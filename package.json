@@ -105,7 +105,8 @@
     "classifiers:strict-none-gate": "python3 packages/ax-classifier-session-sections/strict_none_gate_eval.py",
     "classifiers:relabel-audit": "python3 packages/ax-classifier-session-sections/relabel_audit.py",
     "classifiers:split-audit": "python3 packages/ax-classifier-session-sections/split_audit.py",
-    "classifiers:fixture-metadata": "python3 packages/ax-classifier-session-sections/fixture_metadata.py"
+    "classifiers:fixture-metadata": "python3 packages/ax-classifier-session-sections/fixture_metadata.py",
+    "classifiers:workflow-quality-conclusion": "bun scripts/classifier-workflow-quality-conclusion.ts"
   },
   "dependencies": {
     "@opentui/core": "^0.2.5",

@@ -1,6 +1,14 @@
 import { describe, expect, test } from "bun:test";
+import { Effect } from "effect";
+import { SurrealClient, type SurrealClientShape } from "../lib/db.ts";
+import { ClassifierPackageService, type ClassifierQualityStatusReport } from "../classifiers/package-service.ts";
 import {
+    renderClassifierLifecycleRouteExecutionText,
+    renderClassifierLifecycleRouteExecutionInspectionText,
+    renderClassifierLifecycleRouteExecutionPlanText,
+    renderClassifierLifecycleRouteBindingPreviewText,
     renderClassifierLifecycleInsightText,
+    renderClassifierLifecycleRoutingSummaryText,
     renderClassifierPackageExecutionFactsText,
     renderClassifierPackageExecutionGraphHealthText,
     renderClassifierPackageExecutionHistoryText,
@@ -10,16 +18,25 @@ import {
     renderClassifierPackageOperationExecutionText,
     renderClassifierPackageOperationExecutionPlanText,
     renderClassifierPackageOperationPreflightText,
+    renderClassifierGraphQuerySuggestionRoutingSummaryText,
+    renderClassifierQualityStatusText,
     renderClassifierPackageOperationsText,
     renderClassifierPackagesOperationsText,
+    runClassifiersPackageOperations,
 } from "./classifiers-package-operations.ts";
 import type {
+    ClassifierLifecycleRouteExecutionInspectionReport,
+    ClassifierLifecycleRouteExecutionReport,
+    ClassifierLifecycleRouteExecutionPlanReport,
+    ClassifierLifecycleRouteBindingPreviewReport,
     ClassifierLifecycleInsightReport,
+    ClassifierLifecycleRoutingSummaryReport,
     ClassifierPackageExecutionFactProjectionReport,
     ClassifierPackageExecutionGraphHealthReport,
     ClassifierPackageExecutionHistoryReport,
     ClassifierPackageExecutionSurrealWritePlanReport,
     ClassifierPackageExecutionSurrealApplyReport,
+    ClassifierGraphQuerySuggestionRoutingSummary,
     ClassifierPackageOperationDryRunReport,
     ClassifierPackageOperationExecutionReport,
     ClassifierPackageOperationExecutionPlanReport,
@@ -29,6 +46,282 @@ import type {
 } from "../classifiers/package-operations.ts";
 
 describe("classifiers package-operations format", () => {
+    test("renders graph query suggestion routing summaries", () => {
+        const summary: ClassifierGraphQuerySuggestionRoutingSummary = {
+            has_suggestion: true,
+            query_match_status: "no_match",
+            query_next_action: "relax_filters_or_project_facts",
+            suggested_value_equals: "bind_inputs",
+            suggested_status: "expected_matches",
+            suggested_next_action: "run_suggested_query",
+            suggestion: {
+                value_equals: "bind_inputs",
+                result_count: 1,
+                status: "expected_matches",
+                next_action: "run_suggested_query",
+                remediation: "Run the suggested graph query.",
+                source: "lifecycle_available_value_counts",
+                reason: "available_value_after_relaxing_value_equals",
+                original_query: {
+                    mode: "lifecycle",
+                    predicate: "review_pipeline_recommended_action_execution_phase",
+                    value_equals: "execute",
+                },
+                query: {
+                    mode: "lifecycle",
+                    predicate: "review_pipeline_recommended_action_execution_phase",
+                    value_equals: "bind_inputs",
+                },
+                repair: {
+                    status: "repair_available",
+                    outcome_status: "expected_matches",
+                    execution_status: "ready_to_execute",
+                    next_action: "run_repaired_query",
+                    command_kind: "classifier_graph_query_repair",
+                    can_execute: true,
+                    requires_inputs: false,
+                    required_inputs: [],
+                    blockers: [],
+                    blocker_details: [],
+                    argv: ["bun", "src/cli/index.ts", "classifiers", "graph", "--value", "bind_inputs"],
+                    query: {
+                        mode: "lifecycle",
+                        predicate: "review_pipeline_recommended_action_execution_phase",
+                        value_equals: "bind_inputs",
+                    },
+                    expected_query_match_status: "matched",
+                    expected_result_count: 1,
+                    remediation: "Run the repaired graph query.",
+                },
+                verification: {
+                    status: "ready_to_verify",
+                    outcome_status: "expected_matches",
+                    execution_status: "ready_to_execute",
+                    next_action: "run_verification_query",
+                    command_kind: "classifier_graph_query_repair_verification",
+                    can_execute: true,
+                    requires_inputs: false,
+                    required_inputs: [],
+                    blockers: [],
+                    blocker_details: [],
+                    argv: ["bun", "src/cli/index.ts", "classifiers", "graph", "--value", "bind_inputs"],
+                    query: {
+                        mode: "lifecycle",
+                        predicate: "review_pipeline_recommended_action_execution_phase",
+                        value_equals: "bind_inputs",
+                    },
+                    expected_query_match_status: "matched",
+                    expected_result_count: 1,
+                    remediation: "Run the verification query.",
+                },
+            },
+        };
+
+        const output = renderClassifierGraphQuerySuggestionRoutingSummaryText(summary);
+
+        expect(output).toContain("classifier graph query suggestion routing");
+        expect(output).toContain("has suggestion: true");
+        expect(output).toContain("query match: no_match");
+        expect(output).toContain("suggested value equals: bind_inputs");
+        expect(output).toContain("repair execution status: ready_to_execute");
+        expect(output).toContain("repair outcome status: expected_matches");
+        expect(output).toContain("repair command kind: classifier_graph_query_repair");
+        expect(output).toContain("repair argv: bun src/cli/index.ts classifiers graph --value bind_inputs");
+        expect(output).toContain("verification execution status: ready_to_execute");
+        expect(output).toContain("verification outcome status: expected_matches");
+        expect(output).toContain("verification command kind: classifier_graph_query_repair_verification");
+        expect(output).toContain("verification expected result count: 1");
+    });
+
+    test("renders classifier quality status summaries", () => {
+        const report: ClassifierQualityStatusReport = {
+            schema: "ax.classifier_quality_status.v1",
+            source_report_path: ".ax/experiments/setfit-failure-analysis-workflow-fixtures-current.json",
+            source_schema: "ax.setfit_robustness_failure_analysis.v1",
+            source_decision: "needs_none_safety_review",
+            quality_gate_passed: false,
+            promotion_quality: false,
+            recommended_use: "model_quality_work",
+            metrics: {
+                macro_f1_min: 0.7364,
+                none_false_positive_rate_max: 0.0769,
+                repeated_miss_count: 7,
+                unique_none_false_positive_count: 1,
+            },
+            blockers: [
+                "model_quality_gate_not_passed",
+                "residual_repeated_misses",
+                "residual_none_false_positives",
+                "missing_human_promotion_review",
+            ],
+            next_action: "Keep this classifier in model-quality work until robustness gates pass.",
+        };
+
+        const output = renderClassifierQualityStatusText(report);
+
+        expect(output).toContain("classifier quality status");
+        expect(output).toContain("source decision: needs_none_safety_review");
+        expect(output).toContain("quality gate passed: no");
+        expect(output).toContain("promotion quality: no");
+        expect(output).toContain("recommended use: model_quality_work");
+        expect(output).toContain("repeated misses: 7");
+        expect(output).toContain("unique none false positives: 1");
+        expect(output).toContain("macro f1 min: 0.7364");
+        expect(output).toContain("none false positive max: 0.0769");
+        expect(output).toContain("blocker: model_quality_gate_not_passed");
+    });
+
+    test("routes classifier quality status reports to the package service", async () => {
+        const report: ClassifierQualityStatusReport = {
+            schema: "ax.classifier_quality_status.v1",
+            source_report_path: ".ax/experiments/setfit-failure-analysis-workflow-fixtures-current.json",
+            source_decision: "needs_none_safety_review",
+            quality_gate_passed: false,
+            promotion_quality: false,
+            recommended_use: "model_quality_work",
+            metrics: {
+                repeated_miss_count: 7,
+                unique_none_false_positive_count: 1,
+            },
+            blockers: ["model_quality_gate_not_passed"],
+            next_action: "Keep this classifier in model-quality work until robustness gates pass.",
+        };
+        let calledWith: unknown;
+        const previousExitCode = process.exitCode;
+        const service = ClassifierPackageService.of({
+            writeClassifierQualityStatusReport: (input: unknown) => Effect.sync(() => {
+                calledWith = input;
+                return report;
+            }),
+        } as never);
+
+        try {
+            await Effect.runPromise(
+                runClassifiersPackageOperations({
+                    manifestPath: "packages/ax-classifier-session-sections/ax.classifier.json",
+                    qualityStatus: true,
+                    sourceReportPath: ".ax/experiments/setfit-failure-analysis-workflow-fixtures-current.json",
+                    out: ".ax/experiments/classifier-quality-status-workflow-fixtures.json",
+                    json: false,
+                } as never).pipe(
+                    Effect.provideService(ClassifierPackageService, service),
+                    Effect.provideService(SurrealClient, {} as SurrealClientShape),
+                ),
+            );
+        } finally {
+            process.exitCode = previousExitCode ?? 0;
+        }
+
+        expect(calledWith).toEqual({
+            sourceReportPath: ".ax/experiments/setfit-failure-analysis-workflow-fixtures-current.json",
+            out: ".ax/experiments/classifier-quality-status-workflow-fixtures.json",
+        });
+    });
+
+    test("routes graph query suggestion summaries to the compact writer", async () => {
+        const summary: ClassifierGraphQuerySuggestionRoutingSummary = {
+            has_suggestion: true,
+            query_match_status: "no_match",
+            query_next_action: "relax_filters_or_project_facts",
+            suggested_value_equals: "bind_inputs",
+            suggested_status: "expected_matches",
+            suggested_next_action: "run_suggested_query",
+            suggestion: {
+                value_equals: "bind_inputs",
+                result_count: 1,
+                status: "expected_matches",
+                next_action: "run_suggested_query",
+                remediation: "Run the suggested graph query.",
+                source: "lifecycle_available_value_counts",
+                reason: "available_value_after_relaxing_value_equals",
+                original_query: {
+                    mode: "lifecycle",
+                    predicate: "review_pipeline_recommended_action_execution_phase",
+                    value_equals: "execute",
+                },
+                query: {
+                    mode: "lifecycle",
+                    predicate: "review_pipeline_recommended_action_execution_phase",
+                    value_equals: "bind_inputs",
+                },
+                repair: {
+                    status: "repair_available",
+                    outcome_status: "expected_matches",
+                    execution_status: "ready_to_execute",
+                    next_action: "run_repaired_query",
+                    command_kind: "classifier_graph_query_repair",
+                    can_execute: true,
+                    requires_inputs: false,
+                    required_inputs: [],
+                    blockers: [],
+                    blocker_details: [],
+                    argv: ["bun", "src/cli/index.ts", "classifiers", "graph", "--value", "bind_inputs"],
+                    query: {
+                        mode: "lifecycle",
+                        predicate: "review_pipeline_recommended_action_execution_phase",
+                        value_equals: "bind_inputs",
+                    },
+                    expected_query_match_status: "matched",
+                    expected_result_count: 1,
+                    remediation: "Run the repaired graph query.",
+                },
+                verification: {
+                    status: "ready_to_verify",
+                    outcome_status: "expected_matches",
+                    execution_status: "ready_to_execute",
+                    next_action: "run_verification_query",
+                    command_kind: "classifier_graph_query_repair_verification",
+                    can_execute: true,
+                    requires_inputs: false,
+                    required_inputs: [],
+                    blockers: [],
+                    blocker_details: [],
+                    argv: ["bun", "src/cli/index.ts", "classifiers", "graph", "--value", "bind_inputs"],
+                    query: {
+                        mode: "lifecycle",
+                        predicate: "review_pipeline_recommended_action_execution_phase",
+                        value_equals: "bind_inputs",
+                    },
+                    expected_query_match_status: "matched",
+                    expected_result_count: 1,
+                    remediation: "Run the verification query.",
+                },
+            },
+        };
+        let calledWith: unknown;
+        const service = ClassifierPackageService.of({
+            writeExecutionGraphQuerySuggestionRoutingSummaryReport: (input: unknown) => Effect.sync(() => {
+                calledWith = input;
+                return summary;
+            }),
+        } as never);
+
+        await Effect.runPromise(
+            runClassifiersPackageOperations({
+                manifestPath: "packages/ax-classifier-session-sections/ax.classifier.json",
+                graphHealth: true,
+                querySuggestionRouting: true,
+                graphMode: "lifecycle",
+                predicate: "review_pipeline_recommended_action_execution_phase",
+                valueEquals: "execute",
+                out: ".ax/experiments/query-routing-summary.json",
+                json: false,
+            } as never).pipe(
+                Effect.provideService(ClassifierPackageService, service),
+                Effect.provideService(SurrealClient, {} as SurrealClientShape),
+            ),
+        );
+
+        expect(calledWith).toEqual({
+            out: ".ax/experiments/query-routing-summary.json",
+            query: {
+                mode: "lifecycle",
+                predicate: "review_pipeline_recommended_action_execution_phase",
+                value_equals: "execute",
+            },
+        });
+    });
+
     test("renders operation commands with inputs and outputs", () => {
         const report: ClassifierPackageOperationsReport = {
             schema: "ax.classifier_package_operations_report.v1",
@@ -523,7 +816,7 @@ describe("classifiers package-operations format", () => {
         expect(output).toContain("mode: guarded");
         expect(output).toContain("filter operation: refresh");
         expect(output).toContain("nodes/edges/facts: 3/2/2");
-        expect(output).toContain("results operations/guarded/changed/lifecycle/helper/evidence: 1/1/1/0/0/1");
+        expect(output).toContain("results operations/guarded/changed/lifecycle/helper/boundary/evidence: 1/1/1/0/0/0/1");
         expect(output).toContain("- demo/refresh");
         expect(output).toContain("runs executed/failed/guarded: 1/0/1");
         expect(output).toContain("changed artifacts:");
@@ -534,22 +827,167 @@ describe("classifiers package-operations format", () => {
         const report: ClassifierPackageExecutionGraphHealthReport = {
             schema: "ax.classifier_package_execution_graph_health_report.v1",
             tables: ["classifier_graph_node", "classifier_graph_edge", "classifier_graph_fact"],
-            query: { mode: "lifecycle" },
+            query: {
+                mode: "lifecycle",
+                predicate: "review_pipeline_prepared_argv",
+                subject: "classifier_lifecycle:workflow_candidate_proposal",
+                source_kind: "classifier_package_execution",
+                value_contains: "src/cli/index.ts",
+                value_equals: "bind_inputs",
+            },
             operations: [],
             guarded_operations: [],
             changed_artifacts: [],
             lifecycle_facts: [{
                 graph_id: "fact:lifecycle",
+                kind: "classifier_lifecycle_status",
                 subject: "classifier_lifecycle:workflow_candidate_proposal",
-                predicate: "proposal_review_pending_count",
-                value: 4,
-                lifecycle_key: "proposal_review",
+                predicate: "review_pipeline_prepared_argv",
+                value: ["bun", "src/cli/index.ts"],
+                lifecycle_key: "review_pipeline_lifecycle",
                 artifact_path: ".ax/experiments/workflow-candidate-proposal-review-current.json",
                 evidence_edges: ["edge:lifecycle"],
                 evidence_paths: [".ax/experiments/workflow-candidate-proposal-review-current.json"],
             }],
+            lifecycle_value_counts: [{
+                predicate: "review_pipeline_prepared_argv",
+                value: "[\"bun\",\"src/cli/index.ts\"]",
+                count: 1,
+            }],
+            lifecycle_available_value_counts: [{
+                predicate: "review_pipeline_prepared_argv",
+                value: "[\"bun\",\"src/cli/index.ts\"]",
+                count: 1,
+            }],
             embedding_helper_facts: [],
             evidence_paths: [".ax/experiments/workflow-candidate-proposal-review-current.json"],
+            query_match_status: "matched",
+            query_next_action: "use_query_results",
+            query_remediation: "Use the returned graph rows for the requested classifier workflow.",
+            query_result_kinds: ["lifecycle_facts"],
+            query_result_kind_counts: [{
+                kind: "lifecycle_facts",
+                count: 1,
+            }],
+            query_suggested_value_equals: "bind_inputs",
+            query_suggested_result_count: 1,
+            query_suggested_status: "expected_matches",
+            query_suggested_next_action: "run_suggested_query",
+            query_suggested_remediation: "Run the suggested graph query to inspect the available classifier lifecycle facts.",
+            query_suggestion: {
+                value_equals: "bind_inputs",
+                result_count: 1,
+                changed_filter_count: 0,
+                unchanged_filter_count: 1,
+                has_changed_filters: false,
+                changed_filters: [],
+                unchanged_filters: ["value_equals"],
+                repair_status: "no_repair_needed",
+                repair_next_action: "use_current_query",
+                repair_remediation: "Use the current graph query; no filter repair is needed.",
+                repair_can_execute: false,
+                repair_execution_status: "not_needed",
+                repair_command_kind: "none",
+                repair_requires_inputs: false,
+                repair_required_inputs: [],
+                repair_expected_query_match_status: "not_applicable",
+                repair_outcome_status: "not_applicable",
+                repair_blockers: ["no_repair_needed"],
+                repair_blocker_details: [{
+                    blocker: "no_repair_needed",
+                    remediation: "Use the current graph query; no repair execution is required.",
+                }],
+                repair_argv: [],
+                repair_can_verify: false,
+                repair_verification_status: "not_needed",
+                repair_verification_execution_status: "not_needed",
+                repair_verification_next_action: "skip_verification",
+                repair_verification_remediation: "Verification is not needed because no repair execution is required.",
+                repair_verification_can_execute: false,
+                repair_verification_command_kind: "none",
+                repair_verification_requires_inputs: false,
+                repair_verification_required_inputs: [],
+                repair_verification_blockers: ["no_repair_needed"],
+                repair_verification_blocker_details: [{
+                    blocker: "no_repair_needed",
+                    remediation: "Use the current graph query; verification execution is not required.",
+                }],
+                repair_verification_expected_query_match_status: "not_applicable",
+                repair_verification_outcome_status: "not_applicable",
+                repair_verification_argv: [],
+                status: "expected_matches",
+                next_action: "run_suggested_query",
+                remediation: "Run the suggested graph query to inspect the available classifier lifecycle facts.",
+                source: "lifecycle_available_value_counts",
+                reason: "available_value_after_relaxing_value_equals",
+                relaxed_filters: ["value_equals"],
+                original_query: {
+                    mode: "lifecycle",
+                    predicate: "review_pipeline_prepared_argv",
+                    subject: "classifier_lifecycle:workflow_candidate_proposal",
+                    source_kind: "classifier_package_execution",
+                    value_contains: "src/cli/index.ts",
+                    value_equals: "bind_inputs",
+                },
+                query: {
+                    mode: "lifecycle",
+                    predicate: "review_pipeline_prepared_argv",
+                    subject: "classifier_lifecycle:workflow_candidate_proposal",
+                    source_kind: "classifier_package_execution",
+                    value_contains: "src/cli/index.ts",
+                    value_equals: "bind_inputs",
+                },
+                filter_changes: [{
+                    filter: "value_equals",
+                    from: "bind_inputs",
+                    to: "bind_inputs",
+                    status: "unchanged",
+                }],
+                argv: [
+                    "bun",
+                    "src/cli/index.ts",
+                    "classifiers",
+                    "graph",
+                    "--mode",
+                    "lifecycle",
+                    "--predicate",
+                    "review_pipeline_prepared_argv",
+                    "--subject",
+                    "classifier_lifecycle:workflow_candidate_proposal",
+                    "--source-kind",
+                    "classifier_package_execution",
+                    "--value-contains",
+                    "src/cli/index.ts",
+                    "--value",
+                    "bind_inputs",
+                ],
+            },
+            query_suggested_argv: [
+                "bun",
+                "src/cli/index.ts",
+                "classifiers",
+                "graph",
+                "--mode",
+                "lifecycle",
+                "--predicate",
+                "review_pipeline_prepared_argv",
+                "--subject",
+                "classifier_lifecycle:workflow_candidate_proposal",
+                "--source-kind",
+                "classifier_package_execution",
+                "--value-contains",
+                "src/cli/index.ts",
+                "--value",
+                "bind_inputs",
+            ],
+            query_suggested_query: {
+                mode: "lifecycle",
+                predicate: "review_pipeline_prepared_argv",
+                subject: "classifier_lifecycle:workflow_candidate_proposal",
+                source_kind: "classifier_package_execution",
+                value_contains: "src/cli/index.ts",
+                value_equals: "bind_inputs",
+            },
             totals: {
                 node_count: 2,
                 edge_count: 1,
@@ -580,17 +1018,90 @@ describe("classifiers package-operations format", () => {
         const output = renderClassifierPackageExecutionGraphHealthText(report);
 
         expect(output).toContain("mode: lifecycle");
-        expect(output).toContain("execution/guard/artifact/lifecycle/helper facts: 0/0/0/1/0");
+        expect(output).toContain("filter subject: classifier_lifecycle:workflow_candidate_proposal");
+        expect(output).toContain("filter predicate: review_pipeline_prepared_argv");
+        expect(output).toContain("filter source kind: classifier_package_execution");
+        expect(output).toContain("filter value contains: src/cli/index.ts");
+        expect(output).toContain("filter value equals: bind_inputs");
+        expect(output).toContain("query match: matched");
+        expect(output).toContain("query next action: use_query_results");
+        expect(output).toContain("query remediation: Use the returned graph rows for the requested classifier workflow.");
+        expect(output).toContain("query result kinds: lifecycle_facts");
+        expect(output).toContain("query result kind counts: lifecycle_facts=1");
+        expect(output).toContain("query suggested value equals: bind_inputs");
+        expect(output).toContain("query suggested result count: 1");
+        expect(output).toContain("query suggested status: expected_matches");
+        expect(output).toContain("query suggested next action: run_suggested_query");
+        expect(output).toContain("query suggested remediation: Run the suggested graph query to inspect the available classifier lifecycle facts.");
+        expect(output).toContain("query suggestion: status=expected_matches next_action=run_suggested_query result_count=1 value_equals=bind_inputs");
+        expect(output).toContain("query suggestion filter counts: changed=0 unchanged=1");
+        expect(output).toContain("query suggestion has changed filters: false");
+        expect(output).toContain("query suggestion changed filters: none");
+        expect(output).toContain("query suggestion unchanged filters: value_equals");
+        expect(output).toContain("query suggestion repair status: no_repair_needed");
+        expect(output).toContain("query suggestion repair next action: use_current_query");
+        expect(output).toContain("query suggestion repair remediation: Use the current graph query; no filter repair is needed.");
+        expect(output).toContain("query suggestion repair can execute: false");
+        expect(output).toContain("query suggestion repair execution status: not_needed");
+        expect(output).toContain("query suggestion repair outcome status: not_applicable");
+        expect(output).toContain("query suggestion repair command kind: none");
+        expect(output).toContain("query suggestion repair requires inputs: false");
+        expect(output).toContain("query suggestion repair required inputs: none");
+        expect(output).toContain("query suggestion repair expected query match: not_applicable");
+        expect(output).toContain("query suggestion repair expected result count: none");
+        expect(output).toContain("query suggestion repair blockers: no_repair_needed");
+        expect(output).toContain("query suggestion repair blocker details: no_repair_needed: Use the current graph query; no repair execution is required.");
+        expect(output).toContain("query suggestion repair argv: none");
+        expect(output).toContain("query suggestion repair can verify: false");
+        expect(output).toContain("query suggestion repair verification status: not_needed");
+        expect(output).toContain("query suggestion repair verification execution status: not_needed");
+        expect(output).toContain("query suggestion repair verification outcome status: not_applicable");
+        expect(output).toContain("query suggestion repair verification next action: skip_verification");
+        expect(output).toContain("query suggestion repair verification remediation: Verification is not needed because no repair execution is required.");
+        expect(output).toContain("query suggestion repair verification can execute: false");
+        expect(output).toContain("query suggestion repair verification command kind: none");
+        expect(output).toContain("query suggestion repair verification requires inputs: false");
+        expect(output).toContain("query suggestion repair verification required inputs: none");
+        expect(output).toContain("query suggestion repair verification blockers: no_repair_needed");
+        expect(output).toContain("query suggestion repair verification blocker details: no_repair_needed: Use the current graph query; verification execution is not required.");
+        expect(output).toContain("query suggestion repair verification expected query match: not_applicable");
+        expect(output).toContain("query suggestion repair verification expected result count: none");
+        expect(output).toContain("query suggestion repair verification argv: none");
+        expect(output).toContain("query suggestion repair verification query: none");
+        expect(output).toContain("query suggestion repair query: none");
+        expect(output).toContain("query suggestion provenance: source=lifecycle_available_value_counts reason=available_value_after_relaxing_value_equals");
+        expect(output).toContain("query suggestion relaxed filters: value_equals");
+        expect(output).toContain("query suggestion original query: mode=lifecycle predicate=review_pipeline_prepared_argv subject=classifier_lifecycle:workflow_candidate_proposal source_kind=classifier_package_execution value_contains=src/cli/index.ts value_equals=bind_inputs");
+        expect(output).toContain("query suggestion filter changes: value_equals:bind_inputs->bind_inputs (unchanged)");
+        expect(output).toContain("query suggested argv: bun src/cli/index.ts classifiers graph --mode lifecycle --predicate review_pipeline_prepared_argv --subject classifier_lifecycle:workflow_candidate_proposal --source-kind classifier_package_execution --value-contains src/cli/index.ts --value bind_inputs");
+        expect(output).toContain("query suggested query: mode=lifecycle predicate=review_pipeline_prepared_argv subject=classifier_lifecycle:workflow_candidate_proposal source_kind=classifier_package_execution value_contains=src/cli/index.ts value_equals=bind_inputs");
+        expect(output).toContain("execution/guard/artifact/lifecycle/helper/boundary facts: 0/0/0/1/0/0");
         expect(output).toContain("lifecycle facts:");
-        expect(output).toContain("- proposal_review_pending_count: 4");
-        expect(output).toContain("source: proposal_review .ax/experiments/workflow-candidate-proposal-review-current.json");
+        expect(output).toContain("- review_pipeline_prepared_argv: [\"bun\",\"src/cli/index.ts\"]");
+        expect(output).toContain("source: review_pipeline_lifecycle .ax/experiments/workflow-candidate-proposal-review-current.json");
+        expect(output).toContain("lifecycle value counts:");
+        expect(output).toContain("- review_pipeline_prepared_argv=[\"bun\",\"src/cli/index.ts\"] count=1");
+        expect(output).toContain("lifecycle available value counts:");
+        expect(output).toContain("- review_pipeline_prepared_argv=[\"bun\",\"src/cli/index.ts\"] count=1");
     });
 
     test("renders embedding helper graph facts", () => {
         const report: ClassifierPackageExecutionGraphHealthReport = {
             schema: "ax.classifier_package_execution_graph_health_report.v1",
             tables: ["classifier_graph_node", "classifier_graph_edge", "classifier_graph_fact"],
-            query: { mode: "embedding-helper" },
+            query: {
+                mode: "embedding-helper",
+                fact_kind: "embedding_helper_hard_negative_candidate",
+                status: "accepted",
+                source_fixture_id: "session-section-chunks/none-start-building",
+                proposed_label: "none",
+                threshold: "none",
+                min_seed_count: 2,
+                min_positive_recall: 0.9,
+                min_call_reduction: 0.25,
+                min_nearest_similarity: 0.85,
+                nearest_fixture_id: "session-section-chunks/approval-alright-go",
+            },
             operations: [],
             guarded_operations: [],
             changed_artifacts: [],
@@ -622,6 +1133,79 @@ describe("classifiers package-operations format", () => {
                 evidence_edges: ["edge:hn"],
                 evidence_paths: [".ax/experiments/embedding-helper-review-e210.json"],
             }],
+            routing_policy_summary: {
+                status: "meets_requested_floors",
+                next_action: "choose_reviewed_routing_threshold",
+                remediation: "Use the selected reviewed threshold as an advisory routing policy.",
+                requested_min_positive_recall: 0.9,
+                requested_min_call_reduction: 0.25,
+                evaluated_policy_count: 1,
+                candidate_count: 1,
+                best_threshold_by_call_reduction: "none",
+                best_positive_recall: 0.9028,
+                best_call_reduction: 0.1778,
+                best_available_threshold_by_recall: "none",
+                best_available_positive_recall: 0.9028,
+                best_available_call_reduction: 0.1778,
+                positive_recall_gap_to_request: 0,
+                call_reduction_gap_to_request: 0.0722,
+                blocking_floor_fields: ["call_reduction"],
+                largest_gap_floor: "call_reduction",
+                recommended_floor_adjustments: [{
+                    floor: "call_reduction",
+                    requested: 0.25,
+                    recommended: 0.1778,
+                    gap: 0.0722,
+                    source_threshold: "none",
+                }],
+                recommended_floor_query: {
+                    mode: "embedding-helper",
+                    fact_kind: "embedding_helper_hard_negative_candidate",
+                    status: "accepted",
+                    source_fixture_id: "session-section-chunks/none-start-building",
+                    proposed_label: "none",
+                    threshold: "none",
+                    min_seed_count: 2,
+                    min_positive_recall: 0.9,
+                    min_call_reduction: 0.1778,
+                    min_nearest_similarity: 0.85,
+                    nearest_fixture_id: "session-section-chunks/approval-alright-go",
+                },
+                recommended_floor_argv: [
+                    "bun",
+                    "src/cli/index.ts",
+                    "classifiers",
+                    "graph",
+                    "--mode",
+                    "embedding-helper",
+                    "--fact-kind",
+                    "embedding_helper_hard_negative_candidate",
+                    "--status",
+                    "accepted",
+                    "--source-fixture",
+                    "session-section-chunks/none-start-building",
+                    "--proposed-label",
+                    "none",
+                    "--threshold",
+                    "none",
+                    "--min-seed-count",
+                    "2",
+                    "--min-positive-recall",
+                    "0.9",
+                    "--min-call-reduction",
+                    "0.1778",
+                    "--min-nearest-similarity",
+                    "0.85",
+                    "--nearest-fixture",
+                    "session-section-chunks/approval-alright-go",
+                ],
+                recommended_floor_status: "expected_matches",
+                recommended_floor_candidate_count: 1,
+                recommended_floor_best_threshold_by_call_reduction: "none",
+                recommended_floor_best_positive_recall: 0.9028,
+                recommended_floor_best_call_reduction: 0.1778,
+                recommended_floor_next_action: "choose_recommended_routing_threshold",
+            },
             evidence_paths: [".ax/experiments/embedding-helper-review-e210.json"],
             totals: {
                 node_count: 75,
@@ -653,6 +1237,40 @@ describe("classifiers package-operations format", () => {
         const output = renderClassifierPackageExecutionGraphHealthText(report);
 
         expect(output).toContain("mode: embedding-helper");
+        expect(output).toContain("filter fact kind: embedding_helper_hard_negative_candidate");
+        expect(output).toContain("filter status: accepted");
+        expect(output).toContain("filter source fixture: session-section-chunks/none-start-building");
+        expect(output).toContain("filter proposed label: none");
+        expect(output).toContain("filter threshold: none");
+        expect(output).toContain("filter min seed count: 2");
+        expect(output).toContain("filter min positive recall: 0.9");
+        expect(output).toContain("filter min call reduction: 0.25");
+        expect(output).toContain("filter min nearest similarity: 0.85");
+        expect(output).toContain("filter nearest fixture: session-section-chunks/approval-alright-go");
+        expect(output).toContain("routing policy status: meets_requested_floors");
+        expect(output).toContain("routing policy candidates: 1");
+        expect(output).toContain("routing policy evaluated: 1");
+        expect(output).toContain("routing policy best threshold: none");
+        expect(output).toContain("routing policy best positive recall: 0.9028");
+        expect(output).toContain("routing policy best call reduction: 0.1778");
+        expect(output).toContain("routing policy best available threshold: none");
+        expect(output).toContain("routing policy best available positive recall: 0.9028");
+        expect(output).toContain("routing policy best available call reduction: 0.1778");
+        expect(output).toContain("routing policy positive recall gap: 0");
+        expect(output).toContain("routing policy call reduction gap: 0.0722");
+        expect(output).toContain("routing policy blocking floors: call_reduction");
+        expect(output).toContain("routing policy largest gap: call_reduction");
+        expect(output).toContain("routing policy recommended floor adjustments: call_reduction<=0.1778 (requested 0.25, gap 0.0722, threshold none)");
+        expect(output).toContain("routing policy recommended floor query: mode=embedding-helper fact_kind=embedding_helper_hard_negative_candidate status=accepted source_fixture_id=session-section-chunks/none-start-building proposed_label=none threshold=none min_seed_count=2 min_positive_recall=0.9 min_call_reduction=0.1778 min_nearest_similarity=0.85 nearest_fixture_id=session-section-chunks/approval-alright-go");
+        expect(output).toContain("routing policy recommended floor argv: bun src/cli/index.ts classifiers graph --mode embedding-helper --fact-kind embedding_helper_hard_negative_candidate --status accepted --source-fixture session-section-chunks/none-start-building --proposed-label none --threshold none --min-seed-count 2 --min-positive-recall 0.9 --min-call-reduction 0.1778 --min-nearest-similarity 0.85 --nearest-fixture session-section-chunks/approval-alright-go");
+        expect(output).toContain("routing policy recommended floor status: expected_matches");
+        expect(output).toContain("routing policy recommended floor candidates: 1");
+        expect(output).toContain("routing policy recommended floor best threshold: none");
+        expect(output).toContain("routing policy recommended floor best positive recall: 0.9028");
+        expect(output).toContain("routing policy recommended floor best call reduction: 0.1778");
+        expect(output).toContain("routing policy recommended floor next action: choose_recommended_routing_threshold");
+        expect(output).toContain("routing policy next action: choose_reviewed_routing_threshold");
+        expect(output).toContain("routing policy remediation: Use the selected reviewed threshold as an advisory routing policy.");
         expect(output).toContain("embedding helper facts:");
         expect(output).toContain("- routing recommended_threshold: threshold=none positive_recall=0.9028 call_reduction=0.1778");
         expect(output).toContain("- hard-negative session-section-chunks/none-start-building: promoted_hard_negative_fixture status=accepted proposed=none seeds=2 nearest=0.8743 promoted=session-section-chunks/embedding-helper-hard-negative-none-start-building");
@@ -671,6 +1289,29 @@ describe("classifiers package-operations format", () => {
                 pending_blind_labels: 40,
                 pending_hard_negatives: 20,
                 accepted_hard_negatives: 0,
+                review_pipeline_lifecycle: {
+                    report_path: ".ax/experiments/workflow-candidate-review-pipeline-lifecycle-current.json",
+                    lifecycle_status: "verified_after_execution",
+                    command_kind: "stamp_review_provenance",
+                    prepared_status: "ready_to_execute",
+                    output_verification_status: "verified",
+                    can_execute: true,
+                    can_continue: true,
+                    missing_required_artifact_count: 0,
+                    checked_artifact_count: 2,
+                    prepared_argv: ["bun", "src/cli/index.ts", "classifiers", "workflow-candidates"],
+                    output_artifacts: [{
+                        kind: "review_brief",
+                        path: ".ax/experiments/workflow-candidate-review-pipeline-lifecycle-cli-e331.md",
+                        required_for_handoff: true,
+                    }],
+                    checked_artifacts: [{
+                        kind: "review_brief",
+                        path: ".ax/experiments/workflow-candidate-review-pipeline-lifecycle-cli-e331.md",
+                        exists: true,
+                    }],
+                    failures: [],
+                },
                     focused_batch: {
                         batch_path: ".ax/experiments/blind-review-batch-current.md",
                         batch_source: "existing_reviewed_batch",
@@ -787,7 +1428,173 @@ describe("classifiers package-operations format", () => {
                 evidence_paths: [".ax/experiments/classifier-package-execution-e118-focused-batch-eval.json"],
             }],
             changed_artifacts: [],
-            blocking_items: ["40 blind labels pending"],
+            blocking_items: [
+                "graph query repair available: review_pipeline_recommended_action_execution_phase value execute -> bind_inputs",
+                "40 blind labels pending",
+            ],
+            routing_items: [{
+                kind: "graph_query_repair",
+                blocks_decision: false,
+                status: "ready_to_execute",
+                execution_status: "ready_to_execute",
+                can_execute: true,
+                command_kind: "classifier_graph_query_repair",
+                predicate: "review_pipeline_recommended_action_execution_phase",
+                from_value: "execute",
+                to_value: "bind_inputs",
+                next_action: "run_repaired_query",
+                remediation: "Run the repaired graph query to inspect matching classifier lifecycle facts.",
+                argv: ["bun", "src/cli/index.ts", "classifiers", "graph", "--value", "bind_inputs"],
+            }, {
+                kind: "review_pipeline_action",
+                blocks_decision: false,
+                status: "requires_inputs",
+                execution_status: "missing_inputs",
+                command_kind: "stamp_review_provenance",
+                next_action: "continue_review_pipeline",
+                action_next_action: "Bind required pipeline inputs before executing the command.",
+                can_execute: false,
+                execution_phase: "bind_inputs",
+                missing_inputs: ["reviewer", "reviewed_at"],
+                input_bindings: [
+                    "reviewer flag=--review-provenance-reviewer index=8 prefix=--review-provenance-reviewer= placeholder=<reviewer> value_kind=nonempty_string",
+                    "reviewed_at flag=--review-provenance-reviewed-at index=9 prefix=--review-provenance-reviewed-at= placeholder=<reviewed-at-iso> value_kind=iso_datetime",
+                ],
+                argv: ["bun", "src/cli/index.ts", "--review-provenance-reviewer=<reviewer>"],
+                remediation: "Bind required pipeline inputs before executing the command.",
+            }],
+            graph_recommendations: [{
+                kind: "review_pipeline_success_to_candidate_promotion",
+                status: "ready",
+                source: "persisted_lifecycle_fact",
+                predicate: "review_pipeline_post_apply_recheck_status",
+                value: "gap_closed",
+                next_action: "prioritize_reviewed_candidates_for_harness_or_guidance",
+                remediation: "Use the persisted successful review-route apply fact to inspect reviewed workflow candidates and choose harness or guidance proposals.",
+                query: {
+                    mode: "lifecycle",
+                    subject: "classifier_lifecycle:workflow_candidate_review_pipeline",
+                    predicate: "review_pipeline_post_apply_recheck_status",
+                    value_equals: "gap_closed",
+                },
+                query_argv: ["bun", "src/cli/index.ts", "classifiers", "package-operations", "--graph-health", "--graph-mode=lifecycle", "--subject=classifier_lifecycle:workflow_candidate_review_pipeline", "--predicate=review_pipeline_post_apply_recheck_status", "--value=gap_closed"],
+                candidate_query_argv: ["bun", "src/cli/index.ts", "classifiers", "workflow-candidates", "--topic-report", "--search=review-coverage", "--source-kind=hybrid_window_classifier_projection", "--include-review-facts", "--promote-harness-proposals", "--proposal-dry-run", "--limit=10"],
+                evidence_paths: [".ax/experiments/workflow-candidate-review-pipeline-lifecycle-current.json"],
+            }],
+            graph_query_suggestion: {
+                has_suggestion: true,
+                query_match_status: "no_match",
+                query_next_action: "relax_filters_or_project_facts",
+                suggested_value_equals: "bind_inputs",
+                suggested_status: "expected_matches",
+                suggested_next_action: "run_suggested_query",
+                suggestion: {
+                    value_equals: "bind_inputs",
+                    result_count: 1,
+                    status: "expected_matches",
+                    next_action: "run_suggested_query",
+                    remediation: "Run the suggested graph query to inspect the available classifier lifecycle facts.",
+                    source: "lifecycle_available_value_counts",
+                    reason: "available_value_after_relaxing_value_equals",
+                    original_query: {
+                        mode: "lifecycle",
+                        predicate: "review_pipeline_recommended_action_execution_phase",
+                        value_equals: "execute",
+                    },
+                    query: {
+                        mode: "lifecycle",
+                        predicate: "review_pipeline_recommended_action_execution_phase",
+                        value_equals: "bind_inputs",
+                    },
+                    repair: {
+                        status: "repair_available",
+                        outcome_status: "expected_matches",
+                        execution_status: "ready_to_execute",
+                        next_action: "run_repaired_query",
+                        command_kind: "classifier_graph_query_repair",
+                        can_execute: true,
+                        requires_inputs: false,
+                        required_inputs: [],
+                        blockers: [],
+                        blocker_details: [],
+                        argv: ["bun", "src/cli/index.ts", "classifiers", "graph", "--value", "bind_inputs"],
+                        query: {
+                            mode: "lifecycle",
+                            predicate: "review_pipeline_recommended_action_execution_phase",
+                            value_equals: "bind_inputs",
+                        },
+                        expected_query_match_status: "matched",
+                        expected_result_count: 1,
+                        remediation: "Run the repaired graph query to inspect matching classifier lifecycle facts.",
+                    },
+                    verification: {
+                        status: "ready_to_verify",
+                        outcome_status: "expected_matches",
+                        execution_status: "ready_to_execute",
+                        next_action: "run_verification_query",
+                        command_kind: "classifier_graph_query_repair_verification",
+                        can_execute: true,
+                        requires_inputs: false,
+                        required_inputs: [],
+                        blockers: [],
+                        blocker_details: [],
+                        argv: ["bun", "src/cli/index.ts", "classifiers", "graph", "--value", "bind_inputs"],
+                        query: {
+                            mode: "lifecycle",
+                            predicate: "review_pipeline_recommended_action_execution_phase",
+                            value_equals: "bind_inputs",
+                        },
+                        expected_query_match_status: "matched",
+                        expected_result_count: 1,
+                        remediation: "Run the repair verification query and confirm it returns the expected matches.",
+                    },
+                },
+            },
+            review_pipeline: {
+                report_path: ".ax/experiments/workflow-candidate-review-pipeline-lifecycle-current.json",
+                status: "verified_after_execution",
+                command_kind: "stamp_review_provenance",
+                prepared_status: "ready_to_execute",
+                output_verification_status: "verified",
+                can_execute: true,
+                can_continue: true,
+                missing_required_artifact_count: 0,
+                checked_artifact_count: 2,
+                prepared_argv: ["bun", "src/cli/index.ts", "classifiers", "workflow-candidates"],
+                production_apply_argv: ["bun", "src/cli/index.ts", "--apply-review-facts"],
+                review_provenance_stamp_argv: ["bun", "src/cli/index.ts", "--review-provenance-reviewer=<reviewer>"],
+                review_issue_repair_argv: ["bun", "src/cli/index.ts", "--coverage-review-brief=review.md"],
+                recommended_action_kind: "stamp_review_provenance",
+                recommended_action_argv: ["bun", "src/cli/index.ts", "--review-provenance-reviewer=<reviewer>"],
+                recommended_action_status: "requires_inputs",
+                recommended_action_can_execute: false,
+                recommended_action_execution_phase: "bind_inputs",
+                recommended_action_execution_summary: "kind=stamp_review_provenance phase=bind_inputs status=requires_inputs can_execute=false missing_inputs=2 output_artifacts=1 output_checks=1",
+                recommended_action_next_action: "Bind required pipeline inputs before executing the command.",
+                recommended_action_missing_inputs: ["reviewer", "reviewed_at"],
+                recommended_action_input_bindings: [
+                    "reviewer flag=--review-provenance-reviewer index=8 prefix=--review-provenance-reviewer= placeholder=<reviewer> value_kind=nonempty_string",
+                    "reviewed_at flag=--review-provenance-reviewed-at index=9 prefix=--review-provenance-reviewed-at= placeholder=<reviewed-at-iso> value_kind=iso_datetime",
+                ],
+                recommended_action_output_artifacts: [
+                    "review_brief path=.ax/experiments/workflow-candidate-review-pipeline-lifecycle-cli-e331.md flag=--coverage-review-brief index=10 prefix=--coverage-review-brief= required_for_handoff=true",
+                ],
+                recommended_action_output_checks: [
+                    "review_brief path=.ax/experiments/workflow-candidate-review-pipeline-lifecycle-cli-e331.md index=10 check=file_exists_after_execution status=pending_execution required_for_command_success=true",
+                ],
+                output_artifacts: [{
+                    kind: "review_brief",
+                    path: ".ax/experiments/workflow-candidate-review-pipeline-lifecycle-cli-e331.md",
+                    required_for_handoff: true,
+                }],
+                checked_artifacts: [{
+                    kind: "review_brief",
+                    path: ".ax/experiments/workflow-candidate-review-pipeline-lifecycle-cli-e331.md",
+                    exists: true,
+                }],
+                failures: [],
+                next_action: "continue_review_pipeline",
+            },
             totals: {
                 package_count: 1,
                 local_model_count: 1,
@@ -835,8 +1642,319 @@ describe("classifiers package-operations format", () => {
         expect(output).toContain("remaining missing: review_notes=5, hard_negative_notes=3");
         expect(output).toContain("draft promotion: needs_human_notes (.ax/experiments/blind-review-batch-current-promotion-report.json)");
         expect(output).toContain("failures: draft batch review is incomplete");
+        expect(output).toContain("graph query suggestion: expected_matches value=bind_inputs count=1");
+        expect(output).toContain("graph query repair: expected_matches ready_to_execute classifier_graph_query_repair");
+        expect(output).toContain("graph query repair argv: bun src/cli/index.ts classifiers graph --value bind_inputs");
+        expect(output).toContain("graph query verification: expected_matches ready_to_execute classifier_graph_query_repair_verification");
+        expect(output).toContain("routing items:");
+        expect(output).toContain("- graph_query_repair: ready_to_execute classifier_graph_query_repair next=run_repaired_query blocks_decision=no execution=ready_to_execute can_execute=yes");
+        expect(output).toContain("value repair: review_pipeline_recommended_action_execution_phase execute -> bind_inputs");
+        expect(output).toContain("remediation: Run the repaired graph query to inspect matching classifier lifecycle facts.");
+        expect(output).toContain("- review_pipeline_action: requires_inputs stamp_review_provenance next=continue_review_pipeline blocks_decision=no execution=missing_inputs can_execute=no");
+        expect(output).toContain("action next: Bind required pipeline inputs before executing the command.");
+        expect(output).toContain("can execute: no");
+        expect(output).toContain("execution phase: bind_inputs");
+        expect(output).toContain("missing inputs: reviewer, reviewed_at");
+        expect(output).toContain("input bindings: reviewer flag=--review-provenance-reviewer index=8 prefix=--review-provenance-reviewer= placeholder=<reviewer> value_kind=nonempty_string; reviewed_at flag=--review-provenance-reviewed-at index=9 prefix=--review-provenance-reviewed-at= placeholder=<reviewed-at-iso> value_kind=iso_datetime");
+        expect(output).toContain("graph recommendations:");
+        expect(output).toContain("- review_pipeline_success_to_candidate_promotion: ready next=prioritize_reviewed_candidates_for_harness_or_guidance");
+        expect(output).toContain("source: persisted_lifecycle_fact review_pipeline_post_apply_recheck_status=gap_closed");
+        expect(output).toContain("candidate argv: bun src/cli/index.ts classifiers workflow-candidates --topic-report --search=review-coverage --source-kind=hybrid_window_classifier_projection --include-review-facts --promote-harness-proposals --proposal-dry-run --limit=10");
+        expect(output).toContain("review pipeline: verified_after_execution (.ax/experiments/workflow-candidate-review-pipeline-lifecycle-current.json)");
+        expect(output).toContain("command: stamp_review_provenance prepared=ready_to_execute");
+        expect(output).toContain("argv: bun src/cli/index.ts classifiers workflow-candidates");
+        expect(output).toContain("production apply argv: bun src/cli/index.ts --apply-review-facts");
+        expect(output).toContain("provenance stamp argv: bun src/cli/index.ts --review-provenance-reviewer=<reviewer>");
+        expect(output).toContain("issue repair argv: bun src/cli/index.ts --coverage-review-brief=review.md");
+        expect(output).toContain("recommended action: stamp_review_provenance");
+        expect(output).toContain("recommended action argv: bun src/cli/index.ts --review-provenance-reviewer=<reviewer>");
+        expect(output).toContain("recommended action status: requires_inputs");
+        expect(output).toContain("recommended action can execute: no");
+        expect(output).toContain("recommended action phase: bind_inputs");
+        expect(output).toContain("recommended action summary: kind=stamp_review_provenance phase=bind_inputs status=requires_inputs can_execute=false missing_inputs=2 output_artifacts=1 output_checks=1");
+        expect(output).toContain("recommended action next: Bind required pipeline inputs before executing the command.");
+        expect(output).toContain("recommended action missing inputs: reviewer, reviewed_at");
+        expect(output).toContain("recommended action input bindings: reviewer flag=--review-provenance-reviewer index=8 prefix=--review-provenance-reviewer= placeholder=<reviewer> value_kind=nonempty_string; reviewed_at flag=--review-provenance-reviewed-at index=9 prefix=--review-provenance-reviewed-at= placeholder=<reviewed-at-iso> value_kind=iso_datetime");
+        expect(output).toContain("recommended action output artifacts: review_brief path=.ax/experiments/workflow-candidate-review-pipeline-lifecycle-cli-e331.md flag=--coverage-review-brief index=10 prefix=--coverage-review-brief= required_for_handoff=true");
+        expect(output).toContain("recommended action output checks: review_brief path=.ax/experiments/workflow-candidate-review-pipeline-lifecycle-cli-e331.md index=10 check=file_exists_after_execution status=pending_execution required_for_command_success=true");
+        expect(output).toContain("outputs: verified checked=2 missing=0");
+        expect(output).toContain("output artifacts: review_brief=.ax/experiments/workflow-candidate-review-pipeline-lifecycle-cli-e331.md");
+        expect(output).toContain("checked artifacts: review_brief=.ax/experiments/workflow-candidate-review-pipeline-lifecycle-cli-e331.md ok");
+        expect(output).toContain("execute/continue: yes/yes next=continue_review_pipeline");
         expect(output).toContain("blocking items:");
+        expect(output).toContain("- graph query repair available: review_pipeline_recommended_action_execution_phase value execute -> bind_inputs");
+        expect(output).toContain("- 40 blind labels pending");
         expect(output).toContain("edit suggestion draft notes in .ax/experiments/blind-review-batch-current-suggestion-draft.md then run bun run classifiers:blind-review-batch -- --mode=promote-draft");
+    });
+
+    test("renders classifier lifecycle routing summaries", () => {
+        const route = {
+            kind: "review_pipeline_action" as const,
+            blocks_decision: true,
+            status: "missing_inputs",
+            execution_status: "missing_inputs" as const,
+            command_kind: "stamp_review_provenance",
+            next_action: "inspect_review_pipeline_lifecycle" as const,
+            action_next_action: "Provide required pipeline input values before executing the command.",
+            can_execute: false,
+            execution_phase: "bind_inputs" as const,
+            missing_inputs: ["reviewer"],
+            input_bindings: ["reviewer flag=--review-provenance-reviewer index=8 prefix=--review-provenance-reviewer= placeholder=<reviewer> value_kind=nonempty_string"],
+            argv: ["bun", "src/cli/index.ts", "--review-provenance-reviewer=<reviewer>"],
+            remediation: "Provide required pipeline input values before executing the command.",
+        };
+        const report: ClassifierLifecycleRoutingSummaryReport = {
+            schema: "ax.classifier_lifecycle_routing_summary.v1",
+            source_schema: "ax.classifier_lifecycle_insight_report.v1",
+            decision: "needs_human_review",
+            active_route_kind: "review_pipeline_action",
+            active_route_status: "missing_inputs",
+            active_route_execution_status: "missing_inputs",
+            active_route_can_execute: false,
+            active_route_missing_inputs: ["reviewer"],
+            active_route_input_bindings: route.input_bindings,
+            active_route_command_kind: "stamp_review_provenance",
+            active_route_next_action: "inspect_review_pipeline_lifecycle",
+            active_route_argv: route.argv,
+            active_route: route,
+            executable_routes: [],
+            missing_input_routes: [route],
+            blocked_routes: [],
+            secondary_routes: [],
+            next_action: "bind_active_route_inputs",
+            remediation: "Provide required pipeline input values before executing the command.",
+            totals: {
+                route_count: 1,
+                executable_route_count: 0,
+                missing_input_route_count: 1,
+                blocked_route_count: 0,
+                secondary_route_count: 0,
+            },
+        };
+
+        const output = renderClassifierLifecycleRoutingSummaryText(report);
+
+        expect(output).toContain("classifier lifecycle routing");
+        expect(output).toContain("decision: needs_human_review");
+        expect(output).toContain("active: review_pipeline_action missing_inputs stamp_review_provenance execution=missing_inputs can_execute=no");
+        expect(output).toContain("next action: bind_active_route_inputs");
+        expect(output).toContain("missing inputs: reviewer");
+        expect(output).toContain("input bindings: reviewer flag=--review-provenance-reviewer index=8 prefix=--review-provenance-reviewer= placeholder=<reviewer> value_kind=nonempty_string");
+        expect(output).toContain("argv: bun src/cli/index.ts --review-provenance-reviewer=<reviewer>");
+        expect(output).toContain("routes executable/missing-input/blocked/secondary: 0/1/0/0");
+    });
+
+    test("renders classifier lifecycle route binding previews", () => {
+        const report: ClassifierLifecycleRouteBindingPreviewReport = {
+            schema: "ax.classifier_lifecycle_route_binding_preview.v1",
+            source_schema: "ax.classifier_lifecycle_routing_summary.v1",
+            decision: "ready_to_execute",
+            active_route_kind: "review_pipeline_action",
+            active_route_command_kind: "stamp_review_provenance",
+            provided_inputs: ["reviewer"],
+            missing_values: [],
+            input_bindings: ["reviewer flag=--review-provenance-reviewer index=8 prefix=--review-provenance-reviewer= placeholder=<reviewer> value_kind=nonempty_string"],
+            original_argv: ["bun", "src/cli/index.ts", "--review-provenance-reviewer=<reviewer>"],
+            bound_argv: ["bun", "src/cli/index.ts", "--review-provenance-reviewer=necmett"],
+            next_action: "execute_bound_active_route",
+            remediation: "Execute the bound active route command.",
+        };
+
+        const output = renderClassifierLifecycleRouteBindingPreviewText(report);
+
+        expect(output).toContain("classifier lifecycle route binding preview");
+        expect(output).toContain("decision: ready_to_execute");
+        expect(output).toContain("active: review_pipeline_action stamp_review_provenance");
+        expect(output).toContain("provided inputs: reviewer");
+        expect(output).toContain("missing values: none");
+        expect(output).toContain("bound argv: bun src/cli/index.ts --review-provenance-reviewer=necmett");
+        expect(output).toContain("next action: execute_bound_active_route");
+    });
+
+    test("renders classifier lifecycle route execution plans", () => {
+        const report: ClassifierLifecycleRouteExecutionPlanReport = {
+            schema: "ax.classifier_lifecycle_route_execution_plan.v1",
+            source_schema: "ax.classifier_lifecycle_route_binding_preview.v1",
+            decision: "denied_requires_execute",
+            active_route_kind: "review_pipeline_action",
+            active_route_command_kind: "stamp_review_provenance",
+            requested_execute: false,
+            would_execute: false,
+            command_argv: ["bun", "src/cli/index.ts", "--review-provenance-reviewer=necmett"],
+            preview: {
+                schema: "ax.classifier_lifecycle_route_binding_preview.v1",
+                source_schema: "ax.classifier_lifecycle_routing_summary.v1",
+                decision: "ready_to_execute",
+                active_route_kind: "review_pipeline_action",
+                active_route_command_kind: "stamp_review_provenance",
+                provided_inputs: ["reviewer"],
+                missing_values: [],
+                input_bindings: [],
+                original_argv: ["bun", "src/cli/index.ts", "--review-provenance-reviewer=<reviewer>"],
+                bound_argv: ["bun", "src/cli/index.ts", "--review-provenance-reviewer=necmett"],
+                next_action: "execute_bound_active_route",
+                remediation: "Execute the bound active route command.",
+            },
+            failures: ["route execution requires --execute-route"],
+            next_action: "request_execute_route",
+            remediation: "Re-run with --execute-route to allow this bound route command.",
+        };
+
+        const output = renderClassifierLifecycleRouteExecutionPlanText(report);
+
+        expect(output).toContain("classifier lifecycle route execution plan");
+        expect(output).toContain("decision: denied_requires_execute");
+        expect(output).toContain("requested execute: no");
+        expect(output).toContain("would execute: no");
+        expect(output).toContain("command argv: bun src/cli/index.ts --review-provenance-reviewer=necmett");
+        expect(output).toContain("failure: route execution requires --execute-route");
+    });
+
+    test("renders classifier lifecycle route execution reports", () => {
+        const plan: ClassifierLifecycleRouteExecutionPlanReport = {
+            schema: "ax.classifier_lifecycle_route_execution_plan.v1",
+            source_schema: "ax.classifier_lifecycle_route_binding_preview.v1",
+            decision: "ready_to_execute",
+            active_route_kind: "review_pipeline_action",
+            active_route_command_kind: "stamp_review_provenance",
+            requested_execute: true,
+            would_execute: true,
+            command_argv: ["bun", "-e", "console.log('route ok')"],
+            preview: {
+                schema: "ax.classifier_lifecycle_route_binding_preview.v1",
+                source_schema: "ax.classifier_lifecycle_routing_summary.v1",
+                decision: "ready_to_execute",
+                active_route_kind: "review_pipeline_action",
+                active_route_command_kind: "stamp_review_provenance",
+                provided_inputs: ["reviewer"],
+                missing_values: [],
+                input_bindings: [],
+                original_argv: ["bun", "-e", "console.log('route ok')"],
+                bound_argv: ["bun", "-e", "console.log('route ok')"],
+                next_action: "execute_bound_active_route",
+                remediation: "Execute the bound active route command.",
+            },
+            failures: [],
+            next_action: "execute_bound_route",
+            remediation: "Execute the bound active route command.",
+        };
+        const report: ClassifierLifecycleRouteExecutionReport = {
+            schema: "ax.classifier_lifecycle_route_execution_report.v1",
+            source_schema: "ax.classifier_lifecycle_route_execution_plan.v1",
+            decision: "executed",
+            active_route_kind: "review_pipeline_action",
+            active_route_command_kind: "stamp_review_provenance",
+            command_argv: ["bun", "-e", "console.log('route ok')"],
+            plan,
+            executed: true,
+            started_at: "2026-05-31T12:34:56.000Z",
+            finished_at: "2026-05-31T12:34:57.000Z",
+            duration_ms: 1000,
+            exit_code: 0,
+            signal: null,
+            stdout: "route ok\n",
+            stderr: "",
+            failures: [],
+            next_action: "inspect_route_outputs",
+        };
+
+        const output = renderClassifierLifecycleRouteExecutionText(report);
+
+        expect(output).toContain("classifier lifecycle route execution");
+        expect(output).toContain("decision: executed");
+        expect(output).toContain("executed: yes");
+        expect(output).toContain("exit code: 0");
+        expect(output).toContain("command argv: bun -e console.log('route ok')");
+        expect(output).toContain("stdout: route ok");
+        expect(output).toContain("next action: inspect_route_outputs");
+    });
+
+    test("renders classifier lifecycle route execution inspections", () => {
+        const executionPlan: ClassifierLifecycleRouteExecutionPlanReport = {
+            schema: "ax.classifier_lifecycle_route_execution_plan.v1",
+            source_schema: "ax.classifier_lifecycle_route_binding_preview.v1",
+            decision: "ready_to_execute",
+            active_route_kind: "review_pipeline_action",
+            active_route_command_kind: "stamp_review_provenance",
+            requested_execute: true,
+            would_execute: true,
+            command_argv: ["bun", "src/cli/index.ts", "--out=.ax/experiments/review.json"],
+            preview: {
+                schema: "ax.classifier_lifecycle_route_binding_preview.v1",
+                source_schema: "ax.classifier_lifecycle_routing_summary.v1",
+                decision: "ready_to_execute",
+                active_route_kind: "review_pipeline_action",
+                active_route_command_kind: "stamp_review_provenance",
+                provided_inputs: [],
+                missing_values: [],
+                input_bindings: [],
+                original_argv: [],
+                bound_argv: ["bun", "src/cli/index.ts", "--out=.ax/experiments/review.json"],
+                next_action: "execute_bound_active_route",
+                remediation: "Execute the bound active route command.",
+            },
+            failures: [],
+            next_action: "execute_bound_route",
+            remediation: "Execute the bound active route command.",
+        };
+        const report: ClassifierLifecycleRouteExecutionInspectionReport = {
+            schema: "ax.classifier_lifecycle_route_execution_inspection.v1",
+            source_schema: "ax.classifier_lifecycle_route_execution_report.v1",
+            decision: "needs_review_handoff",
+            active_route_kind: "review_pipeline_action",
+            active_route_command_kind: "stamp_review_provenance",
+            command_argv: ["bun", "src/cli/index.ts", "--out=.ax/experiments/review.json"],
+            execution: {
+                schema: "ax.classifier_lifecycle_route_execution_report.v1",
+                source_schema: "ax.classifier_lifecycle_route_execution_plan.v1",
+                decision: "executed",
+                active_route_kind: "review_pipeline_action",
+                active_route_command_kind: "stamp_review_provenance",
+                command_argv: ["bun", "src/cli/index.ts", "--out=.ax/experiments/review.json"],
+                plan: executionPlan,
+                executed: true,
+                started_at: "2026-05-31T12:34:56.000Z",
+                finished_at: "2026-05-31T12:34:57.000Z",
+                duration_ms: 1000,
+                exit_code: 0,
+                signal: null,
+                stdout: "{}",
+                stderr: "",
+                failures: [],
+                next_action: "inspect_route_outputs",
+            },
+            output_artifacts: [{
+                kind: "readiness_report",
+                flag: "--out",
+                path: ".ax/experiments/review.json",
+                exists: true,
+            }],
+            missing_output_paths: [],
+            parsed_output_source: "stdout",
+            inner_schema: "ax.workflow_candidate_review_coverage.v1",
+            inner_decision: "workflow_candidate_review_coverage_ready",
+            review_handoff_status: "incomplete_review_handoff",
+            production_apply_guard: "missing_review_handoff",
+            production_can_apply: false,
+            review_pipeline_stage: "needs_review_handoff",
+            review_pipeline_next_action: "Complete the review handoff artifacts before applying.",
+            review_pipeline_command_output_check_status: "no_output_artifacts",
+            review_pipeline_command_output_check_next_action: "No pipeline output artifacts need verification.",
+            failures: [],
+            next_action: "complete_review_handoff",
+            remediation: "Complete the review handoff artifacts before applying.",
+        };
+
+        const output = renderClassifierLifecycleRouteExecutionInspectionText(report);
+
+        expect(output).toContain("classifier lifecycle route execution inspection");
+        expect(output).toContain("decision: needs_review_handoff");
+        expect(output).toContain("parsed output source: stdout");
+        expect(output).toContain("inner: ax.workflow_candidate_review_coverage.v1 workflow_candidate_review_coverage_ready");
+        expect(output).toContain("handoff: incomplete_review_handoff production=missing_review_handoff can_apply=no");
+        expect(output).toContain("pipeline: needs_review_handoff outputs=no_output_artifacts");
+        expect(output).toContain("- readiness_report --out .ax/experiments/review.json exists=yes");
+        expect(output).toContain("next action: complete_review_handoff");
     });
 
     test("renders multi-package summaries", () => {

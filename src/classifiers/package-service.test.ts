@@ -67,6 +67,164 @@ async function writeTempExecutionReportRoot(): Promise<string> {
 }
 
 describe("ClassifierPackageService", () => {
+    test("loads pending review task list reports through the service layer", async () => {
+        const taskDir = mkdtempSync(join(tmpdir(), "ax-pending-review-service-"));
+        const fixturePackPath = join(taskDir, "pending-review.jsonl");
+        const reviewBriefPath = join(taskDir, "pending-review.md");
+        const taskPath = join(taskDir, "workflow-candidate-pending-review-demo.md");
+        writeFileSync(fixturePackPath, `${JSON.stringify({
+            id: "workflow-candidate-review-coverage/correction_or_rejection_signal/example",
+            suite: "workflow-candidate-review-coverage",
+            name: "coverage-gap-correction_or_rejection_signal-01",
+            label: "correction_or_rejection_signal",
+            target: "workflow_state",
+            text: "USER:\nthis is wrong\n\nPREVIOUS_ASSISTANT:\nI claimed the command passed without checking the output.\n",
+            source_group: "workflow-candidate",
+            review_status: "pending",
+            topic: "review-coverage",
+            candidate_id: "classifier_candidate_group:hybrid-window/correction_or_rejection_signal",
+            candidate_label: "correction_or_rejection_signal",
+            proposed_action: "add_context_guardrail",
+        })}\n`);
+        writeFileSync(reviewBriefPath, "# Workflow Candidate Coverage Review\n\nReview the pending fixture.\n");
+        writeFileSync(taskPath, [
+            "---",
+            "ax_schema: \"ax.workflow_candidate_pending_review_task.v1\"",
+            `fixture_pack_path: ${JSON.stringify(fixturePackPath)}`,
+            `review_brief_path: ${JSON.stringify(reviewBriefPath)}`,
+            "source_kind: \"hybrid_window_classifier_projection\"",
+            `output_path: ${JSON.stringify(join(taskDir, "pending-review-batch.json"))}`,
+            `review_facts_path: ${JSON.stringify(join(taskDir, "pending-review-facts.json"))}`,
+            `review_write_plan_path: ${JSON.stringify(join(taskDir, "pending-review-write-plan.json"))}`,
+            "review_pipeline_stage: \"needs_review_decisions\"",
+            "candidate_ids_json: [\"classifier_candidate_group:hybrid-window/correction_or_rejection_signal\"]",
+            "---",
+            "",
+            "# ax pending workflow candidate review",
+        ].join("\n"));
+
+        const report = await runWithService(Effect.gen(function* () {
+            const packages = yield* ClassifierPackageService;
+            return yield* packages.pendingReviewTaskListReport({ taskDir });
+        }));
+
+        expect(report).toMatchObject({
+            schema: "ax.workflow_candidate_pending_review_task_list.v1",
+            task_dir: taskDir,
+            queue_status: "waiting_for_review_decisions",
+            task_count: 1,
+            ready_for_review_count: 1,
+            review_command_blocked_count: 1,
+            recommended_task_path: taskPath,
+            recommended_task_route: "collect_review_decisions",
+            recommended_task_review_progress_status: "needs_review",
+            recommended_task_can_execute_command: false,
+            route_counts: {
+                collect_review_decisions: 1,
+            },
+            review_progress_status_counts: {
+                needs_review: 1,
+            },
+        });
+        expect(report.tasks[0]).toMatchObject({
+            path: taskPath,
+            route: "collect_review_decisions",
+            review_progress_status: "needs_review",
+            review_decision_status: "needs_review_decisions",
+        });
+
+        const out = join(taskDir, "pending-review-task-list.json");
+        const written = await runWithService(Effect.gen(function* () {
+            const packages = yield* ClassifierPackageService;
+            return yield* packages.writePendingReviewTaskListReport({ taskDir, out });
+        }));
+
+        expect(written.queue_status).toBe("waiting_for_review_decisions");
+        expect(JSON.parse(readFileSync(out, "utf8"))).toMatchObject({
+            schema: "ax.workflow_candidate_pending_review_task_list.v1",
+            task_dir: taskDir,
+            queue_status: "waiting_for_review_decisions",
+            recommended_task_path: taskPath,
+            tasks: [{
+                path: taskPath,
+                route: "collect_review_decisions",
+                review_progress_status: "needs_review",
+            }],
+        });
+    });
+
+    test("summarizes classifier quality status from a saved robustness analysis report", async () => {
+        const root = mkdtempSync(join(tmpdir(), "ax-classifier-quality-status-"));
+        const sourceReportPath = join(root, "setfit-failure-analysis.json");
+        writeFileSync(sourceReportPath, `${JSON.stringify({
+            schema: "ax.setfit_robustness_failure_analysis.v1",
+            decision: "robust_with_residual_none_false_positive_review",
+            gate: {
+                passed: true,
+                observed: {
+                    macro_f1_min: 0.7542,
+                    none_false_positive_rate_max: 0.0769,
+                },
+            },
+            runs: [
+                { seed: 7, accuracy: 0.85, macro_f1: 0.8344, none_false_positive_rate: 0 },
+                { seed: 42, accuracy: 0.775, macro_f1: 0.7542, none_false_positive_rate: 0 },
+            ],
+            all_seed_unique_none_false_positive_count: 1,
+            all_seed_repeated_misses: [
+                {
+                    id: "session-section-chunks/correction-not-committed",
+                    actual: "correction_or_rejection_signal",
+                    predicted_labels: ["verification_or_recovery_signal"],
+                    hit_count: 2,
+                },
+            ],
+        }, null, 2)}\n`);
+
+        const report = await runWithService(Effect.gen(function* () {
+            const packages = yield* ClassifierPackageService;
+            return yield* packages.classifierQualityStatusReport({ sourceReportPath });
+        }));
+
+        expect(report).toMatchObject({
+            schema: "ax.classifier_quality_status.v1",
+            source_report_path: sourceReportPath,
+            source_schema: "ax.setfit_robustness_failure_analysis.v1",
+            source_decision: "robust_with_residual_none_false_positive_review",
+            quality_gate_passed: true,
+            promotion_quality: false,
+            recommended_use: "candidate_mining",
+            metrics: {
+                accuracy_min: 0.775,
+                accuracy_max: 0.85,
+                macro_f1_min: 0.7542,
+                macro_f1_max: 0.8344,
+                none_false_positive_rate_max: 0.0769,
+                repeated_miss_count: 1,
+                unique_none_false_positive_count: 1,
+            },
+            blockers: [
+                "residual_repeated_misses",
+                "residual_none_false_positives",
+                "missing_human_promotion_review",
+            ],
+            next_action: "Use this classifier for candidate mining and route promotion-quality facts through human review.",
+        });
+
+        const out = join(root, "classifier-quality-status.json");
+        const written = await runWithService(Effect.gen(function* () {
+            const packages = yield* ClassifierPackageService;
+            return yield* packages.writeClassifierQualityStatusReport({ sourceReportPath, out });
+        }));
+
+        expect(written.metrics.repeated_miss_count).toBe(1);
+        expect(JSON.parse(readFileSync(out, "utf8"))).toMatchObject({
+            schema: "ax.classifier_quality_status.v1",
+            promotion_quality: false,
+            recommended_use: "candidate_mining",
+        });
+    });
+
     test("lists classifier package operations through the service layer", async () => {
         const operations = await runWithService(Effect.gen(function* () {
             const packages = yield* ClassifierPackageService;
@@ -125,10 +283,15 @@ describe("ClassifierPackageService", () => {
             "workflow-fixture-split-audit",
             "workflow-fixture-setfit-robustness",
             "workflow-fixture-failure-analysis",
+            "workflow-fixture-boundary-miss-review",
+            "workflow-fixture-boundary-miss-review-workflow-candidate",
+            "workflow-fixture-boundary-deterministic-replay",
+            "workflow-fixture-boundary-deterministic-graph-projection",
             "workflow-fixture-none-safety-pregate",
             "workflow-fixture-none-safety-window-replay",
             "workflow-fixture-hybrid-robustness",
             "workflow-fixture-hybrid-graph-usefulness",
+            "workflow-fixture-quality-conclusion",
             "classifier-lifecycle-status",
             "blind-post-review",
         ]);
@@ -184,10 +347,15 @@ describe("ClassifierPackageService", () => {
             "eval",
             "eval",
             "status",
+            "review",
+            "review",
+            "status",
+            "status",
             "status",
             "status",
             "eval",
             "eval",
+            "status",
             "status",
             "review",
         ]);
@@ -525,6 +693,115 @@ describe("ClassifierPackageService", () => {
         expect(report.totals.edge_count).toBe(1);
     });
 
+    test("summarizes graph query suggestion repair routing through the service layer", async () => {
+        const db = {
+            query: (sql: string) => Effect.sync(() => {
+                expect(sql).toContain("FROM classifier_graph_node");
+                return [
+                    [],
+                    [
+                        {
+                            graph_id: "edge:review",
+                            kind: "has_lifecycle_fact",
+                            from_id: "classifier_lifecycle:workflow_candidate_proposal",
+                            to_id: "classifier_lifecycle_fact:workflow_candidate_proposal/review_pipeline_recommended_action_execution_phase",
+                            evidence_path: ".ax/experiments/workflow-candidate-proposal-review-current.json",
+                            properties_json: "{}",
+                        },
+                    ],
+                    [
+                        {
+                            graph_id: "classifier_lifecycle_fact:workflow_candidate_proposal/review_pipeline_recommended_action_execution_phase",
+                            kind: "classifier_lifecycle_status",
+                            subject: "classifier_lifecycle:workflow_candidate_proposal",
+                            predicate: "review_pipeline_recommended_action_execution_phase",
+                            value_json: "\"bind_inputs\"",
+                            evidence_edges_json: "[\"edge:review\"]",
+                            properties_json: "{\"source_kind\":\"review_pipeline_lifecycle\"}",
+                        },
+                    ],
+                ];
+            }),
+        } as unknown as SurrealClientShape;
+
+        const summary = await runWithServiceAndDb(Effect.gen(function* () {
+            const packages = yield* ClassifierPackageService;
+            return yield* packages.executionGraphQuerySuggestionRoutingSummary({
+                query: {
+                    mode: "lifecycle",
+                    predicate: "review_pipeline_recommended_action_execution_phase",
+                    value_equals: "execute",
+                },
+            });
+        }), db);
+
+        expect(summary.has_suggestion).toBe(true);
+        expect(summary.query_match_status).toBe("no_match");
+        expect(summary.suggestion?.value_equals).toBe("bind_inputs");
+        expect(summary.suggestion?.repair.can_execute).toBe(true);
+        expect(summary.suggestion?.repair.execution_status).toBe("ready_to_execute");
+        expect(summary.suggestion?.repair.command_kind).toBe("classifier_graph_query_repair");
+        expect(summary.suggestion?.repair.query?.value_equals).toBe("bind_inputs");
+        expect(summary.suggestion?.repair.outcome_status).toBe("expected_matches");
+        expect(summary.suggestion?.verification.can_execute).toBe(true);
+        expect(summary.suggestion?.verification.execution_status).toBe("ready_to_execute");
+        expect(summary.suggestion?.verification.command_kind).toBe("classifier_graph_query_repair_verification");
+        expect(summary.suggestion?.verification.query?.value_equals).toBe("bind_inputs");
+        expect(summary.suggestion?.verification.expected_result_count).toBe(1);
+        expect(summary.suggestion?.verification.outcome_status).toBe("expected_matches");
+    });
+
+    test("writes graph query suggestion routing summaries through the service layer", async () => {
+        const out = join(mkdtempSync(join(tmpdir(), "ax-query-routing-summary-")), "nested", "summary.json");
+        const db = {
+            query: (sql: string) => Effect.sync(() => {
+                expect(sql).toContain("FROM classifier_graph_node");
+                return [
+                    [],
+                    [
+                        {
+                            graph_id: "edge:review",
+                            kind: "has_lifecycle_fact",
+                            from_id: "classifier_lifecycle:workflow_candidate_proposal",
+                            to_id: "classifier_lifecycle_fact:workflow_candidate_proposal/review_pipeline_recommended_action_execution_phase",
+                            evidence_path: ".ax/experiments/workflow-candidate-proposal-review-current.json",
+                            properties_json: "{}",
+                        },
+                    ],
+                    [
+                        {
+                            graph_id: "classifier_lifecycle_fact:workflow_candidate_proposal/review_pipeline_recommended_action_execution_phase",
+                            kind: "classifier_lifecycle_status",
+                            subject: "classifier_lifecycle:workflow_candidate_proposal",
+                            predicate: "review_pipeline_recommended_action_execution_phase",
+                            value_json: "\"bind_inputs\"",
+                            evidence_edges_json: "[\"edge:review\"]",
+                            properties_json: "{\"source_kind\":\"review_pipeline_lifecycle\"}",
+                        },
+                    ],
+                ];
+            }),
+        } as unknown as SurrealClientShape;
+
+        const summary = await runWithServiceAndDb(Effect.gen(function* () {
+            const packages = yield* ClassifierPackageService;
+            return yield* packages.writeExecutionGraphQuerySuggestionRoutingSummaryReport({
+                out,
+                query: {
+                    mode: "lifecycle",
+                    predicate: "review_pipeline_recommended_action_execution_phase",
+                    value_equals: "execute",
+                },
+            });
+        }), db);
+        const saved = await Bun.file(out).json();
+
+        expect(summary.suggestion?.repair.execution_status).toBe("ready_to_execute");
+        expect(saved.has_suggestion).toBe(true);
+        expect(saved.suggestion.repair.command_kind).toBe("classifier_graph_query_repair");
+        expect(saved.suggestion.verification.command_kind).toBe("classifier_graph_query_repair_verification");
+    });
+
     test("builds lifecycle insights through the service layer", async () => {
         const statusDir = mkdtempSync(join(tmpdir(), "ax-lifecycle-status-"));
         const statusPath = join(statusDir, "status.json");
@@ -611,6 +888,12 @@ describe("ClassifierPackageService", () => {
                         label: "blind-review-refresh",
                         properties_json: JSON.stringify({ package_key: "session-section-chunks", operation_kind: "review", expensive: false }),
                     },
+                    {
+                        graph_id: "classifier_lifecycle:workflow_candidate_review_pipeline",
+                        kind: "classifier_lifecycle",
+                        label: "workflow candidate review pipeline lifecycle",
+                        properties_json: "{}",
+                    },
                 ],
                 [
                     {
@@ -621,15 +904,47 @@ describe("ClassifierPackageService", () => {
                         evidence_path: ".ax/experiments/run.json",
                         properties_json: "{}",
                     },
+                    {
+                        graph_id: "edge:lifecycle",
+                        kind: "has_evidence",
+                        from_id: "classifier_lifecycle:workflow_candidate_review_pipeline",
+                        to_id: "artifact:.ax/experiments/workflow-candidate-review-pipeline-lifecycle-current.json",
+                        evidence_path: ".ax/experiments/workflow-candidate-review-pipeline-lifecycle-current.json",
+                        properties_json: JSON.stringify({ lifecycle_key: "review_pipeline_lifecycle" }),
+                    },
                 ],
-                [],
+                [
+                    {
+                        graph_id: "fact:phase",
+                        kind: "classifier_lifecycle_status",
+                        subject: "classifier_lifecycle:workflow_candidate_review_pipeline",
+                        predicate: "review_pipeline_recommended_action_execution_phase",
+                        value_json: "\"bind_inputs\"",
+                        evidence_edges_json: JSON.stringify(["edge:lifecycle"]),
+                        properties_json: JSON.stringify({
+                            lifecycle_key: "review_pipeline_lifecycle",
+                            artifact_path: ".ax/experiments/workflow-candidate-review-pipeline-lifecycle-current.json",
+                        }),
+                    },
+                ],
             ]),
         } as unknown as SurrealClientShape;
 
-        const report = await runWithServiceAndDb(Effect.gen(function* () {
+        const result = await runWithServiceAndDb(Effect.gen(function* () {
             const packages = yield* ClassifierPackageService;
-            return yield* packages.lifecycleInsightReport({ workflowStatusPath: statusPath });
+            const input = {
+                workflowStatusPath: statusPath,
+                graphQuery: {
+                    mode: "lifecycle",
+                    predicate: "review_pipeline_recommended_action_execution_phase",
+                    value_equals: "execute",
+                },
+            } as const;
+            const report = yield* packages.lifecycleInsightReport(input);
+            const routing = yield* packages.lifecycleRoutingSummaryReport(input);
+            return { report, routing };
         }), db);
+        const { report, routing } = result;
 
         expect(report.schema).toBe("ax.classifier_lifecycle_insight_report.v1");
         expect(report.decision).toBe("needs_human_review");
@@ -658,6 +973,48 @@ describe("ClassifierPackageService", () => {
         expect(report.workflow_status.proposal_ready_smoke?.promotion_decision).toBe("workflow_candidate_proposal_promotion_ready");
         expect(report.workflow_status.next_actions[0]).toContain("workflow-candidate-proposal-review-current.md");
         expect(report.blocking_items).toContain("workflow candidate proposal review pending 4 proposal(s)");
+        expect(report.blocking_items).toContain("graph query repair available: review_pipeline_recommended_action_execution_phase value execute -> bind_inputs");
+        expect(report.routing_items[0]).toMatchObject({
+            kind: "graph_query_repair",
+            blocks_decision: false,
+            status: "ready_to_execute",
+            execution_status: "ready_to_execute",
+            can_execute: true,
+            command_kind: "classifier_graph_query_repair",
+            predicate: "review_pipeline_recommended_action_execution_phase",
+            from_value: "execute",
+            to_value: "bind_inputs",
+            next_action: "run_repaired_query",
+        });
         expect(report.packages.find((entry) => entry.package_key === "session-section-chunks")?.graph_operation_count).toBe(1);
+        expect(report.graph_query_suggestion?.suggestion?.repair.outcome_status).toBe("expected_matches");
+        expect(routing).toMatchObject({
+            schema: "ax.classifier_lifecycle_routing_summary.v1",
+            decision: "needs_human_review",
+            active_route_kind: "graph_query_repair",
+            active_route_execution_status: "ready_to_execute",
+            active_route_can_execute: true,
+            active_route_missing_inputs: [],
+            active_route_input_bindings: [],
+            next_action: "execute_active_route",
+            totals: {
+                route_count: 1,
+                executable_route_count: 1,
+                missing_input_route_count: 0,
+                blocked_route_count: 0,
+            },
+        });
+        expect(routing.active_route_argv).toEqual([
+            "bun",
+            "src/cli/index.ts",
+            "classifiers",
+            "graph",
+            "--mode",
+            "lifecycle",
+            "--predicate",
+            "review_pipeline_recommended_action_execution_phase",
+            "--value",
+            "bind_inputs",
+        ]);
     });
 });

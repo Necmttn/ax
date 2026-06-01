@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { exec } from "node:child_process";
+import { exec, execFile } from "node:child_process";
 import { safeJsonParse } from "../lib/shared/safe-json.ts";
 import {
     recordRef,
@@ -225,7 +225,7 @@ export interface ClassifierPackageExecutionFact {
     readonly subject: string;
     readonly predicate: string;
     readonly object?: string;
-    readonly value?: string | number | boolean | null;
+    readonly value?: string | number | boolean | readonly string[] | null;
     readonly evidence_edges: readonly string[];
     readonly properties: Readonly<Record<string, string | number | boolean | null>>;
 }
@@ -344,13 +344,21 @@ export interface ClassifierGraphChangedArtifact {
 
 export interface ClassifierGraphLifecycleFact {
     readonly graph_id: string;
+    readonly kind: string;
     readonly subject: string;
     readonly predicate: string;
+    readonly source_kind?: string;
     readonly value: unknown;
     readonly lifecycle_key?: string;
     readonly artifact_path?: string;
     readonly evidence_edges: readonly string[];
     readonly evidence_paths: readonly string[];
+}
+
+export interface ClassifierGraphLifecycleValueCount {
+    readonly predicate: string;
+    readonly value: string;
+    readonly count: number;
 }
 
 export interface ClassifierGraphEmbeddingHelperFact {
@@ -359,6 +367,7 @@ export interface ClassifierGraphEmbeddingHelperFact {
     readonly subject: string;
     readonly predicate: string;
     readonly object?: string;
+    readonly source_kind?: string;
     readonly value: unknown;
     readonly status?: string;
     readonly source_fixture_id?: string;
@@ -377,12 +386,168 @@ export interface ClassifierGraphEmbeddingHelperFact {
     readonly evidence_paths: readonly string[];
 }
 
-export type ClassifierGraphHealthMode = "summary" | "guarded" | "changed-artifacts" | "evidence" | "lifecycle" | "embedding-helper";
+export interface ClassifierGraphBoundaryReplayFact {
+    readonly graph_id: string;
+    readonly kind: string;
+    readonly subject: string;
+    readonly predicate: string;
+    readonly object?: string;
+    readonly source_kind?: string;
+    readonly value: unknown;
+    readonly classifier_key?: string;
+    readonly actual?: string;
+    readonly target?: string;
+    readonly confidence?: number;
+    readonly signals?: readonly string[];
+    readonly evidence_edges: readonly string[];
+    readonly evidence_paths: readonly string[];
+}
+
+export interface ClassifierGraphRoutingPolicyRecommendedQuery {
+    readonly mode: "embedding-helper" | "evidence";
+    readonly operation_id?: string;
+    readonly artifact_path?: string;
+    readonly source_kind?: string;
+    readonly fact_kind?: string;
+    readonly status?: string;
+    readonly source_fixture_id?: string;
+    readonly proposed_label?: string;
+    readonly threshold?: string;
+    readonly min_seed_count?: number;
+    readonly min_positive_recall?: number;
+    readonly min_call_reduction?: number;
+    readonly min_nearest_similarity?: number;
+    readonly nearest_fixture_id?: string;
+    readonly predicate?: string;
+    readonly subject?: string;
+    readonly value_contains?: string;
+    readonly value_equals?: string;
+}
+
+export interface ClassifierGraphRoutingPolicySummary {
+    readonly status: "not_requested" | "meets_requested_floors" | "no_matching_policy";
+    readonly next_action: "set_routing_floors" | "choose_reviewed_routing_threshold" | "lower_floor_or_review_more_candidates";
+    readonly remediation: string;
+    readonly requested_min_positive_recall?: number;
+    readonly requested_min_call_reduction?: number;
+    readonly evaluated_policy_count?: number;
+    readonly candidate_count: number;
+    readonly best_threshold_by_call_reduction?: string;
+    readonly best_positive_recall?: number;
+    readonly best_call_reduction?: number;
+    readonly best_available_threshold_by_recall?: string;
+    readonly best_available_positive_recall?: number;
+    readonly best_available_call_reduction?: number;
+    readonly positive_recall_gap_to_request?: number;
+    readonly call_reduction_gap_to_request?: number;
+    readonly blocking_floor_fields?: readonly ("positive_recall" | "call_reduction")[];
+    readonly largest_gap_floor?: "positive_recall" | "call_reduction";
+    readonly recommended_floor_adjustments?: readonly {
+        readonly floor: "positive_recall" | "call_reduction";
+        readonly requested: number;
+        readonly recommended: number;
+        readonly gap: number;
+        readonly source_threshold?: string;
+    }[];
+    readonly recommended_floor_query?: ClassifierGraphRoutingPolicyRecommendedQuery;
+    readonly recommended_floor_argv?: readonly string[];
+    readonly recommended_floor_status?: "expected_matches" | "no_expected_match";
+    readonly recommended_floor_candidate_count?: number;
+    readonly recommended_floor_best_threshold_by_call_reduction?: string;
+    readonly recommended_floor_best_positive_recall?: number;
+    readonly recommended_floor_best_call_reduction?: number;
+    readonly recommended_floor_next_action?: "choose_recommended_routing_threshold" | "review_more_routing_candidates";
+}
+
+export type ClassifierGraphHealthMode = "summary" | "guarded" | "changed-artifacts" | "evidence" | "lifecycle" | "embedding-helper" | "boundary-replay";
+export type ClassifierGraphQueryResultKind = "operations" | "guarded_operations" | "changed_artifacts" | "lifecycle_facts" | "embedding_helper_facts" | "boundary_replay_facts";
+
+export interface ClassifierGraphQueryResultKindCount {
+    readonly kind: ClassifierGraphQueryResultKind;
+    readonly count: number;
+}
 
 export interface ClassifierGraphHealthQuery {
     readonly mode: ClassifierGraphHealthMode;
     readonly operation_id?: string;
     readonly artifact_path?: string;
+    readonly source_kind?: string;
+    readonly fact_kind?: string;
+    readonly status?: string;
+    readonly source_fixture_id?: string;
+    readonly proposed_label?: string;
+    readonly threshold?: string;
+    readonly min_seed_count?: number;
+    readonly min_positive_recall?: number;
+    readonly min_call_reduction?: number;
+    readonly min_nearest_similarity?: number;
+    readonly nearest_fixture_id?: string;
+    readonly predicate?: string;
+    readonly subject?: string;
+    readonly value_contains?: string;
+    readonly value_equals?: string;
+}
+
+export interface ClassifierGraphQuerySuggestion {
+    readonly value_equals: string;
+    readonly result_count: number;
+    readonly changed_filter_count: number;
+    readonly unchanged_filter_count: number;
+    readonly has_changed_filters: boolean;
+    readonly changed_filters: readonly ["value_equals"] | readonly [];
+    readonly unchanged_filters: readonly ["value_equals"] | readonly [];
+    readonly repair_status: "repair_available" | "no_repair_needed";
+    readonly repair_next_action: "run_repaired_query" | "use_current_query";
+    readonly repair_remediation: string;
+    readonly repair_can_execute: boolean;
+    readonly repair_execution_status: "ready_to_execute" | "not_needed";
+    readonly repair_command_kind: "classifier_graph_query_repair" | "none";
+    readonly repair_requires_inputs: boolean;
+    readonly repair_required_inputs: readonly [];
+    readonly repair_expected_query_match_status: "matched" | "not_applicable";
+    readonly repair_outcome_status: "expected_matches" | "not_applicable";
+    readonly repair_expected_result_count?: number;
+    readonly repair_blockers: readonly ["no_repair_needed"] | readonly [];
+    readonly repair_blocker_details: readonly {
+        readonly blocker: "no_repair_needed";
+        readonly remediation: string;
+    }[];
+    readonly repair_argv: readonly string[];
+    readonly repair_can_verify: boolean;
+    readonly repair_verification_status: "ready_to_verify" | "not_needed";
+    readonly repair_verification_execution_status: "ready_to_execute" | "not_needed";
+    readonly repair_verification_next_action: "run_verification_query" | "skip_verification";
+    readonly repair_verification_remediation: string;
+    readonly repair_verification_can_execute: boolean;
+    readonly repair_verification_command_kind: "classifier_graph_query_repair_verification" | "none";
+    readonly repair_verification_requires_inputs: boolean;
+    readonly repair_verification_required_inputs: readonly [];
+    readonly repair_verification_blockers: readonly ["no_repair_needed"] | readonly [];
+    readonly repair_verification_blocker_details: readonly {
+        readonly blocker: "no_repair_needed";
+        readonly remediation: string;
+    }[];
+    readonly repair_verification_expected_query_match_status: "matched" | "not_applicable";
+    readonly repair_verification_outcome_status: "expected_matches" | "not_applicable";
+    readonly repair_verification_expected_result_count?: number;
+    readonly repair_verification_argv: readonly string[];
+    readonly repair_verification_query?: ClassifierGraphHealthQuery;
+    readonly repair_query?: ClassifierGraphHealthQuery;
+    readonly status: "expected_matches";
+    readonly next_action: "run_suggested_query";
+    readonly remediation: string;
+    readonly source: "lifecycle_available_value_counts";
+    readonly reason: "available_value_after_relaxing_value_equals";
+    readonly relaxed_filters: readonly ["value_equals"];
+    readonly original_query: ClassifierGraphHealthQuery;
+    readonly query: ClassifierGraphHealthQuery;
+    readonly filter_changes: readonly {
+        readonly filter: "value_equals";
+        readonly from?: string;
+        readonly to: string;
+        readonly status: "changed" | "unchanged";
+    }[];
+    readonly argv: readonly string[];
 }
 
 export interface ClassifierPackageExecutionGraphHealthReport {
@@ -393,8 +558,25 @@ export interface ClassifierPackageExecutionGraphHealthReport {
     readonly guarded_operations: readonly ClassifierGraphOperationHealth[];
     readonly changed_artifacts: readonly ClassifierGraphChangedArtifact[];
     readonly lifecycle_facts: readonly ClassifierGraphLifecycleFact[];
+    readonly lifecycle_value_counts?: readonly ClassifierGraphLifecycleValueCount[];
+    readonly lifecycle_available_value_counts?: readonly ClassifierGraphLifecycleValueCount[];
     readonly embedding_helper_facts: readonly ClassifierGraphEmbeddingHelperFact[];
+    readonly boundary_replay_facts?: readonly ClassifierGraphBoundaryReplayFact[];
+    readonly routing_policy_summary?: ClassifierGraphRoutingPolicySummary;
     readonly evidence_paths: readonly string[];
+    readonly query_match_status?: "matched" | "no_match";
+    readonly query_next_action?: "use_query_results" | "relax_filters_or_project_facts";
+    readonly query_remediation?: string;
+    readonly query_result_kinds?: readonly ClassifierGraphQueryResultKind[];
+    readonly query_result_kind_counts?: readonly ClassifierGraphQueryResultKindCount[];
+    readonly query_suggested_value_equals?: string;
+    readonly query_suggested_result_count?: number;
+    readonly query_suggested_status?: "expected_matches";
+    readonly query_suggested_next_action?: "run_suggested_query";
+    readonly query_suggested_remediation?: string;
+    readonly query_suggested_query?: ClassifierGraphHealthQuery;
+    readonly query_suggested_argv?: readonly string[];
+    readonly query_suggestion?: ClassifierGraphQuerySuggestion;
     readonly totals: {
         readonly node_count: number;
         readonly edge_count: number;
@@ -408,6 +590,7 @@ export interface ClassifierPackageExecutionGraphHealthReport {
         readonly artifact_fact_count: number;
         readonly lifecycle_fact_count: number;
         readonly embedding_helper_fact_count: number;
+        readonly boundary_replay_fact_count?: number;
         readonly changed_artifact_count: number;
         readonly evidence_path_count: number;
     };
@@ -417,9 +600,147 @@ export interface ClassifierPackageExecutionGraphHealthReport {
         readonly changed_artifact_count: number;
         readonly lifecycle_fact_count: number;
         readonly embedding_helper_fact_count: number;
+        readonly boundary_replay_fact_count?: number;
         readonly evidence_path_count: number;
     };
     readonly decision: "healthy" | "empty_graph";
+}
+
+export interface ClassifierGraphQuerySuggestionRepairRoutingSummary {
+    readonly status: ClassifierGraphQuerySuggestion["repair_status"];
+    readonly outcome_status: "expected_matches" | "not_applicable";
+    readonly execution_status: ClassifierGraphQuerySuggestion["repair_execution_status"];
+    readonly next_action: ClassifierGraphQuerySuggestion["repair_next_action"];
+    readonly command_kind: ClassifierGraphQuerySuggestion["repair_command_kind"];
+    readonly can_execute: boolean;
+    readonly requires_inputs: boolean;
+    readonly required_inputs: readonly [];
+    readonly blockers: ClassifierGraphQuerySuggestion["repair_blockers"];
+    readonly blocker_details: ClassifierGraphQuerySuggestion["repair_blocker_details"];
+    readonly argv: readonly string[];
+    readonly query?: ClassifierGraphHealthQuery;
+    readonly expected_query_match_status: ClassifierGraphQuerySuggestion["repair_expected_query_match_status"];
+    readonly expected_result_count?: number;
+    readonly remediation: string;
+}
+
+export interface ClassifierGraphQuerySuggestionVerificationRoutingSummary {
+    readonly status: ClassifierGraphQuerySuggestion["repair_verification_status"];
+    readonly outcome_status: "expected_matches" | "not_applicable";
+    readonly execution_status: ClassifierGraphQuerySuggestion["repair_verification_execution_status"];
+    readonly next_action: ClassifierGraphQuerySuggestion["repair_verification_next_action"];
+    readonly command_kind: ClassifierGraphQuerySuggestion["repair_verification_command_kind"];
+    readonly can_execute: boolean;
+    readonly requires_inputs: boolean;
+    readonly required_inputs: readonly [];
+    readonly blockers: ClassifierGraphQuerySuggestion["repair_verification_blockers"];
+    readonly blocker_details: ClassifierGraphQuerySuggestion["repair_verification_blocker_details"];
+    readonly argv: readonly string[];
+    readonly query?: ClassifierGraphHealthQuery;
+    readonly expected_query_match_status: ClassifierGraphQuerySuggestion["repair_verification_expected_query_match_status"];
+    readonly expected_result_count?: number;
+    readonly remediation: string;
+}
+
+export interface ClassifierGraphQuerySuggestionRoutingSummary {
+    readonly has_suggestion: boolean;
+    readonly query_match_status?: ClassifierPackageExecutionGraphHealthReport["query_match_status"];
+    readonly query_next_action?: ClassifierPackageExecutionGraphHealthReport["query_next_action"];
+    readonly suggested_value_equals?: string;
+    readonly suggested_status?: ClassifierPackageExecutionGraphHealthReport["query_suggested_status"];
+    readonly suggested_next_action?: ClassifierPackageExecutionGraphHealthReport["query_suggested_next_action"];
+    readonly suggestion?: {
+        readonly value_equals: string;
+        readonly result_count: number;
+        readonly status: ClassifierGraphQuerySuggestion["status"];
+        readonly next_action: ClassifierGraphQuerySuggestion["next_action"];
+        readonly remediation: string;
+        readonly source: ClassifierGraphQuerySuggestion["source"];
+        readonly reason: ClassifierGraphQuerySuggestion["reason"];
+        readonly original_query: ClassifierGraphHealthQuery;
+        readonly query: ClassifierGraphHealthQuery;
+        readonly repair: ClassifierGraphQuerySuggestionRepairRoutingSummary;
+        readonly verification: ClassifierGraphQuerySuggestionVerificationRoutingSummary;
+    };
+}
+
+export function classifierGraphQueryExpectedOutcomeStatus(
+    expectedQueryMatchStatus: ClassifierGraphQuerySuggestion["repair_expected_query_match_status"],
+    expectedResultCount: number | undefined,
+): "expected_matches" | "not_applicable" {
+    return expectedQueryMatchStatus === "matched" &&
+            expectedResultCount !== undefined &&
+            expectedResultCount > 0
+        ? "expected_matches"
+        : "not_applicable";
+}
+
+export function summarizeClassifierGraphQuerySuggestionRouting(
+    report: ClassifierPackageExecutionGraphHealthReport,
+): ClassifierGraphQuerySuggestionRoutingSummary {
+    const suggestion = report.query_suggestion;
+    const base = {
+        has_suggestion: suggestion !== undefined,
+        ...(report.query_match_status === undefined ? {} : { query_match_status: report.query_match_status }),
+        ...(report.query_next_action === undefined ? {} : { query_next_action: report.query_next_action }),
+        ...(report.query_suggested_value_equals === undefined ? {} : { suggested_value_equals: report.query_suggested_value_equals }),
+        ...(report.query_suggested_status === undefined ? {} : { suggested_status: report.query_suggested_status }),
+        ...(report.query_suggested_next_action === undefined ? {} : { suggested_next_action: report.query_suggested_next_action }),
+    };
+    if (suggestion === undefined) return base;
+
+    const repair = {
+        status: suggestion.repair_status,
+        outcome_status: suggestion.repair_outcome_status,
+        execution_status: suggestion.repair_execution_status,
+        next_action: suggestion.repair_next_action,
+        command_kind: suggestion.repair_command_kind,
+        can_execute: suggestion.repair_can_execute,
+        requires_inputs: suggestion.repair_requires_inputs,
+        required_inputs: suggestion.repair_required_inputs,
+        blockers: suggestion.repair_blockers,
+        blocker_details: suggestion.repair_blocker_details,
+        argv: suggestion.repair_argv,
+        ...(suggestion.repair_query === undefined ? {} : { query: suggestion.repair_query }),
+        expected_query_match_status: suggestion.repair_expected_query_match_status,
+        ...(suggestion.repair_expected_result_count === undefined ? {} : { expected_result_count: suggestion.repair_expected_result_count }),
+        remediation: suggestion.repair_remediation,
+    } satisfies ClassifierGraphQuerySuggestionRepairRoutingSummary;
+
+    const verification = {
+        status: suggestion.repair_verification_status,
+        outcome_status: suggestion.repair_verification_outcome_status,
+        execution_status: suggestion.repair_verification_execution_status,
+        next_action: suggestion.repair_verification_next_action,
+        command_kind: suggestion.repair_verification_command_kind,
+        can_execute: suggestion.repair_verification_can_execute,
+        requires_inputs: suggestion.repair_verification_requires_inputs,
+        required_inputs: suggestion.repair_verification_required_inputs,
+        blockers: suggestion.repair_verification_blockers,
+        blocker_details: suggestion.repair_verification_blocker_details,
+        argv: suggestion.repair_verification_argv,
+        ...(suggestion.repair_verification_query === undefined ? {} : { query: suggestion.repair_verification_query }),
+        expected_query_match_status: suggestion.repair_verification_expected_query_match_status,
+        ...(suggestion.repair_verification_expected_result_count === undefined ? {} : { expected_result_count: suggestion.repair_verification_expected_result_count }),
+        remediation: suggestion.repair_verification_remediation,
+    } satisfies ClassifierGraphQuerySuggestionVerificationRoutingSummary;
+
+    return {
+        ...base,
+        suggestion: {
+            value_equals: suggestion.value_equals,
+            result_count: suggestion.result_count,
+            status: suggestion.status,
+            next_action: suggestion.next_action,
+            remediation: suggestion.remediation,
+            source: suggestion.source,
+            reason: suggestion.reason,
+            original_query: suggestion.original_query,
+            query: suggestion.query,
+            repair,
+            verification,
+        },
+    };
 }
 
 export interface ClassifierLifecycleReviewStatus {
@@ -459,6 +780,46 @@ export interface ClassifierLifecycleReviewStatus {
         readonly proposal_count?: number;
         readonly emitted_draft_count?: number;
         readonly skipped_proposal_count?: number;
+        readonly failures: readonly string[];
+    };
+    readonly review_pipeline_lifecycle?: {
+        readonly report_path: string;
+        readonly lifecycle_status?: string;
+        readonly command_kind?: string;
+        readonly prepared_status?: string;
+        readonly output_verification_status?: string;
+        readonly apply_result?: string;
+        readonly applied?: boolean;
+        readonly applied_statement_count?: number;
+        readonly review_handoff_status?: string;
+        readonly production_apply_guard?: string;
+        readonly production_can_apply?: boolean;
+        readonly post_apply_recheck_status?: string;
+        readonly post_apply_reviewed_candidate_delta?: number;
+        readonly post_apply_unreviewed_candidate_delta?: number;
+        readonly post_apply_projected_reviewed_delta?: number;
+        readonly post_apply_projected_unreviewed_delta?: number;
+        readonly can_execute?: boolean;
+        readonly can_continue?: boolean;
+        readonly missing_required_artifact_count?: number;
+        readonly checked_artifact_count?: number;
+        readonly prepared_argv?: readonly string[];
+        readonly production_apply_argv?: readonly string[];
+        readonly review_provenance_stamp_argv?: readonly string[];
+        readonly review_issue_repair_argv?: readonly string[];
+        readonly recommended_action_kind?: string;
+        readonly recommended_action_argv?: readonly string[];
+        readonly recommended_action_status?: string;
+        readonly recommended_action_can_execute?: boolean;
+        readonly recommended_action_execution_phase?: ClassifierReviewPipelineRecommendedActionExecutionPhase;
+        readonly recommended_action_execution_summary?: string;
+        readonly recommended_action_next_action?: string;
+        readonly recommended_action_missing_inputs?: readonly string[];
+        readonly recommended_action_input_bindings?: readonly string[];
+        readonly recommended_action_output_artifacts?: readonly string[];
+        readonly recommended_action_output_checks?: readonly string[];
+        readonly output_artifacts?: readonly ClassifierReviewPipelineArtifactSummary[];
+        readonly checked_artifacts?: readonly ClassifierReviewPipelineArtifactSummary[];
         readonly failures: readonly string[];
     };
     readonly focused_batch?: {
@@ -549,6 +910,20 @@ export interface ClassifierLifecycleReviewStatus {
     readonly next_actions: readonly string[];
 }
 
+export interface ClassifierReviewPipelineArtifactSummary {
+    readonly kind?: string;
+    readonly path: string;
+    readonly required_for_handoff?: boolean;
+    readonly exists?: boolean;
+}
+
+export type ClassifierReviewPipelineRecommendedActionExecutionPhase =
+    | "bind_inputs"
+    | "execute"
+    | "execute_then_verify_outputs"
+    | "repair_outputs"
+    | "inspect_lifecycle";
+
 export interface ClassifierLifecyclePackageInsight {
     readonly package_key: string;
     readonly package_name: string;
@@ -563,6 +938,80 @@ export interface ClassifierLifecyclePackageInsight {
     readonly last_execution?: ClassifierGraphOperationHealth["last_execution"];
 }
 
+export interface ClassifierReviewPipelineLifecycleInsight {
+    readonly report_path: string;
+    readonly status?: string;
+    readonly command_kind?: string;
+    readonly prepared_status?: string;
+    readonly output_verification_status?: string;
+    readonly can_execute?: boolean;
+    readonly can_continue?: boolean;
+    readonly missing_required_artifact_count: number;
+    readonly checked_artifact_count: number;
+    readonly prepared_argv?: readonly string[];
+    readonly production_apply_argv?: readonly string[];
+    readonly review_provenance_stamp_argv?: readonly string[];
+    readonly review_issue_repair_argv?: readonly string[];
+    readonly recommended_action_kind?: string;
+    readonly recommended_action_argv?: readonly string[];
+    readonly recommended_action_status?: string;
+    readonly recommended_action_can_execute?: boolean;
+    readonly recommended_action_execution_phase?: ClassifierReviewPipelineRecommendedActionExecutionPhase;
+    readonly recommended_action_execution_summary?: string;
+    readonly recommended_action_next_action?: string;
+    readonly recommended_action_missing_inputs?: readonly string[];
+    readonly recommended_action_input_bindings?: readonly string[];
+    readonly recommended_action_output_artifacts?: readonly string[];
+    readonly recommended_action_output_checks?: readonly string[];
+    readonly output_artifacts: readonly ClassifierReviewPipelineArtifactSummary[];
+    readonly checked_artifacts: readonly ClassifierReviewPipelineArtifactSummary[];
+    readonly failures: readonly string[];
+    readonly next_action: "execute_review_pipeline_command" | "repair_review_pipeline_outputs" | "continue_review_pipeline" | "inspect_review_pipeline_lifecycle";
+}
+
+export interface ClassifierLifecycleGraphRecommendation {
+    readonly kind: "review_pipeline_success_to_candidate_promotion";
+    readonly status: "ready";
+    readonly source: "persisted_lifecycle_fact";
+    readonly predicate: string;
+    readonly value: string;
+    readonly next_action: "prioritize_reviewed_candidates_for_harness_or_guidance";
+    readonly remediation: string;
+    readonly query: ClassifierGraphHealthQuery;
+    readonly query_argv: readonly string[];
+    readonly candidate_query_argv: readonly string[];
+    readonly evidence_paths: readonly string[];
+}
+
+export type ClassifierLifecycleRoutingItem = {
+    readonly kind: "graph_query_repair";
+    readonly blocks_decision: boolean;
+    readonly status: ClassifierGraphQuerySuggestionRepairRoutingSummary["execution_status"];
+    readonly execution_status: ClassifierGraphQuerySuggestionRepairRoutingSummary["execution_status"];
+    readonly can_execute: boolean;
+    readonly command_kind: ClassifierGraphQuerySuggestionRepairRoutingSummary["command_kind"];
+    readonly predicate?: string;
+    readonly from_value?: string;
+    readonly to_value: string;
+    readonly next_action: ClassifierGraphQuerySuggestionRepairRoutingSummary["next_action"];
+    readonly remediation: string;
+    readonly argv: readonly string[];
+} | {
+    readonly kind: "review_pipeline_action";
+    readonly blocks_decision: boolean;
+    readonly status?: string;
+    readonly execution_status: "ready_to_execute" | "missing_inputs" | "blocked";
+    readonly command_kind: string;
+    readonly next_action: ClassifierReviewPipelineLifecycleInsight["next_action"];
+    readonly action_next_action?: string;
+    readonly can_execute?: boolean;
+    readonly execution_phase?: ClassifierReviewPipelineRecommendedActionExecutionPhase;
+    readonly missing_inputs: readonly string[];
+    readonly input_bindings: readonly string[];
+    readonly argv: readonly string[];
+    readonly remediation: string;
+};
+
 export interface ClassifierLifecycleInsightReport {
     readonly schema: "ax.classifier_lifecycle_insight_report.v1";
     readonly packages_root: string;
@@ -573,6 +1022,10 @@ export interface ClassifierLifecycleInsightReport {
     readonly failed_operations: readonly ClassifierGraphOperationHealth[];
     readonly changed_artifacts: readonly ClassifierGraphChangedArtifact[];
     readonly blocking_items: readonly string[];
+    readonly routing_items: readonly ClassifierLifecycleRoutingItem[];
+    readonly graph_recommendations: readonly ClassifierLifecycleGraphRecommendation[];
+    readonly graph_query_suggestion?: ClassifierGraphQuerySuggestionRoutingSummary;
+    readonly review_pipeline?: ClassifierReviewPipelineLifecycleInsight;
     readonly totals: {
         readonly package_count: number;
         readonly local_model_count: number;
@@ -585,7 +1038,274 @@ export interface ClassifierLifecycleInsightReport {
         readonly pending_blind_labels: number;
         readonly pending_hard_negatives: number;
     };
-    readonly decision: "healthy" | "needs_graph_apply" | "needs_human_review" | "has_guarded_operations";
+    readonly decision: "healthy" | "needs_graph_apply" | "needs_human_review" | "has_guarded_operations" | "needs_graph_query_repair";
+}
+
+export interface ClassifierLifecycleRoutingSummaryReport {
+    readonly schema: "ax.classifier_lifecycle_routing_summary.v1";
+    readonly source_schema: ClassifierLifecycleInsightReport["schema"];
+    readonly decision: ClassifierLifecycleInsightReport["decision"];
+    readonly active_route?: ClassifierLifecycleRoutingItem;
+    readonly active_route_kind?: ClassifierLifecycleRoutingItem["kind"];
+    readonly active_route_status?: string;
+    readonly active_route_execution_status?: ClassifierLifecycleRoutingItem["execution_status"];
+    readonly active_route_can_execute?: boolean;
+    readonly active_route_command_kind?: string;
+    readonly active_route_next_action?: string;
+    readonly active_route_argv?: readonly string[];
+    readonly active_route_missing_inputs: readonly string[];
+    readonly active_route_input_bindings: readonly string[];
+    readonly executable_routes: readonly ClassifierLifecycleRoutingItem[];
+    readonly missing_input_routes: readonly ClassifierLifecycleRoutingItem[];
+    readonly blocked_routes: readonly ClassifierLifecycleRoutingItem[];
+    readonly secondary_routes: readonly ClassifierLifecycleRoutingItem[];
+    readonly next_action: "execute_active_route" | "bind_active_route_inputs" | "repair_active_route" | "inspect_lifecycle";
+    readonly remediation: string;
+    readonly totals: {
+        readonly route_count: number;
+        readonly executable_route_count: number;
+        readonly missing_input_route_count: number;
+        readonly blocked_route_count: number;
+        readonly secondary_route_count: number;
+    };
+}
+
+export interface ClassifierLifecycleRouteBindingPreviewReport {
+    readonly schema: "ax.classifier_lifecycle_route_binding_preview.v1";
+    readonly source_schema: ClassifierLifecycleRoutingSummaryReport["schema"];
+    readonly decision: "ready_to_execute" | "missing_values" | "no_active_route";
+    readonly active_route_kind?: ClassifierLifecycleRoutingItem["kind"];
+    readonly active_route_command_kind?: string;
+    readonly provided_inputs: readonly string[];
+    readonly missing_values: readonly string[];
+    readonly input_bindings: readonly string[];
+    readonly original_argv: readonly string[];
+    readonly bound_argv: readonly string[];
+    readonly next_action: "execute_bound_active_route" | "provide_missing_values" | "inspect_lifecycle";
+    readonly remediation: string;
+}
+
+export interface ClassifierLifecycleRouteExecutionPlanReport {
+    readonly schema: "ax.classifier_lifecycle_route_execution_plan.v1";
+    readonly source_schema: ClassifierLifecycleRouteBindingPreviewReport["schema"];
+    readonly decision: "ready_to_execute" | "denied_requires_execute" | "blocked";
+    readonly active_route_kind?: ClassifierLifecycleRoutingItem["kind"];
+    readonly active_route_command_kind?: string;
+    readonly requested_execute: boolean;
+    readonly would_execute: boolean;
+    readonly command_argv: readonly string[];
+    readonly preview: ClassifierLifecycleRouteBindingPreviewReport;
+    readonly failures: readonly string[];
+    readonly next_action: "execute_bound_route" | "request_execute_route" | "repair_binding_preview";
+    readonly remediation: string;
+}
+
+export interface ClassifierLifecycleRouteExecutionReport {
+    readonly schema: "ax.classifier_lifecycle_route_execution_report.v1";
+    readonly source_schema: ClassifierLifecycleRouteExecutionPlanReport["schema"];
+    readonly decision: "executed" | "failed" | "not_executed";
+    readonly active_route_kind?: ClassifierLifecycleRoutingItem["kind"];
+    readonly active_route_command_kind?: string;
+    readonly command_argv: readonly string[];
+    readonly plan: ClassifierLifecycleRouteExecutionPlanReport;
+    readonly executed: boolean;
+    readonly started_at: string;
+    readonly finished_at: string;
+    readonly duration_ms: number;
+    readonly exit_code: number | null;
+    readonly signal: string | null;
+    readonly stdout: string;
+    readonly stderr: string;
+    readonly failures: readonly string[];
+    readonly next_action: "inspect_route_outputs" | "repair_route_execution" | "request_execute_route";
+}
+
+export interface ClassifierLifecycleRouteExecutionOutputStatus {
+    readonly kind: "readiness_report" | "review_brief" | "review_facts" | "review_write_plan";
+    readonly flag: string;
+    readonly path: string;
+    readonly exists: boolean;
+    readonly size_bytes?: number;
+    readonly modified_at?: string;
+}
+
+export interface ClassifierLifecycleRouteExecutionInspectionReport {
+    readonly schema: "ax.classifier_lifecycle_route_execution_inspection.v1";
+    readonly source_schema: ClassifierLifecycleRouteExecutionReport["schema"];
+    readonly decision: "ready_for_apply" | "needs_review_handoff" | "needs_output_verification" | "failed_execution" | "uninspectable_output";
+    readonly active_route_kind?: ClassifierLifecycleRoutingItem["kind"];
+    readonly active_route_command_kind?: string;
+    readonly command_argv: readonly string[];
+    readonly execution: ClassifierLifecycleRouteExecutionReport;
+    readonly output_artifacts: readonly ClassifierLifecycleRouteExecutionOutputStatus[];
+    readonly missing_output_paths: readonly string[];
+    readonly parsed_output_source?: "stdout" | "output_file";
+    readonly inner_schema?: string;
+    readonly inner_decision?: string;
+    readonly review_handoff_status?: string;
+    readonly production_apply_guard?: string;
+    readonly production_can_apply?: boolean;
+    readonly review_pipeline_stage?: string;
+    readonly review_pipeline_next_action?: string;
+    readonly review_pipeline_command_output_check_status?: string;
+    readonly review_pipeline_command_output_check_next_action?: string;
+    readonly failures: readonly string[];
+    readonly next_action: "run_route_execution" | "repair_route_outputs" | "complete_review_handoff" | "apply_review_facts" | "inspect_inner_output";
+    readonly remediation: string;
+}
+
+function reviewPipelineLifecycleNextAction(
+    lifecycle: NonNullable<ClassifierLifecycleReviewStatus["review_pipeline_lifecycle"]>,
+): ClassifierReviewPipelineLifecycleInsight["next_action"] {
+    if (
+        (lifecycle.missing_required_artifact_count ?? 0) > 0 ||
+        lifecycle.output_verification_status === "missing_required_outputs" ||
+        (lifecycle.failures ?? []).length > 0
+    ) {
+        return "repair_review_pipeline_outputs";
+    }
+    if (lifecycle.can_execute === true && lifecycle.lifecycle_status !== "verified_after_execution") {
+        return "execute_review_pipeline_command";
+    }
+    if (lifecycle.can_continue === true) {
+        return "continue_review_pipeline";
+    }
+    return "inspect_review_pipeline_lifecycle";
+}
+
+function reviewPipelineRouteExecutionStatus(
+    reviewPipeline: ClassifierReviewPipelineLifecycleInsight,
+): Extract<ClassifierLifecycleRoutingItem, { readonly kind: "review_pipeline_action" }>["execution_status"] {
+    if (reviewPipeline.recommended_action_can_execute === true) {
+        return "ready_to_execute";
+    }
+    if ((reviewPipeline.recommended_action_missing_inputs ?? []).length > 0) {
+        return "missing_inputs";
+    }
+    if (
+        reviewPipeline.recommended_action_status === "missing_inputs" ||
+        reviewPipeline.recommended_action_status === "requires_inputs"
+    ) {
+        return "missing_inputs";
+    }
+    return "blocked";
+}
+
+function reviewPipelineRecommendedAction(
+    lifecycle: NonNullable<ClassifierLifecycleReviewStatus["review_pipeline_lifecycle"]>,
+    prepared?: {
+        readonly can_execute?: boolean;
+        readonly next_action?: string;
+        readonly missing_inputs?: readonly string[];
+        readonly input_bindings?: readonly string[];
+        readonly output_artifacts?: readonly string[];
+        readonly output_checks?: readonly string[];
+    },
+): Pick<NonNullable<ClassifierLifecycleReviewStatus["review_pipeline_lifecycle"]>,
+    | "recommended_action_kind"
+    | "recommended_action_argv"
+    | "recommended_action_status"
+    | "recommended_action_can_execute"
+    | "recommended_action_execution_phase"
+    | "recommended_action_execution_summary"
+    | "recommended_action_next_action"
+    | "recommended_action_missing_inputs"
+    | "recommended_action_input_bindings"
+    | "recommended_action_output_artifacts"
+    | "recommended_action_output_checks"
+> {
+    type RecommendedAction = Pick<NonNullable<ClassifierLifecycleReviewStatus["review_pipeline_lifecycle"]>,
+        | "recommended_action_kind"
+        | "recommended_action_argv"
+        | "recommended_action_status"
+        | "recommended_action_can_execute"
+        | "recommended_action_execution_phase"
+        | "recommended_action_execution_summary"
+        | "recommended_action_next_action"
+        | "recommended_action_missing_inputs"
+        | "recommended_action_input_bindings"
+        | "recommended_action_output_artifacts"
+        | "recommended_action_output_checks"
+    >;
+    const withExecutionRoute = (action: RecommendedAction): RecommendedAction => {
+        if (action.recommended_action_kind === undefined) {
+            return action;
+        }
+        const missingInputCount = action.recommended_action_missing_inputs?.length ?? 0;
+        const outputArtifactCount = action.recommended_action_output_artifacts?.length ?? 0;
+        const outputCheckCount = action.recommended_action_output_checks?.length ?? 0;
+        const phase: ClassifierReviewPipelineRecommendedActionExecutionPhase = action.recommended_action_status === "missing_outputs"
+            ? "repair_outputs"
+            : missingInputCount > 0 || action.recommended_action_status === "requires_inputs" || action.recommended_action_status === "missing_inputs"
+            ? "bind_inputs"
+            : action.recommended_action_can_execute === true && outputCheckCount > 0
+            ? "execute_then_verify_outputs"
+            : action.recommended_action_can_execute === true
+            ? "execute"
+            : "inspect_lifecycle";
+        const summary = [
+            `kind=${action.recommended_action_kind}`,
+            `phase=${phase}`,
+            `status=${action.recommended_action_status ?? "unknown"}`,
+            `can_execute=${action.recommended_action_can_execute === undefined ? "unknown" : action.recommended_action_can_execute}`,
+            `missing_inputs=${missingInputCount}`,
+            `output_artifacts=${outputArtifactCount}`,
+            `output_checks=${outputCheckCount}`,
+        ].join(" ");
+        return {
+            ...action,
+            recommended_action_execution_phase: phase,
+            recommended_action_execution_summary: summary,
+        };
+    };
+    const missingOutputs = (lifecycle.missing_required_artifact_count ?? 0) > 0 ||
+        lifecycle.output_verification_status === "missing_required_outputs" ||
+        (lifecycle.failures ?? []).length > 0;
+    if (missingOutputs && lifecycle.review_issue_repair_argv && lifecycle.review_issue_repair_argv.length > 0) {
+        return withExecutionRoute({
+            recommended_action_kind: "repair_review_issues",
+            recommended_action_argv: lifecycle.review_issue_repair_argv,
+            recommended_action_status: "missing_outputs",
+            recommended_action_can_execute: false,
+            recommended_action_next_action: "Repair review pipeline outputs before continuing.",
+            recommended_action_missing_inputs: [],
+            ...(prepared?.input_bindings === undefined || prepared.input_bindings.length === 0 ? {} : { recommended_action_input_bindings: prepared.input_bindings }),
+            ...(prepared?.output_artifacts === undefined || prepared.output_artifacts.length === 0 ? {} : { recommended_action_output_artifacts: prepared.output_artifacts }),
+            ...(prepared?.output_checks === undefined || prepared.output_checks.length === 0 ? {} : { recommended_action_output_checks: prepared.output_checks }),
+        });
+    }
+    const canExecute = prepared?.can_execute ?? lifecycle.can_execute;
+    const executionState = {
+        ...(lifecycle.prepared_status === undefined ? {} : { recommended_action_status: lifecycle.prepared_status }),
+        ...(canExecute === undefined ? {} : { recommended_action_can_execute: canExecute }),
+        ...(prepared?.next_action === undefined ? {} : { recommended_action_next_action: prepared.next_action }),
+        recommended_action_missing_inputs: prepared?.missing_inputs ?? [],
+        ...(prepared?.input_bindings === undefined || prepared.input_bindings.length === 0 ? {} : { recommended_action_input_bindings: prepared.input_bindings }),
+        ...(prepared?.output_artifacts === undefined || prepared.output_artifacts.length === 0 ? {} : { recommended_action_output_artifacts: prepared.output_artifacts }),
+        ...(prepared?.output_checks === undefined || prepared.output_checks.length === 0 ? {} : { recommended_action_output_checks: prepared.output_checks }),
+    };
+    if (lifecycle.command_kind === "repair_review_issues" && lifecycle.review_issue_repair_argv && lifecycle.review_issue_repair_argv.length > 0) {
+        return withExecutionRoute({
+            recommended_action_kind: "repair_review_issues",
+            recommended_action_argv: lifecycle.review_issue_repair_argv,
+            ...executionState,
+        });
+    }
+    if (lifecycle.command_kind === "stamp_review_provenance" && lifecycle.review_provenance_stamp_argv && lifecycle.review_provenance_stamp_argv.length > 0) {
+        return withExecutionRoute({
+            recommended_action_kind: "stamp_review_provenance",
+            recommended_action_argv: lifecycle.review_provenance_stamp_argv,
+            ...executionState,
+        });
+    }
+    if (lifecycle.command_kind === "apply_review_facts" && lifecycle.production_apply_argv && lifecycle.production_apply_argv.length > 0) {
+        return withExecutionRoute({
+            recommended_action_kind: "apply_review_facts",
+            recommended_action_argv: lifecycle.production_apply_argv,
+            ...executionState,
+        });
+    }
+    return {};
 }
 
 function countOperationKinds(operations: readonly ClassifierPackageOperation[]): ClassifierPackageOperationKindCounts {
@@ -685,6 +1405,83 @@ function jsonArrayOfStrings(value: unknown): readonly string[] {
     return Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === "string") : [];
 }
 
+function jsonArrayOfRecords(value: unknown): readonly Record<string, unknown>[] {
+    return Array.isArray(value)
+        ? value.filter((entry): entry is Record<string, unknown> => Boolean(entry) && typeof entry === "object" && !Array.isArray(entry))
+        : [];
+}
+
+function reviewPipelineArtifactSummaries(value: unknown): readonly ClassifierReviewPipelineArtifactSummary[] {
+    return jsonArrayOfRecords(value)
+        .map((entry) => {
+            const path = stringAt(entry, "path");
+            if (!path) return undefined;
+            const requiredForHandoff = jsonBoolean(entry.required_for_handoff);
+            const exists = jsonBoolean(entry.exists);
+            return {
+                ...(stringAt(entry, "kind") === undefined ? {} : { kind: stringAt(entry, "kind") as string }),
+                path,
+                ...(requiredForHandoff === null ? {} : { required_for_handoff: requiredForHandoff }),
+                ...(exists === null ? {} : { exists }),
+            };
+        })
+        .filter((entry): entry is ClassifierReviewPipelineArtifactSummary => entry !== undefined);
+}
+
+function reviewPipelineInputBindingSummaries(value: unknown): readonly string[] {
+    return jsonArrayOfRecords(value)
+        .map((entry) => {
+            const input = stringAt(entry, "input");
+            if (!input) return undefined;
+            const parts = [
+                input,
+                ...(stringAt(entry, "argv_flag") === undefined ? [] : [`flag=${stringAt(entry, "argv_flag")}`]),
+                ...(numberAt(entry, "argv_index") === undefined ? [] : [`index=${numberAt(entry, "argv_index")}`]),
+                ...(stringAt(entry, "argv_value_prefix") === undefined ? [] : [`prefix=${stringAt(entry, "argv_value_prefix")}`]),
+                ...(stringAt(entry, "placeholder") === undefined ? [] : [`placeholder=${stringAt(entry, "placeholder")}`]),
+                ...(stringAt(entry, "value_kind") === undefined ? [] : [`value_kind=${stringAt(entry, "value_kind")}`]),
+            ];
+            return parts.join(" ");
+        })
+        .filter((entry): entry is string => entry !== undefined);
+}
+
+function reviewPipelineOutputArtifactBindingSummaries(value: unknown): readonly string[] {
+    return jsonArrayOfRecords(value)
+        .map((entry) => {
+            const path = stringAt(entry, "path");
+            if (!path) return undefined;
+            const parts = [
+                stringAt(entry, "kind") ?? "artifact",
+                `path=${path}`,
+                ...(stringAt(entry, "argv_flag") === undefined ? [] : [`flag=${stringAt(entry, "argv_flag")}`]),
+                ...(numberAt(entry, "argv_index") === undefined ? [] : [`index=${numberAt(entry, "argv_index")}`]),
+                ...(stringAt(entry, "argv_value_prefix") === undefined ? [] : [`prefix=${stringAt(entry, "argv_value_prefix")}`]),
+                ...(jsonBoolean(entry.required_for_handoff) === null ? [] : [`required_for_handoff=${jsonBoolean(entry.required_for_handoff)}`]),
+            ];
+            return parts.join(" ");
+        })
+        .filter((entry): entry is string => entry !== undefined);
+}
+
+function reviewPipelineOutputCheckSummaries(value: unknown): readonly string[] {
+    return jsonArrayOfRecords(value)
+        .map((entry) => {
+            const path = stringAt(entry, "path");
+            if (!path) return undefined;
+            const parts = [
+                stringAt(entry, "kind") ?? "artifact",
+                `path=${path}`,
+                ...(numberAt(entry, "argv_index") === undefined ? [] : [`index=${numberAt(entry, "argv_index")}`]),
+                ...(stringAt(entry, "check") === undefined ? [] : [`check=${stringAt(entry, "check")}`]),
+                ...(stringAt(entry, "status") === undefined ? [] : [`status=${stringAt(entry, "status")}`]),
+                ...(jsonBoolean(entry.required_for_command_success) === null ? [] : [`required_for_command_success=${jsonBoolean(entry.required_for_command_success)}`]),
+            ];
+            return parts.join(" ");
+        })
+        .filter((entry): entry is string => entry !== undefined);
+}
+
 function jsonRecordAt(record: Record<string, unknown>, key: string): Record<string, unknown> {
     const value = record[key];
     return value && typeof value === "object" && !Array.isArray(value)
@@ -705,6 +1502,30 @@ function stringAt(record: Record<string, unknown>, key: string): string | undefi
 function numberArrayAt(record: Record<string, unknown>, key: string): readonly number[] {
     const value = record[key];
     return Array.isArray(value) ? value.filter((entry): entry is number => typeof entry === "number" && Number.isFinite(entry)) : [];
+}
+
+function graphFactValueContains(value: unknown, needle: string | undefined): boolean {
+    if (!needle) return true;
+    if (typeof value === "string") return value.includes(needle);
+    if (typeof value === "number" || typeof value === "boolean") return String(value).includes(needle);
+    if (Array.isArray(value)) {
+        return value.some((entry) => graphFactValueContains(entry, needle));
+    }
+    if (value && typeof value === "object") {
+        return JSON.stringify(value).includes(needle);
+    }
+    return false;
+}
+
+function graphFactValueEquals(value: unknown, expected: string | undefined): boolean {
+    if (expected === undefined) return true;
+    if (typeof value === "string") return value === expected;
+    if (typeof value === "number" || typeof value === "boolean" || value === null) return String(value) === expected;
+    return JSON.stringify(value) === expected;
+}
+
+function graphFactValueKey(value: unknown): string {
+    return typeof value === "string" ? value : JSON.stringify(value);
 }
 
 function numberRecordAt(record: Record<string, unknown>, key: string): Record<string, number> | undefined {
@@ -773,6 +1594,86 @@ function loadProposalLifecycleStatus(baseDir: string): Pick<ClassifierLifecycleR
                 failures: jsonArrayOfStrings(smokePromotion.failures),
             },
         }),
+    };
+}
+
+function loadReviewPipelineLifecycleStatus(baseDir: string): Pick<ClassifierLifecycleReviewStatus, "review_pipeline_lifecycle"> {
+    const reportPath = join(baseDir, "workflow-candidate-review-pipeline-lifecycle-current.json");
+    if (!existsSync(reportPath)) return {};
+    const report = loadJsonRecord(reportPath);
+    const coverageReview = jsonRecordAt(report, "coverage_review");
+    const lifecycle = jsonRecordAt(coverageReview, "review_pipeline_lifecycle");
+    const postApplyRecheck = jsonRecordAt(coverageReview, "post_apply_recheck");
+    const hasLifecycle = Object.keys(lifecycle).length > 0;
+    const hasApplyState = stringAt(coverageReview, "apply_result") !== undefined ||
+        numberAt(coverageReview, "applied_statement_count") !== undefined ||
+        stringAt(postApplyRecheck, "status") !== undefined;
+    if (!hasLifecycle && !hasApplyState) return {};
+    const prepared = jsonRecordAt(lifecycle, "prepared");
+    const summary = jsonRecordAt(lifecycle, "summary");
+    const outputVerification = jsonRecordAt(lifecycle, "output_verification");
+    const checkedArtifacts = Array.isArray(outputVerification.checked_artifacts)
+        ? outputVerification.checked_artifacts
+        : [];
+    const preparedArgv = jsonArrayOfStrings(prepared.argv);
+    const preparedCanExecute = jsonBoolean(prepared.can_execute);
+    const preparedNextAction = stringAt(prepared, "next_action");
+    const preparedMissingInputs = jsonArrayOfStrings(prepared.missing_inputs);
+    const inputBindings = reviewPipelineInputBindingSummaries(summary.input_bindings);
+    const preparedOutputArtifactBindings = reviewPipelineOutputArtifactBindingSummaries(prepared.output_artifacts);
+    const preparedOutputChecks = reviewPipelineOutputCheckSummaries(prepared.output_artifact_checks);
+    const outputArtifacts = reviewPipelineArtifactSummaries(prepared.output_artifacts);
+    const checkedArtifactSummaries = reviewPipelineArtifactSummaries(outputVerification.checked_artifacts);
+    const missingRequiredArtifacts = jsonArrayOfStrings(outputVerification.missing_required_artifacts);
+    const productionApplyArgv = jsonArrayOfStrings(coverageReview.production_apply_command_argv);
+    const reviewProvenanceStampArgv = jsonArrayOfStrings(coverageReview.review_provenance_stamp_command_argv);
+    const reviewIssueRepairArgv = jsonArrayOfStrings(coverageReview.review_issue_repair_command_argv);
+    const failures = [
+        ...jsonArrayOfStrings(report.failures),
+        ...jsonArrayOfStrings(coverageReview.failures),
+        ...jsonArrayOfStrings(lifecycle.failures),
+    ];
+    const reviewPipelineLifecycle: NonNullable<ClassifierLifecycleReviewStatus["review_pipeline_lifecycle"]> = {
+        report_path: reportPath,
+        ...(stringAt(lifecycle, "status") === undefined ? {} : { lifecycle_status: stringAt(lifecycle, "status") as string }),
+        ...(stringAt(coverageReview, "review_pipeline_command_kind") === undefined ? {} : { command_kind: stringAt(coverageReview, "review_pipeline_command_kind") as string }),
+        ...(stringAt(prepared, "status") === undefined ? {} : { prepared_status: stringAt(prepared, "status") as string }),
+        ...(stringAt(outputVerification, "status") === undefined ? {} : { output_verification_status: stringAt(outputVerification, "status") as string }),
+        ...(stringAt(coverageReview, "apply_result") === undefined ? {} : { apply_result: stringAt(coverageReview, "apply_result") as string }),
+        ...(jsonBoolean(coverageReview.applied) === null ? {} : { applied: jsonBoolean(coverageReview.applied) as boolean }),
+        ...(numberAt(coverageReview, "applied_statement_count") === undefined ? {} : { applied_statement_count: numberAt(coverageReview, "applied_statement_count") as number }),
+        ...(stringAt(coverageReview, "review_handoff_status") === undefined ? {} : { review_handoff_status: stringAt(coverageReview, "review_handoff_status") as string }),
+        ...(stringAt(coverageReview, "production_apply_guard") === undefined ? {} : { production_apply_guard: stringAt(coverageReview, "production_apply_guard") as string }),
+        ...(jsonBoolean(coverageReview.production_can_apply) === null ? {} : { production_can_apply: jsonBoolean(coverageReview.production_can_apply) as boolean }),
+        ...(stringAt(postApplyRecheck, "status") === undefined ? {} : { post_apply_recheck_status: stringAt(postApplyRecheck, "status") as string }),
+        ...(numberAt(postApplyRecheck, "reviewed_candidate_delta") === undefined ? {} : { post_apply_reviewed_candidate_delta: numberAt(postApplyRecheck, "reviewed_candidate_delta") as number }),
+        ...(numberAt(postApplyRecheck, "unreviewed_candidate_delta") === undefined ? {} : { post_apply_unreviewed_candidate_delta: numberAt(postApplyRecheck, "unreviewed_candidate_delta") as number }),
+        ...(numberAt(postApplyRecheck, "projected_reviewed_delta") === undefined ? {} : { post_apply_projected_reviewed_delta: numberAt(postApplyRecheck, "projected_reviewed_delta") as number }),
+        ...(numberAt(postApplyRecheck, "projected_unreviewed_delta") === undefined ? {} : { post_apply_projected_unreviewed_delta: numberAt(postApplyRecheck, "projected_unreviewed_delta") as number }),
+        ...(jsonBoolean(lifecycle.can_execute) === null ? {} : { can_execute: jsonBoolean(lifecycle.can_execute) as boolean }),
+        ...(jsonBoolean(lifecycle.can_continue) === null ? {} : { can_continue: jsonBoolean(lifecycle.can_continue) as boolean }),
+        missing_required_artifact_count: missingRequiredArtifacts.length,
+        checked_artifact_count: checkedArtifacts.length,
+        ...(preparedArgv.length === 0 ? {} : { prepared_argv: preparedArgv }),
+        ...(productionApplyArgv.length === 0 ? {} : { production_apply_argv: productionApplyArgv }),
+        ...(reviewProvenanceStampArgv.length === 0 ? {} : { review_provenance_stamp_argv: reviewProvenanceStampArgv }),
+        ...(reviewIssueRepairArgv.length === 0 ? {} : { review_issue_repair_argv: reviewIssueRepairArgv }),
+        ...(outputArtifacts.length === 0 ? {} : { output_artifacts: outputArtifacts }),
+        ...(checkedArtifactSummaries.length === 0 ? {} : { checked_artifacts: checkedArtifactSummaries }),
+        failures,
+    };
+    return {
+        review_pipeline_lifecycle: {
+            ...reviewPipelineLifecycle,
+            ...reviewPipelineRecommendedAction(reviewPipelineLifecycle, {
+                ...(preparedCanExecute === null ? {} : { can_execute: preparedCanExecute }),
+                ...(preparedNextAction === undefined ? {} : { next_action: preparedNextAction }),
+                missing_inputs: preparedMissingInputs,
+                input_bindings: inputBindings,
+                output_artifacts: preparedOutputArtifactBindings,
+                output_checks: preparedOutputChecks,
+            }),
+        },
     };
 }
 
@@ -1313,9 +2214,9 @@ export function buildExecutionFactProjectionReport(
         }
     }
     if (workflowStatus) {
-        const lifecycleNode = "classifier_lifecycle:workflow_candidate_proposal";
+        const proposalLifecycleNode = "classifier_lifecycle:workflow_candidate_proposal";
         addNode({
-            id: lifecycleNode,
+            id: proposalLifecycleNode,
             kind: "classifier_lifecycle",
             label: "workflow candidate proposal lifecycle",
             properties: {
@@ -1325,14 +2226,18 @@ export function buildExecutionFactProjectionReport(
             },
         });
         const addLifecycleArtifactFacts = (input: {
+            readonly lifecycleNode: string;
             readonly key: string;
             readonly artifactPath: string;
             readonly decisionPredicate: string;
             readonly decision?: string;
             readonly numericFacts: Readonly<Record<string, number | undefined>>;
+            readonly booleanFacts?: Readonly<Record<string, boolean | undefined>>;
+            readonly stringFacts?: Readonly<Record<string, string | undefined>>;
+            readonly arrayFacts?: Readonly<Record<string, readonly string[] | undefined>>;
         }): void => {
             const artifactNode = pathArtifactId(input.artifactPath);
-            const edgeId = `edge:${factId(`${lifecycleNode}->has_evidence->${artifactNode}:${input.key}`)}`;
+            const edgeId = `edge:${factId(`${input.lifecycleNode}->has_evidence->${artifactNode}:${input.key}`)}`;
             addNode({
                 id: artifactNode,
                 kind: "artifact",
@@ -1345,7 +2250,7 @@ export function buildExecutionFactProjectionReport(
             edges.push({
                 id: edgeId,
                 kind: "has_evidence",
-                from: lifecycleNode,
+                from: input.lifecycleNode,
                 to: artifactNode,
                 evidence_path: input.artifactPath,
                 properties: {
@@ -1354,9 +2259,9 @@ export function buildExecutionFactProjectionReport(
             });
             if (input.decision !== undefined) {
                 facts.push({
-                    id: `fact:${factId(`${lifecycleNode}:${input.decisionPredicate}`)}`,
+                    id: `fact:${factId(`${input.lifecycleNode}:${input.decisionPredicate}`)}`,
                     kind: "classifier_lifecycle_status",
-                    subject: lifecycleNode,
+                    subject: input.lifecycleNode,
                     predicate: input.decisionPredicate,
                     value: input.decision,
                     evidence_edges: [edgeId],
@@ -1369,9 +2274,54 @@ export function buildExecutionFactProjectionReport(
             for (const [predicate, value] of Object.entries(input.numericFacts)) {
                 if (value === undefined) continue;
                 facts.push({
-                    id: `fact:${factId(`${lifecycleNode}:${predicate}`)}`,
+                    id: `fact:${factId(`${input.lifecycleNode}:${predicate}`)}`,
                     kind: "classifier_lifecycle_status",
-                    subject: lifecycleNode,
+                    subject: input.lifecycleNode,
+                    predicate,
+                    value,
+                    evidence_edges: [edgeId],
+                    properties: {
+                        lifecycle_key: input.key,
+                        artifact_path: input.artifactPath,
+                    },
+                });
+            }
+            for (const [predicate, value] of Object.entries(input.booleanFacts ?? {})) {
+                if (value === undefined) continue;
+                facts.push({
+                    id: `fact:${factId(`${input.lifecycleNode}:${predicate}`)}`,
+                    kind: "classifier_lifecycle_status",
+                    subject: input.lifecycleNode,
+                    predicate,
+                    value,
+                    evidence_edges: [edgeId],
+                    properties: {
+                        lifecycle_key: input.key,
+                        artifact_path: input.artifactPath,
+                    },
+                });
+            }
+            for (const [predicate, value] of Object.entries(input.stringFacts ?? {})) {
+                if (value === undefined) continue;
+                facts.push({
+                    id: `fact:${factId(`${input.lifecycleNode}:${predicate}`)}`,
+                    kind: "classifier_lifecycle_status",
+                    subject: input.lifecycleNode,
+                    predicate,
+                    value,
+                    evidence_edges: [edgeId],
+                    properties: {
+                        lifecycle_key: input.key,
+                        artifact_path: input.artifactPath,
+                    },
+                });
+            }
+            for (const [predicate, value] of Object.entries(input.arrayFacts ?? {})) {
+                if (value === undefined || value.length === 0) continue;
+                facts.push({
+                    id: `fact:${factId(`${input.lifecycleNode}:${predicate}`)}`,
+                    kind: "classifier_lifecycle_status",
+                    subject: input.lifecycleNode,
                     predicate,
                     value,
                     evidence_edges: [edgeId],
@@ -1384,6 +2334,7 @@ export function buildExecutionFactProjectionReport(
         };
         if (workflowStatus.proposal_review) {
             addLifecycleArtifactFacts({
+                lifecycleNode: proposalLifecycleNode,
                 key: "proposal_review",
                 artifactPath: workflowStatus.proposal_review.report_path,
                 decisionPredicate: "proposal_review_decision",
@@ -1399,6 +2350,7 @@ export function buildExecutionFactProjectionReport(
         }
         if (workflowStatus.proposal_promotion) {
             addLifecycleArtifactFacts({
+                lifecycleNode: proposalLifecycleNode,
                 key: "proposal_promotion",
                 artifactPath: workflowStatus.proposal_promotion.report_path,
                 decisionPredicate: "proposal_promotion_decision",
@@ -1412,6 +2364,7 @@ export function buildExecutionFactProjectionReport(
         }
         if (workflowStatus.proposal_ready_smoke) {
             addLifecycleArtifactFacts({
+                lifecycleNode: proposalLifecycleNode,
                 key: "proposal_ready_smoke",
                 artifactPath: workflowStatus.proposal_ready_smoke.promotion_report_path,
                 decisionPredicate: "proposal_ready_smoke_promotion_decision",
@@ -1420,6 +2373,75 @@ export function buildExecutionFactProjectionReport(
                     proposal_ready_smoke_proposal_count: workflowStatus.proposal_ready_smoke.proposal_count,
                     proposal_ready_smoke_emitted_draft_count: workflowStatus.proposal_ready_smoke.emitted_draft_count,
                     proposal_ready_smoke_skipped_proposal_count: workflowStatus.proposal_ready_smoke.skipped_proposal_count,
+                },
+            });
+        }
+        if (workflowStatus.review_pipeline_lifecycle) {
+            const reviewPipelineLifecycleNode = "classifier_lifecycle:workflow_candidate_review_pipeline";
+            addNode({
+                id: reviewPipelineLifecycleNode,
+                kind: "classifier_lifecycle",
+                label: "workflow candidate review pipeline lifecycle",
+                properties: {
+                    workflow_status_path: workflowStatus.path,
+                    workflow_status_exists: workflowStatus.exists,
+                    report_path: workflowStatus.review_pipeline_lifecycle.report_path,
+                    lifecycle_status: workflowStatus.review_pipeline_lifecycle.lifecycle_status ?? null,
+                },
+            });
+            addLifecycleArtifactFacts({
+                lifecycleNode: reviewPipelineLifecycleNode,
+                key: "review_pipeline_lifecycle",
+                artifactPath: workflowStatus.review_pipeline_lifecycle.report_path,
+                decisionPredicate: "review_pipeline_lifecycle_status",
+                ...(workflowStatus.review_pipeline_lifecycle.lifecycle_status === undefined ? {} : {
+                    decision: workflowStatus.review_pipeline_lifecycle.lifecycle_status,
+                }),
+                numericFacts: {
+                    review_pipeline_missing_required_artifact_count: workflowStatus.review_pipeline_lifecycle.missing_required_artifact_count,
+                    review_pipeline_checked_artifact_count: workflowStatus.review_pipeline_lifecycle.checked_artifact_count,
+                    review_pipeline_applied_statement_count: workflowStatus.review_pipeline_lifecycle.applied_statement_count,
+                    review_pipeline_post_apply_reviewed_candidate_delta: workflowStatus.review_pipeline_lifecycle.post_apply_reviewed_candidate_delta,
+                    review_pipeline_post_apply_unreviewed_candidate_delta: workflowStatus.review_pipeline_lifecycle.post_apply_unreviewed_candidate_delta,
+                    review_pipeline_post_apply_projected_reviewed_delta: workflowStatus.review_pipeline_lifecycle.post_apply_projected_reviewed_delta,
+                    review_pipeline_post_apply_projected_unreviewed_delta: workflowStatus.review_pipeline_lifecycle.post_apply_projected_unreviewed_delta,
+                },
+                booleanFacts: {
+                    review_pipeline_can_execute: workflowStatus.review_pipeline_lifecycle.can_execute,
+                    review_pipeline_can_continue: workflowStatus.review_pipeline_lifecycle.can_continue,
+                    review_pipeline_recommended_action_can_execute: workflowStatus.review_pipeline_lifecycle.recommended_action_can_execute,
+                    review_pipeline_applied: workflowStatus.review_pipeline_lifecycle.applied,
+                    review_pipeline_production_can_apply: workflowStatus.review_pipeline_lifecycle.production_can_apply,
+                },
+                stringFacts: {
+                    review_pipeline_command_kind: workflowStatus.review_pipeline_lifecycle.command_kind,
+                    review_pipeline_prepared_status: workflowStatus.review_pipeline_lifecycle.prepared_status,
+                    review_pipeline_output_verification_status: workflowStatus.review_pipeline_lifecycle.output_verification_status,
+                    review_pipeline_apply_result: workflowStatus.review_pipeline_lifecycle.apply_result,
+                    review_pipeline_review_handoff_status: workflowStatus.review_pipeline_lifecycle.review_handoff_status,
+                    review_pipeline_production_apply_guard: workflowStatus.review_pipeline_lifecycle.production_apply_guard,
+                    review_pipeline_post_apply_recheck_status: workflowStatus.review_pipeline_lifecycle.post_apply_recheck_status,
+                    review_pipeline_recommended_action_kind: workflowStatus.review_pipeline_lifecycle.recommended_action_kind,
+                    review_pipeline_recommended_action_status: workflowStatus.review_pipeline_lifecycle.recommended_action_status,
+                    review_pipeline_recommended_action_execution_phase: workflowStatus.review_pipeline_lifecycle.recommended_action_execution_phase,
+                    review_pipeline_recommended_action_execution_summary: workflowStatus.review_pipeline_lifecycle.recommended_action_execution_summary,
+                    review_pipeline_recommended_action_next_action: workflowStatus.review_pipeline_lifecycle.recommended_action_next_action,
+                },
+                arrayFacts: {
+                    review_pipeline_prepared_argv: workflowStatus.review_pipeline_lifecycle.prepared_argv,
+                    review_pipeline_production_apply_argv: workflowStatus.review_pipeline_lifecycle.production_apply_argv,
+                    review_pipeline_provenance_stamp_argv: workflowStatus.review_pipeline_lifecycle.review_provenance_stamp_argv,
+                    review_pipeline_issue_repair_argv: workflowStatus.review_pipeline_lifecycle.review_issue_repair_argv,
+                    review_pipeline_recommended_action_argv: workflowStatus.review_pipeline_lifecycle.recommended_action_argv,
+                    review_pipeline_recommended_action_missing_inputs: workflowStatus.review_pipeline_lifecycle.recommended_action_missing_inputs,
+                    review_pipeline_recommended_action_input_bindings: workflowStatus.review_pipeline_lifecycle.recommended_action_input_bindings,
+                    review_pipeline_recommended_action_output_artifacts: workflowStatus.review_pipeline_lifecycle.recommended_action_output_artifacts,
+                    review_pipeline_recommended_action_output_checks: workflowStatus.review_pipeline_lifecycle.recommended_action_output_checks,
+                    review_pipeline_output_artifact_paths: workflowStatus.review_pipeline_lifecycle.output_artifacts?.map((artifact) => artifact.path),
+                    review_pipeline_checked_artifact_paths: workflowStatus.review_pipeline_lifecycle.checked_artifacts?.map((artifact) => artifact.path),
+                    review_pipeline_checked_artifact_states: workflowStatus.review_pipeline_lifecycle.checked_artifacts?.map((artifact) =>
+                        `${artifact.kind ?? "artifact"}:${artifact.exists === true ? "ok" : artifact.exists === false ? "missing" : "unknown"}`,
+                    ),
                 },
             });
         }
@@ -1561,6 +2583,21 @@ export function buildExecutionGraphHealthReport(input: {
         mode: input.query?.mode ?? "summary",
         ...(input.query?.operation_id ? { operation_id: input.query.operation_id } : {}),
         ...(input.query?.artifact_path ? { artifact_path: input.query.artifact_path } : {}),
+        ...(input.query?.source_kind ? { source_kind: input.query.source_kind } : {}),
+        ...(input.query?.fact_kind ? { fact_kind: input.query.fact_kind } : {}),
+        ...(input.query?.status ? { status: input.query.status } : {}),
+        ...(input.query?.source_fixture_id ? { source_fixture_id: input.query.source_fixture_id } : {}),
+        ...(input.query?.proposed_label ? { proposed_label: input.query.proposed_label } : {}),
+        ...(input.query?.threshold ? { threshold: input.query.threshold } : {}),
+        ...(input.query?.min_seed_count === undefined ? {} : { min_seed_count: input.query.min_seed_count }),
+        ...(input.query?.min_positive_recall === undefined ? {} : { min_positive_recall: input.query.min_positive_recall }),
+        ...(input.query?.min_call_reduction === undefined ? {} : { min_call_reduction: input.query.min_call_reduction }),
+        ...(input.query?.min_nearest_similarity === undefined ? {} : { min_nearest_similarity: input.query.min_nearest_similarity }),
+        ...(input.query?.nearest_fixture_id ? { nearest_fixture_id: input.query.nearest_fixture_id } : {}),
+        ...(input.query?.predicate ? { predicate: input.query.predicate } : {}),
+        ...(input.query?.subject ? { subject: input.query.subject } : {}),
+        ...(input.query?.value_contains ? { value_contains: input.query.value_contains } : {}),
+        ...(input.query?.value_equals !== undefined ? { value_equals: input.query.value_equals } : {}),
     };
     const nodesById = new Map(input.nodes.map((node) => [node.graph_id, node]));
     const operationByExecution = new Map<string, string>();
@@ -1666,8 +2703,10 @@ export function buildExecutionGraphHealthReport(input: {
             const value = fact.value_json === undefined ? null : safeJsonParse<unknown>(fact.value_json);
             return {
                 graph_id: fact.graph_id,
+                kind: fact.kind,
                 subject: fact.subject,
                 predicate: fact.predicate,
+                ...(fact.source_kind === undefined ? {} : { source_kind: fact.source_kind }),
                 value,
                 ...(jsonString(properties.lifecycle_key) === undefined ? {} : { lifecycle_key: jsonString(properties.lifecycle_key) as string }),
                 ...(jsonString(properties.artifact_path) === undefined ? {} : { artifact_path: jsonString(properties.artifact_path) as string }),
@@ -1710,6 +2749,7 @@ export function buildExecutionGraphHealthReport(input: {
                 subject: fact.subject,
                 predicate: fact.predicate,
                 ...(fact.object === undefined ? {} : { object: fact.object }),
+                ...(fact.source_kind === undefined ? {} : { source_kind: fact.source_kind }),
                 value,
                 ...(jsonString(properties.status) === null ? {} : { status: jsonString(properties.status) as string }),
                 ...(jsonString(properties.source_fixture_id) === null ? {} : { source_fixture_id: jsonString(properties.source_fixture_id) as string }),
@@ -1726,6 +2766,41 @@ export function buildExecutionGraphHealthReport(input: {
             };
         })
         .sort((a, b) => `${a.predicate}/${a.source_fixture_id ?? a.subject}`.localeCompare(`${b.predicate}/${b.source_fixture_id ?? b.subject}`));
+    const boundaryReplayFacts = input.facts
+        .filter((fact) => fact.source_kind === "boundary_replay_deterministic_projection" || fact.kind === "classifier_boundary_replay")
+        .map((fact): ClassifierGraphBoundaryReplayFact => {
+            const properties = jsonRecord(fact.properties_json);
+            const evidenceEdgesValue = safeJsonParse<unknown>(fact.evidence_edges_json);
+            const evidenceEdges = Array.isArray(evidenceEdgesValue)
+                ? evidenceEdgesValue.filter((entry): entry is string => typeof entry === "string")
+                : [];
+            const evidencePaths = Array.from(new Set(evidenceEdges
+                .map((edgeId) => input.edges.find((edge) => edge.graph_id === edgeId)?.evidence_path)
+                .filter((path): path is string => Boolean(path))))
+                .sort();
+            const value = fact.value_json === undefined ? null : safeJsonParse<unknown>(fact.value_json);
+            const signalsValue = properties.signals;
+            const signals = Array.isArray(signalsValue)
+                ? signalsValue.filter((entry): entry is string => typeof entry === "string")
+                : [];
+            return {
+                graph_id: fact.graph_id,
+                kind: fact.kind,
+                subject: fact.subject,
+                predicate: fact.predicate,
+                ...(fact.object === undefined ? {} : { object: fact.object }),
+                ...(fact.source_kind === undefined ? {} : { source_kind: fact.source_kind }),
+                value,
+                ...(jsonString(properties.classifier_key) === null ? {} : { classifier_key: jsonString(properties.classifier_key) as string }),
+                ...(jsonString(properties.actual) === null ? {} : { actual: jsonString(properties.actual) as string }),
+                ...(jsonString(properties.target) === null ? {} : { target: jsonString(properties.target) as string }),
+                ...(jsonNumber(properties.confidence) === null ? {} : { confidence: jsonNumber(properties.confidence) as number }),
+                ...(signals.length === 0 ? {} : { signals }),
+                evidence_edges: evidenceEdges,
+                evidence_paths: evidencePaths,
+            };
+        })
+        .sort((a, b) => `${a.predicate}/${a.subject}`.localeCompare(`${b.predicate}/${b.subject}`));
     const operationMatches = (operation: ClassifierGraphOperationHealth): boolean =>
         !query.operation_id || operation.operation_id === query.operation_id || `${operation.package_key}/${operation.operation_id}` === query.operation_id;
     const artifactMatches = (artifact: ClassifierGraphChangedArtifact): boolean =>
@@ -1736,7 +2811,7 @@ export function buildExecutionGraphHealthReport(input: {
     const filteredOperations = operations.filter(operationMatches);
     const filteredGuardedOperations = operations.filter((operation) => operation.guarded_count > 0).filter(operationMatches);
     const filteredChangedArtifacts = changedArtifacts.filter(changedArtifactMatches);
-    const graphFactOnlyMode = query.mode === "lifecycle" || query.mode === "embedding-helper";
+    const graphFactOnlyMode = query.mode === "lifecycle" || query.mode === "embedding-helper" || query.mode === "boundary-replay";
     const resultGuardedOperations = graphFactOnlyMode ? [] : filteredGuardedOperations;
     const resultOperations = graphFactOnlyMode
         ? []
@@ -1748,20 +2823,101 @@ export function buildExecutionGraphHealthReport(input: {
     const resultChangedArtifacts = query.mode === "guarded" || graphFactOnlyMode
         ? []
         : filteredChangedArtifacts;
-    const resultLifecycleFacts = query.mode === "lifecycle" || query.mode === "evidence"
-        ? lifecycleFacts.filter((fact) =>
-            !query.artifact_path ||
+    const lifecycleFactMatchesQuery = (
+        fact: ClassifierGraphLifecycleFact,
+        input: { readonly ignoreValueEquals?: boolean } = {},
+    ): boolean =>
+        (!query.artifact_path ||
             fact.artifact_path === query.artifact_path ||
-            fact.evidence_paths.includes(query.artifact_path)
-        )
+            fact.evidence_paths.includes(query.artifact_path)) &&
+        (!query.source_kind || fact.source_kind === query.source_kind) &&
+        (!query.fact_kind || fact.kind === query.fact_kind) &&
+        !query.status &&
+        !query.source_fixture_id &&
+        !query.proposed_label &&
+        !query.threshold &&
+        query.min_seed_count === undefined &&
+        query.min_positive_recall === undefined &&
+        query.min_call_reduction === undefined &&
+        query.min_nearest_similarity === undefined &&
+        !query.nearest_fixture_id &&
+        (!query.predicate || fact.predicate === query.predicate) &&
+        (!query.subject || fact.subject === query.subject) &&
+        graphFactValueContains(fact.value, query.value_contains) &&
+        (input.ignoreValueEquals === true || graphFactValueEquals(fact.value, query.value_equals));
+    const resultLifecycleFacts = query.mode === "lifecycle" || query.mode === "evidence"
+        ? lifecycleFacts.filter((fact) => lifecycleFactMatchesQuery(fact))
+        : [];
+    const availableLifecycleFacts = query.mode === "lifecycle" || query.mode === "evidence"
+        ? lifecycleFacts.filter((fact) => lifecycleFactMatchesQuery(fact, { ignoreValueEquals: true }))
         : [];
     const resultEmbeddingHelperFacts = query.mode === "embedding-helper" || query.mode === "evidence"
         ? embeddingHelperFacts.filter((fact) =>
-            !query.artifact_path ||
-            fact.evidence_paths.includes(query.artifact_path) ||
-            fact.source_fixture_id === query.artifact_path ||
-            fact.subject === query.artifact_path ||
-            fact.object === query.artifact_path
+            (!query.artifact_path ||
+                fact.evidence_paths.includes(query.artifact_path) ||
+                fact.source_fixture_id === query.artifact_path ||
+                fact.subject === query.artifact_path ||
+                fact.object === query.artifact_path) &&
+            (!query.source_kind || fact.source_kind === query.source_kind) &&
+            (!query.fact_kind || fact.kind === query.fact_kind) &&
+            (!query.status || fact.status === query.status) &&
+            (!query.source_fixture_id || fact.source_fixture_id === query.source_fixture_id) &&
+            (!query.proposed_label || fact.proposed_label === query.proposed_label) &&
+            (!query.threshold || fact.threshold === query.threshold) &&
+            (query.min_seed_count === undefined || (typeof fact.seed_count === "number" && fact.seed_count >= query.min_seed_count)) &&
+            (query.min_positive_recall === undefined || (typeof fact.positive_recall_after_routing_mean === "number" && fact.positive_recall_after_routing_mean >= query.min_positive_recall)) &&
+            (query.min_call_reduction === undefined || (typeof fact.setfit_call_reduction_rate_mean === "number" && fact.setfit_call_reduction_rate_mean >= query.min_call_reduction)) &&
+            (query.min_nearest_similarity === undefined || (fact.nearest_neighbors ?? []).some((neighbor) => typeof neighbor.similarity === "number" && neighbor.similarity >= query.min_nearest_similarity!)) &&
+            (!query.nearest_fixture_id || (fact.nearest_neighbors ?? []).some((neighbor) => neighbor.fixture_id === query.nearest_fixture_id)) &&
+            (!query.predicate || fact.predicate === query.predicate) &&
+            (!query.subject || fact.subject === query.subject) &&
+            graphFactValueContains(fact.value, query.value_contains) &&
+            graphFactValueEquals(fact.value, query.value_equals)
+        )
+        : [];
+    const resultBoundaryReplayFacts = query.mode === "boundary-replay" || query.mode === "evidence"
+        ? boundaryReplayFacts.filter((fact) =>
+            (!query.artifact_path ||
+                fact.evidence_paths.includes(query.artifact_path) ||
+                fact.subject === query.artifact_path ||
+                fact.object === query.artifact_path) &&
+            (!query.source_kind || fact.source_kind === query.source_kind) &&
+            (!query.fact_kind || fact.kind === query.fact_kind) &&
+            !query.status &&
+            !query.source_fixture_id &&
+            !query.proposed_label &&
+            !query.threshold &&
+            query.min_seed_count === undefined &&
+            query.min_positive_recall === undefined &&
+            query.min_call_reduction === undefined &&
+            query.min_nearest_similarity === undefined &&
+            !query.nearest_fixture_id &&
+            (!query.predicate || fact.predicate === query.predicate) &&
+            (!query.subject || fact.subject === query.subject) &&
+            graphFactValueContains(fact.value, query.value_contains) &&
+            graphFactValueEquals(fact.value, query.value_equals)
+        )
+        : [];
+    const routingPolicyAvailableFacts = query.mode === "embedding-helper" || query.mode === "evidence"
+        ? embeddingHelperFacts.filter((fact) =>
+            (!query.artifact_path ||
+                fact.evidence_paths.includes(query.artifact_path) ||
+                fact.source_fixture_id === query.artifact_path ||
+                fact.subject === query.artifact_path ||
+                fact.object === query.artifact_path) &&
+            (!query.source_kind || fact.source_kind === query.source_kind) &&
+            (!query.fact_kind || fact.kind === query.fact_kind) &&
+            (!query.status || fact.status === query.status) &&
+            (!query.source_fixture_id || fact.source_fixture_id === query.source_fixture_id) &&
+            (!query.proposed_label || fact.proposed_label === query.proposed_label) &&
+            (!query.threshold || fact.threshold === query.threshold) &&
+            (query.min_seed_count === undefined || (typeof fact.seed_count === "number" && fact.seed_count >= query.min_seed_count)) &&
+            (query.min_nearest_similarity === undefined || (fact.nearest_neighbors ?? []).some((neighbor) => typeof neighbor.similarity === "number" && neighbor.similarity >= query.min_nearest_similarity!)) &&
+            (!query.nearest_fixture_id || (fact.nearest_neighbors ?? []).some((neighbor) => neighbor.fixture_id === query.nearest_fixture_id)) &&
+            (!query.predicate || fact.predicate === query.predicate) &&
+            (!query.subject || fact.subject === query.subject) &&
+            graphFactValueContains(fact.value, query.value_contains) &&
+            graphFactValueEquals(fact.value, query.value_equals)
         )
         : [];
     const resultEvidencePaths = Array.from(new Set([
@@ -1769,7 +2925,356 @@ export function buildExecutionGraphHealthReport(input: {
         ...resultChangedArtifacts.map((artifact) => artifact.evidence_path).filter(Boolean),
         ...resultLifecycleFacts.flatMap((fact) => fact.evidence_paths),
         ...resultEmbeddingHelperFacts.flatMap((fact) => fact.evidence_paths),
+        ...resultBoundaryReplayFacts.flatMap((fact) => fact.evidence_paths),
     ])).sort();
+    const lifecycleValueCountsFor = (facts: readonly ClassifierGraphLifecycleFact[]): readonly ClassifierGraphLifecycleValueCount[] => {
+        const lifecycleValueCountByKey = new Map<string, ClassifierGraphLifecycleValueCount>();
+        for (const fact of facts) {
+            const value = graphFactValueKey(fact.value);
+            const key = `${fact.predicate}\u0000${value}`;
+            const existing = lifecycleValueCountByKey.get(key);
+            lifecycleValueCountByKey.set(key, {
+                predicate: fact.predicate,
+                value,
+                count: (existing?.count ?? 0) + 1,
+            });
+        }
+        return Array.from(lifecycleValueCountByKey.values())
+            .sort((a, b) => `${a.predicate}/${a.value}`.localeCompare(`${b.predicate}/${b.value}`));
+    };
+    const lifecycleValueCounts = lifecycleValueCountsFor(resultLifecycleFacts);
+    const lifecycleAvailableValueCounts = lifecycleValueCountsFor(availableLifecycleFacts);
+    const querySuggestedValue = lifecycleAvailableValueCounts
+        .slice()
+        .sort((a, b) => (b.count - a.count) || `${a.predicate}/${a.value}`.localeCompare(`${b.predicate}/${b.value}`))[0];
+    const querySuggestedValueEquals = querySuggestedValue?.value;
+    const querySuggestedResultCount = querySuggestedValue?.count;
+    const querySuggestedStatus = querySuggestedValue === undefined ? undefined : "expected_matches" as const;
+    const querySuggestedNextAction = querySuggestedValue === undefined ? undefined : "run_suggested_query" as const;
+    const querySuggestedRemediation = querySuggestedValue === undefined
+        ? undefined
+        : "Run the suggested graph query to inspect the available classifier lifecycle facts.";
+    const querySuggestedQuery: ClassifierGraphHealthQuery | undefined = querySuggestedValueEquals === undefined
+        ? undefined
+        : { ...query, value_equals: querySuggestedValueEquals };
+    const querySuggestedArgv = querySuggestedValueEquals === undefined
+        ? undefined
+        : (() => {
+            const argv = ["bun", "src/cli/index.ts", "classifiers", "graph", "--mode", query.mode];
+            const pushArg = (flag: string, value: string | number | undefined): void => {
+                if (value !== undefined) {
+                    argv.push(flag, String(value));
+                }
+            };
+            pushArg("--operation", query.operation_id);
+            pushArg("--artifact", query.artifact_path);
+            pushArg("--source-kind", query.source_kind);
+            pushArg("--fact-kind", query.fact_kind);
+            pushArg("--status", query.status);
+            pushArg("--source-fixture", query.source_fixture_id);
+            pushArg("--proposed-label", query.proposed_label);
+            pushArg("--threshold", query.threshold);
+            pushArg("--min-seed-count", query.min_seed_count);
+            pushArg("--min-positive-recall", query.min_positive_recall);
+            pushArg("--min-call-reduction", query.min_call_reduction);
+            pushArg("--min-nearest-similarity", query.min_nearest_similarity);
+            pushArg("--nearest-fixture", query.nearest_fixture_id);
+            pushArg("--predicate", query.predicate);
+            pushArg("--subject", query.subject);
+            pushArg("--value-contains", query.value_contains);
+            pushArg("--value", querySuggestedValueEquals);
+            return argv;
+        })();
+    const querySuggestion: ClassifierGraphQuerySuggestion | undefined =
+        querySuggestedValueEquals === undefined ||
+        querySuggestedResultCount === undefined ||
+        querySuggestedStatus === undefined ||
+        querySuggestedNextAction === undefined ||
+        querySuggestedRemediation === undefined ||
+        querySuggestedQuery === undefined ||
+        querySuggestedArgv === undefined
+            ? undefined
+            : (() => {
+                const repairExpectedQueryMatchStatus = query.value_equals === querySuggestedValueEquals ? "not_applicable" : "matched";
+                const repairVerificationExpectedQueryMatchStatus = query.value_equals === querySuggestedValueEquals ? "not_applicable" : "matched";
+                const repairExpectedResultCount = query.value_equals === querySuggestedValueEquals ? undefined : querySuggestedResultCount;
+                const repairVerificationExpectedResultCount = query.value_equals === querySuggestedValueEquals ? undefined : querySuggestedResultCount;
+                return {
+                    value_equals: querySuggestedValueEquals,
+                    result_count: querySuggestedResultCount,
+                    changed_filter_count: query.value_equals === querySuggestedValueEquals ? 0 : 1,
+                    unchanged_filter_count: query.value_equals === querySuggestedValueEquals ? 1 : 0,
+                    has_changed_filters: query.value_equals !== querySuggestedValueEquals,
+                    changed_filters: query.value_equals === querySuggestedValueEquals ? [] : ["value_equals"],
+                    unchanged_filters: query.value_equals === querySuggestedValueEquals ? ["value_equals"] : [],
+                    repair_status: query.value_equals === querySuggestedValueEquals ? "no_repair_needed" : "repair_available",
+                    repair_next_action: query.value_equals === querySuggestedValueEquals ? "use_current_query" : "run_repaired_query",
+                    repair_remediation: query.value_equals === querySuggestedValueEquals
+                        ? "Use the current graph query; no filter repair is needed."
+                        : "Run the repaired graph query to inspect matching classifier lifecycle facts.",
+                    repair_can_execute: query.value_equals !== querySuggestedValueEquals,
+                    repair_execution_status: query.value_equals === querySuggestedValueEquals ? "not_needed" : "ready_to_execute",
+                    repair_command_kind: query.value_equals === querySuggestedValueEquals ? "none" : "classifier_graph_query_repair",
+                    repair_requires_inputs: false,
+                    repair_required_inputs: [],
+                    repair_expected_query_match_status: repairExpectedQueryMatchStatus,
+                    repair_outcome_status: classifierGraphQueryExpectedOutcomeStatus(repairExpectedQueryMatchStatus, repairExpectedResultCount),
+                    ...(repairExpectedResultCount === undefined ? {} : { repair_expected_result_count: repairExpectedResultCount }),
+                    repair_blockers: query.value_equals === querySuggestedValueEquals ? ["no_repair_needed"] : [],
+                    repair_blocker_details: query.value_equals === querySuggestedValueEquals
+                        ? [{
+                            blocker: "no_repair_needed",
+                            remediation: "Use the current graph query; no repair execution is required.",
+                        }]
+                        : [],
+                    repair_argv: query.value_equals === querySuggestedValueEquals ? [] : querySuggestedArgv,
+                    repair_can_verify: query.value_equals !== querySuggestedValueEquals,
+                    repair_verification_status: query.value_equals === querySuggestedValueEquals ? "not_needed" : "ready_to_verify",
+                    repair_verification_execution_status: query.value_equals === querySuggestedValueEquals ? "not_needed" : "ready_to_execute",
+                    repair_verification_next_action: query.value_equals === querySuggestedValueEquals ? "skip_verification" : "run_verification_query",
+                    repair_verification_remediation: query.value_equals === querySuggestedValueEquals
+                        ? "Verification is not needed because no repair execution is required."
+                        : "Run the repair verification query and confirm it returns the expected matches.",
+                    repair_verification_can_execute: query.value_equals !== querySuggestedValueEquals,
+                    repair_verification_command_kind: query.value_equals === querySuggestedValueEquals ? "none" : "classifier_graph_query_repair_verification",
+                    repair_verification_requires_inputs: false,
+                    repair_verification_required_inputs: [],
+                    repair_verification_blockers: query.value_equals === querySuggestedValueEquals ? ["no_repair_needed"] : [],
+                    repair_verification_blocker_details: query.value_equals === querySuggestedValueEquals
+                        ? [{
+                            blocker: "no_repair_needed",
+                            remediation: "Use the current graph query; verification execution is not required.",
+                        }]
+                        : [],
+                    repair_verification_expected_query_match_status: repairVerificationExpectedQueryMatchStatus,
+                    repair_verification_outcome_status: classifierGraphQueryExpectedOutcomeStatus(
+                        repairVerificationExpectedQueryMatchStatus,
+                        repairVerificationExpectedResultCount,
+                    ),
+                    ...(repairVerificationExpectedResultCount === undefined ? {} : {
+                        repair_verification_expected_result_count: repairVerificationExpectedResultCount,
+                    }),
+                    repair_verification_argv: query.value_equals === querySuggestedValueEquals ? [] : querySuggestedArgv,
+                    ...(query.value_equals === querySuggestedValueEquals ? {} : { repair_verification_query: querySuggestedQuery }),
+                    ...(query.value_equals === querySuggestedValueEquals ? {} : { repair_query: querySuggestedQuery }),
+                    status: querySuggestedStatus,
+                    next_action: querySuggestedNextAction,
+                    remediation: querySuggestedRemediation,
+                    source: "lifecycle_available_value_counts",
+                    reason: "available_value_after_relaxing_value_equals",
+                    relaxed_filters: ["value_equals"],
+                    original_query: query,
+                    query: querySuggestedQuery,
+                    filter_changes: [{
+                        filter: "value_equals",
+                        ...(query.value_equals === undefined ? {} : { from: query.value_equals }),
+                        to: querySuggestedValueEquals,
+                        status: query.value_equals === querySuggestedValueEquals ? "unchanged" : "changed",
+                    }],
+                    argv: querySuggestedArgv,
+                };
+            })();
+    const routingPolicyFloorsRequested = query.min_positive_recall !== undefined || query.min_call_reduction !== undefined;
+    const routingPolicyCandidates = resultEmbeddingHelperFacts
+        .filter((fact) => fact.kind === "embedding_helper_routing_candidate")
+        .filter((fact) =>
+            typeof fact.positive_recall_after_routing_mean === "number" &&
+            typeof fact.setfit_call_reduction_rate_mean === "number"
+        );
+    const routingPolicyAvailableCandidates = routingPolicyAvailableFacts
+        .filter((fact) => fact.kind === "embedding_helper_routing_candidate")
+        .filter((fact) =>
+            typeof fact.positive_recall_after_routing_mean === "number" &&
+            typeof fact.setfit_call_reduction_rate_mean === "number"
+        );
+    const bestRoutingPolicy = routingPolicyCandidates
+        .slice()
+        .sort((a, b) =>
+            (b.setfit_call_reduction_rate_mean! - a.setfit_call_reduction_rate_mean!) ||
+            (b.positive_recall_after_routing_mean! - a.positive_recall_after_routing_mean!) ||
+            String(a.threshold ?? "").localeCompare(String(b.threshold ?? ""))
+        )[0];
+    const bestAvailableRoutingPolicy = routingPolicyAvailableCandidates
+        .slice()
+        .sort((a, b) =>
+            (b.positive_recall_after_routing_mean! - a.positive_recall_after_routing_mean!) ||
+            (b.setfit_call_reduction_rate_mean! - a.setfit_call_reduction_rate_mean!) ||
+            String(a.threshold ?? "").localeCompare(String(b.threshold ?? ""))
+        )[0];
+    const routingPolicyGap = (requested: number | undefined, actual: number | undefined): number | undefined =>
+        requested === undefined || actual === undefined
+            ? undefined
+            : Math.round(Math.max(0, requested - actual) * 10000) / 10000;
+    const positiveRecallGap = routingPolicyGap(query.min_positive_recall, bestAvailableRoutingPolicy?.positive_recall_after_routing_mean);
+    const callReductionGap = routingPolicyGap(query.min_call_reduction, bestAvailableRoutingPolicy?.setfit_call_reduction_rate_mean);
+    const blockingFloorFields = [
+        ...(positiveRecallGap === undefined || positiveRecallGap === 0 ? [] : ["positive_recall" as const]),
+        ...(callReductionGap === undefined || callReductionGap === 0 ? [] : ["call_reduction" as const]),
+    ];
+    const recommendedFloorAdjustments = [
+        ...(positiveRecallGap !== undefined &&
+        positiveRecallGap > 0 &&
+        query.min_positive_recall !== undefined &&
+        bestAvailableRoutingPolicy?.positive_recall_after_routing_mean !== undefined
+            ? [{
+                floor: "positive_recall" as const,
+                requested: query.min_positive_recall,
+                recommended: bestAvailableRoutingPolicy.positive_recall_after_routing_mean,
+                gap: positiveRecallGap,
+                ...(bestAvailableRoutingPolicy.threshold === undefined ? {} : { source_threshold: bestAvailableRoutingPolicy.threshold }),
+            }]
+            : []),
+        ...(callReductionGap !== undefined &&
+        callReductionGap > 0 &&
+        query.min_call_reduction !== undefined &&
+        bestAvailableRoutingPolicy?.setfit_call_reduction_rate_mean !== undefined
+            ? [{
+                floor: "call_reduction" as const,
+                requested: query.min_call_reduction,
+                recommended: bestAvailableRoutingPolicy.setfit_call_reduction_rate_mean,
+                gap: callReductionGap,
+                ...(bestAvailableRoutingPolicy.threshold === undefined ? {} : { source_threshold: bestAvailableRoutingPolicy.threshold }),
+            }]
+            : []),
+    ];
+    const recommendedPositiveRecallFloor = recommendedFloorAdjustments.find((adjustment) => adjustment.floor === "positive_recall")?.recommended ?? query.min_positive_recall;
+    const recommendedCallReductionFloor = recommendedFloorAdjustments.find((adjustment) => adjustment.floor === "call_reduction")?.recommended ?? query.min_call_reduction;
+    const recommendedFloorQuery: ClassifierGraphRoutingPolicyRecommendedQuery | undefined = recommendedFloorAdjustments.length === 0
+        ? undefined
+        : {
+            mode: query.mode === "evidence" ? "evidence" : "embedding-helper",
+            ...(query.operation_id === undefined ? {} : { operation_id: query.operation_id }),
+            ...(query.artifact_path === undefined ? {} : { artifact_path: query.artifact_path }),
+            ...(query.source_kind === undefined ? {} : { source_kind: query.source_kind }),
+            fact_kind: query.fact_kind ?? "embedding_helper_routing_candidate",
+            ...(query.status === undefined ? {} : { status: query.status }),
+            ...(query.source_fixture_id === undefined ? {} : { source_fixture_id: query.source_fixture_id }),
+            ...(query.proposed_label === undefined ? {} : { proposed_label: query.proposed_label }),
+            ...(query.threshold === undefined ? {} : { threshold: query.threshold }),
+            ...(query.min_seed_count === undefined ? {} : { min_seed_count: query.min_seed_count }),
+            ...(recommendedPositiveRecallFloor === undefined ? {} : { min_positive_recall: recommendedPositiveRecallFloor }),
+            ...(recommendedCallReductionFloor === undefined ? {} : { min_call_reduction: recommendedCallReductionFloor }),
+            ...(query.min_nearest_similarity === undefined ? {} : { min_nearest_similarity: query.min_nearest_similarity }),
+            ...(query.nearest_fixture_id === undefined ? {} : { nearest_fixture_id: query.nearest_fixture_id }),
+            ...(query.predicate === undefined ? {} : { predicate: query.predicate }),
+            ...(query.subject === undefined ? {} : { subject: query.subject }),
+            ...(query.value_contains === undefined ? {} : { value_contains: query.value_contains }),
+            ...(query.value_equals === undefined ? {} : { value_equals: query.value_equals }),
+        };
+    const pushRecommendedFloorArg = (argv: string[], flag: string, value: string | number | undefined): void => {
+        if (value !== undefined) {
+            argv.push(flag, String(value));
+        }
+    };
+    const recommendedFloorArgv = recommendedFloorQuery === undefined
+        ? undefined
+        : (() => {
+            const argv = ["bun", "src/cli/index.ts", "classifiers", "graph", "--mode", recommendedFloorQuery.mode];
+            pushRecommendedFloorArg(argv, "--operation", recommendedFloorQuery.operation_id);
+            pushRecommendedFloorArg(argv, "--artifact", recommendedFloorQuery.artifact_path);
+            pushRecommendedFloorArg(argv, "--source-kind", recommendedFloorQuery.source_kind);
+            pushRecommendedFloorArg(argv, "--fact-kind", recommendedFloorQuery.fact_kind);
+            pushRecommendedFloorArg(argv, "--status", recommendedFloorQuery.status);
+            pushRecommendedFloorArg(argv, "--source-fixture", recommendedFloorQuery.source_fixture_id);
+            pushRecommendedFloorArg(argv, "--proposed-label", recommendedFloorQuery.proposed_label);
+            pushRecommendedFloorArg(argv, "--threshold", recommendedFloorQuery.threshold);
+            pushRecommendedFloorArg(argv, "--min-seed-count", recommendedFloorQuery.min_seed_count);
+            pushRecommendedFloorArg(argv, "--min-positive-recall", recommendedFloorQuery.min_positive_recall);
+            pushRecommendedFloorArg(argv, "--min-call-reduction", recommendedFloorQuery.min_call_reduction);
+            pushRecommendedFloorArg(argv, "--min-nearest-similarity", recommendedFloorQuery.min_nearest_similarity);
+            pushRecommendedFloorArg(argv, "--nearest-fixture", recommendedFloorQuery.nearest_fixture_id);
+            pushRecommendedFloorArg(argv, "--predicate", recommendedFloorQuery.predicate);
+            pushRecommendedFloorArg(argv, "--subject", recommendedFloorQuery.subject);
+            pushRecommendedFloorArg(argv, "--value-contains", recommendedFloorQuery.value_contains);
+            pushRecommendedFloorArg(argv, "--value", recommendedFloorQuery.value_equals);
+            return argv;
+        })();
+    const recommendedFloorCandidates = recommendedFloorQuery === undefined
+        ? []
+        : routingPolicyAvailableCandidates.filter((fact) =>
+            (recommendedFloorQuery.min_positive_recall === undefined ||
+                fact.positive_recall_after_routing_mean! >= recommendedFloorQuery.min_positive_recall) &&
+            (recommendedFloorQuery.min_call_reduction === undefined ||
+                fact.setfit_call_reduction_rate_mean! >= recommendedFloorQuery.min_call_reduction)
+        );
+    const recommendedFloorBestPolicy = recommendedFloorCandidates
+        .slice()
+        .sort((a, b) =>
+            (b.setfit_call_reduction_rate_mean! - a.setfit_call_reduction_rate_mean!) ||
+            (b.positive_recall_after_routing_mean! - a.positive_recall_after_routing_mean!) ||
+            String(a.threshold ?? "").localeCompare(String(b.threshold ?? ""))
+        )[0];
+    const largestGapFloor = positiveRecallGap === undefined && callReductionGap === undefined
+        ? undefined
+        : (positiveRecallGap ?? 0) >= (callReductionGap ?? 0)
+            ? "positive_recall" as const
+            : "call_reduction" as const;
+    const routingPolicySummary: ClassifierGraphRoutingPolicySummary = {
+        status: !routingPolicyFloorsRequested
+            ? "not_requested"
+            : routingPolicyCandidates.length > 0
+                ? "meets_requested_floors"
+                : "no_matching_policy",
+        next_action: !routingPolicyFloorsRequested
+            ? "set_routing_floors"
+            : routingPolicyCandidates.length > 0
+                ? "choose_reviewed_routing_threshold"
+                : "lower_floor_or_review_more_candidates",
+        remediation: !routingPolicyFloorsRequested
+            ? "Set positive-recall and call-reduction floors to evaluate reviewed routing policies."
+            : routingPolicyCandidates.length > 0
+                ? "Use the selected reviewed threshold as an advisory routing policy."
+                : "Lower the requested routing floors or review more routing candidates before enabling this policy.",
+        ...(query.min_positive_recall === undefined ? {} : { requested_min_positive_recall: query.min_positive_recall }),
+        ...(query.min_call_reduction === undefined ? {} : { requested_min_call_reduction: query.min_call_reduction }),
+        evaluated_policy_count: routingPolicyAvailableCandidates.length,
+        candidate_count: routingPolicyCandidates.length,
+        ...(bestRoutingPolicy?.threshold === undefined ? {} : { best_threshold_by_call_reduction: bestRoutingPolicy.threshold }),
+        ...(bestRoutingPolicy?.positive_recall_after_routing_mean === undefined ? {} : { best_positive_recall: bestRoutingPolicy.positive_recall_after_routing_mean }),
+        ...(bestRoutingPolicy?.setfit_call_reduction_rate_mean === undefined ? {} : { best_call_reduction: bestRoutingPolicy.setfit_call_reduction_rate_mean }),
+        ...(bestAvailableRoutingPolicy?.threshold === undefined ? {} : { best_available_threshold_by_recall: bestAvailableRoutingPolicy.threshold }),
+        ...(bestAvailableRoutingPolicy?.positive_recall_after_routing_mean === undefined ? {} : { best_available_positive_recall: bestAvailableRoutingPolicy.positive_recall_after_routing_mean }),
+        ...(bestAvailableRoutingPolicy?.setfit_call_reduction_rate_mean === undefined ? {} : { best_available_call_reduction: bestAvailableRoutingPolicy.setfit_call_reduction_rate_mean }),
+        ...(positiveRecallGap === undefined ? {} : { positive_recall_gap_to_request: positiveRecallGap }),
+        ...(callReductionGap === undefined ? {} : { call_reduction_gap_to_request: callReductionGap }),
+        ...(blockingFloorFields.length === 0 ? {} : { blocking_floor_fields: blockingFloorFields }),
+        ...(largestGapFloor === undefined ? {} : { largest_gap_floor: largestGapFloor }),
+        ...(recommendedFloorAdjustments.length === 0 ? {} : { recommended_floor_adjustments: recommendedFloorAdjustments }),
+        ...(recommendedFloorQuery === undefined ? {} : { recommended_floor_query: recommendedFloorQuery }),
+        ...(recommendedFloorArgv === undefined ? {} : { recommended_floor_argv: recommendedFloorArgv }),
+        ...(recommendedFloorQuery === undefined ? {} : {
+            recommended_floor_status: recommendedFloorCandidates.length > 0 ? "expected_matches" : "no_expected_match",
+            recommended_floor_candidate_count: recommendedFloorCandidates.length,
+            recommended_floor_next_action: recommendedFloorCandidates.length > 0 ? "choose_recommended_routing_threshold" : "review_more_routing_candidates",
+        }),
+        ...(recommendedFloorBestPolicy?.threshold === undefined ? {} : { recommended_floor_best_threshold_by_call_reduction: recommendedFloorBestPolicy.threshold }),
+        ...(recommendedFloorBestPolicy?.positive_recall_after_routing_mean === undefined ? {} : { recommended_floor_best_positive_recall: recommendedFloorBestPolicy.positive_recall_after_routing_mean }),
+        ...(recommendedFloorBestPolicy?.setfit_call_reduction_rate_mean === undefined ? {} : { recommended_floor_best_call_reduction: recommendedFloorBestPolicy.setfit_call_reduction_rate_mean }),
+    };
+    const primaryResultCount =
+        resultOperations.length +
+        resultGuardedOperations.length +
+        resultChangedArtifacts.length +
+        resultLifecycleFacts.length +
+        resultEmbeddingHelperFacts.length +
+        resultBoundaryReplayFacts.length;
+    const queryMatchStatus = primaryResultCount > 0 ? "matched" : "no_match";
+    const queryResultKinds: ClassifierGraphQueryResultKind[] = [
+        ...(resultOperations.length > 0 ? ["operations" as const] : []),
+        ...(resultGuardedOperations.length > 0 ? ["guarded_operations" as const] : []),
+        ...(resultChangedArtifacts.length > 0 ? ["changed_artifacts" as const] : []),
+        ...(resultLifecycleFacts.length > 0 ? ["lifecycle_facts" as const] : []),
+        ...(resultEmbeddingHelperFacts.length > 0 ? ["embedding_helper_facts" as const] : []),
+        ...(resultBoundaryReplayFacts.length > 0 ? ["boundary_replay_facts" as const] : []),
+    ];
+    const queryResultKindCounts: ClassifierGraphQueryResultKindCount[] = [
+        ...(resultOperations.length > 0 ? [{ kind: "operations" as const, count: resultOperations.length }] : []),
+        ...(resultGuardedOperations.length > 0 ? [{ kind: "guarded_operations" as const, count: resultGuardedOperations.length }] : []),
+        ...(resultChangedArtifacts.length > 0 ? [{ kind: "changed_artifacts" as const, count: resultChangedArtifacts.length }] : []),
+        ...(resultLifecycleFacts.length > 0 ? [{ kind: "lifecycle_facts" as const, count: resultLifecycleFacts.length }] : []),
+        ...(resultEmbeddingHelperFacts.length > 0 ? [{ kind: "embedding_helper_facts" as const, count: resultEmbeddingHelperFacts.length }] : []),
+        ...(resultBoundaryReplayFacts.length > 0 ? [{ kind: "boundary_replay_facts" as const, count: resultBoundaryReplayFacts.length }] : []),
+    ];
 
     return {
         schema: "ax.classifier_package_execution_graph_health_report.v1",
@@ -1779,8 +3284,27 @@ export function buildExecutionGraphHealthReport(input: {
         guarded_operations: resultGuardedOperations,
         changed_artifacts: resultChangedArtifacts,
         lifecycle_facts: resultLifecycleFacts,
+        lifecycle_value_counts: lifecycleValueCounts,
+        lifecycle_available_value_counts: lifecycleAvailableValueCounts,
         embedding_helper_facts: resultEmbeddingHelperFacts,
+        boundary_replay_facts: resultBoundaryReplayFacts,
+        routing_policy_summary: routingPolicySummary,
         evidence_paths: resultEvidencePaths,
+        query_match_status: queryMatchStatus,
+        query_next_action: queryMatchStatus === "matched" ? "use_query_results" : "relax_filters_or_project_facts",
+        query_remediation: queryMatchStatus === "matched"
+            ? "Use the returned graph rows for the requested classifier workflow."
+            : "Relax graph filters, inspect available value counts, or project/apply the missing classifier facts before routing from this query.",
+        query_result_kinds: queryResultKinds,
+        query_result_kind_counts: queryResultKindCounts,
+        ...(querySuggestedValueEquals === undefined ? {} : { query_suggested_value_equals: querySuggestedValueEquals }),
+        ...(querySuggestedResultCount === undefined ? {} : { query_suggested_result_count: querySuggestedResultCount }),
+        ...(querySuggestedStatus === undefined ? {} : { query_suggested_status: querySuggestedStatus }),
+        ...(querySuggestedNextAction === undefined ? {} : { query_suggested_next_action: querySuggestedNextAction }),
+        ...(querySuggestedRemediation === undefined ? {} : { query_suggested_remediation: querySuggestedRemediation }),
+        ...(querySuggestedQuery === undefined ? {} : { query_suggested_query: querySuggestedQuery }),
+        ...(querySuggestedArgv === undefined ? {} : { query_suggested_argv: querySuggestedArgv }),
+        ...(querySuggestion === undefined ? {} : { query_suggestion: querySuggestion }),
         totals: {
             node_count: input.nodes.length,
             edge_count: input.edges.length,
@@ -1794,6 +3318,7 @@ export function buildExecutionGraphHealthReport(input: {
             artifact_fact_count: input.facts.filter((fact) => fact.kind === "classifier_artifact_observation").length,
             lifecycle_fact_count: lifecycleFacts.length,
             embedding_helper_fact_count: embeddingHelperFacts.length,
+            boundary_replay_fact_count: boundaryReplayFacts.length,
             changed_artifact_count: changedArtifacts.length,
             evidence_path_count: evidencePaths.size,
         },
@@ -1803,6 +3328,7 @@ export function buildExecutionGraphHealthReport(input: {
             changed_artifact_count: resultChangedArtifacts.length,
             lifecycle_fact_count: resultLifecycleFacts.length,
             embedding_helper_fact_count: resultEmbeddingHelperFacts.length,
+            boundary_replay_fact_count: resultBoundaryReplayFacts.length,
             evidence_path_count: resultEvidencePaths.length,
         },
         decision: input.nodes.length === 0 && input.edges.length === 0 && input.facts.length === 0 ? "empty_graph" : "healthy",
@@ -1811,11 +3337,13 @@ export function buildExecutionGraphHealthReport(input: {
 
 export function loadClassifierLifecycleReviewStatus(path: string): ClassifierLifecycleReviewStatus {
     const proposalLifecycle = loadProposalLifecycleStatus(dirname(path));
+    const reviewPipelineLifecycle = loadReviewPipelineLifecycleStatus(dirname(path));
     if (!existsSync(path)) {
         return {
             path,
             exists: false,
             ...proposalLifecycle,
+            ...reviewPipelineLifecycle,
             next_actions: [],
         };
     }
@@ -2005,6 +3533,7 @@ export function loadClassifierLifecycleReviewStatus(path: string): ClassifierLif
         ...(invalidBlindLabelNoteCount === 0 ? {} : { invalid_blind_label_note_count: invalidBlindLabelNoteCount }),
         ...(invalidHardNegativeNoteCount === 0 ? {} : { invalid_hard_negative_note_count: invalidHardNegativeNoteCount }),
         ...proposalLifecycle,
+        ...reviewPipelineLifecycle,
         ...(focusedBatch === undefined ? {} : { focused_batch: focusedBatch }),
         next_actions: nextActions,
     };
@@ -2013,6 +3542,8 @@ export function loadClassifierLifecycleReviewStatus(path: string): ClassifierLif
 export function buildClassifierLifecycleInsightReport(input: {
     readonly packages: ClassifierPackagesOperationsReport;
     readonly graph: ClassifierPackageExecutionGraphHealthReport;
+    readonly queryGraph?: ClassifierPackageExecutionGraphHealthReport;
+    readonly lifecycleSuccessGraph?: ClassifierPackageExecutionGraphHealthReport;
     readonly workflowStatus: ClassifierLifecycleReviewStatus;
 }): ClassifierLifecycleInsightReport {
     const failedOperations = input.graph.operations.filter((operation) => operation.failed_count > 0);
@@ -2042,11 +3573,200 @@ export function buildClassifierLifecycleInsightReport(input: {
             ...(lastExecution ? { last_execution: lastExecution } : {}),
         };
     });
+    const reviewPipeline = input.workflowStatus.review_pipeline_lifecycle
+        ? (() => {
+            const recommendation = reviewPipelineRecommendedAction(input.workflowStatus.review_pipeline_lifecycle);
+            return {
+                report_path: input.workflowStatus.review_pipeline_lifecycle.report_path,
+                ...(input.workflowStatus.review_pipeline_lifecycle.lifecycle_status === undefined ? {} : {
+                    status: input.workflowStatus.review_pipeline_lifecycle.lifecycle_status,
+                }),
+                ...(input.workflowStatus.review_pipeline_lifecycle.command_kind === undefined ? {} : {
+                    command_kind: input.workflowStatus.review_pipeline_lifecycle.command_kind,
+                }),
+                ...(input.workflowStatus.review_pipeline_lifecycle.prepared_status === undefined ? {} : {
+                    prepared_status: input.workflowStatus.review_pipeline_lifecycle.prepared_status,
+                }),
+                ...(input.workflowStatus.review_pipeline_lifecycle.output_verification_status === undefined ? {} : {
+                    output_verification_status: input.workflowStatus.review_pipeline_lifecycle.output_verification_status,
+                }),
+                ...(input.workflowStatus.review_pipeline_lifecycle.can_execute === undefined ? {} : {
+                    can_execute: input.workflowStatus.review_pipeline_lifecycle.can_execute,
+                }),
+                ...(input.workflowStatus.review_pipeline_lifecycle.can_continue === undefined ? {} : {
+                    can_continue: input.workflowStatus.review_pipeline_lifecycle.can_continue,
+                }),
+                missing_required_artifact_count: input.workflowStatus.review_pipeline_lifecycle.missing_required_artifact_count ?? 0,
+                checked_artifact_count: input.workflowStatus.review_pipeline_lifecycle.checked_artifact_count ?? 0,
+                ...(input.workflowStatus.review_pipeline_lifecycle.prepared_argv === undefined ? {} : {
+                    prepared_argv: input.workflowStatus.review_pipeline_lifecycle.prepared_argv,
+                }),
+                ...(input.workflowStatus.review_pipeline_lifecycle.production_apply_argv === undefined ? {} : {
+                    production_apply_argv: input.workflowStatus.review_pipeline_lifecycle.production_apply_argv,
+                }),
+                ...(input.workflowStatus.review_pipeline_lifecycle.review_provenance_stamp_argv === undefined ? {} : {
+                    review_provenance_stamp_argv: input.workflowStatus.review_pipeline_lifecycle.review_provenance_stamp_argv,
+                }),
+                ...(input.workflowStatus.review_pipeline_lifecycle.review_issue_repair_argv === undefined ? {} : {
+                    review_issue_repair_argv: input.workflowStatus.review_pipeline_lifecycle.review_issue_repair_argv,
+                }),
+                ...((input.workflowStatus.review_pipeline_lifecycle.recommended_action_kind ?? recommendation.recommended_action_kind) === undefined ? {} : {
+                    recommended_action_kind: input.workflowStatus.review_pipeline_lifecycle.recommended_action_kind ?? recommendation.recommended_action_kind,
+                }),
+                ...((input.workflowStatus.review_pipeline_lifecycle.recommended_action_argv ?? recommendation.recommended_action_argv) === undefined ? {} : {
+                    recommended_action_argv: input.workflowStatus.review_pipeline_lifecycle.recommended_action_argv ?? recommendation.recommended_action_argv,
+                }),
+                ...((input.workflowStatus.review_pipeline_lifecycle.recommended_action_status ?? recommendation.recommended_action_status) === undefined ? {} : {
+                    recommended_action_status: input.workflowStatus.review_pipeline_lifecycle.recommended_action_status ?? recommendation.recommended_action_status,
+                }),
+                ...((input.workflowStatus.review_pipeline_lifecycle.recommended_action_can_execute ?? recommendation.recommended_action_can_execute) === undefined ? {} : {
+                    recommended_action_can_execute: input.workflowStatus.review_pipeline_lifecycle.recommended_action_can_execute ?? recommendation.recommended_action_can_execute,
+                }),
+                ...((input.workflowStatus.review_pipeline_lifecycle.recommended_action_execution_phase ?? recommendation.recommended_action_execution_phase) === undefined ? {} : {
+                    recommended_action_execution_phase: input.workflowStatus.review_pipeline_lifecycle.recommended_action_execution_phase ?? recommendation.recommended_action_execution_phase,
+                }),
+                ...((input.workflowStatus.review_pipeline_lifecycle.recommended_action_execution_summary ?? recommendation.recommended_action_execution_summary) === undefined ? {} : {
+                    recommended_action_execution_summary: input.workflowStatus.review_pipeline_lifecycle.recommended_action_execution_summary ?? recommendation.recommended_action_execution_summary,
+                }),
+                ...((input.workflowStatus.review_pipeline_lifecycle.recommended_action_next_action ?? recommendation.recommended_action_next_action) === undefined ? {} : {
+                    recommended_action_next_action: input.workflowStatus.review_pipeline_lifecycle.recommended_action_next_action ?? recommendation.recommended_action_next_action,
+                }),
+                ...((input.workflowStatus.review_pipeline_lifecycle.recommended_action_missing_inputs ?? recommendation.recommended_action_missing_inputs) === undefined ? {} : {
+                    recommended_action_missing_inputs: input.workflowStatus.review_pipeline_lifecycle.recommended_action_missing_inputs ?? recommendation.recommended_action_missing_inputs,
+                }),
+                ...((input.workflowStatus.review_pipeline_lifecycle.recommended_action_input_bindings ?? recommendation.recommended_action_input_bindings) === undefined ? {} : {
+                    recommended_action_input_bindings: input.workflowStatus.review_pipeline_lifecycle.recommended_action_input_bindings ?? recommendation.recommended_action_input_bindings,
+                }),
+                ...((input.workflowStatus.review_pipeline_lifecycle.recommended_action_output_artifacts ?? recommendation.recommended_action_output_artifacts) === undefined ? {} : {
+                    recommended_action_output_artifacts: input.workflowStatus.review_pipeline_lifecycle.recommended_action_output_artifacts ?? recommendation.recommended_action_output_artifacts,
+                }),
+                ...((input.workflowStatus.review_pipeline_lifecycle.recommended_action_output_checks ?? recommendation.recommended_action_output_checks) === undefined ? {} : {
+                    recommended_action_output_checks: input.workflowStatus.review_pipeline_lifecycle.recommended_action_output_checks ?? recommendation.recommended_action_output_checks,
+                }),
+                output_artifacts: input.workflowStatus.review_pipeline_lifecycle.output_artifacts ?? [],
+                checked_artifacts: input.workflowStatus.review_pipeline_lifecycle.checked_artifacts ?? [],
+                failures: input.workflowStatus.review_pipeline_lifecycle.failures ?? [],
+                next_action: reviewPipelineLifecycleNextAction(input.workflowStatus.review_pipeline_lifecycle),
+            } satisfies ClassifierReviewPipelineLifecycleInsight;
+        })()
+        : undefined;
+    const queryGraphSuggestion = summarizeClassifierGraphQuerySuggestionRouting(input.queryGraph ?? input.graph);
+    const queryRepairSuggestion = queryGraphSuggestion.suggestion?.repair.status === "repair_available"
+        ? queryGraphSuggestion.suggestion
+        : undefined;
+    const pendingBlindLabels = input.workflowStatus.pending_blind_labels ?? 0;
+    const pendingHardNegatives = input.workflowStatus.pending_hard_negatives ?? 0;
+    const proposalReviewPending = input.workflowStatus.proposal_review?.decision === "needs_workflow_candidate_proposal_review";
+    const proposalPromotionBlocked = input.workflowStatus.proposal_promotion?.decision === "needs_workflow_candidate_proposal_review";
+    const reviewPipelineBlocked = reviewPipeline?.next_action === "repair_review_pipeline_outputs" || reviewPipeline?.can_continue === false;
+    const queryRepairNeeded = queryRepairSuggestion !== undefined;
+    const queryRepairBlocksDecision = queryRepairNeeded &&
+        input.graph.decision !== "empty_graph" &&
+        pendingBlindLabels === 0 &&
+        pendingHardNegatives === 0 &&
+        input.workflowStatus.decision !== "needs_human_review" &&
+        !proposalReviewPending &&
+        !proposalPromotionBlocked &&
+        !reviewPipelineBlocked &&
+        input.graph.guarded_operations.length === 0;
+    const graphQueryRoutingItems: readonly ClassifierLifecycleRoutingItem[] = queryRepairSuggestion === undefined
+        ? []
+        : [{
+            kind: "graph_query_repair",
+            blocks_decision: queryRepairBlocksDecision,
+            status: queryRepairSuggestion.repair.execution_status,
+            execution_status: queryRepairSuggestion.repair.execution_status,
+            can_execute: queryRepairSuggestion.repair.can_execute,
+            command_kind: queryRepairSuggestion.repair.command_kind,
+            ...(queryRepairSuggestion.original_query.predicate === undefined ? {} : { predicate: queryRepairSuggestion.original_query.predicate }),
+            ...(queryRepairSuggestion.original_query.value_equals === undefined ? {} : { from_value: queryRepairSuggestion.original_query.value_equals }),
+            to_value: queryRepairSuggestion.value_equals,
+            next_action: queryRepairSuggestion.repair.next_action,
+            remediation: queryRepairSuggestion.repair.remediation,
+            argv: queryRepairSuggestion.repair.argv,
+        }];
+    const reviewPipelineRoutingItems: readonly ClassifierLifecycleRoutingItem[] = reviewPipeline?.recommended_action_kind === undefined
+        ? []
+        : [{
+            kind: "review_pipeline_action",
+            blocks_decision: reviewPipelineBlocked,
+            ...(reviewPipeline.recommended_action_status === undefined ? {} : { status: reviewPipeline.recommended_action_status }),
+            execution_status: reviewPipelineRouteExecutionStatus(reviewPipeline),
+            command_kind: reviewPipeline.recommended_action_kind,
+            next_action: reviewPipeline.next_action,
+            ...(reviewPipeline.recommended_action_next_action === undefined ? {} : { action_next_action: reviewPipeline.recommended_action_next_action }),
+            ...(reviewPipeline.recommended_action_can_execute === undefined ? {} : { can_execute: reviewPipeline.recommended_action_can_execute }),
+            ...(reviewPipeline.recommended_action_execution_phase === undefined ? {} : { execution_phase: reviewPipeline.recommended_action_execution_phase }),
+            missing_inputs: reviewPipeline.recommended_action_missing_inputs ?? [],
+            input_bindings: reviewPipeline.recommended_action_input_bindings ?? [],
+            argv: reviewPipeline.recommended_action_argv ?? [],
+            remediation: reviewPipeline.recommended_action_next_action ?? "Inspect the review pipeline lifecycle before continuing.",
+        }];
+    const routingItems = [
+        ...graphQueryRoutingItems,
+        ...reviewPipelineRoutingItems,
+    ].sort((a, b) => Number(b.blocks_decision) - Number(a.blocks_decision));
+    const lifecycleSuccessSubject = "classifier_lifecycle:workflow_candidate_review_pipeline";
+    const lifecycleSuccessPredicate = "review_pipeline_post_apply_recheck_status";
+    const lifecycleSuccessValue = "gap_closed";
+    const lifecycleSuccessQuery: ClassifierGraphHealthQuery = {
+        mode: "lifecycle",
+        subject: lifecycleSuccessSubject,
+        predicate: lifecycleSuccessPredicate,
+        value_equals: lifecycleSuccessValue,
+    };
+    const lifecycleSuccessFacts = (input.lifecycleSuccessGraph ?? input.queryGraph)?.query.mode === "lifecycle"
+        ? (input.lifecycleSuccessGraph ?? input.queryGraph)?.lifecycle_facts.filter((fact) =>
+            fact.subject === lifecycleSuccessSubject &&
+            fact.predicate === lifecycleSuccessPredicate &&
+            fact.value === lifecycleSuccessValue
+        ) ?? []
+        : [];
+    const graphRecommendations: readonly ClassifierLifecycleGraphRecommendation[] = lifecycleSuccessFacts.length === 0
+        ? []
+        : [{
+            kind: "review_pipeline_success_to_candidate_promotion",
+            status: "ready",
+            source: "persisted_lifecycle_fact",
+            predicate: lifecycleSuccessPredicate,
+            value: lifecycleSuccessValue,
+            next_action: "prioritize_reviewed_candidates_for_harness_or_guidance",
+            remediation: "Use the persisted successful review-route apply fact to inspect reviewed workflow candidates and choose harness or guidance proposals.",
+            query: lifecycleSuccessQuery,
+            query_argv: [
+                "bun",
+                "src/cli/index.ts",
+                "classifiers",
+                "package-operations",
+                "--graph-health",
+                "--graph-mode=lifecycle",
+                "--subject=classifier_lifecycle:workflow_candidate_review_pipeline",
+                "--predicate=review_pipeline_post_apply_recheck_status",
+                "--value=gap_closed",
+            ],
+            candidate_query_argv: [
+                "bun",
+                "src/cli/index.ts",
+                "classifiers",
+                "workflow-candidates",
+                "--topic-report",
+                "--search=review-coverage",
+                "--source-kind=hybrid_window_classifier_projection",
+                "--include-review-facts",
+                "--promote-harness-proposals",
+                "--proposal-dry-run",
+                "--limit=10",
+            ],
+            evidence_paths: Array.from(new Set(lifecycleSuccessFacts.flatMap((fact) => fact.evidence_paths))).sort(),
+        }];
     const blockingItems = [
         ...packages
             .filter((entry) => entry.lifecycle_readiness.status === "incomplete")
             .map((entry) => `${entry.package_key} missing lifecycle operation kinds: ${entry.lifecycle_readiness.missing_required_kinds.join(", ")}`),
         ...(input.graph.decision === "empty_graph" ? ["classifier lifecycle graph is empty; run apply-write-plan before graph queries"] : []),
+        ...(queryRepairSuggestion === undefined ? [] : [
+            `graph query repair available: ${queryRepairSuggestion.original_query.predicate ?? "any_predicate"} value ${queryRepairSuggestion.original_query.value_equals ?? "any"} -> ${queryRepairSuggestion.value_equals}`,
+        ]),
         ...input.graph.guarded_operations.map((operation) =>
             `${operation.package_key}/${operation.operation_id} guarded ${operation.guarded_count} time(s)`,
         ),
@@ -2062,6 +3782,15 @@ export function buildClassifierLifecycleInsightReport(input: {
         ...(input.workflowStatus.proposal_promotion?.decision === "needs_workflow_candidate_proposal_review"
             ? ["workflow candidate proposal promotion blocked by review"]
             : []),
+        ...(reviewPipeline && reviewPipeline.missing_required_artifact_count > 0
+            ? [`review pipeline missing ${reviewPipeline.missing_required_artifact_count} required output artifact(s)`]
+            : []),
+        ...(reviewPipeline && reviewPipeline.can_continue === false
+            ? [`review pipeline lifecycle cannot continue: ${reviewPipeline.status ?? "unknown"}`]
+            : []),
+        ...(reviewPipeline
+            ? reviewPipeline.failures.map((failure) => `review pipeline failure: ${failure}`)
+            : []),
         ...((input.workflowStatus.pending_blind_labels ?? 0) > 0
             ? [`${input.workflowStatus.pending_blind_labels} blind labels pending`]
             : []),
@@ -2069,17 +3798,15 @@ export function buildClassifierLifecycleInsightReport(input: {
             ? [`${input.workflowStatus.pending_hard_negatives} hard-negative decisions pending`]
             : []),
     ];
-    const pendingBlindLabels = input.workflowStatus.pending_blind_labels ?? 0;
-    const pendingHardNegatives = input.workflowStatus.pending_hard_negatives ?? 0;
-    const proposalReviewPending = input.workflowStatus.proposal_review?.decision === "needs_workflow_candidate_proposal_review";
-    const proposalPromotionBlocked = input.workflowStatus.proposal_promotion?.decision === "needs_workflow_candidate_proposal_review";
     const decision: ClassifierLifecycleInsightReport["decision"] = input.graph.decision === "empty_graph"
         ? "needs_graph_apply"
-        : pendingBlindLabels > 0 || pendingHardNegatives > 0 || input.workflowStatus.decision === "needs_human_review" || proposalReviewPending || proposalPromotionBlocked
+        : pendingBlindLabels > 0 || pendingHardNegatives > 0 || input.workflowStatus.decision === "needs_human_review" || proposalReviewPending || proposalPromotionBlocked || reviewPipelineBlocked
             ? "needs_human_review"
             : input.graph.guarded_operations.length > 0
                 ? "has_guarded_operations"
-                : "healthy";
+                : queryRepairNeeded
+                    ? "needs_graph_query_repair"
+                    : "healthy";
     return {
         schema: "ax.classifier_lifecycle_insight_report.v1",
         packages_root: input.packages.root,
@@ -2090,6 +3817,10 @@ export function buildClassifierLifecycleInsightReport(input: {
         failed_operations: failedOperations,
         changed_artifacts: input.graph.changed_artifacts,
         blocking_items: blockingItems,
+        routing_items: routingItems,
+        graph_recommendations: graphRecommendations,
+        ...(queryGraphSuggestion.suggestion === undefined ? {} : { graph_query_suggestion: queryGraphSuggestion }),
+        ...(reviewPipeline ? { review_pipeline: reviewPipeline } : {}),
         totals: {
             package_count: input.packages.totals.package_count,
             local_model_count: input.packages.totals.local_model_count,
@@ -2103,6 +3834,370 @@ export function buildClassifierLifecycleInsightReport(input: {
             pending_hard_negatives: pendingHardNegatives,
         },
         decision,
+    };
+}
+
+export function summarizeClassifierLifecycleRouting(
+    report: ClassifierLifecycleInsightReport,
+): ClassifierLifecycleRoutingSummaryReport {
+    const activeRoute = report.routing_items[0];
+    const executableRoutes = report.routing_items.filter((route) => route.can_execute === true);
+    const missingInputRoutes = report.routing_items.filter((route) => route.execution_status === "missing_inputs");
+    const blockedRoutes = report.routing_items.filter((route) => route.can_execute !== true && route.execution_status !== "missing_inputs");
+    const secondaryRoutes = report.routing_items.slice(1);
+    const activeRouteMissingInputs = activeRoute?.kind === "review_pipeline_action" ? activeRoute.missing_inputs : [];
+    const activeRouteInputBindings = activeRoute?.kind === "review_pipeline_action" ? activeRoute.input_bindings : [];
+    const nextAction: ClassifierLifecycleRoutingSummaryReport["next_action"] = activeRoute === undefined
+        ? "inspect_lifecycle"
+        : activeRoute.can_execute === true
+        ? "execute_active_route"
+        : activeRoute.execution_status === "missing_inputs"
+        ? "bind_active_route_inputs"
+        : "repair_active_route";
+    return {
+        schema: "ax.classifier_lifecycle_routing_summary.v1",
+        source_schema: report.schema,
+        decision: report.decision,
+        ...(activeRoute === undefined ? {} : {
+            active_route: activeRoute,
+            active_route_kind: activeRoute.kind,
+            active_route_status: activeRoute.status,
+            active_route_execution_status: activeRoute.execution_status,
+            active_route_can_execute: activeRoute.can_execute,
+            active_route_command_kind: activeRoute.command_kind,
+            active_route_next_action: activeRoute.next_action,
+            active_route_argv: activeRoute.argv,
+        }),
+        active_route_missing_inputs: activeRouteMissingInputs,
+        active_route_input_bindings: activeRouteInputBindings,
+        executable_routes: executableRoutes,
+        missing_input_routes: missingInputRoutes,
+        blocked_routes: blockedRoutes,
+        secondary_routes: secondaryRoutes,
+        next_action: nextAction,
+        remediation: activeRoute?.remediation ?? "No lifecycle route is available. Inspect lifecycle blockers before executing classifier actions.",
+        totals: {
+            route_count: report.routing_items.length,
+            executable_route_count: executableRoutes.length,
+            missing_input_route_count: missingInputRoutes.length,
+            blocked_route_count: blockedRoutes.length,
+            secondary_route_count: secondaryRoutes.length,
+        },
+    };
+}
+
+function bindingInputName(binding: string): string {
+    return binding.split(" ", 1)[0] ?? "";
+}
+
+function bindingPlaceholder(binding: string): string | undefined {
+    return binding.split(" ").find((part) => part.startsWith("placeholder="))?.slice("placeholder=".length);
+}
+
+export function buildClassifierLifecycleRouteBindingPreview(
+    summary: ClassifierLifecycleRoutingSummaryReport,
+    values: Readonly<Record<string, string>>,
+): ClassifierLifecycleRouteBindingPreviewReport {
+    const activeRoute = summary.active_route;
+    const inputNames = summary.active_route_input_bindings
+        .map(bindingInputName)
+        .filter((input) => input.length > 0);
+    const providedInputs = Object.keys(values).filter((key) => values[key] !== undefined && values[key] !== "");
+    const missingValues = inputNames.filter((input) => values[input] === undefined || values[input] === "");
+    const boundArgv = activeRoute === undefined || missingValues.length > 0
+        ? activeRoute?.argv ?? []
+        : activeRoute.argv.map((arg) => {
+            let next = arg;
+            for (const binding of summary.active_route_input_bindings) {
+                const input = bindingInputName(binding);
+                const placeholder = bindingPlaceholder(binding);
+                const value = values[input];
+                if (placeholder && value !== undefined) {
+                    next = next.replace(placeholder, value);
+                }
+            }
+            return next;
+        });
+    const decision: ClassifierLifecycleRouteBindingPreviewReport["decision"] = activeRoute === undefined
+        ? "no_active_route"
+        : missingValues.length > 0
+        ? "missing_values"
+        : "ready_to_execute";
+    return {
+        schema: "ax.classifier_lifecycle_route_binding_preview.v1",
+        source_schema: summary.schema,
+        decision,
+        ...(activeRoute === undefined ? {} : {
+            active_route_kind: activeRoute.kind,
+            active_route_command_kind: activeRoute.command_kind,
+        }),
+        provided_inputs: providedInputs,
+        missing_values: missingValues,
+        input_bindings: summary.active_route_input_bindings,
+        original_argv: activeRoute?.argv ?? [],
+        bound_argv: boundArgv,
+        next_action: decision === "ready_to_execute"
+            ? "execute_bound_active_route"
+            : decision === "missing_values"
+            ? "provide_missing_values"
+            : "inspect_lifecycle",
+        remediation: decision === "ready_to_execute"
+            ? "Execute the bound active route command."
+            : decision === "missing_values"
+            ? "Provide the missing active route input values before executing."
+            : "No active lifecycle route is available. Inspect lifecycle blockers before binding inputs.",
+    };
+}
+
+export function buildClassifierLifecycleRouteExecutionPlan(
+    preview: ClassifierLifecycleRouteBindingPreviewReport,
+    input: { readonly allowExecute: boolean },
+): ClassifierLifecycleRouteExecutionPlanReport {
+    const failures: string[] = [];
+    let decision: ClassifierLifecycleRouteExecutionPlanReport["decision"];
+    if (preview.decision !== "ready_to_execute") {
+        decision = "blocked";
+        failures.push(`route binding preview decision was ${preview.decision}`);
+    } else if (!input.allowExecute) {
+        decision = "denied_requires_execute";
+        failures.push("route execution requires --execute-route");
+    } else {
+        decision = "ready_to_execute";
+    }
+    return {
+        schema: "ax.classifier_lifecycle_route_execution_plan.v1",
+        source_schema: preview.schema,
+        decision,
+        ...(preview.active_route_kind === undefined ? {} : { active_route_kind: preview.active_route_kind }),
+        ...(preview.active_route_command_kind === undefined ? {} : { active_route_command_kind: preview.active_route_command_kind }),
+        requested_execute: input.allowExecute,
+        would_execute: decision === "ready_to_execute",
+        command_argv: preview.bound_argv,
+        preview,
+        failures,
+        next_action: decision === "ready_to_execute"
+            ? "execute_bound_route"
+            : decision === "denied_requires_execute"
+            ? "request_execute_route"
+            : "repair_binding_preview",
+        remediation: decision === "ready_to_execute"
+            ? "Execute the bound active route command."
+            : decision === "denied_requires_execute"
+            ? "Re-run with --execute-route to allow this bound route command."
+            : "Repair the route binding preview before executing.",
+    };
+}
+
+export async function executeClassifierLifecycleRouteExecutionPlan(
+    plan: ClassifierLifecycleRouteExecutionPlanReport,
+): Promise<ClassifierLifecycleRouteExecutionReport> {
+    const started = new Date();
+    const notExecuted = (failures: readonly string[]): ClassifierLifecycleRouteExecutionReport => {
+        const finished = new Date();
+        return {
+            schema: "ax.classifier_lifecycle_route_execution_report.v1",
+            source_schema: plan.schema,
+            decision: "not_executed",
+            ...(plan.active_route_kind === undefined ? {} : { active_route_kind: plan.active_route_kind }),
+            ...(plan.active_route_command_kind === undefined ? {} : { active_route_command_kind: plan.active_route_command_kind }),
+            command_argv: plan.command_argv,
+            plan,
+            executed: false,
+            started_at: started.toISOString(),
+            finished_at: finished.toISOString(),
+            duration_ms: finished.getTime() - started.getTime(),
+            exit_code: null,
+            signal: null,
+            stdout: "",
+            stderr: "",
+            failures,
+            next_action: plan.decision === "denied_requires_execute" ? "request_execute_route" : "repair_route_execution",
+        };
+    };
+    if (plan.decision !== "ready_to_execute") {
+        return notExecuted(plan.failures.length > 0 ? plan.failures : [`route execution plan decision was ${plan.decision}`]);
+    }
+    const [file, ...args] = plan.command_argv;
+    if (!file) {
+        return notExecuted(["route execution command argv was empty"]);
+    }
+    const result = await new Promise<{
+        readonly exitCode: number | null;
+        readonly signal: NodeJS.Signals | null;
+        readonly stdout: string;
+        readonly stderr: string;
+    }>((resolve) => {
+        execFile(file, args, {
+            cwd: process.cwd(),
+            encoding: "utf8",
+            env: process.env,
+            maxBuffer: 10 * 1024 * 1024,
+            shell: false,
+        }, (error, stdout, stderr) => {
+            const processError = error as (Error & {
+                readonly code?: number | string | null;
+                readonly signal?: NodeJS.Signals | null;
+            }) | null;
+            const exitCode = processError
+                ? typeof processError.code === "number" ? processError.code : 1
+                : 0;
+            resolve({
+                exitCode,
+                signal: processError?.signal ?? null,
+                stdout,
+                stderr,
+            });
+        });
+    });
+    const finished = new Date();
+    const failures = result.exitCode === 0
+        ? []
+        : [`route exited with code ${result.exitCode ?? "null"}${result.signal ? ` signal ${result.signal}` : ""}`];
+    return {
+        schema: "ax.classifier_lifecycle_route_execution_report.v1",
+        source_schema: plan.schema,
+        decision: result.exitCode === 0 ? "executed" : "failed",
+        ...(plan.active_route_kind === undefined ? {} : { active_route_kind: plan.active_route_kind }),
+        ...(plan.active_route_command_kind === undefined ? {} : { active_route_command_kind: plan.active_route_command_kind }),
+        command_argv: plan.command_argv,
+        plan,
+        executed: true,
+        started_at: started.toISOString(),
+        finished_at: finished.toISOString(),
+        duration_ms: finished.getTime() - started.getTime(),
+        exit_code: result.exitCode,
+        signal: result.signal,
+        stdout: result.stdout,
+        stderr: result.stderr,
+        failures,
+        next_action: result.exitCode === 0 ? "inspect_route_outputs" : "repair_route_execution",
+    };
+}
+
+const ROUTE_OUTPUT_FLAGS: Readonly<Record<string, ClassifierLifecycleRouteExecutionOutputStatus["kind"]>> = {
+    "--out": "readiness_report",
+    "--coverage-review-brief": "review_brief",
+    "--review-facts": "review_facts",
+    "--review-write-plan": "review_write_plan",
+};
+
+function routeExecutionOutputStatuses(argv: readonly string[]): readonly ClassifierLifecycleRouteExecutionOutputStatus[] {
+    const statuses: ClassifierLifecycleRouteExecutionOutputStatus[] = [];
+    for (let index = 0; index < argv.length; index++) {
+        const arg = argv[index] ?? "";
+        for (const [flag, kind] of Object.entries(ROUTE_OUTPUT_FLAGS)) {
+            const prefix = `${flag}=`;
+            const path = arg === flag ? argv[index + 1] : arg.startsWith(prefix) ? arg.slice(prefix.length) : undefined;
+            if (path === undefined || path.length === 0) {
+                continue;
+            }
+            const status = artifactStatus(path);
+            statuses.push({
+                kind,
+                flag,
+                path,
+                exists: status.exists,
+                ...(status.size_bytes === undefined ? {} : { size_bytes: status.size_bytes }),
+                ...(status.modified_at === undefined ? {} : { modified_at: status.modified_at }),
+            });
+        }
+    }
+    return statuses;
+}
+
+function parseRouteExecutionInnerOutput(
+    execution: ClassifierLifecycleRouteExecutionReport,
+    outputArtifacts: readonly ClassifierLifecycleRouteExecutionOutputStatus[],
+): { readonly source?: "stdout" | "output_file"; readonly value: Record<string, unknown> | null } {
+    const reportArtifact = outputArtifacts.find((artifact) => artifact.kind === "readiness_report" && artifact.exists);
+    if (reportArtifact) {
+        const fileJson = safeJsonParse<Record<string, unknown>>(readFileSync(reportArtifact.path, "utf8"));
+        if (fileJson && typeof fileJson === "object" && !Array.isArray(fileJson)) {
+            return { source: "output_file", value: fileJson };
+        }
+    }
+    const stdoutJson = safeJsonParse<Record<string, unknown>>(execution.stdout);
+    if (stdoutJson && typeof stdoutJson === "object" && !Array.isArray(stdoutJson)) {
+        return { source: "stdout", value: stdoutJson };
+    }
+    return { value: null };
+}
+
+export function inspectClassifierLifecycleRouteExecution(
+    execution: ClassifierLifecycleRouteExecutionReport,
+): ClassifierLifecycleRouteExecutionInspectionReport {
+    const outputArtifacts = routeExecutionOutputStatuses(execution.command_argv);
+    const missingOutputPaths = outputArtifacts.filter((artifact) => !artifact.exists).map((artifact) => artifact.path);
+    const parsed = parseRouteExecutionInnerOutput(execution, outputArtifacts);
+    const inner = parsed.value ?? {};
+    const coverageReview = jsonRecordAt(inner, "coverage_review");
+    const productionCanApply = typeof coverageReview.production_can_apply === "boolean"
+        ? coverageReview.production_can_apply
+        : undefined;
+    const outputCheckStatus = stringAt(coverageReview, "review_pipeline_command_output_check_status");
+    const failures: string[] = [];
+    let decision: ClassifierLifecycleRouteExecutionInspectionReport["decision"];
+    if (execution.decision !== "executed" || !execution.executed || execution.exit_code !== 0) {
+        decision = "failed_execution";
+        failures.push(...(execution.failures.length > 0 ? execution.failures : [`route execution decision was ${execution.decision}`]));
+    } else if (missingOutputPaths.length > 0 || outputCheckStatus === "missing_required_outputs") {
+        decision = "needs_output_verification";
+        failures.push(...missingOutputPaths.map((path) => `missing route output: ${path}`));
+        if (outputCheckStatus === "missing_required_outputs") {
+            failures.push("inner review pipeline reports missing required outputs");
+        }
+    } else if (parsed.value === null) {
+        decision = "uninspectable_output";
+        failures.push("route execution stdout and output file did not contain parseable JSON");
+    } else if (
+        stringAt(coverageReview, "review_handoff_status") !== undefined &&
+        (stringAt(coverageReview, "review_handoff_status") !== "complete_review_handoff" ||
+            stringAt(coverageReview, "production_apply_guard") !== "ready_to_apply" ||
+            productionCanApply !== true)
+    ) {
+        decision = "needs_review_handoff";
+    } else {
+        decision = "ready_for_apply";
+    }
+    return {
+        schema: "ax.classifier_lifecycle_route_execution_inspection.v1",
+        source_schema: execution.schema,
+        decision,
+        ...(execution.active_route_kind === undefined ? {} : { active_route_kind: execution.active_route_kind }),
+        ...(execution.active_route_command_kind === undefined ? {} : { active_route_command_kind: execution.active_route_command_kind }),
+        command_argv: execution.command_argv,
+        execution,
+        output_artifacts: outputArtifacts,
+        missing_output_paths: missingOutputPaths,
+        ...(parsed.source === undefined ? {} : { parsed_output_source: parsed.source }),
+        ...(stringAt(inner, "schema") === undefined ? {} : { inner_schema: stringAt(inner, "schema") as string }),
+        ...(stringAt(inner, "decision") === undefined ? {} : { inner_decision: stringAt(inner, "decision") as string }),
+        ...(stringAt(coverageReview, "review_handoff_status") === undefined ? {} : { review_handoff_status: stringAt(coverageReview, "review_handoff_status") as string }),
+        ...(stringAt(coverageReview, "production_apply_guard") === undefined ? {} : { production_apply_guard: stringAt(coverageReview, "production_apply_guard") as string }),
+        ...(productionCanApply === undefined ? {} : { production_can_apply: productionCanApply }),
+        ...(stringAt(coverageReview, "review_pipeline_stage") === undefined ? {} : { review_pipeline_stage: stringAt(coverageReview, "review_pipeline_stage") as string }),
+        ...(stringAt(coverageReview, "review_pipeline_next_action") === undefined ? {} : { review_pipeline_next_action: stringAt(coverageReview, "review_pipeline_next_action") as string }),
+        ...(outputCheckStatus === undefined ? {} : { review_pipeline_command_output_check_status: outputCheckStatus }),
+        ...(stringAt(coverageReview, "review_pipeline_command_output_check_next_action") === undefined ? {} : { review_pipeline_command_output_check_next_action: stringAt(coverageReview, "review_pipeline_command_output_check_next_action") as string }),
+        failures,
+        next_action: decision === "ready_for_apply"
+            ? "apply_review_facts"
+            : decision === "needs_review_handoff"
+            ? "complete_review_handoff"
+            : decision === "failed_execution"
+            ? "run_route_execution"
+            : decision === "needs_output_verification"
+            ? "repair_route_outputs"
+            : "inspect_inner_output",
+        remediation: decision === "ready_for_apply"
+            ? "Apply the reviewed facts through the production apply command."
+            : decision === "needs_review_handoff"
+            ? "Complete the review handoff artifacts before applying."
+            : decision === "failed_execution"
+            ? "Repair and re-run the lifecycle route execution."
+            : decision === "needs_output_verification"
+            ? "Repair missing route output artifacts or inner output checks before continuing."
+            : "Inspect the route execution stdout and output file manually.",
     };
 }
 
@@ -2161,7 +4256,40 @@ export function writeExecutionGraphHealthReport(path: string, report: Classifier
     writeFileSync(path, `${JSON.stringify(report, null, 2)}\n`);
 }
 
+export function writeClassifierGraphQuerySuggestionRoutingSummary(
+    path: string,
+    report: ClassifierGraphQuerySuggestionRoutingSummary,
+): void {
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, `${JSON.stringify(report, null, 2)}\n`);
+}
+
 export function writeClassifierLifecycleInsightReport(path: string, report: ClassifierLifecycleInsightReport): void {
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, `${JSON.stringify(report, null, 2)}\n`);
+}
+
+export function writeClassifierLifecycleRoutingSummaryReport(path: string, report: ClassifierLifecycleRoutingSummaryReport): void {
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, `${JSON.stringify(report, null, 2)}\n`);
+}
+
+export function writeClassifierLifecycleRouteBindingPreviewReport(path: string, report: ClassifierLifecycleRouteBindingPreviewReport): void {
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, `${JSON.stringify(report, null, 2)}\n`);
+}
+
+export function writeClassifierLifecycleRouteExecutionPlanReport(path: string, report: ClassifierLifecycleRouteExecutionPlanReport): void {
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, `${JSON.stringify(report, null, 2)}\n`);
+}
+
+export function writeClassifierLifecycleRouteExecutionReport(path: string, report: ClassifierLifecycleRouteExecutionReport): void {
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, `${JSON.stringify(report, null, 2)}\n`);
+}
+
+export function writeClassifierLifecycleRouteExecutionInspectionReport(path: string, report: ClassifierLifecycleRouteExecutionInspectionReport): void {
     mkdirSync(dirname(path), { recursive: true });
     writeFileSync(path, `${JSON.stringify(report, null, 2)}\n`);
 }
