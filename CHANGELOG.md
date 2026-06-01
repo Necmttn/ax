@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.1](https://github.com/Necmttn/ax/compare/v0.6.0...v0.6.1) (2026-06-01)
+
+
+### Bug Fixes
+
+* **db:** jitter the transaction-conflict retry to break concurrent-ingest lockstep ([d3aa6be](https://github.com/Necmttn/ax/commit/d3aa6be028581fc3af9419d89b4845f051377154))
+
 ## [0.6.0](https://github.com/Necmttn/ax/compare/v0.5.0...v0.6.0) (2026-06-01)
 
 
