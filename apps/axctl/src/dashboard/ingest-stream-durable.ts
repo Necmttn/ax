@@ -1,5 +1,4 @@
 import { DurableStream, DurableStreamError } from "@durable-streams/client";
-import { DurableStreamTestServer } from "@durable-streams/server";
 import type { IngestStreamEvent } from "../ingest/stream-events.ts";
 import { ingestStreamName, type IngestStreamBus } from "./ingest-stream.ts";
 
@@ -33,6 +32,12 @@ export async function createDurableIngestStream(
 ): Promise<DurableIngestStream> {
     const host = opts?.host ?? "127.0.0.1";
     const port = opts?.port ?? 0;
+    // Lazy import: `@durable-streams/server` pulls native `lmdb` into its module
+    // graph. A static top-level import gets bundled by `bun build --compile` and
+    // crashes the binary at startup ("No native build was found"). Importing it
+    // here keeps lmdb off the CLI startup path - it only loads when a sidecar is
+    // actually started (inside `ax serve`).
+    const { DurableStreamTestServer } = await import("@durable-streams/server");
     const server = new DurableStreamTestServer({
         host,
         port,
