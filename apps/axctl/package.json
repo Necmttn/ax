@@ -23,10 +23,12 @@
     "dashboard:build": "vite build --config src/dashboard/web/vite.config.ts"
   },
   "dependencies": {
-    "@ax/lib": "workspace:*",
-    "@ax/schema": "workspace:*",
     "@ax-classifier/direction-event": "workspace:*",
     "@ax-classifier/verification-event": "workspace:*",
+    "@ax/lib": "workspace:*",
+    "@ax/schema": "workspace:*",
+    "@durable-streams/client": "^0.2.6",
+    "@durable-streams/server": "^0.3.5",
     "@opentui/core": "^0.2.5",
     "@opentui/react": "^0.2.5",
     "@tanstack/react-query": "^5",
