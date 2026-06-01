@@ -504,6 +504,94 @@ Decision:
   SetFit quality, hybrid quality, boundary replay coverage, and graph
   availability into a single decision artifact.
 
+## E497 - Workflow Classifier Quality Conclusion
+
+Question: after ten more focused rounds, what does the current evidence say:
+continue, bail, or narrow the classifier path?
+
+Changes:
+
+- Added `scripts/classifier-workflow-quality-conclusion.ts`.
+- Added package operation `workflow-fixture-quality-conclusion`.
+- Added `bun run classifiers:workflow-quality-conclusion`.
+- Added tests for the decision contract when raw SetFit fails but hybrid,
+  deterministic replay, and graph evidence are available.
+
+Commands:
+
+```sh
+bun src/cli/index.ts classifiers graph \
+  --mode=boundary-replay \
+  --source-kind=boundary_replay_deterministic_projection \
+  --fact-kind=classifier_boundary_replay \
+  --predicate=covered_by_deterministic \
+  --value=true \
+  --out=.ax/experiments/boundary-replay-graph-query-e497.json \
+  --json
+
+bun src/cli/index.ts classifiers package-operations \
+  --operation=workflow-fixture-quality-conclusion \
+  --execute \
+  --out=.ax/experiments/classifier-package-execution-workflow-fixture-quality-conclusion-e497.json \
+  --json
+```
+
+Artifacts:
+
+- `.ax/experiments/boundary-replay-graph-query-e497.json`
+- `.ax/experiments/workflow-classifier-quality-conclusion-current.json`
+- `.ax/experiments/workflow-classifier-quality-conclusion-e497.json`
+- `.ax/experiments/classifier-package-execution-workflow-fixture-quality-conclusion-e497.json`
+
+Results:
+
+- Conclusion: `continue_hybrid_not_raw_setfit`
+- Production posture: `deterministic_and_reviewed_graph_facts_only`
+- Raw SetFit:
+  - quality gate passed: `false`
+  - promotion quality: `false`
+  - recommended use: `model_quality_work`
+  - macro F1 minimum: `0.7364`
+  - repeated misses: `7`
+  - blockers:
+    `model_quality_gate_not_passed`, `residual_repeated_misses`,
+    `residual_none_false_positives`, `missing_human_promotion_review`
+- Hybrid:
+  - decision: `hybrid_robust_enough`
+  - macro F1 minimum: `0.7364`
+  - none false-positive max: `0`
+  - harmful override count: `0`
+  - fixed none false-positive count: `1`
+- Deterministic boundary replay:
+  - decision: `deterministic_boundary_replay_complete`
+  - coverage rate: `1`
+  - covered by deterministic: `1`
+  - uncovered: `0`
+- Graph:
+  - query match status: `matched`
+  - total boundary replay facts: `2`
+  - matched boundary replay facts: `1`
+
+Decision:
+
+- Do not promote raw SetFit output as graph facts.
+- Do continue the classifier program through the hybrid path:
+  deterministic guards, reviewed boundary fixtures, model/helper mining,
+  explicit replay checks, and graph-queryable evidence.
+- The useful result is not "the model labels correctly now." The useful
+  result is that a model failure can be converted into a reviewed boundary
+  artifact, covered by a cheap deterministic rule, projected into the graph,
+  and queried by services.
+
+Verification:
+
+```sh
+bun test scripts/classifier-workflow-quality-conclusion.test.ts src/classifiers/package-manifest.test.ts src/classifiers/package-service.test.ts
+python3 -m json.tool packages/ax-classifier-session-sections/ax.classifier.json >/dev/null
+```
+
+Passed: `36` Bun tests and manifest JSON validation.
+
 Current recommendation:
 
 - Index continuation: E488 turns the accepted classifier-fixture follow-up into

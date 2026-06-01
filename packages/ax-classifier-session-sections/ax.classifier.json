@@ -806,6 +806,21 @@
             ]
         },
         {
+            "id": "workflow-fixture-quality-conclusion",
+            "kind": "status",
+            "description": "Summarize raw SetFit quality, hybrid robustness, deterministic boundary replay, and graph availability into one workflow classifier decision artifact.",
+            "command": "bun run classifiers:workflow-quality-conclusion -- --quality=.ax/experiments/classifier-quality-status-workflow-fixtures-e489.json --hybrid=.ax/experiments/hybrid-robustness-workflow-fixtures-current.json --replay=.ax/experiments/boundary-review-deterministic-replay-workflow-candidate-current.json --graph=.ax/experiments/boundary-replay-graph-query-e497.json --out=.ax/experiments/workflow-classifier-quality-conclusion-current.json --json",
+            "inputs": [
+                ".ax/experiments/classifier-quality-status-workflow-fixtures-e489.json",
+                ".ax/experiments/hybrid-robustness-workflow-fixtures-current.json",
+                ".ax/experiments/boundary-review-deterministic-replay-workflow-candidate-current.json",
+                ".ax/experiments/boundary-replay-graph-query-e497.json"
+            ],
+            "outputs": [
+                ".ax/experiments/workflow-classifier-quality-conclusion-current.json"
+            ]
+        },
+        {
             "id": "classifier-lifecycle-status",
             "kind": "status",
             "description": "Join package readiness, persisted lifecycle graph health, and blind-review blockers into one lifecycle status report.",

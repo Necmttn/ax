@@ -291,6 +291,7 @@ describe("ClassifierPackageService", () => {
             "workflow-fixture-none-safety-window-replay",
             "workflow-fixture-hybrid-robustness",
             "workflow-fixture-hybrid-graph-usefulness",
+            "workflow-fixture-quality-conclusion",
             "classifier-lifecycle-status",
             "blind-post-review",
         ]);
@@ -354,6 +355,7 @@ describe("ClassifierPackageService", () => {
             "status",
             "eval",
             "eval",
+            "status",
             "status",
             "review",
         ]);
