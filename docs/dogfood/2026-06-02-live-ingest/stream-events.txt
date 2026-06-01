@@ -1,0 +1,16 @@
+# POST /api/ingest -> runId=1499f308-d4e2-4e13-9f8c-2959f2f4f2dd
+#   streamName    ingest:1499f308-d4e2-4e13-9f8c-2959f2f4f2dd
+#   streamBaseUrl http://127.0.0.1:50414
+#   stream        http://127.0.0.1:50414/ingest:1499f308-d4e2-4e13-9f8c-2959f2f4f2dd
+# subscriber A subscribes from offset -1 (replay-from-start, then live):
+A         17:58:01.875 [off=0000000000000000_0000000000000692] {"kind":"run_started","runId":"1499f308-d4e2-4e13-9f8c-2959f2f4f2dd","label":"ingest skills,commands,pricing,claude,codex,pi,opencode,cursor,subagents,invoked-positions,spawned,git,signals,outcomes,turn-content-blocks,turn-analysis,reaction-events,classifier-results,session-health,closure,proposals,opportunities,retro-proposals,harness"}
+A         17:58:01.875 [off=0000000000000000_0000000000000692] {"kind":"stage_started","runId":"1499f308-d4e2-4e13-9f8c-2959f2f4f2dd","stage":"ingest skills,commands,pricing,claude,codex,pi,opencode,cursor,subagents,invoked-positions,spawned,git,signals,outcomes,turn-content-blocks,turn-analysis,reaction-events,classifier-results,session-health,closure,proposals,opportunities,retro-proposals,harness"}
+# --- subscriber B attaches mid-run (== a browser page REFRESH) ---
+B(replay) 17:58:01.876 [off=0000000000000000_0000000000000692] {"kind":"run_started","runId":"1499f308-d4e2-4e13-9f8c-2959f2f4f2dd","label":"ingest skills,commands,pricing,claude,codex,pi,opencode,cursor,subagents,invoked-positions,spawned,git,signals,outcomes,turn-content-blocks,turn-analysis,reaction-events,classifier-results,session-health,closure,proposals,opportunities,retro-proposals,harness"}
+B(replay) 17:58:01.876 [off=0000000000000000_0000000000000692] {"kind":"stage_started","runId":"1499f308-d4e2-4e13-9f8c-2959f2f4f2dd","stage":"ingest skills,commands,pricing,claude,codex,pi,opencode,cursor,subagents,invoked-positions,spawned,git,signals,outcomes,turn-content-blocks,turn-analysis,reaction-events,classifier-results,session-health,closure,proposals,opportunities,retro-proposals,harness"}
+A         18:01:28.470 [off=0000000000000000_0000000000001074] {"kind":"stage_finished","runId":"1499f308-d4e2-4e13-9f8c-2959f2f4f2dd","stage":"ingest skills,commands,pricing,claude,codex,pi,opencode,cursor,subagents,invoked-positions,spawned,git,signals,outcomes,turn-content-blocks,turn-analysis,reaction-events,classifier-results,session-health,closure,proposals,opportunities,retro-proposals,harness","status":"ok","durationMs":206854}
+B(replay) 18:01:28.470 [off=0000000000000000_0000000000001074] {"kind":"stage_finished","runId":"1499f308-d4e2-4e13-9f8c-2959f2f4f2dd","stage":"ingest skills,commands,pricing,claude,codex,pi,opencode,cursor,subagents,invoked-positions,spawned,git,signals,outcomes,turn-content-blocks,turn-analysis,reaction-events,classifier-results,session-health,closure,proposals,opportunities,retro-proposals,harness","status":"ok","durationMs":206854}
+A         18:01:28.471 [off=0000000000000000_0000000000001191] {"kind":"run_finished","runId":"1499f308-d4e2-4e13-9f8c-2959f2f4f2dd","status":"completed","durationMs":206854}
+# run_finished seen (count=1) -> stream terminates
+B(replay) 18:01:28.471 [off=0000000000000000_0000000000001191] {"kind":"run_finished","runId":"1499f308-d4e2-4e13-9f8c-2959f2f4f2dd","status":"completed","durationMs":206854}
+# terminal run_finished count = 1 (expect exactly 1)

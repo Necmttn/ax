@@ -85,6 +85,14 @@ Run `bun refs:setup` after fresh clone to populate `.references/`.
 - Weekly self-improve cron (`~/.claude/self-improve/run.sh`) does deep-scan backfill (planned wire-up)
 - `ax-extract-workflow` skill (installable via `npx skills add Necmttn/ax`) frames "what made X work" investigations - triggers retro + session queries to surface the actual sequence of events behind a result.
 
+### Live ingest in the dashboard
+
+- Trigger an in-process ingest run from `ax serve` via `POST /api/ingest` (or the **Live** tab in the dashboard). The run is forked onto the server's long-lived runtime and reuses the same `runIngest` pipeline as the CLI.
+- Progress is published to a **per-run Durable Stream** named `ingest:<runId>` (`ingestStreamName`). `runIngest` live-trace spans become `IngestStreamEvent`s, flow through the `IngestStreamBus`, and land on a Durable Streams sidecar that the browser subscribes to directly. The backend guarantees exactly one terminal `run_finished` event (synthetic `failed` on cause).
+- The dashboard live view subscribes from offset `-1` (replay history from start, then continue live), so a **page refresh / reconnect mid-run rehydrates** already-done stages and resumes the live tail - the Durable Streams offset-resume payoff vs raw SSE. (See `docs/superpowers/research/durable-streams-api.md` for the embed-vs-sidecar decision.)
+- The `IngestStreamBus` seam (`apps/axctl/src/dashboard/ingest-stream.ts`) means the local Durable-Streams-in-Bun backing can later be swapped for a hosted backend without touching the producers or the UI.
+- The CLI `ax ingest` and its terminal step animation (`apps/axctl/src/cli/ingest-trace-progress.ts`) are **unchanged** - the server path reuses `runIngest`, the CLI never passes a `runId`, and `AX_PROGRESS=off` still silences the CLI animation.
+
 ## Workflow extraction commands
 
 ### Scoped ingest

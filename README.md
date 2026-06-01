@@ -157,6 +157,18 @@ axctl skills taste         # CLI view: which skills earned their keep
 axctl recall "auth bug"    # full-text recall across past sessions
 ```
 
+### Live ingest in the dashboard
+
+`axctl serve` exposes `POST /api/ingest` (also wired to the dashboard's **Live**
+tab): it triggers an in-process ingest run and streams progress to a per-run
+[Durable Stream](docs/superpowers/research/durable-streams-api.md) named
+`ingest:<runId>`. The live view replays history from the start and then
+continues live, so a mid-run refresh or reconnect rehydrates finished stages
+and resumes the tail (offset-resume, not raw SSE). An `IngestStreamBus` seam
+keeps the local Durable-Streams-in-Bun backing swappable for a hosted backend
+without touching producers or UI; the CLI `axctl ingest` and its terminal
+animation are unchanged.
+
 ## Agent integration
 
 `ax` ships two installable skills so a Claude Code / Codex agent can query
