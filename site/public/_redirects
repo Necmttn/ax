@@ -1,7 +1,13 @@
-# Cloudflare Pages redirects
+# Cloudflare Pages redirects / rewrites
 # Syntax: <from>  <to>  <status>
 # Reference: https://developers.cloudflare.com/pages/configuration/redirects/
+#
+# Order matters - Cloudflare matches the first rule. Static files (assets,
+# /install, _shell.html, etc.) take precedence over these rules; this file
+# only governs routes that don't match a real file.
 
-# Short install URL used by the landing's curl one-liner.
-# Lets ax.necmttn.com/install resolve to the canonical script on GitHub raw.
-/install  https://raw.githubusercontent.com/Necmttn/ax/main/install.sh  302
+# SPA fallback - any unmatched path serves the TanStack Start SPA shell
+# with a 200 (URL stays as-is, React Router renders the matching route).
+# This is the catch-all for /features, /showcases, /origin, /old-landing,
+# /how-it-works, /docs/*, /manifesto, /brand, /releases/*, etc.
+/*  /_shell.html  200

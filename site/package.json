@@ -11,8 +11,8 @@
     "build": "bun ../scripts/extract-stage-rationale.ts && cp ../install.sh public/install && vite build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
-    "deploy": "bun run build && wrangler deploy --config dist/server/wrangler.json",
-    "deploy:check": "bun run build && wrangler deploy --config dist/server/wrangler.json --dry-run"
+    "deploy": "bun run build && wrangler pages deploy dist/client --project-name=ax --branch=main",
+    "deploy:check": "bun run build && echo 'dist/client/ ready for: wrangler pages deploy dist/client --project-name=ax'"
   },
   "dependencies": {
     "@content-collections/core": "^0.15.1",
