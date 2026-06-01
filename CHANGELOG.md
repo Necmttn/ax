@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.2](https://github.com/Necmttn/ax/compare/v0.6.1...v0.6.2) (2026-06-01)
+
+
+### Bug Fixes
+
+* **ingest:** self-heal reaction_event conflicts on incremental --since ([df4c1ad](https://github.com/Necmttn/ax/commit/df4c1ad18d04103f59fc182d7434b8d6770232c8))
+
 ## [0.6.1](https://github.com/Necmttn/ax/compare/v0.6.0...v0.6.1) (2026-06-01)
 
 
