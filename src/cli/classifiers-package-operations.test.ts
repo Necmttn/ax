@@ -781,6 +781,18 @@ describe("classifiers package-operations format", () => {
             }],
             lifecycle_facts: [],
             embedding_helper_facts: [],
+            boundary_replay_summary: {
+                status: "reviewed_deterministic_facts_available",
+                production_posture: "deterministic_and_reviewed_graph_facts_only",
+                next_action: "use_reviewed_deterministic_graph_facts",
+                remediation: "Use these reviewed deterministic replay facts as promotion-safe graph evidence; keep raw model output in review/mining workflows.",
+                covered_subject_count: 1,
+                deterministic_label_subject_count: 1,
+                evidence_path_count: 1,
+                classifier_keys: ["correction-event"],
+                targets: ["workflow_state"],
+                subjects: ["classifier_boundary_miss:workflow"],
+            },
             evidence_paths: [".ax/experiments/run.json"],
             totals: {
                 node_count: 3,
@@ -817,6 +829,9 @@ describe("classifiers package-operations format", () => {
         expect(output).toContain("filter operation: refresh");
         expect(output).toContain("nodes/edges/facts: 3/2/2");
         expect(output).toContain("results operations/guarded/changed/lifecycle/helper/boundary/evidence: 1/1/1/0/0/0/1");
+        expect(output).toContain("boundary replay summary: reviewed_deterministic_facts_available");
+        expect(output).toContain("boundary replay production posture: deterministic_and_reviewed_graph_facts_only");
+        expect(output).toContain("boundary replay classifiers: correction-event");
         expect(output).toContain("- demo/refresh");
         expect(output).toContain("runs executed/failed/guarded: 1/0/1");
         expect(output).toContain("changed artifacts:");
