@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.0](https://github.com/Necmttn/ax/compare/v0.6.2...v0.7.0) (2026-06-01)
+
+
+### Features
+
+* **ingest:** animated step progress for interactive ax ingest ([1180a15](https://github.com/Necmttn/ax/commit/1180a1569526eb4157bc6704eb0c8b3cc0da4850))
+
 ## [0.6.2](https://github.com/Necmttn/ax/compare/v0.6.1...v0.6.2) (2026-06-01)
 
 
