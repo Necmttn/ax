@@ -304,6 +304,14 @@ export type WorkflowCandidateGuidancePendingReviewCommandStatus =
     | "blocked_until_review_decisions"
     | "blocked_until_review_repairs"
     | "ready_to_execute";
+export type WorkflowCandidateGuidancePendingReviewRecommendedRoute =
+    | "none"
+    | "repair_artifacts"
+    | "repair_review_decisions"
+    | "execute_review_command"
+    | "collect_review_decisions"
+    | "repair_task_schema"
+    | "inspect_task";
 
 export interface WorkflowCandidateGuidancePendingReviewTaskListFilters {
     readonly path?: string;
@@ -349,6 +357,8 @@ export interface WorkflowCandidateGuidancePendingReviewTaskListReport {
     readonly recommended_task_status?: WorkflowCandidateGuidancePendingReviewTaskStatus;
     readonly recommended_task_review_decision_status?: WorkflowCandidateGuidancePendingReviewDecisionStatus;
     readonly recommended_task_review_command_status?: WorkflowCandidateGuidancePendingReviewCommandStatus;
+    readonly recommended_task_route?: WorkflowCandidateGuidancePendingReviewRecommendedRoute;
+    readonly recommended_task_can_execute_command?: boolean;
     readonly recommended_task_candidate_ids?: readonly string[];
     readonly recommended_task_next_action?: string;
     readonly recommended_task_review_sync_command?: readonly string[];
@@ -3518,6 +3528,21 @@ const pendingReviewTaskRecommendedCommandStatus = (
     return "unavailable";
 };
 
+const pendingReviewTaskRecommendedRoute = (
+    task: WorkflowCandidateGuidancePendingReviewTaskListItem,
+): WorkflowCandidateGuidancePendingReviewRecommendedRoute => {
+    if (
+        task.status === "missing_fixture_pack" ||
+        task.status === "missing_review_brief" ||
+        task.status === "missing_review_artifacts"
+    ) return "repair_artifacts";
+    if (task.status === "review_decisions_need_repair") return "repair_review_decisions";
+    if (task.review_sync_command_can_execute || task.review_inspect_command_can_execute) return "execute_review_command";
+    if (task.status === "ready_for_review") return "collect_review_decisions";
+    if (task.status === "unknown_schema") return "repair_task_schema";
+    return "inspect_task";
+};
+
 const selectRecommendedPendingReviewTask = (
     tasks: readonly WorkflowCandidateGuidancePendingReviewTaskListItem[],
 ): WorkflowCandidateGuidancePendingReviewTaskListItem | undefined =>
@@ -3608,6 +3633,8 @@ export function buildWorkflowCandidateGuidancePendingReviewTaskListReport(input:
             recommended_task_status: recommendedTask.status,
             recommended_task_review_decision_status: recommendedTask.review_decision_status,
             recommended_task_review_command_status: pendingReviewTaskRecommendedCommandStatus(recommendedTask),
+            recommended_task_route: pendingReviewTaskRecommendedRoute(recommendedTask),
+            recommended_task_can_execute_command: recommendedTask.review_sync_command_can_execute || recommendedTask.review_inspect_command_can_execute,
             recommended_task_candidate_ids: recommendedTask.candidate_ids,
             recommended_task_next_action: recommendedTask.review_decision_next_action,
             ...(recommendedTask.review_sync_command === undefined ? {} : {
@@ -3698,6 +3725,8 @@ export function renderWorkflowCandidateGuidancePendingReviewTaskListText(
         `recommended task status: ${report.recommended_task_status ?? "none"}`,
         `recommended task review decisions: ${report.recommended_task_review_decision_status ?? "none"}`,
         `recommended task command status: ${report.recommended_task_review_command_status ?? "none"}`,
+        `recommended task route: ${report.recommended_task_route ?? "none"}`,
+        `recommended task can execute command: ${report.recommended_task_can_execute_command === undefined ? "none" : report.recommended_task_can_execute_command ? "yes" : "no"}`,
         `recommended task next: ${report.recommended_task_next_action ?? "none"}`,
         `recommended sync command status: ${report.recommended_task_review_sync_command_status ?? "none"} can_execute=${report.recommended_task_review_sync_command_can_execute === undefined ? "none" : report.recommended_task_review_sync_command_can_execute ? "yes" : "no"}`,
         `recommended inspect command status: ${report.recommended_task_review_inspect_command_status ?? "none"} can_execute=${report.recommended_task_review_inspect_command_can_execute === undefined ? "none" : report.recommended_task_review_inspect_command_can_execute ? "yes" : "no"}`,

@@ -4263,6 +4263,8 @@ describe("classifiers workflow-candidates", () => {
             recommended_task_status: "missing_review_brief",
             recommended_task_review_decision_status: "unknown",
             recommended_task_review_command_status: "unavailable",
+            recommended_task_route: "repair_artifacts",
+            recommended_task_can_execute_command: false,
             recommended_task_candidate_ids: ["classifier_candidate_group:hybrid-window/correction_or_rejection_signal"],
             recommended_task_review_sync_command_status: "unavailable",
             recommended_task_review_sync_command_can_execute: false,
@@ -4308,6 +4310,7 @@ describe("classifiers workflow-candidates", () => {
         expect(report.tasks[2]?.candidate_ids).toEqual(["classifier_candidate_group:hybrid-window/correction_or_rejection_signal"]);
         expect(renderWorkflowCandidateGuidancePendingReviewTaskListText(report)).toContain("missing artifacts: 1");
         expect(renderWorkflowCandidateGuidancePendingReviewTaskListText(report)).toContain("recommended task: .ax/tasks/workflow-candidate-pending-review-missing.md");
+        expect(renderWorkflowCandidateGuidancePendingReviewTaskListText(report)).toContain("recommended task route: repair_artifacts");
         expect(renderWorkflowCandidateGuidancePendingReviewTaskListText(report)).toContain("missing_review_brief");
         expect(renderWorkflowCandidateGuidancePendingReviewTaskListText(report)).toContain("review decisions ready: 1");
         expect(renderWorkflowCandidateGuidancePendingReviewTaskListText(report)).toContain("sync commands ready: 1");
@@ -4340,6 +4343,8 @@ describe("classifiers workflow-candidates", () => {
             missing_artifact_count: 0,
             recommended_task_path: ".ax/tasks/workflow-candidate-pending-review-ready.md",
             recommended_task_review_command_status: "blocked_until_review_decisions",
+            recommended_task_route: "collect_review_decisions",
+            recommended_task_can_execute_command: false,
             recommended_task_review_sync_command_status: "blocked_until_review_decisions",
             recommended_task_review_sync_command_can_execute: false,
             recommended_task_review_inspect_command_status: "blocked_until_review_decisions",
@@ -4373,6 +4378,8 @@ describe("classifiers workflow-candidates", () => {
             review_command_blocked_count: 0,
             recommended_task_path: ".ax/tasks/workflow-candidate-pending-review-reviewed.md",
             recommended_task_review_command_status: "ready_to_execute",
+            recommended_task_route: "execute_review_command",
+            recommended_task_can_execute_command: true,
             recommended_task_review_sync_command_status: "ready_to_execute",
             recommended_task_review_sync_command_can_execute: true,
             recommended_task_review_inspect_command_status: "ready_to_execute",

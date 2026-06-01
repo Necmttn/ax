@@ -33,8 +33,8 @@ artifact path as the evidence to inspect before trusting any summary row.
 
 Current recommendation:
 
-- Index continuation: E462 adds
-  `.ax/experiments/workflow-candidate-pending-review-tasks-recommended-commands-e462.json`
+- Index continuation: E463 adds
+  `.ax/experiments/workflow-candidate-pending-review-tasks-route-e463.json`
   as the latest hybrid classifier review-throughput evidence.
 - Do not adopt SetFit/SVM model output as promotion-quality facts yet.
 - Continue the hybrid path: deterministic guards, helper mining, human review,
@@ -69,8 +69,61 @@ Current recommendation:
   without re-encoding the routing priority. That pointer now also carries the
   recommended sync/inspect argv arrays and can-execute flags, so a review
   service can plan the exact next command while still honoring the blocked
-  state. The immediate bottleneck remains a real human review decision for
-  that pending candidate, not promoting synthetic or harness-only evidence.
+  state. The pointer now also includes a machine-readable route kind and a
+  command-execution boolean, so services can branch without parsing prose
+  `next_action` strings. The immediate bottleneck remains a real human review
+  decision for that pending candidate, not promoting synthetic or harness-only
+  evidence.
+
+## E463 - Add Recommended Review Route
+
+Question:
+- Can review services branch on the recommended pending task without parsing
+  prose next-action text or re-encoding task status rules?
+
+Implementation:
+- Added `recommended_task_route` to
+  `ax.workflow_candidate_pending_review_task_list.v1`.
+- Added `recommended_task_can_execute_command` as a direct boolean guard for
+  executors.
+- Route vocabulary:
+  - `repair_artifacts`,
+  - `repair_review_decisions`,
+  - `execute_review_command`,
+  - `collect_review_decisions`,
+  - `repair_task_schema`,
+  - `inspect_task`, and
+  - `none`.
+- Text output now prints the route and command-execution boolean.
+- Regression coverage verifies artifact repair, human-review collection, and
+  executable-command routes.
+
+Artifacts:
+- `.ax/experiments/workflow-candidate-pending-review-tasks-route-e463.json`
+- `.ax/tasks/workflow-candidate-pending-review-nqj7es.md`
+
+Results:
+- Live task-list report:
+  - `recommended_task_path=.ax/tasks/workflow-candidate-pending-review-nqj7es.md`
+  - `recommended_task_status=ready_for_review`
+  - `recommended_task_review_decision_status=needs_review_decisions`
+  - `recommended_task_review_command_status=blocked_until_review_decisions`
+  - `recommended_task_route=collect_review_decisions`
+  - `recommended_task_can_execute_command=false`
+- Text output confirms the same route and blocked command state.
+
+Decision:
+- E463 removes another service-side inference point: services can branch on a
+  stable route enum instead of scraping text.
+- The current classifier candidate still needs real review decisions before any
+  sync, inspect, graph apply, guidance promotion, or harness promotion.
+
+Verification:
+```sh
+bun test src/cli/classifiers-workflow-candidates.test.ts
+bun src/cli/index.ts classifiers workflow-candidates --list-pending-review-tasks --task-dir=.ax/tasks --out .ax/experiments/workflow-candidate-pending-review-tasks-route-e463.json --json
+bun src/cli/index.ts classifiers workflow-candidates --list-pending-review-tasks --task-dir=.ax/tasks --pending-review-command-status=blocked_until_review_decisions
+```
 
 ## E462 - Surface Recommended Review Commands
 
