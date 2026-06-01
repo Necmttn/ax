@@ -763,6 +763,95 @@ bun run typecheck
 Passed: `27` focused service tests, then `109` combined classifier package
 tests. Typecheck exited `0` with the existing Effect lint messages/warnings.
 
+## E501 - Boundary Replay Package CLI Summary
+
+Question: can agents call the reviewed deterministic replay posture through a
+single package-operations CLI flag, without recreating the graph query or using
+the lower-level graph command?
+
+Changes:
+
+- Added `classifiers package-operations --boundary-replay-summary`.
+- The flag routes through `ClassifierPackageService.boundaryReplaySummaryReport`
+  and `writeBoundaryReplaySummaryReport`.
+- Text output renders the compact promotion posture, subject counts,
+  classifiers, targets, subjects, and recommended argv.
+- The CLI keeps optional graph filters for debug narrowing while the service
+  owns the default boundary replay query.
+- Fixed the top-level CLI DB routing so this DB-backed package-operations flag
+  gets `AppLayer` instead of the no-DB sentinel.
+
+Command:
+
+```sh
+bun src/cli/index.ts classifiers package-operations \
+  --boundary-replay-summary \
+  --out=.ax/experiments/boundary-replay-package-summary-e501.json \
+  --json
+```
+
+Artifact:
+
+- `.ax/experiments/boundary-replay-package-summary-e501.json`
+
+Result:
+
+- `status=reviewed_deterministic_facts_available`
+- `production_posture=deterministic_and_reviewed_graph_facts_only`
+- `next_action=use_reviewed_deterministic_graph_facts`
+- `covered_subject_count=1`
+- `deterministic_label_subject_count=1`
+- `evidence_path_count=1`
+- classifier key: `correction-event`
+- target: `workflow_state`
+
+Verification:
+
+```sh
+bun test src/cli/classifiers-package-operations.test.ts
+bun test scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts src/classifiers/package-service.test.ts
+bun run typecheck
+bun src/cli/index.ts classifiers package-operations --boundary-replay-summary --out=.ax/experiments/boundary-replay-package-summary-e501.json --json
+```
+
+Focused CLI tests passed (`26`). Combined classifier package tests passed
+(`111`). Typecheck exited `0` with existing Effect lint messages/warnings. The
+live CLI command reached local SurrealDB and wrote the E501 artifact.
+
+## E502 - Boundary Replay CLI Routing Guard
+
+Question: can the DB-backed package-operations flags be regression-tested so
+future compact graph summary flags do not accidentally run through the no-DB
+CLI path?
+
+Changes:
+
+- Extracted `classifiersPackageOperationsNeedsDb(args)` from the inline CLI
+  routing condition.
+- Added coverage for the DB-backed package-operations flags:
+  `--apply-write-plan`, `--graph-health`, and `--boundary-replay-summary`.
+- Added a negative check that `--quality-status` remains no-DB because it reads
+  a local report file and does not need SurrealDB.
+
+Decision:
+
+- Keep DB routing explicit for package-operations flags that query or mutate the
+  classifier graph.
+- This directly guards the E501 bug where `--boundary-replay-summary` initially
+  reached `SurrealClient.query` through the no-DB sentinel.
+
+Verification:
+
+```sh
+bun test src/cli/effect-cli.test.ts src/cli/classifiers-package-operations.test.ts
+bun test scripts/classifier-package-operations.test.ts src/cli/effect-cli.test.ts src/cli/classifiers-package-operations.test.ts src/classifiers/package-service.test.ts
+bun run typecheck
+```
+
+Focused CLI tests passed (`53`). Combined classifier package and CLI tests
+passed (`138`). Typecheck exited `0` with existing Effect lint
+messages/warnings.
+
 Current recommendation:
 
 - Index continuation: E488 turns the accepted classifier-fixture follow-up into

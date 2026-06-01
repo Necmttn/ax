@@ -53,3 +53,6 @@ site/.content-collections
 
 # generated MDX partial - rebuilt by scripts/extract-stage-rationale.ts on every dev/build
 docs/how-ax-sees-your-work.generated.mdx
+
+# scratch screenshots from landing iteration
+site/.tmp-shots/

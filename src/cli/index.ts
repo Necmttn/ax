@@ -1847,11 +1847,12 @@ const classifiersPackageOperationsCommand = Command.make(
         workflowStatus: Flag.string("workflow-status").pipe(Flag.optional),
         writePlan: Flag.boolean("write-plan").pipe(Flag.withDefault(false)),
         querySuggestionRouting: Flag.boolean("query-suggestion-routing").pipe(Flag.withDefault(false)),
+        boundaryReplaySummary: Flag.boolean("boundary-replay-summary").pipe(Flag.withDefault(false)),
         qualityStatus: Flag.boolean("quality-status").pipe(Flag.withDefault(false)),
         sourceReport: Flag.string("source-report").pipe(Flag.optional),
         json: jsonFlag,
     },
-    ({ allowExpensive, applyWritePlan, all, dryRun, execute, facts, graphHealth, graphMode, history, manifest, operation, artifact, sourceKind, factKind, status, sourceFixture, proposedLabel, threshold, minSeedCount, minPositiveRecall, minCallReduction, minNearestSimilarity, nearestFixture, predicate, subject, valueContains, valueEquals, out, preflight, root, workflowStatus, writePlan, querySuggestionRouting, qualityStatus, sourceReport, json }) => {
+    ({ allowExpensive, applyWritePlan, all, dryRun, execute, facts, graphHealth, graphMode, history, manifest, operation, artifact, sourceKind, factKind, status, sourceFixture, proposedLabel, threshold, minSeedCount, minPositiveRecall, minCallReduction, minNearestSimilarity, nearestFixture, predicate, subject, valueContains, valueEquals, out, preflight, root, workflowStatus, writePlan, querySuggestionRouting, boundaryReplaySummary, qualityStatus, sourceReport, json }) => {
         const operationId = optionValue(operation);
         const artifactPath = optionValue(artifact);
         const sourceKindName = optionValue(sourceKind);
@@ -1890,8 +1891,9 @@ const classifiersPackageOperationsCommand = Command.make(
             execute,
             facts,
             graphHealth,
-            graphMode,
+            ...(boundaryReplaySummary && graphMode === "summary" ? {} : { graphMode }),
             querySuggestionRouting,
+            boundaryReplaySummary,
             qualityStatus,
             ...(sourceReportPath === undefined ? {} : { sourceReportPath }),
             history,
@@ -4945,6 +4947,15 @@ export const DB_COMMANDS: ReadonlySet<string> = new Set([
     "dogfood",
 ]);
 
+export const classifiersPackageOperationsNeedsDb = (args: ReadonlyArray<string>): boolean =>
+    args[0] === "classifiers" &&
+    args[1] === "package-operations" &&
+    (
+        args.includes("--apply-write-plan") ||
+        args.includes("--graph-health") ||
+        args.includes("--boundary-replay-summary")
+    );
+
 async function main() {
     const [, , ...args] = process.argv;
     if (args[0] === undefined || args[0] === "help" || args[0] === "--help" || args[0] === "-h") {
@@ -4975,7 +4986,7 @@ async function main() {
     }
     if (
         args[0] === "classifiers" &&
-        ((args[1] === "package-operations" && (args.includes("--apply-write-plan") || args.includes("--graph-health"))) ||
+        (classifiersPackageOperationsNeedsDb(args) ||
             args[1] === "graph" ||
             args[1] === "lifecycle")
     ) {
