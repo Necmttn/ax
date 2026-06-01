@@ -374,6 +374,8 @@ export interface WorkflowCandidateGuidancePendingReviewTaskListReport {
     readonly recommended_task_review_command_status?: WorkflowCandidateGuidancePendingReviewCommandStatus;
     readonly recommended_task_route?: WorkflowCandidateGuidancePendingReviewRecommendedRoute;
     readonly recommended_task_can_execute_command?: boolean;
+    readonly recommended_task_fixture_pack_path?: string;
+    readonly recommended_task_review_brief_path?: string;
     readonly recommended_task_candidate_ids?: readonly string[];
     readonly recommended_task_next_action?: string;
     readonly recommended_task_review_sync_command?: readonly string[];
@@ -3674,6 +3676,12 @@ export function buildWorkflowCandidateGuidancePendingReviewTaskListReport(input:
             recommended_task_review_command_status: pendingReviewTaskRecommendedCommandStatus(recommendedTask),
             recommended_task_route: pendingReviewTaskRecommendedRoute(recommendedTask),
             recommended_task_can_execute_command: recommendedTask.review_sync_command_can_execute || recommendedTask.review_inspect_command_can_execute,
+            ...(recommendedTask.fixture_pack_path === undefined ? {} : {
+                recommended_task_fixture_pack_path: recommendedTask.fixture_pack_path,
+            }),
+            ...(recommendedTask.review_brief_path === undefined ? {} : {
+                recommended_task_review_brief_path: recommendedTask.review_brief_path,
+            }),
             recommended_task_candidate_ids: recommendedTask.candidate_ids,
             recommended_task_next_action: recommendedTask.review_decision_next_action,
             ...(recommendedTask.review_sync_command === undefined ? {} : {
@@ -3774,6 +3782,8 @@ export function renderWorkflowCandidateGuidancePendingReviewTaskListText(
         `recommended task command status: ${report.recommended_task_review_command_status ?? "none"}`,
         `recommended task route: ${report.recommended_task_route ?? "none"}`,
         `recommended task can execute command: ${report.recommended_task_can_execute_command === undefined ? "none" : report.recommended_task_can_execute_command ? "yes" : "no"}`,
+        `recommended fixture pack: ${report.recommended_task_fixture_pack_path ?? "none"}`,
+        `recommended review brief: ${report.recommended_task_review_brief_path ?? "none"}`,
         `recommended task next: ${report.recommended_task_next_action ?? "none"}`,
         `recommended sync command status: ${report.recommended_task_review_sync_command_status ?? "none"} can_execute=${report.recommended_task_review_sync_command_can_execute === undefined ? "none" : report.recommended_task_review_sync_command_can_execute ? "yes" : "no"}`,
         `recommended inspect command status: ${report.recommended_task_review_inspect_command_status ?? "none"} can_execute=${report.recommended_task_review_inspect_command_can_execute === undefined ? "none" : report.recommended_task_review_inspect_command_can_execute ? "yes" : "no"}`,

@@ -33,8 +33,8 @@ artifact path as the evidence to inspect before trusting any summary row.
 
 Current recommendation:
 
-- Index continuation: E465 adds
-  `.ax/experiments/workflow-candidate-pending-review-tasks-route-filter-e465.json`
+- Index continuation: E466 adds
+  `.ax/experiments/workflow-candidate-pending-review-tasks-recommended-artifacts-e466.json`
   as the latest hybrid classifier review-throughput evidence.
 - Do not adopt SetFit/SVM model output as promotion-quality facts yet.
 - Continue the hybrid path: deterministic guards, helper mining, human review,
@@ -74,9 +74,51 @@ Current recommendation:
   `next_action` strings. The report now includes aggregate route counts so a
   scheduler can see review queue workload by route before choosing a task. The
   task list can now also be filtered directly by route so schedulers can ask
-  for only collectible reviews or only executable commands. The immediate
-  bottleneck remains a real human review decision for that pending candidate,
-  not promoting synthetic or harness-only evidence.
+  for only collectible reviews or only executable commands. The recommended
+  task header now also carries the fixture pack and review brief paths, so a
+  service can open the review artifacts directly without scanning the task
+  rows. The immediate bottleneck remains a real human review decision for that
+  pending candidate, not promoting synthetic or harness-only evidence.
+
+## E466 - Expose Recommended Review Artifacts
+
+Question:
+- Can a review service open the recommended task's fixture pack and review
+  brief directly from the task-list header, without scanning the `tasks` array?
+
+Implementation:
+- Added `recommended_task_fixture_pack_path` and
+  `recommended_task_review_brief_path` to
+  `ax.workflow_candidate_pending_review_task_list.v1`.
+- Text output now prints `recommended fixture pack` and
+  `recommended review brief`.
+- Regression coverage verifies the header paths for artifact-repair,
+  collect-review, and execute-command routes.
+
+Artifacts:
+- `.ax/experiments/workflow-candidate-pending-review-tasks-recommended-artifacts-e466.json`
+- `.ax/tasks/workflow-candidate-pending-review-nqj7es.md`
+
+Results:
+- Live `--pending-review-route=collect_review_decisions` report:
+  - `recommended_task_path=.ax/tasks/workflow-candidate-pending-review-nqj7es.md`
+  - `recommended_task_route=collect_review_decisions`
+  - `recommended_task_fixture_pack_path=.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e457.jsonl`
+  - `recommended_task_review_brief_path=.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e457.md`
+  - `recommended_task_can_execute_command=false`
+
+Decision:
+- E466 makes the recommended pending-review packet self-contained for review
+  services while preserving the same human-review gate.
+- The current candidate still has no reviewed decision; the correct next
+  action is to open the review brief and record a real review verdict with
+  rationale.
+
+Verification:
+```sh
+bun test src/cli/classifiers-workflow-candidates.test.ts
+bun src/cli/index.ts classifiers workflow-candidates --list-pending-review-tasks --task-dir=.ax/tasks --pending-review-route=collect_review_decisions --out .ax/experiments/workflow-candidate-pending-review-tasks-recommended-artifacts-e466.json --json
+```
 
 ## E465 - Filter Pending Review Tasks By Route
 

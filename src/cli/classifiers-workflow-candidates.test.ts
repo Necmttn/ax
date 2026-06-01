@@ -4273,6 +4273,8 @@ describe("classifiers workflow-candidates", () => {
             recommended_task_review_command_status: "unavailable",
             recommended_task_route: "repair_artifacts",
             recommended_task_can_execute_command: false,
+            recommended_task_fixture_pack_path: ".ax/experiments/pending-review.jsonl",
+            recommended_task_review_brief_path: ".ax/experiments/missing-review.md",
             recommended_task_candidate_ids: ["classifier_candidate_group:hybrid-window/correction_or_rejection_signal"],
             recommended_task_review_sync_command_status: "unavailable",
             recommended_task_review_sync_command_can_execute: false,
@@ -4319,6 +4321,8 @@ describe("classifiers workflow-candidates", () => {
         expect(renderWorkflowCandidateGuidancePendingReviewTaskListText(report)).toContain("missing artifacts: 1");
         expect(renderWorkflowCandidateGuidancePendingReviewTaskListText(report)).toContain("recommended task: .ax/tasks/workflow-candidate-pending-review-missing.md");
         expect(renderWorkflowCandidateGuidancePendingReviewTaskListText(report)).toContain("recommended task route: repair_artifacts");
+        expect(renderWorkflowCandidateGuidancePendingReviewTaskListText(report)).toContain("recommended fixture pack: .ax/experiments/pending-review.jsonl");
+        expect(renderWorkflowCandidateGuidancePendingReviewTaskListText(report)).toContain("recommended review brief: .ax/experiments/missing-review.md");
         expect(renderWorkflowCandidateGuidancePendingReviewTaskListText(report)).toContain("missing_review_brief");
         expect(renderWorkflowCandidateGuidancePendingReviewTaskListText(report)).toContain("review decisions ready: 1");
         expect(renderWorkflowCandidateGuidancePendingReviewTaskListText(report)).toContain("sync commands ready: 1");
@@ -4359,6 +4363,8 @@ describe("classifiers workflow-candidates", () => {
             recommended_task_review_command_status: "blocked_until_review_decisions",
             recommended_task_route: "collect_review_decisions",
             recommended_task_can_execute_command: false,
+            recommended_task_fixture_pack_path: ".ax/experiments/pending-review.jsonl",
+            recommended_task_review_brief_path: ".ax/experiments/pending-review.md",
             recommended_task_review_sync_command_status: "blocked_until_review_decisions",
             recommended_task_review_sync_command_can_execute: false,
             recommended_task_review_inspect_command_status: "blocked_until_review_decisions",
@@ -4398,6 +4404,8 @@ describe("classifiers workflow-candidates", () => {
             recommended_task_review_command_status: "ready_to_execute",
             recommended_task_route: "execute_review_command",
             recommended_task_can_execute_command: true,
+            recommended_task_fixture_pack_path: ".ax/experiments/reviewed.jsonl",
+            recommended_task_review_brief_path: ".ax/experiments/reviewed.md",
             recommended_task_review_sync_command_status: "ready_to_execute",
             recommended_task_review_sync_command_can_execute: true,
             recommended_task_review_inspect_command_status: "ready_to_execute",
@@ -4446,6 +4454,8 @@ describe("classifiers workflow-candidates", () => {
             recommended_task_path: ".ax/tasks/workflow-candidate-pending-review-ready.md",
             recommended_task_route: "collect_review_decisions",
             recommended_task_can_execute_command: false,
+            recommended_task_fixture_pack_path: ".ax/experiments/pending-review.jsonl",
+            recommended_task_review_brief_path: ".ax/experiments/pending-review.md",
         });
         expect(renderWorkflowCandidateGuidancePendingReviewTaskListText(collectReviewRouteReport)).toContain("filter route: collect_review_decisions");
 
@@ -4477,6 +4487,8 @@ describe("classifiers workflow-candidates", () => {
             recommended_task_path: ".ax/tasks/workflow-candidate-pending-review-reviewed.md",
             recommended_task_route: "execute_review_command",
             recommended_task_can_execute_command: true,
+            recommended_task_fixture_pack_path: ".ax/experiments/reviewed.jsonl",
+            recommended_task_review_brief_path: ".ax/experiments/reviewed.md",
         });
     });
 
