@@ -389,6 +389,7 @@ export interface WorkflowCandidateGuidancePendingReviewTaskListItem {
     readonly review_inspect_command_status: WorkflowCandidateGuidancePendingReviewCommandStatus;
     readonly review_inspect_command_can_execute: boolean;
     readonly review_inspect_command_effect: "updates_review_pack_and_writes_review_artifacts";
+    readonly route: WorkflowCandidateGuidancePendingReviewRecommendedRoute;
 }
 
 export interface WorkflowCandidateGuidancePendingReviewTaskListReport {
@@ -3557,7 +3558,7 @@ const pendingReviewTaskMatchesFilters = (
     ) return false;
     if (
         filters.route !== undefined &&
-        pendingReviewTaskRecommendedRoute(task) !== filters.route
+        task.route !== filters.route
     ) return false;
     if (
         filters.review_progress_status !== undefined &&
@@ -3592,7 +3593,10 @@ const pendingReviewTaskRecommendedCommandStatus = (
 };
 
 const pendingReviewTaskRecommendedRoute = (
-    task: WorkflowCandidateGuidancePendingReviewTaskListItem,
+    task: Pick<
+        WorkflowCandidateGuidancePendingReviewTaskListItem,
+        "status" | "review_sync_command_can_execute" | "review_inspect_command_can_execute"
+    >,
 ): WorkflowCandidateGuidancePendingReviewRecommendedRoute => {
     if (
         task.status === "missing_fixture_pack" ||
@@ -3636,7 +3640,7 @@ const pendingReviewTaskRouteCounts = (
     tasks: readonly WorkflowCandidateGuidancePendingReviewTaskListItem[],
 ): WorkflowCandidateGuidancePendingReviewRouteCounts => {
     const counts = emptyPendingReviewRouteCounts();
-    for (const task of tasks) counts[pendingReviewTaskRecommendedRoute(task)] += 1;
+    for (const task of tasks) counts[task.route] += 1;
     return counts;
 };
 
@@ -3730,10 +3734,11 @@ export function buildWorkflowCandidateGuidancePendingReviewTaskListReport(input:
                 review_inspect_command_can_execute: reviewInspectCommandStatus === "ready_to_execute",
                 review_inspect_command_effect: "updates_review_pack_and_writes_review_artifacts",
                 ...decisionSummary,
-            } satisfies Omit<WorkflowCandidateGuidancePendingReviewTaskListItem, "review_progress_status">;
+            } satisfies Omit<WorkflowCandidateGuidancePendingReviewTaskListItem, "review_progress_status" | "route">;
             return {
                 ...task,
                 review_progress_status: pendingReviewTaskReviewProgressStatus(task),
+                route: pendingReviewTaskRecommendedRoute(task),
             };
         })
         .filter((task): task is WorkflowCandidateGuidancePendingReviewTaskListItem => task !== undefined)
@@ -3777,7 +3782,7 @@ export function buildWorkflowCandidateGuidancePendingReviewTaskListReport(input:
             recommended_task_status: recommendedTask.status,
             recommended_task_review_decision_status: recommendedTask.review_decision_status,
             recommended_task_review_command_status: pendingReviewTaskRecommendedCommandStatus(recommendedTask),
-            recommended_task_route: pendingReviewTaskRecommendedRoute(recommendedTask),
+            recommended_task_route: recommendedTask.route,
             recommended_task_can_execute_command: recommendedTask.review_sync_command_can_execute || recommendedTask.review_inspect_command_can_execute,
             ...(recommendedTask.fixture_pack_path === undefined ? {} : {
                 recommended_task_fixture_pack_path: recommendedTask.fixture_pack_path,
@@ -3932,6 +3937,7 @@ export function renderWorkflowCandidateGuidancePendingReviewTaskListText(
             `  - ${task.status} ${task.path}`,
             `    stage: ${task.review_pipeline_stage ?? "unknown"}`,
             `    candidates: ${task.candidate_count}`,
+            `    route: ${task.route}`,
             `    review decisions: ${task.review_decision_status}`,
             `    progress status: ${task.review_progress_status}`,
             `    review fixtures: reviewed=${task.reviewed_fixture_count ?? "unknown"} pending=${task.pending_fixture_count ?? "unknown"} invalid=${task.invalid_fixture_count ?? "unknown"} missing_rationale=${task.missing_rationale_count ?? "unknown"}`,

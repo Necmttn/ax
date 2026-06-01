@@ -33,8 +33,8 @@ artifact path as the evidence to inspect before trusting any summary row.
 
 Current recommendation:
 
-- Index continuation: E473 adds
-  `.ax/experiments/workflow-candidate-pending-review-tasks-queue-status-e473.json`
+- Index continuation: E474 adds
+  `.ax/experiments/workflow-candidate-pending-review-tasks-task-route-e474.json`
   as the latest hybrid classifier review-throughput evidence.
 - Do not adopt SetFit/SVM model output as promotion-quality facts yet.
 - Continue the hybrid path: deterministic guards, helper mining, human review,
@@ -93,9 +93,50 @@ Current recommendation:
   individual rows without re-deriving status from fixture counters. The report
   now also exposes a machine-readable queue status, so services can distinguish
   artifact repair, review repair, executable commands, human-review wait, schema
-  repair, and empty queues without parsing prose. The immediate bottleneck
-  remains a real human review decision for that pending candidate, not promoting
-  synthetic or harness-only evidence.
+  repair, and empty queues without parsing prose. Each task row now also carries
+  its normalized route, so services can render or debug individual rows without
+  re-running routing rules. The immediate bottleneck remains a real human
+  review decision for that pending candidate, not promoting synthetic or
+  harness-only evidence.
+
+## E474 - Expose Task Review Route
+
+Question:
+- Can review services inspect each pending-review task row's normalized route
+  without re-running the same routing rules used by filters, counts, and the
+  recommended-task header?
+
+Implementation:
+- Added `route` to each
+  `ax.workflow_candidate_pending_review_task_list.v1` task row.
+- Route filters, aggregate route counts, and the recommended-task route now
+  use that same row-level route value.
+- Text output now prints each row's `route`.
+
+Artifacts:
+- `.ax/experiments/workflow-candidate-pending-review-tasks-task-route-e474.json`
+- `.ax/tasks/workflow-candidate-pending-review-nqj7es.md`
+
+Results:
+- Live task-list report:
+  - `tasks[0].path=.ax/tasks/workflow-candidate-pending-review-nqj7es.md`
+  - `tasks[0].route=collect_review_decisions`
+  - `recommended_task_route=collect_review_decisions`
+  - `route_counts.collect_review_decisions=1`
+  - `queue_status=waiting_for_review_decisions`
+  - `recommended_task_can_execute_command=false`
+
+Decision:
+- E474 removes another client-side derivation from review services while
+  preserving the same human-review gate.
+- The live task still requires a real verdict and rationale before sync,
+  inspect, graph apply, guidance promotion, or harness promotion.
+
+Verification:
+```sh
+bun test src/cli/classifiers-workflow-candidates.test.ts
+bun src/cli/index.ts classifiers workflow-candidates --list-pending-review-tasks --task-dir=.ax/tasks --out .ax/experiments/workflow-candidate-pending-review-tasks-task-route-e474.json --json
+```
 
 ## E473 - Expose Pending Review Queue Status
 
