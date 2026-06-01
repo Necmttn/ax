@@ -98,7 +98,7 @@ interface CodexTokenUsage {
     ts: string;
 }
 
-interface CodexTurnTokenUsage {
+export interface CodexTurnTokenUsage {
     session: string;
     seq: number;
     ts: string;
@@ -490,7 +490,7 @@ async function walkJsonlFiles(root: string, cutoffMs: number): Promise<CodexFile
     return out;
 }
 
-interface CodexExtract {
+export interface CodexExtract {
     session: CodexSession;
     sourcePath: string | null;
     turns: CodexTurn[];
@@ -969,12 +969,16 @@ function createCodexExtractor(
     };
 }
 
-export function __testExtractCodexJsonlLines(lines: Iterable<string>): CodexExtract | null {
+export function extractCodexJsonlLines(lines: Iterable<string>): CodexExtract | null {
     const extractor = createCodexExtractor("codex-test.jsonl");
     for (const line of lines) {
         extractor.processLine(line);
     }
     return extractor.finish();
+}
+
+export function __testExtractCodexJsonlLines(lines: Iterable<string>): CodexExtract | null {
+    return extractCodexJsonlLines(lines);
 }
 
 export function __testStreamCodexJsonlLines(lines: Iterable<string>, every: number): CodexExtract[] {

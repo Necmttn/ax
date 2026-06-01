@@ -1176,6 +1176,10 @@ export function Turn({
 
 export function SessionInspectRoute() {
     const { sessionId } = useParams({ from: "/sessions/$sessionId/inspect" });
+    return <SessionInspectView sessionId={sessionId} />;
+}
+
+export function SessionInspectView({ sessionId }: { readonly sessionId: string }) {
     const decoded = decodeURIComponent(sessionId);
     const queryClient = useQueryClient();
 
@@ -1303,8 +1307,6 @@ export function SessionInspectRoute() {
                 <h2>Session inspect</h2>
                 <span className="meta">
                     <code>{shortSessionId(decoded)}…</code>
-                    {" · "}
-                    <Link to="/sessions/$sessionId" params={{ sessionId }} style={{ color: "var(--muted, #64748b)" }}>← overview</Link>
                 </span>
             </header>
             {query.error ? <div className="error">Error: {String(query.error)}</div> : null}

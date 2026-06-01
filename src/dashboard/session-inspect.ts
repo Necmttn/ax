@@ -9,6 +9,8 @@
 import { readFile } from "node:fs/promises";
 import { Data, Effect } from "effect";
 import { dissectTurn, type TurnSpan } from "../ingest/turn-dissect.ts";
+import { extractCodexJsonlLines, type CodexTurnTokenUsage } from "../ingest/codex.ts";
+import { estimateCost } from "../ingest/model-pricing.ts";
 import { SurrealClient } from "../lib/db.ts";
 import { decodeJsonRecordOrNull, encodeJson } from "../lib/decode.ts";
 import { resolveTurnContent } from "../queries/session-turn-content.ts";
@@ -407,6 +409,41 @@ const resolveTurnTokenUsage = (sessionId: string): Effect.Effect<Map<number, Tur
         Effect.map((rows) => new Map(rows.map((row) => [row.seq, row]))),
     );
 
+function codexTurnUsageToDetail(usage: CodexTurnTokenUsage): TurnTokenUsageDetail {
+    const cost = estimateCost({
+        modelKey: usage.model,
+        promptTokens: usage.promptTokens,
+        completionTokens: usage.completionTokens,
+        cacheCreationInputTokens: usage.cacheCreationInputTokens,
+        cacheReadInputTokens: usage.cacheReadInputTokens,
+        estimatedTokens: usage.estimatedTokens,
+    });
+    return {
+        seq: usage.seq,
+        model: usage.model,
+        prompt_tokens: usage.promptTokens,
+        completion_tokens: usage.completionTokens,
+        cache_creation_input_tokens: usage.cacheCreationInputTokens,
+        cache_read_input_tokens: usage.cacheReadInputTokens,
+        fresh_input_tokens: usage.freshInputTokens,
+        estimated_tokens: usage.estimatedTokens,
+        estimated_input_cost_usd: cost.inputUsd,
+        estimated_output_cost_usd: cost.outputUsd,
+        estimated_cache_creation_cost_usd: cost.cacheCreationUsd,
+        estimated_cache_read_cost_usd: cost.cacheReadUsd,
+        estimated_cost_usd: cost.totalUsd,
+        pricing_source: cost.pricingSource,
+        usage_source: usage.usageSource,
+        usage_quality: usage.usageQuality,
+    };
+}
+
+function deriveCodexTurnTokenUsage(raw: string): Map<number, TurnTokenUsageDetail> {
+    const extracted = extractCodexJsonlLines(raw.split("\n"));
+    const usages = extracted?.turnTokenUsages ?? [];
+    return new Map(usages.map((usage) => [usage.seq, codexTurnUsageToDetail(usage)]));
+}
+
 /** Spawn args parsed out of a parent tool_use call. Keyed by call_id when
  *  available (codex), else by ts so we can match approximately. */
 interface SpawnCall {
@@ -547,6 +584,15 @@ export const fetchSessionInspect = (
         try: async () => {
             const raw = await readFile(found.path, "utf8");
             const parseLine = found.harness === "codex" ? parseCodexLine : parseClaudeLine;
+            const derivedTurnTokenUsage = found.harness === "codex"
+                ? deriveCodexTurnTokenUsage(raw)
+                : new Map<number, TurnTokenUsageDetail>();
+            const tokenUsageForSeq = (currentSeq: number): TurnTokenUsageDetail | null =>
+                turnTokenUsage.get(currentSeq + 1) ??
+                turnTokenUsage.get(currentSeq) ??
+                derivedTurnTokenUsage.get(currentSeq + 1) ??
+                derivedTurnTokenUsage.get(currentSeq) ??
+                null;
 
             const turns: InspectTurnDto[] = [];
             const totals: Partial<Record<InspectSpanKind, number>> = {};
@@ -576,7 +622,7 @@ export const fetchSessionInspect = (
                     char_count: text.length,
                     raw_text: text,
                     spans: spans.map(toSpanDto),
-                    token_usage: turnTokenUsage.get(currentSeq + 1) ?? turnTokenUsage.get(currentSeq) ?? null,
+                    token_usage: tokenUsageForSeq(currentSeq),
                     content: findTurnContent(turnContent, currentSeq, text),
                 });
             }
