@@ -11,6 +11,11 @@
         {
           "type": "generic",
           "path": "apps/axctl/src/cli/version.ts"
+        },
+        {
+          "type": "json",
+          "path": "apps/axctl/package.json",
+          "jsonpath": "$.version"
         }
       ],
       "changelog-sections": [
