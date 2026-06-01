@@ -114,6 +114,74 @@ Decision:
   examples, and compare whether deterministic/hybrid gates catch the same case
   before another expensive SetFit run.
 
+## E490 - Workflow Boundary Miss Review Operations
+
+Question: can the E489 residual SetFit misses be turned into package-level
+review work without treating the failed model output as useful graph evidence?
+
+Changes:
+
+- Added `workflow-fixture-boundary-miss-review` to the classifier package
+  manifest. It generates a review JSON, markdown brief, and report for all
+  repeated residual misses from
+  `.ax/experiments/setfit-failure-analysis-workflow-fixtures-current.json`.
+- Added `workflow-fixture-boundary-miss-review-workflow-candidate` for a
+  focused review of only workflow-candidate sourced misses.
+- Added `--pending-exit-zero` to `boundary_miss_review.py` so generate-mode
+  package operations can succeed when the only failure is expected pending
+  review work. Invalid rows and other failures still exit nonzero.
+- Added regression coverage for empty `source_group` including all groups and
+  for the stricter pending-only exit behavior.
+
+Commands:
+
+```sh
+bun src/cli/index.ts classifiers package-operations \
+  --operation=workflow-fixture-boundary-miss-review \
+  --execute \
+  --out=.ax/experiments/classifier-package-execution-workflow-fixture-boundary-miss-review-e490.json \
+  --json
+
+bun src/cli/index.ts classifiers package-operations \
+  --operation=workflow-fixture-boundary-miss-review-workflow-candidate \
+  --execute \
+  --out=.ax/experiments/classifier-package-execution-workflow-fixture-boundary-miss-review-workflow-candidate-e490.json \
+  --json
+```
+
+Artifacts:
+
+- `.ax/experiments/boundary-miss-review-workflow-fixtures-current.json`
+- `.ax/experiments/boundary-miss-review-workflow-fixtures-current.md`
+- `.ax/experiments/boundary-miss-review-workflow-fixtures-current-report.json`
+- `.ax/experiments/boundary-miss-review-workflow-candidate-current.json`
+- `.ax/experiments/boundary-miss-review-workflow-candidate-current.md`
+- `.ax/experiments/boundary-miss-review-workflow-candidate-current-report.json`
+- `.ax/experiments/classifier-package-execution-workflow-fixture-boundary-miss-review-e490.json`
+- `.ax/experiments/classifier-package-execution-workflow-fixture-boundary-miss-review-workflow-candidate-e490.json`
+
+Results:
+
+- Broad review operation: `decision=needs_boundary_miss_review`,
+  `items=7`, `pending=7`, families
+  `approval_boundary=1`, `label_boundary=4`, `missed_signal=3`, actual labels
+  `approval=1`, `correction_or_rejection_signal=5`,
+  `verification_or_recovery_signal=1`.
+- Workflow-candidate focused operation: `decision=needs_boundary_miss_review`,
+  `items=1`, `pending=1`, family `missed_signal=1`, actual label
+  `correction_or_rejection_signal=1`.
+- The focused item is still
+  `workflow-candidate-topic/review_coverage/correction_or_rejection_signal/lhseid`,
+  predicted as `none` in seeds `7`, `13`, and `42`.
+
+Decision:
+
+- Continue, but route the model failure into boundary review and fixture
+  contract work.
+- The review operations give the next ten-round loop a concrete work queue:
+  decide which repeated misses are valid labels, which need fixture text/target
+  changes, and which imply deterministic/hybrid gates.
+
 Current recommendation:
 
 - Index continuation: E488 turns the accepted classifier-fixture follow-up into

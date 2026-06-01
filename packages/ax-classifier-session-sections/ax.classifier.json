@@ -701,6 +701,34 @@
             ]
         },
         {
+            "id": "workflow-fixture-boundary-miss-review",
+            "kind": "review",
+            "description": "Generate a review brief for all repeated residual misses from the workflow-augmented SetFit robustness run.",
+            "command": "bun run classifiers:boundary-miss-review -- --analysis=.ax/experiments/setfit-failure-analysis-workflow-fixtures-current.json --review=.ax/experiments/boundary-miss-review-workflow-fixtures-current.json --brief=.ax/experiments/boundary-miss-review-workflow-fixtures-current.md --out=.ax/experiments/boundary-miss-review-workflow-fixtures-current-report.json --source-group= --mode=generate --pending-exit-zero --json",
+            "inputs": [
+                ".ax/experiments/setfit-failure-analysis-workflow-fixtures-current.json"
+            ],
+            "outputs": [
+                ".ax/experiments/boundary-miss-review-workflow-fixtures-current.json",
+                ".ax/experiments/boundary-miss-review-workflow-fixtures-current.md",
+                ".ax/experiments/boundary-miss-review-workflow-fixtures-current-report.json"
+            ]
+        },
+        {
+            "id": "workflow-fixture-boundary-miss-review-workflow-candidate",
+            "kind": "review",
+            "description": "Generate a focused review brief for repeated residual misses that came from workflow-candidate fixtures.",
+            "command": "bun run classifiers:boundary-miss-review -- --analysis=.ax/experiments/setfit-failure-analysis-workflow-fixtures-current.json --review=.ax/experiments/boundary-miss-review-workflow-candidate-current.json --brief=.ax/experiments/boundary-miss-review-workflow-candidate-current.md --out=.ax/experiments/boundary-miss-review-workflow-candidate-current-report.json --source-group=workflow-candidate --mode=generate --pending-exit-zero --json",
+            "inputs": [
+                ".ax/experiments/setfit-failure-analysis-workflow-fixtures-current.json"
+            ],
+            "outputs": [
+                ".ax/experiments/boundary-miss-review-workflow-candidate-current.json",
+                ".ax/experiments/boundary-miss-review-workflow-candidate-current.md",
+                ".ax/experiments/boundary-miss-review-workflow-candidate-current-report.json"
+            ]
+        },
+        {
             "id": "workflow-fixture-none-safety-pregate",
             "kind": "status",
             "description": "Replay a deterministic text-projection none-safety pre-gate over workflow SetFit robustness predictions.",

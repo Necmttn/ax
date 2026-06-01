@@ -61,6 +61,18 @@ class BoundaryMissReviewTest(unittest.TestCase):
         self.assertEqual(review["items"][0]["review_label"], "correction")
         self.assertEqual(review["items"][0]["status"], "pending")
 
+    def test_generate_review_can_include_all_source_groups(self) -> None:
+        review = module.generate_review(analysis(), min_hit_count=2, source_group="")
+
+        self.assertEqual(review["source_group"], "")
+        self.assertEqual(
+            [item["id"] for item in review["items"]],
+            [
+                "session-section-chunks/correction-dirty-files-question",
+                "embedding-helper-hard-negative/session-section-chunks/none-task-recall",
+            ],
+        )
+
     def test_sync_review_updates_status_label_action_and_notes(self) -> None:
         review = module.generate_review(analysis())
         brief = module.render_markdown_brief(review).replace(
@@ -136,6 +148,19 @@ class BoundaryMissReviewTest(unittest.TestCase):
         self.assertTrue(ready["promotion_ready"])
         self.assertEqual(rejected["decision"], "boundary_review_requires_fixture_changes")
         self.assertFalse(rejected["promotion_ready"])
+
+    def test_pending_exit_zero_only_allows_plain_pending_reviews(self) -> None:
+        pending = {"failures": ["boundary miss review still has pending items"]}
+        invalid = {
+            "failures": [
+                "boundary miss review still has pending items",
+                "boundary miss review contains invalid statuses",
+            ]
+        }
+
+        self.assertEqual(module.exit_code_for_report(pending, pending_exit_zero=True), 0)
+        self.assertEqual(module.exit_code_for_report(invalid, pending_exit_zero=True), 1)
+        self.assertEqual(module.exit_code_for_report(pending, pending_exit_zero=False), 1)
 
 
 if __name__ == "__main__":
