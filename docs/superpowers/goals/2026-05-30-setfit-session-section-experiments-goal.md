@@ -446,6 +446,64 @@ Decision:
   branch for `classifier_boundary_replay` so services do not need raw SurrealQL
   to consume deterministic replay evidence.
 
+## E496 - Boundary Replay Graph Query Mode
+
+Question: can services discover deterministic boundary replay facts through
+`ax classifiers graph` instead of raw SurrealQL?
+
+Changes:
+
+- Added graph mode `boundary-replay`.
+- Added `boundary_replay_facts` to graph health reports.
+- Added boundary replay totals and result-kind counts.
+- Added text rendering for boundary replay facts.
+
+Command:
+
+```sh
+bun src/cli/index.ts classifiers graph \
+  --mode=boundary-replay \
+  --source-kind=boundary_replay_deterministic_projection \
+  --fact-kind=classifier_boundary_replay \
+  --predicate=covered_by_deterministic \
+  --value=true \
+  --json
+```
+
+Results:
+
+- `query_match_status=matched`
+- `query_result_kinds=["boundary_replay_facts"]`
+- `query_result_kind_counts=[{kind: "boundary_replay_facts", count: 1}]`
+- Total boundary replay facts in graph: `2`
+- Result boundary replay facts: `1`
+- Returned fact:
+  `covered_by_deterministic=true` for
+  `classifier_boundary_miss:workflow-candidate-topic/review_coverage/correction_or_rejection_signal/lhseid`
+  with classifier key `correction-event`, actual
+  `correction_or_rejection_signal`, target `workflow_state`, and evidence path
+  `.ax/experiments/boundary-review-deterministic-replay-workflow-candidate-current.json`.
+
+Verification:
+
+```sh
+bun test scripts/classifier-package-operations.test.ts src/cli/classifiers-package-operations.test.ts
+bun run typecheck
+```
+
+Passed: `82` Bun tests. Typecheck exited `0` with the existing Effect lint
+messages.
+
+Decision:
+
+- The deterministic replay coverage is now part of the graph query surface.
+- This makes the useful path concrete: model failures can be converted into
+  reviewed boundary misses, deterministic coverage can be projected as graph
+  facts, and services can query those facts without SurrealQL.
+- Next useful slice: add an automated quality/conclusion report that compares
+  SetFit quality, hybrid quality, boundary replay coverage, and graph
+  availability into a single decision artifact.
+
 Current recommendation:
 
 - Index continuation: E488 turns the accepted classifier-fixture follow-up into

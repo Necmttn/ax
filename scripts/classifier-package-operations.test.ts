@@ -1682,6 +1682,68 @@ describe("classifier package operations report", () => {
         });
     });
 
+    test("lists boundary replay graph facts in boundary-replay mode", () => {
+        const report = buildExecutionGraphHealthReport({
+            nodes: [],
+            edges: [{
+                graph_id: "edge:boundary",
+                kind: "reported_boundary_miss",
+                from_id: "artifact:boundary",
+                to_id: "classifier_boundary_miss:workflow",
+                evidence_path: ".ax/experiments/boundary-review-deterministic-replay-workflow-candidate-current.json",
+                properties_json: "{}",
+                source_kind: "boundary_replay_deterministic_projection",
+            }],
+            facts: [{
+                graph_id: "fact:boundary:covered",
+                kind: "classifier_boundary_replay",
+                subject: "classifier_boundary_miss:workflow",
+                predicate: "covered_by_deterministic",
+                value_json: JSON.stringify(true),
+                evidence_edges_json: JSON.stringify(["edge:boundary"]),
+                properties_json: JSON.stringify({
+                    classifier_key: "correction-event",
+                    actual: "correction_or_rejection_signal",
+                    target: "workflow_state",
+                }),
+                source_kind: "boundary_replay_deterministic_projection",
+            }, {
+                graph_id: "fact:boundary:label",
+                kind: "classifier_boundary_replay",
+                subject: "classifier_boundary_miss:workflow",
+                predicate: "deterministic_label",
+                object: "classifier_deterministic_result:workflow",
+                value_json: JSON.stringify({ label: "correction", target: "workflow_state" }),
+                evidence_edges_json: JSON.stringify(["edge:boundary"]),
+                properties_json: JSON.stringify({
+                    classifier_key: "correction-event",
+                    confidence: 0.84,
+                    signals: ["correction:workflow_state"],
+                }),
+                source_kind: "boundary_replay_deterministic_projection",
+            }],
+            query: {
+                mode: "boundary-replay",
+                source_kind: "boundary_replay_deterministic_projection",
+                fact_kind: "classifier_boundary_replay",
+                predicate: "covered_by_deterministic",
+                value_equals: "true",
+            },
+        });
+
+        expect(report.query_match_status).toBe("matched");
+        expect(report.result_totals.boundary_replay_fact_count).toBe(1);
+        expect(report.query_result_kinds).toContain("boundary_replay_facts");
+        expect(report.query_result_kind_counts).toContainEqual({ kind: "boundary_replay_facts", count: 1 });
+        expect(report.boundary_replay_facts?.[0]).toMatchObject({
+            predicate: "covered_by_deterministic",
+            classifier_key: "correction-event",
+            target: "workflow_state",
+            value: true,
+            evidence_paths: [".ax/experiments/boundary-review-deterministic-replay-workflow-candidate-current.json"],
+        });
+    });
+
     test("filters embedding helper graph facts by routing threshold", () => {
         const report = buildExecutionGraphHealthReport({
             nodes: [],
@@ -2797,17 +2859,17 @@ describe("classifier package operations report", () => {
         expect(report.totals.operation_count).toBeGreaterThanOrEqual(37);
         expect(report.totals.operation_kinds.train).toBe(1);
         expect(report.totals.operation_kinds.eval).toBe(9);
-        expect(report.totals.operation_kinds.review).toBe(18);
-        expect(report.totals.operation_kinds.status).toBe(24);
+        expect(report.totals.operation_kinds.review).toBe(20);
+        expect(report.totals.operation_kinds.status).toBe(26);
         expect(report.totals.operation_kinds.publish).toBe(4);
         expect(report.totals.operation_kinds.debug).toBe(1);
         expect(report.totals.local_model_ready_count).toBe(1);
         expect(report.totals.local_model_incomplete_count).toBe(0);
-        expect(report.packages.find((entry) => entry.package_key === "session-section-chunks")?.operation_count).toBe(57);
+        expect(report.packages.find((entry) => entry.package_key === "session-section-chunks")?.operation_count).toBe(61);
         expect(report.packages.find((entry) => entry.package_key === "session-section-chunks")?.operation_kinds.train).toBe(1);
         expect(report.packages.find((entry) => entry.package_key === "session-section-chunks")?.operation_kinds.eval).toBe(9);
-        expect(report.packages.find((entry) => entry.package_key === "session-section-chunks")?.operation_kinds.review).toBe(18);
-        expect(report.packages.find((entry) => entry.package_key === "session-section-chunks")?.operation_kinds.status).toBe(24);
+        expect(report.packages.find((entry) => entry.package_key === "session-section-chunks")?.operation_kinds.review).toBe(20);
+        expect(report.packages.find((entry) => entry.package_key === "session-section-chunks")?.operation_kinds.status).toBe(26);
         expect(report.packages.find((entry) => entry.package_key === "session-section-chunks")?.operation_kinds.publish).toBe(4);
         expect(report.packages.find((entry) => entry.package_key === "session-section-chunks")?.lifecycle_readiness.status).toBe("ready");
         expect(report.packages.find((entry) => entry.package_key === "direction-event")?.lifecycle_readiness.status).toBe("not_applicable");

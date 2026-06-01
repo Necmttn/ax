@@ -1821,7 +1821,7 @@ const classifiersPackageOperationsCommand = Command.make(
         execute: Flag.boolean("execute").pipe(Flag.withDefault(false)),
         facts: Flag.boolean("facts").pipe(Flag.withDefault(false)),
         graphHealth: Flag.boolean("graph-health").pipe(Flag.withDefault(false)),
-        graphMode: Flag.choice("graph-mode", ["summary", "guarded", "changed-artifacts", "evidence", "lifecycle", "embedding-helper"] as const).pipe(Flag.withDefault("summary")),
+        graphMode: Flag.choice("graph-mode", ["summary", "guarded", "changed-artifacts", "evidence", "lifecycle", "embedding-helper", "boundary-replay"] as const).pipe(Flag.withDefault("summary")),
         history: Flag.boolean("history").pipe(Flag.withDefault(false)),
         manifest: Flag.string("manifest").pipe(Flag.withDefault("packages/ax-classifier-session-sections/ax.classifier.json")),
         operation: Flag.string("operation").pipe(Flag.optional),
@@ -1923,7 +1923,7 @@ const classifiersPackageOperationsCommand = Command.make(
 const classifiersGraphCommand = Command.make(
     "graph",
     {
-        mode: Flag.choice("mode", ["summary", "guarded", "changed-artifacts", "evidence", "lifecycle", "embedding-helper"] as const).pipe(Flag.withDefault("summary")),
+        mode: Flag.choice("mode", ["summary", "guarded", "changed-artifacts", "evidence", "lifecycle", "embedding-helper", "boundary-replay"] as const).pipe(Flag.withDefault("summary")),
         operation: Flag.string("operation").pipe(Flag.optional),
         artifact: Flag.string("artifact").pipe(Flag.optional),
         sourceKind: Flag.string("source-kind").pipe(Flag.optional),
@@ -2020,7 +2020,7 @@ const classifiersLifecycleCommand = Command.make(
         routeExecutionPlan: Flag.boolean("route-execution-plan").pipe(Flag.withDefault(false)),
         executeRoute: Flag.boolean("execute-route").pipe(Flag.withDefault(false)),
         inspectRouteExecution: Flag.string("inspect-route-execution").pipe(Flag.optional),
-        graphMode: Flag.choice("graph-mode", ["summary", "guarded", "changed-artifacts", "evidence", "lifecycle", "embedding-helper"] as const).pipe(Flag.optional),
+        graphMode: Flag.choice("graph-mode", ["summary", "guarded", "changed-artifacts", "evidence", "lifecycle", "embedding-helper", "boundary-replay"] as const).pipe(Flag.optional),
         predicate: Flag.string("predicate").pipe(Flag.optional),
         subject: Flag.string("subject").pipe(Flag.optional),
         valueContains: Flag.string("value-contains").pipe(Flag.optional),

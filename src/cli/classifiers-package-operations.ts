@@ -569,8 +569,8 @@ export function renderClassifierPackageExecutionGraphHealthText(report: Classifi
         `query suggested query: ${querySuggestedQuery}`,
         `nodes/edges/facts: ${report.totals.node_count}/${report.totals.edge_count}/${report.totals.fact_count}`,
         `packages/operations/executions/artifacts: ${report.totals.package_count}/${report.totals.operation_count}/${report.totals.execution_count}/${report.totals.artifact_count}`,
-        `execution/guard/artifact/lifecycle/helper facts: ${report.totals.execution_fact_count}/${report.totals.guard_fact_count}/${report.totals.artifact_fact_count}/${report.totals.lifecycle_fact_count}/${report.totals.embedding_helper_fact_count}`,
-        `results operations/guarded/changed/lifecycle/helper/evidence: ${report.result_totals.operation_count}/${report.result_totals.guarded_operation_count}/${report.result_totals.changed_artifact_count}/${report.result_totals.lifecycle_fact_count}/${report.result_totals.embedding_helper_fact_count}/${report.result_totals.evidence_path_count}`,
+        `execution/guard/artifact/lifecycle/helper/boundary facts: ${report.totals.execution_fact_count}/${report.totals.guard_fact_count}/${report.totals.artifact_fact_count}/${report.totals.lifecycle_fact_count}/${report.totals.embedding_helper_fact_count}/${report.totals.boundary_replay_fact_count ?? 0}`,
+        `results operations/guarded/changed/lifecycle/helper/boundary/evidence: ${report.result_totals.operation_count}/${report.result_totals.guarded_operation_count}/${report.result_totals.changed_artifact_count}/${report.result_totals.lifecycle_fact_count}/${report.result_totals.embedding_helper_fact_count}/${report.result_totals.boundary_replay_fact_count ?? 0}/${report.result_totals.evidence_path_count}`,
         `routing policy status: ${routingPolicySummary.status}`,
         `routing policy evaluated: ${routingPolicySummary.evaluated_policy_count ?? "unknown"}`,
         `routing policy candidates: ${routingPolicySummary.candidate_count}`,
@@ -665,6 +665,25 @@ export function renderClassifierPackageExecutionGraphHealthText(report: Classifi
                 lines.push(`- dedupe ${fact.subject}: ${fact.predicate}`);
             } else {
                 lines.push(`- ${fact.kind} ${fact.predicate}: ${fact.subject}`);
+            }
+            if (fact.evidence_paths.length > 0) {
+                lines.push(`  evidence: ${fact.evidence_paths.join(", ")}`);
+            }
+        }
+    }
+    const boundaryReplayFacts = report.boundary_replay_facts ?? [];
+    if (boundaryReplayFacts.length > 0) {
+        lines.push("boundary replay facts:");
+        for (const fact of boundaryReplayFacts) {
+            const value = typeof fact.value === "string"
+                ? fact.value
+                : JSON.stringify(fact.value);
+            lines.push(`- ${fact.predicate}: ${value} subject=${fact.subject}`);
+            if (fact.classifier_key || fact.target || fact.confidence !== undefined) {
+                lines.push(`  classifier: ${fact.classifier_key ?? "unknown"} target=${fact.target ?? "unknown"} confidence=${fact.confidence ?? "unknown"}`);
+            }
+            if ((fact.signals ?? []).length > 0) {
+                lines.push(`  signals: ${(fact.signals ?? []).join(", ")}`);
             }
             if (fact.evidence_paths.length > 0) {
                 lines.push(`  evidence: ${fact.evidence_paths.join(", ")}`);

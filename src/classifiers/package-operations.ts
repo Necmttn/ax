@@ -386,6 +386,23 @@ export interface ClassifierGraphEmbeddingHelperFact {
     readonly evidence_paths: readonly string[];
 }
 
+export interface ClassifierGraphBoundaryReplayFact {
+    readonly graph_id: string;
+    readonly kind: string;
+    readonly subject: string;
+    readonly predicate: string;
+    readonly object?: string;
+    readonly source_kind?: string;
+    readonly value: unknown;
+    readonly classifier_key?: string;
+    readonly actual?: string;
+    readonly target?: string;
+    readonly confidence?: number;
+    readonly signals?: readonly string[];
+    readonly evidence_edges: readonly string[];
+    readonly evidence_paths: readonly string[];
+}
+
 export interface ClassifierGraphRoutingPolicyRecommendedQuery {
     readonly mode: "embedding-helper" | "evidence";
     readonly operation_id?: string;
@@ -442,8 +459,8 @@ export interface ClassifierGraphRoutingPolicySummary {
     readonly recommended_floor_next_action?: "choose_recommended_routing_threshold" | "review_more_routing_candidates";
 }
 
-export type ClassifierGraphHealthMode = "summary" | "guarded" | "changed-artifacts" | "evidence" | "lifecycle" | "embedding-helper";
-export type ClassifierGraphQueryResultKind = "operations" | "guarded_operations" | "changed_artifacts" | "lifecycle_facts" | "embedding_helper_facts";
+export type ClassifierGraphHealthMode = "summary" | "guarded" | "changed-artifacts" | "evidence" | "lifecycle" | "embedding-helper" | "boundary-replay";
+export type ClassifierGraphQueryResultKind = "operations" | "guarded_operations" | "changed_artifacts" | "lifecycle_facts" | "embedding_helper_facts" | "boundary_replay_facts";
 
 export interface ClassifierGraphQueryResultKindCount {
     readonly kind: ClassifierGraphQueryResultKind;
@@ -544,6 +561,7 @@ export interface ClassifierPackageExecutionGraphHealthReport {
     readonly lifecycle_value_counts?: readonly ClassifierGraphLifecycleValueCount[];
     readonly lifecycle_available_value_counts?: readonly ClassifierGraphLifecycleValueCount[];
     readonly embedding_helper_facts: readonly ClassifierGraphEmbeddingHelperFact[];
+    readonly boundary_replay_facts?: readonly ClassifierGraphBoundaryReplayFact[];
     readonly routing_policy_summary?: ClassifierGraphRoutingPolicySummary;
     readonly evidence_paths: readonly string[];
     readonly query_match_status?: "matched" | "no_match";
@@ -572,6 +590,7 @@ export interface ClassifierPackageExecutionGraphHealthReport {
         readonly artifact_fact_count: number;
         readonly lifecycle_fact_count: number;
         readonly embedding_helper_fact_count: number;
+        readonly boundary_replay_fact_count?: number;
         readonly changed_artifact_count: number;
         readonly evidence_path_count: number;
     };
@@ -581,6 +600,7 @@ export interface ClassifierPackageExecutionGraphHealthReport {
         readonly changed_artifact_count: number;
         readonly lifecycle_fact_count: number;
         readonly embedding_helper_fact_count: number;
+        readonly boundary_replay_fact_count?: number;
         readonly evidence_path_count: number;
     };
     readonly decision: "healthy" | "empty_graph";
@@ -2746,6 +2766,41 @@ export function buildExecutionGraphHealthReport(input: {
             };
         })
         .sort((a, b) => `${a.predicate}/${a.source_fixture_id ?? a.subject}`.localeCompare(`${b.predicate}/${b.source_fixture_id ?? b.subject}`));
+    const boundaryReplayFacts = input.facts
+        .filter((fact) => fact.source_kind === "boundary_replay_deterministic_projection" || fact.kind === "classifier_boundary_replay")
+        .map((fact): ClassifierGraphBoundaryReplayFact => {
+            const properties = jsonRecord(fact.properties_json);
+            const evidenceEdgesValue = safeJsonParse<unknown>(fact.evidence_edges_json);
+            const evidenceEdges = Array.isArray(evidenceEdgesValue)
+                ? evidenceEdgesValue.filter((entry): entry is string => typeof entry === "string")
+                : [];
+            const evidencePaths = Array.from(new Set(evidenceEdges
+                .map((edgeId) => input.edges.find((edge) => edge.graph_id === edgeId)?.evidence_path)
+                .filter((path): path is string => Boolean(path))))
+                .sort();
+            const value = fact.value_json === undefined ? null : safeJsonParse<unknown>(fact.value_json);
+            const signalsValue = properties.signals;
+            const signals = Array.isArray(signalsValue)
+                ? signalsValue.filter((entry): entry is string => typeof entry === "string")
+                : [];
+            return {
+                graph_id: fact.graph_id,
+                kind: fact.kind,
+                subject: fact.subject,
+                predicate: fact.predicate,
+                ...(fact.object === undefined ? {} : { object: fact.object }),
+                ...(fact.source_kind === undefined ? {} : { source_kind: fact.source_kind }),
+                value,
+                ...(jsonString(properties.classifier_key) === null ? {} : { classifier_key: jsonString(properties.classifier_key) as string }),
+                ...(jsonString(properties.actual) === null ? {} : { actual: jsonString(properties.actual) as string }),
+                ...(jsonString(properties.target) === null ? {} : { target: jsonString(properties.target) as string }),
+                ...(jsonNumber(properties.confidence) === null ? {} : { confidence: jsonNumber(properties.confidence) as number }),
+                ...(signals.length === 0 ? {} : { signals }),
+                evidence_edges: evidenceEdges,
+                evidence_paths: evidencePaths,
+            };
+        })
+        .sort((a, b) => `${a.predicate}/${a.subject}`.localeCompare(`${b.predicate}/${b.subject}`));
     const operationMatches = (operation: ClassifierGraphOperationHealth): boolean =>
         !query.operation_id || operation.operation_id === query.operation_id || `${operation.package_key}/${operation.operation_id}` === query.operation_id;
     const artifactMatches = (artifact: ClassifierGraphChangedArtifact): boolean =>
@@ -2756,7 +2811,7 @@ export function buildExecutionGraphHealthReport(input: {
     const filteredOperations = operations.filter(operationMatches);
     const filteredGuardedOperations = operations.filter((operation) => operation.guarded_count > 0).filter(operationMatches);
     const filteredChangedArtifacts = changedArtifacts.filter(changedArtifactMatches);
-    const graphFactOnlyMode = query.mode === "lifecycle" || query.mode === "embedding-helper";
+    const graphFactOnlyMode = query.mode === "lifecycle" || query.mode === "embedding-helper" || query.mode === "boundary-replay";
     const resultGuardedOperations = graphFactOnlyMode ? [] : filteredGuardedOperations;
     const resultOperations = graphFactOnlyMode
         ? []
@@ -2820,6 +2875,29 @@ export function buildExecutionGraphHealthReport(input: {
             graphFactValueEquals(fact.value, query.value_equals)
         )
         : [];
+    const resultBoundaryReplayFacts = query.mode === "boundary-replay" || query.mode === "evidence"
+        ? boundaryReplayFacts.filter((fact) =>
+            (!query.artifact_path ||
+                fact.evidence_paths.includes(query.artifact_path) ||
+                fact.subject === query.artifact_path ||
+                fact.object === query.artifact_path) &&
+            (!query.source_kind || fact.source_kind === query.source_kind) &&
+            (!query.fact_kind || fact.kind === query.fact_kind) &&
+            !query.status &&
+            !query.source_fixture_id &&
+            !query.proposed_label &&
+            !query.threshold &&
+            query.min_seed_count === undefined &&
+            query.min_positive_recall === undefined &&
+            query.min_call_reduction === undefined &&
+            query.min_nearest_similarity === undefined &&
+            !query.nearest_fixture_id &&
+            (!query.predicate || fact.predicate === query.predicate) &&
+            (!query.subject || fact.subject === query.subject) &&
+            graphFactValueContains(fact.value, query.value_contains) &&
+            graphFactValueEquals(fact.value, query.value_equals)
+        )
+        : [];
     const routingPolicyAvailableFacts = query.mode === "embedding-helper" || query.mode === "evidence"
         ? embeddingHelperFacts.filter((fact) =>
             (!query.artifact_path ||
@@ -2847,6 +2925,7 @@ export function buildExecutionGraphHealthReport(input: {
         ...resultChangedArtifacts.map((artifact) => artifact.evidence_path).filter(Boolean),
         ...resultLifecycleFacts.flatMap((fact) => fact.evidence_paths),
         ...resultEmbeddingHelperFacts.flatMap((fact) => fact.evidence_paths),
+        ...resultBoundaryReplayFacts.flatMap((fact) => fact.evidence_paths),
     ])).sort();
     const lifecycleValueCountsFor = (facts: readonly ClassifierGraphLifecycleFact[]): readonly ClassifierGraphLifecycleValueCount[] => {
         const lifecycleValueCountByKey = new Map<string, ClassifierGraphLifecycleValueCount>();
@@ -3177,7 +3256,8 @@ export function buildExecutionGraphHealthReport(input: {
         resultGuardedOperations.length +
         resultChangedArtifacts.length +
         resultLifecycleFacts.length +
-        resultEmbeddingHelperFacts.length;
+        resultEmbeddingHelperFacts.length +
+        resultBoundaryReplayFacts.length;
     const queryMatchStatus = primaryResultCount > 0 ? "matched" : "no_match";
     const queryResultKinds: ClassifierGraphQueryResultKind[] = [
         ...(resultOperations.length > 0 ? ["operations" as const] : []),
@@ -3185,6 +3265,7 @@ export function buildExecutionGraphHealthReport(input: {
         ...(resultChangedArtifacts.length > 0 ? ["changed_artifacts" as const] : []),
         ...(resultLifecycleFacts.length > 0 ? ["lifecycle_facts" as const] : []),
         ...(resultEmbeddingHelperFacts.length > 0 ? ["embedding_helper_facts" as const] : []),
+        ...(resultBoundaryReplayFacts.length > 0 ? ["boundary_replay_facts" as const] : []),
     ];
     const queryResultKindCounts: ClassifierGraphQueryResultKindCount[] = [
         ...(resultOperations.length > 0 ? [{ kind: "operations" as const, count: resultOperations.length }] : []),
@@ -3192,6 +3273,7 @@ export function buildExecutionGraphHealthReport(input: {
         ...(resultChangedArtifacts.length > 0 ? [{ kind: "changed_artifacts" as const, count: resultChangedArtifacts.length }] : []),
         ...(resultLifecycleFacts.length > 0 ? [{ kind: "lifecycle_facts" as const, count: resultLifecycleFacts.length }] : []),
         ...(resultEmbeddingHelperFacts.length > 0 ? [{ kind: "embedding_helper_facts" as const, count: resultEmbeddingHelperFacts.length }] : []),
+        ...(resultBoundaryReplayFacts.length > 0 ? [{ kind: "boundary_replay_facts" as const, count: resultBoundaryReplayFacts.length }] : []),
     ];
 
     return {
@@ -3205,6 +3287,7 @@ export function buildExecutionGraphHealthReport(input: {
         lifecycle_value_counts: lifecycleValueCounts,
         lifecycle_available_value_counts: lifecycleAvailableValueCounts,
         embedding_helper_facts: resultEmbeddingHelperFacts,
+        boundary_replay_facts: resultBoundaryReplayFacts,
         routing_policy_summary: routingPolicySummary,
         evidence_paths: resultEvidencePaths,
         query_match_status: queryMatchStatus,
@@ -3235,6 +3318,7 @@ export function buildExecutionGraphHealthReport(input: {
             artifact_fact_count: input.facts.filter((fact) => fact.kind === "classifier_artifact_observation").length,
             lifecycle_fact_count: lifecycleFacts.length,
             embedding_helper_fact_count: embeddingHelperFacts.length,
+            boundary_replay_fact_count: boundaryReplayFacts.length,
             changed_artifact_count: changedArtifacts.length,
             evidence_path_count: evidencePaths.size,
         },
@@ -3244,6 +3328,7 @@ export function buildExecutionGraphHealthReport(input: {
             changed_artifact_count: resultChangedArtifacts.length,
             lifecycle_fact_count: resultLifecycleFacts.length,
             embedding_helper_fact_count: resultEmbeddingHelperFacts.length,
+            boundary_replay_fact_count: resultBoundaryReplayFacts.length,
             evidence_path_count: resultEvidencePaths.length,
         },
         decision: input.nodes.length === 0 && input.edges.length === 0 && input.facts.length === 0 ? "empty_graph" : "healthy",

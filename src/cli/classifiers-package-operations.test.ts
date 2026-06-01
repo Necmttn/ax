@@ -816,7 +816,7 @@ describe("classifiers package-operations format", () => {
         expect(output).toContain("mode: guarded");
         expect(output).toContain("filter operation: refresh");
         expect(output).toContain("nodes/edges/facts: 3/2/2");
-        expect(output).toContain("results operations/guarded/changed/lifecycle/helper/evidence: 1/1/1/0/0/1");
+        expect(output).toContain("results operations/guarded/changed/lifecycle/helper/boundary/evidence: 1/1/1/0/0/0/1");
         expect(output).toContain("- demo/refresh");
         expect(output).toContain("runs executed/failed/guarded: 1/0/1");
         expect(output).toContain("changed artifacts:");
@@ -1075,7 +1075,7 @@ describe("classifiers package-operations format", () => {
         expect(output).toContain("query suggestion filter changes: value_equals:bind_inputs->bind_inputs (unchanged)");
         expect(output).toContain("query suggested argv: bun src/cli/index.ts classifiers graph --mode lifecycle --predicate review_pipeline_prepared_argv --subject classifier_lifecycle:workflow_candidate_proposal --source-kind classifier_package_execution --value-contains src/cli/index.ts --value bind_inputs");
         expect(output).toContain("query suggested query: mode=lifecycle predicate=review_pipeline_prepared_argv subject=classifier_lifecycle:workflow_candidate_proposal source_kind=classifier_package_execution value_contains=src/cli/index.ts value_equals=bind_inputs");
-        expect(output).toContain("execution/guard/artifact/lifecycle/helper facts: 0/0/0/1/0");
+        expect(output).toContain("execution/guard/artifact/lifecycle/helper/boundary facts: 0/0/0/1/0/0");
         expect(output).toContain("lifecycle facts:");
         expect(output).toContain("- review_pipeline_prepared_argv: [\"bun\",\"src/cli/index.ts\"]");
         expect(output).toContain("source: review_pipeline_lifecycle .ax/experiments/workflow-candidate-proposal-review-current.json");
