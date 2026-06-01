@@ -4416,6 +4416,68 @@ describe("classifiers workflow-candidates", () => {
             "--out=.ax/experiments/pending-review-batch.json",
             "--json",
         ]);
+
+        const collectReviewRouteReport = buildWorkflowCandidateGuidancePendingReviewTaskListReport({
+            taskDir: ".ax/tasks",
+            filters: { route: "collect_review_decisions" },
+            taskFiles: [
+                { path: ".ax/tasks/workflow-candidate-pending-review-ready.md", content: taskContent },
+                { path: ".ax/tasks/workflow-candidate-pending-review-missing.md", content: missingBriefContent },
+                { path: ".ax/tasks/workflow-candidate-pending-review-reviewed.md", content: reviewedContent },
+            ],
+            pathExists: (path) => path !== ".ax/experiments/missing-review.md",
+            readFile: (path) => {
+                if (path.endsWith(".jsonl")) return fixtureRowsJsonl;
+                if (path === ".ax/experiments/reviewed.md") return reviewedBrief;
+                return taskContent;
+            },
+        });
+        expect(collectReviewRouteReport).toMatchObject({
+            filters: { route: "collect_review_decisions" },
+            task_count: 1,
+            ready_for_review_count: 1,
+            review_sync_command_ready_count: 0,
+            review_inspect_command_ready_count: 0,
+            route_counts: {
+                collect_review_decisions: 1,
+                execute_review_command: 0,
+                repair_artifacts: 0,
+            },
+            recommended_task_path: ".ax/tasks/workflow-candidate-pending-review-ready.md",
+            recommended_task_route: "collect_review_decisions",
+            recommended_task_can_execute_command: false,
+        });
+        expect(renderWorkflowCandidateGuidancePendingReviewTaskListText(collectReviewRouteReport)).toContain("filter route: collect_review_decisions");
+
+        const executableRouteReport = buildWorkflowCandidateGuidancePendingReviewTaskListReport({
+            taskDir: ".ax/tasks",
+            filters: { route: "execute_review_command" },
+            taskFiles: [
+                { path: ".ax/tasks/workflow-candidate-pending-review-ready.md", content: taskContent },
+                { path: ".ax/tasks/workflow-candidate-pending-review-missing.md", content: missingBriefContent },
+                { path: ".ax/tasks/workflow-candidate-pending-review-reviewed.md", content: reviewedContent },
+            ],
+            pathExists: (path) => path !== ".ax/experiments/missing-review.md",
+            readFile: (path) => {
+                if (path.endsWith(".jsonl")) return fixtureRowsJsonl;
+                if (path === ".ax/experiments/reviewed.md") return reviewedBrief;
+                return taskContent;
+            },
+        });
+        expect(executableRouteReport).toMatchObject({
+            filters: { route: "execute_review_command" },
+            task_count: 1,
+            review_sync_command_ready_count: 1,
+            review_inspect_command_ready_count: 1,
+            route_counts: {
+                collect_review_decisions: 0,
+                execute_review_command: 1,
+                repair_artifacts: 0,
+            },
+            recommended_task_path: ".ax/tasks/workflow-candidate-pending-review-reviewed.md",
+            recommended_task_route: "execute_review_command",
+            recommended_task_can_execute_command: true,
+        });
     });
 
     test("topic harness gates fail with only persisted failed harness facts", () => {
