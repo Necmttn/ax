@@ -6,14 +6,14 @@
 # /install, _shell.html, etc.) take precedence over these rules; this file
 # only governs routes that don't match a real file.
 
-# SPA fallback - any unmatched path serves the TanStack Start SPA shell
-# with a 200 (URL stays as-is, React Router renders the matching route).
-# This is the catch-all for /features, /showcases, /origin, /old-landing,
-# /how-it-works, /docs/*, /manifesto, /brand, /releases/*, etc.
+# SPA fallback - almost every route is prerendered to its own /route/index.html
+# (those static files are served directly and take precedence over this rule).
+# This catch-all only handles routes that are NOT prerendered - currently the
+# runtime gist-share route /s/$owner/$gistId - by serving the prerendered home
+# document with a 200 so the client router can render the matching route.
 #
-# Target is /index.html (a copy of _shell.html emitted by the build), NOT
-# /_shell.html: Cloudflare Pages auto-redirects any *.html URL to its
-# extensionless form (308), so a `/_shell.html` rewrite target gets bounced to
-# /_shell and the /* rule re-matches -> infinite 308 loop. index.html is served
-# as the directory index without that redirect, breaking the loop.
+# Target is /index.html, NOT /_shell.html: Cloudflare Pages auto-redirects any
+# *.html URL to its extensionless form (308), so a `/_shell.html` rewrite
+# target gets bounced to /_shell and the /* rule re-matches -> infinite 308
+# loop. index.html is served as the directory index without that redirect.
 /*  /index.html  200

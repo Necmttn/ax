@@ -18,7 +18,7 @@ const mdxOptions: Options = {
 
 const adrs = defineCollection({
   name: "adrs",
-  directory: "../docs/adr",
+  directory: "../../docs/adr",
   include: "*.md",
   // `content` is the raw markdown (required by @content-collections/mdx
   // 0.15+ to silence the implicit-content deprecation). Downstream
@@ -40,7 +40,7 @@ const adrs = defineCollection({
 
 const pages = defineCollection({
   name: "pages",
-  directory: "../docs",
+  directory: "../../docs",
   include: ["manifesto.md", "brand.md", "language.md", "insights-cli-reference.md"],
   // See `adrs.schema` above for why `content: z.string()` is here.
   schema: z.object({
@@ -55,7 +55,7 @@ const pages = defineCollection({
 
 const releaseAnnouncements = defineCollection({
   name: "releaseAnnouncements",
-  directory: "../docs/releases",
+  directory: "../../docs/releases",
   include: "v*.md",
   schema: z.object({
     version: z.string(),
@@ -73,7 +73,7 @@ const releaseAnnouncements = defineCollection({
 
 const changelog = defineCollection({
   name: "changelog",
-  directory: "..",
+  directory: "../..",
   include: "CHANGELOG.md",
   schema: z.object({
     content: z.string(),
@@ -86,7 +86,7 @@ const changelog = defineCollection({
 
 const howItWorks = defineCollection({
   name: "howItWorks",
-  directory: "../docs",
+  directory: "../../docs",
   include: "how-ax-sees-your-work.mdx",
   schema: z.object({
     content: z.string(),
@@ -98,7 +98,7 @@ const howItWorks = defineCollection({
     // extractor runs doesn't crash MDX compile.
     const { readFile } = await import("node:fs/promises");
     const { join } = await import("node:path");
-    // Resolve from process.cwd() (which is site/ for both `bun run dev`
+    // Resolve from process.cwd() (which is apps/site/ for both `bun run dev`
     // and `bun run build`) using the same relative path as this
     // collection's `directory` config. Can't use `import.meta.url` because
     // content-collections compiles this config into
@@ -108,6 +108,7 @@ const howItWorks = defineCollection({
     // so dirname() on it alone returns "." and doesn't help either.
     const generatedPath = join(
       process.cwd(),
+      "..",
       "..",
       "docs",
       "how-ax-sees-your-work.generated.mdx",
