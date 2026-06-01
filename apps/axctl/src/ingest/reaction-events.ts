@@ -276,6 +276,31 @@ export const buildReactionEventStatements = (
     events: readonly ReactionEventWrite[],
 ): string[] => events.map(buildReactionEventStatement);
 
+const REACTION_DELETE_CHUNK = 200;
+
+/**
+ * Scoped deletes for an incremental re-derive: clear every reaction_event whose
+ * `user_turn` is in the batch we're about to rewrite. Matching on the field
+ * (not the record id) clears rows written under the OLD composite-id scheme
+ * (user_turn__assistant_turn__hash) that still occupy the same user_turn under
+ * the UNIQUE index - otherwise the fresh user_turn-keyed UPSERT collides with
+ * them. Chunked so the IN-list stays a reasonable statement size.
+ */
+export const buildReactionEventDeleteStatements = (
+    events: readonly ReactionEventWrite[],
+): string[] => {
+    const userTurns = [...new Set(events.map((event) => event.userTurnKey))];
+    const statements: string[] = [];
+    for (let i = 0; i < userTurns.length; i += REACTION_DELETE_CHUNK) {
+        const refs = userTurns
+            .slice(i, i + REACTION_DELETE_CHUNK)
+            .map((key) => recordRef("turn", key))
+            .join(", ");
+        statements.push(`DELETE reaction_event WHERE user_turn IN [${refs}];`);
+    }
+    return statements;
+};
+
 const fetchTurns = (sinceDays: number | undefined): Effect.Effect<ReactionEventInput[], DbError, SurrealClient> =>
     Effect.gen(function* () {
         const db = yield* SurrealClient;
@@ -296,7 +321,12 @@ export const deriveReactionEventRows = (
         const rows = yield* fetchTurns(opts.sinceDays);
         const events = deriveReactionEvents(rows);
         if (opts.sinceDays === undefined) {
+            // Full re-derive: wipe and rebuild.
             yield* db.query("DELETE reaction_event;");
+        } else if (events.length > 0) {
+            // Incremental: delete the reaction_events for just the user_turns we
+            // re-derive (idempotent + self-heals legacy composite-id rows).
+            yield* executeStatementsWith(db, buildReactionEventDeleteStatements(events), { chunkSize: 50 });
         }
         yield* executeStatementsWith(db, buildReactionEventStatements(events), { chunkSize: 500 });
         const clusters = new Set(events.map((event) =>

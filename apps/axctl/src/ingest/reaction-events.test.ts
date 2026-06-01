@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
+    buildReactionEventDeleteStatements,
     buildReactionEventStatements,
     deriveReactionEvents,
     type ReactionEventInput,
@@ -120,5 +121,18 @@ describe("reaction event classifier", () => {
         expect(sql).toContain('target: "environment_setup"');
         expect(sql).toContain("context_json");
         expect(sql).toContain("assistant_turn");
+    });
+
+    test("incremental delete targets the re-derived user_turns by field (self-heals legacy ids)", () => {
+        const events = deriveReactionEvents([
+            row({ id: "turn:a1", session: "session:s1", seq: 1, role: "assistant", text: "I will use npm for this." }),
+            row({ id: "turn:u1", session: "session:s1", seq: 2, role: "user", text: "use bun instead" }),
+        ]);
+        const del = buildReactionEventDeleteStatements(events).join("\n");
+        // deletes by the user_turn FIELD (matches old composite-id rows too)
+        expect(del).toContain("DELETE reaction_event WHERE user_turn IN [");
+        expect(del).toContain("turn:`u1`");
+        // no events -> no statements
+        expect(buildReactionEventDeleteStatements([])).toEqual([]);
     });
 });
