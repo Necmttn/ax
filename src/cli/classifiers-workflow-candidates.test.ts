@@ -7,6 +7,7 @@ import {
     buildWorkflowCandidateProposalListReport,
     buildWorkflowCandidateHarnessProposalPlan,
     buildWorkflowCandidateTopicClassifierFixtureRows,
+    buildWorkflowCandidateAcceptedClassifierFixtureSummary,
     buildWorkflowCandidateTopicClassifierFixtureSummary,
     buildWorkflowCandidateTopicHarnessGraphProjection,
     buildWorkflowCandidateTopicHarnessGraphListReport,
@@ -3854,6 +3855,101 @@ describe("classifiers workflow-candidates", () => {
         expect(text).toContain("accepted classifier fixtures: 1");
         expect(text).toContain("classifier fixture follow-ups:");
         expect(text).toContain("classifier_candidate_group:hybrid-window/correction_or_rejection_signal");
+    });
+
+    test("accepted classifier fixture follow-ups materialize fixture rows", () => {
+        const proposals = buildWorkflowCandidateProposalListReport({
+            rows: [],
+            limit: 10,
+            status: "all",
+            expandEvidence: true,
+            search: "review-coverage",
+        });
+        const candidates = buildWorkflowCandidateReport({
+            groupRows: [],
+            evidenceRows: [],
+            sourceKind: "hybrid_window_classifier_projection",
+            limit: 10,
+            examplesPerGroup: 1,
+            search: "review-coverage",
+            taskLike: "include",
+        });
+        const report = {
+            ...buildWorkflowCandidateTopicReport({
+                sourceKind: "hybrid_window_classifier_projection",
+                topic: "review-coverage",
+                proposals,
+                candidates: {
+                    ...candidates,
+                    candidates: [{
+                        group_id: "classifier_candidate_group:hybrid-window/correction_or_rejection_signal",
+                        label: "correction_or_rejection_signal",
+                        proposed_action: "add_context_guardrail",
+                        raw_support_count: 1,
+                        support_count: 1,
+                        evidence_count: 1,
+                        turn_ref_count: 1,
+                        average_confidence: 0.6,
+                        wrapper_like_count: 0,
+                        task_like_count: 0,
+                        task_like_ratio: 0,
+                        score: 0.83,
+                        examples: [{
+                            result_id: "classifier_result:correction",
+                            turn: "turn:correction",
+                            confidence: 0.6,
+                            task_like: false,
+                            text_excerpt: "Can we create another scenario from this successful retro workflow?",
+                        }],
+                    }],
+                },
+            }),
+            persisted_review_facts: buildWorkflowCandidateTopicReviewGraphListReport({
+                topic: "review-coverage",
+                facts: [{
+                    graph_id: "fact:workflow_topic_candidate_review__review_coverage__correction",
+                    subject: "workflow_topic_candidate_review:review_coverage:correction",
+                    predicate: "accept",
+                    object: "classifier_candidate_group:hybrid-window/correction_or_rejection_signal",
+                    value_json: properties({ reviewed: true, verdict: "accept" }),
+                    properties_json: properties({
+                        topic: "review-coverage",
+                        candidate_id: "classifier_candidate_group:hybrid-window/correction_or_rejection_signal",
+                    }),
+                }],
+                edges: [],
+            }),
+        };
+        const reportWithDecision = {
+            ...report,
+            guidance_decision: buildWorkflowCandidateTopicGuidanceDecisionReport(report),
+        };
+
+        const summary = buildWorkflowCandidateAcceptedClassifierFixtureSummary(
+            [reportWithDecision],
+            ".ax/experiments/accepted-classifier-fixtures.jsonl",
+        );
+
+        expect(summary).toMatchObject({
+            path: ".ax/experiments/accepted-classifier-fixtures.jsonl",
+            emitted_fixture_count: 1,
+            candidate_count: 1,
+            skipped_candidate_count: 0,
+        });
+        expect(summary.fixtures[0]).toMatchObject({
+            suite: "workflow-candidate-topic",
+            label: "correction_or_rejection_signal",
+            target: "unknown",
+            source_group: "workflow-candidate",
+            review_status: "accept",
+            topic: "review-coverage",
+            candidate_id: "classifier_candidate_group:hybrid-window/correction_or_rejection_signal",
+            candidate_label: "correction_or_rejection_signal",
+            proposed_action: "add_context_guardrail",
+            result_id: "classifier_result:correction",
+            turn: "turn:correction",
+        });
+        expect(summary.fixtures[0]?.text).toContain("successful retro workflow");
     });
 
     test("guidance decision batch summarizes multiple reviewed topics", () => {

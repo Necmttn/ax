@@ -33,11 +33,14 @@ artifact path as the evidence to inspect before trusting any summary row.
 
 Current recommendation:
 
-- Index continuation: E485 exposes accepted `classifier_fixture`
-  recommendations as first-class follow-up work. The target-resolved
+- Index continuation: E486 materializes accepted `classifier_fixture`
+  follow-ups into a JSONL fixture-pack artifact. The reviewed
   `correction_or_rejection_signal` candidate is still not guidance, but batch
-  reports now carry `accepted_classifier_fixture_candidates` plus counts and
-  text output so services can route it toward fixture-pack/package updates.
+  reports now carry `accepted_classifier_fixture_pack` with one accepted
+  `workflow-candidate-topic` fixture row that services can append or package.
+  The important rough edge is that the row currently falls back to
+  `target="unknown"` because the accepted graph fact did not preserve the
+  repaired `workflow_state` target into the candidate row.
 - Do not adopt SetFit/SVM model output as promotion-quality facts yet.
 - Continue the hybrid path: deterministic guards, helper mining, human review,
   append-only fixtures, graph projection, and workflow/harness usefulness
@@ -106,9 +109,61 @@ Current recommendation:
   analysis passes the candidate-layer quality gate but remains
   `promotion_quality=false` because residual repeated misses, residual `none`
   false positives, and missing human promotion review still block autonomous
-  fact promotion. The immediate bottleneck is now using the new classifier
-  fixture follow-up queue to append/update fixture packs, then rerunning quality
-  checks to see whether it improves the model or just the review graph.
+  fact promotion. The immediate bottleneck is now preserving reviewed target
+  provenance in accepted fixture rows or appending the generated fixture into a
+  real package, then rerunning package quality checks to see whether it improves
+  the model or just the review graph.
+
+## E486 - Materialize Accepted Classifier Fixture Follow-up
+
+Question:
+- Can the accepted `classifier_fixture` follow-up from E485 become an actual
+  fixture-pack artifact instead of only a routing/count signal?
+
+Implementation:
+- Added `buildWorkflowCandidateAcceptedClassifierFixtureSummary`.
+- In guidance-decision batch mode, `--classifier-fixture-pack=<path>` now writes
+  accepted classifier fixture follow-ups into a JSONL pack and attaches the
+  summary as `accepted_classifier_fixture_pack`.
+- Added text output for the accepted fixture pack path and emitted fixture
+  count.
+
+Artifacts:
+- `.ax/experiments/workflow-topic-guidance-decision-batch-e486-accepted-classifier-fixtures.json`
+- `.ax/experiments/workflow-topic-guidance-decision-batch-e486-accepted-classifier-fixtures.jsonl`
+
+Live results:
+- `accepted_classifier_fixture_candidate_count=1`
+- `accepted_classifier_fixture_pack.emitted_fixture_count=1`
+- Emitted fixture:
+  - suite: `workflow-candidate-topic`
+  - label: `correction_or_rejection_signal`
+  - review status: `accept`
+  - topic: `review-coverage`
+  - candidate:
+    `classifier_candidate_group:hybrid-window/correction_or_rejection_signal`
+  - proposed action: `add_context_guardrail`
+  - result id:
+    `fact:workflow_topic_candidate_review__review_coverage__classifier_candidate_g__a67b2fdd040f`
+  - turn:
+    `turn:11fb5aad_2d45_45ef_9f94_7738ce250327__ab7c9d8b15cbcb04__seq_000707`
+  - target: `unknown`
+
+Decision:
+- Continue. The service now produces a concrete fixture-pack/update artifact
+  from an accepted reviewed graph fact.
+- Next useful slice: preserve the reviewed target/provenance
+  (`workflow_state`) in accepted fixture rows, or append this generated row to
+  the actual classifier package and rerun package quality status.
+
+Verification:
+```sh
+bun test src/cli/classifiers-workflow-candidates.test.ts -t "accepted classifier fixture follow-ups materialize"
+bun src/cli/index.ts classifiers workflow-candidates --guidance-decision-batch --source-kind=transcript_classifier_projection --include-review-facts --classifier-fixture-pack=.ax/experiments/workflow-topic-guidance-decision-batch-e486-accepted-classifier-fixtures.jsonl --out=.ax/experiments/workflow-topic-guidance-decision-batch-e486-accepted-classifier-fixtures.json --json
+jq '{accepted_pack: .accepted_classifier_fixture_pack, total: .totals.accepted_classifier_fixture_candidate_count}' .ax/experiments/workflow-topic-guidance-decision-batch-e486-accepted-classifier-fixtures.json
+head -n 1 .ax/experiments/workflow-topic-guidance-decision-batch-e486-accepted-classifier-fixtures.jsonl | jq '{id,suite,label,target,review_status,topic,candidate_id,candidate_label,proposed_action,turn,result_id,confidence,text}'
+bun src/cli/index.ts classifiers workflow-candidates --guidance-decision-batch --source-kind=transcript_classifier_projection --include-review-facts --classifier-fixture-pack=.ax/experiments/workflow-topic-guidance-decision-batch-e486-accepted-classifier-fixtures.txt.jsonl | rg -n "accepted classifier fixture pack|accepted classifier fixtures|classifier fixture follow-ups|correction_or_rejection_signal"
+```
 
 ## E485 - Surface Accepted Classifier Fixture Follow-ups
 

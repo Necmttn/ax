@@ -528,6 +528,7 @@ export interface WorkflowCandidateTopicGuidanceDecisionBatchReport {
     };
     readonly decisions: readonly WorkflowCandidateTopicGuidanceDecisionReport[];
     readonly pending_review_candidates: readonly WorkflowCandidateGuidancePendingReviewCandidate[];
+    readonly accepted_classifier_fixture_pack?: WorkflowCandidateTopicClassifierFixtureSummary;
     readonly pending_review_fixture_pack?: WorkflowCandidateReviewCoverageFixtureSummary;
     readonly pending_review_handoff?: WorkflowCandidateGuidancePendingReviewHandoffSummary;
     readonly pending_review_task?: WorkflowCandidateGuidancePendingReviewTaskSummary;
@@ -3244,6 +3245,7 @@ export function buildWorkflowCandidateTopicGuidanceDecisionBatchReport(input: {
     readonly search?: string;
     readonly decisions: readonly WorkflowCandidateTopicGuidanceDecisionReport[];
     readonly pendingCandidateReport?: WorkflowCandidateReport;
+    readonly acceptedClassifierFixturePack?: WorkflowCandidateTopicClassifierFixtureSummary;
     readonly pendingReviewFixturePack?: WorkflowCandidateReviewCoverageFixtureSummary;
     readonly pendingReviewHandoff?: WorkflowCandidateGuidancePendingReviewHandoffSummary;
     readonly pendingReviewTask?: WorkflowCandidateGuidancePendingReviewTaskSummary;
@@ -3334,6 +3336,7 @@ export function buildWorkflowCandidateTopicGuidanceDecisionBatchReport(input: {
         },
         decisions: input.decisions,
         pending_review_candidates: pendingReviewCandidates,
+        ...(input.acceptedClassifierFixturePack === undefined ? {} : { accepted_classifier_fixture_pack: input.acceptedClassifierFixturePack }),
         ...(input.pendingReviewFixturePack === undefined ? {} : { pending_review_fixture_pack: input.pendingReviewFixturePack }),
         ...(input.pendingReviewHandoff === undefined ? {} : { pending_review_handoff: input.pendingReviewHandoff }),
         ...(input.pendingReviewTask === undefined ? {} : { pending_review_task: input.pendingReviewTask }),
@@ -4434,6 +4437,10 @@ export function renderWorkflowCandidateTopicGuidanceDecisionBatchText(
         ...(report.pending_review_fixture_pack === undefined ? [] : [
             `pending review fixture pack: ${report.pending_review_fixture_pack.path}`,
             `pending review fixtures: ${report.pending_review_fixture_pack.emitted_fixture_count}`,
+        ]),
+        ...(report.accepted_classifier_fixture_pack === undefined ? [] : [
+            `accepted classifier fixture pack: ${report.accepted_classifier_fixture_pack.path}`,
+            `accepted classifier fixtures: ${report.accepted_classifier_fixture_pack.emitted_fixture_count}`,
         ]),
         ...(report.pending_review_handoff === undefined ? [] : [
             `pending review handoff stage: ${report.pending_review_handoff.review_pipeline_stage}`,
@@ -7158,6 +7165,58 @@ export function buildWorkflowCandidateTopicClassifierFixtureSummary(
     };
 }
 
+export function buildWorkflowCandidateAcceptedClassifierFixtureSummary(
+    reports: readonly WorkflowCandidateTopicReport[],
+    path: string,
+): WorkflowCandidateTopicClassifierFixtureSummary {
+    const rows: WorkflowCandidateTopicClassifierFixtureRow[] = [];
+    const acceptedCandidateIds = new Set<string>();
+    for (const report of reports) {
+        const decision = report.guidance_decision ?? buildWorkflowCandidateTopicGuidanceDecisionReport(report);
+        const acceptedFixtureIds = new Set(
+            decision.accepted_classifier_fixture_candidates.map((candidate) => candidate.candidate_id),
+        );
+        for (const candidate of report.candidates.candidates) {
+            if (!acceptedFixtureIds.has(candidate.group_id)) continue;
+            acceptedCandidateIds.add(candidate.group_id);
+            candidate.examples.forEach((example, index) => {
+                const resultId = typeof example.result_id === "string" && example.result_id.length > 0
+                    ? example.result_id
+                    : undefined;
+                const turn = typeof example.turn === "string" && example.turn.length > 0 ? example.turn : undefined;
+                const confidence = typeof example.confidence === "number" ? example.confidence : undefined;
+                rows.push({
+                    id: classifierFixtureIdForExample(report, candidate, example),
+                    suite: "workflow-candidate-topic",
+                    name: classifierFixtureNameForCandidate(report, candidate, index),
+                    label: String(candidate.classifier_label ?? candidate.label ?? "none"),
+                    target: String(candidate.target ?? "unknown"),
+                    text: classifierFixtureTextForExample(example),
+                    source_group: "workflow-candidate",
+                    review_status: "accept",
+                    topic: report.topic,
+                    candidate_id: candidate.group_id,
+                    candidate_label: candidate.label,
+                    proposed_action: candidate.proposed_action,
+                    candidate_support_count: candidate.support_count,
+                    candidate_evidence_count: candidate.evidence_count,
+                    candidate_score: candidate.score,
+                    ...(resultId === undefined ? {} : { result_id: resultId }),
+                    ...(turn === undefined ? {} : { turn }),
+                    ...(confidence === undefined ? {} : { confidence }),
+                });
+            });
+        }
+    }
+    return {
+        path,
+        emitted_fixture_count: rows.length,
+        candidate_count: acceptedCandidateIds.size,
+        skipped_candidate_count: 0,
+        fixtures: rows,
+    };
+}
+
 export function buildWorkflowCandidateReviewCoverageFixtureRows(
     report: WorkflowCandidateReport,
 ): readonly WorkflowCandidateTopicClassifierFixtureRow[] {
@@ -8158,6 +8217,12 @@ export const runClassifiersWorkflowCandidates = (input: WorkflowCandidateCommand
                 writeFileSync(task.summary.path!, task.content, "utf8");
                 pendingReviewTask = task.summary;
             }
+            let acceptedClassifierFixturePack: WorkflowCandidateTopicClassifierFixtureSummary | undefined;
+            if (input.classifierFixturePack) {
+                acceptedClassifierFixturePack = buildWorkflowCandidateAcceptedClassifierFixtureSummary(reports, input.classifierFixturePack);
+                mkdirSync(dirname(input.classifierFixturePack), { recursive: true });
+                writeFileSync(input.classifierFixturePack, renderClassifierFixtureRowsJsonl(acceptedClassifierFixturePack.fixtures), "utf8");
+            }
             const batch = buildWorkflowCandidateTopicGuidanceDecisionBatchReport({
                 sourceKind: input.sourceKind,
                 limit: input.limit,
@@ -8166,6 +8231,7 @@ export const runClassifiersWorkflowCandidates = (input: WorkflowCandidateCommand
                     .map((report) => report.guidance_decision)
                     .filter((decision): decision is WorkflowCandidateTopicGuidanceDecisionReport => decision !== undefined),
                 pendingCandidateReport,
+                ...(acceptedClassifierFixturePack === undefined ? {} : { acceptedClassifierFixturePack }),
                 ...(pendingReviewFixturePack === undefined ? {} : { pendingReviewFixturePack }),
                 ...(pendingReviewHandoff === undefined ? {} : { pendingReviewHandoff }),
                 ...(pendingReviewTask === undefined ? {} : { pendingReviewTask }),
