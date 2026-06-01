@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { Effect } from "effect";
-import { SurrealClient } from "../lib/db.ts";
+import { SurrealClient, type SurrealClientShape } from "../lib/db.ts";
 import { prettyPrint } from "../lib/json.ts";
 import { recordKeyPart, safeKeyPart } from "../lib/shared/derive-keys.ts";
 import { safeJsonParse } from "../lib/shared/safe-json.ts";
@@ -75,6 +75,9 @@ export interface WorkflowCandidateCommandInput {
     readonly emitAdjacentTasks?: boolean;
     readonly emitPendingReviewTask?: boolean;
     readonly listPendingReviewTasks?: boolean;
+    readonly repairPendingReviewContext?: boolean;
+    readonly repairedFixturePack?: string;
+    readonly repairedReviewBrief?: string;
     readonly pendingReviewTaskPath?: string;
     readonly pendingReviewTaskStatus?: WorkflowCandidateGuidancePendingReviewTaskStatus;
     readonly pendingReviewDecisionStatus?: WorkflowCandidateGuidancePendingReviewDecisionStatus;
@@ -447,6 +450,49 @@ export interface WorkflowCandidateGuidancePendingReviewTaskListReport {
     readonly missing_artifact_count: number;
     readonly unknown_schema_count: number;
     readonly tasks: readonly WorkflowCandidateGuidancePendingReviewTaskListItem[];
+    readonly next_action: string;
+}
+
+export type WorkflowCandidateGuidancePendingReviewContextRepairStatus =
+    | "fully_repaired"
+    | "partially_repaired"
+    | "unrepaired"
+    | "unchanged";
+
+export interface WorkflowCandidateGuidancePendingReviewContextRepairTurnContext {
+    readonly turn_id: string;
+    readonly user_text?: string | null;
+    readonly previous_assistant_text?: string | null;
+    readonly target?: string | null;
+}
+
+export interface WorkflowCandidateGuidancePendingReviewContextRepairRow {
+    readonly fixture_id: string;
+    readonly turn_id?: string;
+    readonly status: WorkflowCandidateGuidancePendingReviewContextRepairStatus;
+    readonly before_issues: readonly WorkflowCandidateGuidancePendingReviewContextIssue[];
+    readonly repaired_issues: readonly WorkflowCandidateGuidancePendingReviewContextIssue[];
+    readonly remaining_issues: readonly WorkflowCandidateGuidancePendingReviewContextIssue[];
+    readonly repaired_fixture: WorkflowCandidateTopicClassifierFixtureRow;
+}
+
+export interface WorkflowCandidateGuidancePendingReviewContextRepairReport {
+    readonly schema: "ax.workflow_candidate_pending_review_context_repair.v1";
+    readonly fixture_pack_path: string;
+    readonly review_brief_path?: string;
+    readonly fixture_count: number;
+    readonly repaired_fixture_count: number;
+    readonly fully_repaired_fixture_count: number;
+    readonly partially_repaired_fixture_count: number;
+    readonly unrepaired_fixture_count: number;
+    readonly unchanged_fixture_count: number;
+    readonly before_issue_count: number;
+    readonly after_issue_count: number;
+    readonly repaired_issue_count: number;
+    readonly remaining_issue_count: number;
+    readonly rows: readonly WorkflowCandidateGuidancePendingReviewContextRepairRow[];
+    readonly repaired_jsonl: string;
+    readonly repaired_review_brief_markdown: string;
     readonly next_action: string;
 }
 
@@ -3508,6 +3554,198 @@ const pendingReviewContextNextAction = (issueCount: number, status: WorkflowCand
     issueCount > 0
         ? "Repair fixture context before asking for review decisions."
         : reviewDecisionNextAction(status);
+
+const workflowCandidateFixtureText = (userText: string, previousAssistantText: string): string =>
+    `USER:\n${userText.trim()}\n\nPREVIOUS_ASSISTANT:\n${previousAssistantText.trim()}`;
+
+const pendingReviewContextRepairStatus = (
+    beforeIssueCount: number,
+    repairedIssueCount: number,
+    remainingIssueCount: number,
+): WorkflowCandidateGuidancePendingReviewContextRepairStatus => {
+    if (beforeIssueCount === 0) return "unchanged";
+    if (repairedIssueCount === 0) return "unrepaired";
+    return remainingIssueCount === 0 ? "fully_repaired" : "partially_repaired";
+};
+
+export function buildWorkflowCandidateGuidancePendingReviewContextRepairReport(input: {
+    readonly fixturePackPath: string;
+    readonly reviewBriefPath?: string;
+    readonly rows: readonly WorkflowCandidateTopicClassifierFixtureRow[];
+    readonly turnContexts: readonly WorkflowCandidateGuidancePendingReviewContextRepairTurnContext[];
+}): WorkflowCandidateGuidancePendingReviewContextRepairReport {
+    const contexts = new Map(input.turnContexts.map((context) => [context.turn_id, context]));
+    const rows = input.rows.map((row): WorkflowCandidateGuidancePendingReviewContextRepairRow => {
+        const beforeIssues = pendingReviewFixtureContextIssues(row);
+        const context = typeof row.turn === "string" ? contexts.get(row.turn) : undefined;
+        const repairedIssues: WorkflowCandidateGuidancePendingReviewContextIssue[] = [];
+        let userText = textSectionAfter(row.text, "USER:\n");
+        let previousAssistantText = textSectionAfter(row.text, "PREVIOUS_ASSISTANT:\n");
+        let target = row.target;
+        if (beforeIssues.includes("truncated_user_text") && (context?.user_text ?? "").trim().length > 0) {
+            userText = context!.user_text!.trim();
+            repairedIssues.push("truncated_user_text");
+        }
+        if (beforeIssues.includes("missing_previous_assistant_context") && (context?.previous_assistant_text ?? "").trim().length > 0) {
+            previousAssistantText = context!.previous_assistant_text!.trim();
+            repairedIssues.push("missing_previous_assistant_context");
+        }
+        if (beforeIssues.includes("unknown_target") && (context?.target ?? "").trim().length > 0 && context?.target !== "unknown") {
+            target = context!.target!.trim();
+            repairedIssues.push("unknown_target");
+        }
+        const repairedFixture = {
+            ...row,
+            target,
+            text: workflowCandidateFixtureText(userText, previousAssistantText),
+        };
+        const remainingIssues = pendingReviewFixtureContextIssues(repairedFixture);
+        return {
+            fixture_id: row.id,
+            ...(row.turn === undefined ? {} : { turn_id: row.turn }),
+            status: pendingReviewContextRepairStatus(beforeIssues.length, repairedIssues.length, remainingIssues.length),
+            before_issues: beforeIssues,
+            repaired_issues: repairedIssues,
+            remaining_issues: remainingIssues,
+            repaired_fixture: repairedFixture,
+        };
+    });
+    const repairedFixtures = rows.map((row) => row.repaired_fixture);
+    const beforeIssueCount = rows.reduce((total, row) => total + row.before_issues.length, 0);
+    const remainingIssueCount = rows.reduce((total, row) => total + row.remaining_issues.length, 0);
+    const repairedIssueCount = rows.reduce((total, row) => total + row.repaired_issues.length, 0);
+    const fullyRepairedFixtureCount = rows.filter((row) => row.status === "fully_repaired").length;
+    const partiallyRepairedFixtureCount = rows.filter((row) => row.status === "partially_repaired").length;
+    const unrepairedFixtureCount = rows.filter((row) => row.status === "unrepaired").length;
+    const unchangedFixtureCount = rows.filter((row) => row.status === "unchanged").length;
+    const repairedJsonl = `${repairedFixtures.map((row) => JSON.stringify(row)).join("\n")}${repairedFixtures.length === 0 ? "" : "\n"}`;
+    return {
+        schema: "ax.workflow_candidate_pending_review_context_repair.v1",
+        fixture_pack_path: input.fixturePackPath,
+        ...(input.reviewBriefPath === undefined ? {} : { review_brief_path: input.reviewBriefPath }),
+        fixture_count: rows.length,
+        repaired_fixture_count: fullyRepairedFixtureCount + partiallyRepairedFixtureCount,
+        fully_repaired_fixture_count: fullyRepairedFixtureCount,
+        partially_repaired_fixture_count: partiallyRepairedFixtureCount,
+        unrepaired_fixture_count: unrepairedFixtureCount,
+        unchanged_fixture_count: unchangedFixtureCount,
+        before_issue_count: beforeIssueCount,
+        after_issue_count: remainingIssueCount,
+        repaired_issue_count: repairedIssueCount,
+        remaining_issue_count: remainingIssueCount,
+        rows,
+        repaired_jsonl: repairedJsonl,
+        repaired_review_brief_markdown: renderWorkflowCandidateReviewCoverageBriefMarkdown(repairedFixtures),
+        next_action: remainingIssueCount > 0
+            ? "Review repaired context, then resolve remaining target issues before asking for a human verdict."
+            : "Review the regenerated fixture brief and record a human verdict with rationale.",
+    };
+}
+
+export function renderWorkflowCandidateGuidancePendingReviewContextRepairText(
+    report: WorkflowCandidateGuidancePendingReviewContextRepairReport,
+): string {
+    const lines = [
+        "workflow candidate pending review context repair",
+        `fixture pack: ${report.fixture_pack_path}`,
+        `review brief: ${report.review_brief_path ?? "none"}`,
+        `fixtures: ${report.fixture_count}`,
+        `repaired fixtures: ${report.repaired_fixture_count}`,
+        `fully repaired: ${report.fully_repaired_fixture_count}`,
+        `partially repaired: ${report.partially_repaired_fixture_count}`,
+        `unrepaired: ${report.unrepaired_fixture_count}`,
+        `unchanged: ${report.unchanged_fixture_count}`,
+        `before issues: ${report.before_issue_count}`,
+        `after issues: ${report.after_issue_count}`,
+        `repaired issues: ${report.repaired_issue_count}`,
+        `remaining issues: ${report.remaining_issue_count}`,
+        `next action: ${report.next_action}`,
+        "",
+        "fixtures:",
+    ];
+    if (report.rows.length === 0) lines.push("  (none)");
+    for (const row of report.rows) {
+        lines.push(
+            `  - ${row.status} ${row.fixture_id}`,
+            `    turn: ${row.turn_id ?? "unknown"}`,
+            ...row.before_issues.map((issue) => `    before issue: ${issue}`),
+            ...row.repaired_issues.map((issue) => `    repaired issue: ${issue}`),
+            ...row.remaining_issues.map((issue) => `    remaining issue: ${issue}`),
+        );
+    }
+    return `${lines.join("\n").trimEnd()}\n`;
+}
+
+interface WorkflowCandidatePendingReviewTurnRow {
+    readonly id: string;
+    readonly session_id?: string | null;
+    readonly seq?: number | null;
+    readonly role?: string | null;
+    readonly text?: string | null;
+    readonly text_excerpt?: string | null;
+}
+
+const workflowCandidateTurnContextRowSql = (turnId: string): string => {
+    const turnKey = recordKeyPart(turnId, "turn") ?? turnId;
+    return `
+SELECT
+    type::string(id) AS id,
+    type::string(session) AS session_id,
+    seq,
+    role,
+    text,
+    text_excerpt
+FROM ${recordRef("turn", turnKey)};
+`.trim();
+};
+
+const workflowCandidatePreviousAssistantSql = (sessionId: string, seq: number): string => {
+    const sessionKey = recordKeyPart(sessionId, "session") ?? sessionId;
+    return `
+SELECT
+    type::string(id) AS id,
+    type::string(session) AS session_id,
+    seq,
+    role,
+    text,
+    text_excerpt
+FROM turn
+WHERE session = ${recordRef("session", sessionKey)} AND seq < ${Math.trunc(seq)} AND role = "assistant"
+ORDER BY seq DESC
+LIMIT 1;
+`.trim();
+};
+
+const loadWorkflowCandidatePendingReviewTurnContexts = (
+    db: SurrealClientShape,
+    turnIds: readonly string[],
+): Effect.Effect<readonly WorkflowCandidateGuidancePendingReviewContextRepairTurnContext[], unknown> =>
+    Effect.gen(function* () {
+        const contexts: WorkflowCandidateGuidancePendingReviewContextRepairTurnContext[] = [];
+        for (const turnId of [...new Set(turnIds)]) {
+            const [turnRows] = yield* db.query<[WorkflowCandidatePendingReviewTurnRow[]]>(
+                workflowCandidateTurnContextRowSql(turnId),
+            );
+            const turn = turnRows?.[0];
+            if (turn === undefined) {
+                contexts.push({ turn_id: turnId });
+                continue;
+            }
+            let previousAssistantText: string | null | undefined;
+            if (typeof turn.session_id === "string" && typeof turn.seq === "number") {
+                const [previousRows] = yield* db.query<[WorkflowCandidatePendingReviewTurnRow[]]>(
+                    workflowCandidatePreviousAssistantSql(turn.session_id, turn.seq),
+                );
+                previousAssistantText = previousRows?.[0]?.text ?? previousRows?.[0]?.text_excerpt;
+            }
+            contexts.push({
+                turn_id: turnId,
+                ...((turn.text ?? turn.text_excerpt) === undefined ? {} : { user_text: turn.text ?? turn.text_excerpt }),
+                ...(previousAssistantText === undefined ? {} : { previous_assistant_text: previousAssistantText }),
+            });
+        }
+        return contexts;
+    });
 
 const pendingReviewTaskDecisionSummary = (input: {
     readonly parsed: WorkflowCandidateGuidancePendingReviewTaskParsed;
@@ -7316,6 +7554,60 @@ export const runClassifiersWorkflowCandidates = (input: WorkflowCandidateCommand
                 writeFileSync(input.out, `${prettyPrint(report)}\n`, "utf8");
             }
             console.log(input.json ? prettyPrint(report) : renderWorkflowCandidateGuidancePendingReviewTaskListText(report));
+            return;
+        }
+        if (input.repairPendingReviewContext) {
+            const taskList = loadWorkflowCandidateGuidancePendingReviewTaskListReport(taskDir, {
+                ...(input.pendingReviewTaskPath === undefined ? { route: "repair_review_decisions" as const } : { path: input.pendingReviewTaskPath }),
+            });
+            const task = taskList.tasks[0];
+            if (task?.fixture_pack_path === undefined) {
+                console.log(input.json
+                    ? prettyPrint({
+                        schema: "ax.workflow_candidate_pending_review_context_repair.v1",
+                        fixture_pack_path: "unknown",
+                        fixture_count: 0,
+                        repaired_fixture_count: 0,
+                        fully_repaired_fixture_count: 0,
+                        partially_repaired_fixture_count: 0,
+                        unrepaired_fixture_count: 0,
+                        unchanged_fixture_count: 0,
+                        before_issue_count: 0,
+                        after_issue_count: 0,
+                        repaired_issue_count: 0,
+                        remaining_issue_count: 0,
+                        rows: [],
+                        repaired_jsonl: "",
+                        repaired_review_brief_markdown: "",
+                        next_action: "No pending review task with repairable context was found.",
+                    })
+                    : "No pending review task with repairable context was found.\n");
+                return;
+            }
+            const rows = parseWorkflowCandidateFixtureRowsJsonl(readFileSync(task.fixture_pack_path, "utf8"));
+            const turnIds = rows
+                .map((row) => row.turn)
+                .filter((turn): turn is string => typeof turn === "string" && turn.length > 0);
+            const turnContexts = yield* loadWorkflowCandidatePendingReviewTurnContexts(db, turnIds);
+            const report = buildWorkflowCandidateGuidancePendingReviewContextRepairReport({
+                fixturePackPath: task.fixture_pack_path,
+                ...(task.review_brief_path === undefined ? {} : { reviewBriefPath: task.review_brief_path }),
+                rows,
+                turnContexts,
+            });
+            if (input.repairedFixturePack) {
+                mkdirSync(dirname(input.repairedFixturePack), { recursive: true });
+                writeFileSync(input.repairedFixturePack, report.repaired_jsonl, "utf8");
+            }
+            if (input.repairedReviewBrief) {
+                mkdirSync(dirname(input.repairedReviewBrief), { recursive: true });
+                writeFileSync(input.repairedReviewBrief, report.repaired_review_brief_markdown, "utf8");
+            }
+            if (input.out) {
+                mkdirSync(dirname(input.out), { recursive: true });
+                writeFileSync(input.out, `${prettyPrint(report)}\n`, "utf8");
+            }
+            console.log(input.json ? prettyPrint(report) : renderWorkflowCandidateGuidancePendingReviewContextRepairText(report));
             return;
         }
         const loadTopicReport = (topic: string) =>

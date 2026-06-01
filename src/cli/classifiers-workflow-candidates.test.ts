@@ -17,6 +17,7 @@ import {
     buildWorkflowCandidateGuidancePendingReviewHandoffSummary,
     buildWorkflowCandidateGuidancePendingReviewTask,
     buildWorkflowCandidateGuidancePendingReviewTaskListReport,
+    buildWorkflowCandidateGuidancePendingReviewContextRepairReport,
     buildWorkflowCandidateTopicGuidanceDecisionReport,
     buildWorkflowCandidateTopicHelperExplanations,
     buildWorkflowCandidateTopicReviewGraphProjection,
@@ -50,6 +51,7 @@ import {
     renderWorkflowCandidateTopicHarnessGraphListText,
     renderWorkflowCandidateTopicGuidanceDecisionBatchText,
     renderWorkflowCandidateGuidancePendingReviewTaskListText,
+    renderWorkflowCandidateGuidancePendingReviewContextRepairText,
     renderWorkflowCandidateReportText,
     renderWorkflowCandidateReviewCoverageText,
     syncWorkflowCandidateReportFromBrief,
@@ -4689,6 +4691,61 @@ describe("classifiers workflow-candidates", () => {
         });
         expect(renderWorkflowCandidateGuidancePendingReviewTaskListText(report)).toContain("review context status: needs_repair");
         expect(renderWorkflowCandidateGuidancePendingReviewTaskListText(report)).toContain("context issue: truncated_user_text");
+    });
+
+    test("pending review context repair rehydrates turn and previous assistant without inventing target", () => {
+        const fixtureRow = {
+            id: "workflow-candidate-review-coverage/correction_or_rejection_signal/incomplete",
+            suite: "workflow-candidate-review-coverage" as const,
+            name: "coverage-gap-correction_or_rejection_signal-01",
+            label: "correction_or_rejection_signal",
+            target: "unknown",
+            text: "USER:\nUSER: this is not bad, can we create another scenerio like retro reflect trying to create workflow bas...\n\nPREVIOUS_ASSISTANT:\n",
+            source_group: "workflow-candidate" as const,
+            review_status: "pending" as const,
+            topic: "review-coverage",
+            candidate_id: "classifier_candidate_group:hybrid-window/correction_or_rejection_signal",
+            candidate_label: "correction_or_rejection_signal",
+            proposed_action: "add_context_guardrail",
+            turn: "turn:demo__seq_000707",
+        };
+
+        const report = buildWorkflowCandidateGuidancePendingReviewContextRepairReport({
+            fixturePackPath: ".ax/experiments/pending-review.jsonl",
+            reviewBriefPath: ".ax/experiments/pending-review.md",
+            rows: [fixtureRow],
+            turnContexts: [{
+                turn_id: "turn:demo__seq_000707",
+                user_text: "alright this is not bad i need another scenarios like retro reflect where agent self-applies experiments or user asks for a previously nicely run workflow baseline",
+                previous_assistant_text: "I summarized that the classifier pipeline can emit reviewed workflow candidate tasks, but the packet still needed a human decision.",
+            }],
+        });
+
+        expect(report).toMatchObject({
+            schema: "ax.workflow_candidate_pending_review_context_repair.v1",
+            fixture_pack_path: ".ax/experiments/pending-review.jsonl",
+            review_brief_path: ".ax/experiments/pending-review.md",
+            fixture_count: 1,
+            repaired_fixture_count: 1,
+            fully_repaired_fixture_count: 0,
+            partially_repaired_fixture_count: 1,
+            unrepaired_fixture_count: 0,
+            before_issue_count: 3,
+            after_issue_count: 1,
+            remaining_issue_count: 1,
+            next_action: "Review repaired context, then resolve remaining target issues before asking for a human verdict.",
+        });
+        expect(report.rows[0]).toMatchObject({
+            status: "partially_repaired",
+            repaired_issues: ["truncated_user_text", "missing_previous_assistant_context"],
+            remaining_issues: ["unknown_target"],
+        });
+        expect(report.rows[0]?.repaired_fixture.text).toContain("workflow baseline");
+        expect(report.rows[0]?.repaired_fixture.text).toContain("PREVIOUS_ASSISTANT:\nI summarized");
+        expect(report.rows[0]?.repaired_fixture.target).toBe("unknown");
+        expect(report.repaired_jsonl).toContain("workflow baseline");
+        expect(report.repaired_review_brief_markdown).toContain("workflow baseline");
+        expect(renderWorkflowCandidateGuidancePendingReviewContextRepairText(report)).toContain("remaining issue: unknown_target");
     });
 
     test("topic harness gates fail with only persisted failed harness facts", () => {

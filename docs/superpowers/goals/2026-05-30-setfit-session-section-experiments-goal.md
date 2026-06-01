@@ -33,10 +33,10 @@ artifact path as the evidence to inspect before trusting any summary row.
 
 Current recommendation:
 
-- Index continuation: E479 makes the E478 review-packet problem
-  machine-detectable. The live pending queue now routes the incomplete fixture
-  to `needs_review_repair` / `repair_review_decisions` with explicit context
-  issues instead of treating it as a normal human-review collection task.
+- Index continuation: E480 adds the first fixture-context repair/regeneration
+  path. The live pending review packet can now be rehydrated from the stored
+  turn plus previous assistant context, reducing the current packet from three
+  context issues to one remaining `unknown_target` issue.
 - Do not adopt SetFit/SVM model output as promotion-quality facts yet.
 - Continue the hybrid path: deterministic guards, helper mining, human review,
   append-only fixtures, graph projection, and workflow/harness usefulness
@@ -105,9 +105,66 @@ Current recommendation:
   analysis passes the candidate-layer quality gate but remains
   `promotion_quality=false` because residual repeated misses, residual `none`
   false positives, and missing human promotion review still block autonomous
-  fact promotion. The immediate bottleneck remains a real human review decision
-  or fixture-context repair for that pending candidate, not promoting synthetic
-  or harness-only evidence.
+  fact promotion. The immediate bottleneck is now target resolution plus a real
+  human review decision for the repaired pending candidate, not promoting
+  synthetic or harness-only evidence.
+
+## E480 - Regenerate Pending Review Context
+
+Question:
+- Once E479 detects an incomplete pending-review packet, can AX rehydrate the
+  fixture text from stored turn context and regenerate review artifacts without
+  inventing a better label or target?
+
+Implementation:
+- Added `ax.workflow_candidate_pending_review_context_repair.v1`.
+- Added pure repair/report helpers that:
+  - read pending review fixture rows,
+  - compare before/after context issues,
+  - replace truncated `USER` text from the stored turn,
+  - replace empty `PREVIOUS_ASSISTANT` text from the previous assistant turn,
+  - keep `target=unknown` unless a concrete target source is available,
+  - emit repaired JSONL and regenerated review-brief markdown.
+- Added CLI:
+  - `--repair-pending-review-context`
+  - `--repaired-fixture-pack=<path>`
+  - `--repaired-review-brief=<path>`
+
+Artifacts:
+- `.ax/experiments/workflow-candidate-pending-review-context-repair-e480.json`
+- `.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e480-repaired.jsonl`
+- `.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e480-repaired.md`
+
+Live results:
+- Fixture count: `1`
+- Repaired fixtures: `1`
+- Fully repaired fixtures: `0`
+- Partially repaired fixtures: `1`
+- Before context issues: `3`
+- Repaired issues: `2`
+  - `truncated_user_text`
+  - `missing_previous_assistant_context`
+- Remaining issues: `1`
+  - `unknown_target`
+- Next action:
+  `Review repaired context, then resolve remaining target issues before asking
+  for a human verdict.`
+
+Decision:
+- The repair path is useful and should continue.
+- It correctly avoids fabricating a target. The candidate is still not
+  promotion-quality because `target=unknown` remains unresolved and there is no
+  real human verdict/rationale.
+- Next useful slice: add a target-resolution/review affordance for repaired
+  context packets, then rerun the pending-review task list against the repaired
+  fixture pack before syncing/applying review facts.
+
+Verification:
+```sh
+bun test src/cli/classifiers-workflow-candidates.test.ts -t "pending review context repair rehydrates"
+bun test src/cli/classifiers-workflow-candidates.test.ts src/classifiers/package-service.test.ts
+bun src/cli/index.ts classifiers workflow-candidates --repair-pending-review-context --task-dir=.ax/tasks --out=.ax/experiments/workflow-candidate-pending-review-context-repair-e480.json --repaired-fixture-pack=.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e480-repaired.jsonl --repaired-review-brief=.ax/experiments/workflow-topic-guidance-decision-batch-pending-review-e480-repaired.md --json
+```
 
 ## E479 - Route Incomplete Pending Review Context to Repair
 
