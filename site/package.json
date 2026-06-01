@@ -7,7 +7,7 @@
     "predev": "bun ../scripts/extract-stage-rationale.ts && cp ../install.sh public/install",
     "prebuild": "bun ../scripts/extract-stage-rationale.ts && cp ../install.sh public/install",
     "dev": "vite dev",
-    "build": "vite build",
+    "build": "bun ../scripts/extract-stage-rationale.ts && cp ../install.sh public/install && vite build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
     "deploy": "bun run build && wrangler deploy --config dist/server/wrangler.json",
