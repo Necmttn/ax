@@ -201,18 +201,28 @@ export interface WorkflowCandidateTopicGuidanceCandidateDecision {
     readonly rationale: string;
 }
 
+export interface WorkflowCandidateTopicAcceptedClassifierFixtureCandidate {
+    readonly candidate_id: string;
+    readonly label: string;
+    readonly recommended_artifact: "classifier_fixture";
+    readonly decision: "guidance_promotion_not_warranted";
+    readonly next_action: string;
+}
+
 export interface WorkflowCandidateTopicGuidanceDecisionReport {
     readonly schema: "ax.workflow_topic_guidance_decision.v1";
     readonly topic: string;
     readonly decision: WorkflowCandidateTopicGuidanceDecision;
     readonly next_action: string;
     readonly candidates: readonly WorkflowCandidateTopicGuidanceCandidateDecision[];
+    readonly accepted_classifier_fixture_candidates: readonly WorkflowCandidateTopicAcceptedClassifierFixtureCandidate[];
     readonly totals: {
         readonly candidate_count: number;
         readonly guidance_ready_count: number;
         readonly guidance_not_warranted_count: number;
         readonly needs_passing_harness_evidence_count: number;
         readonly needs_human_review_count: number;
+        readonly accepted_classifier_fixture_candidate_count: number;
         readonly accepted_harness_proposal_count: number;
         readonly scaffolded_harness_experiment_count: number;
         readonly passing_harness_evidence_count: number;
@@ -533,6 +543,7 @@ export interface WorkflowCandidateTopicGuidanceDecisionBatchReport {
         readonly guidance_not_warranted_count: number;
         readonly needs_passing_harness_evidence_count: number;
         readonly needs_human_review_count: number;
+        readonly accepted_classifier_fixture_candidate_count: number;
         readonly accepted_harness_proposal_count: number;
         readonly scaffolded_harness_experiment_count: number;
         readonly passing_harness_evidence_count: number;
@@ -3177,6 +3188,19 @@ export function buildWorkflowCandidateTopicGuidanceDecisionReport(
     const guidanceNotWarrantedCount = candidates.filter((candidate) => candidate.decision === "guidance_promotion_not_warranted").length;
     const needsPassingHarnessEvidenceCount = candidates.filter((candidate) => candidate.decision === "needs_passing_harness_evidence").length;
     const needsHumanReviewCount = candidates.filter((candidate) => candidate.decision === "needs_human_review").length;
+    const acceptedClassifierFixtureCandidates = candidates
+        .filter((candidate) =>
+            candidate.has_review_acceptance &&
+            candidate.recommended_artifact === "classifier_fixture" &&
+            candidate.decision === "guidance_promotion_not_warranted"
+        )
+        .map((candidate): WorkflowCandidateTopicAcceptedClassifierFixtureCandidate => ({
+            candidate_id: candidate.candidate_id,
+            label: candidate.label,
+            recommended_artifact: "classifier_fixture",
+            decision: "guidance_promotion_not_warranted",
+            next_action: "Append this reviewed candidate to a classifier fixture pack or package update candidate.",
+        }));
     const decision: WorkflowCandidateTopicGuidanceDecision = candidates.length === 0 || needsHumanReviewCount > 0
         ? "needs_human_review"
         : guidanceReadyCount > 0
@@ -3198,12 +3222,14 @@ export function buildWorkflowCandidateTopicGuidanceDecisionReport(
         decision,
         next_action: nextAction,
         candidates,
+        accepted_classifier_fixture_candidates: acceptedClassifierFixtureCandidates,
         totals: {
             candidate_count: candidates.length,
             guidance_ready_count: guidanceReadyCount,
             guidance_not_warranted_count: guidanceNotWarrantedCount,
             needs_passing_harness_evidence_count: needsPassingHarnessEvidenceCount,
             needs_human_review_count: needsHumanReviewCount,
+            accepted_classifier_fixture_candidate_count: acceptedClassifierFixtureCandidates.length,
             accepted_harness_proposal_count: acceptedHarnessCandidateIds.size,
             scaffolded_harness_experiment_count: scaffoldedHarnessCandidateIds.size,
             passing_harness_evidence_count: passingHarnessIds.size,
@@ -3255,6 +3281,7 @@ export function buildWorkflowCandidateTopicGuidanceDecisionBatchReport(input: {
             guidance_not_warranted_count: sum.guidance_not_warranted_count + decision.totals.guidance_not_warranted_count,
             needs_passing_harness_evidence_count: sum.needs_passing_harness_evidence_count + decision.totals.needs_passing_harness_evidence_count,
             needs_human_review_count: sum.needs_human_review_count + decision.totals.needs_human_review_count,
+            accepted_classifier_fixture_candidate_count: sum.accepted_classifier_fixture_candidate_count + decision.totals.accepted_classifier_fixture_candidate_count,
             accepted_harness_proposal_count: sum.accepted_harness_proposal_count + decision.totals.accepted_harness_proposal_count,
             scaffolded_harness_experiment_count: sum.scaffolded_harness_experiment_count + decision.totals.scaffolded_harness_experiment_count,
             passing_harness_evidence_count: sum.passing_harness_evidence_count + decision.totals.passing_harness_evidence_count,
@@ -3272,6 +3299,7 @@ export function buildWorkflowCandidateTopicGuidanceDecisionBatchReport(input: {
             guidance_not_warranted_count: 0,
             needs_passing_harness_evidence_count: 0,
             needs_human_review_count: 0,
+            accepted_classifier_fixture_candidate_count: 0,
             accepted_harness_proposal_count: 0,
             scaffolded_harness_experiment_count: 0,
             passing_harness_evidence_count: 0,
@@ -3292,9 +3320,11 @@ export function buildWorkflowCandidateTopicGuidanceDecisionBatchReport(input: {
             ? "Accept or run missing harness checks before promoting guidance."
             : totalsWithPending.needs_human_review_count > 0
                 ? "Review pending topic candidates before promoting guidance."
-                : totalsWithPending.pending_review_candidate_count > 0
+                : totalsWithPending.accepted_classifier_fixture_candidate_count > 0
+                    ? "Append accepted classifier-fixture candidates to fixture packs or package update candidates."
+                    : totalsWithPending.pending_review_candidate_count > 0
                     ? "Review pending workflow candidates before promoting them into guidance, harness checks, fixtures, or graph facts."
-                : "No guidance promotion is currently warranted by reviewed topic evidence.";
+                    : "No guidance promotion is currently warranted by reviewed topic evidence.";
     return {
         schema: "ax.workflow_topic_guidance_decision_batch.v1",
         source_kind: input.sourceKind,
@@ -4399,6 +4429,7 @@ export function renderWorkflowCandidateTopicGuidanceDecisionBatchText(
         `topics: ${report.totals.topic_count}`,
         `candidates: ${report.totals.candidate_count}`,
         `decisions: ready=${report.totals.guidance_ready_count} not_warranted=${report.totals.guidance_not_warranted_count} needs_harness=${report.totals.needs_passing_harness_evidence_count} needs_review=${report.totals.needs_human_review_count}`,
+        `accepted classifier fixtures: ${report.totals.accepted_classifier_fixture_candidate_count}`,
         `pending review candidates: ${report.totals.pending_review_candidate_count} guidance=${report.totals.guidance_pending_review_count} harness=${report.totals.harness_pending_review_count} classifier_fixture=${report.totals.classifier_fixture_pending_review_count} review=${report.totals.review_pending_review_count}`,
         ...(report.pending_review_fixture_pack === undefined ? [] : [
             `pending review fixture pack: ${report.pending_review_fixture_pack.path}`,
@@ -4429,8 +4460,22 @@ export function renderWorkflowCandidateTopicGuidanceDecisionBatchText(
             `  - ${decision.decision} ${decision.topic}`,
             `    candidates: ${decision.totals.candidate_count}`,
             `    counts: ready=${decision.totals.guidance_ready_count} not_warranted=${decision.totals.guidance_not_warranted_count} needs_harness=${decision.totals.needs_passing_harness_evidence_count} needs_review=${decision.totals.needs_human_review_count}`,
+            `    accepted classifier fixtures: ${decision.totals.accepted_classifier_fixture_candidate_count}`,
             `    evidence: accepted_harness=${decision.totals.accepted_harness_proposal_count} scaffolded_harness=${decision.totals.scaffolded_harness_experiment_count} passing_harness=${decision.totals.passing_harness_evidence_count} guidance_proposals=${decision.totals.guidance_proposal_count}`,
             `    next: ${decision.next_action}`,
+        );
+    }
+    lines.push("", "classifier fixture follow-ups:");
+    const classifierFixtureFollowUps = report.decisions.flatMap((decision) =>
+        (decision.accepted_classifier_fixture_candidates ?? []).map((candidate) => ({ topic: decision.topic, candidate }))
+    );
+    if (classifierFixtureFollowUps.length === 0) lines.push("  (none)");
+    for (const { topic, candidate } of classifierFixtureFollowUps) {
+        lines.push(
+            `  - ${candidate.label}`,
+            `    topic: ${topic}`,
+            `    candidate: ${candidate.candidate_id}`,
+            `    next: ${candidate.next_action}`,
         );
     }
     lines.push("", "pending review candidates:");

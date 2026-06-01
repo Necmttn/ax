@@ -33,12 +33,11 @@ artifact path as the evidence to inspect before trusting any summary row.
 
 Current recommendation:
 
-- Index continuation: E484 applied the provenance-complete E483 review fact to
-  the graph and re-ran the batch. The target-resolved
-  `correction_or_rejection_signal` candidate now appears in `review-coverage`
-  with `has_review_acceptance=true`; downstream routing correctly keeps
-  guidance promotion not warranted because the recommended artifact is
-  `classifier_fixture`.
+- Index continuation: E485 exposes accepted `classifier_fixture`
+  recommendations as first-class follow-up work. The target-resolved
+  `correction_or_rejection_signal` candidate is still not guidance, but batch
+  reports now carry `accepted_classifier_fixture_candidates` plus counts and
+  text output so services can route it toward fixture-pack/package updates.
 - Do not adopt SetFit/SVM model output as promotion-quality facts yet.
 - Continue the hybrid path: deterministic guards, helper mining, human review,
   append-only fixtures, graph projection, and workflow/harness usefulness
@@ -107,10 +106,57 @@ Current recommendation:
   analysis passes the candidate-layer quality gate but remains
   `promotion_quality=false` because residual repeated misses, residual `none`
   false positives, and missing human promotion review still block autonomous
-  fact promotion. The immediate bottleneck is now converting this accepted
-  classifier-fixture recommendation into an actual classifier fixture/package
-  update, then rerunning quality checks to see whether it improves the model
-  or just the review graph.
+  fact promotion. The immediate bottleneck is now using the new classifier
+  fixture follow-up queue to append/update fixture packs, then rerunning quality
+  checks to see whether it improves the model or just the review graph.
+
+## E485 - Surface Accepted Classifier Fixture Follow-ups
+
+Question:
+- After E484 applies the accepted review fact, can services see that the
+  accepted candidate should feed classifier fixture/package work instead of
+  being buried inside `guidance_promotion_not_warranted` rationale text?
+
+Implementation:
+- Added `accepted_classifier_fixture_candidates` to
+  `ax.workflow_topic_guidance_decision.v1` reports.
+- Added `accepted_classifier_fixture_candidate_count` to topic and batch
+  totals.
+- Added a `classifier fixture follow-ups` section to batch text output.
+- Kept batch-level `next_action` priority on unresolved human-review backlog;
+  fixture follow-ups are exposed as a parallel queue.
+
+Artifacts:
+- `.ax/experiments/workflow-topic-guidance-decision-batch-e485-classifier-fixture-followup.json`
+
+Live results:
+- Batch total accepted classifier fixtures: `1`
+- `review-coverage` follow-up candidate:
+  - candidate: `classifier_candidate_group:hybrid-window/correction_or_rejection_signal`
+  - label: `correction_or_rejection_signal`
+  - recommended artifact: `classifier_fixture`
+  - decision: `guidance_promotion_not_warranted`
+  - next action:
+    `Append this reviewed candidate to a classifier fixture pack or package update candidate.`
+- Human-readable batch output now includes:
+  - `accepted classifier fixtures: 1`
+  - `classifier fixture follow-ups`
+  - the candidate id for `correction_or_rejection_signal`
+
+Decision:
+- Continue. The service now has a structured handoff from reviewed graph fact
+  to classifier-package work.
+- Next useful slice: materialize this follow-up into an actual fixture-pack
+  append/update candidate, then run package quality status to verify whether it
+  improves classifier quality gates.
+
+Verification:
+```sh
+bun test src/cli/classifiers-workflow-candidates.test.ts -t "guidance decision routes accepted classifier fixtures"
+bun src/cli/index.ts classifiers workflow-candidates --guidance-decision-batch --source-kind=transcript_classifier_projection --include-review-facts --out=.ax/experiments/workflow-topic-guidance-decision-batch-e485-classifier-fixture-followup.json --json
+jq '{total: .totals.accepted_classifier_fixture_candidate_count, next_action, review_coverage: (.decisions[] | select(.topic=="review-coverage") | {accepted_classifier_fixture_candidates, totals})}' .ax/experiments/workflow-topic-guidance-decision-batch-e485-classifier-fixture-followup.json
+bun src/cli/index.ts classifiers workflow-candidates --guidance-decision-batch --source-kind=transcript_classifier_projection --include-review-facts | rg -n "accepted classifier fixtures|classifier fixture follow-ups|correction_or_rejection_signal|next action"
+```
 
 ## E484 - Apply Target-resolved Review Fact
 

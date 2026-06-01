@@ -3769,6 +3769,93 @@ describe("classifiers workflow-candidates", () => {
         });
     });
 
+    test("guidance decision routes accepted classifier fixtures as package follow-up work", () => {
+        const proposals = buildWorkflowCandidateProposalListReport({
+            rows: [],
+            limit: 10,
+            status: "all",
+            expandEvidence: true,
+            search: "review-coverage",
+        });
+        const candidates = buildWorkflowCandidateReport({
+            groupRows: [],
+            evidenceRows: [],
+            sourceKind: "hybrid_window_classifier_projection",
+            limit: 10,
+            examplesPerGroup: 1,
+            search: "review-coverage",
+            taskLike: "include",
+        });
+        const report = {
+            ...buildWorkflowCandidateTopicReport({
+                sourceKind: "hybrid_window_classifier_projection",
+                topic: "review-coverage",
+                proposals,
+                candidates: {
+                    ...candidates,
+                    candidates: [{
+                        group_id: "classifier_candidate_group:hybrid-window/correction_or_rejection_signal",
+                        label: "correction_or_rejection_signal",
+                        proposed_action: "add_context_guardrail",
+                        raw_support_count: 1,
+                        support_count: 1,
+                        evidence_count: 1,
+                        turn_ref_count: 1,
+                        average_confidence: 0.6,
+                        wrapper_like_count: 0,
+                        task_like_count: 0,
+                        task_like_ratio: 0,
+                        score: 0.83,
+                        examples: [{
+                            result_id: "classifier_result:correction",
+                            turn: "turn:correction",
+                            confidence: 0.6,
+                            task_like: false,
+                            text_excerpt: "Can we create another scenario from this successful retro workflow?",
+                        }],
+                    }],
+                },
+            }),
+            persisted_review_facts: buildWorkflowCandidateTopicReviewGraphListReport({
+                topic: "review-coverage",
+                facts: [{
+                    graph_id: "fact:workflow_topic_candidate_review__review_coverage__correction",
+                    subject: "workflow_topic_candidate_review:review_coverage:correction",
+                    predicate: "accept",
+                    object: "classifier_candidate_group:hybrid-window/correction_or_rejection_signal",
+                    value_json: properties({ reviewed: true, verdict: "accept" }),
+                    properties_json: properties({
+                        topic: "review-coverage",
+                        candidate_id: "classifier_candidate_group:hybrid-window/correction_or_rejection_signal",
+                    }),
+                }],
+                edges: [],
+            }),
+        };
+
+        const decision = buildWorkflowCandidateTopicGuidanceDecisionReport(report);
+        const batch = buildWorkflowCandidateTopicGuidanceDecisionBatchReport({
+            sourceKind: "hybrid_window_classifier_projection",
+            limit: 10,
+            decisions: [decision],
+        });
+        const text = renderWorkflowCandidateTopicGuidanceDecisionBatchText(batch);
+
+        expect(decision.totals.accepted_classifier_fixture_candidate_count).toBe(1);
+        expect(decision.accepted_classifier_fixture_candidates).toEqual([{
+            candidate_id: "classifier_candidate_group:hybrid-window/correction_or_rejection_signal",
+            label: "correction_or_rejection_signal",
+            recommended_artifact: "classifier_fixture",
+            decision: "guidance_promotion_not_warranted",
+            next_action: "Append this reviewed candidate to a classifier fixture pack or package update candidate.",
+        }]);
+        expect(batch.totals.accepted_classifier_fixture_candidate_count).toBe(1);
+        expect(batch.next_action).toBe("Append accepted classifier-fixture candidates to fixture packs or package update candidates.");
+        expect(text).toContain("accepted classifier fixtures: 1");
+        expect(text).toContain("classifier fixture follow-ups:");
+        expect(text).toContain("classifier_candidate_group:hybrid-window/correction_or_rejection_signal");
+    });
+
     test("guidance decision batch summarizes multiple reviewed topics", () => {
         const batch = buildWorkflowCandidateTopicGuidanceDecisionBatchReport({
             sourceKind: "hybrid_window_classifier_projection",
@@ -3779,12 +3866,14 @@ describe("classifiers workflow-candidates", () => {
                 decision: "guidance_promotion_not_warranted",
                 next_action: "Do not promote guidance for this topic yet; use the persisted harness fact as graph evidence.",
                 candidates: [],
+                accepted_classifier_fixture_candidates: [],
                 totals: {
                     candidate_count: 1,
                     guidance_ready_count: 0,
                     guidance_not_warranted_count: 1,
                     needs_passing_harness_evidence_count: 0,
                     needs_human_review_count: 0,
+                    accepted_classifier_fixture_candidate_count: 0,
                     accepted_harness_proposal_count: 1,
                     scaffolded_harness_experiment_count: 1,
                     passing_harness_evidence_count: 1,
@@ -3796,12 +3885,14 @@ describe("classifiers workflow-candidates", () => {
                 decision: "guidance_promotion_not_warranted",
                 next_action: "Do not promote guidance for this topic yet; use the persisted harness fact as graph evidence.",
                 candidates: [],
+                accepted_classifier_fixture_candidates: [],
                 totals: {
                     candidate_count: 1,
                     guidance_ready_count: 0,
                     guidance_not_warranted_count: 1,
                     needs_passing_harness_evidence_count: 0,
                     needs_human_review_count: 0,
+                    accepted_classifier_fixture_candidate_count: 0,
                     accepted_harness_proposal_count: 1,
                     scaffolded_harness_experiment_count: 1,
                     passing_harness_evidence_count: 1,
