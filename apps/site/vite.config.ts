@@ -27,6 +27,10 @@ export default defineConfig({
     contentCollections(),
     tanstackStart({
       srcDirectory: "app",
+      // SPA mode keeps the client router + Link prefetch working on a static
+      // host (no server). Prerender then statically renders each route's full
+      // content on top, so first paint is static and in-app nav stays instant.
+      spa: { enabled: true },
       prerender: {
         enabled: true,
         crawlLinks: true,

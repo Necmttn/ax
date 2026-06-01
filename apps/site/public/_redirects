@@ -6,11 +6,12 @@
 # /install, _shell.html, etc.) take precedence over these rules; this file
 # only governs routes that don't match a real file.
 
-# SPA fallback - almost every route is prerendered to its own /route/index.html
-# (those static files are served directly and take precedence over this rule).
-# This catch-all only handles routes that are NOT prerendered - currently the
-# runtime gist-share route /s/$owner/$gistId - by serving the prerendered home
-# document with a 200 so the client router can render the matching route.
+# SPA fallback. Most routes are prerendered to their own /route/index.html and
+# those static files are served directly (and take precedence over this rule).
+# This catch-all covers the SPA client-router entry: the home route and any
+# route without a prerendered file (e.g. the runtime /s/$owner/$gistId gist
+# shares) get the SPA shell (copied to index.html at build time) with a 200,
+# and the hydrated client router renders the matching route + prefetches links.
 #
 # Target is /index.html, NOT /_shell.html: Cloudflare Pages auto-redirects any
 # *.html URL to its extensionless form (308), so a `/_shell.html` rewrite
