@@ -1,0 +1,7 @@
+# Cloudflare Pages redirects
+# Syntax: <from>  <to>  <status>
+# Reference: https://developers.cloudflare.com/pages/configuration/redirects/
+
+# Short install URL used by the landing's curl one-liner.
+# Lets ax.necmttn.com/install resolve to the canonical script on GitHub raw.
+/install  https://raw.githubusercontent.com/Necmttn/ax/main/install.sh  302
