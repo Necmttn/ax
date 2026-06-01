@@ -741,6 +741,19 @@
             ]
         },
         {
+            "id": "workflow-fixture-boundary-deterministic-graph-projection",
+            "kind": "status",
+            "description": "Project deterministic boundary replay coverage into classifier graph nodes, edges, facts, and a Surreal write plan.",
+            "command": "python3 packages/ax-classifier-session-sections/boundary_replay_graph_projection.py --replay=.ax/experiments/boundary-review-deterministic-replay-workflow-candidate-current.json --out=.ax/experiments/boundary-replay-graph-projection-workflow-candidate-current.json --write-plan=.ax/experiments/boundary-replay-graph-write-plan-workflow-candidate-current.json --json",
+            "inputs": [
+                ".ax/experiments/boundary-review-deterministic-replay-workflow-candidate-current.json"
+            ],
+            "outputs": [
+                ".ax/experiments/boundary-replay-graph-projection-workflow-candidate-current.json",
+                ".ax/experiments/boundary-replay-graph-write-plan-workflow-candidate-current.json"
+            ]
+        },
+        {
             "id": "workflow-fixture-none-safety-pregate",
             "kind": "status",
             "description": "Replay a deterministic text-projection none-safety pre-gate over workflow SetFit robustness predictions.",

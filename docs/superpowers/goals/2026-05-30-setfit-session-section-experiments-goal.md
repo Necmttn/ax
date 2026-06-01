@@ -336,6 +336,69 @@ Decision:
   so candidate promotion can prefer deterministic reviewed correction evidence
   and demote raw model `none` predictions on the same row.
 
+## E494 - Boundary Replay Graph Projection
+
+Question: can deterministic replay coverage become graph-shaped facts that the
+query layer can consume without reading the replay JSON directly?
+
+Changes:
+
+- Added `boundary_replay_graph_projection.py`.
+- Added package operation
+  `workflow-fixture-boundary-deterministic-graph-projection`.
+- Added projection tests for covered replay facts and write-plan generation.
+
+Command:
+
+```sh
+bun src/cli/index.ts classifiers package-operations \
+  --operation=workflow-fixture-boundary-deterministic-graph-projection \
+  --execute \
+  --out=.ax/experiments/classifier-package-execution-workflow-fixture-boundary-deterministic-graph-projection-e494.json \
+  --json
+```
+
+Artifacts:
+
+- `.ax/experiments/boundary-replay-graph-projection-workflow-candidate-current.json`
+- `.ax/experiments/boundary-replay-graph-write-plan-workflow-candidate-current.json`
+- `.ax/experiments/classifier-package-execution-workflow-fixture-boundary-deterministic-graph-projection-e494.json`
+
+Results:
+
+- Projection decision: `boundary_replay_graph_projection_ready`
+- Nodes: `3`
+- Edges: `2`
+- Facts: `2`
+- Covered facts: `1`
+- Deterministic label facts: `1`
+- Write plan decision: `ready_to_apply`
+- Source kind:
+  `boundary_replay_deterministic_projection`
+
+Graph facts produced:
+
+- `covered_by_deterministic=true` for
+  `classifier_boundary_miss:workflow-candidate-topic/review_coverage/correction_or_rejection_signal/lhseid`
+- `deterministic_label={label: correction, target: workflow_state}` linked to
+  the deterministic `correction-event` result.
+
+Verification:
+
+```sh
+python3 -m unittest packages/ax-classifier-session-sections/boundary_replay_graph_projection_test.py
+bun test src/classifiers/package-service.test.ts
+```
+
+Passed: `2` Python tests and `25` Bun tests.
+
+Decision:
+
+- Continue the graph-first path. This is now queryable evidence that the model
+  miss has a deterministic reviewed correction alternative.
+- Next useful slice: apply the boundary replay write plan to local SurrealDB
+  and add/query graph-health filters for `boundary_replay_deterministic_projection`.
+
 Current recommendation:
 
 - Index continuation: E488 turns the accepted classifier-fixture follow-up into
