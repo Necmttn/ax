@@ -2,7 +2,7 @@
 import { spawnSync } from "node:child_process";
 import { Surreal } from "surrealdb";
 import { envConfig } from "@ax/lib/db";
-import { classifierThemesSql, harnessCandidatesSql } from "../src/queries/insights.ts";
+import { classifierThemesSql, harnessCandidatesSql } from "../apps/axctl/src/queries/insights.ts";
 
 export interface ClassifierSmokeArgs {
     readonly days: number;

@@ -4,7 +4,7 @@ import schemaSurql from "@ax/schema/schema.surql" with { type: "text" };
 import {
     PROVIDER_PARITY_FEATURES,
     PROVIDER_PARITY_PROVIDERS,
-} from "../src/ingest/provider-parity.ts";
+} from "../apps/axctl/src/ingest/provider-parity.ts";
 
 const schemaTables = (): Set<string> => {
     const schema = schemaSurql;

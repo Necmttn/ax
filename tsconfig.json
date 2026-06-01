@@ -26,6 +26,6 @@
       }
     ]
   },
-  "include": ["src/**/*.ts", "src/**/*.tsx", "src/**/*.d.ts", "packages/**/*.ts"],
-  "exclude": ["src/dashboard/web/**"]
+  "include": ["apps/axctl/src/**/*.ts", "apps/axctl/src/**/*.tsx", "apps/axctl/src/**/*.d.ts", "packages/**/*.ts"],
+  "exclude": ["apps/axctl/src/dashboard/web/**"]
 }

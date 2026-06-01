@@ -1,11 +1,11 @@
 import {
     loadClassifierPackageManifest,
-} from "../src/classifiers/package-manifest.ts";
+} from "../apps/axctl/src/classifiers/package-manifest.ts";
 import {
     buildOperationsReport,
     writeOperationsReport,
     type ClassifierPackageOperationsReport,
-} from "../src/classifiers/package-operations.ts";
+} from "../apps/axctl/src/classifiers/package-operations.ts";
 
 function parseArgs(argv: readonly string[]): { manifest: string; operation?: string; out?: string; json: boolean } {
     let manifest = "packages/ax-classifier-session-sections/ax.classifier.json";

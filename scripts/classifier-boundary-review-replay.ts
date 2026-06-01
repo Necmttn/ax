@@ -4,9 +4,9 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { mkdirSync } from "node:fs";
 import { Effect } from "effect";
-import { ClassifierRunner, ClassifierRunnerLive, type ClassifierResult } from "../src/classifiers/core.ts";
-import { correctionEventClassifier } from "../src/classifiers/correction-event/index.ts";
-import { windowFixture } from "../src/classifiers/test-fixtures.ts";
+import { ClassifierRunner, ClassifierRunnerLive, type ClassifierResult } from "../apps/axctl/src/classifiers/core.ts";
+import { correctionEventClassifier } from "../apps/axctl/src/classifiers/correction-event/index.ts";
+import { windowFixture } from "../apps/axctl/src/classifiers/test-fixtures.ts";
 
 interface BoundaryReviewItem {
     readonly id?: unknown;

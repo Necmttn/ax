@@ -66,7 +66,7 @@ jobs:
 
       - run: bun run check:cli-reference
 
-      - run: bun build --compile --outfile=dist/axctl src/cli/index.ts
+      - run: bun build --compile --outfile=dist/axctl apps/axctl/src/cli/index.ts
 
       - name: Smoke compiled CLI
         run: |

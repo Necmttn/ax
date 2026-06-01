@@ -31,7 +31,7 @@ describe("check-table-coverage gate FAILS on a synthetic orphan", () => {
     // table with no reader. The gate must spot it. Self-test for the gate
     // itself - see Phase D follow-up in the plan.
     const ORPHAN_TABLE = "zzz_synthetic_orphan_for_gate_test";
-    const FIXTURE_PATH = join(REPO_ROOT, "src/ingest/_test_synthetic_orphan.ts");
+    const FIXTURE_PATH = join(REPO_ROOT, "apps/axctl/src/ingest/_test_synthetic_orphan.ts");
 
     beforeEach(() => {
         writeFileSync(

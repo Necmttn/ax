@@ -1,8 +1,9 @@
 {
-  "name": "axctl",
+  "name": "ax",
   "version": "0.5.0",
+  "private": true,
   "license": "AGPL-3.0-only",
-  "description": "ax is local memory and telemetry for coding agents. axctl ingests transcripts, skills, and git history into SurrealDB; surfaces what skills are worth keeping and what the user actually does on demand.",
+  "description": "ax monorepo root - workspace orchestration for the axctl CLI (apps/axctl), landing site (apps/site), and shared packages (@ax/lib, @ax/schema).",
   "type": "module",
   "workspaces": {
     "packages": [
@@ -16,9 +17,6 @@
       "vite": "^8.0.3"
     }
   },
-  "bin": {
-    "axctl": "./bin/axctl"
-  },
   "overrides": {
     "@tanstack/react-router": "1.170.8",
     "@tanstack/react-start": "1.168.14",
@@ -31,8 +29,8 @@
     "prepare": "effect-language-service patch",
     "postinstall": "[ -f bun.lock ] && bun2nix -o bun.nix || true",
     "typecheck": "tsc --noEmit",
-    "ingest": "bun src/cli/index.ts ingest",
-    "search": "bun src/cli/index.ts search",
+    "ingest": "bun apps/axctl/src/cli/index.ts ingest",
+    "search": "bun apps/axctl/src/cli/index.ts search",
     "db:start": "scripts/db-start.sh",
     "db:start:fg": "AX_DB_FOREGROUND=1 scripts/db-start.sh",
     "db:start:nix": "nix run .#ax-surreal",
@@ -46,12 +44,12 @@
     "checkpoint:uninstall": "bash scripts/uninstall-checkpoint.sh",
     "daemon:install": "bash scripts/install-daemon.sh",
     "daemon:uninstall": "bash scripts/uninstall-daemon.sh",
-    "build": "bun build --compile --outfile=dist/axctl src/cli/index.ts",
+    "build": "bun build --compile --outfile=dist/axctl apps/axctl/src/cli/index.ts",
     "check:cli-reference": "bun scripts/check-cli-reference.ts",
     "check:table-coverage": "bun scripts/check-table-coverage.ts",
-    "dashboard:dev": "vite --config src/dashboard/web/vite.config.ts",
-    "dashboard:build": "vite build --config src/dashboard/web/vite.config.ts",
-    "serve": "bun src/cli/index.ts serve",
+    "dashboard:dev": "vite --config apps/axctl/src/dashboard/web/vite.config.ts",
+    "dashboard:build": "vite build --config apps/axctl/src/dashboard/web/vite.config.ts",
+    "serve": "bun apps/axctl/src/cli/index.ts serve",
     "release:announcement": "bun scripts/create-release-announcement.ts",
     "prototype:memory-context": "bun scripts/prototypes/ax-memory-context.ts",
     "prototype:file-context": "bun scripts/prototypes/ax-file-context.ts",

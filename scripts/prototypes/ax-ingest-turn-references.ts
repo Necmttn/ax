@@ -8,18 +8,18 @@ import {
     classifySymbolKind,
     extractTurnReferences,
     normalizeErrorSignature,
-} from "../../src/ingest/turn-references.ts";
+} from "../../apps/axctl/src/ingest/turn-references.ts";
 import {
     errorSignatureRecordKey,
     mentionedRelationRecordKey,
     symbolRecordKey,
     toolFileRelationRecordKey,
-} from "../../src/ingest/record-keys.ts";
+} from "../../apps/axctl/src/ingest/record-keys.ts";
 import {
     classifyToolFileEvidence,
     evidenceReason,
     type ToolFileEvidenceKind,
-} from "../../src/ingest/tool-file-evidence.ts";
+} from "../../apps/axctl/src/ingest/tool-file-evidence.ts";
 
 const cfg = {
     url: process.env.AX_DB_URL ?? "ws://127.0.0.1:8521",

@@ -1,8 +1,8 @@
 import type { ClassifierDefinition } from "./core.ts";
 import { correctionEventClassifier } from "./correction-event/index.ts";
 import { reactionEventClassifier } from "./reaction-event/index.ts";
-import { directionEventClassifier } from "../../packages/ax-classifier-direction-event/src/index.ts";
-import { verificationEventClassifier } from "../../packages/ax-classifier-verification-event/src/index.ts";
+import { directionEventClassifier } from "@ax-classifier/direction-event";
+import { verificationEventClassifier } from "@ax-classifier/verification-event";
 
 export interface RegisteredClassifier {
     readonly definition: ClassifierDefinition;

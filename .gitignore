@@ -21,7 +21,7 @@ dist/
 .DS_Store
 
 # dashboard studio build output
-src/dashboard/web/dist-studio/
+apps/axctl/src/dashboard/web/dist-studio/
 
 # local dogfood outputs (HTML reports, profiling scratch)
 dogfood-output/

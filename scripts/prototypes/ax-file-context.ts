@@ -6,9 +6,9 @@
 import { writeFile } from "node:fs/promises";
 import { Surreal } from "surrealdb";
 import { classifyTopics } from "./ax-memory-context-logic.ts";
-import { classifyTurnIntent } from "../../src/ingest/intent-kind.ts";
-import { errorSignatureRecordKey, symbolRecordKey } from "../../src/ingest/record-keys.ts";
-import { normalizeErrorSignature } from "../../src/ingest/turn-references.ts";
+import { classifyTurnIntent } from "../../apps/axctl/src/ingest/intent-kind.ts";
+import { errorSignatureRecordKey, symbolRecordKey } from "../../apps/axctl/src/ingest/record-keys.ts";
+import { normalizeErrorSignature } from "../../apps/axctl/src/ingest/turn-references.ts";
 
 const cfg = {
     url: process.env.AX_DB_URL ?? "ws://127.0.0.1:8521",

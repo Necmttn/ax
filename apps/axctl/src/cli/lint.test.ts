@@ -6,7 +6,7 @@ import { join } from "node:path";
 
 describe("axctl improve lint", () => {
     test("--help mentions --json and --stale-days", () => {
-        const source = readFileSync("src/cli/index.ts", "utf8");
+        const source = readFileSync("apps/axctl/src/cli/index.ts", "utf8");
         const commandBlock = source.slice(
             source.indexOf("const improveLintCommand"),
             source.indexOf("const improveListCommand"),

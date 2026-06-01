@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { loadClassifierPackageManifest } from "../src/classifiers/package-manifest.ts";
+import { loadClassifierPackageManifest } from "../apps/axctl/src/classifiers/package-manifest.ts";
 import {
     buildOperationExecutionPlanReport,
     buildOperationDryRunReport,
@@ -37,7 +37,7 @@ import {
     writeClassifierLifecycleInsightReport,
     writeOperationsReport,
     writePackagesOperationsReport,
-} from "../src/classifiers/package-operations.ts";
+} from "../apps/axctl/src/classifiers/package-operations.ts";
 
 describe("classifier package operations report", () => {
     test("lists operations from the session-section manifest", () => {

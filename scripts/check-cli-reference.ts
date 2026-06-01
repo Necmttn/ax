@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 
-const help = spawnSync("bun", ["src/cli/index.ts", "help"], {
+const help = spawnSync("bun", ["apps/axctl/src/cli/index.ts", "help"], {
     encoding: "utf8",
 });
 

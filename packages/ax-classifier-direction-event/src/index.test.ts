@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { Effect } from "effect";
-import { ClassifierRunner, ClassifierRunnerLive } from "../../../src/classifiers/core.ts";
-import { windowFixture } from "../../../src/classifiers/test-fixtures.ts";
+import { ClassifierRunner, ClassifierRunnerLive } from "../../../apps/axctl/src/classifiers/core.ts";
+import { windowFixture } from "../../../apps/axctl/src/classifiers/test-fixtures.ts";
 import { directionEventClassifier } from "./index.ts";
 
 const run = (user: string) =>

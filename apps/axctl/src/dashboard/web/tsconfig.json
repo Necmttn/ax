@@ -18,7 +18,7 @@
         "verbatimModuleSyntax": false,
         "types": ["vite/client"],
         "paths": {
-            "@shared/*": ["../../../packages/lib/src/shared/*"]
+            "@shared/*": ["../../../../../packages/lib/src/shared/*"]
         }
     },
     "include": ["src", "vite.config.ts"],
