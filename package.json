@@ -12,7 +12,7 @@
   },
   "scripts": {
     "prepare": "effect-language-service patch",
-    "postinstall": "bun2nix -o bun.nix || true",
+    "postinstall": "[ -f bun.lock ] && bun2nix -o bun.nix || true",
     "typecheck": "tsc --noEmit",
     "ingest": "bun src/cli/index.ts ingest",
     "search": "bun src/cli/index.ts search",
