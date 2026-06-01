@@ -33,8 +33,8 @@ artifact path as the evidence to inspect before trusting any summary row.
 
 Current recommendation:
 
-- Index continuation: E467 adds
-  `.ax/experiments/workflow-candidate-pending-review-tasks-recommended-artifact-status-e467.json`
+- Index continuation: E468 adds
+  `.ax/experiments/workflow-candidate-pending-review-tasks-recommended-progress-e468.json`
   as the latest hybrid classifier review-throughput evidence.
 - Do not adopt SetFit/SVM model output as promotion-quality facts yet.
 - Continue the hybrid path: deterministic guards, helper mining, human review,
@@ -79,9 +79,56 @@ Current recommendation:
   service can open the review artifacts directly without scanning the task
   rows. It now also carries those artifacts' presence statuses, so services can
   route the recommended task to open-review versus artifact repair from the
-  header alone. The immediate bottleneck remains a real human review decision
-  for that pending candidate, not promoting synthetic or harness-only
+  header alone. It now also carries the recommended task's fixture/review
+  progress counts so services can display or route review workload without
+  scanning row details. The immediate bottleneck remains a real human review
+  decision for that pending candidate, not promoting synthetic or harness-only
   evidence.
+
+## E468 - Expose Recommended Review Progress
+
+Question:
+- Can a review service show the recommended task's review progress from the
+  task-list header, without scanning the `tasks` array?
+
+Implementation:
+- Added recommended-task progress fields to
+  `ax.workflow_candidate_pending_review_task_list.v1`:
+  - `recommended_task_fixture_count`
+  - `recommended_task_reviewed_fixture_count`
+  - `recommended_task_pending_fixture_count`
+  - `recommended_task_invalid_fixture_count`
+  - `recommended_task_missing_rationale_count`
+- Text output now prints a compact `recommended review progress` line.
+- Regression coverage verifies progress headers for collect-review and
+  execute-command routes while leaving artifact-repair tasks sparse when
+  progress cannot be read.
+
+Artifacts:
+- `.ax/experiments/workflow-candidate-pending-review-tasks-recommended-progress-e468.json`
+- `.ax/tasks/workflow-candidate-pending-review-nqj7es.md`
+
+Results:
+- Live `--pending-review-route=collect_review_decisions` report:
+  - `recommended_task_fixture_count=1`
+  - `recommended_task_reviewed_fixture_count=0`
+  - `recommended_task_pending_fixture_count=1`
+  - `recommended_task_invalid_fixture_count=0`
+  - `recommended_task_missing_rationale_count=0`
+  - `recommended_task_review_decision_status=needs_review_decisions`
+
+Decision:
+- E468 makes the recommended pending-review packet sufficient for queue UI
+  progress display and service routing.
+- The live candidate is artifact-complete with one pending fixture and zero
+  reviewed fixtures; the next step is still real human review, not sync,
+  inspect, graph apply, guidance promotion, or harness promotion.
+
+Verification:
+```sh
+bun test src/cli/classifiers-workflow-candidates.test.ts
+bun src/cli/index.ts classifiers workflow-candidates --list-pending-review-tasks --task-dir=.ax/tasks --pending-review-route=collect_review_decisions --out .ax/experiments/workflow-candidate-pending-review-tasks-recommended-progress-e468.json --json
+```
 
 ## E467 - Expose Recommended Review Artifact Status
 

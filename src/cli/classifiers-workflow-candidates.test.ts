@@ -4371,6 +4371,11 @@ describe("classifiers workflow-candidates", () => {
             recommended_task_fixture_pack_status: "present",
             recommended_task_review_brief_path: ".ax/experiments/pending-review.md",
             recommended_task_review_brief_status: "present",
+            recommended_task_fixture_count: 1,
+            recommended_task_reviewed_fixture_count: 0,
+            recommended_task_pending_fixture_count: 1,
+            recommended_task_invalid_fixture_count: 0,
+            recommended_task_missing_rationale_count: 0,
             recommended_task_review_sync_command_status: "blocked_until_review_decisions",
             recommended_task_review_sync_command_can_execute: false,
             recommended_task_review_inspect_command_status: "blocked_until_review_decisions",
@@ -4414,6 +4419,11 @@ describe("classifiers workflow-candidates", () => {
             recommended_task_fixture_pack_status: "present",
             recommended_task_review_brief_path: ".ax/experiments/reviewed.md",
             recommended_task_review_brief_status: "present",
+            recommended_task_fixture_count: 1,
+            recommended_task_reviewed_fixture_count: 1,
+            recommended_task_pending_fixture_count: 0,
+            recommended_task_invalid_fixture_count: 0,
+            recommended_task_missing_rationale_count: 0,
             recommended_task_review_sync_command_status: "ready_to_execute",
             recommended_task_review_sync_command_can_execute: true,
             recommended_task_review_inspect_command_status: "ready_to_execute",
@@ -4466,8 +4476,14 @@ describe("classifiers workflow-candidates", () => {
             recommended_task_fixture_pack_status: "present",
             recommended_task_review_brief_path: ".ax/experiments/pending-review.md",
             recommended_task_review_brief_status: "present",
+            recommended_task_fixture_count: 1,
+            recommended_task_reviewed_fixture_count: 0,
+            recommended_task_pending_fixture_count: 1,
+            recommended_task_invalid_fixture_count: 0,
+            recommended_task_missing_rationale_count: 0,
         });
         expect(renderWorkflowCandidateGuidancePendingReviewTaskListText(collectReviewRouteReport)).toContain("filter route: collect_review_decisions");
+        expect(renderWorkflowCandidateGuidancePendingReviewTaskListText(collectReviewRouteReport)).toContain("recommended review progress: fixtures=1 reviewed=0 pending=1 invalid=0 missing_rationale=0");
 
         const executableRouteReport = buildWorkflowCandidateGuidancePendingReviewTaskListReport({
             taskDir: ".ax/tasks",
@@ -4501,6 +4517,11 @@ describe("classifiers workflow-candidates", () => {
             recommended_task_fixture_pack_status: "present",
             recommended_task_review_brief_path: ".ax/experiments/reviewed.md",
             recommended_task_review_brief_status: "present",
+            recommended_task_fixture_count: 1,
+            recommended_task_reviewed_fixture_count: 1,
+            recommended_task_pending_fixture_count: 0,
+            recommended_task_invalid_fixture_count: 0,
+            recommended_task_missing_rationale_count: 0,
         });
     });
 

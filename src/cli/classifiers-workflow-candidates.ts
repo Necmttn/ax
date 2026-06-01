@@ -378,6 +378,11 @@ export interface WorkflowCandidateGuidancePendingReviewTaskListReport {
     readonly recommended_task_fixture_pack_status?: WorkflowCandidateGuidancePendingReviewTaskArtifactStatus;
     readonly recommended_task_review_brief_path?: string;
     readonly recommended_task_review_brief_status?: WorkflowCandidateGuidancePendingReviewTaskArtifactStatus;
+    readonly recommended_task_fixture_count?: number;
+    readonly recommended_task_reviewed_fixture_count?: number;
+    readonly recommended_task_pending_fixture_count?: number;
+    readonly recommended_task_invalid_fixture_count?: number;
+    readonly recommended_task_missing_rationale_count?: number;
     readonly recommended_task_candidate_ids?: readonly string[];
     readonly recommended_task_next_action?: string;
     readonly recommended_task_review_sync_command?: readonly string[];
@@ -3686,6 +3691,21 @@ export function buildWorkflowCandidateGuidancePendingReviewTaskListReport(input:
                 recommended_task_review_brief_path: recommendedTask.review_brief_path,
             }),
             recommended_task_review_brief_status: recommendedTask.review_brief_status,
+            ...(recommendedTask.fixture_count === undefined ? {} : {
+                recommended_task_fixture_count: recommendedTask.fixture_count,
+            }),
+            ...(recommendedTask.reviewed_fixture_count === undefined ? {} : {
+                recommended_task_reviewed_fixture_count: recommendedTask.reviewed_fixture_count,
+            }),
+            ...(recommendedTask.pending_fixture_count === undefined ? {} : {
+                recommended_task_pending_fixture_count: recommendedTask.pending_fixture_count,
+            }),
+            ...(recommendedTask.invalid_fixture_count === undefined ? {} : {
+                recommended_task_invalid_fixture_count: recommendedTask.invalid_fixture_count,
+            }),
+            ...(recommendedTask.missing_rationale_count === undefined ? {} : {
+                recommended_task_missing_rationale_count: recommendedTask.missing_rationale_count,
+            }),
             recommended_task_candidate_ids: recommendedTask.candidate_ids,
             recommended_task_next_action: recommendedTask.review_decision_next_action,
             ...(recommendedTask.review_sync_command === undefined ? {} : {
@@ -3790,6 +3810,7 @@ export function renderWorkflowCandidateGuidancePendingReviewTaskListText(
         `recommended fixture pack status: ${report.recommended_task_fixture_pack_status ?? "none"}`,
         `recommended review brief: ${report.recommended_task_review_brief_path ?? "none"}`,
         `recommended review brief status: ${report.recommended_task_review_brief_status ?? "none"}`,
+        `recommended review progress: fixtures=${report.recommended_task_fixture_count ?? "unknown"} reviewed=${report.recommended_task_reviewed_fixture_count ?? "unknown"} pending=${report.recommended_task_pending_fixture_count ?? "unknown"} invalid=${report.recommended_task_invalid_fixture_count ?? "unknown"} missing_rationale=${report.recommended_task_missing_rationale_count ?? "unknown"}`,
         `recommended task next: ${report.recommended_task_next_action ?? "none"}`,
         `recommended sync command status: ${report.recommended_task_review_sync_command_status ?? "none"} can_execute=${report.recommended_task_review_sync_command_can_execute === undefined ? "none" : report.recommended_task_review_sync_command_can_execute ? "yes" : "no"}`,
         `recommended inspect command status: ${report.recommended_task_review_inspect_command_status ?? "none"} can_execute=${report.recommended_task_review_inspect_command_can_execute === undefined ? "none" : report.recommended_task_review_inspect_command_can_execute ? "yes" : "no"}`,
