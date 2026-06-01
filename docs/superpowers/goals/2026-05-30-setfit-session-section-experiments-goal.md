@@ -33,8 +33,8 @@ artifact path as the evidence to inspect before trusting any summary row.
 
 Current recommendation:
 
-- Index continuation: E455 adds
-  `.ax/experiments/workflow-candidate-pending-review-tasks-e455.json`
+- Index continuation: E456 adds
+  `.ax/experiments/workflow-candidate-pending-review-tasks-e456.json`
   as the latest hybrid classifier review-throughput evidence.
 - Do not adopt SetFit/SVM model output as promotion-quality facts yet.
 - Continue the hybrid path: deterministic guards, helper mining, human review,
@@ -56,10 +56,68 @@ Current recommendation:
   same review-pipeline lifecycle report used by review services, the pending
   review can now be emitted as a `.ax/tasks` handoff with a parseable
   `ax.workflow_candidate_pending_review_task.v1` marker, and the CLI can list
-  those tasks and verify their fixture/brief artifacts before review. A
+  those tasks, verify their fixture/brief artifacts, and dry-run the linked
+  review brief to report whether human decisions are present before review. A
   smoke-marked review is correctly blocked from apply, so the immediate
   bottleneck remains a real human review decision for that pending candidate,
   not promoting synthetic or harness-only evidence.
+
+## E456 - Surface Pending Review Decision Readiness
+
+Question:
+- Can the pending review task list distinguish "artifacts exist" from "the
+  linked review brief has actual reviewed fixture decisions"?
+
+Implementation:
+- Extended pending review task list items with review-decision state:
+  - `fixture_count`,
+  - `synced_fixture_count`,
+  - `reviewed_fixture_count`,
+  - `pending_fixture_count`,
+  - `invalid_fixture_count`,
+  - `missing_rationale_count`,
+  - `review_decision_status`, and
+  - `review_decision_next_action`.
+- The list path now dry-runs
+  `syncWorkflowCandidateFixtureRowsFromBriefWithSummary` against each task's
+  fixture pack and review brief without writing files or applying graph facts.
+- Added aggregate counts for `review_decisions_ready` and
+  `review_decisions_need_repair`.
+- Added regression coverage for:
+  - missing review brief,
+  - ready-for-review but still pending decisions, and
+  - reviewed fixture with rationale ready for sync/readiness inspection.
+
+Artifacts:
+- `.ax/experiments/workflow-candidate-pending-review-tasks-e456.json`
+- `.ax/tasks/workflow-candidate-pending-review-nqj7es.md`
+
+Results:
+- Live JSON report:
+  - `task_count=1`
+  - `ready_for_review_count=1`
+  - `review_decisions_ready_count=0`
+  - `review_decisions_need_repair_count=0`
+  - `missing_artifact_count=0`
+  - `fixture_count=1`
+  - `synced_fixture_count=1`
+  - `reviewed_fixture_count=0`
+  - `pending_fixture_count=1`
+  - `review_decision_status=needs_review_decisions`
+- Text output now prints the same decision-readiness counts.
+
+Decision:
+- E456 closes a useful observability gap: services no longer have to open the
+  review brief manually to tell whether a pending task is only ready for review
+  or has edited decisions ready for the next sync/readiness command.
+- The current task remains blocked on human review, which is correct.
+
+Verification:
+```sh
+bun test src/cli/classifiers-workflow-candidates.test.ts
+bun src/cli/index.ts classifiers workflow-candidates --list-pending-review-tasks --task-dir=.ax/tasks --out .ax/experiments/workflow-candidate-pending-review-tasks-e456.json --json
+bun src/cli/index.ts classifiers workflow-candidates --list-pending-review-tasks --task-dir=.ax/tasks
+```
 
 ## E455 - List Pending Review Task Readiness
 

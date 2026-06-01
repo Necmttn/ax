@@ -4175,6 +4175,21 @@ describe("classifiers workflow-candidates", () => {
     });
 
     test("pending review task list reports artifact readiness", () => {
+        const fixtureRow = {
+            id: "workflow-candidate-review-coverage/correction_or_rejection_signal/example",
+            suite: "workflow-candidate-review-coverage",
+            name: "coverage-gap-correction_or_rejection_signal-01",
+            label: "correction_or_rejection_signal",
+            target: "unknown",
+            text: "USER:\nthis is wrong\n\nPREVIOUS_ASSISTANT:\n",
+            source_group: "workflow-candidate",
+            review_status: "pending",
+            topic: "review-coverage",
+            candidate_id: "classifier_candidate_group:hybrid-window/correction_or_rejection_signal",
+            candidate_label: "correction_or_rejection_signal",
+            proposed_action: "add_context_guardrail",
+        };
+        const fixtureRowsJsonl = `${JSON.stringify(fixtureRow)}\n`;
         const taskContent = [
             "---",
             "ax_schema: \"ax.workflow_candidate_pending_review_task.v1\"",
@@ -4190,29 +4205,57 @@ describe("classifiers workflow-candidates", () => {
             ".ax/experiments/pending-review.md",
             ".ax/experiments/missing-review.md",
         );
+        const reviewedContent = taskContent
+            .replace(".ax/experiments/pending-review.md", ".ax/experiments/reviewed.md")
+            .replace(".ax/experiments/pending-review.jsonl", ".ax/experiments/reviewed.jsonl");
+        const reviewedBrief = [
+            "# Workflow Candidate Coverage Review",
+            "",
+            "- Fixture id: `workflow-candidate-review-coverage/correction_or_rejection_signal/example`",
+            "- Review status: `accept`",
+            "- Review rationale: User directly corrected an agent workflow behavior and the candidate should enter reviewed evidence.",
+        ].join("\n");
         const report = buildWorkflowCandidateGuidancePendingReviewTaskListReport({
             taskDir: ".ax/tasks",
             taskFiles: [
                 { path: ".ax/tasks/workflow-candidate-pending-review-ready.md", content: taskContent },
                 { path: ".ax/tasks/workflow-candidate-pending-review-missing.md", content: missingBriefContent },
+                { path: ".ax/tasks/workflow-candidate-pending-review-reviewed.md", content: reviewedContent },
                 { path: ".ax/tasks/other.md", content: "# unrelated" },
             ],
             pathExists: (path) => path !== ".ax/experiments/missing-review.md",
+            readFile: (path) => {
+                if (path.endsWith(".jsonl")) return fixtureRowsJsonl;
+                if (path === ".ax/experiments/reviewed.md") return reviewedBrief;
+                return taskContent;
+            },
         });
 
         expect(report).toMatchObject({
             schema: "ax.workflow_candidate_pending_review_task_list.v1",
             task_dir: ".ax/tasks",
-            task_count: 2,
+            task_count: 3,
             ready_for_review_count: 1,
+            review_decisions_ready_count: 1,
+            review_decisions_need_repair_count: 0,
             missing_artifact_count: 1,
             unknown_schema_count: 0,
         });
-        expect(report.tasks.map((task) => task.status)).toEqual(["missing_review_brief", "ready_for_review"]);
+        expect(report.tasks.map((task) => task.status)).toEqual(["missing_review_brief", "ready_for_review", "review_decisions_ready"]);
         expect(report.tasks[0]?.review_brief_status).toBe("missing");
-        expect(report.tasks[1]?.candidate_ids).toEqual(["classifier_candidate_group:hybrid-window/correction_or_rejection_signal"]);
+        expect(report.tasks[1]?.review_decision_status).toBe("needs_review_decisions");
+        expect(report.tasks[2]).toMatchObject({
+            review_decision_status: "review_decisions_ready",
+            synced_fixture_count: 1,
+            reviewed_fixture_count: 1,
+            pending_fixture_count: 0,
+            invalid_fixture_count: 0,
+            missing_rationale_count: 0,
+        });
+        expect(report.tasks[2]?.candidate_ids).toEqual(["classifier_candidate_group:hybrid-window/correction_or_rejection_signal"]);
         expect(renderWorkflowCandidateGuidancePendingReviewTaskListText(report)).toContain("missing artifacts: 1");
         expect(renderWorkflowCandidateGuidancePendingReviewTaskListText(report)).toContain("missing_review_brief");
+        expect(renderWorkflowCandidateGuidancePendingReviewTaskListText(report)).toContain("review decisions ready: 1");
     });
 
     test("topic harness gates fail with only persisted failed harness facts", () => {

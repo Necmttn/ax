@@ -275,10 +275,18 @@ export interface WorkflowCandidateGuidancePendingReviewTaskParsed {
 export type WorkflowCandidateGuidancePendingReviewTaskArtifactStatus = "present" | "missing" | "unknown";
 export type WorkflowCandidateGuidancePendingReviewTaskStatus =
     | "ready_for_review"
+    | "review_decisions_ready"
+    | "review_decisions_need_repair"
     | "missing_fixture_pack"
     | "missing_review_brief"
     | "missing_review_artifacts"
     | "unknown_schema";
+export type WorkflowCandidateGuidancePendingReviewDecisionStatus =
+    | "unknown"
+    | "needs_review_decisions"
+    | "reviewed_missing_rationale"
+    | "invalid_review_status"
+    | "review_decisions_ready";
 
 export interface WorkflowCandidateGuidancePendingReviewTaskListItem {
     readonly path: string;
@@ -291,6 +299,14 @@ export interface WorkflowCandidateGuidancePendingReviewTaskListItem {
     readonly review_pipeline_stage?: string;
     readonly candidate_ids: readonly string[];
     readonly candidate_count: number;
+    readonly fixture_count?: number;
+    readonly synced_fixture_count?: number;
+    readonly reviewed_fixture_count?: number;
+    readonly pending_fixture_count?: number;
+    readonly invalid_fixture_count?: number;
+    readonly missing_rationale_count?: number;
+    readonly review_decision_status: WorkflowCandidateGuidancePendingReviewDecisionStatus;
+    readonly review_decision_next_action: string;
 }
 
 export interface WorkflowCandidateGuidancePendingReviewTaskListReport {
@@ -298,6 +314,8 @@ export interface WorkflowCandidateGuidancePendingReviewTaskListReport {
     readonly task_dir: string;
     readonly task_count: number;
     readonly ready_for_review_count: number;
+    readonly review_decisions_ready_count: number;
+    readonly review_decisions_need_repair_count: number;
     readonly missing_artifact_count: number;
     readonly unknown_schema_count: number;
     readonly tasks: readonly WorkflowCandidateGuidancePendingReviewTaskListItem[];
@@ -3244,6 +3262,7 @@ const pendingReviewTaskStatusFor = (
     parsed: WorkflowCandidateGuidancePendingReviewTaskParsed,
     fixturePackStatus: WorkflowCandidateGuidancePendingReviewTaskArtifactStatus,
     reviewBriefStatus: WorkflowCandidateGuidancePendingReviewTaskArtifactStatus,
+    reviewDecisionStatus: WorkflowCandidateGuidancePendingReviewDecisionStatus,
 ): WorkflowCandidateGuidancePendingReviewTaskStatus => {
     if (parsed.schema !== workflowCandidateGuidancePendingReviewTaskSchema) return "unknown_schema";
     const missingFixture = fixturePackStatus === "missing";
@@ -3251,13 +3270,102 @@ const pendingReviewTaskStatusFor = (
     if (missingFixture && missingBrief) return "missing_review_artifacts";
     if (missingFixture) return "missing_fixture_pack";
     if (missingBrief) return "missing_review_brief";
+    if (reviewDecisionStatus === "review_decisions_ready") return "review_decisions_ready";
+    if (reviewDecisionStatus === "reviewed_missing_rationale" || reviewDecisionStatus === "invalid_review_status") return "review_decisions_need_repair";
     return "ready_for_review";
+};
+
+const reviewDecisionNextAction = (status: WorkflowCandidateGuidancePendingReviewDecisionStatus): string => {
+    switch (status) {
+        case "review_decisions_ready":
+            return "Run the batch sync/readiness command and inspect review facts before applying.";
+        case "reviewed_missing_rationale":
+            return "Add rationale text to each reviewed fixture before applying.";
+        case "invalid_review_status":
+            return "Fix invalid fixture review statuses before applying.";
+        case "needs_review_decisions":
+            return "Open the review brief and set at least one fixture to accept, revise, reject, or defer with rationale.";
+        case "unknown":
+            return "Repair or regenerate task artifacts before reading review decisions.";
+    }
+};
+
+const pendingReviewTaskDecisionSummary = (input: {
+    readonly parsed: WorkflowCandidateGuidancePendingReviewTaskParsed;
+    readonly fixturePackStatus: WorkflowCandidateGuidancePendingReviewTaskArtifactStatus;
+    readonly reviewBriefStatus: WorkflowCandidateGuidancePendingReviewTaskArtifactStatus;
+    readonly readFile?: (path: string) => string;
+}): Pick<WorkflowCandidateGuidancePendingReviewTaskListItem,
+    | "fixture_count"
+    | "synced_fixture_count"
+    | "reviewed_fixture_count"
+    | "pending_fixture_count"
+    | "invalid_fixture_count"
+    | "missing_rationale_count"
+    | "review_decision_status"
+    | "review_decision_next_action"
+> => {
+    if (
+        input.parsed.fixture_pack_path === undefined ||
+        input.parsed.review_brief_path === undefined ||
+        input.fixturePackStatus !== "present" ||
+        input.reviewBriefStatus !== "present"
+    ) {
+        return {
+            review_decision_status: "unknown",
+            review_decision_next_action: reviewDecisionNextAction("unknown"),
+        };
+    }
+    const readFile = input.readFile ?? ((path: string) => readFileSync(path, "utf8"));
+    try {
+        const rows = parseWorkflowCandidateFixtureRowsJsonl(readFile(input.parsed.fixture_pack_path));
+        const synced = syncWorkflowCandidateFixtureRowsFromBriefWithSummary(
+            rows,
+            readFile(input.parsed.review_brief_path),
+        );
+        let reviewedFixtureCount = 0;
+        let pendingFixtureCount = 0;
+        let invalidFixtureCount = 0;
+        let missingRationaleCount = 0;
+        for (const row of synced.rows) {
+            if (!VALID_VERDICTS.has(row.review_status)) invalidFixtureCount += 1;
+            if (REVIEWED_VERDICTS.has(row.review_status)) {
+                reviewedFixtureCount += 1;
+                if ((row.review_rationale ?? "").trim().length === 0) missingRationaleCount += 1;
+            } else {
+                pendingFixtureCount += 1;
+            }
+        }
+        const status: WorkflowCandidateGuidancePendingReviewDecisionStatus = invalidFixtureCount > 0
+            ? "invalid_review_status"
+            : missingRationaleCount > 0
+                ? "reviewed_missing_rationale"
+                : reviewedFixtureCount > 0
+                    ? "review_decisions_ready"
+                    : "needs_review_decisions";
+        return {
+            fixture_count: rows.length,
+            synced_fixture_count: synced.synced_fixture_count,
+            reviewed_fixture_count: reviewedFixtureCount,
+            pending_fixture_count: pendingFixtureCount,
+            invalid_fixture_count: invalidFixtureCount,
+            missing_rationale_count: missingRationaleCount,
+            review_decision_status: status,
+            review_decision_next_action: reviewDecisionNextAction(status),
+        };
+    } catch {
+        return {
+            review_decision_status: "unknown",
+            review_decision_next_action: reviewDecisionNextAction("unknown"),
+        };
+    }
 };
 
 export function buildWorkflowCandidateGuidancePendingReviewTaskListReport(input: {
     readonly taskDir: string;
     readonly taskFiles: readonly { readonly path: string; readonly content: string }[];
     readonly pathExists?: (path: string) => boolean;
+    readonly readFile?: (path: string) => string;
 }): WorkflowCandidateGuidancePendingReviewTaskListReport {
     const pathExists = input.pathExists ?? existsSync;
     const tasks = input.taskFiles
@@ -3275,10 +3383,16 @@ export function buildWorkflowCandidateGuidancePendingReviewTaskListReport(input:
             const reviewBriefStatus = parsed.review_brief_path === undefined
                 ? "unknown"
                 : pathExists(parsed.review_brief_path) ? "present" : "missing";
+            const decisionSummary = pendingReviewTaskDecisionSummary({
+                parsed,
+                fixturePackStatus,
+                reviewBriefStatus,
+                ...(input.readFile === undefined ? {} : { readFile: input.readFile }),
+            });
             return {
                 path: file.path,
                 ...(parsed.schema === undefined ? {} : { schema: parsed.schema }),
-                status: pendingReviewTaskStatusFor(parsed, fixturePackStatus, reviewBriefStatus),
+                status: pendingReviewTaskStatusFor(parsed, fixturePackStatus, reviewBriefStatus, decisionSummary.review_decision_status),
                 ...(parsed.fixture_pack_path === undefined ? {} : { fixture_pack_path: parsed.fixture_pack_path }),
                 fixture_pack_status: fixturePackStatus,
                 ...(parsed.review_brief_path === undefined ? {} : { review_brief_path: parsed.review_brief_path }),
@@ -3286,6 +3400,7 @@ export function buildWorkflowCandidateGuidancePendingReviewTaskListReport(input:
                 ...(parsed.review_pipeline_stage === undefined ? {} : { review_pipeline_stage: parsed.review_pipeline_stage }),
                 candidate_ids: parsed.candidate_ids,
                 candidate_count: parsed.candidate_ids.length,
+                ...decisionSummary,
             };
         })
         .filter((task): task is WorkflowCandidateGuidancePendingReviewTaskListItem => task !== undefined)
@@ -3296,12 +3411,16 @@ export function buildWorkflowCandidateGuidancePendingReviewTaskListReport(input:
         task.status === "missing_review_artifacts"
     ).length;
     const readyForReviewCount = tasks.filter((task) => task.status === "ready_for_review").length;
+    const reviewDecisionsReadyCount = tasks.filter((task) => task.status === "review_decisions_ready").length;
+    const reviewDecisionsNeedRepairCount = tasks.filter((task) => task.status === "review_decisions_need_repair").length;
     const unknownSchemaCount = tasks.filter((task) => task.status === "unknown_schema").length;
     return {
         schema: "ax.workflow_candidate_pending_review_task_list.v1",
         task_dir: input.taskDir,
         task_count: tasks.length,
         ready_for_review_count: readyForReviewCount,
+        review_decisions_ready_count: reviewDecisionsReadyCount,
+        review_decisions_need_repair_count: reviewDecisionsNeedRepairCount,
         missing_artifact_count: missingArtifactCount,
         unknown_schema_count: unknownSchemaCount,
         tasks,
@@ -3309,9 +3428,13 @@ export function buildWorkflowCandidateGuidancePendingReviewTaskListReport(input:
             ? "No pending workflow candidate review tasks were found."
             : missingArtifactCount > 0
                 ? "Regenerate or repair pending review task artifacts before review."
-                : readyForReviewCount > 0
-                    ? "Open the review brief for each ready task and record human review decisions."
-                    : "Regenerate pending review tasks with the current schema before review.",
+                : reviewDecisionsNeedRepairCount > 0
+                    ? "Repair reviewed fixture statuses or rationales before applying."
+                    : reviewDecisionsReadyCount > 0
+                        ? "Run the batch sync/readiness command for ready review decisions."
+                        : readyForReviewCount > 0
+                            ? "Open the review brief for each ready task and record human review decisions."
+                            : "Regenerate pending review tasks with the current schema before review.",
     };
 }
 
@@ -3349,6 +3472,8 @@ export function renderWorkflowCandidateGuidancePendingReviewTaskListText(
         `task dir: ${report.task_dir}`,
         `tasks: ${report.task_count}`,
         `ready: ${report.ready_for_review_count}`,
+        `review decisions ready: ${report.review_decisions_ready_count}`,
+        `review decisions need repair: ${report.review_decisions_need_repair_count}`,
         `missing artifacts: ${report.missing_artifact_count}`,
         `unknown schema: ${report.unknown_schema_count}`,
         `next action: ${report.next_action}`,
@@ -3361,8 +3486,11 @@ export function renderWorkflowCandidateGuidancePendingReviewTaskListText(
             `  - ${task.status} ${task.path}`,
             `    stage: ${task.review_pipeline_stage ?? "unknown"}`,
             `    candidates: ${task.candidate_count}`,
+            `    review decisions: ${task.review_decision_status}`,
+            `    review fixtures: reviewed=${task.reviewed_fixture_count ?? "unknown"} pending=${task.pending_fixture_count ?? "unknown"} invalid=${task.invalid_fixture_count ?? "unknown"} missing_rationale=${task.missing_rationale_count ?? "unknown"}`,
             `    fixture pack: ${task.fixture_pack_status} ${task.fixture_pack_path ?? "unknown"}`,
             `    review brief: ${task.review_brief_status} ${task.review_brief_path ?? "unknown"}`,
+            `    next: ${task.review_decision_next_action}`,
         );
         for (const candidateId of task.candidate_ids) lines.push(`    candidate: ${candidateId}`);
     }
