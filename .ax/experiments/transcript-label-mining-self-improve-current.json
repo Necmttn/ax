@@ -1,0 +1,10 @@
+{
+  "schema": "ax.transcript_label_mining_self_improve.v1",
+  "reviewed_promotion_safe_fact_count": 0,
+  "weak_advisory_candidate_count": 0,
+  "rejected_deferred_count": 0,
+  "nearest_neighbor_explanation_count": 0,
+  "top_patterns": [],
+  "recommended_next_action": "mine new transcript label candidates for review",
+  "out_path": ".ax/experiments/transcript-label-mining-self-improve-current.json"
+}

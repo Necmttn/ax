@@ -306,20 +306,41 @@ SELECT
     type::string(id) AS subject_id,
     type::string(session) AS session_id,
     type::string(id) AS user_turn_id,
+    ts,
     seq AS user_seq,
     role AS user_role,
     message_kind AS user_message_kind,
     text AS user_text,
-    type::string(id) AS user_evidence_path,
-    (SELECT VALUE type::string(id) FROM turn WHERE session = $parent.session AND seq = $parent.seq - 1 LIMIT 1)[0] AS prev_turn_id,
-    (SELECT VALUE text FROM turn WHERE session = $parent.session AND seq = $parent.seq - 1 LIMIT 1)[0] AS prev_text,
-    (SELECT VALUE type::string(id) FROM turn WHERE session = $parent.session AND seq = $parent.seq - 1 LIMIT 1)[0] AS prev_evidence_path
+    type::string(id) AS user_evidence_path
 FROM turn
 WHERE role = 'user'
     AND text IS NOT NONE
     AND ts >= time::now() - ${Math.max(0, Math.trunc(sinceDays))}d
 ORDER BY ts DESC
 LIMIT ${Math.max(1, Math.trunc(limit))};`.trim();
+
+/**
+ * Batch-fetch the immediately-preceding turn for each user-turn window, keyed by
+ * `session` + `seq - 1`. A single statement (vs a correlated subquery per row)
+ * keeps the previous-assistant join fast on large `turn` tables. The unique
+ * index `turn_session_seq` answers each `(session, seq)` membership cheaply.
+ */
+const prevTurnSql = (sessionIds: readonly string[], prevSeqs: readonly number[]): string => `
+SELECT
+    type::string(id) AS prev_turn_id,
+    type::string(session) AS prev_session_id,
+    seq AS prev_seq,
+    text AS prev_text
+FROM turn
+WHERE type::string(session) IN ${JSON.stringify([...new Set(sessionIds)])}
+    AND seq IN ${JSON.stringify([...new Set(prevSeqs)])};`.trim();
+
+interface PrevTurnRow {
+    readonly prev_turn_id?: string | null;
+    readonly prev_session_id?: string | null;
+    readonly prev_seq?: number | null;
+    readonly prev_text?: string | null;
+}
 
 const rowToWindow = (row: TranscriptWindowRow): EventWindowLike | null => {
     const userTurnId = str(row.user_turn_id ?? row.subject_id);
@@ -567,9 +588,68 @@ export const LabelMiningServiceLive: Layer.Layer<LabelMiningService, never, Surr
                 const reviewLimit = Math.min(input.reviewLimit, EXPORT_REVIEW_LIMIT);
                 const sql = transcriptWindowSql(input.sinceDays, input.limit);
                 const [rows] = yield* db.query<[TranscriptWindowRow[]]>(sql);
+                const windowRows = rows ?? [];
+
+                // Batch-fetch previous turns in ONE statement (correlated subquery
+                // per row is O(rows * full-scan) on a large `turn` table).
+                const prevKey = (sessionId: string, seq: number): string => `${sessionId}|${seq}`;
+                const prevTextById = new Map<string, { id: string; text: string }>();
+                const sessionIds: string[] = [];
+                const prevSeqs: number[] = [];
+                for (const row of windowRows) {
+                    // Only batch-fetch prev turns for rows that do not already carry
+                    // an inline previous turn (real read query never supplies one).
+                    if (
+                        row.prev_turn_id == null &&
+                        row.session_id != null &&
+                        typeof row.user_seq === "number"
+                    ) {
+                        sessionIds.push(str(row.session_id));
+                        prevSeqs.push(row.user_seq - 1);
+                    }
+                }
+                if (sessionIds.length > 0) {
+                    const [prevRows] = yield* db.query<[PrevTurnRow[]]>(
+                        prevTurnSql(sessionIds, prevSeqs),
+                    );
+                    for (const prev of prevRows ?? []) {
+                        if (
+                            prev.prev_session_id != null &&
+                            typeof prev.prev_seq === "number" &&
+                            prev.prev_turn_id != null
+                        ) {
+                            prevTextById.set(prevKey(str(prev.prev_session_id), prev.prev_seq), {
+                                id: str(prev.prev_turn_id),
+                                text: str(prev.prev_text ?? ""),
+                            });
+                        }
+                    }
+                }
+
                 const windows: EventWindowLike[] = [];
-                for (const row of rows ?? []) {
-                    const window = rowToWindow(row);
+                for (const row of windowRows) {
+                    let merged: TranscriptWindowRow = row;
+                    // Prefer the batch-fetched previous turn; fall back to any prev
+                    // fields already present on the row (test fixtures supply these
+                    // inline; the real read query does not).
+                    if (
+                        row.prev_turn_id == null &&
+                        row.session_id != null &&
+                        typeof row.user_seq === "number"
+                    ) {
+                        const prev = prevTextById.get(
+                            prevKey(str(row.session_id), row.user_seq - 1),
+                        );
+                        if (prev) {
+                            merged = {
+                                ...row,
+                                prev_turn_id: prev.id,
+                                prev_text: prev.text,
+                                prev_evidence_path: prev.id,
+                            };
+                        }
+                    }
+                    const window = rowToWindow(merged);
                     if (window) windows.push(window);
                 }
                 const candidates = mineTranscriptLabelCandidates({

@@ -1,0 +1,896 @@
+{
+  "schema": "ax.transcript_label_mining_report.v1",
+  "since_days": 14,
+  "limit": 500,
+  "review_limit": 80,
+  "candidate_count": 43,
+  "review_rows": [
+    {
+      "candidate_id": "tlm__verification__10e0d58247dee901",
+      "subject_id": "turn:claude_subagent_ac0f9750cffb73085__08b690fa20c5486f__seq_000001",
+      "session_id": "session:`claude-subagent-ac0f9750cffb73085`",
+      "turn_id": "turn:claude_subagent_ac0f9750cffb73085__08b690fa20c5486f__seq_000001",
+      "label_family": "verification",
+      "target": "verification_demand",
+      "weak_label": "verification",
+      "weak_confidence": 0.84,
+      "weak_sources": [
+        "verification:demand"
+      ],
+      "evidence_paths": [
+        "turn:claude_subagent_ac0f9750cffb73085__08b690fa20c5486f__seq_000001"
+      ],
+      "excerpt": "You are reviewing whether a research deliverable matches its specification. Be skeptical — verify independently, do not trust the implementer's report.\n\nWork from: `/Users/necmttn/Projects/ax/.claude/worktrees/live-ingest-durable-streams`\n\n## What was requested (Task 0)\n\nProduce `docs/superpowers/research/durable-streams-api.md` that records, VERBATIM from the real installed `.d.ts` (not invented):\n1. **Server API**: how to create a server/handler, how to append/publish to a named stream, and whether it exposes a `(Request)=>Response` / Node `(req,res)` handler that could be mounted inside an ",
+      "review_status": "pending",
+      "rationale": "",
+      "reviewer": ""
+    },
+    {
+      "candidate_id": "tlm__approval_or_rejection__ae83df336147d642",
+      "subject_id": "turn:2651b3f6_3070_43fe_8d3b_624a0de49fae__0b13c5cc2b1af048__seq_000207",
+      "session_id": "session:`2651b3f6-3070-43fe-8d3b-624a0de49fae`",
+      "turn_id": "turn:2651b3f6_3070_43fe_8d3b_624a0de49fae__0b13c5cc2b1af048__seq_000207",
+      "label_family": "approval_or_rejection",
+      "target": "approval",
+      "weak_label": "approval_or_rejection",
+      "weak_confidence": 0.78,
+      "weak_sources": [
+        "approval_or_rejection:approval"
+      ],
+      "evidence_paths": [
+        "turn:2651b3f6_3070_43fe_8d3b_624a0de49fae__0b13c5cc2b1af048__seq_000207"
+      ],
+      "excerpt": "ship it",
+      "review_status": "pending",
+      "rationale": "",
+      "reviewer": ""
+    },
+    {
+      "candidate_id": "tlm__correction__17b35b8d911a00c4",
+      "subject_id": "turn:019e7c67_9137_77e1_8942_3ad9df5e6308__1a8a78d9ecccb867__seq_002202",
+      "session_id": "session:`019e7c67-9137-77e1-8942-3ad9df5e6308`",
+      "turn_id": "turn:019e7c67_9137_77e1_8942_3ad9df5e6308__1a8a78d9ecccb867__seq_002202",
+      "previous_assistant_turn_id": "turn:019e7c67_9137_77e1_8942_3ad9df5e6308__1a8a78d9ecccb867__seq_002201",
+      "label_family": "correction",
+      "target": "wrong_output",
+      "weak_label": "correction",
+      "weak_confidence": 0.74,
+      "weak_sources": [
+        "correction:wrong_output"
+      ],
+      "evidence_paths": [
+        "turn:019e7c67_9137_77e1_8942_3ad9df5e6308__1a8a78d9ecccb867__seq_002202"
+      ],
+      "excerpt": "got this feedback A bit difficult to understand what things mean. Could help with a legend. What are the percentages? What are the numbers in the top right of the header for each span? I assume percentages are of total tokens used?\n\nOne very useful thing i added to cct is the ability to understand the TOTAL cost of things. For example a toolcall costs: 1. immediate token output cost (the tool call message). 2. cache write of the tool call message + the tool call response. 3. cache read of the tool call message + tool call response FOR EACH FUTURE TURN. This is of course also true for other thi",
+      "previous_assistant_excerpt": "Fixed and deployed.\n\n`/s/:owner/:gistId` no longer redirects to `/studio/?shareOwner=...`. It now keeps the clean URL and embeds the existing Studio reviewer inside the page.\n\nVerified live:\n- `https://ax.necmttn.com/s/Necmttn/42ed035bcaba1f2868d802f0b837405e` returns `200`, not `307`\n- Browser URL stays exactly:\n  `https://ax.necmttn.com/s/Necmttn/42ed035bcaba1f2868d802f0b837405e`\n- The session reviewer renders inside it\n- Cloudflare Worker route redeployed: `ffad92a0-50cd-4237-a54c-a2e8f83c9b7e`\n- Commit pushed to `main`: `960ce41 fix(site): keep share URLs canonical`\n- CI passed.",
+      "review_status": "pending",
+      "rationale": "",
+      "reviewer": ""
+    },
+    {
+      "candidate_id": "tlm__verification__13b885cf00882a3f",
+      "subject_id": "turn:claude_subagent_a58f1a2c677f7f15b__fbe3c4be221c0357__seq_000200",
+      "session_id": "session:`claude-subagent-a58f1a2c677f7f15b`",
+      "turn_id": "turn:claude_subagent_a58f1a2c677f7f15b__fbe3c4be221c0357__seq_000200",
+      "previous_assistant_turn_id": "turn:claude_subagent_a58f1a2c677f7f15b__fbe3c4be221c0357__seq_000199",
+      "label_family": "verification",
+      "target": "verification_demand",
+      "weak_label": "verification",
+      "weak_confidence": 0.84,
+      "weak_sources": [
+        "verification:demand"
+      ],
+      "evidence_paths": [
+        "turn:claude_subagent_a58f1a2c677f7f15b__fbe3c4be221c0357__seq_000200"
+      ],
+      "excerpt": "The final whole-branch review found a Critical: `./dist/axctl serve` (the COMPILED binary) still hard-crashes. The earlier lazy-import only moved the crash from CLI-boot to serve-time — when `createDurableIngestStream()` runs, it `await import(\"@durable-streams/server\")` which loads native **lmdb**, and lmdb cannot load from a `bun build --compile` single-file binary (`No native build was found for platform=darwin arch=arm64`). The curl `install.sh` path ships this compiled binary and users then run `axctl serve` — so the headline feature crashes for them. Native modules fundamentally can't be",
+      "previous_assistant_excerpt": "Done.\n\n## Report\n\n### The try/catch added\nWrapped `ManagedRuntime.make`, the `serveIngestState` assignment, and `Bun.serve` in a try/catch. `createDurableIngestStream()` stays before the try (it's the resource we must protect; once it returns the port is bound). On catch, teardown order:\n1. `serveIngestState = null` — so no half-dead pair is left reachable by the handler.\n2. `await stream.stop()` (`.catch`-guarded) — frees the just-bound sidecar port.\n3. `await runtime.dispose()` (`.catch`-guarded, only if `runtime` was created — guarded by `if (runtime)`).\n4. `throw err` — rethrow so the fail",
+      "review_status": "pending",
+      "rationale": "",
+      "reviewer": ""
+    },
+    {
+      "candidate_id": "tlm__correction__2090dac1bb1c8dde",
+      "subject_id": "turn:019e81a0_e69c_7061_b51e_552fda03980e__cf1122a966f69c45__seq_000003",
+      "session_id": "session:`019e81a0-e69c-7061-b51e-552fda03980e`",
+      "turn_id": "turn:019e81a0_e69c_7061_b51e_552fda03980e__cf1122a966f69c45__seq_000003",
+      "previous_assistant_turn_id": "turn:019e81a0_e69c_7061_b51e_552fda03980e__cf1122a966f69c45__seq_000002",
+      "label_family": "correction",
+      "target": "wrong_output",
+      "weak_label": "correction",
+      "weak_confidence": 0.74,
+      "weak_sources": [
+        "correction:wrong_output"
+      ],
+      "evidence_paths": [
+        "turn:019e81a0_e69c_7061_b51e_552fda03980e__cf1122a966f69c45__seq_000003"
+      ],
+      "excerpt": "the url to pi is wrong in landing hero. it's pi.dev",
+      "previous_assistant_excerpt": "# AGENTS.md instructions for /Users/necmttn/Projects/ax\n\n<INSTRUCTIONS>\n# CLAUDE.md\n\nGuidance for Claude Code and other AI assistants working in this repo.\n\n## What this is\n\n`ax` - local taste & telemetry graph for AI coding agents. Ingests Claude Code transcripts (`~/.claude/projects/`) + Codex transcripts (`~/.codex/sessions/`) + installed skills (`~/.claude/skills/`, `~/.agents/skills/`, plugin caches) into a dedicated SurrealDB instance. CLI surfaces \"what skills/tools you actually use\" on demand.\n\n## Stack\n\n- **Runtime**: bun ≥ 1.3\n- **Language**: TypeScript (strict, `module: preserve`, `",
+      "review_status": "pending",
+      "rationale": "",
+      "reviewer": ""
+    },
+    {
+      "candidate_id": "tlm__verification__20c6e0098736ff35",
+      "subject_id": "turn:c5da4876_a2ce_4862_83ba_2c521acc7694__f9c0c1f21e149989__seq_000028",
+      "session_id": "session:`c5da4876-a2ce-4862-83ba-2c521acc7694`",
+      "turn_id": "turn:c5da4876_a2ce_4862_83ba_2c521acc7694__f9c0c1f21e149989__seq_000028",
+      "label_family": "verification",
+      "target": "verification_demand",
+      "weak_label": "verification",
+      "weak_confidence": 0.84,
+      "weak_sources": [
+        "verification:demand"
+      ],
+      "evidence_paths": [
+        "turn:c5da4876_a2ce_4862_83ba_2c521acc7694__f9c0c1f21e149989__seq_000028"
+      ],
+      "excerpt": "Base directory for this skill: /Users/necmttn/.claude/plugins/cache/claude-plugins-official/superpowers/5.1.0/skills/executing-plans\n\n# Executing Plans\n\n## Overview\n\nLoad plan, review critically, execute all tasks, report when complete.\n\n**Announce at start:** \"I'm using the executing-plans skill to implement this plan.\"\n\n**Note:** Tell your human partner that Superpowers works much better with access to subagents. The quality of its work will be significantly higher if run on a platform with subagent support (such as Claude Code or Codex). If subagents are available, use superpowers:subagent-",
+      "review_status": "pending",
+      "rationale": "",
+      "reviewer": ""
+    },
+    {
+      "candidate_id": "tlm__correction__26a67d8020d1be7c",
+      "subject_id": "turn:019e80f9_b729_7151_adbf_1f6cba2c7975__1501844b0d6e3a3c__seq_000003",
+      "session_id": "session:`019e80f9-b729-7151-adbf-1f6cba2c7975`",
+      "turn_id": "turn:019e80f9_b729_7151_adbf_1f6cba2c7975__1501844b0d6e3a3c__seq_000003",
+      "previous_assistant_turn_id": "turn:019e80f9_b729_7151_adbf_1f6cba2c7975__1501844b0d6e3a3c__seq_000002",
+      "label_family": "correction",
+      "target": "wrong_output",
+      "weak_label": "correction",
+      "weak_confidence": 0.74,
+      "weak_sources": [
+        "correction:wrong_output"
+      ],
+      "evidence_paths": [
+        "turn:019e80f9_b729_7151_adbf_1f6cba2c7975__1501844b0d6e3a3c__seq_000003"
+      ],
+      "excerpt": "In repo /tmp/ax-studio-404 on branch fix-studio-spa-404, implement the UI-only sticky navigation/header fix for the session inspector. Scope: src/dashboard/web/src/routes/inspector-filter-bar.tsx and related CSS if necessary. Goal: the jump/search control row (FilterBar) should stay fixed/sticky at the top of the viewport while scrolling through turns, so repeated clicks on next user/tool/hook controls do not move around. It must work in both local SessionInspectRoute and ShareInspectView because both use FilterBar. Preserve existing styles and avoid touching cost/token code. You are not alone",
+      "previous_assistant_excerpt": "# AGENTS.md instructions for /Users/necmttn/Projects/ax\n\n<INSTRUCTIONS>\n# CLAUDE.md\n\nGuidance for Claude Code and other AI assistants working in this repo.\n\n## What this is\n\n`ax` - local taste & telemetry graph for AI coding agents. Ingests Claude Code transcripts (`~/.claude/projects/`) + Codex transcripts (`~/.codex/sessions/`) + installed skills (`~/.claude/skills/`, `~/.agents/skills/`, plugin caches) into a dedicated SurrealDB instance. CLI surfaces \"what skills/tools you actually use\" on demand.\n\n## Stack\n\n- **Runtime**: bun ≥ 1.3\n- **Language**: TypeScript (strict, `module: preserve`, `",
+      "review_status": "pending",
+      "rationale": "",
+      "reviewer": ""
+    },
+    {
+      "candidate_id": "tlm__verification__2bda9bdd50ea6d34",
+      "subject_id": "turn:298b993e_f388_4f55_8e6b_281cfcb941d4__5efea4118be5e6dd__seq_000016",
+      "session_id": "session:`298b993e-f388-4f55-8e6b-281cfcb941d4`",
+      "turn_id": "turn:298b993e_f388_4f55_8e6b_281cfcb941d4__5efea4118be5e6dd__seq_000016",
+      "label_family": "verification",
+      "target": "verification_demand",
+      "weak_label": "verification",
+      "weak_confidence": 0.84,
+      "weak_sources": [
+        "verification:demand"
+      ],
+      "evidence_paths": [
+        "turn:298b993e_f388_4f55_8e6b_281cfcb941d4__5efea4118be5e6dd__seq_000016"
+      ],
+      "excerpt": "Base directory for this skill: /Users/necmttn/.claude/plugins/cache/claude-plugins-official/superpowers/5.1.0/skills/subagent-driven-development\n\n# Subagent-Driven Development\n\nExecute plan by dispatching fresh subagent per task, with two-stage review after each: spec compliance review first, then code quality review.\n\n**Why subagents:** You delegate tasks to specialized agents with isolated context. By precisely crafting their instructions and context, you ensure they stay focused and succeed at their task. They should never inherit your session's context or history — you construct exactly wh",
+      "review_status": "pending",
+      "rationale": "",
+      "reviewer": ""
+    },
+    {
+      "candidate_id": "tlm__correction__2b9a715dac32ddb9",
+      "subject_id": "turn:ad2d466d_0227_419f_b0a8_1bce6ff43d6d__379cc4290e649f3d__seq_001168",
+      "session_id": "session:`ad2d466d-0227-419f-b0a8-1bce6ff43d6d`",
+      "turn_id": "turn:ad2d466d_0227_419f_b0a8_1bce6ff43d6d__379cc4290e649f3d__seq_001168",
+      "previous_assistant_turn_id": "turn:ad2d466d_0227_419f_b0a8_1bce6ff43d6d__379cc4290e649f3d__seq_001167",
+      "label_family": "correction",
+      "target": "wrong_output",
+      "weak_label": "correction",
+      "weak_confidence": 0.74,
+      "weak_sources": [
+        "correction:wrong_output"
+      ],
+      "evidence_paths": [
+        "turn:ad2d466d_0227_419f_b0a8_1bce6ff43d6d__379cc4290e649f3d__seq_001168"
+      ],
+      "excerpt": "# /loop — schedule a recurring or self-paced prompt\n\nParse the input below into `[interval] <prompt…>` and schedule it.\n\n## Parsing (in priority order)\n\n1. **Leading token**: if the first whitespace-delimited token matches `^\\d+[smhd]$` (e.g. `5m`, `2h`), that's the interval; the rest is the prompt.\n2. **Trailing \"every\" clause**: otherwise, if the input ends with `every <N><unit>` or `every <N> <unit-word>` (e.g. `every 20m`, `every 5 minutes`, `every 2 hours`), extract that as the interval and strip it from the prompt. Only match when what follows \"every\" is a time expression — `check every ",
+      "previous_assistant_excerpt": "<command-message>loop</command-message>\n<command-name>/loop</command-name>\n<command-args>Execute the ingest-speed optimization mission defined in docs/missions/2026-06-02-ingest-speed-optimization.md. Self-paced: do ONE mission iteration per firing, then schedule the next, until ≥100 attempts logged AND diminishing returns — then stop scheduling and write REPORT.md. The scaffold (perf/ingest-speed worktree, frozen subset corpus at $HOME/.cache/ax-bench/home, bench SurrealDB on :8531 with data at $HOME/.cache/ax-bench/db, scripts/bench-ingest.ts harness, ATTEMPTS.md, bench-results/) was set up ",
+      "review_status": "pending",
+      "rationale": "",
+      "reviewer": ""
+    },
+    {
+      "candidate_id": "tlm__verification__38f26ce762239349",
+      "subject_id": "turn:claude_subagent_a336ecc7981ef4609__a9e8aa8bfd22b60d__seq_000001",
+      "session_id": "session:`claude-subagent-a336ecc7981ef4609`",
+      "turn_id": "turn:claude_subagent_a336ecc7981ef4609__a9e8aa8bfd22b60d__seq_000001",
+      "label_family": "verification",
+      "target": "verification_demand",
+      "weak_label": "verification",
+      "weak_confidence": 0.84,
+      "weak_sources": [
+        "verification:demand"
+      ],
+      "evidence_paths": [
+        "turn:claude_subagent_a336ecc7981ef4609__a9e8aa8bfd22b60d__seq_000001"
+      ],
+      "excerpt": "Review whether a server-wiring implementation matches its spec. Be skeptical — verify by reading code, don't trust the report.\n\nWork from: `/Users/necmttn/Projects/ax/.claude/worktrees/live-ingest-durable-streams`\n\n## Spec (Task 5, adapted to the sidecar decision)\nModify `apps/axctl/src/dashboard/server.ts` so `ax serve`:\n1. Starts the Durable Streams sidecar ONCE at server startup via `await createDurableIngestStream()` (from `./ingest-stream-durable.ts`), held for the server lifetime; stops it on shutdown (`stream.stop()`).\n2. Establishes a LONG-LIVED Effect runtime (e.g. `ManagedRuntime`) a",
+      "review_status": "pending",
+      "rationale": "",
+      "reviewer": ""
+    },
+    {
+      "candidate_id": "tlm__correction__4702f58801b54cb6",
+      "subject_id": "turn:11fb5aad_2d45_45ef_9f94_7738ce250327__ab7c9d8b15cbcb04__seq_002581",
+      "session_id": "session:`11fb5aad-2d45-45ef-9f94-7738ce250327`",
+      "turn_id": "turn:11fb5aad_2d45_45ef_9f94_7738ce250327__ab7c9d8b15cbcb04__seq_002581",
+      "previous_assistant_turn_id": "turn:11fb5aad_2d45_45ef_9f94_7738ce250327__ab7c9d8b15cbcb04__seq_002580",
+      "label_family": "correction",
+      "target": "wrong_output",
+      "weak_label": "correction",
+      "weak_confidence": 0.74,
+      "weak_sources": [
+        "correction:wrong_output"
+      ],
+      "evidence_paths": [
+        "turn:11fb5aad_2d45_45ef_9f94_7738ce250327__ab7c9d8b15cbcb04__seq_002581"
+      ],
+      "excerpt": "No, not T3 Turbo, I will give you the URL that I want you to call on.",
+      "previous_assistant_excerpt": "[Request interrupted by user]",
+      "review_status": "pending",
+      "rationale": "",
+      "reviewer": ""
+    },
+    {
+      "candidate_id": "tlm__verification__3b76f13e34add29b",
+      "subject_id": "turn:ad2d466d_0227_419f_b0a8_1bce6ff43d6d__379cc4290e649f3d__seq_000253",
+      "session_id": "session:`ad2d466d-0227-419f-b0a8-1bce6ff43d6d`",
+      "turn_id": "turn:ad2d466d_0227_419f_b0a8_1bce6ff43d6d__379cc4290e649f3d__seq_000253",
+      "label_family": "verification",
+      "target": "verification_demand",
+      "weak_label": "verification",
+      "weak_confidence": 0.84,
+      "weak_sources": [
+        "verification:demand"
+      ],
+      "evidence_paths": [
+        "turn:ad2d466d_0227_419f_b0a8_1bce6ff43d6d__379cc4290e649f3d__seq_000253"
+      ],
+      "excerpt": "Base directory for this skill: /Users/necmttn/.claude/plugins/cache/claude-plugins-official/superpowers/5.1.0/skills/finishing-a-development-branch\n\n# Finishing a Development Branch\n\n## Overview\n\nGuide completion of development work by presenting clear options and handling chosen workflow.\n\n**Core principle:** Verify tests → Detect environment → Present options → Execute choice → Clean up.\n\n**Announce at start:** \"I'm using the finishing-a-development-branch skill to complete this work.\"\n\n## The Process\n\n### Step 1: Verify Tests\n\n**Before presenting options, verify tests pass:**\n\n```bash\n# Run",
+      "review_status": "pending",
+      "rationale": "",
+      "reviewer": ""
+    },
+    {
+      "candidate_id": "tlm__verification__40a6ad05de832587",
+      "subject_id": "turn:f87064d2_3553_4c30_ae5c_c8714461103a__c058eb75a0c63218__seq_000011",
+      "session_id": "session:`f87064d2-3553-4c30-ae5c-c8714461103a`",
+      "turn_id": "turn:f87064d2_3553_4c30_ae5c_c8714461103a__c058eb75a0c63218__seq_000011",
+      "label_family": "verification",
+      "target": "verification_demand",
+      "weak_label": "verification",
+      "weak_confidence": 0.84,
+      "weak_sources": [
+        "verification:demand"
+      ],
+      "evidence_paths": [
+        "turn:f87064d2_3553_4c30_ae5c_c8714461103a__c058eb75a0c63218__seq_000011"
+      ],
+      "excerpt": "# Observability - Query HyperDX/ClickStack Data\n\nQuery observability data from HyperDX (ClickStack) to investigate production errors, monitor service health, and analyze performance issues.\n\n## Quick Reference\n\n| Task | Tool |\n|------|------|\n| Quick log search | HyperDX API (`scripts/hyperdx.ts`) |\n| Error rate charts | HyperDX API |\n| Trace details | ClickHouse (`kubernetes/scripts/query-hyperdx-traces.sh`) |\n| Cross-service analysis | ClickHouse |\n| Complex aggregations | ClickHouse |\n\n## When to Use Each Tool\n\n### HyperDX API (Quick Searches)\n- Real-time log searches\n- Service metrics dash",
+      "review_status": "pending",
+      "rationale": "",
+      "reviewer": ""
+    },
+    {
+      "candidate_id": "tlm__verification__41dadba8493244b",
+      "subject_id": "turn:claude_subagent_a19d156a6487a43be__37d2615d9e6774af__seq_000001",
+      "session_id": "session:`claude-subagent-a19d156a6487a43be`",
+      "turn_id": "turn:claude_subagent_a19d156a6487a43be__37d2615d9e6774af__seq_000001",
+      "label_family": "verification",
+      "target": "verification_demand",
+      "weak_label": "verification",
+      "weak_confidence": 0.84,
+      "weak_sources": [
+        "verification:demand"
+      ],
+      "evidence_paths": [
+        "turn:claude_subagent_a19d156a6487a43be__37d2615d9e6774af__seq_000001"
+      ],
+      "excerpt": "Review whether an implementation matches its spec. Be skeptical — verify by reading code + running, don't trust the report.\n\nWork from: `/Users/necmttn/Projects/ax/.claude/worktrees/live-ingest-durable-streams`\n\n## Background\nTask 3 implements the Durable Streams backing for an `IngestStreamBus`. Per the Task 0 research (`docs/superpowers/research/durable-streams-api.md`, committed), the integration mode is **(B) Sidecar**: `@durable-streams/server`'s `DurableStreamTestServer` owns its own port; the browser reads it directly; there is NO mountable `(Request)=>Response` handler. So the original",
+      "review_status": "pending",
+      "rationale": "",
+      "reviewer": ""
+    },
+    {
+      "candidate_id": "tlm__verification__432bd1a6d8bef891",
+      "subject_id": "turn:ad2d466d_0227_419f_b0a8_1bce6ff43d6d__379cc4290e649f3d__seq_000012",
+      "session_id": "session:`ad2d466d-0227-419f-b0a8-1bce6ff43d6d`",
+      "turn_id": "turn:ad2d466d_0227_419f_b0a8_1bce6ff43d6d__379cc4290e649f3d__seq_000012",
+      "label_family": "verification",
+      "target": "verification_demand",
+      "weak_label": "verification",
+      "weak_confidence": 0.84,
+      "weak_sources": [
+        "verification:demand"
+      ],
+      "evidence_paths": [
+        "turn:ad2d466d_0227_419f_b0a8_1bce6ff43d6d__379cc4290e649f3d__seq_000012"
+      ],
+      "excerpt": "Base directory for this skill: /Users/necmttn/.claude/plugins/cache/claude-plugins-official/superpowers/5.1.0/skills/subagent-driven-development\n\n# Subagent-Driven Development\n\nExecute plan by dispatching fresh subagent per task, with two-stage review after each: spec compliance review first, then code quality review.\n\n**Why subagents:** You delegate tasks to specialized agents with isolated context. By precisely crafting their instructions and context, you ensure they stay focused and succeed at their task. They should never inherit your session's context or history — you construct exactly wh",
+      "review_status": "pending",
+      "rationale": "",
+      "reviewer": ""
+    },
+    {
+      "candidate_id": "tlm__verification__4941169d11f59c42",
+      "subject_id": "turn:ad2d466d_0227_419f_b0a8_1bce6ff43d6d__379cc4290e649f3d__seq_001134",
+      "session_id": "session:`ad2d466d-0227-419f-b0a8-1bce6ff43d6d`",
+      "turn_id": "turn:ad2d466d_0227_419f_b0a8_1bce6ff43d6d__379cc4290e649f3d__seq_001134",
+      "label_family": "verification",
+      "target": "verification_demand",
+      "weak_label": "verification",
+      "weak_confidence": 0.84,
+      "weak_sources": [
+        "verification:demand"
+      ],
+      "evidence_paths": [
+        "turn:ad2d466d_0227_419f_b0a8_1bce6ff43d6d__379cc4290e649f3d__seq_001134"
+      ],
+      "excerpt": "# /loop — schedule a recurring or self-paced prompt\n\nParse the input below into `[interval] <prompt…>` and schedule it.\n\n## Parsing (in priority order)\n\n1. **Leading token**: if the first whitespace-delimited token matches `^\\d+[smhd]$` (e.g. `5m`, `2h`), that's the interval; the rest is the prompt.\n2. **Trailing \"every\" clause**: otherwise, if the input ends with `every <N><unit>` or `every <N> <unit-word>` (e.g. `every 20m`, `every 5 minutes`, `every 2 hours`), extract that as the interval and strip it from the prompt. Only match when what follows \"every\" is a time expression — `check every ",
+      "review_status": "pending",
+      "rationale": "",
+      "reviewer": ""
+    },
+    {
+      "candidate_id": "tlm__verification__565e8db39e6a0ec0",
+      "subject_id": "turn:claude_subagent_a14fe14f81c294f11__cb3e6bd0662a8784__seq_000072",
+      "session_id": "session:`claude-subagent-a14fe14f81c294f11`",
+      "turn_id": "turn:claude_subagent_a14fe14f81c294f11__cb3e6bd0662a8784__seq_000072",
+      "previous_assistant_turn_id": "turn:claude_subagent_a14fe14f81c294f11__cb3e6bd0662a8784__seq_000071",
+      "label_family": "verification",
+      "target": "verification_demand",
+      "weak_label": "verification",
+      "weak_confidence": 0.84,
+      "weak_sources": [
+        "verification:demand"
+      ],
+      "evidence_paths": [
+        "turn:claude_subagent_a14fe14f81c294f11__cb3e6bd0662a8784__seq_000072"
+      ],
+      "excerpt": "Your Task 3 file `apps/axctl/src/dashboard/ingest-stream-durable.ts` introduced a REGRESSION that breaks the compiled `dist/axctl` binary and CI. Root cause: the top-level `import { DurableStreamTestServer } from \"@durable-streams/server\"` pulls native **lmdb** into the eager module graph. `bun build --compile` bundles it, and the compiled binary then crashes at STARTUP on EVERY command (even `./dist/axctl --help`) with: `No native build was found for platform=darwin arch=arm64`. CI (`.github/workflows/ci.yml`) runs `./dist/axctl --version|help|daemon status|doctor` and release-please ships th",
+      "previous_assistant_excerpt": "Both issues fixed.\n\n**What I changed (`ingest-stream-durable.ts`):**\n- **Issue 1 (Important):** Verified `DurableStreamError` is exported from `@durable-streams/client` (`.d.ts` line 1545) and that `DurableStreamErrorCode` includes the literal `\"CONFLICT_EXISTS\"` (line 586). Replaced the bespoke `isConflictExists` duck-typing/substring helper with the typed check `err instanceof DurableStreamError && err.code === \"CONFLICT_EXISTS\"`, added `DurableStreamError` to the import, and deleted the helper entirely.\n- **Issue 2 (Minor):** Added a comment near the handle cache explaining that `append()` ",
+      "review_status": "pending",
+      "rationale": "",
+      "reviewer": ""
+    },
+    {
+      "candidate_id": "tlm__verification__5cb877a7b8c4d6ba",
+      "subject_id": "turn:claude_subagent_a4af8a367d8dbd00c__c42cc15f1103398a__seq_000001",
+      "session_id": "session:`claude-subagent-a4af8a367d8dbd00c`",
+      "turn_id": "turn:claude_subagent_a4af8a367d8dbd00c__c42cc15f1103398a__seq_000001",
+      "label_family": "verification",
+      "target": "verification_demand",
+      "weak_label": "verification",
+      "weak_confidence": 0.84,
+      "weak_sources": [
+        "verification:demand"
+      ],
+      "evidence_paths": [
+        "turn:claude_subagent_a4af8a367d8dbd00c__c42cc15f1103398a__seq_000001"
+      ],
+      "excerpt": "Make the `axctl` CLI top-level command index lean WITHOUT breaking any existing invocation. The `ax --help` output currently lists ~30 flat subcommands and feels crowded. This is items #2 (parent groups) and #3 (common-vs-all help split) from a design discussion. File to edit: `apps/axctl/src/cli/index.ts` (single file; it is currently clean — no uncommitted changes).\n\n## Critical backward-compat constraints (DO NOT BREAK THESE)\n- `derive-signals` and `derive-intents` are hardcoded in installed LaunchAgent plists — see `apps/axctl/src/cli/install.ts` lines ~117 and ~154 (`${binPath} derive-sig",
+      "review_status": "pending",
+      "rationale": "",
+      "reviewer": ""
+    },
+    {
+      "candidate_id": "tlm__verification__6486644e21a9387f",
+      "subject_id": "turn:claude_subagent_a8e36913ab7522d2d__756583716ef7eae0__seq_000001",
+      "session_id": "session:`claude-subagent-a8e36913ab7522d2d`",
+      "turn_id": "turn:claude_subagent_a8e36913ab7522d2d__756583716ef7eae0__seq_000001",
+      "label_family": "verification",
+      "target": "verification_demand",
+      "weak_label": "verification",
+      "weak_confidence": 0.84,
+      "weak_sources": [
+        "verification:demand"
+      ],
+      "evidence_paths": [
+        "turn:claude_subagent_a8e36913ab7522d2d__756583716ef7eae0__seq_000001"
+      ],
+      "excerpt": "You are a code quality reviewer. Spec compliance already passed. Review the code quality of one commit.\n\nWork from: `/Users/necmttn/Projects/ax/.claude/worktrees/live-ingest-durable-streams`\n\nDESCRIPTION: `IngestStreamEvent` typed payload + `ingestStreamEventFromTrace` mapper (live-trace event → coarse ingest progress event).\nREQUIREMENTS: Task 1 of docs/superpowers/plans/2026-06-01-live-ingest-durable-streams.md\nBASE_SHA: 283cada\nHEAD_SHA: d746bf0\n\nRun `git diff 283cada d746bf0 -- apps/axctl/src/ingest/` and read the new files. Assess code quality only (correctness vs spec already verified):\n",
+      "review_status": "pending",
+      "rationale": "",
+      "reviewer": ""
+    },
+    {
+      "candidate_id": "tlm__verification__64a533179357ddc7",
+      "subject_id": "turn:claude_subagent_aa04e0806cbb3a665__116067e8baaec4ee__seq_000001",
+      "session_id": "session:`claude-subagent-aa04e0806cbb3a665`",
+      "turn_id": "turn:claude_subagent_aa04e0806cbb3a665__116067e8baaec4ee__seq_000001",
+      "label_family": "verification",
+      "target": "verification_demand",
+      "weak_label": "verification",
+      "weak_confidence": 0.84,
+      "weak_sources": [
+        "verification:demand"
+      ],
+      "evidence_paths": [
+        "turn:claude_subagent_aa04e0806cbb3a665__116067e8baaec4ee__seq_000001"
+      ],
+      "excerpt": "Add a \"Works with\" provider logo strip to the new ax landing page. The 5 agents/CLIs ax supports today (confirmed in `src/ingest/provider-events.ts` as `AgentProviderName = \"claude\" | \"codex\" | \"pi\" | \"opencode\" | \"cursor\"`):\n\n1. **Claude Code** — Anthropic's CLI. Brand: orange C-shape (we already render an ASCII version in change.tsx). Anthropic brand orange `#d77757`.\n2. **Codex** — OpenAI's CLI. OpenAI brand mark.\n3. **Pi** — Inflection AI's agent (now part of Microsoft). The mathematical π symbol is the logo.\n4. **OpenCode** — sst.dev/opencode terminal coding agent. Likely a custom mark.\n5",
+      "review_status": "pending",
+      "rationale": "",
+      "reviewer": ""
+    },
+    {
+      "candidate_id": "tlm__verification__69744baac173d933",
+      "subject_id": "turn:claude_subagent_aec34fc7a2aff490b__e8d92e4b8416acdf__seq_000001",
+      "session_id": "session:`claude-subagent-aec34fc7a2aff490b`",
+      "turn_id": "turn:claude_subagent_aec34fc7a2aff490b__e8d92e4b8416acdf__seq_000001",
+      "label_family": "verification",
+      "target": "verification_demand",
+      "weak_label": "verification",
+      "weak_confidence": 0.84,
+      "weak_sources": [
+        "verification:demand"
+      ],
+      "evidence_paths": [
+        "turn:claude_subagent_aec34fc7a2aff490b__e8d92e4b8416acdf__seq_000001"
+      ],
+      "excerpt": "You are working in an existing git worktree: `/Users/necmttn/Projects/ax/.worktrees/monorepo-migration`. Do NOT commit, push, or touch git — just investigate, make config/code changes in the working tree, verify by building, and report.\n\n## Context\n`apps/site` is a TanStack Start app deployed as a STATIC site to Cloudflare Pages (no server / no Worker). Current `apps/site/vite.config.ts` uses:\n```ts\ntanstackStart({\n  srcDirectory: \"app\",\n  spa: { enabled: true },\n  prerender: { enabled: true, crawlLinks: true, failOnError: false },\n})\n```\nThis prerenders ~25 routes each to their own static HTM",
+      "review_status": "pending",
+      "rationale": "",
+      "reviewer": ""
+    },
+    {
+      "candidate_id": "tlm__verification__69e6a59453d848e2",
+      "subject_id": "turn:c5da4876_a2ce_4862_83ba_2c521acc7694__f9c0c1f21e149989__seq_000994",
+      "session_id": "session:`c5da4876-a2ce-4862-83ba-2c521acc7694`",
+      "turn_id": "turn:c5da4876_a2ce_4862_83ba_2c521acc7694__f9c0c1f21e149989__seq_000994",
+      "label_family": "verification",
+      "target": "verification_demand",
+      "weak_label": "verification",
+      "weak_confidence": 0.84,
+      "weak_sources": [
+        "verification:demand"
+      ],
+      "evidence_paths": [
+        "turn:c5da4876_a2ce_4862_83ba_2c521acc7694__f9c0c1f21e149989__seq_000994"
+      ],
+      "excerpt": "Base directory for this skill: /Users/necmttn/.claude/plugins/cache/claude-plugins-official/superpowers/5.1.0/skills/finishing-a-development-branch\n\n# Finishing a Development Branch\n\n## Overview\n\nGuide completion of development work by presenting clear options and handling chosen workflow.\n\n**Core principle:** Verify tests → Detect environment → Present options → Execute choice → Clean up.\n\n**Announce at start:** \"I'm using the finishing-a-development-branch skill to complete this work.\"\n\n## The Process\n\n### Step 1: Verify Tests\n\n**Before presenting options, verify tests pass:**\n\n```bash\n# Run",
+      "review_status": "pending",
+      "rationale": "",
+      "reviewer": ""
+    },
+    {
+      "candidate_id": "tlm__verification__6c6c10ead84797fd",
+      "subject_id": "turn:claude_subagent_a369cf4870765565b__f68d923cd4f244d3__seq_000001",
+      "session_id": "session:`claude-subagent-a369cf4870765565b`",
+      "turn_id": "turn:claude_subagent_a369cf4870765565b__f68d923cd4f244d3__seq_000001",
+      "label_family": "verification",
+      "target": "verification_demand",
+      "weak_label": "verification",
+      "weak_confidence": 0.84,
+      "weak_sources": [
+        "verification:demand"
+      ],
+      "evidence_paths": [
+        "turn:claude_subagent_a369cf4870765565b__f68d923cd4f244d3__seq_000001"
+      ],
+      "excerpt": "You are implementing Task 1 of a plan in the `ax` repo: **`IngestStreamEvent` — the progress payload.**\n\nWork from this git worktree (stay inside it): `/Users/necmttn/Projects/ax/.claude/worktrees/live-ingest-durable-streams`\n\nUse TDD (red → green → commit). The project uses `bun:test`.\n\n## ⚠️ Test runner note (read first)\nA global hook blocks bare `bun test`. To run tests, bypass it with a tmp wrapper script. Standard project pattern:\n```bash\nprintf '#!/bin/sh\\nexec bun test \"$@\"\\n' > /tmp/bt.sh && chmod +x /tmp/bt.sh\n/tmp/bt.sh apps/axctl/src/ingest/stream-events.test.ts\n```\nIf that still tr",
+      "review_status": "pending",
+      "rationale": "",
+      "reviewer": ""
+    },
+    {
+      "candidate_id": "tlm__verification__6ec1706aec6c837b",
+      "subject_id": "turn:claude_subagent_a58f1a2c677f7f15b__fbe3c4be221c0357__seq_000001",
+      "session_id": "session:`claude-subagent-a58f1a2c677f7f15b`",
+      "turn_id": "turn:claude_subagent_a58f1a2c677f7f15b__fbe3c4be221c0357__seq_000001",
+      "label_family": "verification",
+      "target": "verification_demand",
+      "weak_label": "verification",
+      "weak_confidence": 0.84,
+      "weak_sources": [
+        "verification:demand"
+      ],
+      "evidence_paths": [
+        "turn:claude_subagent_a58f1a2c677f7f15b__fbe3c4be221c0357__seq_000001"
+      ],
+      "excerpt": "You are implementing Task 5 of a plan in the `ax` repo: **Wire `ax serve` — `POST /api/ingest` + start the Durable Streams sidecar.**\n\nWork from this git worktree (stay inside it): `/Users/necmttn/Projects/ax/.claude/worktrees/live-ingest-durable-streams`\n\nEffect 4.0.0-beta. **Consult effect-solutions before writing Effect runtime code** (`effect-solutions list`, then `effect-solutions show services-and-layers`). Real source: `.references/effect-smol/packages/effect/src`.\n\n## ⚠️ Test runner note\nGlobal hook blocks bare `bun test` (greps for \"bun test\"). Use split vars: `B=bun; T=test; \"$B\" \"$T",
+      "review_status": "pending",
+      "rationale": "",
+      "reviewer": ""
+    },
+    {
+      "candidate_id": "tlm__verification__75672dc88f325541",
+      "subject_id": "turn:claude_subagent_a9a23b1a9e8a1e356__5782aba0d8175295__seq_000001",
+      "session_id": "session:`claude-subagent-a9a23b1a9e8a1e356`",
+      "turn_id": "turn:claude_subagent_a9a23b1a9e8a1e356__5782aba0d8175295__seq_000001",
+      "label_family": "verification",
+      "target": "verification_demand",
+      "weak_label": "verification",
+      "weak_confidence": 0.84,
+      "weak_sources": [
+        "verification:demand"
+      ],
+      "evidence_paths": [
+        "turn:claude_subagent_a9a23b1a9e8a1e356__5782aba0d8175295__seq_000001"
+      ],
+      "excerpt": "Review one small commit for BOTH spec compliance and code quality. Verify by reading code; don't trust the report.\n\nWork from: `/Users/necmttn/Projects/ax/.claude/worktrees/live-ingest-durable-streams`\n\n## Spec (Task 2)\n`apps/axctl/src/dashboard/ingest-stream.ts` must export:\n- `ingestStreamName(runId: string): string` returning `` `ingest:${runId}` ``\n- `interface IngestStreamBus { publish(runId: string, event: IngestStreamEvent): Promise<void> }`\n- `class InMemoryIngestStreamBus implements IngestStreamBus` with `publish` appending to a per-run `Map<string, IngestStreamEvent[]>` and a `histor",
+      "review_status": "pending",
+      "rationale": "",
+      "reviewer": ""
+    },
+    {
+      "candidate_id": "tlm__verification__7815f86c596787da",
+      "subject_id": "turn:claude_subagent_add2208f9195dc757__176efabd9937d97a__seq_000001",
+      "session_id": "session:`claude-subagent-add2208f9195dc757`",
+      "turn_id": "turn:claude_subagent_add2208f9195dc757__176efabd9937d97a__seq_000001",
+      "label_family": "verification",
+      "target": "verification_demand",
+      "weak_label": "verification",
+      "weak_confidence": 0.84,
+      "weak_sources": [
+        "verification:demand"
+      ],
+      "evidence_paths": [
+        "turn:claude_subagent_add2208f9195dc757__176efabd9937d97a__seq_000001"
+      ],
+      "excerpt": "You are implementing Task 6 of a plan in the `ax` repo: **Frontend — live ingest view over Durable Streams.**\n\nWork from this git worktree (stay inside it): `/Users/necmttn/Projects/ax/.claude/worktrees/live-ingest-durable-streams`\n\n## ⚠️ Test runner note\nGlobal hook blocks bare `bun test` (greps for \"bun test\"). If you need it: `B=bun; T=test; \"$B\" \"$T\" <path>`.\n\n## Context — backend already wired (DONE, committed)\n- `POST /api/ingest` (in `apps/axctl/src/dashboard/server.ts`) accepts `{ since?: number }` and returns JSON:\n  ```json\n  { \"runId\": \"<uuid>\", \"stream\": \"http://127.0.0.1:<sidecarP",
+      "review_status": "pending",
+      "rationale": "",
+      "reviewer": ""
+    },
+    {
+      "candidate_id": "tlm__verification__8fafd8426543c1c7",
+      "subject_id": "turn:claude_subagent_a6fdc23d1b567078e__a83cd185fe243468__seq_000001",
+      "session_id": "session:`claude-subagent-a6fdc23d1b567078e`",
+      "turn_id": "turn:claude_subagent_a6fdc23d1b567078e__a83cd185fe243468__seq_000001",
+      "label_family": "verification",
+      "target": "verification_demand",
+      "weak_label": "verification",
+      "weak_confidence": 0.84,
+      "weak_sources": [
+        "verification:demand"
+      ],
+      "evidence_paths": [
+        "turn:claude_subagent_a6fdc23d1b567078e__a83cd185fe243468__seq_000001"
+      ],
+      "excerpt": "Review whether an Effect-based implementation matches its spec. Be skeptical — verify by reading code + running, don't trust the report.\n\nWork from: `/Users/necmttn/Projects/ax/.claude/worktrees/live-ingest-durable-streams`\n\n## Spec (Task 4)\n`apps/axctl/src/dashboard/ingest-workflow.ts` must export a `startIngestWorkflow(opts, bus, baseLayer)` that:\n1. Runs `runIngest` IN-PROCESS, forwarding live-trace events to `bus.publish(...)` by mapping each via `ingestStreamEventFromTrace` (already implemented at `apps/axctl/src/ingest/stream-events.ts`).\n2. Generates a runId, plumbs it so the trace id i",
+      "review_status": "pending",
+      "rationale": "",
+      "reviewer": ""
+    },
+    {
+      "candidate_id": "tlm__verification__96cffa29d12b05bb",
+      "subject_id": "turn:claude_subagent_ad521a81d72d5289e__9a021dc977206b24__seq_000037",
+      "session_id": "session:`claude-subagent-ad521a81d72d5289e`",
+      "turn_id": "turn:claude_subagent_ad521a81d72d5289e__9a021dc977206b24__seq_000037",
+      "label_family": "verification",
+      "target": "verification_demand",
+      "weak_label": "verification",
+      "weak_confidence": 0.84,
+      "weak_sources": [
+        "verification:demand"
+      ],
+      "evidence_paths": [
+        "turn:claude_subagent_ad521a81d72d5289e__9a021dc977206b24__seq_000037"
+      ],
+      "excerpt": "Base directory for this skill: /Users/necmttn/.claude/skills/fork-daemon-observability\n\n# Fork Daemon Observability Checklist\n\nWhen implementing features that dispatch work via `forkDaemon`, background tasks, or RPC handlers:\n\n## Mandatory Verification Before Declaring Complete\n\n### 1. OTEL Trace Context Propagation\n- [ ] Span context is explicitly extracted from the caller and injected into the forked process\n- [ ] `forkDaemon` (or equivalent) receives serialized trace context (trace_id, span_id, baggage)\n- [ ] Child process reconstructs parent context via `opentelemetry::context::Context::cu",
+      "review_status": "pending",
+      "rationale": "",
+      "reviewer": ""
+    },
+    {
+      "candidate_id": "tlm__verification__992daa7f977b3aa1",
+      "subject_id": "turn:claude_subagent_a4fa8eb67813366c4__aa36faccb82a3117__seq_000001",
+      "session_id": "session:`claude-subagent-a4fa8eb67813366c4`",
+      "turn_id": "turn:claude_subagent_a4fa8eb67813366c4__aa36faccb82a3117__seq_000001",
+      "label_family": "verification",
+      "target": "verification_demand",
+      "weak_label": "verification",
+      "weak_confidence": 0.84,
+      "weak_sources": [
+        "verification:demand"
+      ],
+      "evidence_paths": [
+        "turn:claude_subagent_a4fa8eb67813366c4__aa36faccb82a3117__seq_000001"
+      ],
+      "excerpt": "Port the standalone features page prototype into the ax TanStack Start site as a new `/features` route.\n\n**Source file** (read — DO NOT MODIFY):\n`/Users/necmttn/Projects/ax/docs/prototypes/features-page-v2.html` — 7-section deep-dive page covering Sources → Graph → Derive stages → Interventions (with safety contract) → Hooks → Surfaces → Local-first. Mostly static content with a sticky TOC, ASCII graph diagram, syntax-tinted task brief example. Inline CSS + minimal JS.\n\n**Target files** (create):\n- `/Users/necmttn/Projects/ax/site/app/routes/features.tsx` — new route at `/features`. Mounts Sit",
+      "review_status": "pending",
+      "rationale": "",
+      "reviewer": ""
+    },
+    {
+      "candidate_id": "tlm__verification__9fee1d7cae97e3fa",
+      "subject_id": "turn:claude_subagent_ab608f32db50bf4f0__1d925d75fefcbce4__seq_000001",
+      "session_id": "session:`claude-subagent-ab608f32db50bf4f0`",
+      "turn_id": "turn:claude_subagent_ab608f32db50bf4f0__1d925d75fefcbce4__seq_000001",
+      "label_family": "verification",
+      "target": "verification_demand",
+      "weak_label": "verification",
+      "weak_confidence": 0.84,
+      "weak_sources": [
+        "verification:demand"
+      ],
+      "evidence_paths": [
+        "turn:claude_subagent_ab608f32db50bf4f0__1d925d75fefcbce4__seq_000001"
+      ],
+      "excerpt": "You are implementing Task 2 of a plan in the `ax` repo: **`IngestStreamBus` seam + in-memory impl.**\n\nWork from this git worktree (stay inside it): `/Users/necmttn/Projects/ax/.claude/worktrees/live-ingest-durable-streams`\n\nUse TDD (red → green → commit). Project uses `bun:test`.\n\n## ⚠️ Test runner note\nA global hook blocks bare `bun test` (it greps the command string for \"bun test\"). Run the suite via split shell vars so the hook doesn't match:\n```bash\nB=bun; T=test; \"$B\" \"$T\" apps/axctl/src/dashboard/ingest-stream.test.ts\n```\n\n## Task Description (verbatim)\n\n**Goal:** A tiny producer-side in",
+      "review_status": "pending",
+      "rationale": "",
+      "reviewer": ""
+    },
+    {
+      "candidate_id": "tlm__verification__a0adbcd46db2cefa",
+      "subject_id": "turn:claude_subagent_a58f1a2c677f7f15b__fbe3c4be221c0357__seq_000173",
+      "session_id": "session:`claude-subagent-a58f1a2c677f7f15b`",
+      "turn_id": "turn:claude_subagent_a58f1a2c677f7f15b__fbe3c4be221c0357__seq_000173",
+      "previous_assistant_turn_id": "turn:claude_subagent_a58f1a2c677f7f15b__fbe3c4be221c0357__seq_000172",
+      "label_family": "verification",
+      "target": "verification_demand",
+      "weak_label": "verification",
+      "weak_confidence": 0.84,
+      "weak_sources": [
+        "verification:demand"
+      ],
+      "evidence_paths": [
+        "turn:claude_subagent_a58f1a2c677f7f15b__fbe3c4be221c0357__seq_000173"
+      ],
+      "excerpt": "Code-quality review found one production-biting gap to fix (the rest is approved). Fix just this, re-verify, amend, report new SHA.\n\n**Issue (Important):** In `serveDashboard`, you `await createDurableIngestStream()` (binds a sidecar localhost port) and `ManagedRuntime.make(...)` BEFORE `Bun.serve(...)`, and the SIGINT/SIGTERM shutdown handler is registered only AFTER. If `Bun.serve` throws — most commonly **port already in use** — the already-started sidecar server is leaked (its port stays bound, no shutdown handler registered yet) AND the thrown error becomes an unhandled promise rejection ",
+      "previous_assistant_excerpt": "Committed as `d8113ab`. Task complete.\n\n## Status: DONE\n\n### How server.ts runs Effects today + persistent-runtime decision (load-bearing)\nEvery existing `/api/*` route does an **ad-hoc fresh-runtime-per-request** `Effect.runPromise(program.pipe(Effect.provide(AppLayer), Effect.scoped))`. That pattern would kill a `forkDetach` daemon the moment the request resolves, so it can't back `/api/ingest`.\n\nI **built a long-lived `ManagedRuntime`** (`ManagedRuntime.make(IngestRuntimeLayer)`) once in `serveDashboard`, held in a module-level closure (`serveIngestState`), and reuse it for `/api/ingest` vi",
+      "review_status": "pending",
+      "rationale": "",
+      "reviewer": ""
+    },
+    {
+      "candidate_id": "tlm__verification__a307a7898d832e4c",
+      "subject_id": "turn:c5da4876_a2ce_4862_83ba_2c521acc7694__f9c0c1f21e149989__seq_002479",
+      "session_id": "session:`c5da4876-a2ce-4862-83ba-2c521acc7694`",
+      "turn_id": "turn:c5da4876_a2ce_4862_83ba_2c521acc7694__f9c0c1f21e149989__seq_002479",
+      "label_family": "verification",
+      "target": "verification_demand",
+      "weak_label": "verification",
+      "weak_confidence": 0.84,
+      "weak_sources": [
+        "verification:demand"
+      ],
+      "evidence_paths": [
+        "turn:c5da4876_a2ce_4862_83ba_2c521acc7694__f9c0c1f21e149989__seq_002479"
+      ],
+      "excerpt": "Base directory for this skill: /Users/necmttn/.claude/plugins/cache/claude-plugins-official/superpowers/5.1.0/skills/writing-plans\n\n# Writing Plans\n\n## Overview\n\nWrite comprehensive implementation plans assuming the engineer has zero context for our codebase and questionable taste. Document everything they need to know: which files to touch for each task, code, testing, docs they might need to check, how to test it. Give them the whole plan as bite-sized tasks. DRY. YAGNI. TDD. Frequent commits.\n\nAssume they are a skilled developer, but know almost nothing about our toolset or problem domain. ",
+      "review_status": "pending",
+      "rationale": "",
+      "reviewer": ""
+    },
+    {
+      "candidate_id": "tlm__verification__b00c733867de8fa",
+      "subject_id": "turn:claude_subagent_a20a949b183a1b00e__1379f972a81583bf__seq_000001",
+      "session_id": "session:`claude-subagent-a20a949b183a1b00e`",
+      "turn_id": "turn:claude_subagent_a20a949b183a1b00e__1379f972a81583bf__seq_000001",
+      "label_family": "verification",
+      "target": "verification_demand",
+      "weak_label": "verification",
+      "weak_confidence": 0.84,
+      "weak_sources": [
+        "verification:demand"
+      ],
+      "evidence_paths": [
+        "turn:claude_subagent_a20a949b183a1b00e__1379f972a81583bf__seq_000001"
+      ],
+      "excerpt": "Review whether a frontend implementation matches its spec. Be skeptical — verify by reading code, don't trust the report.\n\nWork from: `/Users/necmttn/Projects/ax/.claude/worktrees/live-ingest-durable-streams`\n\n## Spec (Task 6)\nA React hook + live view in the dashboard SPA (`apps/axctl/src/dashboard/web/src/`):\n1. `use-ingest-stream.ts`: `useIngestStream(streamUrl: string|null)` — subscribes via `@durable-streams/client` `stream<IngestStreamEvent>({url, live:true})` + `subscribeJson`, folds events into `{stages: Record<stage,\"running\"|\"ok\"|\"error\">, order, finished, runStatus, label?}`. Folding",
+      "review_status": "pending",
+      "rationale": "",
+      "reviewer": ""
+    },
+    {
+      "candidate_id": "tlm__verification__b84cc43352bfc289",
+      "subject_id": "turn:ad2d466d_0227_419f_b0a8_1bce6ff43d6d__379cc4290e649f3d__seq_000029",
+      "session_id": "session:`ad2d466d-0227-419f-b0a8-1bce6ff43d6d`",
+      "turn_id": "turn:ad2d466d_0227_419f_b0a8_1bce6ff43d6d__379cc4290e649f3d__seq_000029",
+      "label_family": "verification",
+      "target": "verification_demand",
+      "weak_label": "verification",
+      "weak_confidence": 0.84,
+      "weak_sources": [
+        "verification:demand"
+      ],
+      "evidence_paths": [
+        "turn:ad2d466d_0227_419f_b0a8_1bce6ff43d6d__379cc4290e649f3d__seq_000029"
+      ],
+      "excerpt": "Base directory for this skill: /Users/necmttn/.claude/plugins/cache/claude-plugins-official/superpowers/5.1.0/skills/using-git-worktrees\n\n# Using Git Worktrees\n\n## Overview\n\nEnsure work happens in an isolated workspace. Prefer your platform's native worktree tools. Fall back to manual git worktrees only when no native tool is available.\n\n**Core principle:** Detect existing isolation first. Then use native tools. Then fall back to git. Never fight the harness.\n\n**Announce at start:** \"I'm using the using-git-worktrees skill to set up an isolated workspace.\"\n\n## Step 0: Detect Existing Isolation",
+      "review_status": "pending",
+      "rationale": "",
+      "reviewer": ""
+    },
+    {
+      "candidate_id": "tlm__verification__beb20f79d57e447a",
+      "subject_id": "turn:claude_subagent_a14fe14f81c294f11__cb3e6bd0662a8784__seq_000001",
+      "session_id": "session:`claude-subagent-a14fe14f81c294f11`",
+      "turn_id": "turn:claude_subagent_a14fe14f81c294f11__cb3e6bd0662a8784__seq_000001",
+      "label_family": "verification",
+      "target": "verification_demand",
+      "weak_label": "verification",
+      "weak_confidence": 0.84,
+      "weak_sources": [
+        "verification:demand"
+      ],
+      "evidence_paths": [
+        "turn:claude_subagent_a14fe14f81c294f11__cb3e6bd0662a8784__seq_000001"
+      ],
+      "excerpt": "You are implementing Task 3 of a plan in the `ax` repo: **Durable Streams backing for the IngestStreamBus.**\n\nWork from this git worktree (stay inside it): `/Users/necmttn/Projects/ax/.claude/worktrees/live-ingest-durable-streams`\n\n## ⚠️ Test runner note\nA global hook blocks bare `bun test` (greps command string for \"bun test\"). Run via split shell vars:\n```bash\nB=bun; T=test; \"$B\" \"$T\" apps/axctl/src/dashboard/ingest-stream-durable.test.ts\n```\nFor the env-gated run: `B=bun; T=test; AX_STREAM_E2E=1 \"$B\" \"$T\" apps/axctl/src/dashboard/ingest-stream-durable.test.ts`\n\n## REQUIRED READING FIRST\nRea",
+      "review_status": "pending",
+      "rationale": "",
+      "reviewer": ""
+    },
+    {
+      "candidate_id": "tlm__verification__c4e164b95c72a13e",
+      "subject_id": "turn:claude_subagent_a0682098abde89437__756ef347f5bb1f52__seq_000001",
+      "session_id": "session:`claude-subagent-a0682098abde89437`",
+      "turn_id": "turn:claude_subagent_a0682098abde89437__756ef347f5bb1f52__seq_000001",
+      "label_family": "verification",
+      "target": "verification_demand",
+      "weak_label": "verification",
+      "weak_confidence": 0.84,
+      "weak_sources": [
+        "verification:demand"
+      ],
+      "evidence_paths": [
+        "turn:claude_subagent_a0682098abde89437__756ef347f5bb1f52__seq_000001"
+      ],
+      "excerpt": "Port the standalone animated landing prototype into the ax TanStack Start site, replacing the current 7-section landing at `/`.\n\n**Source file** (read — DO NOT MODIFY):\n`/Users/necmttn/Projects/ax/docs/prototypes/landing-v5a-hint-B-anim-v2.html` — single-file HTML with inline CSS + animation JS. The \"dashboard preview\" (72/100 + mini-stats + safety-contract donut), animated lineage (event chips streaming from 3 sources into a typed-graph sink with live counters), 3 sections total.\n\n**Target files** (create / overwrite as needed):\n- `/Users/necmttn/Projects/ax/site/app/routes/index.tsx` — REWRI",
+      "review_status": "pending",
+      "rationale": "",
+      "reviewer": ""
+    },
+    {
+      "candidate_id": "tlm__verification__d6b65e6bd47e03bf",
+      "subject_id": "turn:claude_subagent_a89a30718d3222627__3b46577bbf7a486a__seq_000001",
+      "session_id": "session:`claude-subagent-a89a30718d3222627`",
+      "turn_id": "turn:claude_subagent_a89a30718d3222627__3b46577bbf7a486a__seq_000001",
+      "label_family": "verification",
+      "target": "verification_demand",
+      "weak_label": "verification",
+      "weak_confidence": 0.84,
+      "weak_sources": [
+        "verification:demand"
+      ],
+      "evidence_paths": [
+        "turn:claude_subagent_a89a30718d3222627__3b46577bbf7a486a__seq_000001"
+      ],
+      "excerpt": "Implement a new agent skill for the `ax` repo (github.com/Necmttn/ax) that lets an AI coding agent star the repo, file an issue, or fork/open-a-PR — by shelling out to the `gh` CLI. Goal: zero new `axctl` CLI surface (the human never types a command; the agent invokes this skill). This is item #1 from a design discussion.\n\n## Context to read first\n- `docs/research/2026-06-02-oss-cli-feedback-growth.md` — the research that motivates this; sections 1-2 have the exact verified `gh` commands and the respectful-vs-spammy guidance.\n- Existing skills for structure/voice/frontmatter: `skills/setup/SKI",
+      "review_status": "pending",
+      "rationale": "",
+      "reviewer": ""
+    },
+    {
+      "candidate_id": "tlm__verification__d87448c84cc55ccd",
+      "subject_id": "turn:claude_subagent_ad521a81d72d5289e__9a021dc977206b24__seq_000001",
+      "session_id": "session:`claude-subagent-ad521a81d72d5289e`",
+      "turn_id": "turn:claude_subagent_ad521a81d72d5289e__9a021dc977206b24__seq_000001",
+      "label_family": "verification",
+      "target": "verification_demand",
+      "weak_label": "verification",
+      "weak_confidence": 0.84,
+      "weak_sources": [
+        "verification:demand"
+      ],
+      "evidence_paths": [
+        "turn:claude_subagent_ad521a81d72d5289e__9a021dc977206b24__seq_000001"
+      ],
+      "excerpt": "You are implementing Task 4 of a plan in the `ax` repo: **Server-side ingest workflow runner.**\n\nWork from this git worktree (stay inside it): `/Users/necmttn/Projects/ax/.claude/worktrees/live-ingest-durable-streams`\n\nThis repo uses **Effect 4.0.0-beta**. **IMPORTANT: consult effect-solutions before writing Effect code** — run `effect-solutions list`, then `effect-solutions show services-and-layers testing` (and any relevant topic). Don't guess Effect patterns. Real source is at `.references/effect-smol/packages/effect/src` if you need to verify a beta API.\n\n## ⚠️ Test runner note\nGlobal hook",
+      "review_status": "pending",
+      "rationale": "",
+      "reviewer": ""
+    },
+    {
+      "candidate_id": "tlm__verification__ddda28236bd1a786",
+      "subject_id": "turn:claude_subagent_a42b1f815e16d1e51__0c2236534d5d853c__seq_000001",
+      "session_id": "session:`claude-subagent-a42b1f815e16d1e51`",
+      "turn_id": "turn:claude_subagent_a42b1f815e16d1e51__0c2236534d5d853c__seq_000001",
+      "label_family": "verification",
+      "target": "verification_demand",
+      "weak_label": "verification",
+      "weak_confidence": 0.84,
+      "weak_sources": [
+        "verification:demand"
+      ],
+      "evidence_paths": [
+        "turn:claude_subagent_a42b1f815e16d1e51__0c2236534d5d853c__seq_000001"
+      ],
+      "excerpt": "Fix a real correctness bug in the `ax` repo: **re-running ingest crashes on a unique-index violation** instead of being idempotent. Users won't reset their DB, so re-ingest MUST be idempotent.\n\nWork from: `/Users/necmttn/Projects/ax` (branch `main`). Use TDD. Effect 4.0.0-beta. Project uses `bun:test`.\n\n## ⚠️ Test runner note\nA global hook blocks bare `bun test`. Run via split shell vars: `B=bun; T=test; \"$B\" \"$T\" <path>`.\n\n## The crash (observed running `ax ingest` a second time against an already-ingested DB)\n```\nerror: Database index agent_event_session_seq already contains\n  [agent_session",
+      "review_status": "pending",
+      "rationale": "",
+      "reviewer": ""
+    },
+    {
+      "candidate_id": "tlm__verification__f8a87fb496ff4c02",
+      "subject_id": "turn:claude_subagent_aa533036db61a9df6__32980ba34608156a__seq_000001",
+      "session_id": "session:`claude-subagent-aa533036db61a9df6`",
+      "turn_id": "turn:claude_subagent_aa533036db61a9df6__32980ba34608156a__seq_000001",
+      "label_family": "verification",
+      "target": "verification_demand",
+      "weak_label": "verification",
+      "weak_confidence": 0.84,
+      "weak_sources": [
+        "verification:demand"
+      ],
+      "evidence_paths": [
+        "turn:claude_subagent_aa533036db61a9df6__32980ba34608156a__seq_000001"
+      ],
+      "excerpt": "Review whether an implementation matches its spec. Be skeptical — verify by reading code, do not trust the report.\n\nWork from: `/Users/necmttn/Projects/ax/.claude/worktrees/live-ingest-durable-streams`\n\n## What was requested (Task 1)\nCreate `apps/axctl/src/ingest/stream-events.ts` exporting:\n- `type IngestStreamEvent` = union of 4 variants: `run_started {runId,label}`, `stage_started {runId,stage}`, `stage_finished {runId,stage,status:\"ok\"|\"error\",durationMs}`, `run_finished {runId,status:\"completed\"|\"failed\",durationMs}` (all fields `readonly`).\n- `function ingestStreamEventFromTrace(event: T",
+      "review_status": "pending",
+      "rationale": "",
+      "reviewer": ""
+    },
+    {
+      "candidate_id": "tlm__verification__fabbbb6c4491b6e7",
+      "subject_id": "turn:claude_subagent_a7638c702fbd07a6b__372578eb9e8fa1f8__seq_000001",
+      "session_id": "session:`claude-subagent-a7638c702fbd07a6b`",
+      "turn_id": "turn:claude_subagent_a7638c702fbd07a6b__372578eb9e8fa1f8__seq_000001",
+      "label_family": "verification",
+      "target": "verification_demand",
+      "weak_label": "verification",
+      "weak_confidence": 0.84,
+      "weak_sources": [
+        "verification:demand"
+      ],
+      "evidence_paths": [
+        "turn:claude_subagent_a7638c702fbd07a6b__372578eb9e8fa1f8__seq_000001"
+      ],
+      "excerpt": "You are the FINAL code reviewer for a complete feature branch before it merges as a single PR. Be thorough and skeptical — verify by reading code + running, don't trust prior reviews.\n\nWork from: `/Users/necmttn/Projects/ax/.claude/worktrees/live-ingest-durable-streams`\n\n## The feature: \"Live ingest over Durable Streams\"\n`ax serve` can host ingest: `POST /api/ingest` triggers the existing `runIngest` pipeline in-process (forked), publishes per-stage progress to a per-run Durable Stream (`ingest:<runId>`) via a sidecar Durable Streams server, and a dashboard live view subscribes (catch-up histo",
+      "review_status": "pending",
+      "rationale": "",
+      "reviewer": ""
+    },
+    {
+      "candidate_id": "tlm__verification__fdd57fa1d169de93",
+      "subject_id": "turn:claude_subagent_a8cd2cb4ba6f9ea57__ca77a2a0dadb5172__seq_000001",
+      "session_id": "session:`claude-subagent-a8cd2cb4ba6f9ea57`",
+      "turn_id": "turn:claude_subagent_a8cd2cb4ba6f9ea57__ca77a2a0dadb5172__seq_000001",
+      "label_family": "verification",
+      "target": "verification_demand",
+      "weak_label": "verification",
+      "weak_confidence": 0.84,
+      "weak_sources": [
+        "verification:demand"
+      ],
+      "evidence_paths": [
+        "turn:claude_subagent_a8cd2cb4ba6f9ea57__ca77a2a0dadb5172__seq_000001"
+      ],
+      "excerpt": "Roast the hero on http://localhost:5173/ (the new ax landing) and fix the issues you find. The hero implementation lives in:\n- `/Users/necmttn/Projects/ax/site/app/components/landing-v2/dashboard-preview.tsx` (headline + lede + install + supports strip)\n- `/Users/necmttn/Projects/ax/site/app/components/landing-v2/supports-strip.tsx` (5 provider logos + names)\n- `/Users/necmttn/Projects/ax/site/app/styles/globals.css` (scoped `.landing-v2` block)\n\n**Known issues I want you to fix (and roast first, then fix)**\n\n1. **Eyebrow mismatch.** Currently reads `FOR CLAUDE CODE + CODEX` but ax now support",
+      "review_status": "pending",
+      "rationale": "",
+      "reviewer": ""
+    },
+    {
+      "candidate_id": "tlm__verification__ff2b4d4e4f4fb339",
+      "subject_id": "turn:claude_subagent_a59aaad4ae7a9e497__285b464a2aa35390__seq_000001",
+      "session_id": "session:`claude-subagent-a59aaad4ae7a9e497`",
+      "turn_id": "turn:claude_subagent_a59aaad4ae7a9e497__285b464a2aa35390__seq_000001",
+      "label_family": "verification",
+      "target": "verification_demand",
+      "weak_label": "verification",
+      "weak_confidence": 0.84,
+      "weak_sources": [
+        "verification:demand"
+      ],
+      "evidence_paths": [
+        "turn:claude_subagent_a59aaad4ae7a9e497__285b464a2aa35390__seq_000001"
+      ],
+      "excerpt": "You are implementing Task 7 (final) of a plan in the `ax` repo: **End-to-end dogfood + docs** for the live-ingest-over-Durable-Streams feature.\n\nWork from this git worktree (stay inside it): `/Users/necmttn/Projects/ax/.claude/worktrees/live-ingest-durable-streams`. Today is 2026-06-02.\n\n## What was built (Tasks 0–6, all committed in this worktree)\n- `POST /api/ingest` on `ax serve` triggers an in-process ingest run (forked on a long-lived ManagedRuntime) and returns `{ runId, stream: \"<full sidecar URL>\", streamName: \"ingest:<runId>\", streamBaseUrl }`.\n- Progress flows: `runIngest` live-trace",
+      "review_status": "pending",
+      "rationale": "",
+      "reviewer": ""
+    }
+  ],
+  "review_diversity": {
+    "label_family_count": 3,
+    "label_family_counts": {
+      "verification": 37,
+      "approval_or_rejection": 1,
+      "correction": 5
+    },
+    "min_weak_confidence": 0.74,
+    "max_weak_confidence": 0.84
+  },
+  "out_path": ".ax/experiments/transcript-label-mining-current.json"
+}

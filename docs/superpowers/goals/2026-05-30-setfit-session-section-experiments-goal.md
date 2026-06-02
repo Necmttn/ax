@@ -31787,3 +31787,76 @@ bun scripts/check-table-coverage.ts
 
 All passed. `bun run typecheck` still emits existing Effect lint
 messages/warnings but exits `0`.
+
+## E175 - Transcript Label Mining Bounded Experiment (Iteration 1)
+
+Ran the end-to-end transcript label mining loop (plan
+`docs/superpowers/plans/2026-06-02-transcript-label-mining-experiment.md`,
+Task 7) on a fixed `--since=14 --limit=500 --review-limit=80` window.
+
+Commands:
+
+```sh
+bun apps/axctl/src/cli/index.ts classifiers label-mining \
+  --since=14 --limit=500 --review-limit=80 \
+  --out=.ax/experiments/transcript-label-mining-current.json --json
+bun apps/axctl/src/cli/index.ts classifiers label-mining \
+  --self-improve-query \
+  --out=.ax/experiments/transcript-label-mining-self-improve-current.json --json
+```
+
+Returned:
+
+- candidate_count: `43` (hard gate requires `>= 200`)
+- review_rows: `43` (gate `>= 40` met)
+- review label families: `3` of required `4`
+  (`verification: 37`, `correction: 5`, `approval_or_rejection: 1`)
+- subagent/control wrapper review rows: `28 / 43` (`65%`)
+- reviewed rows / accepted rows / graph facts / vector rows: `0`
+- product self-improve query: runs and cleanly separates
+  reviewed-promotion-safe (`0`), weak/advisory (`0`), rejected/deferred (`0`),
+  nearest-neighbor explanations (`0`); recommends "mine new transcript label
+  candidates for review".
+
+Iteration decision: **fail** (defined failure, not a knob-turn).
+
+- Failure cases triggered: deterministic candidates are mostly control/wrapper
+  text; candidate volume insufficient; label-family diversity insufficient.
+- Per the plan's stop conditions this is a stop, not a reason to keep tuning.
+  The fix is a miner-layer change (exclude `claude_subagent_*` / control
+  sessions at the read layer and broaden organic user-turn extraction) for a
+  future iteration, outside Task 7's run-and-record scope.
+- Promotion safety held: no reviewed rows exist, so per Step 3 the review queue
+  was emitted only and no weak/model-only facts were applied; no raw model
+  label is promotion-safe.
+- Prioritizer (Step 2) skipped: `sentence-transformers` not installed and the
+  candidate batch already failed hard gates, so an expensive embedding run is
+  not warranted (iteration rule: max 1 robustness run unless concrete
+  reviewed-data gain).
+
+Real fixes made while running:
+
+- Read query referenced `ts` in `ORDER BY` without selecting it -> SurrealDB v3
+  "Missing order idiom `ts`" parse error. Added `ts` to the projection.
+- The previous-turn join was a correlated subquery per user turn against a
+  503k-row `turn` table (~3600 eligible rows -> minutes). Replaced with a
+  single batched previous-turn fetch; mining now completes in seconds.
+- Applied the Task 5 schema (`transcript_label_review` /
+  `transcript_label_vector`) to the running DB via `scripts/apply-schema.sh`
+  so the product query path executes.
+
+Artifacts:
+
+- `.ax/experiments/transcript-label-mining-current.json`
+- `.ax/experiments/transcript-label-mining-self-improve-current.json`
+- `.ax/experiments/transcript-label-mining-evaluation-current.json`
+
+Verification:
+
+```sh
+bun test apps/axctl/src/classifiers/label-mining-service.test.ts
+bun run typecheck
+```
+
+Service tests pass; `bun run typecheck` exits `0` (existing Effect lint
+messages remain).
