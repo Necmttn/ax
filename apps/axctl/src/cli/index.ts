@@ -4907,12 +4907,26 @@ const withDb = (args: ReadonlyArray<string>): CliProgram =>
 const withIngest = (args: ReadonlyArray<string>): CliProgram => {
     const debug = args.includes("--debug");
     const interactive = process.stderr.isTTY === true;
-    const progressOff = (process.env.AX_PROGRESS ?? "").toLowerCase() === "off";
+    const progressEnv = (process.env.AX_PROGRESS ?? "").toLowerCase();
+    const progressFlag = (args.find((a) => a.startsWith("--progress=")) ?? "")
+        .slice("--progress=".length)
+        .toLowerCase();
+    const progressOff = progressEnv === "off" || progressFlag === "off";
+    // Force progress even when stderr isn't an interactive TTY (piped, tmux,
+    // a terminal that doesn't report a TTY). The reporter renders the animated
+    // pipeline on a real TTY and falls back to plain per-stage lines otherwise,
+    // so `AX_PROGRESS=on ax ingest` (or `--progress=plain`) always shows output.
+    const force =
+        process.env.AXCTL_PROGRESS_FORCE_PIPELINE === "1" ||
+        ["on", "pipeline", "plain"].includes(progressEnv) ||
+        ["on", "pipeline", "plain"].includes(progressFlag);
     const transport = debug
         ? ConsoleTransportLayer
-        : interactive && !progressOff
-            ? PipelineTraceTransportLayer
-            : undefined;
+        : progressOff
+            ? undefined
+            : interactive || force
+                ? PipelineTraceTransportLayer
+                : undefined;
     const layer = transport
         ? Layer.provideMerge(IngestRuntimeLayer, transport)
         : IngestRuntimeLayer;
