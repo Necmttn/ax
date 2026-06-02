@@ -1,6 +1,7 @@
 import { Effect, Layer } from "effect";
 import { TraceTransportTag, type TraceTransport } from "@ax/lib/live-traces/Sink";
-import { createProgressReporter, type ProgressReporter, type ProgressStage } from "./progress.ts";
+import { createProgressReporter, type ProgressMode, type ProgressReporter, type ProgressStage } from "./progress.ts";
+import { initTuiProgress, type TuiProgressHandle } from "./progress-tui.tsx";
 
 /**
  * Live-trace transport that renders the ingest span pipeline as the animated
@@ -17,7 +18,9 @@ import { createProgressReporter, type ProgressReporter, type ProgressStage } fro
  * the silent Noop transport. PipelineProgress auto-adds stage rows as their
  * spans start, so we don't need the stage list up front.
  */
-export const PipelineTraceTransportLayer: Layer.Layer<TraceTransportTag> = Layer.sync(
+export const pipelineTraceTransportLayer = (
+    mode: ProgressMode = "pipeline",
+): Layer.Layer<TraceTransportTag> => Layer.sync(
     TraceTransportTag,
     () => {
         let progress: ProgressReporter | null = null;
@@ -33,9 +36,9 @@ export const PipelineTraceTransportLayer: Layer.Layer<TraceTransportTag> = Layer
                                 progress = createProgressReporter({
                                     command: "ingest",
                                     runId: event.traceId.replace(/^ingest:/, ""),
-                                    mode: "pipeline",
-                                    // PipelineProgress auto-adds a row per stage as
-                                    // its span starts (stateFor), so start empty.
+                                    mode,
+                                    // PipelineProgress/PlainProgress auto-add a row per
+                                    // stage as its span starts, so start empty.
                                     stages: [],
                                 });
                                 break;
@@ -76,3 +79,108 @@ export const PipelineTraceTransportLayer: Layer.Layer<TraceTransportTag> = Layer
         return transport;
     },
 );
+
+/**
+ * Live-trace transport rendering the ingest pipeline through the OpenTUI + React
+ * renderer (`initTuiProgress`) - a pinned split-footer board that repaints in
+ * place without corrupting scrollback. Interactive-TTY only.
+ *
+ * `initTuiProgress` is async (it spins up an OpenTUI renderer), but the trace
+ * transport's `send` is synchronous, so we buffer reporter calls until the
+ * handle is ready, then flush them. The renderer is torn down in a scope
+ * finalizer when the ingest run's scope closes. `stages` is passed up front so
+ * the fixed-height footer is sized for the run's stage count.
+ */
+export const tuiTraceTransportLayer = (
+    stages: readonly ProgressStage[],
+): Layer.Layer<TraceTransportTag> =>
+    Layer.effect(TraceTransportTag)(
+        Effect.gen(function* () {
+            const state = {
+                handle: null as TuiProgressHandle | null,
+                started: false,
+                cancelled: false,
+            };
+            const spanNames = new Map<string, string>();
+            const queue: Array<(r: ProgressReporter) => void> = [];
+            const apply = (fn: (r: ProgressReporter) => void): void => {
+                if (state.handle) fn(state.handle.progress);
+                else queue.push(fn);
+            };
+
+            // Tear down the renderer when the ingest scope closes. Also covers the
+            // race where the run finishes before init resolves (cancelled flag).
+            yield* Effect.addFinalizer(() =>
+                Effect.promise(async () => {
+                    state.cancelled = true;
+                    if (state.handle) {
+                        try {
+                            state.handle.progress.stop();
+                            await state.handle.teardown();
+                        } catch {
+                            /* terminal cleanup best-effort */
+                        }
+                        state.handle = null;
+                    }
+                })
+            );
+
+            const stageOf = (name: string): ProgressStage => ({ source: "ingest", stage: name });
+
+            const transport: TraceTransport = {
+                send: (events) =>
+                    Effect.sync(() => {
+                        for (const event of events) {
+                            switch (event._tag) {
+                                case "TraceStart": {
+                                    if (state.started) break;
+                                    state.started = true;
+                                    void initTuiProgress({
+                                        command: "ingest",
+                                        runId: event.traceId.replace(/^ingest:/, ""),
+                                        stages,
+                                    })
+                                        .then((handle) => {
+                                            // Scope already closed while we were initializing:
+                                            // tear the fresh renderer straight back down.
+                                            if (state.cancelled) {
+                                                void handle.teardown();
+                                                return;
+                                            }
+                                            state.handle = handle;
+                                            for (const fn of queue) fn(handle.progress);
+                                            queue.length = 0;
+                                        })
+                                        .catch(() => {
+                                            /* OpenTUI failed to init - render nothing rather than crash */
+                                        });
+                                    break;
+                                }
+                                case "SpanStart": {
+                                    if (!event.parentSpanId) break;
+                                    spanNames.set(event.spanId, event.name);
+                                    apply((r) => r.start(stageOf(event.name)));
+                                    break;
+                                }
+                                case "SpanEnd": {
+                                    const name = spanNames.get(event.spanId);
+                                    if (name === undefined) break;
+                                    spanNames.delete(event.spanId);
+                                    if (event.status === "error") apply((r) => r.fail(stageOf(name), "failed"));
+                                    else apply((r) => r.finish(stageOf(name), {}));
+                                    break;
+                                }
+                                case "TraceEnd": {
+                                    apply((r) => r.stop());
+                                    break;
+                                }
+                                default:
+                                    break;
+                            }
+                        }
+                    }),
+            };
+
+            return transport;
+        })
+    );

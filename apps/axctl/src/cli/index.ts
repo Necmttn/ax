@@ -123,10 +123,11 @@ import {
     publishIngestEvent,
 } from "../dashboard/telemetry.ts";
 import type { DbError } from "@ax/lib/errors";
-import { StageRegistry, type StageRegistryShape } from "../ingest/stage/registry.ts";
+import { ALL_STAGES, StageRegistry, type StageRegistryShape } from "../ingest/stage/registry.ts";
 import { IngestRuntimeLayer, ingestRuntimeLayerWith } from "../ingest/stage/runtime.ts";
 import { ConsoleTransportLayer } from "@ax/lib/live-traces/transports/console";
-import { PipelineTraceTransportLayer } from "./ingest-trace-progress.ts";
+import { pipelineTraceTransportLayer, tuiTraceTransportLayer } from "./ingest-trace-progress.ts";
+import type { ProgressStage } from "./progress.ts";
 import { selectByKeys, selectByTag } from "../ingest/stage/select.ts";
 import { type BaseStageStats, type StageDef } from "../ingest/stage/types.ts";
 import { runIngest } from "../ingest/run.ts";
@@ -4904,6 +4905,20 @@ const withDb = (args: ReadonlyArray<string>): CliProgram =>
  *     machine-readable stdout (e.g. `--progress=json`) stays clean.
  * All transports write to **stderr**, never stdout.
  */
+/** The stages a run will execute, resolved synchronously for sizing the
+ *  OpenTUI progress footer. Mirrors `resolveIngestStages` against the default
+ *  registry; over-estimates for `ingest here` (its --stages is injected later),
+ *  which only means a slightly taller footer. */
+const resolveProgressStages = (args: ReadonlyArray<string>): ProgressStage[] => {
+    const stagesArg = args.find((a) => a.startsWith("--stages="));
+    const keys = stagesArg
+        ? stagesArg.slice("--stages=".length).split(",").map((s) => s.trim()).filter(Boolean)
+        : args.includes("--derive-only")
+            ? ALL_STAGES.filter((s) => s.meta.tags.includes("derive")).map((s) => s.meta.key)
+            : ALL_STAGES.map((s) => s.meta.key);
+    return keys.map((key) => ({ source: "ingest", stage: key }));
+};
+
 const withIngest = (args: ReadonlyArray<string>): CliProgram => {
     const debug = args.includes("--debug");
     const interactive = process.stderr.isTTY === true;
@@ -4911,22 +4926,35 @@ const withIngest = (args: ReadonlyArray<string>): CliProgram => {
     const progressFlag = (args.find((a) => a.startsWith("--progress=")) ?? "")
         .slice("--progress=".length)
         .toLowerCase();
-    const progressOff = progressEnv === "off" || progressFlag === "off";
-    // Force progress even when stderr isn't an interactive TTY (piped, tmux,
-    // a terminal that doesn't report a TTY). The reporter renders the animated
-    // pipeline on a real TTY and falls back to plain per-stage lines otherwise,
-    // so `AX_PROGRESS=on ax ingest` (or `--progress=plain`) always shows output.
+    const mode = progressFlag || progressEnv; // "", off, on, pipeline, plain
+    const wantPlain = mode === "plain";
+    // Force progress even when stderr isn't an interactive TTY (piped, tmux, a
+    // terminal that doesn't report a TTY).
     const force =
         process.env.AXCTL_PROGRESS_FORCE_PIPELINE === "1" ||
-        ["on", "pipeline", "plain"].includes(progressEnv) ||
-        ["on", "pipeline", "plain"].includes(progressFlag);
+        mode === "on" || mode === "pipeline" || mode === "plain";
+
+    // Renderer selection:
+    //   --debug             -> raw trace JSON (console)
+    //   AX_PROGRESS=off      -> silent
+    //   --progress=plain     -> plain per-stage lines (any terminal)
+    //   interactive TTY      -> OpenTUI split-footer board (the rich default)
+    //   forced, non-TTY      -> plain per-stage lines
+    //   non-TTY, no force    -> silent
+    // OpenTUI renders into a stdout split-footer, so it needs BOTH streams on a
+    // TTY; otherwise fall back to plain stderr lines.
+    const tuiCapable = interactive && process.stdout.isTTY === true;
     const transport = debug
         ? ConsoleTransportLayer
-        : progressOff
+        : mode === "off"
             ? undefined
-            : interactive || force
-                ? PipelineTraceTransportLayer
-                : undefined;
+            : wantPlain
+                ? pipelineTraceTransportLayer("plain")
+                : tuiCapable
+                    ? tuiTraceTransportLayer(resolveProgressStages(args))
+                    : interactive || force
+                        ? pipelineTraceTransportLayer("plain")
+                        : undefined;
     // The transport must be wired BENEATH TraceSinkLive (via ingestRuntimeLayerWith),
     // not merged on top of the already-built AppLayer - otherwise the sink keeps
     // its default NoopTransport and every event is dropped (no animation, no --debug).
