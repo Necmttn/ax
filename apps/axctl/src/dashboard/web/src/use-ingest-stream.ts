@@ -107,13 +107,34 @@ export function useIngestStream(streamUrl: string | null): IngestStreamState {
         dispatch({ type: "reset" });
 
         let cancelled = false;
+        let receivedAny = false;
+        const controller = new AbortController();
         let unsubscribe: (() => void) | null = null;
         let session: StreamResponse<IngestStreamEvent> | null = null;
 
         (async () => {
             try {
                 // Default offset ("-1") => replay from start, then live deltas.
-                const res = await stream<IngestStreamEvent>({ url: streamUrl, live: true });
+                const res = await stream<IngestStreamEvent>({
+                    url: streamUrl,
+                    live: true,
+                    signal: controller.signal,
+                    // The client already applied backoff retries (network/5xx/429)
+                    // before calling us. Returning `{}` retries; returning void
+                    // STOPS and propagates the error. So: tolerate a transient blip
+                    // on a healthy run (events already flowed) by retrying, but for a
+                    // stale/dead sidecar (a prior serve session's port - nothing ever
+                    // arrives) surface the error and stop instead of retrying forever.
+                    onError: (err) => {
+                        if (cancelled) return;
+                        if (receivedAny) return {};
+                        dispatch({
+                            type: "error",
+                            message: err instanceof Error ? err.message : String(err),
+                        });
+                        return undefined;
+                    },
+                });
                 if (cancelled) {
                     res.cancel();
                     return;
@@ -121,6 +142,7 @@ export function useIngestStream(streamUrl: string | null): IngestStreamState {
                 session = res;
                 unsubscribe = res.subscribeJson((batch) => {
                     if (cancelled) return;
+                    if (batch.items.length > 0) receivedAny = true;
                     for (const event of batch.items) {
                         dispatch({ type: "event", event, offset: batch.offset });
                     }
@@ -136,6 +158,7 @@ export function useIngestStream(streamUrl: string | null): IngestStreamState {
 
         return () => {
             cancelled = true;
+            controller.abort();
             if (unsubscribe) unsubscribe();
             if (session) session.cancel();
         };

@@ -73,6 +73,19 @@ export function IngestLiveRoute() {
         }
     }, [run.finished]);
 
+    // A stale persisted stream URL (a sidecar port from a previous serve session)
+    // can't connect and never delivers events. Clear it so we stop hammering a
+    // dead port, drop back to idle, and tell the user to re-run.
+    useEffect(() => {
+        if (streamUrl && run.error && run.order.length === 0 && !run.finished) {
+            persistStreamUrl(null);
+            setStreamUrl(null);
+            setTriggerError(
+                "Previous run's live stream was unreachable (serve restarted). Cleared - click Run ingest to start fresh.",
+            );
+        }
+    }, [streamUrl, run.error, run.order.length, run.finished]);
+
     const start = async () => {
         setBusy(true);
         setTriggerError(null);
