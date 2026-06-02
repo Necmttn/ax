@@ -4,6 +4,26 @@ import { createProgressReporter, type ProgressMode, type ProgressReporter, type 
 import { initTuiProgress, type TuiProgressHandle } from "./progress-tui.tsx";
 
 /**
+ * Parse a stage-count annotation SpanEvent (emitted by the ingest runner) into a
+ * `[countKey, value]` pair, or null if it isn't a numeric `ingest.*` count.
+ * `ingest.records` is the normalized primary count (drives the rows column);
+ * `ingest.count.<field>` carries each individual stat field.
+ */
+const readCountAttribute = (
+    name: string,
+    attributes: Record<string, unknown> | undefined,
+): readonly [string, number] | null => {
+    if (!name.startsWith("attribute:ingest.")) return null;
+    const value = attributes?.value;
+    if (typeof value !== "number" || !Number.isFinite(value)) return null;
+    if (name === "attribute:ingest.records") return ["records", value];
+    if (name.startsWith("attribute:ingest.count.")) {
+        return [name.slice("attribute:ingest.count.".length), value];
+    }
+    return null;
+};
+
+/**
  * Live-trace transport that renders the ingest span pipeline as the animated
  * `PipelineProgress` (spinner + per-stage rows + rows/speed/eta), instead of
  * dropping events (Noop) or dumping JSON (ConsoleTransport / --debug).
@@ -25,6 +45,7 @@ export const pipelineTraceTransportLayer = (
     () => {
         let progress: ProgressReporter | null = null;
         const spanNames = new Map<string, string>();
+        const spanCounts = new Map<string, Record<string, number>>();
         const stageOf = (name: string): ProgressStage => ({ source: "ingest", stage: name });
 
         const transport: TraceTransport = {
@@ -53,20 +74,31 @@ export const pipelineTraceTransportLayer = (
                                 progress?.start(stageOf(event.name));
                                 break;
                             }
+                            case "SpanEvent": {
+                                const parsed = readCountAttribute(event.name, event.attributes);
+                                if (!parsed) break;
+                                const counts = spanCounts.get(event.spanId) ?? {};
+                                counts[parsed[0]] = parsed[1];
+                                spanCounts.set(event.spanId, counts);
+                                break;
+                            }
                             case "SpanEnd": {
                                 // Only stage spans were recorded in spanNames; an unknown
                                 // spanId here is the root span (or already cleared) - skip.
                                 const name = spanNames.get(event.spanId);
                                 if (name === undefined) break;
                                 spanNames.delete(event.spanId);
+                                const counts = spanCounts.get(event.spanId) ?? {};
+                                spanCounts.delete(event.spanId);
                                 if (event.status === "error") progress?.fail(stageOf(name), "failed");
-                                else progress?.finish(stageOf(name), {});
+                                else progress?.finish(stageOf(name), counts);
                                 break;
                             }
                             case "TraceEnd": {
                                 progress?.stop();
                                 progress = null;
                                 spanNames.clear();
+                                spanCounts.clear();
                                 break;
                             }
                             default:
@@ -102,6 +134,7 @@ export const tuiTraceTransportLayer = (
                 cancelled: false,
             };
             const spanNames = new Map<string, string>();
+            const spanCounts = new Map<string, Record<string, number>>();
             const queue: Array<(r: ProgressReporter) => void> = [];
             const apply = (fn: (r: ProgressReporter) => void): void => {
                 if (state.handle) fn(state.handle.progress);
@@ -162,16 +195,32 @@ export const tuiTraceTransportLayer = (
                                     apply((r) => r.start(stageOf(event.name)));
                                     break;
                                 }
+                                case "SpanEvent": {
+                                    const parsed = readCountAttribute(event.name, event.attributes);
+                                    if (!parsed) break;
+                                    const counts = spanCounts.get(event.spanId) ?? {};
+                                    counts[parsed[0]] = parsed[1];
+                                    spanCounts.set(event.spanId, counts);
+                                    // Live update so rows/speed climb while the stage runs.
+                                    const stageName = spanNames.get(event.spanId);
+                                    if (stageName !== undefined) {
+                                        apply((r) => r.update(stageOf(stageName), { ...counts }));
+                                    }
+                                    break;
+                                }
                                 case "SpanEnd": {
                                     const name = spanNames.get(event.spanId);
                                     if (name === undefined) break;
                                     spanNames.delete(event.spanId);
+                                    const counts = spanCounts.get(event.spanId) ?? {};
+                                    spanCounts.delete(event.spanId);
                                     if (event.status === "error") apply((r) => r.fail(stageOf(name), "failed"));
-                                    else apply((r) => r.finish(stageOf(name), {}));
+                                    else apply((r) => r.finish(stageOf(name), counts));
                                     break;
                                 }
                                 case "TraceEnd": {
                                     apply((r) => r.stop());
+                                    spanCounts.clear();
                                     break;
                                 }
                                 default:

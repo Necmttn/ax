@@ -8,6 +8,25 @@ import type { BaseStageStats, IngestContext, StageDef } from "./types.ts";
  *  × internal fan-out is already heavy. */
 export const PIPELINE_CONCURRENCY = 2;
 
+/** Annotate the active stage span with the numeric fields of its result stats
+ *  (every stage's stats extend `BaseStageStats`). Emits `ingest.records` (the
+ *  primary/largest count, used for the rows column + speed) plus each field as
+ *  `ingest.count.<field>`. Surfaces as `attribute:*` SpanEvents the progress
+ *  transports read; no-op when the stats carry no numeric fields. */
+const annotateStageCounts = (stats: BaseStageStats): Effect.Effect<void> =>
+    Effect.gen(function* () {
+        const numeric = Object.entries(stats).filter(
+            ([key, value]) =>
+                key !== "durationMs" && typeof value === "number" && Number.isFinite(value),
+        ) as ReadonlyArray<readonly [string, number]>;
+        if (numeric.length === 0) return;
+        const primary = numeric.reduce((max, [, value]) => Math.max(max, value), 0);
+        yield* Effect.annotateCurrentSpan("ingest.records", primary);
+        for (const [key, value] of numeric) {
+            yield* Effect.annotateCurrentSpan(`ingest.count.${key}`, value);
+        }
+    });
+
 /** Kahn's algorithm; throws on cycle. Layers are useful for diagnostics, but
  *  `runPipeline` uses Deferreds for tighter scheduling (no layer barriers). */
 export const topoLayers = <S extends BaseStageStats, R>(
@@ -60,6 +79,12 @@ export const runPipeline = <S extends BaseStageStats, R>(
                 }
                 const stats: S = yield* sem.withPermits(1)(
                     s.run(ctx).pipe(
+                        // Annotate the stage span with its result counts (inside the
+                        // span, before LiveTrace.step ends it) so progress reporters
+                        // can show rows/speed. Emitted as `attribute:ingest.*`
+                        // SpanEvents; consumers that don't care (e.g. the server bus)
+                        // ignore them.
+                        Effect.tap((stageStats) => annotateStageCounts(stageStats)),
                         LiveTrace.step(s.meta.key, {
                             "ingest.stage.tags": s.meta.tags.join(","),
                         }),
