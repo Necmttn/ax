@@ -1052,7 +1052,10 @@ const buildSyntheticSkillAndInvocationStatements = (
 
 export const __testCompactCodexToolCall = compactCodexToolCall;
 
-const buildCodexProviderStatements = (batch: MutableCodexExtract): string[] => {
+const buildCodexProviderStatements = (
+    batch: MutableCodexExtract,
+    clearExisting: boolean,
+): string[] => {
     if (!batch.session) return [];
     return [
         ...buildAgentProviderStatements([
@@ -1097,7 +1100,7 @@ const buildCodexProviderStatements = (batch: MutableCodexExtract): string[] => {
                 },
             ],
             events: batch.providerEvents,
-        }),
+        }, { clearExisting }),
     ];
 };
 
@@ -1190,8 +1193,9 @@ const buildCodexTurnTokenUsageStatements = (
 const buildCodexBatchStatements = (
     batch: MutableCodexExtract,
     payloadMaxBytes: number,
+    clearExisting = true,
 ): string[] => [
-    ...buildCodexProviderStatements(batch),
+    ...buildCodexProviderStatements(batch, clearExisting),
     ...buildCodexTokenUsageStatements(batch.tokenUsage),
     ...buildTurnStatements(batch.turns),
     ...buildCodexTurnTokenUsageStatements(batch.turnTokenUsages),
@@ -1338,6 +1342,7 @@ export const ingestCodex = (
                     raw_file: rawPointer ?? undefined,
                 });
 
+            let providerEventsCleared = false;
             const writeBatch = (batch: MutableCodexExtract) =>
                 Effect.gen(function* () {
                     if (!batch.session) return;
@@ -1346,7 +1351,12 @@ export const ingestCodex = (
                         yield* upsertSession(batch.session, null);
                         sessionUpserted = true;
                     }
-                    yield* queryCodexStatements(buildCodexBatchStatements(batch, payloadMaxBytes));
+                    // Clear pre-existing agent_event rows once, on the first
+                    // batch for this session. Subsequent streaming batches must
+                    // NOT re-clear or they would wipe this ingest's own events.
+                    const clearExisting = !providerEventsCleared;
+                    providerEventsCleared = true;
+                    yield* queryCodexStatements(buildCodexBatchStatements(batch, payloadMaxBytes, clearExisting));
                     turnCount += batch.turns.length;
                     fileTurns += batch.turns.length;
                     toolCallCount += batch.toolCalls.length;

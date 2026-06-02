@@ -60,6 +60,73 @@ describe("provider event writer statement builders", () => {
         expect(sql).toContain("updated_at: time::now()");
     });
 
+    test("event batch clears existing session events before re-inserting (idempotent re-ingest)", () => {
+        const sessionKey = agentSessionRecordKey("codex", "session-1");
+        const statements = buildAgentEventStatements({
+            sessions: [
+                {
+                    provider: "codex",
+                    providerSessionId: "session-1",
+                    axSessionId: "session-1",
+                },
+            ],
+            events: [
+                {
+                    provider: "codex",
+                    providerSessionId: "session-1",
+                    providerEventId: "evt-1",
+                    seq: 1,
+                    ts: "2026-05-29T01:00:01.000Z",
+                    type: "message",
+                },
+            ],
+        });
+
+        // The clears must come FIRST so the fresh batch inserts cleanly even if
+        // the existing rows hold the same (agent_session, seq) under a different
+        // record id (seq drift across ingests).
+        const clearEventStmt = `DELETE agent_event WHERE agent_session = agent_session:\`${sessionKey}\`;`;
+        const clearEdgeStmt = `DELETE agent_event_child WHERE agent_session = agent_session:\`${sessionKey}\`;`;
+
+        const clearEventIdx = statements.indexOf(clearEventStmt);
+        const clearEdgeIdx = statements.indexOf(clearEdgeStmt);
+        const firstUpsertIdx = statements.findIndex((s) => s.startsWith("UPSERT agent_event:"));
+
+        expect(clearEventIdx).toBeGreaterThanOrEqual(0);
+        expect(clearEdgeIdx).toBeGreaterThanOrEqual(0);
+        expect(firstUpsertIdx).toBeGreaterThanOrEqual(0);
+        expect(clearEdgeIdx).toBeLessThan(firstUpsertIdx);
+        expect(clearEventIdx).toBeLessThan(firstUpsertIdx);
+    });
+
+    test("clearExisting:false suppresses the per-session clear (streaming follow-up batches)", () => {
+        const statements = buildAgentEventStatements(
+            {
+                sessions: [
+                    {
+                        provider: "codex",
+                        providerSessionId: "session-1",
+                        axSessionId: "session-1",
+                    },
+                ],
+                events: [
+                    {
+                        provider: "codex",
+                        providerSessionId: "session-1",
+                        providerEventId: "evt-2",
+                        seq: 2,
+                        ts: "2026-05-29T01:00:02.000Z",
+                        type: "message",
+                    },
+                ],
+            },
+            { clearExisting: false },
+        );
+
+        expect(statements.some((s) => s.startsWith("DELETE agent_event"))).toBe(false);
+        expect(statements.some((s) => s.startsWith("DELETE agent_event_child"))).toBe(false);
+    });
+
     test("event batch statements write sessions, events, and parent edges", () => {
         const statements = buildAgentEventStatements({
             sessions: [

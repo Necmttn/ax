@@ -139,6 +139,45 @@ export function buildAgentProviderStatements(
     );
 }
 
+/**
+ * Statements that clear a session's existing `agent_event` rows (and the
+ * `agent_event_child` edges that would otherwise dangle) before a fresh batch
+ * is inserted.
+ *
+ * Why this is required for idempotent re-ingest:
+ *   `agent_event` carries a UNIQUE index on `(agent_session, seq)`. Record ids
+ *   are keyed on the *stable* `provider_event_id`, but `seq` is a positional
+ *   counter that is NOT guaranteed stable across ingests (older/partial ingests
+ *   or seq-derivation changes leave drifted `(session, seq)` pairs). On
+ *   re-ingest a fresh event can be assigned a `seq` already occupied by a
+ *   *different* record id, and the per-UPSERT UNIQUE check throws mid-batch.
+ *
+ *   Deleting the session's events first (scoped via the `agent_event_session_ts`
+ *   index on `agent_session`) makes the fresh batch insert cleanly regardless of
+ *   seq drift OR record-id drift. Because record ids are derived from stable
+ *   identifiers, the re-inserted rows reuse the same ids, so `turn.agent_event`,
+ *   `tool_call.agent_event`, `plan_snapshot.agent_event` and `content_document`
+ *   references continue to resolve. Clearing the `agent_event_child` edges in the
+ *   same write avoids leaving edges that point at deleted rows; the batch re-emits
+ *   them via the parent-edge statements.
+ */
+export function buildAgentSessionEventClearStatements(
+    sessions: readonly AgentSessionWrite[],
+): string[] {
+    const statements: string[] = [];
+    const seen = new Set<string>();
+    for (const session of sessions) {
+        const sessionKey = agentSessionRecordKey(session.provider, session.providerSessionId);
+        if (seen.has(sessionKey)) continue;
+        seen.add(sessionKey);
+        const sessionRef = recordRef("agent_session", sessionKey);
+        // Child edges first so no edge transiently references a deleted event.
+        statements.push(`DELETE agent_event_child WHERE agent_session = ${sessionRef};`);
+        statements.push(`DELETE agent_event WHERE agent_session = ${sessionRef};`);
+    }
+    return statements;
+}
+
 const buildAgentSessionStatement = (session: AgentSessionWrite): string => {
     const sessionKey = agentSessionRecordKey(session.provider, session.providerSessionId);
 
@@ -244,9 +283,25 @@ export function buildAgentEventParentEdgeStatement(edge: AgentEventParentEdgeWri
     ])};`;
 }
 
-export function buildAgentEventStatements(batch: AgentEventBatchWrite): string[] {
+export interface BuildAgentEventStatementsOptions {
+    /**
+     * Whether to clear each session's existing `agent_event` rows + child edges
+     * before inserting this batch's events. Defaults to `true` so re-ingest is
+     * idempotent. Streaming ingest (codex) must pass `false` for every batch
+     * after the first one for a given session, otherwise later batches would
+     * delete the events written by earlier batches of the same ingest.
+     */
+    readonly clearExisting?: boolean;
+}
+
+export function buildAgentEventStatements(
+    batch: AgentEventBatchWrite,
+    options?: BuildAgentEventStatementsOptions,
+): string[] {
+    const clearExisting = options?.clearExisting ?? true;
     return [
         ...batch.sessions.map(buildAgentSessionStatement),
+        ...(clearExisting ? buildAgentSessionEventClearStatements(batch.sessions) : []),
         ...batch.events.map(buildAgentEventStatement),
         ...buildParentEdgeStatements(batch.events),
     ];
