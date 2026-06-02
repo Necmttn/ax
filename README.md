@@ -191,6 +191,53 @@ Recommended agent loop:
 3. `axctl project verify --json` before reporting done - runs the checks
    the project actually expects.
 
+## MCP server
+
+`ax mcp` runs a [Model Context Protocol](https://modelcontextprotocol.io)
+server over stdio that exposes ax's read-only graph queries as tools, so a
+coding agent (Claude Code, Codex) can query the ax graph in-context instead of
+shelling out. It complements the installable skills above. (`ax` and `axctl`
+are the same binary.)
+
+Register it with **Claude Code**:
+
+```bash
+claude mcp add ax -- ax mcp        # add --scope user to make it global
+```
+
+Register it with **Codex** by adding to `~/.codex/config.toml`:
+
+```toml
+[mcp_servers.ax]
+command = "ax"
+args = ["mcp"]
+```
+
+The 10 tools, each mirroring the matching CLI command:
+
+- **recall** - full-text recall across turns / commits / skills (`ax recall`).
+- **sessions_around** - sessions in a date window (`ax sessions around`).
+- **session_show** - one session's detail, with optional subagent expansion
+  and skill-by-role grouping (`ax sessions show`).
+- **skills_weighted** - usage x role-weight skill ranking (`ax skills weighted`).
+- **skills_by_role** - skills tagged with a given role (`ax skills by-role`).
+- **skills_roles** - roles for a given skill (`ax skills roles`).
+- **roles** - the full role vocabulary (`ax roles`).
+- **improve_recommend** - top improvement proposals, ranked (`ax improve recommend`).
+- **improve_show** - one proposal's evidence trail (`ax improve show`).
+- **improve_list** - proposals filtered by status / form (`ax improve list`).
+
+> **Read-only.** Mutating ops (`improve accept/reject/verdict`, `skills
+> tag/lint`, `ingest`) stay on the CLI - they write task files / edges a human
+> reviews - so v0 exposes no mutating tools.
+>
+> **Source-run only.** Like live ingest in the dashboard, the MCP server runs
+> when ax is run from source (the `bin/axctl` shim does this); the compiled
+> standalone binary is not supported.
+>
+> `sessions_here` / `sessions_near` are intentionally deferred - they need a
+> git/cwd-resolved repository key, a documented follow-up.
+
 ## CLI shape
 
 ```text
@@ -199,6 +246,7 @@ axctl ingest here [--since=Nd]             # scope ingest to the git repo at $PW
 axctl derive-signals                        # re-run derive pass standalone
 axctl derive-intents                        # re-run user-intent derive standalone
 axctl serve                                 # live web dashboard (API for ax studio)
+axctl mcp                                   # MCP server (stdio) - read-only graph queries for agents
 axctl report                                # one-shot static HTML
 axctl tui                                   # interactive terminal dashboard
 
@@ -318,6 +366,7 @@ Commands:
 - [`docs/language.md`](docs/language.md) - coined vocabulary, the AX glossary
 - [`docs/brand.md`](docs/brand.md) - design system + voice rules
 - [`docs/development.md`](docs/development.md) - local setup, schema, queries, benchmarks
+- [`docs/plans/ax-mcp-server.md`](docs/plans/ax-mcp-server.md) - the `ax mcp` server plan
 - [`CONTRIBUTING.md`](CONTRIBUTING.md) - PR conventions, ground rules
 - [`CONTEXT.md`](CONTEXT.md) - domain glossary (Repository vs. Checkout vs. …)
 - [`docs/adr/`](docs/adr/) - architecture decisions

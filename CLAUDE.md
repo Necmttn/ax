@@ -131,6 +131,15 @@ Run `bun refs:setup` after fresh clone to populate `.references/`.
 loop. `accept` emits a `.ax/tasks/<id>.md` brief; act on it like any other
 task file, then run `axctl improve lint` to reconcile.
 
+## MCP server
+
+`ax mcp` runs a stdio MCP server exposing ax's **read-only** queries as 10 tools
+(`recall`, `sessions_around`, `session_show`, `skills_weighted`, `skills_by_role`,
+`skills_roles`, `roles`, `improve_recommend`, `improve_show`, `improve_list`) so an
+agent can query the graph in-context. Source-run only (like live ingest). Mutating
+ops + `sessions_here`/`near` (need a git-resolved repo key) are intentionally not
+exposed. Server: `apps/axctl/src/mcp/server.ts`; registry: `apps/axctl/src/mcp/tools.ts`.
+
 ## Workflow Candidate Guardrails
 
 <!--ax:guidance__workflow_candidate__b7717e979a1fb149-->
