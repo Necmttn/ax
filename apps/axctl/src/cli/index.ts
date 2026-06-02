@@ -43,6 +43,12 @@ import {
     type WorkflowCandidateTaskLikeMode,
 } from "./classifiers-workflow-candidates.ts";
 import { ClassifierPackageServiceLive } from "../classifiers/package-service.ts";
+import {
+    LabelMiningService,
+    LabelMiningServiceLive,
+    renderGraphProjectionText,
+    renderSelfImproveText,
+} from "../classifiers/label-mining-service.ts";
 import { fetchClassifierExplain } from "../dashboard/classifier-explain.ts";
 import {
     renderClassifierExplainJson,
@@ -1709,42 +1715,67 @@ const ingestCommand = Command.make(
     Command.withSubcommands([ingestHereCommand]),
 );
 
-const deriveSignalsCommand = Command.make(
-    "derive-signals",
-    { since: optionalSince, progress: progressFlag, verbose: verboseFlag },
-    ({ since, progress, verbose }) =>
-        cmdDeriveSignals([...intArg("since", optionValue(since)), `--progress=${progress}`, ...boolArg("verbose", verbose)]),
-).pipe(Command.withDescription("Derive friction, diagnostic, recommendation, and recovery signals"));
+// Shared flag specs + handlers for the derive verbs. They back BOTH the flat
+// top-level commands (`derive-signals` / `derive-intents` - hardcoded in the
+// installed LaunchAgent plists, MUST keep working) AND the grouped
+// `derive signals` / `derive intents` forms under the `derive` parent.
+const deriveSignalsFlags = { since: optionalSince, progress: progressFlag, verbose: verboseFlag } as const;
+const handleDeriveSignals = ({ since, progress, verbose }: {
+    since: Option.Option<number>;
+    progress: string;
+    verbose: boolean;
+}) =>
+    cmdDeriveSignals([...intArg("since", optionValue(since)), `--progress=${progress}`, ...boolArg("verbose", verbose)]);
 
-const deriveIntentsCommand = Command.make(
-    "derive-intents",
-    {
-        dryRun: Flag.boolean("dry-run").pipe(Flag.withDefault(false)),
-        json: jsonFlag,
-    },
-    ({ dryRun, json }) =>
-        Effect.gen(function* () {
-            const summary = yield* deriveTurnIntents({ dryRun });
-            if (json) {
-                console.log(prettyPrint({
-                    considered: summary.considered,
-                    changed: summary.changed,
-                    by_transition: summary.byTransition,
-                    dry_run: dryRun,
-                }));
-                return;
-            }
-            console.log(`considered: ${summary.considered}`);
-            console.log(`changed:    ${summary.changed}${dryRun ? "  (dry-run - no writes)" : ""}`);
-            if (summary.changed === 0) return;
-            console.log("");
-            console.log("transitions:");
-            const sorted = Object.entries(summary.byTransition).sort((a, b) => b[1] - a[1]);
-            for (const [transition, n] of sorted) {
-                console.log(`  ${String(n).padStart(6)}  ${transition}`);
-            }
-        }),
-).pipe(Command.withDescription("Re-run intent classification over existing turn rows; updates intent_kind in place"));
+const deriveIntentsFlags = {
+    dryRun: Flag.boolean("dry-run").pipe(Flag.withDefault(false)),
+    json: jsonFlag,
+} as const;
+const handleDeriveIntents = ({ dryRun, json }: { dryRun: boolean; json: boolean }) =>
+    Effect.gen(function* () {
+        const summary = yield* deriveTurnIntents({ dryRun });
+        if (json) {
+            console.log(prettyPrint({
+                considered: summary.considered,
+                changed: summary.changed,
+                by_transition: summary.byTransition,
+                dry_run: dryRun,
+            }));
+            return;
+        }
+        console.log(`considered: ${summary.considered}`);
+        console.log(`changed:    ${summary.changed}${dryRun ? "  (dry-run - no writes)" : ""}`);
+        if (summary.changed === 0) return;
+        console.log("");
+        console.log("transitions:");
+        const sorted = Object.entries(summary.byTransition).sort((a, b) => b[1] - a[1]);
+        for (const [transition, n] of sorted) {
+            console.log(`  ${String(n).padStart(6)}  ${transition}`);
+        }
+    });
+
+const deriveSignalsDescription = "Derive friction, diagnostic, recommendation, and recovery signals";
+const deriveIntentsDescription = "Re-run intent classification over existing turn rows; updates intent_kind in place";
+
+// Flat top-level forms - referenced by name in the installed LaunchAgent plists
+// (`${binPath} derive-signals --since=1`). Do NOT rename or remove.
+const deriveSignalsCommand = Command.make("derive-signals", deriveSignalsFlags, handleDeriveSignals)
+    .pipe(Command.withDescription(deriveSignalsDescription));
+
+const deriveIntentsCommand = Command.make("derive-intents", deriveIntentsFlags, handleDeriveIntents)
+    .pipe(Command.withDescription(deriveIntentsDescription));
+
+// Grouped forms: `axctl derive signals` / `axctl derive intents`. Same handlers,
+// shorter sub-names, surfaced under one `derive` entry in the top-level index.
+const deriveCommand = Command.make("derive").pipe(
+    Command.withDescription("Derive signals and intents from ingested turns"),
+    Command.withSubcommands([
+        Command.make("signals", deriveSignalsFlags, handleDeriveSignals)
+            .pipe(Command.withDescription(deriveSignalsDescription)),
+        Command.make("intents", deriveIntentsFlags, handleDeriveIntents)
+            .pipe(Command.withDescription(deriveIntentsDescription)),
+    ]),
+);
 
 const insightView = Argument.choice("view", INSIGHT_VIEWS).pipe(Argument.withDefault("repositories"));
 
@@ -2265,6 +2296,71 @@ const classifiersWorkflowCandidatesCommand = Command.make(
     },
 ).pipe(Command.withDescription("Rank transcript-backed workflow candidates from classifier graph facts"));
 
+const classifiersLabelMiningCommand = Command.make(
+    "label-mining",
+    {
+        since: Flag.integer("since").pipe(Flag.withDefault(14)),
+        limit: Flag.integer("limit").pipe(Flag.withDefault(500)),
+        reviewLimit: Flag.integer("review-limit").pipe(Flag.withDefault(80)),
+        out: Flag.string("out").pipe(Flag.optional),
+        projectReviewed: Flag.boolean("project-reviewed").pipe(Flag.withDefault(false)),
+        vectors: Flag.boolean("vectors").pipe(Flag.withDefault(false)),
+        graphProjection: Flag.boolean("graph-projection").pipe(Flag.withDefault(false)),
+        apply: Flag.boolean("apply").pipe(Flag.withDefault(false)),
+        selfImproveQuery: Flag.boolean("self-improve-query").pipe(Flag.withDefault(false)),
+        json: jsonFlag,
+    },
+    ({ since, limit, reviewLimit, out, projectReviewed, vectors, graphProjection, apply, selfImproveQuery, json }) => {
+        const outPath = optionValue(out);
+        const runProjection = projectReviewed || vectors || graphProjection;
+        return Effect.gen(function* () {
+            const svc = yield* LabelMiningService;
+            if (selfImproveQuery) {
+                const result = yield* svc.selfImproveQuery(
+                    outPath === undefined ? {} : { out: outPath },
+                );
+                if (json) console.log(JSON.stringify(result, null, 2));
+                else console.log(renderSelfImproveText(result));
+                return;
+            }
+            if (runProjection) {
+                const report = yield* svc.projectReviewed({
+                    apply,
+                    ...(outPath === undefined ? {} : { out: outPath }),
+                });
+                if (json) console.log(JSON.stringify(report, null, 2));
+                else console.log(renderGraphProjectionText(report));
+                return;
+            }
+            const reportInput = { sinceDays: since, limit, reviewLimit };
+            const report = outPath === undefined
+                ? yield* svc.miningReport(reportInput)
+                : yield* svc.writeMiningReport({ ...reportInput, out: outPath });
+            if (json) console.log(JSON.stringify(report, null, 2));
+            else {
+                console.log(
+                    `transcript label mining - candidates ${report.candidate_count}, review rows ${report.review_rows.length}, families ${report.review_diversity.label_family_count}`,
+                );
+            }
+        }).pipe(
+            Effect.provide(LabelMiningServiceLive),
+            Effect.catchTag("LabelMiningReportWriteError", (e) =>
+                Effect.promise(async () => {
+                    process.stderr.write(
+                        `axctl classifiers label-mining: write error - ${e.message} (${e.path})\n`,
+                    );
+                    process.exit(1);
+                }),
+            ),
+            catchDbErrorAndExit("axctl classifiers label-mining"),
+        );
+    },
+).pipe(
+    Command.withDescription(
+        "Mine transcript label candidates, project reviewed labels to the graph, and query reviewed/advisory/rejected separation",
+    ),
+);
+
 const classifiersCommand = Command.make("classifiers").pipe(
     Command.withDescription("Develop and evaluate ax classifiers"),
     Command.withSubcommands([
@@ -2275,6 +2371,7 @@ const classifiersCommand = Command.make("classifiers").pipe(
         classifiersLifecycleCommand,
         classifiersPackageOperationsCommand,
         classifiersWorkflowCandidatesCommand,
+        classifiersLabelMiningCommand,
     ]),
 );
 
@@ -4840,34 +4937,43 @@ const devOnlyCommands = process.env.AX_DEV === "1" ? [dogfoodCommand] : [];
 export const rootCommand = Command.make("axctl").pipe(
     Command.withDescription("ax local memory and telemetry for coding agents"),
     Command.withSubcommands([
+        // Common verbs - shown in `axctl --help`. Keep this list short; it is the
+        // human's mental map of the tool. Everything else is hidden (still fully
+        // invokable by exact name - agents, plists, and docs use the names) so the
+        // default help stays lean. Full command reference lives in the README.
         ingestCommand,
-        deriveSignalsCommand,
-        deriveIntentsCommand,
-        insightsCommand,
-        classifiersCommand,
         sessionsCommand,
         improveCommand,
         retroCommand,
-        serveCommand,
-        reportCommand,
-        costsGroupCommand,
-        pricingCommand,
         recallCommand,
-        shareCommand,
         skillsCommand,
-        rolesCommand,
-        contextCommand,
-        hookCommand,
-        hooksCommand,
-        projectCommand,
-        evidenceCommand,
-        versionCommand,
-        updateCommand,
+        serveCommand,
         tuiCommand,
+        shareCommand,
         installCommand,
-        daemonCommand,
-        doctorCommand,
-        uninstallCommand,
+        // Hidden: advanced / agent-driven / maintenance verbs. `withHidden` omits
+        // them from `--help`, shell completions, and "did you mean?" while leaving
+        // them callable by exact name. `derive-signals`/`derive-intents` MUST stay
+        // callable - the installed LaunchAgent plists invoke them by name.
+        Command.withHidden(deriveCommand),
+        Command.withHidden(deriveSignalsCommand),
+        Command.withHidden(deriveIntentsCommand),
+        Command.withHidden(insightsCommand),
+        Command.withHidden(classifiersCommand),
+        Command.withHidden(reportCommand),
+        Command.withHidden(costsGroupCommand),
+        Command.withHidden(pricingCommand),
+        Command.withHidden(rolesCommand),
+        Command.withHidden(contextCommand),
+        Command.withHidden(hookCommand),
+        Command.withHidden(hooksCommand),
+        Command.withHidden(projectCommand),
+        Command.withHidden(evidenceCommand),
+        Command.withHidden(versionCommand),
+        Command.withHidden(updateCommand),
+        Command.withHidden(daemonCommand),
+        Command.withHidden(doctorCommand),
+        Command.withHidden(uninstallCommand),
         ...devOnlyCommands,
     ]),
 );
@@ -4984,6 +5090,7 @@ const withoutDb = (args: ReadonlyArray<string>): CliProgram => {
 // errors (e.g. "unknown command") instead of a 5s connect timeout.
 export const DB_COMMANDS: ReadonlySet<string> = new Set([
     "ingest",
+    "derive",
     "derive-signals",
     "derive-intents",
     "insights",
