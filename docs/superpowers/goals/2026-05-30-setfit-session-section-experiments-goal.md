@@ -31906,3 +31906,50 @@ Artifacts (overwritten with iteration-2 values):
 - `.ax/experiments/transcript-label-mining-current.json`
 - `.ax/experiments/transcript-label-mining-self-improve-current.json`
 - `.ax/experiments/transcript-label-mining-evaluation-current.json`
+
+---
+
+## Checkpoint: Transcript label mining — iteration 3, agent-validated end-to-end (2026-06-02)
+
+Exercised the review-dependent gates the prior iterations left pending. Review
+was **agent-adjudication** (reviewer=`claude-opus-adjudication`), NOT human —
+used to validate the pipeline end-to-end. Human sign-off still required before
+any promotion-safe fact informs real guidance.
+
+Two more miner fixes (precision) + two projection bug fixes (surfaced by running
+the apply path for the first time against real data):
+
+- `isTaskDispatchOrCommand` + `isInjectedContextTurn`: drop slash-command bodies
+  and agent task-dispatch prompts (`You are implementing Task N`, `# Simplify`,
+  worktree kickoffs whose "prev" is `# AGENTS.md`). Lifted seed precision from
+  ~0.46 to 0.85.
+- Bare-affirmation guard on the `intent_kind=preference` fallback: `yes please`
+  / `ok lets do it` no longer seed candidates.
+- Projection record-id bug: UPSERT keys were single-quoted strands
+  (`table:'id'`), rejected by SurrealDB v3 → now backtick-quoted.
+- Vector re-projection id round-trip: `vectorProjectionSql` read the full
+  thing-string and re-UPSERTed it as a bare key, doubling the id and colliding
+  on the candidate unique index → now `record::id(id)`.
+
+All 9 hard gates pass (agent-adjudicated):
+
+- candidate_count 328 (≥200) · review export 80 (≥40) · diversity 4 (≥4)
+- seed precision 0.85 (≥0.85) · reject fp-rate 0.10 (≤0.15)
+- neighbor recall 0.75 (≥0.50, reviewed-pool proxy)
+- graph facts 272 = 4 predicates × 68 accepted (≥1/accepted)
+- vector rows 68/68 accepted · product query 68 promotion-safe (≥10)
+
+Adjudication of the 80-row queue: 68 accepted, 4 revised (wrong family
+corrected, not promoted), 8 rejected (pasted refs / dispatch / system output).
+Projection applied via `--project-reviewed --vectors --graph-projection
+--apply`: 68 promotion-safe facts, 68 nodes/edges, 272 facts, 68 vector rows.
+Product query separates reviewed(68) / advisory(0) / rejected(8) /
+neighbor-explanations(68) cleanly. No raw model label is promotion-safe.
+
+Iteration decision: `complete` (pipeline validated). Before production:
+(1) human review replaces agent-adjudication, (2) build queue-JSON →
+`transcript_label_review` import command (this run wrote the table directly via
+a one-off script), (3) embed the full candidate pool for true unreviewed-neighbor
+expansion.
+
+66 unit/CLI/service/schema tests pass; typecheck clean for label-mining files.
