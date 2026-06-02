@@ -1,5 +1,5 @@
 #!/usr/bin/env bun
-import { Effect, Layer, Option, References } from "effect";
+import { Effect, Option, References } from "effect";
 import { Argument, Command, Flag } from "effect/unstable/cli";
 import { SurrealClient, type SurrealClientShape } from "@ax/lib/db";
 import { listSessionsHere, listSessionsAround, listSessionsNear, type SessionRow } from "../dashboard/sessions-query.ts";
@@ -124,7 +124,7 @@ import {
 } from "../dashboard/telemetry.ts";
 import type { DbError } from "@ax/lib/errors";
 import { StageRegistry, type StageRegistryShape } from "../ingest/stage/registry.ts";
-import { IngestRuntimeLayer } from "../ingest/stage/runtime.ts";
+import { IngestRuntimeLayer, ingestRuntimeLayerWith } from "../ingest/stage/runtime.ts";
 import { ConsoleTransportLayer } from "@ax/lib/live-traces/transports/console";
 import { PipelineTraceTransportLayer } from "./ingest-trace-progress.ts";
 import { selectByKeys, selectByTag } from "../ingest/stage/select.ts";
@@ -4927,9 +4927,10 @@ const withIngest = (args: ReadonlyArray<string>): CliProgram => {
             : interactive || force
                 ? PipelineTraceTransportLayer
                 : undefined;
-    const layer = transport
-        ? Layer.provideMerge(IngestRuntimeLayer, transport)
-        : IngestRuntimeLayer;
+    // The transport must be wired BENEATH TraceSinkLive (via ingestRuntimeLayerWith),
+    // not merged on top of the already-built AppLayer - otherwise the sink keeps
+    // its default NoopTransport and every event is dropped (no animation, no --debug).
+    const layer = transport ? ingestRuntimeLayerWith(transport) : IngestRuntimeLayer;
     return runCli(args).pipe(Effect.provide(layer), Effect.scoped);
 };
 
