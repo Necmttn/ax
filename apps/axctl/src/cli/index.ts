@@ -15,6 +15,7 @@ import { retroFromSession, upsertRetro, type RetroSource } from "../ingest/retro
 import { runAgentAccept } from "../improve/agent-accept.ts";
 import { acceptProposal, rejectProposal } from "../improve/actions.ts";
 import { lintFiles } from "../improve/lint.ts";
+import { listProposals, type ProposalRow } from "../improve/list.ts";
 import { recommend, formatRecommendations, copyToClipboard, selectByIndices, parseIndexInput } from "../improve/recommend.ts";
 import { showExperiment, formatShow } from "../improve/show.ts";
 import { cmdRetroReflect } from "./retro-reflect.ts";
@@ -2381,18 +2382,6 @@ const classifiersCommand = Command.make("classifiers").pipe(
  * C3/C4/C8 with the scaffold-on-accept fix that closes the
  * manual-step-dropout problem the adversarial review flagged.
  */
-interface ProposalRow {
-    readonly id: { tb: string; id: string } | string;
-    readonly form: string;
-    readonly title: string;
-    readonly hypothesis: string;
-    readonly dedupe_sig: string;
-    readonly frequency: number;
-    readonly confidence: string;
-    readonly status: string;
-    readonly created_at?: string;
-}
-
 const formatProposalLine = (row: ProposalRow): string => {
     const freq = String(row.frequency).padStart(6);
     const conf = (row.confidence ?? "").padEnd(6);
@@ -2408,18 +2397,11 @@ const cmdImproveList = (args: string[]) =>
         const limit = parsePositiveIntFlag("improve list", "limit", args, 30);
         const formFilter = flag("form", args);
         const statusFilter = flag("status", args) ?? "open";
-        const db = yield* SurrealClient;
-        const where: string[] = [];
-        if (statusFilter !== "all") {
-            where.push(`status = ${surrealLiteral(statusFilter)}`);
-        }
-        if (formFilter !== undefined) {
-            where.push(`form = ${surrealLiteral(formFilter)}`);
-        }
-        const whereClause = where.length > 0 ? `WHERE ${where.join(" AND ")}` : "";
-        const sql = `SELECT id, form, title, hypothesis, dedupe_sig, frequency, confidence, status, type::string(created_at) AS created_at FROM proposal ${whereClause} ORDER BY frequency DESC, created_at DESC LIMIT ${limit};`;
-        const result = yield* db.query<[ProposalRow[]]>(sql);
-        const rows = result?.[0] ?? [];
+        const rows = yield* listProposals({
+            status: statusFilter,
+            ...(formFilter !== undefined ? { form: formFilter } : {}),
+            limit,
+        });
         if (json) {
             console.log(prettyPrint(rows));
             return;
