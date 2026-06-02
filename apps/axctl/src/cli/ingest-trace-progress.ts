@@ -41,12 +41,20 @@ export const PipelineTraceTransportLayer: Layer.Layer<TraceTransportTag> = Layer
                                 break;
                             }
                             case "SpanStart": {
+                                // Skip the trace root span (no parent): its name is the
+                                // whole run label (every stage key joined), which wraps
+                                // the terminal and corrupts the in-place animation. Only
+                                // render actual per-stage spans.
+                                if (!event.parentSpanId) break;
                                 spanNames.set(event.spanId, event.name);
                                 progress?.start(stageOf(event.name));
                                 break;
                             }
                             case "SpanEnd": {
-                                const name = spanNames.get(event.spanId) ?? event.spanId;
+                                // Only stage spans were recorded in spanNames; an unknown
+                                // spanId here is the root span (or already cleared) - skip.
+                                const name = spanNames.get(event.spanId);
+                                if (name === undefined) break;
                                 spanNames.delete(event.spanId);
                                 if (event.status === "error") progress?.fail(stageOf(name), "failed");
                                 else progress?.finish(stageOf(name), {});
