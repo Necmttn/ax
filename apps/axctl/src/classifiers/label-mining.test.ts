@@ -3,10 +3,14 @@ import {
     auditWeakCandidateBatch,
     evaluateLabelMiningIteration,
     mineTranscriptLabelCandidates,
+    projectReviewedLabelsToGraph,
     type EventWindowLike,
     type LabelMiningCandidateAudit,
     type LabelMiningMetrics,
     type LabelMiningPromotionAudit,
+    type TranscriptLabelCandidate,
+    type TranscriptLabelVectorRow,
+    type TranscriptReviewedLabel,
 } from "./label-mining.ts";
 
 const win = (input: {
@@ -369,5 +373,140 @@ describe("evaluateLabelMiningIteration", () => {
         expect(decision.failures).toContain("failed_candidate_precision");
         expect(typeof decision.next_action).toBe("string");
         expect(decision.next_action.length).toBeGreaterThan(0);
+    });
+});
+
+describe("projectReviewedLabelsToGraph", () => {
+    const candidate = (input: {
+        readonly id: string;
+        readonly family?: TranscriptLabelCandidate["label_family"];
+        readonly evidence?: readonly string[];
+    }): TranscriptLabelCandidate => ({
+        id: input.id,
+        source_kind: "transcript_label_mining",
+        subject_type: "event_window",
+        subject_id: `subj:${input.id}`,
+        session_id: "session:s1",
+        turn_id: `turn:${input.id}`,
+        label_family: input.family ?? "correction",
+        target: "wrong_output",
+        weak_label: input.family ?? "correction",
+        weak_confidence: 0.74,
+        weak_sources: ["correction:wrong_output"],
+        evidence_paths: input.evidence ?? [`~/.claude/projects/p/${input.id}.jsonl`],
+        excerpt: "no, that is wrong",
+    });
+
+    const reviewed = (input: {
+        readonly candidate_id: string;
+        readonly status: TranscriptReviewedLabel["review_status"];
+        readonly reviewed_label?: string;
+    }): TranscriptReviewedLabel => ({
+        candidate_id: input.candidate_id,
+        review_status: input.status,
+        ...(input.reviewed_label ? { reviewed_label: input.reviewed_label } : {}),
+        rationale: "human checked",
+        reviewer: "necmttn",
+        reviewed_at: "2026-06-02T00:00:00.000Z",
+    });
+
+    const vector = (input: {
+        readonly candidate_id: string;
+        readonly neighbors?: readonly string[];
+    }): TranscriptLabelVectorRow => ({
+        id: `vec:${input.candidate_id}`,
+        candidate_id: input.candidate_id,
+        embedding_model: "sentence-transformers/all-MiniLM-L6-v2",
+        embedding_dim: 384,
+        embedding_ref: `ref:${input.candidate_id}`,
+        nearest_reviewed_candidate_ids: input.neighbors ?? [],
+        nearest_scores: (input.neighbors ?? []).map(() => 0.9),
+    });
+
+    test("accepted reviewed rows become promotion-safe graph facts with evidence", () => {
+        const c = candidate({ id: "c1", family: "correction" });
+        const projection = projectReviewedLabelsToGraph({
+            candidates: [c],
+            reviews: [reviewed({ candidate_id: "c1", status: "accepted", reviewed_label: "correction" })],
+            vectors: [vector({ candidate_id: "c1" })],
+        });
+        expect(projection.promotion_safe_fact_count).toBeGreaterThanOrEqual(1);
+        const facts = projection.facts.filter((f) => f.subject === "c1");
+        expect(facts.length).toBeGreaterThanOrEqual(1);
+        for (const fact of facts) {
+            expect(fact.kind).toBe("transcript_reviewed_label");
+            expect(fact.source_kind).toBe("transcript_label_mining_reviewed");
+            expect(fact.properties_json).toContain("\"review_status\":\"accepted\"");
+            expect(fact.properties_json).toContain("\"promotion_safe\":true");
+            expect(fact.evidence_edges_json.length).toBeGreaterThan(2);
+        }
+        // node + at least one evidence edge per accepted row
+        expect(projection.nodes.some((n) => n.source_kind === "transcript_label_mining_reviewed")).toBe(true);
+        expect(projection.edges.some((e) => e.evidence_path.length > 0)).toBe(true);
+    });
+
+    test("rejected and deferred rows are stored but not promotion-safe", () => {
+        const projection = projectReviewedLabelsToGraph({
+            candidates: [
+                candidate({ id: "c2", family: "direction" }),
+                candidate({ id: "c3", family: "verification" }),
+            ],
+            reviews: [
+                reviewed({ candidate_id: "c2", status: "rejected" }),
+                reviewed({ candidate_id: "c3", status: "deferred" }),
+            ],
+            vectors: [],
+        });
+        expect(projection.promotion_safe_fact_count).toBe(0);
+        for (const fact of projection.facts) {
+            expect(fact.properties_json).toContain("\"promotion_safe\":false");
+        }
+        expect(projection.review_rows.every((r) => r.promotion_safe === false)).toBe(true);
+        expect(projection.review_rows.map((r) => r.review_status).sort()).toEqual(["deferred", "rejected"]);
+    });
+
+    test("vector rows join back to candidate and graph fact ids", () => {
+        const projection = projectReviewedLabelsToGraph({
+            candidates: [candidate({ id: "c4" })],
+            reviews: [reviewed({ candidate_id: "c4", status: "accepted", reviewed_label: "correction" })],
+            vectors: [vector({ candidate_id: "c4", neighbors: ["c1"] })],
+        });
+        expect(projection.vector_rows.length).toBe(1);
+        const row = projection.vector_rows[0]!;
+        expect(row.candidate_id).toBe("c4");
+        expect(typeof row.graph_fact_id).toBe("string");
+        expect(row.graph_fact_id!.length).toBeGreaterThan(0);
+        // the referenced graph fact id exists among projected facts
+        expect(projection.facts.some((f) => f.graph_id === row.graph_fact_id)).toBe(true);
+        expect(row.nearest_reviewed_candidate_ids).toEqual(["c1"]);
+    });
+
+    test("write statements are deterministic and idempotent", () => {
+        const input = {
+            candidates: [candidate({ id: "c5", family: "correction" })],
+            reviews: [reviewed({ candidate_id: "c5", status: "accepted", reviewed_label: "correction" })],
+            vectors: [vector({ candidate_id: "c5" })],
+        } as const;
+        const a = projectReviewedLabelsToGraph(input);
+        const b = projectReviewedLabelsToGraph(input);
+        expect(JSON.stringify(a)).toBe(JSON.stringify(b));
+        // every write statement is an idempotent UPSERT keyed by a stable id
+        expect(a.statements.length).toBeGreaterThan(0);
+        for (const stmt of a.statements) {
+            expect(stmt.startsWith("UPSERT ")).toBe(true);
+        }
+        expect(a.statements).toEqual(b.statements);
+    });
+
+    test("a vector with no matching reviewed candidate yields no graph fact link", () => {
+        const projection = projectReviewedLabelsToGraph({
+            candidates: [candidate({ id: "c6" })],
+            reviews: [],
+            vectors: [vector({ candidate_id: "c6" })],
+        });
+        // no accepted review -> no promotion-safe fact, vector still recorded
+        expect(projection.promotion_safe_fact_count).toBe(0);
+        expect(projection.vector_rows.length).toBe(1);
+        expect(projection.vector_rows[0]!.graph_fact_id).toBeUndefined();
     });
 });

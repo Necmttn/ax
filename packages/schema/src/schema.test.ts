@@ -140,6 +140,48 @@ describe("turn feedback graph schema", () => {
     });
 });
 
+describe("transcript label mining schema", () => {
+    test("transcript_label_review table and its read indexes are defined", () => {
+        expect(schema).toContain("DEFINE TABLE IF NOT EXISTS transcript_label_review SCHEMAFULL");
+        expect(schema).toContain("DEFINE FIELD candidate_id    ON transcript_label_review TYPE string");
+        expect(schema).toContain("DEFINE FIELD graph_fact_id   ON transcript_label_review TYPE option<string>");
+        expect(schema).toContain("DEFINE FIELD label_family    ON transcript_label_review TYPE string");
+        expect(schema).toContain("DEFINE FIELD review_status   ON transcript_label_review TYPE string");
+        expect(schema).toContain("DEFINE FIELD promotion_safe  ON transcript_label_review TYPE bool");
+        expect(schema).toContain("DEFINE FIELD evidence_paths_json ON transcript_label_review TYPE string");
+        expect(schema).toContain(
+            "DEFINE INDEX IF NOT EXISTS transcript_label_review_candidate ON transcript_label_review FIELDS candidate_id UNIQUE",
+        );
+        expect(schema).toContain(
+            "DEFINE INDEX IF NOT EXISTS transcript_label_review_graph_fact ON transcript_label_review FIELDS graph_fact_id",
+        );
+        expect(schema).toContain(
+            "DEFINE INDEX IF NOT EXISTS transcript_label_review_family ON transcript_label_review FIELDS label_family",
+        );
+        expect(schema).toContain(
+            "DEFINE INDEX IF NOT EXISTS transcript_label_review_status ON transcript_label_review FIELDS review_status",
+        );
+    });
+
+    test("transcript_label_vector table joins candidates and graph facts via indexes", () => {
+        expect(schema).toContain("DEFINE TABLE IF NOT EXISTS transcript_label_vector SCHEMAFULL");
+        expect(schema).toContain("DEFINE FIELD candidate_id    ON transcript_label_vector TYPE string");
+        expect(schema).toContain("DEFINE FIELD graph_fact_id   ON transcript_label_vector TYPE option<string>");
+        expect(schema).toContain("DEFINE FIELD embedding_model ON transcript_label_vector TYPE string");
+        expect(schema).toContain("DEFINE FIELD embedding_dim   ON transcript_label_vector TYPE int");
+        expect(schema).toContain("DEFINE FIELD embedding_ref   ON transcript_label_vector TYPE string");
+        expect(schema).toContain(
+            "DEFINE INDEX IF NOT EXISTS transcript_label_vector_candidate ON transcript_label_vector FIELDS candidate_id UNIQUE",
+        );
+        expect(schema).toContain(
+            "DEFINE INDEX IF NOT EXISTS transcript_label_vector_graph_fact ON transcript_label_vector FIELDS graph_fact_id",
+        );
+        expect(schema).toContain(
+            "DEFINE INDEX IF NOT EXISTS transcript_label_vector_model ON transcript_label_vector FIELDS embedding_model",
+        );
+    });
+});
+
 describe("content block artifact schema", () => {
     test("content document, block, and atom tables are defined", () => {
         expect(schema).toContain("DEFINE TABLE content_document SCHEMAFULL");

@@ -567,3 +567,392 @@ export function evaluateLabelMiningIteration(input: {
         next_action: "run next bounded iteration",
     };
 }
+
+/* ------------------------------------------------------------------------- *
+ * Reviewed graph + vector projection.
+ *
+ * Pure transform from accepted/rejected/deferred reviewed labels into
+ * classifier_graph_* rows (node/edge/fact) plus transcript_label_vector and
+ * transcript_label_review rows. No DB access. The projection is deterministic:
+ * every emitted row carries a stable id derived from the candidate id, so the
+ * generated UPSERT statements are idempotent (re-running over the same input
+ * yields byte-identical statements and rewrites the same records).
+ *
+ * Promotion contract (plan Data Model "Graph Fact Contract"):
+ *   - Only `review_status === "accepted"` rows become promotion-safe graph
+ *     facts (`promotion_safe: true`). Rejected/deferred/revised rows are stored
+ *     for provenance with `promotion_safe: false` and emit no graph facts.
+ *   - Vector rows are recorded for every supplied vector; their `graph_fact_id`
+ *     is set only when the candidate has an accepted reviewed fact to join to.
+ * ------------------------------------------------------------------------- */
+
+/** Reviewed label artifact (plan Data Model). Input to the projection. */
+export interface TranscriptReviewedLabel {
+    readonly candidate_id: string;
+    readonly review_status: "accepted" | "rejected" | "revised" | "deferred";
+    readonly reviewed_label?: string;
+    readonly reviewed_target?: string;
+    readonly rationale: string;
+    readonly reviewer: string;
+    readonly reviewed_at: string;
+}
+
+/** Vector row artifact (plan Data Model). Input to the projection. */
+export interface TranscriptLabelVectorRow {
+    readonly id: string;
+    readonly candidate_id: string;
+    readonly graph_fact_id?: string;
+    readonly embedding_model: string;
+    readonly embedding_dim: number;
+    readonly embedding_ref: string;
+    readonly nearest_reviewed_candidate_ids: readonly string[];
+    readonly nearest_scores: readonly number[];
+}
+
+/** Projected `classifier_graph_node` row. */
+export interface LabelMiningGraphNode {
+    readonly graph_id: string;
+    readonly kind: string;
+    readonly label: string;
+    readonly properties_json: string;
+    readonly source_kind: string;
+}
+
+/** Projected `classifier_graph_edge` row (evidence link). */
+export interface LabelMiningGraphEdge {
+    readonly graph_id: string;
+    readonly kind: string;
+    readonly from_id: string;
+    readonly to_id: string;
+    readonly evidence_path: string;
+    readonly properties_json: string;
+    readonly source_kind: string;
+}
+
+/** Projected `classifier_graph_fact` row. */
+export interface LabelMiningGraphFact {
+    readonly graph_id: string;
+    readonly kind: "transcript_reviewed_label";
+    readonly subject: string;
+    readonly predicate:
+        | "reviewed_label"
+        | "reviewed_target"
+        | "nearest_reviewed_neighbor"
+        | "promotion_safety";
+    readonly object?: string;
+    readonly value_json?: string;
+    readonly evidence_edges_json: string;
+    readonly properties_json: string;
+    readonly source_kind: "transcript_label_mining_reviewed";
+}
+
+/** Persisted reviewed-status row (`transcript_label_review` table). */
+export interface LabelMiningReviewedRow {
+    readonly candidate_id: string;
+    readonly graph_fact_id?: string;
+    readonly label_family: LabelFamily;
+    readonly review_status: TranscriptReviewedLabel["review_status"];
+    readonly promotion_safe: boolean;
+    readonly reviewed_label?: string;
+    readonly reviewed_target?: string;
+    readonly reviewer: string;
+    readonly rationale: string;
+    readonly reviewed_at: string;
+    readonly evidence_paths: readonly string[];
+}
+
+/** Persisted vector row (`transcript_label_vector` table) with graph join. */
+export interface LabelMiningVectorRow {
+    readonly id: string;
+    readonly candidate_id: string;
+    readonly graph_fact_id?: string;
+    readonly embedding_model: string;
+    readonly embedding_dim: number;
+    readonly embedding_ref: string;
+    readonly nearest_reviewed_candidate_ids: readonly string[];
+    readonly nearest_scores: readonly number[];
+}
+
+export interface LabelMiningGraphProjection {
+    readonly nodes: readonly LabelMiningGraphNode[];
+    readonly edges: readonly LabelMiningGraphEdge[];
+    readonly facts: readonly LabelMiningGraphFact[];
+    readonly review_rows: readonly LabelMiningReviewedRow[];
+    readonly vector_rows: readonly LabelMiningVectorRow[];
+    /** Idempotent UPSERT statements (deterministic order) for all rows above. */
+    readonly statements: readonly string[];
+    readonly accepted_count: number;
+    readonly promotion_safe_fact_count: number;
+}
+
+const stableId = (parts: readonly string[]): string =>
+    Bun.hash(parts.join("|")).toString(16).slice(0, 16);
+
+const graphNodeId = (candidateId: string): string =>
+    `tlmg_node__${safeKeyPart(candidateId)}__${stableId(["node", candidateId])}`;
+
+const graphFactId = (candidateId: string, predicate: string): string =>
+    `tlmg_fact__${safeKeyPart(candidateId)}__${safeKeyPart(predicate)}__${stableId([
+        "fact",
+        candidateId,
+        predicate,
+    ])}`;
+
+const graphEdgeId = (candidateId: string, idx: number): string =>
+    `tlmg_edge__${safeKeyPart(candidateId)}__${idx}__${stableId(["edge", candidateId, String(idx)])}`;
+
+/** Deterministic SurrealQL string literal (escapes `\` and `'`). */
+const surqlString = (value: string): string =>
+    `'${value.replace(/\\/g, "\\\\").replace(/'/g, "\\'")}'`;
+
+/**
+ * Build a single idempotent UPSERT keyed by the row's stable string id. Fields
+ * are emitted in a fixed order so re-running over identical input is byte-stable.
+ */
+const upsert = (
+    table: string,
+    id: string,
+    fields: readonly (readonly [string, string])[],
+): string => {
+    const set = fields.map(([key, expr]) => `${key} = ${expr}`).join(", ");
+    return `UPSERT ${table}:${surqlString(id)} SET ${set}`;
+};
+
+const PROMOTION_SAFE_STATUS = "accepted" as const;
+
+export function projectReviewedLabelsToGraph(input: {
+    readonly candidates: readonly TranscriptLabelCandidate[];
+    readonly reviews: readonly TranscriptReviewedLabel[];
+    readonly vectors: readonly TranscriptLabelVectorRow[];
+}): LabelMiningGraphProjection {
+    const candidateById = new Map<string, TranscriptLabelCandidate>();
+    for (const candidate of input.candidates) candidateById.set(candidate.id, candidate);
+
+    const nodes: LabelMiningGraphNode[] = [];
+    const edges: LabelMiningGraphEdge[] = [];
+    const facts: LabelMiningGraphFact[] = [];
+    const reviewRows: LabelMiningReviewedRow[] = [];
+    const statements: string[] = [];
+
+    // Accepted reviews keyed by candidate id, used to join vector rows back.
+    const acceptedFactByCandidate = new Map<string, string>();
+    let acceptedCount = 0;
+    let promotionSafeFactCount = 0;
+
+    // Deterministic order: reviews sorted by candidate id.
+    const sortedReviews = [...input.reviews].sort((a, b) =>
+        a.candidate_id.localeCompare(b.candidate_id));
+
+    for (const review of sortedReviews) {
+        const candidate = candidateById.get(review.candidate_id);
+        const labelFamily: LabelFamily = candidate?.label_family ?? "none";
+        const evidencePaths = candidate?.evidence_paths ?? [];
+        const isAccepted = review.review_status === PROMOTION_SAFE_STATUS;
+        const promotionSafe = isAccepted;
+
+        const reviewRow: LabelMiningReviewedRow = {
+            candidate_id: review.candidate_id,
+            label_family: labelFamily,
+            review_status: review.review_status,
+            promotion_safe: promotionSafe,
+            ...(review.reviewed_label !== undefined ? { reviewed_label: review.reviewed_label } : {}),
+            ...(review.reviewed_target !== undefined ? { reviewed_target: review.reviewed_target } : {}),
+            reviewer: review.reviewer,
+            rationale: review.rationale,
+            reviewed_at: review.reviewed_at,
+            evidence_paths: evidencePaths,
+        };
+
+        if (!isAccepted) {
+            reviewRows.push(reviewRow);
+            continue;
+        }
+
+        acceptedCount += 1;
+
+        // Graph node for the accepted candidate.
+        const nodeId = graphNodeId(review.candidate_id);
+        const nodeProps = JSON.stringify({
+            candidate_id: review.candidate_id,
+            label_family: labelFamily,
+            review_status: review.review_status,
+            promotion_safe: true,
+        });
+        nodes.push({
+            graph_id: nodeId,
+            kind: "transcript_reviewed_label",
+            label: review.reviewed_label ?? candidate?.weak_label ?? labelFamily,
+            properties_json: nodeProps,
+            source_kind: "transcript_label_mining_reviewed",
+        });
+
+        // Evidence edges: one per evidence path (deterministic order).
+        const edgeIds: string[] = [];
+        evidencePaths.forEach((path, idx) => {
+            const edgeId = graphEdgeId(review.candidate_id, idx);
+            edgeIds.push(edgeId);
+            edges.push({
+                graph_id: edgeId,
+                kind: "reviewed_evidence",
+                from_id: nodeId,
+                to_id: `evidence:${review.candidate_id}:${idx}`,
+                evidence_path: path,
+                properties_json: JSON.stringify({ candidate_id: review.candidate_id, kind: "evidence_path" }),
+                source_kind: "transcript_label_mining_reviewed",
+            });
+        });
+        const evidenceEdgesJson = JSON.stringify(edgeIds);
+        const factProps = JSON.stringify({
+            candidate_id: review.candidate_id,
+            review_status: review.review_status,
+            promotion_safe: true,
+            reviewer: review.reviewer,
+        });
+
+        // The reviewed_label fact is the canonical promotion-safe fact a vector
+        // row joins back to.
+        const reviewedLabelFactId = graphFactId(review.candidate_id, "reviewed_label");
+        acceptedFactByCandidate.set(review.candidate_id, reviewedLabelFactId);
+
+        const factSpecs: readonly {
+            readonly predicate: LabelMiningGraphFact["predicate"];
+            readonly object?: string;
+            readonly value_json?: string;
+        }[] = [
+            { predicate: "reviewed_label", object: review.reviewed_label ?? labelFamily },
+            ...(review.reviewed_target !== undefined
+                ? [{ predicate: "reviewed_target" as const, object: review.reviewed_target }]
+                : []),
+            { predicate: "promotion_safety", value_json: JSON.stringify({ promotion_safe: true }) },
+        ];
+
+        for (const spec of factSpecs) {
+            const factId = graphFactId(review.candidate_id, spec.predicate);
+            if (spec.predicate === "promotion_safety") promotionSafeFactCount += 1;
+            facts.push({
+                graph_id: factId,
+                kind: "transcript_reviewed_label",
+                subject: review.candidate_id,
+                predicate: spec.predicate,
+                ...(spec.object !== undefined ? { object: spec.object } : {}),
+                ...(spec.value_json !== undefined ? { value_json: spec.value_json } : {}),
+                evidence_edges_json: evidenceEdgesJson,
+                properties_json: factProps,
+                source_kind: "transcript_label_mining_reviewed",
+            });
+        }
+
+        reviewRows.push({ ...reviewRow, graph_fact_id: reviewedLabelFactId });
+    }
+
+    // Vector rows: record all supplied vectors, join to accepted fact when present.
+    const sortedVectors = [...input.vectors].sort((a, b) =>
+        a.candidate_id.localeCompare(b.candidate_id));
+    const vectorRows: LabelMiningVectorRow[] = sortedVectors.map((vector) => {
+        const graphFact = acceptedFactByCandidate.get(vector.candidate_id);
+        return {
+            id: vector.id,
+            candidate_id: vector.candidate_id,
+            ...(graphFact !== undefined ? { graph_fact_id: graphFact } : {}),
+            embedding_model: vector.embedding_model,
+            embedding_dim: vector.embedding_dim,
+            embedding_ref: vector.embedding_ref,
+            nearest_reviewed_candidate_ids: vector.nearest_reviewed_candidate_ids,
+            nearest_scores: vector.nearest_scores,
+        };
+    });
+
+    // Emit nearest_reviewed_neighbor facts for accepted candidates with neighbors.
+    for (const vector of sortedVectors) {
+        if (!acceptedFactByCandidate.has(vector.candidate_id)) continue;
+        if (vector.nearest_reviewed_candidate_ids.length === 0) continue;
+        const factId = graphFactId(vector.candidate_id, "nearest_reviewed_neighbor");
+        facts.push({
+            graph_id: factId,
+            kind: "transcript_reviewed_label",
+            subject: vector.candidate_id,
+            predicate: "nearest_reviewed_neighbor",
+            value_json: JSON.stringify({
+                nearest_reviewed_candidate_ids: vector.nearest_reviewed_candidate_ids,
+                nearest_scores: vector.nearest_scores,
+            }),
+            evidence_edges_json: JSON.stringify([]),
+            properties_json: JSON.stringify({
+                candidate_id: vector.candidate_id,
+                promotion_safe: true,
+            }),
+            source_kind: "transcript_label_mining_reviewed",
+        });
+    }
+
+    // Build idempotent UPSERT statements in a fixed, deterministic order.
+    for (const node of [...nodes].sort((a, b) => a.graph_id.localeCompare(b.graph_id))) {
+        statements.push(upsert("classifier_graph_node", node.graph_id, [
+            ["graph_id", surqlString(node.graph_id)],
+            ["kind", surqlString(node.kind)],
+            ["label", surqlString(node.label)],
+            ["properties_json", surqlString(node.properties_json)],
+            ["source_kind", surqlString(node.source_kind)],
+        ]));
+    }
+    for (const edge of [...edges].sort((a, b) => a.graph_id.localeCompare(b.graph_id))) {
+        statements.push(upsert("classifier_graph_edge", edge.graph_id, [
+            ["graph_id", surqlString(edge.graph_id)],
+            ["kind", surqlString(edge.kind)],
+            ["from_id", surqlString(edge.from_id)],
+            ["to_id", surqlString(edge.to_id)],
+            ["evidence_path", surqlString(edge.evidence_path)],
+            ["properties_json", surqlString(edge.properties_json)],
+            ["source_kind", surqlString(edge.source_kind)],
+        ]));
+    }
+    for (const fact of [...facts].sort((a, b) => a.graph_id.localeCompare(b.graph_id))) {
+        statements.push(upsert("classifier_graph_fact", fact.graph_id, [
+            ["graph_id", surqlString(fact.graph_id)],
+            ["kind", surqlString(fact.kind)],
+            ["subject", surqlString(fact.subject)],
+            ["predicate", surqlString(fact.predicate)],
+            ["object", fact.object !== undefined ? surqlString(fact.object) : "NONE"],
+            ["value_json", fact.value_json !== undefined ? surqlString(fact.value_json) : "NONE"],
+            ["evidence_edges_json", surqlString(fact.evidence_edges_json)],
+            ["properties_json", surqlString(fact.properties_json)],
+            ["source_kind", surqlString(fact.source_kind)],
+        ]));
+    }
+    for (const row of [...reviewRows].sort((a, b) => a.candidate_id.localeCompare(b.candidate_id))) {
+        statements.push(upsert("transcript_label_review", row.candidate_id, [
+            ["candidate_id", surqlString(row.candidate_id)],
+            ["graph_fact_id", row.graph_fact_id !== undefined ? surqlString(row.graph_fact_id) : "NONE"],
+            ["label_family", surqlString(row.label_family)],
+            ["review_status", surqlString(row.review_status)],
+            ["promotion_safe", row.promotion_safe ? "true" : "false"],
+            ["reviewed_label", row.reviewed_label !== undefined ? surqlString(row.reviewed_label) : "NONE"],
+            ["reviewed_target", row.reviewed_target !== undefined ? surqlString(row.reviewed_target) : "NONE"],
+            ["reviewer", surqlString(row.reviewer)],
+            ["rationale", surqlString(row.rationale)],
+            ["evidence_paths_json", surqlString(JSON.stringify(row.evidence_paths))],
+        ]));
+    }
+    for (const row of [...vectorRows].sort((a, b) => a.id.localeCompare(b.id))) {
+        statements.push(upsert("transcript_label_vector", row.id, [
+            ["candidate_id", surqlString(row.candidate_id)],
+            ["graph_fact_id", row.graph_fact_id !== undefined ? surqlString(row.graph_fact_id) : "NONE"],
+            ["embedding_model", surqlString(row.embedding_model)],
+            ["embedding_dim", String(row.embedding_dim)],
+            ["embedding_ref", surqlString(row.embedding_ref)],
+            ["nearest_reviewed_candidate_ids_json", surqlString(JSON.stringify(row.nearest_reviewed_candidate_ids))],
+            ["nearest_scores_json", surqlString(JSON.stringify(row.nearest_scores))],
+        ]));
+    }
+
+    return {
+        nodes,
+        edges,
+        facts,
+        review_rows: reviewRows,
+        vector_rows: vectorRows,
+        statements,
+        accepted_count: acceptedCount,
+        promotion_safe_fact_count: promotionSafeFactCount,
+    };
+}

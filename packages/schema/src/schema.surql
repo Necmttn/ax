@@ -621,6 +621,41 @@ DEFINE INDEX IF NOT EXISTS classifier_graph_fact_kind ON classifier_graph_fact F
 DEFINE INDEX IF NOT EXISTS classifier_graph_fact_subject ON classifier_graph_fact FIELDS subject;
 DEFINE INDEX IF NOT EXISTS classifier_graph_fact_theme ON classifier_graph_fact FIELDS kind, predicate;
 
+-- Transcript label-mining: reviewed-status rows and embedding/vector rows.
+-- Graph facts themselves reuse classifier_graph_* (node/edge/fact); these two
+-- tables hold the reviewed-status provenance and the vector refs that join
+-- candidates back to promotion-safe graph facts. Writes are idempotent (UPSERT
+-- keyed by candidate_id / vector id).
+DEFINE TABLE IF NOT EXISTS transcript_label_review SCHEMAFULL;
+DEFINE FIELD candidate_id    ON transcript_label_review TYPE string;
+DEFINE FIELD graph_fact_id   ON transcript_label_review TYPE option<string>;
+DEFINE FIELD label_family    ON transcript_label_review TYPE string;
+DEFINE FIELD review_status   ON transcript_label_review TYPE string;
+DEFINE FIELD promotion_safe  ON transcript_label_review TYPE bool;
+DEFINE FIELD reviewed_label  ON transcript_label_review TYPE option<string>;
+DEFINE FIELD reviewed_target ON transcript_label_review TYPE option<string>;
+DEFINE FIELD reviewer        ON transcript_label_review TYPE string;
+DEFINE FIELD rationale       ON transcript_label_review TYPE string;
+DEFINE FIELD evidence_paths_json ON transcript_label_review TYPE string;  -- JSON-encoded
+DEFINE FIELD updated_at      ON transcript_label_review TYPE datetime DEFAULT time::now();
+DEFINE INDEX IF NOT EXISTS transcript_label_review_candidate ON transcript_label_review FIELDS candidate_id UNIQUE;
+DEFINE INDEX IF NOT EXISTS transcript_label_review_graph_fact ON transcript_label_review FIELDS graph_fact_id;
+DEFINE INDEX IF NOT EXISTS transcript_label_review_family ON transcript_label_review FIELDS label_family;
+DEFINE INDEX IF NOT EXISTS transcript_label_review_status ON transcript_label_review FIELDS review_status;
+
+DEFINE TABLE IF NOT EXISTS transcript_label_vector SCHEMAFULL;
+DEFINE FIELD candidate_id    ON transcript_label_vector TYPE string;
+DEFINE FIELD graph_fact_id   ON transcript_label_vector TYPE option<string>;
+DEFINE FIELD embedding_model ON transcript_label_vector TYPE string;
+DEFINE FIELD embedding_dim   ON transcript_label_vector TYPE int;
+DEFINE FIELD embedding_ref   ON transcript_label_vector TYPE string;
+DEFINE FIELD nearest_reviewed_candidate_ids_json ON transcript_label_vector TYPE string;  -- JSON-encoded
+DEFINE FIELD nearest_scores_json ON transcript_label_vector TYPE string;  -- JSON-encoded
+DEFINE FIELD updated_at      ON transcript_label_vector TYPE datetime DEFAULT time::now();
+DEFINE INDEX IF NOT EXISTS transcript_label_vector_candidate ON transcript_label_vector FIELDS candidate_id UNIQUE;
+DEFINE INDEX IF NOT EXISTS transcript_label_vector_graph_fact ON transcript_label_vector FIELDS graph_fact_id;
+DEFINE INDEX IF NOT EXISTS transcript_label_vector_model ON transcript_label_vector FIELDS embedding_model;
+
 DEFINE TABLE IF NOT EXISTS semantic_signal SCHEMAFULL;
 DEFINE FIELD kind           ON semantic_signal TYPE string;
 DEFINE FIELD label          ON semantic_signal TYPE string;
