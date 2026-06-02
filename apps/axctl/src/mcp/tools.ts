@@ -17,7 +17,6 @@ import {
     fetchRecall,
     type RecallParams,
     type RecallSource,
-    type RecallScope,
 } from "../dashboard/recall.ts";
 
 /**
@@ -62,10 +61,6 @@ const recallTool: AxMcpTool = {
             .array(z.enum(RECALL_SOURCES))
             .optional()
             .describe('Which sources to search. Defaults to ["turn"]. Any of "turn", "commit", "skill".'),
-        scope: z
-            .enum(["all", "here"])
-            .optional()
-            .describe('Repository scope. "all" (default) searches everything; "here" is reserved for repo-scoped recall (currently treated as all in MCP).'),
     },
     run: async (args, rt) => {
         const q = String(args.q ?? "").trim();
@@ -75,13 +70,13 @@ const recallTool: AxMcpTool = {
                   RECALL_SOURCES.includes(s as RecallSource),
               ))
             : undefined;
-        // "here" requires a resolved repositoryKey we don't have at the MCP
-        // boundary yet; treat both values as the unscoped (null) case for v0.
-        const scope: RecallScope = null;
+        // No scope param in v0: omit it so fetchRecall defaults to unscoped
+        // (all repositories). Real repo-scoping needs the git resolver, which
+        // is unfit for a long-lived server - revisit later.
 
         // Build params conditionally - exactOptionalPropertyTypes forbids
         // assigning `undefined` to optional props.
-        const params: RecallParams = { q, scope };
+        const params: RecallParams = { q };
         if (typeof limit === "number") (params as { limit?: number }).limit = limit;
         if (sources && sources.length > 0) {
             (params as { sources?: ReadonlyArray<RecallSource> }).sources = sources;
