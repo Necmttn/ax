@@ -43,6 +43,8 @@ jobs:
             artifact: axctl-linux-x64
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # full history + tags so build-axctl.ts can bake the release tag
 
       - uses: oven-sh/setup-bun@v2
         with:
@@ -66,7 +68,7 @@ jobs:
 
       - run: bun run check:cli-reference
 
-      - run: bun build --compile --outfile=dist/axctl apps/axctl/src/cli/index.ts
+      - run: bun scripts/build-axctl.ts apps/axctl/src/cli/index.ts dist/axctl
 
       - name: Smoke compiled CLI
         run: |

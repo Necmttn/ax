@@ -12,7 +12,7 @@
     "dist"
   ],
   "scripts": {
-    "build": "bun build --compile --outfile=dist/axctl src/cli/index.ts",
+    "build": "bun ../../scripts/build-axctl.ts src/cli/index.ts dist/axctl",
     "dev": "bun src/cli/index.ts",
     "serve": "bun src/cli/index.ts serve",
     "ingest": "bun src/cli/index.ts ingest",

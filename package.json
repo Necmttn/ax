@@ -45,7 +45,7 @@
     "checkpoint:uninstall": "bash scripts/uninstall-checkpoint.sh",
     "daemon:install": "bash scripts/install-daemon.sh",
     "daemon:uninstall": "bash scripts/uninstall-daemon.sh",
-    "build": "bun build --compile --outfile=dist/axctl apps/axctl/src/cli/index.ts",
+    "build": "bun scripts/build-axctl.ts apps/axctl/src/cli/index.ts dist/axctl",
     "check:cli-reference": "bun scripts/check-cli-reference.ts",
     "check:table-coverage": "bun scripts/check-table-coverage.ts",
     "dashboard:dev": "vite --config apps/axctl/src/dashboard/web/vite.config.ts",
