@@ -15,21 +15,29 @@ import { Effect } from "effect";
 import { SurrealClient } from "@ax/lib/db";
 import type { DbError } from "@ax/lib/errors";
 import {
+    sessionCompareTurnsQuery,
     sessionHealthQuery,
     sessionOverviewQuery,
     sessionProducedCountQuery,
     sessionTokenUsageQuery,
+    sessionTurnTokenUsageQuery,
 } from "../queries/session-detail.ts";
 import type {
     SessionCompareEntry,
     SessionComparePayload,
+    SessionCompareTurn,
     SessionCompareWinners,
     SessionHealthSummary,
     SessionId,
     SessionOverview,
     SessionTokenUsageDetail,
 } from "@ax/lib/shared/dashboard-types";
-import { runSingleQuery } from "@ax/lib/shared/graph-query";
+import { runQuery, runSingleQuery } from "@ax/lib/shared/graph-query";
+
+export interface SessionCompareOptions {
+    /** Attach the per-turn timeline (P1). Off by default - summary only. */
+    readonly includeTurns?: boolean;
+}
 
 // Mirrors the validation in session-detail.ts: accept real UUIDs and our
 // synthetic prefixed ids, restricted to SurrealDB's unquoted-id charset so the
@@ -102,8 +110,50 @@ const sharedTaskLabel = (
     return labels.every((l) => l === first) ? first : null;
 };
 
+/** Build the per-turn timeline: turn spine merged with token usage (by seq),
+ *  with wall-clock gaps derived from consecutive timestamps. */
+const buildTurns = (params: { recordRef: string }) =>
+    Effect.gen(function* () {
+        const [spine, usage] = yield* Effect.all([
+            runQuery(sessionCompareTurnsQuery, params),
+            runQuery(sessionTurnTokenUsageQuery, params),
+        ]);
+        const usageBySeq = new Map<number, { tokens: number | null; cost: number | null }>();
+        for (const u of usage) {
+            if (u === null) continue;
+            usageBySeq.set(u.seq, {
+                tokens: u.estimated_tokens ?? null,
+                cost: u.estimated_cost_usd ?? null,
+            });
+        }
+
+        let prevMs: number | null = null;
+        const turns: SessionCompareTurn[] = [];
+        for (const row of spine) {
+            if (row === null) continue;
+            const ms = row.ts ? new Date(row.ts).getTime() : null;
+            const gap_ms =
+                prevMs !== null && ms !== null && Number.isFinite(ms) && ms >= prevMs
+                    ? ms - prevMs
+                    : null;
+            if (ms !== null && Number.isFinite(ms)) prevMs = ms;
+            const u = usageBySeq.get(row.seq);
+            turns.push({
+                seq: row.seq,
+                role: row.role,
+                ts: row.ts,
+                gap_ms,
+                est_tokens: u?.tokens ?? null,
+                est_cost_usd: u?.cost ?? null,
+                has_error: row.has_error,
+            });
+        }
+        return turns;
+    });
+
 export const fetchSessionCompare = (
     sessionIds: ReadonlyArray<string>,
+    options: SessionCompareOptions = {},
 ): Effect.Effect<SessionComparePayload, DbError, SurrealClient> =>
     Effect.gen(function* () {
         const notFound: string[] = [];
@@ -128,6 +178,8 @@ export const fetchSessionCompare = (
                 continue;
             }
 
+            const turns = options.includeTurns ? yield* buildTurns(params) : undefined;
+
             entries.push({
                 session_id: overview.id,
                 source: overview.source,
@@ -140,6 +192,7 @@ export const fetchSessionCompare = (
                 health: health as SessionHealthSummary | null,
                 commit_count: commit_count ?? 0,
                 noise_score: noiseScore(health as SessionHealthSummary | null),
+                ...(turns ? { turns } : {}),
             });
         }
 
