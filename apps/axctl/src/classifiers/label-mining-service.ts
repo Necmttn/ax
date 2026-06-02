@@ -502,7 +502,7 @@ FROM transcript_label_review;`.trim();
 /** Read persisted vector rows for re-projection. */
 const vectorProjectionSql = `
 SELECT
-    type::string(id) AS id,
+    record::id(id) AS id,
     candidate_id,
     embedding_model,
     embedding_dim,
