@@ -80,6 +80,7 @@ import { INSIGHT_VIEWS, insightSqlForView, isInsightView } from "../queries/insi
 import { formatInsightRows } from "./insights-format.ts";
 import { writeDashboard } from "../dashboard/report.ts";
 import { serveDashboard } from "../dashboard/server.ts";
+import { serveMcp } from "../mcp/server.ts";
 import { fetchRecall, type RecallSource, type RecallScope } from "../dashboard/recall.ts";
 import { fetchSessionShow } from "../dashboard/session-show.ts";
 import { fetchCostSummary, type CostSummary } from "../dashboard/cost-query.ts";
@@ -3887,6 +3888,14 @@ const serveCommand = Command.make(
     ({ port }) => Effect.sync(() => serveDashboard([`--port=${port}`])),
 ).pipe(Command.withDescription("Serve the live web dashboard locally"));
 
+// Manages its own long-lived ManagedRuntime (like serve), so it is deliberately
+// NOT in DB_COMMANDS - it routes through `withoutDb` and builds AppLayer itself.
+const mcpCommand = Command.make(
+    "mcp",
+    {},
+    () => Effect.sync(() => serveMcp([])),
+).pipe(Command.withDescription("Run an MCP server (stdio) exposing ax's read-only queries"));
+
 const reportCommand = Command.make(
     "report",
     {
@@ -4930,6 +4939,7 @@ export const rootCommand = Command.make("axctl").pipe(
         recallCommand,
         skillsCommand,
         serveCommand,
+        mcpCommand,
         tuiCommand,
         shareCommand,
         installCommand,
