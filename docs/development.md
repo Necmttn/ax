@@ -38,6 +38,42 @@ bun src/cli/index.ts insights friction --limit=10
 bun src/cli/index.ts recall "auth middleware"
 ```
 
+## `ax-dev` - disposable dev build alongside stable `ax`
+
+Install a global `ax-dev` that runs **this source checkout** against an
+**isolated, disposable DB**, so you can test latest changes without touching
+your real graph. The stable `ax` (released binary, prod DB on `:8521`) is left
+untouched.
+
+```bash
+bash scripts/install-dev.sh        # writes ~/.local/bin/ax-dev (a source shim)
+ax-dev db                          # start a disposable SurrealDB on :8522 (data: ~/.local/share/ax-dev)
+ax-dev ingest --since=1            # ingest into the dev DB
+ax-dev serve                       # dev dashboard (full live ingest works - runs from source)
+ax-dev -v                          # shows git provenance: which sha/branch you're on
+ax-dev db --reset                  # wipe + restart the dev DB
+ax-dev db stop                     # stop it
+rm -rf ~/.local/share/ax-dev       # nuke the dev stack entirely
+```
+
+How the isolation works:
+
+- The shim exports `AX_DATA_DIR=~/.local/share/ax-dev` and
+  `AX_DB_URL=ws://127.0.0.1:8522`, then `exec bun <checkout>/apps/axctl/src/cli/index.ts`.
+  No rebuild - it always runs your current working tree.
+- `ax-dev db` runs SurrealDB **on demand** (no launchd agent, so no label
+  collision with the stable daemon) and applies the schema with bucket paths
+  rewritten to the dev data dir.
+- Re-run `scripts/install-dev.sh` from a different checkout to re-point `ax-dev`
+  at it (the checkout path is baked into the shim).
+
+Notes:
+
+- Use `ax-dev db status` (not `ax-dev doctor`) for the dev DB - `doctor` reports
+  the stable launchd daemon, which the dev stack intentionally doesn't run.
+- Tune the location/port with `AX_DEV_DATA_DIR` / `AX_DEV_DB_URL` before running
+  `install-dev.sh`, or override `AX_DATA_DIR` / `AX_DB_URL` per invocation.
+
 ## What gets stored
 
 Core tables:
