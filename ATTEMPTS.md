@@ -13,4 +13,6 @@ Times are wall-clock seconds per ingest; **cold** = 1st (empty→full), **warm**
 
 | 004 | PIPELINE_CONCURRENCY 2 → 4 | 22 | 22 (**-8% vs 24**) | PASS | ✓ keep | one-line constant bump in `apps/axctl/src/ingest/stage/runner.ts`; allows 4 stages inside the scheduling semaphore at once (each stage's own internal fan-out unchanged). Runs [22,28,22] over 3 ingests; counts exact-match golden. No DB-contention regression at bench scale. Pure measurement knob, no correctness surface |
 
+| 005 | turn-content-blocks chunkSize 250 → 1000 | 20 | 23 (**+1 vs 22**) | PASS | ✗ revert | counts exact-match golden (correctness PASS) but warm 23s ≥ 22s best ⇒ not kept. turn-content-blocks is already incremental (attempt 002 ⇒ near-no-op on warm: only new/changed-hash turns write), so larger chunks only matter on the cold full-derive path; cold 20s was within bench noise of 22s, no measurable warm win. Runs [20,31,23] (run 2 = noise spike). Reverted to 250. File: `apps/axctl/src/ingest/turn-content-blocks.ts` |
+
 <!-- append one row per attempt below; keep newest at bottom -->
