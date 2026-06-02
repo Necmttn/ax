@@ -139,7 +139,7 @@ After the CLI is installed, drop the agent skills into your Claude Code
 session with:
 
 ```bash
-npx skills add Necmttn/ax           # installs ax:setup + ax:retro skills
+npx skills add Necmttn/ax           # installs the ax agent skills (setup, retro, repo, …)
 ```
 
 Requires Bun ≥ 1.3 and SurrealDB ≥ 3.0. macOS-first; Linux works for ingest
@@ -234,6 +234,12 @@ axctl uninstall                             # remove launchd + bin symlink
 axctl update [--check]                      # pull latest release
 axctl version [--check|--banner]
 ```
+
+> `axctl --help` lists only the ~10 everyday commands to keep it lean. The rest
+> (`derive-signals`, `derive-intents`, `costs`, `report`, `roles`, `context`,
+> `hook(s)`, `project`, `evidence`, `classifiers`, `insights`, `daemon`,
+> `doctor`, `uninstall`, `update`, `version`) are hidden from `--help` but remain
+> fully invokable by name - the complete set is listed above.
 
 Full reference: [`docs/insights-cli-reference.md`](docs/insights-cli-reference.md).
 
