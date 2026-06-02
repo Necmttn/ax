@@ -1,6 +1,6 @@
 # Ingest-speed optimization - REPORT
 
-**Result: warm re-ingest 50s → 5s - a 10× speedup (−90%). Cold 29s → ~20s (−31%).**
+**Result: warm re-ingest 50s → 3s - a ~17× speedup (−94%). Cold 29s → ~25s (−14%).**
 All wins gated **output-equivalent** (every table count exact-matches the untouched-`main` golden on the frozen corpus subset). Branch: `perf/ingest-speed`.
 
 ## Method
@@ -24,8 +24,9 @@ Warm re-ingest was **slower than cold** because every stage **re-did all its wor
 | 007 | git skip-unchanged | 13s → 8s | −38% | per-repo HEAD-sha watermark in `ingest_file_state`; skip the `git log`/`git show` walk when HEAD+window unchanged. `AX_REDERIVE_GIT=1` |
 | 008 | closure skip-unchanged | 8s → 6s | −25% | input-fingerprint (`stableDigest` of derive inputs) watermark; skip DELETE+re-RELATE of 6346 edges + 1513 rows when unchanged. `AX_REDERIVE_CLOSURE=1` |
 | 009 | pricing skip-unchanged | 6s → 5s | −17% | fingerprint the 4333-row `agent_model` UPSERT batch; skip when unchanged. `AX_REDERIVE_PRICING=1` |
+| 010 | subagents skip-unchanged | 5s → 3s | −40% | per-file (mtime,size) watermark in `ingest_file_state` (`source_kind='claude_subagent'`); `stat` skip of the full re-parse + write of unchanged `agent-*.jsonl` subagent transcripts. `AX_REDERIVE_SUBAGENTS=1` |
 
-**Net: 50s → 5s (10×).** Every win has an `AX_REDERIVE_*=1` escape hatch to force a full re-derive after its logic changes.
+**Net: 50s → 3s (~17×).** Every win has an `AX_REDERIVE_*=1` escape hatch to force a full re-derive after its logic changes.
 
 ## Rejected (gate working as designed)
 
@@ -39,19 +40,20 @@ Warm re-ingest was **slower than cold** because every stage **re-did all its wor
 - **Start:** turn-content-blocks 30s · claude 19s · git 17s · turn-analysis 9s.
 - **After derive-stage incrementals (002–004):** claude + git dominate.
 - **After skip-unchanged (006–007):** closure 3.4s · subagents 2.1s · pricing 1.6s.
-- **After 008–009 (now, 5s):** subagents ~1.9s + a flat tail of sub-1.5s stages, all concurrency-overlapped at concurrency=4. **This is the floor** - remaining wins move wall-clock sub-second.
+- **After 008–009 (5s):** subagents ~1.9s the lone >1s stage above a flat tail of sub-1.5s stages.
+- **After 010 (now, 3s):** subagents drops out of the top stages; **only a flat tail of sub-second stages remains**, all concurrency-overlapped at concurrency=4. **This is the floor** - every blanket-re-write stage is now incremental and no single stage exceeds ~1s warm.
 
 ## Why we stopped
 
-Diminishing returns: every >1s blanket-re-write stage is now incremental. Warm 5s is irreducible overlapped per-stage work. The only remaining candidate (`subagents` ~1.9s) needs moderate per-file watermarking for a sub-second wall-clock gain. Stopping at **10×** with a clean, reviewable result beats grinding marginal attempts.
+Floor reached. Attempt 010 retired the last >1s blanket-re-write stage (`subagents`); every stage that re-did all its work each warm run is now an indexed/fingerprint skip. Warm 3s is irreducible overlapped per-stage work - no remaining single stage exceeds ~1s, so further wins would chase sub-second wall-clock across already-incremental stages. Stopping at **~17×** with a clean, reviewable, fully output-equivalent result.
 
 ## Recommended merge set for `main`
 
-All seven kept commits on `perf/ingest-speed` are independent, gated, and output-equivalent - recommend cherry-picking the lot:
+All eight kept commits on `perf/ingest-speed` are independent, gated, and output-equivalent - recommend cherry-picking the lot:
 
 - **High value, low risk:** 002, 003 (derive incrementals - pure indexed-skip, escape-hatched).
 - **Highest real-world value:** 006, 007 (claude/git skip-unchanged - the watcher's `--since=1` hot path; needs the small `ingest_file_state` schema addition).
-- **Solid:** 008, 009 (closure/pricing fingerprint skips).
+- **Solid:** 008, 009, 010 (closure/pricing fingerprint + subagents file-watermark skips).
 - **Trivial:** 004 (concurrency 2→4 - re-verify on lower-core machines; safe to drop if it regresses elsewhere).
 
 Before merging: run each stage's `AX_REDERIVE_*=1` once if its derivation logic later changes; the watermarks self-heal on input change but a code change to the deriver needs one forced re-derive (documented per stage). The `ingest_file_state` table is the one schema addition (in `packages/schema/src/schema.surql`).
