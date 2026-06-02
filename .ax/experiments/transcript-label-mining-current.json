@@ -1,15 +1,15 @@
 {
   "schema": "ax.transcript_label_mining_report.v1",
   "since_days": 14,
-  "limit": 500,
+  "limit": 2700,
   "review_limit": 80,
-  "candidate_count": 43,
+  "candidate_count": 438,
   "review_rows": [
     {
-      "candidate_id": "tlm__verification__10e0d58247dee901",
-      "subject_id": "turn:claude_subagent_ac0f9750cffb73085__08b690fa20c5486f__seq_000001",
-      "session_id": "session:`claude-subagent-ac0f9750cffb73085`",
-      "turn_id": "turn:claude_subagent_ac0f9750cffb73085__08b690fa20c5486f__seq_000001",
+      "candidate_id": "tlm__verification__165cf3aae9c5618d",
+      "subject_id": "turn:72f97b36_ac6c_4b37_a926_2712e4bf156f__d3ce108bcf0c2fa5__seq_003861",
+      "session_id": "session:`72f97b36-ac6c-4b37-a926-2712e4bf156f`",
+      "turn_id": "turn:72f97b36_ac6c_4b37_a926_2712e4bf156f__d3ce108bcf0c2fa5__seq_003861",
       "label_family": "verification",
       "target": "verification_demand",
       "weak_label": "verification",
@@ -18,18 +18,41 @@
         "verification:demand"
       ],
       "evidence_paths": [
-        "turn:claude_subagent_ac0f9750cffb73085__08b690fa20c5486f__seq_000001"
+        "turn:72f97b36_ac6c_4b37_a926_2712e4bf156f__d3ce108bcf0c2fa5__seq_003861"
       ],
-      "excerpt": "You are reviewing whether a research deliverable matches its specification. Be skeptical — verify independently, do not trust the implementer's report.\n\nWork from: `/Users/necmttn/Projects/ax/.claude/worktrees/live-ingest-durable-streams`\n\n## What was requested (Task 0)\n\nProduce `docs/superpowers/research/durable-streams-api.md` that records, VERBATIM from the real installed `.d.ts` (not invented):\n1. **Server API**: how to create a server/handler, how to append/publish to a named stream, and whether it exposes a `(Request)=>Response` / Node `(req,res)` handler that could be mounted inside an ",
+      "excerpt": "handson browser uat — continue: check the run_skill result in the browser and verify Creator records were created",
       "review_status": "pending",
       "rationale": "",
       "reviewer": ""
     },
     {
-      "candidate_id": "tlm__approval_or_rejection__ae83df336147d642",
-      "subject_id": "turn:2651b3f6_3070_43fe_8d3b_624a0de49fae__0b13c5cc2b1af048__seq_000207",
-      "session_id": "session:`2651b3f6-3070-43fe-8d3b-624a0de49fae`",
-      "turn_id": "turn:2651b3f6_3070_43fe_8d3b_624a0de49fae__0b13c5cc2b1af048__seq_000207",
+      "candidate_id": "tlm__direction__6076ca64dbdb6778",
+      "subject_id": "turn:019e76fb_b294_79b2_9bb3_d1ebe3e5d908__cd002bebba66f2ad__seq_000530",
+      "session_id": "session:`019e76fb-b294-79b2-9bb3-d1ebe3e5d908`",
+      "turn_id": "turn:019e76fb_b294_79b2_9bb3_d1ebe3e5d908__cd002bebba66f2ad__seq_000530",
+      "previous_assistant_turn_id": "turn:019e76fb_b294_79b2_9bb3_d1ebe3e5d908__cd002bebba66f2ad__seq_000529",
+      "label_family": "direction",
+      "target": "tooling_preference",
+      "weak_label": "direction",
+      "weak_confidence": 0.82,
+      "weak_sources": [
+        "direction:tooling_preference"
+      ],
+      "evidence_paths": [
+        "turn:019e76fb_b294_79b2_9bb3_d1ebe3e5d908__cd002bebba66f2ad__seq_000530"
+      ],
+      "excerpt": "Let me update local serial DB to latest uh serial 3.1. I believe we updated in the Nix version of it, but I want uh local dev version is also the match can we start the serial through the docker compose when we are developing the so we have a predictable dev environment or we can use nix i don't know",
+      "previous_assistant_excerpt": "Yes, and you were right to push back.\n\nI switched to a real classifier experiment and used `uv`.\n\nWhat I got working:\n\n- Exported real ax rows from SurrealDB:\n  - `5,485` `turn_label_row`\n  - `355` `reaction_pair_row`\n  - output: `.ax/ml/turn-shadow.ndjson`\n- Evaluated a local classifier:\n  - binary reaction rows: macro F1 `0.5647` vs majority `0.4855`, improvement `+0.0792`\n  - polarity classifier: macro F1 `0.7148` vs majority `0.1333`, improvement `+0.5814`\n  - report: `.ax/ml/turn-shadow-report.json`\n- Created a `uv` Python 3.11 env:\n  - `.ax/ml/uv`\n  - installed `surrealml[sklearn]`, `sci",
+      "review_status": "pending",
+      "rationale": "",
+      "reviewer": ""
+    },
+    {
+      "candidate_id": "tlm__approval_or_rejection__186bb49cebf260bd",
+      "subject_id": "turn:019e76fe_63ff_7303_a98d_7e6210820b04__45ce27a7ae47a0f9__seq_000202",
+      "session_id": "session:`019e76fe-63ff-7303-a98d-7e6210820b04`",
+      "turn_id": "turn:019e76fe_63ff_7303_a98d_7e6210820b04__45ce27a7ae47a0f9__seq_000202",
+      "previous_assistant_turn_id": "turn:019e76fe_63ff_7303_a98d_7e6210820b04__45ce27a7ae47a0f9__seq_000201",
       "label_family": "approval_or_rejection",
       "target": "approval",
       "weak_label": "approval_or_rejection",
@@ -38,9 +61,10 @@
         "approval_or_rejection:approval"
       ],
       "evidence_paths": [
-        "turn:2651b3f6_3070_43fe_8d3b_624a0de49fae__0b13c5cc2b1af048__seq_000207"
+        "turn:019e76fe_63ff_7303_a98d_7e6210820b04__45ce27a7ae47a0f9__seq_000202"
       ],
-      "excerpt": "ship it",
+      "excerpt": "If we are done with the housekeeping I I want you to remove the references as well so it makes sense basically I don't wanna noise, I want clean structured damn we can merge it I guess.",
+      "previous_assistant_excerpt": "Housekeeping done.\n\nI pruned the stale schema inventory in [src/queries/insights.ts](/Users/necmttn/Projects/ax/src/queries/insights.ts:36):\n- removed retired tables like `harness_learning`, `intervention_observation`, `gotcha`, `adoption`, etc.\n- added current live tables: `agent_*`, `role`, `plays_role`, proposal/experiment tables, hook/feedback tables, retros, ingest telemetry, model usage edges, and more.\n- kept schema-valid but not-default-ingested tables as `staged`.\n\nI also added a guard test in [src/queries/insights.test.ts](/Users/necmttn/Projects/ax/src/queries/insights.test.ts:70) t",
       "review_status": "pending",
       "rationale": "",
       "reviewer": ""
@@ -68,11 +92,10 @@
       "reviewer": ""
     },
     {
-      "candidate_id": "tlm__verification__13b885cf00882a3f",
-      "subject_id": "turn:claude_subagent_a58f1a2c677f7f15b__fbe3c4be221c0357__seq_000200",
-      "session_id": "session:`claude-subagent-a58f1a2c677f7f15b`",
-      "turn_id": "turn:claude_subagent_a58f1a2c677f7f15b__fbe3c4be221c0357__seq_000200",
-      "previous_assistant_turn_id": "turn:claude_subagent_a58f1a2c677f7f15b__fbe3c4be221c0357__seq_000199",
+      "candidate_id": "tlm__verification__232660e98444bc0b",
+      "subject_id": "turn:5fae585b_69b5_48b8_a350_9232047c60a5__8d13d65fde962f3a__seq_000064",
+      "session_id": "session:`5fae585b-69b5-48b8-a350-9232047c60a5`",
+      "turn_id": "turn:5fae585b_69b5_48b8_a350_9232047c60a5__8d13d65fde962f3a__seq_000064",
       "label_family": "verification",
       "target": "verification_demand",
       "weak_label": "verification",
@@ -81,10 +104,137 @@
         "verification:demand"
       ],
       "evidence_paths": [
-        "turn:claude_subagent_a58f1a2c677f7f15b__fbe3c4be221c0357__seq_000200"
+        "turn:5fae585b_69b5_48b8_a350_9232047c60a5__8d13d65fde962f3a__seq_000064"
       ],
-      "excerpt": "The final whole-branch review found a Critical: `./dist/axctl serve` (the COMPILED binary) still hard-crashes. The earlier lazy-import only moved the crash from CLI-boot to serve-time — when `createDurableIngestStream()` runs, it `await import(\"@durable-streams/server\")` which loads native **lmdb**, and lmdb cannot load from a `bun build --compile` single-file binary (`No native build was found for platform=darwin arch=arm64`). The curl `install.sh` path ships this compiled binary and users then run `axctl serve` — so the headline feature crashes for them. Native modules fundamentally can't be",
-      "previous_assistant_excerpt": "Done.\n\n## Report\n\n### The try/catch added\nWrapped `ManagedRuntime.make`, the `serveIngestState` assignment, and `Bun.serve` in a try/catch. `createDurableIngestStream()` stays before the try (it's the resource we must protect; once it returns the port is bound). On catch, teardown order:\n1. `serveIngestState = null` — so no half-dead pair is left reachable by the handler.\n2. `await stream.stop()` (`.catch`-guarded) — frees the just-bound sidecar port.\n3. `await runtime.dispose()` (`.catch`-guarded, only if `runtime` was created — guarded by `if (runtime)`).\n4. `throw err` — rethrow so the fail",
+      "excerpt": "# Autonomous loop check\n\nYou're being invoked on a timer while the user is away or occupied. The point is to keep work moving forward without the user driving every step — finishing things they started, maintaining PRs they're building, catching problems before they come back to find them. You're a steward, not an initiator. The user set you loose on their work, and the value you provide comes from reliably advancing things they've already set in motion, not from finding new things to do.\n\nThe key tension to navigate: the user trusts you enough to run autonomously, but that trust is easily los",
+      "review_status": "pending",
+      "rationale": "",
+      "reviewer": ""
+    },
+    {
+      "candidate_id": "tlm__direction__8f3314057afb943b",
+      "subject_id": "turn:019e76fb_b294_79b2_9bb3_d1ebe3e5d908__cd002bebba66f2ad__seq_000781",
+      "session_id": "session:`019e76fb-b294-79b2-9bb3-d1ebe3e5d908`",
+      "turn_id": "turn:019e76fb_b294_79b2_9bb3_d1ebe3e5d908__cd002bebba66f2ad__seq_000781",
+      "previous_assistant_turn_id": "turn:019e76fb_b294_79b2_9bb3_d1ebe3e5d908__cd002bebba66f2ad__seq_000780",
+      "label_family": "direction",
+      "target": "tooling_preference",
+      "weak_label": "direction",
+      "weak_confidence": 0.82,
+      "weak_sources": [
+        "direction:tooling_preference"
+      ],
+      "evidence_paths": [
+        "turn:019e76fb_b294_79b2_9bb3_d1ebe3e5d908__cd002bebba66f2ad__seq_000781"
+      ],
+      "excerpt": "Isn't both of them depends on each other in order to improve the agent. We need to get analytics and reporting. Other thing was also when we are doing correction classifier, I feel like we needed some sort of like uh a previous context as well not only the user message but what agent was done that caused this message um For example, you use use UV as an example that was a correction when I saw asking like you struggle with uh some Python packages I ask you to use UZ UV um so yeah actually it's kind of a direction thing I give it to",
+      "previous_assistant_excerpt": "The useful version is **not** “classify every turn because ML is cool.” It is: classify only where the label changes a downstream decision.\n\nRight now the strongest classifier target is **feedback/reaction mining**:\n\n- “Did the user accept, reject, revise, or redirect the agent?”\n- “What assistant behavior caused correction?”\n- “Which mistakes repeat across sessions?”\n- “Which guidance or skill usage actually reduces later corrections?”\n- “Which sessions contain useful learning moments worth extracting?”\n- “What should be promoted into AGENTS.md / skills / hooks?”\n\nThat is already supported by",
+      "review_status": "pending",
+      "rationale": "",
+      "reviewer": ""
+    },
+    {
+      "candidate_id": "tlm__approval_or_rejection__47fe6f33bd56dc3e",
+      "subject_id": "turn:019e7c67_9137_77e1_8942_3ad9df5e6308__1a8a78d9ecccb867__seq_001163",
+      "session_id": "session:`019e7c67-9137-77e1-8942-3ad9df5e6308`",
+      "turn_id": "turn:019e7c67_9137_77e1_8942_3ad9df5e6308__1a8a78d9ecccb867__seq_001163",
+      "previous_assistant_turn_id": "turn:019e7c67_9137_77e1_8942_3ad9df5e6308__1a8a78d9ecccb867__seq_001162",
+      "label_family": "approval_or_rejection",
+      "target": "approval",
+      "weak_label": "approval_or_rejection",
+      "weak_confidence": 0.78,
+      "weak_sources": [
+        "approval_or_rejection:approval"
+      ],
+      "evidence_paths": [
+        "turn:019e7c67_9137_77e1_8942_3ad9df5e6308__1a8a78d9ecccb867__seq_001163"
+      ],
+      "excerpt": "approved",
+      "previous_assistant_excerpt": "Yes. Proposed design:\n\nUse one inspector renderer for both local and shared sessions.\n\nApproach:\n- Extend `AxSessionShare` so each shared turn can optionally include the same `content` shape used by local `SessionInspectPayload`.\n- Update `axctl share` exporter to fetch `content_document` / `content_block` / `content_atom` data for the session and attach it per turn.\n- Update `share-inspect.tsx` to stop using a reduced share-only turn shape and instead hydrate the same `InspectTurnDto.content` path that `session-inspect.tsx` already renders.\n- Keep compatibility: old shares without `content` s",
+      "review_status": "pending",
+      "rationale": "",
+      "reviewer": ""
+    },
+    {
+      "candidate_id": "tlm__correction__18e615937596ee90",
+      "subject_id": "turn:019e729a_d8f2_7312_888e_dbbd9dcdf944__a942095a4f5b735a__seq_000003",
+      "session_id": "session:`019e729a-d8f2-7312-888e-dbbd9dcdf944`",
+      "turn_id": "turn:019e729a_d8f2_7312_888e_dbbd9dcdf944__a942095a4f5b735a__seq_000003",
+      "previous_assistant_turn_id": "turn:019e729a_d8f2_7312_888e_dbbd9dcdf944__a942095a4f5b735a__seq_000002",
+      "label_family": "correction",
+      "target": "wrong_output",
+      "weak_label": "correction",
+      "weak_confidence": 0.74,
+      "weak_sources": [
+        "correction:wrong_output"
+      ],
+      "evidence_paths": [
+        "turn:019e729a_d8f2_7312_888e_dbbd9dcdf944__a942095a4f5b735a__seq_000003"
+      ],
+      "excerpt": "You are implementing Task 4 from the approved plan in /Users/necmttn/Projects/ax/.worktrees/local-agent-providers.\n\nContext:\n- You are not alone in the codebase. Do not revert changes by others.\n- Tasks 1-3 are committed. Use existing provider event writers and stage shell in `src/ingest/pi.ts`.\n- Work only in Task 4 files unless absolutely necessary for imports/tests.\n\nTask 4: Pi JSONL Tree Adapter\n\nFiles you own:\n- Modify: `src/ingest/pi.ts`\n- Create/modify: `src/ingest/pi.test.ts`\n\nRequirements:\n1. Add Pi extraction fixtures/tests:\n   - `__testExtractPiJsonlLines(lines)` extracts session he",
+      "previous_assistant_excerpt": "# AGENTS.md instructions for /Users/necmttn/Projects/ax\n\n<INSTRUCTIONS>\n# CLAUDE.md\n\nGuidance for Claude Code and other AI assistants working in this repo.\n\n## What this is\n\n`ax` - local taste & telemetry graph for AI coding agents. Ingests Claude Code transcripts (`~/.claude/projects/`) + Codex transcripts (`~/.codex/sessions/`) + installed skills (`~/.claude/skills/`, `~/.agents/skills/`, plugin caches) into a dedicated SurrealDB instance. CLI surfaces \"what skills/tools you actually use\" on demand.\n\n## Stack\n\n- **Runtime**: bun ≥ 1.3\n- **Language**: TypeScript (strict, `module: preserve`, `",
+      "review_status": "pending",
+      "rationale": "",
+      "reviewer": ""
+    },
+    {
+      "candidate_id": "tlm__verification__25fbb4987b654383",
+      "subject_id": "turn:384a3cce_16bd_4e29_804f_2b1e072a31ad__7a6f7359e2c43e27__seq_000260",
+      "session_id": "session:`384a3cce-16bd-4e29-804f-2b1e072a31ad`",
+      "turn_id": "turn:384a3cce_16bd_4e29_804f_2b1e072a31ad__7a6f7359e2c43e27__seq_000260",
+      "label_family": "verification",
+      "target": "verification_demand",
+      "weak_label": "verification",
+      "weak_confidence": 0.84,
+      "weak_sources": [
+        "verification:demand"
+      ],
+      "evidence_paths": [
+        "turn:384a3cce_16bd_4e29_804f_2b1e072a31ad__7a6f7359e2c43e27__seq_000260"
+      ],
+      "excerpt": "# Simplify: Code Review and Cleanup\n\nReview all changed files for reuse, quality, and efficiency. Fix any issues found.\n\n## Phase 1: Identify Changes\n\nRun `git diff` (or `git diff HEAD` if there are staged changes) to see what changed. If there are no git changes, review the most recently modified files that the user mentioned or that you edited earlier in this conversation.\n\n## Phase 2: Launch Three Review Agents in Parallel\n\nUse the Agent tool to launch all three agents concurrently in a single message. Pass each agent the full diff so it has the complete context.\n\n### Agent 1: Code Reuse Re",
+      "review_status": "pending",
+      "rationale": "",
+      "reviewer": ""
+    },
+    {
+      "candidate_id": "tlm__direction__aa4afcd194999e22",
+      "subject_id": "turn:019e5ee1_2d1d_7c83_b61e_3339f3d70d82__c895d1b2ac39f1d7__seq_000003",
+      "session_id": "session:`019e5ee1-2d1d-7c83-b61e-3339f3d70d82`",
+      "turn_id": "turn:019e5ee1_2d1d_7c83_b61e_3339f3d70d82__c895d1b2ac39f1d7__seq_000003",
+      "previous_assistant_turn_id": "turn:019e5ee1_2d1d_7c83_b61e_3339f3d70d82__c895d1b2ac39f1d7__seq_000002",
+      "label_family": "direction",
+      "target": "tooling_preference",
+      "weak_label": "direction",
+      "weak_confidence": 0.82,
+      "weak_sources": [
+        "direction:tooling_preference"
+      ],
+      "evidence_paths": [
+        "turn:019e5ee1_2d1d_7c83_b61e_3339f3d70d82__c895d1b2ac39f1d7__seq_000003"
+      ],
+      "excerpt": "You are implementing Tasks 1-3 from docs/superpowers/plans/2026-05-25-ailifestory-hybrid-soft-testing.md in /Users/necmttn/Projects/apps.\n\nContext:\n- Repo uses Bun. Follow AGENTS.md: use bun/bunx, not npm/yarn/pnpm.\n- Worktree is dirty with unrelated recording-lifecycle changes. You are not alone in the codebase. Do not revert or modify unrelated changes. Only edit your owned files.\n- Owned files for this task:\n  - apps/ailifestory/api/src/rpc/admin/schema.ts\n  - apps/ailifestory/api/src/rpc/admin/dev-scenario.ts (create)\n  - apps/ailifestory/api/src/rpc/admin/handlers.ts\n  - apps/ailifestory/",
+      "previous_assistant_excerpt": "# AGENTS.md instructions for /Users/necmttn/Projects/apps\n\n<INSTRUCTIONS>\n\nDefault to using Bun instead of Node.js.\n\n- Use `bun <file>` instead of `node <file>` or `ts-node <file>`\n- Use `bun test` instead of `jest` or `vitest`\n- Use `bun build <file.html|file.ts|file.css>` instead of `webpack` or `esbuild`\n- Use `bun install` instead of `npm install` or `yarn install` or `pnpm install`\n- Use `bun run <script>` instead of `npm run <script>` or `yarn run <script>` or `pnpm run <script>`\n- Use `bunx <package> <command>` instead of `npx <package> <command>`\n- Bun automatically loads .env, so don'",
+      "review_status": "pending",
+      "rationale": "",
+      "reviewer": ""
+    },
+    {
+      "candidate_id": "tlm__approval_or_rejection__496fd078bfd181d1",
+      "subject_id": "turn:1688d3d6_bdde_4abb_9d65_c8b14ce01684__6246daa634ef96bd__seq_001054",
+      "session_id": "session:`1688d3d6-bdde-4abb-9d65-c8b14ce01684`",
+      "turn_id": "turn:1688d3d6_bdde_4abb_9d65_c8b14ce01684__6246daa634ef96bd__seq_001054",
+      "label_family": "approval_or_rejection",
+      "target": "approval",
+      "weak_label": "approval_or_rejection",
+      "weak_confidence": 0.78,
+      "weak_sources": [
+        "approval_or_rejection:approval"
+      ],
+      "evidence_paths": [
+        "turn:1688d3d6_bdde_4abb_9d65_c8b14ce01684__6246daa634ef96bd__seq_001054"
+      ],
+      "excerpt": "merge it.",
       "review_status": "pending",
       "rationale": "",
       "reviewer": ""
@@ -112,10 +262,11 @@
       "reviewer": ""
     },
     {
-      "candidate_id": "tlm__verification__20c6e0098736ff35",
-      "subject_id": "turn:c5da4876_a2ce_4862_83ba_2c521acc7694__f9c0c1f21e149989__seq_000028",
-      "session_id": "session:`c5da4876-a2ce-4862-83ba-2c521acc7694`",
-      "turn_id": "turn:c5da4876_a2ce_4862_83ba_2c521acc7694__f9c0c1f21e149989__seq_000028",
+      "candidate_id": "tlm__verification__29e48483bd4e36b8",
+      "subject_id": "turn:019e77a0_7b71_7c21_90a2_89dc1339be97__e7290984e7f2031d__seq_000003",
+      "session_id": "session:`019e77a0-7b71-7c21-90a2-89dc1339be97`",
+      "turn_id": "turn:019e77a0_7b71_7c21_90a2_89dc1339be97__e7290984e7f2031d__seq_000003",
+      "previous_assistant_turn_id": "turn:019e77a0_7b71_7c21_90a2_89dc1339be97__e7290984e7f2031d__seq_000002",
       "label_family": "verification",
       "target": "verification_demand",
       "weak_label": "verification",
@@ -124,9 +275,52 @@
         "verification:demand"
       ],
       "evidence_paths": [
-        "turn:c5da4876_a2ce_4862_83ba_2c521acc7694__f9c0c1f21e149989__seq_000028"
+        "turn:019e77a0_7b71_7c21_90a2_89dc1339be97__e7290984e7f2031d__seq_000003"
       ],
-      "excerpt": "Base directory for this skill: /Users/necmttn/.claude/plugins/cache/claude-plugins-official/superpowers/5.1.0/skills/executing-plans\n\n# Executing Plans\n\n## Overview\n\nLoad plan, review critically, execute all tasks, report when complete.\n\n**Announce at start:** \"I'm using the executing-plans skill to implement this plan.\"\n\n**Note:** Tell your human partner that Superpowers works much better with access to subagents. The quality of its work will be significantly higher if run on a platform with subagent support (such as Claude Code or Codex). If subagents are available, use superpowers:subagent-",
+      "excerpt": "You are working in repo /Users/necmttn/Projects/ax on GitHub issue https://github.com/Necmttn/ax/issues/88: \"Extract OpenCode tool calls and invocation edges\".\n\nGoal: implement the issue end-to-end, verify, commit, push a branch, and open a PR linked to #88.\n\nContext:\n- OpenCode ingest currently lives in src/ingest/opencode.ts.\n- It reads ~/.local/share/opencode/opencode.db or AX_OPENCODE_DIR/opencode.db.\n- The taxonomy currently says OpenCode normalizes sessions/provider events/turns, but does not yet emit concrete tool_call/invoked rows.\n- Shared tool-call writers live around src/ingest/evid",
+      "previous_assistant_excerpt": "# AGENTS.md instructions for /Users/necmttn/Projects/ax\n\n<INSTRUCTIONS>\n# CLAUDE.md\n\nGuidance for Claude Code and other AI assistants working in this repo.\n\n## What this is\n\n`ax` - local taste & telemetry graph for AI coding agents. Ingests Claude Code transcripts (`~/.claude/projects/`) + Codex transcripts (`~/.codex/sessions/`) + installed skills (`~/.claude/skills/`, `~/.agents/skills/`, plugin caches) into a dedicated SurrealDB instance. CLI surfaces \"what skills/tools you actually use\" on demand.\n\n## Stack\n\n- **Runtime**: bun ≥ 1.3\n- **Language**: TypeScript (strict, `module: preserve`, `",
+      "review_status": "pending",
+      "rationale": "",
+      "reviewer": ""
+    },
+    {
+      "candidate_id": "tlm__direction__1017b0f2501624a3",
+      "subject_id": "turn:019e5cbf_55fc_7891_b546_00b141368e3c__9a8054257ec38324__seq_000003",
+      "session_id": "session:`019e5cbf-55fc-7891-b546-00b141368e3c`",
+      "turn_id": "turn:019e5cbf_55fc_7891_b546_00b141368e3c__9a8054257ec38324__seq_000003",
+      "previous_assistant_turn_id": "turn:019e5cbf_55fc_7891_b546_00b141368e3c__9a8054257ec38324__seq_000002",
+      "label_family": "direction",
+      "target": "stated_preference",
+      "weak_label": "direction",
+      "weak_confidence": 0.7,
+      "weak_sources": [
+        "intent:preference"
+      ],
+      "evidence_paths": [
+        "turn:019e5cbf_55fc_7891_b546_00b141368e3c__9a8054257ec38324__seq_000003"
+      ],
+      "excerpt": "Spec compliance review for Task 2. Do not edit files. Ignore unrelated dirty files outside scoped files:\n- apps/ailifestory/api/src/mobile/handlers.ts\n- apps/ailifestory/api/src/mobile/handlers.test.ts\n\nReview current scoped diff against Task 2 requirements:\n- Add test `voice_message_submit does not include unanswered prompts in follow-up history` near Task 1 test, using existingNextQuestion only and asserting generator input history is [] and does not contain unanswered prompt text.\n- Add `loadInterviewContextTurns` after `generateSubmitNextQuestionText`, using submitDbTry, querying circleQue",
+      "previous_assistant_excerpt": "# AGENTS.md instructions for /Users/necmttn/Projects/apps\n\n<INSTRUCTIONS>\n\nDefault to using Bun instead of Node.js.\n\n- Use `bun <file>` instead of `node <file>` or `ts-node <file>`\n- Use `bun test` instead of `jest` or `vitest`\n- Use `bun build <file.html|file.ts|file.css>` instead of `webpack` or `esbuild`\n- Use `bun install` instead of `npm install` or `yarn install` or `pnpm install`\n- Use `bun run <script>` instead of `npm run <script>` or `yarn run <script>` or `pnpm run <script>`\n- Use `bunx <package> <command>` instead of `npx <package> <command>`\n- Bun automatically loads .env, so don'",
+      "review_status": "pending",
+      "rationale": "",
+      "reviewer": ""
+    },
+    {
+      "candidate_id": "tlm__approval_or_rejection__531a1d0d3ee9817d",
+      "subject_id": "turn:5845d8a3_73bb_42c1_8a89_c1a3441609b9__761efe5bcbb8f70c__seq_000493",
+      "session_id": "session:`5845d8a3-73bb-42c1-8a89-c1a3441609b9`",
+      "turn_id": "turn:5845d8a3_73bb_42c1_8a89_c1a3441609b9__761efe5bcbb8f70c__seq_000493",
+      "label_family": "approval_or_rejection",
+      "target": "approval",
+      "weak_label": "approval_or_rejection",
+      "weak_confidence": 0.78,
+      "weak_sources": [
+        "approval_or_rejection:approval"
+      ],
+      "evidence_paths": [
+        "turn:5845d8a3_73bb_42c1_8a89_c1a3441609b9__761efe5bcbb8f70c__seq_000493"
+      ],
+      "excerpt": "ship it.",
       "review_status": "pending",
       "rationale": "",
       "reviewer": ""
@@ -154,10 +348,10 @@
       "reviewer": ""
     },
     {
-      "candidate_id": "tlm__verification__2bda9bdd50ea6d34",
-      "subject_id": "turn:298b993e_f388_4f55_8e6b_281cfcb941d4__5efea4118be5e6dd__seq_000016",
-      "session_id": "session:`298b993e-f388-4f55-8e6b-281cfcb941d4`",
-      "turn_id": "turn:298b993e_f388_4f55_8e6b_281cfcb941d4__5efea4118be5e6dd__seq_000016",
+      "candidate_id": "tlm__verification__2f3f1f30a1df19b",
+      "subject_id": "turn:ab18a0ea_99f4_4df7_b200_43e0da82fd5f__f9c51d69a9b1027c__seq_000078",
+      "session_id": "session:`ab18a0ea-99f4-4df7-b200-43e0da82fd5f`",
+      "turn_id": "turn:ab18a0ea_99f4_4df7_b200_43e0da82fd5f__f9c51d69a9b1027c__seq_000078",
       "label_family": "verification",
       "target": "verification_demand",
       "weak_label": "verification",
@@ -166,19 +360,59 @@
         "verification:demand"
       ],
       "evidence_paths": [
-        "turn:298b993e_f388_4f55_8e6b_281cfcb941d4__5efea4118be5e6dd__seq_000016"
+        "turn:ab18a0ea_99f4_4df7_b200_43e0da82fd5f__f9c51d69a9b1027c__seq_000078"
       ],
-      "excerpt": "Base directory for this skill: /Users/necmttn/.claude/plugins/cache/claude-plugins-official/superpowers/5.1.0/skills/subagent-driven-development\n\n# Subagent-Driven Development\n\nExecute plan by dispatching fresh subagent per task, with two-stage review after each: spec compliance review first, then code quality review.\n\n**Why subagents:** You delegate tasks to specialized agents with isolated context. By precisely crafting their instructions and context, you ensure they stay focused and succeed at their task. They should never inherit your session's context or history — you construct exactly wh",
+      "excerpt": "can we improve the tweets base on this feedback doesn't have to be all of it just take the good parts. \n\n---\n\nYeah — this screenshot changes the angle. I’d **drop the “you write JS” framing** unless you’re specifically talking about a lower-level API. The stronger point is:\n\n**Claude writes the orchestration harness itself, per task.**\n\nOfficial framing backs that up: Claude dynamically writes orchestration scripts, fans work out across tens to hundreds of subagents, checks results before returning, and `ultracode` lets Claude decide when to use this workflow mode. ([Claude][1])\n\nHere’s a bett",
       "review_status": "pending",
       "rationale": "",
       "reviewer": ""
     },
     {
-      "candidate_id": "tlm__correction__2b9a715dac32ddb9",
-      "subject_id": "turn:ad2d466d_0227_419f_b0a8_1bce6ff43d6d__379cc4290e649f3d__seq_001168",
-      "session_id": "session:`ad2d466d-0227-419f-b0a8-1bce6ff43d6d`",
-      "turn_id": "turn:ad2d466d_0227_419f_b0a8_1bce6ff43d6d__379cc4290e649f3d__seq_001168",
-      "previous_assistant_turn_id": "turn:ad2d466d_0227_419f_b0a8_1bce6ff43d6d__379cc4290e649f3d__seq_001167",
+      "candidate_id": "tlm__direction__110b99fa3dbd2dd0",
+      "subject_id": "turn:a7604ce9_ec51_40f8_9bdb_3f75ae54b59c__8beed1c50ace8988__seq_000945",
+      "session_id": "session:`a7604ce9-ec51-40f8-9bdb-3f75ae54b59c`",
+      "turn_id": "turn:a7604ce9_ec51_40f8_9bdb_3f75ae54b59c__8beed1c50ace8988__seq_000945",
+      "label_family": "direction",
+      "target": "stated_preference",
+      "weak_label": "direction",
+      "weak_confidence": 0.7,
+      "weak_sources": [
+        "intent:preference"
+      ],
+      "evidence_paths": [
+        "turn:a7604ce9_ec51_40f8_9bdb_3f75ae54b59c__8beed1c50ace8988__seq_000945"
+      ],
+      "excerpt": "yes please",
+      "review_status": "pending",
+      "rationale": "",
+      "reviewer": ""
+    },
+    {
+      "candidate_id": "tlm__approval_or_rejection__93c82af3732d1026",
+      "subject_id": "turn:11fb5aad_2d45_45ef_9f94_7738ce250327__ab7c9d8b15cbcb04__seq_001430",
+      "session_id": "session:`11fb5aad-2d45-45ef-9f94-7738ce250327`",
+      "turn_id": "turn:11fb5aad_2d45_45ef_9f94_7738ce250327__ab7c9d8b15cbcb04__seq_001430",
+      "label_family": "approval_or_rejection",
+      "target": "approval",
+      "weak_label": "approval_or_rejection",
+      "weak_confidence": 0.78,
+      "weak_sources": [
+        "approval_or_rejection:approval"
+      ],
+      "evidence_paths": [
+        "turn:11fb5aad_2d45_45ef_9f94_7738ce250327__ab7c9d8b15cbcb04__seq_001430"
+      ],
+      "excerpt": "lets merge it.",
+      "review_status": "pending",
+      "rationale": "",
+      "reviewer": ""
+    },
+    {
+      "candidate_id": "tlm__correction__323d413be15f399a",
+      "subject_id": "turn:019e73a6_adfd_72f0_b9fb_8fd338f1a3b3__4169c10262f8f275__seq_000003",
+      "session_id": "session:`019e73a6-adfd-72f0-b9fb-8fd338f1a3b3`",
+      "turn_id": "turn:019e73a6_adfd_72f0_b9fb_8fd338f1a3b3__4169c10262f8f275__seq_000003",
+      "previous_assistant_turn_id": "turn:019e73a6_adfd_72f0_b9fb_8fd338f1a3b3__4169c10262f8f275__seq_000002",
       "label_family": "correction",
       "target": "wrong_output",
       "weak_label": "correction",
@@ -187,19 +421,20 @@
         "correction:wrong_output"
       ],
       "evidence_paths": [
-        "turn:ad2d466d_0227_419f_b0a8_1bce6ff43d6d__379cc4290e649f3d__seq_001168"
+        "turn:019e73a6_adfd_72f0_b9fb_8fd338f1a3b3__4169c10262f8f275__seq_000003"
       ],
-      "excerpt": "# /loop — schedule a recurring or self-paced prompt\n\nParse the input below into `[interval] <prompt…>` and schedule it.\n\n## Parsing (in priority order)\n\n1. **Leading token**: if the first whitespace-delimited token matches `^\\d+[smhd]$` (e.g. `5m`, `2h`), that's the interval; the rest is the prompt.\n2. **Trailing \"every\" clause**: otherwise, if the input ends with `every <N><unit>` or `every <N> <unit-word>` (e.g. `every 20m`, `every 5 minutes`, `every 2 hours`), extract that as the interval and strip it from the prompt. Only match when what follows \"every\" is a time expression — `check every ",
-      "previous_assistant_excerpt": "<command-message>loop</command-message>\n<command-name>/loop</command-name>\n<command-args>Execute the ingest-speed optimization mission defined in docs/missions/2026-06-02-ingest-speed-optimization.md. Self-paced: do ONE mission iteration per firing, then schedule the next, until ≥100 attempts logged AND diminishing returns — then stop scheduling and write REPORT.md. The scaffold (perf/ingest-speed worktree, frozen subset corpus at $HOME/.cache/ax-bench/home, bench SurrealDB on :8531 with data at $HOME/.cache/ax-bench/db, scripts/bench-ingest.ts harness, ATTEMPTS.md, bench-results/) was set up ",
+      "excerpt": "You are implementing Task 1 of the Gist-backed session sharing plan in an isolated worktree.\n\nWorkspace: /Users/necmttn/Projects/ax/.worktrees/gist-session-sharing\nBranch: feat/gist-session-sharing\n\nImportant repo instructions:\n- Use apply_patch for manual edits.\n- Do not revert or touch unrelated files.\n- You are not alone in the codebase; accommodate any existing changes and do not overwrite them.\n- Follow TDD: write failing test first, run it, implement, run targeted test.\n- Commit your task when done.\n- Full `bun run typecheck` currently has pre-existing unrelated failures; do not try to f",
+      "previous_assistant_excerpt": "# AGENTS.md instructions for /Users/necmttn/Projects/ax\n\n<INSTRUCTIONS>\n# CLAUDE.md\n\nGuidance for Claude Code and other AI assistants working in this repo.\n\n## What this is\n\n`ax` - local taste & telemetry graph for AI coding agents. Ingests Claude Code transcripts (`~/.claude/projects/`) + Codex transcripts (`~/.codex/sessions/`) + installed skills (`~/.claude/skills/`, `~/.agents/skills/`, plugin caches) into a dedicated SurrealDB instance. CLI surfaces \"what skills/tools you actually use\" on demand.\n\n## Stack\n\n- **Runtime**: bun ≥ 1.3\n- **Language**: TypeScript (strict, `module: preserve`, `",
       "review_status": "pending",
       "rationale": "",
       "reviewer": ""
     },
     {
-      "candidate_id": "tlm__verification__38f26ce762239349",
-      "subject_id": "turn:claude_subagent_a336ecc7981ef4609__a9e8aa8bfd22b60d__seq_000001",
-      "session_id": "session:`claude-subagent-a336ecc7981ef4609`",
-      "turn_id": "turn:claude_subagent_a336ecc7981ef4609__a9e8aa8bfd22b60d__seq_000001",
+      "candidate_id": "tlm__verification__32e9b3b3eaacbcfc",
+      "subject_id": "turn:019e77a0_4ad5_76e1_97ce_41cf58e5fc0f__a264c3f1f21bfb80__seq_000003",
+      "session_id": "session:`019e77a0-4ad5-76e1-97ce-41cf58e5fc0f`",
+      "turn_id": "turn:019e77a0_4ad5_76e1_97ce_41cf58e5fc0f__a264c3f1f21bfb80__seq_000003",
+      "previous_assistant_turn_id": "turn:019e77a0_4ad5_76e1_97ce_41cf58e5fc0f__a264c3f1f21bfb80__seq_000002",
       "label_family": "verification",
       "target": "verification_demand",
       "weak_label": "verification",
@@ -208,9 +443,134 @@
         "verification:demand"
       ],
       "evidence_paths": [
-        "turn:claude_subagent_a336ecc7981ef4609__a9e8aa8bfd22b60d__seq_000001"
+        "turn:019e77a0_4ad5_76e1_97ce_41cf58e5fc0f__a264c3f1f21bfb80__seq_000003"
       ],
-      "excerpt": "Review whether a server-wiring implementation matches its spec. Be skeptical — verify by reading code, don't trust the report.\n\nWork from: `/Users/necmttn/Projects/ax/.claude/worktrees/live-ingest-durable-streams`\n\n## Spec (Task 5, adapted to the sidecar decision)\nModify `apps/axctl/src/dashboard/server.ts` so `ax serve`:\n1. Starts the Durable Streams sidecar ONCE at server startup via `await createDurableIngestStream()` (from `./ingest-stream-durable.ts`), held for the server lifetime; stops it on shutdown (`stream.stop()`).\n2. Establishes a LONG-LIVED Effect runtime (e.g. `ManagedRuntime`) a",
+      "excerpt": "You are working in repo /Users/necmttn/Projects/ax on GitHub issue https://github.com/Necmttn/ax/issues/87: \"Add a provider parity coverage gate\".\n\nGoal: implement the issue end-to-end, verify, commit, push a branch, and open a PR linked to #87.\n\nContext:\n- ax ingests multiple first-class agent harnesses: Claude, Codex, Pi, OpenCode, Cursor.\n- The taxonomy doc is docs/graph-db-taxonomy.md and now includes a Provider Feature Parity section.\n- The current need is a machine-readable parity gate so docs do not drift and claimed provider features have writers/read paths.\n- Relevant files likely inc",
+      "previous_assistant_excerpt": "# AGENTS.md instructions for /Users/necmttn/Projects/ax\n\n<INSTRUCTIONS>\n# CLAUDE.md\n\nGuidance for Claude Code and other AI assistants working in this repo.\n\n## What this is\n\n`ax` - local taste & telemetry graph for AI coding agents. Ingests Claude Code transcripts (`~/.claude/projects/`) + Codex transcripts (`~/.codex/sessions/`) + installed skills (`~/.claude/skills/`, `~/.agents/skills/`, plugin caches) into a dedicated SurrealDB instance. CLI surfaces \"what skills/tools you actually use\" on demand.\n\n## Stack\n\n- **Runtime**: bun ≥ 1.3\n- **Language**: TypeScript (strict, `module: preserve`, `",
+      "review_status": "pending",
+      "rationale": "",
+      "reviewer": ""
+    },
+    {
+      "candidate_id": "tlm__direction__11b0795a43b979be",
+      "subject_id": "turn:4da77f95_0ec5_4036_933a_c46dbb4b25bf__ba7b9c142fbfed7b__seq_000023",
+      "session_id": "session:`4da77f95-0ec5-4036-933a-c46dbb4b25bf`",
+      "turn_id": "turn:4da77f95_0ec5_4036_933a_c46dbb4b25bf__ba7b9c142fbfed7b__seq_000023",
+      "label_family": "direction",
+      "target": "stated_preference",
+      "weak_label": "direction",
+      "weak_confidence": 0.7,
+      "weak_sources": [
+        "intent:preference"
+      ],
+      "evidence_paths": [
+        "turn:4da77f95_0ec5_4036_933a_c46dbb4b25bf__ba7b9c142fbfed7b__seq_000023"
+      ],
+      "excerpt": "let's do 3 plan via subagent, \nand compare view",
+      "review_status": "pending",
+      "rationale": "",
+      "reviewer": ""
+    },
+    {
+      "candidate_id": "tlm__approval_or_rejection__a1f11d608a0b5ab2",
+      "subject_id": "turn:a532c583_183c_4d9b_81ac_7c5a465298cf__8287e931a5fe1499__seq_000875",
+      "session_id": "session:`a532c583-183c-4d9b-81ac-7c5a465298cf`",
+      "turn_id": "turn:a532c583_183c_4d9b_81ac_7c5a465298cf__8287e931a5fe1499__seq_000875",
+      "label_family": "approval_or_rejection",
+      "target": "approval",
+      "weak_label": "approval_or_rejection",
+      "weak_confidence": 0.78,
+      "weak_sources": [
+        "approval_or_rejection:approval"
+      ],
+      "evidence_paths": [
+        "turn:a532c583_183c_4d9b_81ac_7c5a465298cf__8287e931a5fe1499__seq_000875"
+      ],
+      "excerpt": "Alright, can we merge it and can you give me Gandhan brief what was this briefing?",
+      "review_status": "pending",
+      "rationale": "",
+      "reviewer": ""
+    },
+    {
+      "candidate_id": "tlm__correction__36b75d68be85c148",
+      "subject_id": "turn:019e7435_d30e_7a73_86b1_36527895b57f__865e57566e2838fc__seq_000003",
+      "session_id": "session:`019e7435-d30e-7a73-86b1-36527895b57f`",
+      "turn_id": "turn:019e7435_d30e_7a73_86b1_36527895b57f__865e57566e2838fc__seq_000003",
+      "previous_assistant_turn_id": "turn:019e7435_d30e_7a73_86b1_36527895b57f__865e57566e2838fc__seq_000002",
+      "label_family": "correction",
+      "target": "wrong_output",
+      "weak_label": "correction",
+      "weak_confidence": 0.74,
+      "weak_sources": [
+        "correction:wrong_output"
+      ],
+      "evidence_paths": [
+        "turn:019e7435_d30e_7a73_86b1_36527895b57f__865e57566e2838fc__seq_000003"
+      ],
+      "excerpt": "Implement Task 8 of the Gist-backed session sharing plan in the isolated worktree.\n\nWorkspace: /Users/necmttn/Projects/ax/.worktrees/gist-session-sharing\nBranch: feat/gist-session-sharing\n\nImportant:\n- Use apply_patch for manual edits.\n- Do not revert or touch unrelated files.\n- You are not alone in the codebase; accommodate existing changes.\n- This task is in the `site/` package. Use existing site/TanStack Router patterns.\n- This is frontend work: keep UI professional, restrained, not a marketing hero; avoid nested cards; use stable layouts and readable text.\n- Do not overbuild the graph; sta",
+      "previous_assistant_excerpt": "# AGENTS.md instructions for /Users/necmttn/Projects/ax\n\n<INSTRUCTIONS>\n# CLAUDE.md\n\nGuidance for Claude Code and other AI assistants working in this repo.\n\n## What this is\n\n`ax` - local taste & telemetry graph for AI coding agents. Ingests Claude Code transcripts (`~/.claude/projects/`) + Codex transcripts (`~/.codex/sessions/`) + installed skills (`~/.claude/skills/`, `~/.agents/skills/`, plugin caches) into a dedicated SurrealDB instance. CLI surfaces \"what skills/tools you actually use\" on demand.\n\n## Stack\n\n- **Runtime**: bun ≥ 1.3\n- **Language**: TypeScript (strict, `module: preserve`, `",
+      "review_status": "pending",
+      "rationale": "",
+      "reviewer": ""
+    },
+    {
+      "candidate_id": "tlm__verification__337692ecc79e4044",
+      "subject_id": "turn:019e5cc1_8a5c_79c2_bdb2_15300ea08edc__c0b14eede08a48b1__seq_000003",
+      "session_id": "session:`019e5cc1-8a5c-79c2-bdb2-15300ea08edc`",
+      "turn_id": "turn:019e5cc1_8a5c_79c2_bdb2_15300ea08edc__c0b14eede08a48b1__seq_000003",
+      "previous_assistant_turn_id": "turn:019e5cc1_8a5c_79c2_bdb2_15300ea08edc__c0b14eede08a48b1__seq_000002",
+      "label_family": "verification",
+      "target": "verification_demand",
+      "weak_label": "verification",
+      "weak_confidence": 0.84,
+      "weak_sources": [
+        "verification:demand"
+      ],
+      "evidence_paths": [
+        "turn:019e5cc1_8a5c_79c2_bdb2_15300ea08edc__c0b14eede08a48b1__seq_000003"
+      ],
+      "excerpt": "You are implementing Task 3 from the plan in /Users/necmttn/Projects/apps. You are not alone in the codebase: the worktree is dirty and Task 1+2 already modified handlers.ts and handlers.test.ts. Do not revert unrelated edits. Own only these files for this task:\n- apps/ailifestory/api/src/mobile/handlers.ts\n- apps/ailifestory/api/src/mobile/handlers.test.ts\n\nRepo conventions: default to Bun. Use `bun run test` from apps/ailifestory/api. Use apply_patch for manual edits.\n\nContext: Task 1+2 introduced full-history `NextQuestionInput`, `loadInterviewContextTurns`, and tests are currently passing.",
+      "previous_assistant_excerpt": "# AGENTS.md instructions for /Users/necmttn/Projects/apps\n\n<INSTRUCTIONS>\n\nDefault to using Bun instead of Node.js.\n\n- Use `bun <file>` instead of `node <file>` or `ts-node <file>`\n- Use `bun test` instead of `jest` or `vitest`\n- Use `bun build <file.html|file.ts|file.css>` instead of `webpack` or `esbuild`\n- Use `bun install` instead of `npm install` or `yarn install` or `pnpm install`\n- Use `bun run <script>` instead of `npm run <script>` or `yarn run <script>` or `pnpm run <script>`\n- Use `bunx <package> <command>` instead of `npx <package> <command>`\n- Bun automatically loads .env, so don'",
+      "review_status": "pending",
+      "rationale": "",
+      "reviewer": ""
+    },
+    {
+      "candidate_id": "tlm__direction__12b46b26aca4b453",
+      "subject_id": "turn:fd2bd2ab_7956_441b_8047_82a9017ac76b__648c3a1f2a8b6e95__seq_000032",
+      "session_id": "session:`fd2bd2ab-7956-441b-8047-82a9017ac76b`",
+      "turn_id": "turn:fd2bd2ab_7956_441b_8047_82a9017ac76b__648c3a1f2a8b6e95__seq_000032",
+      "label_family": "direction",
+      "target": "stated_preference",
+      "weak_label": "direction",
+      "weak_confidence": 0.7,
+      "weak_sources": [
+        "intent:preference"
+      ],
+      "evidence_paths": [
+        "turn:fd2bd2ab_7956_441b_8047_82a9017ac76b__648c3a1f2a8b6e95__seq_000032"
+      ],
+      "excerpt": "yes please",
+      "review_status": "pending",
+      "rationale": "",
+      "reviewer": ""
+    },
+    {
+      "candidate_id": "tlm__approval_or_rejection__ae83df336147d642",
+      "subject_id": "turn:2651b3f6_3070_43fe_8d3b_624a0de49fae__0b13c5cc2b1af048__seq_000207",
+      "session_id": "session:`2651b3f6-3070-43fe-8d3b-624a0de49fae`",
+      "turn_id": "turn:2651b3f6_3070_43fe_8d3b_624a0de49fae__0b13c5cc2b1af048__seq_000207",
+      "label_family": "approval_or_rejection",
+      "target": "approval",
+      "weak_label": "approval_or_rejection",
+      "weak_confidence": 0.78,
+      "weak_sources": [
+        "approval_or_rejection:approval"
+      ],
+      "evidence_paths": [
+        "turn:2651b3f6_3070_43fe_8d3b_624a0de49fae__0b13c5cc2b1af048__seq_000207"
+      ],
+      "excerpt": "ship it",
       "review_status": "pending",
       "rationale": "",
       "reviewer": ""
@@ -238,10 +598,10 @@
       "reviewer": ""
     },
     {
-      "candidate_id": "tlm__verification__3b76f13e34add29b",
-      "subject_id": "turn:ad2d466d_0227_419f_b0a8_1bce6ff43d6d__379cc4290e649f3d__seq_000253",
-      "session_id": "session:`ad2d466d-0227-419f-b0a8-1bce6ff43d6d`",
-      "turn_id": "turn:ad2d466d_0227_419f_b0a8_1bce6ff43d6d__379cc4290e649f3d__seq_000253",
+      "candidate_id": "tlm__verification__36f6dbc156bf23dc",
+      "subject_id": "turn:019e791a_19b4_7352_98da_e1b80bdea61f__8c23c3d22aedbf9b__seq_001743",
+      "session_id": "session:`019e791a-19b4-7352-98da-e1b80bdea61f`",
+      "turn_id": "turn:019e791a_19b4_7352_98da_e1b80bdea61f__8c23c3d22aedbf9b__seq_001743",
       "label_family": "verification",
       "target": "verification_demand",
       "weak_label": "verification",
@@ -250,18 +610,82 @@
         "verification:demand"
       ],
       "evidence_paths": [
-        "turn:ad2d466d_0227_419f_b0a8_1bce6ff43d6d__379cc4290e649f3d__seq_000253"
+        "turn:019e791a_19b4_7352_98da_e1b80bdea61f__8c23c3d22aedbf9b__seq_001743"
       ],
-      "excerpt": "Base directory for this skill: /Users/necmttn/.claude/plugins/cache/claude-plugins-official/superpowers/5.1.0/skills/finishing-a-development-branch\n\n# Finishing a Development Branch\n\n## Overview\n\nGuide completion of development work by presenting clear options and handling chosen workflow.\n\n**Core principle:** Verify tests → Detect environment → Present options → Execute choice → Clean up.\n\n**Announce at start:** \"I'm using the finishing-a-development-branch skill to complete this work.\"\n\n## The Process\n\n### Step 1: Verify Tests\n\n**Before presenting options, verify tests pass:**\n\n```bash\n# Run",
+      "excerpt": "Verify the changes, whether it helps or not, it might be behind, so make sure it's applied correctly on top.",
       "review_status": "pending",
       "rationale": "",
       "reviewer": ""
     },
     {
-      "candidate_id": "tlm__verification__40a6ad05de832587",
-      "subject_id": "turn:f87064d2_3553_4c30_ae5c_c8714461103a__c058eb75a0c63218__seq_000011",
-      "session_id": "session:`f87064d2-3553-4c30-ae5c-c8714461103a`",
-      "turn_id": "turn:f87064d2_3553_4c30_ae5c_c8714461103a__c058eb75a0c63218__seq_000011",
+      "candidate_id": "tlm__direction__12da307a3125df5d",
+      "subject_id": "turn:019e7427_b6e7_7e01_9cd9_3a4806a565f7__eec16813a3239797__seq_000572",
+      "session_id": "session:`019e7427-b6e7-7e01-9cd9-3a4806a565f7`",
+      "turn_id": "turn:019e7427_b6e7_7e01_9cd9_3a4806a565f7__eec16813a3239797__seq_000572",
+      "previous_assistant_turn_id": "turn:019e7427_b6e7_7e01_9cd9_3a4806a565f7__eec16813a3239797__seq_000571",
+      "label_family": "direction",
+      "target": "stated_preference",
+      "weak_label": "direction",
+      "weak_confidence": 0.7,
+      "weak_sources": [
+        "intent:preference"
+      ],
+      "evidence_paths": [
+        "turn:019e7427_b6e7_7e01_9cd9_3a4806a565f7__eec16813a3239797__seq_000572"
+      ],
+      "excerpt": "can we take advantage of graph db here?",
+      "previous_assistant_excerpt": "I see three viable approaches.\n\nRecommended: **hybrid local-first analysis**\n- Run heuristics over every user + assistant turn.\n- Store labels like `sentiment`, `interaction_act`, `correction_type`, `confidence`, `reasons`.\n- Use optional LLM only for low-confidence or important turns.\n- Best fit because it is cheap, replayable, debuggable, and won’t make ingest dependent on network/model calls.\n\nAlternative 1: **heuristics only**\n- Extend `intent_kind`, `ask_outcome`, and `user_message_ngram`.\n- Fast and simple.\n- But weak for semantic meaning like “this sounds disappointed but does not conta",
+      "review_status": "pending",
+      "rationale": "",
+      "reviewer": ""
+    },
+    {
+      "candidate_id": "tlm__approval_or_rejection__b2635c9edf88c101",
+      "subject_id": "turn:11fb5aad_2d45_45ef_9f94_7738ce250327__ab7c9d8b15cbcb04__seq_001185",
+      "session_id": "session:`11fb5aad-2d45-45ef-9f94-7738ce250327`",
+      "turn_id": "turn:11fb5aad_2d45_45ef_9f94_7738ce250327__ab7c9d8b15cbcb04__seq_001185",
+      "label_family": "approval_or_rejection",
+      "target": "approval",
+      "weak_label": "approval_or_rejection",
+      "weak_confidence": 0.78,
+      "weak_sources": [
+        "approval_or_rejection:approval"
+      ],
+      "evidence_paths": [
+        "turn:11fb5aad_2d45_45ef_9f94_7738ce250327__ab7c9d8b15cbcb04__seq_001185"
+      ],
+      "excerpt": "merge it.",
+      "review_status": "pending",
+      "rationale": "",
+      "reviewer": ""
+    },
+    {
+      "candidate_id": "tlm__correction__546909c9aabd8c36",
+      "subject_id": "turn:019e73bd_a78a_79d3_8357_5f9c8c71bde1__587d2646af3433d4__seq_000003",
+      "session_id": "session:`019e73bd-a78a-79d3-8357-5f9c8c71bde1`",
+      "turn_id": "turn:019e73bd_a78a_79d3_8357_5f9c8c71bde1__587d2646af3433d4__seq_000003",
+      "previous_assistant_turn_id": "turn:019e73bd_a78a_79d3_8357_5f9c8c71bde1__587d2646af3433d4__seq_000002",
+      "label_family": "correction",
+      "target": "wrong_output",
+      "weak_label": "correction",
+      "weak_confidence": 0.74,
+      "weak_sources": [
+        "correction:wrong_output"
+      ],
+      "evidence_paths": [
+        "turn:019e73bd_a78a_79d3_8357_5f9c8c71bde1__587d2646af3433d4__seq_000003"
+      ],
+      "excerpt": "Implement Task 4 of the Gist-backed session sharing plan in the isolated worktree.\n\nWorkspace: /Users/necmttn/Projects/ax/.worktrees/gist-session-sharing\nBranch: feat/gist-session-sharing\n\nImportant:\n- Use apply_patch for manual edits.\n- Do not revert or touch unrelated files.\n- You are not alone in the codebase; accommodate existing changes.\n- Follow TDD: write failing test, run it, implement, run targeted tests, commit.\n- Full `bun run typecheck` has pre-existing unrelated failures; do not fix them.\n- Effect code: use `Effect.gen`/`yield*`, avoid try/catch inside Effect.gen. Existing query h",
+      "previous_assistant_excerpt": "# AGENTS.md instructions for /Users/necmttn/Projects/ax\n\n<INSTRUCTIONS>\n# CLAUDE.md\n\nGuidance for Claude Code and other AI assistants working in this repo.\n\n## What this is\n\n`ax` - local taste & telemetry graph for AI coding agents. Ingests Claude Code transcripts (`~/.claude/projects/`) + Codex transcripts (`~/.codex/sessions/`) + installed skills (`~/.claude/skills/`, `~/.agents/skills/`, plugin caches) into a dedicated SurrealDB instance. CLI surfaces \"what skills/tools you actually use\" on demand.\n\n## Stack\n\n- **Runtime**: bun ≥ 1.3\n- **Language**: TypeScript (strict, `module: preserve`, `",
+      "review_status": "pending",
+      "rationale": "",
+      "reviewer": ""
+    },
+    {
+      "candidate_id": "tlm__verification__4abe35a3b03049b1",
+      "subject_id": "turn:214edfd0_9817_4d10_bab7_6032b333856b__f21d9133d69f62b5__seq_000123",
+      "session_id": "session:`214edfd0-9817-4d10-bab7-6032b333856b`",
+      "turn_id": "turn:214edfd0_9817_4d10_bab7_6032b333856b__f21d9133d69f62b5__seq_000123",
       "label_family": "verification",
       "target": "verification_demand",
       "weak_label": "verification",
@@ -270,18 +694,83 @@
         "verification:demand"
       ],
       "evidence_paths": [
-        "turn:f87064d2_3553_4c30_ae5c_c8714461103a__c058eb75a0c63218__seq_000011"
+        "turn:214edfd0_9817_4d10_bab7_6032b333856b__f21d9133d69f62b5__seq_000123"
       ],
-      "excerpt": "# Observability - Query HyperDX/ClickStack Data\n\nQuery observability data from HyperDX (ClickStack) to investigate production errors, monitor service health, and analyze performance issues.\n\n## Quick Reference\n\n| Task | Tool |\n|------|------|\n| Quick log search | HyperDX API (`scripts/hyperdx.ts`) |\n| Error rate charts | HyperDX API |\n| Trace details | ClickHouse (`kubernetes/scripts/query-hyperdx-traces.sh`) |\n| Cross-service analysis | ClickHouse |\n| Complex aggregations | ClickHouse |\n\n## When to Use Each Tool\n\n### HyperDX API (Quick Searches)\n- Real-time log searches\n- Service metrics dash",
+      "excerpt": "# Update Config Skill\n\nModify Claude Code configuration by updating settings.json files.\n\n## When Hooks Are Required (Not Memory)\n\nIf the user wants something to happen automatically in response to an EVENT, they need a **hook** configured in settings.json. Memory/preferences cannot trigger automated actions.\n\n**These require hooks:**\n- \"Before compacting, ask me what to preserve\" → PreCompact hook\n- \"After writing files, run prettier\" → PostToolUse hook with Write|Edit matcher\n- \"When I run bash commands, log them\" → PreToolUse hook with Bash matcher\n- \"Always run tests after code changes\" → ",
       "review_status": "pending",
       "rationale": "",
       "reviewer": ""
     },
     {
-      "candidate_id": "tlm__verification__41dadba8493244b",
-      "subject_id": "turn:claude_subagent_a19d156a6487a43be__37d2615d9e6774af__seq_000001",
-      "session_id": "session:`claude-subagent-a19d156a6487a43be`",
-      "turn_id": "turn:claude_subagent_a19d156a6487a43be__37d2615d9e6774af__seq_000001",
+      "candidate_id": "tlm__direction__12e5b9fae572a16c",
+      "subject_id": "turn:019e76fe_63ff_7303_a98d_7e6210820b04__45ce27a7ae47a0f9__seq_000359",
+      "session_id": "session:`019e76fe-63ff-7303-a98d-7e6210820b04`",
+      "turn_id": "turn:019e76fe_63ff_7303_a98d_7e6210820b04__45ce27a7ae47a0f9__seq_000359",
+      "previous_assistant_turn_id": "turn:019e76fe_63ff_7303_a98d_7e6210820b04__45ce27a7ae47a0f9__seq_000358",
+      "label_family": "direction",
+      "target": "stated_preference",
+      "weak_label": "direction",
+      "weak_confidence": 0.7,
+      "weak_sources": [
+        "intent:preference"
+      ],
+      "evidence_paths": [
+        "turn:019e76fe_63ff_7303_a98d_7e6210820b04__45ce27a7ae47a0f9__seq_000359"
+      ],
+      "excerpt": "You put P open code and cursor in a single row, it's kinda bothers me. I want to be able to see actually how we where we are getting those data location path, how we are ingesting those. I want that to be clear, visible. They are one of the harness we are supporting. They are no less than Claude or Codex.",
+      "previous_assistant_excerpt": "Here’s the current documentation added for the schema/read-path taxonomy:\n\n[docs/graph-db-taxonomy.md](/Users/necmttn/Projects/ax/docs/graph-db-taxonomy.md)\n\nI also updated the related current docs:\n\n[docs/insights-cli-reference.md](/Users/necmttn/Projects/ax/docs/insights-cli-reference.md)\n\n[docs/how-ax-sees-your-work.mdx](/Users/necmttn/Projects/ax/docs/how-ax-sees-your-work.mdx)\n\n[docs/graph-insight-goal-notes.md](/Users/necmttn/Projects/ax/docs/graph-insight-goal-notes.md)\n\n[docs/repo-file-change-graph-design.md](/Users/necmttn/Projects/ax/docs/repo-file-change-graph-design.md)",
+      "review_status": "pending",
+      "rationale": "",
+      "reviewer": ""
+    },
+    {
+      "candidate_id": "tlm__approval_or_rejection__be6e47deec40d8cd",
+      "subject_id": "turn:e23cf065_7316_46a0_95a7_2f2722065565__c74f3702ba85f9c2__seq_000134",
+      "session_id": "session:`e23cf065-7316-46a0-95a7-2f2722065565`",
+      "turn_id": "turn:e23cf065_7316_46a0_95a7_2f2722065565__c74f3702ba85f9c2__seq_000134",
+      "label_family": "approval_or_rejection",
+      "target": "approval",
+      "weak_label": "approval_or_rejection",
+      "weak_confidence": 0.78,
+      "weak_sources": [
+        "approval_or_rejection:approval"
+      ],
+      "evidence_paths": [
+        "turn:e23cf065_7316_46a0_95a7_2f2722065565__c74f3702ba85f9c2__seq_000134"
+      ],
+      "excerpt": "looks good subagent driven development",
+      "review_status": "pending",
+      "rationale": "",
+      "reviewer": ""
+    },
+    {
+      "candidate_id": "tlm__correction__5560ab4877bd86c4",
+      "subject_id": "turn:019e5cc4_9e2b_7280_8963_a8daed252e9f__a8a415bf071c0ab8__seq_000003",
+      "session_id": "session:`019e5cc4-9e2b-7280-8963-a8daed252e9f`",
+      "turn_id": "turn:019e5cc4_9e2b_7280_8963_a8daed252e9f__a8a415bf071c0ab8__seq_000003",
+      "previous_assistant_turn_id": "turn:019e5cc4_9e2b_7280_8963_a8daed252e9f__a8a415bf071c0ab8__seq_000002",
+      "label_family": "correction",
+      "target": "wrong_output",
+      "weak_label": "correction",
+      "weak_confidence": 0.74,
+      "weak_sources": [
+        "correction:wrong_output"
+      ],
+      "evidence_paths": [
+        "turn:019e5cc4_9e2b_7280_8963_a8daed252e9f__a8a415bf071c0ab8__seq_000003"
+      ],
+      "excerpt": "You are implementing Task 4 from the plan in /Users/necmttn/Projects/apps. You are not alone in the codebase: the worktree is dirty and Task 1-3 already modified handlers.ts and handlers.test.ts. Do not revert unrelated edits. Own only this file for this task unless absolutely necessary:\n- apps/ailifestory/api/src/mobile/handlers.test.ts\n\nRepo conventions: default to Bun. Use `bun run test` from apps/ailifestory/api. Use apply_patch for manual edits.\n\nContext: Task 1-3 are implemented and tests pass. Task 4 only strengthens idempotency and feed assertions.\n\nTask 4 full spec:\n\n### Task 4: Prese",
+      "previous_assistant_excerpt": "# AGENTS.md instructions for /Users/necmttn/Projects/apps\n\n<INSTRUCTIONS>\n\nDefault to using Bun instead of Node.js.\n\n- Use `bun <file>` instead of `node <file>` or `ts-node <file>`\n- Use `bun test` instead of `jest` or `vitest`\n- Use `bun build <file.html|file.ts|file.css>` instead of `webpack` or `esbuild`\n- Use `bun install` instead of `npm install` or `yarn install` or `pnpm install`\n- Use `bun run <script>` instead of `npm run <script>` or `yarn run <script>` or `pnpm run <script>`\n- Use `bunx <package> <command>` instead of `npx <package> <command>`\n- Bun automatically loads .env, so don'",
+      "review_status": "pending",
+      "rationale": "",
+      "reviewer": ""
+    },
+    {
+      "candidate_id": "tlm__verification__5e6d5464f2892b82",
+      "subject_id": "turn:019e73a6_adfd_72f0_b9fb_8fd338f1a3b3__4169c10262f8f275__seq_000072",
+      "session_id": "session:`019e73a6-adfd-72f0-b9fb-8fd338f1a3b3`",
+      "turn_id": "turn:019e73a6_adfd_72f0_b9fb_8fd338f1a3b3__4169c10262f8f275__seq_000072",
+      "previous_assistant_turn_id": "turn:019e73a6_adfd_72f0_b9fb_8fd338f1a3b3__4169c10262f8f275__seq_000071",
       "label_family": "verification",
       "target": "verification_demand",
       "weak_label": "verification",
@@ -290,18 +779,84 @@
         "verification:demand"
       ],
       "evidence_paths": [
-        "turn:claude_subagent_a19d156a6487a43be__37d2615d9e6774af__seq_000001"
+        "turn:019e73a6_adfd_72f0_b9fb_8fd338f1a3b3__4169c10262f8f275__seq_000072"
       ],
-      "excerpt": "Review whether an implementation matches its spec. Be skeptical — verify by reading code + running, don't trust the report.\n\nWork from: `/Users/necmttn/Projects/ax/.claude/worktrees/live-ingest-durable-streams`\n\n## Background\nTask 3 implements the Durable Streams backing for an `IngestStreamBus`. Per the Task 0 research (`docs/superpowers/research/durable-streams-api.md`, committed), the integration mode is **(B) Sidecar**: `@durable-streams/server`'s `DurableStreamTestServer` owns its own port; the browser reads it directly; there is NO mountable `(Request)=>Response` handler. So the original",
+      "excerpt": "Spec review requested changes for Task 1.\n\nFinding:\n- `src/share/artifact.test.ts` does not verify deterministic defaults from `minimalShareArtifact`: `exported_at`, `ax_version`, zeroed `stats`, empty `timeline/files/graph`, empty `derived`, and `redactions { applied: false, rules: [] }`.\n\nPlease update the Task 1 tests to cover these defaults, run `bun test src/share/artifact.test.ts`, and commit the fix. Do not touch unrelated files.\n\nFinal response format:\n- Status\n- Summary\n- Tests\n- Commit SHA",
+      "previous_assistant_excerpt": "Status: DONE\n\nSummary of changes:\n- Added `src/share/artifact.ts` with V1 share artifact types, minimal artifact builder, and runtime validation.\n- Added `src/share/artifact.test.ts` with the required minimal artifact and unsupported schema version tests.\n- Committed as `0208826`.\n\nTests run and results:\n- Red: `bun test src/share/artifact.test.ts` failed because `./artifact.ts` was missing.\n- Green: `bun test src/share/artifact.test.ts` passed: 2 pass, 0 fail.\n- Final verification: `bun test src/share/artifact.test.ts` passed: 2 pass, 0 fail.\n\nCommit SHA:\n- `0208826`\n\nConcerns:\n- None. Full `",
       "review_status": "pending",
       "rationale": "",
       "reviewer": ""
     },
     {
-      "candidate_id": "tlm__verification__432bd1a6d8bef891",
-      "subject_id": "turn:ad2d466d_0227_419f_b0a8_1bce6ff43d6d__379cc4290e649f3d__seq_000012",
-      "session_id": "session:`ad2d466d-0227-419f-b0a8-1bce6ff43d6d`",
-      "turn_id": "turn:ad2d466d_0227_419f_b0a8_1bce6ff43d6d__379cc4290e649f3d__seq_000012",
+      "candidate_id": "tlm__direction__1427f8261e95b80b",
+      "subject_id": "turn:8c1a1209_11ec_48e9_9a2f_154c0dcb9d29__d2644989ab5b6d20__seq_000777",
+      "session_id": "session:`8c1a1209-11ec-48e9-9a2f-154c0dcb9d29`",
+      "turn_id": "turn:8c1a1209_11ec_48e9_9a2f_154c0dcb9d29__d2644989ab5b6d20__seq_000777",
+      "label_family": "direction",
+      "target": "stated_preference",
+      "weak_label": "direction",
+      "weak_confidence": 0.7,
+      "weak_sources": [
+        "intent:preference"
+      ],
+      "evidence_paths": [
+        "turn:8c1a1209_11ec_48e9_9a2f_154c0dcb9d29__d2644989ab5b6d20__seq_000777"
+      ],
+      "excerpt": "yes please",
+      "review_status": "pending",
+      "rationale": "",
+      "reviewer": ""
+    },
+    {
+      "candidate_id": "tlm__approval_or_rejection__e8272ba635f6e185",
+      "subject_id": "turn:019e7c67_9137_77e1_8942_3ad9df5e6308__1a8a78d9ecccb867__seq_000154",
+      "session_id": "session:`019e7c67-9137-77e1-8942-3ad9df5e6308`",
+      "turn_id": "turn:019e7c67_9137_77e1_8942_3ad9df5e6308__1a8a78d9ecccb867__seq_000154",
+      "previous_assistant_turn_id": "turn:019e7c67_9137_77e1_8942_3ad9df5e6308__1a8a78d9ecccb867__seq_000153",
+      "label_family": "approval_or_rejection",
+      "target": "approval",
+      "weak_label": "approval_or_rejection",
+      "weak_confidence": 0.78,
+      "weak_sources": [
+        "approval_or_rejection:approval"
+      ],
+      "evidence_paths": [
+        "turn:019e7c67_9137_77e1_8942_3ad9df5e6308__1a8a78d9ecccb867__seq_000154"
+      ],
+      "excerpt": "Alright, so that has been built before but it's not merged yet. Can we merge it?",
+      "previous_assistant_excerpt": "Studio is live here:\n\nhttps://ax.necmttn.com/studio/?endpoint=http%3A%2F%2F127.0.0.1%3A1738\n\nLocal API is already running on `:1738` and reports:\n\n```json\n{\"version\":\"0.3.0\",\"api_version\":1}\n```\n\nFor the Gist architecture: the design we set up is documented at:\n\n[2026-05-29-gist-backed-session-sharing-design.md](/Users/necmttn/Projects/ax/docs/superpowers/specs/2026-05-29-gist-backed-session-sharing-design.md)\n\nThe intended share URL shape is:\n\n```text\nhttps://ax.necmttn.com/s/<owner>/<gist-id>\n```\n\nBut in this checkout, `axctl share` is not actually registered yet, so I can’t produce a real s",
+      "review_status": "pending",
+      "rationale": "",
+      "reviewer": ""
+    },
+    {
+      "candidate_id": "tlm__correction__56a87996acc6f6cb",
+      "subject_id": "turn:019e72d1_1ab3_79f2_aaec_a275e7b3c01f__4b8194423fd5c7b3__seq_000003",
+      "session_id": "session:`019e72d1-1ab3-79f2-aaec-a275e7b3c01f`",
+      "turn_id": "turn:019e72d1_1ab3_79f2_aaec_a275e7b3c01f__4b8194423fd5c7b3__seq_000003",
+      "previous_assistant_turn_id": "turn:019e72d1_1ab3_79f2_aaec_a275e7b3c01f__4b8194423fd5c7b3__seq_000002",
+      "label_family": "correction",
+      "target": "wrong_output",
+      "weak_label": "correction",
+      "weak_confidence": 0.74,
+      "weak_sources": [
+        "correction:wrong_output"
+      ],
+      "evidence_paths": [
+        "turn:019e72d1_1ab3_79f2_aaec_a275e7b3c01f__4b8194423fd5c7b3__seq_000003"
+      ],
+      "excerpt": "You are implementing final review fixes in /Users/necmttn/Projects/ax/.worktrees/local-agent-providers.\n\nContext:\n- You are not alone in the codebase. Do not revert changes by others.\n- The branch implements local provider transcript support. Final review found five Important gaps that must be fixed before completion.\n- Work in the relevant files only. Commit all fixes in one commit with message `fix: complete local provider integration`.\n\nFix requirements:\n\n1. Provider stage dependencies:\n- `src/ingest/derive-signals.ts` currently has `signalsStage.meta.deps` lacking `pi`, `opencode`, `cursor",
+      "previous_assistant_excerpt": "# AGENTS.md instructions for /Users/necmttn/Projects/ax\n\n<INSTRUCTIONS>\n# CLAUDE.md\n\nGuidance for Claude Code and other AI assistants working in this repo.\n\n## What this is\n\n`ax` - local taste & telemetry graph for AI coding agents. Ingests Claude Code transcripts (`~/.claude/projects/`) + Codex transcripts (`~/.codex/sessions/`) + installed skills (`~/.claude/skills/`, `~/.agents/skills/`, plugin caches) into a dedicated SurrealDB instance. CLI surfaces \"what skills/tools you actually use\" on demand.\n\n## Stack\n\n- **Runtime**: bun ≥ 1.3\n- **Language**: TypeScript (strict, `module: preserve`, `",
+      "review_status": "pending",
+      "rationale": "",
+      "reviewer": ""
+    },
+    {
+      "candidate_id": "tlm__verification__628cd18d9f16832b",
+      "subject_id": "turn:019e5cb7_7c5c_7051_98a6_00d7727f09d8__cd5a8f8676f01410__seq_000003",
+      "session_id": "session:`019e5cb7-7c5c-7051-98a6-00d7727f09d8`",
+      "turn_id": "turn:019e5cb7_7c5c_7051_98a6_00d7727f09d8__cd5a8f8676f01410__seq_000003",
+      "previous_assistant_turn_id": "turn:019e5cb7_7c5c_7051_98a6_00d7727f09d8__cd5a8f8676f01410__seq_000002",
       "label_family": "verification",
       "target": "verification_demand",
       "weak_label": "verification",
@@ -310,18 +865,86 @@
         "verification:demand"
       ],
       "evidence_paths": [
-        "turn:ad2d466d_0227_419f_b0a8_1bce6ff43d6d__379cc4290e649f3d__seq_000012"
+        "turn:019e5cb7_7c5c_7051_98a6_00d7727f09d8__cd5a8f8676f01410__seq_000003"
       ],
-      "excerpt": "Base directory for this skill: /Users/necmttn/.claude/plugins/cache/claude-plugins-official/superpowers/5.1.0/skills/subagent-driven-development\n\n# Subagent-Driven Development\n\nExecute plan by dispatching fresh subagent per task, with two-stage review after each: spec compliance review first, then code quality review.\n\n**Why subagents:** You delegate tasks to specialized agents with isolated context. By precisely crafting their instructions and context, you ensure they stay focused and succeed at their task. They should never inherit your session's context or history — you construct exactly wh",
+      "excerpt": "You are implementing Task 1 from an approved plan in /Users/necmttn/Projects/apps. You are not alone in the codebase: the worktree is dirty, including files in this area. Do not revert or overwrite unrelated edits. Own only these files for this task: apps/ailifestory/api/src/mobile/handlers.ts and apps/ailifestory/api/src/mobile/handlers.test.ts.\n\nRepo conventions: default to Bun. Use `bun run test` from apps/ailifestory/api for tests. Do not use npm/yarn/pnpm. Use apply_patch for manual edits.\n\nFeature context: The tap-to-record async flow currently generates the next question from only previ",
+      "previous_assistant_excerpt": "# AGENTS.md instructions for /Users/necmttn/Projects/apps\n\n<INSTRUCTIONS>\n\nDefault to using Bun instead of Node.js.\n\n- Use `bun <file>` instead of `node <file>` or `ts-node <file>`\n- Use `bun test` instead of `jest` or `vitest`\n- Use `bun build <file.html|file.ts|file.css>` instead of `webpack` or `esbuild`\n- Use `bun install` instead of `npm install` or `yarn install` or `pnpm install`\n- Use `bun run <script>` instead of `npm run <script>` or `yarn run <script>` or `pnpm run <script>`\n- Use `bunx <package> <command>` instead of `npx <package> <command>`\n- Bun automatically loads .env, so don'",
       "review_status": "pending",
       "rationale": "",
       "reviewer": ""
     },
     {
-      "candidate_id": "tlm__verification__4941169d11f59c42",
-      "subject_id": "turn:ad2d466d_0227_419f_b0a8_1bce6ff43d6d__379cc4290e649f3d__seq_001134",
-      "session_id": "session:`ad2d466d-0227-419f-b0a8-1bce6ff43d6d`",
-      "turn_id": "turn:ad2d466d_0227_419f_b0a8_1bce6ff43d6d__379cc4290e649f3d__seq_001134",
+      "candidate_id": "tlm__direction__142b88c73a0b4a37",
+      "subject_id": "turn:019e747a_dee0_7171_b92d_99167cebe524__7715bad8e9124a64__seq_000003",
+      "session_id": "session:`019e747a-dee0-7171-b92d-99167cebe524`",
+      "turn_id": "turn:019e747a_dee0_7171_b92d_99167cebe524__7715bad8e9124a64__seq_000003",
+      "previous_assistant_turn_id": "turn:019e747a_dee0_7171_b92d_99167cebe524__7715bad8e9124a64__seq_000002",
+      "label_family": "direction",
+      "target": "stated_preference",
+      "weak_label": "direction",
+      "weak_confidence": 0.7,
+      "weak_sources": [
+        "intent:preference"
+      ],
+      "evidence_paths": [
+        "turn:019e747a_dee0_7171_b92d_99167cebe524__7715bad8e9124a64__seq_000003"
+      ],
+      "excerpt": "Final re-review after README CLI reference fix in worktree /Users/necmttn/Projects/ax/.worktrees/gist-session-sharing.\n\nDo not edit files. Review only.\n\nPrevious final-review blocker:\n- README CLI shape omitted `share`, causing `bun run check:cli-reference` to fail.\n\nFix:\n- Commit `fbfa4c1 docs: list session share command` adds `axctl share <session-id>` to README CLI shape.\n- `bun run check:cli-reference` now passes.\n- Targeted suite passed: `bun test src/share/redact.test.ts src/share/*.test.ts src/cli/share.test.ts src/queries/session-detail.test.ts site/app/lib/session-share.test.ts` (53 t",
+      "previous_assistant_excerpt": "# AGENTS.md instructions for /Users/necmttn/Projects/ax\n\n<INSTRUCTIONS>\n# CLAUDE.md\n\nGuidance for Claude Code and other AI assistants working in this repo.\n\n## What this is\n\n`ax` - local taste & telemetry graph for AI coding agents. Ingests Claude Code transcripts (`~/.claude/projects/`) + Codex transcripts (`~/.codex/sessions/`) + installed skills (`~/.claude/skills/`, `~/.agents/skills/`, plugin caches) into a dedicated SurrealDB instance. CLI surfaces \"what skills/tools you actually use\" on demand.\n\n## Stack\n\n- **Runtime**: bun ≥ 1.3\n- **Language**: TypeScript (strict, `module: preserve`, `",
+      "review_status": "pending",
+      "rationale": "",
+      "reviewer": ""
+    },
+    {
+      "candidate_id": "tlm__approval_or_rejection__ed0c05aeda2f33ee",
+      "subject_id": "turn:019e7c67_9137_77e1_8942_3ad9df5e6308__1a8a78d9ecccb867__seq_001165",
+      "session_id": "session:`019e7c67-9137-77e1-8942-3ad9df5e6308`",
+      "turn_id": "turn:019e7c67_9137_77e1_8942_3ad9df5e6308__1a8a78d9ecccb867__seq_001165",
+      "previous_assistant_turn_id": "turn:019e7c67_9137_77e1_8942_3ad9df5e6308__1a8a78d9ecccb867__seq_001164",
+      "label_family": "approval_or_rejection",
+      "target": "approval",
+      "weak_label": "approval_or_rejection",
+      "weak_confidence": 0.78,
+      "weak_sources": [
+        "approval_or_rejection:approval"
+      ],
+      "evidence_paths": [
+        "turn:019e7c67_9137_77e1_8942_3ad9df5e6308__1a8a78d9ecccb867__seq_001165"
+      ],
+      "excerpt": "approved",
+      "previous_assistant_excerpt": "<turn_aborted>\nThe user interrupted the previous turn on purpose. Any running unified exec processes may still be running in the background. If any tools/commands were aborted, they may have partially executed.\n</turn_aborted>",
+      "review_status": "pending",
+      "rationale": "",
+      "reviewer": ""
+    },
+    {
+      "candidate_id": "tlm__correction__608e7fcc128c18b3",
+      "subject_id": "turn:019e71cd_3cb0_7f61_affd_bd4615480ad9__231b3e62d067f010__seq_005040",
+      "session_id": "session:`019e71cd-3cb0-7f61-affd-bd4615480ad9`",
+      "turn_id": "turn:019e71cd_3cb0_7f61_affd_bd4615480ad9__231b3e62d067f010__seq_005040",
+      "previous_assistant_turn_id": "turn:019e71cd_3cb0_7f61_affd_bd4615480ad9__231b3e62d067f010__seq_005039",
+      "label_family": "correction",
+      "target": "wrong_output",
+      "weak_label": "correction",
+      "weak_confidence": 0.74,
+      "weak_sources": [
+        "correction:wrong_output"
+      ],
+      "evidence_paths": [
+        "turn:019e71cd_3cb0_7f61_affd_bd4615480ad9__231b3e62d067f010__seq_005040"
+      ],
+      "excerpt": "Androst each of them to give you idea\nThe first one has the problem of uh a turn text is a single unit and in the reader rail these are looks like a different section of a thing, which I don't necessarily like it. I want to see it as a single file with different components, like HTML viewer, maybe.\nanatomy wise:\nThese ones also suffer from the very similar things. The heat map or the map, the turn anatomy things on the right side is kind of interesting, it kinda gives a a high level picture of what is inside of this turn. If it was a like a very long turn we can actually see visually represent",
+      "previous_assistant_excerpt": "Got it. I’ll skip screenshots/images from here.\n\nThe HTML prototype is already created here:\n\n[turn-detail-alternatives.html](/Users/necmttn/Projects/ax/docs/prototypes/turn-detail-alternatives.html)\n\nYou can open that directly in the browser.",
+      "review_status": "pending",
+      "rationale": "",
+      "reviewer": ""
+    },
+    {
+      "candidate_id": "tlm__verification__62cfa1918cbf81a",
+      "subject_id": "turn:019e7284_5640_79f1_aa8e_e23776411ce9__d51f8587021cb69b__seq_000003",
+      "session_id": "session:`019e7284-5640-79f1-aa8e-e23776411ce9`",
+      "turn_id": "turn:019e7284_5640_79f1_aa8e_e23776411ce9__d51f8587021cb69b__seq_000003",
+      "previous_assistant_turn_id": "turn:019e7284_5640_79f1_aa8e_e23776411ce9__d51f8587021cb69b__seq_000002",
       "label_family": "verification",
       "target": "verification_demand",
       "weak_label": "verification",
@@ -330,120 +953,84 @@
         "verification:demand"
       ],
       "evidence_paths": [
-        "turn:ad2d466d_0227_419f_b0a8_1bce6ff43d6d__379cc4290e649f3d__seq_001134"
+        "turn:019e7284_5640_79f1_aa8e_e23776411ce9__d51f8587021cb69b__seq_000003"
       ],
-      "excerpt": "# /loop — schedule a recurring or self-paced prompt\n\nParse the input below into `[interval] <prompt…>` and schedule it.\n\n## Parsing (in priority order)\n\n1. **Leading token**: if the first whitespace-delimited token matches `^\\d+[smhd]$` (e.g. `5m`, `2h`), that's the interval; the rest is the prompt.\n2. **Trailing \"every\" clause**: otherwise, if the input ends with `every <N><unit>` or `every <N> <unit-word>` (e.g. `every 20m`, `every 5 minutes`, `every 2 hours`), extract that as the interval and strip it from the prompt. Only match when what follows \"every\" is a time expression — `check every ",
+      "excerpt": "You are implementing Task 3 from the approved plan in /Users/necmttn/Projects/ax/.worktrees/local-agent-providers.\n\nContext:\n- You are not alone in the codebase. Do not revert changes by others.\n- Task 1 and Task 2 are already committed. Use the new `src/ingest/provider-events.ts` helpers.\n- Work only in Task 3 files unless tests require a minimal adjacent fixture update.\n\nTask 3: Claude And Codex Dual-Write Provider Events\n\nFiles you own:\n- Modify: `src/ingest/transcripts.ts`\n- Modify: `src/ingest/transcripts.test.ts`\n- Modify: `src/ingest/codex.ts`\n- Modify: `src/ingest/codex.test.ts`\n- Modi",
+      "previous_assistant_excerpt": "# AGENTS.md instructions for /Users/necmttn/Projects/ax\n\n<INSTRUCTIONS>\n# CLAUDE.md\n\nGuidance for Claude Code and other AI assistants working in this repo.\n\n## What this is\n\n`ax` - local taste & telemetry graph for AI coding agents. Ingests Claude Code transcripts (`~/.claude/projects/`) + Codex transcripts (`~/.codex/sessions/`) + installed skills (`~/.claude/skills/`, `~/.agents/skills/`, plugin caches) into a dedicated SurrealDB instance. CLI surfaces \"what skills/tools you actually use\" on demand.\n\n## Stack\n\n- **Runtime**: bun ≥ 1.3\n- **Language**: TypeScript (strict, `module: preserve`, `",
       "review_status": "pending",
       "rationale": "",
       "reviewer": ""
     },
     {
-      "candidate_id": "tlm__verification__565e8db39e6a0ec0",
-      "subject_id": "turn:claude_subagent_a14fe14f81c294f11__cb3e6bd0662a8784__seq_000072",
-      "session_id": "session:`claude-subagent-a14fe14f81c294f11`",
-      "turn_id": "turn:claude_subagent_a14fe14f81c294f11__cb3e6bd0662a8784__seq_000072",
-      "previous_assistant_turn_id": "turn:claude_subagent_a14fe14f81c294f11__cb3e6bd0662a8784__seq_000071",
-      "label_family": "verification",
-      "target": "verification_demand",
-      "weak_label": "verification",
-      "weak_confidence": 0.84,
-      "weak_sources": [
-        "verification:demand"
-      ],
-      "evidence_paths": [
-        "turn:claude_subagent_a14fe14f81c294f11__cb3e6bd0662a8784__seq_000072"
-      ],
-      "excerpt": "Your Task 3 file `apps/axctl/src/dashboard/ingest-stream-durable.ts` introduced a REGRESSION that breaks the compiled `dist/axctl` binary and CI. Root cause: the top-level `import { DurableStreamTestServer } from \"@durable-streams/server\"` pulls native **lmdb** into the eager module graph. `bun build --compile` bundles it, and the compiled binary then crashes at STARTUP on EVERY command (even `./dist/axctl --help`) with: `No native build was found for platform=darwin arch=arm64`. CI (`.github/workflows/ci.yml`) runs `./dist/axctl --version|help|daemon status|doctor` and release-please ships th",
-      "previous_assistant_excerpt": "Both issues fixed.\n\n**What I changed (`ingest-stream-durable.ts`):**\n- **Issue 1 (Important):** Verified `DurableStreamError` is exported from `@durable-streams/client` (`.d.ts` line 1545) and that `DurableStreamErrorCode` includes the literal `\"CONFLICT_EXISTS\"` (line 586). Replaced the bespoke `isConflictExists` duck-typing/substring helper with the typed check `err instanceof DurableStreamError && err.code === \"CONFLICT_EXISTS\"`, added `DurableStreamError` to the import, and deleted the helper entirely.\n- **Issue 2 (Minor):** Added a comment near the handle cache explaining that `append()` ",
-      "review_status": "pending",
-      "rationale": "",
-      "reviewer": ""
-    },
-    {
-      "candidate_id": "tlm__verification__5cb877a7b8c4d6ba",
-      "subject_id": "turn:claude_subagent_a4af8a367d8dbd00c__c42cc15f1103398a__seq_000001",
-      "session_id": "session:`claude-subagent-a4af8a367d8dbd00c`",
-      "turn_id": "turn:claude_subagent_a4af8a367d8dbd00c__c42cc15f1103398a__seq_000001",
-      "label_family": "verification",
-      "target": "verification_demand",
-      "weak_label": "verification",
-      "weak_confidence": 0.84,
-      "weak_sources": [
-        "verification:demand"
-      ],
-      "evidence_paths": [
-        "turn:claude_subagent_a4af8a367d8dbd00c__c42cc15f1103398a__seq_000001"
-      ],
-      "excerpt": "Make the `axctl` CLI top-level command index lean WITHOUT breaking any existing invocation. The `ax --help` output currently lists ~30 flat subcommands and feels crowded. This is items #2 (parent groups) and #3 (common-vs-all help split) from a design discussion. File to edit: `apps/axctl/src/cli/index.ts` (single file; it is currently clean — no uncommitted changes).\n\n## Critical backward-compat constraints (DO NOT BREAK THESE)\n- `derive-signals` and `derive-intents` are hardcoded in installed LaunchAgent plists — see `apps/axctl/src/cli/install.ts` lines ~117 and ~154 (`${binPath} derive-sig",
-      "review_status": "pending",
-      "rationale": "",
-      "reviewer": ""
-    },
-    {
-      "candidate_id": "tlm__verification__6486644e21a9387f",
-      "subject_id": "turn:claude_subagent_a8e36913ab7522d2d__756583716ef7eae0__seq_000001",
-      "session_id": "session:`claude-subagent-a8e36913ab7522d2d`",
-      "turn_id": "turn:claude_subagent_a8e36913ab7522d2d__756583716ef7eae0__seq_000001",
-      "label_family": "verification",
-      "target": "verification_demand",
-      "weak_label": "verification",
-      "weak_confidence": 0.84,
-      "weak_sources": [
-        "verification:demand"
-      ],
-      "evidence_paths": [
-        "turn:claude_subagent_a8e36913ab7522d2d__756583716ef7eae0__seq_000001"
-      ],
-      "excerpt": "You are a code quality reviewer. Spec compliance already passed. Review the code quality of one commit.\n\nWork from: `/Users/necmttn/Projects/ax/.claude/worktrees/live-ingest-durable-streams`\n\nDESCRIPTION: `IngestStreamEvent` typed payload + `ingestStreamEventFromTrace` mapper (live-trace event → coarse ingest progress event).\nREQUIREMENTS: Task 1 of docs/superpowers/plans/2026-06-01-live-ingest-durable-streams.md\nBASE_SHA: 283cada\nHEAD_SHA: d746bf0\n\nRun `git diff 283cada d746bf0 -- apps/axctl/src/ingest/` and read the new files. Assess code quality only (correctness vs spec already verified):\n",
-      "review_status": "pending",
-      "rationale": "",
-      "reviewer": ""
-    },
-    {
-      "candidate_id": "tlm__verification__64a533179357ddc7",
-      "subject_id": "turn:claude_subagent_aa04e0806cbb3a665__116067e8baaec4ee__seq_000001",
-      "session_id": "session:`claude-subagent-aa04e0806cbb3a665`",
-      "turn_id": "turn:claude_subagent_aa04e0806cbb3a665__116067e8baaec4ee__seq_000001",
-      "label_family": "verification",
-      "target": "verification_demand",
-      "weak_label": "verification",
-      "weak_confidence": 0.84,
-      "weak_sources": [
-        "verification:demand"
-      ],
-      "evidence_paths": [
-        "turn:claude_subagent_aa04e0806cbb3a665__116067e8baaec4ee__seq_000001"
-      ],
-      "excerpt": "Add a \"Works with\" provider logo strip to the new ax landing page. The 5 agents/CLIs ax supports today (confirmed in `src/ingest/provider-events.ts` as `AgentProviderName = \"claude\" | \"codex\" | \"pi\" | \"opencode\" | \"cursor\"`):\n\n1. **Claude Code** — Anthropic's CLI. Brand: orange C-shape (we already render an ASCII version in change.tsx). Anthropic brand orange `#d77757`.\n2. **Codex** — OpenAI's CLI. OpenAI brand mark.\n3. **Pi** — Inflection AI's agent (now part of Microsoft). The mathematical π symbol is the logo.\n4. **OpenCode** — sst.dev/opencode terminal coding agent. Likely a custom mark.\n5",
-      "review_status": "pending",
-      "rationale": "",
-      "reviewer": ""
-    },
-    {
-      "candidate_id": "tlm__verification__69744baac173d933",
-      "subject_id": "turn:claude_subagent_aec34fc7a2aff490b__e8d92e4b8416acdf__seq_000001",
-      "session_id": "session:`claude-subagent-aec34fc7a2aff490b`",
-      "turn_id": "turn:claude_subagent_aec34fc7a2aff490b__e8d92e4b8416acdf__seq_000001",
-      "label_family": "verification",
-      "target": "verification_demand",
-      "weak_label": "verification",
-      "weak_confidence": 0.84,
-      "weak_sources": [
-        "verification:demand"
-      ],
-      "evidence_paths": [
-        "turn:claude_subagent_aec34fc7a2aff490b__e8d92e4b8416acdf__seq_000001"
-      ],
-      "excerpt": "You are working in an existing git worktree: `/Users/necmttn/Projects/ax/.worktrees/monorepo-migration`. Do NOT commit, push, or touch git — just investigate, make config/code changes in the working tree, verify by building, and report.\n\n## Context\n`apps/site` is a TanStack Start app deployed as a STATIC site to Cloudflare Pages (no server / no Worker). Current `apps/site/vite.config.ts` uses:\n```ts\ntanstackStart({\n  srcDirectory: \"app\",\n  spa: { enabled: true },\n  prerender: { enabled: true, crawlLinks: true, failOnError: false },\n})\n```\nThis prerenders ~25 routes each to their own static HTM",
-      "review_status": "pending",
-      "rationale": "",
-      "reviewer": ""
-    },
-    {
-      "candidate_id": "tlm__verification__69e6a59453d848e2",
-      "subject_id": "turn:c5da4876_a2ce_4862_83ba_2c521acc7694__f9c0c1f21e149989__seq_000994",
+      "candidate_id": "tlm__direction__14d928b40658b673",
+      "subject_id": "turn:c5da4876_a2ce_4862_83ba_2c521acc7694__f9c0c1f21e149989__seq_002052",
       "session_id": "session:`c5da4876-a2ce-4862-83ba-2c521acc7694`",
-      "turn_id": "turn:c5da4876_a2ce_4862_83ba_2c521acc7694__f9c0c1f21e149989__seq_000994",
+      "turn_id": "turn:c5da4876_a2ce_4862_83ba_2c521acc7694__f9c0c1f21e149989__seq_002052",
+      "label_family": "direction",
+      "target": "stated_preference",
+      "weak_label": "direction",
+      "weak_confidence": 0.7,
+      "weak_sources": [
+        "intent:preference"
+      ],
+      "evidence_paths": [
+        "turn:c5da4876_a2ce_4862_83ba_2c521acc7694__f9c0c1f21e149989__seq_002052"
+      ],
+      "excerpt": "i run ax ingest ax on  docs/monorepo-migration-plan:main [$?⇕] is 📦 v0.5.0 via 🥟 v1.3.10 on ☁️  (us-east-1) on ☁️  necmettin.karakaya@gmail.com took 12s\n❯ ax ingest --since 1\naxctl error: 46577 |   try {\n46578 |     await db.close();\n46579 |   } catch {}\n46580 | }), wrap = (db) => ({\n46581 |   query: (sql, bindings) => exports_Effect.tryPromise({\n46582 |     catch: (err) => new DbError({\n                            ^\nerror: Transaction conflict: Resource busy. This transaction can be retried\n operation: \"query\",\n       sql: \"UPSERT agent_provider:`codex` MERGE { name: \\\"codex\\\", display_nam",
+      "review_status": "pending",
+      "rationale": "",
+      "reviewer": ""
+    },
+    {
+      "candidate_id": "tlm__approval_or_rejection__f46670009149ee04",
+      "subject_id": "turn:019e791a_19b4_7352_98da_e1b80bdea61f__8c23c3d22aedbf9b__seq_001685",
+      "session_id": "session:`019e791a-19b4-7352-98da-e1b80bdea61f`",
+      "turn_id": "turn:019e791a_19b4_7352_98da_e1b80bdea61f__8c23c3d22aedbf9b__seq_001685",
+      "previous_assistant_turn_id": "turn:019e791a_19b4_7352_98da_e1b80bdea61f__8c23c3d22aedbf9b__seq_001684",
+      "label_family": "approval_or_rejection",
+      "target": "approval",
+      "weak_label": "approval_or_rejection",
+      "weak_confidence": 0.78,
+      "weak_sources": [
+        "approval_or_rejection:approval"
+      ],
+      "evidence_paths": [
+        "turn:019e791a_19b4_7352_98da_e1b80bdea61f__8c23c3d22aedbf9b__seq_001685"
+      ],
+      "excerpt": "I want to sort all these stashes, don't not lose work if we already have it. Uh I don't want any stashed work lost, so merge it as possible.",
+      "previous_assistant_excerpt": "Yes. There are 5 stashes still present:\n\n```text\nstash@{0}: post-rebase residue before restoring dirty tree\nstash@{1}: pre-rebase local dirty tree before b3ed711\nstash@{2}: autostash\nstash@{3}: feat-WIP before port-to-stage-registry\nstash@{4}: WIP on main: fix dashboard subagent transcript\n```\n\nQuick read:\n\n- `stash@{0}`: one goal doc, `112` lines. Likely residue, needs review before drop.\n- `stash@{1}`: big mixed stash, `25` files. Includes work we already committed plus some studio/share/classifier fixture changes.\n- `stash@{2}`: older big autostash, `26` files. Includes schema/package/CLI/c",
+      "review_status": "pending",
+      "rationale": "",
+      "reviewer": ""
+    },
+    {
+      "candidate_id": "tlm__correction__767734ec3ddfc39e",
+      "subject_id": "turn:019e73ad_9dce_74e2_befa_07b50c23bbc3__6c640c5d218330b0__seq_000003",
+      "session_id": "session:`019e73ad-9dce-74e2-befa-07b50c23bbc3`",
+      "turn_id": "turn:019e73ad_9dce_74e2_befa_07b50c23bbc3__6c640c5d218330b0__seq_000003",
+      "previous_assistant_turn_id": "turn:019e73ad_9dce_74e2_befa_07b50c23bbc3__6c640c5d218330b0__seq_000002",
+      "label_family": "correction",
+      "target": "wrong_output",
+      "weak_label": "correction",
+      "weak_confidence": 0.74,
+      "weak_sources": [
+        "correction:wrong_output"
+      ],
+      "evidence_paths": [
+        "turn:019e73ad_9dce_74e2_befa_07b50c23bbc3__6c640c5d218330b0__seq_000003"
+      ],
+      "excerpt": "Implement Task 2 of the Gist-backed session sharing plan in the isolated worktree.\n\nWorkspace: /Users/necmttn/Projects/ax/.worktrees/gist-session-sharing\nBranch: feat/gist-session-sharing\n\nImportant:\n- Use apply_patch for manual edits.\n- Do not revert or touch unrelated files.\n- You are not alone in the codebase; accommodate existing changes.\n- Follow TDD: write failing test, run it, implement, run targeted tests, commit.\n- Full `bun run typecheck` has pre-existing unrelated failures; do not fix them.\n\nTask 2: Redaction Module\n\nFiles:\n- Create: `src/share/redact.ts`\n- Create test: `src/share/r",
+      "previous_assistant_excerpt": "# AGENTS.md instructions for /Users/necmttn/Projects/ax\n\n<INSTRUCTIONS>\n# CLAUDE.md\n\nGuidance for Claude Code and other AI assistants working in this repo.\n\n## What this is\n\n`ax` - local taste & telemetry graph for AI coding agents. Ingests Claude Code transcripts (`~/.claude/projects/`) + Codex transcripts (`~/.codex/sessions/`) + installed skills (`~/.claude/skills/`, `~/.agents/skills/`, plugin caches) into a dedicated SurrealDB instance. CLI surfaces \"what skills/tools you actually use\" on demand.\n\n## Stack\n\n- **Runtime**: bun ≥ 1.3\n- **Language**: TypeScript (strict, `module: preserve`, `",
+      "review_status": "pending",
+      "rationale": "",
+      "reviewer": ""
+    },
+    {
+      "candidate_id": "tlm__verification__631f003c73b6e10e",
+      "subject_id": "turn:019e7334_0e46_7230_a304_327ce2dfd6c0__b9e1520f2b36b204__seq_000274",
+      "session_id": "session:`019e7334-0e46-7230-a304-327ce2dfd6c0`",
+      "turn_id": "turn:019e7334_0e46_7230_a304_327ce2dfd6c0__b9e1520f2b36b204__seq_000274",
+      "previous_assistant_turn_id": "turn:019e7334_0e46_7230_a304_327ce2dfd6c0__b9e1520f2b36b204__seq_000273",
       "label_family": "verification",
       "target": "verification_demand",
       "weak_label": "verification",
@@ -452,300 +1039,83 @@
         "verification:demand"
       ],
       "evidence_paths": [
-        "turn:c5da4876_a2ce_4862_83ba_2c521acc7694__f9c0c1f21e149989__seq_000994"
+        "turn:019e7334_0e46_7230_a304_327ce2dfd6c0__b9e1520f2b36b204__seq_000274"
       ],
-      "excerpt": "Base directory for this skill: /Users/necmttn/.claude/plugins/cache/claude-plugins-official/superpowers/5.1.0/skills/finishing-a-development-branch\n\n# Finishing a Development Branch\n\n## Overview\n\nGuide completion of development work by presenting clear options and handling chosen workflow.\n\n**Core principle:** Verify tests → Detect environment → Present options → Execute choice → Clean up.\n\n**Announce at start:** \"I'm using the finishing-a-development-branch skill to complete this work.\"\n\n## The Process\n\n### Step 1: Verify Tests\n\n**Before presenting options, verify tests pass:**\n\n```bash\n# Run",
+      "excerpt": "<skill>\n<name>superpowers:subagent-driven-development</name>\n<path>/Users/necmttn/.dotfiles/codex/.codex/plugins/cache/openai-curated/superpowers/acdd3141/skills/subagent-driven-development/SKILL.md</path>\n---\nname: subagent-driven-development\ndescription: Use when executing implementation plans with independent tasks in the current session\n---\n\n# Subagent-Driven Development\n\nExecute plan by dispatching fresh subagent per task, with two-stage review after each: spec compliance review first, then code quality review.\n\n**Why subagents:** You delegate tasks to specialized agents with isolated con",
+      "previous_assistant_excerpt": "$superpowers:subagent-driven-development  go",
       "review_status": "pending",
       "rationale": "",
       "reviewer": ""
     },
     {
-      "candidate_id": "tlm__verification__6c6c10ead84797fd",
-      "subject_id": "turn:claude_subagent_a369cf4870765565b__f68d923cd4f244d3__seq_000001",
-      "session_id": "session:`claude-subagent-a369cf4870765565b`",
-      "turn_id": "turn:claude_subagent_a369cf4870765565b__f68d923cd4f244d3__seq_000001",
-      "label_family": "verification",
-      "target": "verification_demand",
-      "weak_label": "verification",
-      "weak_confidence": 0.84,
-      "weak_sources": [
-        "verification:demand"
-      ],
-      "evidence_paths": [
-        "turn:claude_subagent_a369cf4870765565b__f68d923cd4f244d3__seq_000001"
-      ],
-      "excerpt": "You are implementing Task 1 of a plan in the `ax` repo: **`IngestStreamEvent` — the progress payload.**\n\nWork from this git worktree (stay inside it): `/Users/necmttn/Projects/ax/.claude/worktrees/live-ingest-durable-streams`\n\nUse TDD (red → green → commit). The project uses `bun:test`.\n\n## ⚠️ Test runner note (read first)\nA global hook blocks bare `bun test`. To run tests, bypass it with a tmp wrapper script. Standard project pattern:\n```bash\nprintf '#!/bin/sh\\nexec bun test \"$@\"\\n' > /tmp/bt.sh && chmod +x /tmp/bt.sh\n/tmp/bt.sh apps/axctl/src/ingest/stream-events.test.ts\n```\nIf that still tr",
-      "review_status": "pending",
-      "rationale": "",
-      "reviewer": ""
-    },
-    {
-      "candidate_id": "tlm__verification__6ec1706aec6c837b",
-      "subject_id": "turn:claude_subagent_a58f1a2c677f7f15b__fbe3c4be221c0357__seq_000001",
-      "session_id": "session:`claude-subagent-a58f1a2c677f7f15b`",
-      "turn_id": "turn:claude_subagent_a58f1a2c677f7f15b__fbe3c4be221c0357__seq_000001",
-      "label_family": "verification",
-      "target": "verification_demand",
-      "weak_label": "verification",
-      "weak_confidence": 0.84,
-      "weak_sources": [
-        "verification:demand"
-      ],
-      "evidence_paths": [
-        "turn:claude_subagent_a58f1a2c677f7f15b__fbe3c4be221c0357__seq_000001"
-      ],
-      "excerpt": "You are implementing Task 5 of a plan in the `ax` repo: **Wire `ax serve` — `POST /api/ingest` + start the Durable Streams sidecar.**\n\nWork from this git worktree (stay inside it): `/Users/necmttn/Projects/ax/.claude/worktrees/live-ingest-durable-streams`\n\nEffect 4.0.0-beta. **Consult effect-solutions before writing Effect runtime code** (`effect-solutions list`, then `effect-solutions show services-and-layers`). Real source: `.references/effect-smol/packages/effect/src`.\n\n## ⚠️ Test runner note\nGlobal hook blocks bare `bun test` (greps for \"bun test\"). Use split vars: `B=bun; T=test; \"$B\" \"$T",
-      "review_status": "pending",
-      "rationale": "",
-      "reviewer": ""
-    },
-    {
-      "candidate_id": "tlm__verification__75672dc88f325541",
-      "subject_id": "turn:claude_subagent_a9a23b1a9e8a1e356__5782aba0d8175295__seq_000001",
-      "session_id": "session:`claude-subagent-a9a23b1a9e8a1e356`",
-      "turn_id": "turn:claude_subagent_a9a23b1a9e8a1e356__5782aba0d8175295__seq_000001",
-      "label_family": "verification",
-      "target": "verification_demand",
-      "weak_label": "verification",
-      "weak_confidence": 0.84,
-      "weak_sources": [
-        "verification:demand"
-      ],
-      "evidence_paths": [
-        "turn:claude_subagent_a9a23b1a9e8a1e356__5782aba0d8175295__seq_000001"
-      ],
-      "excerpt": "Review one small commit for BOTH spec compliance and code quality. Verify by reading code; don't trust the report.\n\nWork from: `/Users/necmttn/Projects/ax/.claude/worktrees/live-ingest-durable-streams`\n\n## Spec (Task 2)\n`apps/axctl/src/dashboard/ingest-stream.ts` must export:\n- `ingestStreamName(runId: string): string` returning `` `ingest:${runId}` ``\n- `interface IngestStreamBus { publish(runId: string, event: IngestStreamEvent): Promise<void> }`\n- `class InMemoryIngestStreamBus implements IngestStreamBus` with `publish` appending to a per-run `Map<string, IngestStreamEvent[]>` and a `histor",
-      "review_status": "pending",
-      "rationale": "",
-      "reviewer": ""
-    },
-    {
-      "candidate_id": "tlm__verification__7815f86c596787da",
-      "subject_id": "turn:claude_subagent_add2208f9195dc757__176efabd9937d97a__seq_000001",
-      "session_id": "session:`claude-subagent-add2208f9195dc757`",
-      "turn_id": "turn:claude_subagent_add2208f9195dc757__176efabd9937d97a__seq_000001",
-      "label_family": "verification",
-      "target": "verification_demand",
-      "weak_label": "verification",
-      "weak_confidence": 0.84,
-      "weak_sources": [
-        "verification:demand"
-      ],
-      "evidence_paths": [
-        "turn:claude_subagent_add2208f9195dc757__176efabd9937d97a__seq_000001"
-      ],
-      "excerpt": "You are implementing Task 6 of a plan in the `ax` repo: **Frontend — live ingest view over Durable Streams.**\n\nWork from this git worktree (stay inside it): `/Users/necmttn/Projects/ax/.claude/worktrees/live-ingest-durable-streams`\n\n## ⚠️ Test runner note\nGlobal hook blocks bare `bun test` (greps for \"bun test\"). If you need it: `B=bun; T=test; \"$B\" \"$T\" <path>`.\n\n## Context — backend already wired (DONE, committed)\n- `POST /api/ingest` (in `apps/axctl/src/dashboard/server.ts`) accepts `{ since?: number }` and returns JSON:\n  ```json\n  { \"runId\": \"<uuid>\", \"stream\": \"http://127.0.0.1:<sidecarP",
-      "review_status": "pending",
-      "rationale": "",
-      "reviewer": ""
-    },
-    {
-      "candidate_id": "tlm__verification__8fafd8426543c1c7",
-      "subject_id": "turn:claude_subagent_a6fdc23d1b567078e__a83cd185fe243468__seq_000001",
-      "session_id": "session:`claude-subagent-a6fdc23d1b567078e`",
-      "turn_id": "turn:claude_subagent_a6fdc23d1b567078e__a83cd185fe243468__seq_000001",
-      "label_family": "verification",
-      "target": "verification_demand",
-      "weak_label": "verification",
-      "weak_confidence": 0.84,
-      "weak_sources": [
-        "verification:demand"
-      ],
-      "evidence_paths": [
-        "turn:claude_subagent_a6fdc23d1b567078e__a83cd185fe243468__seq_000001"
-      ],
-      "excerpt": "Review whether an Effect-based implementation matches its spec. Be skeptical — verify by reading code + running, don't trust the report.\n\nWork from: `/Users/necmttn/Projects/ax/.claude/worktrees/live-ingest-durable-streams`\n\n## Spec (Task 4)\n`apps/axctl/src/dashboard/ingest-workflow.ts` must export a `startIngestWorkflow(opts, bus, baseLayer)` that:\n1. Runs `runIngest` IN-PROCESS, forwarding live-trace events to `bus.publish(...)` by mapping each via `ingestStreamEventFromTrace` (already implemented at `apps/axctl/src/ingest/stream-events.ts`).\n2. Generates a runId, plumbs it so the trace id i",
-      "review_status": "pending",
-      "rationale": "",
-      "reviewer": ""
-    },
-    {
-      "candidate_id": "tlm__verification__96cffa29d12b05bb",
-      "subject_id": "turn:claude_subagent_ad521a81d72d5289e__9a021dc977206b24__seq_000037",
-      "session_id": "session:`claude-subagent-ad521a81d72d5289e`",
-      "turn_id": "turn:claude_subagent_ad521a81d72d5289e__9a021dc977206b24__seq_000037",
-      "label_family": "verification",
-      "target": "verification_demand",
-      "weak_label": "verification",
-      "weak_confidence": 0.84,
-      "weak_sources": [
-        "verification:demand"
-      ],
-      "evidence_paths": [
-        "turn:claude_subagent_ad521a81d72d5289e__9a021dc977206b24__seq_000037"
-      ],
-      "excerpt": "Base directory for this skill: /Users/necmttn/.claude/skills/fork-daemon-observability\n\n# Fork Daemon Observability Checklist\n\nWhen implementing features that dispatch work via `forkDaemon`, background tasks, or RPC handlers:\n\n## Mandatory Verification Before Declaring Complete\n\n### 1. OTEL Trace Context Propagation\n- [ ] Span context is explicitly extracted from the caller and injected into the forked process\n- [ ] `forkDaemon` (or equivalent) receives serialized trace context (trace_id, span_id, baggage)\n- [ ] Child process reconstructs parent context via `opentelemetry::context::Context::cu",
-      "review_status": "pending",
-      "rationale": "",
-      "reviewer": ""
-    },
-    {
-      "candidate_id": "tlm__verification__992daa7f977b3aa1",
-      "subject_id": "turn:claude_subagent_a4fa8eb67813366c4__aa36faccb82a3117__seq_000001",
-      "session_id": "session:`claude-subagent-a4fa8eb67813366c4`",
-      "turn_id": "turn:claude_subagent_a4fa8eb67813366c4__aa36faccb82a3117__seq_000001",
-      "label_family": "verification",
-      "target": "verification_demand",
-      "weak_label": "verification",
-      "weak_confidence": 0.84,
-      "weak_sources": [
-        "verification:demand"
-      ],
-      "evidence_paths": [
-        "turn:claude_subagent_a4fa8eb67813366c4__aa36faccb82a3117__seq_000001"
-      ],
-      "excerpt": "Port the standalone features page prototype into the ax TanStack Start site as a new `/features` route.\n\n**Source file** (read — DO NOT MODIFY):\n`/Users/necmttn/Projects/ax/docs/prototypes/features-page-v2.html` — 7-section deep-dive page covering Sources → Graph → Derive stages → Interventions (with safety contract) → Hooks → Surfaces → Local-first. Mostly static content with a sticky TOC, ASCII graph diagram, syntax-tinted task brief example. Inline CSS + minimal JS.\n\n**Target files** (create):\n- `/Users/necmttn/Projects/ax/site/app/routes/features.tsx` — new route at `/features`. Mounts Sit",
-      "review_status": "pending",
-      "rationale": "",
-      "reviewer": ""
-    },
-    {
-      "candidate_id": "tlm__verification__9fee1d7cae97e3fa",
-      "subject_id": "turn:claude_subagent_ab608f32db50bf4f0__1d925d75fefcbce4__seq_000001",
-      "session_id": "session:`claude-subagent-ab608f32db50bf4f0`",
-      "turn_id": "turn:claude_subagent_ab608f32db50bf4f0__1d925d75fefcbce4__seq_000001",
-      "label_family": "verification",
-      "target": "verification_demand",
-      "weak_label": "verification",
-      "weak_confidence": 0.84,
-      "weak_sources": [
-        "verification:demand"
-      ],
-      "evidence_paths": [
-        "turn:claude_subagent_ab608f32db50bf4f0__1d925d75fefcbce4__seq_000001"
-      ],
-      "excerpt": "You are implementing Task 2 of a plan in the `ax` repo: **`IngestStreamBus` seam + in-memory impl.**\n\nWork from this git worktree (stay inside it): `/Users/necmttn/Projects/ax/.claude/worktrees/live-ingest-durable-streams`\n\nUse TDD (red → green → commit). Project uses `bun:test`.\n\n## ⚠️ Test runner note\nA global hook blocks bare `bun test` (it greps the command string for \"bun test\"). Run the suite via split shell vars so the hook doesn't match:\n```bash\nB=bun; T=test; \"$B\" \"$T\" apps/axctl/src/dashboard/ingest-stream.test.ts\n```\n\n## Task Description (verbatim)\n\n**Goal:** A tiny producer-side in",
-      "review_status": "pending",
-      "rationale": "",
-      "reviewer": ""
-    },
-    {
-      "candidate_id": "tlm__verification__a0adbcd46db2cefa",
-      "subject_id": "turn:claude_subagent_a58f1a2c677f7f15b__fbe3c4be221c0357__seq_000173",
-      "session_id": "session:`claude-subagent-a58f1a2c677f7f15b`",
-      "turn_id": "turn:claude_subagent_a58f1a2c677f7f15b__fbe3c4be221c0357__seq_000173",
-      "previous_assistant_turn_id": "turn:claude_subagent_a58f1a2c677f7f15b__fbe3c4be221c0357__seq_000172",
-      "label_family": "verification",
-      "target": "verification_demand",
-      "weak_label": "verification",
-      "weak_confidence": 0.84,
-      "weak_sources": [
-        "verification:demand"
-      ],
-      "evidence_paths": [
-        "turn:claude_subagent_a58f1a2c677f7f15b__fbe3c4be221c0357__seq_000173"
-      ],
-      "excerpt": "Code-quality review found one production-biting gap to fix (the rest is approved). Fix just this, re-verify, amend, report new SHA.\n\n**Issue (Important):** In `serveDashboard`, you `await createDurableIngestStream()` (binds a sidecar localhost port) and `ManagedRuntime.make(...)` BEFORE `Bun.serve(...)`, and the SIGINT/SIGTERM shutdown handler is registered only AFTER. If `Bun.serve` throws — most commonly **port already in use** — the already-started sidecar server is leaked (its port stays bound, no shutdown handler registered yet) AND the thrown error becomes an unhandled promise rejection ",
-      "previous_assistant_excerpt": "Committed as `d8113ab`. Task complete.\n\n## Status: DONE\n\n### How server.ts runs Effects today + persistent-runtime decision (load-bearing)\nEvery existing `/api/*` route does an **ad-hoc fresh-runtime-per-request** `Effect.runPromise(program.pipe(Effect.provide(AppLayer), Effect.scoped))`. That pattern would kill a `forkDetach` daemon the moment the request resolves, so it can't back `/api/ingest`.\n\nI **built a long-lived `ManagedRuntime`** (`ManagedRuntime.make(IngestRuntimeLayer)`) once in `serveDashboard`, held in a module-level closure (`serveIngestState`), and reuse it for `/api/ingest` vi",
-      "review_status": "pending",
-      "rationale": "",
-      "reviewer": ""
-    },
-    {
-      "candidate_id": "tlm__verification__a307a7898d832e4c",
-      "subject_id": "turn:c5da4876_a2ce_4862_83ba_2c521acc7694__f9c0c1f21e149989__seq_002479",
-      "session_id": "session:`c5da4876-a2ce-4862-83ba-2c521acc7694`",
-      "turn_id": "turn:c5da4876_a2ce_4862_83ba_2c521acc7694__f9c0c1f21e149989__seq_002479",
-      "label_family": "verification",
-      "target": "verification_demand",
-      "weak_label": "verification",
-      "weak_confidence": 0.84,
-      "weak_sources": [
-        "verification:demand"
-      ],
-      "evidence_paths": [
-        "turn:c5da4876_a2ce_4862_83ba_2c521acc7694__f9c0c1f21e149989__seq_002479"
-      ],
-      "excerpt": "Base directory for this skill: /Users/necmttn/.claude/plugins/cache/claude-plugins-official/superpowers/5.1.0/skills/writing-plans\n\n# Writing Plans\n\n## Overview\n\nWrite comprehensive implementation plans assuming the engineer has zero context for our codebase and questionable taste. Document everything they need to know: which files to touch for each task, code, testing, docs they might need to check, how to test it. Give them the whole plan as bite-sized tasks. DRY. YAGNI. TDD. Frequent commits.\n\nAssume they are a skilled developer, but know almost nothing about our toolset or problem domain. ",
-      "review_status": "pending",
-      "rationale": "",
-      "reviewer": ""
-    },
-    {
-      "candidate_id": "tlm__verification__b00c733867de8fa",
-      "subject_id": "turn:claude_subagent_a20a949b183a1b00e__1379f972a81583bf__seq_000001",
-      "session_id": "session:`claude-subagent-a20a949b183a1b00e`",
-      "turn_id": "turn:claude_subagent_a20a949b183a1b00e__1379f972a81583bf__seq_000001",
-      "label_family": "verification",
-      "target": "verification_demand",
-      "weak_label": "verification",
-      "weak_confidence": 0.84,
-      "weak_sources": [
-        "verification:demand"
-      ],
-      "evidence_paths": [
-        "turn:claude_subagent_a20a949b183a1b00e__1379f972a81583bf__seq_000001"
-      ],
-      "excerpt": "Review whether a frontend implementation matches its spec. Be skeptical — verify by reading code, don't trust the report.\n\nWork from: `/Users/necmttn/Projects/ax/.claude/worktrees/live-ingest-durable-streams`\n\n## Spec (Task 6)\nA React hook + live view in the dashboard SPA (`apps/axctl/src/dashboard/web/src/`):\n1. `use-ingest-stream.ts`: `useIngestStream(streamUrl: string|null)` — subscribes via `@durable-streams/client` `stream<IngestStreamEvent>({url, live:true})` + `subscribeJson`, folds events into `{stages: Record<stage,\"running\"|\"ok\"|\"error\">, order, finished, runStatus, label?}`. Folding",
-      "review_status": "pending",
-      "rationale": "",
-      "reviewer": ""
-    },
-    {
-      "candidate_id": "tlm__verification__b84cc43352bfc289",
-      "subject_id": "turn:ad2d466d_0227_419f_b0a8_1bce6ff43d6d__379cc4290e649f3d__seq_000029",
+      "candidate_id": "tlm__direction__1591cba8c9a1ca21",
+      "subject_id": "turn:ad2d466d_0227_419f_b0a8_1bce6ff43d6d__379cc4290e649f3d__seq_000419",
       "session_id": "session:`ad2d466d-0227-419f-b0a8-1bce6ff43d6d`",
-      "turn_id": "turn:ad2d466d_0227_419f_b0a8_1bce6ff43d6d__379cc4290e649f3d__seq_000029",
-      "label_family": "verification",
-      "target": "verification_demand",
-      "weak_label": "verification",
-      "weak_confidence": 0.84,
+      "turn_id": "turn:ad2d466d_0227_419f_b0a8_1bce6ff43d6d__379cc4290e649f3d__seq_000419",
+      "label_family": "direction",
+      "target": "stated_preference",
+      "weak_label": "direction",
+      "weak_confidence": 0.7,
       "weak_sources": [
-        "verification:demand"
+        "intent:preference"
       ],
       "evidence_paths": [
-        "turn:ad2d466d_0227_419f_b0a8_1bce6ff43d6d__379cc4290e649f3d__seq_000029"
+        "turn:ad2d466d_0227_419f_b0a8_1bce6ff43d6d__379cc4290e649f3d__seq_000419"
       ],
-      "excerpt": "Base directory for this skill: /Users/necmttn/.claude/plugins/cache/claude-plugins-official/superpowers/5.1.0/skills/using-git-worktrees\n\n# Using Git Worktrees\n\n## Overview\n\nEnsure work happens in an isolated workspace. Prefer your platform's native worktree tools. Fall back to manual git worktrees only when no native tool is available.\n\n**Core principle:** Detect existing isolation first. Then use native tools. Then fall back to git. Never fight the harness.\n\n**Announce at start:** \"I'm using the using-git-worktrees skill to set up an isolated workspace.\"\n\n## Step 0: Detect Existing Isolation",
+      "excerpt": "if i wanna test local build vs the stable in my computer i need alternative one so like ax for stable version which runs longterm i can test against latest updates etc. \nvs dev build which can be disposable db different db location as well. \nso instead of long bun run .dist i can have global one as well .",
       "review_status": "pending",
       "rationale": "",
       "reviewer": ""
     },
     {
-      "candidate_id": "tlm__verification__beb20f79d57e447a",
-      "subject_id": "turn:claude_subagent_a14fe14f81c294f11__cb3e6bd0662a8784__seq_000001",
-      "session_id": "session:`claude-subagent-a14fe14f81c294f11`",
-      "turn_id": "turn:claude_subagent_a14fe14f81c294f11__cb3e6bd0662a8784__seq_000001",
-      "label_family": "verification",
-      "target": "verification_demand",
-      "weak_label": "verification",
-      "weak_confidence": 0.84,
+      "candidate_id": "tlm__approval_or_rejection__f88811296f87b7ff",
+      "subject_id": "turn:019e76fe_63ff_7303_a98d_7e6210820b04__45ce27a7ae47a0f9__seq_002553",
+      "session_id": "session:`019e76fe-63ff-7303-a98d-7e6210820b04`",
+      "turn_id": "turn:019e76fe_63ff_7303_a98d_7e6210820b04__45ce27a7ae47a0f9__seq_002553",
+      "previous_assistant_turn_id": "turn:019e76fe_63ff_7303_a98d_7e6210820b04__45ce27a7ae47a0f9__seq_002552",
+      "label_family": "approval_or_rejection",
+      "target": "approval",
+      "weak_label": "approval_or_rejection",
+      "weak_confidence": 0.78,
       "weak_sources": [
-        "verification:demand"
+        "approval_or_rejection:approval"
       ],
       "evidence_paths": [
-        "turn:claude_subagent_a14fe14f81c294f11__cb3e6bd0662a8784__seq_000001"
+        "turn:019e76fe_63ff_7303_a98d_7e6210820b04__45ce27a7ae47a0f9__seq_002553"
       ],
-      "excerpt": "You are implementing Task 3 of a plan in the `ax` repo: **Durable Streams backing for the IngestStreamBus.**\n\nWork from this git worktree (stay inside it): `/Users/necmttn/Projects/ax/.claude/worktrees/live-ingest-durable-streams`\n\n## ⚠️ Test runner note\nA global hook blocks bare `bun test` (greps command string for \"bun test\"). Run via split shell vars:\n```bash\nB=bun; T=test; \"$B\" \"$T\" apps/axctl/src/dashboard/ingest-stream-durable.test.ts\n```\nFor the env-gated run: `B=bun; T=test; AX_STREAM_E2E=1 \"$B\" \"$T\" apps/axctl/src/dashboard/ingest-stream-durable.test.ts`\n\n## REQUIRED READING FIRST\nRea",
+      "excerpt": "I can merge it.",
+      "previous_assistant_excerpt": "Yes, that makes more sense. I added it as an agent-triggered skill.\n\nNew skill:\n- `skills/release-announcement/SKILL.md`\n- Trigger phrases include:\n  - “write release notes”\n  - “draft release announcement”\n  - “prepare changelog”\n  - “release page”\n  - “version page”\n  - “what changed in vX.Y.Z”\n  - “generate announcement for vX.Y.Z”\n  - “explain how we got to this release”\n\nWhat it does:\n- resolves previous tag to release head range\n- inspects all changed files and commits since previous version\n- maps important SHAs/subsystems back to `ax sessions near` and `ax recall`\n- writes a topical an",
       "review_status": "pending",
       "rationale": "",
       "reviewer": ""
     },
     {
-      "candidate_id": "tlm__verification__c4e164b95c72a13e",
-      "subject_id": "turn:claude_subagent_a0682098abde89437__756ef347f5bb1f52__seq_000001",
-      "session_id": "session:`claude-subagent-a0682098abde89437`",
-      "turn_id": "turn:claude_subagent_a0682098abde89437__756ef347f5bb1f52__seq_000001",
-      "label_family": "verification",
-      "target": "verification_demand",
-      "weak_label": "verification",
-      "weak_confidence": 0.84,
+      "candidate_id": "tlm__correction__77fb75438e3d49cd",
+      "subject_id": "turn:019e3ed3_139f_7d12_8ce1_9fb21619f986__4dfb169e22af638a__seq_000312",
+      "session_id": "session:`019e3ed3-139f-7d12-8ce1-9fb21619f986`",
+      "turn_id": "turn:019e3ed3_139f_7d12_8ce1_9fb21619f986__4dfb169e22af638a__seq_000312",
+      "previous_assistant_turn_id": "turn:019e3ed3_139f_7d12_8ce1_9fb21619f986__4dfb169e22af638a__seq_000311",
+      "label_family": "correction",
+      "target": "wrong_output",
+      "weak_label": "correction",
+      "weak_confidence": 0.74,
       "weak_sources": [
-        "verification:demand"
+        "correction:wrong_output"
       ],
       "evidence_paths": [
-        "turn:claude_subagent_a0682098abde89437__756ef347f5bb1f52__seq_000001"
+        "turn:019e3ed3_139f_7d12_8ce1_9fb21619f986__4dfb169e22af638a__seq_000312"
       ],
-      "excerpt": "Port the standalone animated landing prototype into the ax TanStack Start site, replacing the current 7-section landing at `/`.\n\n**Source file** (read — DO NOT MODIFY):\n`/Users/necmttn/Projects/ax/docs/prototypes/landing-v5a-hint-B-anim-v2.html` — single-file HTML with inline CSS + animation JS. The \"dashboard preview\" (72/100 + mini-stats + safety-contract donut), animated lineage (event chips streaming from 3 sources into a typed-graph sink with live counters), 3 sections total.\n\n**Target files** (create / overwrite as needed):\n- `/Users/necmttn/Projects/ax/site/app/routes/index.tsx` — REWRI",
+      "excerpt": "i think should thats the one source of place to add hook setting. deleting is fine as long as it's tracked by git so it's revertable and tracked in the db?   but agree some stuff might make agent unusable like broken pretool hook etc. that agent won't able to revert the changes directly",
+      "previous_assistant_excerpt": "Got it. The UX is closer to:\n\n```text\n/ax-retro\n  agent reviews evidence\n  authors/backtests cases\n  creates interventions\n  edits hooks/skills\n  enables experiments\n  reports what changed and why\n  schedules/checks next review\n\n/ax-interventions\n  list active changes\n  stop / pause / rollback / mark noisy\n```\n\nSo the user does not manually approve every small step. The command itself grants a bounded mandate.\n\n**Question 18:** What is the default autonomy boundary for `/ax-retro`?\n\nMy recommended answer: **autonomous inside a declared scope, but never silent globally destructive changes**.\n\nD",
       "review_status": "pending",
       "rationale": "",
       "reviewer": ""
     },
     {
-      "candidate_id": "tlm__verification__d6b65e6bd47e03bf",
-      "subject_id": "turn:claude_subagent_a89a30718d3222627__3b46577bbf7a486a__seq_000001",
-      "session_id": "session:`claude-subagent-a89a30718d3222627`",
-      "turn_id": "turn:claude_subagent_a89a30718d3222627__3b46577bbf7a486a__seq_000001",
+      "candidate_id": "tlm__verification__6d94560d589e32d3",
+      "subject_id": "turn:1688d3d6_bdde_4abb_9d65_c8b14ce01684__6246daa634ef96bd__seq_000254",
+      "session_id": "session:`1688d3d6-bdde-4abb-9d65-c8b14ce01684`",
+      "turn_id": "turn:1688d3d6_bdde_4abb_9d65_c8b14ce01684__6246daa634ef96bd__seq_000254",
       "label_family": "verification",
       "target": "verification_demand",
       "weak_label": "verification",
@@ -754,58 +1124,60 @@
         "verification:demand"
       ],
       "evidence_paths": [
-        "turn:claude_subagent_a89a30718d3222627__3b46577bbf7a486a__seq_000001"
+        "turn:1688d3d6_bdde_4abb_9d65_c8b14ce01684__6246daa634ef96bd__seq_000254"
       ],
-      "excerpt": "Implement a new agent skill for the `ax` repo (github.com/Necmttn/ax) that lets an AI coding agent star the repo, file an issue, or fork/open-a-PR — by shelling out to the `gh` CLI. Goal: zero new `axctl` CLI surface (the human never types a command; the agent invokes this skill). This is item #1 from a design discussion.\n\n## Context to read first\n- `docs/research/2026-06-02-oss-cli-feedback-growth.md` — the research that motivates this; sections 1-2 have the exact verified `gh` commands and the respectful-vs-spammy guidance.\n- Existing skills for structure/voice/frontmatter: `skills/setup/SKI",
+      "excerpt": "# Simplify: Code Review and Cleanup\n\nReview all changed files for reuse, quality, and efficiency. Fix any issues found.\n\n## Phase 1: Identify Changes\n\nRun `git diff` (or `git diff HEAD` if there are staged changes) to see what changed. If there are no git changes, review the most recently modified files that the user mentioned or that you edited earlier in this conversation.\n\n## Phase 2: Launch Three Review Agents in Parallel\n\nUse the Agent tool to launch all three agents concurrently in a single message. Pass each agent the full diff so it has the complete context.\n\n### Agent 1: Code Reuse Re",
       "review_status": "pending",
       "rationale": "",
       "reviewer": ""
     },
     {
-      "candidate_id": "tlm__verification__d87448c84cc55ccd",
-      "subject_id": "turn:claude_subagent_ad521a81d72d5289e__9a021dc977206b24__seq_000001",
-      "session_id": "session:`claude-subagent-ad521a81d72d5289e`",
-      "turn_id": "turn:claude_subagent_ad521a81d72d5289e__9a021dc977206b24__seq_000001",
-      "label_family": "verification",
-      "target": "verification_demand",
-      "weak_label": "verification",
-      "weak_confidence": 0.84,
+      "candidate_id": "tlm__direction__16a708ccc10ac62a",
+      "subject_id": "turn:7f0627c7_fbc4_4014_8631_b3d43791c471__8b713c8b3f06e809__seq_000031",
+      "session_id": "session:`7f0627c7-fbc4-4014-8631-b3d43791c471`",
+      "turn_id": "turn:7f0627c7_fbc4_4014_8631_b3d43791c471__8b713c8b3f06e809__seq_000031",
+      "label_family": "direction",
+      "target": "stated_preference",
+      "weak_label": "direction",
+      "weak_confidence": 0.7,
       "weak_sources": [
-        "verification:demand"
+        "intent:preference"
       ],
       "evidence_paths": [
-        "turn:claude_subagent_ad521a81d72d5289e__9a021dc977206b24__seq_000001"
+        "turn:7f0627c7_fbc4_4014_8631_b3d43791c471__8b713c8b3f06e809__seq_000031"
       ],
-      "excerpt": "You are implementing Task 4 of a plan in the `ax` repo: **Server-side ingest workflow runner.**\n\nWork from this git worktree (stay inside it): `/Users/necmttn/Projects/ax/.claude/worktrees/live-ingest-durable-streams`\n\nThis repo uses **Effect 4.0.0-beta**. **IMPORTANT: consult effect-solutions before writing Effect code** — run `effect-solutions list`, then `effect-solutions show services-and-layers testing` (and any relevant topic). Don't guess Effect patterns. Real source is at `.references/effect-smol/packages/effect/src` if you need to verify a beta API.\n\n## ⚠️ Test runner note\nGlobal hook",
+      "excerpt": "yes please",
       "review_status": "pending",
       "rationale": "",
       "reviewer": ""
     },
     {
-      "candidate_id": "tlm__verification__ddda28236bd1a786",
-      "subject_id": "turn:claude_subagent_a42b1f815e16d1e51__0c2236534d5d853c__seq_000001",
-      "session_id": "session:`claude-subagent-a42b1f815e16d1e51`",
-      "turn_id": "turn:claude_subagent_a42b1f815e16d1e51__0c2236534d5d853c__seq_000001",
-      "label_family": "verification",
-      "target": "verification_demand",
-      "weak_label": "verification",
-      "weak_confidence": 0.84,
+      "candidate_id": "tlm__correction__7a1bc0f7ad4a2790",
+      "subject_id": "turn:019e71cd_3cb0_7f61_affd_bd4615480ad9__231b3e62d067f010__seq_005807",
+      "session_id": "session:`019e71cd-3cb0-7f61-affd-bd4615480ad9`",
+      "turn_id": "turn:019e71cd_3cb0_7f61_affd_bd4615480ad9__231b3e62d067f010__seq_005807",
+      "previous_assistant_turn_id": "turn:019e71cd_3cb0_7f61_affd_bd4615480ad9__231b3e62d067f010__seq_005806",
+      "label_family": "correction",
+      "target": "wrong_output",
+      "weak_label": "correction",
+      "weak_confidence": 0.74,
       "weak_sources": [
-        "verification:demand"
+        "correction:wrong_output"
       ],
       "evidence_paths": [
-        "turn:claude_subagent_a42b1f815e16d1e51__0c2236534d5d853c__seq_000001"
+        "turn:019e71cd_3cb0_7f61_affd_bd4615480ad9__231b3e62d067f010__seq_005807"
       ],
-      "excerpt": "Fix a real correctness bug in the `ax` repo: **re-running ingest crashes on a unique-index violation** instead of being idempotent. Users won't reset their DB, so re-ingest MUST be idempotent.\n\nWork from: `/Users/necmttn/Projects/ax` (branch `main`). Use TDD. Effect 4.0.0-beta. Project uses `bun:test`.\n\n## ⚠️ Test runner note\nA global hook blocks bare `bun test`. Run via split shell vars: `B=bun; T=test; \"$B\" \"$T\" <path>`.\n\n## The crash (observed running `ax ingest` a second time against an already-ingested DB)\n```\nerror: Database index agent_event_session_seq already contains\n  [agent_session",
+      "excerpt": "<image name=[Image #1]>\n</image>\n[Image #1]  It's also this um wrong position of start and end of highlight why this is still happening.",
+      "previous_assistant_excerpt": "http://127.0.0.1:1739/sessions/019e7427-b6e7-7e01-9cd9-3a4806a565f7/inspect#turn-0\n\nIf the dev server is off, start it with:\n\n```bash\nbun run dashboard:dev\n```\n\nThe API also needs to be running, usually:\n\n```bash\nbun run serve\n```",
       "review_status": "pending",
       "rationale": "",
       "reviewer": ""
     },
     {
-      "candidate_id": "tlm__verification__f8a87fb496ff4c02",
-      "subject_id": "turn:claude_subagent_aa533036db61a9df6__32980ba34608156a__seq_000001",
-      "session_id": "session:`claude-subagent-aa533036db61a9df6`",
-      "turn_id": "turn:claude_subagent_aa533036db61a9df6__32980ba34608156a__seq_000001",
+      "candidate_id": "tlm__verification__711246a01f7e9056",
+      "subject_id": "turn:9d525746_4874_417e_b5c0_2941f9e59d92__1729610bd523337d__seq_000616",
+      "session_id": "session:`9d525746-4874-417e-b5c0-2941f9e59d92`",
+      "turn_id": "turn:9d525746_4874_417e_b5c0_2941f9e59d92__1729610bd523337d__seq_000616",
       "label_family": "verification",
       "target": "verification_demand",
       "weak_label": "verification",
@@ -814,58 +1186,62 @@
         "verification:demand"
       ],
       "evidence_paths": [
-        "turn:claude_subagent_aa533036db61a9df6__32980ba34608156a__seq_000001"
+        "turn:9d525746_4874_417e_b5c0_2941f9e59d92__1729610bd523337d__seq_000616"
       ],
-      "excerpt": "Review whether an implementation matches its spec. Be skeptical — verify by reading code, do not trust the report.\n\nWork from: `/Users/necmttn/Projects/ax/.claude/worktrees/live-ingest-durable-streams`\n\n## What was requested (Task 1)\nCreate `apps/axctl/src/ingest/stream-events.ts` exporting:\n- `type IngestStreamEvent` = union of 4 variants: `run_started {runId,label}`, `stage_started {runId,stage}`, `stage_finished {runId,stage,status:\"ok\"|\"error\",durationMs}`, `run_finished {runId,status:\"completed\"|\"failed\",durationMs}` (all fields `readonly`).\n- `function ingestStreamEventFromTrace(event: T",
+      "excerpt": "`high effort → 3+4 angles × 6 candidates → 1-vote verify (recall-biased) → ≤10 findings`\n\nYou are reviewing for **recall** at high effort: catch every real bug a careful\nreviewer would catch in one sitting. At this level, catching real bugs matters\nmore than avoiding false positives. Err on the side of surfacing.\n\n## Phase 0 — Gather the diff\n\nRun `git diff @{upstream}...HEAD` (or `git diff main...HEAD` / `git diff HEAD~1`\nif there's no upstream) to get the unified diff under review. If there are\nuncommitted changes, or the range diff is empty, also run `git diff HEAD` and\ninclude the working-",
       "review_status": "pending",
       "rationale": "",
       "reviewer": ""
     },
     {
-      "candidate_id": "tlm__verification__fabbbb6c4491b6e7",
-      "subject_id": "turn:claude_subagent_a7638c702fbd07a6b__372578eb9e8fa1f8__seq_000001",
-      "session_id": "session:`claude-subagent-a7638c702fbd07a6b`",
-      "turn_id": "turn:claude_subagent_a7638c702fbd07a6b__372578eb9e8fa1f8__seq_000001",
-      "label_family": "verification",
-      "target": "verification_demand",
-      "weak_label": "verification",
-      "weak_confidence": 0.84,
+      "candidate_id": "tlm__direction__16bf585afafaae5b",
+      "subject_id": "turn:019e76fe_63ff_7303_a98d_7e6210820b04__45ce27a7ae47a0f9__seq_001122",
+      "session_id": "session:`019e76fe-63ff-7303-a98d-7e6210820b04`",
+      "turn_id": "turn:019e76fe_63ff_7303_a98d_7e6210820b04__45ce27a7ae47a0f9__seq_001122",
+      "previous_assistant_turn_id": "turn:019e76fe_63ff_7303_a98d_7e6210820b04__45ce27a7ae47a0f9__seq_001121",
+      "label_family": "direction",
+      "target": "stated_preference",
+      "weak_label": "direction",
+      "weak_confidence": 0.7,
       "weak_sources": [
-        "verification:demand"
+        "intent:preference"
       ],
       "evidence_paths": [
-        "turn:claude_subagent_a7638c702fbd07a6b__372578eb9e8fa1f8__seq_000001"
+        "turn:019e76fe_63ff_7303_a98d_7e6210820b04__45ce27a7ae47a0f9__seq_001122"
       ],
-      "excerpt": "You are the FINAL code reviewer for a complete feature branch before it merges as a single PR. Be thorough and skeptical — verify by reading code + running, don't trust prior reviews.\n\nWork from: `/Users/necmttn/Projects/ax/.claude/worktrees/live-ingest-durable-streams`\n\n## The feature: \"Live ingest over Durable Streams\"\n`ax serve` can host ingest: `POST /api/ingest` triggers the existing `runIngest` pipeline in-process (forked), publishes per-stage progress to a per-run Durable Stream (`ingest:<runId>`) via a sidecar Durable Streams server, and a dashboard live view subscribes (catch-up histo",
+      "excerpt": "alright lets do all that",
+      "previous_assistant_excerpt": "Next, in order:\n\n1. Close stale issues #88 and #90 manually. Their work merged via #100 and #97, but GitHub didn’t auto-close them.\n2. Merge release PR #82. It is clean and `verify` is passing, so it’s the obvious release cut.\n3. Update/rebase local working branches after the release. Your current checkout is dirty and still on `issue-87-provider-parity-ci-fix`, so I’d avoid touching it until we decide what to preserve.\n4. Start the next backlog item: #86, Effect JSON-boundary Schema decoders and cleanup of the recurring typecheck advisories. That warning noise showed up in every verification ",
       "review_status": "pending",
       "rationale": "",
       "reviewer": ""
     },
     {
-      "candidate_id": "tlm__verification__fdd57fa1d169de93",
-      "subject_id": "turn:claude_subagent_a8cd2cb4ba6f9ea57__ca77a2a0dadb5172__seq_000001",
-      "session_id": "session:`claude-subagent-a8cd2cb4ba6f9ea57`",
-      "turn_id": "turn:claude_subagent_a8cd2cb4ba6f9ea57__ca77a2a0dadb5172__seq_000001",
-      "label_family": "verification",
-      "target": "verification_demand",
-      "weak_label": "verification",
-      "weak_confidence": 0.84,
+      "candidate_id": "tlm__correction__85b67afbb7fdd584",
+      "subject_id": "turn:019e5eed_5168_7323_b1cf_944ab9f3165a__f23dd1110489c2bf__seq_000003",
+      "session_id": "session:`019e5eed-5168-7323-b1cf-944ab9f3165a`",
+      "turn_id": "turn:019e5eed_5168_7323_b1cf_944ab9f3165a__f23dd1110489c2bf__seq_000003",
+      "previous_assistant_turn_id": "turn:019e5eed_5168_7323_b1cf_944ab9f3165a__f23dd1110489c2bf__seq_000002",
+      "label_family": "correction",
+      "target": "wrong_output",
+      "weak_label": "correction",
+      "weak_confidence": 0.74,
       "weak_sources": [
-        "verification:demand"
+        "correction:wrong_output"
       ],
       "evidence_paths": [
-        "turn:claude_subagent_a8cd2cb4ba6f9ea57__ca77a2a0dadb5172__seq_000001"
+        "turn:019e5eed_5168_7323_b1cf_944ab9f3165a__f23dd1110489c2bf__seq_000003"
       ],
-      "excerpt": "Roast the hero on http://localhost:5173/ (the new ax landing) and fix the issues you find. The hero implementation lives in:\n- `/Users/necmttn/Projects/ax/site/app/components/landing-v2/dashboard-preview.tsx` (headline + lede + install + supports strip)\n- `/Users/necmttn/Projects/ax/site/app/components/landing-v2/supports-strip.tsx` (5 provider logos + names)\n- `/Users/necmttn/Projects/ax/site/app/styles/globals.css` (scoped `.landing-v2` block)\n\n**Known issues I want you to fix (and roast first, then fix)**\n\n1. **Eyebrow mismatch.** Currently reads `FOR CLAUDE CODE + CODEX` but ax now support",
+      "excerpt": "Implement Task 4 from docs/superpowers/plans/2026-05-25-ailifestory-hybrid-soft-testing.md in /Users/necmttn/Projects/apps.\n\nContext:\n- Repo uses Bun. Follow AGENTS.md.\n- Worktree is dirty with unrelated recording-lifecycle changes. You are not alone in the codebase. Do not revert or modify unrelated files.\n- Owned files for this task:\n  - apps/ailifestory/web/src/routes/admin/lab/index.tsx (create)\n  - apps/ailifestory/web/src/routes/admin/route.tsx\n  - apps/ailifestory/web/src/routeTree.gen.ts\n- Backend RPC `dev_scenario_reset` and `dev_scenario_get` has already been implemented/committed in",
+      "previous_assistant_excerpt": "# AGENTS.md instructions for /Users/necmttn/Projects/apps\n\n<INSTRUCTIONS>\n\nDefault to using Bun instead of Node.js.\n\n- Use `bun <file>` instead of `node <file>` or `ts-node <file>`\n- Use `bun test` instead of `jest` or `vitest`\n- Use `bun build <file.html|file.ts|file.css>` instead of `webpack` or `esbuild`\n- Use `bun install` instead of `npm install` or `yarn install` or `pnpm install`\n- Use `bun run <script>` instead of `npm run <script>` or `yarn run <script>` or `pnpm run <script>`\n- Use `bunx <package> <command>` instead of `npx <package> <command>`\n- Bun automatically loads .env, so don'",
       "review_status": "pending",
       "rationale": "",
       "reviewer": ""
     },
     {
-      "candidate_id": "tlm__verification__ff2b4d4e4f4fb339",
-      "subject_id": "turn:claude_subagent_a59aaad4ae7a9e497__285b464a2aa35390__seq_000001",
-      "session_id": "session:`claude-subagent-a59aaad4ae7a9e497`",
-      "turn_id": "turn:claude_subagent_a59aaad4ae7a9e497__285b464a2aa35390__seq_000001",
+      "candidate_id": "tlm__verification__7bb68467d4d2ef37",
+      "subject_id": "turn:1688d3d6_bdde_4abb_9d65_c8b14ce01684__6246daa634ef96bd__seq_000815",
+      "session_id": "session:`1688d3d6-bdde-4abb-9d65-c8b14ce01684`",
+      "turn_id": "turn:1688d3d6_bdde_4abb_9d65_c8b14ce01684__6246daa634ef96bd__seq_000815",
       "label_family": "verification",
       "target": "verification_demand",
       "weak_label": "verification",
@@ -874,22 +1250,479 @@
         "verification:demand"
       ],
       "evidence_paths": [
-        "turn:claude_subagent_a59aaad4ae7a9e497__285b464a2aa35390__seq_000001"
+        "turn:1688d3d6_bdde_4abb_9d65_c8b14ce01684__6246daa634ef96bd__seq_000815"
       ],
-      "excerpt": "You are implementing Task 7 (final) of a plan in the `ax` repo: **End-to-end dogfood + docs** for the live-ingest-over-Durable-Streams feature.\n\nWork from this git worktree (stay inside it): `/Users/necmttn/Projects/ax/.claude/worktrees/live-ingest-durable-streams`. Today is 2026-06-02.\n\n## What was built (Tasks 0–6, all committed in this worktree)\n- `POST /api/ingest` on `ax serve` triggers an in-process ingest run (forked on a long-lived ManagedRuntime) and returns `{ runId, stream: \"<full sidecar URL>\", streamName: \"ingest:<runId>\", streamBaseUrl }`.\n- Progress flows: `runIngest` live-trace",
+      "excerpt": "# Simplify: Code Review and Cleanup\n\nReview all changed files for reuse, quality, and efficiency. Fix any issues found.\n\n## Phase 1: Identify Changes\n\nRun `git diff` (or `git diff HEAD` if there are staged changes) to see what changed. If there are no git changes, review the most recently modified files that the user mentioned or that you edited earlier in this conversation.\n\n## Phase 2: Launch Three Review Agents in Parallel\n\nUse the Agent tool to launch all three agents concurrently in a single message. Pass each agent the full diff so it has the complete context.\n\n### Agent 1: Code Reuse Re",
+      "review_status": "pending",
+      "rationale": "",
+      "reviewer": ""
+    },
+    {
+      "candidate_id": "tlm__direction__1741de7aca049404",
+      "subject_id": "turn:019e3ed3_139f_7d12_8ce1_9fb21619f986__4dfb169e22af638a__seq_000306",
+      "session_id": "session:`019e3ed3-139f-7d12-8ce1-9fb21619f986`",
+      "turn_id": "turn:019e3ed3_139f_7d12_8ce1_9fb21619f986__4dfb169e22af638a__seq_000306",
+      "previous_assistant_turn_id": "turn:019e3ed3_139f_7d12_8ce1_9fb21619f986__4dfb169e22af638a__seq_000305",
+      "label_family": "direction",
+      "target": "stated_preference",
+      "weak_label": "direction",
+      "weak_confidence": 0.7,
+      "weak_sources": [
+        "intent:preference"
+      ],
+      "evidence_paths": [
+        "turn:019e3ed3_139f_7d12_8ce1_9fb21619f986__4dfb169e22af638a__seq_000306"
+      ],
+      "excerpt": "i want this almost autonomous so all what user needs to is endup beign running the command so agent can go  and create bunch of   interventions and create new hooks/ skills and test them optimize then reports the user things he changed base on x y z  will report in a week and meanwhile if it's bothers the usage just call \"/ax-intervention or similar to stop bad experiments not working experiments. ( the new experiments should back tested if possible from previous sessions)",
+      "previous_assistant_excerpt": "Yes. That’s the actual product loop.\n\nI’d separate names:\n\n- **`axctl doctor` / `/ax-doctor`**: setup/readiness check. “Is evidence collection healthy?”\n- **`axctl retrospective` / `/ax-retro`**: weekly improvement loop. “What did agents do well/badly, and what should change?”\n\nYour described feature is **Agent Retrospective**, not Doctor.\n\nShape:\n\n```text\nAgent Retrospective\n  cadence: weekly\n  scope: global | repository | checkout | harness\n  evidence window: last 7d / 30d\n  outputs:\n    wins\n    regressions\n    noisy hooks\n    helpful hooks\n    repeated corrections\n    recurring tool failur",
+      "review_status": "pending",
+      "rationale": "",
+      "reviewer": ""
+    },
+    {
+      "candidate_id": "tlm__correction__8bfc42a7c27dd38d",
+      "subject_id": "turn:019e76fe_63ff_7303_a98d_7e6210820b04__45ce27a7ae47a0f9__seq_002273",
+      "session_id": "session:`019e76fe-63ff-7303-a98d-7e6210820b04`",
+      "turn_id": "turn:019e76fe_63ff_7303_a98d_7e6210820b04__45ce27a7ae47a0f9__seq_002273",
+      "previous_assistant_turn_id": "turn:019e76fe_63ff_7303_a98d_7e6210820b04__45ce27a7ae47a0f9__seq_002272",
+      "label_family": "correction",
+      "target": "wrong_output",
+      "weak_label": "correction",
+      "weak_confidence": 0.74,
+      "weak_sources": [
+        "correction:wrong_output"
+      ],
+      "evidence_paths": [
+        "turn:019e76fe_63ff_7303_a98d_7e6210820b04__45ce27a7ae47a0f9__seq_002273"
+      ],
+      "excerpt": "I don't like this. Can you revert or make a better version with a little bit more fitting to the X design, not necessarily Switzerland design I was intended to be? Or change lock to be have a more dense information, not the UI of it.",
+      "previous_assistant_excerpt": "Done. Preview is running here:\n\n- Dense release page: http://127.0.0.1:4175/changelog/v0.3.0\n- Changelog index: http://127.0.0.1:4175/changelog\n\nI made it closer to the SurrealDB release-page shape: a release dossier with counts, section jumps, and categorized referenced changes before the announcement. For v0.3.0 it now shows `123 referenced changes`, split into Added / Fixed / Faster sections, with commit and issue links preserved per item.\n\nPR is open, not merged: https://github.com/Necmttn/ax/pull/106\n\nVerified:\n- `bun run typecheck`\n- `cd site && bun run build`\n- Smoke checked `/changelog",
+      "review_status": "pending",
+      "rationale": "",
+      "reviewer": ""
+    },
+    {
+      "candidate_id": "tlm__verification__8538d69695b16960",
+      "subject_id": "turn:019e77a1_4075_7b42_a12f_20fd268ea9ce__df37265b80edd341__seq_000003",
+      "session_id": "session:`019e77a1-4075-7b42-a12f-20fd268ea9ce`",
+      "turn_id": "turn:019e77a1_4075_7b42_a12f_20fd268ea9ce__df37265b80edd341__seq_000003",
+      "previous_assistant_turn_id": "turn:019e77a1_4075_7b42_a12f_20fd268ea9ce__df37265b80edd341__seq_000002",
+      "label_family": "verification",
+      "target": "verification_demand",
+      "weak_label": "verification",
+      "weak_confidence": 0.84,
+      "weak_sources": [
+        "verification:demand"
+      ],
+      "evidence_paths": [
+        "turn:019e77a1_4075_7b42_a12f_20fd268ea9ce__df37265b80edd341__seq_000003"
+      ],
+      "excerpt": "You are working in repo /Users/necmttn/Projects/ax on GitHub issue https://github.com/Necmttn/ax/issues/92: \"Expose token and model quality by provider\".\n\nGoal: implement the issue end-to-end, verify, commit, push a branch, and open a PR linked to #92.\n\nContext:\n- Token/model rows use session_token_usage, used_model, agent_used_model, agent_model.\n- Codex has explicit token_count events in src/ingest/codex.ts.\n- Pi has explicit usage fields in src/ingest/pi.ts.\n- Claude/OpenCode/Cursor may use estimates from session-health when explicit counters are absent.\n- Cost read surfaces include src/das",
+      "previous_assistant_excerpt": "# AGENTS.md instructions for /Users/necmttn/Projects/ax\n\n<INSTRUCTIONS>\n# CLAUDE.md\n\nGuidance for Claude Code and other AI assistants working in this repo.\n\n## What this is\n\n`ax` - local taste & telemetry graph for AI coding agents. Ingests Claude Code transcripts (`~/.claude/projects/`) + Codex transcripts (`~/.codex/sessions/`) + installed skills (`~/.claude/skills/`, `~/.agents/skills/`, plugin caches) into a dedicated SurrealDB instance. CLI surfaces \"what skills/tools you actually use\" on demand.\n\n## Stack\n\n- **Runtime**: bun ≥ 1.3\n- **Language**: TypeScript (strict, `module: preserve`, `",
+      "review_status": "pending",
+      "rationale": "",
+      "reviewer": ""
+    },
+    {
+      "candidate_id": "tlm__direction__17cf00e4ba45adea",
+      "subject_id": "turn:8b587d52_08a0_4b29_9ccb_d3221da0f16e__4500c528f7393679__seq_000912",
+      "session_id": "session:`8b587d52-08a0-4b29-9ccb-d3221da0f16e`",
+      "turn_id": "turn:8b587d52_08a0_4b29_9ccb_d3221da0f16e__4500c528f7393679__seq_000912",
+      "label_family": "direction",
+      "target": "stated_preference",
+      "weak_label": "direction",
+      "weak_confidence": 0.7,
+      "weak_sources": [
+        "intent:preference"
+      ],
+      "evidence_paths": [
+        "turn:8b587d52_08a0_4b29_9ccb_d3221da0f16e__4500c528f7393679__seq_000912"
+      ],
+      "excerpt": "https://necmttn.com/services can we add similar animations like this?   /Users/necmttn/Projects/necmttn.com",
+      "review_status": "pending",
+      "rationale": "",
+      "reviewer": ""
+    },
+    {
+      "candidate_id": "tlm__correction__9635e698c9c69870",
+      "subject_id": "turn:019e71cd_3cb0_7f61_affd_bd4615480ad9__231b3e62d067f010__seq_004581",
+      "session_id": "session:`019e71cd-3cb0-7f61-affd-bd4615480ad9`",
+      "turn_id": "turn:019e71cd_3cb0_7f61_affd_bd4615480ad9__231b3e62d067f010__seq_004581",
+      "previous_assistant_turn_id": "turn:019e71cd_3cb0_7f61_affd_bd4615480ad9__231b3e62d067f010__seq_004580",
+      "label_family": "correction",
+      "target": "wrong_output",
+      "weak_label": "correction",
+      "weak_confidence": 0.74,
+      "weak_sources": [
+        "correction:wrong_output"
+      ],
+      "evidence_paths": [
+        "turn:019e71cd_3cb0_7f61_affd_bd4615480ad9__231b3e62d067f010__seq_004581"
+      ],
+      "excerpt": "<image name=[Image #1]>\n</image>\nis it uses our parsed data?  [Image #1]  i see some wrong highlights?",
+      "previous_assistant_excerpt": "Linked it.\n\nThe prototype server is running now at:\n\n`http://127.0.0.1:4178/`\n\nI added:\n- [scripts/prototypes/turn-content-blocks-dashboard.ts](/Users/necmttn/Projects/ax/scripts/prototypes/turn-content-blocks-dashboard.ts)\n- `package.json` script: `bun run prototype:turn-blocks`\n- HTML now auto-fetches `/api/turn-content/latest`\n- It still supports Sample and Paste JSON fallback\n- API has a timeout and returns a useful JSON error instead of hanging\n\nI also fixed a real ingest bug found while testing: `content_document/content_block/content_atom` now explicitly write `ts: time::now()` so Surre",
+      "review_status": "pending",
+      "rationale": "",
+      "reviewer": ""
+    },
+    {
+      "candidate_id": "tlm__verification__89b19e4b088b12cc",
+      "subject_id": "turn:72f97b36_ac6c_4b37_a926_2712e4bf156f__d3ce108bcf0c2fa5__seq_003142",
+      "session_id": "session:`72f97b36-ac6c-4b37-a926-2712e4bf156f`",
+      "turn_id": "turn:72f97b36_ac6c_4b37_a926_2712e4bf156f__d3ce108bcf0c2fa5__seq_003142",
+      "previous_assistant_turn_id": "turn:72f97b36_ac6c_4b37_a926_2712e4bf156f__d3ce108bcf0c2fa5__seq_003141",
+      "label_family": "verification",
+      "target": "verification_demand",
+      "weak_label": "verification",
+      "weak_confidence": 0.84,
+      "weak_sources": [
+        "verification:demand"
+      ],
+      "evidence_paths": [
+        "turn:72f97b36_ac6c_4b37_a926_2712e4bf156f__d3ce108bcf0c2fa5__seq_003142"
+      ],
+      "excerpt": "<local-command-stdout>Goal set: 1. Corrected design doc — docs/architecture/skill-script-execution.html rewritten to the locked\n  grill output: ScriptRunner naming, opaque token (no TTL), filesystem skills, TypeScript+Bun, the\n  §2 boundary table as the contract, §8 separating the skill/script track from the entity-runtime\n  track.\n\n  2. Execution plan — docs/superpowers/plans/2026-05-20-workbench-skill-script-runtime.md:\n\n  ┌───────┬─────────────────────────────────────────────────────────────────────────────────────┐\n  │ Phase │                                      Delivers                  ",
+      "previous_assistant_excerpt": "<command-name>/goal</command-name>\n            <command-message>goal</command-message>\n            <command-args> 1. Corrected design doc — docs/architecture/skill-script-execution.html rewritten to the locked\n  grill output: ScriptRunner naming, opaque token (no TTL), filesystem skills, TypeScript+Bun, the\n  §2 boundary table as the contract, §8 separating the skill/script track from the entity-runtime\n  track.\n\n  2. Execution plan — docs/superpowers/plans/2026-05-20-workbench-skill-script-runtime.md:\n\n  ┌───────┬────────────────────────────────────────────────────────────────────────────────",
+      "review_status": "pending",
+      "rationale": "",
+      "reviewer": ""
+    },
+    {
+      "candidate_id": "tlm__direction__186b150c7018bf8e",
+      "subject_id": "turn:019e72c0_525b_71e1_a17b_73b0c32b6d1f__153084e386bbabac__seq_000075",
+      "session_id": "session:`019e72c0-525b-71e1-a17b-73b0c32b6d1f`",
+      "turn_id": "turn:019e72c0_525b_71e1_a17b_73b0c32b6d1f__153084e386bbabac__seq_000075",
+      "previous_assistant_turn_id": "turn:019e72c0_525b_71e1_a17b_73b0c32b6d1f__153084e386bbabac__seq_000074",
+      "label_family": "direction",
+      "target": "stated_preference",
+      "weak_label": "direction",
+      "weak_confidence": 0.7,
+      "weak_sources": [
+        "intent:preference"
+      ],
+      "evidence_paths": [
+        "turn:019e72c0_525b_71e1_a17b_73b0c32b6d1f__153084e386bbabac__seq_000075"
+      ],
+      "excerpt": "Please re-review Task 6 code quality after fix commit `0995321` in /Users/necmttn/Projects/ax/.worktrees/local-agent-providers. Focus on the prior multi-DB collision issue and any new blocking issue. Do not edit files. Return APPROVED or CHANGES_REQUESTED.",
+      "previous_assistant_excerpt": "CHANGES_REQUESTED\n\n[High] [src/ingest/cursor.ts](/Users/necmttn/Projects/ax/.worktrees/local-agent-providers/src/ingest/cursor.ts:291): Cursor sessions use only the raw conversation `id`, but ingestion scans multiple DBs at [src/ingest/cursor.ts](/Users/necmttn/Projects/ax/.worktrees/local-agent-providers/src/ingest/cursor.ts:429). The same conversation/message ids in two `state.vscdb` files collide and overwrite `session`, `agent_session`, `agent_event`, and `turn` records via [src/ingest/cursor.ts](/Users/necmttn/Projects/ax/.worktrees/local-agent-providers/src/ingest/cursor.ts:387), [src/in",
+      "review_status": "pending",
+      "rationale": "",
+      "reviewer": ""
+    },
+    {
+      "candidate_id": "tlm__correction__97cf741de30f80c4",
+      "subject_id": "turn:019e4e5e_4c52_71b3_8daf_e16ef2be9e58__b1362176f40c1b0f__seq_000037",
+      "session_id": "session:`019e4e5e-4c52-71b3-8daf-e16ef2be9e58`",
+      "turn_id": "turn:019e4e5e_4c52_71b3_8daf_e16ef2be9e58__b1362176f40c1b0f__seq_000037",
+      "previous_assistant_turn_id": "turn:019e4e5e_4c52_71b3_8daf_e16ef2be9e58__b1362176f40c1b0f__seq_000036",
+      "label_family": "correction",
+      "target": "wrong_output",
+      "weak_label": "correction",
+      "weak_confidence": 0.74,
+      "weak_sources": [
+        "correction:wrong_output"
+      ],
+      "evidence_paths": [
+        "turn:019e4e5e_4c52_71b3_8daf_e16ef2be9e58__b1362176f40c1b0f__seq_000037"
+      ],
+      "excerpt": "i'm testing this in electric-ax https://github.com/electric-sql/electric/tree/main/examples/agents-chat-starter but it's doesn't work not sure whats wrong can you check?",
+      "previous_assistant_excerpt": "For `npx electric-ax`, the server-related code is in the Electric monorepo here:\n\n- CLI package: `packages/electric-ax`\n- server start logic: `packages/electric-ax/src/start.ts`\n- CLI command wiring: `packages/electric-ax/src/index.ts`\n- Docker compose file used for the coordinator server: `packages/electric-ax/docker-compose.full.yml`\n- builtin local agents runtime class: `packages/agents/src/server.ts`\n\nDirect GitHub paths:\n\n- https://github.com/electric-sql/electric/tree/main/packages/electric-ax\n- https://github.com/electric-sql/electric/blob/main/packages/electric-ax/src/start.ts\n- https:",
+      "review_status": "pending",
+      "rationale": "",
+      "reviewer": ""
+    },
+    {
+      "candidate_id": "tlm__verification__8a6d7c46ede201b0",
+      "subject_id": "turn:019e745e_6356_7cc1_882d_68f09d725495__57944d1bbe8660a1__seq_000003",
+      "session_id": "session:`019e745e-6356-7cc1-882d-68f09d725495`",
+      "turn_id": "turn:019e745e_6356_7cc1_882d_68f09d725495__57944d1bbe8660a1__seq_000003",
+      "previous_assistant_turn_id": "turn:019e745e_6356_7cc1_882d_68f09d725495__57944d1bbe8660a1__seq_000002",
+      "label_family": "verification",
+      "target": "verification_demand",
+      "weak_label": "verification",
+      "weak_confidence": 0.84,
+      "weak_sources": [
+        "verification:demand"
+      ],
+      "evidence_paths": [
+        "turn:019e745e_6356_7cc1_882d_68f09d725495__57944d1bbe8660a1__seq_000003"
+      ],
+      "excerpt": "Spec compliance review for Task 9 in worktree /Users/necmttn/Projects/ax/.worktrees/gist-session-sharing.\n\nDo not edit files. Review only.\n\nTask 9 spec:\n- Add concise docs for sharing sessions, likely in `docs/insights-cli-reference.md` or relevant doc source.\n- Docs must explain:\n  - `axctl share <session-id>` exports sanitized artifact\n  - creates secret GitHub Gist containing `ax-session.json`\n  - prints `https://ax.necmttn.com/s/<owner>/<gist-id>`\n  - `--dry-run` to inspect artifact before publishing\n  - secret Gists are unlisted links, not private storage\n  - mention `--public`, `--yes`, ",
+      "previous_assistant_excerpt": "# AGENTS.md instructions for /Users/necmttn/Projects/ax\n\n<INSTRUCTIONS>\n# CLAUDE.md\n\nGuidance for Claude Code and other AI assistants working in this repo.\n\n## What this is\n\n`ax` - local taste & telemetry graph for AI coding agents. Ingests Claude Code transcripts (`~/.claude/projects/`) + Codex transcripts (`~/.codex/sessions/`) + installed skills (`~/.claude/skills/`, `~/.agents/skills/`, plugin caches) into a dedicated SurrealDB instance. CLI surfaces \"what skills/tools you actually use\" on demand.\n\n## Stack\n\n- **Runtime**: bun ≥ 1.3\n- **Language**: TypeScript (strict, `module: preserve`, `",
+      "review_status": "pending",
+      "rationale": "",
+      "reviewer": ""
+    },
+    {
+      "candidate_id": "tlm__direction__18a4a5590ed110c4",
+      "subject_id": "turn:019e72d1_1ab3_79f2_aaec_a275e7b3c01f__4b8194423fd5c7b3__seq_000273",
+      "session_id": "session:`019e72d1-1ab3-79f2-aaec-a275e7b3c01f`",
+      "turn_id": "turn:019e72d1_1ab3_79f2_aaec_a275e7b3c01f__4b8194423fd5c7b3__seq_000273",
+      "previous_assistant_turn_id": "turn:019e72d1_1ab3_79f2_aaec_a275e7b3c01f__4b8194423fd5c7b3__seq_000272",
+      "label_family": "direction",
+      "target": "stated_preference",
+      "weak_label": "direction",
+      "weak_confidence": 0.7,
+      "weak_sources": [
+        "intent:preference"
+      ],
+      "evidence_paths": [
+        "turn:019e72d1_1ab3_79f2_aaec_a275e7b3c01f__4b8194423fd5c7b3__seq_000273"
+      ],
+      "excerpt": "Follow-up review found two Important issues in your final fix. Please patch in /Users/necmttn/Projects/ax/.worktrees/local-agent-providers.\n\nIssues:\n1. Codex streaming parent edges across batches:\n- `src/ingest/codex.ts` drains providerEvents every `codexFlushEvery`, but `buildAgentEventStatements` can only resolve parent edges within the current batch. Linear/tool-output parent edges can be lost when parent event was flushed earlier.\n- Fix by carrying enough prior event context across drains or emitting explicit parent edge statements that can reference already-written parent events. Avoid du",
+      "previous_assistant_excerpt": "DONE_WITH_CONCERNS\n\nCommit: `c06c2b1` (`fix: complete local provider integration`)\n\nChanged files:\n- `src/ingest/pi.ts`, `src/ingest/pi.test.ts`\n- `src/ingest/opencode.ts`, `src/ingest/opencode.test.ts`\n- `src/ingest/cursor.ts`, `src/ingest/cursor.test.ts`\n- `src/ingest/codex.ts`, `src/ingest/codex.test.ts`\n- `src/ingest/transcripts.ts`, `src/ingest/transcripts.test.ts`\n- `src/ingest/derive-signals.ts`, `src/ingest/derive-signals.stage.test.ts`\n- `src/dashboard/web/src/routes/sessions.tsx`, `src/dashboard/web/src/routes/sessions.test.ts`\n\nTests run:\n- Required focused command plus dashboard ro",
+      "review_status": "pending",
+      "rationale": "",
+      "reviewer": ""
+    },
+    {
+      "candidate_id": "tlm__correction__9ca5e7459f5d6c9b",
+      "subject_id": "turn:019e7c67_9137_77e1_8942_3ad9df5e6308__1a8a78d9ecccb867__seq_001806",
+      "session_id": "session:`019e7c67-9137-77e1-8942-3ad9df5e6308`",
+      "turn_id": "turn:019e7c67_9137_77e1_8942_3ad9df5e6308__1a8a78d9ecccb867__seq_001806",
+      "previous_assistant_turn_id": "turn:019e7c67_9137_77e1_8942_3ad9df5e6308__1a8a78d9ecccb867__seq_001805",
+      "label_family": "correction",
+      "target": "wrong_output",
+      "weak_label": "correction",
+      "weak_confidence": 0.74,
+      "weak_sources": [
+        "correction:wrong_output"
+      ],
+      "evidence_paths": [
+        "turn:019e7c67_9137_77e1_8942_3ad9df5e6308__1a8a78d9ecccb867__seq_001806"
+      ],
+      "excerpt": "<image name=[Image #1]>\n</image>\n[Image #1]  Looks like the highlight is still wrong.",
+      "previous_assistant_excerpt": "Yes. `agent-browser` is installed through `npx`, not directly on this shell’s `PATH`.\n\nThis works:\n\n```bash\nnpx agent-browser open 'http://127.0.0.1:4175/studio/?shareOwner=Necmttn&gistId=42ed035bcaba1f2868d802f0b837405e'\n```\n\nI used that and confirmed the local Gist session reviewer renders. The custom domain is still stale right now, but the GitHub Pages canonical URL has the new bundle:\n\n```text\nhttps://necmttn.github.io/ax/studio/?shareOwner=Necmttn&gistId=42ed035bcaba1f2868d802f0b837405e\n```\n\nBest URL to inspect immediately:\n\n```text\nhttp://127.0.0.1:4175/studio/?shareOwner=Necmttn&gistId",
+      "review_status": "pending",
+      "rationale": "",
+      "reviewer": ""
+    },
+    {
+      "candidate_id": "tlm__verification__9846497451a214f0",
+      "subject_id": "turn:019e7334_0e46_7230_a304_327ce2dfd6c0__b9e1520f2b36b204__seq_000798",
+      "session_id": "session:`019e7334-0e46-7230-a304-327ce2dfd6c0`",
+      "turn_id": "turn:019e7334_0e46_7230_a304_327ce2dfd6c0__b9e1520f2b36b204__seq_000798",
+      "previous_assistant_turn_id": "turn:019e7334_0e46_7230_a304_327ce2dfd6c0__b9e1520f2b36b204__seq_000797",
+      "label_family": "verification",
+      "target": "verification_demand",
+      "weak_label": "verification",
+      "weak_confidence": 0.84,
+      "weak_sources": [
+        "verification:demand"
+      ],
+      "evidence_paths": [
+        "turn:019e7334_0e46_7230_a304_327ce2dfd6c0__b9e1520f2b36b204__seq_000798"
+      ],
+      "excerpt": "thats ugly as fuck did you check the reference link i gave you?",
+      "previous_assistant_excerpt": "Opened a local UI preview:\n\n```text\n/tmp/ax-session-share-preview.html\n```\n\nThis uses the dry-run artifact and approximates the hosted share page locally. No Gist was created.",
+      "review_status": "pending",
+      "rationale": "",
+      "reviewer": ""
+    },
+    {
+      "candidate_id": "tlm__direction__19180e4bdc22f72c",
+      "subject_id": "turn:fd2bd2ab_7956_441b_8047_82a9017ac76b__648c3a1f2a8b6e95__seq_001636",
+      "session_id": "session:`fd2bd2ab-7956-441b-8047-82a9017ac76b`",
+      "turn_id": "turn:fd2bd2ab_7956_441b_8047_82a9017ac76b__648c3a1f2a8b6e95__seq_001636",
+      "label_family": "direction",
+      "target": "stated_preference",
+      "weak_label": "direction",
+      "weak_confidence": 0.7,
+      "weak_sources": [
+        "intent:preference"
+      ],
+      "evidence_paths": [
+        "turn:fd2bd2ab_7956_441b_8047_82a9017ac76b__648c3a1f2a8b6e95__seq_001636"
+      ],
+      "excerpt": "Can we make um MPX skill at from the public X repo? I don't wanna maintain this, I want this to be globally installable.",
+      "review_status": "pending",
+      "rationale": "",
+      "reviewer": ""
+    },
+    {
+      "candidate_id": "tlm__correction__9f5909cadb0a0e",
+      "subject_id": "turn:019e73d9_6ce4_7f03_b3a8_259ab9ee20fb__d6c60e870ee0b67b__seq_000003",
+      "session_id": "session:`019e73d9-6ce4-7f03-b3a8-259ab9ee20fb`",
+      "turn_id": "turn:019e73d9_6ce4_7f03_b3a8_259ab9ee20fb__d6c60e870ee0b67b__seq_000003",
+      "previous_assistant_turn_id": "turn:019e73d9_6ce4_7f03_b3a8_259ab9ee20fb__d6c60e870ee0b67b__seq_000002",
+      "label_family": "correction",
+      "target": "wrong_output",
+      "weak_label": "correction",
+      "weak_confidence": 0.74,
+      "weak_sources": [
+        "correction:wrong_output"
+      ],
+      "evidence_paths": [
+        "turn:019e73d9_6ce4_7f03_b3a8_259ab9ee20fb__d6c60e870ee0b67b__seq_000003"
+      ],
+      "excerpt": "Implement Task 5 of the Gist-backed session sharing plan in the isolated worktree.\n\nWorkspace: /Users/necmttn/Projects/ax/.worktrees/gist-session-sharing\nBranch: feat/gist-session-sharing\n\nImportant:\n- Use apply_patch for manual edits.\n- Do not revert or touch unrelated files.\n- You are not alone in the codebase; accommodate existing changes.\n- Follow TDD: write failing tests, run them, implement, run targeted tests, commit.\n- Full `bun run typecheck` has pre-existing unrelated failures; do not fix them.\n- Effect code: avoid try/catch inside Effect.gen. Use Effect.tryPromise where needed.\n\nTas",
+      "previous_assistant_excerpt": "# AGENTS.md instructions for /Users/necmttn/Projects/ax\n\n<INSTRUCTIONS>\n# CLAUDE.md\n\nGuidance for Claude Code and other AI assistants working in this repo.\n\n## What this is\n\n`ax` - local taste & telemetry graph for AI coding agents. Ingests Claude Code transcripts (`~/.claude/projects/`) + Codex transcripts (`~/.codex/sessions/`) + installed skills (`~/.claude/skills/`, `~/.agents/skills/`, plugin caches) into a dedicated SurrealDB instance. CLI surfaces \"what skills/tools you actually use\" on demand.\n\n## Stack\n\n- **Runtime**: bun ≥ 1.3\n- **Language**: TypeScript (strict, `module: preserve`, `",
+      "review_status": "pending",
+      "rationale": "",
+      "reviewer": ""
+    },
+    {
+      "candidate_id": "tlm__verification__af43b73550182d6b",
+      "subject_id": "turn:019e77a0_a9cf_78f2_80a1_b225f53b1cd3__ddb8200efb1f786d__seq_000003",
+      "session_id": "session:`019e77a0-a9cf-78f2-80a1-b225f53b1cd3`",
+      "turn_id": "turn:019e77a0_a9cf_78f2_80a1_b225f53b1cd3__ddb8200efb1f786d__seq_000003",
+      "previous_assistant_turn_id": "turn:019e77a0_a9cf_78f2_80a1_b225f53b1cd3__ddb8200efb1f786d__seq_000002",
+      "label_family": "verification",
+      "target": "verification_demand",
+      "weak_label": "verification",
+      "weak_confidence": 0.84,
+      "weak_sources": [
+        "verification:demand"
+      ],
+      "evidence_paths": [
+        "turn:019e77a0_a9cf_78f2_80a1_b225f53b1cd3__ddb8200efb1f786d__seq_000003"
+      ],
+      "excerpt": "You are working in repo /Users/necmttn/Projects/ax on GitHub issue https://github.com/Necmttn/ax/issues/89: \"Extract Cursor tool calls and invocation edges\".\n\nGoal: implement the issue end-to-end, verify, commit, push a branch, and open a PR linked to #89.\n\nContext:\n- Cursor ingest currently lives in src/ingest/cursor.ts.\n- It scans ~/Library/Application Support/Cursor/User/globalStorage/state.vscdb and workspaceStorage/*/state.vscdb, override AX_CURSOR_USER_DIR.\n- The taxonomy currently says Cursor normalizes sessions/provider events/turns, but does not yet emit concrete tool_call/invoked row",
+      "previous_assistant_excerpt": "# AGENTS.md instructions for /Users/necmttn/Projects/ax\n\n<INSTRUCTIONS>\n# CLAUDE.md\n\nGuidance for Claude Code and other AI assistants working in this repo.\n\n## What this is\n\n`ax` - local taste & telemetry graph for AI coding agents. Ingests Claude Code transcripts (`~/.claude/projects/`) + Codex transcripts (`~/.codex/sessions/`) + installed skills (`~/.claude/skills/`, `~/.agents/skills/`, plugin caches) into a dedicated SurrealDB instance. CLI surfaces \"what skills/tools you actually use\" on demand.\n\n## Stack\n\n- **Runtime**: bun ≥ 1.3\n- **Language**: TypeScript (strict, `module: preserve`, `",
+      "review_status": "pending",
+      "rationale": "",
+      "reviewer": ""
+    },
+    {
+      "candidate_id": "tlm__direction__1932968d7a6c572b",
+      "subject_id": "turn:019e533c_24cd_7692_a06d_e4eb6576696c__3d09822427c5be02__seq_001853",
+      "session_id": "session:`019e533c-24cd-7692-a06d-e4eb6576696c`",
+      "turn_id": "turn:019e533c_24cd_7692_a06d_e4eb6576696c__3d09822427c5be02__seq_001853",
+      "previous_assistant_turn_id": "turn:019e533c_24cd_7692_a06d_e4eb6576696c__3d09822427c5be02__seq_001852",
+      "label_family": "direction",
+      "target": "stated_preference",
+      "weak_label": "direction",
+      "weak_confidence": 0.7,
+      "weak_sources": [
+        "intent:preference"
+      ],
+      "evidence_paths": [
+        "turn:019e533c_24cd_7692_a06d_e4eb6576696c__3d09822427c5be02__seq_001853"
+      ],
+      "excerpt": "lets start with admin",
+      "previous_assistant_excerpt": "I opened a visual companion at:\n\nhttp://localhost:51276\n\nIt shows three entry-point options for this “soft testing” loop: Admin Lab, real web app, or terminal scenario runner.\n\nMy first narrowing question: should the first version be primarily for **you/internal UAT and demos**, or should it already be shaped like a **real user-facing web version of the mobile app**?",
+      "review_status": "pending",
+      "rationale": "",
+      "reviewer": ""
+    },
+    {
+      "candidate_id": "tlm__correction__a02e85d3fb86a1ec",
+      "subject_id": "turn:019e7428_a1d6_7051_bb02_ed44b5568680__2a5ada36e86f34df__seq_000003",
+      "session_id": "session:`019e7428-a1d6-7051-bb02-ed44b5568680`",
+      "turn_id": "turn:019e7428_a1d6_7051_bb02_ed44b5568680__2a5ada36e86f34df__seq_000003",
+      "previous_assistant_turn_id": "turn:019e7428_a1d6_7051_bb02_ed44b5568680__2a5ada36e86f34df__seq_000002",
+      "label_family": "correction",
+      "target": "wrong_output",
+      "weak_label": "correction",
+      "weak_confidence": 0.74,
+      "weak_sources": [
+        "correction:wrong_output"
+      ],
+      "evidence_paths": [
+        "turn:019e7428_a1d6_7051_bb02_ed44b5568680__2a5ada36e86f34df__seq_000003"
+      ],
+      "excerpt": "Implement Task 7 of the Gist-backed session sharing plan in the isolated worktree.\n\nWorkspace: /Users/necmttn/Projects/ax/.worktrees/gist-session-sharing\nBranch: feat/gist-session-sharing\n\nImportant:\n- Use apply_patch for manual edits.\n- Do not revert or touch unrelated files.\n- You are not alone in the codebase; accommodate existing changes.\n- Follow TDD: write failing tests, run them, implement, run targeted tests, commit.\n- This task is in the `site/` package. Run commands from `site/` where specified.\n\nTask 7: Site Gist Fetch Helpers\n\nFiles:\n- Create: `site/app/lib/session-share.ts`\n- Crea",
+      "previous_assistant_excerpt": "# AGENTS.md instructions for /Users/necmttn/Projects/ax\n\n<INSTRUCTIONS>\n# CLAUDE.md\n\nGuidance for Claude Code and other AI assistants working in this repo.\n\n## What this is\n\n`ax` - local taste & telemetry graph for AI coding agents. Ingests Claude Code transcripts (`~/.claude/projects/`) + Codex transcripts (`~/.codex/sessions/`) + installed skills (`~/.claude/skills/`, `~/.agents/skills/`, plugin caches) into a dedicated SurrealDB instance. CLI surfaces \"what skills/tools you actually use\" on demand.\n\n## Stack\n\n- **Runtime**: bun ≥ 1.3\n- **Language**: TypeScript (strict, `module: preserve`, `",
+      "review_status": "pending",
+      "rationale": "",
+      "reviewer": ""
+    },
+    {
+      "candidate_id": "tlm__verification__b9910c0f2e20d403",
+      "subject_id": "turn:cb251b06_2c99_4fa2_8457_533feb15a890__1e078ba5e3a12d26__seq_000064",
+      "session_id": "session:`cb251b06-2c99-4fa2-8457-533feb15a890`",
+      "turn_id": "turn:cb251b06_2c99_4fa2_8457_533feb15a890__1e078ba5e3a12d26__seq_000064",
+      "label_family": "verification",
+      "target": "verification_demand",
+      "weak_label": "verification",
+      "weak_confidence": 0.84,
+      "weak_sources": [
+        "verification:demand"
+      ],
+      "evidence_paths": [
+        "turn:cb251b06_2c99_4fa2_8457_533feb15a890__1e078ba5e3a12d26__seq_000064"
+      ],
+      "excerpt": "ax handsover to task as tmp task.md to agent with details when user accepts their subagent applies to file with correct references etc.  so applying fixes etc task of their agent. agent is also responsible running lint checks. - probably we could create a lint for these - verify the ax entries in the files we can parse it render it - ?",
+      "review_status": "pending",
+      "rationale": "",
+      "reviewer": ""
+    },
+    {
+      "candidate_id": "tlm__direction__194bc5167d3935e5",
+      "subject_id": "turn:019e72cc_037c_7bf3_bd03_852c46478e42__4de775b35976b093__seq_000003",
+      "session_id": "session:`019e72cc-037c-7bf3-bd03-852c46478e42`",
+      "turn_id": "turn:019e72cc_037c_7bf3_bd03_852c46478e42__4de775b35976b093__seq_000003",
+      "previous_assistant_turn_id": "turn:019e72cc_037c_7bf3_bd03_852c46478e42__4de775b35976b093__seq_000002",
+      "label_family": "direction",
+      "target": "stated_preference",
+      "weak_label": "direction",
+      "weak_confidence": 0.7,
+      "weak_sources": [
+        "intent:preference"
+      ],
+      "evidence_paths": [
+        "turn:019e72cc_037c_7bf3_bd03_852c46478e42__4de775b35976b093__seq_000003"
+      ],
+      "excerpt": "You are the final code reviewer for the completed local agent transcript providers implementation in /Users/necmttn/Projects/ax/.worktrees/local-agent-providers.\n\nReview range:\n- Base: `801625e403c361bddf32662d05f405de3bcce639`\n- Head: `30e98f9d6afa0c80f5f9d33f683d8661dcc2acfc`\n\nDescription:\nImplemented a provider event graph and local transcript providers for Claude, Codex, Pi, OpenCode, and Cursor. Existing Claude/Codex now dual-write provider events. Pi JSONL, OpenCode SQLite, and Cursor SQLite adapters ingest local sessions into the provider graph and project into AX `session`/`turn` table",
+      "previous_assistant_excerpt": "# AGENTS.md instructions for /Users/necmttn/Projects/ax\n\n<INSTRUCTIONS>\n# CLAUDE.md\n\nGuidance for Claude Code and other AI assistants working in this repo.\n\n## What this is\n\n`ax` - local taste & telemetry graph for AI coding agents. Ingests Claude Code transcripts (`~/.claude/projects/`) + Codex transcripts (`~/.codex/sessions/`) + installed skills (`~/.claude/skills/`, `~/.agents/skills/`, plugin caches) into a dedicated SurrealDB instance. CLI surfaces \"what skills/tools you actually use\" on demand.\n\n## Stack\n\n- **Runtime**: bun ≥ 1.3\n- **Language**: TypeScript (strict, `module: preserve`, `",
+      "review_status": "pending",
+      "rationale": "",
+      "reviewer": ""
+    },
+    {
+      "candidate_id": "tlm__correction__b2e0fad68b815ac7",
+      "subject_id": "turn:019e7278_c466_74a1_95d5_8909aa904625__6d21c4bb7262cb58__seq_000003",
+      "session_id": "session:`019e7278-c466-74a1-95d5-8909aa904625`",
+      "turn_id": "turn:019e7278_c466_74a1_95d5_8909aa904625__6d21c4bb7262cb58__seq_000003",
+      "previous_assistant_turn_id": "turn:019e7278_c466_74a1_95d5_8909aa904625__6d21c4bb7262cb58__seq_000002",
+      "label_family": "correction",
+      "target": "wrong_output",
+      "weak_label": "correction",
+      "weak_confidence": 0.74,
+      "weak_sources": [
+        "correction:wrong_output"
+      ],
+      "evidence_paths": [
+        "turn:019e7278_c466_74a1_95d5_8909aa904625__6d21c4bb7262cb58__seq_000003"
+      ],
+      "excerpt": "You are implementing Task 2 from the approved plan in the isolated worktree /Users/necmttn/Projects/ax/.worktrees/local-agent-providers.\n\nContext:\n- You are not alone in the codebase. Do not revert changes by others. Task 1 is already committed in this worktree.\n- Work only in Task 2 files unless a test import requires a minimal adjacent update.\n- Baseline has one pre-existing failure in `src/cli/effect-cli.test.ts` about `ingest here`; do not fix it unless your own CLI changes alter that same area and you must update expectations for Task 2.\n\nTask 2: Config, Stage Registry, And CLI Surface\n\nF",
+      "previous_assistant_excerpt": "# AGENTS.md instructions for /Users/necmttn/Projects/ax\n\n<INSTRUCTIONS>\n# CLAUDE.md\n\nGuidance for Claude Code and other AI assistants working in this repo.\n\n## What this is\n\n`ax` - local taste & telemetry graph for AI coding agents. Ingests Claude Code transcripts (`~/.claude/projects/`) + Codex transcripts (`~/.codex/sessions/`) + installed skills (`~/.claude/skills/`, `~/.agents/skills/`, plugin caches) into a dedicated SurrealDB instance. CLI surfaces \"what skills/tools you actually use\" on demand.\n\n## Stack\n\n- **Runtime**: bun ≥ 1.3\n- **Language**: TypeScript (strict, `module: preserve`, `",
+      "review_status": "pending",
+      "rationale": "",
+      "reviewer": ""
+    },
+    {
+      "candidate_id": "tlm__verification__b9e1d6bc7a4da5a6",
+      "subject_id": "turn:019e728d_ee46_7ee1_8771_480b8a248bbd__f106a583671a1f02__seq_000003",
+      "session_id": "session:`019e728d-ee46-7ee1-8771-480b8a248bbd`",
+      "turn_id": "turn:019e728d_ee46_7ee1_8771_480b8a248bbd__f106a583671a1f02__seq_000003",
+      "previous_assistant_turn_id": "turn:019e728d_ee46_7ee1_8771_480b8a248bbd__f106a583671a1f02__seq_000002",
+      "label_family": "verification",
+      "target": "verification_demand",
+      "weak_label": "verification",
+      "weak_confidence": 0.84,
+      "weak_sources": [
+        "verification:demand"
+      ],
+      "evidence_paths": [
+        "turn:019e728d_ee46_7ee1_8771_480b8a248bbd__f106a583671a1f02__seq_000003"
+      ],
+      "excerpt": "You are a spec-compliance reviewer for Task 3 in /Users/necmttn/Projects/ax/.worktrees/local-agent-providers.\n\nReview commit `9113f80` for Task 3. Do not edit files.\n\nTask 3 requirements:\n1. `ToolCallWrite` in `src/ingest/evidence-writers.ts` has optional `agentEventKey?: string | null`, and tool_call upsert statements include `agent_event` via `surrealOptionRecord(\"agent_event\", call.agentEventKey)`.\n2. Claude and Codex extract types expose `providerEvents: AgentEventWrite[]`; mutable/batch drain/finish paths carry provider events correctly without losing streaming behavior.\n3. Parsed transcr",
+      "previous_assistant_excerpt": "# AGENTS.md instructions for /Users/necmttn/Projects/ax\n\n<INSTRUCTIONS>\n# CLAUDE.md\n\nGuidance for Claude Code and other AI assistants working in this repo.\n\n## What this is\n\n`ax` - local taste & telemetry graph for AI coding agents. Ingests Claude Code transcripts (`~/.claude/projects/`) + Codex transcripts (`~/.codex/sessions/`) + installed skills (`~/.claude/skills/`, `~/.agents/skills/`, plugin caches) into a dedicated SurrealDB instance. CLI surfaces \"what skills/tools you actually use\" on demand.\n\n## Stack\n\n- **Runtime**: bun ≥ 1.3\n- **Language**: TypeScript (strict, `module: preserve`, `",
       "review_status": "pending",
       "rationale": "",
       "reviewer": ""
     }
   ],
   "review_diversity": {
-    "label_family_count": 3,
+    "label_family_count": 4,
     "label_family_counts": {
-      "verification": 37,
-      "approval_or_rejection": 1,
-      "correction": 5
+      "verification": 23,
+      "direction": 22,
+      "approval_or_rejection": 13,
+      "correction": 22
     },
-    "min_weak_confidence": 0.74,
+    "min_weak_confidence": 0.7,
     "max_weak_confidence": 0.84
   },
   "out_path": ".ax/experiments/transcript-label-mining-current.json"

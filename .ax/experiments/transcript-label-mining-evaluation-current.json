@@ -1,20 +1,21 @@
 {
   "schema": "ax.transcript_label_mining_evaluation.v1",
-  "iteration": 1,
+  "iteration": 2,
   "run_at": "2026-06-02",
-  "window": { "since_days": 14, "limit": 500, "review_limit": 80 },
+  "window": { "since_days": 14, "limit": 2700, "review_limit": 80 },
   "inputs": {
     "candidate_report": ".ax/experiments/transcript-label-mining-current.json",
     "priority_report": null,
     "self_improve_report": ".ax/experiments/transcript-label-mining-self-improve-current.json"
   },
   "observed": {
-    "candidate_count": 43,
-    "review_row_count": 43,
-    "review_label_family_count": 3,
-    "review_label_family_counts": { "verification": 37, "approval_or_rejection": 1, "correction": 5 },
-    "subagent_wrapper_review_rows": 28,
-    "subagent_wrapper_fraction": 0.65,
+    "candidate_count": 438,
+    "review_row_count": 80,
+    "review_label_family_count": 4,
+    "review_label_family_counts": { "verification": 23, "direction": 22, "approval_or_rejection": 13, "correction": 22 },
+    "subagent_wrapper_review_rows": 0,
+    "subagent_wrapper_fraction": 0.0,
+    "eligible_clean_turns_in_window": 2700,
     "reviewed_row_count": 0,
     "accepted_reviewed_row_count": 0,
     "graph_fact_count": 0,
@@ -23,33 +24,37 @@
     "self_improve_separation_ok": true
   },
   "hard_success_gates": [
-    { "gate": "candidate_count >= 200", "value": 43, "threshold": 200, "passed": false },
-    { "gate": "review_queue_export >= 40", "value": 43, "threshold": 40, "passed": true },
-    { "gate": "review_diversity >= 4 families", "value": 3, "threshold": 4, "passed": false },
-    { "gate": "deterministic_seed_audit_precision >= 0.85", "value": null, "threshold": 0.85, "passed": false, "reason": "no reviewed sample exists yet" },
-    { "gate": "weak_to_reviewed_false_positive_rate <= 0.15", "value": null, "threshold": 0.15, "passed": false, "reason": "no reviewed sample exists yet" },
-    { "gate": "neighbor_recall >= 2 unreviewed neighbors for >= 50% accepted", "value": null, "threshold": 0.5, "passed": false, "reason": "prioritizer not run; no accepted rows" },
-    { "gate": "graph_facts >= 1 per accepted reviewed row", "value": 0, "threshold": 1, "passed": false, "reason": "no accepted reviewed rows" },
-    { "gate": "vector_rows exist for every accepted reviewed row", "value": 0, "threshold": null, "passed": false, "reason": "no accepted reviewed rows" },
-    { "gate": "product_query >= 10 promotion-safe graph facts", "value": 0, "threshold": 10, "passed": false, "reason": "no reviewed promotion-safe facts" }
+    { "gate": "candidate_count >= 200", "value": 438, "threshold": 200, "passed": true },
+    { "gate": "review_queue_export >= 40", "value": 80, "threshold": 40, "passed": true },
+    { "gate": "review_diversity >= 4 families", "value": 4, "threshold": 4, "passed": true },
+    { "gate": "deterministic_seed_audit_precision >= 0.85", "value": null, "threshold": 0.85, "passed": null, "reason": "pending: no human-reviewed sample yet (plan Step 3 stops at review-queue export)" },
+    { "gate": "weak_to_reviewed_false_positive_rate <= 0.15", "value": null, "threshold": 0.15, "passed": null, "reason": "pending: no reviewed sample yet" },
+    { "gate": "neighbor_recall >= 2 unreviewed neighbors for >= 50% accepted", "value": null, "threshold": 0.5, "passed": null, "reason": "pending: prioritizer not run; no accepted rows" },
+    { "gate": "graph_facts >= 1 per accepted reviewed row", "value": 0, "threshold": 1, "passed": null, "reason": "pending: no accepted reviewed rows" },
+    { "gate": "vector_rows exist for every accepted reviewed row", "value": 0, "threshold": null, "passed": null, "reason": "pending: no accepted reviewed rows" },
+    { "gate": "product_query >= 10 promotion-safe graph facts", "value": 0, "threshold": 10, "passed": null, "reason": "pending: no reviewed promotion-safe facts" }
   ],
   "soft_success_gates": [
-    { "gate": "embedding/SVM helper improves precision@20 by >= 10%", "value": null, "passed": false, "reason": "prioritizer skipped: sentence-transformers not installed and candidate batch failed hard gates; running an expensive embedding model would yield no reviewed-data gain (iteration rule: max 1 SetFit/robustness run unless concrete reviewed-data gain)" },
-    { "gate": "dedup reduces near-duplicate review rows by >= 25%", "value": null, "passed": false, "reason": "not measured this iteration" },
+    { "gate": "embedding/SVM helper improves precision@20 by >= 10%", "value": null, "passed": null, "reason": "deferred: prioritizer is a follow-up once a reviewed sample exists (iteration rule: max 1 robustness run unless concrete reviewed-data gain)" },
+    { "gate": "dedup reduces near-duplicate review rows by >= 25%", "value": null, "passed": null, "reason": "not measured this iteration" },
     { "gate": "no raw model output promoted without review", "value": true, "passed": true }
   ],
-  "failure_cases_triggered": [
+  "failure_cases_triggered": [],
+  "failure_cases_cleared_since_iteration_1": [
     {
       "case": "deterministic_candidates_mostly_control_wrapper_text",
-      "evidence": "28 of 43 review rows (65%) have subject_id under claude_subagent_* sessions; their excerpts are subagent task-dispatch prompts, not organic user corrections/directions"
+      "fix": "read query now filters message_kind='task' AND session.source != 'claude-subagent' AND excludes wrapper/control/subagent intent_kinds",
+      "evidence": "0 of 80 review rows are under claude-subagent sessions (was 65%)"
     },
     {
       "case": "candidate_volume_insufficient",
-      "evidence": "candidate_count=43 against required >=200 over a 14d / 500-row window with 3600 eligible user turns"
+      "fix": "widened read pool to cover the full 14d eligible set (2700 clean turns) + broadened miner via DB intent_kind fallback",
+      "evidence": "candidate_count=438 against required >=200"
     },
     {
       "case": "label_family_diversity_insufficient",
-      "evidence": "only 3 families present (verification, approval_or_rejection, correction); direction and workflow_state absent"
+      "fix": "intent_kind=preference now seeds 'direction' candidates the text regex missed",
+      "evidence": "4 families present (verification, direction, approval_or_rejection, correction)"
     }
   ],
   "promotion_safety": {
@@ -60,20 +65,21 @@
   "product_read_path": {
     "self_improve_query_runs": true,
     "separates_reviewed_advisory_rejected_promotion_safe": true,
-    "recommended_next_action": "mine new transcript label candidates for review"
+    "recommended_next_action": "human-review the 80-row queue, persist accepted rows, then project to graph + run prioritizer"
   },
   "iteration_decision": {
-    "decision": "fail",
-    "can_continue": false,
-    "stop_reason": null,
-    "failures": ["deterministic_candidates_mostly_control_wrapper_text", "candidate_volume_insufficient", "label_family_diversity_insufficient"],
-    "next_action": "do NOT keep tuning this iteration (defined failure, not a knob-turn). The candidate miner must exclude claude_subagent_* / control sessions at the read layer and broaden organic user-turn extraction before re-running. That is a miner change for a future iteration, outside Task 7's run-and-record scope.",
-    "next_iteration_allowed": false
+    "decision": "continue_allowed",
+    "can_continue": true,
+    "stop_reason": "awaiting_human_review",
+    "failures": [],
+    "next_action": "All candidate-stage hard gates pass (volume, export, diversity) and the prior defined-failure is cleared. The pipeline correctly stops at review-queue export (plan Step 3: no reviewed rows -> emit queue only). Next iteration: human-review the exported queue, persist accepted rows to transcript_label_review, then run --project-reviewed --vectors --graph-projection and the prioritizer to exercise the review-dependent gates.",
+    "next_iteration_allowed": true
   },
   "notes": [
-    "Real bug found and fixed during Step 1: the transcript window read query referenced ts in ORDER BY without selecting it (SurrealDB v3 'Missing order idiom' parse error).",
-    "Performance: the original correlated previous-turn subquery ran per user turn against a 503k-row turn table (~3600 eligible rows -> minutes). Replaced with a single batched previous-turn fetch; mining now completes in seconds.",
-    "Schema for transcript_label_review / transcript_label_vector (Task 5) was applied to the running DB via scripts/apply-schema.sh so the product query path executes.",
-    "Prioritizer (Step 2) skipped: sentence-transformers dependency is not installed and the candidate batch already failed hard gates, so an expensive embedding run is not warranted."
+    "Iteration 2 miner fix: label-mining-service.ts read query excludes claude-subagent sessions, restricts to message_kind='task', and drops control/wrapper_instruction/subagent_notification/subagent_task/pasted_reference intent_kinds.",
+    "label-mining.ts matchWeakLabel now takes intent_kind and falls back to it (correction -> correction, preference -> direction) when high-precision text patterns miss, broadening organic extraction; text patterns still win when both match.",
+    "32 unit tests pass (3 new: intent_kind=correction broadening, intent_kind=preference->direction, text-pattern-wins-over-intent); typecheck clean.",
+    "--limit raised to 2700 to read the full 14d eligible pool; candidate output 438 stays under the plan's <=500 mined-rows-per-iteration cap.",
+    "Review-dependent hard gates are PENDING (not failed): they require a human-reviewed sample, which is the next iteration's manual step."
   ]
 }

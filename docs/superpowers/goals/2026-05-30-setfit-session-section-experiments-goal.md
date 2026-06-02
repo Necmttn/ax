@@ -31860,3 +31860,49 @@ bun run typecheck
 
 Service tests pass; `bun run typecheck` exits `0` (existing Effect lint
 messages remain).
+
+---
+
+## Checkpoint: Transcript label mining — iteration 2 (2026-06-02)
+
+Miner-layer fix from iteration 1's defined failure, then re-ran Task 7.
+
+Read-layer fix (`label-mining-service.ts`): the candidate read query now selects
+only organic user instructions — `message_kind = 'task'`,
+`session.source != 'claude-subagent'`, and excludes the
+`control` / `wrapper_instruction` / `subagent_notification` / `subagent_task` /
+`pasted_reference` intent kinds. Read pool widened (`--limit=2700`) to cover the
+full 14d eligible set; candidate output stays under the plan's ≤500/iteration cap.
+
+Miner broadening (`label-mining.ts`): `matchWeakLabel` now takes the DB-derived
+`intent_kind` and falls back to it when the high-precision text regexes miss —
+`correction → correction`, `preference → direction`. Text patterns still win
+when both match. 3 new unit tests; 32 pass total; typecheck clean.
+
+Result — all candidate-stage hard gates now pass:
+
+- candidate_count = 438 (≥ 200) ✅
+- review_queue export = 80 (≥ 40) ✅
+- review diversity = 4 families (verification 23, direction 22,
+  approval_or_rejection 13, correction 22) ✅
+- subagent/wrapper leakage = 0 of 80 review rows (was 65%) ✅
+
+Iteration-1 failure cases all cleared: no failure cases triggered.
+
+Review-dependent gates (seed precision, fp-rate, neighbor recall, graph facts,
+vector rows, ≥10 promotion-safe product facts) are **pending — not failed**:
+they require a human-reviewed sample. Per plan Step 3, with no reviewed rows the
+pipeline correctly stops at review-queue export and applies nothing; no raw
+model label is promotion-safe.
+
+Iteration decision: `continue_allowed` (stop_reason `awaiting_human_review`,
+next_iteration_allowed = true). Next step: human-review the 80-row queue,
+persist accepted rows to `transcript_label_review`, then run
+`--project-reviewed --vectors --graph-projection` + the prioritizer to exercise
+the review-dependent gates.
+
+Artifacts (overwritten with iteration-2 values):
+
+- `.ax/experiments/transcript-label-mining-current.json`
+- `.ax/experiments/transcript-label-mining-self-improve-current.json`
+- `.ax/experiments/transcript-label-mining-evaluation-current.json`
