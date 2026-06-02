@@ -201,6 +201,13 @@ const EMPTY_SESSION_LIST: SessionListResponse = {
     limit: 200,
 } as never;
 
+const EMPTY_SESSION_COMPARE = {
+    task_label: null,
+    sessions: [],
+    winners: { fastest: null, cheapest: null, fewest_tokens: null, cleanest: null },
+    not_found: [],
+} as never;
+
 const EMPTY_TOOL_FAILURES: ToolFailuresResponse = { rows: [], total: 0 } as never;
 const EMPTY_GRAPH: GraphExplorerPayload = { mode: "file-attention", limit: 0, nodes: [], edges: [], query: null } as never;
 const EMPTY_SKILL_GRAPH: SkillGraphPayload = { min_count: 0, limit: 0, node_count: 0, edge_count: 0, max_edge_count: 0, nodes: [], edges: [] };
@@ -268,6 +275,7 @@ export async function mockFetch<T>(input: RequestInfo, init?: RequestInit): Prom
     }
 
     // Empties
+    if (path.startsWith("/api/sessions/compare")) return EMPTY_SESSION_COMPARE as unknown as T;
     if (path.startsWith("/api/sessions")) return EMPTY_SESSION_LIST as unknown as T;
     if (path === "/api/tool-failures" || path.startsWith("/api/tool-failures/")) return EMPTY_TOOL_FAILURES as unknown as T;
     if (path.startsWith("/api/graph-explorer")) return EMPTY_GRAPH as unknown as T;

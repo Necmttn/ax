@@ -25,6 +25,7 @@ import {
 } from "./skill-source.ts";
 import { fetchWorkflow } from "./workflow.ts";
 import { fetchSessionDetail } from "./session-detail.ts";
+import { fetchSessionCompare } from "./session-compare.ts";
 import { fetchSessionInspect } from "./session-inspect.ts";
 import { fetchSessionChildren, fetchSessionsList } from "./sessions-list.ts";
 import { fetchEpisodeTimeline } from "./episode-timeline.ts";
@@ -679,6 +680,27 @@ export async function handleDashboardRequest(req: Request): Promise<Response> {
     }
 
     // Specific routes before the catch-all `sessions/(.+)` below.
+    if (url.pathname === "/api/sessions/compare" && req.method === "GET") {
+        const ids = (url.searchParams.get("ids") ?? "")
+            .split(",")
+            .map((s) => s.trim())
+            .filter((s) => s.length > 0);
+        const includeTurns = url.searchParams.get("turns") === "1";
+        if (ids.length < 2) {
+            return jsonResponse({ error: "need at least 2 session ids (ids=a,b)" }, 400);
+        }
+        try {
+            const payload = await Effect.runPromise(
+                fetchSessionCompare(ids, { includeTurns }).pipe(
+                    Effect.provide(AppLayer),
+                    Effect.scoped,
+                ) as Effect.Effect<unknown>,
+            );
+            return jsonResponse(payload);
+        } catch (err) {
+            return jsonResponse({ error: err instanceof Error ? err.message : String(err) }, 500);
+        }
+    }
     const sessionChildrenMatch = url.pathname.match(/^\/api\/sessions\/(.+)\/children$/);
     if (sessionChildrenMatch && req.method === "GET") {
         const parentId = decodeURIComponent(sessionChildrenMatch[1] ?? "");
