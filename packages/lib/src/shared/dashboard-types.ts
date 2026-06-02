@@ -258,6 +258,58 @@ export interface SessionDetailPayload {
     readonly token_usage: SessionTokenUsageDetail | null;
 }
 
+// ---------------------------------------------------------------------------
+// Multi-session compare view (swimlane P0 - summary metrics)
+// ---------------------------------------------------------------------------
+
+/** Per-session health aggregate read from the `session_health` table. The
+ *  noise axis (tool_errors + user_corrections + interruptions) is the
+ *  "cleaner" signal the compare view ranks on. */
+export interface SessionHealthSummary {
+    readonly turns: number;
+    readonly tool_calls: number;
+    readonly tool_errors: number;
+    readonly user_corrections: number;
+    readonly interruptions: number;
+    readonly subagent_dispatches: number;
+    readonly task_label: string | null;
+}
+
+export interface SessionCompareEntry {
+    readonly session_id: SessionId;
+    readonly source: "claude" | "codex" | string;
+    readonly model: string | null;
+    readonly project: string | null;
+    readonly started_at: string | null;
+    readonly ended_at: string | null;
+    /** ended_at - started_at, ms. Null when either bound is missing. This is
+     *  wall-clock, NOT model latency (transcripts carry no request duration). */
+    readonly duration_ms: number | null;
+    readonly token_usage: SessionTokenUsageDetail | null;
+    readonly health: SessionHealthSummary | null;
+    /** Count of `produced` edges (session → commit). */
+    readonly commit_count: number;
+    /** tool_errors + user_corrections + interruptions. Null if no health row. */
+    readonly noise_score: number | null;
+}
+
+/** Winning session id per axis. Null when undecidable (no data, or a tie). */
+export interface SessionCompareWinners {
+    readonly fastest: SessionId | null;
+    readonly cheapest: SessionId | null;
+    readonly fewest_tokens: SessionId | null;
+    readonly cleanest: SessionId | null;
+}
+
+export interface SessionComparePayload {
+    /** Shared task_label when every compared session agrees; null otherwise. */
+    readonly task_label: string | null;
+    readonly sessions: ReadonlyArray<SessionCompareEntry>;
+    readonly winners: SessionCompareWinners;
+    /** Requested ids that failed to validate or resolve to a session. */
+    readonly not_found: ReadonlyArray<string>;
+}
+
 export interface SessionSkillRoleGroup {
     readonly role: string | null;
     readonly skills: ReadonlyArray<{ readonly skill: string; readonly count: number }>;
