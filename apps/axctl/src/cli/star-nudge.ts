@@ -31,8 +31,23 @@ export interface NudgeEnv {
     readonly silenced: boolean;
 }
 
-// Commands where a footer would be noise (own UI, machine output, or trivial).
-const SKIP_COMMANDS = new Set(["star", "version", "completions", "tui", "serve", "doctor"]);
+// Only nudge AFTER ax delivered something useful - an ingest that filled the
+// graph, a query that surfaced sessions/skills, a retro, an improve proposal.
+// Maintenance/own-UI/machine commands (install, doctor, daemon, update, tui,
+// serve, star, version, ...) are NOT value moments, so they never nudge.
+const VALUE_COMMANDS = new Set([
+    "ingest",
+    "recall",
+    "sessions",
+    "skills",
+    "improve",
+    "retro",
+    "insights",
+    "report",
+    "roles",
+    "evidence",
+    "costs",
+]);
 
 export function readNudgeEnv(): NudgeEnv {
     return {
@@ -60,7 +75,7 @@ export function shouldShowNudge(
     if (!cmd || cmd.startsWith("-")) return false;
     if (argv.includes("--help") || argv.includes("-h")) return false;
     if (argv.includes("--json")) return false;
-    if (SKIP_COMMANDS.has(cmd)) return false;
+    if (!VALUE_COMMANDS.has(cmd)) return false;
     if (now - (state.lastShownAt ?? 0) < ONE_DAY_MS) return false;
     return true;
 }

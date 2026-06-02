@@ -6,8 +6,10 @@ const DAY = 24 * 60 * 60 * 1000;
 const NOW = 1_000 * DAY;
 
 describe("shouldShowNudge", () => {
-    it("shows on an interactive command when never shown and not starred", () => {
-        expect(shouldShowNudge({}, tty, ["ingest"], NOW)).toBe(true);
+    it("shows only after a value command (ingest, recall, retro, improve, ...)", () => {
+        for (const cmd of ["ingest", "recall", "sessions", "skills", "improve", "retro"]) {
+            expect(shouldShowNudge({}, tty, [cmd], NOW)).toBe(true);
+        }
     });
 
     it("never shows on a non-TTY (agents, pipes, the watcher)", () => {
@@ -40,8 +42,8 @@ describe("shouldShowNudge", () => {
         expect(shouldShowNudge({}, tty, ["recall", "--json"], NOW)).toBe(false);
     });
 
-    it("skips its own command and noisy/own-UI commands", () => {
-        for (const cmd of ["star", "version", "completions", "tui", "serve", "doctor"]) {
+    it("never nudges after maintenance / own-UI / non-value commands", () => {
+        for (const cmd of ["star", "version", "completions", "tui", "serve", "doctor", "install", "update", "daemon", "uninstall"]) {
             expect(shouldShowNudge({}, tty, [cmd], NOW)).toBe(false);
         }
     });
