@@ -852,6 +852,57 @@ Focused CLI tests passed (`53`). Combined classifier package and CLI tests
 passed (`138`). Typecheck exited `0` with existing Effect lint
 messages/warnings.
 
+## E503 - Transcript Label Mining Experiment Plan
+
+Question: can we define a bounded experiment that gets more labeled data from
+transcripts, feeds graph facts and vector-backed review/mining, and gives
+self-improve agents useful evidence without runaway model work?
+
+Plan:
+
+- `docs/superpowers/plans/2026-06-02-transcript-label-mining-experiment.md`
+
+Experiment contract:
+
+- Mine high-precision weak label candidates from transcript event windows.
+- Attach embedding nearest-neighbor expansion for review prioritization.
+- Export bounded active review queues.
+- Promote only accepted reviewed rows into classifier graph facts.
+- Store vector rows that join back to reviewed candidates and graph facts.
+- Expose a self-improve product query that separates reviewed
+  promotion-safe facts from weak/advisory and rejected/deferred labels.
+
+Success metrics:
+
+- At least `200` weak label candidates from real transcripts.
+- At least `40` review queue rows.
+- At least `4` label families represented.
+- Deterministic seed audit precision at least `0.85`.
+- Weak-label-to-reviewed promotion false-positive rate at most `0.15`.
+- Nearest-neighbor expansion finds at least `2` unreviewed neighbors for at
+  least `50%` of accepted reviewed labels.
+- Graph projection writes at least `1` fact per accepted reviewed row.
+- Vector rows exist for every accepted reviewed row.
+- Product query returns at least `10` promotion-safe graph facts with evidence
+  and nearest-neighbor explanations.
+
+Runaway guards:
+
+- Maximum `8` implementation iterations.
+- Maximum `2` expensive model runs.
+- Maximum `1` SetFit robustness run unless reviewed-data metrics improve.
+- Stop after two consecutive iterations with no metric improvement.
+- Stop immediately if privacy guards fail, graph writes are not idempotent, or
+  product queries cannot distinguish reviewed facts from weak labels.
+
+Decision:
+
+- This is the next better-shaped path for more labels. It treats embeddings,
+  SVM, SetFit, and any LLM help as mining/review tools, while product behavior
+  consumes reviewed graph facts and vector-backed evidence only.
+- The plan explicitly defines failure cases ahead of time so an agent can run
+  bounded iterations without turning this into open-ended model tuning.
+
 Current recommendation:
 
 - Index continuation: E488 turns the accepted classifier-fixture follow-up into
