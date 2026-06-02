@@ -3343,23 +3343,24 @@ const sessionsNearCommand = Command.make(
  *
  * Lines up 2+ sessions on headline metrics (duration, tokens, cost, turns,
  * errors, corrections, commits) and stars the winner per ranked axis. Answers
- * "same task, which run was faster / cheaper / cleaner?". Auto table on TTY,
+ * "same task, which run was faster / cheaper / cleaner?". --turns adds an
+ * index-aligned per-turn appendix (tokens/gap per turn). Auto table on TTY,
  * --json (or piped) for machine output.
  *
- * Duration is wall-clock (ended_at - started_at); transcripts carry no model
- * latency.
+ * Duration / gap are wall-clock; transcripts carry no model latency.
  */
 const cmdSessionsCompare = (args: string[]) =>
     Effect.gen(function* () {
         const ids = args.filter((a) => !a.startsWith("--"));
         if (ids.length < 2) {
             console.error("axctl sessions compare: need at least 2 session ids");
-            console.error("  usage: axctl sessions compare <idA> <idB> [<idC> ...] [--json]");
+            console.error("  usage: axctl sessions compare <idA> <idB> [<idC> ...] [--turns] [--json]");
             process.exit(2);
         }
 
         const useJson = wantsJson(args);
-        const payload = yield* fetchSessionCompare(ids).pipe(
+        const includeTurns = args.includes("--turns");
+        const payload = yield* fetchSessionCompare(ids, { includeTurns }).pipe(
             catchDbErrorAndExit("axctl sessions compare"),
         );
 
@@ -3382,14 +3383,17 @@ const sessionsCompareCommand = Command.make(
     "compare",
     {
         ids: Argument.string("ids").pipe(Argument.variadic({ min: 2 })),
+        turns: Flag.boolean("turns").pipe(Flag.withDefault(false)),
         json: jsonFlag,
     },
-    ({ ids, json }) => cmdSessionsCompare([...ids, ...boolArg("json", json)]),
+    ({ ids, turns, json }) =>
+        cmdSessionsCompare([...ids, ...boolArg("turns", turns), ...boolArg("json", json)]),
 ).pipe(
     Command.withDescription(
         "Compare 2+ sessions side by side (duration, tokens, cost, turns, errors, " +
         "corrections, commits). Stars the winner per axis - answers which run was " +
-        "faster / cheaper / cleaner. Auto table on TTY, --json for machine output.",
+        "faster / cheaper / cleaner. --turns adds a per-turn appendix. " +
+        "Auto table on TTY, --json for machine output.",
     ),
 );
 

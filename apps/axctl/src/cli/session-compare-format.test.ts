@@ -175,6 +175,53 @@ describe("renderCompareTable", () => {
     });
 });
 
+describe("renderCompareTable --turns appendix", () => {
+    const withTurns = (): SessionComparePayload => {
+        const p = payload();
+        return {
+            ...p,
+            sessions: [
+                {
+                    ...p.sessions[0]!,
+                    turns: [
+                        { seq: 0, role: "user", ts: "2026-06-01T10:00:00.000Z", gap_ms: null, est_tokens: null, est_cost_usd: null, has_error: false },
+                        { seq: 1, role: "assistant", ts: "2026-06-01T10:00:08.000Z", gap_ms: 8_000, est_tokens: 12_300, est_cost_usd: 0.04, has_error: true },
+                    ],
+                },
+                {
+                    ...p.sessions[1]!,
+                    turns: [
+                        { seq: 0, role: "user", ts: "2026-06-01T10:00:00.000Z", gap_ms: null, est_tokens: null, est_cost_usd: null, has_error: false },
+                    ],
+                },
+            ],
+        };
+    };
+
+    test("renders a per-turn block with lane headers", () => {
+        const out = renderCompareTable(withTurns());
+        expect(out).toContain("Per-turn");
+        expect(out).toContain("turn");
+    });
+
+    test("flags error turns and shows gap", () => {
+        const out = renderCompareTable(withTurns());
+        expect(out).toContain("12.3k 8s !");
+    });
+
+    test("pads ragged lanes (session [2] has fewer turns)", () => {
+        const out = renderCompareTable(withTurns());
+        const lines = out.split("\n");
+        // 2 turn rows exist even though session [2] has only 1 turn.
+        const turnRows = lines.filter((l) => /^\d+ /.test(l));
+        expect(turnRows.length).toBe(2);
+    });
+
+    test("no per-turn block when turns absent", () => {
+        expect(renderCompareTable(payload())).not.toContain("Per-turn");
+    });
+});
+
 describe("renderCompareJson", () => {
     test("round-trips the payload", () => {
         const p = payload();

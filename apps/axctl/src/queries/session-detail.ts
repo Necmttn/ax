@@ -164,6 +164,20 @@ FROM produced
 WHERE in = $sessionId
 GROUP ALL;`;
 
+/** Per-turn spine for the compare view: every turn in seq order with its
+ *  timestamp + error flag. Token/cost is merged in from turn_token_usage by
+ *  seq on the caller side (not every turn has a usage row). */
+export const SESSION_COMPARE_TURNS_SQL = `
+SELECT
+    seq,
+    ts,
+    role,
+    has_error
+FROM turn
+WHERE session = $sessionId
+ORDER BY seq ASC
+LIMIT 2000;`;
+
 /**
  * Provider-neutral file evidence. Edit evidence is turn-scoped; read/search
  * evidence is tool-call-scoped. All three relation tables point at the shared
@@ -615,6 +629,32 @@ export const sessionProducedCountQuery = defineSingleQuery<
     name: "session-detail.produced_count",
     sql: (p) => subst(SESSION_PRODUCED_COUNT_SQL, p.recordRef),
     mapRow: (raw) => (isRecord(raw) ? numericField(raw, "count") : 0),
+});
+
+/** Lean per-turn row (seq + ts + error flag). Token/cost merged in by seq. */
+export interface CompareTurnRow {
+    readonly seq: number;
+    readonly ts: string | null;
+    readonly role: string | null;
+    readonly has_error: boolean;
+}
+
+export const sessionCompareTurnsQuery = defineQuery<
+    SessionDetailParams,
+    Record<string, unknown>,
+    CompareTurnRow | null
+>({
+    name: "session-detail.compare_turns",
+    sql: (p) => subst(SESSION_COMPARE_TURNS_SQL, p.recordRef),
+    mapRow: (raw) => {
+        if (!isRecord(raw)) return null;
+        return {
+            seq: numericField(raw, "seq"),
+            ts: dateField(raw, "ts"),
+            role: stringField(raw, "role"),
+            has_error: raw.has_error === true,
+        };
+    },
 });
 
 export const sessionShareTimelineQuery = defineQuery<

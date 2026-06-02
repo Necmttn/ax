@@ -6,6 +6,7 @@
 import type {
     SessionCompareEntry,
     SessionComparePayload,
+    SessionCompareTurn,
     SessionId,
 } from "@ax/lib/shared/dashboard-types";
 
@@ -129,6 +130,57 @@ const buildRows = (payload: SessionComparePayload): ReadonlyArray<MetricRow> => 
 const pad = (text: string, width: number): string =>
     text + " ".repeat(Math.max(0, width - text.length));
 
+const fmtTurnGap = (ms: number | null): string => {
+    if (ms === null) return "";
+    const s = Math.round(ms / 1000);
+    if (s >= 60) return `${Math.floor(s / 60)}m${String(s % 60).padStart(2, "0")}`;
+    return `${s}s`;
+};
+
+/** Per-turn appendix: index-aligned lanes (turn N of session [1] vs turn N of
+ *  [2] …). Cell = tokens + optional gap, `!` flags an error turn. Empty cell
+ *  when a session has no turn at that index (ragged → padded). Returns [] when
+ *  no session carries per-turn data. */
+const renderTurnsBlock = (
+    sessions: ReadonlyArray<SessionCompareEntry>,
+): ReadonlyArray<string> => {
+    const lanes = sessions.map((e) => e.turns ?? null);
+    if (!lanes.some((l) => l !== null && l.length > 0)) return [];
+
+    const maxTurns = Math.max(...lanes.map((l) => l?.length ?? 0));
+
+    const cell = (turn: SessionCompareTurn | undefined): string => {
+        if (!turn) return "";
+        const tok = fmtTokens(turn.est_tokens);
+        const gap = fmtTurnGap(turn.gap_ms);
+        const base = gap ? `${tok} ${gap}` : tok;
+        return turn.has_error ? `${base} !` : base;
+    };
+
+    const headers = ["turn", ...sessions.map((_, i) => laneTag(i))];
+    const body: string[][] = [];
+    for (let i = 0; i < maxTurns; i++) {
+        body.push([
+            String(i + 1),
+            ...lanes.map((lane) => cell(lane?.[i])),
+        ]);
+    }
+
+    const widths = headers.map((h, c) =>
+        Math.max(h.length, ...body.map((r) => r[c]!.length)),
+    );
+    const renderLine = (cells: ReadonlyArray<string>): string =>
+        cells.map((c, i) => pad(c, widths[i]!)).join(" | ");
+
+    const lines: string[] = [];
+    lines.push("");
+    lines.push("Per-turn (index-aligned · cell = tokens [gap], ! = error turn)");
+    lines.push(renderLine(headers));
+    lines.push(widths.map((w) => "-".repeat(w)).join("-+-"));
+    for (const r of body) lines.push(renderLine(r));
+    return lines;
+};
+
 export const renderCompareTable = (payload: SessionComparePayload): string => {
     const sessions = payload.sessions;
     const lines: string[] = [];
@@ -184,6 +236,8 @@ export const renderCompareTable = (payload: SessionComparePayload): string => {
     if (payload.not_found.length > 0) {
         lines.push(`Not found: ${payload.not_found.join(", ")}`);
     }
+
+    lines.push(...renderTurnsBlock(sessions));
 
     return lines.join("\n");
 };

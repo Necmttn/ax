@@ -275,6 +275,21 @@ export interface SessionHealthSummary {
     readonly task_label: string | null;
 }
 
+/** One turn in a session's timeline, with the per-turn trifecta attached.
+ *  Only populated when the compare is requested with per-turn detail (P1). */
+export interface SessionCompareTurn {
+    readonly seq: number;
+    readonly role: string | null;
+    readonly ts: string | null;
+    /** Wall-clock gap to the previous turn, ms. Null for the first turn or when
+     *  a timestamp is missing. NOT model latency - transcripts carry no request
+     *  duration. */
+    readonly gap_ms: number | null;
+    readonly est_tokens: number | null;
+    readonly est_cost_usd: number | null;
+    readonly has_error: boolean;
+}
+
 export interface SessionCompareEntry {
     readonly session_id: SessionId;
     readonly source: "claude" | "codex" | string;
@@ -291,6 +306,9 @@ export interface SessionCompareEntry {
     readonly commit_count: number;
     /** tool_errors + user_corrections + interruptions. Null if no health row. */
     readonly noise_score: number | null;
+    /** Per-turn timeline, ordered by seq. Present only when per-turn detail was
+     *  requested; undefined in the summary-only (P0) payload. */
+    readonly turns?: ReadonlyArray<SessionCompareTurn>;
 }
 
 /** Winning session id per axis. Null when undecidable (no data, or a tie). */
