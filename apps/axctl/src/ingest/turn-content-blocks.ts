@@ -123,14 +123,67 @@ ORDER BY session, seq;`);
         return rows ?? [];
     });
 
+interface ExistingContentHashRow {
+    readonly source_ref?: string | null;
+    readonly content_hash?: string | null;
+}
+
+/**
+ * Load the existing `(turn record key → content_hash)` map for already-derived
+ * turn content documents. Uses the indexed `content_document_source` index
+ * (FIELDS source_kind, source_ref) so this is a single fast lookup, not a scan.
+ * The map key is the document's `source_ref`, which is exactly the turn record
+ * key produced by `turnKeyForRow` - so it lines up with the writer convention.
+ */
+const loadExistingTurnContentHashes = (): Effect.Effect<
+    Map<string, string>,
+    DbError,
+    SurrealClient
+> =>
+    Effect.gen(function* () {
+        const db = yield* SurrealClient;
+        const [rows] = yield* db.query<[ExistingContentHashRow[]]>(
+            `SELECT source_ref, content_hash FROM content_document WHERE source_kind = ${surrealString("turn")};`,
+        );
+        const map = new Map<string, string>();
+        for (const row of rows ?? []) {
+            if (row.source_ref != null && row.content_hash != null) {
+                map.set(row.source_ref, row.content_hash);
+            }
+        }
+        return map;
+    });
+
 export const deriveAndPersistTurnContentBlocks = (
     opts: { readonly sinceDays: number | undefined } = { sinceDays: undefined },
 ): Effect.Effect<TurnContentBlocksStats, DbError, SurrealClient> =>
     Effect.gen(function* () {
         const db = yield* SurrealClient;
+        // Escape hatch: when the derivation logic itself changes, force a full
+        // reset + re-derive of every turn content document.
+        const full = process.env.AX_REDERIVE_CONTENT === "1";
         const rows = yield* fetchTurnRows(opts.sinceDays);
-        const writes = buildTurnContentDocumentWrites(rows);
-        const statements = buildTurnContentBlockStatements(rows, { reset: opts.sinceDays === undefined });
+
+        if (full) {
+            const writes = buildTurnContentDocumentWrites(rows);
+            const statements = buildTurnContentBlockStatements(rows, { reset: true });
+            yield* executeStatementsWith(db, statements, { chunkSize: 250 });
+            const blocks = writes.reduce((sum, write) => sum + write.parsed.blocks.length, 0);
+            const atoms = writes.reduce((sum, write) => sum + write.parsed.atoms.length, 0);
+            return { turns: rows.length, documents: writes.length, blocks, atoms };
+        }
+
+        // Incremental: only (re)derive turns whose content hash is new or changed
+        // vs. what is already stored. Content-document/block/atom ids are
+        // deterministic per turn, so each UPSERT lands in place (no blanket
+        // DELETE). Turns whose hash matches are skipped - already derived and
+        // output-equivalent. Turns are append-only, so changes are rare; this is
+        // a near-no-op on warm runs.
+        const existing = yield* loadExistingTurnContentHashes();
+        const writes = buildTurnContentDocumentWrites(rows).filter(
+            (write) => existing.get(write.sourceRef) !== write.contentHash,
+        );
+        const statements = writes.flatMap(buildContentDocumentStatements);
         yield* executeStatementsWith(db, statements, { chunkSize: 250 });
         const blocks = writes.reduce((sum, write) => sum + write.parsed.blocks.length, 0);
         const atoms = writes.reduce((sum, write) => sum + write.parsed.atoms.length, 0);
