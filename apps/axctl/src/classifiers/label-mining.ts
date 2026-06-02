@@ -216,14 +216,24 @@ export function mineTranscriptLabelCandidates(input: {
 const WRAPPER_FAMILIES = new Set<LabelFamily>(["none"]);
 const MIN_FAMILY_DIVERSITY = 4;
 
-export function auditWeakCandidateBatch(candidates: readonly TranscriptLabelCandidate[]): {
+/**
+ * Output of {@link auditWeakCandidateBatch}. Also the candidate-side input to
+ * {@link evaluateLabelMiningIteration}: `failures` carries any
+ * `failed_missing_evidence` / `failed_empty_batch` /
+ * `failed_insufficient_family_diversity` tokens forward into iteration gating.
+ */
+export interface LabelMiningCandidateAudit {
     readonly candidate_count: number;
     readonly label_family_counts: Readonly<Record<string, number>>;
     readonly wrapper_like_count: number;
     readonly evidence_missing_count: number;
     readonly decision: "candidate_batch_ready" | "candidate_batch_failed";
     readonly failures: readonly string[];
-} {
+}
+
+export function auditWeakCandidateBatch(
+    candidates: readonly TranscriptLabelCandidate[],
+): LabelMiningCandidateAudit {
     const family_counts: Record<string, number> = {};
     let wrapper_like_count = 0;
     let evidence_missing_count = 0;
@@ -252,5 +262,155 @@ export function auditWeakCandidateBatch(candidates: readonly TranscriptLabelCand
         evidence_missing_count,
         decision: failures.length === 0 ? "candidate_batch_ready" : "candidate_batch_failed",
         failures,
+    };
+}
+
+/* ------------------------------------------------------------------------- *
+ * Bounded experiment gates.
+ *
+ * Pure evaluator over per-iteration metrics + audits. Enforces the plan's
+ * Iteration Rules (stop conditions) and Failure Cases (hard fails) for the
+ * transcript label-mining experiment. No DB access, no model calls.
+ * ------------------------------------------------------------------------- */
+
+/** Max implementation iterations before {@link STOP_FOR_ITERATION_LIMIT}. */
+export const MAX_LABEL_MINING_ITERATIONS = 8;
+/** Hard floor: candidate precision on reviewed rows below this is a failure. */
+export const MIN_CANDIDATE_PRECISION = 0.65;
+/** Consecutive no-improvement iterations that trigger no-progress stop. */
+export const NO_PROGRESS_ITERATIONS = 2;
+
+/**
+ * Per-iteration usefulness metrics. Stop-for-no-progress fires only when none
+ * of these improve across {@link NO_PROGRESS_ITERATIONS} consecutive iterations.
+ */
+export interface LabelMiningMetrics {
+    readonly review_precision: number;
+    readonly accepted_label_count: number;
+    readonly neighbor_recall: number;
+    readonly graph_fact_count: number;
+    readonly product_query_result_count: number;
+}
+
+/**
+ * Promotion-side audit. `unsafe_promoted_count > 0` means weak/model-only rows
+ * reached promotion without review (a hard failure); `candidate_precision` is
+ * measured on the reviewed sample.
+ */
+export interface LabelMiningPromotionAudit {
+    readonly promoted_count: number;
+    readonly reviewed_promoted_count: number;
+    readonly unsafe_promoted_count: number;
+    readonly candidate_precision: number;
+}
+
+export type LabelMiningStopReason =
+    | "stop_for_no_progress"
+    | "stop_for_iteration_limit";
+
+export type LabelMiningFailure =
+    | "failed_candidate_precision"
+    | "failed_missing_evidence"
+    | "failed_unsafe_promotion";
+
+export interface LabelMiningIterationDecision {
+    readonly decision: "continue" | "stop" | "fail";
+    readonly can_continue: boolean;
+    readonly stop_reason: LabelMiningStopReason | null;
+    readonly failures: readonly LabelMiningFailure[];
+    readonly next_action: string;
+}
+
+const METRIC_KEYS = [
+    "review_precision",
+    "accepted_label_count",
+    "neighbor_recall",
+    "graph_fact_count",
+    "product_query_result_count",
+] as const satisfies readonly (keyof LabelMiningMetrics)[];
+
+const improvesAny = (
+    current: LabelMiningMetrics,
+    previous: LabelMiningMetrics,
+): boolean => METRIC_KEYS.some((key) => current[key] > previous[key]);
+
+/**
+ * Evaluate one bounded experiment iteration.
+ *
+ * Priority: hard failures first (a failing iteration must not be reported as a
+ * benign stop), then stop conditions, then continue. Failures are collected
+ * from both the candidate audit (evidence) and the promotion audit (precision,
+ * unsafe promotion).
+ */
+export function evaluateLabelMiningIteration(input: {
+    readonly iteration: number;
+    readonly expensive_model_runs: number;
+    readonly previous_metrics: readonly LabelMiningMetrics[];
+    readonly current_metrics: LabelMiningMetrics;
+    readonly candidate_audit: LabelMiningCandidateAudit;
+    readonly promotion_audit: LabelMiningPromotionAudit;
+}): LabelMiningIterationDecision {
+    const failures: LabelMiningFailure[] = [];
+
+    if (input.promotion_audit.candidate_precision < MIN_CANDIDATE_PRECISION) {
+        failures.push("failed_candidate_precision");
+    }
+    if (
+        input.candidate_audit.evidence_missing_count > 0
+        || input.candidate_audit.failures.includes("failed_missing_evidence")
+    ) {
+        failures.push("failed_missing_evidence");
+    }
+    if (input.promotion_audit.unsafe_promoted_count > 0) {
+        failures.push("failed_unsafe_promotion");
+    }
+
+    if (failures.length > 0) {
+        return {
+            decision: "fail",
+            can_continue: false,
+            stop_reason: null,
+            failures,
+            next_action: `stop and treat as experiment failure: ${failures.join(", ")}`,
+        };
+    }
+
+    if (input.iteration > MAX_LABEL_MINING_ITERATIONS) {
+        return {
+            decision: "stop",
+            can_continue: false,
+            stop_reason: "stop_for_iteration_limit",
+            failures: [],
+            next_action: `iteration limit (${MAX_LABEL_MINING_ITERATIONS}) reached; finalize results`,
+        };
+    }
+
+    const recent = input.previous_metrics.slice(-NO_PROGRESS_ITERATIONS);
+    if (recent.length >= NO_PROGRESS_ITERATIONS) {
+        const chain = [...recent, input.current_metrics];
+        let stalled = true;
+        for (let i = 1; i < chain.length; i += 1) {
+            if (improvesAny(chain[i]!, chain[i - 1]!)) {
+                stalled = false;
+                break;
+            }
+        }
+        if (stalled) {
+            return {
+                decision: "stop",
+                can_continue: false,
+                stop_reason: "stop_for_no_progress",
+                failures: [],
+                next_action: "no metric improved across consecutive iterations; stop tuning",
+            };
+        }
+    }
+
+    return {
+        decision: "continue",
+        can_continue: true,
+        stop_reason: null,
+        failures: [],
+        next_action: "run next bounded iteration",
     };
 }

@@ -1,8 +1,12 @@
 import { describe, expect, test } from "bun:test";
 import {
     auditWeakCandidateBatch,
+    evaluateLabelMiningIteration,
     mineTranscriptLabelCandidates,
     type EventWindowLike,
+    type LabelMiningCandidateAudit,
+    type LabelMiningMetrics,
+    type LabelMiningPromotionAudit,
 } from "./label-mining.ts";
 
 const win = (input: {
@@ -231,5 +235,139 @@ describe("auditWeakCandidateBatch", () => {
         expect(audit.evidence_missing_count).toBe(1);
         expect(audit.decision).toBe("candidate_batch_failed");
         expect(audit.failures).toContain("failed_missing_evidence");
+    });
+});
+
+describe("evaluateLabelMiningIteration", () => {
+    const metrics = (input: Partial<LabelMiningMetrics> = {}): LabelMiningMetrics => ({
+        review_precision: 0.9,
+        accepted_label_count: 50,
+        neighbor_recall: 0.6,
+        graph_fact_count: 12,
+        product_query_result_count: 20,
+        ...input,
+    });
+
+    const okAudit = (): LabelMiningCandidateAudit => ({
+        candidate_count: 4,
+        label_family_counts: { correction: 1, direction: 1, verification: 1, approval_or_rejection: 1 },
+        wrapper_like_count: 0,
+        evidence_missing_count: 0,
+        decision: "candidate_batch_ready",
+        failures: [],
+    });
+
+    const okPromotion = (): LabelMiningPromotionAudit => ({
+        promoted_count: 10,
+        reviewed_promoted_count: 10,
+        unsafe_promoted_count: 0,
+        candidate_precision: 0.88,
+    });
+
+    test("continues when metrics improve and gates pass", () => {
+        const decision = evaluateLabelMiningIteration({
+            iteration: 3,
+            expensive_model_runs: 1,
+            previous_metrics: [metrics({ accepted_label_count: 40 })],
+            current_metrics: metrics({ accepted_label_count: 50 }),
+            candidate_audit: okAudit(),
+            promotion_audit: okPromotion(),
+        });
+        expect(decision.decision).toBe("continue");
+        expect(decision.can_continue).toBe(true);
+        expect(decision.stop_reason).toBeNull();
+        expect(decision.failures.length).toBe(0);
+    });
+
+    test("two no-improvement iterations triggers stop_for_no_progress", () => {
+        const flat = metrics();
+        const decision = evaluateLabelMiningIteration({
+            iteration: 4,
+            expensive_model_runs: 1,
+            previous_metrics: [flat, flat],
+            current_metrics: flat,
+            candidate_audit: okAudit(),
+            promotion_audit: okPromotion(),
+        });
+        expect(decision.decision).toBe("stop");
+        expect(decision.can_continue).toBe(false);
+        expect(decision.stop_reason).toBe("stop_for_no_progress");
+    });
+
+    test("more than 8 iterations triggers stop_for_iteration_limit", () => {
+        const decision = evaluateLabelMiningIteration({
+            iteration: 9,
+            expensive_model_runs: 1,
+            previous_metrics: [metrics({ accepted_label_count: 1 })],
+            current_metrics: metrics({ accepted_label_count: 99 }),
+            candidate_audit: okAudit(),
+            promotion_audit: okPromotion(),
+        });
+        expect(decision.decision).toBe("stop");
+        expect(decision.can_continue).toBe(false);
+        expect(decision.stop_reason).toBe("stop_for_iteration_limit");
+    });
+
+    test("precision below 0.65 triggers failed_candidate_precision", () => {
+        const decision = evaluateLabelMiningIteration({
+            iteration: 2,
+            expensive_model_runs: 0,
+            previous_metrics: [],
+            current_metrics: metrics(),
+            candidate_audit: okAudit(),
+            promotion_audit: { ...okPromotion(), candidate_precision: 0.6 },
+        });
+        expect(decision.decision).toBe("fail");
+        expect(decision.can_continue).toBe(false);
+        expect(decision.failures).toContain("failed_candidate_precision");
+    });
+
+    test("missing evidence triggers failed_missing_evidence", () => {
+        const decision = evaluateLabelMiningIteration({
+            iteration: 2,
+            expensive_model_runs: 0,
+            previous_metrics: [],
+            current_metrics: metrics(),
+            candidate_audit: {
+                ...okAudit(),
+                evidence_missing_count: 2,
+                decision: "candidate_batch_failed",
+                failures: ["failed_missing_evidence"],
+            },
+            promotion_audit: okPromotion(),
+        });
+        expect(decision.decision).toBe("fail");
+        expect(decision.can_continue).toBe(false);
+        expect(decision.failures).toContain("failed_missing_evidence");
+    });
+
+    test("weak/model-only promotion triggers failed_unsafe_promotion", () => {
+        const decision = evaluateLabelMiningIteration({
+            iteration: 2,
+            expensive_model_runs: 0,
+            previous_metrics: [],
+            current_metrics: metrics(),
+            candidate_audit: okAudit(),
+            promotion_audit: { ...okPromotion(), unsafe_promoted_count: 3 },
+        });
+        expect(decision.decision).toBe("fail");
+        expect(decision.can_continue).toBe(false);
+        expect(decision.failures).toContain("failed_unsafe_promotion");
+    });
+
+    test("failures take priority over stop conditions and surface next_action", () => {
+        const flat = metrics();
+        const decision = evaluateLabelMiningIteration({
+            iteration: 9,
+            expensive_model_runs: 0,
+            previous_metrics: [flat, flat],
+            current_metrics: flat,
+            candidate_audit: okAudit(),
+            promotion_audit: { ...okPromotion(), candidate_precision: 0.5 },
+        });
+        expect(decision.decision).toBe("fail");
+        expect(decision.failures).toContain("failed_candidate_precision");
+        expect(typeof decision.next_action).toBe("string");
+        expect(decision.next_action.length).toBeGreaterThan(0);
     });
 });
