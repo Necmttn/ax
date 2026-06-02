@@ -1,0 +1,382 @@
+/**
+ * MCP tool registry.
+ *
+ * Each entry is a self-contained descriptor: an MCP-facing name + description +
+ * zod input shape, plus a `run` that maps the validated args onto an ax Effect
+ * query and resolves it on the long-lived runtime. `server.ts` iterates this
+ * array and wraps every result in the MCP content envelope, so adding a tool
+ * (Task 3) means only appending a descriptor here - no transport changes.
+ *
+ * Boundary convention: zod for input validation at the MCP edge (the SDK speaks
+ * zod natively); Effect Schema / Effect stays internal to the query functions.
+ *
+ * Optional-param idiom: under `exactOptionalPropertyTypes: true` you cannot
+ * assign `undefined` to an optional prop. We build params with object spread -
+ * `...(x !== undefined ? { x } : {})` - instead of `as`-casts, mirroring
+ * `apps/axctl/src/dashboard/server.ts`.
+ */
+import { z, type ZodRawShape } from "zod";
+import type { ManagedRuntime, Layer } from "effect";
+import type { AppLayer } from "@ax/lib/layers";
+import {
+    fetchRecall,
+    type RecallParams,
+    type RecallSource,
+} from "../dashboard/recall.ts";
+import {
+    listSessionsAround,
+    type SessionsAroundOpts,
+} from "../dashboard/sessions-query.ts";
+import { fetchSessionShow } from "../dashboard/session-show.ts";
+import type { FetchSessionViewOptions } from "../dashboard/session-view.ts";
+import {
+    fetchSkillsWeighted,
+    type SkillsWeightedParams,
+} from "../dashboard/skills-weighted.ts";
+import {
+    fetchSkillsByRole,
+    fetchRolesForSkill,
+    fetchAllRoles,
+    type FetchSkillsByRoleParams,
+} from "../dashboard/role-queries.ts";
+import { recommend, type RecommendInput } from "../improve/recommend.ts";
+import { showExperiment } from "../improve/show.ts";
+import { listProposals, type ListProposalsInput } from "../improve/list.ts";
+
+/**
+ * The long-lived MCP runtime, built from `AppLayer` (SurrealClient + config +
+ * trace transport). The service/error params are derived from the layer so they
+ * stay in sync if `AppLayer` changes.
+ */
+export type AxRuntime = ManagedRuntime.ManagedRuntime<
+    Layer.Success<typeof AppLayer>,
+    Layer.Error<typeof AppLayer>
+>;
+
+/**
+ * A single MCP tool descriptor. `inputSchema` is a zod raw shape (the SDK's
+ * `registerTool` accepts this directly and derives the JSON schema + arg type).
+ * `run` receives the validated args and the runtime; it returns a raw JSON-able
+ * value, which `server.ts` serialises into the MCP text content envelope.
+ */
+export interface AxMcpTool {
+    readonly name: string;
+    readonly description: string;
+    readonly inputSchema: ZodRawShape;
+    readonly run: (args: Record<string, unknown>, rt: AxRuntime) => Promise<unknown>;
+}
+
+const RECALL_SOURCES = ["turn", "commit", "skill"] as const;
+
+const recallTool: AxMcpTool = {
+    name: "recall",
+    description:
+        "Full-text recall across the ax graph: search turns (conversation excerpts), git commits, and skills. Returns scored hits with source, excerpt, and provenance.",
+    inputSchema: {
+        q: z.string().describe("Search query (required). Matched against turn text, commit messages, and skill metadata."),
+        limit: z
+            .number()
+            .int()
+            .positive()
+            .max(200)
+            .optional()
+            .describe("Max hits to return (default 50, max 200)."),
+        sources: z
+            .array(z.enum(RECALL_SOURCES))
+            .optional()
+            .describe('Which sources to search. Defaults to ["turn"]. Any of "turn", "commit", "skill".'),
+    },
+    run: async (args, rt) => {
+        const q = String(args.q ?? "").trim();
+        const limit = typeof args.limit === "number" ? args.limit : undefined;
+        const sources = Array.isArray(args.sources)
+            ? (args.sources.filter((s): s is RecallSource =>
+                  RECALL_SOURCES.includes(s as RecallSource),
+              ))
+            : undefined;
+        // No scope param in v0: omit it so fetchRecall defaults to unscoped
+        // (all repositories). Real repo-scoping needs the git resolver, which
+        // is unfit for a long-lived server - revisit later.
+        const params: RecallParams = {
+            q,
+            ...(limit !== undefined ? { limit } : {}),
+            ...(sources && sources.length > 0 ? { sources } : {}),
+        };
+
+        return await rt.runPromise(fetchRecall(params));
+    },
+};
+
+const sessionsAroundTool: AxMcpTool = {
+    name: "sessions_around",
+    description:
+        "List agent sessions in a time window centred on a date (default +/-3 days). Returns session rows with turn counts and the first user message. Use to find what work happened around a given day.",
+    inputSchema: {
+        date: z
+            .string()
+            .describe("Centre date (required). ISO timestamp or YYYY-MM-DD."),
+        days: z
+            .number()
+            .int()
+            .positive()
+            .optional()
+            .describe("Half-width of the window in days (default 3)."),
+        project: z
+            .string()
+            .optional()
+            .describe("Optional Claude project slug to filter sessions to."),
+    },
+    run: async (args, rt) => {
+        const dateStr = String(args.date ?? "");
+        const date = new Date(dateStr);
+        if (Number.isNaN(date.getTime())) {
+            throw new Error(`Invalid date: ${JSON.stringify(args.date)}. Expected an ISO timestamp or YYYY-MM-DD.`);
+        }
+        const days = typeof args.days === "number" ? args.days : undefined;
+        const project = typeof args.project === "string" ? args.project : undefined;
+        const opts: SessionsAroundOpts = {
+            date,
+            ...(days !== undefined ? { days } : {}),
+            ...(project !== undefined ? { project } : {}),
+        };
+        return await rt.runPromise(listSessionsAround(opts));
+    },
+};
+
+const sessionShowTool: AxMcpTool = {
+    name: "session_show",
+    description:
+        "Show one session in detail: base facts, optionally expanded subagent children, and optional skill-by-role grouping. Use after sessions_around / recall to drill into a specific session id.",
+    inputSchema: {
+        sessionId: z
+            .string()
+            .describe("Session id to show (required)."),
+        expand: z
+            .array(z.string())
+            .optional()
+            .describe("Subagent session ids (or fragments) to expand inline. Default: none."),
+        expandAll: z
+            .boolean()
+            .optional()
+            .describe("Expand ALL subagent children regardless of `expand` (default false)."),
+        byRole: z
+            .boolean()
+            .optional()
+            .describe("Group the session's top skills by their role classifications."),
+    },
+    run: async (args, rt) => {
+        const sessionId = String(args.sessionId ?? "");
+        const expand = Array.isArray(args.expand)
+            ? new Set(args.expand.map((v) => String(v)))
+            : new Set<string>();
+        const expandAll = args.expandAll === true;
+        const byRole = typeof args.byRole === "boolean" ? args.byRole : undefined;
+        const opts: FetchSessionViewOptions = {
+            sessionId,
+            expand,
+            expandAll,
+            ...(byRole !== undefined ? { byRole } : {}),
+        };
+        return await rt.runPromise(fetchSessionShow(opts));
+    },
+};
+
+const skillsWeightedTool: AxMcpTool = {
+    name: "skills_weighted",
+    description:
+        "Rank skills by usage x role-weight (score = invocations x role-weight). Returns ranked rows plus a doctor summary of unclassified skills. Use to see which skills actually carry weight in recent work.",
+    inputSchema: {
+        windowDays: z
+            .number()
+            .int()
+            .positive()
+            .optional()
+            .describe("Only count invocations within the last N days (default: all time)."),
+        limit: z
+            .number()
+            .int()
+            .positive()
+            .optional()
+            .describe("Max ranked rows to return (default 25)."),
+    },
+    run: async (args, rt) => {
+        const windowDays = typeof args.windowDays === "number" ? args.windowDays : undefined;
+        const limit = typeof args.limit === "number" ? args.limit : undefined;
+        const params: SkillsWeightedParams = {
+            ...(windowDays !== undefined ? { windowDays } : {}),
+            ...(limit !== undefined ? { limit } : {}),
+        };
+        return await rt.runPromise(fetchSkillsWeighted(params));
+    },
+};
+
+const skillsByRoleTool: AxMcpTool = {
+    name: "skills_by_role",
+    description:
+        "List skills tagged with a given role, ranked by invocation count. Returns rows with source/confidence/rationale and whether any skill matched the role.",
+    inputSchema: {
+        role: z
+            .string()
+            .describe("Role name to look up (required)."),
+        limit: z
+            .number()
+            .int()
+            .positive()
+            .optional()
+            .describe("Max skills to return (default 50)."),
+    },
+    run: async (args, rt) => {
+        const role = String(args.role ?? "");
+        const limit = typeof args.limit === "number" ? args.limit : undefined;
+        const params: FetchSkillsByRoleParams = {
+            role,
+            ...(limit !== undefined ? { limit } : {}),
+        };
+        return await rt.runPromise(fetchSkillsByRole(params));
+    },
+};
+
+const skillsRolesTool: AxMcpTool = {
+    name: "skills_roles",
+    description:
+        "List the roles a given skill plays, with weights, source, confidence and rationale. Returns whether the skill exists. The inverse of skills_by_role.",
+    inputSchema: {
+        skill: z
+            .string()
+            .describe("Skill name to look up roles for (required)."),
+    },
+    run: async (args, rt) => {
+        const skill = String(args.skill ?? "");
+        return await rt.runPromise(fetchRolesForSkill({ skill }));
+    },
+};
+
+const rolesTool: AxMcpTool = {
+    name: "roles",
+    description:
+        "List the full role vocabulary with each role's weight and the number of skills classified into it. Use to discover valid role labels for skills_by_role.",
+    inputSchema: {},
+    run: async (_args, rt) => {
+        return await rt.runPromise(fetchAllRoles());
+    },
+};
+
+const RECOMMEND_AGENTS = ["claude", "codex"] as const;
+
+const improveRecommendTool: AxMcpTool = {
+    name: "improve_recommend",
+    description:
+        "Rank open self-improvement proposals by confidence x recency x frequency. Returns the shortlist of grounded suggestions the agent could accept. Use to surface what to improve next.",
+    inputSchema: {
+        limit: z
+            .number()
+            .int()
+            .positive()
+            .optional()
+            .describe("Max proposals to return (default 10)."),
+        forms: z
+            .array(z.string())
+            .optional()
+            .describe("Filter to these proposal forms (e.g. skill, hook, rule)."),
+        agent: z
+            .enum(RECOMMEND_AGENTS)
+            .optional()
+            .describe('Filter to a single agent: "claude" or "codex".'),
+        sinceDays: z
+            .number()
+            .int()
+            .positive()
+            .optional()
+            .describe("Only proposals updated within the last N days."),
+    },
+    run: async (args, rt) => {
+        // `limit` is required on RecommendInput with no internal default - so
+        // default it to 10 here. cwd/project are deliberately not exposed (they
+        // are cwd-bound and meaningless at the MCP boundary).
+        const limit = typeof args.limit === "number" ? args.limit : 10;
+        const forms = Array.isArray(args.forms)
+            ? args.forms.map((v) => String(v))
+            : undefined;
+        const agent =
+            args.agent === "claude" || args.agent === "codex" ? args.agent : undefined;
+        const sinceDays = typeof args.sinceDays === "number" ? args.sinceDays : undefined;
+        const input: RecommendInput = {
+            limit,
+            ...(forms !== undefined ? { forms } : {}),
+            ...(agent !== undefined ? { agent } : {}),
+            ...(sinceDays !== undefined ? { sinceDays } : {}),
+        };
+        return await rt.runPromise(recommend(input));
+    },
+};
+
+const improveShowTool: AxMcpTool = {
+    name: "improve_show",
+    description:
+        "Show one experiment's evidence trail: the proposal, its experiment, and recent checkpoints. Returns null if no proposal/experiment matches. Use to inspect a single improve_recommend / improve_list entry.",
+    inputSchema: {
+        sigOrId: z
+            .string()
+            .describe("Proposal dedupe signature or experiment id (required)."),
+    },
+    run: async (args, rt) => {
+        const sigOrId = String(args.sigOrId ?? "");
+        // null is a valid result (no match) - return it as plain JSON.
+        return await rt.runPromise(showExperiment({ sigOrId }));
+    },
+};
+
+const improveListTool: AxMcpTool = {
+    name: "improve_list",
+    description:
+        "List the experiment-loop proposal shortlist, filterable by status and form. Returns proposal rows ordered by frequency. Use to browse proposals beyond the ranked improve_recommend view.",
+    inputSchema: {
+        status: z
+            .string()
+            .optional()
+            .describe('Status filter (default "open"; pass "all" to disable).'),
+        form: z
+            .string()
+            .optional()
+            .describe("Filter to a single proposal form."),
+        limit: z
+            .number()
+            .int()
+            .positive()
+            .optional()
+            .describe("Max proposals to return (default 30)."),
+    },
+    run: async (args, rt) => {
+        const status = typeof args.status === "string" ? args.status : undefined;
+        const form = typeof args.form === "string" ? args.form : undefined;
+        const limit = typeof args.limit === "number" ? args.limit : undefined;
+        const input: ListProposalsInput = {
+            ...(status !== undefined ? { status } : {}),
+            ...(form !== undefined ? { form } : {}),
+            ...(limit !== undefined ? { limit } : {}),
+        };
+        return await rt.runPromise(listProposals(input));
+    },
+};
+
+/**
+ * All registered MCP tools. `server.ts` iterates this array to register +
+ * wrap each one.
+ *
+ * Deliberately deferred (NOT in v0): `sessions_here` and `sessions_near`. Both
+ * need a resolved git `repositoryKey` / commit-window from the CLI's cwd+git
+ * resolver, which `process.exit`s and is unfit for a long-lived server. They
+ * are a documented follow-up.
+ */
+export const axMcpTools: ReadonlyArray<AxMcpTool> = [
+    recallTool,
+    sessionsAroundTool,
+    sessionShowTool,
+    skillsWeightedTool,
+    skillsByRoleTool,
+    skillsRolesTool,
+    rolesTool,
+    improveRecommendTool,
+    improveShowTool,
+    improveListTool,
+];
