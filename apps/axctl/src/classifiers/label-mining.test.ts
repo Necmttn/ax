@@ -20,6 +20,7 @@ const win = (input: {
     readonly subjectId?: string;
     readonly turnId?: string;
     readonly userMessageKind?: string;
+    readonly userIntentKind?: string;
     readonly evidencePaths?: readonly string[];
 }): EventWindowLike => ({
     key: `window:${input.subjectId ?? "u1"}`,
@@ -31,6 +32,7 @@ const win = (input: {
         seq: 3,
         role: "user",
         ...(input.userMessageKind ? { messageKind: input.userMessageKind } : {}),
+        ...(input.userIntentKind ? { intentKind: input.userIntentKind } : {}),
         text: input.user,
         ts: new Date("2026-05-30T00:00:03Z"),
         evidencePath: (input.evidencePaths ?? ["transcript://session:s1/turn:u1"])[0],
@@ -83,6 +85,54 @@ describe("mineTranscriptLabelCandidates", () => {
         });
         expect(candidates.length).toBe(1);
         expect(candidates[0]!.label_family).toBe("direction");
+    });
+
+    test("broadens via intent_kind=correction when text patterns miss", () => {
+        const candidates = mineTranscriptLabelCandidates({
+            windows: [
+                win({
+                    user: "actually let's go back to the previous approach instead",
+                    previousAssistant: "I refactored the module into three files.",
+                    userIntentKind: "correction",
+                }),
+            ],
+            limit: 500,
+        });
+        expect(candidates.length).toBe(1);
+        const c = candidates[0]!;
+        expect(c.label_family).toBe("correction");
+        expect(c.weak_sources).toContain("intent:correction");
+    });
+
+    test("broadens via intent_kind=preference into a direction candidate", () => {
+        const candidates = mineTranscriptLabelCandidates({
+            windows: [
+                win({
+                    user: "going forward keep responses terse and skip the preamble",
+                    userIntentKind: "preference",
+                }),
+            ],
+            limit: 500,
+        });
+        expect(candidates.length).toBe(1);
+        const c = candidates[0]!;
+        expect(c.label_family).toBe("direction");
+        expect(c.target).toBe("stated_preference");
+        expect(c.weak_sources).toContain("intent:preference");
+    });
+
+    test("high-precision text patterns win over intent_kind fallback", () => {
+        const candidates = mineTranscriptLabelCandidates({
+            windows: [
+                win({
+                    user: "did you run the tests?",
+                    previousAssistant: "Done.",
+                    userIntentKind: "preference",
+                }),
+            ],
+            limit: 500,
+        });
+        expect(candidates[0]!.label_family).toBe("verification");
     });
 
     test("mines a verification demand like did you run tests", () => {

@@ -285,6 +285,7 @@ interface TranscriptWindowRow {
     readonly user_seq?: number | null;
     readonly user_role?: string | null;
     readonly user_message_kind?: string | null;
+    readonly user_intent_kind?: string | null;
     readonly user_text?: string | null;
     readonly user_evidence_path?: string | null;
     readonly prev_turn_id?: string | null;
@@ -295,10 +296,27 @@ interface TranscriptWindowRow {
 const str = (value: unknown): string => (typeof value === "string" ? value : String(value ?? ""));
 
 /**
- * Read recent user turns (with the immediately-preceding turn) from the `turn`
- * table as candidate windows. Only `role = 'user'` turns are eligible subjects;
- * the previous turn is joined via `session` + `seq - 1` so correction/direction
- * candidates can carry the assistant action they reacted to.
+ * Intent kinds that are NOT organic user instructions and must never seed a
+ * label candidate (wrapper/control noise, subagent plumbing, pasted refs).
+ */
+const EXCLUDED_INTENT_KINDS = [
+    "control",
+    "wrapper_instruction",
+    "subagent_notification",
+    "subagent_task",
+    "pasted_reference",
+] as const;
+
+/**
+ * Read recent ORGANIC user turns (with the immediately-preceding turn) from the
+ * `turn` table as candidate windows. The read layer filters out the noise that
+ * previously dominated mining:
+ *   - `message_kind = 'task'`  -> drops tool_result / context / control turns
+ *   - `session.source != 'claude-subagent'` -> drops subagent-session turns
+ *   - excluded `intent_kind`s  -> drops wrapper/control/subagent-plumbing text
+ * Only real `role = 'user'` instructions remain. The previous turn is joined via
+ * `session` + `seq - 1` so correction/direction candidates carry the assistant
+ * action they reacted to.
  */
 const transcriptWindowSql = (sinceDays: number, limit: number): string => `
 SELECT
@@ -310,10 +328,14 @@ SELECT
     seq AS user_seq,
     role AS user_role,
     message_kind AS user_message_kind,
+    intent_kind AS user_intent_kind,
     text AS user_text,
     type::string(id) AS user_evidence_path
 FROM turn
 WHERE role = 'user'
+    AND message_kind = 'task'
+    AND session.source != 'claude-subagent'
+    AND (intent_kind IS NONE OR intent_kind NOT IN ${JSON.stringify([...EXCLUDED_INTENT_KINDS])})
     AND text IS NOT NONE
     AND ts >= time::now() - ${Math.max(0, Math.trunc(sinceDays))}d
 ORDER BY ts DESC
@@ -364,6 +386,9 @@ const rowToWindow = (row: TranscriptWindowRow): EventWindowLike | null => {
             ...(row.user_role != null ? { role: str(row.user_role) } : {}),
             ...(row.user_message_kind != null
                 ? { messageKind: str(row.user_message_kind) }
+                : {}),
+            ...(row.user_intent_kind != null
+                ? { intentKind: str(row.user_intent_kind) }
                 : {}),
             text: str(row.user_text),
             evidencePath: userEvidence,

@@ -47,6 +47,8 @@ export interface EventWindowTurnLike {
     readonly seq?: number;
     readonly role?: string;
     readonly messageKind?: string | null;
+    /** DB-derived intent classification (e.g. 'organic_task' | 'correction' | 'preference'). */
+    readonly intentKind?: string | null;
     readonly text: string;
     readonly ts?: Date | string;
     readonly evidencePath?: string | null;
@@ -82,7 +84,7 @@ interface WeakMatch {
     readonly requiresPreviousAssistant: boolean;
 }
 
-const matchWeakLabel = (text: string): WeakMatch | null => {
+const matchWeakLabel = (text: string, intentKind?: string | null): WeakMatch | null => {
     const lower = text.toLowerCase();
 
     // Verification demands first: questions about checks/tests/results.
@@ -129,7 +131,29 @@ const matchWeakLabel = (text: string): WeakMatch | null => {
         };
     }
 
-    return null;
+    // Fallback: broaden organic extraction using the DB-derived `intent_kind`
+    // when the high-precision text patterns miss. These remain weak labels
+    // (reviewed before any promotion), so a derived-classifier signal is fine.
+    switch (intentKind) {
+        case "correction":
+            return {
+                label_family: "correction",
+                target: "wrong_output",
+                confidence: 0.7,
+                sources: ["intent:correction"],
+                requiresPreviousAssistant: true,
+            };
+        case "preference":
+            return {
+                label_family: "direction",
+                target: "stated_preference",
+                confidence: 0.7,
+                sources: ["intent:preference"],
+                requiresPreviousAssistant: false,
+            };
+        default:
+            return null;
+    }
 };
 
 const candidateId = (input: {
@@ -168,7 +192,7 @@ export function mineTranscriptLabelCandidates(input: {
         const text = window.userTurn.text.trim();
         if (isWrapperLike(window, text)) continue;
 
-        const match = matchWeakLabel(text);
+        const match = matchWeakLabel(text, window.userTurn.intentKind);
         if (!match) continue;
 
         const hasPreviousAssistant = !!window.previousAssistantTurn
