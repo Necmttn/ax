@@ -16,6 +16,7 @@ import { toBareSessionId } from "@ax/lib/shared/session-id";
 import { decodeJsonOrNull } from "@ax/lib/decode";
 import type {
     SessionAgentDelegation,
+    SessionHealthSummary,
     SessionLink,
     SessionOverview,
     SessionTokenUsageDetail,
@@ -140,6 +141,28 @@ FROM turn_token_usage
 WHERE session = $sessionId
 ORDER BY seq ASC
 LIMIT 2000;`;
+
+/** Per-session health aggregate. One row/session, UNIQUE on session. Powers
+ *  the compare view's turns / errors / corrections / interruptions axes. */
+export const SESSION_HEALTH_SQL = `
+SELECT
+    turns,
+    tool_calls,
+    tool_errors,
+    user_corrections,
+    interruptions,
+    subagent_dispatches,
+    task_label
+FROM session_health
+WHERE session = $sessionId
+LIMIT 1;`;
+
+/** Count of commits this session produced (session → commit `produced` edge). */
+export const SESSION_PRODUCED_COUNT_SQL = `
+SELECT count() AS count
+FROM produced
+WHERE in = $sessionId
+GROUP ALL;`;
 
 /**
  * Provider-neutral file evidence. Edit evidence is turn-scoped; read/search
@@ -561,6 +584,37 @@ export const sessionTurnTokenUsageQuery = defineQuery<
             usage_quality: stringField(raw, "usage_quality") ?? "unknown",
         };
     },
+});
+
+export const sessionHealthQuery = defineSingleQuery<
+    SessionDetailParams,
+    Record<string, unknown>,
+    SessionHealthSummary | null
+>({
+    name: "session-detail.health",
+    sql: (p) => subst(SESSION_HEALTH_SQL, p.recordRef),
+    mapRow: (raw) => {
+        if (!isRecord(raw)) return null;
+        return {
+            turns: numericField(raw, "turns"),
+            tool_calls: numericField(raw, "tool_calls"),
+            tool_errors: numericField(raw, "tool_errors"),
+            user_corrections: numericField(raw, "user_corrections"),
+            interruptions: numericField(raw, "interruptions"),
+            subagent_dispatches: numericField(raw, "subagent_dispatches"),
+            task_label: stringField(raw, "task_label"),
+        };
+    },
+});
+
+export const sessionProducedCountQuery = defineSingleQuery<
+    SessionDetailParams,
+    Record<string, unknown>,
+    number
+>({
+    name: "session-detail.produced_count",
+    sql: (p) => subst(SESSION_PRODUCED_COUNT_SQL, p.recordRef),
+    mapRow: (raw) => (isRecord(raw) ? numericField(raw, "count") : 0),
 });
 
 export const sessionShareTimelineQuery = defineQuery<

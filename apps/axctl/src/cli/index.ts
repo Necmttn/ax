@@ -84,8 +84,10 @@ import { serveDashboard } from "../dashboard/server.ts";
 import { serveMcp } from "../mcp/server.ts";
 import { fetchRecall, type RecallSource, type RecallScope } from "../dashboard/recall.ts";
 import { fetchSessionShow } from "../dashboard/session-show.ts";
+import { fetchSessionCompare } from "../dashboard/session-compare.ts";
 import { fetchCostSummary, type CostSummary } from "../dashboard/cost-query.ts";
 import { renderSessionMarkdown, renderSessionJson } from "./session-show-format.ts";
+import { renderCompareTable, renderCompareJson } from "./session-compare-format.ts";
 import { cmdDaemon, cmdDoctor, cmdInstall, cmdUninstall } from "./install.ts";
 import { resolvePwdRepository } from "../pwd.ts";
 import { detectStaleness } from "@ax/lib/transcript-staleness";
@@ -3315,13 +3317,73 @@ const sessionsNearCommand = Command.make(
     "See the ax:extract-workflow skill for narrating workflows around a sha.",
 ));
 
+// ---------------------------------------------------------------------------
+// ax sessions compare <idA> <idB> [...] - side-by-side run comparison (P0)
+// ---------------------------------------------------------------------------
+
+/**
+ * `ax sessions compare <idA> <idB> [<idC> ...] [--json]`
+ *
+ * Lines up 2+ sessions on headline metrics (duration, tokens, cost, turns,
+ * errors, corrections, commits) and stars the winner per ranked axis. Answers
+ * "same task, which run was faster / cheaper / cleaner?". Auto table on TTY,
+ * --json (or piped) for machine output.
+ *
+ * Duration is wall-clock (ended_at - started_at); transcripts carry no model
+ * latency.
+ */
+const cmdSessionsCompare = (args: string[]) =>
+    Effect.gen(function* () {
+        const ids = args.filter((a) => !a.startsWith("--"));
+        if (ids.length < 2) {
+            console.error("axctl sessions compare: need at least 2 session ids");
+            console.error("  usage: axctl sessions compare <idA> <idB> [<idC> ...] [--json]");
+            process.exit(2);
+        }
+
+        const useJson = wantsJson(args);
+        const payload = yield* fetchSessionCompare(ids).pipe(
+            catchDbErrorAndExit("axctl sessions compare"),
+        );
+
+        if (payload.sessions.length < 2) {
+            process.stderr.write(
+                `axctl sessions compare: resolved only ${payload.sessions.length} session(s); need 2+. ` +
+                    `not found: ${payload.not_found.join(", ") || "(none)"}\n`,
+            );
+            process.exit(1);
+        }
+
+        if (useJson) {
+            console.log(renderCompareJson(payload));
+        } else {
+            console.log(renderCompareTable(payload));
+        }
+    });
+
+const sessionsCompareCommand = Command.make(
+    "compare",
+    {
+        ids: Argument.string("ids").pipe(Argument.variadic({ min: 2 })),
+        json: jsonFlag,
+    },
+    ({ ids, json }) => cmdSessionsCompare([...ids, ...boolArg("json", json)]),
+).pipe(
+    Command.withDescription(
+        "Compare 2+ sessions side by side (duration, tokens, cost, turns, errors, " +
+        "corrections, commits). Stars the winner per axis - answers which run was " +
+        "faster / cheaper / cleaner. Auto table on TTY, --json for machine output.",
+    ),
+);
+
 const sessionsCommand = Command.make("sessions").pipe(
-    Command.withDescription("Windowed session queries: here (pwd-repo), around (date), near (sha), show (detail)"),
+    Command.withDescription("Windowed session queries: here (pwd-repo), around (date), near (sha), show (detail), compare (side-by-side)"),
     Command.withSubcommands([
         sessionsHereCommand,
         sessionsAroundCommand,
         sessionsNearCommand,
         sessionShowCommand,
+        sessionsCompareCommand,
     ]),
 );
 
