@@ -703,6 +703,9 @@ export async function cmdInstall() {
     console.log("    axctl tui             # interactive terminal dashboard");
     console.log("    launchctl list | grep 'com.necmttn.ax'   # verify both LaunchAgents loaded");
     console.log();
+    console.log("  questions or feedback? join the community:");
+    console.log("    https://discord.gg/E4R88Cvr5R");
+    console.log();
     console.log(formatInstallOnboardingGuidance(buildOnboardingReport()));
 }
 

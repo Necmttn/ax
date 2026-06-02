@@ -51,6 +51,14 @@ function GitHubIcon({ className }: IconProps) {
   );
 }
 
+function DiscordIcon({ className }: IconProps) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+      <path d="M20.32 4.94A19.5 19.5 0 0 0 15.45 3.4a.07.07 0 0 0-.08.04c-.21.38-.44.87-.6 1.25a18 18 0 0 0-5.4 0c-.17-.39-.4-.87-.62-1.25a.07.07 0 0 0-.07-.04A19.4 19.4 0 0 0 3.7 4.94a.07.07 0 0 0-.03.03C.57 9.6-.28 14.13.14 18.6a.08.08 0 0 0 .03.05 19.6 19.6 0 0 0 5.9 2.98.07.07 0 0 0 .08-.03c.45-.62.86-1.28 1.2-1.96a.07.07 0 0 0-.04-.1c-.64-.24-1.25-.54-1.84-.87a.07.07 0 0 1 0-.12c.12-.1.25-.2.36-.29a.07.07 0 0 1 .07-.01c3.86 1.76 8.03 1.76 11.85 0a.07.07 0 0 1 .08.01c.12.1.24.2.37.3a.07.07 0 0 1-.01.11c-.59.34-1.2.63-1.84.87a.07.07 0 0 0-.04.1c.35.68.76 1.34 1.2 1.96a.07.07 0 0 0 .08.03 19.5 19.5 0 0 0 5.91-2.98.07.07 0 0 0 .03-.05c.5-5.17-.84-9.66-3.54-13.63a.06.06 0 0 0-.03-.03ZM8.02 15.88c-1.17 0-2.13-1.07-2.13-2.38 0-1.31.94-2.38 2.13-2.38 1.2 0 2.15 1.08 2.13 2.38 0 1.31-.94 2.38-2.13 2.38Zm7.97 0c-1.17 0-2.13-1.07-2.13-2.38 0-1.31.94-2.38 2.13-2.38 1.2 0 2.15 1.08 2.13 2.38 0 1.31-.93 2.38-2.13 2.38Z" />
+    </svg>
+  );
+}
+
 function DocsIcon({ className }: IconProps) {
   return (
     <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -166,6 +174,10 @@ export function OpenSourceSection() {
         <a className="oss-action" href="https://github.com/Necmttn/ax/fork" target="_blank" rel="noopener noreferrer">
           <ForkIcon className="oss-action-glyph" />
           Fork the repo <span className="oss-action-arrow" aria-hidden="true">&rarr;</span>
+        </a>
+        <a className="oss-action" href="https://discord.gg/E4R88Cvr5R" target="_blank" rel="noopener noreferrer">
+          <DiscordIcon className="oss-action-glyph" />
+          Join the Discord <span className="oss-action-arrow" aria-hidden="true">&rarr;</span>
         </a>
         <Link className="oss-action" to="/docs">
           <DocsIcon className="oss-action-glyph" />

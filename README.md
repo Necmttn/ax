@@ -316,6 +316,11 @@ Commands:
 - [`CONTEXT.md`](CONTEXT.md) - domain glossary (Repository vs. Checkout vs. …)
 - [`docs/adr/`](docs/adr/) - architecture decisions
 
+## Community
+
+Questions, feedback, or want to shape where ax goes next? Join the Discord:
+[discord.gg/E4R88Cvr5R](https://discord.gg/E4R88Cvr5R)
+
 ## License
 
 [MIT](LICENSE) © 2025 Necmettin Karakaya
