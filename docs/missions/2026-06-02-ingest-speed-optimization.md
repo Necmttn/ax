@@ -26,6 +26,29 @@ converges on real wins instead of guesses.
 separately). **Secondary:** per-stage durations (find/shrink the bottleneck), peak RSS, total
 SurrealDB queries. **Guardrail metric:** output-graph equivalence (see Correctness Gate).
 
+## ⚠️ Resource budget & measurement validity (READ FIRST - this is a laptop)
+
+Ingest is CPU + disk + memory heavy: each run spawns its own SurrealDB (RocksDB cache + write
+buffers) plus a busy bun process. Two rules follow:
+
+1. **Benchmarks run SERIALLY - exactly one ingest measurement at a time, machine otherwise quiet.**
+   Parallel ingests on one machine contend for CPU/disk/page-cache and **corrupt every timing** -
+   the measurement becomes meaningless. Only **one bench SurrealDB** is live during a measured run.
+   Enforce with a lockfile around the bench runner (e.g. `flock $HOME/.cache/ax-bench/bench.lock`).
+2. **Parallelize thinking, NOT measuring.** Multiple agents may reason about + write candidate
+   changes in parallel (each in its own worktree). But every candidate is benchmarked through the
+   **single serialized runner**, queued, one at a time. See §8.
+
+To keep 100 attempts feasible on a laptop:
+- **Use a trimmed, representative corpus subset** (pin it once - §1b), sized so one cold+warm cycle
+  is seconds-to-low-minutes, not many minutes. Validate a couple of wins against the FULL corpus at
+  the end, but iterate on the subset.
+- **Cap SurrealDB memory** for the bench DB (small `AX_DB_ROCKSDB_BLOCK_CACHE_SIZE` if RAM is tight -
+  but keep it CONSTANT across attempts so it's not a confounder).
+- **Default to the single sequential loop** (one agent, one bench DB, back-to-back runs). It's the
+  lowest-resource, highest-measurement-validity option and is the recommended mode for a laptop.
+- Close other heavy apps during a measured run; report machine load if it spikes (flag suspect runs).
+
 ## Hard constraints
 
 1. **Isolation - never touch the user's real or dev data.**
@@ -221,16 +244,24 @@ Grounded in the current code; treat as a starting menu, not a mandate. Measure e
 
 ---
 
-## 8. Comparing agents (leaderboard)
+## 8. Comparing agents (parallel thinking, serialized benchmark)
 
-If multiple agents/approaches run in parallel (each in its **own** worktree + **own** bench port + data
-dir - never shared), each appends to a **shared leaderboard** keyed by approach. Compare on the SAME
-frozen corpus + harness so numbers are commensurable. The leaderboard (`LEADERBOARD.md`) ranks confirmed
-wins by cold + warm median; ties broken by correctness robustness + simplicity of the change. Cross-
-pollinate: a winning idea from one agent becomes a hypothesis others can stack.
+A "fleet" here means **parallel exploration, not parallel measurement** (see Resource budget above).
 
-> Each parallel agent MUST use a distinct `BENCH_PORT` and `BENCH_DATA`/`BENCH_HOME` - no sharing, or
-> the measurements (and the DBs) corrupt each other.
+- **Recommended on a laptop: a single sequential loop.** One agent grinds attempts back-to-back
+  against one bench DB. Simplest, lowest-resource, valid numbers. Start here.
+- **If you do run multiple agents:** they may reason about + write candidate changes **in parallel**
+  (each in its own worktree, so code doesn't collide), but **all benchmarking funnels through ONE
+  serialized runner** holding the bench lock - candidates queue and are measured **one at a time** on
+  the same frozen corpus + harness + single bench DB. Never run two ingest measurements at once.
+  - Practically: agents commit candidate patches to their branches; a single bench worker pulls each,
+    benchmarks it serially, and appends the result to the shared `LEADERBOARD.md`. The agents are the
+    idea generators; the bench worker is the one quiet measuring instrument.
+- The leaderboard ranks confirmed wins by cold + warm median; ties broken by correctness robustness +
+  simplicity. Cross-pollinate: a winning idea becomes a hypothesis others stack on.
+
+> Hard rule: at most ONE ingest benchmark process at any instant. More than one = invalid numbers
+> AND a melted laptop. The parallelism is in *generating* candidates, never in *measuring* them.
 
 ---
 
