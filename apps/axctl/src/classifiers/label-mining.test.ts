@@ -87,6 +87,31 @@ describe("mineTranscriptLabelCandidates", () => {
         expect(candidates[0]!.label_family).toBe("direction");
     });
 
+    test("drops agent task-dispatch and slash-command prompts", () => {
+        const candidates = mineTranscriptLabelCandidates({
+            windows: [
+                win({ user: "You are implementing Task 4 from the approved plan in the worktree.", previousAssistant: "# AGENTS.md instructions\n<INSTRUCTIONS>" }),
+                win({ user: "# Simplify: Code Review and Cleanup\n\nReview all changed files.", subjectId: "turn:u2", turnId: "turn:u2" }),
+                win({ user: "Spec compliance review for Task 2. Do not edit files.", subjectId: "turn:u3", turnId: "turn:u3" }),
+            ],
+            limit: 500,
+        });
+        expect(candidates.length).toBe(0);
+    });
+
+    test("an injected AGENTS.md prev does not anchor a correction", () => {
+        const candidates = mineTranscriptLabelCandidates({
+            windows: [
+                win({
+                    user: "no, that's wrong, revert it",
+                    previousAssistant: "# AGENTS.md instructions\n<INSTRUCTIONS> # CLAUDE.md",
+                }),
+            ],
+            limit: 500,
+        });
+        expect(candidates.length).toBe(0);
+    });
+
     test("broadens via intent_kind=correction when text patterns miss", () => {
         const candidates = mineTranscriptLabelCandidates({
             windows: [
@@ -102,6 +127,17 @@ describe("mineTranscriptLabelCandidates", () => {
         const c = candidates[0]!;
         expect(c.label_family).toBe("correction");
         expect(c.weak_sources).toContain("intent:correction");
+    });
+
+    test("does not seed a candidate from a bare affirmation", () => {
+        const candidates = mineTranscriptLabelCandidates({
+            windows: [
+                win({ user: "yes please", userIntentKind: "preference" }),
+                win({ user: "ok lets do it", subjectId: "turn:u2", turnId: "turn:u2", userIntentKind: "preference" }),
+            ],
+            limit: 500,
+        });
+        expect(candidates.length).toBe(0);
     });
 
     test("broadens via intent_kind=preference into a direction candidate", () => {

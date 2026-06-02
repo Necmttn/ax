@@ -131,9 +131,17 @@ const matchWeakLabel = (text: string, intentKind?: string | null): WeakMatch | n
         };
     }
 
+    // A bare affirmation ("yes please", "ok lets do it") carries an approval
+    // intent but no substantive direction - it is too vague to seed a useful
+    // label, so the intent_kind fallback must not promote it to a candidate.
+    const isBareAffirmation = /^(yes|yeah|yep|yup|ok|okay|sure|alright|aight)[\s,.!]*(please|lets?\s+do(\s+(it|that|this))?|do\s+it|go(\s+ahead)?)?[\s,.!]*$/i.test(
+        text.trim(),
+    );
+
     // Fallback: broaden organic extraction using the DB-derived `intent_kind`
     // when the high-precision text patterns miss. These remain weak labels
     // (reviewed before any promotion), so a derived-classifier signal is fine.
+    if (isBareAffirmation) return null;
     switch (intentKind) {
         case "correction":
             return {
@@ -169,6 +177,34 @@ const candidateId = (input: {
     ].join("__");
 };
 
+/**
+ * Slash-command bodies and agent task-dispatch prompts the user sends from their
+ * OWN session (e.g. `/simplify`, worktree/issue kickoffs). They carry
+ * `message_kind = 'task'` and live in non-subagent sessions, so the read-layer
+ * filters miss them - but they are not organic corrections/directions, and they
+ * dominate the false positives ("You are implementing Task N...", "# Simplify").
+ */
+const isTaskDispatchOrCommand = (text: string): boolean => {
+    const t = text.trimStart();
+    // Slash-command / harness output markers, and markdown-header command bodies.
+    if (/^<(local-command-stdout|command-name|command-message|skill>)/i.test(t)) return true;
+    if (/^#\s+(simplify|update config|autonomous loop|goal\b|review\b)/i.test(t)) return true;
+    // Agent task-dispatch personas.
+    if (/^you are (a |the )?(implementing|working in repo|final|spec[- ]complian|code reviewer|reviewing\b)/i.test(t)) return true;
+    if (/^implement task\s+\d/i.test(t)) return true;
+    if (/^spec compliance review\b/i.test(t)) return true;
+    if (/^(please\s+)?(final\s+)?re-?review\b/i.test(t)) return true;
+    if (/^review range:/i.test(t)) return true;
+    return false;
+};
+
+/** A "previous assistant" turn that is really injected system/AGENTS context. */
+const isInjectedContextTurn = (text: string | undefined): boolean => {
+    if (!text) return false;
+    const t = text.trimStart();
+    return /^(#\s*AGENTS\.md|<INSTRUCTIONS>|#\s*CLAUDE\.md)/i.test(t);
+};
+
 const isWrapperLike = (window: EventWindowLike, text: string): boolean => {
     if (text.length === 0) return true;
     if (isControlOrContextText(text)) return true;
@@ -177,6 +213,7 @@ const isWrapperLike = (window: EventWindowLike, text: string): boolean => {
     const role = window.userTurn.role;
     if (role !== undefined && role !== "user") return true;
     if (/^(system reminder|<system-reminder>|<subagent_notification>)/i.test(text)) return true;
+    if (isTaskDispatchOrCommand(text)) return true;
     return false;
 };
 
@@ -196,7 +233,10 @@ export function mineTranscriptLabelCandidates(input: {
         if (!match) continue;
 
         const hasPreviousAssistant = !!window.previousAssistantTurn
-            && window.previousAssistantTurn.text.trim().length > 0;
+            && window.previousAssistantTurn.text.trim().length > 0
+            // An injected AGENTS.md/CLAUDE.md "prev" is system context, not a real
+            // prior assistant action - it cannot anchor a correction/direction.
+            && !isInjectedContextTurn(window.previousAssistantTurn.text);
         if (match.requiresPreviousAssistant && !hasPreviousAssistant) continue;
 
         const evidencePaths = collectEvidencePaths(window);
@@ -730,6 +770,14 @@ const surqlString = (value: string): string =>
     `'${value.replace(/\\/g, "\\\\").replace(/'/g, "\\'")}'`;
 
 /**
+ * Backtick-quoted record-id part. A record id after `:` must be an identifier,
+ * not a single-quoted strand (SurrealDB v3 rejects `table:'id'`); backtick
+ * quoting is the safe form for arbitrary string keys.
+ */
+const surqlRecordId = (value: string): string =>
+    `\`${value.replace(/`/g, "")}\``;
+
+/**
  * Build a single idempotent UPSERT keyed by the row's stable string id. Fields
  * are emitted in a fixed order so re-running over identical input is byte-stable.
  */
@@ -739,7 +787,7 @@ const upsert = (
     fields: readonly (readonly [string, string])[],
 ): string => {
     const set = fields.map(([key, expr]) => `${key} = ${expr}`).join(", ");
-    return `UPSERT ${table}:${surqlString(id)} SET ${set}`;
+    return `UPSERT ${table}:${surqlRecordId(id)} SET ${set}`;
 };
 
 const PROMOTION_SAFE_STATUS = "accepted" as const;
