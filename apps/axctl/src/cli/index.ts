@@ -21,6 +21,7 @@ import { cmdRetroReflect } from "./retro-reflect.ts";
 import { cmdRetroMeta } from "./retro-meta.ts";
 import { cmdRetroPlan } from "./retro-plan.ts";
 import { cmdShare } from "./share.ts";
+import { cmdStar, maybePrintStarNudge } from "./star-nudge.ts";
 import { cmdSkillsClassify } from "./skills-classify.ts";
 import { cmdSkillsTag } from "./skills-tag.ts";
 import { cmdSkillsLint } from "./skills-lint.ts";
@@ -5136,6 +5137,10 @@ async function main() {
         await Effect.runPromise(withoutDb(["update", ...args.slice(1)]));
         return;
     }
+    if (args[0] === "star") {
+        await cmdStar(args.slice(1));
+        return;
+    }
     if (args[0] === "ingest") {
         // Effect's CLI parser silently ignores unknown flags, so the removed
         // `--*-only` flags would otherwise no-op into a full ingest. Reject
@@ -5179,11 +5184,13 @@ async function main() {
 }
 
 if (import.meta.main) {
-    main().catch((err) => {
-        if (err && typeof err === "object" && "_tag" in err && err._tag === "ShowHelp") {
+    main()
+        .then(() => maybePrintStarNudge(process.argv.slice(2)))
+        .catch((err) => {
+            if (err && typeof err === "object" && "_tag" in err && err._tag === "ShowHelp") {
+                process.exit(1);
+            }
+            console.error("axctl error:", err);
             process.exit(1);
-        }
-        console.error("axctl error:", err);
-        process.exit(1);
-    });
+        });
 }

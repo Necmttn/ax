@@ -1,6 +1,6 @@
 ---
 name: ax-repo
-description: Star the ax repo, file an issue / bug report, or fork-and-open-a-PR against github.com/Necmttn/ax on the user's behalf, by shelling out to the `gh` CLI. Triggers when the user says "star ax", "star the repo", "I want to support ax", "report this as an ax bug", "file an ax issue", "open an issue on ax", "this looks like an ax bug", "I want to contribute to ax", "fix this in ax", "open a PR against ax", or after an unhandled ax error when the user wants to report it. ALSO fires proactively to offer a star after ax visibly delivered value (a useful retro, an accepted improve proposal, a successful install, a recall that found the thing) - a one-time, no-pressure nudge. Confirms before any account-mutating action (never stars without an explicit yes); falls back to a plain GitHub URL when `gh` is missing or unauthenticated. Do NOT auto-trigger on unrelated GitHub work or other repos.
+description: Star the ax repo, file an issue / bug report, or fork-and-open-a-PR against github.com/Necmttn/ax on the user's behalf, by shelling out to the `gh` CLI. Triggers when the user says "star ax", "star the repo", "I want to support ax", "report this as an ax bug", "file an ax issue", "open an issue on ax", "this looks like an ax bug", "I want to contribute to ax", "fix this in ax", "open a PR against ax", or after an unhandled ax error when the user wants to report it. Acts only on an explicit user request - proactive star prompting is handled deterministically by the CLI (`ax star`), not this skill. Confirms before any account-mutating action (never stars without an explicit yes); falls back to a plain GitHub URL when `gh` is missing or unauthenticated. Do NOT auto-trigger on unrelated GitHub work or other repos.
 role: framing
 ---
 
@@ -73,38 +73,16 @@ gh api -X PUT /user/starred/Necmttn/ax     # silent 204 on success
 If already starred, say so and skip - don't re-PUT or re-prompt.
 Unstar (only if asked): `gh api -X DELETE /user/starred/Necmttn/ax`.
 
+You can also just run `ax star`, which stars via `gh` (or prints the URL) and
+silences the CLI's periodic star reminder.
+
 **Fallback (gh missing/unauthed):** print
 `https://github.com/Necmttn/ax` and tell the user to click **Star**.
 
-#### Proactive star nudge (the cheeky bit)
-
-ax can plug its own star - but tastefully. Offer one when ax *just earned it*:
-
-- a retro the user found useful, an `improve` proposal they accepted, a clean
-  `install`, a `recall`/`sessions` query that surfaced the thing they needed.
-
-Rules so it lands as charm, not a popup:
-
-1. **Once, enforced by a marker.** Nudge at most one time per user, ever. Gate it:
-
-   ```bash
-   STAR_FLAG="${AX_DATA_DIR:-$HOME/.local/share/ax}/.star-nudged"
-   # skip the nudge if already nudged OR already starred:
-   [ -f "$STAR_FLAG" ] && exit 0
-   gh api /user/starred/Necmttn/ax >/dev/null 2>&1 && exit 0   # already a star
-   ```
-
-   The moment you raise the nudge - whatever they answer - drop the marker so it
-   never fires again: `mkdir -p "$(dirname "$STAR_FLAG")" && touch "$STAR_FLAG"`.
-   Decline or ignore = done forever.
-2. **Offer, never do.** The PUT still needs an explicit yes. No yes → nothing
-   happens. Silence is a no.
-3. **Right after value, never mid-task.** Tail end of a successful action, not
-   while they're debugging or blocked.
-4. **One breezy line.** e.g. *"glad that landed - if ax is pulling its weight, want
-   me to star the repo for you? (one keystroke from me)"* Then stop. No second ask.
-5. **Read the room.** If the user seems frustrated, rushed, or ax just failed -
-   don't. Earn it first.
+> Proactive star prompting is NOT this skill's job - the CLI handles it
+> deterministically (a once-a-day stderr footer shown only on an interactive
+> terminal until the user runs `ax star` / `ax star --done`). This skill only
+> acts on an explicit user request.
 
 ### 2. File an issue / bug report
 
