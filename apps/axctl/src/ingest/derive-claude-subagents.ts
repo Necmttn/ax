@@ -1,4 +1,4 @@
-import { readdir } from "node:fs/promises";
+import { readdir, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { Effect, Schema } from "effect";
 import { SurrealClient, RecordId } from "@ax/lib/db";
@@ -8,6 +8,8 @@ import { BaseStageStats, IngestContext, StageMeta } from "./stage/types.ts";
 import type { StageDef } from "./stage/registry.ts";
 import { surrealLiteral } from "@ax/lib/json";
 import { decodeJsonOrNull } from "@ax/lib/decode";
+import { executeStatementsWith } from "@ax/lib/shared/statement-exec";
+import { stableDigest } from "@ax/lib/ids";
 import {
     extractFileWithSessionId,
     upsertTurnsForSubagents,
@@ -120,6 +122,8 @@ export interface DeriveClaudeSubagentsStats {
     readonly missingParent: number;
     readonly written: number;
     readonly skippedExisting: number;
+    /** Subagent files skipped because their (mtime,size) matched the watermark. */
+    readonly skippedUnchanged: number;
     /** Subagents that inherited repository/checkout/cwd from their parent during this run. */
     readonly repositoryInherited: number;
     /** Existing subagent rows that were backfilled with repository/checkout/cwd from parent. */
@@ -169,7 +173,39 @@ export const deriveClaudeSubagents = (
                 .filter((name): name is string => typeof name === "string" && name.length > 0),
         );
 
+        // Skip-unchanged watermark (hypothesis 010, mirrors 006 for Claude
+        // transcripts). Each subagent jsonl is fully re-parsed via
+        // extractFileWithSessionId and its turns/tool_calls/invocations
+        // re-written on every run, yet the files are almost always unchanged
+        // between runs. Load every per-file (mtime,size) marker for
+        // source_kind="claude_subagent" in ONE indexed read into a JS Map
+        // keyed by absolute path; a manifest whose stat still matches its
+        // watermark is output-equivalent to a prior run (its rows persist) so
+        // we skip parsing+writing it. `AX_REDERIVE_SUBAGENTS=1` forces a full
+        // re-derive. NEVER `NOT IN` - one indexed Map read only.
+        const forceRederive = process.env.AX_REDERIVE_SUBAGENTS === "1";
+        const fileStateRows = (yield* db.query<[Array<{ path?: string; mtime_ms?: number; size?: number }>]>(
+            `SELECT path, mtime_ms, size FROM ingest_file_state WHERE source_kind = "claude_subagent";`,
+        ))?.[0] ?? [];
+        const watermarks = new Map<string, { mtimeMs: number; size: number }>();
+        if (!forceRederive) {
+            for (const row of fileStateRows) {
+                if (
+                    typeof row.path === "string" &&
+                    typeof row.mtime_ms === "number" &&
+                    typeof row.size === "number"
+                ) {
+                    watermarks.set(row.path, { mtimeMs: row.mtime_ms, size: row.size });
+                }
+            }
+        }
+        const upsertFileWatermark = (filePath: string, mtimeMs: number, size: number) =>
+            executeStatementsWith(db, [
+                `UPSERT ingest_file_state:\`${stableDigest(filePath)}\` CONTENT { path: ${surrealLiteral(filePath)}, source_kind: "claude_subagent", mtime_ms: ${Math.trunc(mtimeMs)}, size: ${Math.trunc(size)}, ingested_at: time::now() };`,
+            ], { chunkSize: 1 });
+
         let written = 0;
+        let skippedUnchanged = 0;
         let missingParent = 0;
         let skippedExisting = 0;
         let repositoryInherited = 0;
@@ -197,6 +233,23 @@ export const deriveClaudeSubagents = (
                     planSnapshots: planSnapshotsTotal,
                 });
             }
+            // Skip-unchanged: a subagent file whose on-disk (mtime,size) still
+            // matches its persisted watermark was fully derived in a prior run;
+            // its session/turns/tool_calls/spawned edge persist, so skipping is
+            // output-equivalent. stat is cheap relative to the full re-parse +
+            // DB writes below; we reuse it for the watermark write at the end.
+            const fileStat = yield* Effect.promise(() => stat(m.file).catch(() => null));
+            const mark = watermarks.get(m.file);
+            if (
+                fileStat &&
+                mark &&
+                fileStat.mtimeMs === mark.mtimeMs &&
+                fileStat.size === mark.size
+            ) {
+                skippedUnchanged += 1;
+                continue;
+            }
+
             // Confirm parent exists - subagent without its parent is orphaned data.
             // Also fetch repository/checkout/cwd so we can inherit them below.
             const parentRid = `session:⟨${m.parentSessionId}⟩`;
@@ -300,6 +353,12 @@ export const deriveClaudeSubagents = (
             );
             written += 1;
 
+            // Record the watermark only after every write for this file
+            // succeeded, so a mid-file failure re-processes next run.
+            if (fileStat) {
+                yield* upsertFileWatermark(m.file, fileStat.mtimeMs, fileStat.size);
+            }
+
             if (opts.onProgress && (index < 5 || (index + 1) % 10 === 0 || index + 1 === manifests.length)) {
                 yield* opts.onProgress({
                     phase: 2,
@@ -353,6 +412,7 @@ export const deriveClaudeSubagents = (
             missingParent,
             written,
             skippedExisting,
+            skippedUnchanged,
             repositoryInherited,
             repositoryBackfilled,
             activity: {
