@@ -1,6 +1,6 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Link } from "@tanstack/react-router";
+import { Link, useNavigate } from "@tanstack/react-router";
 import { api } from "../api.ts";
 import { prettifyProjectSlug } from "@shared/project-slug.ts";
 import type { SessionListResponse, SessionListRow } from "@shared/dashboard-types.ts";
@@ -47,9 +47,10 @@ interface RowProps {
     readonly s: SessionListRow;
     readonly indent?: boolean;
     readonly expandedToggle?: { expanded: boolean; childCount: number; loading?: boolean; onToggle: () => void };
+    readonly select?: { checked: boolean; onToggle: () => void };
 }
 
-function Row({ s, indent, expandedToggle }: RowProps) {
+function Row({ s, indent, expandedToggle, select }: RowProps) {
     // The wire seam delivers a bare session id (see src/lib/shared/session-id.ts);
     // any backtick/`session:` prefix reaching us would be a server bug.
     const sid = s.id;
@@ -72,6 +73,14 @@ function Row({ s, indent, expandedToggle }: RowProps) {
 
     return (
         <tr style={rowStyle} onMouseEnter={onIntent} onFocus={onIntent}>
+            <td style={{ textAlign: "center", width: 28 }}>
+                <input
+                    type="checkbox"
+                    checked={select?.checked ?? false}
+                    onChange={() => select?.onToggle()}
+                    aria-label={`Select ${shortSessionId(s.id)} to compare`}
+                />
+            </td>
             <td style={{ fontFamily: "ui-monospace, monospace", fontSize: 12, paddingLeft: indent ? 32 : 8 }}>
                 {expandedToggle ? (
                     <button
@@ -118,9 +127,29 @@ const PAGE_SIZE = 200;
 
 export function SessionsRoute() {
     const queryClient = useQueryClient();
+    const navigate = useNavigate();
     const [sourceFilter, setSourceFilter] = useState<SourceFilter>("all");
     const [search, setSearch] = useState("");
     const [expanded, setExpanded] = useState<ReadonlySet<string>>(() => new Set());
+    const [selected, setSelected] = useState<ReadonlySet<string>>(() => new Set());
+
+    const toggleSelected = (id: string) => {
+        setSelected((prev) => {
+            const next = new Set(prev);
+            if (next.has(id)) next.delete(id);
+            else next.add(id);
+            return next;
+        });
+    };
+
+    const compareSelected = () => {
+        const ids = Array.from(selected);
+        if (ids.length < 2) return;
+        void navigate({
+            to: "/sessions/compare",
+            search: { ids: ids.join(","), turns: true },
+        });
+    };
 
     // Cache by filter set only - appended pages share the same key so
     // setQueryData accumulates across loadMore() calls (mirrors recall.tsx).
@@ -297,12 +326,38 @@ export function SessionsRoute() {
                         {expanded.size === allExpandableIds.length ? "collapse all" : "expand all"}
                     </button>
                 ) : null}
+                <button
+                    onClick={compareSelected}
+                    disabled={selected.size < 2}
+                    title={selected.size < 2 ? "Select 2+ sessions to compare" : `Compare ${selected.size} sessions`}
+                    style={{
+                        padding: "4px 12px", fontSize: 11, fontWeight: 600,
+                        border: "1px solid #e2e8f0", borderRadius: 4,
+                        background: selected.size >= 2 ? "#0f172a" : "#fff",
+                        color: selected.size >= 2 ? "#fff" : "#cbd5e1",
+                        cursor: selected.size >= 2 ? "pointer" : "not-allowed",
+                    }}
+                >
+                    compare{selected.size > 0 ? ` (${selected.size})` : ""}
+                </button>
+                {selected.size > 0 ? (
+                    <button
+                        onClick={() => setSelected(new Set())}
+                        style={{
+                            padding: "4px 8px", fontSize: 11, border: "1px solid #e2e8f0",
+                            background: "#fff", color: "#475569", borderRadius: 4, cursor: "pointer",
+                        }}
+                    >
+                        clear
+                    </button>
+                ) : null}
             </div>
             {query.isLoading && !query.data ? <div className="loading">Loading…</div> : null}
             {query.data ? (
                 <table style={{ width: "100%", borderCollapse: "collapse" }}>
                     <thead>
                         <tr style={{ background: "#f8fafc", fontSize: 11, color: "#475569", textTransform: "uppercase", letterSpacing: "0.05em" }}>
+                            <th style={{ width: 28 }}></th>
                             <th style={{ textAlign: "left", padding: "6px 8px" }}>id</th>
                             <th style={{ textAlign: "left", padding: "6px 8px" }}>source</th>
                             <th style={{ textAlign: "left", padding: "6px 8px" }}>project</th>
@@ -321,6 +376,7 @@ export function SessionsRoute() {
                                 <Fragment key={parent.id}>
                                     <Row
                                         s={parent}
+                                        select={{ checked: selected.has(parent.id), onToggle: () => toggleSelected(parent.id) }}
                                         {...(childCount > 0
                                             ? {
                                                 expandedToggle: {
@@ -333,14 +389,21 @@ export function SessionsRoute() {
                                             : {})}
                                     />
                                     {isExpanded
-                                        ? (kidState?.rows ?? []).map((child) => <Row key={child.id} s={child} indent />)
+                                        ? (kidState?.rows ?? []).map((child) => (
+                                            <Row
+                                                key={child.id}
+                                                s={child}
+                                                indent
+                                                select={{ checked: selected.has(child.id), onToggle: () => toggleSelected(child.id) }}
+                                            />
+                                        ))
                                         : null}
                                 </Fragment>
                             );
                         })}
                         {allRoots.length < totalCount ? (
                             <tr ref={sentinelRef}>
-                                <td colSpan={7} style={{
+                                <td colSpan={8} style={{
                                     padding: "12px 24px", color: "#64748b", fontSize: 12,
                                     fontFamily: "ui-monospace, monospace",
                                     textAlign: "center", borderTop: "1px dashed #e2e8f0",

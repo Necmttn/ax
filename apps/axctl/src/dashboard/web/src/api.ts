@@ -8,6 +8,7 @@ import type {
     RecallResponse,
     SkillGraphPayload,
     SessionChildrenResponse,
+    SessionComparePayload,
     SessionDetailPayload,
     SessionInspectPayload,
     SessionListResponse,
@@ -191,6 +192,12 @@ export const api = {
         return jsonFetch(qs
             ? `/api/sessions/${encodeURIComponent(sessionId)}/inspect?${qs}`
             : `/api/sessions/${encodeURIComponent(sessionId)}/inspect`);
+    },
+    sessionCompare: (ids: ReadonlyArray<string>, params: { turns?: boolean } = {}): Promise<SessionComparePayload> => {
+        const usp = new URLSearchParams();
+        usp.set("ids", ids.join(","));
+        if (params.turns) usp.set("turns", "1");
+        return jsonFetch(`/api/sessions/compare?${usp.toString()}`);
     },
     episodeTimeline: (parentId: string): Promise<EpisodeTimelinePayload> =>
         jsonFetch(`/api/episodes/${encodeURIComponent(parentId)}`),

@@ -14,6 +14,7 @@ import { SessionRoute } from "./routes/session.tsx";
 import { SessionInspectRoute } from "./routes/session-inspect.tsx";
 import { ShareInspectRoute } from "./routes/share-inspect.tsx";
 import { SessionsRoute } from "./routes/sessions.tsx";
+import { SessionsCompareRoute } from "./routes/sessions-compare.tsx";
 import { EpisodeRoute } from "./routes/episode.tsx";
 import { ProjectRoute } from "./routes/project.tsx";
 import { RecallRoute } from "./routes/recall.tsx";
@@ -101,6 +102,17 @@ const sessionsRoute = createRoute({
     getParentRoute: () => rootRoute,
     path: "/sessions",
     component: SessionsRoute,
+});
+
+// Static segment - must out-prioritize /sessions/$sessionId below.
+const sessionsCompareRoute = createRoute({
+    getParentRoute: () => rootRoute,
+    path: "/sessions/compare",
+    component: SessionsCompareRoute,
+    validateSearch: (search): { ids?: string; turns?: boolean } => ({
+        ids: typeof search.ids === "string" ? search.ids : undefined,
+        turns: search.turns === true || search.turns === "1" || search.turns === "true",
+    }),
 });
 
 const sessionRoute = createRoute({
@@ -217,6 +229,7 @@ const routeTree = rootRoute.addChildren([
     toolsRoute,
     workflowRoute,
     sessionsRoute,
+    sessionsCompareRoute,
     sessionRoute,
     sessionInspectRoute,
     shareInspectRoute,
