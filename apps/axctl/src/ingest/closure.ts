@@ -1,11 +1,12 @@
 import { Effect, Schema } from "effect";
-import { SurrealClient } from "@ax/lib/db";
+import { SurrealClient, type SurrealClientShape } from "@ax/lib/db";
 import { AppLayer } from "@ax/lib/layers";
 import type { DbError } from "@ax/lib/errors";
 import { recordRef } from "./evidence-writers.ts";
 import { surrealDate, surrealJsonOption, surrealObject, surrealOptionString, surrealString } from "@ax/lib/shared/surql";
 import { executeStatementsWith } from "@ax/lib/shared/statement-exec";
 import { isoTimestamp, recordKeyPart, safeKeyPart, type TimestampInput } from "@ax/lib/shared/derive-keys";
+import { recordLiteral, stableDigest } from "@ax/lib/ids";
 
 export type CommitKind = "feature" | "fix" | "refactor" | "test" | "docs" | "chore" | "unknown";
 
@@ -262,12 +263,83 @@ function skillCandidateStatements(row: SkillCandidate): string[] {
 const sinceWhere = (sinceDays: number | undefined): string =>
     sinceDays && sinceDays > 0 ? `WHERE ts > time::now() - ${sinceDays}d` : "";
 
+// ---------- skip-unchanged watermark (hypothesis 008) ----------
+//
+// The closure stage blanket-DELETEs and fully re-derives its output
+// (commit_classification + later_fixed_by + suggests_skill + skill_candidate)
+// on every run - the dominant warm cost (the later_fixed_by DELETE + RELATE of
+// thousands of edges). But the closure output is a deterministic function of
+// its inputs (commit + touched + session_health) and `sinceDays`. On the warm
+// path those inputs are unchanged (git skip-unchanged means no new commits), so
+// the re-derive reproduces identical rows. We cache a single fingerprint of the
+// loaded inputs in the shared `ingest_file_state` table (source_kind='closure',
+// fixed sentinel path). On the next run, if the fingerprint matches the stored
+// digest the output already persists ⇒ skip the blanket DELETE + write entirely
+// (output-equivalent). Any input change (or a wider sinceDays) yields a new
+// digest, forcing a full re-derive. The reads still run (they are the cheap
+// part); only the costly DELETE + RELATE writes are skipped. NEVER `NOT IN`:
+// the watermark is one indexed read. `AX_REDERIVE_CLOSURE=1` forces a full
+// re-derive (ignores the watermark).
+
+const CLOSURE_WATERMARK_SOURCE = "closure";
+const CLOSURE_WATERMARK_PATH = "__closure__";
+
+const closureWatermarkId = (): string =>
+    recordLiteral("ingest_file_state", stableDigest(`closure|${CLOSURE_WATERMARK_PATH}`));
+
+const closureInputFingerprint = (input: {
+    readonly commits: readonly CommitRow[];
+    readonly touched: readonly TouchedRow[];
+    readonly sessionHealth: readonly SessionHealthRow[];
+    readonly sinceDays: number | undefined;
+}): string => {
+    const parts: string[] = [`since=${input.sinceDays ?? ""}`];
+    parts.push(`commits=${input.commits.length}`);
+    for (const c of input.commits) {
+        parts.push(`c|${recordKeyPart(c.id, "commit") ?? ""}|${isoTimestamp(c.ts)}|${c.message ?? ""}|${recordKeyPart(c.repository, "repository") ?? ""}`);
+    }
+    parts.push(`touched=${input.touched.length}`);
+    for (const t of input.touched) {
+        parts.push(`t|${recordKeyPart(t.in, "commit") ?? ""}|${t.path ?? ""}`);
+    }
+    parts.push(`health=${input.sessionHealth.length}`);
+    for (const h of input.sessionHealth) {
+        parts.push(`h|${recordKeyPart(h.session, "session") ?? ""}|${h.tool_errors ?? ""}|${h.user_corrections ?? ""}|${h.interruptions ?? ""}|${h.context_pressure ?? ""}`);
+    }
+    // 32-hex digest keeps collisions astronomically unlikely for this corpus.
+    return stableDigest(parts.join("\n"), 32);
+};
+
+const loadClosureWatermark = (
+    db: SurrealClientShape,
+): Effect.Effect<string | undefined, DbError> =>
+    Effect.gen(function* () {
+        const rows = (yield* db.query<[Array<{ sha?: string }>]>(
+            `SELECT sha FROM ingest_file_state WHERE source_kind = ${surrealString(CLOSURE_WATERMARK_SOURCE)};`,
+        ))?.[0] ?? [];
+        const sha = rows[0]?.sha;
+        return typeof sha === "string" ? sha : undefined;
+    });
+
+const upsertClosureWatermark = (
+    db: SurrealClientShape,
+    digest: string,
+): Effect.Effect<void, DbError> =>
+    executeStatementsWith(
+        db,
+        [
+            `UPSERT ${closureWatermarkId()} CONTENT { path: ${surrealString(CLOSURE_WATERMARK_PATH)}, source_kind: ${surrealString(CLOSURE_WATERMARK_SOURCE)}, sha: ${surrealString(digest)}, ingested_at: time::now() };`,
+        ],
+        { chunkSize: 1 },
+    );
+
 export const deriveClosure = (
     opts: { sinceDays: number | undefined } = { sinceDays: undefined },
 ): Effect.Effect<ClosureStats, DbError, SurrealClient> =>
     Effect.gen(function* () {
         const db = yield* SurrealClient;
-        const [commits, touched, sessionHealth] = yield* Effect.all([
+        const forceRederive = process.env.AX_REDERIVE_CLOSURE === "1";
+        const [commits, touched, sessionHealth, storedDigest] = yield* Effect.all([
             db.query<[CommitRow[]]>(`
 SELECT id, message, repository, type::string(ts) AS ts
 FROM commit
@@ -279,8 +351,22 @@ FROM touched;`).pipe(Effect.map((rows) => rows?.[0] ?? [])),
             db.query<[SessionHealthRow[]]>(`
 SELECT session, tool_errors, user_corrections, interruptions, context_pressure
 FROM session_health;`).pipe(Effect.map((rows) => rows?.[0] ?? [])),
-        ], { concurrency: 3 });
+            forceRederive
+                ? Effect.succeed<string | undefined>(undefined)
+                : loadClosureWatermark(db),
+        ], { concurrency: 4 });
         const rows = deriveClosureRows({ commits, touched, sessionHealth });
+        const stats: ClosureStats = {
+            commitClassifications: rows.classifications.length,
+            fixChains: rows.fixChains.length,
+            skillCandidates: rows.skillCandidates.length,
+        };
+        const digest = closureInputFingerprint({ commits, touched, sessionHealth, sinceDays: opts.sinceDays });
+        if (!forceRederive && storedDigest === digest) {
+            // Inputs unchanged ⇒ persisted output is identical ⇒ skip the
+            // blanket DELETE + full re-write entirely (output-equivalent).
+            return stats;
+        }
         const statements = [
             ...rows.classifications.map(classificationStatement),
             ...rows.fixChains.flatMap(fixChainStatements),
@@ -288,11 +374,8 @@ FROM session_health;`).pipe(Effect.map((rows) => rows?.[0] ?? [])),
         ];
         yield* db.query("DELETE later_fixed_by;DELETE suggests_skill;DELETE skill_candidate;DELETE commit_classification;");
         yield* executeStatementsWith(db, statements, { chunkSize: 500 });
-        return {
-            commitClassifications: rows.classifications.length,
-            fixChains: rows.fixChains.length,
-            skillCandidates: rows.skillCandidates.length,
-        };
+        yield* upsertClosureWatermark(db, digest);
+        return stats;
     });
 
 if (import.meta.main) {

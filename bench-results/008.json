@@ -1,0 +1,1 @@
+{"git":"5e96036","runs":[25,23,6],"cold":25,"warm":6,"counts":{"content_document":2247,"content_block":10406,"content_atom":23892,"session":81,"turn":15201,"tool_call":4555,"agent_event":17549,"skill":24,"signal":0}}
