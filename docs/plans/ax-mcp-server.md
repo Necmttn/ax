@@ -31,9 +31,9 @@ Each maps to the matching `ax` CLI command:
 - **Read-only.** Mutating ops (`improve accept/reject/verdict`, `skills
   tag/lint`, `ingest`) stay on the CLI - they write task files / edges a human
   reviews.
-- **Source-run only.** Like live ingest in the dashboard, the server runs when
-  ax is run from source (the `bin/axctl` shim); the compiled standalone binary
-  is not supported.
+- **Run from source** (the `bin/axctl` shim). Unlike live ingest, the server
+  pulls in no native deps (JS MCP SDK + SurrealDB client), so the compiled
+  standalone binary should serve it too - untested in v0.
 
 ## Deferred
 
@@ -41,7 +41,7 @@ Each maps to the matching `ax` CLI command:
   which the cwd+git resolver `process.exit`s on and is unfit for a long-lived
   server.
 - Mutating tools.
-- Compiled-binary support.
+- Verifying / wiring compiled-binary support (should work; untested).
 
 ## Implementation
 

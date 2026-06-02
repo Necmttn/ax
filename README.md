@@ -231,9 +231,10 @@ The 10 tools, each mirroring the matching CLI command:
 > tag/lint`, `ingest`) stay on the CLI - they write task files / edges a human
 > reviews - so v0 exposes no mutating tools.
 >
-> **Source-run only.** Like live ingest in the dashboard, the MCP server runs
-> when ax is run from source (the `bin/axctl` shim does this); the compiled
-> standalone binary is not supported.
+> **Run it from source** (the `bin/axctl` shim does this). Unlike live ingest,
+> the MCP server pulls in no native deps (just the JS MCP SDK + the SurrealDB
+> client), so the compiled standalone binary should serve it too - that path is
+> just untested in v0.
 >
 > `sessions_here` / `sessions_near` are intentionally deferred - they need a
 > git/cwd-resolved repository key, a documented follow-up.
