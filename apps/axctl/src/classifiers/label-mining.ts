@@ -266,6 +266,159 @@ export function auditWeakCandidateBatch(
 }
 
 /* ------------------------------------------------------------------------- *
+ * Review queue export.
+ *
+ * Pure transform from mined candidates into a bounded, diversity-ordered review
+ * queue. No DB access, no model calls. The service layer (label-mining-service)
+ * reads transcript windows, calls {@link mineTranscriptLabelCandidates}, then
+ * hands the candidates here. Every exported row carries the candidate id, at
+ * least one evidence path, the previous-assistant excerpt (when the family
+ * required it), and pending-review fields so a reviewer can fill them in.
+ * ------------------------------------------------------------------------- */
+
+/** Max review rows exported per batch (plan Iteration Rule: <= 80 review rows). */
+export const EXPORT_REVIEW_LIMIT = 80;
+
+/**
+ * One pending review-queue row. Mirrors {@link TranscriptReviewedLabel} from the
+ * plan's Data Model but in its un-reviewed state: `review_status` is always
+ * `"pending"`, reviewer/label/target are blank until a human fills them in.
+ */
+export interface LabelMiningReviewRow {
+    readonly candidate_id: string;
+    readonly subject_id: string;
+    readonly session_id: string;
+    readonly turn_id: string;
+    readonly previous_assistant_turn_id?: string;
+    readonly label_family: LabelFamily;
+    readonly target: string;
+    readonly weak_label: string;
+    readonly weak_confidence: number;
+    readonly weak_sources: readonly string[];
+    readonly evidence_paths: readonly string[];
+    readonly excerpt: string;
+    readonly previous_assistant_excerpt?: string;
+    readonly review_status: "pending";
+    readonly reviewed_label?: string;
+    readonly reviewed_target?: string;
+    readonly rationale: string;
+    readonly reviewer: string;
+}
+
+/** Family/confidence summary of an exported review queue. */
+export interface LabelMiningReviewDiversity {
+    readonly label_family_count: number;
+    readonly label_family_counts: Readonly<Record<string, number>>;
+    readonly min_weak_confidence: number;
+    readonly max_weak_confidence: number;
+}
+
+export interface LabelMiningReviewQueue {
+    readonly review_rows: readonly LabelMiningReviewRow[];
+    readonly diversity: LabelMiningReviewDiversity;
+}
+
+const toReviewRow = (candidate: TranscriptLabelCandidate): LabelMiningReviewRow => ({
+    candidate_id: candidate.id,
+    subject_id: candidate.subject_id,
+    session_id: candidate.session_id,
+    turn_id: candidate.turn_id,
+    ...(candidate.previous_assistant_turn_id !== undefined
+        ? { previous_assistant_turn_id: candidate.previous_assistant_turn_id }
+        : {}),
+    label_family: candidate.label_family,
+    target: candidate.target,
+    weak_label: candidate.weak_label,
+    weak_confidence: candidate.weak_confidence,
+    weak_sources: candidate.weak_sources,
+    evidence_paths: candidate.evidence_paths,
+    excerpt: candidate.excerpt,
+    ...(candidate.previous_assistant_excerpt !== undefined
+        ? { previous_assistant_excerpt: candidate.previous_assistant_excerpt }
+        : {}),
+    review_status: "pending",
+    rationale: "",
+    reviewer: "",
+});
+
+/**
+ * Build a bounded, diversity-ordered review queue from mined candidates.
+ *
+ * Ordering is a confidence-ranked round-robin across label families: within
+ * each family candidates are sorted by descending weak confidence (ties broken
+ * by candidate id for determinism), then families are interleaved one row at a
+ * time, families themselves ordered by their top candidate's confidence. This
+ * front-loads diversity (every represented family appears before any repeats)
+ * while still preferring high-confidence candidates. The result is capped at
+ * `min(limit, EXPORT_REVIEW_LIMIT)` rows.
+ */
+export function buildReviewQueue(input: {
+    readonly candidates: readonly TranscriptLabelCandidate[];
+    readonly limit?: number;
+}): LabelMiningReviewQueue {
+    const cap = Math.min(
+        input.limit ?? EXPORT_REVIEW_LIMIT,
+        EXPORT_REVIEW_LIMIT,
+    );
+
+    const byFamily = new Map<LabelFamily, TranscriptLabelCandidate[]>();
+    for (const candidate of input.candidates) {
+        const bucket = byFamily.get(candidate.label_family);
+        if (bucket) bucket.push(candidate);
+        else byFamily.set(candidate.label_family, [candidate]);
+    }
+
+    const sortDesc = (a: TranscriptLabelCandidate, b: TranscriptLabelCandidate): number =>
+        b.weak_confidence - a.weak_confidence || a.id.localeCompare(b.id);
+
+    const families = [...byFamily.entries()].map(([family, candidates]) => ({
+        family,
+        candidates: [...candidates].sort(sortDesc),
+    }));
+    // Order families by their strongest candidate so the highest-confidence
+    // family leads the round-robin.
+    families.sort((a, b) =>
+        (b.candidates[0]?.weak_confidence ?? 0) - (a.candidates[0]?.weak_confidence ?? 0)
+        || a.family.localeCompare(b.family));
+
+    const ordered: TranscriptLabelCandidate[] = [];
+    let round = 0;
+    let added = true;
+    while (added && ordered.length < cap) {
+        added = false;
+        for (const entry of families) {
+            const candidate = entry.candidates[round];
+            if (candidate === undefined) continue;
+            ordered.push(candidate);
+            added = true;
+            if (ordered.length >= cap) break;
+        }
+        round += 1;
+    }
+
+    const review_rows = ordered.map(toReviewRow);
+
+    const family_counts: Record<string, number> = {};
+    let min_weak_confidence = review_rows.length > 0 ? Number.POSITIVE_INFINITY : 0;
+    let max_weak_confidence = 0;
+    for (const row of review_rows) {
+        family_counts[row.label_family] = (family_counts[row.label_family] ?? 0) + 1;
+        if (row.weak_confidence < min_weak_confidence) min_weak_confidence = row.weak_confidence;
+        if (row.weak_confidence > max_weak_confidence) max_weak_confidence = row.weak_confidence;
+    }
+
+    return {
+        review_rows,
+        diversity: {
+            label_family_count: Object.keys(family_counts).length,
+            label_family_counts: family_counts,
+            min_weak_confidence: review_rows.length > 0 ? min_weak_confidence : 0,
+            max_weak_confidence,
+        },
+    };
+}
+
+/* ------------------------------------------------------------------------- *
  * Bounded experiment gates.
  *
  * Pure evaluator over per-iteration metrics + audits. Enforces the plan's
