@@ -12,7 +12,7 @@ import {
     commitRecordKey,
     fileRecordKey,
 } from "./record-keys.ts";
-import { recordLiteral } from "@ax/lib/ids";
+import { recordLiteral, stableDigest } from "@ax/lib/ids";
 import {
     chooseIdentity,
     classifyCheckoutKind,
@@ -696,6 +696,64 @@ const writeRepo = (
         } satisfies WriteStats;
     });
 
+// ---------- skip-unchanged watermark (hypothesis 007) ----------
+//
+// The git stage re-walks each repo's history (`git log` + a per-commit
+// `git show --numstat`) on every run - the dominant warm cost. Most repos are
+// unchanged between runs, so we cache a per-repo watermark in the shared
+// `ingest_file_state` table (source_kind='git_repo'): the last-ingested HEAD
+// sha and the history window (since_days) walked. On the next run, if HEAD and
+// since_days are unchanged the repo's commits/files already persist in the DB,
+// so we skip the (expensive) walk entirely - output-equivalent. New commits
+// move HEAD, forcing a fresh walk; a different since_days also forces one (a
+// wider window could surface older commits). NEVER `NOT IN`: the whole table
+// is loaded once in a single indexed read into a JS Map keyed by repo path.
+// `AX_REDERIVE_GIT=1` forces a full walk (ignores watermarks).
+
+const GIT_WATERMARK_SOURCE = "git_repo";
+
+interface GitWatermark {
+    sha: string;
+    sinceDays: number;
+}
+
+const gitWatermarkId = (repoPath: string): string =>
+    recordLiteral("ingest_file_state", stableDigest(`git_repo|${repoPath}`));
+
+const loadGitWatermarks = (
+    db: SurrealClientShape,
+): Effect.Effect<Map<string, GitWatermark>, DbError> =>
+    Effect.gen(function* () {
+        const rows = (yield* db.query<[Array<{ path?: string; sha?: string; since_days?: number }>]>(
+            `SELECT path, sha, since_days FROM ingest_file_state WHERE source_kind = ${surrealString(GIT_WATERMARK_SOURCE)};`,
+        ))?.[0] ?? [];
+        const out = new Map<string, GitWatermark>();
+        for (const row of rows) {
+            if (
+                typeof row.path === "string" &&
+                typeof row.sha === "string" &&
+                typeof row.since_days === "number"
+            ) {
+                out.set(row.path, { sha: row.sha, sinceDays: row.since_days });
+            }
+        }
+        return out;
+    });
+
+const upsertGitWatermark = (
+    db: SurrealClientShape,
+    repoPath: string,
+    sha: string,
+    sinceDays: number,
+): Effect.Effect<void, DbError> =>
+    executeStatementsWith(
+        db,
+        [
+            `UPSERT ${gitWatermarkId(repoPath)} CONTENT { path: ${surrealString(repoPath)}, source_kind: ${surrealString(GIT_WATERMARK_SOURCE)}, sha: ${surrealString(sha)}, since_days: ${Math.trunc(sinceDays)}, ingested_at: time::now() };`,
+        ],
+        { chunkSize: 1 },
+    );
+
 // ---------- public API ----------
 
 export interface GitIngestOpts {
@@ -739,6 +797,16 @@ export const ingestGit = (
         yield* Effect.logDebug("git ingest started", { repos: repos.length, sinceDays });
         const allRepoPaths = repos.map((repo) => repo.path);
 
+        // Skip-unchanged watermark (hypothesis 007): load every per-repo HEAD
+        // marker in ONE indexed read. A repo whose HEAD + window match its
+        // watermark is unchanged ⇒ its commits/files already persist ⇒ skip the
+        // (expensive) history walk. `AX_REDERIVE_GIT=1` forces a full walk.
+        const forceRederive = process.env.AX_REDERIVE_GIT === "1";
+        const db0 = yield* SurrealClient;
+        const watermarks = forceRederive
+            ? new Map<string, GitWatermark>()
+            : yield* loadGitWatermarks(db0);
+
         // Collect per-repo work. Different logical repositories can run in
         // parallel, but checkouts/worktrees of the same repo are serialized.
         // Legacy data can contain multiple checkout-scoped commit rows for
@@ -757,8 +825,27 @@ export const ingestGit = (
                     group,
                     (repo) =>
                         Effect.gen(function* () {
-                            const commits = yield* fetchCommits(repo, sinceDays);
+                            // Skip the history walk when HEAD + window are
+                            // unchanged: the repo's commits/files already
+                            // persist from a prior run (output-equivalent). The
+                            // cheap repo/checkout/session-link upserts still run
+                            // (writeRepo with no commits) so new sessions get
+                            // linked even on a skipped repo.
+                            const mark = repo.headSha ? watermarks.get(repo.path) : undefined;
+                            const unchanged =
+                                mark !== undefined &&
+                                mark.sha === repo.headSha &&
+                                mark.sinceDays === sinceDays;
+                            const commits = unchanged
+                                ? []
+                                : yield* fetchCommits(repo, sinceDays);
                             const stats = yield* writeRepo(repo, commits, allRepoPaths);
+                            // Record the watermark only after a real walk
+                            // succeeded; a skipped repo's marker is already
+                            // current. Requires a concrete HEAD sha.
+                            if (!unchanged && repo.headSha) {
+                                yield* upsertGitWatermark(db0, repo.path, repo.headSha, sinceDays);
+                            }
                             yield* Effect.logDebug("git repository ingested", {
                                 path: repo.path,
                                 sessions: stats.sessions,

@@ -1674,11 +1674,17 @@ DEFINE INDEX reviewed_in_out_uq ON reviewed FIELDS in, out UNIQUE;
 -- Record id = stableHash(path) (paths carry `/` etc. that are awkward in
 -- record keys); `path` is stored as a field with a UNIQUE index so the
 -- load query is a single indexed table scan.
+-- Also reused (2026-06-02, hypothesis 007) as a per-repo git watermark:
+-- source_kind='git_repo', path=repo root, sha=last-ingested HEAD, since_days=
+-- the history window walked. If HEAD+since_days are unchanged the git stage
+-- skips re-walking that repo's history (its commits/files already persist).
 DEFINE TABLE ingest_file_state SCHEMAFULL;
 DEFINE FIELD path        ON ingest_file_state TYPE string;
-DEFINE FIELD source_kind ON ingest_file_state TYPE string;       -- e.g. "claude_transcript"
-DEFINE FIELD mtime_ms    ON ingest_file_state TYPE number;
-DEFINE FIELD size        ON ingest_file_state TYPE number;
+DEFINE FIELD source_kind ON ingest_file_state TYPE string;       -- e.g. "claude_transcript" | "git_repo"
+DEFINE FIELD mtime_ms    ON ingest_file_state TYPE option<number>;
+DEFINE FIELD size        ON ingest_file_state TYPE option<number>;
+DEFINE FIELD sha         ON ingest_file_state TYPE option<string>;  -- git HEAD watermark
+DEFINE FIELD since_days  ON ingest_file_state TYPE option<number>;  -- git history window walked
 DEFINE FIELD ingested_at ON ingest_file_state TYPE datetime DEFAULT time::now();
 DEFINE INDEX ingest_file_state_path_uq ON ingest_file_state FIELDS path UNIQUE;
 DEFINE INDEX ingest_file_state_source  ON ingest_file_state FIELDS source_kind;
