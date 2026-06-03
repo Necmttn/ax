@@ -1,5 +1,6 @@
 import { Context, Effect, Layer, Option, Schema } from "effect";
 import { safeKeyPart } from "@ax/lib/shared/derive-keys";
+import { isControlOrContextText } from "./control-text.ts";
 
 export type ClassifierKind = "heuristic" | "manual" | "local_model" | "llm_review";
 export type ClassifierInputKind = "event_window" | "turn" | "session" | "tool_call";
@@ -160,6 +161,127 @@ export function defineClassifier(definition: ClassifierDefinition): ClassifierDe
         throw new Error(`invalid classifier version: ${definition.version}`);
     }
     return definition;
+}
+
+/**
+ * One regex-driven branch of a heuristic classifier. `confidence` and `signals`
+ * may be static or computed from the window + lowercased user text, mirroring the
+ * per-rule variation the hand-written classifiers carried.
+ */
+export interface ClassifierPattern {
+    readonly test: RegExp;
+    readonly label: string;
+    readonly target: string;
+    /** Evidence tag passed to the (default or overridden) evidence builder. */
+    readonly matched: string;
+    readonly polarity: ClassifierPolarity;
+    readonly durability: ClassifierDurability;
+    readonly confidence: number | ((window: EventWindow, lower: string) => number);
+    readonly signals?: readonly string[] | ((window: EventWindow, lower: string) => readonly string[]);
+}
+
+/**
+ * Declarative config for {@link definePatternClassifier}. `labels`/`targets` are
+ * intentionally absent: they are DERIVED from `patterns`, so a rule can never emit
+ * a value `validateResult` rejects.
+ */
+export interface PatternClassifierConfig {
+    readonly key: string;
+    readonly version: string;
+    readonly description: string;
+    readonly patterns: readonly ClassifierPattern[];
+    /** @default "heuristic" */
+    readonly kind?: ClassifierKind;
+    /** Skip control/context wrapper turns (subagent notifications, AGENTS.md, …). @default false */
+    readonly skipControlText?: boolean;
+    /** Override the evidence object. @default { user, previousAssistant, matched } */
+    readonly evidence?: (window: EventWindow, matched: string) => Record<string, unknown>;
+    /** "first" returns on the first matching pattern; "all" collects every match. @default "first" */
+    readonly mode?: "first" | "all";
+}
+
+const defaultEvidence = (window: EventWindow, matched: string): Record<string, unknown> => ({
+    user: window.userTurn.text,
+    previousAssistant: window.previousAssistantTurn?.text ?? null,
+    matched,
+});
+
+const dedupeOrdered = (values: readonly string[]): readonly string[] => {
+    const seen = new Set<string>();
+    const out: string[] = [];
+    for (const value of values) {
+        if (!seen.has(value)) {
+            seen.add(value);
+            out.push(value);
+        }
+    }
+    return out;
+};
+
+/**
+ * Builds a heuristic {@link ClassifierDefinition} from a list of regex patterns,
+ * collapsing the copy-pasted scaffold (trim → empty guard → optional control-text
+ * guard → lowercase → first-match branches calling `label()`) into data.
+ *
+ * `labels` and `targets` are derived (deduped, stable order) from `patterns`, so
+ * the declared-vs-emitted mismatch `validateResult` guards against is structurally
+ * impossible. Delegates to {@link defineClassifier} so key/version validation and
+ * the resulting shape stay identical to hand-written classifiers.
+ */
+export function definePatternClassifier(config: PatternClassifierConfig): ClassifierDefinition {
+    const evidence = config.evidence ?? defaultEvidence;
+    const skipControlText = config.skipControlText ?? false;
+    const mode = config.mode ?? "first";
+
+    const emit = (window: EventWindow, pattern: ClassifierPattern, lower: string): ClassifierResult => {
+        const signals = typeof pattern.signals === "function"
+            ? pattern.signals(window, lower)
+            : pattern.signals;
+        return label(window, {
+            classifierKey: config.key,
+            classifierVersion: config.version,
+            label: pattern.label,
+            target: pattern.target,
+            polarity: pattern.polarity,
+            durability: pattern.durability,
+            confidence: typeof pattern.confidence === "function"
+                ? pattern.confidence(window, lower)
+                : pattern.confidence,
+            evidence: evidence(window, pattern.matched),
+            ...(signals !== undefined ? { signals } : {}),
+        });
+    };
+
+    const classify = (window: EventWindow): readonly ClassifierResult[] => {
+        const text = window.userTurn.text.trim();
+        if (text.length === 0) return [];
+        if (skipControlText && isControlOrContextText(text)) return [];
+        const lower = text.toLowerCase();
+
+        if (mode === "all") {
+            const results: ClassifierResult[] = [];
+            for (const pattern of config.patterns) {
+                if (pattern.test.test(lower)) results.push(emit(window, pattern, lower));
+            }
+            return results;
+        }
+
+        for (const pattern of config.patterns) {
+            if (pattern.test.test(lower)) return [emit(window, pattern, lower)];
+        }
+        return [];
+    };
+
+    return defineClassifier({
+        key: config.key,
+        version: config.version,
+        kind: config.kind ?? "heuristic",
+        description: config.description,
+        input: "event_window",
+        labels: dedupeOrdered(config.patterns.map((pattern) => pattern.label)),
+        targets: dedupeOrdered(config.patterns.map((pattern) => pattern.target)),
+        classify: (window) => Effect.succeed(classify(window)),
+    });
 }
 
 const validateResult = (

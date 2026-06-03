@@ -216,10 +216,10 @@ export function RetroTerminal() {
   const rootRef = useRef<HTMLElement | null>(null);
   const bodyRef = useRef<HTMLDivElement | null>(null);
   const startRef = useRef(0);
-  const pausedRef = useRef(false);
+  const hoverRef = useRef(false);
   const [lines, setLines] = useState<RenderLine[]>([]);
   const [activeIdx, setActiveIdx] = useState(0);
-  const [paused, setPaused] = useState(false);
+  const [hovered, setHovered] = useState(false);
   const [seq, setSeq] = useState(0);
 
   useEffect(() => {
@@ -234,8 +234,12 @@ export function RetroTerminal() {
         const v = bodyRef.current;
         if (v) v.scrollTop = v.scrollHeight;
       });
-    const waitWhilePaused = async () => {
-      while (pausedRef.current && !cancelled) await sleep(120);
+    // Hover slows the stream so it's readable, and holds the current scene
+    // (no auto-switch to the next tab) until the cursor leaves.
+    const SLOW = 2.2;
+    const pace = (ms: number) => Math.round(ms * (hoverRef.current ? SLOW : 1));
+    const holdWhileHovered = async () => {
+      while (hoverRef.current && !cancelled) await sleep(150);
     };
 
     const reduced =
@@ -264,9 +268,7 @@ export function RetroTerminal() {
       }
 
       for (const ln of scene.script) {
-        await waitWhilePaused();
-        if (cancelled) return false;
-        await sleep(ln.delay);
+        await sleep(pace(ln.delay));
         if (cancelled) return false;
         if (ln.pulse) pulse(ln.pulse);
 
@@ -277,12 +279,12 @@ export function RetroTerminal() {
           setLines((p) => [...p, { id, kind: "ingest", text: ingestBar(label, 0) }]);
           scrollDown();
           for (let pct = 12; pct <= 100; pct += 12) {
-            await sleep(52);
+            await sleep(pace(52));
             if (cancelled) return false;
             const v = Math.min(100, pct);
             setLines((p) => p.map((l) => (l.id === id ? { ...l, text: ingestBar(label, v) } : l)));
           }
-          await sleep(160);
+          await sleep(pace(160));
           setLines((p) =>
             p.map((l) => (l.id === id ? { ...l, kind: "ok", text: done } : l))
           );
@@ -292,8 +294,8 @@ export function RetroTerminal() {
           scrollDown();
         }
       }
-      await sleep(3300);
-      await waitWhilePaused();
+      await sleep(2200);
+      await holdWhileHovered();
       return true;
     }
 
@@ -352,12 +354,12 @@ export function RetroTerminal() {
       <div
         className={`rt rt--${active.accent}`}
         onMouseEnter={() => {
-          pausedRef.current = true;
-          setPaused(true);
+          hoverRef.current = true;
+          setHovered(true);
         }}
         onMouseLeave={() => {
-          pausedRef.current = false;
-          setPaused(false);
+          hoverRef.current = false;
+          setHovered(false);
         }}
       >
         <div className="rt-chrome">
@@ -388,10 +390,10 @@ export function RetroTerminal() {
             ))}
           </div>
           <span
-            className={`rt-pill${paused ? " is-paused" : ""}`}
+            className={`rt-pill${hovered ? " is-slowed" : ""}`}
             aria-hidden="true"
           >
-            {paused ? "● paused" : "● live"}
+            {hovered ? "● slowed · holding" : "● live"}
           </span>
         </div>
 
