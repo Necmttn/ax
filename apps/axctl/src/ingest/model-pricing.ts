@@ -1,6 +1,6 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
-import { Effect, Schema } from "effect";
+import { Effect, FileSystem, Path, Schema } from "effect";
+import { orAbsent } from "@ax/lib/shared/fs-error";
+import { decodeJsonOrNull } from "@ax/lib/decode";
 import { AxConfig } from "@ax/lib/config";
 import { SurrealClient, type SurrealClientShape } from "@ax/lib/db";
 import type { DbError } from "@ax/lib/errors";
@@ -473,38 +473,57 @@ export function agentModelStatement(input: {
     ])};`;
 }
 
-const readJsonFile = async (path: string): Promise<unknown | null> => {
-    try {
-        return JSON.parse(await readFile(path, "utf8"));
-    } catch {
-        return null;
-    }
-};
+// OLD: `JSON.parse(await readFile)` in try/catch → null on ANY fault (missing
+// file OR malformed JSON). `readFileString` recovers every PlatformError to
+// null via `orAbsent`; `decodeJsonOrNull` returns null on a parse error,
+// matching the old tolerate-all behavior end-to-end.
+const readJsonFile = (path: string): Effect.Effect<unknown | null, never, FileSystem.FileSystem> =>
+    Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const text = yield* fs.readFileString(path).pipe(orAbsent(null as string | null));
+        return text === null ? null : decodeJsonOrNull(text);
+    });
 
-const fetchJsonWithCache = async (
+const fetchJsonWithCache = (
     url: string,
     cachePath: string,
     opts: { readonly offline: boolean; readonly refresh: boolean },
-): Promise<{ json: unknown | null; source: "network" | "cache" | "missing" }> => {
-    if (!opts.refresh) {
-        const cached = await readJsonFile(cachePath);
-        if (cached !== null) return { json: cached, source: "cache" };
-    }
-    if (!opts.offline) {
-        try {
-            const response = await fetch(url);
-            if (!response.ok) throw new Error(`HTTP ${response.status}`);
-            const json = await response.json();
-            await mkdir(dirname(cachePath), { recursive: true });
-            await writeFile(cachePath, `${JSON.stringify(json)}\n`, "utf8");
-            return { json, source: "network" };
-        } catch {
-            // Local cache is the fallback; a pricing refresh should not block ingest.
+): Effect.Effect<
+    { json: unknown | null; source: "network" | "cache" | "missing" },
+    never,
+    FileSystem.FileSystem | Path.Path
+> =>
+    Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+
+        if (!opts.refresh) {
+            const cached = yield* readJsonFile(cachePath);
+            if (cached !== null) return { json: cached, source: "cache" as const };
         }
-    }
-    const cached = await readJsonFile(cachePath);
-    return cached === null ? { json: null, source: "missing" } : { json: cached, source: "cache" };
-};
+        if (!opts.offline) {
+            // OLD: the whole network+write block sat in a try/catch that
+            // swallowed ANY failure (the cache is the fallback; a refresh must
+            // not block ingest). The fetch+parse runs under `Effect.tryPromise`
+            // so a network/HTTP/parse fault recovers to `null`; the cache writes
+            // are best-effort (`Effect.ignore` drops mkdir/write faults), all
+            // leaving the cache-fallback path below intact.
+            const networkJson: unknown | null = yield* Effect.tryPromise(async () => {
+                const response = await fetch(url);
+                if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                return (await response.json()) as unknown;
+            }).pipe(Effect.orElseSucceed(() => null as unknown | null));
+            if (networkJson !== null) {
+                yield* fs.makeDirectory(path.dirname(cachePath), { recursive: true }).pipe(Effect.ignore);
+                yield* fs.writeFileString(cachePath, `${JSON.stringify(networkJson)}\n`).pipe(Effect.ignore);
+                return { json: networkJson, source: "network" as const };
+            }
+        }
+        const cached = yield* readJsonFile(cachePath);
+        return cached === null
+            ? { json: null, source: "missing" as const }
+            : { json: cached, source: "cache" as const };
+    });
 
 export interface PricingCatalogLoadResult {
     readonly catalog: Map<string, ModelPricing>;
@@ -512,21 +531,26 @@ export interface PricingCatalogLoadResult {
     readonly modelsDevSource: "network" | "cache" | "missing";
 }
 
-export async function loadPricingCatalog(dataDir: string, env: Record<string, string | undefined> = process.env): Promise<PricingCatalogLoadResult> {
-    const offline = env.AX_PRICING_OFFLINE === "1";
-    const refresh = env.AX_PRICING_REFRESH === "1";
-    const cacheDir = join(dataDir, "pricing");
-    const [litellm, modelsDev] = await Promise.all([
-        fetchJsonWithCache(LITELLM_PRICING_URL, join(cacheDir, "litellm-model-prices.json"), { offline, refresh }),
-        fetchJsonWithCache(MODELS_DEV_API_URL, join(cacheDir, "models-dev-api.json"), { offline, refresh }),
-    ]);
-    const catalog = mergePricingCatalogs(
-        parseModelsDevPricingCatalog(modelsDev.json),
-        parseLiteLlmPricingCatalog(litellm.json),
-        builtInPricingCatalog(),
-    );
-    return { catalog, litellmSource: litellm.source, modelsDevSource: modelsDev.source };
-}
+export const loadPricingCatalog = (
+    dataDir: string,
+    env: Record<string, string | undefined> = process.env,
+): Effect.Effect<PricingCatalogLoadResult, never, FileSystem.FileSystem | Path.Path> =>
+    Effect.gen(function* () {
+        const path = yield* Path.Path;
+        const offline = env.AX_PRICING_OFFLINE === "1";
+        const refresh = env.AX_PRICING_REFRESH === "1";
+        const cacheDir = path.join(dataDir, "pricing");
+        const [litellm, modelsDev] = yield* Effect.all([
+            fetchJsonWithCache(LITELLM_PRICING_URL, path.join(cacheDir, "litellm-model-prices.json"), { offline, refresh }),
+            fetchJsonWithCache(MODELS_DEV_API_URL, path.join(cacheDir, "models-dev-api.json"), { offline, refresh }),
+        ], { concurrency: "unbounded" });
+        const catalog = mergePricingCatalogs(
+            parseModelsDevPricingCatalog(modelsDev.json),
+            parseLiteLlmPricingCatalog(litellm.json),
+            builtInPricingCatalog(),
+        );
+        return { catalog, litellmSource: litellm.source, modelsDevSource: modelsDev.source };
+    });
 
 export interface PricingRefreshStats {
     readonly models: number;
@@ -576,12 +600,12 @@ const upsertPricingWatermark = (db: SurrealClientShape, digest: string): Effect.
         { chunkSize: 1 },
     );
 
-export const refreshModelPricing = (): Effect.Effect<PricingRefreshStats, DbError, SurrealClient | AxConfig> =>
+export const refreshModelPricing = (): Effect.Effect<PricingRefreshStats, DbError, SurrealClient | AxConfig | FileSystem.FileSystem | Path.Path> =>
     Effect.gen(function* () {
         const db = yield* SurrealClient;
         const cfg = yield* AxConfig;
         const forceRewrite = process.env.AX_REDERIVE_PRICING === "1";
-        const result = yield* Effect.promise(() => loadPricingCatalog(cfg.paths.dataDir));
+        const result = yield* loadPricingCatalog(cfg.paths.dataDir);
         const statements = [...result.catalog.entries()].map(([modelKey, pricing]) =>
             agentModelStatement({
                 modelKey,
@@ -612,7 +636,7 @@ export class PricingStageStats extends BaseStageStats.extend<PricingStageStats>(
     modelsDevSource: Schema.String,
 }) {}
 
-export const pricingStage: StageDef<PricingStageStats, SurrealClient | AxConfig> = {
+export const pricingStage: StageDef<PricingStageStats, SurrealClient | AxConfig | FileSystem.FileSystem | Path.Path> = {
     meta: StageMeta.make({ key: "pricing", deps: [], tags: ["ingest"] }),
     run: (_ctx: IngestContext) =>
         Effect.gen(function* () {

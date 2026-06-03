@@ -2,12 +2,24 @@ import { mkdtemp, mkdir, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { describe, expect, test } from "bun:test";
+import { Effect, Layer } from "effect";
+import { BunFileSystem, BunPath } from "@effect/platform-bun";
 import {
     artifactRootsForOptions,
     classifyArtifactPath,
-    discoverArtifactsDryRun,
+    discoverArtifactsDryRun as discoverArtifactsDryRunEffect,
 } from "./artifacts.ts";
-import type { ArtifactSkipReason } from "./artifacts.ts";
+import type { ArtifactDiscoveryOptions, ArtifactDiscoveryDryRun, ArtifactSkipReason } from "./artifacts.ts";
+
+const BunFsLayer = Layer.merge(BunFileSystem.layer, BunPath.layer);
+
+// Forced-dependency edit: run the now-Effect discovery against the REAL
+// Bun-backed FileSystem + Path (the production layers) over the existing
+// tmp-dir fixtures, so symlink/dir/file detection is exercised honestly.
+const discoverArtifactsDryRun = (
+    options: ArtifactDiscoveryOptions,
+): Promise<ArtifactDiscoveryDryRun> =>
+    Effect.runPromise(discoverArtifactsDryRunEffect(options).pipe(Effect.provide(BunFsLayer)));
 
 describe("artifact discovery roots", () => {
     test("builds allowlisted project roots plus configured skill roots", async () => {
@@ -124,6 +136,40 @@ describe("discoverArtifactsDryRun", () => {
         expect(dryRun.counts.bySkipReason.ignored_dir).toBeGreaterThanOrEqual(2);
         expect(dryRun.counts.bySkipReason.nested_git_repo).toBe(1);
         expect(dryRun.counts.bySkipReason.symlink).toBe(1);
+    });
+
+    // Focused coverage for the lstat -> readLink rewrite: the old code used
+    // `lstat` (no symlink-follow) to (a) skip symlink entries and (b) detect a
+    // nested repo via a `.git` directory OR a `.git` *gitfile* (worktree). This
+    // proves the readLink-first classification preserves both branches against
+    // the real Bun FileSystem.
+    test("readLink-based detection: skips symlinks, detects .git gitfile (worktree) and .git dir", async () => {
+        const workspace = await makeTempDir();
+        await writeText(workspace, ".planning/keep.md", "# keep\n");
+
+        // (a) symlink to a regular file -> skipped as "symlink", not followed.
+        await writeText(workspace, ".planning/target.md", "# target\n");
+        await symlink(
+            join(workspace, ".planning", "target.md"),
+            join(workspace, ".planning", "link.md"),
+        );
+
+        // (b) worktree-style nested repo: `.git` is a regular FILE (gitfile).
+        await writeText(workspace, ".planning/worktree-repo/.git", "gitdir: /elsewhere\n");
+        await writeText(workspace, ".planning/worktree-repo/plan.md", "# no\n");
+
+        // (c) classic nested repo: `.git` is a DIRECTORY.
+        await writeText(workspace, ".planning/dir-repo/.git/config", "[core]\n");
+        await writeText(workspace, ".planning/dir-repo/plan.md", "# no\n");
+
+        const dryRun = await discoverArtifactsDryRun({ workspaceRoot: workspace });
+
+        // Only the real files at the planning root survive; the symlink target
+        // is a real file so it is a legitimate candidate, the symlink is not.
+        expect(labelsOf(dryRun.candidates)).toEqual(["planning:keep.md", "planning:target.md"].sort());
+        expect(dryRun.counts.bySkipReason.symlink).toBe(1);
+        // Both the gitfile worktree and the .git-dir repo are detected.
+        expect(dryRun.counts.bySkipReason.nested_git_repo).toBe(2);
     });
 
     test("skips binary files and files over the configured size limit", async () => {
