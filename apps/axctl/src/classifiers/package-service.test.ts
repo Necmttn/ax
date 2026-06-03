@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { Effect } from "effect";
+import { Effect, type FileSystem, Layer, type Path } from "effect";
+import { BunFileSystem, BunPath } from "@effect/platform-bun";
 import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -17,16 +18,26 @@ import {
 
 const sessionSectionManifest = "packages/ax-classifier-session-sections/ax.classifier.json";
 
-const runWithService = <A>(effect: Effect.Effect<A, unknown, ClassifierPackageService>): Promise<A> =>
-    Effect.runPromise(effect.pipe(Effect.provide(ClassifierPackageServiceLive)));
+// Forced-dependency edit: pendingReviewTaskListReport now requires FileSystem +
+// Path (the @effect/platform migration); provide the REAL Bun-backed layers.
+const BunFsLayer = Layer.merge(BunFileSystem.layer, BunPath.layer);
+
+const runWithService = <A>(
+    effect: Effect.Effect<A, unknown, ClassifierPackageService | FileSystem.FileSystem | Path.Path>,
+): Promise<A> =>
+    Effect.runPromise(effect.pipe(
+        Effect.provide(ClassifierPackageServiceLive),
+        Effect.provide(BunFsLayer),
+    ));
 
 const runWithServiceAndDb = <A>(
-    effect: Effect.Effect<A, unknown, ClassifierPackageService | SurrealClient>,
+    effect: Effect.Effect<A, unknown, ClassifierPackageService | SurrealClient | FileSystem.FileSystem | Path.Path>,
     db: SurrealClientShape,
 ): Promise<A> =>
     Effect.runPromise(effect.pipe(
         Effect.provide(ClassifierPackageServiceLive),
         Effect.provideService(SurrealClient, db),
+        Effect.provide(BunFsLayer),
     ));
 
 function writeTempManifest(command: string): string {

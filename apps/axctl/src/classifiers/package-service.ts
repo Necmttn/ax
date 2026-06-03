@@ -1,4 +1,4 @@
-import { Context, Effect, Layer, Schema } from "effect";
+import { Context, Effect, FileSystem, Layer, Path, Schema } from "effect";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { prettyPrint } from "@ax/lib/json";
@@ -456,10 +456,10 @@ export interface ClassifierPackageServiceShape {
     ) => Effect.Effect<ClassifierLifecycleRoutingSummaryReport, ClassifierPackageLoadError | ClassifierPackageReportWriteError, SurrealClient>;
     readonly pendingReviewTaskListReport: (
         input: ClassifierPendingReviewTaskListInput,
-    ) => Effect.Effect<WorkflowCandidateGuidancePendingReviewTaskListReport, ClassifierPackageLoadError>;
+    ) => Effect.Effect<WorkflowCandidateGuidancePendingReviewTaskListReport, ClassifierPackageLoadError, FileSystem.FileSystem | Path.Path>;
     readonly writePendingReviewTaskListReport: (
         input: ClassifierPendingReviewTaskListWriteInput,
-    ) => Effect.Effect<WorkflowCandidateGuidancePendingReviewTaskListReport, ClassifierPackageLoadError | ClassifierPackageReportWriteError>;
+    ) => Effect.Effect<WorkflowCandidateGuidancePendingReviewTaskListReport, ClassifierPackageLoadError | ClassifierPackageReportWriteError, FileSystem.FileSystem | Path.Path>;
     readonly classifierQualityStatusReport: (
         input: ClassifierQualityStatusInput,
     ) => Effect.Effect<ClassifierQualityStatusReport, ClassifierPackageLoadError>;
@@ -878,13 +878,14 @@ export const ClassifierPackageServiceLive: Layer.Layer<ClassifierPackageService>
         const pendingReviewTaskList = Effect.fn("ClassifierPackageService.pendingReviewTaskListReport")(function* (
             input: ClassifierPendingReviewTaskListInput,
         ) {
-            return yield* Effect.try({
-                try: () => loadWorkflowCandidateGuidancePendingReviewTaskListReport(input.taskDir, input.filters),
-                catch: (error) => ClassifierPackageLoadError.make({
-                    path: input.taskDir,
-                    message: errorMessage(error),
-                }),
-            });
+            return yield* loadWorkflowCandidateGuidancePendingReviewTaskListReport(input.taskDir, input.filters).pipe(
+                Effect.catchTag("PlatformError", (error) =>
+                    Effect.fail(ClassifierPackageLoadError.make({
+                        path: input.taskDir,
+                        message: errorMessage(error),
+                    })),
+                ),
+            );
         });
 
         const writePendingReviewTaskList = Effect.fn("ClassifierPackageService.writePendingReviewTaskListReport")(function* (

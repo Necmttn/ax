@@ -1,7 +1,7 @@
-import { existsSync } from "node:fs";
+import { Effect, FileSystem, Path } from "effect";
 import { homedir } from "node:os";
-import { join } from "node:path";
 import { spawnSync } from "node:child_process";
+import { orAbsent } from "@ax/lib/shared/fs-error";
 
 export interface OnboardingCheck {
     readonly id: string;
@@ -15,48 +15,64 @@ export interface OnboardingReport {
     readonly checks: readonly OnboardingCheck[];
 }
 
-function isGitTracked(path: string): boolean {
-    if (!existsSync(path)) return false;
-    const root = spawnSync("git", ["-C", path, "rev-parse", "--show-toplevel"], { encoding: "utf8" });
-    return root.status === 0 && root.stdout.trim().length > 0;
-}
+const isGitTracked = (
+    path: string,
+): Effect.Effect<boolean, never, FileSystem.FileSystem> =>
+    Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        // Discovery probe: a missing/unreadable path is simply "not tracked".
+        const exists = yield* fs.exists(path).pipe(orAbsent(false));
+        if (!exists) return false;
+        const root = spawnSync("git", ["-C", path, "rev-parse", "--show-toplevel"], { encoding: "utf8" });
+        return root.status === 0 && root.stdout.trim().length > 0;
+    });
 
-function checkPath(id: string, title: string, path: string, recommendation: string): OnboardingCheck {
-    const tracked = isGitTracked(path);
-    return {
-        id,
-        title,
-        status: tracked ? "ok" : "warn",
-        path,
-        recommendation: tracked
-            ? "Already inside a git-tracked guidance/config repository."
-            : recommendation,
-    };
-}
+const checkPath = (
+    id: string,
+    title: string,
+    path: string,
+    recommendation: string,
+): Effect.Effect<OnboardingCheck, never, FileSystem.FileSystem> =>
+    Effect.gen(function* () {
+        const tracked = yield* isGitTracked(path);
+        return {
+            id,
+            title,
+            status: tracked ? "ok" : "warn",
+            path,
+            recommendation: tracked
+                ? "Already inside a git-tracked guidance/config repository."
+                : recommendation,
+        };
+    });
 
-export function buildOnboardingReport(home = homedir()): OnboardingReport {
-    const checks = [
-        checkPath(
-            "claude-global",
-            "Claude global guidance",
-            join(home, ".claude"),
-            "Track ~/.claude or move Claude guidance/hooks/commands into a dotfiles repo so guidance experiments have commit evidence.",
-        ),
-        checkPath(
-            "codex-global",
-            "Codex global guidance",
-            join(home, ".codex"),
-            "Track ~/.codex or move Codex guidance/skills/config into a dotfiles repo so agent behavior changes can be compared over time.",
-        ),
-        checkPath(
-            "agents-shared",
-            "Shared agent skills",
-            join(home, ".agents"),
-            "Track shared skills and hooks in git; axctl can then link global/local skill changes to later outcomes.",
-        ),
-    ];
-    return { checks };
-}
+export const buildOnboardingReport = (
+    home = homedir(),
+): Effect.Effect<OnboardingReport, never, FileSystem.FileSystem | Path.Path> =>
+    Effect.gen(function* () {
+        const path = yield* Path.Path;
+        const checks = [
+            yield* checkPath(
+                "claude-global",
+                "Claude global guidance",
+                path.join(home, ".claude"),
+                "Track ~/.claude or move Claude guidance/hooks/commands into a dotfiles repo so guidance experiments have commit evidence.",
+            ),
+            yield* checkPath(
+                "codex-global",
+                "Codex global guidance",
+                path.join(home, ".codex"),
+                "Track ~/.codex or move Codex guidance/skills/config into a dotfiles repo so agent behavior changes can be compared over time.",
+            ),
+            yield* checkPath(
+                "agents-shared",
+                "Shared agent skills",
+                path.join(home, ".agents"),
+                "Track shared skills and hooks in git; axctl can then link global/local skill changes to later outcomes.",
+            ),
+        ];
+        return { checks };
+    });
 
 export function formatOnboardingReport(report: OnboardingReport, json: boolean): string {
     if (json) return JSON.stringify(report, null, 2);

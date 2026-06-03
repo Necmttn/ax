@@ -1,5 +1,4 @@
-import { Effect } from "effect";
-import { readFileSync } from "node:fs";
+import { Effect, FileSystem, type PlatformError } from "effect";
 import type { SurrealClient } from "@ax/lib/db";
 import { safeJsonParse } from "@ax/lib/shared/safe-json";
 import {
@@ -1436,11 +1435,12 @@ export const runClassifiersLifecycle = (
         readonly out?: string;
         readonly json: boolean;
     },
-): Effect.Effect<void, never, ClassifierPackageService | SurrealClient> =>
+): Effect.Effect<void, PlatformError.PlatformError, ClassifierPackageService | SurrealClient | FileSystem.FileSystem> =>
     Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
         const packages = yield* ClassifierPackageService;
         if (input.inspectRouteExecutionPath !== undefined) {
-            const raw = readFileSync(input.inspectRouteExecutionPath, "utf8");
+            const raw = yield* fs.readFileString(input.inspectRouteExecutionPath);
             const execution = safeJsonParse<ClassifierLifecycleRouteExecutionReport>(raw);
             if (execution?.schema !== "ax.classifier_lifecycle_route_execution_report.v1") {
                 console.error("axctl classifiers lifecycle: --inspect-route-execution must point at ax.classifier_lifecycle_route_execution_report.v1 JSON");

@@ -7,6 +7,7 @@ import { listSessionsHere, listSessionsAround, listSessionsNear, type SessionRow
 import { findCommitWindow } from "@ax/lib/git-window";
 import { AxConfig } from "@ax/lib/config";
 import { safeJsonParse } from "@ax/lib/shared/safe-json";
+import { orAbsent } from "@ax/lib/shared/fs-error";
 import { ProcessService } from "@ax/lib/process";
 import { prettyPrint, surrealLiteral } from "@ax/lib/json";
 import { prettifyProjectSlug } from "@ax/lib/shared/project-slug";
@@ -1008,6 +1009,8 @@ const cmdStats = (args: string[]) =>
             process.exit(1);
         }
         const db = yield* SurrealClient;
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
         const exists = yield* skillExists(name);
         if (!exists) {
             const hint = name.length > 20 ? name.slice(0, 20) : name;
@@ -1102,15 +1105,9 @@ RETURN {
             // through. Catches issue #36 too: synthetic dir_path was already
             // skipped above, but defence-in-depth keeps a future "(synthetic-
             // like)" sentinel from regressing.
-            const body = yield* Effect.promise(async () => {
-                try {
-                    const { readFile } = await import("node:fs/promises");
-                    const { join } = await import("node:path");
-                    return await readFile(join(dirPath, "SKILL.md"), "utf8");
-                } catch {
-                    return null;
-                }
-            });
+            const body = yield* fs
+                .readFileString(path.join(dirPath, "SKILL.md"))
+                .pipe(orAbsent<string | null>(null));
             if (body !== null) {
                 const m = body.match(/^---\n[\s\S]*?\n---\n([\s\S]*)$/);
                 const trimmed = (m?.[1] ?? body).trim();
@@ -4505,6 +4502,12 @@ const skillsLintCommand = Command.make(
     },
     ({ taskDir, dryRun, json }) =>
         cmdSkillsLint({ taskDir, dryRun, json }).pipe(
+            Effect.catchTag("PlatformError", (e) =>
+                Effect.sync(() => {
+                    process.stderr.write(`axctl skills lint: file error - ${e.message}\n`);
+                    process.exit(1);
+                }),
+            ),
             catchDbErrorAndExit("axctl skills lint"),
         ),
 ).pipe(

@@ -675,7 +675,7 @@ export function collectDoctorReport(): Effect.Effect<
                 detail: `${agent.loaded ? "loaded" : "not loaded"}; plist=${agent.plistExists ? "present" : "absent"}`,
             })),
         ];
-        const onboarding = buildOnboardingReport();
+        const onboarding = yield* buildOnboardingReport();
         const onboardingChecks: DoctorCheck[] = onboarding.checks.map((c) => ({
             name: `onboarding:${c.id}`,
             ok: c.status === "ok",
@@ -806,7 +806,7 @@ export function cmdInstall(): Effect.Effect<
         console.log("  questions or feedback? join the community:");
         console.log("    https://discord.gg/E4R88Cvr5R");
         console.log();
-        console.log(formatInstallOnboardingGuidance(buildOnboardingReport()));
+        console.log(formatInstallOnboardingGuidance(yield* buildOnboardingReport()));
 
         // Fresh install flows straight into setup (skills + first ingest + doctor).
         console.log();

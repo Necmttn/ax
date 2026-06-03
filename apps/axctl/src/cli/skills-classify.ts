@@ -5,11 +5,10 @@
  * Default mode (no names): all unclassified skills with invocations >= 3.
  * Explicit mode (one+ names): only those skills, no invocation threshold.
  */
-import { Effect } from "effect";
-import { join } from "node:path";
-import { mkdir, writeFile, access } from "node:fs/promises";
+import { Effect, FileSystem, Path, type PlatformError } from "effect";
 import { SurrealClient } from "@ax/lib/db";
 import type { DbError } from "@ax/lib/errors";
+import { orAbsent } from "@ax/lib/shared/fs-error";
 import { prettyPrint } from "@ax/lib/json";
 import { skillNameToSlug, renderClassifyBrief } from "./skills-classify-template.ts";
 import { validateSkillName } from "@ax/lib/role-name";
@@ -77,9 +76,13 @@ export interface ClassifyOptions {
     readonly json: boolean;
 }
 
-export const cmdSkillsClassify = (opts: ClassifyOptions): Effect.Effect<void, DbError, SurrealClient> =>
+export const cmdSkillsClassify = (
+    opts: ClassifyOptions,
+): Effect.Effect<void, DbError | PlatformError.PlatformError, SurrealClient | FileSystem.FileSystem | Path.Path> =>
     Effect.gen(function* () {
         const db = yield* SurrealClient;
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
 
         // Validate any explicitly-provided skill names at the boundary.
         if (opts.names.length > 0) {
@@ -112,7 +115,7 @@ export const cmdSkillsClassify = (opts: ClassifyOptions): Effect.Effect<void, Db
                 skill: r.name,
                 invocations: r.invocations,
                 sessions: r.sessions,
-                path: join(opts.outDir, `classify-${skillNameToSlug(r.name)}.md`),
+                path: path.join(opts.outDir, `classify-${skillNameToSlug(r.name)}.md`),
             }));
             console.log(prettyPrint(out));
             return;
@@ -138,24 +141,19 @@ export const cmdSkillsClassify = (opts: ClassifyOptions): Effect.Effect<void, Db
         }
 
         // Ensure output directory exists
-        yield* Effect.promise(() => mkdir(opts.outDir, { recursive: true }));
+        yield* fs.makeDirectory(opts.outDir, { recursive: true });
 
         const written: string[] = [];
         const skipped: string[] = [];
 
         for (const row of selected) {
             const slug = skillNameToSlug(row.name);
-            const filePath = join(opts.outDir, `classify-${slug}.md`);
+            const filePath = path.join(opts.outDir, `classify-${slug}.md`);
 
-            // Idempotent: skip if file already exists
-            const exists = yield* Effect.promise(async () => {
-                try {
-                    await access(filePath);
-                    return true;
-                } catch {
-                    return false;
-                }
-            });
+            // Idempotent: skip if file already exists. Original used access() in
+            // a try/catch where ANY failure meant "not present"; orAbsent keeps
+            // that probe semantics.
+            const exists = yield* fs.exists(filePath).pipe(orAbsent(false));
 
             if (exists) {
                 skipped.push(filePath);
@@ -168,7 +166,7 @@ export const cmdSkillsClassify = (opts: ClassifyOptions): Effect.Effect<void, Db
                 sessions: row.sessions,
             });
 
-            yield* Effect.promise(() => writeFile(filePath, brief, "utf8"));
+            yield* fs.writeFileString(filePath, brief);
             written.push(filePath);
         }
 

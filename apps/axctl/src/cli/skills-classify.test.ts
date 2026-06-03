@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { Effect } from "effect";
+import { Effect, type FileSystem, Layer, type Path, type PlatformError } from "effect";
+import { BunFileSystem, BunPath } from "@effect/platform-bun";
 import { mkdtempSync } from "node:fs";
 import { readFile, access } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -31,12 +32,16 @@ function mockDb(rows: MockRow[]): SurrealClientShape {
     };
 }
 
+// Forced-dependency edit: cmdSkillsClassify now requires FileSystem + Path
+// (the @effect/platform migration); run against the REAL Bun-backed layers.
+const BunFsLayer = Layer.merge(BunFileSystem.layer, BunPath.layer);
+
 const runWith = <A>(
     db: SurrealClientShape,
-    eff: Effect.Effect<A, DbError, SurrealClient>,
+    eff: Effect.Effect<A, DbError | PlatformError.PlatformError, SurrealClient | FileSystem.FileSystem | Path.Path>,
 ): Promise<A> =>
     Effect.runPromise(
-        eff.pipe(Effect.provideService(SurrealClient, db)),
+        eff.pipe(Effect.provideService(SurrealClient, db), Effect.provide(BunFsLayer)),
     );
 
 // ---------------------------------------------------------------------------

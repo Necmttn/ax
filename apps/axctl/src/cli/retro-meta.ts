@@ -17,12 +17,12 @@
  * Sibling of `retro emit` / `retro list` / `retro reflect`.
  */
 
-import { Effect } from "effect";
+import { Effect, FileSystem } from "effect";
 import { encodeJson } from "@ax/lib/decode";
-import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { SurrealClient } from "@ax/lib/db";
 import type { DbError } from "@ax/lib/errors";
+import { orAbsent } from "@ax/lib/shared/fs-error";
 import { prettyPrint } from "@ax/lib/json";
 import {
     parseRetroCorrections,
@@ -323,8 +323,9 @@ export const buildMetaSnapshot = (input: {
 
 export const cmdRetroMeta = (
     args: string[],
-): Effect.Effect<void, DbError, SurrealClient> =>
+): Effect.Effect<void, DbError, SurrealClient | FileSystem.FileSystem> =>
     Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
         const sinceRaw = flagValue(args, "since");
         const sinceDays = sinceRaw !== undefined && /^\d+$/.test(sinceRaw)
             ? Math.max(1, parseInt(sinceRaw, 10))
@@ -450,8 +451,8 @@ export const cmdRetroMeta = (
 
         const userMd = `${homedir()}/.claude/CLAUDE.md`;
         const projectMd = `${process.cwd()}/CLAUDE.md`;
-        const claudeMdUser = existsSync(userMd) ? userMd : null;
-        const claudeMdProject = existsSync(projectMd) ? projectMd : null;
+        const claudeMdUser = (yield* fs.exists(userMd).pipe(orAbsent(false))) ? userMd : null;
+        const claudeMdProject = (yield* fs.exists(projectMd).pipe(orAbsent(false))) ? projectMd : null;
 
         const snapshot = buildMetaSnapshot({
             sinceDays,
