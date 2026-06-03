@@ -8,7 +8,7 @@ import { SurrealClient } from "@ax/lib/db";
 import { writeFileAtomic } from "@ax/lib/atomic-write";
 import { parseFrontmatter, readList, setFrontmatterList } from "./frontmatter.ts";
 import { addSkillToAgent, removeSkillFromAgent } from "./agent-scope-edit.ts";
-import { reconcileTable } from "./reconcile.ts";
+import { reconcileTable, reconcileByScope } from "./reconcile.ts";
 import { ConfigParseError } from "./errors.ts";
 
 const FS = Layer.mergeAll(BunFileSystem.layer, BunPath.layer);
@@ -177,5 +177,30 @@ describe("reconcileTable", () => {
         const layer = recordingDb(calls, [[1], [2, 3, 4, 5, 6, 7, 8, 9, 10, 11]]);
         const report = await run(reconcileTable("skill", ["a"], { tombstone: false }), layer);
         expect(report).toMatchObject({ tombstoned: 0, tombstoneSkipped: true, skipReason: "incomplete" });
+    });
+
+    test("scoped: a scope constrains every predicate to `scope = $scope`", async () => {
+        const calls: { sql: string; bindings?: Record<string, unknown> }[] = [];
+        const layer = recordingDb(calls, [[1], [1, 2, 3, 4, 5, 6, 7, 8, 9], [1], [], [1, 2, 3, 4, 5, 6, 7, 8, 9]]);
+        await run(reconcileTable("skill", ["a"], { scope: "user" }), layer);
+        expect(calls.every((c) => c.sql.includes("scope = $scope"))).toBe(true);
+        expect(calls.every((c) => (c.bindings as { scope?: string }).scope === "user")).toBe(true);
+    });
+
+    test("reconcileByScope reconciles each scope independently, never cross-scope", async () => {
+        const calls: { sql: string; bindings?: Record<string, unknown> }[] = [];
+        // 2 scopes x 5 queries = 10; all would=0 so nothing is skipped.
+        const layer = recordingDb(calls, Array.from({ length: 10 }, () => [] as unknown[]));
+        const byScope = new Map<string, string[]>([
+            ["user", ["a", "b"]],
+            ["plugin:x", ["c"]],
+        ]);
+        const report = await run(reconcileByScope("skill", byScope), layer);
+        expect(report.perScope.map((p) => p.scope)).toEqual(["user", "plugin:x"]);
+        // every query is scope-constrained - a `user` reconcile can't touch `plugin:x`.
+        expect(calls.every((c) => c.sql.includes("scope = $scope"))).toBe(true);
+        const scopes = new Set(calls.map((c) => (c.bindings as { scope?: string }).scope));
+        expect([...scopes].sort()).toEqual(["plugin:x", "user"]);
+        expect(report).toMatchObject({ table: "skill", tombstoned: 0, tombstoneSkipped: false });
     });
 });

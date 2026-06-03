@@ -46,6 +46,9 @@ export interface ReconcileOptions {
     readonly tombstone?: boolean;
     /** Refuse to tombstone if absent/live exceeds this. Default 0.5. */
     readonly maxTombstoneFraction?: number;
+    /** Constrain the whole pass to one `scope` value (e.g. "user", "plugin:x").
+     *  Rows of other scopes are never read or touched. */
+    readonly scope?: string;
 }
 
 /** One-line human summary, surfacing a refused/degraded tombstone pass loudly. */
@@ -60,6 +63,7 @@ export const formatReconcile = (r: ReconcileReport): string => {
     return `${head}\n  ⚠ tombstone SKIPPED: ${why}. ${r.wouldTombstone} row(s) left untouched. Fix discovery before reconciling.`;
 };
 
+// `$scope` is appended by the caller when a scope is supplied (see scopeClause).
 const ABSENT = "name NOT IN $names AND deleted_at IS NONE"; // on disk gone -> tombstone
 const REVIVABLE = "name IN $names AND deleted_at IS NOT NONE"; // back on disk -> resurrect
 const LIVE = "name IN $names AND deleted_at IS NONE"; // present -> touch
@@ -75,9 +79,16 @@ export const reconcileTable = (
         const dryRun = opts.dryRun ?? false;
         const maxFraction = opts.maxTombstoneFraction ?? 0.5;
 
+        // When a scope is given, EVERY predicate is constrained to it, so a
+        // reconcile of `user` can never touch `plugin:x`, a tool row, or a
+        // project skill from another repo. Rows outside the current discovery's
+        // scopes are left strictly alone.
+        const scopeClause = opts.scope !== undefined ? " AND scope = $scope" : "";
+        const bind = opts.scope !== undefined ? { names, scope: opts.scope } : { names };
+
         const count = (rows: unknown): number => (Array.isArray(rows) ? rows.length : 0);
         const select = (where: string) =>
-            db.query<[unknown[]]>(`SELECT id FROM ${table} WHERE ${where}`, { names }).pipe(
+            db.query<[unknown[]]>(`SELECT id FROM ${table} WHERE ${where}${scopeClause}`, bind).pipe(
                 Effect.map(([rows]) => count(rows)),
             );
 
@@ -93,7 +104,7 @@ export const reconcileTable = (
         const tombstoneSkipped = skipReason !== null;
 
         const mutate = (where: string, set: string) =>
-            db.query<[unknown[]]>(`UPDATE ${table} SET ${set} WHERE ${where}`, { names }).pipe(
+            db.query<[unknown[]]>(`UPDATE ${table} SET ${set} WHERE ${where}${scopeClause}`, bind).pipe(
                 Effect.map(([rows]) => count(rows)),
             );
 
@@ -110,3 +121,49 @@ export const reconcileTable = (
 
         return { table, tombstoned, resurrected, touched, dryRun, tombstoneSkipped, skipReason, wouldTombstone };
     });
+
+export interface ScopedReconcileReport extends ReconcileReport {
+    readonly perScope: ReadonlyArray<{ readonly scope: string; readonly report: ReconcileReport }>;
+}
+
+/**
+ * Reconcile per discovered scope, so only scopes the current discovery OWNS are
+ * touched. DB rows whose scope is absent from `byScope` (other repos' project
+ * skills, provider tools, unknowns) are never read or tombstoned. Each scope
+ * also gets its own safety guard, so one diverging scope can't drag the rest.
+ */
+export const reconcileByScope = (
+    table: string,
+    byScope: ReadonlyMap<string, readonly string[]>,
+    opts: Omit<ReconcileOptions, "scope"> = {},
+): Effect.Effect<ScopedReconcileReport, DbError, SurrealClient> =>
+    Effect.gen(function* () {
+        const perScope: Array<{ scope: string; report: ReconcileReport }> = [];
+        for (const [scope, names] of byScope) {
+            const report = yield* reconcileTable(table, names, { ...opts, scope });
+            perScope.push({ scope, report });
+        }
+        const sum = (f: (r: ReconcileReport) => number): number =>
+            perScope.reduce((acc, p) => acc + f(p.report), 0);
+        const skipped = perScope.filter((p) => p.report.tombstoneSkipped);
+        return {
+            table,
+            tombstoned: sum((r) => r.tombstoned),
+            resurrected: sum((r) => r.resurrected),
+            touched: sum((r) => r.touched),
+            dryRun: opts.dryRun ?? false,
+            tombstoneSkipped: skipped.length > 0,
+            skipReason: skipped[0]?.report.skipReason ?? null,
+            wouldTombstone: sum((r) => r.wouldTombstone),
+            perScope,
+        };
+    });
+
+/** Scoped summary: totals + a line per scope whose tombstone pass was refused. */
+export const formatReconcileScoped = (r: ScopedReconcileReport): string => {
+    const head = `reconcile ${r.table}: tombstoned=${r.tombstoned} resurrected=${r.resurrected} touched=${r.touched} across ${r.perScope.length} scope(s)${r.dryRun ? " (dry-run)" : ""}`;
+    const skips = r.perScope
+        .filter((p) => p.report.tombstoneSkipped)
+        .map((p) => `  ⚠ ${p.scope}: tombstone skipped (${p.report.skipReason}, would delete ${p.report.wouldTombstone})`);
+    return skips.length ? `${head}\n${skips.join("\n")}` : head;
+};
