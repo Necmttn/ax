@@ -13,9 +13,10 @@
  * the existing path or error.
  */
 
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { Effect, FileSystem, type PlatformError } from "effect";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { orAbsent } from "@ax/lib/shared/fs-error";
+import { posixPath } from "@ax/lib/shared/path";
 
 export interface ScaffoldInput {
     readonly title: string;
@@ -44,13 +45,13 @@ export const kebabCase = (raw: string): string =>
         .slice(0, 60);
 
 export const defaultSkillBaseDir = (): string =>
-    process.env.AX_SKILLS_SCAFFOLD_DIR ?? join(homedir(), ".claude", "skills");
+    process.env.AX_SKILLS_SCAFFOLD_DIR ?? posixPath.join(homedir(), ".claude", "skills");
 
 export const skillScaffoldDir = (name: string, baseDir = defaultSkillBaseDir()): string =>
-    join(baseDir, kebabCase(name));
+    posixPath.join(baseDir, kebabCase(name));
 
 export const skillScaffoldFile = (name: string, baseDir = defaultSkillBaseDir()): string =>
-    join(skillScaffoldDir(name, baseDir), "SKILL.md");
+    posixPath.join(skillScaffoldDir(name, baseDir), "SKILL.md");
 
 export const scaffoldContent = (input: ScaffoldInput): string => {
     const nameKebab = kebabCase(input.title);
@@ -80,13 +81,21 @@ export interface ScaffoldOptions {
     readonly force?: boolean;
 }
 
-export const scaffoldSkill = (opts: ScaffoldOptions): ScaffoldResult => {
-    const dir = skillScaffoldDir(opts.input.title, opts.baseDir);
-    const path = join(dir, "SKILL.md");
-    if (existsSync(path) && !opts.force) {
-        return { path, dir, created: false, skipped: true };
-    }
-    mkdirSync(dir, { recursive: true });
-    writeFileSync(path, scaffoldContent(opts.input), { encoding: "utf-8" });
-    return { path, dir, created: true, skipped: false };
-};
+export const scaffoldSkill = (
+    opts: ScaffoldOptions,
+): Effect.Effect<ScaffoldResult, PlatformError.PlatformError, FileSystem.FileSystem> =>
+    Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const dir = skillScaffoldDir(opts.input.title, opts.baseDir);
+        const path = posixPath.join(dir, "SKILL.md");
+        // existsSync probe: any fault → treat as absent (orAbsent(false)).
+        const exists = yield* fs.exists(path).pipe(orAbsent(false));
+        if (exists && !opts.force) {
+            return { path, dir, created: false, skipped: true };
+        }
+        // mkdir + write propagate (original used bare mkdirSync/writeFileSync,
+        // no try/catch → errors surface to the caller).
+        yield* fs.makeDirectory(dir, { recursive: true });
+        yield* fs.writeFileString(path, scaffoldContent(opts.input));
+        return { path, dir, created: true, skipped: false };
+    });

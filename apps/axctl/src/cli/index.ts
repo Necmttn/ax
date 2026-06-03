@@ -2740,17 +2740,15 @@ const improveAcceptCommand = Command.make(
                 }
                 console.log("");
                 console.log("spawning claude subagent to enrich the stub…");
-                const agentResult = yield* Effect.promise(() =>
-                    runAgentAccept({
-                        skillPath: result.artifact_path!,
-                        proposalTitle: result.proposal!.title,
-                        hypothesis: result.proposal!.hypothesis,
-                        triggerPattern: result.proposal!.triggerPattern ?? "",
-                        proposedBehavior: result.proposal!.proposedBehavior,
-                        retroSummaries,
-                        relatedSkillsDir: process.env.AX_SKILLS_SCAFFOLD_DIR ?? `${homedir()}/.claude/skills`,
-                    }),
-                );
+                const agentResult = yield* runAgentAccept({
+                    skillPath: result.artifact_path!,
+                    proposalTitle: result.proposal!.title,
+                    hypothesis: result.proposal!.hypothesis,
+                    triggerPattern: result.proposal!.triggerPattern ?? "",
+                    proposedBehavior: result.proposal!.proposedBehavior,
+                    retroSummaries,
+                    relatedSkillsDir: process.env.AX_SKILLS_SCAFFOLD_DIR ?? `${homedir()}/.claude/skills`,
+                });
                 if (agentResult.skillEnriched) {
                     console.log(`agent enriched ${result.artifact_path}`);
                 }

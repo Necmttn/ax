@@ -12,11 +12,11 @@
  * `~/.claude`. Override via `discoverFiles({ roots: [...] })`.
  */
 
-import { existsSync, readdirSync, readFileSync, realpathSync, statSync, unlinkSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
-import { Effect } from "effect";
+import { Effect, FileSystem, Option, type PlatformError } from "effect";
 import { SurrealClient } from "@ax/lib/db";
+import { orAbsent } from "@ax/lib/shared/fs-error";
+import { posixPath } from "@ax/lib/shared/path";
 import { surrealLiteral } from "@ax/lib/json";
 import {
     parseAutomationMarkers,
@@ -47,105 +47,156 @@ export interface LintOptions extends DiscoverOptions {
     readonly staleDays?: number;
 }
 
-const tryAddFile = (out: LintTarget[], path: string, form: LintForm): void => {
-    if (existsSync(path)) out.push({ path, form });
-};
+// existsSync probe → orAbsent(false): a fault means "treat as absent".
+const tryAddFile = (
+    out: LintTarget[],
+    path: string,
+    form: LintForm,
+): Effect.Effect<void, never, FileSystem.FileSystem> =>
+    Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        if (yield* fs.exists(path).pipe(orAbsent(false))) out.push({ path, form });
+    });
 
-const walkSkillsDir = (out: LintTarget[], skillsDir: string): void => {
-    if (!existsSync(skillsDir)) return;
-    for (const entry of readdirSync(skillsDir)) {
-        const full = join(skillsDir, entry);
-        try {
-            if (!statSync(full).isDirectory()) continue;
-        } catch { continue; }
-        tryAddFile(out, join(full, "SKILL.md"), "skill");
-    }
-};
+// readDirectory of a possibly-absent dir: missing/unreadable → [] (the original
+// guarded with existsSync first, then readdirSync; orAbsent collapses both).
+const safeReadDir = (
+    dir: string,
+): Effect.Effect<ReadonlyArray<string>, never, FileSystem.FileSystem> =>
+    Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        return yield* fs.readDirectory(dir).pipe(orAbsent([] as string[]));
+    });
 
-const walkAgentsDir = (out: LintTarget[], agentsDir: string): void => {
-    if (!existsSync(agentsDir)) return;
-    for (const entry of readdirSync(agentsDir)) {
-        if (!entry.endsWith(".md")) continue;
-        tryAddFile(out, join(agentsDir, entry), "subagent");
-    }
-};
+// statSync(full).isDirectory()/isFile() in try/catch→skip. `fs.stat` follows
+// symlinks (matching node statSync); a stat fault maps to "Other" so the
+// caller's Directory/File predicate skips it, exactly as the original `catch`
+// did. (The skills/agents/harness walkers intentionally follow symlinks here -
+// the no-follow guard is the realPath dedupe at the end of discoverFiles.)
+const statKind = (
+    path: string,
+): Effect.Effect<"Directory" | "File" | "Other", never, FileSystem.FileSystem> =>
+    Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const info = yield* fs.stat(path).pipe(Effect.asSome, orAbsent(Option.none()));
+        if (Option.isNone(info)) return "Other";
+        return info.value.type === "Directory"
+            ? "Directory"
+            : info.value.type === "File"
+              ? "File"
+              : "Other";
+    });
+
+const walkSkillsDir = (
+    out: LintTarget[],
+    skillsDir: string,
+): Effect.Effect<void, never, FileSystem.FileSystem> =>
+    Effect.gen(function* () {
+        for (const entry of yield* safeReadDir(skillsDir)) {
+            const full = posixPath.join(skillsDir, entry);
+            if ((yield* statKind(full)) !== "Directory") continue;
+            yield* tryAddFile(out, posixPath.join(full, "SKILL.md"), "skill");
+        }
+    });
+
+const walkAgentsDir = (
+    out: LintTarget[],
+    agentsDir: string,
+): Effect.Effect<void, never, FileSystem.FileSystem> =>
+    Effect.gen(function* () {
+        for (const entry of yield* safeReadDir(agentsDir)) {
+            if (!entry.endsWith(".md")) continue;
+            yield* tryAddFile(out, posixPath.join(agentsDir, entry), "subagent");
+        }
+    });
 
 const walkFlatFilesDir = (
     out: LintTarget[],
     dir: string,
     form: LintForm,
     predicate: (entry: string) => boolean,
-): void => {
-    if (!existsSync(dir)) return;
-    for (const entry of readdirSync(dir)) {
-        if (!predicate(entry)) continue;
-        const full = join(dir, entry);
-        try {
-            if (!statSync(full).isFile()) continue;
-        } catch { continue; }
-        tryAddFile(out, full, form);
-    }
-};
+): Effect.Effect<void, never, FileSystem.FileSystem> =>
+    Effect.gen(function* () {
+        for (const entry of yield* safeReadDir(dir)) {
+            if (!predicate(entry)) continue;
+            const full = posixPath.join(dir, entry);
+            if ((yield* statKind(full)) !== "File") continue;
+            yield* tryAddFile(out, full, form);
+        }
+    });
 
-const walkHarnessDir = (out: LintTarget[], harnessDir: string): void => {
-    if (!existsSync(harnessDir)) return;
-    for (const entry of readdirSync(harnessDir)) {
-        if (!entry.endsWith(".md")) continue;
-        tryAddFile(out, join(harnessDir, entry), "harness_check");
-    }
-};
+const walkHarnessDir = (
+    out: LintTarget[],
+    harnessDir: string,
+): Effect.Effect<void, never, FileSystem.FileSystem> =>
+    Effect.gen(function* () {
+        for (const entry of yield* safeReadDir(harnessDir)) {
+            if (!entry.endsWith(".md")) continue;
+            yield* tryAddFile(out, posixPath.join(harnessDir, entry), "harness_check");
+        }
+    });
 
 export const defaultRoots = (): string[] => [
     process.cwd(),
-    join(homedir(), ".claude"),
+    posixPath.join(homedir(), ".claude"),
 ];
 
-const deleteFileIfPresent = (path: string): boolean => {
-    try {
-        unlinkSync(path);
-        return true;
-    } catch {
-        return false;
-    }
-};
-
-const statMtimeMsOrNull = (path: string): number | null => {
-    try {
-        return statSync(path).mtimeMs;
-    } catch {
-        return null;
-    }
-};
-
-export const discoverFiles = (opts: DiscoverOptions = {}): LintTarget[] => {
-    const roots = opts.roots ?? defaultRoots();
-    const out: LintTarget[] = [];
-    const seen = new Set<string>();
-    for (const root of roots) {
-        for (const name of ["CLAUDE.md", "AGENTS.md"]) {
-            tryAddFile(out, join(root, name), "guidance");
-        }
-        walkSkillsDir(out, join(root, "skills"));
-        walkAgentsDir(out, join(root, "agents"));
-        tryAddFile(out, join(root, "settings.json"), "hook");
-        tryAddFile(out, join(root, ".claude", "settings.json"), "hook");
-        walkFlatFilesDir(out, join(root, "LaunchAgents"), "automation", (entry) => entry.endsWith(".plist"));
-        walkFlatFilesDir(out, join(root, "cron"), "automation", () => true);
-        walkFlatFilesDir(out, join(root, "automations"), "automation", () => true);
-        walkHarnessDir(out, join(root, "tests", "harness"));
-    }
-    return out.filter((t) => {
-        let key = t.path;
-        try {
-            key = realpathSync(t.path);
-        } catch {
-            key = t.path;
-        }
-        if (seen.has(key)) return false;
-        seen.add(key);
-        return true;
+// unlinkSync in try/catch→bool: ANY failure (incl. absence) → false. `fs.remove`
+// without force fails on a missing path, so map success→true and orAbsent→false.
+const deleteFileIfPresent = (
+    path: string,
+): Effect.Effect<boolean, never, FileSystem.FileSystem> =>
+    Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        return yield* fs.remove(path).pipe(Effect.as(true), orAbsent(false));
     });
-};
+
+// statSync().mtimeMs in try/catch→null: a stat fault or absent mtime → null.
+const statMtimeMsOrNull = (
+    path: string,
+): Effect.Effect<number | null, never, FileSystem.FileSystem> =>
+    Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const info = yield* fs.stat(path).pipe(Effect.asSome, orAbsent(Option.none()));
+        if (Option.isNone(info)) return null;
+        return Option.match(info.value.mtime, {
+            onNone: () => null,
+            onSome: (d) => d.getTime(),
+        });
+    });
+
+export const discoverFiles = (
+    opts: DiscoverOptions = {},
+): Effect.Effect<LintTarget[], never, FileSystem.FileSystem> =>
+    Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const roots = opts.roots ?? defaultRoots();
+        const out: LintTarget[] = [];
+        const seen = new Set<string>();
+        for (const root of roots) {
+            for (const name of ["CLAUDE.md", "AGENTS.md"]) {
+                yield* tryAddFile(out, posixPath.join(root, name), "guidance");
+            }
+            yield* walkSkillsDir(out, posixPath.join(root, "skills"));
+            yield* walkAgentsDir(out, posixPath.join(root, "agents"));
+            yield* tryAddFile(out, posixPath.join(root, "settings.json"), "hook");
+            yield* tryAddFile(out, posixPath.join(root, ".claude", "settings.json"), "hook");
+            yield* walkFlatFilesDir(out, posixPath.join(root, "LaunchAgents"), "automation", (entry) => entry.endsWith(".plist"));
+            yield* walkFlatFilesDir(out, posixPath.join(root, "cron"), "automation", () => true);
+            yield* walkFlatFilesDir(out, posixPath.join(root, "automations"), "automation", () => true);
+            yield* walkHarnessDir(out, posixPath.join(root, "tests", "harness"));
+        }
+        const deduped: LintTarget[] = [];
+        for (const t of out) {
+            // realpathSync in try/catch→fallback to t.path: a fault means use
+            // the raw path as the dedupe key (orAbsent recovers to t.path).
+            const key = yield* fs.realPath(t.path).pipe(orAbsent(t.path));
+            if (seen.has(key)) continue;
+            seen.add(key);
+            deduped.push(t);
+        }
+        return deduped;
+    });
 
 // ---------------------------------------------------------------------------
 // lintFiles - marker scan + DB reconcile + task cleanup
@@ -203,14 +254,23 @@ const collectJsonCommandStrings = (value: unknown, out: string[]): void => {
     }
 };
 
-const collectIds = (target: LintTarget, errors: LintFinding[]): Map<string, IdTarget> => {
+const collectIds = (
+    target: LintTarget,
+    errors: LintFinding[],
+): Effect.Effect<Map<string, IdTarget>, never, FileSystem.FileSystem> =>
+    Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
     const found = new Map<string, IdTarget>();
-    let content: string;
-    try {
-        content = readFileSync(target.path, "utf-8");
-    } catch {
+    // readFileSync in try/catch→empty map: an unreadable/missing file yields no
+    // markers (any read fault collapses to Option.none → "no content").
+    const contentOpt = yield* fs.readFileString(target.path).pipe(
+        Effect.asSome,
+        orAbsent(Option.none<string>()),
+    );
+    if (Option.isNone(contentOpt)) {
         return found;
     }
+    const content = contentOpt.value;
     if (target.form === "guidance") {
         try {
             // Inline markers (guidance files) carry no explicit experiment id.
@@ -268,13 +328,14 @@ const collectIds = (target: LintTarget, errors: LintFinding[]): Map<string, IdTa
         }
     }
     return found;
-};
+    });
 
 export const lintFiles = (
     opts: LintOptions = {},
-): Effect.Effect<LintReport, DbError, SurrealClient> =>
+): Effect.Effect<LintReport, DbError | PlatformError.PlatformError, SurrealClient | FileSystem.FileSystem> =>
     Effect.gen(function* () {
-        const targets = discoverFiles(opts);
+        const fs = yield* FileSystem.FileSystem;
+        const targets = yield* discoverFiles(opts);
         const errors: LintFinding[] = [];
         const warnings: LintFinding[] = [];
         const infos: LintFinding[] = [];
@@ -283,7 +344,7 @@ export const lintFiles = (
         // idToTarget: short_id → { path, experiment? }
         const idToTarget = new Map<string, IdTarget>();
         for (const t of targets) {
-            const found = collectIds(t, errors);
+            const found = yield* collectIds(t, errors);
             for (const [id, tgt] of found) {
                 if (idToTarget.has(id)) {
                     warnings.push({
@@ -372,7 +433,12 @@ export const lintFiles = (
             const updates: string[] = [];
             const pending: PendingReconcile[] = [];
 
-            const reconcileRow = (id: string, tgt: IdTarget, row: ExperimentRow): void => {
+            const reconcileRow = (
+                id: string,
+                tgt: IdTarget,
+                row: ExperimentRow,
+            ): Effect.Effect<void, never, FileSystem.FileSystem> =>
+                Effect.gen(function* () {
                 const plan = planTaskScaffolded({
                     experimentStatus: row.status,
                     lockedVerdict: row.locked_verdict,
@@ -395,15 +461,19 @@ export const lintFiles = (
                     updates.push(
                         `UPDATE ${updateTarget} SET status = '${plan.nextStatus}', scaffolded_at = time::now(), artifact_path = ${surrealLiteral(tgt.path)};`,
                     );
+                    // existsSync probe → orAbsent(false).
+                    const taskPresent = row.task_path
+                        ? yield* fs.exists(row.task_path).pipe(orAbsent(false))
+                        : false;
                     pending.push({
                         shortId: id,
                         experimentId: row.id,
                         previousStatus: row.status,
                         nextStatus: plan.nextStatus,
-                        taskPath: (row.task_path && existsSync(row.task_path)) ? row.task_path : null,
+                        taskPath: taskPresent ? row.task_path : null,
                     });
                 }
-            };
+                });
 
             for (const [id, tgt] of idToTarget) {
                 if (tgt.experiment) {
@@ -419,7 +489,7 @@ export const lintFiles = (
                         });
                         continue;
                     }
-                    reconcileRow(id, tgt, row);
+                    yield* reconcileRow(id, tgt, row);
                 } else {
                     // Inline guidance marker: use dedupe_sig batch result.
                     if (ambiguousShortIds.has(id)) {
@@ -443,7 +513,7 @@ export const lintFiles = (
                         });
                         continue;
                     }
-                    reconcileRow(id, tgt, row);
+                    yield* reconcileRow(id, tgt, row);
                 }
             }
 
@@ -453,7 +523,7 @@ export const lintFiles = (
                 for (const p of pending) {
                     let taskDeleted: string | null = null;
                     if (p.taskPath) {
-                        const deleted = deleteFileIfPresent(p.taskPath);
+                        const deleted = yield* deleteFileIfPresent(p.taskPath);
                         if (!deleted) {
                             warnings.push({
                                 rule: "task_cleanup_failed",
@@ -497,11 +567,14 @@ export const lintFiles = (
         `);
         for (const row of staleResult?.[0] ?? []) {
             if (idToTarget.has(row.short_id)) continue; // marker found this run → not stale
-            if (!row.task_path || !existsSync(row.task_path)) continue;
+            if (!row.task_path) continue;
+            // existsSync probe → orAbsent(false).
+            const present = yield* fs.exists(row.task_path).pipe(orAbsent(false));
+            if (!present) continue;
             // JS-side mtime cross-check: the task file may have been touched
             // (e.g. by the agent) after the experiment was created, so we still
             // verify the file is actually old before emitting the warning.
-            const mtime = statMtimeMsOrNull(row.task_path);
+            const mtime = yield* statMtimeMsOrNull(row.task_path);
             if (mtime === null) continue;
             const staleCutoffMs = Date.now() - staleDays * 86_400_000;
             if (mtime < staleCutoffMs) {

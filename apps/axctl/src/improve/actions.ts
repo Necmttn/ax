@@ -7,11 +7,11 @@
  * (CLI or HTTP) can render however it likes.
  */
 
-import { Effect } from "effect";
-import { existsSync, mkdirSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { Effect, FileSystem, type PlatformError } from "effect";
 import { SurrealClient } from "@ax/lib/db";
 import type { DbError } from "@ax/lib/errors";
+import { orAbsent } from "@ax/lib/shared/fs-error";
+import { posixPath } from "@ax/lib/shared/path";
 import { recordRef, surrealString } from "@ax/lib/shared/surql";
 import { surrealLiteral } from "@ax/lib/json";
 import { recordKeyPart } from "@ax/lib/shared/derive-keys";
@@ -117,33 +117,33 @@ interface FullProposalRow extends ProposalRow {
     } | null;
 }
 
-// scaffoldSkill can throw on filesystem errors. Wrapping the try/catch here
-// keeps acceptProposal's Effect.gen body free of try/catch (matches the lint
-// rule tryCatchInEffectGen enforced on main).
-function trySafeScaffold(
+// scaffoldSkill can fail with a PlatformError on filesystem faults. We recover
+// it into a structured `{ error }` here so acceptProposal can map the failure
+// to a `missing_payload` result (matching main's try/catch-to-message
+// behavior) rather than propagating the PlatformError up its E channel.
+const trySafeScaffold = (
     row: ProposalRow,
     payload: NonNullable<ProposalRow["skill_payload"]>,
     opts: AcceptOptions,
-): { result: ScaffoldResult } | { error: string } {
-    try {
-        const result = scaffoldSkill({
-            input: {
-                title: row.title,
-                hypothesis: row.hypothesis,
-                proposedBehavior: String(payload.proposed_behavior ?? ""),
-                triggerPattern: payload.trigger_pattern == null ? null : String(payload.trigger_pattern),
-                expectedImpact: payload.expected_impact == null ? null : String(payload.expected_impact),
-                dedupeSig: row.dedupe_sig,
-                nowIso: new Date().toISOString(),
-            },
-            ...(opts.scaffoldBaseDir === undefined ? {} : { baseDir: opts.scaffoldBaseDir }),
-            ...(opts.force === undefined ? {} : { force: opts.force }),
-        });
-        return { result };
-    } catch (err) {
-        return { error: err instanceof Error ? err.message : String(err) };
-    }
-}
+): Effect.Effect<{ result: ScaffoldResult } | { error: string }, never, FileSystem.FileSystem> =>
+    scaffoldSkill({
+        input: {
+            title: row.title,
+            hypothesis: row.hypothesis,
+            proposedBehavior: String(payload.proposed_behavior ?? ""),
+            triggerPattern: payload.trigger_pattern == null ? null : String(payload.trigger_pattern),
+            expectedImpact: payload.expected_impact == null ? null : String(payload.expected_impact),
+            dedupeSig: row.dedupe_sig,
+            nowIso: new Date().toISOString(),
+        },
+        ...(opts.scaffoldBaseDir === undefined ? {} : { baseDir: opts.scaffoldBaseDir }),
+        ...(opts.force === undefined ? {} : { force: opts.force }),
+    }).pipe(
+        Effect.map((result) => ({ result }) as { result: ScaffoldResult } | { error: string }),
+        Effect.catchTag("PlatformError", (err) =>
+            Effect.succeed({ error: err.message } as { result: ScaffoldResult } | { error: string }),
+        ),
+    );
 
 const fetchFullProposal = (idLiteral: string) =>
     Effect.gen(function* () {
@@ -162,7 +162,7 @@ const fetchFullProposal = (idLiteral: string) =>
 
 /** Default directory for .ax/tasks/ task brief files. */
 const defaultTaskDir = (): string =>
-    process.env.AX_TASK_DIR ?? join(process.cwd(), ".ax", "tasks");
+    process.env.AX_TASK_DIR ?? posixPath.join(process.cwd(), ".ax", "tasks");
 
 /**
  * Map a full proposal row + experimentId to a TaskInput for renderTaskFile.
@@ -321,8 +321,9 @@ const KEY_COUNTER = (() => {
 
 export const acceptProposal = (
     opts: AcceptOptions,
-): Effect.Effect<AcceptResult, DbError, SurrealClient> =>
+): Effect.Effect<AcceptResult, DbError | PlatformError.PlatformError, SurrealClient | FileSystem.FileSystem> =>
     Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
         const idLiteral = surrealLiteral(opts.sigOrId);
         const row = yield* fetchFullProposal(idLiteral);
         if (!row) return { status: "not_found", message: `no proposal matched ${opts.sigOrId}` };
@@ -382,7 +383,7 @@ export const acceptProposal = (
             if (!payload) {
                 return { status: "missing_payload", message: "skill_proposal payload missing" };
             }
-            const scaffoldOutcome = trySafeScaffold(row, payload, opts);
+            const scaffoldOutcome = yield* trySafeScaffold(row, payload, opts);
             if ("error" in scaffoldOutcome) {
                 return {
                     status: "missing_payload",
@@ -426,9 +427,11 @@ export const acceptProposal = (
         // Default path for all v0 forms: emit .ax/tasks/<dedupe_sig>.md
         validateSig(row.dedupe_sig);
         const taskDir = opts.taskDir ?? defaultTaskDir();
-        const taskPath = join(taskDir, `${row.dedupe_sig}.md`);
+        const taskPath = posixPath.join(taskDir, `${row.dedupe_sig}.md`);
 
-        if (existsSync(taskPath) && !opts.force) {
+        // existsSync probe: any fault → treat as absent (orAbsent(false)).
+        const taskExists = yield* fs.exists(taskPath).pipe(orAbsent(false));
+        if (taskExists && !opts.force) {
             return {
                 status: "scaffold_exists",
                 message: `task brief already exists at ${taskPath} (pass force=true to overwrite)`,
@@ -439,12 +442,13 @@ export const acceptProposal = (
         const taskInput = buildTaskInput(row, experimentId);
         const taskContent = renderTaskFile(taskInput);
 
-        mkdirSync(taskDir, { recursive: true });
+        // mkdir + tmp write propagate (original used bare mkdirSync/writeFileSync).
+        yield* fs.makeDirectory(taskDir, { recursive: true });
         // Atomic write: stage content in a temp file first, commit to final path only
         // after the DB update succeeds. This avoids orphan task files when the DB
         // query fails after the write.
         const tmpPath = `${taskPath}.tmp.${process.pid}`;
-        writeFileSync(tmpPath, taskContent, { encoding: "utf-8" });
+        yield* fs.writeFileString(tmpPath, taskContent);
 
         yield* db.query(`
             UPDATE ${recordRef("proposal", proposalKey)} SET status = '${PROPOSAL_STATUS_ACCEPTED}', updated_at = time::now();
@@ -454,12 +458,16 @@ export const acceptProposal = (
                 status: '${experimentStatus}'
             };
         `).pipe(
-            Effect.tapError(() => Effect.sync(() => {
-                try { unlinkSync(tmpPath); } catch { /* best-effort */ }
-            })),
+            // Best-effort cleanup of the staged temp file on DB failure (matches
+            // main's `try { unlinkSync(tmpPath); } catch {}`): force tolerates an
+            // already-absent temp and `ignore` swallows any other fault so the
+            // original DbError still propagates.
+            Effect.tapError(() => fs.remove(tmpPath, { force: true }).pipe(Effect.ignore)),
         );
 
-        renameSync(tmpPath, taskPath);
+        // Commit the staged write to its final path. Propagates on failure
+        // (original used bare renameSync, no try/catch).
+        yield* fs.rename(tmpPath, taskPath);
 
         return {
             status: "ok",
