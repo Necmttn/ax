@@ -227,6 +227,7 @@ export const unparkAgent = (
         yield* source.unpark({
             name,
             scope,
+            scopeTag: scope, // unused by unpark (renames dirPath only)
             dirPath: livePath,
             skills: [],
             contentHash: "",

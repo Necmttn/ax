@@ -39,9 +39,9 @@ export const reconcileAgents = (
                 ),
             );
             for (const rec of recs) {
-                const arr = byScope.get(rec.scope) ?? [];
+                const arr = byScope.get(rec.scopeTag) ?? [];
                 arr.push(rec.name);
-                byScope.set(rec.scope, arr);
+                byScope.set(rec.scopeTag, arr);
             }
         }
         return yield* reconcileByScope(AGENT_DEF_TABLE, byScope, opts);
