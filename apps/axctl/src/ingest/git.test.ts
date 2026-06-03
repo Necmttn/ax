@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { Effect, Layer } from "effect";
+import { BunFileSystem, BunPath } from "@effect/platform-bun";
 import { SurrealClient, type SurrealClientShape } from "@ax/lib/db";
 import {
     buildCommitLookupQueries,
@@ -240,7 +241,13 @@ describe("ingestGit repoPaths bypass", () => {
 
         const result = await Effect.runPromise(
             ingestGit({ repoPaths: [repoRoot], sinceDays: 1 }).pipe(
-                Effect.provide(Layer.succeed(SurrealClient, fakeDb)),
+                Effect.provide(
+                    Layer.mergeAll(
+                        Layer.succeed(SurrealClient, fakeDb),
+                        BunFileSystem.layer,
+                        BunPath.layer,
+                    ),
+                ),
             ),
         );
 
@@ -265,7 +272,13 @@ describe("ingestGit repoPaths bypass", () => {
 
         const result = await Effect.runPromise(
             ingestGit({ repoPaths: [], sinceDays: 1 }).pipe(
-                Effect.provide(Layer.succeed(SurrealClient, fakeDb)),
+                Effect.provide(
+                    Layer.mergeAll(
+                        Layer.succeed(SurrealClient, fakeDb),
+                        BunFileSystem.layer,
+                        BunPath.layer,
+                    ),
+                ),
             ),
         );
 
