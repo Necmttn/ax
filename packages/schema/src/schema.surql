@@ -15,6 +15,8 @@ DEFINE FIELD description    ON skill TYPE option<string>;   -- parsed from front
 DEFINE FIELD content_hash   ON skill TYPE string;
 DEFINE FIELD bytes          ON skill TYPE option<int>;
 DEFINE FIELD ingested_at    ON skill TYPE datetime VALUE time::now();
+DEFINE FIELD last_seen_at   ON skill TYPE option<datetime>;   -- reconcile: stamped when present on disk
+DEFINE FIELD deleted_at     ON skill TYPE option<datetime>;   -- reconcile: soft tombstone when absent on disk
 DEFINE INDEX skill_name_uq  ON skill FIELDS name UNIQUE;
 DEFINE INDEX skill_scope    ON skill FIELDS scope;
 
@@ -33,6 +35,25 @@ DEFINE INDEX IF NOT EXISTS skill_search_name
 DEFINE INDEX IF NOT EXISTS skill_search_desc
     ON skill FIELDS description
     FULLTEXT ANALYZER skill_text BM25 HIGHLIGHTS;
+
+-- Agent definition files (`~/.claude/agents/*.md`, `<repo>/.claude/agents/*.md`).
+-- Full graph entity with the same reconcile lifecycle as `skill` (see
+-- apps/axctl/src/ingest/agent-def.ts + apps/axctl/src/agents/). The `skills`
+-- list is the skill<->agent binding edited by `ax agents scope` / `ax skills scope`.
+DEFINE TABLE agent_def SCHEMAFULL;
+DEFINE FIELD name           ON agent_def TYPE string;
+DEFINE FIELD scope          ON agent_def TYPE string;          -- 'user' | 'project'
+DEFINE FIELD dir_path       ON agent_def TYPE string;
+DEFINE FIELD description    ON agent_def TYPE option<string>;
+DEFINE FIELD model          ON agent_def TYPE option<string>;
+DEFINE FIELD skills         ON agent_def TYPE option<array<string>>;  -- declared skills: frontmatter list
+DEFINE FIELD content_hash   ON agent_def TYPE string;
+DEFINE FIELD bytes          ON agent_def TYPE option<int>;
+DEFINE FIELD ingested_at    ON agent_def TYPE datetime VALUE time::now();
+DEFINE FIELD last_seen_at   ON agent_def TYPE option<datetime>;
+DEFINE FIELD deleted_at     ON agent_def TYPE option<datetime>;
+DEFINE INDEX agent_def_name_uq ON agent_def FIELDS name UNIQUE;
+DEFINE INDEX agent_def_scope   ON agent_def FIELDS scope;
 
 DEFINE TABLE session SCHEMAFULL;
 DEFINE FIELD project        ON session TYPE option<string>;

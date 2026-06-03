@@ -1169,7 +1169,7 @@ GROUP BY out;`;
         // GROUP BY scan; pull them straight from the skill table so the
         // "never used" rows still appear.
         const noInvSql = `
-SELECT name, scope FROM skill WHERE array::len(<-invoked) = 0;`;
+SELECT name, scope FROM skill WHERE array::len(<-invoked) = 0 AND deleted_at IS NONE;`;
         const [recentRes, summaryRes, skillRes, noInvRes] = yield* Effect.all(
             [
                 db.query<[Array<Record<string, unknown>>]>(recentSql),
