@@ -4998,7 +4998,7 @@ const tuiCommand = Command.make("tui", {}, () =>
 ).pipe(Command.withDescription("Open the interactive dashboard"));
 
 const installCommand = Command.make("install", {}, () =>
-    Effect.promise(() => cmdInstall()),
+    cmdInstall(),
 ).pipe(Command.withDescription("One-shot setup: daemon, watcher, symlink (then runs `ax setup`)"));
 
 const setupCommand = Command.make(
@@ -5010,16 +5010,14 @@ const setupCommand = Command.make(
         agentPrompt: Flag.boolean("agent-prompt").pipe(Flag.withDefault(false)),
     },
     ({ agents, noIngest, yes, agentPrompt }) =>
-        Effect.promise(() =>
-            cmdSetup({
-                ...(agents._tag === "Some"
-                    ? { agents: agents.value.split(",").map((s) => s.trim()).filter(Boolean) }
-                    : {}),
-                skipIngest: noIngest,
-                yes,
-                agentPromptOnly: agentPrompt,
-            }),
-        ),
+        cmdSetup({
+            ...(agents._tag === "Some"
+                ? { agents: agents.value.split(",").map((s) => s.trim()).filter(Boolean) }
+                : {}),
+            skipIngest: noIngest,
+            yes,
+            agentPromptOnly: agentPrompt,
+        }),
 ).pipe(
     Command.withDescription(
         "Install the agent skills, run the first ingest, and verify. " +
@@ -5030,19 +5028,19 @@ const setupCommand = Command.make(
 const daemonStatusCommand = Command.make(
     "status",
     { json: jsonFlag },
-    ({ json }) => Effect.promise(() => cmdDaemon(["status", ...boolArg("json", json)])),
+    ({ json }) => cmdDaemon(["status", ...boolArg("json", json)]),
 ).pipe(Command.withDescription("Show daemon and watcher status"));
 
 const daemonStartCommand = Command.make("start", {}, () =>
-    Effect.promise(() => cmdDaemon(["start"])),
+    cmdDaemon(["start"]),
 ).pipe(Command.withDescription("Start the daemon and watcher"));
 
 const daemonStopCommand = Command.make("stop", {}, () =>
-    Effect.promise(() => cmdDaemon(["stop"])),
+    cmdDaemon(["stop"]),
 ).pipe(Command.withDescription("Stop the daemon and watcher without deleting plists"));
 
 const daemonRestartCommand = Command.make("restart", {}, () =>
-    Effect.promise(() => cmdDaemon(["restart"])),
+    cmdDaemon(["restart"]),
 ).pipe(Command.withDescription("Restart the daemon and watcher"));
 
 const daemonCommand = Command.make("daemon").pipe(
@@ -5058,13 +5056,13 @@ const daemonCommand = Command.make("daemon").pipe(
 const doctorCommand = Command.make(
     "doctor",
     { json: jsonFlag },
-    ({ json }) => Effect.promise(() => cmdDoctor(boolArg("json", json))),
+    ({ json }) => cmdDoctor(boolArg("json", json)),
 ).pipe(Command.withDescription("Check local installation health"));
 
 const uninstallCommand = Command.make(
     "uninstall",
     { purge: Flag.boolean("purge").pipe(Flag.withDefault(false)) },
-    ({ purge }) => Effect.promise(() => cmdUninstall(purge)),
+    ({ purge }) => cmdUninstall(purge),
 ).pipe(
     Command.withDescription(
         "Remove launchd plists and the axctl symlink (--purge also deletes ~/.local/share/ax: binary + data)",
@@ -5224,7 +5222,14 @@ const withoutDb = (args: ReadonlyArray<string>): CliProgram => {
             );
         },
     });
-    return runCli(args).pipe(Effect.provideService(SurrealClient, stub));
+    // Lifecycle commands (install/setup/daemon/doctor/uninstall) are now
+    // @effect/platform-native and require FileSystem + Path. Provide the real
+    // Bun-backed layers here (no DB), so they run without dragging in AppLayer's
+    // SurrealClient connect path.
+    return runCli(args).pipe(
+        Effect.provideService(SurrealClient, stub),
+        Effect.provide(Layer.mergeAll(BunFileSystem.layer, BunPath.layer)),
+    );
 };
 
 // Commands whose handlers reach into SurrealClient via AppLayer. Anything

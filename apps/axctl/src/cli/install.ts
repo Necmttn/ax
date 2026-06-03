@@ -1,8 +1,8 @@
-import { mkdir, writeFile, unlink, symlink, lstat, chmod, rm } from "node:fs/promises";
-import { existsSync } from "node:fs";
-import { join } from "node:path";
 import { homedir } from "node:os";
 import { execSync, spawnSync } from "node:child_process";
+import { Cause, Effect, FileSystem, Path } from "effect";
+import { isNotFound, orAbsent } from "@ax/lib/shared/fs-error";
+import { posixPath } from "@ax/lib/shared/path";
 import { buildOnboardingReport, formatInstallOnboardingGuidance } from "./onboarding.ts";
 import {
     candidatePorts,
@@ -24,12 +24,12 @@ import { prettyPrint } from "@ax/lib/json";
 import schemaSurql from "@ax/schema/schema.surql" with { type: "text" };
 
 const HOME = homedir();
-const DATA_DIR = process.env.AX_DATA_DIR ?? join(HOME, ".local", "share", "ax");
-const LOG_DIR = join(DATA_DIR, "logs");
-const BUCKETS_DIR = join(DATA_DIR, "buckets");
-const LAUNCH_AGENTS_DIR = join(HOME, "Library", "LaunchAgents");
-const BIN_DIR = join(HOME, ".local", "bin");
-const VENDOR_BIN_DIR = join(DATA_DIR, "bin");
+const DATA_DIR = process.env.AX_DATA_DIR ?? posixPath.join(HOME, ".local", "share", "ax");
+const LOG_DIR = posixPath.join(DATA_DIR, "logs");
+const BUCKETS_DIR = posixPath.join(DATA_DIR, "buckets");
+const LAUNCH_AGENTS_DIR = posixPath.join(HOME, "Library", "LaunchAgents");
+const BIN_DIR = posixPath.join(HOME, ".local", "bin");
+const VENDOR_BIN_DIR = posixPath.join(DATA_DIR, "bin");
 
 // Pin to a known-good SurrealDB. Override via env to test newer versions.
 const SURREAL_VERSION = process.env.AXCTL_SURREAL_VERSION ?? "3.0.5";
@@ -37,9 +37,9 @@ const SURREAL_VERSION = process.env.AXCTL_SURREAL_VERSION ?? "3.0.5";
 const DB_LABEL = "com.necmttn.ax-db";
 const WATCH_LABEL = "com.necmttn.ax-watch";
 const DERIVE_LABEL = "com.necmttn.ax-derive-daily";
-const DB_PLIST = join(LAUNCH_AGENTS_DIR, `${DB_LABEL}.plist`);
-const WATCH_PLIST = join(LAUNCH_AGENTS_DIR, `${WATCH_LABEL}.plist`);
-const DERIVE_PLIST = join(LAUNCH_AGENTS_DIR, `${DERIVE_LABEL}.plist`);
+const DB_PLIST = posixPath.join(LAUNCH_AGENTS_DIR, `${DB_LABEL}.plist`);
+const WATCH_PLIST = posixPath.join(LAUNCH_AGENTS_DIR, `${WATCH_LABEL}.plist`);
+const DERIVE_PLIST = posixPath.join(LAUNCH_AGENTS_DIR, `${DERIVE_LABEL}.plist`);
 const ROCKSDB_BLOCK_CACHE_SIZE = process.env.AX_DB_ROCKSDB_BLOCK_CACHE_SIZE ?? "268435456";
 const ROCKSDB_WRITE_BUFFER_SIZE = process.env.AX_DB_ROCKSDB_WRITE_BUFFER_SIZE ?? "33554432";
 const ROCKSDB_MAX_WRITE_BUFFER_NUMBER = process.env.AX_DB_ROCKSDB_MAX_WRITE_BUFFER_NUMBER ?? "4";
@@ -212,95 +212,117 @@ function isSupportedVersion(v: string | null): boolean {
  * falls back to a pinned download into ~/.local/share/ax/bin/surreal.
  * Override via env: AXCTL_SURREAL_PATH (explicit path), AXCTL_FORCE_DOWNLOAD=1.
  */
-async function ensureSurreal(): Promise<string> {
-    const pinnedSurreal = process.env.AXCTL_SURREAL_PATH;
-    if (pinnedSurreal) {
-        const v = surrealVersionString(pinnedSurreal);
-        if (!v) throw new Error(`AXCTL_SURREAL_PATH is not executable`);
-        console.log(`  surreal: pinned ${pinnedSurreal} (${v})`);
-        return pinnedSurreal;
-    }
+function ensureSurreal(): Effect.Effect<string, Error, FileSystem.FileSystem | Path.Path> {
+    return Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
 
-    const localBin = join(VENDOR_BIN_DIR, "surreal");
-
-    // Reuse a previously-downloaded vendor binary if it boots - fastest path.
-    if (existsSync(localBin)) {
-        const v = surrealVersionString(localBin);
-        if (isSupportedVersion(v)) {
-            console.log(`  surreal: vendored ${localBin} (${v})`);
-            return localBin;
+        const pinnedSurreal = process.env.AXCTL_SURREAL_PATH;
+        if (pinnedSurreal) {
+            const v = surrealVersionString(pinnedSurreal);
+            if (!v) return yield* Effect.fail(new Error(`AXCTL_SURREAL_PATH is not executable`));
+            console.log(`  surreal: pinned ${pinnedSurreal} (${v})`);
+            return pinnedSurreal;
         }
-    }
 
-    // Prefer system install when present and version-compatible (any 3.x).
-    if (!process.env.AXCTL_FORCE_DOWNLOAD) {
-        const sys = which("surreal");
-        if (sys) {
-            const v = surrealVersionString(sys);
+        const localBin = path.join(VENDOR_BIN_DIR, "surreal");
+
+        // Reuse a previously-downloaded vendor binary if it boots - fastest path.
+        if (yield* fs.exists(localBin).pipe(orAbsent(false))) {
+            const v = surrealVersionString(localBin);
             if (isSupportedVersion(v)) {
-                console.log(`  surreal: system ${sys} (${v})`);
-                return sys;
+                console.log(`  surreal: vendored ${localBin} (${v})`);
+                return localBin;
             }
-            console.log(`  surreal: system ${sys} unsupported (${v}); will download`);
         }
-    }
 
-    const platform = platformArtifact();
-    if (!platform) {
-        throw new Error(
-            `Unsupported platform ${process.platform}/${process.arch}. ` +
-                `Install surreal manually: https://surrealdb.com/install`,
+        // Prefer system install when present and version-compatible (any 3.x).
+        if (!process.env.AXCTL_FORCE_DOWNLOAD) {
+            const sys = which("surreal");
+            if (sys) {
+                const v = surrealVersionString(sys);
+                if (isSupportedVersion(v)) {
+                    console.log(`  surreal: system ${sys} (${v})`);
+                    return sys;
+                }
+                console.log(`  surreal: system ${sys} unsupported (${v}); will download`);
+            }
+        }
+
+        const platform = platformArtifact();
+        if (!platform) {
+            return yield* Effect.fail(
+                new Error(
+                    `Unsupported platform ${process.platform}/${process.arch}. ` +
+                        `Install surreal manually: https://surrealdb.com/install`,
+                ),
+            );
+        }
+
+        const tag = `v${SURREAL_VERSION}`;
+        const url = `https://github.com/surrealdb/surrealdb/releases/download/${tag}/surreal-${tag}.${platform}.tgz`;
+        console.log(`  surreal: downloading ${tag} for ${platform}...`);
+
+        yield* fs.makeDirectory(VENDOR_BIN_DIR, { recursive: true });
+        const tmpTar = path.join(VENDOR_BIN_DIR, "surreal.tgz");
+
+        const startedAt = Date.now();
+        // The download+extract block mirrors the original try/catch: ANY failure
+        // (network, HTTP, tar, fs PlatformError) falls back to a system surreal
+        // if present, else re-raises. `catchCause` recovers BOTH typed failures
+        // and unexpected defects, matching the original blanket `catch (err)`.
+        return yield* Effect.gen(function* () {
+            const res = yield* Effect.promise(() => fetch(url));
+            if (!res.ok) {
+                return yield* Effect.fail(
+                    new Error(`download failed: HTTP ${res.status} ${res.statusText}`),
+                );
+            }
+            const buf = yield* Effect.promise(() => res.arrayBuffer());
+            const sizeMB = (buf.byteLength / (1024 * 1024)).toFixed(1);
+            yield* fs.writeFile(tmpTar, new Uint8Array(buf));
+
+            const ex = spawnSync("tar", ["-xzf", tmpTar, "-C", VENDOR_BIN_DIR], {
+                stdio: "inherit",
+            });
+            if (ex.status !== 0) return yield* Effect.fail(new Error("tar extract failed"));
+            yield* fs.chmod(localBin, 0o755);
+            yield* fs.remove(tmpTar, { force: true });
+
+            const v = surrealVersionString(localBin);
+            if (!v) return yield* Effect.fail(new Error(`downloaded surreal at ${localBin} did not run`));
+            const elapsedSec = ((Date.now() - startedAt) / 1000).toFixed(1);
+            console.log(`  surreal: installed ${localBin} (${v}) [${sizeMB} MB in ${elapsedSec}s]`);
+            return localBin;
+        }).pipe(
+            Effect.catchCause((cause) => {
+                // Offline / GitHub down - fall back to system surreal if present at all.
+                const err = Cause.squash(cause);
+                const sys = which("surreal");
+                if (sys) {
+                    console.warn(
+                        `  surreal: download failed (${(err as Error).message}); falling back to ${sys}`,
+                    );
+                    return Effect.succeed(sys);
+                }
+                return Effect.fail(err as Error);
+            }),
         );
-    }
-
-    const tag = `v${SURREAL_VERSION}`;
-    const url = `https://github.com/surrealdb/surrealdb/releases/download/${tag}/surreal-${tag}.${platform}.tgz`;
-    console.log(`  surreal: downloading ${tag} for ${platform}...`);
-
-    await mkdir(VENDOR_BIN_DIR, { recursive: true });
-    const tmpTar = join(VENDOR_BIN_DIR, "surreal.tgz");
-
-    const startedAt = Date.now();
-    try {
-        const res = await fetch(url);
-        if (!res.ok) {
-            throw new Error(`download failed: HTTP ${res.status} ${res.statusText}`);
-        }
-        const buf = await res.arrayBuffer();
-        const sizeMB = (buf.byteLength / (1024 * 1024)).toFixed(1);
-        await writeFile(tmpTar, new Uint8Array(buf));
-
-        const ex = spawnSync("tar", ["-xzf", tmpTar, "-C", VENDOR_BIN_DIR], {
-            stdio: "inherit",
-        });
-        if (ex.status !== 0) throw new Error("tar extract failed");
-        await chmod(localBin, 0o755);
-        await unlink(tmpTar).catch(() => undefined);
-
-        const v = surrealVersionString(localBin);
-        if (!v) throw new Error(`downloaded surreal at ${localBin} did not run`);
-        const elapsedSec = ((Date.now() - startedAt) / 1000).toFixed(1);
-        console.log(`  surreal: installed ${localBin} (${v}) [${sizeMB} MB in ${elapsedSec}s]`);
-        return localBin;
-    } catch (err) {
-        // Offline / GitHub down - fall back to system surreal if present at all.
-        const sys = which("surreal");
-        if (sys) {
-            console.warn(`  surreal: download failed (${(err as Error).message}); falling back to ${sys}`);
-            return sys;
-        }
-        throw err;
-    }
+    });
 }
 
-async function ensureDirs() {
-    await mkdir(DATA_DIR, { recursive: true });
-    await mkdir(LOG_DIR, { recursive: true });
-    await mkdir(VENDOR_BIN_DIR, { recursive: true });
-    await mkdir(join(BUCKETS_DIR, "transcripts"), { recursive: true });
-    await mkdir(join(BUCKETS_DIR, "codex_artifacts"), { recursive: true });
-    await mkdir(LAUNCH_AGENTS_DIR, { recursive: true });
-    await mkdir(BIN_DIR, { recursive: true });
+function ensureDirs(): Effect.Effect<void, Error, FileSystem.FileSystem | Path.Path> {
+    return Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        yield* fs.makeDirectory(DATA_DIR, { recursive: true });
+        yield* fs.makeDirectory(LOG_DIR, { recursive: true });
+        yield* fs.makeDirectory(VENDOR_BIN_DIR, { recursive: true });
+        yield* fs.makeDirectory(path.join(BUCKETS_DIR, "transcripts"), { recursive: true });
+        yield* fs.makeDirectory(path.join(BUCKETS_DIR, "codex_artifacts"), { recursive: true });
+        yield* fs.makeDirectory(LAUNCH_AGENTS_DIR, { recursive: true });
+        yield* fs.makeDirectory(BIN_DIR, { recursive: true });
+    });
 }
 
 async function loadAgent(plistPath: string) {
@@ -321,26 +343,72 @@ async function unloadAgentKeepPlist(plistPath: string): Promise<void> {
 }
 
 /** Unload + delete a LaunchAgent plist. Returns true when the file existed and was removed. */
-async function unloadAgent(plistPath: string): Promise<boolean> {
-    await unloadAgentKeepPlist(plistPath);
-    if (!existsSync(plistPath)) return false;
-    try {
-        await unlink(plistPath);
-        return true;
-    } catch {
-        return false;
-    }
+function unloadAgent(plistPath: string): Effect.Effect<boolean, never, FileSystem.FileSystem> {
+    return Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        yield* Effect.sync(() => unloadAgentKeepPlist(plistPath));
+        if (!(yield* fs.exists(plistPath).pipe(orAbsent(false)))) return false;
+        // Original swallowed any unlink error and returned false; `remove`
+        // (no force) succeeds on a present file, else recovers to false.
+        return yield* fs.remove(plistPath).pipe(
+            Effect.as(true),
+            orAbsent(false),
+        );
+    });
 }
 
-async function ensureSymlink(target: string, link: string) {
-    try {
-        const st = await lstat(link);
-        if (st.isSymbolicLink()) await unlink(link);
-        else throw new Error(`${link} exists and is not a symlink`);
-    } catch (err) {
-        if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
-    }
-    await symlink(target, link);
+/**
+ * Ensure `link` is a symbolic link pointing at `target`. @effect/platform has
+ * no `lstat`, so the old `lstat(link).isSymbolicLink()` decision is rebuilt on
+ * `fs.readLink`, which SUCCEEDS iff `link` is a symbolic link:
+ *
+ *   old: lstat ENOENT (absent)         -> symlink(target, link)   [create]
+ *   old: lstat ok && isSymbolicLink    -> unlink(link); symlink   [replace]
+ *   old: lstat ok && NOT symlink       -> throw "exists and is not a symlink"
+ *
+ * new: readLink ok                     -> existing symlink: repoint only when
+ *                                         the target differs (same end-state as
+ *                                         the old unconditional unlink+recreate;
+ *                                         REVIEW: old code always recreated even
+ *                                         when the target already matched).
+ *      readLink NotFound               -> link absent OR a regular file in the
+ *                                         way. Distinguish via `fs.exists`:
+ *                                           absent -> symlink(target, link)
+ *                                           present-not-a-symlink -> throw the
+ *                                             same "exists and is not a symlink".
+ *      readLink other PlatformError    -> re-raise (matches old non-ENOENT rethrow).
+ */
+export function ensureSymlink(
+    target: string,
+    link: string,
+): Effect.Effect<void, Error, FileSystem.FileSystem> {
+    return Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const existingTarget = yield* fs.readLink(link).pipe(
+            Effect.map((t) => ({ kind: "symlink" as const, target: t })),
+            Effect.catchTag("PlatformError", (e) =>
+                isNotFound(e)
+                    ? Effect.succeed({ kind: "missing-or-other" as const })
+                    : Effect.fail(e),
+            ),
+        );
+
+        if (existingTarget.kind === "symlink") {
+            if (existingTarget.target === target) return; // already correct
+            yield* fs.remove(link, { force: true });
+            yield* fs.symlink(target, link);
+            return;
+        }
+
+        // readLink reported NotFound: either the path is genuinely absent, or a
+        // non-symlink (regular file/dir) is in the way. `fs.exists` follows the
+        // path; if something is there it is NOT a symlink (readLink would have
+        // succeeded), so preserve the old hard error.
+        if (yield* fs.exists(link).pipe(orAbsent(false))) {
+            return yield* Effect.fail(new Error(`${link} exists and is not a symlink`));
+        }
+        yield* fs.symlink(target, link);
+    });
 }
 
 function resolveBinaryPath(): string {
@@ -349,7 +417,7 @@ function resolveBinaryPath(): string {
     const arg = process.argv[1] ?? "";
     if (arg.endsWith(".ts")) {
         // Dev mode: point at the bin wrapper
-        return join(import.meta.dir, "..", "..", "bin", "axctl");
+        return posixPath.join(import.meta.dir, "..", "..", "bin", "axctl");
     }
     return process.execPath;
 }
@@ -449,20 +517,27 @@ function loadedDbPid(): number | null {
     return Number.isFinite(pid) ? pid : null;
 }
 
-function launchdStatus(label: string, plist: string): AgentRuntimeStatus {
-    if (!isMacos()) {
-        return { label, plist, plistExists: existsSync(plist), loaded: false, pid: null };
-    }
-    const r = spawnSync("launchctl", ["list", label], { encoding: "utf8" });
-    const output = `${r.stdout ?? ""}${r.stderr ?? ""}`;
-    const pidMatch = output.match(/"PID"\s*=\s*(\d+);/);
-    return {
-        label,
-        plist,
-        plistExists: existsSync(plist),
-        loaded: r.status === 0,
-        pid: pidMatch ? Number(pidMatch[1]) : null,
-    };
+function launchdStatus(
+    label: string,
+    plist: string,
+): Effect.Effect<AgentRuntimeStatus, never, FileSystem.FileSystem> {
+    return Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const plistExists = yield* fs.exists(plist).pipe(orAbsent(false));
+        if (!isMacos()) {
+            return { label, plist, plistExists, loaded: false, pid: null };
+        }
+        const r = spawnSync("launchctl", ["list", label], { encoding: "utf8" });
+        const output = `${r.stdout ?? ""}${r.stderr ?? ""}`;
+        const pidMatch = output.match(/"PID"\s*=\s*(\d+);/);
+        return {
+            label,
+            plist,
+            plistExists,
+            loaded: r.status === 0,
+            pid: pidMatch ? Number(pidMatch[1]) : null,
+        };
+    });
 }
 
 function collectDaemonEndpoint(): DaemonEndpoint {
@@ -485,21 +560,23 @@ function collectDaemonEndpoint(): DaemonEndpoint {
     };
 }
 
-function collectDaemonStatus(): DaemonStatus {
-    const endpoint = collectDaemonEndpoint();
-    return {
-        platform: process.platform,
-        macosLaunchd: isMacos(),
-        dataDir: DATA_DIR,
-        logDir: LOG_DIR,
-        dbListening: endpoint.listening,
-        endpoint,
-        agents: [
-            launchdStatus(DB_LABEL, DB_PLIST),
-            launchdStatus(WATCH_LABEL, WATCH_PLIST),
-            launchdStatus(DERIVE_LABEL, DERIVE_PLIST),
-        ],
-    };
+function collectDaemonStatus(): Effect.Effect<DaemonStatus, never, FileSystem.FileSystem> {
+    return Effect.gen(function* () {
+        const endpoint = collectDaemonEndpoint();
+        return {
+            platform: process.platform,
+            macosLaunchd: isMacos(),
+            dataDir: DATA_DIR,
+            logDir: LOG_DIR,
+            dbListening: endpoint.listening,
+            endpoint,
+            agents: [
+                yield* launchdStatus(DB_LABEL, DB_PLIST),
+                yield* launchdStatus(WATCH_LABEL, WATCH_PLIST),
+                yield* launchdStatus(DERIVE_LABEL, DERIVE_PLIST),
+            ],
+        };
+    });
 }
 
 export function formatDaemonStatus(status: DaemonStatus, json = false): string {
@@ -532,64 +609,80 @@ export function formatDaemonStatus(status: DaemonStatus, json = false): string {
     return lines.join("\n");
 }
 
-export function collectDoctorReport(): DoctorReport {
-    const binLink = join(BIN_DIR, "axctl");
-    const surrealPath = process.env.AXCTL_SURREAL_PATH ?? which("surreal") ?? join(VENDOR_BIN_DIR, "surreal");
-    const surrealVersion = existsSync(surrealPath) ? surrealVersionString(surrealPath) : null;
-    const daemon = collectDaemonStatus();
-    const checks: DoctorCheck[] = [
-        {
-            name: "platform",
-            ok: isMacos(),
-            detail: isMacos() ? "macOS launchd supported" : `${process.platform}; daemon install is macOS-only`,
-        },
-        {
-            name: "binary",
-            ok: existsSync(binLink),
-            detail: existsSync(binLink) ? binLink : `${binLink} missing; run axctl install`,
-        },
-        {
-            name: "data-dir",
-            ok: existsSync(DATA_DIR),
-            detail: DATA_DIR,
-        },
-        {
-            name: "logs-dir",
-            ok: existsSync(LOG_DIR),
-            detail: LOG_DIR,
-        },
-        {
-            name: "surreal",
-            ok: isSupportedVersion(surrealVersion),
-            detail: surrealVersion ? `${surrealPath} (${surrealVersion})` : `${surrealPath} missing or not executable`,
-        },
-        {
-            name: "db-listener",
-            ok: daemon.dbListening && daemon.endpoint.conflict === null,
-            detail: daemon.dbListening
-                ? daemon.endpoint.conflict === null
-                    ? `${daemon.endpoint.host}:${daemon.endpoint.port} is listening`
-                    : `${daemon.endpoint.host}:${daemon.endpoint.port} held by pid=${daemon.endpoint.conflict.pid} (${daemon.endpoint.conflict.command}); rerun 'axctl install' to pick a free port`
-                : `${daemon.endpoint.host}:${daemon.endpoint.port} is not listening`,
-        },
-        {
-            name: "runtime-state",
-            ok: existsSync(daemon.endpoint.runtimeStatePath),
-            detail: daemon.endpoint.runtimeStatePath,
-        },
-        ...daemon.agents.map((agent): DoctorCheck => ({
-            name: agent.label,
-            ok: !isMacos() || (agent.plistExists && agent.loaded),
-            detail: `${agent.loaded ? "loaded" : "not loaded"}; plist=${agent.plistExists ? "present" : "absent"}`,
-        })),
-    ];
-    const onboarding = buildOnboardingReport();
-    const onboardingChecks: DoctorCheck[] = onboarding.checks.map((c) => ({
-        name: `onboarding:${c.id}`,
-        ok: c.status === "ok",
-        detail: c.recommendation,
-    }));
-    return { platform: process.platform, checks: [...checks, ...onboardingChecks] };
+export function collectDoctorReport(): Effect.Effect<
+    DoctorReport,
+    never,
+    FileSystem.FileSystem | Path.Path
+> {
+    return Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const binLink = path.join(BIN_DIR, "axctl");
+        const surrealPath =
+            process.env.AXCTL_SURREAL_PATH ?? which("surreal") ?? path.join(VENDOR_BIN_DIR, "surreal");
+        const surrealExists = yield* fs.exists(surrealPath).pipe(orAbsent(false));
+        const surrealVersion = surrealExists ? surrealVersionString(surrealPath) : null;
+        const daemon = yield* collectDaemonStatus();
+        const binExists = yield* fs.exists(binLink).pipe(orAbsent(false));
+        const dataDirExists = yield* fs.exists(DATA_DIR).pipe(orAbsent(false));
+        const logDirExists = yield* fs.exists(LOG_DIR).pipe(orAbsent(false));
+        const runtimeStateExists = yield* fs
+            .exists(daemon.endpoint.runtimeStatePath)
+            .pipe(orAbsent(false));
+        const checks: DoctorCheck[] = [
+            {
+                name: "platform",
+                ok: isMacos(),
+                detail: isMacos() ? "macOS launchd supported" : `${process.platform}; daemon install is macOS-only`,
+            },
+            {
+                name: "binary",
+                ok: binExists,
+                detail: binExists ? binLink : `${binLink} missing; run axctl install`,
+            },
+            {
+                name: "data-dir",
+                ok: dataDirExists,
+                detail: DATA_DIR,
+            },
+            {
+                name: "logs-dir",
+                ok: logDirExists,
+                detail: LOG_DIR,
+            },
+            {
+                name: "surreal",
+                ok: isSupportedVersion(surrealVersion),
+                detail: surrealVersion ? `${surrealPath} (${surrealVersion})` : `${surrealPath} missing or not executable`,
+            },
+            {
+                name: "db-listener",
+                ok: daemon.dbListening && daemon.endpoint.conflict === null,
+                detail: daemon.dbListening
+                    ? daemon.endpoint.conflict === null
+                        ? `${daemon.endpoint.host}:${daemon.endpoint.port} is listening`
+                        : `${daemon.endpoint.host}:${daemon.endpoint.port} held by pid=${daemon.endpoint.conflict.pid} (${daemon.endpoint.conflict.command}); rerun 'axctl install' to pick a free port`
+                    : `${daemon.endpoint.host}:${daemon.endpoint.port} is not listening`,
+            },
+            {
+                name: "runtime-state",
+                ok: runtimeStateExists,
+                detail: daemon.endpoint.runtimeStatePath,
+            },
+            ...daemon.agents.map((agent): DoctorCheck => ({
+                name: agent.label,
+                ok: !isMacos() || (agent.plistExists && agent.loaded),
+                detail: `${agent.loaded ? "loaded" : "not loaded"}; plist=${agent.plistExists ? "present" : "absent"}`,
+            })),
+        ];
+        const onboarding = buildOnboardingReport();
+        const onboardingChecks: DoctorCheck[] = onboarding.checks.map((c) => ({
+            name: `onboarding:${c.id}`,
+            ok: c.status === "ok",
+            detail: c.recommendation,
+        }));
+        return { platform: process.platform, checks: [...checks, ...onboardingChecks] };
+    });
 }
 
 export function formatDoctorReport(report: DoctorReport, json = false): string {
@@ -601,116 +694,124 @@ export function formatDoctorReport(report: DoctorReport, json = false): string {
     return lines.join("\n");
 }
 
-export async function cmdInstall() {
-    console.log("[axctl] install");
-    await ensureDirs();
+export function cmdInstall(): Effect.Effect<
+    void,
+    Error,
+    FileSystem.FileSystem | Path.Path
+> {
+    return Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        console.log("[axctl] install");
+        yield* ensureDirs();
 
-    const surrealPath = await ensureSurreal();
+        const surrealPath = yield* ensureSurreal();
 
-    const binSource = resolveBinaryPath();
-    const binLink = join(BIN_DIR, "axctl");
-    const aliasBinLink = join(BIN_DIR, "ax");
-    if (binSource !== binLink) {
-        await ensureSymlink(binSource, binLink);
-        console.log(`  symlink: ${binLink} → ${binSource}`);
-    }
-    if (binSource !== aliasBinLink) {
-        await ensureSymlink(binSource, aliasBinLink);
-        console.log(`  alias symlink: ${aliasBinLink} → ${binSource}`);
-    }
-
-    const bind = chooseBindPort();
-    if (bind.chosen !== DEFAULT_DB_PORT) {
-        const conflict = bind.attempted.find(
-            (probe) => probe.port === DEFAULT_DB_PORT && probe.listening,
-        )?.holder;
-        if (conflict) {
-            console.log(
-                `  port ${DEFAULT_DB_PORT} held by pid=${conflict.pid} (${conflict.command}); falling back to ${bind.chosen}`,
-            );
-        } else {
-            console.log(`  port ${DEFAULT_DB_PORT} unavailable; using ${bind.chosen}`);
+        const binSource = resolveBinaryPath();
+        const binLink = path.join(BIN_DIR, "axctl");
+        const aliasBinLink = path.join(BIN_DIR, "ax");
+        if (binSource !== binLink) {
+            yield* ensureSymlink(binSource, binLink);
+            console.log(`  symlink: ${binLink} → ${binSource}`);
         }
-    }
-    writeRuntimeState({ db: { host: DEFAULT_DB_HOST, port: bind.chosen } });
-    console.log(`  runtime-state: ${runtimeStatePath()} (db @ ${DEFAULT_DB_HOST}:${bind.chosen})`);
-
-    await writeFile(
-        DB_PLIST,
-        dbPlist(binSource, surrealPath, { host: DEFAULT_DB_HOST, port: bind.chosen }),
-    );
-    console.log(`  wrote:  ${DB_PLIST}`);
-    await loadAgent(DB_PLIST);
-
-    // Wait for daemon to bind
-    for (let i = 0; i < 8; i++) {
-        if (probePort(bind.chosen).listening) {
-            console.log(`  daemon: listening on ${DEFAULT_DB_HOST}:${bind.chosen}`);
-            break;
+        if (binSource !== aliasBinLink) {
+            yield* ensureSymlink(binSource, aliasBinLink);
+            console.log(`  alias symlink: ${aliasBinLink} → ${binSource}`);
         }
-        await new Promise((res) => setTimeout(res, 500));
-    }
 
-    await writeFile(WATCH_PLIST, watchPlist(binSource));
-    console.log(`  wrote:  ${WATCH_PLIST}`);
-    await loadAgent(WATCH_PLIST);
-
-    await writeFile(DERIVE_PLIST, derivePlist(binSource));
-    console.log(`  wrote:  ${DERIVE_PLIST}`);
-    await loadAgent(DERIVE_PLIST);
-
-    // Apply schema from embedded resource via surreal import.
-    const schemaPath = join(DATA_DIR, ".schema-cache.surql");
-    await writeFile(schemaPath, schemaSurql);
-    const r = spawnSync(
-        surrealPath,
-        [
-            "import",
-            "--endpoint",
-            `http://${DEFAULT_DB_HOST}:${bind.chosen}`,
-            "--user",
-            "root",
-            "--pass",
-            "root",
-            "--ns",
-            "ax",
-            "--db",
-            "main",
-            schemaPath,
-        ],
-        { stdio: ["ignore", "pipe", "pipe"], encoding: "utf8" },
-    );
-    if (r.status === 0) {
-        console.log("  schema: applied");
-    } else {
-        // Capture stdio so the surreal CLI doesn't paint raw ANSI escapes to the
-        // user's terminal; surface only the relevant lines on failure.
-        const out = stripAnsi(`${r.stdout ?? ""}${r.stderr ?? ""}`).trim();
-        console.warn("  schema: apply failed (daemon may not be ready); re-run 'axctl install'");
-        if (out) {
-            for (const line of out.split("\n")) {
-                if (line.trim()) console.warn(`    ${line}`);
+        const bind = chooseBindPort();
+        if (bind.chosen !== DEFAULT_DB_PORT) {
+            const conflict = bind.attempted.find(
+                (probe) => probe.port === DEFAULT_DB_PORT && probe.listening,
+            )?.holder;
+            if (conflict) {
+                console.log(
+                    `  port ${DEFAULT_DB_PORT} held by pid=${conflict.pid} (${conflict.command}); falling back to ${bind.chosen}`,
+                );
+            } else {
+                console.log(`  port ${DEFAULT_DB_PORT} unavailable; using ${bind.chosen}`);
             }
         }
-    }
-    await unlink(schemaPath).catch(() => undefined);
+        writeRuntimeState({ db: { host: DEFAULT_DB_HOST, port: bind.chosen } });
+        console.log(`  runtime-state: ${runtimeStatePath()} (db @ ${DEFAULT_DB_HOST}:${bind.chosen})`);
 
-    const { BANNER } = await import("./banner.ts");
-    console.log(BANNER);
-    console.log("  installed. try:");
-    console.log("    axctl ingest          # initial fill");
-    console.log("    axctl serve           # live web dashboard");
-    console.log("    axctl tui             # interactive terminal dashboard");
-    console.log("    launchctl list | grep 'com.necmttn.ax'   # verify both LaunchAgents loaded");
-    console.log();
-    console.log("  questions or feedback? join the community:");
-    console.log("    https://discord.gg/E4R88Cvr5R");
-    console.log();
-    console.log(formatInstallOnboardingGuidance(buildOnboardingReport()));
+        yield* fs.writeFileString(
+            DB_PLIST,
+            dbPlist(binSource, surrealPath, { host: DEFAULT_DB_HOST, port: bind.chosen }),
+        );
+        console.log(`  wrote:  ${DB_PLIST}`);
+        yield* Effect.sync(() => loadAgent(DB_PLIST));
 
-    // Fresh install flows straight into setup (skills + first ingest + doctor).
-    console.log();
-    await cmdSetup({ fromInstall: true });
+        // Wait for daemon to bind
+        for (let i = 0; i < 8; i++) {
+            if (probePort(bind.chosen).listening) {
+                console.log(`  daemon: listening on ${DEFAULT_DB_HOST}:${bind.chosen}`);
+                break;
+            }
+            yield* Effect.promise(() => new Promise((res) => setTimeout(res, 500)));
+        }
+
+        yield* fs.writeFileString(WATCH_PLIST, watchPlist(binSource));
+        console.log(`  wrote:  ${WATCH_PLIST}`);
+        yield* Effect.sync(() => loadAgent(WATCH_PLIST));
+
+        yield* fs.writeFileString(DERIVE_PLIST, derivePlist(binSource));
+        console.log(`  wrote:  ${DERIVE_PLIST}`);
+        yield* Effect.sync(() => loadAgent(DERIVE_PLIST));
+
+        // Apply schema from embedded resource via surreal import.
+        const schemaPath = path.join(DATA_DIR, ".schema-cache.surql");
+        yield* fs.writeFileString(schemaPath, schemaSurql);
+        const r = spawnSync(
+            surrealPath,
+            [
+                "import",
+                "--endpoint",
+                `http://${DEFAULT_DB_HOST}:${bind.chosen}`,
+                "--user",
+                "root",
+                "--pass",
+                "root",
+                "--ns",
+                "ax",
+                "--db",
+                "main",
+                schemaPath,
+            ],
+            { stdio: ["ignore", "pipe", "pipe"], encoding: "utf8" },
+        );
+        if (r.status === 0) {
+            console.log("  schema: applied");
+        } else {
+            // Capture stdio so the surreal CLI doesn't paint raw ANSI escapes to the
+            // user's terminal; surface only the relevant lines on failure.
+            const out = stripAnsi(`${r.stdout ?? ""}${r.stderr ?? ""}`).trim();
+            console.warn("  schema: apply failed (daemon may not be ready); re-run 'axctl install'");
+            if (out) {
+                for (const line of out.split("\n")) {
+                    if (line.trim()) console.warn(`    ${line}`);
+                }
+            }
+        }
+        yield* fs.remove(schemaPath, { force: true });
+
+        const { BANNER } = yield* Effect.promise(() => import("./banner.ts"));
+        console.log(BANNER);
+        console.log("  installed. try:");
+        console.log("    axctl ingest          # initial fill");
+        console.log("    axctl serve           # live web dashboard");
+        console.log("    axctl tui             # interactive terminal dashboard");
+        console.log("    launchctl list | grep 'com.necmttn.ax'   # verify both LaunchAgents loaded");
+        console.log();
+        console.log("  questions or feedback? join the community:");
+        console.log("    https://discord.gg/E4R88Cvr5R");
+        console.log();
+        console.log(formatInstallOnboardingGuidance(buildOnboardingReport()));
+
+        // Fresh install flows straight into setup (skills + first ingest + doctor).
+        console.log();
+        yield* cmdSetup({ fromInstall: true });
+    });
 }
 
 // ---------------------------------------------------------------------------
@@ -720,9 +821,9 @@ export async function cmdInstall() {
 
 /** Agents ax can install skills for. `dir` is the install-presence probe. */
 const SETUP_AGENTS: ReadonlyArray<{ id: string; label: string; dir: string }> = [
-    { id: "claude-code", label: "Claude Code", dir: join(HOME, ".claude") },
-    { id: "codex", label: "Codex", dir: join(HOME, ".codex") },
-    { id: "cursor", label: "Cursor", dir: join(HOME, ".cursor") },
+    { id: "claude-code", label: "Claude Code", dir: posixPath.join(HOME, ".claude") },
+    { id: "codex", label: "Codex", dir: posixPath.join(HOME, ".codex") },
+    { id: "cursor", label: "Cursor", dir: posixPath.join(HOME, ".cursor") },
 ];
 
 export interface SetupOptions {
@@ -739,158 +840,205 @@ export interface SetupOptions {
 }
 
 /** Resolve the real binary to re-invoke for the first ingest. */
-const selfBin = (): string => {
-    const vendored = join(VENDOR_BIN_DIR, "axctl");
-    return existsSync(vendored) ? vendored : process.execPath;
-};
+const selfBin = (): Effect.Effect<string, never, FileSystem.FileSystem | Path.Path> =>
+    Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const vendored = path.join(VENDOR_BIN_DIR, "axctl");
+        return (yield* fs.exists(vendored).pipe(orAbsent(false))) ? vendored : process.execPath;
+    });
 
 /** Choose which agents to install skills for. Interactive on a TTY, else the
  *  detected (present-on-disk) set, falling back to claude-code + codex. */
-function resolveSetupAgents(opts: SetupOptions): string[] {
-    if (opts.agents && opts.agents.length > 0) return [...opts.agents];
-    const present = SETUP_AGENTS.filter((a) => existsSync(a.dir));
-    const fallback = present.length > 0 ? present.map((a) => a.id) : ["claude-code", "codex"];
+function resolveSetupAgents(
+    opts: SetupOptions,
+): Effect.Effect<string[], never, FileSystem.FileSystem> {
+    return Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        if (opts.agents && opts.agents.length > 0) return [...opts.agents];
+        const presence = yield* Effect.forEach(SETUP_AGENTS, (a) =>
+            fs.exists(a.dir).pipe(orAbsent(false), Effect.map((exists) => ({ a, exists }))),
+        );
+        const present = presence.filter((p) => p.exists).map((p) => p.a);
+        const fallback = present.length > 0 ? present.map((a) => a.id) : ["claude-code", "codex"];
 
-    if (opts.yes || !process.stdin.isTTY) return fallback;
+        if (opts.yes || !process.stdin.isTTY) return fallback;
 
-    // Interactive: per detected agent, ask yes/no (default = detected).
-    const chosen: string[] = [];
-    for (const a of SETUP_AGENTS) {
-        const detected = existsSync(a.dir);
-        const def = detected ? "Y/n" : "y/N";
-        const ans = (globalThis.prompt?.(`  install ax skills for ${a.label}? [${def}]`) ?? "").trim().toLowerCase();
-        const yes = ans === "" ? detected : ans === "y" || ans === "yes";
-        if (yes) chosen.push(a.id);
-    }
-    return chosen.length > 0 ? chosen : fallback;
-}
-
-export async function cmdSetup(opts: SetupOptions = {}) {
-    const { AGENT_ONBOARDING_PROMPT, renderAgentOnboarding } = await import("@ax/lib/agent-onboarding");
-    if (opts.agentPromptOnly) {
-        console.log(AGENT_ONBOARDING_PROMPT);
-        return;
-    }
-    console.log(opts.fromInstall ? "[axctl] setup (skills + first ingest)" : "[axctl] setup");
-
-    const agents = resolveSetupAgents(opts);
-
-    // 1. agent skills via the `skills` tool (npx). Non-fatal if npx is absent.
-    if (agents.length === 0) {
-        console.log("  skills: no agents selected, skipping");
-    } else if (!which("npx")) {
-        console.log("  skills: npx not found (install Node), then run:");
-        console.log(`    npx skills add Necmttn/ax ${agents.map((a) => `-a ${a}`).join(" ")} -g -y`);
-    } else {
-        const args = ["-y", "skills", "add", "Necmttn/ax", "-g", ...agents.flatMap((a) => ["-a", a]), "-y"];
-        console.log(`  skills: npx ${args.join(" ")}`);
-        const r = spawnSync("npx", args, { stdio: "inherit" });
-        if (r.status === 0) console.log(`  skills: installed for ${agents.join(", ")}`);
-        else console.log(`  skills: npx exited ${r.status ?? "?"} (re-run 'ax setup' or the npx command above)`);
-    }
-
-    // 2. first ingest so the graph is populated immediately.
-    if (opts.skipIngest) {
-        console.log("  ingest: skipped (--no-ingest)");
-    } else {
-        console.log("  ingest: running initial backfill...");
-        const r = spawnSync(selfBin(), ["ingest"], { stdio: "inherit" });
-        if (r.status !== 0) console.log(`  ingest: exited ${r.status ?? "?"} (run 'ax ingest' manually)`);
-    }
-
-    // 3. verify.
-    console.log();
-    await cmdDoctor([]);
-
-    // 4. hand off to the agent for the labeling loop (classify -> fill -> lint).
-    console.log();
-    console.log(renderAgentOnboarding());
-}
-
-export async function cmdDaemon(args: string[]) {
-    const parsed = parseDaemonCommand(args);
-    if (!isMacos()) {
-        console.log(formatDaemonStatus(collectDaemonStatus(), parsed.json));
-        if (parsed.command !== "status") {
-            console.error("axctl daemon: start/stop/restart use launchd and are macOS-only");
-            process.exit(2);
+        // Interactive: per detected agent, ask yes/no (default = detected).
+        const chosen: string[] = [];
+        for (const { a, exists: detected } of presence) {
+            const def = detected ? "Y/n" : "y/N";
+            const ans = (globalThis.prompt?.(`  install ax skills for ${a.label}? [${def}]`) ?? "").trim().toLowerCase();
+            const yes = ans === "" ? detected : ans === "y" || ans === "yes";
+            if (yes) chosen.push(a.id);
         }
-        return;
-    }
+        return chosen.length > 0 ? chosen : fallback;
+    });
+}
 
-    if (parsed.command === "start") {
-        if (!existsSync(DB_PLIST) || !existsSync(WATCH_PLIST) || !existsSync(DERIVE_PLIST)) {
-            await cmdInstall();
+export function cmdSetup(
+    opts: SetupOptions = {},
+): Effect.Effect<void, Error, FileSystem.FileSystem | Path.Path> {
+    return Effect.gen(function* () {
+        const { AGENT_ONBOARDING_PROMPT, renderAgentOnboarding } = yield* Effect.promise(
+            () => import("@ax/lib/agent-onboarding"),
+        );
+        if (opts.agentPromptOnly) {
+            console.log(AGENT_ONBOARDING_PROMPT);
+            return;
+        }
+        console.log(opts.fromInstall ? "[axctl] setup (skills + first ingest)" : "[axctl] setup");
+
+        const agents = yield* resolveSetupAgents(opts);
+
+        // 1. agent skills via the `skills` tool (npx). Non-fatal if npx is absent.
+        if (agents.length === 0) {
+            console.log("  skills: no agents selected, skipping");
+        } else if (!which("npx")) {
+            console.log("  skills: npx not found (install Node), then run:");
+            console.log(`    npx skills add Necmttn/ax ${agents.map((a) => `-a ${a}`).join(" ")} -g -y`);
         } else {
-            await loadAgent(DB_PLIST);
-            await loadAgent(WATCH_PLIST);
-            await loadAgent(DERIVE_PLIST);
+            const args = ["-y", "skills", "add", "Necmttn/ax", "-g", ...agents.flatMap((a) => ["-a", a]), "-y"];
+            console.log(`  skills: npx ${args.join(" ")}`);
+            const r = spawnSync("npx", args, { stdio: "inherit" });
+            if (r.status === 0) console.log(`  skills: installed for ${agents.join(", ")}`);
+            else console.log(`  skills: npx exited ${r.status ?? "?"} (re-run 'ax setup' or the npx command above)`);
         }
-    } else if (parsed.command === "stop") {
-        await unloadAgentKeepPlist(DERIVE_PLIST);
-        await unloadAgentKeepPlist(WATCH_PLIST);
-        await unloadAgentKeepPlist(DB_PLIST);
-    } else if (parsed.command === "restart") {
-        await unloadAgentKeepPlist(DERIVE_PLIST);
-        await unloadAgentKeepPlist(WATCH_PLIST);
-        await unloadAgentKeepPlist(DB_PLIST);
-        if (!existsSync(DB_PLIST) || !existsSync(WATCH_PLIST) || !existsSync(DERIVE_PLIST)) {
-            await cmdInstall();
+
+        // 2. first ingest so the graph is populated immediately.
+        if (opts.skipIngest) {
+            console.log("  ingest: skipped (--no-ingest)");
         } else {
-            await loadAgent(DB_PLIST);
-            await loadAgent(WATCH_PLIST);
-            await loadAgent(DERIVE_PLIST);
+            console.log("  ingest: running initial backfill...");
+            const bin = yield* selfBin();
+            const r = spawnSync(bin, ["ingest"], { stdio: "inherit" });
+            if (r.status !== 0) console.log(`  ingest: exited ${r.status ?? "?"} (run 'ax ingest' manually)`);
         }
-    }
 
-    console.log(formatDaemonStatus(collectDaemonStatus(), parsed.json));
+        // 3. verify.
+        console.log();
+        yield* cmdDoctor([]);
+
+        // 4. hand off to the agent for the labeling loop (classify -> fill -> lint).
+        console.log();
+        console.log(renderAgentOnboarding());
+    });
 }
 
-export async function cmdDoctor(args: string[]) {
-    const json = args.includes("--json");
-    console.log(formatDoctorReport(collectDoctorReport(), json));
+export function cmdDaemon(
+    args: string[],
+): Effect.Effect<void, Error, FileSystem.FileSystem | Path.Path> {
+    return Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const parsed = parseDaemonCommand(args);
+        // Whether all three plists already exist on disk (probes; absent => false).
+        const plistsPresent = (): Effect.Effect<boolean, never, FileSystem.FileSystem> =>
+            Effect.gen(function* () {
+                const db = yield* fs.exists(DB_PLIST).pipe(orAbsent(false));
+                const watch = yield* fs.exists(WATCH_PLIST).pipe(orAbsent(false));
+                const derive = yield* fs.exists(DERIVE_PLIST).pipe(orAbsent(false));
+                return db && watch && derive;
+            });
+
+        if (!isMacos()) {
+            console.log(formatDaemonStatus(yield* collectDaemonStatus(), parsed.json));
+            if (parsed.command !== "status") {
+                console.error("axctl daemon: start/stop/restart use launchd and are macOS-only");
+                process.exit(2);
+            }
+            return;
+        }
+
+        if (parsed.command === "start") {
+            if (!(yield* plistsPresent())) {
+                yield* cmdInstall();
+            } else {
+                yield* Effect.sync(() => loadAgent(DB_PLIST));
+                yield* Effect.sync(() => loadAgent(WATCH_PLIST));
+                yield* Effect.sync(() => loadAgent(DERIVE_PLIST));
+            }
+        } else if (parsed.command === "stop") {
+            yield* Effect.sync(() => unloadAgentKeepPlist(DERIVE_PLIST));
+            yield* Effect.sync(() => unloadAgentKeepPlist(WATCH_PLIST));
+            yield* Effect.sync(() => unloadAgentKeepPlist(DB_PLIST));
+        } else if (parsed.command === "restart") {
+            yield* Effect.sync(() => unloadAgentKeepPlist(DERIVE_PLIST));
+            yield* Effect.sync(() => unloadAgentKeepPlist(WATCH_PLIST));
+            yield* Effect.sync(() => unloadAgentKeepPlist(DB_PLIST));
+            if (!(yield* plistsPresent())) {
+                yield* cmdInstall();
+            } else {
+                yield* Effect.sync(() => loadAgent(DB_PLIST));
+                yield* Effect.sync(() => loadAgent(WATCH_PLIST));
+                yield* Effect.sync(() => loadAgent(DERIVE_PLIST));
+            }
+        }
+
+        console.log(formatDaemonStatus(yield* collectDaemonStatus(), parsed.json));
+    });
 }
 
-export async function cmdUninstall(purge = false) {
-    console.log("[axctl] uninstall");
-    for (const plist of [DERIVE_PLIST, WATCH_PLIST, DB_PLIST]) {
-        const removed = await unloadAgent(plist);
-        console.log(`  ${removed ? "removed" : "absent "}: ${plist}`);
-    }
+export function cmdDoctor(
+    args: string[],
+): Effect.Effect<void, never, FileSystem.FileSystem | Path.Path> {
+    return Effect.gen(function* () {
+        const json = args.includes("--json");
+        console.log(formatDoctorReport(yield* collectDoctorReport(), json));
+    });
+}
 
-    for (const binLink of [join(BIN_DIR, "axctl"), join(BIN_DIR, "ax")]) {
-        let symlinkStatus: "removed" | "absent" | "skipped" = "absent";
-        try {
-            const st = await lstat(binLink);
-            if (st.isSymbolicLink()) {
-                await unlink(binLink);
+export function cmdUninstall(
+    purge = false,
+): Effect.Effect<void, Error, FileSystem.FileSystem | Path.Path> {
+    return Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        console.log("[axctl] uninstall");
+        for (const plist of [DERIVE_PLIST, WATCH_PLIST, DB_PLIST]) {
+            const removed = yield* unloadAgent(plist);
+            console.log(`  ${removed ? "removed" : "absent "}: ${plist}`);
+        }
+
+        for (const binLink of [path.join(BIN_DIR, "axctl"), path.join(BIN_DIR, "ax")]) {
+            // Old: lstat -> ENOENT = absent; symlink = unlink+removed; else skipped.
+            // No lstat in @effect/platform: `readLink` succeeds iff it's a symlink.
+            let symlinkStatus: "removed" | "absent" | "skipped" = "absent";
+            const isSymlink = yield* fs.readLink(binLink).pipe(
+                Effect.as(true),
+                Effect.catchTag("PlatformError", (e) =>
+                    isNotFound(e) ? Effect.succeed(false) : Effect.fail(e),
+                ),
+            );
+            if (isSymlink) {
+                yield* fs.remove(binLink);
                 symlinkStatus = "removed";
             } else {
-                symlinkStatus = "skipped";
+                // readLink reported NotFound: genuinely absent, or a non-symlink
+                // (regular file/dir) in the way (the old `else` -> "skipped").
+                const present = yield* fs.exists(binLink).pipe(orAbsent(false));
+                symlinkStatus = present ? "skipped" : "absent";
             }
-        } catch (err) {
-            if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
+            if (symlinkStatus === "removed") {
+                console.log(`  removed symlink: ${binLink}`);
+            } else if (symlinkStatus === "absent") {
+                console.log(`  absent  symlink: ${binLink}`);
+            } else {
+                console.log(`  skipped symlink: ${binLink} (not a symlink)`);
+            }
         }
-        if (symlinkStatus === "removed") {
-            console.log(`  removed symlink: ${binLink}`);
-        } else if (symlinkStatus === "absent") {
-            console.log(`  absent  symlink: ${binLink}`);
-        } else {
-            console.log(`  skipped symlink: ${binLink} (not a symlink)`);
-        }
-    }
 
-    console.log();
-    if (purge) {
-        // --purge wipes the whole install root: the compiled binary, the
-        // SurrealDB store, transcript/codex buckets, and logs. The symlinks +
-        // launchd jobs are already gone above, so this leaves nothing behind.
-        await rm(DATA_DIR, { recursive: true, force: true });
-        console.log(`  purged data dir: ${DATA_DIR}`);
         console.log();
-        console.log("ax fully removed. Thanks for trying it.");
-    } else {
-        console.log(`Data preserved at ${DATA_DIR}.`);
-        console.log("Re-run with --purge (or 'rm -rf' it) for a clean slate.");
-    }
+        if (purge) {
+            // --purge wipes the whole install root: the compiled binary, the
+            // SurrealDB store, transcript/codex buckets, and logs. The symlinks +
+            // launchd jobs are already gone above, so this leaves nothing behind.
+            yield* fs.remove(DATA_DIR, { recursive: true, force: true });
+            console.log(`  purged data dir: ${DATA_DIR}`);
+            console.log();
+            console.log("ax fully removed. Thanks for trying it.");
+        } else {
+            console.log(`Data preserved at ${DATA_DIR}.`);
+            console.log("Re-run with --purge (or 'rm -rf' it) for a clean slate.");
+        }
+    });
 }
