@@ -15,7 +15,7 @@ import type {
     HookProvider,
     HookScope,
 } from "./types.ts";
-import { deriveHookId, deriveOwner, axMarkerId, genMarkerId, embedMarker } from "./ownership.ts";
+import { deriveHookId, deriveOwner, axMarkerId, genMarkerId, embedMarker, preserveMarker } from "./ownership.ts";
 
 const NAME = "claude";
 
@@ -193,7 +193,7 @@ export const claudeProvider: HookProvider = {
             const cur = hooksArr[loc.hi]!;
             hooksArr[loc.hi] = {
                 ...cur,
-                ...(patch.command !== undefined ? { command: patch.command } : {}),
+                ...(patch.command !== undefined ? { command: preserveMarker(cur.command, patch.command) } : {}),
                 ...(patch.timeout !== undefined ? { timeout: patch.timeout } : {}),
             };
             group.hooks = hooksArr;

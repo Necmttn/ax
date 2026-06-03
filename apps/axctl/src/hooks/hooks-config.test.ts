@@ -87,6 +87,19 @@ describe("claude provider", () => {
         expect(rows[0]!.command).toContain("# ax:");
     });
 
+    test("edit command preserves the ax marker so the id stays stable", () => {
+        // regression: edit used to drop the marker -> id churned -> remove broke.
+        const added = runPure(claudeProvider.applyAdd(r, "", { event: "PreToolUse", matcher: "Bash", command: "echo before" }));
+        const id = runPure(claudeProvider.parse(r, added))[0]!.id;
+        const edited = runPure(claudeProvider.applyEdit(r, added, id, { command: "echo after" }));
+        const rows = runPure(claudeProvider.parse(r, edited));
+        expect(rows).toHaveLength(1);
+        expect(rows[0]!.id).toBe(id); // unchanged
+        expect(rows[0]!.owner).toBe("ax"); // marker carried
+        expect(rows[0]!.command).toContain("echo after");
+        expect(rows[0]!.command).toContain(`# ax:${id}`);
+    });
+
     test("add merges into existing matcher group", () => {
         let raw = runPure(claudeProvider.applyAdd(r, "", { event: "PreToolUse", matcher: "Bash", command: "first" }));
         raw = runPure(claudeProvider.applyAdd(r, raw, { event: "PreToolUse", matcher: "Bash", command: "second" }));
@@ -108,7 +121,8 @@ describe("claude provider", () => {
         const id = runPure(claudeProvider.parse(r, raw))[0]!.id;
         const next = runPure(claudeProvider.applyEdit(r, raw, id, { command: "brand new command" }));
         const rows = runPure(claudeProvider.parse(r, next));
-        expect(rows[0]!.command).toBe("brand new command");
+        expect(rows[0]!.command).toContain("brand new command");
+        expect(rows[0]!.id).toBe(id); // marker preserved -> id stable
     });
 
     test("extract -> insert round-trip restores the entry", () => {
@@ -197,7 +211,8 @@ describe("codex provider", () => {
         const raw = runPure(codexProvider.applyAdd(tref, "", { event: "Stop", command: "orig" }));
         const id = runPure(codexProvider.parse(tref, raw))[0]!.id;
         const edited = runPure(codexProvider.applyEdit(tref, raw, id, { command: "edited" }));
-        expect(runPure(codexProvider.parse(tref, edited))[0]!.command).toBe("edited");
+        expect(runPure(codexProvider.parse(tref, edited))[0]!.command).toContain("edited");
+        expect(runPure(codexProvider.parse(tref, edited))[0]!.id).toBe(id); // marker preserved
         const id2 = runPure(codexProvider.parse(tref, edited))[0]!.id;
         const removed = runPure(codexProvider.applyRemove(tref, edited, id2));
         expect(runPure(codexProvider.parse(tref, removed))).toHaveLength(0);

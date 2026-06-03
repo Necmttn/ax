@@ -15,7 +15,7 @@ import type {
     HookProvider,
     HookScope,
 } from "./types.ts";
-import { deriveHookId, deriveOwner, axMarkerId, genMarkerId, embedMarker } from "./ownership.ts";
+import { deriveHookId, deriveOwner, axMarkerId, genMarkerId, embedMarker, preserveMarker } from "./ownership.ts";
 
 const NAME = "cursor";
 
@@ -141,7 +141,7 @@ export const cursorProvider: HookProvider = {
             if (!loc) return raw;
             const next: CursorConfig = { version: cfg.version ?? 1, ...cfg, hooks: { ...(cfg.hooks ?? {}) } };
             const arr = [...(next.hooks![loc.event] ?? [])];
-            arr[loc.idx] = { ...arr[loc.idx]!, ...(patch.command !== undefined ? { command: patch.command } : {}) };
+            arr[loc.idx] = { ...arr[loc.idx]!, ...(patch.command !== undefined ? { command: preserveMarker(arr[loc.idx]!.command, patch.command) } : {}) };
             next.hooks![loc.event] = arr;
             return serialize(next);
         }),

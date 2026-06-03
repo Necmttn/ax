@@ -16,7 +16,7 @@ import type {
     HookProvider,
     HookScope,
 } from "./types.ts";
-import { deriveHookId, deriveOwner, axMarkerId, genMarkerId, embedMarker } from "./ownership.ts";
+import { deriveHookId, deriveOwner, axMarkerId, genMarkerId, embedMarker, preserveMarker } from "./ownership.ts";
 import { decodeClaude, claudeProvider } from "./claude.ts";
 
 const NAME = "codex";
@@ -203,8 +203,10 @@ export const codexProvider: HookProvider = {
                 const arr = [...(next.hooks![loc.event] ?? [])];
                 const cur = { ...arr[loc.idx]! };
                 if (patch.command !== undefined) {
-                    if (typeof cur.command === "object" && cur.command) cur.command = { ...cur.command, command: patch.command };
-                    else cur.command = patch.command;
+                    const oldCmd = (typeof cur.command === "object" && cur.command ? cur.command.command : (cur.command as string | undefined)) ?? "";
+                    const nextCmd = preserveMarker(oldCmd, patch.command);
+                    if (typeof cur.command === "object" && cur.command) cur.command = { ...cur.command, command: nextCmd };
+                    else cur.command = nextCmd;
                 }
                 if (patch.timeout !== undefined) {
                     if (typeof cur.command === "object" && cur.command) cur.command = { ...cur.command, timeout: patch.timeout };

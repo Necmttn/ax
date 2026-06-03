@@ -15,7 +15,7 @@ import type {
     HookProvider,
     HookScope,
 } from "./types.ts";
-import { deriveHookId, deriveOwner, axMarkerId, genMarkerId, embedMarker } from "./ownership.ts";
+import { deriveHookId, deriveOwner, axMarkerId, genMarkerId, embedMarker, preserveMarker } from "./ownership.ts";
 
 const NAME = "opencode";
 
@@ -204,7 +204,9 @@ export const opencodeProvider: HookProvider = {
             if (!loc) return raw;
             const next = cloneHook(cfg);
             const applyPatch = (entry: OcEntry): OcEntry =>
-                patch.command !== undefined ? { ...entry, command: wrapArgv(patch.command) } : entry;
+                patch.command !== undefined
+                    ? { ...entry, command: wrapArgv(preserveMarker(joinArgv(entry.command ?? []), patch.command)) }
+                    : entry;
             if (loc.kind === "file_edited") {
                 const fe = next.experimental!.hook!.file_edited!;
                 const arr = [...(fe[loc.glob] ?? [])];
