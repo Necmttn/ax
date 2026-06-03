@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.10.0](https://github.com/Necmttn/ax/compare/v0.9.0...v0.10.0) (2026-06-03)
+
+
+### Features
+
+* **cli:** ascii wordmark landing on bare `ax` ([ef46e02](https://github.com/Necmttn/ax/commit/ef46e0241291623723ea164e048e3d17ecc5b37e))
+* **onboarding:** agent-instructions prompt + labeling loop (effect.solutions-style) ([9d06018](https://github.com/Necmttn/ax/commit/9d0601800c45293f7b469be0a895da211f19884e))
+* **setup:** `ax setup` command (skills + first ingest + doctor) ([b00f362](https://github.com/Necmttn/ax/commit/b00f36299e711f6bd490b1e3b8c4ae01fe7b8117))
+* **site:** cinematic demo — score-climb arc + multi-harness retro terminal ([9357912](https://github.com/Necmttn/ax/commit/9357912ccb054e2a2dd1d5f10a7d890145508cf0))
+* **site:** hover slows + holds the retro terminal (instead of pausing) ([a0d769f](https://github.com/Necmttn/ax/commit/a0d769f0165cddfc7c9cfe19f48b301faa0d97ea))
+* **site:** typewriter the user lines in the retro terminal ([2edb7d9](https://github.com/Necmttn/ax/commit/2edb7d9965425acc8f86565147adcc0478a3ce2d))
+
+
+### Bug Fixes
+
+* **hooks:** align ax hooks config table columns ([547c840](https://github.com/Necmttn/ax/commit/547c840c5034866886200933bb285cc04960805e))
+* **site:** unify CLI name to `ax` across landing demos ([9dbc4f9](https://github.com/Necmttn/ax/commit/9dbc4f947dc79a8e026353eeac35f8fd843fdc23))
+
 ## [0.9.0](https://github.com/Necmttn/ax/compare/v0.8.0...v0.9.0) (2026-06-03)
 
 
