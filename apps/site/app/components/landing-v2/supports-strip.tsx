@@ -43,20 +43,19 @@ const PROVIDERS: Provider[] = [
     name: "Pi",
     href: "https://pi.dev",
     svg: (
-      // Custom: mathematical π glyph rendered in serif via foreignObject-free text node.
-      // Stays a single inline SVG, scales to row optical height, recolors via currentColor.
-      <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-        <text
-          x="12"
-          y="18"
-          textAnchor="middle"
-          fontFamily="Georgia, 'Times New Roman', serif"
-          fontStyle="italic"
-          fontSize="22"
+      // pi.dev/logo-auto.svg - geometric P + i mark, re-keyed to currentColor
+      // and viewBox tightened to the glyph bounds so it optically matches the
+      // other 24px logos.
+      <svg viewBox="150 150 500 500" aria-hidden="true" focusable="false">
+        <path
           fill="currentColor"
-        >
-          π
-        </text>
+          fillRule="evenodd"
+          d="M165.29 165.29 H517.36 V400 H400 V517.36 H282.65 V634.72 H165.29 Z M282.65 282.65 V400 H400 V282.65 Z"
+        />
+        <path
+          fill="currentColor"
+          d="M517.36 400 H634.72 V634.72 H517.36 Z"
+        />
       </svg>
     ),
   },
@@ -119,6 +118,24 @@ export function SupportsStrip() {
         <span className="dot">·</span> opencode <span className="dot">·</span>{" "}
         cursor
       </p>
+    </div>
+  );
+}
+
+// Floating agent-logo tiles that frame the hero headline (t3.codes-style).
+// Decorative; the supported agents are also named in the hero lede.
+export function HeroLogoField() {
+  return (
+    <div className="hero-logo-field" aria-hidden="true">
+      {PROVIDERS.map((p) => (
+        <span
+          key={p.key}
+          className={`hero-logo hero-logo--${p.key}`}
+          title={p.name}
+        >
+          {p.svg}
+        </span>
+      ))}
     </div>
   );
 }

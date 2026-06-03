@@ -2,11 +2,41 @@
 import { useEffect, useRef } from "react";
 import { Link } from "@tanstack/react-router";
 
+// Wired, always-present sources. Subagents are NOT here - they are spawned
+// transiently by claude/codex (see SUBAGENT_PARENTS + spawnSubagent).
 type SrcKey = "claude" | "codex" | "git";
+type ChipKey = SrcKey | "subagent";
+
+const SRC_KEYS: SrcKey[] = ["claude", "codex", "git"];
+const SUBAGENT_PARENTS: SrcKey[] = ["claude", "codex"];
 
 type VocabItem = { p: string; l: () => string };
 
-const VOCAB: Record<SrcKey, VocabItem[]> = {
+function pick<T>(arr: T[]): T {
+  return arr[Math.floor(Math.random() * arr.length)] ?? arr[0]!;
+}
+
+const SUBAGENT_TYPES = [
+  "Explore",
+  "Plan",
+  "codebase-locator",
+  "general-purpose",
+  "gsd-executor",
+];
+
+// What the graph sends BACK to the agents - concrete, applied improvements.
+// This is the return leg that closes the feedback loop.
+const INTERVENTION_VOCAB: VocabItem[] = [
+  { p: "skill", l: () => pick(["+recall", "+retro", "+verify"]) },
+  { p: "guidance", l: () => "test cmd → pnpm" },
+  { p: "hook", l: () => pick(["pre_commit", "stop-gate"]) },
+  { p: "fix", l: () => "npm → pnpm test" },
+  { p: "ignore", l: () => pick(["dist/", ".generated/"]) },
+  { p: "rule", l: () => "CLAUDE.md +1" },
+  { p: "prune", l: () => "stale rule" },
+];
+
+const VOCAB: Record<ChipKey, VocabItem[]> = {
   claude: [
     {
       p: "turn",
@@ -23,6 +53,21 @@ const VOCAB: Record<SrcKey, VocabItem[]> = {
     { p: "codex", l: () => "write_stdin" },
     { p: "codex", l: () => "update_plan" },
     { p: "codex", l: () => "spawn_agent" },
+  ],
+  subagent: [
+    { p: "dispatch", l: () => pick(SUBAGENT_TYPES) },
+    {
+      p: "loop",
+      l: () =>
+        pick([
+          "plan → execute",
+          "red → green → refactor",
+          "find → verify",
+          "discover → transform",
+        ]),
+    },
+    { p: "parallel", l: () => "×" + String(2 + Math.floor(Math.random() * 5)) },
+    { p: "subagent", l: () => pick(["stop", "return"]) },
   ],
   git: [
     {
@@ -55,10 +100,13 @@ const VOCAB: Record<SrcKey, VocabItem[]> = {
   ],
 };
 
-const CHIP_WEIGHT: Record<SrcKey, { sessions: number; turns: number }> = {
-  claude: { sessions: 12, turns: 4200 },
-  codex: { sessions: 22, turns: 2900 },
-  git: { sessions: 0, turns: 1100 },
+// Per-absorbed-event growth. Subagent loops run inside a session, so they add
+// turns, not new sessions.
+const CHIP_WEIGHT: Record<ChipKey, { sessions: number; turns: number }> = {
+  claude: { sessions: 1, turns: 80 },
+  codex: { sessions: 1, turns: 60 },
+  subagent: { sessions: 0, turns: 45 },
+  git: { sessions: 0, turns: 25 },
 };
 
 const SRC_CADENCE: Record<SrcKey, { min: number; max: number }> = {
@@ -67,7 +115,12 @@ const SRC_CADENCE: Record<SrcKey, { min: number; max: number }> = {
   git: { min: 900, max: 1800 },
 };
 
-const FINAL = { sessions: 4773, turns: 369132, fts: 5.9 };
+// How often a parent spawns a transient subagent.
+const SUBAGENT_SPAWN = { min: 3200, max: 6000 };
+
+// Realistic current snapshot - counters START here and only climb. Also the
+// static value shown under reduced-motion.
+const BASELINE = { sessions: 4773, turns: 369132, fts: 5.9 };
 
 const TRAVEL_MS_MIN = 620;
 const TRAVEL_MS_MAX = 880;
@@ -91,6 +144,7 @@ export function LineageFlow() {
   const ctrSessionsRef = useRef<HTMLSpanElement | null>(null);
   const ctrTurnsRef = useRef<HTMLSpanElement | null>(null);
   const ctrFtsRef = useRef<HTMLSpanElement | null>(null);
+  const ctrAppliedRef = useRef<HTMLSpanElement | null>(null);
 
   useEffect(() => {
     const section = sectionRef.current;
@@ -116,17 +170,17 @@ export function LineageFlow() {
       typeof window !== "undefined" &&
       window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
 
-    const qp =
-      typeof window !== "undefined"
-        ? new URLSearchParams(window.location.search)
-        : null;
-    const jumpFinal = qp?.get("final") === "1";
+    // Counters seed at the realistic baseline and only ever go up.
+    const live = { ...BASELINE };
+    let applied = 128; // improvements applied back to the agents
 
-    const live = { sessions: 0, turns: 0, fts: 0 };
+    function paintApplied() {
+      if (ctrAppliedRef.current) ctrAppliedRef.current.textContent = String(applied);
+    }
 
     function fmt(n: number) {
-      if (n >= 1000) return n.toLocaleString("en-US");
-      return String(n);
+      if (n >= 1000) return Math.floor(n).toLocaleString("en-US");
+      return String(Math.floor(n));
     }
     function paintCtrs() {
       if (ctrSessionsRef.current)
@@ -137,7 +191,7 @@ export function LineageFlow() {
         ctrFtsRef.current.textContent = live.fts.toFixed(1);
     }
 
-    function pickEvent(src: SrcKey) {
+    function pickEvent(src: ChipKey) {
       const pool = VOCAB[src];
       const item = pool[Math.floor(Math.random() * pool.length)] ?? pool[0]!;
       return { prefix: item.p, label: item.l() };
@@ -166,7 +220,7 @@ export function LineageFlow() {
         sink: { x: 0, y: 0, xCenter: 0, xRight: 0 },
         out: { x: 0, y: 0 },
       };
-      (Object.keys(srcEls) as SrcKey[]).forEach((k) => {
+      SRC_KEYS.forEach((k) => {
         const el = srcEls[k]!;
         const rb = rectIn(el, stage!);
         a.src[k] = { x: rb.right - 2, y: rb.top + rb.height / 2, el };
@@ -198,7 +252,7 @@ export function LineageFlow() {
         return [x - gridOffsetLeft, y - gridOffsetTop];
       }
       let ps = "";
-      (["claude", "codex", "git"] as SrcKey[]).forEach((k) => {
+      SRC_KEYS.forEach((k) => {
         const s = P(a.src[k].x, a.src[k].y);
         const d = P(a.sink.x, a.sink.y);
         const midX = (s[0] + d[0]) / 2;
@@ -237,54 +291,40 @@ export function LineageFlow() {
 
     const state = {
       paused: true,
-      done: false,
+      frozen: false,
       visible: false,
-      emitted: 0,
-      maxEmits: 26,
-      timers: [] as Array<ReturnType<typeof setTimeout> | { clear: () => void }>,
+      timers: [] as Array<ReturnType<typeof setTimeout>>,
     };
 
-    function setPill(s: "playing" | "done" | "paused") {
+    let outPulseId: ReturnType<typeof setInterval> | null = null;
+
+    function setPill(s: "playing" | "paused") {
       pill!.setAttribute("data-state", s);
-      pill!.textContent =
-        s === "playing"
-          ? "auto · playing"
-          : s === "done"
-            ? "auto · done"
-            : "auto · paused";
+      pill!.textContent = s === "playing" ? "auto · playing" : "auto · paused";
     }
 
-    function emit(src: SrcKey) {
-      if (state.paused || state.done) return;
+    // Fly one event chip from (startX,startY) to the sink, bump counters on
+    // arrival. Used by both fixed sources and transient subagents.
+    function travelChip(kind: ChipKey, startX: number, startY: number) {
       const a = anchors();
-      const origin = a.src[src];
       const dest = a.sink;
-      if (!origin || !dest) return;
 
-      origin.el.classList.add("emit");
-      setTimeout(() => origin.el.classList.remove("emit"), EMIT_FLASH_MS);
-
-      const ev = pickEvent(src);
+      const ev = pickEvent(kind);
       const chip = document.createElement("div");
       chip.className = "event-chip";
-      chip.setAttribute("data-src", src);
+      chip.setAttribute("data-src", kind);
       chip.innerHTML =
         '<span class="lbl-prefix">' + ev.prefix + ":</span>" + ev.label;
       layer!.appendChild(chip);
 
-      const startX = origin.x;
-      const startY = origin.y;
       const endX = dest.x;
       const endY = dest.y;
 
-      const cw = chip.offsetWidth;
       const ch = chip.offsetHeight;
+      // Anchor by the chip's LEFT edge at both ends so motion is always
+      // source (left) -> graph (right), regardless of chip width.
       chip.style.transform =
-        "translate3d(" +
-        (startX + 4) +
-        "px," +
-        (startY - ch / 2) +
-        "px,0)";
+        "translate3d(" + (startX + 4) + "px," + (startY - ch / 2) + "px,0)";
       chip.style.opacity = "0";
 
       const travel =
@@ -299,7 +339,7 @@ export function LineageFlow() {
           chip.style.opacity = "1";
           chip.style.transform =
             "translate3d(" +
-            (endX - cw - 6) +
+            (endX - 10) +
             "px," +
             (endY - ch / 2) +
             "px,0)";
@@ -310,20 +350,14 @@ export function LineageFlow() {
         sink!.classList.add("absorb");
         setTimeout(() => sink!.classList.remove("absorb"), ABSORB_MS);
 
-        const w = CHIP_WEIGHT[src];
-        live.sessions = Math.min(
-          FINAL.sessions,
-          live.sessions + w.sessions + Math.floor(Math.random() * 8)
-        );
-        live.turns = Math.min(
-          FINAL.turns,
-          live.turns + w.turns + Math.floor(Math.random() * 900)
-        );
+        // Counters only climb - no ceiling.
+        const w = CHIP_WEIGHT[kind];
+        live.sessions += w.sessions + (Math.random() < 0.35 ? 1 : 0);
+        live.turns += w.turns + Math.floor(Math.random() * 70);
         const jitter = (Math.random() - 0.5) * 1.4;
-        if (live.fts === 0) live.fts = 9.2;
         live.fts = Math.max(
           4.1,
-          Math.min(11.0, live.fts * 0.65 + (FINAL.fts + jitter) * 0.35)
+          Math.min(11.0, live.fts * 0.7 + (BASELINE.fts + jitter) * 0.3)
         );
         paintCtrs();
 
@@ -336,15 +370,81 @@ export function LineageFlow() {
       }, travel + 280);
     }
 
+    function emit(src: SrcKey) {
+      if (state.paused || state.frozen) return;
+      const a = anchors();
+      const origin = a.src[src];
+      if (!origin) return;
+      origin.el.classList.add("emit");
+      setTimeout(() => origin.el.classList.remove("emit"), EMIT_FLASH_MS);
+      travelChip(src, origin.x, origin.y);
+    }
+
+    // A parent agent spawns a transient subagent: a small node pops in beside
+    // the parent, fires a few loop events into the graph, then disappears.
+    function spawnSubagent() {
+      if (state.paused || state.frozen) return;
+      const parent = pick(SUBAGENT_PARENTS);
+      const a = anchors();
+      const p = a.src[parent];
+      if (!p) return;
+
+      // flash the parent - it just spawned this loop
+      p.el.classList.add("emit");
+      setTimeout(() => p.el.classList.remove("emit"), EMIT_FLASH_MS);
+
+      const popX = p.x + 14;
+      const popY = p.y + 24;
+
+      const pop = document.createElement("div");
+      pop.className = "subagent-pop";
+      pop.setAttribute("data-parent", parent);
+      pop.innerHTML =
+        '<span class="sa-dot"></span>subagent · ' + pick(SUBAGENT_TYPES);
+      layer!.appendChild(pop);
+      pop.style.transform =
+        "translate3d(" + popX + "px," + popY + "px,0) scale(.6)";
+      pop.style.opacity = "0";
+
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          pop.style.transition = "transform 220ms ease, opacity 220ms ease";
+          pop.style.opacity = "1";
+          pop.style.transform =
+            "translate3d(" + popX + "px," + popY + "px,0) scale(1)";
+        });
+      });
+
+      // emit loop chips from the pop's LEFT edge so they travel toward the
+      // graph (right), not back over the parent.
+      const fromX = popX + 6;
+      const fromY = popY + 9;
+
+      // fire 2–3 loop chips from the pop toward the sink
+      const bursts = 2 + Math.floor(Math.random() * 2);
+      for (let i = 0; i < bursts; i++) {
+        setTimeout(() => {
+          if (state.paused || state.frozen) return;
+          travelChip("subagent", fromX, fromY);
+        }, 260 + i * 360);
+      }
+
+      const life = 360 + bursts * 360 + 500;
+      setTimeout(() => {
+        pop.style.transition = "transform 240ms ease, opacity 240ms ease";
+        pop.style.opacity = "0";
+        pop.style.transform =
+          "translate3d(" + popX + "px," + popY + "px,0) scale(.6)";
+      }, life);
+      setTimeout(() => {
+        if (pop.parentNode) pop.parentNode.removeChild(pop);
+      }, life + 280);
+    }
+
     function scheduleSource(src: SrcKey) {
       function loop() {
-        if (state.paused || state.done) return;
+        if (state.paused || state.frozen) return;
         emit(src);
-        state.emitted++;
-        if (state.emitted >= state.maxEmits) {
-          finish();
-          return;
-        }
         const w = SRC_CADENCE[src];
         const next = w.min + Math.random() * (w.max - w.min);
         const t = setTimeout(loop, next);
@@ -355,67 +455,148 @@ export function LineageFlow() {
       state.timers.push(t0);
     }
 
+    function scheduleSubagents() {
+      function loop() {
+        if (state.paused || state.frozen) return;
+        spawnSubagent();
+        const next =
+          SUBAGENT_SPAWN.min +
+          Math.random() * (SUBAGENT_SPAWN.max - SUBAGENT_SPAWN.min);
+        const t = setTimeout(loop, next);
+        state.timers.push(t);
+      }
+      const t0 = setTimeout(loop, 1600 + Math.random() * 1800);
+      state.timers.push(t0);
+    }
+
+    // The return leg: an applied improvement flies from the interventions node
+    // back to one of the agents, which flashes - it just got better.
+    function emitImprovement() {
+      if (state.paused || state.frozen) return;
+      const a = anchors();
+      const target = pick(SRC_KEYS);
+      const tgt = a.src[target];
+      if (!tgt) return;
+
+      out!.classList.add("pulse");
+      setTimeout(() => out!.classList.remove("pulse"), 700);
+
+      const item = pick(INTERVENTION_VOCAB);
+      const chip = document.createElement("div");
+      chip.className = "improve-chip";
+      chip.innerHTML =
+        '<span class="lbl-prefix">' + item.p + ":</span>" + item.l();
+      layer!.appendChild(chip);
+
+      const ch = chip.offsetHeight;
+      const startX = a.out.x; // interventions, far right
+      const startY = a.out.y;
+      const endX = tgt.x - 40; // land on the agent, far left
+      const endY = tgt.y;
+
+      chip.style.transform =
+        "translate3d(" + (startX + 4) + "px," + (startY - ch / 2) + "px,0)";
+      chip.style.opacity = "0";
+
+      const travel = 720 + Math.random() * 220;
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          chip.style.transition =
+            "transform " +
+            travel +
+            "ms cubic-bezier(.55,.05,.35,1), opacity 240ms ease";
+          chip.style.opacity = "1";
+          chip.style.transform =
+            "translate3d(" + endX + "px," + (endY - ch / 2) + "px,0)";
+        });
+      });
+
+      setTimeout(() => {
+        tgt.el.classList.add("improved");
+        setTimeout(() => tgt.el.classList.remove("improved"), 760);
+        applied += 1;
+        paintApplied();
+        chip.style.transition = "opacity 220ms ease";
+        chip.style.opacity = "0";
+      }, travel + 20);
+
+      setTimeout(() => {
+        if (chip.parentNode) chip.parentNode.removeChild(chip);
+      }, travel + 320);
+    }
+
+    function scheduleImprovements() {
+      function loop() {
+        if (state.paused || state.frozen) return;
+        emitImprovement();
+        const next = 3800 + Math.random() * 3200;
+        const t = setTimeout(loop, next);
+        state.timers.push(t);
+      }
+      const t0 = setTimeout(loop, 2600 + Math.random() * 1600);
+      state.timers.push(t0);
+    }
+
+    function clearTimers() {
+      state.timers.forEach((t) => clearTimeout(t));
+      state.timers = [];
+    }
+
+    function startOutPulse() {
+      if (outPulseId != null) return;
+      outPulseId = setInterval(() => {
+        if (!document.body.contains(out!)) return;
+        out!.classList.add("pulse");
+        setTimeout(() => out!.classList.remove("pulse"), 700);
+      }, 4200);
+    }
+    function stopOutPulse() {
+      if (outPulseId != null) {
+        clearInterval(outPulseId);
+        outPulseId = null;
+      }
+    }
+
     function play() {
-      if (!state.paused || state.done) return;
+      if (!state.paused || state.frozen) return;
       state.paused = false;
       setPill("playing");
-      (["claude", "codex", "git"] as SrcKey[]).forEach(scheduleSource);
+      startOutPulse();
+      SRC_KEYS.forEach(scheduleSource);
+      scheduleSubagents();
+      scheduleImprovements();
     }
     function pause() {
       state.paused = true;
-      state.timers.forEach((t) => {
-        if (typeof t === "number") clearTimeout(t);
-      });
-      state.timers = [];
-      if (!state.done) setPill("paused");
-    }
-    function finish() {
-      state.done = true;
-      state.timers.forEach((t) => {
-        if (typeof t === "number") clearTimeout(t);
-      });
-      state.timers = [];
-      live.sessions = FINAL.sessions;
-      live.turns = FINAL.turns;
-      live.fts = FINAL.fts;
-      paintCtrs();
-      out!.classList.add("pulse");
-      setTimeout(() => out!.classList.remove("pulse"), 700);
-      setPill("done");
-      const pulseT = setInterval(() => {
-        if (!document.body.contains(out!)) {
-          clearInterval(pulseT);
-          return;
-        }
-        out!.classList.add("pulse");
-        setTimeout(() => out!.classList.remove("pulse"), 700);
-      }, 5200);
-      state.timers.push({ clear: () => clearInterval(pulseT) });
+      clearTimers();
+      stopOutPulse();
+      if (!state.frozen) setPill("paused");
     }
 
-    function jumpToFinal() {
-      live.sessions = FINAL.sessions;
-      live.turns = FINAL.turns;
-      live.fts = FINAL.fts;
+    // Reduced-motion: show a static realistic snapshot, never animate.
+    function freezeStatic() {
+      live.sessions = BASELINE.sessions;
+      live.turns = BASELINE.turns;
+      live.fts = BASELINE.fts;
       paintCtrs();
-      state.done = true;
-      setPill("done");
+      state.frozen = true;
+      setPill("paused");
     }
 
     // bootstrap
     drawWires();
     paintCtrs();
+    paintApplied();
 
     let io: IntersectionObserver | null = null;
 
-    if (reduced || jumpFinal) {
-      jumpToFinal();
+    if (reduced) {
+      freezeStatic();
     } else {
       io = new IntersectionObserver(
         (entries) => {
           entries.forEach((e) => {
             state.visible = e.isIntersecting;
-            if (state.done) return;
             if (e.isIntersecting) play();
             else pause();
           });
@@ -440,14 +621,9 @@ export function LineageFlow() {
       } catch {
         /* noop */
       }
-      state.timers.forEach((t) => {
-        if (typeof t === "number") clearTimeout(t);
-        else if (t && typeof (t as { clear: () => void }).clear === "function") {
-          (t as { clear: () => void }).clear();
-        }
-      });
-      state.timers = [];
-      // also clear any chip nodes left over
+      clearTimers();
+      stopOutPulse();
+      // also clear any chip / pop nodes left over
       if (layer) layer.innerHTML = "";
     };
   }, []);
@@ -513,17 +689,17 @@ export function LineageFlow() {
                 <div className="sink-host">surrealdb · 127.0.0.1</div>
                 <div className="sink-counter">
                   <span id="ctr-sessions" ref={ctrSessionsRef}>
-                    0
+                    4,773
                   </span>{" "}
                   sessions &middot;{" "}
                   <span id="ctr-turns" ref={ctrTurnsRef}>
-                    0
+                    369,132
                   </span>{" "}
                   turns
                   <br />
                   FTS median{" "}
                   <span className="fts" id="ctr-fts" ref={ctrFtsRef}>
-                    0.0
+                    5.9
                   </span>
                   ms
                 </div>
@@ -539,6 +715,9 @@ export function LineageFlow() {
                 interventions
                 <span className="out-sub">
                   ranked · safety-contracted · brief-only
+                </span>
+                <span className="out-applied">
+                  <b ref={ctrAppliedRef}>128</b> applied &rarr; agents
                 </span>
               </div>
             </div>

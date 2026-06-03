@@ -68,12 +68,19 @@ main, header, footer {
 
 .site-head {
   display: grid;
-  grid-template-columns: auto 1fr auto;
+  grid-template-columns: 1fr auto;
   align-items: end;
   gap: 16px;
   padding-top: 32px;
   padding-bottom: 16px;
   border-bottom: 2px solid var(--ink);
+}
+
+.brand-cluster {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-width: 0;
 }
 
 .brand {
@@ -114,7 +121,6 @@ a.wordmark {
   padding: 3px 10px;
   border: 1px solid var(--line);
   border-radius: 999px;
-  justify-self: center;
 }
 
 .live::before {
@@ -7090,9 +7096,77 @@ footer .right {
 
 /* ---------- hero ---------- */
 .landing-v2 section.hero {
-  padding: 88px 0 80px;
+  position: relative;
+  padding: 60px 0 56px;
   text-align: center;
   border-bottom: 1px solid var(--line);
+}
+.landing-v2 section.hero > *:not(.hero-logo-field) {
+  position: relative;
+  z-index: 1;
+}
+
+/* floating agent-logo tiles framing the headline (t3.codes-style) */
+.landing-v2 .hero-logo-field {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+}
+.landing-v2 .hero-logo {
+  position: absolute;
+  display: grid;
+  place-items: center;
+  width: 62px;
+  height: 62px;
+  border-radius: 16px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  color: color-mix(in srgb, var(--ink) 55%, transparent);
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.6) inset,
+    0 14px 30px -18px rgba(20, 20, 18, 0.45),
+    0 3px 8px -4px rgba(20, 20, 18, 0.08);
+}
+.landing-v2 .hero-logo svg {
+  width: 26px;
+  height: 26px;
+}
+.landing-v2 .hero-logo--claude {
+  top: 92px;
+  left: 9%;
+  transform: rotate(-8deg);
+  color: var(--claude);
+}
+.landing-v2 .hero-logo--codex {
+  top: 92px;
+  right: 9%;
+  transform: rotate(8deg);
+}
+.landing-v2 .hero-logo--opencode {
+  top: 322px;
+  left: 5.5%;
+  transform: rotate(7deg);
+}
+.landing-v2 .hero-logo--cursor {
+  top: 322px;
+  right: 5.5%;
+  transform: rotate(-7deg);
+}
+.landing-v2 .hero-logo--pi {
+  top: 214px;
+  left: 2.5%;
+  transform: rotate(4deg);
+}
+@media (max-width: 1200px) {
+  .landing-v2 .hero-logo--pi {
+    display: none;
+  }
+}
+@media (max-width: 1080px) {
+  .landing-v2 .hero-logo-field {
+    display: none;
+  }
 }
 .landing-v2 .eyebrow {
   font-family: var(--mono);
@@ -7119,19 +7193,31 @@ footer .right {
 .landing-v2 section.hero h1 {
   font-family: var(--serif);
   font-weight: 400;
-  font-size: 72px;
-  line-height: 1.02;
+  font-size: 60px;
+  line-height: 1.04;
   letter-spacing: -1.4px;
-  margin: 24px auto 20px;
-  max-width: 14ch;
+  margin: 20px auto 14px;
+  max-width: 20ch;
 }
+.landing-v2 section.hero h1 em {
+  font-style: italic;
+  color: var(--ink);
+}
+.landing-v2 .hero-human {
+  font-family: var(--mono);
+  font-size: 12px;
+  letter-spacing: 0.02em;
+  color: var(--muted);
+  margin: 0 auto 22px;
+}
+
 .landing-v2 section.hero .lede {
   font-family: var(--serif);
   font-size: 20px;
   line-height: 1.5;
   color: var(--muted);
   margin: 0 auto 30px;
-  max-width: 44ch;
+  max-width: 46ch;
 }
 
 .landing-v2 .install {
@@ -7223,6 +7309,32 @@ footer .right {
   text-align: center;
 }
 .landing-v2 .meta .sep { opacity: 0.5; margin: 0 8px; }
+
+/* install: label + command + trust strip */
+.landing-v2 .install-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+}
+.landing-v2 .install-label {
+  font-family: var(--mono);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.16em;
+  color: var(--muted);
+}
+.landing-v2 .install-trust {
+  margin: 2px auto 0;
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.02em;
+  color: var(--soft);
+}
+.landing-v2 .install-trust .sep {
+  opacity: 0.5;
+  margin: 0 6px;
+}
 
 /* ---------- demo: dashboard preview ---------- */
 .landing-v2 section.demo {
@@ -7772,7 +7884,80 @@ footer .right {
 }
 .landing-v2 .event-chip[data-src="claude"] { border-left-color: var(--claude); }
 .landing-v2 .event-chip[data-src="codex"] { border-left-color: var(--blue); }
+.landing-v2 .event-chip[data-src="subagent"] { border-left-color: var(--green); }
 .landing-v2 .event-chip[data-src="git"] { border-left-color: var(--amber); }
+
+/* transient subagent node - pops in beside a parent, fires loops, vanishes */
+.landing-v2 .subagent-pop {
+  position: absolute;
+  top: 0;
+  left: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 9px;
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.01em;
+  color: var(--ink);
+  background: var(--panel);
+  border: 1px solid var(--green);
+  border-radius: 999px;
+  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.07);
+  white-space: nowrap;
+  transform-origin: center;
+  pointer-events: none;
+  z-index: 4;
+}
+.landing-v2 .subagent-pop .sa-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--green);
+  box-shadow: 0 0 0 3px rgba(47, 158, 68, 0.18);
+}
+
+/* return leg - applied improvement flying back from interventions to an agent */
+.landing-v2 .improve-chip {
+  position: absolute;
+  top: 0;
+  left: 0;
+  display: inline-flex;
+  align-items: center;
+  font-family: var(--mono);
+  font-size: 10.5px;
+  letter-spacing: 0.01em;
+  padding: 3px 9px;
+  color: var(--ink);
+  background: color-mix(in srgb, var(--green) 12%, var(--panel));
+  border: 1px solid var(--green);
+  border-radius: 999px;
+  white-space: nowrap;
+  box-shadow: 0 2px 8px rgba(47, 158, 68, 0.16);
+  pointer-events: none;
+  z-index: 5;
+}
+.landing-v2 .improve-chip .lbl-prefix {
+  color: var(--green);
+  font-weight: 600;
+  margin-right: 5px;
+}
+.landing-v2 .src-box.improved {
+  border-color: var(--green);
+  box-shadow: 0 0 0 3px rgba(47, 158, 68, 0.22);
+}
+.landing-v2 .out-applied {
+  display: block;
+  margin-top: 7px;
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.02em;
+  color: var(--green);
+}
+.landing-v2 .out-applied b {
+  font-weight: 600;
+  color: var(--green);
+}
 .landing-v2 .event-chip .lbl-prefix {
   color: var(--muted);
   margin-right: 4px;

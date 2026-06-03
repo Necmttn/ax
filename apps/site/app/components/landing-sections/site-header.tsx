@@ -3,11 +3,13 @@ import { Link } from "@tanstack/react-router";
 export function SiteHeader() {
   return (
     <header className="site-head">
-      <Link to="/" className="brand" aria-label="ax home">
-        <span className="wordmark">ax</span>
-        <span className="brand-tag">agent experience</span>
-      </Link>
-      <span className="live" title="agent experience layer is alive">live</span>
+      <div className="brand-cluster">
+        <Link to="/" className="brand" aria-label="ax home">
+          <span className="wordmark">ax</span>
+          <span className="brand-tag">agent experience</span>
+        </Link>
+        <span className="live" title="agent experience layer is alive">live</span>
+      </div>
       <nav className="top-nav">
         <Link to="/features">Features</Link>
         <Link to="/showcases">Showcases</Link>

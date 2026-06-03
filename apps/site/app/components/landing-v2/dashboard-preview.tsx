@@ -1,6 +1,6 @@
 "use client";
 import { useState } from "react";
-import { SupportsStrip } from "./supports-strip";
+import { HeroLogoField } from "./supports-strip";
 
 const INSTALL_CMD = "curl -fsSL ax.necmttn.com/install | sh";
 
@@ -19,46 +19,55 @@ export function DashboardPreview() {
     <>
       {/* ============= hero ============= */}
       <section className="hero">
-        <span className="eyebrow">the agent experience layer</span>
-        <h1>Make your AI<br />coding agent <em>better</em>.</h1>
+        <HeroLogoField />
+        <span className="eyebrow">a feedback loop for your coding agent</span>
+        <h1>
+          Turn every agent session<br />
+          into a better <em>next run</em>.
+        </h1>
+        <p className="hero-human">
+          Built because we got tired of guessing what actually works.
+        </p>
         <p className="lede">
-          ax watches every coding session you run, finds the small changes
-          worth making, and lets you apply them one at a time.
+          ax watches every session your coding harness runs, spots the mistakes
+          it repeats, and turns them into small, repo-specific fixes you review
+          and apply &mdash; one at a time.
         </p>
 
-        <SupportsStrip />
-
-        <div
-          className={`install${copied ? " is-copied" : ""}`}
-          id="install"
-          role="button"
-          tabIndex={0}
-          aria-label="copy install command"
-          aria-live="polite"
-          onClick={onCopy}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" || e.key === " ") {
-              e.preventDefault();
-              onCopy();
-            }
-          }}
-        >
-          <span className="prompt">$</span>
-          <code id="install-code">{INSTALL_CMD}</code>
-          <span
-            id="copy-btn"
-            className={`install-action${copied ? " copied" : ""}`}
-            aria-hidden="true"
+        <div className="install-wrap">
+          <span className="install-label">install in 30 seconds</span>
+          <div
+            className={`install${copied ? " is-copied" : ""}`}
+            id="install"
+            role="button"
+            tabIndex={0}
+            aria-label="copy install command"
+            aria-live="polite"
+            onClick={onCopy}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                onCopy();
+              }
+            }}
           >
-            <span className="install-action__label">
-              {copied ? "copied" : "copy"}
+            <span className="prompt">$</span>
+            <code id="install-code">{INSTALL_CMD}</code>
+            <span
+              id="copy-btn"
+              className={`install-action${copied ? " copied" : ""}`}
+              aria-hidden="true"
+            >
+              <span className="install-action__label">
+                {copied ? "copied" : "copy"}
+              </span>
             </span>
-          </span>
+          </div>
+          <p className="install-trust">
+            runs locally <span className="sep">·</span> you review every change{" "}
+            <span className="sep">·</span> works with the agents you already use
+          </p>
         </div>
-
-        <p className="meta">
-          built because we got tired of guessing what works.
-        </p>
       </section>
 
       {/* ============= demo: dashboard preview ============= */}
