@@ -1,6 +1,4 @@
-import { readdirSync, readFileSync, statSync } from "node:fs";
-import { join } from "node:path";
-import { Effect } from "effect";
+import { Effect, FileSystem, Path, type PlatformError } from "effect";
 import {
     ClassifierRunner,
     ClassifierRunnerLive,
@@ -161,20 +159,36 @@ export async function runClassifierEvalSuites(
     return Effect.runPromise(program.pipe(Effect.provide(ClassifierRunnerLive)));
 }
 
-export function loadClassifierEvalSuites(path: string): readonly ClassifierEvalSuite[] {
-    const stat = statSync(path);
-    const files = stat.isDirectory()
-        ? readdirSync(path).filter((file) => file.endsWith(".json")).sort().map((file) => join(path, file))
-        : [path];
-    return files.map((file) => JSON.parse(readFileSync(file, "utf8")) as ClassifierEvalSuite);
-}
+export const loadClassifierEvalSuites = (
+    target: string,
+): Effect.Effect<readonly ClassifierEvalSuite[], PlatformError.PlatformError, FileSystem.FileSystem | Path.Path> =>
+    Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const stat = yield* fs.stat(target);
+        const files = stat.type === "Directory"
+            ? (yield* fs.readDirectory(target))
+                .filter((file) => file.endsWith(".json"))
+                .sort()
+                .map((file) => path.join(target, file))
+            : [target];
+        return yield* Effect.forEach(files, (file) =>
+            fs.readFileString(file).pipe(
+                Effect.map((contents) => JSON.parse(contents) as ClassifierEvalSuite),
+            ));
+    });
 
 export const defaultClassifierEvalPaths = (): readonly string[] =>
     registeredClassifiers.flatMap((entry) => entry.fixturePaths);
 
-export function loadDefaultClassifierEvalSuites(): readonly ClassifierEvalSuite[] {
-    return defaultClassifierEvalPaths().flatMap((path) => loadClassifierEvalSuites(path));
-}
+export const loadDefaultClassifierEvalSuites = (): Effect.Effect<
+    readonly ClassifierEvalSuite[],
+    PlatformError.PlatformError,
+    FileSystem.FileSystem | Path.Path
+> =>
+    Effect.forEach(defaultClassifierEvalPaths(), (path) => loadClassifierEvalSuites(path)).pipe(
+        Effect.map((suiteGroups) => suiteGroups.flat()),
+    );
 
 export function formatClassifierEvalSummary(summary: ClassifierEvalSummary, opts: { readonly json?: boolean } = {}): string {
     if (opts.json) return JSON.stringify(summary, null, 2);

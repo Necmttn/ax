@@ -1837,9 +1837,8 @@ const classifiersEvalCommand = Command.make(
         path: Flag.string("path").pipe(Flag.optional),
         json: jsonFlag,
     },
-    ({ path, json }) => Effect.promise(() =>
+    ({ path, json }) =>
         cmdClassifiersEval([...stringArg("path", optionValue(path)), ...boolArg("json", json)]),
-    ),
 ).pipe(Command.withDescription("Run classifier golden fixture evaluations"));
 
 const classifiersListCommand = Command.make(
@@ -1847,7 +1846,7 @@ const classifiersListCommand = Command.make(
     {
         json: jsonFlag,
     },
-    ({ json }) => Effect.promise(() => cmdClassifiersList(boolArg("json", json))),
+    ({ json }) => cmdClassifiersList(boolArg("json", json)),
 ).pipe(Command.withDescription("List registered classifiers and fixture coverage"));
 
 const cmdClassifiersExplain = (args: string[]) =>

@@ -1,5 +1,5 @@
-import { existsSync } from "node:fs";
-import { Context, Effect, Layer } from "effect";
+import { Context, Effect, FileSystem, Layer } from "effect";
+import { orAbsent } from "@ax/lib/shared/fs-error";
 import type {
     WorkflowCandidateReviewCoveragePipelineCommandBlocker,
     WorkflowCandidateReviewCoveragePipelineCommandBlockerDetail,
@@ -104,11 +104,15 @@ export interface ClassifierReviewPipelineOutputVerificationReport {
 }
 
 export interface ClassifierReviewPipelineOutputVerifier {
-    readonly exists: (path: string) => Effect.Effect<boolean>;
+    readonly exists: (path: string) => Effect.Effect<boolean, never, FileSystem.FileSystem>;
 }
 
 export const nodeFileOutputVerifier: ClassifierReviewPipelineOutputVerifier = {
-    exists: (path) => Effect.sync(() => existsSync(path)),
+    exists: (path) =>
+        Effect.gen(function* () {
+            const fs = yield* FileSystem.FileSystem;
+            return yield* fs.exists(path).pipe(orAbsent(false));
+        }),
 };
 
 export type ClassifierReviewPipelineLifecycleStatus =
@@ -144,11 +148,11 @@ export interface ClassifierReviewPipelineServiceShape {
     readonly verifyOutputArtifacts: (
         input: ClassifierReviewPipelinePreparedCommand,
         verifier: ClassifierReviewPipelineOutputVerifier,
-    ) => Effect.Effect<ClassifierReviewPipelineOutputVerificationReport>;
+    ) => Effect.Effect<ClassifierReviewPipelineOutputVerificationReport, never, FileSystem.FileSystem>;
     readonly commandLifecycle: (
         input: ClassifierReviewPipelineCommandSource,
         lifecycle?: ClassifierReviewPipelineLifecycleInput,
-    ) => Effect.Effect<ClassifierReviewPipelineLifecycleReport>;
+    ) => Effect.Effect<ClassifierReviewPipelineLifecycleReport, never, FileSystem.FileSystem>;
 }
 
 export class ClassifierReviewPipelineService extends Context.Service<

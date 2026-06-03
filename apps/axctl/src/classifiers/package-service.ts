@@ -1,6 +1,4 @@
 import { Context, Effect, FileSystem, Layer, Path, Schema } from "effect";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname } from "node:path";
 import { prettyPrint } from "@ax/lib/json";
 import { SurrealClient } from "@ax/lib/db";
 import { safeJsonParse } from "@ax/lib/shared/safe-json";
@@ -472,9 +470,36 @@ export class ClassifierPackageService extends Context.Service<ClassifierPackageS
     "ax/ClassifierPackageService",
 ) {}
 
-export const ClassifierPackageServiceLive: Layer.Layer<ClassifierPackageService> = Layer.effect(
+export const ClassifierPackageServiceLive: Layer.Layer<ClassifierPackageService, never, FileSystem.FileSystem | Path.Path> = Layer.effect(
     ClassifierPackageService,
     Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const pathSvc = yield* Path.Path;
+
+        /**
+         * Write a JSON report to disk via @effect/platform FileSystem, mapping any
+         * PlatformError to a tagged `ClassifierPackageReportWriteError`. `ensureDir`
+         * mirrors the original `mkdirSync(dirname, { recursive: true })` for writers
+         * that created the parent dir; writers that wrote straight into an existing
+         * dir keep that behavior with `ensureDir: false`.
+         */
+        const writeJsonReport = (
+            out: string,
+            report: unknown,
+            opts: { readonly ensureDir?: boolean } = {},
+        ): Effect.Effect<void, ClassifierPackageReportWriteError> =>
+            Effect.gen(function* () {
+                if (opts.ensureDir ?? true) {
+                    yield* fs.makeDirectory(pathSvc.dirname(out), { recursive: true });
+                }
+                yield* fs.writeFileString(out, `${prettyPrint(report)}\n`);
+            }).pipe(
+                Effect.mapError((error) => ClassifierPackageReportWriteError.make({
+                    path: out,
+                    message: errorMessage(error),
+                })),
+            );
+
         const loadManifest = Effect.fn("ClassifierPackageService.loadManifest")(function* (path: string) {
             return yield* Effect.try({
                 try: () => loadClassifierPackageManifest(path),
@@ -800,16 +825,7 @@ export const ClassifierPackageServiceLive: Layer.Layer<ClassifierPackageService>
             input: ClassifierBoundaryReplaySummaryWriteInput,
         ) {
             const report = yield* boundaryReplaySummary(input);
-            yield* Effect.try({
-                try: () => {
-                    mkdirSync(dirname(input.out), { recursive: true });
-                    writeFileSync(input.out, `${prettyPrint(report)}\n`, "utf8");
-                },
-                catch: (error) => ClassifierPackageReportWriteError.make({
-                    path: input.out,
-                    message: errorMessage(error),
-                }),
-            });
+            yield* writeJsonReport(input.out, report);
             return report;
         });
 
@@ -892,45 +908,34 @@ export const ClassifierPackageServiceLive: Layer.Layer<ClassifierPackageService>
             input: ClassifierPendingReviewTaskListWriteInput,
         ) {
             const report = yield* pendingReviewTaskList(input);
-            yield* Effect.try({
-                try: () => writeFileSync(input.out, `${prettyPrint(report)}\n`, "utf8"),
-                catch: (error) => ClassifierPackageReportWriteError.make({
-                    path: input.out,
-                    message: errorMessage(error),
-                }),
-            });
+            yield* writeJsonReport(input.out, report, { ensureDir: false });
             return report;
         });
 
         const classifierQualityStatus = Effect.fn("ClassifierPackageService.classifierQualityStatusReport")(function* (
             input: ClassifierQualityStatusInput,
         ) {
-            return yield* Effect.try({
-                try: () => {
-                    const parsed = safeJsonParse<unknown>(readFileSync(input.sourceReportPath, "utf8"));
-                    if (parsed === null) {
-                        throw new Error("Invalid classifier quality source JSON");
-                    }
-                    return buildClassifierQualityStatusReport(input.sourceReportPath, parsed);
-                },
-                catch: (error) => ClassifierPackageLoadError.make({
+            const contents = yield* fs.readFileString(input.sourceReportPath).pipe(
+                Effect.mapError((error) => ClassifierPackageLoadError.make({
                     path: input.sourceReportPath,
                     message: errorMessage(error),
-                }),
-            });
+                })),
+            );
+            const parsed = safeJsonParse<unknown>(contents);
+            if (parsed === null) {
+                return yield* ClassifierPackageLoadError.make({
+                    path: input.sourceReportPath,
+                    message: "Invalid classifier quality source JSON",
+                });
+            }
+            return buildClassifierQualityStatusReport(input.sourceReportPath, parsed);
         });
 
         const writeClassifierQualityStatus = Effect.fn("ClassifierPackageService.writeClassifierQualityStatusReport")(function* (
             input: ClassifierQualityStatusWriteInput,
         ) {
             const report = yield* classifierQualityStatus(input);
-            yield* Effect.try({
-                try: () => writeFileSync(input.out, `${prettyPrint(report)}\n`, "utf8"),
-                catch: (error) => ClassifierPackageReportWriteError.make({
-                    path: input.out,
-                    message: errorMessage(error),
-                }),
-            });
+            yield* writeJsonReport(input.out, report, { ensureDir: false });
             return report;
         });
 

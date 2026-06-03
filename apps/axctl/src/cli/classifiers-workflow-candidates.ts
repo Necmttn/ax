@@ -5669,7 +5669,7 @@ export function renderWorkflowCandidateReviewCoverageBriefMarkdown(
 export const withWorkflowCandidateReviewPipelineLifecycle = (
     report: WorkflowCandidateReviewCoverageReport,
     options: WorkflowCandidateReviewPipelineLifecycleOptions = {},
-): Effect.Effect<WorkflowCandidateReviewCoverageReport> =>
+): Effect.Effect<WorkflowCandidateReviewCoverageReport, never, FileSystem.FileSystem> =>
     Effect.gen(function* () {
         if (report.coverage_review === undefined) return report;
         const coverageReview = yield* withWorkflowCandidateReviewCoverageApplySummaryLifecycle(report.coverage_review, options);
@@ -5684,7 +5684,7 @@ export const withWorkflowCandidateReviewPipelineLifecycle = (
 export const withWorkflowCandidateReviewCoverageApplySummaryLifecycle = (
     summary: WorkflowCandidateReviewCoverageApplySummary,
     options: WorkflowCandidateReviewPipelineLifecycleOptions = {},
-): Effect.Effect<WorkflowCandidateReviewCoverageApplySummary> =>
+): Effect.Effect<WorkflowCandidateReviewCoverageApplySummary, never, FileSystem.FileSystem> =>
     Effect.gen(function* () {
         const pipeline = yield* ClassifierReviewPipelineService;
         const lifecycle = yield* pipeline.commandLifecycle(summary, options);

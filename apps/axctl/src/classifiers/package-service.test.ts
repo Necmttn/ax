@@ -396,6 +396,7 @@ describe("ClassifierPackageService", () => {
             });
         }).pipe(
             Effect.provide(ClassifierPackageServiceLive),
+            Effect.provide(BunFsLayer),
             Effect.flip,
         ));
 
