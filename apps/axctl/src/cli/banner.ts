@@ -20,6 +20,26 @@ export const WORDMARK_ASCII = `
   █▀█ █ █  agent experience layer
 `;
 
+/**
+ * Landing banner printed when `axctl` is run with no command. Wordmark art +
+ * tagline + a nudge to `--help`. ANSI dim is used so the art reads as chrome,
+ * not noise; stripped automatically when stdout is not a TTY.
+ */
+export function formatLandingBanner(version: string, color: boolean): string {
+    const dim = (s: string) => (color ? `\x1b[2m${s}\x1b[0m` : s);
+    const bold = (s: string) => (color ? `\x1b[1m${s}\x1b[0m` : s);
+    return [
+        "",
+        bold("  █▀█ ▀▄▀"),
+        `${bold("  █▀█ █ █")}  ${dim(`agent experience layer · v${version}`)}`,
+        "",
+        "  observability + memory for AI coding agents",
+        "",
+        `  ${dim("run")} ax --help ${dim("to see commands, or")} ax setup ${dim("to get started")}`,
+        "",
+    ].join("\n");
+}
+
 const STUDIO_BASE = "https://ax.necmttn.com/studio/";
 
 /**
