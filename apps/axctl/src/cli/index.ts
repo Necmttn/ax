@@ -11,6 +11,7 @@ import { prettyPrint, surrealLiteral } from "@ax/lib/json";
 import { prettifyProjectSlug } from "@ax/lib/shared/project-slug";
 import { AppLayer } from "@ax/lib/layers";
 import { deriveCheckpoints } from "../ingest/derive-checkpoints.ts";
+import { loadAgentScopeMap } from "../ingest/agent-scope.ts";
 import { retroFromSession, upsertRetro, type RetroSource } from "../ingest/retro.ts";
 import { runAgentAccept } from "../improve/agent-accept.ts";
 import { acceptProposal, rejectProposal } from "../improve/actions.ts";
@@ -1132,7 +1133,12 @@ LIMIT ${limit};`;
 const cmdUnused = (args: string[]) =>
     Effect.gen(function* () {
         const days = parsePositiveIntFlag("unused", "days", args, 7);
+        const includeScoped = args.includes("--include-scoped");
         const db = yield* SurrealClient;
+        // Skills declared in a subagent's `skills:` frontmatter load only when
+        // that agent is spawned - they're not global dead weight. Recover the
+        // skill → agent(s) map from disk so they can be hidden/tagged here.
+        const agentScope = yield* loadAgentScopeMap();
         // PERF (issue #31): Previous form ran a correlated subquery per skill
         // (`SELECT count() FROM invoked WHERE out = $parent.id AND ts > N`).
         // On the largest skill (~500k invoked edges) the index walk took
@@ -1229,12 +1235,32 @@ SELECT name, scope FROM skill WHERE array::len(<-invoked) = 0;`;
             (a, b) =>
                 a.total_inv - b.total_inv || a.name.localeCompare(b.name),
         );
+        let hiddenScoped = 0;
         for (const r of unused) {
+            const agents = agentScope.get(r.name);
+            if (agents && agents.length > 0) {
+                // Agent-scoped: not global dead weight. Hide unless asked,
+                // and when shown, tag with the owning agent(s) instead of scope.
+                if (!includeScoped) {
+                    hiddenScoped++;
+                    continue;
+                }
+                console.log(
+                    `${r.name}  [agent:${agents.join(",")}]  total=${fmtCount(r.total_inv)}  last=${r.last_used}`,
+                );
+                continue;
+            }
             console.log(
                 `${r.name}  [${r.scope}]  total=${fmtCount(r.total_inv)}  last=${r.last_used}`,
             );
         }
-        console.log(`\n${unused.length} skills unused in last ${days} days.`);
+        const shown = unused.length - (includeScoped ? 0 : hiddenScoped);
+        console.log(`\n${shown} skills unused in last ${days} days.`);
+        if (hiddenScoped > 0 && !includeScoped) {
+            console.log(
+                `${hiddenScoped} agent-scoped skills hidden (load only inside a subagent); --include-scoped to show.`,
+            );
+        }
     });
 
 const cmdSkillsWeighted = (args: string[]) =>
@@ -4368,9 +4394,17 @@ const recentCommand = Command.make(
 
 const unusedCommand = Command.make(
     "unused",
-    { days: Flag.integer("days").pipe(Flag.withDefault(7)) },
-    ({ days }) => cmdUnused([`--days=${days}`]),
-).pipe(Command.withDescription("List skills unused within a time window"));
+    {
+        days: Flag.integer("days").pipe(Flag.withDefault(7)),
+        includeScoped: Flag.boolean("include-scoped").pipe(Flag.withDefault(false)),
+    },
+    ({ days, includeScoped }) =>
+        cmdUnused([`--days=${days}`, ...(includeScoped ? ["--include-scoped"] : [])]),
+).pipe(
+    Command.withDescription(
+        "List skills unused within a time window (agent-scoped skills hidden unless --include-scoped)",
+    ),
+);
 
 const tasteCommand = Command.make(
     "taste",
