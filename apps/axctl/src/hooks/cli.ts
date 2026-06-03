@@ -26,20 +26,25 @@ import { HookNotFoundError } from "./errors.ts";
 const json = Flag.boolean("json").pipe(Flag.withDefault(false));
 const asScope = (s: string): HookScope => (s === "project" || s === "local" ? s : "global");
 
-/** Resolve a hook id (or ax marker id) to its provider+scope for mutation. */
+/** Resolve a hook id (or ax marker id) to the EXACT row to mutate. Fails on an
+ *  ambiguous id (8-char ids + copyable markers can collide) rather than silently
+ *  mutating the first match. */
 const locate = (id: string) =>
     Effect.gen(function* () {
         const all = yield* readAllHooks({ withEvidence: false });
-        const hit = all.find((h) => h.id === id || h.axId === id);
-        if (!hit) {
-            return yield* new HookNotFoundError({
-                id,
-                reason: "no configured hook with that id",
-                candidates: all.slice(0, 8).map((h) => h.id),
-            });
+        const matches = all.filter((h) => h.id === id || h.axId === id);
+        if (matches.length === 0) {
+            return yield* new HookNotFoundError({ id, reason: "no configured hook with that id", candidates: all.slice(0, 8).map((h) => h.id) });
         }
-        return hit;
+        if (matches.length > 1) {
+            return yield* new HookNotFoundError({ id, reason: "ambiguous - matches multiple hooks", candidates: matches.map((h) => `${h.provider}:${h.scope}:${h.file}`) });
+        }
+        return matches[0]!;
     });
+
+/** Mutation target derived from a located row: exact provider/scope/file/id. */
+const targetOf = (h: { provider: string; scope: HookScope; file: string; id: string }) =>
+    ({ provider: h.provider, scope: h.scope, file: h.file, id: h.id });
 
 const configCommand = Command.make(
     "config",
@@ -97,7 +102,7 @@ const removeCommand = Command.make(
     { id: Argument.string("id") },
     ({ id }) =>
         locate(id).pipe(
-            Effect.flatMap((h) => removeHook({ provider: h.provider, scope: h.scope, id })),
+            Effect.flatMap((h) => removeHook(targetOf(h))),
             Effect.map(() => console.log(`removed hook ${id}`)),
             Effect.provide(HookProviderRegistryDefault),
         ),
@@ -115,13 +120,11 @@ const editCommand = Command.make(
         locate(id).pipe(
             Effect.flatMap((h) =>
                 editHook({
-                    provider: h.provider,
-                    scope: h.scope,
-                    id,
+                    ...targetOf(h),
                     patch: {
-                        ...(command._tag === "Some" ? { command: command.value } : {}),
-                        ...(matcher._tag === "Some" ? { matcher: matcher.value } : {}),
-                        ...(timeout._tag === "Some" ? { timeout: timeout.value } : {}),
+                        ...(optionValue(command) !== undefined ? { command: optionValue(command)! } : {}),
+                        ...(optionValue(matcher) !== undefined ? { matcher: optionValue(matcher)! } : {}),
+                        ...(optionValue(timeout) !== undefined ? { timeout: optionValue(timeout)! } : {}),
                     },
                 }),
             ),
@@ -135,7 +138,7 @@ const disableCommand = Command.make(
     { id: Argument.string("id") },
     ({ id }) =>
         locate(id).pipe(
-            Effect.flatMap((h) => disableHook({ provider: h.provider, scope: h.scope, id })),
+            Effect.flatMap((h) => disableHook(targetOf(h))),
             Effect.map(() => console.log(`disabled hook ${id} (parked)`)),
             Effect.provide(HookProviderRegistryDefault),
         ),
@@ -146,7 +149,7 @@ const enableCommand = Command.make(
     { id: Argument.string("id") },
     ({ id }) =>
         locate(id).pipe(
-            Effect.flatMap((h) => enableHook({ provider: h.provider, scope: h.scope, id })),
+            Effect.flatMap((h) => enableHook(targetOf(h))),
             Effect.map(() => console.log(`enabled hook ${id}`)),
             Effect.provide(HookProviderRegistryDefault),
         ),

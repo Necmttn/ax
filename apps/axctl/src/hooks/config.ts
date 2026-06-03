@@ -64,22 +64,35 @@ const readMaybe = (
         return yield* fs.readFileString(path);
     });
 
-/** Load the park sidecar (`<file>.ax-parked.json`) entries, or [] when absent. */
+interface ParkedEntry {
+    readonly hook: ConfiguredHook;
+    readonly entry: unknown;
+}
+const parkedPath = (file: string): string => `${file}.ax-parked.json`;
+
+/** Load the park sidecar entries, or [] when absent. A corrupt sidecar is a
+ *  typed `HookConfigParseError` (not a silent drop - that would hide disabled
+ *  hooks). */
 const readParked = (
     file: string,
-): Effect.Effect<ReadonlyArray<{ readonly hook: ConfiguredHook; readonly entry: unknown }>, PlatformError, FileSystem.FileSystem> =>
+): Effect.Effect<ReadonlyArray<ParkedEntry>, PlatformError | HookConfigParseError, FileSystem.FileSystem> =>
     Effect.gen(function* () {
         const fs = yield* FileSystem.FileSystem;
-        const path = `${file}.ax-parked.json`;
+        const path = parkedPath(file);
         if (!(yield* fs.exists(path))) return [];
         const raw = yield* fs.readFileString(path);
         if (raw.trim() === "") return [];
-        try {
-            return JSON.parse(raw) as ReadonlyArray<{ hook: ConfiguredHook; entry: unknown }>;
-        } catch {
-            return [];
-        }
+        return yield* Effect.try({
+            try: () => JSON.parse(raw) as ReadonlyArray<ParkedEntry>,
+            catch: (e) => new HookConfigParseError({ provider: "ax", file: path, reason: `corrupt park sidecar: ${String(e)}` }),
+        });
     });
+
+const writeParked = (
+    file: string,
+    entries: ReadonlyArray<ParkedEntry>,
+): Effect.Effect<void, PlatformError, FileSystem.FileSystem | Path.Path> =>
+    writeFileAtomic(parkedPath(file), `${JSON.stringify(entries, null, 2)}\n`);
 
 /**
  * Read every declared hook across the selected providers/scopes/files.
@@ -106,13 +119,16 @@ export const readAllHooks = (
             for (const scope of scopes) {
                 for (const ref of provider.configFiles(scope, repoRoot)) {
                     const raw = yield* readMaybe(ref.path);
+                    const liveIds = new Set<string>();
                     if (raw.trim() !== "") {
                         const rows = yield* provider.parse(ref, raw);
-                        collected.push(...rows);
+                        for (const r of rows) { liveIds.add(r.id); collected.push(r); }
                     }
-                    // parked entries surface as enabled:false rows.
+                    // parked entries surface as enabled:false rows - but skip any id
+                    // that is ALSO live in the config (a partial-failure leftover), so
+                    // a hook never appears twice.
                     const parked = yield* readParked(ref.path);
-                    for (const p of parked) collected.push({ ...p.hook, enabled: false });
+                    for (const p of parked) if (!liveIds.has(p.hook.id)) collected.push({ ...p.hook, enabled: false });
                 }
             }
         }
@@ -151,15 +167,20 @@ const selectProvider = (
         );
     });
 
-/** Resolve which config file a provider/scope writes to (first ref of matching format). */
+/** Resolve which config file a provider/scope writes to. An exact `file` (from
+ *  the located row) wins, else a `format` match, else the first ref - so a codex
+ *  hook found in `hooks.json` is mutated there, not in `config.toml`. */
 const targetRef = (
     provider: HookProvider,
     scope: HookScope,
     repoRoot: string | null,
-    format?: "json" | "toml",
+    opts: { file?: string | undefined; format?: "json" | "toml" | undefined } = {},
 ): Effect.Effect<HookFileRef, HookValidationError> => {
     const refs = provider.configFiles(scope, repoRoot);
-    const ref = format ? refs.find((r) => r.format === format) ?? refs[0] : refs[0];
+    const ref =
+        (opts.file ? refs.find((r) => r.path === opts.file) : undefined) ??
+        (opts.format ? refs.find((r) => r.format === opts.format) : undefined) ??
+        refs[0];
     return ref
         ? Effect.succeed(ref)
         : Effect.fail(new HookValidationError({ provider: provider.name, reason: "no_config_file", detail: `no config file for scope ${scope}` }));
@@ -169,7 +190,9 @@ export interface MutateOptions {
     readonly provider: string;
     readonly scope: HookScope;
     readonly repoRoot?: string | null | undefined;
-    /** for codex: pick the toml or json file. defaults to first config file. */
+    /** Exact config file to target (from the located row) - routes codex's two files. */
+    readonly file?: string | undefined;
+    /** for codex: pick the toml or json file when `file` is absent. */
     readonly format?: "json" | "toml" | undefined;
 }
 
@@ -184,7 +207,7 @@ export const addHook = (
     Effect.gen(function* () {
         const provider = yield* selectProvider(opts.provider);
         const repoRoot = yield* resolveRepoRoot(opts.repoRoot);
-        const ref = yield* targetRef(provider, opts.scope, repoRoot, opts.format);
+        const ref = yield* targetRef(provider, opts.scope, repoRoot, { file: opts.file, format: opts.format });
         const raw = yield* readMaybe(ref.path);
         const next = yield* provider.applyAdd(ref, raw, opts.input);
         yield* writeFileAtomic(ref.path, next, {
@@ -204,7 +227,7 @@ const mutateById = (
     Effect.gen(function* () {
         const provider = yield* selectProvider(opts.provider);
         const repoRoot = yield* resolveRepoRoot(opts.repoRoot);
-        const ref = yield* targetRef(provider, opts.scope, repoRoot, opts.format);
+        const ref = yield* targetRef(provider, opts.scope, repoRoot, { file: opts.file, format: opts.format });
         const raw = yield* readMaybe(ref.path);
         // confirm the id exists before mutating, for a clean HookNotFoundError.
         const rows = yield* provider.parse(ref, raw);
@@ -235,15 +258,13 @@ export const disableHook = (
     opts: MutateOptions & { readonly id: string },
 ): Effect.Effect<
     string,
-    PlatformError | HookConfigParseError | HookConfigSchemaError | HookProviderNotFoundError | HookNotFoundError,
+    PlatformError | HookConfigParseError | HookConfigSchemaError | HookValidationError | HookProviderNotFoundError | HookNotFoundError,
     HookProviderRegistry | FileSystem.FileSystem | Path.Path
 > =>
     Effect.gen(function* () {
         const provider = yield* selectProvider(opts.provider);
         const repoRoot = yield* resolveRepoRoot(opts.repoRoot);
-        const ref = yield* targetRef(provider, opts.scope, repoRoot, opts.format).pipe(
-            Effect.catchTag("HookValidationError", (e) => Effect.die(e)),
-        );
+        const ref = yield* targetRef(provider, opts.scope, repoRoot, { file: opts.file, format: opts.format });
         const raw = yield* readMaybe(ref.path);
         const rows = yield* provider.parse(ref, raw);
         const hook = rows.find((r) => r.id === opts.id);
@@ -251,12 +272,16 @@ export const disableHook = (
 
         const { entry, text } = yield* provider.extractEntry(ref, raw, opts.id);
         const parked = yield* readParked(ref.path);
+        if (parked.some((p) => p.hook.id === opts.id)) return ref.path; // already parked, idempotent
         const nextParked = [...parked, { hook, entry }];
 
+        // Save the recoverable artifact (parked) FIRST, then remove from the live
+        // config. If the config write fails, roll the parked sidecar back so we
+        // never leave a hook saved-but-still-live or lost.
+        yield* writeParked(ref.path, nextParked);
         yield* writeFileAtomic(ref.path, text, {
             validate: (t) => provider.parse(ref, t).pipe(Effect.asVoid),
-        });
-        yield* writeFileAtomic(`${ref.path}.ax-parked.json`, `${JSON.stringify(nextParked, null, 2)}\n`);
+        }).pipe(Effect.tapError(() => writeParked(ref.path, parked).pipe(Effect.ignore)));
         return ref.path;
     });
 
@@ -268,15 +293,13 @@ export const enableHook = (
     opts: MutateOptions & { readonly id: string },
 ): Effect.Effect<
     string,
-    PlatformError | HookConfigParseError | HookConfigSchemaError | HookProviderNotFoundError | HookNotFoundError,
+    PlatformError | HookConfigParseError | HookConfigSchemaError | HookValidationError | HookProviderNotFoundError | HookNotFoundError,
     HookProviderRegistry | FileSystem.FileSystem | Path.Path
 > =>
     Effect.gen(function* () {
         const provider = yield* selectProvider(opts.provider);
         const repoRoot = yield* resolveRepoRoot(opts.repoRoot);
-        const ref = yield* targetRef(provider, opts.scope, repoRoot, opts.format).pipe(
-            Effect.catchTag("HookValidationError", (e) => Effect.die(e)),
-        );
+        const ref = yield* targetRef(provider, opts.scope, repoRoot, { file: opts.file, format: opts.format });
         const parked = yield* readParked(ref.path);
         const idx = parked.findIndex((p) => p.hook.id === opts.id);
         if (idx < 0) return yield* new HookNotFoundError({ id: opts.id, reason: "missing", candidates: [] });
@@ -285,10 +308,12 @@ export const enableHook = (
         const next = yield* provider.insertEntry(ref, raw, parked[idx]!.entry);
         const remaining = parked.filter((_, i) => i !== idx);
 
+        // Drop from parked FIRST, then insert into the live config. If the config
+        // write fails, restore the parked entry so the hook isn't lost.
+        yield* writeParked(ref.path, remaining);
         yield* writeFileAtomic(ref.path, next, {
             validate: (t) => provider.parse(ref, t).pipe(Effect.asVoid),
-        });
-        yield* writeFileAtomic(`${ref.path}.ax-parked.json`, `${JSON.stringify(remaining, null, 2)}\n`);
+        }).pipe(Effect.tapError(() => writeParked(ref.path, parked).pipe(Effect.ignore)));
         return ref.path;
     });
 

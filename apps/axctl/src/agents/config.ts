@@ -8,7 +8,7 @@ import { ConfigParseError, ScopeTargetError } from "../config-core/errors.ts";
 import { AGENT_DEF_TABLE } from "../ingest/agent-def.ts";
 import { AgentSourceRegistry } from "./registry.ts";
 import { AgentNotFoundError } from "./errors.ts";
-import type { AgentRecord, AgentScope } from "./source.ts";
+import type { AgentRecord, AgentScope, AgentSource } from "./source.ts";
 
 /**
  * Orchestration for `ax agents` CLI subcommands. `readAllAgents` joins on-disk
@@ -148,23 +148,40 @@ export const findAgent = (
         return hit;
     });
 
-/** Hard-delete an agent file. */
+/** Resolve the source owning a record's scope, typed (no non-null assertion). */
+const sourceForScope = (
+    reg: { all: () => ReadonlyArray<AgentSource> },
+    rec: AgentRecord,
+): Effect.Effect<AgentSource, AgentNotFoundError> => {
+    const source = reg.all().find((s) => s.scope === rec.scope);
+    return source ? Effect.succeed(source) : Effect.fail(new AgentNotFoundError({ name: rec.name, known: [] }));
+};
+
+/** Soft-tombstone the agent_def row so the lifecycle view drops it immediately. */
+const tombstoneAgent = (name: string): Effect.Effect<void, DbError, SurrealClient> =>
+    Effect.gen(function* () {
+        const db = yield* SurrealClient;
+        yield* db.query(`UPDATE ${AGENT_DEF_TABLE} SET deleted_at = time::now() WHERE name = $name AND deleted_at IS NONE;`, { name });
+    });
+
+/** Hard-delete an agent file + tombstone its graph row. */
 export const removeAgent = (
     name: string,
 ): Effect.Effect<
     AgentRecord,
-    ConfigParseError | PlatformError | AgentNotFoundError,
-    FileSystem.FileSystem | Path.Path | AgentSourceRegistry
+    ConfigParseError | PlatformError | AgentNotFoundError | DbError,
+    FileSystem.FileSystem | Path.Path | AgentSourceRegistry | SurrealClient
 > =>
     Effect.gen(function* () {
         const reg = yield* AgentSourceRegistry;
         const rec = yield* findAgent(name);
-        const source = reg.all().find((s) => s.scope === rec.scope)!;
+        const source = yield* sourceForScope(reg, rec);
         yield* source.remove(rec);
+        yield* tombstoneAgent(rec.name);
         return rec;
     });
 
-/** Move an agent file aside (disable, recoverable). */
+/** Move an agent file aside (disable, recoverable). Leaves the graph row intact. */
 export const parkAgent = (
     name: string,
 ): Effect.Effect<
@@ -175,7 +192,7 @@ export const parkAgent = (
     Effect.gen(function* () {
         const reg = yield* AgentSourceRegistry;
         const rec = yield* findAgent(name);
-        const source = reg.all().find((s) => s.scope === rec.scope)!;
+        const source = yield* sourceForScope(reg, rec);
         yield* source.park(rec);
         return rec;
     });

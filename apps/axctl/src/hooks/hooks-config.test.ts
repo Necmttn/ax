@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { Effect, Layer } from "effect";
 import { BunFileSystem, BunPath } from "@effect/platform-bun";
 import { SurrealClient } from "@ax/lib/db";
-import { claudeProvider, decodeClaude } from "./providers/claude.ts";
+import { claudeProvider } from "./providers/claude.ts";
 import { cursorProvider } from "./providers/cursor.ts";
 import { codexProvider } from "./providers/codex.ts";
 import { opencodeProvider, joinArgv, wrapArgv } from "./providers/opencode.ts";
@@ -147,8 +147,8 @@ describe("claude provider", () => {
         expect(exit._tag).toBe("Failure");
     });
 
-    test("decodeClaude pure helper handles empty doc", () => {
-        expect(decodeClaude(r, {})).toEqual([]);
+    test("parse handles empty doc", () => {
+        expect(runPure(claudeProvider.parse(r, ""))).toEqual([]);
     });
 });
 
@@ -218,11 +218,15 @@ describe("codex provider", () => {
         expect(runPure(codexProvider.parse(tref, removed))).toHaveLength(0);
     });
 
-    test("JSON file routes through claude codec but tags provider=codex", () => {
+    test("JSON file uses codex identity AND mutates by that id (regression)", () => {
         const raw = JSON.stringify({ hooks: { PreToolUse: [{ hooks: [{ type: "command", command: "echo j" }] }] } });
         const rows = runPure(codexProvider.parse(jref, raw));
         expect(rows).toHaveLength(1);
         expect(rows[0]!.provider).toBe("codex");
+        // the bug: the JSON id was hashed with provider=codex but mutate delegated
+        // to claude (id=claude) -> remove/edit silently no-op'd. Assert remove works.
+        const removed = runPure(codexProvider.applyRemove(jref, raw, rows[0]!.id));
+        expect(runPure(codexProvider.parse(jref, removed))).toHaveLength(0);
     });
 });
 

@@ -17,7 +17,7 @@ import type {
     HookScope,
 } from "./types.ts";
 import { deriveHookId, deriveOwner, axMarkerId, genMarkerId, embedMarker, preserveMarker } from "./ownership.ts";
-import { decodeClaude, claudeProvider } from "./claude.ts";
+import { makeJsonCodec } from "./json-codec.ts";
 
 const NAME = "codex";
 
@@ -32,6 +32,10 @@ const EVENTS = [
     "SubagentStop",
     "PermissionRequest",
 ] as const;
+
+// Codex `hooks.json` is byte-identical to Claude's schema; reuse the shared codec
+// with CODEX identity so ids match across read + mutate (no claude delegation).
+const jsonCodec = makeJsonCodec(NAME, EVENTS);
 
 /**
  * TOML shape:
@@ -58,12 +62,6 @@ const tomlEntryTimeout = (e: CodexTomlEntry): number | undefined =>
 const parseTomlDoc = (file: string, raw: string): Effect.Effect<CodexToml, HookConfigParseError> =>
     Effect.try({
         try: () => (raw.trim() === "" ? {} : (parseToml(raw) as CodexToml)),
-        catch: (e) => new HookConfigParseError({ provider: NAME, file, reason: String(e) }),
-    });
-
-const parseJson = (file: string, raw: string): Effect.Effect<{ hooks?: Record<string, unknown> }, HookConfigParseError> =>
-    Effect.try({
-        try: () => (raw.trim() === "" ? {} : JSON.parse(raw)),
         catch: (e) => new HookConfigParseError({ provider: NAME, file, reason: String(e) }),
     });
 
@@ -116,8 +114,6 @@ const findToml = (doc: CodexToml, ref: HookFileRef, id: string): { event: string
     return null;
 };
 
-const codexJsonRef = (ref: HookFileRef): HookFileRef => ref; // same shape; provider tag differs only for ids
-
 export const codexProvider: HookProvider = {
     name: NAME,
     label: "Codex",
@@ -148,17 +144,7 @@ export const codexProvider: HookProvider = {
                 }
                 return decodeTomlDoc(ref, doc);
             })
-            : Effect.gen(function* () {
-                const settings = yield* parseJson(ref.path, raw);
-                // re-tag provider as codex by decoding through the claude flattener,
-                // then overwriting provider/id with codex identity.
-                const claudeRows = decodeClaude(codexJsonRef(ref), settings as never);
-                return claudeRows.map((r) => {
-                    const id = deriveHookId({ provider: NAME, scope: ref.scope, file: ref.path, event: r.event, matcher: r.matcher, command: r.command });
-                    const ax = axMarkerId(r.command);
-                    return { ...r, provider: NAME, id, ...(ax ? { axId: ax } : { axId: undefined }) };
-                });
-            }),
+            : jsonCodec.parse(ref, raw),
 
     applyAdd: (ref, raw, input) =>
         ref.format === "toml"
@@ -177,7 +163,7 @@ export const codexProvider: HookProvider = {
                 next.hooks![input.event] = [...(next.hooks![input.event] ?? []), entry];
                 return serializeToml(next);
             })
-            : claudeProvider.applyAdd(ref, raw, input),
+            : jsonCodec.applyAdd(ref, raw, input),
 
     applyRemove: (ref, raw, id) =>
         ref.format === "toml"
@@ -191,7 +177,7 @@ export const codexProvider: HookProvider = {
                 else next.hooks![loc.event] = arr;
                 return serializeToml(next);
             })
-            : claudeProvider.applyRemove(ref, raw, id),
+            : jsonCodec.applyRemove(ref, raw, id),
 
     applyEdit: (ref, raw, id, patch: HookPatch) =>
         ref.format === "toml"
@@ -220,7 +206,7 @@ export const codexProvider: HookProvider = {
                 next.hooks![loc.event] = arr;
                 return serializeToml(next);
             })
-            : claudeProvider.applyEdit(ref, raw, id, patch),
+            : jsonCodec.applyEdit(ref, raw, id, patch),
 
     extractEntry: (ref, raw, id) =>
         ref.format === "toml"
@@ -232,7 +218,7 @@ export const codexProvider: HookProvider = {
                 const text = yield* codexProvider.applyRemove(ref, raw, id);
                 return { entry, text };
             })
-            : claudeProvider.extractEntry(ref, raw, id),
+            : jsonCodec.extractEntry(ref, raw, id),
 
     insertEntry: (ref, raw, entry) =>
         ref.format === "toml"
@@ -243,5 +229,5 @@ export const codexProvider: HookProvider = {
                 next.hooks![e.event] = [...(next.hooks![e.event] ?? []), e.toml];
                 return serializeToml(next);
             })
-            : claudeProvider.insertEntry(ref, raw, entry),
+            : jsonCodec.insertEntry(ref, raw, entry),
 };
