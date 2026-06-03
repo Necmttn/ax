@@ -1041,14 +1041,18 @@ export function __testStreamCodexJsonlLines(lines: Iterable<string>, every: numb
 
 type CodexExtractor = ReturnType<typeof createCodexExtractor>;
 
-interface CodexStreamHooks {
+interface CodexStreamHooks<E = never, R = never> {
     /** Flush boundary in lines; `extractor.drain(false)` handed to `onFlush`. */
     readonly flushEvery: number;
     /** Drains a bounded batch to storage mid-file (memory bound). */
-    readonly onFlush: (batch: MutableCodexExtract) => Effect.Effect<void, never, never>;
+    readonly onFlush: (batch: MutableCodexExtract) => Effect.Effect<void, E, R>;
     /** Progress tick at the `CODEX_PROGRESS_LINE_EVERY` cadence (phase 1) and
      *  again right after each flush (phase 2); `phase` distinguishes them. */
-    readonly onProgress?: (phase: number) => Effect.Effect<void, never, never>;
+    readonly onProgress?: (phase: number) => Effect.Effect<void, E, R>;
+    /** Fired AFTER every processed line with the running count, so a caller can
+     *  keep its own `lineCount` live mid-stream (the progress emitter reads it).
+     *  Synchronous + cheap; kept off the `E`/`R` channels deliberately. */
+    readonly onLine?: (lineCount: number) => void;
 }
 
 /**
@@ -1061,11 +1065,11 @@ interface CodexStreamHooks {
  * A vanished file (NotFound) propagates as a typed `PlatformError` so the
  * caller can skip it; non-NotFound failures propagate too.
  */
-const streamCodexFile = (
+const streamCodexFile = <E = never, R = never>(
     filePath: string,
     extractor: CodexExtractor,
-    hooks: CodexStreamHooks,
-): Effect.Effect<number, PlatformError.PlatformError, FileSystem.FileSystem> =>
+    hooks: CodexStreamHooks<E, R>,
+): Effect.Effect<number, PlatformError.PlatformError | E, FileSystem.FileSystem | R> =>
     Effect.gen(function* () {
         const fs = yield* FileSystem.FileSystem;
         let lineCount = 0;
@@ -1076,6 +1080,7 @@ const streamCodexFile = (
                 Effect.gen(function* () {
                     extractor.processLine(line);
                     lineCount += 1;
+                    if (hooks.onLine) hooks.onLine(lineCount);
                     if (lineCount % CODEX_PROGRESS_LINE_EVERY === 0) {
                         if (hooks.onProgress) yield* hooks.onProgress(1);
                     }
@@ -1146,6 +1151,50 @@ export const __testStreamCodexFileBatches = (
         const final = extractor.drain(true);
         if (keep(final)) batches.push(final);
         return batches;
+    });
+
+/** Outcome of {@link __testStreamCodexFileGuarded}: which arm of the production
+ *  NotFound guard was taken. `"skipped"` = benign vanished-file skip (nothing
+ *  persisted); `"completed"` = stream finished; a Failure exit = NotFound (or any
+ *  other PlatformError) propagated because partial state was already persisted. */
+export type CodexGuardedOutcome = "completed" | "skipped";
+
+/**
+ * Test seam mirroring the PRODUCTION mid-stream NotFound guard exactly (the
+ * `ingestCodex` per-file block can't run without a DB, so we replicate just the
+ * guard around the shared {@link streamCodexFile}). `onFlush` simulates a DB
+ * write by flipping `persistedAny` (== production's `sessionUpserted`). A
+ * NotFound is only swallowed as `"skipped"` when NOTHING was persisted yet
+ * (`lineCount === 0 && !persistedAny`); a NotFound AFTER a flush wrote partial
+ * rows propagates as a Failure - proving partial state is never silently skipped.
+ */
+export const __testStreamCodexFileGuarded = (
+    filePath: string,
+    flushEvery: number,
+): Effect.Effect<CodexGuardedOutcome, PlatformError.PlatformError, FileSystem.FileSystem> =>
+    Effect.gen(function* () {
+        const extractor = createCodexExtractor(filePath);
+        let lineCount = 0;
+        let persistedAny = false;
+        return yield* streamCodexFile(filePath, extractor, {
+            flushEvery,
+            // Simulate the production `writeBatch`: the first non-empty flush
+            // upserts the session, flipping the "persisted anything" flag.
+            onFlush: (batch) =>
+                Effect.sync(() => {
+                    if (batch.session) persistedAny = true;
+                }),
+            onLine: (count) => {
+                lineCount = count;
+            },
+        }).pipe(
+            Effect.as("completed" as CodexGuardedOutcome),
+            Effect.catchTag("PlatformError", (e) =>
+                isNotFound(e) && lineCount === 0 && !persistedAny
+                    ? Effect.succeed("skipped" as CodexGuardedOutcome)
+                    : Effect.fail(e),
+            ),
+        );
     });
 
 const buildTurnStatements = (turns: readonly CodexTurn[]): string[] =>
@@ -1494,33 +1543,37 @@ export const ingestCodex = (
                     filePlanSnapshots += batch.planSnapshots.length;
                 });
 
-            // Stream the file via `FileSystem.stream` (NOT a node fh) so a
+            // Stream the file the SAME way the test seams do, via the shared
+            // `streamCodexFile` body (NOT a node fh): `FileSystem.stream` so a
             // session that VANISHED between discovery and here (e.g. a cleaned-up
-            // session dir) surfaces as a typed NotFound `PlatformError` we skip
-            // below, rather than aborting the run. The flush/progress cadence is
-            // threaded INTO the per-line Effect so a 30 MB session still drains in
-            // bounded batches at `flushEvery` intervals - identical to before.
-            // A NotFound mid-stream skips this candidate; other PlatformErrors
-            // re-raise.
-            const vanished = yield* fs.stream(filePath).pipe(
-                Stream.decodeText(),
-                Stream.splitLines,
-                Stream.runForEach((line) =>
-                    Effect.gen(function* () {
-                        extractor.processLine(line);
-                        lineCount += 1;
-                        if (lineCount % CODEX_PROGRESS_LINE_EVERY === 0) {
-                            yield* emitProgress(1);
-                        }
-                        if (lineCount % flushEvery === 0) {
-                            yield* writeBatch(extractor.drain(false));
-                            yield* emitProgress(2);
-                        }
-                    }),
-                ),
+            // session dir) surfaces as a typed NotFound `PlatformError`. The
+            // flush/progress cadence is threaded INTO the per-line Effect (via
+            // `onFlush`/`onProgress`) so a 30 MB session still drains in bounded
+            // batches at `flushEvery` intervals - identical to before. `onLine`
+            // keeps our outer `lineCount` live mid-stream so the progress emitter
+            // sees the running total AND so the NotFound guard below sees the
+            // real count even when the stream fails before returning.
+            //
+            // NotFound handling is GUARDED: a vanished file is only a benign skip
+            // when NOTHING was persisted yet (no line processed AND no session
+            // upserted). If NotFound strikes AFTER a mid-stream flush already wrote
+            // partial rows (`sessionUpserted`), swallowing it would leave a
+            // partial/incomplete session in the DB while reporting "skipped" - a
+            // silent partial ingest. In that case we let it propagate as a loud
+            // stage-level failure instead. Other PlatformErrors always re-raise.
+            const vanished = yield* streamCodexFile(filePath, extractor, {
+                flushEvery,
+                onFlush: writeBatch,
+                onProgress: emitProgress,
+                onLine: (count) => {
+                    lineCount = count;
+                },
+            }).pipe(
                 Effect.as(false),
                 Effect.catchTag("PlatformError", (e) =>
-                    isNotFound(e) ? Effect.succeed(true) : Effect.fail(e),
+                    isNotFound(e) && lineCount === 0 && !sessionUpserted
+                        ? Effect.succeed(true)
+                        : Effect.fail(e),
                 ),
             );
             if (vanished) {
@@ -1545,14 +1598,13 @@ export const ingestCodex = (
                 ? yield* emitProgress(3).pipe(
                     Effect.andThen(
                         // Best-effort cold-storage copy: a file that vanished
-                        // after streaming (or any read fault) tolerates to null
-                        // so the snapshot is simply skipped - the parsed rows are
-                        // already persisted. NotFound recovers via `skipNotFound`;
-                        // other PlatformErrors also fall back to null here to keep
-                        // the prior try/catch-returns-null tolerance.
+                        // after streaming tolerates to null so the snapshot is
+                        // simply skipped - the parsed rows are already persisted.
+                        // Matches `transcripts.ts`: NotFound recovers to null,
+                        // genuine read faults re-raise rather than being silently
+                        // swallowed.
                         fs.readFileString(filePath).pipe(
                             skipNotFound(null as string | null),
-                            Effect.catchTag("PlatformError", () => Effect.succeed(null as string | null)),
                         ),
                     ),
                 )

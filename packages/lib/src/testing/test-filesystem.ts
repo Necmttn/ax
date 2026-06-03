@@ -32,6 +32,17 @@ const chunkBytes = (bytes: Uint8Array, size: number): Uint8Array[] => {
 export interface TestFileSystemOptions {
     /** Inject a non-NotFound failure for a path (e.g. PermissionDenied). */
     readonly errors?: Record<string, PlatformError.PlatformError>;
+    /**
+     * Inject a MID-STREAM failure for a path: `stream` emits the seeded content
+     * in chunks until at least `afterBytes` bytes have flowed, then fails with
+     * `error`. Simulates a file that vanishes / faults part-way through a long
+     * read (e.g. a session dir cleaned up while the reader is mid-file), so the
+     * mid-stream NotFound-after-partial-flush guard is testable.
+     */
+    readonly streamFailAfter?: Record<
+        string,
+        { readonly afterBytes: number; readonly error: PlatformError.PlatformError }
+    >;
 }
 
 export const layerTestFileSystem = (
@@ -60,7 +71,23 @@ export const layerTestFileSystem = (
             const err = injected(path);
             if (err) return Stream.fail(err);
             if (!(path in files)) return Stream.fail(notFound("stream", path));
-            return Stream.fromIterable(chunkBytes(encoder.encode(files[path]!), 3));
+            const chunks = chunkBytes(encoder.encode(files[path]!), 3);
+            const failAfter = opts?.streamFailAfter?.[path];
+            if (failAfter) {
+                // Emit chunks until `afterBytes` bytes have flowed, then fail.
+                let flowed = 0;
+                const prefix: Uint8Array[] = [];
+                for (const chunk of chunks) {
+                    if (flowed >= failAfter.afterBytes) break;
+                    prefix.push(chunk);
+                    flowed += chunk.length;
+                }
+                return Stream.concat(
+                    Stream.fromIterable(prefix),
+                    Stream.fail(failAfter.error),
+                );
+            }
+            return Stream.fromIterable(chunks);
         },
         exists: (path) => Effect.succeed(path in files),
         // `stat` infers type from the seeded map: an exact key is a `File`, a
