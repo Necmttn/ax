@@ -2,10 +2,21 @@ import { describe, expect, test } from "bun:test";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { Effect, FileSystem, Layer, Path } from "effect";
+import { BunFileSystem, BunPath } from "@effect/platform-bun";
 import {
+    type ClaudeInsightReadResult,
     facetToInsightAndFriction,
     readClaudeInsightConversions,
 } from "./claude-insights.ts";
+
+// Real Bun-backed FileSystem + Path against the tmp-dir fixtures (no mock):
+// readClaudeInsightConversions now requires FileSystem + Path after the
+// @effect/platform migration.
+const FsLayer = Layer.mergeAll(BunFileSystem.layer, BunPath.layer);
+const runFs = <A, E>(
+    eff: Effect.Effect<A, E, FileSystem.FileSystem | Path.Path>,
+): Promise<A> => Effect.runPromise(eff.pipe(Effect.provide(FsLayer)));
 
 describe("Claude insights conversion", () => {
     test("converts a facet into one insight and counted friction events", () => {
@@ -173,11 +184,10 @@ describe("Claude insights conversion", () => {
             );
 
             const warn = console.warn;
-            let result: Awaited<ReturnType<typeof readClaudeInsightConversions>> | null =
-                null;
+            let result: ClaudeInsightReadResult | null = null;
             try {
                 console.warn = () => {};
-                result = await readClaudeInsightConversions(root);
+                result = await runFs(readClaudeInsightConversions(root));
             } finally {
                 console.warn = warn;
             }

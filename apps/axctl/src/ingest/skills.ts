@@ -188,9 +188,9 @@ const readPluginSkills = (): FsReader =>
 const readProjectSkills = (): FsReader =>
     Effect.gen(function* () {
         const path = yield* Path.Path;
-        // discoverProjectRoots stays a Promise (out of migration scope); it owns
-        // its own try/catch tolerance internally.
-        const roots = yield* Effect.promise(() => discoverProjectRoots());
+        // discoverProjectRoots is an Effect over FileSystem + Path; it owns its
+        // own tolerate-all recovery internally (cannot fail).
+        const roots = yield* discoverProjectRoots();
         const out: SkillItem[] = [];
         for (const root of roots) {
             const skillsDir = path.join(root.path, ".claude", "skills");

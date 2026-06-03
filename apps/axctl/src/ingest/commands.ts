@@ -224,9 +224,9 @@ const readProjectCommands = (): Effect.Effect<
         // Per-project `<repo>/.claude/commands/` for every project the user has
         // worked in. Re-namespaced under the project basename so two repos with
         // the same bare command name don't collide and the resolver's `:bare`
-        // suffix rule routes invocations correctly. discoverProjectRoots stays a
-        // Promise (out of migration scope); it owns its own try/catch tolerance.
-        const projects = yield* Effect.promise(() => discoverProjectRoots());
+        // suffix rule routes invocations correctly. discoverProjectRoots is an
+        // Effect over FileSystem + Path; it owns its own tolerate-all recovery.
+        const projects = yield* discoverProjectRoots();
         const out: CommandItem[] = [];
         for (const root of projects) {
             const commandsDir = path.join(root.path, ".claude", "commands");

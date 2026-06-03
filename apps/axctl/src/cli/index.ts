@@ -1,5 +1,6 @@
 #!/usr/bin/env bun
-import { Effect, FileSystem, Option, Path, References } from "effect";
+import { Effect, FileSystem, Layer, Option, Path, References } from "effect";
+import { BunFileSystem, BunPath } from "@effect/platform-bun";
 import { Argument, Command, Flag } from "effect/unstable/cli";
 import { SurrealClient, type SurrealClientShape } from "@ax/lib/db";
 import { listSessionsHere, listSessionsAround, listSessionsNear, type SessionRow } from "../dashboard/sessions-query.ts";
@@ -269,14 +270,14 @@ const writeIngestEvent = (
         publishIngestEvent(event);
     }).pipe(Effect.asVoid);
 
-const telemetryStage = <A>(
+const telemetryStage = <A, R = SurrealClient | AxConfig | ProcessService>(
     db: SurrealClientShape,
     runId: string,
     source: string,
     stage: string,
-    program: Effect.Effect<A, DbError, SurrealClient | AxConfig | ProcessService>,
+    program: Effect.Effect<A, DbError, R>,
     progress?: ProgressReporter,
-): Effect.Effect<A, DbError, SurrealClient | AxConfig | ProcessService> =>
+): Effect.Effect<A, DbError, R | SurrealClient | AxConfig | ProcessService> =>
     Effect.gen(function* () {
         progress?.start({ source, stage });
         yield* db.query(buildIngestStageStartStatement({ runId, source, stage }));
@@ -528,6 +529,12 @@ const cmdIngestInsights = (args: string[] = []) =>
             ),
             Effect.provideService(References.MinimumLogLevel, verbose ? "Debug" : "Info"),
             Effect.ensuring(Effect.sync(() => progress.stop())),
+            // ingestClaudeInsights now reads via @effect/platform FileSystem +
+            // Path. Provide the Bun-backed layers here so this command's R stays
+            // aligned with the sibling `cmdIngest` branch in the `ax ingest`
+            // handler (AppLayer also supplies them at the top level; these pure
+            // leaf layers are idempotent to re-provide).
+            Effect.provide(Layer.mergeAll(BunFileSystem.layer, BunPath.layer)),
         );
     }).pipe(Effect.asVoid);
 
