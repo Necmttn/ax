@@ -7405,6 +7405,7 @@ footer .right {
   --rt-yellow: #e8c87a;
   --rt-red: #e87a6f;
   --rt-claude: #d77757;
+  position: relative;
   max-width: 880px;
   margin: 0 auto;
   background: var(--rt-bg);
@@ -7415,6 +7416,7 @@ footer .right {
     0 30px 60px -40px rgba(20, 20, 18, 0.5),
     0 12px 32px -18px rgba(20, 20, 18, 0.25);
 }
+
 .landing-v2 .rt-chrome {
   display: flex;
   align-items: stretch;
@@ -7530,7 +7532,7 @@ footer .right {
   text-transform: uppercase;
   color: var(--rt-green);
 }
-.landing-v2 .rt-pill.is-paused {
+.landing-v2 .rt-pill.is-slowed {
   color: var(--rt-yellow);
 }
 .landing-v2 .rt-banner {
