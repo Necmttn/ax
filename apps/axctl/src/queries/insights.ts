@@ -121,6 +121,7 @@ export const SCHEMA_TABLES: readonly SchemaTableSpec[] = [
     { table: "ingest_run", stage: "active", note: "Top-level ingest execution telemetry." },
     { table: "ingest_stage", stage: "active", note: "Per-stage ingest execution telemetry." },
     { table: "ingest_event", stage: "active", note: "Append-like ingest progress events." },
+    { table: "ingest_file_state", stage: "active", note: "Per-source ingest watermark (mtime/size/sha) for skip-unchanged re-ingest." },
     { table: "query_sample", stage: "staged", note: "Reserved query execution samples." },
     { table: "graph_health_check", stage: "staged", note: "Persisted graph health check rows." },
     { table: "invoked", stage: "active", note: "Turn-to-skill invocation edges." },
