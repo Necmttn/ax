@@ -1,12 +1,10 @@
-import { existsSync } from "node:fs";
-import { stat } from "node:fs/promises";
-import { join } from "node:path";
 import { Database } from "bun:sqlite";
-import { Effect, Schema } from "effect";
+import { Effect, FileSystem, Option, Path, Schema } from "effect";
 import { AxConfig } from "@ax/lib/config";
 import { RecordId, SurrealClient } from "@ax/lib/db";
 import { decodeJsonOrNull } from "@ax/lib/decode";
 import type { DbError } from "@ax/lib/errors";
+import { orAbsent } from "@ax/lib/shared/fs-error";
 import { executeStatements } from "@ax/lib/shared/statement-exec";
 import {
     type ToolCallSkillRelationWrite,
@@ -888,19 +886,31 @@ function failedExtract(dbPath: string, error: unknown): OpenCodeExtract {
     );
 }
 
-async function findOpenCodeDbCandidates(opencodeDir: string, cutoffMs = 0): Promise<string[]> {
-    const dbPath = join(opencodeDir, "opencode.db");
-    if (!existsSync(dbPath)) return [];
-    if (cutoffMs > 0) {
-        try {
-            const st = await stat(dbPath);
-            if (st.mtimeMs < cutoffMs) return [];
-        } catch {
-            return [];
+// Discovery PROBE: the OLD code guarded with `existsSync` and `stat`-in-try/catch,
+// treating any miss/fault as "no candidate". `orAbsent` reproduces that exactly
+// (recovers ANY PlatformError to the fallback), so this reader never fails; R is
+// just FileSystem + Path.
+const findOpenCodeDbCandidates = (
+    opencodeDir: string,
+    cutoffMs = 0,
+): Effect.Effect<string[], never, FileSystem.FileSystem | Path.Path> =>
+    Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const dbPath = path.join(opencodeDir, "opencode.db");
+        // OLD: existsSync guard → [] when the db file is absent.
+        const exists = yield* fs.exists(dbPath).pipe(orAbsent(false));
+        if (!exists) return [];
+        if (cutoffMs > 0) {
+            // OLD: stat in try/catch → [] on fault or when mtime is below cutoff.
+            const mtimeMs = yield* fs.stat(dbPath).pipe(
+                Effect.map((st) => Option.getOrElse(st.mtime, () => new Date(0)).getTime()),
+                orAbsent(-1),
+            );
+            if (mtimeMs < cutoffMs) return [];
         }
-    }
-    return [dbPath];
-}
+        return [dbPath];
+    });
 
 export const __testFindOpenCodeDbCandidates = findOpenCodeDbCandidates;
 
@@ -910,12 +920,12 @@ interface OpenCodeIngestOpts {
 
 export const ingestOpenCode = (
     opts: Partial<OpenCodeIngestOpts> = {},
-): Effect.Effect<OpenCodeStats, DbError, SurrealClient | AxConfig> =>
+): Effect.Effect<OpenCodeStats, DbError, SurrealClient | AxConfig | FileSystem.FileSystem | Path.Path> =>
     Effect.gen(function* () {
         const cfg = yield* AxConfig;
         const db = yield* SurrealClient;
         const cutoff = opts.sinceDays ? Date.now() - opts.sinceDays * 86400 * 1000 : 0;
-        const dbPaths = yield* Effect.promise(() => findOpenCodeDbCandidates(cfg.paths.opencodeDir, cutoff));
+        const dbPaths = yield* findOpenCodeDbCandidates(cfg.paths.opencodeDir, cutoff);
 
         if (dbPaths.length === 0) {
             return {
@@ -976,7 +986,7 @@ export class OpenCodeStageStats extends BaseStageStats.extend<OpenCodeStageStats
     warnings: Schema.Number,
 }) {}
 
-export const opencodeStage: StageDef<OpenCodeStageStats, SurrealClient | AxConfig> = {
+export const opencodeStage: StageDef<OpenCodeStageStats, SurrealClient | AxConfig | FileSystem.FileSystem | Path.Path> = {
     meta: StageMeta.make({ key: "opencode", deps: ["skills", "commands"], tags: ["ingest"] }),
     run: (ctx: IngestContext) =>
         Effect.gen(function* () {

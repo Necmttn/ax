@@ -3,6 +3,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Database } from "bun:sqlite";
 import { describe, expect, test } from "bun:test";
+import { Effect, Layer } from "effect";
+import { BunFileSystem, BunPath } from "@effect/platform-bun";
 import {
     __testBuildCursorBatchStatements,
     __testFindCursorStateDbs,
@@ -11,6 +13,13 @@ import {
 } from "./cursor.ts";
 import { agentEventRecordKey } from "./provider-events.ts";
 import { turnRecordKey } from "./record-keys.ts";
+
+const findCursorStateDbs = (cursorUserDir: string, cutoffMs: number): Promise<string[]> =>
+    Effect.runPromise(
+        __testFindCursorStateDbs(cursorUserDir, cutoffMs).pipe(
+            Effect.provide(Layer.mergeAll(BunFileSystem.layer, BunPath.layer)),
+        ),
+    );
 
 async function withTempCursorStateDb<T>(fn: (db: Database, dbPath: string) => T | Promise<T>): Promise<T> {
     const dir = await mkdtemp(join(tmpdir(), "ax-cursor-"));
@@ -348,7 +357,7 @@ describe("Cursor state.vscdb extraction", () => {
             await utimes(oldDb, old, old);
             await utimes(freshDb, fresh, fresh);
 
-            expect(await __testFindCursorStateDbs(dir, old.getTime() + 1)).toEqual([freshDb]);
+            expect(await findCursorStateDbs(dir, old.getTime() + 1)).toEqual([freshDb]);
         } finally {
             await rm(dir, { recursive: true, force: true });
         }
@@ -368,7 +377,7 @@ describe("Cursor state.vscdb extraction", () => {
             await utimes(dbPath, old, old);
             await utimes(walPath, fresh, fresh);
 
-            expect(await __testFindCursorStateDbs(dir, old.getTime() + 1)).toEqual([dbPath]);
+            expect(await findCursorStateDbs(dir, old.getTime() + 1)).toEqual([dbPath]);
         } finally {
             await rm(dir, { recursive: true, force: true });
         }
@@ -388,7 +397,7 @@ describe("Cursor state.vscdb extraction", () => {
             await utimes(dbPath, old, old);
             await utimes(shmPath, fresh, fresh);
 
-            expect(await __testFindCursorStateDbs(dir, old.getTime() + 1)).toEqual([dbPath]);
+            expect(await findCursorStateDbs(dir, old.getTime() + 1)).toEqual([dbPath]);
         } finally {
             await rm(dir, { recursive: true, force: true });
         }
