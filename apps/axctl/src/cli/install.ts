@@ -734,6 +734,8 @@ export interface SetupOptions {
     readonly yes?: boolean;
     /** Internal: invoked from `cmdInstall` (tweaks headers). */
     readonly fromInstall?: boolean;
+    /** Print ONLY the paste-into-your-agent prompt and exit (for copy / install.sh). */
+    readonly agentPromptOnly?: boolean;
 }
 
 /** Resolve the real binary to re-invoke for the first ingest. */
@@ -764,6 +766,11 @@ function resolveSetupAgents(opts: SetupOptions): string[] {
 }
 
 export async function cmdSetup(opts: SetupOptions = {}) {
+    const { AGENT_ONBOARDING_PROMPT, renderAgentOnboarding } = await import("@ax/lib/agent-onboarding");
+    if (opts.agentPromptOnly) {
+        console.log(AGENT_ONBOARDING_PROMPT);
+        return;
+    }
     console.log(opts.fromInstall ? "[axctl] setup (skills + first ingest)" : "[axctl] setup");
 
     const agents = resolveSetupAgents(opts);
@@ -794,6 +801,10 @@ export async function cmdSetup(opts: SetupOptions = {}) {
     // 3. verify.
     console.log();
     await cmdDoctor([]);
+
+    // 4. hand off to the agent for the labeling loop (classify -> fill -> lint).
+    console.log();
+    console.log(renderAgentOnboarding());
 }
 
 export async function cmdDaemon(args: string[]) {

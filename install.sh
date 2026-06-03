@@ -291,4 +291,13 @@ printf '    %sax doctor%s    %scheck your setup%s\n' "$C_BOLD" "$C_RESET" "$C_DI
 printf '    %sax serve%s     %sopen the dashboard → http://127.0.0.1:8520%s\n' "$C_BOLD" "$C_RESET" "$C_DIM" "$C_RESET"
 printf '    %sax recall%s    %ssearch what your agents actually did%s\n' "$C_BOLD" "$C_RESET" "$C_DIM" "$C_RESET"
 printf '\n'
+
+# When setup didn't auto-run (non-macOS / --no-run-install), surface the
+# paste-into-your-agent prompt directly from the binary (single source of truth).
+if [[ "$RAN_SETUP" != "1" ]]; then
+  printf '  %s▸ then hand the rest to your agent - paste this into Claude Code or Codex:%s\n\n' "$C_BOLD" "$C_RESET"
+  "$install_bin" setup --agent-prompt 2>/dev/null | sed 's/^/    /'
+  printf '\n'
+fi
+
 printf '  %sdocs %shttps://ax.necmttn.com/docs%s\n\n' "$C_DIM" "$C_RESET" "$C_RESET"

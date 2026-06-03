@@ -103,15 +103,20 @@ const main = async () => {
 
     stages.sort((a, b) => a.order - b.order || a.name.localeCompare(b.name));
 
+    // Escape angle/curly brackets so values like `<repo>/.claude/agents/*.md`
+    // aren't parsed as JSX by the MDX compiler downstream (the site build).
+    const mdxSafe = (text: string): string =>
+        text.replace(/[<>{}]/g, (c) => `&#${c.charCodeAt(0)};`);
+
     const sections = stages.map((s) => {
         const lines: string[] = [
-            `### ${s.name}`,
+            `### ${mdxSafe(s.name)}`,
             ``,
-            s.rationale,
+            mdxSafe(s.rationale),
             ``,
         ];
-        if (s.inputs) lines.push(`**Inputs:** ${s.inputs}`, ``);
-        if (s.outputs) lines.push(`**Outputs:** ${s.outputs}`, ``);
+        if (s.inputs) lines.push(`**Inputs:** ${mdxSafe(s.inputs)}`, ``);
+        if (s.outputs) lines.push(`**Outputs:** ${mdxSafe(s.outputs)}`, ``);
         lines.push(`_Source: \`${s.file}\`_`, ``);
         return lines.join("\n");
     });
