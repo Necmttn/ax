@@ -278,7 +278,8 @@ axctl hooks <summary|invocations|backtest>
 
 axctl daemon <status|start|stop|restart>
 axctl doctor                                # local-install health check
-axctl install                               # wire launchd + hooks + DB
+axctl install                               # wire launchd + hooks + DB (then runs setup)
+axctl setup [--agents=… --no-ingest --yes]  # install agent skills + first ingest + doctor
 axctl uninstall                             # remove launchd + bin symlink
 axctl update [--check]                      # pull latest release
 axctl version [--check|--banner]
