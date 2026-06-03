@@ -1,4 +1,4 @@
-import { Effect, FileSystem, Layer, PlatformError, Stream } from "effect";
+import { Effect, FileSystem, Layer, Option, PlatformError, Stream } from "effect";
 
 /**
  * In-memory `FileSystem` layer for migration tests. Seed a `path -> content`
@@ -63,6 +63,36 @@ export const layerTestFileSystem = (
             return Stream.fromIterable(chunkBytes(encoder.encode(files[path]!), 3));
         },
         exists: (path) => Effect.succeed(path in files),
+        // `stat` infers type from the seeded map: an exact key is a `File`, a
+        // path that is a strict prefix of some key is a `Directory`, anything
+        // else is NotFound. This lets the transcripts-root directory filter
+        // (which skips e.g. a `.DS_Store` File) be tested honestly.
+        stat: (path) => {
+            const err = injected(path);
+            if (err) return Effect.fail(err);
+            const info = (type: FileSystem.File.Type): FileSystem.File.Info => ({
+                type,
+                mtime: Option.none(),
+                atime: Option.none(),
+                birthtime: Option.none(),
+                dev: 0,
+                ino: Option.none(),
+                mode: 0,
+                nlink: Option.none(),
+                uid: Option.none(),
+                gid: Option.none(),
+                rdev: Option.none(),
+                size: FileSystem.Size(type === "File" ? files[path]!.length : 0),
+                blksize: Option.none(),
+                blocks: Option.none(),
+            });
+            if (path in files) return Effect.succeed(info("File"));
+            const prefix = path.endsWith("/") ? path : `${path}/`;
+            if (Object.keys(files).some((key) => key.startsWith(prefix))) {
+                return Effect.succeed(info("Directory"));
+            }
+            return Effect.fail(notFound("stat", path));
+        },
         readDirectory: (dir) => {
             const prefix = dir.endsWith("/") ? dir : `${dir}/`;
             const entries = new Set<string>();

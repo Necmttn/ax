@@ -9,6 +9,7 @@ import type { StageDef } from "./stage/registry.ts";
 import { surrealLiteral } from "@ax/lib/json";
 import { decodeJsonOrNull } from "@ax/lib/decode";
 import { fileWatermark } from "@ax/lib/shared/watermark";
+import { isNotFound } from "@ax/lib/shared/fs-error";
 import {
     extractFileWithSessionId,
     upsertTurnsForSubagents,
@@ -252,7 +253,7 @@ export const deriveClaudeSubagents = (
                 m.subagentSessionId,
             ).pipe(
                 Effect.catchTag("PlatformError", (e) =>
-                    e.reason._tag === "NotFound" ? Effect.succeed(null) : Effect.die(e),
+                    isNotFound(e) ? Effect.succeed(null) : Effect.die(e),
                 ),
             );
 

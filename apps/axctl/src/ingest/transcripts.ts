@@ -45,6 +45,7 @@ import { extractToolFileEvidence } from "./tool-file-evidence.ts";
 
 import { executeStatements, executeStatementsWith } from "@ax/lib/shared/statement-exec";
 import { fileWatermark } from "@ax/lib/shared/watermark";
+import { skipNotFound } from "@ax/lib/shared/fs-error";
 
 const MAX_OUTPUT_EXCERPT_CHARS = 1200;
 const DEFAULT_CLAUDE_CONCURRENCY = 4;
@@ -1285,8 +1286,21 @@ export const ingestTranscripts = (
         const cutoff = opts.sinceDays
             ? Date.now() - opts.sinceDays * 86400 * 1000
             : 0;
-        const projectDirs = (yield* fs.readDirectory(transcriptsDir)).filter(
+        const projectEntries = (yield* fs.readDirectory(transcriptsDir)).filter(
             (d) => !opts.project || d === opts.project,
+        );
+        // Keep only actual directories. The transcripts root can hold regular
+        // FILES (e.g. macOS `.DS_Store`); a `readDirectory` on those would fail
+        // with a non-NotFound PlatformError (BadResource/ENOTDIR) and abort the
+        // whole ingest, so we stat-and-filter up front. A vanished entry
+        // (stat NotFound) is simply skipped.
+        const projectDirs = yield* Effect.filter(
+            projectEntries,
+            (entry) =>
+                fs.stat(path.join(transcriptsDir, entry)).pipe(
+                    Effect.map((info) => info.type === "Directory"),
+                    skipNotFound(false),
+                ),
         );
         if (opts.onProgress) yield* opts.onProgress({ projectDirs: projectDirs.length });
 
@@ -1322,9 +1336,7 @@ export const ingestTranscripts = (
             // here yields [] (NotFound→skip), preserving the prior
             // try/catch-returns-[] behavior; other failures re-raise.
             const entries = yield* fs.readDirectory(fullProject).pipe(
-                Effect.catchTag("PlatformError", (e) =>
-                    e.reason._tag === "NotFound" ? Effect.succeed([] as string[]) : Effect.fail(e),
-                ),
+                skipNotFound([] as string[]),
             );
             for (const entry of entries) {
                 if (!entry.endsWith(".jsonl")) continue;
@@ -1335,12 +1347,13 @@ export const ingestTranscripts = (
                 // skipped (NotFound→skip) so it never enters the work list.
                 const st = yield* fs.stat(filePath).pipe(
                     Effect.asSome,
-                    Effect.catchTag("PlatformError", (e) =>
-                        e.reason._tag === "NotFound" ? Effect.succeedNone : Effect.fail(e),
-                    ),
+                    skipNotFound(Option.none()),
                 );
                 if (Option.isNone(st)) continue;
                 const info = st.value;
+                // A file with no mtime gets epoch 0, so it is never
+                // `--since`-skipped (intentional: never silently drop a
+                // transcript just because the FS omitted an mtime).
                 const mtimeMs = Option.getOrElse(info.mtime, () => new Date(0)).getTime();
                 const size = Number(info.size);
                 if (cutoff > 0 && mtimeMs < cutoff) continue;
@@ -1413,9 +1426,7 @@ export const ingestTranscripts = (
             // BEFORE `files += 1` / `wm.commit` below, so a vanished file never
             // advances the watermark. Non-NotFound failures re-raise.
             const extracted = yield* extractFile(candidate.filePath, candidate.projectDir).pipe(
-                Effect.catchTag("PlatformError", (e) =>
-                    e.reason._tag === "NotFound" ? Effect.succeed(null) : Effect.fail(e),
-                ),
+                skipNotFound(null),
             );
             if (!extracted) {
                 activeFiles -= 1;
