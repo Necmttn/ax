@@ -294,6 +294,7 @@ describe("ClassifierPackageService", () => {
             "workflow-fixture-quality-conclusion",
             "classifier-lifecycle-status",
             "blind-post-review",
+            "transcript-label-mining-priority",
         ]);
         expect(operations.map((operation) => operation.kind)).toEqual([
             "train",
@@ -358,6 +359,7 @@ describe("ClassifierPackageService", () => {
             "status",
             "status",
             "review",
+            "status",
         ]);
     });
 

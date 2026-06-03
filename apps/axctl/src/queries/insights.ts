@@ -79,6 +79,8 @@ export const SCHEMA_TABLES: readonly SchemaTableSpec[] = [
     { table: "classifier_graph_node", stage: "active", note: "Generic classifier graph nodes projected from package operations." },
     { table: "classifier_graph_edge", stage: "active", note: "Generic classifier graph edges projected from package operations." },
     { table: "classifier_graph_fact", stage: "active", note: "Generic classifier graph facts projected from package operations." },
+    { table: "transcript_label_review", stage: "active", note: "Human/agent review verdicts for mined transcript label candidates." },
+    { table: "transcript_label_vector", stage: "active", note: "Embedding vectors and nearest-neighbor refs for transcript label candidates." },
     { table: "semantic_signal", stage: "active", note: "Reusable meanings promoted from analyzed turns." },
     { table: "diagnostic_event", stage: "active", note: "Derived diagnostics from failed commands and friction." },
     { table: "guidance", stage: "staged", note: "Persisted behavior controls such as rules, skills, hooks, and commands." },
