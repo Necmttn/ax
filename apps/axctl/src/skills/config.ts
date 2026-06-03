@@ -11,7 +11,7 @@ import type { SkillRecord, SkillScope } from "./sources/types.ts";
 import { SkillNotFoundError } from "./errors.ts";
 
 /** Lifecycle status of a skill row vs its on-disk + parked state. */
-export type SkillStatus = "live" | "orphan" | "parked";
+export type SkillStatus = "live" | "orphan" | "out-of-scope" | "parked";
 
 export interface SkillConfigRow {
     readonly name: string;
@@ -35,6 +35,8 @@ export interface ReadSkillsFilter {
     readonly status?: SkillStatus | undefined;
     /** Include rows whose DB record is tombstoned (`deleted_at` set). */
     readonly includeDeleted?: boolean;
+    /** Include `out-of-scope` rows (other repos' skills, provider tools). */
+    readonly includeOutOfScope?: boolean;
     readonly repoRoot?: string | null;
 }
 
@@ -106,6 +108,10 @@ export const readAllSkills = (
         );
 
         const onDisk = new Set(records.map((r) => r.name));
+        // Scopes the current discovery actually owns. A DB row outside these
+        // (another repo's project skills, provider tools, unknown) is not a
+        // deletion - it's just out-of-context, so it must NOT read as "orphan".
+        const ownedScopes = new Set(records.map((r) => r.scopeTag));
         const rows: SkillConfigRow[] = [];
 
         // (1) on-disk records (live)
@@ -128,7 +134,8 @@ export const readAllSkills = (
             });
         }
 
-        // (2) DB rows with no on-disk record = orphan (tombstoned or pending).
+        // (2) DB rows with no on-disk record: `orphan` when the scope IS owned by
+        // this discovery (a real deletion, reconcile-able), else `out-of-scope`.
         for (const ev of evidence.values()) {
             if (onDisk.has(ev.name)) continue;
             rows.push({
@@ -142,7 +149,7 @@ export const readAllSkills = (
                 agents: scopeMap.get(ev.name) ?? [],
                 fired: ev.fired,
                 lastUsed: ev.last_used,
-                status: "orphan",
+                status: ownedScopes.has(ev.scope) ? "orphan" : "out-of-scope",
                 writable: false,
                 deleted: ev.deleted_at != null,
             });
@@ -150,6 +157,13 @@ export const readAllSkills = (
 
         return rows
             .filter((r) => (r.deleted ? filter.includeDeleted === true : true))
+            // out-of-scope rows (other repos / tools) are hidden unless asked for,
+            // OR when the user explicitly filtered to status=out-of-scope.
+            .filter((r) =>
+                r.status === "out-of-scope"
+                    ? filter.includeOutOfScope === true || filter.status === "out-of-scope"
+                    : true,
+            )
             .filter((r) => (filter.source ? r.source === filter.source : true))
             .filter((r) => (filter.scope ? r.scopeTag === filter.scope : true))
             .filter((r) => (filter.status ? r.status === filter.status : true))

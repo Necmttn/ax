@@ -17,7 +17,7 @@ import { makeDirSource } from "./sources/dir.ts";
 import { makeCommandSource } from "./sources/command.ts";
 import { makeSkillSourceRegistryLayer } from "./sources/registry.ts";
 import { reconcileSkills } from "./reconcile.ts";
-import { scopeSkill } from "./config.ts";
+import { scopeSkill, readAllSkills } from "./config.ts";
 import type { SkillDirRef, SkillSource } from "./sources/types.ts";
 
 const FS = Layer.mergeAll(BunFileSystem.layer, BunPath.layer);
@@ -248,6 +248,42 @@ describe("reconcileSkills", () => {
         );
         expect(report.dryRun).toBe(true);
         expect(calls.every((c) => c.sql.trimStart().startsWith("SELECT"))).toBe(true);
+    });
+});
+
+describe("readAllSkills status: orphan vs out-of-scope", () => {
+    const evidence = (over: Record<string, unknown>) => ({
+        name: "", scope: "user", dir_path: null, description: null, fired: 0, last_used: null, deleted_at: null, ...over,
+    });
+    const run = (filter: Record<string, unknown>) => {
+        const root = tmp("ax-status-");
+        writeSkill(root, "keep", "name: keep"); // on disk, scope "user"
+        const sources: SkillSource[] = [
+            makeDirSource({ name: "user", label: "u", writable: true, roots: () => [ref(root, "user")] }),
+        ];
+        const evRows = [
+            evidence({ name: "keep", scope: "user", fired: 5 }), // on disk -> live
+            evidence({ name: "gone", scope: "user" }), // owned scope, absent on disk -> orphan
+            evidence({ name: "othertool", scope: "codex-tool" }), // unowned scope -> out-of-scope
+        ];
+        const layer = Layer.mergeAll(FS, makeSkillSourceRegistryLayer(sources), recordingDb([], [evRows]));
+        return Effect.runPromise(
+            readAllSkills(filter).pipe(Effect.provide(layer)) as Effect.Effect<any, any, never>,
+        );
+    };
+
+    test("owned-scope absentee = orphan; unowned scope = out-of-scope (hidden by default)", async () => {
+        const rows = await run({});
+        const byName = new Map(rows.map((r: any) => [r.name, r.status]));
+        expect(byName.get("keep")).toBe("live");
+        expect(byName.get("gone")).toBe("orphan");
+        expect(byName.has("othertool")).toBe(false); // out-of-scope hidden by default
+    });
+
+    test("--all-scopes surfaces out-of-scope rows", async () => {
+        const rows = await run({ includeOutOfScope: true });
+        const byName = new Map(rows.map((r: any) => [r.name, r.status]));
+        expect(byName.get("othertool")).toBe("out-of-scope");
     });
 });
 

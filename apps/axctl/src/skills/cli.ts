@@ -48,19 +48,21 @@ const configCommand = Command.make(
         scope: Flag.string("scope").pipe(Flag.optional),
         status: Flag.string("status").pipe(Flag.optional),
         includeDeleted: Flag.boolean("include-deleted").pipe(Flag.withDefault(false)),
+        allScopes: Flag.boolean("all-scopes").pipe(Flag.withDefault(false)),
         json,
     },
-    ({ source, scope, status, includeDeleted, json: asJson }) =>
+    ({ source, scope, status, includeDeleted, allScopes, json: asJson }) =>
         readAllSkills({
             source: optionValue(source),
             scope: optionValue(scope),
             status: optionValue(status) as SkillStatus | undefined,
             includeDeleted,
+            includeOutOfScope: allScopes,
         }).pipe(
             Effect.map((rows) => console.log(asJson ? prettyPrint(rows) : fmt(rows))),
             Effect.provide(SkillSourceRegistryLive),
         ),
-).pipe(Command.withDescription("List skills: name·source·scope·agents·fired·status(live/orphan/parked)"));
+).pipe(Command.withDescription("List skills: name·source·scope·agents·fired·status (live/orphan/out-of-scope/parked). --all-scopes shows other repos' skills + provider tools"));
 
 const reconcileCommand = Command.make(
     "reconcile",
