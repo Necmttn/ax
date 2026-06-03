@@ -14,8 +14,16 @@ dist/
 # local agent + harness state
 .ax/
 .claude/agents/
+.claude/workflows/
 .claude/worktrees/
 .claude/scheduled_tasks.lock
+
+# python build cruft
+__pycache__/
+*.pyc
+
+# soloterm dev-runner config (personal)
+solo.yml
 
 # macOS cruft
 .DS_Store

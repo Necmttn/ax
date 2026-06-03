@@ -61,6 +61,38 @@ Specific failure modes:
 - Zero skill invocations after ingest → user has a different Claude
   transcripts path. Set `AX_TRANSCRIPTS_DIR` and re-ingest.
 
+## Label skills ax can't classify (do this for the user)
+
+ax tags skills with *roles* (e.g. framing, execution, verification) so
+`ax skills weighted` ranks by usage × role, not raw count. A skill the user
+invokes ≥3× with no role is "unclassified" - ax hands each one back to YOU as a
+task brief to fill. This is the core agent-in-the-loop step; don't skip it.
+
+```bash
+ax skills classify        # writes .ax/tasks/classify-<skill>.md per unclassified skill
+```
+
+For each brief written:
+1. Read the skill (its SKILL.md / what it does) and the brief's evidence.
+2. Fill the YAML at the bottom of the brief: `primary_role:` (required, one
+   label), plus optional `secondary_roles:`, `confidence:` (0–1), `rationale:`.
+   Run `ax roles` to see labels already in use; reuse them when they fit.
+3. Apply + check:
+
+```bash
+ax skills lint            # reads filled briefs → writes plays_role edges
+ax skills weighted        # the re-ranked list, now role-weighted
+```
+
+If `classify` reports "no unclassified skills", the user hasn't used enough yet -
+say so and revisit after a few days (the watcher keeps ingesting). One-off
+override without a brief: `ax skills tag <skill> <role>`.
+
+Also surface the config front door when relevant:
+- `ax skills config` - skill lifecycle (live / orphan / out-of-scope / parked).
+- `ax hooks config` - hooks across claude/cursor/codex/opencode (+ add/remove/edit).
+- `ax agents config` - agent definitions and the skills they scope.
+
 ## What's installed
 
 | Component | Where | Owner |

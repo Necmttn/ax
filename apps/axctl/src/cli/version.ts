@@ -1,6 +1,6 @@
 import { spawnSync } from "node:child_process";
 
-export const AX_VERSION = "0.7.0"; // x-release-please-version
+export const AX_VERSION = "0.9.0"; // x-release-please-version
 export const DEFAULT_REPO = "Necmttn/ax";
 
 export interface LatestRelease {

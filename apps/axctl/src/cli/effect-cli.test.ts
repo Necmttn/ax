@@ -144,7 +144,8 @@ describe("effect cli", () => {
     });
 
     test("resolveIngestStages: default runs every stage", () => {
-        expect(resolveIngestStages(testRegistry, [])).toHaveLength(24);
+        // 25 = 24 original + agentDefStage (config-front-door agents domain).
+        expect(resolveIngestStages(testRegistry, [])).toHaveLength(25);
     });
 
     test("resolveIngestStages: local agent provider stages can be selected", () => {

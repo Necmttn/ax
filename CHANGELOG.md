@@ -1,5 +1,92 @@
 # Changelog
 
+## [0.9.0](https://github.com/Necmttn/ax/compare/v0.8.0...v0.9.0) (2026-06-03)
+
+
+### Features
+
+* **agents:** repo-qualified project scope (project:&lt;repo&gt;) ([eb81d57](https://github.com/Necmttn/ax/commit/eb81d570499b8e9238ad55e1119ec81131ec4511))
+* **cli:** hide agent-scoped skills in `ax skills unused` ([51e8596](https://github.com/Necmttn/ax/commit/51e8596d5641aa80a01516c142cdf56f928c041a))
+* **config-core:** Wave 0 shared spine for config front door ([2b1536b](https://github.com/Necmttn/ax/commit/2b1536b7ad6ef656fbcce20059973d20035cd24b))
+* **config-front-door:** CLI wiring for hooks/skills/agents config + smoke fixes ([9123579](https://github.com/Necmttn/ax/commit/91235795d9a0e8b404bad0b52ba450bedd781c70))
+* **config-front-door:** graph integration (schema, agentDefStage, reconcile filters) ([a21e747](https://github.com/Necmttn/ax/commit/a21e747485e3614be016ca0f67bf1fd65d3fd0eb))
+* **config-front-door:** Wave 1 domain modules (hooks, skills, agents) ([161aece](https://github.com/Necmttn/ax/commit/161aecedb3a1e48cc6c930210360cc4edb3820be))
+* **skills:** distinguish out-of-scope rows from orphans in config view ([5ab251a](https://github.com/Necmttn/ax/commit/5ab251a5d7ac616148c8c4c20dfbba270dd08286))
+
+
+### Bug Fixes
+
+* **hooks+agents:** codex identity/routing, ambiguous-id, transactional toggle ([0b750fa](https://github.com/Necmttn/ax/commit/0b750fa4b9600f70ba14f059fe2f56ebbe90f1a5))
+* **hooks:** preserve ax marker on edit so hook id stays stable ([0b8c11f](https://github.com/Necmttn/ax/commit/0b8c11fa3d9fa819f8469c99f4e2e30473f2050b))
+* **queries:** mirror agent_def in SCHEMA_TABLES ([7ea2918](https://github.com/Necmttn/ax/commit/7ea2918ae507961582900effa017e7e7de341d58))
+* **reconcile:** scope-partition so reconcile only touches owned scopes ([1bae738](https://github.com/Necmttn/ax/commit/1bae738d0ef6a9eb21b73d46d978f47835c1245b))
+
+
+### Performance
+
+* **config:** run independent reads concurrently in readAll* ([2892676](https://github.com/Necmttn/ax/commit/2892676c8e96c146f3828d814193eb9b14326837))
+
+## [0.8.0](https://github.com/Necmttn/ax/compare/v0.7.0...v0.8.0) (2026-06-03)
+
+
+### Features
+
+* add Discord community link across site, README, and CLI ([31bd003](https://github.com/Necmttn/ax/commit/31bd0034e1c9bda7eb77018022fa8e203b8b3921))
+* **classifiers:** export transcript label review queue ([1f7b64c](https://github.com/Necmttn/ax/commit/1f7b64c1beb9aabec7de38856d48f80a55e95475))
+* **classifiers:** expose transcript label mining cli ([a6797fe](https://github.com/Necmttn/ax/commit/a6797fe99e9a5db563f2986e2413198806698d85))
+* **classifiers:** gate transcript label mining iterations ([498c867](https://github.com/Necmttn/ax/commit/498c867010c20848284ae8dd120ea379ceb57af2))
+* **classifiers:** mine transcript label candidates ([1b8d4fd](https://github.com/Necmttn/ax/commit/1b8d4fd6b73b61d211a93c33d4eb10a9a264badf))
+* **classifiers:** prioritize transcript label review with embeddings ([54ce534](https://github.com/Necmttn/ax/commit/54ce53468901819332bd743402b7d99a379312d0))
+* **classifiers:** project reviewed transcript labels to graph ([82d06d5](https://github.com/Necmttn/ax/commit/82d06d5d9b7af7c5f9f0c26284861c6b6855518c))
+* **cli:** ax sessions compare — side-by-side run comparison (P0) ([1f18409](https://github.com/Necmttn/ax/commit/1f18409b229c967ac1d108fa13db999319258fb2))
+* **cli:** move star/feedback nudge from skill into the CLI ([2be7867](https://github.com/Necmttn/ax/commit/2be78672abe651cdcbad4b5b4e755076fc003bd6))
+* **cli:** only show the star nudge after value commands ([68c0aa3](https://github.com/Necmttn/ax/commit/68c0aa39cff460fe0e817699f8bd33b9273c9c69))
+* **cli:** per-turn appendix for ax sessions compare (P1) ([47ac854](https://github.com/Necmttn/ax/commit/47ac85406b9ceb8c4ef0ab81772ca6dc110aeb80))
+* **dashboard:** live ingest view over Durable Streams (catch-up + resume + animate) ([09be382](https://github.com/Necmttn/ax/commit/09be38217245d1ce2e873b45d81422600df7c941))
+* **dashboard:** session compare swimlane view (P2) ([63725de](https://github.com/Necmttn/ax/commit/63725de101d68a200b4061d4cd7962ca58bd86ba))
+* **dev:** `ax-dev` global command — source build on a disposable isolated DB ([07006a2](https://github.com/Necmttn/ax/commit/07006a2a4f1d1e42a2ebe756ce2df73f35997ca1))
+* **ingest:** force CLI progress on non-TTY via AX_PROGRESS=on / --progress ([090f86b](https://github.com/Necmttn/ax/commit/090f86bbab93560f704b5e8cc49966d2b87d7dab))
+* **ingest:** IngestStreamEvent payload mapped from live-trace spans ([d746bf0](https://github.com/Necmttn/ax/commit/d746bf04072633dda4e9d70a02ea861b8ada9645))
+* **ingest:** render ingest progress through the OpenTUI/React renderer on a TTY ([ecf3012](https://github.com/Necmttn/ax/commit/ecf30125e3dc023f7e4b78a132a7fb0e7cbe41d9))
+* **ingest:** surface per-stage row counts in progress (rows/speed columns) ([3c33f99](https://github.com/Necmttn/ax/commit/3c33f99d72f82977195568b0605bb2a3ffc004c4))
+* **mcp:** add stdio MCP server scaffold with recall tool ([6b7b650](https://github.com/Necmttn/ax/commit/6b7b650b7db7ddeb0446985ebfe4ccf06fcade88))
+* **mcp:** ax mcp — stdio MCP server exposing read-only graph queries ([296bb7d](https://github.com/Necmttn/ax/commit/296bb7d8c945e4bc8736811908b6fdb8cef5b72f))
+* **mcp:** drop inert scope param from recall tool ([eaa2284](https://github.com/Necmttn/ax/commit/eaa228476e3c59332a8c05490e5a0a849e08784a))
+* **mcp:** wire remaining read-only query tools ([e34d9f1](https://github.com/Necmttn/ax/commit/e34d9f1d5b6128916261f3119c0a9885c3997b1a))
+* **serve:** Durable Streams backing for IngestStreamBus + mountable handler ([b8e25cb](https://github.com/Necmttn/ax/commit/b8e25cb61dfb5223cfaa1275a38146f58e9d74f1))
+* **serve:** in-process ingest workflow runner publishing to the stream bus ([f13644e](https://github.com/Necmttn/ax/commit/f13644e4769ccae4304a47dd162d8433485bbbc7))
+* **serve:** IngestStreamBus seam + in-memory impl ([dacfc66](https://github.com/Necmttn/ax/commit/dacfc661047117f842a02ff02e92a25371ebdb29))
+* **serve:** POST /api/ingest triggers in-process ingest + mounts the run stream ([3eb654b](https://github.com/Necmttn/ax/commit/3eb654bef2b754a928adfe48a3c9a625874980c4))
+* **skill:** ax-repo — star/issue/fork via gh + proactive star nudge ([93ca390](https://github.com/Necmttn/ax/commit/93ca3905fcc5077d3b9ed57f4ed022aae7cf1f00))
+* **version:** show git provenance in `ax -v` (tag/sha/dirty + branch) ([376d1d9](https://github.com/Necmttn/ax/commit/376d1d93368930abfc6353602e4279dd5bcfb643))
+
+
+### Bug Fixes
+
+* **classifiers:** drop dispatch/affirmation noise, fix projection record ids ([ff6113c](https://github.com/Necmttn/ax/commit/ff6113c5b8f954845aa289e41be3ada0f18de484))
+* **classifiers:** mine organic user turns only, broaden via intent_kind ([330ed1f](https://github.com/Necmttn/ax/commit/330ed1fcd3a069a0fb86036c8230556f2a12df95))
+* **classifiers:** SCHEMA_TABLES mirror + classifier package operations tests (green main) ([35dd180](https://github.com/Necmttn/ax/commit/35dd180ea08648064b1fae6865b3f883e567f4fe))
+* **dashboard:** recover from a stale live-ingest stream URL instead of retrying forever ([1b2fddb](https://github.com/Necmttn/ax/commit/1b2fddb2587e88d2e72c05f14295f73e4eff5fce))
+* **ingest:** don't render the trace root span as a progress row ([a58a3ce](https://github.com/Necmttn/ax/commit/a58a3ce6b503393f3b00508085016783c7296ab3))
+* **ingest:** idempotent re-ingest of agent_event (clear session events before re-insert) ([1dc3c47](https://github.com/Necmttn/ax/commit/1dc3c47b6073ed7935f1d2bae6c049b4761a3cc5))
+* **ingest:** wire the progress/debug transport beneath TraceSink so events surface ([74a8b0e](https://github.com/Necmttn/ax/commit/74a8b0e3e5a608f6621e32cba415f89aa17c5fcb))
+* **queries:** mirror ingest_file_state in SCHEMA_TABLES ([095d875](https://github.com/Necmttn/ax/commit/095d8758d8fa6375fa742bf163b16d6fc9a74e55))
+* **serve:** degrade gracefully when the Durable Streams sidecar is unavailable (compiled binary) ([fa3cf80](https://github.com/Necmttn/ax/commit/fa3cf80331117802e0c749518c1a39e90471d964))
+* **serve:** lazy-import @durable-streams/server so the compiled axctl binary boots ([8482cc3](https://github.com/Necmttn/ax/commit/8482cc31811ef707a4b9ec3026d279f95a9e921c))
+
+
+### Performance
+
+* **ingest:** attempt 005 chunkSize 250→1000 REVERTED (warm 23s vs 22s, no win) ([0429fcf](https://github.com/Necmttn/ax/commit/0429fcf22566f869f48e4d360f63efd2e59c5f21))
+* **ingest:** claude skip-unchanged source (warm 13s vs 22s) ([1e6374c](https://github.com/Necmttn/ax/commit/1e6374cc9b8361db91ba3bfe8127a3aa0e35c768))
+* **ingest:** closure skip-unchanged (warm 6s vs 8s) ([32f3092](https://github.com/Necmttn/ax/commit/32f30923be37b891f4d3b401998799b34a06806b))
+* **ingest:** git skip-unchanged (warm 8s vs 13s) ([5e96036](https://github.com/Necmttn/ax/commit/5e960361a7f18cf5aab10be121779140b906964e))
+* **ingest:** PIPELINE_CONCURRENCY 2→4 (warm 22s vs 24s) ([9d61383](https://github.com/Necmttn/ax/commit/9d613830425998183824fb2a32200f3872be9111))
+* **ingest:** pricing skip-unchanged via statement-fingerprint (warm 5s vs 6s) ([f627cef](https://github.com/Necmttn/ax/commit/f627cef05c4d74783a11880f29d6df61a72106f7))
+* **ingest:** subagents skip-unchanged (warm 3s vs 5s) ([32f21dd](https://github.com/Necmttn/ax/commit/32f21ddaaedaecda05963a2b11a1c4068195264a))
+* **ingest:** turn-analysis incremental (warm 24s vs 27s) ([61cd25c](https://github.com/Necmttn/ax/commit/61cd25cfc31d8a0e2f8ecb340aea1cac4b274678))
+* **ingest:** turn-content-blocks incremental via content_hash (warm 27s vs 50s) ([a00e661](https://github.com/Necmttn/ax/commit/a00e661c3420e992aa1d4edf7a293962d01a17cc))
+
 ## [0.7.0](https://github.com/Necmttn/ax/compare/v0.6.2...v0.7.0) (2026-06-01)
 
 

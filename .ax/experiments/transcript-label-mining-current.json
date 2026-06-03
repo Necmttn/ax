@@ -3,7 +3,7 @@
   "since_days": 14,
   "limit": 2700,
   "review_limit": 80,
-  "candidate_count": 438,
+  "candidate_count": 328,
   "review_rows": [
     {
       "candidate_id": "tlm__verification__165cf3aae9c5618d",
@@ -92,10 +92,10 @@
       "reviewer": ""
     },
     {
-      "candidate_id": "tlm__verification__232660e98444bc0b",
-      "subject_id": "turn:5fae585b_69b5_48b8_a350_9232047c60a5__8d13d65fde962f3a__seq_000064",
-      "session_id": "session:`5fae585b-69b5-48b8-a350-9232047c60a5`",
-      "turn_id": "turn:5fae585b_69b5_48b8_a350_9232047c60a5__8d13d65fde962f3a__seq_000064",
+      "candidate_id": "tlm__verification__2f3f1f30a1df19b",
+      "subject_id": "turn:ab18a0ea_99f4_4df7_b200_43e0da82fd5f__f9c51d69a9b1027c__seq_000078",
+      "session_id": "session:`ab18a0ea-99f4-4df7-b200-43e0da82fd5f`",
+      "turn_id": "turn:ab18a0ea_99f4_4df7_b200_43e0da82fd5f__f9c51d69a9b1027c__seq_000078",
       "label_family": "verification",
       "target": "verification_demand",
       "weak_label": "verification",
@@ -104,9 +104,9 @@
         "verification:demand"
       ],
       "evidence_paths": [
-        "turn:5fae585b_69b5_48b8_a350_9232047c60a5__8d13d65fde962f3a__seq_000064"
+        "turn:ab18a0ea_99f4_4df7_b200_43e0da82fd5f__f9c51d69a9b1027c__seq_000078"
       ],
-      "excerpt": "# Autonomous loop check\n\nYou're being invoked on a timer while the user is away or occupied. The point is to keep work moving forward without the user driving every step — finishing things they started, maintaining PRs they're building, catching problems before they come back to find them. You're a steward, not an initiator. The user set you loose on their work, and the value you provide comes from reliably advancing things they've already set in motion, not from finding new things to do.\n\nThe key tension to navigate: the user trusts you enough to run autonomously, but that trust is easily los",
+      "excerpt": "can we improve the tweets base on this feedback doesn't have to be all of it just take the good parts. \n\n---\n\nYeah — this screenshot changes the angle. I’d **drop the “you write JS” framing** unless you’re specifically talking about a lower-level API. The stronger point is:\n\n**Claude writes the orchestration harness itself, per task.**\n\nOfficial framing backs that up: Claude dynamically writes orchestration scripts, fans work out across tens to hundreds of subagents, checks results before returning, and `ultracode` lets Claude decide when to use this workflow mode. ([Claude][1])\n\nHere’s a bett",
       "review_status": "pending",
       "rationale": "",
       "reviewer": ""
@@ -156,426 +156,6 @@
       "reviewer": ""
     },
     {
-      "candidate_id": "tlm__correction__18e615937596ee90",
-      "subject_id": "turn:019e729a_d8f2_7312_888e_dbbd9dcdf944__a942095a4f5b735a__seq_000003",
-      "session_id": "session:`019e729a-d8f2-7312-888e-dbbd9dcdf944`",
-      "turn_id": "turn:019e729a_d8f2_7312_888e_dbbd9dcdf944__a942095a4f5b735a__seq_000003",
-      "previous_assistant_turn_id": "turn:019e729a_d8f2_7312_888e_dbbd9dcdf944__a942095a4f5b735a__seq_000002",
-      "label_family": "correction",
-      "target": "wrong_output",
-      "weak_label": "correction",
-      "weak_confidence": 0.74,
-      "weak_sources": [
-        "correction:wrong_output"
-      ],
-      "evidence_paths": [
-        "turn:019e729a_d8f2_7312_888e_dbbd9dcdf944__a942095a4f5b735a__seq_000003"
-      ],
-      "excerpt": "You are implementing Task 4 from the approved plan in /Users/necmttn/Projects/ax/.worktrees/local-agent-providers.\n\nContext:\n- You are not alone in the codebase. Do not revert changes by others.\n- Tasks 1-3 are committed. Use existing provider event writers and stage shell in `src/ingest/pi.ts`.\n- Work only in Task 4 files unless absolutely necessary for imports/tests.\n\nTask 4: Pi JSONL Tree Adapter\n\nFiles you own:\n- Modify: `src/ingest/pi.ts`\n- Create/modify: `src/ingest/pi.test.ts`\n\nRequirements:\n1. Add Pi extraction fixtures/tests:\n   - `__testExtractPiJsonlLines(lines)` extracts session he",
-      "previous_assistant_excerpt": "# AGENTS.md instructions for /Users/necmttn/Projects/ax\n\n<INSTRUCTIONS>\n# CLAUDE.md\n\nGuidance for Claude Code and other AI assistants working in this repo.\n\n## What this is\n\n`ax` - local taste & telemetry graph for AI coding agents. Ingests Claude Code transcripts (`~/.claude/projects/`) + Codex transcripts (`~/.codex/sessions/`) + installed skills (`~/.claude/skills/`, `~/.agents/skills/`, plugin caches) into a dedicated SurrealDB instance. CLI surfaces \"what skills/tools you actually use\" on demand.\n\n## Stack\n\n- **Runtime**: bun ≥ 1.3\n- **Language**: TypeScript (strict, `module: preserve`, `",
-      "review_status": "pending",
-      "rationale": "",
-      "reviewer": ""
-    },
-    {
-      "candidate_id": "tlm__verification__25fbb4987b654383",
-      "subject_id": "turn:384a3cce_16bd_4e29_804f_2b1e072a31ad__7a6f7359e2c43e27__seq_000260",
-      "session_id": "session:`384a3cce-16bd-4e29-804f-2b1e072a31ad`",
-      "turn_id": "turn:384a3cce_16bd_4e29_804f_2b1e072a31ad__7a6f7359e2c43e27__seq_000260",
-      "label_family": "verification",
-      "target": "verification_demand",
-      "weak_label": "verification",
-      "weak_confidence": 0.84,
-      "weak_sources": [
-        "verification:demand"
-      ],
-      "evidence_paths": [
-        "turn:384a3cce_16bd_4e29_804f_2b1e072a31ad__7a6f7359e2c43e27__seq_000260"
-      ],
-      "excerpt": "# Simplify: Code Review and Cleanup\n\nReview all changed files for reuse, quality, and efficiency. Fix any issues found.\n\n## Phase 1: Identify Changes\n\nRun `git diff` (or `git diff HEAD` if there are staged changes) to see what changed. If there are no git changes, review the most recently modified files that the user mentioned or that you edited earlier in this conversation.\n\n## Phase 2: Launch Three Review Agents in Parallel\n\nUse the Agent tool to launch all three agents concurrently in a single message. Pass each agent the full diff so it has the complete context.\n\n### Agent 1: Code Reuse Re",
-      "review_status": "pending",
-      "rationale": "",
-      "reviewer": ""
-    },
-    {
-      "candidate_id": "tlm__direction__aa4afcd194999e22",
-      "subject_id": "turn:019e5ee1_2d1d_7c83_b61e_3339f3d70d82__c895d1b2ac39f1d7__seq_000003",
-      "session_id": "session:`019e5ee1-2d1d-7c83-b61e-3339f3d70d82`",
-      "turn_id": "turn:019e5ee1_2d1d_7c83_b61e_3339f3d70d82__c895d1b2ac39f1d7__seq_000003",
-      "previous_assistant_turn_id": "turn:019e5ee1_2d1d_7c83_b61e_3339f3d70d82__c895d1b2ac39f1d7__seq_000002",
-      "label_family": "direction",
-      "target": "tooling_preference",
-      "weak_label": "direction",
-      "weak_confidence": 0.82,
-      "weak_sources": [
-        "direction:tooling_preference"
-      ],
-      "evidence_paths": [
-        "turn:019e5ee1_2d1d_7c83_b61e_3339f3d70d82__c895d1b2ac39f1d7__seq_000003"
-      ],
-      "excerpt": "You are implementing Tasks 1-3 from docs/superpowers/plans/2026-05-25-ailifestory-hybrid-soft-testing.md in /Users/necmttn/Projects/apps.\n\nContext:\n- Repo uses Bun. Follow AGENTS.md: use bun/bunx, not npm/yarn/pnpm.\n- Worktree is dirty with unrelated recording-lifecycle changes. You are not alone in the codebase. Do not revert or modify unrelated changes. Only edit your owned files.\n- Owned files for this task:\n  - apps/ailifestory/api/src/rpc/admin/schema.ts\n  - apps/ailifestory/api/src/rpc/admin/dev-scenario.ts (create)\n  - apps/ailifestory/api/src/rpc/admin/handlers.ts\n  - apps/ailifestory/",
-      "previous_assistant_excerpt": "# AGENTS.md instructions for /Users/necmttn/Projects/apps\n\n<INSTRUCTIONS>\n\nDefault to using Bun instead of Node.js.\n\n- Use `bun <file>` instead of `node <file>` or `ts-node <file>`\n- Use `bun test` instead of `jest` or `vitest`\n- Use `bun build <file.html|file.ts|file.css>` instead of `webpack` or `esbuild`\n- Use `bun install` instead of `npm install` or `yarn install` or `pnpm install`\n- Use `bun run <script>` instead of `npm run <script>` or `yarn run <script>` or `pnpm run <script>`\n- Use `bunx <package> <command>` instead of `npx <package> <command>`\n- Bun automatically loads .env, so don'",
-      "review_status": "pending",
-      "rationale": "",
-      "reviewer": ""
-    },
-    {
-      "candidate_id": "tlm__approval_or_rejection__496fd078bfd181d1",
-      "subject_id": "turn:1688d3d6_bdde_4abb_9d65_c8b14ce01684__6246daa634ef96bd__seq_001054",
-      "session_id": "session:`1688d3d6-bdde-4abb-9d65-c8b14ce01684`",
-      "turn_id": "turn:1688d3d6_bdde_4abb_9d65_c8b14ce01684__6246daa634ef96bd__seq_001054",
-      "label_family": "approval_or_rejection",
-      "target": "approval",
-      "weak_label": "approval_or_rejection",
-      "weak_confidence": 0.78,
-      "weak_sources": [
-        "approval_or_rejection:approval"
-      ],
-      "evidence_paths": [
-        "turn:1688d3d6_bdde_4abb_9d65_c8b14ce01684__6246daa634ef96bd__seq_001054"
-      ],
-      "excerpt": "merge it.",
-      "review_status": "pending",
-      "rationale": "",
-      "reviewer": ""
-    },
-    {
-      "candidate_id": "tlm__correction__2090dac1bb1c8dde",
-      "subject_id": "turn:019e81a0_e69c_7061_b51e_552fda03980e__cf1122a966f69c45__seq_000003",
-      "session_id": "session:`019e81a0-e69c-7061-b51e-552fda03980e`",
-      "turn_id": "turn:019e81a0_e69c_7061_b51e_552fda03980e__cf1122a966f69c45__seq_000003",
-      "previous_assistant_turn_id": "turn:019e81a0_e69c_7061_b51e_552fda03980e__cf1122a966f69c45__seq_000002",
-      "label_family": "correction",
-      "target": "wrong_output",
-      "weak_label": "correction",
-      "weak_confidence": 0.74,
-      "weak_sources": [
-        "correction:wrong_output"
-      ],
-      "evidence_paths": [
-        "turn:019e81a0_e69c_7061_b51e_552fda03980e__cf1122a966f69c45__seq_000003"
-      ],
-      "excerpt": "the url to pi is wrong in landing hero. it's pi.dev",
-      "previous_assistant_excerpt": "# AGENTS.md instructions for /Users/necmttn/Projects/ax\n\n<INSTRUCTIONS>\n# CLAUDE.md\n\nGuidance for Claude Code and other AI assistants working in this repo.\n\n## What this is\n\n`ax` - local taste & telemetry graph for AI coding agents. Ingests Claude Code transcripts (`~/.claude/projects/`) + Codex transcripts (`~/.codex/sessions/`) + installed skills (`~/.claude/skills/`, `~/.agents/skills/`, plugin caches) into a dedicated SurrealDB instance. CLI surfaces \"what skills/tools you actually use\" on demand.\n\n## Stack\n\n- **Runtime**: bun ≥ 1.3\n- **Language**: TypeScript (strict, `module: preserve`, `",
-      "review_status": "pending",
-      "rationale": "",
-      "reviewer": ""
-    },
-    {
-      "candidate_id": "tlm__verification__29e48483bd4e36b8",
-      "subject_id": "turn:019e77a0_7b71_7c21_90a2_89dc1339be97__e7290984e7f2031d__seq_000003",
-      "session_id": "session:`019e77a0-7b71-7c21-90a2-89dc1339be97`",
-      "turn_id": "turn:019e77a0_7b71_7c21_90a2_89dc1339be97__e7290984e7f2031d__seq_000003",
-      "previous_assistant_turn_id": "turn:019e77a0_7b71_7c21_90a2_89dc1339be97__e7290984e7f2031d__seq_000002",
-      "label_family": "verification",
-      "target": "verification_demand",
-      "weak_label": "verification",
-      "weak_confidence": 0.84,
-      "weak_sources": [
-        "verification:demand"
-      ],
-      "evidence_paths": [
-        "turn:019e77a0_7b71_7c21_90a2_89dc1339be97__e7290984e7f2031d__seq_000003"
-      ],
-      "excerpt": "You are working in repo /Users/necmttn/Projects/ax on GitHub issue https://github.com/Necmttn/ax/issues/88: \"Extract OpenCode tool calls and invocation edges\".\n\nGoal: implement the issue end-to-end, verify, commit, push a branch, and open a PR linked to #88.\n\nContext:\n- OpenCode ingest currently lives in src/ingest/opencode.ts.\n- It reads ~/.local/share/opencode/opencode.db or AX_OPENCODE_DIR/opencode.db.\n- The taxonomy currently says OpenCode normalizes sessions/provider events/turns, but does not yet emit concrete tool_call/invoked rows.\n- Shared tool-call writers live around src/ingest/evid",
-      "previous_assistant_excerpt": "# AGENTS.md instructions for /Users/necmttn/Projects/ax\n\n<INSTRUCTIONS>\n# CLAUDE.md\n\nGuidance for Claude Code and other AI assistants working in this repo.\n\n## What this is\n\n`ax` - local taste & telemetry graph for AI coding agents. Ingests Claude Code transcripts (`~/.claude/projects/`) + Codex transcripts (`~/.codex/sessions/`) + installed skills (`~/.claude/skills/`, `~/.agents/skills/`, plugin caches) into a dedicated SurrealDB instance. CLI surfaces \"what skills/tools you actually use\" on demand.\n\n## Stack\n\n- **Runtime**: bun ≥ 1.3\n- **Language**: TypeScript (strict, `module: preserve`, `",
-      "review_status": "pending",
-      "rationale": "",
-      "reviewer": ""
-    },
-    {
-      "candidate_id": "tlm__direction__1017b0f2501624a3",
-      "subject_id": "turn:019e5cbf_55fc_7891_b546_00b141368e3c__9a8054257ec38324__seq_000003",
-      "session_id": "session:`019e5cbf-55fc-7891-b546-00b141368e3c`",
-      "turn_id": "turn:019e5cbf_55fc_7891_b546_00b141368e3c__9a8054257ec38324__seq_000003",
-      "previous_assistant_turn_id": "turn:019e5cbf_55fc_7891_b546_00b141368e3c__9a8054257ec38324__seq_000002",
-      "label_family": "direction",
-      "target": "stated_preference",
-      "weak_label": "direction",
-      "weak_confidence": 0.7,
-      "weak_sources": [
-        "intent:preference"
-      ],
-      "evidence_paths": [
-        "turn:019e5cbf_55fc_7891_b546_00b141368e3c__9a8054257ec38324__seq_000003"
-      ],
-      "excerpt": "Spec compliance review for Task 2. Do not edit files. Ignore unrelated dirty files outside scoped files:\n- apps/ailifestory/api/src/mobile/handlers.ts\n- apps/ailifestory/api/src/mobile/handlers.test.ts\n\nReview current scoped diff against Task 2 requirements:\n- Add test `voice_message_submit does not include unanswered prompts in follow-up history` near Task 1 test, using existingNextQuestion only and asserting generator input history is [] and does not contain unanswered prompt text.\n- Add `loadInterviewContextTurns` after `generateSubmitNextQuestionText`, using submitDbTry, querying circleQue",
-      "previous_assistant_excerpt": "# AGENTS.md instructions for /Users/necmttn/Projects/apps\n\n<INSTRUCTIONS>\n\nDefault to using Bun instead of Node.js.\n\n- Use `bun <file>` instead of `node <file>` or `ts-node <file>`\n- Use `bun test` instead of `jest` or `vitest`\n- Use `bun build <file.html|file.ts|file.css>` instead of `webpack` or `esbuild`\n- Use `bun install` instead of `npm install` or `yarn install` or `pnpm install`\n- Use `bun run <script>` instead of `npm run <script>` or `yarn run <script>` or `pnpm run <script>`\n- Use `bunx <package> <command>` instead of `npx <package> <command>`\n- Bun automatically loads .env, so don'",
-      "review_status": "pending",
-      "rationale": "",
-      "reviewer": ""
-    },
-    {
-      "candidate_id": "tlm__approval_or_rejection__531a1d0d3ee9817d",
-      "subject_id": "turn:5845d8a3_73bb_42c1_8a89_c1a3441609b9__761efe5bcbb8f70c__seq_000493",
-      "session_id": "session:`5845d8a3-73bb-42c1-8a89-c1a3441609b9`",
-      "turn_id": "turn:5845d8a3_73bb_42c1_8a89_c1a3441609b9__761efe5bcbb8f70c__seq_000493",
-      "label_family": "approval_or_rejection",
-      "target": "approval",
-      "weak_label": "approval_or_rejection",
-      "weak_confidence": 0.78,
-      "weak_sources": [
-        "approval_or_rejection:approval"
-      ],
-      "evidence_paths": [
-        "turn:5845d8a3_73bb_42c1_8a89_c1a3441609b9__761efe5bcbb8f70c__seq_000493"
-      ],
-      "excerpt": "ship it.",
-      "review_status": "pending",
-      "rationale": "",
-      "reviewer": ""
-    },
-    {
-      "candidate_id": "tlm__correction__26a67d8020d1be7c",
-      "subject_id": "turn:019e80f9_b729_7151_adbf_1f6cba2c7975__1501844b0d6e3a3c__seq_000003",
-      "session_id": "session:`019e80f9-b729-7151-adbf-1f6cba2c7975`",
-      "turn_id": "turn:019e80f9_b729_7151_adbf_1f6cba2c7975__1501844b0d6e3a3c__seq_000003",
-      "previous_assistant_turn_id": "turn:019e80f9_b729_7151_adbf_1f6cba2c7975__1501844b0d6e3a3c__seq_000002",
-      "label_family": "correction",
-      "target": "wrong_output",
-      "weak_label": "correction",
-      "weak_confidence": 0.74,
-      "weak_sources": [
-        "correction:wrong_output"
-      ],
-      "evidence_paths": [
-        "turn:019e80f9_b729_7151_adbf_1f6cba2c7975__1501844b0d6e3a3c__seq_000003"
-      ],
-      "excerpt": "In repo /tmp/ax-studio-404 on branch fix-studio-spa-404, implement the UI-only sticky navigation/header fix for the session inspector. Scope: src/dashboard/web/src/routes/inspector-filter-bar.tsx and related CSS if necessary. Goal: the jump/search control row (FilterBar) should stay fixed/sticky at the top of the viewport while scrolling through turns, so repeated clicks on next user/tool/hook controls do not move around. It must work in both local SessionInspectRoute and ShareInspectView because both use FilterBar. Preserve existing styles and avoid touching cost/token code. You are not alone",
-      "previous_assistant_excerpt": "# AGENTS.md instructions for /Users/necmttn/Projects/ax\n\n<INSTRUCTIONS>\n# CLAUDE.md\n\nGuidance for Claude Code and other AI assistants working in this repo.\n\n## What this is\n\n`ax` - local taste & telemetry graph for AI coding agents. Ingests Claude Code transcripts (`~/.claude/projects/`) + Codex transcripts (`~/.codex/sessions/`) + installed skills (`~/.claude/skills/`, `~/.agents/skills/`, plugin caches) into a dedicated SurrealDB instance. CLI surfaces \"what skills/tools you actually use\" on demand.\n\n## Stack\n\n- **Runtime**: bun ≥ 1.3\n- **Language**: TypeScript (strict, `module: preserve`, `",
-      "review_status": "pending",
-      "rationale": "",
-      "reviewer": ""
-    },
-    {
-      "candidate_id": "tlm__verification__2f3f1f30a1df19b",
-      "subject_id": "turn:ab18a0ea_99f4_4df7_b200_43e0da82fd5f__f9c51d69a9b1027c__seq_000078",
-      "session_id": "session:`ab18a0ea-99f4-4df7-b200-43e0da82fd5f`",
-      "turn_id": "turn:ab18a0ea_99f4_4df7_b200_43e0da82fd5f__f9c51d69a9b1027c__seq_000078",
-      "label_family": "verification",
-      "target": "verification_demand",
-      "weak_label": "verification",
-      "weak_confidence": 0.84,
-      "weak_sources": [
-        "verification:demand"
-      ],
-      "evidence_paths": [
-        "turn:ab18a0ea_99f4_4df7_b200_43e0da82fd5f__f9c51d69a9b1027c__seq_000078"
-      ],
-      "excerpt": "can we improve the tweets base on this feedback doesn't have to be all of it just take the good parts. \n\n---\n\nYeah — this screenshot changes the angle. I’d **drop the “you write JS” framing** unless you’re specifically talking about a lower-level API. The stronger point is:\n\n**Claude writes the orchestration harness itself, per task.**\n\nOfficial framing backs that up: Claude dynamically writes orchestration scripts, fans work out across tens to hundreds of subagents, checks results before returning, and `ultracode` lets Claude decide when to use this workflow mode. ([Claude][1])\n\nHere’s a bett",
-      "review_status": "pending",
-      "rationale": "",
-      "reviewer": ""
-    },
-    {
-      "candidate_id": "tlm__direction__110b99fa3dbd2dd0",
-      "subject_id": "turn:a7604ce9_ec51_40f8_9bdb_3f75ae54b59c__8beed1c50ace8988__seq_000945",
-      "session_id": "session:`a7604ce9-ec51-40f8-9bdb-3f75ae54b59c`",
-      "turn_id": "turn:a7604ce9_ec51_40f8_9bdb_3f75ae54b59c__8beed1c50ace8988__seq_000945",
-      "label_family": "direction",
-      "target": "stated_preference",
-      "weak_label": "direction",
-      "weak_confidence": 0.7,
-      "weak_sources": [
-        "intent:preference"
-      ],
-      "evidence_paths": [
-        "turn:a7604ce9_ec51_40f8_9bdb_3f75ae54b59c__8beed1c50ace8988__seq_000945"
-      ],
-      "excerpt": "yes please",
-      "review_status": "pending",
-      "rationale": "",
-      "reviewer": ""
-    },
-    {
-      "candidate_id": "tlm__approval_or_rejection__93c82af3732d1026",
-      "subject_id": "turn:11fb5aad_2d45_45ef_9f94_7738ce250327__ab7c9d8b15cbcb04__seq_001430",
-      "session_id": "session:`11fb5aad-2d45-45ef-9f94-7738ce250327`",
-      "turn_id": "turn:11fb5aad_2d45_45ef_9f94_7738ce250327__ab7c9d8b15cbcb04__seq_001430",
-      "label_family": "approval_or_rejection",
-      "target": "approval",
-      "weak_label": "approval_or_rejection",
-      "weak_confidence": 0.78,
-      "weak_sources": [
-        "approval_or_rejection:approval"
-      ],
-      "evidence_paths": [
-        "turn:11fb5aad_2d45_45ef_9f94_7738ce250327__ab7c9d8b15cbcb04__seq_001430"
-      ],
-      "excerpt": "lets merge it.",
-      "review_status": "pending",
-      "rationale": "",
-      "reviewer": ""
-    },
-    {
-      "candidate_id": "tlm__correction__323d413be15f399a",
-      "subject_id": "turn:019e73a6_adfd_72f0_b9fb_8fd338f1a3b3__4169c10262f8f275__seq_000003",
-      "session_id": "session:`019e73a6-adfd-72f0-b9fb-8fd338f1a3b3`",
-      "turn_id": "turn:019e73a6_adfd_72f0_b9fb_8fd338f1a3b3__4169c10262f8f275__seq_000003",
-      "previous_assistant_turn_id": "turn:019e73a6_adfd_72f0_b9fb_8fd338f1a3b3__4169c10262f8f275__seq_000002",
-      "label_family": "correction",
-      "target": "wrong_output",
-      "weak_label": "correction",
-      "weak_confidence": 0.74,
-      "weak_sources": [
-        "correction:wrong_output"
-      ],
-      "evidence_paths": [
-        "turn:019e73a6_adfd_72f0_b9fb_8fd338f1a3b3__4169c10262f8f275__seq_000003"
-      ],
-      "excerpt": "You are implementing Task 1 of the Gist-backed session sharing plan in an isolated worktree.\n\nWorkspace: /Users/necmttn/Projects/ax/.worktrees/gist-session-sharing\nBranch: feat/gist-session-sharing\n\nImportant repo instructions:\n- Use apply_patch for manual edits.\n- Do not revert or touch unrelated files.\n- You are not alone in the codebase; accommodate any existing changes and do not overwrite them.\n- Follow TDD: write failing test first, run it, implement, run targeted test.\n- Commit your task when done.\n- Full `bun run typecheck` currently has pre-existing unrelated failures; do not try to f",
-      "previous_assistant_excerpt": "# AGENTS.md instructions for /Users/necmttn/Projects/ax\n\n<INSTRUCTIONS>\n# CLAUDE.md\n\nGuidance for Claude Code and other AI assistants working in this repo.\n\n## What this is\n\n`ax` - local taste & telemetry graph for AI coding agents. Ingests Claude Code transcripts (`~/.claude/projects/`) + Codex transcripts (`~/.codex/sessions/`) + installed skills (`~/.claude/skills/`, `~/.agents/skills/`, plugin caches) into a dedicated SurrealDB instance. CLI surfaces \"what skills/tools you actually use\" on demand.\n\n## Stack\n\n- **Runtime**: bun ≥ 1.3\n- **Language**: TypeScript (strict, `module: preserve`, `",
-      "review_status": "pending",
-      "rationale": "",
-      "reviewer": ""
-    },
-    {
-      "candidate_id": "tlm__verification__32e9b3b3eaacbcfc",
-      "subject_id": "turn:019e77a0_4ad5_76e1_97ce_41cf58e5fc0f__a264c3f1f21bfb80__seq_000003",
-      "session_id": "session:`019e77a0-4ad5-76e1-97ce-41cf58e5fc0f`",
-      "turn_id": "turn:019e77a0_4ad5_76e1_97ce_41cf58e5fc0f__a264c3f1f21bfb80__seq_000003",
-      "previous_assistant_turn_id": "turn:019e77a0_4ad5_76e1_97ce_41cf58e5fc0f__a264c3f1f21bfb80__seq_000002",
-      "label_family": "verification",
-      "target": "verification_demand",
-      "weak_label": "verification",
-      "weak_confidence": 0.84,
-      "weak_sources": [
-        "verification:demand"
-      ],
-      "evidence_paths": [
-        "turn:019e77a0_4ad5_76e1_97ce_41cf58e5fc0f__a264c3f1f21bfb80__seq_000003"
-      ],
-      "excerpt": "You are working in repo /Users/necmttn/Projects/ax on GitHub issue https://github.com/Necmttn/ax/issues/87: \"Add a provider parity coverage gate\".\n\nGoal: implement the issue end-to-end, verify, commit, push a branch, and open a PR linked to #87.\n\nContext:\n- ax ingests multiple first-class agent harnesses: Claude, Codex, Pi, OpenCode, Cursor.\n- The taxonomy doc is docs/graph-db-taxonomy.md and now includes a Provider Feature Parity section.\n- The current need is a machine-readable parity gate so docs do not drift and claimed provider features have writers/read paths.\n- Relevant files likely inc",
-      "previous_assistant_excerpt": "# AGENTS.md instructions for /Users/necmttn/Projects/ax\n\n<INSTRUCTIONS>\n# CLAUDE.md\n\nGuidance for Claude Code and other AI assistants working in this repo.\n\n## What this is\n\n`ax` - local taste & telemetry graph for AI coding agents. Ingests Claude Code transcripts (`~/.claude/projects/`) + Codex transcripts (`~/.codex/sessions/`) + installed skills (`~/.claude/skills/`, `~/.agents/skills/`, plugin caches) into a dedicated SurrealDB instance. CLI surfaces \"what skills/tools you actually use\" on demand.\n\n## Stack\n\n- **Runtime**: bun ≥ 1.3\n- **Language**: TypeScript (strict, `module: preserve`, `",
-      "review_status": "pending",
-      "rationale": "",
-      "reviewer": ""
-    },
-    {
-      "candidate_id": "tlm__direction__11b0795a43b979be",
-      "subject_id": "turn:4da77f95_0ec5_4036_933a_c46dbb4b25bf__ba7b9c142fbfed7b__seq_000023",
-      "session_id": "session:`4da77f95-0ec5-4036-933a-c46dbb4b25bf`",
-      "turn_id": "turn:4da77f95_0ec5_4036_933a_c46dbb4b25bf__ba7b9c142fbfed7b__seq_000023",
-      "label_family": "direction",
-      "target": "stated_preference",
-      "weak_label": "direction",
-      "weak_confidence": 0.7,
-      "weak_sources": [
-        "intent:preference"
-      ],
-      "evidence_paths": [
-        "turn:4da77f95_0ec5_4036_933a_c46dbb4b25bf__ba7b9c142fbfed7b__seq_000023"
-      ],
-      "excerpt": "let's do 3 plan via subagent, \nand compare view",
-      "review_status": "pending",
-      "rationale": "",
-      "reviewer": ""
-    },
-    {
-      "candidate_id": "tlm__approval_or_rejection__a1f11d608a0b5ab2",
-      "subject_id": "turn:a532c583_183c_4d9b_81ac_7c5a465298cf__8287e931a5fe1499__seq_000875",
-      "session_id": "session:`a532c583-183c-4d9b-81ac-7c5a465298cf`",
-      "turn_id": "turn:a532c583_183c_4d9b_81ac_7c5a465298cf__8287e931a5fe1499__seq_000875",
-      "label_family": "approval_or_rejection",
-      "target": "approval",
-      "weak_label": "approval_or_rejection",
-      "weak_confidence": 0.78,
-      "weak_sources": [
-        "approval_or_rejection:approval"
-      ],
-      "evidence_paths": [
-        "turn:a532c583_183c_4d9b_81ac_7c5a465298cf__8287e931a5fe1499__seq_000875"
-      ],
-      "excerpt": "Alright, can we merge it and can you give me Gandhan brief what was this briefing?",
-      "review_status": "pending",
-      "rationale": "",
-      "reviewer": ""
-    },
-    {
-      "candidate_id": "tlm__correction__36b75d68be85c148",
-      "subject_id": "turn:019e7435_d30e_7a73_86b1_36527895b57f__865e57566e2838fc__seq_000003",
-      "session_id": "session:`019e7435-d30e-7a73-86b1-36527895b57f`",
-      "turn_id": "turn:019e7435_d30e_7a73_86b1_36527895b57f__865e57566e2838fc__seq_000003",
-      "previous_assistant_turn_id": "turn:019e7435_d30e_7a73_86b1_36527895b57f__865e57566e2838fc__seq_000002",
-      "label_family": "correction",
-      "target": "wrong_output",
-      "weak_label": "correction",
-      "weak_confidence": 0.74,
-      "weak_sources": [
-        "correction:wrong_output"
-      ],
-      "evidence_paths": [
-        "turn:019e7435_d30e_7a73_86b1_36527895b57f__865e57566e2838fc__seq_000003"
-      ],
-      "excerpt": "Implement Task 8 of the Gist-backed session sharing plan in the isolated worktree.\n\nWorkspace: /Users/necmttn/Projects/ax/.worktrees/gist-session-sharing\nBranch: feat/gist-session-sharing\n\nImportant:\n- Use apply_patch for manual edits.\n- Do not revert or touch unrelated files.\n- You are not alone in the codebase; accommodate existing changes.\n- This task is in the `site/` package. Use existing site/TanStack Router patterns.\n- This is frontend work: keep UI professional, restrained, not a marketing hero; avoid nested cards; use stable layouts and readable text.\n- Do not overbuild the graph; sta",
-      "previous_assistant_excerpt": "# AGENTS.md instructions for /Users/necmttn/Projects/ax\n\n<INSTRUCTIONS>\n# CLAUDE.md\n\nGuidance for Claude Code and other AI assistants working in this repo.\n\n## What this is\n\n`ax` - local taste & telemetry graph for AI coding agents. Ingests Claude Code transcripts (`~/.claude/projects/`) + Codex transcripts (`~/.codex/sessions/`) + installed skills (`~/.claude/skills/`, `~/.agents/skills/`, plugin caches) into a dedicated SurrealDB instance. CLI surfaces \"what skills/tools you actually use\" on demand.\n\n## Stack\n\n- **Runtime**: bun ≥ 1.3\n- **Language**: TypeScript (strict, `module: preserve`, `",
-      "review_status": "pending",
-      "rationale": "",
-      "reviewer": ""
-    },
-    {
-      "candidate_id": "tlm__verification__337692ecc79e4044",
-      "subject_id": "turn:019e5cc1_8a5c_79c2_bdb2_15300ea08edc__c0b14eede08a48b1__seq_000003",
-      "session_id": "session:`019e5cc1-8a5c-79c2-bdb2-15300ea08edc`",
-      "turn_id": "turn:019e5cc1_8a5c_79c2_bdb2_15300ea08edc__c0b14eede08a48b1__seq_000003",
-      "previous_assistant_turn_id": "turn:019e5cc1_8a5c_79c2_bdb2_15300ea08edc__c0b14eede08a48b1__seq_000002",
-      "label_family": "verification",
-      "target": "verification_demand",
-      "weak_label": "verification",
-      "weak_confidence": 0.84,
-      "weak_sources": [
-        "verification:demand"
-      ],
-      "evidence_paths": [
-        "turn:019e5cc1_8a5c_79c2_bdb2_15300ea08edc__c0b14eede08a48b1__seq_000003"
-      ],
-      "excerpt": "You are implementing Task 3 from the plan in /Users/necmttn/Projects/apps. You are not alone in the codebase: the worktree is dirty and Task 1+2 already modified handlers.ts and handlers.test.ts. Do not revert unrelated edits. Own only these files for this task:\n- apps/ailifestory/api/src/mobile/handlers.ts\n- apps/ailifestory/api/src/mobile/handlers.test.ts\n\nRepo conventions: default to Bun. Use `bun run test` from apps/ailifestory/api. Use apply_patch for manual edits.\n\nContext: Task 1+2 introduced full-history `NextQuestionInput`, `loadInterviewContextTurns`, and tests are currently passing.",
-      "previous_assistant_excerpt": "# AGENTS.md instructions for /Users/necmttn/Projects/apps\n\n<INSTRUCTIONS>\n\nDefault to using Bun instead of Node.js.\n\n- Use `bun <file>` instead of `node <file>` or `ts-node <file>`\n- Use `bun test` instead of `jest` or `vitest`\n- Use `bun build <file.html|file.ts|file.css>` instead of `webpack` or `esbuild`\n- Use `bun install` instead of `npm install` or `yarn install` or `pnpm install`\n- Use `bun run <script>` instead of `npm run <script>` or `yarn run <script>` or `pnpm run <script>`\n- Use `bunx <package> <command>` instead of `npx <package> <command>`\n- Bun automatically loads .env, so don'",
-      "review_status": "pending",
-      "rationale": "",
-      "reviewer": ""
-    },
-    {
-      "candidate_id": "tlm__direction__12b46b26aca4b453",
-      "subject_id": "turn:fd2bd2ab_7956_441b_8047_82a9017ac76b__648c3a1f2a8b6e95__seq_000032",
-      "session_id": "session:`fd2bd2ab-7956-441b-8047-82a9017ac76b`",
-      "turn_id": "turn:fd2bd2ab_7956_441b_8047_82a9017ac76b__648c3a1f2a8b6e95__seq_000032",
-      "label_family": "direction",
-      "target": "stated_preference",
-      "weak_label": "direction",
-      "weak_confidence": 0.7,
-      "weak_sources": [
-        "intent:preference"
-      ],
-      "evidence_paths": [
-        "turn:fd2bd2ab_7956_441b_8047_82a9017ac76b__648c3a1f2a8b6e95__seq_000032"
-      ],
-      "excerpt": "yes please",
-      "review_status": "pending",
-      "rationale": "",
-      "reviewer": ""
-    },
-    {
-      "candidate_id": "tlm__approval_or_rejection__ae83df336147d642",
-      "subject_id": "turn:2651b3f6_3070_43fe_8d3b_624a0de49fae__0b13c5cc2b1af048__seq_000207",
-      "session_id": "session:`2651b3f6-3070-43fe-8d3b-624a0de49fae`",
-      "turn_id": "turn:2651b3f6_3070_43fe_8d3b_624a0de49fae__0b13c5cc2b1af048__seq_000207",
-      "label_family": "approval_or_rejection",
-      "target": "approval",
-      "weak_label": "approval_or_rejection",
-      "weak_confidence": 0.78,
-      "weak_sources": [
-        "approval_or_rejection:approval"
-      ],
-      "evidence_paths": [
-        "turn:2651b3f6_3070_43fe_8d3b_624a0de49fae__0b13c5cc2b1af048__seq_000207"
-      ],
-      "excerpt": "ship it",
-      "review_status": "pending",
-      "rationale": "",
-      "reviewer": ""
-    },
-    {
       "candidate_id": "tlm__correction__4702f58801b54cb6",
       "subject_id": "turn:11fb5aad_2d45_45ef_9f94_7738ce250327__ab7c9d8b15cbcb04__seq_002581",
       "session_id": "session:`11fb5aad-2d45-45ef-9f94-7738ce250327`",
@@ -618,11 +198,10 @@
       "reviewer": ""
     },
     {
-      "candidate_id": "tlm__direction__12da307a3125df5d",
-      "subject_id": "turn:019e7427_b6e7_7e01_9cd9_3a4806a565f7__eec16813a3239797__seq_000572",
-      "session_id": "session:`019e7427-b6e7-7e01-9cd9-3a4806a565f7`",
-      "turn_id": "turn:019e7427_b6e7_7e01_9cd9_3a4806a565f7__eec16813a3239797__seq_000572",
-      "previous_assistant_turn_id": "turn:019e7427_b6e7_7e01_9cd9_3a4806a565f7__eec16813a3239797__seq_000571",
+      "candidate_id": "tlm__direction__11b0795a43b979be",
+      "subject_id": "turn:4da77f95_0ec5_4036_933a_c46dbb4b25bf__ba7b9c142fbfed7b__seq_000023",
+      "session_id": "session:`4da77f95-0ec5-4036-933a-c46dbb4b25bf`",
+      "turn_id": "turn:4da77f95_0ec5_4036_933a_c46dbb4b25bf__ba7b9c142fbfed7b__seq_000023",
       "label_family": "direction",
       "target": "stated_preference",
       "weak_label": "direction",
@@ -631,19 +210,18 @@
         "intent:preference"
       ],
       "evidence_paths": [
-        "turn:019e7427_b6e7_7e01_9cd9_3a4806a565f7__eec16813a3239797__seq_000572"
+        "turn:4da77f95_0ec5_4036_933a_c46dbb4b25bf__ba7b9c142fbfed7b__seq_000023"
       ],
-      "excerpt": "can we take advantage of graph db here?",
-      "previous_assistant_excerpt": "I see three viable approaches.\n\nRecommended: **hybrid local-first analysis**\n- Run heuristics over every user + assistant turn.\n- Store labels like `sentiment`, `interaction_act`, `correction_type`, `confidence`, `reasons`.\n- Use optional LLM only for low-confidence or important turns.\n- Best fit because it is cheap, replayable, debuggable, and won’t make ingest dependent on network/model calls.\n\nAlternative 1: **heuristics only**\n- Extend `intent_kind`, `ask_outcome`, and `user_message_ngram`.\n- Fast and simple.\n- But weak for semantic meaning like “this sounds disappointed but does not conta",
+      "excerpt": "let's do 3 plan via subagent, \nand compare view",
       "review_status": "pending",
       "rationale": "",
       "reviewer": ""
     },
     {
-      "candidate_id": "tlm__approval_or_rejection__b2635c9edf88c101",
-      "subject_id": "turn:11fb5aad_2d45_45ef_9f94_7738ce250327__ab7c9d8b15cbcb04__seq_001185",
-      "session_id": "session:`11fb5aad-2d45-45ef-9f94-7738ce250327`",
-      "turn_id": "turn:11fb5aad_2d45_45ef_9f94_7738ce250327__ab7c9d8b15cbcb04__seq_001185",
+      "candidate_id": "tlm__approval_or_rejection__496fd078bfd181d1",
+      "subject_id": "turn:1688d3d6_bdde_4abb_9d65_c8b14ce01684__6246daa634ef96bd__seq_001054",
+      "session_id": "session:`1688d3d6-bdde-4abb-9d65-c8b14ce01684`",
+      "turn_id": "turn:1688d3d6_bdde_4abb_9d65_c8b14ce01684__6246daa634ef96bd__seq_001054",
       "label_family": "approval_or_rejection",
       "target": "approval",
       "weak_label": "approval_or_rejection",
@@ -652,267 +230,9 @@
         "approval_or_rejection:approval"
       ],
       "evidence_paths": [
-        "turn:11fb5aad_2d45_45ef_9f94_7738ce250327__ab7c9d8b15cbcb04__seq_001185"
+        "turn:1688d3d6_bdde_4abb_9d65_c8b14ce01684__6246daa634ef96bd__seq_001054"
       ],
       "excerpt": "merge it.",
-      "review_status": "pending",
-      "rationale": "",
-      "reviewer": ""
-    },
-    {
-      "candidate_id": "tlm__correction__546909c9aabd8c36",
-      "subject_id": "turn:019e73bd_a78a_79d3_8357_5f9c8c71bde1__587d2646af3433d4__seq_000003",
-      "session_id": "session:`019e73bd-a78a-79d3-8357-5f9c8c71bde1`",
-      "turn_id": "turn:019e73bd_a78a_79d3_8357_5f9c8c71bde1__587d2646af3433d4__seq_000003",
-      "previous_assistant_turn_id": "turn:019e73bd_a78a_79d3_8357_5f9c8c71bde1__587d2646af3433d4__seq_000002",
-      "label_family": "correction",
-      "target": "wrong_output",
-      "weak_label": "correction",
-      "weak_confidence": 0.74,
-      "weak_sources": [
-        "correction:wrong_output"
-      ],
-      "evidence_paths": [
-        "turn:019e73bd_a78a_79d3_8357_5f9c8c71bde1__587d2646af3433d4__seq_000003"
-      ],
-      "excerpt": "Implement Task 4 of the Gist-backed session sharing plan in the isolated worktree.\n\nWorkspace: /Users/necmttn/Projects/ax/.worktrees/gist-session-sharing\nBranch: feat/gist-session-sharing\n\nImportant:\n- Use apply_patch for manual edits.\n- Do not revert or touch unrelated files.\n- You are not alone in the codebase; accommodate existing changes.\n- Follow TDD: write failing test, run it, implement, run targeted tests, commit.\n- Full `bun run typecheck` has pre-existing unrelated failures; do not fix them.\n- Effect code: use `Effect.gen`/`yield*`, avoid try/catch inside Effect.gen. Existing query h",
-      "previous_assistant_excerpt": "# AGENTS.md instructions for /Users/necmttn/Projects/ax\n\n<INSTRUCTIONS>\n# CLAUDE.md\n\nGuidance for Claude Code and other AI assistants working in this repo.\n\n## What this is\n\n`ax` - local taste & telemetry graph for AI coding agents. Ingests Claude Code transcripts (`~/.claude/projects/`) + Codex transcripts (`~/.codex/sessions/`) + installed skills (`~/.claude/skills/`, `~/.agents/skills/`, plugin caches) into a dedicated SurrealDB instance. CLI surfaces \"what skills/tools you actually use\" on demand.\n\n## Stack\n\n- **Runtime**: bun ≥ 1.3\n- **Language**: TypeScript (strict, `module: preserve`, `",
-      "review_status": "pending",
-      "rationale": "",
-      "reviewer": ""
-    },
-    {
-      "candidate_id": "tlm__verification__4abe35a3b03049b1",
-      "subject_id": "turn:214edfd0_9817_4d10_bab7_6032b333856b__f21d9133d69f62b5__seq_000123",
-      "session_id": "session:`214edfd0-9817-4d10-bab7-6032b333856b`",
-      "turn_id": "turn:214edfd0_9817_4d10_bab7_6032b333856b__f21d9133d69f62b5__seq_000123",
-      "label_family": "verification",
-      "target": "verification_demand",
-      "weak_label": "verification",
-      "weak_confidence": 0.84,
-      "weak_sources": [
-        "verification:demand"
-      ],
-      "evidence_paths": [
-        "turn:214edfd0_9817_4d10_bab7_6032b333856b__f21d9133d69f62b5__seq_000123"
-      ],
-      "excerpt": "# Update Config Skill\n\nModify Claude Code configuration by updating settings.json files.\n\n## When Hooks Are Required (Not Memory)\n\nIf the user wants something to happen automatically in response to an EVENT, they need a **hook** configured in settings.json. Memory/preferences cannot trigger automated actions.\n\n**These require hooks:**\n- \"Before compacting, ask me what to preserve\" → PreCompact hook\n- \"After writing files, run prettier\" → PostToolUse hook with Write|Edit matcher\n- \"When I run bash commands, log them\" → PreToolUse hook with Bash matcher\n- \"Always run tests after code changes\" → ",
-      "review_status": "pending",
-      "rationale": "",
-      "reviewer": ""
-    },
-    {
-      "candidate_id": "tlm__direction__12e5b9fae572a16c",
-      "subject_id": "turn:019e76fe_63ff_7303_a98d_7e6210820b04__45ce27a7ae47a0f9__seq_000359",
-      "session_id": "session:`019e76fe-63ff-7303-a98d-7e6210820b04`",
-      "turn_id": "turn:019e76fe_63ff_7303_a98d_7e6210820b04__45ce27a7ae47a0f9__seq_000359",
-      "previous_assistant_turn_id": "turn:019e76fe_63ff_7303_a98d_7e6210820b04__45ce27a7ae47a0f9__seq_000358",
-      "label_family": "direction",
-      "target": "stated_preference",
-      "weak_label": "direction",
-      "weak_confidence": 0.7,
-      "weak_sources": [
-        "intent:preference"
-      ],
-      "evidence_paths": [
-        "turn:019e76fe_63ff_7303_a98d_7e6210820b04__45ce27a7ae47a0f9__seq_000359"
-      ],
-      "excerpt": "You put P open code and cursor in a single row, it's kinda bothers me. I want to be able to see actually how we where we are getting those data location path, how we are ingesting those. I want that to be clear, visible. They are one of the harness we are supporting. They are no less than Claude or Codex.",
-      "previous_assistant_excerpt": "Here’s the current documentation added for the schema/read-path taxonomy:\n\n[docs/graph-db-taxonomy.md](/Users/necmttn/Projects/ax/docs/graph-db-taxonomy.md)\n\nI also updated the related current docs:\n\n[docs/insights-cli-reference.md](/Users/necmttn/Projects/ax/docs/insights-cli-reference.md)\n\n[docs/how-ax-sees-your-work.mdx](/Users/necmttn/Projects/ax/docs/how-ax-sees-your-work.mdx)\n\n[docs/graph-insight-goal-notes.md](/Users/necmttn/Projects/ax/docs/graph-insight-goal-notes.md)\n\n[docs/repo-file-change-graph-design.md](/Users/necmttn/Projects/ax/docs/repo-file-change-graph-design.md)",
-      "review_status": "pending",
-      "rationale": "",
-      "reviewer": ""
-    },
-    {
-      "candidate_id": "tlm__approval_or_rejection__be6e47deec40d8cd",
-      "subject_id": "turn:e23cf065_7316_46a0_95a7_2f2722065565__c74f3702ba85f9c2__seq_000134",
-      "session_id": "session:`e23cf065-7316-46a0-95a7-2f2722065565`",
-      "turn_id": "turn:e23cf065_7316_46a0_95a7_2f2722065565__c74f3702ba85f9c2__seq_000134",
-      "label_family": "approval_or_rejection",
-      "target": "approval",
-      "weak_label": "approval_or_rejection",
-      "weak_confidence": 0.78,
-      "weak_sources": [
-        "approval_or_rejection:approval"
-      ],
-      "evidence_paths": [
-        "turn:e23cf065_7316_46a0_95a7_2f2722065565__c74f3702ba85f9c2__seq_000134"
-      ],
-      "excerpt": "looks good subagent driven development",
-      "review_status": "pending",
-      "rationale": "",
-      "reviewer": ""
-    },
-    {
-      "candidate_id": "tlm__correction__5560ab4877bd86c4",
-      "subject_id": "turn:019e5cc4_9e2b_7280_8963_a8daed252e9f__a8a415bf071c0ab8__seq_000003",
-      "session_id": "session:`019e5cc4-9e2b-7280-8963-a8daed252e9f`",
-      "turn_id": "turn:019e5cc4_9e2b_7280_8963_a8daed252e9f__a8a415bf071c0ab8__seq_000003",
-      "previous_assistant_turn_id": "turn:019e5cc4_9e2b_7280_8963_a8daed252e9f__a8a415bf071c0ab8__seq_000002",
-      "label_family": "correction",
-      "target": "wrong_output",
-      "weak_label": "correction",
-      "weak_confidence": 0.74,
-      "weak_sources": [
-        "correction:wrong_output"
-      ],
-      "evidence_paths": [
-        "turn:019e5cc4_9e2b_7280_8963_a8daed252e9f__a8a415bf071c0ab8__seq_000003"
-      ],
-      "excerpt": "You are implementing Task 4 from the plan in /Users/necmttn/Projects/apps. You are not alone in the codebase: the worktree is dirty and Task 1-3 already modified handlers.ts and handlers.test.ts. Do not revert unrelated edits. Own only this file for this task unless absolutely necessary:\n- apps/ailifestory/api/src/mobile/handlers.test.ts\n\nRepo conventions: default to Bun. Use `bun run test` from apps/ailifestory/api. Use apply_patch for manual edits.\n\nContext: Task 1-3 are implemented and tests pass. Task 4 only strengthens idempotency and feed assertions.\n\nTask 4 full spec:\n\n### Task 4: Prese",
-      "previous_assistant_excerpt": "# AGENTS.md instructions for /Users/necmttn/Projects/apps\n\n<INSTRUCTIONS>\n\nDefault to using Bun instead of Node.js.\n\n- Use `bun <file>` instead of `node <file>` or `ts-node <file>`\n- Use `bun test` instead of `jest` or `vitest`\n- Use `bun build <file.html|file.ts|file.css>` instead of `webpack` or `esbuild`\n- Use `bun install` instead of `npm install` or `yarn install` or `pnpm install`\n- Use `bun run <script>` instead of `npm run <script>` or `yarn run <script>` or `pnpm run <script>`\n- Use `bunx <package> <command>` instead of `npx <package> <command>`\n- Bun automatically loads .env, so don'",
-      "review_status": "pending",
-      "rationale": "",
-      "reviewer": ""
-    },
-    {
-      "candidate_id": "tlm__verification__5e6d5464f2892b82",
-      "subject_id": "turn:019e73a6_adfd_72f0_b9fb_8fd338f1a3b3__4169c10262f8f275__seq_000072",
-      "session_id": "session:`019e73a6-adfd-72f0-b9fb-8fd338f1a3b3`",
-      "turn_id": "turn:019e73a6_adfd_72f0_b9fb_8fd338f1a3b3__4169c10262f8f275__seq_000072",
-      "previous_assistant_turn_id": "turn:019e73a6_adfd_72f0_b9fb_8fd338f1a3b3__4169c10262f8f275__seq_000071",
-      "label_family": "verification",
-      "target": "verification_demand",
-      "weak_label": "verification",
-      "weak_confidence": 0.84,
-      "weak_sources": [
-        "verification:demand"
-      ],
-      "evidence_paths": [
-        "turn:019e73a6_adfd_72f0_b9fb_8fd338f1a3b3__4169c10262f8f275__seq_000072"
-      ],
-      "excerpt": "Spec review requested changes for Task 1.\n\nFinding:\n- `src/share/artifact.test.ts` does not verify deterministic defaults from `minimalShareArtifact`: `exported_at`, `ax_version`, zeroed `stats`, empty `timeline/files/graph`, empty `derived`, and `redactions { applied: false, rules: [] }`.\n\nPlease update the Task 1 tests to cover these defaults, run `bun test src/share/artifact.test.ts`, and commit the fix. Do not touch unrelated files.\n\nFinal response format:\n- Status\n- Summary\n- Tests\n- Commit SHA",
-      "previous_assistant_excerpt": "Status: DONE\n\nSummary of changes:\n- Added `src/share/artifact.ts` with V1 share artifact types, minimal artifact builder, and runtime validation.\n- Added `src/share/artifact.test.ts` with the required minimal artifact and unsupported schema version tests.\n- Committed as `0208826`.\n\nTests run and results:\n- Red: `bun test src/share/artifact.test.ts` failed because `./artifact.ts` was missing.\n- Green: `bun test src/share/artifact.test.ts` passed: 2 pass, 0 fail.\n- Final verification: `bun test src/share/artifact.test.ts` passed: 2 pass, 0 fail.\n\nCommit SHA:\n- `0208826`\n\nConcerns:\n- None. Full `",
-      "review_status": "pending",
-      "rationale": "",
-      "reviewer": ""
-    },
-    {
-      "candidate_id": "tlm__direction__1427f8261e95b80b",
-      "subject_id": "turn:8c1a1209_11ec_48e9_9a2f_154c0dcb9d29__d2644989ab5b6d20__seq_000777",
-      "session_id": "session:`8c1a1209-11ec-48e9-9a2f-154c0dcb9d29`",
-      "turn_id": "turn:8c1a1209_11ec_48e9_9a2f_154c0dcb9d29__d2644989ab5b6d20__seq_000777",
-      "label_family": "direction",
-      "target": "stated_preference",
-      "weak_label": "direction",
-      "weak_confidence": 0.7,
-      "weak_sources": [
-        "intent:preference"
-      ],
-      "evidence_paths": [
-        "turn:8c1a1209_11ec_48e9_9a2f_154c0dcb9d29__d2644989ab5b6d20__seq_000777"
-      ],
-      "excerpt": "yes please",
-      "review_status": "pending",
-      "rationale": "",
-      "reviewer": ""
-    },
-    {
-      "candidate_id": "tlm__approval_or_rejection__e8272ba635f6e185",
-      "subject_id": "turn:019e7c67_9137_77e1_8942_3ad9df5e6308__1a8a78d9ecccb867__seq_000154",
-      "session_id": "session:`019e7c67-9137-77e1-8942-3ad9df5e6308`",
-      "turn_id": "turn:019e7c67_9137_77e1_8942_3ad9df5e6308__1a8a78d9ecccb867__seq_000154",
-      "previous_assistant_turn_id": "turn:019e7c67_9137_77e1_8942_3ad9df5e6308__1a8a78d9ecccb867__seq_000153",
-      "label_family": "approval_or_rejection",
-      "target": "approval",
-      "weak_label": "approval_or_rejection",
-      "weak_confidence": 0.78,
-      "weak_sources": [
-        "approval_or_rejection:approval"
-      ],
-      "evidence_paths": [
-        "turn:019e7c67_9137_77e1_8942_3ad9df5e6308__1a8a78d9ecccb867__seq_000154"
-      ],
-      "excerpt": "Alright, so that has been built before but it's not merged yet. Can we merge it?",
-      "previous_assistant_excerpt": "Studio is live here:\n\nhttps://ax.necmttn.com/studio/?endpoint=http%3A%2F%2F127.0.0.1%3A1738\n\nLocal API is already running on `:1738` and reports:\n\n```json\n{\"version\":\"0.3.0\",\"api_version\":1}\n```\n\nFor the Gist architecture: the design we set up is documented at:\n\n[2026-05-29-gist-backed-session-sharing-design.md](/Users/necmttn/Projects/ax/docs/superpowers/specs/2026-05-29-gist-backed-session-sharing-design.md)\n\nThe intended share URL shape is:\n\n```text\nhttps://ax.necmttn.com/s/<owner>/<gist-id>\n```\n\nBut in this checkout, `axctl share` is not actually registered yet, so I can’t produce a real s",
-      "review_status": "pending",
-      "rationale": "",
-      "reviewer": ""
-    },
-    {
-      "candidate_id": "tlm__correction__56a87996acc6f6cb",
-      "subject_id": "turn:019e72d1_1ab3_79f2_aaec_a275e7b3c01f__4b8194423fd5c7b3__seq_000003",
-      "session_id": "session:`019e72d1-1ab3-79f2-aaec-a275e7b3c01f`",
-      "turn_id": "turn:019e72d1_1ab3_79f2_aaec_a275e7b3c01f__4b8194423fd5c7b3__seq_000003",
-      "previous_assistant_turn_id": "turn:019e72d1_1ab3_79f2_aaec_a275e7b3c01f__4b8194423fd5c7b3__seq_000002",
-      "label_family": "correction",
-      "target": "wrong_output",
-      "weak_label": "correction",
-      "weak_confidence": 0.74,
-      "weak_sources": [
-        "correction:wrong_output"
-      ],
-      "evidence_paths": [
-        "turn:019e72d1_1ab3_79f2_aaec_a275e7b3c01f__4b8194423fd5c7b3__seq_000003"
-      ],
-      "excerpt": "You are implementing final review fixes in /Users/necmttn/Projects/ax/.worktrees/local-agent-providers.\n\nContext:\n- You are not alone in the codebase. Do not revert changes by others.\n- The branch implements local provider transcript support. Final review found five Important gaps that must be fixed before completion.\n- Work in the relevant files only. Commit all fixes in one commit with message `fix: complete local provider integration`.\n\nFix requirements:\n\n1. Provider stage dependencies:\n- `src/ingest/derive-signals.ts` currently has `signalsStage.meta.deps` lacking `pi`, `opencode`, `cursor",
-      "previous_assistant_excerpt": "# AGENTS.md instructions for /Users/necmttn/Projects/ax\n\n<INSTRUCTIONS>\n# CLAUDE.md\n\nGuidance for Claude Code and other AI assistants working in this repo.\n\n## What this is\n\n`ax` - local taste & telemetry graph for AI coding agents. Ingests Claude Code transcripts (`~/.claude/projects/`) + Codex transcripts (`~/.codex/sessions/`) + installed skills (`~/.claude/skills/`, `~/.agents/skills/`, plugin caches) into a dedicated SurrealDB instance. CLI surfaces \"what skills/tools you actually use\" on demand.\n\n## Stack\n\n- **Runtime**: bun ≥ 1.3\n- **Language**: TypeScript (strict, `module: preserve`, `",
-      "review_status": "pending",
-      "rationale": "",
-      "reviewer": ""
-    },
-    {
-      "candidate_id": "tlm__verification__628cd18d9f16832b",
-      "subject_id": "turn:019e5cb7_7c5c_7051_98a6_00d7727f09d8__cd5a8f8676f01410__seq_000003",
-      "session_id": "session:`019e5cb7-7c5c-7051-98a6-00d7727f09d8`",
-      "turn_id": "turn:019e5cb7_7c5c_7051_98a6_00d7727f09d8__cd5a8f8676f01410__seq_000003",
-      "previous_assistant_turn_id": "turn:019e5cb7_7c5c_7051_98a6_00d7727f09d8__cd5a8f8676f01410__seq_000002",
-      "label_family": "verification",
-      "target": "verification_demand",
-      "weak_label": "verification",
-      "weak_confidence": 0.84,
-      "weak_sources": [
-        "verification:demand"
-      ],
-      "evidence_paths": [
-        "turn:019e5cb7_7c5c_7051_98a6_00d7727f09d8__cd5a8f8676f01410__seq_000003"
-      ],
-      "excerpt": "You are implementing Task 1 from an approved plan in /Users/necmttn/Projects/apps. You are not alone in the codebase: the worktree is dirty, including files in this area. Do not revert or overwrite unrelated edits. Own only these files for this task: apps/ailifestory/api/src/mobile/handlers.ts and apps/ailifestory/api/src/mobile/handlers.test.ts.\n\nRepo conventions: default to Bun. Use `bun run test` from apps/ailifestory/api for tests. Do not use npm/yarn/pnpm. Use apply_patch for manual edits.\n\nFeature context: The tap-to-record async flow currently generates the next question from only previ",
-      "previous_assistant_excerpt": "# AGENTS.md instructions for /Users/necmttn/Projects/apps\n\n<INSTRUCTIONS>\n\nDefault to using Bun instead of Node.js.\n\n- Use `bun <file>` instead of `node <file>` or `ts-node <file>`\n- Use `bun test` instead of `jest` or `vitest`\n- Use `bun build <file.html|file.ts|file.css>` instead of `webpack` or `esbuild`\n- Use `bun install` instead of `npm install` or `yarn install` or `pnpm install`\n- Use `bun run <script>` instead of `npm run <script>` or `yarn run <script>` or `pnpm run <script>`\n- Use `bunx <package> <command>` instead of `npx <package> <command>`\n- Bun automatically loads .env, so don'",
-      "review_status": "pending",
-      "rationale": "",
-      "reviewer": ""
-    },
-    {
-      "candidate_id": "tlm__direction__142b88c73a0b4a37",
-      "subject_id": "turn:019e747a_dee0_7171_b92d_99167cebe524__7715bad8e9124a64__seq_000003",
-      "session_id": "session:`019e747a-dee0-7171-b92d-99167cebe524`",
-      "turn_id": "turn:019e747a_dee0_7171_b92d_99167cebe524__7715bad8e9124a64__seq_000003",
-      "previous_assistant_turn_id": "turn:019e747a_dee0_7171_b92d_99167cebe524__7715bad8e9124a64__seq_000002",
-      "label_family": "direction",
-      "target": "stated_preference",
-      "weak_label": "direction",
-      "weak_confidence": 0.7,
-      "weak_sources": [
-        "intent:preference"
-      ],
-      "evidence_paths": [
-        "turn:019e747a_dee0_7171_b92d_99167cebe524__7715bad8e9124a64__seq_000003"
-      ],
-      "excerpt": "Final re-review after README CLI reference fix in worktree /Users/necmttn/Projects/ax/.worktrees/gist-session-sharing.\n\nDo not edit files. Review only.\n\nPrevious final-review blocker:\n- README CLI shape omitted `share`, causing `bun run check:cli-reference` to fail.\n\nFix:\n- Commit `fbfa4c1 docs: list session share command` adds `axctl share <session-id>` to README CLI shape.\n- `bun run check:cli-reference` now passes.\n- Targeted suite passed: `bun test src/share/redact.test.ts src/share/*.test.ts src/cli/share.test.ts src/queries/session-detail.test.ts site/app/lib/session-share.test.ts` (53 t",
-      "previous_assistant_excerpt": "# AGENTS.md instructions for /Users/necmttn/Projects/ax\n\n<INSTRUCTIONS>\n# CLAUDE.md\n\nGuidance for Claude Code and other AI assistants working in this repo.\n\n## What this is\n\n`ax` - local taste & telemetry graph for AI coding agents. Ingests Claude Code transcripts (`~/.claude/projects/`) + Codex transcripts (`~/.codex/sessions/`) + installed skills (`~/.claude/skills/`, `~/.agents/skills/`, plugin caches) into a dedicated SurrealDB instance. CLI surfaces \"what skills/tools you actually use\" on demand.\n\n## Stack\n\n- **Runtime**: bun ≥ 1.3\n- **Language**: TypeScript (strict, `module: preserve`, `",
-      "review_status": "pending",
-      "rationale": "",
-      "reviewer": ""
-    },
-    {
-      "candidate_id": "tlm__approval_or_rejection__ed0c05aeda2f33ee",
-      "subject_id": "turn:019e7c67_9137_77e1_8942_3ad9df5e6308__1a8a78d9ecccb867__seq_001165",
-      "session_id": "session:`019e7c67-9137-77e1-8942-3ad9df5e6308`",
-      "turn_id": "turn:019e7c67_9137_77e1_8942_3ad9df5e6308__1a8a78d9ecccb867__seq_001165",
-      "previous_assistant_turn_id": "turn:019e7c67_9137_77e1_8942_3ad9df5e6308__1a8a78d9ecccb867__seq_001164",
-      "label_family": "approval_or_rejection",
-      "target": "approval",
-      "weak_label": "approval_or_rejection",
-      "weak_confidence": 0.78,
-      "weak_sources": [
-        "approval_or_rejection:approval"
-      ],
-      "evidence_paths": [
-        "turn:019e7c67_9137_77e1_8942_3ad9df5e6308__1a8a78d9ecccb867__seq_001165"
-      ],
-      "excerpt": "approved",
-      "previous_assistant_excerpt": "<turn_aborted>\nThe user interrupted the previous turn on purpose. Any running unified exec processes may still be running in the background. If any tools/commands were aborted, they may have partially executed.\n</turn_aborted>",
       "review_status": "pending",
       "rationale": "",
       "reviewer": ""
@@ -940,11 +260,11 @@
       "reviewer": ""
     },
     {
-      "candidate_id": "tlm__verification__62cfa1918cbf81a",
-      "subject_id": "turn:019e7284_5640_79f1_aa8e_e23776411ce9__d51f8587021cb69b__seq_000003",
-      "session_id": "session:`019e7284-5640-79f1-aa8e-e23776411ce9`",
-      "turn_id": "turn:019e7284_5640_79f1_aa8e_e23776411ce9__d51f8587021cb69b__seq_000003",
-      "previous_assistant_turn_id": "turn:019e7284_5640_79f1_aa8e_e23776411ce9__d51f8587021cb69b__seq_000002",
+      "candidate_id": "tlm__verification__5e6d5464f2892b82",
+      "subject_id": "turn:019e73a6_adfd_72f0_b9fb_8fd338f1a3b3__4169c10262f8f275__seq_000072",
+      "session_id": "session:`019e73a6-adfd-72f0-b9fb-8fd338f1a3b3`",
+      "turn_id": "turn:019e73a6_adfd_72f0_b9fb_8fd338f1a3b3__4169c10262f8f275__seq_000072",
+      "previous_assistant_turn_id": "turn:019e73a6_adfd_72f0_b9fb_8fd338f1a3b3__4169c10262f8f275__seq_000071",
       "label_family": "verification",
       "target": "verification_demand",
       "weak_label": "verification",
@@ -953,19 +273,20 @@
         "verification:demand"
       ],
       "evidence_paths": [
-        "turn:019e7284_5640_79f1_aa8e_e23776411ce9__d51f8587021cb69b__seq_000003"
+        "turn:019e73a6_adfd_72f0_b9fb_8fd338f1a3b3__4169c10262f8f275__seq_000072"
       ],
-      "excerpt": "You are implementing Task 3 from the approved plan in /Users/necmttn/Projects/ax/.worktrees/local-agent-providers.\n\nContext:\n- You are not alone in the codebase. Do not revert changes by others.\n- Task 1 and Task 2 are already committed. Use the new `src/ingest/provider-events.ts` helpers.\n- Work only in Task 3 files unless tests require a minimal adjacent fixture update.\n\nTask 3: Claude And Codex Dual-Write Provider Events\n\nFiles you own:\n- Modify: `src/ingest/transcripts.ts`\n- Modify: `src/ingest/transcripts.test.ts`\n- Modify: `src/ingest/codex.ts`\n- Modify: `src/ingest/codex.test.ts`\n- Modi",
-      "previous_assistant_excerpt": "# AGENTS.md instructions for /Users/necmttn/Projects/ax\n\n<INSTRUCTIONS>\n# CLAUDE.md\n\nGuidance for Claude Code and other AI assistants working in this repo.\n\n## What this is\n\n`ax` - local taste & telemetry graph for AI coding agents. Ingests Claude Code transcripts (`~/.claude/projects/`) + Codex transcripts (`~/.codex/sessions/`) + installed skills (`~/.claude/skills/`, `~/.agents/skills/`, plugin caches) into a dedicated SurrealDB instance. CLI surfaces \"what skills/tools you actually use\" on demand.\n\n## Stack\n\n- **Runtime**: bun ≥ 1.3\n- **Language**: TypeScript (strict, `module: preserve`, `",
+      "excerpt": "Spec review requested changes for Task 1.\n\nFinding:\n- `src/share/artifact.test.ts` does not verify deterministic defaults from `minimalShareArtifact`: `exported_at`, `ax_version`, zeroed `stats`, empty `timeline/files/graph`, empty `derived`, and `redactions { applied: false, rules: [] }`.\n\nPlease update the Task 1 tests to cover these defaults, run `bun test src/share/artifact.test.ts`, and commit the fix. Do not touch unrelated files.\n\nFinal response format:\n- Status\n- Summary\n- Tests\n- Commit SHA",
+      "previous_assistant_excerpt": "Status: DONE\n\nSummary of changes:\n- Added `src/share/artifact.ts` with V1 share artifact types, minimal artifact builder, and runtime validation.\n- Added `src/share/artifact.test.ts` with the required minimal artifact and unsupported schema version tests.\n- Committed as `0208826`.\n\nTests run and results:\n- Red: `bun test src/share/artifact.test.ts` failed because `./artifact.ts` was missing.\n- Green: `bun test src/share/artifact.test.ts` passed: 2 pass, 0 fail.\n- Final verification: `bun test src/share/artifact.test.ts` passed: 2 pass, 0 fail.\n\nCommit SHA:\n- `0208826`\n\nConcerns:\n- None. Full `",
       "review_status": "pending",
       "rationale": "",
       "reviewer": ""
     },
     {
-      "candidate_id": "tlm__direction__14d928b40658b673",
-      "subject_id": "turn:c5da4876_a2ce_4862_83ba_2c521acc7694__f9c0c1f21e149989__seq_002052",
-      "session_id": "session:`c5da4876-a2ce-4862-83ba-2c521acc7694`",
-      "turn_id": "turn:c5da4876_a2ce_4862_83ba_2c521acc7694__f9c0c1f21e149989__seq_002052",
+      "candidate_id": "tlm__direction__12da307a3125df5d",
+      "subject_id": "turn:019e7427_b6e7_7e01_9cd9_3a4806a565f7__eec16813a3239797__seq_000572",
+      "session_id": "session:`019e7427-b6e7-7e01-9cd9-3a4806a565f7`",
+      "turn_id": "turn:019e7427_b6e7_7e01_9cd9_3a4806a565f7__eec16813a3239797__seq_000572",
+      "previous_assistant_turn_id": "turn:019e7427_b6e7_7e01_9cd9_3a4806a565f7__eec16813a3239797__seq_000571",
       "label_family": "direction",
       "target": "stated_preference",
       "weak_label": "direction",
@@ -974,19 +295,19 @@
         "intent:preference"
       ],
       "evidence_paths": [
-        "turn:c5da4876_a2ce_4862_83ba_2c521acc7694__f9c0c1f21e149989__seq_002052"
+        "turn:019e7427_b6e7_7e01_9cd9_3a4806a565f7__eec16813a3239797__seq_000572"
       ],
-      "excerpt": "i run ax ingest ax on  docs/monorepo-migration-plan:main [$?⇕] is 📦 v0.5.0 via 🥟 v1.3.10 on ☁️  (us-east-1) on ☁️  necmettin.karakaya@gmail.com took 12s\n❯ ax ingest --since 1\naxctl error: 46577 |   try {\n46578 |     await db.close();\n46579 |   } catch {}\n46580 | }), wrap = (db) => ({\n46581 |   query: (sql, bindings) => exports_Effect.tryPromise({\n46582 |     catch: (err) => new DbError({\n                            ^\nerror: Transaction conflict: Resource busy. This transaction can be retried\n operation: \"query\",\n       sql: \"UPSERT agent_provider:`codex` MERGE { name: \\\"codex\\\", display_nam",
+      "excerpt": "can we take advantage of graph db here?",
+      "previous_assistant_excerpt": "I see three viable approaches.\n\nRecommended: **hybrid local-first analysis**\n- Run heuristics over every user + assistant turn.\n- Store labels like `sentiment`, `interaction_act`, `correction_type`, `confidence`, `reasons`.\n- Use optional LLM only for low-confidence or important turns.\n- Best fit because it is cheap, replayable, debuggable, and won’t make ingest dependent on network/model calls.\n\nAlternative 1: **heuristics only**\n- Extend `intent_kind`, `ask_outcome`, and `user_message_ngram`.\n- Fast and simple.\n- But weak for semantic meaning like “this sounds disappointed but does not conta",
       "review_status": "pending",
       "rationale": "",
       "reviewer": ""
     },
     {
-      "candidate_id": "tlm__approval_or_rejection__f46670009149ee04",
-      "subject_id": "turn:019e791a_19b4_7352_98da_e1b80bdea61f__8c23c3d22aedbf9b__seq_001685",
-      "session_id": "session:`019e791a-19b4-7352-98da-e1b80bdea61f`",
-      "turn_id": "turn:019e791a_19b4_7352_98da_e1b80bdea61f__8c23c3d22aedbf9b__seq_001685",
-      "previous_assistant_turn_id": "turn:019e791a_19b4_7352_98da_e1b80bdea61f__8c23c3d22aedbf9b__seq_001684",
+      "candidate_id": "tlm__approval_or_rejection__531a1d0d3ee9817d",
+      "subject_id": "turn:5845d8a3_73bb_42c1_8a89_c1a3441609b9__761efe5bcbb8f70c__seq_000493",
+      "session_id": "session:`5845d8a3-73bb-42c1-8a89-c1a3441609b9`",
+      "turn_id": "turn:5845d8a3_73bb_42c1_8a89_c1a3441609b9__761efe5bcbb8f70c__seq_000493",
       "label_family": "approval_or_rejection",
       "target": "approval",
       "weak_label": "approval_or_rejection",
@@ -995,158 +316,9 @@
         "approval_or_rejection:approval"
       ],
       "evidence_paths": [
-        "turn:019e791a_19b4_7352_98da_e1b80bdea61f__8c23c3d22aedbf9b__seq_001685"
+        "turn:5845d8a3_73bb_42c1_8a89_c1a3441609b9__761efe5bcbb8f70c__seq_000493"
       ],
-      "excerpt": "I want to sort all these stashes, don't not lose work if we already have it. Uh I don't want any stashed work lost, so merge it as possible.",
-      "previous_assistant_excerpt": "Yes. There are 5 stashes still present:\n\n```text\nstash@{0}: post-rebase residue before restoring dirty tree\nstash@{1}: pre-rebase local dirty tree before b3ed711\nstash@{2}: autostash\nstash@{3}: feat-WIP before port-to-stage-registry\nstash@{4}: WIP on main: fix dashboard subagent transcript\n```\n\nQuick read:\n\n- `stash@{0}`: one goal doc, `112` lines. Likely residue, needs review before drop.\n- `stash@{1}`: big mixed stash, `25` files. Includes work we already committed plus some studio/share/classifier fixture changes.\n- `stash@{2}`: older big autostash, `26` files. Includes schema/package/CLI/c",
-      "review_status": "pending",
-      "rationale": "",
-      "reviewer": ""
-    },
-    {
-      "candidate_id": "tlm__correction__767734ec3ddfc39e",
-      "subject_id": "turn:019e73ad_9dce_74e2_befa_07b50c23bbc3__6c640c5d218330b0__seq_000003",
-      "session_id": "session:`019e73ad-9dce-74e2-befa-07b50c23bbc3`",
-      "turn_id": "turn:019e73ad_9dce_74e2_befa_07b50c23bbc3__6c640c5d218330b0__seq_000003",
-      "previous_assistant_turn_id": "turn:019e73ad_9dce_74e2_befa_07b50c23bbc3__6c640c5d218330b0__seq_000002",
-      "label_family": "correction",
-      "target": "wrong_output",
-      "weak_label": "correction",
-      "weak_confidence": 0.74,
-      "weak_sources": [
-        "correction:wrong_output"
-      ],
-      "evidence_paths": [
-        "turn:019e73ad_9dce_74e2_befa_07b50c23bbc3__6c640c5d218330b0__seq_000003"
-      ],
-      "excerpt": "Implement Task 2 of the Gist-backed session sharing plan in the isolated worktree.\n\nWorkspace: /Users/necmttn/Projects/ax/.worktrees/gist-session-sharing\nBranch: feat/gist-session-sharing\n\nImportant:\n- Use apply_patch for manual edits.\n- Do not revert or touch unrelated files.\n- You are not alone in the codebase; accommodate existing changes.\n- Follow TDD: write failing test, run it, implement, run targeted tests, commit.\n- Full `bun run typecheck` has pre-existing unrelated failures; do not fix them.\n\nTask 2: Redaction Module\n\nFiles:\n- Create: `src/share/redact.ts`\n- Create test: `src/share/r",
-      "previous_assistant_excerpt": "# AGENTS.md instructions for /Users/necmttn/Projects/ax\n\n<INSTRUCTIONS>\n# CLAUDE.md\n\nGuidance for Claude Code and other AI assistants working in this repo.\n\n## What this is\n\n`ax` - local taste & telemetry graph for AI coding agents. Ingests Claude Code transcripts (`~/.claude/projects/`) + Codex transcripts (`~/.codex/sessions/`) + installed skills (`~/.claude/skills/`, `~/.agents/skills/`, plugin caches) into a dedicated SurrealDB instance. CLI surfaces \"what skills/tools you actually use\" on demand.\n\n## Stack\n\n- **Runtime**: bun ≥ 1.3\n- **Language**: TypeScript (strict, `module: preserve`, `",
-      "review_status": "pending",
-      "rationale": "",
-      "reviewer": ""
-    },
-    {
-      "candidate_id": "tlm__verification__631f003c73b6e10e",
-      "subject_id": "turn:019e7334_0e46_7230_a304_327ce2dfd6c0__b9e1520f2b36b204__seq_000274",
-      "session_id": "session:`019e7334-0e46-7230-a304-327ce2dfd6c0`",
-      "turn_id": "turn:019e7334_0e46_7230_a304_327ce2dfd6c0__b9e1520f2b36b204__seq_000274",
-      "previous_assistant_turn_id": "turn:019e7334_0e46_7230_a304_327ce2dfd6c0__b9e1520f2b36b204__seq_000273",
-      "label_family": "verification",
-      "target": "verification_demand",
-      "weak_label": "verification",
-      "weak_confidence": 0.84,
-      "weak_sources": [
-        "verification:demand"
-      ],
-      "evidence_paths": [
-        "turn:019e7334_0e46_7230_a304_327ce2dfd6c0__b9e1520f2b36b204__seq_000274"
-      ],
-      "excerpt": "<skill>\n<name>superpowers:subagent-driven-development</name>\n<path>/Users/necmttn/.dotfiles/codex/.codex/plugins/cache/openai-curated/superpowers/acdd3141/skills/subagent-driven-development/SKILL.md</path>\n---\nname: subagent-driven-development\ndescription: Use when executing implementation plans with independent tasks in the current session\n---\n\n# Subagent-Driven Development\n\nExecute plan by dispatching fresh subagent per task, with two-stage review after each: spec compliance review first, then code quality review.\n\n**Why subagents:** You delegate tasks to specialized agents with isolated con",
-      "previous_assistant_excerpt": "$superpowers:subagent-driven-development  go",
-      "review_status": "pending",
-      "rationale": "",
-      "reviewer": ""
-    },
-    {
-      "candidate_id": "tlm__direction__1591cba8c9a1ca21",
-      "subject_id": "turn:ad2d466d_0227_419f_b0a8_1bce6ff43d6d__379cc4290e649f3d__seq_000419",
-      "session_id": "session:`ad2d466d-0227-419f-b0a8-1bce6ff43d6d`",
-      "turn_id": "turn:ad2d466d_0227_419f_b0a8_1bce6ff43d6d__379cc4290e649f3d__seq_000419",
-      "label_family": "direction",
-      "target": "stated_preference",
-      "weak_label": "direction",
-      "weak_confidence": 0.7,
-      "weak_sources": [
-        "intent:preference"
-      ],
-      "evidence_paths": [
-        "turn:ad2d466d_0227_419f_b0a8_1bce6ff43d6d__379cc4290e649f3d__seq_000419"
-      ],
-      "excerpt": "if i wanna test local build vs the stable in my computer i need alternative one so like ax for stable version which runs longterm i can test against latest updates etc. \nvs dev build which can be disposable db different db location as well. \nso instead of long bun run .dist i can have global one as well .",
-      "review_status": "pending",
-      "rationale": "",
-      "reviewer": ""
-    },
-    {
-      "candidate_id": "tlm__approval_or_rejection__f88811296f87b7ff",
-      "subject_id": "turn:019e76fe_63ff_7303_a98d_7e6210820b04__45ce27a7ae47a0f9__seq_002553",
-      "session_id": "session:`019e76fe-63ff-7303-a98d-7e6210820b04`",
-      "turn_id": "turn:019e76fe_63ff_7303_a98d_7e6210820b04__45ce27a7ae47a0f9__seq_002553",
-      "previous_assistant_turn_id": "turn:019e76fe_63ff_7303_a98d_7e6210820b04__45ce27a7ae47a0f9__seq_002552",
-      "label_family": "approval_or_rejection",
-      "target": "approval",
-      "weak_label": "approval_or_rejection",
-      "weak_confidence": 0.78,
-      "weak_sources": [
-        "approval_or_rejection:approval"
-      ],
-      "evidence_paths": [
-        "turn:019e76fe_63ff_7303_a98d_7e6210820b04__45ce27a7ae47a0f9__seq_002553"
-      ],
-      "excerpt": "I can merge it.",
-      "previous_assistant_excerpt": "Yes, that makes more sense. I added it as an agent-triggered skill.\n\nNew skill:\n- `skills/release-announcement/SKILL.md`\n- Trigger phrases include:\n  - “write release notes”\n  - “draft release announcement”\n  - “prepare changelog”\n  - “release page”\n  - “version page”\n  - “what changed in vX.Y.Z”\n  - “generate announcement for vX.Y.Z”\n  - “explain how we got to this release”\n\nWhat it does:\n- resolves previous tag to release head range\n- inspects all changed files and commits since previous version\n- maps important SHAs/subsystems back to `ax sessions near` and `ax recall`\n- writes a topical an",
-      "review_status": "pending",
-      "rationale": "",
-      "reviewer": ""
-    },
-    {
-      "candidate_id": "tlm__correction__77fb75438e3d49cd",
-      "subject_id": "turn:019e3ed3_139f_7d12_8ce1_9fb21619f986__4dfb169e22af638a__seq_000312",
-      "session_id": "session:`019e3ed3-139f-7d12-8ce1-9fb21619f986`",
-      "turn_id": "turn:019e3ed3_139f_7d12_8ce1_9fb21619f986__4dfb169e22af638a__seq_000312",
-      "previous_assistant_turn_id": "turn:019e3ed3_139f_7d12_8ce1_9fb21619f986__4dfb169e22af638a__seq_000311",
-      "label_family": "correction",
-      "target": "wrong_output",
-      "weak_label": "correction",
-      "weak_confidence": 0.74,
-      "weak_sources": [
-        "correction:wrong_output"
-      ],
-      "evidence_paths": [
-        "turn:019e3ed3_139f_7d12_8ce1_9fb21619f986__4dfb169e22af638a__seq_000312"
-      ],
-      "excerpt": "i think should thats the one source of place to add hook setting. deleting is fine as long as it's tracked by git so it's revertable and tracked in the db?   but agree some stuff might make agent unusable like broken pretool hook etc. that agent won't able to revert the changes directly",
-      "previous_assistant_excerpt": "Got it. The UX is closer to:\n\n```text\n/ax-retro\n  agent reviews evidence\n  authors/backtests cases\n  creates interventions\n  edits hooks/skills\n  enables experiments\n  reports what changed and why\n  schedules/checks next review\n\n/ax-interventions\n  list active changes\n  stop / pause / rollback / mark noisy\n```\n\nSo the user does not manually approve every small step. The command itself grants a bounded mandate.\n\n**Question 18:** What is the default autonomy boundary for `/ax-retro`?\n\nMy recommended answer: **autonomous inside a declared scope, but never silent globally destructive changes**.\n\nD",
-      "review_status": "pending",
-      "rationale": "",
-      "reviewer": ""
-    },
-    {
-      "candidate_id": "tlm__verification__6d94560d589e32d3",
-      "subject_id": "turn:1688d3d6_bdde_4abb_9d65_c8b14ce01684__6246daa634ef96bd__seq_000254",
-      "session_id": "session:`1688d3d6-bdde-4abb-9d65-c8b14ce01684`",
-      "turn_id": "turn:1688d3d6_bdde_4abb_9d65_c8b14ce01684__6246daa634ef96bd__seq_000254",
-      "label_family": "verification",
-      "target": "verification_demand",
-      "weak_label": "verification",
-      "weak_confidence": 0.84,
-      "weak_sources": [
-        "verification:demand"
-      ],
-      "evidence_paths": [
-        "turn:1688d3d6_bdde_4abb_9d65_c8b14ce01684__6246daa634ef96bd__seq_000254"
-      ],
-      "excerpt": "# Simplify: Code Review and Cleanup\n\nReview all changed files for reuse, quality, and efficiency. Fix any issues found.\n\n## Phase 1: Identify Changes\n\nRun `git diff` (or `git diff HEAD` if there are staged changes) to see what changed. If there are no git changes, review the most recently modified files that the user mentioned or that you edited earlier in this conversation.\n\n## Phase 2: Launch Three Review Agents in Parallel\n\nUse the Agent tool to launch all three agents concurrently in a single message. Pass each agent the full diff so it has the complete context.\n\n### Agent 1: Code Reuse Re",
-      "review_status": "pending",
-      "rationale": "",
-      "reviewer": ""
-    },
-    {
-      "candidate_id": "tlm__direction__16a708ccc10ac62a",
-      "subject_id": "turn:7f0627c7_fbc4_4014_8631_b3d43791c471__8b713c8b3f06e809__seq_000031",
-      "session_id": "session:`7f0627c7-fbc4-4014-8631-b3d43791c471`",
-      "turn_id": "turn:7f0627c7_fbc4_4014_8631_b3d43791c471__8b713c8b3f06e809__seq_000031",
-      "label_family": "direction",
-      "target": "stated_preference",
-      "weak_label": "direction",
-      "weak_confidence": 0.7,
-      "weak_sources": [
-        "intent:preference"
-      ],
-      "evidence_paths": [
-        "turn:7f0627c7_fbc4_4014_8631_b3d43791c471__8b713c8b3f06e809__seq_000031"
-      ],
-      "excerpt": "yes please",
+      "excerpt": "ship it.",
       "review_status": "pending",
       "rationale": "",
       "reviewer": ""
@@ -1194,11 +366,11 @@
       "reviewer": ""
     },
     {
-      "candidate_id": "tlm__direction__16bf585afafaae5b",
-      "subject_id": "turn:019e76fe_63ff_7303_a98d_7e6210820b04__45ce27a7ae47a0f9__seq_001122",
+      "candidate_id": "tlm__direction__12e5b9fae572a16c",
+      "subject_id": "turn:019e76fe_63ff_7303_a98d_7e6210820b04__45ce27a7ae47a0f9__seq_000359",
       "session_id": "session:`019e76fe-63ff-7303-a98d-7e6210820b04`",
-      "turn_id": "turn:019e76fe_63ff_7303_a98d_7e6210820b04__45ce27a7ae47a0f9__seq_001122",
-      "previous_assistant_turn_id": "turn:019e76fe_63ff_7303_a98d_7e6210820b04__45ce27a7ae47a0f9__seq_001121",
+      "turn_id": "turn:019e76fe_63ff_7303_a98d_7e6210820b04__45ce27a7ae47a0f9__seq_000359",
+      "previous_assistant_turn_id": "turn:019e76fe_63ff_7303_a98d_7e6210820b04__45ce27a7ae47a0f9__seq_000358",
       "label_family": "direction",
       "target": "stated_preference",
       "weak_label": "direction",
@@ -1207,74 +379,30 @@
         "intent:preference"
       ],
       "evidence_paths": [
-        "turn:019e76fe_63ff_7303_a98d_7e6210820b04__45ce27a7ae47a0f9__seq_001122"
+        "turn:019e76fe_63ff_7303_a98d_7e6210820b04__45ce27a7ae47a0f9__seq_000359"
       ],
-      "excerpt": "alright lets do all that",
-      "previous_assistant_excerpt": "Next, in order:\n\n1. Close stale issues #88 and #90 manually. Their work merged via #100 and #97, but GitHub didn’t auto-close them.\n2. Merge release PR #82. It is clean and `verify` is passing, so it’s the obvious release cut.\n3. Update/rebase local working branches after the release. Your current checkout is dirty and still on `issue-87-provider-parity-ci-fix`, so I’d avoid touching it until we decide what to preserve.\n4. Start the next backlog item: #86, Effect JSON-boundary Schema decoders and cleanup of the recurring typecheck advisories. That warning noise showed up in every verification ",
+      "excerpt": "You put P open code and cursor in a single row, it's kinda bothers me. I want to be able to see actually how we where we are getting those data location path, how we are ingesting those. I want that to be clear, visible. They are one of the harness we are supporting. They are no less than Claude or Codex.",
+      "previous_assistant_excerpt": "Here’s the current documentation added for the schema/read-path taxonomy:\n\n[docs/graph-db-taxonomy.md](/Users/necmttn/Projects/ax/docs/graph-db-taxonomy.md)\n\nI also updated the related current docs:\n\n[docs/insights-cli-reference.md](/Users/necmttn/Projects/ax/docs/insights-cli-reference.md)\n\n[docs/how-ax-sees-your-work.mdx](/Users/necmttn/Projects/ax/docs/how-ax-sees-your-work.mdx)\n\n[docs/graph-insight-goal-notes.md](/Users/necmttn/Projects/ax/docs/graph-insight-goal-notes.md)\n\n[docs/repo-file-change-graph-design.md](/Users/necmttn/Projects/ax/docs/repo-file-change-graph-design.md)",
       "review_status": "pending",
       "rationale": "",
       "reviewer": ""
     },
     {
-      "candidate_id": "tlm__correction__85b67afbb7fdd584",
-      "subject_id": "turn:019e5eed_5168_7323_b1cf_944ab9f3165a__f23dd1110489c2bf__seq_000003",
-      "session_id": "session:`019e5eed-5168-7323-b1cf-944ab9f3165a`",
-      "turn_id": "turn:019e5eed_5168_7323_b1cf_944ab9f3165a__f23dd1110489c2bf__seq_000003",
-      "previous_assistant_turn_id": "turn:019e5eed_5168_7323_b1cf_944ab9f3165a__f23dd1110489c2bf__seq_000002",
-      "label_family": "correction",
-      "target": "wrong_output",
-      "weak_label": "correction",
-      "weak_confidence": 0.74,
+      "candidate_id": "tlm__approval_or_rejection__93c82af3732d1026",
+      "subject_id": "turn:11fb5aad_2d45_45ef_9f94_7738ce250327__ab7c9d8b15cbcb04__seq_001430",
+      "session_id": "session:`11fb5aad-2d45-45ef-9f94-7738ce250327`",
+      "turn_id": "turn:11fb5aad_2d45_45ef_9f94_7738ce250327__ab7c9d8b15cbcb04__seq_001430",
+      "label_family": "approval_or_rejection",
+      "target": "approval",
+      "weak_label": "approval_or_rejection",
+      "weak_confidence": 0.78,
       "weak_sources": [
-        "correction:wrong_output"
+        "approval_or_rejection:approval"
       ],
       "evidence_paths": [
-        "turn:019e5eed_5168_7323_b1cf_944ab9f3165a__f23dd1110489c2bf__seq_000003"
+        "turn:11fb5aad_2d45_45ef_9f94_7738ce250327__ab7c9d8b15cbcb04__seq_001430"
       ],
-      "excerpt": "Implement Task 4 from docs/superpowers/plans/2026-05-25-ailifestory-hybrid-soft-testing.md in /Users/necmttn/Projects/apps.\n\nContext:\n- Repo uses Bun. Follow AGENTS.md.\n- Worktree is dirty with unrelated recording-lifecycle changes. You are not alone in the codebase. Do not revert or modify unrelated files.\n- Owned files for this task:\n  - apps/ailifestory/web/src/routes/admin/lab/index.tsx (create)\n  - apps/ailifestory/web/src/routes/admin/route.tsx\n  - apps/ailifestory/web/src/routeTree.gen.ts\n- Backend RPC `dev_scenario_reset` and `dev_scenario_get` has already been implemented/committed in",
-      "previous_assistant_excerpt": "# AGENTS.md instructions for /Users/necmttn/Projects/apps\n\n<INSTRUCTIONS>\n\nDefault to using Bun instead of Node.js.\n\n- Use `bun <file>` instead of `node <file>` or `ts-node <file>`\n- Use `bun test` instead of `jest` or `vitest`\n- Use `bun build <file.html|file.ts|file.css>` instead of `webpack` or `esbuild`\n- Use `bun install` instead of `npm install` or `yarn install` or `pnpm install`\n- Use `bun run <script>` instead of `npm run <script>` or `yarn run <script>` or `pnpm run <script>`\n- Use `bunx <package> <command>` instead of `npx <package> <command>`\n- Bun automatically loads .env, so don'",
-      "review_status": "pending",
-      "rationale": "",
-      "reviewer": ""
-    },
-    {
-      "candidate_id": "tlm__verification__7bb68467d4d2ef37",
-      "subject_id": "turn:1688d3d6_bdde_4abb_9d65_c8b14ce01684__6246daa634ef96bd__seq_000815",
-      "session_id": "session:`1688d3d6-bdde-4abb-9d65-c8b14ce01684`",
-      "turn_id": "turn:1688d3d6_bdde_4abb_9d65_c8b14ce01684__6246daa634ef96bd__seq_000815",
-      "label_family": "verification",
-      "target": "verification_demand",
-      "weak_label": "verification",
-      "weak_confidence": 0.84,
-      "weak_sources": [
-        "verification:demand"
-      ],
-      "evidence_paths": [
-        "turn:1688d3d6_bdde_4abb_9d65_c8b14ce01684__6246daa634ef96bd__seq_000815"
-      ],
-      "excerpt": "# Simplify: Code Review and Cleanup\n\nReview all changed files for reuse, quality, and efficiency. Fix any issues found.\n\n## Phase 1: Identify Changes\n\nRun `git diff` (or `git diff HEAD` if there are staged changes) to see what changed. If there are no git changes, review the most recently modified files that the user mentioned or that you edited earlier in this conversation.\n\n## Phase 2: Launch Three Review Agents in Parallel\n\nUse the Agent tool to launch all three agents concurrently in a single message. Pass each agent the full diff so it has the complete context.\n\n### Agent 1: Code Reuse Re",
-      "review_status": "pending",
-      "rationale": "",
-      "reviewer": ""
-    },
-    {
-      "candidate_id": "tlm__direction__1741de7aca049404",
-      "subject_id": "turn:019e3ed3_139f_7d12_8ce1_9fb21619f986__4dfb169e22af638a__seq_000306",
-      "session_id": "session:`019e3ed3-139f-7d12-8ce1-9fb21619f986`",
-      "turn_id": "turn:019e3ed3_139f_7d12_8ce1_9fb21619f986__4dfb169e22af638a__seq_000306",
-      "previous_assistant_turn_id": "turn:019e3ed3_139f_7d12_8ce1_9fb21619f986__4dfb169e22af638a__seq_000305",
-      "label_family": "direction",
-      "target": "stated_preference",
-      "weak_label": "direction",
-      "weak_confidence": 0.7,
-      "weak_sources": [
-        "intent:preference"
-      ],
-      "evidence_paths": [
-        "turn:019e3ed3_139f_7d12_8ce1_9fb21619f986__4dfb169e22af638a__seq_000306"
-      ],
-      "excerpt": "i want this almost autonomous so all what user needs to is endup beign running the command so agent can go  and create bunch of   interventions and create new hooks/ skills and test them optimize then reports the user things he changed base on x y z  will report in a week and meanwhile if it's bothers the usage just call \"/ax-intervention or similar to stop bad experiments not working experiments. ( the new experiments should back tested if possible from previous sessions)",
-      "previous_assistant_excerpt": "Yes. That’s the actual product loop.\n\nI’d separate names:\n\n- **`axctl doctor` / `/ax-doctor`**: setup/readiness check. “Is evidence collection healthy?”\n- **`axctl retrospective` / `/ax-retro`**: weekly improvement loop. “What did agents do well/badly, and what should change?”\n\nYour described feature is **Agent Retrospective**, not Doctor.\n\nShape:\n\n```text\nAgent Retrospective\n  cadence: weekly\n  scope: global | repository | checkout | harness\n  evidence window: last 7d / 30d\n  outputs:\n    wins\n    regressions\n    noisy hooks\n    helpful hooks\n    repeated corrections\n    recurring tool failur",
+      "excerpt": "lets merge it.",
       "review_status": "pending",
       "rationale": "",
       "reviewer": ""
@@ -1302,11 +430,11 @@
       "reviewer": ""
     },
     {
-      "candidate_id": "tlm__verification__8538d69695b16960",
-      "subject_id": "turn:019e77a1_4075_7b42_a12f_20fd268ea9ce__df37265b80edd341__seq_000003",
-      "session_id": "session:`019e77a1-4075-7b42-a12f-20fd268ea9ce`",
-      "turn_id": "turn:019e77a1_4075_7b42_a12f_20fd268ea9ce__df37265b80edd341__seq_000003",
-      "previous_assistant_turn_id": "turn:019e77a1_4075_7b42_a12f_20fd268ea9ce__df37265b80edd341__seq_000002",
+      "candidate_id": "tlm__verification__9846497451a214f0",
+      "subject_id": "turn:019e7334_0e46_7230_a304_327ce2dfd6c0__b9e1520f2b36b204__seq_000798",
+      "session_id": "session:`019e7334-0e46-7230-a304-327ce2dfd6c0`",
+      "turn_id": "turn:019e7334_0e46_7230_a304_327ce2dfd6c0__b9e1520f2b36b204__seq_000798",
+      "previous_assistant_turn_id": "turn:019e7334_0e46_7230_a304_327ce2dfd6c0__b9e1520f2b36b204__seq_000797",
       "label_family": "verification",
       "target": "verification_demand",
       "weak_label": "verification",
@@ -1315,19 +443,19 @@
         "verification:demand"
       ],
       "evidence_paths": [
-        "turn:019e77a1_4075_7b42_a12f_20fd268ea9ce__df37265b80edd341__seq_000003"
+        "turn:019e7334_0e46_7230_a304_327ce2dfd6c0__b9e1520f2b36b204__seq_000798"
       ],
-      "excerpt": "You are working in repo /Users/necmttn/Projects/ax on GitHub issue https://github.com/Necmttn/ax/issues/92: \"Expose token and model quality by provider\".\n\nGoal: implement the issue end-to-end, verify, commit, push a branch, and open a PR linked to #92.\n\nContext:\n- Token/model rows use session_token_usage, used_model, agent_used_model, agent_model.\n- Codex has explicit token_count events in src/ingest/codex.ts.\n- Pi has explicit usage fields in src/ingest/pi.ts.\n- Claude/OpenCode/Cursor may use estimates from session-health when explicit counters are absent.\n- Cost read surfaces include src/das",
-      "previous_assistant_excerpt": "# AGENTS.md instructions for /Users/necmttn/Projects/ax\n\n<INSTRUCTIONS>\n# CLAUDE.md\n\nGuidance for Claude Code and other AI assistants working in this repo.\n\n## What this is\n\n`ax` - local taste & telemetry graph for AI coding agents. Ingests Claude Code transcripts (`~/.claude/projects/`) + Codex transcripts (`~/.codex/sessions/`) + installed skills (`~/.claude/skills/`, `~/.agents/skills/`, plugin caches) into a dedicated SurrealDB instance. CLI surfaces \"what skills/tools you actually use\" on demand.\n\n## Stack\n\n- **Runtime**: bun ≥ 1.3\n- **Language**: TypeScript (strict, `module: preserve`, `",
+      "excerpt": "thats ugly as fuck did you check the reference link i gave you?",
+      "previous_assistant_excerpt": "Opened a local UI preview:\n\n```text\n/tmp/ax-session-share-preview.html\n```\n\nThis uses the dry-run artifact and approximates the hosted share page locally. No Gist was created.",
       "review_status": "pending",
       "rationale": "",
       "reviewer": ""
     },
     {
-      "candidate_id": "tlm__direction__17cf00e4ba45adea",
-      "subject_id": "turn:8b587d52_08a0_4b29_9ccb_d3221da0f16e__4500c528f7393679__seq_000912",
-      "session_id": "session:`8b587d52-08a0-4b29-9ccb-d3221da0f16e`",
-      "turn_id": "turn:8b587d52_08a0_4b29_9ccb_d3221da0f16e__4500c528f7393679__seq_000912",
+      "candidate_id": "tlm__direction__14d928b40658b673",
+      "subject_id": "turn:c5da4876_a2ce_4862_83ba_2c521acc7694__f9c0c1f21e149989__seq_002052",
+      "session_id": "session:`c5da4876-a2ce-4862-83ba-2c521acc7694`",
+      "turn_id": "turn:c5da4876_a2ce_4862_83ba_2c521acc7694__f9c0c1f21e149989__seq_002052",
       "label_family": "direction",
       "target": "stated_preference",
       "weak_label": "direction",
@@ -1336,9 +464,29 @@
         "intent:preference"
       ],
       "evidence_paths": [
-        "turn:8b587d52_08a0_4b29_9ccb_d3221da0f16e__4500c528f7393679__seq_000912"
+        "turn:c5da4876_a2ce_4862_83ba_2c521acc7694__f9c0c1f21e149989__seq_002052"
       ],
-      "excerpt": "https://necmttn.com/services can we add similar animations like this?   /Users/necmttn/Projects/necmttn.com",
+      "excerpt": "i run ax ingest ax on  docs/monorepo-migration-plan:main [$?⇕] is 📦 v0.5.0 via 🥟 v1.3.10 on ☁️  (us-east-1) on ☁️  necmettin.karakaya@gmail.com took 12s\n❯ ax ingest --since 1\naxctl error: 46577 |   try {\n46578 |     await db.close();\n46579 |   } catch {}\n46580 | }), wrap = (db) => ({\n46581 |   query: (sql, bindings) => exports_Effect.tryPromise({\n46582 |     catch: (err) => new DbError({\n                            ^\nerror: Transaction conflict: Resource busy. This transaction can be retried\n operation: \"query\",\n       sql: \"UPSERT agent_provider:`codex` MERGE { name: \\\"codex\\\", display_nam",
+      "review_status": "pending",
+      "rationale": "",
+      "reviewer": ""
+    },
+    {
+      "candidate_id": "tlm__approval_or_rejection__a1f11d608a0b5ab2",
+      "subject_id": "turn:a532c583_183c_4d9b_81ac_7c5a465298cf__8287e931a5fe1499__seq_000875",
+      "session_id": "session:`a532c583-183c-4d9b-81ac-7c5a465298cf`",
+      "turn_id": "turn:a532c583_183c_4d9b_81ac_7c5a465298cf__8287e931a5fe1499__seq_000875",
+      "label_family": "approval_or_rejection",
+      "target": "approval",
+      "weak_label": "approval_or_rejection",
+      "weak_confidence": 0.78,
+      "weak_sources": [
+        "approval_or_rejection:approval"
+      ],
+      "evidence_paths": [
+        "turn:a532c583_183c_4d9b_81ac_7c5a465298cf__8287e931a5fe1499__seq_000875"
+      ],
+      "excerpt": "Alright, can we merge it and can you give me Gandhan brief what was this briefing?",
       "review_status": "pending",
       "rationale": "",
       "reviewer": ""
@@ -1366,11 +514,10 @@
       "reviewer": ""
     },
     {
-      "candidate_id": "tlm__verification__89b19e4b088b12cc",
-      "subject_id": "turn:72f97b36_ac6c_4b37_a926_2712e4bf156f__d3ce108bcf0c2fa5__seq_003142",
-      "session_id": "session:`72f97b36-ac6c-4b37-a926-2712e4bf156f`",
-      "turn_id": "turn:72f97b36_ac6c_4b37_a926_2712e4bf156f__d3ce108bcf0c2fa5__seq_003142",
-      "previous_assistant_turn_id": "turn:72f97b36_ac6c_4b37_a926_2712e4bf156f__d3ce108bcf0c2fa5__seq_003141",
+      "candidate_id": "tlm__verification__b9910c0f2e20d403",
+      "subject_id": "turn:cb251b06_2c99_4fa2_8457_533feb15a890__1e078ba5e3a12d26__seq_000064",
+      "session_id": "session:`cb251b06-2c99-4fa2-8457-533feb15a890`",
+      "turn_id": "turn:cb251b06_2c99_4fa2_8457_533feb15a890__1e078ba5e3a12d26__seq_000064",
       "label_family": "verification",
       "target": "verification_demand",
       "weak_label": "verification",
@@ -1379,20 +526,18 @@
         "verification:demand"
       ],
       "evidence_paths": [
-        "turn:72f97b36_ac6c_4b37_a926_2712e4bf156f__d3ce108bcf0c2fa5__seq_003142"
+        "turn:cb251b06_2c99_4fa2_8457_533feb15a890__1e078ba5e3a12d26__seq_000064"
       ],
-      "excerpt": "<local-command-stdout>Goal set: 1. Corrected design doc — docs/architecture/skill-script-execution.html rewritten to the locked\n  grill output: ScriptRunner naming, opaque token (no TTL), filesystem skills, TypeScript+Bun, the\n  §2 boundary table as the contract, §8 separating the skill/script track from the entity-runtime\n  track.\n\n  2. Execution plan — docs/superpowers/plans/2026-05-20-workbench-skill-script-runtime.md:\n\n  ┌───────┬─────────────────────────────────────────────────────────────────────────────────────┐\n  │ Phase │                                      Delivers                  ",
-      "previous_assistant_excerpt": "<command-name>/goal</command-name>\n            <command-message>goal</command-message>\n            <command-args> 1. Corrected design doc — docs/architecture/skill-script-execution.html rewritten to the locked\n  grill output: ScriptRunner naming, opaque token (no TTL), filesystem skills, TypeScript+Bun, the\n  §2 boundary table as the contract, §8 separating the skill/script track from the entity-runtime\n  track.\n\n  2. Execution plan — docs/superpowers/plans/2026-05-20-workbench-skill-script-runtime.md:\n\n  ┌───────┬────────────────────────────────────────────────────────────────────────────────",
+      "excerpt": "ax handsover to task as tmp task.md to agent with details when user accepts their subagent applies to file with correct references etc.  so applying fixes etc task of their agent. agent is also responsible running lint checks. - probably we could create a lint for these - verify the ax entries in the files we can parse it render it - ?",
       "review_status": "pending",
       "rationale": "",
       "reviewer": ""
     },
     {
-      "candidate_id": "tlm__direction__186b150c7018bf8e",
-      "subject_id": "turn:019e72c0_525b_71e1_a17b_73b0c32b6d1f__153084e386bbabac__seq_000075",
-      "session_id": "session:`019e72c0-525b-71e1-a17b-73b0c32b6d1f`",
-      "turn_id": "turn:019e72c0_525b_71e1_a17b_73b0c32b6d1f__153084e386bbabac__seq_000075",
-      "previous_assistant_turn_id": "turn:019e72c0_525b_71e1_a17b_73b0c32b6d1f__153084e386bbabac__seq_000074",
+      "candidate_id": "tlm__direction__1591cba8c9a1ca21",
+      "subject_id": "turn:ad2d466d_0227_419f_b0a8_1bce6ff43d6d__379cc4290e649f3d__seq_000419",
+      "session_id": "session:`ad2d466d-0227-419f-b0a8-1bce6ff43d6d`",
+      "turn_id": "turn:ad2d466d_0227_419f_b0a8_1bce6ff43d6d__379cc4290e649f3d__seq_000419",
       "label_family": "direction",
       "target": "stated_preference",
       "weak_label": "direction",
@@ -1401,10 +546,29 @@
         "intent:preference"
       ],
       "evidence_paths": [
-        "turn:019e72c0_525b_71e1_a17b_73b0c32b6d1f__153084e386bbabac__seq_000075"
+        "turn:ad2d466d_0227_419f_b0a8_1bce6ff43d6d__379cc4290e649f3d__seq_000419"
       ],
-      "excerpt": "Please re-review Task 6 code quality after fix commit `0995321` in /Users/necmttn/Projects/ax/.worktrees/local-agent-providers. Focus on the prior multi-DB collision issue and any new blocking issue. Do not edit files. Return APPROVED or CHANGES_REQUESTED.",
-      "previous_assistant_excerpt": "CHANGES_REQUESTED\n\n[High] [src/ingest/cursor.ts](/Users/necmttn/Projects/ax/.worktrees/local-agent-providers/src/ingest/cursor.ts:291): Cursor sessions use only the raw conversation `id`, but ingestion scans multiple DBs at [src/ingest/cursor.ts](/Users/necmttn/Projects/ax/.worktrees/local-agent-providers/src/ingest/cursor.ts:429). The same conversation/message ids in two `state.vscdb` files collide and overwrite `session`, `agent_session`, `agent_event`, and `turn` records via [src/ingest/cursor.ts](/Users/necmttn/Projects/ax/.worktrees/local-agent-providers/src/ingest/cursor.ts:387), [src/in",
+      "excerpt": "if i wanna test local build vs the stable in my computer i need alternative one so like ax for stable version which runs longterm i can test against latest updates etc. \nvs dev build which can be disposable db different db location as well. \nso instead of long bun run .dist i can have global one as well .",
+      "review_status": "pending",
+      "rationale": "",
+      "reviewer": ""
+    },
+    {
+      "candidate_id": "tlm__approval_or_rejection__ae83df336147d642",
+      "subject_id": "turn:2651b3f6_3070_43fe_8d3b_624a0de49fae__0b13c5cc2b1af048__seq_000207",
+      "session_id": "session:`2651b3f6-3070-43fe-8d3b-624a0de49fae`",
+      "turn_id": "turn:2651b3f6_3070_43fe_8d3b_624a0de49fae__0b13c5cc2b1af048__seq_000207",
+      "label_family": "approval_or_rejection",
+      "target": "approval",
+      "weak_label": "approval_or_rejection",
+      "weak_confidence": 0.78,
+      "weak_sources": [
+        "approval_or_rejection:approval"
+      ],
+      "evidence_paths": [
+        "turn:2651b3f6_3070_43fe_8d3b_624a0de49fae__0b13c5cc2b1af048__seq_000207"
+      ],
+      "excerpt": "ship it",
       "review_status": "pending",
       "rationale": "",
       "reviewer": ""
@@ -1432,11 +596,11 @@
       "reviewer": ""
     },
     {
-      "candidate_id": "tlm__verification__8a6d7c46ede201b0",
-      "subject_id": "turn:019e745e_6356_7cc1_882d_68f09d725495__57944d1bbe8660a1__seq_000003",
-      "session_id": "session:`019e745e-6356-7cc1-882d-68f09d725495`",
-      "turn_id": "turn:019e745e_6356_7cc1_882d_68f09d725495__57944d1bbe8660a1__seq_000003",
-      "previous_assistant_turn_id": "turn:019e745e_6356_7cc1_882d_68f09d725495__57944d1bbe8660a1__seq_000002",
+      "candidate_id": "tlm__verification__e92dea606076bbac",
+      "subject_id": "turn:019e633b_c57f_7301_84b3_dc253614898a__1d52cc8a3d5af626__seq_000106",
+      "session_id": "session:`019e633b-c57f-7301-84b3-dc253614898a`",
+      "turn_id": "turn:019e633b_c57f_7301_84b3_dc253614898a__1d52cc8a3d5af626__seq_000106",
+      "previous_assistant_turn_id": "turn:019e633b_c57f_7301_84b3_dc253614898a__1d52cc8a3d5af626__seq_000105",
       "label_family": "verification",
       "target": "verification_demand",
       "weak_label": "verification",
@@ -1445,20 +609,20 @@
         "verification:demand"
       ],
       "evidence_paths": [
-        "turn:019e745e_6356_7cc1_882d_68f09d725495__57944d1bbe8660a1__seq_000003"
+        "turn:019e633b_c57f_7301_84b3_dc253614898a__1d52cc8a3d5af626__seq_000106"
       ],
-      "excerpt": "Spec compliance review for Task 9 in worktree /Users/necmttn/Projects/ax/.worktrees/gist-session-sharing.\n\nDo not edit files. Review only.\n\nTask 9 spec:\n- Add concise docs for sharing sessions, likely in `docs/insights-cli-reference.md` or relevant doc source.\n- Docs must explain:\n  - `axctl share <session-id>` exports sanitized artifact\n  - creates secret GitHub Gist containing `ax-session.json`\n  - prints `https://ax.necmttn.com/s/<owner>/<gist-id>`\n  - `--dry-run` to inspect artifact before publishing\n  - secret Gists are unlisted links, not private storage\n  - mention `--public`, `--yes`, ",
-      "previous_assistant_excerpt": "# AGENTS.md instructions for /Users/necmttn/Projects/ax\n\n<INSTRUCTIONS>\n# CLAUDE.md\n\nGuidance for Claude Code and other AI assistants working in this repo.\n\n## What this is\n\n`ax` - local taste & telemetry graph for AI coding agents. Ingests Claude Code transcripts (`~/.claude/projects/`) + Codex transcripts (`~/.codex/sessions/`) + installed skills (`~/.claude/skills/`, `~/.agents/skills/`, plugin caches) into a dedicated SurrealDB instance. CLI surfaces \"what skills/tools you actually use\" on demand.\n\n## Stack\n\n- **Runtime**: bun ≥ 1.3\n- **Language**: TypeScript (strict, `module: preserve`, `",
+      "excerpt": "this is what other agent drafted  # The loop I kept closing by hand\n\n*Origin notes for `ax`. How a shrinking feedback loop turned into the whole idea.*\n\n---\n\nStart with autocomplete, because that is where this actually started.\n\nThe first coding agents that worked were not the ones that did the most. They were the ones with the tightest feedback loop. You typed, the model predicted the next edit, and you either pressed tab or you kept typing. That was the whole interface. Tab meant *yes*. Typing through it meant *no*. A binary signal, instant, on every keystroke, from the one person who knew w",
+      "previous_assistant_excerpt": "Copied the article text to your clipboard.",
       "review_status": "pending",
       "rationale": "",
       "reviewer": ""
     },
     {
-      "candidate_id": "tlm__direction__18a4a5590ed110c4",
-      "subject_id": "turn:019e72d1_1ab3_79f2_aaec_a275e7b3c01f__4b8194423fd5c7b3__seq_000273",
-      "session_id": "session:`019e72d1-1ab3-79f2-aaec-a275e7b3c01f`",
-      "turn_id": "turn:019e72d1_1ab3_79f2_aaec_a275e7b3c01f__4b8194423fd5c7b3__seq_000273",
-      "previous_assistant_turn_id": "turn:019e72d1_1ab3_79f2_aaec_a275e7b3c01f__4b8194423fd5c7b3__seq_000272",
+      "candidate_id": "tlm__direction__16bf585afafaae5b",
+      "subject_id": "turn:019e76fe_63ff_7303_a98d_7e6210820b04__45ce27a7ae47a0f9__seq_001122",
+      "session_id": "session:`019e76fe-63ff-7303-a98d-7e6210820b04`",
+      "turn_id": "turn:019e76fe_63ff_7303_a98d_7e6210820b04__45ce27a7ae47a0f9__seq_001122",
+      "previous_assistant_turn_id": "turn:019e76fe_63ff_7303_a98d_7e6210820b04__45ce27a7ae47a0f9__seq_001121",
       "label_family": "direction",
       "target": "stated_preference",
       "weak_label": "direction",
@@ -1467,10 +631,30 @@
         "intent:preference"
       ],
       "evidence_paths": [
-        "turn:019e72d1_1ab3_79f2_aaec_a275e7b3c01f__4b8194423fd5c7b3__seq_000273"
+        "turn:019e76fe_63ff_7303_a98d_7e6210820b04__45ce27a7ae47a0f9__seq_001122"
       ],
-      "excerpt": "Follow-up review found two Important issues in your final fix. Please patch in /Users/necmttn/Projects/ax/.worktrees/local-agent-providers.\n\nIssues:\n1. Codex streaming parent edges across batches:\n- `src/ingest/codex.ts` drains providerEvents every `codexFlushEvery`, but `buildAgentEventStatements` can only resolve parent edges within the current batch. Linear/tool-output parent edges can be lost when parent event was flushed earlier.\n- Fix by carrying enough prior event context across drains or emitting explicit parent edge statements that can reference already-written parent events. Avoid du",
-      "previous_assistant_excerpt": "DONE_WITH_CONCERNS\n\nCommit: `c06c2b1` (`fix: complete local provider integration`)\n\nChanged files:\n- `src/ingest/pi.ts`, `src/ingest/pi.test.ts`\n- `src/ingest/opencode.ts`, `src/ingest/opencode.test.ts`\n- `src/ingest/cursor.ts`, `src/ingest/cursor.test.ts`\n- `src/ingest/codex.ts`, `src/ingest/codex.test.ts`\n- `src/ingest/transcripts.ts`, `src/ingest/transcripts.test.ts`\n- `src/ingest/derive-signals.ts`, `src/ingest/derive-signals.stage.test.ts`\n- `src/dashboard/web/src/routes/sessions.tsx`, `src/dashboard/web/src/routes/sessions.test.ts`\n\nTests run:\n- Required focused command plus dashboard ro",
+      "excerpt": "alright lets do all that",
+      "previous_assistant_excerpt": "Next, in order:\n\n1. Close stale issues #88 and #90 manually. Their work merged via #100 and #97, but GitHub didn’t auto-close them.\n2. Merge release PR #82. It is clean and `verify` is passing, so it’s the obvious release cut.\n3. Update/rebase local working branches after the release. Your current checkout is dirty and still on `issue-87-provider-parity-ci-fix`, so I’d avoid touching it until we decide what to preserve.\n4. Start the next backlog item: #86, Effect JSON-boundary Schema decoders and cleanup of the recurring typecheck advisories. That warning noise showed up in every verification ",
+      "review_status": "pending",
+      "rationale": "",
+      "reviewer": ""
+    },
+    {
+      "candidate_id": "tlm__approval_or_rejection__b2635c9edf88c101",
+      "subject_id": "turn:11fb5aad_2d45_45ef_9f94_7738ce250327__ab7c9d8b15cbcb04__seq_001185",
+      "session_id": "session:`11fb5aad-2d45-45ef-9f94-7738ce250327`",
+      "turn_id": "turn:11fb5aad_2d45_45ef_9f94_7738ce250327__ab7c9d8b15cbcb04__seq_001185",
+      "label_family": "approval_or_rejection",
+      "target": "approval",
+      "weak_label": "approval_or_rejection",
+      "weak_confidence": 0.78,
+      "weak_sources": [
+        "approval_or_rejection:approval"
+      ],
+      "evidence_paths": [
+        "turn:11fb5aad_2d45_45ef_9f94_7738ce250327__ab7c9d8b15cbcb04__seq_001185"
+      ],
+      "excerpt": "merge it.",
       "review_status": "pending",
       "rationale": "",
       "reviewer": ""
@@ -1498,11 +682,11 @@
       "reviewer": ""
     },
     {
-      "candidate_id": "tlm__verification__9846497451a214f0",
-      "subject_id": "turn:019e7334_0e46_7230_a304_327ce2dfd6c0__b9e1520f2b36b204__seq_000798",
-      "session_id": "session:`019e7334-0e46-7230-a304-327ce2dfd6c0`",
-      "turn_id": "turn:019e7334_0e46_7230_a304_327ce2dfd6c0__b9e1520f2b36b204__seq_000798",
-      "previous_assistant_turn_id": "turn:019e7334_0e46_7230_a304_327ce2dfd6c0__b9e1520f2b36b204__seq_000797",
+      "candidate_id": "tlm__verification__fb942ce671e328d6",
+      "subject_id": "turn:72f97b36_ac6c_4b37_a926_2712e4bf156f__d3ce108bcf0c2fa5__seq_003143",
+      "session_id": "session:`72f97b36-ac6c-4b37-a926-2712e4bf156f`",
+      "turn_id": "turn:72f97b36_ac6c_4b37_a926_2712e4bf156f__d3ce108bcf0c2fa5__seq_003143",
+      "previous_assistant_turn_id": "turn:72f97b36_ac6c_4b37_a926_2712e4bf156f__d3ce108bcf0c2fa5__seq_003142",
       "label_family": "verification",
       "target": "verification_demand",
       "weak_label": "verification",
@@ -1511,10 +695,158 @@
         "verification:demand"
       ],
       "evidence_paths": [
-        "turn:019e7334_0e46_7230_a304_327ce2dfd6c0__b9e1520f2b36b204__seq_000798"
+        "turn:72f97b36_ac6c_4b37_a926_2712e4bf156f__d3ce108bcf0c2fa5__seq_003143"
       ],
-      "excerpt": "thats ugly as fuck did you check the reference link i gave you?",
-      "previous_assistant_excerpt": "Opened a local UI preview:\n\n```text\n/tmp/ax-session-share-preview.html\n```\n\nThis uses the dry-run artifact and approximates the hosted share page locally. No Gist was created.",
+      "excerpt": "A session-scoped Stop hook is now active with condition: \"1. Corrected design doc — docs/architecture/skill-script-execution.html rewritten to the locked\n  grill output: ScriptRunner naming, opaque token (no TTL), filesystem skills, TypeScript+Bun, the\n  §2 boundary table as the contract, §8 separating the skill/script track from the entity-runtime\n  track.\n\n  2. Execution plan — docs/superpowers/plans/2026-05-20-workbench-skill-script-runtime.md:\n\n  ┌───────┬─────────────────────────────────────────────────────────────────────────────────────┐\n  │ Phase │                                      ",
+      "previous_assistant_excerpt": "<local-command-stdout>Goal set: 1. Corrected design doc — docs/architecture/skill-script-execution.html rewritten to the locked\n  grill output: ScriptRunner naming, opaque token (no TTL), filesystem skills, TypeScript+Bun, the\n  §2 boundary table as the contract, §8 separating the skill/script track from the entity-runtime\n  track.\n\n  2. Execution plan — docs/superpowers/plans/2026-05-20-workbench-skill-script-runtime.md:\n\n  ┌───────┬─────────────────────────────────────────────────────────────────────────────────────┐\n  │ Phase │                                      Delivers                  ",
+      "review_status": "pending",
+      "rationale": "",
+      "reviewer": ""
+    },
+    {
+      "candidate_id": "tlm__direction__17cf00e4ba45adea",
+      "subject_id": "turn:8b587d52_08a0_4b29_9ccb_d3221da0f16e__4500c528f7393679__seq_000912",
+      "session_id": "session:`8b587d52-08a0-4b29-9ccb-d3221da0f16e`",
+      "turn_id": "turn:8b587d52_08a0_4b29_9ccb_d3221da0f16e__4500c528f7393679__seq_000912",
+      "label_family": "direction",
+      "target": "stated_preference",
+      "weak_label": "direction",
+      "weak_confidence": 0.7,
+      "weak_sources": [
+        "intent:preference"
+      ],
+      "evidence_paths": [
+        "turn:8b587d52_08a0_4b29_9ccb_d3221da0f16e__4500c528f7393679__seq_000912"
+      ],
+      "excerpt": "https://necmttn.com/services can we add similar animations like this?   /Users/necmttn/Projects/necmttn.com",
+      "review_status": "pending",
+      "rationale": "",
+      "reviewer": ""
+    },
+    {
+      "candidate_id": "tlm__approval_or_rejection__be6e47deec40d8cd",
+      "subject_id": "turn:e23cf065_7316_46a0_95a7_2f2722065565__c74f3702ba85f9c2__seq_000134",
+      "session_id": "session:`e23cf065-7316-46a0-95a7-2f2722065565`",
+      "turn_id": "turn:e23cf065_7316_46a0_95a7_2f2722065565__c74f3702ba85f9c2__seq_000134",
+      "label_family": "approval_or_rejection",
+      "target": "approval",
+      "weak_label": "approval_or_rejection",
+      "weak_confidence": 0.78,
+      "weak_sources": [
+        "approval_or_rejection:approval"
+      ],
+      "evidence_paths": [
+        "turn:e23cf065_7316_46a0_95a7_2f2722065565__c74f3702ba85f9c2__seq_000134"
+      ],
+      "excerpt": "looks good subagent driven development",
+      "review_status": "pending",
+      "rationale": "",
+      "reviewer": ""
+    },
+    {
+      "candidate_id": "tlm__correction__da49f6fa4b75c6df",
+      "subject_id": "turn:019e633b_c57f_7301_84b3_dc253614898a__1d52cc8a3d5af626__seq_000087",
+      "session_id": "session:`019e633b-c57f-7301-84b3-dc253614898a`",
+      "turn_id": "turn:019e633b_c57f_7301_84b3_dc253614898a__1d52cc8a3d5af626__seq_000087",
+      "previous_assistant_turn_id": "turn:019e633b_c57f_7301_84b3_dc253614898a__1d52cc8a3d5af626__seq_000086",
+      "label_family": "correction",
+      "target": "wrong_output",
+      "weak_label": "correction",
+      "weak_confidence": 0.74,
+      "weak_sources": [
+        "correction:wrong_output"
+      ],
+      "evidence_paths": [
+        "turn:019e633b_c57f_7301_84b3_dc253614898a__1d52cc8a3d5af626__seq_000087"
+      ],
+      "excerpt": "Insights that it gets for growth and applies it so it does not repeat the same mistakes. So what happens is that after each session, agent gives himself a self retro cells, like, what's went wrong, what's went okay, and writes a small note about related to this session. So across the timeline of, like, a one week multiple times, these feedbacks are being collected. And, eventually, we will get one big session where user is triggering. Go do, like, a big retro or big, uh, self reflect session based on the previous retros and the graph that we have to figure out what can be improved, what can be",
+      "previous_assistant_excerpt": "Open this:\n\nhttp://127.0.0.1:8766/origin.html\n\nThe docs landing page is also available at:\n\nhttp://127.0.0.1:8766/",
+      "review_status": "pending",
+      "rationale": "",
+      "reviewer": ""
+    },
+    {
+      "candidate_id": "tlm__verification__ff763b3a9f1e75bf",
+      "subject_id": "turn:1688d3d6_bdde_4abb_9d65_c8b14ce01684__6246daa634ef96bd__seq_000377",
+      "session_id": "session:`1688d3d6-bdde-4abb-9d65-c8b14ce01684`",
+      "turn_id": "turn:1688d3d6_bdde_4abb_9d65_c8b14ce01684__6246daa634ef96bd__seq_000377",
+      "label_family": "verification",
+      "target": "verification_demand",
+      "weak_label": "verification",
+      "weak_confidence": 0.84,
+      "weak_sources": [
+        "verification:demand"
+      ],
+      "evidence_paths": [
+        "turn:1688d3d6_bdde_4abb_9d65_c8b14ce01684__6246daa634ef96bd__seq_000377"
+      ],
+      "excerpt": "yes revise and start pr  and merge 958 meanwhile use subgaent to babysit the pr to production verify bleed is stop.",
+      "review_status": "pending",
+      "rationale": "",
+      "reviewer": ""
+    },
+    {
+      "candidate_id": "tlm__direction__18a4a5590ed110c4",
+      "subject_id": "turn:019e72d1_1ab3_79f2_aaec_a275e7b3c01f__4b8194423fd5c7b3__seq_000273",
+      "session_id": "session:`019e72d1-1ab3-79f2-aaec-a275e7b3c01f`",
+      "turn_id": "turn:019e72d1_1ab3_79f2_aaec_a275e7b3c01f__4b8194423fd5c7b3__seq_000273",
+      "previous_assistant_turn_id": "turn:019e72d1_1ab3_79f2_aaec_a275e7b3c01f__4b8194423fd5c7b3__seq_000272",
+      "label_family": "direction",
+      "target": "stated_preference",
+      "weak_label": "direction",
+      "weak_confidence": 0.7,
+      "weak_sources": [
+        "intent:preference"
+      ],
+      "evidence_paths": [
+        "turn:019e72d1_1ab3_79f2_aaec_a275e7b3c01f__4b8194423fd5c7b3__seq_000273"
+      ],
+      "excerpt": "Follow-up review found two Important issues in your final fix. Please patch in /Users/necmttn/Projects/ax/.worktrees/local-agent-providers.\n\nIssues:\n1. Codex streaming parent edges across batches:\n- `src/ingest/codex.ts` drains providerEvents every `codexFlushEvery`, but `buildAgentEventStatements` can only resolve parent edges within the current batch. Linear/tool-output parent edges can be lost when parent event was flushed earlier.\n- Fix by carrying enough prior event context across drains or emitting explicit parent edge statements that can reference already-written parent events. Avoid du",
+      "previous_assistant_excerpt": "DONE_WITH_CONCERNS\n\nCommit: `c06c2b1` (`fix: complete local provider integration`)\n\nChanged files:\n- `src/ingest/pi.ts`, `src/ingest/pi.test.ts`\n- `src/ingest/opencode.ts`, `src/ingest/opencode.test.ts`\n- `src/ingest/cursor.ts`, `src/ingest/cursor.test.ts`\n- `src/ingest/codex.ts`, `src/ingest/codex.test.ts`\n- `src/ingest/transcripts.ts`, `src/ingest/transcripts.test.ts`\n- `src/ingest/derive-signals.ts`, `src/ingest/derive-signals.stage.test.ts`\n- `src/dashboard/web/src/routes/sessions.tsx`, `src/dashboard/web/src/routes/sessions.test.ts`\n\nTests run:\n- Required focused command plus dashboard ro",
+      "review_status": "pending",
+      "rationale": "",
+      "reviewer": ""
+    },
+    {
+      "candidate_id": "tlm__approval_or_rejection__e8272ba635f6e185",
+      "subject_id": "turn:019e7c67_9137_77e1_8942_3ad9df5e6308__1a8a78d9ecccb867__seq_000154",
+      "session_id": "session:`019e7c67-9137-77e1-8942-3ad9df5e6308`",
+      "turn_id": "turn:019e7c67_9137_77e1_8942_3ad9df5e6308__1a8a78d9ecccb867__seq_000154",
+      "previous_assistant_turn_id": "turn:019e7c67_9137_77e1_8942_3ad9df5e6308__1a8a78d9ecccb867__seq_000153",
+      "label_family": "approval_or_rejection",
+      "target": "approval",
+      "weak_label": "approval_or_rejection",
+      "weak_confidence": 0.78,
+      "weak_sources": [
+        "approval_or_rejection:approval"
+      ],
+      "evidence_paths": [
+        "turn:019e7c67_9137_77e1_8942_3ad9df5e6308__1a8a78d9ecccb867__seq_000154"
+      ],
+      "excerpt": "Alright, so that has been built before but it's not merged yet. Can we merge it?",
+      "previous_assistant_excerpt": "Studio is live here:\n\nhttps://ax.necmttn.com/studio/?endpoint=http%3A%2F%2F127.0.0.1%3A1738\n\nLocal API is already running on `:1738` and reports:\n\n```json\n{\"version\":\"0.3.0\",\"api_version\":1}\n```\n\nFor the Gist architecture: the design we set up is documented at:\n\n[2026-05-29-gist-backed-session-sharing-design.md](/Users/necmttn/Projects/ax/docs/superpowers/specs/2026-05-29-gist-backed-session-sharing-design.md)\n\nThe intended share URL shape is:\n\n```text\nhttps://ax.necmttn.com/s/<owner>/<gist-id>\n```\n\nBut in this checkout, `axctl share` is not actually registered yet, so I can’t produce a real s",
+      "review_status": "pending",
+      "rationale": "",
+      "reviewer": ""
+    },
+    {
+      "candidate_id": "tlm__correction__e0334d3830b72e7d",
+      "subject_id": "turn:019e76fe_63ff_7303_a98d_7e6210820b04__45ce27a7ae47a0f9__seq_000308",
+      "session_id": "session:`019e76fe-63ff-7303-a98d-7e6210820b04`",
+      "turn_id": "turn:019e76fe_63ff_7303_a98d_7e6210820b04__45ce27a7ae47a0f9__seq_000308",
+      "previous_assistant_turn_id": "turn:019e76fe_63ff_7303_a98d_7e6210820b04__45ce27a7ae47a0f9__seq_000307",
+      "label_family": "correction",
+      "target": "wrong_output",
+      "weak_label": "correction",
+      "weak_confidence": 0.74,
+      "weak_sources": [
+        "correction:wrong_output"
+      ],
+      "evidence_paths": [
+        "turn:019e76fe_63ff_7303_a98d_7e6210820b04__45ce27a7ae47a0f9__seq_000308"
+      ],
+      "excerpt": "No left over code, etcetera is yeah. Everything we are writing today is has a read path, correct?",
+      "previous_assistant_excerpt": "Done. I cleaned the remaining stale schema reference and verified the cleanup.\n\nChanged:\n- Removed retired schema definitions and the old `REMOVE TABLE IF EXISTS` cleanup block from `schema/schema.surql`.\n- Removed leftover retired-table references from docs/read inventory.\n- Updated the schema inventory test so `SCHEMA_TABLES` now directly mirrors current `DEFINE TABLE` entries.\n- Confirmed no remaining retired references in the targeted schema/docs/query files.\n\nVerification:\n- Retired-reference `rg` check returned no matches.\n- `bun test src/queries/insights.test.ts schema/schema.test.ts` p",
       "review_status": "pending",
       "rationale": "",
       "reviewer": ""
@@ -1540,11 +872,33 @@
       "reviewer": ""
     },
     {
-      "candidate_id": "tlm__correction__9f5909cadb0a0e",
-      "subject_id": "turn:019e73d9_6ce4_7f03_b3a8_259ab9ee20fb__d6c60e870ee0b67b__seq_000003",
-      "session_id": "session:`019e73d9-6ce4-7f03-b3a8-259ab9ee20fb`",
-      "turn_id": "turn:019e73d9_6ce4_7f03_b3a8_259ab9ee20fb__d6c60e870ee0b67b__seq_000003",
-      "previous_assistant_turn_id": "turn:019e73d9_6ce4_7f03_b3a8_259ab9ee20fb__d6c60e870ee0b67b__seq_000002",
+      "candidate_id": "tlm__approval_or_rejection__ed0c05aeda2f33ee",
+      "subject_id": "turn:019e7c67_9137_77e1_8942_3ad9df5e6308__1a8a78d9ecccb867__seq_001165",
+      "session_id": "session:`019e7c67-9137-77e1-8942-3ad9df5e6308`",
+      "turn_id": "turn:019e7c67_9137_77e1_8942_3ad9df5e6308__1a8a78d9ecccb867__seq_001165",
+      "previous_assistant_turn_id": "turn:019e7c67_9137_77e1_8942_3ad9df5e6308__1a8a78d9ecccb867__seq_001164",
+      "label_family": "approval_or_rejection",
+      "target": "approval",
+      "weak_label": "approval_or_rejection",
+      "weak_confidence": 0.78,
+      "weak_sources": [
+        "approval_or_rejection:approval"
+      ],
+      "evidence_paths": [
+        "turn:019e7c67_9137_77e1_8942_3ad9df5e6308__1a8a78d9ecccb867__seq_001165"
+      ],
+      "excerpt": "approved",
+      "previous_assistant_excerpt": "<turn_aborted>\nThe user interrupted the previous turn on purpose. Any running unified exec processes may still be running in the background. If any tools/commands were aborted, they may have partially executed.\n</turn_aborted>",
+      "review_status": "pending",
+      "rationale": "",
+      "reviewer": ""
+    },
+    {
+      "candidate_id": "tlm__correction__efcf6c9e632369ba",
+      "subject_id": "turn:019e7334_0e46_7230_a304_327ce2dfd6c0__b9e1520f2b36b204__seq_001781",
+      "session_id": "session:`019e7334-0e46-7230-a304-327ce2dfd6c0`",
+      "turn_id": "turn:019e7334_0e46_7230_a304_327ce2dfd6c0__b9e1520f2b36b204__seq_001781",
+      "previous_assistant_turn_id": "turn:019e7334_0e46_7230_a304_327ce2dfd6c0__b9e1520f2b36b204__seq_001780",
       "label_family": "correction",
       "target": "wrong_output",
       "weak_label": "correction",
@@ -1553,32 +907,10 @@
         "correction:wrong_output"
       ],
       "evidence_paths": [
-        "turn:019e73d9_6ce4_7f03_b3a8_259ab9ee20fb__d6c60e870ee0b67b__seq_000003"
+        "turn:019e7334_0e46_7230_a304_327ce2dfd6c0__b9e1520f2b36b204__seq_001781"
       ],
-      "excerpt": "Implement Task 5 of the Gist-backed session sharing plan in the isolated worktree.\n\nWorkspace: /Users/necmttn/Projects/ax/.worktrees/gist-session-sharing\nBranch: feat/gist-session-sharing\n\nImportant:\n- Use apply_patch for manual edits.\n- Do not revert or touch unrelated files.\n- You are not alone in the codebase; accommodate existing changes.\n- Follow TDD: write failing tests, run them, implement, run targeted tests, commit.\n- Full `bun run typecheck` has pre-existing unrelated failures; do not fix them.\n- Effect code: avoid try/catch inside Effect.gen. Use Effect.tryPromise where needed.\n\nTas",
-      "previous_assistant_excerpt": "# AGENTS.md instructions for /Users/necmttn/Projects/ax\n\n<INSTRUCTIONS>\n# CLAUDE.md\n\nGuidance for Claude Code and other AI assistants working in this repo.\n\n## What this is\n\n`ax` - local taste & telemetry graph for AI coding agents. Ingests Claude Code transcripts (`~/.claude/projects/`) + Codex transcripts (`~/.codex/sessions/`) + installed skills (`~/.claude/skills/`, `~/.agents/skills/`, plugin caches) into a dedicated SurrealDB instance. CLI surfaces \"what skills/tools you actually use\" on demand.\n\n## Stack\n\n- **Runtime**: bun ≥ 1.3\n- **Language**: TypeScript (strict, `module: preserve`, `",
-      "review_status": "pending",
-      "rationale": "",
-      "reviewer": ""
-    },
-    {
-      "candidate_id": "tlm__verification__af43b73550182d6b",
-      "subject_id": "turn:019e77a0_a9cf_78f2_80a1_b225f53b1cd3__ddb8200efb1f786d__seq_000003",
-      "session_id": "session:`019e77a0-a9cf-78f2-80a1-b225f53b1cd3`",
-      "turn_id": "turn:019e77a0_a9cf_78f2_80a1_b225f53b1cd3__ddb8200efb1f786d__seq_000003",
-      "previous_assistant_turn_id": "turn:019e77a0_a9cf_78f2_80a1_b225f53b1cd3__ddb8200efb1f786d__seq_000002",
-      "label_family": "verification",
-      "target": "verification_demand",
-      "weak_label": "verification",
-      "weak_confidence": 0.84,
-      "weak_sources": [
-        "verification:demand"
-      ],
-      "evidence_paths": [
-        "turn:019e77a0_a9cf_78f2_80a1_b225f53b1cd3__ddb8200efb1f786d__seq_000003"
-      ],
-      "excerpt": "You are working in repo /Users/necmttn/Projects/ax on GitHub issue https://github.com/Necmttn/ax/issues/89: \"Extract Cursor tool calls and invocation edges\".\n\nGoal: implement the issue end-to-end, verify, commit, push a branch, and open a PR linked to #89.\n\nContext:\n- Cursor ingest currently lives in src/ingest/cursor.ts.\n- It scans ~/Library/Application Support/Cursor/User/globalStorage/state.vscdb and workspaceStorage/*/state.vscdb, override AX_CURSOR_USER_DIR.\n- The taxonomy currently says Cursor normalizes sessions/provider events/turns, but does not yet emit concrete tool_call/invoked row",
-      "previous_assistant_excerpt": "# AGENTS.md instructions for /Users/necmttn/Projects/ax\n\n<INSTRUCTIONS>\n# CLAUDE.md\n\nGuidance for Claude Code and other AI assistants working in this repo.\n\n## What this is\n\n`ax` - local taste & telemetry graph for AI coding agents. Ingests Claude Code transcripts (`~/.claude/projects/`) + Codex transcripts (`~/.codex/sessions/`) + installed skills (`~/.claude/skills/`, `~/.agents/skills/`, plugin caches) into a dedicated SurrealDB instance. CLI surfaces \"what skills/tools you actually use\" on demand.\n\n## Stack\n\n- **Runtime**: bun ≥ 1.3\n- **Language**: TypeScript (strict, `module: preserve`, `",
+      "excerpt": "And give me URL again, I just push main, I think it's already deployed right now. If not, let me know what's wrong with it.",
+      "previous_assistant_excerpt": "You’re right about the mislabel.\n\nI reproduced it on the shared session:\n- `#588` is your actual input.\n- `#592` is the `/review-all` command wrapper content.\n- DB already had `intent_kind=wrapper_instruction`, but the shared Studio reader ignored `intent_kind` and only used `message_kind=task`, so it rendered as `USER INPUT`.\n\nFixed in commit:\n\n`db7f33d fix: honor share turn intent in inspector`\n\nWhat changed:\n- Shared session inspector now uses `intent_kind` first.\n- `wrapper_instruction`, `skill_context`, `system_context`, `subagent_task`, etc. no longer collapse into `user_input`.\n- Added ",
       "review_status": "pending",
       "rationale": "",
       "reviewer": ""
@@ -1606,11 +938,33 @@
       "reviewer": ""
     },
     {
-      "candidate_id": "tlm__correction__a02e85d3fb86a1ec",
-      "subject_id": "turn:019e7428_a1d6_7051_bb02_ed44b5568680__2a5ada36e86f34df__seq_000003",
-      "session_id": "session:`019e7428-a1d6-7051-bb02-ed44b5568680`",
-      "turn_id": "turn:019e7428_a1d6_7051_bb02_ed44b5568680__2a5ada36e86f34df__seq_000003",
-      "previous_assistant_turn_id": "turn:019e7428_a1d6_7051_bb02_ed44b5568680__2a5ada36e86f34df__seq_000002",
+      "candidate_id": "tlm__approval_or_rejection__f46670009149ee04",
+      "subject_id": "turn:019e791a_19b4_7352_98da_e1b80bdea61f__8c23c3d22aedbf9b__seq_001685",
+      "session_id": "session:`019e791a-19b4-7352-98da-e1b80bdea61f`",
+      "turn_id": "turn:019e791a_19b4_7352_98da_e1b80bdea61f__8c23c3d22aedbf9b__seq_001685",
+      "previous_assistant_turn_id": "turn:019e791a_19b4_7352_98da_e1b80bdea61f__8c23c3d22aedbf9b__seq_001684",
+      "label_family": "approval_or_rejection",
+      "target": "approval",
+      "weak_label": "approval_or_rejection",
+      "weak_confidence": 0.78,
+      "weak_sources": [
+        "approval_or_rejection:approval"
+      ],
+      "evidence_paths": [
+        "turn:019e791a_19b4_7352_98da_e1b80bdea61f__8c23c3d22aedbf9b__seq_001685"
+      ],
+      "excerpt": "I want to sort all these stashes, don't not lose work if we already have it. Uh I don't want any stashed work lost, so merge it as possible.",
+      "previous_assistant_excerpt": "Yes. There are 5 stashes still present:\n\n```text\nstash@{0}: post-rebase residue before restoring dirty tree\nstash@{1}: pre-rebase local dirty tree before b3ed711\nstash@{2}: autostash\nstash@{3}: feat-WIP before port-to-stage-registry\nstash@{4}: WIP on main: fix dashboard subagent transcript\n```\n\nQuick read:\n\n- `stash@{0}`: one goal doc, `112` lines. Likely residue, needs review before drop.\n- `stash@{1}`: big mixed stash, `25` files. Includes work we already committed plus some studio/share/classifier fixture changes.\n- `stash@{2}`: older big autostash, `26` files. Includes schema/package/CLI/c",
+      "review_status": "pending",
+      "rationale": "",
+      "reviewer": ""
+    },
+    {
+      "candidate_id": "tlm__correction__fb88d6926ff8858d",
+      "subject_id": "turn:019e7c67_9137_77e1_8942_3ad9df5e6308__1a8a78d9ecccb867__seq_001928",
+      "session_id": "session:`019e7c67-9137-77e1-8942-3ad9df5e6308`",
+      "turn_id": "turn:019e7c67_9137_77e1_8942_3ad9df5e6308__1a8a78d9ecccb867__seq_001928",
+      "previous_assistant_turn_id": "turn:019e7c67_9137_77e1_8942_3ad9df5e6308__1a8a78d9ecccb867__seq_001927",
       "label_family": "correction",
       "target": "wrong_output",
       "weak_label": "correction",
@@ -1619,40 +973,20 @@
         "correction:wrong_output"
       ],
       "evidence_paths": [
-        "turn:019e7428_a1d6_7051_bb02_ed44b5568680__2a5ada36e86f34df__seq_000003"
+        "turn:019e7c67_9137_77e1_8942_3ad9df5e6308__1a8a78d9ecccb867__seq_001928"
       ],
-      "excerpt": "Implement Task 7 of the Gist-backed session sharing plan in the isolated worktree.\n\nWorkspace: /Users/necmttn/Projects/ax/.worktrees/gist-session-sharing\nBranch: feat/gist-session-sharing\n\nImportant:\n- Use apply_patch for manual edits.\n- Do not revert or touch unrelated files.\n- You are not alone in the codebase; accommodate existing changes.\n- Follow TDD: write failing tests, run them, implement, run targeted tests, commit.\n- This task is in the `site/` package. Run commands from `site/` where specified.\n\nTask 7: Site Gist Fetch Helpers\n\nFiles:\n- Create: `site/app/lib/session-share.ts`\n- Crea",
-      "previous_assistant_excerpt": "# AGENTS.md instructions for /Users/necmttn/Projects/ax\n\n<INSTRUCTIONS>\n# CLAUDE.md\n\nGuidance for Claude Code and other AI assistants working in this repo.\n\n## What this is\n\n`ax` - local taste & telemetry graph for AI coding agents. Ingests Claude Code transcripts (`~/.claude/projects/`) + Codex transcripts (`~/.codex/sessions/`) + installed skills (`~/.claude/skills/`, `~/.agents/skills/`, plugin caches) into a dedicated SurrealDB instance. CLI surfaces \"what skills/tools you actually use\" on demand.\n\n## Stack\n\n- **Runtime**: bun ≥ 1.3\n- **Language**: TypeScript (strict, `module: preserve`, `",
+      "excerpt": "no it's claudflare deploymets. you manage to do it before ?",
+      "previous_assistant_excerpt": "I can deploy to GitHub Pages, and I did.\n\nWhat I can’t currently deploy is `ax.necmttn.com`, because it is not configured as this repo’s GitHub Pages custom domain.\n\nEvidence:\n\n```json\n\"html_url\": \"https://necmttn.github.io/ax/\",\n\"cname\": null,\n\"source\": { \"branch\": \"main\", \"path\": \"/docs\" }\n```\n\nLatest Pages build is deployed from commit:\n\n```text\n803a164 fix(studio): reduce selected block highlighting\n```\n\nWorking deployed URL:\n\n```text\nhttps://necmttn.github.io/ax/studio/?shareOwner=Necmttn&gistId=42ed035bcaba1f2868d802f0b837405e\n```\n\nBut `ax.necmttn.com` resolves to Cloudflare IPs and serv",
       "review_status": "pending",
       "rationale": "",
       "reviewer": ""
     },
     {
-      "candidate_id": "tlm__verification__b9910c0f2e20d403",
-      "subject_id": "turn:cb251b06_2c99_4fa2_8457_533feb15a890__1e078ba5e3a12d26__seq_000064",
-      "session_id": "session:`cb251b06-2c99-4fa2-8457-533feb15a890`",
-      "turn_id": "turn:cb251b06_2c99_4fa2_8457_533feb15a890__1e078ba5e3a12d26__seq_000064",
-      "label_family": "verification",
-      "target": "verification_demand",
-      "weak_label": "verification",
-      "weak_confidence": 0.84,
-      "weak_sources": [
-        "verification:demand"
-      ],
-      "evidence_paths": [
-        "turn:cb251b06_2c99_4fa2_8457_533feb15a890__1e078ba5e3a12d26__seq_000064"
-      ],
-      "excerpt": "ax handsover to task as tmp task.md to agent with details when user accepts their subagent applies to file with correct references etc.  so applying fixes etc task of their agent. agent is also responsible running lint checks. - probably we could create a lint for these - verify the ax entries in the files we can parse it render it - ?",
-      "review_status": "pending",
-      "rationale": "",
-      "reviewer": ""
-    },
-    {
-      "candidate_id": "tlm__direction__194bc5167d3935e5",
-      "subject_id": "turn:019e72cc_037c_7bf3_bd03_852c46478e42__4de775b35976b093__seq_000003",
-      "session_id": "session:`019e72cc-037c-7bf3-bd03-852c46478e42`",
-      "turn_id": "turn:019e72cc_037c_7bf3_bd03_852c46478e42__4de775b35976b093__seq_000003",
-      "previous_assistant_turn_id": "turn:019e72cc_037c_7bf3_bd03_852c46478e42__4de775b35976b093__seq_000002",
+      "candidate_id": "tlm__direction__1a8586f1c5810c2",
+      "subject_id": "turn:8c1a1209_11ec_48e9_9a2f_154c0dcb9d29__d2644989ab5b6d20__seq_000815",
+      "session_id": "session:`8c1a1209-11ec-48e9-9a2f-154c0dcb9d29`",
+      "turn_id": "turn:8c1a1209_11ec_48e9_9a2f_154c0dcb9d29__d2644989ab5b6d20__seq_000815",
+      "previous_assistant_turn_id": "turn:8c1a1209_11ec_48e9_9a2f_154c0dcb9d29__d2644989ab5b6d20__seq_000814",
       "label_family": "direction",
       "target": "stated_preference",
       "weak_label": "direction",
@@ -1661,54 +995,702 @@
         "intent:preference"
       ],
       "evidence_paths": [
-        "turn:019e72cc_037c_7bf3_bd03_852c46478e42__4de775b35976b093__seq_000003"
+        "turn:8c1a1209_11ec_48e9_9a2f_154c0dcb9d29__d2644989ab5b6d20__seq_000815"
       ],
-      "excerpt": "You are the final code reviewer for the completed local agent transcript providers implementation in /Users/necmttn/Projects/ax/.worktrees/local-agent-providers.\n\nReview range:\n- Base: `801625e403c361bddf32662d05f405de3bcce639`\n- Head: `30e98f9d6afa0c80f5f9d33f683d8661dcc2acfc`\n\nDescription:\nImplemented a provider event graph and local transcript providers for Claude, Codex, Pi, OpenCode, and Cursor. Existing Claude/Codex now dual-write provider events. Pi JSONL, OpenCode SQLite, and Cursor SQLite adapters ingest local sessions into the provider graph and project into AX `session`/`turn` table",
-      "previous_assistant_excerpt": "# AGENTS.md instructions for /Users/necmttn/Projects/ax\n\n<INSTRUCTIONS>\n# CLAUDE.md\n\nGuidance for Claude Code and other AI assistants working in this repo.\n\n## What this is\n\n`ax` - local taste & telemetry graph for AI coding agents. Ingests Claude Code transcripts (`~/.claude/projects/`) + Codex transcripts (`~/.codex/sessions/`) + installed skills (`~/.claude/skills/`, `~/.agents/skills/`, plugin caches) into a dedicated SurrealDB instance. CLI surfaces \"what skills/tools you actually use\" on demand.\n\n## Stack\n\n- **Runtime**: bun ≥ 1.3\n- **Language**: TypeScript (strict, `module: preserve`, `",
+      "excerpt": "can we tidy up the cli i want \n'ax dashboard serve' -> 'ax serve'\n\nand figure out way how can we tidy up the dashboard experience.",
+      "previous_assistant_excerpt": "[Request interrupted by user]",
       "review_status": "pending",
       "rationale": "",
       "reviewer": ""
     },
     {
-      "candidate_id": "tlm__correction__b2e0fad68b815ac7",
-      "subject_id": "turn:019e7278_c466_74a1_95d5_8909aa904625__6d21c4bb7262cb58__seq_000003",
-      "session_id": "session:`019e7278-c466-74a1-95d5-8909aa904625`",
-      "turn_id": "turn:019e7278_c466_74a1_95d5_8909aa904625__6d21c4bb7262cb58__seq_000003",
-      "previous_assistant_turn_id": "turn:019e7278_c466_74a1_95d5_8909aa904625__6d21c4bb7262cb58__seq_000002",
+      "candidate_id": "tlm__approval_or_rejection__f88811296f87b7ff",
+      "subject_id": "turn:019e76fe_63ff_7303_a98d_7e6210820b04__45ce27a7ae47a0f9__seq_002553",
+      "session_id": "session:`019e76fe-63ff-7303-a98d-7e6210820b04`",
+      "turn_id": "turn:019e76fe_63ff_7303_a98d_7e6210820b04__45ce27a7ae47a0f9__seq_002553",
+      "previous_assistant_turn_id": "turn:019e76fe_63ff_7303_a98d_7e6210820b04__45ce27a7ae47a0f9__seq_002552",
+      "label_family": "approval_or_rejection",
+      "target": "approval",
+      "weak_label": "approval_or_rejection",
+      "weak_confidence": 0.78,
+      "weak_sources": [
+        "approval_or_rejection:approval"
+      ],
+      "evidence_paths": [
+        "turn:019e76fe_63ff_7303_a98d_7e6210820b04__45ce27a7ae47a0f9__seq_002553"
+      ],
+      "excerpt": "I can merge it.",
+      "previous_assistant_excerpt": "Yes, that makes more sense. I added it as an agent-triggered skill.\n\nNew skill:\n- `skills/release-announcement/SKILL.md`\n- Trigger phrases include:\n  - “write release notes”\n  - “draft release announcement”\n  - “prepare changelog”\n  - “release page”\n  - “version page”\n  - “what changed in vX.Y.Z”\n  - “generate announcement for vX.Y.Z”\n  - “explain how we got to this release”\n\nWhat it does:\n- resolves previous tag to release head range\n- inspects all changed files and commits since previous version\n- maps important SHAs/subsystems back to `ax sessions near` and `ax recall`\n- writes a topical an",
+      "review_status": "pending",
+      "rationale": "",
+      "reviewer": ""
+    },
+    {
+      "candidate_id": "tlm__correction__7faf68ef1f65bc98",
+      "subject_id": "turn:019e4e5e_4c52_71b3_8daf_e16ef2be9e58__b1362176f40c1b0f__seq_000404",
+      "session_id": "session:`019e4e5e-4c52-71b3-8daf-e16ef2be9e58`",
+      "turn_id": "turn:019e4e5e_4c52_71b3_8daf_e16ef2be9e58__b1362176f40c1b0f__seq_000404",
+      "previous_assistant_turn_id": "turn:019e4e5e_4c52_71b3_8daf_e16ef2be9e58__b1362176f40c1b0f__seq_000403",
       "label_family": "correction",
       "target": "wrong_output",
       "weak_label": "correction",
-      "weak_confidence": 0.74,
+      "weak_confidence": 0.7,
       "weak_sources": [
-        "correction:wrong_output"
+        "intent:correction"
       ],
       "evidence_paths": [
-        "turn:019e7278_c466_74a1_95d5_8909aa904625__6d21c4bb7262cb58__seq_000003"
+        "turn:019e4e5e_4c52_71b3_8daf_e16ef2be9e58__b1362176f40c1b0f__seq_000404"
       ],
-      "excerpt": "You are implementing Task 2 from the approved plan in the isolated worktree /Users/necmttn/Projects/ax/.worktrees/local-agent-providers.\n\nContext:\n- You are not alone in the codebase. Do not revert changes by others. Task 1 is already committed in this worktree.\n- Work only in Task 2 files unless a test import requires a minimal adjacent update.\n- Baseline has one pre-existing failure in `src/cli/effect-cli.test.ts` about `ingest here`; do not fix it unless your own CLI changes alter that same area and you must update expectations for Task 2.\n\nTask 2: Config, Stage Registry, And CLI Surface\n\nF",
-      "previous_assistant_excerpt": "# AGENTS.md instructions for /Users/necmttn/Projects/ax\n\n<INSTRUCTIONS>\n# CLAUDE.md\n\nGuidance for Claude Code and other AI assistants working in this repo.\n\n## What this is\n\n`ax` - local taste & telemetry graph for AI coding agents. Ingests Claude Code transcripts (`~/.claude/projects/`) + Codex transcripts (`~/.codex/sessions/`) + installed skills (`~/.claude/skills/`, `~/.agents/skills/`, plugin caches) into a dedicated SurrealDB instance. CLI surfaces \"what skills/tools you actually use\" on demand.\n\n## Stack\n\n- **Runtime**: bun ≥ 1.3\n- **Language**: TypeScript (strict, `module: preserve`, `",
+      "excerpt": "i was talking about ; https://github.com/electric-sql/electric/tree/main/examples/deep-survey can you create folder with demo",
+      "previous_assistant_excerpt": "Yes. I’d make it as a second page in the same `working-demo`, reusing the working Horton runner path.\n\nOne question before I design it: should “wiki demo” mean **search/read Wikipedia articles** via Horton, or a **tiny local wiki app** where Horton helps create/edit pages?",
       "review_status": "pending",
       "rationale": "",
       "reviewer": ""
     },
     {
-      "candidate_id": "tlm__verification__b9e1d6bc7a4da5a6",
-      "subject_id": "turn:019e728d_ee46_7ee1_8771_480b8a248bbd__f106a583671a1f02__seq_000003",
-      "session_id": "session:`019e728d-ee46-7ee1-8771-480b8a248bbd`",
-      "turn_id": "turn:019e728d_ee46_7ee1_8771_480b8a248bbd__f106a583671a1f02__seq_000003",
-      "previous_assistant_turn_id": "turn:019e728d_ee46_7ee1_8771_480b8a248bbd__f106a583671a1f02__seq_000002",
-      "label_family": "verification",
-      "target": "verification_demand",
-      "weak_label": "verification",
-      "weak_confidence": 0.84,
+      "candidate_id": "tlm__direction__1ae796a597d4beaa",
+      "subject_id": "turn:019e76fe_63ff_7303_a98d_7e6210820b04__45ce27a7ae47a0f9__seq_001659",
+      "session_id": "session:`019e76fe-63ff-7303-a98d-7e6210820b04`",
+      "turn_id": "turn:019e76fe_63ff_7303_a98d_7e6210820b04__45ce27a7ae47a0f9__seq_001659",
+      "previous_assistant_turn_id": "turn:019e76fe_63ff_7303_a98d_7e6210820b04__45ce27a7ae47a0f9__seq_001658",
+      "label_family": "direction",
+      "target": "stated_preference",
+      "weak_label": "direction",
+      "weak_confidence": 0.7,
       "weak_sources": [
-        "verification:demand"
+        "intent:preference"
       ],
       "evidence_paths": [
-        "turn:019e728d_ee46_7ee1_8771_480b8a248bbd__f106a583671a1f02__seq_000003"
+        "turn:019e76fe_63ff_7303_a98d_7e6210820b04__45ce27a7ae47a0f9__seq_001659"
       ],
-      "excerpt": "You are a spec-compliance reviewer for Task 3 in /Users/necmttn/Projects/ax/.worktrees/local-agent-providers.\n\nReview commit `9113f80` for Task 3. Do not edit files.\n\nTask 3 requirements:\n1. `ToolCallWrite` in `src/ingest/evidence-writers.ts` has optional `agentEventKey?: string | null`, and tool_call upsert statements include `agent_event` via `surrealOptionRecord(\"agent_event\", call.agentEventKey)`.\n2. Claude and Codex extract types expose `providerEvents: AgentEventWrite[]`; mutable/batch drain/finish paths carry provider events correctly without losing streaming behavior.\n3. Parsed transcr",
-      "previous_assistant_excerpt": "# AGENTS.md instructions for /Users/necmttn/Projects/ax\n\n<INSTRUCTIONS>\n# CLAUDE.md\n\nGuidance for Claude Code and other AI assistants working in this repo.\n\n## What this is\n\n`ax` - local taste & telemetry graph for AI coding agents. Ingests Claude Code transcripts (`~/.claude/projects/`) + Codex transcripts (`~/.codex/sessions/`) + installed skills (`~/.claude/skills/`, `~/.agents/skills/`, plugin caches) into a dedicated SurrealDB instance. CLI surfaces \"what skills/tools you actually use\" on demand.\n\n## Stack\n\n- **Runtime**: bun ≥ 1.3\n- **Language**: TypeScript (strict, `module: preserve`, `",
+      "excerpt": "Can we set up a change log thing that we keep track of what the big changes in between versions? So we can have a like a change log section on the website where after each version release tied to the release please, we have like what are the things that changes, which is auto-generated, but we can also have little uh LM generated like uh summary of changes, what is name, like uh announcement document, etc.",
+      "previous_assistant_excerpt": "Immediate leftovers:\n\n1. Open release PR: #102 `chore(main): release 0.4.0`\n   CI is green. It was generated before #103, so it only mentions #101. If you want the release to include the Effect cleanup too, we should let Release Please refresh or recreate the release PR. If not, it can be merged as-is.\n\n2. Open roadmap/issues:\n   Highest priority: #78, row types say `string | null` but DB can return `undefined`. This is the most correctness-shaped issue.\n   Then: #73 daemon port fallback/runtime state.\n   Then broader roadmap: #64-70 around project memory, recall, concepts, guidance lifecycle,",
+      "review_status": "pending",
+      "rationale": "",
+      "reviewer": ""
+    },
+    {
+      "candidate_id": "tlm__correction__c941d5424f3c4258",
+      "subject_id": "turn:019e434a_63a5_79e1_bd2a_ffd7a2e859ad__c3d459f39129e9d6__seq_000079",
+      "session_id": "session:`019e434a-63a5-79e1-bd2a-ffd7a2e859ad`",
+      "turn_id": "turn:019e434a_63a5_79e1_bd2a_ffd7a2e859ad__c3d459f39129e9d6__seq_000079",
+      "previous_assistant_turn_id": "turn:019e434a_63a5_79e1_bd2a_ffd7a2e859ad__c3d459f39129e9d6__seq_000078",
+      "label_family": "correction",
+      "target": "wrong_output",
+      "weak_label": "correction",
+      "weak_confidence": 0.7,
+      "weak_sources": [
+        "intent:correction"
+      ],
+      "evidence_paths": [
+        "turn:019e434a_63a5_79e1_bd2a_ffd7a2e859ad__c3d459f39129e9d6__seq_000079"
+      ],
+      "excerpt": "Stop investigating. Summarize NOW with what you have: verdict (proceed/proceed-with-changes/rethink), direct answers to the 4 open questions, blocking issues. Concise.",
+      "previous_assistant_excerpt": "<permissions instructions>\nFilesystem sandboxing defines which files can be read or written. `sandbox_mode` is `workspace-write`: The sandbox permits reading files, and editing files in `cwd` and `writable_roots`. Editing files in other directories requires approval. Network access is restricted.\nApproval policy is currently never. Do not provide the `sandbox_permissions` for any reason, commands will be rejected.\n The writable roots are `/Users/necmttn/Projects/quera`, `/private/tmp`, `/private/var/folders/b3/vjgftfjn4ls48pw7_t4n6hx80000gn/T`, `/Users/necmttn/.codex/memories`.\n</permissions i",
+      "review_status": "pending",
+      "rationale": "",
+      "reviewer": ""
+    },
+    {
+      "candidate_id": "tlm__direction__1bb19052a21460a3",
+      "subject_id": "turn:8c1a1209_11ec_48e9_9a2f_154c0dcb9d29__d2644989ab5b6d20__seq_000671",
+      "session_id": "session:`8c1a1209-11ec-48e9-9a2f-154c0dcb9d29`",
+      "turn_id": "turn:8c1a1209_11ec_48e9_9a2f_154c0dcb9d29__d2644989ab5b6d20__seq_000671",
+      "label_family": "direction",
+      "target": "stated_preference",
+      "weak_label": "direction",
+      "weak_confidence": 0.7,
+      "weak_sources": [
+        "intent:preference"
+      ],
+      "evidence_paths": [
+        "turn:8c1a1209_11ec_48e9_9a2f_154c0dcb9d29__d2644989ab5b6d20__seq_000671"
+      ],
+      "excerpt": "yeah lets do 1 , 3, 4 status check ? sub agent driven? and come back to me with prioritize",
+      "review_status": "pending",
+      "rationale": "",
+      "reviewer": ""
+    },
+    {
+      "candidate_id": "tlm__direction__1e67b7d593fb123b",
+      "subject_id": "turn:6e8ee5ce_0aa9_413f_98ef_bd537dbef696__678d04e0ef16dc94__seq_001594",
+      "session_id": "session:`6e8ee5ce-0aa9-413f-98ef-bd537dbef696`",
+      "turn_id": "turn:6e8ee5ce_0aa9_413f_98ef_bd537dbef696__678d04e0ef16dc94__seq_001594",
+      "label_family": "direction",
+      "target": "stated_preference",
+      "weak_label": "direction",
+      "weak_confidence": 0.7,
+      "weak_sources": [
+        "intent:preference"
+      ],
+      "evidence_paths": [
+        "turn:6e8ee5ce_0aa9_413f_98ef_bd537dbef696__678d04e0ef16dc94__seq_001594"
+      ],
+      "excerpt": "i want ui s to be similar as well .",
+      "review_status": "pending",
+      "rationale": "",
+      "reviewer": ""
+    },
+    {
+      "candidate_id": "tlm__direction__1f71073e980acbde",
+      "subject_id": "turn:019e57f5_d90c_7d42_aaac_fa462dc27311__a9397a8eedb04b35__seq_000835",
+      "session_id": "session:`019e57f5-d90c-7d42-aaac-fa462dc27311`",
+      "turn_id": "turn:019e57f5_d90c_7d42_aaac_fa462dc27311__a9397a8eedb04b35__seq_000835",
+      "previous_assistant_turn_id": "turn:019e57f5_d90c_7d42_aaac_fa462dc27311__a9397a8eedb04b35__seq_000834",
+      "label_family": "direction",
+      "target": "stated_preference",
+      "weak_label": "direction",
+      "weak_confidence": 0.7,
+      "weak_sources": [
+        "intent:preference"
+      ],
+      "evidence_paths": [
+        "turn:019e57f5_d90c_7d42_aaac_fa462dc27311__a9397a8eedb04b35__seq_000835"
+      ],
+      "excerpt": "alright yeah lets do all for clean architecture",
+      "previous_assistant_excerpt": "Short answer: the server fix is clean and should stay. `ON CONFLICT DO NOTHING` plus read-back is the right Postgres-level idempotency pattern for `clientRequestId`.\n\nBut this incident does reveal architecture friction. I would not block on `$improve-codebase-architecture`, but I would do one follow-up deepening pass soon.\n\n1. **Voice Message Submission Module**\nFiles: [handlers.ts](/Users/necmttn/Projects/apps/apps/ailifestory/api/src/mobile/handlers.ts:3106), [handlers.test.ts](/Users/necmttn/Projects/apps/apps/ailifestory/api/src/mobile/handlers.test.ts:1015)\n\nProblem: `voice_message_submit",
+      "review_status": "pending",
+      "rationale": "",
+      "reviewer": ""
+    },
+    {
+      "candidate_id": "tlm__direction__207ec5ad15054ee3",
+      "subject_id": "turn:5c62b378_8f15_4869_96bc_bddd6491a5e2__2aa7e2dde4a2a751__seq_000320",
+      "session_id": "session:`5c62b378-8f15-4869-96bc-bddd6491a5e2`",
+      "turn_id": "turn:5c62b378_8f15_4869_96bc_bddd6491a5e2__2aa7e2dde4a2a751__seq_000320",
+      "label_family": "direction",
+      "target": "stated_preference",
+      "weak_label": "direction",
+      "weak_confidence": 0.7,
+      "weak_sources": [
+        "intent:preference"
+      ],
+      "evidence_paths": [
+        "turn:5c62b378_8f15_4869_96bc_bddd6491a5e2__2aa7e2dde4a2a751__seq_000320"
+      ],
+      "excerpt": "yes lets do 1, 2",
+      "review_status": "pending",
+      "rationale": "",
+      "reviewer": ""
+    },
+    {
+      "candidate_id": "tlm__direction__226b41c0e43d541b",
+      "subject_id": "turn:4da77f95_0ec5_4036_933a_c46dbb4b25bf__ba7b9c142fbfed7b__seq_000018",
+      "session_id": "session:`4da77f95-0ec5-4036-933a-c46dbb4b25bf`",
+      "turn_id": "turn:4da77f95_0ec5_4036_933a_c46dbb4b25bf__ba7b9c142fbfed7b__seq_000018",
+      "label_family": "direction",
+      "target": "stated_preference",
+      "weak_label": "direction",
+      "weak_confidence": 0.7,
+      "weak_sources": [
+        "intent:preference"
+      ],
+      "evidence_paths": [
+        "turn:4da77f95_0ec5_4036_933a_c46dbb4b25bf__ba7b9c142fbfed7b__seq_000018"
+      ],
+      "excerpt": "i want to break it down about 1 comparision what we have what they got what you offer before  after  how it' helps ?",
+      "review_status": "pending",
+      "rationale": "",
+      "reviewer": ""
+    },
+    {
+      "candidate_id": "tlm__direction__2292e5973e930eec",
+      "subject_id": "turn:fd2bd2ab_7956_441b_8047_82a9017ac76b__648c3a1f2a8b6e95__seq_001730",
+      "session_id": "session:`fd2bd2ab-7956-441b-8047-82a9017ac76b`",
+      "turn_id": "turn:fd2bd2ab_7956_441b_8047_82a9017ac76b__648c3a1f2a8b6e95__seq_001730",
+      "label_family": "direction",
+      "target": "stated_preference",
+      "weak_label": "direction",
+      "weak_confidence": 0.7,
+      "weak_sources": [
+        "intent:preference"
+      ],
+      "evidence_paths": [
+        "turn:fd2bd2ab_7956_441b_8047_82a9017ac76b__648c3a1f2a8b6e95__seq_001730"
+      ],
+      "excerpt": "We need to clean up the skills a bit. The previous one, the query one, I think let's lower it down to setup and retro and have the both skill to have a prefix of x column and the name of the skill. Uh so we can like similar to super powers we have right now. And yeah.",
+      "review_status": "pending",
+      "rationale": "",
+      "reviewer": ""
+    },
+    {
+      "candidate_id": "tlm__direction__22b80d7b11016670",
+      "subject_id": "turn:52caad90_847d_4c4b_ba89_723038ed9abc__04754bca62cda143__seq_000120",
+      "session_id": "session:`52caad90-847d-4c4b-ba89-723038ed9abc`",
+      "turn_id": "turn:52caad90_847d_4c4b_ba89_723038ed9abc__04754bca62cda143__seq_000120",
+      "label_family": "direction",
+      "target": "stated_preference",
+      "weak_label": "direction",
+      "weak_confidence": 0.7,
+      "weak_sources": [
+        "intent:preference"
+      ],
+      "evidence_paths": [
+        "turn:52caad90_847d_4c4b_ba89_723038ed9abc__04754bca62cda143__seq_000120"
+      ],
+      "excerpt": "I think we can add parts for Scope group feedback collapse part. For example in there the task list etc. We can mention the meta frameworks out there similar to like a get shit done or spec ops etc. I don't know uh ralph loop uh name drops a couple of those things like what I mean by that. And still there is a uhIntelligence is like literally you chatting with it and seeing the results.  First graph can be improved, I think, it's not very clear. [Image #1] I'm having difficulty to ingest what I'm seeing in here. You can also in utilize some things some better, more readable..\nThe example that ",
+      "review_status": "pending",
+      "rationale": "",
+      "reviewer": ""
+    },
+    {
+      "candidate_id": "tlm__direction__237bc179e2c9f927",
+      "subject_id": "turn:5845d8a3_73bb_42c1_8a89_c1a3441609b9__761efe5bcbb8f70c__seq_000004",
+      "session_id": "session:`5845d8a3-73bb-42c1-8a89-c1a3441609b9`",
+      "turn_id": "turn:5845d8a3_73bb_42c1_8a89_c1a3441609b9__761efe5bcbb8f70c__seq_000004",
+      "label_family": "direction",
+      "target": "stated_preference",
+      "weak_label": "direction",
+      "weak_confidence": 0.7,
+      "weak_sources": [
+        "intent:preference"
+      ],
+      "evidence_paths": [
+        "turn:5845d8a3_73bb_42c1_8a89_c1a3441609b9__761efe5bcbb8f70c__seq_000004"
+      ],
+      "excerpt": "can we add adapters for transport and show it in the UI of the landing page. \nWS, SSE, durable streams.",
+      "review_status": "pending",
+      "rationale": "",
+      "reviewer": ""
+    },
+    {
+      "candidate_id": "tlm__direction__238b2c6e27f7ab41",
+      "subject_id": "turn:019e633b_c57f_7301_84b3_dc253614898a__1d52cc8a3d5af626__seq_000124",
+      "session_id": "session:`019e633b-c57f-7301-84b3-dc253614898a`",
+      "turn_id": "turn:019e633b_c57f_7301_84b3_dc253614898a__1d52cc8a3d5af626__seq_000124",
+      "previous_assistant_turn_id": "turn:019e633b_c57f_7301_84b3_dc253614898a__1d52cc8a3d5af626__seq_000123",
+      "label_family": "direction",
+      "target": "stated_preference",
+      "weak_label": "direction",
+      "weak_confidence": 0.7,
+      "weak_sources": [
+        "intent:preference"
+      ],
+      "evidence_paths": [
+        "turn:019e633b_c57f_7301_84b3_dc253614898a__1d52cc8a3d5af626__seq_000124"
+      ],
+      "excerpt": "can we add visiuals like https://background-agents.com/    i would like visually appeling as well",
+      "previous_assistant_excerpt": "Yes. I replaced the article body with a stronger version based on that draft and tightened the framing around:\n\n- autocomplete as the original feedback harness\n- autonomy making feedback sparser\n- signal living in transcripts, corrections, and git\n- the main-branch/worktree hook as the concrete proof\n- “push the fix down the stack” as the core principle\n- retros as hypotheses, experiments as the accountability layer\n\nAlso updated the page title/meta and README docs label.\n\nVerification passed:\n- `bun run dashboard:build`\n- `git diff --check`\n- ASCII check for `docs/origin.html`\n\nRefresh:\n\nhttp",
+      "review_status": "pending",
+      "rationale": "",
+      "reviewer": ""
+    },
+    {
+      "candidate_id": "tlm__direction__25cf2b369c300a6c",
+      "subject_id": "turn:019e533c_24cd_7692_a06d_e4eb6576696c__3d09822427c5be02__seq_001827",
+      "session_id": "session:`019e533c-24cd-7692-a06d-e4eb6576696c`",
+      "turn_id": "turn:019e533c_24cd_7692_a06d_e4eb6576696c__3d09822427c5be02__seq_001827",
+      "previous_assistant_turn_id": "turn:019e533c_24cd_7692_a06d_e4eb6576696c__3d09822427c5be02__seq_001826",
+      "label_family": "direction",
+      "target": "stated_preference",
+      "weak_label": "direction",
+      "weak_confidence": 0.7,
+      "weak_sources": [
+        "intent:preference"
+      ],
+      "evidence_paths": [
+        "turn:019e533c_24cd_7692_a06d_e4eb6576696c__3d09822427c5be02__seq_001827"
+      ],
+      "excerpt": "Soft testing is also like a me doing a user exception test and I wanna test the recording, answering, uh like a next question generation um I wanna demonstrate like a episode generation um what else? I wanna set up a phone calls as well. So the way I'm thinking about it we either go with them, have some sort of web version of this app where users can also log in with the web and we can create a test at on through the web or we create through the development en andv rirhonymmente uh uh the admin view parts",
+      "previous_assistant_excerpt": "Yes. I added two AILifeStory root recipes for this:\n\n- `just story core-test` runs the core product/API tests once, no Expo or Simulator.\n- `just story core-watch` runs the same core surface in watch mode for fast iteration.\n\nVerified:\n\n```sh\njust story core-test\n```\n\nResult: `81 passed`, `1 skipped`, around `867ms` test duration.\n\nThis covers the mobile handler/product layer, services, calls, and agent pieces directly through Bun/Vitest, so it avoids Metro, Expo native modules, Expo SQLite, and UI reload time. The only uncommitted change is [apps/ailifestory/justfile](/Users/necmttn/Projects/",
+      "review_status": "pending",
+      "rationale": "",
+      "reviewer": ""
+    },
+    {
+      "candidate_id": "tlm__direction__26cde59bb9f291b5",
+      "subject_id": "turn:019e7284_5640_79f1_aa8e_e23776411ce9__d51f8587021cb69b__seq_000283",
+      "session_id": "session:`019e7284-5640-79f1-aa8e-e23776411ce9`",
+      "turn_id": "turn:019e7284_5640_79f1_aa8e_e23776411ce9__d51f8587021cb69b__seq_000283",
+      "previous_assistant_turn_id": "turn:019e7284_5640_79f1_aa8e_e23776411ce9__d51f8587021cb69b__seq_000282",
+      "label_family": "direction",
+      "target": "stated_preference",
+      "weak_label": "direction",
+      "weak_confidence": 0.7,
+      "weak_sources": [
+        "intent:preference"
+      ],
+      "evidence_paths": [
+        "turn:019e7284_5640_79f1_aa8e_e23776411ce9__d51f8587021cb69b__seq_000283"
+      ],
+      "excerpt": "Spec review requested a Task 3 fix in /Users/necmttn/Projects/ax/.worktrees/local-agent-providers.\n\nIssue:\n- Claude provider events can reuse the same `seq` for the top-level turn event, tool_use provider events, and tool_result events. Schema has unique index `(agent_session, seq)`, so real transcripts with multiple provider events in one turn can fail DB writes.\n\nPlease fix Task 3 only:\n1. Make provider event `seq` unique within a provider session for Claude. Options: maintain a separate monotonically increasing provider event sequence counter, or otherwise guarantee uniqueness. Prefer a sep",
+      "previous_assistant_excerpt": "DONE_WITH_CONCERNS\n\nChanged files:\n- `src/ingest/transcripts.ts`\n- `src/ingest/transcripts.test.ts`\n- `src/ingest/codex.ts`\n- `src/ingest/codex.test.ts`\n- `src/ingest/evidence-writers.ts`\n- `src/ingest/evidence-writers.test.ts` minimal adjacent allowlist update\n\nTests run:\n- `bun test src/ingest/codex.test.ts src/ingest/transcripts.test.ts src/ingest/provider-events.test.ts` pass, 25/25\n- `bun test src/ingest/evidence-writers.test.ts` pass, 7/7\n- `git diff --check` pass\n\nCommit hash:\n- `9113f80`\n\nConcerns:\n- Full `bun run typecheck` still fails on existing unrelated errors outside these touche",
+      "review_status": "pending",
+      "rationale": "",
+      "reviewer": ""
+    },
+    {
+      "candidate_id": "tlm__direction__297e9ebcbe2970fb",
+      "subject_id": "turn:019e7246_4a5b_7c03_ad4b_7dbc8a5d77a9__0db03c91014e3b35__seq_000045",
+      "session_id": "session:`019e7246-4a5b-7c03-ad4b-7dbc8a5d77a9`",
+      "turn_id": "turn:019e7246_4a5b_7c03_ad4b_7dbc8a5d77a9__0db03c91014e3b35__seq_000045",
+      "previous_assistant_turn_id": "turn:019e7246_4a5b_7c03_ad4b_7dbc8a5d77a9__0db03c91014e3b35__seq_000044",
+      "label_family": "direction",
+      "target": "stated_preference",
+      "weak_label": "direction",
+      "weak_confidence": 0.7,
+      "weak_sources": [
+        "intent:preference"
+      ],
+      "evidence_paths": [
+        "turn:019e7246_4a5b_7c03_ad4b_7dbc8a5d77a9__0db03c91014e3b35__seq_000045"
+      ],
+      "excerpt": "can we track my pi config with .dotfiles i have",
+      "previous_assistant_excerpt": "Fixed.\n\nWhat changed:\n- Removed stale global `@mariozechner/pi-coding-agent`, which owned the existing `pi` binary.\n- Installed `@earendil-works/pi-coding-agent@0.77.0`.\n- Verified `pi` now points to the new package.\n- Verified `pi --version` returns `0.77.0`.\n- Verified `pi --help` and `pi list` work without the missing `@earendil-works/pi-ai` error.\n\nYour existing Plannotator extension is still installed:\n\n```text\nnpm:@plannotator/pi-extension\n```\n\nThe original failure was an `EEXIST` conflict from the old global `pi` binary.",
+      "review_status": "pending",
+      "rationale": "",
+      "reviewer": ""
+    },
+    {
+      "candidate_id": "tlm__direction__29ce399359cae6fe",
+      "subject_id": "turn:70908211_280a_498e_a840_f56fcb39e1bc__5a4945750eb65152__seq_003510",
+      "session_id": "session:`70908211-280a-498e-a840-f56fcb39e1bc`",
+      "turn_id": "turn:70908211_280a_498e_a840_f56fcb39e1bc__5a4945750eb65152__seq_003510",
+      "label_family": "direction",
+      "target": "stated_preference",
+      "weak_label": "direction",
+      "weak_confidence": 0.7,
+      "weak_sources": [
+        "intent:preference"
+      ],
+      "evidence_paths": [
+        "turn:70908211_280a_498e_a840_f56fcb39e1bc__5a4945750eb65152__seq_003510"
+      ],
+      "excerpt": "yes lets do it, currently there's some bugs around it hopefully it will be fixed now",
+      "review_status": "pending",
+      "rationale": "",
+      "reviewer": ""
+    },
+    {
+      "candidate_id": "tlm__direction__2ae6f5d0adab4f9f",
+      "subject_id": "turn:019e791a_19b4_7352_98da_e1b80bdea61f__8c23c3d22aedbf9b__seq_000052",
+      "session_id": "session:`019e791a-19b4-7352-98da-e1b80bdea61f`",
+      "turn_id": "turn:019e791a_19b4_7352_98da_e1b80bdea61f__8c23c3d22aedbf9b__seq_000052",
+      "previous_assistant_turn_id": "turn:019e791a_19b4_7352_98da_e1b80bdea61f__8c23c3d22aedbf9b__seq_000051",
+      "label_family": "direction",
+      "target": "stated_preference",
+      "weak_label": "direction",
+      "weak_confidence": 0.7,
+      "weak_sources": [
+        "intent:preference"
+      ],
+      "evidence_paths": [
+        "turn:019e791a_19b4_7352_98da_e1b80bdea61f__8c23c3d22aedbf9b__seq_000052"
+      ],
+      "excerpt": "Can we run each of them with different sub-agents and you drive the merge uh keep the main branch clean, the main root of the repo. If they are gonna work on the different work trees, let them work in separate places.",
+      "previous_assistant_excerpt": "I found 4 concrete deepening opportunities. No files changed.\n\n1. **Provider Transcript Ingest Normalization**\nFiles: [transcripts.ts](/Users/necmttn/Projects/ax/src/ingest/transcripts.ts:1), [codex.ts](/Users/necmttn/Projects/ax/src/ingest/codex.ts:1), [cursor.ts](/Users/necmttn/Projects/ax/src/ingest/cursor.ts:1), [opencode.ts](/Users/necmttn/Projects/ax/src/ingest/opencode.ts:1), [pi.ts](/Users/necmttn/Projects/ax/src/ingest/pi.ts:1), [normalized/transcripts.ts](/Users/necmttn/Projects/ax/src/ingest/normalized/transcripts.ts:1)\n\nProblem: each provider module repeats the same transcript conc",
+      "review_status": "pending",
+      "rationale": "",
+      "reviewer": ""
+    },
+    {
+      "candidate_id": "tlm__direction__2b5a8b2533031d19",
+      "subject_id": "turn:fd2bd2ab_7956_441b_8047_82a9017ac76b__648c3a1f2a8b6e95__seq_001790",
+      "session_id": "session:`fd2bd2ab-7956-441b-8047-82a9017ac76b`",
+      "turn_id": "turn:fd2bd2ab_7956_441b_8047_82a9017ac76b__648c3a1f2a8b6e95__seq_001790",
+      "label_family": "direction",
+      "target": "stated_preference",
+      "weak_label": "direction",
+      "weak_confidence": 0.7,
+      "weak_sources": [
+        "intent:preference"
+      ],
+      "evidence_paths": [
+        "turn:fd2bd2ab_7956_441b_8047_82a9017ac76b__648c3a1f2a8b6e95__seq_001790"
+      ],
+      "excerpt": "[Image #4] Based on what I understood, the agent actually didn't ingest much and so far what it gets, it's like another good feedback. Can we do if the is there a way to like a trigger cloud codes insightights thing and the codex self-reflecting and our ingestion to figure out the session overlaps etcetera, to figure out something actionable, some like a good queries for agent to give back. Because as it is right now, like I just set it up from fresh and like it's testing, but yeah, it's missing out stuff.",
+      "review_status": "pending",
+      "rationale": "",
+      "reviewer": ""
+    },
+    {
+      "candidate_id": "tlm__direction__2ba5f4a495687ecc",
+      "subject_id": "turn:89164e62_42e2_47e8_a72d_93c9e5412d8a__af909bbea9ededed__seq_000387",
+      "session_id": "session:`89164e62-42e2-47e8-a72d-93c9e5412d8a`",
+      "turn_id": "turn:89164e62_42e2_47e8_a72d_93c9e5412d8a__af909bbea9ededed__seq_000387",
+      "label_family": "direction",
+      "target": "stated_preference",
+      "weak_label": "direction",
+      "weak_confidence": 0.7,
+      "weak_sources": [
+        "intent:preference"
+      ],
+      "evidence_paths": [
+        "turn:89164e62_42e2_47e8_a72d_93c9e5412d8a__af909bbea9ededed__seq_000387"
+      ],
+      "excerpt": "alright lets work on this issue now using subagents",
+      "review_status": "pending",
+      "rationale": "",
+      "reviewer": ""
+    },
+    {
+      "candidate_id": "tlm__direction__2bc0f4cd7fd570cc",
+      "subject_id": "turn:019e71cd_3cb0_7f61_affd_bd4615480ad9__231b3e62d067f010__seq_004965",
+      "session_id": "session:`019e71cd-3cb0-7f61-affd-bd4615480ad9`",
+      "turn_id": "turn:019e71cd_3cb0_7f61_affd_bd4615480ad9__231b3e62d067f010__seq_004965",
+      "previous_assistant_turn_id": "turn:019e71cd_3cb0_7f61_affd_bd4615480ad9__231b3e62d067f010__seq_004964",
+      "label_family": "direction",
+      "target": "stated_preference",
+      "weak_label": "direction",
+      "weak_confidence": 0.7,
+      "weak_sources": [
+        "intent:preference"
+      ],
+      "evidence_paths": [
+        "turn:019e71cd_3cb0_7f61_affd_bd4615480ad9__231b3e62d067f010__seq_004965"
+      ],
+      "excerpt": "can we embed this highlights to existing  view instead of adding new block view ?",
+      "previous_assistant_excerpt": "Fixed the UI and one underlying data bug.\n\nWhat changed:\n- Corrected turn-to-content mapping. The inspector was attaching blocks from the wrong turn because JSONL turns and normalized DB `turn.seq` do not line up exactly. It now verifies block text against the rendered turn text before attaching.\n- Reworked the expanded block UI:\n  - no more collapsed skinny `RAW TURN` rail\n  - full-width annotated raw block preview\n  - blocks/atoms panes below it with stable widths\n  - different block colors for context/objective/budget/tool/system/etc.\n  - when `blocks` is open, the main turn text itself use",
+      "review_status": "pending",
+      "rationale": "",
+      "reviewer": ""
+    },
+    {
+      "candidate_id": "tlm__direction__2c54338509abd55b",
+      "subject_id": "turn:019e791a_19b4_7352_98da_e1b80bdea61f__8c23c3d22aedbf9b__seq_000547",
+      "session_id": "session:`019e791a-19b4-7352-98da-e1b80bdea61f`",
+      "turn_id": "turn:019e791a_19b4_7352_98da_e1b80bdea61f__8c23c3d22aedbf9b__seq_000547",
+      "previous_assistant_turn_id": "turn:019e791a_19b4_7352_98da_e1b80bdea61f__8c23c3d22aedbf9b__seq_000546",
+      "label_family": "direction",
+      "target": "stated_preference",
+      "weak_label": "direction",
+      "weak_confidence": 0.7,
+      "weak_sources": [
+        "intent:preference"
+      ],
+      "evidence_paths": [
+        "turn:019e791a_19b4_7352_98da_e1b80bdea61f__8c23c3d22aedbf9b__seq_000547"
+      ],
+      "excerpt": "can we identify product issues are they fixeable",
+      "previous_assistant_excerpt": "Merged into `main` and smoke-tested. Current head is `ebae1c7` (`test: update opencode parity evidence`), and `main` is ahead of `origin/main` by 8 commits.\n\nVerification passed:\n- `bun test`: 1428 pass, 2 skip, 0 fail\n- `bun run typecheck`: exit 0, with the existing Effect diagnostic noise still printing\n- `bun run dashboard:build`: exit 0\n- DB/schema smoke passed\n- CLI/API smokes passed for sessions, improve, project context/verify/harness, and ingest stages\n- Browser dogfood passed for `/`, `/sessions`, session detail, and `/improve`\n\nDogfood report and screenshots are in [dogfood-output/ar",
+      "review_status": "pending",
+      "rationale": "",
+      "reviewer": ""
+    },
+    {
+      "candidate_id": "tlm__direction__2c94849b0d5637f9",
+      "subject_id": "turn:ab18a0ea_99f4_4df7_b200_43e0da82fd5f__f9c51d69a9b1027c__seq_000004",
+      "session_id": "session:`ab18a0ea-99f4-4df7-b200-43e0da82fd5f`",
+      "turn_id": "turn:ab18a0ea_99f4_4df7_b200_43e0da82fd5f__f9c51d69a9b1027c__seq_000004",
+      "label_family": "direction",
+      "target": "stated_preference",
+      "weak_label": "direction",
+      "weak_confidence": 0.7,
+      "weak_sources": [
+        "intent:preference"
+      ],
+      "evidence_paths": [
+        "turn:ab18a0ea_99f4_4df7_b200_43e0da82fd5f__f9c51d69a9b1027c__seq_000004"
+      ],
+      "excerpt": "[5/29/26 9:24 AM] Mitch Nick: Dynamic workflow just like a ralph loop kinda, right?! Except 1) it lets things run in parallel and 2) allowed to run on subscription (not separate usage based billing)\n[5/29/26 9:29 AM] Neco: thats how i interpreted as well. one of the problem CC had was there's no programmatic way to /clear context window   with workflows they kind a jinx what @alfredvcr  is building with statemachines but internal\n[5/29/26 9:33 AM] Neco: export const meta = {\n  name: 'triage-open-issues',\n  description: 'Fetch open GitHub issues and triage each (priority, effort, blockers, next",
+      "review_status": "pending",
+      "rationale": "",
+      "reviewer": ""
+    },
+    {
+      "candidate_id": "tlm__direction__2e910a02dc3f217d",
+      "subject_id": "turn:72f97b36_ac6c_4b37_a926_2712e4bf156f__d3ce108bcf0c2fa5__seq_002843",
+      "session_id": "session:`72f97b36-ac6c-4b37-a926-2712e4bf156f`",
+      "turn_id": "turn:72f97b36_ac6c_4b37_a926_2712e4bf156f__d3ce108bcf0c2fa5__seq_002843",
+      "label_family": "direction",
+      "target": "stated_preference",
+      "weak_label": "direction",
+      "weak_confidence": 0.7,
+      "weak_sources": [
+        "intent:preference"
+      ],
+      "evidence_paths": [
+        "turn:72f97b36_ac6c_4b37_a926_2712e4bf156f__d3ce108bcf0c2fa5__seq_002843"
+      ],
+      "excerpt": "alright now can we recheck the architecture of executor.sh because they also have similar idea around secret managment",
+      "review_status": "pending",
+      "rationale": "",
+      "reviewer": ""
+    },
+    {
+      "candidate_id": "tlm__direction__2ed131d5146d9b67",
+      "subject_id": "turn:019e76fb_b294_79b2_9bb3_d1ebe3e5d908__cd002bebba66f2ad__seq_002662",
+      "session_id": "session:`019e76fb-b294-79b2-9bb3-d1ebe3e5d908`",
+      "turn_id": "turn:019e76fb_b294_79b2_9bb3_d1ebe3e5d908__cd002bebba66f2ad__seq_002662",
+      "previous_assistant_turn_id": "turn:019e76fb_b294_79b2_9bb3_d1ebe3e5d908__cd002bebba66f2ad__seq_002661",
+      "label_family": "direction",
+      "target": "stated_preference",
+      "weak_label": "direction",
+      "weak_confidence": 0.7,
+      "weak_sources": [
+        "intent:preference"
+      ],
+      "evidence_paths": [
+        "turn:019e76fb_b294_79b2_9bb3_d1ebe3e5d908__cd002bebba66f2ad__seq_002662"
+      ],
+      "excerpt": "Alright, what's the next in this thread? I wanna try to use a little bit more complex models. What we have so far, you said is a light models. What is the next step of classifiers we can work on?",
+      "previous_assistant_excerpt": "Goal is complete: [2026-05-30-classifier-facts-evidence-harness-goal.md](/Users/necmttn/Projects/ax/docs/superpowers/goals/2026-05-30-classifier-facts-evidence-harness-goal.md).\n\nDelivered the full classifier facts/evidence/harness path:\n\n- 6 classifier insight views: results, themes, facts, correction contexts, outcomes, harness candidates.\n- 4+ evidence kinds: classified turn, previous assistant, recent tool failure, recent edited file.\n- Harness candidates now have stable ids, signatures, proposed layer/action, examples, and evidence refs.\n- 26/26 classifier fixtures pass.\n- 2 package-shape",
+      "review_status": "pending",
+      "rationale": "",
+      "reviewer": ""
+    },
+    {
+      "candidate_id": "tlm__direction__2f3b36984a2e4d88",
+      "subject_id": "turn:019e533c_24cd_7692_a06d_e4eb6576696c__3d09822427c5be02__seq_001592",
+      "session_id": "session:`019e533c-24cd-7692-a06d-e4eb6576696c`",
+      "turn_id": "turn:019e533c_24cd_7692_a06d_e4eb6576696c__3d09822427c5be02__seq_001592",
+      "previous_assistant_turn_id": "turn:019e533c_24cd_7692_a06d_e4eb6576696c__3d09822427c5be02__seq_001591",
+      "label_family": "direction",
+      "target": "stated_preference",
+      "weak_label": "direction",
+      "weak_confidence": 0.7,
+      "weak_sources": [
+        "intent:preference"
+      ],
+      "evidence_paths": [
+        "turn:019e533c_24cd_7692_a06d_e4eb6576696c__3d09822427c5be02__seq_001592"
+      ],
+      "excerpt": "yes please do",
+      "previous_assistant_excerpt": "Good. I’d treat the HealthOS dev setup as validated now.\n\nCurrent next cleanup:\n- Leave `apps/healthos/web/src/routeTree.gen.ts` alone unless you want to commit that formatting churn.\n- Keep using `just health ios` only after native dependency changes.\n- Use `just health mobile` for normal HealthOS mobile dev.\n\nNext architecture step: continue moving shared auth/session assumptions into `@apps/auth`, then make HealthOS and Ailifestory app-specific layers thin wrappers around that package.",
+      "review_status": "pending",
+      "rationale": "",
+      "reviewer": ""
+    },
+    {
+      "candidate_id": "tlm__direction__2f8ce91c63ef9927",
+      "subject_id": "turn:11fb5aad_2d45_45ef_9f94_7738ce250327__ab7c9d8b15cbcb04__seq_000388",
+      "session_id": "session:`11fb5aad-2d45-45ef-9f94-7738ce250327`",
+      "turn_id": "turn:11fb5aad_2d45_45ef_9f94_7738ce250327__ab7c9d8b15cbcb04__seq_000388",
+      "label_family": "direction",
+      "target": "stated_preference",
+      "weak_label": "direction",
+      "weak_confidence": 0.7,
+      "weak_sources": [
+        "intent:preference"
+      ],
+      "evidence_paths": [
+        "turn:11fb5aad_2d45_45ef_9f94_7738ce250327__ab7c9d8b15cbcb04__seq_000388"
+      ],
+      "excerpt": "can we get some design assets to make the terminal truely looks like claude code / codex ? their ascii art etc",
+      "review_status": "pending",
+      "rationale": "",
+      "reviewer": ""
+    },
+    {
+      "candidate_id": "tlm__direction__2f9c9c370cde3868",
+      "subject_id": "turn:019e6320_4155_7e40_8beb_c35a6780faeb__e39e3566ae1c4b90__seq_000115",
+      "session_id": "session:`019e6320-4155-7e40-8beb-c35a6780faeb`",
+      "turn_id": "turn:019e6320_4155_7e40_8beb_c35a6780faeb__e39e3566ae1c4b90__seq_000115",
+      "previous_assistant_turn_id": "turn:019e6320_4155_7e40_8beb_c35a6780faeb__e39e3566ae1c4b90__seq_000114",
+      "label_family": "direction",
+      "target": "stated_preference",
+      "weak_label": "direction",
+      "weak_confidence": 0.7,
+      "weak_sources": [
+        "intent:preference"
+      ],
+      "evidence_paths": [
+        "turn:019e6320_4155_7e40_8beb_c35a6780faeb__e39e3566ae1c4b90__seq_000115"
+      ],
+      "excerpt": "alright lets commit.",
+      "previous_assistant_excerpt": "<environment_context>\n  <current_date>2026-05-27</current_date>\n  <timezone>Asia/Makassar</timezone>\n</environment_context>",
+      "review_status": "pending",
+      "rationale": "",
+      "reviewer": ""
+    },
+    {
+      "candidate_id": "tlm__direction__3028e097afc88707",
+      "subject_id": "turn:67fc26ae_3798_46a3_ac7d_3fa9d14ca4c2__d9130d5bcb8f7e9e__seq_000041",
+      "session_id": "session:`67fc26ae-3798-46a3-ac7d-3fa9d14ca4c2`",
+      "turn_id": "turn:67fc26ae_3798_46a3_ac7d_3fa9d14ca4c2__d9130d5bcb8f7e9e__seq_000041",
+      "label_family": "direction",
+      "target": "stated_preference",
+      "weak_label": "direction",
+      "weak_confidence": 0.7,
+      "weak_sources": [
+        "intent:preference"
+      ],
+      "evidence_paths": [
+        "turn:67fc26ae_3798_46a3_ac7d_3fa9d14ca4c2__d9130d5bcb8f7e9e__seq_000041"
+      ],
+      "excerpt": "i want you to build a version of it with durablestream and tanstack db i think it has existing infra we can build on  top instead of reinventing from scratch",
+      "review_status": "pending",
+      "rationale": "",
+      "reviewer": ""
+    },
+    {
+      "candidate_id": "tlm__direction__30a03df5739b4f36",
+      "subject_id": "turn:019e71cd_3cb0_7f61_affd_bd4615480ad9__231b3e62d067f010__seq_003030",
+      "session_id": "session:`019e71cd-3cb0-7f61-affd-bd4615480ad9`",
+      "turn_id": "turn:019e71cd_3cb0_7f61_affd_bd4615480ad9__231b3e62d067f010__seq_003030",
+      "previous_assistant_turn_id": "turn:019e71cd_3cb0_7f61_affd_bd4615480ad9__231b3e62d067f010__seq_003029",
+      "label_family": "direction",
+      "target": "stated_preference",
+      "weak_label": "direction",
+      "weak_confidence": 0.7,
+      "weak_sources": [
+        "intent:preference"
+      ],
+      "evidence_paths": [
+        "turn:019e71cd_3cb0_7f61_affd_bd4615480ad9__231b3e62d067f010__seq_003030"
+      ],
+      "excerpt": "I see how slow is our current index after like a thirty day ingestion. Is it workable? How much difference it will be. I wanna see a comparison between 500 characters versus full text. Uh can you create that benchmark and tell me the numbers?",
+      "previous_assistant_excerpt": "Because `turn.text_excerpt` was originally designed as the cheap recall/search field, not the archival text field.\n\nThe full text is stored separately:\n\n```sql\nDEFINE FIELD text         ON turn TYPE option<string>;  -- full extracted message text\nDEFINE FIELD text_excerpt ON turn TYPE option<string>;  -- first ~500 chars\n```\n\nThe FTS index is currently on `text_excerpt`:\n\n```sql\nDEFINE INDEX turn_text_fts\nON turn FIELDS text_excerpt\nFULLTEXT ANALYZER turn_text BM25 HIGHLIGHTS;\n```\n\nWhy 500 chars was reasonable initially:\n\n- keeps the FTS index small\n- avoids indexing huge pasted files, screens",
+      "review_status": "pending",
+      "rationale": "",
+      "reviewer": ""
+    },
+    {
+      "candidate_id": "tlm__direction__30a1316aae2f6c70",
+      "subject_id": "turn:6e8ee5ce_0aa9_413f_98ef_bd537dbef696__678d04e0ef16dc94__seq_001803",
+      "session_id": "session:`6e8ee5ce-0aa9-413f-98ef-bd537dbef696`",
+      "turn_id": "turn:6e8ee5ce_0aa9_413f_98ef_bd537dbef696__678d04e0ef16dc94__seq_001803",
+      "label_family": "direction",
+      "target": "stated_preference",
+      "weak_label": "direction",
+      "weak_confidence": 0.7,
+      "weak_sources": [
+        "intent:preference"
+      ],
+      "evidence_paths": [
+        "turn:6e8ee5ce_0aa9_413f_98ef_bd537dbef696__678d04e0ef16dc94__seq_001803"
+      ],
+      "excerpt": "alright i wanna publish this on tweeter can you draft me draft?",
+      "review_status": "pending",
+      "rationale": "",
+      "reviewer": ""
+    },
+    {
+      "candidate_id": "tlm__direction__32d63a4aead5a81",
+      "subject_id": "turn:52caad90_847d_4c4b_ba89_723038ed9abc__04754bca62cda143__seq_000769",
+      "session_id": "session:`52caad90-847d-4c4b-ba89-723038ed9abc`",
+      "turn_id": "turn:52caad90_847d_4c4b_ba89_723038ed9abc__04754bca62cda143__seq_000769",
+      "label_family": "direction",
+      "target": "stated_preference",
+      "weak_label": "direction",
+      "weak_confidence": 0.7,
+      "weak_sources": [
+        "intent:preference"
+      ],
+      "evidence_paths": [
+        "turn:52caad90_847d_4c4b_ba89_723038ed9abc__04754bca62cda143__seq_000769"
+      ],
+      "excerpt": "alright can we clean up a bit ? we have origin, manifesto, and landing page need a unify, \ni want width of the origin to match the landing page with.  at least for the hero part of the article.  manifesto still renders as md on the website?   if necessary happy to do grill me with docs ?",
+      "review_status": "pending",
+      "rationale": "",
+      "reviewer": ""
+    },
+    {
+      "candidate_id": "tlm__direction__3321d1f83bb679e3",
+      "subject_id": "turn:11fb5aad_2d45_45ef_9f94_7738ce250327__ab7c9d8b15cbcb04__seq_000653",
+      "session_id": "session:`11fb5aad-2d45-45ef-9f94-7738ce250327`",
+      "turn_id": "turn:11fb5aad_2d45_45ef_9f94_7738ce250327__ab7c9d8b15cbcb04__seq_000653",
+      "label_family": "direction",
+      "target": "stated_preference",
+      "weak_label": "direction",
+      "weak_confidence": 0.7,
+      "weak_sources": [
+        "intent:preference"
+      ],
+      "evidence_paths": [
+        "turn:11fb5aad_2d45_45ef_9f94_7738ce250327__ab7c9d8b15cbcb04__seq_000653"
+      ],
+      "excerpt": "can we have some realistic end of subagent end ? check from ax some subagent session endings for reference",
       "review_status": "pending",
       "rationale": "",
       "reviewer": ""
@@ -1717,10 +1699,10 @@
   "review_diversity": {
     "label_family_count": 4,
     "label_family_counts": {
-      "verification": 23,
-      "direction": 22,
+      "verification": 10,
+      "direction": 43,
       "approval_or_rejection": 13,
-      "correction": 22
+      "correction": 14
     },
     "min_weak_confidence": 0.7,
     "max_weak_confidence": 0.84

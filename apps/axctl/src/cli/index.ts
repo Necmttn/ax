@@ -11,6 +11,7 @@ import { prettyPrint, surrealLiteral } from "@ax/lib/json";
 import { prettifyProjectSlug } from "@ax/lib/shared/project-slug";
 import { AppLayer } from "@ax/lib/layers";
 import { deriveCheckpoints } from "../ingest/derive-checkpoints.ts";
+import { loadAgentScopeMap } from "../ingest/agent-scope.ts";
 import { retroFromSession, upsertRetro, type RetroSource } from "../ingest/retro.ts";
 import { runAgentAccept } from "../improve/agent-accept.ts";
 import { acceptProposal, rejectProposal } from "../improve/actions.ts";
@@ -88,7 +89,7 @@ import { fetchSessionCompare } from "../dashboard/session-compare.ts";
 import { fetchCostSummary, type CostSummary } from "../dashboard/cost-query.ts";
 import { renderSessionMarkdown, renderSessionJson } from "./session-show-format.ts";
 import { renderCompareTable, renderCompareJson } from "./session-compare-format.ts";
-import { cmdDaemon, cmdDoctor, cmdInstall, cmdUninstall } from "./install.ts";
+import { cmdDaemon, cmdDoctor, cmdInstall, cmdSetup, cmdUninstall } from "./install.ts";
 import { resolvePwdRepository } from "../pwd.ts";
 import { detectStaleness } from "@ax/lib/transcript-staleness";
 import { ingestTranscripts } from "../ingest/transcripts.ts";
@@ -110,6 +111,9 @@ import {
     type FileContextHookInput,
 } from "../hooks/file-context-hook.ts";
 import { recordHookFire } from "../hooks/telemetry.ts";
+import { hooksConfigSubcommands } from "../hooks/cli.ts";
+import { skillsConfigSubcommands } from "../skills/cli.ts";
+import { agentsCommand } from "../agents/cli.ts";
 import type { TelemetryHarness } from "@ax/lib/telemetry-base";
 import { formatHookLogRowsTsv, queryHookLog } from "../hooks/log.ts";
 import {
@@ -1132,7 +1136,12 @@ LIMIT ${limit};`;
 const cmdUnused = (args: string[]) =>
     Effect.gen(function* () {
         const days = parsePositiveIntFlag("unused", "days", args, 7);
+        const includeScoped = args.includes("--include-scoped");
         const db = yield* SurrealClient;
+        // Skills declared in a subagent's `skills:` frontmatter load only when
+        // that agent is spawned - they're not global dead weight. Recover the
+        // skill → agent(s) map from disk so they can be hidden/tagged here.
+        const agentScope = yield* loadAgentScopeMap();
         // PERF (issue #31): Previous form ran a correlated subquery per skill
         // (`SELECT count() FROM invoked WHERE out = $parent.id AND ts > N`).
         // On the largest skill (~500k invoked edges) the index walk took
@@ -1163,7 +1172,7 @@ GROUP BY out;`;
         // GROUP BY scan; pull them straight from the skill table so the
         // "never used" rows still appear.
         const noInvSql = `
-SELECT name, scope FROM skill WHERE array::len(<-invoked) = 0;`;
+SELECT name, scope FROM skill WHERE array::len(<-invoked) = 0 AND deleted_at IS NONE;`;
         const [recentRes, summaryRes, skillRes, noInvRes] = yield* Effect.all(
             [
                 db.query<[Array<Record<string, unknown>>]>(recentSql),
@@ -1229,12 +1238,32 @@ SELECT name, scope FROM skill WHERE array::len(<-invoked) = 0;`;
             (a, b) =>
                 a.total_inv - b.total_inv || a.name.localeCompare(b.name),
         );
+        let hiddenScoped = 0;
         for (const r of unused) {
+            const agents = agentScope.get(r.name);
+            if (agents && agents.length > 0) {
+                // Agent-scoped: not global dead weight. Hide unless asked,
+                // and when shown, tag with the owning agent(s) instead of scope.
+                if (!includeScoped) {
+                    hiddenScoped++;
+                    continue;
+                }
+                console.log(
+                    `${r.name}  [agent:${agents.join(",")}]  total=${fmtCount(r.total_inv)}  last=${r.last_used}`,
+                );
+                continue;
+            }
             console.log(
                 `${r.name}  [${r.scope}]  total=${fmtCount(r.total_inv)}  last=${r.last_used}`,
             );
         }
-        console.log(`\n${unused.length} skills unused in last ${days} days.`);
+        const shown = unused.length - (includeScoped ? 0 : hiddenScoped);
+        console.log(`\n${shown} skills unused in last ${days} days.`);
+        if (hiddenScoped > 0 && !includeScoped) {
+            console.log(
+                `${hiddenScoped} agent-scoped skills hidden (load only inside a subagent); --include-scoped to show.`,
+            );
+        }
     });
 
 const cmdSkillsWeighted = (args: string[]) =>
@@ -4368,9 +4397,17 @@ const recentCommand = Command.make(
 
 const unusedCommand = Command.make(
     "unused",
-    { days: Flag.integer("days").pipe(Flag.withDefault(7)) },
-    ({ days }) => cmdUnused([`--days=${days}`]),
-).pipe(Command.withDescription("List skills unused within a time window"));
+    {
+        days: Flag.integer("days").pipe(Flag.withDefault(7)),
+        includeScoped: Flag.boolean("include-scoped").pipe(Flag.withDefault(false)),
+    },
+    ({ days, includeScoped }) =>
+        cmdUnused([`--days=${days}`, ...(includeScoped ? ["--include-scoped"] : [])]),
+).pipe(
+    Command.withDescription(
+        "List skills unused within a time window (agent-scoped skills hidden unless --include-scoped)",
+    ),
+);
 
 const tasteCommand = Command.make(
     "taste",
@@ -4532,6 +4569,7 @@ const skillsCommand = Command.make("skills").pipe(
         skillsLintCommand,
         byRoleCommand,
         rolesForSkillCommand,
+        ...skillsConfigSubcommands,
     ]),
 );
 
@@ -4854,8 +4892,9 @@ const hooksBacktestCommand = Command.make(
 ).pipe(Command.withDescription("Run deterministic feedback-case backtests for hook evidence"));
 
 const hooksCommand = Command.make("hooks").pipe(
-    Command.withDescription("Inspect native Claude/Codex harness hook evidence"),
+    Command.withDescription("Hook config CRUD (config/add/remove/edit/disable/enable) + evidence (summary/invocations/session/backtest)"),
     Command.withSubcommands([
+        ...hooksConfigSubcommands,
         hooksSummaryCommand,
         hooksInvocationsCommand,
         hooksSessionCommand,
@@ -4944,7 +4983,33 @@ const tuiCommand = Command.make("tui", {}, () =>
 
 const installCommand = Command.make("install", {}, () =>
     Effect.promise(() => cmdInstall()),
-).pipe(Command.withDescription("One-shot setup: daemon, watcher, and symlink"));
+).pipe(Command.withDescription("One-shot setup: daemon, watcher, symlink (then runs `ax setup`)"));
+
+const setupCommand = Command.make(
+    "setup",
+    {
+        agents: Flag.string("agents").pipe(Flag.optional),
+        noIngest: Flag.boolean("no-ingest").pipe(Flag.withDefault(false)),
+        yes: Flag.boolean("yes").pipe(Flag.withDefault(false)),
+        agentPrompt: Flag.boolean("agent-prompt").pipe(Flag.withDefault(false)),
+    },
+    ({ agents, noIngest, yes, agentPrompt }) =>
+        Effect.promise(() =>
+            cmdSetup({
+                ...(agents._tag === "Some"
+                    ? { agents: agents.value.split(",").map((s) => s.trim()).filter(Boolean) }
+                    : {}),
+                skipIngest: noIngest,
+                yes,
+                agentPromptOnly: agentPrompt,
+            }),
+        ),
+).pipe(
+    Command.withDescription(
+        "Install the agent skills, run the first ingest, and verify. " +
+        "--agents=claude-code,codex  --no-ingest  --yes  --agent-prompt (print just the paste-to-agent block)",
+    ),
+);
 
 const daemonStatusCommand = Command.make(
     "status",
@@ -5010,6 +5075,7 @@ export const rootCommand = Command.make("axctl").pipe(
         tuiCommand,
         shareCommand,
         installCommand,
+        setupCommand,
         // Hidden: advanced / agent-driven / maintenance verbs. `withHidden` omits
         // them from `--help`, shell completions, and "did you mean?" while leaving
         // them callable by exact name. `derive-signals`/`derive-intents` MUST stay
@@ -5026,6 +5092,7 @@ export const rootCommand = Command.make("axctl").pipe(
         Command.withHidden(contextCommand),
         Command.withHidden(hookCommand),
         Command.withHidden(hooksCommand),
+        Command.withHidden(agentsCommand),
         Command.withHidden(projectCommand),
         Command.withHidden(evidenceCommand),
         Command.withHidden(versionCommand),
@@ -5167,6 +5234,7 @@ export const DB_COMMANDS: ReadonlySet<string> = new Set([
     "context",
     "hook",
     "hooks",
+    "agents",
     "evidence",
     "tui",
     "dogfood",
@@ -5183,7 +5251,14 @@ export const classifiersPackageOperationsNeedsDb = (args: ReadonlyArray<string>)
 
 async function main() {
     const [, , ...args] = process.argv;
-    if (args[0] === undefined || args[0] === "help" || args[0] === "--help" || args[0] === "-h") {
+    if (args[0] === undefined) {
+        // Bare `ax`: brand landing (ASCII wordmark) then the command list.
+        const { formatLandingBanner } = await import("./banner.ts");
+        process.stdout.write(formatLandingBanner(AX_VERSION, process.stdout.isTTY === true) + "\n");
+        await Effect.runPromise(withoutDb(["--help"]));
+        return;
+    }
+    if (args[0] === "help" || args[0] === "--help" || args[0] === "-h") {
         await Effect.runPromise(withoutDb(["--help"]));
         return;
     }

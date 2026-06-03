@@ -44,6 +44,7 @@ import { graphHealthSql } from "./graph-health.ts";
 
 export const SCHEMA_TABLES: readonly SchemaTableSpec[] = [
     { table: "skill", stage: "active", note: "Installed skills and slash commands." },
+    { table: "agent_def", stage: "active", note: "Agent definition files (~/.claude/agents) with reconcile lifecycle." },
     { table: "role", stage: "active", note: "Skill role labels used for weighting and grouping." },
     { table: "session", stage: "active", note: "Claude and Codex transcript sessions." },
     { table: "agent_provider", stage: "active", note: "Agent transcript provider identities." },

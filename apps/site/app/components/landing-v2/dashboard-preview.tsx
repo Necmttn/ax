@@ -6,14 +6,35 @@ import { RetroTerminal } from "./retro-terminal";
 
 const INSTALL_CMD = "curl -fsSL ax.necmttn.com/install | sh";
 
+// Mirror of packages/lib/src/agent-onboarding.ts (AGENT_ONBOARDING_PROMPT).
+// Kept inline so the marketing bundle stays free of the @ax/lib workspace dep.
+const AGENT_PROMPT = `Set up ax for me. ax is my local agent-experience graph over my Claude Code + Codex history. Do this end to end:
+
+1. VERIFY - run \`ax doctor\`. If anything isn't ok, diagnose and fix it, then re-run until it is.
+
+2. LABEL what ax can't classify - run \`ax skills classify\`. It writes one \`.ax/tasks/classify-<skill>.md\` brief per skill I use but ax can't role-tag. For each brief: read the skill, decide its role(s), and fill the YAML at the bottom (\`primary_role:\` is required; \`secondary_roles\`, \`confidence\`, \`rationale\` are optional). Run \`ax roles\` to see labels already in use. Then run \`ax skills lint\` to apply them.
+
+3. SHOW me the result - run \`ax skills weighted\` and \`ax skills config\`. Tell me which skills you labeled and why, and flag anything ax marked orphan or out-of-scope.
+
+Then recommend a couple of skills I under-use that you'd reach for, based on what you saw.`;
+
 export function DashboardPreview() {
   const [copied, setCopied] = useState(false);
+  const [copiedPrompt, setCopiedPrompt] = useState(false);
 
   function onCopy() {
     if (typeof navigator === "undefined" || !navigator.clipboard) return;
     navigator.clipboard.writeText(INSTALL_CMD).then(() => {
       setCopied(true);
       setTimeout(() => setCopied(false), 1500);
+    });
+  }
+
+  function onCopyPrompt() {
+    if (typeof navigator === "undefined" || !navigator.clipboard) return;
+    navigator.clipboard.writeText(AGENT_PROMPT).then(() => {
+      setCopiedPrompt(true);
+      setTimeout(() => setCopiedPrompt(false), 1500);
     });
   }
 
@@ -70,6 +91,21 @@ export function DashboardPreview() {
             <span className="sep">·</span> works with the agents you already use
           </p>
         </div>
+
+        <button
+          type="button"
+          className={`agent-instructions${copiedPrompt ? " is-copied" : ""}`}
+          onClick={onCopyPrompt}
+          aria-label="copy agent setup instructions"
+          aria-live="polite"
+        >
+          <span className="agent-instructions__label">
+            {copiedPrompt ? "copied - paste into your agent" : "▸ copy agent instructions"}
+          </span>
+          <span className="agent-instructions__hint">
+            then your agent installs, labels your skills &amp; verifies
+          </span>
+        </button>
       </section>
 
       {/* ============= retro terminal: the mechanism ============= */}

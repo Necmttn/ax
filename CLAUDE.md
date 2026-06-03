@@ -43,11 +43,9 @@ turbo.json  tsconfig.base.json  package.json (root = workspace orchestrator)
 Internal imports resolve by package name: `@ax/lib/db`, `@ax/lib/shared/surql`,
 `@ax/schema/schema.surql` (with `{ type: "text" }`), `@ax-classifier/...`.
 
-**Build/test:** `bun run build` compiles the CLI to `dist/axctl`;
-`cd apps/site && bun run build` builds the site; `bunx turbo run build`
-orchestrates both. `bun test` (repo-wide) and `bun run typecheck` (axctl +
-packages) are the CI gates. Site has its own `bun run typecheck` (strict
-null-checks; needs a prior build for route/content codegen).
+**Build/test:** `bun run build` → `dist/axctl`; `bunx turbo run build` does CLI
++ site. CI gates: `bun test` (repo-wide) + `bun run typecheck`. Site's own
+`bun run typecheck` is strict-null and needs a prior build (route/content codegen).
 
 <!-- effect-solutions:start -->
 ## Effect Best Practices
@@ -63,14 +61,9 @@ Topics: quick-start, project-setup, tsconfig, basics, services-and-layers, data-
 Never guess at Effect patterns - check the guide first.
 <!-- effect-solutions:end -->
 
-## Local Effect Source
-
-The Effect v4 source (`effect-smol`) is shallow-cloned to `.references/effect-smol`. Use this to:
-- Explore APIs and find real usage examples
-- Read implementation details when documentation isn't enough
-- Verify type signatures of beta APIs
-
-Run `bun refs:setup` after fresh clone to populate `.references/`.
+Effect v4 source (`effect-smol`) is shallow-cloned to `.references/effect-smol`
+for API/usage/type lookup on beta APIs. `bun refs:setup` populates it after a
+fresh clone.
 
 ## Schema rules of thumb
 
@@ -87,13 +80,9 @@ Run `bun refs:setup` after fresh clone to populate `.references/`.
 
 ### Live ingest in the dashboard
 
-- Trigger an in-process ingest run from `ax serve` via `POST /api/ingest` (or the **Live** tab in the dashboard). The run is forked onto the server's long-lived runtime and reuses the same `runIngest` pipeline as the CLI.
-- Progress is published to a **per-run Durable Stream** named `ingest:<runId>` (`ingestStreamName`). `runIngest` live-trace spans become `IngestStreamEvent`s, flow through the `IngestStreamBus`, and land on a Durable Streams sidecar that the browser subscribes to directly. The backend guarantees exactly one terminal `run_finished` event (synthetic `failed` on cause).
-- The dashboard live view subscribes from offset `-1` (replay history from start, then continue live), so a **page refresh / reconnect mid-run rehydrates** already-done stages and resumes the live tail - the Durable Streams offset-resume payoff vs raw SSE. (See `docs/superpowers/research/durable-streams-api.md` for the embed-vs-sidecar decision.)
-- The `IngestStreamBus` seam (`apps/axctl/src/dashboard/ingest-stream.ts`) means the local Durable-Streams-in-Bun backing can later be swapped for a hosted backend without touching the producers or the UI.
-- The CLI `ax ingest` and its terminal step animation (`apps/axctl/src/cli/ingest-trace-progress.ts`) are **unchanged** - the server path reuses `runIngest`, the CLI never passes a `runId`, and `AX_PROGRESS=off` still silences the CLI animation.
-- `ax ingest` progress is on by default in an interactive terminal (animated pipeline). When stderr isn't a TTY (piped, tmux, some terminals) it's silent by default; force it with `AX_PROGRESS=on` (or `--progress=plain` / `--progress=pipeline`) to get plain `[axctl] <stage> started/done` lines (animation on a real TTY). `AX_PROGRESS=off` silences it. Gated in `withIngest` (`apps/axctl/src/cli/index.ts`).
-- Live ingest in the dashboard requires running ax **from source** (the `bin/axctl` shim already does this). The compiled standalone binary serves the dashboard but disables live ingest - native lmdb can't bundle into the `--compile` binary, so the sidecar is skipped and `POST /api/ingest` returns 503.
+- `ax serve` → `POST /api/ingest` (or the **Live** tab) forks `runIngest` (same pipeline as CLI) onto the server runtime. Progress flows as `IngestStreamEvent`s through the `IngestStreamBus` seam (`apps/axctl/src/dashboard/ingest-stream.ts`) to a per-run Durable Stream `ingest:<runId>`; the browser subscribes from offset `-1`, so refresh/reconnect mid-run rehydrates. Exactly one terminal `run_finished` event guaranteed. The bus seam lets the Bun backing swap for a hosted backend later untouched.
+- CLI `ax ingest` is unchanged (never passes a `runId`). Progress animates on a TTY by default; non-TTY is silent unless forced with `AX_PROGRESS=on` (or `--progress=plain|pipeline`). `AX_PROGRESS=off` silences. Gated in `withIngest` (`apps/axctl/src/cli/index.ts`).
+- **Live ingest needs ax from source** (the `bin/axctl` shim does this). The compiled `--compile` binary serves the dashboard but returns 503 on `POST /api/ingest` - native lmdb can't bundle, so no sidecar.
 
 ## Workflow extraction commands
 

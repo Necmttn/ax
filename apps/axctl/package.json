@@ -1,6 +1,6 @@
 {
   "name": "axctl",
-  "version": "0.7.0",
+  "version": "0.9.0",
   "license": "AGPL-3.0-only",
   "description": "ax CLI - local memory and telemetry for coding agents. axctl ingests transcripts, skills, and git history into SurrealDB; surfaces what skills are worth keeping and what the user actually does on demand.",
   "type": "module",
@@ -29,6 +29,7 @@
     "@ax/schema": "workspace:*",
     "@durable-streams/client": "^0.2.6",
     "@durable-streams/server": "^0.3.5",
+    "@effect/platform-bun": "4.0.0-beta.70",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "@opentui/core": "^0.2.5",
     "@opentui/react": "^0.2.5",
@@ -39,6 +40,7 @@
     "node-pty": "1.1.0",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
+    "smol-toml": "1.6.1",
     "surrealdb": "^2.0.0",
     "yaml": "^2.8.4",
     "zod": "3.25.76"
