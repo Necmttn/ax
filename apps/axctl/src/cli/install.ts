@@ -1,7 +1,8 @@
 import { homedir } from "node:os";
 import { execSync, spawnSync } from "node:child_process";
 import { Cause, Effect, FileSystem, Path } from "effect";
-import { isNotFound, orAbsent } from "@ax/lib/shared/fs-error";
+import { orAbsent } from "@ax/lib/shared/fs-error";
+import { classifyNoFollow } from "@ax/lib/shared/fs-classify";
 import { posixPath } from "@ax/lib/shared/path";
 import { buildOnboardingReport, formatInstallOnboardingGuidance } from "./onboarding.ts";
 import {
@@ -346,7 +347,7 @@ async function unloadAgentKeepPlist(plistPath: string): Promise<void> {
 function unloadAgent(plistPath: string): Effect.Effect<boolean, never, FileSystem.FileSystem> {
     return Effect.gen(function* () {
         const fs = yield* FileSystem.FileSystem;
-        yield* Effect.sync(() => unloadAgentKeepPlist(plistPath));
+        yield* Effect.promise(() => unloadAgentKeepPlist(plistPath));
         if (!(yield* fs.exists(plistPath).pipe(orAbsent(false)))) return false;
         // Original swallowed any unlink error and returned false; `remove`
         // (no force) succeeds on a present file, else recovers to false.
@@ -359,24 +360,24 @@ function unloadAgent(plistPath: string): Effect.Effect<boolean, never, FileSyste
 
 /**
  * Ensure `link` is a symbolic link pointing at `target`. @effect/platform has
- * no `lstat`, so the old `lstat(link).isSymbolicLink()` decision is rebuilt on
- * `fs.readLink`, which SUCCEEDS iff `link` is a symbolic link:
+ * no `lstat`, so the old `lstat(link).isSymbolicLink()` partition is rebuilt on
+ * the shared {@link classifyNoFollow} (readLink->Effect.as(true)->orAbsent(false),
+ * so ANY readLink failure incl. EINVAL on a regular file is treated as
+ * not-a-symlink, then `fs.stat` distinguishes File/Directory/Missing). This
+ * matches the original lstat partition EXACTLY:
  *
- *   old: lstat ENOENT (absent)         -> symlink(target, link)   [create]
- *   old: lstat ok && isSymbolicLink    -> unlink(link); symlink   [replace]
- *   old: lstat ok && NOT symlink       -> throw "exists and is not a symlink"
+ *   old: lstat ENOENT (absent)      -> symlink(target, link)   [create]
+ *   old: lstat ok && isSymbolicLink -> unlink(link); symlink   [replace]
+ *   old: lstat ok && NOT symlink    -> throw "exists and is not a symlink"
  *
- * new: readLink ok                     -> existing symlink: repoint only when
- *                                         the target differs (same end-state as
- *                                         the old unconditional unlink+recreate;
- *                                         REVIEW: old code always recreated even
- *                                         when the target already matched).
- *      readLink NotFound               -> link absent OR a regular file in the
- *                                         way. Distinguish via `fs.exists`:
- *                                           absent -> symlink(target, link)
- *                                           present-not-a-symlink -> throw the
- *                                             same "exists and is not a symlink".
- *      readLink other PlatformError    -> re-raise (matches old non-ENOENT rethrow).
+ *   new: "Missing"                  -> symlink(target, link)   [create]
+ *        "SymbolicLink"             -> repoint via readLink compare: recreate
+ *                                      only when the target differs, no-op when
+ *                                      it already matches (same end-state as the
+ *                                      old unconditional unlink+recreate).
+ *        "File"/"Directory"/"Other" -> throw the same "exists and is not a
+ *                                      symlink" hard error (a regular file in
+ *                                      the slot is preserved, not clobbered).
  */
 export function ensureSymlink(
     target: string,
@@ -384,30 +385,24 @@ export function ensureSymlink(
 ): Effect.Effect<void, Error, FileSystem.FileSystem> {
     return Effect.gen(function* () {
         const fs = yield* FileSystem.FileSystem;
-        const existingTarget = yield* fs.readLink(link).pipe(
-            Effect.map((t) => ({ kind: "symlink" as const, target: t })),
-            Effect.catchTag("PlatformError", (e) =>
-                isNotFound(e)
-                    ? Effect.succeed({ kind: "missing-or-other" as const })
-                    : Effect.fail(e),
-            ),
-        );
+        const kind = yield* classifyNoFollow(link);
 
-        if (existingTarget.kind === "symlink") {
-            if (existingTarget.target === target) return; // already correct
+        if (kind === "SymbolicLink") {
+            const current = yield* fs.readLink(link);
+            if (current === target) return; // already correct
             yield* fs.remove(link, { force: true });
             yield* fs.symlink(target, link);
             return;
         }
 
-        // readLink reported NotFound: either the path is genuinely absent, or a
-        // non-symlink (regular file/dir) is in the way. `fs.exists` follows the
-        // path; if something is there it is NOT a symlink (readLink would have
-        // succeeded), so preserve the old hard error.
-        if (yield* fs.exists(link).pipe(orAbsent(false))) {
-            return yield* Effect.fail(new Error(`${link} exists and is not a symlink`));
+        if (kind === "Missing") {
+            yield* fs.symlink(target, link);
+            return;
         }
-        yield* fs.symlink(target, link);
+
+        // "File"/"Directory"/"Other": something that is NOT a symlink occupies
+        // the slot. Preserve the old hard error (and leave the file intact).
+        return yield* Effect.fail(new Error(`${link} exists and is not a symlink`));
     });
 }
 
@@ -740,7 +735,7 @@ export function cmdInstall(): Effect.Effect<
             dbPlist(binSource, surrealPath, { host: DEFAULT_DB_HOST, port: bind.chosen }),
         );
         console.log(`  wrote:  ${DB_PLIST}`);
-        yield* Effect.sync(() => loadAgent(DB_PLIST));
+        yield* Effect.promise(() => loadAgent(DB_PLIST));
 
         // Wait for daemon to bind
         for (let i = 0; i < 8; i++) {
@@ -753,11 +748,11 @@ export function cmdInstall(): Effect.Effect<
 
         yield* fs.writeFileString(WATCH_PLIST, watchPlist(binSource));
         console.log(`  wrote:  ${WATCH_PLIST}`);
-        yield* Effect.sync(() => loadAgent(WATCH_PLIST));
+        yield* Effect.promise(() => loadAgent(WATCH_PLIST));
 
         yield* fs.writeFileString(DERIVE_PLIST, derivePlist(binSource));
         console.log(`  wrote:  ${DERIVE_PLIST}`);
-        yield* Effect.sync(() => loadAgent(DERIVE_PLIST));
+        yield* Effect.promise(() => loadAgent(DERIVE_PLIST));
 
         // Apply schema from embedded resource via surreal import.
         const schemaPath = path.join(DATA_DIR, ".schema-cache.surql");
@@ -953,24 +948,24 @@ export function cmdDaemon(
             if (!(yield* plistsPresent())) {
                 yield* cmdInstall();
             } else {
-                yield* Effect.sync(() => loadAgent(DB_PLIST));
-                yield* Effect.sync(() => loadAgent(WATCH_PLIST));
-                yield* Effect.sync(() => loadAgent(DERIVE_PLIST));
+                yield* Effect.promise(() => loadAgent(DB_PLIST));
+                yield* Effect.promise(() => loadAgent(WATCH_PLIST));
+                yield* Effect.promise(() => loadAgent(DERIVE_PLIST));
             }
         } else if (parsed.command === "stop") {
-            yield* Effect.sync(() => unloadAgentKeepPlist(DERIVE_PLIST));
-            yield* Effect.sync(() => unloadAgentKeepPlist(WATCH_PLIST));
-            yield* Effect.sync(() => unloadAgentKeepPlist(DB_PLIST));
+            yield* Effect.promise(() => unloadAgentKeepPlist(DERIVE_PLIST));
+            yield* Effect.promise(() => unloadAgentKeepPlist(WATCH_PLIST));
+            yield* Effect.promise(() => unloadAgentKeepPlist(DB_PLIST));
         } else if (parsed.command === "restart") {
-            yield* Effect.sync(() => unloadAgentKeepPlist(DERIVE_PLIST));
-            yield* Effect.sync(() => unloadAgentKeepPlist(WATCH_PLIST));
-            yield* Effect.sync(() => unloadAgentKeepPlist(DB_PLIST));
+            yield* Effect.promise(() => unloadAgentKeepPlist(DERIVE_PLIST));
+            yield* Effect.promise(() => unloadAgentKeepPlist(WATCH_PLIST));
+            yield* Effect.promise(() => unloadAgentKeepPlist(DB_PLIST));
             if (!(yield* plistsPresent())) {
                 yield* cmdInstall();
             } else {
-                yield* Effect.sync(() => loadAgent(DB_PLIST));
-                yield* Effect.sync(() => loadAgent(WATCH_PLIST));
-                yield* Effect.sync(() => loadAgent(DERIVE_PLIST));
+                yield* Effect.promise(() => loadAgent(DB_PLIST));
+                yield* Effect.promise(() => loadAgent(WATCH_PLIST));
+                yield* Effect.promise(() => loadAgent(DERIVE_PLIST));
             }
         }
 
@@ -987,6 +982,36 @@ export function cmdDoctor(
     });
 }
 
+/**
+ * Classify + reclaim a single bin-link slot during uninstall. Mirrors the
+ * original lstat-based partition EXACTLY:
+ *
+ *   old: lstat ENOENT          -> "absent"
+ *   old: lstat ok && symlink   -> unlink -> "removed"
+ *   old: lstat ok && NOT link  -> "skipped" (left intact; uninstall continues)
+ *
+ * lstat never followed symlinks, so a regular file always classified as
+ * "skipped" - never an abort. Built on the shared classifyNoFollow so a regular
+ * file (whose readLink fails with EINVAL, NOT NotFound) is treated as
+ * not-a-symlink -> "skipped" and is NOT re-raised: uninstall must continue to
+ * the purge step regardless of what occupies the slot.
+ */
+export function removeBinLinkSlot(
+    binLink: string,
+): Effect.Effect<"removed" | "absent" | "skipped", Error, FileSystem.FileSystem> {
+    return Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const kind = yield* classifyNoFollow(binLink);
+        if (kind === "SymbolicLink") {
+            yield* fs.remove(binLink);
+            return "removed";
+        }
+        if (kind === "Missing") return "absent";
+        // "File"/"Directory"/"Other": a non-symlink in the slot. Leave intact.
+        return "skipped";
+    });
+}
+
 export function cmdUninstall(
     purge = false,
 ): Effect.Effect<void, Error, FileSystem.FileSystem | Path.Path> {
@@ -1000,24 +1025,7 @@ export function cmdUninstall(
         }
 
         for (const binLink of [path.join(BIN_DIR, "axctl"), path.join(BIN_DIR, "ax")]) {
-            // Old: lstat -> ENOENT = absent; symlink = unlink+removed; else skipped.
-            // No lstat in @effect/platform: `readLink` succeeds iff it's a symlink.
-            let symlinkStatus: "removed" | "absent" | "skipped" = "absent";
-            const isSymlink = yield* fs.readLink(binLink).pipe(
-                Effect.as(true),
-                Effect.catchTag("PlatformError", (e) =>
-                    isNotFound(e) ? Effect.succeed(false) : Effect.fail(e),
-                ),
-            );
-            if (isSymlink) {
-                yield* fs.remove(binLink);
-                symlinkStatus = "removed";
-            } else {
-                // readLink reported NotFound: genuinely absent, or a non-symlink
-                // (regular file/dir) in the way (the old `else` -> "skipped").
-                const present = yield* fs.exists(binLink).pipe(orAbsent(false));
-                symlinkStatus = present ? "skipped" : "absent";
-            }
+            const symlinkStatus = yield* removeBinLinkSlot(binLink);
             if (symlinkStatus === "removed") {
                 console.log(`  removed symlink: ${binLink}`);
             } else if (symlinkStatus === "absent") {
