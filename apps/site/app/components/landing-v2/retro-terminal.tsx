@@ -289,6 +289,30 @@ export function RetroTerminal() {
             p.map((l) => (l.id === id ? { ...l, kind: "ok", text: done } : l))
           );
           scrollDown();
+        } else if (ln.kind === "user") {
+          // typewriter: the prompt shows instantly, the message types out so
+          // it reads as the human writing it.
+          const id = uid();
+          const full = ln.text;
+          const m = full.match(/^❯\s/);
+          const prefix = m ? m[0] : "";
+          const rest = full.slice(prefix.length);
+          setLines((p) => [...p, { id, kind: "user", text: `${prefix}▌` }]);
+          scrollDown();
+          for (let i = 1; i <= rest.length; i++) {
+            await sleep(pace(26));
+            if (cancelled) return false;
+            setLines((p) =>
+              p.map((l) =>
+                l.id === id ? { ...l, text: `${prefix}${rest.slice(0, i)}▌` } : l
+              )
+            );
+          }
+          await sleep(pace(140));
+          setLines((p) =>
+            p.map((l) => (l.id === id ? { ...l, text: prefix + rest } : l))
+          );
+          scrollDown();
         } else {
           setLines((p) => [...p, { id: uid(), kind: ln.kind, text: ln.text }]);
           scrollDown();
