@@ -63,7 +63,16 @@ All `fs.*` return `Effect.Effect<T, PlatformError>`; all `path.*` are pure metho
 - **Other `PlatformError`s** (permission, IO) → propagate by default; a stage may choose to log-and-skip per-item if that matches existing tolerance (e.g. codex's raw-snapshot read already swallows on failure, `codex.ts:1406-1410`).
 - A single bad file must never abort a whole-corpus stage: per-item processing is wrapped so item failures are isolated (defense-in-depth), with `NotFound` skipped silently and other errors logged.
 
-## Phasing (crash-first vertical slices; each phase = its own PR)
+## Execution model
+
+This lands as a **single branch → single PR**, executed **autonomously / unattended** (no human review between phases). The phases below are an *internal ordering* for the executing agent (crash-first, dependency-respecting), NOT separate PRs. Consequences:
+
+- **Tests are the only gate.** The full `bun test` suite + `bun run typecheck` must be green at the end, and ideally kept green phase-to-phase. There is no human checkpoint, so a red suite is the stop signal.
+- **Do NOT modify existing tests** - they are the regression guard for the migration. The sole exception is a **forced dependency change**: when migrating a function changes its signature (e.g. `async` → `Effect`), the existing tests that call it must be updated to the new signature/invocation - that is a mechanical dependency edit, not a behavioral one. Never weaken, delete, or skip an existing assertion to make the suite pass.
+- **Expand tests where coverage is thin.** Add new tests for new behavior (the `NotFound`→skip path, streaming parity, per-migrated-module reads against the in-memory FS layer). New tests are additive.
+- **A green suite must mean what it meant before.** If a migration would make an existing test pass for the wrong reason, stop and surface it rather than editing the test.
+
+## Phasing (internal execution order within the single PR; crash-first, dependency-respecting)
 
 **Phase 0 - Foundation.**
 - Confirm the ingest runtime resolves through `AppLayer` (FileSystem + Path already merged). Add nothing if already satisfied.
@@ -88,7 +97,8 @@ All `fs.*` return `Effect.Effect<T, PlatformError>`; all `path.*` are pure metho
 
 ## Testing
 
-- Per migrated file: replace tmp-dir fixtures with the in-memory FileSystem layer (Phase 0 helper); override the layer in `bun:test`.
+- **Existing suite is the regression guard** - keep it green throughout; only edit an existing test when a migrated signature forces a mechanical call-site change (see Execution model). Never relax an assertion.
+- Per migrated file: prefer the in-memory FileSystem layer (Phase 0 helper) for *new* tests; override the layer in `bun:test`. Existing tmp-dir fixture tests stay as-is unless a signature change forces an update.
 - P3 regression: `NotFound` mid-batch → skip + run completes (Phase 1).
 - Streaming parity: a fixture transcript with/without trailing newline, multi-byte UTF-8, and a large (>10 MB) file produce identical extracted records under `fs.stream`+`splitLines` vs the prior `readLines`.
 - CI: `bun test` + `bun run typecheck` per phase; the compiled-binary smoke (existing `build-artifacts`) still boots.
