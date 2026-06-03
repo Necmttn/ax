@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
-import { Effect, Layer } from "effect";
+import { Effect, Layer, PlatformError } from "effect";
 import { BunFileSystem, BunPath } from "@effect/platform-bun";
+import { layerTestFileSystem } from "@ax/lib/testing/test-filesystem";
 import { SurrealClient, type SurrealClientShape } from "@ax/lib/db";
 import {
     buildCommitLookupQueries,
@@ -17,6 +18,9 @@ import {
     deriveRepositoryDisplayName,
     nestedCheckoutPaths,
     ingestGit,
+    isGitRepo,
+    readRepoListFile,
+    REPO_LIST_FILE,
 } from "./git.ts";
 
 describe("git ingest relation statements", () => {
@@ -285,5 +289,49 @@ describe("ingestGit repoPaths bypass", () => {
         // Empty repoPaths → falls back to discoverRepos → nothing discovered from
         // empty DB sessions → 0 repos.
         expect(result.repos).toBe(0);
+    });
+});
+
+describe("git discovery best-effort tolerance (review fix #1)", () => {
+    const permissionDenied = (method: string, path: string) =>
+        PlatformError.systemError({
+            _tag: "PermissionDenied",
+            module: "FileSystem",
+            method,
+            pathOrDescriptor: path,
+        });
+
+    test("readRepoListFile recovers a non-NotFound (PermissionDenied) repo-list read to []", async () => {
+        const out = await Effect.runPromise(
+            readRepoListFile().pipe(
+                Effect.provide(
+                    layerTestFileSystem(
+                        {},
+                        { errors: { [REPO_LIST_FILE]: permissionDenied("readFileString", REPO_LIST_FILE) } },
+                    ),
+                ),
+            ),
+        );
+        // A faulty optional-config read must NOT abort - it yields an empty list.
+        expect(out).toEqual([]);
+    });
+
+    test("isGitRepo recovers a non-NotFound (PermissionDenied) .git probe to false", async () => {
+        const probePath = "/locked-repo/.git";
+        const out = await Effect.runPromise(
+            isGitRepo("/locked-repo").pipe(
+                Effect.provide(
+                    Layer.merge(
+                        layerTestFileSystem(
+                            {},
+                            { errors: { [probePath]: permissionDenied("exists", probePath) } },
+                        ),
+                        BunPath.layer,
+                    ),
+                ),
+            ),
+        );
+        // A failed discovery probe means "not a repo", not a defect.
+        expect(out).toBe(false);
     });
 });

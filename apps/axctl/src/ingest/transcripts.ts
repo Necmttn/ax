@@ -46,6 +46,7 @@ import { extractToolFileEvidence } from "./tool-file-evidence.ts";
 import { executeStatements, executeStatementsWith } from "@ax/lib/shared/statement-exec";
 import { fileWatermark } from "@ax/lib/shared/watermark";
 import { skipNotFound } from "@ax/lib/shared/fs-error";
+import { posixPath } from "@ax/lib/shared/path";
 
 const MAX_OUTPUT_EXCERPT_CHARS = 1200;
 const DEFAULT_CLAUDE_CONCURRENCY = 4;
@@ -950,12 +951,6 @@ function createClaudeExtractor(path: Path.Path, projectDir: string, sessionId: s
         },
     };
 }
-
-// The pure line-extractor oracle is a synchronous test helper, so it grabs the
-// default (posix) `Path` implementation once via a side-effect-free runSync
-// rather than threading a service through every caller. Production paths use
-// the `Path.Path` obtained from the Effect context in `ingestTranscripts`.
-const posixPath: Path.Path = Effect.runSync(Path.Path.pipe(Effect.provide(Path.layer)));
 
 export function __testExtractClaudeJsonlLines(
     lines: Iterable<string>,

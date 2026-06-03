@@ -20,22 +20,15 @@ import {
 } from "./repository-identity.ts";
 import { surrealString } from "@ax/lib/shared/surql";
 import { executeStatementsWith } from "@ax/lib/shared/statement-exec";
-import { skipNotFound } from "@ax/lib/shared/fs-error";
-
-// `basename` here is pure posix string math on canonical absolute repo paths,
-// used by the synchronous exported `deriveRepositoryDisplayName` helper (which
-// has direct unit-test callers) and by `writeRepo`'s worktree-name derivation.
-// Grab the default (posix) `Path` implementation once via a side-effect-free
-// runSync rather than threading the `Path.Path` service through these pure
-// callers - mirrors `transcripts.ts`. Production fs/path that needs the live
-// service obtains it from the Effect context.
-const posixPath: Path.Path = Effect.runSync(Path.Path.pipe(Effect.provide(Path.layer)));
+import { orAbsent } from "@ax/lib/shared/fs-error";
+import { posixPath } from "@ax/lib/shared/path";
 
 /**
  * Optional override file: one absolute repo path per line. Lines starting with
  * '#' are ignored.
  */
-const REPO_LIST_FILE =
+/** @internal exported for tests. */
+export const REPO_LIST_FILE =
     process.env.AX_REPO_LIST ??
     posixPath.join(homedir(), ".local", "share", "ax", "ax-repos.txt");
 
@@ -77,33 +70,38 @@ interface CommitWithFiles extends CommitRow {
 
 // ---------- repo discovery ----------
 
-const readRepoListFile = (): Effect.Effect<
-    string[],
-    PlatformError.PlatformError,
-    FileSystem.FileSystem
-> =>
+/** @internal exported for tests: proves OPTIONAL-config read tolerance. */
+export const readRepoListFile = (): Effect.Effect<string[], never, FileSystem.FileSystem> =>
     Effect.gen(function* () {
         const fs = yield* FileSystem.FileSystem;
-        // A missing override file is the common case; recover NotFound to "" so
-        // it yields an empty list. Any other PlatformError (permission/IO) is
-        // re-raised by skipNotFound rather than silently swallowed.
-        const txt = yield* fs.readFileString(REPO_LIST_FILE).pipe(skipNotFound(""));
+        const txt = yield* fs.readFileString(REPO_LIST_FILE);
         return txt
             .split("\n")
             .map((l) => l.trim())
             .filter((l) => l.length > 0 && !l.startsWith("#"));
-    });
+    }).pipe(
+        // An OPTIONAL override file: a missing file (NotFound) is the common
+        // case, but a permission/EISDIR/IO fault on this best-effort config read
+        // must ALSO be treated as "no override" rather than aborting the whole
+        // git ingest stage. orAbsent recovers ANY PlatformError to an empty list.
+        orAbsent<string[]>([]),
+    );
 
-const isGitRepo = (
+/** @internal exported for tests: proves discovery-PROBE tolerance. */
+export const isGitRepo = (
     path: string,
-): Effect.Effect<boolean, PlatformError.PlatformError, FileSystem.FileSystem | Path.Path> =>
+): Effect.Effect<boolean, never, FileSystem.FileSystem | Path.Path> =>
     Effect.gen(function* () {
         const fs = yield* FileSystem.FileSystem;
         const pathSvc = yield* Path.Path;
-        // `fs.exists` reports presence without throwing on absence, matching the
-        // prior `stat(...).then(true).catch(false)` semantics.
+        // A discovery PROBE: `fs.exists` reports presence without throwing on
+        // absence. Any PlatformError (permission/EISDIR/IO on the `.git` path)
+        // means "treat as not a repo and continue", matching the prior
+        // `stat(...).then(true).catch(false)` best-effort semantics. orAbsent
+        // recovers ANY PlatformError to false so a single inaccessible candidate
+        // never aborts the whole repo walk.
         return yield* fs.exists(pathSvc.join(path, ".git"));
-    });
+    }).pipe(orAbsent(false));
 
 /**
  * Walk upward from `cwd` until we find a `.git` entry. Returns null when the

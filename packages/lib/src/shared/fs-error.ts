@@ -28,3 +28,23 @@ export const skipNotFound =
         Effect.catchTag(eff, "PlatformError", (e) =>
             isNotFound(e) ? Effect.succeed(fallback) : Effect.fail(e),
         );
+
+/**
+ * Best-effort recovery for discovery PROBES and OPTIONAL reads: ANY
+ * `PlatformError` (NotFound, permission, EISDIR, IO) recovers to `fallback` and
+ * the error is cleared from the E channel. Use ONLY where the operation means
+ * "does this exist / read it if present" and any failure legitimately means
+ * "treat as absent and continue" - NOT for reads whose failure would silently
+ * drop real data (use {@link skipNotFound} there). Composes data-last:
+ *
+ * ```ts
+ * fs.exists(join(p, ".git")).pipe(orAbsent(false))
+ * fs.readFileString(optionalConfig).pipe(orAbsent(""))
+ * ```
+ */
+export const orAbsent =
+    <A>(fallback: A) =>
+    <R>(
+        eff: Effect.Effect<A, PlatformError.PlatformError, R>,
+    ): Effect.Effect<A, never, R> =>
+        Effect.catchTag(eff, "PlatformError", () => Effect.succeed(fallback));

@@ -5,6 +5,7 @@
   "type": "module",
   "exports": {
     "./shared/fs-error": "./src/shared/fs-error.ts",
+    "./shared/path": "./src/shared/path.ts",
     "./testing/test-filesystem": "./src/testing/test-filesystem.ts",
     "./*": {
       "types": "./src/*.ts",

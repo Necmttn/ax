@@ -89,7 +89,14 @@ export const layerTestFileSystem = (
             }
             return Stream.fromIterable(chunks);
         },
-        exists: (path) => Effect.succeed(path in files),
+        exists: (path) => {
+            const err = injected(path);
+            if (err) return Effect.fail(err);
+            // A path that is a strict prefix of some key exists as a directory.
+            if (path in files) return Effect.succeed(true);
+            const prefix = path.endsWith("/") ? path : `${path}/`;
+            return Effect.succeed(Object.keys(files).some((key) => key.startsWith(prefix)));
+        },
         // `stat` infers type from the seeded map: an exact key is a `File`, a
         // path that is a strict prefix of some key is a `Directory`, anything
         // else is NotFound. This lets the transcripts-root directory filter
