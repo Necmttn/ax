@@ -1,4 +1,5 @@
 import { Layer } from "effect";
+import { BunFileSystem, BunPath } from "@effect/platform-bun";
 import { AxConfigLive } from "./config.ts";
 import { SurrealClientLive } from "./db.ts";
 import { ProcessServiceLive } from "./process.ts";
@@ -33,6 +34,10 @@ import { NoopTransportLayer } from "./live-traces/transports/console.ts";
 const AppLayerSansTransport = SurrealClientLive.pipe(
     Layer.provideMerge(AxConfigLive),
     Layer.merge(ProcessServiceLive),
+    // Bun-backed FileSystem + Path: the seam every config-front-door mutator
+    // (`ax hooks/skills/agents`) writes through (see @ax/lib/atomic-write).
+    Layer.merge(BunFileSystem.layer),
+    Layer.merge(BunPath.layer),
     Layer.provideMerge(LiveTraceLayer),
     Layer.provideMerge(TraceSinkLive({ flushIntervalMs: 200 })),
 );
