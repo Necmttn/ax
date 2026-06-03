@@ -317,22 +317,45 @@ export const enableHook = (
         return ref.path;
     });
 
-/** TSV formatter for `ax hooks config` (mirrors formatHookSummaryRows shape). */
+/** Padded-column formatter for `ax hooks config`. Computes each column's width
+ *  from header + data (mirrors role-format.ts), then fits `command` (last col)
+ *  to the remaining terminal width so it never overflows / line-wraps. */
 export const formatConfiguredHooks = (rows: ReadonlyArray<ConfiguredHookWithEvidence>): string => {
-    const lines = ["id\tprovider\tscope\tevent\tmatcher\towner\tenabled\tfired\tcommand"];
-    for (const h of rows) {
-        const cmd = h.command.replace(/\s+/g, " ").trim();
-        lines.push([
-            h.id,
-            h.provider,
-            h.scope,
-            h.event,
-            h.matcher ?? "",
-            h.owner,
-            h.enabled ? "yes" : "no",
-            h.fired === undefined ? "" : String(h.fired),
-            cmd.length > 80 ? `${cmd.slice(0, 79)}…` : cmd,
-        ].join("\t"));
-    }
-    return lines.join("\n");
+    type Cell = { id: string; provider: string; scope: string; event: string; matcher: string; owner: string; enabled: string; fired: string; command: string };
+    const header: Cell = { id: "id", provider: "provider", scope: "scope", event: "event", matcher: "matcher", owner: "owner", enabled: "enabled", fired: "fired", command: "command" };
+    const cells: Cell[] = rows.map((h) => ({
+        id: h.id,
+        provider: h.provider,
+        scope: h.scope,
+        event: h.event,
+        matcher: h.matcher ?? "",
+        owner: h.owner,
+        enabled: h.enabled ? "yes" : "no",
+        fired: h.fired === undefined ? "" : String(h.fired),
+        command: h.command.replace(/\s+/g, " ").trim(),
+    }));
+
+    const all = [header, ...cells];
+    const w = (k: keyof Cell): number => Math.max(...all.map((c) => c[k].length));
+    const fixed = (["id", "provider", "scope", "event", "matcher", "owner", "enabled", "fired"] as const).map(w);
+    const gutter = 2;
+    const fixedTotal = fixed.reduce((a, b) => a + b + gutter, 0);
+    // command gets whatever the terminal has left (min 20), capped at its own data width.
+    const term = process.stdout.columns ?? 120;
+    const cmdAvail = Math.max(20, term - fixedTotal - 1);
+    const cmdW = Math.min(w("command"), cmdAvail);
+
+    const fit = (s: string, n: number): string => (s.length > n ? `${s.slice(0, n - 1)}…` : s);
+    const fmt = (c: Cell): string =>
+        c.id.padEnd(fixed[0]!) + "  " +
+        c.provider.padEnd(fixed[1]!) + "  " +
+        c.scope.padEnd(fixed[2]!) + "  " +
+        c.event.padEnd(fixed[3]!) + "  " +
+        c.matcher.padEnd(fixed[4]!) + "  " +
+        c.owner.padEnd(fixed[5]!) + "  " +
+        c.enabled.padEnd(fixed[6]!) + "  " +
+        c.fired.padStart(fixed[7]!) + "  " +
+        fit(c.command, cmdW);
+
+    return [fmt(header), ...cells.map(fmt)].join("\n");
 };
