@@ -1,5 +1,5 @@
 #!/usr/bin/env bun
-import { Effect, Option, References } from "effect";
+import { Effect, FileSystem, Option, Path, References } from "effect";
 import { Argument, Command, Flag } from "effect/unstable/cli";
 import { SurrealClient, type SurrealClientShape } from "@ax/lib/db";
 import { listSessionsHere, listSessionsAround, listSessionsNear, type SessionRow } from "../dashboard/sessions-query.ts";
@@ -3047,7 +3047,7 @@ const maybeAutoIngestStale = (
     cmdLabel: string,
     repoRoot: string,
     args: ReadonlyArray<string>,
-): Effect.Effect<void, DbError, SurrealClient | AxConfig> =>
+): Effect.Effect<void, DbError, SurrealClient | AxConfig | FileSystem.FileSystem | Path.Path> =>
     Effect.gen(function* () {
         if (args.includes("--no-stale-check")) return;
         const threshold = parsePositiveIntFlag(
@@ -3071,7 +3071,12 @@ const maybeAutoIngestStale = (
             process.stderr.write(
                 `axctl ${cmdLabel}: backfilling ${report.newFiles.length} new transcript(s) for ${project}\n`,
             );
-            yield* ingestTranscripts({ project, sinceDays: 7 });
+            // A genuine FS failure during auto-backfill (the vanished-file
+            // case is already caught+skipped inside ingestTranscripts) dies as
+            // a defect rather than masquerading as a recoverable DbError.
+            yield* ingestTranscripts({ project, sinceDays: 7 }).pipe(
+                Effect.catchTag("PlatformError", (e) => Effect.die(e)),
+            );
         } else {
             process.stderr.write(
                 `axctl ${cmdLabel}: ${report.newFiles.length} new transcript(s) on disk not yet ingested ` +

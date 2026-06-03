@@ -10,6 +10,7 @@ import { mkdtemp, mkdir, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { Effect, Layer } from "effect";
+import { BunFileSystem, BunPath } from "@effect/platform-bun";
 import { RecordId } from "surrealdb";
 import { SurrealClient } from "@ax/lib/db";
 import { AxConfig, makeTestConfig } from "@ax/lib/config";
@@ -96,7 +97,13 @@ async function runWith(
 ) {
     return Effect.runPromise(
         deriveClaudeSubagents().pipe(
-            Effect.provide(Layer.merge(dbLayer, configLayer)),
+            // `extractFileWithSessionId` is now FileSystem-native; provide the
+            // REAL Bun-backed FileSystem + Path against the existing tmp-dir
+            // fixtures (not the in-memory mock) so this test exercises the
+            // production read path unchanged.
+            Effect.provide(
+                Layer.mergeAll(dbLayer, configLayer, BunFileSystem.layer, BunPath.layer),
+            ),
         ),
     );
 }

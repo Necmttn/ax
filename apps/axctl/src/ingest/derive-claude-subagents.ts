@@ -1,6 +1,6 @@
 import { readdir, stat } from "node:fs/promises";
 import { join } from "node:path";
-import { Effect, Schema } from "effect";
+import { Effect, FileSystem, Path, Schema } from "effect";
 import { SurrealClient, RecordId } from "@ax/lib/db";
 import { AxConfig } from "@ax/lib/config";
 import type { DbError } from "@ax/lib/errors";
@@ -146,7 +146,7 @@ export const deriveClaudeSubagents = (
 ): Effect.Effect<
     DeriveClaudeSubagentsStats,
     DbError,
-    SurrealClient | AxConfig
+    SurrealClient | AxConfig | FileSystem.FileSystem | Path.Path
 > =>
     Effect.gen(function* () {
         const cfg = yield* AxConfig;
@@ -242,8 +242,18 @@ export const deriveClaudeSubagents = (
             // synthetic session id. This produces turns/invocations/tool_calls
             // attributed to the subagent session, so the dashboard can show
             // *what* it did (Bash, Read, Edit calls etc).
-            const extracted = yield* Effect.promise(() =>
-                extractFileWithSessionId(m.file, m.project ?? "", m.subagentSessionId),
+            // `extractFileWithSessionId` is now FileSystem-native: a subagent
+            // transcript that VANISHED mid-run surfaces a NotFound
+            // PlatformError, which we treat as "no usable content" (→ null)
+            // so the run continues; other FS failures die as defects.
+            const extracted = yield* extractFileWithSessionId(
+                m.file,
+                m.project ?? "",
+                m.subagentSessionId,
+            ).pipe(
+                Effect.catchTag("PlatformError", (e) =>
+                    e.reason._tag === "NotFound" ? Effect.succeed(null) : Effect.die(e),
+                ),
             );
 
             // Inherit repository/checkout from parent unconditionally (the extractor
@@ -419,7 +429,7 @@ export class SubagentsStats extends BaseStageStats.extend<SubagentsStats>("Subag
     subagentLinksWritten: Schema.Number,
 }) {}
 
-export const subagentsStage: StageDef<SubagentsStats, SurrealClient | AxConfig> = {
+export const subagentsStage: StageDef<SubagentsStats, SurrealClient | AxConfig | FileSystem.FileSystem | Path.Path> = {
     meta: StageMeta.make({ key: "subagents", deps: ["claude", "codex"], tags: ["derive"] }),
     run: (_ctx: IngestContext) =>
         Effect.gen(function* () {

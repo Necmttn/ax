@@ -1,6 +1,4 @@
-import { readdir, stat, open } from "node:fs/promises";
-import { join, basename, isAbsolute, resolve } from "node:path";
-import { Effect, Schema } from "effect";
+import { Effect, FileSystem, Option, Path, PlatformError, Schema, Stream } from "effect";
 import { RecordId, SurrealClient, filePointer } from "@ax/lib/db";
 import { AxConfig } from "@ax/lib/config";
 import { surrealLiteral } from "@ax/lib/json";
@@ -135,9 +133,9 @@ export interface HookCommandInvocationWrite {
     readonly blocking_error_excerpt: string | null;
 }
 
-function deriveProject(transcriptDir: string): string {
+function deriveProject(path: Path.Path, transcriptDir: string): string {
     // ~/.claude/projects encodes cwd as `-Users-necmttn-Projects-myapp`
-    const m = basename(transcriptDir);
+    const m = path.basename(transcriptDir);
     return m;
 }
 
@@ -148,9 +146,9 @@ function repoFromCwd(cwd: string | null): string | null {
     return m?.[1] ?? null;
 }
 
-function normalizeEditPath(path: string, cwd: string | null): string {
-    if (isAbsolute(path) || !cwd) return path;
-    return resolve(cwd, path);
+function normalizeEditPath(pathSvc: Path.Path, filePath: string, cwd: string | null): string {
+    if (pathSvc.isAbsolute(filePath) || !cwd) return filePath;
+    return pathSvc.resolve(cwd, filePath);
 }
 
 export function transcriptEditFileRecordKey(path: string): string {
@@ -301,7 +299,7 @@ interface FileExtract {
     hookCommandInvocations: HookCommandInvocationWrite[];
 }
 
-function createClaudeExtractor(projectDir: string, sessionId: string) {
+function createClaudeExtractor(path: Path.Path, projectDir: string, sessionId: string) {
     let session: Session | null = null;
     const turns: Turn[] = [];
     const invocations: Invocation[] = [];
@@ -493,17 +491,17 @@ function createClaudeExtractor(projectDir: string, sessionId: string) {
             (name === "Edit" || name === "Write" || name === "NotebookEdit") &&
             input
         ) {
-            const path =
+            const editPath =
                 stringField(input, "file_path") ??
                 stringField(input, "path") ??
                 stringField(input, "notebook_path");
-            if (path) {
+            if (editPath) {
                 edits.push({
                     session: sessionId,
                     seq,
                     ts,
                     repo: repoFromCwd(cwd),
-                    path: normalizeEditPath(path, turnCwd),
+                    path: normalizeEditPath(path, editPath, turnCwd),
                     tool: name,
                 });
             }
@@ -836,7 +834,7 @@ function createClaudeExtractor(projectDir: string, sessionId: string) {
             if (!session) {
                 session = {
                     id: sessionId,
-                    project: deriveProject(projectDir),
+                    project: deriveProject(path, projectDir),
                     cwd,
                     model,
                     started_at: ts,
@@ -952,47 +950,63 @@ function createClaudeExtractor(projectDir: string, sessionId: string) {
     };
 }
 
+// The pure line-extractor oracle is a synchronous test helper, so it grabs the
+// default (posix) `Path` implementation once via a side-effect-free runSync
+// rather than threading a service through every caller. Production paths use
+// the `Path.Path` obtained from the Effect context in `ingestTranscripts`.
+const posixPath: Path.Path = Effect.runSync(Path.Path.pipe(Effect.provide(Path.layer)));
+
 export function __testExtractClaudeJsonlLines(
     lines: Iterable<string>,
     projectDir: string,
     sessionId: string,
 ): FileExtract | null {
-    const extractor = createClaudeExtractor(projectDir, sessionId);
+    const extractor = createClaudeExtractor(posixPath, projectDir, sessionId);
     for (const line of lines) {
         extractor.processLine(line);
     }
     return extractor.finish();
 }
 
-async function extractFile(filePath: string, projectDir: string): Promise<FileExtract | null> {
-    const sessionId = basename(filePath, ".jsonl");
-    return extractFileWithSessionId(filePath, projectDir, sessionId);
-}
+const extractFile = (
+    filePath: string,
+    projectDir: string,
+): Effect.Effect<FileExtract | null, PlatformError.PlatformError, FileSystem.FileSystem | Path.Path> =>
+    Effect.gen(function* () {
+        const path = yield* Path.Path;
+        const sessionId = path.basename(filePath, ".jsonl");
+        return yield* extractFileWithSessionId(filePath, projectDir, sessionId);
+    });
 
 /**
  * Run the Claude extractor against an arbitrary file with a caller-supplied
  * session id. Used by the subagent ingest path so it can produce synthetic
  * `claude-subagent-<agentId>` session records rather than the
  * filename-derived id.
+ *
+ * Streams the file via `FileSystem.stream` so a transcript that VANISHES
+ * mid-run (e.g. a cleaned-up git worktree) surfaces as a typed
+ * `PlatformError` (`reason._tag === "NotFound"`) the caller can catch and
+ * skip - rather than an unrecoverable defect that aborts the whole run.
  */
-export async function extractFileWithSessionId(
+export const extractFileWithSessionId = (
     filePath: string,
     projectDir: string,
     sessionId: string,
-): Promise<FileExtract | null> {
-    const fh = await open(filePath, "r");
-    const extractor = createClaudeExtractor(projectDir, sessionId);
-    try {
-        for await (const line of fh.readLines()) {
-            extractor.processLine(line);
-        }
-    } finally {
-        await fh.close();
-    }
-    const extracted = extractor.finish();
-    if (!extracted) return null;
-    return { ...extracted, sourcePath: filePath };
-}
+): Effect.Effect<FileExtract | null, PlatformError.PlatformError, FileSystem.FileSystem | Path.Path> =>
+    Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const extractor = createClaudeExtractor(path, projectDir, sessionId);
+        yield* fs.stream(filePath).pipe(
+            Stream.decodeText(),
+            Stream.splitLines,
+            Stream.runForEach((line) => Effect.sync(() => extractor.processLine(line))),
+        );
+        const extracted = extractor.finish();
+        if (!extracted) return null;
+        return { ...extracted, sourcePath: filePath };
+    });
 
 export {
     upsertSessions as upsertSessionsForSubagents,
@@ -1262,14 +1276,16 @@ export interface TranscriptStats {
 
 export const ingestTranscripts = (
     opts: Partial<IngestOpts> = {},
-): Effect.Effect<TranscriptStats, DbError, SurrealClient | AxConfig> =>
+): Effect.Effect<TranscriptStats, DbError | PlatformError.PlatformError, SurrealClient | AxConfig | FileSystem.FileSystem | Path.Path> =>
     Effect.gen(function* () {
         const cfg = yield* AxConfig;
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
         const transcriptsDir = cfg.paths.transcriptsDir;
         const cutoff = opts.sinceDays
             ? Date.now() - opts.sinceDays * 86400 * 1000
             : 0;
-        const projectDirs = (yield* Effect.promise(() => readdir(transcriptsDir))).filter(
+        const projectDirs = (yield* fs.readDirectory(transcriptsDir)).filter(
             (d) => !opts.project || d === opts.project,
         );
         if (opts.onProgress) yield* opts.onProgress({ projectDirs: projectDirs.length });
@@ -1301,26 +1317,38 @@ export const ingestTranscripts = (
             hookCommandInvocationCount;
 
         for (const projectDir of projectDirs) {
-            const fullProject = join(transcriptsDir, projectDir);
-            const entries = yield* Effect.promise(async () => {
-                try {
-                    return await readdir(fullProject);
-                } catch {
-                    return [] as string[];
-                }
-            });
+            const fullProject = path.join(transcriptsDir, projectDir);
+            // A project dir that vanished between the parent readDirectory and
+            // here yields [] (NotFound→skip), preserving the prior
+            // try/catch-returns-[] behavior; other failures re-raise.
+            const entries = yield* fs.readDirectory(fullProject).pipe(
+                Effect.catchTag("PlatformError", (e) =>
+                    e.reason._tag === "NotFound" ? Effect.succeed([] as string[]) : Effect.fail(e),
+                ),
+            );
             for (const entry of entries) {
                 if (!entry.endsWith(".jsonl")) continue;
-                const filePath = join(fullProject, entry);
+                const filePath = path.join(fullProject, entry);
                 // Always stat: we need (mtime,size) both for the optional
                 // --since cutoff AND for the skip-unchanged watermark below.
-                const st = yield* Effect.promise(() => stat(filePath));
-                if (cutoff > 0 && st.mtimeMs < cutoff) continue;
+                // A file that vanished after readDirectory enumerated it is
+                // skipped (NotFound→skip) so it never enters the work list.
+                const st = yield* fs.stat(filePath).pipe(
+                    Effect.asSome,
+                    Effect.catchTag("PlatformError", (e) =>
+                        e.reason._tag === "NotFound" ? Effect.succeedNone : Effect.fail(e),
+                    ),
+                );
+                if (Option.isNone(st)) continue;
+                const info = st.value;
+                const mtimeMs = Option.getOrElse(info.mtime, () => new Date(0)).getTime();
+                const size = Number(info.size);
+                if (cutoff > 0 && mtimeMs < cutoff) continue;
                 candidates.push({
                     projectDir,
                     filePath,
-                    mtimeMs: st.mtimeMs,
-                    size: st.size,
+                    mtimeMs,
+                    size,
                 });
             }
         }
@@ -1379,8 +1407,15 @@ export const ingestTranscripts = (
                     hookCommandInvocations: hookCommandInvocationCount,
                 });
             }
-            const extracted = yield* Effect.promise(() =>
-                extractFile(candidate.filePath, candidate.projectDir),
+            // A transcript that VANISHED between discovery and here (e.g. a
+            // git worktree cleaned up mid-run) surfaces as a typed
+            // PlatformError; NotFound→null SKIPS it. The skip short-circuits
+            // BEFORE `files += 1` / `wm.commit` below, so a vanished file never
+            // advances the watermark. Non-NotFound failures re-raise.
+            const extracted = yield* extractFile(candidate.filePath, candidate.projectDir).pipe(
+                Effect.catchTag("PlatformError", (e) =>
+                    e.reason._tag === "NotFound" ? Effect.succeed(null) : Effect.fail(e),
+                ),
             );
             if (!extracted) {
                 activeFiles -= 1;
@@ -1519,13 +1554,20 @@ export class ClaudeStats extends BaseStageStats.extend<ClaudeStats>("ClaudeStats
     toolCallsIngested: Schema.Number,
 }) {}
 
-export const claudeStage: StageDef<ClaudeStats, SurrealClient | AxConfig> = {
+export const claudeStage: StageDef<ClaudeStats, SurrealClient | AxConfig | FileSystem.FileSystem | Path.Path> = {
     meta: StageMeta.make({ key: "claude", deps: ["skills", "commands"], tags: ["ingest"] }),
     run: (ctx: IngestContext) =>
         Effect.gen(function* () {
             const t0 = Date.now();
             const sinceDays = sinceDaysFromCtx(ctx);
-            const result = yield* ingestTranscripts({ sinceDays, project: ctx.claudeProject });
+            // The vanished-transcript case is caught + skipped inside
+            // `ingestTranscripts`; any PlatformError that escapes here is a
+            // genuine FS failure (e.g. an unreadable transcripts root or a
+            // non-NotFound stat/stream error) so it dies as a defect rather
+            // than masquerading as a recoverable DbError.
+            const result = yield* ingestTranscripts({ sinceDays, project: ctx.claudeProject }).pipe(
+                Effect.catchTag("PlatformError", (e) => Effect.die(e)),
+            );
             return ClaudeStats.make({
                 durationMs: Date.now() - t0,
                 summary: `ingested ${result.sessions} sessions, ${result.turns} turns, ${result.toolCalls} tool calls`,
