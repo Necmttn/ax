@@ -67,7 +67,7 @@ export const collectAgents = (): Effect.Effect<
 > =>
     Effect.gen(function* () {
         const reg = yield* AgentSourceRegistry;
-        const repoRoot = (yield* Effect.promise(() => findGitRoot(process.cwd()))) ?? undefined;
+        const repoRoot = (yield* findGitRoot(process.cwd())) ?? undefined;
         const byName = new Map<string, AgentRecord>();
         for (const source of reg.all()) {
             const recs = yield* source.discover(repoRoot).pipe(

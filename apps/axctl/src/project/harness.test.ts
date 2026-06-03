@@ -2,7 +2,8 @@ import { mkdtemp, rm, writeFile, mkdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, test } from "bun:test";
-import { Effect } from "effect";
+import { Effect, Layer } from "effect";
+import { BunFileSystem } from "@effect/platform-bun";
 import { ProcessServiceLive } from "@ax/lib/process";
 import {
     buildGuidanceRevisions,
@@ -12,6 +13,8 @@ import {
 } from "./harness.ts";
 import type { GitState } from "./types.ts";
 
+const harnessLayer = Layer.merge(ProcessServiceLive, BunFileSystem.layer);
+
 describe("scanGuidanceSources", () => {
     test("finds repo-local guidance and produces revisions", async () => {
         const root = await mkdtemp(join(tmpdir(), "ax-harness-"));
@@ -19,13 +22,13 @@ describe("scanGuidanceSources", () => {
             await writeFile(join(root, "AGENTS.md"), "Never edit main without approval.\n", "utf8");
             await mkdir(join(root, ".agents"), { recursive: true });
 
-            const sources = await Effect.runPromise(scanGuidanceSources(root).pipe(Effect.provide(ProcessServiceLive)));
+            const sources = await Effect.runPromise(scanGuidanceSources(root).pipe(Effect.provide(harnessLayer)));
             const repoSources = sources.filter((source) => source.scope === "repository");
 
             expect(repoSources.map((source) => source.path)).toContain(join(root, "AGENTS.md"));
             expect(repoSources.some((source) => source.provider === "agents")).toBe(true);
 
-            const revisions = await Effect.runPromise(buildGuidanceRevisions(repoSources).pipe(Effect.provide(ProcessServiceLive)));
+            const revisions = await Effect.runPromise(buildGuidanceRevisions(repoSources).pipe(Effect.provide(harnessLayer)));
             expect(revisions).toEqual(
                 expect.arrayContaining([
                     expect.objectContaining({

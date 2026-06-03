@@ -1,7 +1,5 @@
-import { existsSync } from "node:fs";
-import { readFile } from "node:fs/promises";
-import { join } from "node:path";
-import { Effect } from "effect";
+import { Effect, FileSystem, Path } from "effect";
+import { orAbsent } from "@ax/lib/shared/fs-error";
 import type { DiagnosticConfig, DiagnosticIssue, LiveDiagnostics } from "./types.ts";
 
 function stringOrNull(value: unknown): string | null {
@@ -39,17 +37,22 @@ export function parseDiagnosticConfig(raw: string): DiagnosticConfig {
     };
 }
 
-export const loadDiagnosticConfig = (root: string | null): Effect.Effect<DiagnosticConfig | null, string> =>
+export const loadDiagnosticConfig = (
+    root: string | null,
+): Effect.Effect<DiagnosticConfig | null, string, FileSystem.FileSystem | Path.Path> =>
     Effect.gen(function* () {
         if (!root) return null;
-        const path = existsSync(join(root, ".axctl", "config.json"))
-            ? join(root, ".axctl", "config.json")
-            : join(root, ".ax", "config.json");
-        if (!existsSync(path)) return null;
-        const raw = yield* Effect.tryPromise({
-            try: () => readFile(path, "utf8"),
-            catch: (error) => String(error),
-        });
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const axctlPath = path.join(root, ".axctl", "config.json");
+        // existsSync probes → orAbsent(false): a fault means "treat as absent".
+        const configPath = (yield* fs.exists(axctlPath).pipe(orAbsent(false)))
+            ? axctlPath
+            : path.join(root, ".ax", "config.json");
+        if (!(yield* fs.exists(configPath).pipe(orAbsent(false)))) return null;
+        const raw = yield* fs.readFileString(configPath).pipe(
+            Effect.mapError((error) => String(error)),
+        );
         return yield* Effect.try({
             try: () => parseDiagnosticConfig(raw),
             catch: (error) => String(error),
@@ -105,7 +108,9 @@ const emptyDiagnostics = (configured: boolean, error: string | null): LiveDiagno
     error,
 });
 
-export const queryLiveDiagnostics = (root: string | null): Effect.Effect<LiveDiagnostics> =>
+export const queryLiveDiagnostics = (
+    root: string | null,
+): Effect.Effect<LiveDiagnostics, never, FileSystem.FileSystem | Path.Path> =>
     Effect.gen(function* () {
         const configResult = yield* loadDiagnosticConfig(root).pipe(
             Effect.match({

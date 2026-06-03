@@ -49,10 +49,10 @@ export interface ReadOptions {
     readonly repoRoot?: string | null | undefined;
 }
 
-const resolveRepoRoot = (override: string | null | undefined): Effect.Effect<string | null> =>
-    override !== undefined
-        ? Effect.succeed(override)
-        : Effect.promise(() => findGitRoot(process.cwd()));
+const resolveRepoRoot = (
+    override: string | null | undefined,
+): Effect.Effect<string | null, never, FileSystem.FileSystem> =>
+    override !== undefined ? Effect.succeed(override) : findGitRoot(process.cwd());
 
 /** Read a config file's text, returning "" when the file does not exist. */
 const readMaybe = (

@@ -1,24 +1,23 @@
-import { dirname, extname } from "node:path";
-import { stat } from "node:fs/promises";
-import { Effect } from "effect";
+import { Effect, FileSystem } from "effect";
 import { ProcessService, type ProcessResult } from "@ax/lib/process";
+import { orAbsent } from "@ax/lib/shared/fs-error";
+import { posixPath } from "@ax/lib/shared/path";
 import type { GitState, ProjectFileChange } from "./types.ts";
 
-const exists = (path: string): Promise<boolean> =>
-    stat(path)
-        .then(() => true)
-        .catch(() => false);
-
-export async function findGitRoot(cwd: string): Promise<string | null> {
-    let cur = cwd;
-    for (let i = 0; i < 16; i += 1) {
-        if (await exists(`${cur}/.git`)) return cur;
-        const parent = dirname(cur);
-        if (parent === cur) return null;
-        cur = parent;
-    }
-    return null;
-}
+export const findGitRoot = (cwd: string): Effect.Effect<string | null, never, FileSystem.FileSystem> =>
+    Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        let cur = cwd;
+        for (let i = 0; i < 16; i += 1) {
+            // Original probed `stat(`${cur}/.git`)` (then→true / catch→false);
+            // existence probe → fs.exists + orAbsent(false).
+            if (yield* fs.exists(`${cur}/.git`).pipe(orAbsent(false))) return cur;
+            const parent = posixPath.dirname(cur);
+            if (parent === cur) return null;
+            cur = parent;
+        }
+        return null;
+    });
 
 const runGit = (cwd: string, args: ReadonlyArray<string>): Effect.Effect<ProcessResult, never, ProcessService> =>
     Effect.gen(function* () {
@@ -31,7 +30,7 @@ const runGit = (cwd: string, args: ReadonlyArray<string>): Effect.Effect<Process
     });
 
 export function detectLang(path: string): string | null {
-    const ext = extname(path).toLowerCase();
+    const ext = posixPath.extname(path).toLowerCase();
     switch (ext) {
         case ".ts":
             return "typescript";
@@ -88,9 +87,11 @@ function parseBranch(line: string): string | null {
     return withoutPrefix.split("...")[0]?.trim() || null;
 }
 
-export const getGitState = (cwd = process.cwd()): Effect.Effect<GitState, never, ProcessService> =>
+export const getGitState = (
+    cwd = process.cwd(),
+): Effect.Effect<GitState, never, ProcessService | FileSystem.FileSystem> =>
     Effect.gen(function* () {
-        const root = yield* Effect.promise(() => findGitRoot(cwd));
+        const root = yield* findGitRoot(cwd);
         if (!root) {
             return {
                 root: null,
