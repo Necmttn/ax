@@ -1,11 +1,11 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { mkdtempSync, readFileSync, writeFileSync, existsSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Effect, Layer } from "effect";
 import { BunFileSystem, BunPath } from "@effect/platform-bun";
 import { SurrealClient } from "@ax/lib/db";
-import { userSource } from "./source.ts";
+import { userSource, projectSource } from "./source.ts";
 import { AgentSourceRegistryFrom } from "./registry.ts";
 import { scopeAgent, readAllAgents } from "./config.ts";
 import { reconcileAgents } from "./reconcile.ts";
@@ -63,6 +63,7 @@ describe("agent source discover", () => {
         const byName = new Map(recs.map((r) => [r.name, r]));
         const reviewer = byName.get("reviewer")!;
         expect(reviewer.scope).toBe("user");
+        expect(reviewer.scopeTag).toBe("user"); // user scope tag is plain "user"
         expect(reviewer.description).toBe("reviews code");
         expect(reviewer.model).toBe("opus");
         expect(reviewer.skills).toEqual(["commit", "tdd"]); // sorted+deduped
@@ -70,6 +71,17 @@ describe("agent source discover", () => {
         // No-frontmatter file still yields a record keyed by filename stem.
         expect(byName.has("plain")).toBe(true);
         expect(byName.get("plain")!.skills).toEqual([]);
+    });
+
+    test("project source emits a repo-qualified scopeTag (project:<repo>)", async () => {
+        const repo = mkdtempSync(join(tmpdir(), "myrepo-"));
+        mkdirSync(join(repo, ".claude", "agents"), { recursive: true });
+        writeFileSync(join(repo, ".claude", "agents", "p.md"), "---\nname: p\n---\nbody");
+        const recs = await Effect.runPromise(
+            projectSource.discover(repo).pipe(Effect.provide(FS)),
+        );
+        expect(recs[0]!.scope).toBe("project"); // kind
+        expect(recs[0]!.scopeTag).toBe(`project:${repo.split("/").filter(Boolean).pop()}`); // repo-qualified
     });
 
     test("skips parked sidecars", async () => {

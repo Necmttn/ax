@@ -39,7 +39,7 @@ const upsertAgent = (
         const id = agentRecordId(rec.name);
         yield* db.upsert(id, {
             name: rec.name,
-            scope: rec.scope,
+            scope: rec.scopeTag, // repo-qualified (user | project:<repo>)
             dir_path: rec.dirPath,
             description: rec.description ?? undefined,
             model: rec.model ?? undefined,
@@ -105,9 +105,9 @@ export const ingestAgentDefs = (): Effect.Effect<
         // outside the scopes it just discovered.
         const byScope = new Map<string, string[]>();
         for (const a of agents) {
-            const arr = byScope.get(a.scope) ?? [];
+            const arr = byScope.get(a.scopeTag) ?? [];
             arr.push(a.name);
-            byScope.set(a.scope, arr);
+            byScope.set(a.scopeTag, arr);
         }
         const report = yield* reconcileByScope(AGENT_DEF_TABLE, byScope);
 

@@ -22,7 +22,12 @@ export type AgentScope = "user" | "project";
 export interface AgentRecord {
     /** Canonical agent name (frontmatter `name`, else filename stem). */
     readonly name: string;
+    /** Source kind (drives source resolution + park/unpark). */
     readonly scope: AgentScope;
+    /** Repo-qualified DB scope key: `user` or `project:<repo>`. This is what the
+     *  `agent_def.scope` column stores and what reconcile partitions by, so a
+     *  reconcile from repo A never tombstones repo B's project agents. */
+    readonly scopeTag: string;
     /** Absolute path to the agent `.md` file. */
     readonly dirPath: string;
     readonly description?: string | undefined;
@@ -87,6 +92,7 @@ const parseAgentFile = (
     fullPath: string,
     fallbackName: string,
     scope: AgentScope,
+    scopeTag: string,
 ): Effect.Effect<AgentRecord, ConfigParseError, FileSystem.FileSystem> =>
     Effect.gen(function* () {
         const fs = yield* FileSystem.FileSystem;
@@ -108,6 +114,7 @@ const parseAgentFile = (
         return {
             name,
             scope,
+            scopeTag,
             dirPath: fullPath,
             description,
             model,
@@ -121,6 +128,7 @@ const parseAgentFile = (
 const discoverRoot = (
     dir: string,
     scope: AgentScope,
+    scopeTag: string,
 ): Effect.Effect<AgentRecord[], ConfigParseError | PlatformError, FileSystem.FileSystem | Path.Path> =>
     Effect.gen(function* () {
         const fs = yield* FileSystem.FileSystem;
@@ -137,7 +145,7 @@ const discoverRoot = (
                 .pipe(Effect.map((s) => s.type), Effect.orElseSucceed(() => "Unknown" as const));
             if (type !== "File") continue;
             const stem = entry.replace(/\.md$/, "");
-            out.push(yield* parseAgentFile(full, stem, scope));
+            out.push(yield* parseAgentFile(full, stem, scope, scopeTag));
         }
         return out;
     });
@@ -146,6 +154,7 @@ const makeSource = (
     name: string,
     scope: AgentScope,
     roots: (repoRoot: string | undefined) => readonly string[],
+    scopeTagFor: (repoRoot: string | undefined) => string,
 ): AgentSource => {
     const wrapFs = (op: string, file: string) => (e: unknown) =>
         new ConfigParseError({ file, reason: `${op} failed: ${String(e)}` });
@@ -165,9 +174,10 @@ const makeSource = (
             }),
         discover: (repoRoot) =>
             Effect.gen(function* () {
+                const tag = scopeTagFor(repoRoot);
                 const all: AgentRecord[] = [];
                 for (const dir of roots(repoRoot)) {
-                    all.push(...(yield* discoverRoot(dir, scope)));
+                    all.push(...(yield* discoverRoot(dir, scope, tag)));
                 }
                 return all;
             }),
@@ -196,13 +206,21 @@ const makeSource = (
 };
 
 /** User source: `~/.claude/agents/*.md` (or `AX_AGENT_DIRS` override). */
-export const userSource: AgentSource = makeSource("user", "user", () => {
-    const fromEnv = envUserDirs();
-    if (fromEnv.length > 0) return fromEnv;
-    return [`${HOME}/.claude/agents`];
-});
+export const userSource: AgentSource = makeSource(
+    "user",
+    "user",
+    () => {
+        const fromEnv = envUserDirs();
+        if (fromEnv.length > 0) return fromEnv;
+        return [`${HOME}/.claude/agents`];
+    },
+    () => "user",
+);
 
-/** Project source: `<repo>/.claude/agents/*.md`. No repoRoot ⇒ no roots. */
-export const projectSource: AgentSource = makeSource("project", "project", (repoRoot) =>
-    repoRoot ? [`${repoRoot}/.claude/agents`] : [],
+/** Project source: `<repo>/.claude/agents/*.md`, scoped `project:<repo>`. */
+export const projectSource: AgentSource = makeSource(
+    "project",
+    "project",
+    (repoRoot) => (repoRoot ? [`${repoRoot}/.claude/agents`] : []),
+    (repoRoot) => `project:${repoRoot ? repoRoot.split("/").filter(Boolean).pop() ?? "project" : "project"}`,
 );
