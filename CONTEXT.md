@@ -59,6 +59,12 @@ owns ordering, parallelism, and per-stage error events; it does not own stage
 logic. The derive-* stages remain the **Derivation Engine** subset.
 _Avoid_: ingest script, runner
 
+**Ingest Watermark**:
+A per-file or per-stage fingerprint recorded after a successful derive, so an
+unchanged input is skipped (output-equivalent) on the next run. Stored in
+`ingest_file_state` keyed by source kind and path.
+_Avoid_: cache, dedup key
+
 **Commit Signal**:
 The quality of commit evidence for reconstructing durable agent work memory.
 _Avoid_: commit lint
@@ -437,6 +443,7 @@ _Avoid_: task
 - An **Ingest Stage** declares its dependency **Ingest Stages**; the **Ingest Pipeline** computes execution order and parallelism from that graph rather than a hardcoded list.
 - The **Ingest Pipeline** runs independent stages concurrently; `claude` and `codex` have no dependency between them and run in parallel.
 - `--stages=` and `--derive-only` select a subgraph of the **Ingest Pipeline**; legacy `--X-only` flags are deprecated aliases.
+- An **Ingest Stage** may use an **Ingest Watermark** to skip unchanged inputs; the watermark is storage idempotency state, invisible to product semantics.
 
 ## Example dialogue
 
