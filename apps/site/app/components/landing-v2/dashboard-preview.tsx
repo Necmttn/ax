@@ -330,7 +330,7 @@ export function DashboardPreview() {
         </div>
 
         <p className="demo-caption">
-          Run <code>axctl serve</code> to see yours.
+          Run <code>ax serve</code> to see yours.
         </p>
       </section>
     </>

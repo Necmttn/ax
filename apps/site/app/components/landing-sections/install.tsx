@@ -6,16 +6,16 @@ export function InstallSection() {
       <pre>
         <code>
           <span className="prompt">$</span> curl -fsSL https://raw.githubusercontent.com/Necmttn/ax/main/install.sh | bash{"\n"}
-          <span className="prompt">$</span> PATH=&quot;$HOME/.local/bin:$PATH&quot; axctl ingest --since=7{"\n"}
-          <span className="prompt">$</span> axctl serve   <span className="comment"># live dashboard at http://127.0.0.1:8520</span>
+          <span className="prompt">$</span> PATH=&quot;$HOME/.local/bin:$PATH&quot; ax ingest --since=7{"\n"}
+          <span className="prompt">$</span> ax serve   <span className="comment"># live dashboard at http://127.0.0.1:8520</span>
         </code>
       </pre>
       <p className="install-label install-or">or via nix</p>
       <pre>
         <code>
           <span className="prompt">$</span> nix profile add github:Necmttn/ax{"\n"}
-          <span className="prompt">$</span> axctl ingest --since=7{"\n"}
-          <span className="prompt">$</span> axctl serve   <span className="comment"># live dashboard at http://127.0.0.1:8520</span>
+          <span className="prompt">$</span> ax ingest --since=7{"\n"}
+          <span className="prompt">$</span> ax serve   <span className="comment"># live dashboard at http://127.0.0.1:8520</span>
         </code>
       </pre>
       <p className="install-meta">

@@ -140,7 +140,7 @@ export function OpenSourceSection() {
             </div>
             <div className="oss-line">
               <span className="prompt">$</span>
-              <code>axctl daemon start</code>
+              <code>ax daemon start</code>
             </div>
             <div className="oss-line muted">
               <span></span>

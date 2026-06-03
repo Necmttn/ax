@@ -84,7 +84,7 @@ export function RecallShowcase() {
         </span>
         <span className="prompt">~/Projects/ax</span>
         <span className="prompt">&gt;</span>
-        <span className="cmd">axctl recall</span>
+        <span className="cmd">ax recall</span>
         <span className="arg" ref={argRef}>"auth middleware oauth refresh token"</span>
         <span className="caret" />
       </div>
@@ -257,7 +257,7 @@ export function RecallShowcase() {
           <p>
             Every Claude Code and Codex session ax ingests becomes a row in the unified
             graph - turn text, tool calls, reasoning, file edits, commit refs.
-            {" "}<code>axctl recall</code> runs full-text search over that graph and ranks by
+            {" "}<code>ax recall</code> runs full-text search over that graph and ranks by
             {" "}<em>recency × relevance × outcome</em>.
           </p>
           <p>

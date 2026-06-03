@@ -238,20 +238,20 @@ export function TerminalFigure() {
           </div>
           <div className="term-body" data-term-body>
             <div className="term-line" data-step="say"    data-delay="200"><span className="t-sys">[ session 4129 wrapping — stop hook fires ]</span></div>
-            <div className="term-line" data-step="tool"   data-delay="800">  <span className="t-bullet">⏺</span> Bash(<span className="t-cmd">axctl retro emit --session=4129</span>)</div>
+            <div className="term-line" data-step="tool"   data-delay="800">  <span className="t-bullet">⏺</span> Bash(<span className="t-cmd">ax retro emit --session=4129</span>)</div>
             <div className="term-line" data-step="out"    data-delay="500">    <span className="t-arm">⎿</span>  tried=8 · worked=6 · failed=3 · next=2</div>
             <div className="term-line" data-step="out"    data-delay="180">       failed: <span className="t-err">2 fixes landed after feature in src/ingest/transcripts.ts</span></div>
             <div className="term-line" data-step="out"    data-delay="180">       failed: <span className="t-err">main-branch edit attempted (advisory ignored)</span></div>
             <div className="term-line" data-step="tool"   data-delay="900">  <span className="t-bullet">⏺</span> Task(<span className="t-cmd">reflect-session-4129</span>)</div>
             <div className="term-line" data-step="out"    data-delay="500">    <span className="t-arm">⎿</span>  subagent clustering retros + skill_candidate evidence…</div>
-            <div className="term-line" data-step="tool"   data-delay="800">  <span className="t-bullet">⏺</span> Bash(<span className="t-cmd">axctl retro reflect --since=7d</span>)</div>
+            <div className="term-line" data-step="tool"   data-delay="800">  <span className="t-bullet">⏺</span> Bash(<span className="t-cmd">ax retro reflect --since=7d</span>)</div>
             <div className="term-line" data-step="out"    data-delay="500">    <span className="t-arm">⎿</span>  3 proposals ranked:</div>
             <div className="term-line" data-step="out"    data-delay="180">       1. feature→fix chains, same file <span className="t-num">26x</span>  <span className="t-arrow">→</span> <span className="t-id">post-feature-verify</span>      <span className="t-num">hi</span></div>
             <div className="term-line" data-step="out"    data-delay="180">       2. main-branch edits, advisory only <span className="t-num">7x</span> <span className="t-arrow">→</span> <span className="t-id">main-branch-guardrail</span>    <span className="t-num">lo</span></div>
             <div className="term-line" data-step="out"    data-delay="180">       3. ingest regressions, same file <span className="t-num">3x</span>   <span className="t-arrow">→</span> <span className="t-id">ingest-regression</span>          <span className="t-num">hi</span></div>
             <div className="term-line" data-step="say"    data-delay="900">  Top: <span className="t-id">post-feature-verify</span> - 26 fix-chains in 7d. Accept?</div>
             <div className="term-line" data-step="prompt" data-delay="1100"><span className="t-prompt">❯</span> y</div>
-            <div className="term-line" data-step="tool"   data-delay="700">  <span className="t-bullet">⏺</span> Bash(<span className="t-cmd">axctl improve accept skill__508c34566d2f1d85 --with-agent</span>)</div>
+            <div className="term-line" data-step="tool"   data-delay="700">  <span className="t-bullet">⏺</span> Bash(<span className="t-cmd">ax improve accept skill__508c34566d2f1d85 --with-agent</span>)</div>
             <div className="term-line" data-step="out"    data-delay="500">    <span className="t-arm">⎿</span>  scaffolded ~/.claude/skills/post-feature-verify/</div>
             <div className="term-line" data-step="out"    data-delay="350">       spawning claude subagent…</div>
             <div className="term-line" data-step="tool"   data-delay="700">  <span className="t-bullet">⏺</span> Edit(<span className="t-file">~/.claude/skills/post-feature-verify/SKILL.md</span>)</div>
@@ -291,19 +291,19 @@ export function TerminalFigure() {
           <div className="term-body" data-term-body>
             <div className="term-line" data-step="say"    data-delay="200"><span className="t-sys">[ session 4129 ending - auto retro ]</span></div>
             <div className="term-line" data-step="say"    data-delay="800"><span className="t-cx-cdx">codex</span><span className="t-cx-msg"> emitting retro on session end</span></div>
-            <div className="term-line" data-step="tool"   data-delay="500">  <span className="t-shell">$</span> <span className="t-cmd">axctl retro emit --session=4129</span></div>
+            <div className="term-line" data-step="tool"   data-delay="500">  <span className="t-shell">$</span> <span className="t-cmd">ax retro emit --session=4129</span></div>
             <div className="term-line" data-step="out"    data-delay="500">  <span className="t-arrow">›</span> tried=8 · worked=6 · failed=3 · next=2</div>
             <div className="term-line" data-step="out"    data-delay="180">    failed: <span className="t-err">2 fixes landed after feature in src/ingest/transcripts.ts</span></div>
             <div className="term-line" data-step="out"    data-delay="180">    failed: <span className="t-err">main-branch edit attempted (advisory ignored)</span></div>
             <div className="term-line" data-step="say"    data-delay="900"><span className="t-cx-cdx">codex</span><span className="t-cx-msg"> subagent clustering retros + skill_candidate evidence…</span></div>
-            <div className="term-line" data-step="tool"   data-delay="700">  <span className="t-shell">$</span> <span className="t-cmd">axctl retro reflect --since=7d</span></div>
+            <div className="term-line" data-step="tool"   data-delay="700">  <span className="t-shell">$</span> <span className="t-cmd">ax retro reflect --since=7d</span></div>
             <div className="term-line" data-step="out"    data-delay="500">  <span className="t-arrow">›</span> 3 proposals ranked:</div>
             <div className="term-line" data-step="out"    data-delay="180">    1. feature→fix chains, same file <span className="t-num">26x</span>  <span className="t-arrow">→</span> <span className="t-id">post-feature-verify</span>      <span className="t-num">hi</span></div>
             <div className="term-line" data-step="out"    data-delay="180">    2. main-branch edits, advisory only <span className="t-num">7x</span> <span className="t-arrow">→</span> <span className="t-id">main-branch-guardrail</span>    <span className="t-num">lo</span></div>
             <div className="term-line" data-step="out"    data-delay="180">    3. ingest regressions, same file <span className="t-num">3x</span>   <span className="t-arrow">→</span> <span className="t-id">ingest-regression</span>          <span className="t-num">hi</span></div>
             <div className="term-line" data-step="say"    data-delay="900"><span className="t-cx-cdx">codex</span><span className="t-cx-msg"> top: post-feature-verify - 26 fix-chains in 7d. accept?</span></div>
             <div className="term-line" data-step="prompt" data-delay="1100"><span className="t-cx-user">user</span><span className="t-cx-msg"> y</span></div>
-            <div className="term-line" data-step="tool"   data-delay="700">  <span className="t-shell">$</span> <span className="t-cmd">axctl improve accept skill__508c34566d2f1d85 --with-agent</span></div>
+            <div className="term-line" data-step="tool"   data-delay="700">  <span className="t-shell">$</span> <span className="t-cmd">ax improve accept skill__508c34566d2f1d85 --with-agent</span></div>
             <div className="term-line" data-step="out"    data-delay="500">  <span className="t-arrow">›</span> scaffolded · spawning claude subagent</div>
             <div className="term-line" data-step="tool"   data-delay="600">  <span className="t-edit">✎ edit</span> <span className="t-file">SKILL.md</span> <span className="t-diff-meta">(+18 -0)</span></div>
             <div className="term-line t-diff" data-step="out" data-delay="140">    <span className="t-add">+ &lt;!--ax:skill-508c34566d2f--&gt;</span></div>
@@ -339,19 +339,19 @@ export function TerminalFigure() {
           <div className="term-body" data-term-body>
             <div className="term-line" data-step="prompt" data-delay="200"><span className="t-prompt">❯</span> build a workflow from how I shipped the live-traces vendoring last week - that was clean</div>
             <div className="term-line" data-step="say"    data-delay="900">  Looking up that session in your ax graph.</div>
-            <div className="term-line" data-step="tool"   data-delay="700">  <span className="t-bullet">⏺</span> Bash(<span className="t-cmd">axctl insights sessions --query=&quot;live-traces vendoring&quot; --limit=1</span>)</div>
+            <div className="term-line" data-step="tool"   data-delay="700">  <span className="t-bullet">⏺</span> Bash(<span className="t-cmd">ax insights sessions --query=&quot;live-traces vendoring&quot; --limit=1</span>)</div>
             <div className="term-line" data-step="out"    data-delay="500">    <span className="t-arm">⎿</span>  session <span className="t-id">0e9c5a1</span> · 2026-05-21 · live-traces vendored into ax</div>
             <div className="term-line" data-step="out"    data-delay="180">       turns=38 · tool_calls=104 · failures=<span className="t-num">0</span> · corrections=<span className="t-num">0</span></div>
             <div className="term-line" data-step="out"    data-delay="180">       closure: <span className="t-ok">feature_only</span> (no fixes in 7d)</div>
             <div className="term-line" data-step="out"    data-delay="180">       produced: 1 PR · 8 commits · 12 files touched</div>
-            <div className="term-line" data-step="tool"   data-delay="800">  <span className="t-bullet">⏺</span> Bash(<span className="t-cmd">axctl recall --session=0e9c5a1 --top=5</span>)</div>
+            <div className="term-line" data-step="tool"   data-delay="800">  <span className="t-bullet">⏺</span> Bash(<span className="t-cmd">ax recall --session=0e9c5a1 --top=5</span>)</div>
             <div className="term-line" data-step="out"    data-delay="500">    <span className="t-arm">⎿</span>  takeaways:</div>
             <div className="term-line" data-step="out"    data-delay="180">       <span className="t-arrow">•</span> plan-mode opened the session (12 turns before first edit)</div>
             <div className="term-line" data-step="out"    data-delay="180">       <span className="t-arrow">•</span> TDD applied: tests authored before each .ts module landed</div>
             <div className="term-line" data-step="out"    data-delay="180">       <span className="t-arrow">•</span> verify-before-commit fired <span className="t-num">8x</span> (build + typecheck per commit)</div>
             <div className="term-line" data-step="out"    data-delay="180">       <span className="t-arrow">•</span> narrow-pr-scope kept each commit &lt; 200 LOC</div>
             <div className="term-line" data-step="out"    data-delay="180">       <span className="t-arrow">•</span> zero rollbacks in 7d post-merge</div>
-            <div className="term-line" data-step="tool"   data-delay="800">  <span className="t-bullet">⏺</span> Bash(<span className="t-cmd">axctl skills pairs superpowers:writing-plans --since=session=0e9c5a1</span>)</div>
+            <div className="term-line" data-step="tool"   data-delay="800">  <span className="t-bullet">⏺</span> Bash(<span className="t-cmd">ax skills pairs superpowers:writing-plans --since=session=0e9c5a1</span>)</div>
             <div className="term-line" data-step="out"    data-delay="500">    <span className="t-arm">⎿</span>  3 strong pairs from that session:</div>
             <div className="term-line" data-step="out"    data-delay="180">       1. writing-plans <span className="t-arrow">→</span> test-driven-development     <span className="t-num">12x</span> in-session</div>
             <div className="term-line" data-step="out"    data-delay="180">       2. test-driven <span className="t-arrow">→</span> verification-before-completion <span className="t-num">8x</span>  in-session</div>

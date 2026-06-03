@@ -67,7 +67,7 @@ export function HookBacktestShowcase() {
               </span>
             </header>
             <pre className="term-body">
-<span className="term-line"><span className="t-prompt">~/.claude $</span> <span className="t-cmd">axctl hooks backtest</span> pre-tool-main-branch-guard <span className="t-flag">--since=</span><span className="t-num">7d</span></span>{"\n"}
+<span className="term-line"><span className="t-prompt">~/.claude $</span> <span className="t-cmd">ax hooks backtest</span> pre-tool-main-branch-guard <span className="t-flag">--since=</span><span className="t-num">7d</span></span>{"\n"}
 <span className="term-line"><span className="t-muted">  ↳ replay window  </span> 2026-05-21 → 2026-05-28  <span className="t-muted">(7d)</span></span>{"\n"}
 <span className="term-line"><span className="t-muted">  ↳ sessions       </span> <span className="t-num">14</span> claude_code, <span className="t-num">3</span> codex  <span className="t-muted">(17 total)</span></span>{"\n"}
 <span className="term-line"><span className="t-muted">  ↳ tool_calls     </span> <span className="t-num">1,247</span> bash invocations indexed</span>{"\n"}
@@ -92,7 +92,7 @@ export function HookBacktestShowcase() {
 <span className="term-line"><span className="t-muted">  one to review:</span></span>{"\n"}
 <span className="term-line"><span className="t-muted">    </span><span className="t-id">sess_8af3·turn-42</span>  <span className="t-warn">hotfix/prod-token-leak</span>  <span className="t-muted">→ allow-list?</span></span>{"\n"}
 <span className="term-line"> </span>{"\n"}
-<span className="term-line"><span className="t-ok">  install with:</span> <span className="t-cmd">axctl hooks install</span> pre-tool-main-branch-guard <span className="t-flag">--allow=hotfix/*</span></span>{"\n"}
+<span className="term-line"><span className="t-ok">  install with:</span> <span className="t-cmd">ax hooks install</span> pre-tool-main-branch-guard <span className="t-flag">--allow=hotfix/*</span></span>{"\n"}
 <span className="term-line"><span className="t-prompt">~/.claude $</span> <span className="term-caret" aria-hidden="true" /></span>
             </pre>
           </section>

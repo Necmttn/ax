@@ -104,7 +104,7 @@ export function FeaturesPage() {
         <div className="section-body">
           <p>
             A LaunchAgent (<code>com.necmttn.ax-watch</code>) tails your Claude and Codex transcript
-            directories and runs <code>axctl ingest --since=1</code> in the background within seconds of a
+            directories and runs <code>ax ingest --since=1</code> in the background within seconds of a
             new turn. A weekly cron does a deep-scan backfill for anything the watcher missed.
             Nothing is uploaded, queued, or phoned home - every read stays on the same filesystem
             your agent already writes to.
@@ -428,7 +428,7 @@ export function FeaturesPage() {
           <b>Manual-safe by commitment.</b> ax never edits <code className="inline">settings.json</code>,
           hooks, LaunchAgents, cron, or shell scripts directly. An accepted intervention emits a task
           brief at <code className="inline">.ax/tasks/&lt;id&gt;.md</code> with the safety contract on top.
-          You - or your agent - apply it. <code className="inline">axctl improve lint</code> reads the marker
+          You - or your agent - apply it. <code className="inline">ax improve lint</code> reads the marker
           you left behind to reconcile the proposal back to accepted state.
         </div>
 
@@ -473,7 +473,7 @@ export function FeaturesPage() {
 }`}</span>
             {"\n\n"}
             The <span className="pn">echo</span> line is the marker{" "}
-            <span className="pn">axctl improve lint</span> looks for.
+            <span className="pn">ax improve lint</span> looks for.
           </pre>
         </div>
       </section>
@@ -525,8 +525,8 @@ export function FeaturesPage() {
             <div className="hook-bullet">
               <div className="b-title">Inspect + backtest</div>
               <div className="b-body">
-                <code className="inline">axctl hooks</code> shows fire counts, marker reconciliation, and
-                who-installed-what. <code className="inline">axctl hooks backtest ./my-hook.ts --days 14</code>
+                <code className="inline">ax hooks</code> shows fire counts, marker reconciliation, and
+                who-installed-what. <code className="inline">ax hooks backtest ./my-hook.ts --days 14</code>
                 {" "}replays the last two weeks of tool calls through a candidate before you ship it.
               </div>
             </div>
@@ -549,7 +549,7 @@ export function FeaturesPage() {
             One CLI, <em>seven verbs.</em>
           </h2>
           <p className="section-lede">
-            Everything ax knows is reachable from <code className="inline">axctl</code>. The dashboard and TUI
+            Everything ax knows is reachable from <code className="inline">ax</code>. The dashboard and TUI
             are the same queries with different paint.
           </p>
         </div>
@@ -557,41 +557,41 @@ export function FeaturesPage() {
         <div className="cli-grid">
           <div className="cli-row">
             <span className="cmd">
-              axctl recall <span className="arg">&lt;q&gt;</span>
+              ax recall <span className="arg">&lt;q&gt;</span>
             </span>
             <span className="desc">BM25 full-text search across every user + assistant turn. Median 5.9ms.</span>
           </div>
           <div className="cli-row">
-            <span className="cmd">axctl context</span>
+            <span className="cmd">ax context</span>
             <span className="desc">Builds a just-in-time context pack from the graph for the next session.</span>
           </div>
           <div className="cli-row">
-            <span className="cmd">axctl hooks</span>
+            <span className="cmd">ax hooks</span>
             <span className="desc">Inspect installed hooks, fire counts, marker reconciliation, and backtest candidates.</span>
           </div>
           <div className="cli-row">
-            <span className="cmd">axctl doctor</span>
+            <span className="cmd">ax doctor</span>
             <span className="desc">Harness health check - drift, conflicts, dead weight across skills + hooks + plists.</span>
           </div>
           <div className="cli-row">
             <span className="cmd">
-              axctl improve <span className="arg">list / show / accept / reject / lint / verdict / checkpoint</span>
+              ax improve <span className="arg">list / show / accept / reject / lint / verdict / checkpoint</span>
             </span>
             <span className="desc">Walk the intervention queue. Accept emits a task brief; lint reconciles the marker.</span>
           </div>
           <div className="cli-row">
-            <span className="cmd">axctl serve</span>
+            <span className="cmd">ax serve</span>
             <span className="desc">
               Local web dashboard at <code className="inline">127.0.0.1:8520</code> with the same data the TUI sees.
             </span>
           </div>
           <div className="cli-row">
-            <span className="cmd">axctl tui</span>
+            <span className="cmd">ax tui</span>
             <span className="desc">Interactive terminal dashboard. Sessions, interventions, harness in one pane.</span>
           </div>
           <div className="cli-row">
             <span className="cmd">
-              axctl ingest <span className="arg">--since=N</span>
+              ax ingest <span className="arg">--since=N</span>
             </span>
             <span className="desc">What the LaunchAgent calls on every new transcript. Idempotent; safe to rerun.</span>
           </div>
@@ -629,7 +629,7 @@ export function FeaturesPage() {
             <span className="lc-eye">daemon</span>
             <span className="lc-val">LaunchAgent</span>
             <span className="lc-desc">
-              macOS + Linux, installed by <code className="inline">axctl install</code>. Survives reboots.
+              macOS + Linux, installed by <code className="inline">ax install</code>. Survives reboots.
             </span>
           </div>
           <div className="local-card">

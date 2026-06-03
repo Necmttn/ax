@@ -24,18 +24,18 @@ export function HeroSection() {
             <em>~/Projects/app · ax first run</em>
           </div>
           <code>
-            <span><b>$</b> axctl ingest --since=7</span>
+            <span><b>$</b> ax ingest --since=7</span>
             <span className="term-muted">indexed 91 sessions · 18,424 turns · 3,802 tool calls</span>
             <span className="term-muted">skills 288 · commits 142 · local graph 127.0.0.1</span>
             <span aria-hidden="true">&nbsp;</span>
-            <span><b>$</b> axctl recall &quot;auth middleware failed&quot;</span>
+            <span><b>$</b> ax recall &quot;auth middleware failed&quot;</span>
             <span className="term-ok">4 matching sessions · same file pair · same verify miss</span>
             <span aria-hidden="true">&nbsp;</span>
-            <span><b>$</b> axctl retro pending</span>
+            <span><b>$</b> ax retro pending</span>
             <span className="term-warn">3 sessions need review · 1 repeats a known failure</span>
             <span className="term-muted">proposal: post-feature-verify skill</span>
             <span aria-hidden="true">&nbsp;</span>
-            <span><b>$</b> axctl improve verdict post-feature-verify</span>
+            <span><b>$</b> ax improve verdict post-feature-verify</span>
             <span className="term-ok">adopted · +30 sessions · 0 repeat incidents</span>
           </code>
         </div>

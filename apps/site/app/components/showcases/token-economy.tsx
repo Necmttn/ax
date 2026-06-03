@@ -48,7 +48,7 @@ export function TokenEconomyShowcase() {
       </h2>
       <p className="lede">
         Every agent user is bleeding money on cache misses they can&apos;t see.{" "}
-        <span className="cmd">axctl insights token-impact --since=7d</span> joins your local
+        <span className="cmd">ax insights token-impact --since=7d</span> joins your local
         claude + codex transcripts, reconciles provider metadata against transcript bytes,
         and shows the spend, the hit rate, and the workflows burning the budget.
       </p>
@@ -283,7 +283,7 @@ export function TokenEconomyShowcase() {
           history per turn.
           <span className="src">
             workflow-impact says the gsd → superpowers migration is paying off · run{" "}
-            <code>axctl insights workflow-impact</code> for the cohort comparison
+            <code>ax insights workflow-impact</code> for the cohort comparison
           </span>
         </div>
       </section>
