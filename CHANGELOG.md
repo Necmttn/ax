@@ -1,5 +1,31 @@
 # Changelog
 
+## [0.9.0](https://github.com/Necmttn/ax/compare/v0.8.0...v0.9.0) (2026-06-03)
+
+
+### Features
+
+* **agents:** repo-qualified project scope (project:&lt;repo&gt;) ([eb81d57](https://github.com/Necmttn/ax/commit/eb81d570499b8e9238ad55e1119ec81131ec4511))
+* **cli:** hide agent-scoped skills in `ax skills unused` ([51e8596](https://github.com/Necmttn/ax/commit/51e8596d5641aa80a01516c142cdf56f928c041a))
+* **config-core:** Wave 0 shared spine for config front door ([2b1536b](https://github.com/Necmttn/ax/commit/2b1536b7ad6ef656fbcce20059973d20035cd24b))
+* **config-front-door:** CLI wiring for hooks/skills/agents config + smoke fixes ([9123579](https://github.com/Necmttn/ax/commit/91235795d9a0e8b404bad0b52ba450bedd781c70))
+* **config-front-door:** graph integration (schema, agentDefStage, reconcile filters) ([a21e747](https://github.com/Necmttn/ax/commit/a21e747485e3614be016ca0f67bf1fd65d3fd0eb))
+* **config-front-door:** Wave 1 domain modules (hooks, skills, agents) ([161aece](https://github.com/Necmttn/ax/commit/161aecedb3a1e48cc6c930210360cc4edb3820be))
+* **skills:** distinguish out-of-scope rows from orphans in config view ([5ab251a](https://github.com/Necmttn/ax/commit/5ab251a5d7ac616148c8c4c20dfbba270dd08286))
+
+
+### Bug Fixes
+
+* **hooks+agents:** codex identity/routing, ambiguous-id, transactional toggle ([0b750fa](https://github.com/Necmttn/ax/commit/0b750fa4b9600f70ba14f059fe2f56ebbe90f1a5))
+* **hooks:** preserve ax marker on edit so hook id stays stable ([0b8c11f](https://github.com/Necmttn/ax/commit/0b8c11fa3d9fa819f8469c99f4e2e30473f2050b))
+* **queries:** mirror agent_def in SCHEMA_TABLES ([7ea2918](https://github.com/Necmttn/ax/commit/7ea2918ae507961582900effa017e7e7de341d58))
+* **reconcile:** scope-partition so reconcile only touches owned scopes ([1bae738](https://github.com/Necmttn/ax/commit/1bae738d0ef6a9eb21b73d46d978f47835c1245b))
+
+
+### Performance
+
+* **config:** run independent reads concurrently in readAll* ([2892676](https://github.com/Necmttn/ax/commit/2892676c8e96c146f3828d814193eb9b14326837))
+
 ## [0.8.0](https://github.com/Necmttn/ax/compare/v0.7.0...v0.8.0) (2026-06-03)
 
 
