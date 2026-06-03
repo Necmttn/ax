@@ -1,101 +1,60 @@
-import { Effect } from "effect";
-import { defineClassifier, label, type ClassifierResult, type EventWindow } from "../core.ts";
-import { isControlOrContextText } from "../control-text.ts";
+import { definePatternClassifier } from "../core.ts";
 
-const classifierKey = "correction-event";
-const classifierVersion = "0.1.0";
-
-const evidenceFor = (window: EventWindow, matched: string): Record<string, unknown> => ({
-    user: window.userTurn.text,
-    previousAssistant: window.previousAssistantTurn?.text ?? null,
-    matched,
-});
-
-function classify(window: EventWindow): readonly ClassifierResult[] {
-    const text = window.userTurn.text.trim();
-    if (text.length === 0 || isControlOrContextText(text)) return [];
-    const lower = text.toLowerCase();
-
-    if (/\b(don'?t want just html|not just html|want to see the results|actually useful things|apply to surrealml)\b/i.test(lower)) {
-        return [label(window, {
-            classifierKey,
-            classifierVersion,
+export const correctionEventClassifier = definePatternClassifier({
+    key: "correction-event",
+    version: "0.1.0",
+    description: "Identifies user corrections and what was wrong with the agent response or interpretation.",
+    skipControlText: true,
+    patterns: [
+        {
+            test: /\b(don'?t want just html|not just html|want to see the results|actually useful things|apply to surrealml)\b/i,
             label: "correction",
             target: "wrong_artifact",
+            matched: "wrong_artifact",
             polarity: "revise",
             durability: "session_preference",
             confidence: 0.86,
-            evidence: evidenceFor(window, "wrong_artifact"),
             signals: ["correction:wrong_artifact"],
-        })];
-    }
-
-    if (/\b(previous context|not only the user message|what agent was done|caused this message|missed the context)\b/i.test(lower)) {
-        return [label(window, {
-            classifierKey,
-            classifierVersion,
+        },
+        {
+            test: /\b(previous context|not only the user message|what agent was done|caused this message|missed the context)\b/i,
             label: "correction",
             target: "missing_context",
+            matched: "missing_context",
             polarity: "revise",
             durability: "repo_preference",
             confidence: 0.88,
-            evidence: evidenceFor(window, "missing_context"),
             signals: ["correction:missing_context"],
-        })];
-    }
-
-    if (/\b(direction thing|not a correction|misclassified|classification.*wrong|wrong classifier)\b/i.test(lower)) {
-        return [label(window, {
-            classifierKey,
-            classifierVersion,
+        },
+        {
+            test: /\b(direction thing|not a correction|misclassified|classification.*wrong|wrong classifier)\b/i,
             label: "correction",
             target: "misclassified_intent",
+            matched: "misclassified_intent",
             polarity: "revise",
             durability: "repo_preference",
             confidence: 0.82,
-            evidence: evidenceFor(window, "misclassified_intent"),
             signals: ["correction:misclassified_intent"],
-        })];
-    }
-
-    if (/\b(accepted workflow candidate|persisted review fact)\b.*\b(correction_or_rejection_signal|workflow-state correction|workflow_state|add_context_guardrail)\b/i.test(lower)) {
-        return [label(window, {
-            classifierKey,
-            classifierVersion,
+        },
+        {
+            test: /\b(accepted workflow candidate|persisted review fact)\b.*\b(correction_or_rejection_signal|workflow-state correction|workflow_state|add_context_guardrail)\b/i,
             label: "correction",
             target: "workflow_state",
+            matched: "workflow_state_reviewed_candidate",
             polarity: "revise",
             durability: "repo_preference",
             confidence: 0.84,
-            evidence: evidenceFor(window, "workflow_state_reviewed_candidate"),
             signals: ["correction:workflow_state", "source:reviewed_workflow_candidate"],
-        })];
-    }
-
-    if (/^(no|nope|nah)\b|\b(wrong|not what i asked|not that)\b/i.test(lower)) {
-        return [label(window, {
-            classifierKey,
-            classifierVersion,
+        },
+        {
+            test: /^(no|nope|nah)\b|\b(wrong|not what i asked|not that)\b/i,
             label: "correction",
             target: "wrong_output",
+            matched: "wrong_output",
             polarity: "revise",
             durability: "session_preference",
             confidence: 0.74,
-            evidence: evidenceFor(window, "wrong_output"),
             signals: ["correction:wrong_output"],
-        })];
-    }
-
-    return [];
-}
-
-export const correctionEventClassifier = defineClassifier({
-    key: classifierKey,
-    version: classifierVersion,
-    kind: "heuristic",
-    description: "Identifies user corrections and what was wrong with the agent response or interpretation.",
-    input: "event_window",
-    labels: ["correction"],
-    targets: ["wrong_artifact", "missing_context", "misclassified_intent", "wrong_output", "workflow_state"],
-    classify: (window) => Effect.succeed(classify(window)),
+        },
+    ],
 });
