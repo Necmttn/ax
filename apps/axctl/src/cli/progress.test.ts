@@ -146,6 +146,31 @@ describe("cli progress", () => {
         expect(output).toContain("205");
     });
 
+    test("pipeline mode suppresses speed for sub-100ms stages instead of absurd throughput", () => {
+        const sink = memorySink(true, 120);
+        let now = 1_000;
+        const progress = createProgressReporter({
+            command: "ingest",
+            mode: "pipeline",
+            runId: "abc123456789",
+            stages: [{ source: "ingest", stage: "pricing" }],
+            sink,
+            now: () => now,
+            intervalMs: 10_000,
+            env: {},
+        });
+
+        progress.start({ source: "ingest", stage: "pricing" });
+        now = 1_001; // 1ms bulk insert
+        progress.finish({ source: "ingest", stage: "pricing" }, { count: 4339 });
+        progress.stop();
+
+        const output = sink.chunks.join("");
+        expect(output).toContain("4,339"); // row count still shown
+        expect(output).not.toContain("4,339,000/s"); // not the noise-inflated rate
+        expect(output).not.toContain("339,000/s");
+    });
+
     test("pipeline mode shows discovery totals before row counts exist", () => {
         const sink = memorySink(true, 120);
         const progress = createProgressReporter({

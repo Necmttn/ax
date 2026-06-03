@@ -42,6 +42,11 @@ export interface ProgressOptions {
 }
 
 const spinnerFrames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+/** Below this, a stage's wall-clock is dominated by measurement noise (a single
+ *  bulk insert finishes in ~1ms), so rows/elapsed yields absurd throughput like
+ *  "4,339,000/s". Display floors sub-100ms times to "0.1s" anyway - suppress the
+ *  rate to "--" rather than divide by the true sub-millisecond elapsed. */
+const minSpeedElapsedMs = 100;
 const countDisplayOrder = [
     "files",
     "bytes",
@@ -362,7 +367,7 @@ class PipelineProgress implements ProgressReporter {
         const running = this.states.filter((state) => state.status === "running");
         const currentLabel = running.length > 0 ? running.map(stageKey).join(" + ") : "idle";
         const observedRows = this.states.reduce((sum, state) => sum + totalRows(state.counts), 0);
-        const speed = elapsed > 0 ? observedRows / (elapsed / 1000) : 0;
+        const speed = elapsed >= minSpeedElapsedMs ? observedRows / (elapsed / 1000) : 0;
         const eta = done > 0 && done < total ? formatDuration((elapsed / done) * (total - done)) : "--";
         const labelW = this.labelWidth();
         const header = `  ${"stage".padEnd(labelW)}  progress              ${"rows".padStart(8)}  ${"speed".padStart(10)}  ${"time".padStart(7)}`;
@@ -387,7 +392,7 @@ class PipelineProgress implements ProgressReporter {
     private stageLine(state: StageState, now: number, labelW: number): string {
         const elapsed = state.startedAt ? (state.finishedAt ?? now) - state.startedAt : 0;
         const rows = totalRows(state.counts);
-        const speed = elapsed > 0 && rows > 0 ? rows / (elapsed / 1000) : 0;
+        const speed = elapsed >= minSpeedElapsedMs && rows > 0 ? rows / (elapsed / 1000) : 0;
         const cur = state.counts.currentFile ?? state.counts.currentSubagent;
         const tot = state.counts.totalFiles ?? state.counts.totalSubagents;
         const ratio = typeof cur === "number" && typeof tot === "number" && tot > 0
