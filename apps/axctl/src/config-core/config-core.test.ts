@@ -134,23 +134,48 @@ describe("reconcileTable", () => {
     const run = <A, E>(eff: Effect.Effect<A, E, SurrealClient>, layer: Layer.Layer<SurrealClient>) =>
         Effect.runPromise(eff.pipe(Effect.provide(layer)) as Effect.Effect<A, E, never>);
 
-    test("live run emits tombstone + resurrect + touch with $names binding", async () => {
+    // query order: SELECT absent, SELECT live, [UPDATE absent], UPDATE revivable, UPDATE live
+    test("live run: pre-selects then tombstone/resurrect/touch with $names binding", async () => {
         const calls: { sql: string; bindings?: Record<string, unknown> }[] = [];
-        const layer = recordingDb(calls, [[1, 2], [3], [4, 5, 6]]); // tomb=2, revived=1, touched=3
+        // wouldTombstone=1, livePresent=9 -> liveTotal=10, 1/10 < 0.5 so not skipped
+        const layer = recordingDb(calls, [[1], [1, 2, 3, 4, 5, 6, 7, 8, 9], [1], [7], [1, 2, 3, 4, 5, 6, 7, 8, 9]]);
         const report = await run(reconcileTable("skill", ["a", "b"]), layer);
-        expect(report).toMatchObject({ table: "skill", tombstoned: 2, resurrected: 1, touched: 3, dryRun: false });
-        expect(calls).toHaveLength(3);
-        expect(calls[0]!.sql).toContain("SET deleted_at = time::now()");
-        expect(calls[0]!.sql).toContain("NOT IN $names");
+        expect(report).toMatchObject({ table: "skill", tombstoned: 1, resurrected: 1, touched: 9, dryRun: false, tombstoneSkipped: false, wouldTombstone: 1 });
+        expect(calls[0]!.sql).toStartWith("SELECT"); // wouldTombstone probe
         expect(calls[0]!.bindings).toEqual({ names: ["a", "b"] });
-        expect(calls[1]!.sql).toContain("deleted_at = NONE");
+        expect(calls[2]!.sql).toContain("SET deleted_at = time::now()");
+        expect(calls[2]!.sql).toContain("NOT IN $names");
+        expect(calls[3]!.sql).toContain("deleted_at = NONE");
     });
 
-    test("dry-run only SELECTs, never UPDATEs", async () => {
+    test("dry-run never UPDATEs", async () => {
         const calls: { sql: string; bindings?: Record<string, unknown> }[] = [];
-        const layer = recordingDb(calls, [[1], [], [2, 3]]);
+        const layer = recordingDb(calls, [[1], [2, 3, 4], [9]]); // would=1, present=3, revivable=1
         const report = await run(reconcileTable("agent_def", ["x"], { dryRun: true }), layer);
-        expect(report).toMatchObject({ tombstoned: 1, resurrected: 0, touched: 2, dryRun: true });
+        expect(report).toMatchObject({ tombstoned: 1, resurrected: 1, touched: 3, dryRun: true, tombstoneSkipped: false });
         expect(calls.every((c) => c.sql.startsWith("SELECT"))).toBe(true);
+    });
+
+    test("SAFETY: refuses to tombstone an implausible share of the table", async () => {
+        const calls: { sql: string; bindings?: Record<string, unknown> }[] = [];
+        // wouldTombstone=8, livePresent=2 -> 8/10 = 0.8 > 0.5 -> implausible, skipped
+        const layer = recordingDb(calls, [[1, 2, 3, 4, 5, 6, 7, 8], [1, 2]]);
+        const report = await run(reconcileTable("skill", ["a", "b"]), layer);
+        expect(report).toMatchObject({ tombstoned: 0, tombstoneSkipped: true, skipReason: "implausible", wouldTombstone: 8 });
+        expect(calls.some((c) => c.sql.startsWith("UPDATE") && c.sql.includes("deleted_at = time::now()"))).toBe(false);
+    });
+
+    test("SAFETY: empty snapshot tombstones nothing", async () => {
+        const calls: { sql: string; bindings?: Record<string, unknown> }[] = [];
+        const layer = recordingDb(calls, [[1, 2, 3], []]);
+        const report = await run(reconcileTable("skill", []), layer);
+        expect(report).toMatchObject({ tombstoned: 0, tombstoneSkipped: true, skipReason: "empty" });
+    });
+
+    test("SAFETY: tombstone:false (degraded discovery) skips the destructive pass", async () => {
+        const calls: { sql: string; bindings?: Record<string, unknown> }[] = [];
+        const layer = recordingDb(calls, [[1], [2, 3, 4, 5, 6, 7, 8, 9, 10, 11]]);
+        const report = await run(reconcileTable("skill", ["a"], { tombstone: false }), layer);
+        expect(report).toMatchObject({ tombstoned: 0, tombstoneSkipped: true, skipReason: "incomplete" });
     });
 });

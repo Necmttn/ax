@@ -217,19 +217,21 @@ describe("reconcileSkills", () => {
             }),
         ];
         const calls: { sql: string; bindings?: Record<string, unknown> }[] = [];
+        // query order: SELECT absent, SELECT live, UPDATE absent, UPDATE revivable, UPDATE live.
+        // wouldTombstone=1 vs livePresent=9 keeps it under the 50% safety guard.
         const layer = Layer.mergeAll(
             FS,
             makeSkillSourceRegistryLayer(sources),
-            recordingDb(calls, [[1], [], [2, 3]]), // tomb=1 resurrect=0 touch=2
+            recordingDb(calls, [[1], [1, 2, 3, 4, 5, 6, 7, 8, 9], [1], [], [1, 2, 3, 4, 5, 6, 7, 8, 9]]),
         );
         const report = await Effect.runPromise(
             reconcileSkills().pipe(Effect.provide(layer)) as Effect.Effect<any, any, never>,
         );
-        expect(report).toMatchObject({ table: "skill", tombstoned: 1, dryRun: false });
-        // first UPDATE is the tombstone pass with the on-disk $names binding.
-        expect(calls[0]!.sql).toContain("SET deleted_at = time::now()");
-        expect(calls[0]!.sql).toContain("NOT IN $names");
-        const names = (calls[0]!.bindings as { names: string[] }).names.sort();
+        expect(report).toMatchObject({ table: "skill", tombstoned: 1, dryRun: false, tombstoneSkipped: false });
+        // calls[2] is the tombstone UPDATE with the on-disk $names binding.
+        expect(calls[2]!.sql).toContain("SET deleted_at = time::now()");
+        expect(calls[2]!.sql).toContain("NOT IN $names");
+        const names = (calls[2]!.bindings as { names: string[] }).names.sort();
         expect(names).toEqual(["also", "keep"]);
     });
 

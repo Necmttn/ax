@@ -18,25 +18,40 @@ import type { SkillRecord } from "./sources/types.ts";
  * shouldn't tombstone all the others), so per-ref discovery defects are logged
  * and skipped.
  */
+export interface SkillSnapshot {
+    readonly records: ReadonlyArray<SkillRecord>;
+    /** False when any root failed to ENUMERATE (PlatformError) - the snapshot is
+     *  degraded and must not drive destructive tombstoning. A single malformed
+     *  SKILL.md (SkillParseError) is a benign per-file skip and keeps it true. */
+    readonly complete: boolean;
+}
+
 export const discoverAllSkills = (
     repoRoot: string | null = null,
 ): Effect.Effect<
-    ReadonlyArray<SkillRecord>,
+    SkillSnapshot,
     never,
     SkillSourceRegistry | FileSystem.FileSystem | Path.Path
 > =>
     Effect.gen(function* () {
         const registry = yield* SkillSourceRegistry;
         const records: SkillRecord[] = [];
+        let complete: boolean = true;
+        const empty = [] as ReadonlyArray<SkillRecord>;
         for (const source of registry.all()) {
             for (const ref of source.roots(repoRoot)) {
                 const found = yield* source.discover(ref).pipe(
-                    Effect.tapError((err) =>
-                        Effect.logWarning(
-                            `skills reconcile: skipping ${ref.root}: ${String(err)}`,
+                    // a corrupt SKILL.md skips just that file; snapshot stays complete
+                    Effect.catchTag("SkillParseError", (err) =>
+                        Effect.logWarning(`skills reconcile: bad SKILL.md under ${ref.root}: ${err.reason}`).pipe(Effect.as(empty)),
+                    ),
+                    // a root we cannot READ (EACCES/ENOENT) degrades the snapshot -> no tombstone
+                    Effect.catchCause((cause) =>
+                        Effect.sync(() => { complete = false; }).pipe(
+                            Effect.andThen(Effect.logWarning(`skills reconcile: unreadable root ${ref.root}: ${String(cause)}`)),
+                            Effect.as(empty),
                         ),
                     ),
-                    Effect.orElseSucceed(() => [] as ReadonlyArray<SkillRecord>),
                 );
                 records.push(...found);
             }
@@ -44,7 +59,7 @@ export const discoverAllSkills = (
         // Dedup by name (user precedes plugin in registry order, so it wins).
         const byName = new Map<string, SkillRecord>();
         for (const r of records) if (!byName.has(r.name)) byName.set(r.name, r);
-        return [...byName.values()];
+        return { records: [...byName.values()], complete };
     });
 
 /**
@@ -60,7 +75,11 @@ export const reconcileSkills = (
     SkillSourceRegistry | FileSystem.FileSystem | Path.Path | SurrealClient
 > =>
     Effect.gen(function* () {
-        const records = yield* discoverAllSkills(opts?.repoRoot ?? null);
-        const names = records.map((r) => r.name);
-        return yield* reconcileTable("skill", names, { dryRun: opts?.dryRun ?? false });
+        const snapshot = yield* discoverAllSkills(opts?.repoRoot ?? null);
+        const names = snapshot.records.map((r) => r.name);
+        // A degraded snapshot resurrects/touches but never tombstones.
+        return yield* reconcileTable("skill", names, {
+            dryRun: opts?.dryRun ?? false,
+            tombstone: snapshot.complete,
+        });
     });

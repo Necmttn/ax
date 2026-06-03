@@ -30,9 +30,9 @@ export interface SkillConfigRow {
 }
 
 export interface ReadSkillsFilter {
-    readonly source?: string;
-    readonly scope?: string;
-    readonly status?: SkillStatus;
+    readonly source?: string | undefined;
+    readonly scope?: string | undefined;
+    readonly status?: SkillStatus | undefined;
     /** Include rows whose DB record is tombstoned (`deleted_at` set). */
     readonly includeDeleted?: boolean;
     readonly repoRoot?: string | null;
@@ -99,7 +99,7 @@ export const readAllSkills = (
     SkillSourceRegistry | FileSystem.FileSystem | Path.Path | SurrealClient
 > =>
     Effect.gen(function* () {
-        const records = yield* discoverAllSkills(filter.repoRoot ?? null);
+        const { records } = yield* discoverAllSkills(filter.repoRoot ?? null);
         const evidence = yield* fetchEvidence();
         const scopeMap = yield* loadAgentScopeMap();
 
@@ -165,7 +165,7 @@ const findRecord = (
     SkillSourceRegistry | FileSystem.FileSystem | Path.Path
 > =>
     Effect.gen(function* () {
-        const records = yield* discoverAllSkills(repoRoot);
+        const { records } = yield* discoverAllSkills(repoRoot);
         const matches = records.filter((r) => r.name === name);
         if (matches.length === 1) return matches[0]!;
         return yield* new SkillNotFoundError({

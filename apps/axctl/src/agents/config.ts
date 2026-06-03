@@ -32,7 +32,7 @@ export interface AgentListRow {
 
 export interface AgentFilter {
     /** Restrict to one scope. */
-    readonly scope?: AgentScope;
+    readonly scope?: AgentScope | undefined;
     /** Include rows tombstoned in the graph (default false → live + uningested). */
     readonly includeDeleted?: boolean;
 }

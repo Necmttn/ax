@@ -1,9 +1,9 @@
-import { createHash } from "node:crypto";
 import { Effect, FileSystem, Path } from "effect";
 import type { PlatformError } from "effect/PlatformError";
 import { HOME } from "@ax/lib/paths";
 import { parseFrontmatter, readList } from "../config-core/frontmatter.ts";
 import { ConfigParseError } from "../config-core/errors.ts";
+import { sha16 } from "../config-core/hash.ts";
 
 /**
  * Agent definition source: Claude Code subagent files (`<dir>/<name>.md`) with
@@ -67,8 +67,6 @@ export interface AgentSource {
     ) => Effect.Effect<void, ConfigParseError, FileSystem.FileSystem>;
 }
 
-const hashBody = (body: string): string =>
-    createHash("sha256").update(body).digest("hex").slice(0, 16);
 
 /** `AX_AGENT_DIRS` (comma list) overrides the user root, for tests. */
 const envUserDirs = (): string[] =>
@@ -114,7 +112,7 @@ const parseAgentFile = (
             description,
             model,
             skills,
-            contentHash: hashBody(parsed.body),
+            contentHash: sha16(parsed.body),
             bytes: Buffer.byteLength(content, "utf8"),
         } satisfies AgentRecord;
     });

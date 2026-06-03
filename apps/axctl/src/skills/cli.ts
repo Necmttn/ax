@@ -1,6 +1,9 @@
 import { Effect } from "effect";
 import { Argument, Command, Flag } from "effect/unstable/cli";
 import { prettyPrint } from "@ax/lib/json";
+import { optionValue } from "../config-core/cli-util.ts";
+import { formatReconcile } from "../config-core/reconcile.ts";
+import { reconcileSkills } from "./reconcile.ts";
 import { SkillSourceRegistryLive } from "./sources/registry.ts";
 import {
     readAllSkills,
@@ -49,9 +52,9 @@ const configCommand = Command.make(
     },
     ({ source, scope, status, includeDeleted, json: asJson }) =>
         readAllSkills({
-            ...(source._tag === "Some" ? { source: source.value } : {}),
-            ...(scope._tag === "Some" ? { scope: scope.value } : {}),
-            ...(status._tag === "Some" ? { status: status.value as SkillStatus } : {}),
+            source: optionValue(source),
+            scope: optionValue(scope),
+            status: optionValue(status) as SkillStatus | undefined,
             includeDeleted,
         }).pipe(
             Effect.map((rows) => console.log(asJson ? prettyPrint(rows) : fmt(rows))),
@@ -63,15 +66,10 @@ const reconcileCommand = Command.make(
     "reconcile",
     { dryRun: Flag.boolean("dry-run").pipe(Flag.withDefault(false)), json },
     ({ dryRun, json: asJson }) =>
-        Effect.gen(function* () {
-            const { reconcileSkills } = yield* Effect.promise(() => import("./reconcile.ts"));
-            const report = yield* reconcileSkills({ dryRun });
-            console.log(
-                asJson
-                    ? prettyPrint(report)
-                    : `reconcile skill: tombstoned=${report.tombstoned} resurrected=${report.resurrected} touched=${report.touched}${dryRun ? " (dry-run)" : ""}`,
-            );
-        }).pipe(Effect.provide(SkillSourceRegistryLive)),
+        reconcileSkills({ dryRun }).pipe(
+            Effect.map((report) => console.log(asJson ? prettyPrint(report) : formatReconcile(report))),
+            Effect.provide(SkillSourceRegistryLive),
+        ),
 ).pipe(Command.withDescription("Tombstone skill rows absent on disk; resurrect those present (--dry-run)"));
 
 const scopeCommand = Command.make(

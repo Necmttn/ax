@@ -1,6 +1,8 @@
 import { Effect } from "effect";
 import { Argument, Command, Flag } from "effect/unstable/cli";
 import { prettyPrint } from "@ax/lib/json";
+import { optionValue } from "../config-core/cli-util.ts";
+import { formatReconcile } from "../config-core/reconcile.ts";
 import { AgentSourceRegistryLive } from "./registry.ts";
 import {
     readAllAgents,
@@ -43,7 +45,7 @@ const configCommand = Command.make(
     },
     ({ scope, includeDeleted, json: asJson }) =>
         readAllAgents({
-            ...(scope._tag === "Some" ? { scope: scope.value as AgentScope } : {}),
+            scope: optionValue(scope) as AgentScope | undefined,
             includeDeleted,
         }).pipe(
             Effect.map((rows) => console.log(asJson ? prettyPrint(rows) : fmt(rows))),
@@ -56,13 +58,7 @@ const reconcileCommand = Command.make(
     { dryRun: Flag.boolean("dry-run").pipe(Flag.withDefault(false)), json },
     ({ dryRun, json: asJson }) =>
         reconcileAgents({ dryRun }).pipe(
-            Effect.map((report) =>
-                console.log(
-                    asJson
-                        ? prettyPrint(report)
-                        : `reconcile agent_def: tombstoned=${report.tombstoned} resurrected=${report.resurrected} touched=${report.touched}${dryRun ? " (dry-run)" : ""}`,
-                ),
-            ),
+            Effect.map((report) => console.log(asJson ? prettyPrint(report) : formatReconcile(report))),
             Effect.provide(AgentSourceRegistryLive),
         ),
 ).pipe(Command.withDescription("Tombstone agent_def rows absent on disk; resurrect those present (--dry-run)"));

@@ -1,7 +1,7 @@
 import { Effect, FileSystem, Path } from "effect";
 import type { PlatformError } from "effect/PlatformError";
-import { createHash } from "node:crypto";
 import { SkillParseError } from "@ax/lib/errors";
+import { sha16 } from "../../config-core/hash.ts";
 import { parseFrontmatter } from "../../config-core/frontmatter.ts";
 import { SkillReadOnlyError } from "../errors.ts";
 import {
@@ -11,8 +11,6 @@ import {
     type SkillSource,
 } from "./types.ts";
 
-const sha16 = (text: string): string =>
-    createHash("sha256").update(text).digest("hex").slice(0, 16);
 
 const firstNonEmptyLine = (body: string): string | undefined => {
     for (const line of body.split("\n")) {

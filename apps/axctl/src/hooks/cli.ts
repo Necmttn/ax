@@ -1,6 +1,7 @@
 import { Effect } from "effect";
 import { Argument, Command, Flag } from "effect/unstable/cli";
 import { prettyPrint } from "@ax/lib/json";
+import { optionValue } from "../config-core/cli-util.ts";
 import { HookProviderRegistryDefault } from "./providers/registry.ts";
 import {
     readAllHooks,
@@ -49,18 +50,20 @@ const configCommand = Command.make(
         noEvidence: Flag.boolean("no-evidence").pipe(Flag.withDefault(false)),
         json,
     },
-    ({ provider, scope, event, noEvidence, json: asJson }) =>
-        readAllHooks({
-            providerFilter: provider._tag === "Some" ? provider.value : undefined,
-            scopeFilter: scope._tag === "Some" ? asScope(scope.value) : undefined,
-            eventFilter: event._tag === "Some" ? event.value : undefined,
+    ({ provider, scope, event, noEvidence, json: asJson }) => {
+        const sc = optionValue(scope);
+        return readAllHooks({
+            providerFilter: optionValue(provider),
+            scopeFilter: sc !== undefined ? asScope(sc) : undefined,
+            eventFilter: optionValue(event),
             withEvidence: !noEvidence,
         }).pipe(
             Effect.map((rows: ReadonlyArray<ConfiguredHookWithEvidence>) =>
                 console.log(asJson ? prettyPrint(rows) : formatConfiguredHooks(rows)),
             ),
             Effect.provide(HookProviderRegistryDefault),
-        ),
+        );
+    },
 ).pipe(Command.withDescription("List configured hooks across providers/scopes (+fired evidence)"));
 
 const addCommand = Command.make(
@@ -80,8 +83,8 @@ const addCommand = Command.make(
             input: {
                 event,
                 command,
-                matcher: matcher._tag === "Some" ? matcher.value : null,
-                ...(timeout._tag === "Some" ? { timeout: timeout.value } : {}),
+                matcher: optionValue(matcher) ?? null,
+                ...(optionValue(timeout) !== undefined ? { timeout: optionValue(timeout)! } : {}),
             },
         }).pipe(
             Effect.map((path) => console.log(`added ${provider} ${event} hook -> ${path}`)),

@@ -152,21 +152,23 @@ describe("reconcileAgents (mock SurrealClient)", () => {
         writeAgent("planner", "---\nname: planner\n---\nbody");
         const rec: QueryRecorder = { calls: [] };
 
+        // 2 on-disk agents; query order = SELECT absent, SELECT live, UPDATE x3.
+        // would=0 (fixture[2]) keeps the safety guard from tripping.
         const report = await Effect.runPromise(
             reconcileAgents().pipe(
-                Effect.provide(recordingDb(rec, [[], [], []])),
+                Effect.provide(recordingDb(rec, [[], [1, 2], [], [], [1, 2]])),
                 Effect.provide(FS),
                 Effect.provide(reg()),
             ) as Effect.Effect<any, never, never>,
         );
 
         expect((report as { table: string }).table).toBe("agent_def");
-        // reconcileTable issues exactly the three non-dry-run UPDATEs.
+        // reconcileTable issues the three non-dry-run UPDATEs (after two pre-SELECTs).
         const joined = rec.calls.join("\n");
         expect(joined).toContain("UPDATE agent_def SET deleted_at = time::now() WHERE name NOT IN $names");
         expect(joined).toContain("UPDATE agent_def SET deleted_at = NONE");
         expect(joined).toContain("UPDATE agent_def SET last_seen_at = time::now() WHERE name IN $names");
-        expect(rec.calls.length).toBe(3);
+        expect(rec.calls.length).toBe(5);
     });
 
     test("dry-run issues SELECTs only, no UPDATEs", async () => {

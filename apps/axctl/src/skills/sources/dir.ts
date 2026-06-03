@@ -1,7 +1,7 @@
 import { Effect, FileSystem, Path } from "effect";
 import type { PlatformError } from "effect/PlatformError";
-import { createHash } from "node:crypto";
 import { SkillParseError } from "@ax/lib/errors";
+import { sha16 } from "../../config-core/hash.ts";
 import { validateRoleName } from "@ax/lib/role-name";
 import { parseFrontmatter, readList } from "../../config-core/frontmatter.ts";
 import { SkillReadOnlyError } from "../errors.ts";
@@ -28,8 +28,6 @@ const extractRoles = (fm: Record<string, unknown>): string[] => {
     return out;
 };
 
-const sha16 = (text: string): string =>
-    createHash("sha256").update(text).digest("hex").slice(0, 16);
 
 /**
  * Apply a source's name-namespacing rule. Plugin + project skills get the bare
