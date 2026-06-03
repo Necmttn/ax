@@ -15,7 +15,7 @@ import {
     surrealString,
 } from "@ax/lib/shared/surql";
 import { classifyFeedback, classifyUserAsk } from "./ask-outcome.ts";
-import { BaseStageStats, IngestContext, sinceDaysFromCtx, StageMeta } from "./stage/types.ts";
+import { BaseStageStats, IngestContext, sinceDaysFromCtx, sinceWhereClause, StageMeta } from "./stage/types.ts";
 import type { StageDef } from "./stage/registry.ts";
 
 export const TurnAnalysisKey = Schema.Literal("turn-analysis");
@@ -529,7 +529,7 @@ export function deriveTurnAnalysisRows(rows: readonly TurnAnalysisInput[]): Turn
 const fetchTurns = (sinceDays: number | undefined): Effect.Effect<TurnAnalysisInput[], DbError, SurrealClient> =>
     Effect.gen(function* () {
         const db = yield* SurrealClient;
-        const since = sinceDays && sinceDays > 0 ? `WHERE ts > time::now() - ${sinceDays}d` : "";
+        const since = sinceWhereClause(sinceDays);
         const [rows] = yield* db.query<[TurnAnalysisInput[]]>(`
 SELECT id, session, session.source AS source, seq, role, message_kind, intent_kind, text, text_excerpt, type::string(ts) AS ts
 FROM turn

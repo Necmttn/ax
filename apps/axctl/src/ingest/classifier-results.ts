@@ -17,7 +17,7 @@ import { SurrealClient } from "@ax/lib/db";
 import type { DbError } from "@ax/lib/errors";
 import { executeStatementsWith } from "@ax/lib/shared/statement-exec";
 import { recordKeyPart } from "@ax/lib/shared/derive-keys";
-import { BaseStageStats, IngestContext, sinceDaysFromCtx, StageMeta } from "./stage/types.ts";
+import { BaseStageStats, IngestContext, sinceDaysFromCtx, sinceWhereClause, StageMeta } from "./stage/types.ts";
 import type { StageDef } from "./stage/registry.ts";
 
 export const ClassifierResultsKey = Schema.Literal("classifier-results");
@@ -146,7 +146,7 @@ export async function deriveClassifierResultsFromRows(
 const fetchTurns = (sinceDays: number | undefined): Effect.Effect<ClassifierTurnRow[], DbError, SurrealClient> =>
     Effect.gen(function* () {
         const db = yield* SurrealClient;
-        const since = sinceDays && sinceDays > 0 ? `WHERE ts > time::now() - ${sinceDays}d` : "";
+        const since = sinceWhereClause(sinceDays);
         const [rows] = yield* db.query<[ClassifierTurnRow[]]>(`
 SELECT id, session, seq, role, message_kind, text, text_excerpt, type::string(ts) AS ts
 FROM turn

@@ -260,9 +260,6 @@ function skillCandidateStatements(row: SkillCandidate): string[] {
     return statements;
 }
 
-const sinceWhere = (sinceDays: number | undefined): string =>
-    sinceDays && sinceDays > 0 ? `WHERE ts > time::now() - ${sinceDays}d` : "";
-
 // ---------- skip-unchanged watermark (hypothesis 008) ----------
 //
 // The closure stage blanket-DELETEs and fully re-derives its output
@@ -343,7 +340,7 @@ export const deriveClosure = (
             db.query<[CommitRow[]]>(`
 SELECT id, message, repository, type::string(ts) AS ts
 FROM commit
-${sinceWhere(opts.sinceDays)}
+${sinceWhereClause(opts.sinceDays)}
 ORDER BY ts ASC;`).pipe(Effect.map((rows) => rows?.[0] ?? [])),
             db.query<[TouchedRow[]]>(`
 SELECT in, out, out.path AS path
@@ -393,7 +390,7 @@ if (import.meta.main) {
 // Co-located StageDef
 // ---------------------------------------------------------------------------
 
-import { BaseStageStats, IngestContext, sinceDaysFromCtx, StageMeta } from "./stage/types.ts";
+import { BaseStageStats, IngestContext, sinceDaysFromCtx, sinceWhereClause, StageMeta } from "./stage/types.ts";
 import type { StageDef } from "./stage/registry.ts";
 
 export const ClosureKey = Schema.Literal("closure");

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import { Schema } from "effect";
-import { BaseStageStats, IngestContext, sinceDaysFromCtx, StageMeta } from "./types.ts";
+import { BaseStageStats, IngestContext, sinceAndClause, sinceDaysFromCtx, sinceWhereClause, StageMeta } from "./types.ts";
 import { IngestStageTag } from "./tags.ts";
 
 class ExampleStats extends BaseStageStats.extend<ExampleStats>("ExampleStats")({
@@ -59,6 +59,42 @@ describe("sinceDaysFromCtx", () => {
         const tomorrow = new Date(Date.now() + 86400000);
         const ctx = IngestContext.make({ cwd: "/tmp", since: tomorrow, debug: false });
         expect(sinceDaysFromCtx(ctx)).toBeUndefined();
+    });
+});
+
+describe("sinceWhereClause", () => {
+    it("returns empty string for undefined (no time filter)", () => {
+        expect(sinceWhereClause(undefined)).toBe("");
+    });
+
+    it("returns empty string for 0", () => {
+        expect(sinceWhereClause(0)).toBe("");
+    });
+
+    it("returns empty string for a negative day count", () => {
+        expect(sinceWhereClause(-3)).toBe("");
+    });
+
+    it("builds a WHERE clause for a positive day count", () => {
+        expect(sinceWhereClause(7)).toBe("WHERE ts > time::now() - 7d");
+    });
+});
+
+describe("sinceAndClause", () => {
+    it("returns empty string for undefined (no time filter)", () => {
+        expect(sinceAndClause(undefined)).toBe("");
+    });
+
+    it("returns empty string for 0", () => {
+        expect(sinceAndClause(0)).toBe("");
+    });
+
+    it("returns empty string for a negative day count", () => {
+        expect(sinceAndClause(-3)).toBe("");
+    });
+
+    it("builds an AND clause for a positive day count", () => {
+        expect(sinceAndClause(7)).toBe("AND ts > time::now() - 7d");
     });
 });
 

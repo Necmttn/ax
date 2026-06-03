@@ -12,7 +12,7 @@ import {
     surrealOptionString,
     surrealString,
 } from "@ax/lib/shared/surql";
-import { BaseStageStats, IngestContext, sinceDaysFromCtx, StageMeta } from "./stage/types.ts";
+import { BaseStageStats, IngestContext, sinceDaysFromCtx, sinceWhereClause, StageMeta } from "./stage/types.ts";
 import type { StageDef } from "./stage/registry.ts";
 
 export const ReactionEventsKey = Schema.Literal("reaction-events");
@@ -304,7 +304,7 @@ export const buildReactionEventDeleteStatements = (
 const fetchTurns = (sinceDays: number | undefined): Effect.Effect<ReactionEventInput[], DbError, SurrealClient> =>
     Effect.gen(function* () {
         const db = yield* SurrealClient;
-        const since = sinceDays && sinceDays > 0 ? `WHERE ts > time::now() - ${sinceDays}d` : "";
+        const since = sinceWhereClause(sinceDays);
         const [rows] = yield* db.query<[ReactionEventInput[]]>(`
 SELECT id, session, session.source AS source, seq, role, message_kind, intent_kind, text, text_excerpt, type::string(ts) AS ts
 FROM turn

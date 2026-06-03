@@ -224,7 +224,7 @@ function ngramStatement(item: NgramAggregate): string {
 const fetchToolCalls = (sinceDays: number | undefined): Effect.Effect<ToolCallOutcomeRow[], DbError, SurrealClient> =>
     Effect.gen(function* () {
         const db = yield* SurrealClient;
-        const since = sinceDays && sinceDays > 0 ? `WHERE ts > time::now() - ${sinceDays}d` : "";
+        const since = sinceWhereClause(sinceDays);
         const result = yield* db.query<[ToolCallOutcomeRow[]]>(`
 SELECT id, session, turn, name, command_norm, command_text, output_excerpt, error_text, exit_code, has_error, status, type::string(ts) AS ts
 FROM tool_call
@@ -236,7 +236,7 @@ ORDER BY ts DESC;`);
 const fetchUserTurns = (sinceDays: number | undefined): Effect.Effect<UserTurnRow[], DbError, SurrealClient> =>
     Effect.gen(function* () {
         const db = yield* SurrealClient;
-        const since = sinceDays && sinceDays > 0 ? `AND ts > time::now() - ${sinceDays}d` : "";
+        const since = sinceAndClause(sinceDays);
         const result = yield* db.query<[UserTurnRow[]]>(`
 SELECT id, session, seq, text_excerpt, type::string(ts) AS ts, has_error
 FROM turn
@@ -281,7 +281,7 @@ if (import.meta.main) {
 // Co-located StageDef
 // ---------------------------------------------------------------------------
 
-import { BaseStageStats, IngestContext, sinceDaysFromCtx, StageMeta } from "./stage/types.ts";
+import { BaseStageStats, IngestContext, sinceAndClause, sinceDaysFromCtx, sinceWhereClause, StageMeta } from "./stage/types.ts";
 import type { StageDef } from "./stage/registry.ts";
 
 export const OutcomesKey = Schema.Literal("outcomes");
