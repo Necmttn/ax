@@ -1,10 +1,31 @@
 {
   "schema": "ax.transcript_label_mining_self_improve.v1",
-  "reviewed_promotion_safe_fact_count": 0,
+  "reviewed_promotion_safe_fact_count": 68,
   "weak_advisory_candidate_count": 0,
-  "rejected_deferred_count": 0,
-  "nearest_neighbor_explanation_count": 0,
-  "top_patterns": [],
-  "recommended_next_action": "mine new transcript label candidates for review",
+  "rejected_deferred_count": 8,
+  "nearest_neighbor_explanation_count": 68,
+  "top_patterns": [
+    {
+      "pattern": "direction",
+      "label_family": "direction",
+      "count": 39
+    },
+    {
+      "pattern": "approval_or_rejection",
+      "label_family": "approval_or_rejection",
+      "count": 13
+    },
+    {
+      "pattern": "correction",
+      "label_family": "correction",
+      "count": 13
+    },
+    {
+      "pattern": "verification",
+      "label_family": "verification",
+      "count": 3
+    }
+  ],
+  "recommended_next_action": "apply reviewed promotion-safe graph facts to self-improve guidance",
   "out_path": ".ax/experiments/transcript-label-mining-self-improve-current.json"
 }
