@@ -707,6 +707,93 @@ export async function cmdInstall() {
     console.log("    https://discord.gg/E4R88Cvr5R");
     console.log();
     console.log(formatInstallOnboardingGuidance(buildOnboardingReport()));
+
+    // Fresh install flows straight into setup (skills + first ingest + doctor).
+    console.log();
+    await cmdSetup({ fromInstall: true });
+}
+
+// ---------------------------------------------------------------------------
+// `ax setup` - install the agent skills, run the first ingest, verify.
+// Runnable standalone AND auto-invoked at the tail of `ax install`.
+// ---------------------------------------------------------------------------
+
+/** Agents ax can install skills for. `dir` is the install-presence probe. */
+const SETUP_AGENTS: ReadonlyArray<{ id: string; label: string; dir: string }> = [
+    { id: "claude-code", label: "Claude Code", dir: join(HOME, ".claude") },
+    { id: "codex", label: "Codex", dir: join(HOME, ".codex") },
+    { id: "cursor", label: "Cursor", dir: join(HOME, ".cursor") },
+];
+
+export interface SetupOptions {
+    /** Explicit agent ids; skips detection/prompt when set. */
+    readonly agents?: ReadonlyArray<string>;
+    /** Skip the initial `ax ingest`. */
+    readonly skipIngest?: boolean;
+    /** Non-interactive: take detected defaults, no prompts. */
+    readonly yes?: boolean;
+    /** Internal: invoked from `cmdInstall` (tweaks headers). */
+    readonly fromInstall?: boolean;
+}
+
+/** Resolve the real binary to re-invoke for the first ingest. */
+const selfBin = (): string => {
+    const vendored = join(VENDOR_BIN_DIR, "axctl");
+    return existsSync(vendored) ? vendored : process.execPath;
+};
+
+/** Choose which agents to install skills for. Interactive on a TTY, else the
+ *  detected (present-on-disk) set, falling back to claude-code + codex. */
+function resolveSetupAgents(opts: SetupOptions): string[] {
+    if (opts.agents && opts.agents.length > 0) return [...opts.agents];
+    const present = SETUP_AGENTS.filter((a) => existsSync(a.dir));
+    const fallback = present.length > 0 ? present.map((a) => a.id) : ["claude-code", "codex"];
+
+    if (opts.yes || !process.stdin.isTTY) return fallback;
+
+    // Interactive: per detected agent, ask yes/no (default = detected).
+    const chosen: string[] = [];
+    for (const a of SETUP_AGENTS) {
+        const detected = existsSync(a.dir);
+        const def = detected ? "Y/n" : "y/N";
+        const ans = (globalThis.prompt?.(`  install ax skills for ${a.label}? [${def}]`) ?? "").trim().toLowerCase();
+        const yes = ans === "" ? detected : ans === "y" || ans === "yes";
+        if (yes) chosen.push(a.id);
+    }
+    return chosen.length > 0 ? chosen : fallback;
+}
+
+export async function cmdSetup(opts: SetupOptions = {}) {
+    console.log(opts.fromInstall ? "[axctl] setup (skills + first ingest)" : "[axctl] setup");
+
+    const agents = resolveSetupAgents(opts);
+
+    // 1. agent skills via the `skills` tool (npx). Non-fatal if npx is absent.
+    if (agents.length === 0) {
+        console.log("  skills: no agents selected, skipping");
+    } else if (!which("npx")) {
+        console.log("  skills: npx not found (install Node), then run:");
+        console.log(`    npx skills add Necmttn/ax ${agents.map((a) => `-a ${a}`).join(" ")} -g -y`);
+    } else {
+        const args = ["-y", "skills", "add", "Necmttn/ax", "-g", ...agents.flatMap((a) => ["-a", a]), "-y"];
+        console.log(`  skills: npx ${args.join(" ")}`);
+        const r = spawnSync("npx", args, { stdio: "inherit" });
+        if (r.status === 0) console.log(`  skills: installed for ${agents.join(", ")}`);
+        else console.log(`  skills: npx exited ${r.status ?? "?"} (re-run 'ax setup' or the npx command above)`);
+    }
+
+    // 2. first ingest so the graph is populated immediately.
+    if (opts.skipIngest) {
+        console.log("  ingest: skipped (--no-ingest)");
+    } else {
+        console.log("  ingest: running initial backfill...");
+        const r = spawnSync(selfBin(), ["ingest"], { stdio: "inherit" });
+        if (r.status !== 0) console.log(`  ingest: exited ${r.status ?? "?"} (run 'ax ingest' manually)`);
+    }
+
+    // 3. verify.
+    console.log();
+    await cmdDoctor([]);
 }
 
 export async function cmdDaemon(args: string[]) {
