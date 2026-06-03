@@ -538,17 +538,65 @@ ORDER BY session, seq;`);
         return rows ?? [];
     });
 
+interface ExistingAnalyzedTurnRow {
+    readonly turn?: unknown;
+}
+
+/**
+ * Load the set of turn keys that already have a `turn_analysis` row. Uses the
+ * UNIQUE `turn_analysis_turn` index (single field `turn`), so this is a fast
+ * indexed read of just the foreign keys, not a full-row scan. The returned keys
+ * are normalized through `recordKeyPart(..., "turn")` so they line up exactly
+ * with the `turnKey` produced by `classifyTurnAnalysis`.
+ */
+const loadAnalyzedTurnKeys = (): Effect.Effect<Set<string>, DbError, SurrealClient> =>
+    Effect.gen(function* () {
+        const db = yield* SurrealClient;
+        const [rows] = yield* db.query<[ExistingAnalyzedTurnRow[]]>(
+            "SELECT turn FROM turn_analysis;",
+        );
+        const set = new Set<string>();
+        for (const row of rows ?? []) {
+            const key = recordKeyPart(row.turn, "turn");
+            if (key != null) set.add(key);
+        }
+        return set;
+    });
+
 export const deriveTurnAnalysis = (
     opts: { readonly sinceDays: number | undefined } = { sinceDays: undefined },
 ): Effect.Effect<TurnAnalysisStats, DbError, SurrealClient> =>
     Effect.gen(function* () {
         const db = yield* SurrealClient;
+        // Escape hatch: when the derivation logic itself changes, force a full
+        // reset + re-derive of every turn analysis.
+        const full = process.env.AX_REDERIVE_ANALYSIS === "1";
         const rows = yield* fetchTurns(opts.sinceDays);
-        const analyses = deriveTurnAnalysisRows(rows);
-        const statements = buildTurnAnalysisStatements(analyses);
-        if (opts.sinceDays === undefined) {
+        // Derive over the full ordered row set so the reacts_to "previous
+        // assistant turn" lookahead has complete session context, then filter
+        // down to only the turns that still need persisting.
+        const allAnalyses = deriveTurnAnalysisRows(rows);
+
+        if (full && opts.sinceDays === undefined) {
             yield* db.query("DELETE reacts_to; DELETE expresses; DELETE turn_analysis; DELETE semantic_signal;");
+            yield* executeStatementsWith(db, buildTurnAnalysisStatements(allAnalyses), { chunkSize: 500 });
+            return {
+                turnsAnalyzed: allAnalyses.length,
+                signalsPromoted: new Set(allAnalyses.map((a) => a.semanticSignal?.key).filter(Boolean)).size,
+                expressesEdges: allAnalyses.filter((a) => a.semanticSignal !== null).length,
+                reactsToEdges: allAnalyses.filter((a) => a.reactsToTurnKey !== null).length,
+            };
         }
+
+        // Incremental: turns are append-only, so an existing `turn_analysis`
+        // row is output-equivalent (its turn text/role/kind never mutate, and
+        // its reacts_to/expresses edges have deterministic ids). Skip those;
+        // only derive turns not yet analyzed. No blanket DELETE - the
+        // turn_analysis id is the turn key, so each UPSERT lands in place. This
+        // is a near-no-op on warm runs where almost every turn already exists.
+        const analyzed = yield* loadAnalyzedTurnKeys();
+        const analyses = allAnalyses.filter((a) => !analyzed.has(a.turnKey));
+        const statements = buildTurnAnalysisStatements(analyses);
         yield* executeStatementsWith(db, statements, { chunkSize: 500 });
         return {
             turnsAnalyzed: analyses.length,

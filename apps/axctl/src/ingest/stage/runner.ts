@@ -6,7 +6,7 @@ import type { BaseStageStats, IngestContext, StageDef } from "./types.ts";
 /** Max stages running their `run` Effect concurrently. Each stage has its own
  *  internal concurrency (claude=8, codex=4) hitting Surreal, so 2 stages
  *  × internal fan-out is already heavy. */
-export const PIPELINE_CONCURRENCY = 2;
+export const PIPELINE_CONCURRENCY = 4;
 
 /** Annotate the active stage span with the numeric fields of its result stats
  *  (every stage's stats extend `BaseStageStats`). Emits `ingest.records` (the

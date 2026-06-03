@@ -2,10 +2,11 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { Effect, Schema } from "effect";
 import { AxConfig } from "@ax/lib/config";
-import { SurrealClient } from "@ax/lib/db";
+import { SurrealClient, type SurrealClientShape } from "@ax/lib/db";
 import type { DbError } from "@ax/lib/errors";
 import { executeStatementsWith } from "@ax/lib/shared/statement-exec";
 import { recordRef, surrealObject, surrealOptionInt, surrealOptionString, surrealString } from "@ax/lib/shared/surql";
+import { recordLiteral, stableDigest } from "@ax/lib/ids";
 import { BaseStageStats, IngestContext, StageMeta } from "./stage/types.ts";
 import type { StageDef } from "./stage/registry.ts";
 
@@ -533,10 +534,53 @@ export interface PricingRefreshStats {
     readonly modelsDevSource: "network" | "cache" | "missing";
 }
 
+// ---------------------------------------------------------------------------
+// Skip-unchanged via input-fingerprint watermark (attempt 009, mirrors 008).
+//
+// refreshModelPricing UPSERTs the entire agent_model catalog (hundreds of rows)
+// on every run, even though the catalog is a deterministic function of the
+// cached pricing JSON + the built-in constants and is unchanged between warm
+// runs. We fingerprint the exact UPSERT statements (the `updated_at=time::now()`
+// clause is identical text across runs, so it does not perturb the digest) and
+// cache it in the shared `ingest_file_state` table (source_kind='pricing', fixed
+// sentinel path). On the next run, if the fingerprint matches the stored digest
+// the persisted rows are already identical ⇒ skip the whole UPSERT batch
+// (output-equivalent; only the volatile `updated_at` would have changed). Any
+// catalog change yields a new digest, forcing a full re-write. NEVER `NOT IN`:
+// the watermark is one indexed read. `AX_REDERIVE_PRICING=1` forces a full
+// re-write (ignores the watermark).
+const PRICING_WATERMARK_SOURCE = "pricing";
+const PRICING_WATERMARK_PATH = "__pricing__";
+
+const pricingWatermarkId = (): string =>
+    recordLiteral("ingest_file_state", stableDigest(`pricing|${PRICING_WATERMARK_PATH}`));
+
+const pricingStatementsFingerprint = (statements: readonly string[]): string =>
+    stableDigest(statements.join("\n"), 32);
+
+const loadPricingWatermark = (db: SurrealClientShape): Effect.Effect<string | undefined, DbError> =>
+    Effect.gen(function* () {
+        const rows = (yield* db.query<[Array<{ sha?: string }>]>(
+            `SELECT sha FROM ingest_file_state WHERE source_kind = ${surrealString(PRICING_WATERMARK_SOURCE)};`,
+        ))?.[0] ?? [];
+        const sha = rows[0]?.sha;
+        return typeof sha === "string" ? sha : undefined;
+    });
+
+const upsertPricingWatermark = (db: SurrealClientShape, digest: string): Effect.Effect<void, DbError> =>
+    executeStatementsWith(
+        db,
+        [
+            `UPSERT ${pricingWatermarkId()} CONTENT { path: ${surrealString(PRICING_WATERMARK_PATH)}, source_kind: ${surrealString(PRICING_WATERMARK_SOURCE)}, sha: ${surrealString(digest)}, ingested_at: time::now() };`,
+        ],
+        { chunkSize: 1 },
+    );
+
 export const refreshModelPricing = (): Effect.Effect<PricingRefreshStats, DbError, SurrealClient | AxConfig> =>
     Effect.gen(function* () {
         const db = yield* SurrealClient;
         const cfg = yield* AxConfig;
+        const forceRewrite = process.env.AX_REDERIVE_PRICING === "1";
         const result = yield* Effect.promise(() => loadPricingCatalog(cfg.paths.dataDir));
         const statements = [...result.catalog.entries()].map(([modelKey, pricing]) =>
             agentModelStatement({
@@ -546,7 +590,12 @@ export const refreshModelPricing = (): Effect.Effect<PricingRefreshStats, DbErro
                 pricingCatalog: result.catalog,
             })
         );
-        yield* executeStatementsWith(db, statements, { chunkSize: 500 });
+        const digest = pricingStatementsFingerprint(statements);
+        const storedDigest = forceRewrite ? undefined : yield* loadPricingWatermark(db);
+        if (storedDigest !== digest) {
+            yield* executeStatementsWith(db, statements, { chunkSize: 500 });
+            yield* upsertPricingWatermark(db, digest);
+        }
         return {
             models: result.catalog.size,
             litellmSource: result.litellmSource,

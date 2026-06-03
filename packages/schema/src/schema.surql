@@ -1689,3 +1689,37 @@ DEFINE INDEX retro_repository_ts ON retro FIELDS repository, created_at;
 DEFINE TABLE reviewed TYPE RELATION FROM session TO retro SCHEMAFULL;
 DEFINE FIELD created_at ON reviewed TYPE datetime DEFAULT time::now();
 DEFINE INDEX reviewed_in_out_uq ON reviewed FIELDS in, out UNIQUE;
+
+-- =====================================================================
+-- ingest_file_state: per-source-file ingest watermark (2026-06-02)
+-- =====================================================================
+-- A cheap skip-unchanged marker for source transcript files. The Claude
+-- transcript stage re-parses + re-writes every .jsonl in scope on every
+-- run; the vast majority are unchanged between runs (the watcher fires
+-- on a single new file but ingest re-scans the whole tree). This table
+-- records, per file, the (mtime_ms, size) seen at last successful ingest.
+--
+-- On ingest the stage loads the whole table into a JS Map keyed by `path`
+-- in ONE indexed read, statSyncs each candidate, and SKIPS parsing+writing
+-- any file whose (mtime_ms, size) still matches the stored watermark. A
+-- skipped file's turns/tool_calls/events are already in the DB from a prior
+-- run, so skipping is output-equivalent. New/changed files always process,
+-- then upsert their watermark. NEVER `NOT IN` - one indexed Map read only.
+--
+-- Record id = stableHash(path) (paths carry `/` etc. that are awkward in
+-- record keys); `path` is stored as a field with a UNIQUE index so the
+-- load query is a single indexed table scan.
+-- Also reused (2026-06-02, hypothesis 007) as a per-repo git watermark:
+-- source_kind='git_repo', path=repo root, sha=last-ingested HEAD, since_days=
+-- the history window walked. If HEAD+since_days are unchanged the git stage
+-- skips re-walking that repo's history (its commits/files already persist).
+DEFINE TABLE ingest_file_state SCHEMAFULL;
+DEFINE FIELD path        ON ingest_file_state TYPE string;
+DEFINE FIELD source_kind ON ingest_file_state TYPE string;       -- e.g. "claude_transcript" | "git_repo"
+DEFINE FIELD mtime_ms    ON ingest_file_state TYPE option<number>;
+DEFINE FIELD size        ON ingest_file_state TYPE option<number>;
+DEFINE FIELD sha         ON ingest_file_state TYPE option<string>;  -- git HEAD watermark
+DEFINE FIELD since_days  ON ingest_file_state TYPE option<number>;  -- git history window walked
+DEFINE FIELD ingested_at ON ingest_file_state TYPE datetime DEFAULT time::now();
+DEFINE INDEX ingest_file_state_path_uq ON ingest_file_state FIELDS path UNIQUE;
+DEFINE INDEX ingest_file_state_source  ON ingest_file_state FIELDS source_kind;
