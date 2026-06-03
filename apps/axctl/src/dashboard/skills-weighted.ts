@@ -52,10 +52,12 @@ export interface SkillsWeightedParams {
  * subqueries per row (perf lesson from cmdTaste issue #31).
  */
 function buildInvocationSql(windowDays: number | undefined): string {
-    const whereClause =
-        windowDays !== undefined && windowDays > 0
-            ? `WHERE ts >= time::now() - ${windowDays}d`
-            : "";
+    // Exclude tombstoned skills (reconcile soft-delete) so ranking drops ghosts.
+    const conds = ["out.deleted_at IS NONE"];
+    if (windowDays !== undefined && windowDays > 0) {
+        conds.push(`ts >= time::now() - ${windowDays}d`);
+    }
+    const whereClause = `WHERE ${conds.join(" AND ")}`;
     return `
 SELECT
     out AS skill_id,
