@@ -261,11 +261,16 @@ if [[ "$MODIFY_PATH" == "1" && ":$PATH:" != *":$BIN_DIR:"* ]]; then
   info "add it: export PATH=\"$BIN_DIR:\$PATH\""
 fi
 
+# `axctl install` chains into `axctl setup` (agent skills + first ingest +
+# doctor). On non-macOS the daemon install is skipped, so point the user at
+# `ax setup` directly (skills install works cross-platform).
+RAN_SETUP=0
 if [[ "$RUN_INSTALL" == "1" ]]; then
   if [[ "$(uname -s)" == "Darwin" ]]; then
     printf '\n'
-    step "running ${C_BOLD}axctl install${C_RESET} (SurrealDB + watcher)"
+    step "running ${C_BOLD}axctl install${C_RESET} (SurrealDB + watcher + ${C_BOLD}ax setup${C_RESET})"
     "$install_bin" install
+    RAN_SETUP=1
   else
     printf '\n'
     warn "full daemon install is macOS-only for now; skipping 'axctl install'"
@@ -276,7 +281,12 @@ fi
 # Done.
 # ---------------------------------------------------------------------------
 printf '\n'
-printf '  %s%sax is ready.%s\n\n' "$C_GREEN" "$C_BOLD" "$C_RESET"
+if [[ "$RAN_SETUP" == "1" ]]; then
+  printf '  %s%sax is ready.%s\n\n' "$C_GREEN" "$C_BOLD" "$C_RESET"
+else
+  printf '  %s%saxctl installed.%s next, finish setup:\n\n' "$C_GREEN" "$C_BOLD" "$C_RESET"
+  printf '    %sax setup%s     %sinstall the agent skills + first ingest%s\n' "$C_BOLD" "$C_RESET" "$C_DIM" "$C_RESET"
+fi
 printf '    %sax doctor%s    %scheck your setup%s\n' "$C_BOLD" "$C_RESET" "$C_DIM" "$C_RESET"
 printf '    %sax serve%s     %sopen the dashboard → http://127.0.0.1:8520%s\n' "$C_BOLD" "$C_RESET" "$C_DIM" "$C_RESET"
 printf '    %sax recall%s    %ssearch what your agents actually did%s\n' "$C_BOLD" "$C_RESET" "$C_DIM" "$C_RESET"

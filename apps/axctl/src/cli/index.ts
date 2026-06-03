@@ -89,7 +89,7 @@ import { fetchSessionCompare } from "../dashboard/session-compare.ts";
 import { fetchCostSummary, type CostSummary } from "../dashboard/cost-query.ts";
 import { renderSessionMarkdown, renderSessionJson } from "./session-show-format.ts";
 import { renderCompareTable, renderCompareJson } from "./session-compare-format.ts";
-import { cmdDaemon, cmdDoctor, cmdInstall, cmdUninstall } from "./install.ts";
+import { cmdDaemon, cmdDoctor, cmdInstall, cmdSetup, cmdUninstall } from "./install.ts";
 import { resolvePwdRepository } from "../pwd.ts";
 import { detectStaleness } from "@ax/lib/transcript-staleness";
 import { ingestTranscripts } from "../ingest/transcripts.ts";
@@ -4983,7 +4983,31 @@ const tuiCommand = Command.make("tui", {}, () =>
 
 const installCommand = Command.make("install", {}, () =>
     Effect.promise(() => cmdInstall()),
-).pipe(Command.withDescription("One-shot setup: daemon, watcher, and symlink"));
+).pipe(Command.withDescription("One-shot setup: daemon, watcher, symlink (then runs `ax setup`)"));
+
+const setupCommand = Command.make(
+    "setup",
+    {
+        agents: Flag.string("agents").pipe(Flag.optional),
+        noIngest: Flag.boolean("no-ingest").pipe(Flag.withDefault(false)),
+        yes: Flag.boolean("yes").pipe(Flag.withDefault(false)),
+    },
+    ({ agents, noIngest, yes }) =>
+        Effect.promise(() =>
+            cmdSetup({
+                ...(agents._tag === "Some"
+                    ? { agents: agents.value.split(",").map((s) => s.trim()).filter(Boolean) }
+                    : {}),
+                skipIngest: noIngest,
+                yes,
+            }),
+        ),
+).pipe(
+    Command.withDescription(
+        "Install the agent skills, run the first ingest, and verify. " +
+        "--agents=claude-code,codex  --no-ingest  --yes (non-interactive)",
+    ),
+);
 
 const daemonStatusCommand = Command.make(
     "status",
@@ -5049,6 +5073,7 @@ export const rootCommand = Command.make("axctl").pipe(
         tuiCommand,
         shareCommand,
         installCommand,
+        setupCommand,
         // Hidden: advanced / agent-driven / maintenance verbs. `withHidden` omits
         // them from `--help`, shell completions, and "did you mean?" while leaving
         // them callable by exact name. `derive-signals`/`derive-intents` MUST stay
