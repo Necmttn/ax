@@ -1,5 +1,6 @@
-import { Effect, FileSystem, Option, Path } from "effect";
+import { Effect, FileSystem, Path } from "effect";
 import { orAbsent } from "@ax/lib/shared/fs-error";
+import { classifyNoFollow } from "@ax/lib/shared/fs-classify";
 import { posixPath } from "@ax/lib/shared/path";
 
 export type ArtifactRootKind =
@@ -112,38 +113,11 @@ export function classifyArtifactPath(
     }
 }
 
-/**
- * lstat-equivalent (does NOT follow symlinks) entry classification. Effect's
- * `FileSystem` has no `lstat` and `fs.stat` follows symlinks, so we detect a
- * symlink first: `readLink` SUCCEEDS iff the path is a symlink, fails otherwise.
- * When it is not a symlink, `fs.stat` reports the real type (a real file/dir is
- * unaffected by symlink-following). This reproduces the old `Dirent`-based
- * `isSymbolicLink()/isDirectory()/isFile()` partition exactly.
- */
-type EntryType = "SymbolicLink" | "Directory" | "File" | "Other" | "Missing";
-
-const classifyEntry = (
-    fullPath: string,
-): Effect.Effect<EntryType, never, FileSystem.FileSystem> =>
-    Effect.gen(function* () {
-        const fs = yield* FileSystem.FileSystem;
-        const isSymlink = yield* fs.readLink(fullPath).pipe(
-            Effect.map(() => true),
-            orAbsent(false),
-        );
-        if (isSymlink) return "SymbolicLink";
-        const info = yield* fs.stat(fullPath).pipe(Effect.asSome, orAbsent(Option.none()));
-        if (Option.isNone(info)) return "Missing";
-        const type = info.value.type;
-        if (type === "Directory") return "Directory";
-        if (type === "File") return "File";
-        return "Other";
-    });
-
 export const discoverArtifactsDryRun = (
     options: ArtifactDiscoveryOptions,
 ): Effect.Effect<ArtifactDiscoveryDryRun, never, FileSystem.FileSystem | Path.Path> =>
     Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
         const roots = artifactRootsForOptions(options);
         const candidates: ArtifactCandidate[] = [];
         const skipped: ArtifactSkip[] = [];
@@ -151,11 +125,16 @@ export const discoverArtifactsDryRun = (
 
         for (const root of roots) {
             // OLD: `stat(root.path)` in try/catch → "missing_root" on any fault;
-            // also "missing_root" when it is not a directory. The root itself is
-            // never a symlink we want to follow specially, so a plain stat is
-            // faithful here.
-            const entryType = yield* classifyEntry(root.path);
-            if (entryType !== "Directory") {
+            // also "missing_root" when it is not a directory. `stat` FOLLOWS
+            // symlinks, so a root that is a symlink TO a directory (e.g. a
+            // symlinked `.planning` or a symlinked skillRoot) WAS scanned. We
+            // keep `fs.stat` here to preserve that follow-the-root behavior;
+            // only the CHILDREN are classified no-follow (via classifyNoFollow).
+            const rootIsDir = yield* fs.stat(root.path).pipe(
+                Effect.map((info) => info.type === "Directory"),
+                orAbsent(false),
+            );
+            if (!rootIsDir) {
                 skipped.push(skip(root, root.path, "missing_root"));
                 continue;
             }
@@ -209,7 +188,7 @@ const walkArtifactRoot = (
 
         for (const entry of entries) {
             const fullPath = path.join(state.currentPath, entry);
-            const entryType = yield* classifyEntry(fullPath);
+            const entryType = yield* classifyNoFollow(fullPath);
 
             if (entryType === "SymbolicLink") {
                 state.skipped.push(skip(state.root, fullPath, "symlink"));
@@ -281,8 +260,8 @@ function shouldIgnoreDirectory(path: string, name: string): boolean {
  * OLD: `lstat(join(path, ".git"))` then `.isDirectory() || .isFile()`. `lstat`
  * does NOT follow symlinks, so a `.git` that is itself a symlink reported as a
  * symlink (neither dir nor file) ⇒ returned `false`. We preserve that exactly:
- * `classifyEntry` reports a `.git` symlink as "SymbolicLink", which is neither
- * "Directory" nor "File" ⇒ false.
+ * `classifyNoFollow` reports a `.git` symlink as "SymbolicLink", which is
+ * neither "Directory" nor "File" ⇒ false.
  */
 const isNestedGitRepo = (
     dirPath: string,
@@ -292,7 +271,7 @@ const isNestedGitRepo = (
         if (posixPath.resolve(dirPath) === posixPath.resolve(rootPath)) return false;
         const path = yield* Path.Path;
         const gitPath = path.join(dirPath, ".git");
-        const entryType = yield* classifyEntry(gitPath);
+        const entryType = yield* classifyNoFollow(gitPath);
         return entryType === "Directory" || entryType === "File";
     });
 

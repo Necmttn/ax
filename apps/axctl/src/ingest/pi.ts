@@ -1,5 +1,6 @@
 import { Effect, FileSystem, Option, Path, PlatformError, Schema } from "effect";
 import { orAbsent } from "@ax/lib/shared/fs-error";
+import { classifyNoFollow } from "@ax/lib/shared/fs-classify";
 import { AxConfig } from "@ax/lib/config";
 import { RecordId, SurrealClient } from "@ax/lib/db";
 import { decodeJsonOrNull } from "@ax/lib/decode";
@@ -587,10 +588,17 @@ interface PiFileCandidate {
     path: string;
 }
 
-// OLD: readdir in try/catch → `return` (any error skips the dir); stat in
-// try/catch → `continue` (any error skips the entry). Both tolerated ANY
-// failure, so `orAbsent` (recover every PlatformError to a fallback) is the
-// faithful equivalent and clears the E channel back to `never`.
+// OLD: readdir(withFileTypes) in try/catch → `return` (any error skips the
+// dir); classification via `entry.isDirectory()`/`entry.isFile()` (Dirent =>
+// lstat-equivalent, does NOT follow symlinks); then `stat(full)` in try/catch
+// → `continue` (any error skips the entry) ONLY for the mtime of a confirmed
+// regular file. We must preserve the no-follow classification: recurse only on
+// real directories, accept only real `.jsonl` files, and SKIP symlinks (a
+// symlinked dir is not recursed into → no escaping the tree / no cycle hang;
+// a symlinked `.jsonl` is not ingested). The mtime `fs.stat` then runs on a
+// confirmed non-symlink regular file, matching the old follow-free behavior.
+// `orAbsent` recovers every PlatformError to a fallback, matching the old
+// blanket try/catch and clearing the E channel back to `never`.
 const walkJsonlFiles = (
     root: string,
     cutoffMs: number,
@@ -600,21 +608,24 @@ const walkJsonlFiles = (
         const path = yield* Path.Path;
         const out: PiFileCandidate[] = [];
 
-        const visit = (dir: string): Effect.Effect<void, never> =>
+        const visit = (
+            dir: string,
+        ): Effect.Effect<void, never, FileSystem.FileSystem | Path.Path> =>
             Effect.gen(function* () {
                 const entries = yield* fs.readDirectory(dir).pipe(orAbsent([] as string[]));
                 for (const entry of entries) {
                     const full = path.join(dir, entry);
-                    const info = yield* fs.stat(full).pipe(
-                        Effect.asSome,
-                        orAbsent(Option.none()),
-                    );
-                    if (Option.isNone(info)) continue;
-                    const stats = info.value;
-                    if (stats.type === "Directory") {
+                    const kind = yield* classifyNoFollow(full);
+                    if (kind === "Directory") {
                         yield* visit(full);
-                    } else if (stats.type === "File" && full.endsWith(".jsonl")) {
-                        const mtimeMs = Option.getOrElse(stats.mtime, () => new Date(0)).getTime();
+                    } else if (kind === "File" && full.endsWith(".jsonl")) {
+                        const mtimeMs = yield* fs.stat(full).pipe(
+                            Effect.map((st) =>
+                                Option.getOrElse(st.mtime, () => new Date(0)).getTime()
+                            ),
+                            orAbsent(-1),
+                        );
+                        if (mtimeMs < 0) continue;
                         if (cutoffMs > 0 && mtimeMs < cutoffMs) continue;
                         out.push({ path: full });
                     }
@@ -624,6 +635,8 @@ const walkJsonlFiles = (
         yield* visit(root);
         return out;
     });
+
+export const __testWalkJsonlFiles = walkJsonlFiles;
 
 const buildTurnStatements = (turns: readonly PiTurn[]): string[] =>
     turns.map((turn) => {

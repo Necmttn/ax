@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm, utimes, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, symlink, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Database } from "bun:sqlite";
@@ -398,6 +398,33 @@ describe("Cursor state.vscdb extraction", () => {
             await utimes(shmPath, fresh, fresh);
 
             expect(await findCursorStateDbs(dir, old.getTime() + 1)).toEqual([dbPath]);
+        } finally {
+            await rm(dir, { recursive: true, force: true });
+        }
+    });
+
+    // Regression: old discovery filtered workspaceStorage entries with
+    // `Dirent.isDirectory()` (does NOT follow symlinks). The @effect/platform
+    // migration briefly used `fs.stat().type` (FOLLOWS), which would pick up a
+    // workspace that is merely a symlink TO a directory. classifyNoFollow
+    // restores Dirent semantics: a symlinked workspace dir is skipped.
+    test("skips a symlinked workspaceStorage entry (no-follow)", async () => {
+        const dir = await mkdtemp(join(tmpdir(), "ax-cursor-symlink-"));
+        try {
+            // A real workspace dir with a db -> discovered.
+            const realWorkspace = join(dir, "workspaceStorage", "real");
+            await mkdir(realWorkspace, { recursive: true });
+            const realDb = join(realWorkspace, "state.vscdb");
+            await writeFile(realDb, "");
+
+            // An out-of-tree dir holding a db, reached only via a symlinked
+            // workspaceStorage entry -> must NOT be discovered.
+            const outside = join(dir, "outside");
+            await mkdir(outside, { recursive: true });
+            await writeFile(join(outside, "state.vscdb"), "");
+            await symlink(outside, join(dir, "workspaceStorage", "linked"));
+
+            expect(await findCursorStateDbs(dir, 0)).toEqual([realDb]);
         } finally {
             await rm(dir, { recursive: true, force: true });
         }

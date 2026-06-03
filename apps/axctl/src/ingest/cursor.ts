@@ -4,6 +4,7 @@ import { AxConfig } from "@ax/lib/config";
 import { RecordId, SurrealClient } from "@ax/lib/db";
 import type { DbError } from "@ax/lib/errors";
 import { orAbsent } from "@ax/lib/shared/fs-error";
+import { classifyNoFollow } from "@ax/lib/shared/fs-classify";
 import { posixPath } from "@ax/lib/shared/path";
 import { skillRecordKey } from "@ax/lib/skill-id";
 import { executeStatements } from "@ax/lib/shared/statement-exec";
@@ -950,13 +951,13 @@ const findCursorStateDbs = (
         const entries = yield* fs.readDirectory(workspaceStorage).pipe(orAbsent([] as string[]));
         for (const entry of entries) {
             const entryPath = path.join(workspaceStorage, entry);
-            // OLD: entry.isDirectory() filter. readDirectory returns names only,
-            // so stat each; orAbsent(false) skips non-dirs / unreadable entries.
-            const isDir = yield* fs.stat(entryPath).pipe(
-                Effect.map((st) => st.type === "Directory"),
-                orAbsent(false),
-            );
-            if (!isDir) continue;
+            // OLD: entry.isDirectory() filter via readdir(withFileTypes) - a
+            // `Dirent` check that does NOT follow symlinks. `classifyNoFollow`
+            // restores that: a symlinked workspace dir classifies as
+            // "SymbolicLink" (not "Directory") and is skipped, matching the old
+            // Dirent partition. Unreadable / missing entries also skip.
+            const kind = yield* classifyNoFollow(entryPath);
+            if (kind !== "Directory") continue;
             const dbPath = path.join(entryPath, "state.vscdb");
             if (yield* includeDbByMtime(dbPath, cutoffMs)) dbPaths.push(dbPath);
         }

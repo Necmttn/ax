@@ -6,6 +6,7 @@ import type { DbError } from "@ax/lib/errors";
 import { AppLayer } from "@ax/lib/layers";
 import { posixPath } from "@ax/lib/shared/path";
 import { orAbsent } from "@ax/lib/shared/fs-error";
+import { classifyNoFollow } from "@ax/lib/shared/fs-classify";
 import { recordRef } from "./evidence-writers.ts";
 import { surrealDate, surrealJsonTextOption, surrealObject, surrealOptionDate, surrealOptionRecord, surrealOptionString, surrealSet, surrealString } from "@ax/lib/shared/surql";
 import { executeStatements } from "@ax/lib/shared/statement-exec";
@@ -457,17 +458,18 @@ const jsonFiles = (
         for (const entry of entries) {
             if (!entry.endsWith(".json")) continue;
             const full = path.join(dir, entry);
-            // OLD: entry.isFile() filter via withFileTypes. readDirectory
-            // returns names only, so stat each; orAbsent(false) skips
-            // non-files / vanished entries.
-            const isFile = yield* fs.stat(full).pipe(
-                Effect.map((st) => st.type === "File"),
-                orAbsent(false),
-            );
-            if (isFile) files.push(full);
+            // OLD: entry.isFile() filter via readdir(withFileTypes) - a `Dirent`
+            // check that does NOT follow symlinks. `classifyNoFollow` restores
+            // that: a symlinked `.json` classifies as "SymbolicLink" (not
+            // "File") and is skipped, matching the old Dirent partition.
+            // Non-files / vanished entries also skip.
+            const kind = yield* classifyNoFollow(full);
+            if (kind === "File") files.push(full);
         }
         return files.sort((a, b) => a.localeCompare(b));
     });
+
+export const __testJsonFiles = jsonFiles;
 
 const readJsonRecord = (
     filePath: string,

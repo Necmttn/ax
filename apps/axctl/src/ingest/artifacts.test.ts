@@ -199,6 +199,29 @@ describe("discoverArtifactsDryRun", () => {
         expect(dryRun.counts.found).toBe(1);
         expect(dryRun.counts.bySkipReason.missing_root).toBe(3);
     });
+
+    // Regression: the ROOT probe uses `fs.stat` (FOLLOWS symlinks), matching the
+    // old `stat(root.path)`. A skillRoot that is itself a symlink TO a real
+    // directory must STILL be scanned (only CHILDREN are classified no-follow).
+    test("follows a symlinked root directory (stat-based root probe)", async () => {
+        const workspace = await makeTempDir();
+        const realSkillDir = await makeTempDir();
+        await writeFileAt(realSkillDir, "my-skill/SKILL.md", "# skill\n");
+
+        const linkedSkillRoot = join(workspace, "linked-skills");
+        await symlink(realSkillDir, linkedSkillRoot);
+
+        const dryRun = await discoverArtifactsDryRun({
+            workspaceRoot: workspace,
+            skillRoots: [linkedSkillRoot],
+        });
+
+        // The symlinked root resolves to the real dir and IS scanned; the real
+        // SKILL.md child is discovered (the child walk is still no-follow, but
+        // SKILL.md here is a real file, not a link).
+        expect(dryRun.counts.byKind.skill).toBe(1);
+        expect(dryRun.candidates.some((c) => c.relativePath === "my-skill/SKILL.md")).toBe(true);
+    });
 });
 
 async function makeTempDir(): Promise<string> {
