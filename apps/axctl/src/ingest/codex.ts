@@ -1,6 +1,4 @@
-import { readdir, stat, open } from "node:fs/promises";
-import { join } from "node:path";
-import { Effect, Schema } from "effect";
+import { Effect, FileSystem, Option, Path, PlatformError, Schema, Stream } from "effect";
 import { RecordId, SurrealClient, filePointer } from "@ax/lib/db";
 import { AxConfig } from "@ax/lib/config";
 import { decodeJsonOrNull } from "@ax/lib/decode";
@@ -43,13 +41,14 @@ import {
 import { invokedRelationRecordKey, toolCallRecordKey, turnRecordKey } from "./record-keys.ts";
 import { extractToolFileEvidence } from "./tool-file-evidence.ts";
 import { executeStatements } from "@ax/lib/shared/statement-exec";
+import { isNotFound, skipNotFound } from "@ax/lib/shared/fs-error";
 import { safeKeyPart } from "@ax/lib/shared/derive-keys";
 import { tokenQualityLabels } from "./token-quality.ts";
 import { estimateCost } from "./model-pricing.ts";
 
 const DEFAULT_CODEX_RAW_MAX_BYTES = 5 * 1024 * 1024;
 const DEFAULT_CODEX_PROGRESS_EVERY = 10;
-const DEFAULT_CODEX_FLUSH_EVERY = 500;
+export const DEFAULT_CODEX_FLUSH_EVERY = 500;
 const DEFAULT_CODEX_CONCURRENCY = 1;
 const DEFAULT_CODEX_PAYLOAD_MAX_BYTES = 1200;
 const CODEX_PROGRESS_LINE_EVERY = 100;
@@ -459,36 +458,54 @@ interface CodexFileCandidate {
     sizeBytes: number;
 }
 
-async function walkJsonlFiles(root: string, cutoffMs: number): Promise<CodexFileCandidate[]> {
-    const out: CodexFileCandidate[] = [];
-    async function visit(dir: string) {
-        let entries;
-        try {
-            entries = await readdir(dir, { withFileTypes: true });
-        } catch {
-            return;
-        }
-        for (const e of entries) {
-            const full = join(dir, e.name);
-            if (e.isDirectory()) {
-                await visit(full);
-            } else if (e.isFile() && full.endsWith(".jsonl")) {
-                let st;
-                try {
-                    st = await stat(full);
-                } catch {
-                    continue;
+/**
+ * Recursively enumerate `*.jsonl` session files under `root` via the Effect
+ * `FileSystem`. The codex sessions dir is nested (year/month/day), so we walk
+ * directories depth-first. Resilience matches the prior node-fs walk:
+ *   - a `readDirectory` on a vanished/missing dir (NotFound) yields `[]` → skip,
+ *   - each entry is `stat`-ed; a vanished entry (NotFound) is skipped,
+ *   - `.type === "Directory"` recurses, a `.jsonl` File is collected.
+ * Non-NotFound `PlatformError`s (BadResource/PermissionDenied/...) re-raise so a
+ * genuine FS fault is a defect, not a silently-dropped half-walk.
+ *
+ * `File.Info.mtime` is `Option<Date>` (epoch 0 fallback so a missing mtime is
+ * never `--since`-skipped); `.size` is a branded bigint coerced to `number`.
+ */
+const walkJsonlFiles = (
+    root: string,
+    cutoffMs: number,
+): Effect.Effect<CodexFileCandidate[], PlatformError.PlatformError, FileSystem.FileSystem | Path.Path> =>
+    Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const out: CodexFileCandidate[] = [];
+
+        const visit = (dir: string): Effect.Effect<void, PlatformError.PlatformError> =>
+            Effect.gen(function* () {
+                const entries = yield* fs.readDirectory(dir).pipe(
+                    skipNotFound([] as string[]),
+                );
+                for (const entry of entries) {
+                    const full = path.join(dir, entry);
+                    const info = yield* fs.stat(full).pipe(
+                        Effect.asSome,
+                        skipNotFound(Option.none()),
+                    );
+                    if (Option.isNone(info)) continue;
+                    const stats = info.value;
+                    if (stats.type === "Directory") {
+                        yield* visit(full);
+                    } else if (stats.type === "File" && full.endsWith(".jsonl")) {
+                        const mtimeMs = Option.getOrElse(stats.mtime, () => new Date(0)).getTime();
+                        if (cutoffMs > 0 && mtimeMs < cutoffMs) continue;
+                        out.push({ path: full, sizeBytes: Number(stats.size) });
+                    }
                 }
-                if (cutoffMs > 0) {
-                    if (st.mtimeMs < cutoffMs) continue;
-                }
-                out.push({ path: full, sizeBytes: st.size });
-            }
-        }
-    }
-    await visit(root);
-    return out;
-}
+            });
+
+        yield* visit(root);
+        return out;
+    });
 
 export interface CodexExtract {
     session: CodexSession;
@@ -1022,6 +1039,115 @@ export function __testStreamCodexJsonlLines(lines: Iterable<string>, every: numb
     return batches;
 }
 
+type CodexExtractor = ReturnType<typeof createCodexExtractor>;
+
+interface CodexStreamHooks {
+    /** Flush boundary in lines; `extractor.drain(false)` handed to `onFlush`. */
+    readonly flushEvery: number;
+    /** Drains a bounded batch to storage mid-file (memory bound). */
+    readonly onFlush: (batch: MutableCodexExtract) => Effect.Effect<void, never, never>;
+    /** Progress tick at the `CODEX_PROGRESS_LINE_EVERY` cadence (phase 1) and
+     *  again right after each flush (phase 2); `phase` distinguishes them. */
+    readonly onProgress?: (phase: number) => Effect.Effect<void, never, never>;
+}
+
+/**
+ * Stream a codex jsonl file through `FileSystem.stream` → `splitLines`, feeding
+ * each line into `extractor.processLine` AND threading the flush/progress
+ * cadence into the per-line Effect (so a 30 MB session drains in bounded
+ * batches instead of buffering whole and flushing once). The terminal
+ * `drain(true)` + final flush stays with the CALLER. Returns the line count.
+ *
+ * A vanished file (NotFound) propagates as a typed `PlatformError` so the
+ * caller can skip it; non-NotFound failures propagate too.
+ */
+const streamCodexFile = (
+    filePath: string,
+    extractor: CodexExtractor,
+    hooks: CodexStreamHooks,
+): Effect.Effect<number, PlatformError.PlatformError, FileSystem.FileSystem> =>
+    Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        let lineCount = 0;
+        yield* fs.stream(filePath).pipe(
+            Stream.decodeText(),
+            Stream.splitLines,
+            Stream.runForEach((line) =>
+                Effect.gen(function* () {
+                    extractor.processLine(line);
+                    lineCount += 1;
+                    if (lineCount % CODEX_PROGRESS_LINE_EVERY === 0) {
+                        if (hooks.onProgress) yield* hooks.onProgress(1);
+                    }
+                    if (lineCount % hooks.flushEvery === 0) {
+                        yield* hooks.onFlush(extractor.drain(false));
+                        if (hooks.onProgress) yield* hooks.onProgress(2);
+                    }
+                }),
+            ),
+        );
+        return lineCount;
+    });
+
+/**
+ * Test seam: stream a file the SAME way production does (flush cadence threaded
+ * via {@link streamCodexFile}) and return the finished extract. NotFound
+ * propagates so the vanished-file skip contract is testable.
+ */
+export const __testStreamCodexFile = (
+    filePath: string,
+    flushEvery = DEFAULT_CODEX_FLUSH_EVERY,
+): Effect.Effect<CodexExtract | null, PlatformError.PlatformError, FileSystem.FileSystem> =>
+    Effect.gen(function* () {
+        const extractor = createCodexExtractor(filePath);
+        yield* streamCodexFile(filePath, extractor, {
+            flushEvery,
+            // The test extractor accumulates across drains; finish() drains the
+            // rest, so the mid-file drain here is a no-op for the final result -
+            // we only need the cadence to FIRE so `lineCount % flushEvery`
+            // exercises the streaming path identically to production.
+            onFlush: () => Effect.void,
+        });
+        return extractor.finish();
+    });
+
+/**
+ * Test seam for the flush-cadence honesty test: collects every batch that the
+ * streaming reader drains mid-file PLUS the terminal `drain(true)`, proving
+ * (a) multiple flushes fire on a file larger than `flushEvery`, and
+ * (b) the concatenated batches are output-equivalent to a single pass.
+ */
+export const __testStreamCodexFileBatches = (
+    filePath: string,
+    flushEvery: number,
+): Effect.Effect<MutableCodexExtract[], PlatformError.PlatformError, FileSystem.FileSystem> =>
+    Effect.gen(function* () {
+        const extractor = createCodexExtractor(filePath);
+        const batches: MutableCodexExtract[] = [];
+        const keep = (batch: MutableCodexExtract): boolean =>
+            batch.session !== null && (
+                batch.turns.length > 0 ||
+                batch.turnTokenUsages.length > 0 ||
+                batch.invocations.length > 0 ||
+                batch.toolCalls.length > 0 ||
+                batch.providerEvents.length > 0 ||
+                batch.parentEdges.length > 0 ||
+                batch.skillRelations.length > 0 ||
+                batch.planSnapshots.length > 0 ||
+                batch.tokenUsage !== null
+            );
+        yield* streamCodexFile(filePath, extractor, {
+            flushEvery,
+            onFlush: (batch) =>
+                Effect.sync(() => {
+                    if (keep(batch)) batches.push(batch);
+                }),
+        });
+        const final = extractor.drain(true);
+        if (keep(final)) batches.push(final);
+        return batches;
+    });
+
 const buildTurnStatements = (turns: readonly CodexTurn[]): string[] =>
     turns.map(
         (t) =>
@@ -1237,12 +1363,13 @@ export interface CodexStats {
 
 export const ingestCodex = (
     opts: Partial<CodexIngestOpts> = {},
-): Effect.Effect<CodexStats, DbError, SurrealClient | AxConfig> =>
+): Effect.Effect<CodexStats, DbError | PlatformError.PlatformError, SurrealClient | AxConfig | FileSystem.FileSystem | Path.Path> =>
     Effect.gen(function* () {
         const cfg = yield* AxConfig;
         const db = yield* SurrealClient;
+        const fs = yield* FileSystem.FileSystem;
         const cutoff = opts.sinceDays ? Date.now() - opts.sinceDays * 86400 * 1000 : 0;
-        const files = yield* Effect.promise(() => walkJsonlFiles(cfg.paths.codexDir, cutoff));
+        const files = yield* walkJsonlFiles(cfg.paths.codexDir, cutoff);
         const totalBytes = files.reduce((sum, file) => sum + file.sizeBytes, 0);
         if (opts.onProgress) yield* opts.onProgress({ totalFiles: files.length, totalBytes });
         const rawMaxBytes = cfg.knobs.codexRawMaxBytes;
@@ -1367,24 +1494,38 @@ export const ingestCodex = (
                     filePlanSnapshots += batch.planSnapshots.length;
                 });
 
-            const fh = yield* Effect.promise(() => open(filePath, "r"));
-            try {
-                const iterator = fh.readLines()[Symbol.asyncIterator]();
-                while (true) {
-                    const next = yield* Effect.promise(() => iterator.next());
-                    if (next.done) break;
-                    extractor.processLine(next.value);
-                    lineCount += 1;
-                    if (lineCount % CODEX_PROGRESS_LINE_EVERY === 0) {
-                        yield* emitProgress(1);
-                    }
-                    if (lineCount % flushEvery === 0) {
-                        yield* writeBatch(extractor.drain(false));
-                        yield* emitProgress(2);
-                    }
-                }
-            } finally {
-                yield* Effect.promise(() => fh.close());
+            // Stream the file via `FileSystem.stream` (NOT a node fh) so a
+            // session that VANISHED between discovery and here (e.g. a cleaned-up
+            // session dir) surfaces as a typed NotFound `PlatformError` we skip
+            // below, rather than aborting the run. The flush/progress cadence is
+            // threaded INTO the per-line Effect so a 30 MB session still drains in
+            // bounded batches at `flushEvery` intervals - identical to before.
+            // A NotFound mid-stream skips this candidate; other PlatformErrors
+            // re-raise.
+            const vanished = yield* fs.stream(filePath).pipe(
+                Stream.decodeText(),
+                Stream.splitLines,
+                Stream.runForEach((line) =>
+                    Effect.gen(function* () {
+                        extractor.processLine(line);
+                        lineCount += 1;
+                        if (lineCount % CODEX_PROGRESS_LINE_EVERY === 0) {
+                            yield* emitProgress(1);
+                        }
+                        if (lineCount % flushEvery === 0) {
+                            yield* writeBatch(extractor.drain(false));
+                            yield* emitProgress(2);
+                        }
+                    }),
+                ),
+                Effect.as(false),
+                Effect.catchTag("PlatformError", (e) =>
+                    isNotFound(e) ? Effect.succeed(true) : Effect.fail(e),
+                ),
+            );
+            if (vanished) {
+                activeFiles -= 1;
+                return;
             }
 
             const finalBatch = extractor.drain(true);
@@ -1402,13 +1543,18 @@ export const ingestCodex = (
             const bucketPath = `${completedSession.id}.jsonl`;
             const rawContent = snapshotRaw
                 ? yield* emitProgress(3).pipe(
-                    Effect.andThen(Effect.promise(async () => {
-                      try {
-                          return await Bun.file(filePath).text();
-                      } catch {
-                          return null;
-                      }
-                  })),
+                    Effect.andThen(
+                        // Best-effort cold-storage copy: a file that vanished
+                        // after streaming (or any read fault) tolerates to null
+                        // so the snapshot is simply skipped - the parsed rows are
+                        // already persisted. NotFound recovers via `skipNotFound`;
+                        // other PlatformErrors also fall back to null here to keep
+                        // the prior try/catch-returns-null tolerance.
+                        fs.readFileString(filePath).pipe(
+                            skipNotFound(null as string | null),
+                            Effect.catchTag("PlatformError", () => Effect.succeed(null as string | null)),
+                        ),
+                    ),
                 )
                 : null;
             let rawPointer: string | null = null;
@@ -1524,13 +1670,20 @@ export class CodexStageStats extends BaseStageStats.extend<CodexStageStats>("Cod
     toolCallsIngested: Schema.Number,
 }) {}
 
-export const codexStage: StageDef<CodexStageStats, SurrealClient | AxConfig> = {
+export const codexStage: StageDef<CodexStageStats, SurrealClient | AxConfig | FileSystem.FileSystem | Path.Path> = {
     meta: StageMeta.make({ key: "codex", deps: ["skills", "commands"], tags: ["ingest"] }),
     run: (ctx: IngestContext) =>
         Effect.gen(function* () {
             const t0 = Date.now();
             const sinceDays = sinceDaysFromCtx(ctx);
-            const result = yield* ingestCodex({ sinceDays });
+            // A vanished session file is caught + skipped inside `ingestCodex`;
+            // any PlatformError that escapes here is a genuine FS fault (e.g. an
+            // unreadable sessions root or a non-NotFound stat/stream error), so
+            // it dies as a defect rather than masquerading as a recoverable
+            // DbError - mirroring `claudeStage`.
+            const result = yield* ingestCodex({ sinceDays }).pipe(
+                Effect.catchTag("PlatformError", (e) => Effect.die(e)),
+            );
             return CodexStageStats.make({
                 durationMs: Date.now() - t0,
                 summary: `ingested ${result.sessions} sessions, ${result.turns} turns, ${result.toolCalls} tool calls`,
