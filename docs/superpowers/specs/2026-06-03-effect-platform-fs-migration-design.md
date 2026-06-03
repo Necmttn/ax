@@ -22,11 +22,16 @@ This is a *class* of bug: untyped node `fs` rejections crossing an `Effect.promi
 
 ## Goal
 
-Replace all `node:fs`/`node:path` usage (**98 files**) with `@effect/platform`'s `FileSystem` + `Path` services, so every filesystem/path operation is Effect-native, returns typed errors, and is testable against an in-memory filesystem layer. The vanished-file crash (P3) is fixed as **Phase 1**.
+Replace all `node:fs`/`node:path` usage (**59 production files**; the earlier "98" counted test files too) with `@effect/platform`'s `FileSystem` + `Path` services, so every filesystem/path operation is Effect-native, returns typed errors, and is testable against an in-memory filesystem layer. The vanished-file crash (P3) is fixed as **Phase 1**.
+
+**Locked scope decisions (post multi-agent review):**
+- **Full config/paths async rewrite** - `paths.ts`/`config.ts` foundational path building is rewritten to source `Path.Path`/`FileSystem` (layer graph reordered); no `node:path` survives even in module-level/sync bootstrap. (Done late, Phase 4 of the plan.)
+- **`install.ts` is migrated**, not deferred - with a smoke test (`ax install`/`ax doctor`/symlink) and the symlink detection rewritten via `fs.readLink` (no `lstat`). Gated `REVIEW-BLOCKER`.
+- **Symlink detection rewritten** (no `node:fs` `lstat`) at all sites (`artifacts.ts`, `install.ts`).
 
 ## Why this is the right shape
 
-- **Typed errors:** ENOENT is a `PlatformError` `SystemError` with `reason: "NotFound"` (`effect/dist/FileSystem.d.ts:659`). A vanished file becomes an explicit `Effect.catchTag`/match → skip, not a defect that kills the run.
+- **Typed errors:** ENOENT surfaces as a `PlatformError` (tag `"PlatformError"`) whose `.reason` is a `SystemError` with `._tag === "NotFound"`. The catch is `Effect.catchTag("PlatformError", e => e.reason._tag === "NotFound" ? skip : fail)` - NEVER broaden it (a tagless/`catchAll` swallows permission/IO/corruption as "vanished file"). A vanished file becomes an explicit skip, not a defect that kills the run; non-NotFound errors MUST re-raise (negative-tested).
 - **Testability:** swap `BunFileSystem` for an in-memory FileSystem layer in tests - no tmp-dir fixtures, deterministic.
 - **Consistency:** ~10 files already use `FileSystem`/`Path` (`agent-def.ts`, `agents/*`, `skills/reconcile.ts`, `cli/index.ts`…). This finishes the job and removes node-base-dep reliance.
 - **Layer already wired:** `AppLayer` merges `BunFileSystem.layer` + `BunPath.layer` (`packages/lib/src/layers.ts:39-40`), so the services are provided app-wide already. No new layer plumbing for the common path.
@@ -47,7 +52,7 @@ In this beta, `FileSystem` + `Path` are re-exported from `effect` directly:
 | `mkdir(p,{recursive})` | `fs.makeDirectory(p, { recursive: true })` |
 | `unlink(p)` | `fs.remove(p)` |
 | `join`/`basename`/`dirname`/`resolve`/`isAbsolute` | `path.join`/`.basename`/`.dirname`/`.resolve`/`.isAbsolute` (`Path.Path`) |
-| `try/catch (ENOENT)` | `Effect.catchTag("SystemError", e => e.reason === "NotFound" ? skip : fail)` (or `Effect.catchIf`) |
+| `try/catch (ENOENT)` | `Effect.catchTag("PlatformError", e => e.reason._tag === "NotFound" ? skip : fail)` |
 
 All `fs.*` return `Effect.Effect<T, PlatformError>`; all `path.*` are pure methods on the `Path.Path` service value.
 
@@ -107,7 +112,7 @@ This lands as a **single branch → single PR**, executed **autonomously / unatt
 
 1. **Streaming parity** - `fs.stream`+`Stream.splitLines` must match `fh.readLines()` exactly (trailing newline handling, encoding, very large files). Mitigation: parity test + Phase 1 benchmark. (Ingest is already DB-round-trip-bound - see the 93%-in-`kevent64` finding - so Stream overhead is unlikely to dominate, but verify.)
 2. **Path-service churn** - honoring "no node base deps" pushes `Path.Path` into many pure helpers for zero IO benefit. Mitigation: Phase 3 isolates it; flag pure-overhead helpers per PR for lift-vs-param judgment.
-3. **98-file diff** - large surface. Mitigation: strict phasing, one PR per phase, tests per slice, the Phase 4 lint guard prevents backsliding.
+3. **59-file diff** - large surface. Mitigation: strict phasing, one PR per phase, tests per slice, the Phase 4 lint guard prevents backsliding.
 4. **Non-Effect call sites** - a few fs uses sit outside Effect (sync CLI paths). Mitigation: lift to the nearest Effect boundary or run via `AppLayer`; called out per file in its phase.
 
 ## Out of scope
