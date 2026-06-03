@@ -9,11 +9,11 @@
  * would fight the plugin manager or has no real file at all.
  */
 import { spawn } from "node:child_process";
-import { access, readFile, rename } from "node:fs/promises";
-import { dirname, join } from "node:path";
-import { Effect } from "effect";
+import { Effect, FileSystem } from "effect";
 import { SurrealClient } from "@ax/lib/db";
 import type { DbError } from "@ax/lib/errors";
+import { orAbsent } from "@ax/lib/shared/fs-error";
+import { posixPath } from "@ax/lib/shared/path";
 import { surrealLiteral } from "@ax/lib/json";
 import type {
     SkillSourcePayload,
@@ -42,14 +42,12 @@ const GUI_EDITORS = new Set([
     "windsurf",
 ]);
 
-const fileExists = async (path: string): Promise<boolean> => {
-    try {
-        await access(path);
-        return true;
-    } catch {
-        return false;
-    }
-};
+const fileExists = (path: string): Effect.Effect<boolean, never, FileSystem.FileSystem> =>
+    Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        // Original probed via `access` in a try/catch: any failure -> absent.
+        return yield* fs.exists(path).pipe(orAbsent(false));
+    });
 
 const FRONTMATTER_RE = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/;
 
@@ -69,32 +67,39 @@ interface DiskRead {
     readonly error: string | null;
 }
 
-const readSkillFromDir = async (dirPath: string): Promise<DiskRead> => {
-    const activePath = join(dirPath, SKILL_FILE);
-    const archivedPath = join(dirPath, ARCHIVED_FILE);
-    const [hasActive, hasArchived] = await Promise.all([
-        fileExists(activePath),
-        fileExists(archivedPath),
-    ]);
-    const target = hasActive ? activePath : hasArchived ? archivedPath : null;
-    if (!target) {
-        return { state: "missing", file_path: null, frontmatter: null, body: null, error: null };
-    }
-    const state: SkillSourceState = hasActive ? "active" : "disabled";
-    try {
-        const text = await readFile(target, "utf8");
-        const { frontmatter, body } = splitFrontmatter(text);
-        return { state, file_path: target, frontmatter, body, error: null };
-    } catch (err) {
-        return {
-            state,
-            file_path: target,
-            frontmatter: null,
-            body: null,
-            error: err instanceof Error ? err.message : String(err),
-        };
-    }
-};
+const readSkillFromDir = (
+    dirPath: string,
+): Effect.Effect<DiskRead, never, FileSystem.FileSystem> =>
+    Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const activePath = posixPath.join(dirPath, SKILL_FILE);
+        const archivedPath = posixPath.join(dirPath, ARCHIVED_FILE);
+        const [hasActive, hasArchived] = yield* Effect.all([
+            fileExists(activePath),
+            fileExists(archivedPath),
+        ]);
+        const target = hasActive ? activePath : hasArchived ? archivedPath : null;
+        if (!target) {
+            return { state: "missing", file_path: null, frontmatter: null, body: null, error: null };
+        }
+        const state: SkillSourceState = hasActive ? "active" : "disabled";
+        // Original caught ANY read failure and surfaced it as an error string.
+        return yield* fs.readFileString(target).pipe(
+            Effect.map((text): DiskRead => {
+                const { frontmatter, body } = splitFrontmatter(text);
+                return { state, file_path: target, frontmatter, body, error: null };
+            }),
+            Effect.catchTag("PlatformError", (err) =>
+                Effect.succeed<DiskRead>({
+                    state,
+                    file_path: target,
+                    frontmatter: null,
+                    body: null,
+                    error: err.message,
+                }),
+            ),
+        );
+    });
 
 interface SkillRowMeta {
     readonly scope: string;
@@ -125,7 +130,7 @@ const isSyntheticDir = (dirPath: string | null): boolean =>
  *  tools, claude builtins) come back `missing` / non-editable. */
 export const readSkillSource = (
     name: string,
-): Effect.Effect<SkillSourcePayload, DbError, SurrealClient> =>
+): Effect.Effect<SkillSourcePayload, DbError, SurrealClient | FileSystem.FileSystem> =>
     Effect.gen(function* () {
         const meta = yield* fetchSkillMeta(name);
         const scope = meta?.scope ?? "unknown";
@@ -143,7 +148,7 @@ export const readSkillSource = (
                 error: meta ? null : `no skill named "${name}"`,
             };
         }
-        const disk = yield* Effect.promise(() => readSkillFromDir(dirPath as string));
+        const disk = yield* readSkillFromDir(dirPath as string);
         return {
             name,
             scope,
@@ -159,29 +164,33 @@ export const readSkillSource = (
 
 /** Rename SKILL.md <-> SKILL.md.archived so the on-disk state matches `want`.
  *  Idempotent: returns the resulting state without erroring when already there. */
-export const setSkillDiskState = async (
+export const setSkillDiskState = (
     dirPath: string,
     want: "active" | "disabled",
-): Promise<SkillSourceState> => {
-    const activePath = join(dirPath, SKILL_FILE);
-    const archivedPath = join(dirPath, ARCHIVED_FILE);
-    const [hasActive, hasArchived] = await Promise.all([
-        fileExists(activePath),
-        fileExists(archivedPath),
-    ]);
-    if (want === "disabled") {
-        if (hasActive) {
-            await rename(activePath, archivedPath);
-            return "disabled";
+): Effect.Effect<SkillSourceState, never, FileSystem.FileSystem> =>
+    Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const activePath = posixPath.join(dirPath, SKILL_FILE);
+        const archivedPath = posixPath.join(dirPath, ARCHIVED_FILE);
+        const [hasActive, hasArchived] = yield* Effect.all([
+            fileExists(activePath),
+            fileExists(archivedPath),
+        ]);
+        // Original `rename` had no tolerance (the async fn rejected, and the
+        // `Effect.promise` caller died); keep dying on a rename failure.
+        if (want === "disabled") {
+            if (hasActive) {
+                yield* fs.rename(activePath, archivedPath).pipe(Effect.orDie);
+                return "disabled";
+            }
+            return hasArchived ? "disabled" : "missing";
         }
-        return hasArchived ? "disabled" : "missing";
-    }
-    if (hasArchived && !hasActive) {
-        await rename(archivedPath, activePath);
-        return "active";
-    }
-    return hasActive ? "active" : "missing";
-};
+        if (hasArchived && !hasActive) {
+            yield* fs.rename(archivedPath, activePath).pipe(Effect.orDie);
+            return "active";
+        }
+        return hasActive ? "active" : "missing";
+    });
 
 /**
  * Reflect a triage decision onto disk for user-owned skills:
@@ -193,14 +202,14 @@ export const setSkillDiskState = async (
 export const applySkillDecisionToDisk = (
     name: string,
     decision: TriageDecision | null,
-): Effect.Effect<SkillSourceState | null, DbError, SurrealClient> =>
+): Effect.Effect<SkillSourceState | null, DbError, SurrealClient | FileSystem.FileSystem> =>
     Effect.gen(function* () {
         const meta = yield* fetchSkillMeta(name);
         if (!meta || isSyntheticDir(meta.dir_path) || !isEditableScope(meta.scope)) {
             return null;
         }
         const want: "active" | "disabled" = decision === "archive" ? "disabled" : "active";
-        return yield* Effect.promise(() => setSkillDiskState(meta.dir_path as string, want));
+        return yield* setSkillDiskState(meta.dir_path as string, want);
     });
 
 const launchViewer = async (
@@ -216,7 +225,7 @@ const launchViewer = async (
             args = ["-R", path];
         } else {
             cmd = "xdg-open";
-            args = [dirname(path)];
+            args = [posixPath.dirname(path)];
         }
     } else {
         const editor = (process.env.VISUAL ?? process.env.EDITOR ?? "").trim();
@@ -243,7 +252,7 @@ const launchViewer = async (
 export const openSkillTarget = (
     name: string,
     target: "finder" | "editor",
-): Effect.Effect<{ launched: string }, DbError, SurrealClient> =>
+): Effect.Effect<{ launched: string }, DbError, SurrealClient | FileSystem.FileSystem> =>
     Effect.gen(function* () {
         const source = yield* readSkillSource(name);
         const path = source.file_path ?? source.dir_path;

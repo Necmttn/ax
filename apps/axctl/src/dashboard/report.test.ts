@@ -1,6 +1,23 @@
 import { describe, expect, test } from "bun:test";
+import { Effect, FileSystem, Layer } from "effect";
+import { BunFileSystem, BunPath } from "@effect/platform-bun";
+import { SurrealClient } from "@ax/lib/db";
 import type { DashboardData } from "./report.ts";
-import { renderDashboardHtml } from "./report.ts";
+import { renderDashboardHtml, writeDashboard } from "./report.ts";
+
+/** Mock SurrealClient that returns empty result sets for every query, so
+ *  `fetchDashboardData` produces a zeroed-out DashboardData without a real DB. */
+function makeEmptyDb() {
+    const impl = {
+        query: <T extends unknown[] = unknown[]>() => Effect.succeed([[]] as unknown as T),
+        upsert: () => Effect.void,
+        relate: () => Effect.void,
+        putFile: () => Effect.void,
+        getFile: () => Effect.succeed(""),
+        raw: undefined as unknown as import("surrealdb").Surreal,
+    };
+    return Layer.succeed(SurrealClient, impl);
+}
 
 const sampleData: DashboardData = {
     generatedAt: "2026-05-10T00:00:00.000Z",
@@ -135,5 +152,29 @@ describe("dashboard report renderer", () => {
         expect(html).toContain("No failing tool calls found.");
         expect(html).toContain("No friction events found.");
         expect(html).toContain("No session evidence ingested yet.");
+    });
+});
+
+describe("writeDashboard (@effect/platform write path)", () => {
+    test("creates the parent dir and writes the rendered HTML to disk", async () => {
+        const program = Effect.gen(function* () {
+            const fs = yield* FileSystem.FileSystem;
+            const dir = yield* fs.makeTempDirectory({ prefix: "ax-report-test-" });
+            // Write into a NESTED, not-yet-existing dir to exercise makeDirectory.
+            const outPath = `${dir}/nested/dashboard.html`;
+            const result = yield* writeDashboard({ out: outPath, limit: 5 });
+            const onDisk = yield* fs.readFileString(result.path);
+            return { result, onDisk };
+        }).pipe(
+            Effect.provide(
+                Layer.mergeAll(makeEmptyDb(), BunFileSystem.layer, BunPath.layer),
+            ),
+        );
+
+        const { result, onDisk } = await Effect.runPromise(program);
+        expect(result.path.endsWith("/nested/dashboard.html")).toBe(true);
+        expect(result.url.startsWith("file://")).toBe(true);
+        expect(onDisk).toContain("axctl Evidence Dashboard");
+        expect(onDisk).toBe(renderDashboardHtml(result.data));
     });
 });

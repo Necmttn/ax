@@ -1,10 +1,9 @@
-import { mkdir, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
-import { dirname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
-import { Effect } from "effect";
+import { Effect, FileSystem, Path } from "effect";
 import { SurrealClient, type SurrealClientShape } from "@ax/lib/db";
 import type { DbError } from "@ax/lib/errors";
+import { posixPath } from "@ax/lib/shared/path";
 import {
     checkoutActivitySql,
     gitCorrelationSql,
@@ -51,8 +50,8 @@ interface DashboardOpts {
     readonly limit: number;
 }
 
-const DEFAULT_DASHBOARD_PATH = join(
-    process.env.AX_DATA_DIR ?? join(homedir(), ".local", "share", "ax"),
+const DEFAULT_DASHBOARD_PATH = posixPath.join(
+    process.env.AX_DATA_DIR ?? posixPath.join(homedir(), ".local", "share", "ax"),
     "dashboard.html",
 );
 
@@ -127,15 +126,17 @@ export const fetchDashboardData = (
 
 export const writeDashboard = (
     opts: DashboardOpts,
-): Effect.Effect<DashboardWriteResult, DbError, SurrealClient> =>
+): Effect.Effect<DashboardWriteResult, DbError, SurrealClient | FileSystem.FileSystem | Path.Path> =>
     Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
         const data = yield* fetchDashboardData(opts.limit);
-        const outPath = resolve(opts.out ?? DEFAULT_DASHBOARD_PATH);
+        const outPath = path.resolve(opts.out ?? DEFAULT_DASHBOARD_PATH);
         const html = renderDashboardHtml(data);
-        yield* Effect.promise(async () => {
-            await mkdir(dirname(outPath), { recursive: true });
-            await writeFile(outPath, html, "utf8");
-        });
+        // Match the original `Effect.promise` semantics: a write/mkdir failure
+        // is unrecoverable here, so die rather than surface a typed error.
+        yield* fs.makeDirectory(path.dirname(outPath), { recursive: true }).pipe(Effect.orDie);
+        yield* fs.writeFileString(outPath, html).pipe(Effect.orDie);
         return {
             path: outPath,
             url: pathToFileURL(outPath).href,

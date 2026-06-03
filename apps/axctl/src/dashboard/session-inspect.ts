@@ -6,8 +6,7 @@
  * `scripts/prototypes/ax-session-inspect.ts`.
  */
 
-import { readFile } from "node:fs/promises";
-import { Data, Effect, type FileSystem, type Path } from "effect";
+import { Data, Effect, FileSystem, type Path } from "effect";
 import { dissectTurn, type TurnSpan } from "../ingest/turn-dissect.ts";
 import { extractCodexJsonlLines, type CodexTurnTokenUsage } from "../ingest/codex.ts";
 import { estimateCost } from "../ingest/model-pricing.ts";
@@ -584,9 +583,20 @@ export const fetchSessionInspect = (
             { offset: opts.turnOffset, limit: opts.turnLimit },
             INSPECT_TURNS_PAGINATION,
         );
-        const payload = yield* Effect.tryPromise({
-        try: async () => {
-            const raw = await readFile(found.path, "utf8");
+        const fs = yield* FileSystem.FileSystem;
+        // The read is the only failure source here; the rest of the body is
+        // pure parsing. Preserve the original `Effect.tryPromise` behavior of
+        // mapping ANY read failure into SessionInspectReadError.
+        const raw = yield* fs.readFileString(found.path).pipe(
+            Effect.catchTag("PlatformError", (err) =>
+                new SessionInspectReadError({
+                    path: found.path,
+                    message: err.message,
+                    cause: err,
+                }),
+            ),
+        );
+        const payload = ((): SessionInspectPayload => {
             const parseLine = found.harness === "codex" ? parseCodexLine : parseClaudeLine;
             const derivedTurnTokenUsage = found.harness === "codex"
                 ? deriveCodexTurnTokenUsage(raw)
@@ -740,13 +750,6 @@ export const fetchSessionInspect = (
                 hook_fires: hookFireSlice,
                 total_hook_fires: allHookFires.length,
             };
-        },
-        catch: (err) =>
-            new SessionInspectReadError({
-                path: found.path,
-                message: err instanceof Error ? err.message : String(err),
-                cause: err,
-            }),
-    });
+        })();
         return payload;
     });
