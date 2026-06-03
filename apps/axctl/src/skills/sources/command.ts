@@ -66,7 +66,9 @@ export const makeCommandSource = (config: {
     readonly label: string;
     readonly writable: boolean;
     readonly roots: (repoRoot: string | null) => ReadonlyArray<SkillDirRef>;
-    readonly installed?: (repoRoot: string | null) => boolean;
+    readonly installed?: (
+        repoRoot: string | null,
+    ) => Effect.Effect<boolean, never, FileSystem.FileSystem>;
 }): SkillSource => {
     const assertWritable = (
         name: string,
@@ -165,7 +167,8 @@ export const makeCommandSource = (config: {
         writable: config.writable,
         roots: config.roots,
         installed:
-            config.installed ?? ((repoRoot) => config.roots(repoRoot).length > 0),
+            config.installed ??
+            ((repoRoot) => Effect.succeed(config.roots(repoRoot).length > 0)),
         discover,
         remove,
         park,

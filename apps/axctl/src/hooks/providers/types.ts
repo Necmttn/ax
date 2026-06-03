@@ -1,4 +1,4 @@
-import type { Effect } from "effect";
+import type { Effect, FileSystem } from "effect";
 import type {
     HookConfigParseError,
     HookConfigSchemaError,
@@ -85,7 +85,9 @@ export interface HookProvider {
     /** config files this provider reads for a given scope (global/project/local). */
     readonly configFiles: (scope: HookScope, repoRoot: string | null) => ReadonlyArray<HookFileRef>;
     /** cheap check: does this provider appear installed (any global config dir exists)? */
-    readonly installed: (repoRoot: string | null) => boolean;
+    readonly installed: (
+        repoRoot: string | null,
+    ) => Effect.Effect<boolean, never, FileSystem.FileSystem>;
 
     /** decode the raw text of one config file into normalized hook entries. */
     readonly parse: (

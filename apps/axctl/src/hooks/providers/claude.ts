@@ -1,5 +1,7 @@
 import { join } from "node:path";
-import { existsSync } from "node:fs";
+import { posixPath } from "@ax/lib/shared/path";
+import { orAbsent } from "@ax/lib/shared/fs-error";
+import { Effect, FileSystem } from "effect";
 import { HOME } from "@ax/lib/paths";
 import type { HookProvider, HookScope } from "./types.ts";
 import { makeJsonCodec } from "./json-codec.ts";
@@ -33,7 +35,11 @@ export const claudeProvider: HookProvider = {
         return [{ path: join(repoRoot, ".claude", "settings.local.json"), scope, format: "json" }];
     },
 
-    installed: () => existsSync(join(HOME, ".claude")),
+    installed: () =>
+        Effect.gen(function* () {
+            const fs = yield* FileSystem.FileSystem;
+            return yield* fs.exists(posixPath.join(HOME, ".claude")).pipe(orAbsent(false));
+        }),
 
     parse: codec.parse,
     applyAdd: codec.applyAdd,

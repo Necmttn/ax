@@ -1,6 +1,7 @@
-import { Effect } from "effect";
+import { Effect, FileSystem } from "effect";
 import { join } from "node:path";
-import { existsSync } from "node:fs";
+import { posixPath } from "@ax/lib/shared/path";
+import { orAbsent } from "@ax/lib/shared/fs-error";
 import { parse as parseToml, stringify as stringifyToml } from "smol-toml";
 import { HOME } from "@ax/lib/paths";
 import {
@@ -133,7 +134,11 @@ export const codexProvider: HookProvider = {
         return [];
     },
 
-    installed: () => existsSync(join(HOME, ".codex")),
+    installed: () =>
+        Effect.gen(function* () {
+            const fs = yield* FileSystem.FileSystem;
+            return yield* fs.exists(posixPath.join(HOME, ".codex")).pipe(orAbsent(false));
+        }),
 
     parse: (ref, raw) =>
         ref.format === "toml"
