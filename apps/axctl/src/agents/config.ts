@@ -78,9 +78,10 @@ export const readAllAgents = (
 > =>
     Effect.gen(function* () {
         const db = yield* SurrealClient;
-        const onDisk = yield* discoverAll();
-        const [graphRows] = yield* db.query<[AgentDbRow[]]>(
-            `SELECT name, deleted_at FROM ${AGENT_DEF_TABLE}`,
+        // disk discovery and the graph snapshot are independent -> run concurrently.
+        const [onDisk, [graphRows]] = yield* Effect.all(
+            [discoverAll(), db.query<[AgentDbRow[]]>(`SELECT name, deleted_at FROM ${AGENT_DEF_TABLE}`)],
+            { concurrency: 2 },
         );
         const deletedInGraph = new Set(
             (graphRows ?? [])

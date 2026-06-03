@@ -99,9 +99,11 @@ export const readAllSkills = (
     SkillSourceRegistry | FileSystem.FileSystem | Path.Path | SurrealClient
 > =>
     Effect.gen(function* () {
-        const { records } = yield* discoverAllSkills(filter.repoRoot ?? null);
-        const evidence = yield* fetchEvidence();
-        const scopeMap = yield* loadAgentScopeMap();
+        // independent reads (disk discovery, DB evidence, agent-scope map) run concurrently.
+        const [{ records }, evidence, scopeMap] = yield* Effect.all(
+            [discoverAllSkills(filter.repoRoot ?? null), fetchEvidence(), loadAgentScopeMap()],
+            { concurrency: 3 },
+        );
 
         const onDisk = new Set(records.map((r) => r.name));
         const rows: SkillConfigRow[] = [];
