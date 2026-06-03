@@ -607,7 +607,11 @@ interface RecallCliOpts {
  */
 const resolveScope = (
     scopeFlag: string | null,
-): Effect.Effect<RecallScope, DbError | import("@ax/lib/process").ProcessError, SurrealClient | ProcessService> =>
+): Effect.Effect<
+    RecallScope,
+    DbError | import("@ax/lib/process").ProcessError,
+    SurrealClient | ProcessService | FileSystem.FileSystem
+> =>
     Effect.gen(function* () {
         if (scopeFlag === "all") return { kind: "all" } as RecallScope;
 

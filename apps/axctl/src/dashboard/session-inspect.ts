@@ -7,7 +7,7 @@
  */
 
 import { readFile } from "node:fs/promises";
-import { Data, Effect } from "effect";
+import { Data, Effect, type FileSystem, type Path } from "effect";
 import { dissectTurn, type TurnSpan } from "../ingest/turn-dissect.ts";
 import { extractCodexJsonlLines, type CodexTurnTokenUsage } from "../ingest/codex.ts";
 import { estimateCost } from "../ingest/model-pricing.ts";
@@ -562,7 +562,11 @@ export interface FetchSessionInspectOptions {
 export const fetchSessionInspect = (
     sessionId: string,
     opts: FetchSessionInspectOptions = {},
-): Effect.Effect<SessionInspectPayload, SessionInspectReadError | TranscriptNotFoundError, SurrealClient> =>
+): Effect.Effect<
+    SessionInspectPayload,
+    SessionInspectReadError | TranscriptNotFoundError,
+    SurrealClient | FileSystem.FileSystem | Path.Path
+> =>
     Effect.gen(function* () {
         // Normalise inbound id at the seam so the rest of the function operates
         // on a bare id (also what we echo back as payload.session_id).
