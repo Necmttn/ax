@@ -8,7 +8,7 @@ import { stableDigest } from "./record-keys.ts";
 import { buildContentDocumentStatements, type ContentDocumentWrite } from "./content-blocks/persist.ts";
 import { parseProviderTurn } from "./content-blocks/parse-turn.ts";
 import type { ContentDocumentInput } from "./content-blocks/types.ts";
-import { BaseStageStats, IngestContext, sinceDaysFromCtx, StageMeta } from "./stage/types.ts";
+import { BaseStageStats, IngestContext, sinceDaysFromCtx, sinceWhereClause, StageMeta } from "./stage/types.ts";
 import type { StageDef } from "./stage/registry.ts";
 
 export const TurnContentBlocksKey = Schema.Literal("turn-content-blocks");
@@ -114,7 +114,7 @@ const fetchTurnRows = (
 ): Effect.Effect<TurnContentBlockRow[], DbError, SurrealClient> =>
     Effect.gen(function* () {
         const db = yield* SurrealClient;
-        const since = sinceDays && sinceDays > 0 ? `WHERE ts > time::now() - ${sinceDays}d` : "";
+        const since = sinceWhereClause(sinceDays);
         const [rows] = yield* db.query<[TurnContentBlockRow[]]>(`
 SELECT id, session, agent_event, seq, role, message_kind, intent_kind, text, text_excerpt, has_tool_use, has_error, type::string(ts) AS ts
 FROM turn

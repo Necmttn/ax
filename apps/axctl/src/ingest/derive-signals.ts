@@ -352,8 +352,7 @@ const fetchSessionTurns = (
 ): Effect.Effect<SessionTurns[], DbError, SurrealClient> =>
     Effect.gen(function* () {
         const db = yield* SurrealClient;
-        const sinceFilter =
-            sinceDays && sinceDays > 0 ? `WHERE ts > time::now() - ${sinceDays}d` : "";
+        const sinceFilter = sinceWhereClause(sinceDays);
         const sql = `
 SELECT
     id,
@@ -672,8 +671,7 @@ const fetchFailedToolCalls = (
 ): Effect.Effect<ToolCallLike[], DbError, SurrealClient> =>
     Effect.gen(function* () {
         const db = yield* SurrealClient;
-        const sinceFilter =
-            sinceDays && sinceDays > 0 ? `AND ts > time::now() - ${sinceDays}d` : "";
+        const sinceFilter = sinceAndClause(sinceDays);
         const sql = `
 SELECT
     id,
@@ -982,7 +980,7 @@ if (import.meta.main) {
 // Co-located StageDef
 // ---------------------------------------------------------------------------
 
-import { BaseStageStats, IngestContext, sinceDaysFromCtx, StageMeta } from "./stage/types.ts";
+import { BaseStageStats, IngestContext, sinceAndClause, sinceDaysFromCtx, sinceWhereClause, StageMeta } from "./stage/types.ts";
 import type { StageDef } from "./stage/registry.ts";
 
 export const SignalsKey = Schema.Literal("signals");

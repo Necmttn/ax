@@ -34,6 +34,19 @@ export const sinceDaysFromCtx = (ctx: IngestContext): number | undefined => {
     return days > 0 ? days : undefined;
 };
 
+/** Build a standalone `WHERE ts > time::now() - Nd` filter from a `sinceDays`.
+ *  Returns `""` when `sinceDays` is undefined or non-positive (no time filter).
+ *  Extracted to kill the copy-pasted ternary whose typo'd variants fail
+ *  silently (query runs, returns 0 rows, no error). */
+export const sinceWhereClause = (sinceDays: number | undefined): string =>
+    sinceDays && sinceDays > 0 ? `WHERE ts > time::now() - ${sinceDays}d` : "";
+
+/** `AND ts > time::now() - Nd` continuation variant of {@link sinceWhereClause},
+ *  for appending to a query that already has a `WHERE`. Same empty-string
+ *  semantics when there is no time filter. */
+export const sinceAndClause = (sinceDays: number | undefined): string =>
+    sinceDays && sinceDays > 0 ? `AND ts > time::now() - ${sinceDays}d` : "";
+
 /** Declarative metadata for a stage. The `key` field is narrowed per stage at
  *  construction time; deps/tags reference Schema unions defined in
  *  `./registry.ts` and `./tags.ts`. */
