@@ -3,8 +3,8 @@ import { SurrealClient } from "@ax/lib/db";
 import { DbError } from "@ax/lib/errors";
 import { findGitRoot } from "../project/git.ts";
 import {
-    reconcileTable,
-    type ReconcileReport,
+    reconcileByScope,
+    type ScopedReconcileReport,
 } from "../config-core/reconcile.ts";
 import { AGENT_DEF_TABLE } from "../ingest/agent-def.ts";
 import { AgentSourceRegistry } from "./registry.ts";
@@ -18,14 +18,15 @@ import { AgentSourceRegistry } from "./registry.ts";
 export const reconcileAgents = (
     opts?: { readonly dryRun?: boolean },
 ): Effect.Effect<
-    ReconcileReport,
+    ScopedReconcileReport,
     DbError,
     SurrealClient | FileSystem.FileSystem | Path.Path | AgentSourceRegistry
 > =>
     Effect.gen(function* () {
         const reg = yield* AgentSourceRegistry;
         const repoRoot = (yield* Effect.promise(() => findGitRoot(process.cwd()))) ?? undefined;
-        const names = new Set<string>();
+        // Partition by scope (user/project) so user-scope reconcile is independent.
+        const byScope = new Map<string, string[]>();
         for (const source of reg.all()) {
             const recs = yield* source.discover(repoRoot).pipe(
                 Effect.mapError(
@@ -37,7 +38,11 @@ export const reconcileAgents = (
                         }),
                 ),
             );
-            for (const rec of recs) names.add(rec.name);
+            for (const rec of recs) {
+                const arr = byScope.get(rec.scope) ?? [];
+                arr.push(rec.name);
+                byScope.set(rec.scope, arr);
+            }
         }
-        return yield* reconcileTable(AGENT_DEF_TABLE, [...names], opts);
+        return yield* reconcileByScope(AGENT_DEF_TABLE, byScope, opts);
     });

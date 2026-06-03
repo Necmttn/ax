@@ -2,7 +2,7 @@ import { Effect, FileSystem, Path } from "effect";
 import type { PlatformError } from "effect/PlatformError";
 import { SurrealClient } from "@ax/lib/db";
 import type { DbError } from "@ax/lib/errors";
-import { reconcileTable, type ReconcileReport } from "../config-core/reconcile.ts";
+import { reconcileByScope, type ScopedReconcileReport } from "../config-core/reconcile.ts";
 import { SkillSourceRegistry } from "./sources/registry.ts";
 import type { SkillRecord } from "./sources/types.ts";
 
@@ -70,15 +70,23 @@ export const discoverAllSkills = (
 export const reconcileSkills = (
     opts?: { readonly dryRun?: boolean; readonly repoRoot?: string | null },
 ): Effect.Effect<
-    ReconcileReport,
+    ScopedReconcileReport,
     DbError | PlatformError,
     SkillSourceRegistry | FileSystem.FileSystem | Path.Path | SurrealClient
 > =>
     Effect.gen(function* () {
         const snapshot = yield* discoverAllSkills(opts?.repoRoot ?? null);
-        const names = snapshot.records.map((r) => r.name);
+        // Partition by scope so reconcile only touches scopes THIS discovery owns
+        // (user/command/plugin:x/...); the `skill` table also holds provider tools
+        // and other repos' project skills, which must never be tombstoned here.
+        const byScope = new Map<string, string[]>();
+        for (const rec of snapshot.records) {
+            const arr = byScope.get(rec.scopeTag) ?? [];
+            arr.push(rec.name);
+            byScope.set(rec.scopeTag, arr);
+        }
         // A degraded snapshot resurrects/touches but never tombstones.
-        return yield* reconcileTable("skill", names, {
+        return yield* reconcileByScope("skill", byScope, {
             dryRun: opts?.dryRun ?? false,
             tombstone: snapshot.complete,
         });

@@ -2,7 +2,7 @@ import { Effect } from "effect";
 import { Argument, Command, Flag } from "effect/unstable/cli";
 import { prettyPrint } from "@ax/lib/json";
 import { optionValue } from "../config-core/cli-util.ts";
-import { formatReconcile } from "../config-core/reconcile.ts";
+import { formatReconcileScoped } from "../config-core/reconcile.ts";
 import { AgentSourceRegistryLive } from "./registry.ts";
 import {
     readAllAgents,
@@ -58,7 +58,7 @@ const reconcileCommand = Command.make(
     { dryRun: Flag.boolean("dry-run").pipe(Flag.withDefault(false)), json },
     ({ dryRun, json: asJson }) =>
         reconcileAgents({ dryRun }).pipe(
-            Effect.map((report) => console.log(asJson ? prettyPrint(report) : formatReconcile(report))),
+            Effect.map((report) => console.log(asJson ? prettyPrint(report) : formatReconcileScoped(report))),
             Effect.provide(AgentSourceRegistryLive),
         ),
 ).pipe(Command.withDescription("Tombstone agent_def rows absent on disk; resurrect those present (--dry-run)"));

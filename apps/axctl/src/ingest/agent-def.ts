@@ -18,7 +18,7 @@ import { skillRecordKey } from "@ax/lib/skill-id";
 import { AppLayer } from "@ax/lib/layers";
 import { DbError } from "@ax/lib/errors";
 import { findGitRoot } from "../project/git.ts";
-import { reconcileTable } from "../config-core/reconcile.ts";
+import { reconcileByScope } from "../config-core/reconcile.ts";
 import { AgentSourceRegistry, AgentSourceRegistryLive } from "../agents/registry.ts";
 import type { AgentRecord } from "../agents/source.ts";
 import { BaseStageStats, IngestContext, StageMeta } from "./stage/types.ts";
@@ -101,10 +101,15 @@ export const ingestAgentDefs = (): Effect.Effect<
             discard: true,
         });
 
-        const report = yield* reconcileTable(
-            AGENT_DEF_TABLE,
-            agents.map((a) => a.name),
-        );
+        // Reconcile per scope (user/project) so the stage never tombstones agents
+        // outside the scopes it just discovered.
+        const byScope = new Map<string, string[]>();
+        for (const a of agents) {
+            const arr = byScope.get(a.scope) ?? [];
+            arr.push(a.name);
+            byScope.set(a.scope, arr);
+        }
+        const report = yield* reconcileByScope(AGENT_DEF_TABLE, byScope);
 
         yield* Effect.logDebug("agent_def upserted", {
             count: agents.length,
