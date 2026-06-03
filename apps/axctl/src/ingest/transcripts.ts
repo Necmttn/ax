@@ -46,6 +46,7 @@ import {
 import { extractToolFileEvidence } from "./tool-file-evidence.ts";
 
 import { executeStatements, executeStatementsWith } from "@ax/lib/shared/statement-exec";
+import { fileWatermark } from "@ax/lib/shared/watermark";
 
 const MAX_OUTPUT_EXCERPT_CHARS = 1200;
 const DEFAULT_CLAUDE_CONCURRENCY = 4;
@@ -1341,39 +1342,23 @@ export const ingestTranscripts = (
                 .filter((name): name is string => typeof name === "string" && name.length > 0),
         );
 
-        // Skip-unchanged watermark (hypothesis 006). Load every known
-        // per-file (mtime,size) marker in ONE indexed read into a JS Map
-        // keyed by absolute path; a candidate whose stat still matches its
-        // watermark is output-equivalent to a prior run (its turns/tool
-        // calls/events already persist) so we skip parsing+writing it.
+        // Skip-unchanged watermark (hypothesis 006), now via the shared
+        // `fileWatermark` seam: ONE indexed read of every per-file (mtime,size)
+        // marker, an in-memory `unchanged()` skip check, and a `commit()` UPSERT
+        // recorded only after a file's writes succeed. A candidate whose stat
+        // still matches its watermark is output-equivalent to a prior run (its
+        // turns/tool calls/events already persist) so we skip parsing+writing it.
         // `AX_REDERIVE_CLAUDE=1` forces a full re-parse (ignores watermarks).
-        const forceRederive = process.env.AX_REDERIVE_CLAUDE === "1";
-        const fileStateRows = (yield* db.query<[Array<{ path?: string; mtime_ms?: number; size?: number }>]>(
-            `SELECT path, mtime_ms, size FROM ingest_file_state WHERE source_kind = "claude_transcript";`,
-        ))?.[0] ?? [];
-        const watermarks = new Map<string, { mtimeMs: number; size: number }>();
-        if (!forceRederive) {
-            for (const row of fileStateRows) {
-                if (
-                    typeof row.path === "string" &&
-                    typeof row.mtime_ms === "number" &&
-                    typeof row.size === "number"
-                ) {
-                    watermarks.set(row.path, { mtimeMs: row.mtime_ms, size: row.size });
-                }
-            }
-        }
-        const upsertFileWatermark = (filePath: string, mtimeMs: number, size: number) =>
-            executeStatementsWith(db, [
-                `UPSERT ingest_file_state:\`${escapeRecordKey(stableHash(filePath))}\` CONTENT { path: ${surrealLiteral(filePath)}, source_kind: "claude_transcript", mtime_ms: ${Math.trunc(mtimeMs)}, size: ${Math.trunc(size)}, ingested_at: time::now() };`,
-            ], { chunkSize: 1 });
+        const wm = yield* fileWatermark({
+            sourceKind: "claude_transcript",
+            forceEnv: "AX_REDERIVE_CLAUDE",
+        });
 
         yield* Effect.forEach(candidates.map((candidate, index) => ({ candidate, index })), ({ candidate, index }) => Effect.gen(function* () {
             // Skip-unchanged: a candidate whose on-disk (mtime,size) still
             // matches its persisted watermark has already been ingested in a
             // prior run; its rows persist, so skipping is output-equivalent.
-            const mark = watermarks.get(candidate.filePath);
-            if (mark && mark.mtimeMs === candidate.mtimeMs && mark.size === candidate.size) {
+            if (wm.unchanged(candidate.filePath, candidate.mtimeMs, candidate.size)) {
                 return;
             }
             activeFiles += 1;
@@ -1474,7 +1459,7 @@ export const ingestTranscripts = (
             }
             // Record the watermark only after every write for this file
             // succeeded, so a mid-file failure re-processes next run.
-            yield* upsertFileWatermark(candidate.filePath, candidate.mtimeMs, candidate.size);
+            yield* wm.commit(candidate.filePath, candidate.mtimeMs, candidate.size);
             activeFiles -= 1;
         }), { concurrency, discard: true });
         yield* Effect.logDebug("transcript ingest complete", {

@@ -8,8 +8,7 @@ import { BaseStageStats, IngestContext, StageMeta } from "./stage/types.ts";
 import type { StageDef } from "./stage/registry.ts";
 import { surrealLiteral } from "@ax/lib/json";
 import { decodeJsonOrNull } from "@ax/lib/decode";
-import { executeStatementsWith } from "@ax/lib/shared/statement-exec";
-import { stableDigest } from "@ax/lib/ids";
+import { fileWatermark } from "@ax/lib/shared/watermark";
 import {
     extractFileWithSessionId,
     upsertTurnsForSubagents,
@@ -174,35 +173,18 @@ export const deriveClaudeSubagents = (
         );
 
         // Skip-unchanged watermark (hypothesis 010, mirrors 006 for Claude
-        // transcripts). Each subagent jsonl is fully re-parsed via
-        // extractFileWithSessionId and its turns/tool_calls/invocations
-        // re-written on every run, yet the files are almost always unchanged
-        // between runs. Load every per-file (mtime,size) marker for
-        // source_kind="claude_subagent" in ONE indexed read into a JS Map
-        // keyed by absolute path; a manifest whose stat still matches its
-        // watermark is output-equivalent to a prior run (its rows persist) so
-        // we skip parsing+writing it. `AX_REDERIVE_SUBAGENTS=1` forces a full
-        // re-derive. NEVER `NOT IN` - one indexed Map read only.
-        const forceRederive = process.env.AX_REDERIVE_SUBAGENTS === "1";
-        const fileStateRows = (yield* db.query<[Array<{ path?: string; mtime_ms?: number; size?: number }>]>(
-            `SELECT path, mtime_ms, size FROM ingest_file_state WHERE source_kind = "claude_subagent";`,
-        ))?.[0] ?? [];
-        const watermarks = new Map<string, { mtimeMs: number; size: number }>();
-        if (!forceRederive) {
-            for (const row of fileStateRows) {
-                if (
-                    typeof row.path === "string" &&
-                    typeof row.mtime_ms === "number" &&
-                    typeof row.size === "number"
-                ) {
-                    watermarks.set(row.path, { mtimeMs: row.mtime_ms, size: row.size });
-                }
-            }
-        }
-        const upsertFileWatermark = (filePath: string, mtimeMs: number, size: number) =>
-            executeStatementsWith(db, [
-                `UPSERT ingest_file_state:\`${stableDigest(filePath)}\` CONTENT { path: ${surrealLiteral(filePath)}, source_kind: "claude_subagent", mtime_ms: ${Math.trunc(mtimeMs)}, size: ${Math.trunc(size)}, ingested_at: time::now() };`,
-            ], { chunkSize: 1 });
+        // transcripts), now via the shared `fileWatermark` seam. Each subagent
+        // jsonl is fully re-parsed via extractFileWithSessionId and its
+        // turns/tool_calls/invocations re-written on every run, yet the files
+        // are almost always unchanged between runs. The seam does ONE indexed
+        // read of every source_kind="claude_subagent" (mtime,size) marker; a
+        // manifest whose stat still matches its watermark is output-equivalent
+        // to a prior run (its rows persist) so we skip parsing+writing it.
+        // `AX_REDERIVE_SUBAGENTS=1` forces a full re-derive.
+        const wm = yield* fileWatermark({
+            sourceKind: "claude_subagent",
+            forceEnv: "AX_REDERIVE_SUBAGENTS",
+        });
 
         let written = 0;
         let skippedUnchanged = 0;
@@ -239,13 +221,7 @@ export const deriveClaudeSubagents = (
             // output-equivalent. stat is cheap relative to the full re-parse +
             // DB writes below; we reuse it for the watermark write at the end.
             const fileStat = yield* Effect.promise(() => stat(m.file).catch(() => null));
-            const mark = watermarks.get(m.file);
-            if (
-                fileStat &&
-                mark &&
-                fileStat.mtimeMs === mark.mtimeMs &&
-                fileStat.size === mark.size
-            ) {
+            if (fileStat && wm.unchanged(m.file, fileStat.mtimeMs, fileStat.size)) {
                 skippedUnchanged += 1;
                 continue;
             }
@@ -356,7 +332,7 @@ export const deriveClaudeSubagents = (
             // Record the watermark only after every write for this file
             // succeeded, so a mid-file failure re-processes next run.
             if (fileStat) {
-                yield* upsertFileWatermark(m.file, fileStat.mtimeMs, fileStat.size);
+                yield* wm.commit(m.file, fileStat.mtimeMs, fileStat.size);
             }
 
             if (opts.onProgress && (index < 5 || (index + 1) % 10 === 0 || index + 1 === manifests.length)) {
