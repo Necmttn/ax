@@ -1,6 +1,8 @@
 "use client";
 import { useState } from "react";
 import { HeroLogoField } from "./supports-strip";
+import { ScoreClimb } from "./score-climb";
+import { RetroTerminal } from "./retro-terminal";
 
 const INSTALL_CMD = "curl -fsSL ax.necmttn.com/install | sh";
 
@@ -70,8 +72,23 @@ export function DashboardPreview() {
         </div>
       </section>
 
+      {/* ============= retro terminal: the mechanism ============= */}
+      <RetroTerminal />
+
       {/* ============= demo: dashboard preview ============= */}
       <section className="demo">
+        <div className="demo-intro">
+          <span className="eyebrow">as you use it, it gets better</span>
+          <h2>
+            Every applied fix moves the&nbsp;score.
+          </h2>
+          <p>
+            Harness Doctor grades how well your setup is working. ax keeps
+            finding small fixes&nbsp;&mdash; you apply the ones you like, and the
+            number climbs.
+          </p>
+        </div>
+
         <div
           className="browser"
           role="img"
@@ -90,18 +107,7 @@ export function DashboardPreview() {
           <div className="dash">
             <p className="dash-head">Harness Doctor &middot; this week</p>
 
-            <div className="score-number">
-              <span className="n">72</span>
-              <span className="denom">/ 100</span>
-            </div>
-
-            <div className="score-band">
-              <span className="chip">needs work</span>
-              <span className="scope">
-                based on <b>4,773 sessions</b> &middot; <b>14 days</b> &middot;
-                last sync <b>2m ago</b>
-              </span>
-            </div>
+            <ScoreClimb />
 
             <div className="ministats">
               {/* 1: turns indexed */}

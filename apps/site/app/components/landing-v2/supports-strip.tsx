@@ -9,7 +9,7 @@ type Provider = {
   svg: React.ReactNode;
 };
 
-const PROVIDERS: Provider[] = [
+export const PROVIDERS: Provider[] = [
   {
     key: "claude",
     name: "Claude Code",

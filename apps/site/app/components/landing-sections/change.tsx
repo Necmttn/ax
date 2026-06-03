@@ -28,7 +28,7 @@ export function ChangeSection() {
   );
 }
 
-function TerminalFigure() {
+export function TerminalFigure() {
   const rootRef = useRef<HTMLElement | null>(null);
 
   useEffect(() => {
