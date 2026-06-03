@@ -4991,8 +4991,9 @@ const setupCommand = Command.make(
         agents: Flag.string("agents").pipe(Flag.optional),
         noIngest: Flag.boolean("no-ingest").pipe(Flag.withDefault(false)),
         yes: Flag.boolean("yes").pipe(Flag.withDefault(false)),
+        agentPrompt: Flag.boolean("agent-prompt").pipe(Flag.withDefault(false)),
     },
-    ({ agents, noIngest, yes }) =>
+    ({ agents, noIngest, yes, agentPrompt }) =>
         Effect.promise(() =>
             cmdSetup({
                 ...(agents._tag === "Some"
@@ -5000,12 +5001,13 @@ const setupCommand = Command.make(
                     : {}),
                 skipIngest: noIngest,
                 yes,
+                agentPromptOnly: agentPrompt,
             }),
         ),
 ).pipe(
     Command.withDescription(
         "Install the agent skills, run the first ingest, and verify. " +
-        "--agents=claude-code,codex  --no-ingest  --yes (non-interactive)",
+        "--agents=claude-code,codex  --no-ingest  --yes  --agent-prompt (print just the paste-to-agent block)",
     ),
 );
 
@@ -5249,7 +5251,14 @@ export const classifiersPackageOperationsNeedsDb = (args: ReadonlyArray<string>)
 
 async function main() {
     const [, , ...args] = process.argv;
-    if (args[0] === undefined || args[0] === "help" || args[0] === "--help" || args[0] === "-h") {
+    if (args[0] === undefined) {
+        // Bare `ax`: brand landing (ASCII wordmark) then the command list.
+        const { formatLandingBanner } = await import("./banner.ts");
+        process.stdout.write(formatLandingBanner(AX_VERSION, process.stdout.isTTY === true) + "\n");
+        await Effect.runPromise(withoutDb(["--help"]));
+        return;
+    }
+    if (args[0] === "help" || args[0] === "--help" || args[0] === "-h") {
         await Effect.runPromise(withoutDb(["--help"]));
         return;
     }
