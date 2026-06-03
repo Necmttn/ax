@@ -111,6 +111,9 @@ import {
     type FileContextHookInput,
 } from "../hooks/file-context-hook.ts";
 import { recordHookFire } from "../hooks/telemetry.ts";
+import { hooksConfigSubcommands } from "../hooks/cli.ts";
+import { skillsConfigSubcommands } from "../skills/cli.ts";
+import { agentsCommand } from "../agents/cli.ts";
 import type { TelemetryHarness } from "@ax/lib/telemetry-base";
 import { formatHookLogRowsTsv, queryHookLog } from "../hooks/log.ts";
 import {
@@ -4566,6 +4569,7 @@ const skillsCommand = Command.make("skills").pipe(
         skillsLintCommand,
         byRoleCommand,
         rolesForSkillCommand,
+        ...skillsConfigSubcommands,
     ]),
 );
 
@@ -4888,8 +4892,9 @@ const hooksBacktestCommand = Command.make(
 ).pipe(Command.withDescription("Run deterministic feedback-case backtests for hook evidence"));
 
 const hooksCommand = Command.make("hooks").pipe(
-    Command.withDescription("Inspect native Claude/Codex harness hook evidence"),
+    Command.withDescription("Hook config CRUD (config/add/remove/edit/disable/enable) + evidence (summary/invocations/session/backtest)"),
     Command.withSubcommands([
+        ...hooksConfigSubcommands,
         hooksSummaryCommand,
         hooksInvocationsCommand,
         hooksSessionCommand,
@@ -5060,6 +5065,7 @@ export const rootCommand = Command.make("axctl").pipe(
         Command.withHidden(contextCommand),
         Command.withHidden(hookCommand),
         Command.withHidden(hooksCommand),
+        Command.withHidden(agentsCommand),
         Command.withHidden(projectCommand),
         Command.withHidden(evidenceCommand),
         Command.withHidden(versionCommand),
@@ -5201,6 +5207,7 @@ export const DB_COMMANDS: ReadonlySet<string> = new Set([
     "context",
     "hook",
     "hooks",
+    "agents",
     "evidence",
     "tui",
     "dogfood",

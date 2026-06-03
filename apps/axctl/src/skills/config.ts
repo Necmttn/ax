@@ -60,7 +60,7 @@ const fetchEvidence = (): Effect.Effect<Map<string, EvidenceRow>, DbError, Surre
                 description,
                 deleted_at,
                 array::len(<-invoked) AS fired,
-                math::max((SELECT VALUE ts FROM <-invoked)) AS last_used
+                time::max((SELECT VALUE ts FROM <-invoked)) AS last_used
             FROM skill;`,
         );
         const out = new Map<string, EvidenceRow>();

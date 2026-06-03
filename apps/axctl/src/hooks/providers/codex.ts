@@ -71,7 +71,12 @@ const decodeTomlDoc = (ref: HookFileRef, doc: CodexToml): ConfiguredHook[] => {
     const out: ConfiguredHook[] = [];
     const hooks = doc.hooks ?? {};
     for (const event of Object.keys(hooks)) {
-        for (const entry of hooks[event] ?? []) {
+        const entries = hooks[event];
+        // Codex config.toml may hold non-array values under `hooks` (e.g. a
+        // bare `notify`/scalar or a single table); only `[[hooks.<Event>]]`
+        // array-of-tables entries are lifecycle hooks we decode.
+        if (!Array.isArray(entries)) continue;
+        for (const entry of entries) {
             const command = tomlEntryCommand(entry);
             if (!command) continue;
             const matcher = entry.matcher ?? null;
@@ -99,7 +104,8 @@ const serializeToml = (doc: CodexToml): string => stringifyToml(doc as Record<st
 const findToml = (doc: CodexToml, ref: HookFileRef, id: string): { event: string; idx: number } | null => {
     const hooks = doc.hooks ?? {};
     for (const event of Object.keys(hooks)) {
-        const arr = hooks[event] ?? [];
+        const arr = hooks[event];
+        if (!Array.isArray(arr)) continue;
         for (let i = 0; i < arr.length; i += 1) {
             const command = tomlEntryCommand(arr[i]!);
             const matcher = arr[i]!.matcher ?? null;
