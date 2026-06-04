@@ -1,40 +1,39 @@
 "use client";
 import { useState } from "react";
-import { HeroLogoField } from "./supports-strip";
+import { Link } from "@tanstack/react-router";
+import { HeroLogoField, PROVIDERS } from "./supports-strip";
 import { ScoreClimb } from "./score-climb";
 import { RetroTerminal } from "./retro-terminal";
 
 const INSTALL_CMD = "curl -fsSL ax.necmttn.com/install | sh";
+const DOCS_URL = "https://ax.necmttn.com/docs";
 
-// Mirror of packages/lib/src/agent-onboarding.ts (AGENT_ONBOARDING_PROMPT).
-// Kept inline so the marketing bundle stays free of the @ax/lib workspace dep.
-const AGENT_PROMPT = `Set up ax for me. ax is my local agent-experience graph over my Claude Code + Codex history. Do this end to end:
+// Self-contained "give this to your agent" prompt for the landing site: unlike
+// packages/lib's AGENT_ONBOARDING_PROMPT (run after ax is installed, by `ax
+// setup` / install.sh), this one is pasted by someone who hasn't installed yet,
+// so it opens with the install step. Kept inline so the marketing bundle stays
+// free of the @ax/lib workspace dep.
+const AGENT_PROMPT = `Set up ax for me, end to end. ax is a local agent-experience graph over my Claude Code + Codex history - it runs locally and I review every change.
 
-1. VERIFY - run \`ax doctor\`. If anything isn't ok, diagnose and fix it, then re-run until it is.
+1. INSTALL - run \`${INSTALL_CMD}\` to install the ax CLI. Reference: ${DOCS_URL}
 
-2. LABEL what ax can't classify - run \`ax skills classify\`. It writes one \`.ax/tasks/classify-<skill>.md\` brief per skill I use but ax can't role-tag. For each brief: read the skill, decide its role(s), and fill the YAML at the bottom (\`primary_role:\` is required; \`secondary_roles\`, \`confidence\`, \`rationale\` are optional). Run \`ax roles\` to see labels already in use. Then run \`ax skills lint\` to apply them.
+2. VERIFY - run \`ax doctor\`. If anything isn't ok, diagnose and fix it, then re-run until it is.
 
-3. SHOW me the result - run \`ax skills weighted\` and \`ax skills config\`. Tell me which skills you labeled and why, and flag anything ax marked orphan or out-of-scope.
+3. LABEL what ax can't classify - run \`ax skills classify\`. It writes one \`.ax/tasks/classify-<skill>.md\` brief per skill I use but ax can't role-tag. For each brief: read the skill, decide its role(s), and fill the YAML at the bottom (\`primary_role:\` is required; \`secondary_roles\`, \`confidence\`, \`rationale\` are optional). Run \`ax roles\` to see labels already in use. Then run \`ax skills lint\` to apply them. If it says "no unclassified skills", that's fine.
+
+4. SHOW me the result - run \`ax skills weighted\` and \`ax skills config\`. Tell me which skills you labeled and why, and flag anything ax marked orphan or out-of-scope.
 
 Then recommend a couple of skills I under-use that you'd reach for, based on what you saw.`;
 
 export function DashboardPreview() {
-  const [copied, setCopied] = useState(false);
   const [copiedPrompt, setCopiedPrompt] = useState(false);
-
-  function onCopy() {
-    if (typeof navigator === "undefined" || !navigator.clipboard) return;
-    navigator.clipboard.writeText(INSTALL_CMD).then(() => {
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
-    });
-  }
+  const [hovered, setHovered] = useState(false);
 
   function onCopyPrompt() {
     if (typeof navigator === "undefined" || !navigator.clipboard) return;
     navigator.clipboard.writeText(AGENT_PROMPT).then(() => {
       setCopiedPrompt(true);
-      setTimeout(() => setCopiedPrompt(false), 1500);
+      setTimeout(() => setCopiedPrompt(false), 2200);
     });
   }
 
@@ -59,53 +58,67 @@ export function DashboardPreview() {
 
         <div className="install-wrap">
           <span className="install-label">install in 30 seconds</span>
-          <div
-            className={`install${copied ? " is-copied" : ""}`}
-            id="install"
-            role="button"
-            tabIndex={0}
-            aria-label="copy install command"
-            aria-live="polite"
-            onClick={onCopy}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" || e.key === " ") {
-                e.preventDefault();
-                onCopy();
-              }
-            }}
-          >
-            <span className="prompt">$</span>
-            <code id="install-code">{INSTALL_CMD}</code>
-            <span
-              id="copy-btn"
-              className={`install-action${copied ? " copied" : ""}`}
-              aria-hidden="true"
+
+          <div className="cta-row">
+            <button
+              type="button"
+              className="prompt-pill"
+              onClick={onCopyPrompt}
+              onMouseEnter={() => setHovered(true)}
+              onMouseLeave={() => setHovered(false)}
+              onFocus={() => setHovered(true)}
+              onBlur={() => setHovered(false)}
+              aria-label="copy agent setup prompt"
             >
-              <span className="install-action__label">
-                {copied ? "copied" : "copy"}
+              <span className="prompt-pill__icons" aria-hidden="true">
+                {PROVIDERS.map((p) => (
+                  <span
+                    key={p.key}
+                    className={`prompt-pill__icon prompt-pill__icon--${p.key}`}
+                  >
+                    {p.svg}
+                  </span>
+                ))}
               </span>
-            </span>
+              <span className="prompt-pill__label">Copy setup prompt</span>
+            </button>
+
+            <Link to="/docs" className="cta-secondary">
+              <span className="cta-secondary__icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" focusable="false">
+                  <path
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.6"
+                    strokeLinejoin="round"
+                    d="M6 3.5h7L18 8v12.5H6z"
+                  />
+                  <path
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.6"
+                    strokeLinecap="round"
+                    d="M9 12h6M9 15.5h6"
+                  />
+                </svg>
+              </span>
+              Read the docs
+            </Link>
           </div>
-          <p className="install-trust">
-            runs locally <span className="sep">·</span> you review every change{" "}
-            <span className="sep">·</span> works with the agents you already use
+
+          <p
+            className={`cta-foot${hovered ? " is-hover" : ""}${copiedPrompt ? " is-copied" : ""}`}
+            aria-live="polite"
+          >
+            <span className="cta-foot__hint">
+              paste it - your agent installs ax, labels your skills, and tells
+              you which ones to actually use
+            </span>
+            <span className="cta-foot__copied">
+              ✓ Copied - paste into your coding agent for the guided setup
+            </span>
           </p>
         </div>
-
-        <button
-          type="button"
-          className={`agent-instructions${copiedPrompt ? " is-copied" : ""}`}
-          onClick={onCopyPrompt}
-          aria-label="copy agent setup instructions"
-          aria-live="polite"
-        >
-          <span className="agent-instructions__label">
-            {copiedPrompt ? "copied - paste into your agent" : "▸ copy agent instructions"}
-          </span>
-          <span className="agent-instructions__hint">
-            then your agent installs, labels your skills &amp; verifies
-          </span>
-        </button>
       </section>
 
       {/* ============= retro terminal: the mechanism ============= */}
