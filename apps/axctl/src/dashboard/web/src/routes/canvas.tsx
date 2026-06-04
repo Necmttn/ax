@@ -125,6 +125,9 @@ const dotRadius = (size: number, scaleMax: number): number =>
 const barWidth = (size: number, scaleMax: number): number =>
     24 + Math.sqrt(Math.min(1, size / Math.max(scaleMax, 1))) * 150;
 
+const fmtTokens = (n: number): string =>
+    n >= 1000 ? `${(n / 1000).toFixed(n >= 10_000 ? 0 : 1)}k` : `${n}`;
+
 interface Camera { x: number; y: number; scale: number; }
 
 export function CanvasRoute() {
@@ -342,7 +345,7 @@ export function CanvasRoute() {
                                     <rect width={w} height={h} rx={5}
                                           fill={`${fill}44`} stroke={n.id === selectedId ? "#fff" : stroke}
                                           strokeWidth={(n.id === selectedId ? 2 : 1.2) / cam.scale} />
-                                    {/* epoch notches (epochs=1 in v0 -> none; ready for compaction ingest) */}
+                                    {/* compaction epoch notches: one per boundary (epochs-1) */}
                                     {Array.from({ length: Math.max(0, n.epochs - 1) }).map((_, k) => (
                                         <rect key={k} x={(w * (k + 1)) / n.epochs - 1} y={-2}
                                               width={2} height={h + 4} fill="#e0563a" />
@@ -397,7 +400,8 @@ export function CanvasRoute() {
                                 {n.project ?? "no project"} - {n.source}
                             </div>
                             <div style={{ color: "#7e8ba3", marginTop: 2 }}>
-                                {n.size} turns - ctx {n.context_pressure}
+                                {n.turns} turns - {fmtTokens(n.size)} tok - ctx {n.context_pressure}
+                                {n.epochs > 1 ? ` - ${n.epochs - 1}x compacted` : ""}
                                 {n.corrections > 0 ? ` - ${n.corrections} corr` : ""}
                             </div>
                             <Link
@@ -416,8 +420,9 @@ export function CanvasRoute() {
                 <div style={{ marginTop: 10, padding: 10, border: "1px solid #1e2633", borderRadius: 8 }}>
                     <div style={{ fontWeight: 600 }}>{selected.label}</div>
                     <div style={{ color: "#7e8ba3", fontSize: 12, marginTop: 4 }}>
-                        {selected.project ?? "no project"} - {selected.source} - {selected.size} turns -
-                        ctx pressure {selected.context_pressure}
+                        {selected.project ?? "no project"} - {selected.source} - {selected.turns} turns -
+                        {" "}{fmtTokens(selected.size)} tokens - ctx pressure {selected.context_pressure}
+                        {selected.epochs > 1 ? ` - ${selected.epochs - 1}x compacted` : ""}
                         {selected.is_subagent ? " - subagent" : ""}
                     </div>
                     <Link to="/sessions/$sessionId/inspect" params={{ sessionId: selected.id }}

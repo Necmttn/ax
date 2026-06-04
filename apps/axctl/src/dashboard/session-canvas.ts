@@ -58,6 +58,21 @@ export const TURN_COUNTS_SQL = `
 SELECT <string>session AS s, count() AS turns
 FROM turn WHERE role IN ['user', 'assistant'] GROUP BY s;`;
 
+// Context-token volume per session = the real "how much context did this burn"
+// size signal (cross-provider; session-health derives estimated_tokens for all
+// sources). One indexed scan of session_token_usage (UNIQUE on session).
+export const SESSION_TOKENS_SQL = `
+SELECT <string>session AS s, (estimated_tokens ?? 0) AS tokens
+FROM session_token_usage;`;
+
+// Compaction boundaries per session (oldest-first via ts), for epoch notches.
+// `tokens_before` = context size at the moment it compacted. The `compaction`
+// table is owned/ingested by the compaction-signal feature (all providers);
+// this is read-only consumption. Graceful when empty: nodes show epochs=1.
+export const COMPACTIONS_SQL = `
+SELECT <string>session AS s, (tokens_before ?? 0) AS pre_tokens, (trigger ?? "auto") AS trigger
+FROM compaction ORDER BY ts ASC;`;
+
 const str = (row: Record<string, unknown>, key: string): string | null => {
     const value = row[key];
     if (typeof value === "string") {
@@ -92,6 +107,8 @@ export interface RowsToSessionCanvasInput {
     readonly nodeRows: ReadonlyArray<Record<string, unknown>>;
     readonly edgeRows: ReadonlyArray<Record<string, unknown>>;
     readonly turnRows: ReadonlyArray<Record<string, unknown>>;
+    readonly tokenRows: ReadonlyArray<Record<string, unknown>>;
+    readonly compactionRows: ReadonlyArray<Record<string, unknown>>;
     readonly generatedAt?: string;
     readonly warnings?: ReadonlyArray<string>;
 }
@@ -104,6 +121,22 @@ export function rowsToSessionCanvas(input: RowsToSessionCanvasInput): SessionCan
     for (const row of input.turnRows) {
         const id = str(row, "s");
         if (id) turnsById.set(id, num(row, "turns"));
+    }
+
+    const tokensById = new Map<string, number>();
+    for (const row of input.tokenRows) {
+        const id = str(row, "s");
+        if (id) tokensById.set(id, num(row, "tokens"));
+    }
+
+    // compaction boundaries per session, oldest-first, for epoch notches.
+    const compactionsById = new Map<string, Array<{ pre_tokens: number; trigger: string }>>();
+    for (const row of input.compactionRows) {
+        const id = str(row, "s");
+        if (!id) continue;
+        const list = compactionsById.get(id) ?? [];
+        list.push({ pre_tokens: num(row, "pre_tokens"), trigger: str(row, "trigger") ?? "auto" });
+        compactionsById.set(id, list);
     }
 
     const edges: SessionCanvasEdge[] = [];
@@ -125,6 +158,7 @@ export function rowsToSessionCanvas(input: RowsToSessionCanvasInput): SessionCan
         if (!id || nodeById.has(id)) continue;
         const corrections = num(row, "corrections");
         const interruptions = num(row, "interruptions");
+        const compactions = compactionsById.get(id) ?? [];
         nodeById.set(id, {
             id,
             label: str(row, "label") ?? id,
@@ -132,8 +166,10 @@ export function rowsToSessionCanvas(input: RowsToSessionCanvasInput): SessionCan
             source: str(row, "source") ?? "claude",
             started_at: dateStr(row, "started_at"),
             ended_at: dateStr(row, "ended_at"),
-            size: Math.max(1, turnsById.get(id) ?? 0),
-            epochs: 1,
+            size: Math.max(1, tokensById.get(id) ?? 0),
+            turns: turnsById.get(id) ?? 0,
+            epochs: compactions.length + 1,
+            compactions,
             context_pressure: str(row, "context_pressure") ?? "unknown",
             corrections,
             tone: toneFor(corrections, interruptions),
@@ -148,6 +184,7 @@ export function rowsToSessionCanvas(input: RowsToSessionCanvasInput): SessionCan
         if (existing) {
             nodeById.set(id, { ...existing, is_subagent: true });
         } else {
+            const compactions = compactionsById.get(id) ?? [];
             nodeById.set(id, {
                 id,
                 label: id,
@@ -155,8 +192,10 @@ export function rowsToSessionCanvas(input: RowsToSessionCanvasInput): SessionCan
                 source: "claude",
                 started_at: null,
                 ended_at: null,
-                size: Math.max(1, turnsById.get(id) ?? 0),
-                epochs: 1,
+                size: Math.max(1, tokensById.get(id) ?? 0),
+                turns: turnsById.get(id) ?? 0,
+                epochs: compactions.length + 1,
+                compactions,
                 context_pressure: "unknown",
                 corrections: 0,
                 tone: "neutral",
@@ -206,12 +245,19 @@ export const fetchSessionCanvas = (
             TURN_COUNTS_SQL,
             {},
         );
+        const tokenRows = yield* db.query<[Array<Record<string, unknown>>]>(
+            SESSION_TOKENS_SQL,
+            {},
+        );
+        const compactionRows = yield* db.query<[Array<Record<string, unknown>>]>(
+            COMPACTIONS_SQL,
+            {},
+        );
         return rowsToSessionCanvas({
             nodeRows: nodeRows?.[0] ?? [],
             edgeRows: edgeRows?.[0] ?? [],
             turnRows: turnRows?.[0] ?? [],
-            warnings: [
-                "v0: node size is turn count; context-token + compaction-epoch sizing pending ingest.",
-            ],
+            tokenRows: tokenRows?.[0] ?? [],
+            compactionRows: compactionRows?.[0] ?? [],
         });
     });

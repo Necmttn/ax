@@ -560,10 +560,11 @@ export interface GraphExplorerPayload {
 
 // ==== Session Canvas (infinite-canvas, semantic-zoom session lineage) ====
 // Nodes = sessions; edges = spawn lineage (parent -> subagent). `size` is the
-// session's weight on the canvas. v0 sizes by turn volume (always populated);
-// the design target is context-token volume + compaction epochs, which lands
-// once the Claude per-turn token + `compact_boundary` ingest is added. The
-// `epochs` field is wired through now (defaults to 1) so the renderer is ready.
+// session's visual weight = context-token volume (session_token_usage.
+// estimated_tokens) - the real "how much context did this burn" signal,
+// cross-provider. `turns` (conversational user+assistant turns) is kept as a
+// secondary display number. `epochs` = compaction count (1 = no compaction);
+// `compactions` carries the preTokens at each boundary for epoch notches.
 export interface SessionCanvasNode {
     readonly id: string;
     readonly label: string;
@@ -571,8 +572,10 @@ export interface SessionCanvasNode {
     readonly source: string;            // 'claude' | 'codex' | ...
     readonly started_at: string | null;
     readonly ended_at: string | null;
-    readonly size: number;              // v0: user+assistant turns (size proxy)
-    readonly epochs: number;            // compaction epochs; v0 = 1 (no ingest yet)
+    readonly size: number;              // context tokens (estimated_tokens)
+    readonly turns: number;             // conversational (user+assistant) turns
+    readonly epochs: number;            // compaction epochs (1 = uncompacted)
+    readonly compactions: ReadonlyArray<{ pre_tokens: number; trigger: string }>;
     readonly context_pressure: string;  // 'low' | 'medium' | 'high' | 'unknown'
     readonly corrections: number;
     readonly tone: string;              // success | warning | neutral
