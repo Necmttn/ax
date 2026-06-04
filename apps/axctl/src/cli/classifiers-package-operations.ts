@@ -1146,7 +1146,7 @@ const serviceErrorText = (error: unknown): string => {
 
 export const runClassifiersPackageOperations = (
     input: ClassifierPackageOperationsCommandInput,
-): Effect.Effect<void, never, ClassifierPackageService | SurrealClient> =>
+): Effect.Effect<void, never, ClassifierPackageService | SurrealClient | FileSystem.FileSystem> =>
     Effect.gen(function* () {
         const packages = yield* ClassifierPackageService;
         if (input.applyWritePlan) {
@@ -1447,9 +1447,9 @@ export const runClassifiersLifecycle = (
                 process.exitCode = 2;
                 return;
             }
-            const report = inspectClassifierLifecycleRouteExecution(execution);
+            const report = yield* inspectClassifierLifecycleRouteExecution(execution);
             if (input.out !== undefined) {
-                writeClassifierLifecycleRouteExecutionInspectionReport(input.out, report);
+                yield* writeClassifierLifecycleRouteExecutionInspectionReport(input.out, report);
             }
             if (input.json) {
                 console.log(JSON.stringify(report, null, 2));
@@ -1525,11 +1525,11 @@ export const runClassifiersLifecycle = (
                 : renderClassifierLifecycleInsightText(report as ClassifierLifecycleInsightReport));
         }
         if (routeExecution !== undefined && input.out !== undefined) {
-            writeClassifierLifecycleRouteExecutionReport(input.out, report as ClassifierLifecycleRouteExecutionReport);
+            yield* writeClassifierLifecycleRouteExecutionReport(input.out, report as ClassifierLifecycleRouteExecutionReport);
         } else if (routeExecutionPlan !== undefined && input.out !== undefined) {
-            writeClassifierLifecycleRouteExecutionPlanReport(input.out, report as ClassifierLifecycleRouteExecutionPlanReport);
+            yield* writeClassifierLifecycleRouteExecutionPlanReport(input.out, report as ClassifierLifecycleRouteExecutionPlanReport);
         } else if (routePreview !== undefined && input.out !== undefined) {
-            writeClassifierLifecycleRouteBindingPreviewReport(input.out, report as ClassifierLifecycleRouteBindingPreviewReport);
+            yield* writeClassifierLifecycleRouteBindingPreviewReport(input.out, report as ClassifierLifecycleRouteBindingPreviewReport);
         }
         if (routeExecution !== undefined && report.decision !== "executed") {
             process.exitCode = 1;
@@ -1552,7 +1552,7 @@ export const runClassifiersLifecycle = (
 
 export const runClassifiersPackagesOperations = (
     input: ClassifierPackagesOperationsCommandInput,
-): Effect.Effect<void, never, ClassifierPackageService> =>
+): Effect.Effect<void, never, ClassifierPackageService | FileSystem.FileSystem> =>
     Effect.gen(function* () {
         const packages = yield* ClassifierPackageService;
         const root = input.root ?? "packages";

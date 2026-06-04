@@ -68,12 +68,16 @@ async function writeTempExecutionReportRoot(): Promise<string> {
     const artifactPath = join(root, "artifact.txt");
     const manifestPath = writeTempManifest(`node -e "require('fs').writeFileSync('${artifactPath}', 'artifact')"`);
     const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
-    const plan = buildOperationExecutionPlanReport(manifest, manifestPath, "print-demo", {
-        allowExecute: true,
-        allowExpensive: false,
-    });
-    const execution = await executeOperationPlanReport(plan);
-    writeOperationExecutionReport(join(root, "classifier-package-execution-demo.json"), execution);
+    await Effect.runPromise(
+        Effect.gen(function* () {
+            const plan = yield* buildOperationExecutionPlanReport(manifest, manifestPath, "print-demo", {
+                allowExecute: true,
+                allowExpensive: false,
+            });
+            const execution = yield* executeOperationPlanReport(plan);
+            yield* writeOperationExecutionReport(join(root, "classifier-package-execution-demo.json"), execution);
+        }).pipe(Effect.provide(BunFsLayer)),
+    );
     return root;
 }
 

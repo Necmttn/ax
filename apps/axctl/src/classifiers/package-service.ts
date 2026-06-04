@@ -354,74 +354,74 @@ export const buildClassifierQualityStatusReport = (
 };
 
 export interface ClassifierPackageServiceShape {
-    readonly loadManifest: (path: string) => Effect.Effect<ClassifierPackageManifest, ClassifierPackageLoadError>;
-    readonly listOperations: (manifestPath: string) => Effect.Effect<readonly ClassifierPackageOperation[], ClassifierPackageLoadError>;
+    readonly loadManifest: (path: string) => Effect.Effect<ClassifierPackageManifest, ClassifierPackageLoadError, FileSystem.FileSystem>;
+    readonly listOperations: (manifestPath: string) => Effect.Effect<readonly ClassifierPackageOperation[], ClassifierPackageLoadError, FileSystem.FileSystem>;
     readonly getOperation: (input: {
         readonly manifestPath: string;
         readonly operationId: string;
-    }) => Effect.Effect<ClassifierPackageOperation, ClassifierPackageLoadError | ClassifierPackageOperationNotFound>;
+    }) => Effect.Effect<ClassifierPackageOperation, ClassifierPackageLoadError | ClassifierPackageOperationNotFound, FileSystem.FileSystem>;
     readonly operationsReport: (
         input: ClassifierPackageOperationReportInput,
-    ) => Effect.Effect<ClassifierPackageOperationsReport, ClassifierPackageLoadError>;
+    ) => Effect.Effect<ClassifierPackageOperationsReport, ClassifierPackageLoadError, FileSystem.FileSystem>;
     readonly writeOperationsReport: (
         input: ClassifierPackageOperationWriteInput,
-    ) => Effect.Effect<ClassifierPackageOperationsReport, ClassifierPackageLoadError | ClassifierPackageReportWriteError>;
+    ) => Effect.Effect<ClassifierPackageOperationsReport, ClassifierPackageLoadError | ClassifierPackageReportWriteError, FileSystem.FileSystem>;
     readonly operationPreflightReport: (
         input: ClassifierPackageOperationPreflightInput,
-    ) => Effect.Effect<ClassifierPackageOperationPreflightReport, ClassifierPackageLoadError>;
+    ) => Effect.Effect<ClassifierPackageOperationPreflightReport, ClassifierPackageLoadError, FileSystem.FileSystem>;
     readonly writeOperationPreflightReport: (
         input: ClassifierPackageOperationPreflightWriteInput,
-    ) => Effect.Effect<ClassifierPackageOperationPreflightReport, ClassifierPackageLoadError | ClassifierPackageReportWriteError>;
+    ) => Effect.Effect<ClassifierPackageOperationPreflightReport, ClassifierPackageLoadError | ClassifierPackageReportWriteError, FileSystem.FileSystem>;
     readonly operationDryRunReport: (
         input: ClassifierPackageOperationDryRunInput,
-    ) => Effect.Effect<ClassifierPackageOperationDryRunReport, ClassifierPackageLoadError>;
+    ) => Effect.Effect<ClassifierPackageOperationDryRunReport, ClassifierPackageLoadError, FileSystem.FileSystem>;
     readonly writeOperationDryRunReport: (
         input: ClassifierPackageOperationDryRunWriteInput,
-    ) => Effect.Effect<ClassifierPackageOperationDryRunReport, ClassifierPackageLoadError | ClassifierPackageReportWriteError>;
+    ) => Effect.Effect<ClassifierPackageOperationDryRunReport, ClassifierPackageLoadError | ClassifierPackageReportWriteError, FileSystem.FileSystem>;
     readonly operationExecutionPlanReport: (
         input: ClassifierPackageOperationExecutionPlanInput,
-    ) => Effect.Effect<ClassifierPackageOperationExecutionPlanReport, ClassifierPackageLoadError>;
+    ) => Effect.Effect<ClassifierPackageOperationExecutionPlanReport, ClassifierPackageLoadError, FileSystem.FileSystem>;
     readonly writeOperationExecutionPlanReport: (
         input: ClassifierPackageOperationExecutionPlanWriteInput,
-    ) => Effect.Effect<ClassifierPackageOperationExecutionPlanReport, ClassifierPackageLoadError | ClassifierPackageReportWriteError>;
+    ) => Effect.Effect<ClassifierPackageOperationExecutionPlanReport, ClassifierPackageLoadError | ClassifierPackageReportWriteError, FileSystem.FileSystem>;
     readonly executeOperation: (
         input: ClassifierPackageOperationExecutionInput,
-    ) => Effect.Effect<ClassifierPackageOperationExecutionReport, ClassifierPackageLoadError | ClassifierPackageReportWriteError>;
+    ) => Effect.Effect<ClassifierPackageOperationExecutionReport, ClassifierPackageLoadError | ClassifierPackageReportWriteError, FileSystem.FileSystem>;
     readonly writeOperationExecutionReport: (
         input: ClassifierPackageOperationExecutionWriteInput,
-    ) => Effect.Effect<ClassifierPackageOperationExecutionReport, ClassifierPackageLoadError | ClassifierPackageReportWriteError>;
-    readonly discoverManifestPaths: (root?: string) => Effect.Effect<readonly string[], ClassifierPackageLoadError>;
-    readonly packageSummaries: (root?: string) => Effect.Effect<readonly ClassifierPackageOperationsSummary[], ClassifierPackageLoadError>;
+    ) => Effect.Effect<ClassifierPackageOperationExecutionReport, ClassifierPackageLoadError | ClassifierPackageReportWriteError, FileSystem.FileSystem>;
+    readonly discoverManifestPaths: (root?: string) => Effect.Effect<readonly string[], ClassifierPackageLoadError, FileSystem.FileSystem>;
+    readonly packageSummaries: (root?: string) => Effect.Effect<readonly ClassifierPackageOperationsSummary[], ClassifierPackageLoadError, FileSystem.FileSystem>;
     readonly packagesOperationsReport: (
         input?: ClassifierPackagesOperationsReportInput,
-    ) => Effect.Effect<ClassifierPackagesOperationsReport, ClassifierPackageLoadError>;
+    ) => Effect.Effect<ClassifierPackagesOperationsReport, ClassifierPackageLoadError, FileSystem.FileSystem>;
     readonly writePackagesOperationsReport: (
         input: ClassifierPackagesOperationsWriteInput,
-    ) => Effect.Effect<ClassifierPackagesOperationsReport, ClassifierPackageLoadError | ClassifierPackageReportWriteError>;
+    ) => Effect.Effect<ClassifierPackagesOperationsReport, ClassifierPackageLoadError | ClassifierPackageReportWriteError, FileSystem.FileSystem>;
     readonly executionHistoryReport: (
         input?: ClassifierPackageExecutionHistoryInput,
-    ) => Effect.Effect<ClassifierPackageExecutionHistoryReport, ClassifierPackageLoadError>;
+    ) => Effect.Effect<ClassifierPackageExecutionHistoryReport, ClassifierPackageLoadError, FileSystem.FileSystem>;
     readonly writeExecutionHistoryReport: (
         input: ClassifierPackageExecutionHistoryWriteInput,
-    ) => Effect.Effect<ClassifierPackageExecutionHistoryReport, ClassifierPackageLoadError | ClassifierPackageReportWriteError>;
+    ) => Effect.Effect<ClassifierPackageExecutionHistoryReport, ClassifierPackageLoadError | ClassifierPackageReportWriteError, FileSystem.FileSystem>;
     readonly executionFactProjectionReport: (
         input?: ClassifierPackageExecutionFactProjectionInput,
-    ) => Effect.Effect<ClassifierPackageExecutionFactProjectionReport, ClassifierPackageLoadError>;
+    ) => Effect.Effect<ClassifierPackageExecutionFactProjectionReport, ClassifierPackageLoadError, FileSystem.FileSystem>;
     readonly writeExecutionFactProjectionReport: (
         input: ClassifierPackageExecutionFactProjectionWriteInput,
-    ) => Effect.Effect<ClassifierPackageExecutionFactProjectionReport, ClassifierPackageLoadError | ClassifierPackageReportWriteError>;
+    ) => Effect.Effect<ClassifierPackageExecutionFactProjectionReport, ClassifierPackageLoadError | ClassifierPackageReportWriteError, FileSystem.FileSystem>;
     readonly executionSurrealWritePlanReport: (
         input?: ClassifierPackageExecutionSurrealWritePlanInput,
-    ) => Effect.Effect<ClassifierPackageExecutionSurrealWritePlanReport, ClassifierPackageLoadError>;
+    ) => Effect.Effect<ClassifierPackageExecutionSurrealWritePlanReport, ClassifierPackageLoadError, FileSystem.FileSystem>;
     readonly writeExecutionSurrealWritePlanReport: (
         input: ClassifierPackageExecutionSurrealWritePlanWriteInput,
-    ) => Effect.Effect<ClassifierPackageExecutionSurrealWritePlanReport, ClassifierPackageLoadError | ClassifierPackageReportWriteError>;
+    ) => Effect.Effect<ClassifierPackageExecutionSurrealWritePlanReport, ClassifierPackageLoadError | ClassifierPackageReportWriteError, FileSystem.FileSystem>;
     readonly applyExecutionSurrealWritePlanReport: (
         input?: ClassifierPackageExecutionSurrealApplyInput,
-    ) => Effect.Effect<ClassifierPackageExecutionSurrealApplyReport, ClassifierPackageLoadError | ClassifierPackageReportWriteError, SurrealClient>;
+    ) => Effect.Effect<ClassifierPackageExecutionSurrealApplyReport, ClassifierPackageLoadError | ClassifierPackageReportWriteError, SurrealClient | FileSystem.FileSystem>;
     readonly writeExecutionSurrealApplyReport: (
         input: ClassifierPackageExecutionSurrealApplyWriteInput,
-    ) => Effect.Effect<ClassifierPackageExecutionSurrealApplyReport, ClassifierPackageLoadError | ClassifierPackageReportWriteError, SurrealClient>;
+    ) => Effect.Effect<ClassifierPackageExecutionSurrealApplyReport, ClassifierPackageLoadError | ClassifierPackageReportWriteError, SurrealClient | FileSystem.FileSystem>;
     readonly executionGraphHealthReport: (
         input?: ClassifierPackageExecutionGraphHealthInput,
     ) => Effect.Effect<ClassifierPackageExecutionGraphHealthReport, ClassifierPackageReportWriteError, SurrealClient>;
@@ -430,7 +430,7 @@ export interface ClassifierPackageServiceShape {
     ) => Effect.Effect<ClassifierGraphQuerySuggestionRoutingSummary, ClassifierPackageReportWriteError, SurrealClient>;
     readonly writeExecutionGraphQuerySuggestionRoutingSummaryReport: (
         input: ClassifierGraphQuerySuggestionRoutingSummaryWriteInput,
-    ) => Effect.Effect<ClassifierGraphQuerySuggestionRoutingSummary, ClassifierPackageReportWriteError, SurrealClient>;
+    ) => Effect.Effect<ClassifierGraphQuerySuggestionRoutingSummary, ClassifierPackageReportWriteError, SurrealClient | FileSystem.FileSystem>;
     readonly boundaryReplaySummaryReport: (
         input?: ClassifierBoundaryReplaySummaryInput,
     ) => Effect.Effect<ClassifierGraphBoundaryReplaySummary, ClassifierPackageReportWriteError, SurrealClient>;
@@ -439,19 +439,19 @@ export interface ClassifierPackageServiceShape {
     ) => Effect.Effect<ClassifierGraphBoundaryReplaySummary, ClassifierPackageReportWriteError, SurrealClient>;
     readonly writeExecutionGraphHealthReport: (
         input: ClassifierPackageExecutionGraphHealthWriteInput,
-    ) => Effect.Effect<ClassifierPackageExecutionGraphHealthReport, ClassifierPackageReportWriteError, SurrealClient>;
+    ) => Effect.Effect<ClassifierPackageExecutionGraphHealthReport, ClassifierPackageReportWriteError, SurrealClient | FileSystem.FileSystem>;
     readonly lifecycleInsightReport: (
         input?: ClassifierLifecycleInsightInput,
-    ) => Effect.Effect<ClassifierLifecycleInsightReport, ClassifierPackageLoadError | ClassifierPackageReportWriteError, SurrealClient>;
+    ) => Effect.Effect<ClassifierLifecycleInsightReport, ClassifierPackageLoadError | ClassifierPackageReportWriteError, SurrealClient | FileSystem.FileSystem>;
     readonly writeLifecycleInsightReport: (
         input: ClassifierLifecycleInsightWriteInput,
-    ) => Effect.Effect<ClassifierLifecycleInsightReport, ClassifierPackageLoadError | ClassifierPackageReportWriteError, SurrealClient>;
+    ) => Effect.Effect<ClassifierLifecycleInsightReport, ClassifierPackageLoadError | ClassifierPackageReportWriteError, SurrealClient | FileSystem.FileSystem>;
     readonly lifecycleRoutingSummaryReport: (
         input?: ClassifierLifecycleInsightInput,
-    ) => Effect.Effect<ClassifierLifecycleRoutingSummaryReport, ClassifierPackageLoadError | ClassifierPackageReportWriteError, SurrealClient>;
+    ) => Effect.Effect<ClassifierLifecycleRoutingSummaryReport, ClassifierPackageLoadError | ClassifierPackageReportWriteError, SurrealClient | FileSystem.FileSystem>;
     readonly writeLifecycleRoutingSummaryReport: (
         input: ClassifierLifecycleRoutingSummaryWriteInput,
-    ) => Effect.Effect<ClassifierLifecycleRoutingSummaryReport, ClassifierPackageLoadError | ClassifierPackageReportWriteError, SurrealClient>;
+    ) => Effect.Effect<ClassifierLifecycleRoutingSummaryReport, ClassifierPackageLoadError | ClassifierPackageReportWriteError, SurrealClient | FileSystem.FileSystem>;
     readonly pendingReviewTaskListReport: (
         input: ClassifierPendingReviewTaskListInput,
     ) => Effect.Effect<WorkflowCandidateGuidancePendingReviewTaskListReport, ClassifierPackageLoadError, FileSystem.FileSystem | Path.Path>;
@@ -501,10 +501,9 @@ export const ClassifierPackageServiceLive: Layer.Layer<ClassifierPackageService,
             );
 
         const loadManifest = Effect.fn("ClassifierPackageService.loadManifest")(function* (path: string) {
-            return yield* Effect.try({
-                try: () => loadClassifierPackageManifest(path),
-                catch: (error) => ClassifierPackageLoadError.make({ path, message: errorMessage(error) }),
-            });
+            return yield* loadClassifierPackageManifest(path).pipe(
+                Effect.mapError((error) => ClassifierPackageLoadError.make({ path, message: errorMessage(error) })),
+            );
         });
 
         const listOperations = Effect.fn("ClassifierPackageService.listOperations")(function* (manifestPath: string) {
@@ -538,10 +537,9 @@ export const ClassifierPackageServiceLive: Layer.Layer<ClassifierPackageService,
             input: ClassifierPackageOperationWriteInput,
         ) {
             const report = yield* operationsReport(input);
-            yield* Effect.try({
-                try: () => writeOperationsReport(input.out, report),
-                catch: (error) => ClassifierPackageReportWriteError.make({ path: input.out, message: errorMessage(error) }),
-            });
+            yield* writeOperationsReport(input.out, report).pipe(
+                Effect.mapError((error) => ClassifierPackageReportWriteError.make({ path: input.out, message: errorMessage(error) })),
+            );
             return report;
         });
 
@@ -549,17 +547,16 @@ export const ClassifierPackageServiceLive: Layer.Layer<ClassifierPackageService,
             input: ClassifierPackageOperationPreflightInput,
         ) {
             const manifest = yield* loadManifest(input.manifestPath);
-            return buildOperationPreflightReport(manifest, input.manifestPath, input.operationId);
+            return yield* buildOperationPreflightReport(manifest, input.manifestPath, input.operationId);
         });
 
         const writePreflightReport = Effect.fn("ClassifierPackageService.writeOperationPreflightReport")(function* (
             input: ClassifierPackageOperationPreflightWriteInput,
         ) {
             const report = yield* operationPreflightReport(input);
-            yield* Effect.try({
-                try: () => writeOperationPreflightReport(input.out, report),
-                catch: (error) => ClassifierPackageReportWriteError.make({ path: input.out, message: errorMessage(error) }),
-            });
+            yield* writeOperationPreflightReport(input.out, report).pipe(
+                Effect.mapError((error) => ClassifierPackageReportWriteError.make({ path: input.out, message: errorMessage(error) })),
+            );
             return report;
         });
 
@@ -567,17 +564,16 @@ export const ClassifierPackageServiceLive: Layer.Layer<ClassifierPackageService,
             input: ClassifierPackageOperationDryRunInput,
         ) {
             const manifest = yield* loadManifest(input.manifestPath);
-            return buildOperationDryRunReport(manifest, input.manifestPath, input.operationId);
+            return yield* buildOperationDryRunReport(manifest, input.manifestPath, input.operationId);
         });
 
         const writeDryRunReport = Effect.fn("ClassifierPackageService.writeOperationDryRunReport")(function* (
             input: ClassifierPackageOperationDryRunWriteInput,
         ) {
             const report = yield* operationDryRunReport(input);
-            yield* Effect.try({
-                try: () => writeOperationDryRunReport(input.out, report),
-                catch: (error) => ClassifierPackageReportWriteError.make({ path: input.out, message: errorMessage(error) }),
-            });
+            yield* writeOperationDryRunReport(input.out, report).pipe(
+                Effect.mapError((error) => ClassifierPackageReportWriteError.make({ path: input.out, message: errorMessage(error) })),
+            );
             return report;
         });
 
@@ -585,7 +581,7 @@ export const ClassifierPackageServiceLive: Layer.Layer<ClassifierPackageService,
             input: ClassifierPackageOperationExecutionPlanInput,
         ) {
             const manifest = yield* loadManifest(input.manifestPath);
-            return buildOperationExecutionPlanReport(manifest, input.manifestPath, input.operationId, {
+            return yield* buildOperationExecutionPlanReport(manifest, input.manifestPath, input.operationId, {
                 allowExecute: input.allowExecute,
                 allowExpensive: input.allowExpensive,
             });
@@ -595,10 +591,9 @@ export const ClassifierPackageServiceLive: Layer.Layer<ClassifierPackageService,
             input: ClassifierPackageOperationExecutionPlanWriteInput,
         ) {
             const report = yield* operationExecutionPlanReport(input);
-            yield* Effect.try({
-                try: () => writeOperationExecutionPlanReport(input.out, report),
-                catch: (error) => ClassifierPackageReportWriteError.make({ path: input.out, message: errorMessage(error) }),
-            });
+            yield* writeOperationExecutionPlanReport(input.out, report).pipe(
+                Effect.mapError((error) => ClassifierPackageReportWriteError.make({ path: input.out, message: errorMessage(error) })),
+            );
             return report;
         });
 
@@ -606,31 +601,28 @@ export const ClassifierPackageServiceLive: Layer.Layer<ClassifierPackageService,
             input: ClassifierPackageOperationExecutionInput,
         ) {
             const plan = yield* operationExecutionPlanReport(input);
-            return yield* Effect.tryPromise({
-                try: () => executeOperationPlanReport(plan),
-                catch: (error) => ClassifierPackageReportWriteError.make({
+            return yield* executeOperationPlanReport(plan).pipe(
+                Effect.mapError((error) => ClassifierPackageReportWriteError.make({
                     path: input.manifestPath,
                     message: errorMessage(error),
-                }),
-            });
+                })),
+            );
         });
 
         const writeExecutionReport = Effect.fn("ClassifierPackageService.writeOperationExecutionReport")(function* (
             input: ClassifierPackageOperationExecutionWriteInput,
         ) {
             const report = yield* executeOperation(input);
-            yield* Effect.try({
-                try: () => writeOperationExecutionReport(input.out, report),
-                catch: (error) => ClassifierPackageReportWriteError.make({ path: input.out, message: errorMessage(error) }),
-            });
+            yield* writeOperationExecutionReport(input.out, report).pipe(
+                Effect.mapError((error) => ClassifierPackageReportWriteError.make({ path: input.out, message: errorMessage(error) })),
+            );
             return report;
         });
 
         const discoverManifestPaths = Effect.fn("ClassifierPackageService.discoverManifestPaths")(function* (root = "packages") {
-            return yield* Effect.try({
-                try: () => discoverClassifierPackageManifestPaths(root),
-                catch: (error) => ClassifierPackageLoadError.make({ path: root, message: errorMessage(error) }),
-            });
+            return yield* discoverClassifierPackageManifestPaths(root).pipe(
+                Effect.mapError((error) => ClassifierPackageLoadError.make({ path: root, message: errorMessage(error) })),
+            );
         });
 
         const packageSummaries = Effect.fn("ClassifierPackageService.packageSummaries")(function* (root = "packages") {
@@ -654,10 +646,9 @@ export const ClassifierPackageServiceLive: Layer.Layer<ClassifierPackageService,
             input: ClassifierPackagesOperationsWriteInput,
         ) {
             const report = yield* packagesOperationsReport(input);
-            yield* Effect.try({
-                try: () => writePackagesOperationsReport(input.out, report),
-                catch: (error) => ClassifierPackageReportWriteError.make({ path: input.out, message: errorMessage(error) }),
-            });
+            yield* writePackagesOperationsReport(input.out, report).pipe(
+                Effect.mapError((error) => ClassifierPackageReportWriteError.make({ path: input.out, message: errorMessage(error) })),
+            );
             return report;
         });
 
@@ -665,15 +656,14 @@ export const ClassifierPackageServiceLive: Layer.Layer<ClassifierPackageService,
             input?: ClassifierPackageExecutionHistoryInput,
         ) {
             const root = input?.root ?? ".ax/experiments";
-            const paths = yield* Effect.try({
-                try: () => discoverClassifierPackageExecutionReportPaths(root),
-                catch: (error) => ClassifierPackageLoadError.make({ path: root, message: errorMessage(error) }),
-            });
+            const paths = yield* discoverClassifierPackageExecutionReportPaths(root).pipe(
+                Effect.mapError((error) => ClassifierPackageLoadError.make({ path: root, message: errorMessage(error) })),
+            );
             const entries = yield* Effect.forEach(paths, (path) =>
-                Effect.try({
-                    try: () => ({ path, report: loadClassifierPackageExecutionReport(path) }),
-                    catch: (error) => ClassifierPackageLoadError.make({ path, message: errorMessage(error) }),
-                }));
+                loadClassifierPackageExecutionReport(path).pipe(
+                    Effect.map((report) => ({ path, report })),
+                    Effect.mapError((error) => ClassifierPackageLoadError.make({ path, message: errorMessage(error) })),
+                ));
             return buildExecutionHistoryReport(root, entries);
         });
 
@@ -681,10 +671,9 @@ export const ClassifierPackageServiceLive: Layer.Layer<ClassifierPackageService,
             input: ClassifierPackageExecutionHistoryWriteInput,
         ) {
             const report = yield* executionHistoryReport(input);
-            yield* Effect.try({
-                try: () => writeExecutionHistoryReport(input.out, report),
-                catch: (error) => ClassifierPackageReportWriteError.make({ path: input.out, message: errorMessage(error) }),
-            });
+            yield* writeExecutionHistoryReport(input.out, report).pipe(
+                Effect.mapError((error) => ClassifierPackageReportWriteError.make({ path: input.out, message: errorMessage(error) })),
+            );
             return report;
         });
 
@@ -692,20 +681,18 @@ export const ClassifierPackageServiceLive: Layer.Layer<ClassifierPackageService,
             input?: ClassifierPackageExecutionFactProjectionInput,
         ) {
             const root = input?.root ?? ".ax/experiments";
-            const paths = yield* Effect.try({
-                try: () => discoverClassifierPackageExecutionReportPaths(root),
-                catch: (error) => ClassifierPackageLoadError.make({ path: root, message: errorMessage(error) }),
-            });
+            const paths = yield* discoverClassifierPackageExecutionReportPaths(root).pipe(
+                Effect.mapError((error) => ClassifierPackageLoadError.make({ path: root, message: errorMessage(error) })),
+            );
             const entries = yield* Effect.forEach(paths, (path) =>
-                Effect.try({
-                    try: () => ({ path, report: loadClassifierPackageExecutionReport(path) }),
-                    catch: (error) => ClassifierPackageLoadError.make({ path, message: errorMessage(error) }),
-                }));
+                loadClassifierPackageExecutionReport(path).pipe(
+                    Effect.map((report) => ({ path, report })),
+                    Effect.mapError((error) => ClassifierPackageLoadError.make({ path, message: errorMessage(error) })),
+                ));
             const workflowStatusPath = input?.workflowStatusPath ?? ".ax/experiments/blind-workflow-status-current.json";
-            const workflowStatus = yield* Effect.try({
-                try: () => loadClassifierLifecycleReviewStatus(workflowStatusPath),
-                catch: (error) => ClassifierPackageLoadError.make({ path: workflowStatusPath, message: errorMessage(error) }),
-            });
+            const workflowStatus = yield* loadClassifierLifecycleReviewStatus(workflowStatusPath).pipe(
+                Effect.mapError((error) => ClassifierPackageLoadError.make({ path: workflowStatusPath, message: errorMessage(error) })),
+            );
             return buildExecutionFactProjectionReport(root, entries, workflowStatus);
         });
 
@@ -713,10 +700,9 @@ export const ClassifierPackageServiceLive: Layer.Layer<ClassifierPackageService,
             input: ClassifierPackageExecutionFactProjectionWriteInput,
         ) {
             const report = yield* executionFactProjectionReport(input);
-            yield* Effect.try({
-                try: () => writeExecutionFactProjectionReport(input.out, report),
-                catch: (error) => ClassifierPackageReportWriteError.make({ path: input.out, message: errorMessage(error) }),
-            });
+            yield* writeExecutionFactProjectionReport(input.out, report).pipe(
+                Effect.mapError((error) => ClassifierPackageReportWriteError.make({ path: input.out, message: errorMessage(error) })),
+            );
             return report;
         });
 
@@ -731,10 +717,9 @@ export const ClassifierPackageServiceLive: Layer.Layer<ClassifierPackageService,
             input: ClassifierPackageExecutionSurrealWritePlanWriteInput,
         ) {
             const report = yield* executionSurrealWritePlanReport(input);
-            yield* Effect.try({
-                try: () => writeExecutionSurrealWritePlanReport(input.out, report),
-                catch: (error) => ClassifierPackageReportWriteError.make({ path: input.out, message: errorMessage(error) }),
-            });
+            yield* writeExecutionSurrealWritePlanReport(input.out, report).pipe(
+                Effect.mapError((error) => ClassifierPackageReportWriteError.make({ path: input.out, message: errorMessage(error) })),
+            );
             return report;
         });
 
@@ -758,10 +743,9 @@ export const ClassifierPackageServiceLive: Layer.Layer<ClassifierPackageService,
             input: ClassifierPackageExecutionSurrealApplyWriteInput,
         ) {
             const report = yield* applyExecutionSurrealWritePlan(input);
-            yield* Effect.try({
-                try: () => writeExecutionSurrealApplyReport(input.out, report),
-                catch: (error) => ClassifierPackageReportWriteError.make({ path: input.out, message: errorMessage(error) }),
-            });
+            yield* writeExecutionSurrealApplyReport(input.out, report).pipe(
+                Effect.mapError((error) => ClassifierPackageReportWriteError.make({ path: input.out, message: errorMessage(error) })),
+            );
             return report;
         });
 
@@ -787,10 +771,9 @@ export const ClassifierPackageServiceLive: Layer.Layer<ClassifierPackageService,
             input: ClassifierPackageExecutionGraphHealthWriteInput,
         ) {
             const report = yield* executionGraphHealth(input);
-            yield* Effect.try({
-                try: () => writeExecutionGraphHealthReport(input.out, report),
-                catch: (error) => ClassifierPackageReportWriteError.make({ path: input.out, message: errorMessage(error) }),
-            });
+            yield* writeExecutionGraphHealthReport(input.out, report).pipe(
+                Effect.mapError((error) => ClassifierPackageReportWriteError.make({ path: input.out, message: errorMessage(error) })),
+            );
             return report;
         });
 
@@ -805,10 +788,9 @@ export const ClassifierPackageServiceLive: Layer.Layer<ClassifierPackageService,
             input: ClassifierGraphQuerySuggestionRoutingSummaryWriteInput,
         ) {
             const report = yield* executionGraphQuerySuggestionRoutingSummary(input);
-            yield* Effect.try({
-                try: () => writeClassifierGraphQuerySuggestionRoutingSummary(input.out, report),
-                catch: (error) => ClassifierPackageReportWriteError.make({ path: input.out, message: errorMessage(error) }),
-            });
+            yield* writeClassifierGraphQuerySuggestionRoutingSummary(input.out, report).pipe(
+                Effect.mapError((error) => ClassifierPackageReportWriteError.make({ path: input.out, message: errorMessage(error) })),
+            );
             return report;
         });
 
@@ -846,13 +828,12 @@ export const ClassifierPackageServiceLive: Layer.Layer<ClassifierPackageService,
                 ? undefined
                 : yield* executionGraphHealth({ query: input.graphQuery });
             const workflowStatusPath = input?.workflowStatusPath ?? ".ax/experiments/blind-workflow-status-current.json";
-            const workflowStatus = yield* Effect.try({
-                try: () => loadClassifierLifecycleReviewStatus(workflowStatusPath),
-                catch: (error) => ClassifierPackageLoadError.make({
+            const workflowStatus = yield* loadClassifierLifecycleReviewStatus(workflowStatusPath).pipe(
+                Effect.mapError((error) => ClassifierPackageLoadError.make({
                     path: workflowStatusPath,
                     message: errorMessage(error),
-                }),
-            });
+                })),
+            );
             return buildClassifierLifecycleInsightReport({
                 packages,
                 graph,
@@ -866,10 +847,9 @@ export const ClassifierPackageServiceLive: Layer.Layer<ClassifierPackageService,
             input: ClassifierLifecycleInsightWriteInput,
         ) {
             const report = yield* lifecycleInsight(input);
-            yield* Effect.try({
-                try: () => writeClassifierLifecycleInsightReport(input.out, report),
-                catch: (error) => ClassifierPackageReportWriteError.make({ path: input.out, message: errorMessage(error) }),
-            });
+            yield* writeClassifierLifecycleInsightReport(input.out, report).pipe(
+                Effect.mapError((error) => ClassifierPackageReportWriteError.make({ path: input.out, message: errorMessage(error) })),
+            );
             return report;
         });
 
@@ -884,10 +864,9 @@ export const ClassifierPackageServiceLive: Layer.Layer<ClassifierPackageService,
             input: ClassifierLifecycleRoutingSummaryWriteInput,
         ) {
             const report = yield* lifecycleRoutingSummary(input);
-            yield* Effect.try({
-                try: () => writeClassifierLifecycleRoutingSummaryReport(input.out, report),
-                catch: (error) => ClassifierPackageReportWriteError.make({ path: input.out, message: errorMessage(error) }),
-            });
+            yield* writeClassifierLifecycleRoutingSummaryReport(input.out, report).pipe(
+                Effect.mapError((error) => ClassifierPackageReportWriteError.make({ path: input.out, message: errorMessage(error) })),
+            );
             return report;
         });
 
