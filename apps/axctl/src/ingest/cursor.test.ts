@@ -226,7 +226,7 @@ describe("Cursor state.vscdb extraction", () => {
             expect(extract.compactions[0]?.boundaryRef).toBe("b1");
             expect(extract.providerEvents.filter((e) => e.type === "compaction").length).toBe(1);
             const compactionEvent = extract.providerEvents.find((e) => e.type === "compaction")!;
-            expect(agentEventRecordKey(compactionEvent)).toBe(extract.compactions[0]?.agentEventKey);
+            expect(extract.compactions[0]?.agentEventKey).toBe(agentEventRecordKey(compactionEvent));
         });
     });
 
