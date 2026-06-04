@@ -1,6 +1,14 @@
 import { describe, expect, it } from "bun:test";
-import { Deferred, Effect, Fiber } from "effect";
-import { PIPELINE_CONCURRENCY, runPipeline, topoLayers } from "./runner.ts";
+import { Deferred, Effect, Fiber, Layer } from "effect";
+import { LiveTraceLayer } from "@ax/lib/live-traces/Tracer";
+import {
+    TraceSinkLive,
+    TraceTransportTag,
+    type TraceTransport,
+} from "@ax/lib/live-traces/Sink";
+import type { TraceEvent } from "@ax/lib/live-traces/types";
+import { LiveTrace } from "@ax/lib/live-traces/index";
+import { annotateStageProgress, PIPELINE_CONCURRENCY, runPipeline, topoLayers } from "./runner.ts";
 import { BaseStageStats, IngestContext, StageMeta, type StageDef } from "./types.ts";
 
 const stage = (key: string, deps: string[]): StageDef => ({
@@ -142,5 +150,79 @@ describe("runPipeline", () => {
         expect(new Set(finished)).toEqual(
             new Set(["skills", "commands", "git", "claude"]),
         );
+    });
+});
+
+const traceLayer = (events: TraceEvent[]) => {
+    const transport: TraceTransport = {
+        send: (batch) =>
+            Effect.sync(() => {
+                for (const event of batch) events.push(event);
+            }),
+    };
+    const transportLayer = Layer.succeed(TraceTransportTag, transport);
+    const sink = TraceSinkLive({ flushIntervalMs: 1 }).pipe(Layer.provide(transportLayer));
+    return Layer.mergeAll(sink, LiveTraceLayer.pipe(Layer.provide(sink)));
+};
+
+// The codex/claude stages were running 35s+ on an indeterminate progress bar
+// because counts were only annotated on SpanEnd. `annotateStageProgress` is the
+// bridge that lets a stage emit *live* `attribute:ingest.count.*` SpanEvents
+// mid-run (one per finite field) so the progress transports climb rows/speed
+// while the stage is still working.
+describe("annotateStageProgress", () => {
+    it("emits each finite count as a live attribute:ingest.count.* SpanEvent before the stage span ends", async () => {
+        const events: TraceEvent[] = [];
+        const ctx = IngestContext.make({ cwd: "/tmp/ax", since: new Date(0), debug: false });
+
+        const demo: StageDef = {
+            meta: StageMeta.make({ key: "demo", deps: [], tags: ["ingest"] }),
+            run: () =>
+                annotateStageProgress({
+                    currentFile: 2,
+                    totalFiles: 5,
+                    records: 42,
+                    notANumber: Number.NaN,
+                }).pipe(
+                    Effect.as(BaseStageStats.make({ durationMs: 1, summary: "demo done" })),
+                ),
+        };
+
+        await Effect.runPromise(
+            runPipeline([demo], ctx).pipe(
+                LiveTrace.withTrace({
+                    traceId: "ingest:test",
+                    label: "ingest demo",
+                    scope: { type: "user", id: "test" },
+                }),
+                Effect.provide(traceLayer(events)),
+            ) as Effect.Effect<unknown, never, never>,
+        );
+
+        const names = events.map((e) => ("name" in e ? e.name : e._tag));
+        const spanEndIdx = events.findIndex((e) => e._tag === "SpanEnd");
+        const progressIdxs = events
+            .map((e, i) =>
+                e._tag === "SpanEvent" && e.name.startsWith("attribute:ingest.count.") ? i : -1,
+            )
+            .filter((i) => i >= 0);
+
+        // The finite progress fields surfaced as count SpanEvents...
+        expect(names).toContain("attribute:ingest.count.currentFile");
+        expect(names).toContain("attribute:ingest.count.totalFiles");
+        expect(names).toContain("attribute:ingest.count.records");
+        // ...the non-finite value was skipped...
+        expect(names).not.toContain("attribute:ingest.count.notANumber");
+        // ...and all fired before the span ended (live deltas, not on SpanEnd).
+        expect(progressIdxs.length).toBe(3);
+        expect(spanEndIdx).toBeGreaterThanOrEqual(0);
+        expect(Math.max(...progressIdxs)).toBeLessThan(spanEndIdx);
+
+        const recordsEvent = events.find(
+            (e) => e._tag === "SpanEvent" && e.name === "attribute:ingest.count.records",
+        );
+        const recordsValue =
+            recordsEvent && "attributes" in recordsEvent ? recordsEvent.attributes?.value : null;
+        expect(recordsValue).toBe(42);
     });
 });
