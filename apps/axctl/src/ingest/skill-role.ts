@@ -54,11 +54,18 @@ export const relateSkillRoles = (
         let rolesUpserted = 0;
         let edgesWritten = 0;
         for (const roleName of cleaned) {
-            const roleId = new RecordId("role", roleName);
-            yield* db.upsert(roleId, { name: roleName });
+            const roleLit = recordLiteral("role", roleName);
+            // UPSERT ... SET (not CONTENT) so an existing role's tunable
+            // `weight` survives re-ingest. A CONTENT upsert replaces the whole
+            // record, dropping `weight` to NONE; the next write then crashes
+            // with "Expected `float` but found `NONE`" because `weight ON role`
+            // is non-optional (Pi dogfood, 2026-06-04). SET only touches `name`
+            // - `weight` keeps its value, or gets DEFAULT 1.0 on first create.
+            // roleName is validated by validateRoleName (^[a-z][a-z0-9_-]*$),
+            // so it can't break out of the double-quoted string literal.
+            yield* db.query(`UPSERT ${roleLit} SET name = "${roleName}";`);
             rolesUpserted += 1;
 
-            const roleLit = recordLiteral("role", roleName);
             yield* db.query(
                 `RELATE ${skillLit}->plays_role->${roleLit} SET source = "frontmatter", confidence = 1.0, since = time::now();`,
             );

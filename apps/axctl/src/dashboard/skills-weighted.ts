@@ -50,23 +50,35 @@ export interface SkillsWeightedParams {
  * Pass 1: per-skill invocation aggregates from the invoked edge table.
  * GROUP BY out gives us count + distinct sessions. We avoid correlated
  * subqueries per row (perf lesson from cmdTaste issue #31).
+ *
+ * Tombstone exclusion deliberately does NOT live in this WHERE clause.
+ * `out.deleted_at IS NONE` dereferences the skill record for every invoked
+ * edge; combined with the `in.session` deref in the SELECT, the planner walks
+ * both graph edges per row and the query hangs past 120s on a populated graph
+ * (87k+ invoked edges - the timeout the Pi dogfood hit, 2026-06-04). Instead we
+ * fetch the small set of tombstoned skill ids once (DELETED_SKILLS_SQL) and
+ * filter them out in JS during the merge.
  */
 function buildInvocationSql(windowDays: number | undefined): string {
-    // Exclude tombstoned skills (reconcile soft-delete) so ranking drops ghosts.
-    const conds = ["out.deleted_at IS NONE"];
-    if (windowDays !== undefined && windowDays > 0) {
-        conds.push(`ts >= time::now() - ${windowDays}d`);
-    }
-    const whereClause = `WHERE ${conds.join(" AND ")}`;
+    const whereClause =
+        windowDays !== undefined && windowDays > 0
+            ? `WHERE ts >= time::now() - ${windowDays}d\n`
+            : "";
     return `
 SELECT
     out AS skill_id,
     count() AS invocations,
     array::len(array::distinct(in.session)) AS session_count
 FROM invoked
-${whereClause}
-GROUP BY skill_id;`.trim();
+${whereClause}GROUP BY skill_id;`.trim();
 }
+
+/**
+ * Tombstoned (reconcile soft-deleted) skill ids. The skill table is small, so
+ * this direct field-filter scan is cheap - no graph derefs. Used to drop ghost
+ * skills from the ranking in JS instead of via a per-edge WHERE deref.
+ */
+const DELETED_SKILLS_SQL = `SELECT VALUE id FROM skill WHERE deleted_at IS NOT NONE;`;
 
 /**
  * Pass 2: per-skill role names + weights from plays_role edges.
@@ -77,19 +89,27 @@ const ROLE_WEIGHT_SQL = `
 SELECT
     in AS skill_id,
     out.name AS role_name,
-    math::max([weight ?? out.weight, 1.0]) AS effective_weight
+    math::max([weight ?? out.weight ?? 1.0, 1.0]) AS effective_weight
 FROM plays_role
 WHERE source IN ["frontmatter", "brief", "user"];`.trim();
 
 /**
  * Doctor query: count unclassified skills with >= 3 invocations.
  * Mirrors the predicate from src/cli/skills-classify.ts.
+ *
+ * NON-correlated by construction: the original per-skill subqueries
+ * (`... WHERE in = $parent.id`) ran two graph lookups for every skill row,
+ * making this O(skills × edges) - it hung `ax skills weighted` past 120s on a
+ * populated graph (Pi dogfood, 2026-06-04). Here the invocation GROUP BY and
+ * the classified-skill set each evaluate once, then a single set-difference.
  */
 const UNCLASSIFIED_COUNT_SQL = `
-SELECT count() AS n FROM skill
-WHERE
-    NOT (SELECT id FROM plays_role WHERE in = $parent.id AND source IN ["frontmatter", "brief", "user"])[0]
-    AND array::len((SELECT id FROM invoked WHERE out = $parent.id)) >= 3;`.trim();
+SELECT count() AS n FROM (
+    SELECT out AS sid, count() AS c FROM invoked GROUP BY sid
+)
+WHERE c >= 3
+    AND sid NOT IN (SELECT VALUE in FROM plays_role WHERE source IN ["frontmatter", "brief", "user"])
+GROUP ALL;`.trim();
 
 // ---------------------------------------------------------------------------
 // Main export
@@ -103,16 +123,23 @@ export const fetchSkillsWeighted = (
         const limit = params.limit ?? 25;
         const doctorThreshold = params.doctorThreshold ?? 5;
 
-        // Run both passes + doctor query concurrently.
-        const [invRes, roleRes, doctorRes] = yield* Effect.all(
+        // Run passes + doctor + tombstone-id query concurrently.
+        const [invRes, roleRes, doctorRes, deletedRes] = yield* Effect.all(
             [
                 db.query<[Array<Record<string, unknown>>]>(
                     buildInvocationSql(params.windowDays),
                 ),
                 db.query<[Array<Record<string, unknown>>]>(ROLE_WEIGHT_SQL),
                 db.query<[Array<Record<string, unknown>>]>(UNCLASSIFIED_COUNT_SQL),
+                db.query<[Array<unknown>]>(DELETED_SKILLS_SQL),
             ],
-            { concurrency: 3 },
+            { concurrency: 4 },
+        );
+
+        // Tombstoned skill ids - excluded from ranking in JS (see
+        // buildInvocationSql for why this isn't a per-edge WHERE deref).
+        const deletedSkills = new Set(
+            ((deletedRes?.[0] ?? []) as unknown[]).map((id) => String(id)),
         );
 
         // ---------------------------------------------------------------------------
@@ -148,6 +175,9 @@ export const fetchSkillsWeighted = (
         for (const r of (invRes?.[0] ?? []) as Array<Record<string, unknown>>) {
             const skillId = String(r.skill_id ?? "");
             if (!skillId) continue;
+            // Drop ghost (reconcile soft-deleted) skills - the tombstone filter
+            // that used to live in the pass-1 WHERE clause as a per-edge deref.
+            if (deletedSkills.has(skillId)) continue;
 
             // Derive a human-readable name from the record id string.
             // SurrealDB returns skill_id as e.g. "skill:⟨caveman⟩" or
