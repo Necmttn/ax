@@ -105,9 +105,9 @@ export function OpenSourceSection() {
           If it shapes your agent, you should be able to fork it.
         </h2>
         <p>
-          ax is AGPL-3.0, local-first, and end-to-end typed. The whole feedback
-          loop lives in files and a database on your machine&nbsp;&mdash; inspect
-          it, bend it, fork it. Commercial license available if you need it.
+          AGPL-3.0. Local-first. Typed end to end. Every signal lives in files
+          and a database you own&nbsp;&mdash; no cloud, no lock-in. Commercial
+          license available if you need it.
         </p>
       </div>
 
