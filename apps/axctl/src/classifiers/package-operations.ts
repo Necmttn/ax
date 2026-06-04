@@ -1,6 +1,7 @@
-import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
 import { exec, execFile } from "node:child_process";
+import { Effect, FileSystem, Option, type PlatformError } from "effect";
+import { orAbsent, skipNotFound } from "@ax/lib/shared/fs-error";
+import { posixPath } from "@ax/lib/shared/path";
 import { safeJsonParse } from "@ax/lib/shared/safe-json";
 import {
     recordRef,
@@ -1354,17 +1355,26 @@ function lifecycleReadiness(
     };
 }
 
-function artifactStatus(path: string): ClassifierPackageOperationArtifactStatus {
-    if (!existsSync(path)) {
-        return { path, exists: false };
-    }
-    const stat = statSync(path);
-    return {
-        path,
-        exists: true,
-        size_bytes: stat.size,
-        modified_at: stat.mtime.toISOString(),
-    };
+function artifactStatus(
+    path: string,
+): Effect.Effect<ClassifierPackageOperationArtifactStatus, PlatformError.PlatformError, FileSystem.FileSystem> {
+    return Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const exists = yield* fs.exists(path).pipe(orAbsent(false));
+        if (!exists) {
+            return { path, exists: false };
+        }
+        const stat = yield* fs.stat(path);
+        return {
+            path,
+            exists: true,
+            size_bytes: Number(stat.size),
+            modified_at: Option.match(stat.mtime, {
+                onNone: () => new Date(0).toISOString(),
+                onSome: (date) => date.toISOString(),
+            }),
+        };
+    });
 }
 
 function outputChanges(
@@ -1554,31 +1564,43 @@ function numberRecordAt(record: Record<string, unknown>, key: string): Record<st
     return entries.length > 0 ? Object.fromEntries(entries) : {};
 }
 
-function loadJsonRecord(path: string): Record<string, unknown> {
-    if (!existsSync(path)) {
-        return {};
-    }
-    const parsed = safeJsonParse<unknown>(readFileSync(path, "utf8"));
-    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
-        ? parsed as Record<string, unknown>
-        : {};
+function loadJsonRecord(
+    path: string,
+): Effect.Effect<Record<string, unknown>, PlatformError.PlatformError, FileSystem.FileSystem> {
+    return Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const exists = yield* fs.exists(path).pipe(orAbsent(false));
+        if (!exists) {
+            return {};
+        }
+        const parsed = safeJsonParse<unknown>(yield* fs.readFileString(path));
+        return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+            ? parsed as Record<string, unknown>
+            : {};
+    });
 }
 
-function loadProposalLifecycleStatus(baseDir: string): Pick<ClassifierLifecycleReviewStatus, "proposal_review" | "proposal_promotion" | "proposal_ready_smoke"> {
-    const reviewPath = join(baseDir, "workflow-candidate-proposal-review-current.json");
-    const reviewSummaryPath = join(baseDir, "workflow-candidate-proposal-review-current.md");
-    const promotionPath = join(baseDir, "workflow-candidate-proposal-promotion-current.json");
-    const smokePromotionPath = join(baseDir, "workflow-candidate-proposal-ready-smoke-promotion-current.json");
-    const smokeDraftDir = join(baseDir, "workflow-candidate-proposal-ready-smoke-drafts");
-    const review = loadJsonRecord(reviewPath);
+function loadProposalLifecycleStatus(
+    baseDir: string,
+): Effect.Effect<Pick<ClassifierLifecycleReviewStatus, "proposal_review" | "proposal_promotion" | "proposal_ready_smoke">, PlatformError.PlatformError, FileSystem.FileSystem> {
+    return Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const reviewPath = posixPath.join(baseDir, "workflow-candidate-proposal-review-current.json");
+    const reviewSummaryPath = posixPath.join(baseDir, "workflow-candidate-proposal-review-current.md");
+    const promotionPath = posixPath.join(baseDir, "workflow-candidate-proposal-promotion-current.json");
+    const smokePromotionPath = posixPath.join(baseDir, "workflow-candidate-proposal-ready-smoke-promotion-current.json");
+    const smokeDraftDir = posixPath.join(baseDir, "workflow-candidate-proposal-ready-smoke-drafts");
+    const review = yield* loadJsonRecord(reviewPath);
     const reviewTotals = jsonRecordAt(review, "totals");
-    const promotion = loadJsonRecord(promotionPath);
-    const smokePromotion = loadJsonRecord(smokePromotionPath);
+    const promotion = yield* loadJsonRecord(promotionPath);
+    const smokePromotion = yield* loadJsonRecord(smokePromotionPath);
+    const reviewSummaryExists = yield* fs.exists(reviewSummaryPath).pipe(orAbsent(false));
+    const smokeDraftDirExists = yield* fs.exists(smokeDraftDir).pipe(orAbsent(false));
     return {
         ...(Object.keys(review).length === 0 ? {} : {
             proposal_review: {
                 report_path: reviewPath,
-                ...(existsSync(reviewSummaryPath) ? { summary_path: reviewSummaryPath } : {}),
+                ...(reviewSummaryExists ? { summary_path: reviewSummaryPath } : {}),
                 ...(stringAt(review, "decision") === undefined ? {} : { decision: stringAt(review, "decision") as string }),
                 ...(numberAt(reviewTotals, "proposal_count") === undefined ? {} : { proposal_count: numberAt(reviewTotals, "proposal_count") as number }),
                 ...(numberAt(reviewTotals, "ready_count") === undefined ? {} : { ready_count: numberAt(reviewTotals, "ready_count") as number }),
@@ -1601,7 +1623,7 @@ function loadProposalLifecycleStatus(baseDir: string): Pick<ClassifierLifecycleR
         ...(Object.keys(smokePromotion).length === 0 ? {} : {
             proposal_ready_smoke: {
                 promotion_report_path: smokePromotionPath,
-                ...(existsSync(smokeDraftDir) ? { draft_dir: smokeDraftDir } : {}),
+                ...(smokeDraftDirExists ? { draft_dir: smokeDraftDir } : {}),
                 review_decision: "workflow_candidate_proposal_reviews_ready",
                 ...(stringAt(smokePromotion, "decision") === undefined ? {} : { promotion_decision: stringAt(smokePromotion, "decision") as string }),
                 ...(numberAt(smokePromotion, "proposal_count") === undefined ? {} : { proposal_count: numberAt(smokePromotion, "proposal_count") as number }),
@@ -1611,12 +1633,17 @@ function loadProposalLifecycleStatus(baseDir: string): Pick<ClassifierLifecycleR
             },
         }),
     };
+    });
 }
 
-function loadReviewPipelineLifecycleStatus(baseDir: string): Pick<ClassifierLifecycleReviewStatus, "review_pipeline_lifecycle"> {
-    const reportPath = join(baseDir, "workflow-candidate-review-pipeline-lifecycle-current.json");
-    if (!existsSync(reportPath)) return {};
-    const report = loadJsonRecord(reportPath);
+function loadReviewPipelineLifecycleStatus(
+    baseDir: string,
+): Effect.Effect<Pick<ClassifierLifecycleReviewStatus, "review_pipeline_lifecycle">, PlatformError.PlatformError, FileSystem.FileSystem> {
+    return Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const reportPath = posixPath.join(baseDir, "workflow-candidate-review-pipeline-lifecycle-current.json");
+    if (!(yield* fs.exists(reportPath).pipe(orAbsent(false)))) return {};
+    const report = yield* loadJsonRecord(reportPath);
     const coverageReview = jsonRecordAt(report, "coverage_review");
     const lifecycle = jsonRecordAt(coverageReview, "review_pipeline_lifecycle");
     const postApplyRecheck = jsonRecordAt(coverageReview, "post_apply_recheck");
@@ -1691,6 +1718,7 @@ function loadReviewPipelineLifecycleStatus(baseDir: string): Pick<ClassifierLife
             }),
         },
     };
+    });
 }
 
 export function buildOperationsReport(
@@ -1722,7 +1750,9 @@ export function buildOperationPreflightReport(
     manifest: ClassifierPackageManifest,
     manifestPath: string,
     operationId: string,
-): ClassifierPackageOperationPreflightReport {
+): Effect.Effect<ClassifierPackageOperationPreflightReport, never, FileSystem.FileSystem> {
+    return Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
     const operation = findClassifierPackageOperation(manifest, operationId);
     if (!operation) {
         return {
@@ -1737,10 +1767,8 @@ export function buildOperationPreflightReport(
             decision: "operation_missing",
         };
     }
-    const inputs = (operation.inputs ?? []).map((path) => ({
-        path,
-        exists: existsSync(path),
-    }));
+    const inputs = yield* Effect.forEach(operation.inputs ?? [], (path) =>
+        fs.exists(path).pipe(orAbsent(false), Effect.map((exists) => ({ path, exists }))));
     const missingInputs = inputs.filter((input) => !input.exists).map((input) => input.path);
     return {
         schema: "ax.classifier_package_operation_preflight_report.v1",
@@ -1754,14 +1782,16 @@ export function buildOperationPreflightReport(
         failures: missingInputs.map((path) => `missing input: ${path}`),
         decision: missingInputs.length === 0 ? "ready" : "missing_inputs",
     };
+    });
 }
 
 export function buildOperationDryRunReport(
     manifest: ClassifierPackageManifest,
     manifestPath: string,
     operationId: string,
-): ClassifierPackageOperationDryRunReport {
-    const preflight = buildOperationPreflightReport(manifest, manifestPath, operationId);
+): Effect.Effect<ClassifierPackageOperationDryRunReport, never, FileSystem.FileSystem> {
+    return Effect.gen(function* () {
+    const preflight = yield* buildOperationPreflightReport(manifest, manifestPath, operationId);
     return {
         schema: "ax.classifier_package_operation_dry_run_report.v1",
         manifest: manifestPath,
@@ -1776,6 +1806,7 @@ export function buildOperationDryRunReport(
             ? "ready_to_run"
             : preflight.decision === "operation_missing" ? "operation_missing" : "blocked",
     };
+    });
 }
 
 export function buildOperationExecutionPlanReport(
@@ -1783,8 +1814,9 @@ export function buildOperationExecutionPlanReport(
     manifestPath: string,
     operationId: string,
     input: ClassifierPackageOperationExecutionPlanInput,
-): ClassifierPackageOperationExecutionPlanReport {
-    const dryRun = buildOperationDryRunReport(manifest, manifestPath, operationId);
+): Effect.Effect<ClassifierPackageOperationExecutionPlanReport, never, FileSystem.FileSystem> {
+    return Effect.gen(function* () {
+    const dryRun = yield* buildOperationDryRunReport(manifest, manifestPath, operationId);
     const expensive = dryRun.operation ? EXPENSIVE_OPERATION_KINDS.has(dryRun.operation.kind) : false;
     const guardFailures: string[] = [];
     let decision: ClassifierPackageOperationExecutionPlanReport["decision"];
@@ -1816,24 +1848,25 @@ export function buildOperationExecutionPlanReport(
         failures: [...dryRun.failures, ...guardFailures],
         decision,
     };
+    });
 }
 
-export async function executeOperationPlanReport(
+export function executeOperationPlanReport(
     plan: ClassifierPackageOperationExecutionPlanReport,
-): Promise<ClassifierPackageOperationExecutionReport> {
+): Effect.Effect<ClassifierPackageOperationExecutionReport, PlatformError.PlatformError, FileSystem.FileSystem> {
+    return Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
     const started = new Date();
-    const outputStatuses = (): readonly ClassifierPackageOperationInputStatus[] =>
-        (plan.operation?.outputs ?? []).map((path) => ({
-            path,
-            exists: existsSync(path),
-        }));
-    const artifactStatuses = (): readonly ClassifierPackageOperationArtifactStatus[] =>
-        (plan.operation?.outputs ?? []).map((path) => artifactStatus(path));
-    const outputsBefore = artifactStatuses();
+    const outputStatuses = (): Effect.Effect<readonly ClassifierPackageOperationInputStatus[], PlatformError.PlatformError, FileSystem.FileSystem> =>
+        Effect.forEach(plan.operation?.outputs ?? [], (path) =>
+            fs.exists(path).pipe(orAbsent(false), Effect.map((exists) => ({ path, exists }))));
+    const artifactStatuses = (): Effect.Effect<readonly ClassifierPackageOperationArtifactStatus[], PlatformError.PlatformError, FileSystem.FileSystem> =>
+        Effect.forEach(plan.operation?.outputs ?? [], (path) => artifactStatus(path));
+    const outputsBefore = yield* artifactStatuses();
     if (plan.decision !== "ready_to_execute" || !plan.command) {
         const finished = new Date();
-        const outputs = outputStatuses();
-        const outputsAfter = artifactStatuses();
+        const outputs = yield* outputStatuses();
+        const outputsAfter = yield* artifactStatuses();
         return {
             schema: "ax.classifier_package_operation_execution_report.v1",
             manifest: plan.manifest,
@@ -1861,7 +1894,7 @@ export async function executeOperationPlanReport(
     }
     const command = plan.command;
 
-    const result = await new Promise<{
+    const result = yield* Effect.promise(() => new Promise<{
         readonly exitCode: number | null;
         readonly signal: NodeJS.Signals | null;
         readonly stdout: string;
@@ -1888,10 +1921,10 @@ export async function executeOperationPlanReport(
                 stderr,
             });
         });
-    });
+    }));
     const finished = new Date();
-    const outputs = outputStatuses();
-    const outputsAfter = artifactStatuses();
+    const outputs = yield* outputStatuses();
+    const outputsAfter = yield* artifactStatuses();
     const missingOutputs = outputs.filter((output) => !output.exists).map((output) => output.path);
     const failures = [
         ...(result.exitCode === 0
@@ -1923,16 +1956,35 @@ export async function executeOperationPlanReport(
         failures,
         decision: result.exitCode === 0 && missingOutputs.length === 0 ? "executed" : "failed",
     };
+    });
 }
 
-export function discoverClassifierPackageManifestPaths(root = "packages"): readonly string[] {
-    if (!existsSync(root)) return [];
-    return readdirSync(root)
-        .map((entry) => join(root, entry))
-        .filter((path) => statSync(path).isDirectory())
-        .map((path) => join(path, "ax.classifier.json"))
-        .filter((path) => existsSync(path))
-        .sort();
+export function discoverClassifierPackageManifestPaths(
+    root = "packages",
+): Effect.Effect<readonly string[], PlatformError.PlatformError, FileSystem.FileSystem> {
+    return Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        if (!(yield* fs.exists(root).pipe(orAbsent(false)))) return [];
+        const entries = yield* fs.readDirectory(root).pipe(skipNotFound([] as readonly string[]));
+        const dirEntries = yield* Effect.forEach(entries, (entry) => {
+            const entryPath = posixPath.join(root, entry);
+            return fs.stat(entryPath).pipe(
+                Effect.map((info): string | undefined => (info.type === "Directory" ? entryPath : undefined)),
+                orAbsent<string | undefined>(undefined),
+            );
+        });
+        const manifestPaths = yield* Effect.forEach(
+            dirEntries.filter((entry): entry is string => entry !== undefined),
+            (dir) => {
+                const manifestPath = posixPath.join(dir, "ax.classifier.json");
+                return fs.exists(manifestPath).pipe(
+                    orAbsent(false),
+                    Effect.map((exists) => (exists ? manifestPath : undefined)),
+                );
+            },
+        );
+        return manifestPaths.filter((entry): entry is string => entry !== undefined).sort();
+    });
 }
 
 export function summarizeClassifierPackageOperations(
@@ -2007,32 +2059,46 @@ function isExecutionReport(value: unknown): value is ClassifierPackageOperationE
         typeof (plan as { readonly decision?: unknown }).decision === "string";
 }
 
-export function discoverClassifierPackageExecutionReportPaths(root = ".ax/experiments"): readonly string[] {
-    if (!existsSync(root)) return [];
-    return readdirSync(root)
-        .map((entry) => join(root, entry))
-        .filter((path) => statSync(path).isFile())
-        .filter((path) => path.includes("classifier-package-execution-") && path.endsWith(".json"))
-        .filter((path) => !path.includes("classifier-package-execution-plan-"))
-        .filter((path) => !path.includes("classifier-package-execution-history-"))
-        .filter((path) => !path.includes("classifier-package-execution-facts-"))
-        .filter((path) => !path.includes("classifier-package-execution-write-plan-"))
-        .filter((path) => !path.includes("classifier-package-execution-apply-"))
-        .filter((path) => !path.includes("classifier-package-execution-graph-health-"))
-        .sort();
+export function discoverClassifierPackageExecutionReportPaths(
+    root = ".ax/experiments",
+): Effect.Effect<readonly string[], PlatformError.PlatformError, FileSystem.FileSystem> {
+    return Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        if (!(yield* fs.exists(root).pipe(orAbsent(false)))) return [];
+        const entries = yield* fs.readDirectory(root).pipe(skipNotFound([] as readonly string[]));
+        const fileEntries = yield* Effect.forEach(entries, (entry) => {
+            const entryPath = posixPath.join(root, entry);
+            return fs.stat(entryPath).pipe(
+                Effect.map((info): string | undefined => (info.type === "File" ? entryPath : undefined)),
+                orAbsent<string | undefined>(undefined),
+            );
+        });
+        return fileEntries
+            .filter((path): path is string => path !== undefined)
+            .filter((path) => path.includes("classifier-package-execution-") && path.endsWith(".json"))
+            .filter((path) => !path.includes("classifier-package-execution-plan-"))
+            .filter((path) => !path.includes("classifier-package-execution-history-"))
+            .filter((path) => !path.includes("classifier-package-execution-facts-"))
+            .filter((path) => !path.includes("classifier-package-execution-write-plan-"))
+            .filter((path) => !path.includes("classifier-package-execution-apply-"))
+            .filter((path) => !path.includes("classifier-package-execution-graph-health-"))
+            .sort();
+    });
 }
 
-export function loadClassifierPackageExecutionReport(path: string): ClassifierPackageOperationExecutionReport {
-    const parsed = safeJsonParse<unknown>(readFileSync(path, "utf8"));
+export function loadClassifierPackageExecutionReport(
+    path: string,
+): Effect.Effect<ClassifierPackageOperationExecutionReport, PlatformError.PlatformError | Error, FileSystem.FileSystem> {
+    return Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const parsed = safeJsonParse<unknown>(yield* fs.readFileString(path));
     if (!isExecutionReport(parsed)) {
-        throw new Error(`invalid classifier package execution report: ${path}`);
+        return yield* Effect.fail(new Error(`invalid classifier package execution report: ${path}`));
     }
     const normalizedOutputs = Array.isArray((parsed as { readonly outputs?: unknown }).outputs)
         ? (parsed as { readonly outputs: readonly ClassifierPackageOperationInputStatus[] }).outputs
-        : (parsed.operation?.outputs ?? []).map((path) => ({
-            path,
-            exists: existsSync(path),
-        }));
+        : yield* Effect.forEach(parsed.operation?.outputs ?? [], (path) =>
+            fs.exists(path).pipe(orAbsent(false), Effect.map((exists) => ({ path, exists }))));
     const normalizedMissingOutputs = Array.isArray((parsed as { readonly missing_outputs?: unknown }).missing_outputs)
         ? (parsed as { readonly missing_outputs: readonly string[] }).missing_outputs
         : normalizedOutputs.filter((output) => !output.exists).map((output) => output.path);
@@ -2054,6 +2120,7 @@ export function loadClassifierPackageExecutionReport(path: string): ClassifierPa
         outputs_before: outputsBefore,
         output_changes: changes,
     };
+    });
 }
 
 export function buildExecutionHistoryReport(
@@ -3430,19 +3497,23 @@ export function buildExecutionGraphHealthReport(input: {
     };
 }
 
-export function loadClassifierLifecycleReviewStatus(path: string): ClassifierLifecycleReviewStatus {
-    const proposalLifecycle = loadProposalLifecycleStatus(dirname(path));
-    const reviewPipelineLifecycle = loadReviewPipelineLifecycleStatus(dirname(path));
-    if (!existsSync(path)) {
+export function loadClassifierLifecycleReviewStatus(
+    path: string,
+): Effect.Effect<ClassifierLifecycleReviewStatus, PlatformError.PlatformError, FileSystem.FileSystem> {
+    return Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const proposalLifecycle = yield* loadProposalLifecycleStatus(posixPath.dirname(path));
+    const reviewPipelineLifecycle = yield* loadReviewPipelineLifecycleStatus(posixPath.dirname(path));
+    if (!(yield* fs.exists(path).pipe(orAbsent(false)))) {
         return {
             path,
             exists: false,
             ...proposalLifecycle,
             ...reviewPipelineLifecycle,
             next_actions: [],
-        };
+        } satisfies ClassifierLifecycleReviewStatus as ClassifierLifecycleReviewStatus;
     }
-    const record = loadJsonRecord(path);
+    const record = yield* loadJsonRecord(path);
     const stages = jsonRecordAt(record, "stages");
     const blindLabels = jsonRecordAt(stages, "blind_labels");
     const hardNegativeReview = jsonRecordAt(stages, "hard_negative_review");
@@ -3498,12 +3569,7 @@ export function loadClassifierLifecycleReviewStatus(path: string): ClassifierLif
     const refreshReportPath = path.endsWith("blind-workflow-status-current.json")
         ? path.replace("blind-workflow-status-current.json", "blind-review-batch-current-refresh-report.json")
         : undefined;
-    const refreshRecord = refreshReportPath && existsSync(refreshReportPath)
-        ? safeJsonParse<unknown>(readFileSync(refreshReportPath, "utf8"))
-        : undefined;
-    const refresh = refreshRecord && typeof refreshRecord === "object" && !Array.isArray(refreshRecord)
-        ? refreshRecord as Record<string, unknown>
-        : {};
+    const refresh = refreshReportPath ? yield* loadJsonRecord(refreshReportPath) : {};
     const suggestionDraftPath = path.endsWith("blind-workflow-status-current.json")
         ? path.replace("blind-workflow-status-current.json", "blind-review-batch-current-suggestion-draft.md")
         : undefined;
@@ -3516,24 +3582,14 @@ export function loadClassifierLifecycleReviewStatus(path: string): ClassifierLif
     const promotionReportPath = path.endsWith("blind-workflow-status-current.json")
         ? path.replace("blind-workflow-status-current.json", "blind-review-batch-current-promotion-report.json")
         : undefined;
-    const suggestionDraftReportRecord = suggestionDraftReportPath && existsSync(suggestionDraftReportPath)
-        ? safeJsonParse<unknown>(readFileSync(suggestionDraftReportPath, "utf8"))
-        : undefined;
-    const suggestionDraftReport = suggestionDraftReportRecord && typeof suggestionDraftReportRecord === "object" && !Array.isArray(suggestionDraftReportRecord)
-        ? suggestionDraftReportRecord as Record<string, unknown>
-        : {};
-    const suggestionDraftEvalRecord = suggestionDraftEvalReportPath && existsSync(suggestionDraftEvalReportPath)
-        ? safeJsonParse<unknown>(readFileSync(suggestionDraftEvalReportPath, "utf8"))
-        : undefined;
-    const suggestionDraftEval = suggestionDraftEvalRecord && typeof suggestionDraftEvalRecord === "object" && !Array.isArray(suggestionDraftEvalRecord)
-        ? suggestionDraftEvalRecord as Record<string, unknown>
-        : {};
-    const promotionReportRecord = promotionReportPath && existsSync(promotionReportPath)
-        ? safeJsonParse<unknown>(readFileSync(promotionReportPath, "utf8"))
-        : undefined;
-    const promotionReport = promotionReportRecord && typeof promotionReportRecord === "object" && !Array.isArray(promotionReportRecord)
-        ? promotionReportRecord as Record<string, unknown>
-        : {};
+    const suggestionDraftReport = suggestionDraftReportPath ? yield* loadJsonRecord(suggestionDraftReportPath) : {};
+    const suggestionDraftEval = suggestionDraftEvalReportPath ? yield* loadJsonRecord(suggestionDraftEvalReportPath) : {};
+    const promotionReport = promotionReportPath ? yield* loadJsonRecord(promotionReportPath) : {};
+    const refreshReportExists = refreshReportPath ? yield* fs.exists(refreshReportPath).pipe(orAbsent(false)) : false;
+    const suggestionDraftExists = suggestionDraftPath ? yield* fs.exists(suggestionDraftPath).pipe(orAbsent(false)) : false;
+    const suggestionDraftReportExists = suggestionDraftReportPath ? yield* fs.exists(suggestionDraftReportPath).pipe(orAbsent(false)) : false;
+    const suggestionDraftEvalReportExists = suggestionDraftEvalReportPath ? yield* fs.exists(suggestionDraftEvalReportPath).pipe(orAbsent(false)) : false;
+    const promotionReportExists = promotionReportPath ? yield* fs.exists(promotionReportPath).pipe(orAbsent(false)) : false;
     const schema = stringAt(record, "schema");
     const decision = stringAt(record, "decision");
     const pendingBlindLabels = numberAt(blindLabels, "pending");
@@ -3548,7 +3604,7 @@ export function loadClassifierLifecycleReviewStatus(path: string): ClassifierLif
             ...(stringAt(refresh, "batch_report") === undefined ? {} : { batch_report_path: stringAt(refresh, "batch_report") as string }),
             ...(stringAt(refresh, "batch_eval") === undefined ? {} : { batch_eval_path: stringAt(refresh, "batch_eval") as string }),
             ...(stringAt(refresh, "batch_sync") === undefined ? {} : { batch_sync_path: stringAt(refresh, "batch_sync") as string }),
-            ...(refreshReportPath && existsSync(refreshReportPath) ? { refresh_report_path: refreshReportPath } : {}),
+            ...(refreshReportExists ? { refresh_report_path: refreshReportPath } : {}),
             ...(stringAt(refresh, "batch_source") === undefined ? {} : { batch_source: stringAt(refresh, "batch_source") as string }),
             selected_ordinals: selectedOrdinals,
             ...(numberAt(reviewBatchDetails, "context_enriched_sections") === undefined ? {} : { context_enriched_sections: numberAt(reviewBatchDetails, "context_enriched_sections") as number }),
@@ -3571,11 +3627,11 @@ export function loadClassifierLifecycleReviewStatus(path: string): ClassifierLif
             invalid_refs: invalidRefs,
             ...(numberAt(reviewBatchEvalDetails, "review_task_total") === undefined ? {} : { review_task_total: numberAt(reviewBatchEvalDetails, "review_task_total") as number }),
             review_tasks: reviewTasks,
-            ...(suggestionDraftPath && existsSync(suggestionDraftPath) ? {
+            ...(suggestionDraftExists ? {
                 suggestion_draft: {
                     path: suggestionDraftPath,
-                    ...(suggestionDraftReportPath && existsSync(suggestionDraftReportPath) ? { report_path: suggestionDraftReportPath } : {}),
-                    ...(suggestionDraftEvalReportPath && existsSync(suggestionDraftEvalReportPath) ? { eval_report_path: suggestionDraftEvalReportPath } : {}),
+                    ...(suggestionDraftReportExists ? { report_path: suggestionDraftReportPath } : {}),
+                    ...(suggestionDraftEvalReportExists ? { eval_report_path: suggestionDraftEvalReportPath } : {}),
                     ...(stringAt(suggestionDraftReport, "decision") === undefined ? {} : { decision: stringAt(suggestionDraftReport, "decision") as string }),
                     ...(stringAt(suggestionDraftReport, "after_decision") === undefined ? {} : { after_decision: stringAt(suggestionDraftReport, "after_decision") as string }),
                     ...(numberAt(suggestionDraftReport, "prefilled_review_label") === undefined ? {} : { prefilled_review_label: numberAt(suggestionDraftReport, "prefilled_review_label") as number }),
@@ -3592,7 +3648,7 @@ export function loadClassifierLifecycleReviewStatus(path: string): ClassifierLif
                     ...(numberAt(suggestionDraftEval, "blocking_field_total") === undefined ? {} : { eval_blocking_field_total: numberAt(suggestionDraftEval, "blocking_field_total") as number }),
                 },
             } : {}),
-            ...(promotionReportPath && existsSync(promotionReportPath) ? {
+            ...(promotionReportExists ? {
                 draft_promotion: {
                     report_path: promotionReportPath,
                     ...(stringAt(promotionReport, "decision") === undefined ? {} : { decision: stringAt(promotionReport, "decision") as string }),
@@ -3631,7 +3687,8 @@ export function loadClassifierLifecycleReviewStatus(path: string): ClassifierLif
         ...reviewPipelineLifecycle,
         ...(focusedBatch === undefined ? {} : { focused_batch: focusedBatch }),
         next_actions: nextActions,
-    };
+    } as ClassifierLifecycleReviewStatus;
+    });
 }
 
 export function buildClassifierLifecycleInsightReport(input: {
@@ -4176,54 +4233,62 @@ const ROUTE_OUTPUT_FLAGS: Readonly<Record<string, ClassifierLifecycleRouteExecut
     "--review-write-plan": "review_write_plan",
 };
 
-function routeExecutionOutputStatuses(argv: readonly string[]): readonly ClassifierLifecycleRouteExecutionOutputStatus[] {
-    const statuses: ClassifierLifecycleRouteExecutionOutputStatus[] = [];
-    for (let index = 0; index < argv.length; index++) {
-        const arg = argv[index] ?? "";
-        for (const [flag, kind] of Object.entries(ROUTE_OUTPUT_FLAGS)) {
-            const prefix = `${flag}=`;
-            const path = arg === flag ? argv[index + 1] : arg.startsWith(prefix) ? arg.slice(prefix.length) : undefined;
-            if (path === undefined || path.length === 0) {
-                continue;
+function routeExecutionOutputStatuses(
+    argv: readonly string[],
+): Effect.Effect<readonly ClassifierLifecycleRouteExecutionOutputStatus[], PlatformError.PlatformError, FileSystem.FileSystem> {
+    return Effect.gen(function* () {
+        const candidates: { readonly flag: string; readonly kind: ClassifierLifecycleRouteExecutionOutputStatus["kind"]; readonly path: string }[] = [];
+        for (let index = 0; index < argv.length; index++) {
+            const arg = argv[index] ?? "";
+            for (const [flag, kind] of Object.entries(ROUTE_OUTPUT_FLAGS)) {
+                const prefix = `${flag}=`;
+                const path = arg === flag ? argv[index + 1] : arg.startsWith(prefix) ? arg.slice(prefix.length) : undefined;
+                if (path === undefined || path.length === 0) {
+                    continue;
+                }
+                candidates.push({ flag, kind, path });
             }
-            const status = artifactStatus(path);
-            statuses.push({
+        }
+        return yield* Effect.forEach(candidates, ({ flag, kind, path }) =>
+            artifactStatus(path).pipe(Effect.map((status) => ({
                 kind,
                 flag,
                 path,
                 exists: status.exists,
                 ...(status.size_bytes === undefined ? {} : { size_bytes: status.size_bytes }),
                 ...(status.modified_at === undefined ? {} : { modified_at: status.modified_at }),
-            });
-        }
-    }
-    return statuses;
+            }))));
+    });
 }
 
 function parseRouteExecutionInnerOutput(
     execution: ClassifierLifecycleRouteExecutionReport,
     outputArtifacts: readonly ClassifierLifecycleRouteExecutionOutputStatus[],
-): { readonly source?: "stdout" | "output_file"; readonly value: Record<string, unknown> | null } {
-    const reportArtifact = outputArtifacts.find((artifact) => artifact.kind === "readiness_report" && artifact.exists);
-    if (reportArtifact) {
-        const fileJson = safeJsonParse<Record<string, unknown>>(readFileSync(reportArtifact.path, "utf8"));
-        if (fileJson && typeof fileJson === "object" && !Array.isArray(fileJson)) {
-            return { source: "output_file", value: fileJson };
+): Effect.Effect<{ readonly source?: "stdout" | "output_file"; readonly value: Record<string, unknown> | null }, PlatformError.PlatformError, FileSystem.FileSystem> {
+    return Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const reportArtifact = outputArtifacts.find((artifact) => artifact.kind === "readiness_report" && artifact.exists);
+        if (reportArtifact) {
+            const fileJson = safeJsonParse<Record<string, unknown>>(yield* fs.readFileString(reportArtifact.path));
+            if (fileJson && typeof fileJson === "object" && !Array.isArray(fileJson)) {
+                return { source: "output_file", value: fileJson };
+            }
         }
-    }
-    const stdoutJson = safeJsonParse<Record<string, unknown>>(execution.stdout);
-    if (stdoutJson && typeof stdoutJson === "object" && !Array.isArray(stdoutJson)) {
-        return { source: "stdout", value: stdoutJson };
-    }
-    return { value: null };
+        const stdoutJson = safeJsonParse<Record<string, unknown>>(execution.stdout);
+        if (stdoutJson && typeof stdoutJson === "object" && !Array.isArray(stdoutJson)) {
+            return { source: "stdout", value: stdoutJson };
+        }
+        return { value: null };
+    });
 }
 
 export function inspectClassifierLifecycleRouteExecution(
     execution: ClassifierLifecycleRouteExecutionReport,
-): ClassifierLifecycleRouteExecutionInspectionReport {
-    const outputArtifacts = routeExecutionOutputStatuses(execution.command_argv);
+): Effect.Effect<ClassifierLifecycleRouteExecutionInspectionReport, PlatformError.PlatformError, FileSystem.FileSystem> {
+    return Effect.gen(function* () {
+    const outputArtifacts = yield* routeExecutionOutputStatuses(execution.command_argv);
     const missingOutputPaths = outputArtifacts.filter((artifact) => !artifact.exists).map((artifact) => artifact.path);
-    const parsed = parseRouteExecutionInnerOutput(execution, outputArtifacts);
+    const parsed = yield* parseRouteExecutionInnerOutput(execution, outputArtifacts);
     const inner = parsed.value ?? {};
     const coverageReview = jsonRecordAt(inner, "coverage_review");
     const productionCanApply = typeof coverageReview.production_can_apply === "boolean"
@@ -4294,97 +4359,98 @@ export function inspectClassifierLifecycleRouteExecution(
             ? "Repair missing route output artifacts or inner output checks before continuing."
             : "Inspect the route execution stdout and output file manually.",
     };
+    });
 }
 
-export function writeOperationsReport(path: string, report: ClassifierPackageOperationsReport): void {
-    mkdirSync(dirname(path), { recursive: true });
-    writeFileSync(path, `${JSON.stringify(report, null, 2)}\n`);
+/**
+ * Write a JSON report to disk via @effect/platform FileSystem, mirroring the
+ * original `mkdirSync(dirname, { recursive: true })` + `writeFileSync` pair.
+ */
+function writeJsonReport(
+    path: string,
+    report: unknown,
+): Effect.Effect<void, PlatformError.PlatformError, FileSystem.FileSystem> {
+    return Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        yield* fs.makeDirectory(posixPath.dirname(path), { recursive: true });
+        yield* fs.writeFileString(path, `${JSON.stringify(report, null, 2)}\n`);
+    });
 }
 
-export function writeOperationPreflightReport(path: string, report: ClassifierPackageOperationPreflightReport): void {
-    mkdirSync(dirname(path), { recursive: true });
-    writeFileSync(path, `${JSON.stringify(report, null, 2)}\n`);
+export function writeOperationsReport(
+    path: string,
+    report: ClassifierPackageOperationsReport,
+): Effect.Effect<void, PlatformError.PlatformError, FileSystem.FileSystem> {
+    return writeJsonReport(path, report);
 }
 
-export function writeOperationDryRunReport(path: string, report: ClassifierPackageOperationDryRunReport): void {
-    mkdirSync(dirname(path), { recursive: true });
-    writeFileSync(path, `${JSON.stringify(report, null, 2)}\n`);
+export function writeOperationPreflightReport(path: string, report: ClassifierPackageOperationPreflightReport): Effect.Effect<void, PlatformError.PlatformError, FileSystem.FileSystem> {
+    return writeJsonReport(path, report);
 }
 
-export function writeOperationExecutionPlanReport(path: string, report: ClassifierPackageOperationExecutionPlanReport): void {
-    mkdirSync(dirname(path), { recursive: true });
-    writeFileSync(path, `${JSON.stringify(report, null, 2)}\n`);
+export function writeOperationDryRunReport(path: string, report: ClassifierPackageOperationDryRunReport): Effect.Effect<void, PlatformError.PlatformError, FileSystem.FileSystem> {
+    return writeJsonReport(path, report);
 }
 
-export function writeOperationExecutionReport(path: string, report: ClassifierPackageOperationExecutionReport): void {
-    mkdirSync(dirname(path), { recursive: true });
-    writeFileSync(path, `${JSON.stringify(report, null, 2)}\n`);
+export function writeOperationExecutionPlanReport(path: string, report: ClassifierPackageOperationExecutionPlanReport): Effect.Effect<void, PlatformError.PlatformError, FileSystem.FileSystem> {
+    return writeJsonReport(path, report);
 }
 
-export function writePackagesOperationsReport(path: string, report: ClassifierPackagesOperationsReport): void {
-    mkdirSync(dirname(path), { recursive: true });
-    writeFileSync(path, `${JSON.stringify(report, null, 2)}\n`);
+export function writeOperationExecutionReport(path: string, report: ClassifierPackageOperationExecutionReport): Effect.Effect<void, PlatformError.PlatformError, FileSystem.FileSystem> {
+    return writeJsonReport(path, report);
 }
 
-export function writeExecutionHistoryReport(path: string, report: ClassifierPackageExecutionHistoryReport): void {
-    mkdirSync(dirname(path), { recursive: true });
-    writeFileSync(path, `${JSON.stringify(report, null, 2)}\n`);
+export function writePackagesOperationsReport(path: string, report: ClassifierPackagesOperationsReport): Effect.Effect<void, PlatformError.PlatformError, FileSystem.FileSystem> {
+    return writeJsonReport(path, report);
 }
 
-export function writeExecutionFactProjectionReport(path: string, report: ClassifierPackageExecutionFactProjectionReport): void {
-    mkdirSync(dirname(path), { recursive: true });
-    writeFileSync(path, `${JSON.stringify(report, null, 2)}\n`);
+export function writeExecutionHistoryReport(path: string, report: ClassifierPackageExecutionHistoryReport): Effect.Effect<void, PlatformError.PlatformError, FileSystem.FileSystem> {
+    return writeJsonReport(path, report);
 }
 
-export function writeExecutionSurrealWritePlanReport(path: string, report: ClassifierPackageExecutionSurrealWritePlanReport): void {
-    mkdirSync(dirname(path), { recursive: true });
-    writeFileSync(path, `${JSON.stringify(report, null, 2)}\n`);
+export function writeExecutionFactProjectionReport(path: string, report: ClassifierPackageExecutionFactProjectionReport): Effect.Effect<void, PlatformError.PlatformError, FileSystem.FileSystem> {
+    return writeJsonReport(path, report);
 }
 
-export function writeExecutionSurrealApplyReport(path: string, report: ClassifierPackageExecutionSurrealApplyReport): void {
-    mkdirSync(dirname(path), { recursive: true });
-    writeFileSync(path, `${JSON.stringify(report, null, 2)}\n`);
+export function writeExecutionSurrealWritePlanReport(path: string, report: ClassifierPackageExecutionSurrealWritePlanReport): Effect.Effect<void, PlatformError.PlatformError, FileSystem.FileSystem> {
+    return writeJsonReport(path, report);
 }
 
-export function writeExecutionGraphHealthReport(path: string, report: ClassifierPackageExecutionGraphHealthReport): void {
-    mkdirSync(dirname(path), { recursive: true });
-    writeFileSync(path, `${JSON.stringify(report, null, 2)}\n`);
+export function writeExecutionSurrealApplyReport(path: string, report: ClassifierPackageExecutionSurrealApplyReport): Effect.Effect<void, PlatformError.PlatformError, FileSystem.FileSystem> {
+    return writeJsonReport(path, report);
+}
+
+export function writeExecutionGraphHealthReport(path: string, report: ClassifierPackageExecutionGraphHealthReport): Effect.Effect<void, PlatformError.PlatformError, FileSystem.FileSystem> {
+    return writeJsonReport(path, report);
 }
 
 export function writeClassifierGraphQuerySuggestionRoutingSummary(
     path: string,
     report: ClassifierGraphQuerySuggestionRoutingSummary,
-): void {
-    mkdirSync(dirname(path), { recursive: true });
-    writeFileSync(path, `${JSON.stringify(report, null, 2)}\n`);
+): Effect.Effect<void, PlatformError.PlatformError, FileSystem.FileSystem> {
+    return writeJsonReport(path, report);
 }
 
-export function writeClassifierLifecycleInsightReport(path: string, report: ClassifierLifecycleInsightReport): void {
-    mkdirSync(dirname(path), { recursive: true });
-    writeFileSync(path, `${JSON.stringify(report, null, 2)}\n`);
+export function writeClassifierLifecycleInsightReport(path: string, report: ClassifierLifecycleInsightReport): Effect.Effect<void, PlatformError.PlatformError, FileSystem.FileSystem> {
+    return writeJsonReport(path, report);
 }
 
-export function writeClassifierLifecycleRoutingSummaryReport(path: string, report: ClassifierLifecycleRoutingSummaryReport): void {
-    mkdirSync(dirname(path), { recursive: true });
-    writeFileSync(path, `${JSON.stringify(report, null, 2)}\n`);
+export function writeClassifierLifecycleRoutingSummaryReport(path: string, report: ClassifierLifecycleRoutingSummaryReport): Effect.Effect<void, PlatformError.PlatformError, FileSystem.FileSystem> {
+    return writeJsonReport(path, report);
 }
 
-export function writeClassifierLifecycleRouteBindingPreviewReport(path: string, report: ClassifierLifecycleRouteBindingPreviewReport): void {
-    mkdirSync(dirname(path), { recursive: true });
-    writeFileSync(path, `${JSON.stringify(report, null, 2)}\n`);
+export function writeClassifierLifecycleRouteBindingPreviewReport(path: string, report: ClassifierLifecycleRouteBindingPreviewReport): Effect.Effect<void, PlatformError.PlatformError, FileSystem.FileSystem> {
+    return writeJsonReport(path, report);
 }
 
-export function writeClassifierLifecycleRouteExecutionPlanReport(path: string, report: ClassifierLifecycleRouteExecutionPlanReport): void {
-    mkdirSync(dirname(path), { recursive: true });
-    writeFileSync(path, `${JSON.stringify(report, null, 2)}\n`);
+export function writeClassifierLifecycleRouteExecutionPlanReport(path: string, report: ClassifierLifecycleRouteExecutionPlanReport): Effect.Effect<void, PlatformError.PlatformError, FileSystem.FileSystem> {
+    return writeJsonReport(path, report);
 }
 
-export function writeClassifierLifecycleRouteExecutionReport(path: string, report: ClassifierLifecycleRouteExecutionReport): void {
-    mkdirSync(dirname(path), { recursive: true });
-    writeFileSync(path, `${JSON.stringify(report, null, 2)}\n`);
+export function writeClassifierLifecycleRouteExecutionReport(path: string, report: ClassifierLifecycleRouteExecutionReport): Effect.Effect<void, PlatformError.PlatformError, FileSystem.FileSystem> {
+    return writeJsonReport(path, report);
 }
 
-export function writeClassifierLifecycleRouteExecutionInspectionReport(path: string, report: ClassifierLifecycleRouteExecutionInspectionReport): void {
-    mkdirSync(dirname(path), { recursive: true });
-    writeFileSync(path, `${JSON.stringify(report, null, 2)}\n`);
+export function writeClassifierLifecycleRouteExecutionInspectionReport(path: string, report: ClassifierLifecycleRouteExecutionInspectionReport): Effect.Effect<void, PlatformError.PlatformError, FileSystem.FileSystem> {
+    return writeJsonReport(path, report);
 }

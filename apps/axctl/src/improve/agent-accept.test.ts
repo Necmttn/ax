@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { Effect, Layer } from "effect";
+import { BunFileSystem, BunPath } from "@effect/platform-bun";
 import { mkdtempSync, readFileSync, existsSync, readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -7,6 +8,10 @@ import { buildAgentAcceptPrompt, runAgentAccept } from "./agent-accept.ts";
 import { acceptProposal } from "./actions.ts";
 import { SurrealClient } from "@ax/lib/db";
 import { DbError } from "@ax/lib/errors";
+
+// Real Bun-backed FS + Path: acceptProposal + runAgentAccept now require
+// FileSystem (forced dependency edit on the migrated production code).
+const fsLayer = Layer.mergeAll(BunFileSystem.layer, BunPath.layer);
 
 describe("buildAgentAcceptPrompt", () => {
     const ctx = {
@@ -54,9 +59,10 @@ describe("buildAgentAcceptPrompt", () => {
 // ---------------------------------------------------------------------------
 const fakeRowsLayer = (fixtures: ReadonlyArray<unknown[]>) => {
     let i = 0;
-    return Layer.succeed(SurrealClient, {
+    const db = Layer.succeed(SurrealClient, {
         query: <T>(_: string) => Effect.sync(() => (fixtures[i++] ?? []) as unknown as T),
     } as never);
+    return Layer.mergeAll(db, fsLayer);
 };
 
 describe("acceptProposal - task emission", () => {
@@ -404,7 +410,7 @@ const fakeRowsLayerWithFailure = (
     failPattern: RegExp,
 ) => {
     let i = 0;
-    return Layer.succeed(SurrealClient, {
+    const db = Layer.succeed(SurrealClient, {
         query: <T>(sql: string): Effect.Effect<T, DbError> => {
             if (failPattern.test(sql)) {
                 return Effect.fail(new DbError({ operation: "query", message: "simulated DB failure", sql }));
@@ -412,7 +418,47 @@ const fakeRowsLayerWithFailure = (
             return Effect.sync(() => (fixtures[i++] ?? []) as unknown as T);
         },
     } as never);
+    return Layer.mergeAll(db, fsLayer);
 };
+
+describe("acceptProposal - atomic write success", () => {
+    test("DB success → content committed to final path, no .tmp file left behind", async () => {
+        const taskDir = mkdtempSync(join(tmpdir(), "ax-atomic-ok-"));
+        const longSig = "guidance__atomic_ok42";
+        const proposalRow = {
+            id: "proposal:atmok1",
+            form: "guidance",
+            title: "Atomic write success",
+            hypothesis: "Verify write-temp then rename commits the final file",
+            dedupe_sig: longSig,
+            status: "open",
+            skill_payload: null,
+            guidance_payload: {
+                file_target: "~/.claude/CLAUDE.md",
+                section: null,
+                suggested_text: "Atomic write body.",
+            },
+        };
+
+        const layer = fakeRowsLayer([[[proposalRow]], [[]]]);
+        const result = await Effect.runPromise(
+            acceptProposal({ sigOrId: longSig, taskDir }).pipe(Effect.provide(layer)),
+        );
+
+        expect(result.status).toBe("ok");
+        // Final file lands at <taskDir>/<sig>.md (the rename target).
+        const taskPath = join(taskDir, `${longSig}.md`);
+        expect(result.task_path).toBe(taskPath);
+        expect(existsSync(taskPath)).toBe(true);
+        // Rendered task content was committed by the rename (not left in the tmp).
+        expect(readFileSync(taskPath, "utf-8")).toContain(`<!--ax:${longSig}-->`);
+        // The staged temp file must have been renamed away - nothing .tmp remains.
+        const leftovers = readdirSync(taskDir).filter((f) => f.includes(".tmp."));
+        expect(leftovers).toHaveLength(0);
+        // Exactly the one committed file in the dir.
+        expect(readdirSync(taskDir)).toEqual([`${longSig}.md`]);
+    });
+});
 
 describe("acceptProposal - atomic write on DB failure", () => {
     test("DB failure after tmp write → neither taskPath nor tmpPath exists", async () => {
@@ -461,15 +507,17 @@ describe("runAgentAccept smoke", () => {
             return;
         }
         // Smoke path - opt-in, expensive. Requires `claude` on PATH.
-        const result = await runAgentAccept({
-            skillPath: "/tmp/ax-agent-smoke/SKILL.md",
-            proposalTitle: "smoke",
-            hypothesis: "h",
-            triggerPattern: "t",
-            proposedBehavior: "b",
-            retroSummaries: ["session x: Bash failed ×1"],
-            relatedSkillsDir: "/tmp",
-        });
+        const result = await Effect.runPromise(
+            runAgentAccept({
+                skillPath: "/tmp/ax-agent-smoke/SKILL.md",
+                proposalTitle: "smoke",
+                hypothesis: "h",
+                triggerPattern: "t",
+                proposedBehavior: "b",
+                retroSummaries: ["session x: Bash failed ×1"],
+                relatedSkillsDir: "/tmp",
+            }).pipe(Effect.provide(fsLayer)),
+        );
         expect(result.exitCode).toBeGreaterThanOrEqual(0);
     });
 });

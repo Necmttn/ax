@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { Effect } from "effect";
+import { Effect, type FileSystem, Layer, type Path } from "effect";
+import { BunFileSystem, BunPath } from "@effect/platform-bun";
 import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -50,13 +51,18 @@ function clientWithWindows(
 }
 
 const runWithDb = <A>(
-    effect: Effect.Effect<A, unknown, LabelMiningService | SurrealClient>,
+    effect: Effect.Effect<
+        A,
+        unknown,
+        LabelMiningService | SurrealClient | FileSystem.FileSystem | Path.Path
+    >,
     client: SurrealClientShape,
 ): Promise<A> =>
     Effect.runPromise(
         effect.pipe(
             Effect.provide(LabelMiningServiceLive),
             Effect.provideService(SurrealClient, client),
+            Effect.provide(Layer.merge(BunFileSystem.layer, BunPath.layer)),
         ),
     );
 

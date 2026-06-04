@@ -7,8 +7,14 @@ import { toolCallRecordKey, turnRecordKey } from "./record-keys.ts";
 import {
     __testBuildPiBatchStatements,
     __testExtractPiJsonlLines,
+    __testWalkJsonlFiles,
     textFromPiContent,
 } from "./pi.ts";
+import { mkdir, mkdtemp, symlink, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { Effect, Layer } from "effect";
+import { BunFileSystem, BunPath } from "@effect/platform-bun";
 
 describe("Pi JSONL extraction", () => {
     const extractAgentEventKeysAndSeqs = (statements: readonly string[]): { key: string; seq: number }[] =>
@@ -602,5 +608,58 @@ describe("Pi JSONL extraction", () => {
         expect(turnStatement).toContain("session: session:`pi\\`session\\nunsafe`");
         expect(turnStatement).toContain('ts: d"2026-05-29T06:00:01.000Z"');
         expect(turnStatement).not.toContain("session: session:`pi`session");
+    });
+});
+
+describe("Pi JSONL directory walk (no-follow symlink semantics)", () => {
+    const BunFsLayer = Layer.merge(BunFileSystem.layer, BunPath.layer);
+
+    const walk = (root: string): Promise<{ path: string }[]> =>
+        Effect.runPromise(__testWalkJsonlFiles(root, 0).pipe(Effect.provide(BunFsLayer)));
+
+    // Regression: the old walk classified entries via `Dirent.isDirectory()` /
+    // `isFile()` which do NOT follow symlinks. The @effect/platform migration
+    // briefly used `fs.stat().type` (FOLLOWS), which would (a) recurse into a
+    // symlinked dir → escape the tree / hang on a cycle, and (b) ingest a
+    // symlinked `.jsonl`. classifyNoFollow restores Dirent semantics.
+    test("skips a symlinked directory and a symlinked .jsonl under piDir", async () => {
+        const base = await mkdtemp(join(tmpdir(), "ax-pi-walk-"));
+        const piDir = join(base, "pi");
+        await mkdir(piDir, { recursive: true });
+
+        // A real .jsonl is collected.
+        await writeFile(join(piDir, "real.jsonl"), "{}\n");
+
+        // An out-of-tree dir with a .jsonl we must NOT reach via a symlinked dir.
+        const outside = join(base, "outside");
+        await mkdir(outside, { recursive: true });
+        await writeFile(join(outside, "leak.jsonl"), "{}\n");
+        await symlink(outside, join(piDir, "linked-dir"));
+
+        // A symlinked .jsonl pointing at a real .jsonl must be skipped (the link
+        // is not a real file per Dirent semantics).
+        await symlink(join(outside, "leak.jsonl"), join(piDir, "linked.jsonl"));
+
+        const found = (await walk(piDir)).map((f) => f.path).sort();
+
+        expect(found).toEqual([join(piDir, "real.jsonl")]);
+        expect(found.some((p) => p.includes("leak.jsonl"))).toBe(false);
+        expect(found.some((p) => p.includes("linked.jsonl"))).toBe(false);
+    });
+
+    // A symlink CYCLE must not hang: the cycle link classifies as "SymbolicLink"
+    // and is never recursed into, so the walk terminates.
+    test("does not infinitely recurse on a symlink cycle", async () => {
+        const base = await mkdtemp(join(tmpdir(), "ax-pi-cycle-"));
+        const piDir = join(base, "pi");
+        const sub = join(piDir, "sub");
+        await mkdir(sub, { recursive: true });
+        await writeFile(join(sub, "ok.jsonl"), "{}\n");
+        // sub/loop -> piDir (a cycle).
+        await symlink(piDir, join(sub, "loop"));
+
+        const found = (await walk(piDir)).map((f) => f.path);
+
+        expect(found).toEqual([join(sub, "ok.jsonl")]);
     });
 });

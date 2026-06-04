@@ -1,4 +1,4 @@
-import { basename } from "node:path";
+import { posixPath } from "@ax/lib/shared/path";
 import { parseFrontmatter } from "./parse-yaml.ts";
 import type {
     ParsedContentAtom,
@@ -263,7 +263,7 @@ function parseSkill(input: ContentFixtureInput): ParsedContent {
 
 export function decideMarkdownParser(input: ContentFixtureInput): ParserDecision {
     const { frontmatter, body } = parseFrontmatter(input.text);
-    const base = basename(input.path);
+    const base = posixPath.basename(input.path);
     const fm = asRecord(frontmatter);
     const text = `${input.path}\n${input.text}`;
 

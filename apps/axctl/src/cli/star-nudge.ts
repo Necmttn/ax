@@ -7,16 +7,23 @@
 // (`ax star`) or dismisses it (`ax star --done`). Agents and the background
 // watcher run non-TTY, so they never see it.
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { Effect, FileSystem, Layer } from "effect";
+import { BunFileSystem, BunPath } from "@effect/platform-bun";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { orAbsent } from "@ax/lib/shared/fs-error";
+import { posixPath } from "@ax/lib/shared/path";
 
 const REPO = "Necmttn/ax";
 const REPO_URL = `https://github.com/${REPO}`;
 const ONE_DAY_MS = 24 * 60 * 60 * 1000;
 
-const dataDir = (): string => process.env.AX_DATA_DIR ?? join(homedir(), ".local", "share", "ax");
-const statePath = (): string => join(dataDir(), "nudge-state.json");
+const dataDir = (): string => process.env.AX_DATA_DIR ?? posixPath.join(homedir(), ".local", "share", "ax");
+const statePath = (): string => posixPath.join(dataDir(), "nudge-state.json");
+
+// Best-effort I/O runs on the real Bun-backed filesystem, the same backing the
+// CLI uses everywhere else. These ops are intentionally side-effect-isolated:
+// the nudge must never break the CLI, so every failure is swallowed.
+const BunFsLayer = Layer.merge(BunFileSystem.layer, BunPath.layer);
 
 export interface NudgeState {
     /** Set once the user stars or dismisses - the nudge never shows again. */
@@ -91,36 +98,45 @@ export function renderNudge(): string {
     ].join("\n");
 }
 
-function readState(): NudgeState {
-    try {
-        if (!existsSync(statePath())) return {};
-        return JSON.parse(readFileSync(statePath(), "utf8")) as NudgeState;
-    } catch {
-        return {};
-    }
-}
+const readState = (): Effect.Effect<NudgeState, never, FileSystem.FileSystem> =>
+    Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        // Original: existsSync-guard + readFileSync in a try/catch, ANY error
+        // (missing file, unreadable, malformed JSON) -> {}.
+        const raw = yield* fs.readFileString(statePath()).pipe(orAbsent<string | null>(null));
+        if (raw === null) return {};
+        try {
+            return JSON.parse(raw) as NudgeState;
+        } catch {
+            return {};
+        }
+    });
 
-function writeState(next: NudgeState): void {
-    try {
-        mkdirSync(dataDir(), { recursive: true });
-        writeFileSync(statePath(), `${JSON.stringify(next, null, 2)}\n`);
-    } catch {
+const writeState = (next: NudgeState): Effect.Effect<void, never, FileSystem.FileSystem> =>
+    Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
         // best-effort; a read-only data dir must not break the CLI
-    }
-}
+        yield* fs.makeDirectory(dataDir(), { recursive: true }).pipe(orAbsent<void>(undefined));
+        yield* fs
+            .writeFileString(statePath(), `${JSON.stringify(next, null, 2)}\n`)
+            .pipe(orAbsent<void>(undefined));
+    });
 
 /** Best-effort post-command footer. Never throws. */
-export function maybePrintStarNudge(argv: readonly string[]): void {
-    try {
+export function maybePrintStarNudge(argv: readonly string[]): Promise<void> {
+    const program = Effect.gen(function* () {
         const env = readNudgeEnv();
-        const state = readState();
+        const state = yield* readState();
         const now = Date.now();
         if (!shouldShowNudge(state, env, argv, now)) return;
         process.stderr.write(`${renderNudge()}\n`);
-        writeState({ ...state, lastShownAt: now, shownCount: (state.shownCount ?? 0) + 1 });
-    } catch {
+        yield* writeState({ ...state, lastShownAt: now, shownCount: (state.shownCount ?? 0) + 1 });
+    }).pipe(
+        Effect.provide(BunFsLayer),
         // the nudge must never break the CLI
-    }
+        Effect.ignore,
+    );
+    return Effect.runPromise(program);
 }
 
 /**
@@ -128,8 +144,16 @@ export function maybePrintStarNudge(argv: readonly string[]): void {
  * so the reminder stops. Hidden command; the nudge text points users at it.
  */
 export async function cmdStar(args: readonly string[]): Promise<void> {
+    const markStarred = (): Promise<void> =>
+        Effect.runPromise(
+            Effect.gen(function* () {
+                const state = yield* readState();
+                yield* writeState({ ...state, starred: true });
+            }).pipe(Effect.provide(BunFsLayer)),
+        );
+
     if (args.includes("--done") || args.includes("--starred")) {
-        writeState({ ...readState(), starred: true });
+        await markStarred();
         console.log("Thanks - hiding the star reminder.");
         return;
     }
@@ -138,7 +162,7 @@ export async function cmdStar(args: readonly string[]): Promise<void> {
     if (auth.status === 0) {
         const put = spawnSync("gh", ["api", "-X", "PUT", `/user/starred/${REPO}`], { stdio: "ignore" });
         if (put.status === 0) {
-            writeState({ ...readState(), starred: true });
+            await markStarred();
             console.log(`★ Starred ${REPO} - thank you!`);
             return;
         }

@@ -18,10 +18,9 @@
  * to copy the resolution logic.
  */
 
-import { readdir, stat } from "node:fs/promises";
 import { homedir } from "node:os";
-import { join } from "node:path";
-import { Effect } from "effect";
+import { Effect, FileSystem, Path } from "effect";
+import { orAbsent } from "@ax/lib/shared/fs-error";
 import { SurrealClient } from "./db.ts";
 import { toBareSessionId, toSessionRid } from "./shared/session-id.ts";
 
@@ -66,41 +65,63 @@ export function harnessFromPath(path: string): Harness {
     return path.includes("/.codex/sessions/") ? "codex" : "claude";
 }
 
-async function findClaudeJsonl(sessionId: string): Promise<FoundTranscript | null> {
-    const projectsDir = join(homedir(), ".claude", "projects");
-    let subdirs: string[];
-    try { subdirs = await readdir(projectsDir); } catch { return null; }
-    for (const sub of subdirs) {
-        const candidate = join(projectsDir, sub, `${sessionId}.jsonl`);
-        try {
-            await stat(candidate);
-            return { path: candidate, harness: "claude" };
-        } catch { /* not here */ }
-    }
-    return null;
-}
+const findClaudeJsonl = (
+    sessionId: string,
+): Effect.Effect<FoundTranscript | null, never, FileSystem.FileSystem | Path.Path> =>
+    Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const projectsDir = path.join(homedir(), ".claude", "projects");
+        // OLD: readdir(projectsDir) in try/catch → return null. A missing or
+        // unreadable projects dir means "no claude transcript here", so recover
+        // ANY PlatformError to [] then bail with null - orAbsent.
+        const subdirs = yield* fs.readDirectory(projectsDir).pipe(orAbsent([] as string[]));
+        for (const sub of subdirs) {
+            const candidate = path.join(projectsDir, sub, `${sessionId}.jsonl`);
+            // OLD: stat(candidate) in try/catch → continue. A probe for "does
+            // this file exist?" where any failure means "not here" - orAbsent.
+            const here = yield* fs.exists(candidate).pipe(orAbsent(false));
+            if (here) return { path: candidate, harness: "claude" } satisfies FoundTranscript;
+        }
+        return null;
+    });
 
 /** Codex transcripts live under `~/.codex/sessions/YYYY/MM/DD/rollout-{ts}-{sessionId}.jsonl`. */
-async function findCodexJsonl(sessionId: string): Promise<FoundTranscript | null> {
-    const root = join(homedir(), ".codex", "sessions");
-    try {
-        for (const year of await readdir(root)) {
-            const yearDir = join(root, year);
-            for (const month of await readdir(yearDir).catch(() => [])) {
-                const monthDir = join(yearDir, month);
-                for (const day of await readdir(monthDir).catch(() => [])) {
-                    const dayDir = join(monthDir, day);
-                    for (const file of await readdir(dayDir).catch(() => [])) {
+const findCodexJsonl = (
+    sessionId: string,
+): Effect.Effect<FoundTranscript | null, never, FileSystem.FileSystem | Path.Path> =>
+    Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const root = path.join(homedir(), ".codex", "sessions");
+        // OLD: each level's readdir tolerated failure (outer try/catch → root
+        // missing; inner `.catch(() => [])` per level). Every directory listing
+        // recovers ANY PlatformError to [] - orAbsent.
+        const years = yield* fs.readDirectory(root).pipe(orAbsent([] as string[]));
+        for (const year of years) {
+            const yearDir = path.join(root, year);
+            const months = yield* fs.readDirectory(yearDir).pipe(orAbsent([] as string[]));
+            for (const month of months) {
+                const monthDir = path.join(yearDir, month);
+                const days = yield* fs.readDirectory(monthDir).pipe(orAbsent([] as string[]));
+                for (const day of days) {
+                    const dayDir = path.join(monthDir, day);
+                    const fileEntries = yield* fs
+                        .readDirectory(dayDir)
+                        .pipe(orAbsent([] as string[]));
+                    for (const file of fileEntries) {
                         if (file.endsWith(`-${sessionId}.jsonl`)) {
-                            return { path: join(dayDir, file), harness: "codex" };
+                            return {
+                                path: path.join(dayDir, file),
+                                harness: "codex",
+                            } satisfies FoundTranscript;
                         }
                     }
                 }
             }
         }
-    } catch { /* root missing */ }
-    return null;
-}
+        return null;
+    });
 
 /** Pull the persisted transcript path (`raw_file`) off the session row.
  *  Defensive: DB error or missing row degrades to null so the search-based
@@ -124,26 +145,31 @@ const resolveRawFileFromDb = (sessionId: string): Effect.Effect<string | null, n
     ));
 
 /** Disk-only resolution: try the hint, then claude search, then codex search.
- *  Pure async (no DB dep) so it can be tested without a SurrealClient layer. */
-async function findOnDisk(
+ *  No DB dep so it can be exercised without a SurrealClient layer. */
+const findOnDisk = (
     sessionId: string,
     rawFileHint: string | null,
-): Promise<FoundTranscript> {
-    // Hinted path wins when it actually exists on disk - this is how
-    // synthetic session ids (e.g. claude-subagent-<agentId>) resolve to
-    // their real jsonl, since the hint was persisted at ingest time.
-    if (rawFileHint) {
-        try {
-            await stat(rawFileHint);
-            return { path: rawFileHint, harness: harnessFromPath(rawFileHint) };
-        } catch { /* hint stale - fall through to search */ }
-    }
-    const claude = await findClaudeJsonl(sessionId);
-    if (claude) return claude;
-    const codex = await findCodexJsonl(sessionId);
-    if (codex) return codex;
-    throw new TranscriptNotFoundError(sessionId);
-}
+): Effect.Effect<FoundTranscript, TranscriptNotFoundError, FileSystem.FileSystem | Path.Path> =>
+    Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        // Hinted path wins when it actually exists on disk - this is how
+        // synthetic session ids (e.g. claude-subagent-<agentId>) resolve to
+        // their real jsonl, since the hint was persisted at ingest time.
+        if (rawFileHint) {
+            // OLD: stat(rawFileHint) in try/catch → fall through to search. A
+            // probe where any failure means "hint stale, keep searching" -
+            // orAbsent.
+            const hintExists = yield* fs.exists(rawFileHint).pipe(orAbsent(false));
+            if (hintExists) {
+                return { path: rawFileHint, harness: harnessFromPath(rawFileHint) } satisfies FoundTranscript;
+            }
+        }
+        const claude = yield* findClaudeJsonl(sessionId);
+        if (claude) return claude;
+        const codex = yield* findCodexJsonl(sessionId);
+        if (codex) return codex;
+        return yield* Effect.fail(new TranscriptNotFoundError(sessionId));
+    });
 
 /**
  * Locate the JSONL transcript for a session, preferring the persisted
@@ -152,16 +178,14 @@ async function findOnDisk(
  */
 export const locateTranscript = (
     sessionId: string,
-): Effect.Effect<FoundTranscript, TranscriptNotFoundError, SurrealClient> =>
+): Effect.Effect<
+    FoundTranscript,
+    TranscriptNotFoundError,
+    SurrealClient | FileSystem.FileSystem | Path.Path
+> =>
     Effect.gen(function* () {
         const hint = yield* resolveRawFileFromDb(sessionId);
-        return yield* Effect.tryPromise({
-            try: () => findOnDisk(sessionId, hint),
-            catch: (err) =>
-                err instanceof TranscriptNotFoundError
-                    ? err
-                    : new TranscriptNotFoundError(sessionId),
-        });
+        return yield* findOnDisk(sessionId, hint);
     });
 
 /** Disk-only variant exposed for tests that don't want to spin up a fake
@@ -169,4 +193,5 @@ export const locateTranscript = (
 export const locateTranscriptOnDisk = (
     sessionId: string,
     rawFileHint: string | null,
-): Promise<FoundTranscript> => findOnDisk(sessionId, rawFileHint);
+): Effect.Effect<FoundTranscript, TranscriptNotFoundError, FileSystem.FileSystem | Path.Path> =>
+    findOnDisk(sessionId, rawFileHint);

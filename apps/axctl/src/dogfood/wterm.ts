@@ -1,13 +1,52 @@
-import { chmod, mkdir, mkdtemp } from "node:fs/promises";
-import { existsSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { Effect } from "effect";
+import { Effect, FileSystem } from "effect";
+import { BunFileSystem } from "@effect/platform-bun";
 import type { ServerWebSocket } from "bun";
 import { SurrealClient } from "@ax/lib/db";
 import { AppLayer } from "@ax/lib/layers";
 import { recordRef } from "../ingest/evidence-writers.ts";
+import { orAbsent } from "@ax/lib/shared/fs-error";
+import { posixPath } from "@ax/lib/shared/path";
 import { surrealJson, surrealString } from "@ax/lib/shared/surql";
+
+/** Bun-backed FS + Path layer for the standalone fs Effects this module runs
+ *  via `Effect.runPromise` (the dogfood server is plain async, not Effect). */
+const WtermFsLayer = BunFileSystem.layer;
+
+/** Probe a path for existence, recovering ANY failure to `false` (the original
+ *  `existsSync` probes treated every fault as "absent"). */
+const exists = (path: string): Promise<boolean> =>
+    Effect.runPromise(
+        Effect.gen(function* () {
+            const fs = yield* FileSystem.FileSystem;
+            return yield* fs.exists(path).pipe(orAbsent(false));
+        }).pipe(Effect.provide(WtermFsLayer)),
+    );
+
+interface DogfoodScratch {
+    readonly home: string;
+    readonly scratch: string;
+}
+
+/** Create the dogfood scratch tree: a fresh temp dir with `home/` (plus the
+ *  three harness subdirs) and `scratch/`. Mirrors the original
+ *  `mkdtemp(join(tmpdir(), "axctl-wterm-dogfood-"))` + mkdir sequence exactly;
+ *  `makeTempDirectory({ prefix })` creates `<tmpdir>/<prefix>XXXXXX`. Failures
+ *  propagate (the originals had no tolerance), surfaced via Effect.runPromise. */
+const makeDogfoodScratch = (): Promise<DogfoodScratch> =>
+    Effect.runPromise(
+        Effect.gen(function* () {
+            const fs = yield* FileSystem.FileSystem;
+            const workRoot = yield* fs.makeTempDirectory({ prefix: "axctl-wterm-dogfood-" });
+            const home = posixPath.join(workRoot, "home");
+            const scratch = posixPath.join(workRoot, "scratch");
+            yield* fs.makeDirectory(home, { recursive: true });
+            yield* fs.makeDirectory(scratch, { recursive: true });
+            for (const dir of [".claude", ".codex", ".agents"]) {
+                yield* fs.makeDirectory(posixPath.join(home, dir), { recursive: true });
+            }
+            return { home, scratch };
+        }).pipe(Effect.provide(WtermFsLayer)),
+    );
 
 export type DogfoodScenario = "axctl-setup" | "interactive";
 export type DogfoodTransport = "auto" | "pty" | "process";
@@ -90,20 +129,23 @@ function shortHash(value: string): string {
     return Bun.hash(value).toString(16).padStart(16, "0");
 }
 
-function repoRoot(): string {
+async function repoRoot(): Promise<string> {
     if (process.env.AX_REPO_ROOT) return process.env.AX_REPO_ROOT;
-    if (existsSync(join(process.cwd(), "package.json")) && existsSync(join(process.cwd(), "node_modules"))) {
+    if (
+        (await exists(posixPath.join(process.cwd(), "package.json")))
+        && (await exists(posixPath.join(process.cwd(), "node_modules")))
+    ) {
         return process.cwd();
     }
-    return join(import.meta.dir, "..", "..");
+    return posixPath.join(import.meta.dir, "..", "..");
 }
 
-function currentAxctlPath(root: string): string {
-    if (!process.argv[1]?.endsWith(".ts") && existsSync(process.execPath)) {
+async function currentAxctlPath(root: string): Promise<string> {
+    if (!process.argv[1]?.endsWith(".ts") && (await exists(process.execPath))) {
         return process.execPath;
     }
-    if (existsSync(join(root, "dist", "axctl"))) return join(root, "dist", "axctl");
-    return join(root, "bin", "axctl");
+    if (await exists(posixPath.join(root, "dist", "axctl"))) return posixPath.join(root, "dist", "axctl");
+    return posixPath.join(root, "bin", "axctl");
 }
 
 export function parseDogfoodTerminalArgs(args: readonly string[]): DogfoodTerminalArgs {
@@ -177,30 +219,24 @@ export function resolveDogfoodAgentPreset(agent: DogfoodAgent = "shell"): Dogfoo
     }
 }
 
-export async function createAxctlSetupDemoScript(root = repoRoot()): Promise<DogfoodTerminalSession> {
-    const workRoot = await mkdtemp(join(tmpdir(), "axctl-wterm-dogfood-"));
-    const home = join(workRoot, "home");
-    const scratch = join(workRoot, "scratch");
-    await mkdir(home, { recursive: true });
-    await mkdir(scratch, { recursive: true });
-    for (const dir of [".claude", ".codex", ".agents"]) {
-        await mkdir(join(home, dir), { recursive: true });
-    }
+export async function createAxctlSetupDemoScript(root?: string): Promise<DogfoodTerminalSession> {
+    const resolvedRoot = root ?? (await repoRoot());
+    const { home, scratch } = await makeDogfoodScratch();
 
-    const axctl = currentAxctlPath(root);
+    const axctl = await currentAxctlPath(resolvedRoot);
 
     const lines = [
         "set -euo pipefail",
         "clear",
         "printf '\\033[1;36maxctl wterm dogfood: fresh setup demo\\033[0m\\r\\n'",
-        `printf 'repo: %s\\r\\n' ${JSON.stringify(root)}`,
+        `printf 'repo: %s\\r\\n' ${JSON.stringify(resolvedRoot)}`,
         `printf 'scratch home: %s\\r\\n\\r\\n' ${JSON.stringify(home)}`,
         "printf '$ axctl --help\\r\\n'",
         `${JSON.stringify(axctl)} --help | sed -n '1,18p'`,
         "printf '\\r\\n$ HOME=<scratch> axctl doctor --json\\r\\n'",
         `HOME=${JSON.stringify(home)} ${JSON.stringify(axctl)} doctor --json`,
         "printf '\\r\\n$ host agent tracks harness dirs in git\\r\\n'",
-        `for d in ${JSON.stringify(join(home, ".claude"))} ${JSON.stringify(join(home, ".codex"))} ${JSON.stringify(join(home, ".agents"))}; do`,
+        `for d in ${JSON.stringify(posixPath.join(home, ".claude"))} ${JSON.stringify(posixPath.join(home, ".codex"))} ${JSON.stringify(posixPath.join(home, ".agents"))}; do`,
         "  git -C \"$d\" init -q",
         "  cat >\"$d/.gitignore\" <<'EOF'",
         "projects/",
@@ -240,14 +276,7 @@ export async function createInteractiveDogfoodSession(options: {
     readonly command?: string;
     readonly successMarker?: string;
 }): Promise<DogfoodTerminalSession> {
-    const workRoot = await mkdtemp(join(tmpdir(), "axctl-wterm-dogfood-"));
-    const home = join(workRoot, "home");
-    const scratch = join(workRoot, "scratch");
-    await mkdir(home, { recursive: true });
-    await mkdir(scratch, { recursive: true });
-    for (const dir of [".claude", ".codex", ".agents"]) {
-        await mkdir(join(home, dir), { recursive: true });
-    }
+    const { home, scratch } = await makeDogfoodScratch();
     const preset = resolveDogfoodAgentPreset(options.agent ?? "shell");
     const command = options.command?.trim();
     return {
@@ -417,20 +446,26 @@ async function persistDogfoodResult(result: DogfoodResult): Promise<boolean> {
 
 async function ensureNodePtySpawnHelperExecutable(root: string): Promise<void> {
     const arch = process.arch === "arm64" ? "darwin-arm64" : "darwin-x64";
-    const helper = join(root, "node_modules", "node-pty", "prebuilds", arch, "spawn-helper");
-    if (!existsSync(helper)) return;
-    await chmod(helper, 0o755);
+    const helper = posixPath.join(root, "node_modules", "node-pty", "prebuilds", arch, "spawn-helper");
+    if (!(await exists(helper))) return;
+    // Original `chmod` had no tolerance; surface the failure (dies via runPromise).
+    await Effect.runPromise(
+        Effect.gen(function* () {
+            const fs = yield* FileSystem.FileSystem;
+            yield* fs.chmod(helper, 0o755);
+        }).pipe(Effect.provide(WtermFsLayer)),
+    );
 }
 
 function ptySidecarPath(root: string): string {
-    return join(root, "src", "dogfood", "pty-sidecar.mjs");
+    return posixPath.join(root, "src", "dogfood", "pty-sidecar.mjs");
 }
 
 async function canUsePtyTransport(root: string): Promise<{ readonly ok: boolean; readonly reason?: string }> {
-    if (!existsSync(join(root, "node_modules", "node-pty"))) {
+    if (!(await exists(posixPath.join(root, "node_modules", "node-pty")))) {
         return { ok: false, reason: "node-pty is not installed" };
     }
-    if (!existsSync(ptySidecarPath(root))) {
+    if (!(await exists(ptySidecarPath(root)))) {
         return { ok: false, reason: "PTY sidecar script is missing" };
     }
     if (Bun.which("node") === null) {
@@ -457,18 +492,19 @@ async function resolveEffectiveTransport(
 }
 
 async function serveNodeModuleFile(pathname: string): Promise<Response | null> {
+    const root = await repoRoot();
     const mappings: Record<string, string> = {
-        "/vendor/@wterm/dom/index.js": join(repoRoot(), "node_modules", "@wterm", "dom", "dist", "index.js"),
-        "/vendor/@wterm/dom/wterm.js": join(repoRoot(), "node_modules", "@wterm", "dom", "dist", "wterm.js"),
-        "/vendor/@wterm/dom/renderer.js": join(repoRoot(), "node_modules", "@wterm", "dom", "dist", "renderer.js"),
-        "/vendor/@wterm/dom/input.js": join(repoRoot(), "node_modules", "@wterm", "dom", "dist", "input.js"),
-        "/vendor/@wterm/dom/debug.js": join(repoRoot(), "node_modules", "@wterm", "dom", "dist", "debug.js"),
-        "/vendor/@wterm/core/index.js": join(repoRoot(), "node_modules", "@wterm", "core", "dist", "index.js"),
-        "/vendor/@wterm/core/terminal-core.js": join(repoRoot(), "node_modules", "@wterm", "core", "dist", "terminal-core.js"),
-        "/vendor/@wterm/core/wasm-bridge.js": join(repoRoot(), "node_modules", "@wterm", "core", "dist", "wasm-bridge.js"),
-        "/vendor/@wterm/core/wasm-inline.js": join(repoRoot(), "node_modules", "@wterm", "core", "dist", "wasm-inline.js"),
-        "/vendor/@wterm/core/transport.js": join(repoRoot(), "node_modules", "@wterm", "core", "dist", "transport.js"),
-        "/vendor/wterm.css": join(repoRoot(), "node_modules", "@wterm", "dom", "src", "terminal.css"),
+        "/vendor/@wterm/dom/index.js": posixPath.join(root, "node_modules", "@wterm", "dom", "dist", "index.js"),
+        "/vendor/@wterm/dom/wterm.js": posixPath.join(root, "node_modules", "@wterm", "dom", "dist", "wterm.js"),
+        "/vendor/@wterm/dom/renderer.js": posixPath.join(root, "node_modules", "@wterm", "dom", "dist", "renderer.js"),
+        "/vendor/@wterm/dom/input.js": posixPath.join(root, "node_modules", "@wterm", "dom", "dist", "input.js"),
+        "/vendor/@wterm/dom/debug.js": posixPath.join(root, "node_modules", "@wterm", "dom", "dist", "debug.js"),
+        "/vendor/@wterm/core/index.js": posixPath.join(root, "node_modules", "@wterm", "core", "dist", "index.js"),
+        "/vendor/@wterm/core/terminal-core.js": posixPath.join(root, "node_modules", "@wterm", "core", "dist", "terminal-core.js"),
+        "/vendor/@wterm/core/wasm-bridge.js": posixPath.join(root, "node_modules", "@wterm", "core", "dist", "wasm-bridge.js"),
+        "/vendor/@wterm/core/wasm-inline.js": posixPath.join(root, "node_modules", "@wterm", "core", "dist", "wasm-inline.js"),
+        "/vendor/@wterm/core/transport.js": posixPath.join(root, "node_modules", "@wterm", "core", "dist", "transport.js"),
+        "/vendor/wterm.css": posixPath.join(root, "node_modules", "@wterm", "dom", "src", "terminal.css"),
     };
     const filePath = mappings[pathname];
     if (!filePath) return null;
@@ -481,7 +517,7 @@ async function serveNodeModuleFile(pathname: string): Promise<Response | null> {
 export async function startWtermDogfoodServer(
     args: DogfoodTerminalArgs,
 ): Promise<DogfoodTerminalServer> {
-    const root = repoRoot();
+    const root = await repoRoot();
     const effective = await resolveEffectiveTransport(args.transport, root);
     if (args.scenario === "interactive" && effective.transport !== "pty") {
         throw new Error("interactive dogfood requires PTY transport; install node-pty/node or use axctl-setup");

@@ -23,10 +23,10 @@
  * relations.
  */
 
-import { Effect } from "effect";
-import { existsSync } from "node:fs";
+import { Effect, FileSystem } from "effect";
 import { SurrealClient } from "@ax/lib/db";
 import type { DbError } from "@ax/lib/errors";
+import { orAbsent } from "@ax/lib/shared/fs-error";
 import { prettyPrint } from "@ax/lib/json";
 import {
     recordRef,
@@ -94,7 +94,10 @@ const fail = (message: string): never => {
  */
 export const parseRetroPlanArgs = (
     argv: readonly string[],
-    options: { readonly checkPlanPath?: boolean } = { checkPlanPath: true },
+    // `checkPlanPath` is accepted for backwards-compatible call sites. The
+    // plan-path existence probe now lives in `cmdRetroPlan` (it needs the
+    // injected FileSystem); this pure parser does no I/O.
+    _options: { readonly checkPlanPath?: boolean } = { checkPlanPath: true },
 ): RetroPlanArgs => {
     const args = [...argv];
     const slug = flagValue(args, "slug");
@@ -133,10 +136,6 @@ export const parseRetroPlanArgs = (
     if (!Number.isFinite(frequency) || frequency <= 0) {
         fail(`--frequency must be a positive integer (got ${frequencyRaw})`);
     }
-    if (options.checkPlanPath && !existsSync(planPath as string)) {
-        fail(`--plan-path file not found: ${planPath}`);
-    }
-
     const evidenceRetros = evidenceRaw
         .split(",")
         .map((s) => s.trim())
@@ -301,9 +300,16 @@ export const buildRetroPlanStatements = (
 
 export const cmdRetroPlan = (
     args: string[],
-): Effect.Effect<void, DbError, SurrealClient> =>
+): Effect.Effect<void, DbError, SurrealClient | FileSystem.FileSystem> =>
     Effect.gen(function* () {
-        const parsed = parseRetroPlanArgs(args);
+        const fs = yield* FileSystem.FileSystem;
+        const parsed = parseRetroPlanArgs(args, { checkPlanPath: false });
+        // Plan-path existence probe (moved out of the pure parser): a missing or
+        // unreadable file fails the command, matching the original existsSync guard.
+        const planExists = yield* fs.exists(parsed.planPath).pipe(orAbsent(false));
+        if (!planExists) {
+            fail(`--plan-path file not found: ${parsed.planPath}`);
+        }
         const built = buildRetroPlanStatements(parsed);
 
         const db = yield* SurrealClient;

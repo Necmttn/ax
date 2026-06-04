@@ -1,11 +1,23 @@
 import { describe, expect, test } from "bun:test";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { Effect, FileSystem, Layer, Path } from "effect";
+import { BunFileSystem, BunPath } from "@effect/platform-bun";
 import {
+    type ClaudeInsightReadResult,
+    __testJsonFiles,
     facetToInsightAndFriction,
     readClaudeInsightConversions,
 } from "./claude-insights.ts";
+
+// Real Bun-backed FileSystem + Path against the tmp-dir fixtures (no mock):
+// readClaudeInsightConversions now requires FileSystem + Path after the
+// @effect/platform migration.
+const FsLayer = Layer.mergeAll(BunFileSystem.layer, BunPath.layer);
+const runFs = <A, E>(
+    eff: Effect.Effect<A, E, FileSystem.FileSystem | Path.Path>,
+): Promise<A> => Effect.runPromise(eff.pipe(Effect.provide(FsLayer)));
 
 describe("Claude insights conversion", () => {
     test("converts a facet into one insight and counted friction events", () => {
@@ -173,11 +185,10 @@ describe("Claude insights conversion", () => {
             );
 
             const warn = console.warn;
-            let result: Awaited<ReturnType<typeof readClaudeInsightConversions>> | null =
-                null;
+            let result: ClaudeInsightReadResult | null = null;
             try {
                 console.warn = () => {};
-                result = await readClaudeInsightConversions(root);
+                result = await runFs(readClaudeInsightConversions(root));
             } finally {
                 console.warn = warn;
             }
@@ -196,6 +207,27 @@ describe("Claude insights conversion", () => {
             });
         } finally {
             await rm(root, { recursive: true, force: true });
+        }
+    });
+});
+
+describe("jsonFiles (no-follow symlink semantics)", () => {
+    // Regression: old code filtered with `Dirent.isFile()` (does NOT follow
+    // symlinks). The @effect/platform migration briefly used `fs.stat().type`
+    // (FOLLOWS), which would accept a symlinked `.json`. classifyNoFollow
+    // restores Dirent semantics: only REAL files are collected.
+    test("collects real .json files but skips a symlinked .json", async () => {
+        const dir = await mkdtemp(join(tmpdir(), "ax-insights-json-"));
+        try {
+            await writeFile(join(dir, "real.json"), "{}\n");
+            // a symlink whose target is a real .json must still be skipped.
+            await symlink(join(dir, "real.json"), join(dir, "linked.json"));
+
+            const files = await runFs(__testJsonFiles(dir));
+
+            expect(files).toEqual([join(dir, "real.json")]);
+        } finally {
+            await rm(dir, { recursive: true, force: true });
         }
     });
 });

@@ -57,8 +57,12 @@ export const makeDirSource = (config: {
     readonly name: SkillScope;
     readonly label: string;
     readonly writable: boolean;
-    readonly roots: (repoRoot: string | null) => ReadonlyArray<SkillDirRef>;
-    readonly installed?: (repoRoot: string | null) => boolean;
+    readonly roots: (
+        repoRoot: string | null,
+    ) => Effect.Effect<ReadonlyArray<SkillDirRef>, never, FileSystem.FileSystem | Path.Path>;
+    readonly installed?: (
+        repoRoot: string | null,
+    ) => Effect.Effect<boolean, never, FileSystem.FileSystem>;
 }): SkillSource => {
     const assertWritable = (
         name: string,
@@ -174,7 +178,12 @@ export const makeDirSource = (config: {
         writable: config.writable,
         roots: config.roots,
         installed:
-            config.installed ?? ((repoRoot) => config.roots(repoRoot).length > 0),
+            config.installed ??
+            ((repoRoot) =>
+                config.roots(repoRoot).pipe(
+                    Effect.map((roots) => roots.length > 0),
+                    Effect.provide(Path.layer),
+                )),
         discover,
         remove,
         park,

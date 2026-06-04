@@ -4,9 +4,16 @@ import { existsSync as fsExists } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Effect, Layer } from "effect";
+import { BunFileSystem, BunPath } from "@effect/platform-bun";
 import { SurrealClient } from "@ax/lib/db";
 import { DbError } from "@ax/lib/errors";
 import { discoverFiles, lintFiles, type LintTarget } from "./lint.ts";
+
+// Real Bun-backed FS + Path for the migrated discoverFiles/lintFiles (forced
+// dependency edit: the production code now requires FileSystem + Path).
+const fsLayer = Layer.mergeAll(BunFileSystem.layer, BunPath.layer);
+const runDiscover = (opts: Parameters<typeof discoverFiles>[0]): Promise<LintTarget[]> =>
+    Effect.runPromise(discoverFiles(opts).pipe(Effect.provide(fsLayer)));
 
 const make = () => {
     const root = mkdtempSync(join(tmpdir(), "ax-lint-"));
@@ -29,9 +36,9 @@ const make = () => {
 };
 
 describe("discoverFiles", () => {
-    test("walks the given roots and returns categorized targets", () => {
+    test("walks the given roots and returns categorized targets", async () => {
         const root = make();
-        const out = discoverFiles({ roots: [root] });
+        const out = await runDiscover({ roots: [root] });
         const paths = out.map((t: LintTarget) => t.path).sort();
         expect(paths).toContain(join(root, "CLAUDE.md"));
         expect(paths).toContain(join(root, "AGENTS.md"));
@@ -42,9 +49,9 @@ describe("discoverFiles", () => {
         expect(paths).toContain(join(root, "tests", "harness", "surrealml-output-required.md"));
     });
 
-    test("tags each target with form=guidance/skill/subagent/hook/automation/harness_check", () => {
+    test("tags each target with form=guidance/skill/subagent/hook/automation/harness_check", async () => {
         const root = make();
-        const out = discoverFiles({ roots: [root] });
+        const out = await runDiscover({ roots: [root] });
         const claude = out.find((t) => t.path.endsWith("CLAUDE.md"));
         expect(claude?.form).toBe("guidance");
         const skill = out.find((t) => t.path.endsWith("SKILL.md"));
@@ -57,12 +64,12 @@ describe("discoverFiles", () => {
         expect(harness?.form).toBe("harness_check");
     });
 
-    test("dedupes guidance aliases that resolve to the same real file", () => {
+    test("dedupes guidance aliases that resolve to the same real file", async () => {
         const root = mkdtempSync(join(tmpdir(), "ax-lint-"));
         writeFileSync(join(root, "CLAUDE.md"), "# shared guidance");
         symlinkSync("CLAUDE.md", join(root, "AGENTS.md"));
 
-        const out = discoverFiles({ roots: [root] });
+        const out = await runDiscover({ roots: [root] });
         const guidance = out.filter((target) => target.form === "guidance");
 
         expect(guidance).toHaveLength(1);
@@ -71,14 +78,17 @@ describe("discoverFiles", () => {
 });
 
 interface QueryRecorder { calls: string[]; }
+// Each recording layer merges the real Bun FS + Path so the migrated lintFiles
+// (now requiring FileSystem) resolves both the mock DB and real fs in one provide.
 const recordingLayer = (recorder: QueryRecorder, fixtures: ReadonlyArray<unknown[]>) => {
     let i = 0;
-    return Layer.succeed(SurrealClient, {
+    const db = Layer.succeed(SurrealClient, {
         query: <T>(sql: string) => Effect.sync(() => {
             recorder.calls.push(sql);
             return [(fixtures[i++] ?? [])] as unknown as T;
         }),
     } as never);
+    return Layer.mergeAll(db, fsLayer);
 };
 
 /** Layer that succeeds for the first N queries, then fails for queries matching `failPattern`. */
@@ -88,7 +98,7 @@ const recordingLayerWithFailure = (
     failPattern: RegExp,
 ) => {
     let i = 0;
-    return Layer.succeed(SurrealClient, {
+    const db = Layer.succeed(SurrealClient, {
         query: <T>(sql: string): Effect.Effect<T, DbError> => {
             recorder.calls.push(sql);
             if (failPattern.test(sql)) {
@@ -97,6 +107,7 @@ const recordingLayerWithFailure = (
             return Effect.sync(() => [(fixtures[i++] ?? [])] as unknown as T);
         },
     } as never);
+    return Layer.mergeAll(db, fsLayer);
 };
 
 describe("lintFiles", () => {

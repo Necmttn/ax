@@ -4,9 +4,8 @@
  * behind on-disk transcripts, the command can auto-backfill (small delta)
  * or warn the user (large delta) instead of silently returning stale rows.
  */
-import { readdir } from "node:fs/promises";
-import { join } from "node:path";
-import { Effect } from "effect";
+import { Effect, FileSystem, Path } from "effect";
+import { orAbsent } from "@ax/lib/shared/fs-error";
 import { SurrealClient } from "./db.ts";
 import type { DbError } from "./errors.ts";
 
@@ -29,21 +28,20 @@ export interface StalenessReport {
 export const detectStaleness = (opts: {
     readonly transcriptsDir: string;
     readonly project: string;
-}): Effect.Effect<StalenessReport, DbError, SurrealClient> =>
+}): Effect.Effect<StalenessReport, DbError, SurrealClient | FileSystem.FileSystem | Path.Path> =>
     Effect.gen(function* () {
         const db = yield* SurrealClient;
-        const projectDir = join(opts.transcriptsDir, opts.project);
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const projectDir = path.join(opts.transcriptsDir, opts.project);
 
-        const onDisk = yield* Effect.promise(async () => {
-            try {
-                const entries = await readdir(projectDir);
-                return entries
-                    .filter((e) => e.endsWith(".jsonl"))
-                    .map((e) => join(projectDir, e));
-            } catch {
-                return [] as string[];
-            }
-        });
+        // OLD: readdir(projectDir) in try/catch → return []. A missing or
+        // unreadable project dir means "nothing on disk to compare", so recover
+        // ANY PlatformError to [] - orAbsent.
+        const entries = yield* fs.readDirectory(projectDir).pipe(orAbsent([] as string[]));
+        const onDisk = entries
+            .filter((e) => e.endsWith(".jsonl"))
+            .map((e) => path.join(projectDir, e));
 
         const rows = yield* db.query<[Array<{ raw_file: unknown }>]>(
             `SELECT raw_file FROM session

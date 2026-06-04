@@ -7,11 +7,11 @@
  * skills as global dead weight. This module recovers the skill → agent(s)
  * mapping straight from the agent files (read-side, no DB round-trip).
  */
-import { readFile, readdir } from "node:fs/promises";
-import { join } from "node:path";
 import { homedir } from "node:os";
 import { parse as parseYaml } from "yaml";
-import { Effect } from "effect";
+import { Effect, FileSystem, Path } from "effect";
+import { posixPath } from "@ax/lib/shared/path";
+import { orAbsent } from "@ax/lib/shared/fs-error";
 
 const FRONTMATTER_RE = /^---\n([\s\S]*?)\n---/;
 
@@ -53,7 +53,7 @@ export function defaultAgentDirs(): string[] {
         .map((s) => s.trim())
         .filter(Boolean);
     if (fromEnv.length > 0) return fromEnv;
-    return [join(homedir(), ".claude", "agents")];
+    return [posixPath.join(homedir(), ".claude", "agents")];
 }
 
 /**
@@ -63,18 +63,24 @@ export function defaultAgentDirs(): string[] {
  */
 export const loadAgentScopeMap = (
     dirs: string[] = defaultAgentDirs(),
-): Effect.Effect<Map<string, string[]>> =>
+): Effect.Effect<Map<string, string[]>, never, FileSystem.FileSystem | Path.Path> =>
     Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
         const agents: { name: string; content: string }[] = [];
         for (const dir of dirs) {
-            const entries = yield* Effect.promise(() =>
-                readdir(dir).catch(() => [] as string[]),
-            );
+            // OLD: readdir(dir).catch(() => []) tolerated ANY error (a missing
+            // `~/.claude/agents` just means no scoping), so recover ANY
+            // PlatformError to [] - orAbsent, not skipNotFound.
+            const entries = yield* fs.readDirectory(dir).pipe(orAbsent([] as string[]));
             for (const entry of entries) {
                 if (!entry.endsWith(".md")) continue;
-                const content = yield* Effect.promise(() =>
-                    readFile(join(dir, entry), "utf8").catch(() => null),
-                );
+                // OLD: readFile(...).catch(() => null) tolerated ANY error
+                // (unreadable files are skipped), so recover ANY PlatformError
+                // to null - orAbsent.
+                const content = yield* fs
+                    .readFileString(path.join(dir, entry))
+                    .pipe(orAbsent(null as string | null));
                 if (content != null) {
                     agents.push({ name: entry.replace(/\.md$/, ""), content });
                 }

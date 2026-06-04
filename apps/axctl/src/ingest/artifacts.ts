@@ -1,5 +1,7 @@
-import { lstat, readdir, readFile, stat } from "node:fs/promises";
-import { basename, join, relative, resolve, sep } from "node:path";
+import { Effect, FileSystem, Path } from "effect";
+import { orAbsent } from "@ax/lib/shared/fs-error";
+import { classifyNoFollow } from "@ax/lib/shared/fs-classify";
+import { posixPath } from "@ax/lib/shared/path";
 
 export type ArtifactRootKind =
     | "planning"
@@ -74,16 +76,16 @@ const MARKDOWN_EXTENSIONS = new Set([".md", ".markdown"]);
 const WORKFLOW_SCRIPT_EXTENSIONS = new Set([".js", ".mjs", ".ts"]);
 
 export function artifactRootsForOptions(options: ArtifactDiscoveryOptions): ArtifactRoot[] {
-    const workspaceRoot = resolve(options.workspaceRoot);
+    const workspaceRoot = posixPath.resolve(options.workspaceRoot);
     const roots: ArtifactRoot[] = [
-        { kind: "planning", path: join(workspaceRoot, ".planning") },
-        { kind: "claude_monitoring", path: join(workspaceRoot, ".claude", "monitoring") },
-        { kind: "claude_workflows", path: join(workspaceRoot, ".claude", "workflows") },
-        { kind: "superpowers_plans", path: join(workspaceRoot, "docs", "superpowers", "plans") },
+        { kind: "planning", path: posixPath.join(workspaceRoot, ".planning") },
+        { kind: "claude_monitoring", path: posixPath.join(workspaceRoot, ".claude", "monitoring") },
+        { kind: "claude_workflows", path: posixPath.join(workspaceRoot, ".claude", "workflows") },
+        { kind: "superpowers_plans", path: posixPath.join(workspaceRoot, "docs", "superpowers", "plans") },
     ];
 
     for (const skillRoot of options.skillRoots ?? []) {
-        roots.push({ kind: "skill_root", path: resolve(skillRoot) });
+        roots.push({ kind: "skill_root", path: posixPath.resolve(skillRoot) });
     }
 
     return dedupeRoots(roots);
@@ -93,7 +95,7 @@ export function classifyArtifactPath(
     path: string,
     rootKind: ArtifactRootKind,
 ): ArtifactKind | null {
-    const name = basename(path);
+    const name = posixPath.basename(path);
     const ext = extensionOf(path);
 
     switch (rootKind) {
@@ -111,44 +113,49 @@ export function classifyArtifactPath(
     }
 }
 
-export async function discoverArtifactsDryRun(
+export const discoverArtifactsDryRun = (
     options: ArtifactDiscoveryOptions,
-): Promise<ArtifactDiscoveryDryRun> {
-    const roots = artifactRootsForOptions(options);
-    const candidates: ArtifactCandidate[] = [];
-    const skipped: ArtifactSkip[] = [];
-    const maxFileBytes = options.maxFileBytes ?? DEFAULT_MAX_FILE_BYTES;
+): Effect.Effect<ArtifactDiscoveryDryRun, never, FileSystem.FileSystem | Path.Path> =>
+    Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const roots = artifactRootsForOptions(options);
+        const candidates: ArtifactCandidate[] = [];
+        const skipped: ArtifactSkip[] = [];
+        const maxFileBytes = options.maxFileBytes ?? DEFAULT_MAX_FILE_BYTES;
 
-    for (const root of roots) {
-        let rootStat;
-        try {
-            rootStat = await stat(root.path);
-        } catch {
-            skipped.push(skip(root, root.path, "missing_root"));
-            continue;
+        for (const root of roots) {
+            // OLD: `stat(root.path)` in try/catch → "missing_root" on any fault;
+            // also "missing_root" when it is not a directory. `stat` FOLLOWS
+            // symlinks, so a root that is a symlink TO a directory (e.g. a
+            // symlinked `.planning` or a symlinked skillRoot) WAS scanned. We
+            // keep `fs.stat` here to preserve that follow-the-root behavior;
+            // only the CHILDREN are classified no-follow (via classifyNoFollow).
+            const rootIsDir = yield* fs.stat(root.path).pipe(
+                Effect.map((info) => info.type === "Directory"),
+                orAbsent(false),
+            );
+            if (!rootIsDir) {
+                skipped.push(skip(root, root.path, "missing_root"));
+                continue;
+            }
+
+            yield* walkArtifactRoot({
+                root,
+                currentPath: root.path,
+                rootPath: root.path,
+                maxFileBytes,
+                candidates,
+                skipped,
+            });
         }
-        if (!rootStat.isDirectory()) {
-            skipped.push(skip(root, root.path, "missing_root"));
-            continue;
-        }
 
-        await walkArtifactRoot({
-            root,
-            currentPath: root.path,
-            rootPath: root.path,
-            maxFileBytes,
-            candidates,
-            skipped,
-        });
-    }
-
-    return {
-        roots,
-        candidates: candidates.sort(compareByPath),
-        skipped: skipped.sort(compareByPath),
-        counts: buildCounts(candidates, skipped, roots),
-    };
-}
+        return {
+            roots,
+            candidates: candidates.sort(compareByPath),
+            skipped: skipped.sort(compareByPath),
+            counts: buildCounts(candidates, skipped, roots),
+        };
+    });
 
 type WalkState = {
     readonly root: ArtifactRoot;
@@ -159,100 +166,131 @@ type WalkState = {
     readonly skipped: ArtifactSkip[];
 };
 
-async function walkArtifactRoot(state: WalkState): Promise<void> {
-    let entries;
-    try {
-        entries = await readdir(state.currentPath, { withFileTypes: true });
-    } catch {
-        state.skipped.push(skip(state.root, state.currentPath, "read_error"));
-        return;
-    }
+const walkArtifactRoot = (
+    state: WalkState,
+): Effect.Effect<void, never, FileSystem.FileSystem | Path.Path> =>
+    Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
 
-    for (const entry of entries) {
-        const fullPath = join(state.currentPath, entry.name);
-
-        if (entry.isSymbolicLink()) {
-            state.skipped.push(skip(state.root, fullPath, "symlink"));
-            continue;
+        // OLD: `readdir(withFileTypes)` in try/catch → "read_error" on any fault.
+        // `readDirectory` returns names only; we re-derive symlink/dir/file via
+        // `classifyEntry` (lstat-equivalent) per entry. A NotFound dir read
+        // recovers to a sentinel so we can still push the "read_error" skip.
+        const entries = yield* fs.readDirectory(state.currentPath).pipe(
+            Effect.map((names) => names as readonly string[] | null),
+            orAbsent(null as readonly string[] | null),
+        );
+        if (entries === null) {
+            state.skipped.push(skip(state.root, state.currentPath, "read_error"));
+            return;
         }
 
-        if (entry.isDirectory()) {
-            if (shouldIgnoreDirectory(fullPath, entry.name)) {
-                state.skipped.push(skip(state.root, fullPath, "ignored_dir"));
+        for (const entry of entries) {
+            const fullPath = path.join(state.currentPath, entry);
+            const entryType = yield* classifyNoFollow(fullPath);
+
+            if (entryType === "SymbolicLink") {
+                state.skipped.push(skip(state.root, fullPath, "symlink"));
                 continue;
             }
-            if (await isNestedGitRepo(fullPath, state.rootPath)) {
-                state.skipped.push(skip(state.root, fullPath, "nested_git_repo"));
+
+            if (entryType === "Directory") {
+                if (shouldIgnoreDirectory(fullPath, entry)) {
+                    state.skipped.push(skip(state.root, fullPath, "ignored_dir"));
+                    continue;
+                }
+                if (yield* isNestedGitRepo(fullPath, state.rootPath)) {
+                    state.skipped.push(skip(state.root, fullPath, "nested_git_repo"));
+                    continue;
+                }
+                yield* walkArtifactRoot({ ...state, currentPath: fullPath });
                 continue;
             }
-            await walkArtifactRoot({ ...state, currentPath: fullPath });
-            continue;
+
+            if (entryType !== "File") continue;
+
+            const artifactKind = classifyArtifactPath(fullPath, state.root.kind);
+            if (!artifactKind) {
+                state.skipped.push(skip(state.root, fullPath, "unsupported_extension"));
+                continue;
+            }
+
+            // OLD: `lstat(fullPath)` in try/catch → "read_error". The entry is a
+            // confirmed non-symlink regular file at this point, so a following
+            // `fs.stat` matches the old lstat result for size.
+            const size = yield* fs.stat(fullPath).pipe(
+                Effect.map((info) => Number(info.size)),
+                orAbsent(undefined as number | undefined),
+            );
+            if (size === undefined) {
+                state.skipped.push(skip(state.root, fullPath, "read_error"));
+                continue;
+            }
+
+            if (size > state.maxFileBytes) {
+                state.skipped.push(skip(state.root, fullPath, "too_large", size));
+                continue;
+            }
+
+            if (yield* looksBinary(fullPath)) {
+                state.skipped.push(skip(state.root, fullPath, "binary", size));
+                continue;
+            }
+
+            state.candidates.push({
+                path: fullPath,
+                relativePath: relativeSlash(state.root.path, fullPath),
+                rootKind: state.root.kind,
+                artifactKind,
+                bytes: size,
+            });
         }
-
-        if (!entry.isFile()) continue;
-
-        const artifactKind = classifyArtifactPath(fullPath, state.root.kind);
-        if (!artifactKind) {
-            state.skipped.push(skip(state.root, fullPath, "unsupported_extension"));
-            continue;
-        }
-
-        let fileStat;
-        try {
-            fileStat = await lstat(fullPath);
-        } catch {
-            state.skipped.push(skip(state.root, fullPath, "read_error"));
-            continue;
-        }
-
-        if (fileStat.size > state.maxFileBytes) {
-            state.skipped.push(skip(state.root, fullPath, "too_large", fileStat.size));
-            continue;
-        }
-
-        if (await looksBinary(fullPath)) {
-            state.skipped.push(skip(state.root, fullPath, "binary", fileStat.size));
-            continue;
-        }
-
-        state.candidates.push({
-            path: fullPath,
-            relativePath: relativeSlash(state.root.path, fullPath),
-            rootKind: state.root.kind,
-            artifactKind,
-            bytes: fileStat.size,
-        });
-    }
-}
+    });
 
 function shouldIgnoreDirectory(path: string, name: string): boolean {
     if (IGNORED_DIR_NAMES.has(name)) return true;
-    return path.split(sep).includes(".claude") && name === "worktrees";
+    return path.split(posixPath.sep).includes(".claude") && name === "worktrees";
 }
 
-async function isNestedGitRepo(path: string, rootPath: string): Promise<boolean> {
-    if (resolve(path) === resolve(rootPath)) return false;
-    try {
-        const gitStat = await lstat(join(path, ".git"));
-        return gitStat.isDirectory() || gitStat.isFile();
-    } catch {
-        return false;
-    }
-}
+/**
+ * Probe for a nested git repo: does `<path>/.git` exist as a real directory
+ * (normal repo) or a real file (worktree/submodule gitfile)?
+ *
+ * OLD: `lstat(join(path, ".git"))` then `.isDirectory() || .isFile()`. `lstat`
+ * does NOT follow symlinks, so a `.git` that is itself a symlink reported as a
+ * symlink (neither dir nor file) ⇒ returned `false`. We preserve that exactly:
+ * `classifyNoFollow` reports a `.git` symlink as "SymbolicLink", which is
+ * neither "Directory" nor "File" ⇒ false.
+ */
+const isNestedGitRepo = (
+    dirPath: string,
+    rootPath: string,
+): Effect.Effect<boolean, never, FileSystem.FileSystem | Path.Path> =>
+    Effect.gen(function* () {
+        if (posixPath.resolve(dirPath) === posixPath.resolve(rootPath)) return false;
+        const path = yield* Path.Path;
+        const gitPath = path.join(dirPath, ".git");
+        const entryType = yield* classifyNoFollow(gitPath);
+        return entryType === "Directory" || entryType === "File";
+    });
 
-async function looksBinary(path: string): Promise<boolean> {
-    let sample;
-    try {
-        sample = await readFile(path);
-    } catch {
-        return false;
-    }
-    const capped = sample.subarray(0, TEXT_SAMPLE_BYTES);
-    return capped.includes(0);
-}
+const looksBinary = (
+    path: string,
+): Effect.Effect<boolean, never, FileSystem.FileSystem> =>
+    Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        // OLD: `readFile(path)` in try/catch → false on any fault; then check the
+        // first TEXT_SAMPLE_BYTES for a NUL byte. orAbsent(null) recovers any
+        // read fault to "not binary".
+        const sample = yield* fs.readFile(path).pipe(orAbsent(null as Uint8Array | null));
+        if (sample === null) return false;
+        const capped = sample.subarray(0, TEXT_SAMPLE_BYTES);
+        return capped.includes(0);
+    });
 
 function extensionOf(path: string): string {
-    const name = basename(path);
+    const name = posixPath.basename(path);
     const dot = name.lastIndexOf(".");
     return dot >= 0 ? name.slice(dot).toLowerCase() : "";
 }
@@ -320,10 +358,10 @@ function dedupeRoots(roots: readonly ArtifactRoot[]): ArtifactRoot[] {
     const seen = new Set<string>();
     const out: ArtifactRoot[] = [];
     for (const root of roots) {
-        const key = `${root.kind}:${resolve(root.path)}`;
+        const key = `${root.kind}:${posixPath.resolve(root.path)}`;
         if (seen.has(key)) continue;
         seen.add(key);
-        out.push({ ...root, path: resolve(root.path) });
+        out.push({ ...root, path: posixPath.resolve(root.path) });
     }
     return out;
 }
@@ -333,6 +371,6 @@ function compareByPath(a: { readonly path: string }, b: { readonly path: string 
 }
 
 function relativeSlash(from: string, to: string): string {
-    const rel = relative(from, to);
-    return rel === "" ? "." : rel.split(sep).join("/");
+    const rel = posixPath.relative(from, to);
+    return rel === "" ? "." : rel.split(posixPath.sep).join("/");
 }

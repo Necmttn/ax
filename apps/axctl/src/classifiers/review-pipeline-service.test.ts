@@ -2,7 +2,8 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { describe, expect, test } from "bun:test";
-import { Effect } from "effect";
+import { Effect, type FileSystem } from "effect";
+import { BunFileSystem } from "@effect/platform-bun";
 import {
     ClassifierReviewPipelineService,
     ClassifierReviewPipelineServiceLive,
@@ -10,8 +11,15 @@ import {
     type ClassifierReviewPipelineCommandSource,
 } from "./review-pipeline-service.ts";
 
-const runWithService = <A>(effect: Effect.Effect<A, unknown, ClassifierReviewPipelineService>): Promise<A> =>
-    Effect.runPromise(effect.pipe(Effect.provide(ClassifierReviewPipelineServiceLive)));
+const runWithService = <A>(
+    effect: Effect.Effect<A, unknown, ClassifierReviewPipelineService | FileSystem.FileSystem>,
+): Promise<A> =>
+    Effect.runPromise(
+        effect.pipe(
+            Effect.provide(ClassifierReviewPipelineServiceLive),
+            Effect.provide(BunFileSystem.layer),
+        ),
+    );
 
 describe("ClassifierReviewPipelineService", () => {
     test("summarizes a ready review repair command for service execution", async () => {

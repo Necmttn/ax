@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { Effect } from "effect";
+import { BunFileSystem } from "@effect/platform-bun";
 import { SurrealClient, type SurrealClientShape } from "@ax/lib/db";
 import { ClassifierPackageService, type ClassifierQualityStatusReport } from "../classifiers/package-service.ts";
 import {
@@ -208,6 +209,7 @@ describe("classifiers package-operations format", () => {
                 } as never).pipe(
                     Effect.provideService(ClassifierPackageService, service),
                     Effect.provideService(SurrealClient, {} as SurrealClientShape),
+                    Effect.provide(BunFileSystem.layer),
                 ),
             );
         } finally {
@@ -311,6 +313,7 @@ describe("classifiers package-operations format", () => {
             } as never).pipe(
                 Effect.provideService(ClassifierPackageService, service),
                 Effect.provideService(SurrealClient, {} as SurrealClientShape),
+                Effect.provide(BunFileSystem.layer),
             ),
         );
 
@@ -385,6 +388,7 @@ describe("classifiers package-operations format", () => {
                 } as never).pipe(
                     Effect.provideService(ClassifierPackageService, service),
                     Effect.provideService(SurrealClient, {} as SurrealClientShape),
+                    Effect.provide(BunFileSystem.layer),
                 ),
             );
         } finally {

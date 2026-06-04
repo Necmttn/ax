@@ -1,4 +1,4 @@
-import { Effect } from "effect";
+import { Effect, FileSystem, Path } from "effect";
 import { SurrealClient } from "@ax/lib/db";
 import { ProcessService } from "@ax/lib/process";
 import type { DbError } from "@ax/lib/errors";
@@ -77,7 +77,9 @@ function printHarness(payload: ProjectHarnessReport): void {
     }
 }
 
-export const cmdProject = (args: string[]): Effect.Effect<void, DbError, SurrealClient | ProcessService> =>
+export const cmdProject = (
+    args: string[],
+): Effect.Effect<void, DbError, SurrealClient | ProcessService | FileSystem.FileSystem | Path.Path> =>
     Effect.gen(function* () {
         const [subcommand, ...rest] = args;
         if (!subcommand || subcommand === "help" || subcommand === "--help" || subcommand === "-h") {

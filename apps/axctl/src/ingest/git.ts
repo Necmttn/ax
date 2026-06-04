@@ -1,7 +1,5 @@
-import { lstat, readFile, stat } from "node:fs/promises";
-import { join, basename, dirname } from "node:path";
 import { homedir } from "node:os";
-import { Effect, Schema } from "effect";
+import { Effect, FileSystem, Path, type PlatformError, Schema } from "effect";
 import { SurrealClient, type SurrealClientShape } from "@ax/lib/db";
 import { AppLayer } from "@ax/lib/layers";
 import type { DbError } from "@ax/lib/errors";
@@ -22,14 +20,17 @@ import {
 } from "./repository-identity.ts";
 import { surrealString } from "@ax/lib/shared/surql";
 import { executeStatementsWith } from "@ax/lib/shared/statement-exec";
+import { orAbsent } from "@ax/lib/shared/fs-error";
+import { posixPath } from "@ax/lib/shared/path";
 
 /**
  * Optional override file: one absolute repo path per line. Lines starting with
  * '#' are ignored.
  */
-const REPO_LIST_FILE =
+/** @internal exported for tests. */
+export const REPO_LIST_FILE =
     process.env.AX_REPO_LIST ??
-    join(homedir(), ".local", "share", "ax", "ax-repos.txt");
+    posixPath.join(homedir(), ".local", "share", "ax", "ax-repos.txt");
 
 /** Hard cap on history depth so cold runs stay bounded. */
 const DEFAULT_SINCE_DAYS = 30;
@@ -69,40 +70,63 @@ interface CommitWithFiles extends CommitRow {
 
 // ---------- repo discovery ----------
 
-const readRepoListFile = (): Effect.Effect<string[]> =>
-    Effect.promise(async () => {
-        try {
-            const txt = await readFile(REPO_LIST_FILE, "utf8");
-            return txt
-                .split("\n")
-                .map((l) => l.trim())
-                .filter((l) => l.length > 0 && !l.startsWith("#"));
-        } catch {
-            return [];
-        }
-    });
+/** @internal exported for tests: proves OPTIONAL-config read tolerance. */
+export const readRepoListFile = (): Effect.Effect<string[], never, FileSystem.FileSystem> =>
+    Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const txt = yield* fs.readFileString(REPO_LIST_FILE);
+        return txt
+            .split("\n")
+            .map((l) => l.trim())
+            .filter((l) => l.length > 0 && !l.startsWith("#"));
+    }).pipe(
+        // An OPTIONAL override file: a missing file (NotFound) is the common
+        // case, but a permission/EISDIR/IO fault on this best-effort config read
+        // must ALSO be treated as "no override" rather than aborting the whole
+        // git ingest stage. orAbsent recovers ANY PlatformError to an empty list.
+        orAbsent<string[]>([]),
+    );
 
-const isGitRepo = (path: string): Promise<boolean> =>
-    stat(join(path, ".git"))
-        .then(() => true)
-        .catch(() => false);
+/** @internal exported for tests: proves discovery-PROBE tolerance. */
+export const isGitRepo = (
+    path: string,
+): Effect.Effect<boolean, never, FileSystem.FileSystem | Path.Path> =>
+    Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const pathSvc = yield* Path.Path;
+        // A discovery PROBE: `fs.exists` reports presence without throwing on
+        // absence. Any PlatformError (permission/EISDIR/IO on the `.git` path)
+        // means "treat as not a repo and continue", matching the prior
+        // `stat(...).then(true).catch(false)` best-effort semantics. orAbsent
+        // recovers ANY PlatformError to false so a single inaccessible candidate
+        // never aborts the whole repo walk.
+        return yield* fs.exists(pathSvc.join(path, ".git"));
+    }).pipe(orAbsent(false));
 
 /**
  * Walk upward from `cwd` until we find a `.git` entry. Returns null when the
  * filesystem root is reached without a hit. Bounded to 12 levels for safety.
  */
-async function findRepoRoot(cwd: string): Promise<string | null> {
-    let cur = cwd;
-    for (let i = 0; i < 12; i += 1) {
-        if (await isGitRepo(cur)) return cur;
-        const parent = dirname(cur);
-        if (parent === cur) return null;
-        cur = parent;
-    }
-    return null;
-}
+const findRepoRoot = (
+    cwd: string,
+): Effect.Effect<string | null, PlatformError.PlatformError, FileSystem.FileSystem | Path.Path> =>
+    Effect.gen(function* () {
+        const pathSvc = yield* Path.Path;
+        let cur = cwd;
+        for (let i = 0; i < 12; i += 1) {
+            if (yield* isGitRepo(cur)) return cur;
+            const parent = pathSvc.dirname(cur);
+            if (parent === cur) return null;
+            cur = parent;
+        }
+        return null;
+    });
 
-const deriveReposFromSessions = (): Effect.Effect<string[], DbError, SurrealClient> =>
+const deriveReposFromSessions = (): Effect.Effect<
+    string[],
+    DbError | PlatformError.PlatformError,
+    SurrealClient | FileSystem.FileSystem | Path.Path
+> =>
     Effect.gen(function* () {
         const db = yield* SurrealClient;
         // GROUP ALL collapses everything; array::distinct dedupes.
@@ -114,7 +138,7 @@ const deriveReposFromSessions = (): Effect.Effect<string[], DbError, SurrealClie
         const out: string[] = [];
         for (const cwd of cwds) {
             if (typeof cwd !== "string" || cwd.length === 0) continue;
-            const root = yield* Effect.promise(() => findRepoRoot(cwd));
+            const root = yield* findRepoRoot(cwd);
             if (!root) continue;
             if (seen.has(root)) continue;
             seen.add(root);
@@ -123,14 +147,18 @@ const deriveReposFromSessions = (): Effect.Effect<string[], DbError, SurrealClie
         return out;
     });
 
-const discoverRepos = (): Effect.Effect<RepoInfo[], DbError, SurrealClient> =>
+const discoverRepos = (): Effect.Effect<
+    RepoInfo[],
+    DbError | PlatformError.PlatformError,
+    SurrealClient | FileSystem.FileSystem | Path.Path
+> =>
     Effect.gen(function* () {
         const fromFile = yield* readRepoListFile();
         const candidates: string[] = [];
         if (fromFile.length > 0) {
             // Only keep entries that actually have a `.git` directory.
             for (const path of fromFile) {
-                const ok = yield* Effect.promise(() => isGitRepo(path));
+                const ok = yield* isGitRepo(path);
                 if (ok) candidates.push(path);
             }
         }
@@ -187,15 +215,21 @@ const trimmedGitOutput = (cwd: string, args: string[]): Effect.Effect<string | n
         return trimmed.length > 0 ? trimmed : null;
     });
 
-const readGitEntry = (path: string): Effect.Effect<string> =>
-    Effect.promise(async () => {
-        const gitPath = join(path, ".git");
-        const st = await lstat(gitPath);
-        if (st.isDirectory()) return "directory";
-        return (await readFile(gitPath, "utf8")).trim();
+const readGitEntry = (
+    path: string,
+): Effect.Effect<string, PlatformError.PlatformError, FileSystem.FileSystem | Path.Path> =>
+    Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const pathSvc = yield* Path.Path;
+        const gitPath = pathSvc.join(path, ".git");
+        const st = yield* fs.stat(gitPath);
+        if (st.type === "Directory") return "directory";
+        return (yield* fs.readFileString(gitPath)).trim();
     });
 
-const buildRepoInfo = (path: string): Effect.Effect<RepoInfo> =>
+const buildRepoInfo = (
+    path: string,
+): Effect.Effect<RepoInfo, PlatformError.PlatformError, FileSystem.FileSystem | Path.Path> =>
     Effect.gen(function* () {
         const [remoteUrl, initialCommit, gitDir, branch, headSha, gitEntry] = yield* Effect.all(
             [
@@ -510,7 +544,7 @@ export function deriveRepositoryDisplayName(
     repoPath: string,
 ): string {
     const remoteName = remoteUrlNormalized?.split("/").filter(Boolean).at(-1);
-    return remoteName && remoteName.length > 0 ? remoteName : basename(repoPath);
+    return remoteName && remoteName.length > 0 ? remoteName : posixPath.basename(repoPath);
 }
 
 const writeRepo = (
@@ -545,7 +579,7 @@ const writeRepo = (
                 `path: ${surrealString(repo.path)},`,
                 `branch: ${repo.branch === null ? "NONE" : surrealString(repo.branch)},`,
                 `head_sha: ${repo.headSha === null ? "NONE" : surrealString(repo.headSha)},`,
-                `worktree_name: ${repo.worktreeKind === "worktree" ? surrealString(basename(repo.path)) : "NONE"},`,
+                `worktree_name: ${repo.worktreeKind === "worktree" ? surrealString(posixPath.basename(repo.path)) : "NONE"},`,
                 "dirty: false,",
                 "updated_at: time::now()",
                 "};",
@@ -780,7 +814,11 @@ export interface GitStats {
 
 export const ingestGit = (
     opts: Partial<GitIngestOpts> = {},
-): Effect.Effect<GitStats, DbError, SurrealClient> =>
+): Effect.Effect<
+    GitStats,
+    DbError | PlatformError.PlatformError,
+    SurrealClient | FileSystem.FileSystem | Path.Path
+> =>
     Effect.gen(function* () {
         const requested = opts.sinceDays ?? DEFAULT_SINCE_DAYS;
         const sinceDays = Math.min(Math.max(requested, 1), MAX_SINCE_DAYS);
@@ -917,16 +955,24 @@ export class GitStageStats extends BaseStageStats.extend<GitStageStats>("GitStag
     repositoriesSeen: Schema.Number,
 }) {}
 
-export const gitStage: StageDef<GitStageStats, SurrealClient> = {
+export const gitStage: StageDef<
+    GitStageStats,
+    SurrealClient | FileSystem.FileSystem | Path.Path
+> = {
     meta: StageMeta.make({ key: "git", deps: [], tags: ["ingest"] }),
     run: (ctx: IngestContext) =>
         Effect.gen(function* () {
             const t0 = Date.now();
             const sinceDays = sinceDaysFromCtx(ctx);
+            // Repo discovery tolerates a vanished override file / missing `.git`
+            // (NotFound is recovered inside ingestGit); any PlatformError that
+            // escapes here is a genuine FS fault (unreadable repo-list file or a
+            // non-NotFound stat error), so it dies as a defect rather than
+            // masquerading as a recoverable DbError.
             const result = yield* ingestGit({
                 ...(sinceDays === undefined ? {} : { sinceDays }),
                 ...(ctx.repoPaths === undefined ? {} : { repoPaths: ctx.repoPaths }),
-            });
+            }).pipe(Effect.catchTag("PlatformError", (e) => Effect.die(e)));
             return GitStageStats.make({
                 durationMs: Date.now() - t0,
                 summary: `ingested ${result.commits} commits from ${result.repos} repos`,

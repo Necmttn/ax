@@ -5,7 +5,8 @@
  * no real DB connection is needed.
  */
 import { describe, it, expect } from "bun:test";
-import { Effect } from "effect";
+import { Effect, Layer } from "effect";
+import { BunFileSystem, BunPath } from "@effect/platform-bun";
 import { mkdir, writeFile, access } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -146,6 +147,10 @@ async function fileExists(path: string): Promise<boolean> {
     }
 }
 
+// Forced-dependency edit: cmdSkillsLint now requires FileSystem + Path
+// (the @effect/platform migration); run against the REAL Bun-backed layers.
+const BunFsLayer = Layer.merge(BunFileSystem.layer, BunPath.layer);
+
 function runLint(
     db: SurrealClientShape,
     opts: { taskDir: string; dryRun?: boolean; json?: boolean },
@@ -155,7 +160,7 @@ function runLint(
             taskDir: opts.taskDir,
             dryRun: opts.dryRun ?? false,
             json: opts.json ?? false,
-        }).pipe(Effect.provideService(SurrealClient, db)),
+        }).pipe(Effect.provideService(SurrealClient, db), Effect.provide(BunFsLayer)),
     );
 }
 

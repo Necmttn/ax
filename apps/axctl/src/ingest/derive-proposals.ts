@@ -22,7 +22,7 @@
  * compute friction_delta against a stable reference point.
  */
 
-import { Effect, Schema } from "effect";
+import { Effect, FileSystem, Path, Schema } from "effect";
 import { SurrealClient } from "@ax/lib/db";
 import { AppLayer } from "@ax/lib/layers";
 import type { DbError } from "@ax/lib/errors";
@@ -326,7 +326,7 @@ export const buildSkillProposalStatements = (
 
 export const deriveProposals = (
     opts: DeriveProposalsOpts = { minFrequency: 3 },
-): Effect.Effect<DeriveProposalsStats, DbError, SurrealClient | import("@ax/lib/process").ProcessService> =>
+): Effect.Effect<DeriveProposalsStats, DbError, SurrealClient | import("@ax/lib/process").ProcessService | FileSystem.FileSystem | Path.Path> =>
     Effect.gen(function* () {
         const db = yield* SurrealClient;
         const [candidates, skills, existingProposals] = yield* Effect.all([
@@ -392,7 +392,7 @@ export class ProposalsStats extends BaseStageStats.extend<ProposalsStats>("Propo
     guidanceProposals: Schema.Number,
 }) {}
 
-export const proposalsStage: StageDef<ProposalsStats, SurrealClient | ProcessService> = {
+export const proposalsStage: StageDef<ProposalsStats, SurrealClient | ProcessService | FileSystem.FileSystem | Path.Path> = {
     meta: StageMeta.make({ key: "proposals", deps: ["closure"], tags: ["derive"] }),
     run: (_ctx: IngestContext) =>
         Effect.gen(function* () {

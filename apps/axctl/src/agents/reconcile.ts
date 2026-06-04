@@ -24,7 +24,7 @@ export const reconcileAgents = (
 > =>
     Effect.gen(function* () {
         const reg = yield* AgentSourceRegistry;
-        const repoRoot = (yield* Effect.promise(() => findGitRoot(process.cwd()))) ?? undefined;
+        const repoRoot = (yield* findGitRoot(process.cwd())) ?? undefined;
         // Partition by scope (user/project) so user-scope reconcile is independent.
         const byScope = new Map<string, string[]>();
         for (const source of reg.all()) {

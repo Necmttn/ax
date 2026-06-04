@@ -63,9 +63,13 @@ export interface SkillSource {
     /** Source-level default; a root may still be read-only via its `SkillDirRef`. */
     readonly writable: boolean;
     /** Roots to walk; `repoRoot` scopes the project/command per-repo roots. */
-    readonly roots: (repoRoot: string | null) => ReadonlyArray<SkillDirRef>;
+    readonly roots: (
+        repoRoot: string | null,
+    ) => Effect.Effect<ReadonlyArray<SkillDirRef>, never, FileSystem.FileSystem | Path.Path>;
     /** Cheap "is this source present on this machine/repo" check. */
-    readonly installed: (repoRoot: string | null) => boolean;
+    readonly installed: (
+        repoRoot: string | null,
+    ) => Effect.Effect<boolean, never, FileSystem.FileSystem>;
     readonly discover: (
         ref: SkillDirRef,
     ) => Effect.Effect<ReadonlyArray<SkillRecord>, SkillParseError | PlatformError, FileSystem.FileSystem | Path.Path>;

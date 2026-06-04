@@ -1,9 +1,16 @@
 import { describe, expect, test } from "bun:test";
+import { Effect, Layer } from "effect";
+import { BunFileSystem, BunPath } from "@effect/platform-bun";
 import { formatClassifierList, listClassifiers } from "./list.ts";
 
+// listClassifiers reads fixture files via @effect/platform FileSystem; provide
+// the REAL Bun-backed layers (forced-dependency edit, never a mock).
+const BunFsLayer = Layer.merge(BunFileSystem.layer, BunPath.layer);
+const run = <A, E>(effect: Effect.Effect<A, E, never>): Promise<A> => Effect.runPromise(effect);
+
 describe("classifier list", () => {
-    test("includes registered classifiers with fixture counts", () => {
-        const rows = listClassifiers();
+    test("includes registered classifiers with fixture counts", async () => {
+        const rows = await run(listClassifiers().pipe(Effect.provide(BunFsLayer)));
         const verification = rows.find((row) => row.key === "verification-event");
         const direction = rows.find((row) => row.key === "direction-event");
 
@@ -22,8 +29,9 @@ describe("classifier list", () => {
         expect(rows.filter((row) => !["verification-event", "direction-event"].includes(row.key)).every((row) => row.source === "built-in")).toBe(true);
     });
 
-    test("formats a compact table", () => {
-        const output = formatClassifierList(listClassifiers());
+    test("formats a compact table", async () => {
+        const rows = await run(listClassifiers().pipe(Effect.provide(BunFsLayer)));
+        const output = formatClassifierList(rows);
 
         expect(output).toContain("classifier");
         expect(output).toContain("verification-event");

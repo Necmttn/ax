@@ -1,7 +1,7 @@
-import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { Effect } from "effect";
+import { Effect, FileSystem, Path, type PlatformError } from "effect";
 import { SurrealClient, type SurrealClientShape } from "@ax/lib/db";
+import { orAbsent } from "@ax/lib/shared/fs-error";
+import { posixPath } from "@ax/lib/shared/path";
 import { prettyPrint } from "@ax/lib/json";
 import { recordKeyPart, safeKeyPart } from "@ax/lib/shared/derive-keys";
 import { safeJsonParse } from "@ax/lib/shared/safe-json";
@@ -1596,7 +1596,7 @@ const slugPart = (value: string): string => {
 };
 
 const taskPathForCandidate = (taskDir: string, candidate: WorkflowCandidate): string =>
-    join(taskDir, `workflow-candidate-${slugPart(candidate.label)}-${shortHash(candidate.group_id)}.md`);
+    posixPath.join(taskDir, `workflow-candidate-${slugPart(candidate.label)}-${shortHash(candidate.group_id)}.md`);
 
 const evidenceTurnsForCandidate = (candidate: WorkflowCandidate): readonly string[] => {
     const turns = candidate.examples
@@ -1616,7 +1616,7 @@ const evidenceMergeKeyForCandidate = (candidate: WorkflowCandidate): string => {
 const taskPathForCandidateGroup = (taskDir: string, candidates: readonly WorkflowCandidate[]): string => {
     const label = candidates.map((candidate) => candidate.label).join("--");
     const hash = shortHash(candidates.map((candidate) => candidate.group_id).sort().join("|"));
-    return join(taskDir, `workflow-candidate-merged-${slugPart(label)}-${hash}.md`);
+    return posixPath.join(taskDir, `workflow-candidate-merged-${slugPart(label)}-${hash}.md`);
 };
 
 const includesAny = (values: readonly unknown[], needles: readonly string[]): boolean => {
@@ -3350,7 +3350,7 @@ export function buildWorkflowCandidateTopicGuidanceDecisionBatchReport(input: {
 const pendingReviewTaskPath = (
     taskDir: string,
     fixturePack: WorkflowCandidateReviewCoverageFixtureSummary,
-): string => join(taskDir, `workflow-candidate-pending-review-${shortHash(fixturePack.fixtures.map((row) => row.candidate_id).sort().join("|"))}.md`);
+): string => posixPath.join(taskDir, `workflow-candidate-pending-review-${shortHash(fixturePack.fixtures.map((row) => row.candidate_id).sort().join("|"))}.md`);
 
 export function buildWorkflowCandidateGuidancePendingReviewTask(input: {
     readonly taskDir: string;
@@ -3901,7 +3901,13 @@ const pendingReviewTaskDecisionSummary = (input: {
             review_decision_next_action: reviewDecisionNextAction("unknown"),
         };
     }
-    const readFile = input.readFile ?? ((path: string) => readFileSync(path, "utf8"));
+    // No node:fs fallback: the only production caller (`load...`, now Effect)
+    // supplies a sync closure backed by FS-pre-read content; tests inject their
+    // own. Absence falls through to the unreadable summary below, matching the
+    // original try/catch tolerance.
+    const readFile = input.readFile ?? ((_path: string): string => {
+        throw new Error("readFile not provided");
+    });
     try {
         const rows = parseWorkflowCandidateFixtureRowsJsonl(readFile(input.parsed.fixture_pack_path));
         const synced = syncWorkflowCandidateFixtureRowsFromBriefWithSummary(
@@ -4103,7 +4109,10 @@ export function buildWorkflowCandidateGuidancePendingReviewTaskListReport(input:
     readonly pathExists?: (path: string) => boolean;
     readonly readFile?: (path: string) => string;
 }): WorkflowCandidateGuidancePendingReviewTaskListReport {
-    const pathExists = input.pathExists ?? existsSync;
+    // No node:fs fallback: callers supply a sync probe (tests inject their own;
+    // `load...` derives one from FS-pre-resolved existence). Absent -> treat all
+    // referenced artifacts as missing.
+    const pathExists = input.pathExists ?? ((_path: string): boolean => false);
     const allTasks = input.taskFiles
         .map((file): WorkflowCandidateGuidancePendingReviewTaskListItem | undefined => {
             const parsed = parseWorkflowCandidateGuidancePendingReviewTaskMarkdown(file.content);
@@ -4274,31 +4283,75 @@ export function buildWorkflowCandidateGuidancePendingReviewTaskListReport(input:
     };
 }
 
-const listMarkdownFiles = (dir: string): readonly string[] => {
-    if (!existsSync(dir)) return [];
-    return readdirSync(dir)
-        .map((name) => join(dir, name))
-        .filter((path) => {
-            try {
-                return statSync(path).isFile() && path.endsWith(".md");
-            } catch {
-                return false;
+const listMarkdownFiles = (
+    dir: string,
+): Effect.Effect<readonly string[], never, FileSystem.FileSystem | Path.Path> =>
+    Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        // Original: existsSync-guard then readdirSync; a missing dir -> [].
+        const names = yield* fs.readDirectory(dir).pipe(orAbsent([] as readonly string[]));
+        const candidates = names.map((name) => path.join(dir, name));
+        const files: string[] = [];
+        for (const candidate of candidates) {
+            // Original used statSync(...).isFile() in a try/catch (any error ->
+            // skip). fs.stat follows symlinks just as the bare statSync did.
+            const info = yield* fs.stat(candidate).pipe(orAbsent<FileSystem.File.Info | null>(null));
+            if (info !== null && info.type === "File" && candidate.endsWith(".md")) {
+                files.push(candidate);
             }
-        })
-        .sort();
-};
+        }
+        return files.sort();
+    });
 
 export function loadWorkflowCandidateGuidancePendingReviewTaskListReport(
     taskDir: string,
     filters?: WorkflowCandidateGuidancePendingReviewTaskListFilters,
-): WorkflowCandidateGuidancePendingReviewTaskListReport {
-    return buildWorkflowCandidateGuidancePendingReviewTaskListReport({
-        taskDir,
-        ...(filters === undefined ? {} : { filters }),
-        taskFiles: listMarkdownFiles(taskDir).map((path) => ({
-            path,
-            content: readFileSync(path, "utf8"),
-        })),
+): Effect.Effect<
+    WorkflowCandidateGuidancePendingReviewTaskListReport,
+    PlatformError.PlatformError,
+    FileSystem.FileSystem | Path.Path
+> {
+    return Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const paths = yield* listMarkdownFiles(taskDir);
+        // Reads with no original tolerance (the file was just stat'd): propagate.
+        const taskFiles: { path: string; content: string }[] = [];
+        for (const path of paths) {
+            taskFiles.push({ path, content: yield* fs.readFileString(path) });
+        }
+
+        // Pre-resolve the artifact paths that the pure builder would otherwise
+        // probe/read synchronously, so the builder stays pure (and the test
+        // sync-closure interface is preserved). Mirror the original tolerance:
+        // existsSync (presence probe -> orAbsent(false)) and readFileSync inside
+        // a try/catch (any error -> "unreadable", so a read miss simply omits the
+        // path from the content map and the builder's closure throws -> caught).
+        const referenced = new Set<string>();
+        for (const file of taskFiles) {
+            const parsed = parseWorkflowCandidateGuidancePendingReviewTaskMarkdown(file.content);
+            if (parsed.fixture_pack_path !== undefined) referenced.add(parsed.fixture_pack_path);
+            if (parsed.review_brief_path !== undefined) referenced.add(parsed.review_brief_path);
+        }
+        const present = new Set<string>();
+        const contents = new Map<string, string>();
+        for (const ref of referenced) {
+            if (yield* fs.exists(ref).pipe(orAbsent(false))) present.add(ref);
+            const content = yield* fs.readFileString(ref).pipe(orAbsent<string | null>(null));
+            if (content !== null) contents.set(ref, content);
+        }
+
+        return buildWorkflowCandidateGuidancePendingReviewTaskListReport({
+            taskDir,
+            ...(filters === undefined ? {} : { filters }),
+            taskFiles,
+            pathExists: (p) => present.has(p),
+            readFile: (p) => {
+                const content = contents.get(p);
+                if (content === undefined) throw new Error(`unreadable: ${p}`);
+                return content;
+            },
+        });
     });
 }
 
@@ -4509,16 +4562,23 @@ const withWorkflowCandidateTopicGuidanceDecision = (
     guidance_decision: buildWorkflowCandidateTopicGuidanceDecisionReport(report),
 });
 
-export function readWorkflowCandidateHelperFixtures(path: string): readonly WorkflowCandidateHelperFixtureRow[] {
-    const rows: WorkflowCandidateHelperFixtureRow[] = [];
-    for (const line of readFileSync(path, "utf8").split(/\r?\n/)) {
-        const parsed = safeJsonParse<unknown>(line.trim());
-        if (!isObject(parsed)) continue;
-        const id = asString(parsed.id);
-        const text = asString(parsed.text);
-        if (id && text) rows.push({ id, text });
-    }
-    return rows;
+export function readWorkflowCandidateHelperFixtures(
+    filePath: string,
+): Effect.Effect<readonly WorkflowCandidateHelperFixtureRow[], PlatformError.PlatformError, FileSystem.FileSystem> {
+    return Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        // Read with no original tolerance (bare readFileSync): propagate.
+        const raw = yield* fs.readFileString(filePath);
+        const rows: WorkflowCandidateHelperFixtureRow[] = [];
+        for (const line of raw.split(/\r?\n/)) {
+            const parsed = safeJsonParse<unknown>(line.trim());
+            if (!isObject(parsed)) continue;
+            const id = asString(parsed.id);
+            const text = asString(parsed.text);
+            if (id && text) rows.push({ id, text });
+        }
+        return rows;
+    });
 }
 
 export function buildWorkflowCandidateTopicHelperExplanations(input: {
@@ -5609,7 +5669,7 @@ export function renderWorkflowCandidateReviewCoverageBriefMarkdown(
 export const withWorkflowCandidateReviewPipelineLifecycle = (
     report: WorkflowCandidateReviewCoverageReport,
     options: WorkflowCandidateReviewPipelineLifecycleOptions = {},
-): Effect.Effect<WorkflowCandidateReviewCoverageReport> =>
+): Effect.Effect<WorkflowCandidateReviewCoverageReport, never, FileSystem.FileSystem> =>
     Effect.gen(function* () {
         if (report.coverage_review === undefined) return report;
         const coverageReview = yield* withWorkflowCandidateReviewCoverageApplySummaryLifecycle(report.coverage_review, options);
@@ -5624,7 +5684,7 @@ export const withWorkflowCandidateReviewPipelineLifecycle = (
 export const withWorkflowCandidateReviewCoverageApplySummaryLifecycle = (
     summary: WorkflowCandidateReviewCoverageApplySummary,
     options: WorkflowCandidateReviewPipelineLifecycleOptions = {},
-): Effect.Effect<WorkflowCandidateReviewCoverageApplySummary> =>
+): Effect.Effect<WorkflowCandidateReviewCoverageApplySummary, never, FileSystem.FileSystem> =>
     Effect.gen(function* () {
         const pipeline = yield* ClassifierReviewPipelineService;
         const lifecycle = yield* pipeline.commandLifecycle(summary, options);
@@ -7758,6 +7818,8 @@ export function renderWorkflowCandidateBriefMarkdown(report: WorkflowCandidateRe
 export const runClassifiersWorkflowCandidates = (input: WorkflowCandidateCommandInput) =>
     Effect.gen(function* () {
         const db = yield* SurrealClient;
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
         const taskDir = input.taskDir ?? ".ax/tasks";
         if (input.listPendingReviewTasks) {
             const filters: WorkflowCandidateGuidancePendingReviewTaskListFilters = {
@@ -7769,16 +7831,16 @@ export const runClassifiersWorkflowCandidates = (input: WorkflowCandidateCommand
                 ...(input.pendingReviewProgressStatus === undefined ? {} : { review_progress_status: input.pendingReviewProgressStatus }),
             };
             const hasFilters = Object.keys(filters).length > 0;
-            const report = loadWorkflowCandidateGuidancePendingReviewTaskListReport(taskDir, hasFilters ? filters : undefined);
+            const report = yield* loadWorkflowCandidateGuidancePendingReviewTaskListReport(taskDir, hasFilters ? filters : undefined);
             if (input.out) {
-                mkdirSync(dirname(input.out), { recursive: true });
-                writeFileSync(input.out, `${prettyPrint(report)}\n`, "utf8");
+                yield* fs.makeDirectory(path.dirname(input.out), { recursive: true });
+                yield* fs.writeFileString(input.out, `${prettyPrint(report)}\n`);
             }
             console.log(input.json ? prettyPrint(report) : renderWorkflowCandidateGuidancePendingReviewTaskListText(report));
             return;
         }
         if (input.repairPendingReviewContext) {
-            const taskList = loadWorkflowCandidateGuidancePendingReviewTaskListReport(taskDir, {
+            const taskList = yield* loadWorkflowCandidateGuidancePendingReviewTaskListReport(taskDir, {
                 ...(input.pendingReviewTaskPath === undefined ? { route: "repair_review_decisions" as const } : { path: input.pendingReviewTaskPath }),
             });
             const task = taskList.tasks[0];
@@ -7808,7 +7870,7 @@ export const runClassifiersWorkflowCandidates = (input: WorkflowCandidateCommand
                     : "No pending review task with repairable context was found.\n");
                 return;
             }
-            const rows = parseWorkflowCandidateFixtureRowsJsonl(readFileSync(task.fixture_pack_path, "utf8"));
+            const rows = parseWorkflowCandidateFixtureRowsJsonl(yield* fs.readFileString(task.fixture_pack_path));
             const turnIds = rows
                 .map((row) => row.turn)
                 .filter((turn): turn is string => typeof turn === "string" && turn.length > 0);
@@ -7821,16 +7883,16 @@ export const runClassifiersWorkflowCandidates = (input: WorkflowCandidateCommand
                 ...(input.repairTarget === undefined ? {} : { repairTarget: input.repairTarget }),
             });
             if (input.repairedFixturePack) {
-                mkdirSync(dirname(input.repairedFixturePack), { recursive: true });
-                writeFileSync(input.repairedFixturePack, report.repaired_jsonl, "utf8");
+                yield* fs.makeDirectory(path.dirname(input.repairedFixturePack), { recursive: true });
+                yield* fs.writeFileString(input.repairedFixturePack, report.repaired_jsonl);
             }
             if (input.repairedReviewBrief) {
-                mkdirSync(dirname(input.repairedReviewBrief), { recursive: true });
-                writeFileSync(input.repairedReviewBrief, report.repaired_review_brief_markdown, "utf8");
+                yield* fs.makeDirectory(path.dirname(input.repairedReviewBrief), { recursive: true });
+                yield* fs.writeFileString(input.repairedReviewBrief, report.repaired_review_brief_markdown);
             }
             if (input.out) {
-                mkdirSync(dirname(input.out), { recursive: true });
-                writeFileSync(input.out, `${prettyPrint(report)}\n`, "utf8");
+                yield* fs.makeDirectory(path.dirname(input.out), { recursive: true });
+                yield* fs.writeFileString(input.out, `${prettyPrint(report)}\n`);
             }
             console.log(input.json ? prettyPrint(report) : renderWorkflowCandidateGuidancePendingReviewContextRepairText(report));
             return;
@@ -8022,7 +8084,7 @@ export const runClassifiersWorkflowCandidates = (input: WorkflowCandidateCommand
                 taskLike: input.taskLike,
             }), reviewFactRows);
             const coverageFixturePack = input.coverageFixturePack;
-            const taskDir = input.taskDir ?? join(process.cwd(), ".ax", "tasks");
+            const taskDir = input.taskDir ?? path.join(process.cwd(), ".ax", "tasks");
             const reviewPipelineValues: ClassifierReviewPipelineInputValues = {
                 ...(input.reviewPipelineReviewer === undefined
                     ? input.reviewProvenanceReviewer === undefined ? {} : { reviewer: input.reviewProvenanceReviewer }
@@ -8036,31 +8098,31 @@ export const runClassifiersWorkflowCandidates = (input: WorkflowCandidateCommand
             let pendingReviewTask: WorkflowCandidateGuidancePendingReviewTaskSummary | undefined;
             if (coverageFixturePack !== undefined) {
                 pendingReviewFixturePack = buildWorkflowCandidateReviewCoverageFixtureSummary(pendingCandidateReport, coverageFixturePack);
-                mkdirSync(dirname(coverageFixturePack), { recursive: true });
-                writeFileSync(coverageFixturePack, renderClassifierFixtureRowsJsonl(pendingReviewFixturePack.fixtures), "utf8");
+                yield* fs.makeDirectory(path.dirname(coverageFixturePack), { recursive: true });
+                yield* fs.writeFileString(coverageFixturePack, renderClassifierFixtureRowsJsonl(pendingReviewFixturePack.fixtures));
                 const reviewProjection = buildWorkflowCandidateReviewCoverageGraphProjectionFromFixtures({
                     rows: pendingReviewFixturePack.fixtures,
                     syncedFrom: coverageFixturePack,
                 });
                 const reviewWritePlan = buildWorkflowCandidateTopicReviewGraphWritePlan(reviewProjection);
                 if (input.reviewFacts !== undefined) {
-                    mkdirSync(dirname(input.reviewFacts), { recursive: true });
-                    writeFileSync(input.reviewFacts, `${prettyPrint(reviewProjection)}\n`, "utf8");
+                    yield* fs.makeDirectory(path.dirname(input.reviewFacts), { recursive: true });
+                    yield* fs.writeFileString(input.reviewFacts, `${prettyPrint(reviewProjection)}\n`);
                 }
                 if (input.reviewWritePlan !== undefined) {
-                    mkdirSync(dirname(input.reviewWritePlan), { recursive: true });
-                    writeFileSync(input.reviewWritePlan, `${prettyPrint(reviewWritePlan)}\n`, "utf8");
+                    yield* fs.makeDirectory(path.dirname(input.reviewWritePlan), { recursive: true });
+                    yield* fs.writeFileString(input.reviewWritePlan, `${prettyPrint(reviewWritePlan)}\n`);
                 }
                 if (input.coverageReviewBrief !== undefined) {
-                    mkdirSync(dirname(input.coverageReviewBrief), { recursive: true });
-                    writeFileSync(input.coverageReviewBrief, renderWorkflowCandidateReviewCoverageBriefMarkdown(pendingReviewFixturePack.fixtures, {
+                    yield* fs.makeDirectory(path.dirname(input.coverageReviewBrief), { recursive: true });
+                    yield* fs.writeFileString(input.coverageReviewBrief, renderWorkflowCandidateReviewCoverageBriefMarkdown(pendingReviewFixturePack.fixtures, {
                         sourceKind: input.sourceKind,
                         limit: input.limit,
                         coverageFixturePack,
                         coverageReviewBrief: input.coverageReviewBrief,
                         commandMode: "guidance_decision_batch",
                         ...(input.out === undefined ? {} : { outputPath: input.out }),
-                    }), "utf8");
+                    }));
                 }
                 let applySummary = buildWorkflowCandidateReviewCoverageApplySummary({
                     rows: pendingReviewFixturePack.fixtures,
@@ -8095,7 +8157,7 @@ export const runClassifiersWorkflowCandidates = (input: WorkflowCandidateCommand
             }
             if (input.coverageReviewPack !== undefined) {
                 let reviewedRows = parseWorkflowCandidateFixtureRowsJsonl(
-                    readFileSync(input.coverageReviewPack, "utf8"),
+                    yield* fs.readFileString(input.coverageReviewPack),
                 );
                 let syncedFixtureCount = 0;
                 let unknownFixtureCount = 0;
@@ -8104,12 +8166,12 @@ export const runClassifiersWorkflowCandidates = (input: WorkflowCandidateCommand
                 if (input.syncCoverageReviewBrief !== undefined) {
                     const syncResult = syncWorkflowCandidateFixtureRowsFromBriefWithSummary(
                         reviewedRows,
-                        readFileSync(input.syncCoverageReviewBrief, "utf8"),
+                        yield* fs.readFileString(input.syncCoverageReviewBrief),
                     );
                     reviewedRows = syncResult.rows;
                     syncedFixtureCount = syncResult.synced_fixture_count;
                     unknownFixtureCount = syncResult.unknown_fixture_count;
-                    writeFileSync(input.coverageReviewPack, renderClassifierFixtureRowsJsonl(reviewedRows), "utf8");
+                    yield* fs.writeFileString(input.coverageReviewPack, renderClassifierFixtureRowsJsonl(reviewedRows));
                 }
                 if (input.reviewProvenanceReviewer !== undefined || input.reviewProvenanceReviewedAt !== undefined) {
                     const stampResult = stampWorkflowCandidateReviewProvenance(reviewedRows, {
@@ -8119,18 +8181,18 @@ export const runClassifiersWorkflowCandidates = (input: WorkflowCandidateCommand
                     reviewedRows = stampResult.rows;
                     stampedReviewerCount = stampResult.stamped_reviewer_count;
                     stampedReviewedAtCount = stampResult.stamped_reviewed_at_count;
-                    writeFileSync(input.coverageReviewPack, renderClassifierFixtureRowsJsonl(reviewedRows), "utf8");
+                    yield* fs.writeFileString(input.coverageReviewPack, renderClassifierFixtureRowsJsonl(reviewedRows));
                 }
                 if (input.coverageReviewBrief !== undefined) {
-                    mkdirSync(dirname(input.coverageReviewBrief), { recursive: true });
-                    writeFileSync(input.coverageReviewBrief, renderWorkflowCandidateReviewCoverageBriefMarkdown(reviewedRows, {
+                    yield* fs.makeDirectory(path.dirname(input.coverageReviewBrief), { recursive: true });
+                    yield* fs.writeFileString(input.coverageReviewBrief, renderWorkflowCandidateReviewCoverageBriefMarkdown(reviewedRows, {
                         sourceKind: input.sourceKind,
                         limit: input.limit,
                         coverageReviewPack: input.coverageReviewPack,
                         coverageReviewBrief: input.coverageReviewBrief,
                         commandMode: "guidance_decision_batch",
                         ...(input.out === undefined ? {} : { outputPath: input.out }),
-                    }), "utf8");
+                    }));
                 }
                 const reviewProjection = buildWorkflowCandidateReviewCoverageGraphProjectionFromFixtures({
                     rows: reviewedRows,
@@ -8138,12 +8200,12 @@ export const runClassifiersWorkflowCandidates = (input: WorkflowCandidateCommand
                 });
                 const reviewWritePlan = buildWorkflowCandidateTopicReviewGraphWritePlan(reviewProjection);
                 if (input.reviewFacts !== undefined) {
-                    mkdirSync(dirname(input.reviewFacts), { recursive: true });
-                    writeFileSync(input.reviewFacts, `${prettyPrint(reviewProjection)}\n`, "utf8");
+                    yield* fs.makeDirectory(path.dirname(input.reviewFacts), { recursive: true });
+                    yield* fs.writeFileString(input.reviewFacts, `${prettyPrint(reviewProjection)}\n`);
                 }
                 if (input.reviewWritePlan !== undefined) {
-                    mkdirSync(dirname(input.reviewWritePlan), { recursive: true });
-                    writeFileSync(input.reviewWritePlan, `${prettyPrint(reviewWritePlan)}\n`, "utf8");
+                    yield* fs.makeDirectory(path.dirname(input.reviewWritePlan), { recursive: true });
+                    yield* fs.writeFileString(input.reviewWritePlan, `${prettyPrint(reviewWritePlan)}\n`);
                 }
                 const reviewFixturePack = pendingReviewFixturePack ?? {
                     path: input.coverageReviewPack,
@@ -8243,15 +8305,15 @@ export const runClassifiersWorkflowCandidates = (input: WorkflowCandidateCommand
                     sourceKind: input.sourceKind,
                     ...(input.out === undefined ? {} : { outputPath: input.out }),
                 });
-                mkdirSync(dirname(task.summary.path!), { recursive: true });
-                writeFileSync(task.summary.path!, task.content, "utf8");
+                yield* fs.makeDirectory(path.dirname(task.summary.path!), { recursive: true });
+                yield* fs.writeFileString(task.summary.path!, task.content);
                 pendingReviewTask = task.summary;
             }
             let acceptedClassifierFixturePack: WorkflowCandidateTopicClassifierFixtureSummary | undefined;
             if (input.classifierFixturePack) {
                 acceptedClassifierFixturePack = buildWorkflowCandidateAcceptedClassifierFixtureSummary(reports, input.classifierFixturePack);
-                mkdirSync(dirname(input.classifierFixturePack), { recursive: true });
-                writeFileSync(input.classifierFixturePack, renderClassifierFixtureRowsJsonl(acceptedClassifierFixturePack.fixtures), "utf8");
+                yield* fs.makeDirectory(path.dirname(input.classifierFixturePack), { recursive: true });
+                yield* fs.writeFileString(input.classifierFixturePack, renderClassifierFixtureRowsJsonl(acceptedClassifierFixturePack.fixtures));
             }
             const batch = buildWorkflowCandidateTopicGuidanceDecisionBatchReport({
                 sourceKind: input.sourceKind,
@@ -8267,8 +8329,8 @@ export const runClassifiersWorkflowCandidates = (input: WorkflowCandidateCommand
                 ...(pendingReviewTask === undefined ? {} : { pendingReviewTask }),
             });
             if (input.out) {
-                mkdirSync(dirname(input.out), { recursive: true });
-                writeFileSync(input.out, `${prettyPrint(batch)}\n`, "utf8");
+                yield* fs.makeDirectory(path.dirname(input.out), { recursive: true });
+                yield* fs.writeFileString(input.out, `${prettyPrint(batch)}\n`);
             }
             console.log(input.json ? prettyPrint(batch) : renderWorkflowCandidateTopicGuidanceDecisionBatchText(batch));
             return;
@@ -8302,8 +8364,8 @@ export const runClassifiersWorkflowCandidates = (input: WorkflowCandidateCommand
                 edges: result?.[1] ?? [],
             });
             if (input.out) {
-                mkdirSync(dirname(input.out), { recursive: true });
-                writeFileSync(input.out, `${prettyPrint(report)}\n`, "utf8");
+                yield* fs.makeDirectory(path.dirname(input.out), { recursive: true });
+                yield* fs.writeFileString(input.out, `${prettyPrint(report)}\n`);
             }
             console.log(input.json ? prettyPrint(report) : renderWorkflowCandidateTopicHarnessGraphListText(report));
             return;
@@ -8341,23 +8403,23 @@ export const runClassifiersWorkflowCandidates = (input: WorkflowCandidateCommand
                     taskLike: input.taskLike,
                 }), reviewFacts);
                 const fixtureSummary = buildWorkflowCandidateReviewCoverageFixtureSummary(candidateReport, input.coverageFixturePack);
-                mkdirSync(dirname(input.coverageFixturePack), { recursive: true });
-                writeFileSync(input.coverageFixturePack, renderClassifierFixtureRowsJsonl(fixtureSummary.fixtures), "utf8");
+                yield* fs.makeDirectory(path.dirname(input.coverageFixturePack), { recursive: true });
+                yield* fs.writeFileString(input.coverageFixturePack, renderClassifierFixtureRowsJsonl(fixtureSummary.fixtures));
                 if (input.coverageReviewBrief) {
-                    mkdirSync(dirname(input.coverageReviewBrief), { recursive: true });
-                    writeFileSync(input.coverageReviewBrief, renderWorkflowCandidateReviewCoverageBriefMarkdown(fixtureSummary.fixtures, {
+                    yield* fs.makeDirectory(path.dirname(input.coverageReviewBrief), { recursive: true });
+                    yield* fs.writeFileString(input.coverageReviewBrief, renderWorkflowCandidateReviewCoverageBriefMarkdown(fixtureSummary.fixtures, {
                         sourceKind: input.sourceKind,
                         limit: input.limit,
                         coverageFixturePack: input.coverageFixturePack,
                         coverageReviewBrief: input.coverageReviewBrief,
                         ...(input.out === undefined ? {} : { outputPath: input.out }),
-                    }), "utf8");
+                    }));
                 }
                 report = { ...report, fixture_pack: fixtureSummary };
             }
             if (input.coverageReviewPack) {
                 let reviewedRows = parseWorkflowCandidateFixtureRowsJsonl(
-                    readFileSync(input.coverageReviewPack, "utf8"),
+                    yield* fs.readFileString(input.coverageReviewPack),
                 );
                 let syncedFixtureCount = 0;
                 let unknownFixtureCount = 0;
@@ -8366,12 +8428,12 @@ export const runClassifiersWorkflowCandidates = (input: WorkflowCandidateCommand
                 if (input.syncCoverageReviewBrief) {
                     const syncResult = syncWorkflowCandidateFixtureRowsFromBriefWithSummary(
                         reviewedRows,
-                        readFileSync(input.syncCoverageReviewBrief, "utf8"),
+                        yield* fs.readFileString(input.syncCoverageReviewBrief),
                     );
                     reviewedRows = syncResult.rows;
                     syncedFixtureCount = syncResult.synced_fixture_count;
                     unknownFixtureCount = syncResult.unknown_fixture_count;
-                    writeFileSync(input.coverageReviewPack, renderClassifierFixtureRowsJsonl(reviewedRows), "utf8");
+                    yield* fs.writeFileString(input.coverageReviewPack, renderClassifierFixtureRowsJsonl(reviewedRows));
                 }
                 if (input.reviewProvenanceReviewer !== undefined || input.reviewProvenanceReviewedAt !== undefined) {
                     const stampResult = stampWorkflowCandidateReviewProvenance(reviewedRows, {
@@ -8381,17 +8443,17 @@ export const runClassifiersWorkflowCandidates = (input: WorkflowCandidateCommand
                     reviewedRows = stampResult.rows;
                     stampedReviewerCount = stampResult.stamped_reviewer_count;
                     stampedReviewedAtCount = stampResult.stamped_reviewed_at_count;
-                    writeFileSync(input.coverageReviewPack, renderClassifierFixtureRowsJsonl(reviewedRows), "utf8");
+                    yield* fs.writeFileString(input.coverageReviewPack, renderClassifierFixtureRowsJsonl(reviewedRows));
                 }
                 if (input.coverageReviewBrief) {
-                    mkdirSync(dirname(input.coverageReviewBrief), { recursive: true });
-                    writeFileSync(input.coverageReviewBrief, renderWorkflowCandidateReviewCoverageBriefMarkdown(reviewedRows, {
+                    yield* fs.makeDirectory(path.dirname(input.coverageReviewBrief), { recursive: true });
+                    yield* fs.writeFileString(input.coverageReviewBrief, renderWorkflowCandidateReviewCoverageBriefMarkdown(reviewedRows, {
                         sourceKind: input.sourceKind,
                         limit: input.limit,
                         coverageReviewPack: input.coverageReviewPack,
                         coverageReviewBrief: input.coverageReviewBrief,
                         ...(input.out === undefined ? {} : { outputPath: input.out }),
-                    }), "utf8");
+                    }));
                 }
                 const reviewProjection = buildWorkflowCandidateReviewCoverageGraphProjectionFromFixtures({
                     rows: reviewedRows,
@@ -8399,12 +8461,12 @@ export const runClassifiersWorkflowCandidates = (input: WorkflowCandidateCommand
                 });
                 const reviewWritePlan = buildWorkflowCandidateTopicReviewGraphWritePlan(reviewProjection);
                 if (input.reviewFacts) {
-                    mkdirSync(dirname(input.reviewFacts), { recursive: true });
-                    writeFileSync(input.reviewFacts, `${prettyPrint(reviewProjection)}\n`, "utf8");
+                    yield* fs.makeDirectory(path.dirname(input.reviewFacts), { recursive: true });
+                    yield* fs.writeFileString(input.reviewFacts, `${prettyPrint(reviewProjection)}\n`);
                 }
                 if (input.reviewWritePlan) {
-                    mkdirSync(dirname(input.reviewWritePlan), { recursive: true });
-                    writeFileSync(input.reviewWritePlan, `${prettyPrint(reviewWritePlan)}\n`, "utf8");
+                    yield* fs.makeDirectory(path.dirname(input.reviewWritePlan), { recursive: true });
+                    yield* fs.writeFileString(input.reviewWritePlan, `${prettyPrint(reviewWritePlan)}\n`);
                 }
                 const pendingApplySummary = buildWorkflowCandidateReviewCoverageApplySummary({
                     rows: reviewedRows,
@@ -8517,8 +8579,8 @@ export const runClassifiersWorkflowCandidates = (input: WorkflowCandidateCommand
                 });
             }
             if (input.out) {
-                mkdirSync(dirname(input.out), { recursive: true });
-                writeFileSync(input.out, `${prettyPrint(report)}\n`, "utf8");
+                yield* fs.makeDirectory(path.dirname(input.out), { recursive: true });
+                yield* fs.writeFileString(input.out, `${prettyPrint(report)}\n`);
             }
             console.log(input.json ? prettyPrint(report) : renderWorkflowCandidateReviewCoverageText(report));
             return;
@@ -8720,31 +8782,32 @@ export const runClassifiersWorkflowCandidates = (input: WorkflowCandidateCommand
                     ORDER BY updated_at DESC
                     LIMIT ${Math.max(1, input.limit * 25)};
                 `).pipe(catchDbErrorAndExit("axctl classifiers workflow-candidates"));
+                const helperFixtures = yield* readWorkflowCandidateHelperFixtures(
+                    path.join(process.cwd(), "packages", "ax-classifier-session-sections", "eval-fixtures", "chunks.jsonl"),
+                );
                 topicReport = {
                     ...topicReport,
                     helper_explanations: buildWorkflowCandidateTopicHelperExplanations({
                         report: topicReport,
                         facts: helperRows?.[0] ?? [],
                         edges: helperRows?.[1] ?? [],
-                        fixtures: readWorkflowCandidateHelperFixtures(
-                            join(process.cwd(), "packages", "ax-classifier-session-sections", "eval-fixtures", "chunks.jsonl"),
-                        ),
+                        fixtures: helperFixtures,
                     }),
                 };
             }
             if (input.syncBrief) {
                 topicReport = syncWorkflowCandidateTopicReportFromBrief(
                     topicReport,
-                    readFileSync(input.syncBrief, "utf8"),
+                    yield* fs.readFileString(input.syncBrief),
                     input.syncBrief,
                 );
             }
             if (input.emitAdjacentTasks) {
-                const taskDir = input.taskDir ?? join(process.cwd(), ".ax", "tasks");
+                const taskDir = input.taskDir ?? path.join(process.cwd(), ".ax", "tasks");
                 const adjacentTasks = buildWorkflowCandidateTopicTaskDrafts(topicReport, taskDir);
-                if (adjacentTasks.drafts.length > 0) mkdirSync(taskDir, { recursive: true });
+                if (adjacentTasks.drafts.length > 0) yield* fs.makeDirectory(taskDir, { recursive: true });
                 for (const draft of adjacentTasks.drafts) {
-                    writeFileSync(draft.path, draft.content, "utf8");
+                    yield* fs.writeFileString(draft.path, draft.content);
                 }
                 topicReport = {
                     ...topicReport,
@@ -8753,8 +8816,8 @@ export const runClassifiersWorkflowCandidates = (input: WorkflowCandidateCommand
             }
             if (input.classifierFixturePack) {
                 const summary = buildWorkflowCandidateTopicClassifierFixtureSummary(topicReport, input.classifierFixturePack);
-                mkdirSync(dirname(input.classifierFixturePack), { recursive: true });
-                writeFileSync(input.classifierFixturePack, renderClassifierFixtureRowsJsonl(summary.fixtures), "utf8");
+                yield* fs.makeDirectory(path.dirname(input.classifierFixturePack), { recursive: true });
+                yield* fs.writeFileString(input.classifierFixturePack, renderClassifierFixtureRowsJsonl(summary.fixtures));
                 topicReport = {
                     ...topicReport,
                     classifier_fixtures: summary,
@@ -8783,23 +8846,23 @@ export const runClassifiersWorkflowCandidates = (input: WorkflowCandidateCommand
                 topicReport = withWorkflowCandidateTopicGuidanceDecision(topicReport);
             }
             if (input.out) {
-                mkdirSync(dirname(input.out), { recursive: true });
-                writeFileSync(input.out, `${prettyPrint(topicReport)}\n`, "utf8");
+                yield* fs.makeDirectory(path.dirname(input.out), { recursive: true });
+                yield* fs.writeFileString(input.out, `${prettyPrint(topicReport)}\n`);
             }
             if (input.evidencePack) {
-                mkdirSync(dirname(input.evidencePack), { recursive: true });
-                writeFileSync(input.evidencePack, renderWorkflowCandidateTopicEvidencePackMarkdown(topicReport), "utf8");
+                yield* fs.makeDirectory(path.dirname(input.evidencePack), { recursive: true });
+                yield* fs.writeFileString(input.evidencePack, renderWorkflowCandidateTopicEvidencePackMarkdown(topicReport));
             }
             if (input.reviewFacts || input.reviewWritePlan || input.applyReviewFacts) {
                 const reviewProjection = buildWorkflowCandidateTopicReviewGraphProjection(topicReport);
                 const reviewWritePlan = buildWorkflowCandidateTopicReviewGraphWritePlan(reviewProjection);
                 if (input.reviewFacts) {
-                    mkdirSync(dirname(input.reviewFacts), { recursive: true });
-                    writeFileSync(input.reviewFacts, `${prettyPrint(reviewProjection)}\n`, "utf8");
+                    yield* fs.makeDirectory(path.dirname(input.reviewFacts), { recursive: true });
+                    yield* fs.writeFileString(input.reviewFacts, `${prettyPrint(reviewProjection)}\n`);
                 }
                 if (input.reviewWritePlan) {
-                    mkdirSync(dirname(input.reviewWritePlan), { recursive: true });
-                    writeFileSync(input.reviewWritePlan, `${prettyPrint(reviewWritePlan)}\n`, "utf8");
+                    yield* fs.makeDirectory(path.dirname(input.reviewWritePlan), { recursive: true });
+                    yield* fs.writeFileString(input.reviewWritePlan, `${prettyPrint(reviewWritePlan)}\n`);
                 }
                 if (input.applyReviewFacts && reviewWritePlan.statements.length > 0) {
                     yield* db.query(reviewWritePlan.statements.join("\n")).pipe(
@@ -8811,12 +8874,12 @@ export const runClassifiersWorkflowCandidates = (input: WorkflowCandidateCommand
                 const harnessProjection = buildWorkflowCandidateTopicHarnessGraphProjection(topicReport);
                 const harnessWritePlan = buildWorkflowCandidateTopicHarnessGraphWritePlan(harnessProjection);
                 if (input.harnessFacts) {
-                    mkdirSync(dirname(input.harnessFacts), { recursive: true });
-                    writeFileSync(input.harnessFacts, `${prettyPrint(harnessProjection)}\n`, "utf8");
+                    yield* fs.makeDirectory(path.dirname(input.harnessFacts), { recursive: true });
+                    yield* fs.writeFileString(input.harnessFacts, `${prettyPrint(harnessProjection)}\n`);
                 }
                 if (input.harnessWritePlan) {
-                    mkdirSync(dirname(input.harnessWritePlan), { recursive: true });
-                    writeFileSync(input.harnessWritePlan, `${prettyPrint(harnessWritePlan)}\n`, "utf8");
+                    yield* fs.makeDirectory(path.dirname(input.harnessWritePlan), { recursive: true });
+                    yield* fs.writeFileString(input.harnessWritePlan, `${prettyPrint(harnessWritePlan)}\n`);
                 }
                 if (input.applyHarnessFacts && harnessWritePlan.statements.length > 0) {
                     yield* db.query(harnessWritePlan.statements.join("\n")).pipe(
@@ -8909,8 +8972,8 @@ export const runClassifiersWorkflowCandidates = (input: WorkflowCandidateCommand
                 ...(input.search === undefined ? {} : { search: input.search }),
             });
             if (input.out) {
-                mkdirSync(dirname(input.out), { recursive: true });
-                writeFileSync(input.out, `${prettyPrint(listReport)}\n`, "utf8");
+                yield* fs.makeDirectory(path.dirname(input.out), { recursive: true });
+                yield* fs.writeFileString(input.out, `${prettyPrint(listReport)}\n`);
             }
             console.log(input.json ? prettyPrint(listReport) : renderWorkflowCandidateProposalListText(listReport));
             return;
@@ -8946,18 +9009,18 @@ export const runClassifiersWorkflowCandidates = (input: WorkflowCandidateCommand
         if (input.syncBrief) {
             report = syncWorkflowCandidateReportFromBrief(
                 report,
-                readFileSync(input.syncBrief, "utf8"),
+                yield* fs.readFileString(input.syncBrief),
                 input.syncBrief,
             );
         }
         if (input.promoteTasks || input.promoteProposals) {
-            const taskDir = input.taskDir ?? join(process.cwd(), ".ax", "tasks");
+            const taskDir = input.taskDir ?? path.join(process.cwd(), ".ax", "tasks");
             const promotion = buildWorkflowCandidateTaskDrafts(report, taskDir, input.promotionMode ?? "per-candidate");
             report = promotion.report;
             if (input.promoteTasks) {
-                if (promotion.drafts.length > 0) mkdirSync(taskDir, { recursive: true });
+                if (promotion.drafts.length > 0) yield* fs.makeDirectory(taskDir, { recursive: true });
                 for (const draft of promotion.drafts) {
-                    writeFileSync(draft.path, draft.content, "utf8");
+                    yield* fs.writeFileString(draft.path, draft.content);
                 }
             }
         }
@@ -8999,12 +9062,12 @@ export const runClassifiersWorkflowCandidates = (input: WorkflowCandidateCommand
             }
         }
         if (input.out) {
-            mkdirSync(dirname(input.out), { recursive: true });
-            writeFileSync(input.out, `${prettyPrint(report)}\n`, "utf8");
+            yield* fs.makeDirectory(path.dirname(input.out), { recursive: true });
+            yield* fs.writeFileString(input.out, `${prettyPrint(report)}\n`);
         }
         if (input.brief) {
-            mkdirSync(dirname(input.brief), { recursive: true });
-            writeFileSync(input.brief, renderWorkflowCandidateBriefMarkdown(report), "utf8");
+            yield* fs.makeDirectory(path.dirname(input.brief), { recursive: true });
+            yield* fs.writeFileString(input.brief, renderWorkflowCandidateBriefMarkdown(report));
         }
         console.log(input.json ? prettyPrint(report) : renderWorkflowCandidateReportText(report));
         if (report.decision !== "workflow_candidates_ranked") process.exitCode = 1;

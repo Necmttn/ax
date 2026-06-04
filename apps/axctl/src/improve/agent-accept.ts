@@ -21,8 +21,9 @@
  * AgentAcceptResult shape so callers can inspect after the fact.
  */
 
-import { existsSync, statSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { Effect, FileSystem, Option, type PlatformError } from "effect";
+import { orAbsent } from "@ax/lib/shared/fs-error";
+import { posixPath } from "@ax/lib/shared/path";
 
 export interface AgentAcceptContext {
     readonly skillPath: string;
@@ -47,7 +48,7 @@ export const buildAgentAcceptPrompt = (ctx: AgentAcceptContext): string => {
     const retrosBlock = ctx.retroSummaries.length === 0
         ? "(no recent retros captured)"
         : ctx.retroSummaries.map((s) => `  - ${s}`).join("\n");
-    const planPath = join(dirname(ctx.skillPath), "PLAN.md");
+    const planPath = posixPath.join(posixPath.dirname(ctx.skillPath), "PLAN.md");
     return [
         "You are improving a skill stub for the `ax` agent-experience graph.",
         "",
@@ -78,22 +79,35 @@ export const buildAgentAcceptPrompt = (ctx: AgentAcceptContext): string => {
     ].join("\n");
 };
 
-const safeMtime = (path: string): number | null => {
-    try {
-        return existsSync(path) ? statSync(path).mtimeMs : null;
-    } catch {
-        return null;
-    }
-};
+// existsSync+statSync().mtimeMs in try/catch→null: a missing file or any stat
+// fault yields null (orAbsent(none) collapses both; an absent mtime → null too).
+const safeMtime = (
+    path: string,
+): Effect.Effect<number | null, never, FileSystem.FileSystem> =>
+    Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const info = yield* fs.stat(path).pipe(Effect.asSome, orAbsent(Option.none()));
+        if (Option.isNone(info)) return null;
+        return Option.match(info.value.mtime, {
+            onNone: () => null,
+            onSome: (d) => d.getTime(),
+        });
+    });
 
-export const runAgentAccept = async (
-    ctx: AgentAcceptContext,
-): Promise<AgentAcceptResult> => {
-    const planPath = join(dirname(ctx.skillPath), "PLAN.md");
-    const prompt = buildAgentAcceptPrompt(ctx);
-    const beforeSkillMtime = safeMtime(ctx.skillPath);
-    const planExistedBefore = existsSync(planPath);
+const fileExists = (
+    path: string,
+): Effect.Effect<boolean, never, FileSystem.FileSystem> =>
+    Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        return yield* fs.exists(path).pipe(orAbsent(false));
+    });
 
+// Spawn the subagent and stream its output. The Bun.spawn lifecycle stays in a
+// single async closure wrapped by Effect.promise (it never throws a typed
+// error - process failures surface as a non-zero exitCode in the result).
+const spawnAgent = async (
+    prompt: string,
+): Promise<{ exitCode: number; stdout: string; stderr: string }> => {
     const cmd = ["claude", "-p", "--permission-mode=bypassPermissions", prompt];
     const child = Bun.spawn(cmd, {
         stdout: "pipe",
@@ -131,19 +145,33 @@ export const runAgentAccept = async (
 
     await Promise.all([pumpStdout, pumpStderr]);
     const exitCode = await child.exited;
-
-    const afterSkillMtime = safeMtime(ctx.skillPath);
-    const skillEnriched =
-        afterSkillMtime !== null
-        && (beforeSkillMtime === null || afterSkillMtime > beforeSkillMtime);
-    const planWritten = !planExistedBefore && existsSync(planPath);
-
-    return {
-        exitCode,
-        stdout: stdoutChunks.join(""),
-        stderr: stderrChunks.join(""),
-        skillEnriched,
-        planWritten,
-        planPath: planWritten || existsSync(planPath) ? planPath : null,
-    };
+    return { exitCode, stdout: stdoutChunks.join(""), stderr: stderrChunks.join("") };
 };
+
+export const runAgentAccept = (
+    ctx: AgentAcceptContext,
+): Effect.Effect<AgentAcceptResult, PlatformError.PlatformError, FileSystem.FileSystem> =>
+    Effect.gen(function* () {
+        const planPath = posixPath.join(posixPath.dirname(ctx.skillPath), "PLAN.md");
+        const prompt = buildAgentAcceptPrompt(ctx);
+        const beforeSkillMtime = yield* safeMtime(ctx.skillPath);
+        const planExistedBefore = yield* fileExists(planPath);
+
+        const { exitCode, stdout, stderr } = yield* Effect.promise(() => spawnAgent(prompt));
+
+        const afterSkillMtime = yield* safeMtime(ctx.skillPath);
+        const skillEnriched =
+            afterSkillMtime !== null
+            && (beforeSkillMtime === null || afterSkillMtime > beforeSkillMtime);
+        const planExistsAfter = yield* fileExists(planPath);
+        const planWritten = !planExistedBefore && planExistsAfter;
+
+        return {
+            exitCode,
+            stdout,
+            stderr,
+            skillEnriched,
+            planWritten,
+            planPath: planWritten || planExistsAfter ? planPath : null,
+        };
+    });

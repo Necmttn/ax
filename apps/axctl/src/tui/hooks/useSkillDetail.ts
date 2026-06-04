@@ -1,10 +1,25 @@
 import { useEffect, useRef, useState } from "react";
-import { Effect } from "effect";
+import { Effect, FileSystem } from "effect";
+import { BunFileSystem } from "@effect/platform-bun";
 import { flushSync } from "@opentui/react";
-import { readFile } from "node:fs/promises";
-import { join } from "node:path";
 import type { SurrealClientShape } from "@ax/lib/db";
+import { orAbsent } from "@ax/lib/shared/fs-error";
+import { posixPath } from "@ax/lib/shared/path";
 import { SKILL_DETAIL_SQL } from "../queries.ts";
+
+/**
+ * Read a skill's SKILL.md body, recovering ANY filesystem failure to `null`
+ * (the original try/catch left `body` undefined when the file was unreadable).
+ * The TUI keeps no ambient Effect runtime in the React tree (see tui/index.tsx),
+ * so the read runs as a self-contained Effect over `BunFileSystem.layer`.
+ */
+const readSkillBody = (filePath: string): Promise<string | null> =>
+    Effect.runPromise(
+        Effect.gen(function* () {
+            const fs = yield* FileSystem.FileSystem;
+            return yield* fs.readFileString(filePath);
+        }).pipe(orAbsent<string | null>(null), Effect.provide(BunFileSystem.layer)),
+    );
 
 /**
  * Debounce window before firing the detail query. Holding j/k spams selection
@@ -98,17 +113,16 @@ export function useSkillDetail(
                     let withBody = payload ?? null;
                     const dirPath = withBody?.skill?.dir_path;
                     if (typeof dirPath === "string" && dirPath.length > 0) {
-                        try {
-                            const raw = await readFile(join(dirPath, "SKILL.md"), "utf8");
+                        const raw = await readSkillBody(posixPath.join(dirPath, "SKILL.md"));
+                        if (raw !== null) {
                             const m = raw.match(/^---\n[\s\S]*?\n---\n([\s\S]*)$/);
                             const body = (m?.[1] ?? raw).trim();
                             withBody = {
                                 ...withBody!,
                                 skill: { ...withBody!.skill!, body },
                             };
-                        } catch {
-                            // Skill file unreadable - leave body undefined.
                         }
+                        // Skill file unreadable - leave body undefined.
                     }
                     if (cancelled) return;
                     if (withBody) cacheRef.current.set(name, withBody);

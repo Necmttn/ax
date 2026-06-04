@@ -2,8 +2,11 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, test } from "bun:test";
-import { Effect } from "effect";
+import { Effect, Layer } from "effect";
+import { BunFileSystem, BunPath } from "@effect/platform-bun";
 import { extractInstructionMatches, loadPackageInfo, packageSignals } from "./stack.ts";
+
+const fsLayer = Layer.mergeAll(BunFileSystem.layer, BunPath.layer);
 
 describe("loadPackageInfo", () => {
     test("invalid package.json returns empty dependencies/scripts instead of throwing", async () => {
@@ -11,7 +14,7 @@ describe("loadPackageInfo", () => {
         try {
             await writeFile(join(root, "package.json"), "{invalid json", "utf8");
 
-            const info = await Effect.runPromise(loadPackageInfo(root));
+            const info = await Effect.runPromise(loadPackageInfo(root).pipe(Effect.provide(fsLayer)));
 
             expect(info).toEqual({
                 packageJsonPath: null,

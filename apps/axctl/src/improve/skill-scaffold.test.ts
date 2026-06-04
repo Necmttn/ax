@@ -3,7 +3,15 @@ import { existsSync, readFileSync, rmSync } from "node:fs";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { kebabCase, scaffoldContent, scaffoldSkill, skillScaffoldFile } from "./skill-scaffold.ts";
+import { Effect, Layer } from "effect";
+import { BunFileSystem, BunPath } from "@effect/platform-bun";
+import { kebabCase, scaffoldContent, scaffoldSkill, skillScaffoldFile, type ScaffoldOptions } from "./skill-scaffold.ts";
+
+// scaffoldSkill now returns an Effect requiring FileSystem + Path (migrated to
+// @effect/platform); run it against the real Bun-backed layers in tests.
+const fsLayer = Layer.mergeAll(BunFileSystem.layer, BunPath.layer);
+const runScaffold = (opts: ScaffoldOptions) =>
+    Effect.runPromise(scaffoldSkill(opts).pipe(Effect.provide(fsLayer)));
 
 describe("kebabCase", () => {
     test("downcases + replaces non-alnum + collapses runs", () => {
@@ -54,10 +62,10 @@ describe("scaffoldContent", () => {
 });
 
 describe("scaffoldSkill", () => {
-    test("creates SKILL.md under baseDir/<kebab-name>/", () => {
+    test("creates SKILL.md under baseDir/<kebab-name>/", async () => {
         const baseDir = mkdtempSync(join(tmpdir(), "ax-scaffold-"));
         try {
-            const result = scaffoldSkill({
+            const result = await runScaffold({
                 baseDir,
                 input: {
                     title: "Demo Skill",
@@ -77,7 +85,7 @@ describe("scaffoldSkill", () => {
         }
     });
 
-    test("refuses to clobber an existing file unless force=true", () => {
+    test("refuses to clobber an existing file unless force=true", async () => {
         const baseDir = mkdtempSync(join(tmpdir(), "ax-scaffold-"));
         try {
             const input = {
@@ -87,12 +95,12 @@ describe("scaffoldSkill", () => {
                 dedupeSig: "skill__d",
                 nowIso: "2026-05-25T00:00:00.000Z",
             };
-            const first = scaffoldSkill({ baseDir, input });
+            const first = await runScaffold({ baseDir, input });
             expect(first.created).toBe(true);
-            const second = scaffoldSkill({ baseDir, input });
+            const second = await runScaffold({ baseDir, input });
             expect(second.created).toBe(false);
             expect(second.skipped).toBe(true);
-            const forced = scaffoldSkill({ baseDir, input: { ...input, proposedBehavior: "new" }, force: true });
+            const forced = await runScaffold({ baseDir, input: { ...input, proposedBehavior: "new" }, force: true });
             expect(forced.created).toBe(true);
             expect(readFileSync(forced.path, "utf-8")).toContain("new");
         } finally {

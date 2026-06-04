@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { Effect } from "effect";
+import { BunFileSystem } from "@effect/platform-bun";
 import {
     attachWorkflowCandidateProposalEvidence,
     buildWorkflowCandidateReport,
@@ -2474,7 +2475,7 @@ describe("classifiers workflow-candidates", () => {
             verifier: {
                 exists: () => Effect.succeed(false),
             },
-        }));
+        }).pipe(Effect.provide(BunFileSystem.layer)));
         expect(reportWithLifecycle.coverage_review?.review_pipeline_lifecycle?.status).toBe("missing_required_outputs");
         expect(reportWithLifecycle.coverage_review?.review_pipeline_lifecycle?.prepared.argv).toContain("--review-provenance-reviewer=necmett");
         expect(reportWithLifecycle.coverage_review?.review_pipeline_lifecycle?.prepared.argv).toContain("--review-provenance-reviewed-at=2026-05-31T12:34:56.000Z");
@@ -4316,7 +4317,7 @@ describe("classifiers workflow-candidates", () => {
                     exists: () => Effect.succeed(false),
                 },
             },
-        ));
+        ).pipe(Effect.provide(BunFileSystem.layer)));
         const handoff = buildWorkflowCandidateGuidancePendingReviewHandoffSummary({
             fixturePack: {
                 path: ".ax/experiments/pending-review.jsonl",

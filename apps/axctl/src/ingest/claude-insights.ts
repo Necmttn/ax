@@ -1,11 +1,12 @@
-import { readdir, readFile } from "node:fs/promises";
 import { homedir } from "node:os";
-import { basename, join } from "node:path";
-import { Effect } from "effect";
+import { Effect, FileSystem, Path } from "effect";
 import { SurrealClient } from "@ax/lib/db";
 import { decodeJsonOrNull } from "@ax/lib/decode";
 import type { DbError } from "@ax/lib/errors";
 import { AppLayer } from "@ax/lib/layers";
+import { posixPath } from "@ax/lib/shared/path";
+import { orAbsent } from "@ax/lib/shared/fs-error";
+import { classifyNoFollow } from "@ax/lib/shared/fs-classify";
 import { recordRef } from "./evidence-writers.ts";
 import { surrealDate, surrealJsonTextOption, surrealObject, surrealOptionDate, surrealOptionRecord, surrealOptionString, surrealSet, surrealString } from "@ax/lib/shared/surql";
 import { executeStatements } from "@ax/lib/shared/statement-exec";
@@ -116,7 +117,7 @@ const numericMetaMapKeys = new Set([
 function defaultUsageDir(): string {
     return (
         process.env.AX_CLAUDE_USAGE_DIR ??
-        join(homedir(), ".claude", "usage-data")
+        posixPath.join(homedir(), ".claude", "usage-data")
     );
 }
 
@@ -200,7 +201,7 @@ export function normalizeFrictionKind(rawKind: string): string {
 }
 
 function sourceKeyPart(sourcePath: string): string {
-    const fileName = basename(sourcePath, ".json");
+    const fileName = posixPath.basename(sourcePath, ".json");
     const clean = normalizeRawKind(fileName);
     if (clean.length > 0) return clean;
     return `source_${Bun.hash(sourcePath).toString(16).padStart(16, "0")}`;
@@ -224,7 +225,7 @@ function insightText(sourcePath: string, facet: JsonRecord, sessionId: string | 
         nonEmptyString(facet.underlying_goal) ??
         (sessionId
             ? `Claude insights import for session ${sessionId}`
-            : `Claude insights import from ${basename(sourcePath)}`)
+            : `Claude insights import from ${posixPath.basename(sourcePath)}`)
     );
 }
 
@@ -368,7 +369,7 @@ function sessionPlaceholderStatement(
     meta: JsonRecord | null,
 ): string {
     const projectPath = nonEmptyString(meta?.project_path);
-    const projectName = projectPath ? basename(projectPath) : null;
+    const projectName = projectPath ? posixPath.basename(projectPath) : null;
     const startedAt = metaStartTime(meta);
     const endedAt = sessionEndTime(meta);
     const fields: Array<readonly [string, string]> = [["source", surrealString("claude")]];
@@ -444,43 +445,65 @@ export function buildClaudeInsightStatements(
     return statements;
 }
 
-async function jsonFiles(dir: string): Promise<string[]> {
-    try {
-        const entries = await readdir(dir, { withFileTypes: true });
-        return entries
-            .filter((entry) => entry.isFile() && entry.name.endsWith(".json"))
-            .map((entry) => join(dir, entry.name))
-            .sort((a, b) => a.localeCompare(b));
-    } catch {
-        return [];
-    }
-}
+const jsonFiles = (
+    dir: string,
+): Effect.Effect<string[], never, FileSystem.FileSystem | Path.Path> =>
+    Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        // OLD: readdir(withFileTypes) in try/catch → []. A missing/unreadable
+        // dir just means no facets, so recover ANY PlatformError to [].
+        const entries = yield* fs.readDirectory(dir).pipe(orAbsent([] as string[]));
+        const files: string[] = [];
+        for (const entry of entries) {
+            if (!entry.endsWith(".json")) continue;
+            const full = path.join(dir, entry);
+            // OLD: entry.isFile() filter via readdir(withFileTypes) - a `Dirent`
+            // check that does NOT follow symlinks. `classifyNoFollow` restores
+            // that: a symlinked `.json` classifies as "SymbolicLink" (not
+            // "File") and is skipped, matching the old Dirent partition.
+            // Non-files / vanished entries also skip.
+            const kind = yield* classifyNoFollow(full);
+            if (kind === "File") files.push(full);
+        }
+        return files.sort((a, b) => a.localeCompare(b));
+    });
 
-async function readJsonRecord(
+export const __testJsonFiles = jsonFiles;
+
+const readJsonRecord = (
     filePath: string,
-): Promise<{ record: JsonRecord | null; malformed: boolean }> {
-    let text: string;
-    try {
-        text = await readFile(filePath, "utf8");
-    } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        console.warn(`[claude-insights] skipping unreadable JSON ${filePath}: ${message}`);
-        return { record: null, malformed: true };
-    }
-    const parsed = decodeJsonOrNull(text);
-    if (parsed === null) {
-        console.warn(`[claude-insights] skipping malformed JSON ${filePath}`);
-        return { record: null, malformed: true };
-    }
-    if (!isRecord(parsed)) {
-        console.warn(`[claude-insights] skipping non-object JSON ${filePath}`);
-        return { record: null, malformed: true };
-    }
-    return { record: parsed, malformed: false };
-}
+): Effect.Effect<
+    { record: JsonRecord | null; malformed: boolean },
+    never,
+    FileSystem.FileSystem
+> =>
+    Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        // OLD: readFile in try/catch → warn "unreadable" + malformed on ANY
+        // error. orAbsent(null) recovers any read fault; null signals the
+        // unreadable case below (matching the old tolerate-all catch).
+        const text = yield* fs
+            .readFileString(filePath)
+            .pipe(orAbsent(null as string | null));
+        if (text === null) {
+            console.warn(`[claude-insights] skipping unreadable JSON ${filePath}`);
+            return { record: null, malformed: true };
+        }
+        const parsed = decodeJsonOrNull(text);
+        if (parsed === null) {
+            console.warn(`[claude-insights] skipping malformed JSON ${filePath}`);
+            return { record: null, malformed: true };
+        }
+        if (!isRecord(parsed)) {
+            console.warn(`[claude-insights] skipping non-object JSON ${filePath}`);
+            return { record: null, malformed: true };
+        }
+        return { record: parsed, malformed: false };
+    });
 
 function sessionIdForFile(filePath: string, record: JsonRecord): string {
-    return nonEmptyString(record.session_id) ?? basename(filePath, ".json");
+    return nonEmptyString(record.session_id) ?? posixPath.basename(filePath, ".json");
 }
 
 const queryStatements = (
@@ -494,64 +517,74 @@ const writeClaudeInsightConversion = (
 ): Effect.Effect<void, DbError, SurrealClient> =>
     queryStatements(buildClaudeInsightStatements(conversion, meta));
 
-export async function readClaudeInsightConversions(
+export const readClaudeInsightConversions = (
     usageDir: string = defaultUsageDir(),
-): Promise<ClaudeInsightReadResult> {
-    const facetsDir = join(usageDir, "facets");
-    const sessionMetaDir = join(usageDir, "session-meta");
-    const [facetFiles, metaFiles] = await Promise.all([
-        jsonFiles(facetsDir),
-        jsonFiles(sessionMetaDir),
-    ]);
+): Effect.Effect<
+    ClaudeInsightReadResult,
+    never,
+    FileSystem.FileSystem | Path.Path
+> =>
+    Effect.gen(function* () {
+        const path = yield* Path.Path;
+        const facetsDir = path.join(usageDir, "facets");
+        const sessionMetaDir = path.join(usageDir, "session-meta");
+        const [facetFiles, metaFiles] = yield* Effect.all([
+            jsonFiles(facetsDir),
+            jsonFiles(sessionMetaDir),
+        ]);
 
-    let malformed = 0;
-    const metaBySessionId = new Map<string, JsonRecord>();
-    let sessionMeta = 0;
-    for (const metaPath of metaFiles) {
-        const parsed = await readJsonRecord(metaPath);
-        if (parsed.malformed) {
-            malformed += 1;
-            continue;
+        let malformed = 0;
+        const metaBySessionId = new Map<string, JsonRecord>();
+        let sessionMeta = 0;
+        for (const metaPath of metaFiles) {
+            const parsed = yield* readJsonRecord(metaPath);
+            if (parsed.malformed) {
+                malformed += 1;
+                continue;
+            }
+            if (!parsed.record) continue;
+            sessionMeta += 1;
+            metaBySessionId.set(sessionIdForFile(metaPath, parsed.record), parsed.record);
+            metaBySessionId.set(path.basename(metaPath, ".json"), parsed.record);
         }
-        if (!parsed.record) continue;
-        sessionMeta += 1;
-        metaBySessionId.set(sessionIdForFile(metaPath, parsed.record), parsed.record);
-        metaBySessionId.set(basename(metaPath, ".json"), parsed.record);
-    }
 
-    let facets = 0;
-    const items: ClaudeInsightReadItem[] = [];
-    for (const facetPath of facetFiles) {
-        const parsed = await readJsonRecord(facetPath);
-        if (parsed.malformed) {
-            malformed += 1;
-            continue;
+        let facets = 0;
+        const items: ClaudeInsightReadItem[] = [];
+        for (const facetPath of facetFiles) {
+            const parsed = yield* readJsonRecord(facetPath);
+            if (parsed.malformed) {
+                malformed += 1;
+                continue;
+            }
+            if (!parsed.record) continue;
+
+            facets += 1;
+            const sessionId = sessionIdForFile(facetPath, parsed.record);
+            const meta = metaBySessionId.get(sessionId) ?? null;
+            const conversion = facetToInsightAndFriction({
+                sourcePath: facetPath,
+                facet: parsed.record,
+                meta,
+            });
+            items.push({ sourcePath: facetPath, meta, conversion });
         }
-        if (!parsed.record) continue;
 
-        facets += 1;
-        const sessionId = sessionIdForFile(facetPath, parsed.record);
-        const meta = metaBySessionId.get(sessionId) ?? null;
-        const conversion = facetToInsightAndFriction({
-            sourcePath: facetPath,
-            facet: parsed.record,
-            meta,
-        });
-        items.push({ sourcePath: facetPath, meta, conversion });
-    }
-
-    return {
-        stats: { facets, sessionMeta, malformed },
-        items,
-    };
-}
+        return {
+            stats: { facets, sessionMeta, malformed },
+            items,
+        };
+    });
 
 export const ingestClaudeInsights = (
     opts: Partial<ClaudeInsightIngestOpts> = {},
-): Effect.Effect<ClaudeInsightIngestStats, DbError, SurrealClient> =>
+): Effect.Effect<
+    ClaudeInsightIngestStats,
+    DbError,
+    SurrealClient | FileSystem.FileSystem | Path.Path
+> =>
     Effect.gen(function* () {
-        const loaded = yield* Effect.promise(() =>
-            readClaudeInsightConversions(opts.usageDir ?? defaultUsageDir()),
+        const loaded = yield* readClaudeInsightConversions(
+            opts.usageDir ?? defaultUsageDir(),
         );
         let insights = 0;
         let frictionEvents = 0;

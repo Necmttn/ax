@@ -1,11 +1,13 @@
 #!/usr/bin/env bun
-import { Effect, Option, References } from "effect";
+import { Effect, FileSystem, Layer, Option, Path, References } from "effect";
+import { BunFileSystem, BunPath } from "@effect/platform-bun";
 import { Argument, Command, Flag } from "effect/unstable/cli";
 import { SurrealClient, type SurrealClientShape } from "@ax/lib/db";
 import { listSessionsHere, listSessionsAround, listSessionsNear, type SessionRow } from "../dashboard/sessions-query.ts";
 import { findCommitWindow } from "@ax/lib/git-window";
 import { AxConfig } from "@ax/lib/config";
 import { safeJsonParse } from "@ax/lib/shared/safe-json";
+import { orAbsent } from "@ax/lib/shared/fs-error";
 import { ProcessService } from "@ax/lib/process";
 import { prettyPrint, surrealLiteral } from "@ax/lib/json";
 import { prettifyProjectSlug } from "@ax/lib/shared/project-slug";
@@ -269,14 +271,14 @@ const writeIngestEvent = (
         publishIngestEvent(event);
     }).pipe(Effect.asVoid);
 
-const telemetryStage = <A>(
+const telemetryStage = <A, R = SurrealClient | AxConfig | ProcessService>(
     db: SurrealClientShape,
     runId: string,
     source: string,
     stage: string,
-    program: Effect.Effect<A, DbError, SurrealClient | AxConfig | ProcessService>,
+    program: Effect.Effect<A, DbError, R>,
     progress?: ProgressReporter,
-): Effect.Effect<A, DbError, SurrealClient | AxConfig | ProcessService> =>
+): Effect.Effect<A, DbError, R | SurrealClient | AxConfig | ProcessService> =>
     Effect.gen(function* () {
         progress?.start({ source, stage });
         yield* db.query(buildIngestStageStartStatement({ runId, source, stage }));
@@ -528,6 +530,12 @@ const cmdIngestInsights = (args: string[] = []) =>
             ),
             Effect.provideService(References.MinimumLogLevel, verbose ? "Debug" : "Info"),
             Effect.ensuring(Effect.sync(() => progress.stop())),
+            // ingestClaudeInsights now reads via @effect/platform FileSystem +
+            // Path. Provide the Bun-backed layers here so this command's R stays
+            // aligned with the sibling `cmdIngest` branch in the `ax ingest`
+            // handler (AppLayer also supplies them at the top level; these pure
+            // leaf layers are idempotent to re-provide).
+            Effect.provide(Layer.mergeAll(BunFileSystem.layer, BunPath.layer)),
         );
     }).pipe(Effect.asVoid);
 
@@ -600,7 +608,11 @@ interface RecallCliOpts {
  */
 const resolveScope = (
     scopeFlag: string | null,
-): Effect.Effect<RecallScope, DbError | import("@ax/lib/process").ProcessError, SurrealClient | ProcessService> =>
+): Effect.Effect<
+    RecallScope,
+    DbError | import("@ax/lib/process").ProcessError,
+    SurrealClient | ProcessService | FileSystem.FileSystem
+> =>
     Effect.gen(function* () {
         if (scopeFlag === "all") return { kind: "all" } as RecallScope;
 
@@ -997,6 +1009,8 @@ const cmdStats = (args: string[]) =>
             process.exit(1);
         }
         const db = yield* SurrealClient;
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
         const exists = yield* skillExists(name);
         if (!exists) {
             const hint = name.length > 20 ? name.slice(0, 20) : name;
@@ -1091,15 +1105,9 @@ RETURN {
             // through. Catches issue #36 too: synthetic dir_path was already
             // skipped above, but defence-in-depth keeps a future "(synthetic-
             // like)" sentinel from regressing.
-            const body = yield* Effect.promise(async () => {
-                try {
-                    const { readFile } = await import("node:fs/promises");
-                    const { join } = await import("node:path");
-                    return await readFile(join(dirPath, "SKILL.md"), "utf8");
-                } catch {
-                    return null;
-                }
-            });
+            const body = yield* fs
+                .readFileString(path.join(dirPath, "SKILL.md"))
+                .pipe(orAbsent<string | null>(null));
             if (body !== null) {
                 const m = body.match(/^---\n[\s\S]*?\n---\n([\s\S]*)$/);
                 const trimmed = (m?.[1] ?? body).trim();
@@ -1829,9 +1837,8 @@ const classifiersEvalCommand = Command.make(
         path: Flag.string("path").pipe(Flag.optional),
         json: jsonFlag,
     },
-    ({ path, json }) => Effect.promise(() =>
+    ({ path, json }) =>
         cmdClassifiersEval([...stringArg("path", optionValue(path)), ...boolArg("json", json)]),
-    ),
 ).pipe(Command.withDescription("Run classifier golden fixture evaluations"));
 
 const classifiersListCommand = Command.make(
@@ -1839,7 +1846,7 @@ const classifiersListCommand = Command.make(
     {
         json: jsonFlag,
     },
-    ({ json }) => Effect.promise(() => cmdClassifiersList(boolArg("json", json))),
+    ({ json }) => cmdClassifiersList(boolArg("json", json)),
 ).pipe(Command.withDescription("List registered classifiers and fixture coverage"));
 
 const cmdClassifiersExplain = (args: string[]) =>
@@ -2733,17 +2740,15 @@ const improveAcceptCommand = Command.make(
                 }
                 console.log("");
                 console.log("spawning claude subagent to enrich the stub…");
-                const agentResult = yield* Effect.promise(() =>
-                    runAgentAccept({
-                        skillPath: result.artifact_path!,
-                        proposalTitle: result.proposal!.title,
-                        hypothesis: result.proposal!.hypothesis,
-                        triggerPattern: result.proposal!.triggerPattern ?? "",
-                        proposedBehavior: result.proposal!.proposedBehavior,
-                        retroSummaries,
-                        relatedSkillsDir: process.env.AX_SKILLS_SCAFFOLD_DIR ?? `${homedir()}/.claude/skills`,
-                    }),
-                );
+                const agentResult = yield* runAgentAccept({
+                    skillPath: result.artifact_path!,
+                    proposalTitle: result.proposal!.title,
+                    hypothesis: result.proposal!.hypothesis,
+                    triggerPattern: result.proposal!.triggerPattern ?? "",
+                    proposedBehavior: result.proposal!.proposedBehavior,
+                    retroSummaries,
+                    relatedSkillsDir: process.env.AX_SKILLS_SCAFFOLD_DIR ?? `${homedir()}/.claude/skills`,
+                });
                 if (agentResult.skillEnriched) {
                     console.log(`agent enriched ${result.artifact_path}`);
                 }
@@ -3047,7 +3052,7 @@ const maybeAutoIngestStale = (
     cmdLabel: string,
     repoRoot: string,
     args: ReadonlyArray<string>,
-): Effect.Effect<void, DbError, SurrealClient | AxConfig> =>
+): Effect.Effect<void, DbError, SurrealClient | AxConfig | FileSystem.FileSystem | Path.Path> =>
     Effect.gen(function* () {
         if (args.includes("--no-stale-check")) return;
         const threshold = parsePositiveIntFlag(
@@ -3071,7 +3076,12 @@ const maybeAutoIngestStale = (
             process.stderr.write(
                 `axctl ${cmdLabel}: backfilling ${report.newFiles.length} new transcript(s) for ${project}\n`,
             );
-            yield* ingestTranscripts({ project, sinceDays: 7 });
+            // A genuine FS failure during auto-backfill (the vanished-file
+            // case is already caught+skipped inside ingestTranscripts) dies as
+            // a defect rather than masquerading as a recoverable DbError.
+            yield* ingestTranscripts({ project, sinceDays: 7 }).pipe(
+                Effect.catchTag("PlatformError", (e) => Effect.die(e)),
+            );
         } else {
             process.stderr.write(
                 `axctl ${cmdLabel}: ${report.newFiles.length} new transcript(s) on disk not yet ingested ` +
@@ -3833,13 +3843,13 @@ const cmdRetroBrief = (args: string[]) =>
         const transcriptPath = row.raw_file ?? null;
         const body = formatRetroBrief(session, transcriptPath, suggested);
 
-        const { mkdir, writeFile } = yield* Effect.promise(() => import("node:fs/promises"));
-        const { join, resolve } = yield* Effect.promise(() => import("node:path"));
-        const outDir = resolve(outDirFlag ?? join(process.cwd(), ".ax", "tasks", "retro"));
-        yield* Effect.promise(() => mkdir(outDir, { recursive: true }));
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const outDir = path.resolve(outDirFlag ?? path.join(process.cwd(), ".ax", "tasks", "retro"));
+        yield* fs.makeDirectory(outDir, { recursive: true }).pipe(Effect.orDie);
         const safeKey = key.replace(/[^a-zA-Z0-9._-]/g, "_").slice(0, 80);
-        const filePath = join(outDir, `${safeKey}.md`);
-        yield* Effect.promise(() => writeFile(filePath, body, "utf8"));
+        const filePath = path.join(outDir, `${safeKey}.md`);
+        yield* fs.writeFileString(filePath, body).pipe(Effect.orDie);
 
         if (json) {
             console.log(prettyPrint({ session: idStr, path: filePath, suggested_model: suggested, transcript: transcriptPath }));
@@ -4489,6 +4499,12 @@ const skillsLintCommand = Command.make(
     },
     ({ taskDir, dryRun, json }) =>
         cmdSkillsLint({ taskDir, dryRun, json }).pipe(
+            Effect.catchTag("PlatformError", (e) =>
+                Effect.sync(() => {
+                    process.stderr.write(`axctl skills lint: file error - ${e.message}\n`);
+                    process.exit(1);
+                }),
+            ),
             catchDbErrorAndExit("axctl skills lint"),
         ),
 ).pipe(
@@ -4982,7 +4998,7 @@ const tuiCommand = Command.make("tui", {}, () =>
 ).pipe(Command.withDescription("Open the interactive dashboard"));
 
 const installCommand = Command.make("install", {}, () =>
-    Effect.promise(() => cmdInstall()),
+    cmdInstall(),
 ).pipe(Command.withDescription("One-shot setup: daemon, watcher, symlink (then runs `ax setup`)"));
 
 const setupCommand = Command.make(
@@ -4994,16 +5010,14 @@ const setupCommand = Command.make(
         agentPrompt: Flag.boolean("agent-prompt").pipe(Flag.withDefault(false)),
     },
     ({ agents, noIngest, yes, agentPrompt }) =>
-        Effect.promise(() =>
-            cmdSetup({
-                ...(agents._tag === "Some"
-                    ? { agents: agents.value.split(",").map((s) => s.trim()).filter(Boolean) }
-                    : {}),
-                skipIngest: noIngest,
-                yes,
-                agentPromptOnly: agentPrompt,
-            }),
-        ),
+        cmdSetup({
+            ...(agents._tag === "Some"
+                ? { agents: agents.value.split(",").map((s) => s.trim()).filter(Boolean) }
+                : {}),
+            skipIngest: noIngest,
+            yes,
+            agentPromptOnly: agentPrompt,
+        }),
 ).pipe(
     Command.withDescription(
         "Install the agent skills, run the first ingest, and verify. " +
@@ -5014,19 +5028,19 @@ const setupCommand = Command.make(
 const daemonStatusCommand = Command.make(
     "status",
     { json: jsonFlag },
-    ({ json }) => Effect.promise(() => cmdDaemon(["status", ...boolArg("json", json)])),
+    ({ json }) => cmdDaemon(["status", ...boolArg("json", json)]),
 ).pipe(Command.withDescription("Show daemon and watcher status"));
 
 const daemonStartCommand = Command.make("start", {}, () =>
-    Effect.promise(() => cmdDaemon(["start"])),
+    cmdDaemon(["start"]),
 ).pipe(Command.withDescription("Start the daemon and watcher"));
 
 const daemonStopCommand = Command.make("stop", {}, () =>
-    Effect.promise(() => cmdDaemon(["stop"])),
+    cmdDaemon(["stop"]),
 ).pipe(Command.withDescription("Stop the daemon and watcher without deleting plists"));
 
 const daemonRestartCommand = Command.make("restart", {}, () =>
-    Effect.promise(() => cmdDaemon(["restart"])),
+    cmdDaemon(["restart"]),
 ).pipe(Command.withDescription("Restart the daemon and watcher"));
 
 const daemonCommand = Command.make("daemon").pipe(
@@ -5042,13 +5056,13 @@ const daemonCommand = Command.make("daemon").pipe(
 const doctorCommand = Command.make(
     "doctor",
     { json: jsonFlag },
-    ({ json }) => Effect.promise(() => cmdDoctor(boolArg("json", json))),
+    ({ json }) => cmdDoctor(boolArg("json", json)),
 ).pipe(Command.withDescription("Check local installation health"));
 
 const uninstallCommand = Command.make(
     "uninstall",
     { purge: Flag.boolean("purge").pipe(Flag.withDefault(false)) },
-    ({ purge }) => Effect.promise(() => cmdUninstall(purge)),
+    ({ purge }) => cmdUninstall(purge),
 ).pipe(
     Command.withDescription(
         "Remove launchd plists and the axctl symlink (--purge also deletes ~/.local/share/ax: binary + data)",
@@ -5208,7 +5222,14 @@ const withoutDb = (args: ReadonlyArray<string>): CliProgram => {
             );
         },
     });
-    return runCli(args).pipe(Effect.provideService(SurrealClient, stub));
+    // Lifecycle commands (install/setup/daemon/doctor/uninstall) are now
+    // @effect/platform-native and require FileSystem + Path. Provide the real
+    // Bun-backed layers here (no DB), so they run without dragging in AppLayer's
+    // SurrealClient connect path.
+    return runCli(args).pipe(
+        Effect.provideService(SurrealClient, stub),
+        Effect.provide(Layer.mergeAll(BunFileSystem.layer, BunPath.layer)),
+    );
 };
 
 // Commands whose handlers reach into SurrealClient via AppLayer. Anything

@@ -3,14 +3,24 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Effect, Layer } from "effect";
+import { BunFileSystem, BunPath } from "@effect/platform-bun";
 import { SurrealClient, type SurrealClientShape } from "./db.ts";
 import {
     encodeClaudeProjectSlug,
+    type FoundTranscript,
     harnessFromPath,
     locateTranscript,
     locateTranscriptOnDisk,
     TranscriptNotFoundError,
 } from "./transcript-locator.ts";
+
+// EXISTING tests of now-Effect fns: provide the REAL Bun-backed FileSystem +
+// Path against the tmp-dir fixtures (never the in-memory mock).
+const FsLayer = Layer.merge(BunFileSystem.layer, BunPath.layer);
+
+/** Run the disk-only locator against the real Bun FileSystem. */
+const onDisk = (sessionId: string, hint: string | null): Promise<FoundTranscript> =>
+    Effect.runPromise(locateTranscriptOnDisk(sessionId, hint).pipe(Effect.provide(FsLayer)));
 
 /** Minimal SurrealClient fake. `query` returns the raw_file the test wants
  *  resolveRawFileFromDb to see; everything else returns empty. */
@@ -90,7 +100,7 @@ describe("locateTranscriptOnDisk", () => {
         tmpRoots.push(dir);
         const file = join(dir, "agent-fake.jsonl");
         await writeFile(file, "");
-        const found = await locateTranscriptOnDisk("claude-subagent-fake", file);
+        const found = await onDisk("claude-subagent-fake", file);
         expect(found.path).toBe(file);
         expect(found.harness).toBe("claude");
     });
@@ -102,7 +112,7 @@ describe("locateTranscriptOnDisk", () => {
         await mkdir(sessionsDir, { recursive: true });
         const file = join(sessionsDir, "rollout-1-fake.jsonl");
         await writeFile(file, "");
-        const found = await locateTranscriptOnDisk("anything", file);
+        const found = await onDisk("anything", file);
         expect(found.path).toBe(file);
         expect(found.harness).toBe("codex");
     });
@@ -110,13 +120,13 @@ describe("locateTranscriptOnDisk", () => {
     test("null rawFileHint with no matching jsonl falls back to throwing TranscriptNotFoundError", async () => {
         // Use a session id guaranteed not to exist under the real ~/.claude or ~/.codex trees.
         const bogus = `ax-test-bogus-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-        await expect(locateTranscriptOnDisk(bogus, null)).rejects.toThrow(/session transcript not found/);
+        await expect(onDisk(bogus, null)).rejects.toThrow(/session transcript not found/);
     });
 
     test("stale rawFileHint (file missing) falls back to search and still errors when nothing found", async () => {
         const bogus = `ax-test-stale-${Date.now()}-${Math.random().toString(36).slice(2)}`;
         const stale = join(tmpdir(), `definitely-missing-${bogus}.jsonl`);
-        await expect(locateTranscriptOnDisk(bogus, stale)).rejects.toThrow(/session transcript not found/);
+        await expect(onDisk(bogus, stale)).rejects.toThrow(/session transcript not found/);
     });
 });
 
@@ -135,7 +145,7 @@ describe("locateTranscript (with DB hint)", () => {
         await writeFile(file, "");
         const found = await Effect.runPromise(
             locateTranscript("claude-subagent-fromdb").pipe(
-                Effect.provide(Layer.succeed(SurrealClient, fakeLocatorClient(file))),
+                Effect.provide(Layer.merge(Layer.succeed(SurrealClient, fakeLocatorClient(file)), FsLayer)),
             ),
         );
         expect(found.path).toBe(file);
@@ -145,7 +155,7 @@ describe("locateTranscript (with DB hint)", () => {
     test("null raw_file in DB plus no on-disk match throws TranscriptNotFoundError", async () => {
         const bogus = `ax-test-db-null-${Date.now()}-${Math.random().toString(36).slice(2)}`;
         const eff = locateTranscript(bogus).pipe(
-            Effect.provide(Layer.succeed(SurrealClient, fakeLocatorClient(null))),
+            Effect.provide(Layer.merge(Layer.succeed(SurrealClient, fakeLocatorClient(null)), FsLayer)),
         );
         await expect(Effect.runPromise(eff)).rejects.toThrow(/session transcript not found/);
     });
@@ -153,7 +163,7 @@ describe("locateTranscript (with DB hint)", () => {
     test("TranscriptNotFoundError preserves the session id", async () => {
         const bogus = `ax-test-err-${Date.now()}-${Math.random().toString(36).slice(2)}`;
         const eff = locateTranscript(bogus).pipe(
-            Effect.provide(Layer.succeed(SurrealClient, fakeLocatorClient(null))),
+            Effect.provide(Layer.merge(Layer.succeed(SurrealClient, fakeLocatorClient(null)), FsLayer)),
         );
         const exit = await Effect.runPromise(Effect.exit(eff));
         expect(exit._tag).toBe("Failure");

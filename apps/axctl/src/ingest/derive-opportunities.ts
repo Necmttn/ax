@@ -23,9 +23,9 @@
  * passes are idempotent.
  */
 
-import { Effect, Schema } from "effect";
+import { Effect, FileSystem, Option, Schema } from "effect";
 import { homedir } from "node:os";
-import { statSync } from "node:fs";
+import { orAbsent } from "@ax/lib/shared/fs-error";
 import { SurrealClient } from "@ax/lib/db";
 import { AppLayer } from "@ax/lib/layers";
 import type { DbError } from "@ax/lib/errors";
@@ -201,15 +201,31 @@ interface InvokedTsRow {
     readonly ts: string;
 }
 
-const safeFileMtimeMs = (absPath: string): number | null => {
-    try {
-        return statSync(absPath).mtimeMs;
-    } catch {
-        return null;
-    }
-};
+/**
+ * Best-effort file mtime in epoch-ms, or `null` when the file is absent /
+ * unreadable. OLD: `statSync` in try/catch returning `null` on ANY fault →
+ * `orAbsent` (a missing or unreadable guidance target is "not addressed").
+ * `fs.stat` follows symlinks (matching node's `statSync`); `.mtime` is an
+ * `Option<Date>`, so a stat that lands but lacks mtime also maps to `null`.
+ */
+export const safeFileMtimeMs = (
+    absPath: string,
+): Effect.Effect<number | null, never, FileSystem.FileSystem> =>
+    Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const info = yield* fs.stat(absPath).pipe(Effect.asSome, orAbsent(Option.none()));
+        if (Option.isNone(info)) return null;
+        return Option.match(info.value.mtime, {
+            onNone: () => null,
+            onSome: (d) => d.getTime(),
+        });
+    });
 
-export const deriveOpportunities = (): Effect.Effect<DeriveOpportunitiesStats, DbError, SurrealClient> =>
+export const deriveOpportunities = (): Effect.Effect<
+    DeriveOpportunitiesStats,
+    DbError,
+    SurrealClient | FileSystem.FileSystem
+> =>
     Effect.gen(function* () {
         const db = yield* SurrealClient;
         // Active = accepted proposal + experiment without a locked verdict.
@@ -433,7 +449,7 @@ export const deriveOpportunities = (): Effect.Effect<DeriveOpportunitiesStats, D
                 // either has been touched post-accept (every later
                 // opportunity addressed) or not. Defensive: stat may fail.
                 const absPath = resolveGuidanceTargetPath(target, home);
-                const mtimeMs = safeFileMtimeMs(absPath);
+                const mtimeMs = yield* safeFileMtimeMs(absPath);
                 const enriched = matches.map((m) => {
                     const matchedMs = new Date(m.ts).getTime();
                     const addressed = mtimeMs !== null && mtimeMs > matchedMs;
@@ -489,7 +505,7 @@ export class OpportunitiesStats extends BaseStageStats.extend<OpportunitiesStats
     opportunities: Schema.Number,
 }) {}
 
-export const opportunitiesStage: StageDef<OpportunitiesStats, SurrealClient> = {
+export const opportunitiesStage: StageDef<OpportunitiesStats, SurrealClient | FileSystem.FileSystem> = {
     meta: StageMeta.make({ key: "opportunities", deps: ["proposals"], tags: ["derive"] }),
     run: (_ctx: IngestContext) =>
         Effect.gen(function* () {

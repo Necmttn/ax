@@ -2,8 +2,17 @@ import { describe, expect, test } from "bun:test";
 import { mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Effect } from "effect";
+import { Effect, FileSystem, Layer, Path } from "effect";
+import { BunFileSystem, BunPath } from "@effect/platform-bun";
 import { buildScopeMap, loadAgentScopeMap, skillsForAgent } from "./agent-scope.ts";
+
+// Real Bun-backed FileSystem + Path against the tmp-dir fixtures (no mock):
+// loadAgentScopeMap now requires FileSystem + Path after the @effect/platform
+// migration.
+const FsLayer = Layer.mergeAll(BunFileSystem.layer, BunPath.layer);
+const runFs = <A, E>(
+    eff: Effect.Effect<A, E, FileSystem.FileSystem | Path.Path>,
+): Promise<A> => Effect.runPromise(eff.pipe(Effect.provide(FsLayer)));
 
 const agent = (skills: string[]) =>
     `---\nname: x\ntools: Read, Bash\nskills:\n${skills.map((s) => `  - ${s}`).join("\n")}\n---\nbody`;
@@ -51,13 +60,13 @@ describe("loadAgentScopeMap", () => {
         const dir = await mkdtemp(join(tmpdir(), "ax-agents-"));
         await writeFile(join(dir, "gtm-prospector.md"), agent(["build-tam"]));
         await writeFile(join(dir, "notes.txt"), agent(["should-be-ignored"]));
-        const map = await Effect.runPromise(loadAgentScopeMap([dir]));
+        const map = await runFs(loadAgentScopeMap([dir]));
         expect(map.get("build-tam")).toEqual(["gtm-prospector"]);
         expect(map.has("should-be-ignored")).toBe(false);
     });
 
     test("missing dir → empty map, no defect", async () => {
-        const map = await Effect.runPromise(
+        const map = await runFs(
             loadAgentScopeMap([join(tmpdir(), "ax-nope-does-not-exist")]),
         );
         expect(map.size).toBe(0);

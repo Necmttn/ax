@@ -1,4 +1,4 @@
-import { Effect } from "effect";
+import { Effect, FileSystem, Path } from "effect";
 import { queryLiveDiagnostics } from "./diagnostics.ts";
 import { getGitState } from "./git.ts";
 import { loadProjectStack } from "./stack.ts";
@@ -17,7 +17,9 @@ interface ProjectGrounding {
     readonly diagnostics: ProjectContext["diagnostics"];
 }
 
-const buildProjectGrounding = (cwd = process.cwd()): Effect.Effect<ProjectGrounding, never, ProcessService> =>
+const buildProjectGrounding = (
+    cwd = process.cwd(),
+): Effect.Effect<ProjectGrounding, never, ProcessService | FileSystem.FileSystem | Path.Path> =>
     Effect.gen(function* () {
         const git = yield* getGitState(cwd);
         const stack = yield* loadProjectStack(git.root);
@@ -32,7 +34,9 @@ const buildProjectGrounding = (cwd = process.cwd()): Effect.Effect<ProjectGround
         };
     });
 
-export const buildProjectContext = (cwd = process.cwd()): Effect.Effect<ProjectContext, never, ProcessService> =>
+export const buildProjectContext = (
+    cwd = process.cwd(),
+): Effect.Effect<ProjectContext, never, ProcessService | FileSystem.FileSystem | Path.Path> =>
     Effect.gen(function* () {
         const grounding = yield* buildProjectGrounding(cwd);
         return {
@@ -45,7 +49,9 @@ export const buildProjectContext = (cwd = process.cwd()): Effect.Effect<ProjectC
         };
     });
 
-export const buildProjectVerification = (cwd = process.cwd()): Effect.Effect<ProjectVerification, never, ProcessService> =>
+export const buildProjectVerification = (
+    cwd = process.cwd(),
+): Effect.Effect<ProjectVerification, never, ProcessService | FileSystem.FileSystem | Path.Path> =>
     Effect.gen(function* () {
         const grounding = yield* buildProjectGrounding(cwd);
         return {
@@ -59,5 +65,5 @@ export const buildProjectVerification = (cwd = process.cwd()): Effect.Effect<Pro
 
 export const buildProjectHarness = (
     cwd = process.cwd(),
-): Effect.Effect<ProjectHarnessReport, DbError, SurrealClient | ProcessService> =>
+): Effect.Effect<ProjectHarnessReport, DbError, SurrealClient | ProcessService | FileSystem.FileSystem | Path.Path> =>
     buildProjectHarnessReport(cwd);
