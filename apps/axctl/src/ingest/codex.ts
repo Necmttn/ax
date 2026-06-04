@@ -31,6 +31,7 @@ import {
     parseCodexFunctionOutput,
     toolKindForName,
 } from "./tool-calls.ts";
+import { buildCompactionStatements, extractCodexCompaction, type CompactionWrite } from "./compaction.ts";
 import { classifyTurnIntent } from "./intent-kind.ts";
 import { providerDelegationSignalAvailability } from "./delegation.ts";
 import {
@@ -518,6 +519,7 @@ export interface CodexExtract {
     parentEdges: AgentEventParentEdgeWrite[];
     skillRelations: ToolCallSkillRelationWrite[];
     planSnapshots: PlanSnapshotWrite[];
+    compactions: CompactionWrite[];
     tokenUsage: CodexTokenUsage | null;
 }
 
@@ -532,6 +534,7 @@ interface MutableCodexExtract {
     parentEdges: AgentEventParentEdgeWrite[];
     skillRelations: ToolCallSkillRelationWrite[];
     planSnapshots: PlanSnapshotWrite[];
+    compactions: CompactionWrite[];
     tokenUsage: CodexTokenUsage | null;
 }
 
@@ -548,6 +551,8 @@ function createCodexExtractor(
     const parentEdges: AgentEventParentEdgeWrite[] = [];
     const skillRelations: ToolCallSkillRelationWrite[] = [];
     const planSnapshots: PlanSnapshotWrite[] = [];
+    const compactions: CompactionWrite[] = [];
+    let lastContextTokens: number | null = null;
     let tokenUsage: CodexTokenUsage | null = null;
     let tokenCountEvents = 0;
     let previousTotalTokenUsage: Record<string, unknown> | null = null;
@@ -848,6 +853,7 @@ function createCodexExtractor(
         const drainedSnapshots = take(planSnapshots, (snapshot) =>
             snapshot.toolCallKey === null || snapshot.toolCallKey === undefined || flushableToolCallKeys.has(snapshot.toolCallKey),
         );
+        const drainedCompactions = compactions.splice(0, compactions.length);
         return {
             session,
             sourcePath: filePath,
@@ -859,6 +865,7 @@ function createCodexExtractor(
             parentEdges: drainedParentEdges,
             skillRelations: drainedRelations,
             planSnapshots: drainedSnapshots,
+            compactions: drainedCompactions,
             tokenUsage,
         };
     };
@@ -906,7 +913,42 @@ function createCodexExtractor(
                     if (turnUsage) turnTokenUsages.push(turnUsage);
                     previousTotalTokenUsage = nextUsage.totalTokenUsage;
                     tokenUsage = nextUsage;
+                    lastContextTokens = nextUsage.estimatedTokens ?? lastContextTokens;
                 }
+                return;
+            }
+
+            if (type === "compacted" && payload && session) {
+                seq += 1;
+                const compactionEventId = `compacted:${seq}`;
+                const eventKey = agentEventRecordKey({
+                    provider: "codex",
+                    providerSessionId: session.id,
+                    providerEventId: compactionEventId,
+                    seq,
+                });
+                pushProviderEvent({
+                    providerEventId: compactionEventId,
+                    seq,
+                    ts,
+                    type: "compaction",
+                    role: null,
+                    text: null,
+                    textExcerpt: null,
+                    raw: { replacement_count: Array.isArray(payload.replacement_history) ? payload.replacement_history.length : 0 },
+                    labels: { source: "codex_transcript" },
+                    metrics: { strategy: "history_replacement", turnSeq: seq },
+                }, session);
+                const write = extractCodexCompaction(payload, {
+                    sessionId: session.id,
+                    providerSessionId: session.id,
+                    seq,
+                    ts: new Date(ts),
+                    agentEventKey: eventKey,
+                    tokensBefore: lastContextTokens,
+                    boundaryRef: `seq_${seq}`,
+                });
+                if (write) compactions.push(write);
                 return;
             }
 
@@ -979,6 +1021,7 @@ function createCodexExtractor(
                 parentEdges: remaining.parentEdges,
                 skillRelations: remaining.skillRelations,
                 planSnapshots: remaining.planSnapshots,
+                compactions: remaining.compactions,
                 tokenUsage: remaining.tokenUsage,
             };
         },
@@ -1388,6 +1431,7 @@ const buildCodexBatchStatements = (
     ...batch.planSnapshots.flatMap((snapshot) =>
         buildPlanSnapshotStatements(snapshot),
     ),
+    ...buildCompactionStatements(batch.compactions ?? []),
 ];
 
 export const __testBuildCodexBatchStatements = buildCodexBatchStatements;
