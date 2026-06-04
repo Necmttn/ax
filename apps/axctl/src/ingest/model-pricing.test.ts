@@ -3,16 +3,29 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { Effect, Layer } from "effect";
+import { BunFileSystem, BunPath } from "@effect/platform-bun";
 import {
     builtInPricingCatalog,
     estimateCost,
-    loadPricingCatalog,
+    loadPricingCatalog as loadPricingCatalogEffect,
     mergePricingCatalogs,
     normalizeModelName,
     parseLiteLlmPricingCatalog,
     parseModelsDevPricingCatalog,
     pricingForModel,
 } from "./model-pricing.ts";
+import type { PricingCatalogLoadResult } from "./model-pricing.ts";
+
+const BunFsLayer = Layer.merge(BunFileSystem.layer, BunPath.layer);
+
+// Forced-dependency edit: `loadPricingCatalog` is now Effect-native; run it
+// against the REAL Bun-backed FileSystem + Path layers over the tmp cache dir.
+const loadPricingCatalog = (
+    dataDir: string,
+    env?: Record<string, string | undefined>,
+): Promise<PricingCatalogLoadResult> =>
+    Effect.runPromise(loadPricingCatalogEffect(dataDir, env).pipe(Effect.provide(BunFsLayer)));
 
 describe("model pricing", () => {
     it("parses LiteLLM per-token prices into per-million prices", () => {

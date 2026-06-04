@@ -1,5 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import { Effect, Layer } from "effect";
+import { BunFileSystem } from "@effect/platform-bun";
 import { DbError } from "@ax/lib/errors";
 import { SurrealClient, type SurrealClientShape } from "@ax/lib/db";
 import { AxConfigLive } from "@ax/lib/config";
@@ -69,7 +70,14 @@ const baseServices = (dbLayer: Layer.Layer<SurrealClient>, registry: Layer.Layer
     const process = ProcessServiceTest({
         route: () => new Error("ProcessService not expected in this test"),
     });
-    return Layer.mergeAll(dbLayer, registry, AxConfigLive, process);
+    // AxConfigLive now reads the persisted runtime endpoint at acquisition, so
+    // it needs FileSystem; provide the real Bun-backed FS beneath it.
+    return Layer.mergeAll(
+        dbLayer,
+        registry,
+        AxConfigLive.pipe(Layer.provide(BunFileSystem.layer)),
+        process,
+    );
 };
 
 const opts = (): RunIngestOptions => ({

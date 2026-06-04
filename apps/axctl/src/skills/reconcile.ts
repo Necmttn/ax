@@ -39,7 +39,7 @@ export const discoverAllSkills = (
         let complete: boolean = true;
         const empty = [] as ReadonlyArray<SkillRecord>;
         for (const source of registry.all()) {
-            for (const ref of source.roots(repoRoot)) {
+            for (const ref of yield* source.roots(repoRoot)) {
                 const found = yield* source.discover(ref).pipe(
                     // a corrupt SKILL.md skips just that file; snapshot stays complete
                     Effect.catchTag("SkillParseError", (err) =>

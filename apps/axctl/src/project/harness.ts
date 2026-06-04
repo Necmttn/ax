@@ -1,11 +1,10 @@
 import { createHash } from "node:crypto";
-import { existsSync, readdirSync, statSync } from "node:fs";
-import { readFile } from "node:fs/promises";
-import { dirname, join, relative } from "node:path";
 import { homedir } from "node:os";
-import { Effect } from "effect";
+import { Effect, FileSystem, Path } from "effect";
 import { SurrealClient } from "@ax/lib/db";
 import { ProcessService } from "@ax/lib/process";
+import { orAbsent } from "@ax/lib/shared/fs-error";
+import { posixPath } from "@ax/lib/shared/path";
 import type { DbError } from "@ax/lib/errors";
 import { getGitState } from "./git.ts";
 import {
@@ -56,7 +55,7 @@ interface ObservedToolCallRow {
 const hashText = (text: string): string => createHash("sha256").update(text).digest("hex").slice(0, 16);
 
 function isInside(child: string, parent: string): boolean {
-    const rel = relative(parent, child);
+    const rel = posixPath.relative(parent, child);
     return rel === "" || (!rel.startsWith("..") && !rel.startsWith("/"));
 }
 
@@ -92,43 +91,62 @@ function evidenceStrength(path: string, tracked: boolean): GuidanceEvidenceStren
     return "untracked";
 }
 
-const gitRootFor = (path: string): Effect.Effect<string | null, never, ProcessService> =>
-    runGit(statSync(path).isDirectory() ? path : dirname(path), ["rev-parse", "--show-toplevel"]);
+const gitRootFor = (
+    path: string,
+): Effect.Effect<string | null, never, ProcessService | FileSystem.FileSystem> =>
+    Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        // Original used bare statSync (FOLLOWS symlinks) on an existsSync-confirmed
+        // candidate path; throw-on-failure preserved via orDie. fs.stat also follows.
+        const info = yield* fs.stat(path).pipe(Effect.orDie);
+        const base = info.type === "Directory" ? path : posixPath.dirname(path);
+        return yield* runGit(base, ["rev-parse", "--show-toplevel"]);
+    });
 
 const isTracked = (path: string, gitRoot: string | null): Effect.Effect<boolean, never, ProcessService> =>
     Effect.gen(function* () {
         if (!gitRoot || !isInside(path, gitRoot)) return false;
-        const rel = relative(gitRoot, path);
+        const rel = posixPath.relative(gitRoot, path);
         const out = yield* runGit(gitRoot, ["ls-files", "--", rel]);
         return out !== null && out.length > 0;
     });
 
-function candidateGuidancePaths(root: string | null): string[] {
-    const paths: string[] = [];
-    if (root) {
-        for (const item of REPO_GUIDANCE) {
-            const path = join(root, item);
-            if (existsSync(path)) paths.push(path);
-        }
-    }
-    const home = homedir();
-    for (const item of GLOBAL_GUIDANCE) {
-        const path = join(home, item);
-        if (existsSync(path)) paths.push(path);
-    }
-    return [...new Set(paths)];
-}
-
-export const scanGuidanceSources = (root: string | null): Effect.Effect<ReadonlyArray<GuidanceSource>, never, ProcessService> =>
+const candidateGuidancePaths = (
+    root: string | null,
+): Effect.Effect<string[], never, FileSystem.FileSystem> =>
     Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const paths: string[] = [];
+        if (root) {
+            for (const item of REPO_GUIDANCE) {
+                const path = posixPath.join(root, item);
+                // existsSync probe → orAbsent(false): a fault means "treat as absent".
+                if (yield* fs.exists(path).pipe(orAbsent(false))) paths.push(path);
+            }
+        }
+        const home = homedir();
+        for (const item of GLOBAL_GUIDANCE) {
+            const path = posixPath.join(home, item);
+            if (yield* fs.exists(path).pipe(orAbsent(false))) paths.push(path);
+        }
+        return [...new Set(paths)];
+    });
+
+export const scanGuidanceSources = (
+    root: string | null,
+): Effect.Effect<ReadonlyArray<GuidanceSource>, never, ProcessService | FileSystem.FileSystem> =>
+    Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
         const out: GuidanceSource[] = [];
-        for (const path of candidateGuidancePaths(root)) {
-            const stat = statSync(path);
+        for (const path of yield* candidateGuidancePaths(root)) {
+            // Original used bare statSync (FOLLOWS symlinks) on an existsSync-confirmed
+            // path; throw-on-failure preserved via orDie. fs.stat also follows.
+            const stat = yield* fs.stat(path).pipe(Effect.orDie);
             const gitRoot = yield* gitRootFor(path);
             const tracked = yield* isTracked(path, gitRoot);
             out.push({
                 path,
-                kind: stat.isDirectory() ? "directory" : "file",
+                kind: stat.type === "Directory" ? "directory" : "file",
                 scope: root && isInside(path, root) ? "repository" : path.includes("/plugins/cache/") ? "plugin-cache" : "global",
                 provider: providerFor(path),
                 evidenceStrength: evidenceStrength(path, tracked),
@@ -139,21 +157,28 @@ export const scanGuidanceSources = (root: string | null): Effect.Effect<Readonly
         return out.sort((a, b) => a.scope.localeCompare(b.scope) || a.path.localeCompare(b.path));
     });
 
-async function contentForRevision(path: string): Promise<string> {
-    const stat = statSync(path);
-    if (!stat.isDirectory()) return await readFile(path, "utf8");
-    const names = readdirSync(path).sort().slice(0, 200);
-    return names.join("\n");
-}
+const contentForRevision = (
+    path: string,
+): Effect.Effect<string, never, FileSystem.FileSystem> =>
+    Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        // Original used bare statSync (FOLLOWS symlinks) on a known-present source
+        // path; throw-on-failure preserved via orDie. fs.stat also follows.
+        const stat = yield* fs.stat(path).pipe(Effect.orDie);
+        // readFile/readdirSync had no recovery (failure → throw/defect) → orDie.
+        if (stat.type !== "Directory") return yield* fs.readFileString(path).pipe(Effect.orDie);
+        const names = (yield* fs.readDirectory(path).pipe(Effect.orDie)).sort().slice(0, 200);
+        return names.join("\n");
+    });
 
 export const buildGuidanceRevisions = (
     sources: ReadonlyArray<GuidanceSource>,
-): Effect.Effect<ReadonlyArray<GuidanceRevision>, never, ProcessService> =>
+): Effect.Effect<ReadonlyArray<GuidanceRevision>, never, ProcessService | FileSystem.FileSystem> =>
     Effect.gen(function* () {
         const observedAt = new Date().toISOString();
         const revisions: GuidanceRevision[] = [];
         for (const source of sources) {
-            const content = yield* Effect.promise(() => contentForRevision(source.path));
+            const content = yield* contentForRevision(source.path);
             const head = source.gitRoot ? yield* runGit(source.gitRoot, ["rev-parse", "--short", "HEAD"]) : null;
             revisions.push({
                 sourcePath: source.path,
@@ -258,7 +283,7 @@ RETURN {
 export const buildProjectHarnessReport = (
     cwd = process.cwd(),
     builder: HarnessDoctorReportBuilder = defaultHarnessDoctorReportBuilder,
-): Effect.Effect<ProjectHarnessReport, DbError, SurrealClient | ProcessService> =>
+): Effect.Effect<ProjectHarnessReport, DbError, SurrealClient | ProcessService | FileSystem.FileSystem | Path.Path> =>
     Effect.gen(function* () {
         const git = yield* getGitState(cwd);
         const stack = yield* loadProjectStack(git.root);

@@ -6,15 +6,14 @@
  * A brief is "filled" when its YAML frontmatter contains a non-empty
  * `primary_role: <string>`. Otherwise it is pending; leave it alone.
  */
-import { Effect } from "effect";
-import { join } from "node:path";
-import { readdir, readFile, unlink } from "node:fs/promises";
+import { Effect, FileSystem, Path, type PlatformError } from "effect";
 import { parse as parseYaml } from "yaml";
 import { RecordId, SurrealClient, type SurrealClientShape } from "@ax/lib/db";
 import type { DbError } from "@ax/lib/errors";
 import { prettyPrint } from "@ax/lib/json";
 import { recordLiteral } from "@ax/lib/ids";
 import { validateRoleName, validateSkillName } from "@ax/lib/role-name";
+import { orAbsent } from "@ax/lib/shared/fs-error";
 import { surrealString } from "@ax/lib/shared/surql";
 
 // ---------------------------------------------------------------------------
@@ -211,8 +210,9 @@ const applyBrief = (
     filePath: string,
     fm: BriefFrontmatter,
     dryRun: boolean,
-): Effect.Effect<LintBriefResult, DbError> =>
+): Effect.Effect<LintBriefResult, DbError | PlatformError.PlatformError, FileSystem.FileSystem> =>
     Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
         const { ax_classify, primary_role, secondary, confidence, rationale } = fm;
 
         // Resolve skill record id by name
@@ -274,7 +274,7 @@ const applyBrief = (
         }
 
         // Remove the brief file only after ALL writes succeed
-        yield* Effect.promise(() => unlink(filePath));
+        yield* fs.remove(filePath);
 
         return {
             file: filePath,
@@ -288,34 +288,28 @@ const applyBrief = (
 // Main exported command
 // ---------------------------------------------------------------------------
 
-export const cmdSkillsLint = (opts: SkillsLintOptions): Effect.Effect<void, DbError, SurrealClient> =>
+export const cmdSkillsLint = (
+    opts: SkillsLintOptions,
+): Effect.Effect<void, DbError | PlatformError.PlatformError, SurrealClient | FileSystem.FileSystem | Path.Path> =>
     Effect.gen(function* () {
         const db = yield* SurrealClient;
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
 
-        // Collect all classify-*.md files from the task dir
-        const files: string[] = yield* Effect.promise(async () => {
-            try {
-                const entries = await readdir(opts.taskDir);
-                return entries
-                    .filter((e) => e.startsWith("classify-") && e.endsWith(".md"))
-                    .map((e) => join(opts.taskDir, e))
-                    .sort();
-            } catch {
-                // Task dir doesn't exist yet - zero briefs is fine
-                return [];
-            }
-        });
+        // Collect all classify-*.md files from the task dir. A missing task dir
+        // legitimately means zero briefs, matching the original ANY-error->[].
+        const entries = yield* fs.readDirectory(opts.taskDir).pipe(orAbsent([] as string[]));
+        const files: string[] = entries
+            .filter((e) => e.startsWith("classify-") && e.endsWith(".md"))
+            .map((e) => path.join(opts.taskDir, e))
+            .sort();
 
         const results: LintBriefResult[] = [];
 
         for (const filePath of files) {
-            const content = yield* Effect.promise(async () => {
-                try {
-                    return await readFile(filePath, "utf8");
-                } catch {
-                    return null;
-                }
-            });
+            // File may disappear between readDirectory and read; original treated
+            // ANY error as "skip".
+            const content = yield* fs.readFileString(filePath).pipe(orAbsent<string | null>(null));
 
             if (content === null) {
                 // File disappeared between readdir and readFile - skip

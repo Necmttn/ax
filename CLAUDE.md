@@ -4,7 +4,7 @@ Guidance for Claude Code and other AI assistants working in this repo.
 
 ## What this is
 
-`ax` - local taste & telemetry graph for AI coding agents. Ingests Claude Code transcripts (`~/.claude/projects/`) + Codex transcripts (`~/.codex/sessions/`) + installed skills (`~/.claude/skills/`, `~/.agents/skills/`, plugin caches) into a dedicated SurrealDB instance. CLI surfaces "what skills/tools you actually use" on demand.
+`ax` - local taste & telemetry graph for AI coding agents. Ingests transcripts from 5 harnesses - Claude Code (`~/.claude/projects/`), Codex (`~/.codex/sessions/`), Pi (`~/.pi/agent/sessions/`), OpenCode + Cursor (SQLite stores) - plus installed skills (`~/.claude/skills/`, `~/.agents/skills/`, plugin caches) into a dedicated SurrealDB instance. Each harness has a full parser dual-writing provider events (`agent_*` tables) + normalized records (`session`/`turn`/`tool_call`); `AgentProviderName` enumerates them (`apps/axctl/src/ingest/provider-events.ts`). CLI surfaces "what skills/tools you actually use" on demand.
 
 ## Stack
 
@@ -12,7 +12,7 @@ Guidance for Claude Code and other AI assistants working in this repo.
 - **Language**: TypeScript (strict, `module: preserve`, `moduleResolution: bundler`)
 - **DB**: SurrealDB 3.0+ on `127.0.0.1:8521`, ns=`ax`, db=`main`
 - **Effect**: `effect@beta` (4.0.0-beta.x) for ingest pipelines + service layer (v0.1)
-- **TUI** (planned): `@opentui/react` + react@19.2
+- **TUI**: `@opentui/react` + react@19.2 - skills browser (`apps/axctl/src/tui/`) + ingest progress (`apps/axctl/src/cli/progress-tui.tsx`)
 
 ## Layout
 
@@ -88,7 +88,7 @@ fresh clone.
 
 ### Scoped ingest
 
-`ax ingest here [--since=Nd] [--stages=<list>]` - scope ingest to the git repo at `$PWD`. Claude transcripts filtered to the matching `~/.claude/projects/<slug>/` dir; git history restricted to this repo; Codex skipped. `--stages=` overrides the default stage set (uses StageRegistry).
+`ax ingest here [--since=Nd] [--stages=<list>]` - scope ingest to the git repo at `$PWD`. Claude transcripts filtered to the matching `~/.claude/projects/<slug>/` dir; git history restricted to this repo; Codex/Pi/OpenCode/Cursor skipped (no cwd filter yet). `--stages=` overrides the default stage set (uses StageRegistry).
 
 ### Session queries
 

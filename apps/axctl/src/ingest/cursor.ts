@@ -1,11 +1,11 @@
-import { existsSync } from "node:fs";
-import { readdir, stat } from "node:fs/promises";
-import { isAbsolute, join, relative } from "node:path";
 import { Database } from "bun:sqlite";
-import { Effect, Schema } from "effect";
+import { Effect, FileSystem, Option, Path, Schema } from "effect";
 import { AxConfig } from "@ax/lib/config";
 import { RecordId, SurrealClient } from "@ax/lib/db";
 import type { DbError } from "@ax/lib/errors";
+import { orAbsent } from "@ax/lib/shared/fs-error";
+import { classifyNoFollow } from "@ax/lib/shared/fs-classify";
+import { posixPath } from "@ax/lib/shared/path";
 import { skillRecordKey } from "@ax/lib/skill-id";
 import { executeStatements } from "@ax/lib/shared/statement-exec";
 import { recordRef, surrealDate, surrealString } from "@ax/lib/shared/surql";
@@ -164,13 +164,13 @@ function emptyExtract(warnings: string[] = [], skipped = 0): CursorExtract {
 
 function cursorDbIdentity(dbPath: string, cursorUserDir?: string | null): string {
     if (cursorUserDir && cursorUserDir.length > 0) {
-        const relativePath = relative(cursorUserDir, dbPath);
+        const relativePath = posixPath.relative(cursorUserDir, dbPath);
         if (
             relativePath.length > 0 &&
             relativePath !== ".." &&
             !relativePath.startsWith("../") &&
             !relativePath.startsWith("..\\") &&
-            !isAbsolute(relativePath)
+            !posixPath.isAbsolute(relativePath)
         ) {
             return relativePath.replace(/[\\/]/g, "/");
         }
@@ -906,41 +906,63 @@ const buildCursorBatchStatements = (extract: CursorExtract, sourcePath: string):
 
 export const __testBuildCursorBatchStatements = buildCursorBatchStatements;
 
-async function includeDbByMtime(dbPath: string, cutoffMs: number): Promise<boolean> {
-    if (!existsSync(dbPath)) return false;
-    if (cutoffMs <= 0) return true;
-    try {
+// All fs ops below are discovery PROBES: the OLD code guarded every access with
+// `existsSync`/`readdir`-in-try/catch and treated any miss/fault as "absent,
+// skip". `orAbsent` reproduces that exactly (recovers ANY PlatformError to the
+// fallback, clearing the E channel), so these readers never fail; R is just
+// FileSystem (+ Path for the directory walk).
+const includeDbByMtime = (
+    dbPath: string,
+    cutoffMs: number,
+): Effect.Effect<boolean, never, FileSystem.FileSystem> =>
+    Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        // OLD: existsSync guard → false when the db file is absent.
+        const exists = yield* fs.exists(dbPath).pipe(orAbsent(false));
+        if (!exists) return false;
+        if (cutoffMs <= 0) return true;
         const paths = [dbPath, `${dbPath}-wal`, `${dbPath}-shm`];
         for (const path of paths) {
-            if (!existsSync(path)) continue;
-            const st = await stat(path);
-            if (st.mtimeMs >= cutoffMs) return true;
+            // OLD: existsSync guard → skip absent sidecars; stat in try/catch → false.
+            const sidecarExists = yield* fs.exists(path).pipe(orAbsent(false));
+            if (!sidecarExists) continue;
+            const mtimeMs = yield* fs.stat(path).pipe(
+                Effect.map((st) => Option.getOrElse(st.mtime, () => new Date(0)).getTime()),
+                orAbsent(-1),
+            );
+            if (mtimeMs >= cutoffMs) return true;
         }
         return false;
-    } catch {
-        return false;
-    }
-}
+    });
 
-async function findCursorStateDbs(cursorUserDir: string, cutoffMs = 0): Promise<string[]> {
-    const dbPaths: string[] = [];
-    const globalDb = join(cursorUserDir, "globalStorage", "state.vscdb");
-    if (await includeDbByMtime(globalDb, cutoffMs)) dbPaths.push(globalDb);
+const findCursorStateDbs = (
+    cursorUserDir: string,
+    cutoffMs = 0,
+): Effect.Effect<string[], never, FileSystem.FileSystem | Path.Path> =>
+    Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const dbPaths: string[] = [];
+        const globalDb = path.join(cursorUserDir, "globalStorage", "state.vscdb");
+        if (yield* includeDbByMtime(globalDb, cutoffMs)) dbPaths.push(globalDb);
 
-    const workspaceStorage = join(cursorUserDir, "workspaceStorage");
-    let entries;
-    try {
-        entries = await readdir(workspaceStorage, { withFileTypes: true });
-    } catch {
+        const workspaceStorage = path.join(cursorUserDir, "workspaceStorage");
+        // OLD: readdir(withFileTypes) in try/catch → return dbPaths on error.
+        const entries = yield* fs.readDirectory(workspaceStorage).pipe(orAbsent([] as string[]));
+        for (const entry of entries) {
+            const entryPath = path.join(workspaceStorage, entry);
+            // OLD: entry.isDirectory() filter via readdir(withFileTypes) - a
+            // `Dirent` check that does NOT follow symlinks. `classifyNoFollow`
+            // restores that: a symlinked workspace dir classifies as
+            // "SymbolicLink" (not "Directory") and is skipped, matching the old
+            // Dirent partition. Unreadable / missing entries also skip.
+            const kind = yield* classifyNoFollow(entryPath);
+            if (kind !== "Directory") continue;
+            const dbPath = path.join(entryPath, "state.vscdb");
+            if (yield* includeDbByMtime(dbPath, cutoffMs)) dbPaths.push(dbPath);
+        }
         return dbPaths;
-    }
-    for (const entry of entries) {
-        if (!entry.isDirectory()) continue;
-        const dbPath = join(workspaceStorage, entry.name, "state.vscdb");
-        if (await includeDbByMtime(dbPath, cutoffMs)) dbPaths.push(dbPath);
-    }
-    return dbPaths;
-}
+    });
 
 export const __testFindCursorStateDbs = findCursorStateDbs;
 
@@ -950,12 +972,12 @@ interface CursorIngestOpts {
 
 export const ingestCursor = (
     opts: Partial<CursorIngestOpts> = {},
-): Effect.Effect<CursorStats, DbError, SurrealClient | AxConfig> =>
+): Effect.Effect<CursorStats, DbError, SurrealClient | AxConfig | FileSystem.FileSystem | Path.Path> =>
     Effect.gen(function* () {
         const cfg = yield* AxConfig;
         const db = yield* SurrealClient;
         const cutoff = opts.sinceDays ? Date.now() - opts.sinceDays * 86400 * 1000 : 0;
-        const dbPaths = yield* Effect.promise(() => findCursorStateDbs(cfg.paths.cursorUserDir, cutoff));
+        const dbPaths = yield* findCursorStateDbs(cfg.paths.cursorUserDir, cutoff);
         let sessionCount = 0;
         let turnCount = 0;
         let toolCallCount = 0;
@@ -1001,7 +1023,7 @@ export class CursorStageStats extends BaseStageStats.extend<CursorStageStats>("C
     warnings: Schema.Number,
 }) {}
 
-export const cursorStage: StageDef<CursorStageStats, SurrealClient | AxConfig> = {
+export const cursorStage: StageDef<CursorStageStats, SurrealClient | AxConfig | FileSystem.FileSystem | Path.Path> = {
     meta: StageMeta.make({ key: "cursor", deps: ["skills", "commands"], tags: ["ingest"] }),
     run: (ctx: IngestContext) =>
         Effect.gen(function* () {

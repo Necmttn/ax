@@ -31,6 +31,8 @@ jobs:
 
       - run: bun run check:cli-reference
 
+      - run: bun run check:no-node-fs
+
       - run: bun run check:table-coverage
 
       - run: bun run build

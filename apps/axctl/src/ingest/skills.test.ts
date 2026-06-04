@@ -7,6 +7,7 @@
  */
 import { describe, expect, test } from "bun:test";
 import { Effect, Layer } from "effect";
+import { BunFileSystem, BunPath } from "@effect/platform-bun";
 import { RecordId } from "surrealdb";
 import { mkdtemp, mkdir, writeFile, rm } from "node:fs/promises";
 import { join } from "node:path";
@@ -14,6 +15,11 @@ import { tmpdir } from "node:os";
 import { SurrealClient } from "@ax/lib/db";
 import type { SurrealClientShape } from "@ax/lib/db";
 import { ingestSkills } from "./skills.ts";
+
+// ingestSkills now reads the on-disk fixtures through the @effect/platform
+// FileSystem + Path services, so the real Bun-backed layers are provided
+// against the mkdtemp fixture (never a mock - this is a genuine on-disk read).
+const PlatformLayer = Layer.mergeAll(BunFileSystem.layer, BunPath.layer);
 
 // ---------------------------------------------------------------------------
 // Import the module's test-only parse helper
@@ -147,7 +153,7 @@ describe("looseLineParse list-format fallback", () => {
 
             const { layer } = makeMockDb();
             const stats = await Effect.runPromise(
-                ingestSkills().pipe(Effect.provide(layer)),
+                ingestSkills().pipe(Effect.provide(layer), Effect.provide(PlatformLayer)),
             );
 
             expect(stats.edgesWritten).toBe(2);
@@ -181,7 +187,7 @@ describe("ingestSkills end-to-end role wiring", () => {
 
             const { calls, layer } = makeMockDb();
             await Effect.runPromise(
-                ingestSkills().pipe(Effect.provide(layer)),
+                ingestSkills().pipe(Effect.provide(layer), Effect.provide(PlatformLayer)),
             );
 
             // RELATE query should use literal record ids, not $skill/$role bindings
@@ -218,7 +224,7 @@ describe("ingestSkills end-to-end role wiring", () => {
 
             const { layer } = makeMockDb();
             const stats = await Effect.runPromise(
-                ingestSkills().pipe(Effect.provide(layer)),
+                ingestSkills().pipe(Effect.provide(layer), Effect.provide(PlatformLayer)),
             );
 
             expect(stats.edgesWritten).toBe(2);
@@ -246,7 +252,7 @@ describe("ingestSkills end-to-end role wiring", () => {
 
             const { calls, layer } = makeMockDb();
             const stats = await Effect.runPromise(
-                ingestSkills().pipe(Effect.provide(layer)),
+                ingestSkills().pipe(Effect.provide(layer), Effect.provide(PlatformLayer)),
             );
 
             expect(stats.edgesWritten).toBe(0);

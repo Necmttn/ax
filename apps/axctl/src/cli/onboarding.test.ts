@@ -3,11 +3,20 @@ import { mkdtemp, mkdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
+import { Effect, Layer } from "effect";
+import { BunFileSystem, BunPath } from "@effect/platform-bun";
 import {
     buildOnboardingReport,
     formatInstallOnboardingGuidance,
     formatOnboardingReport,
 } from "./onboarding.ts";
+
+// Forced-dependency edit: `buildOnboardingReport` is now an Effect requiring
+// FileSystem + Path (the @effect/platform migration). Run it against the REAL
+// Bun-backed layers, exactly as the production CLI does.
+const BunFsLayer = Layer.merge(BunFileSystem.layer, BunPath.layer);
+const runReport = (home: string) =>
+    Effect.runPromise(buildOnboardingReport(home).pipe(Effect.provide(BunFsLayer)));
 
 describe("onboarding report", () => {
     test("warns when global guidance directories are not git tracked", async () => {
@@ -16,7 +25,7 @@ describe("onboarding report", () => {
             await mkdir(join(root, ".claude"));
             await mkdir(join(root, ".codex"));
             await mkdir(join(root, ".agents"));
-            const report = buildOnboardingReport(root);
+            const report = await runReport(root);
 
             expect(report.checks.every((check) => check.status === "warn")).toBe(true);
             expect(formatOnboardingReport(report, true)).toContain("claude-global");
@@ -32,7 +41,7 @@ describe("onboarding report", () => {
             await mkdir(join(root, ".claude"));
             await mkdir(join(root, ".codex"));
             await mkdir(join(root, ".agents"));
-            const report = buildOnboardingReport(root);
+            const report = await runReport(root);
 
             expect(report.checks.every((check) => check.status === "ok")).toBe(true);
         } finally {
@@ -46,7 +55,7 @@ describe("onboarding report", () => {
             await mkdir(join(root, ".claude"));
             await mkdir(join(root, ".codex"));
             await mkdir(join(root, ".agents"));
-            const text = formatInstallOnboardingGuidance(buildOnboardingReport(root));
+            const text = formatInstallOnboardingGuidance(await runReport(root));
 
             expect(text).toContain("Harness tracking recommended");
             expect(text).toContain("Ask your host agent to:");
@@ -65,7 +74,7 @@ describe("onboarding report", () => {
             await mkdir(join(root, ".claude"));
             await mkdir(join(root, ".codex"));
             await mkdir(join(root, ".agents"));
-            const text = formatInstallOnboardingGuidance(buildOnboardingReport(root));
+            const text = formatInstallOnboardingGuidance(await runReport(root));
 
             expect(text).toContain("Harness tracking: ok");
         } finally {

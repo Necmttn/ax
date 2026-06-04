@@ -1,4 +1,9 @@
+import { mkdtemp, rm, utimes, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, test } from "bun:test";
+import { Effect } from "effect";
+import { BunFileSystem } from "@effect/platform-bun";
 import {
     buildOpportunityStatements,
     hookBasenameFromArtifactPath,
@@ -8,8 +13,14 @@ import {
     parseOverlapFiles,
     parseSkillTriggerTool,
     resolveGuidanceTargetPath,
+    safeFileMtimeMs,
     triggerTokensFromCandidate,
 } from "./derive-opportunities.ts";
+
+const runMtime = (absPath: string): Promise<number | null> =>
+    Effect.runPromise(
+        safeFileMtimeMs(absPath).pipe(Effect.provide(BunFileSystem.layer)),
+    );
 
 describe("opportunityKey", () => {
     test("deterministic for the same (experiment, evidence) pair", () => {
@@ -152,5 +163,29 @@ describe("resolveGuidanceTargetPath", () => {
 
     test("leaves other relative paths unchanged", () => {
         expect(resolveGuidanceTargetPath("docs/notes.md", home)).toBe("docs/notes.md");
+    });
+});
+
+describe("safeFileMtimeMs", () => {
+    test("returns the file mtime in epoch-ms for an existing file", async () => {
+        const dir = await mkdtemp(join(tmpdir(), "ax-mtime-"));
+        try {
+            const file = join(dir, "CLAUDE.md");
+            await writeFile(file, "x");
+            const when = new Date("2026-01-02T03:04:05.000Z");
+            await utimes(file, when, when);
+            expect(await runMtime(file)).toBe(when.getTime());
+        } finally {
+            await rm(dir, { recursive: true, force: true });
+        }
+    });
+
+    test("returns null for a missing file (orAbsent)", async () => {
+        const dir = await mkdtemp(join(tmpdir(), "ax-mtime-"));
+        try {
+            expect(await runMtime(join(dir, "does-not-exist.md"))).toBeNull();
+        } finally {
+            await rm(dir, { recursive: true, force: true });
+        }
     });
 });

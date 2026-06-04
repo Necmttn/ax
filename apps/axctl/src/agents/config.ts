@@ -42,10 +42,8 @@ interface AgentDbRow {
     readonly deleted_at: unknown;
 }
 
-const resolveRepoRoot = (): Effect.Effect<string | undefined> =>
-    Effect.promise(() => findGitRoot(process.cwd())).pipe(
-        Effect.map((r) => r ?? undefined),
-    );
+const resolveRepoRoot = (): Effect.Effect<string | undefined, never, FileSystem.FileSystem> =>
+    findGitRoot(process.cwd()).pipe(Effect.map((r) => r ?? undefined));
 
 /** Discover all on-disk agents across every source, dedup by name (user wins). */
 const discoverAll = (): Effect.Effect<

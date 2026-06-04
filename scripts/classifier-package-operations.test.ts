@@ -1,4 +1,6 @@
 import { describe, expect, test } from "bun:test";
+import { Effect, type FileSystem } from "effect";
+import { BunFileSystem } from "@ax/lib/bun-platform";
 import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -39,9 +41,15 @@ import {
     writePackagesOperationsReport,
 } from "../apps/axctl/src/classifiers/package-operations.ts";
 
+// @effect/platform migration: the package-operations fs/path leaf functions now
+// return Effect.Effect<_, _, FileSystem.FileSystem>. Run them against the REAL
+// Bun-backed FileSystem layer so these tests exercise actual package operations.
+const runFs = <A, E>(eff: Effect.Effect<A, E, FileSystem.FileSystem>): Promise<A> =>
+    Effect.runPromise(eff.pipe(Effect.provide(BunFileSystem.layer)));
+
 describe("classifier package operations report", () => {
-    test("lists operations from the session-section manifest", () => {
-        const manifest = loadClassifierPackageManifest("packages/ax-classifier-session-sections/ax.classifier.json");
+    test("lists operations from the session-section manifest", async () => {
+        const manifest = await runFs(loadClassifierPackageManifest("packages/ax-classifier-session-sections/ax.classifier.json"));
 
         const report = buildOperationsReport(manifest, "packages/ax-classifier-session-sections/ax.classifier.json");
 
@@ -50,8 +58,8 @@ describe("classifier package operations report", () => {
         expect(report.failures).toEqual([]);
     });
 
-    test("selects one operation by id", () => {
-        const manifest = loadClassifierPackageManifest("packages/ax-classifier-session-sections/ax.classifier.json");
+    test("selects one operation by id", async () => {
+        const manifest = await runFs(loadClassifierPackageManifest("packages/ax-classifier-session-sections/ax.classifier.json"));
 
         const report = buildOperationsReport(manifest, "packages/ax-classifier-session-sections/ax.classifier.json", "blind-review-refresh");
 
@@ -60,8 +68,8 @@ describe("classifier package operations report", () => {
         expect(report.operations[0]?.command).toBe("bun run classifiers:blind-review-refresh");
     });
 
-    test("reports missing operations without throwing", () => {
-        const manifest = loadClassifierPackageManifest("packages/ax-classifier-verification-event/ax.classifier.json");
+    test("reports missing operations without throwing", async () => {
+        const manifest = await runFs(loadClassifierPackageManifest("packages/ax-classifier-verification-event/ax.classifier.json"));
 
         const report = buildOperationsReport(manifest, "packages/ax-classifier-verification-event/ax.classifier.json", "missing");
 
@@ -70,10 +78,10 @@ describe("classifier package operations report", () => {
         expect(report.failures).toEqual(["classifier package verification-event does not declare operation: missing"]);
     });
 
-    test("preflights selected operation inputs", () => {
-        const manifest = loadClassifierPackageManifest("packages/ax-classifier-session-sections/ax.classifier.json");
+    test("preflights selected operation inputs", async () => {
+        const manifest = await runFs(loadClassifierPackageManifest("packages/ax-classifier-session-sections/ax.classifier.json"));
 
-        const report = buildOperationPreflightReport(manifest, "packages/ax-classifier-session-sections/ax.classifier.json", "setfit-train-eval");
+        const report = await runFs(buildOperationPreflightReport(manifest, "packages/ax-classifier-session-sections/ax.classifier.json", "setfit-train-eval"));
 
         expect(report.decision).toBe("ready");
         expect(report.operation?.kind).toBe("train");
@@ -84,8 +92,8 @@ describe("classifier package operations report", () => {
         expect(report.missing_inputs).toEqual([]);
     });
 
-    test("preflight reports missing declared inputs", () => {
-        const manifest = loadClassifierPackageManifest("packages/ax-classifier-session-sections/ax.classifier.json");
+    test("preflight reports missing declared inputs", async () => {
+        const manifest = await runFs(loadClassifierPackageManifest("packages/ax-classifier-session-sections/ax.classifier.json"));
         const testManifest = {
             ...manifest,
             operations: [
@@ -100,26 +108,26 @@ describe("classifier package operations report", () => {
             ],
         };
 
-        const report = buildOperationPreflightReport(testManifest, "packages/ax-classifier-session-sections/ax.classifier.json", "missing-input-demo");
+        const report = await runFs(buildOperationPreflightReport(testManifest, "packages/ax-classifier-session-sections/ax.classifier.json", "missing-input-demo"));
 
         expect(report.decision).toBe("missing_inputs");
         expect(report.missing_inputs).toContain(".ax/experiments/does-not-exist-for-preflight-test.json");
         expect(report.failures).toContain("missing input: .ax/experiments/does-not-exist-for-preflight-test.json");
     });
 
-    test("preflight reports missing selected operations", () => {
-        const manifest = loadClassifierPackageManifest("packages/ax-classifier-session-sections/ax.classifier.json");
+    test("preflight reports missing selected operations", async () => {
+        const manifest = await runFs(loadClassifierPackageManifest("packages/ax-classifier-session-sections/ax.classifier.json"));
 
-        const report = buildOperationPreflightReport(manifest, "packages/ax-classifier-session-sections/ax.classifier.json", "missing");
+        const report = await runFs(buildOperationPreflightReport(manifest, "packages/ax-classifier-session-sections/ax.classifier.json", "missing"));
 
         expect(report.decision).toBe("operation_missing");
         expect(report.failures).toEqual(["classifier package session-section-chunks does not declare operation: missing"]);
     });
 
-    test("builds dry-run operation reports without executing", () => {
-        const manifest = loadClassifierPackageManifest("packages/ax-classifier-session-sections/ax.classifier.json");
+    test("builds dry-run operation reports without executing", async () => {
+        const manifest = await runFs(loadClassifierPackageManifest("packages/ax-classifier-session-sections/ax.classifier.json"));
 
-        const report = buildOperationDryRunReport(manifest, "packages/ax-classifier-session-sections/ax.classifier.json", "setfit-train-eval");
+        const report = await runFs(buildOperationDryRunReport(manifest, "packages/ax-classifier-session-sections/ax.classifier.json", "setfit-train-eval"));
 
         expect(report.schema).toBe("ax.classifier_package_operation_dry_run_report.v1");
         expect(report.decision).toBe("ready_to_run");
@@ -128,8 +136,8 @@ describe("classifier package operations report", () => {
         expect(report.preflight.decision).toBe("ready");
     });
 
-    test("dry-run reports blocked operations when preflight fails", () => {
-        const manifest = loadClassifierPackageManifest("packages/ax-classifier-session-sections/ax.classifier.json");
+    test("dry-run reports blocked operations when preflight fails", async () => {
+        const manifest = await runFs(loadClassifierPackageManifest("packages/ax-classifier-session-sections/ax.classifier.json"));
         const testManifest = {
             ...manifest,
             operations: [
@@ -144,33 +152,33 @@ describe("classifier package operations report", () => {
             ],
         };
 
-        const report = buildOperationDryRunReport(testManifest, "packages/ax-classifier-session-sections/ax.classifier.json", "blocked-demo");
+        const report = await runFs(buildOperationDryRunReport(testManifest, "packages/ax-classifier-session-sections/ax.classifier.json", "blocked-demo"));
 
         expect(report.decision).toBe("blocked");
         expect(report.would_execute).toBe(false);
         expect(report.preflight.missing_inputs).toContain(".ax/experiments/does-not-exist-for-dry-run-test.json");
     });
 
-    test("execution plan denies execution by default", () => {
-        const manifest = loadClassifierPackageManifest("packages/ax-classifier-session-sections/ax.classifier.json");
+    test("execution plan denies execution by default", async () => {
+        const manifest = await runFs(loadClassifierPackageManifest("packages/ax-classifier-session-sections/ax.classifier.json"));
 
-        const report = buildOperationExecutionPlanReport(manifest, "packages/ax-classifier-session-sections/ax.classifier.json", "setfit-train-eval", {
+        const report = await runFs(buildOperationExecutionPlanReport(manifest, "packages/ax-classifier-session-sections/ax.classifier.json", "setfit-train-eval", {
             allowExecute: false,
             allowExpensive: false,
-        });
+        }));
 
         expect(report.decision).toBe("denied_requires_execute");
         expect(report.would_execute).toBe(false);
         expect(report.failures).toContain("execution requires --execute");
     });
 
-    test("execution plan blocks expensive operations without explicit allowance", () => {
-        const manifest = loadClassifierPackageManifest("packages/ax-classifier-session-sections/ax.classifier.json");
+    test("execution plan blocks expensive operations without explicit allowance", async () => {
+        const manifest = await runFs(loadClassifierPackageManifest("packages/ax-classifier-session-sections/ax.classifier.json"));
 
-        const report = buildOperationExecutionPlanReport(manifest, "packages/ax-classifier-session-sections/ax.classifier.json", "setfit-train-eval", {
+        const report = await runFs(buildOperationExecutionPlanReport(manifest, "packages/ax-classifier-session-sections/ax.classifier.json", "setfit-train-eval", {
             allowExecute: true,
             allowExpensive: false,
-        });
+        }));
 
         expect(report.decision).toBe("denied_expensive");
         expect(report.would_execute).toBe(false);
@@ -178,13 +186,13 @@ describe("classifier package operations report", () => {
         expect(report.failures).toContain("operation kind train requires --allow-expensive");
     });
 
-    test("execution plan marks explicitly allowed operation ready", () => {
-        const manifest = loadClassifierPackageManifest("packages/ax-classifier-session-sections/ax.classifier.json");
+    test("execution plan marks explicitly allowed operation ready", async () => {
+        const manifest = await runFs(loadClassifierPackageManifest("packages/ax-classifier-session-sections/ax.classifier.json"));
 
-        const report = buildOperationExecutionPlanReport(manifest, "packages/ax-classifier-session-sections/ax.classifier.json", "setfit-train-eval", {
+        const report = await runFs(buildOperationExecutionPlanReport(manifest, "packages/ax-classifier-session-sections/ax.classifier.json", "setfit-train-eval", {
             allowExecute: true,
             allowExpensive: true,
-        });
+        }));
 
         expect(report.decision).toBe("ready_to_execute");
         expect(report.would_execute).toBe(true);
@@ -192,7 +200,7 @@ describe("classifier package operations report", () => {
     });
 
     test("executes ready operation plans and captures output", async () => {
-        const manifest = loadClassifierPackageManifest("packages/ax-classifier-session-sections/ax.classifier.json");
+        const manifest = await runFs(loadClassifierPackageManifest("packages/ax-classifier-session-sections/ax.classifier.json"));
         const outPath = join(mkdtempSync(join(tmpdir(), "ax-exec-output-")), "output.txt");
         const testManifest = {
             ...manifest,
@@ -204,12 +212,12 @@ describe("classifier package operations report", () => {
                 outputs: [outPath],
             }],
         };
-        const plan = buildOperationExecutionPlanReport(testManifest, "packages/ax-classifier-session-sections/ax.classifier.json", "print-demo", {
+        const plan = await runFs(buildOperationExecutionPlanReport(testManifest, "packages/ax-classifier-session-sections/ax.classifier.json", "print-demo", {
             allowExecute: true,
             allowExpensive: false,
-        });
+        }));
 
-        const report = await executeOperationPlanReport(plan);
+        const report = await runFs(executeOperationPlanReport(plan));
 
         expect(report.schema).toBe("ax.classifier_package_operation_execution_report.v1");
         expect(report.decision).toBe("executed");
@@ -225,7 +233,7 @@ describe("classifier package operations report", () => {
     });
 
     test("marks execution failed when declared outputs are missing", async () => {
-        const manifest = loadClassifierPackageManifest("packages/ax-classifier-session-sections/ax.classifier.json");
+        const manifest = await runFs(loadClassifierPackageManifest("packages/ax-classifier-session-sections/ax.classifier.json"));
         const missingOutPath = join(mkdtempSync(join(tmpdir(), "ax-missing-output-")), "missing.txt");
         const testManifest = {
             ...manifest,
@@ -237,12 +245,12 @@ describe("classifier package operations report", () => {
                 outputs: [missingOutPath],
             }],
         };
-        const plan = buildOperationExecutionPlanReport(testManifest, "packages/ax-classifier-session-sections/ax.classifier.json", "missing-output-demo", {
+        const plan = await runFs(buildOperationExecutionPlanReport(testManifest, "packages/ax-classifier-session-sections/ax.classifier.json", "missing-output-demo", {
             allowExecute: true,
             allowExpensive: false,
-        });
+        }));
 
-        const report = await executeOperationPlanReport(plan);
+        const report = await runFs(executeOperationPlanReport(plan));
 
         expect(report.decision).toBe("failed");
         expect(report.executed).toBe(true);
@@ -253,7 +261,7 @@ describe("classifier package operations report", () => {
     });
 
     test("does not execute denied operation plans", async () => {
-        const manifest = loadClassifierPackageManifest("packages/ax-classifier-session-sections/ax.classifier.json");
+        const manifest = await runFs(loadClassifierPackageManifest("packages/ax-classifier-session-sections/ax.classifier.json"));
         const missingOutPath = join(mkdtempSync(join(tmpdir(), "ax-denied-output-")), "missing.txt");
         const testManifest = {
             ...manifest,
@@ -265,12 +273,12 @@ describe("classifier package operations report", () => {
                 outputs: [missingOutPath],
             }],
         };
-        const plan = buildOperationExecutionPlanReport(testManifest, "packages/ax-classifier-session-sections/ax.classifier.json", "denied-train-demo", {
+        const plan = await runFs(buildOperationExecutionPlanReport(testManifest, "packages/ax-classifier-session-sections/ax.classifier.json", "denied-train-demo", {
             allowExecute: true,
             allowExpensive: false,
-        });
+        }));
 
-        const report = await executeOperationPlanReport(plan);
+        const report = await runFs(executeOperationPlanReport(plan));
 
         expect(report.decision).toBe("not_executed");
         expect(report.executed).toBe(false);
@@ -280,51 +288,51 @@ describe("classifier package operations report", () => {
         expect(report.failures).toContain("operation kind train requires --allow-expensive");
     });
 
-    test("writes operations report JSON to disk", () => {
-        const manifest = loadClassifierPackageManifest("packages/ax-classifier-session-sections/ax.classifier.json");
+    test("writes operations report JSON to disk", async () => {
+        const manifest = await runFs(loadClassifierPackageManifest("packages/ax-classifier-session-sections/ax.classifier.json"));
         const report = buildOperationsReport(manifest, "packages/ax-classifier-session-sections/ax.classifier.json", "blind-workflow-status");
         const path = join(mkdtempSync(join(tmpdir(), "ax-ops-")), "nested", "report.json");
 
-        writeOperationsReport(path, report);
+        await runFs(writeOperationsReport(path, report));
 
         const written = JSON.parse(readFileSync(path, "utf8"));
         expect(written.decision).toBe("operation_found");
         expect(written.operations[0].id).toBe("blind-workflow-status");
     });
 
-    test("writes preflight report JSON to disk", () => {
-        const manifest = loadClassifierPackageManifest("packages/ax-classifier-session-sections/ax.classifier.json");
-        const report = buildOperationPreflightReport(manifest, "packages/ax-classifier-session-sections/ax.classifier.json", "setfit-train-eval");
+    test("writes preflight report JSON to disk", async () => {
+        const manifest = await runFs(loadClassifierPackageManifest("packages/ax-classifier-session-sections/ax.classifier.json"));
+        const report = await runFs(buildOperationPreflightReport(manifest, "packages/ax-classifier-session-sections/ax.classifier.json", "setfit-train-eval"));
         const path = join(mkdtempSync(join(tmpdir(), "ax-preflight-")), "report.json");
 
-        writeOperationPreflightReport(path, report);
+        await runFs(writeOperationPreflightReport(path, report));
 
         const written = JSON.parse(readFileSync(path, "utf8"));
         expect(written.schema).toBe("ax.classifier_package_operation_preflight_report.v1");
         expect(written.decision).toBe("ready");
     });
 
-    test("writes dry-run report JSON to disk", () => {
-        const manifest = loadClassifierPackageManifest("packages/ax-classifier-session-sections/ax.classifier.json");
-        const report = buildOperationDryRunReport(manifest, "packages/ax-classifier-session-sections/ax.classifier.json", "setfit-train-eval");
+    test("writes dry-run report JSON to disk", async () => {
+        const manifest = await runFs(loadClassifierPackageManifest("packages/ax-classifier-session-sections/ax.classifier.json"));
+        const report = await runFs(buildOperationDryRunReport(manifest, "packages/ax-classifier-session-sections/ax.classifier.json", "setfit-train-eval"));
         const path = join(mkdtempSync(join(tmpdir(), "ax-dry-run-")), "report.json");
 
-        writeOperationDryRunReport(path, report);
+        await runFs(writeOperationDryRunReport(path, report));
 
         const written = JSON.parse(readFileSync(path, "utf8"));
         expect(written.schema).toBe("ax.classifier_package_operation_dry_run_report.v1");
         expect(written.would_execute).toBe(false);
     });
 
-    test("writes execution plan report JSON to disk", () => {
-        const manifest = loadClassifierPackageManifest("packages/ax-classifier-session-sections/ax.classifier.json");
-        const report = buildOperationExecutionPlanReport(manifest, "packages/ax-classifier-session-sections/ax.classifier.json", "setfit-train-eval", {
+    test("writes execution plan report JSON to disk", async () => {
+        const manifest = await runFs(loadClassifierPackageManifest("packages/ax-classifier-session-sections/ax.classifier.json"));
+        const report = await runFs(buildOperationExecutionPlanReport(manifest, "packages/ax-classifier-session-sections/ax.classifier.json", "setfit-train-eval", {
             allowExecute: false,
             allowExpensive: false,
-        });
+        }));
         const path = join(mkdtempSync(join(tmpdir(), "ax-execution-plan-")), "report.json");
 
-        writeOperationExecutionPlanReport(path, report);
+        await runFs(writeOperationExecutionPlanReport(path, report));
 
         const written = JSON.parse(readFileSync(path, "utf8"));
         expect(written.schema).toBe("ax.classifier_package_operation_execution_plan_report.v1");
@@ -332,7 +340,7 @@ describe("classifier package operations report", () => {
     });
 
     test("writes execution report JSON to disk", async () => {
-        const manifest = loadClassifierPackageManifest("packages/ax-classifier-session-sections/ax.classifier.json");
+        const manifest = await runFs(loadClassifierPackageManifest("packages/ax-classifier-session-sections/ax.classifier.json"));
         const outPath = join(mkdtempSync(join(tmpdir(), "ax-exec-write-output-")), "output.txt");
         const testManifest = {
             ...manifest,
@@ -344,14 +352,14 @@ describe("classifier package operations report", () => {
                 outputs: [outPath],
             }],
         };
-        const plan = buildOperationExecutionPlanReport(testManifest, "packages/ax-classifier-session-sections/ax.classifier.json", "print-demo", {
+        const plan = await runFs(buildOperationExecutionPlanReport(testManifest, "packages/ax-classifier-session-sections/ax.classifier.json", "print-demo", {
             allowExecute: true,
             allowExpensive: false,
-        });
-        const report = await executeOperationPlanReport(plan);
+        }));
+        const report = await runFs(executeOperationPlanReport(plan));
         const path = join(mkdtempSync(join(tmpdir(), "ax-execution-report-")), "report.json");
 
-        writeOperationExecutionReport(path, report);
+        await runFs(writeOperationExecutionReport(path, report));
 
         const written = JSON.parse(readFileSync(path, "utf8"));
         expect(written.schema).toBe("ax.classifier_package_operation_execution_report.v1");
@@ -361,7 +369,7 @@ describe("classifier package operations report", () => {
     });
 
     test("builds execution history summaries from execution reports", async () => {
-        const manifest = loadClassifierPackageManifest("packages/ax-classifier-session-sections/ax.classifier.json");
+        const manifest = await runFs(loadClassifierPackageManifest("packages/ax-classifier-session-sections/ax.classifier.json"));
         const outPath = join(mkdtempSync(join(tmpdir(), "ax-history-output-")), "output.txt");
         const testManifest = {
             ...manifest,
@@ -373,11 +381,11 @@ describe("classifier package operations report", () => {
                 outputs: [outPath],
             }],
         };
-        const plan = buildOperationExecutionPlanReport(testManifest, "packages/ax-classifier-session-sections/ax.classifier.json", "print-demo", {
+        const plan = await runFs(buildOperationExecutionPlanReport(testManifest, "packages/ax-classifier-session-sections/ax.classifier.json", "print-demo", {
             allowExecute: true,
             allowExpensive: false,
-        });
-        const execution = await executeOperationPlanReport(plan);
+        }));
+        const execution = await runFs(executeOperationPlanReport(plan));
 
         const report = buildExecutionHistoryReport(".ax/experiments", [{
             path: ".ax/experiments/demo-execution.json",
@@ -393,22 +401,22 @@ describe("classifier package operations report", () => {
 
     test("discovers and writes execution history reports", async () => {
         const root = mkdtempSync(join(tmpdir(), "ax-history-"));
-        const manifest = loadClassifierPackageManifest("packages/ax-classifier-session-sections/ax.classifier.json");
-        const plan = buildOperationExecutionPlanReport(manifest, "packages/ax-classifier-session-sections/ax.classifier.json", "missing", {
+        const manifest = await runFs(loadClassifierPackageManifest("packages/ax-classifier-session-sections/ax.classifier.json"));
+        const plan = await runFs(buildOperationExecutionPlanReport(manifest, "packages/ax-classifier-session-sections/ax.classifier.json", "missing", {
             allowExecute: true,
             allowExpensive: false,
-        });
-        const execution = await executeOperationPlanReport(plan);
+        }));
+        const execution = await runFs(executeOperationPlanReport(plan));
         const executionPath = join(root, "classifier-package-execution-demo.json");
         const historyPath = join(root, "history.json");
-        writeOperationExecutionReport(executionPath, execution);
+        await runFs(writeOperationExecutionReport(executionPath, execution));
 
-        const paths = discoverClassifierPackageExecutionReportPaths(root);
+        const paths = await runFs(discoverClassifierPackageExecutionReportPaths(root));
         const history = buildExecutionHistoryReport(root, paths.map((path) => ({
             path,
             report: JSON.parse(readFileSync(path, "utf8")),
         })));
-        writeExecutionHistoryReport(historyPath, history);
+        await runFs(writeExecutionHistoryReport(historyPath, history));
 
         const written = JSON.parse(readFileSync(historyPath, "utf8"));
         expect(paths).toEqual([executionPath]);
@@ -416,7 +424,7 @@ describe("classifier package operations report", () => {
     });
 
     test("projects execution reports into graph-ready facts and edges", async () => {
-        const manifest = loadClassifierPackageManifest("packages/ax-classifier-session-sections/ax.classifier.json");
+        const manifest = await runFs(loadClassifierPackageManifest("packages/ax-classifier-session-sections/ax.classifier.json"));
         const outPath = join(mkdtempSync(join(tmpdir(), "ax-fact-output-")), "output.txt");
         const testManifest = {
             ...manifest,
@@ -428,11 +436,11 @@ describe("classifier package operations report", () => {
                 outputs: [outPath],
             }],
         };
-        const plan = buildOperationExecutionPlanReport(testManifest, "packages/ax-classifier-session-sections/ax.classifier.json", "print-demo", {
+        const plan = await runFs(buildOperationExecutionPlanReport(testManifest, "packages/ax-classifier-session-sections/ax.classifier.json", "print-demo", {
             allowExecute: true,
             allowExpensive: false,
-        });
-        const execution = await executeOperationPlanReport(plan);
+        }));
+        const execution = await runFs(executeOperationPlanReport(plan));
 
         const report = buildExecutionFactProjectionReport(".ax/experiments", [{
             path: ".ax/experiments/classifier-package-execution-demo.json",
@@ -446,7 +454,7 @@ describe("classifier package operations report", () => {
         expect(report.facts.map((fact) => fact.kind)).toEqual(expect.arrayContaining(["classifier_operation_execution", "classifier_artifact_observation"]));
     });
 
-    test("projects proposal lifecycle review artifacts into graph facts", () => {
+    test("projects proposal lifecycle review artifacts into graph facts", async () => {
         const report = buildExecutionFactProjectionReport(".ax/experiments", [], {
             path: ".ax/experiments/blind-workflow-status-current.json",
             exists: true,
@@ -502,7 +510,7 @@ describe("classifier package operations report", () => {
         ]));
     });
 
-    test("projects review pipeline lifecycle artifacts into graph facts", () => {
+    test("projects review pipeline lifecycle artifacts into graph facts", async () => {
         const report = buildExecutionFactProjectionReport(".ax/experiments", [], {
             path: ".ax/experiments/blind-workflow-status-current.json",
             exists: true,
@@ -703,7 +711,7 @@ describe("classifier package operations report", () => {
         ]));
     });
 
-    test("loads review pipeline lifecycle status beside workflow status", () => {
+    test("loads review pipeline lifecycle status beside workflow status", async () => {
         const dir = mkdtempSync(join(tmpdir(), "ax-review-pipeline-lifecycle-"));
         const statusPath = join(dir, "blind-workflow-status-current.json");
         const lifecyclePath = join(dir, "workflow-candidate-review-pipeline-lifecycle-current.json");
@@ -776,7 +784,7 @@ describe("classifier package operations report", () => {
             },
         }), "utf8");
 
-        const status = loadClassifierLifecycleReviewStatus(statusPath);
+        const status = await runFs(loadClassifierLifecycleReviewStatus(statusPath));
 
         expect(status.review_pipeline_lifecycle).toMatchObject({
             report_path: lifecyclePath,
@@ -828,19 +836,19 @@ describe("classifier package operations report", () => {
     });
 
     test("writes execution fact projection reports", async () => {
-        const manifest = loadClassifierPackageManifest("packages/ax-classifier-session-sections/ax.classifier.json");
-        const plan = buildOperationExecutionPlanReport(manifest, "packages/ax-classifier-session-sections/ax.classifier.json", "missing", {
+        const manifest = await runFs(loadClassifierPackageManifest("packages/ax-classifier-session-sections/ax.classifier.json"));
+        const plan = await runFs(buildOperationExecutionPlanReport(manifest, "packages/ax-classifier-session-sections/ax.classifier.json", "missing", {
             allowExecute: true,
             allowExpensive: false,
-        });
-        const execution = await executeOperationPlanReport(plan);
+        }));
+        const execution = await runFs(executeOperationPlanReport(plan));
         const report = buildExecutionFactProjectionReport(".ax/experiments", [{
             path: ".ax/experiments/classifier-package-execution-missing.json",
             report: execution,
         }]);
         const path = join(mkdtempSync(join(tmpdir(), "ax-facts-")), "facts.json");
 
-        writeExecutionFactProjectionReport(path, report);
+        await runFs(writeExecutionFactProjectionReport(path, report));
 
         const written = JSON.parse(readFileSync(path, "utf8"));
         expect(written.schema).toBe("ax.classifier_package_execution_fact_projection.v1");
@@ -848,12 +856,12 @@ describe("classifier package operations report", () => {
     });
 
     test("builds Surreal write plans from execution fact projections", async () => {
-        const manifest = loadClassifierPackageManifest("packages/ax-classifier-session-sections/ax.classifier.json");
-        const plan = buildOperationExecutionPlanReport(manifest, "packages/ax-classifier-session-sections/ax.classifier.json", "missing", {
+        const manifest = await runFs(loadClassifierPackageManifest("packages/ax-classifier-session-sections/ax.classifier.json"));
+        const plan = await runFs(buildOperationExecutionPlanReport(manifest, "packages/ax-classifier-session-sections/ax.classifier.json", "missing", {
             allowExecute: true,
             allowExpensive: false,
-        });
-        const execution = await executeOperationPlanReport(plan);
+        }));
+        const execution = await runFs(executeOperationPlanReport(plan));
         const projection = buildExecutionFactProjectionReport(".ax/experiments", [{
             path: ".ax/experiments/classifier-package-execution-missing.json",
             report: execution,
@@ -874,7 +882,7 @@ describe("classifier package operations report", () => {
         const writePlan = buildExecutionSurrealWritePlanReport(projection);
         const path = join(mkdtempSync(join(tmpdir(), "ax-write-plan-")), "write-plan.json");
 
-        writeExecutionSurrealWritePlanReport(path, writePlan);
+        await runFs(writeExecutionSurrealWritePlanReport(path, writePlan));
 
         const written = JSON.parse(readFileSync(path, "utf8"));
         expect(written.schema).toBe("ax.classifier_package_execution_surreal_write_plan.v1");
@@ -973,14 +981,14 @@ describe("classifier package operations report", () => {
         }, async () => undefined);
         const path = join(mkdtempSync(join(tmpdir(), "ax-apply-")), "apply.json");
 
-        writeExecutionSurrealApplyReport(path, report);
+        await runFs(writeExecutionSurrealApplyReport(path, report));
 
         const written = JSON.parse(readFileSync(path, "utf8"));
         expect(written.schema).toBe("ax.classifier_package_execution_surreal_apply_report.v1");
         expect(written.decision).toBe("applied");
     });
 
-    test("builds graph health reports from persisted classifier graph rows", () => {
+    test("builds graph health reports from persisted classifier graph rows", async () => {
         const report = buildExecutionGraphHealthReport({
             nodes: [
                 {
@@ -1064,7 +1072,7 @@ describe("classifier package operations report", () => {
         expect(report.changed_artifacts[0]?.artifact_path).toBe(".ax/experiments/out.json");
     });
 
-    test("filters graph health reports by mode and operation", () => {
+    test("filters graph health reports by mode and operation", async () => {
         const report = buildExecutionGraphHealthReport({
             nodes: [
                 {
@@ -1115,7 +1123,7 @@ describe("classifier package operations report", () => {
         expect(report.evidence_paths).toEqual(["guarded.json"]);
     });
 
-    test("lists lifecycle graph facts in lifecycle mode", () => {
+    test("lists lifecycle graph facts in lifecycle mode", async () => {
         const report = buildExecutionGraphHealthReport({
             nodes: [{
                 graph_id: "classifier_lifecycle:workflow_candidate_proposal",
@@ -1215,7 +1223,7 @@ describe("classifier package operations report", () => {
         expect(report.evidence_paths).toEqual([".ax/experiments/workflow-candidate-proposal-review-current.json"]);
     });
 
-    test("filters lifecycle graph facts by exact value", () => {
+    test("filters lifecycle graph facts by exact value", async () => {
         const report = buildExecutionGraphHealthReport({
             nodes: [],
             edges: [{
@@ -1284,7 +1292,7 @@ describe("classifier package operations report", () => {
         });
     });
 
-    test("marks graph health reports with no matching query results", () => {
+    test("marks graph health reports with no matching query results", async () => {
         const report = buildExecutionGraphHealthReport({
             nodes: [],
             edges: [{
@@ -1455,7 +1463,7 @@ describe("classifier package operations report", () => {
         });
     });
 
-    test("summarizes lifecycle graph fact values", () => {
+    test("summarizes lifecycle graph fact values", async () => {
         const report = buildExecutionGraphHealthReport({
             nodes: [],
             edges: [{
@@ -1509,7 +1517,7 @@ describe("classifier package operations report", () => {
         }]);
     });
 
-    test("lists embedding helper graph facts in embedding-helper mode", () => {
+    test("lists embedding helper graph facts in embedding-helper mode", async () => {
         const report = buildExecutionGraphHealthReport({
             nodes: [
                 {
@@ -1682,7 +1690,7 @@ describe("classifier package operations report", () => {
         });
     });
 
-    test("lists boundary replay graph facts in boundary-replay mode", () => {
+    test("lists boundary replay graph facts in boundary-replay mode", async () => {
         const report = buildExecutionGraphHealthReport({
             nodes: [],
             edges: [{
@@ -1755,7 +1763,7 @@ describe("classifier package operations report", () => {
         });
     });
 
-    test("filters embedding helper graph facts by routing threshold", () => {
+    test("filters embedding helper graph facts by routing threshold", async () => {
         const report = buildExecutionGraphHealthReport({
             nodes: [],
             edges: [{
@@ -1821,7 +1829,7 @@ describe("classifier package operations report", () => {
         });
     });
 
-    test("filters embedding helper graph facts by minimum positive recall", () => {
+    test("filters embedding helper graph facts by minimum positive recall", async () => {
         const report = buildExecutionGraphHealthReport({
             nodes: [],
             edges: [{
@@ -1884,7 +1892,7 @@ describe("classifier package operations report", () => {
         });
     });
 
-    test("filters embedding helper graph facts by minimum call reduction", () => {
+    test("filters embedding helper graph facts by minimum call reduction", async () => {
         const report = buildExecutionGraphHealthReport({
             nodes: [],
             edges: [{
@@ -1947,7 +1955,7 @@ describe("classifier package operations report", () => {
         });
     });
 
-    test("summarizes routing policies that meet recall and call reduction floors", () => {
+    test("summarizes routing policies that meet recall and call reduction floors", async () => {
         const report = buildExecutionGraphHealthReport({
             nodes: [],
             edges: [{
@@ -2015,7 +2023,7 @@ describe("classifier package operations report", () => {
         });
     });
 
-    test("summarizes routing policies with a no-match remediation", () => {
+    test("summarizes routing policies with a no-match remediation", async () => {
         const report = buildExecutionGraphHealthReport({
             nodes: [],
             edges: [{
@@ -2110,7 +2118,7 @@ describe("classifier package operations report", () => {
         });
     });
 
-    test("filters embedding helper graph facts by minimum seed count", () => {
+    test("filters embedding helper graph facts by minimum seed count", async () => {
         const report = buildExecutionGraphHealthReport({
             nodes: [],
             edges: [{
@@ -2179,18 +2187,18 @@ describe("classifier package operations report", () => {
         });
     });
 
-    test("writes graph health reports", () => {
+    test("writes graph health reports", async () => {
         const report = buildExecutionGraphHealthReport({ nodes: [], edges: [], facts: [] });
         const path = join(mkdtempSync(join(tmpdir(), "ax-graph-health-")), "health.json");
 
-        writeExecutionGraphHealthReport(path, report);
+        await runFs(writeExecutionGraphHealthReport(path, report));
 
         const written = JSON.parse(readFileSync(path, "utf8"));
         expect(written.schema).toBe("ax.classifier_package_execution_graph_health_report.v1");
         expect(written.decision).toBe("empty_graph");
     });
 
-    test("builds classifier lifecycle insight reports from packages, graph health, and workflow status", () => {
+    test("builds classifier lifecycle insight reports from packages, graph health, and workflow status", async () => {
         const packages = buildPackagesOperationsReport("packages", [{
             manifest: "packages/demo/ax.classifier.json",
             package_key: "demo",
@@ -2310,7 +2318,7 @@ describe("classifier package operations report", () => {
         expect(report.packages[0]?.failed_operation_count).toBe(1);
     });
 
-    test("recommends candidate promotion from persisted review pipeline success facts", () => {
+    test("recommends candidate promotion from persisted review pipeline success facts", async () => {
         const lifecycleSuccessGraph = buildExecutionGraphHealthReport({
             nodes: [],
             edges: [{
@@ -2377,7 +2385,7 @@ describe("classifier package operations report", () => {
         expect(report.graph_recommendations[0]?.candidate_query_argv).toContain("--source-kind=hybrid_window_classifier_projection");
     });
 
-    test("summarizes review pipeline lifecycle routing in lifecycle insight reports", () => {
+    test("summarizes review pipeline lifecycle routing in lifecycle insight reports", async () => {
         const report = buildClassifierLifecycleInsightReport({
             packages: buildPackagesOperationsReport("packages", []),
             graph: buildExecutionGraphHealthReport({
@@ -2517,7 +2525,7 @@ describe("classifier package operations report", () => {
         expect(report.graph_query_suggestion?.suggestion?.repair.command_kind).toBe("classifier_graph_query_repair");
     });
 
-    test("summarizes lifecycle routing for service execution helpers", () => {
+    test("summarizes lifecycle routing for service execution helpers", async () => {
         const report = buildClassifierLifecycleInsightReport({
             packages: buildPackagesOperationsReport("packages", []),
             graph: buildExecutionGraphHealthReport({
@@ -2677,7 +2685,7 @@ describe("classifier package operations report", () => {
         expect(report.stdout.trim()).toBe("route ok");
     });
 
-    test("inspects lifecycle route execution outputs and surfaces handoff blockers", () => {
+    test("inspects lifecycle route execution outputs and surfaces handoff blockers", async () => {
         const dir = mkdtempSync(join(tmpdir(), "ax-route-execution-inspection-"));
         const reportPath = join(dir, "review-coverage.json");
         const briefPath = join(dir, "review-coverage.md");
@@ -2736,7 +2744,7 @@ describe("classifier package operations report", () => {
             next_action: "inspect_route_outputs" as const,
         };
 
-        const inspection = inspectClassifierLifecycleRouteExecution(execution);
+        const inspection = await runFs(inspectClassifierLifecycleRouteExecution(execution));
 
         expect(inspection).toMatchObject({
             schema: "ax.classifier_lifecycle_route_execution_inspection.v1",
@@ -2759,7 +2767,7 @@ describe("classifier package operations report", () => {
         ]));
     });
 
-    test("routes lifecycle insight reports to graph query repair when the filtered graph has a suggestion", () => {
+    test("routes lifecycle insight reports to graph query repair when the filtered graph has a suggestion", async () => {
         const graphRows = {
             nodes: [{
                 graph_id: "classifier_lifecycle:workflow_candidate_review_pipeline",
@@ -2837,7 +2845,7 @@ describe("classifier package operations report", () => {
         expect(report.graph_query_suggestion?.suggestion?.repair.command_kind).toBe("classifier_graph_query_repair");
     });
 
-    test("writes lifecycle insight reports", () => {
+    test("writes lifecycle insight reports", async () => {
         const report = buildClassifierLifecycleInsightReport({
             packages: buildPackagesOperationsReport("packages", []),
             graph: buildExecutionGraphHealthReport({ nodes: [], edges: [], facts: [] }),
@@ -2845,24 +2853,24 @@ describe("classifier package operations report", () => {
         });
         const path = join(mkdtempSync(join(tmpdir(), "ax-lifecycle-")), "lifecycle.json");
 
-        writeClassifierLifecycleInsightReport(path, report);
+        await runFs(writeClassifierLifecycleInsightReport(path, report));
 
         const written = JSON.parse(readFileSync(path, "utf8"));
         expect(written.schema).toBe("ax.classifier_lifecycle_insight_report.v1");
         expect(written.decision).toBe("needs_graph_apply");
     });
 
-    test("discovers classifier package manifests", () => {
-        const paths = discoverClassifierPackageManifestPaths("packages");
+    test("discovers classifier package manifests", async () => {
+        const paths = await runFs(discoverClassifierPackageManifestPaths("packages"));
 
         expect(paths).toContain("packages/ax-classifier-session-sections/ax.classifier.json");
         expect(paths).toContain("packages/ax-classifier-direction-event/ax.classifier.json");
         expect(paths).toEqual([...paths].sort());
     });
 
-    test("builds multi-package operation summaries", () => {
-        const paths = discoverClassifierPackageManifestPaths("packages");
-        const packages = paths.map((path) => summarizeClassifierPackageOperations(loadClassifierPackageManifest(path), path));
+    test("builds multi-package operation summaries", async () => {
+        const paths = await runFs(discoverClassifierPackageManifestPaths("packages"));
+        const packages = await Promise.all(paths.map(async (path) => summarizeClassifierPackageOperations(await runFs(loadClassifierPackageManifest(path)), path)));
         const report = buildPackagesOperationsReport("packages", packages);
 
         expect(report.schema).toBe("ax.classifier_packages_operations_report.v1");
@@ -2886,13 +2894,13 @@ describe("classifier package operations report", () => {
         expect(report.packages.find((entry) => entry.package_key === "direction-event")?.lifecycle_readiness.status).toBe("not_applicable");
     });
 
-    test("writes multi-package operations report JSON to disk", () => {
-        const paths = discoverClassifierPackageManifestPaths("packages");
-        const packages = paths.map((path) => summarizeClassifierPackageOperations(loadClassifierPackageManifest(path), path));
+    test("writes multi-package operations report JSON to disk", async () => {
+        const paths = await runFs(discoverClassifierPackageManifestPaths("packages"));
+        const packages = await Promise.all(paths.map(async (path) => summarizeClassifierPackageOperations(await runFs(loadClassifierPackageManifest(path)), path)));
         const report = buildPackagesOperationsReport("packages", packages);
         const path = join(mkdtempSync(join(tmpdir(), "ax-ops-all-")), "report.json");
 
-        writePackagesOperationsReport(path, report);
+        await runFs(writePackagesOperationsReport(path, report));
 
         const written = JSON.parse(readFileSync(path, "utf8"));
         expect(written.totals.package_count).toBe(report.totals.package_count);

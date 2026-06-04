@@ -31,13 +31,20 @@ import { NoopTransportLayer } from "./live-traces/transports/console.ts";
  * fully-built `AppLayer` does NOT rewire the already-constructed sink, so the
  * transport must be provided here, beneath the sink.
  */
+// Bun-backed FileSystem + Path: the seam every config-front-door mutator
+// (`ax hooks/skills/agents`) writes through (see @ax/lib/atomic-write), AND the
+// dependency `AxConfigLive` now needs to read the persisted runtime endpoint
+// from `runtime.json` at acquisition. Merged into the platform base so the same
+// instances satisfy both `AxConfig`'s build and downstream consumers.
+const PlatformLive = Layer.mergeAll(BunFileSystem.layer, BunPath.layer);
+
+// Provide FS+Path BENEATH AxConfig so its build is satisfied, while
+// `provideMerge` re-exposes them so consumers still see FileSystem + Path.
+const AxConfigProvided = AxConfigLive.pipe(Layer.provideMerge(PlatformLive));
+
 const AppLayerSansTransport = SurrealClientLive.pipe(
-    Layer.provideMerge(AxConfigLive),
+    Layer.provideMerge(AxConfigProvided),
     Layer.merge(ProcessServiceLive),
-    // Bun-backed FileSystem + Path: the seam every config-front-door mutator
-    // (`ax hooks/skills/agents`) writes through (see @ax/lib/atomic-write).
-    Layer.merge(BunFileSystem.layer),
-    Layer.merge(BunPath.layer),
     Layer.provideMerge(LiveTraceLayer),
     Layer.provideMerge(TraceSinkLive({ flushIntervalMs: 200 })),
 );

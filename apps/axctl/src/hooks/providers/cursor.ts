@@ -1,6 +1,6 @@
-import { Effect } from "effect";
-import { join } from "node:path";
-import { existsSync } from "node:fs";
+import { Effect, FileSystem } from "effect";
+import { posixPath } from "@ax/lib/shared/path";
+import { orAbsent } from "@ax/lib/shared/fs-error";
 import { HOME } from "@ax/lib/paths";
 import {
     HookConfigParseError,
@@ -94,12 +94,16 @@ export const cursorProvider: HookProvider = {
     matcher: "none",
 
     configFiles: (scope: HookScope, repoRoot) => {
-        if (scope === "global") return [{ path: join(HOME, ".cursor", "hooks.json"), scope, format: "json" }];
-        if (scope === "project" && repoRoot) return [{ path: join(repoRoot, ".cursor", "hooks.json"), scope, format: "json" }];
+        if (scope === "global") return [{ path: posixPath.join(HOME, ".cursor", "hooks.json"), scope, format: "json" }];
+        if (scope === "project" && repoRoot) return [{ path: posixPath.join(repoRoot, ".cursor", "hooks.json"), scope, format: "json" }];
         return [];
     },
 
-    installed: () => existsSync(join(HOME, ".cursor")),
+    installed: () =>
+        Effect.gen(function* () {
+            const fs = yield* FileSystem.FileSystem;
+            return yield* fs.exists(posixPath.join(HOME, ".cursor")).pipe(orAbsent(false));
+        }),
 
     parse: (ref, raw) =>
         Effect.gen(function* () {

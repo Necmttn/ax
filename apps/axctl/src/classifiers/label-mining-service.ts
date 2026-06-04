@@ -1,6 +1,4 @@
-import { Context, Effect, Layer, Schema } from "effect";
-import { mkdirSync, writeFileSync } from "node:fs";
-import { dirname } from "node:path";
+import { Context, Effect, FileSystem, Layer, Path, Schema } from "effect";
 import { SurrealClient } from "@ax/lib/db";
 import type { DbError } from "@ax/lib/errors";
 import { prettyPrint } from "@ax/lib/json";
@@ -434,14 +432,14 @@ export interface LabelMiningServiceShape {
     ) => Effect.Effect<LabelMiningReport, LabelMiningError, SurrealClient>;
     readonly writeMiningReport: (
         input: LabelMiningWriteInput,
-    ) => Effect.Effect<LabelMiningReport, LabelMiningError, SurrealClient>;
+    ) => Effect.Effect<LabelMiningReport, LabelMiningError, SurrealClient | FileSystem.FileSystem | Path.Path>;
     /**
      * Product read path: separate reviewed promotion-safe facts, weak/advisory
      * candidates, rejected/deferred reviews, and nearest-neighbor explanations.
      */
     readonly selfImproveQuery: (
         input: LabelMiningSelfImproveInput,
-    ) => Effect.Effect<LabelMiningSelfImproveResult, LabelMiningError, SurrealClient>;
+    ) => Effect.Effect<LabelMiningSelfImproveResult, LabelMiningError, SurrealClient | FileSystem.FileSystem | Path.Path>;
     /**
      * Project persisted reviewed rows + vector rows into classifier graph facts.
      * Only `accepted` reviews become promotion-safe. With `apply`, the idempotent
@@ -449,7 +447,7 @@ export interface LabelMiningServiceShape {
      */
     readonly projectReviewed: (
         input: LabelMiningProjectInput,
-    ) => Effect.Effect<LabelMiningGraphProjectionReport, LabelMiningError, SurrealClient>;
+    ) => Effect.Effect<LabelMiningGraphProjectionReport, LabelMiningError, SurrealClient | FileSystem.FileSystem | Path.Path>;
 }
 
 export class LabelMiningService extends Context.Service<LabelMiningService, LabelMiningServiceShape>()(
@@ -588,17 +586,22 @@ const vectorRowToVector = (row: VectorTableRow): TranscriptLabelVectorRow => ({
     nearest_scores: parseNumberArray(row.nearest_scores_json),
 });
 
-const writeReport = (out: string, report: unknown): Effect.Effect<void, LabelMiningReportWriteError> =>
-    Effect.try({
-        try: () => {
-            mkdirSync(dirname(out), { recursive: true });
-            writeFileSync(out, `${prettyPrint(report)}\n`);
-        },
-        catch: (err) =>
-            new LabelMiningReportWriteError({
-                path: out,
-                message: err instanceof Error ? err.message : String(err),
-            }),
+const writeReport = (
+    out: string,
+    report: unknown,
+): Effect.Effect<void, LabelMiningReportWriteError, FileSystem.FileSystem | Path.Path> =>
+    Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        yield* fs.makeDirectory(path.dirname(out), { recursive: true }).pipe(
+            Effect.andThen(fs.writeFileString(out, `${prettyPrint(report)}\n`)),
+            Effect.mapError((err) =>
+                new LabelMiningReportWriteError({
+                    path: out,
+                    message: err instanceof Error ? err.message : String(err),
+                }),
+            ),
+        );
     });
 
 export const LabelMiningServiceLive: Layer.Layer<LabelMiningService, never, SurrealClient> =
@@ -694,17 +697,7 @@ export const LabelMiningServiceLive: Layer.Layer<LabelMiningService, never, Surr
             ) {
                 const report = yield* miningReport(input);
                 const withPath: LabelMiningReport = { ...report, out_path: input.out };
-                yield* Effect.try({
-                    try: () => {
-                        mkdirSync(dirname(input.out), { recursive: true });
-                        writeFileSync(input.out, `${prettyPrint(withPath)}\n`);
-                    },
-                    catch: (err) =>
-                        new LabelMiningReportWriteError({
-                            path: input.out,
-                            message: err instanceof Error ? err.message : String(err),
-                        }),
-                });
+                yield* writeReport(input.out, withPath);
                 return withPath;
             });
 

@@ -2,7 +2,8 @@ import { mkdtemp, rm, mkdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, test } from "bun:test";
-import { Effect } from "effect";
+import { Effect, Layer } from "effect";
+import { BunFileSystem } from "@effect/platform-bun";
 import { ProcessServiceTest } from "@ax/lib/process";
 import { getGitState } from "./git.ts";
 
@@ -27,7 +28,9 @@ describe("getGitState", () => {
                 },
             });
 
-            const state = await Effect.runPromise(getGitState(root).pipe(Effect.provide(layer)));
+            const state = await Effect.runPromise(
+                getGitState(root).pipe(Effect.provide(Layer.merge(layer, BunFileSystem.layer))),
+            );
 
             expect(state.root).toBe(root);
             expect(state.branch).toBe("main");
@@ -44,7 +47,9 @@ describe("getGitState", () => {
         const root = await mkdtemp(join(tmpdir(), "ax-git-nogit-"));
         try {
             const layer = ProcessServiceTest({ route: () => new Error("should not run") });
-            const state = await Effect.runPromise(getGitState(root).pipe(Effect.provide(layer)));
+            const state = await Effect.runPromise(
+                getGitState(root).pipe(Effect.provide(Layer.merge(layer, BunFileSystem.layer))),
+            );
             expect(state.root).toBeNull();
             expect(state.dirty).toBe(false);
             expect(state.changes).toEqual([]);

@@ -8,6 +8,7 @@ import { mkdtemp, rm, mkdir, writeFile, realpath } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { Effect, Layer } from "effect";
+import { BunFileSystem } from "@effect/platform-bun";
 import { RecordId } from "surrealdb";
 import { SurrealClient, type SurrealClientShape } from "@ax/lib/db";
 import { ProcessServiceLive } from "@ax/lib/process";
@@ -90,7 +91,9 @@ function makeMockDb(existsResponse: boolean) {
 async function resolve(cwd: string, dbExists: boolean) {
     return Effect.runPromise(
         resolvePwdRepository(cwd).pipe(
-            Effect.provide(Layer.merge(ProcessServiceLive, makeMockDb(dbExists))),
+            Effect.provide(
+                Layer.mergeAll(ProcessServiceLive, makeMockDb(dbExists), BunFileSystem.layer),
+            ),
         ),
     );
 }
@@ -103,7 +106,9 @@ async function resolveErr(cwd: string) {
                 onSuccess: (v) => ({ ok: true, v }) as const,
                 onFailure: (e) => ({ ok: false, e }) as const,
             }),
-            Effect.provide(Layer.merge(ProcessServiceLive, makeMockDb(false))),
+            Effect.provide(
+                Layer.mergeAll(ProcessServiceLive, makeMockDb(false), BunFileSystem.layer),
+            ),
         ),
     );
 }
@@ -186,7 +191,9 @@ describe("resolvePwdRepository", () => {
                     onSuccess: (v) => ({ ok: true, cwd: v.cwd }) as const,
                     onFailure: (e) => ({ ok: false, tag: (e as { _tag: string })._tag }) as const,
                 }),
-                Effect.provide(Layer.merge(ProcessServiceLive, makeMockDb(false))),
+                Effect.provide(
+                    Layer.mergeAll(ProcessServiceLive, makeMockDb(false), BunFileSystem.layer),
+                ),
             ),
         );
         // Either resolution or NotAGitRepoError are valid

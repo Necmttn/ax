@@ -1,7 +1,5 @@
-import { existsSync } from "node:fs";
-import { readFile } from "node:fs/promises";
-import { join } from "node:path";
-import { Effect } from "effect";
+import { Effect, FileSystem, Path } from "effect";
+import { orAbsent } from "@ax/lib/shared/fs-error";
 import type { InstructionMatch, PackageInfo, ProjectStack, StackSignal } from "./types.ts";
 
 const INSTRUCTION_FILES = ["AGENTS.md", "CLAUDE.md"] as const;
@@ -30,22 +28,26 @@ function packageNames(value: unknown): ReadonlyArray<string> {
     return Object.keys(value as Record<string, unknown>).sort();
 }
 
-export const loadPackageInfo = (root: string | null): Effect.Effect<PackageInfo> =>
+export const loadPackageInfo = (root: string | null): Effect.Effect<PackageInfo, never, FileSystem.FileSystem | Path.Path> =>
     Effect.gen(function* () {
         if (!root) return emptyPackageInfo();
 
-        const path = join(root, "package.json");
-        if (!existsSync(path)) return emptyPackageInfo();
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+
+        const pkgPath = path.join(root, "package.json");
+        // existsSync probe → orAbsent(false): a fault means "treat as absent".
+        if (!(yield* fs.exists(pkgPath).pipe(orAbsent(false)))) return emptyPackageInfo();
 
         const parsed = yield* Effect.tryPromise({
-            try: () => Bun.file(path).json() as Promise<unknown>,
+            try: () => Bun.file(pkgPath).json() as Promise<unknown>,
             catch: () => "PackageJsonReadError" as const,
         }).pipe(Effect.orElseSucceed(() => null));
 
         if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return emptyPackageInfo();
         const record = parsed as Record<string, unknown>;
         return {
-            packageJsonPath: path,
+            packageJsonPath: pkgPath,
             packageManager: typeof record.packageManager === "string" ? record.packageManager : null,
             scripts: asStringRecord(record.scripts),
             dependencies: packageNames(record.dependencies),
@@ -123,20 +125,28 @@ export function extractInstructionMatches(file: string, content: string): Readon
     return matches.slice(0, 40);
 }
 
-export const loadInstructionMatches = (root: string | null): Effect.Effect<ReadonlyArray<InstructionMatch>> =>
+export const loadInstructionMatches = (
+    root: string | null,
+): Effect.Effect<ReadonlyArray<InstructionMatch>, never, FileSystem.FileSystem | Path.Path> =>
     Effect.gen(function* () {
         if (!root) return [];
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
         const all: InstructionMatch[] = [];
         for (const name of INSTRUCTION_FILES) {
-            const path = join(root, name);
-            if (!existsSync(path)) continue;
-            const content = yield* Effect.promise(() => readFile(path, "utf8"));
-            all.push(...extractInstructionMatches(path, content));
+            const filePath = path.join(root, name);
+            // existsSync probe → orAbsent(false): a fault means "treat as absent".
+            if (!(yield* fs.exists(filePath).pipe(orAbsent(false)))) continue;
+            // Original read used Effect.promise (failure → defect); preserve via orDie.
+            const content = yield* fs.readFileString(filePath).pipe(Effect.orDie);
+            all.push(...extractInstructionMatches(filePath, content));
         }
         return all;
     });
 
-export const loadProjectStack = (root: string | null): Effect.Effect<ProjectStack> =>
+export const loadProjectStack = (
+    root: string | null,
+): Effect.Effect<ProjectStack, never, FileSystem.FileSystem | Path.Path> =>
     Effect.gen(function* () {
         const pkg = yield* loadPackageInfo(root);
         const instructions = yield* loadInstructionMatches(root);

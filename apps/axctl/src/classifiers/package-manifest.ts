@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { Effect, FileSystem, type PlatformError } from "effect";
 import { safeJsonParse } from "@ax/lib/shared/safe-json";
 import type { ClassifierInputKind, ClassifierKind } from "./core.ts";
 
@@ -94,12 +94,17 @@ export function isClassifierPackageManifest(value: unknown): value is Classifier
         (record.operations === undefined || (Array.isArray(record.operations) && record.operations.every(isClassifierPackageOperation)));
 }
 
-export function loadClassifierPackageManifest(path: string): ClassifierPackageManifest {
-    const parsed = safeJsonParse<unknown>(readFileSync(path, "utf8"));
-    if (!isClassifierPackageManifest(parsed)) {
-        throw new Error(`invalid classifier package manifest: ${path}`);
-    }
-    return parsed;
+export function loadClassifierPackageManifest(
+    path: string,
+): Effect.Effect<ClassifierPackageManifest, PlatformError.PlatformError | Error, FileSystem.FileSystem> {
+    return Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const parsed = safeJsonParse<unknown>(yield* fs.readFileString(path));
+        if (!isClassifierPackageManifest(parsed)) {
+            return yield* Effect.fail(new Error(`invalid classifier package manifest: ${path}`));
+        }
+        return parsed;
+    });
 }
 
 export function listClassifierPackageOperations(manifest: ClassifierPackageManifest): readonly ClassifierPackageOperation[] {

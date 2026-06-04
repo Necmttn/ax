@@ -10,11 +10,9 @@
  *
  * @see scripts/extract-stage-rationale.ts for the full annotation contract.
  */
-import { readFile, readdir, stat } from "node:fs/promises";
-import { join } from "node:path";
 import { createHash } from "node:crypto";
 import { parse as parseYaml } from "yaml";
-import { Effect, Schema } from "effect";
+import { Effect, FileSystem, Path, Schema } from "effect";
 import { SurrealClient } from "@ax/lib/db";
 import { defaultSkillDirs } from "@ax/lib/paths";
 import { AppLayer } from "@ax/lib/layers";
@@ -25,6 +23,7 @@ import { discoverProjectRoots } from "./project-discovery.ts";
 import { BaseStageStats, IngestContext, StageMeta } from "./stage/types.ts";
 import type { StageDef } from "./stage/registry.ts";
 import { validateRoleName } from "@ax/lib/role-name";
+import { orAbsent } from "@ax/lib/shared/fs-error";
 
 interface ParsedSkill {
     name: string;
@@ -117,109 +116,115 @@ function parseSkillFile(content: string, fallbackName: string): ParsedSkill {
     };
 }
 
-async function readSkillDir(dir: string, scope: string): Promise<SkillItem[]> {
-    const out: SkillItem[] = [];
-    let entries: string[];
-    try {
-        entries = await readdir(dir);
-    } catch {
+// Every fs op below is wrapped in `orAbsent`, which clears the PlatformError E
+// channel (any discovery miss / unreadable dir recovers to a fallback - exactly
+// the old per-call try/catch tolerance). So the readers never fail; R is just
+// FileSystem + Path.
+type FsReader = Effect.Effect<SkillItem[], never, FileSystem.FileSystem | Path.Path>;
+
+const readSkillDir = (dir: string, scope: string): FsReader =>
+    Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const out: SkillItem[] = [];
+        // OLD: try/catch around readdir → return []. A missing/unreadable dir is
+        // a tolerated discovery miss, so recover ANY PlatformError to [].
+        const entries = yield* fs.readDirectory(dir).pipe(orAbsent([] as string[]));
+        for (const entry of entries) {
+            const full = path.join(dir, entry);
+            // OLD: stat in try/catch → continue on error; skip non-directories.
+            // orAbsent(false) treats any stat fault as "not a directory, skip".
+            const isDir = yield* fs.stat(full).pipe(
+                Effect.map((st) => st.type === "Directory"),
+                orAbsent(false),
+            );
+            if (!isDir) continue;
+            const skillFile = path.join(full, "SKILL.md");
+            // OLD: readFile in try/catch → continue (skip dir without SKILL.md).
+            // orAbsent(null) recovers any read fault to "no skill here".
+            const content = yield* fs.readFileString(skillFile).pipe(orAbsent(null as string | null));
+            if (content === null) continue;
+            const parsed = parseSkillFile(content, entry);
+            out.push({
+                skill: parsed,
+                dir_path: full,
+                bytes: Buffer.byteLength(content, "utf8"),
+                scope,
+            });
+        }
         return out;
-    }
-    for (const entry of entries) {
-        const full = join(dir, entry);
-        let st;
-        try {
-            st = await stat(full);
-        } catch {
-            continue;
-        }
-        if (!st.isDirectory()) continue;
-        const skillFile = join(full, "SKILL.md");
-        let content: string;
-        try {
-            content = await readFile(skillFile, "utf8");
-        } catch {
-            continue;
-        }
-        const parsed = parseSkillFile(content, entry);
-        out.push({
-            skill: parsed,
-            dir_path: full,
-            bytes: Buffer.byteLength(content, "utf8"),
-            scope,
-        });
-    }
-    return out;
-}
+    });
 
-async function readPluginSkills(): Promise<SkillItem[]> {
-    const root = join(process.env.HOME!, ".claude", "plugins", "cache");
-    const out: SkillItem[] = [];
-    let marketplaces: string[];
-    try {
-        marketplaces = await readdir(root);
-    } catch {
+const readPluginSkills = (): FsReader =>
+    Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const root = path.join(process.env.HOME!, ".claude", "plugins", "cache");
+        const out: SkillItem[] = [];
+        // OLD: each readdir level guarded by try/catch → return/continue.
+        const marketplaces = yield* fs.readDirectory(root).pipe(orAbsent([] as string[]));
+        for (const market of marketplaces) {
+            const marketDir = path.join(root, market);
+            const plugins = yield* fs.readDirectory(marketDir).pipe(orAbsent([] as string[]));
+            for (const plugin of plugins) {
+                const pluginDir = path.join(marketDir, plugin);
+                const versions = yield* fs.readDirectory(pluginDir).pipe(orAbsent([] as string[]));
+                for (const version of versions) {
+                    const skillsDir = path.join(pluginDir, version, "skills");
+                    const items = yield* readSkillDir(skillsDir, `plugin:${plugin}`);
+                    items.forEach((it) => {
+                        // Re-namespace skill name to plugin:skillname for plugin-scoped skills
+                        if (!it.skill.name.includes(":")) {
+                            it.skill.name = `${plugin}:${it.skill.name}`;
+                        }
+                    });
+                    out.push(...items);
+                }
+            }
+        }
         return out;
-    }
-    for (const market of marketplaces) {
-        const marketDir = join(root, market);
-        let plugins: string[];
-        try {
-            plugins = await readdir(marketDir);
-        } catch {
-            continue;
-        }
-        for (const plugin of plugins) {
-            const pluginDir = join(marketDir, plugin);
-            let versions: string[];
-            try {
-                versions = await readdir(pluginDir);
-            } catch {
-                continue;
-            }
-            for (const version of versions) {
-                const skillsDir = join(pluginDir, version, "skills");
-                const items = await readSkillDir(skillsDir, `plugin:${plugin}`);
-                items.forEach((it) => {
-                    // Re-namespace skill name to plugin:skillname for plugin-scoped skills
-                    if (!it.skill.name.includes(":")) {
-                        it.skill.name = `${plugin}:${it.skill.name}`;
-                    }
-                });
-                out.push(...items);
-            }
-        }
-    }
-    return out;
-}
+    });
 
-async function readProjectSkills(): Promise<SkillItem[]> {
-    const roots = await discoverProjectRoots();
-    const out: SkillItem[] = [];
-    for (const root of roots) {
-        const skillsDir = join(root.path, ".claude", "skills");
-        const items = await readSkillDir(skillsDir, `project:${root.name}`);
-        // Re-namespace under the project so two repos with the same bare
-        // skill name (`expo-deployment`) don't collide in the catalog and
-        // the resolver's `:bare` suffix rule attaches invocations correctly.
-        items.forEach((it) => {
-            if (!it.skill.name.includes(":")) {
-                it.skill.name = `${root.name}:${it.skill.name}`;
-            }
-        });
-        out.push(...items);
-    }
-    return out;
-}
+const readProjectSkills = (): FsReader =>
+    Effect.gen(function* () {
+        const path = yield* Path.Path;
+        // discoverProjectRoots is an Effect over FileSystem + Path; it owns its
+        // own tolerate-all recovery internally (cannot fail).
+        const roots = yield* discoverProjectRoots();
+        const out: SkillItem[] = [];
+        for (const root of roots) {
+            const skillsDir = path.join(root.path, ".claude", "skills");
+            const items = yield* readSkillDir(skillsDir, `project:${root.name}`);
+            // Re-namespace under the project so two repos with the same bare
+            // skill name (`expo-deployment`) don't collide in the catalog and
+            // the resolver's `:bare` suffix rule attaches invocations correctly.
+            items.forEach((it) => {
+                if (!it.skill.name.includes(":")) {
+                    it.skill.name = `${root.name}:${it.skill.name}`;
+                }
+            });
+            out.push(...items);
+        }
+        return out;
+    });
 
-const collectSkills = (): Effect.Effect<SkillItem[]> =>
-    Effect.promise(async () => {
+const collectSkills = (): Effect.Effect<
+    SkillItem[],
+    never,
+    FileSystem.FileSystem | Path.Path
+> =>
+    Effect.gen(function* () {
         const buckets = defaultSkillDirs();
-        const [fromBaseDirs, fromPlugins, fromProjects] = await Promise.all([
-            Promise.all(buckets.map(({ dir, scope }) => readSkillDir(dir, scope))).then((xs) => xs.flat()),
-            readPluginSkills(),
-            readProjectSkills(),
-        ]);
+        const [fromBaseDirs, fromPlugins, fromProjects] = yield* Effect.all(
+            [
+                Effect.forEach(buckets, ({ dir, scope }) => readSkillDir(dir, scope), {
+                    concurrency: "unbounded",
+                }).pipe(Effect.map((xs) => xs.flat())),
+                readPluginSkills(),
+                readProjectSkills(),
+            ],
+            { concurrency: "unbounded" },
+        );
         const all = [...fromBaseDirs, ...fromPlugins, ...fromProjects];
 
         // Dedup by name keeping highest-precedence (user dirs first, plugins last is fine)
@@ -233,7 +238,7 @@ const collectSkills = (): Effect.Effect<SkillItem[]> =>
 export const ingestSkills = (): Effect.Effect<
     { count: number; rolesUpserted: number; edgesWritten: number },
     DbError,
-    SurrealClient
+    SurrealClient | FileSystem.FileSystem | Path.Path
 > =>
     Effect.gen(function* () {
         const db = yield* SurrealClient;
@@ -303,7 +308,10 @@ export class SkillsStats extends BaseStageStats.extend<SkillsStats>("SkillsStats
  * Consumed by: {@link ClaudeKey}, {@link CodexKey} via `invoked` edges.
  * Tags: ingest
  */
-export const skillsStage: StageDef<SkillsStats, SurrealClient> = {
+export const skillsStage: StageDef<
+    SkillsStats,
+    SurrealClient | FileSystem.FileSystem | Path.Path
+> = {
     meta: StageMeta.make({ key: "skills", deps: [], tags: ["ingest"] }),
     run: (_ctx: IngestContext) =>
         Effect.gen(function* () {

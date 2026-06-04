@@ -3,12 +3,21 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Database } from "bun:sqlite";
 import { describe, expect, test } from "bun:test";
+import { Effect, Layer } from "effect";
+import { BunFileSystem, BunPath } from "@effect/platform-bun";
 import {
     __testBuildOpenCodeBatchStatements,
     __testFindOpenCodeDbCandidates,
     extractOpenCodeDatabase,
 } from "./opencode.ts";
 import { toolCallRecordKey, turnRecordKey } from "./record-keys.ts";
+
+const findOpenCodeDbCandidates = (opencodeDir: string, cutoffMs: number): Promise<string[]> =>
+    Effect.runPromise(
+        __testFindOpenCodeDbCandidates(opencodeDir, cutoffMs).pipe(
+            Effect.provide(Layer.mergeAll(BunFileSystem.layer, BunPath.layer)),
+        ),
+    );
 
 async function withTempOpenCodeDb<T>(fn: (db: Database, dbPath: string) => T | Promise<T>): Promise<T> {
     const dir = await mkdtemp(join(tmpdir(), "ax-opencode-"));
@@ -396,8 +405,8 @@ describe("OpenCode SQLite extraction", () => {
             const old = new Date("2026-05-01T00:00:00.000Z");
             await utimes(dbPath, old, old);
 
-            expect(await __testFindOpenCodeDbCandidates(join(dbPath, ".."), old.getTime() + 1)).toEqual([]);
-            expect(await __testFindOpenCodeDbCandidates(join(dbPath, ".."), old.getTime())).toEqual([dbPath]);
+            expect(await findOpenCodeDbCandidates(join(dbPath, ".."), old.getTime() + 1)).toEqual([]);
+            expect(await findOpenCodeDbCandidates(join(dbPath, ".."), old.getTime())).toEqual([dbPath]);
         });
     });
 });

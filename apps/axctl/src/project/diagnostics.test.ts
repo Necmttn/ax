@@ -2,13 +2,16 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, test } from "bun:test";
-import { Effect } from "effect";
+import { Effect, Layer } from "effect";
+import { BunFileSystem, BunPath } from "@effect/platform-bun";
 import {
     loadDiagnosticConfig,
     normalizeDiagnosticIssue,
     parseDiagnosticConfig,
     queryLiveDiagnostics,
 } from "./diagnostics.ts";
+
+const fsLayer = Layer.mergeAll(BunFileSystem.layer, BunPath.layer);
 
 async function withTempRoot<T>(fn: (root: string) => Promise<T>): Promise<T> {
     const root = await mkdtemp(join(tmpdir(), "axctl-diagnostics-"));
@@ -73,7 +76,7 @@ describe("parseDiagnosticConfig", () => {
 describe("loadDiagnosticConfig", () => {
     test("returns null when .axctl/config.json is absent", async () => {
         await withTempRoot(async (root) => {
-            const config = await Effect.runPromise(loadDiagnosticConfig(root));
+            const config = await Effect.runPromise(loadDiagnosticConfig(root).pipe(Effect.provide(fsLayer)));
 
             expect(config).toBeNull();
         });
@@ -88,7 +91,7 @@ describe("loadDiagnosticConfig", () => {
                 timeoutMs: 750,
             });
 
-            const config = await Effect.runPromise(loadDiagnosticConfig(root));
+            const config = await Effect.runPromise(loadDiagnosticConfig(root).pipe(Effect.provide(fsLayer)));
 
             expect(config).toEqual({
                 healthUrl: "http://localhost:4319/internal/health",
@@ -125,7 +128,7 @@ describe("normalizeDiagnosticIssue", () => {
 describe("queryLiveDiagnostics", () => {
     test("returns unavailable diagnostics when config is absent", async () => {
         await withTempRoot(async (root) => {
-            const diagnostics = await Effect.runPromise(queryLiveDiagnostics(root));
+            const diagnostics = await Effect.runPromise(queryLiveDiagnostics(root).pipe(Effect.provide(fsLayer)));
 
             expect(diagnostics).toEqual({
                 configured: false,
@@ -144,7 +147,7 @@ describe("queryLiveDiagnostics", () => {
         await withTempRoot(async (root) => {
             await writeRawDiagnosticConfig(root, "{invalid json");
 
-            const diagnostics = await Effect.runPromise(queryLiveDiagnostics(root));
+            const diagnostics = await Effect.runPromise(queryLiveDiagnostics(root).pipe(Effect.provide(fsLayer)));
 
             expect(diagnostics).toEqual({
                 configured: true,
@@ -190,7 +193,7 @@ describe("queryLiveDiagnostics", () => {
                     timeoutMs: 1000,
                 });
 
-                const diagnostics = await Effect.runPromise(queryLiveDiagnostics(root));
+                const diagnostics = await Effect.runPromise(queryLiveDiagnostics(root).pipe(Effect.provide(fsLayer)));
 
                 expect(diagnostics).toEqual({
                     configured: true,
@@ -233,7 +236,7 @@ describe("queryLiveDiagnostics", () => {
                     timeoutMs: 1000,
                 });
 
-                const diagnostics = await Effect.runPromise(queryLiveDiagnostics(root));
+                const diagnostics = await Effect.runPromise(queryLiveDiagnostics(root).pipe(Effect.provide(fsLayer)));
 
                 expect(diagnostics).toEqual({
                     configured: true,

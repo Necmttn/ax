@@ -1,6 +1,6 @@
-import { readdir, stat } from "node:fs/promises";
-import { join } from "node:path";
-import { Effect, Schema } from "effect";
+import { Effect, FileSystem, Option, Path, PlatformError, Schema } from "effect";
+import { orAbsent } from "@ax/lib/shared/fs-error";
+import { classifyNoFollow } from "@ax/lib/shared/fs-classify";
 import { AxConfig } from "@ax/lib/config";
 import { RecordId, SurrealClient } from "@ax/lib/db";
 import { decodeJsonOrNull } from "@ax/lib/decode";
@@ -588,34 +588,55 @@ interface PiFileCandidate {
     path: string;
 }
 
-async function walkJsonlFiles(root: string, cutoffMs: number): Promise<PiFileCandidate[]> {
-    const out: PiFileCandidate[] = [];
-    async function visit(dir: string) {
-        let entries;
-        try {
-            entries = await readdir(dir, { withFileTypes: true });
-        } catch {
-            return;
-        }
-        for (const entry of entries) {
-            const full = join(dir, entry.name);
-            if (entry.isDirectory()) {
-                await visit(full);
-            } else if (entry.isFile() && full.endsWith(".jsonl")) {
-                let st;
-                try {
-                    st = await stat(full);
-                } catch {
-                    continue;
+// OLD: readdir(withFileTypes) in try/catch → `return` (any error skips the
+// dir); classification via `entry.isDirectory()`/`entry.isFile()` (Dirent =>
+// lstat-equivalent, does NOT follow symlinks); then `stat(full)` in try/catch
+// → `continue` (any error skips the entry) ONLY for the mtime of a confirmed
+// regular file. We must preserve the no-follow classification: recurse only on
+// real directories, accept only real `.jsonl` files, and SKIP symlinks (a
+// symlinked dir is not recursed into → no escaping the tree / no cycle hang;
+// a symlinked `.jsonl` is not ingested). The mtime `fs.stat` then runs on a
+// confirmed non-symlink regular file, matching the old follow-free behavior.
+// `orAbsent` recovers every PlatformError to a fallback, matching the old
+// blanket try/catch and clearing the E channel back to `never`.
+const walkJsonlFiles = (
+    root: string,
+    cutoffMs: number,
+): Effect.Effect<PiFileCandidate[], never, FileSystem.FileSystem | Path.Path> =>
+    Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const out: PiFileCandidate[] = [];
+
+        const visit = (
+            dir: string,
+        ): Effect.Effect<void, never, FileSystem.FileSystem | Path.Path> =>
+            Effect.gen(function* () {
+                const entries = yield* fs.readDirectory(dir).pipe(orAbsent([] as string[]));
+                for (const entry of entries) {
+                    const full = path.join(dir, entry);
+                    const kind = yield* classifyNoFollow(full);
+                    if (kind === "Directory") {
+                        yield* visit(full);
+                    } else if (kind === "File" && full.endsWith(".jsonl")) {
+                        const mtimeMs = yield* fs.stat(full).pipe(
+                            Effect.map((st) =>
+                                Option.getOrElse(st.mtime, () => new Date(0)).getTime()
+                            ),
+                            orAbsent(-1),
+                        );
+                        if (mtimeMs < 0) continue;
+                        if (cutoffMs > 0 && mtimeMs < cutoffMs) continue;
+                        out.push({ path: full });
+                    }
                 }
-                if (cutoffMs > 0 && st.mtimeMs < cutoffMs) continue;
-                out.push({ path: full });
-            }
-        }
-    }
-    await visit(root);
-    return out;
-}
+            });
+
+        yield* visit(root);
+        return out;
+    });
+
+export const __testWalkJsonlFiles = walkJsonlFiles;
 
 const buildTurnStatements = (turns: readonly PiTurn[]): string[] =>
     turns.map((turn) => {
@@ -741,12 +762,13 @@ interface PiIngestOpts {
 
 export const ingestPi = (
     opts: Partial<PiIngestOpts> = {},
-): Effect.Effect<PiStats, DbError, SurrealClient | AxConfig> =>
+): Effect.Effect<PiStats, DbError | PlatformError.PlatformError, SurrealClient | AxConfig | FileSystem.FileSystem | Path.Path> =>
     Effect.gen(function* () {
         const cfg = yield* AxConfig;
         const db = yield* SurrealClient;
+        const fs = yield* FileSystem.FileSystem;
         const cutoff = opts.sinceDays ? Date.now() - opts.sinceDays * 86400 * 1000 : 0;
-        const files = yield* Effect.promise(() => walkJsonlFiles(cfg.paths.piDir, cutoff));
+        const files = yield* walkJsonlFiles(cfg.paths.piDir, cutoff);
         let fileCount = 0;
         let sessionCount = 0;
         let eventCount = 0;
@@ -757,7 +779,11 @@ export const ingestPi = (
 
         for (const file of files) {
             fileCount += 1;
-            const text = yield* Effect.promise(() => Bun.file(file.path).text());
+            // OLD: `Bun.file(path).text()` under `Effect.promise` - a read
+            // rejection became an unrecoverable defect. `readFileString`
+            // surfaces a typed PlatformError that the stage boundary dies on,
+            // preserving "no tolerance for a read fault here".
+            const text = yield* fs.readFileString(file.path);
             const extractor = createPiExtractor(file.path);
             for (const line of text.split(/\r?\n/)) {
                 extractor.processLine(line);
@@ -808,13 +834,19 @@ export class PiStageStats extends BaseStageStats.extend<PiStageStats>("PiStageSt
     warnings: Schema.Number,
 }) {}
 
-export const piStage: StageDef<PiStageStats, SurrealClient | AxConfig> = {
+export const piStage: StageDef<PiStageStats, SurrealClient | AxConfig | FileSystem.FileSystem | Path.Path> = {
     meta: StageMeta.make({ key: "pi", deps: ["skills", "commands"], tags: ["ingest"] }),
     run: (ctx: IngestContext) =>
         Effect.gen(function* () {
             const t0 = Date.now();
             const sinceDays = sinceDaysFromCtx(ctx);
-            const result = yield* ingestPi({ sinceDays });
+            // The directory walk recovers every PlatformError internally; the
+            // only PlatformError that can escape `ingestPi` is a per-file
+            // `readFileString` fault, which (like claude/codex) dies as a defect
+            // rather than masquerading as a recoverable DbError.
+            const result = yield* ingestPi({ sinceDays }).pipe(
+                Effect.catchTag("PlatformError", (e) => Effect.die(e)),
+            );
             return PiStageStats.make({
                 durationMs: Date.now() - t0,
                 summary: `ingested ${result.files} files, ${result.sessions} sessions, ${result.events} events, ${result.turns} turns, ${result.toolCalls} tool calls, skipped ${result.skipped}, warnings ${result.warnings}`,

@@ -5,11 +5,11 @@
  * stage's responsibility. This is purely a "given a directory, what repository
  * record does it correspond to?" resolver.
  */
-import { realpath } from "node:fs/promises";
-import { Effect, Schema } from "effect";
+import { Effect, FileSystem, Schema } from "effect";
 import { RecordId } from "surrealdb";
 import { SurrealClient } from "@ax/lib/db";
 import type { DbError } from "@ax/lib/errors";
+import { orAbsent } from "@ax/lib/shared/fs-error";
 import { ProcessService, type ProcessError } from "@ax/lib/process";
 import {
     chooseIdentity,
@@ -64,15 +64,18 @@ export const resolvePwdRepository = (
 ): Effect.Effect<
     PwdResolution,
     NotAGitRepoError | DbError | ProcessError,
-    SurrealClient | ProcessService
+    SurrealClient | ProcessService | FileSystem.FileSystem
 > =>
     Effect.gen(function* () {
         const proc = yield* ProcessService;
+        const fs = yield* FileSystem.FileSystem;
 
         // Step 1: resolve symlinks so the path is canonical.
         const rawCwd = cwd ?? process.cwd();
-        // fall back to raw path if symlink resolution fails; git will validate existence next
-        const resolvedCwd = yield* Effect.promise(() => realpath(rawCwd).catch(() => rawCwd));
+        // OLD: realpath(rawCwd).catch(() => rawCwd) - fall back to the raw path
+        // if symlink resolution fails for ANY reason (git validates existence
+        // next), so recover ANY PlatformError to rawCwd - orAbsent.
+        const resolvedCwd = yield* fs.realPath(rawCwd).pipe(orAbsent(rawCwd));
 
         // Step 2: git rev-parse --show-toplevel
         const toplevelResult = yield* proc.exec("git", ["rev-parse", "--show-toplevel"], {

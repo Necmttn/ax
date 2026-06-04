@@ -1,6 +1,9 @@
 import { describe, expect, test } from "bun:test";
+import { Effect, Layer } from "effect";
+import { BunFileSystem } from "@effect/platform-bun";
 import {
     CLASSIFIER_PACKAGE_SCHEMA,
+    type ClassifierPackageManifest,
     findClassifierPackageOperation,
     isClassifierPackageManifest,
     listClassifierPackageOperations,
@@ -8,17 +11,22 @@ import {
     requireClassifierPackageOperation,
 } from "./package-manifest.ts";
 
+const BunFsLayer = Layer.mergeAll(BunFileSystem.layer);
+
+const loadManifest = (path: string): Promise<ClassifierPackageManifest> =>
+    Effect.runPromise(loadClassifierPackageManifest(path).pipe(Effect.provide(BunFsLayer)));
+
 describe("classifier package manifest", () => {
-    test("loads the example manifest", () => {
-        const manifest = loadClassifierPackageManifest("packages/ax-classifier-verification-event/ax.classifier.json");
+    test("loads the example manifest", async () => {
+        const manifest = await loadManifest("packages/ax-classifier-verification-event/ax.classifier.json");
 
         expect(manifest.schema).toBe(CLASSIFIER_PACKAGE_SCHEMA);
         expect(manifest.key).toBe("verification-event");
         expect(manifest.labels).toContain("verification_request");
     });
 
-    test("loads the direction-event package manifest", () => {
-        const manifest = loadClassifierPackageManifest("packages/ax-classifier-direction-event/ax.classifier.json");
+    test("loads the direction-event package manifest", async () => {
+        const manifest = await loadManifest("packages/ax-classifier-direction-event/ax.classifier.json");
 
         expect(manifest.schema).toBe(CLASSIFIER_PACKAGE_SCHEMA);
         expect(manifest.key).toBe("direction-event");
@@ -26,8 +34,8 @@ describe("classifier package manifest", () => {
         expect(manifest.targets).toContain("tooling_preference");
     });
 
-    test("loads the session-sections local model package manifest", () => {
-        const manifest = loadClassifierPackageManifest("packages/ax-classifier-session-sections/ax.classifier.json");
+    test("loads the session-sections local model package manifest", async () => {
+        const manifest = await loadManifest("packages/ax-classifier-session-sections/ax.classifier.json");
 
         expect(manifest.schema).toBe(CLASSIFIER_PACKAGE_SCHEMA);
         expect(manifest.key).toBe("session-section-chunks");
@@ -81,8 +89,8 @@ describe("classifier package manifest", () => {
         expect(manifest.operations?.find((operation) => operation.id === "workflow-fixture-quality-conclusion")?.command).toContain("classifiers:workflow-quality-conclusion");
     });
 
-    test("lists and resolves classifier package operations", () => {
-        const manifest = loadClassifierPackageManifest("packages/ax-classifier-session-sections/ax.classifier.json");
+    test("lists and resolves classifier package operations", async () => {
+        const manifest = await loadManifest("packages/ax-classifier-session-sections/ax.classifier.json");
 
         const operations = listClassifierPackageOperations(manifest);
         const refresh = findClassifierPackageOperation(manifest, "blind-review-refresh");
@@ -166,8 +174,8 @@ describe("classifier package manifest", () => {
         expect(workflowQualityConclusion.outputs).toContain(".ax/experiments/workflow-classifier-quality-conclusion-current.json");
     });
 
-    test("requires classifier package operation by id", () => {
-        const manifest = loadClassifierPackageManifest("packages/ax-classifier-verification-event/ax.classifier.json");
+    test("requires classifier package operation by id", async () => {
+        const manifest = await loadManifest("packages/ax-classifier-verification-event/ax.classifier.json");
 
         expect(listClassifierPackageOperations(manifest)).toEqual([]);
         expect(findClassifierPackageOperation(manifest, "missing")).toBeUndefined();

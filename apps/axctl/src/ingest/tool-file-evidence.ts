@@ -1,4 +1,4 @@
-import { isAbsolute, resolve } from "node:path";
+import { posixPath } from "@ax/lib/shared/path";
 import type { ToolCallWrite } from "./evidence-writers.ts";
 import { toolCallRecordKey } from "./record-keys.ts";
 
@@ -66,8 +66,8 @@ function arrayStringField(input: Record<string, unknown>, field: string): readon
 }
 
 function normalizeEvidencePath(path: string, cwd?: string | null): string {
-    if (isAbsolute(path) || !cwd) return path;
-    return resolve(cwd, path);
+    if (posixPath.isAbsolute(path) || !cwd) return path;
+    return posixPath.resolve(cwd, path);
 }
 
 function unique(values: Iterable<string>): string[] {

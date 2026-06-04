@@ -1,10 +1,13 @@
 import { describe, expect, test } from "bun:test";
-import { Effect, Layer } from "effect";
+import { Effect, FileSystem, Layer, Path } from "effect";
+import { BunFileSystem, BunPath } from "@effect/platform-bun";
 import { mkdtemp, mkdir, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { detectStaleness } from "./transcript-staleness.ts";
 import { SurrealClient, type SurrealClientShape } from "./db.ts";
+
+const FsLayer = Layer.merge(BunFileSystem.layer, BunPath.layer);
 
 type Capture = { sql: string; bindings: Record<string, unknown> | undefined };
 
@@ -26,8 +29,10 @@ const makeMockDb = (
     return { layer: Layer.succeed(SurrealClient, impl), captured };
 };
 
-const run = <A>(eff: Effect.Effect<A, unknown, SurrealClient>, layer: Layer.Layer<SurrealClient>) =>
-    Effect.runPromise(eff.pipe(Effect.provide(layer)));
+const run = <A>(
+    eff: Effect.Effect<A, unknown, SurrealClient | FileSystem.FileSystem | Path.Path>,
+    layer: Layer.Layer<SurrealClient>,
+) => Effect.runPromise(eff.pipe(Effect.provide(Layer.merge(layer, FsLayer))));
 
 describe("detectStaleness", () => {
     test("returns empty newFiles when project dir does not exist", async () => {
