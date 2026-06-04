@@ -663,3 +663,28 @@ describe("Pi JSONL directory walk (no-follow symlink semantics)", () => {
         expect(found).toEqual([join(sub, "ok.jsonl")]);
     });
 });
+
+describe("pi compaction", () => {
+    test("type:compaction produces a compaction row (no duplicate provider event)", () => {
+        const extracted = __testExtractPiJsonlLines([
+            JSON.stringify({ type: "session", id: "pi-1", timestamp: 1748498738132, cwd: "/tmp" }),
+            JSON.stringify({ type: "compaction", id: "c1", parentId: "p0", timestamp: 1748498800000, summary: "Goal: ship X", firstKeptEntryId: "entry-7", tokensBefore: 90000, fromHook: false, details: { readFiles: ["a.ts"], modifiedFiles: [] } }),
+        ]);
+        expect(extracted).not.toBeNull();
+        expect(extracted!.compactions.length).toBe(1);
+        const c = extracted!.compactions[0];
+        expect(c.strategy).toBe("summarize");
+        expect(c.summary).toBe("Goal: ship X");
+        expect(c.boundaryRef).toBe("entry-7");
+        expect(c.tokensBefore).toBe(90000);
+        expect(extracted!.providerEvents.filter((e) => e.type === "compaction").length).toBe(1);
+
+        const eventKey = agentEventRecordKey({
+            provider: "pi",
+            providerSessionId: "pi-1",
+            providerEventId: "c1",
+            seq: 1,
+        });
+        expect(c.agentEventKey).toBe(eventKey);
+    });
+});
