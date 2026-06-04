@@ -7397,83 +7397,130 @@ footer .right {
   max-width: 46ch;
 }
 
-.landing-v2 .install {
-  display: inline-flex;
+/* hero CTA: primary "copy setup prompt" pill (harness icons) + docs link.
+   The icon row replaces the old "works with the agents you already use" text. */
+.landing-v2 .cta-row {
+  display: flex;
+  flex-wrap: wrap;
   align-items: stretch;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: var(--panel);
-  overflow: hidden;
-  font-family: var(--mono);
-  font-size: 13px;
+  justify-content: center;
+  gap: 12px;
   max-width: 100%;
-  cursor: pointer;
-  transition:
-    border-color 0.18s ease,
-    background-color 0.18s ease,
-    transform 0.08s ease;
-  outline: none;
 }
-.landing-v2 .install:hover,
-.landing-v2 .install:focus-visible { border-color: var(--ink); }
-.landing-v2 .install:active { transform: scale(0.997); }
-.landing-v2 .install.is-copied { border-color: var(--green); }
 
-.landing-v2 .install .prompt {
-  color: var(--muted);
-  padding: 12px 4px 12px 14px;
-  user-select: none;
-  transition: color 0.18s ease;
-}
-.landing-v2 .install:hover .prompt,
-.landing-v2 .install:focus-visible .prompt { color: var(--ink); }
-.landing-v2 .install code {
-  color: var(--ink);
-  padding: 12px 16px 12px 6px;
-  white-space: nowrap;
-  overflow-x: auto;
-  scrollbar-width: none;
-  user-select: all;
-}
-.landing-v2 .install code::-webkit-scrollbar { display: none; }
-
-/* Fixed-width action cell - width never changes between copy/copied.
-   Uses ::before reservation trick: the longer label sits invisibly,
-   the visible label is layered on top via grid. No layout shift. */
-.landing-v2 .install .install-action {
-  border-left: 1px solid var(--line);
-  padding: 12px 14px;
-  font-family: var(--mono);
-  font-size: 11px;
-  text-transform: uppercase;
-  letter-spacing: 0.12em;
-  color: var(--muted);
-  user-select: none;
-  display: grid;
+.landing-v2 .prompt-pill {
+  display: inline-flex;
   align-items: center;
-  justify-items: center;
+  gap: 12px;
+  padding: 12px 22px 12px 18px;
+  border: 1px solid var(--ink);
+  border-radius: 999px;
+  background: var(--ink);
+  color: var(--page);
+  font-family: var(--sans);
+  cursor: pointer;
+  outline: none;
+  transition:
+    background-color 0.18s ease,
+    border-color 0.18s ease,
+    transform 0.08s ease;
+}
+.landing-v2 .prompt-pill:hover,
+.landing-v2 .prompt-pill:focus-visible { background: #000; }
+.landing-v2 .prompt-pill:active { transform: scale(0.99); }
+.landing-v2 .prompt-pill__icons {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.landing-v2 .prompt-pill__icon {
+  display: inline-flex;
+  width: 16px;
+  height: 16px;
+  color: var(--page);
+  /* gentle staggered idle drift; speeds up on hover for a live wiggle */
+  animation: axIconDrift 3s ease-in-out infinite;
+  animation-delay: calc(var(--i, 0) * 0.18s);
+  will-change: transform;
+}
+.landing-v2 .prompt-pill__icon svg { width: 100%; height: 100%; display: block; }
+.landing-v2 .prompt-pill__icon--claude { --i: 0; }
+.landing-v2 .prompt-pill__icon--codex { --i: 1; }
+.landing-v2 .prompt-pill__icon--pi { --i: 2; }
+.landing-v2 .prompt-pill__icon--opencode { --i: 3; }
+.landing-v2 .prompt-pill__icon--cursor { --i: 4; }
+.landing-v2 .prompt-pill:hover .prompt-pill__icon,
+.landing-v2 .prompt-pill:focus-visible .prompt-pill__icon {
+  animation-duration: 1.05s;
+}
+@keyframes axIconDrift {
+  0%, 100% { transform: translateY(0) rotate(0deg); }
+  30% { transform: translateY(-1.5px) rotate(-7deg); }
+  60% { transform: translateY(0.5px) rotate(5deg); }
+}
+.landing-v2 .prompt-pill__label {
+  font-size: 14px;
+  font-weight: 550;
+  letter-spacing: 0.01em;
   white-space: nowrap;
-  transition: color 0.18s ease, border-color 0.18s ease;
 }
-.landing-v2 .install .install-action::before {
-  content: "copied";
-  visibility: hidden;
+
+.landing-v2 .cta-secondary {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 20px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--panel);
+  color: var(--ink);
+  font-family: var(--sans);
+  font-size: 14px;
+  text-decoration: none;
+  outline: none;
+  transition: border-color 0.18s ease, transform 0.08s ease;
+}
+.landing-v2 .cta-secondary:hover,
+.landing-v2 .cta-secondary:focus-visible { border-color: var(--ink); }
+.landing-v2 .cta-secondary:active { transform: scale(0.99); }
+.landing-v2 .cta-secondary__icon {
+  display: inline-flex;
+  width: 16px;
+  height: 16px;
+  color: var(--muted);
+}
+.landing-v2 .cta-secondary__icon svg { width: 100%; height: 100%; display: block; }
+
+/* foot under the CTA: hover reveals a prompt teaser, click shows copied.
+   Both states share one grid cell so the row never shifts height. */
+.landing-v2 .cta-foot {
+  display: grid;
+  margin: 4px auto 0;
+  min-height: 1.3em;
+  max-width: 100%;
+  font-family: var(--mono);
+  font-size: 12px;
+  letter-spacing: 0.01em;
+  text-align: center;
+}
+.landing-v2 .cta-foot__hint,
+.landing-v2 .cta-foot__copied {
   grid-area: 1 / 1;
+  opacity: 0;
   pointer-events: none;
+  transition: opacity 0.18s ease;
 }
-.landing-v2 .install .install-action__label { grid-area: 1 / 1; }
-.landing-v2 .install:hover .install-action,
-.landing-v2 .install:focus-visible .install-action { color: var(--ink); }
-.landing-v2 .install.is-copied .install-action {
-  color: var(--green);
-  border-left-color: var(--green);
-}
+.landing-v2 .cta-foot__hint { color: var(--soft); }
+.landing-v2 .cta-foot__copied { color: var(--blue); }
+.landing-v2 .cta-foot.is-hover:not(.is-copied) .cta-foot__hint { opacity: 1; }
+.landing-v2 .cta-foot.is-copied .cta-foot__copied { opacity: 1; }
 
 @media (prefers-reduced-motion: reduce) {
-  .landing-v2 .install,
-  .landing-v2 .install .install-action,
-  .landing-v2 .install .prompt { transition: none; }
-  .landing-v2 .install:active { transform: none; }
+  .landing-v2 .prompt-pill,
+  .landing-v2 .cta-secondary { transition: none; }
+  .landing-v2 .prompt-pill:active,
+  .landing-v2 .cta-secondary:active { transform: none; }
+  .landing-v2 .prompt-pill__icon { animation: none; }
 }
 
 .landing-v2 .meta {
@@ -7501,51 +7548,6 @@ footer .right {
   letter-spacing: 0.16em;
   color: var(--muted);
 }
-.landing-v2 .install-trust {
-  margin: 2px auto 0;
-  font-family: var(--mono);
-  font-size: 11px;
-  letter-spacing: 0.02em;
-  color: var(--soft);
-}
-.landing-v2 .install-trust .sep {
-  opacity: 0.5;
-  margin: 0 6px;
-}
-
-/* "copy agent instructions" - the effect.solutions-style agent handoff. */
-.landing-v2 .agent-instructions {
-  display: inline-flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 3px;
-  margin: 16px auto 0;
-  padding: 10px 18px;
-  border: 1px dashed var(--line);
-  border-radius: 8px;
-  background: transparent;
-  cursor: pointer;
-  outline: none;
-  transition: border-color 0.18s ease, transform 0.08s ease;
-}
-.landing-v2 .agent-instructions:hover,
-.landing-v2 .agent-instructions:focus-visible { border-color: var(--ink); }
-.landing-v2 .agent-instructions:active { transform: scale(0.997); }
-.landing-v2 .agent-instructions.is-copied { border-color: var(--green); border-style: solid; }
-.landing-v2 .agent-instructions__label {
-  font-family: var(--mono);
-  font-size: 13px;
-  color: var(--ink);
-  letter-spacing: 0.01em;
-}
-.landing-v2 .agent-instructions.is-copied .agent-instructions__label { color: var(--green); }
-.landing-v2 .agent-instructions__hint {
-  font-family: var(--mono);
-  font-size: 11px;
-  color: var(--soft);
-  letter-spacing: 0.02em;
-}
-
 /* ---------- demo: dashboard preview ---------- */
 .landing-v2 section.demo {
   padding: 72px 0 88px;
