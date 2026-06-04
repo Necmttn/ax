@@ -6610,8 +6610,9 @@ footer .right {
   transition: border-color 0.18s ease, transform 0.18s ease;
 }
 .features-page .stage-card:hover {
-  border-color: var(--ink);
+  border-color: rgba(10, 10, 10, 0.16);
   transform: translateY(-2px);
+  box-shadow: 0 10px 30px -20px rgba(10, 10, 10, 0.3);
 }
 .features-page .stage-card.new {
   border-color: var(--ink);
@@ -7022,8 +7023,9 @@ footer .right {
 }
 .features-page .card:hover {
   transform: translateY(-2px);
-  border-color: var(--ink);
+  border-color: rgba(10, 10, 10, 0.16);
   background: #fff;
+  box-shadow: 0 10px 30px -20px rgba(10, 10, 10, 0.3);
 }
 .features-page .card .card-title {
   font-family: var(--serif);
@@ -8614,23 +8616,11 @@ footer .right {
   overflow: hidden;
   transition: transform 0.18s ease, border-color 0.18s ease, background 0.18s ease, box-shadow 0.18s ease;
 }
-.landing-v2 .oss-proof-card::before {
-  content: "";
-  position: absolute;
-  inset: 0 auto 0 0;
-  width: 2px;
-  background: var(--accent, var(--ink));
-  opacity: 0;
-  transition: opacity 0.18s ease;
-}
 .landing-v2 .oss-proof-card:hover {
   transform: translateY(-2px);
-  border-color: var(--accent, var(--ink));
+  border-color: rgba(10, 10, 10, 0.16);
   background: #fff;
-  box-shadow: 0 8px 24px -16px rgba(10, 10, 10, 0.35);
-}
-.landing-v2 .oss-proof-card:hover::before {
-  opacity: 0.85;
+  box-shadow: 0 10px 30px -20px rgba(10, 10, 10, 0.3);
 }
 .landing-v2 .oss-proof-card.accent-ink { --accent: var(--ink); }
 .landing-v2 .oss-proof-card.accent-blue { --accent: var(--blue); }
@@ -8766,8 +8756,9 @@ footer .right {
 }
 .landing-v2 .card:hover {
   transform: translateY(-2px);
-  border-color: var(--ink);
+  border-color: rgba(10, 10, 10, 0.16);
   background: #fff;
+  box-shadow: 0 10px 30px -20px rgba(10, 10, 10, 0.3);
 }
 .landing-v2 .card .num {
   font-family: var(--mono);
