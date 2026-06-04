@@ -1,4 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
+import { SiteHeader } from "~/components/landing-sections/site-header";
+import { SiteFooter } from "~/components/landing-sections/site-footer";
 import { ChapterHero } from "~/components/origin-sections/chapter-hero";
 import { Chapter1Tab } from "~/components/origin-sections/chapter-1-tab";
 import { ChapterExhibitA } from "~/components/origin-sections/chapter-exhibit-a";
@@ -30,7 +32,9 @@ export const Route = createFileRoute("/origin")({
 
 function Origin() {
   return (
-    <main className="essay">
+    <>
+      <SiteHeader />
+      <main className="essay">
       <ChapterHero />
       <Chapter1Tab />
       <ChapterExhibitA />
@@ -51,6 +55,8 @@ function Origin() {
       <Chapter7CodingFirst />
       <Chapter8WhatAxIs />
       <ChapterCta />
-    </main>
+      </main>
+      <SiteFooter />
+    </>
   );
 }

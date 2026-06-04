@@ -1,7 +1,15 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { allAdrs, allPages } from "content-collections";
+import { SiteHeader } from "~/components/landing-sections/site-header";
+import { SiteFooter } from "~/components/landing-sections/site-footer";
 
 export const Route = createFileRoute("/docs/")({
+  head: () => ({
+    meta: [
+      { title: "Docs - ax" },
+      { name: "description", content: "Reference, guides, and architecture decision records for ax." },
+    ],
+  }),
   loader: () => ({
     adrs: [...allAdrs].sort((a, b) => a.slug.localeCompare(b.slug)),
     pageCount: allPages.length,
@@ -9,35 +17,92 @@ export const Route = createFileRoute("/docs/")({
   component: DocsIndex,
 });
 
+const REFERENCE = [
+  {
+    to: "/how-it-works" as const,
+    kicker: "guide",
+    title: "How ax sees your work",
+    blurb: "From raw transcripts to a typed graph - the ingest pipeline, stage by stage.",
+  },
+  {
+    to: "/docs/language" as const,
+    kicker: "reference",
+    title: "Language",
+    blurb: "The shared vocabulary - sessions, turns, roles, verdicts, and how they connect.",
+  },
+  {
+    to: "/docs/cli-reference" as const,
+    kicker: "reference",
+    title: "CLI reference",
+    blurb: "Every ax command, flag, and scoped query you can run from the terminal.",
+  },
+  {
+    to: "/changelog" as const,
+    kicker: "releases",
+    title: "Changelog",
+    blurb: "Release announcements in product language, plus the generated commit log.",
+  },
+  {
+    to: "/manifesto" as const,
+    kicker: "position paper",
+    title: "Manifesto",
+    blurb: "Why the agent experience layer needs to exist at all.",
+  },
+  {
+    to: "/brand" as const,
+    kicker: "brand",
+    title: "Brand",
+    blurb: "Voice, wordmark, and palette for anyone referencing ax.",
+  },
+];
+
 function DocsIndex() {
   const { adrs } = Route.useLoaderData();
   return (
-    <main className="max-w-3xl mx-auto p-8">
-      <h1 className="text-3xl font-semibold mb-8">Docs</h1>
+    <>
+      <SiteHeader />
+      <main className="docs-page">
+        <header className="docs-hero">
+          <p className="eyebrow">documentation</p>
+          <h1>
+            Everything ax <em>knows how to tell you</em>.
+          </h1>
+          <p className="lede">
+            Reference for the CLI and the graph language, the guides behind the
+            pipeline, and the architecture decisions that got us here.
+          </p>
+        </header>
 
-      <section className="mb-12">
-        <h2 className="text-xl font-semibold mb-4">Reference</h2>
-        <ul className="space-y-2">
-          <li><Link to="/docs/language" className="underline">Language</Link></li>
-          <li><Link to="/docs/cli-reference" className="underline">CLI reference</Link></li>
-          <li><Link to="/changelog" className="underline">Changelog</Link></li>
-          <li><Link to="/manifesto" className="underline">Manifesto</Link></li>
-          <li><Link to="/brand" className="underline">Brand</Link></li>
-        </ul>
-      </section>
-
-      <section>
-        <h2 className="text-xl font-semibold mb-4">Architecture Decision Records</h2>
-        <ul className="space-y-2">
-          {adrs.map((adr) => (
-            <li key={adr.slug}>
-              <Link to="/docs/adr/$slug" params={{ slug: adr.slug }} className="underline">
-                {adr.title}
+        <section className="docs-section">
+          <div className="section-kicker">reference &amp; guides</div>
+          <div className="docs-grid">
+            {REFERENCE.map((item) => (
+              <Link key={item.to} to={item.to} className="docs-card">
+                <span className="docs-card-kicker">{item.kicker}</span>
+                <span className="docs-card-title">{item.title}</span>
+                <span className="docs-card-blurb">{item.blurb}</span>
+                <span className="docs-card-arrow" aria-hidden="true">→</span>
               </Link>
-            </li>
-          ))}
-        </ul>
-      </section>
-    </main>
+            ))}
+          </div>
+        </section>
+
+        <section className="docs-section">
+          <div className="section-kicker">architecture decision records</div>
+          <ul className="docs-adr-list">
+            {adrs.map((adr) => (
+              <li key={adr.slug}>
+                <Link to="/docs/adr/$slug" params={{ slug: adr.slug }}>
+                  <span className="adr-slug">{adr.slug.replace(/^(\d+)-.*/, "ADR $1")}</span>
+                  <span className="adr-title">{adr.title}</span>
+                  <span className="adr-arrow" aria-hidden="true">→</span>
+                </Link>
+              </li>
+            ))}
+          </ul>
+        </section>
+      </main>
+      <SiteFooter />
+    </>
   );
 }

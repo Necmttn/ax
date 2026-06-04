@@ -1,8 +1,17 @@
+import { readFileSync } from "node:fs";
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import { tanstackStart } from "@tanstack/react-start/plugin/vite";
 import tailwindcss from "@tailwindcss/vite";
 import contentCollections from "@content-collections/vite";
+
+// Single source of truth for the version badge: the root package.json that
+// Release Please bumps. Read at config time (Node context) and injected as a
+// compile-time constant so the header badge stays in sync with releases
+// without a runtime fetch.
+const AX_VERSION = JSON.parse(
+  readFileSync(new URL("../../package.json", import.meta.url), "utf8"),
+).version as string;
 
 // Static-first prerender + SPA fallback. Pure static deploy target - no
 // Cloudflare Worker, no SSR per request, no Worker bundle size limit. Deploy
@@ -23,6 +32,9 @@ import contentCollections from "@content-collections/vite";
 // _redirects + public/install are honored at the Pages edge natively, so the
 // install one-liner resolves without a Worker.
 export default defineConfig({
+  define: {
+    __AX_VERSION__: JSON.stringify(AX_VERSION),
+  },
   plugins: [
     contentCollections(),
     tanstackStart({
