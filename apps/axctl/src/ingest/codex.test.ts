@@ -1039,7 +1039,7 @@ describe("codex compaction", () => {
     test("type:compacted produces a compaction row + provider event", () => {
         const extracted = __testExtractCodexJsonlLines([
             JSON.stringify({ type: "session_meta", timestamp: "2026-05-14T15:00:00.000Z", payload: { id: "cdx-1", timestamp: "2026-05-14T15:00:00.000Z", cwd: "/tmp", originator: "test" } }),
-            JSON.stringify({ type: "event_msg", timestamp: "2026-05-14T15:30:00.000Z", payload: { type: "token_count", info: { total_token_usage: { input_tokens: 100, output_tokens: 20, total_tokens: 120000 }, model_context_window: 200000 } } }),
+            JSON.stringify({ type: "event_msg", timestamp: "2026-05-14T15:30:00.000Z", payload: { type: "token_count", info: { total_token_usage: { input_tokens: 100, output_tokens: 20, total_tokens: 120000 }, last_token_usage: { input_tokens: 120000, output_tokens: 20, total_tokens: 120020 }, model_context_window: 200000 } } }),
             JSON.stringify({ type: "compacted", timestamp: "2026-05-14T15:34:42.663Z", payload: { message: "", replacement_history: [{ type: "message" }, { type: "message" }] } }),
         ]);
         expect(extracted).not.toBeNull();

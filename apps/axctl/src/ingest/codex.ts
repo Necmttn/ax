@@ -913,7 +913,7 @@ function createCodexExtractor(
                     if (turnUsage) turnTokenUsages.push(turnUsage);
                     previousTotalTokenUsage = nextUsage.totalTokenUsage;
                     tokenUsage = nextUsage;
-                    lastContextTokens = nextUsage.estimatedTokens ?? lastContextTokens;
+                    lastContextTokens = (nextUsage.lastTokenUsage ? numberField(nextUsage.lastTokenUsage, "input_tokens") : null) ?? lastContextTokens;
                 }
                 return;
             }
