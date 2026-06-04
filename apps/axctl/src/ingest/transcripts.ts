@@ -7,6 +7,7 @@ import { resolveSkillName, skillRecordKey } from "@ax/lib/skill-id";
 import { AppLayer } from "@ax/lib/layers";
 import type { DbError } from "@ax/lib/errors";
 import { BaseStageStats, IngestContext, sinceDaysFromCtx, StageMeta } from "./stage/types.ts";
+import { annotateStageProgress } from "./stage/runner.ts";
 import type { StageDef } from "./stage/registry.ts";
 import {
     buildPlanSnapshotStatements,
@@ -1571,7 +1572,7 @@ export const claudeStage: StageDef<ClaudeStats, SurrealClient | AxConfig | FileS
             // genuine FS failure (e.g. an unreadable transcripts root or a
             // non-NotFound stat/stream error) so it dies as a defect rather
             // than masquerading as a recoverable DbError.
-            const result = yield* ingestTranscripts({ sinceDays, project: ctx.claudeProject }).pipe(
+            const result = yield* ingestTranscripts({ sinceDays, project: ctx.claudeProject, onProgress: annotateStageProgress }).pipe(
                 Effect.catchTag("PlatformError", (e) => Effect.die(e)),
             );
             return ClaudeStats.make({

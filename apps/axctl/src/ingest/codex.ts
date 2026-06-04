@@ -7,6 +7,7 @@ import { recordRef, surrealDate, surrealJsonOption, surrealObject, surrealOption
 import { AppLayer } from "@ax/lib/layers";
 import type { DbError } from "@ax/lib/errors";
 import { BaseStageStats, IngestContext, sinceDaysFromCtx, StageMeta } from "./stage/types.ts";
+import { annotateStageProgress } from "./stage/runner.ts";
 import type { StageDef } from "./stage/registry.ts";
 import {
     buildPlanSnapshotStatements,
@@ -1733,7 +1734,7 @@ export const codexStage: StageDef<CodexStageStats, SurrealClient | AxConfig | Fi
             // unreadable sessions root or a non-NotFound stat/stream error), so
             // it dies as a defect rather than masquerading as a recoverable
             // DbError - mirroring `claudeStage`.
-            const result = yield* ingestCodex({ sinceDays }).pipe(
+            const result = yield* ingestCodex({ sinceDays, onProgress: annotateStageProgress }).pipe(
                 Effect.catchTag("PlatformError", (e) => Effect.die(e)),
             );
             return CodexStageStats.make({

@@ -27,6 +27,31 @@ const annotateStageCounts = (stats: BaseStageStats): Effect.Effect<void> =>
         }
     });
 
+/**
+ * Bridge a stage's mid-run progress counts onto the active stage span as live
+ * `ingest.count.<field>` annotations. Each annotation is emitted as an
+ * `attribute:ingest.*` SpanEvent immediately (see `WrappedSpan.attribute`), so
+ * the progress transports' rows/speed/bar climb *while* the stage runs instead
+ * of snapping to a final count only on `SpanEnd`.
+ *
+ * Pass this as a stage's `onProgress` hook. It must run inside the stage's
+ * `LiveTrace.step` span (i.e. from within `StageDef.run`) so `annotateCurrentSpan`
+ * targets the stage span. Keys like `currentFile`/`totalFiles` drive the
+ * determinate bar; `records`/`sessions`/`turns`/… drive the rows column. No-op
+ * for non-finite values. Mirrors {@link annotateStageCounts}' key scheme so the
+ * mid-run and final counts share one parsing path in the transports.
+ */
+export const annotateStageProgress = (
+    counts: Record<string, number>,
+): Effect.Effect<void> =>
+    Effect.gen(function* () {
+        for (const [key, value] of Object.entries(counts)) {
+            if (typeof value === "number" && Number.isFinite(value)) {
+                yield* Effect.annotateCurrentSpan(`ingest.count.${key}`, value);
+            }
+        }
+    });
+
 /** Kahn's algorithm; throws on cycle. Layers are useful for diagnostics, but
  *  `runPipeline` uses Deferreds for tighter scheduling (no layer barriers). */
 export const topoLayers = <S extends BaseStageStats, R>(
