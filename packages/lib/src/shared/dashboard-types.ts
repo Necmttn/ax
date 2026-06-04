@@ -333,10 +333,23 @@ export interface SessionSkillRoleGroup {
     readonly skills: ReadonlyArray<{ readonly skill: string; readonly count: number }>;
 }
 
+/** One context-compaction boundary recorded for a session. Sourced from the
+ *  `compaction` table; one row per compaction event across all harnesses. */
+export interface SessionCompaction {
+    readonly harness: string;
+    readonly ts: string;
+    readonly strategy: string;
+    readonly trigger: string | null;
+    readonly tokens_before: number | null;
+    readonly kept_count: number | null;
+    readonly summary: string | null;
+}
+
 export interface SessionViewPayload {
     readonly session: SessionDetailPayload;
     readonly expanded_subagents: ReadonlyArray<SessionDetailPayload>;
     readonly by_role: ReadonlyArray<SessionSkillRoleGroup> | null;
+    readonly compactions: ReadonlyArray<SessionCompaction>;
 }
 
 export interface WorkflowEpisode {

@@ -7,6 +7,7 @@ import { Effect } from "effect";
 import { SurrealClient } from "@ax/lib/db";
 import type { DbError } from "@ax/lib/errors";
 import type {
+    SessionCompaction,
     SessionDetailPayload,
     SessionLink,
     SessionSkillRoleGroup,
@@ -18,7 +19,30 @@ import {
     sessionSkillRolesQuery,
     type SessionSkillRoleEdge,
 } from "../queries/session-view.ts";
+import { sessionCompactionsQuery } from "../queries/session-detail.ts";
 import { fetchSessionDetail } from "./session-detail.ts";
+
+// Accepts both real UUIDs and our synthetic prefixed ids. Mirrors the
+// validation in fetchSessionDetail so we can safely inline the record id.
+const SESSION_ID_RE = /^[A-Za-z0-9_-]{6,80}$/;
+
+const sessionRecordRef = (sessionId: string): string | null => {
+    const uuid = sessionId
+        .replace(/^session:⟨/, "")
+        .replace(/⟩$/, "")
+        .replace(/^session:/, "");
+    return SESSION_ID_RE.test(uuid) ? `session:⟨${uuid}⟩` : null;
+};
+
+const fetchSessionCompactions = (
+    sessionId: string,
+): Effect.Effect<ReadonlyArray<SessionCompaction>, never, SurrealClient> =>
+    Effect.gen(function* () {
+        const recordRef = sessionRecordRef(sessionId);
+        if (!recordRef) return [] as ReadonlyArray<SessionCompaction>;
+        const rows = yield* runQuery(sessionCompactionsQuery, { recordRef });
+        return rows.filter((c): c is SessionCompaction => c !== null);
+    });
 
 export type { SessionViewPayload } from "@ax/lib/shared/dashboard-types";
 
@@ -147,13 +171,17 @@ export const fetchSessionView: (
             ? fetchSessionSkillRoleGroups(primary.top_skills)
             : Effect.succeed(null);
 
-    const [expanded, byRole] = yield* Effect.all([expandedEffect, byRoleEffect], {
-        concurrency: 2,
-    });
+    const compactionsEffect = fetchSessionCompactions(opts.sessionId);
+
+    const [expanded, byRole, compactions] = yield* Effect.all(
+        [expandedEffect, byRoleEffect, compactionsEffect],
+        { concurrency: 3 },
+    );
 
     return {
         session: primary,
         expanded_subagents: expanded,
         by_role: byRole,
+        compactions,
     };
 });

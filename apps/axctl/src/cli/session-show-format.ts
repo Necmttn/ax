@@ -110,6 +110,23 @@ function renderTimeline(payload: SessionDetailPayload, prefix = ""): string[] {
 }
 
 /**
+ * Render the `## Compaction` section listing context-compaction boundaries.
+ * Returns "" when there are none, so callers can append unconditionally.
+ */
+function renderCompaction(payload: SessionShowPayload): string[] {
+    const compactions = payload.compactions ?? [];
+    if (compactions.length === 0) return [];
+    const lines: string[] = [`## Compaction (${compactions.length})`, ""];
+    for (const c of compactions) {
+        const toks = c.tokens_before !== null ? ` · ${c.tokens_before} tok before` : "";
+        const kept = c.kept_count !== null ? ` · ${c.kept_count} kept` : "";
+        const sum = c.summary ? ` - ${c.summary.split("\n")[0]!.slice(0, 80)}` : "";
+        lines.push(`- ${c.ts} · ${c.harness} · ${c.strategy}${toks}${kept}${sum}`);
+    }
+    return lines;
+}
+
+/**
  * Render the session show payload as a markdown-flavoured TTY string.
  * Pure function - no I/O.
  */
@@ -207,6 +224,13 @@ export function renderSessionMarkdown(
     }
 
     lines.push("");
+
+    // ── compaction section ───────────────────────────────────────────────────
+    const compactionLines = renderCompaction(payload);
+    if (compactionLines.length > 0) {
+        lines.push(...compactionLines);
+        lines.push("");
+    }
 
     // ── subagents section ────────────────────────────────────────────────────
     if (session.children.length > 0) {
