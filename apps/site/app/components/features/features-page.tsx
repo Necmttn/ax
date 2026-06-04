@@ -48,7 +48,8 @@ export function FeaturesPage() {
           <span className="section-num">01 / Sources</span>
           <h2>Everything your agent already wrote down.</h2>
           <p className="section-lede">
-            Your agent leaves a paper trail in five places. ax reads all of them.
+            Five coding harnesses, plus git and your installed skills. ax reads
+            all of them.
           </p>
         </div>
 
@@ -61,6 +62,14 @@ export function FeaturesPage() {
             <div className="src-tile">
               <span className="label">Codex sessions</span>
               <span className="path">~/.codex/sessions/*.jsonl</span>
+            </div>
+            <div className="src-tile">
+              <span className="label">Pi sessions</span>
+              <span className="path">~/.pi/agent/sessions/*.jsonl</span>
+            </div>
+            <div className="src-tile">
+              <span className="label">OpenCode + Cursor</span>
+              <span className="path">local SQLite stores</span>
             </div>
             <div className="src-tile">
               <span className="label">Git history</span>
@@ -165,11 +174,15 @@ export function FeaturesPage() {
 
           <div className="graph-legend">
             <div className="legend-block">
-              <div className="legend-title">Nodes - 6 of ~14</div>
+              <div className="legend-title">Nodes - 7 of ~14</div>
               <div className="legend-list">
                 <div className="row">
                   <code>session</code>
                   <span className="desc">one agent conversation, start → end</span>
+                </div>
+                <div className="row">
+                  <code>compaction</code>
+                  <span className="desc">context ran out and got summarized</span>
                 </div>
                 <div className="row">
                   <code>turn</code>
@@ -546,11 +559,11 @@ export function FeaturesPage() {
         <div className="section-head">
           <span className="section-num">06 / Surfaces</span>
           <h2>
-            One CLI, <em>seven verbs.</em>
+            One CLI, <em>eight verbs.</em>
           </h2>
           <p className="section-lede">
-            Everything ax knows is reachable from <code className="inline">ax</code>. The dashboard and TUI
-            are the same queries with different paint.
+            Everything ax knows is reachable from <code className="inline">ax</code>. The dashboard, TUI,
+            and MCP server are the same queries with different paint.
           </p>
         </div>
 
@@ -583,6 +596,12 @@ export function FeaturesPage() {
             <span className="cmd">ax serve</span>
             <span className="desc">
               Local web dashboard at <code className="inline">127.0.0.1:8520</code> with the same data the TUI sees.
+            </span>
+          </div>
+          <div className="cli-row">
+            <span className="cmd">ax mcp</span>
+            <span className="desc">
+              Stdio MCP server - exposes ax&apos;s read-only queries as 10 tools so Claude Code or Codex can query the graph in-context.
             </span>
           </div>
           <div className="cli-row">
@@ -634,10 +653,11 @@ export function FeaturesPage() {
           </div>
           <div className="local-card">
             <span className="lc-eye">license</span>
-            <span className="lc-val">MIT · single binary</span>
+            <span className="lc-val">AGPL-3.0 · single binary</span>
             <span className="lc-desc">
               Built with Bun. No cloud account, no telemetry egress.{" "}
-              <code className="inline">brew uninstall ax</code> removes it.
+              <code className="inline">ax uninstall</code> removes it. Commercial
+              license available.
             </span>
           </div>
         </div>
