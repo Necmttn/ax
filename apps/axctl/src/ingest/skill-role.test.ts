@@ -60,12 +60,15 @@ describe("relateSkillRoles", () => {
         expect(result.rolesUpserted).toBe(1);
         expect(result.edgesWritten).toBe(1);
 
-        // One upsert for the role node
-        const upsertCalls = calls.filter((c): c is Extract<Call, { kind: "upsert" }> => c.kind === "upsert");
-        expect(upsertCalls).toHaveLength(1);
-        expect(upsertCalls[0]!.content).toEqual({ name: "framing" });
-
         const queryCalls = calls.filter((c): c is Extract<Call, { kind: "query" }> => c.kind === "query");
+
+        // One UPSERT ... SET for the role node. SET (not CONTENT) so an
+        // existing role's weight survives re-ingest.
+        const roleUpserts = queryCalls.filter((c) => c.sql.includes("UPSERT role:"));
+        expect(roleUpserts).toHaveLength(1);
+        expect(roleUpserts[0]!.sql).toContain("role:`framing`");
+        expect(roleUpserts[0]!.sql).toContain('SET name = "framing"');
+        expect(roleUpserts[0]!.sql).not.toContain("CONTENT");
 
         // Sweep DELETE uses literal skill id, no $skill/$role placeholders
         const sweepDelete = queryCalls.find((c) =>
@@ -97,9 +100,12 @@ describe("relateSkillRoles", () => {
         expect(result.rolesUpserted).toBe(2);
         expect(result.edgesWritten).toBe(2);
 
-        const upsertCalls = calls.filter((c): c is Extract<Call, { kind: "upsert" }> => c.kind === "upsert");
-        expect(upsertCalls).toHaveLength(2);
-        const upsertedNames = upsertCalls.map((c) => (c.content as { name: string }).name);
+        const roleUpserts = calls.filter(
+            (c): c is Extract<Call, { kind: "query" }> =>
+                c.kind === "query" && c.sql.includes("UPSERT role:"),
+        );
+        expect(roleUpserts).toHaveLength(2);
+        const upsertedNames = roleUpserts.map((c) => c.sql.match(/SET name = "([^"]+)"/)?.[1]);
         expect(upsertedNames).toContain("framing");
         expect(upsertedNames).toContain("execution");
 
@@ -137,9 +143,12 @@ describe("relateSkillRoles", () => {
         expect(result.rolesUpserted).toBe(1);
         expect(result.edgesWritten).toBe(1);
 
-        const upsertCalls = calls.filter((c): c is Extract<Call, { kind: "upsert" }> => c.kind === "upsert");
-        expect(upsertCalls).toHaveLength(1);
-        expect(upsertCalls[0]!.content).toEqual({ name: "framing" });
+        const roleUpserts = calls.filter(
+            (c): c is Extract<Call, { kind: "query" }> =>
+                c.kind === "query" && c.sql.includes("UPSERT role:"),
+        );
+        expect(roleUpserts).toHaveLength(1);
+        expect(roleUpserts[0]!.sql).toContain('SET name = "framing"');
     });
 
     test("idempotent: running twice issues DELETE then RELATE both times", async () => {
@@ -247,8 +256,11 @@ describe("relateSkillRoles", () => {
         expect(result.rolesSkipped).toBe(1);
 
         // Only valid roles were upserted
-        const upsertCalls = calls.filter((c): c is Extract<Call, { kind: "upsert" }> => c.kind === "upsert");
-        const upsertedNames = upsertCalls.map((c) => (c.content as { name: string }).name);
+        const roleUpserts = calls.filter(
+            (c): c is Extract<Call, { kind: "query" }> =>
+                c.kind === "query" && c.sql.includes("UPSERT role:"),
+        );
+        const upsertedNames = roleUpserts.map((c) => c.sql.match(/SET name = "([^"]+)"/)?.[1]);
         expect(upsertedNames).toContain("framing");
         expect(upsertedNames).toContain("execution");
         expect(upsertedNames).not.toContain("role`with`backtick");

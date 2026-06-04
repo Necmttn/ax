@@ -1083,8 +1083,17 @@ DEFINE INDEX graph_health_kind_created ON graph_health_check FIELDS kind, create
 
 DEFINE TABLE IF NOT EXISTS role SCHEMAFULL;
 DEFINE FIELD name   ON role TYPE string;
-DEFINE FIELD weight ON role TYPE float DEFAULT 1.0;
+-- `VALUE $value ?? 1.0` coerces any NONE/absent write back to 1.0 so a
+-- CONTENT-style upsert that drops `weight` can never leave it NONE and crash
+-- the next write with "Expected `float` but found `NONE`" (Pi dogfood,
+-- 2026-06-04). DEFAULT still seeds 1.0 on first create.
+-- OVERWRITE so the VALUE clause actually replaces the prior definition when
+-- re-applied to an existing DB (plain DEFINE FIELD errors "already exists" and
+-- silently keeps the old, NONE-permitting definition).
+DEFINE FIELD OVERWRITE weight ON role TYPE float DEFAULT 1.0 VALUE $value ?? 1.0;
 DEFINE INDEX IF NOT EXISTS role_name_uq ON role FIELDS name UNIQUE;
+-- Repair rows written before the VALUE clause existed (weight already NONE).
+UPDATE role SET weight = 1.0 WHERE weight = NONE;
 
 DEFINE TABLE IF NOT EXISTS plays_role TYPE RELATION FROM skill TO role;
 DEFINE FIELD confidence ON plays_role TYPE float DEFAULT 1.0;
