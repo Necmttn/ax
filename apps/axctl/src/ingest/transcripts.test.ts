@@ -1084,3 +1084,64 @@ describe("Claude transcript extraction", () => {
         ]);
     });
 });
+
+describe("claude compaction", () => {
+    test("isCompactSummary message becomes a compaction row, not a user turn", () => {
+        const extracted = __testExtractClaudeJsonlLines(
+            [
+                JSON.stringify({
+                    type: "user",
+                    uuid: "u1",
+                    timestamp: "2026-06-01T10:00:00.000Z",
+                    sessionId: "cl-1",
+                    cwd: "/tmp",
+                    message: { role: "user", content: "real question" },
+                }),
+                JSON.stringify({
+                    type: "user",
+                    uuid: "u2",
+                    timestamp: "2026-06-01T10:05:00.000Z",
+                    sessionId: "cl-1",
+                    cwd: "/tmp",
+                    isCompactSummary: true,
+                    isVisibleInTranscriptOnly: true,
+                    message: { role: "user", content: "## Summary\nGoal: ship X" },
+                }),
+            ],
+            "-tmp",
+            "cl-1",
+        );
+
+        expect(extracted).not.toBeNull();
+        if (!extracted) return;
+
+        expect(extracted.compactions.length).toBe(1);
+        expect(extracted.compactions[0].strategy).toBe("summarize");
+        expect(extracted.compactions[0].summary).toContain("Goal: ship X");
+        expect(extracted.compactions[0].boundaryRef).toBe("u2");
+
+        const userTurnTexts = extracted.turns
+            .filter((t) => t.role === "user")
+            .map((t) => t.text);
+        expect(userTurnTexts).toContain("real question");
+        expect(userTurnTexts.some((t) => t?.includes("Goal: ship X"))).toBe(false);
+
+        // No duplicate type:"user" provider event for the compaction entry,
+        // and exactly one compaction provider event whose key matches the row.
+        const compactionEvents = extracted.providerEvents.filter(
+            (e) => e.type === "compaction",
+        );
+        expect(compactionEvents.length).toBe(1);
+        const userEventsForU2 = extracted.providerEvents.filter(
+            (e) => e.providerEventId === "u2" && e.type === "user",
+        );
+        expect(userEventsForU2.length).toBe(0);
+        const eventKey = agentEventRecordKey({
+            provider: "claude",
+            providerSessionId: "cl-1",
+            providerEventId: "u2",
+            seq: compactionEvents[0].seq,
+        });
+        expect(extracted.compactions[0].agentEventKey).toBe(eventKey);
+    });
+});

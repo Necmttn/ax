@@ -47,6 +47,11 @@ import { executeStatements, executeStatementsWith } from "@ax/lib/shared/stateme
 import { fileWatermark } from "@ax/lib/shared/watermark";
 import { skipNotFound } from "@ax/lib/shared/fs-error";
 import { posixPath } from "@ax/lib/shared/path";
+import {
+    buildCompactionStatements,
+    extractClaudeCompaction,
+    type CompactionWrite,
+} from "./compaction.ts";
 
 const MAX_OUTPUT_EXCERPT_CHARS = 1200;
 const DEFAULT_CLAUDE_CONCURRENCY = 4;
@@ -299,11 +304,13 @@ interface FileExtract {
     planSnapshots: PlanSnapshotWrite[];
     hookEvents: HarnessHookEventWrite[];
     hookCommandInvocations: HookCommandInvocationWrite[];
+    compactions: CompactionWrite[];
 }
 
 function createClaudeExtractor(path: Path.Path, projectDir: string, sessionId: string) {
     let session: Session | null = null;
     const turns: Turn[] = [];
+    const compactions: CompactionWrite[] = [];
     const invocations: Invocation[] = [];
     const edits: Edit[] = [];
     const toolCalls: MutableToolCallWrite[] = [];
@@ -872,6 +879,57 @@ function createClaudeExtractor(path: Path.Path, projectDir: string, sessionId: s
             const providerEventId = stringField(entry, "uuid");
             const kind = messageKind(role, messageContent, textExcerpt);
             const intentKind = classifyTurnIntent({ role, messageKind: kind, source: "claude", text });
+
+            // Context-compaction artifact: a synthetic `type:"user"` entry with
+            // `isCompactSummary:true` carrying the summary text. Capture it as a
+            // `compaction` row + a `compaction` provider event, and SKIP the
+            // normal user turn + the unconditional provider push so it never
+            // pollutes turn/recall data (it is transcript-only, not a real turn).
+            const isCompactSummary =
+                entry.isCompactSummary === true ||
+                (isRecord(entry.message) &&
+                    (entry.message as Record<string, unknown>).isCompactSummary === true);
+            if (isCompactSummary) {
+                const compactionSeq = nextProviderSeq();
+                const eventKey = agentEventRecordKey({
+                    provider: "claude",
+                    providerSessionId: sessionId,
+                    providerEventId,
+                    seq: compactionSeq,
+                });
+                pushProviderEvent({
+                    providerEventId,
+                    seq: compactionSeq,
+                    ts,
+                    type: "compaction",
+                    role: null,
+                    text,
+                    textExcerpt,
+                    raw: entry,
+                    labels: {
+                        source: "claude_transcript",
+                        messageKind: kind,
+                        intentKind,
+                    },
+                    metrics: {
+                        turnSeq: seq,
+                        contentBlocks: content.length,
+                    },
+                });
+                compactions.push(
+                    extractClaudeCompaction({
+                        sessionId,
+                        providerSessionId: sessionId,
+                        seq: compactionSeq,
+                        ts: new Date(ts),
+                        agentEventKey: eventKey,
+                        summary: text ?? null,
+                        boundaryRef: providerEventId ?? null,
+                    }),
+                );
+                return;
+            }
+
             pushProviderEvent({
                 providerEventId,
                 seq: nextProviderSeq(),
@@ -947,6 +1005,7 @@ function createClaudeExtractor(path: Path.Path, projectDir: string, sessionId: s
                 planSnapshots,
                 hookEvents,
                 hookCommandInvocations,
+                compactions,
             };
         },
     };
@@ -1195,6 +1254,9 @@ const writePlanSnapshots = (snapshots: PlanSnapshotWrite[]) =>
 const writeToolCallStatements = (toolCalls: readonly ToolCallWrite[]) =>
     queryTranscriptStatements(buildToolCallStatements(toolCalls));
 
+const writeCompactions = (compactions: readonly CompactionWrite[]) =>
+    queryTranscriptStatements(buildCompactionStatements(compactions));
+
 const writeHookEvidence = (
     events: readonly HarnessHookEventWrite[],
     invocations: readonly HookCommandInvocationWrite[],
@@ -1438,6 +1500,7 @@ export const ingestTranscripts = (
             yield* upsertTurns(extracted.turns);
             turnCount += extracted.turns.length;
             yield* writeProviderEvidence(extracted);
+            yield* writeCompactions(extracted.compactions);
             yield* writeToolCallStatements(extracted.toolCalls);
             toolCallCount += extracted.toolCalls.length;
             yield* writeToolFileEvidence(extracted.toolCalls);
