@@ -32,6 +32,7 @@ import { fetchEpisodeTimeline } from "./episode-timeline.ts";
 import { fetchProject } from "./project.ts";
 import { fetchRecall } from "./recall.ts";
 import { fetchGraphExplorer } from "./graph-explorer.ts";
+import { fetchSessionCanvas } from "./session-canvas.ts";
 import { fetchSkillGraph } from "./skill-graph.ts";
 import { fetchWrapped, sanitizeWrappedProfile } from "./wrapped.ts";
 
@@ -562,6 +563,28 @@ export async function handleDashboardRequest(req: Request): Promise<Response> {
         try {
             const payload = await Effect.runPromise(
                 fetchGraphExplorer(params).pipe(
+                    Effect.provide(AppLayer),
+                    Effect.scoped,
+                ) as Effect.Effect<unknown>,
+            );
+            return jsonResponse(payload);
+        } catch (err) {
+            return jsonResponse(
+                { error: err instanceof Error ? err.message : String(err) },
+                500,
+            );
+        }
+    }
+    if (url.pathname === "/api/session-canvas" && req.method === "GET") {
+        const limitParam = url.searchParams.get("limit");
+        const limit = limitParam ? Number(limitParam) : undefined;
+        const params: { limit?: number } = {};
+        if (typeof limit === "number" && Number.isFinite(limit)) {
+            params.limit = limit;
+        }
+        try {
+            const payload = await Effect.runPromise(
+                fetchSessionCanvas(params).pipe(
                     Effect.provide(AppLayer),
                     Effect.scoped,
                 ) as Effect.Effect<unknown>,

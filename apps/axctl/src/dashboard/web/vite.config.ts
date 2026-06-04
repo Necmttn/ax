@@ -27,7 +27,7 @@ export default defineConfig({
         strictPort: true,
         proxy: {
             "/api": {
-                target: "http://127.0.0.1:1738",
+                target: `http://127.0.0.1:${process.env.AX_DAEMON_PORT ?? "1738"}`,
                 changeOrigin: false,
                 ws: false,
             },

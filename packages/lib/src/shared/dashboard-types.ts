@@ -558,6 +558,41 @@ export interface GraphExplorerPayload {
     readonly warnings: ReadonlyArray<string>;
 }
 
+// ==== Session Canvas (infinite-canvas, semantic-zoom session lineage) ====
+// Nodes = sessions; edges = spawn lineage (parent -> subagent). `size` is the
+// session's weight on the canvas. v0 sizes by turn volume (always populated);
+// the design target is context-token volume + compaction epochs, which lands
+// once the Claude per-turn token + `compact_boundary` ingest is added. The
+// `epochs` field is wired through now (defaults to 1) so the renderer is ready.
+export interface SessionCanvasNode {
+    readonly id: string;
+    readonly label: string;
+    readonly project: string | null;
+    readonly source: string;            // 'claude' | 'codex' | ...
+    readonly started_at: string | null;
+    readonly ended_at: string | null;
+    readonly size: number;              // v0: user+assistant turns (size proxy)
+    readonly epochs: number;            // compaction epochs; v0 = 1 (no ingest yet)
+    readonly context_pressure: string;  // 'low' | 'medium' | 'high' | 'unknown'
+    readonly corrections: number;
+    readonly tone: string;              // success | warning | neutral
+    readonly is_subagent: boolean;
+}
+
+export interface SessionCanvasEdge {
+    readonly source: string;
+    readonly target: string;
+    readonly relation: string;          // 'spawned'
+    readonly label: string | null;      // subagent nickname when present
+}
+
+export interface SessionCanvasPayload {
+    readonly generatedAt: string;
+    readonly nodes: ReadonlyArray<SessionCanvasNode>;
+    readonly edges: ReadonlyArray<SessionCanvasEdge>;
+    readonly warnings: ReadonlyArray<string>;
+}
+
 export interface RecallHit {
     readonly turn_id: string;
     readonly session_id: SessionId;

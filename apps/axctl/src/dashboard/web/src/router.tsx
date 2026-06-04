@@ -20,6 +20,7 @@ import { ProjectRoute } from "./routes/project.tsx";
 import { RecallRoute } from "./routes/recall.tsx";
 import { SkillGraphRoute } from "./routes/skill-graph.tsx";
 import { GraphRoute } from "./routes/graph.tsx";
+import { CanvasRoute } from "./routes/canvas.tsx";
 import type { GraphExplorerMode } from "@shared/dashboard-types.ts";
 import { WrappedRoute } from "./routes/wrapped.tsx";
 import { ImproveRoute } from "./routes/improve.tsx";
@@ -187,6 +188,12 @@ const graphRoute = createRoute({
     }),
 });
 
+const canvasRoute = createRoute({
+    getParentRoute: () => rootRoute,
+    path: "/canvas",
+    component: CanvasRoute,
+});
+
 const recallRoute = createRoute({
     getParentRoute: () => rootRoute,
     path: "/recall",
@@ -237,6 +244,7 @@ const routeTree = rootRoute.addChildren([
     projectRoute,
     skillGraphRoute,
     graphRoute,
+    canvasRoute,
     recallRoute,
     wrappedRoute,
     improveRoute,

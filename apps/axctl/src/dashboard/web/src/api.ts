@@ -7,6 +7,7 @@ import type {
     ProjectPagePayload,
     RecallResponse,
     SkillGraphPayload,
+    SessionCanvasPayload,
     SessionChildrenResponse,
     SessionComparePayload,
     SessionDetailPayload,
@@ -214,6 +215,12 @@ export const api = {
         if (params.limit != null) usp.set("limit", String(params.limit));
         const qs = usp.toString();
         return jsonFetch(qs ? `/api/graph-explorer?${qs}` : "/api/graph-explorer");
+    },
+    sessionCanvas: (params: { limit?: number } = {}): Promise<SessionCanvasPayload> => {
+        const usp = new URLSearchParams();
+        if (params.limit != null) usp.set("limit", String(params.limit));
+        const qs = usp.toString();
+        return jsonFetch(qs ? `/api/session-canvas?${qs}` : "/api/session-canvas");
     },
     skillGraph: (params: { minCount?: number; limit?: number } = {}): Promise<SkillGraphPayload> => {
         const usp = new URLSearchParams();

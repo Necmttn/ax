@@ -16,6 +16,7 @@ interface Tab {
         | "/skills"
         | "/skills/graph"
         | "/graph"
+        | "/canvas"
         | "/tools"
         | "/decisions"
         | "/workflow"
@@ -69,6 +70,15 @@ export function Shell({ children }: { children: ReactNode }) {
                 queryClient.prefetchQuery({
                     queryKey: ["graph-explorer", "file-attention", "", 160],
                     queryFn: () => api.graphExplorer({ mode: "file-attention", limit: 160 }),
+                }),
+        },
+        {
+            to: "/canvas",
+            label: "Canvas",
+            prefetch: () =>
+                queryClient.prefetchQuery({
+                    queryKey: ["session-canvas"],
+                    queryFn: () => api.sessionCanvas({ limit: 800 }),
                 }),
         },
         {
