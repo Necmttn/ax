@@ -677,6 +677,8 @@ describe("pi compaction", () => {
         expect(c.summary).toBe("Goal: ship X");
         expect(c.boundaryRef).toBe("entry-7");
         expect(c.tokensBefore).toBe(90000);
+        expect(c.readFiles).toEqual(["a.ts"]);
+        expect(c.modifiedFiles).toEqual([]);
         expect(extracted!.providerEvents.filter((e) => e.type === "compaction").length).toBe(1);
 
         const eventKey = agentEventRecordKey({

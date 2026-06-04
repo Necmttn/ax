@@ -121,7 +121,7 @@ function renderCompaction(payload: SessionShowPayload): string[] {
         const toks = c.tokens_before !== null ? ` · ${c.tokens_before} tok before` : "";
         const kept = c.kept_count !== null ? ` · ${c.kept_count} kept` : "";
         const sum = c.summary ? ` - ${c.summary.split("\n")[0]!.slice(0, 80)}` : "";
-        lines.push(`- ${c.ts} · ${c.harness} · ${c.strategy}${toks}${kept}${sum}`);
+        lines.push(`- ${fmtTs(c.ts)} · ${c.harness} · ${c.strategy}${toks}${kept}${sum}`);
     }
     return lines;
 }

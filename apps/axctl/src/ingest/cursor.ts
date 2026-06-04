@@ -786,7 +786,7 @@ function extractComposerDiskKvData(
         compactions.push(
             extractCursorCompaction({
                 sessionId: session.id,
-                providerSessionId: composerId,
+                providerSessionId: session.id,
                 seq: compactionSeq,
                 ts: new Date(compactionTs),
                 agentEventKey: eventKey,
