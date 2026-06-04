@@ -3,12 +3,14 @@ import { Effect, Layer, PlatformError } from "effect";
 import { BunFileSystem, BunPath } from "@effect/platform-bun";
 import { layerTestFileSystem } from "@ax/lib/testing/test-filesystem";
 import { SurrealClient, type SurrealClientShape } from "@ax/lib/db";
+import { pathToProjectSlug } from "@ax/lib/shared/project-slug";
 import {
     buildCommitLookupQueries,
     buildCommitUpsertStatement,
     buildFileLookupQueries,
     buildFileUpsertStatement,
     buildProducedRelationStatements,
+    buildCanonicalProjectUpdate,
     buildSessionCheckoutWhere,
     buildSessionCheckoutUpdateStatement,
     buildSessionRepoWhere,
@@ -218,6 +220,22 @@ describe("git ingest relation statements", () => {
         ).toBe("myapp");
         expect(deriveRepositoryDisplayName(null, "/tmp/worktree-a")).toBe("worktree-a");
     });
+
+    test("canonicalizes session.project off the repository edge, collapsing every harness + worktree", () => {
+        // Same repo, sessions keyed many ways: claude dash-slug, codex raw cwd,
+        // worktree slugs. Keying the rewrite on the `repository` edge (not cwd)
+        // unifies them all - including orphan-worktree sessions whose checkout
+        // dir no longer exists on disk - onto one canonical slug.
+        const statement = buildCanonicalProjectUpdate(
+            "repository:`remote__github_com_necmttn_ax__1714814dc1199312`",
+            "-Users-necmttn-Projects-ax",
+        );
+        expect(statement).toBe(
+            'UPDATE session SET project = "-Users-necmttn-Projects-ax" ' +
+                "WHERE repository = repository:`remote__github_com_necmttn_ax__1714814dc1199312` " +
+                'AND (project IS NONE OR project != "-Users-necmttn-Projects-ax") RETURN NONE;',
+        );
+    });
 });
 
 describe("ingestGit repoPaths bypass", () => {
@@ -261,6 +279,43 @@ describe("ingestGit repoPaths bypass", () => {
         // At least one UPSERT or SELECT should reference the repo - just confirm
         // something was issued (meaning discovery was bypassed and writeRepo ran).
         expect(issued.length).toBeGreaterThan(0);
+    });
+
+    test("issues a canonical-project UPDATE keyed by the repository edge", async () => {
+        const issued: string[] = [];
+        const fakeDb: SurrealClientShape = {
+            query: <T extends unknown[]>(sql: string) =>
+                Effect.sync(() => {
+                    issued.push(sql);
+                    return [[]] as T;
+                }),
+            upsert: () => Effect.void,
+            relate: () => Effect.void,
+            putFile: () => Effect.void,
+            getFile: () => Effect.succeed(""),
+            raw: {} as never,
+        };
+
+        const repoRoot = process.cwd();
+        const expectedSlug = pathToProjectSlug(repoRoot);
+
+        await Effect.runPromise(
+            ingestGit({ repoPaths: [repoRoot], sinceDays: 1 }).pipe(
+                Effect.provide(
+                    Layer.mergeAll(
+                        Layer.succeed(SurrealClient, fakeDb),
+                        BunFileSystem.layer,
+                        BunPath.layer,
+                    ),
+                ),
+            ),
+        );
+
+        const canonical = issued.find(
+            (sql) => sql.includes("SET project =") && sql.includes("WHERE repository ="),
+        );
+        expect(canonical).toBeDefined();
+        expect(canonical).toContain(`SET project = "${expectedSlug}"`);
     });
 
     test("when repoPaths is empty array, falls back to discovery (returns 0 repos on empty DB)", async () => {

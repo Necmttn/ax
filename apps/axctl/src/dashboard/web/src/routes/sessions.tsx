@@ -2,7 +2,7 @@ import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { api } from "../api.ts";
-import { prettifyProjectSlug } from "@shared/project-slug.ts";
+import { sessionProjectLabel } from "@shared/project-slug.ts";
 import type { SessionListResponse, SessionListRow } from "@shared/dashboard-types.ts";
 import { shortSessionId } from "@shared/session-id.ts";
 
@@ -54,8 +54,7 @@ function Row({ s, indent, expandedToggle, select }: RowProps) {
     // The wire seam delivers a bare session id (see src/lib/shared/session-id.ts);
     // any backtick/`session:` prefix reaching us would be a server bug.
     const sid = s.id;
-    const pretty = s.project ? prettifyProjectSlug(s.project) : null;
-    const project = (pretty && pretty !== "(no repo)") ? pretty : (s.cwd ? (s.cwd.split("/").pop() ?? "-") : "-");
+    const project = sessionProjectLabel(s.project, s.cwd);
 
     // Warm the inspect-data query on hover/focus - intent-based prefetch
     // avoids stampeding the API when the page has 200 rows.
