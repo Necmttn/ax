@@ -65,7 +65,7 @@ function makeMockDb(queryResponses: Map<string, unknown[][]> = new Map()) {
  * (so discover() returns [] immediately) plus dummy DB config.
  */
 function makeEmptyTranscriptsConfig() {
-    return Layer.succeed(AxConfig, makeTestConfig({
+    return Layer.effect(AxConfig, makeTestConfig({
         paths: {
             home: "/nonexistent",
             transcriptsDir: "/nonexistent-path-for-tests",
@@ -87,7 +87,7 @@ function makeEmptyTranscriptsConfig() {
             codexRawMaxBytes: 5 * 1024 * 1024,
             codexPayloadMaxBytes: 1200,
         },
-    }));
+    })).pipe(Layer.provide(BunFileSystem.layer));
 }
 
 /** Convenience: merge db+config layers and run the stage. */
@@ -285,7 +285,7 @@ async function buildFixture(opts: {
 
 /** Config layer that points transcriptsDir at a real temp root. */
 function makeFixtureConfig(transcriptsDir: string) {
-    return Layer.succeed(AxConfig, makeTestConfig({
+    return Layer.effect(AxConfig, makeTestConfig({
         paths: {
             home: "/nonexistent",
             transcriptsDir,
@@ -307,7 +307,7 @@ function makeFixtureConfig(transcriptsDir: string) {
             codexRawMaxBytes: 5 * 1024 * 1024,
             codexPayloadMaxBytes: 1200,
         },
-    }));
+    })).pipe(Layer.provide(BunFileSystem.layer));
 }
 
 // ---------------------------------------------------------------------------

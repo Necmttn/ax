@@ -535,29 +535,31 @@ function launchdStatus(
     });
 }
 
-function collectDaemonEndpoint(): DaemonEndpoint {
-    const state = readRuntimeState();
-    const probe = probePort(state.db.port);
-    const loadedPid = loadedDbPid();
-    // Treat conflict as "another process is listening", not us. When launchd
-    // says our DB agent owns this PID, suppress the conflict in the report.
-    const conflict =
-        probe.holder && loadedPid !== null && probe.holder.pid === loadedPid
-            ? null
-            : probe.holder;
-    return {
-        host: state.db.host,
-        port: state.db.port,
-        url: dbUrlFromState(state),
-        listening: probe.listening,
-        conflict,
-        runtimeStatePath: runtimeStatePath(),
-    };
+function collectDaemonEndpoint(): Effect.Effect<DaemonEndpoint, never, FileSystem.FileSystem> {
+    return Effect.gen(function* () {
+        const state = yield* readRuntimeState();
+        const probe = probePort(state.db.port);
+        const loadedPid = loadedDbPid();
+        // Treat conflict as "another process is listening", not us. When launchd
+        // says our DB agent owns this PID, suppress the conflict in the report.
+        const conflict =
+            probe.holder && loadedPid !== null && probe.holder.pid === loadedPid
+                ? null
+                : probe.holder;
+        return {
+            host: state.db.host,
+            port: state.db.port,
+            url: dbUrlFromState(state),
+            listening: probe.listening,
+            conflict,
+            runtimeStatePath: runtimeStatePath(),
+        };
+    });
 }
 
 function collectDaemonStatus(): Effect.Effect<DaemonStatus, never, FileSystem.FileSystem> {
     return Effect.gen(function* () {
-        const endpoint = collectDaemonEndpoint();
+        const endpoint = yield* collectDaemonEndpoint();
         return {
             platform: process.platform,
             macosLaunchd: isMacos(),
@@ -727,7 +729,7 @@ export function cmdInstall(): Effect.Effect<
                 console.log(`  port ${DEFAULT_DB_PORT} unavailable; using ${bind.chosen}`);
             }
         }
-        writeRuntimeState({ db: { host: DEFAULT_DB_HOST, port: bind.chosen } });
+        yield* writeRuntimeState({ db: { host: DEFAULT_DB_HOST, port: bind.chosen } });
         console.log(`  runtime-state: ${runtimeStatePath()} (db @ ${DEFAULT_DB_HOST}:${bind.chosen})`);
 
         yield* fs.writeFileString(
