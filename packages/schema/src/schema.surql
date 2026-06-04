@@ -500,6 +500,24 @@ DEFINE FIELD ts             ON plan_snapshot TYPE datetime DEFAULT time::now();
 DEFINE INDEX plan_snapshot_plan_ts ON plan_snapshot FIELDS plan, ts;
 DEFINE INDEX plan_snapshot_agent_event ON plan_snapshot FIELDS agent_event;
 
+DEFINE TABLE compaction SCHEMAFULL;
+DEFINE FIELD session           ON compaction TYPE record<session>;
+DEFINE FIELD agent_event       ON compaction TYPE option<record<agent_event>>;
+DEFINE FIELD harness           ON compaction TYPE string;          -- provider name: claude|codex|pi|cursor|opencode
+DEFINE FIELD ts                ON compaction TYPE datetime;
+DEFINE FIELD trigger           ON compaction TYPE option<string>;  -- auto|manual|hook
+DEFINE FIELD strategy          ON compaction TYPE string;          -- summarize|history_replacement|encrypted
+DEFINE FIELD source_confidence ON compaction TYPE string;          -- explicit|derived
+DEFINE FIELD summary           ON compaction TYPE option<string>;  -- Pi/Claude; null for Codex/Cursor
+DEFINE FIELD tokens_before     ON compaction TYPE option<int>;
+DEFINE FIELD boundary_ref      ON compaction TYPE option<string>;  -- where post-compaction history resumes
+DEFINE FIELD kept_count        ON compaction TYPE option<int>;     -- Codex replacement_history length
+DEFINE FIELD read_files        ON compaction TYPE option<string>;  -- JSON-encoded array; Pi details
+DEFINE FIELD modified_files    ON compaction TYPE option<string>;  -- JSON-encoded array; Pi details
+DEFINE FIELD raw               ON compaction TYPE option<string>;  -- JSON-encoded
+DEFINE INDEX compaction_session_ts  ON compaction FIELDS session, ts;
+DEFINE INDEX compaction_agent_event ON compaction FIELDS agent_event;
+
 DEFINE TABLE insight SCHEMAFULL;
 DEFINE FIELD subject_type   ON insight TYPE string;
 DEFINE FIELD subject_id     ON insight TYPE option<string>;

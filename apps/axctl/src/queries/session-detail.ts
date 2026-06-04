@@ -16,6 +16,7 @@ import { toBareSessionId } from "@ax/lib/shared/session-id";
 import { decodeJsonOrNull } from "@ax/lib/decode";
 import type {
     SessionAgentDelegation,
+    SessionCompaction,
     SessionHealthSummary,
     SessionLink,
     SessionOverview,
@@ -100,6 +101,21 @@ FROM tool_call
 WHERE session = $sessionId AND name = "Agent"
 ORDER BY ts ASC
 LIMIT 50;`;
+
+/** Context-compaction boundaries recorded for this session, oldest first. */
+export const SESSION_COMPACTIONS_SQL = `
+SELECT
+    harness,
+    type::string(ts) AS ts,
+    strategy,
+    trigger,
+    tokens_before,
+    kept_count,
+    summary
+FROM compaction
+WHERE session = $sessionId
+ORDER BY ts ASC
+LIMIT 100;`;
 
 export const SESSION_TOKEN_USAGE_SQL = `
 SELECT
@@ -566,6 +582,31 @@ export const sessionTokenUsageQuery = defineSingleQuery<
             estimated_cache_read_cost_usd: nullableNumberField(raw, "estimated_cache_read_cost_usd"),
             estimated_cost_usd: nullableNumberField(raw, "estimated_cost_usd"),
             pricing_source: stringField(raw, "pricing_source"),
+        };
+    },
+});
+
+export const sessionCompactionsQuery = defineQuery<
+    SessionDetailParams,
+    Record<string, unknown>,
+    SessionCompaction | null
+>({
+    name: "session-detail.compactions",
+    sql: (p) => subst(SESSION_COMPACTIONS_SQL, p.recordRef),
+    mapRow: (raw) => {
+        if (!isRecord(raw)) return null;
+        const harness = stringField(raw, "harness");
+        const ts = dateField(raw, "ts");
+        const strategy = stringField(raw, "strategy");
+        if (!harness || !ts || !strategy) return null;
+        return {
+            harness,
+            ts,
+            strategy,
+            trigger: stringField(raw, "trigger"),
+            tokens_before: nullableNumberField(raw, "tokens_before"),
+            kept_count: nullableNumberField(raw, "kept_count"),
+            summary: stringField(raw, "summary"),
         };
     },
 });

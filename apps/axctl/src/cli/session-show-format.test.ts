@@ -69,6 +69,7 @@ const MINIMAL_PAYLOAD: SessionShowPayload = {
     },
     expanded_subagents: [],
     by_role: null,
+    compactions: [],
 };
 
 // ---------------------------------------------------------------------------
@@ -199,6 +200,44 @@ describe("renderSessionMarkdown - sections", () => {
     });
 });
 
+describe("renderSessionMarkdown - compaction", () => {
+    it("renders a compaction section when compactions present", () => {
+        const payload: SessionShowPayload = {
+            ...MINIMAL_PAYLOAD,
+            compactions: [
+                {
+                    harness: "codex",
+                    ts: "2026-05-14T15:34:42.663Z",
+                    strategy: "history_replacement",
+                    trigger: "auto",
+                    tokens_before: 120000,
+                    kept_count: 83,
+                    summary: null,
+                },
+                {
+                    harness: "pi",
+                    ts: "2026-05-29T06:05:38.132Z",
+                    strategy: "summarize",
+                    trigger: "auto",
+                    tokens_before: 90000,
+                    kept_count: null,
+                    summary: "Goal: ship X",
+                },
+            ],
+        };
+        const md = renderSessionMarkdown(payload);
+        expect(md).toContain("## Compaction");
+        expect(md).toContain("history_replacement");
+        expect(md).toContain("83 kept");
+        expect(md).toContain("Goal: ship X");
+    });
+
+    it("does NOT render a compaction section when compactions empty", () => {
+        const md = renderSessionMarkdown(MINIMAL_PAYLOAD);
+        expect(md).not.toContain("## Compaction");
+    });
+});
+
 describe("renderSessionMarkdown - not found", () => {
     it("emits not-found message when overview is null", () => {
         const payload: SessionShowPayload = {
@@ -213,6 +252,7 @@ describe("renderSessionMarkdown - not found", () => {
             },
             expanded_subagents: [],
             by_role: null,
+            compactions: [],
         };
         const out = renderSessionMarkdown(payload);
         expect(out).toContain("not found");
@@ -298,6 +338,7 @@ describe("renderSessionMarkdown - empty session", () => {
             },
             expanded_subagents: [],
             by_role: null,
+            compactions: [],
         };
         const out = renderSessionMarkdown(payload);
         expect(out).not.toContain("## Top skills");
@@ -316,6 +357,7 @@ describe("renderSessionMarkdown - empty session", () => {
             },
             expanded_subagents: [],
             by_role: null,
+            compactions: [],
         };
         const out = renderSessionMarkdown(payload);
         expect(out).not.toContain("## Subagents");

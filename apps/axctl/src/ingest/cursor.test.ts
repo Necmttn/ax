@@ -192,6 +192,75 @@ describe("Cursor state.vscdb extraction", () => {
         });
     });
 
+    test("flags compaction when a composer has a non-empty summarizedComposers array", async () => {
+        await withTempCursorStateDb((db, dbPath) => {
+            db.run("CREATE TABLE cursorDiskKV (key text primary key, value blob)");
+            db.query("INSERT INTO cursorDiskKV (key, value) VALUES (?, ?)").run(
+                "composerData:comp-1",
+                JSON.stringify({
+                    composerId: "comp-1",
+                    name: "t",
+                    createdAt: 1748000000000,
+                    summarizedComposers: ["prev-comp"],
+                    fullConversationHeadersOnly: [
+                        { bubbleId: "b1", type: 1, grouping: { hasText: true } },
+                    ],
+                }),
+            );
+            db.query("INSERT INTO cursorDiskKV (key, value) VALUES (?, ?)").run(
+                "bubbleId:comp-1:b1",
+                JSON.stringify({
+                    bubbleId: "b1",
+                    type: 2,
+                    text: "hi",
+                    createdAt: "2026-05-29T10:49:48.611Z",
+                }),
+            );
+
+            const extract = extractCursorStateDb(dbPath);
+
+            expect(extract.compactions.length).toBe(1);
+            expect(extract.compactions[0]?.harness).toBe("cursor");
+            expect(extract.compactions[0]?.strategy).toBe("encrypted");
+            expect(extract.compactions[0]?.summary).toBeNull();
+            expect(extract.compactions[0]?.boundaryRef).toBe("b1");
+            expect(extract.providerEvents.filter((e) => e.type === "compaction").length).toBe(1);
+            const compactionEvent = extract.providerEvents.find((e) => e.type === "compaction")!;
+            expect(extract.compactions[0]?.agentEventKey).toBe(agentEventRecordKey(compactionEvent));
+        });
+    });
+
+    test("does not flag compaction when summarizedComposers is empty", async () => {
+        await withTempCursorStateDb((db, dbPath) => {
+            db.run("CREATE TABLE cursorDiskKV (key text primary key, value blob)");
+            db.query("INSERT INTO cursorDiskKV (key, value) VALUES (?, ?)").run(
+                "composerData:comp-2",
+                JSON.stringify({
+                    composerId: "comp-2",
+                    name: "t",
+                    createdAt: 1748000000000,
+                    summarizedComposers: [],
+                    fullConversationHeadersOnly: [
+                        { bubbleId: "b1", type: 1, grouping: { hasText: true } },
+                    ],
+                }),
+            );
+            db.query("INSERT INTO cursorDiskKV (key, value) VALUES (?, ?)").run(
+                "bubbleId:comp-2:b1",
+                JSON.stringify({
+                    bubbleId: "b1",
+                    type: 2,
+                    text: "hi",
+                    createdAt: "2026-05-29T10:49:48.611Z",
+                }),
+            );
+
+            const extract = extractCursorStateDb(dbPath);
+
+            expect(extract.compactions.length).toBe(0);
+        });
+    });
+
     test("extracts Cursor toolFormerData into shared tool calls and invocation edges", async () => {
         await withTempCursorStateDb((db, dbPath) => {
             db.run("CREATE TABLE cursorDiskKV (key text primary key, value blob)");

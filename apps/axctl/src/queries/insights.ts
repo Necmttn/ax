@@ -70,6 +70,7 @@ export const SCHEMA_TABLES: readonly SchemaTableSpec[] = [
     { table: "content_block", stage: "active", note: "Searchable markdown block chunks with source offsets." },
     { table: "content_atom", stage: "active", note: "Fine-grained parsed document facts and evidence atoms." },
     { table: "plan_snapshot", stage: "active", note: "Point-in-time TodoWrite/update_plan snapshots." },
+    { table: "compaction", stage: "active", note: "Context-compaction events per harness (summarize/history-replacement/encrypted)." },
     { table: "insight", stage: "active", note: "Imported Claude usage-data insight facets." },
     { table: "friction_event", stage: "active", note: "Tool failures, imported insight friction, and derived friction." },
     { table: "turn_analysis", stage: "active", note: "Per-turn message analysis for sparse user feedback and assistant behavior." },

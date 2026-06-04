@@ -24,6 +24,7 @@ import {
     type ToolCallSkillRelationWrite,
     type ToolCallWrite,
 } from "./evidence-writers.ts";
+import { buildCompactionStatements, extractPiCompaction, type CompactionWrite } from "./compaction.ts";
 import { classifyTurnIntent } from "./intent-kind.ts";
 import { providerDelegationSignalAvailability } from "./delegation.ts";
 import { agentEventRecordKey, buildAgentEventStatements, buildAgentProviderStatements, type AgentEventWrite } from "./provider-events.ts";
@@ -85,6 +86,7 @@ interface PiExtract {
     invocations: PiInvocation[];
     toolCalls: ToolCallWrite[];
     providerEvents: AgentEventWrite[];
+    compactions: CompactionWrite[];
     skillRelations: ToolCallSkillRelationWrite[];
     usage: PiUsage;
     skipped: number;
@@ -292,6 +294,7 @@ function createPiExtractor(filePath: string) {
     const invocations: PiInvocation[] = [];
     const toolCalls: MutableToolCallWrite[] = [];
     const providerEvents: AgentEventWrite[] = [];
+    const compactions: CompactionWrite[] = [];
     const skillRelations: ToolCallSkillRelationWrite[] = [];
     const toolCallsByCallId = new Map<string, MutableToolCallWrite>();
     const pendingToolResultsByCallId = new Map<string, ToolResultFields>();
@@ -543,6 +546,27 @@ function createPiExtractor(filePath: string) {
                 },
             }, session);
 
+            if (type === "compaction") {
+                // The universal pushProviderEvent above already emitted the
+                // `compaction` agent_event keyed on (provider, session, providerEventId,
+                // seq). Reproduce that exact key here to link the compaction row; do
+                // NOT push a second provider event.
+                const eventKey = agentEventRecordKey({
+                    provider: "pi",
+                    providerSessionId: session.id,
+                    providerEventId,
+                    seq,
+                });
+                const write = extractPiCompaction(entry, {
+                    sessionId: session.id,
+                    providerSessionId: session.id,
+                    seq,
+                    ts: new Date(ts),
+                    agentEventKey: eventKey,
+                });
+                if (write) compactions.push(write);
+            }
+
             if (message && role === "assistant" && Array.isArray(message.content)) {
                 let toolCallOrdinal = 0;
                 for (const block of message.content) {
@@ -567,6 +591,7 @@ function createPiExtractor(filePath: string) {
                 invocations,
                 toolCalls,
                 providerEvents,
+                compactions,
                 skillRelations,
                 usage,
                 skipped,
@@ -751,6 +776,7 @@ const buildPiBatchStatements = (extract: PiExtract): string[] => [
     ...extract.skillRelations.flatMap((relation) =>
         buildRelateToolCallSkillStatements(relation),
     ),
+    ...buildCompactionStatements(extract.compactions),
     ...buildPiTokenUsageStatements(extract),
 ];
 
