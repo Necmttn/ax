@@ -70,7 +70,7 @@ FROM session_token_usage;`;
 // table is owned/ingested by the compaction-signal feature (all providers);
 // this is read-only consumption. Graceful when empty: nodes show epochs=1.
 export const COMPACTIONS_SQL = `
-SELECT <string>session AS s, (tokens_before ?? 0) AS pre_tokens, (trigger ?? "auto") AS trigger
+SELECT <string>session AS s, ts, (tokens_before ?? 0) AS pre_tokens, (trigger ?? "auto") AS trigger
 FROM compaction ORDER BY ts ASC;`;
 
 const str = (row: Record<string, unknown>, key: string): string | null => {
@@ -130,10 +130,18 @@ export function rowsToSessionCanvas(input: RowsToSessionCanvasInput): SessionCan
     }
 
     // compaction boundaries per session, oldest-first, for epoch notches.
+    // Dedupe by ts: the source can carry duplicate boundary rows (re-ingest /
+    // backfill), which would otherwise inflate the epoch count.
     const compactionsById = new Map<string, Array<{ pre_tokens: number; trigger: string }>>();
+    const seenTsById = new Map<string, Set<string>>();
     for (const row of input.compactionRows) {
         const id = str(row, "s");
         if (!id) continue;
+        const ts = str(row, "ts") ?? "";
+        const seen = seenTsById.get(id) ?? new Set<string>();
+        if (ts && seen.has(ts)) continue;
+        seen.add(ts);
+        seenTsById.set(id, seen);
         const list = compactionsById.get(id) ?? [];
         list.push({ pre_tokens: num(row, "pre_tokens"), trigger: str(row, "trigger") ?? "auto" });
         compactionsById.set(id, list);

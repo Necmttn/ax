@@ -126,7 +126,11 @@ const barWidth = (size: number, scaleMax: number): number =>
     24 + Math.sqrt(Math.min(1, size / Math.max(scaleMax, 1))) * 150;
 
 const fmtTokens = (n: number): string =>
-    n >= 1000 ? `${(n / 1000).toFixed(n >= 10_000 ? 0 : 1)}k` : `${n}`;
+    n >= 1_000_000
+        ? `${(n / 1_000_000).toFixed(1)}M`
+        : n >= 1000
+            ? `${(n / 1000).toFixed(n >= 10_000 ? 0 : 1)}k`
+            : `${n}`;
 
 interface Camera { x: number; y: number; scale: number; }
 
