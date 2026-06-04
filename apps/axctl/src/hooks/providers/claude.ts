@@ -1,4 +1,3 @@
-import { join } from "node:path";
 import { posixPath } from "@ax/lib/shared/path";
 import { orAbsent } from "@ax/lib/shared/fs-error";
 import { Effect, FileSystem } from "effect";
@@ -29,10 +28,10 @@ export const claudeProvider: HookProvider = {
     matcher: "tool",
 
     configFiles: (scope: HookScope, repoRoot) => {
-        if (scope === "global") return [{ path: join(HOME, ".claude", "settings.json"), scope, format: "json" }];
+        if (scope === "global") return [{ path: posixPath.join(HOME, ".claude", "settings.json"), scope, format: "json" }];
         if (!repoRoot) return [];
-        if (scope === "project") return [{ path: join(repoRoot, ".claude", "settings.json"), scope, format: "json" }];
-        return [{ path: join(repoRoot, ".claude", "settings.local.json"), scope, format: "json" }];
+        if (scope === "project") return [{ path: posixPath.join(repoRoot, ".claude", "settings.json"), scope, format: "json" }];
+        return [{ path: posixPath.join(repoRoot, ".claude", "settings.local.json"), scope, format: "json" }];
     },
 
     installed: () =>

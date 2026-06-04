@@ -58,7 +58,7 @@ describe("dir source discover", () => {
             name: "user",
             label: "u",
             writable: true,
-            roots: () => [ref(root, "user")],
+            roots: () => Effect.succeed([ref(root, "user")]),
         });
         const recs = await runFs(src.discover(ref(root, "user")));
         const byName = new Map(recs.map((r) => [r.name, r]));
@@ -78,7 +78,7 @@ describe("dir source discover", () => {
             name: "plugin",
             label: "p",
             writable: false,
-            roots: () => [ref(root, "plugin:superpowers", false)],
+            roots: () => Effect.succeed([ref(root, "plugin:superpowers", false)]),
         });
         const [rec] = await runFs(src.discover(ref(root, "plugin:superpowers", false)));
         expect(rec!.name).toBe("superpowers:caveman");
@@ -93,7 +93,7 @@ describe("dir source discover", () => {
         mkdirSync(join(root, ".ax-parked", "hidden"), { recursive: true });
         writeFileSync(join(root, ".ax-parked", "hidden", "SKILL.md"), "---\nname: hidden\n---\nX");
         writeFileSync(join(root, "loose.txt"), "not a skill");
-        const src = makeDirSource({ name: "user", label: "u", writable: true, roots: () => [] });
+        const src = makeDirSource({ name: "user", label: "u", writable: true, roots: () => Effect.succeed([]) });
         const recs = await runFs(src.discover(ref(root, "user")));
         expect(recs.map((r) => r.name)).toEqual(["live"]);
     });
@@ -106,7 +106,7 @@ describe("read-only source guards (fail before disk touch)", () => {
         name: "plugin",
         label: "p",
         writable: false,
-        roots: () => [ref(root, "plugin:x", false)],
+        roots: () => Effect.succeed([ref(root, "plugin:x", false)]),
     });
     const rec = {
         name: "x:owned",
@@ -146,7 +146,7 @@ describe("symlink-safe remove", () => {
             name: "user",
             label: "u",
             writable: true,
-            roots: () => [ref(skillsRoot, "user")],
+            roots: () => Effect.succeed([ref(skillsRoot, "user")]),
         });
         const [rec] = await runFs(src.discover(ref(skillsRoot, "user")));
         expect(rec!.name).toBe("stowed"); // symlinked dir discovered (stat follows link)
@@ -166,7 +166,7 @@ describe("command source (flat .md)", () => {
         const src = makeCommandSource({
             label: "c",
             writable: true,
-            roots: () => [ref(root, "command")],
+            roots: () => Effect.succeed([ref(root, "command")]),
         });
         const recs = await runFs(src.discover(ref(root, "command")));
         const names = recs.map((r) => r.name).sort();
@@ -213,7 +213,7 @@ describe("reconcileSkills", () => {
                 name: "user",
                 label: "u",
                 writable: true,
-                roots: () => [ref(root, "user")],
+                roots: () => Effect.succeed([ref(root, "user")]),
             }),
         ];
         const calls: { sql: string; bindings?: Record<string, unknown> }[] = [];
@@ -239,7 +239,7 @@ describe("reconcileSkills", () => {
         const root = tmp("ax-rec-dry-");
         writeSkill(root, "x", "name: x");
         const sources: SkillSource[] = [
-            makeDirSource({ name: "user", label: "u", writable: true, roots: () => [ref(root, "user")] }),
+            makeDirSource({ name: "user", label: "u", writable: true, roots: () => Effect.succeed([ref(root, "user")]) }),
         ];
         const calls: { sql: string; bindings?: Record<string, unknown> }[] = [];
         const layer = Layer.mergeAll(FS, makeSkillSourceRegistryLayer(sources), recordingDb(calls, [[], [], []]));
@@ -259,7 +259,7 @@ describe("readAllSkills status: orphan vs out-of-scope", () => {
         const root = tmp("ax-status-");
         writeSkill(root, "keep", "name: keep"); // on disk, scope "user"
         const sources: SkillSource[] = [
-            makeDirSource({ name: "user", label: "u", writable: true, roots: () => [ref(root, "user")] }),
+            makeDirSource({ name: "user", label: "u", writable: true, roots: () => Effect.succeed([ref(root, "user")]) }),
         ];
         const evRows = [
             evidence({ name: "keep", scope: "user", fired: 5 }), // on disk -> live

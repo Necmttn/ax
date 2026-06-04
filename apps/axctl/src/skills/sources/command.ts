@@ -65,7 +65,9 @@ const walk = (
 export const makeCommandSource = (config: {
     readonly label: string;
     readonly writable: boolean;
-    readonly roots: (repoRoot: string | null) => ReadonlyArray<SkillDirRef>;
+    readonly roots: (
+        repoRoot: string | null,
+    ) => Effect.Effect<ReadonlyArray<SkillDirRef>, never, FileSystem.FileSystem | Path.Path>;
     readonly installed?: (
         repoRoot: string | null,
     ) => Effect.Effect<boolean, never, FileSystem.FileSystem>;
@@ -168,7 +170,11 @@ export const makeCommandSource = (config: {
         roots: config.roots,
         installed:
             config.installed ??
-            ((repoRoot) => Effect.succeed(config.roots(repoRoot).length > 0)),
+            ((repoRoot) =>
+                config.roots(repoRoot).pipe(
+                    Effect.map((roots) => roots.length > 0),
+                    Effect.provide(Path.layer),
+                )),
         discover,
         remove,
         park,

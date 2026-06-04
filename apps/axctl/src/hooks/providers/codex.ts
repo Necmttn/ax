@@ -1,5 +1,4 @@
 import { Effect, FileSystem } from "effect";
-import { join } from "node:path";
 import { posixPath } from "@ax/lib/shared/path";
 import { orAbsent } from "@ax/lib/shared/fs-error";
 import { parse as parseToml, stringify as stringifyToml } from "smol-toml";
@@ -124,12 +123,12 @@ export const codexProvider: HookProvider = {
     configFiles: (scope: HookScope, repoRoot) => {
         if (scope === "global") {
             return [
-                { path: join(HOME, ".codex", "config.toml"), scope, format: "toml" },
-                { path: join(HOME, ".codex", "hooks.json"), scope, format: "json" },
+                { path: posixPath.join(HOME, ".codex", "config.toml"), scope, format: "toml" },
+                { path: posixPath.join(HOME, ".codex", "hooks.json"), scope, format: "json" },
             ];
         }
         if (scope === "project" && repoRoot) {
-            return [{ path: join(repoRoot, ".codex", "hooks.json"), scope, format: "json" }];
+            return [{ path: posixPath.join(repoRoot, ".codex", "hooks.json"), scope, format: "json" }];
         }
         return [];
     },

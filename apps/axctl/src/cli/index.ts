@@ -3843,13 +3843,13 @@ const cmdRetroBrief = (args: string[]) =>
         const transcriptPath = row.raw_file ?? null;
         const body = formatRetroBrief(session, transcriptPath, suggested);
 
-        const { mkdir, writeFile } = yield* Effect.promise(() => import("node:fs/promises"));
-        const { join, resolve } = yield* Effect.promise(() => import("node:path"));
-        const outDir = resolve(outDirFlag ?? join(process.cwd(), ".ax", "tasks", "retro"));
-        yield* Effect.promise(() => mkdir(outDir, { recursive: true }));
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const outDir = path.resolve(outDirFlag ?? path.join(process.cwd(), ".ax", "tasks", "retro"));
+        yield* fs.makeDirectory(outDir, { recursive: true }).pipe(Effect.orDie);
         const safeKey = key.replace(/[^a-zA-Z0-9._-]/g, "_").slice(0, 80);
-        const filePath = join(outDir, `${safeKey}.md`);
-        yield* Effect.promise(() => writeFile(filePath, body, "utf8"));
+        const filePath = path.join(outDir, `${safeKey}.md`);
+        yield* fs.writeFileString(filePath, body).pipe(Effect.orDie);
 
         if (json) {
             console.log(prettyPrint({ session: idStr, path: filePath, suggested_model: suggested, transcript: transcriptPath }));

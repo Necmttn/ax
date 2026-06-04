@@ -1,6 +1,4 @@
-import { readdir, stat } from "node:fs/promises";
-import { join } from "node:path";
-import { Effect, FileSystem, Path, Schema } from "effect";
+import { Effect, FileSystem, Option, Path, Schema } from "effect";
 import { SurrealClient, RecordId } from "@ax/lib/db";
 import { AxConfig } from "@ax/lib/config";
 import type { DbError } from "@ax/lib/errors";
@@ -9,7 +7,7 @@ import type { StageDef } from "./stage/registry.ts";
 import { surrealLiteral } from "@ax/lib/json";
 import { decodeJsonOrNull } from "@ax/lib/decode";
 import { fileWatermark } from "@ax/lib/shared/watermark";
-import { isNotFound } from "@ax/lib/shared/fs-error";
+import { isNotFound, orAbsent } from "@ax/lib/shared/fs-error";
 import {
     extractFileWithSessionId,
     upsertTurnsForSubagents,
@@ -49,53 +47,57 @@ const stringField = (row: Record<string, unknown>, key: string): string | null =
  * minimum metadata. Doesn't open the full file - just first + last line for
  * sessionId / agentId / timestamps so the scan stays cheap.
  */
-async function discover(transcriptsDir: string): Promise<SubagentManifest[]> {
-    const out: SubagentManifest[] = [];
-    let projectDirs: string[];
-    try {
-        projectDirs = await readdir(transcriptsDir);
-    } catch {
+const discover = (
+    transcriptsDir: string,
+): Effect.Effect<SubagentManifest[], never, FileSystem.FileSystem | Path.Path> =>
+    Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const out: SubagentManifest[] = [];
+        // Original tolerance: any readdir failure (missing/unreadable) -> skip.
+        const projectDirs = yield* fs
+            .readDirectory(transcriptsDir)
+            .pipe(orAbsent<ReadonlyArray<string>>([]));
+        for (const projectDir of projectDirs) {
+            const fullProject = path.join(transcriptsDir, projectDir);
+            const entries = yield* fs
+                .readDirectory(fullProject)
+                .pipe(orAbsent<ReadonlyArray<string>>([]));
+            for (const entry of entries) {
+                if (entry.endsWith(".jsonl")) continue;
+                const subagentDir = path.join(fullProject, entry, "subagents");
+                const agentFiles = yield* fs
+                    .readDirectory(subagentDir)
+                    .pipe(orAbsent<ReadonlyArray<string>>([]));
+                for (const agentFile of agentFiles) {
+                    if (!agentFile.endsWith(".jsonl")) continue;
+                    if (!agentFile.startsWith("agent-")) continue;
+                    const fullPath = path.join(subagentDir, agentFile);
+                    const manifest = yield* parseManifest(fullPath, projectDir);
+                    if (manifest) out.push(manifest);
+                }
+            }
+        }
         return out;
-    }
-    for (const projectDir of projectDirs) {
-        const fullProject = join(transcriptsDir, projectDir);
-        let entries: string[];
-        try {
-            entries = await readdir(fullProject);
-        } catch {
-            continue;
-        }
-        for (const entry of entries) {
-            if (entry.endsWith(".jsonl")) continue;
-            const subagentDir = join(fullProject, entry, "subagents");
-            let agentFiles: string[];
-            try {
-                agentFiles = await readdir(subagentDir);
-            } catch {
-                continue;
-            }
-            for (const agentFile of agentFiles) {
-                if (!agentFile.endsWith(".jsonl")) continue;
-                if (!agentFile.startsWith("agent-")) continue;
-                const fullPath = join(subagentDir, agentFile);
-                const manifest = await parseManifest(fullPath, projectDir);
-                if (manifest) out.push(manifest);
-            }
-        }
-    }
-    return out;
-}
+    });
 
-async function parseManifest(
+const parseManifest = (
     filePath: string,
     projectDir: string,
-): Promise<SubagentManifest | null> {
-    let text: string;
-    try {
-        text = await Bun.file(filePath).text();
-    } catch {
-        return null;
-    }
+): Effect.Effect<SubagentManifest | null, never, FileSystem.FileSystem> =>
+    Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        // Original tolerance: any read failure -> null (file vanished/unreadable).
+        const text = yield* fs.readFileString(filePath).pipe(orAbsent<string | null>(null));
+        if (text === null) return null;
+        return buildManifest(text, filePath, projectDir);
+    });
+
+const buildManifest = (
+    text: string,
+    filePath: string,
+    projectDir: string,
+): SubagentManifest | null => {
     const lines = text.split("\n").filter((l) => l.length > 0);
     if (lines.length === 0) return null;
     const first = decodeJsonOrNull(lines[0] ?? "");
@@ -152,8 +154,9 @@ export const deriveClaudeSubagents = (
     Effect.gen(function* () {
         const cfg = yield* AxConfig;
         const db = yield* SurrealClient;
+        const fs = yield* FileSystem.FileSystem;
         if (opts.onProgress) yield* opts.onProgress({ phase: 1 });
-        const manifests = yield* Effect.promise(() => discover(cfg.paths.transcriptsDir));
+        const manifests = yield* discover(cfg.paths.transcriptsDir);
         if (opts.onProgress) {
             yield* opts.onProgress({
                 phase: 2,
@@ -221,7 +224,14 @@ export const deriveClaudeSubagents = (
             // its session/turns/tool_calls/spawned edge persist, so skipping is
             // output-equivalent. stat is cheap relative to the full re-parse +
             // DB writes below; we reuse it for the watermark write at the end.
-            const fileStat = yield* Effect.promise(() => stat(m.file).catch(() => null));
+            // Original tolerance: bare stat (FOLLOWS) with any error -> null.
+            const fileStat = yield* fs.stat(m.file).pipe(
+                Effect.map((info) => ({
+                    mtimeMs: Option.getOrElse(info.mtime, () => new Date(0)).getTime(),
+                    size: Number(info.size),
+                })),
+                orAbsent<{ mtimeMs: number; size: number } | null>(null),
+            );
             if (fileStat && wm.unchanged(m.file, fileStat.mtimeMs, fileStat.size)) {
                 skippedUnchanged += 1;
                 continue;

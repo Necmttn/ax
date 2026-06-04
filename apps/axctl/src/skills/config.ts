@@ -243,7 +243,7 @@ export const unparkSkill = (
     Effect.gen(function* () {
         const registry = yield* SkillSourceRegistry;
         const source = yield* registry.select(sourceName);
-        const ref = source.roots(opts?.repoRoot ?? null).find((r) => r.writable);
+        const ref = (yield* source.roots(opts?.repoRoot ?? null)).find((r) => r.writable);
         if (!ref) {
             return yield* new SkillNotFoundError({ name, candidates: [] });
         }

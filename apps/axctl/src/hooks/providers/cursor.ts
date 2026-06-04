@@ -1,5 +1,4 @@
 import { Effect, FileSystem } from "effect";
-import { join } from "node:path";
 import { posixPath } from "@ax/lib/shared/path";
 import { orAbsent } from "@ax/lib/shared/fs-error";
 import { HOME } from "@ax/lib/paths";
@@ -95,8 +94,8 @@ export const cursorProvider: HookProvider = {
     matcher: "none",
 
     configFiles: (scope: HookScope, repoRoot) => {
-        if (scope === "global") return [{ path: join(HOME, ".cursor", "hooks.json"), scope, format: "json" }];
-        if (scope === "project" && repoRoot) return [{ path: join(repoRoot, ".cursor", "hooks.json"), scope, format: "json" }];
+        if (scope === "global") return [{ path: posixPath.join(HOME, ".cursor", "hooks.json"), scope, format: "json" }];
+        if (scope === "project" && repoRoot) return [{ path: posixPath.join(repoRoot, ".cursor", "hooks.json"), scope, format: "json" }];
         return [];
     },
 

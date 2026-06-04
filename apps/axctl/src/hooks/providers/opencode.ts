@@ -1,5 +1,4 @@
 import { Effect, FileSystem } from "effect";
-import { join } from "node:path";
 import { posixPath } from "@ax/lib/shared/path";
 import { orAbsent } from "@ax/lib/shared/fs-error";
 import { HOME } from "@ax/lib/paths";
@@ -146,8 +145,8 @@ export const opencodeProvider: HookProvider = {
     matcher: "glob",
 
     configFiles: (scope: HookScope, repoRoot) => {
-        if (scope === "global") return [{ path: join(HOME, ".config", "opencode", "opencode.json"), scope, format: "json" }];
-        if (scope === "project" && repoRoot) return [{ path: join(repoRoot, "opencode.json"), scope, format: "json" }];
+        if (scope === "global") return [{ path: posixPath.join(HOME, ".config", "opencode", "opencode.json"), scope, format: "json" }];
+        if (scope === "project" && repoRoot) return [{ path: posixPath.join(repoRoot, "opencode.json"), scope, format: "json" }];
         return [];
     },
 
