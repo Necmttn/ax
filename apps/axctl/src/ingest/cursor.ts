@@ -15,6 +15,7 @@ import {
     type ToolCallSkillRelationWrite,
     type ToolCallWrite,
 } from "./evidence-writers.ts";
+import { buildCompactionStatements, extractCursorCompaction, type CompactionWrite } from "./compaction.ts";
 import { classifyTurnIntent } from "./intent-kind.ts";
 import { providerDelegationSignalAvailability } from "./delegation.ts";
 import { agentEventRecordKey, buildAgentEventStatements, buildAgentProviderStatements, type AgentEventWrite } from "./provider-events.ts";
@@ -74,6 +75,7 @@ export interface CursorExtract {
     toolCalls: ToolCallWrite[];
     providerEvents: AgentEventWrite[];
     skillRelations: ToolCallSkillRelationWrite[];
+    compactions: CompactionWrite[];
     skipped: number;
     warnings: string[];
 }
@@ -157,6 +159,7 @@ function emptyExtract(warnings: string[] = [], skipped = 0): CursorExtract {
         toolCalls: [],
         providerEvents: [],
         skillRelations: [],
+        compactions: [],
         skipped,
         warnings,
     };
@@ -601,11 +604,12 @@ function extractComposerData(
     const toolCalls: ToolCallWrite[] = [];
     const providerEvents: AgentEventWrite[] = [];
     const skillRelations: ToolCallSkillRelationWrite[] = [];
+    const compactions: CompactionWrite[] = [];
     let skipped = 0;
     const conversations = Array.isArray(data.conversations) ? data.conversations : [];
     if (!Array.isArray(data.conversations)) {
         warnings.push(`${sourceKey}: missing conversations array`);
-        return { sessions, turns, invocations, toolCalls, providerEvents, skillRelations, skipped: 1 };
+        return { sessions, turns, invocations, toolCalls, providerEvents, skillRelations, compactions, skipped: 1 };
     }
 
     for (const conversation of conversations) {
@@ -655,7 +659,7 @@ function extractComposerData(
         if (seq > 0) sessions.push(session);
     }
 
-    return { sessions, turns, invocations, toolCalls, providerEvents, skillRelations, skipped };
+    return { sessions, turns, invocations, toolCalls, providerEvents, skillRelations, compactions, skipped };
 }
 
 function extractComposerDiskKvData(
@@ -673,16 +677,17 @@ function extractComposerDiskKvData(
     const toolCalls: ToolCallWrite[] = [];
     const providerEvents: AgentEventWrite[] = [];
     const skillRelations: ToolCallSkillRelationWrite[] = [];
+    const compactions: CompactionWrite[] = [];
     let skipped = 0;
     const composerId = stringField(data, "composerId") ?? sourceKey.slice(CURSOR_COMPOSER_DATA_PREFIX.length);
     if (composerId.length === 0) {
         warnings.push(`${sourceKey}: missing composerId`);
-        return { sessions, turns, invocations, toolCalls, providerEvents, skillRelations, skipped: 1 };
+        return { sessions, turns, invocations, toolCalls, providerEvents, skillRelations, compactions, skipped: 1 };
     }
     const headers = Array.isArray(data.fullConversationHeadersOnly) ? data.fullConversationHeadersOnly : [];
     if (!Array.isArray(data.fullConversationHeadersOnly)) {
         warnings.push(`${sourceKey}: missing fullConversationHeadersOnly array`);
-        return { sessions, turns, invocations, toolCalls, providerEvents, skillRelations, skipped: 1 };
+        return { sessions, turns, invocations, toolCalls, providerEvents, skillRelations, compactions, skipped: 1 };
     }
 
     const session: CursorSession = {
@@ -748,7 +753,50 @@ function extractComposerDiskKvData(
     }
     if (seq > 0) sessions.push(session);
 
-    return { sessions, turns, invocations, toolCalls, providerEvents, skillRelations, skipped };
+    const summarizedComposers = Array.isArray((data as Record<string, unknown>).summarizedComposers)
+        ? ((data as Record<string, unknown>).summarizedComposers as unknown[]).filter(
+              (x): x is string => typeof x === "string",
+          )
+        : [];
+    if (summarizedComposers.length > 0) {
+        const compactionSeq = seq + 1;
+        const firstHeader = headers.find((header): header is Record<string, unknown> => isRecord(header));
+        const firstBubbleId =
+            (firstHeader ? stringField(firstHeader, "bubbleId") : null) ?? composerId;
+        const compactionTs = validTimestamp(data.createdAt, session.ended_at).ts;
+        const compactionEventId = `compaction:${composerId}`;
+        const eventKey = agentEventRecordKey({
+            provider: "cursor",
+            providerSessionId: session.id,
+            providerEventId: compactionEventId,
+            seq: compactionSeq,
+        });
+        providerEvents.push({
+            provider: "cursor",
+            providerSessionId: session.id,
+            axSessionId: session.id,
+            providerEventId: compactionEventId,
+            seq: compactionSeq,
+            ts: compactionTs,
+            type: "compaction",
+            role: null,
+            text: null,
+            metrics: { strategy: "encrypted" },
+        });
+        compactions.push(
+            extractCursorCompaction({
+                sessionId: session.id,
+                providerSessionId: composerId,
+                seq: compactionSeq,
+                ts: new Date(compactionTs),
+                agentEventKey: eventKey,
+                boundaryRef: firstBubbleId,
+                summarizedComposers,
+            }),
+        );
+    }
+
+    return { sessions, turns, invocations, toolCalls, providerEvents, skillRelations, compactions, skipped };
 }
 
 export function extractCursorStateDb(dbPath: string, options: CursorExtractOptions = {}): CursorExtract {
@@ -770,6 +818,7 @@ export function extractCursorStateDb(dbPath: string, options: CursorExtractOptio
         const toolCalls: ToolCallWrite[] = [];
         const providerEvents: AgentEventWrite[] = [];
         const skillRelations: ToolCallSkillRelationWrite[] = [];
+        const compactions: CompactionWrite[] = [];
         const warnings: string[] = [];
         let skipped = 0;
 
@@ -799,6 +848,7 @@ export function extractCursorStateDb(dbPath: string, options: CursorExtractOptio
                     toolCalls.push(...extracted.toolCalls);
                     providerEvents.push(...extracted.providerEvents);
                     skillRelations.push(...extracted.skillRelations);
+                    compactions.push(...extracted.compactions);
                     skipped += extracted.skipped;
                 } else if (row.key.startsWith(CURSOR_COMPOSER_DATA_PREFIX)) {
                     const extracted = extractComposerDiskKvData(payload, row.key, dbPath, dbIdentity, db, table, warnings);
@@ -808,12 +858,13 @@ export function extractCursorStateDb(dbPath: string, options: CursorExtractOptio
                     toolCalls.push(...extracted.toolCalls);
                     providerEvents.push(...extracted.providerEvents);
                     skillRelations.push(...extracted.skillRelations);
+                    compactions.push(...extracted.compactions);
                     skipped += extracted.skipped;
                 }
             }
         }
 
-        return { sessions, turns, invocations, toolCalls, providerEvents, skillRelations, skipped, warnings };
+        return { sessions, turns, invocations, toolCalls, providerEvents, skillRelations, compactions, skipped, warnings };
     } catch (error) {
         return emptyExtract(
             [`failed to extract Cursor state database ${dbPath}: ${error instanceof Error ? error.message : String(error)}`],
@@ -902,6 +953,7 @@ const buildCursorBatchStatements = (extract: CursorExtract, sourcePath: string):
     ...extract.skillRelations.flatMap((relation) =>
         buildRelateToolCallSkillStatements(relation),
     ),
+    ...buildCompactionStatements(extract.compactions),
 ];
 
 export const __testBuildCursorBatchStatements = buildCursorBatchStatements;
