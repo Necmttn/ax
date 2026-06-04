@@ -8,6 +8,7 @@ import type {
     RecallResponse,
     SkillGraphPayload,
     SessionCanvasPayload,
+    SessionOrchestration,
     SessionChildrenResponse,
     SessionComparePayload,
     SessionDetailPayload,
@@ -222,6 +223,8 @@ export const api = {
         const qs = usp.toString();
         return jsonFetch(qs ? `/api/session-canvas?${qs}` : "/api/session-canvas");
     },
+    sessionOrchestration: (id: string): Promise<SessionOrchestration> =>
+        jsonFetch(`/api/session-orchestration?id=${encodeURIComponent(id)}`),
     skillGraph: (params: { minCount?: number; limit?: number } = {}): Promise<SkillGraphPayload> => {
         const usp = new URLSearchParams();
         if (params.minCount != null) usp.set("minCount", String(params.minCount));

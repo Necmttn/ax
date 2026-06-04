@@ -580,6 +580,32 @@ export interface SessionCanvasNode {
     readonly corrections: number;
     readonly tone: string;              // success | warning | neutral
     readonly is_subagent: boolean;
+    readonly subagent_count: number;    // direct children spawned by this session
+    // Fractions [0..1] of the session's [started_at, ended_at] during which the
+    // main agent was blocked waiting on a subagent (merged child intervals).
+    // Drives the swimlane pill's inline work/wait rail.
+    readonly wait_segments: ReadonlyArray<{ readonly start: number; readonly end: number }>;
+}
+
+// Per-session orchestration drill-in: the main rail + every subagent it spawned,
+// with real timing so the UI can show fan-out / parallel / sequential + wait%.
+export interface SessionOrchestrationSubagent {
+    readonly id: string;
+    readonly nickname: string | null;
+    readonly task: string | null;       // the subagent's first user turn = what it was asked to do
+    readonly started_at: string | null;
+    readonly ended_at: string | null;
+    readonly tone: string;              // quick | long (by duration) | unknown
+    readonly duration_ms: number | null;
+}
+
+export interface SessionOrchestration {
+    readonly session_id: string;
+    readonly label: string;
+    readonly started_at: string | null;
+    readonly ended_at: string | null;
+    readonly wait_pct: number;          // 0..1 share of session blocked on subagents
+    readonly subagents: ReadonlyArray<SessionOrchestrationSubagent>;
 }
 
 export interface SessionCanvasEdge {

@@ -5,6 +5,7 @@ import type {
     SessionCanvasEdge,
     SessionCanvasNode,
     SessionCanvasPayload,
+    SessionOrchestration,
 } from "@ax/lib/shared/dashboard-types";
 
 // Session lineage canvas. Nodes come from `session_health` (precomputed
@@ -40,8 +41,12 @@ FROM session
 ORDER BY started_at DESC
 LIMIT $limit;`;
 
+// Spawn edges + child timing. `ts` = when the parent dispatched; child
+// started_at/ended_at give the subagent's run span. Used both for lineage edges
+// and to derive the parent's work/wait rail (blocked while a child runs).
 export const SPAWNED_EDGES_SQL = `
-SELECT <string>in AS source, <string>out AS target, (nickname ?? NONE) AS label
+SELECT <string>in AS source, <string>out AS target, (nickname ?? NONE) AS label,
+       ts AS spawn_ts, out.started_at AS child_start, out.ended_at AS child_end
 FROM spawned;`;
 
 // Conversational turn volume per session, counted directly from `turn` (works
@@ -103,6 +108,39 @@ const dateStr = (row: Record<string, unknown>, key: string): string | null => {
 const toneFor = (corrections: number, interruptions: number): string =>
     corrections > 0 || interruptions > 0 ? "warning" : "success";
 
+const ms = (iso: string | null): number | null => {
+    if (!iso) return null;
+    const t = new Date(iso).getTime();
+    return Number.isFinite(t) ? t : null;
+};
+
+interface ChildInterval { startMs: number; endMs: number; }
+
+/** Merge child run-intervals and express the time the main agent was blocked as
+ *  fractions [0..1] of the parent's [start, end]. Overlapping children (parallel
+ *  fan-out) collapse into one wait band. */
+export function waitSegments(
+    parentStart: string | null,
+    parentEnd: string | null,
+    children: ReadonlyArray<ChildInterval>,
+): Array<{ start: number; end: number }> {
+    const p0 = ms(parentStart);
+    const p1 = ms(parentEnd);
+    if (p0 === null || p1 === null || p1 <= p0 || children.length === 0) return [];
+    const span = p1 - p0;
+    const clipped = children
+        .map((c) => ({ a: Math.max(p0, c.startMs), b: Math.min(p1, c.endMs) }))
+        .filter((c) => c.b > c.a)
+        .sort((x, y) => x.a - y.a);
+    const merged: Array<{ a: number; b: number }> = [];
+    for (const c of clipped) {
+        const last = merged[merged.length - 1];
+        if (last && c.a <= last.b) last.b = Math.max(last.b, c.b);
+        else merged.push({ ...c });
+    }
+    return merged.map((m) => ({ start: (m.a - p0) / span, end: (m.b - p0) / span }));
+}
+
 export interface RowsToSessionCanvasInput {
     readonly nodeRows: ReadonlyArray<Record<string, unknown>>;
     readonly edgeRows: ReadonlyArray<Record<string, unknown>>;
@@ -148,17 +186,23 @@ export function rowsToSessionCanvas(input: RowsToSessionCanvasInput): SessionCan
     }
 
     const edges: SessionCanvasEdge[] = [];
+    const childIntervalsByParent = new Map<string, ChildInterval[]>();
+    const childCountByParent = new Map<string, number>();
     for (const row of input.edgeRows) {
         const source = str(row, "source");
         const target = str(row, "target");
         if (!source || !target || source === target) continue;
         subagentIds.add(target);
-        edges.push({
-            source,
-            target,
-            relation: "spawned",
-            label: str(row, "label"),
-        });
+        edges.push({ source, target, relation: "spawned", label: str(row, "label") });
+        childCountByParent.set(source, (childCountByParent.get(source) ?? 0) + 1);
+        // child run interval (start = spawn_ts or child_start; end = child_end)
+        const startMs = ms(dateStr(row, "child_start")) ?? ms(dateStr(row, "spawn_ts"));
+        const endMs = ms(dateStr(row, "child_end"));
+        if (startMs !== null && endMs !== null) {
+            const list = childIntervalsByParent.get(source) ?? [];
+            list.push({ startMs, endMs });
+            childIntervalsByParent.set(source, list);
+        }
     }
 
     for (const row of input.nodeRows) {
@@ -167,13 +211,15 @@ export function rowsToSessionCanvas(input: RowsToSessionCanvasInput): SessionCan
         const corrections = num(row, "corrections");
         const interruptions = num(row, "interruptions");
         const compactions = compactionsById.get(id) ?? [];
+        const startedAt = dateStr(row, "started_at");
+        const endedAt = dateStr(row, "ended_at");
         nodeById.set(id, {
             id,
             label: str(row, "label") ?? id,
             project: str(row, "project"),
             source: str(row, "source") ?? "claude",
-            started_at: dateStr(row, "started_at"),
-            ended_at: dateStr(row, "ended_at"),
+            started_at: startedAt,
+            ended_at: endedAt,
             size: Math.max(1, tokensById.get(id) ?? 0),
             turns: turnsById.get(id) ?? 0,
             epochs: compactions.length + 1,
@@ -182,6 +228,8 @@ export function rowsToSessionCanvas(input: RowsToSessionCanvasInput): SessionCan
             corrections,
             tone: toneFor(corrections, interruptions),
             is_subagent: false,
+            subagent_count: childCountByParent.get(id) ?? 0,
+            wait_segments: waitSegments(startedAt, endedAt, childIntervalsByParent.get(id) ?? []),
         });
     }
 
@@ -208,6 +256,8 @@ export function rowsToSessionCanvas(input: RowsToSessionCanvasInput): SessionCan
                 corrections: 0,
                 tone: "neutral",
                 is_subagent: true,
+                subagent_count: childCountByParent.get(id) ?? 0,
+                wait_segments: [],
             });
         }
     }
@@ -230,6 +280,97 @@ const clampLimit = (limit: number | undefined): number => {
     if (!Number.isFinite(value)) return 800;
     return Math.max(10, Math.min(2000, value));
 };
+
+// ---- Orchestration drill-in: one session's subagent timeline ----
+
+export const ORCH_PARENT_SQL = `
+SELECT
+    <string>id AS id,
+    (
+        (SELECT task_label FROM session_health WHERE session = $parent.id LIMIT 1)[0].task_label
+        ?? project ?? <string>id
+    ) AS label,
+    started_at, ended_at
+FROM session WHERE <string>id = $id LIMIT 1;`;
+
+export const ORCH_CHILDREN_SQL = `
+SELECT <string>out AS id, (nickname ?? NONE) AS nickname, ts,
+       out.started_at AS started_at, out.ended_at AS ended_at
+FROM spawned WHERE <string>in = $id ORDER BY ts ASC;`;
+
+// First user turn per child session = the subagent's task. ONE query over the
+// child id set (built from `out` refs) instead of a correlated per-child scan
+// (which was the issue-#77 trap - ~10s for 50+ children). Rows arrive seq-ASC,
+// so the first row seen per session is its lowest-seq (= the dispatch prompt).
+const orchTasksSql = (childRefs: ReadonlyArray<string>): string => `
+SELECT <string>session AS s, text_excerpt, seq
+FROM turn WHERE session IN [${childRefs.join(", ")}] AND role = "user" ORDER BY seq ASC;`;
+
+const QUICK_SUBAGENT_MS = 60_000;
+
+export function rowsToOrchestration(
+    parentRow: Record<string, unknown> | undefined,
+    childRows: ReadonlyArray<Record<string, unknown>>,
+    sessionId: string,
+    tasksById: ReadonlyMap<string, string> = new Map(),
+): SessionOrchestration {
+    const startedAt = parentRow ? dateStr(parentRow, "started_at") : null;
+    const endedAt = parentRow ? dateStr(parentRow, "ended_at") : null;
+    const intervals: ChildInterval[] = [];
+    const subagents = childRows.map((row) => {
+        const cs = dateStr(row, "started_at");
+        const ce = dateStr(row, "ended_at");
+        const sMs = ms(cs);
+        const eMs = ms(ce);
+        const duration = sMs !== null && eMs !== null && eMs >= sMs ? eMs - sMs : null;
+        if (sMs !== null && eMs !== null) intervals.push({ startMs: sMs, endMs: eMs });
+        const childId = str(row, "id") ?? "";
+        const taskRaw = tasksById.get(childId) ?? null;
+        return {
+            id: childId,
+            nickname: str(row, "nickname"),
+            task: taskRaw ? taskRaw.replace(/\s+/g, " ").slice(0, 120) : null,
+            started_at: cs,
+            ended_at: ce,
+            duration_ms: duration,
+            tone: duration === null ? "unknown" : duration < QUICK_SUBAGENT_MS ? "quick" : "long",
+        };
+    });
+    // wait_pct = total merged wait span / parent span
+    const segs = waitSegments(startedAt, endedAt, intervals);
+    const waitPct = segs.reduce((acc, s) => acc + (s.end - s.start), 0);
+    return {
+        session_id: sessionId,
+        label: parentRow ? (str(parentRow, "label") ?? sessionId) : sessionId,
+        started_at: startedAt,
+        ended_at: endedAt,
+        wait_pct: Math.min(1, Math.max(0, waitPct)),
+        subagents,
+    };
+}
+
+export const fetchSessionOrchestration = (
+    sessionId: string,
+): Effect.Effect<SessionOrchestration, DbError, SurrealClient> =>
+    Effect.gen(function* () {
+        const db = yield* SurrealClient;
+        const parent = yield* db.query<[Array<Record<string, unknown>>]>(ORCH_PARENT_SQL, { id: sessionId });
+        const children = yield* db.query<[Array<Record<string, unknown>>]>(ORCH_CHILDREN_SQL, { id: sessionId });
+        const childRows = children?.[0] ?? [];
+        // batched task fetch: one query over all child ids (the `id` field is the
+        // exact `session:⟨uuid⟩` record-ref literal, safe to inline in the IN set).
+        const childRefs = childRows.map((r) => str(r, "id")).filter((s): s is string => !!s);
+        const tasksById = new Map<string, string>();
+        if (childRefs.length > 0) {
+            const taskRows = yield* db.query<[Array<Record<string, unknown>>]>(orchTasksSql(childRefs), {});
+            for (const r of taskRows?.[0] ?? []) {
+                const s = str(r, "s");
+                const ex = str(r, "text_excerpt");
+                if (s && ex && !tasksById.has(s)) tasksById.set(s, ex); // first (lowest seq) wins
+            }
+        }
+        return rowsToOrchestration(parent?.[0]?.[0], childRows, sessionId, tasksById);
+    });
 
 export interface SessionCanvasParams {
     readonly limit?: number;

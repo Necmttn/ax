@@ -1,440 +1,294 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { api } from "../api.ts";
-import type { SessionCanvasNode, SessionCanvasPayload } from "@shared/dashboard-types.ts";
+import type {
+    SessionCanvasNode,
+    SessionCanvasPayload,
+    SessionOrchestration,
+    SessionOrchestrationSubagent,
+} from "@shared/dashboard-types.ts";
 
-// Session Canvas - infinite-canvas, semantic-zoom view of session lineage.
-//
-// HYBRID CAMERA: one transform matrix {x, y, scale} drives BOTH an SVG glyph
-// layer (cheap, all bands) and a CSS-transformed DOM overlay (rich HTML, near
-// zoom only). The band the camera is in decides which layer owns a node -
-// exactly the tldraw/Figma split. The DOM overlay is the shippable baseline of
-// the "HTML in canvas" plan; the WICG html-in-canvas WebGL path
-// (texElementImage2D, behind chrome://flags/#canvas-draw-element) is the
-// drop-in upgrade for the same node components - see the design spec.
+// Session Canvas - swimlanes (repo × time). Each pill is a session: width = √tokens,
+// color = outcome, red ticks = compaction, and an inline work/wait rail (solid =
+// main working, hatched = blocked on a subagent). Click a pill to drill into its
+// orchestration timeline (the subagent fan-out / parallel / sequential dance).
 
-const WORLD_W = 2600;
-const WORLD_H = 1800;
+const LANES = 8;            // top repos shown; rest collapse into "+ more"
+const ROW_H = 40;
+const PILL_H = 14;
+const TRACK_LEFT = 150;     // px reserved for lane labels
 
-// Semantic-zoom band thresholds (on camera scale).
-const ATLAS_MAX = 0.55;   // below -> dots only
-const LINEAGE_MAX = 1.7;  // atlas..this -> context bars + edges; above -> + DOM cards
-
-// Fixed screen-space card dimensions for the decluttered detail-band overlay.
-const CARD_W = 190;
-const CARD_H = 92;
-const CARD_GAP = 6;
-const MAX_CARDS = 16;
-
-type Band = "atlas" | "lineage" | "detail";
-const bandFor = (scale: number): Band =>
-    scale < ATLAS_MAX ? "atlas" : scale < LINEAGE_MAX ? "lineage" : "detail";
-
-interface Placed extends SessionCanvasNode {
-    x: number;
-    y: number;
-}
-
-const toneColor = (tone: string): string =>
-    tone === "warning" ? "#c98a2e" : tone === "success" ? "#2e9e57" : "#5b6b86";
-
-const pressureBorder = (p: string): string =>
-    p === "high" ? "#e0563a" : p === "medium" ? "#c98a2e" : p === "low" ? "#2e7e44" : "#2a3650";
-
-// Fruchterman-Reingold force layout in world space. Adapted from graph.tsx;
-// disconnected nodes (solo sessions with no spawn edges) settle on a loose grid.
-function layout(payload: SessionCanvasPayload): Placed[] {
-    const srcNodes = payload.nodes ?? [];
-    const srcEdges = payload.edges ?? [];
-    const nodes: Placed[] = srcNodes.map((node, index) => {
-        const angle = (index / Math.max(srcNodes.length, 1)) * Math.PI * 2;
-        const radius = Math.min(WORLD_W, WORLD_H) * 0.36;
-        return {
-            ...node,
-            x: WORLD_W / 2 + Math.cos(angle) * radius,
-            y: WORLD_H / 2 + Math.sin(angle) * radius,
-        };
-    });
-    if (nodes.length <= 1) {
-        if (nodes[0]) {
-            nodes[0].x = WORLD_W / 2;
-            nodes[0].y = WORLD_H / 2;
-        }
-        return nodes;
-    }
-    const byId = new Map(nodes.map((n) => [n.id, n]));
-    const edges = srcEdges
-        .map((e) => ({ s: byId.get(e.source), t: byId.get(e.target) }))
-        .filter((e): e is { s: Placed; t: Placed } => !!e.s && !!e.t);
-
-    const k = Math.sqrt((WORLD_W * WORLD_H) / nodes.length) * 0.7;
-    let temp = Math.min(WORLD_W, WORLD_H) / 8;
-
-    for (let iter = 0; iter < 90; iter++) {
-        const disp = new Map<Placed, { dx: number; dy: number }>();
-        for (const n of nodes) disp.set(n, { dx: 0, dy: 0 });
-        for (let i = 0; i < nodes.length; i++) {
-            for (let j = i + 1; j < nodes.length; j++) {
-                const a = nodes[i]!;
-                const b = nodes[j]!;
-                let dx = a.x - b.x;
-                let dy = a.y - b.y;
-                const dist = Math.sqrt(dx * dx + dy * dy) || 0.01;
-                if (dist > k * 4) continue;
-                const force = (k * k) / dist;
-                dx = (dx / dist) * force;
-                dy = (dy / dist) * force;
-                const ad = disp.get(a)!;
-                const bd = disp.get(b)!;
-                ad.dx += dx; ad.dy += dy;
-                bd.dx -= dx; bd.dy -= dy;
-            }
-        }
-        for (const e of edges) {
-            const dx = e.s.x - e.t.x;
-            const dy = e.s.y - e.t.y;
-            const dist = Math.sqrt(dx * dx + dy * dy) || 0.01;
-            const force = (dist * dist) / k;
-            const ux = (dx / dist) * force;
-            const uy = (dy / dist) * force;
-            const sd = disp.get(e.s)!;
-            const td = disp.get(e.t)!;
-            sd.dx -= ux; sd.dy -= uy;
-            td.dx += ux; td.dy += uy;
-        }
-        for (const n of nodes) {
-            const d = disp.get(n)!;
-            const len = Math.sqrt(d.dx * d.dx + d.dy * d.dy) || 0.01;
-            n.x += (d.dx / len) * Math.min(len, temp);
-            n.y += (d.dy / len) * Math.min(len, temp);
-            n.x = Math.max(40, Math.min(WORLD_W - 40, n.x));
-            n.y = Math.max(40, Math.min(WORLD_H - 40, n.y));
-        }
-        temp *= 0.95;
-    }
-    return nodes;
-}
-
-// size (conversational-turn volume) -> visual extent. The ratio is clamped to
-// 1 against a p95 scale-max (see `sizeScaleMax`) so a single huge outlier (e.g.
-// a Codex session with thousands of event rows) caps at the largest glyph
-// instead of squashing every other node to the floor. sqrt softens the spread.
-const dotRadius = (size: number, scaleMax: number): number =>
-    5 + Math.sqrt(Math.min(1, size / Math.max(scaleMax, 1))) * 22;
-const barWidth = (size: number, scaleMax: number): number =>
-    24 + Math.sqrt(Math.min(1, size / Math.max(scaleMax, 1))) * 150;
+const tMs = (iso: string | null): number | null => {
+    if (!iso) return null;
+    const t = new Date(iso).getTime();
+    return Number.isFinite(t) ? t : null;
+};
 
 const fmtTokens = (n: number): string =>
-    n >= 1_000_000
-        ? `${(n / 1_000_000).toFixed(1)}M`
-        : n >= 1000
-            ? `${(n / 1000).toFixed(n >= 10_000 ? 0 : 1)}k`
-            : `${n}`;
+    n >= 1_000_000 ? `${(n / 1_000_000).toFixed(1)}M` : n >= 1000 ? `${(n / 1000).toFixed(n >= 10_000 ? 0 : 1)}k` : `${n}`;
 
-interface Camera { x: number; y: number; scale: number; }
+const fmtDur = (msv: number | null): string => {
+    if (msv === null) return "?";
+    const s = Math.round(msv / 1000);
+    if (s < 60) return `${s}s`;
+    const m = Math.round(s / 60);
+    return m < 60 ? `${m}m` : `${Math.floor(m / 60)}h${m % 60}m`;
+};
+
+const repoOf = (n: SessionCanvasNode): string => {
+    const p = n.project ?? "unknown";
+    const m = p.match(/(?:Projects|workspaces|worktrees)[-/]([^-/]+)/);
+    return m?.[1] ?? p.split(/[-/]/).filter(Boolean).pop() ?? "unknown";
+};
+
+const toneFill = (tone: string): string =>
+    tone === "warning" ? "#3a2c12" : tone === "live" ? "#13294d" : "#173a27";
+const toneStroke = (tone: string): string =>
+    tone === "warning" ? "#d49a3a" : tone === "live" ? "#4f8bff" : "#3fbf7a";
 
 export function CanvasRoute() {
     const query = useQuery({
         queryKey: ["session-canvas"],
         queryFn: () => api.sessionCanvas({ limit: 800 }),
     });
-    const data = query.data ?? null;
+    const data: SessionCanvasPayload | null = query.data ?? null;
+    const [selected, setSelected] = useState<string | null>(null);
+    const [width, setWidth] = useState(1000);
 
-    const stageRef = useRef<HTMLDivElement | null>(null);
-    const [box, setBox] = useState({ w: 900, h: 640 });
-    const [cam, setCam] = useState<Camera>({ x: 0, y: 0, scale: 0.35 });
-    const [selectedId, setSelectedId] = useState<string | null>(null);
-    const dragRef = useRef<{ px: number; py: number; cx: number; cy: number } | null>(null);
-    const fittedRef = useRef(false);
+    // top-level sessions only (subagents live in the drill-in)
+    const sessions = useMemo(
+        () => (data?.nodes ?? []).filter((n) => !n.is_subagent && n.started_at),
+        [data],
+    );
 
-    useEffect(() => {
-        if (!stageRef.current) return;
-        const obs = new ResizeObserver((entries) => {
-            for (const e of entries) {
-                setBox({
-                    w: Math.max(320, Math.floor(e.contentRect.width)),
-                    h: Math.max(420, Math.floor(e.contentRect.height)),
-                });
-            }
-        });
-        obs.observe(stageRef.current);
-        return () => obs.disconnect();
-    }, []);
+    // lanes: group by repo, keep the most-active LANES, collapse the rest
+    const { lanes, laneOf } = useMemo(() => {
+        const byRepo = new Map<string, number>();
+        for (const s of sessions) byRepo.set(repoOf(s), (byRepo.get(repoOf(s)) ?? 0) + 1);
+        const ranked = [...byRepo.entries()].sort((a, b) => b[1] - a[1]).map(([r]) => r);
+        const keep = new Set(ranked.slice(0, LANES));
+        const lanes = [...ranked.slice(0, LANES), ...(ranked.length > LANES ? ["+ more"] : [])];
+        const laneOf = (s: SessionCanvasNode) => (keep.has(repoOf(s)) ? repoOf(s) : "+ more");
+        return { lanes, laneOf };
+    }, [sessions]);
 
-    const placed = useMemo(() => (data ? layout(data) : []), [data]);
-    const posById = useMemo(() => new Map(placed.map((n) => [n.id, n])), [placed]);
-    // p95 scale-max (not the true max) so a single huge outlier doesn't flatten
-    // the scale. True per-node size still shows in the cards/inspector.
-    const maxSize = useMemo(() => {
-        if (placed.length === 0) return 1;
-        const sorted = placed.map((n) => n.size).sort((a, b) => a - b);
-        const p95 = sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * 0.95))];
-        return Math.max(1, p95 ?? 1);
-    }, [placed]);
-
-    // Fit the world into the viewport once data + box are known.
-    useEffect(() => {
-        if (fittedRef.current || placed.length === 0) return;
-        const fitScale = Math.min(box.w / WORLD_W, box.h / WORLD_H) * 0.92;
-        setCam({
-            scale: fitScale,
-            x: (box.w - WORLD_W * fitScale) / 2,
-            y: (box.h - WORLD_H * fitScale) / 2,
-        });
-        fittedRef.current = true;
-    }, [placed, box]);
-
-    const band = bandFor(cam.scale);
-
-    const onWheel = (event: React.WheelEvent) => {
-        event.preventDefault();
-        const rect = stageRef.current?.getBoundingClientRect();
-        if (!rect) return;
-        const px = event.clientX - rect.left;
-        const py = event.clientY - rect.top;
-        const factor = Math.exp(-event.deltaY * 0.0012);
-        const next = Math.max(0.08, Math.min(6, cam.scale * factor));
-        // keep the world point under the cursor fixed
-        const wx = (px - cam.x) / cam.scale;
-        const wy = (py - cam.y) / cam.scale;
-        setCam({ scale: next, x: px - wx * next, y: py - wy * next });
-    };
-    const onPointerDown = (event: React.PointerEvent) => {
-        (event.target as Element).setPointerCapture?.(event.pointerId);
-        dragRef.current = { px: event.clientX, py: event.clientY, cx: cam.x, cy: cam.y };
-    };
-    const onPointerMove = (event: React.PointerEvent) => {
-        const d = dragRef.current;
-        if (!d) return;
-        setCam((c) => ({ ...c, x: d.cx + (event.clientX - d.px), y: d.cy + (event.clientY - d.py) }));
-    };
-    const onPointerUp = () => { dragRef.current = null; };
-
-    const fit = () => { fittedRef.current = false; setCam((c) => ({ ...c })); };
-    const zoomBy = (factor: number) => {
-        const cx = box.w / 2;
-        const cy = box.h / 2;
-        const next = Math.max(0.08, Math.min(6, cam.scale * factor));
-        const wx = (cx - cam.x) / cam.scale;
-        const wy = (cy - cam.y) / cam.scale;
-        setCam({ scale: next, x: cx - wx * next, y: cy - wy * next });
-    };
-
-    const selected = selectedId ? posById.get(selectedId) ?? null : null;
-    const connectedIds = useMemo(() => {
-        if (!selectedId || !data) return null;
-        const ids = new Set<string>([selectedId]);
-        for (const e of data.edges ?? []) {
-            if (e.source === selectedId) ids.add(e.target);
-            if (e.target === selectedId) ids.add(e.source);
+    // time range across visible sessions
+    const [t0, t1] = useMemo(() => {
+        let lo = Infinity, hi = -Infinity;
+        for (const s of sessions) {
+            const a = tMs(s.started_at); const b = tMs(s.ended_at) ?? a;
+            if (a !== null) { lo = Math.min(lo, a); hi = Math.max(hi, b ?? a); }
         }
-        return ids;
-    }, [data, selectedId]);
+        return Number.isFinite(lo) ? [lo, Math.max(hi, lo + 1)] : [0, 1];
+    }, [sessions]);
 
-    // DOM-overlay cards live in SCREEN space at fixed pixel size (not the scaled
-    // world layer) - map-label style, so they stay readable at any zoom instead
-    // of ballooning. Then a greedy declutter: project + viewport-cull, sort by
-    // priority (selected, then size), keep a card only if its screen rect does
-    // not overlap an already-kept one. "Fit what fits, drop the rest" - the
-    // dropped nodes still show as bars underneath. No collision lib needed.
-    const overlayCards = useMemo(() => {
-        if (band !== "detail") return [] as Array<{ n: Placed; x: number; y: number }>;
-        const candidates = placed
-            .map((n) => ({
-                n,
-                x: n.x * cam.scale + cam.x + (barWidth(n.size, maxSize) * cam.scale) / 2 + 8,
-                y: n.y * cam.scale + cam.y - CARD_H / 2,
-            }))
-            .filter((c) => c.x > -CARD_W && c.x < box.w && c.y > -CARD_H && c.y < box.h);
-        candidates.sort((a, b) =>
-            (b.n.id === selectedId ? 1 : 0) - (a.n.id === selectedId ? 1 : 0) || b.n.size - a.n.size,
-        );
-        const kept: Array<{ n: Placed; x: number; y: number }> = [];
-        for (const c of candidates) {
-            const hit = kept.some((k) =>
-                !(c.x + CARD_W + CARD_GAP < k.x || c.x > k.x + CARD_W + CARD_GAP ||
-                  c.y + CARD_H + CARD_GAP < k.y || c.y > k.y + CARD_H + CARD_GAP),
-            );
-            if (hit) continue;
-            kept.push(c);
-            if (kept.length >= MAX_CARDS) break;
+    const trackW = Math.max(200, width - TRACK_LEFT - 24);
+    const xOf = (msv: number) => ((msv - t0) / (t1 - t0)) * trackW;
+    const laneIndex = new Map(lanes.map((l, i) => [l, i]));
+
+    const dayTicks = useMemo(() => {
+        const out: Array<{ x: number; label: string }> = [];
+        const day = 86_400_000;
+        const start = Math.ceil(t0 / day) * day;
+        for (let t = start; t <= t1; t += day) {
+            out.push({ x: xOf(t), label: new Date(t).toLocaleDateString("en-US", { weekday: "short", day: "numeric" }) });
         }
-        return kept;
-    }, [band, placed, cam, box, maxSize, selectedId]);
+        return out;
+    }, [t0, t1, trackW]);
 
     return (
-        <section className="panel">
+        <section className="panel" style={{ display: "flex", flexDirection: "column", gap: 0 }}>
             <header>
                 <h2>Session Canvas</h2>
                 <span className="meta">
-                    {data ? `${data.nodes?.length ?? 0} sessions / ${data.edges?.length ?? 0} spawn edges - ${band}` : "lineage"}
+                    {data ? `${sessions.length} sessions · ${lanes.length} lanes` : "swimlanes"}
                 </span>
             </header>
 
-            <div style={{ display: "flex", gap: 8, alignItems: "center", margin: "8px 0", flexWrap: "wrap" }}>
-                <button type="button" onClick={() => zoomBy(1.3)}>+</button>
-                <button type="button" onClick={() => zoomBy(1 / 1.3)}>-</button>
-                <button type="button" onClick={fit}>Fit</button>
-                <span style={{ fontSize: 12, color: "#7e8ba3" }}>
-                    scale {cam.scale.toFixed(2)} - band <b>{band}</b> - scroll to zoom, drag to pan
-                </span>
-                {data?.warnings?.map((w) => (
-                    <span key={w} style={{ fontSize: 11, color: "#c98a2e" }}>{w}</span>
-                ))}
-            </div>
+            {query.isLoading ? <div style={{ padding: 16, color: "#7e8ba3" }}>Loading…</div> : null}
+            {query.error ? <div style={{ padding: 16, color: "#e0563a" }}>Error: {String(query.error)}</div> : null}
 
             <div
-                ref={stageRef}
-                onWheel={onWheel}
-                onPointerDown={onPointerDown}
-                onPointerMove={onPointerMove}
-                onPointerUp={onPointerUp}
-                onPointerLeave={onPointerUp}
-                style={{
-                    position: "relative",
-                    height: "70vh",
-                    background: "#0b0e14",
-                    border: "1px solid #1e2633",
-                    borderRadius: 10,
-                    overflow: "hidden",
-                    cursor: dragRef.current ? "grabbing" : "grab",
-                    touchAction: "none",
-                }}
+                ref={(el) => { if (el && el.clientWidth && el.clientWidth !== width) setWidth(el.clientWidth); }}
+                style={{ background: "#0a0d13", border: "1px solid #1b2330", borderRadius: 12, overflow: "hidden" }}
             >
-                {query.isLoading ? <div style={{ padding: 16, color: "#7e8ba3" }}>Loading canvas...</div> : null}
-                {query.error ? <div style={{ padding: 16, color: "#e0563a" }}>Error: {String(query.error)}</div> : null}
-
-                {/* SVG glyph layer - all bands. Camera via <g> transform. */}
-                <svg width={box.w} height={box.h} style={{ position: "absolute", inset: 0 }} aria-label="Session canvas">
-                    <g transform={`translate(${cam.x}, ${cam.y}) scale(${cam.scale})`}>
-                        {data?.edges?.map((e, i) => {
-                            const s = posById.get(e.source);
-                            const t = posById.get(e.target);
-                            if (!s || !t) return null;
-                            const active = !connectedIds || connectedIds.has(e.source) || connectedIds.has(e.target);
-                            return (
-                                <line
-                                    key={`${e.source}-${e.target}-${i}`}
-                                    x1={s.x} y1={s.y} x2={t.x} y2={t.y}
-                                    stroke="#2f6df0"
-                                    strokeWidth={1.4 / cam.scale}
-                                    opacity={active ? 0.5 : 0.12}
-                                />
-                            );
-                        })}
-                        {placed.map((n) => {
-                            const dim = connectedIds && !connectedIds.has(n.id);
-                            const fill = toneColor(n.tone);
-                            const stroke = pressureBorder(n.context_pressure);
-                            if (band === "atlas") {
-                                const r = dotRadius(n.size, maxSize);
-                                return (
-                                    <circle
-                                        key={n.id} cx={n.x} cy={n.y} r={r}
-                                        fill={`${fill}55`} stroke={fill} strokeWidth={1.2 / cam.scale}
-                                        opacity={dim ? 0.3 : 1}
-                                        style={{ cursor: "pointer" }}
-                                        onClick={() => setSelectedId(n.id)}
-                                    />
-                                );
-                            }
-                            // lineage + detail bands: context bar (width = size proxy)
-                            const w = barWidth(n.size, maxSize);
-                            const h = 22;
-                            return (
-                                <g key={n.id} transform={`translate(${n.x - w / 2}, ${n.y - h / 2})`}
-                                   opacity={dim ? 0.3 : 1} style={{ cursor: "pointer" }}
-                                   onClick={() => setSelectedId(n.id)}>
-                                    <rect width={w} height={h} rx={5}
-                                          fill={`${fill}44`} stroke={n.id === selectedId ? "#fff" : stroke}
-                                          strokeWidth={(n.id === selectedId ? 2 : 1.2) / cam.scale} />
-                                    {/* compaction epoch notches: one per boundary (epochs-1) */}
-                                    {Array.from({ length: Math.max(0, n.epochs - 1) }).map((_, k) => (
-                                        <rect key={k} x={(w * (k + 1)) / n.epochs - 1} y={-2}
-                                              width={2} height={h + 4} fill="#e0563a" />
-                                    ))}
-                                    {n.is_subagent ? (
-                                        <circle cx={6} cy={h / 2} r={3} fill="#4a3fa0" />
-                                    ) : null}
-                                    {cam.scale > 0.9 ? (
-                                        <text x={w / 2} y={h / 2 + 4} textAnchor="middle"
-                                              fontSize={11 / cam.scale} fill="#cfe0ff"
-                                              style={{ pointerEvents: "none" }}>
-                                            {n.label.length > 22 ? `${n.label.slice(0, 21)}…` : n.label}
-                                        </text>
-                                    ) : null}
-                                </g>
-                            );
-                        })}
-                    </g>
-                </svg>
-
-                {/* DOM overlay layer - SCREEN space, fixed pixel size, decluttered.
-                    Live HTML React nodes positioned at projected node coords; no
-                    camera scale so text stays crisp at any zoom. This is exactly the
-                    layer html-in-canvas would texture into WebGL (texElementImage2D). */}
-                <div style={{ position: "absolute", inset: 0, pointerEvents: "none" }}>
-                    {overlayCards.map(({ n, x, y }) => (
-                        <div
-                            key={n.id}
-                            onClick={() => setSelectedId(n.id)}
-                            style={{
-                                position: "absolute",
-                                left: x,
-                                top: y,
-                                width: CARD_W,
-                                height: CARD_H,
-                                boxSizing: "border-box",
-                                overflow: "hidden",
-                                background: "#0e1320ee",
-                                border: `1px solid ${n.id === selectedId ? "#fff" : toneColor(n.tone)}`,
-                                borderRadius: 6,
-                                padding: "6px 8px",
-                                fontSize: 11,
-                                color: "#9fc0ff",
-                                pointerEvents: "auto",
-                                cursor: "pointer",
-                            }}
-                        >
-                            <div style={{ fontWeight: 600, color: "#cfe0ff", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                                {n.label}
-                            </div>
-                            <div style={{ color: "#7e8ba3", marginTop: 2, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                                {n.project ?? "no project"} - {n.source}
-                            </div>
-                            <div style={{ color: "#7e8ba3", marginTop: 2 }}>
-                                {n.turns} turns - {fmtTokens(n.size)} tok - ctx {n.context_pressure}
-                                {n.epochs > 1 ? ` - ${n.epochs - 1}x compacted` : ""}
-                                {n.corrections > 0 ? ` - ${n.corrections} corr` : ""}
-                            </div>
-                            <Link
-                                to="/sessions/$sessionId/inspect"
-                                params={{ sessionId: n.id }}
-                                style={{ color: "#2f6df0", fontSize: 11 }}
-                            >
-                                inspect turns →
-                            </Link>
+                {/* day axis */}
+                <div style={{ position: "relative", height: 22, borderBottom: "1px solid #131922", marginLeft: TRACK_LEFT }}>
+                    {dayTicks.map((d, i) => (
+                        <span key={i} style={{ position: "absolute", left: d.x, top: 5, fontSize: 9, color: "#3f4c63", letterSpacing: ".05em", textTransform: "uppercase" }}>{d.label}</span>
+                    ))}
+                </div>
+                {/* lanes */}
+                <div style={{ position: "relative" }}>
+                    {lanes.map((lane) => (
+                        <div key={lane} style={{ position: "relative", height: ROW_H, borderBottom: "1px solid #0f141d" }}>
+                            <div style={{ position: "absolute", left: 14, top: ROW_H / 2 - 7, width: TRACK_LEFT - 20, fontSize: 11, color: lane === "+ more" ? "#55657f" : "#8b9ab3", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{lane}</div>
                         </div>
                     ))}
+                    {/* day gridlines */}
+                    {dayTicks.map((d, i) => (
+                        <div key={`g${i}`} style={{ position: "absolute", top: 0, bottom: 0, left: TRACK_LEFT + d.x, width: 1, background: "#0f141d" }} />
+                    ))}
+                    {/* pills - render subagent-heavy + selected last so they sit on
+                        top of overlapping solo pills (clickability + the interesting
+                        ones win the z-order) */}
+                    {[...sessions]
+                        .sort((a, b) =>
+                            (a.id === selected ? 1 : 0) - (b.id === selected ? 1 : 0) ||
+                            a.subagent_count - b.subagent_count)
+                        .map((s) => {
+                        const a = tMs(s.started_at); if (a === null) return null;
+                        const b = tMs(s.ended_at) ?? a;
+                        const li = laneIndex.get(laneOf(s)) ?? 0;
+                        const left = TRACK_LEFT + xOf(a);
+                        // width = √tokens (NOT duration - a session's [start,end] often
+                        // spans idle days). Placed at start-time; the inline rail shows
+                        // the blocked proportion regardless of pill width.
+                        void b;
+                        const w = 12 + Math.sqrt(Math.min(1, s.size / 2_000_000)) * 78;
+                        const top = li * ROW_H + ROW_H / 2 - PILL_H / 2;
+                        const isSel = s.id === selected;
+                        return (
+                            <div
+                                key={s.id}
+                                title={`${s.label}\n${repoOf(s)} · ${s.turns} turns · ${fmtTokens(s.size)} tok${s.subagent_count ? ` · ${s.subagent_count} subagents` : ""}${s.epochs > 1 ? ` · ${s.epochs - 1}× compacted` : ""}`}
+                                onClick={() => setSelected(isSel ? null : s.id)}
+                                style={{
+                                    position: "absolute", left, top, width: w, height: PILL_H, borderRadius: 7,
+                                    background: toneFill(s.tone), border: `1px solid ${isSel ? "#fff" : toneStroke(s.tone)}`,
+                                    cursor: "pointer", overflow: "hidden", boxSizing: "border-box",
+                                }}
+                            >
+                                {/* inline work/wait rail: hatched bands where main was blocked */}
+                                {s.wait_segments.map((seg, k) => (
+                                    <div key={k} style={{
+                                        position: "absolute", top: 0, bottom: 0,
+                                        left: `${seg.start * 100}%`, width: `${Math.max(0.5, (seg.end - seg.start) * 100)}%`,
+                                        background: "repeating-linear-gradient(45deg,#0e1830,#0e1830 2px,#0b1426 2px,#0b1426 4px)",
+                                        borderLeft: "1px solid #2a3f6688", borderRight: "1px solid #2a3f6688",
+                                    }} />
+                                ))}
+                                {/* compaction ticks */}
+                                {s.compactions.map((_, k) => (
+                                    <div key={`c${k}`} style={{ position: "absolute", top: -1, bottom: -1, left: `${((k + 1) / (s.compactions.length + 1)) * 100}%`, width: 1.5, background: "#ff6b4a" }} />
+                                ))}
+                                {/* subagent count dot */}
+                                {s.subagent_count > 0 ? (
+                                    <div style={{ position: "absolute", top: 1, right: 2, fontSize: 7, color: "#9fc0ff" }}>{s.subagent_count}</div>
+                                ) : null}
+                            </div>
+                        );
+                    })}
                 </div>
             </div>
 
-            {selected ? (
-                <div style={{ marginTop: 10, padding: 10, border: "1px solid #1e2633", borderRadius: 8 }}>
-                    <div style={{ fontWeight: 600 }}>{selected.label}</div>
-                    <div style={{ color: "#7e8ba3", fontSize: 12, marginTop: 4 }}>
-                        {selected.project ?? "no project"} - {selected.source} - {selected.turns} turns -
-                        {" "}{fmtTokens(selected.size)} tokens - ctx pressure {selected.context_pressure}
-                        {selected.epochs > 1 ? ` - ${selected.epochs - 1}x compacted` : ""}
-                        {selected.is_subagent ? " - subagent" : ""}
+            <div style={{ display: "flex", gap: 14, padding: "8px 2px", fontSize: 10, color: "#55657f", flexWrap: "wrap" }}>
+                <span>pill = session · width = √tokens · color = outcome</span>
+                <span style={{ color: "#8b9ab3" }}>▨ hatched = main blocked on subagent</span>
+                <span style={{ color: "#ff6b4a" }}>| = compaction</span>
+                <span>click a pill → orchestration timeline</span>
+            </div>
+
+            {selected ? <OrchestrationPanel sessionId={selected} onClose={() => setSelected(null)} /> : null}
+        </section>
+    );
+}
+
+// ---- Orchestration drill-in ----
+
+function laneAssign(subs: ReadonlyArray<{ a: number; b: number }>): number[] {
+    // greedy: place each bar in the first row whose last bar ended before it starts
+    const rowEnds: number[] = [];
+    return subs.map((s) => {
+        let row = rowEnds.findIndex((end) => end <= s.a);
+        if (row === -1) { row = rowEnds.length; rowEnds.push(s.b); }
+        else rowEnds[row] = s.b;
+        return row;
+    });
+}
+
+function OrchestrationPanel({ sessionId, onClose }: { sessionId: string; onClose: () => void }) {
+    const q = useQuery({
+        queryKey: ["orchestration", sessionId],
+        queryFn: () => api.sessionOrchestration(sessionId),
+    });
+    const d: SessionOrchestration | null = q.data ?? null;
+
+    const view = useMemo(() => {
+        if (!d) return null;
+        const p0 = tMs(d.started_at); const p1 = tMs(d.ended_at);
+        if (p0 === null || p1 === null || p1 <= p0) return null;
+        const span = p1 - p0;
+        const frac = (t: number) => Math.max(0, Math.min(1, (t - p0) / span));
+        const bars = d.subagents
+            .map((s: SessionOrchestrationSubagent) => {
+                const a = tMs(s.started_at); const b = tMs(s.ended_at) ?? a;
+                if (a === null || b === null) return null;
+                return { s, a: frac(a), b: frac(b) };
+            })
+            .filter((x): x is { s: SessionOrchestrationSubagent; a: number; b: number } => !!x);
+        const rows = laneAssign(bars);
+        return { bars, rows, rowCount: Math.max(1, ...rows.map((r) => r + 1)) };
+    }, [d]);
+
+    return (
+        <div style={{ marginTop: 12, background: "#0a0d13", border: "1px solid #1b2330", borderRadius: 12, overflow: "hidden" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 14px", borderBottom: "1px solid #161d29" }}>
+                <div>
+                    <div style={{ fontSize: 12, color: "#e6edf6", fontWeight: 600 }}>{d?.label ?? "…"}</div>
+                    <div style={{ fontSize: 10, color: "#55657f", marginTop: 2 }}>
+                        {d ? `${d.subagents.length} subagents · main blocked ${Math.round(d.wait_pct * 100)}%` : "loading orchestration…"}
                     </div>
-                    <Link to="/sessions/$sessionId/inspect" params={{ sessionId: selected.id }}
-                          style={{ color: "#2f6df0", fontSize: 13 }}>
-                        Open session (L3 - turn content) →
+                </div>
+                <button type="button" onClick={onClose} style={{ background: "none", border: "1px solid #2a3650", color: "#8b9ab3", borderRadius: 6, padding: "3px 9px", cursor: "pointer", fontSize: 11 }}>close</button>
+            </div>
+            {q.error ? <div style={{ padding: 14, color: "#e0563a" }}>Error: {String(q.error)}</div> : null}
+            {d && d.subagents.length === 0 ? <div style={{ padding: 14, color: "#7e8ba3", fontSize: 12 }}>No subagents - this session ran solo.</div> : null}
+            {view ? (
+                <div style={{ position: "relative", padding: "14px 16px 18px 70px" }}>
+                    {/* main rail */}
+                    <div style={{ position: "relative", height: 16, marginBottom: 8 }}>
+                        <span style={{ position: "absolute", left: -58, top: 1, fontSize: 10, color: "#cfe0ff" }}>main</span>
+                        <div style={{ position: "absolute", inset: 0, background: "#16345e", border: "1px solid #4f8bff", borderRadius: 4 }} />
+                        {/* compute wait bands from bars (merged) */}
+                        {mergeBands(view.bars.map((x) => ({ a: x.a, b: x.b }))).map((seg, k) => (
+                            <div key={k} style={{ position: "absolute", top: 0, bottom: 0, left: `${seg.a * 100}%`, width: `${Math.max(0.4, (seg.b - seg.a) * 100)}%`, background: "repeating-linear-gradient(45deg,#0e1830,#0e1830 4px,#0b1426 4px,#0b1426 8px)", border: "1px dashed #2a3f66" }} />
+                        ))}
+                    </div>
+                    <span style={{ position: "absolute", left: 12, top: 46, fontSize: 10, color: "#8b9ab3" }}>subagents</span>
+                    {/* subagent bars */}
+                    <div style={{ position: "relative", marginTop: 4, height: view.rowCount * 16 + 4 }}>
+                        {view.bars.map((x, i) => (
+                            <div
+                                key={x.s.id + i}
+                                title={`${x.s.task ?? x.s.nickname ?? x.s.id}\n${fmtDur(x.s.duration_ms)}`}
+                                style={{
+                                    position: "absolute", top: view.rows[i]! * 16, left: `${x.a * 100}%`,
+                                    width: `${Math.max(0.6, (x.b - x.a) * 100)}%`, height: 11, borderRadius: 6,
+                                    background: x.s.tone === "long" ? "#3a2c12" : "#173a27",
+                                    border: `1px solid ${x.s.tone === "long" ? "#d49a3a" : "#3fbf7a"}`,
+                                    overflow: "hidden", whiteSpace: "nowrap", fontSize: 8, color: "#cfe0ff", padding: "0 3px", lineHeight: "11px",
+                                }}
+                            >{(x.b - x.a) > 0.06 ? (x.s.task ?? "") : ""}</div>
+                        ))}
+                    </div>
+                    <Link to="/sessions/$sessionId/inspect" params={{ sessionId }} style={{ color: "#2f6df0", fontSize: 11, display: "inline-block", marginTop: 10 }}>
+                        open session turns →
                     </Link>
                 </div>
             ) : null}
-        </section>
+        </div>
     );
+}
+
+function mergeBands(intervals: ReadonlyArray<{ a: number; b: number }>): Array<{ a: number; b: number }> {
+    const sorted = [...intervals].filter((x) => x.b > x.a).sort((x, y) => x.a - y.a);
+    const out: Array<{ a: number; b: number }> = [];
+    for (const c of sorted) {
+        const last = out[out.length - 1];
+        if (last && c.a <= last.b) last.b = Math.max(last.b, c.b);
+        else out.push({ ...c });
+    }
+    return out;
 }
