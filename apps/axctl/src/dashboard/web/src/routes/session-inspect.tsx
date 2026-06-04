@@ -7,6 +7,7 @@ import { childrenByAnchorTurn, spawnAnchorSet, turnText } from "./inspector-filt
 import { spliceHookFires } from "@shared/hook-fire-splice.ts";
 import { FilterBar } from "./inspector-filter-bar.tsx";
 import { shortSessionId } from "@shared/session-id.ts";
+import { sessionProjectLabel } from "@shared/project-slug.ts";
 import type { InspectContentAtomDto, InspectContentBlockDto, InspectTurnContentDto } from "@shared/dashboard-types.ts";
 
 interface KindStyle { bg: string; fg: string; bar: string; label: string }
@@ -1314,6 +1315,15 @@ export function SessionInspectView({ sessionId }: { readonly sessionId: string }
             {data ? (
                 <>
                     <div style={{ padding: "8px 24px", color: "#64748b", fontSize: 12, fontFamily: "ui-monospace, monospace" }}>
+                        <span>project: </span>
+                        {data.project ? (
+                            <Link to="/projects/$slug" params={{ slug: data.project }} style={{ color: "#2563eb", fontWeight: 600 }}>
+                                {sessionProjectLabel(data.project, data.cwd)}
+                            </Link>
+                        ) : (
+                            <strong style={{ color: "#334155" }}>{sessionProjectLabel(data.project, data.cwd)}</strong>
+                        )}
+                        {" · "}
                         {data.turns.length} turns · {data.total_chars.toLocaleString()} chars
                         {data.total_hook_fires > 0 ? (
                             <> · <span style={{ color: "#065f46" }}>{data.total_hook_fires} hook decision{data.total_hook_fires === 1 ? "" : "s"}</span></>

@@ -235,6 +235,9 @@ interface ChildEdge {
 const PARENT_SQL = `
     SELECT <string>in AS parent, nickname FROM spawned WHERE out = $sid LIMIT 1;
 `;
+const SESSION_META_SQL = `
+    SELECT project, cwd FROM session WHERE id = $sid LIMIT 1;
+`;
 const CHILDREN_SQL = `
     SELECT <string>out AS child, <string>ts AS ts, tool, nickname
     FROM spawned
@@ -323,6 +326,24 @@ const resolveParent = (sessionId: string): Effect.Effect<ParentInfo, never, Surr
         }),
         "session-inspect resolveParent",
     ).pipe(Effect.map((v) => v ?? { parent_session: null, parent_nickname: null }));
+
+interface SessionMeta {
+    readonly project: string | null;
+    readonly cwd: string | null;
+}
+interface SessionMetaRow {
+    readonly project?: string | null;
+    readonly cwd?: string | null;
+}
+
+/** The session's canonical project key + cwd, for the inspect header label.
+ *  Defensive: swallows DB errors so the inspector still renders unlabelled. */
+const resolveSessionMeta = (sessionId: string): Effect.Effect<SessionMeta, never, SurrealClient> =>
+    queryOptional<SessionMetaRow, SessionMeta>(
+        interpolateRid(SESSION_META_SQL, toBareSessionId(sessionId)),
+        (row) => ({ project: row.project ?? null, cwd: row.cwd ?? null }),
+        "session-inspect resolveSessionMeta",
+    ).pipe(Effect.map((v) => v ?? { project: null, cwd: null }));
 
 /** Sessions this one spawned (its subagents). Same defensive shape as
  *  resolveParent - DB failure degrades to empty list. */
@@ -570,8 +591,9 @@ export const fetchSessionInspect = (
         // Normalise inbound id at the seam so the rest of the function operates
         // on a bare id (also what we echo back as payload.session_id).
         const bareSessionId = toBareSessionId(sessionId);
-        const [parent, childrenEdges, allHookFires, turnContent, tokenUsage, turnTokenUsage, found] = yield* Effect.all([
+        const [parent, sessionMeta, childrenEdges, allHookFires, turnContent, tokenUsage, turnTokenUsage, found] = yield* Effect.all([
             resolveParent(bareSessionId),
+            resolveSessionMeta(bareSessionId),
             resolveChildren(bareSessionId),
             resolveHookFires(bareSessionId),
             resolveTurnContent(bareSessionId),
@@ -738,6 +760,8 @@ export const fetchSessionInspect = (
             return {
                 session_id: bareSessionId,
                 source_path: found.path,
+                project: sessionMeta.project,
+                cwd: sessionMeta.cwd,
                 total_chars: totalChars,
                 token_usage: tokenUsage,
                 total_turns: turns.length,

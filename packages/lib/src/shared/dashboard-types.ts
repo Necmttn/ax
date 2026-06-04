@@ -866,6 +866,13 @@ export interface HookFireDto {
 export interface SessionInspectPayload {
     readonly session_id: SessionId;
     readonly source_path: string;
+    /** Canonical project key for this session (post git-stage canonicalization),
+     *  or null when the session never linked to a repository. The SPA labels it
+     *  via `sessionProjectLabel(project, cwd)`. */
+    readonly project: string | null;
+    /** Working directory the session ran in - the inspect header's fallback
+     *  label when `project` is absent or points at a bare container dir. */
+    readonly cwd: string | null;
     readonly total_chars: number;
     /** All-session totals across every turn, NOT just the returned slice. */
     readonly totals_by_kind: Partial<Record<InspectSpanKind, number>>;

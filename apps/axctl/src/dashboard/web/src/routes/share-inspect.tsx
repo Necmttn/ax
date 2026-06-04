@@ -121,6 +121,8 @@ export function inspectPayloadFromShare(artifact: ShareArtifact, sourcePath: str
     return {
         session_id: artifact.session.id,
         source_path: sourcePath,
+        project: null,
+        cwd: null,
         total_chars: totalChars,
         totals_by_kind: totals,
         token_usage: artifact.token_usage ?? null,

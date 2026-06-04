@@ -24,6 +24,36 @@ const CONTAINER_DIRS = new Set([
 
 const HOME_SEGMENTS = new Set(["Users", "home", "root"]);
 
+/**
+ * Encode an absolute repo/checkout path into the canonical `session.project`
+ * key. Mirrors exactly how Claude Code names its `~/.claude/projects/<slug>`
+ * directories - every `/` and `.` becomes `-`. Claude main-checkout sessions
+ * therefore already carry the canonical key, while codex / pi / opencode /
+ * cursor sessions (which store a raw cwd) and worktree checkouts converge onto
+ * the identical key once the git stage canonicalizes them off the shared
+ * `repository` edge. `prettifyProjectSlug` turns the result back into a label.
+ */
+export function pathToProjectSlug(path: string): string {
+    return path.replace(/[/.]/g, "-");
+}
+
+/**
+ * The display label for a session's project. Prefers the prettified
+ * `session.project` key; when that resolves to `(no repo)` (a bare container
+ * dir) or is absent, falls back to the cwd's last path segment, then to `-`.
+ * Shared by the sessions list and the inspect header so both label a session
+ * the same way.
+ */
+export function sessionProjectLabel(
+    project: string | null | undefined,
+    cwd: string | null | undefined,
+): string {
+    const pretty = project ? prettifyProjectSlug(project) : null;
+    if (pretty && pretty !== "(no repo)" && pretty !== "?") return pretty;
+    if (cwd) return cwd.split("/").filter(Boolean).pop() ?? "-";
+    return "-";
+}
+
 export function prettifyProjectSlug(raw: unknown): string {
     if (raw == null) return "?";
     const s = String(raw);

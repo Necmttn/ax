@@ -19,6 +19,7 @@ import {
     type RepositoryIdentityKind,
 } from "./repository-identity.ts";
 import { surrealString } from "@ax/lib/shared/surql";
+import { pathToProjectSlug } from "@ax/lib/shared/project-slug";
 import { executeStatementsWith } from "@ax/lib/shared/statement-exec";
 import { orAbsent } from "@ax/lib/shared/fs-error";
 import { posixPath } from "@ax/lib/shared/path";
@@ -526,6 +527,69 @@ export function buildSessionCheckoutUpdateStatement(
     return `UPDATE session SET repository = ${repositoryId}, checkout = ${checkoutId} WHERE ${buildSessionCheckoutWhere(repoPath, excludedRepoPaths)} RETURN NONE;`;
 }
 
+/**
+ * Canonicalize `session.project` onto a single key for every session linked to
+ * one logical repository. The harness parsers populate `project`
+ * inconsistently - Claude stores a `~/.claude/projects/<slug>` dir slug, while
+ * codex / pi / opencode / cursor store the raw cwd, and Claude worktrees get a
+ * distinct slug per checkout - so the SAME repo fragments into many `project`
+ * values and every exact-match grouping (project pages, workflow episodes)
+ * misses cross-harness and cross-worktree sessions. Keying the rewrite on the
+ * already-unified `repository` edge (rather than the cwd path) collapses all of
+ * them, including orphan-worktree sessions whose checkout dir is gone. The
+ * `project != ...` guard keeps the UPDATE a no-op once a session is canonical.
+ */
+export function buildCanonicalProjectUpdate(
+    repositoryId: string,
+    canonicalSlug: string,
+): string {
+    const slugLit = surrealString(canonicalSlug);
+    return `UPDATE session SET project = ${slugLit} WHERE repository = ${repositoryId} AND (project IS NONE OR project != ${slugLit}) RETURN NONE;`;
+}
+
+/**
+ * The canonical repo root for a group of same-repository checkouts. Prefer the
+ * `normal` checkout (its path IS the repo root); otherwise the shortest path is
+ * the closest-to-root worktree candidate. Used only as a fallback when the
+ * persisted `repository.root_path` is unavailable (e.g. a worktree-only run
+ * before any normal checkout was ever seen).
+ */
+function canonicalRootFromGroup(group: readonly RepoInfo[]): string | null {
+    const normal = group.find((r) => r.worktreeKind === "normal");
+    if (normal) return normal.path;
+    const sorted = [...group].sort((a, b) => a.path.length - b.path.length);
+    return sorted[0]?.path ?? null;
+}
+
+/**
+ * Collapse every `session.project` value for one logical repository onto a
+ * single canonical slug derived from the repo root. Runs once per repository
+ * group after its checkouts are written. Prefers the persisted
+ * `repository.root_path` (set by a prior run's normal checkout) so even a
+ * worktree-scoped run converges onto the main checkout's slug.
+ */
+const canonicalizeGroupProject = (
+    db: SurrealClientShape,
+    group: readonly RepoInfo[],
+): Effect.Effect<void, DbError> =>
+    Effect.gen(function* () {
+        const first = group[0];
+        if (!first) return;
+        const repositoryId = recordLiteral("repository", first.repositoryKey);
+        const rootResult = yield* db.query<[Array<{ root_path?: unknown }>]>(
+            `SELECT root_path FROM ${repositoryId};`,
+        );
+        const persisted = rootResult?.[0]?.[0]?.root_path;
+        const rootPath =
+            typeof persisted === "string" && persisted.length > 0
+                ? persisted
+                : canonicalRootFromGroup(group);
+        if (!rootPath) return;
+        yield* db.query(
+            buildCanonicalProjectUpdate(repositoryId, pathToProjectSlug(rootPath)),
+        );
+    });
+
 const linkedSessionCount = (
     db: SurrealClientShape,
     repoPath: string,
@@ -859,10 +923,11 @@ export const ingestGit = (
         const perGroup = yield* Effect.forEach(
             repoGroups,
             (group) =>
-                Effect.forEach(
-                    group,
-                    (repo) =>
-                        Effect.gen(function* () {
+                Effect.gen(function* () {
+                    const groupStats = yield* Effect.forEach(
+                        group,
+                        (repo) =>
+                            Effect.gen(function* () {
                             // Skip the history walk when HEAD + window are
                             // unchanged: the repo's commits/files already
                             // persist from a prior run (output-equivalent). The
@@ -903,8 +968,15 @@ export const ingestGit = (
                             }
                             return stats;
                         }),
-                    { concurrency: 1 },
-                ),
+                        { concurrency: 1 },
+                    );
+                    // Now that every checkout of this repository is written and
+                    // its sessions are linked to the repository edge, fold all
+                    // their project keys (claude slug, codex/pi/opencode raw
+                    // cwd, per-worktree slugs) onto one canonical slug.
+                    yield* canonicalizeGroupProject(db0, group);
+                    return groupStats;
+                }),
             { concurrency: 4 },
         );
         const perRepo = perGroup.flat();
