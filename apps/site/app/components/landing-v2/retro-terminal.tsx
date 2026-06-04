@@ -70,7 +70,7 @@ const SCENES: Scene[] = [
     harness: "claude",
     accent: "claude",
     name: "Claude Code",
-    meta: "Opus 4.7 · ~/Projects/ax",
+    meta: "Opus 4.8 · ~/Projects/ax",
     script: [
       { kind: "ok", text: "✓ webhook retries shipped - 6 tests green", delay: 320 },
       { kind: "say", text: "before I close this out, let me retro the session - catch anything I keep repeating.", delay: 840 },
@@ -177,7 +177,7 @@ const SCENES: Scene[] = [
     harness: "claude",
     accent: "claude",
     name: "Claude Code",
-    meta: "Opus 4.7 · ~/Projects/ax",
+    meta: "Opus 4.8 · ~/Projects/ax",
     script: [
       { kind: "user", text: "❯ I've got a pile of skills with no roles - can you sort out what each one does?", delay: 360 },
       { kind: "say", text: "I'll have ax draft a brief per skill, then work them in parallel.", delay: 840 },
