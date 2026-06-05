@@ -17,6 +17,7 @@ import type {
 // orchestration timeline (the subagent fan-out / parallel / sequential dance).
 
 const LANES = 8;            // top repos shown; rest collapse into "+ more"
+const AUTO_ZOOM = 6;        // at/above this zoom, the detail panel auto-follows the centered session
 const ROW_H = 40;           // min lane height (1 sub-row)
 const SUBROW_H = 18;        // height of each stacked sub-row within a lane
 const PILL_H = 14;
@@ -61,7 +62,7 @@ export function CanvasRoute() {
     // time-axis camera: zoom = horizontal scale, panX = px scrolled into content
     const [zoom, setZoom] = useState(1);
     const [panX, setPanX] = useState(0);
-    const [detailMode, setDetailMode] = useState<"inplace" | "focus" | "both">("both");
+    const [detailMode, setDetailMode] = useState<"inplace" | "focus" | "both">("focus");
     const qc = useQueryClient();
     const prefetchInspect = (id: string) =>
         qc.prefetchQuery({ queryKey: ["session-inspect", id], queryFn: () => api.sessionInspect(id), staleTime: 120_000 });
@@ -177,6 +178,24 @@ export function CanvasRoute() {
         return out;
     }, [t0, t1, contentW, clampedPan, trackW]);
 
+    // at deep zoom, auto-focus the session whose pill is nearest viewport-center
+    // so the detail panel follows what you scrub to - no clicking needed.
+    const autoFocusId = useMemo(() => {
+        if (zoom < AUTO_ZOOM) return null;
+        const center = trackW / 2;
+        let best: string | null = null, bestD = Infinity;
+        for (const s of sessions) {
+            const a = tMs(s.started_at); if (a === null) continue;
+            const px = xOf(a); if (px < -40 || px > trackW + 40) continue;
+            const w = 12 + Math.sqrt(Math.min(1, s.size / 2_000_000)) * 78;
+            const d = Math.abs(px + w / 2 - center);
+            if (d < bestD) { bestD = d; best = s.id; }
+        }
+        return best;
+    }, [zoom, sessions, trackW, contentW, clampedPan]);
+    // manual click pins a session; otherwise (deep zoom) follow the centered one
+    const focusId = selected ?? autoFocusId;
+
     // zoom toward an anchor x (px from track origin), keeping that time fixed
     const zoomAt = (anchorX: number, factor: number) => {
         const next = Math.max(1, Math.min(2000, zoom * factor));
@@ -269,7 +288,7 @@ export function CanvasRoute() {
                         ones win the z-order) */}
                     {[...sessions]
                         .sort((a, b) =>
-                            (a.id === selected ? 1 : 0) - (b.id === selected ? 1 : 0) ||
+                            (a.id === focusId ? 1 : 0) - (b.id === focusId ? 1 : 0) ||
                             a.subagent_count - b.subagent_count)
                         .map((s) => {
                         const a = tMs(s.started_at); if (a === null) return null;
@@ -281,7 +300,7 @@ export function CanvasRoute() {
                         void b;
                         const w = 12 + Math.sqrt(Math.min(1, s.size / 2_000_000)) * 78;
                         const top = topOf(s);
-                        const isSel = s.id === selected;
+                        const isSel = s.id === focusId;
                         // progressive label: grow into the gap before the next pill
                         const nextStart = nextStartById.get(s.id) ?? Infinity;
                         const nextX = nextStart === Infinity ? left + w + 320 : TRACK_LEFT + xOf(nextStart);
@@ -327,13 +346,14 @@ export function CanvasRoute() {
                             </Fragment>
                         );
                     })}
-                    {selected && (detailMode === "inplace" || detailMode === "both") ? (() => {
-                        const sel = sessions.find((s) => s.id === selected);
+                    {focusId && (detailMode === "inplace" || detailMode === "both") ? (() => {
+                        const fid = focusId;
+                        const sel = sessions.find((s) => s.id === fid);
                         const a = sel?.started_at ? tMs(sel.started_at) : null;
                         if (!sel || a === null) return null;
                         const x = Math.max(TRACK_LEFT, Math.min(Math.max(TRACK_LEFT, width - 380), TRACK_LEFT + xOf(a) + 12));
                         const y = Math.max(4, Math.min(Math.max(4, laneGeom.total - 250), topOf(sel) + 16));
-                        return <InPlaceDetail sessionId={selected} x={x} y={y} onClose={() => setSelected(null)} />;
+                        return <InPlaceDetail sessionId={fid} x={x} y={y} onClose={() => setSelected(null)} />;
                     })() : null}
                 </div>
             </div>
@@ -345,8 +365,8 @@ export function CanvasRoute() {
                 <span>click a pill → detail (toggle in-place / focus / both)</span>
             </div>
 
-            {selected && (detailMode === "focus" || detailMode === "both")
-                ? <FocusDetail sessionId={selected} onClose={() => setSelected(null)} />
+            {focusId && (detailMode === "focus" || detailMode === "both")
+                ? <FocusDetail sessionId={focusId} onClose={() => setSelected(null)} />
                 : null}
         </section>
     );
