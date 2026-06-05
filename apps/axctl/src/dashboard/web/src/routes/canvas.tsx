@@ -66,6 +66,13 @@ export function CanvasRoute() {
     const qc = useQueryClient();
     const prefetchInspect = (id: string) =>
         qc.prefetchQuery({ queryKey: ["session-summary", id], queryFn: () => api.sessionSummary(id), staleTime: 120_000 });
+    // hover preview: show the detail card on hover (data is prefetched + ~30ms,
+    // so it's instant). A small grace timer lets you move into the card.
+    const [hoverId, setHoverId] = useState<string | null>(null);
+    const hideTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const showHover = (id: string) => { if (hideTimer.current) clearTimeout(hideTimer.current); prefetchInspect(id); setHoverId(id); };
+    const keepHover = () => { if (hideTimer.current) clearTimeout(hideTimer.current); };
+    const scheduleHideHover = () => { if (hideTimer.current) clearTimeout(hideTimer.current); hideTimer.current = setTimeout(() => setHoverId(null), 160); };
     const dragRef = useRef<{ px: number; pan: number } | null>(null);
 
     // top-level sessions only (subagents live in the drill-in)
@@ -310,7 +317,8 @@ export function CanvasRoute() {
                             <Fragment key={s.id}>
                             <div
                                 title={`${s.label}\n${repoOf(s)} · ${s.turns} turns · ${fmtTokens(s.size)} tok${s.subagent_count ? ` · ${s.subagent_count} subagents` : ""}${s.epochs > 1 ? ` · ${s.epochs - 1}× compacted` : ""}`}
-                                onMouseEnter={() => prefetchInspect(s.id)}
+                                onMouseEnter={() => showHover(s.id)}
+                                onMouseLeave={scheduleHideHover}
                                 onClick={() => setSelected(isSel ? null : s.id)}
                                 style={{
                                     position: "absolute", left, top, width: w, height: PILL_H, borderRadius: 7,
@@ -354,6 +362,16 @@ export function CanvasRoute() {
                         const x = Math.max(TRACK_LEFT, Math.min(Math.max(TRACK_LEFT, width - 380), TRACK_LEFT + xOf(a) + 12));
                         const y = Math.max(4, Math.min(Math.max(4, laneGeom.total - 250), topOf(sel) + 16));
                         return <InPlaceDetail sessionId={fid} x={x} y={y} onClose={() => setSelected(null)} />;
+                    })() : null}
+                    {/* hover preview card (any pill, instant via prefetch) */}
+                    {hoverId && hoverId !== focusId ? (() => {
+                        const hid = hoverId;
+                        const sel = sessions.find((s) => s.id === hid);
+                        const a = sel?.started_at ? tMs(sel.started_at) : null;
+                        if (!sel || a === null) return null;
+                        const x = Math.max(TRACK_LEFT, Math.min(Math.max(TRACK_LEFT, width - 380), TRACK_LEFT + xOf(a) + 12));
+                        const y = Math.max(4, Math.min(Math.max(4, laneGeom.total - 250), topOf(sel) + 16));
+                        return <InPlaceDetail sessionId={hid} x={x} y={y} onClose={() => setHoverId(null)} onMouseEnter={keepHover} onMouseLeave={scheduleHideHover} />;
                     })() : null}
                 </div>
             </div>

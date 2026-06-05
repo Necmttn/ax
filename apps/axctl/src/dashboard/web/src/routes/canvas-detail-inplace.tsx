@@ -11,7 +11,10 @@ const fmtTokens = (n: number | null): string =>
     n == null ? "-" : n >= 1_000_000 ? `${(n / 1_000_000).toFixed(1)}M` : n >= 1000 ? `${Math.round(n / 1000)}k` : `${n}`;
 const trunc = (s: string | null, n: number): string | null => (s == null ? null : s.length > n ? `${s.slice(0, n - 1)}…` : s);
 
-export function InPlaceDetail({ sessionId, x, y, onClose }: { sessionId: string; x: number; y: number; onClose: () => void }) {
+export function InPlaceDetail({ sessionId, x, y, onClose, onMouseEnter, onMouseLeave }: {
+    sessionId: string; x: number; y: number; onClose: () => void;
+    onMouseEnter?: () => void; onMouseLeave?: () => void;
+}) {
     const q = useQuery({
         queryKey: ["session-summary", sessionId],
         queryFn: () => api.sessionSummary(sessionId),
@@ -19,11 +22,15 @@ export function InPlaceDetail({ sessionId, x, y, onClose }: { sessionId: string;
     const d: SessionSummary | null = q.data ?? null;
 
     const card = (children: ReactNode) => (
-        <div style={{
-            position: "absolute", left: x, top: y, width: 360, maxHeight: 270, overflow: "auto",
-            background: "#0e1422", border: "1px solid #4f8bff", borderRadius: 8, padding: "8px 10px",
-            pointerEvents: "auto", zIndex: 20, boxShadow: "0 8px 28px #000a", fontSize: 11,
-        }}>
+        <div
+            onMouseEnter={onMouseEnter}
+            onMouseLeave={onMouseLeave}
+            style={{
+                position: "absolute", left: x, top: y, width: 360, maxHeight: 270, overflow: "auto",
+                background: "#0e1422", border: "1px solid #4f8bff", borderRadius: 8, padding: "8px 10px",
+                pointerEvents: "auto", zIndex: 20, boxShadow: "0 8px 28px #000a", fontSize: 11,
+            }}
+        >
             <button type="button" onClick={onClose} style={{ position: "absolute", top: 6, right: 6, background: "none", border: "none", color: "#8b9ab3", cursor: "pointer", fontSize: 13 }}>×</button>
             {children}
         </div>
