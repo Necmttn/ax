@@ -23,23 +23,20 @@ import type {
 // their edges. `session_health` is now a per-row LEFT decoration for the size +
 // context-pressure signals only - same pattern as graph-explorer's FILE_ATTENTION_SQL.
 export const SESSION_NODES_SQL = `
-SELECT
-    <string>id AS id,
-    (
-        (SELECT task_label FROM session_health WHERE session = $parent.id LIMIT 1)[0].task_label
-        ?? project
-        ?? <string>id
-    ) AS label,
-    (project ?? NONE) AS project,
-    (source ?? "claude") AS source,
-    started_at,
-    ended_at,
-    ((SELECT context_pressure FROM session_health WHERE session = $parent.id LIMIT 1)[0].context_pressure ?? "unknown") AS context_pressure,
-    ((SELECT correction_turns FROM session_health WHERE session = $parent.id LIMIT 1)[0].correction_turns ?? 0) AS corrections,
-    ((SELECT interruptions FROM session_health WHERE session = $parent.id LIMIT 1)[0].interruptions ?? 0) AS interruptions
+SELECT <string>id AS id, (project ?? NONE) AS project, (source ?? "claude") AS source, started_at, ended_at
 FROM session
 ORDER BY started_at DESC
 LIMIT $limit;`;
+
+// session_health decoration (label / pressure / corrections), batched as ONE
+// scan + joined in TS - NOT 4 correlated subqueries per node (the issue-#77 trap
+// that made the node query ~27s once session_health grew via the backfill).
+export const SESSION_HEALTH_SQL = `
+SELECT <string>session AS s, task_label,
+       (context_pressure ?? "unknown") AS context_pressure,
+       (correction_turns ?? 0) AS corrections,
+       (interruptions ?? 0) AS interruptions
+FROM session_health;`;
 
 // Spawn edges + child timing. `ts` = when the parent dispatched; child
 // started_at/ended_at give the subagent's run span. Used both for lineage edges
@@ -147,9 +144,12 @@ export interface RowsToSessionCanvasInput {
     readonly turnRows: ReadonlyArray<Record<string, unknown>>;
     readonly tokenRows: ReadonlyArray<Record<string, unknown>>;
     readonly compactionRows: ReadonlyArray<Record<string, unknown>>;
+    readonly healthRows: ReadonlyArray<Record<string, unknown>>;
     readonly generatedAt?: string;
     readonly warnings?: ReadonlyArray<string>;
 }
+
+interface HealthInfo { label: string | null; context_pressure: string; corrections: number; interruptions: number; }
 
 export function rowsToSessionCanvas(input: RowsToSessionCanvasInput): SessionCanvasPayload {
     const nodeById = new Map<string, SessionCanvasNode>();
@@ -165,6 +165,17 @@ export function rowsToSessionCanvas(input: RowsToSessionCanvasInput): SessionCan
     for (const row of input.tokenRows) {
         const id = str(row, "s");
         if (id) tokensById.set(id, num(row, "tokens"));
+    }
+
+    const healthById = new Map<string, HealthInfo>();
+    for (const row of input.healthRows) {
+        const id = str(row, "s");
+        if (id) healthById.set(id, {
+            label: str(row, "task_label"),
+            context_pressure: str(row, "context_pressure") ?? "unknown",
+            corrections: num(row, "corrections"),
+            interruptions: num(row, "interruptions"),
+        });
     }
 
     // compaction boundaries per session, oldest-first, for epoch notches.
@@ -208,15 +219,17 @@ export function rowsToSessionCanvas(input: RowsToSessionCanvasInput): SessionCan
     for (const row of input.nodeRows) {
         const id = str(row, "id");
         if (!id || nodeById.has(id)) continue;
-        const corrections = num(row, "corrections");
-        const interruptions = num(row, "interruptions");
+        const health = healthById.get(id);
+        const corrections = health?.corrections ?? 0;
+        const interruptions = health?.interruptions ?? 0;
+        const project = str(row, "project");
         const compactions = compactionsById.get(id) ?? [];
         const startedAt = dateStr(row, "started_at");
         const endedAt = dateStr(row, "ended_at");
         nodeById.set(id, {
             id,
-            label: str(row, "label") ?? id,
-            project: str(row, "project"),
+            label: health?.label ?? project ?? id,
+            project,
             source: str(row, "source") ?? "claude",
             started_at: startedAt,
             ended_at: endedAt,
@@ -224,7 +237,7 @@ export function rowsToSessionCanvas(input: RowsToSessionCanvasInput): SessionCan
             turns: turnsById.get(id) ?? 0,
             epochs: compactions.length + 1,
             compactions,
-            context_pressure: str(row, "context_pressure") ?? "unknown",
+            context_pressure: health?.context_pressure ?? "unknown",
             corrections,
             tone: toneFor(corrections, interruptions),
             is_subagent: false,
@@ -241,9 +254,10 @@ export function rowsToSessionCanvas(input: RowsToSessionCanvasInput): SessionCan
             nodeById.set(id, { ...existing, is_subagent: true });
         } else {
             const compactions = compactionsById.get(id) ?? [];
+            const health = healthById.get(id);
             nodeById.set(id, {
                 id,
-                label: id,
+                label: health?.label ?? id,
                 project: null,
                 source: "claude",
                 started_at: null,
@@ -252,8 +266,8 @@ export function rowsToSessionCanvas(input: RowsToSessionCanvasInput): SessionCan
                 turns: turnsById.get(id) ?? 0,
                 epochs: compactions.length + 1,
                 compactions,
-                context_pressure: "unknown",
-                corrections: 0,
+                context_pressure: health?.context_pressure ?? "unknown",
+                corrections: health?.corrections ?? 0,
                 tone: "neutral",
                 is_subagent: true,
                 subagent_count: childCountByParent.get(id) ?? 0,
@@ -402,11 +416,16 @@ export const fetchSessionCanvas = (
             COMPACTIONS_SQL,
             {},
         );
+        const healthRows = yield* db.query<[Array<Record<string, unknown>>]>(
+            SESSION_HEALTH_SQL,
+            {},
+        );
         return rowsToSessionCanvas({
             nodeRows: nodeRows?.[0] ?? [],
             edgeRows: edgeRows?.[0] ?? [],
             turnRows: turnRows?.[0] ?? [],
             tokenRows: tokenRows?.[0] ?? [],
             compactionRows: compactionRows?.[0] ?? [],
+            healthRows: healthRows?.[0] ?? [],
         });
     });

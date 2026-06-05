@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { api } from "../api.ts";
@@ -55,6 +55,10 @@ export function CanvasRoute() {
     const data: SessionCanvasPayload | null = query.data ?? null;
     const [selected, setSelected] = useState<string | null>(null);
     const [width, setWidth] = useState(1000);
+    // time-axis camera: zoom = horizontal scale, panX = px scrolled into content
+    const [zoom, setZoom] = useState(1);
+    const [panX, setPanX] = useState(0);
+    const dragRef = useRef<{ px: number; pan: number } | null>(null);
 
     // top-level sessions only (subagents live in the drill-in)
     const sessions = useMemo(
@@ -84,7 +88,12 @@ export function CanvasRoute() {
     }, [sessions]);
 
     const trackW = Math.max(200, width - TRACK_LEFT - 24);
-    const xOf = (msv: number) => ((msv - t0) / (t1 - t0)) * trackW;
+    const contentW = trackW * zoom;
+    const maxPan = Math.max(0, contentW - trackW);
+    const clampedPan = Math.min(maxPan, Math.max(0, panX));
+    // ms -> px within the visible track (after zoom + horizontal pan)
+    const xOf = (msv: number) => ((msv - t0) / (t1 - t0)) * contentW - clampedPan;
+
     const laneIndex = new Map(lanes.map((l, i) => [l, i]));
 
     const dayTicks = useMemo(() => {
@@ -92,10 +101,37 @@ export function CanvasRoute() {
         const day = 86_400_000;
         const start = Math.ceil(t0 / day) * day;
         for (let t = start; t <= t1; t += day) {
-            out.push({ x: xOf(t), label: new Date(t).toLocaleDateString("en-US", { weekday: "short", day: "numeric" }) });
+            const x = ((t - t0) / (t1 - t0)) * contentW - clampedPan;
+            if (x < -40 || x > trackW + 40) continue;
+            out.push({ x, label: new Date(t).toLocaleDateString("en-US", { weekday: "short", day: "numeric" }) });
         }
         return out;
-    }, [t0, t1, trackW]);
+    }, [t0, t1, contentW, clampedPan, trackW]);
+
+    // zoom toward an anchor x (px from track origin), keeping that time fixed
+    const zoomAt = (anchorX: number, factor: number) => {
+        const next = Math.max(1, Math.min(80, zoom * factor));
+        const worldFrac = (clampedPan + anchorX) / contentW;          // time under anchor
+        const nextContentW = trackW * next;
+        setPanX(Math.max(0, worldFrac * nextContentW - anchorX));
+        setZoom(next);
+    };
+    const onWheel = (e: React.WheelEvent) => {
+        if (e.deltaY === 0) return;
+        e.preventDefault();
+        const rect = e.currentTarget.getBoundingClientRect();
+        const anchor = e.clientX - rect.left - TRACK_LEFT;
+        zoomAt(Math.max(0, anchor), Math.exp(-e.deltaY * 0.0015));
+    };
+    const onPointerDown = (e: React.PointerEvent) => {
+        (e.target as Element).setPointerCapture?.(e.pointerId);
+        dragRef.current = { px: e.clientX, pan: clampedPan };
+    };
+    const onPointerMove = (e: React.PointerEvent) => {
+        const d = dragRef.current; if (!d) return;
+        setPanX(Math.max(0, Math.min(maxPan, d.pan - (e.clientX - d.px))));
+    };
+    const onPointerUp = () => { dragRef.current = null; };
 
     return (
         <section className="panel" style={{ display: "flex", flexDirection: "column", gap: 0 }}>
@@ -109,9 +145,24 @@ export function CanvasRoute() {
             {query.isLoading ? <div style={{ padding: 16, color: "#7e8ba3" }}>Loading…</div> : null}
             {query.error ? <div style={{ padding: 16, color: "#e0563a" }}>Error: {String(query.error)}</div> : null}
 
+            <div style={{ display: "flex", gap: 6, alignItems: "center", margin: "6px 0" }}>
+                {([["−", 1 / 1.4], ["+", 1.4]] as const).map(([sym, f]) => (
+                    <button key={sym} type="button" onClick={() => zoomAt(trackW / 2, f)}
+                        style={{ width: 26, height: 24, background: "#0e1422", border: "1px solid #2a3650", color: "#cfe0ff", borderRadius: 6, cursor: "pointer" }}>{sym}</button>
+                ))}
+                <button type="button" onClick={() => { setZoom(1); setPanX(0); }}
+                    style={{ height: 24, padding: "0 9px", background: "#0e1422", border: "1px solid #2a3650", color: "#cfe0ff", borderRadius: 6, cursor: "pointer", fontSize: 11 }}>Fit</button>
+                <span style={{ fontSize: 11, color: "#55657f" }}>{zoom.toFixed(1)}× · scroll to zoom, drag to pan</span>
+            </div>
+
             <div
                 ref={(el) => { if (el && el.clientWidth && el.clientWidth !== width) setWidth(el.clientWidth); }}
-                style={{ background: "#0a0d13", border: "1px solid #1b2330", borderRadius: 12, overflow: "hidden" }}
+                onWheel={onWheel}
+                onPointerDown={onPointerDown}
+                onPointerMove={onPointerMove}
+                onPointerUp={onPointerUp}
+                onPointerLeave={onPointerUp}
+                style={{ background: "#0a0d13", border: "1px solid #1b2330", borderRadius: 12, overflow: "hidden", cursor: dragRef.current ? "grabbing" : "grab", touchAction: "none" }}
             >
                 {/* day axis */}
                 <div style={{ position: "relative", height: 22, borderBottom: "1px solid #131922", marginLeft: TRACK_LEFT }}>
