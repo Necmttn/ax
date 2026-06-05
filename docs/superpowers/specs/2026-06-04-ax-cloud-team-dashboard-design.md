@@ -1,157 +1,188 @@
-# ax cloud - team adoption & propagation dashboard (design)
+# ax cloud - team layer (design, post-grill)
 
-Date: 2026-06-04
+Date: 2026-06-04 (grilled 2026-06-05)
 Status: validated design, pre-plan
-Origin: brainstorm with Neco; pain articulated by Mitch Nick (ex-RevvedUp)
+Origin: brainstorm with Neco; pain articulated by Mitch Nick (ex-RevvedUp);
+sharpened by a /grill-me pass (13 forks) + competitive signal (Everlier LLM
+gateway, Pocock/TanStack Intent skill distribution).
 
-## One-line
+## The beam (decision #1 - everything hangs on this)
 
-Open-core layer on top of ax: the local OSS tool stays a private dev companion;
-a hosted dashboard sells eng managers **ROI on AI spend + discovery and
-propagation of siloed excellence**, fed only by aggregates the laptops compute.
+**ax is never the substrate. ax is the meaning layer over whatever substrate the
+team already has.** Collection (transcripts | LLM gateway), distribution
+(npm | git), and history (git | jj) are commodities ax *reads from and
+annotates* - never things ax *becomes.* This single principle resolved three
+separate "should we build X?" forks identically (gateway, npm, VCS): building the
+substrate is always a different, crowded, ops-heavy company that destroys ax's
+only moat. The moat is **meaning**: what's used, why it changed, whether it
+worked, what should spread.
 
 ## The pain (why anyone pays)
 
-An eng manager spends real money and effort on AI tooling and is blind to the return:
+A team spends real money + effort on AI tooling and is blind to the return:
 
-- **Spend ROI** - pays ~$200/seat (Claude Max / Cursor / etc). No idea who actually
-  uses it day-to-day vs. who has a dead seat. The bill is real; the usage is invisible.
-- **Siloed excellence** - builds/buys internal skills and tooling, can't see how (or
-  whether) engineers use them. A great workflow - e.g. one engineer's OpenTelemetry
-  skill - lives on a single laptop and never spreads. The best performer's recipe
-  stays trapped.
+- **Spend / sprawl** - pays ~$200/seat across many tools; engineers swap
+  models/providers/harnesses weekly. Each provider console is a silo; nobody sees
+  *across* them, deduped, per person. Dead seats and duplicate seats are invisible.
+- **Siloed excellence** - a great workflow (one engineer's OTel skill) lives on one
+  laptop and never spreads. The best performer's recipe stays trapped.
 
-Both are the *same blindness*: the manager can't see what's happening inside his
-team's agents. One telemetry engine answers both.
+Same blindness, one engine. Provider consoles structurally **can't** close it
+(they won't show competitor spend, and they only meter tokens, never *outcome*).
 
-## Decisions locked in brainstorm
+## Two positionings, one engine (don't pick the buyer in a doc - pick it in the market)
 
-1. **Buyer = eng manager / team lead** (7–15 dev teams). Follow the money; poke the
-   spend-ROI + adoption pain. Per-person *utilization* visibility is a feature here,
-   not a bug.
+Qualify buyers on **AI-spend + a named owner of that spend**, not headcount
+(AI-native teams are small but spend heavily). Run both as landing pages / pitches;
+whichever lands/pays first sets the headline.
 
-2. **Open-core split.**
-   - **ax local (OSS, free)** - the dev tool. Already built. All raw data stays local.
-   - **ax cloud (hosted, paid)** - thin aggregator + manager dashboard.
+- **Positioning A - eng-manager / spend + adoption** (`/teams`):
+  "See what your team's AI spend is actually buying - every seat, every harness,
+  without reading anyone's code."
+- **Positioning B - applied-AI team / governed skill sync** (`/registry`):
+  "Ship curated skills to your whole team; their agents send fixes back."
+  ICP: applied-AI teams arming **non-engineer domain experts** (legal, finance,
+  consulting). Acute, present pain - they're hand-rolling repo locks today.
 
-3. **B's transparency buys A's permission.** A surveillance dashboard normally dies
-   on distrust. Because the collector is local + open-source, a dev can read the code
-   and verify exactly what leaves the machine. OSS local is the trust anchor that
-   makes a paid manager dashboard survivable.
+## The wedge: governed skill sync + suggestion loop (was: spend dashboard)
 
-4. **Data boundary (the privacy line).**
-   - Raw transcripts, prompts, code, full analytics/classification/exploration -
-     **never leave the laptop.**
-   - Per-person **utilization** (tokens, active days, sessions, per-harness) ships
-     out - it's the seat the manager pays for, arguably already on the provider
-     admin console.
-   - **Behavior** (what you worked on, workflows) ships out only as **team
-     aggregates** + **opt-in skill shares.** Manager learns "the team underuses X,"
-     never "Bob wrote bad code Tuesday."
-
-5. **Architecture principle: "edge computes, ship derivatives."** The laptop is both
-   the privacy boundary and the compute boundary. Local ax does the heavy lifting
-   (parsing, classification, weighting, workflow extraction). The cloud only receives
-   small derived rows. This solves privacy *and* hosting cost in one move - no
-   terabytes of transcripts to store, move, or process. Cloud stays cheap while value
-   compounds.
-
-6. **Wedge = utilization audit fronted by the gift (option C).** First paid surface
-   is a spend-ROI report ("here's your AI spend, here's usage per seat, here are N
-   dead seats costing $X/mo") - the cheapest aggregate to build and the fastest
-   "yes." The *same* report surfaces hidden gold ("Alice built an OTel skill used
-   40x, nobody else has it - share it?"). The cold number gets the manager to pay;
-   the gift is what he shows the team so it doesn't read as spyware.
-
-## Architecture
+The grill flipped the wedge. "Adoption analytics" is a vitamin; "my domain experts
+keep polluting the skill repo and I can't cleanly ship them curated, current
+skills" is a painkiller someone feels *now*.
 
 ```
-+- each dev laptop ---------------+
-| ax local (OSS)                  |
-|  - parse 5 harness transcripts  |   raw transcripts, prompts, code
-|  - SurrealDB (local)            |   ----- NEVER LEAVE -----
-|  - classify / weight / extract  |
-|  - compute DERIVATIVES ---------+--+  small aggregate rows only
-+---------------------------------+  |  (opt-in, dev-verifiable)
-                                     v
-                         +- ax cloud (hosted, paid) -+
-                         |  thin aggregation layer    |
-                         |  team rollups + dedup       |
-                         |  manager dashboard          |
-                         +-----------------------------+
+author/edit skill → govern (review gate) → sync down to laptops
+   ↑                                                   ↓
+recommend promote/deprecate ←── ax ranks by usage ──── consumer agent uses it
+   (intelligence layer)            evidence                → hits edge case
+                                                           → emits suggestion up
 ```
 
-### What syncs (the derivative payload) - first cut
+- **Governance = suggestion/review loop, not RBAC walls.** Consumers aren't locked
+  out; their *agent* proposes changes upstream; authors accept/reject; updated skill
+  re-syncs. Clean repo preserved by the gate, made smart by ax ranking. This is
+  ax's existing `improve recommend/accept/lint` machinery pointed at a multiplayer
+  registry.
+- **Source of truth:** managed skills sync **read-only** locally (the registry
+  already distinguishes `writable` sources). A local edit becomes a ranked
+  suggestion (≈ a PR via the VCS's own gate) or a clearly-labeled local override -
+  never an in-place clobber, never silent drift. Personal/unmanaged skills stay
+  fully writable.
+- **Skill-edit = first-class intent event.** ax already dual-writes agent events; an
+  `Edit`-skill tool call + surrounding reasoning + post-change outcome = *why this
+  changed and did it work* - queryable. git/jj/npm/gateway structurally cannot do
+  this.
 
-Per dev, per sync window (e.g. daily), opt-in:
+Spend/adoption analytics demotes to **v1** and rides the same engine as the
+*evidence layer* that makes the registry smart (promote/deprecate, "what's working").
 
-- **Utilization row** - per harness: token totals (in/out), active days, session
-  count, seat = paid/dead flag. Identifiable to the dev (it's the seat).
-- **Skill/tool usage rollup** - `{skill_id, invocations, role, last_used}` per dev.
-  Drives the heatmap and the dedup/propagation engine. Names of skills, not contents.
-- **Opt-in skill share** - when a dev publishes a local skill, its SKILL.md +
-  extracted workflow recipe goes to the team library. Explicit action, never automatic.
-- **Aggregate behavior signals** - failure->recovery counts, retro verdicts, hook
-  effectiveness - rolled to team level, not per-person attributable.
+## Privacy: the suggestion channel can't leak what the privacy line protects
 
-Explicitly NOT synced: transcript text, prompts, file contents, diffs, the substance
-of "what you worked on."
+The specificity that makes a suggestion useful ("failed on M&A indemnity clauses")
+is the sensitive context - attorney-client privileged for the legal ICP. So:
 
-### How it syncs
+- **Upstream carries failure-shape, not content.** `{skill_id, failure_mode, step,
+  frequency}` - never the payload that triggered it.
+- **The local agent is the redaction proxy** ("become the proxy"): on failure it
+  synthesizes a **runnable, PII-stripped synthetic repro test** that reproduces the
+  failure deterministically. Upstream gets a *failing regression test*, never the
+  real matter. Author fixes skill → test goes green → re-syncs. The registry accrues
+  a regression suite born from real failures, zero privileged content.
+- **Two-tier redaction (per-registry policy flag):**
+  - *Light (default)* - best-effort redact + auto-share. Frictionless, non-regulated.
+  - *Regulated* - adversarial recover-pass (a second local pass tries to recover any
+    real identifier; fail → never leaves) + local consent gate (author/consumer sees
+    the exact artifact, OSS-verifiable) + provenance stamp (redaction method +
+    reviewer, auditable/revocable).
 
-- Opt-in at install (`ax cloud join <team>` or similar). Dev sees and can dump the
-  exact payload before it sends (OSS, verifiable).
-- Push from the existing local watcher / ingest cadence; derivative computed locally,
-  posted to cloud. Frequency: daily batch is fine for v0 (no realtime need).
-- Auth: team token. Transport: HTTPS POST of derived rows.
+## Architecture: edge computes, ship derivatives
 
-## Dashboard surfaces (manager-facing)
+The laptop is both the privacy boundary and the compute boundary. Raw transcripts,
+prompts, code - never leave. ax local computes small **derived rows**; the cloud is
+a thin aggregator + registry + dashboard. Solves privacy *and* hosting cost at once
+(no terabytes of transcripts to store/move).
 
-1. **Spend ROI (the paywall + wedge)** - total AI spend, usage per seat, dead-seat
-   list with $ waste, trend. Fronted by hidden-gold callouts (siloed high-value
-   skills) so screen #1 is "you're wasting $X *and* here's hidden gold."
-2. **Tooling heatmap** - every skill/MCP/harness across the team: used vs.
-   installed-but-dead; who's never touched the thing you built -> training targets.
-3. **Propagation** - siloed-skill discovery (high-use-by-one / unknown-to-rest),
-   one-click "recommend to team," team skill library of opt-in shares. The
-   best-performer's recipe, spread. (`skills weighted` + `ax-extract-workflow`,
-   team-wide.)
+```
++- each dev laptop --------------+
+| ax local (OSS)                 |  raw transcripts/prompts/code = NEVER LEAVE
+|  - parse 5 harnesses           |
+|  - classify / weight / extract |
+|  - compute DERIVATIVES --------+--+  small opt-in, dev-verifiable rows
+|  - MCP control plane (sync ops)|  |
++--------------------------------+  v
+                        +- ax cloud (thin) -+
+                        | aggregates + team  |
+                        | skill registry     |
+                        | dashboard          |
+                        +--------------------+
+   (collection / distribution / history substrates are pluggable + external)
+```
 
-## Open-core / packaging line
+### Feasibility (what exists vs net-new)
+
+- **Exists (laptop hooks are friendly):** `IngestStreamBus` seam built to swap the
+  local backing for a hosted backend (`dashboard/ingest-stream.ts:9-11`);
+  session-share publish primitive (`share/gist.ts`); pluggable skill sources with a
+  `writable` flag (`skills/sources/registry.ts`); `ax mcp` (read-only, 10 tools).
+- **Net-new (the bulk of v0):** cloud service + team/member/registry data model
+  (DB is single local SurrealDB today) + identity + bidirectional sync/reconcile.
+
+### MCP - two meanings, don't conflate
+
+- **Control plane (v0):** ax's *own* MCP gains sync/registry ops, so an agent
+  self-serves in-session ("sync my skills", "what changed", "submit upstream").
+  Crosses ax's deliberate read-only line → the **author-vs-consumer permission
+  boundary must be enforced at the MCP tool scope** (a consumer agent may
+  `submit-suggestion`, must NOT `accept-merge`).
+- **Payload (deferred):** distributing *third-party* MCP servers to laptops =
+  RCE-grade blast radius + secrets. If ever: manifest-not-secrets (reference the
+  team's vault, never store), signed/provenanced even in light mode. **Not v0.**
+
+## Pricing: cheap for reach, margin in the premium tier
+
+Monetization must not fight propagation. Unit = **consumer seat** (the domain
+expert *receiving* curated skills), not author seat - consumers are many and
+expensive professionals; charge a sliver of one billable hour/seat/month so the
+buyer never rations the rollout. Margin lives in the **premium org tier**: regulated
+mode (adversarial redaction, consent gate, provenance), the intelligence layer
+(usage rankings, promote/deprecate), SSO/admin. Avoid per-run/per-suggestion
+metering at v0 (punishes usage = anti-propagation).
+
+## Open-core line
 
 - **Free (OSS local):** everything a single dev gets today.
-- **Paid (cloud):** team aggregation, manager dashboard, propagation library,
-  spend-ROI reporting. Priced per seat or per team; the $200/seat spend it audits is
-  the anchor - capture a fraction of the waste it surfaces.
+- **Paid (cloud):** team registry + governed sync, suggestion-loop + ranking,
+  premium org tier (compliance + intelligence + admin). Analytics/spend dashboard = v1.
 
 ## Build sequencing
 
-- **v0 (wedge):** derivative payload (utilization + skill-usage rollup) + opt-in sync
-  + Spend-ROI dashboard with hidden-gold callouts. Smallest thing a manager pays for.
-- **v1:** tooling heatmap + training targets.
-- **v2:** full propagation engine + team skill library + recommend-to-team.
+- **v0:** team/registry data model + identity + bidirectional sync; managed
+  read-only skill sync; suggestion loop (failure-shape + synthetic repro test, light
+  redaction); ax-MCP control plane with role-scoped tools; usage ranking of
+  suggestions. **Skills only - no MCP payload.**
+- **v1:** spend/adoption analytics dashboard (cross-harness unified, dedup, dead/dup
+  seats, outcome linkage); regulated redaction mode; MCP-manifest sync (signed).
+- **v2:** promote/deprecate automation; vertical expansion (legal → finance/consult).
 
 ## Risks / mitigations
 
-- **Surveillance rip-out.** -> OSS-verifiable collector; behavior is aggregate-only;
-  lead with the gift, not the watch. The hard line: per-person *utilization* yes,
-  per-person *behavior* never.
-- **Manager wants more than the line allows** ("let me see what Bob built"). -> hold
-  the line; that demand is exactly what turns the tool toxic and gets it removed.
-- **Dev opt-in rate too low to be useful.** -> utilization can be argued as
-  already-visible on provider admin consoles; the dev-facing value (local analytics,
-  getting credited when your skill spreads) is the carrot for opting in.
-- **Provider token data granularity** - confirm ax's local token-per-turn parse is
-  accurate enough to drive a spend report (memory notes tokens are the real
-  cross-provider signal; Codex turn rows inflate ~10x, must filter role).
+- **Substrate temptation** (be the gateway/npm/VCS) → the beam: overlay, never become.
+- **Coverage hole** - ax is a passive observer; a dev can run agents outside ax. v0
+  accepts passive-coverage-with-honest-labeling; the dev-facing value (local
+  analytics, getting credited when a skill spreads) is the carrot for staying installed.
+- **Laundered leak** - agent "redacted" test still carries a real identifier, now
+  labeled safe → travels further. Mitigated by regulated mode (adversarial + gate +
+  provenance); light mode is best-effort and explicitly scoped to non-regulated.
+- **Governance bypass** - a consumer agent merging via MCP. Enforce author/consumer
+  scope at the MCP tool layer, not just UI.
 
 ## Open questions
 
-1. Pricing model - per-seat vs. per-team vs. % of audited spend?
-2. Sync identity - how is a dev tied to a team + to their paid seat (SSO? email
-   domain? manual invite)?
-3. Does v0 need realtime, or is daily batch genuinely fine? (assume batch)
-4. Is "opt-in per dev" enough, or does the manager need an org-mandated mode - and
-   does mandating break the trust model that makes it work?
-5. Token/spend accuracy: can local parse alone produce a defensible $ number, or does
-   v0 need to read the provider billing/admin API for ground truth?
+1. Identity/sync - how a dev binds to a team + seat (SSO / email domain / invite)?
+2. Batch vs realtime sync for v0 (assume near-real-time pull on session start +
+   daily push).
+3. Opt-in vs org-mandated coverage - mandate only the utilization half (already the
+   employer's, like the AWS bill); behavior stays opt-in + aggregate. Does mandating
+   even utilization dent trust enough to matter?
+4. Private team registry vs the parked public community registry/mesh - do they
+   connect, and when?
