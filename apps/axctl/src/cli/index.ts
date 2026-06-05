@@ -1280,6 +1280,7 @@ const cmdSkillsWeighted = (args: string[]) =>
         const windowDays = parseOptionalPositiveIntFlag("skills weighted", "window", args);
         const doctorThreshold = parsePositiveIntFlag("skills weighted", "doctor-threshold", args, 5);
         const json = args.includes("--json");
+        const includeTools = args.includes("--include-tools");
 
         // --window=0 is invalid: parseOptionalPositiveIntFlag rejects it (n <= 0).
         // If the user passes --window, but 0 or negative, process.exit(2) already fired.
@@ -1288,6 +1289,7 @@ const cmdSkillsWeighted = (args: string[]) =>
             ...(windowDays !== undefined ? { windowDays } : {}),
             limit,
             doctorThreshold,
+            includeTools,
         }).pipe(
             catchDbErrorAndExit("axctl skills weighted"),
         );
@@ -4521,20 +4523,24 @@ const weightedCommand = Command.make(
         window: Flag.integer("window").pipe(Flag.optional),
         limit: positiveLimit(25),
         doctorThreshold: Flag.integer("doctor-threshold").pipe(Flag.withDefault(5)),
+        includeTools: Flag.boolean("include-tools").pipe(Flag.withDefault(false)),
         json: jsonFlag,
     },
-    ({ window, limit, doctorThreshold, json }) =>
+    ({ window, limit, doctorThreshold, includeTools, json }) =>
         cmdSkillsWeighted([
             `--limit=${limit}`,
             ...intArg("window", optionValue(window)),
             `--doctor-threshold=${doctorThreshold}`,
+            ...boolArg("include-tools", includeTools),
             ...boolArg("json", json),
         ]),
 ).pipe(
     Command.withDescription(
         "Rank skills by usage × role-weight (classified skills score higher). " +
+        "Provider built-in tools (codex/pi/etc.) are excluded by default; pass " +
+        "--include-tools to rank them too. " +
         "Doctor mode warns when many skills are unclassified. " +
-        "--window=Nd  --limit=N  --doctor-threshold=N  --json",
+        "--window=Nd  --limit=N  --doctor-threshold=N  --include-tools  --json",
     ),
 );
 

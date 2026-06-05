@@ -40,6 +40,13 @@ export interface SkillsWeightedParams {
     readonly windowDays?: number;
     readonly limit?: number;
     readonly doctorThreshold?: number;
+    /**
+     * Include synthetic provider built-in tools (codex/pi/opencode/cursor tool
+     * calls, written as skill rows with `dir_path = '(synthetic)'`). Default
+     * false: these are tool invocations, not skills, and otherwise dominate and
+     * bury the real skill ranking.
+     */
+    readonly includeTools?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -94,6 +101,13 @@ FROM plays_role
 WHERE source IN ["frontmatter", "brief", "user"];`.trim();
 
 /**
+ * skill id -> display name. The record id is mangled (`skill:v2__<name>__<hash>`),
+ * so derive the readable label from the `name` field instead. Small table,
+ * direct scan, no derefs.
+ */
+const SKILL_NAMES_SQL = `SELECT id, name FROM skill`;
+
+/**
  * Doctor query: count unclassified skills with >= 3 invocations.
  * Mirrors the predicate from src/cli/skills-classify.ts.
  *
@@ -103,13 +117,30 @@ WHERE source IN ["frontmatter", "brief", "user"];`.trim();
  * populated graph (Pi dogfood, 2026-06-04). Here the invocation GROUP BY and
  * the classified-skill set each evaluate once, then a single set-difference.
  */
-const UNCLASSIFIED_COUNT_SQL = `
+/**
+ * Synthetic provider built-in tool skill ids. These rows are written by the
+ * codex/pi/opencode/cursor ingest with `dir_path = '(synthetic)'` so tool usage
+ * is trackable, but they are tool calls, not skills. The skill table is small,
+ * so this direct field-filter scan is cheap - no graph derefs. Used both as a
+ * subquery (doctor) and to drop tools from the ranking in JS.
+ */
+const SYNTHETIC_SKILLS_SQL = `SELECT VALUE id FROM skill WHERE dir_path = "(synthetic)"`;
+
+function buildUnclassifiedSql(includeTools: boolean): string {
+    // Exclude synthetic provider tools from the doctor count too, unless the
+    // caller asked for them - otherwise "N unclassified skills" is dominated by
+    // codex/pi tool calls that can never carry a role.
+    const toolClause = includeTools
+        ? ""
+        : `\n    AND sid NOT IN (${SYNTHETIC_SKILLS_SQL})`;
+    return `
 SELECT count() AS n FROM (
     SELECT out AS sid, count() AS c FROM invoked GROUP BY sid
 )
 WHERE c >= 3
-    AND sid NOT IN (SELECT VALUE in FROM plays_role WHERE source IN ["frontmatter", "brief", "user"])
+    AND sid NOT IN (SELECT VALUE in FROM plays_role WHERE source IN ["frontmatter", "brief", "user"])${toolClause}
 GROUP ALL;`.trim();
+}
 
 // ---------------------------------------------------------------------------
 // Main export
@@ -122,19 +153,40 @@ export const fetchSkillsWeighted = (
         const db = yield* SurrealClient;
         const limit = params.limit ?? 25;
         const doctorThreshold = params.doctorThreshold ?? 5;
+        const includeTools = params.includeTools ?? false;
 
-        // Run passes + doctor + tombstone-id query concurrently.
-        const [invRes, roleRes, doctorRes, deletedRes] = yield* Effect.all(
+        // Run passes + doctor + tombstone + synthetic-tool id queries concurrently.
+        const [invRes, roleRes, doctorRes, deletedRes, toolRes, nameRes] = yield* Effect.all(
             [
                 db.query<[Array<Record<string, unknown>>]>(
                     buildInvocationSql(params.windowDays),
                 ),
                 db.query<[Array<Record<string, unknown>>]>(ROLE_WEIGHT_SQL),
-                db.query<[Array<Record<string, unknown>>]>(UNCLASSIFIED_COUNT_SQL),
+                db.query<[Array<Record<string, unknown>>]>(
+                    buildUnclassifiedSql(includeTools),
+                ),
                 db.query<[Array<unknown>]>(DELETED_SKILLS_SQL),
+                db.query<[Array<unknown>]>(SYNTHETIC_SKILLS_SQL),
+                db.query<[Array<Record<string, unknown>>]>(SKILL_NAMES_SQL),
             ],
-            { concurrency: 4 },
+            { concurrency: 6 },
         );
+
+        // skill id -> readable name (from the `name` field, not the mangled id).
+        const skillNames = new Map<string, string>();
+        for (const r of (nameRes?.[0] ?? []) as Array<Record<string, unknown>>) {
+            const sid = String(r.id ?? "");
+            const nm = typeof r.name === "string" ? r.name : "";
+            if (sid && nm) skillNames.set(sid, nm);
+        }
+
+        // Synthetic provider tools (codex/pi/etc.) - excluded from the ranking
+        // unless includeTools. Empty set when the caller opts in.
+        const toolSkills = includeTools
+            ? new Set<string>()
+            : new Set(
+                  ((toolRes?.[0] ?? []) as unknown[]).map((id) => String(id)),
+              );
 
         // Tombstoned skill ids - excluded from ranking in JS (see
         // buildInvocationSql for why this isn't a per-edge WHERE deref).
@@ -178,14 +230,18 @@ export const fetchSkillsWeighted = (
             // Drop ghost (reconcile soft-deleted) skills - the tombstone filter
             // that used to live in the pass-1 WHERE clause as a per-edge deref.
             if (deletedSkills.has(skillId)) continue;
+            // Drop synthetic provider built-in tools unless includeTools.
+            if (toolSkills.has(skillId)) continue;
 
-            // Derive a human-readable name from the record id string.
-            // SurrealDB returns skill_id as e.g. "skill:⟨caveman⟩" or
-            // "skill:caveman". Strip the prefix/brackets.
-            const skillName = skillId
-                .replace(/^skill:⟨/, "")
-                .replace(/⟩$/, "")
-                .replace(/^skill:/, "");
+            // Prefer the real `name` field; fall back to stripping the record id
+            // (handles "skill:⟨caveman⟩" / "skill:caveman"; the mangled
+            // "skill:v2__name__hash" form has no clean name to derive, hence the map).
+            const skillName =
+                skillNames.get(skillId) ??
+                skillId
+                    .replace(/^skill:⟨/, "")
+                    .replace(/⟩$/, "")
+                    .replace(/^skill:/, "");
 
             const invocations = Number(r.invocations ?? 0);
             const sessionCount = Number(r.session_count ?? 0);
