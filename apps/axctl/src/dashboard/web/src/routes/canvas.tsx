@@ -65,7 +65,7 @@ export function CanvasRoute() {
     const [detailMode, setDetailMode] = useState<"inplace" | "focus" | "both">("focus");
     const qc = useQueryClient();
     const prefetchInspect = (id: string) =>
-        qc.prefetchQuery({ queryKey: ["session-inspect", id], queryFn: () => api.sessionInspect(id), staleTime: 120_000 });
+        qc.prefetchQuery({ queryKey: ["session-summary", id], queryFn: () => api.sessionSummary(id), staleTime: 120_000 });
     const dragRef = useRef<{ px: number; pan: number } | null>(null);
 
     // top-level sessions only (subagents live in the drill-in)

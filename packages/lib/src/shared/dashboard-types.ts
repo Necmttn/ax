@@ -599,6 +599,24 @@ export interface SessionOrchestrationSubagent {
     readonly duration_ms: number | null;
 }
 
+// Lightweight session summary for the canvas detail card. DB-ONLY (no
+// transcript file read/parse) so it returns in ~ms instead of the 20-60s the
+// full inspect endpoint can take when it has to walk the filesystem to locate
+// a transcript. Same facts the card shows - no data loss.
+export interface SessionSummary {
+    readonly session_id: string;
+    readonly task: string | null;          // first user turn (what it was asked)
+    readonly first_ask: string | null;
+    readonly last_assistant: string | null;
+    readonly correction: string | null;
+    readonly turns: number;                // conversational (user+assistant)
+    readonly tokens: number | null;
+    readonly cost_usd: number | null;
+    readonly model: string | null;
+    readonly subagents: number;
+    readonly tools: ReadonlyArray<{ readonly name: string; readonly count: number }>;
+}
+
 export interface SessionOrchestration {
     readonly session_id: string;
     readonly label: string;
