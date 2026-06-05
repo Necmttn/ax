@@ -8,8 +8,7 @@ import { FooterCards } from "~/components/landing-v2";
 import { HeroLogoField } from "~/components/landing-v2/supports-strip";
 import "../styles/pitch.css";
 
-const MAILTO =
-  "mailto:necmettin.karakaya@gmail.com?subject=ax%20for%20teams%20-%20walkthrough";
+const BOOK_URL = "https://cal.com/necmttn/30min";
 
 export const Route = createFileRoute("/teams")({
   head: () => ({
@@ -18,7 +17,7 @@ export const Route = createFileRoute("/teams")({
       {
         name: "description",
         content:
-          "Every engineer uses AI differently. ax shows which agent workflows are actually changing how your team ships, where adoption is stuck, and what should become standard practice.",
+          "Every engineer uses AI differently. ax shows which agent workflows change how your team ships, where adoption is stuck, and what should become standard practice.",
       },
     ],
   }),
@@ -59,8 +58,8 @@ function ImpactSection() {
           A faster team has a different <em>shape</em>.
         </h2>
         <p>
-          The gates open as a workflow goes from one person&rsquo;s trick to
-          team practice. The scroll <em>is</em> your adoption curve.
+          Gates open as a workflow goes from one person&rsquo;s trick to team
+          practice. The scroll <em>is</em> your adoption curve.
         </p>
       </div>
 
@@ -68,8 +67,7 @@ function ImpactSection() {
         <MetricsBars scrollProgress={scrollProgress} />
         <PipelineFlow scrollProgress={scrollProgress} />
         <p className="impact-frame">
-          Each dot is a <b>session</b> moving through your pipeline. Stuck gates
-          are workflows still trapped in one person&rsquo;s head &mdash; ax finds
+          Stuck gates are workflows still trapped in one head &mdash; ax finds
           them.
         </p>
         <p className="impact-illus">
@@ -94,20 +92,20 @@ function Teams() {
             actually ships with <em>AI</em>.
           </h1>
           <p className="hero-human">
-            Every engineer is trying agents differently. Nobody knows what is
+            Every engineer tries agents differently. Nobody knows what is
             sticking.
           </p>
           <p className="lede">
-            ax turns local coding-agent sessions into evidence for your internal
-            AI enablement work: which workflows improve real shipping, where the
+            ax turns local coding-agent sessions into evidence for your AI
+            enablement work: which workflows improve real shipping, where the
             team is stuck, and what should become standard practice.
           </p>
 
           <div className="install-wrap">
             <span className="install-label">runs on the laptops you already have</span>
             <div className="cta-row">
-              <a className="prompt-pill is-solo" href={MAILTO}>
-                <span className="prompt-pill__label">Book a 20-min walkthrough</span>
+              <a className="prompt-pill is-solo" href={BOOK_URL}>
+                <span className="prompt-pill__label">Book a walkthrough</span>
               </a>
               <a className="cta-secondary" href="#demo">
                 <span className="cta-secondary__icon" aria-hidden="true">
@@ -138,8 +136,8 @@ function Teams() {
             <p>
               Copilot, Cursor, Claude Code, ChatGPT &mdash; the tools arrive
               before the operating model. Some engineers build real agentic
-              workflows. Others stay at autocomplete. Leadership gets demos, but
-              not a shared way of shipping.
+              workflows; others stay at autocomplete. Leadership gets demos, not
+              a shared way of shipping.
             </p>
           </div>
           <div className="pitch-triad">
@@ -152,7 +150,7 @@ function Teams() {
               <h3>Tool chaos</h3>
               <p>
                 Every engineer has a different stack, habit and prompt folder.
-                ax shows the patterns underneath the tool sprawl.
+                ax shows the patterns under the sprawl.
               </p>
             </div>
             <div className="pitch-fcard">
@@ -164,7 +162,7 @@ function Teams() {
               </span>
               <h3>No shared playbook</h3>
               <p>
-                The useful workflows stay private unless someone turns them into
+                The useful workflows stay private until someone turns them into
                 team practice. ax finds what is ready to teach or package.
               </p>
             </div>
@@ -177,10 +175,10 @@ function Teams() {
                   <path d="M8.2 10.9l7.6-3.8M8.2 13.1l7.6 3.8" />
                 </svg>
               </span>
-              <h3>Shipping still feels the same</h3>
+              <h3>Shipping feels the same</h3>
               <p>
-                If cycle time is not changing, AI is still a side experiment. ax
-                connects agent usage to the work that actually ships.
+                If cycle time isn&rsquo;t moving, AI is still a side experiment.
+                ax ties agent usage to the work that ships.
               </p>
             </div>
           </div>
@@ -192,8 +190,8 @@ function Teams() {
             <span className="eyebrow">one screen, the whole team</span>
             <h2>The evidence layer for internal AI enablement.</h2>
             <p>
-              Your internal AI lead should not have to guess what stuck after the
-              workshop. ax shows where leverage is showing up, where usage is
+              Your AI lead shouldn&rsquo;t have to guess what stuck after the
+              workshop. ax shows where leverage is showing up, where usage stays
               shallow, and which workflows are ready to spread.
             </p>
           </div>
@@ -231,8 +229,8 @@ function Teams() {
             </div>
           </div>
           <p className="demo-caption">
-            Aggregates only &mdash; the point isn&rsquo;t to police anyone,
-            it&rsquo;s to see whether AI is becoming part of how the team ships.
+            Aggregates only &mdash; not to police anyone, just to see whether AI
+            is becoming part of how the team ships.
           </p>
         </section>
 
@@ -244,18 +242,19 @@ function Teams() {
           <div className="pitch-head">
             <span className="eyebrow">the privacy line</span>
             <h2>
-              The collector is <em>open source</em>. So your team can read exactly
-              what leaves.
+              The collector is <em>open source</em>, so you can read exactly what
+              leaves.
             </h2>
             <p>
-              ax runs locally and computes small derived rows. Raw transcripts,
-              prompts and code physically never leave the machine &mdash; and
-              because it&rsquo;s OSS, that&rsquo;s verifiable, not a promise.
+              ax runs on each laptop and computes small derived rows. Only those
+              aggregates ship; the sensitive work stays put by construction.
+              Because it&rsquo;s OSS, you can verify that line instead of
+              trusting it.
             </p>
           </div>
           <div className="pitch-lanes">
             <div className="pitch-lane is-out">
-              <h3><span className="dot"></span> ships out</h3>
+              <h3><span className="dot"></span> what leaves the laptop</h3>
               <ul>
                 <li>Per-seat <b>adoption signal</b> <span className="dim">(active days, depth of use)</span></li>
                 <li>Skill / workflow <b>usage rollups</b> <span className="dim">(names, not contents)</span></li>
@@ -264,12 +263,12 @@ function Teams() {
               </ul>
             </div>
             <div className="pitch-lane is-local">
-              <h3><span className="dot"></span> stays on the laptop</h3>
+              <h3><span className="dot"></span> what never leaves</h3>
               <ul>
-                <li>Transcript text &amp; <b>prompts</b></li>
-                <li>Your <b>code</b>, diffs and file contents</li>
-                <li><b>What</b> you&rsquo;re building, per person</li>
-                <li>Everything ax needs for <b>local</b> analytics</li>
+                <li>Transcript text &amp; <b>prompts</b> <span className="dim">(read locally, never sent)</span></li>
+                <li>Your <b>code</b>, diffs and file contents <span className="dim">(stay on disk)</span></li>
+                <li><b>What</b> each person is building <span className="dim">(yours to keep)</span></li>
+                <li>Everything else ax touches to compute the rollups</li>
               </ul>
             </div>
           </div>
@@ -277,15 +276,15 @@ function Teams() {
 
         {/* ============= closing CTA ============= */}
         <section className="pitch-cta">
-          <h2>Make AI adoption visible enough to operate.</h2>
+          <h2>What gets measured gets improved.</h2>
           <p>
-            A 20-minute walkthrough on your own data &mdash; we&rsquo;ll show you
-            what stuck, what stayed shallow, and which workflows are ready to
-            become standard practice.
+            Right now AI adoption isn&rsquo;t measured at all. A walkthrough on
+            your own data shows what stuck, what stayed shallow, and which
+            workflows are ready to become standard practice.
           </p>
           <div className="cta-row">
-            <a className="prompt-pill is-solo" href={MAILTO}>
-              <span className="prompt-pill__label">Book a 20-min walkthrough</span>
+            <a className="prompt-pill is-solo" href={BOOK_URL}>
+              <span className="prompt-pill__label">Book a walkthrough</span>
             </a>
             <a className="cta-secondary" href="#privacy">
               How the privacy line works

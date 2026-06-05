@@ -5,6 +5,7 @@ import {
   DashboardPreview,
   LineageFlow,
   OpenSourceSection,
+  TeamsCallout,
   FooterCards,
 } from "~/components/landing-v2";
 
@@ -20,6 +21,7 @@ function Landing() {
         <DashboardPreview />
         <LineageFlow />
         <OpenSourceSection />
+        <TeamsCallout />
         <FooterCards />
       </main>
       <SiteFooter />

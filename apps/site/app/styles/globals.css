@@ -8177,6 +8177,12 @@ footer .right {
   display: flex;
   align-items: flex-end;
 }
+/* interventions card: bar + 2-line legend is taller than 28px;
+   let it flow below the value instead of overflowing up into it */
+.landing-v2 .mini-chart:has(.stack-wrap) {
+  height: auto;
+  align-items: stretch;
+}
 .landing-v2 .mini-sub {
   margin-top: 10px;
   font-family: var(--mono);
@@ -8907,6 +8913,34 @@ footer .right {
 }
 .landing-v2 .oss-action.primary:hover .oss-action-arrow {
   color: var(--page);
+}
+
+/* for-teams upsell band */
+.landing-v2 section.teams-callout {
+  padding: 60px 0 64px;
+  border-bottom: 1px solid var(--line);
+  background: #f0efe8;
+  text-align: center;
+}
+.landing-v2 .teams-callout .open-source-head {
+  margin: 0 auto 28px;
+}
+.landing-v2 .teams-callout .open-source-head h2 {
+  font-size: 40px;
+  letter-spacing: -0.8px;
+  margin: 18px auto 14px;
+  max-width: 20ch;
+}
+.landing-v2 .teams-callout .open-source-head p {
+  font-size: 17px;
+  max-width: 48ch;
+}
+.landing-v2 .teams-callout .oss-actions {
+  margin-top: 0;
+}
+@media (max-width: 720px) {
+  .landing-v2 section.teams-callout { padding: 48px 0 52px; }
+  .landing-v2 .teams-callout .open-source-head h2 { font-size: 32px; }
 }
 
 /* ---------- footer cards ---------- */
