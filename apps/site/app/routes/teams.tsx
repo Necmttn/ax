@@ -1,4 +1,7 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute } from "@tanstack/react-router";
+import { useEffect, useRef } from "react";
+import { MetricsBars } from "~/components/pitch/MetricsBars";
+import { PipelineFlow } from "~/components/pitch/PipelineFlow";
 import { SiteHeader } from "~/components/landing-sections/site-header";
 import { SiteFooter } from "~/components/landing-sections/site-footer";
 import { FooterCards } from "~/components/landing-v2";
@@ -11,25 +14,69 @@ const MAILTO =
 export const Route = createFileRoute("/teams")({
   head: () => ({
     meta: [
-      { title: "ax for teams - close the gap to your best AI user" },
+      { title: "ax for teams - see how your team actually ships with AI" },
       {
         name: "description",
         content:
-          "Most teams plateau at a fraction of what their AI tooling can do. ax shows the gap between your best AI users and the rest - and the workflows worth spreading - so the whole team ships faster.",
+          "Every engineer uses AI differently. ax shows which agent workflows are actually changing how your team ships, where adoption is stuck, and what should become standard practice.",
       },
     ],
   }),
   component: Teams,
 });
 
-function PitchSwitch() {
+function ImpactSection() {
+  const impactRef = useRef<HTMLElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
+  const scrollProgress = useRef({ value: 0 });
+
+  useEffect(() => {
+    const impact = impactRef.current;
+    const panel = panelRef.current;
+    if (!impact || !panel) return;
+
+    const update = () => {
+      const rect = panel.getBoundingClientRect();
+      const start = window.innerHeight * 0.72;
+      const end = window.innerHeight * 0.28;
+      scrollProgress.current.value = Math.max(0, Math.min(1, (start - rect.top) / (start - end)));
+    };
+
+    window.addEventListener("scroll", update, { passive: true });
+    window.addEventListener("resize", update);
+    update();
+    return () => {
+      window.removeEventListener("scroll", update);
+      window.removeEventListener("resize", update);
+    };
+  }, []);
+
   return (
-    <div className="pitch-switch" role="tablist" aria-label="positioning">
-      <Link to="/teams" className="is-active">
-        for managers
-      </Link>
-      <Link to="/registry">for applied-AI teams</Link>
-    </div>
+    <section ref={impactRef} className="pitch-section">
+      <div className="pitch-head">
+        <span className="eyebrow">what deeper adoption looks like</span>
+        <h2>
+          A faster team has a different <em>shape</em>.
+        </h2>
+        <p>
+          The gates open as a workflow goes from one person&rsquo;s trick to
+          team practice. The scroll <em>is</em> your adoption curve.
+        </p>
+      </div>
+
+      <div ref={panelRef} className="impact-panel">
+        <MetricsBars scrollProgress={scrollProgress} />
+        <PipelineFlow scrollProgress={scrollProgress} />
+        <p className="impact-frame">
+          Each dot is a <b>session</b> moving through your pipeline. Stuck gates
+          are workflows still trapped in one person&rsquo;s head &mdash; ax finds
+          them.
+        </p>
+        <p className="impact-illus">
+          illustrative &mdash; your numbers render from real sessions
+        </p>
+      </div>
+    </section>
   );
 }
 
@@ -43,18 +90,17 @@ function Teams() {
           <HeroLogoField />
           <span className="eyebrow">ax for engineering teams</span>
           <h1>
-            Your team uses a <em>fraction</em><br />
-            of what AI can do.
+            See how your team<br />
+            actually ships with <em>AI</em>.
           </h1>
           <p className="hero-human">
-            The real cost isn&rsquo;t the spend &mdash; it&rsquo;s the speed
-            you&rsquo;re leaving on the table.
+            Every engineer is trying agents differently. Nobody knows what is
+            sticking.
           </p>
           <p className="lede">
-            A couple of people get great at AI and fly. Everyone else plateaus at
-            autocomplete. ax finds the gap between your best AI users and the rest
-            &mdash; the workflows that actually ship, and who hasn&rsquo;t picked
-            them up &mdash; so you can close it.
+            ax turns local coding-agent sessions into evidence for your internal
+            AI enablement work: which workflows improve real shipping, where the
+            team is stuck, and what should become standard practice.
           </p>
 
           <div className="install-wrap">
@@ -63,36 +109,37 @@ function Teams() {
               <a className="prompt-pill is-solo" href={MAILTO}>
                 <span className="prompt-pill__label">Book a 20-min walkthrough</span>
               </a>
-              <a className="cta-secondary" href="#privacy">
+              <a className="cta-secondary" href="#demo">
                 <span className="cta-secondary__icon" aria-hidden="true">
                   <svg viewBox="0 0 24 24" focusable="false">
                     <path
                       fill="none"
                       stroke="currentColor"
                       strokeWidth="1.6"
+                      strokeLinecap="round"
                       strokeLinejoin="round"
-                      d="M12 3.5 5 6.5v5c0 4 3 7 7 9 4-2 7-5 7-9v-5z"
+                      d="M4 19V5M4 19h16M8 19v-5M12 19v-9M16 19V8M20 19v-7"
                     />
                   </svg>
                 </span>
-                How the privacy line works
+                See what ax finds
               </a>
             </div>
-            <PitchSwitch />
           </div>
         </section>
 
         {/* ============= the gap ============= */}
         <section className="pitch-section">
           <div className="pitch-head">
-            <span className="eyebrow">the opportunity</span>
+            <span className="eyebrow">the rollout problem</span>
             <h2>
-              The upside you <em>can&rsquo;t see</em>.
+              The first AI rollout does not make a team <em>AI-native</em>.
             </h2>
             <p>
-              What you&rsquo;d save trimming dead seats is rounding error next to
-              the speed your team isn&rsquo;t getting. That gap stays invisible
-              &mdash; until you can compare how people actually work.
+              Copilot, Cursor, Claude Code, ChatGPT &mdash; the tools arrive
+              before the operating model. Some engineers build real agentic
+              workflows. Others stay at autocomplete. Leadership gets demos, but
+              not a shared way of shipping.
             </p>
           </div>
           <div className="pitch-triad">
@@ -102,10 +149,10 @@ function Teams() {
                   <path d="M4 19V5M4 19h16M8 19v-5M12 19v-9M16 19V8M20 19v-7" />
                 </svg>
               </span>
-              <h3>The adoption gap</h3>
+              <h3>Tool chaos</h3>
               <p>
-                A few people are flying; most are barely past autocomplete. See
-                who&rsquo;s stuck at the starting line &mdash; and on what.
+                Every engineer has a different stack, habit and prompt folder.
+                ax shows the patterns underneath the tool sprawl.
               </p>
             </div>
             <div className="pitch-fcard">
@@ -115,10 +162,10 @@ function Teams() {
                   <path d="M5 19h14" />
                 </svg>
               </span>
-              <h3>What actually works</h3>
+              <h3>No shared playbook</h3>
               <p>
-                Which workflows, skills and harnesses line up with shipping &mdash;
-                surfaced from real sessions, not vibes or self-reports.
+                The useful workflows stay private unless someone turns them into
+                team practice. ax finds what is ready to teach or package.
               </p>
             </div>
             <div className="pitch-fcard">
@@ -130,25 +177,24 @@ function Teams() {
                   <path d="M8.2 10.9l7.6-3.8M8.2 13.1l7.6 3.8" />
                 </svg>
               </span>
-              <h3>Spread the best</h3>
+              <h3>Shipping still feels the same</h3>
               <p>
-                Your top performer&rsquo;s recipe, made repeatable &mdash; level
-                the whole team up to your best AI user instead of hoping it rubs
-                off.
+                If cycle time is not changing, AI is still a side experiment. ax
+                connects agent usage to the work that actually ships.
               </p>
             </div>
           </div>
         </section>
 
         {/* ============= dashboard preview ============= */}
-        <section className="demo">
+        <section className="demo" id="demo">
           <div className="demo-intro">
             <span className="eyebrow">one screen, the whole team</span>
-            <h2>See the gap. Close the gap.</h2>
+            <h2>The evidence layer for internal AI enablement.</h2>
             <p>
-              The same view that shows who&rsquo;s underusing AI shows you exactly
-              what to hand them &mdash; the workflow that&rsquo;s already working
-              two desks over.
+              Your internal AI lead should not have to guess what stuck after the
+              workshop. ax shows where leverage is showing up, where usage is
+              shallow, and which workflows are ready to spread.
             </p>
           </div>
 
@@ -159,36 +205,39 @@ function Teams() {
               <div className="browser-spacer"></div>
             </div>
             <div className="dash">
-              <p className="dash-head">Team AI adoption &middot; 12 engineers</p>
+              <p className="dash-head">Shared agent practice &middot; 12 engineers</p>
               <div className="ministats">
                 <div className="mini">
-                  <div className="mini-label">Team adoption</div>
+                  <div className="mini-label">AI-native workflows</div>
                   <div className="mini-value">41<span className="unit">%</span></div>
-                  <div className="mini-sub"><b>59%</b> still on the table</div>
+                  <div className="mini-sub"><b>59%</b> still shallow</div>
                 </div>
                 <div className="mini">
-                  <div className="mini-label">At expert tier</div>
+                  <div className="mini-label">Power users</div>
                   <div className="mini-value">3<span className="unit">/ 12</span></div>
-                  <div className="mini-sub"><span className="neg">9 plateaued</span></div>
+                  <div className="mini-sub"><span className="neg">9 not using patterns</span></div>
                 </div>
                 <div className="mini">
-                  <div className="mini-label">Workflows that ship</div>
+                  <div className="mini-label">Shipping workflows</div>
                   <div className="mini-value">6</div>
                   <div className="mini-sub"><span className="pos">+2</span> found this week</div>
                 </div>
                 <div className="mini">
                   <div className="mini-label">Ready to spread</div>
                   <div className="mini-value">3</div>
-                  <div className="mini-sub"><b>best-performer</b> skills</div>
+                  <div className="mini-sub"><b>proven</b> playbooks</div>
                 </div>
               </div>
             </div>
           </div>
           <p className="demo-caption">
             Aggregates only &mdash; the point isn&rsquo;t to police anyone,
-            it&rsquo;s to level them up.
+            it&rsquo;s to see whether AI is becoming part of how the team ships.
           </p>
         </section>
+
+        {/* ============= impact signal ============= */}
+        <ImpactSection />
 
         {/* ============= the privacy line ============= */}
         <section className="pitch-section" id="privacy">
@@ -228,19 +277,19 @@ function Teams() {
 
         {/* ============= closing CTA ============= */}
         <section className="pitch-cta">
-          <h2>Stop leaving speed on the table.</h2>
+          <h2>Make AI adoption visible enough to operate.</h2>
           <p>
             A 20-minute walkthrough on your own data &mdash; we&rsquo;ll show you
-            the adoption gap and the workflows worth spreading before you decide
-            anything.
+            what stuck, what stayed shallow, and which workflows are ready to
+            become standard practice.
           </p>
           <div className="cta-row">
             <a className="prompt-pill is-solo" href={MAILTO}>
               <span className="prompt-pill__label">Book a 20-min walkthrough</span>
             </a>
-            <Link to="/registry" className="cta-secondary">
-              See the applied-AI angle
-            </Link>
+            <a className="cta-secondary" href="#privacy">
+              How the privacy line works
+            </a>
           </div>
         </section>
 

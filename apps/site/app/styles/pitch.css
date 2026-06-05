@@ -184,6 +184,108 @@
   margin: 0;
 }
 
+/* impact indicators copied from necmttn.com/services ------------------------ */
+.landing-v2 .impact-panel {
+  max-width: 980px;
+  margin: 0 auto;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--panel);
+  padding: 26px 26px 24px;
+}
+.landing-v2 .metrics-bars {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 24px;
+  margin-bottom: 28px;
+}
+.landing-v2 .metric-bar__label,
+.landing-v2 .pipeline-flow__labels span {
+  display: block;
+  font-family: var(--mono);
+  font-size: 10px;
+  line-height: 1.2;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.landing-v2 .metric-bar__top {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+.landing-v2 .metric-bar__num {
+  font-family: var(--mono);
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+.landing-v2 .metric-bar__track {
+  height: 6px;
+  margin-top: 8px;
+  overflow: hidden;
+  background: var(--line);
+}
+.landing-v2 .metric-bar__fill {
+  height: 100%;
+  transform-origin: left center;
+  transform: scaleX(0);
+  background: var(--green);
+}
+.landing-v2 .metric-bar p {
+  font-family: var(--mono);
+  font-size: 10px;
+  line-height: 1.35;
+  color: var(--muted);
+  opacity: 0.72;
+  margin: 7px 0 0;
+}
+.landing-v2 .impact-frame {
+  text-align: center;
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  line-height: 1.5;
+  color: var(--muted);
+  max-width: 62ch;
+  margin: 22px auto 0;
+}
+.landing-v2 .impact-frame b {
+  color: var(--ink);
+}
+.landing-v2 .impact-illus {
+  display: block;
+  width: fit-content;
+  margin: 12px auto 0;
+  font-family: var(--mono);
+  font-size: 9px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--soft);
+  border: 1px dashed var(--line);
+  border-radius: 999px;
+  padding: 4px 10px;
+}
+.landing-v2 .pipeline-flow__labels {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 8px;
+  margin-bottom: 12px;
+  text-align: center;
+}
+.landing-v2 .pipeline-flow__labels span {
+  transition: color 300ms ease, font-weight 300ms ease;
+}
+.landing-v2 .pipeline-flow__canvas-wrap {
+  width: 100%;
+  height: 160px;
+}
+.landing-v2 .pipeline-flow canvas {
+  display: block;
+}
+
 /* closing CTA band ----------------------------------------------------------- */
 .landing-v2 .pitch-cta {
   text-align: center;
@@ -239,7 +341,15 @@
     grid-template-columns: 1fr 1fr;
   }
   .landing-v2 .pitch-lanes,
-  .landing-v2 .pitch-triad {
+  .landing-v2 .pitch-triad,
+  .landing-v2 .metrics-bars {
     grid-template-columns: 1fr;
+  }
+  .landing-v2 .impact-panel {
+    padding: 20px 14px 18px;
+  }
+  .landing-v2 .pipeline-flow__labels span {
+    font-size: 9px;
+    letter-spacing: 0.1em;
   }
 }
