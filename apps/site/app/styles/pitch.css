@@ -1,0 +1,355 @@
+/* ---------------------------------------------------------------------------
+   pitch.css - scoped extras for the two A/B positioning pages (/teams, /registry).
+   Everything else reuses the existing .landing-v2 system (hero, eyebrow, lede,
+   cta-row, prompt-pill, cta-secondary, cards, oss-proof-*). Only the bits the
+   homepage didn't already have live here. Scoped under .landing-v2 so the design
+   tokens (--ink/--page/--panel/--line/--muted/--soft/--green/--blue/--claude)
+   resolve identically.
+--------------------------------------------------------------------------- */
+
+.landing-v2 .pitch-section {
+  padding: 58px 0;
+  border-bottom: 1px solid var(--line);
+}
+.landing-v2 .pitch-section:last-of-type {
+  border-bottom: 0;
+}
+
+.landing-v2 .pitch-head {
+  text-align: center;
+  max-width: 660px;
+  margin: 0 auto 36px;
+}
+.landing-v2 .pitch-head h2 {
+  font-family: var(--serif);
+  font-weight: 400;
+  font-size: 34px;
+  line-height: 1.14;
+  letter-spacing: -0.6px;
+  margin: 14px 0 12px;
+  color: var(--ink);
+}
+.landing-v2 .pitch-head h2 em {
+  font-style: italic;
+}
+.landing-v2 .pitch-head p {
+  font-family: var(--serif);
+  font-size: 18px;
+  line-height: 1.5;
+  color: var(--muted);
+  margin: 0;
+}
+
+/* primary CTA pill used as a link (no provider icons, just a label) */
+.landing-v2 .prompt-pill.is-solo {
+  padding: 13px 26px;
+  text-decoration: none;
+}
+
+/* two lanes: what ships out vs what stays local ------------------------------ */
+.landing-v2 .pitch-lanes {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+  max-width: 860px;
+  margin: 0 auto;
+}
+.landing-v2 .pitch-lane {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--panel);
+  padding: 22px 22px 20px;
+}
+.landing-v2 .pitch-lane h3 {
+  font-family: var(--mono);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.16em;
+  margin: 0 0 14px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.landing-v2 .pitch-lane h3 .dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+}
+.landing-v2 .pitch-lane.is-out h3 {
+  color: var(--blue);
+}
+.landing-v2 .pitch-lane.is-out h3 .dot {
+  background: var(--blue);
+}
+.landing-v2 .pitch-lane.is-local h3 {
+  color: var(--green);
+}
+.landing-v2 .pitch-lane.is-local h3 .dot {
+  background: var(--green);
+}
+.landing-v2 .pitch-lane ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.landing-v2 .pitch-lane li {
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--ink);
+  padding: 9px 0;
+  border-top: 1px solid var(--line);
+}
+.landing-v2 .pitch-lane li:first-child {
+  border-top: 0;
+}
+.landing-v2 .pitch-lane li .dim {
+  color: var(--muted);
+}
+
+/* numbered loop steps -------------------------------------------------------- */
+.landing-v2 .pitch-loop {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 10px;
+  max-width: 1000px;
+  margin: 0 auto;
+}
+.landing-v2 .pitch-step {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--panel);
+  padding: 18px 16px;
+  min-height: 132px;
+}
+.landing-v2 .pitch-step .n {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--soft);
+  letter-spacing: 0.1em;
+}
+.landing-v2 .pitch-step h4 {
+  font-family: var(--serif);
+  font-weight: 400;
+  font-size: 16px;
+  margin: 8px 0 6px;
+  color: var(--ink);
+}
+.landing-v2 .pitch-step p {
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: var(--muted);
+  margin: 0;
+}
+
+/* feature triad -------------------------------------------------------------- */
+.landing-v2 .pitch-triad {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 14px;
+  max-width: 1000px;
+  margin: 0 auto;
+}
+.landing-v2 .pitch-fcard {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--panel);
+  padding: 24px 22px;
+}
+.landing-v2 .pitch-fcard .ic {
+  width: 34px;
+  height: 34px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 14px;
+  color: var(--ink);
+}
+.landing-v2 .pitch-fcard .ic svg {
+  width: 18px;
+  height: 18px;
+}
+.landing-v2 .pitch-fcard h3 {
+  font-family: var(--serif);
+  font-weight: 400;
+  font-size: 19px;
+  margin: 0 0 8px;
+  color: var(--ink);
+}
+.landing-v2 .pitch-fcard p {
+  font-size: 14px;
+  line-height: 1.55;
+  color: var(--muted);
+  margin: 0;
+}
+
+/* impact indicators copied from necmttn.com/services ------------------------ */
+.landing-v2 .impact-panel {
+  max-width: 980px;
+  margin: 0 auto;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--panel);
+  padding: 26px 26px 24px;
+}
+.landing-v2 .metrics-bars {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 24px;
+  margin-bottom: 28px;
+}
+.landing-v2 .metric-bar__label,
+.landing-v2 .pipeline-flow__labels span {
+  display: block;
+  font-family: var(--mono);
+  font-size: 10px;
+  line-height: 1.2;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.landing-v2 .metric-bar__top {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+.landing-v2 .metric-bar__num {
+  font-family: var(--mono);
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+.landing-v2 .metric-bar__track {
+  height: 6px;
+  margin-top: 8px;
+  overflow: hidden;
+  background: var(--line);
+}
+.landing-v2 .metric-bar__fill {
+  height: 100%;
+  transform-origin: left center;
+  transform: scaleX(0);
+  background: var(--green);
+}
+.landing-v2 .metric-bar p {
+  font-family: var(--mono);
+  font-size: 10px;
+  line-height: 1.35;
+  color: var(--muted);
+  opacity: 0.72;
+  margin: 7px 0 0;
+}
+.landing-v2 .impact-frame {
+  text-align: center;
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  line-height: 1.5;
+  color: var(--muted);
+  max-width: 62ch;
+  margin: 22px auto 0;
+}
+.landing-v2 .impact-frame b {
+  color: var(--ink);
+}
+.landing-v2 .impact-illus {
+  display: block;
+  width: fit-content;
+  margin: 12px auto 0;
+  font-family: var(--mono);
+  font-size: 9px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--soft);
+  border: 1px dashed var(--line);
+  border-radius: 999px;
+  padding: 4px 10px;
+}
+.landing-v2 .pipeline-flow__labels {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 8px;
+  margin-bottom: 12px;
+  text-align: center;
+}
+.landing-v2 .pipeline-flow__labels span {
+  transition: color 300ms ease, font-weight 300ms ease;
+}
+.landing-v2 .pipeline-flow__canvas-wrap {
+  width: 100%;
+  height: 160px;
+}
+.landing-v2 .pipeline-flow canvas {
+  display: block;
+}
+
+/* closing CTA band ----------------------------------------------------------- */
+.landing-v2 .pitch-cta {
+  text-align: center;
+  padding: 60px 0 64px;
+}
+.landing-v2 .pitch-cta h2 {
+  font-family: var(--serif);
+  font-weight: 400;
+  font-size: 30px;
+  letter-spacing: -0.5px;
+  line-height: 1.16;
+  margin: 0 auto 10px;
+  max-width: 20ch;
+  color: var(--ink);
+}
+.landing-v2 .pitch-cta p {
+  font-family: var(--serif);
+  font-size: 17px;
+  color: var(--muted);
+  margin: 0 auto 24px;
+  max-width: 48ch;
+}
+.landing-v2 .pitch-cta .cta-row {
+  justify-content: center;
+}
+
+/* a small "which page am I on" sibling switch under the hero ----------------- */
+.landing-v2 .pitch-switch {
+  display: inline-flex;
+  gap: 6px;
+  margin: 22px auto 0;
+  padding: 4px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--panel);
+  font-family: var(--mono);
+  font-size: 11px;
+}
+.landing-v2 .pitch-switch a {
+  padding: 6px 14px;
+  border-radius: 999px;
+  text-decoration: none;
+  color: var(--muted);
+  letter-spacing: 0.04em;
+}
+.landing-v2 .pitch-switch a.is-active {
+  background: var(--ink);
+  color: var(--page);
+}
+
+@media (max-width: 860px) {
+  .landing-v2 .pitch-loop {
+    grid-template-columns: 1fr 1fr;
+  }
+  .landing-v2 .pitch-lanes,
+  .landing-v2 .pitch-triad,
+  .landing-v2 .metrics-bars {
+    grid-template-columns: 1fr;
+  }
+  .landing-v2 .impact-panel {
+    padding: 20px 14px 18px;
+  }
+  .landing-v2 .pipeline-flow__labels span {
+    font-size: 9px;
+    letter-spacing: 0.1em;
+  }
+}
