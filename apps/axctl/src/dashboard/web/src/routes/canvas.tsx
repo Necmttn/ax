@@ -1,7 +1,9 @@
 import { Fragment, useMemo, useRef, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { api } from "../api.ts";
+import { InPlaceDetail } from "./canvas-detail-inplace.tsx";
+import { FocusDetail } from "./canvas-detail-focus.tsx";
 import type {
     SessionCanvasNode,
     SessionCanvasPayload,
@@ -15,7 +17,8 @@ import type {
 // orchestration timeline (the subagent fan-out / parallel / sequential dance).
 
 const LANES = 8;            // top repos shown; rest collapse into "+ more"
-const ROW_H = 40;
+const ROW_H = 40;           // min lane height (1 sub-row)
+const SUBROW_H = 18;        // height of each stacked sub-row within a lane
 const PILL_H = 14;
 const TRACK_LEFT = 150;     // px reserved for lane labels
 
@@ -58,6 +61,10 @@ export function CanvasRoute() {
     // time-axis camera: zoom = horizontal scale, panX = px scrolled into content
     const [zoom, setZoom] = useState(1);
     const [panX, setPanX] = useState(0);
+    const [detailMode, setDetailMode] = useState<"inplace" | "focus" | "both">("both");
+    const qc = useQueryClient();
+    const prefetchInspect = (id: string) =>
+        qc.prefetchQuery({ queryKey: ["session-inspect", id], queryFn: () => api.sessionInspect(id), staleTime: 120_000 });
     const dragRef = useRef<{ px: number; pan: number } | null>(null);
 
     // top-level sessions only (subagents live in the drill-in)
@@ -94,7 +101,6 @@ export function CanvasRoute() {
     // ms -> px within the visible track (after zoom + horizontal pan)
     const xOf = (msv: number) => ((msv - t0) / (t1 - t0)) * contentW - clampedPan;
 
-    const laneIndex = new Map(lanes.map((l, i) => [l, i]));
 
     // start time of the next pill in the same lane - bounds how wide a label can
     // grow before it would collide with the next session. As you zoom in, this
@@ -115,6 +121,49 @@ export function CanvasRoute() {
         }
         return m;
     }, [sessions, laneOf]);
+
+    // sub-row packing: within a lane, sessions whose [start,end] overlap in TIME
+    // (multiple agents on the same project at once) stack into separate rows via
+    // greedy interval packing. Time-based (not zoom-based) so lane heights are
+    // stable. Lane height grows with the max concurrency it ever saw.
+    const { rowById, laneRows } = useMemo(() => {
+        const rowById = new Map<string, number>();
+        const laneRows = new Map<string, number>();
+        const byLane = new Map<string, SessionCanvasNode[]>();
+        for (const s of sessions) {
+            const k = laneOf(s);
+            const arr = byLane.get(k) ?? [];
+            arr.push(s); byLane.set(k, arr);
+        }
+        for (const [lane, arr] of byLane) {
+            arr.sort((x, y) => (tMs(x.started_at) ?? 0) - (tMs(y.started_at) ?? 0));
+            const rowEnds: number[] = [];
+            for (const s of arr) {
+                const a = tMs(s.started_at) ?? 0;
+                const b = Math.max(tMs(s.ended_at) ?? a, a);
+                let row = rowEnds.findIndex((end) => end <= a);
+                if (row === -1) { row = rowEnds.length; rowEnds.push(b); } else rowEnds[row] = b;
+                rowById.set(s.id, row);
+            }
+            laneRows.set(lane, Math.max(1, rowEnds.length));
+        }
+        return { rowById, laneRows };
+    }, [sessions, laneOf]);
+
+    // cumulative lane y-offsets + heights (variable, from sub-row count)
+    const laneGeom = useMemo(() => {
+        const yByLane = new Map<string, number>();
+        const hByLane = new Map<string, number>();
+        let acc = 0;
+        for (const lane of lanes) {
+            const rows = laneRows.get(lane) ?? 1;
+            const h = Math.max(ROW_H, rows * SUBROW_H + 8);
+            yByLane.set(lane, acc); hByLane.set(lane, h); acc += h;
+        }
+        return { yByLane, hByLane, total: Math.max(ROW_H, acc) };
+    }, [lanes, laneRows]);
+    const topOf = (s: SessionCanvasNode) =>
+        (laneGeom.yByLane.get(laneOf(s)) ?? 0) + (rowById.get(s.id) ?? 0) * SUBROW_H + (SUBROW_H - PILL_H) / 2 + 4;
 
     const dayTicks = useMemo(() => {
         const out: Array<{ x: number; label: string }> = [];
@@ -173,6 +222,15 @@ export function CanvasRoute() {
                 <button type="button" onClick={() => { setZoom(1); setPanX(0); }}
                     style={{ height: 24, padding: "0 9px", background: "#0e1422", border: "1px solid #2a3650", color: "#cfe0ff", borderRadius: 6, cursor: "pointer", fontSize: 11 }}>Fit</button>
                 <span style={{ fontSize: 11, color: "#55657f" }}>{zoom.toFixed(1)}× · scroll to zoom, drag to pan</span>
+                <span style={{ flex: 1 }} />
+                <span style={{ fontSize: 10, color: "#55657f" }}>detail:</span>
+                {(["inplace", "focus", "both"] as const).map((m) => (
+                    <button key={m} type="button" onClick={() => setDetailMode(m)}
+                        style={{ height: 24, padding: "0 9px", borderRadius: 6, cursor: "pointer", fontSize: 11,
+                            background: detailMode === m ? "#16345e" : "#0e1422",
+                            border: `1px solid ${detailMode === m ? "#4f8bff" : "#2a3650"}`,
+                            color: detailMode === m ? "#cfe0ff" : "#8b9ab3" }}>{m === "inplace" ? "in-place" : m}</button>
+                ))}
             </div>
 
             <div
@@ -191,12 +249,17 @@ export function CanvasRoute() {
                     ))}
                 </div>
                 {/* lanes */}
-                <div style={{ position: "relative" }}>
-                    {lanes.map((lane) => (
-                        <div key={lane} style={{ position: "relative", height: ROW_H, borderBottom: "1px solid #0f141d" }}>
-                            <div style={{ position: "absolute", left: 14, top: ROW_H / 2 - 7, width: TRACK_LEFT - 20, fontSize: 11, color: lane === "+ more" ? "#55657f" : "#8b9ab3", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{lane}</div>
-                        </div>
-                    ))}
+                <div style={{ position: "relative", height: laneGeom.total }}>
+                    {lanes.map((lane) => {
+                        const rows = laneRows.get(lane) ?? 1;
+                        return (
+                            <div key={lane} style={{ position: "absolute", left: 0, right: 0, top: laneGeom.yByLane.get(lane) ?? 0, height: laneGeom.hByLane.get(lane) ?? ROW_H, borderBottom: "1px solid #0f141d" }}>
+                                <div style={{ position: "absolute", left: 14, top: 6, width: TRACK_LEFT - 20, fontSize: 11, color: lane === "+ more" ? "#55657f" : "#8b9ab3", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                                    {lane}{rows > 1 ? <span style={{ color: "#3f4c63" }}> ·{rows}</span> : null}
+                                </div>
+                            </div>
+                        );
+                    })}
                     {/* day gridlines */}
                     {dayTicks.map((d, i) => (
                         <div key={`g${i}`} style={{ position: "absolute", top: 0, bottom: 0, left: TRACK_LEFT + d.x, width: 1, background: "#0f141d" }} />
@@ -211,14 +274,13 @@ export function CanvasRoute() {
                         .map((s) => {
                         const a = tMs(s.started_at); if (a === null) return null;
                         const b = tMs(s.ended_at) ?? a;
-                        const li = laneIndex.get(laneOf(s)) ?? 0;
                         const left = TRACK_LEFT + xOf(a);
                         // width = √tokens (NOT duration - a session's [start,end] often
                         // spans idle days). Placed at start-time; the inline rail shows
                         // the blocked proportion regardless of pill width.
                         void b;
                         const w = 12 + Math.sqrt(Math.min(1, s.size / 2_000_000)) * 78;
-                        const top = li * ROW_H + ROW_H / 2 - PILL_H / 2;
+                        const top = topOf(s);
                         const isSel = s.id === selected;
                         // progressive label: grow into the gap before the next pill
                         const nextStart = nextStartById.get(s.id) ?? Infinity;
@@ -229,6 +291,7 @@ export function CanvasRoute() {
                             <Fragment key={s.id}>
                             <div
                                 title={`${s.label}\n${repoOf(s)} · ${s.turns} turns · ${fmtTokens(s.size)} tok${s.subagent_count ? ` · ${s.subagent_count} subagents` : ""}${s.epochs > 1 ? ` · ${s.epochs - 1}× compacted` : ""}`}
+                                onMouseEnter={() => prefetchInspect(s.id)}
                                 onClick={() => setSelected(isSel ? null : s.id)}
                                 style={{
                                     position: "absolute", left, top, width: w, height: PILL_H, borderRadius: 7,
@@ -264,6 +327,14 @@ export function CanvasRoute() {
                             </Fragment>
                         );
                     })}
+                    {selected && (detailMode === "inplace" || detailMode === "both") ? (() => {
+                        const sel = sessions.find((s) => s.id === selected);
+                        const a = sel?.started_at ? tMs(sel.started_at) : null;
+                        if (!sel || a === null) return null;
+                        const x = Math.max(TRACK_LEFT, Math.min(Math.max(TRACK_LEFT, width - 380), TRACK_LEFT + xOf(a) + 12));
+                        const y = Math.max(4, Math.min(Math.max(4, laneGeom.total - 250), topOf(sel) + 16));
+                        return <InPlaceDetail sessionId={selected} x={x} y={y} onClose={() => setSelected(null)} />;
+                    })() : null}
                 </div>
             </div>
 
@@ -271,10 +342,12 @@ export function CanvasRoute() {
                 <span>pill = session · width = √tokens · color = outcome</span>
                 <span style={{ color: "#8b9ab3" }}>▨ hatched = main blocked on subagent</span>
                 <span style={{ color: "#ff6b4a" }}>| = compaction</span>
-                <span>click a pill → orchestration timeline</span>
+                <span>click a pill → detail (toggle in-place / focus / both)</span>
             </div>
 
-            {selected ? <OrchestrationPanel sessionId={selected} onClose={() => setSelected(null)} /> : null}
+            {selected && (detailMode === "focus" || detailMode === "both")
+                ? <FocusDetail sessionId={selected} onClose={() => setSelected(null)} />
+                : null}
         </section>
     );
 }
