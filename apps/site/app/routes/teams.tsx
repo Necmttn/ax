@@ -11,11 +11,11 @@ const MAILTO =
 export const Route = createFileRoute("/teams")({
   head: () => ({
     meta: [
-      { title: "ax for teams - see what your AI spend actually buys" },
+      { title: "ax for teams - close the gap to your best AI user" },
       {
         name: "description",
         content:
-          "One view of every AI seat and harness across your team - deduped, tied to outcomes - without reading anyone's code. Raw stays on the laptop; only aggregates leave.",
+          "Most teams plateau at a fraction of what their AI tooling can do. ax shows the gap between your best AI users and the rest - and the workflows worth spreading - so the whole team ships faster.",
       },
     ],
   }),
@@ -43,18 +43,18 @@ function Teams() {
           <HeroLogoField />
           <span className="eyebrow">ax for engineering teams</span>
           <h1>
-            See what your AI spend<br />
-            is <em>actually</em> buying.
+            Your team uses a <em>fraction</em><br />
+            of what AI can do.
           </h1>
           <p className="hero-human">
-            Every seat, every harness, in one place &mdash; without reading
-            anyone&rsquo;s code.
+            The real cost isn&rsquo;t the spend &mdash; it&rsquo;s the speed
+            you&rsquo;re leaving on the table.
           </p>
           <p className="lede">
-            Your team swaps models, providers and harnesses every week, and each
-            vendor console is a silo. ax unifies them: one view of who uses what,
-            which seats are dead, which are paid twice &mdash; and whether the
-            spend is producing anything.
+            A couple of people get great at AI and fly. Everyone else plateaus at
+            autocomplete. ax finds the gap between your best AI users and the rest
+            &mdash; the workflows that actually ship, and who hasn&rsquo;t picked
+            them up &mdash; so you can close it.
           </p>
 
           <div className="install-wrap">
@@ -82,60 +82,59 @@ function Teams() {
           </div>
         </section>
 
-        {/* ============= the blindness ============= */}
+        {/* ============= the gap ============= */}
         <section className="pitch-section">
           <div className="pitch-head">
-            <span className="eyebrow">the blindness</span>
+            <span className="eyebrow">the opportunity</span>
             <h2>
-              You&rsquo;re paying for AI you <em>can&rsquo;t see</em>.
+              The upside you <em>can&rsquo;t see</em>.
             </h2>
             <p>
-              The invoice is real. The usage isn&rsquo;t visible &mdash; and
-              providers will never show you what happens across their
-              competitors.
+              What you&rsquo;d save trimming dead seats is rounding error next to
+              the speed your team isn&rsquo;t getting. That gap stays invisible
+              &mdash; until you can compare how people actually work.
             </p>
           </div>
           <div className="pitch-triad">
             <div className="pitch-fcard">
               <span className="ic" aria-hidden="true">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
-                  <rect x="3" y="5" width="18" height="14" rx="2" />
-                  <path d="M3 10h18M8 19v-9" />
+                  <path d="M4 19V5M4 19h16M8 19v-5M12 19v-9M16 19V8M20 19v-7" />
                 </svg>
               </span>
-              <h3>Dead &amp; duplicate seats</h3>
+              <h3>The adoption gap</h3>
               <p>
-                Who actually touches their $200 seat day-to-day? Who has three
-                tools doing one job? Dedup the sprawl, kill the waste.
+                A few people are flying; most are barely past autocomplete. See
+                who&rsquo;s stuck at the starting line &mdash; and on what.
               </p>
             </div>
             <div className="pitch-fcard">
               <span className="ic" aria-hidden="true">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
-                  <circle cx="6" cy="6" r="2.5" />
+                  <path d="M5 13l3.5 3.5L19 6" />
+                  <path d="M5 19h14" />
+                </svg>
+              </span>
+              <h3>What actually works</h3>
+              <p>
+                Which workflows, skills and harnesses line up with shipping &mdash;
+                surfaced from real sessions, not vibes or self-reports.
+              </p>
+            </div>
+            <div className="pitch-fcard">
+              <span className="ic" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+                  <circle cx="6" cy="12" r="2.5" />
                   <circle cx="18" cy="6" r="2.5" />
-                  <circle cx="12" cy="18" r="2.5" />
-                  <path d="M6 8.5v2a3 3 0 0 0 3 3h6a3 3 0 0 0 3-3v-2M12 13.5v2" />
+                  <circle cx="18" cy="18" r="2.5" />
+                  <path d="M8.2 10.9l7.6-3.8M8.2 13.1l7.6 3.8" />
                 </svg>
               </span>
-              <h3>Harness sprawl, unified</h3>
+              <h3>Spread the best</h3>
               <p>
-                Claude Code, Codex, Cursor, OpenCode, Pi &mdash; one deduped view
-                per person, instead of five consoles that can&rsquo;t see each
-                other.
-              </p>
-            </div>
-            <div className="pitch-fcard">
-              <span className="ic" aria-hidden="true">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M12 3l2.4 5.4 5.6.5-4.2 3.7 1.3 5.6L12 16.8 6.9 18.7l1.3-5.6L4 9.4l5.6-.5z" />
-                </svg>
-              </span>
-              <h3>Hidden gold</h3>
-              <p>
-                Your best performer built a workflow nobody else has. ax finds
-                the siloed skill that&rsquo;s used 40&times; on one laptop &mdash;
-                so you can spread it.
+                Your top performer&rsquo;s recipe, made repeatable &mdash; level
+                the whole team up to your best AI user instead of hoping it rubs
+                off.
               </p>
             </div>
           </div>
@@ -145,11 +144,11 @@ function Teams() {
         <section className="demo">
           <div className="demo-intro">
             <span className="eyebrow">one screen, the whole team</span>
-            <h2>Spend in, outcomes out.</h2>
+            <h2>See the gap. Close the gap.</h2>
             <p>
-              The same report that shows you the waste shows you the gold &mdash;
-              so it&rsquo;s the screen you bring to the team, not the one you hide
-              from them.
+              The same view that shows who&rsquo;s underusing AI shows you exactly
+              what to hand them &mdash; the workflow that&rsquo;s already working
+              two desks over.
             </p>
           </div>
 
@@ -160,33 +159,34 @@ function Teams() {
               <div className="browser-spacer"></div>
             </div>
             <div className="dash">
-              <p className="dash-head">Team spend &amp; adoption &middot; 12 engineers</p>
+              <p className="dash-head">Team AI adoption &middot; 12 engineers</p>
               <div className="ministats">
                 <div className="mini">
-                  <div className="mini-label">Monthly AI spend</div>
-                  <div className="mini-value">$2.4<span className="unit">k</span></div>
-                  <div className="mini-sub"><b>5</b> tools &middot; <span className="neg">+18%</span></div>
+                  <div className="mini-label">Team adoption</div>
+                  <div className="mini-value">41<span className="unit">%</span></div>
+                  <div className="mini-sub"><b>59%</b> still on the table</div>
                 </div>
                 <div className="mini">
-                  <div className="mini-label">Seats live</div>
-                  <div className="mini-value">9<span className="unit">/ 12</span></div>
-                  <div className="mini-sub"><span className="neg">3 dead</span> &middot; $600/mo</div>
+                  <div className="mini-label">At expert tier</div>
+                  <div className="mini-value">3<span className="unit">/ 12</span></div>
+                  <div className="mini-sub"><span className="neg">9 plateaued</span></div>
                 </div>
                 <div className="mini">
-                  <div className="mini-label">Duplicate seats</div>
-                  <div className="mini-value">4</div>
-                  <div className="mini-sub">2 tools, same job</div>
+                  <div className="mini-label">Workflows that ship</div>
+                  <div className="mini-value">6</div>
+                  <div className="mini-sub"><span className="pos">+2</span> found this week</div>
                 </div>
                 <div className="mini">
-                  <div className="mini-label">Hidden gold</div>
+                  <div className="mini-label">Ready to spread</div>
                   <div className="mini-value">3</div>
-                  <div className="mini-sub"><b>siloed skills</b> worth spreading</div>
+                  <div className="mini-sub"><b>best-performer</b> skills</div>
                 </div>
               </div>
             </div>
           </div>
           <p className="demo-caption">
-            Aggregates only. Nothing here required reading a line of anyone&rsquo;s code.
+            Aggregates only &mdash; the point isn&rsquo;t to police anyone,
+            it&rsquo;s to level them up.
           </p>
         </section>
 
@@ -208,9 +208,9 @@ function Teams() {
             <div className="pitch-lane is-out">
               <h3><span className="dot"></span> ships out</h3>
               <ul>
-                <li>Per-seat <b>utilization</b> <span className="dim">(tokens, active days &mdash; the seat you pay for)</span></li>
-                <li>Skill / tool <b>usage rollups</b> <span className="dim">(names, not contents)</span></li>
-                <li><b>Failure shapes</b> <span className="dim">(&ldquo;step 3 fails on input-class Y, 12&times;&rdquo;)</span></li>
+                <li>Per-seat <b>adoption signal</b> <span className="dim">(active days, depth of use)</span></li>
+                <li>Skill / workflow <b>usage rollups</b> <span className="dim">(names, not contents)</span></li>
+                <li><b>What correlates with shipping</b> <span className="dim">(the patterns worth spreading)</span></li>
                 <li>Team-level <b>aggregates</b> <span className="dim">(never per-person behavior)</span></li>
               </ul>
             </div>
@@ -228,10 +228,11 @@ function Teams() {
 
         {/* ============= closing CTA ============= */}
         <section className="pitch-cta">
-          <h2>Find the waste. Spread the gold.</h2>
+          <h2>Stop leaving speed on the table.</h2>
           <p>
             A 20-minute walkthrough on your own data &mdash; we&rsquo;ll show you
-            the dead seats and the hidden skills before you decide anything.
+            the adoption gap and the workflows worth spreading before you decide
+            anything.
           </p>
           <div className="cta-row">
             <a className="prompt-pill is-solo" href={MAILTO}>

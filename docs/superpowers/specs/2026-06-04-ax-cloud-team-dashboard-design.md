@@ -19,16 +19,23 @@ worked, what should spread.
 
 ## The pain (why anyone pays)
 
-A team spends real money + effort on AI tooling and is blind to the return:
+The pain is **opportunity cost, not spend.** A team adopts AI tooling and is blind
+to the return - but the loss that matters is the *speed they're not getting*, which
+dwarfs anything saved by trimming a dead seat. Lead with upside, not waste:
+cost-cutting is a vitamin and adversarial (it pitches the manager on cutting seats);
+"your team is at 40% of what AI could give you" is the painkiller.
 
-- **Spend / sprawl** - pays ~$200/seat across many tools; engineers swap
-  models/providers/harnesses weekly. Each provider console is a silo; nobody sees
-  *across* them, deduped, per person. Dead seats and duplicate seats are invisible.
+- **The adoption gap** - a couple of people get great at AI and fly; everyone else
+  plateaus at autocomplete. The gap between best and rest is invisible until you can
+  compare how people actually work.
 - **Siloed excellence** - a great workflow (one engineer's OTel skill) lives on one
-  laptop and never spreads. The best performer's recipe stays trapped.
+  laptop and never spreads. The best performer's recipe stays trapped, so the team
+  never levels up to its own best AI user.
 
-Same blindness, one engine. Provider consoles structurally **can't** close it
-(they won't show competitor spend, and they only meter tokens, never *outcome*).
+One engine surfaces both: what correlates with shipping, and who hasn't picked it up.
+Provider consoles structurally **can't** do this - they meter tokens, never
+*outcome*, and never *across* harnesses. (Spend/dedup is a minor supporting tab, not
+the pitch.)
 
 ## Two positionings, one engine (don't pick the buyer in a doc - pick it in the market)
 
@@ -36,9 +43,10 @@ Qualify buyers on **AI-spend + a named owner of that spend**, not headcount
 (AI-native teams are small but spend heavily). Run both as landing pages / pitches;
 whichever lands/pays first sets the headline.
 
-- **Positioning A - eng-manager / spend + adoption** (`/teams`):
-  "See what your team's AI spend is actually buying - every seat, every harness,
-  without reading anyone's code."
+- **Positioning A - eng-manager / adoption gap + propagation** (`/teams`):
+  "Your team uses a fraction of what AI can do. Close the gap between your best AI
+  user and the rest - and spread what actually ships." (Frame = opportunity cost,
+  not cost-savings.)
 - **Positioning B - applied-AI team / governed skill sync** (`/registry`):
   "Ship curated skills to your whole team; their agents send fixes back."
   ICP: applied-AI teams arming **non-engineer domain experts** (legal, finance,
