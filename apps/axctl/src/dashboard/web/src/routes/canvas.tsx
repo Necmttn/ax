@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from "react";
+import { Fragment, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { api } from "../api.ts";
@@ -95,6 +95,26 @@ export function CanvasRoute() {
     const xOf = (msv: number) => ((msv - t0) / (t1 - t0)) * contentW - clampedPan;
 
     const laneIndex = new Map(lanes.map((l, i) => [l, i]));
+
+    // start time of the next pill in the same lane - bounds how wide a label can
+    // grow before it would collide with the next session. As you zoom in, this
+    // gap widens, so labels fade in progressively (semantic zoom).
+    const nextStartById = useMemo(() => {
+        const m = new Map<string, number>();
+        const byLane = new Map<string, SessionCanvasNode[]>();
+        for (const s of sessions) {
+            const k = laneOf(s);
+            const arr = byLane.get(k) ?? [];
+            arr.push(s); byLane.set(k, arr);
+        }
+        for (const arr of byLane.values()) {
+            arr.sort((x, y) => (tMs(x.started_at) ?? 0) - (tMs(y.started_at) ?? 0));
+            for (let i = 0; i < arr.length; i++) {
+                m.set(arr[i]!.id, i + 1 < arr.length ? (tMs(arr[i + 1]!.started_at) ?? Infinity) : Infinity);
+            }
+        }
+        return m;
+    }, [sessions, laneOf]);
 
     const dayTicks = useMemo(() => {
         const out: Array<{ x: number; label: string }> = [];
@@ -200,9 +220,14 @@ export function CanvasRoute() {
                         const w = 12 + Math.sqrt(Math.min(1, s.size / 2_000_000)) * 78;
                         const top = li * ROW_H + ROW_H / 2 - PILL_H / 2;
                         const isSel = s.id === selected;
+                        // progressive label: grow into the gap before the next pill
+                        const nextStart = nextStartById.get(s.id) ?? Infinity;
+                        const nextX = nextStart === Infinity ? left + w + 320 : TRACK_LEFT + xOf(nextStart);
+                        const labelMaxPx = Math.min(320, nextX - (left + w) - 6);
+                        const showLabel = labelMaxPx > 34 && left < width && left + w > TRACK_LEFT;
                         return (
+                            <Fragment key={s.id}>
                             <div
-                                key={s.id}
                                 title={`${s.label}\n${repoOf(s)} · ${s.turns} turns · ${fmtTokens(s.size)} tok${s.subagent_count ? ` · ${s.subagent_count} subagents` : ""}${s.epochs > 1 ? ` · ${s.epochs - 1}× compacted` : ""}`}
                                 onClick={() => setSelected(isSel ? null : s.id)}
                                 style={{
@@ -229,6 +254,14 @@ export function CanvasRoute() {
                                     <div style={{ position: "absolute", top: 1, right: 2, fontSize: 7, color: "#9fc0ff" }}>{s.subagent_count}</div>
                                 ) : null}
                             </div>
+                            {showLabel ? (
+                                <div style={{
+                                    position: "absolute", left: left + w + 5, top: top + 1, width: labelMaxPx, height: PILL_H,
+                                    fontSize: 10, lineHeight: `${PILL_H - 2}px`, color: "#aab9d6",
+                                    whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", pointerEvents: "none",
+                                }}>{s.label}</div>
+                            ) : null}
+                            </Fragment>
                         );
                     })}
                 </div>
