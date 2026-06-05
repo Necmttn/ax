@@ -1,5 +1,36 @@
 # Changelog
 
+## [0.11.0](https://github.com/Necmttn/ax/compare/v0.10.0...v0.11.0) (2026-06-05)
+
+
+### Features
+
+* first-class compaction signal across harnesses ([#133](https://github.com/Necmttn/ax/issues/133)) ([c1d7a91](https://github.com/Necmttn/ax/commit/c1d7a912d014b6930fd9469ede9b464c47adae40))
+* **ingest:** emit live progress deltas for codex/claude stages ([8b40ac5](https://github.com/Necmttn/ax/commit/8b40ac5c5fd443ff6784b101ab4611921a9c1087))
+* migrate node:fs/path → @effect/platform (FileSystem/Path) ([bed3ecd](https://github.com/Necmttn/ax/commit/bed3ecda6df549ba6cefc1dd1e38a131f7ab0a65))
+* **site:** Flue-style copy-prompt pill in hero, simplify install section ([c477a74](https://github.com/Necmttn/ax/commit/c477a74c1061197ecfe71e25601787ed420de23e))
+* **site:** honest impact section on /teams ([09643c4](https://github.com/Necmttn/ax/commit/09643c45f810a004efce9c80f29f1e148d47e7a7))
+* **site:** landing→teams upsell, teams copy trim, interventions fix ([2aecb23](https://github.com/Necmttn/ax/commit/2aecb2327caf75e7d5f96a4696a0530321be267b))
+* **site:** reframe /teams from cost-savings to opportunity cost ([79813ee](https://github.com/Necmttn/ax/commit/79813ee31323417c930afb5ed5d6990e8ce09e0d))
+* **site:** two A/B positioning pages for ax cloud team layer ([ed40e06](https://github.com/Necmttn/ax/commit/ed40e069ad3797f39736346a23e08172fc4fca75))
+* **site:** unify page layouts, responsive header, and changelog freshness ([d72f3fb](https://github.com/Necmttn/ax/commit/d72f3fbfab782257cba545d4ba49dffbe4494deb))
+* **skills:** exclude provider built-in tools from weighted ranking ([347e4ea](https://github.com/Necmttn/ax/commit/347e4ea3aa14b00bc352368386b50865ec65212e))
+
+
+### Bug Fixes
+
+* **cli:** install.ts await launchctl loads (Effect.promise); classifyNoFollow for symlink slots so a regular file doesn't abort uninstall (review fixes) [REVIEW-BLOCKER] ([8abfa5c](https://github.com/Necmttn/ax/commit/8abfa5c7c98979977ddaf8847f82e8679bc81111))
+* **ingest:** canonicalize session.project off the repository edge ([21839ac](https://github.com/Necmttn/ax/commit/21839ac663daecc19b576c5e6628860aa6cd0558))
+* **ingest:** claude reader -&gt; FileSystem streaming; vanished transcript skips instead of aborting run ([6854fc5](https://github.com/Necmttn/ax/commit/6854fc585b28b8fcfc9b8b526a82a9b2f697428f))
+* **ingest:** codex mid-stream NotFound no longer silently skips partial writes; route production through streamCodexFile (review fixes) ([1dcad1c](https://github.com/Necmttn/ax/commit/1dcad1ce2fd9ad2378809d122c017a0ec841924a))
+* **ingest:** codex reader -&gt; FileSystem streaming; vanished session skips; flush cadence preserved ([e9864bc](https://github.com/Necmttn/ax/commit/e9864bcec9a2dd07510cbc172a2e19e6e2980f9c))
+* **ingest:** preserve no-follow symlink semantics in directory walks (classifyNoFollow); follow symlinks only where the old code did ([7a55ce1](https://github.com/Necmttn/ax/commit/7a55ce11233371e773e9510fe8e8afaed68b3d64))
+* **progress:** suppress noise-inflated speed for sub-100ms stages ([f45f9ef](https://github.com/Necmttn/ax/commit/f45f9ef83be6ad47f99a4dae402ebd3dd503bd1d))
+* **schema:** idempotent schema apply - IF NOT EXISTS on all indexes ([ad62420](https://github.com/Necmttn/ax/commit/ad624202f0de7991ce5d91af365356cf2af8d457))
+* **site:** refine card hover, drop accent left-bar + hard rings ([16768e7](https://github.com/Necmttn/ax/commit/16768e7d5e87d02a25a8047c5e33a9c83c29e830))
+* **site:** rewrite open-source body, correct footer license to AGPL-3.0 ([bfd0ec2](https://github.com/Necmttn/ax/commit/bfd0ec206a9fd2f64c2be8e999d94be46aa87794))
+* **skills:** role.weight NONE crash + weighted-query per-edge deref hang ([e7b82c5](https://github.com/Necmttn/ax/commit/e7b82c563e63f546ef2e463b9000685fa24235aa))
+
 ## [0.10.0](https://github.com/Necmttn/ax/compare/v0.9.0...v0.10.0) (2026-06-03)
 
 
