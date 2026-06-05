@@ -17,8 +17,8 @@ DEFINE FIELD bytes          ON skill TYPE option<int>;
 DEFINE FIELD ingested_at    ON skill TYPE datetime VALUE time::now();
 DEFINE FIELD last_seen_at   ON skill TYPE option<datetime>;   -- reconcile: stamped when present on disk
 DEFINE FIELD deleted_at     ON skill TYPE option<datetime>;   -- reconcile: soft tombstone when absent on disk
-DEFINE INDEX skill_name_uq  ON skill FIELDS name UNIQUE;
-DEFINE INDEX skill_scope    ON skill FIELDS scope;
+DEFINE INDEX IF NOT EXISTS skill_name_uq  ON skill FIELDS name UNIQUE;
+DEFINE INDEX IF NOT EXISTS skill_scope    ON skill FIELDS scope;
 
 -- Full-text search (BM25 + ngram tokenization) for `axctl search`.
 -- ngram(2, 8) generates 2-8 char substrings so partial-word queries hit
@@ -52,8 +52,8 @@ DEFINE FIELD bytes          ON agent_def TYPE option<int>;
 DEFINE FIELD ingested_at    ON agent_def TYPE datetime VALUE time::now();
 DEFINE FIELD last_seen_at   ON agent_def TYPE option<datetime>;
 DEFINE FIELD deleted_at     ON agent_def TYPE option<datetime>;
-DEFINE INDEX agent_def_name_uq ON agent_def FIELDS name UNIQUE;
-DEFINE INDEX agent_def_scope   ON agent_def FIELDS scope;
+DEFINE INDEX IF NOT EXISTS agent_def_name_uq ON agent_def FIELDS name UNIQUE;
+DEFINE INDEX IF NOT EXISTS agent_def_scope   ON agent_def FIELDS scope;
 
 DEFINE TABLE session SCHEMAFULL;
 DEFINE FIELD project        ON session TYPE option<string>;
@@ -66,13 +66,13 @@ DEFINE FIELD raw_file       ON session TYPE option<string>;  -- f"transcripts:/<
 DEFINE FIELD repository     ON session TYPE option<record<repository>>;
 DEFINE FIELD checkout       ON session TYPE option<record<checkout>>;
 DEFINE FIELD workspace      ON session TYPE option<record<workspace>>;
-DEFINE INDEX session_repository_started ON session FIELDS repository, started_at;
-DEFINE INDEX session_checkout_started ON session FIELDS checkout, started_at;
-DEFINE INDEX session_workspace_started ON session FIELDS workspace, started_at;
+DEFINE INDEX IF NOT EXISTS session_repository_started ON session FIELDS repository, started_at;
+DEFINE INDEX IF NOT EXISTS session_checkout_started ON session FIELDS checkout, started_at;
+DEFINE INDEX IF NOT EXISTS session_workspace_started ON session FIELDS workspace, started_at;
 -- Standalone started_at index: the dashboard roots query orders all sessions
 -- by started_at with no repository/checkout/workspace prefix, so the composite
 -- indexes above don't cover it. See GitHub issue #76.
-DEFINE INDEX session_started ON session FIELDS started_at;
+DEFINE INDEX IF NOT EXISTS session_started ON session FIELDS started_at;
 
 DEFINE TABLE agent_provider SCHEMAFULL;
 DEFINE FIELD name           ON agent_provider TYPE string;
@@ -81,7 +81,7 @@ DEFINE FIELD version        ON agent_provider TYPE option<string>;
 DEFINE FIELD capabilities   ON agent_provider TYPE option<string>;  -- JSON-encoded
 DEFINE FIELD created_at     ON agent_provider TYPE datetime DEFAULT time::now();
 DEFINE FIELD updated_at     ON agent_provider TYPE option<datetime>;
-DEFINE INDEX agent_provider_name_uq ON agent_provider FIELDS name UNIQUE;
+DEFINE INDEX IF NOT EXISTS agent_provider_name_uq ON agent_provider FIELDS name UNIQUE;
 
 DEFINE TABLE agent_model SCHEMAFULL;
 DEFINE FIELD name                  ON agent_model TYPE string;
@@ -100,8 +100,8 @@ DEFINE FIELD context_window       ON agent_model TYPE option<int>;
 DEFINE FIELD pricing_source        ON agent_model TYPE option<string>;
 DEFINE FIELD created_at            ON agent_model TYPE datetime DEFAULT time::now();
 DEFINE FIELD updated_at            ON agent_model TYPE option<datetime>;
-DEFINE INDEX agent_model_name_uq ON agent_model FIELDS name UNIQUE;
-DEFINE INDEX agent_model_provider ON agent_model FIELDS provider;
+DEFINE INDEX IF NOT EXISTS agent_model_name_uq ON agent_model FIELDS name UNIQUE;
+DEFINE INDEX IF NOT EXISTS agent_model_provider ON agent_model FIELDS provider;
 
 DEFINE TABLE agent_session SCHEMAFULL;
 DEFINE FIELD provider            ON agent_session TYPE record<agent_provider>;
@@ -119,8 +119,8 @@ DEFINE FIELD started_at          ON agent_session TYPE option<datetime>;
 DEFINE FIELD ended_at            ON agent_session TYPE option<datetime>;
 DEFINE FIELD created_at          ON agent_session TYPE datetime DEFAULT time::now();
 DEFINE FIELD updated_at          ON agent_session TYPE option<datetime>;
-DEFINE INDEX agent_session_provider_id ON agent_session FIELDS provider, provider_session_id UNIQUE;
-DEFINE INDEX agent_session_ax_session ON agent_session FIELDS ax_session;
+DEFINE INDEX IF NOT EXISTS agent_session_provider_id ON agent_session FIELDS provider, provider_session_id UNIQUE;
+DEFINE INDEX IF NOT EXISTS agent_session_ax_session ON agent_session FIELDS ax_session;
 
 DEFINE TABLE agent_event SCHEMAFULL;
 DEFINE FIELD agent_session      ON agent_event TYPE record<agent_session>;
@@ -137,9 +137,9 @@ DEFINE FIELD text_excerpt       ON agent_event TYPE option<string>;
 DEFINE FIELD raw                ON agent_event TYPE option<string>;  -- JSON-encoded
 DEFINE FIELD labels             ON agent_event TYPE option<string>;  -- JSON-encoded
 DEFINE FIELD metrics            ON agent_event TYPE option<string>;  -- JSON-encoded
-DEFINE INDEX agent_event_session_seq ON agent_event FIELDS agent_session, seq UNIQUE;
-DEFINE INDEX agent_event_provider_id ON agent_event FIELDS provider, provider_event_id;
-DEFINE INDEX agent_event_session_ts ON agent_event FIELDS agent_session, ts;
+DEFINE INDEX IF NOT EXISTS agent_event_session_seq ON agent_event FIELDS agent_session, seq UNIQUE;
+DEFINE INDEX IF NOT EXISTS agent_event_provider_id ON agent_event FIELDS provider, provider_event_id;
+DEFINE INDEX IF NOT EXISTS agent_event_session_ts ON agent_event FIELDS agent_session, ts;
 
 -- ==== File buckets (SurrealDB 3.0 experimental) ====
 -- Requires: surreal start --allow-experimental files
@@ -164,9 +164,9 @@ DEFINE FIELD text           ON turn TYPE option<string>;  -- full extracted mess
 DEFINE FIELD text_excerpt   ON turn TYPE option<string>;  -- first ~500 chars
 DEFINE FIELD has_tool_use   ON turn TYPE bool DEFAULT false;
 DEFINE FIELD has_error      ON turn TYPE bool DEFAULT false;
-DEFINE INDEX turn_session_seq ON turn FIELDS session, seq UNIQUE;
-DEFINE INDEX turn_ts        ON turn FIELDS ts;
-DEFINE INDEX turn_agent_event ON turn FIELDS agent_event;
+DEFINE INDEX IF NOT EXISTS turn_session_seq ON turn FIELDS session, seq UNIQUE;
+DEFINE INDEX IF NOT EXISTS turn_ts        ON turn FIELDS ts;
+DEFINE INDEX IF NOT EXISTS turn_agent_event ON turn FIELDS agent_event;
 
 -- Recall (cross-session text search). `class` tokenizer + lowercase filter
 -- gives word-level matches; ascii folds accents. BM25 ranks hits so common
@@ -187,23 +187,23 @@ DEFINE FIELD checkout       ON file TYPE option<record<checkout>>;
 DEFINE FIELD workspace      ON file TYPE option<record<workspace>>;
 DEFINE FIELD kind           ON file TYPE option<string>;
 DEFINE FIELD identity_scope ON file TYPE option<string>;
-DEFINE INDEX file_path_uq   ON file FIELDS repo, path UNIQUE;
+DEFINE INDEX IF NOT EXISTS file_path_uq   ON file FIELDS repo, path UNIQUE;
 DEFINE INDEX IF NOT EXISTS file_path ON file FIELDS path;
-DEFINE INDEX file_repository_path ON file FIELDS repository, path;
+DEFINE INDEX IF NOT EXISTS file_repository_path ON file FIELDS repository, path;
 REMOVE INDEX IF EXISTS file_checkout_path ON file;
-DEFINE INDEX file_workspace_path ON file FIELDS workspace, path;
+DEFINE INDEX IF NOT EXISTS file_workspace_path ON file FIELDS workspace, path;
 
 DEFINE TABLE symbol SCHEMAFULL;
 DEFINE FIELD name           ON symbol TYPE string;
 DEFINE FIELD kind           ON symbol TYPE option<string>;      -- 'camel' | 'snake' | 'function' | ...
 DEFINE FIELD created_at     ON symbol TYPE datetime DEFAULT time::now();
-DEFINE INDEX symbol_name_uq ON symbol FIELDS name UNIQUE;
+DEFINE INDEX IF NOT EXISTS symbol_name_uq ON symbol FIELDS name UNIQUE;
 
 DEFINE TABLE error_signature SCHEMAFULL;
 DEFINE FIELD text           ON error_signature TYPE string;
 DEFINE FIELD normalized     ON error_signature TYPE string;
 DEFINE FIELD created_at     ON error_signature TYPE datetime DEFAULT time::now();
-DEFINE INDEX error_signature_norm_uq ON error_signature FIELDS normalized UNIQUE;
+DEFINE INDEX IF NOT EXISTS error_signature_norm_uq ON error_signature FIELDS normalized UNIQUE;
 
 DEFINE TABLE commit SCHEMAFULL;
 DEFINE FIELD sha            ON commit TYPE string;
@@ -213,8 +213,8 @@ DEFINE FIELD author         ON commit TYPE option<string>;
 DEFINE FIELD ts             ON commit TYPE datetime;
 DEFINE FIELD repository     ON commit TYPE option<record<repository>>;
 DEFINE FIELD checkout       ON commit TYPE option<record<checkout>>;
-DEFINE INDEX commit_sha_uq  ON commit FIELDS repo, sha UNIQUE;
-DEFINE INDEX commit_repository_ts ON commit FIELDS repository, ts;
+DEFINE INDEX IF NOT EXISTS commit_sha_uq  ON commit FIELDS repo, sha UNIQUE;
+DEFINE INDEX IF NOT EXISTS commit_repository_ts ON commit FIELDS repository, ts;
 REMOVE INDEX IF EXISTS commit_checkout_ts ON commit;
 
 -- Full-text search on commit messages (BM25 + word tokenization) for `ax recall` / `ax commits search`.
@@ -238,8 +238,8 @@ DEFINE FIELD initial_commit ON repository TYPE option<string>;
 DEFINE FIELD default_branch ON repository TYPE option<string>;
 DEFINE FIELD created_at     ON repository TYPE datetime DEFAULT time::now();
 DEFINE FIELD updated_at     ON repository TYPE option<datetime>;
-DEFINE INDEX repository_remote ON repository FIELDS remote_url;
-DEFINE INDEX repository_initial_commit ON repository FIELDS initial_commit;
+DEFINE INDEX IF NOT EXISTS repository_remote ON repository FIELDS remote_url;
+DEFINE INDEX IF NOT EXISTS repository_initial_commit ON repository FIELDS initial_commit;
 
 DEFINE TABLE checkout SCHEMAFULL;
 DEFINE FIELD repository     ON checkout TYPE record<repository>;
@@ -250,7 +250,7 @@ DEFINE FIELD worktree_name  ON checkout TYPE option<string>;
 DEFINE FIELD dirty          ON checkout TYPE bool DEFAULT false;
 DEFINE FIELD created_at     ON checkout TYPE datetime DEFAULT time::now();
 DEFINE FIELD updated_at     ON checkout TYPE option<datetime>;
-DEFINE INDEX checkout_path_uq ON checkout FIELDS repository, path UNIQUE;
+DEFINE INDEX IF NOT EXISTS checkout_path_uq ON checkout FIELDS repository, path UNIQUE;
 
 DEFINE TABLE workspace SCHEMAFULL;
 DEFINE FIELD repository     ON workspace TYPE option<record<repository>>;
@@ -271,9 +271,9 @@ DEFINE FIELD labels         ON changeset TYPE option<string>;  -- JSON-encoded
 DEFINE FIELD metrics        ON changeset TYPE option<string>;  -- JSON-encoded
 DEFINE FIELD created_at     ON changeset TYPE datetime DEFAULT time::now();
 DEFINE FIELD updated_at     ON changeset TYPE option<datetime>;
-DEFINE INDEX changeset_session ON changeset FIELDS session, created_at;
-DEFINE INDEX changeset_repository ON changeset FIELDS repository, created_at;
-DEFINE INDEX changeset_checkout ON changeset FIELDS checkout, created_at;
+DEFINE INDEX IF NOT EXISTS changeset_session ON changeset FIELDS session, created_at;
+DEFINE INDEX IF NOT EXISTS changeset_repository ON changeset FIELDS repository, created_at;
+DEFINE INDEX IF NOT EXISTS changeset_checkout ON changeset FIELDS checkout, created_at;
 DEFINE INDEX IF NOT EXISTS changeset_summary_search
     ON changeset FIELDS summary_text
     FULLTEXT ANALYZER skill_text BM25 HIGHLIGHTS;
@@ -290,10 +290,10 @@ DEFINE FIELD labels         ON file_memory TYPE option<string>;  -- JSON-encoded
 DEFINE FIELD metrics        ON file_memory TYPE option<string>;  -- JSON-encoded
 DEFINE FIELD created_at     ON file_memory TYPE datetime DEFAULT time::now();
 DEFINE FIELD updated_at     ON file_memory TYPE option<datetime>;
-DEFINE INDEX file_memory_file ON file_memory FIELDS file, kind;
-DEFINE INDEX file_memory_repository_path ON file_memory FIELDS repository, path;
-DEFINE INDEX file_memory_checkout_path ON file_memory FIELDS checkout, path;
-DEFINE INDEX file_memory_workspace_path ON file_memory FIELDS workspace, path;
+DEFINE INDEX IF NOT EXISTS file_memory_file ON file_memory FIELDS file, kind;
+DEFINE INDEX IF NOT EXISTS file_memory_repository_path ON file_memory FIELDS repository, path;
+DEFINE INDEX IF NOT EXISTS file_memory_checkout_path ON file_memory FIELDS checkout, path;
+DEFINE INDEX IF NOT EXISTS file_memory_workspace_path ON file_memory FIELDS workspace, path;
 DEFINE INDEX IF NOT EXISTS file_memory_text_search
     ON file_memory FIELDS text
     FULLTEXT ANALYZER skill_text BM25 HIGHLIGHTS;
@@ -306,7 +306,7 @@ DEFINE FIELD kind           ON tool TYPE option<string>;
 DEFINE FIELD labels         ON tool TYPE option<string>;  -- JSON-encoded
 DEFINE FIELD created_at     ON tool TYPE datetime DEFAULT time::now();
 DEFINE FIELD updated_at     ON tool TYPE option<datetime>;
-DEFINE INDEX tool_identity_uq ON tool FIELDS provider, name, identity UNIQUE;
+DEFINE INDEX IF NOT EXISTS tool_identity_uq ON tool FIELDS provider, name, identity UNIQUE;
 
 DEFINE TABLE tool_call SCHEMAFULL;
 DEFINE FIELD session        ON tool_call TYPE record<session>;
@@ -330,12 +330,12 @@ DEFINE FIELD output_excerpt ON tool_call TYPE option<string>;
 DEFINE FIELD error_text     ON tool_call TYPE option<string>;
 DEFINE FIELD exit_code      ON tool_call TYPE option<int>;
 DEFINE FIELD has_error      ON tool_call TYPE bool DEFAULT false;
-DEFINE INDEX tool_call_session_ts ON tool_call FIELDS session, ts;
-DEFINE INDEX tool_call_tool_ts ON tool_call FIELDS tool, ts;
-DEFINE INDEX tool_call_command_norm_ts ON tool_call FIELDS command_norm, ts;
-DEFINE INDEX tool_call_command_tool_ts ON tool_call FIELDS command_tool, ts;
-DEFINE INDEX tool_call_error_ts ON tool_call FIELDS has_error, ts;
-DEFINE INDEX tool_call_agent_event ON tool_call FIELDS agent_event;
+DEFINE INDEX IF NOT EXISTS tool_call_session_ts ON tool_call FIELDS session, ts;
+DEFINE INDEX IF NOT EXISTS tool_call_tool_ts ON tool_call FIELDS tool, ts;
+DEFINE INDEX IF NOT EXISTS tool_call_command_norm_ts ON tool_call FIELDS command_norm, ts;
+DEFINE INDEX IF NOT EXISTS tool_call_command_tool_ts ON tool_call FIELDS command_tool, ts;
+DEFINE INDEX IF NOT EXISTS tool_call_error_ts ON tool_call FIELDS has_error, ts;
+DEFINE INDEX IF NOT EXISTS tool_call_agent_event ON tool_call FIELDS agent_event;
 
 DEFINE TABLE plan SCHEMAFULL;
 DEFINE FIELD session        ON plan TYPE option<record<session>>;
@@ -346,8 +346,8 @@ DEFINE FIELD status         ON plan TYPE option<string>;
 DEFINE FIELD items          ON plan TYPE option<string>;  -- JSON-encoded
 DEFINE FIELD created_at     ON plan TYPE datetime DEFAULT time::now();
 DEFINE FIELD updated_at     ON plan TYPE option<datetime>;
-DEFINE INDEX plan_session   ON plan FIELDS session;
-DEFINE INDEX plan_source_session ON plan FIELDS source, session;
+DEFINE INDEX IF NOT EXISTS plan_session   ON plan FIELDS session;
+DEFINE INDEX IF NOT EXISTS plan_source_session ON plan FIELDS source, session;
 
 DEFINE TABLE plan_item SCHEMAFULL;
 DEFINE FIELD plan           ON plan_item TYPE record<plan>;
@@ -361,7 +361,7 @@ DEFINE FIELD created_at     ON plan_item TYPE datetime DEFAULT time::now();
 DEFINE FIELD updated_at     ON plan_item TYPE option<datetime>;
 DEFINE FIELD first_seen_at  ON plan_item TYPE option<datetime>;
 DEFINE FIELD last_seen_at   ON plan_item TYPE option<datetime>;
-DEFINE INDEX plan_item_plan_seq ON plan_item FIELDS plan, seq UNIQUE;
+DEFINE INDEX IF NOT EXISTS plan_item_plan_seq ON plan_item FIELDS plan, seq UNIQUE;
 
 DEFINE TABLE artifact SCHEMAFULL;
 DEFINE FIELD kind           ON artifact TYPE string;
@@ -372,7 +372,7 @@ DEFINE FIELD content_hash   ON artifact TYPE option<string>;
 DEFINE FIELD raw            ON artifact TYPE option<string>;  -- JSON-encoded
 DEFINE FIELD created_at     ON artifact TYPE datetime DEFAULT time::now();
 DEFINE FIELD updated_at     ON artifact TYPE option<datetime>;
-DEFINE INDEX artifact_hash  ON artifact FIELDS content_hash;
+DEFINE INDEX IF NOT EXISTS artifact_hash  ON artifact FIELDS content_hash;
 
 DEFINE TABLE content_document SCHEMAFULL;
 DEFINE FIELD source_kind    ON content_document TYPE string;
@@ -398,9 +398,9 @@ DEFINE FIELD raw            ON content_document TYPE option<string>;
 DEFINE FIELD labels         ON content_document TYPE option<string>;
 DEFINE FIELD metrics        ON content_document TYPE option<string>;
 DEFINE FIELD ts             ON content_document TYPE datetime DEFAULT time::now();
-DEFINE INDEX content_document_source ON content_document FIELDS source_kind, source_ref;
-DEFINE INDEX content_document_hash ON content_document FIELDS content_hash;
-DEFINE INDEX content_document_parse ON content_document FIELDS parse_fingerprint;
+DEFINE INDEX IF NOT EXISTS content_document_source ON content_document FIELDS source_kind, source_ref;
+DEFINE INDEX IF NOT EXISTS content_document_hash ON content_document FIELDS content_hash;
+DEFINE INDEX IF NOT EXISTS content_document_parse ON content_document FIELDS parse_fingerprint;
 
 DEFINE TABLE content_block SCHEMAFULL;
 DEFINE FIELD document       ON content_block TYPE record<content_document> REFERENCE ON DELETE CASCADE;
@@ -422,9 +422,9 @@ DEFINE FIELD raw            ON content_block TYPE option<string>;
 DEFINE FIELD labels         ON content_block TYPE option<string>;
 DEFINE FIELD metrics        ON content_block TYPE option<string>;
 DEFINE FIELD ts             ON content_block TYPE datetime DEFAULT time::now();
-DEFINE INDEX content_block_document_seq ON content_block FIELDS document, seq UNIQUE;
-DEFINE INDEX content_block_kind ON content_block FIELDS kind, ts;
-DEFINE INDEX content_block_hash ON content_block FIELDS document, block_hash;
+DEFINE INDEX IF NOT EXISTS content_block_document_seq ON content_block FIELDS document, seq UNIQUE;
+DEFINE INDEX IF NOT EXISTS content_block_kind ON content_block FIELDS kind, ts;
+DEFINE INDEX IF NOT EXISTS content_block_hash ON content_block FIELDS document, block_hash;
 
 DEFINE ANALYZER IF NOT EXISTS content_text
     TOKENIZERS class
@@ -450,12 +450,12 @@ DEFINE FIELD end_offset     ON content_atom TYPE option<int>;
 DEFINE FIELD confidence     ON content_atom TYPE float DEFAULT 1.0;
 DEFINE FIELD raw            ON content_atom TYPE option<string>;
 DEFINE FIELD ts             ON content_atom TYPE datetime DEFAULT time::now();
-DEFINE INDEX content_atom_kind_value ON content_atom FIELDS kind, normalized;
-DEFINE INDEX content_atom_block ON content_atom FIELDS block;
-DEFINE INDEX content_atom_document_kind ON content_atom FIELDS document, kind;
-DEFINE INDEX content_atom_source_kind_value ON content_atom FIELDS source_kind, kind, normalized;
-DEFINE INDEX content_atom_session_kind ON content_atom FIELDS session, kind;
-DEFINE INDEX content_atom_workspace_kind_value ON content_atom FIELDS workspace, kind, normalized;
+DEFINE INDEX IF NOT EXISTS content_atom_kind_value ON content_atom FIELDS kind, normalized;
+DEFINE INDEX IF NOT EXISTS content_atom_block ON content_atom FIELDS block;
+DEFINE INDEX IF NOT EXISTS content_atom_document_kind ON content_atom FIELDS document, kind;
+DEFINE INDEX IF NOT EXISTS content_atom_source_kind_value ON content_atom FIELDS source_kind, kind, normalized;
+DEFINE INDEX IF NOT EXISTS content_atom_session_kind ON content_atom FIELDS session, kind;
+DEFINE INDEX IF NOT EXISTS content_atom_workspace_kind_value ON content_atom FIELDS workspace, kind, normalized;
 
 DEFINE TABLE mentions_file TYPE RELATION FROM content_atom TO file SCHEMAFULL;
 DEFINE FIELD document      ON mentions_file TYPE record<content_document>;
@@ -464,9 +464,9 @@ DEFINE FIELD confidence    ON mentions_file TYPE float DEFAULT 1.0;
 DEFINE FIELD source_kind   ON mentions_file TYPE string;
 DEFINE FIELD workspace     ON mentions_file TYPE option<record<workspace>>;
 DEFINE FIELD ts            ON mentions_file TYPE datetime DEFAULT time::now();
-DEFINE INDEX mentions_file_in ON mentions_file FIELDS in;
-DEFINE INDEX mentions_file_out ON mentions_file FIELDS out;
-DEFINE INDEX mentions_file_document ON mentions_file FIELDS document;
+DEFINE INDEX IF NOT EXISTS mentions_file_in ON mentions_file FIELDS in;
+DEFINE INDEX IF NOT EXISTS mentions_file_out ON mentions_file FIELDS out;
+DEFINE INDEX IF NOT EXISTS mentions_file_document ON mentions_file FIELDS document;
 
 DEFINE TABLE mentions_commit TYPE RELATION FROM content_atom TO commit SCHEMAFULL;
 DEFINE FIELD document      ON mentions_commit TYPE record<content_document>;
@@ -475,8 +475,8 @@ DEFINE FIELD confidence    ON mentions_commit TYPE float DEFAULT 1.0;
 DEFINE FIELD source_kind   ON mentions_commit TYPE string;
 DEFINE FIELD workspace     ON mentions_commit TYPE option<record<workspace>>;
 DEFINE FIELD ts            ON mentions_commit TYPE datetime DEFAULT time::now();
-DEFINE INDEX mentions_commit_in ON mentions_commit FIELDS in;
-DEFINE INDEX mentions_commit_out ON mentions_commit FIELDS out;
+DEFINE INDEX IF NOT EXISTS mentions_commit_in ON mentions_commit FIELDS in;
+DEFINE INDEX IF NOT EXISTS mentions_commit_out ON mentions_commit FIELDS out;
 
 DEFINE TABLE mentions_artifact TYPE RELATION FROM content_atom TO artifact SCHEMAFULL;
 DEFINE FIELD document      ON mentions_artifact TYPE record<content_document>;
@@ -484,8 +484,8 @@ DEFINE FIELD block         ON mentions_artifact TYPE record<content_block>;
 DEFINE FIELD confidence    ON mentions_artifact TYPE float DEFAULT 1.0;
 DEFINE FIELD source_kind   ON mentions_artifact TYPE string;
 DEFINE FIELD ts            ON mentions_artifact TYPE datetime DEFAULT time::now();
-DEFINE INDEX mentions_artifact_in ON mentions_artifact FIELDS in;
-DEFINE INDEX mentions_artifact_out ON mentions_artifact FIELDS out;
+DEFINE INDEX IF NOT EXISTS mentions_artifact_in ON mentions_artifact FIELDS in;
+DEFINE INDEX IF NOT EXISTS mentions_artifact_out ON mentions_artifact FIELDS out;
 
 DEFINE TABLE plan_snapshot SCHEMAFULL;
 DEFINE FIELD plan           ON plan_snapshot TYPE option<record<plan>>;
@@ -497,8 +497,8 @@ DEFINE FIELD items          ON plan_snapshot TYPE string;  -- JSON-encoded
 DEFINE FIELD summary        ON plan_snapshot TYPE option<string>;
 DEFINE FIELD explanation    ON plan_snapshot TYPE option<string>;
 DEFINE FIELD ts             ON plan_snapshot TYPE datetime DEFAULT time::now();
-DEFINE INDEX plan_snapshot_plan_ts ON plan_snapshot FIELDS plan, ts;
-DEFINE INDEX plan_snapshot_agent_event ON plan_snapshot FIELDS agent_event;
+DEFINE INDEX IF NOT EXISTS plan_snapshot_plan_ts ON plan_snapshot FIELDS plan, ts;
+DEFINE INDEX IF NOT EXISTS plan_snapshot_agent_event ON plan_snapshot FIELDS agent_event;
 
 DEFINE TABLE compaction SCHEMAFULL;
 DEFINE FIELD session           ON compaction TYPE record<session>;
@@ -515,8 +515,8 @@ DEFINE FIELD kept_count        ON compaction TYPE option<int>;     -- Codex repl
 DEFINE FIELD read_files        ON compaction TYPE option<string>;  -- JSON-encoded array; Pi details
 DEFINE FIELD modified_files    ON compaction TYPE option<string>;  -- JSON-encoded array; Pi details
 DEFINE FIELD raw               ON compaction TYPE option<string>;  -- JSON-encoded
-DEFINE INDEX compaction_session_ts  ON compaction FIELDS session, ts;
-DEFINE INDEX compaction_agent_event ON compaction FIELDS agent_event;
+DEFINE INDEX IF NOT EXISTS compaction_session_ts  ON compaction FIELDS session, ts;
+DEFINE INDEX IF NOT EXISTS compaction_agent_event ON compaction FIELDS agent_event;
 
 DEFINE TABLE insight SCHEMAFULL;
 DEFINE FIELD subject_type   ON insight TYPE string;
@@ -526,7 +526,7 @@ DEFINE FIELD text           ON insight TYPE string;
 DEFINE FIELD labels         ON insight TYPE option<string>;  -- JSON-encoded
 DEFINE FIELD metrics        ON insight TYPE option<string>;  -- JSON-encoded
 DEFINE FIELD created_at     ON insight TYPE datetime DEFAULT time::now();
-DEFINE INDEX insight_subject ON insight FIELDS subject_type, subject_id;
+DEFINE INDEX IF NOT EXISTS insight_subject ON insight FIELDS subject_type, subject_id;
 
 DEFINE TABLE friction_event SCHEMAFULL;
 DEFINE FIELD session        ON friction_event TYPE option<record<session>>;
@@ -537,7 +537,7 @@ DEFINE FIELD labels         ON friction_event TYPE option<string>;  -- JSON-enco
 DEFINE FIELD metrics        ON friction_event TYPE option<string>;  -- JSON-encoded
 DEFINE FIELD raw            ON friction_event TYPE option<string>;  -- JSON-encoded
 DEFINE FIELD ts             ON friction_event TYPE datetime DEFAULT time::now();
-DEFINE INDEX friction_session_kind ON friction_event FIELDS session, kind;
+DEFINE INDEX IF NOT EXISTS friction_session_kind ON friction_event FIELDS session, kind;
 
 DEFINE TABLE IF NOT EXISTS turn_analysis SCHEMAFULL;
 DEFINE FIELD turn           ON turn_analysis TYPE record<turn> REFERENCE ON DELETE CASCADE;
@@ -717,7 +717,7 @@ DEFINE FIELD labels         ON diagnostic_event TYPE option<string>;  -- JSON-en
 DEFINE FIELD metrics        ON diagnostic_event TYPE option<string>;  -- JSON-encoded
 DEFINE FIELD raw            ON diagnostic_event TYPE option<string>;  -- JSON-encoded
 DEFINE FIELD ts             ON diagnostic_event TYPE datetime DEFAULT time::now();
-DEFINE INDEX diagnostic_session_kind ON diagnostic_event FIELDS session, kind;
+DEFINE INDEX IF NOT EXISTS diagnostic_session_kind ON diagnostic_event FIELDS session, kind;
 
 DEFINE TABLE guidance SCHEMAFULL;
 DEFINE FIELD slug           ON guidance TYPE string;
@@ -726,8 +726,8 @@ DEFINE FIELD status         ON guidance TYPE string DEFAULT 'active';
 DEFINE FIELD labels         ON guidance TYPE option<string>;  -- JSON-encoded
 DEFINE FIELD created_at     ON guidance TYPE datetime DEFAULT time::now();
 DEFINE FIELD updated_at     ON guidance TYPE option<datetime>;
-DEFINE INDEX guidance_slug_uq ON guidance FIELDS slug UNIQUE;
-DEFINE INDEX guidance_status ON guidance FIELDS status;
+DEFINE INDEX IF NOT EXISTS guidance_slug_uq ON guidance FIELDS slug UNIQUE;
+DEFINE INDEX IF NOT EXISTS guidance_status ON guidance FIELDS status;
 
 DEFINE TABLE guidance_version SCHEMAFULL;
 DEFINE FIELD guidance       ON guidance_version TYPE record<guidance>;
@@ -735,14 +735,14 @@ DEFINE FIELD version        ON guidance_version TYPE string;
 DEFINE FIELD text           ON guidance_version TYPE string;
 DEFINE FIELD raw            ON guidance_version TYPE option<string>;  -- JSON-encoded
 DEFINE FIELD created_at     ON guidance_version TYPE datetime DEFAULT time::now();
-DEFINE INDEX guidance_version_uq ON guidance_version FIELDS guidance, version UNIQUE;
+DEFINE INDEX IF NOT EXISTS guidance_version_uq ON guidance_version FIELDS guidance, version UNIQUE;
 DEFINE FIELD status         ON guidance_version TYPE string DEFAULT 'proposed';
 DEFINE FIELD scope          ON guidance_version TYPE option<string>;
 DEFINE FIELD risk           ON guidance_version TYPE option<string>;
 DEFINE FIELD evidence       ON guidance_version TYPE option<string>;
 DEFINE FIELD metrics_before ON guidance_version TYPE option<string>;
 DEFINE FIELD metrics_after  ON guidance_version TYPE option<string>;
-DEFINE INDEX guidance_version_status ON guidance_version FIELDS status, created_at;
+DEFINE INDEX IF NOT EXISTS guidance_version_status ON guidance_version FIELDS status, created_at;
 
 DEFINE TABLE guidance_source SCHEMAFULL;
 DEFINE FIELD path              ON guidance_source TYPE string;
@@ -753,8 +753,8 @@ DEFINE FIELD evidence_strength ON guidance_source TYPE string;
 DEFINE FIELD git_root          ON guidance_source TYPE option<string>;
 DEFINE FIELD tracked           ON guidance_source TYPE bool DEFAULT false;
 DEFINE FIELD observed_at       ON guidance_source TYPE datetime DEFAULT time::now();
-DEFINE INDEX guidance_source_path_uq ON guidance_source FIELDS path UNIQUE;
-DEFINE INDEX guidance_source_scope ON guidance_source FIELDS scope, provider;
+DEFINE INDEX IF NOT EXISTS guidance_source_path_uq ON guidance_source FIELDS path UNIQUE;
+DEFINE INDEX IF NOT EXISTS guidance_source_scope ON guidance_source FIELDS scope, provider;
 
 DEFINE TABLE guidance_revision SCHEMAFULL;
 DEFINE FIELD source            ON guidance_revision TYPE option<record<guidance_source>>;
@@ -765,8 +765,8 @@ DEFINE FIELD evidence_strength ON guidance_revision TYPE string;
 DEFINE FIELD commit_evidence   ON guidance_revision TYPE option<string>;
 DEFINE FIELD file_evidence     ON guidance_revision TYPE option<string>;
 DEFINE FIELD observed_at       ON guidance_revision TYPE datetime DEFAULT time::now();
-DEFINE INDEX guidance_revision_source_hash ON guidance_revision FIELDS source_path, content_hash UNIQUE;
-DEFINE INDEX guidance_revision_scope ON guidance_revision FIELDS scope, observed_at;
+DEFINE INDEX IF NOT EXISTS guidance_revision_source_hash ON guidance_revision FIELDS source_path, content_hash UNIQUE;
+DEFINE INDEX IF NOT EXISTS guidance_revision_scope ON guidance_revision FIELDS scope, observed_at;
 
 DEFINE TABLE stack SCHEMAFULL;
 DEFINE FIELD name        ON stack TYPE string;
@@ -774,7 +774,7 @@ DEFINE FIELD aliases     ON stack TYPE option<string>;  -- JSON-encoded
 DEFINE FIELD labels      ON stack TYPE option<string>;  -- JSON-encoded
 DEFINE FIELD created_at  ON stack TYPE datetime DEFAULT time::now();
 DEFINE FIELD updated_at  ON stack TYPE option<datetime>;
-DEFINE INDEX stack_name_uq ON stack FIELDS name UNIQUE;
+DEFINE INDEX IF NOT EXISTS stack_name_uq ON stack FIELDS name UNIQUE;
 
 DEFINE TABLE command_outcome SCHEMAFULL;
 DEFINE FIELD tool_call     ON command_outcome TYPE option<record<tool_call>>;
@@ -787,8 +787,8 @@ DEFINE FIELD text          ON command_outcome TYPE option<string>;
 DEFINE FIELD labels        ON command_outcome TYPE option<string>;  -- JSON-encoded
 DEFINE FIELD metrics       ON command_outcome TYPE option<string>;  -- JSON-encoded
 DEFINE FIELD ts            ON command_outcome TYPE datetime DEFAULT time::now();
-DEFINE INDEX command_outcome_kind_ts ON command_outcome FIELDS kind, ts;
-DEFINE INDEX command_outcome_session ON command_outcome FIELDS session, ts;
+DEFINE INDEX IF NOT EXISTS command_outcome_kind_ts ON command_outcome FIELDS kind, ts;
+DEFINE INDEX IF NOT EXISTS command_outcome_session ON command_outcome FIELDS session, ts;
 
 DEFINE TABLE user_message_ngram SCHEMAFULL;
 DEFINE FIELD ngram         ON user_message_ngram TYPE string;
@@ -801,8 +801,8 @@ DEFINE FIELD near_edit_count ON user_message_ngram TYPE int DEFAULT 0;
 DEFINE FIELD near_verification_count ON user_message_ngram TYPE int DEFAULT 0;
 DEFINE FIELD first_seen    ON user_message_ngram TYPE option<datetime>;
 DEFINE FIELD last_seen     ON user_message_ngram TYPE option<datetime>;
-DEFINE INDEX user_message_ngram_n_count ON user_message_ngram FIELDS n, count;
-DEFINE INDEX user_message_ngram_text ON user_message_ngram FIELDS ngram;
+DEFINE INDEX IF NOT EXISTS user_message_ngram_n_count ON user_message_ngram FIELDS n, count;
+DEFINE INDEX IF NOT EXISTS user_message_ngram_text ON user_message_ngram FIELDS ngram;
 
 DEFINE TABLE workflow_epoch SCHEMAFULL;
 DEFINE FIELD name          ON workflow_epoch TYPE string;
@@ -811,7 +811,7 @@ DEFINE FIELD ends_at       ON workflow_epoch TYPE option<datetime>;
 DEFINE FIELD evidence_kind ON workflow_epoch TYPE option<string>;
 DEFINE FIELD evidence_ref  ON workflow_epoch TYPE option<string>;
 DEFINE FIELD notes         ON workflow_epoch TYPE option<string>;
-DEFINE INDEX workflow_epoch_name ON workflow_epoch FIELDS name UNIQUE;
+DEFINE INDEX IF NOT EXISTS workflow_epoch_name ON workflow_epoch FIELDS name UNIQUE;
 
 DEFINE TABLE session_token_usage SCHEMAFULL;
 DEFINE FIELD session       ON session_token_usage TYPE record<session>;
@@ -835,9 +835,9 @@ DEFINE FIELD pricing_source ON session_token_usage TYPE option<string>;
 DEFINE FIELD labels        ON session_token_usage TYPE option<string>;  -- JSON-encoded
 DEFINE FIELD metrics       ON session_token_usage TYPE option<string>;  -- JSON-encoded
 DEFINE FIELD ts            ON session_token_usage TYPE datetime DEFAULT time::now();
-DEFINE INDEX session_token_usage_session ON session_token_usage FIELDS session UNIQUE;
-DEFINE INDEX session_token_usage_epoch ON session_token_usage FIELDS workflow_epoch, source, ts;
-DEFINE INDEX session_token_usage_model ON session_token_usage FIELDS model_ref, ts;
+DEFINE INDEX IF NOT EXISTS session_token_usage_session ON session_token_usage FIELDS session UNIQUE;
+DEFINE INDEX IF NOT EXISTS session_token_usage_epoch ON session_token_usage FIELDS workflow_epoch, source, ts;
+DEFINE INDEX IF NOT EXISTS session_token_usage_model ON session_token_usage FIELDS model_ref, ts;
 
 DEFINE TABLE turn_token_usage SCHEMAFULL;
 DEFINE FIELD session       ON turn_token_usage TYPE record<session>;
@@ -862,9 +862,9 @@ DEFINE FIELD usage_source   ON turn_token_usage TYPE string;
 DEFINE FIELD usage_quality  ON turn_token_usage TYPE string;
 DEFINE FIELD raw            ON turn_token_usage TYPE option<string>;
 DEFINE FIELD ts             ON turn_token_usage TYPE datetime DEFAULT time::now();
-DEFINE INDEX turn_token_usage_turn ON turn_token_usage FIELDS turn UNIQUE;
-DEFINE INDEX turn_token_usage_session_seq ON turn_token_usage FIELDS session, seq;
-DEFINE INDEX turn_token_usage_model ON turn_token_usage FIELDS model_ref, ts;
+DEFINE INDEX IF NOT EXISTS turn_token_usage_turn ON turn_token_usage FIELDS turn UNIQUE;
+DEFINE INDEX IF NOT EXISTS turn_token_usage_session_seq ON turn_token_usage FIELDS session, seq;
+DEFINE INDEX IF NOT EXISTS turn_token_usage_model ON turn_token_usage FIELDS model_ref, ts;
 
 DEFINE TABLE session_health SCHEMAFULL;
 DEFINE FIELD session       ON session_health TYPE record<session>;
@@ -891,8 +891,8 @@ DEFINE FIELD correction_turns ON session_health TYPE int DEFAULT 0;
 DEFINE FIELD labels        ON session_health TYPE option<string>;  -- JSON-encoded
 DEFINE FIELD metrics       ON session_health TYPE option<string>;  -- JSON-encoded
 DEFINE FIELD ts            ON session_health TYPE datetime DEFAULT time::now();
-DEFINE INDEX session_health_session ON session_health FIELDS session UNIQUE;
-DEFINE INDEX session_health_epoch ON session_health FIELDS workflow_epoch, source, ts;
+DEFINE INDEX IF NOT EXISTS session_health_session ON session_health FIELDS session UNIQUE;
+DEFINE INDEX IF NOT EXISTS session_health_epoch ON session_health FIELDS workflow_epoch, source, ts;
 
 DEFINE TABLE commit_classification SCHEMAFULL;
 DEFINE FIELD commit        ON commit_classification TYPE record<commit>;
@@ -903,8 +903,8 @@ DEFINE FIELD message       ON commit_classification TYPE option<string>;
 DEFINE FIELD labels        ON commit_classification TYPE option<string>;  -- JSON-encoded
 DEFINE FIELD metrics       ON commit_classification TYPE option<string>;  -- JSON-encoded
 DEFINE FIELD ts            ON commit_classification TYPE datetime DEFAULT time::now();
-DEFINE INDEX commit_classification_commit ON commit_classification FIELDS commit UNIQUE;
-DEFINE INDEX commit_classification_kind_ts ON commit_classification FIELDS kind, ts;
+DEFINE INDEX IF NOT EXISTS commit_classification_commit ON commit_classification FIELDS commit UNIQUE;
+DEFINE INDEX IF NOT EXISTS commit_classification_kind_ts ON commit_classification FIELDS kind, ts;
 
 DEFINE TABLE branch SCHEMAFULL;
 DEFINE FIELD repository     ON branch TYPE record<repository>;
@@ -914,7 +914,7 @@ DEFINE FIELD upstream       ON branch TYPE option<string>;
 DEFINE FIELD is_default     ON branch TYPE bool DEFAULT false;
 DEFINE FIELD first_seen_at  ON branch TYPE datetime DEFAULT time::now();
 DEFINE FIELD last_seen_at   ON branch TYPE option<datetime>;
-DEFINE INDEX branch_repo_name ON branch FIELDS repository, name UNIQUE;
+DEFINE INDEX IF NOT EXISTS branch_repo_name ON branch FIELDS repository, name UNIQUE;
 
 DEFINE TABLE pull_request SCHEMAFULL;
 DEFINE FIELD repository     ON pull_request TYPE record<repository>;
@@ -938,8 +938,8 @@ DEFINE FIELD commit_count   ON pull_request TYPE int DEFAULT 0;
 DEFINE FIELD labels         ON pull_request TYPE option<string>;
 DEFINE FIELD raw            ON pull_request TYPE option<string>;
 DEFINE FIELD updated_at     ON pull_request TYPE option<datetime>;
-DEFINE INDEX pull_request_repo_number ON pull_request FIELDS repository, number UNIQUE;
-DEFINE INDEX pull_request_state ON pull_request FIELDS repository, state, updated_at;
+DEFINE INDEX IF NOT EXISTS pull_request_repo_number ON pull_request FIELDS repository, number UNIQUE;
+DEFINE INDEX IF NOT EXISTS pull_request_state ON pull_request FIELDS repository, state, updated_at;
 
 DEFINE TABLE review_event SCHEMAFULL;
 DEFINE FIELD pull_request   ON review_event TYPE record<pull_request>;
@@ -953,8 +953,8 @@ DEFINE FIELD category       ON review_event TYPE string DEFAULT 'unknown';
 DEFINE FIELD unresolved     ON review_event TYPE bool DEFAULT false;
 DEFINE FIELD raw            ON review_event TYPE option<string>;
 DEFINE FIELD ts             ON review_event TYPE datetime;
-DEFINE INDEX review_event_pr_ts ON review_event FIELDS pull_request, ts;
-DEFINE INDEX review_event_severity ON review_event FIELDS repository, severity, ts;
+DEFINE INDEX IF NOT EXISTS review_event_pr_ts ON review_event FIELDS pull_request, ts;
+DEFINE INDEX IF NOT EXISTS review_event_severity ON review_event FIELDS repository, severity, ts;
 
 DEFINE TABLE check_run SCHEMAFULL;
 DEFINE FIELD pull_request   ON check_run TYPE option<record<pull_request>>;
@@ -968,8 +968,8 @@ DEFINE FIELD url            ON check_run TYPE option<string>;
 DEFINE FIELD raw            ON check_run TYPE option<string>;
 DEFINE FIELD started_at     ON check_run TYPE option<datetime>;
 DEFINE FIELD completed_at   ON check_run TYPE option<datetime>;
-DEFINE INDEX check_run_pr ON check_run FIELDS pull_request, status, conclusion;
-DEFINE INDEX check_run_commit ON check_run FIELDS commit, status, conclusion;
+DEFINE INDEX IF NOT EXISTS check_run_pr ON check_run FIELDS pull_request, status, conclusion;
+DEFINE INDEX IF NOT EXISTS check_run_commit ON check_run FIELDS commit, status, conclusion;
 
 DEFINE TABLE delivery_outcome SCHEMAFULL;
 DEFINE FIELD session        ON delivery_outcome TYPE option<record<session>>;
@@ -988,9 +988,9 @@ DEFINE FIELD confidence     ON delivery_outcome TYPE string DEFAULT 'medium';
 DEFINE FIELD evidence       ON delivery_outcome TYPE option<string>;
 DEFINE FIELD created_at     ON delivery_outcome TYPE datetime DEFAULT time::now();
 DEFINE FIELD updated_at     ON delivery_outcome TYPE option<datetime>;
-DEFINE INDEX delivery_session ON delivery_outcome FIELDS session UNIQUE;
-DEFINE INDEX delivery_pr ON delivery_outcome FIELDS pull_request;
-DEFINE INDEX delivery_status ON delivery_outcome FIELDS repository, status, updated_at;
+DEFINE INDEX IF NOT EXISTS delivery_session ON delivery_outcome FIELDS session UNIQUE;
+DEFINE INDEX IF NOT EXISTS delivery_pr ON delivery_outcome FIELDS pull_request;
+DEFINE INDEX IF NOT EXISTS delivery_status ON delivery_outcome FIELDS repository, status, updated_at;
 
 DEFINE TABLE phase_span SCHEMAFULL;
 DEFINE FIELD session        ON phase_span TYPE record<session>;
@@ -1010,7 +1010,7 @@ DEFINE FIELD interruptions  ON phase_span TYPE int DEFAULT 0;
 DEFINE FIELD corrections    ON phase_span TYPE int DEFAULT 0;
 DEFINE FIELD metrics        ON phase_span TYPE option<string>;
 DEFINE FIELD evidence       ON phase_span TYPE option<string>;
-DEFINE INDEX phase_span_session_phase ON phase_span FIELDS session, phase;
+DEFINE INDEX IF NOT EXISTS phase_span_session_phase ON phase_span FIELDS session, phase;
 
 DEFINE TABLE skill_candidate SCHEMAFULL;
 DEFINE FIELD name          ON skill_candidate TYPE string;
@@ -1023,8 +1023,8 @@ DEFINE FIELD status        ON skill_candidate TYPE string DEFAULT 'candidate';
 DEFINE FIELD labels        ON skill_candidate TYPE option<string>;  -- JSON-encoded
 DEFINE FIELD metrics       ON skill_candidate TYPE option<string>;  -- JSON-encoded
 DEFINE FIELD created_at    ON skill_candidate TYPE datetime DEFAULT time::now();
-DEFINE INDEX skill_candidate_name ON skill_candidate FIELDS name UNIQUE;
-DEFINE INDEX skill_candidate_status ON skill_candidate FIELDS status, created_at;
+DEFINE INDEX IF NOT EXISTS skill_candidate_name ON skill_candidate FIELDS name UNIQUE;
+DEFINE INDEX IF NOT EXISTS skill_candidate_status ON skill_candidate FIELDS status, created_at;
 
 -- ==== Ingest telemetry tables ====
 
@@ -1035,7 +1035,7 @@ DEFINE FIELD since_days    ON ingest_run TYPE option<int>;
 DEFINE FIELD started_at    ON ingest_run TYPE datetime DEFAULT time::now();
 DEFINE FIELD ended_at      ON ingest_run TYPE option<datetime>;
 DEFINE FIELD metrics       ON ingest_run TYPE option<string>;
-DEFINE INDEX ingest_run_status_started ON ingest_run FIELDS status, started_at;
+DEFINE INDEX IF NOT EXISTS ingest_run_status_started ON ingest_run FIELDS status, started_at;
 
 DEFINE TABLE ingest_stage SCHEMAFULL;
 DEFINE FIELD run           ON ingest_stage TYPE record<ingest_run>;
@@ -1046,7 +1046,7 @@ DEFINE FIELD started_at    ON ingest_stage TYPE datetime DEFAULT time::now();
 DEFINE FIELD ended_at      ON ingest_stage TYPE option<datetime>;
 DEFINE FIELD counts        ON ingest_stage TYPE option<string>;
 DEFINE FIELD error_text    ON ingest_stage TYPE option<string>;
-DEFINE INDEX ingest_stage_run ON ingest_stage FIELDS run, started_at;
+DEFINE INDEX IF NOT EXISTS ingest_stage_run ON ingest_stage FIELDS run, started_at;
 
 DEFINE TABLE ingest_event SCHEMAFULL;
 DEFINE FIELD run           ON ingest_event TYPE record<ingest_run>;
@@ -1057,8 +1057,8 @@ DEFINE FIELD message       ON ingest_event TYPE string;
 DEFINE FIELD counts        ON ingest_event TYPE option<string>;
 DEFINE FIELD raw           ON ingest_event TYPE option<string>;
 DEFINE FIELD ts            ON ingest_event TYPE datetime DEFAULT time::now();
-DEFINE INDEX ingest_event_run_ts ON ingest_event FIELDS run, ts;
-DEFINE INDEX ingest_event_source_ts ON ingest_event FIELDS source, ts;
+DEFINE INDEX IF NOT EXISTS ingest_event_run_ts ON ingest_event FIELDS run, ts;
+DEFINE INDEX IF NOT EXISTS ingest_event_source_ts ON ingest_event FIELDS source, ts;
 
 DEFINE TABLE query_sample SCHEMAFULL;
 DEFINE FIELD name          ON query_sample TYPE option<string>;
@@ -1075,7 +1075,7 @@ DEFINE FIELD status        ON graph_health_check TYPE string;
 DEFINE FIELD count         ON graph_health_check TYPE int DEFAULT 0;
 DEFINE FIELD rows          ON graph_health_check TYPE option<string>;
 DEFINE FIELD created_at    ON graph_health_check TYPE datetime DEFAULT time::now();
-DEFINE INDEX graph_health_kind_created ON graph_health_check FIELDS kind, created_at;
+DEFINE INDEX IF NOT EXISTS graph_health_kind_created ON graph_health_check FIELDS kind, created_at;
 
 -- ==== Skill roles (P3.1) ====
 -- Multi-role natural: one skill -> many plays_role edges. Weighted query
@@ -1281,57 +1281,57 @@ DEFINE FIELD reason       ON concerns TYPE option<string>;
 DEFINE FIELD labels       ON concerns TYPE option<string>;  -- JSON-encoded
 DEFINE FIELD metrics      ON concerns TYPE option<string>;  -- JSON-encoded
 DEFINE FIELD ts           ON concerns TYPE datetime DEFAULT time::now();
-DEFINE INDEX concerns_in  ON concerns FIELDS in;
-DEFINE INDEX concerns_out ON concerns FIELDS out;
+DEFINE INDEX IF NOT EXISTS concerns_in  ON concerns FIELDS in;
+DEFINE INDEX IF NOT EXISTS concerns_out ON concerns FIELDS out;
 DEFINE INDEX IF NOT EXISTS concerns_in_out_kind ON concerns FIELDS in, out, kind;
 
 DEFINE TABLE includes     TYPE RELATION FROM changeset TO file_memory SCHEMAFULL;
 DEFINE FIELD kind         ON includes TYPE option<string>;
 DEFINE FIELD labels       ON includes TYPE option<string>;  -- JSON-encoded
 DEFINE FIELD ts           ON includes TYPE datetime DEFAULT time::now();
-DEFINE INDEX includes_in  ON includes FIELDS in;
-DEFINE INDEX includes_out ON includes FIELDS out;
+DEFINE INDEX IF NOT EXISTS includes_in  ON includes FIELDS in;
+DEFINE INDEX IF NOT EXISTS includes_out ON includes FIELDS out;
 
 DEFINE TABLE involves     TYPE RELATION FROM changeset TO file SCHEMAFULL;
 DEFINE FIELD role         ON involves TYPE option<string>;
 DEFINE FIELD labels       ON involves TYPE option<string>;  -- JSON-encoded
 DEFINE FIELD ts           ON involves TYPE datetime DEFAULT time::now();
-DEFINE INDEX involves_in  ON involves FIELDS in;
-DEFINE INDEX involves_out ON involves FIELDS out;
+DEFINE INDEX IF NOT EXISTS involves_in  ON involves FIELDS in;
+DEFINE INDEX IF NOT EXISTS involves_out ON involves FIELDS out;
 
 DEFINE TABLE resulted_in  TYPE RELATION SCHEMAFULL;
 DEFINE FIELD kind         ON resulted_in TYPE option<string>;
 DEFINE FIELD labels       ON resulted_in TYPE option<string>;  -- JSON-encoded
 DEFINE FIELD ts           ON resulted_in TYPE datetime DEFAULT time::now();
-DEFINE INDEX resulted_in_in ON resulted_in FIELDS in;
-DEFINE INDEX resulted_in_out ON resulted_in FIELDS out;
+DEFINE INDEX IF NOT EXISTS resulted_in_in ON resulted_in FIELDS in;
+DEFINE INDEX IF NOT EXISTS resulted_in_out ON resulted_in FIELDS out;
 
 DEFINE TABLE supersedes   TYPE RELATION SCHEMAFULL;
 DEFINE FIELD reason       ON supersedes TYPE option<string>;
 DEFINE FIELD ts           ON supersedes TYPE datetime DEFAULT time::now();
-DEFINE INDEX supersedes_in ON supersedes FIELDS in;
-DEFINE INDEX supersedes_out ON supersedes FIELDS out;
+DEFINE INDEX IF NOT EXISTS supersedes_in ON supersedes FIELDS in;
+DEFINE INDEX IF NOT EXISTS supersedes_out ON supersedes FIELDS out;
 
 DEFINE TABLE produced_artifact TYPE RELATION SCHEMAFULL;
 DEFINE FIELD kind         ON produced_artifact TYPE option<string>;
 DEFINE FIELD labels       ON produced_artifact TYPE option<string>;  -- JSON-encoded
 DEFINE FIELD ts           ON produced_artifact TYPE datetime DEFAULT time::now();
-DEFINE INDEX produced_artifact_in ON produced_artifact FIELDS in;
-DEFINE INDEX produced_artifact_out ON produced_artifact FIELDS out;
+DEFINE INDEX IF NOT EXISTS produced_artifact_in ON produced_artifact FIELDS in;
+DEFINE INDEX IF NOT EXISTS produced_artifact_out ON produced_artifact FIELDS out;
 
 DEFINE TABLE has_artifact TYPE RELATION SCHEMAFULL;
 DEFINE FIELD kind         ON has_artifact TYPE option<string>;
 DEFINE FIELD labels       ON has_artifact TYPE option<string>;  -- JSON-encoded
 DEFINE FIELD ts           ON has_artifact TYPE datetime DEFAULT time::now();
-DEFINE INDEX has_artifact_in ON has_artifact FIELDS in;
-DEFINE INDEX has_artifact_out ON has_artifact FIELDS out;
+DEFINE INDEX IF NOT EXISTS has_artifact_in ON has_artifact FIELDS in;
+DEFINE INDEX IF NOT EXISTS has_artifact_out ON has_artifact FIELDS out;
 
 DEFINE TABLE derived_from TYPE RELATION SCHEMAFULL;
 DEFINE FIELD kind         ON derived_from TYPE option<string>;
 DEFINE FIELD labels       ON derived_from TYPE option<string>;  -- JSON-encoded
 DEFINE FIELD ts           ON derived_from TYPE datetime DEFAULT time::now();
-DEFINE INDEX derived_from_in ON derived_from FIELDS in;
-DEFINE INDEX derived_from_out ON derived_from FIELDS out;
+DEFINE INDEX IF NOT EXISTS derived_from_in ON derived_from FIELDS in;
+DEFINE INDEX IF NOT EXISTS derived_from_out ON derived_from FIELDS out;
 
 DEFINE TABLE skill_paired TYPE RELATION FROM skill TO skill;  -- skills co-occurring in same session within N turns
 DEFINE FIELD count        ON skill_paired TYPE int DEFAULT 1;
@@ -1354,16 +1354,16 @@ DEFINE FIELD ts           ON spawned TYPE datetime DEFAULT time::now();
 DEFINE FIELD tool         ON spawned TYPE option<string>;       -- e.g. "spawn_agent" | "Task"
 DEFINE FIELD tool_call    ON spawned TYPE option<record<tool_call>>;
 DEFINE FIELD nickname     ON spawned TYPE option<string>;       -- codex assigns "Turing", "Babbage", etc.
-DEFINE INDEX spawned_in   ON spawned FIELDS in;
-DEFINE INDEX spawned_out  ON spawned FIELDS out;
+DEFINE INDEX IF NOT EXISTS spawned_in   ON spawned FIELDS in;
+DEFINE INDEX IF NOT EXISTS spawned_out  ON spawned FIELDS out;
 
 DEFINE TABLE agent_event_child TYPE RELATION FROM agent_event TO agent_event SCHEMAFULL;
 DEFINE FIELD agent_session ON agent_event_child TYPE record<agent_session>;
 DEFINE FIELD provider      ON agent_event_child TYPE record<agent_provider>;
 DEFINE FIELD kind          ON agent_event_child TYPE string DEFAULT "parent";
 DEFINE FIELD ts            ON agent_event_child TYPE datetime DEFAULT time::now();
-DEFINE INDEX agent_event_child_in ON agent_event_child FIELDS in;
-DEFINE INDEX agent_event_child_out ON agent_event_child FIELDS out;
+DEFINE INDEX IF NOT EXISTS agent_event_child_in ON agent_event_child FIELDS in;
+DEFINE INDEX IF NOT EXISTS agent_event_child_out ON agent_event_child FIELDS out;
 
 DEFINE TABLE used_model TYPE RELATION FROM session TO agent_model SCHEMAFULL;
 DEFINE FIELD session_token_usage ON used_model TYPE option<record<session_token_usage>>;
@@ -1372,15 +1372,15 @@ DEFINE FIELD estimated_tokens    ON used_model TYPE int DEFAULT 0;
 DEFINE FIELD estimated_cost_usd  ON used_model TYPE option<float>;
 DEFINE FIELD pricing_source      ON used_model TYPE option<string>;
 DEFINE FIELD ts                  ON used_model TYPE datetime DEFAULT time::now();
-DEFINE INDEX used_model_in ON used_model FIELDS in;
-DEFINE INDEX used_model_out ON used_model FIELDS out;
+DEFINE INDEX IF NOT EXISTS used_model_in ON used_model FIELDS in;
+DEFINE INDEX IF NOT EXISTS used_model_out ON used_model FIELDS out;
 
 DEFINE TABLE agent_used_model TYPE RELATION FROM agent_session TO agent_model SCHEMAFULL;
 DEFINE FIELD provider ON agent_used_model TYPE record<agent_provider>;
 DEFINE FIELD source   ON agent_used_model TYPE string;
 DEFINE FIELD ts       ON agent_used_model TYPE datetime DEFAULT time::now();
-DEFINE INDEX agent_used_model_in ON agent_used_model FIELDS in;
-DEFINE INDEX agent_used_model_out ON agent_used_model FIELDS out;
+DEFINE INDEX IF NOT EXISTS agent_used_model_in ON agent_used_model FIELDS in;
+DEFINE INDEX IF NOT EXISTS agent_used_model_out ON agent_used_model FIELDS out;
 
 -- ==== Materialized views (computed at query time) ====
 
@@ -1401,7 +1401,7 @@ DEFINE FIELD skill_name ON skill_triage_decision TYPE string;
 DEFINE FIELD decision   ON skill_triage_decision TYPE string;  -- keep | archive | review
 DEFINE FIELD reason     ON skill_triage_decision TYPE option<string>;
 DEFINE FIELD decided_at ON skill_triage_decision TYPE datetime DEFAULT time::now();
-DEFINE INDEX skill_triage_decision_name ON skill_triage_decision FIELDS skill_name UNIQUE;
+DEFINE INDEX IF NOT EXISTS skill_triage_decision_name ON skill_triage_decision FIELDS skill_name UNIQUE;
 
 -- ---------------------------------------------------------------------------
 -- Native agent-harness hook evidence. These rows describe the harness layer
@@ -1419,10 +1419,10 @@ DEFINE FIELD tool_call       ON harness_hook_event TYPE option<record<tool_call>
 DEFINE FIELD cwd             ON harness_hook_event TYPE option<string>;
 DEFINE FIELD transcript_uuid ON harness_hook_event TYPE option<string>;
 DEFINE FIELD source_type     ON harness_hook_event TYPE string;                 -- hook_progress | hook_success | hook_blocking_error | hook_additional_context
-DEFINE INDEX harness_hook_event_by_ts      ON harness_hook_event FIELDS ts;
-DEFINE INDEX harness_hook_event_by_session ON harness_hook_event FIELDS session;
-DEFINE INDEX harness_hook_event_by_name    ON harness_hook_event FIELDS hook_name;
-DEFINE INDEX harness_hook_event_by_tool    ON harness_hook_event FIELDS tool_call;
+DEFINE INDEX IF NOT EXISTS harness_hook_event_by_ts      ON harness_hook_event FIELDS ts;
+DEFINE INDEX IF NOT EXISTS harness_hook_event_by_session ON harness_hook_event FIELDS session;
+DEFINE INDEX IF NOT EXISTS harness_hook_event_by_name    ON harness_hook_event FIELDS hook_name;
+DEFINE INDEX IF NOT EXISTS harness_hook_event_by_tool    ON harness_hook_event FIELDS tool_call;
 
 DEFINE TABLE hook_command_invocation SCHEMAFULL;
 DEFINE FIELD hook_event             ON hook_command_invocation TYPE record<harness_hook_event>;
@@ -1443,12 +1443,12 @@ DEFINE FIELD stdout_excerpt         ON hook_command_invocation TYPE option<strin
 DEFINE FIELD stderr_excerpt         ON hook_command_invocation TYPE option<string>;
 DEFINE FIELD content_excerpt        ON hook_command_invocation TYPE option<string>;
 DEFINE FIELD blocking_error_excerpt ON hook_command_invocation TYPE option<string>;
-DEFINE INDEX hook_command_invocation_by_ts      ON hook_command_invocation FIELDS ts;
-DEFINE INDEX hook_command_invocation_by_session ON hook_command_invocation FIELDS session;
-DEFINE INDEX hook_command_invocation_by_event   ON hook_command_invocation FIELDS hook_event;
-DEFINE INDEX hook_command_invocation_by_command ON hook_command_invocation FIELDS command_hash;
-DEFINE INDEX hook_command_invocation_by_status  ON hook_command_invocation FIELDS provider_status;
-DEFINE INDEX hook_command_invocation_by_effect  ON hook_command_invocation FIELDS effect;
+DEFINE INDEX IF NOT EXISTS hook_command_invocation_by_ts      ON hook_command_invocation FIELDS ts;
+DEFINE INDEX IF NOT EXISTS hook_command_invocation_by_session ON hook_command_invocation FIELDS session;
+DEFINE INDEX IF NOT EXISTS hook_command_invocation_by_event   ON hook_command_invocation FIELDS hook_event;
+DEFINE INDEX IF NOT EXISTS hook_command_invocation_by_command ON hook_command_invocation FIELDS command_hash;
+DEFINE INDEX IF NOT EXISTS hook_command_invocation_by_status  ON hook_command_invocation FIELDS provider_status;
+DEFINE INDEX IF NOT EXISTS hook_command_invocation_by_effect  ON hook_command_invocation FIELDS effect;
 
 -- ---------------------------------------------------------------------------
 -- Generic feedback case definitions and deterministic backtest results.
@@ -1465,8 +1465,8 @@ DEFINE FIELD rule_json        ON feedback_case_type TYPE string;                
 DEFINE FIELD status           ON feedback_case_type TYPE string DEFAULT 'active'; -- active | paused | retired
 DEFINE FIELD created_at       ON feedback_case_type TYPE datetime DEFAULT time::now();
 DEFINE FIELD updated_at       ON feedback_case_type TYPE option<datetime>;
-DEFINE INDEX feedback_case_type_name ON feedback_case_type FIELDS name UNIQUE;
-DEFINE INDEX feedback_case_type_status ON feedback_case_type FIELDS status;
+DEFINE INDEX IF NOT EXISTS feedback_case_type_name ON feedback_case_type FIELDS name UNIQUE;
+DEFINE INDEX IF NOT EXISTS feedback_case_type_status ON feedback_case_type FIELDS status;
 
 DEFINE TABLE feedback_case_result SCHEMAFULL;
 DEFINE FIELD case_type        ON feedback_case_result TYPE record<feedback_case_type>;
@@ -1479,9 +1479,9 @@ DEFINE FIELD reason           ON feedback_case_result TYPE string;
 DEFINE FIELD window_json      ON feedback_case_result TYPE string;               -- JSON-encoded inspected window
 DEFINE FIELD evidence_json    ON feedback_case_result TYPE string;               -- JSON-encoded matched evidence
 DEFINE FIELD observed_at      ON feedback_case_result TYPE datetime DEFAULT time::now();
-DEFINE INDEX feedback_case_result_by_case ON feedback_case_result FIELDS case_type, observed_at;
-DEFINE INDEX feedback_case_result_by_status ON feedback_case_result FIELDS status;
-DEFINE INDEX feedback_case_result_by_session ON feedback_case_result FIELDS session;
+DEFINE INDEX IF NOT EXISTS feedback_case_result_by_case ON feedback_case_result FIELDS case_type, observed_at;
+DEFINE INDEX IF NOT EXISTS feedback_case_result_by_status ON feedback_case_result FIELDS status;
+DEFINE INDEX IF NOT EXISTS feedback_case_result_by_session ON feedback_case_result FIELDS session;
 
 -- ---------------------------------------------------------------------------
 -- Hook-fire telemetry. Every `axctl hook file-context` decision (inject or
@@ -1510,10 +1510,10 @@ DEFINE FIELD task_excerpt              ON hook_fire TYPE string;        -- clipp
 DEFINE FIELD top_prior_sessions        ON hook_fire TYPE array<record<session>>;
 DEFINE FIELD injected_titles           ON hook_fire TYPE array<string> DEFAULT [];   -- clipped titles of injected sessions (max 3, empty when inject=false)
 
-DEFINE INDEX hook_fire_by_ts      ON hook_fire FIELDS ts;
-DEFINE INDEX hook_fire_by_session ON hook_fire FIELDS session;
-DEFINE INDEX hook_fire_by_file    ON hook_fire FIELDS file;
-DEFINE INDEX hook_fire_by_reason  ON hook_fire FIELDS reason;
+DEFINE INDEX IF NOT EXISTS hook_fire_by_ts      ON hook_fire FIELDS ts;
+DEFINE INDEX IF NOT EXISTS hook_fire_by_session ON hook_fire FIELDS session;
+DEFINE INDEX IF NOT EXISTS hook_fire_by_file    ON hook_fire FIELDS file;
+DEFINE INDEX IF NOT EXISTS hook_fire_by_reason  ON hook_fire FIELDS reason;
 
 -- ==== Proposal (polymorphic shortlist) ====
 -- One row per repeated workflow we might package. `form` selects which
@@ -1536,9 +1536,9 @@ DEFINE FIELD reject_reason ON proposal TYPE option<string>;
 DEFINE FIELD baseline      ON proposal TYPE option<string>;
 DEFINE FIELD created_at    ON proposal TYPE datetime DEFAULT time::now();
 DEFINE FIELD updated_at    ON proposal TYPE option<datetime>;
-DEFINE INDEX proposal_dedupe_uq    ON proposal FIELDS dedupe_sig UNIQUE;
-DEFINE INDEX proposal_status_freq  ON proposal FIELDS status, frequency;
-DEFINE INDEX proposal_form_status  ON proposal FIELDS form, status, created_at;
+DEFINE INDEX IF NOT EXISTS proposal_dedupe_uq    ON proposal FIELDS dedupe_sig UNIQUE;
+DEFINE INDEX IF NOT EXISTS proposal_status_freq  ON proposal FIELDS status, frequency;
+DEFINE INDEX IF NOT EXISTS proposal_form_status  ON proposal FIELDS form, status, created_at;
 
 -- ==== Per-form payload tables ====
 -- One row per proposal of the matching form. Typed fields per form avoid
@@ -1550,7 +1550,7 @@ DEFINE FIELD trigger_pattern    ON skill_proposal TYPE string;
 DEFINE FIELD suspected_gap      ON skill_proposal TYPE string;
 DEFINE FIELD proposed_behavior  ON skill_proposal TYPE string;
 DEFINE FIELD expected_impact    ON skill_proposal TYPE option<string>;
-DEFINE INDEX skill_proposal_uq  ON skill_proposal FIELDS proposal UNIQUE;
+DEFINE INDEX IF NOT EXISTS skill_proposal_uq  ON skill_proposal FIELDS proposal UNIQUE;
 
 DEFINE TABLE subagent_proposal SCHEMAFULL;
 DEFINE FIELD proposal              ON subagent_proposal TYPE record<proposal> REFERENCE ON DELETE CASCADE;
@@ -1558,7 +1558,7 @@ DEFINE FIELD bounded_role          ON subagent_proposal TYPE string;
 DEFINE FIELD delegation_trigger    ON subagent_proposal TYPE string;
     -- pattern matched against Task tool calls (see opportunity definition below)
 DEFINE FIELD example_task_patterns ON subagent_proposal TYPE array<string> DEFAULT [];
-DEFINE INDEX subagent_proposal_uq  ON subagent_proposal FIELDS proposal UNIQUE;
+DEFINE INDEX IF NOT EXISTS subagent_proposal_uq  ON subagent_proposal FIELDS proposal UNIQUE;
 
 DEFINE TABLE hook_proposal SCHEMAFULL;
 DEFINE FIELD proposal       ON hook_proposal TYPE record<proposal> REFERENCE ON DELETE CASCADE;
@@ -1571,7 +1571,7 @@ DEFINE FIELD smoke_test_command ON hook_proposal TYPE option<string>;
 DEFINE FIELD disable_command    ON hook_proposal TYPE option<string>;
 DEFINE FIELD failure_mode       ON hook_proposal TYPE option<string>;
     -- fail_open | fail_closed
-DEFINE INDEX hook_proposal_uq ON hook_proposal FIELDS proposal UNIQUE;
+DEFINE INDEX IF NOT EXISTS hook_proposal_uq ON hook_proposal FIELDS proposal UNIQUE;
 
 DEFINE TABLE guidance_proposal SCHEMAFULL;
 DEFINE FIELD proposal        ON guidance_proposal TYPE record<proposal> REFERENCE ON DELETE CASCADE;
@@ -1579,7 +1579,7 @@ DEFINE FIELD file_target     ON guidance_proposal TYPE string;
     -- e.g. "CLAUDE.md", "~/.claude/CLAUDE.md"
 DEFINE FIELD section         ON guidance_proposal TYPE option<string>;
 DEFINE FIELD suggested_text  ON guidance_proposal TYPE string;
-DEFINE INDEX guidance_proposal_uq ON guidance_proposal FIELDS proposal UNIQUE;
+DEFINE INDEX IF NOT EXISTS guidance_proposal_uq ON guidance_proposal FIELDS proposal UNIQUE;
 
 DEFINE TABLE automation_proposal SCHEMAFULL;
 DEFINE FIELD proposal        ON automation_proposal TYPE record<proposal> REFERENCE ON DELETE CASCADE;
@@ -1592,7 +1592,7 @@ DEFINE FIELD smoke_test_command ON automation_proposal TYPE option<string>;
 DEFINE FIELD disable_command    ON automation_proposal TYPE option<string>;
 DEFINE FIELD failure_mode       ON automation_proposal TYPE option<string>;
     -- fail_open | fail_closed
-DEFINE INDEX automation_proposal_uq ON automation_proposal FIELDS proposal UNIQUE;
+DEFINE INDEX IF NOT EXISTS automation_proposal_uq ON automation_proposal FIELDS proposal UNIQUE;
 
 -- ==== Typed evidence edges ====
 -- Replaces the JSON-blob `evidence_refs` design that codex review flagged
@@ -1606,9 +1606,9 @@ DEFINE TABLE cites_evidence TYPE RELATION SCHEMAFULL;
 DEFINE FIELD count ON cites_evidence TYPE int DEFAULT 1;
 DEFINE FIELD kind  ON cites_evidence TYPE option<string>;
 DEFINE FIELD ts    ON cites_evidence TYPE datetime DEFAULT time::now();
-DEFINE INDEX cites_evidence_in     ON cites_evidence FIELDS in;
-DEFINE INDEX cites_evidence_out    ON cites_evidence FIELDS out;
-DEFINE INDEX cites_evidence_in_out ON cites_evidence FIELDS in, out;
+DEFINE INDEX IF NOT EXISTS cites_evidence_in     ON cites_evidence FIELDS in;
+DEFINE INDEX IF NOT EXISTS cites_evidence_out    ON cites_evidence FIELDS out;
+DEFINE INDEX IF NOT EXISTS cites_evidence_in_out ON cites_evidence FIELDS in, out;
 
 -- ==== Experiment (created on accept) ====
 -- One row per accepted proposal. `artifact` is a typed link to the
@@ -1627,9 +1627,9 @@ DEFINE FIELD status     ON experiment TYPE string  DEFAULT 'task_emitted';
 -- task_emitted | scaffolded | regressed | retired
 DEFINE FIELD task_path  ON experiment TYPE option<string>;
 -- absolute path to .ax/tasks/<id>.md while pending
-DEFINE INDEX experiment_status_idx ON experiment FIELDS status;
-DEFINE INDEX experiment_proposal_uq ON experiment FIELDS proposal UNIQUE;
-DEFINE INDEX experiment_created     ON experiment FIELDS created_at;
+DEFINE INDEX IF NOT EXISTS experiment_status_idx ON experiment FIELDS status;
+DEFINE INDEX IF NOT EXISTS experiment_proposal_uq ON experiment FIELDS proposal UNIQUE;
+DEFINE INDEX IF NOT EXISTS experiment_created     ON experiment FIELDS created_at;
 
 -- ==== Opportunity (verdict denominator) ====
 -- Each time a proposal's trigger pattern recurs after experiment.created_at,
@@ -1641,8 +1641,8 @@ DEFINE INDEX experiment_created     ON experiment FIELDS created_at;
 DEFINE TABLE opportunity TYPE RELATION SCHEMAFULL;
 DEFINE FIELD matched_at    ON opportunity TYPE datetime;
 DEFINE FIELD was_addressed ON opportunity TYPE bool DEFAULT false;
-DEFINE INDEX opportunity_in_ts  ON opportunity FIELDS in, matched_at;
-DEFINE INDEX opportunity_out    ON opportunity FIELDS out;
+DEFINE INDEX IF NOT EXISTS opportunity_in_ts  ON opportunity FIELDS in, matched_at;
+DEFINE INDEX IF NOT EXISTS opportunity_out    ON opportunity FIELDS out;
 
 -- ==== Checkpoint (decision support, never auto-verdict) ====
 -- One row per (experiment, kind) snapshot at +3 / +10 / +30 sessions
@@ -1673,7 +1673,7 @@ DEFINE FIELD suggested    ON checkpoint TYPE option<string>;
     -- adopted | ignored | regressed | no_longer_needed | partial
 DEFINE FIELD user_verdict ON checkpoint TYPE option<string>;
 DEFINE FIELD observed_at  ON checkpoint TYPE datetime DEFAULT time::now();
-DEFINE INDEX checkpoint_experiment_kind ON checkpoint FIELDS experiment, kind, observed_at;
+DEFINE INDEX IF NOT EXISTS checkpoint_experiment_kind ON checkpoint FIELDS experiment, kind, observed_at;
 
 -- ==== dogfood_run (Phase C12) ====
 -- One row per dogfood scenario invocation. Owned by src/dogfood/wterm.ts.
@@ -1696,9 +1696,9 @@ DEFINE FIELD transcript_artifact ON dogfood_run TYPE option<record<artifact>>;
 DEFINE FIELD cwd              ON dogfood_run TYPE option<string>;
 DEFINE FIELD started_at       ON dogfood_run TYPE datetime;
 DEFINE FIELD ended_at         ON dogfood_run TYPE datetime;
-DEFINE INDEX dogfood_run_id_uq      ON dogfood_run FIELDS run_id UNIQUE;
-DEFINE INDEX dogfood_run_status_ts  ON dogfood_run FIELDS status, ended_at;
-DEFINE INDEX dogfood_run_scenario   ON dogfood_run FIELDS scenario, ended_at;
+DEFINE INDEX IF NOT EXISTS dogfood_run_id_uq      ON dogfood_run FIELDS run_id UNIQUE;
+DEFINE INDEX IF NOT EXISTS dogfood_run_status_ts  ON dogfood_run FIELDS status, ended_at;
+DEFINE INDEX IF NOT EXISTS dogfood_run_scenario   ON dogfood_run FIELDS scenario, ended_at;
 
 -- =====================================================================
 -- Phase B: retro table (2026-05-26)
@@ -1726,9 +1726,9 @@ DEFINE FIELD next          ON retro TYPE option<string>;
 DEFINE FIELD raw           ON retro TYPE option<string>;        -- original JSON payload
 DEFINE FIELD repository    ON retro TYPE option<record<repository>>;
 DEFINE FIELD created_at    ON retro TYPE datetime DEFAULT time::now();
-DEFINE INDEX retro_session_uq    ON retro FIELDS session UNIQUE;
-DEFINE INDEX retro_source_ts     ON retro FIELDS source, created_at;
-DEFINE INDEX retro_repository_ts ON retro FIELDS repository, created_at;
+DEFINE INDEX IF NOT EXISTS retro_session_uq    ON retro FIELDS session UNIQUE;
+DEFINE INDEX IF NOT EXISTS retro_source_ts     ON retro FIELDS source, created_at;
+DEFINE INDEX IF NOT EXISTS retro_repository_ts ON retro FIELDS repository, created_at;
 
 -- Graph edge: session got a retro. Lets queries traverse both directions
 -- (session->reviewed->retro, retro<-reviewed<-session) and ask
@@ -1736,7 +1736,7 @@ DEFINE INDEX retro_repository_ts ON retro FIELDS repository, created_at;
 -- `ax retro pending`. Bidirectional + reads cleanly in English.
 DEFINE TABLE reviewed TYPE RELATION FROM session TO retro SCHEMAFULL;
 DEFINE FIELD created_at ON reviewed TYPE datetime DEFAULT time::now();
-DEFINE INDEX reviewed_in_out_uq ON reviewed FIELDS in, out UNIQUE;
+DEFINE INDEX IF NOT EXISTS reviewed_in_out_uq ON reviewed FIELDS in, out UNIQUE;
 
 -- =====================================================================
 -- ingest_file_state: per-source-file ingest watermark (2026-06-02)
@@ -1769,5 +1769,5 @@ DEFINE FIELD size        ON ingest_file_state TYPE option<number>;
 DEFINE FIELD sha         ON ingest_file_state TYPE option<string>;  -- git HEAD watermark
 DEFINE FIELD since_days  ON ingest_file_state TYPE option<number>;  -- git history window walked
 DEFINE FIELD ingested_at ON ingest_file_state TYPE datetime DEFAULT time::now();
-DEFINE INDEX ingest_file_state_path_uq ON ingest_file_state FIELDS path UNIQUE;
-DEFINE INDEX ingest_file_state_source  ON ingest_file_state FIELDS source_kind;
+DEFINE INDEX IF NOT EXISTS ingest_file_state_path_uq ON ingest_file_state FIELDS path UNIQUE;
+DEFINE INDEX IF NOT EXISTS ingest_file_state_source  ON ingest_file_state FIELDS source_kind;

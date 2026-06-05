@@ -783,7 +783,16 @@ export function cmdInstall(): Effect.Effect<
             // Capture stdio so the surreal CLI doesn't paint raw ANSI escapes to the
             // user's terminal; surface only the relevant lines on failure.
             const out = stripAnsi(`${r.stdout ?? ""}${r.stderr ?? ""}`).trim();
-            console.warn("  schema: apply failed (daemon may not be ready); re-run 'axctl install'");
+            // Don't guess the cause - surface the real surreal error below. The
+            // common one is a UNIQUE-index rebuild aborting on duplicate data;
+            // index defs are now `IF NOT EXISTS` so re-apply is a no-op on an
+            // already-populated DB. A genuine connection error reads "refused".
+            const looksLikeConn = /refus|connect|unreachable|timed out/i.test(out);
+            console.warn(
+                looksLikeConn
+                    ? "  schema: apply failed (daemon not reachable); re-run 'axctl install' once it is up"
+                    : "  schema: apply failed; resolve the error below, then re-run 'axctl install':",
+            );
             if (out) {
                 for (const line of out.split("\n")) {
                     if (line.trim()) console.warn(`    ${line}`);

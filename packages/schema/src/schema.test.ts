@@ -203,14 +203,14 @@ describe("content block artifact schema", () => {
         expect(schema).toContain("DEFINE FIELD repository     ON content_atom TYPE option<record<repository>>");
         expect(schema).toContain("DEFINE FIELD workspace      ON content_atom TYPE option<record<workspace>>");
         expect(schema).toContain("DEFINE FIELD artifact_kind  ON content_atom TYPE option<string>");
-        expect(schema).toContain("DEFINE INDEX content_atom_source_kind_value ON content_atom FIELDS source_kind, kind, normalized");
-        expect(schema).toContain("DEFINE INDEX content_atom_workspace_kind_value ON content_atom FIELDS workspace, kind, normalized");
+        expect(schema).toContain("DEFINE INDEX IF NOT EXISTS content_atom_source_kind_value ON content_atom FIELDS source_kind, kind, normalized");
+        expect(schema).toContain("DEFINE INDEX IF NOT EXISTS content_atom_workspace_kind_value ON content_atom FIELDS workspace, kind, normalized");
     });
 
     test("explicit mention relation tables are defined", () => {
         expect(schema).toContain("DEFINE TABLE mentions_file TYPE RELATION FROM content_atom TO file SCHEMAFULL");
         expect(schema).toContain("DEFINE TABLE mentions_commit TYPE RELATION FROM content_atom TO commit SCHEMAFULL");
         expect(schema).toContain("DEFINE TABLE mentions_artifact TYPE RELATION FROM content_atom TO artifact SCHEMAFULL");
-        expect(schema).toContain("DEFINE INDEX mentions_file_document ON mentions_file FIELDS document");
+        expect(schema).toContain("DEFINE INDEX IF NOT EXISTS mentions_file_document ON mentions_file FIELDS document");
     });
 });
