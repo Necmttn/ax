@@ -33,7 +33,7 @@ is to AI coding agents what retros and post-mortems are to engineering
 teams - a structured reflection step that compounds.
 
 `ax` (lowercase) is the reference implementation. Local typed graph,
-Stop-hook-driven retros, agent-readable queries, React dashboard, MIT.
+Stop-hook-driven retros, agent-readable queries, React dashboard, AGPL-3.0.
 A longer take: [`docs/manifesto.md`](docs/manifesto.md). Vocabulary:
 [`docs/language.md`](docs/language.md).
 
@@ -43,20 +43,24 @@ A longer take: [`docs/manifesto.md`](docs/manifesto.md). Vocabulary:
 flowchart LR
   cc["~/.claude/projects/<br/>Claude transcripts"]
   cx["~/.codex/sessions/<br/>Codex transcripts"]
-  sk["~/.claude/skills/<br/>installed skills"]
+  pi["~/.pi/agent/sessions/<br/>Pi transcripts"]
+  oc["OpenCode + Cursor<br/>SQLite stores"]
+  sk["installed skills<br/>(.claude, .agents, plugins)"]
   g[("local git history")]
 
   cc --> ingest
   cx --> ingest
+  pi --> ingest
+  oc --> ingest
   sk --> ingest
   g  --> ingest
 
   ingest["axctl ingest<br/>(Effect pipelines)"] --> db
-  db[("the ax graph<br/>session · turn · tool_call · skill<br/>repository · checkout · commit · file<br/>friction · diagnostic · insight")]
+  db[("the ax graph<br/>session · turn · tool_call · skill · plan<br/>repository · checkout · commit · file<br/>friction · diagnostic · compaction · insight")]
 
   db --> cli["axctl CLI<br/>recall · skills · insights · evidence"]
   db --> dash["axctl serve<br/>live dashboard"]
-  db --> agent["agent skill<br/>project context · verify · harness"]
+  db --> agent["agent skill + ax mcp<br/>project context · verify · harness"]
 ```
 
 Everything runs on `127.0.0.1`. The agent and the CLI both read the same
@@ -114,8 +118,10 @@ events).
 
 `ax` takes a different shape: a **typed graph of evidence** built from the
 agent's own logs. Sessions, turns, tool calls, plans, skills, commits, files,
-friction, and derived signals - all queryable, all local, no
-network round-trip, no third party.
+friction, compaction events, and derived signals - all queryable, all local, no
+network round-trip, no third party. Signals like compaction are normalized the
+same way across every harness, so "context ran out and got summarized" is one
+queryable event whether it came from Claude Code, Codex, Pi, OpenCode, or Cursor.
 
 Three things fall out of that, and they're the three things "agent
 experience" actually means in practice:
@@ -175,12 +181,14 @@ animation are unchanged.
 
 ## Agent integration
 
-`ax` ships two installable skills so a Claude Code / Codex agent can query
-its own evidence graph mid-session:
+`ax` ships a set of installable skills so a Claude Code / Codex agent can drive
+and query its own evidence graph mid-session - `setup` (install + verify),
+`retro` and `retro-meta` (the experiment loop), `ax-extract-workflow`
+(reconstruct what made a past result work), `ax-repo` (star / file issues / open
+PRs), and `release-announcement`:
 
 ```bash
-npx skills add git@github.com:Necmttn/ax.git --skill axctl    -g -a claude-code -a codex -y
-npx skills add git@github.com:Necmttn/ax.git --skill retro -g -a claude-code -a codex -y
+npx skills add Necmttn/ax -g -a claude-code -a codex -y   # all ax agent skills
 ```
 
 Recommended agent loop:
@@ -242,11 +250,10 @@ The 10 tools, each mirroring the matching CLI command:
 ## CLI shape
 
 ```text
-axctl ingest [--since=N] [--reset]         # backfill the graph
-axctl ingest here [--since=Nd]             # scope ingest to the git repo at $PWD
-axctl derive-signals                        # re-run derive pass standalone
-axctl derive-intents                        # re-run user-intent derive standalone
-axctl serve                                 # live web dashboard (API for ax studio)
+axctl ingest [--since=N] [--reset] [--stages=<list>]   # backfill the graph
+axctl ingest here [--since=Nd] [--stages=<list>]       # scope ingest to the git repo at $PWD
+axctl derive <signals|intents>              # re-run a derive pass standalone
+axctl serve                                 # live web dashboard
 axctl mcp                                   # MCP server (stdio) - read-only graph queries for agents
 axctl report                                # one-shot static HTML
 axctl tui                                   # interactive terminal dashboard
@@ -254,11 +261,12 @@ axctl tui                                   # interactive terminal dashboard
 axctl recall <query> [--sources=turn,commit,skill] [--scope=here|all]
                                             # cross-session BM25 full-text search
 axctl context [file] [<query>]              # file/agent-context grounding
-axctl skills <search|taste|unused|pairs|recovery|classify|tag|lint|weighted|by-role|roles>
-axctl insights <view>                       # 19 read-only graph views
-axctl classifiers <list|eval|explain>       # classifier coverage and turn explanations
+axctl skills <search|taste|unused|pairs|recovery|stats|recent|classify|tag|lint|weighted|by-role|roles|config|reconcile|scope|park|unpark|rm>
+axctl agents <config|reconcile|scope|park|unpark|rm>   # agent-file registry + overrides
+axctl insights <view>                       # 31 read-only graph views
+axctl classifiers <list|eval|explain|...>   # classifier coverage, graph, lifecycle, label-mining
 axctl costs <summary>                       # token/cost usage by provider/model quality
-axctl sessions <here|around <date>|near <sha>|show <id>>
+axctl sessions <here|around <date>|near <sha>|show <id>|compare>
                                             # windowed session queries
 axctl costs summary [--since=N]             # estimated token cost by provider/model
 axctl costs for --session <id>              # cost for one session
@@ -272,9 +280,9 @@ axctl roles                                 # list role labels with skill counts
 axctl project <context|verify|harness>
 axctl evidence <guidance-next|session-summary|weekly>
 axctl improve <list|show|accept|reject|verdict|checkpoint|reset>
-axctl retro <emit|list|reflect|plan>        # the retro-loop CLI
+axctl retro <emit|list|pending|brief|reflect|meta|plan>   # the retro-loop CLI
 axctl hook <fire>                           # hook helper invoked from settings.json
-axctl hooks <summary|invocations|backtest>
+axctl hooks <summary|invocations|backtest|session|config ...>   # + hook-config CRUD
 
 axctl daemon <status|start|stop|restart>
 axctl doctor                                # local-install health check
@@ -285,11 +293,13 @@ axctl update [--check]                      # pull latest release
 axctl version [--check|--banner]
 ```
 
-> `axctl --help` lists only the ~10 everyday commands to keep it lean. The rest
-> (`derive-signals`, `derive-intents`, `costs`, `report`, `roles`, `context`,
-> `hook(s)`, `project`, `evidence`, `classifiers`, `insights`, `daemon`,
-> `doctor`, `uninstall`, `update`, `version`) are hidden from `--help` but remain
-> fully invokable by name - the complete set is listed above.
+> `axctl --help` lists only the everyday commands (`ingest`, `sessions`,
+> `improve`, `retro`, `recall`, `skills`, `serve`, `mcp`, `tui`, `share`,
+> `install`, `setup`) to keep it lean. The rest (`derive`, `agents`, `costs`,
+> `report`, `roles`, `context`, `hook(s)`, `project`, `evidence`, `classifiers`,
+> `insights`, `daemon`, `doctor`, `uninstall`, `update`, `version`) are hidden
+> from `--help` but remain fully invokable by name. This block can drift - run
+> `axctl <command> --help` for the authoritative subcommand set.
 
 Full reference: [`docs/insights-cli-reference.md`](docs/insights-cli-reference.md).
 
@@ -380,4 +390,5 @@ Questions, feedback, or want to shape where ax goes next? Join the Discord:
 
 ## License
 
-[MIT](LICENSE) © 2025 Necmettin Karakaya
+[AGPL-3.0-only](LICENSE) © 2025 Necmettin Karakaya. A commercial license is
+available for use that the AGPL doesn't permit - reach out via the Discord above.
