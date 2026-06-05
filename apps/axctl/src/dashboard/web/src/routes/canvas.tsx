@@ -110,7 +110,7 @@ export function CanvasRoute() {
 
     // zoom toward an anchor x (px from track origin), keeping that time fixed
     const zoomAt = (anchorX: number, factor: number) => {
-        const next = Math.max(1, Math.min(80, zoom * factor));
+        const next = Math.max(1, Math.min(2000, zoom * factor));
         const worldFrac = (clampedPan + anchorX) / contentW;          // time under anchor
         const nextContentW = trackW * next;
         setPanX(Math.max(0, worldFrac * nextContentW - anchorX));
