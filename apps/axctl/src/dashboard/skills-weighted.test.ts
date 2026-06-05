@@ -118,6 +118,75 @@ describe("fetchSkillsWeighted", () => {
         expect(result.rows.length).toBe(2);
     });
 
+    // -----------------------------------------------------------------------
+    // Provider-tool exclusion + name map (query order:
+    // 0 inv, 1 role, 2 doctor, 3 deleted, 4 synthetic, 5 names)
+    // -----------------------------------------------------------------------
+
+    // inv rows: a real skill + a synthetic codex tool that would otherwise rank #1
+    const invWithTool = [
+        [
+            { skill_id: "skill:v2__simplify__h1", invocations: 47, session_count: 33 },
+            { skill_id: "skill:v2__codex_exec_command__h2", invocations: 90000, session_count: 600 },
+        ],
+    ];
+    const synthIds = [["skill:v2__codex_exec_command__h2"]];
+    const nameRows = [
+        [
+            { id: "skill:v2__simplify__h1", name: "simplify" },
+            { id: "skill:v2__codex_exec_command__h2", name: "codex:exec_command" },
+        ],
+    ];
+
+    it("excludes synthetic provider tools by default and uses the name field", async () => {
+        const db = makeMockDb([
+            invWithTool, mockRoleRows, mockDoctorBelow, [[]], synthIds, nameRows,
+        ]);
+        const result = await runWithMock(db, fetchSkillsWeighted());
+
+        expect(result.rows.map((r) => r.skill_name)).toEqual(["simplify"]);
+        expect(result.rows.some((r) => r.skill_name === "codex:exec_command")).toBe(false);
+    });
+
+    it("includeTools=true keeps tools and drops the synthetic doctor clause", async () => {
+        const capturedSqls: string[] = [];
+        const base = makeMockDb([
+            invWithTool, mockRoleRows, mockDoctorBelow, [[]], synthIds, nameRows,
+        ]);
+        const db: SurrealClientShape = {
+            ...base,
+            query: <T extends unknown[] = unknown[]>(sql: string, b?: Record<string, unknown>) => {
+                capturedSqls.push(sql);
+                return base.query<T>(sql, b);
+            },
+        } as unknown as SurrealClientShape;
+
+        const result = await runWithMock(db, fetchSkillsWeighted({ includeTools: true }));
+
+        // Tool is ranked (and named) when opted in.
+        expect(result.rows[0]!.skill_name).toBe("codex:exec_command");
+        // Doctor SQL (index 2) must NOT exclude synthetics when includeTools.
+        expect(capturedSqls[2]).not.toContain('dir_path = "(synthetic)"');
+    });
+
+    it("doctor SQL excludes synthetics by default", async () => {
+        const capturedSqls: string[] = [];
+        const db: SurrealClientShape = {
+            query: <T extends unknown[] = unknown[]>(sql: string): Effect.Effect<T, DbError> => {
+                capturedSqls.push(sql);
+                return Effect.succeed([[]] as unknown as T);
+            },
+            upsert: () => Effect.void,
+            relate: () => Effect.void,
+            putFile: () => Effect.void,
+            getFile: () => Effect.succeed(""),
+            raw: {} as never,
+        } as unknown as SurrealClientShape;
+
+        await runWithMock(db, fetchSkillsWeighted());
+        expect(capturedSqls[2]).toContain('dir_path = "(synthetic)"');
+    });
+
     it("includes window clause when windowDays is set", async () => {
         const capturedSqls: string[] = [];
         const db: SurrealClientShape = {
