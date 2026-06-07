@@ -1064,7 +1064,20 @@ export async function handleDashboardRequestWithCors(req: Request): Promise<Resp
     const cors = corsHeadersFor(origin);
 
     if (req.method === "OPTIONS") {
-        return new Response(null, { status: 204, headers: cors });
+        // Chrome's Private Network Access: an HTTPS page (the hosted studio at
+        // ax.necmttn.com) fetching a loopback address (this daemon) triggers a
+        // preflight carrying `Access-Control-Request-Private-Network: true`.
+        // Without echoing `Access-Control-Allow-Private-Network: true` the
+        // request is blocked and studio "cannot access" the daemon. Only set it
+        // for an allowed origin (cors is empty otherwise) and only when asked.
+        const headers = { ...cors };
+        if (
+            Object.keys(cors).length > 0 &&
+            req.headers.get("access-control-request-private-network") === "true"
+        ) {
+            headers["Access-Control-Allow-Private-Network"] = "true";
+        }
+        return new Response(null, { status: 204, headers });
     }
 
     const response = await handleDashboardRequest(req);
