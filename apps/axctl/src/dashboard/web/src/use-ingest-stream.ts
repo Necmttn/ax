@@ -21,8 +21,18 @@ import type { IngestStreamEvent } from "../../../ingest/stream-events.ts";
 export type StageStatus = "running" | "ok" | "error";
 export type RunStatus = "running" | "completed" | "failed";
 
+/** Live per-stage metering folded from `stage_progress` events. */
+export interface StageProgress {
+    readonly current: number;
+    readonly total: number;
+    readonly ratePerSec: number;
+    readonly etaLeftMs: number | null;
+}
+
 export interface IngestStreamState {
     readonly stages: Record<string, StageStatus>;
+    /** Per-stage live progress (current/total/rate/eta), keyed by stage name. */
+    readonly progress: Record<string, StageProgress>;
     readonly order: ReadonlyArray<string>;
     readonly finished: boolean;
     readonly runStatus: RunStatus;
@@ -36,6 +46,7 @@ export interface IngestStreamState {
 
 const IDLE: IngestStreamState = {
     stages: {},
+    progress: {},
     order: [],
     finished: false,
     runStatus: "running",
@@ -61,6 +72,26 @@ function applyEvent(state: IngestStreamState, event: IngestStreamEvent): IngestS
             return {
                 ...state,
                 stages: { ...state.stages, [event.stage]: "running" },
+                order: known ? state.order : [...state.order, event.stage],
+            };
+        }
+        case "stage_progress": {
+            const known = event.stage in state.stages;
+            const current = state.stages[event.stage];
+            // Don't resurrect a finished stage's bar on replay.
+            if (current === "ok" || current === "error") return state;
+            return {
+                ...state,
+                stages: { ...state.stages, [event.stage]: "running" },
+                progress: {
+                    ...state.progress,
+                    [event.stage]: {
+                        current: event.current,
+                        total: event.total,
+                        ratePerSec: event.ratePerSec,
+                        etaLeftMs: event.etaLeftMs,
+                    },
+                },
                 order: known ? state.order : [...state.order, event.stage],
             };
         }

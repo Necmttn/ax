@@ -167,16 +167,37 @@ function StageChecklist({ run }: { run: ReturnType<typeof useIngestStream> }) {
         <ul className="ingest-stages">
             {run.order.map((stage) => {
                 const status = run.stages[stage] ?? "running";
+                const p = run.progress[stage];
+                const pct = p && p.total > 0 ? Math.min(100, Math.round((p.current / p.total) * 100)) : null;
                 return (
                     <li key={stage} className={`ingest-stage ${status}`}>
                         <span className="ingest-stage-glyph">{STAGE_GLYPH[status]}</span>
                         <span className="ingest-stage-name">{stage}</span>
-                        <span className="ingest-stage-status">{status}</span>
+                        {status === "running" && p && pct !== null ? (
+                            <span className="ingest-stage-bar" aria-label={`${pct}%`}>
+                                <span className="ingest-stage-bar-fill" style={{ width: `${pct}%` }} />
+                            </span>
+                        ) : null}
+                        <span className="ingest-stage-status">
+                            {status === "running" && p && pct !== null
+                                ? `${p.current.toLocaleString()}/${p.total.toLocaleString()} · ${pct}%${
+                                    p.ratePerSec > 0 ? ` · ${p.ratePerSec.toFixed(1)}/s` : ""
+                                }${p.etaLeftMs !== null ? ` · ~${formatEtaLeft(p.etaLeftMs)} left` : ""}`
+                                : status}
+                        </span>
                     </li>
                 );
             })}
         </ul>
     );
+}
+
+/** Compact remaining-time label for the live progress bar ("3m30s", "45s"). */
+function formatEtaLeft(ms: number): string {
+    const s = Math.max(0, Math.round(ms / 1000));
+    if (s < 60) return `${s}s`;
+    const m = Math.floor(s / 60);
+    return `${m}m${(s % 60).toString().padStart(2, "0")}s`;
 }
 
 /** Count tiles reusing the same React Query keys the live SSE hook invalidates,
