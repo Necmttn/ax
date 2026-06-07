@@ -28,8 +28,9 @@ solo.yml
 # macOS cruft
 .DS_Store
 
-# dashboard studio build output
-apps/axctl/src/dashboard/web/dist-studio/
+# studio build outputs (apps/studio - daemon/web/desktop targets)
+apps/studio/dist-studio/
+apps/studio/dist-desktop/
 
 # local dogfood outputs (HTML reports, profiling scratch)
 dogfood-output/
