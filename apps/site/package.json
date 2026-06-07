@@ -6,9 +6,9 @@
   "type": "module",
   "scripts": {
     "predev": "bun ../../scripts/extract-stage-rationale.ts && cp ../../install.sh public/install",
-    "prebuild": "bun ../../scripts/extract-stage-rationale.ts && cp ../../install.sh public/install",
+    "prebuild": "bun ../../scripts/extract-stage-rationale.ts && cp ../../install.sh public/install && bun ../../scripts/build-studio.ts",
     "dev": "vite dev",
-    "build": "bun ../../scripts/extract-stage-rationale.ts && cp ../../install.sh public/install && vite build",
+    "build": "bun ../../scripts/extract-stage-rationale.ts && cp ../../install.sh public/install && bun ../../scripts/build-studio.ts && vite build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
     "deploy": "bun run build && wrangler pages deploy dist/client --project-name=ax --branch=main",
