@@ -95,6 +95,7 @@ import { cmdDaemon, cmdDoctor, cmdInstall, cmdSetup, cmdUninstall } from "./inst
 import { resolvePwdRepository } from "../pwd.ts";
 import { detectStaleness } from "@ax/lib/transcript-staleness";
 import { ingestTranscripts } from "../ingest/transcripts.ts";
+import { estimateIngest, formatDryRun } from "../ingest/dry-run.ts";
 import { encodeClaudeProjectSlug } from "@ax/lib/transcript-locator";
 import {
     createProgressReporter,
@@ -1723,12 +1724,28 @@ const ingestCommand = Command.make(
         deriveOnly: Flag.boolean("derive-only").pipe(Flag.withDefault(false)),
         // Wipe the skill graph before a full re-ingest so it rebuilds clean.
         reset: Flag.boolean("reset").pipe(Flag.withDefault(false)),
+        // Estimate how long a full backfill takes (counts sources + times a
+        // small sample) and exit without running the full ingest.
+        dryRun: Flag.boolean("dry-run").pipe(Flag.withDefault(false)),
+        json: Flag.boolean("json").pipe(Flag.withDefault(false)),
         since: optionalSince,
         progress: progressFlag,
         verbose: verboseFlag,
         debug: debugFlag,
     },
-    ({ insightsOnly, stages, deriveOnly, reset, since, progress, verbose, debug }) => {
+    ({ insightsOnly, stages, deriveOnly, reset, dryRun, json, since, progress, verbose, debug }) => {
+        if (dryRun) {
+            // Same runtime layer (IngestRuntimeLayer via withIngest) provides
+            // estimateIngest's services (AxConfig/FS/Path/SurrealClient); the cast
+            // aligns this branch's requirement set with the other ingest branches
+            // so Command.make infers one handler return type.
+            return Effect.gen(function* () {
+                const result = yield* estimateIngest({
+                    sinceDays: Option.getOrUndefined(since),
+                });
+                console.log(formatDryRun(result, json));
+            }) as ReturnType<typeof cmdIngest>;
+        }
         if (insightsOnly) {
             if (reset) {
                 console.error("axctl ingest: --reset cannot be combined with --insights-only");
@@ -1762,6 +1779,7 @@ const ingestCommand = Command.make(
 ).pipe(
     Command.withDescription(
         "Ingest skills, local agent transcripts, git history, and insight artifacts. " +
+            "Use --dry-run [--json] to estimate how long a full backfill will take (and exit). " +
             "Use --stages=<a,b,c> for a custom subset, or --derive-only to run every stage tagged `derive` " +
             "(see ADR-0009; canonical list lives in src/ingest/stage/registry.ts). " +
             "Use --reset to wipe the skill graph first and rebuild it clean.",

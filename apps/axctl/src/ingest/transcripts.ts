@@ -1318,6 +1318,9 @@ interface IngestOpts {
     sinceDays: number | undefined;
     project: string | undefined;
     onProgress: (counts: Record<string, number>) => Effect.Effect<void>;
+    /** Cap the number of transcript files processed. Used by `ingest --dry-run`
+     *  to time a small representative slice for ETA calibration. */
+    limit: number | undefined;
 }
 
 export interface TranscriptStats {
@@ -1422,6 +1425,12 @@ export const ingestTranscripts = (
                     size,
                 });
             }
+        }
+
+        // `--dry-run` calibration: cap to a small representative slice so we can
+        // time real parse+write throughput without processing everything.
+        if (typeof opts.limit === "number" && candidates.length > opts.limit) {
+            candidates.length = opts.limit;
         }
 
         if (opts.onProgress) yield* opts.onProgress({ totalFiles: candidates.length });

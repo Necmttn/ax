@@ -1443,6 +1443,9 @@ const queryCodexStatements = (statements: readonly string[]) =>
 interface CodexIngestOpts {
     sinceDays: number | undefined;
     onProgress: (counts: Record<string, number>) => Effect.Effect<void>;
+    /** Cap the number of session files processed. Used by `ingest --dry-run` to
+     *  time a small representative slice for ETA calibration. */
+    limit: number | undefined;
 }
 
 export interface CodexStats {
@@ -1464,6 +1467,11 @@ export const ingestCodex = (
         const fs = yield* FileSystem.FileSystem;
         const cutoff = opts.sinceDays ? Date.now() - opts.sinceDays * 86400 * 1000 : 0;
         const files = yield* walkJsonlFiles(cfg.paths.codexDir, cutoff);
+        // `--dry-run` calibration: cap to a small representative slice so we can
+        // time real parse+write throughput without processing everything.
+        if (typeof opts.limit === "number" && files.length > opts.limit) {
+            files.length = opts.limit;
+        }
         const totalBytes = files.reduce((sum, file) => sum + file.sizeBytes, 0);
         if (opts.onProgress) yield* opts.onProgress({ totalFiles: files.length, totalBytes });
         const rawMaxBytes = cfg.knobs.codexRawMaxBytes;
