@@ -152,14 +152,27 @@ export function buildAgentProviderStatements(
  *   re-ingest a fresh event can be assigned a `seq` already occupied by a
  *   *different* record id, and the per-UPSERT UNIQUE check throws mid-batch.
  *
- *   Deleting the session's events first (scoped via the `agent_event_session_ts`
- *   index on `agent_session`) makes the fresh batch insert cleanly regardless of
- *   seq drift OR record-id drift. Because record ids are derived from stable
- *   identifiers, the re-inserted rows reuse the same ids, so `turn.agent_event`,
- *   `tool_call.agent_event`, `plan_snapshot.agent_event` and `content_document`
- *   references continue to resolve. Clearing the `agent_event_child` edges in the
- *   same write avoids leaving edges that point at deleted rows; the batch re-emits
- *   them via the parent-edge statements.
+ *   Deleting the session's events first makes the fresh batch insert cleanly
+ *   regardless of seq drift OR record-id drift. Because record ids are derived
+ *   from stable identifiers, the re-inserted rows reuse the same ids, so
+ *   `turn.agent_event`, `tool_call.agent_event`, `plan_snapshot.agent_event` and
+ *   `content_document` references continue to resolve. Clearing the
+ *   `agent_event_child` edges in the same write avoids leaving edges that point
+ *   at deleted rows; the batch re-emits them via the parent-edge statements.
+ *
+ *   The delete MUST route through the PRIMARY id, not the `(agent_session, seq)`
+ *   secondary index. A long-lived DB can accumulate stale/ghost entries in the
+ *   `agent_event_session_seq` UNIQUE index (observed across a SurrealDB version
+ *   change / prior partial ingests: 27 codex sessions held ~19k duplicate
+ *   `(agent_session, seq)` rows the index let in). A bare
+ *   `DELETE ... WHERE agent_session = ...` is planned through that index and
+ *   SILENTLY SKIPS the drifted rows - yet their index entries still block the
+ *   fresh `(agent_session, seq)` INSERT, so the next ingest crashes with
+ *   "Database index agent_event_session_seq already contains [...]". An inner
+ *   `SELECT VALUE id ... WHERE agent_session = ...` reliably enumerates every
+ *   row (full-table predicate); the outer `DELETE ... WHERE id IN (...)` removes
+ *   them by primary id, which never consults the corruptible secondary index.
+ *   `ax doctor` surfaces residual duplicates so the index can be rebuilt.
  */
 export function buildAgentSessionEventClearStatements(
     sessions: readonly AgentSessionWrite[],
@@ -172,8 +185,11 @@ export function buildAgentSessionEventClearStatements(
         seen.add(sessionKey);
         const sessionRef = recordRef("agent_session", sessionKey);
         // Child edges first so no edge transiently references a deleted event.
-        statements.push(`DELETE agent_event_child WHERE agent_session = ${sessionRef};`);
-        statements.push(`DELETE agent_event WHERE agent_session = ${sessionRef};`);
+        // Delete by primary id (via an `id IN (SELECT VALUE id ...)` subquery) so
+        // a corrupt/stale `agent_event_session_seq` index can't silently leave
+        // rows behind - see the doc comment above.
+        statements.push(`DELETE agent_event_child WHERE id IN (SELECT VALUE id FROM agent_event_child WHERE agent_session = ${sessionRef});`);
+        statements.push(`DELETE agent_event WHERE id IN (SELECT VALUE id FROM agent_event WHERE agent_session = ${sessionRef});`);
     }
     return statements;
 }
