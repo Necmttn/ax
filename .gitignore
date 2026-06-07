@@ -69,3 +69,6 @@ docs/how-ax-sees-your-work.generated.mdx
 
 # scratch screenshots from landing iteration
 apps/site/.tmp-shots/
+
+# studio-desktop electron build output
+apps/studio-desktop/dist-electron/
