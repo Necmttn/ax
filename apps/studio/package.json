@@ -1,0 +1,31 @@
+{
+  "name": "@ax/studio",
+  "version": "0.12.1",
+  "private": true,
+  "license": "AGPL-3.0-only",
+  "description": "ax studio - dashboard SPA for the ax agent-experience graph. Consumed by the daemon, the hosted web deploy, and the desktop app.",
+  "type": "module",
+  "scripts": {
+    "dev": "STUDIO_TARGET=daemon vite",
+    "dev:web": "STUDIO_TARGET=web vite",
+    "build": "STUDIO_TARGET=daemon vite build",
+    "build:web": "STUDIO_TARGET=web vite build",
+    "build:desktop": "STUDIO_TARGET=desktop vite build",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@ax/lib": "workspace:*",
+    "@durable-streams/client": "^0.2.6",
+    "@tanstack/react-query": "^5",
+    "@tanstack/react-router": "^1.169",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0"
+  },
+  "devDependencies": {
+    "@types/react": "^19.2.0",
+    "@types/react-dom": "^19.2.0",
+    "@vitejs/plugin-react": "^6",
+    "typescript": "catalog:",
+    "vite": "catalog:"
+  }
+}
