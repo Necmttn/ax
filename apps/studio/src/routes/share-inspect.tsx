@@ -69,7 +69,7 @@ function validateArtifact(value: unknown): ShareArtifact {
     ) {
         throw new Error("Invalid session share artifact");
     }
-    return value as ShareArtifact;
+    return value as unknown as ShareArtifact;
 }
 
 export async function fetchShareArtifact(owner: string, gistId: string): Promise<ShareArtifact> {

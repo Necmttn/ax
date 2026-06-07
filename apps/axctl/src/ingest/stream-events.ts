@@ -1,10 +1,10 @@
 import type { TraceEvent } from "@ax/lib/live-traces/types";
+import type { IngestStreamEvent } from "@ax/lib/shared/ingest-stream-events";
 
-export type IngestStreamEvent =
-    | { readonly kind: "run_started"; readonly runId: string; readonly label: string }
-    | { readonly kind: "stage_started"; readonly runId: string; readonly stage: string }
-    | { readonly kind: "stage_finished"; readonly runId: string; readonly stage: string; readonly status: "ok" | "error"; readonly durationMs: number }
-    | { readonly kind: "run_finished"; readonly runId: string; readonly status: "completed" | "failed"; readonly durationMs: number };
+// The event contract now lives in @ax/lib/shared so the standalone @ax/studio
+// package consumes the same source of truth; re-export keeps this module's
+// existing importers (./stream-events.ts) working unchanged.
+export type { IngestStreamEvent };
 
 const runIdOf = (traceId: string): string => traceId.replace(/^ingest:/, "");
 
