@@ -5028,23 +5028,21 @@ const setupCommand = Command.make(
     "setup",
     {
         agents: Flag.string("agents").pipe(Flag.optional),
-        noIngest: Flag.boolean("no-ingest").pipe(Flag.withDefault(false)),
         yes: Flag.boolean("yes").pipe(Flag.withDefault(false)),
         agentPrompt: Flag.boolean("agent-prompt").pipe(Flag.withDefault(false)),
     },
-    ({ agents, noIngest, yes, agentPrompt }) =>
+    ({ agents, yes, agentPrompt }) =>
         cmdSetup({
             ...(agents._tag === "Some"
                 ? { agents: agents.value.split(",").map((s) => s.trim()).filter(Boolean) }
                 : {}),
-            skipIngest: noIngest,
             yes,
             agentPromptOnly: agentPrompt,
         }),
 ).pipe(
     Command.withDescription(
-        "Install the agent skills, run the first ingest, and verify. " +
-        "--agents=claude-code,codex  --no-ingest  --yes  --agent-prompt (print just the paste-to-agent block)",
+        "Install the agent skills and verify; hands ingest to your agent via the onboarding brief. " +
+        "--agents=claude-code,codex  --yes  --agent-prompt (print just the paste-to-agent block)",
     ),
 );
 
