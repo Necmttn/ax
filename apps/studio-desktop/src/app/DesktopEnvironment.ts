@@ -42,6 +42,11 @@ export interface DesktopEnvironmentShape {
     readonly surrealBinaryPath: string;
     readonly bunBinaryPath: string;
     /**
+     * Absolute path to the bundled preload script. Sits beside the bundled
+     * `main.cjs` in `dist-electron/` (i.e. the main process `dirname`).
+     */
+    readonly preloadPath: string;
+    /**
      * Entry point for `ax serve` source.
      * Packaged -> `<appRoot>/ax-src/apps/axctl/src/cli/index.ts`;
      * dev -> repo path.
@@ -88,6 +93,7 @@ export const make = (
         logsDir: path.join(input.userDataDir, "logs"),
         surrealBinaryPath: input.surrealBinaryPath,
         bunBinaryPath: input.bunBinaryPath,
+        preloadPath: path.join(input.dirname, "preload.cjs"),
         axSourceEntry,
         studioStaticDir,
         axDataDir: path.join(input.userDataDir, "db"),
