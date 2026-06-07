@@ -13,6 +13,7 @@ import { useSyncExternalStore } from "react";
 import { createCliRenderer } from "@opentui/core";
 import { createRoot } from "@opentui/react";
 import type { ProgressReporter, ProgressStage } from "./progress.ts";
+import { computeStageMetrics } from "./progress.ts";
 
 type Status = "pending" | "running" | "done" | "failed";
 
@@ -219,7 +220,7 @@ function IngestProgressView({ store, command, runId }: ViewProps) {
     const eta = done > 0 && done < total ? formatDuration((elapsed / done) * (total - done)) : "--";
     const labelW = Math.max(12, ...stages.map((s) => stageKey(s).length));
 
-    const headerLine = `axctl ${command}  run=${runId.slice(0, 8)}  elapsed=${formatDuration(elapsed)}  eta=${eta}`;
+    const headerLine = `axctl ${command}  run=${runId.slice(0, 8)}  [${done}/${total}]  elapsed=${formatDuration(elapsed)}  eta=${eta}`;
     const speedLine = `speed ${speed > 0 ? `${formatCount(speed)}/s` : "--"}  current=${currentLabel}`;
     const colHeader = `  ${"stage".padEnd(labelW)}  progress              ${"rows".padStart(8)}  ${"speed".padStart(10)}  ${"time".padStart(7)}`;
 
@@ -276,11 +277,13 @@ function StageRow({ s, labelW, frame, now }: {
         : "--";
     const speedText = speed > 0 ? `${formatCount(speed)}/s` : "--";
     const timeText = s.startedAt ? formatDuration(elapsed) : "--";
+    const etaLeftMs = s.status === "running" ? computeStageMetrics(s.counts, elapsed).etaLeftMs : undefined;
+    const etaText = etaLeftMs !== undefined ? `  ~${formatDuration(etaLeftMs)} left` : "";
     const color = s.status === "done" ? "#9ece6a"
         : s.status === "failed" ? "#f7768e"
         : s.status === "running" ? "#7dcfff"
         : "#414868";
-    const line = `${icon} ${label}  ${bar}  ${rowText.padStart(8)}  ${speedText.padStart(10)}  ${timeText.padStart(7)}${s.error ? `  ${s.error}` : ""}`;
+    const line = `${icon} ${label}  ${bar}  ${rowText.padStart(8)}  ${speedText.padStart(10)}  ${timeText.padStart(7)}${s.error ? `  ${s.error}` : etaText}`;
     return (
         <box style={{ height: 1, flexShrink: 0 }}>
             <text fg={color}>{line}</text>

@@ -5234,11 +5234,11 @@ const withIngest = (args: ReadonlyArray<string>): CliProgram => {
         : mode === "off"
             ? undefined
             : wantPlain
-                ? pipelineTraceTransportLayer("plain")
+                ? pipelineTraceTransportLayer("plain", resolveProgressStages(args))
                 : tuiCapable
                     ? tuiTraceTransportLayer(resolveProgressStages(args))
                     : interactive || force
-                        ? pipelineTraceTransportLayer("plain")
+                        ? pipelineTraceTransportLayer("plain", resolveProgressStages(args))
                         : undefined;
     // The transport must be wired BENEATH TraceSinkLive (via ingestRuntimeLayerWith),
     // not merged on top of the already-built AppLayer - otherwise the sink keeps

@@ -141,6 +141,44 @@ function totalRows(counts: Record<string, number>): number {
     return 0;
 }
 
+const firstFinite = (...values: Array<number | undefined>): number | undefined => {
+    for (const v of values) if (typeof v === "number" && Number.isFinite(v)) return v;
+    return undefined;
+};
+
+/** Per-stage live metrics shared by every renderer (plain log, pipeline board,
+ *  TUI, dashboard) so the Paxel-style line is identical everywhere. `current`/
+ *  `total` come from the `currentFile`/`totalFiles` (or subagent) convention
+ *  keys; `itemsPerSec` is item throughput (files/s, what Paxel shows); `rowsPerSec`
+ *  is record throughput; `etaLeftMs` projects the remaining items at the current
+ *  item rate. Sub-100ms elapsed suppresses rates to avoid noise-inflated speeds. */
+export interface StageMetrics {
+    readonly current: number | undefined;
+    readonly total: number | undefined;
+    readonly ratio: number | undefined;
+    readonly rows: number;
+    readonly itemsPerSec: number;
+    readonly rowsPerSec: number;
+    readonly etaLeftMs: number | undefined;
+}
+
+export function computeStageMetrics(counts: Record<string, number>, elapsedMs: number): StageMetrics {
+    const current = firstFinite(counts.currentFile, counts.currentSubagent);
+    const total = firstFinite(counts.totalFiles, counts.totalSubagents);
+    const ratio = current !== undefined && total !== undefined && total > 0
+        ? Math.min(1, current / total)
+        : undefined;
+    const rows = totalRows(counts);
+    const secs = elapsedMs / 1000;
+    const measurable = elapsedMs >= minSpeedElapsedMs && secs > 0;
+    const itemsPerSec = measurable && current !== undefined && current > 0 ? current / secs : 0;
+    const rowsPerSec = measurable && rows > 0 ? rows / secs : 0;
+    const etaLeftMs = itemsPerSec > 0 && total !== undefined && current !== undefined && total > current
+        ? ((total - current) / itemsPerSec) * 1000
+        : undefined;
+    return { current, total, ratio, rows, itemsPerSec, rowsPerSec, etaLeftMs };
+}
+
 function summarizeCounts(counts: Record<string, number>): string {
     const phase = typeof counts.phase === "number"
         ? counts.phase === 1 ? "reading" : counts.phase === 2 ? "writing" : counts.phase === 3 ? "snapshotting" : "working"
@@ -242,13 +280,50 @@ class JsonProgress implements ProgressReporter {
 class PlainProgress implements ProgressReporter {
     readonly live = false;
 
-    constructor(private readonly sink: ProgressSink, private readonly now: () => number) {}
+    // Per-stage start time + ordered keys so update() lines carry a [n/N] step
+    // index and an item rate. `lastLine` de-dupes identical consecutive lines so
+    // an agent tailing the log isn't flooded when counts haven't changed.
+    private readonly startedAt = new Map<string, number>();
+    private readonly order: string[] = [];
+    private readonly lastLine = new Map<string, string>();
 
-    start(stage: ProgressStage): void {
-        this.sink.write(`[axctl] ${stageKey(stage)} started\n`);
+    constructor(
+        private readonly sink: ProgressSink,
+        private readonly now: () => number,
+        private readonly stageCount = 0,
+    ) {}
+
+    private track(key: string): void {
+        if (!this.startedAt.has(key)) {
+            this.startedAt.set(key, this.now());
+            this.order.push(key);
+        }
     }
 
-    update(): void {}
+    start(stage: ProgressStage): void {
+        const key = stageKey(stage);
+        this.track(key);
+        this.sink.write(`[axctl] ${key} started\n`);
+    }
+
+    update(stage: ProgressStage, counts: Record<string, number>): void {
+        const key = stageKey(stage);
+        this.track(key);
+        const m = computeStageMetrics(counts, this.now() - (this.startedAt.get(key) ?? this.now()));
+        // Only emit a live line once we have a determinate current/total; pure
+        // discovery ticks (totals only) and total-less stages stay quiet here and
+        // surface their result on finish().
+        if (m.current === undefined || m.total === undefined) return;
+        const idx = this.order.indexOf(key) + 1;
+        const n = Math.max(this.stageCount, this.order.length);
+        const pct = m.ratio !== undefined ? `  ${Math.round(m.ratio * 100)}%` : "";
+        const rate = m.itemsPerSec > 0 ? `  ${m.itemsPerSec.toFixed(1)} it/s` : "";
+        const eta = m.etaLeftMs !== undefined ? `  ~${formatDuration(m.etaLeftMs)} left` : "";
+        const line = `[axctl] [${idx}/${n}] ${key}  ${formatCount(m.current)}/${formatCount(m.total)}${rate}${pct}${eta}`;
+        if (this.lastLine.get(key) === line) return;
+        this.lastLine.set(key, line);
+        this.sink.write(line + "\n");
+    }
 
     finish(stage: ProgressStage, counts: Record<string, number>): void {
         const summary = summarizeCounts(counts);
@@ -372,7 +447,7 @@ class PipelineProgress implements ProgressReporter {
         const labelW = this.labelWidth();
         const header = `  ${"stage".padEnd(labelW)}  progress              ${"rows".padStart(8)}  ${"speed".padStart(10)}  ${"time".padStart(7)}`;
         const rows = [
-            `axctl ${this.options.command}  run=${this.options.runId.slice(0, 8)}  elapsed=${formatDuration(elapsed)}  eta=${eta}`,
+            `axctl ${this.options.command}  run=${this.options.runId.slice(0, 8)}  [${done}/${total}]  elapsed=${formatDuration(elapsed)}  eta=${eta}`,
             `speed ${speed > 0 ? `${formatCount(speed)}/s` : "--"}  current=${currentLabel}`,
             "",
             header,
@@ -416,7 +491,11 @@ class PipelineProgress implements ProgressReporter {
                 : "--";
         const speedText = speed > 0 ? `${formatCount(speed)}/s` : "--";
         const timeText = state.startedAt ? formatDuration(elapsed) : "--";
-        const suffix = state.error ? `  ${state.error}` : "";
+        const etaLeftMs = state.status === "running"
+            ? computeStageMetrics(state.counts, elapsed).etaLeftMs
+            : undefined;
+        const etaText = etaLeftMs !== undefined ? `  ~${formatDuration(etaLeftMs)} left` : "";
+        const suffix = state.error ? `  ${state.error}` : etaText;
         return `${icon} ${label}  ${bar}  ${rowText.padStart(8)}  ${speedText.padStart(10)}  ${timeText.padStart(7)}${suffix}`;
     }
 
@@ -446,7 +525,7 @@ export function createProgressReporter(options: ProgressOptions): ProgressReport
     };
     if (options.mode === "off") return new NoopProgress();
     if (options.mode === "json") return new JsonProgress({ ...base, sink });
-    if (options.mode === "plain") return new PlainProgress(sink, now);
+    if (options.mode === "plain") return new PlainProgress(sink, now, options.stages.length);
     if (shouldUsePipeline(options.mode, sink, env)) {
         return new PipelineProgress({
             ...base,
@@ -455,5 +534,5 @@ export function createProgressReporter(options: ProgressOptions): ProgressReport
         }, options.stages);
     }
     if (options.mode === "auto") return new JsonProgress({ ...base, sink });
-    return new PlainProgress(sink, now);
+    return new PlainProgress(sink, now, options.stages.length);
 }

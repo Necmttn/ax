@@ -40,6 +40,7 @@ const readCountAttribute = (
  */
 export const pipelineTraceTransportLayer = (
     mode: ProgressMode = "pipeline",
+    stages: readonly ProgressStage[] = [],
 ): Layer.Layer<TraceTransportTag> => Layer.sync(
     TraceTransportTag,
     () => {
@@ -58,9 +59,10 @@ export const pipelineTraceTransportLayer = (
                                     command: "ingest",
                                     runId: event.traceId.replace(/^ingest:/, ""),
                                     mode,
-                                    // PipelineProgress/PlainProgress auto-add a row per
-                                    // stage as its span starts, so start empty.
-                                    stages: [],
+                                    // Pass the known stage list so plain-mode [n/N]
+                                    // step indices are stable; PipelineProgress still
+                                    // auto-adds rows as spans start.
+                                    stages,
                                 });
                                 break;
                             }
