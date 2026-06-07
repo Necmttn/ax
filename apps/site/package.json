@@ -6,15 +6,16 @@
   "type": "module",
   "scripts": {
     "predev": "bun ../../scripts/extract-stage-rationale.ts && cp ../../install.sh public/install",
-    "prebuild": "bun ../../scripts/extract-stage-rationale.ts && cp ../../install.sh public/install && bun ../../scripts/build-studio.ts",
+    "prebuild": "bun ../../scripts/extract-stage-rationale.ts && cp ../../install.sh public/install && bun ../../scripts/stage-studio.ts",
     "dev": "vite dev",
-    "build": "bun ../../scripts/extract-stage-rationale.ts && cp ../../install.sh public/install && bun ../../scripts/build-studio.ts && vite build",
+    "build": "bun ../../scripts/extract-stage-rationale.ts && cp ../../install.sh public/install && bun ../../scripts/stage-studio.ts && vite build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
     "deploy": "bun run build && wrangler pages deploy dist/client --project-name=ax --branch=main",
     "deploy:check": "bun run build && echo 'dist/client/ ready for: wrangler pages deploy dist/client --project-name=ax'"
   },
   "dependencies": {
+    "@ax/studio": "workspace:*",
     "@content-collections/core": "^0.15.1",
     "@content-collections/mdx": "^0.2.2",
     "@content-collections/vite": "^0.3.0",

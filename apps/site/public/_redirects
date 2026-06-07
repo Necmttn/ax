@@ -19,7 +19,7 @@
 # loop. index.html is served as the directory index without that redirect.
 
 # Studio SPA (its own client router, base /studio/, staged into public/studio
-# by scripts/build-studio.ts). Real assets under /studio/assets/* are served
+# by scripts/stage-studio.ts). Real assets under /studio/assets/* are served
 # directly (static precedence); deep client routes (/studio/sessions, ...) fall
 # through to the studio shell. This MUST precede the site-wide /* catch-all,
 # else /studio/<route> would render the marketing SPA -> blank "Invariant failed".
