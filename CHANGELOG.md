@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.12.1](https://github.com/Necmttn/ax/compare/v0.12.0...v0.12.1) (2026-06-07)
+
+
+### Bug Fixes
+
+* **serve:** echo Allow-Private-Network so hosted studio can reach loopback daemon ([#138](https://github.com/Necmttn/ax/issues/138)) ([3f7eee1](https://github.com/Necmttn/ax/commit/3f7eee14248298f7aec6b63101a97cd034e5a1f0))
+
 ## [0.12.0](https://github.com/Necmttn/ax/compare/v0.11.0...v0.12.0) (2026-06-07)
 
 
