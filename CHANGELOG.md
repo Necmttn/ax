@@ -1,5 +1,30 @@
 # Changelog
 
+## [0.12.0](https://github.com/Necmttn/ax/compare/v0.11.0...v0.12.0) (2026-06-07)
+
+
+### Features
+
+* **canvas:** auto-focus detail on deep zoom + default to focus mode ([4980eca](https://github.com/Necmttn/ax/commit/4980eca4470a758e37203f332da1eaf43d0e92bc))
+* **canvas:** inline session detail (in-place + focus), sub-row lanes, hover-prefetch ([62e7422](https://github.com/Necmttn/ax/commit/62e7422413d46ae6787fc4849e51b2cb6fb47680))
+* **canvas:** progressive pill labels on zoom ([a379029](https://github.com/Necmttn/ax/commit/a379029e5d929149203f11d95e9a861160c002c6))
+* **canvas:** raise time-axis zoom cap 80x -&gt; 2000x ([4511dd2](https://github.com/Necmttn/ax/commit/4511dd2504aab2b8d45bebdc6bcba7a3df6ce734))
+* **canvas:** show detail card on hover (instant via prefetch + ~30ms summary) ([72dbe7b](https://github.com/Necmttn/ax/commit/72dbe7beb0536671ac9d415db6cc0570f4047bf2))
+* **canvas:** swimlanes + subagent orchestration timeline ([f67a8f5](https://github.com/Necmttn/ax/commit/f67a8f5bb72f302d81cccfbafd8329267a688313))
+* **canvas:** time-axis zoom/pan + 30x faster node query ([8fe9cc9](https://github.com/Necmttn/ax/commit/8fe9cc98f67f48af24b1ef21241ddd497a2cc505))
+* **dashboard:** canvas size = context tokens + compaction epochs ([e073f71](https://github.com/Necmttn/ax/commit/e073f71c7d3615a227ea70645eb45b4ea989a18f))
+* **dashboard:** session canvas - semantic-zoom lineage graph ([33abcef](https://github.com/Necmttn/ax/commit/33abcefde52419331b04cebcbd118777f59effee))
+
+
+### Bug Fixes
+
+* **canvas:** compaction query ts order, token M-formatting, dedupe boundaries ([15eb4eb](https://github.com/Necmttn/ax/commit/15eb4ebfe0731448e61ff1586eb6fe9894a5d6ba))
+
+
+### Performance
+
+* **canvas:** DB-only session-summary for detail card (20-58s -&gt; ~30ms) + gold bench ([f2ef307](https://github.com/Necmttn/ax/commit/f2ef307f35df867ef4aa55704566314c6937b133))
+
 ## [0.11.0](https://github.com/Necmttn/ax/compare/v0.10.0...v0.11.0) (2026-06-05)
 
 
