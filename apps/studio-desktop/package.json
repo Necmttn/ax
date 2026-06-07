@@ -1,0 +1,29 @@
+{
+  "name": "@ax/studio-desktop",
+  "version": "0.12.1",
+  "private": true,
+  "license": "AGPL-3.0-only",
+  "description": "ax studio desktop app - Electron shell that supervises surreal + ax serve and renders the studio SPA.",
+  "type": "module",
+  "main": "dist-electron/main.cjs",
+  "scripts": {
+    "build:main": "tsdown",
+    "build:studio": "bun --filter @ax/studio build:desktop",
+    "build": "bun run build:studio && bun run build:main",
+    "start": "bun run build && electron .",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@ax/lib": "workspace:*",
+    "@effect/platform-node": "4.0.0-beta.70",
+    "effect": "catalog:"
+  },
+  "devDependencies": {
+    "@types/node": "^25.0.0",
+    "electron": "41.5.0",
+    "electron-builder": "26.8.1",
+    "electron-updater": "^6.6.2",
+    "tsdown": "^0.20.3",
+    "typescript": "catalog:"
+  }
+}
