@@ -49,6 +49,7 @@ FROM (
         GROUP BY out
     )
     WHERE skill_id.name IS NOT NONE
+        AND (skill_id.dir_path IS NONE OR skill_id.dir_path != "(synthetic)")
 );`;
 
 export const SKILL_LAST_PROJECT_SQL = `
@@ -82,4 +83,6 @@ SELECT
     0 AS commits_after,
     -0.5 * array::len(<-proposed) AS taste_score
 FROM skill
-WHERE array::len(<-invoked) = 0 AND array::len(<-proposed) > 0;`;
+WHERE array::len(<-invoked) = 0
+    AND array::len(<-proposed) > 0
+    AND (dir_path IS NONE OR dir_path != "(synthetic)");`;

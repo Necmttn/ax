@@ -1383,6 +1383,13 @@ const cmdRoles = (args: string[]) =>
 const cmdTaste = (args: string[]) =>
     Effect.gen(function* () {
         const limit = parsePositiveIntFlag("taste", "limit", args, 30);
+        const includeTools = args.includes("--include-tools");
+        const syntheticFilter = includeTools
+            ? ""
+            : ` AND (skill_id.dir_path IS NONE OR skill_id.dir_path != "(synthetic)")`;
+        const syntheticSkillFilter = includeTools
+            ? ""
+            : ` AND (dir_path IS NONE OR dir_path != "(synthetic)")`;
         const db = yield* SurrealClient;
         // Composite signal: invocations (positive), errors near invocation
         // (negative), corrections within 3 turns of invocation in the same
@@ -1476,7 +1483,10 @@ FROM (
     -- (matches the original cmdTaste behaviour, which started FROM skill and
     -- thus naturally excluded these). Currently happens for a handful of
     -- legacy plugin/built-in tool names that didn't get recorded as skills.
+    -- Drop synthetic provider tools by default too: these are low-level tool
+    -- invocations, not named skills, and otherwise dominate the setup signal.
     WHERE skill_id.name IS NOT NONE
+        ${syntheticFilter}
 );`;
 
         // Skills with proposals but no invocations - the GROUP BY scan
@@ -1495,7 +1505,7 @@ SELECT
     0 AS commits_after,
     -0.5 * array::len(<-proposed) AS taste_score
 FROM skill
-WHERE array::len(<-invoked) = 0 AND array::len(<-proposed) > 0;`;
+WHERE array::len(<-invoked) = 0 AND array::len(<-proposed) > 0${syntheticSkillFilter};`;
 
         // Issue #47: skills with neither invocations nor proposals get
         // dropped entirely from the merged set, so `taste --limit=200`
@@ -1514,7 +1524,7 @@ SELECT
     0 AS commits_after,
     0 AS taste_score
 FROM skill
-WHERE array::len(<-invoked) = 0 AND array::len(<-proposed) = 0;`;
+WHERE array::len(<-invoked) = 0 AND array::len(<-proposed) = 0${syntheticSkillFilter};`;
 
         const [aggResult, propResult, zeroResult] = yield* Effect.all(
             [
@@ -4423,9 +4433,16 @@ const unusedCommand = Command.make(
 
 const tasteCommand = Command.make(
     "taste",
-    { limit: positiveLimit(30) },
-    ({ limit }) => cmdTaste([`--limit=${limit}`]),
-).pipe(Command.withDescription("Rank skills by usage, corrections, proposals, and produced commits"));
+    {
+        limit: positiveLimit(30),
+        includeTools: Flag.boolean("include-tools").pipe(Flag.withDefault(false)),
+    },
+    ({ limit, includeTools }) =>
+        cmdTaste([`--limit=${limit}`, ...boolArg("include-tools", includeTools)]),
+).pipe(Command.withDescription(
+    "Rank named skills by usage, corrections, proposals, and produced commits. " +
+    "Synthetic provider tools are hidden by default; use --include-tools to rank them too.",
+));
 
 const pairsCommand = Command.make(
     "pairs",

@@ -16,7 +16,7 @@ export const AGENT_ONBOARDING_PROMPT = [
     "",
     "3. SHOW me the result - run `ax skills weighted` (usage x role ranking) and `ax skills config` (lifecycle view). Tell me which skills you labeled and why, and flag anything ax marked orphan or out-of-scope.",
     "",
-    "Then recommend a couple of skills I under-use that you'd reach for, based on what you saw.",
+    "4. GIVE ME A NEXT STEP - recommend 1-2 under-used skills you'd reach for based on what you saw, then end with a concrete CTA: the exact command or prompt I should run next, and what outcome it will produce.",
 ].join("\n");
 
 /** Prompt wrapped with a short human-facing header for terminal output. */
