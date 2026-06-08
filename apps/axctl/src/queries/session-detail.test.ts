@@ -6,6 +6,7 @@ import {
     SESSION_SHARE_TURNS_SQL,
     SESSION_SHARE_TURN_TOOLCALLS_SQL,
     SESSION_SHARE_HOOK_FIRES_SQL,
+    SESSION_SHARE_HARNESS_HOOKS_SQL,
     mapSessionShareFileRow,
     mapSessionShareTimelineRow,
     mapSessionShareTurnRow,
@@ -113,6 +114,8 @@ describe("session share query mappers", () => {
         expect(SESSION_SHARE_TURN_TOOLCALLS_SQL).toContain("LIMIT 4000");
         expect(SESSION_SHARE_HOOK_FIRES_SQL).toContain("WHERE session = $sessionId");
         expect(SESSION_SHARE_HOOK_FIRES_SQL).toContain("LIMIT 2000");
+        expect(SESSION_SHARE_HARNESS_HOOKS_SQL).toContain("WHERE session = $sessionId");
+        expect(SESSION_SHARE_HARNESS_HOOKS_SQL).toContain("LIMIT 2000");
         expect(SESSION_SHARE_FILES_SQL).toContain("WHERE in.session = $sessionId");
         expect(SESSION_SHARE_FILES_SQL).toContain("LIMIT 200");
     });

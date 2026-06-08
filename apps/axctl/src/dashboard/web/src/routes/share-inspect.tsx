@@ -17,6 +17,18 @@ import { DockedRail, HookFireMarker, InspectGuide, KIND_STYLE, Turn, useInspectS
 
 type ShareSchemaVersion = 1 | 2 | 3;
 
+interface ShareHarnessHookView {
+    readonly idx: number;
+    readonly ts: string;
+    readonly event_name: string;
+    readonly hook_name: string;
+    readonly effect: string;
+    readonly status: string;
+    readonly command?: string;
+    readonly detail?: string;
+    readonly anchor_turn_seq: number | null;
+}
+
 interface ShareArtifact {
     readonly schema_version: ShareSchemaVersion;
     readonly exported_at: string;
@@ -40,6 +52,7 @@ interface ShareArtifact {
     };
     readonly token_usage?: SessionTokenUsageDetail | null;
     readonly hook_fires?: ReadonlyArray<HookFireDto>;
+    readonly harness_hooks?: ReadonlyArray<ShareHarnessHookView>;
     readonly turns?: ReadonlyArray<{
         readonly id: string;
         readonly seq: number;
@@ -254,18 +267,35 @@ function fmtDuration(ms: number | null | undefined): string | null {
 function InspectBody({
     data,
     subagentsByTurn,
+    harnessHooks,
     onSelectSubagent,
     onPrefetchSubagent,
 }: {
     readonly data: SessionInspectPayload;
     readonly subagentsByTurn?: ReadonlyMap<number, ReadonlyArray<ShareSubagentCard>>;
+    readonly harnessHooks?: ReadonlyArray<ShareHarnessHookView>;
     readonly onSelectSubagent?: (file: string) => void;
     readonly onPrefetchSubagent?: (file: string) => void;
 }) {
     const [anchoredSeq, setAnchoredSeq] = useState<number | null>(() => hashSeq());
     const turnsRef = useRef<ReadonlyArray<InspectTurnDto>>([]);
     turnsRef.current = data.turns;
-    const hookFireIdxs = data.hook_fires.map((h) => h.idx);
+    // Harness hooks (guardrail fires) anchored to their nearest turn, + the
+    // combined jump idx list ("next hook fire" cycles file-context + harness).
+    const harnessByTurn = useMemo(() => {
+        const map = new Map<number, ShareHarnessHookView[]>();
+        for (const hook of harnessHooks ?? []) {
+            if (hook.anchor_turn_seq == null) continue;
+            const list = map.get(hook.anchor_turn_seq) ?? [];
+            list.push(hook);
+            map.set(hook.anchor_turn_seq, list);
+        }
+        return map;
+    }, [harnessHooks]);
+    const hookFireIdxs = [
+        ...data.hook_fires.map((h) => h.idx),
+        ...(harnessHooks ?? []).map((h) => HARNESS_HOOK_IDX_BASE + h.idx),
+    ];
     const hookFireIdxsRef = useRef<ReadonlyArray<number>>([]);
     hookFireIdxsRef.current = hookFireIdxs;
     const visibleSeq = useVisibleTurnSeq(data.turns, anchoredSeq ?? data.turns[0]?.seq ?? null);
@@ -305,7 +335,7 @@ function InspectBody({
                 getCurrentSeq={() => anchoredSeq}
                 hookFireIdxs={hookFireIdxs}
                 getHookFireIdxs={() => hookFireIdxsRef.current}
-                totalHookFires={data.total_hook_fires}
+                totalHookFires={data.total_hook_fires + (harnessHooks?.length ?? 0)}
             />
             <InspectGuide data={data} />
             <div style={{ display: "flex", gap: 4, flexWrap: "wrap", padding: "4px 24px 8px" }}>
@@ -332,6 +362,7 @@ function InspectBody({
                         }
                         const turn = item.turn;
                         const spawned = subagentsByTurn?.get(turn.seq);
+                        const hooks = harnessByTurn.get(turn.seq);
                         return (
                             <div key={`turn-${turn.seq}`}>
                                 <Turn
@@ -340,6 +371,13 @@ function InspectBody({
                                     activeTarget={selection?.turnSeq === turn.seq ? selection.target : null}
                                     onInspect={setSelection}
                                 />
+                                {hooks && hooks.length > 0 ? (
+                                    <div style={{ padding: "2px 24px 4px" }}>
+                                        {hooks.map((hook) => (
+                                            <HarnessHookMarker key={`hh-${hook.idx}`} hook={hook} />
+                                        ))}
+                                    </div>
+                                ) : null}
                                 {spawned && spawned.length > 0 ? (
                                     <div style={{ padding: "2px 24px 6px" }}>
                                         {spawned.map((card) => (
@@ -385,6 +423,49 @@ const SUBAGENT_LINK_STYLE: CSSProperties = {
     fontSize: 12,
     textDecoration: "underline",
 };
+
+/** DOM-id offset so harness-hook markers don't collide with file-context
+ *  hook_fire markers (both use `hook-<n>` ids for the shared jump). */
+const HARNESS_HOOK_IDX_BASE = 1_000_000;
+
+const HARNESS_EFFECT_TONE: Record<string, { bg: string; fg: string; bar: string }> = {
+    blocked: { bg: "#fef2f2", fg: "#991b1b", bar: "#ef4444" },
+    modified_input: { bg: "#fffbeb", fg: "#92400e", bar: "#f59e0b" },
+    injected_context: { bg: "#ecfdf5", fg: "#065f46", bar: "#10b981" },
+    notified: { bg: "#eff6ff", fg: "#1e40af", bar: "#3b82f6" },
+};
+
+/** Inline marker for a harness hook that did something (blocked / modified /
+ *  injected). Shows the guardrail activity inline in the shared transcript. */
+function HarnessHookMarker(props: { readonly hook: ShareHarnessHookView }) {
+    const { hook } = props;
+    const tone = HARNESS_EFFECT_TONE[hook.effect] ?? { bg: "#f8fafc", fg: "#334155", bar: "#94a3b8" };
+    return (
+        <div
+            id={`hook-${HARNESS_HOOK_IDX_BASE + hook.idx}`}
+            style={{
+                margin: "4px 0", padding: "5px 10px", background: tone.bg,
+                borderLeft: `4px solid ${tone.bar}`, borderRadius: 3,
+                fontSize: 11, fontFamily: "ui-monospace, monospace", color: tone.fg,
+            }}
+        >
+            <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                <span style={{ fontWeight: 700 }}>⚙ hook</span>
+                <span style={{ fontWeight: 600 }}>{hook.hook_name}</span>
+                <span style={{ background: tone.bar, color: "#fff", padding: "0 6px", borderRadius: 2, fontSize: 10, fontWeight: 600 }}>
+                    {hook.effect.replace(/_/g, " ")}
+                </span>
+                {hook.command ? <span style={{ opacity: 0.7 }}>{hook.command}</span> : null}
+                {hook.status === "blocking_error" ? <span style={{ fontWeight: 600 }}>⚠️ blocking</span> : null}
+            </div>
+            {hook.detail ? (
+                <div style={{ marginTop: 4, whiteSpace: "pre-wrap", wordBreak: "break-word", opacity: 0.9, lineHeight: 1.5 }}>
+                    {hook.detail}
+                </div>
+            ) : null}
+        </div>
+    );
+}
 
 /**
  * Inline "spawned subagent" marker, mirroring the live inspector's SpawnMarker
@@ -544,6 +625,7 @@ function MultiFileShareView(props: {
                 <InspectBody
                     data={data}
                     subagentsByTurn={subagentsByTurn}
+                    harnessHooks={fileQuery.data?.harness_hooks}
                     onSelectSubagent={setSelectedFile}
                     onPrefetchSubagent={prefetch}
                 />
@@ -574,7 +656,7 @@ function LegacyShareView(props: { readonly owner: string; readonly gistId: strin
             </header>
             {query.error ? <div className="error">Error: {String(query.error)}</div> : null}
             {query.isLoading && !data ? <div className="loading">Loading shared session…</div> : null}
-            {data ? <InspectBody data={data} /> : null}
+            {data ? <InspectBody data={data} harnessHooks={query.data?.harness_hooks} /> : null}
         </section>
     );
 }

@@ -26,7 +26,7 @@ import type {
     SessionTopSkill,
     TurnTokenUsageDetail,
 } from "@ax/lib/shared/dashboard-types";
-import type { ShareEvent, ShareFile, ShareTurn } from "../share/artifact.ts";
+import type { ShareEvent, ShareFile, ShareHarnessHook, ShareTurn } from "../share/artifact.ts";
 
 export const SESSION_OVERVIEW_SQL = `
 SELECT
@@ -281,6 +281,28 @@ LIMIT 2000;`;
  * the otherwise text-less tool-call turns (keeps the shared transcript from
  * jumping over the agent's actual work).
  */
+/** Harness hook invocations that DID something (blocked / modified input /
+ *  injected context / notified) for a shared session - the guardrail hooks the
+ *  user configured. Passthrough (allowed / no_op / unknown) is excluded to keep
+ *  the transcript readable. */
+export const SESSION_SHARE_HARNESS_HOOKS_SQL = `
+SELECT
+    ts,
+    event_name,
+    hook_name,
+    effect,
+    provider_status,
+    command,
+    stdout_excerpt,
+    content_excerpt,
+    blocking_error_excerpt,
+    stderr_excerpt
+FROM hook_command_invocation
+WHERE session = $sessionId
+    AND effect IN ["blocked", "modified_input", "injected_context", "notified"]
+ORDER BY ts ASC
+LIMIT 2000;`;
+
 /** Runtime hook-fire decisions for a shared session (file-context injections
  *  etc.), ordered by time so the viewer can interleave + jump to them. */
 export const SESSION_SHARE_HOOK_FIRES_SQL = `
@@ -557,6 +579,65 @@ export const sessionShareTurnToolCallsQuery = defineQuery<
 
 /** Hook fire without the SPA-only `idx` (assigned by the exporter in ts order). */
 export type ShareHookFire = Omit<HookFireDto, "idx">;
+
+/** Harness hook row before the exporter assigns idx + anchor turn. */
+export type ShareHarnessHookRow = Omit<ShareHarnessHook, "idx" | "anchor_turn_seq">;
+
+const HARNESS_DETAIL_MAX = 600;
+
+/** Pull `additionalContext` out of a hook's stdout JSON (the text Claude/Codex
+ *  actually saw injected), tolerating a missing/malformed payload. */
+const extractInjectedContext = (stdout: string | null): string | null => {
+    if (!stdout) return null;
+    const parsed = decodeJsonOrNull(stdout);
+    if (!parsed || typeof parsed !== "object") return null;
+    const rec = parsed as Record<string, unknown>;
+    const hso = rec.hookSpecificOutput;
+    if (hso && typeof hso === "object" && typeof (hso as Record<string, unknown>).additionalContext === "string") {
+        return (hso as Record<string, unknown>).additionalContext as string;
+    }
+    return typeof rec.additionalContext === "string" ? rec.additionalContext : null;
+};
+
+/** The most informative excerpt of what a hook did: blocking reason, injected
+ *  context, or raw output. Clipped so a big file-memory block stays bounded. */
+const harnessHookDetail = (raw: Record<string, unknown>): string | null => {
+    const detail = stringField(raw, "blocking_error_excerpt")
+        ?? stringField(raw, "content_excerpt")
+        ?? extractInjectedContext(stringField(raw, "stdout_excerpt"))
+        ?? stringField(raw, "stderr_excerpt");
+    if (!detail) return null;
+    const trimmed = detail.trim();
+    return trimmed.length > HARNESS_DETAIL_MAX ? `${trimmed.slice(0, HARNESS_DETAIL_MAX - 1)}…` : trimmed;
+};
+
+export const sessionShareHarnessHooksQuery = defineQuery<
+    SessionDetailParams,
+    Record<string, unknown>,
+    ShareHarnessHookRow | null
+>({
+    name: "session-detail.share_harness_hooks",
+    sql: (p) => subst(SESSION_SHARE_HARNESS_HOOKS_SQL, p.recordRef),
+    mapRow: (raw) => {
+        if (!isRecord(raw)) return null;
+        const ts = dateField(raw, "ts");
+        const event_name = stringField(raw, "event_name");
+        const hook_name = stringField(raw, "hook_name");
+        const effect = stringField(raw, "effect");
+        if (!ts || !event_name || !hook_name || !effect) return null;
+        const command = stringField(raw, "command");
+        const detail = harnessHookDetail(raw);
+        return {
+            ts,
+            event_name,
+            hook_name,
+            effect,
+            status: stringField(raw, "provider_status") ?? "",
+            ...(command ? { command } : {}),
+            ...(detail ? { detail } : {}),
+        };
+    },
+});
 
 export const sessionShareHookFiresQuery = defineQuery<
     SessionDetailParams,
