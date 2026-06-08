@@ -42,9 +42,10 @@ const makeEnvironmentInput: DesktopEnvironment.MakeDesktopEnvironmentInput = {
     userDataDir: Electron.app.getPath("userData"),
     platform: process.platform,
     processArch: process.arch,
-    // Phase 2 (backend supervisor) resolves the real bundled binary locations.
-    // Until then we fall back to PATH lookups, which are unused by the Phase 1
-    // window-open flow.
+    // Dev-only fallbacks. When packaged, DesktopEnvironment resolves the real
+    // per-arch vendored binaries under <resourcesPath>/bin/<arch>/ (staged by
+    // scripts/fetch-binaries.ts); these values are then ignored. In dev,
+    // surreal is looked up on PATH and bun resolves to the running Electron node.
     surrealBinaryPath: "surreal",
     bunBinaryPath: process.execPath,
     // Canonical ax data dir: mirror @ax/lib config + daemon install scripts so

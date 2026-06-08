@@ -23,9 +23,17 @@ export interface MakeDesktopEnvironmentInput {
     readonly platform: NodeJS.Platform;
     /** `process.arch`. */
     readonly processArch: string;
-    /** Absolute path to the bundled `surreal` binary. */
+    /**
+     * Dev fallback for `surreal` (e.g. `"surreal"` for a PATH lookup). When
+     * packaged this is ignored - the path resolves to the vendored per-arch
+     * binary under `<resourcesPath>/bin/<arch>/surreal`.
+     */
     readonly surrealBinaryPath: string;
-    /** Absolute path to the bundled `bun` binary. */
+    /**
+     * Dev fallback for `bun` (e.g. `process.execPath` or `"bun"`). When packaged
+     * this is ignored - the path resolves to the vendored per-arch binary under
+     * `<resourcesPath>/bin/<arch>/bun`.
+     */
     readonly bunBinaryPath: string;
     /**
      * `app.getPath("home")` (or `process.env.HOME`). Used to derive the
@@ -89,6 +97,44 @@ export const resolveAxDataDir = (
     path: Path.Path,
 ): string => axDataDirOverride ?? path.join(homeDir, ".local", "share", "ax");
 
+/**
+ * Map `process.arch` to the directory name `scripts/fetch-binaries.ts` writes
+ * vendored binaries under (`resources/bin/<arch>/`). Only the two macOS arches
+ * we ship are recognised; anything else returns the raw arch so the resulting
+ * path is obviously wrong (fail loud) rather than silently mismatched.
+ */
+export const binArchDir = (processArch: string): string => {
+    if (processArch === "arm64") return "arm64";
+    if (processArch === "x64") return "x64";
+    return processArch;
+};
+
+/**
+ * Resolve the absolute path to a vendored binary. Packaged builds use the
+ * per-arch binary bundled under `<resourcesPath>/bin/<arch>/` by
+ * `fetch-binaries.ts` (staged into Electron resources at build time). Dev builds
+ * fall back to the supplied PATH-lookup placeholder (e.g. `"surreal"`, or
+ * `process.execPath` for bun).
+ */
+export const resolveBinaryPath = (
+    args: {
+        readonly isDevelopment: boolean;
+        readonly resourcesPath: string;
+        readonly processArch: string;
+        readonly name: "surreal" | "bun";
+        readonly devFallback: string;
+    },
+    path: Path.Path,
+): string =>
+    args.isDevelopment
+        ? args.devFallback
+        : path.join(
+              args.resourcesPath,
+              "bin",
+              binArchDir(args.processArch),
+              args.name,
+          );
+
 export class DesktopEnvironment extends Context.Service<
     DesktopEnvironment,
     DesktopEnvironmentShape
@@ -116,8 +162,26 @@ export const make = (
         appRoot,
         userDataDir: input.userDataDir,
         logsDir: path.join(input.userDataDir, "logs"),
-        surrealBinaryPath: input.surrealBinaryPath,
-        bunBinaryPath: input.bunBinaryPath,
+        surrealBinaryPath: resolveBinaryPath(
+            {
+                isDevelopment: input.isDevelopment,
+                resourcesPath: input.resourcesPath,
+                processArch: input.processArch,
+                name: "surreal",
+                devFallback: input.surrealBinaryPath,
+            },
+            path,
+        ),
+        bunBinaryPath: resolveBinaryPath(
+            {
+                isDevelopment: input.isDevelopment,
+                resourcesPath: input.resourcesPath,
+                processArch: input.processArch,
+                name: "bun",
+                devFallback: input.bunBinaryPath,
+            },
+            path,
+        ),
         preloadPath: path.join(input.dirname, "preload.cjs"),
         axSourceEntry,
         studioStaticDir,

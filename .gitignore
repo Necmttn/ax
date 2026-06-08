@@ -72,3 +72,6 @@ apps/site/.tmp-shots/
 
 # studio-desktop electron build output
 apps/studio-desktop/dist-electron/
+
+# studio-desktop vendored binaries (fetched per-arch by scripts/fetch-binaries.ts, not committed)
+apps/studio-desktop/resources/bin/
