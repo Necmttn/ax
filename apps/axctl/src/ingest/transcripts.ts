@@ -320,6 +320,19 @@ interface ClaudeTokenUsage {
     ts: string;
 }
 
+/** One assistant turn's usage, captured from that message's `usage` block. */
+interface ClaudeTurnTokenUsage {
+    seq: number;
+    ts: string;
+    model: string | null;
+    promptTokens: number;
+    completionTokens: number;
+    cacheCreationInputTokens: number;
+    cacheReadInputTokens: number;
+    freshInputTokens: number;
+    estimatedTokens: number;
+}
+
 interface FileExtract {
     session: Session;
     sourcePath: string | null;
@@ -334,6 +347,7 @@ interface FileExtract {
     hookCommandInvocations: HookCommandInvocationWrite[];
     compactions: CompactionWrite[];
     tokenUsage: ClaudeTokenUsage | null;
+    turnTokenUsages: ClaudeTurnTokenUsage[];
 }
 
 function createClaudeExtractor(path: Path.Path, projectDir: string, sessionId: string) {
@@ -366,6 +380,7 @@ function createClaudeExtractor(path: Path.Path, projectDir: string, sessionId: s
     let usageCacheCreation = 0;
     let usageCacheRead = 0;
     let sawUsage = false;
+    const turnTokenUsages: ClaudeTurnTokenUsage[] = [];
 
     const nextProviderSeq = (): number => {
         providerSeq += 1;
@@ -907,10 +922,26 @@ function createClaudeExtractor(path: Path.Path, projectDir: string, sessionId: s
             const usage = message && isRecord(message.usage) ? message.usage : null;
             if (usage) {
                 sawUsage = true;
-                usageFreshInput += numberField(usage, "input_tokens") ?? 0;
-                usageCompletion += numberField(usage, "output_tokens") ?? 0;
-                usageCacheCreation += numberField(usage, "cache_creation_input_tokens") ?? 0;
-                usageCacheRead += numberField(usage, "cache_read_input_tokens") ?? 0;
+                const freshInput = numberField(usage, "input_tokens") ?? 0;
+                const completion = numberField(usage, "output_tokens") ?? 0;
+                const cacheCreation = numberField(usage, "cache_creation_input_tokens") ?? 0;
+                const cacheRead = numberField(usage, "cache_read_input_tokens") ?? 0;
+                usageFreshInput += freshInput;
+                usageCompletion += completion;
+                usageCacheCreation += cacheCreation;
+                usageCacheRead += cacheRead;
+                // Per-turn usage drives the inspector's per-turn cost rail.
+                turnTokenUsages.push({
+                    seq,
+                    ts,
+                    model,
+                    promptTokens: freshInput + cacheCreation + cacheRead,
+                    completionTokens: completion,
+                    cacheCreationInputTokens: cacheCreation,
+                    cacheReadInputTokens: cacheRead,
+                    freshInputTokens: freshInput,
+                    estimatedTokens: freshInput + cacheCreation + cacheRead + completion,
+                });
             }
             const messageContent = message?.content;
             const content = asContentBlocks(messageContent);
@@ -1068,6 +1099,7 @@ function createClaudeExtractor(path: Path.Path, projectDir: string, sessionId: s
                           ts: session.ended_at ?? session.started_at ?? new Date(0).toISOString(),
                       }
                     : null,
+                turnTokenUsages,
             };
         },
     };
@@ -1428,8 +1460,55 @@ export const buildClaudeTokenUsageStatements = (extracted: FileExtract): string[
     ];
 };
 
+/**
+ * Per-turn `turn_token_usage` rows, priced from each assistant message's own
+ * `usage`. Mirrors the codex turn-usage shape so the inspector's per-turn cost
+ * rail lights up for Claude sessions too. Empty when no turns carried usage.
+ */
+export const buildClaudeTurnTokenUsageStatements = (extracted: FileExtract): string[] => {
+    const sessionId = extracted.session.id;
+    return extracted.turnTokenUsages.map((usage) => {
+        const modelKey = normalizeModelName(usage.model);
+        const cost = estimateCost({
+            modelKey,
+            promptTokens: usage.promptTokens,
+            completionTokens: usage.completionTokens,
+            cacheCreationInputTokens: usage.cacheCreationInputTokens,
+            cacheReadInputTokens: usage.cacheReadInputTokens,
+            estimatedTokens: usage.estimatedTokens,
+        });
+        const turnKey = turnRecordKey(sessionId, usage.seq);
+        return `UPSERT ${recordRef("turn_token_usage", turnKey)} MERGE ${surrealObject([
+            ["session", recordRef("session", sessionId)],
+            ["turn", recordRef("turn", turnKey)],
+            ["seq", Math.trunc(usage.seq).toString(10)],
+            ["source", surrealString("claude")],
+            ["model", surrealOptionString(usage.model)],
+            ["prompt_tokens", surrealOptionInt(usage.promptTokens)],
+            ["completion_tokens", surrealOptionInt(usage.completionTokens)],
+            ["cache_creation_input_tokens", surrealOptionInt(usage.cacheCreationInputTokens)],
+            ["cache_read_input_tokens", surrealOptionInt(usage.cacheReadInputTokens)],
+            ["fresh_input_tokens", surrealOptionInt(usage.freshInputTokens)],
+            ["estimated_tokens", Math.trunc(usage.estimatedTokens).toString(10)],
+            ["model_ref", modelKey ? recordRef("agent_model", modelKey) : "NONE"],
+            ["estimated_input_cost_usd", surrealOptionFloat(cost.inputUsd)],
+            ["estimated_output_cost_usd", surrealOptionFloat(cost.outputUsd)],
+            ["estimated_cache_creation_cost_usd", surrealOptionFloat(cost.cacheCreationUsd)],
+            ["estimated_cache_read_cost_usd", surrealOptionFloat(cost.cacheReadUsd)],
+            ["estimated_cost_usd", surrealOptionFloat(cost.totalUsd)],
+            ["pricing_source", surrealOptionString(cost.pricingSource)],
+            ["usage_source", surrealString("claude_transcript.message_usage")],
+            ["usage_quality", surrealString("provider_turn")],
+            ["ts", surrealDate(usage.ts)],
+        ])};`;
+    });
+};
+
 const writeClaudeTokenUsage = (extracted: FileExtract) => {
-    const statements = buildClaudeTokenUsageStatements(extracted);
+    const statements = [
+        ...buildClaudeTokenUsageStatements(extracted),
+        ...buildClaudeTurnTokenUsageStatements(extracted),
+    ];
     return statements.length === 0
         ? Effect.void
         : queryTranscriptStatements(statements);

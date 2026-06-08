@@ -113,4 +113,31 @@ describe("share redaction", () => {
         expect(redacted.artifact.redactions.rules).toContain("authorization-bearer");
         expect(redacted.artifact.redactions.rules).toContain("openai-api-key");
     });
+
+    it("stamps each child's own redaction state (no inherited/false flags)", () => {
+        const parent = minimalShareArtifact({ id: "parent1", source: "claude" });
+        const cleanChild = minimalShareArtifact({ id: "child-clean", source: "claude" });
+        const dirtyChild = {
+            ...minimalShareArtifact({ id: "child-dirty", source: "claude" }),
+            session: {
+                ...minimalShareArtifact({ id: "child-dirty", source: "claude" }).session,
+                summary: "Authorization: Bearer secret-token",
+            },
+        };
+
+        const { artifact } = redactShareArtifact({
+            ...parent,
+            children: [cleanChild, dirtyChild],
+        });
+
+        const child0 = artifact.children?.[0];
+        const child1 = artifact.children?.[1];
+        // Parent itself had no secrets.
+        expect(artifact.redactions.applied).toBe(false);
+        // Clean child stays clean; dirty child reports its own redaction.
+        expect(child0?.redactions.applied).toBe(false);
+        expect(child1?.redactions.applied).toBe(true);
+        expect(child1?.redactions.rules).toContain("authorization-bearer");
+        expect(child1?.session.summary).toBe("Authorization: Bearer [REDACTED_SECRET]");
+    });
 });

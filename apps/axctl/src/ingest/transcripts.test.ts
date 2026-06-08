@@ -5,6 +5,7 @@ import { extractToolFileEvidence } from "./tool-file-evidence.ts";
 import {
     __testExtractClaudeJsonlLines,
     buildClaudeTokenUsageStatements,
+    buildClaudeTurnTokenUsageStatements,
     claudeConcurrency,
     transcriptEditFileRecordKey,
 } from "./transcripts.ts";
@@ -1254,5 +1255,40 @@ describe("claude token usage", () => {
         expect(stmt).toContain("estimated_cost_usd: NONE");
         expect(stmt).toContain("pricing_source: NONE");
         expect(stmt).toContain("prompt_tokens: 3310");
+    });
+
+    test("emits a priced turn_token_usage row per assistant message", () => {
+        const extracted = __testExtractClaudeJsonlLines(
+            usageLines("claude-opus-4-8"),
+            "-tmp",
+            "cl-tok",
+        );
+        const stmts = buildClaudeTurnTokenUsageStatements(extracted!);
+        // Two assistant messages -> two per-turn rows.
+        expect(stmts).toHaveLength(2);
+        expect(stmts[0]).toContain("UPSERT turn_token_usage:");
+        expect(stmts[0]).toContain("usage_source: \"claude_transcript.message_usage\"");
+        // First turn: fresh 100 @ $5/M + output 50 @ $25/M + cacheCreate 200
+        // @ $6.25/M + cacheRead 1000 @ $0.5/M = 0.0005+0.00125+0.00125+0.0005
+        expect(stmts[0]).toContain("estimated_cost_usd: 0.0035");
+        expect(stmts[0]).toContain("prompt_tokens: 1300");
+    });
+
+    test("emits no turn rows when the transcript carries no usage", () => {
+        const extracted = __testExtractClaudeJsonlLines(
+            [
+                JSON.stringify({
+                    type: "user",
+                    uuid: "u1",
+                    timestamp: "2026-06-01T10:00:00.000Z",
+                    sessionId: "cl-none",
+                    cwd: "/tmp",
+                    message: { role: "user", content: "hi" },
+                }),
+            ],
+            "-tmp",
+            "cl-none",
+        );
+        expect(buildClaudeTurnTokenUsageStatements(extracted!)).toEqual([]);
     });
 });

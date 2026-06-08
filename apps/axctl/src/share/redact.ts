@@ -68,43 +68,54 @@ export function redactShareText(input: string): RedactionResult {
     };
 }
 
+const redactValue = (value: unknown, appliedRules: Set<string>): unknown => {
+    if (typeof value === "string") {
+        const redacted = redactShareText(value);
+        for (const rule of redacted.rules) appliedRules.add(rule);
+        return redacted.text;
+    }
+
+    if (Array.isArray(value)) {
+        return value.map((item) => redactValue(item, appliedRules));
+    }
+
+    if (typeof value === "object" && value !== null) {
+        return Object.fromEntries(
+            Object.entries(value).map(([key, nestedValue]) => [key, redactValue(nestedValue, appliedRules)]),
+        );
+    }
+
+    return value;
+};
+
+/**
+ * Redact one node's OWN content (everything except `children`) and stamp that
+ * node's `redactions` with the rules that fired on it. Each node owns its
+ * redaction state so that, once the bundle is split into per-session files,
+ * every file accurately reports what was scrubbed in it - rather than every
+ * child inheriting the root's flag (or claiming `applied: false` while its
+ * text was in fact redacted).
+ */
+function redactNode(node: AxSessionShare): AxSessionShare {
+    const { children, ...own } = node;
+    const appliedRules = new Set<string>();
+    const redactedOwn = redactValue(own, appliedRules) as Omit<AxSessionShare, "children">;
+    const rules = sortedRules([...node.redactions.rules, ...appliedRules]);
+
+    return {
+        ...redactedOwn,
+        ...(children ? { children: children.map(redactNode) } : {}),
+        redactions: {
+            applied: rules.length > 0,
+            rules,
+        },
+    };
+}
+
 export function redactShareArtifact(artifact: AxSessionShare): {
     artifact: AxSessionShare;
     rules: ReadonlyArray<string>;
 } {
-    const appliedRules = new Set<string>();
-
-    const redactValue = (value: unknown): unknown => {
-        if (typeof value === "string") {
-            const redacted = redactShareText(value);
-            for (const rule of redacted.rules) appliedRules.add(rule);
-            return redacted.text;
-        }
-
-        if (Array.isArray(value)) {
-            return value.map((item) => redactValue(item));
-        }
-
-        if (typeof value === "object" && value !== null) {
-            return Object.fromEntries(
-                Object.entries(value).map(([key, nestedValue]) => [key, redactValue(nestedValue)]),
-            );
-        }
-
-        return value;
-    };
-
-    const redactedArtifact = redactValue(artifact) as AxSessionShare;
-    const rules = sortedRules([...artifact.redactions.rules, ...appliedRules]);
-
-    return {
-        artifact: {
-            ...redactedArtifact,
-            redactions: {
-                applied: rules.length > 0,
-                rules,
-            },
-        },
-        rules,
-    };
+    const redacted = redactNode(artifact);
+    return { artifact: redacted, rules: redacted.redactions.rules };
 }
