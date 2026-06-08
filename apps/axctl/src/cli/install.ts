@@ -835,8 +835,6 @@ const SETUP_AGENTS: ReadonlyArray<{ id: string; label: string; dir: string }> = 
 export interface SetupOptions {
     /** Explicit agent ids; skips detection/prompt when set. */
     readonly agents?: ReadonlyArray<string>;
-    /** Skip the initial `ax ingest`. */
-    readonly skipIngest?: boolean;
     /** Non-interactive: take detected defaults, no prompts. */
     readonly yes?: boolean;
     /** Internal: invoked from `cmdInstall` (tweaks headers). */
@@ -844,15 +842,6 @@ export interface SetupOptions {
     /** Print ONLY the paste-into-your-agent prompt and exit (for copy / install.sh). */
     readonly agentPromptOnly?: boolean;
 }
-
-/** Resolve the real binary to re-invoke for the first ingest. */
-const selfBin = (): Effect.Effect<string, never, FileSystem.FileSystem | Path.Path> =>
-    Effect.gen(function* () {
-        const fs = yield* FileSystem.FileSystem;
-        const path = yield* Path.Path;
-        const vendored = path.join(VENDOR_BIN_DIR, "axctl");
-        return (yield* fs.exists(vendored).pipe(orAbsent(false))) ? vendored : process.execPath;
-    });
 
 /** Choose which agents to install skills for. Interactive on a TTY, else the
  *  detected (present-on-disk) set, falling back to claude-code + codex. */
@@ -893,7 +882,7 @@ export function cmdSetup(
             console.log(AGENT_ONBOARDING_PROMPT);
             return;
         }
-        console.log(opts.fromInstall ? "[axctl] setup (skills + first ingest)" : "[axctl] setup");
+        console.log(opts.fromInstall ? "[axctl] setup (skills + onboarding)" : "[axctl] setup");
 
         const agents = yield* resolveSetupAgents(opts);
 
@@ -911,21 +900,22 @@ export function cmdSetup(
             else console.log(`  skills: npx exited ${r.status ?? "?"} (re-run 'ax setup' or the npx command above)`);
         }
 
-        // 2. first ingest so the graph is populated immediately.
-        if (opts.skipIngest) {
-            console.log("  ingest: skipped (--no-ingest)");
-        } else {
-            console.log("  ingest: running initial backfill...");
-            const bin = yield* selfBin();
-            const r = spawnSync(bin, ["ingest"], { stdio: "inherit" });
-            if (r.status !== 0) console.log(`  ingest: exited ${r.status ?? "?"} (run 'ax ingest' manually)`);
-        }
+        // 2. ingest is NOT run here. A full backfill can take minutes; blocking
+        // setup on it makes install feel frozen, and re-running it on every
+        // `ax update` is pure waste (the watcher + daily ETL keep the graph
+        // fresh). The onboarding brief hands ingest to the agent as a narrated
+        // step (dry-run ETA -> background run -> dashboard -> takeaways). Users
+        // without an agent get the explicit next-step below.
+        console.log("  ingest: not run yet (kept out of setup so it never blocks). populate the graph:");
+        console.log("          ax ingest --dry-run   # see how long a full backfill will take");
+        console.log("          ax ingest             # full backfill (watch live in ax serve)");
+        console.log("          ...or the daily 04:00 sync fills it overnight.");
 
         // 3. verify.
         console.log();
         yield* cmdDoctor([]);
 
-        // 4. hand off to the agent for the labeling loop (classify -> fill -> lint).
+        // 4. hand off to the agent for ingest + the labeling loop (classify -> fill -> lint).
         console.log();
         console.log(renderAgentOnboarding());
     });

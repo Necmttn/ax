@@ -1790,9 +1790,25 @@ td.skill-cell .description {
 
 .ingest-stage-status {
     font-size: 11px;
-    text-transform: uppercase;
     letter-spacing: 0.05em;
     color: var(--muted);
+    white-space: nowrap;
+    font-variant-numeric: tabular-nums;
+}
+
+.ingest-stage-bar {
+    flex: 0 0 120px;
+    height: 6px;
+    border-radius: 3px;
+    background: var(--border, #30363d);
+    overflow: hidden;
+}
+
+.ingest-stage-bar-fill {
+    display: block;
+    height: 100%;
+    background: #2ea043;
+    transition: width 0.2s ease-out;
 }
 
 .ingest-stage.ok .ingest-stage-glyph {

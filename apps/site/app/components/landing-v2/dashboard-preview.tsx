@@ -17,13 +17,15 @@ const AGENT_PROMPT = `Set up ax for me, end to end. ax is a local agent-experien
 
 1. INSTALL - run \`${INSTALL_CMD}\` to install the ax CLI. Reference: ${DOCS_URL}
 
-2. VERIFY - run \`ax doctor\`. If anything isn't ok, diagnose and fix it, then re-run until it is.
+2. INGEST MY HISTORY - first run \`ax ingest --dry-run\` and tell me, in plain words, how long a full backfill will take. Then start the ingest in the BACKGROUND so we can keep working: run \`ax ingest\` as a background job with AX_PROGRESS=plain, and watch its output for progress and completion. Tell me I can watch it fill live in the dashboard - run \`ax serve\` and open http://127.0.0.1:8520. When the ingest finishes, summarize what landed: total sessions, turns, and the top skills/tools I actually use. Then continue with the steps below.
 
-3. LABEL what ax can't classify - run \`ax skills classify\`. It writes one \`.ax/tasks/classify-<skill>.md\` brief per skill I use but ax can't role-tag. For each brief: read the skill, decide its role(s), and fill the YAML at the bottom (\`primary_role:\` is required; \`secondary_roles\`, \`confidence\`, \`rationale\` are optional). Run \`ax roles\` to see labels already in use. Then run \`ax skills lint\` to apply them. If it says "no unclassified skills", that's fine.
+3. VERIFY - run \`ax doctor\`. If anything isn't ok, diagnose and fix it, then re-run until it is.
 
-4. SHOW me the result - run \`ax skills weighted\` and \`ax skills config\`. Tell me which skills you labeled and why, and flag anything ax marked orphan or out-of-scope.
+4. LABEL what ax can't classify - run \`ax skills classify\`. It writes one \`.ax/tasks/classify-<skill>.md\` brief per skill I use but ax can't role-tag. For each brief: read the skill, decide its role(s), and fill the YAML at the bottom (\`primary_role:\` is required; \`secondary_roles\`, \`confidence\`, \`rationale\` are optional). Run \`ax roles\` to see labels already in use. Then run \`ax skills lint\` to apply them. If it says "no unclassified skills", that's fine.
 
-5. GIVE ME A NEXT STEP - recommend 1-2 under-used skills you'd reach for based on what you saw, then end with a concrete CTA: the exact command or prompt I should run next, and what outcome it will produce.`;
+5. SHOW me the result - run \`ax skills weighted\` and \`ax skills config\`. Tell me which skills you labeled and why, and flag anything ax marked orphan or out-of-scope.
+
+6. GIVE ME A NEXT STEP - recommend 1-2 under-used skills you'd reach for based on what you saw, then end with a concrete CTA: the exact command or prompt I should run next, and what outcome it will produce.`;
 
 export function DashboardPreview() {
   const [copiedPrompt, setCopiedPrompt] = useState(false);

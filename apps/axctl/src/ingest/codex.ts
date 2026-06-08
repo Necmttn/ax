@@ -1443,6 +1443,12 @@ const queryCodexStatements = (statements: readonly string[]) =>
 interface CodexIngestOpts {
     sinceDays: number | undefined;
     onProgress: (counts: Record<string, number>) => Effect.Effect<void>;
+    /** Hard cap on session files processed - a backstop for `ingest --dry-run`
+     *  calibration (paired with `deadlineMs`). */
+    limit: number | undefined;
+    /** Absolute wall-clock deadline (ms epoch). Once reached, no NEW file is
+     *  started; in-flight files finish. Lets `--dry-run` time-box calibration. */
+    deadlineMs: number | undefined;
 }
 
 export interface CodexStats {
@@ -1464,6 +1470,11 @@ export const ingestCodex = (
         const fs = yield* FileSystem.FileSystem;
         const cutoff = opts.sinceDays ? Date.now() - opts.sinceDays * 86400 * 1000 : 0;
         const files = yield* walkJsonlFiles(cfg.paths.codexDir, cutoff);
+        // `--dry-run` calibration: cap to a small representative slice so we can
+        // time real parse+write throughput without processing everything.
+        if (typeof opts.limit === "number" && files.length > opts.limit) {
+            files.length = opts.limit;
+        }
         const totalBytes = files.reduce((sum, file) => sum + file.sizeBytes, 0);
         if (opts.onProgress) yield* opts.onProgress({ totalFiles: files.length, totalBytes });
         const rawMaxBytes = cfg.knobs.codexRawMaxBytes;
@@ -1483,6 +1494,11 @@ export const ingestCodex = (
         const recordCount = () => turnCount + invCount + toolCallCount + planSnapshotCount;
 
         yield* Effect.forEach(files.map((file, index) => ({ file, index })), ({ file, index }) => Effect.gen(function* () {
+            // Time-box (dry-run calibration): once the deadline passes, start no
+            // new files; in-flight ones finish.
+            if (opts.deadlineMs !== undefined && Date.now() >= opts.deadlineMs) {
+                return;
+            }
             activeFiles += 1;
             if (opts.onProgress && (index < 5 || index % 10 === 0)) {
                 yield* opts.onProgress({

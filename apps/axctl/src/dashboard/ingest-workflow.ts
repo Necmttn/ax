@@ -54,12 +54,17 @@ interface TerminalState {
 
 /** A live-trace transport that forwards ingest spans to the stream bus. */
 function busTransportLayer(bus: IngestStreamBus, state: TerminalState): Layer.Layer<TraceTransportTag> {
-    const spanNames = new Map<string, string>();
+    const ctx = {
+        spanNames: new Map<string, string>(),
+        spanStartedAt: new Map<string, number>(),
+        spanCounts: new Map<string, Record<string, number>>(),
+        index: { started: 0 },
+    };
     const transport: TraceTransport = {
         send: (events) =>
             Effect.promise(async () => {
                 for (const event of events) {
-                    const mapped = ingestStreamEventFromTrace(event, { spanNames });
+                    const mapped = ingestStreamEventFromTrace(event, ctx);
                     if (mapped) {
                         if (mapped.kind === "run_finished") state.finished = true;
                         await bus.publish(mapped.runId, mapped);

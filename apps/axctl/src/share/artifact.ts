@@ -1,12 +1,16 @@
 import type { InspectTurnContentDto, SessionTokenUsageDetail, TurnTokenUsageDetail } from "@ax/lib/shared/dashboard-types";
 
-export const AX_SESSION_SHARE_SCHEMA_VERSION = 1 as const;
+export const AX_SESSION_SHARE_SCHEMA_VERSION = 2 as const;
+
+/** Schema versions a reader still accepts. v1 lacked `children`. */
+export const SUPPORTED_SHARE_SCHEMA_VERSIONS = [1, 2] as const;
+export type ShareSchemaVersion = (typeof SUPPORTED_SHARE_SCHEMA_VERSIONS)[number];
 
 export type KnownShareSource = "claude" | "codex" | "pi" | "opencode" | "cursor";
 export type ShareSource = KnownShareSource | (string & {});
 
 export interface AxSessionShare {
-    readonly schema_version: typeof AX_SESSION_SHARE_SCHEMA_VERSION;
+    readonly schema_version: ShareSchemaVersion;
     readonly exported_at: string;
     readonly ax_version: string;
     readonly session: {
@@ -41,6 +45,12 @@ export interface AxSessionShare {
         readonly applied: boolean;
         readonly rules: ReadonlyArray<string>;
     };
+    /**
+     * v2+: child subagent sessions spawned by this session, each a full
+     * (recursively redacted) share artifact. Absent/empty when the session
+     * delegated no subagents. Recursion terminates at leaf sessions.
+     */
+    readonly children?: ReadonlyArray<AxSessionShare>;
 }
 
 export interface ShareTurn {
@@ -109,7 +119,12 @@ const hasNumericStats = (value: Record<string, unknown>): boolean =>
 
 export function isAxSessionShare(value: unknown): value is AxSessionShare {
     if (!isRecord(value)) return false;
-    if (value.schema_version !== AX_SESSION_SHARE_SCHEMA_VERSION) return false;
+    if (
+        typeof value.schema_version !== "number" ||
+        !(SUPPORTED_SHARE_SCHEMA_VERSIONS as ReadonlyArray<number>).includes(value.schema_version)
+    ) {
+        return false;
+    }
     if (typeof value.exported_at !== "string") return false;
     if (typeof value.ax_version !== "string") return false;
     if (!isRecord(value.session)) return false;
@@ -126,6 +141,10 @@ export function isAxSessionShare(value: unknown): value is AxSessionShare {
     if (!isRecord(value.redactions)) return false;
     if (typeof value.redactions.applied !== "boolean") return false;
     if (!Array.isArray(value.redactions.rules)) return false;
+    if (value.children !== undefined) {
+        if (!Array.isArray(value.children)) return false;
+        if (!value.children.every((child) => isAxSessionShare(child))) return false;
+    }
     return true;
 }
 

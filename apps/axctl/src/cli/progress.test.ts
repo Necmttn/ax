@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { createProgressReporter, parseProgressMode, type ProgressSink } from "./progress.ts";
+import { computeStageMetrics, createProgressReporter, parseProgressMode, type ProgressSink } from "./progress.ts";
 
 function memorySink(isTTY = false, columns = 120): ProgressSink & { chunks: string[] } {
     const chunks: string[] = [];
@@ -38,6 +38,75 @@ describe("cli progress", () => {
 
         expect(sink.chunks.join("")).toContain("[axctl] skills/upsert started");
         expect(sink.chunks.join("")).toContain("skills=205");
+    });
+
+    test("computeStageMetrics derives it/s, ratio, and eta-left", () => {
+        // 50/200 files in 5s => 10 it/s; 150 left => 15s.
+        const m = computeStageMetrics(
+            { currentFile: 50, totalFiles: 200, records: 1000 },
+            5000,
+        );
+        expect(m.current).toBe(50);
+        expect(m.total).toBe(200);
+        expect(m.ratio).toBeCloseTo(0.25, 5);
+        expect(m.itemsPerSec).toBeCloseTo(10, 5);
+        expect(m.etaLeftMs).toBeCloseTo(15000, 0);
+        expect(m.rowsPerSec).toBeCloseTo(200, 5);
+    });
+
+    test("computeStageMetrics suppresses rates for sub-100ms elapsed", () => {
+        const m = computeStageMetrics({ currentFile: 5, totalFiles: 200 }, 1);
+        expect(m.itemsPerSec).toBe(0);
+        expect(m.etaLeftMs).toBeUndefined();
+    });
+
+    test("plain mode emits live [n/N] progress lines with it/s and eta-left", () => {
+        const sink = memorySink();
+        let now = 1_000;
+        const progress = createProgressReporter({
+            command: "ingest",
+            mode: "plain",
+            runId: "abc123",
+            stages: [
+                { source: "claude", stage: "transcripts" },
+                { source: "codex", stage: "sessions" },
+            ],
+            sink,
+            now: () => now,
+        });
+
+        progress.start({ source: "claude", stage: "transcripts" });
+        now = 6_000; // 5s elapsed
+        progress.update({ source: "claude", stage: "transcripts" }, {
+            currentFile: 50,
+            totalFiles: 200,
+            records: 1000,
+        });
+        progress.stop();
+
+        const out = sink.chunks.join("");
+        expect(out).toContain("[1/2] claude/transcripts  50/200");
+        expect(out).toContain("it/s");
+        expect(out).toContain("25%");
+        expect(out).toContain("left");
+    });
+
+    test("plain mode stays quiet on total-less discovery ticks", () => {
+        const sink = memorySink();
+        const progress = createProgressReporter({
+            command: "ingest",
+            mode: "plain",
+            runId: "abc123",
+            stages: [{ source: "signals", stage: "derive" }],
+            sink,
+            now: () => 1_000,
+        });
+        progress.start({ source: "signals", stage: "derive" });
+        progress.update({ source: "signals", stage: "derive" }, { signals: 12 }); // no current/total
+        progress.stop();
+        const out = sink.chunks.join("");
+        expect(out).toContain("signals/derive started");
+        expect(out).not.toContain("[1/1]"); // no live line without a determinate total
     });
 
     test("json mode emits structured progress events", () => {

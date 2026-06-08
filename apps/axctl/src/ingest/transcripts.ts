@@ -49,6 +49,16 @@ import { fileWatermark } from "@ax/lib/shared/watermark";
 import { skipNotFound } from "@ax/lib/shared/fs-error";
 import { posixPath } from "@ax/lib/shared/path";
 import {
+    surrealDate,
+    surrealJsonOption,
+    surrealObject,
+    surrealOptionInt,
+    surrealOptionString,
+    surrealString,
+} from "@ax/lib/shared/surql";
+import { safeKeyPart } from "@ax/lib/shared/derive-keys";
+import { estimateCost, normalizeModelName } from "./model-pricing.ts";
+import {
     buildCompactionStatements,
     extractClaudeCompaction,
     type CompactionWrite,
@@ -293,6 +303,23 @@ function applyToolResult(call: MutableToolCallWrite, result: ToolResultFields): 
     call.hasError = result.hasError;
 }
 
+/**
+ * Per-session token usage summed from the Claude transcript's own
+ * `message.usage` blocks. Anthropic reports `input_tokens` EXCLUSIVE of cache
+ * tokens, so `promptTokens` here is the total billed input
+ * (fresh + cache-creation + cache-read) to match the convention `estimateCost`
+ * expects (it subtracts cache from prompt to recover fresh input).
+ */
+interface ClaudeTokenUsage {
+    promptTokens: number;
+    completionTokens: number;
+    cacheCreationInputTokens: number;
+    cacheReadInputTokens: number;
+    estimatedTokens: number;
+    model: string | null;
+    ts: string;
+}
+
 interface FileExtract {
     session: Session;
     sourcePath: string | null;
@@ -306,6 +333,7 @@ interface FileExtract {
     hookEvents: HarnessHookEventWrite[];
     hookCommandInvocations: HookCommandInvocationWrite[];
     compactions: CompactionWrite[];
+    tokenUsage: ClaudeTokenUsage | null;
 }
 
 function createClaudeExtractor(path: Path.Path, projectDir: string, sessionId: string) {
@@ -330,6 +358,14 @@ function createClaudeExtractor(path: Path.Path, projectDir: string, sessionId: s
     let cwd: string | null = null;
     let model: string | null = null;
     let lastProviderEventId: string | null = null;
+    // Token usage accumulated from per-message `usage` blocks. `freshInput` is
+    // Anthropic's cache-exclusive `input_tokens`; cache totals are tracked
+    // separately so we can both store the breakdown and price it correctly.
+    let usageFreshInput = 0;
+    let usageCompletion = 0;
+    let usageCacheCreation = 0;
+    let usageCacheRead = 0;
+    let sawUsage = false;
 
     const nextProviderSeq = (): number => {
         providerSeq += 1;
@@ -865,6 +901,17 @@ function createClaudeExtractor(path: Path.Path, projectDir: string, sessionId: s
                 model = entryModel;
                 if (session) session.model = entryModel;
             }
+            // Anthropic emits `usage` on each assistant message. Sum across the
+            // session; subagent transcripts live in separate files, so this
+            // never double-counts a child's tokens into its parent.
+            const usage = message && isRecord(message.usage) ? message.usage : null;
+            if (usage) {
+                sawUsage = true;
+                usageFreshInput += numberField(usage, "input_tokens") ?? 0;
+                usageCompletion += numberField(usage, "output_tokens") ?? 0;
+                usageCacheCreation += numberField(usage, "cache_creation_input_tokens") ?? 0;
+                usageCacheRead += numberField(usage, "cache_read_input_tokens") ?? 0;
+            }
             const messageContent = message?.content;
             const content = asContentBlocks(messageContent);
 
@@ -1007,6 +1054,20 @@ function createClaudeExtractor(path: Path.Path, projectDir: string, sessionId: s
                 hookEvents,
                 hookCommandInvocations,
                 compactions,
+                tokenUsage: sawUsage
+                    ? {
+                          // Total billed input = fresh + both cache buckets, so
+                          // estimateCost recovers fresh input by subtracting cache.
+                          promptTokens: usageFreshInput + usageCacheCreation + usageCacheRead,
+                          completionTokens: usageCompletion,
+                          cacheCreationInputTokens: usageCacheCreation,
+                          cacheReadInputTokens: usageCacheRead,
+                          estimatedTokens:
+                              usageFreshInput + usageCacheCreation + usageCacheRead + usageCompletion,
+                          model: session.model,
+                          ts: session.ended_at ?? session.started_at ?? new Date(0).toISOString(),
+                      }
+                    : null,
             };
         },
     };
@@ -1314,10 +1375,79 @@ const buildClaudeProviderStatements = (extracted: FileExtract): string[] => [
 const writeProviderEvidence = (extracted: FileExtract) =>
     queryTranscriptStatements(buildClaudeProviderStatements(extracted));
 
+const surrealOptionFloat = (value: number | null | undefined): string =>
+    value === null || value === undefined || !Number.isFinite(value)
+        ? "NONE"
+        : Number(value.toFixed(8)).toString();
+
+/**
+ * Build the `session_token_usage` UPSERT for a Claude session, priced from the
+ * transcript's own usage totals. Targets the SAME record id the session-health
+ * stage uses (`safeKeyPart(sessionId)`) so this priced row and the later
+ * health pass converge on one row - health's `IF prompt_tokens != NONE` guard
+ * preserves these real counts (and leaves the cost fields it never writes
+ * intact). Empty when the transcript carried no `usage` blocks.
+ */
+export const buildClaudeTokenUsageStatements = (extracted: FileExtract): string[] => {
+    const usage = extracted.tokenUsage;
+    if (!usage) return [];
+    const modelKey = normalizeModelName(usage.model);
+    const cost = estimateCost({
+        modelKey,
+        promptTokens: usage.promptTokens,
+        completionTokens: usage.completionTokens,
+        cacheCreationInputTokens: usage.cacheCreationInputTokens,
+        cacheReadInputTokens: usage.cacheReadInputTokens,
+        estimatedTokens: usage.estimatedTokens,
+    });
+    const sessionId = extracted.session.id;
+    return [
+        `UPSERT ${recordRef("session_token_usage", safeKeyPart(sessionId))} MERGE ${surrealObject([
+            ["session", recordRef("session", sessionId)],
+            ["source", surrealString("claude")],
+            ["model", surrealOptionString(usage.model)],
+            ["prompt_tokens", surrealOptionInt(usage.promptTokens)],
+            ["completion_tokens", surrealOptionInt(usage.completionTokens)],
+            ["cache_creation_input_tokens", surrealOptionInt(usage.cacheCreationInputTokens)],
+            ["cache_read_input_tokens", surrealOptionInt(usage.cacheReadInputTokens)],
+            ["estimated_tokens", Math.trunc(usage.estimatedTokens).toString(10)],
+            ["transcript_bytes", "0"],
+            ["model_ref", modelKey ? recordRef("agent_model", modelKey) : "NONE"],
+            ["estimated_input_cost_usd", surrealOptionFloat(cost.inputUsd)],
+            ["estimated_output_cost_usd", surrealOptionFloat(cost.outputUsd)],
+            ["estimated_cache_creation_cost_usd", surrealOptionFloat(cost.cacheCreationUsd)],
+            ["estimated_cache_read_cost_usd", surrealOptionFloat(cost.cacheReadUsd)],
+            ["estimated_cost_usd", surrealOptionFloat(cost.totalUsd)],
+            ["pricing_source", surrealOptionString(cost.pricingSource)],
+            ["labels", surrealJsonOption({
+                source: "claude_transcript",
+                token_source: "transcript_usage",
+            })],
+            ["ts", surrealDate(usage.ts)],
+        ])};`,
+    ];
+};
+
+const writeClaudeTokenUsage = (extracted: FileExtract) => {
+    const statements = buildClaudeTokenUsageStatements(extracted);
+    return statements.length === 0
+        ? Effect.void
+        : queryTranscriptStatements(statements);
+};
+
+export { writeClaudeTokenUsage as writeTokenUsageForSubagents };
+
 interface IngestOpts {
     sinceDays: number | undefined;
     project: string | undefined;
     onProgress: (counts: Record<string, number>) => Effect.Effect<void>;
+    /** Hard cap on transcript files processed - a backstop for `ingest --dry-run`
+     *  calibration (paired with `deadlineMs`). */
+    limit: number | undefined;
+    /** Absolute wall-clock deadline (ms epoch). Once reached, no NEW file is
+     *  started; in-flight files finish. Lets `--dry-run` time-box calibration so
+     *  it stays snappy even when individual transcripts are large. */
+    deadlineMs: number | undefined;
 }
 
 export interface TranscriptStats {
@@ -1424,6 +1554,12 @@ export const ingestTranscripts = (
             }
         }
 
+        // `--dry-run` calibration: cap to a small representative slice so we can
+        // time real parse+write throughput without processing everything.
+        if (typeof opts.limit === "number" && candidates.length > opts.limit) {
+            candidates.length = opts.limit;
+        }
+
         if (opts.onProgress) yield* opts.onProgress({ totalFiles: candidates.length });
 
         // Snapshot the real skill/command catalog once. The skills + commands
@@ -1454,6 +1590,12 @@ export const ingestTranscripts = (
         });
 
         yield* Effect.forEach(candidates.map((candidate, index) => ({ candidate, index })), ({ candidate, index }) => Effect.gen(function* () {
+            // Time-box (dry-run calibration): once the deadline passes, start no
+            // new files. In-flight ones finish, so the sample is whatever
+            // completed within the budget.
+            if (opts.deadlineMs !== undefined && Date.now() >= opts.deadlineMs) {
+                return;
+            }
             // Skip-unchanged: a candidate whose on-disk (mtime,size) still
             // matches its persisted watermark has already been ingested in a
             // prior run; its rows persist, so skipping is output-equivalent.
@@ -1498,6 +1640,7 @@ export const ingestTranscripts = (
             extracted.session.raw_file = pointer;
             yield* upsertSessions([extracted.session]);
             sessions += 1;
+            yield* writeClaudeTokenUsage(extracted);
             yield* upsertTurns(extracted.turns);
             turnCount += extracted.turns.length;
             yield* writeProviderEvidence(extracted);

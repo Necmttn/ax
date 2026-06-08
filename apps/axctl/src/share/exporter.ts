@@ -18,6 +18,7 @@ import type {
 import { runQuery, runSingleQuery } from "@ax/lib/shared/graph-query";
 import { resolveTurnContent } from "../queries/session-turn-content.ts";
 import {
+    sessionChildrenQuery,
     sessionOverviewQuery,
     sessionShareFilesQuery,
     sessionShareTimelineQuery,
@@ -38,6 +39,7 @@ export interface ShareArtifactParts {
     readonly turns: ReadonlyArray<ShareTurn>;
     readonly timeline: ReadonlyArray<ShareEvent>;
     readonly files: ReadonlyArray<ShareFile>;
+    readonly children?: ReadonlyArray<AxSessionShare>;
 }
 
 const SESSION_ID_RE = /^[A-Za-z0-9_-]{6,80}$/;
@@ -147,6 +149,9 @@ export function buildShareArtifactFromParts(
             applied: false,
             rules: [],
         },
+        ...(parts.children && parts.children.length > 0
+            ? { children: parts.children }
+            : {}),
     };
 }
 
@@ -183,16 +188,29 @@ const attachTurnTokenUsage = (
     });
 };
 
+export interface ExportSessionShareOptions {
+    /**
+     * Record refs already materialised on the current export path. Guards
+     * against re-exporting (or cycling on) a session that appears more than
+     * once in the spawn graph. Internal - callers pass nothing.
+     */
+    readonly visited?: ReadonlySet<string>;
+}
+
 export const exportSessionShare = (
     sessionId: string,
     axVersion: string,
+    options: ExportSessionShareOptions = {},
 ): Effect.Effect<AxSessionShare | null, DbError, SurrealClient> =>
     Effect.gen(function* () {
         const recordRef = normalizeSessionRecordRef(sessionId);
         if (recordRef === null) return null;
 
+        const visited = options.visited ?? new Set<string>();
+        if (visited.has(recordRef)) return null;
+
         const params = { recordRef };
-        const [overview, topSkillsRaw, toolCallsRaw, tokenUsage, turnTokenUsageRaw, turnsRaw, timelineRaw, filesRaw, turnContent] =
+        const [overview, topSkillsRaw, toolCallsRaw, tokenUsage, turnTokenUsageRaw, turnsRaw, timelineRaw, filesRaw, childLinksRaw, turnContent] =
             yield* Effect.all([
                 runSingleQuery(sessionOverviewQuery, params),
                 runQuery(sessionTopSkillsQuery, params),
@@ -202,10 +220,26 @@ export const exportSessionShare = (
                 runQuery(sessionShareTurnsQuery, params),
                 runQuery(sessionShareTimelineQuery, params),
                 runQuery(sessionShareFilesQuery, params),
+                runQuery(sessionChildrenQuery, params),
                 resolveTurnContent(sessionId),
             ]);
 
         if (overview === null) return null;
+
+        // Recurse into spawned subagents. The visited set carries this session
+        // so a child that points back never re-expands; leaves return [].
+        const nextVisited = new Set(visited).add(recordRef);
+        const childLinks = childLinksRaw.filter(isPresent);
+        const children = (
+            yield* Effect.all(
+                childLinks.map((link) =>
+                    exportSessionShare(String(link.session_id), axVersion, {
+                        visited: nextVisited,
+                    }),
+                ),
+                { concurrency: "unbounded" },
+            )
+        ).filter(isPresent);
 
         return buildShareArtifactFromParts({
             axVersion,
@@ -220,5 +254,6 @@ export const exportSessionShare = (
             ),
             timeline: timelineRaw.filter(isPresent),
             files: filesRaw.filter(isPresent),
+            children,
         });
     });

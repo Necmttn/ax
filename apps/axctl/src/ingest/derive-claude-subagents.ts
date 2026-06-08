@@ -16,6 +16,7 @@ import {
     relateInvocationsForSubagents,
     relateToolCallSkillsForSubagents,
     writePlanSnapshotsForSubagents,
+    writeTokenUsageForSubagents,
 } from "./transcripts.ts";
 import { resolveSkillName } from "@ax/lib/skill-id";
 import { recordLiteral } from "@ax/lib/ids";
@@ -318,6 +319,7 @@ export const deriveClaudeSubagents = (
                 });
                 if (parentRepository !== undefined) repositoryInherited += 1;
 
+                yield* writeTokenUsageForSubagents(extracted);
                 yield* upsertTurnsForSubagents(extracted.turns);
                 yield* writeToolCallStatementsForSubagents(extracted.toolCalls);
                 yield* writeToolFileEvidenceForSubagents(extracted.toolCalls);
