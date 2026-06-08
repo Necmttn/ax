@@ -23,10 +23,12 @@ import {
     sessionShareFilesQuery,
     sessionShareTimelineQuery,
     sessionShareTurnsQuery,
+    sessionShareTurnToolCallsQuery,
     sessionTokenUsageQuery,
     sessionTurnTokenUsageQuery,
     sessionToolCallsQuery,
     sessionTopSkillsQuery,
+    type ShareTurnToolCall,
 } from "../queries/session-detail.ts";
 
 export interface ShareArtifactParts {
@@ -222,6 +224,43 @@ const attachTurnTokenUsage = (
     });
 };
 
+const TOOL_OUTPUT_MAX = 400;
+
+const formatToolCall = (call: ShareTurnToolCall): string => {
+    const head = call.command ? `${call.name} ${call.command}` : call.name;
+    const out = call.output
+        ? `\n→ ${call.output.length > TOOL_OUTPUT_MAX ? `${call.output.slice(0, TOOL_OUTPUT_MAX - 1)}…` : call.output}`
+        : "";
+    return `🔧 ${head}${call.has_error ? " ⚠️" : ""}${out}`;
+};
+
+/**
+ * Tool-call turns (web fetch, file edits, bash, …) carry no dissected text, so
+ * a text-only export jumps over the agent's actual work. Synthesize a readable
+ * tool line on those turns from the call records (name + command + truncated
+ * output) so the shared transcript stays coherent. Turns that already have
+ * text are left untouched.
+ */
+export const attachSynthesizedToolText = (
+    turns: ReadonlyArray<ShareTurn>,
+    toolCalls: ReadonlyArray<ShareTurnToolCall>,
+): ReadonlyArray<ShareTurn> => {
+    if (toolCalls.length === 0) return turns;
+    const bySeq = new Map<number, ShareTurnToolCall[]>();
+    for (const call of toolCalls) {
+        const list = bySeq.get(call.seq) ?? [];
+        list.push(call);
+        bySeq.set(call.seq, list);
+    }
+    return turns.map((turn) => {
+        if (turn.text.length > 0) return turn;
+        const calls = bySeq.get(turn.seq);
+        if (!calls || calls.length === 0) return turn;
+        const text = calls.map(formatToolCall).join("\n\n");
+        return { ...turn, text, ...(turn.has_tool_use === undefined ? { has_tool_use: true } : {}) };
+    });
+};
+
 export interface ExportSessionShareOptions {
     /**
      * Record refs already materialised on the current export path. Guards
@@ -246,7 +285,7 @@ export const exportSessionShare = (
         if (visited.has(recordRef)) return null;
 
         const params = { recordRef };
-        const [overview, topSkillsRaw, toolCallsRaw, tokenUsage, turnTokenUsageRaw, turnsRaw, timelineRaw, filesRaw, childLinksRaw, turnContent] =
+        const [overview, topSkillsRaw, toolCallsRaw, tokenUsage, turnTokenUsageRaw, turnsRaw, timelineRaw, filesRaw, childLinksRaw, turnToolCallsRaw, turnContent] =
             yield* Effect.all([
                 runSingleQuery(sessionOverviewQuery, params),
                 runQuery(sessionTopSkillsQuery, params),
@@ -257,6 +296,7 @@ export const exportSessionShare = (
                 runQuery(sessionShareTimelineQuery, params),
                 runQuery(sessionShareFilesQuery, params),
                 runQuery(sessionChildrenQuery, params),
+                runQuery(sessionShareTurnToolCallsQuery, params),
                 resolveTurnContent(sessionId),
             ]);
 
@@ -281,6 +321,17 @@ export const exportSessionShare = (
             )
         ).filter(isPresent);
 
+        // Build turns: synthesize tool lines, attach usage + content, then drop
+        // turns that ended up with neither text nor content (empty assistant /
+        // thinking shells) so the shared transcript has no blank rows.
+        const turns = attachTurnContent(
+            attachTurnTokenUsage(
+                attachSynthesizedToolText(shareTurns, turnToolCallsRaw.filter(isPresent)),
+                turnTokenUsageRaw.filter(isPresent),
+            ),
+            turnContent,
+        ).filter((turn) => turn.text.length > 0 || turn.content != null);
+
         return buildShareArtifactFromParts({
             axVersion,
             exportedAt: new Date().toISOString(),
@@ -288,10 +339,7 @@ export const exportSessionShare = (
             topSkills: topSkillsRaw.filter(isPresent),
             toolCalls: toolCallsRaw.filter(isPresent),
             tokenUsage,
-            turns: attachTurnContent(
-                attachTurnTokenUsage(shareTurns, turnTokenUsageRaw.filter(isPresent)),
-                turnContent,
-            ),
+            turns,
             timeline: timelineRaw.filter(isPresent),
             files: filesRaw.filter(isPresent),
             children,

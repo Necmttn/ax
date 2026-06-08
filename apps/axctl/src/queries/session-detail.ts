@@ -268,9 +268,30 @@ SELECT
     has_tool_use,
     has_error
 FROM turn
-WHERE session = $sessionId AND text IS NOT NONE
+WHERE session = $sessionId
+    AND message_kind NOT IN ["system", "attachment", "queue-operation", "tool_result"]
 ORDER BY seq ASC
-LIMIT 250;`;
+LIMIT 2000;`;
+
+/**
+ * Per-turn tool calls for a shared session. The call record carries both the
+ * invocation (name + command) and its result (output_excerpt), keyed to the
+ * turn seq it ran in - so the exporter can synthesize a readable tool line on
+ * the otherwise text-less tool-call turns (keeps the shared transcript from
+ * jumping over the agent's actual work).
+ */
+export const SESSION_SHARE_TURN_TOOLCALLS_SQL = `
+SELECT
+    seq,
+    name,
+    command_norm,
+    command_text,
+    output_excerpt,
+    has_error
+FROM tool_call
+WHERE session = $sessionId AND seq IS NOT NONE
+ORDER BY seq ASC
+LIMIT 4000;`;
 
 export const SESSION_SHARE_FILES_SQL = `
 SELECT
@@ -341,14 +362,20 @@ export function mapSessionShareTurnRow(
     if (!isRecord(raw)) return null;
     const id = recordIdString(raw.id);
     const role = stringField(raw, "role");
-    const text = stringField(raw, "text");
-    if (!id || !role || !text) return null;
+    // Tool-call / tool-result turns carry no top-level `text` (their detail
+    // lives in dissected content blocks attached later). Keep them so the
+    // shared transcript shows the agent's actual tool activity instead of
+    // jumping straight from one assistant message to the next; fall back to
+    // the excerpt, then to an empty string the renderer can handle.
+    const rawText = stringField(raw, "text");
+    const text_excerpt = stringField(raw, "text_excerpt") ?? undefined;
+    if (!id || !role) return null;
+    const text = rawText ?? text_excerpt ?? "";
 
     const seq = numericField(raw, "seq");
     const ts = dateField(raw, "ts") ?? undefined;
     const message_kind = stringField(raw, "message_kind") ?? undefined;
     const intent_kind = stringField(raw, "intent_kind") ?? undefined;
-    const text_excerpt = stringField(raw, "text_excerpt") ?? undefined;
     const has_tool_use = typeof raw.has_tool_use === "boolean" ? raw.has_tool_use : undefined;
     const has_error = typeof raw.has_error === "boolean" ? raw.has_error : undefined;
 
@@ -476,6 +503,35 @@ export const sessionShareTurnsQuery = defineQuery<
     name: "session-detail.share_turns",
     sql: (p) => subst(SESSION_SHARE_TURNS_SQL, p.recordRef),
     mapRow: mapSessionShareTurnRow,
+});
+
+export interface ShareTurnToolCall {
+    readonly seq: number;
+    readonly name: string;
+    readonly command: string | null;
+    readonly output: string | null;
+    readonly has_error: boolean;
+}
+
+export const sessionShareTurnToolCallsQuery = defineQuery<
+    SessionDetailParams,
+    Record<string, unknown>,
+    ShareTurnToolCall | null
+>({
+    name: "session-detail.share_turn_toolcalls",
+    sql: (p) => subst(SESSION_SHARE_TURN_TOOLCALLS_SQL, p.recordRef),
+    mapRow: (raw) => {
+        if (!isRecord(raw)) return null;
+        const name = stringField(raw, "name");
+        if (name === null) return null;
+        return {
+            seq: numericField(raw, "seq"),
+            name,
+            command: stringField(raw, "command_norm") ?? stringField(raw, "command_text"),
+            output: stringField(raw, "output_excerpt"),
+            has_error: raw.has_error === true,
+        };
+    },
 });
 
 export const sessionChildrenQuery = defineQuery<
