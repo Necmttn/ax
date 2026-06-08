@@ -1,7 +1,11 @@
 import { describe, expect, test } from "bun:test";
 import {
     fetchShareArtifact,
+    fetchShareFile,
+    fetchShareManifest,
+    gistRawUrl,
     inspectPayloadFromShare,
+    isShareManifest,
     rawSessionFileUrl,
     spanKindForShareTurn,
 } from "./share-inspect.tsx";
@@ -81,6 +85,88 @@ describe("fetchShareArtifact", () => {
         } finally {
             globalThis.fetch = originalFetch;
         }
+    });
+});
+
+describe("isShareManifest", () => {
+    test("accepts a v3 manifest, rejects a session artifact", () => {
+        expect(isShareManifest({
+            schema_version: 3,
+            kind: "manifest",
+            session: { id: "s1", source: "claude" },
+            totals: { cost_usd: null, duration_ms: null, tool_calls: 0, turns: 0, subagents: 0, failures: 0 },
+            root_file: "session.json",
+            subagents: [],
+        })).toBe(true);
+        expect(isShareManifest({ schema_version: 3, session: { id: "s1" }, turns: [] })).toBe(false);
+    });
+});
+
+describe("fetchShareManifest", () => {
+    const withFetch = async (
+        handler: (url: string) => Response,
+        run: () => Promise<void>,
+    ) => {
+        const original = globalThis.fetch;
+        globalThis.fetch = (async (input: RequestInfo | URL) => handler(String(input))) as typeof fetch;
+        try {
+            await run();
+        } finally {
+            globalThis.fetch = original;
+        }
+    };
+
+    test("fetches index.json from gist raw content", async () => {
+        const manifest = {
+            schema_version: 3,
+            kind: "manifest",
+            exported_at: "2026-06-01T00:00:00.000Z",
+            session: { id: "root1", source: "claude" },
+            stats: { turns: 1, tool_calls: 0, files_changed: 0, skills_used: 0, failures: 0 },
+            root_file: "session.json",
+            totals: { cost_usd: 1.5, duration_ms: 1000, tool_calls: 0, turns: 1, subagents: 1, failures: 0 },
+            subagents: [],
+        };
+        await withFetch(
+            (url) => {
+                expect(url).toBe(gistRawUrl("Necmttn", "abc123", "index.json"));
+                return new Response(JSON.stringify(manifest), { headers: { "content-type": "application/json" } });
+            },
+            async () => {
+                const result = await fetchShareManifest("Necmttn", "abc123");
+                expect(result?.totals.cost_usd).toBe(1.5);
+                expect(result?.root_file).toBe("session.json");
+            },
+        );
+    });
+
+    test("returns null for a legacy gist with no manifest (404)", async () => {
+        await withFetch(
+            () => new Response("Not Found", { status: 404 }),
+            async () => {
+                expect(await fetchShareManifest("Necmttn", "legacy")).toBeNull();
+            },
+        );
+    });
+
+    test("fetchShareFile loads a named subagent file", async () => {
+        await withFetch(
+            (url) => {
+                expect(url).toBe(gistRawUrl("Necmttn", "abc123", "subagent-x.json"));
+                return new Response(JSON.stringify({
+                    schema_version: 3,
+                    exported_at: "2026-06-01T00:00:00.000Z",
+                    session: { id: "claude-subagent-x", source: "claude-subagent" },
+                    stats: { turns: 2, tool_calls: 0, files_changed: 0, skills_used: 0, failures: 0 },
+                    turns: [],
+                }), { headers: { "content-type": "application/json" } });
+            },
+            async () => {
+                const artifact = await fetchShareFile("Necmttn", "abc123", "subagent-x.json");
+                expect(artifact.session.id).toBe("claude-subagent-x");
+                expect(artifact.schema_version).toBe(3);
+            },
+        );
     });
 });
 
