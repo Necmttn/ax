@@ -224,14 +224,45 @@ const attachTurnTokenUsage = (
     });
 };
 
-const TOOL_OUTPUT_MAX = 400;
+const TOOL_OUTPUT_MAX = 600;
+const TOOL_ARG_MAX = 200;
+const TOOL_MAX_ARGS = 6;
+
+const clip = (value: string, max: number): string =>
+    value.length > max ? `${value.slice(0, max - 1)}…` : value;
+
+/**
+ * Render a tool call's arguments from its recorded input JSON as compact
+ * `key: value` lines (whitespace collapsed, each value clipped). Falls back to
+ * the normalized command string for shell tools that have no structured input.
+ */
+const formatToolArgs = (call: ShareTurnToolCall): string[] => {
+    if (call.input_json) {
+        const parsed = (() => {
+            try {
+                return JSON.parse(call.input_json) as unknown;
+            } catch {
+                return null;
+            }
+        })();
+        if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+            const lines: string[] = [];
+            for (const [key, value] of Object.entries(parsed as Record<string, unknown>)) {
+                if (value === null || value === undefined || value === "") continue;
+                const rendered = typeof value === "string" ? value : JSON.stringify(value);
+                lines.push(`  ${key}: ${clip(rendered.replace(/\s+/g, " ").trim(), TOOL_ARG_MAX)}`);
+                if (lines.length >= TOOL_MAX_ARGS) break;
+            }
+            if (lines.length > 0) return lines;
+        }
+    }
+    return call.command ? [`  ${clip(call.command, TOOL_ARG_MAX)}`] : [];
+};
 
 const formatToolCall = (call: ShareTurnToolCall): string => {
-    const head = call.command ? `${call.name} ${call.command}` : call.name;
-    const out = call.output
-        ? `\n→ ${call.output.length > TOOL_OUTPUT_MAX ? `${call.output.slice(0, TOOL_OUTPUT_MAX - 1)}…` : call.output}`
-        : "";
-    return `🔧 ${head}${call.has_error ? " ⚠️" : ""}${out}`;
+    const lines = [`🔧 ${call.name}${call.has_error ? "  ⚠️ error" : ""}`, ...formatToolArgs(call)];
+    if (call.output) lines.push(`→ ${clip(call.output, TOOL_OUTPUT_MAX)}`);
+    return lines.join("\n");
 };
 
 /**

@@ -13,28 +13,46 @@ describe("attachSynthesizedToolText", () => {
         text,
     });
 
-    it("synthesizes a tool line on text-less turns from tool calls", () => {
+    it("synthesizes a tool line with arguments from input json", () => {
         const [a, b] = attachSynthesizedToolText(
             [turn(12, ""), turn(13, "real assistant text")],
             [
-                { seq: 12, name: "WebFetch", command: "https://x.com", output: "page body", has_error: false },
-                { seq: 13, name: "Bash", command: "ls", output: "files", has_error: false },
+                {
+                    seq: 12,
+                    name: "WebFetch",
+                    command: null,
+                    input_json: JSON.stringify({ url: "https://x.com", prompt: "what is this" }),
+                    output: "page body",
+                    has_error: false,
+                },
+                { seq: 13, name: "Bash", command: "ls", input_json: null, output: "files", has_error: false },
             ],
         );
-        expect(a?.text).toContain("🔧 WebFetch https://x.com");
+        expect(a?.text).toContain("🔧 WebFetch");
+        expect(a?.text).toContain("url: https://x.com");
+        expect(a?.text).toContain("prompt: what is this");
         expect(a?.text).toContain("→ page body");
         expect(a?.has_tool_use).toBe(true);
         // A turn that already has text is left untouched.
         expect(b?.text).toBe("real assistant text");
     });
 
+    it("falls back to the command for shell tools without input json", () => {
+        const [a] = attachSynthesizedToolText(
+            [turn(1, "")],
+            [{ seq: 1, name: "Bash", command: "ls -la", input_json: null, output: "files", has_error: false }],
+        );
+        expect(a?.text).toContain("🔧 Bash");
+        expect(a?.text).toContain("ls -la");
+    });
+
     it("truncates long tool output and flags errors", () => {
         const [a] = attachSynthesizedToolText(
             [turn(1, "")],
-            [{ seq: 1, name: "Bash", command: "x", output: "z".repeat(900), has_error: true }],
+            [{ seq: 1, name: "Bash", command: "x", input_json: null, output: "z".repeat(2000), has_error: true }],
         );
         expect(a?.text).toContain("⚠️");
-        expect(a?.text.length).toBeLessThan(500);
+        expect(a?.text.length).toBeLessThan(800);
         expect(a?.text).toContain("…");
     });
 });

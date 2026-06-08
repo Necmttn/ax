@@ -286,6 +286,7 @@ SELECT
     name,
     command_norm,
     command_text,
+    input_json,
     output_excerpt,
     has_error
 FROM tool_call
@@ -509,6 +510,8 @@ export interface ShareTurnToolCall {
     readonly seq: number;
     readonly name: string;
     readonly command: string | null;
+    /** JSON-encoded tool input/arguments, as recorded. */
+    readonly input_json: string | null;
     readonly output: string | null;
     readonly has_error: boolean;
 }
@@ -528,6 +531,7 @@ export const sessionShareTurnToolCallsQuery = defineQuery<
             seq: numericField(raw, "seq"),
             name,
             command: stringField(raw, "command_norm") ?? stringField(raw, "command_text"),
+            input_json: stringField(raw, "input_json"),
             output: stringField(raw, "output_excerpt"),
             has_error: raw.has_error === true,
         };
