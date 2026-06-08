@@ -40,6 +40,12 @@ export default defineConfig({
         },
     },
     server: {
+        // Bind IPv4 explicitly: the desktop shell's dev URL is
+        // http://127.0.0.1:1739, and vite's default "localhost" host resolves
+        // to IPv6 ::1 on macOS, which the Electron window can't reach
+        // (ERR_CONNECTION_REFUSED). Pin 127.0.0.1 so `bun --filter @ax/studio
+        // dev` + the desktop dev launch work out of the box.
+        host: "127.0.0.1",
         port: 1739,
         strictPort: true,
         proxy: {
