@@ -27,6 +27,16 @@ export interface MakeDesktopEnvironmentInput {
     readonly surrealBinaryPath: string;
     /** Absolute path to the bundled `bun` binary. */
     readonly bunBinaryPath: string;
+    /**
+     * `app.getPath("home")` (or `process.env.HOME`). Used to derive the
+     * canonical ax data dir so desktop and the CLI daemon agree on it.
+     */
+    readonly homeDir: string;
+    /**
+     * `process.env.AX_DATA_DIR` if set. Overrides the derived default, matching
+     * `@ax/lib` config + the daemon install scripts.
+     */
+    readonly axDataDirOverride: string | undefined;
 }
 
 export interface DesktopEnvironmentShape {
@@ -58,11 +68,26 @@ export interface DesktopEnvironmentShape {
      */
     readonly studioStaticDir: string;
     /**
-     * ax data dir (SurrealDB + friends). Sensible default for now;
-     * Phase 2 Task 2.1 reconciles this with the CLI's canonical data dir.
+     * Canonical ax data dir, authoritative across desktop + CLI daemon.
+     * Resolution mirrors `@ax/lib` config (`packages/lib/src/config.ts`) and the
+     * daemon install scripts (`scripts/install-daemon.sh`, `db-start.sh`):
+     * `$AX_DATA_DIR ?? $HOME/.local/share/ax`. The plist's rocksdb URL is
+     * `rocksdb://<axDataDir>/db` - the surreal arg appends `/db`, so `axDataDir`
+     * is the parent dir, not the rocksdb path itself.
      */
     readonly axDataDir: string;
 }
+
+/**
+ * Canonical ax data dir resolution. Single source of truth shared with the CLI
+ * daemon: `$AX_DATA_DIR` env override, else `$HOME/.local/share/ax`. Kept as a
+ * standalone export so it can be unit-tested without an Electron `app`.
+ */
+export const resolveAxDataDir = (
+    homeDir: string,
+    axDataDirOverride: string | undefined,
+    path: Path.Path,
+): string => axDataDirOverride ?? path.join(homeDir, ".local", "share", "ax");
 
 export class DesktopEnvironment extends Context.Service<
     DesktopEnvironment,
@@ -96,7 +121,7 @@ export const make = (
         preloadPath: path.join(input.dirname, "preload.cjs"),
         axSourceEntry,
         studioStaticDir,
-        axDataDir: path.join(input.userDataDir, "db"),
+        axDataDir: resolveAxDataDir(input.homeDir, input.axDataDirOverride, path),
     });
 };
 

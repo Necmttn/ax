@@ -46,6 +46,10 @@ const makeEnvironmentInput: DesktopEnvironment.MakeDesktopEnvironmentInput = {
     // window-open flow.
     surrealBinaryPath: "surreal",
     bunBinaryPath: process.execPath,
+    // Canonical ax data dir: mirror @ax/lib config + daemon install scripts so
+    // desktop and the CLI daemon agree on the rocksdb location.
+    homeDir: Electron.app.getPath("home"),
+    axDataDirOverride: process.env.AX_DATA_DIR,
 };
 
 // ---------------------------------------------------------------------------
