@@ -1,4 +1,4 @@
-import { Effect } from "effect";
+import { Effect, Ref } from "effect";
 import {
     AX_SESSION_SHARE_SCHEMA_VERSION,
     type AxSessionShare,
@@ -24,6 +24,7 @@ import {
     sessionShareTimelineQuery,
     sessionShareTurnsQuery,
     sessionShareTurnToolCallsQuery,
+    sessionShareHookFiresQuery,
     sessionTokenUsageQuery,
     sessionTurnTokenUsageQuery,
     sessionToolCallsQuery,
@@ -43,6 +44,7 @@ export interface ShareArtifactParts {
     readonly files: ReadonlyArray<ShareFile>;
     readonly children?: ReadonlyArray<AxSessionShare>;
     readonly spawnAnchorTurnSeq?: number | null;
+    readonly hookFires?: AxSessionShare["hook_fires"];
 }
 
 const SESSION_ID_RE = /^[A-Za-z0-9_-]{6,80}$/;
@@ -166,6 +168,7 @@ export function buildShareArtifactFromParts(
             failures,
         },
         token_usage: parts.tokenUsage ?? null,
+        ...(parts.hookFires && parts.hookFires.length > 0 ? { hook_fires: parts.hookFires } : {}),
         turns: parts.turns,
         timeline: parts.timeline,
         files,
@@ -292,6 +295,14 @@ export const attachSynthesizedToolText = (
     });
 };
 
+/** Subagents exported concurrently at each level of the spawn tree. Bounds DB
+ *  load so a wide fan-out (100+ subagents) can't stampede the daemon into a
+ *  timeout (unbounded recursion previously hung the export). */
+const EXPORT_CONCURRENCY = 8;
+/** Hard cap on sessions fully exported in one share (root + descendants), so a
+ *  pathological orchestration can't produce an unbounded gist or hang. */
+const MAX_EXPORTED_SESSIONS = 400;
+
 export interface ExportSessionShareOptions {
     /**
      * Record refs already materialised on the current export path. Guards
@@ -301,6 +312,8 @@ export interface ExportSessionShareOptions {
     readonly visited?: ReadonlySet<string>;
     /** Internal: the parent turn seq this session was spawned at, if any. */
     readonly spawnAnchorTurnSeq?: number | null;
+    /** Internal: shared remaining-session budget (cycle/size backstop). */
+    readonly budget?: Ref.Ref<number>;
 }
 
 export const exportSessionShare = (
@@ -315,8 +328,14 @@ export const exportSessionShare = (
         const visited = options.visited ?? new Set<string>();
         if (visited.has(recordRef)) return null;
 
+        // Shared budget across the whole recursion (created once at the root)
+        // caps total sessions exported - a cycle/size backstop.
+        const budget = options.budget ?? (yield* Ref.make(MAX_EXPORTED_SESSIONS));
+        const remaining = yield* Ref.updateAndGet(budget, (n) => n - 1);
+        if (remaining < 0) return null;
+
         const params = { recordRef };
-        const [overview, topSkillsRaw, toolCallsRaw, tokenUsage, turnTokenUsageRaw, turnsRaw, timelineRaw, filesRaw, childLinksRaw, turnToolCallsRaw, turnContent] =
+        const [overview, topSkillsRaw, toolCallsRaw, tokenUsage, turnTokenUsageRaw, turnsRaw, timelineRaw, filesRaw, childLinksRaw, turnToolCallsRaw, hookFiresRaw, turnContent] =
             yield* Effect.all([
                 runSingleQuery(sessionOverviewQuery, params),
                 runQuery(sessionTopSkillsQuery, params),
@@ -328,10 +347,16 @@ export const exportSessionShare = (
                 runQuery(sessionShareFilesQuery, params),
                 runQuery(sessionChildrenQuery, params),
                 runQuery(sessionShareTurnToolCallsQuery, params),
+                runQuery(sessionShareHookFiresQuery, params),
                 resolveTurnContent(sessionId),
             ]);
 
         if (overview === null) return null;
+
+        // Assign the SPA-only monotonic idx (used for stable DOM ids + jumps).
+        const hookFires = hookFiresRaw
+            .filter(isPresent)
+            .map((fire, idx) => ({ idx, ...fire }));
 
         // Recurse into spawned subagents. The visited set carries this session
         // so a child that points back never re-expands; leaves return [].
@@ -346,9 +371,11 @@ export const exportSessionShare = (
                     exportSessionShare(String(link.session_id), axVersion, {
                         visited: nextVisited,
                         spawnAnchorTurnSeq: anchorChildToTurn(shareTurns, link.ts ?? null),
+                        budget,
                     }),
                 ),
-                { concurrency: "unbounded" },
+                // Bounded so a wide fan-out can't stampede the daemon.
+                { concurrency: EXPORT_CONCURRENCY },
             )
         ).filter(isPresent);
 
@@ -374,6 +401,7 @@ export const exportSessionShare = (
             timeline: timelineRaw.filter(isPresent),
             files: filesRaw.filter(isPresent),
             children,
+            hookFires,
             ...(options.spawnAnchorTurnSeq != null
                 ? { spawnAnchorTurnSeq: options.spawnAnchorTurnSeq }
                 : {}),
