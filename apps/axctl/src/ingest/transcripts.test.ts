@@ -4,6 +4,7 @@ import { fileRecordKey, toolCallRecordKey, turnRecordKey } from "./record-keys.t
 import { extractToolFileEvidence } from "./tool-file-evidence.ts";
 import {
     __testExtractClaudeJsonlLines,
+    buildClaudeTokenUsageStatements,
     claudeConcurrency,
     transcriptEditFileRecordKey,
 } from "./transcripts.ts";
@@ -1143,5 +1144,115 @@ describe("claude compaction", () => {
             seq: compactionEvents[0].seq,
         });
         expect(extracted.compactions[0].agentEventKey).toBe(eventKey);
+    });
+});
+
+describe("claude token usage", () => {
+    const usageLines = (model: string) => [
+        JSON.stringify({
+            type: "user",
+            uuid: "u1",
+            timestamp: "2026-06-01T10:00:00.000Z",
+            sessionId: "cl-tok",
+            cwd: "/tmp",
+            message: { role: "user", content: "do a thing" },
+        }),
+        JSON.stringify({
+            type: "assistant",
+            uuid: "a1",
+            timestamp: "2026-06-01T10:00:01.000Z",
+            sessionId: "cl-tok",
+            message: {
+                role: "assistant",
+                model,
+                content: "ok",
+                usage: {
+                    input_tokens: 100,
+                    output_tokens: 50,
+                    cache_creation_input_tokens: 200,
+                    cache_read_input_tokens: 1000,
+                },
+            },
+        }),
+        JSON.stringify({
+            type: "assistant",
+            uuid: "a2",
+            timestamp: "2026-06-01T10:00:02.000Z",
+            sessionId: "cl-tok",
+            message: {
+                role: "assistant",
+                model,
+                content: "done",
+                usage: {
+                    input_tokens: 10,
+                    output_tokens: 5,
+                    cache_creation_input_tokens: 0,
+                    cache_read_input_tokens: 2000,
+                },
+            },
+        }),
+    ];
+
+    test("sums per-message usage with cache-inclusive prompt totals", () => {
+        const extracted = __testExtractClaudeJsonlLines(
+            usageLines("claude-opus-4-8"),
+            "-tmp",
+            "cl-tok",
+        );
+        expect(extracted?.tokenUsage).not.toBeNull();
+        const u = extracted!.tokenUsage!;
+        // prompt = fresh(110) + cacheCreation(200) + cacheRead(3000) = 3310
+        expect(u.promptTokens).toBe(3310);
+        expect(u.completionTokens).toBe(55);
+        expect(u.cacheCreationInputTokens).toBe(200);
+        expect(u.cacheReadInputTokens).toBe(3000);
+        expect(u.estimatedTokens).toBe(3365);
+        expect(u.model).toBe("claude-opus-4-8");
+    });
+
+    test("prices the session via the built-in catalog", () => {
+        const extracted = __testExtractClaudeJsonlLines(
+            usageLines("claude-opus-4-8"),
+            "-tmp",
+            "cl-tok",
+        );
+        const [stmt] = buildClaudeTokenUsageStatements(extracted!);
+        expect(stmt).toContain("UPSERT session_token_usage:");
+        expect(stmt).toContain("pricing_source:");
+        // fresh 110 @ $5/M + output 55 @ $25/M + cacheCreate 200 @ $6.25/M
+        // + cacheRead 3000 @ $0.5/M = 0.00055 + 0.001375 + 0.00125 + 0.0015
+        expect(stmt).toContain("estimated_cost_usd: 0.004675");
+        expect(stmt).toContain('source: "claude"');
+    });
+
+    test("emits no statements when the transcript carries no usage", () => {
+        const extracted = __testExtractClaudeJsonlLines(
+            [
+                JSON.stringify({
+                    type: "user",
+                    uuid: "u1",
+                    timestamp: "2026-06-01T10:00:00.000Z",
+                    sessionId: "cl-none",
+                    cwd: "/tmp",
+                    message: { role: "user", content: "hi" },
+                }),
+            ],
+            "-tmp",
+            "cl-none",
+        );
+        expect(extracted?.tokenUsage).toBeNull();
+        expect(buildClaudeTokenUsageStatements(extracted!)).toEqual([]);
+    });
+
+    test("leaves cost null for an unknown model but still records tokens", () => {
+        const extracted = __testExtractClaudeJsonlLines(
+            usageLines("some-unpriced-model"),
+            "-tmp",
+            "cl-tok",
+        );
+        const [stmt] = buildClaudeTokenUsageStatements(extracted!);
+        expect(stmt).toContain("estimated_cost_usd: NONE");
+        expect(stmt).toContain("pricing_source: NONE");
+        expect(stmt).toContain("prompt_tokens: 3310");
     });
 });

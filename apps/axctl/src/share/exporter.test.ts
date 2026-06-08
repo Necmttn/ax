@@ -3,6 +3,7 @@ import {
     buildShareArtifactFromParts,
     normalizeSessionRecordRef,
 } from "./exporter.ts";
+import { minimalShareArtifact } from "./artifact.ts";
 
 describe("buildShareArtifactFromParts", () => {
     it("builds a V1 artifact from session rows", () => {
@@ -115,6 +116,49 @@ describe("buildShareArtifactFromParts", () => {
             { from: "session:abc123", to: "file:src/a.ts", label: "changed" },
             { from: "session:abc123", to: "file:src/b.ts", label: "changed" },
         ]);
+    });
+
+    const baseParts = {
+        axVersion: "0.2.0",
+        exportedAt: "2026-05-29T00:00:00.000Z",
+        overview: {
+            id: "parent1",
+            project: "ax",
+            cwd: "/Users/necmttn/Projects/ax",
+            model: "gpt-5",
+            source: "codex" as const,
+            started_at: "2026-05-29T00:00:00.000Z",
+            ended_at: "2026-05-29T00:10:00.000Z",
+        },
+        topSkills: [],
+        toolCalls: [],
+        turns: [],
+        timeline: [],
+        files: [],
+    };
+
+    it("emits a schema v2 artifact", () => {
+        const artifact = buildShareArtifactFromParts(baseParts);
+        expect(artifact.schema_version).toBe(2);
+    });
+
+    it("attaches child subagent shares when provided", () => {
+        const child = minimalShareArtifact({ id: "child1", source: "codex" });
+        const artifact = buildShareArtifactFromParts({
+            ...baseParts,
+            children: [child],
+        });
+
+        expect(artifact.children).toHaveLength(1);
+        expect(artifact.children?.[0]?.session.id).toBe("child1");
+    });
+
+    it("omits children when none were spawned", () => {
+        const artifact = buildShareArtifactFromParts(baseParts);
+        expect(artifact.children).toBeUndefined();
+
+        const empty = buildShareArtifactFromParts({ ...baseParts, children: [] });
+        expect(empty.children).toBeUndefined();
     });
 });
 

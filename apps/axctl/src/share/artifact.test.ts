@@ -36,6 +36,10 @@ describe("share artifact", () => {
         expect(isAxSessionShare(artifact)).toBe(true);
     });
 
+    it("defaults to schema v2", () => {
+        expect(AX_SESSION_SHARE_SCHEMA_VERSION).toBe(2);
+    });
+
     it("rejects unsupported schema versions", () => {
         const artifact = minimalShareArtifact({
             id: "abc123",
@@ -43,6 +47,30 @@ describe("share artifact", () => {
         });
 
         expect(isAxSessionShare({ ...artifact, schema_version: 999 })).toBe(false);
+    });
+
+    it("still accepts legacy v1 artifacts (no children field)", () => {
+        const artifact = minimalShareArtifact({ id: "abc123", source: "codex" });
+        expect(isAxSessionShare({ ...artifact, schema_version: 1 })).toBe(true);
+    });
+
+    it("accepts a v2 artifact carrying nested child shares", () => {
+        const child = minimalShareArtifact({ id: "child1", source: "codex" });
+        const parent = {
+            ...minimalShareArtifact({ id: "parent1", source: "codex" }),
+            children: [child],
+        };
+        expect(isAxSessionShare(parent)).toBe(true);
+    });
+
+    it("rejects a non-array children field", () => {
+        const artifact = minimalShareArtifact({ id: "abc123", source: "codex" });
+        expect(isAxSessionShare({ ...artifact, children: "nope" })).toBe(false);
+    });
+
+    it("rejects children that are not valid shares", () => {
+        const artifact = minimalShareArtifact({ id: "abc123", source: "codex" });
+        expect(isAxSessionShare({ ...artifact, children: [{ bogus: true }] })).toBe(false);
     });
 
     it("rejects artifacts missing derived data", () => {
