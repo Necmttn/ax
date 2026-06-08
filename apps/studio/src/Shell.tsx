@@ -3,7 +3,7 @@ import { Link, useRouterState } from "@tanstack/react-router";
 import { useQueryClient } from "@tanstack/react-query";
 import { api, studioConnection, type DaemonVersion } from "./api.ts";
 import { useIngestEvents } from "./use-ingest-events.ts";
-import { fmtLastUsed } from "@shared/formatters.ts";
+import { fmtLastUsed } from "@ax/lib/shared/formatters";
 
 const STUDIO_MOCK = import.meta.env.VITE_STUDIO_MOCK === "true";
 const DEFAULT_LOCAL_ENDPOINT = "http://127.0.0.1:1738";

@@ -9,7 +9,7 @@ import type {
     GraphExplorerPayload,
     GraphExplorerStoryCard,
     GraphMetricValue,
-} from "@shared/dashboard-types.ts";
+} from "@ax/lib/shared/dashboard-types";
 
 const MODES: ReadonlyArray<{ mode: GraphExplorerMode; label: string; implemented: boolean }> = [
     { mode: "file-attention", label: "File attention", implemented: true },

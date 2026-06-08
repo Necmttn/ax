@@ -1,6 +1,6 @@
 import { useEffect, useReducer } from "react";
 import { stream, type StreamResponse } from "@durable-streams/client";
-import type { IngestStreamEvent } from "@shared/ingest-stream-events.ts";
+import type { IngestStreamEvent } from "@ax/lib/shared/ingest-stream-events";
 
 /**
  * Live ingest view over Durable Streams.

@@ -9,11 +9,11 @@ import type {
     WorkflowEpisode,
     WorkflowResponse,
     WorkflowWeekBucket,
-} from "@shared/dashboard-types.ts";
-import { fmtCount, fmtTs } from "@shared/formatters.ts";
-import { prettifyProjectSlug } from "@shared/project-slug.ts";
-import { PHASE_LABEL, type Phase } from "@shared/phases.ts";
-import { shortSessionId } from "@shared/session-id.ts";
+} from "@ax/lib/shared/dashboard-types";
+import { fmtCount, fmtTs } from "@ax/lib/shared/formatters";
+import { prettifyProjectSlug } from "@ax/lib/shared/project-slug";
+import { PHASE_LABEL, type Phase } from "@ax/lib/shared/phases";
+import { shortSessionId } from "@ax/lib/shared/session-id";
 
 const HEATMAP_TOP_N = 12;
 

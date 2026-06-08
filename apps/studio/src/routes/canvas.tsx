@@ -9,7 +9,7 @@ import type {
     SessionCanvasPayload,
     SessionOrchestration,
     SessionOrchestrationSubagent,
-} from "@shared/dashboard-types.ts";
+} from "@ax/lib/shared/dashboard-types";
 
 // Session Canvas - swimlanes (repo × time). Each pill is a session: width = √tokens,
 // color = outcome, red ticks = compaction, and an inline work/wait rail (solid =

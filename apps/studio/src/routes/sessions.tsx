@@ -2,9 +2,9 @@ import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { api } from "../api.ts";
-import { sessionProjectLabel } from "@shared/project-slug.ts";
-import type { SessionListResponse, SessionListRow } from "@shared/dashboard-types.ts";
-import { shortSessionId } from "@shared/session-id.ts";
+import { sessionProjectLabel } from "@ax/lib/shared/project-slug";
+import type { SessionListResponse, SessionListRow } from "@ax/lib/shared/dashboard-types";
+import { shortSessionId } from "@ax/lib/shared/session-id";
 
 const fmtTs = (ts: string | null): string => {
     if (!ts) return "-";

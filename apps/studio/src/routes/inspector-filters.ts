@@ -1,8 +1,8 @@
-import type { InspectSpanKind, InspectTurnDto } from "@shared/dashboard-types.ts";
+import type { InspectSpanKind, InspectTurnDto } from "@ax/lib/shared/dashboard-types";
 import {
     CORRECTION_MAX_LENGTH,
     isCorrectionPhrase,
-} from "@shared/correction-phrase.ts";
+} from "@ax/lib/shared/correction-phrase";
 
 /** Canonical text of a turn. Prefer `raw_text` because spans intentionally
  * omit whitespace-only gaps between detected sections, while content-block

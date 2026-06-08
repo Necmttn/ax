@@ -2,13 +2,13 @@ import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNod
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useParams } from "@tanstack/react-router";
 import { api } from "../api.ts";
-import type { HookFireDto, InspectSpanDto, InspectSpanKind, InspectTurnDto, SessionInspectPayload, SessionTokenUsageDetail, TurnTokenUsageDetail } from "@shared/dashboard-types.ts";
+import type { HookFireDto, InspectSpanDto, InspectSpanKind, InspectTurnDto, SessionInspectPayload, SessionTokenUsageDetail, TurnTokenUsageDetail } from "@ax/lib/shared/dashboard-types";
 import { childrenByAnchorTurn, spawnAnchorSet, turnText } from "./inspector-filters.ts";
-import { spliceHookFires } from "@shared/hook-fire-splice.ts";
+import { spliceHookFires } from "@ax/lib/shared/hook-fire-splice";
 import { FilterBar } from "./inspector-filter-bar.tsx";
-import { shortSessionId } from "@shared/session-id.ts";
-import { sessionProjectLabel } from "@shared/project-slug.ts";
-import type { InspectContentAtomDto, InspectContentBlockDto, InspectTurnContentDto } from "@shared/dashboard-types.ts";
+import { shortSessionId } from "@ax/lib/shared/session-id";
+import { sessionProjectLabel } from "@ax/lib/shared/project-slug";
+import type { InspectContentAtomDto, InspectContentBlockDto, InspectTurnContentDto } from "@ax/lib/shared/dashboard-types";
 
 interface KindStyle { bg: string; fg: string; bar: string; label: string }
 export const KIND_STYLE: Record<InspectSpanKind, KindStyle> = {

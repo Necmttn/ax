@@ -2,8 +2,8 @@ import { useState } from "react";
 import { Link } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api.ts";
-import type { SkillTriageNote, TriageDecision } from "@shared/dashboard-types.ts";
-import { fmtTs } from "@shared/formatters.ts";
+import type { SkillTriageNote, TriageDecision } from "@ax/lib/shared/dashboard-types";
+import { fmtTs } from "@ax/lib/shared/formatters";
 
 export function DecisionsRoute() {
     const queryClient = useQueryClient();

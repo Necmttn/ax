@@ -7,8 +7,8 @@ import type {
     ProposalDto,
     ProposalForm,
     ProposalStatus,
-} from "@shared/dashboard-types.ts";
-import { fmtTs } from "@shared/formatters.ts";
+} from "@ax/lib/shared/dashboard-types";
+import { fmtTs } from "@ax/lib/shared/formatters";
 
 const ALL_FORMS: ReadonlyArray<ProposalForm | "all"> = [
     "all", "skill", "subagent", "hook", "guidance", "automation",

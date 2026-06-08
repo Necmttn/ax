@@ -2,9 +2,9 @@ import { useEffect, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate, useSearch } from "@tanstack/react-router";
 import { api } from "../api.ts";
-import { fmtTs } from "@shared/formatters.ts";
-import { prettifyProjectSlug } from "@shared/project-slug.ts";
-import { shortSessionId } from "@shared/session-id.ts";
+import { fmtTs } from "@ax/lib/shared/formatters";
+import { prettifyProjectSlug } from "@ax/lib/shared/project-slug";
+import { shortSessionId } from "@ax/lib/shared/session-id";
 
 function highlight(snippet: string, q: string): React.ReactNode {
     if (!q) return snippet;

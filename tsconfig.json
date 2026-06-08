@@ -19,9 +19,6 @@
     "skipLibCheck": true,
     "sourceMap": true,
     "types": ["bun-types"],
-    "paths": {
-      "@shared/*": ["./packages/lib/src/shared/*"]
-    },
     "plugins": [
       {
         "name": "@effect/language-service",

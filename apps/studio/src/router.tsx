@@ -21,7 +21,7 @@ import { RecallRoute } from "./routes/recall.tsx";
 import { SkillGraphRoute } from "./routes/skill-graph.tsx";
 import { GraphRoute } from "./routes/graph.tsx";
 import { CanvasRoute } from "./routes/canvas.tsx";
-import type { GraphExplorerMode } from "@shared/dashboard-types.ts";
+import type { GraphExplorerMode } from "@ax/lib/shared/dashboard-types";
 import { WrappedRoute } from "./routes/wrapped.tsx";
 import { ImproveRoute } from "./routes/improve.tsx";
 import { IngestLiveRoute } from "./routes/ingest-live.tsx";

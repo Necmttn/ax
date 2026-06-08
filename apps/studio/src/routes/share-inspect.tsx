@@ -9,9 +9,9 @@ import type {
     SessionInspectPayload,
     SessionTokenUsageDetail,
     TurnTokenUsageDetail,
-} from "@shared/dashboard-types.ts";
-import { shortSessionId } from "@shared/session-id.ts";
-import { spliceHookFires } from "@shared/hook-fire-splice.ts";
+} from "@ax/lib/shared/dashboard-types";
+import { shortSessionId } from "@ax/lib/shared/session-id";
+import { spliceHookFires } from "@ax/lib/shared/hook-fire-splice";
 import { FilterBar } from "./inspector-filter-bar.tsx";
 import { DockedRail, HookFireMarker, InspectGuide, KIND_STYLE, Turn, useInspectSelection, useVisibleTurnSeq } from "./session-inspect.tsx";
 

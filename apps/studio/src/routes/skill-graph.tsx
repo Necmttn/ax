@@ -2,12 +2,12 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link, useNavigate, useSearch } from "@tanstack/react-router";
 import { api } from "../api.ts";
-import { fmtCount } from "@shared/formatters.ts";
+import { fmtCount } from "@ax/lib/shared/formatters";
 import type {
     SkillGraphEdge,
     SkillGraphNode,
     SkillGraphPayload,
-} from "@shared/dashboard-types.ts";
+} from "@ax/lib/shared/dashboard-types";
 
 interface LaidOutNode extends SkillGraphNode {
     x: number;

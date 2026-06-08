@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { InspectSpanKind, InspectTurnDto } from "@shared/dashboard-types.ts";
+import type { InspectSpanKind, InspectTurnDto } from "@ax/lib/shared/dashboard-types";
 import {
     isCorrectionTurn,
     isRoleTurn,

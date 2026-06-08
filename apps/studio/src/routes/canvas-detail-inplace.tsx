@@ -2,7 +2,7 @@ import type { ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { api } from "../api.ts";
-import type { SessionSummary } from "@shared/dashboard-types.ts";
+import type { SessionSummary } from "@ax/lib/shared/dashboard-types";
 
 // In-place card - anchored at the pill (x,y in the lanes container). DB-only
 // summary (fast); the same facts as the focus strip, in a compact card.

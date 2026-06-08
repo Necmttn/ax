@@ -6,8 +6,8 @@ import type {
     WrappedFact,
     WrappedProfile,
     WrappedUsageDay,
-} from "@shared/dashboard-types.ts";
-import { fmtCount, fmtTs } from "@shared/formatters.ts";
+} from "@ax/lib/shared/dashboard-types";
+import { fmtCount, fmtTs } from "@ax/lib/shared/formatters";
 
 const hourLabel = (hour: number | null): string => {
     if (hour == null) return "n/a";

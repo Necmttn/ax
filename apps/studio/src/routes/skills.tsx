@@ -9,9 +9,9 @@ import type {
     SkillTriageNote,
     SkillTriageResponse,
     TriageDecision,
-} from "@shared/dashboard-types.ts";
-import { fmtCount, fmtLastUsed, fmtScore, fmtTs } from "@shared/formatters.ts";
-import { prettifyProjectSlug } from "@shared/project-slug.ts";
+} from "@ax/lib/shared/dashboard-types";
+import { fmtCount, fmtLastUsed, fmtScore, fmtTs } from "@ax/lib/shared/formatters";
+import { prettifyProjectSlug } from "@ax/lib/shared/project-slug";
 
 type Filter = "all" | "actionable" | "keep" | "archive" | "review";
 

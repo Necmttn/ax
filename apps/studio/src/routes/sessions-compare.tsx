@@ -5,9 +5,9 @@ import { api } from "../api.ts";
 import type {
     SessionCompareEntry,
     SessionId,
-} from "@shared/dashboard-types.ts";
-import { shortSessionId } from "@shared/session-id.ts";
-import { prettifyProjectSlug } from "@shared/project-slug.ts";
+} from "@ax/lib/shared/dashboard-types";
+import { shortSessionId } from "@ax/lib/shared/session-id";
+import { prettifyProjectSlug } from "@ax/lib/shared/project-slug";
 
 const fmtDuration = (ms: number | null): string => {
     if (ms === null) return "-";

@@ -24,7 +24,7 @@ import type {
     TriageDecision,
     WorkflowResponse,
     WrappedProfile,
-} from "@shared/dashboard-types.ts";
+} from "@ax/lib/shared/dashboard-types";
 
 // Studio mock-mode build flag. When true (set at build time for the public
 // studio bundle), every fetch is either:

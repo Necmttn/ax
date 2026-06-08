@@ -28,7 +28,7 @@ import type {
     ToolFailuresResponse,
     WorkflowResponse,
     WrappedProfile,
-} from "@shared/dashboard-types.ts";
+} from "@ax/lib/shared/dashboard-types";
 
 const NOW = "2026-05-26T14:08:00.000Z";
 

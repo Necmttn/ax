@@ -1,9 +1,9 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link, useParams } from "@tanstack/react-router";
 import { api } from "../api.ts";
-import { fmtCount, fmtLastUsed, fmtTs } from "@shared/formatters.ts";
-import { prettifyProjectSlug } from "@shared/project-slug.ts";
-import { shortSessionId } from "@shared/session-id.ts";
+import { fmtCount, fmtLastUsed, fmtTs } from "@ax/lib/shared/formatters";
+import { prettifyProjectSlug } from "@ax/lib/shared/project-slug";
+import { shortSessionId } from "@ax/lib/shared/session-id";
 
 const fmtDuration = (start: string | null, end: string | null): string => {
     if (!start || !end) return "-";
