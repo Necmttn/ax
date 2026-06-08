@@ -27,9 +27,11 @@
  *
  * Crash-restart ordering: each `SupervisedProcess` restarts itself on crash. ax
  * serve reconnects to surreal on boot, so a surreal restart does not require a
- * manual ax-serve bounce in the steady state - but to be safe the manager wires
- * an `onExit` hook on surreal that bounces ax serve (see TODO below for the
- * live attach->spawn transition, which is intentionally deferred).
+ * manual ax-serve bounce in the steady state. A belt-and-suspenders surreal
+ * `onExit` hook that proactively bounces ax serve is NOT wired yet - it is
+ * deferred (see TODO in `startSpawn`) because `MakeSupervisedProcess` does not
+ * accept lifecycle hooks. Steady-state recovery therefore relies on each
+ * process's own self-restart plus ax-serve's reconnect-on-boot.
  */
 import * as Context from "effect/Context";
 import * as Duration from "effect/Duration";
@@ -223,7 +225,7 @@ export class AxBackendManager extends Context.Service<
     AxBackendManagerShape
 >()("@ax/studio-desktop/backend/AxBackendManager") {}
 
-const { logInfo, logWarning, logError } =
+const { logInfo, logError } =
     DesktopObservability.makeComponentLogger("ax-backend-manager");
 
 interface ManagerProcesses {
@@ -272,6 +274,16 @@ const make = (makeProcess: MakeSupervisedProcess) =>
             );
         });
 
+        // Conservative bail when a spawned process never reports ready: log
+        // loudly and leave the window closed (mirrors the `conflict` branch's
+        // handling). We do NOT start downstream processes or open the window
+        // over a backend that never came up. Never throws.
+        const abortNotReady = (name: string) =>
+            logError(
+                "backend process did not report ready within timeout; not opening window",
+                { process: name, surrealPort: SURREAL_PORT, axServePort: AX_SERVE_PORT },
+            );
+
         const startSpawn = (withSurreal: boolean) =>
             Effect.gen(function* () {
                 let surreal: SupervisedProcess | null = null;
@@ -279,15 +291,25 @@ const make = (makeProcess: MakeSupervisedProcess) =>
                     surreal = yield* buildProcess(makeSurrealConfig(env));
                     yield* Ref.update(procs, (p) => ({ ...p, surreal }));
                     // Start surreal and await its readiness before ax serve so
-                    // ax serve never races a missing DB.
+                    // ax serve never races a missing DB. If surreal never
+                    // reports ready, bail conservatively: do not start ax serve,
+                    // do not open the window over a dead backend.
                     yield* surreal.start;
-                    yield* awaitReady(surreal, "surreal");
+                    const surrealReady = yield* awaitReady(surreal, "surreal");
+                    if (!surrealReady) {
+                        yield* abortNotReady("surreal");
+                        return;
+                    }
                 }
 
                 const axServe = yield* buildProcess(makeAxServeConfig(env));
                 yield* Ref.update(procs, (p) => ({ ...p, axServe }));
                 yield* axServe.start;
-                yield* awaitReady(axServe, "ax-serve");
+                const axServeReady = yield* awaitReady(axServe, "ax-serve");
+                if (!axServeReady) {
+                    yield* abortNotReady("ax-serve");
+                    return;
+                }
 
                 yield* markReadyAndOpenWindow;
 
@@ -382,10 +404,15 @@ const READINESS_POLL_TIMEOUT = Duration.seconds(65);
  * snapshot so the manager can SEQUENCE surreal -> ax serve.
  *
  * Bounded by {@link READINESS_POLL_TIMEOUT} (slightly above the process's own
- * 60s readiness timeout) so a daemon that never comes up surfaces a warning
- * instead of blocking boot forever.
+ * 60s readiness timeout). Returns `true` once the process reports ready, or
+ * `false` if it never does within the timeout (the caller gates progression on
+ * this so a never-ready daemon does not open the window over a dead backend).
+ * Never fails.
  */
-const awaitReady = (proc: SupervisedProcess, name: string) =>
+const awaitReady = (
+    proc: SupervisedProcess,
+    name: string,
+): Effect.Effect<boolean> =>
     proc.snapshot.pipe(
         Effect.flatMap((snap) =>
             snap.ready
@@ -394,11 +421,8 @@ const awaitReady = (proc: SupervisedProcess, name: string) =>
         ),
         Effect.retry(Schedule.spaced(READINESS_POLL_INTERVAL)),
         Effect.timeout(READINESS_POLL_TIMEOUT),
-        Effect.catch(() =>
-            logWarning("backend process did not report ready within timeout", {
-                process: name,
-            }),
-        ),
+        Effect.as(true),
+        Effect.orElseSucceed(() => false),
     );
 
 /**

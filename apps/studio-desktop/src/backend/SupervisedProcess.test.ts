@@ -206,6 +206,12 @@ test("child exit while desiredRunning schedules a restart after backoff", async 
                 // Let the exit be observed and a restart scheduled.
                 yield* TestClock.adjust(Duration.millis(1));
                 const snapAfterCrash = yield* proc.snapshot;
+                // The respawn must be GATED behind the backoff delay: with the
+                // clock only advanced 1ms (< INITIAL_RESTART_DELAY) no new spawn
+                // should have happened yet. This pins the backoff timing - an
+                // impl that respawned with zero delay would fail here.
+                const spawnsBeforeBackoff =
+                    yield* stubSpawner.controller.spawnCount;
 
                 // Advance past the first backoff delay (500ms) to respawn.
                 yield* TestClock.adjust(INITIAL_RESTART_DELAY);
@@ -218,6 +224,7 @@ test("child exit while desiredRunning schedules a restart after backoff", async 
                 return {
                     spawnsAfterStart,
                     snapAfterCrash,
+                    spawnsBeforeBackoff,
                     spawnsAfterRestart,
                     snapAfterRestart,
                 };
@@ -235,6 +242,8 @@ test("child exit while desiredRunning schedules a restart after backoff", async 
 
     expect(out.spawnsAfterStart).toBe(1);
     expect(out.snapAfterCrash.restartAttempt).toBeGreaterThanOrEqual(1);
+    // Backoff timing: no respawn before the delay elapses, exactly one after.
+    expect(out.spawnsBeforeBackoff).toBe(1);
     expect(out.spawnsAfterRestart).toBe(2);
 });
 
