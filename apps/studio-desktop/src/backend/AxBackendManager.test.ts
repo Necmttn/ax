@@ -1,8 +1,10 @@
 import { expect, test } from "bun:test";
 
+import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Ref from "effect/Ref";
+import { TestClock } from "effect/testing";
 import { HttpClient, HttpClientResponse } from "effect/unstable/http";
 import { ChildProcessSpawner } from "effect/unstable/process";
 
@@ -107,10 +109,16 @@ const makeFakeWindow = Effect.gen(function* () {
     return { layer, openCount: Ref.get(opened) } as const;
 });
 
-const arbitrationLayer = (decision: ArbitrationDecision) =>
+const arbitrationLayer = (
+    decision: ArbitrationDecision,
+    probeDaemon: Effect.Effect<boolean> = Effect.succeed(true),
+) =>
     Layer.succeed(
         AxBackendManager.AxArbitration,
-        AxBackendManager.AxArbitration.of({ probe: Effect.succeed(decision) }),
+        AxBackendManager.AxArbitration.of({
+            probe: Effect.succeed(decision),
+            probeDaemon,
+        }),
     );
 
 const testEnv = {
@@ -502,4 +510,147 @@ test("surreal initial boot does not bounce ax serve", async () => {
         { name: "surreal", action: "start" },
         { name: "ax-serve", action: "start" },
     ]);
+});
+
+// ---------------------------------------------------------------------------
+// (i) attach mode: poller stays quiet while the external daemon stays healthy
+// ---------------------------------------------------------------------------
+
+test("attach mode does NOT transition while the attached daemon stays healthy", async () => {
+    const program = Effect.gen(function* () {
+        const fakeProc = yield* makeFakeProcessFactory;
+        const fakeWindow = yield* makeFakeWindow;
+
+        const events = yield* Effect.scoped(
+            Effect.gen(function* () {
+                const manager = yield* AxBackendManager.AxBackendManager;
+                yield* manager.start;
+                // Drive several poll cycles (grace + 5 intervals) with a healthy
+                // probe. No spawn should ever happen.
+                yield* TestClock.adjust(Duration.seconds(5 + 5 * 5));
+                return yield* fakeProc.events;
+            }).pipe(
+                Effect.provide(
+                    AxBackendManager.layer(fakeProc.factory).pipe(
+                        // Probe always healthy.
+                        Layer.provide(
+                            arbitrationLayer({ mode: "attach" }, Effect.succeed(true)),
+                        ),
+                        Layer.provide(fakeWindow.layer),
+                        Layer.provide(DesktopState.layer),
+                        Layer.provide(envLayer),
+                        Layer.provide(platformStubLayer),
+                    ),
+                ),
+            ),
+        );
+
+        return { events };
+    }).pipe(Effect.provide(TestClock.layer()));
+
+    const out = await Effect.runPromise(program);
+
+    // Healthy attach: nothing spawned.
+    expect(out.events).toEqual([]);
+});
+
+// ---------------------------------------------------------------------------
+// (j) attach mode: sustained probe failure transitions attach -> spawn
+// ---------------------------------------------------------------------------
+
+test("attach mode transitions to spawn after the attached daemon dies", async () => {
+    const program = Effect.gen(function* () {
+        const fakeProc = yield* makeFakeProcessFactory;
+        const fakeWindow = yield* makeFakeWindow;
+        // Probe healthy until the test flips it unhealthy.
+        const healthy = yield* Ref.make(true);
+
+        const events = yield* Effect.scoped(
+            Effect.gen(function* () {
+                const manager = yield* AxBackendManager.AxBackendManager;
+                yield* manager.start;
+                // Window opened against the external daemon; nothing spawned yet.
+                expect(yield* fakeProc.events).toEqual([]);
+                expect(yield* fakeWindow.openCount).toBe(1);
+
+                // Daemon dies. The next two consecutive probes fail (threshold 2),
+                // triggering the attach -> spawn takeover.
+                yield* Ref.set(healthy, false);
+                // grace -> first failing tick (failures=1)
+                yield* TestClock.adjust(Duration.seconds(5));
+                // one interval -> second failing tick (failures=2 -> transition)
+                yield* TestClock.adjust(Duration.seconds(5));
+                // let the spawn path settle (its readiness gate uses the clock)
+                yield* TestClock.adjust(Duration.seconds(1));
+                return yield* fakeProc.events;
+            }).pipe(
+                Effect.provide(
+                    AxBackendManager.layer(fakeProc.factory).pipe(
+                        Layer.provide(
+                            arbitrationLayer({ mode: "attach" }, Ref.get(healthy)),
+                        ),
+                        Layer.provide(fakeWindow.layer),
+                        Layer.provide(DesktopState.layer),
+                        Layer.provide(envLayer),
+                        Layer.provide(platformStubLayer),
+                    ),
+                ),
+            ),
+        );
+
+        return { events };
+    }).pipe(Effect.provide(TestClock.layer()));
+
+    const out = await Effect.runPromise(program);
+
+    // The takeover ran the spawn path: surreal then ax-serve.
+    const startOrder = out.events
+        .filter((e) => e.action === "start")
+        .map((e) => e.name);
+    expect(startOrder).toEqual(["surreal", "ax-serve"]);
+});
+
+// ---------------------------------------------------------------------------
+// (k) attach mode: poller torn down by stop -> no transition after stop
+// ---------------------------------------------------------------------------
+
+test("attach mode poller does NOT transition after stop (torn down)", async () => {
+    const program = Effect.gen(function* () {
+        const fakeProc = yield* makeFakeProcessFactory;
+        const fakeWindow = yield* makeFakeWindow;
+        const healthy = yield* Ref.make(true);
+
+        const events = yield* Effect.scoped(
+            Effect.gen(function* () {
+                const manager = yield* AxBackendManager.AxBackendManager;
+                yield* manager.start;
+                // Stop the manager FIRST (latches `stopping`), then make the
+                // daemon die and advance well past the failure threshold. The
+                // poller must bail without spawning anything.
+                yield* manager.stop();
+                yield* Ref.set(healthy, false);
+                yield* TestClock.adjust(Duration.seconds(5 + 5 * 5));
+                return yield* fakeProc.events;
+            }).pipe(
+                Effect.provide(
+                    AxBackendManager.layer(fakeProc.factory).pipe(
+                        Layer.provide(
+                            arbitrationLayer({ mode: "attach" }, Ref.get(healthy)),
+                        ),
+                        Layer.provide(fakeWindow.layer),
+                        Layer.provide(DesktopState.layer),
+                        Layer.provide(envLayer),
+                        Layer.provide(platformStubLayer),
+                    ),
+                ),
+            ),
+        );
+
+        return { events };
+    }).pipe(Effect.provide(TestClock.layer()));
+
+    const out = await Effect.runPromise(program);
+
+    // No spawn after stop: poller was torn down / guarded by `stopping`.
+    expect(out.events).toEqual([]);
 });

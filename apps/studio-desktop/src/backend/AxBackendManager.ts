@@ -35,6 +35,17 @@
  * against teardown (manager `stopping` + `DesktopState.quitting`) and only fires
  * once ax serve has been started. Self-restart + reconnect-on-boot still back it
  * up.
+ *
+ * Attach -> spawn live transition: in `attach` mode we reuse an external CLI
+ * daemon we do NOT supervise. After opening the window the manager forks a
+ * readiness poller (into its own scope) that re-probes the attached daemon every
+ * {@link ATTACH_POLL_INTERVAL}; on {@link ATTACH_FAILURE_THRESHOLD} consecutive
+ * failed probes (debounced against a transient blip) it logs the takeover and
+ * runs the spawn path ({@link startSpawn}) to bring up our own supervised pair,
+ * then stops polling (SupervisedProcess crash-restart covers further failures).
+ * The transition is latched (runs at most once), bails during
+ * `stopping`/`quitting`, and the poller fiber is torn down by the manager's
+ * `stop`/scope so it never leaks or races teardown.
  */
 import * as Context from "effect/Context";
 import * as Duration from "effect/Duration";
@@ -54,6 +65,7 @@ import {
     AX_SERVE_PORT,
     type ArbitrationDecision,
     probeArbitration,
+    probeDaemon,
     SURREAL_PORT,
 } from "./AxDaemonArbitration.ts";
 import {
@@ -70,6 +82,16 @@ import {
 
 /** Daemon boot can be slow on a cold rocksdb; give each process a full minute. */
 const READINESS_TIMEOUT = Duration.seconds(60);
+
+/**
+ * Attach-mode readiness poller cadence + debounce. After attaching to an
+ * external CLI daemon we re-probe it on this interval; once this many probes
+ * fail back-to-back we treat the daemon as gone and transition attach -> spawn.
+ * A small grace before the first probe avoids racing a daemon that is mid-boot.
+ */
+const ATTACH_POLL_INTERVAL = Duration.seconds(5);
+const ATTACH_POLL_INITIAL_GRACE = Duration.seconds(5);
+const ATTACH_FAILURE_THRESHOLD = 2;
 
 // ---------------------------------------------------------------------------
 // Injectable seams
@@ -98,9 +120,15 @@ export type MakeSupervisedProcess = (
 /**
  * Arbitration seam. The live layer runs the real {@link probeArbitration}
  * probes; tests inject a fixed decision.
+ *
+ * `probeDaemon` is the per-daemon health probe the attach-mode readiness poller
+ * re-runs to detect the external CLI daemon going away (separate from the
+ * boot-time `probe` that folds all three probes into a decision). Exposed on the
+ * seam so tests can stub it (healthy -> unhealthy) without hitting the network.
  */
 export interface AxArbitrationShape {
     readonly probe: Effect.Effect<ArbitrationDecision, never, HttpClient.HttpClient>;
+    readonly probeDaemon: Effect.Effect<boolean, never, HttpClient.HttpClient>;
 }
 
 export class AxArbitration extends Context.Service<AxArbitration, AxArbitrationShape>()(
@@ -109,7 +137,7 @@ export class AxArbitration extends Context.Service<AxArbitration, AxArbitrationS
 
 export const arbitrationLayer = Layer.succeed(
     AxArbitration,
-    AxArbitration.of({ probe: probeArbitration }),
+    AxArbitration.of({ probe: probeArbitration, probeDaemon }),
 );
 
 /**
@@ -263,6 +291,10 @@ const make = (makeProcess: MakeSupervisedProcess) =>
         // stop). Combined with `quitting`, this guards the bounce against every
         // teardown path (explicit stop, scope-close finalizer, app quit).
         const stopping = yield* Ref.make(false);
+        // Latched true once the attach -> spawn transition has fired so it can
+        // never run twice (the poller stops itself after winning the latch, but
+        // the CAS makes the guard robust even if two checks interleave).
+        const transitioned = yield* Ref.make(false);
 
         // Provide the supervised-process deps once; the factory's `Scope` is the
         // manager's parent scope so processes live as long as the manager.
@@ -393,12 +425,93 @@ const make = (makeProcess: MakeSupervisedProcess) =>
                 // reconnects to the fresh DB instead of limping on a dead
                 // connection. The self-restart + reconnect-on-boot still backs
                 // it up in the steady state.
-                //
-                // TODO(phase-2): attach -> spawn live transition.
-                //  AxDaemonArbitration's residual note: if an ATTACHED CLI daemon
-                //  dies, a periodic re-probe should fall back to spawn. Not wired
-                //  yet (separate from the bounce above).
             });
+
+        // ---- Attach -> spawn live transition -------------------------------
+        //
+        // In `attach` mode we reuse the external CLI daemon and own none of its
+        // processes; if it dies the window is pointed at a dead backend. The
+        // poller below re-probes that daemon and, on a sustained failure, takes
+        // over by running the spawn path (our own supervised pair).
+
+        // Run the takeover at most once. Wins the `transitioned` latch via CAS
+        // (compare-and-set); if it was already set, another path beat us - no-op.
+        const transitionAttachToSpawn = Effect.gen(function* () {
+            // Never take over while shutting down.
+            if (yield* Ref.get(stopping)) {
+                return false;
+            }
+            if (yield* Ref.get(desktopState.quitting)) {
+                return false;
+            }
+            const won = yield* Ref.modify(transitioned, (already) =>
+                already ? [false, already] : [true, true],
+            );
+            if (!won) {
+                return false;
+            }
+            yield* logInfo(
+                "attached daemon went away; transitioning attach->spawn",
+                { surrealPort: SURREAL_PORT, axServePort: AX_SERVE_PORT },
+            );
+            yield* Ref.set(mode, "spawn");
+            // Bring up our own supervised pair (surreal + ax-serve). From here
+            // SupervisedProcess crash-restart covers further failures, so the
+            // caller stops the poller once this returns true.
+            yield* startSpawn(true);
+            return true;
+        });
+
+        // One poll tick: re-probe the attached daemon, tracking consecutive
+        // failures in `failures`. Returns `true` once the transition has fired
+        // (signals the repeat loop to stop). Probe failures are total (the probe
+        // collapses errors to `false`), so this never fails the fiber.
+        const pollTick = (failures: Ref.Ref<number>): Effect.Effect<boolean> =>
+            Effect.gen(function* () {
+                // Stop quietly if teardown began between ticks.
+                if (yield* Ref.get(stopping)) {
+                    return true;
+                }
+                if (yield* Ref.get(desktopState.quitting)) {
+                    return true;
+                }
+                const healthy = yield* arbitration.probeDaemon.pipe(
+                    Effect.provideService(HttpClient.HttpClient, httpClient),
+                );
+                if (healthy) {
+                    yield* Ref.set(failures, 0);
+                    return false;
+                }
+                const consecutive = yield* Ref.updateAndGet(failures, (n) => n + 1);
+                yield* logInfo("attached daemon probe failed", {
+                    consecutive,
+                    threshold: ATTACH_FAILURE_THRESHOLD,
+                });
+                if (consecutive < ATTACH_FAILURE_THRESHOLD) {
+                    return false;
+                }
+                return yield* transitionAttachToSpawn;
+            });
+
+        // The full poller: an initial grace, then repeat `pollTick` on a fixed
+        // cadence until it returns `true` (transition fired or teardown began).
+        // Forked into the manager's parent scope so `stop`/scope-close interrupts
+        // it cleanly (no leaked fiber); the repeat is naturally interruptible at
+        // every `sleep`.
+        const attachReadinessPoller = Effect.gen(function* () {
+            const failures = yield* Ref.make(0);
+            yield* Effect.sleep(ATTACH_POLL_INITIAL_GRACE);
+            yield* pollTick(failures).pipe(
+                Effect.repeat({
+                    schedule: Schedule.spaced(ATTACH_POLL_INTERVAL),
+                    until: (done) => done,
+                }),
+            );
+        }).pipe(
+            Effect.catchCause((cause) =>
+                logError("attach readiness poller failed", { cause: String(cause) }),
+            ),
+        );
 
         const start: Effect.Effect<void> = Effect.gen(function* () {
             const decision = yield* arbitration.probe.pipe(
@@ -410,9 +523,12 @@ const make = (makeProcess: MakeSupervisedProcess) =>
             switch (decision.mode) {
                 case "attach":
                     // A healthy CLI daemon pair already owns the ports. We do not
-                    // own its lifecycle (see AxDaemonArbitration residual note);
-                    // just attach the window to it.
+                    // own its lifecycle, so attach the window to it AND fork a
+                    // readiness poller that takes over (attach -> spawn) if the
+                    // external daemon dies. Forked into the manager's parent
+                    // scope so `stop`/scope-close interrupts it (no leaked fiber).
                     yield* markReadyAndOpenWindow;
+                    yield* Effect.forkIn(attachReadinessPoller, parentScope);
                     return;
                 case "spawn":
                     yield* startSpawn(true);
