@@ -364,7 +364,14 @@ function InspectBody({
                         const spawned = subagentsByTurn?.get(turn.seq);
                         const hooks = harnessByTurn.get(turn.seq);
                         return (
-                            <div key={`turn-${turn.seq}`}>
+                            // content-visibility virtualizes paint/layout for
+                            // off-screen turns while keeping every turn in the
+                            // DOM, so #turn-N anchors, jumps, find, and the cost
+                            // rail keep working on huge (100k+ px) transcripts.
+                            <div
+                                key={`turn-${turn.seq}`}
+                                style={{ contentVisibility: "auto", containIntrinsicSize: "auto 200px" }}
+                            >
                                 <Turn
                                     turn={turn}
                                     anchored={anchoredSeq === turn.seq}
