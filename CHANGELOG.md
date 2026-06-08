@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.15.0](https://github.com/Necmttn/ax/compare/v0.14.0...v0.15.0) (2026-06-08)
+
+
+### Features
+
+* **share:** export+render hook fires; bound export concurrency ([#152](https://github.com/Necmttn/ax/issues/152)) ([bacf96b](https://github.com/Necmttn/ax/commit/bacf96b816faedaa7b3bdd26074e0e195c9523a8))
+* **share:** render tool arguments in synthesized tool turns ([#150](https://github.com/Necmttn/ax/issues/150)) ([0027b54](https://github.com/Necmttn/ax/commit/0027b54cd15d4ad41e50ab441ebc32b258f406f6))
+
 ## [0.14.0](https://github.com/Necmttn/ax/compare/v0.13.0...v0.14.0) (2026-06-08)
 
 
