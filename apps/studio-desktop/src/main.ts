@@ -19,6 +19,7 @@ import * as ElectronMenu from "./electron/ElectronMenu.ts";
 import * as ElectronProtocol from "./electron/ElectronProtocol.ts";
 import * as ElectronShell from "./electron/ElectronShell.ts";
 import * as ElectronWindow from "./electron/ElectronWindow.ts";
+import * as DesktopUpdates from "./updates/DesktopUpdates.ts";
 import * as DesktopWindow from "./window/DesktopWindow.ts";
 
 // ---------------------------------------------------------------------------
@@ -82,6 +83,7 @@ const foundationLayer = Layer.mergeAll(
     DesktopLifecycle.layerShutdown,
     DesktopLifecycle.layer,
     DesktopWindow.layer,
+    DesktopUpdates.layer,
 ).pipe(Layer.provideMerge(environmentLayer));
 
 // Phase 2 backend supervisor, provide-merged ON TOP of foundation so it can

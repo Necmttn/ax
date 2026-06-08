@@ -4,6 +4,7 @@ import * as AxBackendManager from "../backend/AxBackendManager.ts";
 import * as ElectronApp from "../electron/ElectronApp.ts";
 import * as ElectronMenu from "../electron/ElectronMenu.ts";
 import * as ElectronProtocol from "../electron/ElectronProtocol.ts";
+import * as DesktopUpdates from "../updates/DesktopUpdates.ts";
 import * as DesktopEnvironment from "./DesktopEnvironment.ts";
 import * as DesktopLifecycle from "./DesktopLifecycle.ts";
 import * as DesktopObservability from "./DesktopObservability.ts";
@@ -26,6 +27,7 @@ const startup = Effect.gen(function* () {
     const lifecycle = yield* DesktopLifecycle.DesktopLifecycle;
     const backendManager = yield* AxBackendManager.AxBackendManager;
     const environment = yield* DesktopEnvironment.DesktopEnvironment;
+    const updates = yield* DesktopUpdates.DesktopUpdates;
 
     // 1. Block until the Electron app is ready. Scheme privileges were already
     //    registered eagerly in main.ts (must happen before ready).
@@ -48,6 +50,18 @@ const startup = Effect.gen(function* () {
     //    orders surreal -> ax serve (or attaches to an existing pair), and opens
     //    the window once the backend is ready.
     yield* backendManager.start;
+
+    // 6. Phase 3: kick off an electron-updater check. The update feed comes from
+    //    electron-builder's GitHub `publish` config, baked into `app-update.yml`
+    //    at package time - there is no feed in development, so a check would only
+    //    error. Skip it in dev, and never block boot on it: fork it (it catches +
+    //    logs its own failures, so a failed check can never crash the app).
+    if (environment.isDevelopment) {
+        yield* logStartupInfo("skipping update check in dev (no update feed)");
+    } else {
+        yield* Effect.forkDetach(updates.checkForUpdates);
+    }
+
     yield* logStartupInfo("startup complete");
 }).pipe(Effect.withSpan("desktop.startup"));
 
