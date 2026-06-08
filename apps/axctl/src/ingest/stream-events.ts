@@ -1,21 +1,9 @@
 import type { TraceEvent } from "@ax/lib/live-traces/types";
+import type { IngestStreamEvent } from "@ax/lib/shared/ingest-stream-events";
 
-export type IngestStreamEvent =
-    | { readonly kind: "run_started"; readonly runId: string; readonly label: string }
-    | { readonly kind: "stage_started"; readonly runId: string; readonly stage: string }
-    | {
-        readonly kind: "stage_progress";
-        readonly runId: string;
-        readonly stage: string;
-        readonly current: number;
-        readonly total: number;
-        readonly ratePerSec: number;
-        readonly etaLeftMs: number | null;
-        /** 1-based index of this stage among those started so far. */
-        readonly stageIndex: number;
-    }
-    | { readonly kind: "stage_finished"; readonly runId: string; readonly stage: string; readonly status: "ok" | "error"; readonly durationMs: number }
-    | { readonly kind: "run_finished"; readonly runId: string; readonly status: "completed" | "failed"; readonly durationMs: number };
+// Re-export so existing axctl importers (`from ".../ingest/stream-events.ts"`)
+// keep resolving the type unchanged after the contract moved to @ax/lib/shared.
+export type { IngestStreamEvent };
 
 const runIdOf = (traceId: string): string => traceId.replace(/^ingest:/, "");
 

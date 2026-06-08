@@ -19,8 +19,8 @@
     "search": "bun src/cli/index.ts search",
     "typecheck": "tsc --noEmit",
     "test": "bun test",
-    "dashboard:dev": "vite --config src/dashboard/web/vite.config.ts",
-    "dashboard:build": "vite build --config src/dashboard/web/vite.config.ts"
+    "dashboard:dev": "bun --filter @ax/studio dev",
+    "dashboard:build": "bun --filter @ax/studio build"
   },
   "dependencies": {
     "@ax-classifier/direction-event": "workspace:*",
@@ -39,7 +39,6 @@
     "effect": "catalog:",
     "node-pty": "1.1.0",
     "react": "^19.2.0",
-    "react-dom": "^19.2.0",
     "smol-toml": "1.6.1",
     "surrealdb": "^2.0.0",
     "yaml": "^2.8.4",
@@ -48,13 +47,9 @@
   "devDependencies": {
     "@effect/language-service": "^0.85.1",
     "@tanstack/react-router": "^1.169",
-    "@tanstack/router-plugin": "^1.167",
     "@types/bun": "catalog:",
     "@types/react": "^19.2.0",
-    "@types/react-dom": "^19.2.0",
-    "@vitejs/plugin-react": "^6",
     "bun-types": "1.3.13",
-    "typescript": "catalog:",
-    "vite": "catalog:"
+    "typescript": "catalog:"
   }
 }
