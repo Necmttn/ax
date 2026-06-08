@@ -11,7 +11,7 @@ import type {
 } from "@shared/dashboard-types.ts";
 import { shortSessionId } from "@shared/session-id.ts";
 import { FilterBar } from "./inspector-filter-bar.tsx";
-import { CostRail, InspectGuide, KIND_STYLE, Turn, useVisibleTurnSeq } from "./session-inspect.tsx";
+import { DockedRail, InspectGuide, KIND_STYLE, Turn, useInspectSelection, useVisibleTurnSeq } from "./session-inspect.tsx";
 
 type ShareSchemaVersion = 1 | 2 | 3;
 
@@ -247,49 +247,6 @@ function fmtDuration(ms: number | null | undefined): string | null {
     return `${h}h${m % 60 ? ` ${m % 60}m` : ""}`;
 }
 
-/**
- * Inline "spawned subagent" marker, mirroring the live inspector's SpawnMarker
- * look but wired to in-bundle file selection (gist children aren't DB routes).
- */
-function ShareSpawnMarker(props: {
-    readonly card: ShareSubagentCard;
-    readonly onSelect: () => void;
-    readonly onPrefetch: () => void;
-}) {
-    const { card } = props;
-    const cost = fmtUsd(card.cost_usd);
-    const duration = fmtDuration(card.duration_ms);
-    return (
-        <button
-            type="button"
-            onClick={props.onSelect}
-            onMouseEnter={props.onPrefetch}
-            onFocus={props.onPrefetch}
-            style={{
-                display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap",
-                width: "100%", textAlign: "left", cursor: "pointer",
-                margin: "4px 0", padding: "7px 10px", background: "#fff1f2",
-                border: "1px solid #fecdd3", borderLeft: "4px solid #e11d48", borderRadius: 3,
-                fontSize: 11, fontFamily: "ui-monospace, monospace", color: "#9f1239",
-            }}
-        >
-            <span style={{ fontWeight: 700 }}>↳ spawned subagent</span>
-            <span style={{ fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 420 }}>
-                {card.task_label ? `"${card.task_label}"` : `${card.id.slice(0, 24)}…`}
-            </span>
-            <span style={{ background: "#fecdd3", color: "#7f1d1d", padding: "0 6px", borderRadius: 2, fontSize: 10, fontWeight: 600 }}>
-                {card.model ?? card.source}
-            </span>
-            <span style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
-                {cost ? <span>{cost}</span> : null}
-                {duration ? <span>{duration}</span> : null}
-                <span>{card.stats.turns} turns</span>
-                <span style={{ opacity: 0.7 }}>open →</span>
-            </span>
-        </button>
-    );
-}
-
 /** The transcript body for one session - reused by parent + subagent views. */
 function InspectBody({
     data,
@@ -306,8 +263,9 @@ function InspectBody({
     const turnsRef = useRef<ReadonlyArray<InspectTurnDto>>([]);
     turnsRef.current = data.turns;
     const visibleSeq = useVisibleTurnSeq(data.turns, anchoredSeq ?? data.turns[0]?.seq ?? null);
-    // Spawn-turn seqs power the "next spawn" jump button (and match the inline
-    // spawn markers). Without this the button would say "no matches".
+    const [selection, setSelection] = useInspectSelection(data);
+    // Spawn-turn seqs power the "next spawn" jump button + match the inline
+    // spawn markers below.
     const spawnAnchorSeqs = useMemo(
         () => new Set<number>(subagentsByTurn ? [...subagentsByTurn.keys()] : []),
         [subagentsByTurn],
@@ -366,7 +324,12 @@ function InspectBody({
                         const spawned = subagentsByTurn?.get(turn.seq);
                         return (
                             <div key={turn.seq}>
-                                <Turn turn={turn} anchored={anchoredSeq === turn.seq} />
+                                <Turn
+                                    turn={turn}
+                                    anchored={anchoredSeq === turn.seq}
+                                    activeTarget={selection?.turnSeq === turn.seq ? selection.target : null}
+                                    onInspect={setSelection}
+                                />
                                 {spawned && spawned.length > 0 ? (
                                     <div style={{ padding: "2px 24px 6px" }}>
                                         {spawned.map((card) => (
@@ -383,7 +346,12 @@ function InspectBody({
                         );
                     })}
                 </div>
-                <CostRail data={data} currentSeq={visibleSeq} />
+                <DockedRail
+                    data={data}
+                    currentSeq={visibleSeq}
+                    selection={selection}
+                    setSelection={setSelection}
+                />
             </div>
         </>
     );
@@ -407,6 +375,49 @@ const SUBAGENT_LINK_STYLE: CSSProperties = {
     fontSize: 12,
     textDecoration: "underline",
 };
+
+/**
+ * Inline "spawned subagent" marker, mirroring the live inspector's SpawnMarker
+ * look but wired to in-bundle file selection (gist children aren't DB routes).
+ */
+function ShareSpawnMarker(props: {
+    readonly card: ShareSubagentCard;
+    readonly onSelect: () => void;
+    readonly onPrefetch: () => void;
+}) {
+    const { card } = props;
+    const cost = fmtUsd(card.cost_usd);
+    const duration = fmtDuration(card.duration_ms);
+    return (
+        <button
+            type="button"
+            onClick={props.onSelect}
+            onMouseEnter={props.onPrefetch}
+            onFocus={props.onPrefetch}
+            style={{
+                display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap",
+                width: "100%", textAlign: "left", cursor: "pointer",
+                margin: "4px 0", padding: "7px 10px", background: "#fff1f2",
+                border: "1px solid #fecdd3", borderLeft: "4px solid #e11d48", borderRadius: 3,
+                fontSize: 11, fontFamily: "ui-monospace, monospace", color: "#9f1239",
+            }}
+        >
+            <span style={{ fontWeight: 700 }}>↳ spawned subagent</span>
+            <span style={{ fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 420 }}>
+                {card.task_label ? `"${card.task_label}"` : `${card.id.slice(0, 24)}…`}
+            </span>
+            <span style={{ background: "#fecdd3", color: "#7f1d1d", padding: "0 6px", borderRadius: 2, fontSize: 10, fontWeight: 600 }}>
+                {card.model ?? card.source}
+            </span>
+            <span style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
+                {cost ? <span>{cost}</span> : null}
+                {duration ? <span>{duration}</span> : null}
+                <span>{card.stats.turns} turns</span>
+                <span style={{ opacity: 0.7 }}>open →</span>
+            </span>
+        </button>
+    );
+}
 
 /** v3 multi-file share: manifest-first render + lazy/prefetch session files. */
 function MultiFileShareView(props: {
@@ -437,8 +448,8 @@ function MultiFileShareView(props: {
     const totalCost = fmtUsd(totals.cost_usd);
     const totalDuration = fmtDuration(totals.duration_ms);
 
-    // Which session is on screen, and the direct children it spawned, grouped
-    // by the parent turn they were launched from -> inline spawn markers.
+    // Which session is on screen, its direct children grouped by spawn turn
+    // (-> inline markers), and a back-link when viewing a subagent.
     const selectedSessionId = selectedFile === manifest.root_file
         ? manifest.session.id
         : manifest.subagents.find((c) => c.file === selectedFile)?.id ?? null;
@@ -453,9 +464,6 @@ function MultiFileShareView(props: {
         }
         return map;
     }, [manifest.subagents, selectedSessionId]);
-
-    // Compact subagent subheader (mirrors the live inspector): direct children
-    // of the selected session + a back-link when viewing a subagent.
     const directChildren = manifest.subagents.filter((c) => c.parent_id === selectedSessionId);
     const selectedCard = selectedFile === manifest.root_file
         ? null

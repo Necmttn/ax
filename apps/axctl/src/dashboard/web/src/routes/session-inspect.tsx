@@ -260,6 +260,19 @@ type InspectTarget =
     | { kind: "block"; blockSeq: number }
     | { kind: "atom"; blockSeq: number; atomIndex: number };
 
+/**
+ * The turn + block/atom currently surfaced in the docked right-rail inspector.
+ * Lifted out of individual turns so ONE persistent inspector under the cost rail
+ * tracks whatever the user last hovered, instead of a toggle per turn.
+ */
+export interface InspectSelection {
+    turnSeq: number;
+    content: InspectTurnContentDto;
+    target: InspectTarget | null;
+    turnUsage: TurnTokenUsageDetail | null;
+    turnChars: number;
+}
+
 function sameInspectTarget(a: InspectTarget | null, b: InspectTarget | null): boolean {
     if (a === b) return true;
     if (!a || !b) return false;
@@ -356,6 +369,7 @@ function AliasMiniMap({
                     <button
                         key={`map-${block.seq}-${alias.value}`}
                         type="button"
+                        onMouseEnter={() => setActiveTarget(target)}
                         onClick={() => setActiveTarget(target)}
                         title={aliasTitle(alias)}
                         style={{
@@ -561,9 +575,13 @@ export function useVisibleTurnSeq(
 export function CostRail({
     data,
     currentSeq,
+    docked = false,
 }: {
     data: Pick<SessionInspectPayload, "turns" | "total_turns" | "token_usage">;
     currentSeq: number | null;
+    /** When rendered inside the shared sticky right column, the column owns the
+     *  sticky/scroll/margin so the rail itself drops its own positioning. */
+    docked?: boolean;
 }) {
     const usage = data.token_usage;
     const sessionCost = tokenCostTotal(usage);
@@ -583,17 +601,21 @@ export function CostRail({
 
     return (
         <aside style={{
-            position: "sticky",
-            top: 48,
-            alignSelf: "flex-start",
-            flex: "0 0 228px",
-            margin: "0 24px 16px 0",
+            ...(docked
+                ? { flex: "0 0 auto" }
+                : {
+                    position: "sticky",
+                    top: 48,
+                    alignSelf: "flex-start",
+                    flex: "0 0 228px",
+                    margin: "0 24px 16px 0",
+                    maxHeight: "calc(100vh - 64px)",
+                    overflow: "auto",
+                }),
             border: "1px solid #d8dee8",
             background: "#f8fafc",
             fontFamily: "ui-monospace, monospace",
             color: "#334155",
-            maxHeight: "calc(100vh - 64px)",
-            overflow: "auto",
         }}>
             <div style={{ padding: "8px 9px", borderBottom: "1px solid #e2e8f0" }}>
                 <div style={{ color: "#64748b", font: "700 10px/1.2 ui-monospace, monospace", textTransform: "uppercase" }}>
@@ -636,13 +658,93 @@ export function CostRail({
     );
 }
 
+type InspectRailData = Pick<SessionInspectPayload, "turns" | "total_turns" | "token_usage">;
+
+/**
+ * Owns the docked inspector's selection (which turn + block/atom). Seeds to the
+ * first turn with parsed content so the right-rail panel is populated on load,
+ * then follows whatever block/alias the user hovers. Shared by the dashboard and
+ * the public share view so both behave identically.
+ */
+export function useInspectSelection(data: InspectRailData | null) {
+    const [selection, setSelection] = useState<InspectSelection | null>(null);
+    useEffect(() => {
+        if (selection || !data) return;
+        const first = data.turns.find((turn) => turn.content);
+        if (first?.content) {
+            setSelection({
+                turnSeq: first.seq,
+                content: first.content,
+                target: null,
+                turnUsage: first.token_usage ?? null,
+                turnChars: first.char_count,
+            });
+        }
+    }, [data, selection]);
+    return [selection, setSelection] as const;
+}
+
+/**
+ * The persistent right column: the cost rail with the parsed-block inspector
+ * docked beneath it. Sticky so it stays in view while the turn list scrolls.
+ */
+export function DockedRail({
+    data,
+    currentSeq,
+    selection,
+    setSelection,
+}: {
+    data: InspectRailData;
+    currentSeq: number | null;
+    selection: InspectSelection | null;
+    setSelection: (selection: InspectSelection | null) => void;
+}) {
+    return (
+        <div style={{
+            flex: "0 0 320px",
+            alignSelf: "flex-start",
+            position: "sticky",
+            top: 48,
+            maxHeight: "calc(100vh - 64px)",
+            overflow: "auto",
+            margin: "0 24px 16px 0",
+            display: "flex",
+            flexDirection: "column",
+            gap: 8,
+        }}>
+            <CostRail data={data} currentSeq={currentSeq} docked />
+            {selection ? (
+                <TurnContentInspector
+                    content={selection.content}
+                    activeTarget={selection.target}
+                    setActiveTarget={(target) =>
+                        setSelection(selection ? { ...selection, target } : selection)}
+                    turnUsage={selection.turnUsage}
+                    turnChars={selection.turnChars}
+                    turnSeq={selection.turnSeq}
+                    maxHeight="calc(100vh - 320px)"
+                />
+            ) : (
+                <aside style={{
+                    border: "1px solid #d8dee8", background: "#f8fafc",
+                    padding: 10, color: "#94a3b8",
+                    font: "11px/1.5 ui-monospace, monospace",
+                }}>
+                    Hover a turn’s text to inspect its parsed blocks here.
+                </aside>
+            )}
+        </div>
+    );
+}
+
 const SYMBOL_REF_STYLE = { fontWeight: 700, color: "#15803d" } as const;
 
 /**
  * Render a block's raw slice with symbol-reference atom values bolded inline,
  * so named entities (e.g. `SurrealDB`) stand out in the transcript itself
  * rather than only in the inspector's atom list. Atoms carry no offsets, so we
- * match by value (longest-first to avoid partial overlaps).
+ * match by value (longest-first; word boundaries so "data" doesn't bold inside
+ * "metadata").
  */
 function renderSliceWithSymbols(slice: string, block: InspectContentBlockDto): ReactNode {
     const symbols = [...new Set(
@@ -652,7 +754,6 @@ function renderSliceWithSymbols(slice: string, block: InspectContentBlockDto): R
     )].sort((a, b) => b.length - a.length);
     if (symbols.length === 0) return slice;
     const escaped = symbols.map((s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
-    // Word boundaries so e.g. "data" doesn't bold inside "metadata".
     const re = new RegExp(`\\b(${escaped.join("|")})\\b`, "g");
     const symbolSet = new Set(symbols);
     return slice.split(re).map((part, i) =>
@@ -694,7 +795,7 @@ function AnnotatedRawText({
         rawParts.push(
             <span
                 key={`raw-${block.seq}`}
-                onMouseEnter={() => setHoverSeq(block.seq)}
+                onMouseEnter={() => { setHoverSeq(block.seq); setActiveTarget(target); }}
                 onMouseLeave={() => setHoverSeq((seq) => seq === block.seq ? null : seq)}
                 onClick={() => setActiveTarget(target)}
                 title={blockHoverTitle(block, mismatch)}
@@ -723,18 +824,23 @@ function AnnotatedRawText({
     );
 }
 
-function TurnContentInspector({
+export function TurnContentInspector({
     content,
     activeTarget,
     setActiveTarget,
     turnUsage,
     turnChars,
+    maxHeight = 400,
+    turnSeq,
 }: {
     content: InspectTurnContentDto;
     activeTarget: InspectTarget | null;
     setActiveTarget: (target: InspectTarget | null) => void;
     turnUsage?: TurnTokenUsageDetail | null;
     turnChars: number;
+    maxHeight?: number | string;
+    /** Shown in the header so the docked inspector says which turn it reflects. */
+    turnSeq?: number;
 }) {
     const block = selectedBlock(content, activeTarget) ?? visibleTextBlocks(content)[0] ?? content.blocks[0] ?? null;
     const atom = selectedAtom(block, activeTarget);
@@ -751,10 +857,10 @@ function TurnContentInspector({
         : null;
 
     return (
-        <aside style={{ border: "1px solid #d8dee8", background: "#f8fafc", minWidth: 0, maxHeight: 400, overflow: "auto" }}>
+        <aside style={{ border: "1px solid #d8dee8", background: "#f8fafc", minWidth: 0, maxHeight, overflow: "auto" }}>
             <div style={{ padding: "8px 10px", borderBottom: "1px solid #e2e8f0", display: "flex", justifyContent: "space-between", gap: 8, alignItems: "baseline" }}>
                 <strong style={{ color: "#334155", font: "700 10px/1 ui-monospace, monospace", textTransform: "uppercase" }}>
-                    inspector
+                    inspector{turnSeq != null ? ` · #${turnSeq}` : ""}
                 </strong>
                 <span style={{ color: "#94a3b8", font: "10px/1 ui-monospace, monospace" }}>
                     {content.parser_id}@{content.parser_version}
@@ -1042,13 +1148,24 @@ export function Turn({
     turn,
     anchored,
     childrenSpawnedHere,
+    activeTarget,
+    onInspect,
 }: {
     turn: InspectTurnDto;
     anchored: boolean;
     childrenSpawnedHere?: ReadonlyArray<SpawnChildDto>;
+    /** Non-null only when THIS turn owns the docked inspector's current target. */
+    activeTarget: InspectTarget | null;
+    /** Hover/click a block or alias to surface it in the docked rail inspector. */
+    onInspect: (selection: InspectSelection) => void;
 }) {
-    const [showInspector, setShowInspector] = useState(false);
-    const [activeTarget, setActiveTarget] = useState<InspectTarget | null>(null);
+    const turnUsage = turn.token_usage ?? null;
+    // Routes every block/alias hover+click up to the shared docked inspector,
+    // tagged with this turn's content + usage so the rail can show cost lenses.
+    const setActiveTarget = (target: InspectTarget | null) => {
+        if (!turn.content) return;
+        onInspect({ turnSeq: turn.seq, content: turn.content, target, turnUsage, turnChars: turn.char_count });
+    };
     const s = KIND_STYLE[turn.semantic_role];
     const kindCounts = new Map<InspectSpanKind, number>();
     for (const sp of turn.spans) kindCounts.set(sp.kind, (kindCounts.get(sp.kind) ?? 0) + sp.text.length);
@@ -1088,7 +1205,6 @@ export function Turn({
     )) : [];
     const ts = turn.ts ? new Date(turn.ts).toISOString().slice(11, 19) : "";
     const sizeStr = turn.char_count > 1000 ? `${(turn.char_count / 1000).toFixed(1)}k` : `${turn.char_count}`;
-    const turnUsage = turn.token_usage ?? null;
     const turnCost = numberOrNull(turnUsage?.estimated_cost_usd);
     const spawnedChildCount = childrenSpawnedHere?.length ?? 0;
     const jsonlBadge = turn.role !== turn.semantic_role.replace(/_text$|_input$/, "")
@@ -1138,17 +1254,17 @@ export function Turn({
                         {turnCost !== null ? fmtUsd(turnCost) : "cost ?"} · {usageTokenLine(turnUsage)}
                     </span>
                 ) : null}
-                {turn.content ? (
-                    <button
-                        onClick={() => setShowInspector((value) => !value)}
+                {turn.content && activeTarget ? (
+                    <span
+                        title="This turn is showing in the docked inspector on the right."
                         style={{
-                            padding: "1px 7px", border: "1px solid #cbd5e1", borderRadius: 3,
-                            background: showInspector ? "#0f172a" : "#fff", color: showInspector ? "#fff" : "#475569",
-                            font: "10px/1.4 ui-monospace, monospace", cursor: "pointer",
+                            padding: "1px 7px", border: "1px solid #0f172a", borderRadius: 3,
+                            background: "#0f172a", color: "#fff",
+                            font: "10px/1.4 ui-monospace, monospace",
                         }}
                     >
-                        {showInspector ? "hide inspector" : "inspect"}
-                    </button>
+                        inspecting →
+                    </span>
                 ) : null}
                 <span style={{ display: "inline-flex", gap: 3, flexWrap: "wrap", marginLeft: "auto" }}>
                     {aliasChips.length > 0 ? aliasChips : chips}
@@ -1168,29 +1284,13 @@ export function Turn({
                         activeTarget={activeTarget}
                         setActiveTarget={setActiveTarget}
                     />
-                    <div style={{
-                        display: "grid",
-                        gridTemplateColumns: showInspector ? "minmax(0, 1fr) minmax(260px, 340px)" : "1fr",
-                        gap: showInspector ? 8 : 0,
-                        alignItems: "start",
-                    }}>
-                        <AnnotatedRawText
-                            content={turn.content}
-                            rawText={turnText(turn)}
-                            activeTarget={activeTarget}
-                            setActiveTarget={setActiveTarget}
-                            maxHeight={400}
-                        />
-                        {showInspector ? (
-                            <TurnContentInspector
-                                content={turn.content}
-                                activeTarget={activeTarget}
-                                setActiveTarget={setActiveTarget}
-                                turnUsage={turnUsage}
-                                turnChars={turn.char_count}
-                            />
-                        ) : null}
-                    </div>
+                    <AnnotatedRawText
+                        content={turn.content}
+                        rawText={turnText(turn)}
+                        activeTarget={activeTarget}
+                        setActiveTarget={setActiveTarget}
+                        maxHeight={400}
+                    />
                 </>
             ) : (
                 <pre style={{ margin: 0, padding: "4px 0 6px", whiteSpace: "pre-wrap", wordBreak: "break-word", font: "12px/1.55 ui-monospace, monospace", maxHeight: 400, overflow: "auto" }}>
@@ -1235,6 +1335,11 @@ export function SessionInspectView({ sessionId }: { readonly sessionId: string }
         return m ? Number(m[1]) : null;
     };
     const [anchoredSeq, setAnchoredSeq] = useState<number | null>(() => readHashSeq());
+
+    // The docked right-rail inspector tracks the last block/alias the user
+    // hovered, across all turns (seeded to the first parsed turn).
+    const [selection, setSelection] = useInspectSelection(data);
+
     useEffect(() => {
         if (typeof window === "undefined") return;
         const onHashChange = () => setAnchoredSeq(readHashSeq());
@@ -1441,6 +1546,8 @@ export function SessionInspectView({ sessionId }: { readonly sessionId: string }
                                             turn={t}
                                             anchored={anchoredSeq === t.seq}
                                             childrenSpawnedHere={childrenByTurn.get(t.seq)}
+                                            activeTarget={selection?.turnSeq === t.seq ? selection.target : null}
+                                            onInspect={setSelection}
                                         />
                                     );
                                 });
@@ -1479,7 +1586,12 @@ export function SessionInspectView({ sessionId }: { readonly sessionId: string }
                                 </div>
                             ) : null}
                         </div>
-                        <CostRail data={data} currentSeq={visibleSeq} />
+                        <DockedRail
+                            data={data}
+                            currentSeq={visibleSeq}
+                            selection={selection}
+                            setSelection={setSelection}
+                        />
                     </div>
                 </>
             ) : null}

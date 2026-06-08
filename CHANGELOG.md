@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.13.0](https://github.com/Necmttn/ax/compare/v0.12.1...v0.13.0) (2026-06-08)
+
+
+### Features
+
+* **share:** export subagent transcripts + price Claude sessions ([#145](https://github.com/Necmttn/ax/issues/145)) ([#146](https://github.com/Necmttn/ax/issues/146)) ([7b8d050](https://github.com/Necmttn/ax/commit/7b8d050031853e647b2b06500aa6d1b4879b2a43))
+
+
+### Bug Fixes
+
+* **ingest:** clear agent_event by primary id so index drift can't crash re-ingest ([#141](https://github.com/Necmttn/ax/issues/141)) ([1090c5f](https://github.com/Necmttn/ax/commit/1090c5f2616d57c2994539447cb0906e28c16470))
+
 ## [0.12.1](https://github.com/Necmttn/ax/compare/v0.12.0...v0.12.1) (2026-06-07)
 
 
