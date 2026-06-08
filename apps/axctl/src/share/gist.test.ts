@@ -1,18 +1,31 @@
 import { describe, expect, it } from "bun:test";
 import {
-    gistCreateArgs,
-    parseGistCreateOutput,
+    gistApiArgs,
+    gistBundlePayload,
+    parseGistApiOutput,
     shareUrlForGist,
 } from "./gist.ts";
+import { minimalShareArtifact } from "./artifact.ts";
+import { buildShareBundle } from "./manifest.ts";
 
 describe("gist helpers", () => {
-    it("parses owner and gist id from gh output", () => {
-        const parsed = parseGistCreateOutput("https://gist.github.com/necmttn/abc123def456\n");
+    it("parses owner and gist id from gh api JSON", () => {
+        const parsed = parseGistApiOutput(
+            JSON.stringify({ id: "abc123def456", owner: { login: "necmttn" }, html_url: "x" }),
+        );
         expect(parsed).toEqual({ owner: "necmttn", gistId: "abc123def456" });
     });
 
-    it("returns null for unparseable gh output", () => {
-        expect(parseGistCreateOutput("created gist but no url")).toBeNull();
+    it("tolerates anonymous gists (no owner)", () => {
+        expect(parseGistApiOutput(JSON.stringify({ id: "abc123" }))).toEqual({
+            owner: "",
+            gistId: "abc123",
+        });
+    });
+
+    it("returns null for unparseable / id-less output", () => {
+        expect(parseGistApiOutput("not json")).toBeNull();
+        expect(parseGistApiOutput(JSON.stringify({ owner: { login: "x" } }))).toBeNull();
     });
 
     it("builds canonical ax share URLs", () => {
@@ -21,30 +34,19 @@ describe("gist helpers", () => {
         );
     });
 
-    it("omits visibility flags for default private gists", () => {
-        const args = gistCreateArgs({ public: false });
-
-        expect(args).toEqual([
-            "gh",
-            "gist",
-            "create",
-            "--filename",
-            "ax-session.json",
-            "-",
-        ]);
-        expect(args).not.toContain("--public");
-        expect(args).not.toContain("--secret");
+    it("POSTs the gist body from stdin via gh api", () => {
+        expect(gistApiArgs()).toEqual(["gh", "api", "--method", "POST", "/gists", "--input", "-"]);
     });
 
-    it("passes public visibility flag for public gists", () => {
-        expect(gistCreateArgs({ public: true })).toEqual([
-            "gh",
-            "gist",
-            "create",
-            "--public",
-            "--filename",
-            "ax-session.json",
-            "-",
-        ]);
+    it("serializes the bundle into a files map with stringified content", () => {
+        const bundle = buildShareBundle(minimalShareArtifact({ id: "abc123", source: "codex" }));
+        const payload = gistBundlePayload({ bundle, public: true });
+
+        expect(payload.public).toBe(true);
+        expect(payload.description).toContain("abc123");
+        expect(Object.keys(payload.files).sort()).toEqual(["index.json", "session.json"]);
+        // Each file's content is a JSON string, not a nested object.
+        expect(typeof payload.files["index.json"]!.content).toBe("string");
+        expect(JSON.parse(payload.files["index.json"]!.content).kind).toBe("manifest");
     });
 });

@@ -137,9 +137,9 @@ describe("buildShareArtifactFromParts", () => {
         files: [],
     };
 
-    it("emits a schema v2 artifact", () => {
+    it("emits a current-schema artifact", () => {
         const artifact = buildShareArtifactFromParts(baseParts);
-        expect(artifact.schema_version).toBe(2);
+        expect(artifact.schema_version).toBe(3);
     });
 
     it("attaches child subagent shares when provided", () => {
