@@ -11,6 +11,9 @@
     "build:studio": "bun --filter @ax/studio build:desktop",
     "build": "bun run build:studio && bun run build:main",
     "start": "bun run build && electron .",
+    "prepackage": "bun run scripts/fetch-binaries.ts && bun run scripts/stage-ax-source.ts && bun run build",
+    "package": "bun run prepackage && electron-builder --config electron-builder.config.cjs",
+    "package:dir": "bun run prepackage && electron-builder --dir --config electron-builder.config.cjs",
     "test": "bun test",
     "typecheck": "tsc --noEmit"
   },
