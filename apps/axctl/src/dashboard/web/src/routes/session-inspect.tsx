@@ -13,10 +13,10 @@ import type { InspectContentAtomDto, InspectContentBlockDto, InspectTurnContentD
 interface KindStyle { bg: string; fg: string; bar: string; label: string }
 export const KIND_STYLE: Record<InspectSpanKind, KindStyle> = {
     user_input:            { bg: "#fef9c3", fg: "#78350f", bar: "#eab308", label: "user input" },
-    assistant_text:        { bg: "#f3f4f6", fg: "#111827", bar: "#0f172a", label: "assistant text" },
+    assistant_text:        { bg: "#f3f4f6", fg: "var(--ink)", bar: "var(--ink)", label: "assistant text" },
     tool_use:              { bg: "#ede9fe", fg: "#4c1d95", bar: "#8b5cf6", label: "tool use" },
-    skill_context:         { bg: "#dbeafe", fg: "#1e3a8a", bar: "#3b82f6", label: "skill" },
-    system_context:        { bg: "#e5e7eb", fg: "#1f2937", bar: "#64748b", label: "system" },
+    skill_context:         { bg: "#dbeafe", fg: "#1e3a8a", bar: "var(--blue)", label: "skill" },
+    system_context:        { bg: "#e5e7eb", fg: "#1f2937", bar: "var(--muted)", label: "system" },
     wrapper_instruction:   { bg: "#fde68a", fg: "#92400e", bar: "#f59e0b", label: "wrapper" },
     hook_injection:        { bg: "#bbf7d0", fg: "#065f46", bar: "#10b981", label: "hook" },
     tool_result:           { bg: "#e9d5ff", fg: "#5b21b6", bar: "#a855f7", label: "tool result" },
@@ -44,12 +44,12 @@ const ALIAS_STYLE: Record<string, ContentTone> = {
     budget:                { bg: "#ffedd5", fg: "#9a3412", bar: "#f97316", label: "budget" },
     continuation_behavior: { bg: "#fef3c7", fg: "#854d0e", bar: "#eab308", label: "continuation" },
     completion_audit:      { bg: "#fee2e2", fg: "#991b1b", bar: "#ef4444", label: "completion audit" },
-    progress_visibility:   { bg: "#dbeafe", fg: "#1e3a8a", bar: "#3b82f6", label: "progress" },
+    progress_visibility:   { bg: "#dbeafe", fg: "#1e3a8a", bar: "var(--blue)", label: "progress" },
     work_from_evidence:    { bg: "#ccfbf1", fg: "#115e59", bar: "#14b8a6", label: "evidence" },
     environment_context:   { bg: "#e0f2fe", fg: "#075985", bar: "#0284c7", label: "environment" },
-    permissions:           { bg: "#e5e7eb", fg: "#1f2937", bar: "#64748b", label: "permissions" },
+    permissions:           { bg: "#e5e7eb", fg: "#1f2937", bar: "var(--muted)", label: "permissions" },
     agent_guidance:        { bg: "#f5f3ff", fg: "#5b21b6", bar: "#8b5cf6", label: "agent guidance" },
-    skills_manifest:       { bg: "#dbeafe", fg: "#1e3a8a", bar: "#2563eb", label: "skills" },
+    skills_manifest:       { bg: "#dbeafe", fg: "#1e3a8a", bar: "var(--blue)", label: "skills" },
     apps_manifest:         { bg: "#ecfccb", fg: "#3f6212", bar: "#84cc16", label: "apps" },
     plugins_manifest:      { bg: "#fce7f3", fg: "#9d174d", bar: "#ec4899", label: "plugins" },
     tool_call:             { bg: "#ede9fe", fg: "#4c1d95", bar: "#8b5cf6", label: "tool call" },
@@ -57,7 +57,7 @@ const ALIAS_STYLE: Record<string, ContentTone> = {
     plan:                  { bg: "#cffafe", fg: "#155e75", bar: "#06b6d4", label: "plan" },
     todo:                  { bg: "#fef9c3", fg: "#713f12", bar: "#ca8a04", label: "todo" },
     verification:          { bg: "#dcfce7", fg: "#14532d", bar: "#16a34a", label: "verification" },
-    reference:             { bg: "#f1f5f9", fg: "#334155", bar: "#64748b", label: "reference" },
+    reference:             { bg: "var(--track)", fg: "var(--ink)", bar: "var(--muted)", label: "reference" },
 };
 
 const numberOrNull = (value: number | null | undefined): number | null =>
@@ -106,7 +106,7 @@ function totalBreakdownCost(usage: SessionTokenUsageDetail): number {
 
 function costBarSegments(usage: SessionTokenUsageDetail): ReadonlyArray<{ label: string; value: number | null; color: string }> {
     return [
-        { label: "fresh input", value: numberOrNull(usage.estimated_input_cost_usd), color: "#2567a8" },
+        { label: "fresh input", value: numberOrNull(usage.estimated_input_cost_usd), color: "var(--blue)" },
         { label: "cache write", value: numberOrNull(usage.estimated_cache_creation_cost_usd), color: "#f59e0b" },
         { label: "cache read", value: numberOrNull(usage.estimated_cache_read_cost_usd), color: "#10b981" },
         { label: "output", value: numberOrNull(usage.estimated_output_cost_usd), color: "#8b5cf6" },
@@ -184,17 +184,17 @@ function turnTokenUsageTitle(turn: InspectTurnDto): string {
 }
 
 function blockFamily(kind: string): ContentTone {
-    if (kind.includes("system") || kind.includes("instruction")) return { bg: "#e5e7eb", fg: "#1f2937", bar: "#64748b", label: "system" };
-    if (kind.includes("environment") || kind.includes("context")) return { bg: "#dbeafe", fg: "#1e3a8a", bar: "#2563eb", label: "context" };
+    if (kind.includes("system") || kind.includes("instruction")) return { bg: "#e5e7eb", fg: "#1f2937", bar: "var(--muted)", label: "system" };
+    if (kind.includes("environment") || kind.includes("context")) return { bg: "#dbeafe", fg: "#1e3a8a", bar: "var(--blue)", label: "context" };
     if (kind.includes("objective") || kind.includes("goal")) return { bg: "#dcfce7", fg: "#166534", bar: "#22c55e", label: "objective" };
     if (kind.includes("budget") || kind.includes("metric")) return { bg: "#ffedd5", fg: "#9a3412", bar: "#f97316", label: "budget" };
     if (kind.includes("assistant")) return { bg: "#cffafe", fg: "#155e75", bar: "#06b6d4", label: "assistant" };
     if (kind.includes("tool")) return { bg: "#ede9fe", fg: "#4c1d95", bar: "#8b5cf6", label: "tool" };
     if (kind.includes("hook")) return { bg: "#bbf7d0", fg: "#065f46", bar: "#10b981", label: "hook" };
-    if (kind.includes("code")) return { bg: "#f1f5f9", fg: "#334155", bar: "#475569", label: "code" };
+    if (kind.includes("code")) return { bg: "var(--track)", fg: "var(--ink)", bar: "var(--muted)", label: "code" };
     if (kind.includes("heading")) return { bg: "#fee2e2", fg: "#991b1b", bar: "#ef4444", label: "heading" };
     if (kind.includes("paragraph")) return { bg: "#fef9c3", fg: "#78350f", bar: "#eab308", label: "paragraph" };
-    return { bg: "#f8fafc", fg: "#334155", bar: "#94a3b8", label: blockLabel(kind) };
+    return { bg: "var(--page)", fg: "var(--ink)", bar: "var(--muted-2)", label: blockLabel(kind) };
 }
 
 function blockLabel(kind: string): string {
@@ -305,11 +305,11 @@ function atomDisplayLabel(atom: InspectContentAtomDto): string {
 
 function atomTone(atom: InspectContentAtomDto): ContentTone {
     if (atom.kind === "section_alias") return ALIAS_STYLE[atom.value] ?? ALIAS_STYLE.reference;
-    if (atom.kind.includes("file")) return { bg: "#eff6ff", fg: "#1d4ed8", bar: "#3b82f6", label: "file" };
+    if (atom.kind.includes("file")) return { bg: "#eff6ff", fg: "#1d4ed8", bar: "var(--blue)", label: "file" };
     if (atom.kind.includes("url") || atom.kind.includes("citation")) return { bg: "#ecfeff", fg: "#0e7490", bar: "#06b6d4", label: "link" };
     if (atom.kind.includes("symbol")) return { bg: "#f0fdf4", fg: "#15803d", bar: "#22c55e", label: "symbol" };
     if (atom.kind.includes("command")) return { bg: "#fef3c7", fg: "#92400e", bar: "#f59e0b", label: "command" };
-    return { bg: "#f8fafc", fg: "#334155", bar: "#94a3b8", label: blockLabel(atom.kind) };
+    return { bg: "var(--page)", fg: "var(--ink)", bar: "var(--muted-2)", label: blockLabel(atom.kind) };
 }
 
 function semanticAliasCounts(content: InspectTurnContentDto): Array<{ alias: string; label: string; count: number; tone: ContentTone }> {
@@ -465,7 +465,7 @@ export function InspectGuide({ data }: { data: Pick<SessionInspectPayload, "tota
             margin: "4px 24px 10px",
             padding: "8px 10px",
             border: "1px solid #cfd8d4",
-            background: "#f8fafc",
+            background: "var(--page)",
             display: "grid",
             gap: 7,
         }}>
@@ -479,12 +479,12 @@ export function InspectGuide({ data }: { data: Pick<SessionInspectPayload, "tota
                     </strong>
                     <span
                         title="Total provider tokens reported for the session. This is billing telemetry, unlike the structure percentages below which are character share."
-                        style={{ color: "#64748b", font: "11px/1.4 ui-monospace, monospace" }}
+                        style={{ color: "var(--muted)", font: "11px/1.4 ui-monospace, monospace" }}
                     >
                         {fmtCount(usage.estimated_tokens)} tokens · {usage.model ?? "unknown model"}
                     </span>
                 </div>
-                <span style={{ color: "#64748b", font: "10px/1.4 ui-monospace, monospace" }}>
+                <span style={{ color: "var(--muted)", font: "10px/1.4 ui-monospace, monospace" }}>
                     structure % = character share · hover metrics for definitions
                 </span>
             </div>
@@ -503,8 +503,8 @@ export function InspectGuide({ data }: { data: Pick<SessionInspectPayload, "tota
                         title={`${segment.label}: ${fmtUsd(segment.value)} (${pctOf(segment.value, breakdownTotal || totalCost)} of known cost components)`}
                         style={{
                             background: "#fff",
-                            color: "#334155",
-                            border: "1px solid #e2e8f0",
+                            color: "var(--ink)",
+                            border: "1px solid var(--line)",
                             borderLeft: `3px solid ${segment.color}`,
                             padding: "2px 7px",
                             font: "10px/1.2 ui-monospace, monospace",
@@ -591,7 +591,7 @@ export function CostRail({
         ? `${((progress.totalCostUsd / sessionCost) * 100).toFixed(1)}%`
         : "-";
     const rows = [
-        ["fresh", progress.freshInputCostUsd, "#2567a8", "Fresh input billed at normal input price."],
+        ["fresh", progress.freshInputCostUsd, "var(--blue)", "Fresh input billed at normal input price."],
         ["cache write", progress.cacheWriteCostUsd, "#f59e0b", "Cache creation cost reported by provider usage."],
         ["cache read", progress.cacheReadCostUsd, "#10b981", "Cached input read cost reported by provider usage."],
         ["output", progress.outputCostUsd, "#8b5cf6", "Output token cost reported by provider usage."],
@@ -612,31 +612,31 @@ export function CostRail({
                     maxHeight: "calc(100vh - 64px)",
                     overflow: "auto",
                 }),
-            border: "1px solid #d8dee8",
-            background: "#f8fafc",
+            border: "1px solid var(--line)",
+            background: "var(--page)",
             fontFamily: "ui-monospace, monospace",
-            color: "#334155",
+            color: "var(--ink)",
         }}>
-            <div style={{ padding: "8px 9px", borderBottom: "1px solid #e2e8f0" }}>
-                <div style={{ color: "#64748b", font: "700 10px/1.2 ui-monospace, monospace", textTransform: "uppercase" }}>
+            <div style={{ padding: "8px 9px", borderBottom: "1px solid var(--line)" }}>
+                <div style={{ color: "var(--muted)", font: "700 10px/1.2 ui-monospace, monospace", textTransform: "uppercase" }}>
                     cost so far
                 </div>
                 <div
                     title="Exact provider token usage summed through the currently visible turn. Missing transcript rows are not estimated in this rail."
-                    style={{ marginTop: 6, color: "#111827", font: "700 20px/1 ui-monospace, monospace" }}
+                    style={{ marginTop: 6, color: "var(--ink)", font: "700 20px/1 ui-monospace, monospace" }}
                 >
                     {fmtUsd(progress.totalCostUsd)}
                 </div>
-                <div style={{ marginTop: 5, color: "#64748b", font: "10px/1.35 ui-monospace, monospace" }}>
+                <div style={{ marginTop: 5, color: "var(--muted)", font: "10px/1.35 ui-monospace, monospace" }}>
                     through #{currentSeq ?? "-"} · {progressPct} of session
                 </div>
             </div>
             <dl style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: "5px 8px", margin: 0, padding: "8px 9px", font: "10px/1.25 ui-monospace, monospace" }}>
-                <dt style={{ color: "#64748b" }}>exact turns</dt>
+                <dt style={{ color: "var(--muted)" }}>exact turns</dt>
                 <dd style={{ margin: 0, fontWeight: 700 }}>{progress.exactTurns}/{exactTurnCount}</dd>
-                <dt style={{ color: "#64748b" }}>tokens</dt>
+                <dt style={{ color: "var(--muted)" }}>tokens</dt>
                 <dd style={{ margin: 0, fontWeight: 700 }}>{fmtCount(progress.estimatedTokens)}</dd>
-                <dt style={{ color: "#64748b" }}>session total</dt>
+                <dt style={{ color: "var(--muted)" }}>session total</dt>
                 <dd style={{ margin: 0, fontWeight: 700 }}>{fmtUsd(sessionCost)}</dd>
             </dl>
             <div style={{ display: "grid", gap: 5, padding: "0 9px 9px" }}>
@@ -644,14 +644,14 @@ export function CostRail({
                     <div
                         key={label}
                         title={title}
-                        style={{ display: "flex", justifyContent: "space-between", gap: 8, border: "1px solid #e2e8f0", background: "#fff", borderLeft: `3px solid ${color}`, padding: "5px 6px", font: "10px/1.2 ui-monospace, monospace" }}
+                        style={{ display: "flex", justifyContent: "space-between", gap: 8, border: "1px solid var(--line)", background: "#fff", borderLeft: `3px solid ${color}`, padding: "5px 6px", font: "10px/1.2 ui-monospace, monospace" }}
                     >
-                        <span style={{ color: "#64748b" }}>{label}</span>
+                        <span style={{ color: "var(--muted)" }}>{label}</span>
                         <strong>{fmtUsd(value)}</strong>
                     </div>
                 ))}
             </div>
-            <div style={{ borderTop: "1px solid #e2e8f0", padding: "7px 9px", color: "#64748b", font: "10px/1.35 ui-monospace, monospace" }}>
+            <div style={{ borderTop: "1px solid var(--line)", padding: "7px 9px", color: "var(--muted)", font: "10px/1.35 ui-monospace, monospace" }}>
                 Exact provider rows only. Turns without token events are explained on hover.
             </div>
         </aside>
@@ -726,8 +726,8 @@ export function DockedRail({
                 />
             ) : (
                 <aside style={{
-                    border: "1px solid #d8dee8", background: "#f8fafc",
-                    padding: 10, color: "#94a3b8",
+                    border: "1px solid var(--line)", background: "var(--page)",
+                    padding: 10, color: "var(--muted-2)",
                     font: "11px/1.5 ui-monospace, monospace",
                 }}>
                     Hover a turn’s text to inspect its parsed blocks here.
@@ -857,60 +857,60 @@ export function TurnContentInspector({
         : null;
 
     return (
-        <aside style={{ border: "1px solid #d8dee8", background: "#f8fafc", minWidth: 0, maxHeight, overflow: "auto" }}>
-            <div style={{ padding: "8px 10px", borderBottom: "1px solid #e2e8f0", display: "flex", justifyContent: "space-between", gap: 8, alignItems: "baseline" }}>
-                <strong style={{ color: "#334155", font: "700 10px/1 ui-monospace, monospace", textTransform: "uppercase" }}>
+        <aside style={{ border: "1px solid var(--line)", background: "var(--page)", minWidth: 0, maxHeight, overflow: "auto" }}>
+            <div style={{ padding: "8px 10px", borderBottom: "1px solid var(--line)", display: "flex", justifyContent: "space-between", gap: 8, alignItems: "baseline" }}>
+                <strong style={{ color: "var(--ink)", font: "700 10px/1 ui-monospace, monospace", textTransform: "uppercase" }}>
                     inspector{turnSeq != null ? ` · #${turnSeq}` : ""}
                 </strong>
-                <span style={{ color: "#94a3b8", font: "10px/1 ui-monospace, monospace" }}>
+                <span style={{ color: "var(--muted-2)", font: "10px/1 ui-monospace, monospace" }}>
                     {content.parser_id}@{content.parser_version}
                 </span>
             </div>
             {!block ? (
-                <div style={{ padding: 10, color: "#94a3b8", font: "11px/1.5 ui-monospace, monospace" }}>No parsed block selected.</div>
+                <div style={{ padding: 10, color: "var(--muted-2)", font: "11px/1.5 ui-monospace, monospace" }}>No parsed block selected.</div>
             ) : (
                 <div style={{ padding: 10, display: "grid", gap: 8 }}>
-                    <div style={{ background: "#fff", border: "1px solid #e2e8f0", boxShadow: `inset 4px 0 0 ${family.bar}`, padding: "8px 9px" }}>
+                    <div style={{ background: "#fff", border: "1px solid var(--line)", boxShadow: `inset 4px 0 0 ${family.bar}`, padding: "8px 9px" }}>
                         <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "baseline" }}>
                             <strong style={{ color: family.fg, font: "700 11px/1 ui-monospace, monospace", textTransform: "uppercase" }}>
                                 {displayBlockLabel(block)}
                             </strong>
-                            <span style={{ color: "#94a3b8", font: "10px/1 ui-monospace, monospace" }}>
+                            <span style={{ color: "var(--muted-2)", font: "10px/1 ui-monospace, monospace" }}>
                                 block #{block.seq}{block.parent_seq == null ? "" : ` / parent ${block.parent_seq}`}
                             </span>
                         </div>
-                        <div style={{ marginTop: 6, color: "#64748b", font: "10px/1.3 ui-monospace, monospace" }}>
+                        <div style={{ marginTop: 6, color: "var(--muted)", font: "10px/1.3 ui-monospace, monospace" }}>
                             {block.kind} · {Math.round(block.confidence * 100)}% · {block.start_offset ?? "?"}-{block.end_offset ?? "?"}
                         </div>
                         {block.heading ? (
-                            <div style={{ marginTop: 7, color: "#334155", font: "700 11px/1.35 ui-monospace, monospace" }}>{block.heading}</div>
+                            <div style={{ marginTop: 7, color: "var(--ink)", font: "700 11px/1.35 ui-monospace, monospace" }}>{block.heading}</div>
                         ) : null}
-                        <pre style={{ margin: "7px 0 0", color: "#334155", font: "11px/1.45 ui-monospace, monospace", whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
+                        <pre style={{ margin: "7px 0 0", color: "var(--ink)", font: "11px/1.45 ui-monospace, monospace", whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
                             {contentBrief(block.text_excerpt ?? block.text)}
                         </pre>
                     </div>
 
                     {turnUsage ? (
-                        <div style={{ background: "#fff", border: "1px solid #e2e8f0", padding: "8px 9px" }}>
+                        <div style={{ background: "#fff", border: "1px solid var(--line)", padding: "8px 9px" }}>
                             <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "baseline" }}>
-                                <strong style={{ color: "#334155", font: "700 10px/1 ui-monospace, monospace", textTransform: "uppercase" }}>
+                                <strong style={{ color: "var(--ink)", font: "700 10px/1 ui-monospace, monospace", textTransform: "uppercase" }}>
                                     estimated cost lens
                                 </strong>
-                                <span style={{ color: "#94a3b8", font: "10px/1 ui-monospace, monospace" }}>
+                                <span style={{ color: "var(--muted-2)", font: "10px/1 ui-monospace, monospace" }}>
                                     char-weighted
                                 </span>
                             </div>
                             <dl style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: "4px 8px", margin: "7px 0 0", font: "11px/1.35 ui-monospace, monospace" }}>
-                                <dt style={{ color: "#64748b" }}>allocated block cost</dt>
+                                <dt style={{ color: "var(--muted)" }}>allocated block cost</dt>
                                 <dd style={{ margin: 0, fontWeight: 700 }}>{fmtUsd(blockTotalCost)}</dd>
-                                <dt style={{ color: "#64748b" }}>cache-read share</dt>
+                                <dt style={{ color: "var(--muted)" }}>cache-read share</dt>
                                 <dd style={{ margin: 0, fontWeight: 700 }}>{fmtUsd(blockCacheReadCost)}</dd>
-                                <dt style={{ color: "#64748b" }}>block chars</dt>
+                                <dt style={{ color: "var(--muted)" }}>block chars</dt>
                                 <dd style={{ margin: 0 }}>{fmtCount(blockChars)}</dd>
-                                <dt style={{ color: "#64748b" }}>turn tokens</dt>
+                                <dt style={{ color: "var(--muted)" }}>turn tokens</dt>
                                 <dd style={{ margin: 0 }}>{fmtCount(turnUsage.estimated_tokens)}</dd>
                             </dl>
-                            <div style={{ marginTop: 6, color: "#64748b", fontSize: 11, lineHeight: 1.35 }}>
+                            <div style={{ marginTop: 6, color: "var(--muted)", fontSize: 11, lineHeight: 1.35 }}>
                                 Turn usage is provider-derived; block/span cost is allocated by character share inside this turn.
                             </div>
                         </div>
@@ -921,11 +921,11 @@ export function TurnContentInspector({
                     ) : null}
 
                     <div>
-                        <div style={{ color: "#64748b", font: "700 10px/1 ui-monospace, monospace", textTransform: "uppercase", marginBottom: 5 }}>
+                        <div style={{ color: "var(--muted)", font: "700 10px/1 ui-monospace, monospace", textTransform: "uppercase", marginBottom: 5 }}>
                             atoms in this block · {blockAtoms.length}
                         </div>
                         {blockAtoms.length === 0 ? (
-                            <div style={{ color: "#94a3b8", font: "11px/1.5 ui-monospace, monospace" }}>No references or semantic atoms extracted.</div>
+                            <div style={{ color: "var(--muted-2)", font: "11px/1.5 ui-monospace, monospace" }}>No references or semantic atoms extracted.</div>
                         ) : (
                             <div style={{ display: "grid", gap: 5 }}>
                                 {blockAtoms.map((entry, index) => {
@@ -953,7 +953,7 @@ export function TurnContentInspector({
                         )}
                     </div>
                     {content.blockset_hash ? (
-                        <div style={{ color: "#94a3b8", font: "10px/1.35 ui-monospace, monospace", borderTop: "1px solid #e2e8f0", paddingTop: 7 }}>
+                        <div style={{ color: "var(--muted-2)", font: "10px/1.35 ui-monospace, monospace", borderTop: "1px solid var(--line)", paddingTop: 7 }}>
                             blockset {content.blockset_hash.slice(0, 12)}
                         </div>
                     ) : null}
@@ -970,7 +970,7 @@ function AtomCard({ atom, active, compact = false }: { atom: InspectContentAtomD
     const matched = typeof raw["matched"] === "string" ? raw["matched"] : null;
     return (
         <div style={{
-            border: `1px solid ${active ? tone.bar : "#e2e8f0"}`,
+            border: `1px solid ${active ? tone.bar : "var(--line)"}`,
             boxShadow: `inset 3px 0 0 ${tone.bar}`,
             background: active ? tone.bg : "#fff",
             padding: compact ? "6px 7px" : "8px 9px",
@@ -979,15 +979,15 @@ function AtomCard({ atom, active, compact = false }: { atom: InspectContentAtomD
                 <strong style={{ color: tone.fg, font: "700 10px/1 ui-monospace, monospace", textTransform: "uppercase" }}>
                     {atomDisplayLabel(atom)}
                 </strong>
-                <span style={{ color: "#94a3b8", font: "10px/1 ui-monospace, monospace" }}>
+                <span style={{ color: "var(--muted-2)", font: "10px/1 ui-monospace, monospace" }}>
                     {Math.round(atom.confidence * 100)}%
                 </span>
             </div>
-            <div style={{ marginTop: 4, color: "#334155", font: "11px/1.35 ui-monospace, monospace", overflowWrap: "anywhere" }}>
+            <div style={{ marginTop: 4, color: "var(--ink)", font: "11px/1.35 ui-monospace, monospace", overflowWrap: "anywhere" }}>
                 {atom.normalized ?? atom.value}
             </div>
             {!compact && (method || matched) ? (
-                <div style={{ marginTop: 5, color: "#64748b", font: "10px/1.35 ui-monospace, monospace" }}>
+                <div style={{ marginTop: 5, color: "var(--muted)", font: "10px/1.35 ui-monospace, monospace" }}>
                     {method ? `method: ${method}` : null}
                     {method && matched ? " · " : null}
                     {matched ? `matched: ${matched}` : null}
@@ -1095,8 +1095,8 @@ function SpawnMarker({ child }: { child: SpawnChildDto }) {
  *  that landed in the agent's context window. */
 export function HookFireMarker({ hook }: { hook: HookFireDto }) {
     const ts = hook.ts ? new Date(hook.ts).toISOString().slice(11, 19) : "";
-    const injectBg = hook.inject ? "#bbf7d0" : "#e2e8f0";
-    const injectFg = hook.inject ? "#065f46" : "#475569";
+    const injectBg = hook.inject ? "#bbf7d0" : "var(--line)";
+    const injectFg = hook.inject ? "#065f46" : "var(--muted)";
     const filePathShort = hook.file_path.length > 60
         ? `…${hook.file_path.slice(-58)}`
         : hook.file_path;
@@ -1108,7 +1108,7 @@ export function HookFireMarker({ hook }: { hook: HookFireDto }) {
                 margin: "4px 24px", padding: "6px 10px",
                 scrollMarginTop: JUMP_TARGET_SCROLL_MARGIN,
                 borderLeft: "3px solid #10b981",
-                background: hook.inject ? "#ecfdf5" : "#f8fafc",
+                background: hook.inject ? "#ecfdf5" : "var(--page)",
                 borderRadius: 3, fontSize: 11,
                 fontFamily: "ui-monospace, monospace", color: "#065f46",
             }}
@@ -1124,10 +1124,10 @@ export function HookFireMarker({ hook }: { hook: HookFireDto }) {
                 <span style={{ background: "#fef3c7", color: "#92400e", padding: "0 6px", borderRadius: 2, fontSize: 10 }}>
                     reason: <strong>{hook.reason}</strong>
                 </span>
-                <span style={{ color: "#64748b", fontSize: 10 }}>{hook.latency_ms}ms</span>
-                <span style={{ color: "#64748b", marginLeft: "auto" }}>{ts}</span>
+                <span style={{ color: "var(--muted)", fontSize: 10 }}>{hook.latency_ms}ms</span>
+                <span style={{ color: "var(--muted)", marginLeft: "auto" }}>{ts}</span>
             </div>
-            <div style={{ marginTop: 3, color: "#475569", fontSize: 11, wordBreak: "break-all" }}>
+            <div style={{ marginTop: 3, color: "var(--muted)", fontSize: 11, wordBreak: "break-all" }}>
                 {filePathShort}
             </div>
             {hook.inject && hook.injected_titles.length > 0 ? (
@@ -1208,7 +1208,7 @@ export function Turn({
     const turnCost = numberOrNull(turnUsage?.estimated_cost_usd);
     const spawnedChildCount = childrenSpawnedHere?.length ?? 0;
     const jsonlBadge = turn.role !== turn.semantic_role.replace(/_text$|_input$/, "")
-        ? <span style={{ color: "#94a3b8", fontSize: 10 }}>(jsonl: {turn.role})</span>
+        ? <span style={{ color: "var(--muted-2)", fontSize: 10 }}>(jsonl: {turn.role})</span>
         : null;
     return (
         <div
@@ -1224,8 +1224,8 @@ export function Turn({
                 transition: "background 0.6s",
             }}
         >
-            <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 11, color: "#64748b", flexWrap: "wrap", fontFamily: "ui-monospace, monospace" }}>
-                <a href={`#turn-${turn.seq}`} style={{ color: "#94a3b8", textDecoration: "none", minWidth: 48 }}>#{turn.seq}</a>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 11, color: "var(--muted)", flexWrap: "wrap", fontFamily: "ui-monospace, monospace" }}>
+                <a href={`#turn-${turn.seq}`} style={{ color: "var(--muted-2)", textDecoration: "none", minWidth: 48 }}>#{turn.seq}</a>
                 <span style={{ background: s.bg, color: s.fg, padding: "1px 8px", borderRadius: 3, fontWeight: 600, fontSize: 10, textTransform: "uppercase", letterSpacing: "0.04em" }}>
                     {s.label}
                 </span>
@@ -1239,17 +1239,17 @@ export function Turn({
                     </span>
                 ) : null}
                 {jsonlBadge}
-                <span title="Turn timestamp from the source transcript." style={{ color: "#94a3b8" }}>{ts}</span>
+                <span title="Turn timestamp from the source transcript." style={{ color: "var(--muted-2)" }}>{ts}</span>
                 <span
                     title={`${sizeStr}c = ${turn.char_count.toLocaleString()} characters in this turn. ${turn.spans.length}span = ${turn.spans.length} classified message slice${turn.spans.length === 1 ? "" : "s"} from the raw transcript.`}
-                    style={{ color: "#94a3b8" }}
+                    style={{ color: "var(--muted-2)" }}
                 >
                     {sizeStr}c · {turn.spans.length}span
                 </span>
                 {turnUsage ? (
                     <span
                         title={turnTokenUsageTitle(turn)}
-                        style={{ color: "#64748b" }}
+                        style={{ color: "var(--muted)" }}
                     >
                         {turnCost !== null ? fmtUsd(turnCost) : "cost ?"} · {usageTokenLine(turnUsage)}
                     </span>
@@ -1258,8 +1258,8 @@ export function Turn({
                     <span
                         title="This turn is showing in the docked inspector on the right."
                         style={{
-                            padding: "1px 7px", border: "1px solid #0f172a", borderRadius: 3,
-                            background: "#0f172a", color: "#fff",
+                            padding: "1px 7px", border: "1px solid var(--ink)", borderRadius: 3,
+                            background: "var(--ink)", color: "#fff",
                             font: "10px/1.4 ui-monospace, monospace",
                         }}
                     >
@@ -1445,14 +1445,14 @@ export function SessionInspectView({ sessionId }: { readonly sessionId: string }
             {query.isLoading && !data ? <div className="loading">Loading…</div> : null}
             {data ? (
                 <>
-                    <div style={{ padding: "8px 24px", color: "#64748b", fontSize: 12, fontFamily: "ui-monospace, monospace" }}>
+                    <div style={{ padding: "8px 24px", color: "var(--muted)", fontSize: 12, fontFamily: "ui-monospace, monospace" }}>
                         <span>project: </span>
                         {data.project ? (
-                            <Link to="/projects/$slug" params={{ slug: data.project }} style={{ color: "#2563eb", fontWeight: 600 }}>
+                            <Link to="/projects/$slug" params={{ slug: data.project }} style={{ color: "var(--blue)", fontWeight: 600 }}>
                                 {sessionProjectLabel(data.project, data.cwd)}
                             </Link>
                         ) : (
-                            <strong style={{ color: "#334155" }}>{sessionProjectLabel(data.project, data.cwd)}</strong>
+                            <strong style={{ color: "var(--ink)" }}>{sessionProjectLabel(data.project, data.cwd)}</strong>
                         )}
                         {" · "}
                         {data.turns.length} turns · {data.total_chars.toLocaleString()} chars
@@ -1556,8 +1556,8 @@ export function SessionInspectView({ sessionId }: { readonly sessionId: string }
                                 <div
                                     ref={sentinelRef}
                                     style={{
-                                        padding: "12px 24px", color: "#64748b", fontSize: 12, fontFamily: "ui-monospace, monospace",
-                                        textAlign: "center", borderTop: "1px dashed #e2e8f0",
+                                        padding: "12px 24px", color: "var(--muted)", fontSize: 12, fontFamily: "ui-monospace, monospace",
+                                        textAlign: "center", borderTop: "1px dashed var(--line)",
                                     }}
                                 >
                                     {appendLoading
@@ -1569,16 +1569,16 @@ export function SessionInspectView({ sessionId }: { readonly sessionId: string }
                                             <button
                                                 onClick={() => void loadMore(200)}
                                                 style={{
-                                                    padding: "2px 10px", marginLeft: 6, fontSize: 11, border: "1px solid #e2e8f0",
-                                                    background: "#fff", color: "#475569", borderRadius: 4, cursor: "pointer",
+                                                    padding: "2px 10px", marginLeft: 6, fontSize: 11, border: "1px solid var(--line)",
+                                                    background: "#fff", color: "var(--muted)", borderRadius: 4, cursor: "pointer",
                                                 }}
                                             >load 200 more</button>
                                             {" "}
                                             <button
                                                 onClick={() => void loadMore(data.total_turns - data.turns.length)}
                                                 style={{
-                                                    padding: "2px 10px", fontSize: 11, border: "1px solid #e2e8f0",
-                                                    background: "#fff", color: "#475569", borderRadius: 4, cursor: "pointer",
+                                                    padding: "2px 10px", fontSize: 11, border: "1px solid var(--line)",
+                                                    background: "#fff", color: "var(--muted)", borderRadius: 4, cursor: "pointer",
                                                 }}
                                             >load all</button>
                                         </>
