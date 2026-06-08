@@ -8,6 +8,7 @@ import * as Layer from "effect/Layer";
 
 import * as Electron from "electron";
 
+import * as AxBackendManager from "./backend/AxBackendManager.ts";
 import * as DesktopApp from "./app/DesktopApp.ts";
 import * as DesktopEnvironment from "./app/DesktopEnvironment.ts";
 import * as DesktopLifecycle from "./app/DesktopLifecycle.ts";
@@ -82,8 +83,18 @@ const foundationLayer = Layer.mergeAll(
     DesktopWindow.layer,
 ).pipe(Layer.provideMerge(environmentLayer));
 
-// Application layer = electron services + foundation, provided platform deps.
-const desktopApplicationLayer = foundationLayer.pipe(
+// Phase 2 backend supervisor, provide-merged ON TOP of foundation so it can
+// consume foundation's DesktopState/DesktopWindow/DesktopBackendOutputLog +
+// DesktopEnvironment. The platform deps (ChildProcessSpawner/HttpClient) come
+// from the platform layer below. Sibling `mergeAll` layers do NOT feed each
+// other, so this must be a `provideMerge`, not another `mergeAll` entry.
+const foundationWithBackendLayer = AxBackendManager.liveLayer.pipe(
+    Layer.provideMerge(foundationLayer),
+);
+
+// Application layer = electron services + foundation (incl. backend supervisor),
+// provided platform deps.
+const desktopApplicationLayer = foundationWithBackendLayer.pipe(
     Layer.provideMerge(electronLayer),
     Layer.provideMerge(platformLayer),
 );
