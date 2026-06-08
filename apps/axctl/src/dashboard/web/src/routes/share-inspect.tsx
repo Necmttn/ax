@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useParams } from "@tanstack/react-router";
 import type {
@@ -97,6 +97,7 @@ export interface ShareSubagentCard {
     readonly file: string;
     readonly parent_id: string | null;
     readonly depth: number;
+    readonly spawn_turn_seq: number | null;
     readonly source: string;
     readonly model?: string;
     readonly started_at?: string;
@@ -247,12 +248,28 @@ function fmtDuration(ms: number | null | undefined): string | null {
 }
 
 /** The transcript body for one session - reused by parent + subagent views. */
-function InspectBody({ data }: { readonly data: SessionInspectPayload }) {
+function InspectBody({
+    data,
+    subagentsByTurn,
+    onSelectSubagent,
+    onPrefetchSubagent,
+}: {
+    readonly data: SessionInspectPayload;
+    readonly subagentsByTurn?: ReadonlyMap<number, ReadonlyArray<ShareSubagentCard>>;
+    readonly onSelectSubagent?: (file: string) => void;
+    readonly onPrefetchSubagent?: (file: string) => void;
+}) {
     const [anchoredSeq, setAnchoredSeq] = useState<number | null>(() => hashSeq());
     const turnsRef = useRef<ReadonlyArray<InspectTurnDto>>([]);
     turnsRef.current = data.turns;
     const visibleSeq = useVisibleTurnSeq(data.turns, anchoredSeq ?? data.turns[0]?.seq ?? null);
     const [selection, setSelection] = useInspectSelection(data);
+    // Spawn-turn seqs power the "next spawn" jump button + match the inline
+    // spawn markers below.
+    const spawnAnchorSeqs = useMemo(
+        () => new Set<number>(subagentsByTurn ? [...subagentsByTurn.keys()] : []),
+        [subagentsByTurn],
+    );
 
     useEffect(() => {
         const onHashChange = () => setAnchoredSeq(hashSeq());
@@ -273,7 +290,7 @@ function InspectBody({ data }: { readonly data: SessionInspectPayload }) {
             </div>
             <FilterBar
                 turns={data.turns}
-                anchorSeqs={new Set()}
+                anchorSeqs={spawnAnchorSeqs}
                 loadedCount={data.turns.length}
                 totalCount={data.total_turns}
                 appendLoading={false}
@@ -303,15 +320,31 @@ function InspectBody({ data }: { readonly data: SessionInspectPayload }) {
             </div>
             <div style={{ display: "flex", alignItems: "flex-start", gap: 12 }}>
                 <div style={{ minWidth: 0, flex: "1 1 auto" }}>
-                    {data.turns.map((turn) => (
-                        <Turn
-                            key={turn.seq}
-                            turn={turn}
-                            anchored={anchoredSeq === turn.seq}
-                            activeTarget={selection?.turnSeq === turn.seq ? selection.target : null}
-                            onInspect={setSelection}
-                        />
-                    ))}
+                    {data.turns.map((turn) => {
+                        const spawned = subagentsByTurn?.get(turn.seq);
+                        return (
+                            <div key={turn.seq}>
+                                <Turn
+                                    turn={turn}
+                                    anchored={anchoredSeq === turn.seq}
+                                    activeTarget={selection?.turnSeq === turn.seq ? selection.target : null}
+                                    onInspect={setSelection}
+                                />
+                                {spawned && spawned.length > 0 ? (
+                                    <div style={{ padding: "2px 24px 6px" }}>
+                                        {spawned.map((card) => (
+                                            <ShareSpawnMarker
+                                                key={card.id}
+                                                card={card}
+                                                onSelect={() => onSelectSubagent?.(card.file)}
+                                                onPrefetch={() => onPrefetchSubagent?.(card.file)}
+                                            />
+                                        ))}
+                                    </div>
+                                ) : null}
+                            </div>
+                        );
+                    })}
                 </div>
                 <DockedRail
                     data={data}
@@ -324,21 +357,37 @@ function InspectBody({ data }: { readonly data: SessionInspectPayload }) {
     );
 }
 
-/** One clickable card in the subagent navigation strip. */
-function SessionNavCard(props: {
-    readonly title: string;
-    readonly subtitle?: string;
-    readonly cost: number | null;
-    readonly durationMs: number | null;
-    readonly steps: number;
-    readonly turns: number;
-    readonly hadError?: boolean;
-    readonly active: boolean;
+const SUBAGENT_BAR_STYLE: CSSProperties = {
+    padding: "6px 24px",
+    background: "#fff1f2",
+    borderTop: "1px solid #fecdd3",
+    borderBottom: "1px solid #fecdd3",
+    fontSize: 12,
+};
+
+const SUBAGENT_LINK_STYLE: CSSProperties = {
+    background: "transparent",
+    border: "none",
+    padding: 0,
+    cursor: "pointer",
+    color: "#9f1239",
+    fontFamily: "ui-monospace, monospace",
+    fontSize: 12,
+    textDecoration: "underline",
+};
+
+/**
+ * Inline "spawned subagent" marker, mirroring the live inspector's SpawnMarker
+ * look but wired to in-bundle file selection (gist children aren't DB routes).
+ */
+function ShareSpawnMarker(props: {
+    readonly card: ShareSubagentCard;
     readonly onSelect: () => void;
     readonly onPrefetch: () => void;
 }) {
-    const cost = fmtUsd(props.cost);
-    const duration = fmtDuration(props.durationMs);
+    const { card } = props;
+    const cost = fmtUsd(card.cost_usd);
+    const duration = fmtDuration(card.duration_ms);
     return (
         <button
             type="button"
@@ -346,34 +395,25 @@ function SessionNavCard(props: {
             onMouseEnter={props.onPrefetch}
             onFocus={props.onPrefetch}
             style={{
-                textAlign: "left",
-                cursor: "pointer",
-                minWidth: 180,
-                maxWidth: 260,
-                padding: "8px 12px",
-                borderRadius: 8,
-                border: props.active ? "1px solid #6366f1" : "1px solid #1e293b",
-                background: props.active ? "#1e1b4b" : "#0f172a",
-                color: "#e2e8f0",
-                display: "flex",
-                flexDirection: "column",
-                gap: 4,
+                display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap",
+                width: "100%", textAlign: "left", cursor: "pointer",
+                margin: "4px 0", padding: "7px 10px", background: "#fff1f2",
+                border: "1px solid #fecdd3", borderLeft: "4px solid #e11d48", borderRadius: 3,
+                fontSize: 11, fontFamily: "ui-monospace, monospace", color: "#9f1239",
             }}
         >
-            <span style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, fontWeight: 600 }}>
-                {props.hadError ? <span title="had failures" style={{ color: "#f87171" }}>●</span> : null}
-                <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{props.title}</span>
+            <span style={{ fontWeight: 700 }}>↳ spawned subagent</span>
+            <span style={{ fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 420 }}>
+                {card.task_label ? `"${card.task_label}"` : `${card.id.slice(0, 24)}…`}
             </span>
-            {props.subtitle ? (
-                <span style={{ fontSize: 11, color: "#94a3b8", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                    {props.subtitle}
-                </span>
-            ) : null}
-            <span style={{ fontSize: 11, color: "#64748b", fontFamily: "ui-monospace, monospace", display: "flex", gap: 8, flexWrap: "wrap" }}>
-                {cost ? <span title="estimated cost">{cost}</span> : null}
-                {duration ? <span title="wall-clock duration">{duration}</span> : null}
-                <span title="tool calls / steps">{props.steps} steps</span>
-                <span title="turns">{props.turns} turns</span>
+            <span style={{ background: "#fecdd3", color: "#7f1d1d", padding: "0 6px", borderRadius: 2, fontSize: 10, fontWeight: 600 }}>
+                {card.model ?? card.source}
+            </span>
+            <span style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
+                {cost ? <span>{cost}</span> : null}
+                {duration ? <span>{duration}</span> : null}
+                <span>{card.stats.turns} turns</span>
+                <span style={{ opacity: 0.7 }}>open →</span>
             </span>
         </button>
     );
@@ -408,6 +448,34 @@ function MultiFileShareView(props: {
     const totalCost = fmtUsd(totals.cost_usd);
     const totalDuration = fmtDuration(totals.duration_ms);
 
+    // Which session is on screen, its direct children grouped by spawn turn
+    // (-> inline markers), and a back-link when viewing a subagent.
+    const selectedSessionId = selectedFile === manifest.root_file
+        ? manifest.session.id
+        : manifest.subagents.find((c) => c.file === selectedFile)?.id ?? null;
+    const subagentsByTurn = useMemo(() => {
+        const map = new Map<number, ShareSubagentCard[]>();
+        for (const card of manifest.subagents) {
+            if (card.parent_id !== selectedSessionId) continue;
+            if (card.spawn_turn_seq == null) continue;
+            const list = map.get(card.spawn_turn_seq) ?? [];
+            list.push(card);
+            map.set(card.spawn_turn_seq, list);
+        }
+        return map;
+    }, [manifest.subagents, selectedSessionId]);
+    const directChildren = manifest.subagents.filter((c) => c.parent_id === selectedSessionId);
+    const selectedCard = selectedFile === manifest.root_file
+        ? null
+        : manifest.subagents.find((c) => c.file === selectedFile) ?? null;
+    const parentCard = selectedCard && selectedCard.parent_id !== manifest.session.id
+        ? manifest.subagents.find((c) => c.id === selectedCard.parent_id) ?? null
+        : null;
+    const parentFile = parentCard ? parentCard.file : manifest.root_file;
+    const parentLabel = parentCard
+        ? (parentCard.task_label ?? `${shortSessionId(parentCard.id)}…`)
+        : "main session";
+
     return (
         <section className="panel">
             <header>
@@ -420,38 +488,56 @@ function MultiFileShareView(props: {
                     {totalDuration ? ` · ${totalDuration}` : ""}
                 </span>
             </header>
-            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", padding: "12px 24px", borderBottom: "1px solid #1e293b" }}>
-                <SessionNavCard
-                    title="Main session"
-                    subtitle={manifest.session.model ?? manifest.session.source}
-                    cost={manifest.token_usage?.estimated_cost_usd ?? null}
-                    durationMs={null}
-                    steps={manifest.stats.tool_calls}
-                    turns={manifest.stats.turns}
-                    hadError={manifest.stats.failures > 0}
-                    active={selectedFile === manifest.root_file}
-                    onSelect={() => setSelectedFile(manifest.root_file)}
-                    onPrefetch={() => prefetch(manifest.root_file)}
-                />
-                {manifest.subagents.map((card) => (
-                    <SessionNavCard
-                        key={card.id}
-                        title={card.task_label ?? shortSessionId(card.id)}
-                        subtitle={card.model ?? card.source}
-                        cost={card.cost_usd}
-                        durationMs={card.duration_ms}
-                        steps={card.stats.tool_calls}
-                        turns={card.stats.turns}
-                        hadError={card.had_error}
-                        active={selectedFile === card.file}
-                        onSelect={() => setSelectedFile(card.file)}
-                        onPrefetch={() => prefetch(card.file)}
-                    />
-                ))}
-            </div>
+            {directChildren.length > 0 ? (
+                <div style={SUBAGENT_BAR_STYLE}>
+                    <strong style={{ color: "#9f1239" }}>
+                        ↓ spawned {directChildren.length} subagent{directChildren.length === 1 ? "" : "s"}
+                    </strong>
+                    <span style={{ marginLeft: 12, color: "#9f1239", opacity: 0.85 }}>
+                        {directChildren.slice(0, 8).map((c, i) => (
+                            <span key={c.id}>
+                                {i > 0 ? " · " : " "}
+                                <button
+                                    type="button"
+                                    onClick={() => setSelectedFile(c.file)}
+                                    onMouseEnter={() => prefetch(c.file)}
+                                    onFocus={() => prefetch(c.file)}
+                                    style={SUBAGENT_LINK_STYLE}
+                                >
+                                    {c.task_label ? `"${c.task_label.slice(0, 40)}${c.task_label.length > 40 ? "…" : ""}"` : `${shortSessionId(c.id)}…`}
+                                    {fmtUsd(c.cost_usd) ? ` (${fmtUsd(c.cost_usd)})` : ""}
+                                </button>
+                            </span>
+                        ))}
+                        {directChildren.length > 8 ? <span> · …+{directChildren.length - 8}</span> : null}
+                    </span>
+                </div>
+            ) : null}
+            {selectedCard ? (
+                <div style={SUBAGENT_BAR_STYLE}>
+                    <button
+                        type="button"
+                        onClick={() => setSelectedFile(parentFile)}
+                        onMouseEnter={() => prefetch(parentFile)}
+                        style={{ ...SUBAGENT_LINK_STYLE, fontWeight: 700 }}
+                    >
+                        ↑ back to {parentLabel}
+                    </button>
+                    <span style={{ color: "#9f1239", marginLeft: 8, opacity: 0.7 }}>
+                        Viewing subagent{selectedCard.task_label ? `: "${selectedCard.task_label.slice(0, 60)}${selectedCard.task_label.length > 60 ? "…" : ""}"` : ""}.
+                    </span>
+                </div>
+            ) : null}
             {fileQuery.error ? <div className="error">Error: {String(fileQuery.error)}</div> : null}
             {fileQuery.isLoading && !data ? <div className="loading">Loading session…</div> : null}
-            {data ? <InspectBody data={data} /> : null}
+            {data ? (
+                <InspectBody
+                    data={data}
+                    subagentsByTurn={subagentsByTurn}
+                    onSelectSubagent={setSelectedFile}
+                    onPrefetchSubagent={prefetch}
+                />
+            ) : null}
         </section>
     );
 }

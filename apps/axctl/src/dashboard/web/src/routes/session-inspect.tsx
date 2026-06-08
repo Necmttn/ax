@@ -737,6 +737,32 @@ export function DockedRail({
     );
 }
 
+const SYMBOL_REF_STYLE = { fontWeight: 700, color: "#15803d" } as const;
+
+/**
+ * Render a block's raw slice with symbol-reference atom values bolded inline,
+ * so named entities (e.g. `SurrealDB`) stand out in the transcript itself
+ * rather than only in the inspector's atom list. Atoms carry no offsets, so we
+ * match by value (longest-first; word boundaries so "data" doesn't bold inside
+ * "metadata").
+ */
+function renderSliceWithSymbols(slice: string, block: InspectContentBlockDto): ReactNode {
+    const symbols = [...new Set(
+        block.atoms
+            .filter((a) => a.kind.includes("symbol") && a.value.length > 0)
+            .map((a) => a.value),
+    )].sort((a, b) => b.length - a.length);
+    if (symbols.length === 0) return slice;
+    const escaped = symbols.map((s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+    const re = new RegExp(`\\b(${escaped.join("|")})\\b`, "g");
+    const symbolSet = new Set(symbols);
+    return slice.split(re).map((part, i) =>
+        symbolSet.has(part)
+            ? <strong key={i} style={SYMBOL_REF_STYLE} title="symbol reference">{part}</strong>
+            : part,
+    );
+}
+
 function AnnotatedRawText({
     content,
     rawText,
@@ -775,7 +801,7 @@ function AnnotatedRawText({
                 title={blockHoverTitle(block, mismatch)}
                 style={rawBlockTextStyle({ tone: family, active, hovered, mismatch })}
             >
-                {slice}
+                {renderSliceWithSymbols(slice, block)}
             </span>,
         );
         cursor = end;

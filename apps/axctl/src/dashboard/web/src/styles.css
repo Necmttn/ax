@@ -121,6 +121,28 @@ a {
     white-space: nowrap;
 }
 
+.masthead-share {
+    align-items: center;
+}
+
+.share-cta {
+    font-family: ui-monospace, Menlo, monospace;
+    font-size: 12px;
+    font-weight: 600;
+    text-decoration: none;
+    color: #fff;
+    background: var(--ink, #0f172a);
+    border: 1px solid var(--ink, #0f172a);
+    border-radius: 6px;
+    padding: 8px 14px;
+    white-space: nowrap;
+    transition: opacity 0.15s;
+}
+
+.share-cta:hover {
+    opacity: 0.85;
+}
+
 nav.tabs {
     display: flex;
     gap: 8px;

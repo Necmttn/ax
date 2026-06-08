@@ -31,6 +31,40 @@ interface Tab {
 
 export function Shell({ children }: { children: ReactNode }) {
     const state = useRouterState();
+    // A shared session (/share/...) is a standalone, read-only gist view: the
+    // local-graph nav + live/offline chrome don't apply (those routes need a
+    // running daemon). Render slim branded chrome with a CTA instead. Branching
+    // on which component renders keeps each one's hooks unconditional.
+    return state.location.pathname.startsWith("/share")
+        ? <ShareChrome>{children}</ShareChrome>
+        : <FullChrome>{children}</FullChrome>;
+}
+
+/** Slim chrome for a standalone shared-session gist view. */
+function ShareChrome({ children }: { children: ReactNode }) {
+    return (
+        <div className="shell">
+            <header className="masthead masthead-share">
+                <div className="brand">
+                    <h1>ax</h1>
+                    <span className="brand-tag">agent experience</span>
+                </div>
+                <a
+                    className="share-cta"
+                    href="https://ax.necmttn.com"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                >
+                    Map your own agent sessions → Get ax
+                </a>
+            </header>
+            {children}
+        </div>
+    );
+}
+
+function FullChrome({ children }: { children: ReactNode }) {
+    const state = useRouterState();
     const path = state.location.pathname;
     const queryClient = useQueryClient();
     const live = useIngestEvents();

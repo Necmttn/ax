@@ -23,10 +23,12 @@ import {
     sessionShareFilesQuery,
     sessionShareTimelineQuery,
     sessionShareTurnsQuery,
+    sessionShareTurnToolCallsQuery,
     sessionTokenUsageQuery,
     sessionTurnTokenUsageQuery,
     sessionToolCallsQuery,
     sessionTopSkillsQuery,
+    type ShareTurnToolCall,
 } from "../queries/session-detail.ts";
 
 export interface ShareArtifactParts {
@@ -40,9 +42,40 @@ export interface ShareArtifactParts {
     readonly timeline: ReadonlyArray<ShareEvent>;
     readonly files: ReadonlyArray<ShareFile>;
     readonly children?: ReadonlyArray<AxSessionShare>;
+    readonly spawnAnchorTurnSeq?: number | null;
 }
 
 const SESSION_ID_RE = /^[A-Za-z0-9_-]{6,80}$/;
+
+/**
+ * Best-effort: the seq of the turn whose timestamp is the closest match to a
+ * spawn timestamp (within 60s, preferring the turn at-or-just-before the
+ * spawn). Mirrors the live inspector's `anchorChildToTurn` so share markers
+ * land at the same point. Returns null when nothing matches.
+ */
+export const anchorChildToTurn = (
+    turns: ReadonlyArray<ShareTurn>,
+    spawnTs: string | null,
+): number | null => {
+    if (!spawnTs) return null;
+    const spawnMs = new Date(spawnTs).getTime();
+    if (!Number.isFinite(spawnMs)) return null;
+    let best: number | null = null;
+    let bestDelta = Infinity;
+    for (const turn of turns) {
+        if (!turn.ts) continue;
+        const ms = new Date(turn.ts).getTime();
+        if (!Number.isFinite(ms)) continue;
+        const delta = spawnMs - ms;
+        if (delta < -5_000) continue;
+        if (Math.abs(delta) > 60_000) continue;
+        if (delta < bestDelta) {
+            bestDelta = delta;
+            best = turn.seq;
+        }
+    }
+    return best;
+};
 
 const sumBy = <T>(items: ReadonlyArray<T>, read: (item: T) => number): number =>
     items.reduce((sum, item) => sum + read(item), 0);
@@ -152,6 +185,9 @@ export function buildShareArtifactFromParts(
         ...(parts.children && parts.children.length > 0
             ? { children: parts.children }
             : {}),
+        ...(parts.spawnAnchorTurnSeq !== undefined && parts.spawnAnchorTurnSeq !== null
+            ? { spawn_anchor_turn_seq: parts.spawnAnchorTurnSeq }
+            : {}),
     };
 }
 
@@ -188,6 +224,43 @@ const attachTurnTokenUsage = (
     });
 };
 
+const TOOL_OUTPUT_MAX = 400;
+
+const formatToolCall = (call: ShareTurnToolCall): string => {
+    const head = call.command ? `${call.name} ${call.command}` : call.name;
+    const out = call.output
+        ? `\n→ ${call.output.length > TOOL_OUTPUT_MAX ? `${call.output.slice(0, TOOL_OUTPUT_MAX - 1)}…` : call.output}`
+        : "";
+    return `🔧 ${head}${call.has_error ? " ⚠️" : ""}${out}`;
+};
+
+/**
+ * Tool-call turns (web fetch, file edits, bash, …) carry no dissected text, so
+ * a text-only export jumps over the agent's actual work. Synthesize a readable
+ * tool line on those turns from the call records (name + command + truncated
+ * output) so the shared transcript stays coherent. Turns that already have
+ * text are left untouched.
+ */
+export const attachSynthesizedToolText = (
+    turns: ReadonlyArray<ShareTurn>,
+    toolCalls: ReadonlyArray<ShareTurnToolCall>,
+): ReadonlyArray<ShareTurn> => {
+    if (toolCalls.length === 0) return turns;
+    const bySeq = new Map<number, ShareTurnToolCall[]>();
+    for (const call of toolCalls) {
+        const list = bySeq.get(call.seq) ?? [];
+        list.push(call);
+        bySeq.set(call.seq, list);
+    }
+    return turns.map((turn) => {
+        if (turn.text.length > 0) return turn;
+        const calls = bySeq.get(turn.seq);
+        if (!calls || calls.length === 0) return turn;
+        const text = calls.map(formatToolCall).join("\n\n");
+        return { ...turn, text, ...(turn.has_tool_use === undefined ? { has_tool_use: true } : {}) };
+    });
+};
+
 export interface ExportSessionShareOptions {
     /**
      * Record refs already materialised on the current export path. Guards
@@ -195,6 +268,8 @@ export interface ExportSessionShareOptions {
      * once in the spawn graph. Internal - callers pass nothing.
      */
     readonly visited?: ReadonlySet<string>;
+    /** Internal: the parent turn seq this session was spawned at, if any. */
+    readonly spawnAnchorTurnSeq?: number | null;
 }
 
 export const exportSessionShare = (
@@ -210,7 +285,7 @@ export const exportSessionShare = (
         if (visited.has(recordRef)) return null;
 
         const params = { recordRef };
-        const [overview, topSkillsRaw, toolCallsRaw, tokenUsage, turnTokenUsageRaw, turnsRaw, timelineRaw, filesRaw, childLinksRaw, turnContent] =
+        const [overview, topSkillsRaw, toolCallsRaw, tokenUsage, turnTokenUsageRaw, turnsRaw, timelineRaw, filesRaw, childLinksRaw, turnToolCallsRaw, turnContent] =
             yield* Effect.all([
                 runSingleQuery(sessionOverviewQuery, params),
                 runQuery(sessionTopSkillsQuery, params),
@@ -221,6 +296,7 @@ export const exportSessionShare = (
                 runQuery(sessionShareTimelineQuery, params),
                 runQuery(sessionShareFilesQuery, params),
                 runQuery(sessionChildrenQuery, params),
+                runQuery(sessionShareTurnToolCallsQuery, params),
                 resolveTurnContent(sessionId),
             ]);
 
@@ -228,6 +304,9 @@ export const exportSessionShare = (
 
         // Recurse into spawned subagents. The visited set carries this session
         // so a child that points back never re-expands; leaves return [].
+        // Each child's spawn-edge ts is anchored to the nearest parent turn so
+        // the viewer can mark where it was launched.
+        const shareTurns = turnsRaw.filter(isPresent);
         const nextVisited = new Set(visited).add(recordRef);
         const childLinks = childLinksRaw.filter(isPresent);
         const children = (
@@ -235,11 +314,23 @@ export const exportSessionShare = (
                 childLinks.map((link) =>
                     exportSessionShare(String(link.session_id), axVersion, {
                         visited: nextVisited,
+                        spawnAnchorTurnSeq: anchorChildToTurn(shareTurns, link.ts ?? null),
                     }),
                 ),
                 { concurrency: "unbounded" },
             )
         ).filter(isPresent);
+
+        // Build turns: synthesize tool lines, attach usage + content, then drop
+        // turns that ended up with neither text nor content (empty assistant /
+        // thinking shells) so the shared transcript has no blank rows.
+        const turns = attachTurnContent(
+            attachTurnTokenUsage(
+                attachSynthesizedToolText(shareTurns, turnToolCallsRaw.filter(isPresent)),
+                turnTokenUsageRaw.filter(isPresent),
+            ),
+            turnContent,
+        ).filter((turn) => turn.text.length > 0 || turn.content != null);
 
         return buildShareArtifactFromParts({
             axVersion,
@@ -248,12 +339,12 @@ export const exportSessionShare = (
             topSkills: topSkillsRaw.filter(isPresent),
             toolCalls: toolCallsRaw.filter(isPresent),
             tokenUsage,
-            turns: attachTurnContent(
-                attachTurnTokenUsage(turnsRaw.filter(isPresent), turnTokenUsageRaw.filter(isPresent)),
-                turnContent,
-            ),
+            turns,
             timeline: timelineRaw.filter(isPresent),
             files: filesRaw.filter(isPresent),
             children,
+            ...(options.spawnAnchorTurnSeq != null
+                ? { spawnAnchorTurnSeq: options.spawnAnchorTurnSeq }
+                : {}),
         });
     });
