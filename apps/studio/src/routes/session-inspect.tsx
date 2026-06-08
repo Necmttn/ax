@@ -96,12 +96,13 @@ function tokenCostTotal(usage: SessionTokenUsageDetail | null): number | null {
 }
 
 function totalBreakdownCost(usage: SessionTokenUsageDetail): number {
-    return [
+    const parts: ReadonlyArray<number | null | undefined> = [
         usage.estimated_input_cost_usd,
         usage.estimated_cache_creation_cost_usd,
         usage.estimated_cache_read_cost_usd,
         usage.estimated_output_cost_usd,
-    ].reduce((sum, value) => sum + (numberOrNull(value) ?? 0), 0);
+    ];
+    return parts.reduce<number>((sum, value) => sum + (numberOrNull(value) ?? 0), 0);
 }
 
 function costBarSegments(usage: SessionTokenUsageDetail): ReadonlyArray<{ label: string; value: number | null; color: string }> {
