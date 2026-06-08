@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.14.0](https://github.com/Necmttn/ax/compare/v0.13.0...v0.14.0) (2026-06-08)
+
+
+### Features
+
+* **share:** multi-file gist bundles + progressive studio + per-turn pricing ([#147](https://github.com/Necmttn/ax/issues/147)) ([6aadd24](https://github.com/Necmttn/ax/commit/6aadd241b575560f512e27bab397f4f68609e21d))
+* **studio:** dock the turn inspector under the cost rail, hover-driven ([#148](https://github.com/Necmttn/ax/issues/148)) ([af11a42](https://github.com/Necmttn/ax/commit/af11a42a82ae5ca25c34198d469a497de3ac31d7))
+
 ## [0.13.0](https://github.com/Necmttn/ax/compare/v0.12.1...v0.13.0) (2026-06-08)
 
 
