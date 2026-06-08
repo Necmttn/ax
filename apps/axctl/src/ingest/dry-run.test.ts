@@ -42,6 +42,8 @@ const baseResult = (over: Partial<DryRunResult> = {}): DryRunResult => ({
     sampled: { items: 30, seconds: 2.1 },
     ratePerSec: 14.3,
     etaSeconds: 210,
+    rough: false,
+    populated: false,
     ...over,
 });
 
@@ -76,9 +78,16 @@ describe("formatDryRun", () => {
         expect(out).toContain("nothing to ingest yet");
     });
 
-    test("human output handles an already-populated DB (no measurable rate)", () => {
-        const out = formatDryRun(baseResult({ ratePerSec: null, etaSeconds: null }), false);
-        expect(out).toContain("already has data");
+    test("human output tags a small (time-boxed) sample as rough", () => {
+        const out = formatDryRun(baseResult({ sampled: { items: 5, seconds: 8 }, ratePerSec: 0.6, etaSeconds: 3300, rough: true }), false);
+        expect(out).toContain("(rough)");
+    });
+
+    test("human output reports an already-populated DB as incremental", () => {
+        const out = formatDryRun(baseResult({ ratePerSec: null, etaSeconds: null, populated: true }), false);
+        expect(out).toContain("already populated");
+        expect(out).toContain("incremental");
         expect(out).toContain("ax ingest");
+        expect(out).not.toContain("ETA ~"); // no misleading full-total ETA
     });
 });

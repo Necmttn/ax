@@ -1443,9 +1443,12 @@ const queryCodexStatements = (statements: readonly string[]) =>
 interface CodexIngestOpts {
     sinceDays: number | undefined;
     onProgress: (counts: Record<string, number>) => Effect.Effect<void>;
-    /** Cap the number of session files processed. Used by `ingest --dry-run` to
-     *  time a small representative slice for ETA calibration. */
+    /** Hard cap on session files processed - a backstop for `ingest --dry-run`
+     *  calibration (paired with `deadlineMs`). */
     limit: number | undefined;
+    /** Absolute wall-clock deadline (ms epoch). Once reached, no NEW file is
+     *  started; in-flight files finish. Lets `--dry-run` time-box calibration. */
+    deadlineMs: number | undefined;
 }
 
 export interface CodexStats {
@@ -1491,6 +1494,11 @@ export const ingestCodex = (
         const recordCount = () => turnCount + invCount + toolCallCount + planSnapshotCount;
 
         yield* Effect.forEach(files.map((file, index) => ({ file, index })), ({ file, index }) => Effect.gen(function* () {
+            // Time-box (dry-run calibration): once the deadline passes, start no
+            // new files; in-flight ones finish.
+            if (opts.deadlineMs !== undefined && Date.now() >= opts.deadlineMs) {
+                return;
+            }
             activeFiles += 1;
             if (opts.onProgress && (index < 5 || index % 10 === 0)) {
                 yield* opts.onProgress({

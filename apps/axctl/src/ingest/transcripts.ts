@@ -1318,9 +1318,13 @@ interface IngestOpts {
     sinceDays: number | undefined;
     project: string | undefined;
     onProgress: (counts: Record<string, number>) => Effect.Effect<void>;
-    /** Cap the number of transcript files processed. Used by `ingest --dry-run`
-     *  to time a small representative slice for ETA calibration. */
+    /** Hard cap on transcript files processed - a backstop for `ingest --dry-run`
+     *  calibration (paired with `deadlineMs`). */
     limit: number | undefined;
+    /** Absolute wall-clock deadline (ms epoch). Once reached, no NEW file is
+     *  started; in-flight files finish. Lets `--dry-run` time-box calibration so
+     *  it stays snappy even when individual transcripts are large. */
+    deadlineMs: number | undefined;
 }
 
 export interface TranscriptStats {
@@ -1463,6 +1467,12 @@ export const ingestTranscripts = (
         });
 
         yield* Effect.forEach(candidates.map((candidate, index) => ({ candidate, index })), ({ candidate, index }) => Effect.gen(function* () {
+            // Time-box (dry-run calibration): once the deadline passes, start no
+            // new files. In-flight ones finish, so the sample is whatever
+            // completed within the budget.
+            if (opts.deadlineMs !== undefined && Date.now() >= opts.deadlineMs) {
+                return;
+            }
             // Skip-unchanged: a candidate whose on-disk (mtime,size) still
             // matches its persisted watermark has already been ingested in a
             // prior run; its rows persist, so skipping is output-equivalent.

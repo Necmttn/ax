@@ -22,8 +22,15 @@ import type { DbError } from "@ax/lib/errors";
 import { ingestTranscripts } from "./transcripts.ts";
 import { ingestCodex } from "./codex.ts";
 
-/** How many sessions to push through the pipeline to measure throughput. */
-export const DEFAULT_SAMPLE_SIZE = 30;
+/** Wall-clock budget for the calibration sample. Keeps the dry-run snappy even
+ *  when individual transcripts are large (one fat session can take seconds). */
+export const DEFAULT_SAMPLE_BUDGET_MS = 8_000;
+/** Hard backstop on files sampled, so a corpus of tiny files doesn't run the
+ *  whole budget for no extra signal. */
+export const DEFAULT_SAMPLE_CAP = 60;
+/** Below this many sampled items the ETA is flagged "rough" - a small sample is
+ *  noisy, especially when transcript sizes vary widely. */
+export const ROUGH_SAMPLE_THRESHOLD = 10;
 
 export interface SourceCounts {
     /** claude `.jsonl` transcript files (~one per session). */
@@ -48,6 +55,12 @@ export interface DryRunResult {
     readonly ratePerSec: number | null;
     /** projected full-backfill seconds, or null when no rate could be measured. */
     readonly etaSeconds: number | null;
+    /** true when the sample was small (time-boxed early), so the ETA is noisy. */
+    readonly rough: boolean;
+    /** true when the graph already has sessions. A full-total ETA would be
+     *  misleading (the watermark skips already-ingested files), so we report the
+     *  run as incremental instead. */
+    readonly populated: boolean;
 }
 
 /** Pure ETA math. Returns null rate/eta when the sample measured nothing
@@ -105,6 +118,23 @@ const countJsonl = (
         return count;
     });
 
+/** Cheap "is the graph already populated?" probe. One existence check, not a
+ *  full count. Drives the ETA branch: an empty graph means every on-disk file is
+ *  pending (so total == pending and the ETA is exact); a populated graph means
+ *  the watermark will skip most files, so extrapolating over the full total would
+ *  wildly over-estimate - we report incremental instead. */
+const dbHasSessions = (): Effect.Effect<boolean, never, SurrealClient> =>
+    Effect.gen(function* () {
+        const db = yield* SurrealClient;
+        const rows = (yield* db.query<[Array<{ id: unknown }>]>("SELECT id FROM session LIMIT 1;"))?.[0] ?? [];
+        return rows.length > 0;
+    }).pipe(
+        // A missing `session` table (schema not applied yet) or any query failure
+        // means we can't confirm population - treat as empty (first run) rather
+        // than crashing the dry-run.
+        Effect.orElseSucceed(() => false),
+    );
+
 const pathExists = (p: string): Effect.Effect<boolean, never, FileSystem.FileSystem> =>
     Effect.gen(function* () {
         const fs = yield* FileSystem.FileSystem;
@@ -113,7 +143,10 @@ const pathExists = (p: string): Effect.Effect<boolean, never, FileSystem.FileSys
 
 export interface EstimateOptions {
     readonly sinceDays?: number | undefined;
-    readonly sampleSize?: number | undefined;
+    /** Wall-clock budget for the calibration sample (ms). */
+    readonly sampleBudgetMs?: number | undefined;
+    /** Hard file-count backstop for the sample. */
+    readonly sampleCap?: number | undefined;
     /** Injectable clock (ms) for deterministic tests. */
     readonly now?: (() => number) | undefined;
 }
@@ -130,7 +163,8 @@ export const estimateIngest = (
         const cfg = yield* AxConfig;
         const path = yield* Path.Path;
         const now = opts.now ?? (() => Date.now());
-        const sample = opts.sampleSize ?? DEFAULT_SAMPLE_SIZE;
+        const cap = opts.sampleCap ?? DEFAULT_SAMPLE_CAP;
+        const budgetMs = opts.sampleBudgetMs ?? DEFAULT_SAMPLE_BUDGET_MS;
         const cutoff = opts.sinceDays ? now() - opts.sinceDays * 86400 * 1000 : 0;
 
         const claude = yield* countJsonl(cfg.paths.transcriptsDir, cutoff);
@@ -141,17 +175,29 @@ export const estimateIngest = (
         const sessionsTotal = claude + codex + pi;
         const sources: SourceCounts = { claude, codex, pi, opencodeStore, cursorStore, sessionsTotal };
 
-        // Calibrate on whichever jsonl harness has the most pending work, so the
-        // measured rate is representative.
+        // On a populated graph the watermark skips already-ingested files, so a
+        // full-total ETA is meaningless (and sampling would only re-touch a
+        // handful of new files). Report incremental and skip calibration.
+        const populated = yield* dbHasSessions();
+        if (populated) {
+            return { sources, sampled: { items: 0, seconds: 0 }, ratePerSec: null, etaSeconds: null, rough: false, populated };
+        }
+
+        // First run: every on-disk file is pending, so total == pending and the
+        // ETA is exact. Calibrate on whichever jsonl harness has the most work.
+        // Time-boxed: process real files until the budget elapses (or the cap is
+        // hit), then extrapolate.
         const useCodex = codex > claude;
         const t0 = now();
+        const deadlineMs = t0 + budgetMs;
         const items = useCodex
-            ? (yield* ingestCodex({ sinceDays: opts.sinceDays, limit: sample })).sessions
-            : (yield* ingestTranscripts({ sinceDays: opts.sinceDays, limit: sample })).sessions;
+            ? (yield* ingestCodex({ sinceDays: opts.sinceDays, limit: cap, deadlineMs })).sessions
+            : (yield* ingestTranscripts({ sinceDays: opts.sinceDays, limit: cap, deadlineMs })).sessions;
         const seconds = (now() - t0) / 1000;
 
         const { ratePerSec, etaSeconds } = computeEstimate(sessionsTotal, items, seconds);
-        return { sources, sampled: { items, seconds }, ratePerSec, etaSeconds };
+        const rough = ratePerSec !== null && items < ROUGH_SAMPLE_THRESHOLD;
+        return { sources, sampled: { items, seconds }, ratePerSec, etaSeconds, rough, populated };
     });
 
 /** Render the dry-run result for humans (Paxel-style) or as JSON for the agent. */
@@ -163,6 +209,8 @@ export function formatDryRun(result: DryRunResult, json: boolean): string {
                 sampled: result.sampled,
                 ratePerSec: result.ratePerSec,
                 etaSeconds: result.etaSeconds,
+                rough: result.rough,
+                populated: result.populated,
             },
             null,
             2,
@@ -181,10 +229,18 @@ export function formatDryRun(result: DryRunResult, json: boolean): string {
         return lines.join("\n");
     }
 
+    if (result.populated) {
+        // Graph already has sessions: runs are incremental (the watermark skips
+        // already-ingested files), so a full-total ETA would be meaningless.
+        lines.push("  graph already populated - the next run is incremental (only new/changed files), so it'll be quick.");
+        lines.push("  run it: ax ingest");
+        return lines.join("\n");
+    }
+
     if (result.ratePerSec === null) {
-        // Nothing measurable - usually the graph is already populated, so the
-        // sample slice was skipped by the watermark.
-        lines.push("  graph already has data - a fresh run will be quick (only new files).");
+        // Empty graph but the sample measured nothing usable (e.g. all candidate
+        // files were too short to produce a session). Can't project a rate.
+        lines.push("  couldn't measure a rate from the sample; just run it:");
         lines.push("  run it: ax ingest");
         return lines.join("\n");
     }
@@ -193,7 +249,8 @@ export function formatDryRun(result: DryRunResult, json: boolean): string {
         `  calibrating... sampled ${result.sampled.items} in ${result.sampled.seconds.toFixed(1)}s (${result.ratePerSec.toFixed(1)}/s)`,
     );
     const eta = result.etaSeconds === null ? "unknown" : `~${formatDuration(result.etaSeconds)}`;
-    lines.push(`  total: ${s.sessionsTotal.toLocaleString()} sessions   ETA ${eta} on this machine`);
+    const roughTag = result.rough ? " (rough)" : "";
+    lines.push(`  total: ${s.sessionsTotal.toLocaleString()} sessions   ETA ${eta}${roughTag} on this machine`);
     lines.push("  run it: ax ingest   (watch live in ax serve → http://127.0.0.1:8520)");
     return lines.join("\n");
 }
