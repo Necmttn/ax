@@ -27,6 +27,24 @@ const PROD_STUDIO_URL = "ax://studio/index.html?endpoint=http%3A%2F%2F127.0.0.1%
 const WINDOW_WIDTH = 1200;
 const WINDOW_HEIGHT = 800;
 
+/**
+ * Same-origin check for the `will-navigate` guard. Compares protocol + host
+ * rather than `URL.origin` because the custom `ax://` scheme is non-special and
+ * reports an opaque `"null"` origin - so `origin === origin` would wrongly match
+ * any two `ax://` URLs (e.g. `ax://studio` vs `ax://evil`). Protocol+host is
+ * exact for both the dev http origin and the prod `ax://studio` origin.
+ */
+export function isSameAppOrigin(navigationUrl: string, isDev: boolean): boolean {
+  const applicationUrl = isDev ? DEV_STUDIO_URL : PROD_STUDIO_URL;
+  try {
+    const app = new URL(applicationUrl);
+    const target = new URL(navigationUrl);
+    return app.protocol === target.protocol && app.host === target.host;
+  } catch {
+    return false;
+  }
+}
+
 export type DesktopWindowError = ElectronWindow.ElectronWindowCreateError;
 
 type DesktopWindowRuntimeServices =
@@ -83,6 +101,21 @@ const make = Effect.gen(function* () {
         void runPromise(electronShell.openExternal(url));
       }
       return { action: "deny" };
+    });
+
+    // Security: block top-level navigation away from the trusted app origin.
+    // A renderer-side `window.location = ...` or `<a target=_self>` would
+    // otherwise navigate the main frame off the `ax://` app to an arbitrary
+    // page. Allow only same-origin navigation; for anything else prevent it,
+    // routing http(s) targets to the system browser via the safe-URL guard.
+    window.webContents.on("will-navigate", (event, url) => {
+      if (isSameAppOrigin(url, environment.isDevelopment)) {
+        return;
+      }
+      event.preventDefault();
+      if (Option.isSome(ElectronShell.parseSafeExternalUrl(url))) {
+        void runPromise(electronShell.openExternal(url));
+      }
     });
 
     window.webContents.on(
