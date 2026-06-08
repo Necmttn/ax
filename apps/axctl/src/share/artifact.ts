@@ -1,4 +1,4 @@
-import type { InspectTurnContentDto, SessionTokenUsageDetail, TurnTokenUsageDetail } from "@ax/lib/shared/dashboard-types";
+import type { HookFireDto, InspectTurnContentDto, SessionTokenUsageDetail, TurnTokenUsageDetail } from "@ax/lib/shared/dashboard-types";
 
 export const AX_SESSION_SHARE_SCHEMA_VERSION = 3 as const;
 
@@ -38,6 +38,9 @@ export interface AxSessionShare {
         readonly failures: number;
     };
     readonly token_usage?: SessionTokenUsageDetail | null;
+    /** v3+: runtime hook-fire decisions (file-context injections etc.), so the
+     *  shared inspector can show + jump to them like the live one. */
+    readonly hook_fires?: ReadonlyArray<HookFireDto>;
     readonly turns: ReadonlyArray<ShareTurn>;
     readonly timeline: ReadonlyArray<ShareEvent>;
     readonly files: ReadonlyArray<ShareFile>;

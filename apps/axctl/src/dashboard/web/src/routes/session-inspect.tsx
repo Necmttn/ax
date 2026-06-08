@@ -1093,7 +1093,7 @@ function SpawnMarker({ child }: { child: SpawnChildDto }) {
  *  visual language is consistent. Chips surface inject/reason/event; when
  *  inject=true we also show the clipped titles of the prior-session memory
  *  that landed in the agent's context window. */
-function HookFireMarker({ hook }: { hook: HookFireDto }) {
+export function HookFireMarker({ hook }: { hook: HookFireDto }) {
     const ts = hook.ts ? new Date(hook.ts).toISOString().slice(11, 19) : "";
     const injectBg = hook.inject ? "#bbf7d0" : "#e2e8f0";
     const injectFg = hook.inject ? "#065f46" : "#475569";

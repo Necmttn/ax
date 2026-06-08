@@ -195,6 +195,22 @@ describe("buildShareArtifactFromParts", () => {
         expect(artifact.schema_version).toBe(3);
     });
 
+    it("carries hook fires when present, omits the field when empty", () => {
+        const hook = {
+            idx: 0,
+            ts: "2026-05-29T00:01:00.000Z",
+            event: "pre-edit",
+            file_path: "src/a.ts",
+            inject: true,
+            reason: "high_signal",
+            latency_ms: 12,
+            injected_titles: ["prior session"],
+        };
+        expect(buildShareArtifactFromParts({ ...baseParts, hookFires: [hook] }).hook_fires).toHaveLength(1);
+        expect(buildShareArtifactFromParts({ ...baseParts, hookFires: [] }).hook_fires).toBeUndefined();
+        expect(buildShareArtifactFromParts(baseParts).hook_fires).toBeUndefined();
+    });
+
     it("attaches child subagent shares when provided", () => {
         const child = minimalShareArtifact({ id: "child1", source: "codex" });
         const artifact = buildShareArtifactFromParts({

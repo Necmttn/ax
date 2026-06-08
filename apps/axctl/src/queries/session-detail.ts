@@ -15,6 +15,7 @@ import {
 import { toBareSessionId } from "@ax/lib/shared/session-id";
 import { decodeJsonOrNull } from "@ax/lib/decode";
 import type {
+    HookFireDto,
     SessionAgentDelegation,
     SessionCompaction,
     SessionHealthSummary,
@@ -280,6 +281,22 @@ LIMIT 2000;`;
  * the otherwise text-less tool-call turns (keeps the shared transcript from
  * jumping over the agent's actual work).
  */
+/** Runtime hook-fire decisions for a shared session (file-context injections
+ *  etc.), ordered by time so the viewer can interleave + jump to them. */
+export const SESSION_SHARE_HOOK_FIRES_SQL = `
+SELECT
+    ts,
+    event,
+    file_path,
+    inject,
+    reason,
+    latency_ms,
+    injected_titles
+FROM hook_fire
+WHERE session = $sessionId
+ORDER BY ts ASC
+LIMIT 2000;`;
+
 export const SESSION_SHARE_TURN_TOOLCALLS_SQL = `
 SELECT
     seq,
@@ -534,6 +551,35 @@ export const sessionShareTurnToolCallsQuery = defineQuery<
             input_json: stringField(raw, "input_json"),
             output: stringField(raw, "output_excerpt"),
             has_error: raw.has_error === true,
+        };
+    },
+});
+
+/** Hook fire without the SPA-only `idx` (assigned by the exporter in ts order). */
+export type ShareHookFire = Omit<HookFireDto, "idx">;
+
+export const sessionShareHookFiresQuery = defineQuery<
+    SessionDetailParams,
+    Record<string, unknown>,
+    ShareHookFire | null
+>({
+    name: "session-detail.share_hook_fires",
+    sql: (p) => subst(SESSION_SHARE_HOOK_FIRES_SQL, p.recordRef),
+    mapRow: (raw) => {
+        if (!isRecord(raw)) return null;
+        const ts = dateField(raw, "ts");
+        const event = stringField(raw, "event");
+        if (!ts || !event) return null;
+        return {
+            ts,
+            event,
+            file_path: stringField(raw, "file_path") ?? "",
+            inject: raw.inject === true,
+            reason: stringField(raw, "reason") ?? "",
+            latency_ms: numericField(raw, "latency_ms"),
+            injected_titles: Array.isArray(raw.injected_titles)
+                ? (raw.injected_titles as unknown[]).filter((t): t is string => typeof t === "string")
+                : [],
         };
     },
 });

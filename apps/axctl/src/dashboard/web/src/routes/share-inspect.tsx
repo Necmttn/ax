@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react"
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useParams } from "@tanstack/react-router";
 import type {
+    HookFireDto,
     InspectTurnContentDto,
     InspectSpanKind,
     InspectTurnDto,
@@ -10,8 +11,9 @@ import type {
     TurnTokenUsageDetail,
 } from "@shared/dashboard-types.ts";
 import { shortSessionId } from "@shared/session-id.ts";
+import { spliceHookFires } from "@shared/hook-fire-splice.ts";
 import { FilterBar } from "./inspector-filter-bar.tsx";
-import { DockedRail, InspectGuide, KIND_STYLE, Turn, useInspectSelection, useVisibleTurnSeq } from "./session-inspect.tsx";
+import { DockedRail, HookFireMarker, InspectGuide, KIND_STYLE, Turn, useInspectSelection, useVisibleTurnSeq } from "./session-inspect.tsx";
 
 type ShareSchemaVersion = 1 | 2 | 3;
 
@@ -37,6 +39,7 @@ interface ShareArtifact {
         readonly failures: number;
     };
     readonly token_usage?: SessionTokenUsageDetail | null;
+    readonly hook_fires?: ReadonlyArray<HookFireDto>;
     readonly turns?: ReadonlyArray<{
         readonly id: string;
         readonly seq: number;
@@ -216,8 +219,8 @@ export function inspectPayloadFromShare(artifact: ShareArtifact, sourcePath: str
         parent_session: null,
         parent_nickname: null,
         children: [],
-        hook_fires: [],
-        total_hook_fires: 0,
+        hook_fires: artifact.hook_fires ?? [],
+        total_hook_fires: artifact.hook_fires?.length ?? 0,
     };
 }
 
@@ -262,6 +265,9 @@ function InspectBody({
     const [anchoredSeq, setAnchoredSeq] = useState<number | null>(() => hashSeq());
     const turnsRef = useRef<ReadonlyArray<InspectTurnDto>>([]);
     turnsRef.current = data.turns;
+    const hookFireIdxs = data.hook_fires.map((h) => h.idx);
+    const hookFireIdxsRef = useRef<ReadonlyArray<number>>([]);
+    hookFireIdxsRef.current = hookFireIdxs;
     const visibleSeq = useVisibleTurnSeq(data.turns, anchoredSeq ?? data.turns[0]?.seq ?? null);
     const [selection, setSelection] = useInspectSelection(data);
     // Spawn-turn seqs power the "next spawn" jump button + match the inline
@@ -297,9 +303,9 @@ function InspectBody({
                 loadMore={() => Promise.resolve()}
                 getTurns={() => turnsRef.current}
                 getCurrentSeq={() => anchoredSeq}
-                hookFireIdxs={[]}
-                getHookFireIdxs={() => []}
-                totalHookFires={0}
+                hookFireIdxs={hookFireIdxs}
+                getHookFireIdxs={() => hookFireIdxsRef.current}
+                totalHookFires={data.total_hook_fires}
             />
             <InspectGuide data={data} />
             <div style={{ display: "flex", gap: 4, flexWrap: "wrap", padding: "4px 24px 8px" }}>
@@ -320,10 +326,14 @@ function InspectBody({
             </div>
             <div style={{ display: "flex", alignItems: "flex-start", gap: 12 }}>
                 <div style={{ minWidth: 0, flex: "1 1 auto" }}>
-                    {data.turns.map((turn) => {
+                    {spliceHookFires(data.turns, data.hook_fires).map((item) => {
+                        if (item.kind === "hook_fire") {
+                            return <HookFireMarker key={`hook-${item.hook.idx}`} hook={item.hook} />;
+                        }
+                        const turn = item.turn;
                         const spawned = subagentsByTurn?.get(turn.seq);
                         return (
-                            <div key={turn.seq}>
+                            <div key={`turn-${turn.seq}`}>
                                 <Turn
                                     turn={turn}
                                     anchored={anchoredSeq === turn.seq}
