@@ -306,6 +306,12 @@ function InspectBody({
     const turnsRef = useRef<ReadonlyArray<InspectTurnDto>>([]);
     turnsRef.current = data.turns;
     const visibleSeq = useVisibleTurnSeq(data.turns, anchoredSeq ?? data.turns[0]?.seq ?? null);
+    // Spawn-turn seqs power the "next spawn" jump button (and match the inline
+    // spawn markers). Without this the button would say "no matches".
+    const spawnAnchorSeqs = useMemo(
+        () => new Set<number>(subagentsByTurn ? [...subagentsByTurn.keys()] : []),
+        [subagentsByTurn],
+    );
 
     useEffect(() => {
         const onHashChange = () => setAnchoredSeq(hashSeq());
@@ -326,7 +332,7 @@ function InspectBody({
             </div>
             <FilterBar
                 turns={data.turns}
-                anchorSeqs={new Set()}
+                anchorSeqs={spawnAnchorSeqs}
                 loadedCount={data.turns.length}
                 totalCount={data.total_turns}
                 appendLoading={false}
