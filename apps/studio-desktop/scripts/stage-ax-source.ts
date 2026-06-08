@@ -23,6 +23,23 @@
  * per-arch: the staged `node_modules` is host-arch-only. Release builds for the
  * other arch must run this script on that arch.
  *
+ * Dangling-symlink-free node_modules (electron-builder packaging requirement):
+ * bun's default "isolated" linker builds `node_modules/.bun/` (a content store)
+ * and fills every package dir with symlinks into it. electron-builder filters
+ * the top-level `.bun` dot-dir out of `extraResources`, so the store never lands
+ * in the `.app` and the ~482 per-package symlinks dangle - its signing walk then
+ * does a symlink-following `stat` and dies with ENOENT. To avoid this we install
+ * with bun's "hoisted" linker (npm-style flat node_modules of REAL directories,
+ * no `.bun` symlink farm) via a `bunfig.toml` written into the staged tree.
+ *
+ * Hoisted still emits a handful of SELF-CONTAINED relative links (workspace
+ * links like node_modules/@ax/lib -> ../../packages/lib, and `.bin/*` shims)
+ * that resolve INSIDE the staged tree. Those are load-bearing - the classifier
+ * sources import `../../../apps/axctl/...` through the workspace link - and they
+ * pack fine because their targets ship in the same tree. We KEEP those and only
+ * dereference any symlink that escapes the staged tree (would dangle in the
+ * .app); a truly dangling link aborts the stage. See `ensureSymlinkFree`.
+ *
  * Usage:
  *   bun run scripts/stage-ax-source.ts            # stage for host arch
  *   bun run scripts/stage-ax-source.ts --skip-install   # copy source only
@@ -32,7 +49,16 @@
  * idempotent given the same lockfile.
  */
 import { spawnSync } from "node:child_process";
-import { cpSync, existsSync, mkdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import {
+    cpSync,
+    existsSync,
+    mkdirSync,
+    readdirSync,
+    realpathSync,
+    rmSync,
+    statSync,
+    writeFileSync,
+} from "node:fs";
 import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -128,6 +154,97 @@ function dirSize(path: string): string {
 }
 
 /**
+ * Recursively collect every symlink under `root`. Returns absolute paths.
+ * We never descend INTO a symlinked dir (its real target lives elsewhere);
+ * we record the link itself and move on.
+ */
+function findSymlinks(root: string, acc: string[] = []): string[] {
+    let entries: ReturnType<typeof readdirSync>;
+    try {
+        entries = readdirSync(root, { withFileTypes: true });
+    } catch {
+        return acc;
+    }
+    for (const ent of entries) {
+        const full = join(root, ent.name);
+        if (ent.isSymbolicLink()) {
+            acc.push(full);
+            continue;
+        }
+        if (ent.isDirectory()) findSymlinks(full, acc);
+    }
+    return acc;
+}
+
+/**
+ * Replace a symlink with a real copy of its (resolved) target. Used as the
+ * dereference fallback for symlinks that escape the staged tree.
+ * Throws if the target can't be resolved (a dangling link in the staged tree
+ * is exactly the packaging defect we must surface, not silently swallow).
+ */
+function dereferenceSymlink(link: string): void {
+    const target = realpathSync(link); // throws on dangling
+    rmSync(link, { force: true });
+    cpSync(target, link, { recursive: true, dereference: true });
+}
+
+/**
+ * Validate the staged tree's symlinks. The defect we guard against is the
+ * `.bun` isolated-store farm whose top-level dot-dir electron-builder filters
+ * out, leaving ~482 per-package symlinks DANGLING in the .app -> its signing
+ * walk stats them and dies with ENOENT.
+ *
+ * The hoisted linker eliminates the `.bun` farm. What remains is a small set of
+ * SELF-CONTAINED relative links that resolve INSIDE the staged tree:
+ *   - workspace links: node_modules/@ax/lib -> ../../packages/lib, axctl ->
+ *     ../apps/axctl, etc. These are load-bearing: the classifier sources use
+ *     relative imports (`../../../apps/axctl/...`) that only resolve when the
+ *     node_modules entry points at the real staged `packages/`/`apps/` dir.
+ *     Dereferencing them (copying the package contents) BREAKS those relative
+ *     imports, so we keep them as internal links.
+ *   - `.bin/*` shims that point within node_modules.
+ * These pack fine (they're not under a filtered dot-dir) and resolve in the
+ * .app because their real targets ship inside the same tree.
+ *
+ * Policy: keep symlinks whose resolved real target stays inside `root`;
+ * dereference any symlink that escapes `root` (would dangle in the .app);
+ * abort on a dangling symlink (the original ENOENT defect).
+ */
+function ensureSymlinkFree(root: string): void {
+    const rootReal = realpathSync(root);
+    const links = findSymlinks(root);
+    if (links.length === 0) {
+        log("  node_modules has no symlinks (hoisted linker)");
+        return;
+    }
+    let internal = 0;
+    let escaped = 0;
+    for (const link of links) {
+        let target: string;
+        try {
+            target = realpathSync(link); // throws on dangling
+        } catch (err) {
+            die(
+                `dangling symlink in staged tree: ${link} ` +
+                    `(${err instanceof Error ? err.message : String(err)}). ` +
+                    "This would dangle in the .app and break electron-builder's signing walk.",
+            );
+        }
+        if (target === rootReal || target.startsWith(`${rootReal}/`)) {
+            internal++; // self-contained; resolves inside the staged tree -> keep
+            continue;
+        }
+        // Escapes the staged tree -> would dangle once packed. Dereference it.
+        dereferenceSymlink(link);
+        escaped++;
+    }
+    log(
+        `  symlinks: ${internal} internal (kept, resolve in-tree)` +
+            (escaped > 0 ? `, ${escaped} external (dereferenced)` : ""),
+    );
+}
+
+/**
  * Build a tailored root package.json for the staged tree:
  *   - workspaces.packages narrowed to the staged members (so `bun install`
  *     doesn't fail on the absent apps/site, apps/studio, etc.)
@@ -201,8 +318,20 @@ async function main() {
     if (skipInstall) {
         log("skipping `bun install` (--skip-install)");
     } else {
-        log("installing host-arch deps: `bun install` in resources/ax-src/ ...");
-        const r = spawnSync("bun", ["install"], {
+        // Force bun's HOISTED linker for the staged tree. The default "isolated"
+        // linker builds `node_modules/.bun/` + ~482 per-package symlinks; that
+        // dot-dir is filtered out of electron-builder's extraResources so the
+        // symlinks dangle in the .app and crash the signing walk with ENOENT.
+        // Hoisted gives an npm-style flat tree of REAL directories (no .bun farm).
+        writeFileSync(
+            join(AX_SRC, "bunfig.toml"),
+            '# Generated by stage-ax-source.ts. Hoisted linker => symlink-free\n' +
+                '# node_modules so electron-builder packs the tree cleanly.\n' +
+                "[install]\nlinker = \"hoisted\"\n",
+        );
+        log("  wrote bunfig.toml (linker = hoisted)");
+        log("installing host-arch deps: `bun install --linker hoisted` in resources/ax-src/ ...");
+        const r = spawnSync("bun", ["install", "--linker", "hoisted"], {
             cwd: AX_SRC,
             stdio: "inherit",
             // Don't let a stale root catalog/lock abort the install; allow
@@ -215,6 +344,9 @@ async function main() {
                     "Native deps were not staged - investigate before relying on this bundle.",
             );
         }
+        // Backstop: keep self-contained internal links, dereference/abort any
+        // symlink that escapes the staged tree (the original ENOENT defect).
+        ensureSymlinkFree(AX_SRC);
         log(`  node_modules staged  (${dirSize(join(AX_SRC, "node_modules"))})`);
     }
 
