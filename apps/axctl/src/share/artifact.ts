@@ -58,6 +58,13 @@ export interface AxSessionShare {
      * delegated no subagents. Recursion terminates at leaf sessions.
      */
     readonly children?: ReadonlyArray<AxSessionShare>;
+    /**
+     * v3+: the seq of the turn IN THIS SESSION'S PARENT where this session was
+     * spawned (matched from the spawn-edge timestamp). Lets the viewer anchor a
+     * "spawned subagent" marker at the right point in the parent transcript.
+     * Absent on the root and when no parent turn matched.
+     */
+    readonly spawn_anchor_turn_seq?: number | null;
 }
 
 export interface ShareTurn {

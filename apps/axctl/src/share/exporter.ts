@@ -40,9 +40,40 @@ export interface ShareArtifactParts {
     readonly timeline: ReadonlyArray<ShareEvent>;
     readonly files: ReadonlyArray<ShareFile>;
     readonly children?: ReadonlyArray<AxSessionShare>;
+    readonly spawnAnchorTurnSeq?: number | null;
 }
 
 const SESSION_ID_RE = /^[A-Za-z0-9_-]{6,80}$/;
+
+/**
+ * Best-effort: the seq of the turn whose timestamp is the closest match to a
+ * spawn timestamp (within 60s, preferring the turn at-or-just-before the
+ * spawn). Mirrors the live inspector's `anchorChildToTurn` so share markers
+ * land at the same point. Returns null when nothing matches.
+ */
+export const anchorChildToTurn = (
+    turns: ReadonlyArray<ShareTurn>,
+    spawnTs: string | null,
+): number | null => {
+    if (!spawnTs) return null;
+    const spawnMs = new Date(spawnTs).getTime();
+    if (!Number.isFinite(spawnMs)) return null;
+    let best: number | null = null;
+    let bestDelta = Infinity;
+    for (const turn of turns) {
+        if (!turn.ts) continue;
+        const ms = new Date(turn.ts).getTime();
+        if (!Number.isFinite(ms)) continue;
+        const delta = spawnMs - ms;
+        if (delta < -5_000) continue;
+        if (Math.abs(delta) > 60_000) continue;
+        if (delta < bestDelta) {
+            bestDelta = delta;
+            best = turn.seq;
+        }
+    }
+    return best;
+};
 
 const sumBy = <T>(items: ReadonlyArray<T>, read: (item: T) => number): number =>
     items.reduce((sum, item) => sum + read(item), 0);
@@ -152,6 +183,9 @@ export function buildShareArtifactFromParts(
         ...(parts.children && parts.children.length > 0
             ? { children: parts.children }
             : {}),
+        ...(parts.spawnAnchorTurnSeq !== undefined && parts.spawnAnchorTurnSeq !== null
+            ? { spawn_anchor_turn_seq: parts.spawnAnchorTurnSeq }
+            : {}),
     };
 }
 
@@ -195,6 +229,8 @@ export interface ExportSessionShareOptions {
      * once in the spawn graph. Internal - callers pass nothing.
      */
     readonly visited?: ReadonlySet<string>;
+    /** Internal: the parent turn seq this session was spawned at, if any. */
+    readonly spawnAnchorTurnSeq?: number | null;
 }
 
 export const exportSessionShare = (
@@ -228,6 +264,9 @@ export const exportSessionShare = (
 
         // Recurse into spawned subagents. The visited set carries this session
         // so a child that points back never re-expands; leaves return [].
+        // Each child's spawn-edge ts is anchored to the nearest parent turn so
+        // the viewer can mark where it was launched.
+        const shareTurns = turnsRaw.filter(isPresent);
         const nextVisited = new Set(visited).add(recordRef);
         const childLinks = childLinksRaw.filter(isPresent);
         const children = (
@@ -235,6 +274,7 @@ export const exportSessionShare = (
                 childLinks.map((link) =>
                     exportSessionShare(String(link.session_id), axVersion, {
                         visited: nextVisited,
+                        spawnAnchorTurnSeq: anchorChildToTurn(shareTurns, link.ts ?? null),
                     }),
                 ),
                 { concurrency: "unbounded" },
@@ -249,11 +289,14 @@ export const exportSessionShare = (
             toolCalls: toolCallsRaw.filter(isPresent),
             tokenUsage,
             turns: attachTurnContent(
-                attachTurnTokenUsage(turnsRaw.filter(isPresent), turnTokenUsageRaw.filter(isPresent)),
+                attachTurnTokenUsage(shareTurns, turnTokenUsageRaw.filter(isPresent)),
                 turnContent,
             ),
             timeline: timelineRaw.filter(isPresent),
             files: filesRaw.filter(isPresent),
             children,
+            ...(options.spawnAnchorTurnSeq != null
+                ? { spawnAnchorTurnSeq: options.spawnAnchorTurnSeq }
+                : {}),
         });
     });

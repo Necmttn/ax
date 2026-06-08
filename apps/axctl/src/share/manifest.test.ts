@@ -80,6 +80,19 @@ describe("buildShareBundle", () => {
         expect(m.totals.subagents).toBe(3);
     });
 
+    it("carries each child's spawn_turn_seq onto its card", () => {
+        const spawnedChild = {
+            ...child("a"),
+            spawn_anchor_turn_seq: 7,
+        };
+        const root: AxSessionShare = {
+            ...minimalShareArtifact({ id: "root1", source: "claude" }),
+            children: [spawnedChild],
+        };
+        const card = buildShareBundle(root).manifest.subagents[0]!;
+        expect(card.spawn_turn_seq).toBe(7);
+    });
+
     it("records depth + parent_id for nested descendants", () => {
         const root: AxSessionShare = {
             ...minimalShareArtifact({ id: "root1", source: "claude" }),

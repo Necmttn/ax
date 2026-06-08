@@ -97,6 +97,7 @@ export interface ShareSubagentCard {
     readonly file: string;
     readonly parent_id: string | null;
     readonly depth: number;
+    readonly spawn_turn_seq: number | null;
     readonly source: string;
     readonly model?: string;
     readonly started_at?: string;
@@ -246,8 +247,61 @@ function fmtDuration(ms: number | null | undefined): string | null {
     return `${h}h${m % 60 ? ` ${m % 60}m` : ""}`;
 }
 
+/**
+ * Inline "spawned subagent" marker, mirroring the live inspector's SpawnMarker
+ * look but wired to in-bundle file selection (gist children aren't DB routes).
+ */
+function ShareSpawnMarker(props: {
+    readonly card: ShareSubagentCard;
+    readonly onSelect: () => void;
+    readonly onPrefetch: () => void;
+}) {
+    const { card } = props;
+    const cost = fmtUsd(card.cost_usd);
+    const duration = fmtDuration(card.duration_ms);
+    return (
+        <button
+            type="button"
+            onClick={props.onSelect}
+            onMouseEnter={props.onPrefetch}
+            onFocus={props.onPrefetch}
+            style={{
+                display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap",
+                width: "100%", textAlign: "left", cursor: "pointer",
+                margin: "4px 0", padding: "7px 10px", background: "#fff1f2",
+                border: "1px solid #fecdd3", borderLeft: "4px solid #e11d48", borderRadius: 3,
+                fontSize: 11, fontFamily: "ui-monospace, monospace", color: "#9f1239",
+            }}
+        >
+            <span style={{ fontWeight: 700 }}>↳ spawned subagent</span>
+            <span style={{ fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 420 }}>
+                {card.task_label ? `"${card.task_label}"` : `${card.id.slice(0, 24)}…`}
+            </span>
+            <span style={{ background: "#fecdd3", color: "#7f1d1d", padding: "0 6px", borderRadius: 2, fontSize: 10, fontWeight: 600 }}>
+                {card.model ?? card.source}
+            </span>
+            <span style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
+                {cost ? <span>{cost}</span> : null}
+                {duration ? <span>{duration}</span> : null}
+                <span>{card.stats.turns} turns</span>
+                <span style={{ opacity: 0.7 }}>open →</span>
+            </span>
+        </button>
+    );
+}
+
 /** The transcript body for one session - reused by parent + subagent views. */
-function InspectBody({ data }: { readonly data: SessionInspectPayload }) {
+function InspectBody({
+    data,
+    subagentsByTurn,
+    onSelectSubagent,
+    onPrefetchSubagent,
+}: {
+    readonly data: SessionInspectPayload;
+    readonly subagentsByTurn?: ReadonlyMap<number, ReadonlyArray<ShareSubagentCard>>;
+    readonly onSelectSubagent?: (file: string) => void;
+    readonly onPrefetchSubagent?: (file: string) => void;
+}) {
     const [anchoredSeq, setAnchoredSeq] = useState<number | null>(() => hashSeq());
     const turnsRef = useRef<ReadonlyArray<InspectTurnDto>>([]);
     turnsRef.current = data.turns;
@@ -302,9 +356,26 @@ function InspectBody({ data }: { readonly data: SessionInspectPayload }) {
             </div>
             <div style={{ display: "flex", alignItems: "flex-start", gap: 12 }}>
                 <div style={{ minWidth: 0, flex: "1 1 auto" }}>
-                    {data.turns.map((turn) => (
-                        <Turn key={turn.seq} turn={turn} anchored={anchoredSeq === turn.seq} />
-                    ))}
+                    {data.turns.map((turn) => {
+                        const spawned = subagentsByTurn?.get(turn.seq);
+                        return (
+                            <div key={turn.seq}>
+                                <Turn turn={turn} anchored={anchoredSeq === turn.seq} />
+                                {spawned && spawned.length > 0 ? (
+                                    <div style={{ padding: "2px 24px 6px" }}>
+                                        {spawned.map((card) => (
+                                            <ShareSpawnMarker
+                                                key={card.id}
+                                                card={card}
+                                                onSelect={() => onSelectSubagent?.(card.file)}
+                                                onPrefetch={() => onPrefetchSubagent?.(card.file)}
+                                            />
+                                        ))}
+                                    </div>
+                                ) : null}
+                            </div>
+                        );
+                    })}
                 </div>
                 <CostRail data={data} currentSeq={visibleSeq} />
             </div>
@@ -396,6 +467,23 @@ function MultiFileShareView(props: {
     const totalCost = fmtUsd(totals.cost_usd);
     const totalDuration = fmtDuration(totals.duration_ms);
 
+    // Which session is on screen, and the direct children it spawned, grouped
+    // by the parent turn they were launched from -> inline spawn markers.
+    const selectedSessionId = selectedFile === manifest.root_file
+        ? manifest.session.id
+        : manifest.subagents.find((c) => c.file === selectedFile)?.id ?? null;
+    const subagentsByTurn = useMemo(() => {
+        const map = new Map<number, ShareSubagentCard[]>();
+        for (const card of manifest.subagents) {
+            if (card.parent_id !== selectedSessionId) continue;
+            if (card.spawn_turn_seq == null) continue;
+            const list = map.get(card.spawn_turn_seq) ?? [];
+            list.push(card);
+            map.set(card.spawn_turn_seq, list);
+        }
+        return map;
+    }, [manifest.subagents, selectedSessionId]);
+
     return (
         <section className="panel">
             <header>
@@ -439,7 +527,14 @@ function MultiFileShareView(props: {
             </div>
             {fileQuery.error ? <div className="error">Error: {String(fileQuery.error)}</div> : null}
             {fileQuery.isLoading && !data ? <div className="loading">Loading session…</div> : null}
-            {data ? <InspectBody data={data} /> : null}
+            {data ? (
+                <InspectBody
+                    data={data}
+                    subagentsByTurn={subagentsByTurn}
+                    onSelectSubagent={setSelectedFile}
+                    onPrefetchSubagent={prefetch}
+                />
+            ) : null}
         </section>
     );
 }

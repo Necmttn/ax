@@ -43,6 +43,8 @@ export interface ShareSubagentCard {
     readonly parent_id: string | null;
     /** 1 for a direct child of the root, 2 for a grandchild, etc. */
     readonly depth: number;
+    /** Turn seq in the PARENT session where this subagent was spawned, if known. */
+    readonly spawn_turn_seq: number | null;
     readonly source: ShareSource;
     readonly model?: string;
     readonly started_at?: string;
@@ -126,6 +128,7 @@ const cardFor = (share: AxSessionShare, parentId: string | null, depth: number):
         file: subagentFileName(share.session.id),
         parent_id: parentId,
         depth,
+        spawn_turn_seq: share.spawn_anchor_turn_seq ?? null,
         source: share.session.source,
         ...(share.session.model ? { model: share.session.model } : {}),
         ...(share.session.started_at ? { started_at: share.session.started_at } : {}),
