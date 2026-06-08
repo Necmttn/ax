@@ -28,8 +28,11 @@ solo.yml
 # macOS cruft
 .DS_Store
 
-# dashboard studio build output
-apps/axctl/src/dashboard/web/dist-studio/
+# studio build output (daemon dist/ is covered by the generic dist/ rule)
+apps/studio/dist-studio/
+apps/studio/dist-desktop/
+# studio staged into the site by scripts/stage-studio.ts (generated, not committed)
+apps/site/public/studio/
 
 # local dogfood outputs (HTML reports, profiling scratch)
 dogfood-output/
