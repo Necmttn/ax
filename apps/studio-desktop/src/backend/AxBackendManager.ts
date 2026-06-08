@@ -26,12 +26,15 @@
  * so unit tests can stub start/stop without launching real OS processes.
  *
  * Crash-restart ordering: each `SupervisedProcess` restarts itself on crash. ax
- * serve reconnects to surreal on boot, so a surreal restart does not require a
- * manual ax-serve bounce in the steady state. A belt-and-suspenders surreal
- * `onExit` hook that proactively bounces ax serve is NOT wired yet - it is
- * deferred (see TODO in `startSpawn`) because `MakeSupervisedProcess` does not
- * accept lifecycle hooks. Steady-state recovery therefore relies on each
- * process's own self-restart plus ax-serve's reconnect-on-boot.
+ * serve reconnects to surreal on boot, so a surreal restart does not strictly
+ * require a manual ax-serve bounce in the steady state. As a belt-and-suspenders
+ * measure the manager passes surreal a `SupervisedProcessHooks.onExit` hook
+ * (threaded through {@link MakeSupervisedProcess}) that bounces ax serve
+ * (`stop` + `start`) when surreal exits, so ax serve reconnects to the fresh DB
+ * promptly instead of limping on a dead connection. The bounce is guarded
+ * against teardown (manager `stopping` + `DesktopState.quitting`) and only fires
+ * once ax serve has been started. Self-restart + reconnect-on-boot still back it
+ * up.
  */
 import * as Context from "effect/Context";
 import * as Duration from "effect/Duration";
@@ -57,6 +60,7 @@ import {
     makeSupervisedProcess,
     type SupervisedProcess,
     type SupervisedProcessConfig,
+    type SupervisedProcessHooks,
     type SupervisedProcessSnapshot,
 } from "./SupervisedProcess.ts";
 
@@ -74,10 +78,14 @@ const READINESS_TIMEOUT = Duration.seconds(60);
 /**
  * The factory used to vend a single supervised process. Defaults to
  * {@link makeSupervisedProcess}; tests inject a stub that records start/stop
- * without launching a real process.
+ * without launching a real process. The optional `hooks` argument is threaded
+ * through to {@link makeSupervisedProcess} so the manager can react to a
+ * process becoming ready / exiting (e.g. bounce ax-serve when surreal
+ * restarts); stub factories may ignore it or invoke it to simulate lifecycle.
  */
 export type MakeSupervisedProcess = (
     config: SupervisedProcessConfig,
+    hooks?: SupervisedProcessHooks,
 ) => Effect.Effect<
     SupervisedProcess,
     never,
@@ -249,11 +257,20 @@ const make = (makeProcess: MakeSupervisedProcess) =>
             surreal: null,
             axServe: null,
         });
+        // Latched true for the lifetime of `stop`/teardown so the surreal
+        // restart hook never respawns ax-serve while the manager is shutting
+        // down (the hook runs in the supervisor's fiber, concurrently with
+        // stop). Combined with `quitting`, this guards the bounce against every
+        // teardown path (explicit stop, scope-close finalizer, app quit).
+        const stopping = yield* Ref.make(false);
 
         // Provide the supervised-process deps once; the factory's `Scope` is the
         // manager's parent scope so processes live as long as the manager.
-        const buildProcess = (config: SupervisedProcessConfig) =>
-            makeProcess(config).pipe(
+        const buildProcess = (
+            config: SupervisedProcessConfig,
+            hooks?: SupervisedProcessHooks,
+        ) =>
+            makeProcess(config, hooks).pipe(
                 Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
                 Effect.provideService(HttpClient.HttpClient, httpClient),
                 Effect.provideService(
@@ -284,11 +301,68 @@ const make = (makeProcess: MakeSupervisedProcess) =>
                 { process: name, surrealPort: SURREAL_PORT, axServePort: AX_SERVE_PORT },
             );
 
+        // Belt-and-suspenders: when surreal exits (and is about to self-restart)
+        // bounce ax-serve so it reconnects to the fresh surreal on boot rather
+        // than limping on a dead DB connection until its own next restart.
+        // Runs from surreal's supervisor fiber (its `onExit`), concurrently with
+        // any teardown - hence the guards. `axServe.stop`/`start` are themselves
+        // mutex-guarded by SupervisedProcess, so the bounce can't race itself.
+        const bounceAxServe = Effect.gen(function* () {
+            // Don't respawn while shutting down (explicit stop, finalizer, quit).
+            if (yield* Ref.get(stopping)) {
+                return;
+            }
+            if (yield* Ref.get(desktopState.quitting)) {
+                return;
+            }
+            // Only bounce if ax-serve has actually been started by this manager.
+            const axServe = (yield* Ref.get(procs)).axServe;
+            if (!axServe) {
+                return;
+            }
+            yield* logInfo("surreal restarted; bouncing ax-serve", {
+                surrealPort: SURREAL_PORT,
+                axServePort: AX_SERVE_PORT,
+            });
+            // Re-check the guards after the stop (teardown may have begun while
+            // we awaited it) before bringing ax-serve back up.
+            yield* axServe.stop();
+            if (yield* Ref.get(stopping)) {
+                return;
+            }
+            if (yield* Ref.get(desktopState.quitting)) {
+                return;
+            }
+            // Re-read the handle: `stop()`/teardown clears `procs`, so a null
+            // here means the manager was torn down mid-bounce - do not respawn.
+            const stillTracked = (yield* Ref.get(procs)).axServe;
+            if (stillTracked !== axServe) {
+                return;
+            }
+            yield* axServe.start;
+        }).pipe(
+            Effect.catchCause((cause) =>
+                logError("failed to bounce ax-serve after surreal restart", {
+                    cause: String(cause),
+                }),
+            ),
+        );
+
+        // Surreal lifecycle hooks. `onExit` fires when surreal's run finalizes
+        // (just before its own backoff restart is scheduled); that is the moment
+        // to schedule the ax-serve bounce. We use `onExit` rather than `onReady`
+        // because `onReady` resets `restartAttempt` to 0 before firing, so it
+        // cannot distinguish the initial boot from a restart - whereas `onExit`
+        // never fires on initial boot at all.
+        const surrealHooks: SupervisedProcessHooks = {
+            onExit: () => bounceAxServe,
+        };
+
         const startSpawn = (withSurreal: boolean) =>
             Effect.gen(function* () {
                 let surreal: SupervisedProcess | null = null;
                 if (withSurreal) {
-                    surreal = yield* buildProcess(makeSurrealConfig(env));
+                    surreal = yield* buildProcess(makeSurrealConfig(env), surrealHooks);
                     yield* Ref.update(procs, (p) => ({ ...p, surreal }));
                     // Start surreal and await its readiness before ax serve so
                     // ax serve never races a missing DB. If surreal never
@@ -313,16 +387,17 @@ const make = (makeProcess: MakeSupervisedProcess) =>
 
                 yield* markReadyAndOpenWindow;
 
-                // TODO(phase-2): crash-restart ordering refinements.
-                //  1. surreal-crash -> ax-serve bounce. Each SupervisedProcess
-                //     already self-restarts on crash, and ax serve reconnects to
-                //     surreal on boot, so the steady state recovers without help.
-                //     A belt-and-suspenders bounce (surreal `onExit` hook ->
-                //     axServe.stop()+start) would need `makeProcess` to accept
-                //     SupervisedProcessHooks; deferred to keep the test seam thin.
-                //  2. attach -> spawn live transition. AxDaemonArbitration's
-                //     residual note: if an ATTACHED CLI daemon dies, a periodic
-                //     re-probe should fall back to spawn. Not wired yet.
+                // Surreal-crash -> ax-serve bounce is now wired via the surreal
+                // `onExit` hook (see `bounceAxServe` / `surrealHooks` above):
+                // when surreal exits and self-restarts, we bounce ax-serve so it
+                // reconnects to the fresh DB instead of limping on a dead
+                // connection. The self-restart + reconnect-on-boot still backs
+                // it up in the steady state.
+                //
+                // TODO(phase-2): attach -> spawn live transition.
+                //  AxDaemonArbitration's residual note: if an ATTACHED CLI daemon
+                //  dies, a periodic re-probe should fall back to spawn. Not wired
+                //  yet (separate from the bounce above).
             });
 
         const start: Effect.Effect<void> = Effect.gen(function* () {
@@ -360,6 +435,10 @@ const make = (makeProcess: MakeSupervisedProcess) =>
 
         const stop: AxBackendManagerShape["stop"] = (options) =>
             Effect.gen(function* () {
+                // Latch the teardown flag first so a concurrent surreal `onExit`
+                // hook (which may fire as we kill surreal below) bails instead of
+                // respawning ax-serve mid-shutdown.
+                yield* Ref.set(stopping, true);
                 // Take + clear the handles atomically so the scope-close finalizer
                 // can't double-stop after an explicit stop (idempotent).
                 const current = yield* Ref.getAndSet(procs, {

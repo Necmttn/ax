@@ -14,6 +14,7 @@ import type { ArbitrationDecision } from "./AxDaemonArbitration.ts";
 import type {
     SupervisedProcess,
     SupervisedProcessConfig,
+    SupervisedProcessHooks,
     SupervisedProcessSnapshot,
 } from "./SupervisedProcess.ts";
 
@@ -28,13 +29,18 @@ interface FakeProcessEvent {
 
 /**
  * Build a stub `makeProcess` factory that records start/stop ordering across
- * every supervised process it vends, and never touches a real OS process.
+ * every supervised process it vends, and never touches a real OS process. Also
+ * captures the lifecycle `hooks` passed for each process so a test can fire
+ * them (e.g. simulate surreal's `onExit` -> ax-serve bounce).
  */
 const makeFakeProcessFactory = Effect.gen(function* () {
     const events = yield* Ref.make<ReadonlyArray<FakeProcessEvent>>([]);
     const configs = yield* Ref.make<ReadonlyArray<SupervisedProcessConfig>>([]);
+    const hooksByName = yield* Ref.make<
+        Readonly<Record<string, SupervisedProcessHooks | undefined>>
+    >({});
 
-    const factory: AxBackendManager.MakeSupervisedProcess = (config) =>
+    const factory: AxBackendManager.MakeSupervisedProcess = (config, hooks) =>
         Effect.sync(() => {
             const proc: SupervisedProcess = {
                 start: Ref.update(events, (xs) => [
@@ -53,12 +59,26 @@ const makeFakeProcessFactory = Effect.gen(function* () {
                 } satisfies SupervisedProcessSnapshot),
             };
             return proc;
-        }).pipe(Effect.tap(() => Ref.update(configs, (xs) => [...xs, config])));
+        }).pipe(
+            Effect.tap(() => Ref.update(configs, (xs) => [...xs, config])),
+            Effect.tap(() =>
+                Ref.update(hooksByName, (m) => ({ ...m, [config.name]: hooks })),
+            ),
+        );
+
+    /** Fire the captured `onExit` hook for a process, if any (simulates crash). */
+    const fireExit = (name: string) =>
+        Ref.get(hooksByName).pipe(
+            Effect.flatMap((m) =>
+                m[name]?.onExit?.({ pid: 1234, reason: "code=1" }) ?? Effect.void,
+            ),
+        );
 
     return {
         factory,
         events: Ref.get(events),
         configs: Ref.get(configs),
+        fireExit,
     } as const;
 });
 
@@ -348,4 +368,138 @@ test("conflict mode neither spawns nor opens the window", async () => {
 
     expect(out.events).toEqual([]);
     expect(out.opened).toBe(0);
+});
+
+// ---------------------------------------------------------------------------
+// (f) surreal restart (onExit) after both running bounces ax-serve
+// ---------------------------------------------------------------------------
+
+test("surreal restart bounces ax serve (stop then start)", async () => {
+    const program = Effect.gen(function* () {
+        const fakeProc = yield* makeFakeProcessFactory;
+        const fakeWindow = yield* makeFakeWindow;
+
+        // Read events INSIDE the scope: the scope-close finalizer (stop) appends
+        // its own stop events, which would otherwise pollute the assertion.
+        const events = yield* Effect.scoped(
+            Effect.gen(function* () {
+                const manager = yield* AxBackendManager.AxBackendManager;
+                yield* manager.start;
+                // Both processes are up. Simulate surreal crashing/exiting (the
+                // supervisor would self-restart); the manager's onExit hook
+                // should bounce ax-serve.
+                yield* fakeProc.fireExit("surreal");
+                return yield* fakeProc.events;
+            }).pipe(
+                Effect.provide(
+                    AxBackendManager.layer(fakeProc.factory).pipe(
+                        Layer.provide(arbitrationLayer({ mode: "spawn" })),
+                        Layer.provide(fakeWindow.layer),
+                        Layer.provide(DesktopState.layer),
+                        Layer.provide(envLayer),
+                        Layer.provide(platformStubLayer),
+                    ),
+                ),
+            ),
+        );
+
+        return { events };
+    });
+
+    const out = await Effect.runPromise(program);
+
+    // Initial: surreal start, ax-serve start. Then bounce: ax-serve stop + start.
+    expect(out.events).toEqual([
+        { name: "surreal", action: "start" },
+        { name: "ax-serve", action: "start" },
+        { name: "ax-serve", action: "stop" },
+        { name: "ax-serve", action: "start" },
+    ]);
+});
+
+// ---------------------------------------------------------------------------
+// (g) NO bounce when surreal exit happens during/after manager stop (teardown)
+// ---------------------------------------------------------------------------
+
+test("surreal exit during teardown does NOT respawn ax serve", async () => {
+    const program = Effect.gen(function* () {
+        const fakeProc = yield* makeFakeProcessFactory;
+        const fakeWindow = yield* makeFakeWindow;
+
+        const events = yield* Effect.scoped(
+            Effect.gen(function* () {
+                const manager = yield* AxBackendManager.AxBackendManager;
+                yield* manager.start;
+                // Tear down, THEN fire surreal's exit hook (mirrors a surreal
+                // SIGTERM landing as the manager shuts down). The bounce must
+                // bail: no ax-serve respawn after teardown.
+                yield* manager.stop();
+                yield* fakeProc.fireExit("surreal");
+                return yield* fakeProc.events;
+            }).pipe(
+                Effect.provide(
+                    AxBackendManager.layer(fakeProc.factory).pipe(
+                        Layer.provide(arbitrationLayer({ mode: "spawn" })),
+                        Layer.provide(fakeWindow.layer),
+                        Layer.provide(DesktopState.layer),
+                        Layer.provide(envLayer),
+                        Layer.provide(platformStubLayer),
+                    ),
+                ),
+            ),
+        );
+
+        return { events };
+    });
+
+    const out = await Effect.runPromise(program);
+
+    // start surreal, start ax-serve, then reverse-order teardown. No further
+    // ax-serve start after the teardown stops.
+    expect(out.events).toEqual([
+        { name: "surreal", action: "start" },
+        { name: "ax-serve", action: "start" },
+        { name: "ax-serve", action: "stop" },
+        { name: "surreal", action: "stop" },
+    ]);
+});
+
+// ---------------------------------------------------------------------------
+// (h) NO bounce on surreal's initial boot (only onExit, never onReady)
+// ---------------------------------------------------------------------------
+
+test("surreal initial boot does not bounce ax serve", async () => {
+    const program = Effect.gen(function* () {
+        const fakeProc = yield* makeFakeProcessFactory;
+        const fakeWindow = yield* makeFakeWindow;
+
+        const events = yield* Effect.scoped(
+            Effect.gen(function* () {
+                const manager = yield* AxBackendManager.AxBackendManager;
+                yield* manager.start;
+                // No exit fired: the manager only reacts to surreal `onExit`, so
+                // a clean initial boot must leave ax-serve untouched (one start).
+                return yield* fakeProc.events;
+            }).pipe(
+                Effect.provide(
+                    AxBackendManager.layer(fakeProc.factory).pipe(
+                        Layer.provide(arbitrationLayer({ mode: "spawn" })),
+                        Layer.provide(fakeWindow.layer),
+                        Layer.provide(DesktopState.layer),
+                        Layer.provide(envLayer),
+                        Layer.provide(platformStubLayer),
+                    ),
+                ),
+            ),
+        );
+
+        return { events };
+    });
+
+    const out = await Effect.runPromise(program);
+
+    expect(out.events).toEqual([
+        { name: "surreal", action: "start" },
+        { name: "ax-serve", action: "start" },
+    ]);
 });
