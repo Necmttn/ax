@@ -11,7 +11,7 @@ import type {
 } from "@shared/dashboard-types.ts";
 import { shortSessionId } from "@shared/session-id.ts";
 import { FilterBar } from "./inspector-filter-bar.tsx";
-import { CostRail, InspectGuide, KIND_STYLE, Turn, useVisibleTurnSeq } from "./session-inspect.tsx";
+import { DockedRail, InspectGuide, KIND_STYLE, Turn, useInspectSelection, useVisibleTurnSeq } from "./session-inspect.tsx";
 
 type ShareSchemaVersion = 1 | 2 | 3;
 
@@ -252,6 +252,7 @@ function InspectBody({ data }: { readonly data: SessionInspectPayload }) {
     const turnsRef = useRef<ReadonlyArray<InspectTurnDto>>([]);
     turnsRef.current = data.turns;
     const visibleSeq = useVisibleTurnSeq(data.turns, anchoredSeq ?? data.turns[0]?.seq ?? null);
+    const [selection, setSelection] = useInspectSelection(data);
 
     useEffect(() => {
         const onHashChange = () => setAnchoredSeq(hashSeq());
@@ -303,10 +304,21 @@ function InspectBody({ data }: { readonly data: SessionInspectPayload }) {
             <div style={{ display: "flex", alignItems: "flex-start", gap: 12 }}>
                 <div style={{ minWidth: 0, flex: "1 1 auto" }}>
                     {data.turns.map((turn) => (
-                        <Turn key={turn.seq} turn={turn} anchored={anchoredSeq === turn.seq} />
+                        <Turn
+                            key={turn.seq}
+                            turn={turn}
+                            anchored={anchoredSeq === turn.seq}
+                            activeTarget={selection?.turnSeq === turn.seq ? selection.target : null}
+                            onInspect={setSelection}
+                        />
                     ))}
                 </div>
-                <CostRail data={data} currentSeq={visibleSeq} />
+                <DockedRail
+                    data={data}
+                    currentSeq={visibleSeq}
+                    selection={selection}
+                    setSelection={setSelection}
+                />
             </div>
         </>
     );
