@@ -75,3 +75,7 @@ apps/studio-desktop/dist-electron/
 
 # studio-desktop vendored binaries (fetched per-arch by scripts/fetch-binaries.ts, not committed)
 apps/studio-desktop/resources/bin/
+
+# studio-desktop staged bundle resources (built per-arch by scripts/stage-ax-source.ts, not committed)
+apps/studio-desktop/resources/ax-src/
+apps/studio-desktop/resources/studio/
