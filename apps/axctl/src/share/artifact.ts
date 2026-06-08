@@ -87,6 +87,11 @@ export interface ShareHarnessHook {
     readonly effect: string;
     /** progress_only | success | blocking_error */
     readonly status: string;
+    /** The command the hook ran (e.g. `axctl hook file-context`). */
+    readonly command?: string;
+    /** What the hook did/injected: the injected context, blocking reason, or
+     *  output excerpt - so the reader can show *why* it fired, not just that. */
+    readonly detail?: string;
     /** Nearest turn seq by timestamp, for inline placement. */
     readonly anchor_turn_seq: number | null;
 }

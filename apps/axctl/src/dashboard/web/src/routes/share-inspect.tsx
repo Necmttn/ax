@@ -24,6 +24,8 @@ interface ShareHarnessHookView {
     readonly hook_name: string;
     readonly effect: string;
     readonly status: string;
+    readonly command?: string;
+    readonly detail?: string;
     readonly anchor_turn_seq: number | null;
 }
 
@@ -442,18 +444,25 @@ function HarnessHookMarker(props: { readonly hook: ShareHarnessHookView }) {
         <div
             id={`hook-${HARNESS_HOOK_IDX_BASE + hook.idx}`}
             style={{
-                display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap",
                 margin: "4px 0", padding: "5px 10px", background: tone.bg,
                 borderLeft: `4px solid ${tone.bar}`, borderRadius: 3,
                 fontSize: 11, fontFamily: "ui-monospace, monospace", color: tone.fg,
             }}
         >
-            <span style={{ fontWeight: 700 }}>⚙ hook</span>
-            <span style={{ fontWeight: 600 }}>{hook.hook_name}</span>
-            <span style={{ background: tone.bar, color: "#fff", padding: "0 6px", borderRadius: 2, fontSize: 10, fontWeight: 600 }}>
-                {hook.effect.replace(/_/g, " ")}
-            </span>
-            {hook.status === "blocking_error" ? <span style={{ fontWeight: 600 }}>⚠️ blocking</span> : null}
+            <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                <span style={{ fontWeight: 700 }}>⚙ hook</span>
+                <span style={{ fontWeight: 600 }}>{hook.hook_name}</span>
+                <span style={{ background: tone.bar, color: "#fff", padding: "0 6px", borderRadius: 2, fontSize: 10, fontWeight: 600 }}>
+                    {hook.effect.replace(/_/g, " ")}
+                </span>
+                {hook.command ? <span style={{ opacity: 0.7 }}>{hook.command}</span> : null}
+                {hook.status === "blocking_error" ? <span style={{ fontWeight: 600 }}>⚠️ blocking</span> : null}
+            </div>
+            {hook.detail ? (
+                <div style={{ marginTop: 4, whiteSpace: "pre-wrap", wordBreak: "break-word", opacity: 0.9, lineHeight: 1.5 }}>
+                    {hook.detail}
+                </div>
+            ) : null}
         </div>
     );
 }

@@ -291,7 +291,12 @@ SELECT
     event_name,
     hook_name,
     effect,
-    provider_status
+    provider_status,
+    command,
+    stdout_excerpt,
+    content_excerpt,
+    blocking_error_excerpt,
+    stderr_excerpt
 FROM hook_command_invocation
 WHERE session = $sessionId
     AND effect IN ["blocked", "modified_input", "injected_context", "notified"]
@@ -578,6 +583,34 @@ export type ShareHookFire = Omit<HookFireDto, "idx">;
 /** Harness hook row before the exporter assigns idx + anchor turn. */
 export type ShareHarnessHookRow = Omit<ShareHarnessHook, "idx" | "anchor_turn_seq">;
 
+const HARNESS_DETAIL_MAX = 600;
+
+/** Pull `additionalContext` out of a hook's stdout JSON (the text Claude/Codex
+ *  actually saw injected), tolerating a missing/malformed payload. */
+const extractInjectedContext = (stdout: string | null): string | null => {
+    if (!stdout) return null;
+    const parsed = decodeJsonOrNull(stdout);
+    if (!parsed || typeof parsed !== "object") return null;
+    const rec = parsed as Record<string, unknown>;
+    const hso = rec.hookSpecificOutput;
+    if (hso && typeof hso === "object" && typeof (hso as Record<string, unknown>).additionalContext === "string") {
+        return (hso as Record<string, unknown>).additionalContext as string;
+    }
+    return typeof rec.additionalContext === "string" ? rec.additionalContext : null;
+};
+
+/** The most informative excerpt of what a hook did: blocking reason, injected
+ *  context, or raw output. Clipped so a big file-memory block stays bounded. */
+const harnessHookDetail = (raw: Record<string, unknown>): string | null => {
+    const detail = stringField(raw, "blocking_error_excerpt")
+        ?? stringField(raw, "content_excerpt")
+        ?? extractInjectedContext(stringField(raw, "stdout_excerpt"))
+        ?? stringField(raw, "stderr_excerpt");
+    if (!detail) return null;
+    const trimmed = detail.trim();
+    return trimmed.length > HARNESS_DETAIL_MAX ? `${trimmed.slice(0, HARNESS_DETAIL_MAX - 1)}…` : trimmed;
+};
+
 export const sessionShareHarnessHooksQuery = defineQuery<
     SessionDetailParams,
     Record<string, unknown>,
@@ -592,12 +625,16 @@ export const sessionShareHarnessHooksQuery = defineQuery<
         const hook_name = stringField(raw, "hook_name");
         const effect = stringField(raw, "effect");
         if (!ts || !event_name || !hook_name || !effect) return null;
+        const command = stringField(raw, "command");
+        const detail = harnessHookDetail(raw);
         return {
             ts,
             event_name,
             hook_name,
             effect,
             status: stringField(raw, "provider_status") ?? "",
+            ...(command ? { command } : {}),
+            ...(detail ? { detail } : {}),
         };
     },
 });
