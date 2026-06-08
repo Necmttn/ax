@@ -1,3 +1,4 @@
+import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 
 import * as AxBackendManager from "../backend/AxBackendManager.ts";
@@ -71,6 +72,7 @@ const scopedProgram = Effect.scoped(
         yield* Effect.annotateCurrentSpan({ scope: "desktop" });
 
         const shutdown = yield* DesktopLifecycle.DesktopShutdown;
+        const backendManager = yield* AxBackendManager.AxBackendManager;
 
         // Mark shutdown complete when the program scope closes, so before-quit
         // handlers awaiting completion unblock even on a Phase-1 (no supervisor)
@@ -81,6 +83,22 @@ const scopedProgram = Effect.scoped(
 
         // Stay alive until something requests shutdown (before-quit / signal).
         yield* shutdown.awaitRequest;
+
+        // Explicitly tear down the supervised backend BEFORE the scope-close
+        // `markComplete` finalizer unblocks the before-quit handler (the manager's
+        // own stop finalizer runs on the outer layer scope, which races app exit
+        // and orphans the spawned processes). Bounded by a timeout so a stuck
+        // stop can never hang the quit: the spawned `bun ax serve` ignores
+        // SIGTERM, so teardown depends on the supervisor's forceKill SIGKILL; if
+        // that doesn't land in time we still proceed to quit rather than wedge
+        // the app. `stop` is idempotent (the finalizer backstop is harmless).
+        // KNOWN ISSUE (found by live spawn dogfooding): if forceKill doesn't
+        // escalate, the spawned ax-serve can outlive the app - see the
+        // SupervisedProcess SIGKILL-escalation TODO.
+        yield* backendManager.stop().pipe(
+            Effect.timeout(Duration.seconds(6)),
+            Effect.ignore,
+        );
     }),
 );
 
