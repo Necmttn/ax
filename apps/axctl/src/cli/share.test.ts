@@ -78,7 +78,11 @@ describe("cmdShareWithDeps", () => {
         await cmdShareWithDeps(["abc123", "--dry-run"], harness.deps);
 
         expect(harness.exitCode()).toBeUndefined();
-        expect(JSON.parse(harness.stdout()).session.id).toBe("abc123");
+        // Dry-run emits the multi-file bundle keyed by gist filename.
+        const bundle = JSON.parse(harness.stdout());
+        expect(bundle["index.json"].kind).toBe("manifest");
+        expect(bundle["index.json"].session.id).toBe("abc123");
+        expect(bundle["session.json"].session.id).toBe("abc123");
         expect(harness.stderr()).toBe("");
         expect(harness.published).toHaveLength(0);
     });

@@ -1,9 +1,16 @@
 import type { InspectTurnContentDto, SessionTokenUsageDetail, TurnTokenUsageDetail } from "@ax/lib/shared/dashboard-types";
 
-export const AX_SESSION_SHARE_SCHEMA_VERSION = 2 as const;
+export const AX_SESSION_SHARE_SCHEMA_VERSION = 3 as const;
 
-/** Schema versions a reader still accepts. v1 lacked `children`. */
-export const SUPPORTED_SHARE_SCHEMA_VERSIONS = [1, 2] as const;
+/**
+ * Schema versions a reader still accepts.
+ * - v1: flat single file, no children.
+ * - v2: single file, `children` nested inline.
+ * - v3: multi-file gist bundle - an `index.json` manifest + one
+ *   `session.json` (root) + `subagent-<id>.json` per descendant; per-file
+ *   shares no longer inline `children` (they are referenced from the manifest).
+ */
+export const SUPPORTED_SHARE_SCHEMA_VERSIONS = [1, 2, 3] as const;
 export type ShareSchemaVersion = (typeof SUPPORTED_SHARE_SCHEMA_VERSIONS)[number];
 
 export type KnownShareSource = "claude" | "codex" | "pi" | "opencode" | "cursor";

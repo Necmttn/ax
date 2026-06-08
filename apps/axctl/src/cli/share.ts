@@ -4,6 +4,7 @@ import { AppLayer } from "@ax/lib/layers";
 import { prettyPrint } from "@ax/lib/json";
 import type { AxSessionShare } from "../share/artifact.ts";
 import { exportSessionShare } from "../share/exporter.ts";
+import { buildShareBundle, type ShareBundle } from "../share/manifest.ts";
 import {
     createSessionGist,
     shareUrlForGist,
@@ -31,7 +32,7 @@ export interface ShareCommandDeps {
         axVersion: string,
     ) => Promise<AxSessionShare | null>;
     readonly publish: (input: {
-        readonly artifact: AxSessionShare;
+        readonly bundle: ShareBundle;
         readonly public: boolean;
     }) => Promise<GistRef>;
     readonly open: (ref: GistRef) => Promise<void>;
@@ -104,9 +105,13 @@ export async function cmdShareWithDeps(
     }
 
     const { artifact } = redactShareArtifact(exported);
+    const bundle = buildShareBundle(artifact);
 
     if (parsed.dryRun) {
-        deps.writeStdout(`${prettyPrint(artifact)}\n`);
+        // Emit the full multi-file bundle keyed by gist filename so the dry-run
+        // shows exactly what would be published (manifest + every part).
+        const byFile = Object.fromEntries(bundle.files.map((file) => [file.name, file.content]));
+        deps.writeStdout(`${prettyPrint(byFile)}\n`);
         return;
     }
 
@@ -122,7 +127,7 @@ export async function cmdShareWithDeps(
     let ref: GistRef;
     try {
         ref = await deps.publish({
-            artifact,
+            bundle,
             public: parsed.public,
         });
     } catch (error) {
