@@ -41,6 +41,10 @@ export interface AxSessionShare {
     /** v3+: runtime hook-fire decisions (file-context injections etc.), so the
      *  shared inspector can show + jump to them like the live one. */
     readonly hook_fires?: ReadonlyArray<HookFireDto>;
+    /** v3+: harness hook invocations that DID something (blocked / modified /
+     *  injected), anchored to the nearest turn, so the shared transcript shows
+     *  where guardrail hooks fired. */
+    readonly harness_hooks?: ReadonlyArray<ShareHarnessHook>;
     readonly turns: ReadonlyArray<ShareTurn>;
     readonly timeline: ReadonlyArray<ShareEvent>;
     readonly files: ReadonlyArray<ShareFile>;
@@ -68,6 +72,23 @@ export interface AxSessionShare {
      * Absent on the root and when no parent turn matched.
      */
     readonly spawn_anchor_turn_seq?: number | null;
+}
+
+/** A harness hook invocation surfaced in a shared transcript. */
+export interface ShareHarnessHook {
+    /** Monotonic index for stable DOM ids / jump cursor. */
+    readonly idx: number;
+    readonly ts: string;
+    /** PreToolUse | PostToolUse | SessionStart | UserPromptSubmit | Stop | ... */
+    readonly event_name: string;
+    /** e.g. PreToolUse:Write, SessionStart:startup */
+    readonly hook_name: string;
+    /** allowed | blocked | injected_context | modified_input | notified | no_op */
+    readonly effect: string;
+    /** progress_only | success | blocking_error */
+    readonly status: string;
+    /** Nearest turn seq by timestamp, for inline placement. */
+    readonly anchor_turn_seq: number | null;
 }
 
 export interface ShareTurn {

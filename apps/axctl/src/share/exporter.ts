@@ -25,6 +25,7 @@ import {
     sessionShareTurnsQuery,
     sessionShareTurnToolCallsQuery,
     sessionShareHookFiresQuery,
+    sessionShareHarnessHooksQuery,
     sessionTokenUsageQuery,
     sessionTurnTokenUsageQuery,
     sessionToolCallsQuery,
@@ -45,6 +46,7 @@ export interface ShareArtifactParts {
     readonly children?: ReadonlyArray<AxSessionShare>;
     readonly spawnAnchorTurnSeq?: number | null;
     readonly hookFires?: AxSessionShare["hook_fires"];
+    readonly harnessHooks?: AxSessionShare["harness_hooks"];
 }
 
 const SESSION_ID_RE = /^[A-Za-z0-9_-]{6,80}$/;
@@ -169,6 +171,7 @@ export function buildShareArtifactFromParts(
         },
         token_usage: parts.tokenUsage ?? null,
         ...(parts.hookFires && parts.hookFires.length > 0 ? { hook_fires: parts.hookFires } : {}),
+        ...(parts.harnessHooks && parts.harnessHooks.length > 0 ? { harness_hooks: parts.harnessHooks } : {}),
         turns: parts.turns,
         timeline: parts.timeline,
         files,
@@ -335,7 +338,7 @@ export const exportSessionShare = (
         if (remaining < 0) return null;
 
         const params = { recordRef };
-        const [overview, topSkillsRaw, toolCallsRaw, tokenUsage, turnTokenUsageRaw, turnsRaw, timelineRaw, filesRaw, childLinksRaw, turnToolCallsRaw, hookFiresRaw, turnContent] =
+        const [overview, topSkillsRaw, toolCallsRaw, tokenUsage, turnTokenUsageRaw, turnsRaw, timelineRaw, filesRaw, childLinksRaw, turnToolCallsRaw, hookFiresRaw, harnessHooksRaw, turnContent] =
             yield* Effect.all([
                 runSingleQuery(sessionOverviewQuery, params),
                 runQuery(sessionTopSkillsQuery, params),
@@ -348,6 +351,7 @@ export const exportSessionShare = (
                 runQuery(sessionChildrenQuery, params),
                 runQuery(sessionShareTurnToolCallsQuery, params),
                 runQuery(sessionShareHookFiresQuery, params),
+                runQuery(sessionShareHarnessHooksQuery, params),
                 resolveTurnContent(sessionId),
             ]);
 
@@ -363,6 +367,14 @@ export const exportSessionShare = (
         // Each child's spawn-edge ts is anchored to the nearest parent turn so
         // the viewer can mark where it was launched.
         const shareTurns = turnsRaw.filter(isPresent);
+        // Harness hooks: assign idx + anchor each to the nearest turn by ts.
+        const harnessHooks = harnessHooksRaw
+            .filter(isPresent)
+            .map((hook, idx) => ({
+                idx,
+                ...hook,
+                anchor_turn_seq: anchorChildToTurn(shareTurns, hook.ts),
+            }));
         const nextVisited = new Set(visited).add(recordRef);
         const childLinks = childLinksRaw.filter(isPresent);
         const children = (
@@ -402,6 +414,7 @@ export const exportSessionShare = (
             files: filesRaw.filter(isPresent),
             children,
             hookFires,
+            harnessHooks,
             ...(options.spawnAnchorTurnSeq != null
                 ? { spawnAnchorTurnSeq: options.spawnAnchorTurnSeq }
                 : {}),
