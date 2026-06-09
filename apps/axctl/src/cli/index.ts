@@ -90,6 +90,7 @@ import { fetchRecall, type RecallSource, type RecallScope } from "../dashboard/r
 import { fetchSessionShow } from "../dashboard/session-show.ts";
 import { fetchSessionCompare } from "../dashboard/session-compare.ts";
 import { fetchCostSummary, type CostSummary } from "../dashboard/cost-query.ts";
+import { fetchLocSummary, type LocSummary, type LocSelector } from "../dashboard/loc-query.ts";
 import { renderSessionMarkdown, renderSessionJson } from "./session-show-format.ts";
 import { renderCompareTable, renderCompareJson } from "./session-compare-format.ts";
 import { cmdDaemon, cmdDoctor, cmdInstall, cmdSetup, cmdUninstall } from "./install.ts";
@@ -4260,6 +4261,93 @@ const costsGroupCommand = Command.make("costs").pipe(
     Command.withSubcommands([costsSummaryCommand, costsForCommand]),
 );
 
+const formatLocSummary = (summary: LocSummary): string => {
+    const lines: string[] = [];
+    lines.push(`selector ${summary.selector}`);
+    lines.push(`evidence ${summary.evidence}`);
+    lines.push(
+        `lines +${integer(summary.totals.linesAdded)} -${integer(summary.totals.linesRemoved)} (changed ${integer(summary.totals.linesChanged)})  edits ${integer(summary.totals.edits)}  sessions ${integer(summary.totals.sessions)}`,
+    );
+    lines.push("");
+    lines.push(`${"tool".padEnd(14)} ${"edits".padStart(8)} ${"+added".padStart(10)} ${"-removed".padStart(10)}`);
+    for (const row of summary.byTool) {
+        lines.push(
+            `${row.tool.padEnd(14)} ${integer(row.edits).padStart(8)} ${integer(row.linesAdded).padStart(10)} ${integer(row.linesRemoved).padStart(10)}`,
+        );
+    }
+    lines.push("");
+    lines.push("sessions");
+    for (const row of summary.sessions.slice(0, 20)) {
+        lines.push(
+            `- ${row.session.replace(/^session:/, "")}  ${row.source}  +${integer(row.linesAdded)} -${integer(row.linesRemoved)}  (${integer(row.edits)} edits)`,
+        );
+    }
+    return lines.join("\n");
+};
+
+const cmdLoc = (input: {
+    readonly session: string | null;
+    readonly query: string | null;
+    readonly terms: string | null;
+    readonly sinceDays: number | null;
+    readonly project: string | null;
+    readonly here: boolean;
+    readonly limit: number;
+    readonly json: boolean;
+}) =>
+    Effect.gen(function* () {
+        let repositoryKey: string | null = null;
+        if (input.here) {
+            const pwdResolution = yield* resolvePwdRepository().pipe(
+                Effect.catchTag("NotAGitRepoError", (err) =>
+                    Effect.sync(() => {
+                        process.stderr.write(`axctl loc: --here requires a git repository (cwd=${err.cwd})\n`);
+                        process.exit(2);
+                    }),
+                ),
+            );
+            repositoryKey = pwdResolution.repositoryRecordId.id as string;
+        }
+        const since = input.sinceDays === null
+            ? null
+            : new Date(Date.now() - Math.min(Math.max(Math.trunc(input.sinceDays), 1), 3650) * 86400 * 1000);
+        const terms = costQueryTerms(input.query, input.terms);
+        const selected: LocSelector = input.session
+            ? { kind: "session", sessionId: input.session }
+            : { kind: "query", terms, limit: input.limit, since, project: input.project, repositoryKey };
+        const summary = yield* fetchLocSummary(selected);
+        if (input.json) {
+            console.log(prettyPrint(summary));
+            return;
+        }
+        console.log(formatLocSummary(summary));
+    });
+
+const locCommand = Command.make(
+    "loc",
+    {
+        session: Flag.string("session").pipe(Flag.optional),
+        query: Flag.string("query").pipe(Flag.optional),
+        terms: Flag.string("terms").pipe(Flag.optional),
+        since: optionalSince,
+        project: Flag.string("project").pipe(Flag.optional),
+        here: Flag.boolean("here").pipe(Flag.withDefault(false)),
+        limit: positiveLimit(50),
+        json: jsonFlag,
+    },
+    ({ session, query, terms, since, project, here, limit, json }) =>
+        cmdLoc({
+            session: optionValue(session) ?? null,
+            query: optionValue(query) ?? null,
+            terms: optionValue(terms) ?? null,
+            sinceDays: optionValue(since) ?? null,
+            project: optionValue(project) ?? null,
+            here,
+            limit,
+            json,
+        }),
+).pipe(Command.withDescription("Estimate lines added/removed from agent edits (Edit/Write/MultiEdit)"));
+
 const cmdPricing = (input: { readonly limit: number; readonly query: string | null; readonly json: boolean }) =>
     Effect.gen(function* () {
         const db = yield* SurrealClient;
@@ -5172,6 +5260,7 @@ export const rootCommand = Command.make("axctl").pipe(
         Command.withHidden(classifiersCommand),
         Command.withHidden(reportCommand),
         Command.withHidden(costsGroupCommand),
+        Command.withHidden(locCommand),
         Command.withHidden(pricingCommand),
         Command.withHidden(rolesCommand),
         Command.withHidden(contextCommand),
@@ -5319,6 +5408,7 @@ export const DB_COMMANDS: ReadonlySet<string> = new Set([
     "retro",
     "report",
     "costs",
+    "loc",
     "pricing",
     "recall",
     "skills",
