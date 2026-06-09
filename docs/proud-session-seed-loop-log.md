@@ -289,3 +289,28 @@ index. Branch: 8 commits, +999/-93 across 12 files; typecheck 0; tests green.
   is a working URL). Then the FINAL iteration near 08:30: re-enable
   `com.necmttn.ax-watch`, run one catch-up `ax ingest` (lock now protects it),
   and confirm `sessions here` / `share` still fast.
+
+---
+
+## Iteration 6 — validate published shares live (2026-06-10 02:46 WITA)
+
+**Tried.** Validated the 3 published shares are live + correctly structured, via
+HTTP + the underlying GitHub gists.
+
+**Worked — all 3 live, public, complete:**
+- HTTP 200 for all `ax.necmttn.com/s/Necmttn/<id>` (identical 33KB SPA shell;
+  session data loads client-side from the gist).
+- gist bundles validated: each `public=true`, has `index.json`, and the exact
+  subagent counts as published:
+  - `77fd35…` (fb1be39a): 31 files, **29 subagents**
+  - `51d989…` (b23ebb28): 7 files, **5 subagents**
+  - `1b9b38…` (11fb5aad): 29 files, **27 subagents**
+
+**Failed / friction.** None. >30min from 08:30, so the watcher stays stopped
+(no re-enable yet).
+
+**Next (wind-down).** Substantive work COMPLETE — reads converged, 3 live shares,
+PR summary ready, branch green. Remaining: the final wind-down within ~30min of
+08:30 — re-enable `com.necmttn.ax-watch`, one catch-up `ax ingest --since=1`
+(lock-protected), confirm `sessions here` + `share --dry-run` still fast, then
+mark the loop complete. Interim wakes are just health pings.
