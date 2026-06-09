@@ -75,3 +75,6 @@ apps/studio-desktop/dist-release/
 apps/studio-desktop/resources/bin/
 apps/studio-desktop/resources/ax-src/
 apps/studio-desktop/resources/studio/
+
+# launch/marketing assets - heavy media (30MB+), captured locally, unredacted
+docs/launch-proof/
