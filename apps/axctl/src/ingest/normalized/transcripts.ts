@@ -172,6 +172,7 @@ export const buildNormalizedSyntheticSkillInvocationStatements = (
 
         return `RELATE ${recordRef("turn", turnKey)}->invoked:\`${edgeKey}\`->${recordRef("skill", skillKey)} SET ${surrealSet([
             ["ts", surrealDate(invocation.ts)],
+            ["session", recordRef("session", invocation.sessionId)],
             ["args", surrealString(args)],
             ["turn_has_error", invocation.turnHasError ? "true" : "false"],
             ["turn_index", (invocation.turnIndex ?? invocation.seq).toString(10)],

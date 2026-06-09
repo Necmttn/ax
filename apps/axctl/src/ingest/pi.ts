@@ -687,7 +687,7 @@ const buildSyntheticSkillAndInvocationStatements = (
         const skillKey = skillRecordKey(invocation.skill);
         const args = JSON.stringify(invocation.args ?? {});
         const edgeKey = invokedRelationRecordKey({ turnKey, skillKey, args });
-        return `RELATE turn:\`${turnKey}\`->invoked:\`${edgeKey}\`->skill:\`${skillKey}\` SET ts = ${surrealDate(invocation.ts)}, args = ${surrealString(args)}, turn_has_error = false, turn_index = ${invocation.seq};`;
+        return `RELATE turn:\`${turnKey}\`->invoked:\`${edgeKey}\`->skill:\`${skillKey}\` SET session = ${recordRef("session", invocation.session)}, ts = ${surrealDate(invocation.ts)}, args = ${surrealString(args)}, turn_has_error = false, turn_index = ${invocation.seq};`;
     });
     return [...skillStatements, ...invocationStatements];
 };

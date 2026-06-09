@@ -1,6 +1,7 @@
 import { describe, expect, it, test } from "bun:test";
 import {
     SESSION_FILE_EVIDENCE_SQL,
+    SESSION_TOP_SKILLS_SQL,
     SESSION_SHARE_FILES_SQL,
     SESSION_SHARE_TIMELINE_SQL,
     SESSION_SHARE_TURNS_SQL,
@@ -13,6 +14,12 @@ import {
 } from "./session-detail.ts";
 
 describe("session detail queries", () => {
+    test("top skills use denormalized invoked session field", () => {
+        expect(SESSION_TOP_SKILLS_SQL).toContain("FROM invoked");
+        expect(SESSION_TOP_SKILLS_SQL).toContain("WHERE session = $sessionId");
+        expect(SESSION_TOP_SKILLS_SQL).not.toContain("WHERE in.session = $sessionId");
+    });
+
     test("file evidence reads shared relation tables without provider branches", () => {
         expect(SESSION_FILE_EVIDENCE_SQL).toContain("FROM edited");
         expect(SESSION_FILE_EVIDENCE_SQL).toContain("FROM read_file");

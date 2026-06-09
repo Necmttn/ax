@@ -463,6 +463,7 @@ describe("Pi JSONL extraction", () => {
         expect(sql).toContain("name: \"pi:read\"");
         expect(sql).toContain("scope: \"pi-tool\"");
         expect(sql).toContain("->invoked:");
+        expect(sql).toContain("session = session:`pi-tools`");
         expect(sql).toContain("->concerns:");
         expect(sql).toContain("UPSERT session_token_usage:`pi_tools`");
         expect(sql).toContain("prompt_tokens: 12");

@@ -586,6 +586,9 @@ describe("Codex transcript extraction", () => {
                 }),
             },
         ]);
+        const sql = __testBuildCodexBatchStatements(extracted, 1200).join("\n");
+        expect(sql).toContain("->invoked:");
+        expect(sql).toContain("session = session:`codex-session`");
 
         expect(extracted.toolCalls).toHaveLength(2);
         const execCall = extracted.toolCalls.find((call) => call.toolName === "exec_command");

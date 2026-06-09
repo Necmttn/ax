@@ -1115,6 +1115,11 @@ DEFINE INDEX IF NOT EXISTS plays_role_out ON plays_role FIELDS out;
 DEFINE TABLE invoked      TYPE RELATION FROM turn TO skill;     -- explicit Skill tool call
 DEFINE FIELD args         ON invoked TYPE option<string>;       -- JSON-encoded
 DEFINE FIELD ts           ON invoked TYPE datetime;
+-- Denormalised source session. Session-detail top-skills must avoid
+-- dereferencing `in.session` across every invoked edge for large sessions.
+DEFINE FIELD session      ON invoked TYPE option<record<session>>;
+-- Repair rows written before `session` was denormalised onto invoked edges.
+UPDATE invoked SET session = in.session WHERE session IS NONE;
 -- Denormalised copies of the source turn's `has_error` and "was corrected
 -- within 3 user turns" flags. cmdTaste's `clean_inv` / `corrections`
 -- subqueries previously dereferenced `in.has_error` / walked `corrected_by`
@@ -1137,6 +1142,7 @@ DEFINE FIELD is_first     ON invoked TYPE option<bool>;
 -- `WHERE out = $skill_id AND ts > time::now() - Nd`. Composite index
 -- covers both predicates from one seek.
 DEFINE INDEX IF NOT EXISTS invoked_out_ts ON invoked FIELDS out, ts;
+DEFINE INDEX IF NOT EXISTS invoked_session_out_ts ON invoked FIELDS session, out, ts;
 DEFINE INDEX IF NOT EXISTS invoked_in_out_args ON invoked FIELDS in, out, args;
 
 DEFINE TABLE proposed     TYPE RELATION FROM turn TO skill;     -- assistant text mentioned skill, never invoked
