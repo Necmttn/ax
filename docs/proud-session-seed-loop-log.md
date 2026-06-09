@@ -222,3 +222,39 @@ slow read commands and grepped for the `IN`-scan anti-pattern repo-wide.
   corrections recovered) — the seed prompt's "caught something wrong → verified
   → fixed" beat — validating share perf once more on that shape.
 - Keep the branch green: full repo typecheck + the touched test suites.
+
+---
+
+## Iteration 4 — publish recovery-arc proud session + keep branch green (2026-06-10 01:30 WITA)
+
+**Tried.** Ranked ax-project claude sessions by recovery-arc signal
+(`reaction_event reaction_type='correction'`, resolved via `user_turn.session`
+since the direct `session` field is mostly unpopulated). Cross-checked git.
+
+**Worked. 3rd PUBLISHED (recovery arc):**
+https://ax.necmttn.com/s/Necmttn/1b9b38f33908a0d4aa7b3b1a8d019b73
+`11fb5aad` — 27 subagents, 967 turns, 601 tool_calls, 25 files changed, **24
+failures recovered + 4 `wrong_output` corrections** (genuine caught-wrong→fixed
+loops: "no the retired one", "get rid of this wrong one", "not T3 Turbo…"),
+shipped 18+ commits of the classifiers batch-review lifecycle. Published in
+**11.5s** — the iter-2 share speedup held on a 27-subagent session.
+(Runner-up `cb251b06`: 40 subagents but only 3 corrections — picked 11fb5aad for
+the stronger recovery arc.)
+
+**Branch green (task 2):** typecheck 0 (axctl + lib); 76 tests pass across 7
+touched suites (ingest-lock, sessions-query, session-turn-content, exporter,
+artifact, config, schema). No code changed this iteration → review-all/
+effect-lint N/A.
+
+**Failed / friction.** `reaction_event.session` is largely NONE; corrections
+must be grouped via `user_turn.session` — worth knowing for any future
+correction-based query.
+
+**Next (seeds iter 5).**
+- Three strong public shares now cover the headline signals (subagents,
+  correction/recovery arc, big architectural ship). Read optimization converged
+  on the CLI + share paths.
+- New surface to sweep: the `ax serve` dashboard read endpoints (cost-query,
+  loc-query, sessions-list) — they had `IN [...]` forms in the iter-3 grep;
+  profile them for the same membership-scan family and fix if real.
+- Then weigh winding toward a PR-prep iteration (branch summary) as 08:30 nears.
