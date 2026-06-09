@@ -114,3 +114,35 @@ the right signal here anyway.
 - Time `ax sessions show <id>` and `ax share` on the largest sessions
   (3297-turn `b23ebb28`, 1483-turn `fb1be39a`) - likely the next read hotspots
   with `IN`-style scans or per-turn derefs.
+
+---
+
+## Iteration 1 - run the seed flow, publish a proud session (2026-06-10 00:10 WITA)
+
+**Tried.** Drove ax through the seed-prompt flow against the now-fast DB:
+1. listed candidates (instant); profiled `sessions show --json` on the
+   3297-turn `b23ebb28` = **0.53s** (read paths healthy, no hotspot there).
+2. ranked the big sessions by seed signals (subagents / delegations / tool calls):
+   `fb1be39a` = **29 subagents**, 1483 turns, 13h, 8 reaction_events;
+   `b23ebb28` = 5 subagents, 3297 turns, 21h, 4 reaction_events.
+3. git cross-check of each window: `fb1be39a` shipped the studio timeline UI,
+   `fix: speed up session inspect paging`, and `fix/share-subagent-url` (the
+   subagent-share rendering itself) → 0.16.0; `b23ebb28` shipped the @ax/studio
+   Electron extraction (#156) → 0.15.0.
+4. picked `fb1be39a` (densest showcases-well trace + corrections + verifiable
+   ship), `--dry-run` (45s, redaction OK), then published `--public --yes`.
+
+**Worked. PUBLISHED:**
+https://ax.necmttn.com/s/Necmttn/77fd35f66094fe777e7875889c73115c
+329 top-level turns / 29 subagents / $333.48 / redactions applied. **No wedge**
+(the doc's headline risk) - 54s end-to-end; the iter-0 lock + timebox held.
+
+**Failed / friction.** `ax share` (dry-run 45s, publish 54s) is the slow path
+now. 1483 turns + 29 subagents → almost certainly a per-subagent N+1 / `IN`-scan
+in the bundle export, same family as the iter-0 `enrichSessions` bug.
+
+**Next (seeds iter 2).**
+- Profile `ax share` bundle export; find the per-subagent / per-turn read
+  hotspot and apply the same indexed-lookup fix. Target <15s for 29 subagents.
+- Then publish a 2nd proud session (`b23ebb28`, the Electron extraction) to
+  validate the speedup on a different shape.
