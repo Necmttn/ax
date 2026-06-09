@@ -6,6 +6,7 @@ import type { HookFireDto, InspectSpanDto, InspectSpanKind, InspectTurnDto, Sess
 import { childrenByAnchorTurn, spawnAnchorSet, turnText } from "./inspector-filters.ts";
 import { spliceHookFires } from "@ax/lib/shared/hook-fire-splice";
 import { FilterBar } from "./inspector-filter-bar.tsx";
+import { SessionTimelineView } from "./session-timeline.tsx";
 import { shortSessionId } from "@ax/lib/shared/session-id";
 import { sessionProjectLabel } from "@ax/lib/shared/project-slug";
 import type { InspectContentAtomDto, InspectContentBlockDto, InspectTurnContentDto } from "@ax/lib/shared/dashboard-types";
@@ -1340,6 +1341,10 @@ export function SessionInspectView({ sessionId }: { readonly sessionId: string }
         return m ? Number(m[1]) : null;
     };
     const [anchoredSeq, setAnchoredSeq] = useState<number | null>(() => readHashSeq());
+    // Zoom level. Default to the timeline: it's the fast highlight overview
+    // (~2-3s) and the right entry point; the raw transcript is a slower
+    // (large-query) drill-down loaded on demand.
+    const [view, setView] = useState<"transcript" | "timeline">("timeline");
 
     // The docked right-rail inspector tracks the last block/alias the user
     // hovered, across all turns (seeded to the first parsed turn).
@@ -1442,13 +1447,27 @@ export function SessionInspectView({ sessionId }: { readonly sessionId: string }
         <section className="panel">
             <header>
                 <h2>Session inspect</h2>
-                <span className="meta">
+                <span className="meta" style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                    <span style={{ display: "inline-flex", border: "1px solid var(--line)", borderRadius: 5, overflow: "hidden" }}>
+                        {(["timeline", "transcript"] as const).map((v) => (
+                            <button
+                                key={v}
+                                type="button"
+                                onClick={() => setView(v)}
+                                style={{
+                                    fontFamily: "ui-monospace, monospace", fontSize: 11, padding: "2px 10px", cursor: "pointer",
+                                    border: "none", background: view === v ? "var(--ink)" : "var(--panel)", color: view === v ? "var(--panel)" : "var(--muted)",
+                                }}
+                            >{v}</button>
+                        ))}
+                    </span>
                     <code>{shortSessionId(decoded)}…</code>
                 </span>
             </header>
-            {query.error ? <div className="error">Error: {String(query.error)}</div> : null}
-            {query.isLoading && !data ? <div className="loading">Loading…</div> : null}
-            {data ? (
+            {view === "timeline" ? <SessionTimelineView sessionId={decoded} /> : null}
+            {view === "transcript" && query.error ? <div className="error">Error: {String(query.error)}</div> : null}
+            {view === "transcript" && query.isLoading && !data ? <div className="loading">Loading…</div> : null}
+            {view === "transcript" && data ? (
                 <>
                     <div style={{ padding: "8px 24px", color: "var(--muted)", fontSize: 12, fontFamily: "ui-monospace, monospace" }}>
                         <span>project: </span>

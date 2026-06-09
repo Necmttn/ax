@@ -81,6 +81,7 @@ import { ingestClaudeInsights } from "../ingest/claude-insights.ts";
 import { deriveSignals } from "../ingest/derive-signals.ts";
 import { deriveTurnIntents } from "../ingest/derive-intents.ts";
 import { INSIGHT_VIEWS, insightSqlForView, isInsightView } from "../queries/insights.ts";
+import { extractSessionTimeline, SessionTimelineServiceLayer } from "../timeline/service.ts";
 import { formatInsightRows } from "./insights-format.ts";
 import { writeDashboard } from "../dashboard/report.ts";
 import { serveDashboard } from "../dashboard/server.ts";
@@ -4429,6 +4430,37 @@ const statsCommand = Command.make(
     ({ skill }) => cmdStats([skill]),
 ).pipe(Command.withDescription("Show detailed stats for one skill"));
 
+const cmdTimeline = (sessionId: string, json: boolean) =>
+    extractSessionTimeline(sessionId).pipe(
+        Effect.provide(SessionTimelineServiceLayer),
+        Effect.flatMap((tl) =>
+            Effect.sync(() => {
+                if (json) {
+                    console.log(JSON.stringify(tl, null, 2));
+                    return;
+                }
+                const h = tl.highlights;
+                const dur = h.duration_ms != null ? `${(h.duration_ms / 3_600_000).toFixed(1)}h` : "?";
+                const total = Object.values(h.event_counts).reduce((a, b) => a + b, 0);
+                console.log(`${h.model ?? "?"} · ${h.repository ?? ""} · ${dur} · ${h.turns} turns · ${h.tool_calls} tools · ${h.tool_errors} errs · ${h.files_changed} files · $${h.cost_usd?.toFixed(2) ?? "?"}`);
+                console.log(`${tl.segments.length} segments · ${tl.events.length} key events (of ${total})\n`);
+                for (const s of tl.segments) {
+                    const r = s.rollup;
+                    console.log(`  ${s.id} [${s.boundary}] ${s.title}`);
+                    console.log(`     ${s.event_count} evts · ${r.tool_calls} tools · ${r.file_edits} edits · ${r.failures} fail/${r.recovered} rec · ${r.decisions} dec · ${r.checkpoints} chk · ${r.corrections} corr`);
+                }
+            })
+        ),
+    );
+
+const timelineCommand = Command.make(
+    "timeline",
+    { sessionId: Argument.string("session-id"), json: jsonFlag },
+    ({ sessionId, json }) => cmdTimeline(sessionId, json),
+).pipe(Command.withDescription(
+    "Highlight/event timeline for a session (segments + ranked events, LLM-free). --json for the full structure.",
+));
+
 const recentCommand = Command.make(
     "recent",
     { limit: positiveLimit(20) },
@@ -5148,6 +5180,7 @@ export const rootCommand = Command.make("axctl").pipe(
         Command.withHidden(agentsCommand),
         Command.withHidden(projectCommand),
         Command.withHidden(evidenceCommand),
+        Command.withHidden(timelineCommand),
         Command.withHidden(versionCommand),
         Command.withHidden(updateCommand),
         Command.withHidden(daemonCommand),
@@ -5296,6 +5329,7 @@ export const DB_COMMANDS: ReadonlySet<string> = new Set([
     "hooks",
     "agents",
     "evidence",
+    "timeline",
     "tui",
     "dogfood",
 ]);

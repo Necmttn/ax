@@ -27,6 +27,7 @@ import { fetchWorkflow } from "./workflow.ts";
 import { fetchSessionDetail } from "./session-detail.ts";
 import { fetchSessionCompare } from "./session-compare.ts";
 import { fetchSessionInspect } from "./session-inspect.ts";
+import { extractSessionTimeline, SessionTimelineServiceLayer } from "../timeline/service.ts";
 import { fetchSessionChildren, fetchSessionsList } from "./sessions-list.ts";
 import { fetchEpisodeTimeline } from "./episode-timeline.ts";
 import { fetchProject } from "./project.ts";
@@ -800,6 +801,27 @@ export async function handleDashboardRequest(req: Request): Promise<Response> {
                     turnOffset: Number.isFinite(turnOffset) ? turnOffset : 0,
                     turnLimit: Number.isFinite(turnLimit) ? turnLimit : 100,
                 }).pipe(
+                    Effect.provide(AppLayer),
+                    Effect.scoped,
+                ) as Effect.Effect<unknown>,
+            );
+            return jsonResponse(payload);
+        } catch (err) {
+            return jsonResponse(
+                { error: err instanceof Error ? err.message : String(err) },
+                err instanceof Error && /not found/i.test(err.message) ? 404 : 500,
+            );
+        }
+    }
+
+    const sessionTimelineMatch = url.pathname.match(/^\/api\/sessions\/(.+)\/timeline$/);
+    if (sessionTimelineMatch && req.method === "GET") {
+        const sessionId = decodeURIComponent(sessionTimelineMatch[1] ?? "");
+        if (!sessionId) return jsonResponse({ error: "missing session id" }, 400);
+        try {
+            const payload = await Effect.runPromise(
+                extractSessionTimeline(sessionId).pipe(
+                    Effect.provide(SessionTimelineServiceLayer),
                     Effect.provide(AppLayer),
                     Effect.scoped,
                 ) as Effect.Effect<unknown>,

@@ -131,6 +131,59 @@ export interface DaemonVersion {
     readonly capabilities: ReadonlyArray<string>;
 }
 
+// --- session timeline (highlight zoom) -------------------------------------
+
+export type TimelineEventKind =
+    | "decision" | "tool_call" | "file_edit" | "skill_invocation"
+    | "failure" | "correction" | "checkpoint" | "outcome";
+
+export interface TimelineRef {
+    readonly type: "turn" | "file" | "tool" | "skill" | "subagent" | "commit";
+    readonly id: string;
+}
+export interface TimelineEvent {
+    readonly kind: TimelineEventKind;
+    readonly ts: string;
+    readonly seq: number | null;
+    readonly segment_id?: string;
+    readonly title: string;
+    readonly detail?: string;
+    readonly status?: "ok" | "error";
+    readonly refs: ReadonlyArray<TimelineRef>;
+    readonly recovered_by_seq?: number | null;
+}
+export interface TimelineSegment {
+    readonly id: string;
+    readonly index: number;
+    readonly title: string;
+    readonly boundary: "session_start" | "ask" | "commit" | "compaction" | "time_gap";
+    readonly start_seq: number | null;
+    readonly end_seq: number | null;
+    readonly started_at: string;
+    readonly ended_at: string | null;
+    readonly duration_ms: number | null;
+    readonly rollup: {
+        readonly tool_calls: number; readonly file_edits: number; readonly files: number;
+        readonly failures: number; readonly recovered: number; readonly skills: number;
+        readonly decisions: number; readonly checkpoints: number; readonly corrections: number;
+    };
+    readonly event_count: number;
+}
+export interface SessionTimelinePayload {
+    readonly session_id: string;
+    readonly highlights: {
+        readonly started_at: string | null; readonly ended_at: string | null; readonly duration_ms: number | null;
+        readonly model: string | null; readonly project: string | null; readonly repository: string | null;
+        readonly turns: number; readonly user_turns: number; readonly assistant_turns: number;
+        readonly tool_calls: number; readonly tool_errors: number; readonly files_changed: number;
+        readonly skills_used: number; readonly corrections: number; readonly interruptions: number;
+        readonly cost_usd: number | null; readonly estimated_tokens: number | null;
+        readonly event_counts: Readonly<Record<TimelineEventKind, number>>;
+    };
+    readonly segments: ReadonlyArray<TimelineSegment>;
+    readonly events: ReadonlyArray<TimelineEvent>;
+}
+
 export const api = {
     version: (): Promise<DaemonVersion> => jsonFetch("/api/version"),
     skills: (): Promise<SkillTriageResponse> => jsonFetch("/api/skills"),
@@ -196,6 +249,8 @@ export const api = {
             ? `/api/sessions/${encodeURIComponent(sessionId)}/inspect?${qs}`
             : `/api/sessions/${encodeURIComponent(sessionId)}/inspect`);
     },
+    sessionTimeline: (sessionId: string): Promise<SessionTimelinePayload> =>
+        jsonFetch(`/api/sessions/${encodeURIComponent(sessionId)}/timeline`),
     sessionCompare: (ids: ReadonlyArray<string>, params: { turns?: boolean } = {}): Promise<SessionComparePayload> => {
         const usp = new URLSearchParams();
         usp.set("ids", ids.join(","));
