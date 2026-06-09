@@ -258,3 +258,34 @@ correction-based query.
   loc-query, sessions-list) — they had `IN [...]` forms in the iter-3 grep;
   profile them for the same membership-scan family and fix if real.
 - Then weigh winding toward a PR-prep iteration (branch summary) as 08:30 nears.
+
+---
+
+## Iteration 5 — dashboard read-endpoint sweep + PR-prep (2026-06-10 01:55 WITA)
+
+**Tried.** Profiled the `ax serve` dashboard read endpoints flagged in the iter-3
+grep (cost-query, loc-query, sessions-list) for the `IN`-scan family.
+
+**Worked — all healthy (read optimization is fully converged):**
+- `cost-query`: `session IN (subquery)` over `session_token_usage`, but that
+  table is **3519 rows** (one per session) with a `session` index → IN-50 =
+  **0.03s**. Fine.
+- `loc-query`: session-kind uses `session = X` (indexed) + small constant
+  `name IN [editTools]`; query-kind is gated by an FTS subquery + LIMIT. Fine.
+- `sessions-list`: `id IN [<record ids>]` is a direct record lookup, not a scan.
+  Fine.
+- **Conclusion:** the `IN [...]` anti-pattern only hurts the BIG tables (turn
+  560k, content_block 430k, content_atom 1.1M) — all fixed in iters 0 & 2. Small
+  tables (≤~3.5k rows) are fine with IN. No remaining slow read on any path.
+
+**PR-prep.** Wrote `docs/PR-sessions-hang-summary.md` — headline wins, what
+changed, tests, the 3 dogfooded shares, and the install/deploy note for the new
+index. Branch: 8 commits, +999/-93 across 12 files; typecheck 0; tests green.
+
+**Next (seeds iter 6 — wind-down toward 08:30).**
+- Loop goal met: reads converged, 3 public shares cover all seed signals, PR
+  summary ready. Lengthening cadence.
+- iter 6: validate the 3 published shares are live/fetchable (the demo's payoff
+  is a working URL). Then the FINAL iteration near 08:30: re-enable
+  `com.necmttn.ax-watch`, run one catch-up `ax ingest` (lock now protects it),
+  and confirm `sessions here` / `share` still fast.
