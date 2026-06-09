@@ -37,7 +37,14 @@ const TURN_CONTENT_DOCUMENTS_FOR_SEQS_SQL = `
     ORDER BY turn_seq;
 `;
 
-const TURN_CONTENT_BLOCKS_SQL = `
+// Per-document content queries: `document = $document` hits
+// content_block_document_seq / content_atom_document_kind, so each is a ~1ms
+// indexed lookup. They replace `... WHERE document IN [<all docs>]`, which was a
+// membership scan over the whole 430k-block / 1.1M-atom tables (6s + 22s on a
+// 318-doc session) - the same IN-scan family fixed for `enrichSessions`. Fanned
+// out per document, full content export drops from ~28s to ~1s. `$document` is a
+// validated record literal (contentDocumentRid), interpolated, never a binding.
+const TURN_CONTENT_BLOCKS_FOR_DOC_SQL = `
     SELECT
         type::string(id) AS id,
         type::string(document) AS document_id,
@@ -52,12 +59,11 @@ const TURN_CONTENT_BLOCKS_SQL = `
         end_offset,
         confidence
     FROM content_block
-    WHERE source_kind = "turn"
-      AND document IN $documents
-    ORDER BY document_id, seq;
+    WHERE document = $document
+    ORDER BY seq;
 `;
 
-const TURN_CONTENT_ATOMS_SQL = `
+const TURN_CONTENT_ATOMS_FOR_DOC_SQL = `
     SELECT
         type::string(document) AS document_id,
         block.seq AS block_seq,
@@ -67,10 +73,12 @@ const TURN_CONTENT_ATOMS_SQL = `
         confidence,
         raw
     FROM content_atom
-    WHERE source_kind = "turn"
-      AND document IN $documents
-    ORDER BY document_id, block_seq, kind, value;
+    WHERE document = $document
+    ORDER BY block_seq, kind, value;
 `;
+
+/** Per-document fan-out width for full content resolution (share export). */
+const CONTENT_FANOUT_CONCURRENCY = 16;
 
 interface TurnContentDocumentRow {
     readonly source_ref: string | null;
@@ -204,7 +212,6 @@ const resolveTurnContentFromDocuments = (
 
         const documentMetaById = new Map<string, TurnContentDocumentRow>();
         for (const row of documentRows) documentMetaById.set(row.document_id, row);
-        const documentListSql = `[${documents.join(", ")}]`;
 
         const directBlockRefs = opts.directBlockLimitPerDocument
             ? documentRows.flatMap((row) => {
@@ -215,9 +222,9 @@ const resolveTurnContentFromDocuments = (
                 );
             })
             : [];
-        const blockRows = yield* queryMany<TurnContentBlockRow, TurnContentBlockRow>(
-            directBlockRefs.length > 0
-                ? `
+        const blockRows = directBlockRefs.length > 0
+            ? yield* queryMany<TurnContentBlockRow, TurnContentBlockRow>(
+                `
                     SELECT
                         type::string(id) AS id,
                         type::string(document) AS document_id,
@@ -233,13 +240,22 @@ const resolveTurnContentFromDocuments = (
                         confidence
                     FROM [${directBlockRefs.join(", ")}]
                     ORDER BY document_id, seq;
-                `
-                : TURN_CONTENT_BLOCKS_SQL.split("$documents").join(documentListSql),
-            (row) => row,
-            directBlockRefs.length > 0
-                ? "session-turn-content resolveBlocksDirect"
-                : "session-turn-content resolveBlocks",
-        );
+                `,
+                (row) => row,
+                "session-turn-content resolveBlocksDirect",
+            )
+            // Per-document indexed fan-out instead of a `document IN [<all docs>]`
+            // membership scan (see TURN_CONTENT_BLOCKS_FOR_DOC_SQL).
+            : (yield* Effect.forEach(
+                documents,
+                (docRid) =>
+                    queryMany<TurnContentBlockRow, TurnContentBlockRow>(
+                        TURN_CONTENT_BLOCKS_FOR_DOC_SQL.split("$document").join(docRid),
+                        (row) => row,
+                        "session-turn-content resolveBlocksPerDoc",
+                    ),
+                { concurrency: CONTENT_FANOUT_CONCURRENCY },
+            )).flat();
         const directAtomRefs = opts.directAtomLimitPerKind
             ? blockRows.flatMap((block) => {
                 const blockKey = recordKeyPart(block.id, "content_block");
@@ -272,11 +288,17 @@ const resolveTurnContentFromDocuments = (
                 "session-turn-content resolveAtomsDirect",
             )
             : opts.includeAtoms
-              ? yield* queryMany<TurnContentAtomRow, TurnContentAtomRow>(
-                TURN_CONTENT_ATOMS_SQL.split("$documents").join(documentListSql),
-                (row) => row,
-                "session-turn-content resolveAtoms",
-            )
+              // Per-document indexed fan-out instead of a `document IN [...]` scan.
+              ? (yield* Effect.forEach(
+                  documents,
+                  (docRid) =>
+                      queryMany<TurnContentAtomRow, TurnContentAtomRow>(
+                          TURN_CONTENT_ATOMS_FOR_DOC_SQL.split("$document").join(docRid),
+                          (row) => row,
+                          "session-turn-content resolveAtomsPerDoc",
+                      ),
+                  { concurrency: CONTENT_FANOUT_CONCURRENCY },
+              )).flat()
               : [];
 
         const atomsByDocumentAndBlock = new Map<string, InspectContentAtomDto[]>();

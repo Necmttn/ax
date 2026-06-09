@@ -31,6 +31,10 @@ export interface AxConfigShape {
         readonly codexFlushEvery: number;
         readonly codexRawMaxBytes: number;
         readonly codexPayloadMaxBytes: number;
+        /** hard wall-clock cap (seconds) on a single CLI ingest before it self-cancels */
+        readonly ingestTimeoutSeconds: number;
+        /** fan-out width for per-session enrichment in session-list queries */
+        readonly sessionsEnrichConcurrency: number;
     };
 }
 
@@ -43,6 +47,8 @@ const DEFAULTS = {
     codexFlushEvery: 500,
     codexRawMaxBytes: 5 * 1024 * 1024,
     codexPayloadMaxBytes: 1200,
+    ingestTimeoutSeconds: 900,
+    sessionsEnrichConcurrency: 16,
 } as const;
 
 const csv = (raw: string | undefined): string[] =>
@@ -126,6 +132,14 @@ export function envSnapshot(
                 codexPayloadMaxBytes: nonNegativeInt(
                     env.AX_CODEX_PAYLOAD_MAX_BYTES,
                     DEFAULTS.codexPayloadMaxBytes,
+                ),
+                ingestTimeoutSeconds: positiveInt(
+                    env.AX_INGEST_TIMEOUT_SECONDS,
+                    DEFAULTS.ingestTimeoutSeconds,
+                ),
+                sessionsEnrichConcurrency: positiveInt(
+                    env.AX_SESSIONS_ENRICH_CONCURRENCY,
+                    DEFAULTS.sessionsEnrichConcurrency,
                 ),
             },
         };

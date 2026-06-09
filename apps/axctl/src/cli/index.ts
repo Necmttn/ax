@@ -145,6 +145,7 @@ import {
 import type { DbError } from "@ax/lib/errors";
 import { ALL_STAGES, StageRegistry, type StageRegistryShape } from "../ingest/stage/registry.ts";
 import { IngestRuntimeLayer, ingestRuntimeLayerWith } from "../ingest/stage/runtime.ts";
+import { withIngestLock } from "../ingest/ingest-lock.ts";
 import { ConsoleTransportLayer } from "@ax/lib/live-traces/transports/console";
 import { pipelineTraceTransportLayer, tuiTraceTransportLayer } from "./ingest-trace-progress.ts";
 import type { ProgressStage } from "./progress.ts";
@@ -396,18 +397,62 @@ interface IngestCommandOpts {
     readonly claudeProject?: string;
 }
 
-const cmdIngest = (args: string[], opts: IngestCommandOpts = {}) => {
-    const commandName = opts.command ?? "ingest";
-    return runIngest({
-        command: commandName,
-        args,
-        cwd: opts.cwd ?? process.cwd(),
-        ...(opts.repoPaths ? { repoPaths: opts.repoPaths } : {}),
-        ...(opts.claudeProject ? { claudeProject: opts.claudeProject } : {}),
-        debug: args.includes("--debug"),
-        verbose: args.includes("--verbose"),
-    }).pipe(Effect.asVoid);
-};
+/**
+ * Extra grace beyond the hard ingest timeout (`AxConfig.knobs.ingestTimeoutSeconds`)
+ * before a held lock is deemed stale and stolen: the owner should have
+ * self-cancelled at the timeout, so anything older is genuinely dead.
+ */
+const INGEST_LOCK_STALE_GRACE_MS = 60_000;
+
+const cmdIngest = (args: string[], opts: IngestCommandOpts = {}) =>
+    Effect.gen(function* () {
+        const commandName = opts.command ?? "ingest";
+        const cfg = yield* AxConfig;
+        const path = yield* Path.Path;
+        const lockPath = path.join(cfg.paths.dataDir, "ingest.lock");
+        const timeoutSeconds = cfg.knobs.ingestTimeoutSeconds;
+
+        const work = runIngest({
+            command: commandName,
+            args,
+            cwd: opts.cwd ?? process.cwd(),
+            ...(opts.repoPaths ? { repoPaths: opts.repoPaths } : {}),
+            ...(opts.claudeProject ? { claudeProject: opts.claudeProject } : {}),
+            debug: args.includes("--debug"),
+            verbose: args.includes("--verbose"),
+        }).pipe(Effect.asVoid);
+
+        // Single-flight + hard wall-clock cap, both owned by the lock. While one
+        // ingest holds the lock another SKIPS (the watcher re-fires anyway, so a
+        // redundant run is harmless and avoids the pile-up that wedges the DB).
+        // The timeout lives inside the lock so that a timed-out run LEAVES its
+        // lock to age into a cooldown - interrupting the fiber doesn't prove
+        // SurrealDB stopped server-side, so the next ingest must hold off until
+        // the lock goes stale rather than charging a still-busy DB.
+        yield* withIngestLock(
+            {
+                lockPath,
+                command: commandName,
+                staleMs: timeoutSeconds * 1000 + INGEST_LOCK_STALE_GRACE_MS,
+                timeoutSeconds,
+                onBusy: (holder) =>
+                    Effect.sync(() =>
+                        process.stderr.write(
+                            `axctl ${commandName}: another ingest (pid ${holder.pid}, ${holder.command}) ` +
+                                `is in progress; skipping.\n`,
+                        )
+                    ),
+                onTimeout: () =>
+                    Effect.sync(() =>
+                        process.stderr.write(
+                            `axctl ${commandName}: ingest exceeded ${timeoutSeconds}s and was cancelled; ` +
+                                `lock held as cooldown. Raise AX_INGEST_TIMEOUT_SECONDS for a large first backfill.\n`,
+                        )
+                    ),
+            },
+            work,
+        );
+    });
 
 /**
  * `ax ingest here` - scope ingest to the git repo at $PWD.
@@ -3080,6 +3125,13 @@ function formatSessionsTable(rows: SessionRow[]): string {
  */
 const STALE_THRESHOLD_DEFAULT = 5;
 
+/**
+ * Hard ceiling on the convenience auto-backfill in `maybeAutoIngestStale`.
+ * Past this the backfill is interrupted and the query proceeds with whatever
+ * is already ingested - the read must never be held hostage by ingest.
+ */
+const AUTO_BACKFILL_TIMEOUT_SECONDS = 20;
+
 const maybeAutoIngestStale = (
     cmdLabel: string,
     repoRoot: string,
@@ -3111,9 +3163,24 @@ const maybeAutoIngestStale = (
             // A genuine FS failure during auto-backfill (the vanished-file
             // case is already caught+skipped inside ingestTranscripts) dies as
             // a defect rather than masquerading as a recoverable DbError.
-            yield* ingestTranscripts({ project, sinceDays: 7 }).pipe(
+            //
+            // Timebox it: the backfill is a convenience, not the point of the
+            // command. If the DB is busy (e.g. the ax-watch daemon is mid-ingest
+            // of a large live transcript) an unbounded backfill would hang the
+            // whole query indefinitely. On timeout we interrupt it and fall
+            // through to the read with possibly-stale data, telling the user how
+            // to finish the backfill explicitly.
+            const outcome = yield* ingestTranscripts({ project, sinceDays: 7 }).pipe(
                 Effect.catchTag("PlatformError", (e) => Effect.die(e)),
+                Effect.timeoutOption(`${AUTO_BACKFILL_TIMEOUT_SECONDS} seconds`),
             );
+            if (Option.isNone(outcome)) {
+                process.stderr.write(
+                    `axctl ${cmdLabel}: auto-backfill exceeded ${AUTO_BACKFILL_TIMEOUT_SECONDS}s and was cancelled; ` +
+                        `showing possibly-stale results. Run \`axctl ingest here --since=7\` to finish, ` +
+                        `or pass --no-stale-check to skip this check.\n`,
+                );
+            }
         } else {
             process.stderr.write(
                 `axctl ${cmdLabel}: ${report.newFiles.length} new transcript(s) on disk not yet ingested ` +
@@ -3347,14 +3414,32 @@ const sessionShowCommand = Command.make(
 
 // Effect/CLI Command definitions for sessions subcommands
 
+// Shared opt-out flags for the auto-backfill that `here`/`near` run before
+// reading. `maybeAutoIngestStale` reads these from the forwarded arg list;
+// they must be declared on the Command or the CLI parser rejects them as
+// unrecognized (the documented `--no-stale-check` escape hatch was previously
+// dead for exactly this reason).
+const noStaleCheckFlag = Flag.boolean("no-stale-check").pipe(Flag.withDefault(false));
+const staleThresholdFlag = Flag.integer("stale-threshold").pipe(Flag.optional);
+const staleCheckArgs = (noStaleCheck: boolean, staleThreshold: Option.Option<number>): string[] => [
+    ...boolArg("no-stale-check", noStaleCheck),
+    ...intArg("stale-threshold", optionValue(staleThreshold)),
+];
+
 const sessionsHereCommand = Command.make(
     "here",
     {
         days: Flag.integer("days").pipe(Flag.withDefault(14)),
         json: jsonFlag,
+        noStaleCheck: noStaleCheckFlag,
+        staleThreshold: staleThresholdFlag,
     },
-    ({ days, json }) =>
-        cmdSessionsHere([`--days=${days}`, ...boolArg("json", json)]),
+    ({ days, json, noStaleCheck, staleThreshold }) =>
+        cmdSessionsHere([
+            `--days=${days}`,
+            ...boolArg("json", json),
+            ...staleCheckArgs(noStaleCheck, staleThreshold),
+        ]),
 ).pipe(Command.withDescription("List sessions for the current git repository (default: last 14 days)"));
 
 const sessionsAroundCommand = Command.make(
@@ -3379,9 +3464,11 @@ const sessionsNearCommand = Command.make(
     {
         sha: Argument.string("sha"),
         json: jsonFlag,
+        noStaleCheck: noStaleCheckFlag,
+        staleThreshold: staleThresholdFlag,
     },
-    ({ sha, json }) =>
-        cmdSessionsNear([sha, ...boolArg("json", json)]),
+    ({ sha, json, noStaleCheck, staleThreshold }) =>
+        cmdSessionsNear([sha, ...boolArg("json", json), ...staleCheckArgs(noStaleCheck, staleThreshold)]),
 ).pipe(Command.withDescription(
     "List sessions that overlapped with a git commit window (from the predecessor commit's timestamp to this commit's timestamp). " +
     "Pass a full or short SHA. Must be inside the target git repo. " +
