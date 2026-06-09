@@ -106,6 +106,8 @@ describe("writePullRequests", () => {
         expect(prStmt!).toContain("additions: 120");
         expect(prStmt!).toContain("deletions: 30");
         expect(prStmt!).toContain("repository: repository:`repo-key`");
+        // datetime emitted as a properly-quoted d"..." literal (escaping fix)
+        expect(prStmt!).toContain('merged_at: d"2026-05-09T12:00:00.000Z"');
 
         // review_event upsert
         const reviewStmt = sql.find((s) => s.includes("UPSERT review_event:"));
@@ -182,5 +184,57 @@ describe("writePullRequests", () => {
         expect(checkStmt!).toContain("commit: NONE");
         expect(sql.some((s) => s.includes("FROM produced"))).toBe(false);
         expect(sql.some((s) => s.includes("UPSERT delivery_outcome:"))).toBe(false);
+    });
+
+    test("skips a review whose normalized state is null", async () => {
+        const sql: string[] = [];
+        const db = makeMockDb(sql);
+
+        const stats = await run(
+            {
+                repositoryId: "repository:`repo-key`",
+                repositoryKey: "repo-key",
+                prs: [
+                    {
+                        ...mergedPrFixture,
+                        // No state field → normalizeReviewEvent yields state: null
+                        reviews: [{ author: { login: "r", type: "User" }, body: "hmm" }],
+                    },
+                ],
+            },
+            db,
+        );
+
+        expect(stats.reviews).toBe(0);
+        expect(sql.some((s) => s.includes("UPSERT review_event:"))).toBe(false);
+        // the rest of the PR still writes
+        expect(stats.pullRequests).toBe(1);
+        expect(stats.checks).toBe(1);
+    });
+
+    test("skips a check with both name and status null", async () => {
+        const sql: string[] = [];
+        const db = makeMockDb(sql);
+
+        const stats = await run(
+            {
+                repositoryId: "repository:`repo-key`",
+                repositoryKey: "repo-key",
+                prs: [
+                    {
+                        ...mergedPrFixture,
+                        // CheckRun with no name and no status → skipped
+                        statusCheckRollup: [{ __typename: "CheckRun", conclusion: null }],
+                    },
+                ],
+            },
+            db,
+        );
+
+        expect(stats.checks).toBe(0);
+        expect(sql.some((s) => s.includes("UPSERT check_run:"))).toBe(false);
+        // the rest of the PR still writes
+        expect(stats.pullRequests).toBe(1);
+        expect(stats.reviews).toBe(1);
     });
 });

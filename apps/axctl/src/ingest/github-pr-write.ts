@@ -13,7 +13,7 @@ import { Effect } from "effect";
 import { SurrealClient } from "@ax/lib/db";
 import type { DbError } from "@ax/lib/errors";
 import { recordLiteral, stableDigest } from "@ax/lib/ids";
-import { surrealJson, surrealString } from "@ax/lib/shared/surql";
+import { surrealDate, surrealJson, surrealOptionDate, surrealString } from "@ax/lib/shared/surql";
 import { executeStatementsWith } from "@ax/lib/shared/statement-exec";
 import {
     aggregateReviewPain,
@@ -55,10 +55,6 @@ const toRecordRef = (table: string, id: string): string => {
     return recordLiteral(table, key);
 };
 
-/** A SurrealQL datetime literal (`d"<iso>"`) or `NONE` for empty/nullish input. */
-const dt = (iso: string | null): string =>
-    typeof iso === "string" && iso.length > 0 ? `d"${iso}"` : "NONE";
-
 const asRecord = (value: unknown): Record<string, unknown> =>
     value && typeof value === "object" ? value as Record<string, unknown> : {};
 
@@ -95,9 +91,9 @@ export const writePullRequests = (
                     `merge_sha: ${np.mergeSha === null ? "NONE" : surrealString(np.mergeSha)}, ` +
                     `author: ${np.author === null ? "NONE" : surrealString(np.author)}, ` +
                     `url: ${np.url === null ? "NONE" : surrealString(np.url)}, ` +
-                    `opened_at: ${dt(np.openedAt)}, ` +
-                    `closed_at: ${dt(np.closedAt)}, ` +
-                    `merged_at: ${dt(np.mergedAt)}, ` +
+                    `opened_at: ${surrealOptionDate(np.openedAt)}, ` +
+                    `closed_at: ${surrealOptionDate(np.closedAt)}, ` +
+                    `merged_at: ${surrealOptionDate(np.mergedAt)}, ` +
                     `updated_at: time::now(), ` +
                     `additions: ${np.additions}, ` +
                     `deletions: ${np.deletions}, ` +
@@ -109,16 +105,18 @@ export const writePullRequests = (
             );
             pullRequests++;
 
-            // Reviews
+            // Reviews. Key on review content (reviewer/ts/state) rather than
+            // array index, so re-ingest with a different gh ordering/count
+            // updates the same rows instead of orphaning them.
             const rawReviews = prRaw.reviews;
             if (Array.isArray(rawReviews)) {
-                for (let i = 0; i < rawReviews.length; i++) {
-                    const ne = normalizeReviewEvent(rawReviews[i]);
+                for (const review of rawReviews) {
+                    const ne = normalizeReviewEvent(review);
                     if (ne.state === null) continue; // state is required
 
                     const reviewId = recordLiteral(
                         "review_event",
-                        stableDigest(`${prKey}|review|${i}`),
+                        stableDigest(`${prKey}|review|${ne.reviewer ?? ""}|${ne.ts ?? ""}|${ne.state}`),
                     );
                     statements.push(
                         `UPSERT ${reviewId} CONTENT { ` +
@@ -132,7 +130,7 @@ export const writePullRequests = (
                             `category: ${surrealString(ne.category)}, ` +
                             `unresolved: false, ` +
                             `raw: ${surrealJson(ne.raw)}, ` +
-                            `ts: ${ne.ts !== null && ne.ts.length > 0 ? `d"${ne.ts}"` : "time::now()"} ` +
+                            `ts: ${ne.ts ? surrealDate(ne.ts) : "time::now()"} ` +
                             `};`,
                     );
                     reviews++;
@@ -150,16 +148,18 @@ export const writePullRequests = (
                 commitRef = commitIdStr ? toRecordRef("commit", commitIdStr) : null;
             }
 
-            // Checks
+            // Checks. Key on check content (name/startedAt) rather than array
+            // index, so a different rollup ordering on re-ingest updates the
+            // same rows instead of orphaning them.
             const rawChecks = prRaw.statusCheckRollup;
             if (Array.isArray(rawChecks)) {
-                for (let j = 0; j < rawChecks.length; j++) {
-                    const nc = normalizeCheckRun(rawChecks[j]);
+                for (const entry of rawChecks) {
+                    const nc = normalizeCheckRun(entry);
                     if (nc.name === null && nc.status === null) continue;
 
                     const checkId = recordLiteral(
                         "check_run",
-                        stableDigest(`${prKey}|check|${j}`),
+                        stableDigest(`${prKey}|check|${nc.name ?? ""}|${nc.startedAt ?? ""}`),
                     );
                     statements.push(
                         `UPSERT ${checkId} CONTENT { ` +
@@ -172,8 +172,8 @@ export const writePullRequests = (
                             `conclusion: ${nc.conclusion === null ? "NONE" : surrealString(nc.conclusion)}, ` +
                             `url: ${nc.url === null ? "NONE" : surrealString(nc.url)}, ` +
                             `raw: ${surrealJson(nc.raw)}, ` +
-                            `started_at: ${dt(nc.startedAt)}, ` +
-                            `completed_at: ${dt(nc.completedAt)} ` +
+                            `started_at: ${surrealOptionDate(nc.startedAt)}, ` +
+                            `completed_at: ${surrealOptionDate(nc.completedAt)} ` +
                             `};`,
                     );
                     checks++;
@@ -182,6 +182,9 @@ export const writePullRequests = (
 
             // Delivery link: only when the PR's commit exists in the graph.
             if (commitRef !== null) {
+                // A merge commit present in our local commit graph is a proxy
+                // for "reached main", not a guarantee that it landed on the
+                // default branch.
                 const reachedMain = np.mergeSha !== null && commitRef !== null;
 
                 const srows = yield* db.query<[string[]]>(
@@ -207,6 +210,11 @@ export const writePullRequests = (
 
                 for (const sidStr of sessionIds) {
                     const sessionRef = toRecordRef("session", sidStr);
+                    // delivery_outcome.session is UNIQUE → one outcome per
+                    // session; if a session maps to multiple PRs, last write
+                    // wins (v0 accepted limitation). Keying by the session id
+                    // is required: a different id with the same session would
+                    // violate the UNIQUE index.
                     const deliveryId = recordLiteral(
                         "delivery_outcome",
                         stableDigest(sidStr),
