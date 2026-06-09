@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useParams } from "@tanstack/react-router";
+import { useNavigate, useParams, useSearch } from "@tanstack/react-router";
 import type {
     HookFireDto,
     InspectTurnContentDto,
@@ -632,7 +632,29 @@ function MultiFileShareView(props: {
 }) {
     const { owner, gistId, manifest } = props;
     const qc = useQueryClient();
-    const [selectedFile, setSelectedFile] = useState<string>(manifest.root_file);
+    // Selected session is URL-driven (?sub=<file>) so browser back/forward walks
+    // the parent <-> subagent navigation instead of being trapped in local state.
+    const navigate = useNavigate();
+    const search = useSearch({ strict: false }) as { readonly sub?: string };
+    const selectedFile = search.sub && manifest.subagents.some((c) => c.file === search.sub)
+        ? search.sub
+        : manifest.root_file;
+    const setSelectedFile = (file: string) => {
+        const sub = file === manifest.root_file ? undefined : file;
+        // This view mounts on both the studio index ("/studio/?shareOwner&gistId",
+        // the public iframe entry) and the "/share/$owner/$gistId" route, so
+        // navigate()'s search-updater can't resolve a single route type. The call
+        // is valid at runtime on either - it swaps ?sub on the current location and
+        // clears the #turn anchor (it points at the session we're leaving).
+        const navigateLoose = navigate as unknown as (opts: {
+            readonly search: (prev: Record<string, unknown>) => Record<string, unknown>;
+            readonly hash: string;
+        }) => void;
+        navigateLoose({
+            search: (prev) => ({ ...prev, sub }),
+            hash: "",
+        });
+    };
 
     const fileQuery = useQuery({
         queryKey: ["share-file", owner, gistId, selectedFile],
