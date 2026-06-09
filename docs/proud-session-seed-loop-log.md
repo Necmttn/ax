@@ -353,3 +353,28 @@ hole, ship the safe subset and split the rest into its own iteration.**
 - 5. recall.ts session-IN scope filter. 6. schema diff-apply on install.
 - 7. reaction_event.session backfill+index. 8. loc-query name-IN.
 - 9. content_atom(session,source_kind) index. 10. DB retention/compaction.
+
+---
+
+## Iteration 8 — optimization target #4: session-canvas orch IN-scan (2026-06-10 07:55 WITA)
+
+**Tried.** Profiled `session-canvas.ts` `orchTasksSql` on the worst-case
+orchestration (`72f97b36`, **117 spawned children**): `turn WHERE session IN
+[117] AND role='user' ORDER BY seq` = **1.33s** (fetches 3106 rows just to keep
+the first per child). Per-child `session = X ... LIMIT 1` = 0.016s.
+
+**Worked.** Replaced with per-child indexed `LIMIT 1` fan-out (concurrency 16) —
+117 rows instead of 3106, and indexed. The view only needs each child's first
+user turn (dispatch prompt), so the result is identical. Added
+`session-canvas.test.ts` (regression guard: per-child `session =`, never
+`session IN`, + task→subagent mapping). typecheck 0, test 1/1, effect-lint clean.
+Committed `f544637`. Clean, isolated target — no rabbit hole (the time-box rule
+held; profiled before changing, real test isolation).
+
+**Next.**
+- 5. `recall.ts:116` `AND session IN [ids]` scope filter — profile with a large
+  `--scope=here` (many sessions) before changing; fix only if slow.
+- 9. `content_atom(session, source_kind)` index (defeated `(session,kind)` today).
+- 7. `reaction_event.session` backfill+index (drop the `user_turn.session` deref).
+- Then the risky/test-coupled ones (1b buildFileContextPack swap, 2 insights
+  $parent.session, 3 ingest write batching) — each its own time-boxed iteration.
