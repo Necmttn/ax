@@ -51,7 +51,10 @@ SELECT
   (SELECT estimated_cost_usd FROM session_token_usage WHERE session = $parent.session LIMIT 1)[0].estimated_cost_usd AS estimated_cost_usd
 FROM session_metrics
 ${where}
-ORDER BY durability_ratio ASC
+-- Lead with sessions that did real committing work (NONE-durability rows - 0-commit
+-- review/agent sessions - otherwise sort first under plain ASC and bury the signal),
+-- then most-fragile-first within them.
+ORDER BY produced_commits DESC, durability_ratio ASC
 LIMIT ${limit};`))?.[0] ?? [];
         return rows.map((r) => ({
             session: String(r.session ?? ""),
