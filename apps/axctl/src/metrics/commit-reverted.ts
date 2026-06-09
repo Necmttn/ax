@@ -22,7 +22,29 @@ export interface RevertedResult {
     /** True when the commit graph was unchanged since last run and the
      *  full-history scan was skipped. */
     readonly skipped: boolean;
+    /** The commit-graph fingerprint for this run. The CALLER advances the
+     *  watermark (via {@link advanceRevertedWatermark}) only AFTER the dependent
+     *  session_metrics rows are written, so a crash between the reverted writes
+     *  and the rollup leaves the watermark stale → the next run re-scans and
+     *  re-derives the affected sessions instead of silently skipping them. */
+    readonly fingerprint: string;
 }
+
+/** Advance the commit-reverted watermark. Call only after the dependent
+ *  session_metrics rows for this run's `changedKeys` have been written. */
+export const advanceRevertedWatermark = (fingerprint: string): Effect.Effect<void, DbError, SurrealClient> =>
+    Effect.gen(function* () {
+        const db = yield* SurrealClient;
+        yield* executeStatementsWith(
+            db,
+            [
+                `UPSERT ${watermarkId()} CONTENT { path: ${surrealString(WATERMARK_PATH)},`
+                + ` source_kind: ${surrealString(WATERMARK_SOURCE)}, sha: ${surrealString(fingerprint)},`
+                + ` ingested_at: time::now() };`,
+            ],
+            { chunkSize: 1 },
+        );
+    });
 
 /**
  * Compute `commit.reverted` over FULL history (freshness backbone, ADR-0011).
@@ -63,7 +85,7 @@ export const computeRevertedCommits = (): Effect.Effect<RevertedResult, DbError,
             const cur = (yield* db.query<[Array<{ n?: number }>]>(
                 `SELECT count() AS n FROM commit WHERE reverted = true GROUP ALL;`,
             ))?.[0]?.[0]?.n ?? 0;
-            return { revertedCount: Number(cur), totalCommits, changedKeys: [], skipped: true };
+            return { revertedCount: Number(cur), totalCommits, changedKeys: [], skipped: true, fingerprint };
         }
 
         // 2. Full-history re-derivation (only when the graph changed).
@@ -106,16 +128,8 @@ export const computeRevertedCommits = (): Effect.Effect<RevertedResult, DbError,
         }
         if (stmts.length > 0) yield* executeStatementsWith(db, stmts, { chunkSize: 500 });
 
-        // 4. Advance the watermark.
-        yield* executeStatementsWith(
-            db,
-            [
-                `UPSERT ${watermarkId()} CONTENT { path: ${surrealString(WATERMARK_PATH)},`
-                + ` source_kind: ${surrealString(WATERMARK_SOURCE)}, sha: ${surrealString(fingerprint)},`
-                + ` ingested_at: time::now() };`,
-            ],
-            { chunkSize: 1 },
-        );
-
-        return { revertedCount: revertedKeys.size, totalCommits: commits.length, changedKeys, skipped: false };
+        // NOTE: the watermark is advanced by the CALLER (derive-metrics) only
+        // after the dependent session_metrics rows are written - not here - so a
+        // crash between these reverted writes and the rollup re-scans next run.
+        return { revertedCount: revertedKeys.size, totalCommits: commits.length, changedKeys, skipped: false, fingerprint };
     });

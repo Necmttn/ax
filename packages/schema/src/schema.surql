@@ -1181,6 +1181,12 @@ DEFINE FIELD edit_kind    ON edited TYPE option<string>;
 -- `edited` lookups by source turn (e.g., 'which files did this session edit').
 DEFINE INDEX IF NOT EXISTS edited_in ON edited FIELDS in;
 DEFINE INDEX IF NOT EXISTS edited_in_out_tool ON edited FIELDS in, out, tool;
+-- edited_out backs fragility_cascade's `edited WHERE out IN [files]` lookup so it
+-- uses the index instead of scanning the edited table (codex #3 hardening). The
+-- per-match `in.session` deref is still bounded to the fragile-file set; before
+-- enabling fragility on real data (after the file-key namespace fix), move it to
+-- a derive-stage precompute with limits - see docs/metrics.md.
+DEFINE INDEX IF NOT EXISTS edited_out ON edited FIELDS out;
 
 DEFINE TABLE mentioned_file TYPE RELATION FROM turn TO file;
 DEFINE FIELD source       ON mentioned_file TYPE string DEFAULT "text"; -- 'text' | 'tool_input' | 'tool_output'

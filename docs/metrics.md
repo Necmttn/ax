@@ -98,6 +98,24 @@ minimal (a flat catalog array + a switch, NOT a registry/DAG/codegen).
   need a hang-safe **bounded** design - e.g. a derive-stage precompute that joins
   the already-stored `session_metrics.durability_ratio` rather than an on-demand
   per-edge deref - and are deferred to a later wave.
+- **`fragility_cascade` is gated, not live.** It returns empty today because the
+  `touched` (git) file keys (`file:remote_*`) and `edited` (tool-call) file keys
+  (`file:repository__*`) are **disjoint namespaces** - the cross-session join can
+  never match. The signal logic + surface are correct; before it produces real
+  edges, the file-key derivation across the git and tool-call ingest paths must be
+  reconciled (join on file `path` within a repo, or unify the keys). AND, once the
+  namespace gap is fixed, the on-demand `edited WHERE out IN [files]` + `in.session`
+  deref must move to a **derive-stage precompute with limits** - reverted-touched
+  files can be numerous, so a broad fileRefs set would reproduce the documented
+  87k-edge deref hang (the `edited_out` index helps the lookup but not the deref).
+- **Incremental freshness gaps (reconciled by deep/full ingest).** On the daemon's
+  `--since=1` path, `time_to_land_ms` can stay stale for an OLD session whose PR
+  merges LATER (the dirty set keys on the time window + changed reverted commits,
+  not on PR changes). Likewise delegation depends on the spawn-tree. A full ingest
+  (no `--since`, or `AX_REDERIVE_METRICS=1`) recomputes all sessions and reconciles
+  these; the weekly deep-scan backfill is the intended reconciler. A PR-driven dirty
+  source (sessions producing commits whose PR `merge_sha`/`merged_at` changed) is
+  the proper incremental fix - deferred.
 - The registry/DAG/`fn::` extraction - only once ~5–6 signals make the
   per-metric edits feel like copy-paste (the ADR-0011 gate).
 - **Multi-provider tool-name parity**: `time_to_first_edit_ms` +

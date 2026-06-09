@@ -6,7 +6,7 @@ import { recordKeyPart } from "@ax/lib/shared/derive-keys";
 import { executeStatementsWith } from "@ax/lib/shared/statement-exec";
 import { BaseStageStats, type IngestContext, sinceDaysFromCtx, StageMeta } from "./stage/types.ts";
 import type { StageDef } from "./stage/registry.ts";
-import { computeRevertedCommits } from "../metrics/commit-reverted.ts";
+import { advanceRevertedWatermark, computeRevertedCommits } from "../metrics/commit-reverted.ts";
 import { computeDurability } from "../metrics/durability.ts";
 import { computeTimeToLand } from "../metrics/time-to-land.ts";
 import { computeSessionLoc } from "../metrics/session-loc.ts";
@@ -59,6 +59,9 @@ export const deriveMetrics = (
             (s): s is string => typeof s === "string" && s.length > 0,
         );
         if (sessionIds.length === 0) {
+            // Reverted writes (if any) are done and nothing else needs the rollup;
+            // safe to advance the watermark now.
+            if (!reverted.skipped) yield* advanceRevertedWatermark(reverted.fingerprint);
             return { sessionsWritten: 0, revertedCommits: reverted.revertedCount };
         }
 
@@ -109,6 +112,10 @@ export const deriveMetrics = (
                 + `ts: time::now() };`;
         });
         yield* executeStatementsWith(db, stmts, { chunkSize: 500 });
+        // Advance the commit-reverted watermark ONLY now that the dependent
+        // session_metrics rows are persisted - a crash before this point re-scans
+        // next run instead of silently skipping the affected sessions (codex #2).
+        if (!reverted.skipped) yield* advanceRevertedWatermark(reverted.fingerprint);
         return { sessionsWritten: expandedIds.length, revertedCommits: reverted.revertedCount };
     });
 
