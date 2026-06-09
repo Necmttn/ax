@@ -88,7 +88,7 @@ describe("listSessionsHere", () => {
         expect(captured[0]!.sql).not.toContain("14d");
     });
 
-    test("enriches turn_count and first_user_message via batched queries", async () => {
+    test("enriches turn_count and first_user_message via per-session indexed lookups", async () => {
         const { layer, captured } = makeMockDb({
             sessionRows: [
                 {
@@ -109,11 +109,15 @@ describe("listSessionsHere", () => {
 
         // First call: session list (no turn_count/first_user_message in projection).
         expect(captured[0]!.sql).not.toContain("turn_count");
-        // Second + third calls: count + first-message enrichment.
-        expect(captured[1]!.sql).toContain("count() AS n FROM turn");
-        expect(captured[1]!.sql).toContain("session IN [session:`s1`]");
-        expect(captured[2]!.sql).toContain("text_excerpt AS text FROM turn");
-        expect(captured[2]!.sql).toContain("AND role = 'user'");
+        // One enrichment query per session, using the literal session id (NOT a
+        // `session IN [...]` membership scan) so the turn_session_seq index is hit.
+        expect(captured).toHaveLength(2);
+        const enrich = captured[1]!.sql;
+        expect(enrich).toContain("FROM ONLY session:`s1`");
+        expect(enrich).toContain("count() FROM turn WHERE session = session:`s1`");
+        expect(enrich).toContain("AND role = 'user'");
+        expect(enrich).toContain("LIMIT 1");
+        expect(enrich).not.toContain("session IN");
     });
 
     test("orders by started_at DESC", async () => {

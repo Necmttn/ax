@@ -43,9 +43,38 @@ const SESSION_SELECT = `
 FROM session`.trim();
 
 /**
- * Enrich session rows with turn_count + first_user_message via two bulk
- * queries instead of per-row sub-selects. Returns rows in original order.
+ * `type::string(id)` returns one of: `session:plain`, `session:⟨key⟩`, or
+ * `` session:`key` `` depending on the key's char set. Strip the prefix + any
+ * wrapping delimiters and rebuild a clean backtick record literal.
  */
+const sessionLiteral = (id: string): string => {
+    let k = id.replace(/^session:/, "");
+    if (k.startsWith("⟨") && k.endsWith("⟩")) k = k.slice(1, -1);
+    else if (k.startsWith("`") && k.endsWith("`")) k = k.slice(1, -1);
+    return `session:\`${k}\``;
+};
+
+/**
+ * Enrich session rows with turn_count + first_user_message.
+ *
+ * One INDEXED lookup per session, fanned out with bounded concurrency. The
+ * obvious batch form - `... FROM turn WHERE session IN [<all ids>] ...` - does
+ * NOT use the `turn_session_seq` index; SurrealDB evaluates `session IN [list]`
+ * as a per-row membership test, so cost is O(total_turns × #sessions) and a
+ * 120d/798-session window took >24s (and could wedge the DB). A literal-id
+ * lookup (`session = session:\`k\``) hits the index in ~1ms; 798 of them at
+ * concurrency 16 finish in well under a second. Order is preserved by
+ * `Effect.forEach`.
+ */
+// Per-session enrichment fan-out width. 16 is empirically fast (798 sessions in
+// ~1.3s through the real SurrealDB WS client, which multiplexes by request id),
+// and tunable down if a future load test shows connection-saturation under a
+// concurrent ingest. Env override: AX_SESSIONS_ENRICH_CONCURRENCY.
+const ENRICH_CONCURRENCY = (() => {
+    const n = Number(process.env.AX_SESSIONS_ENRICH_CONCURRENCY);
+    return Number.isFinite(n) && n > 0 ? Math.floor(n) : 16;
+})();
+
 const enrichSessions = (
     rows: ReadonlyArray<{
         readonly id: string;
@@ -60,43 +89,31 @@ const enrichSessions = (
         if (rows.length === 0) return [];
         const db = yield* SurrealClient;
 
-        // type::string(id) returns one of: `session:plain`, `session:⟨key⟩`,
-        // or `` session:`key` `` depending on the key's char set. Strip prefix
-        // + any wrapping delimiters so we can rebuild a clean backtick literal.
-        const ids = rows.map((r) => {
-            let k = r.id.replace(/^session:/, "");
-            if (k.startsWith("⟨") && k.endsWith("⟩")) k = k.slice(1, -1);
-            else if (k.startsWith("`") && k.endsWith("`")) k = k.slice(1, -1);
-            return k;
-        });
-        const idLiterals = ids.map((k) => `session:\`${k}\``).join(", ");
-        const inClause = `[${idLiterals}]`;
-
-        const countResult = yield* db.query<[Array<{ session: unknown; n: number }>]>(
-            `SELECT type::string(session) AS session, count() AS n FROM turn WHERE session IN ${inClause} GROUP BY session;`,
+        return yield* Effect.forEach(
+            rows,
+            (r) =>
+                Effect.gen(function* () {
+                    const lit = sessionLiteral(r.id);
+                    // `FROM ONLY <session record>` returns a single object; the
+                    // two correlated counts use literal ids (not `$parent.id`,
+                    // which would defeat the index).
+                    const result = yield* db.query<
+                        [{ turn_count: number | null; first_user_message: string | null } | null]
+                    >(
+                        `SELECT
+                            (SELECT count() FROM turn WHERE session = ${lit} GROUP ALL)[0].count AS turn_count,
+                            (SELECT VALUE text_excerpt FROM turn WHERE session = ${lit} AND role = 'user' ORDER BY seq ASC LIMIT 1)[0] AS first_user_message
+                         FROM ONLY ${lit};`,
+                    );
+                    const enriched = result?.[0] ?? null;
+                    return {
+                        ...r,
+                        turn_count: Number(enriched?.turn_count ?? 0) || 0,
+                        first_user_message: enriched?.first_user_message ?? null,
+                    };
+                }),
+            { concurrency: ENRICH_CONCURRENCY },
         );
-        const counts = new Map<string, number>();
-        for (const row of countResult?.[0] ?? []) {
-            const sid = String(row.session);
-            counts.set(sid, Number(row.n) || 0);
-        }
-
-        const firstResult = yield* db.query<[Array<{ session: unknown; text: string | null }>]>(
-            `SELECT type::string(session) AS session, seq, text_excerpt AS text FROM turn
-             WHERE session IN ${inClause} AND role = 'user'
-             ORDER BY session, seq;`,
-        );
-        const firstMsg = new Map<string, string | null>();
-        for (const row of firstResult?.[0] ?? []) {
-            const sid = String(row.session);
-            if (!firstMsg.has(sid)) firstMsg.set(sid, row.text ?? null);
-        }
-
-        return rows.map((r) => ({
-            ...r,
-            turn_count: counts.get(r.id) ?? 0,
-            first_user_message: firstMsg.get(r.id) ?? null,
-        }));
     });
 
 // ---------------------------------------------------------------------------
