@@ -35,7 +35,7 @@ export const SOURCE_BADGE_COLORS: Record<string, { bg: string; fg: string }> = {
 };
 
 function SourceBadge({ source }: { source: string }) {
-    const c = SOURCE_BADGE_COLORS[source] ?? { bg: "#e5e7eb", fg: "#475569" };
+    const c = SOURCE_BADGE_COLORS[source] ?? { bg: "#e5e7eb", fg: "var(--muted)" };
     return (
         <span style={{ background: c.bg, color: c.fg, padding: "1px 8px", borderRadius: 3, fontSize: 11, fontWeight: 600 }}>
             {source}
@@ -86,7 +86,7 @@ function Row({ s, indent, expandedToggle, select }: RowProps) {
                         onClick={expandedToggle.onToggle}
                         style={{
                             border: "none", background: "transparent", cursor: "pointer",
-                            padding: "0 6px 0 0", fontFamily: "inherit", fontSize: 12, color: "#64748b",
+                            padding: "0 6px 0 0", fontFamily: "inherit", fontSize: 12, color: "var(--muted)",
                         }}
                         title={`${expandedToggle.expanded ? "Collapse" : "Expand"} ${expandedToggle.childCount} subagent${expandedToggle.childCount === 1 ? "" : "s"}`}
                     >
@@ -94,7 +94,7 @@ function Row({ s, indent, expandedToggle, select }: RowProps) {
                         {expandedToggle.loading ? " …" : ""}
                     </button>
                 ) : indent ? (
-                    <span style={{ color: "#cbd5e1", marginRight: 6 }}>↳</span>
+                    <span style={{ color: "var(--muted-2)", marginRight: 6 }}>↳</span>
                 ) : (
                     <span style={{ display: "inline-block", width: 32 }} />
                 )}
@@ -102,16 +102,16 @@ function Row({ s, indent, expandedToggle, select }: RowProps) {
             </td>
             <td><SourceBadge source={s.source} /></td>
             <td>{project}</td>
-            <td style={{ fontFamily: "ui-monospace, monospace", fontSize: 12, color: "#64748b" }}>{fmtTs(s.started_at)}</td>
-            <td style={{ fontFamily: "ui-monospace, monospace", fontSize: 12, color: "#64748b", textAlign: "right" }}>{fmtDuration(s.started_at, s.ended_at)}</td>
-            <td style={{ textAlign: "right", fontFamily: "ui-monospace, monospace", fontSize: 12, color: "#cbd5e1" }}>{s.turn_count > 0 ? s.turn_count.toLocaleString() : "-"}</td>
+            <td style={{ fontFamily: "ui-monospace, monospace", fontSize: 12, color: "var(--muted)" }}>{fmtTs(s.started_at)}</td>
+            <td style={{ fontFamily: "ui-monospace, monospace", fontSize: 12, color: "var(--muted)", textAlign: "right" }}>{fmtDuration(s.started_at, s.ended_at)}</td>
+            <td style={{ textAlign: "right", fontFamily: "ui-monospace, monospace", fontSize: 12, fontVariantNumeric: "tabular-nums", color: s.turn_count > 0 ? "var(--ink)" : "var(--muted-2)" }}>{s.turn_count > 0 ? s.turn_count.toLocaleString() : "-"}</td>
             <td style={{ display: "flex", gap: 8, alignItems: "center" }}>
                 {s.has_raw_file ? (
-                    <Link to="/sessions/$sessionId" params={{ sessionId: sid }} preload="intent" style={{ color: "var(--blue, #3b82f6)", fontWeight: 600 }}>
+                    <Link to="/sessions/$sessionId" params={{ sessionId: sid }} preload="intent" style={{ color: "var(--blue)", fontWeight: 600 }}>
                         open →
                     </Link>
                 ) : (
-                    <span style={{ color: "#cbd5e1", fontSize: 11 }} title="No raw transcript stored - cannot inspect">no transcript</span>
+                    <span style={{ color: "var(--muted-2)", fontSize: 11 }} title="No raw transcript stored - cannot inspect">no transcript</span>
                 )}
             </td>
         </tr>
@@ -296,9 +296,9 @@ export function SessionsRoute() {
                             onClick={() => setSourceFilter(f)}
                             style={{
                                 padding: "4px 12px", fontSize: 11, fontWeight: 600,
-                                border: "1px solid #e2e8f0",
-                                background: sourceFilter === f ? "#0f172a" : "#fff",
-                                color: sourceFilter === f ? "#fff" : "#475569",
+                                border: "1px solid var(--line)",
+                                background: sourceFilter === f ? "var(--ink)" : "#fff",
+                                color: sourceFilter === f ? "#fff" : "var(--muted)",
                                 borderRadius: 4, cursor: "pointer",
                             }}
                         >
@@ -310,7 +310,7 @@ export function SessionsRoute() {
                     value={search}
                     onChange={(e) => setSearch(e.target.value)}
                     placeholder="filter by id / project / cwd / model"
-                    style={{ flex: 1, maxWidth: 360, padding: "4px 8px", fontSize: 12, border: "1px solid #e2e8f0", borderRadius: 4 }}
+                    style={{ flex: 1, maxWidth: 360, padding: "4px 8px", fontSize: 12, border: "1px solid var(--line)", borderRadius: 4 }}
                 />
                 {allExpandableIds.length > 0 ? (
                     <button
@@ -318,8 +318,8 @@ export function SessionsRoute() {
                             prev.size === allExpandableIds.length ? new Set() : new Set(allExpandableIds),
                         )}
                         style={{
-                            padding: "4px 10px", fontSize: 11, border: "1px solid #e2e8f0",
-                            background: "#fff", color: "#475569", borderRadius: 4, cursor: "pointer",
+                            padding: "4px 10px", fontSize: 11, border: "1px solid var(--line)",
+                            background: "#fff", color: "var(--muted)", borderRadius: 4, cursor: "pointer",
                         }}
                     >
                         {expanded.size === allExpandableIds.length ? "collapse all" : "expand all"}
@@ -331,9 +331,9 @@ export function SessionsRoute() {
                     title={selected.size < 2 ? "Select 2+ sessions to compare" : `Compare ${selected.size} sessions`}
                     style={{
                         padding: "4px 12px", fontSize: 11, fontWeight: 600,
-                        border: "1px solid #e2e8f0", borderRadius: 4,
-                        background: selected.size >= 2 ? "#0f172a" : "#fff",
-                        color: selected.size >= 2 ? "#fff" : "#cbd5e1",
+                        border: "1px solid var(--line)", borderRadius: 4,
+                        background: selected.size >= 2 ? "var(--ink)" : "#fff",
+                        color: selected.size >= 2 ? "#fff" : "var(--muted-2)",
                         cursor: selected.size >= 2 ? "pointer" : "not-allowed",
                     }}
                 >
@@ -343,8 +343,8 @@ export function SessionsRoute() {
                     <button
                         onClick={() => setSelected(new Set())}
                         style={{
-                            padding: "4px 8px", fontSize: 11, border: "1px solid #e2e8f0",
-                            background: "#fff", color: "#475569", borderRadius: 4, cursor: "pointer",
+                            padding: "4px 8px", fontSize: 11, border: "1px solid var(--line)",
+                            background: "#fff", color: "var(--muted)", borderRadius: 4, cursor: "pointer",
                         }}
                     >
                         clear
@@ -355,7 +355,7 @@ export function SessionsRoute() {
             {query.data ? (
                 <table style={{ width: "100%", borderCollapse: "collapse" }}>
                     <thead>
-                        <tr style={{ background: "#f8fafc", fontSize: 11, color: "#475569", textTransform: "uppercase", letterSpacing: "0.05em" }}>
+                        <tr style={{ background: "var(--page)", fontSize: 11, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.05em" }}>
                             <th style={{ width: 28 }}></th>
                             <th style={{ textAlign: "left", padding: "6px 8px" }}>id</th>
                             <th style={{ textAlign: "left", padding: "6px 8px" }}>source</th>
@@ -403,9 +403,9 @@ export function SessionsRoute() {
                         {allRoots.length < totalCount ? (
                             <tr ref={sentinelRef}>
                                 <td colSpan={8} style={{
-                                    padding: "12px 24px", color: "#64748b", fontSize: 12,
+                                    padding: "12px 24px", color: "var(--muted)", fontSize: 12,
                                     fontFamily: "ui-monospace, monospace",
-                                    textAlign: "center", borderTop: "1px dashed #e2e8f0",
+                                    textAlign: "center", borderTop: "1px dashed var(--line)",
                                 }}>
                                     {appendLoading
                                         ? `loading next ${PAGE_SIZE} of ${totalCount.toLocaleString()}…`
@@ -417,8 +417,8 @@ export function SessionsRoute() {
                                                 onClick={() => void loadMore(PAGE_SIZE)}
                                                 style={{
                                                     padding: "2px 10px", marginLeft: 6, fontSize: 11,
-                                                    border: "1px solid #e2e8f0", background: "#fff",
-                                                    color: "#475569", borderRadius: 4, cursor: "pointer",
+                                                    border: "1px solid var(--line)", background: "#fff",
+                                                    color: "var(--muted)", borderRadius: 4, cursor: "pointer",
                                                 }}
                                             >load {PAGE_SIZE} more</button>
                                         </>

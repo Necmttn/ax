@@ -138,10 +138,32 @@ const buildGraph = (
     };
 };
 
+const SUMMARY_MAX = 160;
+
+/**
+ * One-line "what this session set out to do", for the share outcome header.
+ * The first real user turn's opening sentence (skips control/context/tool
+ * turns). For a subagent this is the brief its parent handed it.
+ */
+const deriveSummary = (turns: ReadonlyArray<ShareTurn>): string | undefined => {
+    const task = turns.find(
+        (t) =>
+            t.role === "user" &&
+            (t.message_kind === "task" || t.message_kind === undefined) &&
+            t.text.trim().length > 0,
+    );
+    const raw = (task?.text ?? "").replace(/\s+/g, " ").trim();
+    if (raw.length === 0) return undefined;
+    const firstSentence = raw.split(/(?<=[.!?])\s/)[0] ?? raw;
+    const pick = firstSentence.length >= 20 ? firstSentence : raw;
+    return pick.length > SUMMARY_MAX ? `${pick.slice(0, SUMMARY_MAX - 1)}…` : pick;
+};
+
 export function buildShareArtifactFromParts(
     parts: ShareArtifactParts,
 ): AxSessionShare {
     const files = dedupeFilesByPath(parts.files);
+    const summary = deriveSummary(parts.turns);
     const tool_calls = sumBy(parts.toolCalls, (tool) => tool.count);
     const failures = sumBy(parts.toolCalls, (tool) => tool.failures);
     const working_style =
@@ -161,6 +183,7 @@ export function buildShareArtifactFromParts(
             ...(parts.overview.cwd ? { repository: parts.overview.cwd } : {}),
             ...(parts.overview.started_at ? { started_at: parts.overview.started_at } : {}),
             ...(parts.overview.ended_at ? { ended_at: parts.overview.ended_at } : {}),
+            ...(summary ? { summary } : {}),
         },
         stats: {
             turns: parts.turns.length,
