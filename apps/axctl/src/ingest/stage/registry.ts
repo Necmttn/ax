@@ -22,6 +22,7 @@ import { ReactionEventsKey, reactionEventsStage } from "../reaction-events.ts";
 import { ClassifierResultsKey, classifierResultsStage } from "../classifier-results.ts";
 import { SessionHealthKey, sessionHealthStage } from "../session-health.ts";
 import { ClosureKey, closureStage } from "../closure.ts";
+import { DeriveMetricsKey, deriveMetricsStage } from "../derive-metrics.ts";
 import { ProposalsKey, proposalsStage } from "../derive-proposals.ts";
 import { OpportunitiesKey, opportunitiesStage } from "../derive-opportunities.ts";
 import { RetroProposalsKey, retroProposalsStage } from "../derive-retro-proposals.ts";
@@ -32,7 +33,7 @@ export type { StageDef } from "./types.ts";
 /** Composed union of every known Ingest Stage key. Each stage file exports its
  *  own `Schema.Literal("<key>")`; this union is reassembled by re-exporting
  *  them here. Adding a stage = one import + one entry in the union below. */
-export const IngestStageKey = Schema.Union([SkillsKey, CommandsKey, AgentDefKey, PricingKey, ClaudeKey, CodexKey, PiKey, OpenCodeKey, CursorKey, SubagentsKey, InvokedPositionsKey, SpawnedKey, GitKey, SignalsKey, OutcomesKey, TurnContentBlocksKey, TurnAnalysisKey, ReactionEventsKey, ClassifierResultsKey, SessionHealthKey, ClosureKey, ProposalsKey, OpportunitiesKey, RetroProposalsKey, HarnessKey]);
+export const IngestStageKey = Schema.Union([SkillsKey, CommandsKey, AgentDefKey, PricingKey, ClaudeKey, CodexKey, PiKey, OpenCodeKey, CursorKey, SubagentsKey, InvokedPositionsKey, SpawnedKey, GitKey, SignalsKey, OutcomesKey, TurnContentBlocksKey, TurnAnalysisKey, ReactionEventsKey, ClassifierResultsKey, SessionHealthKey, ClosureKey, DeriveMetricsKey, ProposalsKey, OpportunitiesKey, RetroProposalsKey, HarnessKey]);
 export type IngestStageKey = typeof IngestStageKey.Type;
 
 export interface StageRegistryShape {
@@ -56,7 +57,7 @@ export const StageRegistryLive = (
     });
 
 /** The canonical list of stages provided by `StageRegistryDefault`. */
-export const ALL_STAGES = [skillsStage, commandsStage, agentDefStage, pricingStage, claudeStage, codexStage, piStage, opencodeStage, cursorStage, subagentsStage, invokedPositionsStage, spawnedStage, gitStage, signalsStage, outcomesStage, turnContentBlocksStage, turnAnalysisStage, reactionEventsStage, classifierResultsStage, sessionHealthStage, closureStage, proposalsStage, opportunitiesStage, retroProposalsStage, harnessStage] as const;
+export const ALL_STAGES = [skillsStage, commandsStage, agentDefStage, pricingStage, claudeStage, codexStage, piStage, opencodeStage, cursorStage, subagentsStage, invokedPositionsStage, spawnedStage, gitStage, signalsStage, outcomesStage, turnContentBlocksStage, turnAnalysisStage, reactionEventsStage, classifierResultsStage, sessionHealthStage, closureStage, deriveMetricsStage, proposalsStage, opportunitiesStage, retroProposalsStage, harnessStage] as const;
 
 /** Production registry: the canonical list of stages provided by ax. Test code
  *  should prefer `StageRegistryLive([...])` with explicit fixtures. */

@@ -229,6 +229,12 @@ DEFINE ANALYZER IF NOT EXISTS commit_text
 DEFINE INDEX IF NOT EXISTS commit_message_fts
     ON commit FIELDS message
     FULLTEXT ANALYZER commit_text BM25 HIGHLIGHTS;
+-- option<bool>, not bool DEFAULT false: the git stage re-UPSERTs commits via
+-- CONTENT (omitting `reverted`), and pre-existing rows predate the field, so a
+-- non-optional bool coerces NONE → ingest crash (schema-orphan-field-none-crash).
+-- NONE means "not known reverted"; durability counts only `reverted = true`.
+DEFINE FIELD OVERWRITE reverted ON commit TYPE option<bool>;
+DEFINE INDEX IF NOT EXISTS commit_reverted ON commit FIELDS reverted;
 
 DEFINE TABLE repository SCHEMAFULL;
 DEFINE FIELD name           ON repository TYPE option<string>;
@@ -898,6 +904,20 @@ DEFINE FIELD ts            ON session_health TYPE datetime DEFAULT time::now();
 DEFINE INDEX IF NOT EXISTS session_health_session ON session_health FIELDS session UNIQUE;
 DEFINE INDEX IF NOT EXISTS session_health_epoch ON session_health FIELDS workflow_epoch, source, ts;
 
+DEFINE TABLE session_metrics SCHEMAFULL;
+DEFINE FIELD session            ON session_metrics TYPE record<session>;
+DEFINE FIELD durability_ratio   ON session_metrics TYPE option<float>;
+DEFINE FIELD produced_commits   ON session_metrics TYPE int DEFAULT 0;
+DEFINE FIELD reverted_commits   ON session_metrics TYPE int DEFAULT 0;
+DEFINE FIELD time_to_land_ms    ON session_metrics TYPE option<int>;
+DEFINE FIELD lines_added        ON session_metrics TYPE int DEFAULT 0;
+DEFINE FIELD lines_removed      ON session_metrics TYPE int DEFAULT 0;
+DEFINE FIELD time_to_first_edit_ms ON session_metrics TYPE option<int>;
+DEFINE FIELD cold_start_reads   ON session_metrics TYPE int DEFAULT 0;
+DEFINE FIELD delegation_ratio   ON session_metrics TYPE option<float>;
+DEFINE FIELD ts                 ON session_metrics TYPE datetime DEFAULT time::now();
+DEFINE INDEX IF NOT EXISTS session_metrics_session ON session_metrics FIELDS session UNIQUE;
+
 DEFINE TABLE commit_classification SCHEMAFULL;
 DEFINE FIELD commit        ON commit_classification TYPE record<commit>;
 DEFINE FIELD repository    ON commit_classification TYPE option<record<repository>>;
@@ -1165,6 +1185,12 @@ DEFINE FIELD edit_kind    ON edited TYPE option<string>;
 -- `edited` lookups by source turn (e.g., 'which files did this session edit').
 DEFINE INDEX IF NOT EXISTS edited_in ON edited FIELDS in;
 DEFINE INDEX IF NOT EXISTS edited_in_out_tool ON edited FIELDS in, out, tool;
+-- edited_out backs fragility_cascade's `edited WHERE out IN [files]` lookup so it
+-- uses the index instead of scanning the edited table (codex #3 hardening). The
+-- per-match `in.session` deref is still bounded to the fragile-file set; before
+-- enabling fragility on real data (after the file-key namespace fix), move it to
+-- a derive-stage precompute with limits - see docs/metrics.md.
+DEFINE INDEX IF NOT EXISTS edited_out ON edited FIELDS out;
 
 DEFINE TABLE mentioned_file TYPE RELATION FROM turn TO file;
 DEFINE FIELD source       ON mentioned_file TYPE string DEFAULT "text"; -- 'text' | 'tool_input' | 'tool_output'
