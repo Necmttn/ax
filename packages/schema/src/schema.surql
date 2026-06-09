@@ -401,6 +401,10 @@ DEFINE FIELD ts             ON content_document TYPE datetime DEFAULT time::now(
 DEFINE INDEX IF NOT EXISTS content_document_source ON content_document FIELDS source_kind, source_ref;
 DEFINE INDEX IF NOT EXISTS content_document_hash ON content_document FIELDS content_hash;
 DEFINE INDEX IF NOT EXISTS content_document_parse ON content_document FIELDS parse_fingerprint;
+-- Resolve a session's turn documents (share export / inspector). Without this,
+-- `WHERE source_kind='turn' AND session=$sid` only uses the source_kind prefix
+-- and scans every turn document (~600ms/session); the composite makes it ~0.3ms.
+DEFINE INDEX IF NOT EXISTS content_document_session ON content_document FIELDS session, source_kind;
 
 DEFINE TABLE content_block SCHEMAFULL;
 DEFINE FIELD document       ON content_block TYPE record<content_document> REFERENCE ON DELETE CASCADE;
