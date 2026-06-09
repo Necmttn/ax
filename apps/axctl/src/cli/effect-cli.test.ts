@@ -144,8 +144,9 @@ describe("effect cli", () => {
     });
 
     test("resolveIngestStages: default runs every stage", () => {
-        // 25 = 24 original + agentDefStage (config-front-door agents domain).
-        expect(resolveIngestStages(testRegistry, [])).toHaveLength(25);
+        // 26 = 24 original + agentDefStage (config-front-door agents domain)
+        //    + deriveMetricsStage (graph-derived session metrics rollup).
+        expect(resolveIngestStages(testRegistry, [])).toHaveLength(26);
     });
 
     test("resolveIngestStages: local agent provider stages can be selected", () => {
@@ -167,6 +168,7 @@ describe("effect cli", () => {
         expect([...keys].sort()).toEqual([
             "classifier-results",
             "closure",
+            "derive-metrics",
             "harness",
             "invoked-positions",
             "opportunities",
