@@ -66,8 +66,11 @@ interface SignalDefinition {
   readonly description: string;
   readonly kind: SignalKind;
   readonly cost: SignalCost;
-  readonly category: string;      // "delivery" | "graph" | "effort" | ...
+  readonly category: string;      // "delivery" | "graph" | "effort" | "deep" | ...
   readonly format: SignalFormat;
+  // Upstream signals this one reuses. The derive stage computes in topo order,
+  // so a deep signal joins precomputed results instead of re-traversing edges.
+  readonly deps?: readonly string[];
   // computed-tier (kind: session-scalar only): a SurrealQL expression over the
   // session_metrics row's `session` link. Framework emits a COMPUTED field.
   readonly sql?: string;
@@ -75,9 +78,21 @@ interface SignalDefinition {
   //   session-scalar → Effect<Map<sessionId, scalar>>
   //   aggregate      → Effect<ReadonlyArray<{ key; value; ... }>>
   //   relation       → Effect<ReadonlyArray<{ from: sessionId; to: sessionId; ...attrs }>>
+  //   primitive      → materializes a Layer-0 table/column (e.g. commit_reverted)
   readonly compute?: (ctx: SignalContext) => Effect.Effect<unknown, DbError, SurrealClient>;
 }
+
+// ctx.dep(id) returns the already-computed result of an upstream signal (this
+// pass, in-memory) or reads its materialized column/table - never recomputes.
+interface SignalContext {
+  readonly db: SurrealClient;
+  readonly window: { readonly sessionIds: readonly string[] } | "all";
+  readonly dep: <T = unknown>(signalId: string) => Effect.Effect<T, DbError>;
+}
 ```
+
+The registry is therefore a **compute graph (DAG)**, not a flat list. See
+"Layered signals" below.
 
 ### The three kinds
 
@@ -91,6 +106,36 @@ interface SignalDefinition {
   (A's commit `later_fixed_by` B; file handoff A→B; `spawned` tree). Rendered
   natively in the **dashboard graph view**, as an edge list by
   `ax signals show <id>`, and via MCP. Always `derived`.
+- **`primitive`** (Layer-0) - a materialized per-entity fact other signals reuse
+  (e.g. `commit_reverted` per commit). Not user-facing; exists to be a `dep`.
+
+### Layered signals (composition / the multi-hop reuse model)
+
+The registry is a **DAG**. Deep multi-hop signals declare `deps` and **reuse**
+what cheaper signals already materialized, instead of re-walking ~87k edges per
+signal. This is what makes 3-5-jump weighted queries affordable, and is the
+core hang-safety mechanism ([[weighted-query-per-edge-deref-hang]]).
+
+```
+Layer 0 (primitive, one O(edges) pass):
+  commit_reverted        := EXISTS(commit ->later_fixed_by-> commit)   # walked once
+
+Layer 1 (reuse the primitive - bool/scalar join, no re-walk):
+  durability_ratio  (session)  := share of produced commits where !commit_reverted
+  file_fragility    (file)     := count(touched commits where commit_reverted)
+
+Layer 2 (deep - join Layer 0/1 results):
+  fragility_cascade           (relation)  deps:[file_fragility, commit_reverted]
+  skill_durability_efficacy   (aggregate) deps:[durability_ratio]
+  ignored_review_breakage     (aggregate) deps:[commit_reverted]
+```
+
+One expensive `later_fixed_by` traversal (Layer 0) feeds five deeper signals,
+each now a cheap join. The derive stage **topo-sorts by `deps`** (the Kahn /
+`Deferred.await` pattern the stage runner already uses) so Layer 0 lands before
+1 before 2; `ctx.dep(id)` exposes upstream results (in-memory this pass, or the
+materialized column/table). A new deep insight = one entry declaring its `deps`
+and joining them. Depth lives in the query; the machinery does not change.
 
 ### Registry
 
@@ -117,10 +162,12 @@ Register all new tables in `SCHEMA_TABLES` (`insights.ts`) - a test guards this.
 ### Derive stage - `session-signals`
 
 Tag `derive`; deps on the stages whose data it reads (`git`, `github-pr`,
-delivery, health). Iterates `ALL_SIGNALS.filter(cost === "derived")`, computes
-each, UPSERTs results. New signal needs no new stage. Bounded to sessions in the
-ingest window; forward-looking signals recompute as the new commits/PRs that
-move them land.
+delivery, health). **Topo-sorts `ALL_SIGNALS.filter(cost === "derived")` by each
+signal's `deps`** (Kahn / `Deferred.await`, the runner's existing pattern) so
+Layer-0 primitives compute before the signals that reuse them; `ctx.dep(id)`
+serves upstream results. UPSERTs each result. New signal needs no new stage.
+Bounded to sessions in the ingest window; forward-looking signals recompute as
+the new commits/PRs that move them land.
 
 **Hang-safety (the deref lesson, [[weighted-query-per-edge-deref-hang]]):**
 derived computes use aggregate, tombstone-filtered-in-JS queries; never stack
@@ -161,23 +208,33 @@ A new signal lands in all three because they iterate the registry.
 
 ## Seed signals (`ALL_SIGNALS` v1)
 
-| id | kind | cost | formula | format |
-|---|---|---|---|---|
-| `produced_commits` | session-scalar | computed | `count(->produced->commit)` | count |
-| `time_to_first_edit_ms` | session-scalar | computed | first `edited.ts` − `started_at` | duration |
-| `durability_ratio` | session-scalar | derived | 1 − (produced commits with `later_fixed_by` ÷ produced) | percent |
-| `handoff_sessions` | session-scalar | derived | distinct *other* sessions that later `edited` a file this session's commits `touched` | count |
-| `time_to_land_ms` | session-scalar | derived | `ended_at` → min linked `pull_request.merged_at` | duration |
-| `delegation_ratio` | session-scalar | derived | produced commits from `spawned` subagents ÷ total | percent |
-| `cold_start_reads` | session-scalar | derived | `read_file`+`searched_file` before first `edited` | count |
-| `recovery_effective` | session-scalar | derived | error turn → `recovered_by`→skill → delivery=merged | bool |
-| `lines_added` / `lines_removed` | session-scalar | derived | JS line-count of edit `input_json` (the `ax loc` logic, now stored) | count |
-| `skill_durability_efficacy` | aggregate | derived | per-skill mean `durability_ratio` of sessions that `invoked` it | percent |
-| `rework_chain` | relation | derived | commit in A `later_fixed_by` commit in B → edge A→B | edge |
-| `file_handoff` | relation | derived | A `edited` file F, B later `edited` F → edge A→B over F | edge |
+| id | kind | cost | deps | formula | format |
+|---|---|---|---|---|---|
+| `commit_reverted` | primitive | derived | - | per-commit bool: `EXISTS(->later_fixed_by->commit)`; Layer-0, walked once | bool |
+| `produced_commits` | session-scalar | computed | - | `count(->produced->commit)` | count |
+| `time_to_first_edit_ms` | session-scalar | computed | - | first `edited.ts` − `started_at` | duration |
+| `durability_ratio` | session-scalar | derived | `commit_reverted` | share of produced commits where `!commit_reverted` | percent |
+| `handoff_sessions` | session-scalar | derived | - | distinct *other* sessions that later `edited` a file this session's commits `touched` | count |
+| `time_to_land_ms` | session-scalar | derived | - | `ended_at` → min linked `pull_request.merged_at` | duration |
+| `delegation_ratio` | session-scalar | derived | - | produced commits from `spawned` subagents ÷ total | percent |
+| `cold_start_reads` | session-scalar | derived | - | `read_file`+`searched_file` before first `edited` | count |
+| `recovery_effective` | session-scalar | derived | - | error turn → `recovered_by`→skill → delivery=merged | bool |
+| `lines_added` / `lines_removed` | session-scalar | derived | - | JS line-count of edit `input_json` (the `ax loc` logic, now stored) | count |
+| `file_fragility` | primitive | derived | `commit_reverted` | per-file: count of touched commits where `commit_reverted` | count |
+| `skill_durability_efficacy` | aggregate | derived | `durability_ratio` | per-skill mean `durability_ratio` of sessions that `invoked` it | percent |
+| `rework_chain` | relation | derived | `commit_reverted` | commit in A `later_fixed_by` commit in B → edge A→B | edge |
+| `file_handoff` | relation | derived | - | A `edited` file F, B later `edited` F → edge A→B over F | edge |
+| `fragility_cascade` (deep ①) | relation | derived | `file_fragility`,`commit_reverted` | hotspot file A introduced → chain of downstream fix-sessions; weight = # downstream fixers × commits | edge+weight |
+| `error_recovery_efficacy` (deep ③) | aggregate | derived | `recovery_effective` | per (error_signature, skill): merged-after-recovery ÷ attempts | percent |
+| `expertise_leverage` (deep ④) | aggregate | derived | - | author session → file → distinct later sessions that `read_file` it before their own first edit; weight = downstream readers | count |
 
 Empty/zero semantics: no commits → `durability_ratio` = NONE (not 0); no linked
 PR → `time_to_land_ms` = NONE. Distinguish "no data" from a real 0.
+
+The `deep` ones (①③④) demonstrate the layered model: each declares `deps` and
+joins precomputed Layer-0/1 results rather than re-traversing. New deep insights
+(② skill-spread, ⑤ skill-pair lift, ⑥ ignored-review-breakage) are pure
+additions - no machinery change.
 
 ## Testing
 
@@ -208,13 +265,18 @@ PR → `time_to_land_ms` = NONE. Distinguish "no data" from a real 0.
 
 ## Phasing (for the plan)
 
-1. Framework core: `SignalDefinition` + registry + `session_metrics` schema +
-   computed-field sync + derive stage scaffold (no signals yet).
-2. Seed `session-scalar` signals (computed + derived) + the read module.
+1. Framework core: `SignalDefinition` (incl. `deps`/`SignalContext.dep`) +
+   registry + `session_metrics` schema + computed-field sync + topo-ordered
+   derive stage scaffold (no signals yet).
+2. Layer-0 primitive (`commit_reverted`) + seed `session-scalar` signals
+   (computed + derived, incl. `durability_ratio` reusing the primitive) + read
+   module.
 3. CLI surfaces (`sessions show` enrich, `sessions metrics`, `signals`,
    `signals show`).
 4. `aggregate` + `relation` kinds + their seeds + dashboard/MCP rendering.
-5. Playbook doc + live smoke + verification.
+5. Deep layered signals (`file_fragility` → `fragility_cascade`,
+   `error_recovery_efficacy`, `expertise_leverage`) - proving the DAG/reuse model.
+6. Playbook doc + live smoke + verification.
 
 ## Open questions
 
