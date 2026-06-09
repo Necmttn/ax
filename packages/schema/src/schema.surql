@@ -229,6 +229,8 @@ DEFINE ANALYZER IF NOT EXISTS commit_text
 DEFINE INDEX IF NOT EXISTS commit_message_fts
     ON commit FIELDS message
     FULLTEXT ANALYZER commit_text BM25 HIGHLIGHTS;
+DEFINE FIELD reverted ON commit TYPE bool DEFAULT false;
+DEFINE INDEX IF NOT EXISTS commit_reverted ON commit FIELDS reverted;
 
 DEFINE TABLE repository SCHEMAFULL;
 DEFINE FIELD name           ON repository TYPE option<string>;
@@ -893,6 +895,17 @@ DEFINE FIELD metrics       ON session_health TYPE option<string>;  -- JSON-encod
 DEFINE FIELD ts            ON session_health TYPE datetime DEFAULT time::now();
 DEFINE INDEX IF NOT EXISTS session_health_session ON session_health FIELDS session UNIQUE;
 DEFINE INDEX IF NOT EXISTS session_health_epoch ON session_health FIELDS workflow_epoch, source, ts;
+
+DEFINE TABLE session_metrics SCHEMAFULL;
+DEFINE FIELD session            ON session_metrics TYPE record<session>;
+DEFINE FIELD durability_ratio   ON session_metrics TYPE option<float>;
+DEFINE FIELD produced_commits   ON session_metrics TYPE int DEFAULT 0;
+DEFINE FIELD reverted_commits   ON session_metrics TYPE int DEFAULT 0;
+DEFINE FIELD time_to_land_ms    ON session_metrics TYPE option<int>;
+DEFINE FIELD lines_added        ON session_metrics TYPE int DEFAULT 0;
+DEFINE FIELD lines_removed      ON session_metrics TYPE int DEFAULT 0;
+DEFINE FIELD ts                 ON session_metrics TYPE datetime DEFAULT time::now();
+DEFINE INDEX IF NOT EXISTS session_metrics_session ON session_metrics FIELDS session UNIQUE;
 
 DEFINE TABLE commit_classification SCHEMAFULL;
 DEFINE FIELD commit        ON commit_classification TYPE record<commit>;
