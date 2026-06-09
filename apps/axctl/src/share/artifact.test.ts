@@ -36,8 +36,8 @@ describe("share artifact", () => {
         expect(isAxSessionShare(artifact)).toBe(true);
     });
 
-    it("defaults to schema v3", () => {
-        expect(AX_SESSION_SHARE_SCHEMA_VERSION).toBe(3);
+    it("defaults to schema v4", () => {
+        expect(AX_SESSION_SHARE_SCHEMA_VERSION).toBe(4);
     });
 
     it("rejects unsupported schema versions", () => {

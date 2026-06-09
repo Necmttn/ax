@@ -270,7 +270,7 @@ SELECT
     has_error
 FROM turn
 WHERE session = $sessionId
-    AND message_kind NOT IN ["system", "attachment", "queue-operation", "tool_result"]
+    AND message_kind NOT IN ["system", "attachment", "queue-operation"]
 ORDER BY seq ASC
 LIMIT 2000;`;
 

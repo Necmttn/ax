@@ -3,9 +3,66 @@ import { Effect, Layer } from "effect";
 import { BunFileSystem, BunPath } from "@effect/platform-bun";
 import { SurrealClient, type SurrealClientShape } from "@ax/lib/db";
 import type { DbError } from "@ax/lib/errors";
-import { codexContentToInspectorText, fetchSessionInspect, jsonlBlockToInspectorText } from "./session-inspect.ts";
+import { codexContentToInspectorText, fetchSessionInspect, jsonlBlockToInspectorText, parseClaudeLine, parseCodexLine } from "./session-inspect.ts";
 
 const BunFsLayer = Layer.merge(BunFileSystem.layer, BunPath.layer);
+
+describe("live tool_calls extraction", () => {
+    test("Claude tool_use block becomes a ToolCallDto and is NOT baked into text", () => {
+        const line = JSON.stringify({
+            type: "assistant",
+            timestamp: "2026-06-09T02:15:20Z",
+            message: { role: "assistant", content: [
+                { type: "tool_use", name: "WebFetch", input: { url: "https://paxel.ai/about" } },
+            ] },
+        });
+        const turn = parseClaudeLine(line);
+        // Pure tool_use turn: kept (non-null) with empty text + structured call.
+        expect(turn).not.toBeNull();
+        expect(turn!.text).toBe("");
+        expect(turn!.text).not.toContain("<tool_use");
+        expect(turn?.toolCalls?.length).toBe(1);
+        const call = turn!.toolCalls![0]!;
+        expect(call.name).toBe("WebFetch");
+        expect(call.category).toBe("net");
+        expect(call.input).toEqual({ url: "https://paxel.ai/about" });
+        expect(call.command).toBeNull();
+        expect(call.has_error).toBe(false);
+    });
+
+    test("Claude assistant prose + tool_use keeps the prose but drops the <tool_use> text", () => {
+        const line = JSON.stringify({
+            type: "assistant",
+            timestamp: "2026-06-09T02:15:20Z",
+            message: { role: "assistant", content: [
+                { type: "text", text: "Let me fetch that page." },
+                { type: "tool_use", name: "WebFetch", input: { url: "https://paxel.ai/about" } },
+            ] },
+        });
+        const turn = parseClaudeLine(line);
+        expect(turn).not.toBeNull();
+        expect(turn!.text).toBe("Let me fetch that page.");
+        expect(turn!.text).not.toContain("<tool_use");
+        expect(turn?.toolCalls?.length).toBe(1);
+        expect(turn!.toolCalls![0]!.name).toBe("WebFetch");
+    });
+
+    test("Codex function_call becomes a ToolCallDto with empty text (not null)", () => {
+        const line = JSON.stringify({
+            timestamp: "2026-06-09T02:15:20Z",
+            payload: { type: "function_call", name: "shell", arguments: "{\"command\":\"ls -la\"}", call_id: "c1" },
+        });
+        const turn = parseCodexLine(line);
+        expect(turn).not.toBeNull();
+        expect(turn!.text).toBe("");
+        expect(turn!.text).not.toContain("<tool_use");
+        expect(turn?.toolCalls?.length).toBe(1);
+        const call = turn!.toolCalls![0]!;
+        expect(call.name).toBe("shell");
+        expect(call.category).toBe("sh");
+        expect(call.input).toEqual({ command: "ls -la" });
+    });
+});
 
 describe("codexContentToInspectorText", () => {
     test("joins text blocks with newlines to match ingested turn offsets", () => {

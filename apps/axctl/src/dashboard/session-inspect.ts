@@ -24,8 +24,10 @@ import type {
     SessionInspectPayload,
     SessionTokenUsageDetail,
     SpawnMeta,
+    ToolCallDto,
     TurnTokenUsageDetail,
 } from "@ax/lib/shared/dashboard-types";
+import { categoryOf } from "@ax/lib/shared/tool-presentation";
 import {
     interpolateRid,
     queryMany,
@@ -33,7 +35,7 @@ import {
 } from "@ax/lib/shared/graph-query";
 import { safeKeyPart } from "@ax/lib/shared/derive-keys";
 import { clampPagination, type PaginationConfig } from "@ax/lib/shared/pagination";
-import { toBareSessionId } from "@ax/lib/shared/session-id";
+import { toBareSessionId, toSessionRid } from "@ax/lib/shared/session-id";
 import { recordRef } from "@ax/lib/shared/surql";
 
 const INSPECT_TURNS_PAGINATION: PaginationConfig = { defaultLimit: 2000, maxLimit: 2000 };
@@ -148,21 +150,50 @@ interface CanonicalTurn {
     readonly role: string;       // 'user' | 'assistant' | 'developer' | etc.
     readonly text: string;
     readonly ts: string | null;
+    readonly toolCalls?: ReadonlyArray<ToolCallDto>;
 }
 
-function parseClaudeLine(line: string): CanonicalTurn | null {
+const asRecord = (v: unknown): Record<string, unknown> | null =>
+    v && typeof v === "object" && !Array.isArray(v) ? (v as Record<string, unknown>) : null;
+
+/** Build a ToolCallDto from a tool name + raw input (object | JSON string).
+ *  `seq` is set to 0 here and overwritten with the turn's seq at assembly. */
+function toToolCall(seq: number, name: string, rawInput: unknown): ToolCallDto {
+    let input = asRecord(rawInput);
+    if (input === null && typeof rawInput === "string") {
+        const parsed = decodeJsonRecordOrNull(rawInput);
+        if (parsed) input = parsed;
+    }
+    const command = input && typeof input.command === "string" ? input.command : null;
+    return { seq, name, category: categoryOf(name), input, command, output_excerpt: null, has_error: false, tokens: null };
+}
+
+export function parseClaudeLine(line: string): CanonicalTurn | null {
     const entry = decodeJsonRecordOrNull(line) as JsonlMessage | null;
     if (entry === null) return null;
     if (entry.type !== "user" && entry.type !== "assistant") return null;
     const content = entry.message?.content;
+    // tool_use blocks are captured structurally in `toolCalls` below, so they
+    // must NOT also be baked into `text` (that would duplicate the call as a
+    // raw <tool_use …> line next to the compact ToolRow). text/tool_result
+    // blocks are unchanged.
     const text = typeof content === "string"
         ? content
-        : Array.isArray(content) ? content.map(jsonlBlockToInspectorText).join("") : "";
-    if (!text) return null;
+        : Array.isArray(content)
+            ? content.map((b) => b.type === "tool_use" ? "" : jsonlBlockToInspectorText(b)).join("")
+            : "";
+    const toolCalls = Array.isArray(content)
+        ? content
+            .filter((b): b is JsonlContentBlock => b.type === "tool_use" && typeof b.name === "string")
+            .map((b) => toToolCall(0, b.name!, b.input))
+        : [];
+    // Keep tool-only turns: empty text but non-empty toolCalls is valid now.
+    if (!text && toolCalls.length === 0) return null;
     return {
         role: entry.message?.role ?? entry.type,
         text,
         ts: entry.timestamp ?? null,
+        ...(toolCalls.length > 0 ? { toolCalls } : {}),
     };
 }
 
@@ -189,7 +220,7 @@ export function codexContentToInspectorText(content: unknown): string {
         .join("\n");
 }
 
-function parseCodexLine(line: string): CanonicalTurn | null {
+export function parseCodexLine(line: string): CanonicalTurn | null {
     const entry = decodeJsonRecordOrNull(line) as CodexLine | null;
     if (entry === null) return null;
     const p = entry.payload;
@@ -202,12 +233,15 @@ function parseCodexLine(line: string): CanonicalTurn | null {
     }
     if (p.type === "function_call") {
         const name = p.name ?? "function";
-        const args = p.arguments ?? "{}";
-        const clipped = args.length > 400 ? `${args.slice(0, 400)}...` : args;
+        // The call is captured structurally in toolCalls; don't bake a raw
+        // <tool_use …> text line (it would duplicate the compact ToolRow).
+        // This branch returns regardless of empty text - it is not gated by
+        // the `!text` guard - so the tool-only turn is retained.
         return {
             role: "assistant",
-            text: `<tool_use name="${name.replace(/"/g, "")}">${clipped}</tool_use>`,
+            text: "",
             ts: entry.timestamp ?? null,
+            toolCalls: [toToolCall(0, name, p.arguments ?? "{}")],
         };
     }
     if (p.type === "function_call_output") {
@@ -233,6 +267,17 @@ interface ChildEdge {
     readonly nickname: string | null;
 }
 
+/** Run metrics for one spawned child session, resolved from its normalized
+ *  records (turn / tool_call / session_token_usage / session timestamps).
+ *  All nullable - missing data or a failed stats query degrades to null. */
+interface ChildStats {
+    readonly turns: number | null;
+    readonly tool_calls: number | null;
+    readonly est_tokens: number | null;
+    readonly cost_usd: number | null;
+    readonly duration_ms: number | null;
+}
+
 /** SQL constants kept near their resolvers so the only thing the helper hides
  *  is the Effect.gen + Effect.catch ceremony - the SQL stays grep-able. */
 const PARENT_SQL = `
@@ -246,6 +291,30 @@ const CHILDREN_SQL = `
     FROM spawned
     WHERE in = $sid
     ORDER BY ts ASC;
+`;
+/** Batched subagent run-metrics over a list of child session record-ids.
+ *  Four grouped SELECTs in one round-trip (turns, tool_calls, token usage,
+ *  session timestamps); stitched together in JS by bare session id. The
+ *  `$ids` placeholder is replaced with an inline record-id array literal
+ *  (each id validated + wrapped via toSessionRid). */
+const CHILD_STATS_SQL = `
+    SELECT session, count() AS turns
+    FROM turn
+    WHERE session IN $ids
+    GROUP BY session;
+
+    SELECT session, count() AS tool_calls
+    FROM tool_call
+    WHERE session IN $ids
+    GROUP BY session;
+
+    SELECT session, estimated_tokens, estimated_cost_usd
+    FROM session_token_usage
+    WHERE session IN $ids;
+
+    SELECT id AS session, started_at, ended_at
+    FROM session
+    WHERE id IN $ids;
 `;
 const HOOK_FIRES_SQL = `
     SELECT ts, event, file_path, inject, reason, latency_ms, injected_titles
@@ -389,6 +458,105 @@ const resolveChildren = (sessionId: string): Effect.Effect<ReadonlyArray<ChildEd
             nickname: r.nickname ?? null,
         }),
         "session-inspect resolveChildren",
+    );
+
+/** A `session` record-id reference as returned by Surreal. The SDK hands
+ *  these back either as a decorated string or a RecordId-like object; we only
+ *  need its string form to re-bare. */
+type SurrealRef = string | { toString(): string };
+
+const refToBare = (ref: SurrealRef | null | undefined): string | null => {
+    if (ref == null) return null;
+    return toBareSessionId(typeof ref === "string" ? ref : String(ref));
+};
+
+interface ChildTurnsRow { readonly session: SurrealRef; readonly turns: number | null }
+interface ChildToolCallsRow { readonly session: SurrealRef; readonly tool_calls: number | null }
+interface ChildTokenRow {
+    readonly session: SurrealRef;
+    readonly estimated_tokens: number | null;
+    readonly estimated_cost_usd: number | null;
+}
+interface ChildSessionRow {
+    readonly session: SurrealRef;
+    readonly started_at: Date | string | null;
+    readonly ended_at: Date | string | null;
+}
+
+const toMs = (v: Date | string | null | undefined): number | null => {
+    if (v == null) return null;
+    const ms = v instanceof Date ? v.getTime() : new Date(v).getTime();
+    return Number.isFinite(ms) ? ms : null;
+};
+
+/** Resolve run metrics for every spawned child in ONE round-trip. Returns a
+ *  map keyed by bare child session id. Defensive: any DB failure degrades to
+ *  an empty map so the inspector still renders the spawn markers metric-less
+ *  (mirrors resolveChildren's swallow-and-degrade contract). */
+const resolveChildStats = (
+    childIds: ReadonlyArray<string>,
+): Effect.Effect<ReadonlyMap<string, ChildStats>, never, SurrealClient> =>
+    Effect.gen(function* () {
+        if (childIds.length === 0) return new Map<string, ChildStats>();
+        const idList = childIds.map((id) => toSessionRid(toBareSessionId(id))).join(", ");
+        const sql = CHILD_STATS_SQL.split("$ids").join(`[${idList}]`);
+        const db = yield* SurrealClient;
+        const [turnRows, toolRows, tokenRows, sessionRows] = yield* db.query<[
+            ChildTurnsRow[],
+            ChildToolCallsRow[],
+            ChildTokenRow[],
+            ChildSessionRow[],
+        ]>(sql);
+
+        const turnsByChild = new Map<string, number>();
+        for (const r of turnRows ?? []) {
+            const id = refToBare(r.session);
+            if (id) turnsByChild.set(id, Number(r.turns ?? 0));
+        }
+        const toolsByChild = new Map<string, number>();
+        for (const r of toolRows ?? []) {
+            const id = refToBare(r.session);
+            if (id) toolsByChild.set(id, Number(r.tool_calls ?? 0));
+        }
+        const tokensByChild = new Map<string, { est_tokens: number | null; cost_usd: number | null }>();
+        for (const r of tokenRows ?? []) {
+            const id = refToBare(r.session);
+            if (id) {
+                tokensByChild.set(id, {
+                    est_tokens: r.estimated_tokens == null ? null : Number(r.estimated_tokens),
+                    cost_usd: r.estimated_cost_usd == null ? null : Number(r.estimated_cost_usd),
+                });
+            }
+        }
+        const durationByChild = new Map<string, number | null>();
+        for (const r of sessionRows ?? []) {
+            const id = refToBare(r.session);
+            if (!id) continue;
+            const start = toMs(r.started_at);
+            const end = toMs(r.ended_at);
+            durationByChild.set(id, start != null && end != null && end >= start ? end - start : null);
+        }
+
+        const out = new Map<string, ChildStats>();
+        for (const rawId of childIds) {
+            const id = toBareSessionId(rawId);
+            const tokens = tokensByChild.get(id);
+            out.set(id, {
+                turns: turnsByChild.get(id) ?? null,
+                tool_calls: toolsByChild.get(id) ?? null,
+                est_tokens: tokens?.est_tokens ?? null,
+                cost_usd: tokens?.cost_usd ?? null,
+                duration_ms: durationByChild.get(id) ?? null,
+            });
+        }
+        return out;
+    }).pipe(
+        Effect.catch((err) =>
+            Effect.sync(() => {
+                console.error("axctl session-inspect resolveChildStats failed:", err);
+                return new Map<string, ChildStats>();
+            }),
+        ),
     );
 
 /** Fetch every hook_fire row for the session, ts-ordered. N is small
@@ -700,6 +868,11 @@ const fetchGraphSessionInspect = (
             resolveTurnContentForSourceRefs(turnSourceRefs),
         ], { concurrency: "unbounded" });
 
+        // Subagent run metrics, batched over the resolved child ids. Depends on
+        // childrenEdges so it runs after the Effect.all above; degrades to an
+        // empty map on failure (see resolveChildStats).
+        const childStats = yield* resolveChildStats(childrenEdges.map((e) => e.session_id));
+
         const totalTurnsRaw = Number(health?.turns ?? 0);
         const totalTurns = Number.isFinite(totalTurnsRaw) && totalTurnsRaw > 0
             ? Math.trunc(totalTurnsRaw)
@@ -736,14 +909,22 @@ const fetchGraphSessionInspect = (
         const totals = { ...pageTotals };
         if (parent.parent_session) applySubagentTaskTagging(turns, totals);
 
-        const children = childrenEdges.map((edge) => ({
-            session_id: edge.session_id,
-            ts: edge.ts,
-            tool: edge.tool,
-            nickname: edge.nickname,
-            anchor_turn_seq: anchorChildToTurn(turns, edge.ts),
-            meta: null,
-        }));
+        const children = childrenEdges.map((edge) => {
+            const stats = childStats.get(edge.session_id) ?? null;
+            return {
+                session_id: edge.session_id,
+                ts: edge.ts,
+                tool: edge.tool,
+                nickname: edge.nickname,
+                anchor_turn_seq: anchorChildToTurn(turns, edge.ts),
+                meta: null,
+                turns: stats?.turns ?? null,
+                tool_calls: stats?.tool_calls ?? null,
+                est_tokens: stats?.est_tokens ?? null,
+                cost_usd: stats?.cost_usd ?? null,
+                duration_ms: stats?.duration_ms ?? null,
+            };
+        });
 
         const totalChars = Object.values(totals).reduce((sum, value) => sum + Number(value ?? 0), 0);
 
@@ -806,6 +987,10 @@ export const fetchSessionInspect = (
             resolveTurnTokenUsage(bareSessionId),
             locateTranscript(bareSessionId),
         ], { concurrency: "unbounded" });
+        // Subagent run metrics, batched over the resolved child ids. Depends on
+        // childrenEdges so it runs after the Effect.all above; degrades to an
+        // empty map on failure (see resolveChildStats).
+        const childStats = yield* resolveChildStats(childrenEdges.map((e) => e.session_id));
         const fs = yield* FileSystem.FileSystem;
         // The read is the only failure source here; the rest of the body is
         // pure parsing. Preserve the original `Effect.tryPromise` behavior of
@@ -861,6 +1046,9 @@ export const fetchSessionInspect = (
                     spans: spans.map(toSpanDto),
                     token_usage: tokenUsageForSeq(currentSeq),
                     content: findTurnContent(turnContent, currentSeq, text),
+                    ...(canonical.toolCalls && canonical.toolCalls.length > 0
+                        ? { tool_calls: canonical.toolCalls.map((c) => ({ ...c, seq: currentSeq })) }
+                        : {}),
                 });
             }
 
@@ -920,14 +1108,22 @@ export const fetchSessionInspect = (
                 return spawnCalls[bestIdx]!.meta;
             };
 
-            const children = childrenEdges.map((edge) => ({
-                session_id: edge.session_id,
-                ts: edge.ts,
-                tool: edge.tool,
-                nickname: edge.nickname,
-                anchor_turn_seq: anchorChildToTurn(turns, edge.ts),
-                meta: metaForChild(edge.ts),
-            }));
+            const children = childrenEdges.map((edge) => {
+                const stats = childStats.get(edge.session_id) ?? null;
+                return {
+                    session_id: edge.session_id,
+                    ts: edge.ts,
+                    tool: edge.tool,
+                    nickname: edge.nickname,
+                    anchor_turn_seq: anchorChildToTurn(turns, edge.ts),
+                    meta: metaForChild(edge.ts),
+                    turns: stats?.turns ?? null,
+                    tool_calls: stats?.tool_calls ?? null,
+                    est_tokens: stats?.est_tokens ?? null,
+                    cost_usd: stats?.cost_usd ?? null,
+                    duration_ms: stats?.duration_ms ?? null,
+                };
+            });
 
             // Slice turns to the requested window. The full session totals
             // (totals_by_kind, total_chars) are kept unchanged so the legend

@@ -1,9 +1,13 @@
 import { describe, expect, test } from "bun:test";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
     dashboardApiCapabilities,
     dashboardApiKind,
     formatSseEvent,
+    handleDashboardRequest,
     handleDashboardRequestWithCors,
+    imageContentType,
     isGraphExplorerEnabled,
     parseDashboardServeArgs,
     parseQueryRequest,
@@ -42,6 +46,62 @@ describe("studio CORS / Private Network Access", () => {
         }));
         expect(res.headers.get("access-control-allow-origin")).toBeNull();
         expect(res.headers.get("access-control-allow-private-network")).toBeNull();
+    });
+});
+
+describe("imageContentType", () => {
+    test("maps known image extensions (case-insensitive)", () => {
+        expect(imageContentType("/a/x.png")).toBe("image/png");
+        expect(imageContentType("/a/x.JPG")).toBe("image/jpeg");
+        expect(imageContentType("/a/x.jpeg")).toBe("image/jpeg");
+        expect(imageContentType("/a/x.webp")).toBe("image/webp");
+        expect(imageContentType("/a/x.svg")).toBe("image/svg+xml");
+        expect(imageContentType("/a/x.avif")).toBe("image/avif");
+    });
+
+    test("returns null for non-image / extensionless paths", () => {
+        expect(imageContentType("/etc/passwd")).toBeNull();
+        expect(imageContentType("/a/notes.txt")).toBeNull();
+        expect(imageContentType("/a/script.sh")).toBeNull();
+        expect(imageContentType("noext")).toBeNull();
+    });
+});
+
+describe("GET /api/image", () => {
+    const req = (path: string | null): Request => {
+        const qs = path === null ? "" : `?path=${encodeURIComponent(path)}`;
+        return new Request(`http://127.0.0.1:1738/api/image${qs}`);
+    };
+
+    test("serves an existing image file with the right content-type", async () => {
+        const file = join(tmpdir(), `ax-img-test-${Date.now()}.png`);
+        // 1x1 transparent PNG
+        const png = Buffer.from(
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M8AAAMBAQDJ/pLvAAAAAElFTkSuQmCC",
+            "base64",
+        );
+        await Bun.write(file, png);
+        const res = await handleDashboardRequest(req(file));
+        expect(res.status).toBe(200);
+        expect(res.headers.get("content-type")).toBe("image/png");
+        expect((await res.arrayBuffer()).byteLength).toBe(png.byteLength);
+    });
+
+    test("404 when the path is missing", () => {
+        return handleDashboardRequest(req("/nope/does-not-exist.png")).then((res) => {
+            expect(res.status).toBe(404);
+        });
+    });
+
+    test("404 for a non-image extension even if it exists", async () => {
+        const file = join(tmpdir(), `ax-img-test-${Date.now()}.txt`);
+        await Bun.write(file, "secret");
+        const res = await handleDashboardRequest(req(file));
+        expect(res.status).toBe(404);
+    });
+
+    test("404 when no path param is given", async () => {
+        expect((await handleDashboardRequest(req(null))).status).toBe(404);
     });
 });
 

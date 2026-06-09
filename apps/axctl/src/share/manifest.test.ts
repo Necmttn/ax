@@ -75,7 +75,7 @@ describe("buildShareBundle", () => {
 
         const m = bundle.manifest;
         expect(m.kind).toBe("manifest");
-        expect(m.schema_version).toBe(3);
+        expect(m.schema_version).toBe(4);
         expect(m.subagents).toHaveLength(3);
         expect(m.totals.subagents).toBe(3);
     });

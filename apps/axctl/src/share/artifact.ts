@@ -1,6 +1,6 @@
-import type { HookFireDto, InspectTurnContentDto, SessionTokenUsageDetail, TurnTokenUsageDetail } from "@ax/lib/shared/dashboard-types";
+import type { HookFireDto, InspectTurnContentDto, SessionTokenUsageDetail, ToolCallDto, TurnTokenUsageDetail } from "@ax/lib/shared/dashboard-types";
 
-export const AX_SESSION_SHARE_SCHEMA_VERSION = 3 as const;
+export const AX_SESSION_SHARE_SCHEMA_VERSION = 4 as const;
 
 /**
  * Schema versions a reader still accepts.
@@ -9,8 +9,10 @@ export const AX_SESSION_SHARE_SCHEMA_VERSION = 3 as const;
  * - v3: multi-file gist bundle - an `index.json` manifest + one
  *   `session.json` (root) + `subagent-<id>.json` per descendant; per-file
  *   shares no longer inline `children` (they are referenced from the manifest).
+ * - v4: per-turn structured `tool_calls` (typed args) replace the baked
+ *   `🔧 …` synthesized text. v1–v3 readers fall back to the text path.
  */
-export const SUPPORTED_SHARE_SCHEMA_VERSIONS = [1, 2, 3] as const;
+export const SUPPORTED_SHARE_SCHEMA_VERSIONS = [1, 2, 3, 4] as const;
 export type ShareSchemaVersion = (typeof SUPPORTED_SHARE_SCHEMA_VERSIONS)[number];
 
 export type KnownShareSource = "claude" | "codex" | "pi" | "opencode" | "cursor";
@@ -109,6 +111,8 @@ export interface ShareTurn {
     readonly has_error?: boolean;
     readonly token_usage?: TurnTokenUsageDetail | null;
     readonly content?: InspectTurnContentDto | null;
+    /** v4+: structured tool invocations on this turn (typed args). */
+    readonly tool_calls?: ReadonlyArray<ToolCallDto>;
 }
 
 export interface ShareEvent {

@@ -14,7 +14,9 @@ import type {
     SessionTokenUsageDetail,
     SessionToolCall,
     SessionTopSkill,
+    ToolCallDto,
 } from "@ax/lib/shared/dashboard-types";
+import { categoryOf } from "@ax/lib/shared/tool-presentation";
 import { runQuery, runSingleQuery } from "@ax/lib/shared/graph-query";
 import { resolveTurnContent } from "../queries/session-turn-content.ts";
 import {
@@ -253,55 +255,37 @@ const attachTurnTokenUsage = (
     });
 };
 
-const TOOL_OUTPUT_MAX = 600;
-const TOOL_ARG_MAX = 200;
-const TOOL_MAX_ARGS = 6;
-
-const clip = (value: string, max: number): string =>
-    value.length > max ? `${value.slice(0, max - 1)}…` : value;
-
-/**
- * Render a tool call's arguments from its recorded input JSON as compact
- * `key: value` lines (whitespace collapsed, each value clipped). Falls back to
- * the normalized command string for shell tools that have no structured input.
- */
-const formatToolArgs = (call: ShareTurnToolCall): string[] => {
+const toShareToolCall = (call: ShareTurnToolCall): ToolCallDto => {
+    let input: Record<string, unknown> | null = null;
     if (call.input_json) {
-        const parsed = (() => {
-            try {
-                return JSON.parse(call.input_json) as unknown;
-            } catch {
-                return null;
+        try {
+            const parsed = JSON.parse(call.input_json) as unknown;
+            if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+                input = parsed as Record<string, unknown>;
             }
-        })();
-        if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
-            const lines: string[] = [];
-            for (const [key, value] of Object.entries(parsed as Record<string, unknown>)) {
-                if (value === null || value === undefined || value === "") continue;
-                const rendered = typeof value === "string" ? value : JSON.stringify(value);
-                lines.push(`  ${key}: ${clip(rendered.replace(/\s+/g, " ").trim(), TOOL_ARG_MAX)}`);
-                if (lines.length >= TOOL_MAX_ARGS) break;
-            }
-            if (lines.length > 0) return lines;
-        }
+        } catch { /* leave input null */ }
     }
-    return call.command ? [`  ${clip(call.command, TOOL_ARG_MAX)}`] : [];
-};
-
-const formatToolCall = (call: ShareTurnToolCall): string => {
-    const lines = [`🔧 ${call.name}${call.has_error ? "  ⚠️ error" : ""}`, ...formatToolArgs(call)];
-    if (call.output) lines.push(`→ ${clip(call.output, TOOL_OUTPUT_MAX)}`);
-    return lines.join("\n");
+    return {
+        seq: call.seq,
+        name: call.name,
+        category: categoryOf(call.name),
+        input,
+        command: call.command ?? null,
+        // Carry the full stored excerpt (already DB-bounded at ingest). This is
+        // only a fallback for calls whose tool_result turn didn't pair into the
+        // card; the primary full-output source is the merged tool_result turn.
+        output_excerpt: call.output ?? null,
+        has_error: call.has_error,
+        tokens: null,
+    };
 };
 
 /**
- * Tool-call turns (web fetch, file edits, bash, …) carry no dissected text, so
- * a text-only export jumps over the agent's actual work. Synthesize a readable
- * tool line on those turns from the call records (name + command + truncated
- * output) so the shared transcript stays coherent. Turns that already have
- * text are left untouched.
+ * Attach typed `tool_calls` to each turn from its recorded call rows. Replaces
+ * the old text-baking (`attachSynthesizedToolText`): tool turns now carry
+ * structured data the renderer formats, so live + shared render identically.
  */
-export const attachSynthesizedToolText = (
+export const attachStructuredToolCalls = (
     turns: ReadonlyArray<ShareTurn>,
     toolCalls: ReadonlyArray<ShareTurnToolCall>,
 ): ReadonlyArray<ShareTurn> => {
@@ -313,11 +297,13 @@ export const attachSynthesizedToolText = (
         bySeq.set(call.seq, list);
     }
     return turns.map((turn) => {
-        if (turn.text.length > 0) return turn;
         const calls = bySeq.get(turn.seq);
         if (!calls || calls.length === 0) return turn;
-        const text = calls.map(formatToolCall).join("\n\n");
-        return { ...turn, text, ...(turn.has_tool_use === undefined ? { has_tool_use: true } : {}) };
+        return {
+            ...turn,
+            tool_calls: calls.map(toShareToolCall),
+            ...(turn.has_tool_use === undefined ? { has_tool_use: true } : {}),
+        };
     });
 };
 
@@ -414,16 +400,18 @@ export const exportSessionShare = (
             )
         ).filter(isPresent);
 
-        // Build turns: synthesize tool lines, attach usage + content, then drop
-        // turns that ended up with neither text nor content (empty assistant /
-        // thinking shells) so the shared transcript has no blank rows.
+        // Build turns: attach structured tool calls, usage + content, then drop
+        // turns that ended up with no text, no content, and no tool calls (empty
+        // assistant / thinking shells) so the shared transcript has no blank rows.
         const turns = attachTurnContent(
             attachTurnTokenUsage(
-                attachSynthesizedToolText(shareTurns, turnToolCallsRaw.filter(isPresent)),
+                attachStructuredToolCalls(shareTurns, turnToolCallsRaw.filter(isPresent)),
                 turnTokenUsageRaw.filter(isPresent),
             ),
             turnContent,
-        ).filter((turn) => turn.text.length > 0 || turn.content != null);
+        ).filter((turn) =>
+            turn.text.length > 0 || turn.content != null || (turn.tool_calls?.length ?? 0) > 0
+        );
 
         return buildShareArtifactFromParts({
             axVersion,

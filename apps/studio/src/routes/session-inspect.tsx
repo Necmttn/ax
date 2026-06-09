@@ -9,6 +9,11 @@ import { FilterBar } from "./inspector-filter-bar.tsx";
 import { SessionTimelineView } from "./session-timeline.tsx";
 import { shortSessionId } from "@ax/lib/shared/session-id";
 import { sessionProjectLabel } from "@ax/lib/shared/project-slug";
+import { ToolResultView } from "./tool-result.tsx";
+import { ToolRow } from "./tool-row.tsx";
+import { extractImagePaths } from "./turn-images.ts";
+import { TurnImages } from "./turn-images.tsx";
+import { Transcript } from "./transcript.tsx";
 import type { InspectContentAtomDto, InspectContentBlockDto, InspectTurnContentDto } from "@ax/lib/shared/dashboard-types";
 
 interface KindStyle { bg: string; fg: string; bar: string; label: string }
@@ -115,14 +120,12 @@ function costBarSegments(usage: SessionTokenUsageDetail): ReadonlyArray<{ label:
     ];
 }
 
-function usageTokenLine(usage: TurnTokenUsageDetail): string {
-    const parts = [
-        `${fmtCount(usage.estimated_tokens)} tok`,
-        usage.fresh_input_tokens !== null ? `${fmtCount(usage.fresh_input_tokens)} fresh` : null,
-        usage.cache_read_input_tokens !== null ? `${fmtCount(usage.cache_read_input_tokens)} cached` : null,
-        usage.completion_tokens !== null ? `${fmtCount(usage.completion_tokens)} out` : null,
-    ].filter((part): part is string => part !== null);
-    return parts.join(" · ");
+/** Compact, glanceable token count for the turn header: `43.3k` / `156`.
+ *  The full fresh/cache/output breakdown lives in the hover title only. */
+function compactTokenCount(usage: TurnTokenUsageDetail): string | null {
+    const n = numberOrNull(usage.estimated_tokens);
+    if (n === null || n <= 0) return null;
+    return n >= 1000 ? `${(n / 1000).toFixed(1)}k` : `${n}`;
 }
 
 type CostProgress = {
@@ -312,23 +315,6 @@ function atomTone(atom: InspectContentAtomDto): ContentTone {
     if (atom.kind.includes("symbol")) return { bg: "#f0fdf4", fg: "#15803d", bar: "#22c55e", label: "symbol" };
     if (atom.kind.includes("command")) return { bg: "#fef3c7", fg: "#92400e", bar: "#f59e0b", label: "command" };
     return { bg: "var(--page)", fg: "var(--ink)", bar: "var(--muted-2)", label: blockLabel(atom.kind) };
-}
-
-function semanticAliasCounts(content: InspectTurnContentDto): Array<{ alias: string; label: string; count: number; tone: ContentTone }> {
-    const aliases = visibleTextBlocks(content)
-        .map((block) => primarySectionAlias(block))
-        .filter((alias): alias is InspectContentAtomDto => alias !== null);
-    const hasStructuralAlias = aliases.some((alias) => alias.value !== "reference");
-    const counts = new Map<string, { label: string; count: number; tone: ContentTone }>();
-    for (const alias of aliases) {
-        if (hasStructuralAlias && alias.value === "reference") continue;
-        const style = ALIAS_STYLE[alias.value] ?? ALIAS_STYLE.reference;
-        const existing = counts.get(alias.value) ?? { label: aliasLabel(alias), count: 0, tone: { ...style, label: aliasLabel(alias) } };
-        counts.set(alias.value, { ...existing, count: existing.count + 1 });
-    }
-    return [...counts.entries()]
-        .map(([alias, value]) => ({ alias, ...value }))
-        .sort((a, b) => b.count - a.count);
 }
 
 function AliasMiniMap({
@@ -1007,12 +993,57 @@ interface SpawnMetaDto {
     readonly brief: string | null;
 }
 
-interface SpawnChildDto {
+export interface SpawnChildDto {
     readonly session_id: string;
     readonly nickname: string | null;
     readonly tool: string | null;
     readonly ts: string | null;
     readonly meta: SpawnMetaDto | null;
+    readonly turns: number | null;
+    readonly tool_calls: number | null;
+    readonly est_tokens: number | null;
+    readonly cost_usd: number | null;
+    readonly duration_ms: number | null;
+}
+
+/** Compact token count for a plain number: `30.3k` / `156` / null when empty.
+ *  Mirrors compactTokenCount (which takes a TurnTokenUsageDetail). */
+export function compactTokens(n: number | null | undefined): string | null {
+    if (n == null || !Number.isFinite(n) || n <= 0) return null;
+    return n >= 1000 ? `${(n / 1000).toFixed(1)}k` : `${n}`;
+}
+
+/** Glanceable duration from milliseconds: `42s` / `1m58s` / `1h2m` / null. */
+export function fmtDurationMs(ms: number | null | undefined): string | null {
+    if (ms == null || !Number.isFinite(ms) || ms < 0) return null;
+    const s = Math.round(ms / 1000);
+    if (s < 60) return `${s}s`;
+    const m = Math.floor(s / 60);
+    if (m < 60) return s % 60 ? `${m}m${s % 60}s` : `${m}m`;
+    const h = Math.floor(m / 60);
+    return m % 60 ? `${h}h${m % 60}m` : `${h}h`;
+}
+
+/** The dim subagent-metric chips shared by the live + (mirrored) share marker.
+ *  Returns the ordered, null-omitted label set. */
+export function subagentMetricChips(child: {
+    readonly turns: number | null;
+    readonly tool_calls: number | null;
+    readonly est_tokens: number | null;
+    readonly duration_ms: number | null;
+    readonly cost_usd: number | null;
+}): ReadonlyArray<string> {
+    const out: string[] = [];
+    if (child.turns != null) out.push(`${child.turns} turns`);
+    if (child.tool_calls != null) out.push(`${child.tool_calls} tools`);
+    const tok = compactTokens(child.est_tokens);
+    if (tok) out.push(`${tok} tok`);
+    const dur = fmtDurationMs(child.duration_ms);
+    if (dur) out.push(dur);
+    if (child.cost_usd != null && Number.isFinite(child.cost_usd)) {
+        out.push(child.cost_usd >= 0.01 ? `$${child.cost_usd.toFixed(2)}` : `$${child.cost_usd.toFixed(4)}`);
+    }
+    return out;
 }
 
 function SpawnMarker({ child }: { child: SpawnChildDto }) {
@@ -1024,6 +1055,7 @@ function SpawnMarker({ child }: { child: SpawnChildDto }) {
     if (m?.agent_type) chips.push({ label: "type", value: m.agent_type });
     if (m?.reasoning_effort) chips.push({ label: "effort", value: m.reasoning_effort });
     if (m?.fork_context != null) chips.push({ label: "fork", value: m.fork_context ? "yes" : "no" });
+    const metrics = subagentMetricChips(child);
 
     // Prefetch the spawned child's inspect data on hover/focus only -
     // mass-prefetching all 52 spawn markers at once would stampede the API.
@@ -1067,6 +1099,11 @@ function SpawnMarker({ child }: { child: SpawnChildDto }) {
                 ))}
                 <span style={{ opacity: 0.6, marginLeft: "auto" }}>{ts}</span>
             </div>
+            {metrics.length > 0 ? (
+                <div style={{ marginTop: 4, opacity: 0.7, fontSize: 10, letterSpacing: 0.2 }}>
+                    {metrics.join(" · ")}
+                </div>
+            ) : null}
             {brief ? (
                 <div style={{ marginTop: 4, color: "#7f1d1d", opacity: 0.9, fontSize: 11, lineHeight: 1.5, whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
                     <span style={{ fontStyle: "italic" }}>
@@ -1146,12 +1183,95 @@ export function HookFireMarker({ hook }: { hook: HookFireDto }) {
     );
 }
 
+// --- Turn layout grid -------------------------------------------------------
+// Every turn type shares ONE alignment grid so the `#seq` gutter, the header
+// metadata, and ALL body content (user text, assistant prose, tool cards)
+// line up on a single content-left edge.
+//
+//   | accent | GUTTER | CONTENT COLUMN ............. |
+//     3px      44px     1fr  (header + body align here)
+//
+// Horizontal padding lives on the outer container; the grid sits inside it.
+const TURN_PAD_X = 24;
+const TURN_GUTTER = 44; // fixed seq column width (was: 48 min in full / auto in tool)
+const TURN_COL_GAP = 8;
+const turnMono = "ui-monospace, SFMono-Regular, Menlo, monospace";
+
+/** The single restrained header every turn shares:
+ *  `#seq · ●role · time · $cost · Ntok` - all dim, one line.
+ *  Role is a small color dot + lowercase word (the loud uppercase tinted pill
+ *  is gone; the kind COLOR survives as the dot + the left accent bar).
+ *  Token internals (fresh/cache/output) + char/span structure are demoted to
+ *  the hover title only. */
+function TurnHeader({
+    turn,
+    style,
+    extras,
+    rightSlot,
+    hideRoleLabel,
+}: {
+    turn: InspectTurnDto;
+    style: KindStyle;
+    /** Inline nodes inserted after the role marker (e.g. spawned-child, jsonl badge). */
+    extras?: ReactNode;
+    /** Right-aligned slot (e.g. "inspecting →"). */
+    rightSlot?: ReactNode;
+    /** Tool-only turns: the card below states the tool identity, so the header
+     *  keeps the color dot for the grid but drops the redundant role word. */
+    hideRoleLabel?: boolean;
+}) {
+    const ts = turn.ts ? new Date(turn.ts).toISOString().slice(11, 19) : "";
+    const usage = turn.token_usage ?? null;
+    const cost = numberOrNull(usage?.estimated_cost_usd);
+    const tok = usage ? compactTokenCount(usage) : null;
+    const dim = "#9aa3b2";
+    const structureTitle =
+        `${turn.char_count.toLocaleString()} characters · ${turn.spans.length} classified span${turn.spans.length === 1 ? "" : "s"} from the raw transcript.`;
+    return (
+        <div
+            style={{
+                gridColumn: "2",
+                display: "flex",
+                alignItems: "baseline",
+                gap: 8,
+                fontSize: 10.5,
+                lineHeight: 1.6,
+                color: dim,
+                fontFamily: turnMono,
+                flexWrap: "wrap",
+            }}
+        >
+            <span style={{ display: "inline-flex", alignItems: "center", gap: 6, flex: "0 0 auto" }}>
+                <span
+                    aria-hidden
+                    title={hideRoleLabel ? undefined : `${style.label} turn`}
+                    style={{ width: 6, height: 6, borderRadius: 2, background: style.bar, flex: "0 0 auto", transform: "translateY(1px)" }}
+                />
+                {hideRoleLabel ? null : <span style={{ color: style.fg, opacity: 0.85, fontWeight: 600 }}>{style.label}</span>}
+            </span>
+            {ts ? <span title="Turn timestamp from the source transcript." style={{ color: dim }}>{ts}</span> : null}
+            {cost !== null ? <span title={turnTokenUsageTitle(turn)} style={{ color: dim }}>{fmtUsd(cost)}</span> : null}
+            {tok ? <span title={turnTokenUsageTitle(turn)} style={{ color: dim }}>{tok} tok</span> : null}
+            {turn.char_count > 0 ? (
+                <span title={structureTitle} style={{ color: "#c2c8d2" }}>
+                    {turn.char_count > 1000 ? `${(turn.char_count / 1000).toFixed(1)}k` : turn.char_count}c
+                </span>
+            ) : null}
+            {extras}
+            {rightSlot ? <span style={{ marginLeft: "auto", display: "inline-flex", alignItems: "baseline", gap: 6 }}>{rightSlot}</span> : null}
+        </div>
+    );
+}
+
 function TurnImpl({
     turn,
     anchored,
     childrenSpawnedHere,
     activeTarget,
     onInspect,
+    resultFor,
+    skillContentFor,
+    imagePaths: imagePathsProp,
 }: {
     turn: InspectTurnDto;
     anchored: boolean;
@@ -1160,6 +1280,18 @@ function TurnImpl({
     activeTarget: InspectTarget | null;
     /** Hover/click a block or alias to surface it in the docked rail inspector. */
     onInspect: (selection: InspectSelection) => void;
+    /** Paired tool_result output for this turn's i-th tool call, when the
+     *  following tool_result turn was merged into the card (live path). */
+    resultFor?: (callIndex: number) => string | undefined;
+    /** Injected SKILL.md for this turn's i-th call when it is a `Skill` call
+     *  whose following skill_context turn was folded into the card. */
+    skillContentFor?: (callIndex: number) => string | undefined;
+    /** Merged image paths to render on this turn: its own `[Image: source: …]`
+     *  refs plus any folded in from following pure-attachment turns
+     *  ({@link pairImageAttachments}). When absent, falls back to extracting
+     *  the turn's own paths so turns rendered outside the paired path don't
+     *  regress. */
+    imagePaths?: ReadonlyArray<string>;
 }) {
     const turnUsage = turn.token_usage ?? null;
     // Routes every block/alias hover+click up to the shared docked inspector,
@@ -1169,136 +1301,132 @@ function TurnImpl({
         onInspect({ turnSeq: turn.seq, content: turn.content, target, turnUsage, turnChars: turn.char_count });
     };
     const s = KIND_STYLE[turn.semantic_role];
-    const kindCounts = new Map<InspectSpanKind, number>();
-    for (const sp of turn.spans) kindCounts.set(sp.kind, (kindCounts.get(sp.kind) ?? 0) + sp.text.length);
-    const total = turn.char_count;
-    const chips = [...kindCounts.entries()]
-        .sort((a, b) => b[1] - a[1])
-        .map(([kind, n]) => {
-            const c = KIND_STYLE[kind];
-            const pct = total > 0 ? ((n / total) * 100).toFixed(0) : "0";
-            return (
-                <span
-                    key={kind}
-                    title={`${c.label}: ${pct}% of this turn's characters. This is structure share, not token or billing share.`}
-                    style={{ background: c.bg, color: c.fg, padding: "0 6px", borderRadius: 3, fontSize: 10, fontFamily: "ui-monospace, monospace" }}
-                >
-                    {c.label} {pct}%
-                </span>
-            );
-        });
-    const aliasChips = turn.content ? semanticAliasCounts(turn.content).slice(0, 8).map(({ alias, label, count, tone }) => (
-        <span
-            key={alias}
-            title={`${label}: ${count} semantic block${count === 1 ? "" : "s"} detected inside this turn.`}
-            style={{
-                background: tone.bg,
-                color: tone.fg,
-                borderLeft: `3px solid ${tone.bar}`,
-                padding: "0 6px",
-                borderRadius: 3,
-                fontSize: 10,
-                fontFamily: "ui-monospace, monospace",
-                fontWeight: 700,
-            }}
-        >
-            {label} {count}
-        </span>
-    )) : [];
-    const ts = turn.ts ? new Date(turn.ts).toISOString().slice(11, 19) : "";
-    const sizeStr = turn.char_count > 1000 ? `${(turn.char_count / 1000).toFixed(1)}k` : `${turn.char_count}`;
-    const turnCost = numberOrNull(turnUsage?.estimated_cost_usd);
     const spawnedChildCount = childrenSpawnedHere?.length ?? 0;
+    // A surviving tool_result turn is an ORPHAN (its preceding call wasn't
+    // matched, or there was none) - paired results are merged into the call
+    // card upstream and never reach this component.
     const jsonlBadge = turn.role !== turn.semantic_role.replace(/_text$|_input$/, "")
         ? <span style={{ color: "var(--muted-2)", fontSize: 10 }}>(jsonl: {turn.role})</span>
         : null;
-    return (
-        <div
-            id={`turn-${turn.seq}`}
-            title={turnTokenUsageTitle(turn)}
+    const spawnBadge = spawnedChildCount > 0
+        ? (
+            <span title={`This turn spawned ${spawnedChildCount} sub-agent session${spawnedChildCount === 1 ? "" : "s"}.`}
+                style={{ color: "#9f1239", fontWeight: 700 }}>
+                spawn x{spawnedChildCount}
+            </span>
+        )
+        : null;
+    const inspectingBadge = turn.content && activeTarget
+        ? (
+            <span title="This turn is showing in the docked inspector on the right." style={{ color: "#0f172a", fontWeight: 600 }}>
+                inspecting →
+            </span>
+        )
+        : null;
+    const headerExtras = (jsonlBadge || spawnBadge)
+        ? <>{spawnBadge}{jsonlBadge}</>
+        : undefined;
+
+    // The `#seq` anchor lives in the fixed gutter (column 1) for EVERY turn
+    // type so the content column (header + body) starts at one shared left
+    // edge. The accent bar carries the kind color at x=0.
+    const seqGutter = (
+        <a
+            href={`#turn-${turn.seq}`}
             style={{
-                display: "grid",
-                gridTemplateColumns: "1fr",
-                padding: "6px 24px",
-                scrollMarginTop: JUMP_TARGET_SCROLL_MARGIN,
-                borderLeft: `3px solid ${s.bar}`,
-                background: anchored ? "#fef3c7" : "transparent",
-                transition: "background 0.6s",
+                gridColumn: "1",
+                gridRow: "1",
+                color: "#aeb5c0",
+                textDecoration: "none",
+                fontSize: 10.5,
+                lineHeight: 1.6,
+                fontFamily: turnMono,
+                textAlign: "right",
+                paddingRight: 2,
             }}
         >
-            <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 11, color: "var(--muted)", flexWrap: "wrap", fontFamily: "ui-monospace, monospace" }}>
-                <a href={`#turn-${turn.seq}`} style={{ color: "var(--muted-2)", textDecoration: "none", minWidth: 48 }}>#{turn.seq}</a>
-                <span style={{ background: s.bg, color: s.fg, padding: "1px 8px", borderRadius: 3, fontWeight: 600, fontSize: 10, textTransform: "uppercase", letterSpacing: "0.04em" }}>
-                    {s.label}
-                </span>
-                {spawnedChildCount > 0 ? (
-                    <span style={{
-                        background: "#ffe4e6", color: "#9f1239", border: "1px solid #fecdd3",
-                        padding: "1px 8px", borderRadius: 3, fontWeight: 700, fontSize: 10,
-                        textTransform: "uppercase",
-                    }}>
-                        spawned child x{spawnedChildCount}
-                    </span>
-                ) : null}
-                {jsonlBadge}
-                <span title="Turn timestamp from the source transcript." style={{ color: "var(--muted-2)" }}>{ts}</span>
-                <span
-                    title={`${sizeStr}c = ${turn.char_count.toLocaleString()} characters in this turn. ${turn.spans.length}span = ${turn.spans.length} classified message slice${turn.spans.length === 1 ? "" : "s"} from the raw transcript.`}
-                    style={{ color: "var(--muted-2)" }}
-                >
-                    {sizeStr}c · {turn.spans.length}span
-                </span>
-                {turnUsage ? (
-                    <span
-                        title={turnTokenUsageTitle(turn)}
-                        style={{ color: "var(--muted)" }}
-                    >
-                        {turnCost !== null ? fmtUsd(turnCost) : "cost ?"} · {usageTokenLine(turnUsage)}
-                    </span>
-                ) : null}
-                {turn.content && activeTarget ? (
-                    <span
-                        title="This turn is showing in the docked inspector on the right."
-                        style={{
-                            padding: "1px 7px", border: "1px solid var(--ink)", borderRadius: 3,
-                            background: "var(--ink)", color: "#fff",
-                            font: "10px/1.4 ui-monospace, monospace",
-                        }}
-                    >
-                        inspecting →
-                    </span>
-                ) : null}
-                <span style={{ display: "inline-flex", gap: 3, flexWrap: "wrap", marginLeft: "auto" }}>
-                    {aliasChips.length > 0 ? aliasChips : chips}
-                </span>
-            </div>
-            {childrenSpawnedHere && childrenSpawnedHere.length > 0 ? (
-                <div style={{ padding: "6px 0 2px" }}>
-                    {childrenSpawnedHere.map((c) => (
-                        <SpawnMarker key={c.session_id} child={c} />
-                    ))}
+            #{turn.seq}
+        </a>
+    );
+
+    // A tool-ONLY turn carries no assistant prose - just the tool call(s). The
+    // card below already states the tool identity, tokens and result, so the
+    // header collapses to the shared dim row; the body is the card alone. It
+    // uses the SAME grid as every other turn, so the card's content edge lines
+    // up with user/assistant body text.
+    const toolOnly = !!turn.tool_calls && turn.tool_calls.length > 0 && !turn.content && turn.char_count === 0
+        && spawnedChildCount === 0 && turn.semantic_role !== "tool_result";
+
+    // On-disk images pasted as `[Image: source: /…/foo.png]` text refs. The
+    // daemon serves the bytes; a missing file degrades to the text ref. The
+    // transcript supplies a merged list (own refs + folded pure-attachment
+    // turns); fall back to this turn's own refs when rendered standalone.
+    const imagePaths = imagePathsProp ?? extractImagePaths(turn.raw_text ?? "");
+
+    const gridStyle: CSSProperties = {
+        display: "grid",
+        gridTemplateColumns: `${TURN_GUTTER}px 1fr`,
+        columnGap: TURN_COL_GAP,
+        rowGap: 3,
+        padding: `8px ${TURN_PAD_X}px`,
+        scrollMarginTop: JUMP_TARGET_SCROLL_MARGIN,
+        borderLeft: `3px solid ${s.bar}`,
+        background: anchored ? "#fef3c7" : "transparent",
+        transition: "background 0.6s",
+    };
+
+    if (toolOnly) {
+        return (
+            <div id={`turn-${turn.seq}`} title={turnTokenUsageTitle(turn)} style={gridStyle}>
+                {seqGutter}
+                <TurnHeader turn={turn} style={s} extras={headerExtras} hideRoleLabel />
+                <div style={{ gridColumn: "2" }}>
+                    <ToolRow calls={turn.tool_calls!} resultFor={resultFor} skillContentFor={skillContentFor} />
+                    <TurnImages paths={imagePaths} />
                 </div>
-            ) : null}
-            {turn.content ? (
-                <>
-                    <AliasMiniMap
-                        content={turn.content}
-                        activeTarget={activeTarget}
-                        setActiveTarget={setActiveTarget}
-                    />
-                    <AnnotatedRawText
-                        content={turn.content}
-                        rawText={turnText(turn)}
-                        activeTarget={activeTarget}
-                        setActiveTarget={setActiveTarget}
-                        maxHeight={400}
-                    />
-                </>
-            ) : (
-                <pre style={{ margin: 0, padding: "4px 0 6px", whiteSpace: "pre-wrap", wordBreak: "break-word", font: "12px/1.55 ui-monospace, monospace", maxHeight: 400, overflow: "auto" }}>
-                    {turn.spans.map((sp, i) => <Span key={i} span={sp} />)}
-                </pre>
-            )}
+            </div>
+        );
+    }
+
+    return (
+        <div id={`turn-${turn.seq}`} title={turnTokenUsageTitle(turn)} style={gridStyle}>
+            {seqGutter}
+            <TurnHeader turn={turn} style={s} extras={headerExtras} rightSlot={inspectingBadge} />
+            <div style={{ gridColumn: "2", minWidth: 0 }}>
+                {childrenSpawnedHere && childrenSpawnedHere.length > 0 ? (
+                    <div style={{ padding: "2px 0 4px" }}>
+                        {childrenSpawnedHere.map((c) => (
+                            <SpawnMarker key={c.session_id} child={c} />
+                        ))}
+                    </div>
+                ) : null}
+                {turn.semantic_role === "tool_result" ? (
+                    <ToolResultView text={turn.raw_text ?? ""} />
+                ) : turn.content ? (
+                    <>
+                        <AliasMiniMap
+                            content={turn.content}
+                            activeTarget={activeTarget}
+                            setActiveTarget={setActiveTarget}
+                        />
+                        <AnnotatedRawText
+                            content={turn.content}
+                            rawText={turnText(turn)}
+                            activeTarget={activeTarget}
+                            setActiveTarget={setActiveTarget}
+                            maxHeight={400}
+                        />
+                    </>
+                ) : (
+                    <pre style={{ margin: 0, padding: "2px 0 0", whiteSpace: "pre-wrap", wordBreak: "break-word", font: "12px/1.55 ui-monospace, monospace", maxHeight: 400, overflow: "auto" }}>
+                        {turn.spans.map((sp, i) => <Span key={i} span={sp} />)}
+                    </pre>
+                )}
+                {turn.tool_calls && turn.tool_calls.length > 0
+                    ? <ToolRow calls={turn.tool_calls} resultFor={resultFor} skillContentFor={skillContentFor} />
+                    : null}
+                <TurnImages paths={imagePaths} />
+            </div>
         </div>
     );
 }
@@ -1424,6 +1552,10 @@ export function SessionInspectView({ sessionId }: { readonly sessionId: string }
         () => spawnAnchorSet(data?.children ?? []),
         [data?.children],
     );
+    const childrenByTurn = useMemo(
+        () => childrenByAnchorTurn(data?.children ?? []),
+        [data?.children],
+    );
     const visibleSeq = useVisibleTurnSeq(data?.turns ?? [], anchoredSeq ?? data?.turns[0]?.seq ?? null);
 
     // IntersectionObserver on a sentinel triggers the next page load.
@@ -1468,156 +1600,121 @@ export function SessionInspectView({ sessionId }: { readonly sessionId: string }
             {view === "transcript" && query.error ? <div className="error">Error: {String(query.error)}</div> : null}
             {view === "transcript" && query.isLoading && !data ? <div className="loading">Loading…</div> : null}
             {view === "transcript" && data ? (
-                <>
-                    <div style={{ padding: "8px 24px", color: "var(--muted)", fontSize: 12, fontFamily: "ui-monospace, monospace" }}>
-                        <span>project: </span>
-                        {data.project ? (
-                            <Link to="/projects/$slug" params={{ slug: data.project }} style={{ color: "var(--blue)", fontWeight: 600 }}>
-                                {sessionProjectLabel(data.project, data.cwd)}
-                            </Link>
-                        ) : (
-                            <strong style={{ color: "var(--ink)" }}>{sessionProjectLabel(data.project, data.cwd)}</strong>
-                        )}
-                        {" · "}
-                        {data.turns.length} turns · {data.total_chars.toLocaleString()} chars
-                        {data.total_hook_fires > 0 ? (
-                            <> · <span style={{ color: "#065f46" }}>{data.total_hook_fires} hook decision{data.total_hook_fires === 1 ? "" : "s"}</span></>
-                        ) : null}
-                        {" · source: "}<code>{data.source_path}</code>
-                    </div>
-                    {data.children.length > 0 ? (
-                        <div style={{ padding: "6px 24px", background: "#ffe4e6", borderTop: "1px solid #fecdd3", borderBottom: "1px solid #fecdd3", fontSize: 12 }}>
-                            <strong style={{ color: "#9f1239" }}>↓ spawned {data.children.length} subagent{data.children.length === 1 ? "" : "s"}</strong>
-                            <span style={{ marginLeft: 12, color: "#9f1239", opacity: 0.7 }}>
-                                {data.children.slice(0, 6).map((c, i) => {
-                                    // Wire seam: c.session_id is already bare.
-                                    const bare = c.session_id;
-                                    return (
-                                        <span key={c.session_id}>
-                                            {i > 0 ? " · " : " "}
-                                            <Link
-                                                to="/sessions/$sessionId/inspect"
-                                                params={{ sessionId: bare }}
-                                                style={{ color: "#9f1239", fontFamily: "ui-monospace, monospace" }}
-                                            >
-                                                {c.nickname ? `"${c.nickname}"` : `${bare.slice(0, 10)}…`}
-                                            </Link>
-                                        </span>
-                                    );
-                                })}
-                                {data.children.length > 6 ? <span> · …+{data.children.length - 6}</span> : null}
-                            </span>
-                        </div>
-                    ) : null}
-                    {data.parent_session ? (
-                        <div style={{ padding: "6px 24px", background: "#ffe4e6", borderTop: "1px solid #fecdd3", borderBottom: "1px solid #fecdd3", fontSize: 12 }}>
-                            <strong style={{ color: "#9f1239" }}>↑ spawned by</strong>
-                            {" "}
-                            <Link
-                                to="/sessions/$sessionId/inspect"
-                                params={{ sessionId: data.parent_session }}
-                                style={{ color: "#9f1239", fontWeight: 600, fontFamily: "ui-monospace, monospace" }}
-                            >
-                                {shortSessionId(data.parent_session)}…
-                            </Link>
-                            {data.parent_nickname ? <span style={{ color: "#9f1239", marginLeft: 8 }}>· nickname: <strong>{data.parent_nickname}</strong></span> : null}
-                            <span style={{ color: "#9f1239", marginLeft: 8, opacity: 0.7 }}>This is a subagent session.</span>
-                        </div>
-                    ) : null}
-                    <FilterBar
-                        turns={data.turns}
-                        anchorSeqs={anchorSeqs}
-                        loadedCount={data.turns.length}
-                        totalCount={data.total_turns}
-                        appendLoading={appendLoading}
-                        loadMore={loadMore}
-                        getTurns={() => turnsRef.current}
-                        getCurrentSeq={() => anchoredSeqRef.current}
-                        hookFireIdxs={data.hook_fires.map((h) => h.idx)}
-                        getHookFireIdxs={() => hookFireIdxsRef.current}
-                        totalHookFires={data.total_hook_fires}
-                    />
-                    <InspectGuide data={data} />
-                    <div style={{ display: "flex", gap: 4, flexWrap: "wrap", padding: "4px 24px 8px" }}>
-                        {(Object.keys(KIND_STYLE) as InspectSpanKind[]).map((kind) => {
-                            const c = KIND_STYLE[kind];
-                            const n = data.totals_by_kind[kind] ?? 0;
-                            const pct = data.total_chars > 0 ? ((n / data.total_chars) * 100).toFixed(1) : "0";
-                            return (
-                                <span
-                                    key={kind}
-                                    title={`${c.label}: ${pct}% of exported characters in this session view. This is not token share or billing share.`}
-                                    style={{ background: c.bg, color: c.fg, padding: "2px 10px", borderRadius: 4, fontSize: 11, fontWeight: 600, borderLeft: `3px solid ${c.bar}` }}
-                                >
-                                    {c.label} <em style={{ fontStyle: "normal", opacity: 0.7, fontWeight: 400 }}>{pct}%</em>
-                                </span>
-                            );
-                        })}
-                    </div>
-                    <div style={{ display: "flex", alignItems: "flex-start", gap: 12 }}>
-                        <div style={{ minWidth: 0, flex: "1 1 auto" }}>
-                            {(() => {
-                                const childrenByTurn = childrenByAnchorTurn(data.children);
-                                const items = spliceHookFires(data.turns, data.hook_fires);
-                                return items.map((item) => {
-                                    if (item.kind === "hook_fire") {
-                                        return <HookFireMarker key={`hook-${item.hook.idx}`} hook={item.hook} />;
-                                    }
-                                    const t = item.turn;
-                                    return (
-                                        <Turn
-                                            key={`turn-${t.seq}`}
-                                            turn={t}
-                                            anchored={anchoredSeq === t.seq}
-                                            childrenSpawnedHere={childrenByTurn.get(t.seq)}
-                                            activeTarget={selection?.turnSeq === t.seq ? selection.target : null}
-                                            onInspect={setSelection}
-                                        />
-                                    );
-                                });
-                            })()}
-                            {data.turns.length < data.total_turns ? (
-                                <div
-                                    ref={sentinelRef}
-                                    style={{
-                                        padding: "12px 24px", color: "var(--muted)", fontSize: 12, fontFamily: "ui-monospace, monospace",
-                                        textAlign: "center", borderTop: "1px dashed var(--line)",
-                                    }}
-                                >
-                                    {appendLoading
-                                        ? `loading next ${PAGE_SIZE} of ${data.total_turns.toLocaleString()}…`
-                                        : `loaded ${data.turns.length.toLocaleString()} of ${data.total_turns.toLocaleString()} turns ·`}
-                                    {!appendLoading ? (
-                                        <>
-                                            {" "}
-                                            <button
-                                                onClick={() => void loadMore(200)}
-                                                style={{
-                                                    padding: "2px 10px", marginLeft: 6, fontSize: 11, border: "1px solid var(--line)",
-                                                    background: "#fff", color: "var(--muted)", borderRadius: 4, cursor: "pointer",
-                                                }}
-                                            >load 200 more</button>
-                                            {" "}
-                                            <button
-                                                onClick={() => void loadMore(data.total_turns - data.turns.length)}
-                                                style={{
-                                                    padding: "2px 10px", fontSize: 11, border: "1px solid var(--line)",
-                                                    background: "#fff", color: "var(--muted)", borderRadius: 4, cursor: "pointer",
-                                                }}
-                                            >load all</button>
-                                        </>
-                                    ) : null}
+                <Transcript
+                    data={data}
+                    anchoredSeq={anchoredSeq}
+                    selection={selection}
+                    setSelection={setSelection}
+                    visibleSeq={visibleSeq}
+                    filterBar={{
+                        turns: data.turns,
+                        anchorSeqs,
+                        loadedCount: data.turns.length,
+                        totalCount: data.total_turns,
+                        appendLoading,
+                        loadMore,
+                        getTurns: () => turnsRef.current,
+                        getCurrentSeq: () => anchoredSeqRef.current,
+                        hookFireIdxs: data.hook_fires.map((h) => h.idx),
+                        getHookFireIdxs: () => hookFireIdxsRef.current,
+                        totalHookFires: data.total_hook_fires,
+                    }}
+                    childrenSpawnedHereForTurn={(seq) => childrenByTurn.get(seq)}
+                    header={
+                        <>
+                            <div style={{ padding: "8px 24px", color: "var(--muted)", fontSize: 12, fontFamily: "ui-monospace, monospace" }}>
+                                <span>project: </span>
+                                {data.project ? (
+                                    <Link to="/projects/$slug" params={{ slug: data.project }} style={{ color: "var(--blue)", fontWeight: 600 }}>
+                                        {sessionProjectLabel(data.project, data.cwd)}
+                                    </Link>
+                                ) : (
+                                    <strong style={{ color: "var(--ink)" }}>{sessionProjectLabel(data.project, data.cwd)}</strong>
+                                )}
+                                {" · "}
+                                {data.turns.length} turns · {data.total_chars.toLocaleString()} chars
+                                {data.total_hook_fires > 0 ? (
+                                    <> · <span style={{ color: "#065f46" }}>{data.total_hook_fires} hook decision{data.total_hook_fires === 1 ? "" : "s"}</span></>
+                                ) : null}
+                                {" · source: "}<code>{data.source_path}</code>
+                            </div>
+                            {data.children.length > 0 ? (
+                                <div style={{ padding: "6px 24px", background: "#ffe4e6", borderTop: "1px solid #fecdd3", borderBottom: "1px solid #fecdd3", fontSize: 12 }}>
+                                    <strong style={{ color: "#9f1239" }}>↓ spawned {data.children.length} subagent{data.children.length === 1 ? "" : "s"}</strong>
+                                    <span style={{ marginLeft: 12, color: "#9f1239", opacity: 0.7 }}>
+                                        {data.children.slice(0, 6).map((c, i) => {
+                                            // Wire seam: c.session_id is already bare.
+                                            const bare = c.session_id;
+                                            return (
+                                                <span key={c.session_id}>
+                                                    {i > 0 ? " · " : " "}
+                                                    <Link
+                                                        to="/sessions/$sessionId/inspect"
+                                                        params={{ sessionId: bare }}
+                                                        style={{ color: "#9f1239", fontFamily: "ui-monospace, monospace" }}
+                                                    >
+                                                        {c.nickname ? `"${c.nickname}"` : `${bare.slice(0, 10)}…`}
+                                                    </Link>
+                                                </span>
+                                            );
+                                        })}
+                                        {data.children.length > 6 ? <span> · …+{data.children.length - 6}</span> : null}
+                                    </span>
                                 </div>
                             ) : null}
-                        </div>
-                        <DockedRail
-                            data={data}
-                            currentSeq={visibleSeq}
-                            selection={selection}
-                            setSelection={setSelection}
-                        />
-                    </div>
-                </>
+                            {data.parent_session ? (
+                                <div style={{ padding: "6px 24px", background: "#ffe4e6", borderTop: "1px solid #fecdd3", borderBottom: "1px solid #fecdd3", fontSize: 12 }}>
+                                    <strong style={{ color: "#9f1239" }}>↑ spawned by</strong>
+                                    {" "}
+                                    <Link
+                                        to="/sessions/$sessionId/inspect"
+                                        params={{ sessionId: data.parent_session }}
+                                        style={{ color: "#9f1239", fontWeight: 600, fontFamily: "ui-monospace, monospace" }}
+                                    >
+                                        {shortSessionId(data.parent_session)}…
+                                    </Link>
+                                    {data.parent_nickname ? <span style={{ color: "#9f1239", marginLeft: 8 }}>· nickname: <strong>{data.parent_nickname}</strong></span> : null}
+                                    <span style={{ color: "#9f1239", marginLeft: 8, opacity: 0.7 }}>This is a subagent session.</span>
+                                </div>
+                            ) : null}
+                        </>
+                    }
+                    renderAfterTurns={() =>
+                        data.turns.length < data.total_turns ? (
+                            <div
+                                ref={sentinelRef}
+                                style={{
+                                    padding: "12px 24px", color: "#64748b", fontSize: 12, fontFamily: "ui-monospace, monospace",
+                                    textAlign: "center", borderTop: "1px dashed #e2e8f0",
+                                }}
+                            >
+                                {appendLoading
+                                    ? `loading next ${PAGE_SIZE} of ${data.total_turns.toLocaleString()}…`
+                                    : `loaded ${data.turns.length.toLocaleString()} of ${data.total_turns.toLocaleString()} turns ·`}
+                                {!appendLoading ? (
+                                    <>
+                                        {" "}
+                                        <button
+                                            onClick={() => void loadMore(200)}
+                                            style={{
+                                                padding: "2px 10px", marginLeft: 6, fontSize: 11, border: "1px solid #e2e8f0",
+                                                background: "#fff", color: "#475569", borderRadius: 4, cursor: "pointer",
+                                            }}
+                                        >load 200 more</button>
+                                        {" "}
+                                        <button
+                                            onClick={() => void loadMore(data.total_turns - data.turns.length)}
+                                            style={{
+                                                padding: "2px 10px", fontSize: 11, border: "1px solid #e2e8f0",
+                                                background: "#fff", color: "#475569", borderRadius: 4, cursor: "pointer",
+                                            }}
+                                        >load all</button>
+                                    </>
+                                ) : null}
+                            </div>
+                        ) : null
+                    }
+                />
             ) : null}
         </section>
     );

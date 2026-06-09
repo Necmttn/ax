@@ -879,6 +879,24 @@ export interface InspectTurnContentDto {
     readonly blocks: ReadonlyArray<InspectContentBlockDto>;
 }
 
+export type ToolCategory = "net" | "file" | "edit" | "sh" | "search" | "agent" | "other";
+
+/** A single tool invocation surfaced in a transcript turn. Carries the RAW
+ *  structured input so the renderer (not the producer) decides preview vs.
+ *  expand - the presentation is never baked at the source. */
+export interface ToolCallDto {
+    readonly seq: number;
+    readonly name: string;
+    readonly category: ToolCategory;
+    /** Raw structured args. null for shell-style tools whose only arg is `command`. */
+    readonly input: Record<string, unknown> | null;
+    /** Shell-style fallback (Bash etc.) when there is no structured input. */
+    readonly command: string | null;
+    readonly output_excerpt: string | null;
+    readonly has_error: boolean;
+    readonly tokens: number | null;
+}
+
 export interface InspectTurnDto {
     /** Sequence within session, 0-indexed in JSONL message order. */
     readonly seq: number;
@@ -893,6 +911,7 @@ export interface InspectTurnDto {
     readonly spans: ReadonlyArray<InspectSpanDto>;
     readonly token_usage?: TurnTokenUsageDetail | null;
     readonly content?: InspectTurnContentDto | null;
+    readonly tool_calls?: ReadonlyArray<ToolCallDto>;
 }
 
 export interface SpawnMeta {
@@ -919,6 +938,14 @@ export interface SpawnedChild {
     /** Args extracted from the parent's tool_use call. Null if we couldn't
      *  match the call (e.g. spawn happened off-JSONL or args weren't parseable). */
     readonly meta: SpawnMeta | null;
+    /** Subagent run metrics, resolved from the child session's normalized
+     *  records. All nullable: a failed/missing stats query degrades to null so
+     *  the inspector still renders the marker (just without the metric row). */
+    readonly turns: number | null;
+    readonly tool_calls: number | null;
+    readonly est_tokens: number | null;
+    readonly cost_usd: number | null;
+    readonly duration_ms: number | null;
 }
 
 /** A single PreToolUse hook decision row, surfaced alongside turns so the

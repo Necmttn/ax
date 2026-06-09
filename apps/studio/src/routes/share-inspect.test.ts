@@ -216,6 +216,32 @@ describe("inspectPayloadFromShare", () => {
         expect(payload.token_usage).toBeNull();
     });
 
+    test("v4 artifact: tool_calls pass through to the inspect payload", () => {
+        const artifact = {
+            schema_version: 4, exported_at: "2026-06-09T00:00:00Z",
+            session: { id: "s1", source: "claude" },
+            stats: { turns: 1, tool_calls: 1, files_changed: 0, skills_used: 0, failures: 0 },
+            turns: [{
+                id: "t0", seq: 0, role: "assistant", text: "",
+                tool_calls: [{ seq: 0, name: "WebFetch", category: "net", input: { url: "https://paxel.ai" }, command: null, output_excerpt: null, has_error: false, tokens: 228 }],
+            }],
+        } as any;
+        const payload = inspectPayloadFromShare(artifact, "gist:x/y");
+        expect(payload.turns[0]!.tool_calls?.[0]?.name).toBe("WebFetch");
+    });
+
+    test("v3 artifact still renders (baked text path, no crash)", () => {
+        const artifact = {
+            schema_version: 3, exported_at: "2026-06-09T00:00:00Z",
+            session: { id: "s1", source: "claude" },
+            stats: { turns: 1, tool_calls: 1, files_changed: 0, skills_used: 0, failures: 0 },
+            turns: [{ id: "t0", seq: 0, role: "assistant", text: "🔧 WebFetch\n  url: https://paxel.ai", has_tool_use: true }],
+        } as any;
+        const payload = inspectPayloadFromShare(artifact, "gist:x/y");
+        expect(payload.turns[0]!.raw_text).toContain("🔧");
+        expect(payload.turns[0]!.tool_calls).toBeUndefined();
+    });
+
     test("carries token usage into the shared cost lens when exported", () => {
         const payload = inspectPayloadFromShare({
             schema_version: 1,

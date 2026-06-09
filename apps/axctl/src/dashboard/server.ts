@@ -38,6 +38,64 @@ import { fetchSessionSummary } from "./session-summary.ts";
 import { fetchSkillGraph } from "./skill-graph.ts";
 import { fetchWrapped, sanitizeWrappedProfile } from "./wrapped.ts";
 
+/**
+ * Map of supported image extension → MIME type. This is the safety allowlist
+ * for {@link handleImageRequest}: a path whose extension isn't here is refused
+ * (404), so the local-image endpoint can only ever serve image bytes and never
+ * arbitrary files. Keep in sync with the SPA's `IMAGE_EXTENSIONS`.
+ */
+const IMAGE_CONTENT_TYPES: Record<string, string> = {
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".gif": "image/gif",
+    ".webp": "image/webp",
+    ".bmp": "image/bmp",
+    ".svg": "image/svg+xml",
+    ".avif": "image/avif",
+};
+
+/** Content-type for a path by extension, or null if not a supported image. */
+export function imageContentType(path: string): string | null {
+    const dot = path.lastIndexOf(".");
+    if (dot < 0) return null;
+    return IMAGE_CONTENT_TYPES[path.slice(dot).toLowerCase()] ?? null;
+}
+
+/**
+ * GET /api/image?path=<url-encoded-absolute-path>
+ *
+ * Serves a local on-disk image so the SPA can render `[Image: source: …]`
+ * transcript refs (a browser can't load `file://` from an http origin). This
+ * is a localhost-only personal dev daemon; the safety line is: the path must
+ * resolve to an EXISTING regular file with a known image extension. Anything
+ * else - missing file, directory, non-image extension, read error - is a flat
+ * 404, so we never follow into or leak non-image files.
+ */
+async function handleImageRequest(url: URL): Promise<Response> {
+    const raw = url.searchParams.get("path");
+    if (!raw) return new Response("not found", { status: 404 });
+    const contentType = imageContentType(raw);
+    if (!contentType) return new Response("not found", { status: 404 });
+    try {
+        const file = Bun.file(raw);
+        // `exists()` is false for a missing path; a directory yields size 0 and
+        // a failing read below. Bun.file on a dir does not throw on `exists`.
+        if (!(await file.exists())) return new Response("not found", { status: 404 });
+        const bytes = await file.arrayBuffer();
+        return new Response(bytes, {
+            headers: {
+                "content-type": contentType,
+                // Personal dev daemon; on-disk images are effectively immutable
+                // (CleanShot writes unique filenames), so cache hard.
+                "cache-control": "private, max-age=86400",
+            },
+        });
+    } catch {
+        return new Response("not found", { status: 404 });
+    }
+}
+
 export function parseDashboardServeArgs(args: string[]): { port: number } {
     const raw = args.find((arg) => arg.startsWith("--port="))?.split("=")[1];
     const port = raw === undefined ? 1738 : Number(raw);
@@ -394,6 +452,7 @@ const baseApiCapabilities = [
     "improve",     // /api/improve + accept/reject/verdict
     "events",      // /api/events (SSE)
     "ingest",      // POST /api/ingest -> { runId, stream } + Durable Streams sidecar
+    "image",       // GET /api/image?path= -> local on-disk image bytes
 ] as const;
 
 export const dashboardApiCapabilities = (
@@ -1008,6 +1067,9 @@ export async function handleDashboardRequest(req: Request): Promise<Response> {
     }
     if (url.pathname === "/api/ingest" && req.method === "POST") {
         return handleIngestTrigger(req);
+    }
+    if (url.pathname === "/api/image" && req.method === "GET") {
+        return handleImageRequest(url);
     }
     if (url.pathname.startsWith("/api/")) return queryApi(url.pathname);
 

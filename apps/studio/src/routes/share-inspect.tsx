@@ -8,14 +8,14 @@ import type {
     InspectTurnDto,
     SessionInspectPayload,
     SessionTokenUsageDetail,
+    ToolCallDto,
     TurnTokenUsageDetail,
 } from "@ax/lib/shared/dashboard-types";
 import { shortSessionId } from "@ax/lib/shared/session-id";
-import { spliceHookFires } from "@ax/lib/shared/hook-fire-splice";
-import { FilterBar } from "./inspector-filter-bar.tsx";
-import { DockedRail, HookFireMarker, InspectGuide, KIND_STYLE, Turn, useInspectSelection, useVisibleTurnSeq } from "./session-inspect.tsx";
+import { compactTokens, useInspectSelection, useVisibleTurnSeq } from "./session-inspect.tsx";
+import { Transcript } from "./transcript.tsx";
 
-type ShareSchemaVersion = 1 | 2 | 3;
+type ShareSchemaVersion = 1 | 2 | 3 | 4;
 
 // A published gist's files are immutable for a viewing session, so cache them
 // forever and never refetch on focus/remount - the 1.26MB session.json should
@@ -76,6 +76,7 @@ interface ShareArtifact {
         readonly token_usage?: TurnTokenUsageDetail | null;
         readonly has_tool_use?: boolean;
         readonly has_error?: boolean;
+        readonly tool_calls?: ReadonlyArray<ToolCallDto>;
     }>;
 }
 
@@ -93,7 +94,7 @@ export function rawSessionFileUrl(owner: string, gistId: string): string {
     return gistRawUrl(owner, gistId, "ax-session.json");
 }
 
-const SUPPORTED_VERSIONS = new Set<number>([1, 2, 3]);
+const SUPPORTED_VERSIONS = new Set<number>([1, 2, 3, 4]);
 
 function validateArtifact(value: unknown): ShareArtifact {
     if (
@@ -226,6 +227,7 @@ export function inspectPayloadFromShare(artifact: ShareArtifact, sourcePath: str
             spans: [{ kind, text: turn.text, label: turn.intent_kind ?? turn.message_kind }],
             token_usage: turn.token_usage ?? null,
             content: turn.content ?? null,
+            ...(turn.tool_calls && turn.tool_calls.length > 0 ? { tool_calls: turn.tool_calls } : {}),
         };
     });
 
@@ -372,101 +374,66 @@ function InspectBody({
     const windowedTurns = useMemo(() => data.turns.slice(0, visibleCount), [data.turns, visibleCount]);
 
     return (
-        <>
-            <div style={{ padding: "8px 24px", color: "var(--muted)", fontSize: 12, fontFamily: "ui-monospace, monospace" }}>
-                {data.turns.length} turns · {data.total_chars.toLocaleString()} chars
-                {" · source: "}<code>{data.source_path}</code>
-            </div>
-            <FilterBar
-                turns={data.turns}
-                anchorSeqs={spawnAnchorSeqs}
-                loadedCount={visibleCount}
-                totalCount={data.turns.length}
-                appendLoading={false}
-                loadMore={loadMore}
-                getTurns={() => turnsRef.current}
-                getCurrentSeq={() => anchoredSeq}
-                hookFireIdxs={hookFireIdxs}
-                getHookFireIdxs={() => hookFireIdxsRef.current}
-                totalHookFires={data.total_hook_fires + (harnessHooks?.length ?? 0)}
-            />
-            <InspectGuide data={data} />
-            <div style={{ display: "flex", gap: 4, flexWrap: "wrap", padding: "4px 24px 8px" }}>
-                {(Object.keys(KIND_STYLE) as InspectSpanKind[]).map((kind) => {
-                    const c = KIND_STYLE[kind];
-                    const n = data.totals_by_kind[kind] ?? 0;
-                    const pct = data.total_chars > 0 ? ((n / data.total_chars) * 100).toFixed(1) : "0";
-                    return (
-                        <span
-                            key={kind}
-                            title={`${c.label}: ${pct}% of exported characters in this session view. This is not token share or billing share.`}
-                            style={{ background: c.bg, color: c.fg, padding: "2px 10px", borderRadius: 4, fontSize: 11, fontWeight: 600, borderLeft: `3px solid ${c.bar}` }}
-                        >
-                            {c.label} <em style={{ fontStyle: "normal", opacity: 0.7, fontWeight: 400 }}>{pct}%</em>
-                        </span>
-                    );
-                })}
-            </div>
-            <div style={{ display: "flex", alignItems: "flex-start", gap: 12 }}>
-                <div style={{ minWidth: 0, flex: "1 1 auto" }}>
-                    {spliceHookFires(windowedTurns, data.hook_fires).map((item) => {
-                        if (item.kind === "hook_fire") {
-                            return <HookFireMarker key={`hook-${item.hook.idx}`} hook={item.hook} />;
-                        }
-                        const turn = item.turn;
-                        const spawned = subagentsByTurn?.get(turn.seq);
-                        const hooks = harnessByTurn.get(turn.seq);
-                        return (
-                            // content-visibility virtualizes paint/layout for
-                            // off-screen turns while keeping every turn in the
-                            // DOM, so #turn-N anchors, jumps, find, and the cost
-                            // rail keep working on huge (100k+ px) transcripts.
-                            <div
-                                key={`turn-${turn.seq}`}
-                                style={{ contentVisibility: "auto", containIntrinsicSize: "auto 200px" }}
-                            >
-                                <Turn
-                                    turn={turn}
-                                    anchored={anchoredSeq === turn.seq}
-                                    activeTarget={selection?.turnSeq === turn.seq ? selection.target : null}
-                                    onInspect={setSelection}
-                                />
-                                {hooks && hooks.length > 0 ? (
-                                    <div style={{ padding: "2px 24px 4px" }}>
-                                        {hooks.map((hook) => (
-                                            <HarnessHookMarker key={`hh-${hook.idx}`} hook={hook} />
-                                        ))}
-                                    </div>
-                                ) : null}
-                                {spawned && spawned.length > 0 ? (
-                                    <div style={{ padding: "2px 24px 6px" }}>
-                                        {spawned.map((card) => (
-                                            <ShareSpawnMarker
-                                                key={card.id}
-                                                card={card}
-                                                onSelect={() => onSelectSubagent?.(card.file)}
-                                                onPrefetch={() => onPrefetchSubagent?.(card.file)}
-                                            />
-                                        ))}
-                                    </div>
-                                ) : null}
-                            </div>
-                        );
-                    })}
-                    {visibleCount < data.turns.length ? (
-                        <div ref={sentinelRef} style={{ padding: "12px 24px", color: "var(--muted-2)", fontSize: 11, fontFamily: "ui-monospace, monospace" }}>
-                            loading {data.turns.length - visibleCount} more turns…
-                        </div>
-                    ) : null}
+        <Transcript
+            data={{ ...data, turns: windowedTurns }}
+            anchoredSeq={anchoredSeq}
+            selection={selection}
+            setSelection={setSelection}
+            visibleSeq={visibleSeq}
+            filterBar={{
+                turns: data.turns,
+                anchorSeqs: spawnAnchorSeqs,
+                loadedCount: visibleCount,
+                totalCount: data.turns.length,
+                appendLoading: false,
+                loadMore,
+                getTurns: () => turnsRef.current,
+                getCurrentSeq: () => anchoredSeq,
+                hookFireIdxs,
+                getHookFireIdxs: () => hookFireIdxsRef.current,
+                totalHookFires: data.total_hook_fires + (harnessHooks?.length ?? 0),
+            }}
+            header={
+                <div style={{ padding: "8px 24px", color: "var(--muted)", fontSize: 12, fontFamily: "ui-monospace, monospace" }}>
+                    {data.turns.length} turns · {data.total_chars.toLocaleString()} chars
+                    {" · source: "}<code>{data.source_path}</code>
                 </div>
-                <DockedRail
-                    data={data}
-                    currentSeq={visibleSeq}
-                    selection={selection}
-                    setSelection={setSelection}
-                />
-            </div>
-        </>
+            }
+            renderAfterTurn={(seq) => {
+                const spawned = subagentsByTurn?.get(seq);
+                const hooks = harnessByTurn.get(seq);
+                return (
+                    <>
+                        {hooks && hooks.length > 0 ? (
+                            <div style={{ padding: "2px 24px 4px" }}>
+                                {hooks.map((hook) => (
+                                    <HarnessHookMarker key={`hh-${hook.idx}`} hook={hook} />
+                                ))}
+                            </div>
+                        ) : null}
+                        {spawned && spawned.length > 0 ? (
+                            <div style={{ padding: "2px 24px 6px" }}>
+                                {spawned.map((card) => (
+                                    <ShareSpawnMarker
+                                        key={card.id}
+                                        card={card}
+                                        onSelect={() => onSelectSubagent?.(card.file)}
+                                        onPrefetch={() => onPrefetchSubagent?.(card.file)}
+                                    />
+                                ))}
+                            </div>
+                        ) : null}
+                    </>
+                );
+            }}
+            renderAfterTurns={() =>
+                visibleCount < data.turns.length ? (
+                    <div ref={sentinelRef} style={{ padding: "12px 24px", color: "var(--muted-2)", fontSize: 11, fontFamily: "ui-monospace, monospace" }}>
+                        loading {data.turns.length - visibleCount} more turns…
+                    </div>
+                ) : null
+            }
+        />
     );
 }
 
@@ -536,7 +503,7 @@ function HarnessHookMarker(props: { readonly hook: ShareHarnessHookView }) {
  * Inline "spawned subagent" marker, mirroring the live inspector's SpawnMarker
  * look but wired to in-bundle file selection (gist children aren't DB routes).
  */
-function ShareSpawnMarker(props: {
+export function ShareSpawnMarker(props: {
     readonly card: ShareSubagentCard;
     readonly onSelect: () => void;
     readonly onPrefetch: () => void;
@@ -544,6 +511,7 @@ function ShareSpawnMarker(props: {
     const { card } = props;
     const cost = fmtUsd(card.cost_usd);
     const duration = fmtDuration(card.duration_ms);
+    const tokens = compactTokens(card.estimated_tokens);
     return (
         <button
             type="button"
@@ -566,9 +534,11 @@ function ShareSpawnMarker(props: {
                 {card.model ?? card.source}
             </span>
             <span style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
-                {cost ? <span>{cost}</span> : null}
-                {duration ? <span>{duration}</span> : null}
                 <span>{card.stats.turns} turns</span>
+                <span>{card.stats.tool_calls} tools</span>
+                {tokens ? <span>{tokens} tok</span> : null}
+                {duration ? <span>{duration}</span> : null}
+                {cost ? <span>{cost}</span> : null}
                 <span style={{ opacity: 0.7 }}>open →</span>
             </span>
         </button>

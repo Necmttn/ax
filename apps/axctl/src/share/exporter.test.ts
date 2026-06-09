@@ -1,59 +1,54 @@
-import { describe, expect, it } from "bun:test";
+import { describe, expect, it, test } from "bun:test";
 import {
-    attachSynthesizedToolText,
+    attachStructuredToolCalls,
     buildShareArtifactFromParts,
     normalizeSessionRecordRef,
 } from "./exporter.ts";
+import type { ShareTurn } from "./artifact.ts";
 
-describe("attachSynthesizedToolText", () => {
-    const turn = (seq: number, text: string): import("./artifact.ts").ShareTurn => ({
-        id: `turn:${seq}`,
-        seq,
-        role: "assistant",
-        text,
+const turn = (seq: number, text: string): ShareTurn => ({ id: `t${seq}`, seq, role: "assistant", text });
+
+describe("attachStructuredToolCalls", () => {
+    test("attaches typed tool_calls to the matching empty-text turn", () => {
+        const turns = [turn(0, "")];
+        const calls = [{ seq: 0, name: "WebFetch", input_json: "{\"url\":\"https://paxel.ai\"}", command: null, output: "ok", has_error: false }];
+        const [out] = attachStructuredToolCalls(turns, calls);
+        expect(out!.tool_calls?.length).toBe(1);
+        const c = out!.tool_calls![0]!;
+        expect(c.name).toBe("WebFetch");
+        expect(c.category).toBe("net");
+        expect(c.input).toEqual({ url: "https://paxel.ai" });
+        expect(c.output_excerpt).toBe("ok");
+        expect(out!.text).toBe(""); // no baked 🔧 text
     });
 
-    it("synthesizes a tool line with arguments from input json", () => {
-        const [a, b] = attachSynthesizedToolText(
-            [turn(12, ""), turn(13, "real assistant text")],
-            [
-                {
-                    seq: 12,
-                    name: "WebFetch",
-                    command: null,
-                    input_json: JSON.stringify({ url: "https://x.com", prompt: "what is this" }),
-                    output: "page body",
-                    has_error: false,
-                },
-                { seq: 13, name: "Bash", command: "ls", input_json: null, output: "files", has_error: false },
-            ],
-        );
-        expect(a?.text).toContain("🔧 WebFetch");
-        expect(a?.text).toContain("url: https://x.com");
-        expect(a?.text).toContain("prompt: what is this");
-        expect(a?.text).toContain("→ page body");
-        expect(a?.has_tool_use).toBe(true);
-        // A turn that already has text is left untouched.
-        expect(b?.text).toBe("real assistant text");
+    test("Bash-style call carries command, null input", () => {
+        const calls = [{ seq: 0, name: "Bash", input_json: null, command: "git status", output: null, has_error: false }];
+        const [out] = attachStructuredToolCalls([turn(0, "")], calls);
+        const c = out!.tool_calls![0]!;
+        expect(c.command).toBe("git status");
+        expect(c.category).toBe("sh");
     });
 
-    it("falls back to the command for shell tools without input json", () => {
-        const [a] = attachSynthesizedToolText(
-            [turn(1, "")],
-            [{ seq: 1, name: "Bash", command: "ls -la", input_json: null, output: "files", has_error: false }],
-        );
-        expect(a?.text).toContain("🔧 Bash");
-        expect(a?.text).toContain("ls -la");
+    test("invalid input_json leaves input null", () => {
+        const calls = [{ seq: 0, name: "Bash", input_json: "not json", command: null, output: null, has_error: false }];
+        const [out] = attachStructuredToolCalls([turn(0, "")], calls);
+        expect(out!.tool_calls![0]!.input).toBeNull();
     });
 
-    it("truncates long tool output and flags errors", () => {
-        const [a] = attachSynthesizedToolText(
-            [turn(1, "")],
-            [{ seq: 1, name: "Bash", command: "x", input_json: null, output: "z".repeat(2000), has_error: true }],
-        );
-        expect(a?.text).toContain("⚠️");
-        expect(a?.text.length).toBeLessThan(800);
-        expect(a?.text).toContain("…");
+    test("array input_json is rejected (non-object) → input null", () => {
+        const calls = [{ seq: 0, name: "Bash", input_json: "[1,2,3]", command: null, output: null, has_error: false }];
+        const [out] = attachStructuredToolCalls([turn(0, "")], calls);
+        expect(out!.tool_calls![0]!.input).toBeNull();
+    });
+
+    test("sets has_tool_use and carries the full stored output_excerpt (no re-truncation)", () => {
+        // The DB already bounds output_excerpt at ingest; the exporter must not
+        // re-truncate - full output is the locked share contract.
+        const calls = [{ seq: 0, name: "Bash", input_json: null, command: "x", output: "z".repeat(1000), has_error: false }];
+        const [out] = attachStructuredToolCalls([turn(0, "")], calls);
+        expect(out!.has_tool_use).toBe(true);
+        expect(out!.tool_calls![0]!.output_excerpt!.length).toBe(1000);
     });
 });
 import { minimalShareArtifact } from "./artifact.ts";
@@ -192,7 +187,7 @@ describe("buildShareArtifactFromParts", () => {
 
     it("emits a current-schema artifact", () => {
         const artifact = buildShareArtifactFromParts(baseParts);
-        expect(artifact.schema_version).toBe(3);
+        expect(artifact.schema_version).toBe(4);
     });
 
     it("carries hook fires when present, omits the field when empty", () => {

@@ -89,6 +89,20 @@ export const studioConnection = {
     },
 };
 
+/**
+ * Build the `<img src>` for a local on-disk image referenced in a turn. The
+ * daemon serves the bytes via `GET /api/image?path=<url-encoded-abs-path>`
+ * (the browser can't load `file://` from an http(s) origin). When studio is
+ * live-pointed at a remote daemon, prefix with that endpoint so the image
+ * resolves against the same daemon the data came from; otherwise it stays a
+ * same-origin path.
+ */
+export function imageSrc(absolutePath: string): string {
+    const path = `/api/image?path=${encodeURIComponent(absolutePath)}`;
+    const endpoint = STUDIO_MOCK ? readEndpoint() : null;
+    return endpoint ? endpoint + path : path;
+}
+
 async function jsonFetch<T>(input: RequestInfo, init?: RequestInit): Promise<T> {
     if (STUDIO_MOCK) {
         const endpoint = readEndpoint();
