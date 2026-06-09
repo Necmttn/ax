@@ -3,15 +3,10 @@ import { SurrealClient } from "@ax/lib/db";
 import type { DbError } from "@ax/lib/errors";
 import { recordLiteral } from "@ax/lib/ids";
 import { surrealString } from "@ax/lib/shared/surql";
+import { recordKeyPart } from "@ax/lib/shared/derive-keys";
 import { editDelta } from "../dashboard/loc-query.ts";
 
 const EDIT_TOOLS = ["Edit", "Write", "MultiEdit", "NotebookEdit"];
-const stripKey = (idStr: string): string => {
-    let k = idStr.trim().replace(/^session:/, "");
-    if (k.startsWith("⟨") && k.endsWith("⟩")) k = k.slice(1, -1);
-    if (k.startsWith("`") && k.endsWith("`")) k = k.slice(1, -1);
-    return k;
-};
 
 export interface SessionLoc { readonly added: number; readonly removed: number; }
 
@@ -22,7 +17,7 @@ export const computeSessionLoc = (
         const db = yield* SurrealClient;
         const map = new Map<string, SessionLoc>();
         if (sessionIds.length === 0) return map;
-        const refs = sessionIds.map((id) => recordLiteral("session", stripKey(id))).join(", ");
+        const refs = sessionIds.map((id) => recordLiteral("session", recordKeyPart(id, "session") ?? "")).join(", ");
         const tools = EDIT_TOOLS.map((t) => surrealString(t)).join(", ");
         const rows = (yield* db.query<[Array<Record<string, unknown>>]>(`
 SELECT type::string(session) AS session, name, input_json

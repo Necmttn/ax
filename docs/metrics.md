@@ -68,10 +68,11 @@ Then sanity-check counts (ns=ax db=main on 127.0.0.1:8521):
 
 ## Deferred to wave 2
 
-- **Cross-session signals** (`fragility-cascade.ts` is built + unit-tested but its
-  live query is not yet correct - see the WAVE-2 comment in that file: needs a
-  3-query JS join to avoid an unsupported `FROM … AS` alias and an `edited`
-  per-deref hang). Not wired to any surface yet.
+- **Cross-session signals** (`fragility-cascade.ts` is built, unit-tested, and
+  live-query-correct: a bounded 3-query JS join (reverted-touched -> produced map
+  -> edited scoped to the fragile files) that avoids the unsupported `FROM ... AS`
+  alias and the all-`edited` per-deref hang). Computed correctly but NOT yet wired
+  to a surface (CLI/show/dashboard) - that wiring is wave 2.
 - `cold_start_reads`, `handoff_sessions`, `delegation_ratio`,
   `recovery_effective`, `skill_durability_efficacy`, `expertise_leverage`, and the
   rest of the named signals.

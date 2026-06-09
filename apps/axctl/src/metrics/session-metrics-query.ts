@@ -2,6 +2,7 @@ import { Effect } from "effect";
 import { SurrealClient } from "@ax/lib/db";
 import type { DbError } from "@ax/lib/errors";
 import { surrealDate, surrealString } from "@ax/lib/shared/surql";
+import { nonEmptyString } from "@ax/lib/shared/derive-keys";
 
 export interface SessionMetricsRow {
     readonly session: string;
@@ -22,8 +23,6 @@ const numOrNull = (v: unknown): number | null => {
     return Number.isFinite(n) ? n : null;
 };
 const numOrZero = (v: unknown): number => numOrNull(v) ?? 0;
-const strOrNull = (v: unknown): string | null =>
-    typeof v === "string" && v.length > 0 ? v : null;
 
 export const fetchSessionMetrics = (
     input: { readonly since: Date | null; readonly limit: number; readonly project?: string | null },
@@ -52,8 +51,8 @@ ORDER BY durability_ratio ASC
 LIMIT ${limit};`))?.[0] ?? [];
         return rows.map((r) => ({
             session: String(r.session ?? ""),
-            taskLabel: strOrNull(r.task_label),
-            source: strOrNull(r.source),
+            taskLabel: nonEmptyString(r.task_label),
+            source: nonEmptyString(r.source),
             durabilityRatio: numOrNull(r.durability_ratio),
             producedCommits: numOrZero(r.produced_commits),
             timeToLandMs: numOrNull(r.time_to_land_ms),

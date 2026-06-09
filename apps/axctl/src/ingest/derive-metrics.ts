@@ -2,6 +2,7 @@ import { Effect, Schema } from "effect";
 import { SurrealClient } from "@ax/lib/db";
 import type { DbError } from "@ax/lib/errors";
 import { recordLiteral } from "@ax/lib/ids";
+import { recordKeyPart } from "@ax/lib/shared/derive-keys";
 import { executeStatementsWith } from "@ax/lib/shared/statement-exec";
 import { BaseStageStats, type IngestContext, sinceDaysFromCtx, StageMeta } from "./stage/types.ts";
 import type { StageDef } from "./stage/registry.ts";
@@ -16,13 +17,6 @@ export interface DeriveMetricsStats {
 }
 
 const num = (n: number | null): string => (n === null ? "NONE" : String(n));
-
-const stripKey = (idStr: string): string => {
-    let k = idStr.trim().replace(/^session:/, "");
-    if (k.startsWith("⟨") && k.endsWith("⟩")) k = k.slice(1, -1);
-    if (k.startsWith("`") && k.endsWith("`")) k = k.slice(1, -1);
-    return k;
-};
 
 /**
  * Recompute the per-session metrics rollup.
@@ -43,14 +37,20 @@ export const deriveMetrics = (
         // 1. Freshness backbone - full-history commit.reverted (diff-only writes).
         const reverted = yield* computeRevertedCommits();
 
-        // 2. Dirty set: sessions in the window, plus any session that produced a
-        //    commit currently flagged reverted (its durability may have changed).
+        // 2. Dirty set: sessions in the window, PLUS any session that produced a
+        //    commit whose `reverted` flag *changed* this run (either direction).
+        //    Keying on the changed set - not "currently reverted" - is what makes
+        //    a true→false flip recompute the old session's durability instead of
+        //    leaving it stale-low (codex adversarial #1 / ADR-0011 dirty-set).
         const sinceClause = opts.sinceDays
             ? `started_at >= time::now() - ${Math.max(1, Math.trunc(opts.sinceDays))}d`
             : "true";
+        const changedRefs = reverted.changedKeys.map((k) => recordLiteral("commit", k));
+        const changedClause = changedRefs.length > 0
+            ? ` OR id IN (SELECT VALUE in FROM produced WHERE out IN [${changedRefs.join(", ")}])`
+            : "";
         const dirty = (yield* db.query<[string[]]>(
-            `SELECT VALUE type::string(id) FROM session WHERE ${sinceClause}`
-            + ` OR id IN (SELECT VALUE in FROM produced WHERE out.reverted = true);`,
+            `SELECT VALUE type::string(id) FROM session WHERE ${sinceClause}${changedClause};`,
         ))?.[0] ?? [];
         const sessionIds = (dirty as unknown as unknown[]).filter(
             (s): s is string => typeof s === "string" && s.length > 0,
@@ -67,7 +67,7 @@ export const deriveMetrics = (
 
         // 4. One session_metrics row per dirty session.
         const stmts = sessionIds.map((id) => {
-            const key = stripKey(id);
+            const key = recordKeyPart(id, "session") ?? "";
             const sessionRef = recordLiteral("session", key);
             const d = dur.get(id) ?? { produced: 0, reverted: 0, ratio: null };
             const t = ttl.get(id) ?? null;

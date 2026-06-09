@@ -2,13 +2,7 @@ import { Effect } from "effect";
 import { SurrealClient } from "@ax/lib/db";
 import type { DbError } from "@ax/lib/errors";
 import { recordLiteral } from "@ax/lib/ids";
-
-const stripKey = (idStr: string): string => {
-    let k = idStr.trim().replace(/^session:/, "");
-    if (k.startsWith("⟨") && k.endsWith("⟩")) k = k.slice(1, -1);
-    if (k.startsWith("`") && k.endsWith("`")) k = k.slice(1, -1);
-    return k;
-};
+import { recordKeyPart } from "@ax/lib/shared/derive-keys";
 
 const isoMs = (iso: unknown): number | null => {
     if (typeof iso !== "string" || iso.length === 0) return null;
@@ -34,7 +28,7 @@ export const computeTimeToLand = (
         if (sessionIds.length === 0) return map;
         for (const id of sessionIds) map.set(id, null);
 
-        const refs = sessionIds.map((id) => recordLiteral("session", stripKey(id))).join(", ");
+        const refs = sessionIds.map((id) => recordLiteral("session", recordKeyPart(id, "session") ?? "")).join(", ");
         // Produced commits (sha) + the producing session's end time.
         const produced = (yield* db.query<[Array<Record<string, unknown>>]>(
             `SELECT type::string(in) AS session, type::string(in.ended_at) AS ended_at, out.sha AS sha`

@@ -2,6 +2,7 @@ import { Effect } from "effect";
 import { SurrealClient } from "@ax/lib/db";
 import type { DbError } from "@ax/lib/errors";
 import { recordLiteral } from "@ax/lib/ids";
+import { recordKeyPart } from "@ax/lib/shared/derive-keys";
 
 export interface Durability {
     readonly produced: number;
@@ -9,20 +10,13 @@ export interface Durability {
     readonly ratio: number | null; // null = no commits (distinct from 0)
 }
 
-const stripKey = (idStr: string): string => {
-    let k = idStr.trim().replace(/^session:/, "");
-    if (k.startsWith("⟨") && k.endsWith("⟩")) k = k.slice(1, -1);
-    if (k.startsWith("`") && k.endsWith("`")) k = k.slice(1, -1);
-    return k;
-};
-
 export const computeDurability = (
     sessionIds: readonly string[],
 ): Effect.Effect<Map<string, Durability>, DbError, SurrealClient> =>
     Effect.gen(function* () {
         const db = yield* SurrealClient;
         if (sessionIds.length === 0) return new Map();
-        const refs = sessionIds.map((id) => recordLiteral("session", stripKey(id))).join(", ");
+        const refs = sessionIds.map((id) => recordLiteral("session", recordKeyPart(id, "session") ?? "")).join(", ");
         const result = (yield* db.query<[Array<Record<string, unknown>>]>(`
 SELECT type::string(in) AS session,
        count() AS produced,
