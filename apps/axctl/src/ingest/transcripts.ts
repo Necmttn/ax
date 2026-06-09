@@ -1318,7 +1318,7 @@ const relateInvocations = (invocations: Invocation[]) =>
             const args = JSON.stringify(inv.args);
             const edgeKey = invokedRelationRecordKey({ turnKey, skillKey, args });
             return [
-                `RELATE turn:\`${turnKey}\`->invoked:\`${edgeKey}\`->skill:\`${skillKey}\` SET ts = d"${inv.ts}", args = ${surrealLiteral(args)}, turn_has_error = ${inv.turn_has_error}, turn_index = ${inv.seq};`,
+                `RELATE turn:\`${turnKey}\`->invoked:\`${edgeKey}\`->skill:\`${skillKey}\` SET session = ${recordRef("session", inv.session)}, ts = d"${inv.ts}", args = ${surrealLiteral(args)}, turn_has_error = ${inv.turn_has_error}, turn_index = ${inv.seq};`,
             ];
         });
         yield* executeStatementsWith(db, stmts, { chunkSize: 500 });

@@ -55,9 +55,10 @@ const indexRoute = createRoute({
     getParentRoute: () => rootRoute,
     path: "/",
     component: StudioIndexRoute,
-    validateSearch: (search): { shareOwner?: string; gistId?: string } => ({
+    validateSearch: (search): { shareOwner?: string; gistId?: string; sub?: string } => ({
         shareOwner: typeof search.shareOwner === "string" ? search.shareOwner : undefined,
         gistId: typeof search.gistId === "string" ? search.gistId : undefined,
+        sub: typeof search.sub === "string" ? search.sub : undefined,
     }),
 });
 
@@ -132,6 +133,9 @@ const shareInspectRoute = createRoute({
     getParentRoute: () => rootRoute,
     path: "/share/$owner/$gistId",
     component: ShareInspectRoute,
+    validateSearch: (search): { sub?: string } => ({
+        sub: typeof search.sub === "string" ? search.sub : undefined,
+    }),
 });
 
 const episodeRoute = createRoute({

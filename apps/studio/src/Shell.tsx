@@ -98,15 +98,6 @@ function FullChrome({ children }: { children: ReactNode }) {
                 }),
         },
         {
-            to: "/graph",
-            label: "Graph",
-            prefetch: () =>
-                queryClient.prefetchQuery({
-                    queryKey: ["graph-explorer", "file-attention", "", 160],
-                    queryFn: () => api.graphExplorer({ mode: "file-attention", limit: 160 }),
-                }),
-        },
-        {
             to: "/canvas",
             label: "Canvas",
             prefetch: () =>

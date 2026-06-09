@@ -10,9 +10,10 @@ import { Data, Effect, FileSystem, type Path } from "effect";
 import { dissectTurn, type TurnSpan } from "../ingest/turn-dissect.ts";
 import { extractCodexJsonlLines, type CodexTurnTokenUsage } from "../ingest/codex.ts";
 import { estimateCost } from "../ingest/model-pricing.ts";
+import { turnRecordKey } from "@ax/lib/ids";
 import { SurrealClient } from "@ax/lib/db";
 import { decodeJsonRecordOrNull, encodeJson } from "@ax/lib/decode";
-import { resolveTurnContent } from "../queries/session-turn-content.ts";
+import { resolveTurnContent, resolveTurnContentForSourceRefs } from "../queries/session-turn-content.ts";
 import { locateTranscript, type TranscriptNotFoundError } from "@ax/lib/transcript-locator";
 import type {
     HookFireDto,
@@ -30,8 +31,10 @@ import {
     queryMany,
     queryOptional,
 } from "@ax/lib/shared/graph-query";
+import { safeKeyPart } from "@ax/lib/shared/derive-keys";
 import { clampPagination, type PaginationConfig } from "@ax/lib/shared/pagination";
 import { toBareSessionId } from "@ax/lib/shared/session-id";
+import { recordRef } from "@ax/lib/shared/surql";
 
 const INSPECT_TURNS_PAGINATION: PaginationConfig = { defaultLimit: 2000, maxLimit: 2000 };
 
@@ -236,7 +239,7 @@ const PARENT_SQL = `
     SELECT <string>in AS parent, nickname FROM spawned WHERE out = $sid LIMIT 1;
 `;
 const SESSION_META_SQL = `
-    SELECT project, cwd FROM session WHERE id = $sid LIMIT 1;
+    SELECT project, cwd, raw_file, source FROM session WHERE id = $sid LIMIT 1;
 `;
 const CHILDREN_SQL = `
     SELECT <string>out AS child, <string>ts AS ts, tool, nickname
@@ -270,6 +273,16 @@ const TURN_TOKEN_USAGE_SQL = `
            estimated_cost_usd, pricing_source, usage_source, usage_quality
     FROM turn_token_usage
     WHERE session = $sid
+    ORDER BY seq ASC;
+`;
+const TURN_TOKEN_USAGE_FOR_REFS_SQL = `
+    SELECT seq, model, prompt_tokens, completion_tokens,
+           cache_creation_input_tokens, cache_read_input_tokens,
+           fresh_input_tokens, estimated_tokens,
+           estimated_input_cost_usd, estimated_output_cost_usd,
+           estimated_cache_creation_cost_usd, estimated_cache_read_cost_usd,
+           estimated_cost_usd, pricing_source, usage_source, usage_quality
+    FROM $refs
     ORDER BY seq ASC;
 `;
 
@@ -311,6 +324,15 @@ interface TurnTokenUsageRow extends TokenUsageRow {
     readonly usage_source: string | null;
     readonly usage_quality: string | null;
 }
+interface GraphTurnRow {
+    readonly seq: number;
+    readonly role: string;
+    readonly ts: string | Date | null;
+    readonly text: string | null;
+}
+interface GraphSessionHealthRow {
+    readonly turns?: number | null;
+}
 
 /** Resolve the spawning parent of this session (codex spawn_agent / claude
  *  Task). Returns nulls if not a subagent. Defensive: swallows DB errors so
@@ -330,10 +352,14 @@ const resolveParent = (sessionId: string): Effect.Effect<ParentInfo, never, Surr
 interface SessionMeta {
     readonly project: string | null;
     readonly cwd: string | null;
+    readonly raw_file: string | null;
+    readonly source: string | null;
 }
 interface SessionMetaRow {
     readonly project?: string | null;
     readonly cwd?: string | null;
+    readonly raw_file?: string | null;
+    readonly source?: string | null;
 }
 
 /** The session's canonical project key + cwd, for the inspect header label.
@@ -341,9 +367,14 @@ interface SessionMetaRow {
 const resolveSessionMeta = (sessionId: string): Effect.Effect<SessionMeta, never, SurrealClient> =>
     queryOptional<SessionMetaRow, SessionMeta>(
         interpolateRid(SESSION_META_SQL, toBareSessionId(sessionId)),
-        (row) => ({ project: row.project ?? null, cwd: row.cwd ?? null }),
+        (row) => ({
+            project: row.project ?? null,
+            cwd: row.cwd ?? null,
+            raw_file: row.raw_file ?? null,
+            source: row.source ?? null,
+        }),
         "session-inspect resolveSessionMeta",
-    ).pipe(Effect.map((v) => v ?? { project: null, cwd: null }));
+    ).pipe(Effect.map((v) => v ?? { project: null, cwd: null, raw_file: null, source: null }));
 
 /** Sessions this one spawned (its subagents). Same defensive shape as
  *  resolveParent - DB failure degrades to empty list. */
@@ -427,6 +458,61 @@ const resolveTurnTokenUsage = (sessionId: string): Effect.Effect<Map<number, Tur
         "session-inspect resolveTurnTokenUsage",
     ).pipe(
         Effect.map((rows) => new Map(rows.map((row) => [row.seq, row]))),
+    );
+
+const resolveTurnTokenUsageForSourceRefs = (
+    sourceRefs: ReadonlyArray<string>,
+): Effect.Effect<Map<number, TurnTokenUsageDetail>, never, SurrealClient> => {
+    const refs = sourceRefs.map((key) => recordRef("turn_token_usage", key));
+    if (refs.length === 0) return Effect.succeed(new Map<number, TurnTokenUsageDetail>());
+    return queryMany<TurnTokenUsageRow, TurnTokenUsageDetail>(
+        TURN_TOKEN_USAGE_FOR_REFS_SQL.split("$refs").join(`[${refs.join(", ")}]`),
+        mapTurnTokenUsageRow,
+        "session-inspect resolveTurnTokenUsageForSourceRefs",
+    ).pipe(
+        Effect.map((rows) => new Map(rows.map((row) => [row.seq, row]))),
+    );
+};
+
+const turnSourceRefsForWindow = (
+    sessionId: string,
+    turnOffset: number,
+    turnLimit: number,
+): ReadonlyArray<string> => {
+    const bare = toBareSessionId(sessionId);
+    // DB turn records are one-based; the inspector API exposes zero-based
+    // offsets/sequences. Fetch exactly the requested page by translating at
+    // the storage seam.
+    return Array.from({ length: turnLimit }, (_, i) => turnRecordKey(bare, turnOffset + i + 1));
+};
+
+const resolveGraphTurnWindow = (
+    sessionId: string,
+    turnOffset: number,
+    turnLimit: number,
+): Effect.Effect<ReadonlyArray<GraphTurnRow>, never, SurrealClient> => {
+    const turnRefs = turnSourceRefsForWindow(sessionId, turnOffset, turnLimit);
+    if (turnRefs.length === 0) return Effect.succeed([]);
+    const from = turnRefs.map((key) => recordRef("turn", key)).join(", ");
+    return queryMany<GraphTurnRow, GraphTurnRow>(
+        `
+            SELECT seq, role, type::string(ts) AS ts, text
+            FROM [${from}]
+            WHERE text IS NOT NONE
+            ORDER BY seq ASC;
+        `,
+        (row) => row,
+        "session-inspect resolveGraphTurnWindow",
+    );
+};
+
+const resolveGraphSessionHealth = (
+    sessionId: string,
+): Effect.Effect<GraphSessionHealthRow | null, never, SurrealClient> =>
+    queryOptional<GraphSessionHealthRow, GraphSessionHealthRow>(
+        `SELECT turns FROM ${recordRef("session_health", safeKeyPart(toBareSessionId(sessionId)))} LIMIT 1;`,
+        (row) => row,
+        "session-inspect resolveGraphSessionHealth",
     );
 
 function codexTurnUsageToDetail(usage: CodexTurnTokenUsage): TurnTokenUsageDetail {
@@ -568,6 +654,118 @@ function applySubagentTaskTagging(
     }
 }
 
+function hookFiresForTurnWindow(
+    allHookFires: ReadonlyArray<HookFireDto>,
+    turnSlice: ReadonlyArray<InspectTurnDto>,
+    turnOffset: number,
+    totalTurns: number,
+): ReadonlyArray<HookFireDto> {
+    const isFirstPage = turnOffset === 0;
+    const isLastPage = turnOffset + turnSlice.length >= totalTurns;
+    const firstTs = turnSlice.find((t) => t.ts)?.ts ?? null;
+    const lastTs = [...turnSlice].reverse().find((t) => t.ts)?.ts ?? null;
+    const firstMs = firstTs ? new Date(firstTs).getTime() : null;
+    const lastMs = lastTs ? new Date(lastTs).getTime() : null;
+    return allHookFires.filter((h) => {
+        const hMs = new Date(h.ts).getTime();
+        if (!Number.isFinite(hMs)) return false;
+        // Before the window: include only on the first page.
+        if (firstMs != null && hMs < firstMs) return isFirstPage;
+        // After the window: include only on the last page.
+        if (lastMs != null && hMs > lastMs) return isLastPage;
+        // Within the [firstMs, lastMs] envelope - always include.
+        // (If both bounds are null - all turns lack ts - keep everything
+        // on the first page so the user still sees them.)
+        if (firstMs == null && lastMs == null) return isFirstPage;
+        return true;
+    });
+}
+
+const fetchGraphSessionInspect = (
+    bareSessionId: string,
+    turnOffset: number,
+    turnLimit: number,
+): Effect.Effect<SessionInspectPayload | null, never, SurrealClient> =>
+    Effect.gen(function* () {
+        const turnSourceRefs = turnSourceRefsForWindow(bareSessionId, turnOffset, turnLimit);
+        const [parent, sessionMeta, childrenEdges, allHookFires, tokenUsage, turnTokenUsage, graphTurns, health, turnContent] = yield* Effect.all([
+            resolveParent(bareSessionId),
+            resolveSessionMeta(bareSessionId),
+            resolveChildren(bareSessionId),
+            resolveHookFires(bareSessionId),
+            resolveTokenUsage(bareSessionId),
+            resolveTurnTokenUsageForSourceRefs(turnSourceRefs),
+            resolveGraphTurnWindow(bareSessionId, turnOffset, turnLimit),
+            resolveGraphSessionHealth(bareSessionId),
+            resolveTurnContentForSourceRefs(turnSourceRefs),
+        ], { concurrency: "unbounded" });
+
+        const totalTurnsRaw = Number(health?.turns ?? 0);
+        const totalTurns = Number.isFinite(totalTurnsRaw) && totalTurnsRaw > 0
+            ? Math.trunc(totalTurnsRaw)
+            : graphTurns.length;
+        if (totalTurns <= 0) return null;
+        if (graphTurns.length === 0 && turnOffset < totalTurns) return null;
+
+        const turns: InspectTurnDto[] = [];
+        const pageTotals: Partial<Record<InspectSpanKind, number>> = {};
+        for (const row of graphTurns) {
+            const text = row.text ?? "";
+            if (!text) continue;
+            const fallbackKind: InspectSpanKind = row.role === "assistant" ? "assistant_text" : "user_input";
+            const spans = dissectTurn(text, { defaultKind: fallbackKind });
+            const semantic = dominantKind(spans, fallbackKind);
+            for (const s of spans) {
+                pageTotals[s.kind] = (pageTotals[s.kind] ?? 0) + s.text.length;
+            }
+            const dbSeq = Number(row.seq);
+            const seq = Number.isFinite(dbSeq) ? dbSeq - 1 : turns.length + turnOffset;
+            turns.push({
+                seq,
+                role: row.role,
+                semantic_role: semantic,
+                ts: row.ts instanceof Date ? row.ts.toISOString() : row.ts,
+                char_count: text.length,
+                raw_text: text,
+                spans: spans.map(toSpanDto),
+                token_usage: turnTokenUsage.get(dbSeq) ?? turnTokenUsage.get(seq) ?? null,
+                content: findTurnContent(turnContent, seq, text),
+            });
+        }
+
+        const totals = { ...pageTotals };
+        if (parent.parent_session) applySubagentTaskTagging(turns, totals);
+
+        const children = childrenEdges.map((edge) => ({
+            session_id: edge.session_id,
+            ts: edge.ts,
+            tool: edge.tool,
+            nickname: edge.nickname,
+            anchor_turn_seq: anchorChildToTurn(turns, edge.ts),
+            meta: null,
+        }));
+
+        const totalChars = Object.values(totals).reduce((sum, value) => sum + Number(value ?? 0), 0);
+
+        return {
+            session_id: bareSessionId,
+            source_path: sessionMeta.raw_file ?? `graph:${bareSessionId}`,
+            project: sessionMeta.project,
+            cwd: sessionMeta.cwd,
+            total_chars: totalChars,
+            token_usage: tokenUsage,
+            total_turns: totalTurns,
+            turn_window: { offset: turnOffset, limit: turnLimit },
+            turns,
+            totals_by_kind: totals,
+            parent_session: parent.parent_session,
+            parent_nickname: parent.parent_nickname,
+            children,
+            hook_fires: hookFiresForTurnWindow(allHookFires, turns, turnOffset, totalTurns),
+            total_hook_fires: allHookFires.length,
+        };
+    });
+
 export interface FetchSessionInspectOptions {
     readonly turnOffset?: number;
     readonly turnLimit?: number;
@@ -591,6 +789,13 @@ export const fetchSessionInspect = (
         // Normalise inbound id at the seam so the rest of the function operates
         // on a bare id (also what we echo back as payload.session_id).
         const bareSessionId = toBareSessionId(sessionId);
+        const { offset: turnOffset, limit: turnLimit } = clampPagination(
+            { offset: opts.turnOffset, limit: opts.turnLimit },
+            INSPECT_TURNS_PAGINATION,
+        );
+        const graphPayload = yield* fetchGraphSessionInspect(bareSessionId, turnOffset, turnLimit);
+        if (graphPayload) return graphPayload;
+
         const [parent, sessionMeta, childrenEdges, allHookFires, turnContent, tokenUsage, turnTokenUsage, found] = yield* Effect.all([
             resolveParent(bareSessionId),
             resolveSessionMeta(bareSessionId),
@@ -601,10 +806,6 @@ export const fetchSessionInspect = (
             resolveTurnTokenUsage(bareSessionId),
             locateTranscript(bareSessionId),
         ], { concurrency: "unbounded" });
-        const { offset: turnOffset, limit: turnLimit } = clampPagination(
-            { offset: opts.turnOffset, limit: opts.turnLimit },
-            INSPECT_TURNS_PAGINATION,
-        );
         const fs = yield* FileSystem.FileSystem;
         // The read is the only failure source here; the rest of the body is
         // pure parsing. Preserve the original `Effect.tryPromise` behavior of
@@ -737,25 +938,7 @@ export const fetchSessionInspect = (
             // the SPA can splice them in without pulling all hooks per page.
             // First page (offset=0) also gets any pre-first-turn hooks; last
             // page picks up any post-last-turn orphans.
-            const isFirstPage = turnOffset === 0;
-            const isLastPage = turnOffset + turnSlice.length >= turns.length;
-            const firstTs = turnSlice.find((t) => t.ts)?.ts ?? null;
-            const lastTs = [...turnSlice].reverse().find((t) => t.ts)?.ts ?? null;
-            const firstMs = firstTs ? new Date(firstTs).getTime() : null;
-            const lastMs = lastTs ? new Date(lastTs).getTime() : null;
-            const hookFireSlice = allHookFires.filter((h) => {
-                const hMs = new Date(h.ts).getTime();
-                if (!Number.isFinite(hMs)) return false;
-                // Before the window: include only on the first page.
-                if (firstMs != null && hMs < firstMs) return isFirstPage;
-                // After the window: include only on the last page.
-                if (lastMs != null && hMs > lastMs) return isLastPage;
-                // Within the [firstMs, lastMs] envelope - always include.
-                // (If both bounds are null - all turns lack ts - keep everything
-                // on the first page so the user still sees them.)
-                if (firstMs == null && lastMs == null) return isFirstPage;
-                return true;
-            });
+            const hookFireSlice = hookFiresForTurnWindow(allHookFires, turnSlice, turnOffset, turns.length);
 
             return {
                 session_id: bareSessionId,

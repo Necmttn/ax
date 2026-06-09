@@ -376,14 +376,18 @@ async function handleSkillBulkDecision(req: Request): Promise<Response> {
  *   - nag the user to `axctl update` when their daemon is behind
  */
 const API_VERSION = 1;
-const API_CAPABILITIES = [
+export const isGraphExplorerEnabled = (
+    env: Record<string, string | undefined> = process.env,
+): boolean => env.AX_ENABLE_GRAPH_EXPLORER === "1";
+
+const baseApiCapabilities = [
     "skills",      // /api/skills + decide/detail/source/open
     "decisions",   // /api/decisions
     "workflow",    // /api/workflow
     "sessions",    // /api/sessions + detail/children/inspect
     "episodes",    // /api/episodes/:parentId
     "projects",    // /api/projects/:slug
-    "graph",       // /api/graph-explorer + /api/skill-graph
+    "skill-graph", // /api/skill-graph
     "recall",      // /api/recall
     "tools",       // /api/tool-failures
     "wrapped",     // /api/wrapped + public-preview
@@ -391,6 +395,13 @@ const API_CAPABILITIES = [
     "events",      // /api/events (SSE)
     "ingest",      // POST /api/ingest -> { runId, stream } + Durable Streams sidecar
 ] as const;
+
+export const dashboardApiCapabilities = (
+    env: Record<string, string | undefined> = process.env,
+): ReadonlyArray<string> =>
+    isGraphExplorerEnabled(env)
+        ? [...baseApiCapabilities, "graph-explorer"]
+        : baseApiCapabilities;
 
 /**
  * Server-lifetime ingest state, set up once by {@link serveDashboard} at
@@ -468,7 +479,7 @@ export async function handleDashboardRequest(req: Request): Promise<Response> {
         return jsonResponse({
             version: AX_VERSION,
             api_version: API_VERSION,
-            capabilities: API_CAPABILITIES,
+            capabilities: dashboardApiCapabilities(),
         });
     }
     if (url.pathname === "/api/query" && req.method === "POST") {
@@ -552,6 +563,12 @@ export async function handleDashboardRequest(req: Request): Promise<Response> {
         }
     }
     if (url.pathname === "/api/graph-explorer" && req.method === "GET") {
+        if (!isGraphExplorerEnabled()) {
+            return jsonResponse({
+                error: "graph_explorer_disabled",
+                message: "Graph explorer is disabled. Set AX_ENABLE_GRAPH_EXPLORER=1 to enable this experimental endpoint.",
+            }, 404);
+        }
         const mode = url.searchParams.get("mode");
         const q = url.searchParams.get("q");
         const limitParam = url.searchParams.get("limit");

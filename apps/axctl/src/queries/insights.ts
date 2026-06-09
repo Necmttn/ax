@@ -102,6 +102,7 @@ export const SCHEMA_TABLES: readonly SchemaTableSpec[] = [
     { table: "review_event", stage: "staged", note: "GitHub review events for delivery analytics." },
     { table: "check_run", stage: "staged", note: "GitHub check runs for delivery analytics." },
     { table: "delivery_outcome", stage: "staged", note: "Session delivery/promotion outcome summaries." },
+    { table: "workflow_snapshot", stage: "active", note: "Precomputed dashboard workflow payload used by /api/workflow." },
     { table: "phase_span", stage: "staged", note: "Session workflow phase spans and phase-level counters." },
     { table: "skill_candidate", stage: "active", note: "Evidence-backed candidate skills or guardrails." },
     { table: "proposal", stage: "active", note: "Polymorphic shortlist of repeated workflow improvement candidates." },

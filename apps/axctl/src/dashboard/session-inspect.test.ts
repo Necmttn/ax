@@ -1,5 +1,11 @@
 import { describe, expect, test } from "bun:test";
-import { codexContentToInspectorText, jsonlBlockToInspectorText } from "./session-inspect.ts";
+import { Effect, Layer } from "effect";
+import { BunFileSystem, BunPath } from "@effect/platform-bun";
+import { SurrealClient, type SurrealClientShape } from "@ax/lib/db";
+import type { DbError } from "@ax/lib/errors";
+import { codexContentToInspectorText, fetchSessionInspect, jsonlBlockToInspectorText } from "./session-inspect.ts";
+
+const BunFsLayer = Layer.merge(BunFileSystem.layer, BunPath.layer);
 
 describe("codexContentToInspectorText", () => {
     test("joins text blocks with newlines to match ingested turn offsets", () => {
@@ -43,5 +49,92 @@ describe("jsonlBlockToInspectorText", () => {
             type: "tool_result",
             content: "done",
         })).toBe("<local-command-stdout>done</local-command-stdout>");
+    });
+});
+
+function makeInspectDb(): { readonly db: SurrealClientShape; readonly sql: string[] } {
+    const sql: string[] = [];
+    const db = {
+        query: <T extends unknown[] = unknown[]>(
+            statement: string,
+            _bindings?: Record<string, unknown>,
+        ): Effect.Effect<T, DbError> => {
+            sql.push(statement);
+            if (statement.includes("FROM spawned") && statement.includes("WHERE out")) {
+                return Effect.succeed([[ ]] as unknown as T);
+            }
+            if (statement.includes("SELECT project, cwd, raw_file, source FROM session")) {
+                return Effect.succeed([[
+                    { project: "repo", cwd: "/repo", raw_file: "/slow/transcript.jsonl", source: "codex" },
+                ]] as unknown as T);
+            }
+            if (statement.includes("FROM spawned") && statement.includes("WHERE in")) {
+                return Effect.succeed([[ ]] as unknown as T);
+            }
+            if (statement.includes("FROM hook_fire")) {
+                return Effect.succeed([[ ]] as unknown as T);
+            }
+            if (statement.includes("FROM session_token_usage")) {
+                return Effect.succeed([[ ]] as unknown as T);
+            }
+            if (statement.includes("FROM turn_token_usage")) {
+                return Effect.succeed([[ ]] as unknown as T);
+            }
+            if (statement.includes("SELECT source_ref, type::string(id) AS document_id")) {
+                return Effect.succeed([[ ]] as unknown as T);
+            }
+            if (statement.includes("FROM session_health:")) {
+                return Effect.succeed([[
+                    { turns: 2 },
+                ]] as unknown as T);
+            }
+            if (statement.includes("FROM [turn:")) {
+                return Effect.succeed([[
+                    {
+                        seq: 1,
+                        role: "user",
+                        ts: "2026-06-09T00:00:00.000Z",
+                        text: "hello inspect",
+                    },
+                    {
+                        seq: 2,
+                        role: "assistant",
+                        ts: "2026-06-09T00:00:01.000Z",
+                        text: "done",
+                    },
+                ]] as unknown as T);
+            }
+            return Effect.succeed([[ ]] as unknown as T);
+        },
+        upsert: () => Effect.void,
+        relate: () => Effect.void,
+        putFile: () => Effect.void,
+        getFile: () => Effect.succeed(""),
+        raw: {} as never,
+    } as unknown as SurrealClientShape;
+    return { db, sql };
+}
+
+describe("fetchSessionInspect graph-backed paging", () => {
+    test("returns a paged inspect payload without locating or reading the transcript", async () => {
+        const { db, sql } = makeInspectDb();
+
+        const payload = await Effect.runPromise(
+            fetchSessionInspect("session-a", { turnOffset: 0, turnLimit: 100 }).pipe(
+                Effect.provideService(SurrealClient, db),
+                Effect.provide(BunFsLayer),
+            ),
+        );
+
+        expect(payload.source_path).toBe("/slow/transcript.jsonl");
+        expect(payload.total_turns).toBe(2);
+        expect(payload.total_chars).toBe(17);
+        expect(payload.turns.map((turn) => [turn.seq, turn.role, turn.raw_text])).toEqual([
+            [0, "user", "hello inspect"],
+            [1, "assistant", "done"],
+        ]);
+        expect(sql.some((statement) => statement.includes("SELECT raw_file FROM"))).toBe(false);
+        expect(sql.some((statement) => statement.includes("GROUP ALL"))).toBe(false);
+        expect(sql.some((statement) => statement.includes("START $offset LIMIT $limit"))).toBe(false);
     });
 });

@@ -7,6 +7,7 @@ import {
     WORKFLOW_EPISODES_SQL,
     WORKFLOW_EPISODE_PAIRS_SQL,
     WORKFLOW_EPISODE_SUBAGENT_INVOCATIONS_SQL,
+    WORKFLOW_SNAPSHOT_SQL,
     WORKFLOW_SESSION_SEQUENCES_SQL,
     WORKFLOW_SESSION_SHAPE_SQL,
     WORKFLOW_WEEKLY_SKILLS_SQL,
@@ -324,7 +325,17 @@ const stringFieldOrId = (
     return null;
 };
 
-export const fetchWorkflow = (): Effect.Effect<
+const parseSnapshotPayload = (rows: ReadonlyArray<Record<string, unknown>>): WorkflowResponse | null => {
+    const payload = stringField(rows[0] ?? {}, "payload");
+    if (!payload) return null;
+    try {
+        return JSON.parse(payload) as WorkflowResponse;
+    } catch {
+        return null;
+    }
+};
+
+export const computeWorkflow = (): Effect.Effect<
     WorkflowResponse,
     DbError,
     SurrealClient
@@ -404,4 +415,41 @@ export const fetchWorkflow = (): Effect.Effect<
             episode_shapes_total,
             narrative: buildNarrative(convergence),
         };
+    });
+
+export const refreshWorkflowSnapshot = (): Effect.Effect<
+    WorkflowResponse,
+    DbError,
+    SurrealClient
+> =>
+    Effect.gen(function* () {
+        const db = yield* SurrealClient;
+        const payload = yield* computeWorkflow();
+        yield* db.query(
+            `UPSERT workflow_snapshot:latest CONTENT {
+                generated_at: $generated_at,
+                payload: $payload,
+                source: "workflow-refresh"
+            };`,
+            {
+                generated_at: new Date(payload.generatedAt),
+                payload: JSON.stringify(payload),
+            },
+        );
+        return payload;
+    });
+
+export const fetchWorkflow = (): Effect.Effect<
+    WorkflowResponse,
+    DbError,
+    SurrealClient
+> =>
+    Effect.gen(function* () {
+        const db = yield* SurrealClient;
+        const snapshotRows = (yield* db.query<[Array<Record<string, unknown>>]>(
+            WORKFLOW_SNAPSHOT_SQL,
+        ))?.[0] ?? [];
+        const snapshot = parseSnapshotPayload(snapshotRows);
+        if (snapshot) return snapshot;
+        return yield* refreshWorkflowSnapshot();
     });

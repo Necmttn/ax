@@ -1,5 +1,14 @@
 import { describe, expect, test } from "bun:test";
-import { dashboardApiKind, formatSseEvent, handleDashboardRequestWithCors, parseDashboardServeArgs, parseQueryRequest, recentIngestEventsSql } from "./server.ts";
+import {
+    dashboardApiCapabilities,
+    dashboardApiKind,
+    formatSseEvent,
+    handleDashboardRequestWithCors,
+    isGraphExplorerEnabled,
+    parseDashboardServeArgs,
+    parseQueryRequest,
+    recentIngestEventsSql,
+} from "./server.ts";
 
 function preflight(headers: Record<string, string>): Request {
     return new Request("http://127.0.0.1:1738/api/version", {
@@ -71,5 +80,34 @@ describe("dashboard server", () => {
     test("dashboardApiKind recognizes experiment-loop improve route", () => {
         expect(dashboardApiKind("/api/improve")).toBe("improve");
         expect(dashboardApiKind("/api/improve/extra")).toBe("unknown");
+    });
+
+    test("graph explorer is disabled unless explicitly enabled", () => {
+        expect(isGraphExplorerEnabled({})).toBe(false);
+        expect(isGraphExplorerEnabled({ AX_ENABLE_GRAPH_EXPLORER: "0" })).toBe(false);
+        expect(isGraphExplorerEnabled({ AX_ENABLE_GRAPH_EXPLORER: "1" })).toBe(true);
+    });
+
+    test("capabilities hide graph explorer by default", () => {
+        expect(dashboardApiCapabilities({})).not.toContain("graph-explorer");
+        expect(dashboardApiCapabilities({})).toContain("skill-graph");
+        expect(dashboardApiCapabilities({ AX_ENABLE_GRAPH_EXPLORER: "1" })).toContain("graph-explorer");
+    });
+
+    test("graph explorer endpoint returns 404 by default", async () => {
+        const prev = process.env.AX_ENABLE_GRAPH_EXPLORER;
+        delete process.env.AX_ENABLE_GRAPH_EXPLORER;
+        try {
+            const res = await handleDashboardRequestWithCors(
+                new Request("http://127.0.0.1:1738/api/graph-explorer"),
+            );
+            expect(res.status).toBe(404);
+            await expect(res.json()).resolves.toMatchObject({
+                error: "graph_explorer_disabled",
+            });
+        } finally {
+            if (prev === undefined) delete process.env.AX_ENABLE_GRAPH_EXPLORER;
+            else process.env.AX_ENABLE_GRAPH_EXPLORER = prev;
+        }
     });
 });

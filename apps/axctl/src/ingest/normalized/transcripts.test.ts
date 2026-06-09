@@ -84,6 +84,7 @@ describe("normalized transcript persistence", () => {
         expect(sql).toContain("content_hash: \"opencode\"");
         expect(sql).toContain("RELATE turn:`session_a__");
         expect(sql).toContain("->invoked:");
+        expect(sql).toContain("session = session:`session\\`a`");
         expect(sql).toContain("turn_has_error = false");
         expect(sql).toContain("turn_index = 2");
         expect(sql).toContain('args = "{\\"pattern\\":\\"TODO\\"}"');

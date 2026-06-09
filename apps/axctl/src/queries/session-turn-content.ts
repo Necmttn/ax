@@ -5,11 +5,15 @@ import type {
     InspectContentBlockDto,
     InspectTurnContentDto,
 } from "@ax/lib/shared/dashboard-types";
+import { identityPart } from "@ax/lib/ids";
+import { recordKeyPart } from "@ax/lib/shared/derive-keys";
 import { interpolateRid, queryMany } from "@ax/lib/shared/graph-query";
 import { toBareSessionId } from "@ax/lib/shared/session-id";
+import { recordRef } from "@ax/lib/shared/surql";
 
 const TURN_CONTENT_DOCUMENTS_SQL = `
     SELECT
+        source_ref,
         type::string(id) AS document_id,
         parser_id,
         parser_version,
@@ -17,6 +21,19 @@ const TURN_CONTENT_DOCUMENTS_SQL = `
         turn.seq AS turn_seq
     FROM content_document
     WHERE source_kind = "turn" AND session = $sid
+    ORDER BY turn_seq;
+`;
+
+const TURN_CONTENT_DOCUMENTS_FOR_SEQS_SQL = `
+    SELECT
+        source_ref,
+        type::string(id) AS document_id,
+        parser_id,
+        parser_version,
+        blockset_hash,
+        turn.seq AS turn_seq
+    FROM content_document
+    WHERE source_kind = "turn" AND session = $sid AND turn.seq IN $seqs
     ORDER BY turn_seq;
 `;
 
@@ -56,6 +73,7 @@ const TURN_CONTENT_ATOMS_SQL = `
 `;
 
 interface TurnContentDocumentRow {
+    readonly source_ref: string | null;
     readonly document_id: string;
     readonly parser_id: string;
     readonly parser_version: string;
@@ -64,6 +82,7 @@ interface TurnContentDocumentRow {
 }
 
 interface TurnContentBlockRow {
+    readonly id: string;
     readonly document_id: string;
     readonly seq: number;
     readonly parent_seq: number | null;
@@ -99,11 +118,82 @@ function contentDocumentRid(value: string): string | null {
 export const resolveTurnContent = (
     sessionId: string,
 ): Effect.Effect<Map<number, InspectTurnContentDto>, never, SurrealClient> =>
+    resolveTurnContentFromDocuments(interpolateRid(TURN_CONTENT_DOCUMENTS_SQL, toBareSessionId(sessionId)), {
+        includeAtoms: true,
+    });
+
+export const resolveTurnContentForTurnSeqs = (
+    sessionId: string,
+    turnSeqs: ReadonlyArray<number>,
+): Effect.Effect<Map<number, InspectTurnContentDto>, never, SurrealClient> => {
+    const seqs = [...new Set(turnSeqs)]
+        .filter((seq) => Number.isInteger(seq) && seq >= 0)
+        .sort((a, b) => a - b);
+    if (seqs.length === 0) return Effect.succeed(new Map<number, InspectTurnContentDto>());
+    return resolveTurnContentFromDocuments(
+        interpolateRid(TURN_CONTENT_DOCUMENTS_FOR_SEQS_SQL, toBareSessionId(sessionId)),
+        { seqs },
+        { includeAtoms: true },
+    );
+};
+
+const contentDocumentKeyForTurnRef = (sourceRef: string): string =>
+    `turn__${identityPart(sourceRef, "source")}`;
+
+export const resolveTurnContentForSourceRefs = (
+    sourceRefs: ReadonlyArray<string>,
+): Effect.Effect<Map<number, InspectTurnContentDto>, never, SurrealClient> => {
+    const refs = [...new Set(sourceRefs)].filter((ref) => ref.length > 0);
+    if (refs.length === 0) return Effect.succeed(new Map<number, InspectTurnContentDto>());
+    const documents = refs
+        .map((ref) => recordRef("content_document", contentDocumentKeyForTurnRef(ref)))
+        .join(", ");
+    // Fast inspector path: direct document/block/atom record fetches avoid the
+    // multi-second `document IN ...` scans seen on large sessions. Atoms are
+    // capped per kind/block so the initial inspect response stays sub-second.
+    return resolveTurnContentFromDocuments(`
+        SELECT
+            source_ref,
+            type::string(id) AS document_id,
+            parser_id,
+            parser_version,
+            blockset_hash,
+            turn.seq AS turn_seq
+        FROM [${documents}]
+        ORDER BY turn_seq;
+    `, undefined, {
+        includeAtoms: false,
+        directBlockLimitPerDocument: 20,
+        directAtomLimitPerKind: 5,
+    });
+};
+
+const FAST_TURN_ATOM_KINDS = [
+    "symbol_ref",
+    "section_alias",
+    "file_ref",
+    "xml_tag",
+    "command_ref",
+    "url_ref",
+    "citation_ref",
+    "error_signature",
+] as const;
+
+const resolveTurnContentFromDocuments = (
+    documentsSql: string,
+    bindings?: Record<string, unknown>,
+    opts: {
+        readonly includeAtoms: boolean;
+        readonly directBlockLimitPerDocument?: number;
+        readonly directAtomLimitPerKind?: number;
+    } = { includeAtoms: true },
+): Effect.Effect<Map<number, InspectTurnContentDto>, never, SurrealClient> =>
     Effect.gen(function* () {
         const documentRows = yield* queryMany<TurnContentDocumentRow, TurnContentDocumentRow>(
-            interpolateRid(TURN_CONTENT_DOCUMENTS_SQL, toBareSessionId(sessionId)),
+            documentsSql,
             (row) => row,
             "session-turn-content resolveDocuments",
+            bindings,
         );
         if (documentRows.length === 0) return new Map<number, InspectTurnContentDto>();
 
@@ -116,18 +206,78 @@ export const resolveTurnContent = (
         for (const row of documentRows) documentMetaById.set(row.document_id, row);
         const documentListSql = `[${documents.join(", ")}]`;
 
-        const [blockRows, atomRows] = yield* Effect.all([
-            queryMany<TurnContentBlockRow, TurnContentBlockRow>(
-                TURN_CONTENT_BLOCKS_SQL.split("$documents").join(documentListSql),
+        const directBlockRefs = opts.directBlockLimitPerDocument
+            ? documentRows.flatMap((row) => {
+                if (!row.source_ref) return [];
+                const documentKey = contentDocumentKeyForTurnRef(row.source_ref);
+                return Array.from({ length: opts.directBlockLimitPerDocument ?? 0 }, (_, i) =>
+                    recordRef("content_block", `${documentKey}__block_${(i + 1).toString(10).padStart(6, "0")}`),
+                );
+            })
+            : [];
+        const blockRows = yield* queryMany<TurnContentBlockRow, TurnContentBlockRow>(
+            directBlockRefs.length > 0
+                ? `
+                    SELECT
+                        type::string(id) AS id,
+                        type::string(document) AS document_id,
+                        seq,
+                        parent_seq,
+                        kind,
+                        role,
+                        heading,
+                        text,
+                        text_excerpt,
+                        start_offset,
+                        end_offset,
+                        confidence
+                    FROM [${directBlockRefs.join(", ")}]
+                    ORDER BY document_id, seq;
+                `
+                : TURN_CONTENT_BLOCKS_SQL.split("$documents").join(documentListSql),
+            (row) => row,
+            directBlockRefs.length > 0
+                ? "session-turn-content resolveBlocksDirect"
+                : "session-turn-content resolveBlocks",
+        );
+        const directAtomRefs = opts.directAtomLimitPerKind
+            ? blockRows.flatMap((block) => {
+                const blockKey = recordKeyPart(block.id, "content_block");
+                if (!blockKey) return [];
+                return FAST_TURN_ATOM_KINDS.flatMap((kind) =>
+                    Array.from({ length: opts.directAtomLimitPerKind ?? 0 }, (_, i) =>
+                        recordRef(
+                            "content_atom",
+                            `${blockKey}__${identityPart(kind, "atom")}__${(i + 1).toString(10).padStart(4, "0")}`,
+                        ),
+                    ),
+                );
+            })
+            : [];
+        const atomRows = directAtomRefs.length > 0
+            ? yield* queryMany<TurnContentAtomRow, TurnContentAtomRow>(
+                `
+                    SELECT
+                        type::string(document) AS document_id,
+                        block.seq AS block_seq,
+                        kind,
+                        value,
+                        normalized,
+                        confidence,
+                        raw
+                    FROM [${directAtomRefs.join(", ")}]
+                    ORDER BY document_id, block_seq, kind, value;
+                `,
                 (row) => row,
-                "session-turn-content resolveBlocks",
-            ),
-            queryMany<TurnContentAtomRow, TurnContentAtomRow>(
+                "session-turn-content resolveAtomsDirect",
+            )
+            : opts.includeAtoms
+              ? yield* queryMany<TurnContentAtomRow, TurnContentAtomRow>(
                 TURN_CONTENT_ATOMS_SQL.split("$documents").join(documentListSql),
                 (row) => row,
                 "session-turn-content resolveAtoms",
-            ),
-        ], { concurrency: "unbounded" });
+            )
+              : [];
 
         const atomsByDocumentAndBlock = new Map<string, InspectContentAtomDto[]>();
         for (const atom of atomRows) {

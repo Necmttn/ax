@@ -50,13 +50,17 @@ GROUP BY week
 ORDER BY week ASC;`;
 
 /**
- * Flat (session, skill, ts) rows over the lookback window. The server groups
- * by session client-side, classifies each skill into a phase, compresses
- * consecutive same-phase, and aggregates by shape.
- *
- * Avoids correlated subqueries on the per-session loop - those tank perf
- * on 3k-session datasets (we hit this in R8 with tool-failures).
+ * Latest precomputed workflow payload. The live endpoint should read this
+ * single row; refresh/benchmark jobs own the expensive aggregate rebuild.
+ * This replaces the endpoint-time WORKFLOW_SESSION_SEQUENCES_SQL and
+ * WORKFLOW_EPISODE_SUBAGENT_INVOCATIONS_SQL global invoked scans that were
+ * dominating /api/workflow latency on large local datasets.
  */
+export const WORKFLOW_SNAPSHOT_SQL = `
+SELECT payload
+FROM workflow_snapshot:latest
+LIMIT 1;`;
+
 /**
  * Top "work episodes" - parent sessions that spawned >= 1 subagent. Returns
  * the parent's id/project/started_at plus how many descendants it had. Real
@@ -85,32 +89,34 @@ export const WORKFLOW_EPISODE_PAIRS_SQL = `
 SELECT in AS parent, out AS child FROM spawned;`;
 
 /**
- * Invocations from any subagent session (the cheap side - filters on the
- * session_source_ts index). Parent-session invocations are loaded by the
- * server in a second per-parent batch using the pair mapping, because IN
- * (subquery) over invoked tanks perf at 600k+ rows.
+ * First invocation of each skill in each subagent session. This keeps episode
+ * shapes as "which workflow phases appeared, and in what first-use order"
+ * without replaying every repeated invocation across all subagent turns.
  */
 export const WORKFLOW_EPISODE_SUBAGENT_INVOCATIONS_SQL = `
 SELECT
     in.session AS session,
     out.name AS skill,
+    turn_index,
     ts
 FROM invoked
-WHERE in.session IS NOT NONE
+WHERE is_first = true
+  AND in.session IS NOT NONE
   AND out.name IS NOT NONE
   AND in.session.source = "claude-subagent"
-ORDER BY ts ASC
 LIMIT 100000;`;
 
 export const WORKFLOW_SESSION_SEQUENCES_SQL = `
 SELECT
     in.session AS session,
     out.name AS skill,
+    turn_index,
     ts
 FROM invoked
 WHERE ts > time::now() - ${W}w
+  AND is_first = true
   AND in.session IS NOT NONE
   AND out.name IS NOT NONE
   AND in.session.source != "claude-subagent"
-ORDER BY session ASC, ts ASC
+ORDER BY session ASC, turn_index ASC
 LIMIT 50000;`;

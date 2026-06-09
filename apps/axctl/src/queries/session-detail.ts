@@ -45,7 +45,7 @@ SELECT
     count() AS count,
     time::max(ts) AS last_used
 FROM invoked
-WHERE in.session = $sessionId AND out.name IS NOT NONE
+WHERE session = $sessionId AND out.name IS NOT NONE
 GROUP BY skill
 ORDER BY count DESC
 LIMIT 20;`;
