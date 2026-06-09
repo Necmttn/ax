@@ -188,3 +188,37 @@ index lands for other users / fresh DBs.
 - Hunt remaining `IN`-scan / per-edge-deref hotspots (recall, `skills weighted`
   — flagged in prior memory) with the same indexed-lookup fix.
 - Optionally publish a 3rd, different-category proud session.
+
+---
+
+## Iteration 3 — verify schema-apply + hunt remaining hotspots (2026-06-10 01:05 WITA)
+
+**Tried.** (1) Traced how schema.surql is applied. (2) Profiled the prior-flagged
+slow read commands and grepped for the `IN`-scan anti-pattern repo-wide.
+
+**Worked.**
+- **schema-apply (task 1):** schema.surql is applied by `axctl install`
+  (install.ts:759 writes the embedded text → `surreal import`), NOT by ingest.
+  `DEFINE INDEX IF NOT EXISTS` is idempotent, so the new `content_document_session`
+  index lands for users on their next install/upgrade, building on the existing
+  DB (0.9s here). Consistent with every other index — not local-only, not a bug.
+- **hotspots (task 2):** recall **0.5s**, `skills weighted` **1.4–2.1s** (the
+  memory's per-edge-deref hang is already resolved), session-canvas orch
+  **0.02s** (its `session IN [childRefs]` form looked like the iter-0 trap, but
+  `spawned`-edge children are tiny for these sessions, so it never reproduces
+  slow). No live IN-scan hotspot remains on demo or dashboard read paths — the
+  two real ones (enrichSessions, share content) were fixed in iters 0 & 2.
+- **hardening:** added `session-turn-content.test.ts` (2 tests) — regression
+  guard that the share content fetch uses per-document `document =` and never
+  `document IN`, plus the empty-session short-circuit. typecheck 0, effect-lint
+  clean.
+
+**Failed / friction.** `skills weighted --window=30d` rejects the `d` suffix
+(wants a bare integer) — minor CLI ergonomics wart, not in scope.
+
+**Next (seeds iter 4).**
+- Read optimization has converged (no remaining live hotspot). Shift focus:
+  publish a 3rd proud session chosen for the **recovery-arc** signal (most
+  corrections recovered) — the seed prompt's "caught something wrong → verified
+  → fixed" beat — validating share perf once more on that shape.
+- Keep the branch green: full repo typecheck + the touched test suites.
