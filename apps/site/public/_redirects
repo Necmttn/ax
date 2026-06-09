@@ -23,5 +23,11 @@
 # directly (static precedence); deep client routes (/studio/sessions, ...) fall
 # through to the studio shell. This MUST precede the site-wide /* catch-all,
 # else /studio/<route> would render the marketing SPA -> blank "Invariant failed".
-/studio/*  /studio/index.html  200
+#
+# Target is the DIRECTORY (/studio/), NOT /studio/index.html: Cloudflare Pages
+# canonicalizes a subdirectory `*.html` URL to its extensionless/dir form (308),
+# so a `/studio/index.html` rewrite target fails to resolve and the rule is
+# silently skipped -> /studio/<route> falls through to /* (marketing shell).
+# /studio/ is served as the directory index (the studio shell) without a 308.
+/studio/*  /studio/  200
 /*  /index.html  200
