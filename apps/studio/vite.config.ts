@@ -1,6 +1,17 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import path from "node:path";
+import { readFileSync } from "node:fs";
+
+/** The released monorepo version, baked into the bundle so the studio can show
+ *  its own build version and flag a mismatch against the connected daemon. */
+const STUDIO_VERSION = ((): string => {
+    try {
+        return JSON.parse(readFileSync(path.resolve(__dirname, "../../package.json"), "utf8")).version ?? "0.0.0";
+    } catch {
+        return "0.0.0";
+    }
+})();
 
 /**
  * Studio SPA build with 3 targets, selected via STUDIO_TARGET:
@@ -25,7 +36,10 @@ const { base, outDir, mock } = CONFIG[TARGET];
 export default defineConfig({
     root: __dirname,
     base,
-    define: { "import.meta.env.VITE_STUDIO_MOCK": JSON.stringify(mock ? "true" : "false") },
+    define: {
+        "import.meta.env.VITE_STUDIO_MOCK": JSON.stringify(mock ? "true" : "false"),
+        __STUDIO_VERSION__: JSON.stringify(STUDIO_VERSION),
+    },
     plugins: [react()],
     resolve: { alias: { "@shared": path.resolve(__dirname, "../../packages/lib/src/shared") } },
     server: {
