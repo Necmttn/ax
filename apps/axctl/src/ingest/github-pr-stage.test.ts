@@ -155,5 +155,8 @@ describe("ingestGithubPrs", () => {
         expect(sel).toBeDefined();
         expect(sel!).toContain("root_path IN [");
         expect(sel!).toContain('"/tmp/x"');
+        // A worktree path never equals the canonical root_path, so the filter
+        // also resolves the repository via the checkout table.
+        expect(sel!).toContain("SELECT VALUE repository FROM checkout WHERE path IN [");
     });
 });

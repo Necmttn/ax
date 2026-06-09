@@ -225,6 +225,11 @@ export const writePullRequests = (
                             `repository: ${input.repositoryId}, ` +
                             `pull_request: ${prId}, ` +
                             `status: ${surrealString(status)}, ` +
+                            // promotion_path is `string DEFAULT 'unknown'` but
+                            // SurrealDB v3 doesn't apply the DEFAULT on CONTENT
+                            // upserts (the field coerces NONE → error). This
+                            // writer only links a PR, so the path is "pr".
+                            `promotion_path: "pr", ` +
                             `pr_size: ${surrealJson(prSize)}, ` +
                             `review_pain: ${surrealJson(reviewPain)}, ` +
                             `confidence: "medium", ` +

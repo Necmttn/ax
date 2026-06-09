@@ -32,13 +32,16 @@ describe("PR_LIST_JSON_FIELDS", () => {
             "additions",
             "deletions",
             "changedFiles",
-            "commits",
             "labels",
             "reviews",
             "statusCheckRollup",
         ]) {
             expect(fields).toContain(field);
         }
+    });
+
+    test("omits the `commits` field (GraphQL node-limit blowup at scale)", () => {
+        expect(PR_LIST_JSON_FIELDS.split(",")).not.toContain("commits");
     });
 });
 

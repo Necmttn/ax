@@ -12,9 +12,17 @@ import { Effect } from "effect";
 /**
  * Comma-joined field list passed to `gh pr list --json`.
  * Covers identity, diff stats, CI signal, and review history.
+ *
+ * NOTE: `commits` is intentionally omitted. gh resolves it as a GraphQL
+ * connection that traverses each commit's `authors` sub-connection, and at the
+ * stage's default `--limit` (200) the estimated node count exceeds GitHub's
+ * 500k GraphQL ceiling ("requesting up to 1,000,000 possible nodes"), making
+ * the whole call fail. We only used `commits` for a commit count; the writer's
+ * `commit_count` falls back to 0 (the normalizer treats absent commits as 0),
+ * and `scorePrSize` still scores on additions/deletions/changedFiles.
  */
 export const PR_LIST_JSON_FIELDS: string =
-    "number,title,state,baseRefName,headRefName,headRefOid,mergeCommit,author,url,createdAt,closedAt,mergedAt,additions,deletions,changedFiles,commits,labels,reviews,statusCheckRollup";
+    "number,title,state,baseRefName,headRefName,headRefOid,mergeCommit,author,url,createdAt,closedAt,mergedAt,additions,deletions,changedFiles,labels,reviews,statusCheckRollup";
 
 /**
  * Build the argv passed to `gh` (not including `"gh"` itself).

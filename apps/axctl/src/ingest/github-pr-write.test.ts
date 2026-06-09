@@ -128,6 +128,9 @@ describe("writePullRequests", () => {
         expect(deliveryStmt!).toContain("session: session:`sess-1`");
         expect(deliveryStmt!).toContain("pull_request: pull_request:");
         expect(deliveryStmt!).toContain("status:");
+        // promotion_path must be set explicitly - SurrealDB v3 doesn't apply the
+        // schema DEFAULT on CONTENT upserts, so an unset required field errors.
+        expect(deliveryStmt!).toContain('promotion_path: "pr"');
         expect(deliveryStmt!).toContain("pr_size:");
         expect(deliveryStmt!).toContain("review_pain:");
 

@@ -80,12 +80,18 @@ export const ingestGithubPrs = (
         const limit = deps?.limit ?? 200;
         const fetchImpl = deps?.fetchImpl ?? fetchPullRequests;
 
-        // Scope the scan to specific checkout paths when requested (ingest here),
-        // otherwise scan every GitHub-remoted repository.
+        // Scope the scan to specific paths when requested (ingest here),
+        // otherwise scan every GitHub-remoted repository. A path can be either a
+        // repository's canonical `root_path` (run from the main checkout) or a
+        // worktree path (run from `.claude/worktrees/*`). The latter never
+        // equals `root_path`, so we also resolve via the `checkout` table, whose
+        // per-worktree `path` → `repository` mapping the git stage populates
+        // (github-pr deps on "git", so the $PWD checkout exists by the time we run).
         const repoPaths = deps?.repoPaths ?? [];
+        const quotedPaths = repoPaths.map((p) => surrealString(p)).join(", ");
         const repoPathFilter =
             repoPaths.length > 0
-                ? ` AND root_path IN [${repoPaths.map((p) => surrealString(p)).join(", ")}]`
+                ? ` AND (root_path IN [${quotedPaths}] OR id IN (SELECT VALUE repository FROM checkout WHERE path IN [${quotedPaths}]))`
                 : "";
         const repoRows = yield* db.query<
             [Array<{ id: string; root_path: string | null; remote_url: string | null }>]
