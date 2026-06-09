@@ -4,6 +4,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { api, studioConnection, type DaemonVersion } from "./api.ts";
 import { useIngestEvents } from "./use-ingest-events.ts";
 import { fmtLastUsed } from "@ax/lib/shared/formatters";
+import { cmpSemver, STUDIO_VERSION } from "./version.ts";
 
 const STUDIO_MOCK = import.meta.env.VITE_STUDIO_MOCK === "true";
 const DEFAULT_LOCAL_ENDPOINT = "http://127.0.0.1:1738";
@@ -276,18 +277,29 @@ function LiveBanner({ endpoint, onDisconnect }: { endpoint: string; onDisconnect
         return () => { cancelled = true; };
     }, [endpoint]);
 
-    const behind = info && info.api_version < STUDIO_MIN_API_VERSION;
-    const className = behind
+    const apiBehind = info != null && info.api_version < STUDIO_MIN_API_VERSION;
+    // Compare the connected daemon's release version against this studio bundle's.
+    // <0: daemon older than studio (update the daemon); >0: studio bundle stale.
+    const verDelta = info != null ? cmpSemver(info.version, STUDIO_VERSION) : 0;
+    const warn = apiBehind || verDelta !== 0;
+    const className = warn
         ? "studio-banner studio-banner-warn"
         : "studio-banner studio-banner-live";
 
     return (
         <div className={className}>
-            <strong>{behind ? "Stale." : "Live."}</strong>
+            <strong>{warn ? "Update." : "Live."}</strong>
             <span>
                 Connected to <code>{endpoint}</code>
                 {info ? <> · ax v{info.version} (api v{info.api_version})</> : null}
-                {behind ? <> · studio expects api v{STUDIO_MIN_API_VERSION}+, run <code>axctl update</code></> : null}
+                {" · studio v"}{STUDIO_VERSION}
+                {verDelta < 0
+                    ? <> · daemon is behind studio - run <code>axctl update</code></>
+                    : null}
+                {verDelta > 0
+                    ? <> · studio bundle is stale (v{STUDIO_VERSION} &lt; daemon v{info!.version}) - hard-refresh</>
+                    : null}
+                {apiBehind ? <> · studio expects api v{STUDIO_MIN_API_VERSION}+</> : null}
                 {err ? <> · could not read /api/version: <code>{err}</code></> : null}
             </span>
             <button type="button" className="banner-btn" onClick={onDisconnect}>

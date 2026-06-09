@@ -132,7 +132,7 @@ export class DeriveMetricsStageStats extends BaseStageStats.extend<DeriveMetrics
 }) {}
 
 export const deriveMetricsStage: StageDef<DeriveMetricsStageStats, SurrealClient> = {
-    meta: StageMeta.make({ key: "derive-metrics", deps: ["git", "github-pr", "session-health", "spawned"], tags: ["derive"] }),
+    meta: StageMeta.make({ key: "derive-metrics", deps: ["git", "session-health", "spawned"], tags: ["derive"] }),
     run: (ctx: IngestContext) =>
         Effect.gen(function* () {
             const t0 = Date.now();

@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.18.0](https://github.com/Necmttn/ax/compare/v0.17.0...v0.18.0) (2026-06-09)
+
+
+### Features
+
+* **ingest:** add gh pr list fetch module ([1ac2c2b](https://github.com/Necmttn/ax/commit/1ac2c2b1b7db4d0a77554c34a0fa767c468b08b3))
+* **ingest:** add PR/review/check/delivery writer with session linking ([88d8b60](https://github.com/Necmttn/ax/commit/88d8b605e5e3a6ad2ec4de752304167952da58a2))
+* **ingest:** extend PR normalizers for gh CLI + check/review aggregators ([d8d1c87](https://github.com/Necmttn/ax/commit/d8d1c87ce070fedbe8e6596d311055598c6a2c4b))
+* **ingest:** register github-pr stage (fetch+normalize+write+link) ([b77106f](https://github.com/Necmttn/ax/commit/b77106fd132afd8b72c50f0ccd3fc351772b76d6))
+
+
+### Bug Fixes
+
+* **ingest:** escape PR datetimes, content-stable child keys, document delivery uniqueness ([793039d](https://github.com/Necmttn/ax/commit/793039df9a152a9b63800e6f973cc558231f29c5))
+* **ingest:** make github-pr stage work end-to-end against live gh ([1096686](https://github.com/Necmttn/ax/commit/1096686ed82b97de0c659c199ee2f0af17819d92))
+* **ingest:** remove incomplete github-pr stage (restore 25-stage set, unblock CI) ([2cd3fd1](https://github.com/Necmttn/ax/commit/2cd3fd18db0edda4c52a991cc4a785159521aa37))
+* **ingest:** scope github-pr stage to ctx.repoPaths ([02745e1](https://github.com/Necmttn/ax/commit/02745e1325e2336738656ac1dd8339a2156746f9))
+* **studio:** populate tool_calls in the graph inspect path ([9276cf3](https://github.com/Necmttn/ax/commit/9276cf3762c536267575d0a31f25261236094cc3))
+
 ## [0.17.0](https://github.com/Necmttn/ax/compare/v0.16.0...v0.17.0) (2026-06-09)
 
 

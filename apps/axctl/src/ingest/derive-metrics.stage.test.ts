@@ -6,7 +6,7 @@ describe("derive-metrics stage", () => {
     test("key + meta", () => {
         expect(Schema.decodeUnknownSync(DeriveMetricsKey)("derive-metrics")).toBe("derive-metrics");
         expect(deriveMetricsStage.meta.key).toBe("derive-metrics");
-        expect(deriveMetricsStage.meta.deps).toEqual(["git", "github-pr", "session-health", "spawned"]);
+        expect(deriveMetricsStage.meta.deps).toEqual(["git", "session-health", "spawned"]);
         expect(deriveMetricsStage.meta.tags).toEqual(["derive"]);
     });
 });

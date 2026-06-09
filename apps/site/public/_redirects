@@ -23,5 +23,18 @@
 # directly (static precedence); deep client routes (/studio/sessions, ...) fall
 # through to the studio shell. This MUST precede the site-wide /* catch-all,
 # else /studio/<route> would render the marketing SPA -> blank "Invariant failed".
-/studio/*  /studio/index.html  200
+#
+# Target is the DIRECTORY (/studio/), NOT /studio/index.html: Cloudflare Pages
+# canonicalizes a subdirectory `*.html` URL to its extensionless/dir form (308),
+# so a `/studio/index.html` rewrite target fails to resolve and the rule is
+# silently skipped -> /studio/<route> falls through to /* (marketing shell).
+# /studio/ is served as the directory index (the studio shell) without a 308.
+#
+# BUT a working `/studio/*` rewrite is greedy and also matches the real asset
+# files (/studio/assets/index-*.js) - static-asset precedence does NOT save them
+# here, so the bundle would be served the HTML shell and the SPA never boots
+# (blank page). Self-rewrite the assets to themselves FIRST so they serve as
+# files, then the catch-all sends client routes to the studio shell.
+/studio/assets/*  /studio/assets/:splat  200
+/studio/*  /studio/  200
 /*  /index.html  200
