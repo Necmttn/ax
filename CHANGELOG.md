@@ -1,5 +1,28 @@
 # Changelog
 
+## [0.17.0](https://github.com/Necmttn/ax/compare/v0.16.0...v0.17.0) (2026-06-09)
+
+
+### Features
+
+* **metrics:** add `ax loc` lines-of-code metric ([9d04bb6](https://github.com/Necmttn/ax/commit/9d04bb6f59d650f4cced94cf0cfefe129f9fb6f1))
+* **studio:** sessions design pass - share outcome header ([#158](https://github.com/Necmttn/ax/issues/158)) ([4d2894b](https://github.com/Necmttn/ax/commit/4d2894b01cfdf37f26d0e97e0541ee6d45694264))
+* **studio:** unified transcript tool rendering (ported onto studio structure) ([b0d0bce](https://github.com/Necmttn/ax/commit/b0d0bce2f8d2f7784815d85e49fbefb597e4087e))
+* **timeline:** LLM-free session timeline service (highlights + segments + events) ([#160](https://github.com/Necmttn/ax/issues/160)) ([4ee78fd](https://github.com/Necmttn/ax/commit/4ee78fd5c32295e87c8003e8a305cde5c1e4d601))
+
+
+### Bug Fixes
+
+* speed up session inspect paging ([27142e6](https://github.com/Necmttn/ax/commit/27142e69f46104de3966fdb3ab6361aed7a039dd))
+* **studio:** gate graph explorer ([3b1a81f](https://github.com/Necmttn/ax/commit/3b1a81f7c6d6e0c349820296410a9fe789773ae4))
+* **studio:** URL-drive subagent selection in share viewer ([34e465b](https://github.com/Necmttn/ax/commit/34e465bef6e8679c3b02b3ae3961ce700d22c0f7))
+
+
+### Performance
+
+* cache workflow dashboard payload ([7855417](https://github.com/Necmttn/ax/commit/7855417c36995182028d367002d0841fdaf859f3))
+* speed up session detail skills ([585a4b1](https://github.com/Necmttn/ax/commit/585a4b1b41bb8d7dde3e7d149f552f1040e219e3))
+
 ## [0.16.0](https://github.com/Necmttn/ax/compare/v0.15.0...v0.16.0) (2026-06-09)
 
 
