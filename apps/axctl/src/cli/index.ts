@@ -90,6 +90,7 @@ import { fetchRecall, type RecallSource, type RecallScope } from "../dashboard/r
 import { fetchSessionShow } from "../dashboard/session-show.ts";
 import { fetchSessionCompare } from "../dashboard/session-compare.ts";
 import { fetchCostSummary, type CostSummary } from "../dashboard/cost-query.ts";
+import { fetchSessionMetrics, type SessionMetricsRow } from "../metrics/session-metrics-query.ts";
 import { fetchLocSummary, type LocSummary, type LocSelector } from "../dashboard/loc-query.ts";
 import { renderSessionMarkdown, renderSessionJson } from "./session-show-format.ts";
 import { renderCompareTable, renderCompareJson } from "./session-compare-format.ts";
@@ -3451,14 +3452,93 @@ const sessionsCompareCommand = Command.make(
     ),
 );
 
+// ---------------------------------------------------------------------------
+// ax sessions metrics - graph-derived per-session metrics listing
+// ---------------------------------------------------------------------------
+
+const metricPct = (v: number | null): string => (v === null ? "  -" : `${Math.round(v * 100)}%`.padStart(4));
+const metricMs = (v: number | null): string =>
+    v === null ? "-" : v >= 3600000 ? `${(v / 3600000).toFixed(1)}h` : `${Math.max(1, Math.round(v / 60000))}m`;
+
+const formatSessionMetrics = (rows: SessionMetricsRow[]): string => {
+    if (rows.length === 0) return "no session_metrics rows (run `ax ingest` to populate).";
+    const lines: string[] = [];
+    lines.push(
+        `${"session".padEnd(20)} ${"durab".padStart(5)} ${"commits".padStart(7)} ${"land".padStart(5)} ${"+/-loc".padStart(12)}  task`,
+    );
+    for (const r of rows.slice(0, 50)) {
+        lines.push(
+            `${r.session.replace(/^session:/, "").replace(/[`⟨⟩]/g, "").slice(0, 20).padEnd(20)} `
+            + `${metricPct(r.durabilityRatio)} ${String(r.producedCommits).padStart(7)} ${metricMs(r.timeToLandMs).padStart(5)} `
+            + `${`+${r.linesAdded}/-${r.linesRemoved}`.padStart(12)}  ${(r.taskLabel ?? "").replace(/\s+/g, " ").slice(0, 60)}`,
+        );
+    }
+    return lines.join("\n");
+};
+
+const cmdSessionsMetrics = (input: {
+    readonly sinceDays: number | null;
+    readonly project: string | null;
+    readonly here: boolean;
+    readonly limit: number;
+    readonly json: boolean;
+}) =>
+    Effect.gen(function* () {
+        let project = input.project;
+        if (input.here) {
+            const pwd = yield* resolvePwdRepository().pipe(
+                Effect.catchTag("NotAGitRepoError", (err) =>
+                    Effect.sync(() => {
+                        process.stderr.write(`axctl sessions metrics: --here requires a git repository (cwd=${err.cwd})\n`);
+                        process.exit(2);
+                    }),
+                ),
+            );
+            project = pwd.repoRoot;
+        }
+        const since = input.sinceDays === null
+            ? null
+            : new Date(Date.now() - Math.min(Math.max(Math.trunc(input.sinceDays), 1), 3650) * 86400 * 1000);
+        const rows = yield* fetchSessionMetrics({ since, limit: input.limit, project });
+        if (input.json) {
+            console.log(prettyPrint(rows));
+            return;
+        }
+        console.log(formatSessionMetrics(rows));
+    });
+
+const sessionsMetricsCommand = Command.make(
+    "metrics",
+    {
+        since: optionalSince,
+        project: Flag.string("project").pipe(Flag.optional),
+        here: Flag.boolean("here").pipe(Flag.withDefault(false)),
+        limit: positiveLimit(50),
+        json: jsonFlag,
+    },
+    ({ since, project, here, limit, json }) =>
+        cmdSessionsMetrics({
+            sinceDays: optionValue(since) ?? null,
+            project: optionValue(project) ?? null,
+            here,
+            limit,
+            json,
+        }),
+).pipe(Command.withDescription(
+    "Graph-derived per-session metrics: durability (commits not later reverted), "
+    + "time-to-land (session→PR merge), lines added/removed, sorted by lowest durability. "
+    + "--here scopes to the pwd repo, --since N days, --json for machine output.",
+));
+
 const sessionsCommand = Command.make("sessions").pipe(
-    Command.withDescription("Windowed session queries: here (pwd-repo), around (date), near (sha), show (detail), compare (side-by-side)"),
+    Command.withDescription("Windowed session queries: here (pwd-repo), around (date), near (sha), show (detail), compare (side-by-side), metrics (graph-derived)"),
     Command.withSubcommands([
         sessionsHereCommand,
         sessionsAroundCommand,
         sessionsNearCommand,
         sessionShowCommand,
         sessionsCompareCommand,
+        sessionsMetricsCommand,
     ]),
 );
 
