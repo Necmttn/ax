@@ -24,7 +24,7 @@ export const computeDurability = (
         if (sessionIds.length === 0) return new Map();
         const refs = sessionIds.map((id) => recordLiteral("session", stripKey(id))).join(", ");
         const result = (yield* db.query<[Array<Record<string, unknown>>]>(`
-SELECT in AS session,
+SELECT type::string(in) AS session,
        count() AS produced,
        count(out.reverted = true) AS reverted
 FROM produced

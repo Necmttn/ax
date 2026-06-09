@@ -229,7 +229,11 @@ DEFINE ANALYZER IF NOT EXISTS commit_text
 DEFINE INDEX IF NOT EXISTS commit_message_fts
     ON commit FIELDS message
     FULLTEXT ANALYZER commit_text BM25 HIGHLIGHTS;
-DEFINE FIELD reverted ON commit TYPE bool DEFAULT false;
+-- option<bool>, not bool DEFAULT false: the git stage re-UPSERTs commits via
+-- CONTENT (omitting `reverted`), and pre-existing rows predate the field, so a
+-- non-optional bool coerces NONE → ingest crash (schema-orphan-field-none-crash).
+-- NONE means "not known reverted"; durability counts only `reverted = true`.
+DEFINE FIELD OVERWRITE reverted ON commit TYPE option<bool>;
 DEFINE INDEX IF NOT EXISTS commit_reverted ON commit FIELDS reverted;
 
 DEFINE TABLE repository SCHEMAFULL;

@@ -17,6 +17,15 @@ export interface CascadeEdge {
 export const computeFragilityCascade = (): Effect.Effect<CascadeEdge[], DbError, SurrealClient> =>
     Effect.gen(function* () {
         const db = yield* SurrealClient;
+        // WAVE-2: this single-query form is NOT yet live-correct and is not wired
+        // to any surface. The `FROM (subquery) AS o, (subquery) AS d` comma-join +
+        // table aliases are rejected by SurrealDB 3.1 (same parse error that hit
+        // time-to-land), and an `in.session` deref over all `edited` edges risks
+        // the 87k-edge per-deref hang. Before surfacing, replace with a 3-query
+        // JS join: (1) touched WHERE in.reverted=true, (2) produced commit→session,
+        // (3) edited file/session/ts - joined + weighted in JS (the dedup/weight
+        // logic below is already tested and stays). Until then this query is
+        // exercised only by the mocked unit test.
         const rows = (yield* db.query<[Array<Record<string, unknown>>]>(`
 SELECT
   type::string(origin) AS origin,
