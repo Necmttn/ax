@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.16.0](https://github.com/Necmttn/ax/compare/v0.15.0...v0.16.0) (2026-06-09)
+
+
+### Features
+
+* **share:** surface harness hooks in the shared transcript ([#153](https://github.com/Necmttn/ax/issues/153)) ([04036a1](https://github.com/Necmttn/ax/commit/04036a1eb0fbe3c728b61b22626f755914fc8496))
+* **studio:** extract @ax/studio + standalone Electron desktop app ([#156](https://github.com/Necmttn/ax/issues/156)) ([a0025e8](https://github.com/Necmttn/ax/commit/a0025e8b6361a779a9ea70e2c601fce46515e44d))
+* **studio:** unify sessions palette + share outcome header ([#157](https://github.com/Necmttn/ax/issues/157)) ([6b61251](https://github.com/Necmttn/ax/commit/6b61251338c1326df417c7827e63fe3501b89806))
+
+
+### Performance
+
+* **studio:** virtualize shared transcript paint via content-visibility ([#155](https://github.com/Necmttn/ax/issues/155)) ([1c495c4](https://github.com/Necmttn/ax/commit/1c495c44092bcf12e71568fbaa38812f7559a310))
+
 ## [0.15.0](https://github.com/Necmttn/ax/compare/v0.14.0...v0.15.0) (2026-06-08)
 
 
