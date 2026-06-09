@@ -50,6 +50,7 @@ export const mapHealth = (raw: unknown): HealthRow | null => {
 };
 
 export interface OverviewRow {
+    readonly source: string | null;
     readonly model: string | null;
     readonly project: string | null;
     readonly cwd: string | null;
@@ -57,10 +58,11 @@ export interface OverviewRow {
     readonly ended_at: string | null;
 }
 export const overviewSql = (ref: string): string =>
-    `SELECT model, project, cwd, started_at, ended_at FROM ${ref};`;
+    `SELECT source, model, project, cwd, started_at, ended_at FROM ${ref};`;
 export const mapOverview = (raw: unknown): OverviewRow | null => {
     if (!isRecord(raw)) return null;
     return {
+        source: stringField(raw, "source"),
         model: stringField(raw, "model"),
         project: stringField(raw, "project"),
         cwd: stringField(raw, "cwd"),
@@ -87,13 +89,15 @@ export interface ToolCallRow {
     readonly ts: string | null;
     readonly name: string;
     readonly command_norm: string | null;
+    /** First 400 chars of input_json - codex edit detection peeks at the command. */
+    readonly command_text: string | null;
     readonly output_excerpt: string | null;
     readonly error_text: string | null;
     readonly has_error: boolean;
     readonly call_id: string | null;
 }
 export const toolCallsSql = (ref: string): string =>
-    `SELECT seq, ts, name, command_norm, output_excerpt, error_text, has_error, call_id FROM tool_call WHERE session = ${ref} ORDER BY seq ASC LIMIT 4000;`;
+    `SELECT seq, ts, name, command_norm, string::slice(input_json ?? "", 0, 400) AS command_text, output_excerpt, error_text, has_error, call_id FROM tool_call WHERE session = ${ref} ORDER BY seq ASC LIMIT 6000;`;
 export const mapToolCall = (raw: unknown): ToolCallRow | null => {
     if (!isRecord(raw)) return null;
     const name = stringField(raw, "name");
@@ -103,6 +107,7 @@ export const mapToolCall = (raw: unknown): ToolCallRow | null => {
         ts: dateField(raw, "ts"),
         name,
         command_norm: stringField(raw, "command_norm"),
+        command_text: stringField(raw, "command_text"),
         output_excerpt: stringField(raw, "output_excerpt"),
         error_text: stringField(raw, "error_text"),
         has_error: boolField(raw, "has_error"),
@@ -163,6 +168,15 @@ export const mapCorrection = (raw: unknown): CorrectionRow | null => {
     };
 };
 
+/** Fallback correction source: turns the classifier tagged intent_kind=correction
+ *  (catches redirects the reaction_event table missed). Merged + deduped by seq. */
+export const intentCorrectionsSql = (ref: string): string =>
+    `SELECT seq, ts, text_excerpt AS user_text FROM turn WHERE session = ${ref} AND intent_kind = "correction" ORDER BY seq ASC LIMIT 500;`;
+export const mapIntentCorrection = (raw: unknown): CorrectionRow | null => {
+    if (!isRecord(raw)) return null;
+    return { seq: seqField(raw, "seq"), ts: dateField(raw, "ts"), target: null, user_text: stringField(raw, "user_text") };
+};
+
 export interface PlanRow {
     readonly ts: string | null;
     readonly summary: string | null;
@@ -185,6 +199,31 @@ export const commitsSql = (ref: string): string =>
 export const mapCommit = (raw: unknown): CommitRow | null => {
     if (!isRecord(raw)) return null;
     return { ts: dateField(raw, "ts"), sha: stringField(raw, "sha"), message: stringField(raw, "message") };
+};
+
+export interface AskRow {
+    readonly seq: number | null;
+    readonly ts: string | null;
+    readonly text: string | null;
+}
+/** User "asks" - segment boundaries. message_kind=task is the real prompt
+ *  (skips control/context/tool-result user turns). */
+export const asksSql = (ref: string): string =>
+    `SELECT seq, ts, text_excerpt AS text FROM turn WHERE session = ${ref} AND role = "user" AND message_kind = "task" ORDER BY seq ASC LIMIT 1000;`;
+export const mapAsk = (raw: unknown): AskRow | null => {
+    if (!isRecord(raw)) return null;
+    return { seq: seqField(raw, "seq"), ts: dateField(raw, "ts"), text: stringField(raw, "text") };
+};
+
+export interface CompactionRow {
+    readonly ts: string | null;
+}
+export const compactionsSql = (ref: string): string =>
+    `SELECT ts FROM compaction WHERE session = ${ref} ORDER BY ts ASC LIMIT 200;`;
+export const mapCompaction = (raw: unknown): CompactionRow | null => {
+    if (!isRecord(raw)) return null;
+    const ts = dateField(raw, "ts");
+    return ts ? { ts } : null;
 };
 
 export interface LastTurnRow {

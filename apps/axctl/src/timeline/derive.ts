@@ -10,7 +10,9 @@ import type {
     TimelineEventKind,
 } from "./types.ts";
 import type {
+    AskRow,
     CommitRow,
+    CompactionRow,
     CorrectionRow,
     CostRow,
     EditRow,
@@ -21,13 +23,13 @@ import type {
     SkillRow,
     ToolCallRow,
 } from "./queries.ts";
+import { classifyTool, isRealSkill, type ProviderSource } from "./providers.ts";
+import { segmentize } from "./segment.ts";
 
 const TITLE_MAX = 120;
 const DETAIL_MAX = 280;
 /** Seq distance within which a later success counts as recovering a failure. */
 const RECOVERY_WINDOW = 40;
-/** Tool names that are inherently "notable" even without a normalized command. */
-const NOTABLE_TOOLS = new Set(["Bash", "Task", "Agent"]);
 
 const firstLine = (s: string | null | undefined): string =>
     (s ?? "").split("\n").find((l) => l.trim().length > 0)?.trim() ?? "";
@@ -41,24 +43,48 @@ const tsValue = (ts: string | null): number => {
 
 // --- per-kind derivation ---------------------------------------------------
 
-const isNotableTool = (t: ToolCallRow): boolean =>
-    t.command_norm != null || NOTABLE_TOOLS.has(t.name);
-
-export function deriveToolEvents(rows: ReadonlyArray<ToolCallRow>): TimelineEvent[] {
-    return rows
-        .filter((t) => !t.has_error && isNotableTool(t) && t.ts != null)
-        .map((t) => ({
-            kind: "tool_call" as const,
-            ts: t.ts as string,
+/**
+ * Successful tool calls -> tool_call / file_edit events, provider-aware. Errors
+ * are skipped (they become `failure` events). Noise (reads/searches) and the
+ * fake `<provider>:` skill shadow are dropped. codex/cursor edits (which have no
+ * `edited` edge) are recovered here from the command; claude/pi edits that the
+ * `edited` edge already covers (in `editedSeqs`) are left to deriveFileEvents
+ * so they keep their real path.
+ */
+export function deriveToolEvents(
+    rows: ReadonlyArray<ToolCallRow>,
+    source: ProviderSource,
+    editedSeqs: ReadonlySet<number>,
+): TimelineEvent[] {
+    const out: TimelineEvent[] = [];
+    for (const t of rows) {
+        if (t.has_error || t.ts == null) continue;
+        const c = classifyTool(source, { name: t.name, command_norm: t.command_norm, command_text: t.command_text });
+        if (c.kind === "noise" || c.kind === "skill") continue;
+        const turnRef = t.seq != null ? [{ type: "turn" as const, id: String(t.seq) }] : [];
+        if (c.kind === "file_edit") {
+            if (t.seq != null && editedSeqs.has(t.seq)) continue; // edge covers it with a real path
+            out.push({
+                kind: "file_edit",
+                ts: t.ts,
+                seq: t.seq,
+                title: clip(t.command_norm ?? t.name, TITLE_MAX),
+                ...(t.command_text ? { detail: clip(t.command_text, DETAIL_MAX) } : {}),
+                refs: turnRef,
+            });
+            continue;
+        }
+        out.push({
+            kind: "tool_call",
+            ts: t.ts,
             seq: t.seq,
             title: clip(t.command_norm ?? t.name, TITLE_MAX),
             ...(firstLine(t.output_excerpt) ? { detail: clip(firstLine(t.output_excerpt), DETAIL_MAX) } : {}),
-            status: "ok" as const,
-            refs: [
-                ...(t.call_id ? [{ type: "tool" as const, id: t.call_id }] : []),
-                ...(t.seq != null ? [{ type: "turn" as const, id: String(t.seq) }] : []),
-            ],
-        }));
+            status: "ok",
+            refs: [...(t.call_id ? [{ type: "tool" as const, id: t.call_id }] : []), ...turnRef],
+        });
+    }
+    return out;
 }
 
 export function deriveFailureEvents(rows: ReadonlyArray<ToolCallRow>): TimelineEvent[] {
@@ -98,9 +124,12 @@ export function deriveFileEvents(rows: ReadonlyArray<EditRow>): TimelineEvent[] 
         }));
 }
 
-export function deriveSkillEvents(rows: ReadonlyArray<SkillRow>): TimelineEvent[] {
+export function deriveSkillEvents(
+    rows: ReadonlyArray<SkillRow>,
+    source: ProviderSource,
+): TimelineEvent[] {
     return rows
-        .filter((s) => s.name != null && s.ts != null)
+        .filter((s) => s.name != null && s.ts != null && isRealSkill(source, s.name))
         .map((s) => ({
             kind: "skill_invocation" as const,
             ts: s.ts as string,
@@ -275,6 +304,7 @@ export function deriveHighlights(input: {
 
 export interface TimelineInputs {
     readonly sessionId: string;
+    readonly source: ProviderSource;
     readonly health: HealthRow | null;
     readonly overview: OverviewRow | null;
     readonly cost: CostRow | null;
@@ -284,6 +314,8 @@ export interface TimelineInputs {
     readonly corrections: ReadonlyArray<CorrectionRow>;
     readonly plans: ReadonlyArray<PlanRow>;
     readonly commits: ReadonlyArray<CommitRow>;
+    readonly asks: ReadonlyArray<AskRow>;
+    readonly compactions: ReadonlyArray<CompactionRow>;
     readonly lastAssistant: LastTurnRow | null;
 }
 
@@ -292,12 +324,15 @@ const dedupePaths = (edits: ReadonlyArray<EditRow>): number =>
 
 /** Compose all derivations into the final ordered SessionTimeline. Pure. */
 export function buildTimeline(input: TimelineInputs): SessionTimeline {
+    const editedSeqs = new Set(
+        input.edits.map((e) => e.seq).filter((s): s is number => s != null),
+    );
     const failures = pairRecoveries(deriveFailureEvents(input.toolCalls), input.toolCalls, input.edits);
     const events = [
-        ...deriveToolEvents(input.toolCalls),
+        ...deriveToolEvents(input.toolCalls, input.source, editedSeqs),
         ...failures,
         ...deriveFileEvents(input.edits),
-        ...deriveSkillEvents(input.skills),
+        ...deriveSkillEvents(input.skills, input.source),
         ...deriveCorrectionEvents(input.corrections),
         ...deriveDecisionEvents(input.plans),
         ...deriveCheckpointEvents(input.commits),
@@ -308,8 +343,15 @@ export function buildTimeline(input: TimelineInputs): SessionTimeline {
         overview: input.overview,
         cost: input.cost,
         filesChanged: dedupePaths(input.edits),
-        skillsUsed: new Set(input.skills.map((s) => s.name).filter(Boolean)).size,
-        events,
+        skillsUsed: isRealSkill(input.source, "x")
+            ? new Set(input.skills.map((s) => s.name).filter(Boolean)).size
+            : 0,
+        events, // full counts, before L1 capping
     });
-    return { session_id: input.sessionId, highlights, events };
+    const { segments, events: kept } = segmentize(
+        events,
+        { asks: input.asks, commits: input.commits, compactions: input.compactions },
+        input.overview?.started_at ?? null,
+    );
+    return { session_id: input.sessionId, highlights, segments, events: kept };
 }

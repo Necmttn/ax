@@ -10,14 +10,20 @@ import { SurrealClient } from "@ax/lib/db";
 import { buildTimeline } from "./derive.ts";
 import type { SessionTimeline } from "./types.ts";
 import {
+    asksSql,
     commitsSql,
+    compactionsSql,
     correctionsSql,
     costSql,
     editsSql,
     healthSql,
     lastAssistantSql,
+    mapAsk,
     mapCommit,
+    mapCompaction,
+    intentCorrectionsSql,
     mapCorrection,
+    mapIntentCorrection,
     mapCost,
     mapEdit,
     mapHealth,
@@ -60,7 +66,7 @@ export const SessionTimelineServiceLayer = Layer.effect(SessionTimelineService)(
                 const ref = sessionRef(sessionId);
                 const [
                     healthRaw, overviewRaw, costRaw, toolRaw, editRaw,
-                    skillRaw, correctionRaw, planRaw, commitRaw, lastRaw,
+                    skillRaw, correctionRaw, intentCorrectionRaw, planRaw, commitRaw, askRaw, compactionRaw, lastRaw,
                 ] = yield* Effect.all([
                     oneRow(healthSql(ref)),
                     oneRow(overviewSql(ref)),
@@ -69,22 +75,39 @@ export const SessionTimelineServiceLayer = Layer.effect(SessionTimelineService)(
                     rows(editsSql(ref)),
                     rows(skillsSql(ref)),
                     rows(correctionsSql(ref)),
+                    rows(intentCorrectionsSql(ref)),
                     rows(plansSql(ref)),
                     rows(commitsSql(ref)),
+                    rows(asksSql(ref)),
+                    rows(compactionsSql(ref)),
                     oneRow(lastAssistantSql(ref)),
                 ], { concurrency: "unbounded" });
 
+                const overview = mapOverview(overviewRaw);
+                // Merge both correction sources, dedupe by seq (reaction_event wins - it has a target).
+                const correctionBySeq = new Map<number, ReturnType<typeof mapCorrection>>();
+                for (const c of intentCorrectionRaw.map(mapIntentCorrection).filter(present)) {
+                    if (c.seq != null) correctionBySeq.set(c.seq, c);
+                }
+                for (const c of correctionRaw.map(mapCorrection).filter(present)) {
+                    if (c.seq != null) correctionBySeq.set(c.seq, c);
+                }
+                const corrections = [...correctionBySeq.values()].filter(present).sort((a, b) => (a!.seq ?? 0) - (b!.seq ?? 0));
+
                 return buildTimeline({
                     sessionId,
+                    source: overview?.source ?? "claude",
                     health: mapHealth(healthRaw),
-                    overview: mapOverview(overviewRaw),
+                    overview,
                     cost: mapCost(costRaw),
                     toolCalls: toolRaw.map(mapToolCall).filter(present),
                     edits: editRaw.map(mapEdit).filter(present),
                     skills: skillRaw.map(mapSkill).filter(present),
-                    corrections: correctionRaw.map(mapCorrection).filter(present),
+                    corrections,
                     plans: planRaw.map(mapPlan).filter(present),
                     commits: commitRaw.map(mapCommit).filter(present),
+                    asks: askRaw.map(mapAsk).filter(present),
+                    compactions: compactionRaw.map(mapCompaction).filter(present),
                     lastAssistant: mapLastTurn(lastRaw),
                 });
             });

@@ -29,6 +29,8 @@ export interface TimelineEvent {
     readonly ts: string;
     /** Anchor turn seq (for `#turn-N` linking); null when not turn-anchored. */
     readonly seq: number | null;
+    /** L2 segment this event belongs to (assigned during assembly). */
+    readonly segment_id?: string;
     /** One-line, human-readable. Raw data (command/path/error) - never LLM-authored. */
     readonly title: string;
     /** Optional secondary line (output excerpt, error text, commit message…). */
@@ -65,9 +67,43 @@ export interface SessionHighlights {
     readonly event_counts: Readonly<Record<TimelineEventKind, number>>;
 }
 
+/** Boundary signal that opened an L2 segment. */
+export type SegmentBoundary = "session_start" | "ask" | "commit" | "compaction" | "time_gap";
+
+/** L2 - a phase/iteration of the session. Carries FULL rollup counts even when
+ *  L1 events were capped, so nothing is silently hidden. */
+export interface TimelineSegment {
+    readonly id: string;
+    readonly index: number;
+    readonly title: string;
+    readonly boundary: SegmentBoundary;
+    readonly start_seq: number | null;
+    readonly end_seq: number | null;
+    readonly started_at: string;
+    readonly ended_at: string | null;
+    readonly duration_ms: number | null;
+    /** Full counts for everything that happened in the span (pre-cap). */
+    readonly rollup: {
+        readonly tool_calls: number;
+        readonly file_edits: number;
+        readonly files: number;
+        readonly failures: number;
+        readonly recovered: number;
+        readonly skills: number;
+        readonly decisions: number;
+        readonly checkpoints: number;
+        readonly corrections: number;
+    };
+    /** Total events in the span before L1 capping. */
+    readonly event_count: number;
+}
+
 export interface SessionTimeline {
     readonly session_id: string;
     readonly highlights: SessionHighlights;
-    /** Important events, ascending by ts. */
+    /** L2 spine - always complete (one per phase/iteration). */
+    readonly segments: ReadonlyArray<TimelineSegment>;
+    /** L1 - the important events, ascending by ts, capped per segment + globally.
+     *  Each carries `segment_id`. Full counts live on the segment rollups. */
     readonly events: ReadonlyArray<TimelineEvent>;
 }

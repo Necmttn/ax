@@ -12,19 +12,42 @@ import type { ToolCallRow, EditRow } from "./queries.ts";
 
 const tc = (over: Partial<ToolCallRow>): ToolCallRow => ({
     seq: 0, ts: "2026-06-07T00:00:00Z", name: "Bash", command_norm: null,
-    output_excerpt: null, error_text: null, has_error: false, call_id: null, ...over,
+    command_text: null, output_excerpt: null, error_text: null, has_error: false, call_id: null, ...over,
 });
+const NO_EDGES = new Set<number>();
 
 describe("deriveToolEvents", () => {
-    it("keeps notable successes, drops errors and noise", () => {
+    it("keeps notable successes, drops errors and read-noise", () => {
         const events = deriveToolEvents([
             tc({ seq: 1, name: "Bash", command_norm: "bun test" }),
-            tc({ seq: 2, name: "Read", command_norm: null }), // not notable -> dropped
-            tc({ seq: 3, name: "Bash", command_norm: "x", has_error: true }), // error -> dropped (it's a failure)
-        ]);
+            tc({ seq: 2, name: "Read" }), // noise -> dropped
+            tc({ seq: 3, name: "Bash", command_norm: "x", has_error: true }), // error -> failure, not here
+        ], "claude", NO_EDGES);
         expect(events.map((e) => e.title)).toEqual(["bun test"]);
         expect(events[0]?.kind).toBe("tool_call");
         expect(events[0]?.status).toBe("ok");
+    });
+
+    it("surfaces codex exec_command as a tool (provider-aware)", () => {
+        const events = deriveToolEvents([
+            tc({ seq: 1, name: "exec_command", command_norm: "git status" }),
+        ], "codex", NO_EDGES);
+        expect(events[0]?.kind).toBe("tool_call");
+        expect(events[0]?.title).toBe("git status");
+    });
+
+    it("classifies a codex shell edit (sed) as file_edit", () => {
+        const events = deriveToolEvents([
+            tc({ seq: 1, name: "exec_command", command_norm: "sed", command_text: "sed -i s/a/b/ x.ts" }),
+        ], "codex", NO_EDGES);
+        expect(events[0]?.kind).toBe("file_edit");
+    });
+
+    it("lets the edited edge own claude file edits (skips tool_call dupes)", () => {
+        const events = deriveToolEvents([
+            tc({ seq: 5, name: "Edit" }),
+        ], "claude", new Set([5]));
+        expect(events).toHaveLength(0); // seq 5 covered by the edge
     });
 });
 
@@ -96,8 +119,9 @@ describe("deriveCheckpointEvents", () => {
 
 describe("buildTimeline", () => {
     const base: TimelineInputs = {
-        sessionId: "s1", health: null, overview: null, cost: null,
-        toolCalls: [], edits: [], skills: [], corrections: [], plans: [], commits: [], lastAssistant: null,
+        sessionId: "s1", source: "claude", health: null, overview: null, cost: null,
+        toolCalls: [], edits: [], skills: [], corrections: [], plans: [], commits: [],
+        asks: [], compactions: [], lastAssistant: null,
     };
 
     it("orders events by ts and tallies event_counts", () => {
