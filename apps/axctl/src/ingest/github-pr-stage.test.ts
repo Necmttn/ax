@@ -131,5 +131,29 @@ describe("ingestGithubPrs", () => {
         const prStmt = sql.find((s) => s.includes("UPSERT pull_request:"));
         expect(prStmt).toBeDefined();
         expect(prStmt!).toContain("repository: repository:`r1`");
+
+        // No repoPaths → the discovery SELECT is unfiltered.
+        const selUnscoped = sql.find((s) => s.includes("FROM repository"));
+        expect(selUnscoped).toBeDefined();
+        expect(selUnscoped!).not.toContain("root_path IN [");
+    });
+
+    test("scopes the repository SELECT to repoPaths when provided", async () => {
+        const sql: string[] = [];
+        const db = makeMockDb(sql, {
+            repoRows: [
+                [{ id: "repository:`r1`", root_path: "/tmp/x", remote_url: "https://github.com/o/r" }],
+            ],
+        });
+
+        await run(
+            { repoPaths: ["/tmp/x"], fetchImpl: () => Effect.succeed([mergedPrFixture]) },
+            db,
+        );
+
+        const sel = sql.find((s) => s.includes("FROM repository"));
+        expect(sel).toBeDefined();
+        expect(sel!).toContain("root_path IN [");
+        expect(sel!).toContain('"/tmp/x"');
     });
 });

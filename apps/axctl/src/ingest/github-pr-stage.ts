@@ -15,6 +15,7 @@ import { Effect, Schema } from "effect";
 import { SurrealClient } from "@ax/lib/db";
 import type { DbError } from "@ax/lib/errors";
 import { recordLiteral } from "@ax/lib/ids";
+import { surrealString } from "@ax/lib/shared/surql";
 import { BaseStageStats, IngestContext, StageMeta } from "./stage/types.ts";
 import type { StageDef } from "./stage/registry.ts";
 import { fetchPullRequests } from "./github-pr-fetch.ts";
@@ -38,6 +39,12 @@ export interface GithubPrIngestDeps {
         readonly limit: number;
     }) => Effect.Effect<unknown[], never, never>;
     readonly limit?: number;
+    /**
+     * When non-empty, restrict the repository scan to checkouts whose
+     * `root_path` is in this list (used by `ax ingest here` to scope PR ingest
+     * to $PWD). Absent/empty → scan every GitHub-remoted repository.
+     */
+    readonly repoPaths?: readonly string[];
 }
 
 /**
@@ -73,10 +80,17 @@ export const ingestGithubPrs = (
         const limit = deps?.limit ?? 200;
         const fetchImpl = deps?.fetchImpl ?? fetchPullRequests;
 
+        // Scope the scan to specific checkout paths when requested (ingest here),
+        // otherwise scan every GitHub-remoted repository.
+        const repoPaths = deps?.repoPaths ?? [];
+        const repoPathFilter =
+            repoPaths.length > 0
+                ? ` AND root_path IN [${repoPaths.map((p) => surrealString(p)).join(", ")}]`
+                : "";
         const repoRows = yield* db.query<
             [Array<{ id: string; root_path: string | null; remote_url: string | null }>]
         >(
-            `SELECT type::string(id) AS id, root_path, remote_url FROM repository WHERE remote_url != NONE AND root_path != NONE;`,
+            `SELECT type::string(id) AS id, root_path, remote_url FROM repository WHERE remote_url != NONE AND root_path != NONE${repoPathFilter};`,
         );
         const repos = repoRows?.[0] ?? [];
 
@@ -97,6 +111,7 @@ export const ingestGithubPrs = (
             // Count every attempted repo as scanned, whether or not it has PRs.
             totals.repositoriesScanned += 1;
 
+            // TODO: honour ctx.since to bound the gh pr list window (v0 fetches a fixed limit)
             const prs = yield* fetchImpl({ cwd: repo.root_path, limit });
             if (prs.length === 0) continue;
 
@@ -119,10 +134,12 @@ export const ingestGithubPrs = (
  */
 export const githubPrStage: StageDef<GithubPrStageStats, SurrealClient> = {
     meta: StageMeta.make({ key: "github-pr", deps: ["git"], tags: ["ingest"] }),
-    run: (_ctx: IngestContext) =>
+    run: (ctx: IngestContext) =>
         Effect.gen(function* () {
             const t0 = Date.now();
-            const result = yield* ingestGithubPrs();
+            const result = yield* ingestGithubPrs(
+                ctx.repoPaths === undefined ? undefined : { repoPaths: ctx.repoPaths },
+            );
             return GithubPrStageStats.make({
                 durationMs: Date.now() - t0,
                 summary: `ingested ${result.pullRequests} PRs from ${result.repositoriesScanned} repos`,
