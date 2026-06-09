@@ -27,6 +27,8 @@ const makeDb = (sink: string[]) =>
                 return Effect.succeed([[{ session: "session:`s1`", produced: 2, reverted: 0 }]] as unknown as T);
             }
             if (/FROM tool_call/.test(sql)) return Effect.succeed([[]] as unknown as T);
+            // wave-2: delegation spawn edges (none) - keeps the compute deref-free.
+            if (/FROM spawned/.test(sql)) return Effect.succeed([[]] as unknown as T);
             return Effect.succeed([[]] as unknown as T);
         },
     } as never);
@@ -36,6 +38,9 @@ describe("deriveMetrics", () => {
         const sink: string[] = [];
         const stats = await Effect.runPromise(deriveMetrics({ sinceDays: 1 }).pipe(Effect.provide(makeDb(sink))));
         expect(sink.some((s) => /UPSERT session_metrics/.test(s) && s.includes("session:`s1`"))).toBe(true);
+        // wave-2 fields are present in the UPSERT CONTENT.
+        expect(sink.some((s) => /cold_start_reads:/.test(s) && /delegation_ratio:/.test(s) && /time_to_first_edit_ms:/.test(s)))
+            .toBe(true);
         expect(stats.sessionsWritten).toBe(1);
     });
 });

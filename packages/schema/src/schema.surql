@@ -908,6 +908,9 @@ DEFINE FIELD reverted_commits   ON session_metrics TYPE int DEFAULT 0;
 DEFINE FIELD time_to_land_ms    ON session_metrics TYPE option<int>;
 DEFINE FIELD lines_added        ON session_metrics TYPE int DEFAULT 0;
 DEFINE FIELD lines_removed      ON session_metrics TYPE int DEFAULT 0;
+DEFINE FIELD time_to_first_edit_ms ON session_metrics TYPE option<int>;
+DEFINE FIELD cold_start_reads   ON session_metrics TYPE int DEFAULT 0;
+DEFINE FIELD delegation_ratio   ON session_metrics TYPE option<float>;
 DEFINE FIELD ts                 ON session_metrics TYPE datetime DEFAULT time::now();
 DEFINE INDEX IF NOT EXISTS session_metrics_session ON session_metrics FIELDS session UNIQUE;
 

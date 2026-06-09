@@ -10,6 +10,9 @@ import { computeRevertedCommits } from "../metrics/commit-reverted.ts";
 import { computeDurability } from "../metrics/durability.ts";
 import { computeTimeToLand } from "../metrics/time-to-land.ts";
 import { computeSessionLoc } from "../metrics/session-loc.ts";
+import { computeTimeToFirstEdit } from "../metrics/time-to-first-edit.ts";
+import { computeColdStartReads } from "../metrics/cold-start-reads.ts";
+import { computeDelegationRatio } from "../metrics/delegation-ratio.ts";
 
 export interface DeriveMetricsStats {
     readonly sessionsWritten: number;
@@ -59,10 +62,17 @@ export const deriveMetrics = (
             return { sessionsWritten: 0, revertedCommits: reverted.revertedCount };
         }
 
-        // 3. Wave-1 scalars for the dirty set.
-        const [dur, ttl, loc] = yield* Effect.all(
-            [computeDurability(sessionIds), computeTimeToLand(sessionIds), computeSessionLoc(sessionIds)],
-            { concurrency: 3 },
+        // 3. Wave-1 + wave-2 scalars for the dirty set.
+        const [dur, ttl, loc, tfe, csr, del] = yield* Effect.all(
+            [
+                computeDurability(sessionIds),
+                computeTimeToLand(sessionIds),
+                computeSessionLoc(sessionIds),
+                computeTimeToFirstEdit(sessionIds),
+                computeColdStartReads(sessionIds),
+                computeDelegationRatio(sessionIds),
+            ],
+            { concurrency: 6 },
         );
 
         // 4. One session_metrics row per dirty session.
@@ -76,6 +86,8 @@ export const deriveMetrics = (
                 + `session: ${sessionRef}, `
                 + `durability_ratio: ${num(d.ratio)}, produced_commits: ${d.produced}, reverted_commits: ${d.reverted}, `
                 + `time_to_land_ms: ${num(t)}, lines_added: ${l.added}, lines_removed: ${l.removed}, `
+                + `time_to_first_edit_ms: ${num(tfe.get(id) ?? null)}, cold_start_reads: ${csr.get(id) ?? 0}, `
+                + `delegation_ratio: ${num(del.get(id) ?? null)}, `
                 + `ts: time::now() };`;
         });
         yield* executeStatementsWith(db, stmts, { chunkSize: 500 });

@@ -3464,13 +3464,16 @@ const formatSessionMetrics = (rows: SessionMetricsRow[]): string => {
     if (rows.length === 0) return "no session_metrics rows (run `ax ingest` to populate).";
     const lines: string[] = [];
     lines.push(
-        `${"session".padEnd(20)} ${"durab".padStart(5)} ${"commits".padStart(7)} ${"land".padStart(5)} ${"+/-loc".padStart(12)}  task`,
+        `${"session".padEnd(20)} ${"durab".padStart(5)} ${"commits".padStart(7)} ${"land".padStart(5)} ${"+/-loc".padStart(12)} `
+        + `${"1st-edit".padStart(8)} ${"reads".padStart(5)} ${"deleg%".padStart(6)}  task`,
     );
     for (const r of rows.slice(0, 50)) {
         lines.push(
             `${r.session.replace(/^session:/, "").replace(/[`⟨⟩]/g, "").slice(0, 20).padEnd(20)} `
             + `${metricPct(r.durabilityRatio)} ${String(r.producedCommits).padStart(7)} ${metricMs(r.timeToLandMs).padStart(5)} `
-            + `${`+${r.linesAdded}/-${r.linesRemoved}`.padStart(12)}  ${(r.taskLabel ?? "").replace(/\s+/g, " ").slice(0, 60)}`,
+            + `${`+${r.linesAdded}/-${r.linesRemoved}`.padStart(12)} `
+            + `${metricMs(r.timeToFirstEditMs).padStart(8)} ${String(r.coldStartReads).padStart(5)} ${metricPct(r.delegationRatio)}  `
+            + `${(r.taskLabel ?? "").replace(/\s+/g, " ").slice(0, 50)}`,
         );
     }
     return lines.join("\n");

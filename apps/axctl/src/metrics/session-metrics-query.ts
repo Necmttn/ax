@@ -13,6 +13,9 @@ export interface SessionMetricsRow {
     readonly timeToLandMs: number | null;
     readonly linesAdded: number;
     readonly linesRemoved: number;
+    readonly timeToFirstEditMs: number | null;
+    readonly coldStartReads: number;
+    readonly delegationRatio: number | null;
     readonly estimatedCostUsd: number | null;
     readonly userCorrections: number | null;
 }
@@ -42,6 +45,7 @@ SELECT
   type::string(session) AS session,
   session.source AS source,
   durability_ratio, produced_commits, time_to_land_ms, lines_added, lines_removed,
+  time_to_first_edit_ms, cold_start_reads, delegation_ratio,
   (SELECT task_label FROM session_health WHERE session = $parent.session LIMIT 1)[0].task_label AS task_label,
   (SELECT user_corrections FROM session_health WHERE session = $parent.session LIMIT 1)[0].user_corrections AS user_corrections,
   (SELECT estimated_cost_usd FROM session_token_usage WHERE session = $parent.session LIMIT 1)[0].estimated_cost_usd AS estimated_cost_usd
@@ -58,6 +62,9 @@ LIMIT ${limit};`))?.[0] ?? [];
             timeToLandMs: numOrNull(r.time_to_land_ms),
             linesAdded: numOrZero(r.lines_added),
             linesRemoved: numOrZero(r.lines_removed),
+            timeToFirstEditMs: numOrNull(r.time_to_first_edit_ms),
+            coldStartReads: numOrZero(r.cold_start_reads),
+            delegationRatio: numOrNull(r.delegation_ratio),
             estimatedCostUsd: numOrNull(r.estimated_cost_usd),
             userCorrections: numOrNull(r.user_corrections),
         }));
