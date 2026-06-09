@@ -146,3 +146,45 @@ in the bundle export, same family as the iter-0 `enrichSessions` bug.
   hotspot and apply the same indexed-lookup fix. Target <15s for 29 subagents.
 - Then publish a 2nd proud session (`b23ebb28`, the Electron extraction) to
   validate the speedup on a different shape.
+
+---
+
+## Iteration 2 — optimize `ax share` + publish 2nd proud session (2026-06-10 00:45 WITA)
+
+**Tried.** Profiled the `ax share` bundle export (was 45-54s for a 29-subagent
+session). Found two read hotspots in `resolveTurnContent`, both the IN-scan/N+1
+family from iter 0:
+- blocks/atoms via `... WHERE document IN [<318 docs>]` = membership scans over
+  the 430k-block / 1.1M-atom tables → **6.3s + 22s**. Single-document
+  `document = X` is indexed (~1ms). Replaced with per-document fan-out at
+  concurrency 16.
+- `content_document` had no session index → `source_kind='turn' AND session=$sid`
+  scanned all turn docs (~600ms/session). Added `content_document_session
+  (session, source_kind)` → 0.3ms.
+
+**Worked.** share `--dry-run` fb1be39a **45s → 1.5s**; output byte-identical
+content (629 blocks / 1551 atoms verified vs the old IN-scan). Published a 2nd
+proud session (different shape: 944 turns, 768 tool_calls, 29 files changed, 15
+failures recovered — the @ax/studio Electron extraction → 0.15.0) in **7.8s**:
+https://ax.necmttn.com/s/Necmttn/51d98957752632f6bbeedd81934dcb1c
+Tests 32/32 (exporter/artifact/session-detail); effect-lint clean.
+
+**review-all (adversarial).** New findings were non-blocking nice-to-haves
+("stress-test 300+ doc sessions" — empirically validated by the exact
+629/1551 match + two real publishes; "regression test malformed
+content_document ids" — already guarded by `contentDocumentRid`
+regex/backtick-escape). The detailed lock/timeout findings in the job log were
+the STALE iter-0 review (already fixed).
+
+**Failed / friction.** Applied `content_document_session` live via curl to
+measure; it IS in schema.surql now, but I have NOT verified the normal
+schema-apply path (ingest startup?) actually (re)applies schema.surql so the
+index lands for other users / fresh DBs.
+
+**Next (seeds iter 3).**
+- Verify the schema-apply path applies the new index (grep how schema.surql is
+  loaded; confirm a fresh `ax ingest` defines it). Critical — else the share
+  speedup only exists on this machine.
+- Hunt remaining `IN`-scan / per-edge-deref hotspots (recall, `skills weighted`
+  — flagged in prior memory) with the same indexed-lookup fix.
+- Optionally publish a 3rd, different-category proud session.
