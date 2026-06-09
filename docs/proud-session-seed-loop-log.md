@@ -314,3 +314,42 @@ PR summary ready, branch green. Remaining: the final wind-down within ~30min of
 08:30 — re-enable `com.necmttn.ax-watch`, one catch-up `ax ingest --since=1`
 (lock-protected), confirm `sessions here` + `share --dry-run` still fast, then
 mark the loop complete. Interim wakes are just health pings.
+
+---
+
+## Iteration 7 — optimization loop target #1: file-context turn IN-scans (2026-06-10 07:10 WITA)
+
+Branch `opt/read-hotspots` off the merged main (#167 + #166). Working the
+10-target optimization backlog from the post-merge review.
+
+**Tried.** Target #1 = `context/file-context.ts` `session IN [...]` cluster.
+Found two layers:
+- `loadPriorFileSessionsLean` (hook limit-5 path): `turn WHERE session IN [≤50]`
+  for user/assistant counts + task titles = ~3s membership scan over 560k turns.
+- `loadPriorFileSessions` (the `$parent.session` correlated version `ax context
+  file` actually uses): ~12 partial scans/row, ~3.2s.
+
+**Worked.** Fixed the lean loader: both turn reads → per-session `session = <lit>`
+indexed fan-out (concurrency 16); small-table reads stay batched. typecheck 0,
+file-context + hook tests 26/26, effect-lint clean. Committed `76df58f`.
+
+**Failed / friction (important lesson).** Tried to also swap
+`buildFileContextPack` onto the lean loader + delete the slow correlated one —
+but (a) the unit test mocks the slow query's single fat response, so it needs a
+full per-session mock rewrite, and (b) the lean loader prioritizes `pr_title`
+for the session title while the slow one prioritizes the first user-turn text —
+a real BEHAVIORAL difference, not just perf. Reverted the swap to pristine and
+shipped only the safe, tested lean-loader fix. **Loop rule going forward:
+time-box each target; if it turns into a test-coupling / behavior-change rabbit
+hole, ship the safe subset and split the rest into its own iteration.**
+
+**Next (optimization backlog, re-ordered for low-risk-first).**
+- 1b. `buildFileContextPack` → lean loader swap (needs mock rewrite + title-
+  priority decision). Its own iteration.
+- 2. `insights.ts` `$parent.session` correlated subqueries (633-774) — same
+  pattern; likely same test coupling, time-box it.
+- 3. ingest write batching (`transcripts.ts` per-row UPSERTs → per-file txn).
+- 4. session-canvas orch `session IN [childRefs]` (small, self-contained).
+- 5. recall.ts session-IN scope filter. 6. schema diff-apply on install.
+- 7. reaction_event.session backfill+index. 8. loc-query name-IN.
+- 9. content_atom(session,source_kind) index. 10. DB retention/compaction.
