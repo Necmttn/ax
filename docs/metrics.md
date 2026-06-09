@@ -66,24 +66,43 @@ bun apps/axctl/src/cli/index.ts sessions metrics --project /path/to/repo --limit
 Then sanity-check counts (ns=ax db=main on 127.0.0.1:8521):
 `SELECT count() AS rows, count(durability_ratio != NONE) AS with_durab FROM session_metrics GROUP ALL;`
 
-## Deferred to wave 2
+## What ships in wave 2
 
-- **Cross-session signals** (`fragility-cascade.ts` is built, unit-tested, and
-  live-query-correct: a bounded 3-query JS join (reverted-touched -> produced map
-  -> edited scoped to the fragile files) that avoids the unsupported `FROM ... AS`
-  alias and the all-`edited` per-deref hang). Computed correctly but NOT yet wired
-  to a surface (CLI/show/dashboard) - that wiring is wave 2.
-- `cold_start_reads`, `handoff_sessions`, `delegation_ratio`,
-  `recovery_effective`, `skill_durability_efficacy`, `expertise_leverage`, and the
-  rest of the named signals.
+| metric | column on `session_metrics` | meaning |
+|---|---|---|
+| time_to_first_edit_ms | `time_to_first_edit_ms` (`option<int>`) | ms from `session.started_at` to the session's first Edit/Write tool call; NONE when the session never edited |
+| cold_start_reads | `cold_start_reads` (`int`) | count of Read/Grep/Glob tool calls before the session's first edit (how much orientation the session needed before acting) |
+| delegation_ratio | `delegation_ratio` (`option<float>`) | share of the session's produced commits attributable to spawned sub-agents vs. direct work; NONE when the session produced nothing |
+
+## What ships in wave 3
+
+The `ax signals` surface - the ADR-0011 "framework earns itself" point, kept
+minimal (a flat catalog array + a switch, NOT a registry/DAG/codegen).
+
+- `ax signals list` - browse the signal catalog: one line per signal
+  (`id  [kind]  label - description`).
+- `ax signals show <id> [--limit N] [--json]` - render a signal by id. For a
+  `relation` signal it prints `origin → downstream  (weight N)` edges sorted by
+  weight (top `--limit`, default 30). Unknown id → stderr error + exit 2 listing
+  valid ids; `--json` emits the raw edges.
+- `fragility_cascade` (relation, cross-session) is now browsable through this
+  surface - the bounded `fragility-cascade.ts` computation wired to the CLI.
+  Catalog: `apps/axctl/src/metrics/catalog.ts`.
+
+## Deferred
+
+- **Remaining aggregate / relation signals**: `skill_durability_efficacy`,
+  `error_recovery_efficacy`, `expertise_leverage`, `file_handoff`, `rework_chain`.
+  These are cross-ALL-session aggregates whose naive `invoked`/`edited` `in.session`
+  deref over ~87k edges would HANG (see `weighted-query-per-edge-deref-hang`). They
+  need a hang-safe **bounded** design - e.g. a derive-stage precompute that joins
+  the already-stored `session_metrics.durability_ratio` rather than an on-demand
+  per-edge deref - and are deferred to a later wave.
 - The registry/DAG/`fn::` extraction - only once ~5–6 signals make the
   per-metric edits feel like copy-paste (the ADR-0011 gate).
-
-### Deferred to wave 2/3
-
 - **Multi-provider tool-name parity**: `time_to_first_edit_ms` +
   `cold_start_reads` currently recognize only Claude tool names
   (`Edit`/`Write`/`MultiEdit`/`NotebookEdit` for edits, `Read`/`Grep`/`Glob` for
   reads/searches); Codex/Pi `apply_patch` + shell read/search commands (via
   `tool_call.command_norm`/`command_tool`) are not yet counted -- multi-provider
-  parity is a wave-3 refinement.
+  parity is a later refinement.
