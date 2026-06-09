@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { memo, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useParams } from "@tanstack/react-router";
 import { api } from "../api.ts";
@@ -1144,7 +1144,7 @@ export function HookFireMarker({ hook }: { hook: HookFireDto }) {
     );
 }
 
-export function Turn({
+function TurnImpl({
     turn,
     anchored,
     childrenSpawnedHere,
@@ -1300,6 +1300,10 @@ export function Turn({
         </div>
     );
 }
+
+/** Memoized: per-turn dissection is expensive; only re-render when this turn's
+ *  own props change (not on every parent hover/scroll/hash update). */
+export const Turn = memo(TurnImpl);
 
 export function SessionInspectRoute() {
     const { sessionId } = useParams({ from: "/sessions/$sessionId/inspect" });

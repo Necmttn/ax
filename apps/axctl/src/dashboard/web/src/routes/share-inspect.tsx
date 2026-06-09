@@ -17,6 +17,17 @@ import { DockedRail, HookFireMarker, InspectGuide, KIND_STYLE, Turn, useInspectS
 
 type ShareSchemaVersion = 1 | 2 | 3;
 
+// A published gist's files are immutable for a viewing session, so cache them
+// forever and never refetch on focus/remount - the 1.26MB session.json should
+// be fetched + parsed once, then served from cache on every navigation.
+const IMMUTABLE_SHARE_QUERY = { staleTime: Infinity, gcTime: Infinity } as const;
+
+// Mount only this many turns initially, then grow on scroll. content-visibility
+// virtualizes paint, but React still MOUNTS every turn + runs its per-turn
+// dissection up front - on a 291-turn session that's the multi-second hang.
+// Windowing the mount (like the live inspector's PAGE_SIZE) is the real fix.
+const SHARE_PAGE_SIZE = 80;
+
 interface ShareHarnessHookView {
     readonly idx: number;
     readonly ts: string;
@@ -280,6 +291,23 @@ function InspectBody({
     const [anchoredSeq, setAnchoredSeq] = useState<number | null>(() => hashSeq());
     const turnsRef = useRef<ReadonlyArray<InspectTurnDto>>([]);
     turnsRef.current = data.turns;
+
+    // Mount-windowing: render the first N turns, grow on scroll / on a jump that
+    // targets a turn past the window. The full list stays in `data.turns` so
+    // jump/find/cost-rail still see everything.
+    const [visibleCount, setVisibleCount] = useState(() => Math.min(SHARE_PAGE_SIZE, data.turns.length));
+    // Reset the window when the session being viewed changes (subagent switch).
+    useEffect(() => {
+        setVisibleCount(Math.min(SHARE_PAGE_SIZE, data.turns.length));
+    }, [data.source_path, data.turns.length]);
+    const loadMore = (n?: number) =>
+        new Promise<void>((resolve) => {
+            setVisibleCount((c) => Math.min(data.turns.length, c + Math.max(n ?? SHARE_PAGE_SIZE, SHARE_PAGE_SIZE)));
+            // Resolve after the grow has rendered so FilterBar's post-loadMore
+            // scrollIntoView finds the now-mounted target.
+            requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+        });
+    const sentinelRef = useRef<HTMLDivElement | null>(null);
     // Harness hooks (guardrail fires) anchored to their nearest turn, + the
     // combined jump idx list ("next hook fire" cycles file-context + harness).
     const harnessByTurn = useMemo(() => {
@@ -313,10 +341,35 @@ function InspectBody({
         return () => window.removeEventListener("hashchange", onHashChange);
     }, []);
 
+    // A jump/hash targeting a turn past the window grows it to include the target.
+    useEffect(() => {
+        if (anchoredSeq == null) return;
+        const idx = data.turns.findIndex((t) => t.seq === anchoredSeq);
+        if (idx >= 0 && idx >= visibleCount) setVisibleCount(idx + 1);
+    }, [anchoredSeq, data.turns, visibleCount]);
+
     useEffect(() => {
         if (anchoredSeq == null) return;
         document.getElementById(`turn-${anchoredSeq}`)?.scrollIntoView({ behavior: "auto", block: "start" });
-    }, [anchoredSeq, data.turns.length]);
+    }, [anchoredSeq, data.turns.length, visibleCount]);
+
+    // Grow the window as the bottom sentinel scrolls into view.
+    useEffect(() => {
+        const el = sentinelRef.current;
+        if (!el || visibleCount >= data.turns.length) return;
+        const obs = new IntersectionObserver(
+            (entries) => {
+                if (entries.some((e) => e.isIntersecting)) {
+                    setVisibleCount((c) => Math.min(data.turns.length, c + SHARE_PAGE_SIZE));
+                }
+            },
+            { rootMargin: "1200px 0px" },
+        );
+        obs.observe(el);
+        return () => obs.disconnect();
+    }, [visibleCount, data.turns.length]);
+
+    const windowedTurns = useMemo(() => data.turns.slice(0, visibleCount), [data.turns, visibleCount]);
 
     return (
         <>
@@ -327,10 +380,10 @@ function InspectBody({
             <FilterBar
                 turns={data.turns}
                 anchorSeqs={spawnAnchorSeqs}
-                loadedCount={data.turns.length}
-                totalCount={data.total_turns}
+                loadedCount={visibleCount}
+                totalCount={data.turns.length}
                 appendLoading={false}
-                loadMore={() => Promise.resolve()}
+                loadMore={loadMore}
                 getTurns={() => turnsRef.current}
                 getCurrentSeq={() => anchoredSeq}
                 hookFireIdxs={hookFireIdxs}
@@ -356,7 +409,7 @@ function InspectBody({
             </div>
             <div style={{ display: "flex", alignItems: "flex-start", gap: 12 }}>
                 <div style={{ minWidth: 0, flex: "1 1 auto" }}>
-                    {spliceHookFires(data.turns, data.hook_fires).map((item) => {
+                    {spliceHookFires(windowedTurns, data.hook_fires).map((item) => {
                         if (item.kind === "hook_fire") {
                             return <HookFireMarker key={`hook-${item.hook.idx}`} hook={item.hook} />;
                         }
@@ -400,6 +453,11 @@ function InspectBody({
                             </div>
                         );
                     })}
+                    {visibleCount < data.turns.length ? (
+                        <div ref={sentinelRef} style={{ padding: "12px 24px", color: "var(--muted-2)", fontSize: 11, fontFamily: "ui-monospace, monospace" }}>
+                            loading {data.turns.length - visibleCount} more turns…
+                        </div>
+                    ) : null}
                 </div>
                 <DockedRail
                     data={data}
@@ -579,6 +637,7 @@ function MultiFileShareView(props: {
     const fileQuery = useQuery({
         queryKey: ["share-file", owner, gistId, selectedFile],
         queryFn: () => fetchShareFile(owner, gistId, selectedFile),
+        ...IMMUTABLE_SHARE_QUERY,
     });
     const data = useMemo(
         () => fileQuery.data ? inspectPayloadFromShare(fileQuery.data, `gist:${owner}/${gistId}/${selectedFile}`) : null,
@@ -589,6 +648,7 @@ function MultiFileShareView(props: {
         qc.prefetchQuery({
             queryKey: ["share-file", owner, gistId, file],
             queryFn: () => fetchShareFile(owner, gistId, file),
+            ...IMMUTABLE_SHARE_QUERY,
         });
 
     const totals = manifest.totals;
@@ -705,6 +765,7 @@ function LegacyShareView(props: { readonly owner: string; readonly gistId: strin
     const query = useQuery({
         queryKey: ["share-inspect", owner, gistId],
         queryFn: () => fetchShareArtifact(owner, gistId),
+        ...IMMUTABLE_SHARE_QUERY,
     });
     const data = useMemo(
         () => query.data ? inspectPayloadFromShare(query.data, `gist:${owner}/${gistId}`) : null,
@@ -751,6 +812,7 @@ export function ShareInspectView(props: { readonly owner: string; readonly gistI
     const manifestQuery = useQuery({
         queryKey: ["share-manifest", owner, gistId],
         queryFn: () => fetchShareManifest(owner, gistId),
+        ...IMMUTABLE_SHARE_QUERY,
     });
 
     if (manifestQuery.isLoading) {
