@@ -1341,8 +1341,10 @@ export function SessionInspectView({ sessionId }: { readonly sessionId: string }
         return m ? Number(m[1]) : null;
     };
     const [anchoredSeq, setAnchoredSeq] = useState<number | null>(() => readHashSeq());
-    // Zoom level: raw transcript (default) vs. the highlight/event timeline.
-    const [view, setView] = useState<"transcript" | "timeline">("transcript");
+    // Zoom level. Default to the timeline: it's the fast highlight overview
+    // (~2-3s) and the right entry point; the raw transcript is a slower
+    // (large-query) drill-down loaded on demand.
+    const [view, setView] = useState<"transcript" | "timeline">("timeline");
 
     // The docked right-rail inspector tracks the last block/alias the user
     // hovered, across all turns (seeded to the first parsed turn).
