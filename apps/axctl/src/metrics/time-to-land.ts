@@ -1,14 +1,7 @@
 import { Effect } from "effect";
 import { SurrealClient } from "@ax/lib/db";
 import type { DbError } from "@ax/lib/errors";
-import { recordLiteral } from "@ax/lib/ids";
-import { recordKeyPart } from "@ax/lib/shared/derive-keys";
-
-const isoMs = (iso: unknown): number | null => {
-    if (typeof iso !== "string" || iso.length === 0) return null;
-    const t = new Date(iso).getTime();
-    return Number.isFinite(t) ? t : null;
-};
+import { isoMs, sessionRefList } from "./util.ts";
 
 /**
  * Latency from a session's end to when its work landed: the earliest
@@ -28,7 +21,7 @@ export const computeTimeToLand = (
         if (sessionIds.length === 0) return map;
         for (const id of sessionIds) map.set(id, null);
 
-        const refs = sessionIds.map((id) => recordLiteral("session", recordKeyPart(id, "session") ?? "")).join(", ");
+        const refs = sessionRefList(sessionIds);
         // Produced commits (sha) + the producing session's end time.
         const produced = (yield* db.query<[Array<Record<string, unknown>>]>(
             `SELECT type::string(in) AS session, type::string(in.ended_at) AS ended_at, out.sha AS sha`

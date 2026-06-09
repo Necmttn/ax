@@ -78,3 +78,12 @@ Then sanity-check counts (ns=ax db=main on 127.0.0.1:8521):
   rest of the named signals.
 - The registry/DAG/`fn::` extraction - only once ~5–6 signals make the
   per-metric edits feel like copy-paste (the ADR-0011 gate).
+
+### Deferred to wave 2/3
+
+- **Multi-provider tool-name parity**: `time_to_first_edit_ms` +
+  `cold_start_reads` currently recognize only Claude tool names
+  (`Edit`/`Write`/`MultiEdit`/`NotebookEdit` for edits, `Read`/`Grep`/`Glob` for
+  reads/searches); Codex/Pi `apply_patch` + shell read/search commands (via
+  `tool_call.command_norm`/`command_tool`) are not yet counted -- multi-provider
+  parity is a wave-3 refinement.

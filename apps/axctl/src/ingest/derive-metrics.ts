@@ -62,21 +62,39 @@ export const deriveMetrics = (
             return { sessionsWritten: 0, revertedCommits: reverted.revertedCount };
         }
 
-        // 3. Wave-1 + wave-2 scalars for the dirty set.
+        // 2b. Spawn-parent expansion: a dirty CHILD means its parent's
+        //     delegation_ratio may have changed, but a parent outside the ingest
+        //     window is not in the base dirty set. Walk the transitive
+        //     spawn-PARENT closure of the dirty set so those parents recompute
+        //     too. Bounded (depth cap 8) + cycle-guarded (`!all.has`) against
+        //     cyclic/self spawn edges.
+        let frontier = new Set(sessionIds);
+        const all = new Set(sessionIds);
+        for (let depth = 0; depth < 8 && frontier.size > 0; depth++) {
+            const refs = [...frontier].map((id) => recordLiteral("session", recordKeyPart(id, "session") ?? "")).join(", ");
+            const parents = (yield* db.query<[string[]]>(
+                `SELECT VALUE type::string(in) FROM spawned WHERE out IN [${refs}];`,
+            ))?.[0] ?? [];
+            frontier = new Set();
+            for (const p of parents) if (typeof p === "string" && !all.has(p)) { all.add(p); frontier.add(p); }
+        }
+        const expandedIds = [...all];
+
+        // 3. Wave-1 + wave-2 scalars for the dirty set (+ spawn parents).
         const [dur, ttl, loc, tfe, csr, del] = yield* Effect.all(
             [
-                computeDurability(sessionIds),
-                computeTimeToLand(sessionIds),
-                computeSessionLoc(sessionIds),
-                computeTimeToFirstEdit(sessionIds),
-                computeColdStartReads(sessionIds),
-                computeDelegationRatio(sessionIds),
+                computeDurability(expandedIds),
+                computeTimeToLand(expandedIds),
+                computeSessionLoc(expandedIds),
+                computeTimeToFirstEdit(expandedIds),
+                computeColdStartReads(expandedIds),
+                computeDelegationRatio(expandedIds),
             ],
             { concurrency: 6 },
         );
 
-        // 4. One session_metrics row per dirty session.
-        const stmts = sessionIds.map((id) => {
+        // 4. One session_metrics row per dirty session (+ spawn parents).
+        const stmts = expandedIds.map((id) => {
             const key = recordKeyPart(id, "session") ?? "";
             const sessionRef = recordLiteral("session", key);
             const d = dur.get(id) ?? { produced: 0, reverted: 0, ratio: null };
@@ -91,7 +109,7 @@ export const deriveMetrics = (
                 + `ts: time::now() };`;
         });
         yield* executeStatementsWith(db, stmts, { chunkSize: 500 });
-        return { sessionsWritten: sessionIds.length, revertedCommits: reverted.revertedCount };
+        return { sessionsWritten: expandedIds.length, revertedCommits: reverted.revertedCount };
     });
 
 // ---------------------------------------------------------------------------
@@ -107,7 +125,7 @@ export class DeriveMetricsStageStats extends BaseStageStats.extend<DeriveMetrics
 }) {}
 
 export const deriveMetricsStage: StageDef<DeriveMetricsStageStats, SurrealClient> = {
-    meta: StageMeta.make({ key: "derive-metrics", deps: ["git", "github-pr", "session-health"], tags: ["derive"] }),
+    meta: StageMeta.make({ key: "derive-metrics", deps: ["git", "github-pr", "session-health", "spawned"], tags: ["derive"] }),
     run: (ctx: IngestContext) =>
         Effect.gen(function* () {
             const t0 = Date.now();

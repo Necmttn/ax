@@ -1,17 +1,11 @@
 import { Effect } from "effect";
 import { SurrealClient } from "@ax/lib/db";
 import type { DbError } from "@ax/lib/errors";
-import { recordLiteral } from "@ax/lib/ids";
 import { surrealString } from "@ax/lib/shared/surql";
-import { recordKeyPart } from "@ax/lib/shared/derive-keys";
+import { isoMs, sessionRefList } from "./util.ts";
 
+// TODO(wave-3): multi-provider tool-name classification (apply_patch, shell read/search)
 const EDIT_TOOLS = ["Edit", "Write", "MultiEdit", "NotebookEdit"];
-
-const isoMs = (iso: unknown): number | null => {
-    if (typeof iso !== "string" || iso.length === 0) return null;
-    const t = new Date(iso).getTime();
-    return Number.isFinite(t) ? t : null;
-};
 
 /**
  * Time from a session's `started_at` to its first edit, in ms. null when the
@@ -32,7 +26,7 @@ export const computeTimeToFirstEdit = (
         if (sessionIds.length === 0) return map;
         for (const id of sessionIds) map.set(id, null);
 
-        const refs = sessionIds.map((id) => recordLiteral("session", recordKeyPart(id, "session") ?? "")).join(", ");
+        const refs = sessionRefList(sessionIds);
         const tools = EDIT_TOOLS.map((t) => surrealString(t)).join(", ");
 
         // First edit per session (bounded; deref-free aggregate).

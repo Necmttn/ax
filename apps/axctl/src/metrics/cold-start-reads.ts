@@ -1,19 +1,13 @@
 import { Effect } from "effect";
 import { SurrealClient } from "@ax/lib/db";
 import type { DbError } from "@ax/lib/errors";
-import { recordLiteral } from "@ax/lib/ids";
 import { surrealString } from "@ax/lib/shared/surql";
-import { recordKeyPart } from "@ax/lib/shared/derive-keys";
+import { isoMs, sessionRefList } from "./util.ts";
 
+// TODO(wave-3): multi-provider tool-name classification (apply_patch, shell read/search)
 const EDIT_TOOLS = new Set(["Edit", "Write", "MultiEdit", "NotebookEdit"]);
 const READ_TOOLS = new Set(["Read", "Grep", "Glob"]);
 const ALL_TOOLS = [...EDIT_TOOLS, ...READ_TOOLS];
-
-const isoMs = (iso: unknown): number | null => {
-    if (typeof iso !== "string" || iso.length === 0) return null;
-    const t = new Date(iso).getTime();
-    return Number.isFinite(t) ? t : null;
-};
 
 /**
  * Count of read/search tool_calls (Read = read_file-ish, Grep/Glob =
@@ -35,7 +29,7 @@ export const computeColdStartReads = (
         const map = new Map<string, number>();
         if (sessionIds.length === 0) return map;
 
-        const refs = sessionIds.map((id) => recordLiteral("session", recordKeyPart(id, "session") ?? "")).join(", ");
+        const refs = sessionRefList(sessionIds);
         const tools = ALL_TOOLS.map((t) => surrealString(t)).join(", ");
         const rows = (yield* db.query<[Array<Record<string, unknown>>]>(
             `SELECT type::string(session) AS session, name, type::string(ts) AS ts`

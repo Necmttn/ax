@@ -1,8 +1,7 @@
 import { Effect } from "effect";
 import { SurrealClient } from "@ax/lib/db";
 import type { DbError } from "@ax/lib/errors";
-import { recordLiteral } from "@ax/lib/ids";
-import { recordKeyPart } from "@ax/lib/shared/derive-keys";
+import { fillDefaults, sessionRefList } from "./util.ts";
 
 export interface Durability {
     readonly produced: number;
@@ -16,7 +15,7 @@ export const computeDurability = (
     Effect.gen(function* () {
         const db = yield* SurrealClient;
         if (sessionIds.length === 0) return new Map();
-        const refs = sessionIds.map((id) => recordLiteral("session", recordKeyPart(id, "session") ?? "")).join(", ");
+        const refs = sessionRefList(sessionIds);
         const result = (yield* db.query<[Array<Record<string, unknown>>]>(`
 SELECT type::string(in) AS session,
        count() AS produced,
@@ -30,6 +29,5 @@ GROUP BY session;`))?.[0] ?? [];
             const reverted = Number(row.reverted ?? 0);
             map.set(String(row.session), { produced, reverted, ratio: produced === 0 ? null : (produced - reverted) / produced });
         }
-        for (const id of sessionIds) if (!map.has(id)) map.set(id, { produced: 0, reverted: 0, ratio: null });
-        return map;
+        return fillDefaults(map, sessionIds, { produced: 0, reverted: 0, ratio: null });
     });
