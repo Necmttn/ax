@@ -3,9 +3,49 @@ import { Effect, Layer } from "effect";
 import { BunFileSystem, BunPath } from "@effect/platform-bun";
 import { SurrealClient, type SurrealClientShape } from "@ax/lib/db";
 import type { DbError } from "@ax/lib/errors";
-import { codexContentToInspectorText, fetchSessionInspect, jsonlBlockToInspectorText, parseClaudeLine, parseCodexLine } from "./session-inspect.ts";
+import { codexContentToInspectorText, fetchSessionInspect, jsonlBlockToInspectorText, parseClaudeLine, parseCodexLine, shareTurnToolCallToDto } from "./session-inspect.ts";
+import type { ShareTurnToolCall } from "../queries/session-detail.ts";
 
 const BunFsLayer = Layer.merge(BunFileSystem.layer, BunPath.layer);
+
+describe("graph tool_calls mapping (shareTurnToolCallToDto)", () => {
+    test("maps a recorded Bash tool_call row to a ToolCallDto, parsing input_json + carrying output", () => {
+        const row: ShareTurnToolCall = {
+            seq: 11,
+            name: "Bash",
+            command: "gh pr list",
+            input_json: JSON.stringify({ command: "gh pr list", description: "list PRs" }),
+            output: "open PRs:\n#116",
+            has_error: false,
+        };
+        const dto = shareTurnToolCallToDto(row);
+        expect(dto.seq).toBe(11);
+        expect(dto.name).toBe("Bash");
+        expect(dto.category).toBe("sh");
+        expect(dto.input).toEqual({ command: "gh pr list", description: "list PRs" });
+        expect(dto.command).toBe("gh pr list");
+        expect(dto.output_excerpt).toBe("open PRs:\n#116");
+        expect(dto.has_error).toBe(false);
+        expect(dto.tokens).toBeNull();
+    });
+
+    test("degrades to null input when input_json is absent or malformed; preserves error flag", () => {
+        const row: ShareTurnToolCall = {
+            seq: 24,
+            name: "WebFetch",
+            command: null,
+            input_json: "not-json",
+            output: null,
+            has_error: true,
+        };
+        const dto = shareTurnToolCallToDto(row);
+        expect(dto.input).toBeNull();
+        expect(dto.command).toBeNull();
+        expect(dto.output_excerpt).toBeNull();
+        expect(dto.has_error).toBe(true);
+        expect(dto.category).toBe("net");
+    });
+});
 
 describe("live tool_calls extraction", () => {
     test("Claude tool_use block becomes a ToolCallDto and is NOT baked into text", () => {

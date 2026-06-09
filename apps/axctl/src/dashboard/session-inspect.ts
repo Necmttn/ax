@@ -14,6 +14,7 @@ import { turnRecordKey } from "@ax/lib/ids";
 import { SurrealClient } from "@ax/lib/db";
 import { decodeJsonRecordOrNull, encodeJson } from "@ax/lib/decode";
 import { resolveTurnContent, resolveTurnContentForSourceRefs } from "../queries/session-turn-content.ts";
+import { sessionShareTurnToolCallsQuery, type ShareTurnToolCall } from "../queries/session-detail.ts";
 import { locateTranscript, type TranscriptNotFoundError } from "@ax/lib/transcript-locator";
 import type {
     HookFireDto,
@@ -32,6 +33,7 @@ import {
     interpolateRid,
     queryMany,
     queryOptional,
+    runQuery,
 } from "@ax/lib/shared/graph-query";
 import { safeKeyPart } from "@ax/lib/shared/derive-keys";
 import { clampPagination, type PaginationConfig } from "@ax/lib/shared/pagination";
@@ -166,6 +168,30 @@ function toToolCall(seq: number, name: string, rawInput: unknown): ToolCallDto {
     }
     const command = input && typeof input.command === "string" ? input.command : null;
     return { seq, name, category: categoryOf(name), input, command, output_excerpt: null, has_error: false, tokens: null };
+}
+
+/** Map a recorded `tool_call` row (the share-turn-toolcalls projection) to a
+ *  `ToolCallDto`, mirroring the share exporter's `toShareToolCall`. `seq` is
+ *  carried through from the row (the turn seq the call ran in) and rewritten to
+ *  the display seq at assembly. Output comes from the stored excerpt (the live
+ *  tool_result turns carry no text in the graph), which the renderer uses as
+ *  its tool-card output fallback. */
+export function shareTurnToolCallToDto(call: ShareTurnToolCall): ToolCallDto {
+    let input: Record<string, unknown> | null = null;
+    if (call.input_json) {
+        const parsed = decodeJsonRecordOrNull(call.input_json);
+        if (parsed) input = parsed;
+    }
+    return {
+        seq: call.seq,
+        name: call.name,
+        category: categoryOf(call.name),
+        input,
+        command: call.command ?? null,
+        output_excerpt: call.output ?? null,
+        has_error: call.has_error,
+        tokens: null,
+    };
 }
 
 export function parseClaudeLine(line: string): CanonicalTurn | null {
@@ -666,13 +692,38 @@ const resolveGraphTurnWindow = (
         `
             SELECT seq, role, type::string(ts) AS ts, text
             FROM [${from}]
-            WHERE text IS NOT NONE
+            WHERE text IS NOT NONE OR has_tool_use = true
             ORDER BY seq ASC;
         `,
         (row) => row,
         "session-inspect resolveGraphTurnWindow",
     );
 };
+
+/** Per-turn tool calls for this session, keyed by the (1-based DB) turn seq the
+ *  calls ran in - exactly the `tool_call.seq` written at ingest, which equals
+ *  the issuing assistant turn's `turn.seq`. Mirrors the share exporter's
+ *  `toShareToolCall` mapping so the live graph path and the share path render
+ *  identical tool cards. `ToolCallDto.seq` is set to 0 here and rewritten with
+ *  the turn's display seq at assembly (matching the JSONL path).
+ *
+ *  Defensive: a failed query degrades to an empty map - turns still render,
+ *  just without their tool cards (never crashes the inspector). */
+const resolveGraphTurnToolCalls = (
+    sessionId: string,
+): Effect.Effect<ReadonlyMap<number, ToolCallDto[]>, never, SurrealClient> =>
+    runQuery(sessionShareTurnToolCallsQuery, { recordRef: toSessionRid(toBareSessionId(sessionId)) }).pipe(
+        Effect.map((rows) => {
+            const bySeq = new Map<number, ToolCallDto[]>();
+            for (const row of rows) {
+                if (row === null) continue;
+                const list = bySeq.get(row.seq) ?? [];
+                list.push(shareTurnToolCallToDto(row));
+                bySeq.set(row.seq, list);
+            }
+            return bySeq;
+        }),
+    );
 
 const resolveGraphSessionHealth = (
     sessionId: string,
@@ -856,7 +907,7 @@ const fetchGraphSessionInspect = (
 ): Effect.Effect<SessionInspectPayload | null, never, SurrealClient> =>
     Effect.gen(function* () {
         const turnSourceRefs = turnSourceRefsForWindow(bareSessionId, turnOffset, turnLimit);
-        const [parent, sessionMeta, childrenEdges, allHookFires, tokenUsage, turnTokenUsage, graphTurns, health, turnContent] = yield* Effect.all([
+        const [parent, sessionMeta, childrenEdges, allHookFires, tokenUsage, turnTokenUsage, graphTurns, health, turnContent, toolCallsByDbSeq] = yield* Effect.all([
             resolveParent(bareSessionId),
             resolveSessionMeta(bareSessionId),
             resolveChildren(bareSessionId),
@@ -866,6 +917,7 @@ const fetchGraphSessionInspect = (
             resolveGraphTurnWindow(bareSessionId, turnOffset, turnLimit),
             resolveGraphSessionHealth(bareSessionId),
             resolveTurnContentForSourceRefs(turnSourceRefs),
+            resolveGraphTurnToolCalls(bareSessionId),
         ], { concurrency: "unbounded" });
 
         // Subagent run metrics, batched over the resolved child ids. Depends on
@@ -884,14 +936,22 @@ const fetchGraphSessionInspect = (
         const pageTotals: Partial<Record<InspectSpanKind, number>> = {};
         for (const row of graphTurns) {
             const text = row.text ?? "";
-            if (!text) continue;
+            const dbSeq = Number(row.seq);
+            // tool_call rows are keyed by their issuing turn's (1-based) DB seq.
+            const turnToolCalls = Number.isFinite(dbSeq) ? toolCallsByDbSeq.get(dbSeq) : undefined;
+            // Keep a pure tool_use turn (empty text) only when it actually
+            // carries tool calls; genuinely-empty system/attachment turns that
+            // slipped through the filter are still dropped.
+            if (!text && !(turnToolCalls && turnToolCalls.length > 0)) continue;
             const fallbackKind: InspectSpanKind = row.role === "assistant" ? "assistant_text" : "user_input";
             const spans = dissectTurn(text, { defaultKind: fallbackKind });
+            // A tool-only turn has no spans to dominate; the renderer keys off
+            // `tool_calls`, so default its semantic role to the assistant text
+            // kind (it is an assistant tool_use turn).
             const semantic = dominantKind(spans, fallbackKind);
             for (const s of spans) {
                 pageTotals[s.kind] = (pageTotals[s.kind] ?? 0) + s.text.length;
             }
-            const dbSeq = Number(row.seq);
             const seq = Number.isFinite(dbSeq) ? dbSeq - 1 : turns.length + turnOffset;
             turns.push({
                 seq,
@@ -903,6 +963,11 @@ const fetchGraphSessionInspect = (
                 spans: spans.map(toSpanDto),
                 token_usage: turnTokenUsage.get(dbSeq) ?? turnTokenUsage.get(seq) ?? null,
                 content: findTurnContent(turnContent, seq, text),
+                // Rewrite each call's seq to the display seq, matching the JSONL
+                // path (`c.seq = currentSeq`).
+                ...(turnToolCalls && turnToolCalls.length > 0
+                    ? { tool_calls: turnToolCalls.map((c) => ({ ...c, seq })) }
+                    : {}),
             });
         }
 
