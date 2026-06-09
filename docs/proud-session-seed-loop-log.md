@@ -5,11 +5,22 @@ Autonomous iteration loop. Goal: optimize ax ingestion + reads, then drive the
 sessions and publish public share URLs. Run window: **2026-06-09 23:43 WITA →
 2026-06-10 08:30 WITA**.
 
-Per iteration: optimize → run seed flow → find/publish → log → `review-all` →
-commit → reflect → next.
+Per iteration: optimize → run seed flow → find/publish → log → `review-all` +
+**Effect-idioms review** → commit → reflect → next.
 
 Conventions: each iteration records **Tried · Worked · Failed · Next**. The
 **Next** of iteration N seeds the plan for N+1.
+
+**Reviewers (run every successful iteration):**
+1. `review-all` - simplify + codex review + codex adversarial review.
+2. **Effect-idioms reviewer** - check against Effect-TS references/examples; use
+   Effect-native constructs, NOT ad-hoc JS. Specifically: config via
+   `AxConfig`/`Config` (never raw `process.env` reads outside config.ts), errors
+   via Effect APIs (not `try/catch` in `Effect.gen`), JSON via Schema where it
+   matters, no `Effect.sync` returning a Promise. Run **`effect-lint`** (the
+   `@effect/language-service` tsc plugin surfaces `effect(...)` diagnostics; this
+   repo has no oxlint) on changed files and treat new `effect(...)` findings as
+   blocking.
 
 ---
 
@@ -64,6 +75,35 @@ escape-hatch flags accepted.
   (`AX_SESSIONS_ENRICH_CONCURRENCY`); load-test-under-ingest deferred to a later
   iteration. Final: typecheck 0, tests 20/20 + 6/6, `sessions here --days=120`
   = 0.7s, lock absent at rest.
+
+---
+
+## Iteration 0.1 - Effect-native config (2026-06-10 00:00 WITA)
+
+**Context.** User added a standing **Effect-idioms reviewer**: use Effect-native
+constructs (Config, not raw `process.env`) and run `effect-lint` each iteration.
+Iteration 0 had shipped two raw `process.env` reads
+(`AX_INGEST_TIMEOUT_SECONDS`, `AX_SESSIONS_ENRICH_CONCURRENCY`) - exactly the
+smell to catch.
+
+**Tried / shipped.** Moved both knobs into `AxConfig.knobs`
+(`ingestTimeoutSeconds`, `sessionsEnrichConcurrency`) - the single env boundary
+in `config.ts` (`positiveInt(env.X, default)`), consumed via the typed service.
+`cmdIngest` reads `cfg.knobs.ingestTimeoutSeconds`; `enrichSessions` yields
+`AxConfig` for `knobs.sessionsEnrichConcurrency` (its R + the three `list*`
+return types widened to `SurrealClient | AxConfig`). Removed the dead
+`INGEST_HARD_TIMEOUT_SECONDS` const. Test layers now provide `AxConfigTest({})`
+(unit) / `AppLayer` already had it (e2e).
+
+**Worked.** typecheck 0 (axctl + lib); tests 26/26 (lock + sessions + config).
+**effect-lint: zero `effect(...)` findings in any changed file**
+(ingest-lock.ts, sessions-query.ts, cmdIngest span, config.ts). Pre-existing
+`preferSchemaOverJson` / `lazyPromiseInEffectSync` messages elsewhere in
+cli/index.ts are out of scope.
+
+**Failed / friction.** No oxlint in this repo (npx hit a workspace
+`EOVERRIDE`); the Effect linting is the language-service tsc plugin, which is
+the right signal here anyway.
 
 **Next (seeds iter 1).**
 - Run the seed prompt flow end-to-end now that reads are fast. Confirm

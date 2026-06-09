@@ -6,6 +6,7 @@
  */
 import { Effect } from "effect";
 import { SurrealClient } from "@ax/lib/db";
+import { AxConfig } from "@ax/lib/config";
 import type { DbError } from "@ax/lib/errors";
 import { recordLiteral } from "@ax/lib/ids";
 
@@ -66,15 +67,6 @@ const sessionLiteral = (id: string): string => {
  * concurrency 16 finish in well under a second. Order is preserved by
  * `Effect.forEach`.
  */
-// Per-session enrichment fan-out width. 16 is empirically fast (798 sessions in
-// ~1.3s through the real SurrealDB WS client, which multiplexes by request id),
-// and tunable down if a future load test shows connection-saturation under a
-// concurrent ingest. Env override: AX_SESSIONS_ENRICH_CONCURRENCY.
-const ENRICH_CONCURRENCY = (() => {
-    const n = Number(process.env.AX_SESSIONS_ENRICH_CONCURRENCY);
-    return Number.isFinite(n) && n > 0 ? Math.floor(n) : 16;
-})();
-
 const enrichSessions = (
     rows: ReadonlyArray<{
         readonly id: string;
@@ -84,10 +76,15 @@ const enrichSessions = (
         readonly project: string | null;
         readonly repository: string | null;
     }>,
-): Effect.Effect<SessionRow[], DbError, SurrealClient> =>
+): Effect.Effect<SessionRow[], DbError, SurrealClient | AxConfig> =>
     Effect.gen(function* () {
         if (rows.length === 0) return [];
         const db = yield* SurrealClient;
+        // Fan-out width comes from AxConfig (the single env boundary), not a raw
+        // process.env read. 16 is empirically fast (798 sessions ~1.3s through
+        // the WS client, which multiplexes by request id); tune down via
+        // AX_SESSIONS_ENRICH_CONCURRENCY if a load test shows saturation.
+        const concurrency = (yield* AxConfig).knobs.sessionsEnrichConcurrency;
 
         return yield* Effect.forEach(
             rows,
@@ -112,7 +109,7 @@ const enrichSessions = (
                         first_user_message: enriched?.first_user_message ?? null,
                     };
                 }),
-            { concurrency: ENRICH_CONCURRENCY },
+            { concurrency },
         );
     });
 
@@ -137,7 +134,7 @@ export interface SessionsHereOpts {
  */
 export const listSessionsHere = (
     opts: SessionsHereOpts,
-): Effect.Effect<SessionRow[], DbError, SurrealClient> =>
+): Effect.Effect<SessionRow[], DbError, SurrealClient | AxConfig> =>
     Effect.gen(function* () {
         const db = yield* SurrealClient;
         const days = opts.days ?? 14;
@@ -172,7 +169,7 @@ export interface SessionsAroundOpts {
  */
 export const listSessionsAround = (
     opts: SessionsAroundOpts,
-): Effect.Effect<SessionRow[], DbError, SurrealClient> =>
+): Effect.Effect<SessionRow[], DbError, SurrealClient | AxConfig> =>
     Effect.gen(function* () {
         const db = yield* SurrealClient;
         const days = opts.days ?? 3;
@@ -220,7 +217,7 @@ export interface SessionsNearOpts {
  */
 export const listSessionsNear = (
     opts: SessionsNearOpts,
-): Effect.Effect<SessionRow[], DbError, SurrealClient> =>
+): Effect.Effect<SessionRow[], DbError, SurrealClient | AxConfig> =>
     Effect.gen(function* () {
         const db = yield* SurrealClient;
         // Record-typed fields require record literals, not bindings, for correct comparison.

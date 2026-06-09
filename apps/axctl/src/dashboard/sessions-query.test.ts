@@ -6,8 +6,10 @@
  */
 import { describe, expect, test } from "bun:test";
 import { Effect, Layer } from "effect";
+import { BunFileSystem } from "@effect/platform-bun";
 import { RecordId } from "surrealdb";
 import { SurrealClient, type SurrealClientShape } from "@ax/lib/db";
+import { AxConfig, AxConfigTest } from "@ax/lib/config";
 import {
     listSessionsHere,
     listSessionsAround,
@@ -46,11 +48,15 @@ function makeMockDb(opts?: {
     return { layer: Layer.succeed(SurrealClient, impl), captured };
 }
 
+// enrichSessions reads its fan-out width from AxConfig.knobs, so the mock DB
+// layer is merged with a test AxConfig (defaults; no env overrides needed).
+const configLayer = AxConfigTest({}).pipe(Layer.provide(BunFileSystem.layer));
+
 async function run<A>(
-    eff: Effect.Effect<A, unknown, SurrealClient>,
+    eff: Effect.Effect<A, unknown, SurrealClient | AxConfig>,
     layer: Layer.Layer<SurrealClient>,
 ): Promise<A> {
-    return Effect.runPromise(eff.pipe(Effect.provide(layer)));
+    return Effect.runPromise(eff.pipe(Effect.provide(Layer.mergeAll(layer, configLayer))));
 }
 
 // ---------------------------------------------------------------------------

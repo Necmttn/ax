@@ -398,16 +398,9 @@ interface IngestCommandOpts {
 }
 
 /**
- * Default hard wall-clock cap for a single CLI ingest (seconds). Bounds a
- * wedged ingest so it self-cancels instead of pegging SurrealDB indefinitely.
- * Override per-run with `--timeout=N` or `AX_INGEST_TIMEOUT_SECONDS`.
- */
-const INGEST_HARD_TIMEOUT_SECONDS = 900;
-
-/**
- * Extra grace beyond the hard timeout before a held lock is deemed stale and
- * stolen: the owner should have self-cancelled at the timeout, so anything
- * older is genuinely dead.
+ * Extra grace beyond the hard ingest timeout (`AxConfig.knobs.ingestTimeoutSeconds`)
+ * before a held lock is deemed stale and stolen: the owner should have
+ * self-cancelled at the timeout, so anything older is genuinely dead.
  */
 const INGEST_LOCK_STALE_GRACE_MS = 60_000;
 
@@ -417,10 +410,7 @@ const cmdIngest = (args: string[], opts: IngestCommandOpts = {}) =>
         const cfg = yield* AxConfig;
         const path = yield* Path.Path;
         const lockPath = path.join(cfg.paths.dataDir, "ingest.lock");
-        const envTimeout = Number(process.env.AX_INGEST_TIMEOUT_SECONDS);
-        const timeoutSeconds = Number.isFinite(envTimeout) && envTimeout > 0
-            ? envTimeout
-            : INGEST_HARD_TIMEOUT_SECONDS;
+        const timeoutSeconds = cfg.knobs.ingestTimeoutSeconds;
 
         const work = runIngest({
             command: commandName,
