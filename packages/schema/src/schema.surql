@@ -992,6 +992,12 @@ DEFINE INDEX IF NOT EXISTS delivery_session ON delivery_outcome FIELDS session U
 DEFINE INDEX IF NOT EXISTS delivery_pr ON delivery_outcome FIELDS pull_request;
 DEFINE INDEX IF NOT EXISTS delivery_status ON delivery_outcome FIELDS repository, status, updated_at;
 
+DEFINE TABLE workflow_snapshot SCHEMAFULL;
+DEFINE FIELD generated_at ON workflow_snapshot TYPE datetime DEFAULT time::now();
+DEFINE FIELD payload      ON workflow_snapshot TYPE string;
+DEFINE FIELD source       ON workflow_snapshot TYPE string DEFAULT 'workflow-refresh';
+DEFINE INDEX IF NOT EXISTS workflow_snapshot_generated ON workflow_snapshot FIELDS generated_at;
+
 DEFINE TABLE phase_span SCHEMAFULL;
 DEFINE FIELD session        ON phase_span TYPE record<session>;
 DEFINE FIELD phase          ON phase_span TYPE string;
