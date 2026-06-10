@@ -89,7 +89,9 @@ export interface ToolCallRow {
     readonly ts: string | null;
     readonly name: string;
     readonly command_norm: string | null;
-    /** First 400 chars of input_json - codex edit detection peeks at the command. */
+    /** First 1600 chars of input_json - codex edit detection peeks at the
+     *  command; shellTitle/dispatchLabel pull `description`, which claude puts
+     *  AFTER a possibly-long `command`, so the slice must reach past it. */
     readonly command_text: string | null;
     readonly output_excerpt: string | null;
     readonly error_text: string | null;
@@ -97,7 +99,7 @@ export interface ToolCallRow {
     readonly call_id: string | null;
 }
 export const toolCallsSql = (ref: string): string =>
-    `SELECT seq, ts, name, command_norm, string::slice(input_json ?? "", 0, 400) AS command_text, output_excerpt, error_text, has_error, call_id FROM tool_call WHERE session = ${ref} ORDER BY seq ASC LIMIT 6000;`;
+    `SELECT seq, ts, name, command_norm, string::slice(input_json ?? "", 0, 1600) AS command_text, output_excerpt, error_text, has_error, call_id FROM tool_call WHERE session = ${ref} ORDER BY seq ASC LIMIT 6000;`;
 export const mapToolCall = (raw: unknown): ToolCallRow | null => {
     if (!isRecord(raw)) return null;
     const name = stringField(raw, "name");
