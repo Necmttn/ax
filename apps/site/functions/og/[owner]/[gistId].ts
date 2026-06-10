@@ -136,10 +136,18 @@ export const onRequestGet: PagesFunction = async (ctx) => {
         "https://cdn.jsdelivr.net/fontsource/fonts/jetbrains-mono@latest/latin-700-normal.ttf",
     ).then((r) => r.arrayBuffer());
 
-    const debugMin = u.searchParams.get("debug") === "min";
-    const renderHtml = debugMin
+    const debug = u.searchParams.get("debug") ?? "";
+    const part = debug.startsWith("part:") ? Number(debug.slice(5)) : 99;
+    const pieces = [
+        `<div style="display:flex;justify-content:space-between;align-items:center"><div style="display:flex;align-items:baseline"><span style="font-size:30px;color:#141615;font-weight:700">ax</span><span style="font-size:15px;color:#66706b;margin-left:12px;letter-spacing:2px">AGENT EXPERIENCE</span></div><span style="font-size:20px;color:#66706b">${esc(right)}</span></div>`,
+        `<div style="display:flex;font-size:38px;line-height:1.25;color:#141615;margin-top:34px;font-weight:600">${title}</div>`,
+        `<div style="display:flex;gap:56px;margin-top:36px">${stats}</div>`,
+        `<div style="display:flex;margin-top:38px">${laneHtml(manifest.subagents)}</div>`,
+        `<div style="display:flex;flex:1"></div><div style="display:flex;justify-content:space-between;font-size:16px;letter-spacing:1px;color:#66706b"><span>${t.subagents > 0 ? `BARS = ${t.subagents} SUBAGENTS · DARKER = COSTLIER` : ""}</span><span>RECORDED WITH AX · AX.NECMTTN.COM</span></div>`,
+    ];
+    const renderHtml = debug === "min"
         ? `<div style="display:flex;width:1200px;height:630px;background:#fff;font-family:'JetBrains Mono';font-size:60px;align-items:center;justify-content:center">ax og probe</div>`
-        : html.trim();
+        : `<div style="display:flex;flex-direction:column;width:1200px;height:630px;background:#f3f6f5;padding:28px;font-family:'JetBrains Mono'"><div style="display:flex;flex-direction:column;flex:1;background:#ffffff;border:2px solid #cfd8d4;padding:44px 52px">${pieces.slice(0, part).join("")}</div></div>`;
     let png: ArrayBuffer;
     try {
         const image = new ImageResponse(renderHtml, {
