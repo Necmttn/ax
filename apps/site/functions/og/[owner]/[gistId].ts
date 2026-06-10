@@ -1,26 +1,31 @@
 /**
- * Per-session OG image: a poster derived from the share's gist manifest
- * (`index.json`) - verdict, title, headline numbers, and the subagent
- * fan-out as cost-shaded lane bars on a shared time axis. The same visual
- * language as the share page's hero, so the link preview IS the product.
+ * Per-session OG poster (1200x630 PNG), rendered at the edge from the share's
+ * gist manifest. Dark card built to pop on a feed: big verdict numbers, the
+ * subagent fleet as a waffle grid (one cell per subagent, brighter = costlier,
+ * red = hit failures), and a stacked cost-anatomy bar (where the dollars went).
  *
- * Served at /og/<owner>/<gistId> (PNG, 1200x630). Cached aggressively:
- * a given gist's manifest is immutable enough for a day.
+ * Satori-safe rules learned the hard way: every multi-child element needs
+ * explicit display:flex, integer px only, no raw <svg> children (the worker
+ * html parser drops unknown tags).
  */
 import { ImageResponse } from "workers-og";
 
 interface SubagentCard {
-    readonly started_at?: string;
-    readonly ended_at?: string;
-    readonly duration_ms: number | null;
     readonly cost_usd: number | null;
     readonly stats?: { readonly failures?: number };
+}
+
+interface TokenUsage {
+    readonly estimated_input_cost_usd: number | null;
+    readonly estimated_cache_creation_cost_usd: number | null;
+    readonly estimated_cache_read_cost_usd: number | null;
+    readonly estimated_output_cost_usd: number | null;
 }
 
 interface Manifest {
     readonly kind: string;
     readonly session: { readonly summary?: string; readonly model?: string; readonly started_at?: string };
-    readonly stats: { readonly files_changed: number };
+    readonly token_usage?: TokenUsage | null;
     readonly totals: {
         readonly cost_usd: number | null;
         readonly duration_ms: number | null;
@@ -32,12 +37,24 @@ interface Manifest {
     readonly subagents: ReadonlyArray<SubagentCard>;
 }
 
+const INK = "#e7e9ec";
+const DIM = "#8b93a1";
+const BG = "#15161d";
+const CARD = "#1e1f2a";
+const LINE = "#33364a";
+const GREEN = "#34d399";
+const RED = "#f87171";
+const ROSE = "#fb7185";
+const GOLD = "#fbbf24";
+const BLUE = "#60a5fa";
+const VIOLET = "#a78bfa";
+
 const esc = (s: string): string =>
     s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
 const cleanSummary = (raw: string | undefined): string => {
     const text = (raw ?? "").replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
-    return text.length > 0 ? (text.length > 120 ? `${text.slice(0, 119)}…` : text) : "Shared agent session";
+    return text.length > 0 ? (text.length > 110 ? `${text.slice(0, 109)}…` : text) : "Shared agent session";
 };
 
 const fmtDuration = (ms: number | null): string | null => {
@@ -50,35 +67,52 @@ const fmtDuration = (ms: number | null): string | null => {
 const fmtUsd = (n: number | null): string | null =>
     n == null ? null : `$${n >= 100 ? n.toFixed(0) : n.toFixed(2)}`;
 
-/** Greedy-packed subagent lanes as one inline SVG (satori renders embedded
- *  SVG natively, which sidesteps html-parser flex semantics entirely). */
-function laneHtml(cards: ReadonlyArray<SubagentCard>): string {
-    const times = cards
-        .map((c) => ({ t: Date.parse(c.started_at ?? ""), d: c.duration_ms ?? 0, cost: c.cost_usd ?? 0, failed: (c.stats?.failures ?? 0) > 0 }))
-        .filter((c) => Number.isFinite(c.t));
-    if (times.length === 0) return "";
-    const t0 = Math.min(...times.map((c) => c.t));
-    const t1 = Math.max(...times.map((c) => c.t + Math.max(c.d, 60_000)));
-    const span = Math.max(t1 - t0, 60_000);
-    const maxCost = Math.max(0.01, ...times.map((c) => c.cost));
-    const W = 1036;
-    const laneEnds: number[] = [];
-    let rects = "";
-    for (const c of times.sort((p, q) => p.t - q.t)) {
-        const x = (c.t - t0) / span;
-        const w = Math.max(c.d / span, 0.008);
-        let r = 0;
-        while (r < laneEnds.length && laneEnds[r] > x - 0.004) r++;
-        if (r >= 5) r = 4;
-        laneEnds[r] = x + w;
-        const opacity = (0.35 + 0.6 * (c.cost / maxCost)).toFixed(2);
-        rects += `<rect x="${Math.round(x * W)}" y="${r * 22}" width="${Math.max(Math.round(w * W), 8)}" height="16" rx="3" fill="${c.failed ? "#bd443b" : "#b32650"}" fill-opacity="${opacity}"/>`;
-    }
-    const H = laneEnds.length * 22;
-    const svg = `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg">${rects}</svg>`;
-    // The worker's html parser only knows a small tag subset (raw <svg> children
-    // get dropped) - but satori renders <img> with an SVG data URI natively.
-    return `<img width="${W}" height="${H}" src="data:image/svg+xml;base64,${btoa(svg)}" />`;
+/** Mix a hex color toward the card background (0 = card, 1 = full color). */
+function shade(hex: string, t: number): string {
+    const c = (s: string, i: number) => parseInt(s.slice(i, i + 2), 16);
+    const [r1, g1, b1] = [c(hex, 1), c(hex, 3), c(hex, 5)];
+    const [r0, g0, b0] = [c(CARD, 1), c(CARD, 3), c(CARD, 5)];
+    const mix = (a: number, b: number) => Math.round(b + (a - b) * t);
+    return `rgb(${mix(r1, r0)},${mix(g1, g0)},${mix(b1, b0)})`;
+}
+
+/** The fleet: one rounded cell per subagent, brightness = cost share. */
+function fleetHtml(cards: ReadonlyArray<SubagentCard>): string {
+    if (cards.length === 0) return "";
+    const maxCost = Math.max(0.01, ...cards.map((c) => c.cost_usd ?? 0));
+    const sorted = [...cards].sort((a, b) => (b.cost_usd ?? 0) - (a.cost_usd ?? 0));
+    const n = sorted.length;
+    const cell = n <= 16 ? 44 : n <= 36 ? 36 : 28;
+    const cells = sorted.map((c) => {
+        const failed = (c.stats?.failures ?? 0) > 0;
+        const t = 0.25 + 0.75 * ((c.cost_usd ?? 0) / maxCost);
+        const color = failed ? shade(RED, Math.max(t, 0.55)) : shade(ROSE, t);
+        return `<div style="width:${cell}px;height:${cell}px;border-radius:6px;background:${color}"></div>`;
+    }).join("");
+    return `<div style="display:flex;flex-wrap:wrap;gap:6px;width:${(cell + 6) * 8}px">${cells}</div>`;
+}
+
+/** Stacked cost-anatomy bar: fresh / cache write / cache read / output / subagents. */
+function costBarHtml(m: Manifest): string {
+    const u = m.token_usage;
+    const subCost = m.subagents.reduce((acc, c) => acc + (c.cost_usd ?? 0), 0);
+    const parts = [
+        { label: "fresh", v: u?.estimated_input_cost_usd ?? 0, color: BLUE },
+        { label: "cache write", v: u?.estimated_cache_creation_cost_usd ?? 0, color: GOLD },
+        { label: "cache read", v: u?.estimated_cache_read_cost_usd ?? 0, color: GREEN },
+        { label: "output", v: u?.estimated_output_cost_usd ?? 0, color: VIOLET },
+        { label: `${m.totals.subagents} subagents`, v: subCost, color: ROSE },
+    ].filter((p) => p.v > 0.005);
+    const total = parts.reduce((acc, p) => acc + p.v, 0);
+    if (total <= 0) return "";
+    const W = 1088;
+    const segs = parts.map((p) =>
+        `<div style="display:flex;width:${Math.max(Math.round((p.v / total) * W), 6)}px;height:14px;background:${p.color}"></div>`
+    ).join("");
+    const legend = parts.map((p) =>
+        `<div style="display:flex;align-items:center"><div style="width:10px;height:10px;border-radius:2px;background:${p.color};margin-right:8px"></div><span style="font-size:15px;color:${DIM}">${p.label.toUpperCase()} ${fmtUsd(p.v)}</span></div>`
+    ).join("");
+    return `<div style="display:flex;flex-direction:column"><div style="display:flex;border-radius:4px;overflow:hidden">${segs}</div><div style="display:flex;gap:26px;margin-top:12px">${legend}</div></div>`;
 }
 
 export const onRequestGet: PagesFunction = async (ctx) => {
@@ -90,7 +124,7 @@ export const onRequestGet: PagesFunction = async (ctx) => {
     const cache = (caches as unknown as { default: Cache }).default;
     // r= version busts stale cached renders when the poster template changes.
     const u = new URL(ctx.request.url);
-    u.searchParams.set("r", "2");
+    u.searchParams.set("r", "4");
     const cacheKey = new Request(u.toString());
     const hit = await cache.match(cacheKey);
     if (hit) return hit;
@@ -105,35 +139,20 @@ export const onRequestGet: PagesFunction = async (ctx) => {
 
     const t = manifest.totals;
     const title = esc(cleanSummary(manifest.session.summary));
+    const model = manifest.session.model ?? "";
     const date = (manifest.session.started_at ?? "").slice(0, 10);
-    const right = [fmtUsd(t.cost_usd), fmtDuration(t.duration_ms), date].filter(Boolean).join(" · ");
-    const stat = (n: string, label: string) =>
-        `<div style="display:flex;flex-direction:column"><span style="font-size:40px;font-weight:700;color:#141615">${n}</span><span style="font-size:15px;letter-spacing:1px;color:#66706b">${label.toUpperCase()}</span></div>`;
+
+    const stat = (n: string, label: string, color: string = INK) =>
+        `<div style="display:flex;flex-direction:column;margin-right:54px"><span style="font-size:52px;font-weight:700;color:${color}">${n}</span><span style="font-size:15px;letter-spacing:2px;color:${DIM};margin-top:2px">${label}</span></div>`;
     const stats = [
-        stat(t.turns.toLocaleString("en-US"), "turns"),
-        stat(t.tool_calls.toLocaleString("en-US"), "tool calls"),
-        t.subagents > 0 ? stat(String(t.subagents), "subagents") : "",
-        stat(String(manifest.stats.files_changed), "files"),
-        t.failures > 0 ? `<div style="display:flex;flex-direction:column"><span style="font-size:40px;font-weight:700;color:#bd443b">${t.failures}</span><span style="font-size:15px;letter-spacing:1px;color:#66706b">FAILURES</span></div>` : "",
+        stat(t.turns.toLocaleString("en-US"), "TURNS"),
+        stat(t.tool_calls.toLocaleString("en-US"), "TOOL CALLS"),
+        fmtDuration(t.duration_ms) ? stat(fmtDuration(t.duration_ms)!, "WALL CLOCK") : "",
+        fmtUsd(t.cost_usd) ? stat(fmtUsd(t.cost_usd)!, "TOTAL COST", GREEN) : "",
+        t.failures > 0 ? stat(String(t.failures), "FAILED TOOL CALLS", RED) : "",
     ].filter(Boolean).join("");
 
-    const html = `
-<div style="display:flex;flex-direction:column;width:1200px;height:630px;background:#f3f6f5;padding:28px;font-family:'JetBrains Mono'">
-  <div style="display:flex;flex-direction:column;flex:1;background:#ffffff;border:2px solid #cfd8d4;padding:44px 52px">
-    <div style="display:flex;justify-content:space-between;align-items:center">
-      <div style="display:flex;align-items:baseline"><span style="font-size:30px;color:#141615;font-weight:700">ax</span><span style="font-size:15px;color:#66706b;margin-left:12px;letter-spacing:2px">AGENT EXPERIENCE</span></div>
-      <span style="font-size:20px;color:#66706b">${esc(right)}</span>
-    </div>
-    <div style="display:flex;font-size:38px;line-height:1.25;color:#141615;margin-top:34px;font-weight:600">${title}</div>
-    <div style="display:flex;gap:56px;margin-top:36px">${stats}</div>
-    <div style="display:flex;margin-top:38px">${laneHtml(manifest.subagents)}</div>
-    <div style="display:flex;flex:1"></div>
-    <div style="display:flex;justify-content:space-between;font-size:16px;letter-spacing:1px;color:#66706b">
-      <span>${t.subagents > 0 ? `BARS = ${t.subagents} SUBAGENTS · DARKER = COSTLIER` : ""}</span>
-      <span>RECORDED WITH AX · AX.NECMTTN.COM</span>
-    </div>
-  </div>
-</div>`;
+    const html = `<div style="display:flex;width:1200px;height:630px;background:${BG};padding:24px;font-family:'JetBrains Mono'"><div style="display:flex;flex-direction:column;flex:1;background:${CARD};border:2px solid ${LINE};border-radius:14px;padding:38px 46px"><div style="display:flex;justify-content:space-between;align-items:center"><div style="display:flex;align-items:baseline"><span style="font-size:32px;color:${INK};font-weight:700">ax</span><span style="font-size:14px;color:${DIM};margin-left:12px;letter-spacing:3px">AGENT EXPERIENCE</span></div><span style="font-size:17px;color:${DIM}">${esc([model, date].filter(Boolean).join(" · "))}</span></div><div style="display:flex;font-size:33px;line-height:1.3;color:${INK};margin-top:26px;font-weight:600;max-width:1100px">${title}</div><div style="display:flex;flex:1;align-items:center"><div style="display:flex;flex-direction:column;flex:1"><div style="display:flex">${stats}</div></div>${t.subagents > 0 ? `<div style="display:flex;flex-direction:column;align-items:flex-end"><div style="display:flex">${fleetHtml(manifest.subagents)}</div><span style="font-size:14px;letter-spacing:2px;color:${DIM};margin-top:10px">${t.subagents} SUBAGENTS · BRIGHTER = COSTLIER</span></div>` : ""}</div>${costBarHtml(manifest)}<div style="display:flex;justify-content:space-between;margin-top:22px"><span style="font-size:15px;letter-spacing:2px;color:${DIM}">EVERY TURN · EVERY TOOL CALL · EVERY DOLLAR</span><span style="font-size:15px;letter-spacing:2px;color:${INK}">RECORDED WITH AX · AX.NECMTTN.COM</span></div></div></div>`;
 
     const font = await fetch(
         "https://cdn.jsdelivr.net/fontsource/fonts/jetbrains-mono@latest/latin-400-normal.ttf",
@@ -142,21 +161,9 @@ export const onRequestGet: PagesFunction = async (ctx) => {
         "https://cdn.jsdelivr.net/fontsource/fonts/jetbrains-mono@latest/latin-700-normal.ttf",
     ).then((r) => r.arrayBuffer());
 
-    const debug = u.searchParams.get("debug") ?? "";
-    const part = debug.startsWith("part:") ? Number(debug.slice(5)) : 99;
-    const pieces = [
-        `<div style="display:flex;justify-content:space-between;align-items:center"><div style="display:flex;align-items:baseline"><span style="font-size:30px;color:#141615;font-weight:700">ax</span><span style="font-size:15px;color:#66706b;margin-left:12px;letter-spacing:2px">AGENT EXPERIENCE</span></div><span style="font-size:20px;color:#66706b">${esc(right)}</span></div>`,
-        `<div style="display:flex;font-size:38px;line-height:1.25;color:#141615;margin-top:34px;font-weight:600">${title}</div>`,
-        `<div style="display:flex;gap:56px;margin-top:36px">${stats}</div>`,
-        `<div style="display:flex;margin-top:38px">${laneHtml(manifest.subagents)}</div>`,
-        `<div style="display:flex;flex:1"></div><div style="display:flex;justify-content:space-between;font-size:16px;letter-spacing:1px;color:#66706b"><span>${t.subagents > 0 ? `BARS = ${t.subagents} SUBAGENTS · DARKER = COSTLIER` : ""}</span><span>RECORDED WITH AX · AX.NECMTTN.COM</span></div>`,
-    ];
-    const renderHtml = debug === "min"
-        ? `<div style="display:flex;width:1200px;height:630px;background:#fff;font-family:'JetBrains Mono';font-size:60px;align-items:center;justify-content:center">ax og probe</div>`
-        : `<div style="display:flex;flex-direction:column;width:1200px;height:630px;background:#f3f6f5;padding:28px;font-family:'JetBrains Mono'"><div style="display:flex;flex-direction:column;flex:1;background:#ffffff;border:2px solid #cfd8d4;padding:44px 52px">${pieces.slice(0, part).join("")}</div></div>`;
     let png: ArrayBuffer;
     try {
-        const image = new ImageResponse(renderHtml, {
+        const image = new ImageResponse(html, {
             width: 1200,
             height: 630,
             fonts: [
