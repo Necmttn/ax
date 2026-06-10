@@ -15,6 +15,7 @@ import { enrichInsightRows } from "./insights-enrich.ts";
 
 function makeMockDb(): { layer: Layer.Layer<SurrealClient>; captured: string[] } {
     const tc = makeTestSurrealClient({
+        denyWrites: true,
         fallback: (sql) => {
             if (sql.includes("FROM turn") && sql.includes('role = "assistant"')) {
                 return [[{ id: "turn:prev", seq: 4, text: "previous reply" }]];

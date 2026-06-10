@@ -64,6 +64,7 @@ describe("fetchSessionShow - call count", () => {
                 // the routing logic: with no children, no expansion calls happen.
                 Effect.provide(
                     makeTestSurrealClient({
+                        denyWrites: true,
                         fallback: [[makePayload("019e0ad4-0000-0000-0000-000000000001")]],
                     }).layer,
                 ),
@@ -163,6 +164,7 @@ describe("fetchSessionShow - byRole", () => {
             }).pipe(
                 Effect.provide(
                     makeTestSurrealClient({
+                        denyWrites: true,
                         fallback: [[makePayload("019e0ad4-0000-0000-0000-000000000001")]],
                     }).layer,
                 ),
@@ -189,6 +191,7 @@ describe("fetchSessionShow - byRole", () => {
             }).pipe(
                 Effect.provide(
                     makeTestSurrealClient({
+                        denyWrites: true,
                         fallback: [[payloadNoSkills]],
                     }).layer,
                 ),

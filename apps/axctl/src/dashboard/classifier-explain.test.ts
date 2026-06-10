@@ -21,6 +21,7 @@ describe("classifier explain query", () => {
 
     test("fetches turn and classifier results", async () => {
         const stub: SurrealClientShape = makeTestSurrealClient({
+            denyWrites: true,
             fallback: [
                 [{ id: "turn:u1", role: "user", text: "did you run tests?" }],
                 [{

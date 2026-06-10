@@ -26,6 +26,7 @@ const onDisk = (sessionId: string, hint: string | null): Promise<FoundTranscript
  *  resolveRawFileFromDb to see; everything else returns empty. */
 const fakeLocatorLayer = (rawFile: string | null) =>
     makeTestSurrealClient({
+        denyWrites: true,
         routes: { "SELECT raw_file FROM": [[{ raw_file: rawFile }]] },
     }).layer;
 

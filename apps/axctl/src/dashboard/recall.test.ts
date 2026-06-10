@@ -10,6 +10,7 @@ import { fetchRecall } from "./recall.ts";
 
 function makeMockDb(queryResponses: Map<string, unknown[][]> = new Map()) {
     return makeTestSurrealClient({
+        denyWrites: true,
         routes: [...queryResponses].map(([match, rows]) => ({ match, rows: rows as unknown[] })),
     }).layer;
 }

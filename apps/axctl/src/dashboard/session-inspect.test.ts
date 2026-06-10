@@ -151,6 +151,7 @@ describe("jsonlBlockToInspectorText", () => {
 
 function makeInspectDb(): { readonly db: SurrealClientShape; readonly sql: string[] } {
     const tc = makeTestSurrealClient({
+        denyWrites: true,
         fallback: (statement) => {
             if (statement.includes("FROM spawned") && statement.includes("WHERE out")) {
                 return [[ ]];

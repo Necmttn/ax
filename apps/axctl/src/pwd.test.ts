@@ -74,6 +74,7 @@ async function initRepoWithCommit(dir: string): Promise<string> {
 function makeMockDb(existsResponse: boolean) {
     // Return a row (exists) or empty (not exists)
     return makeTestSurrealClient({
+        denyWrites: true,
         fallback: [existsResponse ? [{ id: "repository:somekey" }] : []],
     }).layer;
 }

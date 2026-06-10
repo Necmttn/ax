@@ -11,7 +11,7 @@ import { makeTestSurrealClient } from "./testing/surreal.ts";
 const FsLayer = Layer.merge(BunFileSystem.layer, BunPath.layer);
 
 const makeMockDb = (seenRows: ReadonlyArray<{ raw_file: string }>) => {
-    const tc = makeTestSurrealClient({ fallback: [seenRows] });
+    const tc = makeTestSurrealClient({ denyWrites: true, fallback: [seenRows] });
     return { layer: tc.layer, captured: tc.calls };
 };
 

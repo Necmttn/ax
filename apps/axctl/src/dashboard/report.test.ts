@@ -8,7 +8,7 @@ import { renderDashboardHtml, writeDashboard } from "./report.ts";
 /** Mock SurrealClient that returns empty result sets for every query, so
  *  `fetchDashboardData` produces a zeroed-out DashboardData without a real DB. */
 function makeEmptyDb() {
-    return makeTestSurrealClient().layer;
+    return makeTestSurrealClient({ denyWrites: true }).layer;
 }
 
 const sampleData: DashboardData = {

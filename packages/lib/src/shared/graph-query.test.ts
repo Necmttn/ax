@@ -15,6 +15,7 @@ import {
  *  helper passed so tests can assert on them. */
 function fakeClient(result: unknown): TestSurrealClient {
     return makeTestSurrealClient({
+        denyWrites: true,
         fallback:
             result instanceof Error
                 ? Effect.fail(new DbError({ operation: "query", message: result.message }))
@@ -207,7 +208,7 @@ import { runQuery, runSingleQuery } from "./graph-query.ts";
 import { defineQuery, defineSingleQuery } from "./query.ts";
 
 const clientReturning = (rows: unknown[]): SurrealClientShape =>
-    makeTestSurrealClient({ fallback: [rows] }).client;
+    makeTestSurrealClient({ denyWrites: true, fallback: [rows] }).client;
 
 const run = (eff: Effect.Effect<unknown, unknown, SurrealClient>, c: SurrealClientShape) =>
     Effect.runPromise(eff.pipe(Effect.provideService(SurrealClient, c)));
@@ -225,6 +226,7 @@ describe("runQuery", () => {
     });
     test("DB error degrades to []", async () => {
         const failing: SurrealClientShape = makeTestSurrealClient({
+            denyWrites: true,
             fallback: Effect.fail(new DbError({ operation: "query", message: "boom" })),
         }).client;
         const out = await run(runQuery(demo, {}), failing);
@@ -249,6 +251,7 @@ describe("runSingleQuery", () => {
             mapRow: (row) => String(row.id ?? ""),
         });
         const failing: SurrealClientShape = makeTestSurrealClient({
+            denyWrites: true,
             fallback: Effect.fail(new DbError({ operation: "query", message: "boom" })),
         }).client;
         expect(await run(runSingleQuery(one, {}), failing)).toBe(null);

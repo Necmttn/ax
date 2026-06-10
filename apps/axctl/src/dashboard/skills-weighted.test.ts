@@ -18,7 +18,7 @@ import { fetchSkillsWeighted } from "./skills-weighted.ts";
 
 /** Mock SurrealClient answering query() calls with `responses` in call order. */
 const makeMockDb = (responses: Array<unknown>): TestSurrealClient =>
-    makeTestSurrealClient({ responses: responses as Array<unknown[]> });
+    makeTestSurrealClient({ denyWrites: true, responses: responses as Array<unknown[]> });
 
 /** Run an Effect with the mock SurrealClient. */
 const runWithMock = <A>(
@@ -141,14 +141,14 @@ describe("fetchSkillsWeighted", () => {
     });
 
     it("doctor SQL excludes synthetics by default", async () => {
-        const db = makeTestSurrealClient();
+        const db = makeTestSurrealClient({ denyWrites: true });
 
         await runWithMock(db, fetchSkillsWeighted());
         expect(db.captured[2]).toContain('dir_path = "(synthetic)"');
     });
 
     it("includes window clause when windowDays is set", async () => {
-        const db = makeTestSurrealClient();
+        const db = makeTestSurrealClient({ denyWrites: true });
 
         await runWithMock(db, fetchSkillsWeighted({ windowDays: 30 }));
         // First SQL is the invocation query
@@ -156,7 +156,7 @@ describe("fetchSkillsWeighted", () => {
     });
 
     it("omits window clause when windowDays is not set", async () => {
-        const db = makeTestSurrealClient();
+        const db = makeTestSurrealClient({ denyWrites: true });
 
         await runWithMock(db, fetchSkillsWeighted());
         expect(db.captured[0]).not.toContain("ts >= time::now()");

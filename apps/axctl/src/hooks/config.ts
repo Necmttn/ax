@@ -3,7 +3,7 @@ import type { PlatformError } from "effect/PlatformError";
 import { SurrealClient } from "@ax/lib/db";
 import type { DbError } from "@ax/lib/errors";
 import { writeFileAtomic } from "@ax/lib/atomic-write";
-import { decodeJsonOrNull } from "@ax/lib/decode";
+import { decodeJsonOrNull, jsonParseErrorText } from "@ax/lib/decode";
 import { findGitRoot } from "../project/git.ts";
 import { queryHookSummary } from "../queries/hooks.ts";
 import { HookProviderRegistry } from "./providers/registry.ts";
@@ -88,7 +88,7 @@ const readParked = (
             return yield* new HookConfigParseError({
                 provider: "ax",
                 file: path,
-                reason: "corrupt park sidecar: invalid JSON",
+                reason: `corrupt park sidecar: invalid JSON (${jsonParseErrorText(raw)})`,
             });
         }
         return parsed as ReadonlyArray<ParkedEntry>;

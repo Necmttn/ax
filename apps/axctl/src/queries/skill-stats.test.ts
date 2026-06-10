@@ -10,6 +10,7 @@ import {
 
 function makeMockDb(responses: Array<unknown>): SurrealClientShape {
     return makeTestSurrealClient({
+        denyWrites: true,
         responses: responses as ReadonlyArray<TestSurrealRows>,
     }).client;
 }

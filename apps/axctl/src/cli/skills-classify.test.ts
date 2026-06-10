@@ -19,7 +19,7 @@ type MockRow = { name: string; invocations: number; sessions: number };
 
 /** Build a minimal SurrealClientShape mock that returns a fixed row list. */
 function mockDb(rows: MockRow[]): SurrealClientShape {
-    return makeTestSurrealClient({ fallback: [rows] }).client;
+    return makeTestSurrealClient({ denyWrites: true, fallback: [rows] }).client;
 }
 
 // Forced-dependency edit: cmdSkillsClassify now requires FileSystem + Path
@@ -153,6 +153,7 @@ describe("cmdSkillsClassify explicit mode", () => {
     test("queries the named skills (SQL contains the name)", async () => {
         const outDir = mkdtempSync(join(tmpdir(), "ax-classify-explicit-"));
         const tc = makeTestSurrealClient({
+            denyWrites: true,
             fallback: [[{ name: "composto", invocations: 5, sessions: 2 }]],
         });
         await runWith(tc.client, cmdSkillsClassify({ names: ["composto"], outDir, dryRun: false, json: false }));
@@ -196,7 +197,7 @@ describe("cmdSkillsClassify explicit mode", () => {
 describe("SQL shape (default mode)", () => {
     test("default query requires invocations >= 3 and NOT plays_role", async () => {
         const outDir = mkdtempSync(join(tmpdir(), "ax-classify-sql-"));
-        const tc = makeTestSurrealClient();
+        const tc = makeTestSurrealClient({ denyWrites: true });
         await runWith(tc.client, cmdSkillsClassify({ names: [], outDir, dryRun: false, json: false }));
         const capturedSql = tc.captured.at(-1) ?? "";
         expect(capturedSql).toContain("plays_role");

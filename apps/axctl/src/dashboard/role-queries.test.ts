@@ -26,6 +26,7 @@ function stubLayer(
     queryResults: Array<Array<Record<string, unknown>>>,
 ): Layer.Layer<SurrealClient> {
     return makeTestSurrealClient({
+        denyWrites: true,
         responses: queryResults.map((result) => [result]),
     }).layer;
 }

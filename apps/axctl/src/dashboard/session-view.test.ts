@@ -96,6 +96,7 @@ describe("fetchSessionView", () => {
         const seenRoleBindings: unknown[] = [];
 
         const tc = makeTestSurrealClient({
+            denyWrites: true,
             fallback: (sql, bindings) => {
                 if (sql.includes("FROM plays_role")) {
                     seenRoleBindings.push(bindings);

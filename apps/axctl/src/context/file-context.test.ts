@@ -5,6 +5,7 @@ import { buildFileContextPack, extractFileContextSignals } from "./file-context.
 
 function fakeContextLayer() {
     return makeTestSurrealClient({
+        denyWrites: true,
         fallback: (sql) => {
             if (sql.includes("FROM file")) {
                     return [[

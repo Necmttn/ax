@@ -14,6 +14,7 @@ import { fetchSessionOrchestration } from "./session-canvas.ts";
 
 function makeMockDb(): { layer: Layer.Layer<SurrealClient>; captured: string[] } {
     const tc = makeTestSurrealClient({
+        denyWrites: true,
         routes: [
             {
                 match: "FROM session WHERE <string>id",

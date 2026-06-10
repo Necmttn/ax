@@ -4,7 +4,7 @@ import { makeTestSurrealClient, type TestSurrealClient } from "@ax/lib/testing/s
 import { ClassifierFactsService, ClassifierFactsServiceLive } from "./facts.ts";
 
 function clientWithRows(rows: readonly Record<string, unknown>[]): TestSurrealClient {
-    return makeTestSurrealClient({ fallback: [rows] });
+    return makeTestSurrealClient({ denyWrites: true, fallback: [rows] });
 }
 
 const provideFacts = (client: TestSurrealClient) =>

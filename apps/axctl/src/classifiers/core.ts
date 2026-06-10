@@ -1,5 +1,5 @@
 import { Context, Effect, Layer, Option, Schema } from "effect";
-import { decodeJsonOrNull } from "@ax/lib/decode";
+import { decodeJsonOption } from "@ax/lib/decode";
 import { safeKeyPart } from "@ax/lib/shared/derive-keys";
 import { isControlOrContextText } from "./control-text.ts";
 
@@ -306,7 +306,9 @@ const validateResult = (
         if (!Number.isFinite(result.confidence) || result.confidence < 0 || result.confidence > 1) {
             throw new Error(`classifier ${classifier.key} emitted invalid confidence ${result.confidence}`);
         }
-        if (decodeJsonOrNull(result.evidenceJson) === null) {
+        // Option-based decode: the JSON document `null` is legal evidence
+        // (evidence is typed `unknown`), only a *parse failure* is an error.
+        if (Option.isNone(decodeJsonOption(result.evidenceJson))) {
             throw new Error(`classifier ${classifier.key} emitted evidenceJson that is not valid JSON`);
         }
             return Effect.void;

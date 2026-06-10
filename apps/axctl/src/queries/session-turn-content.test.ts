@@ -18,6 +18,7 @@ const DOC_ID = "content_document:turn__s1_seq_000001__abc";
 // Route a mock query by the table/clause it targets, recording every SQL seen.
 function makeMockDb(): { layer: Layer.Layer<SurrealClient>; captured: string[] } {
     const tc = makeTestSurrealClient({
+        denyWrites: true,
         fallback: (sql) => {
             const rows = (() => {
                 if (sql.includes("FROM content_document")) {
@@ -96,7 +97,7 @@ describe("resolveTurnContent (full content / share export)", () => {
     });
 
     test("empty session (no documents) returns an empty map without block/atom queries", async () => {
-        const tc = makeTestSurrealClient();
+        const tc = makeTestSurrealClient({ denyWrites: true });
         const byTurn = await Effect.runPromise(
             resolveTurnContent("session:`empty`").pipe(Effect.provide(tc.layer)),
         );

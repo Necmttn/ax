@@ -15,6 +15,7 @@ import { SKILL_DETAIL_SQL as TUI_SKILL_DETAIL_SQL } from "../tui/queries.ts";
 /** Mock SurrealClientShape returning canned responses per query() call. */
 function makeMockDb(responses: Array<unknown>): SurrealClientShape {
     return makeTestSurrealClient({
+        denyWrites: true,
         responses: responses as ReadonlyArray<TestSurrealRows>,
     }).client;
 }

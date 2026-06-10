@@ -1,5 +1,5 @@
 import { Effect } from "effect";
-import { decodeJsonOrNull } from "@ax/lib/decode";
+import { decodeJsonOrNull, jsonParseErrorText } from "@ax/lib/decode";
 import { HookConfigParseError, HookConfigSchemaError, HookValidationError } from "../errors.ts";
 import type { ConfiguredHook, HookFileRef, HookInput, HookPatch } from "./types.ts";
 import { deriveHookId, deriveOwner, axMarkerId, genMarkerId, embedMarker, preserveMarker } from "./ownership.ts";
@@ -42,7 +42,7 @@ export const makeJsonCodec = (name: string, events: readonly string[]): JsonCode
         if (raw.trim() === "") return Effect.succeed({});
         const parsed = decodeJsonOrNull(raw);
         return parsed === null
-            ? Effect.fail(new HookConfigParseError({ provider: name, file, reason: "invalid JSON" }))
+            ? Effect.fail(new HookConfigParseError({ provider: name, file, reason: `invalid JSON (${jsonParseErrorText(raw)})` }))
             : Effect.succeed(parsed as ClaudeSettings);
     };
 
