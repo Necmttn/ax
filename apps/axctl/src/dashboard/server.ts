@@ -89,55 +89,6 @@ LIMIT ${safeLimit};`.trim();
 }
 
 /**
- * POST /api/improve/:sig/accept body: { force?: boolean }
- * POST /api/improve/:sig/reject body: { reason?: string }
- * POST /api/improve/:sig/verdict body: { verdict: string }
- *
- * Single handler dispatches all three; shared logic lives in
- * src/improve/actions.ts so the CLI and HTTP paths agree on semantics.
- */
-async function handleImproveAction(
-    sig: string,
-    action: "accept" | "reject" | "verdict",
-    req: Request,
-): Promise<Response> {
-    if (req.method !== "POST") return jsonResponse({ error: "method_not_allowed" }, 405);
-    let body: Record<string, unknown> = {};
-    try { body = (await req.json()) as Record<string, unknown>; } catch { /* empty body ok */ }
-
-    try {
-        const result = await Effect.runPromise(
-            Effect.gen(function* () {
-                if (action === "accept") {
-                    const force = body.force === true;
-                    const { acceptProposal } = yield* Effect.promise(() => import("../improve/actions.ts"));
-                    return yield* acceptProposal({ sigOrId: sig, force });
-                }
-                if (action === "reject") {
-                    const reason = typeof body.reason === "string" ? body.reason : undefined;
-                    const { rejectProposal } = yield* Effect.promise(() => import("../improve/actions.ts"));
-                    return yield* rejectProposal({ sigOrId: sig, ...(reason === undefined ? {} : { reason }) });
-                }
-                const verdict = typeof body.verdict === "string" ? body.verdict : "";
-                const { setVerdict } = yield* Effect.promise(() => import("../improve/actions.ts"));
-                return yield* setVerdict({ sigOrId: sig, verdict });
-            }).pipe(Effect.provide(AppLayer), Effect.scoped) as Effect.Effect<{ readonly status: string; readonly message?: string }>,
-        );
-        const httpStatus = result.status === "ok" ? 200
-            : result.status === "not_found" ? 404
-            : result.status === "wrong_status" || result.status === "scaffold_exists" || result.status === "verdict_locked" ? 409
-            : result.status === "unsupported_form" || result.status === "missing_payload" || result.status === "invalid_verdict" ? 400
-            : 500;
-        return jsonResponse(result, httpStatus);
-    } catch (err) {
-        return jsonResponse(
-            { error: err instanceof Error ? err.message : String(err) },
-            500,
-        );
-    }
-}
-
-/**
  * Server-lifetime ingest state, set up once by {@link serveDashboard} at
  * startup and torn down on shutdown.
  *
@@ -257,13 +208,6 @@ export async function handleDashboardRequest(req: Request): Promise<Response> {
                 connection: "keep-alive",
             },
         });
-    }
-    const improveActionMatch = url.pathname.match(/^\/api\/improve\/(.+?)\/(accept|reject|verdict)$/);
-    if (improveActionMatch) {
-        const sig = decodeURIComponent(improveActionMatch[1] ?? "");
-        const action = improveActionMatch[2] as "accept" | "reject" | "verdict";
-        if (!sig) return jsonResponse({ error: "missing proposal sig" }, 400);
-        return handleImproveAction(sig, action, req);
     }
     if (url.pathname === "/api/ingest" && req.method === "POST") {
         return handleIngestTrigger(req);

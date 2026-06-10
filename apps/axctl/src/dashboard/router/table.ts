@@ -4,6 +4,7 @@
  * catch-all (`/api/sessions/:id+`) after its sibling subroutes.
  */
 import type { AnyRoute } from "./router.ts";
+import { improveRoutes } from "./routes/improve.ts";
 import { insightRoutes } from "./routes/insights.ts";
 import { sessionRoutes } from "./routes/sessions.ts";
 import { skillRoutes } from "./routes/skills.ts";
@@ -14,4 +15,5 @@ export const routeTable: ReadonlyArray<AnyRoute> = [
     ...insightRoutes,
     ...sessionRoutes,
     ...skillRoutes,
+    ...improveRoutes,
 ];
