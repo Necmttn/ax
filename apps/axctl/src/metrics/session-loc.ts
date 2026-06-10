@@ -1,4 +1,5 @@
 import { Effect } from "effect";
+import { jsonRecordField } from "@ax/lib/decode";
 import { SurrealClient } from "@ax/lib/db";
 import type { DbError } from "@ax/lib/errors";
 import { editDelta } from "../dashboard/loc-query.ts";
@@ -23,15 +24,9 @@ const PATCH_TEXT_FIELDS = ["patch", "diff", "input", "command", "cmd"] as const;
  */
 export const applyPatchDelta = (inputJson: string | null): SessionLoc => {
     const zero = { added: 0, removed: 0 };
-    if (inputJson === null) return zero;
-    let input: Record<string, unknown>;
-    try {
-        const parsed: unknown = JSON.parse(inputJson);
-        if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) return zero;
-        input = parsed as Record<string, unknown>;
-    } catch {
-        return zero;
-    }
+    // Record decode rejects malformed JSON, arrays, and scalars in one step.
+    const input = jsonRecordField.decode(inputJson);
+    if (input === null) return zero;
     let patch: string | null = null;
     for (const field of PATCH_TEXT_FIELDS) {
         const value = input[field];

@@ -23,6 +23,7 @@
  */
 
 import { Effect, FileSystem, Path, Schema } from "effect";
+import { jsonRecordField } from "@ax/lib/decode";
 import { SurrealClient } from "@ax/lib/db";
 import { AppLayer } from "@ax/lib/layers";
 import type { DbError } from "@ax/lib/errors";
@@ -184,7 +185,9 @@ export const parseMetrics = (
 ): Record<string, unknown> => {
     if (raw === null || raw === undefined) return {};
     if (typeof raw === "string") {
-        try { return JSON.parse(raw) as Record<string, unknown>; } catch { return {}; }
+        // Tolerant decode: corrupt or non-object JSON -> {} (the proposal
+        // pipeline must never die on one bad metrics column).
+        return (jsonRecordField.decode(raw) as Record<string, unknown> | null) ?? {};
     }
     return raw;
 };

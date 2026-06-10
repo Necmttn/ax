@@ -1,6 +1,7 @@
 import { homedir } from "node:os";
 import { pathToFileURL } from "node:url";
 import { Effect, FileSystem, Path } from "effect";
+import { jsonRecordField } from "@ax/lib/decode";
 import { SurrealClient, type SurrealClientShape } from "@ax/lib/db";
 import type { DbError } from "@ax/lib/errors";
 import { posixPath } from "@ax/lib/shared/path";
@@ -165,14 +166,7 @@ const firstScalar = (value: unknown): unknown =>
 
 const parseJsonRecord = (value: unknown): Row => {
     if (typeof value !== "string") return {};
-    try {
-        const parsed = JSON.parse(value) as unknown;
-        return typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)
-            ? (parsed as Row)
-            : {};
-    } catch {
-        return {};
-    }
+    return (jsonRecordField.decode(value) as Row | null) ?? {};
 };
 
 const maxNumber = (rows: readonly Row[], key: string): number =>

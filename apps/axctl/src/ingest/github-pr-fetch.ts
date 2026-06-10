@@ -17,6 +17,7 @@
  */
 
 import { Effect } from "effect";
+import { jsonArrayField } from "@ax/lib/decode";
 import { runCommand } from "@ax/lib/process";
 
 /**
@@ -85,13 +86,7 @@ export function prListArgs(limit: number, updatedSince?: string): string[] {
  * Returns `[]` for any non-array JSON value or any parse error.
  */
 export function parsePrListOutput(stdout: string): unknown[] {
-    let parsed: unknown;
-    try {
-        parsed = JSON.parse(stdout);
-    } catch {
-        return [];
-    }
-    return Array.isArray(parsed) ? parsed : [];
+    return [...(jsonArrayField.decode(stdout) ?? [])];
 }
 
 /**
