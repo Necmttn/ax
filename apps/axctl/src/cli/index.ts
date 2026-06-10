@@ -14,7 +14,7 @@ import {
     buildRolesNext,
     buildImproveProposalsNext,
 } from "../nav/next-links.ts";
-import { renderNextFooter } from "./next-format.ts";
+import { printNextFooter } from "./next-format.ts";
 import { findCommitWindow } from "@ax/lib/git-window";
 import { AxConfig } from "@ax/lib/config";
 import { safeJsonParse } from "@ax/lib/shared/safe-json";
@@ -893,8 +893,7 @@ const cmdRecall = (opts: RecallCliOpts) =>
         if (result.hits.length === 0 && !multiSource) {
             console.log(`no matches for "${opts.query}"`);
             // Errors-as-teaching: name the broader queries to try next.
-            const footer = renderNextFooter(next);
-            if (footer) console.log(footer);
+            printNextFooter(next);
             return;
         }
         if (result.hits.length > 0) {
@@ -952,8 +951,7 @@ const cmdRecall = (opts: RecallCliOpts) =>
             }
         }
 
-        const footer = renderNextFooter(next);
-        if (footer) console.log(footer);
+        printNextFooter(next);
     });
 
 const cmdSearch = (args: string[]) =>
@@ -1093,7 +1091,13 @@ const cmdStats = (args: string[]) =>
     Effect.gen(function* () {
         const name = args.filter((a) => !a.startsWith("--"))[0];
         if (!name) {
-            console.error("axctl skills stats: missing skill name");
+            // Errors-as-teaching: name the command that answers the likely
+            // intent (aggregate ranking) instead of a bare usage error.
+            console.error(
+                "axctl skills stats: missing <skill> (per-skill detail). " +
+                    "For the aggregate usage ranking use `ax skills weighted`; " +
+                    "to find a skill name use `ax recall \"<query>\" --sources=skill`.",
+            );
             process.exit(1);
         }
         const db = yield* SurrealClient;
@@ -1386,8 +1390,7 @@ const cmdSkillsWeighted = (args: string[]) =>
             console.log(renderWeightedJson(result));
         } else {
             console.log(renderWeightedTable(result));
-            const footer = renderNextFooter(buildSkillsWeightedNext(result));
-            if (footer) console.log(footer);
+            printNextFooter(buildSkillsWeightedNext(result));
         }
     });
 
@@ -1418,8 +1421,7 @@ const cmdSkillsByRole = (args: string[]) =>
             console.log(renderSkillsByRoleJson(result, role));
         } else {
             console.log(renderSkillsByRoleTable(result, role));
-            const footer = renderNextFooter(buildSkillsByRoleNext(result, role));
-            if (footer) console.log(footer);
+            printNextFooter(buildSkillsByRoleNext(result, role));
         }
     });
 
@@ -1450,8 +1452,7 @@ const cmdRolesForSkill = (args: string[]) =>
             console.log(renderRolesForSkillJson(result, skill));
         } else {
             console.log(renderRolesForSkillTable(result, skill));
-            const footer = renderNextFooter(buildSkillsRolesNext(result, skill));
-            if (footer) console.log(footer);
+            printNextFooter(buildSkillsRolesNext(result, skill));
         }
     });
 
@@ -1471,8 +1472,7 @@ const cmdRoles = (args: string[]) =>
             console.log(renderAllRolesJson(result));
         } else {
             console.log(renderAllRolesTable(result));
-            const footer = renderNextFooter(buildRolesNext(result));
-            if (footer) console.log(footer);
+            printNextFooter(buildRolesNext(result));
         }
     });
 
@@ -2576,14 +2576,12 @@ const cmdImproveList = (args: string[]) =>
         );
         if (rows.length === 0) {
             console.log("(no proposals match filter)");
-            const footer = renderNextFooter(improveNext);
-            if (footer) console.log(footer);
+            printNextFooter(improveNext);
             return;
         }
         console.log(`  freq  conf    status      form         dedupe_sig                title`);
         for (const row of rows) console.log(formatProposalLine(row));
-        const footer = renderNextFooter(improveNext);
-        if (footer) console.log(footer);
+        printNextFooter(improveNext);
     });
 
 const cmdImproveShow = (args: string[]) =>
@@ -2677,14 +2675,11 @@ const cmdImproveRecommend = (args: string[]) =>
         }
         const formatted = formatRecommendations(items);
         console.log(formatted);
-        {
-            const footer = renderNextFooter(
-                buildImproveProposalsNext(
-                    items.map((i) => ({ sig: i.shortId, title: i.title })),
-                ),
-            );
-            if (footer) console.log(footer);
-        }
+        printNextFooter(
+            buildImproveProposalsNext(
+                items.map((i) => ({ sig: i.shortId, title: i.title })),
+            ),
+        );
         if (items.length > 0 && !noClipboard) {
             const copied = copyToClipboard(formatted);
             if (copied) console.log("\n[copied to clipboard]");
@@ -3300,8 +3295,7 @@ const cmdSessionsHere = (args: string[]) =>
             notes.push(`showing ${rows.length} of ${visible.length} - raise --limit`);
         }
         if (notes.length > 0) console.log(`(${notes.join("; ")})`);
-        const footer = renderNextFooter(next);
-        if (footer) console.log(footer);
+        printNextFooter(next);
     });
 
 // --- sessions around ---
@@ -3358,8 +3352,7 @@ const cmdSessionsAround = (args: string[]) =>
             return;
         }
         console.log(formatSessionsTable(rows));
-        const footer = renderNextFooter(next);
-        if (footer) console.log(footer);
+        printNextFooter(next);
     });
 
 // --- sessions near ---
@@ -3426,8 +3419,7 @@ const cmdSessionsNear = (args: string[]) =>
             return;
         }
         console.log(formatSessionsTable(rows));
-        const footer = renderNextFooter(next);
-        if (footer) console.log(footer);
+        printNextFooter(next);
     });
 
 // ---------------------------------------------------------------------------
@@ -3498,6 +3490,7 @@ const cmdSessionShow = (args: string[]) =>
             console.log(renderSessionJson(payload, { metrics, next }));
         } else {
             console.log(renderSessionMarkdown(payload, { metrics, next }));
+            printNextFooter(next);
         }
     });
 
@@ -4929,9 +4922,12 @@ const recallCommand = Command.make(
 
 const statsCommand = Command.make(
     "stats",
-    { skill: Argument.string("skill") },
-    ({ skill }) => cmdStats([skill]),
-).pipe(Command.withDescription("Show detailed stats for one skill"));
+    // Optional so a bare `ax skills stats` reaches our teaching error instead
+    // of the framework's "Missing required argument" dead end - dogfood retro
+    // showed an agent guessing this command for the AGGREGATE ranking.
+    { skill: Argument.string("skill").pipe(Argument.optional) },
+    ({ skill }) => cmdStats(Option.isSome(skill) ? [skill.value] : []),
+).pipe(Command.withDescription("Show detailed stats for ONE skill (requires <skill>). For the aggregate usage ranking use `ax skills weighted`."));
 
 const cmdTimeline = (sessionId: string, json: boolean) =>
     extractSessionTimeline(sessionId).pipe(
