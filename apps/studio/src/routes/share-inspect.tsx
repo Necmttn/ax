@@ -13,6 +13,7 @@ import type {
 } from "@ax/lib/shared/dashboard-types";
 import { shortSessionId } from "@ax/lib/shared/session-id";
 import type { SessionTimelinePayload } from "../api.ts";
+import { FilesTouchedPanel } from "./files-touched-panel.tsx";
 import { compactTokens, useInspectSelection, useVisibleTurnSeq } from "./session-inspect.tsx";
 import { SessionTimelineBody } from "./session-timeline.tsx";
 import { Transcript } from "./transcript.tsx";
@@ -1489,6 +1490,9 @@ function MultiFileShareView(props: {
             ) : null}
             {fileQuery.error ? <div className="error">Error: {String(fileQuery.error)}</div> : null}
             {fileQuery.isLoading && !data ? <div className="loading">Loading session…</div> : null}
+            {/* Keyed by file: the tree model is created once per mount, so it
+                must remount when the session on screen changes. */}
+            {data ? <FilesTouchedPanel key={selectedFile} turns={data.turns} /> : null}
             {fileQuery.data?.session_timeline ? (
                 <div style={VIEW_TOGGLE_BAR_STYLE}>
                     {(["transcript", "timeline"] as const).map((mode) => (
@@ -1572,6 +1576,7 @@ function LegacyShareView(props: { readonly owner: string; readonly gistId: strin
             ) : null}
             {query.error ? <div className="error">Error: {String(query.error)}</div> : null}
             {query.isLoading && !data ? <div className="loading">Loading shared session…</div> : null}
+            {data ? <FilesTouchedPanel turns={data.turns} /> : null}
             {data ? <InspectBody data={data} harnessHooks={query.data?.harness_hooks} /> : null}
         </section>
     );
