@@ -212,12 +212,18 @@ const installCommand = Command.make(
 
             for (const entry of results) {
                 const matcherStr = entry.input.matcher ? ` [matcher: ${entry.input.matcher}]` : "";
+                if (entry.skipped) {
+                    console.log(`already installed - skipped ${entry.provider} ${entry.input.event}${matcherStr}`);
+                    continue;
+                }
                 console.log(`installed ${entry.provider} ${entry.input.event}${matcherStr} -> ${entry.writtenPath}`);
                 console.log(`  command: ${entry.input.command}`);
             }
+            const installed = results.filter((r) => !r.skipped).length;
+            const skipped = results.length - installed;
             console.log("");
-            console.log(`${results.length} hook(s) installed.`);
-            if (providerList.includes("codex")) {
+            console.log(`${installed} hook(s) installed${skipped > 0 ? `, ${skipped} skipped (already installed)` : ""}.`);
+            if (installed > 0 && providerList.includes("codex")) {
                 console.log("note (codex): approve the new hook when prompted (trust review).");
             }
         }).pipe(Effect.provide(HookProviderRegistryDefault)),

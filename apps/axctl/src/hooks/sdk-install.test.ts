@@ -1,10 +1,20 @@
 import { describe, expect, test } from "bun:test";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Effect } from "effect";
-import { planInstall, loadHookMeta, SdkHookImportError, SdkHookValidationError } from "./sdk-install.ts";
-import type { InstallableHookMeta } from "./sdk-install.ts";
+import { Effect, Layer } from "effect";
+import { BunFileSystem, BunPath } from "@effect/platform-bun";
+import { SurrealClient } from "@ax/lib/db";
+import { HookProviderRegistryDefault } from "./providers/registry.ts";
+import {
+    planInstall,
+    loadHookMeta,
+    filterAlreadyInstalled,
+    installHookFile,
+    SdkHookImportError,
+    SdkHookValidationError,
+} from "./sdk-install.ts";
+import type { InstallableHookMeta, InstallPlanEntry, InstallResult } from "./sdk-install.ts";
 
 // ---------------------------------------------------------------------------
 // planInstall (pure)
@@ -163,5 +173,121 @@ describe("loadHookMeta", () => {
         const err = await runFail(loadHookMeta(file));
         expect(err).toBeInstanceOf(SdkHookValidationError);
         expect((err as SdkHookValidationError).reason).toContain("object");
+    });
+});
+
+// ---------------------------------------------------------------------------
+// filterAlreadyInstalled (pure)
+// ---------------------------------------------------------------------------
+
+describe("filterAlreadyInstalled", () => {
+    const entry = (provider: string, event: string, command: string): InstallPlanEntry => ({
+        provider,
+        input: { event, matcher: null, command, timeout: 10 },
+    });
+
+    test("skips an entry whose (provider, scope, event, command) already exists", () => {
+        const plan = [entry("claude", "PreToolUse", "bun /abs/g.ts")];
+        const existing = [
+            { provider: "claude", scope: "global", event: "PreToolUse", command: "bun /abs/g.ts" },
+        ];
+        const out = filterAlreadyInstalled(plan, existing, "global");
+        expect(out[0]!.skipped).toBe(true);
+    });
+
+    test("matches even when the existing command carries an ax marker", () => {
+        const plan = [entry("claude", "PreToolUse", "bun /abs/g.ts")];
+        const existing = [
+            { provider: "claude", scope: "global", event: "PreToolUse", command: "bun /abs/g.ts # ax:abc12345" },
+        ];
+        const out = filterAlreadyInstalled(plan, existing, "global");
+        expect(out[0]!.skipped).toBe(true);
+    });
+
+    test("does not skip when provider, event, scope, or command differ", () => {
+        const plan = [entry("claude", "PreToolUse", "bun /abs/g.ts")];
+        const cases = [
+            { provider: "codex", scope: "global", event: "PreToolUse", command: "bun /abs/g.ts" },
+            { provider: "claude", scope: "project", event: "PreToolUse", command: "bun /abs/g.ts" },
+            { provider: "claude", scope: "global", event: "PostToolUse", command: "bun /abs/g.ts" },
+            { provider: "claude", scope: "global", event: "PreToolUse", command: "bun /abs/other.ts" },
+        ];
+        for (const existing of cases) {
+            const out = filterAlreadyInstalled(plan, [existing], "global");
+            expect(out[0]!.skipped).toBe(false);
+        }
+    });
+
+    test("partial overlap: only the existing combination is skipped", () => {
+        const plan = [
+            entry("claude", "PreToolUse", "bun /abs/g.ts"),
+            entry("codex", "PreToolUse", "bun /abs/g.ts"),
+        ];
+        const existing = [
+            { provider: "claude", scope: "global", event: "PreToolUse", command: "bun /abs/g.ts # ax:deadbeef" },
+        ];
+        const out = filterAlreadyInstalled(plan, existing, "global");
+        expect(out[0]!.skipped).toBe(true);
+        expect(out[1]!.skipped).toBe(false);
+    });
+});
+
+// ---------------------------------------------------------------------------
+// installHookFile (real claude codec against tmp config + mock SurrealClient)
+// ---------------------------------------------------------------------------
+
+const mockDb = Layer.succeed(SurrealClient, {
+    query: <T>() => Effect.sync(() => [[]] as unknown as T),
+} as never);
+
+const fullLayer = Layer.mergeAll(BunFileSystem.layer, BunPath.layer, HookProviderRegistryDefault, mockDb);
+
+const runFull = <A, E>(eff: Effect.Effect<A, E, never>): Promise<A> =>
+    Effect.runPromise(eff as Effect.Effect<A, never>);
+
+describe("installHookFile", () => {
+    const writeHookFile = (dir: string): string => {
+        const file = join(dir, "guard.ts");
+        writeFileSync(
+            file,
+            `export default { name: "guard", events: ["PreToolUse"], matcher: { tools: ["Write", "Edit"] } };\n`,
+        );
+        return file;
+    };
+
+    test("fails with SdkHookValidationError when the path is not absolute", async () => {
+        const err = await runFull(
+            installHookFile("relative/guard.ts", ["claude"], "global")
+                .pipe(Effect.flip, Effect.provide(fullLayer)) as Effect.Effect<unknown, never, never>,
+        );
+        expect(err).toBeInstanceOf(SdkHookValidationError);
+        expect((err as SdkHookValidationError).reason).toBe("hook file path must be absolute");
+    });
+
+    test("re-running install is idempotent: second run all-skipped, config byte-identical", async () => {
+        const root = mk();
+        const hookFile = writeHookFile(root);
+
+        const first = await runFull(
+            installHookFile(hookFile, ["claude"], "project", { repoRoot: root })
+                .pipe(Effect.provide(fullLayer)) as Effect.Effect<ReadonlyArray<InstallResult>, never, never>,
+        );
+        expect(first).toHaveLength(1);
+        expect(first[0]!.skipped).toBe(false);
+        const configPath = first[0]!.writtenPath!;
+        const bytesAfterFirst = readFileSync(configPath, "utf8");
+        // marker embedded by the codec
+        expect(bytesAfterFirst).toContain("bun " + hookFile);
+
+        const second = await runFull(
+            installHookFile(hookFile, ["claude"], "project", { repoRoot: root })
+                .pipe(Effect.provide(fullLayer)) as Effect.Effect<typeof first, never, never>,
+        );
+        expect(second).toHaveLength(1);
+        expect(second[0]!.skipped).toBe(true);
+        expect(second[0]!.writtenPath).toBeUndefined();
+
+        const bytesAfterSecond = readFileSync(configPath, "utf8");
+        expect(bytesAfterSecond).toBe(bytesAfterFirst);
     });
 });
