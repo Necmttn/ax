@@ -1,0 +1,10 @@
+{
+  "session_id": "th-456",
+  "turn_id": "turn-9",
+  "tool_use_id": "tu-1",
+  "model": "gpt-5.4",
+  "cwd": "/Users/u/Projects/ax",
+  "hook_event_name": "PreToolUse",
+  "tool_name": "Bash",
+  "tool_input": { "command": "git checkout main" }
+}

@@ -1,0 +1,8 @@
+{
+  "session_id": "abc-123",
+  "transcript_path": "/Users/u/.claude/projects/x/abc-123.jsonl",
+  "cwd": "/Users/u/Projects/ax",
+  "hook_event_name": "PreToolUse",
+  "tool_name": "Bash",
+  "tool_input": { "command": "git checkout main", "description": "switch" }
+}
