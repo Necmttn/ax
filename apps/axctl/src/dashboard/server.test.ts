@@ -2,17 +2,14 @@ import { describe, expect, test } from "bun:test";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
-    dashboardApiCapabilities,
-    dashboardApiKind,
     formatSseEvent,
     handleDashboardRequest,
     handleDashboardRequestWithCors,
     imageContentType,
-    isGraphExplorerEnabled,
     parseDashboardServeArgs,
-    parseQueryRequest,
     recentIngestEventsSql,
 } from "./server.ts";
+import { dashboardApiCapabilities, isGraphExplorerEnabled } from "./capabilities.ts";
 
 function preflight(headers: Record<string, string>): Request {
     return new Request("http://127.0.0.1:1738/api/version", {
@@ -114,13 +111,6 @@ describe("dashboard server", () => {
         expect(parseDashboardServeArgs(["--port=1800"]).port).toBe(1800);
     });
 
-    test("parseQueryRequest rejects non-select mutations", async () => {
-        await expect(parseQueryRequest(new Request("http://x/api/query", {
-            method: "POST",
-            body: JSON.stringify({ sql: "DELETE session;" }),
-        }))).rejects.toThrow("Only SELECT, RETURN, and INFO queries are allowed");
-    });
-
     test("formatSseEvent emits valid SSE frame", () => {
         expect(formatSseEvent("message", { ok: true })).toBe('event: message\ndata: {"ok":true}\n\n');
     });
@@ -131,15 +121,6 @@ describe("dashboard server", () => {
         expect(sql).toContain('WHERE ts > d"2026-05-10T00:00:00.000Z"');
         expect(sql).toContain("ORDER BY ts ASC");
         expect(sql).toContain("LIMIT 12");
-    });
-
-    test("dashboardApiKind recognizes self improve route", () => {
-        expect(dashboardApiKind("/api/self-improve")).toBe("self-improve");
-    });
-
-    test("dashboardApiKind recognizes experiment-loop improve route", () => {
-        expect(dashboardApiKind("/api/improve")).toBe("improve");
-        expect(dashboardApiKind("/api/improve/extra")).toBe("unknown");
     });
 
     test("graph explorer is disabled unless explicitly enabled", () => {
@@ -169,5 +150,19 @@ describe("dashboard server", () => {
             if (prev === undefined) delete process.env.AX_ENABLE_GRAPH_EXPLORER;
             else process.env.AX_ENABLE_GRAPH_EXPLORER = prev;
         }
+    });
+
+    test("GET /api/version is served by the route table", async () => {
+        const res = await handleDashboardRequest(new Request("http://127.0.0.1:1738/api/version"));
+        expect(res.status).toBe(200);
+        const body = await res.json() as { api_version: number; capabilities: string[] };
+        expect(body.api_version).toBe(1);
+        expect(body.capabilities).toContain("sessions");
+    });
+
+    test("unknown /api/* path preserves the legacy 200 not_found quirk", async () => {
+        const res = await handleDashboardRequest(new Request("http://127.0.0.1:1738/api/definitely-not-a-route"));
+        expect(res.status).toBe(200);
+        await expect(res.json()).resolves.toEqual({ error: "not_found" });
     });
 });

@@ -5,8 +5,6 @@ import { IngestRuntimeLayer } from "../ingest/stage/runtime.ts";
 import { createDurableIngestStream, type DurableIngestStream } from "./ingest-stream-durable.ts";
 import { ingestStreamName } from "./ingest-stream.ts";
 import { startIngestWorkflow } from "./ingest-workflow.ts";
-import { graphHealthSql } from "../queries/graph-health.ts";
-import { checkoutActivitySql, gitCorrelationSql } from "../queries/insights.ts";
 import { addIngestEventSubscriber, removeIngestEventSubscriber } from "./telemetry.ts";
 import {
     clearSkillDecision,
@@ -37,6 +35,9 @@ import { fetchSessionCanvas, fetchSessionOrchestration } from "./session-canvas.
 import { fetchSessionSummary } from "./session-summary.ts";
 import { fetchSkillGraph } from "./skill-graph.ts";
 import { fetchWrapped, sanitizeWrappedProfile } from "./wrapped.ts";
+import { isGraphExplorerEnabled } from "./capabilities.ts";
+import { dispatch, jsonResponse } from "./router/router.ts";
+import { routeTable } from "./router/table.ts";
 
 /**
  * Map of supported image extension → MIME type. This is the safety allowlist
@@ -103,16 +104,6 @@ export function parseDashboardServeArgs(args: string[]): { port: number } {
     return { port };
 }
 
-export async function parseQueryRequest(req: Request): Promise<{ sql: string }> {
-    const body = await req.json() as { sql?: unknown };
-    const sql = typeof body.sql === "string" ? body.sql.trim() : "";
-    if (!sql) throw new Error("SQL is required");
-    if (!/^(SELECT|RETURN|INFO)\b/i.test(sql)) {
-        throw new Error("Only SELECT, RETURN, and INFO queries are allowed");
-    }
-    return { sql };
-}
-
 export function formatSseEvent(event: string, data: unknown): string {
     return `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
 }
@@ -125,65 +116,6 @@ FROM ingest_event
 WHERE ts > d"${sinceIso}"
 ORDER BY ts ASC
 LIMIT ${safeLimit};`.trim();
-}
-
-export function dashboardApiKind(pathname: string): "graph-health" | "worktrees" | "self-improve" | "improve" | "unknown" {
-    if (pathname === "/api/graph-health") return "graph-health";
-    if (pathname === "/api/worktrees") return "worktrees";
-    if (pathname === "/api/self-improve") return "self-improve";
-    if (pathname === "/api/improve") return "improve";
-    return "unknown";
-}
-
-async function jsonResponse(value: unknown, status = 200): Promise<Response> {
-    return new Response(JSON.stringify(value), {
-        status,
-        headers: { "content-type": "application/json; charset=utf-8" },
-    });
-}
-
-async function queryApi(pathname: string): Promise<Response> {
-    const program = Effect.gen(function* () {
-        const db = yield* SurrealClient;
-        if (pathname === "/api/graph-health") return yield* db.query(graphHealthSql(25));
-        if (pathname === "/api/worktrees") {
-            const activity = yield* db.query(checkoutActivitySql(50));
-            const git = yield* db.query(gitCorrelationSql(50));
-            return { activity, git };
-        }
-        if (pathname === "/api/self-improve") {
-            return yield* db.query(`
-SELECT id, guidance, version, text, status, scope, risk, evidence, metrics_before, metrics_after, created_at
-FROM guidance_version
-ORDER BY created_at DESC
-LIMIT 50;`);
-        }
-        if (pathname === "/api/improve") {
-            // Experiment-loop shortlist + verdict state. Reads proposal +
-            // per-form payloads + the active experiment + newest checkpoint.
-            // See docs/superpowers/plans/2026-05-25-experiment-loop-cleanup-and-rebuild.md
-            // (Phase C10).
-            const result = yield* db.query<[Array<Record<string, unknown>>]>(`
-SELECT id, form, title, hypothesis, dedupe_sig, frequency, confidence, status, reject_reason,
-    type::string(created_at) AS created_at,
-    (SELECT trigger_pattern, suspected_gap, proposed_behavior, expected_impact FROM skill_proposal      WHERE proposal = $parent.id LIMIT 1)[0] AS skill_payload,
-    (SELECT bounded_role, delegation_trigger, example_task_patterns FROM subagent_proposal   WHERE proposal = $parent.id LIMIT 1)[0] AS subagent_payload,
-    (SELECT event_name, target_tool, hook_command, recovery_path, smoke_test_command, disable_command, failure_mode FROM hook_proposal       WHERE proposal = $parent.id LIMIT 1)[0] AS hook_payload,
-    (SELECT file_target, section, suggested_text FROM guidance_proposal   WHERE proposal = $parent.id LIMIT 1)[0] AS guidance_payload,
-    (SELECT trigger_signal, schedule, action, recovery_path, smoke_test_command, disable_command, failure_mode FROM automation_proposal WHERE proposal = $parent.id LIMIT 1)[0] AS automation_payload,
-    (SELECT id, artifact_path, status, task_path, locked_verdict,
-        type::string(created_at) AS created_at,
-        type::string(scaffolded_at) AS scaffolded_at,
-        (SELECT kind, suggested, user_verdict, measured, type::string(observed_at) AS observed_at FROM checkpoint WHERE experiment = $parent.id ORDER BY observed_at DESC LIMIT 1)[0] AS latest_checkpoint
-        FROM experiment WHERE proposal = $parent.id LIMIT 1)[0] AS experiment
-FROM proposal
-ORDER BY frequency DESC, created_at DESC
-LIMIT 100;`);
-            return { proposals: result?.[0] ?? [] };
-        }
-        return { error: "not_found" };
-    }).pipe(Effect.provide(AppLayer), Effect.scoped);
-    return jsonResponse(await Effect.runPromise(program as Effect.Effect<unknown>));
 }
 
 /**
@@ -424,45 +356,6 @@ async function handleSkillBulkDecision(req: Request): Promise<Response> {
 }
 
 /**
- * API version contract. Bump api_version when removing or renaming
- * endpoints / fields (breaking change). Adding endpoints / optional
- * fields is forward-compatible - keep api_version, append to capabilities.
- *
- * The hosted studio at ax.necmttn.com reads this and uses it to:
- *   - display the connected daemon's version in the banner
- *   - feature-gate UI for missing capabilities
- *   - nag the user to `axctl update` when their daemon is behind
- */
-const API_VERSION = 1;
-export const isGraphExplorerEnabled = (
-    env: Record<string, string | undefined> = process.env,
-): boolean => env.AX_ENABLE_GRAPH_EXPLORER === "1";
-
-const baseApiCapabilities = [
-    "skills",      // /api/skills + decide/detail/source/open
-    "decisions",   // /api/decisions
-    "workflow",    // /api/workflow
-    "sessions",    // /api/sessions + detail/children/inspect
-    "episodes",    // /api/episodes/:parentId
-    "projects",    // /api/projects/:slug
-    "skill-graph", // /api/skill-graph
-    "recall",      // /api/recall
-    "tools",       // /api/tool-failures
-    "wrapped",     // /api/wrapped + public-preview
-    "improve",     // /api/improve + accept/reject/verdict
-    "events",      // /api/events (SSE)
-    "ingest",      // POST /api/ingest -> { runId, stream } + Durable Streams sidecar
-    "image",       // GET /api/image?path= -> local on-disk image bytes
-] as const;
-
-export const dashboardApiCapabilities = (
-    env: Record<string, string | undefined> = process.env,
-): ReadonlyArray<string> =>
-    isGraphExplorerEnabled(env)
-        ? [...baseApiCapabilities, "graph-explorer"]
-        : baseApiCapabilities;
-
-/**
  * Server-lifetime ingest state, set up once by {@link serveDashboard} at
  * startup and torn down on shutdown.
  *
@@ -533,27 +426,8 @@ async function handleIngestTrigger(req: Request): Promise<Response> {
 
 export async function handleDashboardRequest(req: Request): Promise<Response> {
     const url = new URL(req.url);
-    if (url.pathname === "/api/version") {
-        const { AX_VERSION } = await import("../cli/version.ts");
-        return jsonResponse({
-            version: AX_VERSION,
-            api_version: API_VERSION,
-            capabilities: dashboardApiCapabilities(),
-        });
-    }
-    if (url.pathname === "/api/query" && req.method === "POST") {
-        try {
-            const { sql } = await parseQueryRequest(req);
-            const started = performance.now();
-            const result = await Effect.runPromise(Effect.gen(function* () {
-                const db = yield* SurrealClient;
-                return yield* db.query(sql);
-            }).pipe(Effect.provide(AppLayer), Effect.scoped) as Effect.Effect<unknown>);
-            return jsonResponse({ result, durationMs: Math.round(performance.now() - started) });
-        } catch (error) {
-            return jsonResponse({ error: error instanceof Error ? error.message : String(error) }, 400);
-        }
-    }
+    const routed = await dispatch(routeTable, req, url);
+    if (routed !== null) return routed;
     if (url.pathname === "/api/events") {
         let subscriber: ((event: unknown) => void) | null = null;
         let interval: ReturnType<typeof setInterval> | null = null;
@@ -1071,7 +945,7 @@ export async function handleDashboardRequest(req: Request): Promise<Response> {
     if (url.pathname === "/api/image" && req.method === "GET") {
         return handleImageRequest(url);
     }
-    if (url.pathname.startsWith("/api/")) return queryApi(url.pathname);
+    if (url.pathname.startsWith("/api/")) return jsonResponse({ error: "not_found" });
 
     // Non-API GET: serve a tiny landing pointing the user at the hosted
     // studio. The CLI is API-only now; the dashboard UI lives at
