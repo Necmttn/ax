@@ -241,7 +241,7 @@ export const PROVIDER_PARITY_FEATURES: readonly ProviderParityFeature[] = [
                 { path: "apps/axctl/src/ingest/tool-file-evidence.ts", contains: "EDIT_TOOLS" },
             ]),
             opencode: extractorGap("OpenCode file edit evidence depends on concrete tool-call extraction."),
-            cursor: extractorGap("Cursor file edit evidence depends on concrete tool-call extraction."),
+            cursor: extractorGap("Cursor file edit evidence is not mapped into file relations yet."),
         },
     },
     {
@@ -269,7 +269,7 @@ export const PROVIDER_PARITY_FEATURES: readonly ProviderParityFeature[] = [
                 { path: "apps/axctl/src/ingest/tool-file-evidence.ts", contains: "SEARCH_TOOLS" },
             ]),
             opencode: extractorGap("OpenCode file read/search evidence is not mapped into file relations yet."),
-            cursor: extractorGap("Cursor file read/search evidence depends on concrete tool-call extraction."),
+            cursor: extractorGap("Cursor file read/search evidence is not mapped into file relations yet."),
         },
     },
     {
