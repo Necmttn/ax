@@ -1,4 +1,4 @@
-import { Effect, Exit, References } from "effect";
+import { Cause, Effect, Exit, Option, References } from "effect";
 import { AxConfig } from "@ax/lib/config";
 import { SurrealClient, type SurrealClientShape } from "@ax/lib/db";
 import type { DbError } from "@ax/lib/errors";
@@ -71,6 +71,51 @@ const parseOptionalPositiveIntFlag = (
 
 const errorText = (error: unknown): string =>
     error instanceof Error ? error.message : String(error);
+
+/**
+ * Settle the `ingest_run` row for every way the wrapped effect can finish,
+ * in ONE uninterruptible `onExit` finalizer (replaces the old triplicated
+ * tap-ok / catch-error / onExit-interrupt trio):
+ *
+ *  - success       -> status "ok"
+ *  - typed failure -> status "error" + `{ error: <message> }`; the original
+ *                     failure still propagates
+ *  - interruption  -> status "error" + `{ error: "interrupted" }` (best
+ *                     effort - the write itself is `Effect.ignore`d)
+ *
+ * Pure defects write nothing, mirroring the old trio (tap/catch never saw
+ * them). The finalizer runs while the SurrealClient scope is still open
+ * (inner scope unwinds before the layer closes the connection), so the last
+ * write has a live connection. The interruption arm requires the process
+ * main fiber to actually be interrupted on SIGINT - see BunRuntime.runMain
+ * in cli/index.ts.
+ */
+export const withIngestRunFinish = (db: SurrealClientShape, runId: string) =>
+    <A, E, R>(effect: Effect.Effect<A, E, R>): Effect.Effect<A, E | DbError, R> =>
+        Effect.onExit(effect, (exit): Effect.Effect<void, DbError> => {
+            if (Exit.isSuccess(exit)) {
+                return db.query(buildIngestRunFinishStatement({ runId, status: "ok" }))
+                    .pipe(Effect.asVoid);
+            }
+            // Read the cause before the `hasInterrupts` guard: its negative
+            // branch would otherwise narrow `exit` to `never`.
+            const cause = exit.cause;
+            if (Exit.hasInterrupts(exit)) {
+                return db.query(buildIngestRunFinishStatement({
+                    runId,
+                    status: "error",
+                    metrics: { error: "interrupted" },
+                })).pipe(Effect.ignore);
+            }
+            const failure = Cause.findErrorOption(cause);
+            return Option.isSome(failure)
+                ? db.query(buildIngestRunFinishStatement({
+                    runId,
+                    status: "error",
+                    metrics: { error: errorText(failure.value) },
+                })).pipe(Effect.asVoid)
+                : Effect.void;
+        });
 
 const numericCounts = (value: unknown): Record<string, number> => {
     if (typeof value !== "object" || value === null) return {};
@@ -254,32 +299,7 @@ export const runIngest = (
                 label: `ingest ${selectedStages.map((s) => s.meta.key).join(",")}`,
                 scope: { type: "user", id: process.env.USER ?? "local" },
             }),
-            Effect.tap(() => db.query(buildIngestRunFinishStatement({ runId, status: "ok" })).pipe(Effect.asVoid)),
-            Effect.catch((error) =>
-                Effect.gen(function* () {
-                    yield* db.query(buildIngestRunFinishStatement({
-                        runId,
-                        status: "error",
-                        metrics: { error: errorText(error) },
-                    }));
-                    return yield* error;
-                }),
-            ),
-            // Ctrl-C: tap/catch above never run on interruption, so without
-            // this the row stays status "running" forever. Finalizers run
-            // uninterruptibly BEFORE the SurrealClient layer closes (inner
-            // scope unwinds first), so this last write still has a live
-            // connection. Requires the process main fiber to actually be
-            // interrupted on SIGINT - see BunRuntime.runMain in cli/index.ts.
-            Effect.onExit((exit) =>
-                Exit.hasInterrupts(exit)
-                    ? db.query(buildIngestRunFinishStatement({
-                        runId,
-                        status: "error",
-                        metrics: { error: "interrupted" },
-                    })).pipe(Effect.ignore)
-                    : Effect.void,
-            ),
+            withIngestRunFinish(db, runId),
             Effect.provideService(References.MinimumLogLevel, opts.verbose ? "Debug" : "Info"),
         );
 

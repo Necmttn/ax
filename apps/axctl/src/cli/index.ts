@@ -1,5 +1,5 @@
 #!/usr/bin/env bun
-import { Cause, Effect, Exit, FileSystem, Layer, Option, Path, References } from "effect";
+import { Cause, Effect, FileSystem, Layer, Option, Path, References } from "effect";
 import { BunFileSystem, BunPath, BunRuntime } from "@effect/platform-bun";
 import { Argument, Command, Flag } from "effect/unstable/cli";
 import { SurrealClient, type SurrealClientShape } from "@ax/lib/db";
@@ -153,7 +153,6 @@ import {
 import { guidanceNext, parseSelfImproveArgs, selfImproveWeekly, sessionSummary } from "../self-improve/commands.ts";
 import {
     buildIngestEventStatement,
-    buildIngestRunFinishStatement,
     buildIngestRunStartStatement,
     buildIngestStageFinishStatement,
     buildIngestStageStartStatement,
@@ -169,7 +168,7 @@ import { pipelineTraceTransportLayer, tuiTraceTransportLayer } from "./ingest-tr
 import type { ProgressStage } from "./progress.ts";
 import { selectByKeys, selectByTag } from "../ingest/stage/select.ts";
 import { type BaseStageStats, type StageDef } from "../ingest/stage/types.ts";
-import { runIngest } from "../ingest/run.ts";
+import { runIngest, withIngestRunFinish } from "../ingest/run.ts";
 
 const boolArg = (name: string, enabled: boolean): string[] =>
     enabled ? [`--${name}`] : [];
@@ -518,24 +517,6 @@ const cmdIngestHere = (args: string[]) => {
     });
 };
 
-/**
- * Finish an `ingest_run` row when the fiber is INTERRUPTED (Ctrl-C under
- * `BunRuntime.runMain`): the success `tap` / failure `catch` around a run
- * never execute on interruption, which used to strand rows in status
- * "running". Runs as an uninterruptible finalizer while the SurrealClient
- * scope is still open (inner scope unwinds before the layer closes the
- * connection). Mirrors the same `onExit` inside `ingest/run.ts`.
- */
-const finishIngestRunOnInterrupt = (db: SurrealClientShape, runId: string) =>
-    (exit: Exit.Exit<unknown, unknown>): Effect.Effect<void> =>
-        Exit.hasInterrupts(exit)
-            ? db.query(buildIngestRunFinishStatement({
-                runId,
-                status: "error",
-                metrics: { error: "interrupted" },
-            })).pipe(Effect.ignore)
-            : Effect.void;
-
 const cmdDeriveSignals = (args: string[]) =>
     Effect.gen(function* () {
         const db = yield* SurrealClient;
@@ -566,18 +547,7 @@ const cmdDeriveSignals = (args: string[]) =>
             deriveSignals({ sinceDays, onProgress: progressUpdater(progress, "signals", "derive") }),
             progress,
         ).pipe(
-            Effect.tap(() => db.query(buildIngestRunFinishStatement({ runId, status: "ok" })).pipe(Effect.asVoid)),
-            Effect.catch((error) =>
-                Effect.gen(function* () {
-                    yield* db.query(buildIngestRunFinishStatement({
-                        runId,
-                        status: "error",
-                        metrics: { error: errorText(error) },
-                    }));
-                    return yield* error;
-                }),
-            ),
-            Effect.onExit(finishIngestRunOnInterrupt(db, runId)),
+            withIngestRunFinish(db, runId),
             Effect.provideService(References.MinimumLogLevel, verbose ? "Debug" : "Info"),
             Effect.ensuring(Effect.sync(() => progress.stop())),
         );
@@ -602,18 +572,7 @@ const cmdIngestInsights = (args: string[] = []) =>
             yield* telemetryStage(db, runId, "claude", "insights", ingestClaudeInsights(), progress);
         });
         yield* program.pipe(
-            Effect.tap(() => db.query(buildIngestRunFinishStatement({ runId, status: "ok" })).pipe(Effect.asVoid)),
-            Effect.catch((error) =>
-                Effect.gen(function* () {
-                    yield* db.query(buildIngestRunFinishStatement({
-                        runId,
-                        status: "error",
-                        metrics: { error: errorText(error) },
-                    }));
-                    return yield* error;
-                }),
-            ),
-            Effect.onExit(finishIngestRunOnInterrupt(db, runId)),
+            withIngestRunFinish(db, runId),
             Effect.provideService(References.MinimumLogLevel, verbose ? "Debug" : "Info"),
             Effect.ensuring(Effect.sync(() => progress.stop())),
             // ingestClaudeInsights now reads via @effect/platform FileSystem +
