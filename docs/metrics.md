@@ -86,7 +86,9 @@ minimal (a flat catalog array + a switch, NOT a registry/DAG/codegen).
   weight (top `--limit`, default 30). Unknown id → stderr error + exit 2 listing
   valid ids; `--json` emits the raw edges.
 - `fragility_cascade` (relation, cross-session) is now browsable through this
-  surface - the bounded `fragility-cascade.ts` computation wired to the CLI.
+  surface. `ax signals show fragility_cascade` reads the **precomputed**
+  `fragility_cascade` table (written by the `derive-metrics` stage) - a single
+  small-table scan, no live edge derefs on the read path.
   Catalog: `apps/axctl/src/metrics/catalog.ts`.
 
 ## Deferred
@@ -98,16 +100,26 @@ minimal (a flat catalog array + a switch, NOT a registry/DAG/codegen).
   need a hang-safe **bounded** design - e.g. a derive-stage precompute that joins
   the already-stored `session_metrics.durability_ratio` rather than an on-demand
   per-edge deref - and are deferred to a later wave.
-- **`fragility_cascade` is gated, not live.** It returns empty today because the
-  `touched` (git) file keys (`file:remote_*`) and `edited` (tool-call) file keys
-  (`file:repository__*`) are **disjoint namespaces** - the cross-session join can
-  never match. The signal logic + surface are correct; before it produces real
-  edges, the file-key derivation across the git and tool-call ingest paths must be
-  reconciled (join on file `path` within a repo, or unify the keys). AND, once the
-  namespace gap is fixed, the on-demand `edited WHERE out IN [files]` + `in.session`
-  deref must move to a **derive-stage precompute with limits** - reverted-touched
-  files can be numerous, so a broad fileRefs set would reproduce the documented
-  87k-edge deref hang (the `edited_out` index helps the lookup but not the deref).
+- **`fragility_cascade` file-identity bridge (issue #171, shipped).** The
+  `touched` (git) file keys (`file:remote_*`, repo-relative `path`) and `edited`
+  (tool-call) file keys (`file:repository__*`, ABSOLUTE path) remain **disjoint
+  namespaces** - unifying them at ingest (resolving the repository inside the
+  transcript hot path) or migrating ~5k existing local-path file rows + their
+  edges was judged riskier than bridging. Instead the join is bridged
+  **deterministically at derive time**: for each fragile repo file, its
+  local-path twin keys are recomputed as
+  `localPathFileRecordKey(checkout.path + "/" + relPath)` - the exact derivation
+  tool-call ingest uses, now canonical in `@ax/lib/ids` - across the repo's
+  checkout roots, and twin edits fold back onto the canonical git file. Works on
+  ALL existing data, no migration. The computation runs as a **derive-stage
+  precompute with hard limits** in `derive-metrics` (live data has ~112k
+  reverted-touched edges): bounded reverted-commit anchor
+  (`maxRevertedCommits`), mass reverts skipped (`maxFilesPerCommit`), capped
+  fragile-file set (`maxFragileFiles`), every lookup chunked + index-anchored
+  (`touched_in`, `produced_out_ts`, `edited_out`), and the only `in.session`
+  deref bounded to candidate matches. Results land in the `fragility_cascade`
+  table (full rewrite per run); the CLI reads stored rows. Known gap: edits in a
+  checkout whose root the `checkout` table has never seen don't bridge.
 - **Incremental freshness gaps (reconciled by deep/full ingest).** On the daemon's
   `--since=1` path, `time_to_land_ms` can stay stale for an OLD session whose PR
   merges LATER (the dirty set keys on the time window + changed reverted commits,

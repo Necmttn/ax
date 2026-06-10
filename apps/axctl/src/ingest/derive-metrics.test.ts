@@ -11,7 +11,7 @@ import { SurrealClient } from "@ax/lib/db";
 const makeDb = (sink: string[]) =>
     Layer.succeed(SurrealClient, {
         query: <T>(sql: string) => {
-            if (/UPSERT session_metrics|UPDATE commit/.test(sql)) {
+            if (/UPSERT session_metrics|UPDATE commit|DELETE fragility_cascade/.test(sql)) {
                 sink.push(sql);
                 return Effect.succeed([[]] as unknown as T);
             }
@@ -42,5 +42,9 @@ describe("deriveMetrics", () => {
         expect(sink.some((s) => /cold_start_reads:/.test(s) && /delegation_ratio:/.test(s) && /time_to_first_edit_ms:/.test(s)))
             .toBe(true);
         expect(stats.sessionsWritten).toBe(1);
+        // Fragility-cascade precompute runs on the dirty path: with no reverted
+        // commits it writes 0 edges but still rewrites (clears) the table.
+        expect(stats.cascadeEdges).toBe(0);
+        expect(sink.some((s) => /DELETE fragility_cascade;/.test(s))).toBe(true);
     });
 });

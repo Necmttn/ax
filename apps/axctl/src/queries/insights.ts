@@ -97,6 +97,7 @@ export const SCHEMA_TABLES: readonly SchemaTableSpec[] = [
     { table: "turn_token_usage", stage: "active", note: "Provider-derived per-turn token/cache usage and priced cost estimates." },
     { table: "session_health", stage: "active", note: "Derived session-level workflow, context, and interruption health." },
     { table: "session_metrics", stage: "active", note: "Graph-derived per-session metrics (durability, time-to-land, loc)." },
+    { table: "fragility_cascade", stage: "active", note: "Precomputed cross-session fragility-cascade signal edges (origin session -> downstream fixer)." },
     { table: "commit_classification", stage: "active", note: "Commit message lifecycle classification." },
     { table: "branch", stage: "staged", note: "GitHub branch state for delivery analytics." },
     { table: "pull_request", stage: "staged", note: "GitHub pull request state for delivery analytics." },

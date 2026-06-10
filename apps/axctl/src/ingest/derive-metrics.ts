@@ -13,10 +13,12 @@ import { computeSessionLoc } from "../metrics/session-loc.ts";
 import { computeTimeToFirstEdit } from "../metrics/time-to-first-edit.ts";
 import { computeColdStartReads } from "../metrics/cold-start-reads.ts";
 import { computeDelegationRatio } from "../metrics/delegation-ratio.ts";
+import { deriveFragilityCascade } from "../metrics/fragility-cascade.ts";
 
 export interface DeriveMetricsStats {
     readonly sessionsWritten: number;
     readonly revertedCommits: number;
+    readonly cascadeEdges: number;
 }
 
 const num = (n: number | null): string => (n === null ? "NONE" : String(n));
@@ -59,10 +61,13 @@ export const deriveMetrics = (
             (s): s is string => typeof s === "string" && s.length > 0,
         );
         if (sessionIds.length === 0) {
-            // Reverted writes (if any) are done and nothing else needs the rollup;
-            // safe to advance the watermark now.
+            // No dirty sessions. New cascade edges are only possible when the
+            // reverted set itself changed (no new sessions ⇒ no new `edited`
+            // edges), so the bounded cascade re-derive runs only on that path -
+            // BEFORE the watermark advances, so a crash re-runs it next time.
+            const cascadeEdges = reverted.skipped ? 0 : yield* deriveFragilityCascade();
             if (!reverted.skipped) yield* advanceRevertedWatermark(reverted.fingerprint);
-            return { sessionsWritten: 0, revertedCommits: reverted.revertedCount };
+            return { sessionsWritten: 0, revertedCommits: reverted.revertedCount, cascadeEdges };
         }
 
         // 2b. Spawn-parent expansion: a dirty CHILD means its parent's
@@ -112,11 +117,19 @@ export const deriveMetrics = (
                 + `ts: time::now() };`;
         });
         yield* executeStatementsWith(db, stmts, { chunkSize: 500 });
+
+        // 5. Fragility-cascade precompute (issue #171): bounded full rewrite of
+        //    the `fragility_cascade` table so `ax signals show fragility_cascade`
+        //    reads stored rows instead of doing live edge derefs. Runs whenever
+        //    sessions were dirty (new `edited` edges can add downstream fixers)
+        //    and on reverted-set changes (handled above for the empty dirty set).
+        const cascadeEdges = yield* deriveFragilityCascade();
+
         // Advance the commit-reverted watermark ONLY now that the dependent
         // session_metrics rows are persisted - a crash before this point re-scans
         // next run instead of silently skipping the affected sessions (codex #2).
         if (!reverted.skipped) yield* advanceRevertedWatermark(reverted.fingerprint);
-        return { sessionsWritten: expandedIds.length, revertedCommits: reverted.revertedCount };
+        return { sessionsWritten: expandedIds.length, revertedCommits: reverted.revertedCount, cascadeEdges };
     });
 
 // ---------------------------------------------------------------------------
@@ -129,6 +142,7 @@ export type DeriveMetricsKey = typeof DeriveMetricsKey.Type;
 export class DeriveMetricsStageStats extends BaseStageStats.extend<DeriveMetricsStageStats>("DeriveMetricsStageStats")({
     sessionsWritten: Schema.Number,
     revertedCommits: Schema.Number,
+    cascadeEdges: Schema.Number,
 }) {}
 
 export const deriveMetricsStage: StageDef<DeriveMetricsStageStats, SurrealClient> = {
@@ -139,9 +153,10 @@ export const deriveMetricsStage: StageDef<DeriveMetricsStageStats, SurrealClient
             const r = yield* deriveMetrics({ sinceDays: sinceDaysFromCtx(ctx) });
             return DeriveMetricsStageStats.make({
                 durationMs: Date.now() - t0,
-                summary: `wrote ${r.sessionsWritten} session_metrics rows; ${r.revertedCommits} reverted commits`,
+                summary: `wrote ${r.sessionsWritten} session_metrics rows; ${r.revertedCommits} reverted commits; ${r.cascadeEdges} cascade edges`,
                 sessionsWritten: r.sessionsWritten,
                 revertedCommits: r.revertedCommits,
+                cascadeEdges: r.cascadeEdges,
             });
         }),
 };
