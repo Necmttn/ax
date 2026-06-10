@@ -205,6 +205,143 @@ a {
     font-weight: 600;
 }
 
+/* v2 hero: verdict + title row, one-sentence lede, session scrubber. */
+.share-hero-top {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 16px;
+}
+.share-hero-verdict {
+    font-family: ui-monospace, Menlo, monospace;
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--green);
+    margin-right: 10px;
+    white-space: nowrap;
+    vertical-align: 2px;
+}
+.share-hero-right {
+    font-family: ui-monospace, Menlo, monospace;
+    font-size: 12px;
+    color: var(--muted);
+    white-space: nowrap;
+}
+.share-hero-lede {
+    margin: 6px 0 0;
+    font-size: 13.5px;
+    line-height: 1.5;
+    color: var(--muted);
+}
+.share-hero-lede b {
+    color: var(--ink);
+    font-weight: 600;
+}
+.share-hero-fail {
+    color: var(--red);
+}
+.scrub-wrap {
+    margin-top: 14px;
+}
+.scrub-labels {
+    position: relative;
+    height: 15px;
+    margin-bottom: 2px;
+}
+.scrub-labels span {
+    position: absolute;
+    top: 0;
+    font-family: ui-monospace, Menlo, monospace;
+    font-size: 9px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--muted);
+    border-left: 1px solid var(--line);
+    padding-left: 5px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    cursor: pointer;
+}
+.scrub-labels span:hover {
+    color: var(--ink);
+}
+.scrub-lanes {
+    position: relative;
+    margin-top: 3px;
+}
+.lane-bar {
+    position: absolute;
+    height: 6px;
+    border-radius: 1.5px;
+    background: var(--rose);
+}
+.lane-bar.failed {
+    background: var(--red);
+}
+.share-hero-brand {
+    display: flex;
+    justify-content: space-between;
+    margin-top: 14px;
+    font-family: ui-monospace, Menlo, monospace;
+    font-size: 9.5px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--muted-2);
+}
+.share-hero-brand b {
+    color: var(--muted);
+}
+.scrub {
+    position: relative;
+    height: 26px;
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    overflow: hidden;
+    background: var(--panel);
+}
+.scrub-seg {
+    position: absolute;
+    top: 0;
+    height: 100%;
+    margin: 0;
+    padding: 0;
+    background: transparent;
+    border: none;
+    border-right: 1px solid var(--line);
+    cursor: pointer;
+    overflow: hidden;
+}
+.scrub-seg:hover {
+    background: color-mix(in srgb, var(--blue) 7%, var(--panel));
+}
+.scrub i {
+    position: absolute;
+    pointer-events: none;
+}
+.scrub-commit {
+    bottom: 0;
+    width: 2px;
+    height: 9px;
+    background: var(--green);
+}
+.scrub-fail {
+    top: 0;
+    width: 2px;
+    height: 7px;
+    background: var(--red);
+}
+.scrub-axis {
+    display: flex;
+    justify-content: space-between;
+    font-family: ui-monospace, Menlo, monospace;
+    font-size: 9px;
+    color: var(--muted);
+    padding: 3px 1px 0;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
 .share-cta {
     font-family: ui-monospace, Menlo, monospace;
     font-size: 12px;

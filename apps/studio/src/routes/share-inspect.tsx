@@ -613,8 +613,128 @@ function fmtShareDate(iso?: string): string | null {
     return d.toISOString().slice(0, 10);
 }
 
-/** Outcome-first header for a shared session: what it did + the headline stats,
- *  so a cold reader gets the story before the transcript. */
+/** Strip the `committed <sha> · ` prefix a timeline segment title carries so
+ *  scrubber labels read as work, not bookkeeping. */
+const segmentLabel = (title: string): string =>
+    title.replace(/^committed\s+\S+\s*·\s*/, "").trim() || title;
+
+/**
+ * The session scrubber: the whole run on one wall-clock strip. Segments are
+ * the timeline's phases (proportional to real elapsed time), green ticks are
+ * commits, red ticks failures, rose dots subagent dispatches. Clicking a
+ * phase jumps the transcript to its first turn (the hash flip also leaves
+ * the timeline view if that's where the reader is).
+ */
+function SessionScrubber({ timeline, spawnCards }: {
+    readonly timeline: SessionTimelinePayload;
+    readonly spawnCards?: ReadonlyArray<ShareSubagentCard>;
+}) {
+    const h = timeline.highlights;
+    const t0 = Date.parse(h.started_at ?? "");
+    const t1 = Date.parse(h.ended_at ?? "");
+    if (!Number.isFinite(t0) || !Number.isFinite(t1) || t1 - t0 < 60_000) return null;
+    const span = t1 - t0;
+    const frac = (iso: string | null | undefined): number | null => {
+        const t = Date.parse(iso ?? "");
+        if (!Number.isFinite(t)) return null;
+        return Math.min(1, Math.max(0, (t - t0) / span));
+    };
+    const segs = timeline.segments
+        .map((seg, i) => {
+            const a = frac(seg.started_at);
+            const next = timeline.segments[i + 1];
+            const b = next ? frac(next.started_at) : 1;
+            return a != null && b != null && b > a ? { seg, a, b } : null;
+        })
+        .filter((s): s is { seg: SessionTimelinePayload["segments"][number]; a: number; b: number } => s !== null);
+    if (segs.length < 2) return null;
+    const ticks = (kind: "checkpoint" | "failure") =>
+        timeline.events.filter((e) => e.kind === kind).map((e) => frac(e.ts)).filter((x): x is number => x != null);
+    const jump = (seq: number | null) => {
+        if (seq == null) return;
+        window.location.hash = `turn-${seq}`;
+    };
+    const fmtClock = (t: number) => new Date(t).toISOString().slice(5, 16).replace("T", " ");
+    // Subagent lanes: each dispatch as a bar on the same time axis, greedy
+    // row packing, opacity by cost - the fan-out made visible (the F2 map).
+    const lanes: Array<Array<{ x: number; w: number; cost: number; failed: boolean; label: string }>> = [];
+    const laneEnds: number[] = [];
+    const maxCost = Math.max(0.01, ...(spawnCards ?? []).map((c) => c.cost_usd ?? 0));
+    for (const card of [...(spawnCards ?? [])].sort((p, q) => (p.started_at ?? "").localeCompare(q.started_at ?? ""))) {
+        const x = frac(card.started_at);
+        if (x == null) continue;
+        const w = Math.max((card.duration_ms ?? 0) / span, 0.004);
+        let r = 0;
+        while (r < laneEnds.length && laneEnds[r] > x - 0.002) r++;
+        if (r >= 4) r = 3;
+        laneEnds[r] = x + w;
+        (lanes[r] ??= []).push({
+            x,
+            w,
+            cost: card.cost_usd ?? 0,
+            failed: (card.stats?.failures ?? 0) > 0,
+            label: `${card.task_label ?? card.id} - ${fmtUsd(card.cost_usd) ?? ""}`,
+        });
+    }
+    return (
+        <div className="scrub-wrap">
+            {/* Labels live in their own deck so the strip below stays pure
+                signal - inside the strip they collided with the ticks. */}
+            <div className="scrub-labels">
+                {segs.filter(({ a, b }) => b - a > 0.08).map(({ seg, a, b }) => (
+                    <span
+                        key={`l-${seg.id}`}
+                        style={{ left: `${a * 100}%`, width: `${(b - a) * 100}%` }}
+                        onClick={() => jump(seg.start_seq)}
+                    >
+                        {segmentLabel(seg.title)}
+                    </span>
+                ))}
+            </div>
+            <div className="scrub">
+                {segs.map(({ seg, a, b }) => (
+                    <button
+                        key={seg.id}
+                        type="button"
+                        className="scrub-seg"
+                        style={{ left: `${a * 100}%`, width: `${(b - a) * 100}%` }}
+                        title={`${segmentLabel(seg.title)} - ${fmtDuration(seg.duration_ms) ?? ""} · ${seg.rollup.tool_calls} tools${seg.rollup.failures ? ` · ${seg.rollup.failures} failures` : ""}`}
+                        onClick={() => jump(seg.start_seq)}
+                    />
+                ))}
+                {ticks("checkpoint").map((x, i) => <i key={`c${i}`} className="scrub-commit" style={{ left: `${x * 100}%` }} />)}
+                {ticks("failure").map((x, i) => <i key={`f${i}`} className="scrub-fail" style={{ left: `${x * 100}%` }} />)}
+            </div>
+            {lanes.length > 0 ? (
+                <div className="scrub-lanes" style={{ height: lanes.length * 8 + 2 }}>
+                    {lanes.map((row, r) =>
+                        row.map((b, i) => (
+                            <i
+                                key={`${r}-${i}`}
+                                className={b.failed ? "lane-bar failed" : "lane-bar"}
+                                style={{
+                                    left: `${b.x * 100}%`,
+                                    width: `${Math.max(b.w * 100, 0.4)}%`,
+                                    top: r * 8,
+                                    opacity: 0.35 + 0.6 * (b.cost / maxCost),
+                                }}
+                                title={b.label}
+                            />
+                        )))}
+                </div>
+            ) : null}
+            <div className="scrub-axis">
+                <span>{fmtClock(t0)}</span>
+                <span>commits ↓ · failures ↑{lanes.length > 0 ? " · bars = subagents (darker = costlier)" : ""} - click a phase to jump</span>
+                <span>{fmtClock(t1)}</span>
+            </div>
+        </div>
+    );
+}
+
+/** Outcome-first header for a shared session: verdict, a one-sentence lede
+ *  built from the run's own numbers, and the wall-clock scrubber - so a cold
+ *  reader gets the story AND the shape before the transcript. */
 function ShareOutcomeHeader(props: {
     readonly summary?: string;
     readonly source: string;
@@ -628,32 +748,41 @@ function ShareOutcomeHeader(props: {
     readonly failures: number;
     readonly costUsd: number | null;
     readonly durationMs: number | null;
+    readonly timeline?: SessionTimelinePayload | null;
+    readonly spawnCards?: ReadonlyArray<ShareSubagentCard>;
 }) {
     const cost = fmtUsd(props.costUsd);
     const duration = fmtDuration(props.durationMs);
     const date = fmtShareDate(props.startedAt);
-    const sub = [props.model ?? props.source, props.project, date].filter(Boolean).join(" · ");
-    const stat = (n: string, label: string) => (
-        <span className="share-hero-stat"><b>{n}</b><span>{label}</span></span>
-    );
-    // Hero totals roll up the whole spawn tree; the cost rail below counts
-    // only the session on screen - qualify the labels so the two figures
-    // don't read as a contradiction.
-    const all = props.subagents > 0 ? " (incl. subagents)" : "";
+    const tl = props.timeline ?? null;
+    const commits = tl?.highlights.event_counts.checkpoint ?? 0;
+    const failEvents = tl ? tl.events.filter((e) => e.kind === "failure") : [];
+    const recovered = failEvents.filter((e) => e.recovered_by_seq != null).length;
+    const right = [cost, duration, date, props.model ?? props.source].filter(Boolean).join(" · ");
+    // The lede: the headline numbers assembled into one readable sentence
+    // (a stat grid makes the reader do the assembly; a sentence does it).
+    const failPhrase = props.failures > 0
+        ? `${props.failures} failed tool calls${failEvents.length > 0 && recovered === failEvents.length ? " - recovered" : ""}`
+        : null;
     return (
         <div className="share-hero">
-            <h2 className="share-hero-title">{cleanShareSummary(props.summary) ?? "Shared agent session"}</h2>
-            {sub ? <div className="share-hero-sub">{sub}</div> : null}
-            <div className="share-hero-stats">
-                {stat(props.turns.toLocaleString(), `turns${all}`)}
-                {stat(props.toolCalls.toLocaleString(), "tool calls")}
-                {stat(props.files.toLocaleString(), "files")}
-                {props.subagents > 0 ? stat(props.subagents.toLocaleString(), "subagents") : null}
-                {cost ? stat(cost, `cost${all}`) : null}
-                {duration ? stat(duration, "duration") : null}
-                <span className="share-hero-outcome" style={{ color: props.failures > 0 ? "var(--red)" : "var(--green)" }}>
-                    {props.failures > 0 ? `✗ ${props.failures} failed tool calls` : "✓ no failed tool calls"}
-                </span>
+            <div className="share-hero-top">
+                <h2 className="share-hero-title">
+                    {commits > 0 ? <span className="share-hero-verdict">✔ {commits} commits</span> : null}
+                    {cleanShareSummary(props.summary) ?? "Shared agent session"}
+                </h2>
+                {right ? <span className="share-hero-right">{right}</span> : null}
+            </div>
+            <p className="share-hero-lede">
+                An agent{props.subagents > 0 ? <> and <b>{props.subagents} subagents</b></> : null}
+                {" - "}<b>{props.turns.toLocaleString()}</b> turns, <b>{props.toolCalls.toLocaleString()}</b> tool calls
+                {props.files > 0 ? <>, <b>{props.files}</b> files</> : null}
+                {failPhrase ? <>, <span className="share-hero-fail">{failPhrase}</span></> : null}.
+            </p>
+            {tl ? <SessionScrubber timeline={tl} spawnCards={props.spawnCards} /> : null}
+            <div className="share-hero-brand">
+                <span>{[props.project, fmtShareDate(props.startedAt)].filter(Boolean).join(" · ")}</span>
+                <span>recorded with <b>ax</b> · ax.necmttn.com</span>
             </div>
         </div>
     );
@@ -826,6 +955,8 @@ function MultiFileShareView(props: {
                     failures={selectedCard.stats.failures}
                     costUsd={selectedCard.cost_usd}
                     durationMs={selectedCard.duration_ms}
+                    timeline={fileQuery.data?.session_timeline ?? null}
+                    spawnCards={directChildren}
                 />
             ) : (
                 <ShareOutcomeHeader
@@ -841,22 +972,23 @@ function MultiFileShareView(props: {
                     failures={totals.failures}
                     costUsd={totals.cost_usd}
                     durationMs={totals.duration_ms}
+                    timeline={fileQuery.data?.session_timeline ?? null}
+                    spawnCards={directChildren}
                 />
             )}
             {directChildren.length > 0 ? (
-                <div style={SUBAGENT_BAR_STYLE}>
-                    <span style={{
-                        display: "block",
-                        font: "700 10px/1 ui-monospace, monospace",
+                <details style={SUBAGENT_BAR_STYLE}>
+                    <summary style={{
+                        font: "700 10px/1.5 ui-monospace, monospace",
                         textTransform: "uppercase",
                         letterSpacing: "0.08em",
                         color: "var(--muted)",
-                        margin: "2px 0 8px",
+                        cursor: "pointer",
                     }}>
-                        ↓ {directChildren.length} subagent session{directChildren.length === 1 ? "" : "s"} - tap to open
-                    </span>
-                    <span style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-                        {directChildren.slice(0, 8).map((c) => (
+                        {directChildren.length} subagent session{directChildren.length === 1 ? "" : "s"} · {fmtUsd(directChildren.reduce((acc, c) => acc + (c.cost_usd ?? 0), 0)) ?? ""} - browse all, or open them inline at their spawn points ↓
+                    </summary>
+                    <span style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 10 }}>
+                        {directChildren.map((c) => (
                             <button
                                 key={c.id}
                                 type="button"
@@ -869,13 +1001,8 @@ function MultiFileShareView(props: {
                                 {fmtUsd(c.cost_usd) ? <span style={{ color: "var(--muted)", marginLeft: 6 }}>{fmtUsd(c.cost_usd)}</span> : null}
                             </button>
                         ))}
-                        {directChildren.length > 8 ? (
-                            <span style={{ alignSelf: "center", color: "var(--muted)", fontFamily: "ui-monospace, monospace" }}>
-                                +{directChildren.length - 8} more inline ↓
-                            </span>
-                        ) : null}
                     </span>
-                </div>
+                </details>
             ) : null}
             {selectedCard ? (
                 <div style={SUBAGENT_BAR_STYLE}>
@@ -906,7 +1033,7 @@ function MultiFileShareView(props: {
                                     : {}),
                             }}
                         >
-                            {mode}
+                            {mode === "transcript" ? "Read the transcript" : "Scan the timeline"}
                         </button>
                     ))}
                 </div>
@@ -964,6 +1091,7 @@ function LegacyShareView(props: { readonly owner: string; readonly gistId: strin
                     subagents={0}
                     failures={query.data.stats.failures}
                     costUsd={query.data.token_usage?.estimated_cost_usd ?? null}
+                    timeline={query.data.session_timeline ?? null}
                     durationMs={
                         query.data.session.started_at && query.data.session.ended_at
                             ? new Date(query.data.session.ended_at).getTime() - new Date(query.data.session.started_at).getTime()

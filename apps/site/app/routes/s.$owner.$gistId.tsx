@@ -9,12 +9,26 @@ export const Route = createFileRoute("/s/$owner/$gistId")({
     sub: typeof search.sub === "string" && search.sub.length > 0 ? search.sub : undefined,
     view: search.view === "timeline" ? ("timeline" as const) : undefined,
   }),
-  head: ({ params }) => ({
-    meta: [
-      { title: `Shared ax session - ${params.owner}/${params.gistId}` },
-      { name: "description", content: "A shared ax session rendered from a Gist artifact." },
-    ],
-  }),
+  head: ({ params }) => {
+    const og = `https://ax.necmttn.com/og/${params.owner}/${params.gistId}`;
+    const url = `https://ax.necmttn.com/s/${params.owner}/${params.gistId}`;
+    return {
+      meta: [
+        { title: `Shared ax session - ${params.owner}/${params.gistId}` },
+        { name: "description", content: "A recorded AI coding-agent session - every turn, tool call, and dollar." },
+        { property: "og:title", content: "Shared ax session" },
+        { property: "og:description", content: "A recorded AI coding-agent session - every turn, tool call, and dollar." },
+        { property: "og:type", content: "website" },
+        { property: "og:url", content: url },
+        // Poster rendered from the session's own data by /og/:owner/:gistId.
+        { property: "og:image", content: og },
+        { property: "og:image:width", content: "1200" },
+        { property: "og:image:height", content: "630" },
+        { name: "twitter:card", content: "summary_large_image" },
+        { name: "twitter:image", content: og },
+      ],
+    };
+  },
   component: SharedSessionFrame,
 });
 
