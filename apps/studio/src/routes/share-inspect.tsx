@@ -625,9 +625,9 @@ const segmentLabel = (title: string): string =>
  * phase jumps the transcript to its first turn (the hash flip also leaves
  * the timeline view if that's where the reader is).
  */
-function SessionScrubber({ timeline, spawnTimes }: {
+function SessionScrubber({ timeline, spawnCards }: {
     readonly timeline: SessionTimelinePayload;
-    readonly spawnTimes?: ReadonlyArray<string>;
+    readonly spawnCards?: ReadonlyArray<ShareSubagentCard>;
 }) {
     const h = timeline.highlights;
     const t0 = Date.parse(h.started_at ?? "");
@@ -655,8 +655,42 @@ function SessionScrubber({ timeline, spawnTimes }: {
         window.location.hash = `turn-${seq}`;
     };
     const fmtClock = (t: number) => new Date(t).toISOString().slice(5, 16).replace("T", " ");
+    // Subagent lanes: each dispatch as a bar on the same time axis, greedy
+    // row packing, opacity by cost - the fan-out made visible (the F2 map).
+    const lanes: Array<Array<{ x: number; w: number; cost: number; failed: boolean; label: string }>> = [];
+    const laneEnds: number[] = [];
+    const maxCost = Math.max(0.01, ...(spawnCards ?? []).map((c) => c.cost_usd ?? 0));
+    for (const card of [...(spawnCards ?? [])].sort((p, q) => (p.started_at ?? "").localeCompare(q.started_at ?? ""))) {
+        const x = frac(card.started_at);
+        if (x == null) continue;
+        const w = Math.max((card.duration_ms ?? 0) / span, 0.004);
+        let r = 0;
+        while (r < laneEnds.length && laneEnds[r] > x - 0.002) r++;
+        if (r >= 4) r = 3;
+        laneEnds[r] = x + w;
+        (lanes[r] ??= []).push({
+            x,
+            w,
+            cost: card.cost_usd ?? 0,
+            failed: (card.stats?.failures ?? 0) > 0,
+            label: `${card.task_label ?? card.id} - ${fmtUsd(card.cost_usd) ?? ""}`,
+        });
+    }
     return (
         <div className="scrub-wrap">
+            {/* Labels live in their own deck so the strip below stays pure
+                signal - inside the strip they collided with the ticks. */}
+            <div className="scrub-labels">
+                {segs.filter(({ a, b }) => b - a > 0.08).map(({ seg, a, b }) => (
+                    <span
+                        key={`l-${seg.id}`}
+                        style={{ left: `${a * 100}%`, width: `${(b - a) * 100}%` }}
+                        onClick={() => jump(seg.start_seq)}
+                    >
+                        {segmentLabel(seg.title)}
+                    </span>
+                ))}
+            </div>
             <div className="scrub">
                 {segs.map(({ seg, a, b }) => (
                     <button
@@ -666,20 +700,32 @@ function SessionScrubber({ timeline, spawnTimes }: {
                         style={{ left: `${a * 100}%`, width: `${(b - a) * 100}%` }}
                         title={`${segmentLabel(seg.title)} - ${fmtDuration(seg.duration_ms) ?? ""} · ${seg.rollup.tool_calls} tools${seg.rollup.failures ? ` · ${seg.rollup.failures} failures` : ""}`}
                         onClick={() => jump(seg.start_seq)}
-                    >
-                        {(b - a) > 0.08 ? <span>{segmentLabel(seg.title)}</span> : null}
-                    </button>
+                    />
                 ))}
                 {ticks("checkpoint").map((x, i) => <i key={`c${i}`} className="scrub-commit" style={{ left: `${x * 100}%` }} />)}
                 {ticks("failure").map((x, i) => <i key={`f${i}`} className="scrub-fail" style={{ left: `${x * 100}%` }} />)}
-                {(spawnTimes ?? []).map((iso, i) => {
-                    const x = frac(iso);
-                    return x == null ? null : <i key={`s${i}`} className="scrub-spawn" style={{ left: `${x * 100}%` }} />;
-                })}
             </div>
+            {lanes.length > 0 ? (
+                <div className="scrub-lanes" style={{ height: lanes.length * 8 + 2 }}>
+                    {lanes.map((row, r) =>
+                        row.map((b, i) => (
+                            <i
+                                key={`${r}-${i}`}
+                                className={b.failed ? "lane-bar failed" : "lane-bar"}
+                                style={{
+                                    left: `${b.x * 100}%`,
+                                    width: `${Math.max(b.w * 100, 0.4)}%`,
+                                    top: r * 8,
+                                    opacity: 0.35 + 0.6 * (b.cost / maxCost),
+                                }}
+                                title={b.label}
+                            />
+                        )))}
+                </div>
+            ) : null}
             <div className="scrub-axis">
                 <span>{fmtClock(t0)}</span>
-                <span>commits ↓ · failures ↑ · subagents ◦ - click a phase to jump</span>
+                <span>commits ↓ · failures ↑{lanes.length > 0 ? " · bars = subagents (darker = costlier)" : ""} - click a phase to jump</span>
                 <span>{fmtClock(t1)}</span>
             </div>
         </div>
@@ -703,7 +749,7 @@ function ShareOutcomeHeader(props: {
     readonly costUsd: number | null;
     readonly durationMs: number | null;
     readonly timeline?: SessionTimelinePayload | null;
-    readonly spawnTimes?: ReadonlyArray<string>;
+    readonly spawnCards?: ReadonlyArray<ShareSubagentCard>;
 }) {
     const cost = fmtUsd(props.costUsd);
     const duration = fmtDuration(props.durationMs);
@@ -733,7 +779,11 @@ function ShareOutcomeHeader(props: {
                 {props.files > 0 ? <>, <b>{props.files}</b> files</> : null}
                 {failPhrase ? <>, <span className="share-hero-fail">{failPhrase}</span></> : null}.
             </p>
-            {tl ? <SessionScrubber timeline={tl} spawnTimes={props.spawnTimes} /> : null}
+            {tl ? <SessionScrubber timeline={tl} spawnCards={props.spawnCards} /> : null}
+            <div className="share-hero-brand">
+                <span>{[props.project, fmtShareDate(props.startedAt)].filter(Boolean).join(" · ")}</span>
+                <span>recorded with <b>ax</b> · ax.necmttn.com</span>
+            </div>
         </div>
     );
 }
@@ -906,7 +956,7 @@ function MultiFileShareView(props: {
                     costUsd={selectedCard.cost_usd}
                     durationMs={selectedCard.duration_ms}
                     timeline={fileQuery.data?.session_timeline ?? null}
-                    spawnTimes={directChildren.map((c) => c.started_at).filter((t): t is string => !!t)}
+                    spawnCards={directChildren}
                 />
             ) : (
                 <ShareOutcomeHeader
@@ -923,23 +973,22 @@ function MultiFileShareView(props: {
                     costUsd={totals.cost_usd}
                     durationMs={totals.duration_ms}
                     timeline={fileQuery.data?.session_timeline ?? null}
-                    spawnTimes={directChildren.map((c) => c.started_at).filter((t): t is string => !!t)}
+                    spawnCards={directChildren}
                 />
             )}
             {directChildren.length > 0 ? (
-                <div style={SUBAGENT_BAR_STYLE}>
-                    <span style={{
-                        display: "block",
-                        font: "700 10px/1 ui-monospace, monospace",
+                <details style={SUBAGENT_BAR_STYLE}>
+                    <summary style={{
+                        font: "700 10px/1.5 ui-monospace, monospace",
                         textTransform: "uppercase",
                         letterSpacing: "0.08em",
                         color: "var(--muted)",
-                        margin: "2px 0 8px",
+                        cursor: "pointer",
                     }}>
-                        ↓ {directChildren.length} subagent session{directChildren.length === 1 ? "" : "s"} - tap to open
-                    </span>
-                    <span style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-                        {directChildren.slice(0, 8).map((c) => (
+                        {directChildren.length} subagent session{directChildren.length === 1 ? "" : "s"} · {fmtUsd(directChildren.reduce((acc, c) => acc + (c.cost_usd ?? 0), 0)) ?? ""} - browse all, or open them inline at their spawn points ↓
+                    </summary>
+                    <span style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 10 }}>
+                        {directChildren.map((c) => (
                             <button
                                 key={c.id}
                                 type="button"
@@ -952,13 +1001,8 @@ function MultiFileShareView(props: {
                                 {fmtUsd(c.cost_usd) ? <span style={{ color: "var(--muted)", marginLeft: 6 }}>{fmtUsd(c.cost_usd)}</span> : null}
                             </button>
                         ))}
-                        {directChildren.length > 8 ? (
-                            <span style={{ alignSelf: "center", color: "var(--muted)", fontFamily: "ui-monospace, monospace" }}>
-                                +{directChildren.length - 8} more inline ↓
-                            </span>
-                        ) : null}
                     </span>
-                </div>
+                </details>
             ) : null}
             {selectedCard ? (
                 <div style={SUBAGENT_BAR_STYLE}>

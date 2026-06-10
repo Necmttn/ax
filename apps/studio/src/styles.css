@@ -243,9 +243,58 @@ a {
 .scrub-wrap {
     margin-top: 14px;
 }
+.scrub-labels {
+    position: relative;
+    height: 15px;
+    margin-bottom: 2px;
+}
+.scrub-labels span {
+    position: absolute;
+    top: 0;
+    font-family: ui-monospace, Menlo, monospace;
+    font-size: 9px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--muted);
+    border-left: 1px solid var(--line);
+    padding-left: 5px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    cursor: pointer;
+}
+.scrub-labels span:hover {
+    color: var(--ink);
+}
+.scrub-lanes {
+    position: relative;
+    margin-top: 3px;
+}
+.lane-bar {
+    position: absolute;
+    height: 6px;
+    border-radius: 1.5px;
+    background: var(--rose);
+}
+.lane-bar.failed {
+    background: var(--red);
+}
+.share-hero-brand {
+    display: flex;
+    justify-content: space-between;
+    margin-top: 14px;
+    font-family: ui-monospace, Menlo, monospace;
+    font-size: 9.5px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--muted-2);
+}
+.share-hero-brand b {
+    color: var(--muted);
+}
 .scrub {
     position: relative;
-    height: 32px;
+    height: 26px;
     border: 1px solid var(--line);
     border-radius: 4px;
     overflow: hidden;
@@ -266,19 +315,6 @@ a {
 .scrub-seg:hover {
     background: color-mix(in srgb, var(--blue) 7%, var(--panel));
 }
-.scrub-seg span {
-    position: absolute;
-    left: 6px;
-    top: 50%;
-    transform: translateY(-50%);
-    font-family: ui-monospace, Menlo, monospace;
-    font-size: 9px;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-    color: var(--muted);
-    white-space: nowrap;
-    pointer-events: none;
-}
 .scrub i {
     position: absolute;
     pointer-events: none;
@@ -294,14 +330,6 @@ a {
     width: 2px;
     height: 7px;
     background: var(--red);
-}
-.scrub-spawn {
-    top: 50%;
-    width: 3px;
-    height: 3px;
-    margin-top: -1.5px;
-    border-radius: 50%;
-    background: var(--rose);
 }
 .scrub-axis {
     display: flex;
