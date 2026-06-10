@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { Effect, FileSystem, Layer } from "effect";
+import { Effect, FileSystem, Layer, Redacted } from "effect";
 import { BunFileSystem } from "@effect/platform-bun";
 import { AxConfig, AxConfigTest, envSnapshot, makeTestConfig } from "./config.ts";
 
@@ -55,6 +55,25 @@ describe("AxConfig", () => {
         }));
         expect(snap.knobs.codexConcurrency).toBe(1);
         expect(snap.knobs.codexPayloadMaxBytes).toBe(1200);
+    });
+
+    test("envSnapshot parses csv dirs: trims entries, drops empties, missing -> []", async () => {
+        const snap = await run(envSnapshot({
+            HOME: "/tmp/home",
+            AX_SKILLS_DIRS: " /a , /b ,, /c ",
+        }));
+        expect(snap.paths.skillDirs).toEqual(["/a", "/b", "/c"]);
+        expect(snap.paths.commandDirs).toEqual([]);
+    });
+
+    test("db.pass is redacted: never leaks via toString, unwraps via Redacted.value", async () => {
+        const snap = await run(envSnapshot({ HOME: "/tmp/home", AX_DB_PASS: "s3cret" }));
+        expect(String(snap.db.pass)).not.toContain("s3cret");
+        expect(`${snap.db.pass}`).not.toContain("s3cret");
+        expect(Redacted.value(snap.db.pass)).toBe("s3cret");
+
+        const dflt = await run(envSnapshot({ HOME: "/tmp/home" }));
+        expect(Redacted.value(dflt.db.pass)).toBe("root");
     });
 
     test("AxConfigTest layer provides overridden values", async () => {
