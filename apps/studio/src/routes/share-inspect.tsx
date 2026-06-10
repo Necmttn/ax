@@ -417,9 +417,8 @@ function InspectBody({
                 totalHookFires: data.total_hook_fires + (harnessHooks?.length ?? 0),
             }}
             header={
-                <div style={{ padding: "8px 24px", color: "var(--muted)", fontSize: 12, fontFamily: "ui-monospace, monospace" }}>
-                    {data.turns.length} turns · {data.total_chars.toLocaleString()} chars
-                    {" · source: "}<code>{data.source_path}</code>
+                <div style={{ padding: "8px var(--strip-x)", color: "var(--muted)", fontSize: 12, fontFamily: "ui-monospace, monospace" }}>
+                    {data.turns.length} turns · this session
                 </div>
             }
             renderAfterTurn={(seq) => {
@@ -428,14 +427,14 @@ function InspectBody({
                 return (
                     <>
                         {hooks && hooks.length > 0 ? (
-                            <div style={{ padding: "2px 24px 4px" }}>
+                            <div style={{ padding: "2px var(--strip-x) 4px" }}>
                                 {hooks.map((hook) => (
                                     <HarnessHookMarker key={`hh-${hook.idx}`} hook={hook} />
                                 ))}
                             </div>
                         ) : null}
                         {spawned && spawned.length > 0 ? (
-                            <div style={{ padding: "2px 24px 6px" }}>
+                            <div style={{ padding: "2px var(--strip-x) 6px" }}>
                                 {spawned.map((card) => (
                                     <ShareSpawnMarker
                                         key={card.id}
@@ -451,7 +450,7 @@ function InspectBody({
             }}
             renderAfterTurns={() =>
                 visibleCount < data.turns.length ? (
-                    <div ref={sentinelRef} style={{ padding: "12px 24px", color: "var(--muted-2)", fontSize: 11, fontFamily: "ui-monospace, monospace" }}>
+                    <div ref={sentinelRef} style={{ padding: "12px var(--strip-x)", color: "var(--muted-2)", fontSize: 11, fontFamily: "ui-monospace, monospace" }}>
                         loading {data.turns.length - visibleCount} more turns…
                     </div>
                 ) : null
@@ -461,37 +460,53 @@ function InspectBody({
 }
 
 const SUBAGENT_BAR_STYLE: CSSProperties = {
-    padding: "6px 24px",
-    background: "#fff1f2",
-    borderTop: "1px solid #fecdd3",
-    borderBottom: "1px solid #fecdd3",
+    padding: "8px var(--strip-x)",
+    background: "var(--page)",
+    borderTop: "1px solid var(--line)",
+    borderBottom: "1px solid var(--line)",
     fontSize: 12,
 };
 
+/** Chip-shaped child-session link: a solid scannable unit with a real hit
+ *  area, toned as navigation (the rose family stays on the inline spawn
+ *  markers - an error-red strip read as "something failed", not "browse"). */
 const SUBAGENT_LINK_STYLE: CSSProperties = {
-    background: "transparent",
-    border: "none",
-    padding: 0,
+    display: "inline-flex",
+    alignItems: "center",
+    background: "var(--panel)",
+    border: "1px solid var(--line)",
+    borderRadius: 3,
+    padding: "6px 10px",
     cursor: "pointer",
-    color: "#9f1239",
+    color: "var(--blue)",
     fontFamily: "ui-monospace, monospace",
     fontSize: 12,
-    textDecoration: "underline",
+    textDecoration: "none",
+};
+
+/** Children share a long boilerplate prefix ("You are implementing ...") -
+ *  truncating from the tail kept only the shared part. Strip the prefix so
+ *  the differentiating text survives. */
+const subagentChipLabel = (label: string | null | undefined): string | null => {
+    if (!label) return null;
+    const stripped = label.replace(/^you are\s+(implementing\s+)?/i, "").trim();
+    const text = stripped || label;
+    return text.length > 52 ? `${text.slice(0, 51)}…` : text;
 };
 
 const VIEW_TOGGLE_BAR_STYLE: CSSProperties = {
     display: "flex",
     gap: 6,
-    padding: "8px 24px 0",
+    padding: "8px var(--strip-x) 0",
 };
 
 const VIEW_TOGGLE_BUTTON_STYLE: CSSProperties = {
-    background: "#fff",
-    border: "1px solid var(--line, #d7dbe2)",
+    background: "var(--panel)",
+    border: "1px solid var(--line)",
     borderRadius: 4,
-    padding: "3px 12px",
+    padding: "6px 12px",
     cursor: "pointer",
-    color: "#374151",
+    color: "var(--muted)",
     fontFamily: "ui-monospace, monospace",
     fontSize: 11.5,
     textTransform: "uppercase",
@@ -502,11 +517,16 @@ const VIEW_TOGGLE_BUTTON_STYLE: CSSProperties = {
  *  hook_fire markers (both use `hook-<n>` ids for the shared jump). */
 const HARNESS_HOOK_IDX_BASE = 1_000_000;
 
+const harnessTone = (accent: string): { bg: string; fg: string; bar: string } => ({
+    bg: `color-mix(in srgb, ${accent} 8%, var(--panel))`,
+    fg: `color-mix(in srgb, ${accent} 45%, var(--ink))`,
+    bar: accent,
+});
 const HARNESS_EFFECT_TONE: Record<string, { bg: string; fg: string; bar: string }> = {
-    blocked: { bg: "#fef2f2", fg: "#991b1b", bar: "#ef4444" },
-    modified_input: { bg: "#fffbeb", fg: "#92400e", bar: "#f59e0b" },
-    injected_context: { bg: "#ecfdf5", fg: "#065f46", bar: "#10b981" },
-    notified: { bg: "#eff6ff", fg: "#1e40af", bar: "var(--blue)" },
+    blocked: harnessTone("var(--red)"),
+    modified_input: harnessTone("var(--gold)"),
+    injected_context: harnessTone("var(--green)"),
+    notified: harnessTone("var(--blue)"),
 };
 
 /** Inline marker for a harness hook that did something (blocked / modified /
@@ -563,16 +583,16 @@ export function ShareSpawnMarker(props: {
             style={{
                 display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap",
                 width: "100%", textAlign: "left", cursor: "pointer",
-                margin: "4px 0", padding: "7px 10px", background: "#fff1f2",
-                border: "1px solid #fecdd3", borderLeft: "4px solid #e11d48", borderRadius: 3,
-                fontSize: 11, fontFamily: "ui-monospace, monospace", color: "#9f1239",
+                margin: "4px 0", padding: "10px", background: "color-mix(in srgb, var(--rose) 8%, var(--panel))",
+                border: "1px solid color-mix(in srgb, var(--rose) 25%, var(--panel))", borderLeft: "4px solid var(--rose)", borderRadius: 3,
+                fontSize: 11, fontFamily: "ui-monospace, monospace", color: "var(--rose)",
             }}
         >
             <span style={{ fontWeight: 700 }}>↳ spawned subagent</span>
             <span style={{ fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 420 }}>
                 {card.task_label ? `"${card.task_label}"` : `${card.id.slice(0, 24)}…`}
             </span>
-            <span style={{ background: "#fecdd3", color: "#7f1d1d", padding: "0 6px", borderRadius: 2, fontSize: 10, fontWeight: 600 }}>
+            <span style={{ background: "color-mix(in srgb, var(--rose) 25%, var(--panel))", color: "color-mix(in srgb, var(--rose) 45%, var(--ink))", padding: "0 6px", borderRadius: 2, fontSize: 10, fontWeight: 600 }}>
                 {card.model ?? card.source}
             </span>
             <span style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
@@ -617,23 +637,36 @@ function ShareOutcomeHeader(props: {
     const stat = (n: string, label: string) => (
         <span className="share-hero-stat"><b>{n}</b><span>{label}</span></span>
     );
+    // Hero totals roll up the whole spawn tree; the cost rail below counts
+    // only the session on screen - qualify the labels so the two figures
+    // don't read as a contradiction.
+    const all = props.subagents > 0 ? " (incl. subagents)" : "";
     return (
         <div className="share-hero">
-            <h2 className="share-hero-title">{props.summary ?? "Shared agent session"}</h2>
+            <h2 className="share-hero-title">{cleanShareSummary(props.summary) ?? "Shared agent session"}</h2>
             {sub ? <div className="share-hero-sub">{sub}</div> : null}
             <div className="share-hero-stats">
-                {stat(props.turns.toLocaleString(), "turns")}
+                {stat(props.turns.toLocaleString(), `turns${all}`)}
                 {stat(props.toolCalls.toLocaleString(), "tool calls")}
                 {stat(props.files.toLocaleString(), "files")}
                 {props.subagents > 0 ? stat(props.subagents.toLocaleString(), "subagents") : null}
-                {cost ? stat(cost, "cost") : null}
+                {cost ? stat(cost, `cost${all}`) : null}
                 {duration ? stat(duration, "duration") : null}
                 <span className="share-hero-outcome" style={{ color: props.failures > 0 ? "var(--red)" : "var(--green)" }}>
-                    {props.failures > 0 ? `✗ ${props.failures} failed` : "✓ no failures"}
+                    {props.failures > 0 ? `✗ ${props.failures} failed tool calls` : "✓ no failed tool calls"}
                 </span>
             </div>
         </div>
     );
+}
+
+/** Share summaries are raw first-turn text and can open with harness XML
+ *  (`<local-command-stdout>…`) - strip tags/envelopes so the largest type on
+ *  the page reads as a story, not a debug dump. */
+export function cleanShareSummary(raw: string | null | undefined): string | null {
+    if (!raw) return null;
+    const text = raw.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
+    return text.length > 0 ? text : null;
 }
 
 /** v3 multi-file share: manifest-first render + lazy/prefetch session files. */
@@ -777,42 +810,71 @@ function MultiFileShareView(props: {
                     {" · gist share"}
                 </span>
             </header>
-            <ShareOutcomeHeader
-                summary={manifest.session.summary}
-                source={manifest.session.source}
-                model={manifest.session.model}
-                project={manifest.session.project}
-                startedAt={manifest.session.started_at}
-                turns={totals.turns}
-                toolCalls={totals.tool_calls}
-                files={manifest.stats.files_changed}
-                subagents={totals.subagents}
-                failures={totals.failures}
-                costUsd={totals.cost_usd}
-                durationMs={totals.duration_ms}
-            />
+            {/* Hero follows the session ON SCREEN: a subagent view shows the
+                subagent's task + stats, not the parent's (which read as a
+                missing context switch). */}
+            {selectedCard ? (
+                <ShareOutcomeHeader
+                    summary={selectedCard.task_label ?? "Subagent session"}
+                    source={selectedCard.source}
+                    model={selectedCard.model}
+                    project={manifest.session.project}
+                    startedAt={selectedCard.started_at}
+                    turns={selectedCard.stats.turns}
+                    toolCalls={selectedCard.stats.tool_calls}
+                    files={selectedCard.stats.files_changed}
+                    subagents={directChildren.length}
+                    failures={selectedCard.stats.failures}
+                    costUsd={selectedCard.cost_usd}
+                    durationMs={selectedCard.duration_ms}
+                />
+            ) : (
+                <ShareOutcomeHeader
+                    summary={manifest.session.summary}
+                    source={manifest.session.source}
+                    model={manifest.session.model}
+                    project={manifest.session.project}
+                    startedAt={manifest.session.started_at}
+                    turns={totals.turns}
+                    toolCalls={totals.tool_calls}
+                    files={manifest.stats.files_changed}
+                    subagents={totals.subagents}
+                    failures={totals.failures}
+                    costUsd={totals.cost_usd}
+                    durationMs={totals.duration_ms}
+                />
+            )}
             {directChildren.length > 0 ? (
                 <div style={SUBAGENT_BAR_STYLE}>
-                    <strong style={{ color: "#9f1239" }}>
-                        ↓ spawned {directChildren.length} subagent{directChildren.length === 1 ? "" : "s"}
-                    </strong>
-                    <span style={{ marginLeft: 12, color: "#9f1239", opacity: 0.85 }}>
-                        {directChildren.slice(0, 8).map((c, i) => (
-                            <span key={c.id}>
-                                {i > 0 ? " · " : " "}
-                                <button
-                                    type="button"
-                                    onClick={() => setSelectedFile(c.file)}
-                                    onMouseEnter={() => prefetch(c.file)}
-                                    onFocus={() => prefetch(c.file)}
-                                    style={SUBAGENT_LINK_STYLE}
-                                >
-                                    {c.task_label ? `"${c.task_label.slice(0, 40)}${c.task_label.length > 40 ? "…" : ""}"` : `${shortSessionId(c.id)}…`}
-                                    {fmtUsd(c.cost_usd) ? ` (${fmtUsd(c.cost_usd)})` : ""}
-                                </button>
-                            </span>
+                    <span style={{
+                        display: "block",
+                        font: "700 10px/1 ui-monospace, monospace",
+                        textTransform: "uppercase",
+                        letterSpacing: "0.08em",
+                        color: "var(--muted)",
+                        margin: "2px 0 8px",
+                    }}>
+                        ↓ {directChildren.length} subagent session{directChildren.length === 1 ? "" : "s"} - tap to open
+                    </span>
+                    <span style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                        {directChildren.slice(0, 8).map((c) => (
+                            <button
+                                key={c.id}
+                                type="button"
+                                onClick={() => setSelectedFile(c.file)}
+                                onMouseEnter={() => prefetch(c.file)}
+                                onFocus={() => prefetch(c.file)}
+                                style={SUBAGENT_LINK_STYLE}
+                            >
+                                {subagentChipLabel(c.task_label) ?? `${shortSessionId(c.id)}…`}
+                                {fmtUsd(c.cost_usd) ? <span style={{ color: "var(--muted)", marginLeft: 6 }}>{fmtUsd(c.cost_usd)}</span> : null}
+                            </button>
                         ))}
-                        {directChildren.length > 8 ? <span> · …+{directChildren.length - 8}</span> : null}
+                        {directChildren.length > 8 ? (
+                            <span style={{ alignSelf: "center", color: "var(--muted)", fontFamily: "ui-monospace, monospace" }}>
+                                +{directChildren.length - 8} more inline ↓
+                            </span>
+                        ) : null}
                     </span>
                 </div>
             ) : null}
@@ -824,11 +886,8 @@ function MultiFileShareView(props: {
                         onMouseEnter={() => prefetch(parentFile)}
                         style={{ ...SUBAGENT_LINK_STYLE, fontWeight: 700 }}
                     >
-                        ↑ back to {parentLabel}
+                        ↑ back to {subagentChipLabel(parentLabel) ?? parentLabel}
                     </button>
-                    <span style={{ color: "#9f1239", marginLeft: 8, opacity: 0.7 }}>
-                        Viewing subagent{selectedCard.task_label ? `: "${selectedCard.task_label.slice(0, 60)}${selectedCard.task_label.length > 60 ? "…" : ""}"` : ""}.
-                    </span>
                 </div>
             ) : null}
             {fileQuery.error ? <div className="error">Error: {String(fileQuery.error)}</div> : null}
@@ -840,10 +899,11 @@ function MultiFileShareView(props: {
                             key={mode}
                             type="button"
                             onClick={() => setView(mode)}
+                            aria-pressed={view === mode}
                             style={{
                                 ...VIEW_TOGGLE_BUTTON_STYLE,
                                 ...(view === mode
-                                    ? { background: "#1f2937", color: "#fff", borderColor: "#1f2937" }
+                                    ? { background: "var(--ink)", color: "var(--page)", borderColor: "var(--ink)" }
                                     : {}),
                             }}
                         >

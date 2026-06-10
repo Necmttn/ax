@@ -69,9 +69,9 @@ export function FilterBar({
     const quickFilters: ReadonlyArray<QuickFilter> = useMemo(() => [
         { key: "correction",     label: "next correction",  pred: isCorrectionTurn },
         { key: "spawn",          label: "next spawn",       pred: (t) => isSpawnAnchorTurn(t, anchorSeqs) },
-        { key: "tool_use",       label: "next tool_use",    pred: (t) => isRoleTurn(t, "tool_use") },
-        { key: "tool_result",    label: "next tool_result", pred: (t) => isRoleTurn(t, "tool_result") },
-        { key: "hook_injection", label: "next hook ctx",    pred: (t) => isRoleTurn(t, "hook_injection") },
+        { key: "tool_use",       label: "next tool call",    pred: (t) => isRoleTurn(t, "tool_use") },
+        { key: "tool_result",    label: "next tool result", pred: (t) => isRoleTurn(t, "tool_result") },
+        { key: "hook_injection", label: "next hook context",    pred: (t) => isRoleTurn(t, "hook_injection") },
     ], [anchorSeqs]);
 
     // "next hook fire" jumps among the spliced hook_fire markers - those have
@@ -179,12 +179,15 @@ export function FilterBar({
     };
 
     const btnStyle = (enabled: boolean): React.CSSProperties => ({
-        padding: "3px 10px",
-        fontSize: 11,
+        padding: "6px 10px",
+        fontSize: 12,
         fontFamily: "ui-monospace, monospace",
-        border: "1px solid #e2e8f0",
-        background: enabled ? "#fff" : "#f1f5f9",
-        color: enabled ? "#475569" : "#94a3b8",
+        border: "1px solid var(--line)",
+        background: enabled ? "var(--panel)" : "var(--page)",
+        // Disabled buttons still carry content (match counts) - dim with
+        // opacity, keep the text readable.
+        color: "var(--muted)",
+        opacity: enabled ? 1 : 0.55,
         borderRadius: 4,
         cursor: enabled ? "pointer" : "not-allowed",
     });
@@ -193,11 +196,10 @@ export function FilterBar({
         <div className="filter-bar" style={{
             position: "sticky", top: 0, zIndex: 10,
             display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center",
-            padding: "6px 24px", borderTop: "1px solid #e2e8f0", background: "#f8fafc",
-            borderBottom: "1px solid #e2e8f0",
+            padding: "6px var(--strip-x)", borderTop: "1px solid var(--line)", background: "var(--page)",
+            borderBottom: "1px solid var(--line)",
             fontFamily: "ui-monospace, monospace", fontSize: 11,
         }}>
-            <span style={{ color: "#64748b", marginRight: 4 }}>jump:</span>
             {(() => {
                 const hasLoaded = hookFireIdxs.length > 0;
                 const canDiscoverMore = loadedCount < totalCount && totalHookFires > 0;
@@ -214,7 +216,7 @@ export function FilterBar({
                         onClick={() => { void jumpNextHookFire(); }}
                         disabled={!enabled}
                         title={title}
-                        style={{ ...btnStyle(enabled), borderLeft: "3px solid #10b981" }}
+                        style={{ ...btnStyle(enabled), borderLeft: "3px solid var(--green)" }}
                     >
                         next hook fire{count}
                     </button>
@@ -253,10 +255,11 @@ export function FilterBar({
                     onChange={(e) => setSearchInput(e.target.value)}
                     onKeyDown={onSearchKeyDown}
                     placeholder="find in turns (Enter to jump)…"
+                    aria-label="find in turns"
                     style={{
-                        flex: 1, padding: "3px 8px", fontSize: 11, fontFamily: "inherit",
-                        border: "1px solid #e2e8f0", borderRadius: 4, background: "#fff",
-                        color: "#1f2937", minWidth: 0,
+                        flex: 1, padding: "6px 8px", fontSize: 13, fontFamily: "inherit",
+                        border: "1px solid var(--line)", borderRadius: 4, background: "var(--panel)",
+                        color: "var(--ink)", minWidth: 0,
                     }}
                 />
                 <button
@@ -269,7 +272,7 @@ export function FilterBar({
                     next
                 </button>
                 {searchQuery.trim().length > 0 ? (
-                    <span style={{ color: searchSeqs.length > 0 ? "#475569" : "#ef4444" }}>
+                    <span style={{ color: searchSeqs.length > 0 ? "var(--muted)" : "var(--red)" }}>
                         {searchSeqs.length > 0
                             ? `${searchSeqs.length} hit${searchSeqs.length === 1 ? "" : "s"}`
                             : (fullyLoaded ? "no hits" : "no hits in loaded window")}

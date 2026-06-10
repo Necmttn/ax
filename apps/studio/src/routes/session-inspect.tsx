@@ -17,18 +17,29 @@ import { Transcript } from "./transcript.tsx";
 import type { InspectContentAtomDto, InspectContentBlockDto, InspectTurnContentDto } from "@ax/lib/shared/dashboard-types";
 
 interface KindStyle { bg: string; fg: string; bar: string; label: string }
+
+/** One tone recipe off the calibrated root accents: tinted bg, ink-anchored
+ *  dark fg (always readable on the tint), the raw accent as the bar. Two
+ *  kinds in the same family differ by bg strength (call 14% vs result 7%). */
+const tone = (accent: string, bgPct: number, label: string): KindStyle => ({
+    bg: `color-mix(in srgb, ${accent} ${bgPct}%, var(--panel))`,
+    fg: `color-mix(in srgb, ${accent} 45%, var(--ink))`,
+    bar: accent,
+    label,
+});
+
 export const KIND_STYLE: Record<InspectSpanKind, KindStyle> = {
-    user_input:            { bg: "#fef9c3", fg: "#78350f", bar: "#eab308", label: "user input" },
-    assistant_text:        { bg: "#f3f4f6", fg: "var(--ink)", bar: "var(--ink)", label: "assistant text" },
-    tool_use:              { bg: "#ede9fe", fg: "#4c1d95", bar: "#8b5cf6", label: "tool use" },
-    skill_context:         { bg: "#dbeafe", fg: "#1e3a8a", bar: "var(--blue)", label: "skill" },
-    system_context:        { bg: "#e5e7eb", fg: "#1f2937", bar: "var(--muted)", label: "system" },
-    wrapper_instruction:   { bg: "#fde68a", fg: "#92400e", bar: "#f59e0b", label: "wrapper" },
-    hook_injection:        { bg: "#bbf7d0", fg: "#065f46", bar: "#10b981", label: "hook" },
-    tool_result:           { bg: "#e9d5ff", fg: "#5b21b6", bar: "#a855f7", label: "tool result" },
-    subagent_notification: { bg: "#fed7aa", fg: "#9a3412", bar: "#f97316", label: "subagent notif" },
-    subagent_task:         { bg: "#ffe4e6", fg: "#9f1239", bar: "#e11d48", label: "subagent task" },
-    pasted_reference:      { bg: "#fecaca", fg: "#7f1d1d", bar: "#ef4444", label: "pasted" },
+    user_input:            tone("var(--gold)", 12, "user input"),
+    assistant_text:        { bg: "var(--track)", fg: "var(--ink)", bar: "var(--ink)", label: "assistant text" },
+    tool_use:              tone("var(--violet)", 14, "tool use"),
+    skill_context:         tone("var(--blue)", 12, "skill"),
+    system_context:        { bg: "var(--track)", fg: "var(--ink)", bar: "var(--muted)", label: "system" },
+    wrapper_instruction:   tone("var(--gold)", 26, "wrapper"),
+    hook_injection:        tone("var(--green)", 14, "hook"),
+    tool_result:           tone("var(--violet)", 7, "tool result"),
+    subagent_notification: tone("var(--rose)", 7, "subagent notif"),
+    subagent_task:         tone("var(--rose)", 14, "subagent task"),
+    pasted_reference:      tone("var(--red)", 12, "pasted"),
 };
 
 const JUMP_TARGET_SCROLL_MARGIN = 76;
@@ -114,9 +125,9 @@ function totalBreakdownCost(usage: SessionTokenUsageDetail): number {
 function costBarSegments(usage: SessionTokenUsageDetail): ReadonlyArray<{ label: string; value: number | null; color: string }> {
     return [
         { label: "fresh input", value: numberOrNull(usage.estimated_input_cost_usd), color: "var(--blue)" },
-        { label: "cache write", value: numberOrNull(usage.estimated_cache_creation_cost_usd), color: "#f59e0b" },
-        { label: "cache read", value: numberOrNull(usage.estimated_cache_read_cost_usd), color: "#10b981" },
-        { label: "output", value: numberOrNull(usage.estimated_output_cost_usd), color: "#8b5cf6" },
+        { label: "cache write", value: numberOrNull(usage.estimated_cache_creation_cost_usd), color: "var(--gold)" },
+        { label: "cache read", value: numberOrNull(usage.estimated_cache_read_cost_usd), color: "var(--green)" },
+        { label: "output", value: numberOrNull(usage.estimated_output_cost_usd), color: "var(--violet)" },
     ];
 }
 
@@ -195,7 +206,7 @@ function blockFamily(kind: string): ContentTone {
     if (kind.includes("budget") || kind.includes("metric")) return { bg: "#ffedd5", fg: "#9a3412", bar: "#f97316", label: "budget" };
     if (kind.includes("assistant")) return { bg: "#cffafe", fg: "#155e75", bar: "#06b6d4", label: "assistant" };
     if (kind.includes("tool")) return { bg: "#ede9fe", fg: "#4c1d95", bar: "#8b5cf6", label: "tool" };
-    if (kind.includes("hook")) return { bg: "#bbf7d0", fg: "#065f46", bar: "#10b981", label: "hook" };
+    if (kind.includes("hook")) return { bg: "color-mix(in srgb, var(--green) 14%, var(--panel))", fg: "color-mix(in srgb, var(--green) 45%, var(--ink))", bar: "var(--green)", label: "hook" };
     if (kind.includes("code")) return { bg: "var(--track)", fg: "var(--ink)", bar: "var(--muted)", label: "code" };
     if (kind.includes("heading")) return { bg: "#fee2e2", fg: "#991b1b", bar: "#ef4444", label: "heading" };
     if (kind.includes("paragraph")) return { bg: "#fef9c3", fg: "#78350f", bar: "#eab308", label: "paragraph" };
@@ -310,10 +321,10 @@ function atomDisplayLabel(atom: InspectContentAtomDto): string {
 
 function atomTone(atom: InspectContentAtomDto): ContentTone {
     if (atom.kind === "section_alias") return ALIAS_STYLE[atom.value] ?? ALIAS_STYLE.reference;
-    if (atom.kind.includes("file")) return { bg: "#eff6ff", fg: "#1d4ed8", bar: "var(--blue)", label: "file" };
-    if (atom.kind.includes("url") || atom.kind.includes("citation")) return { bg: "#ecfeff", fg: "#0e7490", bar: "#06b6d4", label: "link" };
-    if (atom.kind.includes("symbol")) return { bg: "#f0fdf4", fg: "#15803d", bar: "#22c55e", label: "symbol" };
-    if (atom.kind.includes("command")) return { bg: "#fef3c7", fg: "#92400e", bar: "#f59e0b", label: "command" };
+    if (atom.kind.includes("file")) return { bg: "color-mix(in srgb, var(--blue) 8%, var(--panel))", fg: "color-mix(in srgb, var(--blue) 55%, var(--ink))", bar: "var(--blue)", label: "file" };
+    if (atom.kind.includes("url") || atom.kind.includes("citation")) return { bg: "color-mix(in srgb, var(--blue) 6%, var(--panel))", fg: "color-mix(in srgb, var(--blue) 45%, var(--ink))", bar: "var(--blue)", label: "link" };
+    if (atom.kind.includes("symbol")) return { bg: "color-mix(in srgb, var(--green) 8%, var(--panel))", fg: "color-mix(in srgb, var(--green) 45%, var(--ink))", bar: "var(--green)", label: "symbol" };
+    if (atom.kind.includes("command")) return { bg: "color-mix(in srgb, var(--gold) 18%, var(--panel))", fg: "color-mix(in srgb, var(--gold) 45%, var(--ink))", bar: "var(--gold)", label: "command" };
     return { bg: "var(--page)", fg: "var(--ink)", bar: "var(--muted-2)", label: blockLabel(atom.kind) };
 }
 
@@ -330,9 +341,10 @@ function AliasMiniMap({
         .map((block) => ({ block, alias: primarySectionAlias(block) }))
         .filter((entry): entry is { block: InspectContentBlockDto; alias: InspectContentAtomDto } => entry.alias !== null);
     const hasStructuralAlias = aliasBlocks.some((entry) => entry.alias.value !== "reference");
-    const blocks = hasStructuralAlias
-        ? aliasBlocks.filter((entry) => entry.alias.value !== "reference")
-        : aliasBlocks;
+    // A reference-only turn would render an all-grey strip that first-time
+    // readers parse as a skeleton loader or redaction - show nothing instead.
+    if (!hasStructuralAlias) return null;
+    const blocks = aliasBlocks.filter((entry) => entry.alias.value !== "reference");
     if (blocks.length === 0) return null;
 
     return (
@@ -360,6 +372,7 @@ function AliasMiniMap({
                         onMouseEnter={() => setActiveTarget(target)}
                         onClick={() => setActiveTarget(target)}
                         title={aliasTitle(alias)}
+                        aria-label={aliasTitle(alias)}
                         style={{
                             flex: `${width} 1 10px`,
                             minWidth: 8,
@@ -452,7 +465,7 @@ export function InspectGuide({ data }: { data: Pick<SessionInspectPayload, "tota
         <div style={{
             margin: "4px 24px 10px",
             padding: "8px 10px",
-            border: "1px solid #cfd8d4",
+            border: "1px solid var(--line)",
             background: "var(--page)",
             display: "grid",
             gap: 7,
@@ -480,8 +493,8 @@ export function InspectGuide({ data }: { data: Pick<SessionInspectPayload, "tota
                 title={`Cost mix by provider billing component. Pricing: ${usage.pricing_source ?? "unknown"}. Per-turn headers below use turn usage when available; inspector block/span cost is character-allocated within the selected turn.`}
                 style={{
                     height: 8,
-                    border: "1px solid #cfd8d4",
-                    background: gradient ? `linear-gradient(90deg, ${gradient})` : "#e5e7eb",
+                    border: "1px solid var(--line)",
+                    background: gradient ? `linear-gradient(90deg, ${gradient})` : "var(--track)",
                 }}
             />
             <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
@@ -490,7 +503,7 @@ export function InspectGuide({ data }: { data: Pick<SessionInspectPayload, "tota
                         key={segment.label}
                         title={`${segment.label}: ${fmtUsd(segment.value)} (${pctOf(segment.value, breakdownTotal || totalCost)} of known cost components)`}
                         style={{
-                            background: "#fff",
+                            background: "var(--panel)",
                             color: "var(--ink)",
                             border: "1px solid var(--line)",
                             borderLeft: `3px solid ${segment.color}`,
@@ -804,7 +817,7 @@ function AnnotatedRawText({
             overflow: "auto",
             whiteSpace: "pre-wrap",
             wordBreak: "break-word",
-            font: "11px/1.55 ui-monospace, SFMono-Regular, Menlo, monospace",
+            font: "12.5px/1.55 ui-monospace, SFMono-Regular, Menlo, monospace",
             background: "#fff",
         }}>
             {rawParts.length > 0 ? rawParts : rawText}
@@ -1075,9 +1088,9 @@ function SpawnMarker({ child }: { child: SpawnChildDto }) {
 
     return (
         <div onMouseEnter={onIntent} onFocus={onIntent} style={{
-            margin: "4px 0", padding: "7px 10px", background: "#fff1f2",
-            border: "1px solid #fecdd3", borderLeft: "4px solid #e11d48", borderRadius: 3, fontSize: 11,
-            fontFamily: "ui-monospace, monospace", color: "#9f1239",
+            margin: "4px 0", padding: "7px 10px", background: "color-mix(in srgb, var(--rose) 8%, var(--panel))",
+            border: "1px solid color-mix(in srgb, var(--rose) 25%, var(--panel))", borderLeft: "4px solid var(--rose)", borderRadius: 3, fontSize: 11,
+            fontFamily: "ui-monospace, monospace", color: "var(--rose)",
         }}>
             <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
                 <span style={{ fontWeight: 700 }}>↳ child session spawned</span>
@@ -1085,13 +1098,13 @@ function SpawnMarker({ child }: { child: SpawnChildDto }) {
                     to="/sessions/$sessionId/inspect"
                     params={{ sessionId: childBare }}
                     preload="intent"
-                    style={{ color: "#9f1239", fontWeight: 600 }}
+                    style={{ color: "var(--rose)", fontWeight: 600 }}
                 >
                     {child.nickname ? `"${child.nickname}"` : `${childBare.slice(0, 12)}…`}
                 </Link>
                 {child.nickname ? <span style={{ opacity: 0.6 }}>{childBare.slice(0, 10)}…</span> : null}
                 {child.tool ? <span style={{ opacity: 0.6 }}>via {child.tool}</span> : null}
-                {m ? <span style={{ background: "#fecdd3", color: "#7f1d1d", padding: "0 6px", borderRadius: 2, fontSize: 10, fontWeight: 600 }}>{m.provider}</span> : null}
+                {m ? <span style={{ background: "color-mix(in srgb, var(--rose) 25%, var(--panel))", color: "color-mix(in srgb, var(--rose) 45%, var(--ink))", padding: "0 6px", borderRadius: 2, fontSize: 10, fontWeight: 600 }}>{m.provider}</span> : null}
                 {chips.map((c) => (
                     <span key={c.label} style={{ background: "#fee2e2", padding: "0 6px", borderRadius: 2, fontSize: 10 }}>
                         {c.label}: <strong>{c.value}</strong>
@@ -1105,7 +1118,7 @@ function SpawnMarker({ child }: { child: SpawnChildDto }) {
                 </div>
             ) : null}
             {brief ? (
-                <div style={{ marginTop: 4, color: "#7f1d1d", opacity: 0.9, fontSize: 11, lineHeight: 1.5, whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
+                <div style={{ marginTop: 4, color: "color-mix(in srgb, var(--rose) 45%, var(--ink))", opacity: 0.9, fontSize: 11, lineHeight: 1.5, whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
                     <span style={{ fontStyle: "italic" }}>
                         “{expanded || !briefIsLong ? brief : `${brief.slice(0, briefClippedLen - 1)}…`}”
                     </span>
@@ -1114,8 +1127,8 @@ function SpawnMarker({ child }: { child: SpawnChildDto }) {
                             onClick={() => setExpanded((v) => !v)}
                             style={{
                                 marginLeft: 6, padding: "0 6px", fontSize: 10, fontFamily: "inherit",
-                                background: "transparent", border: "1px solid #fecdd3", borderRadius: 3,
-                                color: "#9f1239", cursor: "pointer",
+                                background: "transparent", border: "1px solid color-mix(in srgb, var(--rose) 25%, var(--panel))", borderRadius: 3,
+                                color: "var(--rose)", cursor: "pointer",
                             }}
                         >
                             {expanded ? "show less" : `show full (${brief.length.toLocaleString()}c)`}
@@ -1134,8 +1147,8 @@ function SpawnMarker({ child }: { child: SpawnChildDto }) {
  *  that landed in the agent's context window. */
 export function HookFireMarker({ hook }: { hook: HookFireDto }) {
     const ts = hook.ts ? new Date(hook.ts).toISOString().slice(11, 19) : "";
-    const injectBg = hook.inject ? "#bbf7d0" : "var(--line)";
-    const injectFg = hook.inject ? "#065f46" : "var(--muted)";
+    const injectBg = hook.inject ? "color-mix(in srgb, var(--green) 14%, var(--panel))" : "var(--line)";
+    const injectFg = hook.inject ? "color-mix(in srgb, var(--green) 45%, var(--ink))" : "var(--muted)";
     const filePathShort = hook.file_path.length > 60
         ? `…${hook.file_path.slice(-58)}`
         : hook.file_path;
@@ -1147,9 +1160,9 @@ export function HookFireMarker({ hook }: { hook: HookFireDto }) {
                 margin: "4px 24px", padding: "6px 10px",
                 scrollMarginTop: JUMP_TARGET_SCROLL_MARGIN,
                 borderLeft: "3px solid #10b981",
-                background: hook.inject ? "#ecfdf5" : "var(--page)",
+                background: hook.inject ? "color-mix(in srgb, var(--green) 8%, var(--panel))" : "var(--page)",
                 borderRadius: 3, fontSize: 11,
-                fontFamily: "ui-monospace, monospace", color: "#065f46",
+                fontFamily: "ui-monospace, monospace", color: "color-mix(in srgb, var(--green) 45%, var(--ink))",
             }}
         >
             <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
@@ -1157,10 +1170,10 @@ export function HookFireMarker({ hook }: { hook: HookFireDto }) {
                 <span style={{ background: injectBg, color: injectFg, padding: "0 6px", borderRadius: 2, fontSize: 10, fontWeight: 600 }}>
                     inject: {hook.inject ? "yes" : "no"}
                 </span>
-                <span style={{ background: "#e0e7ff", color: "#3730a3", padding: "0 6px", borderRadius: 2, fontSize: 10 }}>
+                <span style={{ background: "color-mix(in srgb, var(--blue) 14%, var(--panel))", color: "color-mix(in srgb, var(--blue) 45%, var(--ink))", padding: "0 6px", borderRadius: 2, fontSize: 10 }}>
                     event: <strong>{hook.event}</strong>
                 </span>
-                <span style={{ background: "#fef3c7", color: "#92400e", padding: "0 6px", borderRadius: 2, fontSize: 10 }}>
+                <span style={{ background: "color-mix(in srgb, var(--gold) 18%, var(--panel))", color: "color-mix(in srgb, var(--gold) 45%, var(--ink))", padding: "0 6px", borderRadius: 2, fontSize: 10 }}>
                     reason: <strong>{hook.reason}</strong>
                 </span>
                 <span style={{ color: "var(--muted)", fontSize: 10 }}>{hook.latency_ms}ms</span>
@@ -1170,7 +1183,7 @@ export function HookFireMarker({ hook }: { hook: HookFireDto }) {
                 {filePathShort}
             </div>
             {hook.inject && hook.injected_titles.length > 0 ? (
-                <div style={{ marginTop: 4, paddingTop: 4, borderTop: "1px dashed #a7f3d0", fontSize: 10, color: "#065f46" }}>
+                <div style={{ marginTop: 4, paddingTop: 4, borderTop: "1px dashed color-mix(in srgb, var(--green) 30%, var(--panel))", fontSize: 10, color: "color-mix(in srgb, var(--green) 45%, var(--ink))" }}>
                     <span style={{ fontWeight: 600 }}>injected memory ({hook.injected_titles.length}):</span>
                     <ul style={{ margin: "2px 0 0 16px", padding: 0 }}>
                         {hook.injected_titles.map((t, i) => (
@@ -1192,8 +1205,8 @@ export function HookFireMarker({ hook }: { hook: HookFireDto }) {
 //     3px      44px     1fr  (header + body align here)
 //
 // Horizontal padding lives on the outer container; the grid sits inside it.
-const TURN_PAD_X = 24;
-const TURN_GUTTER = 44; // fixed seq column width (was: 48 min in full / auto in tool)
+const TURN_PAD_X = 16;
+const TURN_GUTTER = 36; // fixed seq column width (was: 48 min in full / auto in tool)
 const TURN_COL_GAP = 8;
 const turnMono = "ui-monospace, SFMono-Regular, Menlo, monospace";
 
@@ -1224,7 +1237,7 @@ function TurnHeader({
     const usage = turn.token_usage ?? null;
     const cost = numberOrNull(usage?.estimated_cost_usd);
     const tok = usage ? compactTokenCount(usage) : null;
-    const dim = "#9aa3b2";
+    const dim = "var(--muted)";
     const structureTitle =
         `${turn.char_count.toLocaleString()} characters · ${turn.spans.length} classified span${turn.spans.length === 1 ? "" : "s"} from the raw transcript.`;
     return (
@@ -1247,16 +1260,16 @@ function TurnHeader({
                     title={hideRoleLabel ? undefined : `${style.label} turn`}
                     style={{ width: 6, height: 6, borderRadius: 2, background: style.bar, flex: "0 0 auto", transform: "translateY(1px)" }}
                 />
-                {hideRoleLabel ? null : <span style={{ color: style.fg, opacity: 0.85, fontWeight: 600 }}>{style.label}</span>}
+                {hideRoleLabel
+                    ? <span className="sr-only">{style.label} turn</span>
+                    : <span style={{ color: style.fg, opacity: 0.85, fontWeight: 600 }}>{style.label}</span>}
             </span>
             {ts ? <span title="Turn timestamp from the source transcript." style={{ color: dim }}>{ts}</span> : null}
             {cost !== null ? <span title={turnTokenUsageTitle(turn)} style={{ color: dim }}>{fmtUsd(cost)}</span> : null}
-            {tok ? <span title={turnTokenUsageTitle(turn)} style={{ color: dim }}>{tok} tok</span> : null}
-            {turn.char_count > 0 ? (
-                <span title={structureTitle} style={{ color: "#c2c8d2" }}>
-                    {turn.char_count > 1000 ? `${(turn.char_count / 1000).toFixed(1)}k` : turn.char_count}c
-                </span>
-            ) : null}
+            {/* Cumulative context size, not per-turn spend - label it that way.
+                Char-count was pipeline telemetry with no reader value (hover
+                still carries the structural breakdown via turnTokenUsageTitle). */}
+            {tok ? <span title={turnTokenUsageTitle(turn)} style={{ color: dim }}>{tok} ctx</span> : null}
             {extras}
             {rightSlot ? <span style={{ marginLeft: "auto", display: "inline-flex", alignItems: "baseline", gap: 6 }}>{rightSlot}</span> : null}
         </div>
@@ -1302,30 +1315,22 @@ function TurnImpl({
     };
     const s = KIND_STYLE[turn.semantic_role];
     const spawnedChildCount = childrenSpawnedHere?.length ?? 0;
-    // A surviving tool_result turn is an ORPHAN (its preceding call wasn't
-    // matched, or there was none) - paired results are merged into the call
-    // card upstream and never reach this component.
-    const jsonlBadge = turn.role !== turn.semantic_role.replace(/_text$|_input$/, "")
-        ? <span style={{ color: "var(--muted-2)", fontSize: 10 }}>(jsonl: {turn.role})</span>
-        : null;
     const spawnBadge = spawnedChildCount > 0
         ? (
             <span title={`This turn spawned ${spawnedChildCount} sub-agent session${spawnedChildCount === 1 ? "" : "s"}.`}
-                style={{ color: "#9f1239", fontWeight: 700 }}>
+                style={{ color: "var(--rose)", fontWeight: 700 }}>
                 spawn x{spawnedChildCount}
             </span>
         )
         : null;
     const inspectingBadge = turn.content && activeTarget
         ? (
-            <span title="This turn is showing in the docked inspector on the right." style={{ color: "#0f172a", fontWeight: 600 }}>
+            <span title="This turn is showing in the docked inspector on the right." style={{ color: "var(--ink)", fontWeight: 600 }}>
                 inspecting →
             </span>
         )
         : null;
-    const headerExtras = (jsonlBadge || spawnBadge)
-        ? <>{spawnBadge}{jsonlBadge}</>
-        : undefined;
+    const headerExtras = spawnBadge ? <>{spawnBadge}</> : undefined;
 
     // The `#seq` anchor lives in the fixed gutter (column 1) for EVERY turn
     // type so the content column (header + body) starts at one shared left
@@ -1336,7 +1341,7 @@ function TurnImpl({
             style={{
                 gridColumn: "1",
                 gridRow: "1",
-                color: "#aeb5c0",
+                color: "var(--muted)",
                 textDecoration: "none",
                 fontSize: 10.5,
                 lineHeight: 1.6,
@@ -1367,11 +1372,11 @@ function TurnImpl({
         display: "grid",
         gridTemplateColumns: `${TURN_GUTTER}px 1fr`,
         columnGap: TURN_COL_GAP,
-        rowGap: 3,
+        rowGap: 4,
         padding: `8px ${TURN_PAD_X}px`,
         scrollMarginTop: JUMP_TARGET_SCROLL_MARGIN,
         borderLeft: `3px solid ${s.bar}`,
-        background: anchored ? "#fef3c7" : "transparent",
+        background: anchored ? "color-mix(in srgb, var(--blue) 8%, transparent)" : "transparent",
         transition: "background 0.6s",
     };
 
@@ -1380,7 +1385,7 @@ function TurnImpl({
             <div id={`turn-${turn.seq}`} className="turn-row" title={turnTokenUsageTitle(turn)} style={gridStyle}>
                 {seqGutter}
                 <TurnHeader turn={turn} style={s} extras={headerExtras} hideRoleLabel />
-                <div style={{ gridColumn: "2", minWidth: 0 }}>
+                <div style={{ gridColumn: "2", minWidth: 0, maxWidth: "92ch" }}>
                     <ToolRow calls={turn.tool_calls!} resultFor={resultFor} skillContentFor={skillContentFor} />
                     <TurnImages paths={imagePaths} />
                 </div>
@@ -1392,7 +1397,7 @@ function TurnImpl({
         <div id={`turn-${turn.seq}`} className="turn-row" title={turnTokenUsageTitle(turn)} style={gridStyle}>
             {seqGutter}
             <TurnHeader turn={turn} style={s} extras={headerExtras} rightSlot={inspectingBadge} />
-            <div style={{ gridColumn: "2", minWidth: 0 }}>
+            <div style={{ gridColumn: "2", minWidth: 0, maxWidth: "92ch" }}>
                 {childrenSpawnedHere && childrenSpawnedHere.length > 0 ? (
                     <div style={{ padding: "2px 0 4px" }}>
                         {childrenSpawnedHere.map((c) => (
@@ -1418,7 +1423,7 @@ function TurnImpl({
                         />
                     </>
                 ) : (
-                    <pre style={{ margin: 0, padding: "2px 0 0", whiteSpace: "pre-wrap", wordBreak: "break-word", font: "12px/1.55 ui-monospace, monospace", maxHeight: 400, overflow: "auto" }}>
+                    <pre style={{ margin: 0, padding: "2px 0 0", whiteSpace: "pre-wrap", wordBreak: "break-word", font: "12.5px/1.55 ui-monospace, monospace", maxHeight: 400, overflow: "auto" }}>
                         {turn.spans.map((sp, i) => <Span key={i} span={sp} />)}
                     </pre>
                 )}
@@ -1634,14 +1639,14 @@ export function SessionInspectView({ sessionId }: { readonly sessionId: string }
                                 {" · "}
                                 {data.turns.length} turns · {data.total_chars.toLocaleString()} chars
                                 {data.total_hook_fires > 0 ? (
-                                    <> · <span style={{ color: "#065f46" }}>{data.total_hook_fires} hook decision{data.total_hook_fires === 1 ? "" : "s"}</span></>
+                                    <> · <span style={{ color: "color-mix(in srgb, var(--green) 45%, var(--ink))" }}>{data.total_hook_fires} hook decision{data.total_hook_fires === 1 ? "" : "s"}</span></>
                                 ) : null}
                                 {" · source: "}<code>{data.source_path}</code>
                             </div>
                             {data.children.length > 0 ? (
-                                <div style={{ padding: "6px 24px", background: "#ffe4e6", borderTop: "1px solid #fecdd3", borderBottom: "1px solid #fecdd3", fontSize: 12 }}>
-                                    <strong style={{ color: "#9f1239" }}>↓ spawned {data.children.length} subagent{data.children.length === 1 ? "" : "s"}</strong>
-                                    <span style={{ marginLeft: 12, color: "#9f1239", opacity: 0.7 }}>
+                                <div style={{ padding: "6px 24px", background: "color-mix(in srgb, var(--rose) 8%, var(--panel))", borderTop: "1px solid color-mix(in srgb, var(--rose) 25%, var(--panel))", borderBottom: "1px solid color-mix(in srgb, var(--rose) 25%, var(--panel))", fontSize: 12 }}>
+                                    <strong style={{ color: "var(--rose)" }}>↓ spawned {data.children.length} subagent{data.children.length === 1 ? "" : "s"}</strong>
+                                    <span style={{ marginLeft: 12, color: "var(--rose)", opacity: 0.7 }}>
                                         {data.children.slice(0, 6).map((c, i) => {
                                             // Wire seam: c.session_id is already bare.
                                             const bare = c.session_id;
@@ -1651,7 +1656,7 @@ export function SessionInspectView({ sessionId }: { readonly sessionId: string }
                                                     <Link
                                                         to="/sessions/$sessionId/inspect"
                                                         params={{ sessionId: bare }}
-                                                        style={{ color: "#9f1239", fontFamily: "ui-monospace, monospace" }}
+                                                        style={{ color: "var(--rose)", fontFamily: "ui-monospace, monospace" }}
                                                     >
                                                         {c.nickname ? `"${c.nickname}"` : `${bare.slice(0, 10)}…`}
                                                     </Link>
@@ -1663,18 +1668,18 @@ export function SessionInspectView({ sessionId }: { readonly sessionId: string }
                                 </div>
                             ) : null}
                             {data.parent_session ? (
-                                <div style={{ padding: "6px 24px", background: "#ffe4e6", borderTop: "1px solid #fecdd3", borderBottom: "1px solid #fecdd3", fontSize: 12 }}>
-                                    <strong style={{ color: "#9f1239" }}>↑ spawned by</strong>
+                                <div style={{ padding: "6px 24px", background: "color-mix(in srgb, var(--rose) 8%, var(--panel))", borderTop: "1px solid color-mix(in srgb, var(--rose) 25%, var(--panel))", borderBottom: "1px solid color-mix(in srgb, var(--rose) 25%, var(--panel))", fontSize: 12 }}>
+                                    <strong style={{ color: "var(--rose)" }}>↑ spawned by</strong>
                                     {" "}
                                     <Link
                                         to="/sessions/$sessionId/inspect"
                                         params={{ sessionId: data.parent_session }}
-                                        style={{ color: "#9f1239", fontWeight: 600, fontFamily: "ui-monospace, monospace" }}
+                                        style={{ color: "var(--rose)", fontWeight: 600, fontFamily: "ui-monospace, monospace" }}
                                     >
                                         {shortSessionId(data.parent_session)}…
                                     </Link>
-                                    {data.parent_nickname ? <span style={{ color: "#9f1239", marginLeft: 8 }}>· nickname: <strong>{data.parent_nickname}</strong></span> : null}
-                                    <span style={{ color: "#9f1239", marginLeft: 8, opacity: 0.7 }}>This is a subagent session.</span>
+                                    {data.parent_nickname ? <span style={{ color: "var(--rose)", marginLeft: 8 }}>· nickname: <strong>{data.parent_nickname}</strong></span> : null}
+                                    <span style={{ color: "var(--rose)", marginLeft: 8, opacity: 0.7 }}>This is a subagent session.</span>
                                 </div>
                             ) : null}
                         </>

@@ -83,21 +83,40 @@ export function Transcript({
             {header}
             <FilterBar {...filterBar} />
             <InspectGuide data={data} />
-            <div style={{ display: "flex", gap: 4, flexWrap: "wrap", padding: "4px 24px 8px" }}>
-                {(Object.keys(KIND_STYLE) as InspectSpanKind[]).map((kind) => {
-                    const c = KIND_STYLE[kind];
-                    const n = data.totals_by_kind[kind] ?? 0;
-                    const pct = data.total_chars > 0 ? ((n / data.total_chars) * 100).toFixed(1) : "0";
+            <div style={{ display: "flex", gap: 4, flexWrap: "wrap", padding: "4px var(--strip-x) 8px" }}>
+                {(() => {
+                    // Chips at ~0% are dead weight that dilutes the meaningful
+                    // ones - collapse them into a single dim count.
+                    const entries = (Object.keys(KIND_STYLE) as InspectSpanKind[]).map((kind) => {
+                        const n = data.totals_by_kind[kind] ?? 0;
+                        const share = data.total_chars > 0 ? (n / data.total_chars) * 100 : 0;
+                        return { kind, share };
+                    });
+                    const visible = entries.filter((e) => e.share >= 0.05);
+                    const hidden = entries.length - visible.length;
                     return (
-                        <span
-                            key={kind}
-                            title={`${c.label}: ${pct}% of exported characters in this session view. This is not token share or billing share.`}
-                            style={{ background: c.bg, color: c.fg, padding: "2px 10px", borderRadius: 4, fontSize: 11, fontWeight: 600, borderLeft: `3px solid ${c.bar}` }}
-                        >
-                            {c.label} <em style={{ fontStyle: "normal", opacity: 0.7, fontWeight: 400 }}>{pct}%</em>
-                        </span>
+                        <>
+                            {visible.map(({ kind, share }) => {
+                                const c = KIND_STYLE[kind];
+                                const pct = share.toFixed(1);
+                                return (
+                                    <span
+                                        key={kind}
+                                        title={`${c.label}: ${pct}% of exported characters in this session view. This is not token share or billing share.`}
+                                        style={{ background: c.bg, color: c.fg, padding: "2px 10px", borderRadius: 4, fontSize: 11, fontWeight: 600, borderLeft: `3px solid ${c.bar}` }}
+                                    >
+                                        {c.label} <em style={{ fontStyle: "normal", opacity: 0.7, fontWeight: 400 }}>{pct}%</em>
+                                    </span>
+                                );
+                            })}
+                            {hidden > 0 ? (
+                                <span style={{ alignSelf: "center", color: "var(--muted-2)", fontSize: 11 }}>
+                                    +{hidden} at ~0%
+                                </span>
+                            ) : null}
+                        </>
                     );
-                })}
+                })()}
             </div>
             <div style={{ display: "flex", alignItems: "flex-start", gap: 12 }}>
                 <div style={{ minWidth: 0, flex: "1 1 auto" }}>
