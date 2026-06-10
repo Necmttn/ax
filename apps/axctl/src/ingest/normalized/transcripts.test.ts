@@ -1,8 +1,12 @@
 import { describe, expect, it } from "bun:test";
+import { Effect, Layer } from "effect";
+import { SurrealClient, type SurrealClientShape } from "@ax/lib/db";
 import {
     buildNormalizedSyntheticSkillInvocationStatements,
     buildNormalizedTranscriptStatements,
     buildNormalizedTurnStatements,
+    writeNormalizedTranscriptBatch,
+    type BuildNormalizedTranscriptStatementsOptions,
     type NormalizedTranscriptBatch,
 } from "./transcripts.ts";
 import { toolCallRecordKey, turnRecordKey } from "../record-keys.ts";
@@ -213,5 +217,40 @@ describe("normalized transcript persistence", () => {
         expect(cleared).toContain("->agent_event_child:");
         const notCleared = buildNormalizedTranscriptStatements(batch, { clearExisting: false }).join("\n");
         expect(notCleared).not.toContain("DELETE (SELECT VALUE id FROM agent_event WHERE");
+    });
+
+    it("threads statement options through writeNormalizedTranscriptBatch", async () => {
+        const batch: NormalizedTranscriptBatch = {
+            sessions: [{ id: "s1", provider: "codex" }],
+            events: [{
+                provider: "codex", providerSessionId: "s1", providerEventId: "e1",
+                seq: 1, ts: "2026-06-10T00:00:00.000Z", type: "message", role: "user",
+            }],
+            turns: [],
+        };
+        const run = async (options?: BuildNormalizedTranscriptStatementsOptions) => {
+            const captured: string[] = [];
+            const impl = {
+                query: <T extends unknown[] = unknown[]>(sql: string) => {
+                    captured.push(sql);
+                    return Effect.succeed([[]] as unknown as T);
+                },
+                upsert: () => Effect.void,
+                relate: () => Effect.void,
+                putFile: () => Effect.void,
+                getFile: () => Effect.succeed(""),
+                raw: {} as never,
+            } as SurrealClientShape;
+            await Effect.runPromise(
+                writeNormalizedTranscriptBatch(batch, options).pipe(
+                    Effect.provide(Layer.succeed(SurrealClient, impl)),
+                ),
+            );
+            return captured.join("\n");
+        };
+
+        expect(await run()).toContain("DELETE (SELECT VALUE id FROM agent_event");
+        expect(await run({ clearExisting: false }))
+            .not.toContain("DELETE (SELECT VALUE id FROM agent_event");
     });
 });

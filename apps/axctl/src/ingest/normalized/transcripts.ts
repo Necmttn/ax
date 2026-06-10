@@ -224,8 +224,11 @@ export const buildNormalizedTranscriptStatements = (
 
 export const writeNormalizedTranscriptBatch = (
     batch: NormalizedTranscriptBatch,
+    options?: BuildNormalizedTranscriptStatementsOptions,
 ): Effect.Effect<void, DbError, SurrealClient> =>
     Effect.gen(function* () {
         yield* upsertNormalizedSessions(batch.sessions);
-        yield* executeStatements(buildNormalizedTranscriptStatements(batch), { chunkSize: 500 });
+        yield* executeStatements(buildNormalizedTranscriptStatements(batch, options), {
+            chunkSize: 500,
+        });
     });
