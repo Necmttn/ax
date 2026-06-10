@@ -115,7 +115,7 @@ export const onRequestGet: PagesFunction = async (ctx) => {
 <div style="display:flex;flex-direction:column;width:1200px;height:630px;background:#f3f6f5;padding:28px;font-family:'JetBrains Mono'">
   <div style="display:flex;flex-direction:column;flex:1;background:#ffffff;border:2px solid #cfd8d4;padding:44px 52px">
     <div style="display:flex;justify-content:space-between;align-items:center">
-      <span style="font-size:30px;color:#141615;font-weight:700">ax<span style="font-size:15px;color:#66706b;margin-left:12px;letter-spacing:2px">AGENT EXPERIENCE</span></span>
+      <div style="display:flex;align-items:baseline"><span style="font-size:30px;color:#141615;font-weight:700">ax</span><span style="font-size:15px;color:#66706b;margin-left:12px;letter-spacing:2px">AGENT EXPERIENCE</span></div>
       <span style="font-size:20px;color:#66706b">${esc(right)}</span>
     </div>
     <div style="display:flex;font-size:38px;line-height:1.25;color:#141615;margin-top:34px;font-weight:600">${title}</div>
