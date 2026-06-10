@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 
 describe("axctl improve recommend", () => {
     test("--help lists filter flags", () => {
-        const source = readFileSync("apps/axctl/src/cli/index.ts", "utf8");
+        const source = readFileSync("apps/axctl/src/cli/commands/improve.ts", "utf8");
         const commandBlock = source.slice(
             source.indexOf("const improveRecommendCommand"),
             source.indexOf("const improveLintCommand"),
