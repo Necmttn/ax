@@ -16,6 +16,7 @@ import {
     correctionsSql,
     costSql,
     editsSql,
+    editStatsSql,
     healthSql,
     lastAssistantSql,
     mapAsk,
@@ -26,6 +27,7 @@ import {
     mapIntentCorrection,
     mapCost,
     mapEdit,
+    mapEditStat,
     mapHealth,
     mapLastTurn,
     mapOverview,
@@ -65,7 +67,7 @@ export const SessionTimelineServiceLayer = Layer.effect(SessionTimelineService)(
             const extract = Effect.fn("SessionTimelineService.extract")(function* (sessionId: string) {
                 const ref = sessionRef(sessionId);
                 const [
-                    healthRaw, overviewRaw, costRaw, toolRaw, editRaw,
+                    healthRaw, overviewRaw, costRaw, toolRaw, editRaw, editStatRaw,
                     skillRaw, correctionRaw, intentCorrectionRaw, planRaw, commitRaw, askRaw, compactionRaw, lastRaw,
                 ] = yield* Effect.all([
                     oneRow(healthSql(ref)),
@@ -73,6 +75,7 @@ export const SessionTimelineServiceLayer = Layer.effect(SessionTimelineService)(
                     oneRow(costSql(ref)),
                     rows(toolCallsSql(ref)),
                     rows(editsSql(ref)),
+                    rows(editStatsSql(ref)),
                     rows(skillsSql(ref)),
                     rows(correctionsSql(ref)),
                     rows(intentCorrectionsSql(ref)),
@@ -102,6 +105,7 @@ export const SessionTimelineServiceLayer = Layer.effect(SessionTimelineService)(
                     cost: mapCost(costRaw),
                     toolCalls: toolRaw.map(mapToolCall).filter(present),
                     edits: editRaw.map(mapEdit).filter(present),
+                    editStats: editStatRaw.map(mapEditStat).filter(present),
                     skills: skillRaw.map(mapSkill).filter(present),
                     corrections,
                     plans: planRaw.map(mapPlan).filter(present),

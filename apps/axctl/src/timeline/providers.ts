@@ -76,7 +76,12 @@ export function classifyTool(source: ProviderSource, t: ClassifyInput): Classifi
     if (EDIT_TOOL_NAMES.has(lname)) return { kind: "file_edit", importance: "high" };
 
     // codex/pi/opencode/cursor edit through the shell - inspect the command.
+    // Claude-like harnesses edit through dedicated tools (the `edited` edge
+    // covers those); their Bash heredocs/redirects are pipelines and logging,
+    // so the shell-edit heuristic only produces false "FILE EDIT git add"
+    // rows there - skip it.
     if (SHELL_EXEC_NAMES.has(lname)) {
+        if (isClaudeLike(source)) return { kind: "tool", importance: "high" };
         const cmd = (t.command_norm ?? "").toLowerCase();
         const text = (t.command_text ?? "").toLowerCase();
         const isEdit =

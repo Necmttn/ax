@@ -4,8 +4,11 @@ import {
     deriveCheckpointEvents,
     deriveDecisionEvents,
     deriveFailureEvents,
+    deriveFileEvents,
     deriveToolEvents,
+    editDelta,
     pairRecoveries,
+    shellTitle,
     type TimelineInputs,
 } from "./derive.ts";
 import type { ToolCallRow, EditRow } from "./queries.ts";
@@ -50,6 +53,26 @@ describe("deriveToolEvents", () => {
         expect(events).toHaveLength(0); // seq 5 covered by the edge
     });
 
+    it("does not classify claude Bash heredocs/redirects as file edits", () => {
+        const events = deriveToolEvents([
+            tc({ seq: 1, name: "Bash", command_norm: "git add", command_text: '{"command": "git add -A && echo done > /tmp/log"}' }),
+            tc({ seq: 2, name: "Bash", command_norm: "bun run", command_text: '{"command": "bun run x <<\'EOF\'\\n...\\nEOF"}' }),
+        ], "claude", NO_EDGES);
+        expect(events.map((e) => e.kind)).toEqual(["tool_call", "tool_call"]);
+    });
+
+    it("titles wrapper commands (echo) with the real pipeline segment + intent", () => {
+        const events = deriveToolEvents([
+            tc({
+                seq: 3,
+                name: "Bash",
+                command_norm: "echo",
+                command_text: '{"command": "echo ===; bun run typecheck 2>&1", "description": "Typecheck the CLI"}',
+            }),
+        ], "claude", NO_EDGES);
+        expect(events[0]?.title).toBe("bun run typecheck 2>&1 - Typecheck the CLI");
+    });
+
     it("titles Agent dispatches with the description, not the bare tool name", () => {
         const events = deriveToolEvents([
             tc({ seq: 7, name: "Agent", command_text: '{"description": "Implement Task 3: stage registry", "prompt": "You are imp' }),
@@ -61,6 +84,30 @@ describe("deriveToolEvents", () => {
             "Agent: general-purpose",
             "Agent",
         ]);
+    });
+});
+
+describe("editDelta + deriveFileEvents", () => {
+    it("counts +/- lines from Edit and Write inputs", () => {
+        expect(editDelta("Edit", JSON.stringify({ old_string: "a\nb\nc", new_string: "a\nB" })))
+            .toEqual({ added: 2, removed: 3 });
+        expect(editDelta("Write", JSON.stringify({ content: "l1\nl2\nl3\nl4" })))
+            .toEqual({ added: 4, removed: 0 });
+        expect(editDelta("Edit", '{"old_string": "trunc')).toBeNull(); // truncated -> no delta
+    });
+
+    it("appends +/- to file_edit titles when a delta is known", () => {
+        const edits: EditRow[] = [
+            { seq: 4, ts: "2026-06-07T00:00:01Z", path: "src/a.ts", edit_kind: "update", tool: "Edit" },
+            { seq: 9, ts: "2026-06-07T00:00:02Z", path: "src/b.ts", edit_kind: "update", tool: "Edit" },
+        ];
+        const events = deriveFileEvents(edits, new Map([[4, { added: 12, removed: 3 }]]));
+        expect(events[0]?.title).toBe("src/a.ts  +12/-3");
+        expect(events[1]?.title).toBe("src/b.ts");
+    });
+
+    it("shellTitle returns null when there is nothing better", () => {
+        expect(shellTitle('{"command": "echo hello"}')).toBeNull();
     });
 });
 

@@ -135,6 +135,28 @@ export const mapEdit = (raw: unknown): EditRow | null => {
     };
 };
 
+/** Full edit-tool inputs, fetched separately so the lean tool_call query stays
+ *  cheap: counting +/- lines needs old_string/new_string/content, which the
+ *  400-char command_text slice cannot carry. 32k slice bounds Write payloads;
+ *  a truncated JSON simply yields no delta (best-effort). */
+export interface EditStatRow {
+    readonly seq: number | null;
+    readonly name: string;
+    readonly input_json: string | null;
+}
+export const editStatsSql = (ref: string): string =>
+    `SELECT seq, name, string::slice(input_json ?? "", 0, 32000) AS input_json FROM tool_call WHERE session = ${ref} AND name IN ['Edit', 'Write', 'NotebookEdit'] ORDER BY seq ASC LIMIT 2000;`;
+export const mapEditStat = (raw: unknown): EditStatRow | null => {
+    if (!isRecord(raw)) return null;
+    const name = stringField(raw, "name");
+    if (!name) return null;
+    return {
+        seq: seqField(raw, "seq"),
+        name,
+        input_json: stringField(raw, "input_json"),
+    };
+};
+
 export interface SkillRow {
     readonly seq: number | null;
     readonly ts: string | null;
