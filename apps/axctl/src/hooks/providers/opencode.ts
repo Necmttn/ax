@@ -1,4 +1,5 @@
 import { Effect, FileSystem } from "effect";
+import { decodeJsonOrNull } from "@ax/lib/decode";
 import { posixPath } from "@ax/lib/shared/path";
 import { orAbsent } from "@ax/lib/shared/fs-error";
 import { HOME } from "@ax/lib/paths";
@@ -44,11 +45,13 @@ interface OcConfig {
     [k: string]: unknown;
 }
 
-const parseJson = (file: string, raw: string): Effect.Effect<OcConfig, HookConfigParseError> =>
-    Effect.try({
-        try: () => (raw.trim() === "" ? {} : (JSON.parse(raw) as OcConfig)),
-        catch: (e) => new HookConfigParseError({ provider: NAME, file, reason: String(e) }),
-    });
+const parseJson = (file: string, raw: string): Effect.Effect<OcConfig, HookConfigParseError> => {
+    if (raw.trim() === "") return Effect.succeed({});
+    const parsed = decodeJsonOrNull(raw);
+    return parsed === null
+        ? Effect.fail(new HookConfigParseError({ provider: NAME, file, reason: "invalid JSON" }))
+        : Effect.succeed(parsed as OcConfig);
+};
 
 /** argv → display string. Recognizes the `["sh","-c", cmd]` wrap and unwraps it. */
 export const joinArgv = (argv: ReadonlyArray<string>): string => {

@@ -9,6 +9,7 @@ import { FilterBar } from "./inspector-filter-bar.tsx";
 import { SessionTimelineView } from "./session-timeline.tsx";
 import { shortSessionId } from "@ax/lib/shared/session-id";
 import { sessionProjectLabel } from "@ax/lib/shared/project-slug";
+import { TextWithFences } from "../highlight/HighlightedCode.tsx";
 import { ToolResultView } from "./tool-result.tsx";
 import { ToolRow } from "./tool-row.tsx";
 import { extractImagePaths } from "./turn-images.ts";
@@ -49,7 +50,7 @@ export function Span({ span }: { span: InspectSpanDto }) {
     const title = span.label ? `${s.label}: ${span.label}` : s.label;
     return (
         <span style={{ background: s.bg, color: s.fg, padding: "0 1px", borderRadius: 2 }} title={title}>
-            {span.text}
+            <TextWithFences text={span.text} />
         </span>
     );
 }
@@ -804,7 +805,7 @@ function AnnotatedRawText({
                 title={blockHoverTitle(block, mismatch)}
                 style={rawBlockTextStyle({ tone: family, active, hovered, mismatch })}
             >
-                {renderSliceWithSymbols(slice, block)}
+                <TextWithFences text={slice} renderText={(t) => renderSliceWithSymbols(t, block)} />
             </span>,
         );
         cursor = end;

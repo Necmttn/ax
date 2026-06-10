@@ -7,6 +7,7 @@ import { Effect } from "effect";
 import { Argument, Command } from "effect/unstable/cli";
 import { Flag } from "effect/unstable/cli";
 import { SurrealClient } from "@ax/lib/db";
+import { prettyPrint } from "@ax/lib/json";
 import { INSIGHT_VIEWS, insightSqlForView } from "../../queries/insights.ts";
 import { enrichInsightRows } from "../../queries/insights-enrich.ts";
 import { formatInsightRows } from "../insights-format.ts";
@@ -74,7 +75,7 @@ const cmdTimeline = (sessionId: string, json: boolean) =>
         Effect.flatMap((tl) =>
             Effect.sync(() => {
                 if (json) {
-                    console.log(JSON.stringify(tl, null, 2));
+                    console.log(prettyPrint(tl));
                     return;
                 }
                 const h = tl.highlights;

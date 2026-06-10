@@ -8,7 +8,7 @@ import type { RuntimeManifest } from "./manifest.ts";
 export const serveCommand = Command.make(
     "serve",
     { port: Flag.integer("port").pipe(Flag.withDefault(1738)) },
-    ({ port }) => Effect.sync(() => serveDashboard([`--port=${port}`])),
+    ({ port }) => Effect.promise(() => serveDashboard([`--port=${port}`])),
 ).pipe(Command.withDescription("Serve the live web dashboard locally"));
 
 // Manages its own long-lived ManagedRuntime (like serve), so it is deliberately
@@ -16,7 +16,7 @@ export const serveCommand = Command.make(
 export const mcpCommand = Command.make(
     "mcp",
     {},
-    () => Effect.sync(() => serveMcp([])),
+    () => Effect.promise(() => serveMcp([])),
 ).pipe(Command.withDescription("Run an MCP server (stdio) exposing ax's read-only queries"));
 
 export const tuiCommand = Command.make("tui", {}, () =>

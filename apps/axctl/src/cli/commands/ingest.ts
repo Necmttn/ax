@@ -24,6 +24,7 @@ import {
     type ProgressMode,
     type ProgressReporter,
 } from "../progress.ts";
+import { stderrExit } from "../output.ts";
 import {
     buildIngestEventStatement,
     buildIngestRunStartStatement,
@@ -273,12 +274,7 @@ const cmdIngestHere = (args: string[]) => {
         const registry = yield* StageRegistry;
         const pwd = yield* resolvePwdRepository().pipe(
             Effect.catchTag("NotAGitRepoError", (err) =>
-                Effect.sync(() => {
-                    process.stderr.write(
-                        `axctl ingest here: not in a git repository (cwd=${err.cwd})\n`,
-                    );
-                    process.exit(2);
-                }),
+                stderrExit(`axctl ingest here: not in a git repository (cwd=${err.cwd})\n`, 2),
             ),
         );
 
@@ -357,9 +353,7 @@ const cmdIngestInsights = (input: {
                 { source: "claude", stage: "insights" },
             ],
         });
-        const program = Effect.gen(function* () {
-            yield* telemetryStage(db, runId, "claude", "insights", ingestClaudeInsights(), progress);
-        });
+        const program = telemetryStage(db, runId, "claude", "insights", ingestClaudeInsights(), progress);
         yield* program.pipe(
             withIngestRunFinish(db, runId),
             Effect.provideService(References.MinimumLogLevel, input.verbose ? "Debug" : "Info"),

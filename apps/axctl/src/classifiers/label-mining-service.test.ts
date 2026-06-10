@@ -5,6 +5,7 @@ import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { SurrealClient, type SurrealClientShape } from "@ax/lib/db";
+import { makeTestSurrealClient, type TestSurrealClient } from "@ax/lib/testing/surreal";
 import {
     EXPORT_REVIEW_LIMIT,
     LabelMiningService,
@@ -32,22 +33,8 @@ interface FakeWindowRow {
     readonly prev_evidence_path?: string | null;
 }
 
-function clientWithWindows(
-    rows: readonly FakeWindowRow[],
-    capture: { sql?: string; bindings?: Record<string, unknown> | undefined },
-): SurrealClientShape {
-    return {
-        query: <T extends unknown[]>(sql: string, bindings?: Record<string, unknown>) => {
-            capture.sql = sql;
-            capture.bindings = bindings;
-            return Effect.succeed([rows] as unknown as T);
-        },
-        upsert: () => Effect.void,
-        relate: () => Effect.void,
-        putFile: () => Effect.void,
-        getFile: () => Effect.succeed(""),
-        raw: {} as never,
-    };
+function clientWithWindows(rows: readonly FakeWindowRow[]): TestSurrealClient {
+    return makeTestSurrealClient({ fallback: [rows] });
 }
 
 const runWithDb = <A>(
@@ -122,21 +109,20 @@ const approvalWindow = (n: number): FakeWindowRow => ({
 
 describe("LabelMiningService.miningReport", () => {
     test("reads transcript windows from persisted turns", async () => {
-        const capture: { sql?: string; bindings?: Record<string, unknown> } = {};
+        const tc = clientWithWindows([correctionWindow(1)]);
         await runWithDb(
             Effect.gen(function* () {
                 const svc = yield* LabelMiningService;
                 return yield* svc.miningReport({ sinceDays: 14, limit: 500, reviewLimit: 80 });
             }),
-            clientWithWindows([correctionWindow(1)], capture),
+            tc.client,
         );
 
-        expect(capture.sql).toContain("FROM turn");
-        expect(capture.sql).toMatch(/role\s*=\s*['"]user['"]/);
+        expect(tc.captured.at(-1)).toContain("FROM turn");
+        expect(tc.captured.at(-1)).toMatch(/role\s*=\s*['"]user['"]/);
     });
 
     test("exports review rows sorted by weak confidence and diversified by family", async () => {
-        const capture: { sql?: string } = {};
         const rows = [
             // approval has lower confidence than correction/direction/verification
             approvalWindow(1),
@@ -150,7 +136,7 @@ describe("LabelMiningService.miningReport", () => {
                 const svc = yield* LabelMiningService;
                 return yield* svc.miningReport({ sinceDays: 14, limit: 500, reviewLimit: 80 });
             }),
-            clientWithWindows(rows, capture),
+            clientWithWindows(rows).client,
         );
 
         expect(report.schema).toBe("ax.transcript_label_mining_report.v1");
@@ -169,7 +155,6 @@ describe("LabelMiningService.miningReport", () => {
     });
 
     test("caps exported review rows at 80", async () => {
-        const capture: { sql?: string } = {};
         // 200 correction windows -> only 80 may be exported.
         const rows: FakeWindowRow[] = [];
         for (let i = 0; i < 200; i += 1) rows.push(correctionWindow(i));
@@ -179,7 +164,7 @@ describe("LabelMiningService.miningReport", () => {
                 const svc = yield* LabelMiningService;
                 return yield* svc.miningReport({ sinceDays: 14, limit: 500, reviewLimit: 500 });
             }),
-            clientWithWindows(rows, capture),
+            clientWithWindows(rows).client,
         );
 
         expect(EXPORT_REVIEW_LIMIT).toBe(80);
@@ -188,13 +173,12 @@ describe("LabelMiningService.miningReport", () => {
     });
 
     test("every exported row has candidate id, evidence, prev excerpt, and pending review fields", async () => {
-        const capture: { sql?: string } = {};
         const report = await runWithDb(
             Effect.gen(function* () {
                 const svc = yield* LabelMiningService;
                 return yield* svc.miningReport({ sinceDays: 14, limit: 500, reviewLimit: 80 });
             }),
-            clientWithWindows([correctionWindow(1), directionWindow(2)], capture),
+            clientWithWindows([correctionWindow(1), directionWindow(2)]).client,
         );
 
         expect(report.review_rows.length).toBeGreaterThan(0);
@@ -211,7 +195,6 @@ describe("LabelMiningService.miningReport", () => {
     });
 
     test("limits the candidate mine to the requested limit before review cap", async () => {
-        const capture: { sql?: string } = {};
         const rows: FakeWindowRow[] = [];
         for (let i = 0; i < 50; i += 1) rows.push(correctionWindow(i));
 
@@ -220,7 +203,7 @@ describe("LabelMiningService.miningReport", () => {
                 const svc = yield* LabelMiningService;
                 return yield* svc.miningReport({ sinceDays: 14, limit: 10, reviewLimit: 80 });
             }),
-            clientWithWindows(rows, capture),
+            clientWithWindows(rows).client,
         );
 
         expect(report.candidate_count).toBe(10);
@@ -229,7 +212,6 @@ describe("LabelMiningService.miningReport", () => {
 
 describe("LabelMiningService.writeMiningReport", () => {
     test("writes the report to the requested path", async () => {
-        const capture: { sql?: string } = {};
         const out = join(mkdtempSync(join(tmpdir(), "ax-label-mining-")), "nested", "report.json");
 
         const report = await runWithDb(
@@ -237,7 +219,7 @@ describe("LabelMiningService.writeMiningReport", () => {
                 const svc = yield* LabelMiningService;
                 return yield* svc.writeMiningReport({ sinceDays: 14, limit: 500, reviewLimit: 80, out });
             }),
-            clientWithWindows([correctionWindow(1), directionWindow(2), verificationWindow(3)], capture),
+            clientWithWindows([correctionWindow(1), directionWindow(2), verificationWindow(3)]).client,
         );
 
         const saved = JSON.parse(readFileSync(out, "utf8"));

@@ -42,6 +42,7 @@ import {
     lifecycleRuntime,
 } from "./commands/lifecycle.ts";
 import { AX_VERSION, liveVersionDeps, printVersion } from "./version.ts";
+import { stderrExit } from "./output.ts";
 import { agentsCommand, agentsRuntime } from "../agents/cli.ts";
 import { ALL_STAGES } from "../ingest/stage/registry.ts";
 import { IngestRuntimeLayer, ingestRuntimeLayerWith } from "../ingest/stage/runtime.ts";
@@ -305,12 +306,10 @@ const dispatch = (args: ReadonlyArray<string>): Effect.Effect<void, unknown> => 
         // has been acquired yet, so a direct exit(2) is finalizer-safe.
         const removed = detectRemovedIngestFlag(args.slice(1));
         if (removed) {
-            return Effect.sync(() => {
-                console.error(
-                    `axctl ingest: ${removed.flag} was removed. Use ${removed.replacement} instead.`,
-                );
-                process.exit(2);
-            });
+            return stderrExit(
+                `axctl ingest: ${removed.flag} was removed. Use ${removed.replacement} instead.\n`,
+                2,
+            );
         }
         return withIngest(args);
     }

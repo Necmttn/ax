@@ -23,6 +23,12 @@ type WalkEntry = WalkEntryFile | WalkEntryDirectory;
  * Shared recursion skeleton for nested jsonl session trees. The presets differ
  * only in how they list/classify paths, preserving provider-specific error and
  * symlink semantics.
+ *
+ * The Claude parser (`ingestTranscripts` in transcripts.ts) intentionally does
+ * NOT use this skeleton: its layout is flat (`<project-slug>/<session>.jsonl`,
+ * exactly one level, no recursion) and it must keep the full `(mtime, size)`
+ * stat per file for the skip-unchanged ingest watermark, whereas this walker
+ * only consumes mtime/size for the `--since` cutoff and discards them.
  */
 const walkJsonlCore = <E, R>(input: {
     readonly root: string;

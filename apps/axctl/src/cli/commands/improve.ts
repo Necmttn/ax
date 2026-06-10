@@ -3,6 +3,7 @@ import { Effect } from "effect";
 import { Argument, Command, Flag } from "effect/unstable/cli";
 import { SurrealClient } from "@ax/lib/db";
 import { prettyPrint, surrealLiteral } from "@ax/lib/json";
+import { decodeJsonOrNull } from "@ax/lib/decode";
 import { surrealString } from "@ax/lib/shared/surql";
 import { homedir } from "node:os";
 import { deriveCheckpoints } from "../../ingest/derive-checkpoints.ts";
@@ -99,7 +100,7 @@ const cmdImproveLint = (input: {
             staleDays,
         });
         if (json) {
-            console.log(JSON.stringify(report, null, 2));
+            console.log(prettyPrint(report));
         } else {
             for (const f of report.errors) {
                 console.log(`error  ${f.rule}: ${f.message} (${f.path})`);
@@ -149,7 +150,7 @@ const cmdImproveRecommend = (input: {
             ...(sinceDays === undefined ? {} : { sinceDays }),
         });
         if (json) {
-            console.log(JSON.stringify(items, null, 2));
+            console.log(prettyPrint(items));
             return;
         }
         printNextLinks(
@@ -319,21 +320,18 @@ const improveAcceptCommand = Command.make(
                 let retroSummaries: readonly string[] = [];
                 const baselineRaw = result.proposal.baseline;
                 if (typeof baselineRaw === "string" && baselineRaw.length > 0) {
-                    try {
-                        const parsed = JSON.parse(baselineRaw) as {
-                            tool?: string;
-                            sessionKeys?: unknown;
-                            frequency?: number;
-                        };
-                        if (Array.isArray(parsed.sessionKeys)) {
-                            const tool = parsed.tool ?? "tool";
-                            retroSummaries = parsed.sessionKeys
-                                .filter((s): s is string => typeof s === "string")
-                                .slice(0, 5)
-                                .map((s) => `session ${s}: top tool ${tool} failed (cluster freq=${parsed.frequency ?? "?"})`);
-                        }
-                    } catch {
-                        // ignore - baseline shape may evolve
+                    // Parse failure → null: baseline shape may evolve.
+                    const parsed = decodeJsonOrNull(baselineRaw) as {
+                        tool?: string;
+                        sessionKeys?: unknown;
+                        frequency?: number;
+                    } | null;
+                    if (parsed && Array.isArray(parsed.sessionKeys)) {
+                        const tool = parsed.tool ?? "tool";
+                        retroSummaries = parsed.sessionKeys
+                            .filter((s): s is string => typeof s === "string")
+                            .slice(0, 5)
+                            .map((s) => `session ${s}: top tool ${tool} failed (cluster freq=${parsed.frequency ?? "?"})`);
                     }
                 }
                 console.log("");

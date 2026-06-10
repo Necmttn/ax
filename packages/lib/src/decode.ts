@@ -7,15 +7,40 @@ export const JsonRecordSchema = Schema.Record(Schema.String, Schema.Unknown);
 export type JsonRecord = typeof JsonRecordSchema.Type;
 
 /**
+ * JSON decode that distinguishes parse failure from the valid JSON document
+ * `null`: `Option.some(null)` for the input `"null"`, `Option.none()` for
+ * malformed input. Use this at boundaries where `null` is a legal payload
+ * value (e.g. classifier evidence) - `decodeJsonOrNull` conflates the two.
+ */
+export const decodeJsonOption = (input: string): Option.Option<unknown> =>
+    decodeJsonString(input);
+
+/**
  * Best-effort JSON decode at an IO boundary (jsonl lines, file payloads).
  * Returns `null` for malformed input instead of throwing - callers must
  * handle the `null` branch (typically by skipping the record and counting
  * a "corrupted" stat). Backed by Effect Schema so the decode is uniform
- * across ingest entrypoints.
+ * across ingest entrypoints. NOTE: the valid JSON document `"null"` also
+ * decodes to `null`; callers that must tell the two apart use
+ * `decodeJsonOption`.
  */
 export const decodeJsonOrNull = (input: string): unknown | null => {
     const result = decodeJsonString(input);
     return Option.isSome(result) ? result.value : null;
+};
+
+/**
+ * Re-derive the native parse error for a warning/error detail: the
+ * Option-based schema decode drops the `SyntaxError` that a legacy
+ * `JSON.parse` message surfaced. Run this only on the (rare) failure path.
+ */
+export const jsonParseErrorText = (raw: string): string => {
+    try {
+        JSON.parse(raw);
+        return "schema decode failed";
+    } catch (error) {
+        return error instanceof Error ? error.message : String(error);
+    }
 };
 
 /**

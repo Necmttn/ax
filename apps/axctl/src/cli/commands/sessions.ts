@@ -2,6 +2,7 @@
 import { Effect, FileSystem, Option, Path } from "effect";
 import { Argument, Command, Flag } from "effect/unstable/cli";
 import { SurrealClient } from "@ax/lib/db";
+import { SkillName } from "@ax/lib/brands";
 import { AxConfig } from "@ax/lib/config";
 import type { DbError } from "@ax/lib/errors";
 import { findCommitWindow } from "@ax/lib/git-window";
@@ -37,7 +38,7 @@ import { formatSessionMetrics, SESSION_METRICS_LEGEND } from "../../metrics/util
 import { buildSessionsNext, buildSessionShowNext } from "../../nav/next-links.ts";
 import { resolvePwdRepository } from "../../pwd.ts";
 import { printNextLinks } from "../next-format.ts";
-import { catchDbErrorAndExit, wantsJsonFlag } from "../output.ts";
+import { catchDbErrorAndExit, stderrExit, wantsJsonFlag } from "../output.ts";
 import { renderCompareTable, renderCompareJson } from "../session-compare-format.ts";
 import { renderSessionMarkdown, renderSessionJson } from "../session-show-format.ts";
 import type { RuntimeManifest } from "./manifest.ts";
@@ -187,12 +188,7 @@ const cmdSessionsHere = (input: SessionsHereInput) =>
 
         const pwdResolution = yield* resolvePwdRepository().pipe(
             Effect.catchTag("NotAGitRepoError", (err) =>
-                Effect.sync(() => {
-                    process.stderr.write(
-                        `axctl sessions here: not in a git repository (cwd=${err.cwd})\n`,
-                    );
-                    process.exit(2);
-                }),
+                stderrExit(`axctl sessions here: not in a git repository (cwd=${err.cwd})\n`, 2),
             ),
         );
 
@@ -211,7 +207,7 @@ const cmdSessionsHere = (input: SessionsHereInput) =>
         const { sessions, next } = buildSessionsNext(rows);
 
         if (json) {
-            console.log(JSON.stringify({ sessions, next }, null, 2));
+            console.log(prettyPrint({ sessions, next }));
             return;
         }
         printNextLinks(next);
@@ -278,7 +274,7 @@ const cmdSessionsAround = (input: {
         });
 
         if (json) {
-            console.log(JSON.stringify({ sessions, next }, null, 2));
+            console.log(prettyPrint({ sessions, next }));
             return;
         }
         printNextLinks(next);
@@ -300,12 +296,7 @@ const cmdSessionsNear = (input: {
         // Resolve repository via pwd (near is always pwd-scoped)
         const pwdResolution = yield* resolvePwdRepository().pipe(
             Effect.catchTag("NotAGitRepoError", (err) =>
-                Effect.sync(() => {
-                    process.stderr.write(
-                        `axctl sessions near: not in a git repository (cwd=${err.cwd})\n`,
-                    );
-                    process.exit(2);
-                }),
+                stderrExit(`axctl sessions near: not in a git repository (cwd=${err.cwd})\n`, 2),
             ),
         );
 
@@ -346,7 +337,7 @@ const cmdSessionsNear = (input: {
         const { sessions, next } = buildSessionsNext(rows);
 
         if (json) {
-            console.log(JSON.stringify({ sessions, next }, null, 2));
+            console.log(prettyPrint({ sessions, next }));
             return;
         }
         printNextLinks(next);
@@ -650,10 +641,7 @@ const cmdSessionsMetrics = (input: {
         if (input.here) {
             const pwd = yield* resolvePwdRepository().pipe(
                 Effect.catchTag("NotAGitRepoError", (err) =>
-                    Effect.sync(() => {
-                        process.stderr.write(`axctl sessions metrics: --here requires a git repository (cwd=${err.cwd})\n`);
-                        process.exit(2);
-                    }),
+                    stderrExit(`axctl sessions metrics: --here requires a git repository (cwd=${err.cwd})\n`, 2),
                 ),
             );
             project = pwd.repoRoot;
@@ -669,7 +657,9 @@ const cmdSessionsMetrics = (input: {
             const all = yield* fetchAggregateRows({ since, project });
             const rows = applyAggregateFilters(all, { source: input.source, minCostUsd: input.minCost });
             if (input.skill !== null) {
-                const skillSessions = yield* fetchSkillSessionSet(input.skill);
+                // CLI flag is a user-supplied skill name: brand at the input
+                // boundary via the schema constructor.
+                const skillSessions = yield* fetchSkillSessionSet(SkillName.make(input.skill));
                 const efficacy = computeSkillEfficacy(rows, skillSessions, input.skill);
                 if (input.json) {
                     console.log(prettyPrint(efficacy));

@@ -9,6 +9,7 @@
  * html parser drops unknown tags).
  */
 import { ImageResponse } from "workers-og";
+import { OG_RENDER_REV } from "../../_lib/og-meta";
 
 interface SubagentCard {
     readonly cost_usd: number | null;
@@ -128,6 +129,50 @@ function costBarHtml(m: Manifest): string {
     return `<div style="display:flex;flex-direction:column"><div style="display:flex">${segs}</div><div style="display:flex;margin-top:12px">${legend}</div></div>`;
 }
 
+/**
+ * ASCII AX mark, two lines, monospace column-aligned:
+ *
+ *    col: 0123456
+ *          /\  \/
+ *         /--\ /\
+ *
+ * A = ` /\` over `/--\` (cols 0-3), X = `\/` over `/\` (cols 5-6). Shared by
+ * the small header logo and the large ?variant=watermark background; each
+ * line renders as its own div (line-stack) to avoid <pre> fragility in
+ * workers-og.
+ */
+const ASCII_AX_LINES = [" /\\  \\/", "/--\\ /\\"] as const;
+
+// Satori collapses runs of regular spaces under its default white-space
+// handling, which destroys column alignment. Swap every space (leading and
+// internal) for a literal non-breaking space, which satori renders as-is.
+const artLine = (line: string): string => esc(line).replace(/ /g, "\u00A0");
+
+/** Small two-line ASCII AX wordmark for the poster header. */
+function asciiLogoHtml(color: string): string {
+    const lines = ASCII_AX_LINES.map(
+        (line) =>
+            `<div style="display:flex;font-size:14px;line-height:16px;color:${color};letter-spacing:1px;font-weight:700">${artLine(line)}</div>`,
+    ).join("");
+    return `<div style="display:flex;flex-direction:column">${lines}</div>`;
+}
+
+/**
+ * Large background ASCII watermark for the ?variant=watermark debug variant:
+ * the same AX mark as the header, scaled up. Positioned absolutely (satori
+ * supports position:absolute when the container is position:relative). Low
+ * opacity so content stays readable.
+ */
+function asciiWatermarkHtml(): string {
+    const lines = ASCII_AX_LINES.map(
+        (line) =>
+            `<div style="display:flex;font-size:120px;line-height:132px;color:${INK};letter-spacing:4px;font-weight:700">${artLine(line)}</div>`,
+    ).join("");
+    // Faded via an opacity wrapper on the container (not a hex alpha channel
+    // on the color) - satori applies opacity to the whole subtree.
+    return `<div style="display:flex;flex-direction:column;position:absolute;top:160px;left:120px;opacity:0.06">${lines}</div>`;
+}
+
 export const onRequestGet: PagesFunction = async (ctx) => {
     const owner = String(ctx.params.owner ?? "");
     const gistId = String(ctx.params.gistId ?? "").replace(/\.png$/, "");
@@ -135,9 +180,12 @@ export const onRequestGet: PagesFunction = async (ctx) => {
         return new Response("bad request", { status: 400 });
     }
     const cache = (caches as unknown as { default: Cache }).default;
-    // r= version busts stale cached renders when the poster template changes.
+    // r= version (OG_RENDER_REV, shared with the /s/ meta rewriter's ?v=
+    // og:image param) busts stale cached renders when the template changes.
+    // Append variant so watermark and default renders cache independently.
     const u = new URL(ctx.request.url);
-    u.searchParams.set("r", "5");
+    const variant = u.searchParams.get("variant") ?? "default";
+    u.searchParams.set("r", `${OG_RENDER_REV}-${variant}`);
     const cacheKey = new Request(u.toString());
     const hit = await cache.match(cacheKey);
     if (hit) return hit;
@@ -169,7 +217,9 @@ export const onRequestGet: PagesFunction = async (ctx) => {
     const stats = `<div style="display:flex;flex-direction:column"><div style="display:flex;margin-bottom:30px">${statList.slice(0, 3).join("")}</div><div style="display:flex">${statList.slice(3).join("")}</div></div>`;
 
     const blocks: Record<string, string> = {
-        header: `<div style="display:flex;justify-content:space-between;align-items:center"><div style="display:flex;align-items:baseline"><span style="font-size:42px;color:${INK};font-weight:700;font-family:'Gelasio'">ax</span><span style="font-size:14px;color:${DIM};margin-left:14px;letter-spacing:3px">AGENT EXPERIENCE</span></div><span style="font-size:17px;color:${DIM}">${esc([model, date].filter(Boolean).join(" · "))}</span></div>`,
+        // ASCII logo replaces the serif "ax" wordmark. The line-stack avoids
+        // <pre> fragility and keeps display:flex on the container intact.
+        header: `<div style="display:flex;justify-content:space-between;align-items:center"><div style="display:flex;align-items:center"><div style="display:flex;margin-right:14px">${asciiLogoHtml(INK)}</div><span style="font-size:14px;color:${DIM};letter-spacing:3px">AGENT EXPERIENCE</span></div><span style="font-size:17px;color:${DIM}">${esc([model, date].filter(Boolean).join(" · "))}</span></div>`,
         title: `<div style="display:flex;font-size:33px;line-height:1.3;color:${INK};margin-top:26px;font-weight:600">${title}</div>`,
         stats: `<div style="display:flex;margin-top:30px">${stats}</div>`,
         fleet: t.subagents > 0 ? `<div style="display:flex;flex-direction:column;align-items:flex-start;margin-top:30px"><div style="display:flex">${fleetHtml(manifest.subagents)}</div><span style="font-size:14px;letter-spacing:2px;color:${DIM};margin-top:10px">${t.subagents} SUBAGENTS · BRIGHTER = COSTLIER</span></div>` : "",
@@ -183,11 +233,16 @@ export const onRequestGet: PagesFunction = async (ctx) => {
     const inner = probe
         ? probe.split(",").filter((k) => k in blocks).map((k) => blocks[k]).join("")
         : `${blocks.header}${blocks.title}${mid}${blocks.costbar}${blocks.footer}`;
+    // ?variant=watermark: inject a large low-opacity ASCII background mark for
+    // iterating on the treatment without making it the default social card.
+    // position:relative on the outer container lets the absolute child render
+    // behind the content stack. Never active by default.
+    const watermark = variant === "watermark" ? asciiWatermarkHtml() : "";
     // Full bleed, no border: the platform rendering the preview (X / Slack /
     // Discord) draws its own frame + rounded corners - an inner border reads
     // as a nested double-frame. 64px safe margins keep content clear of the
     // platforms' corner clipping (GitHub-card convention).
-    const html = `<div style="display:flex;flex-direction:column;width:1200px;height:630px;background:${CARD};padding:56px 64px;font-family:'JetBrains Mono'">${inner}</div>`;
+    const html = `<div style="display:flex;flex-direction:column;position:relative;width:1200px;height:630px;background:${CARD};padding:56px 64px;font-family:'JetBrains Mono'">${watermark}${inner}</div>`;
 
     const font = await fetch(
         "https://cdn.jsdelivr.net/fontsource/fonts/jetbrains-mono@latest/latin-400-normal.ttf",

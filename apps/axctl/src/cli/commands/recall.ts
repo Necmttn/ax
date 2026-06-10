@@ -4,6 +4,7 @@ import { Argument, Command, Flag } from "effect/unstable/cli";
 import { SurrealClient } from "@ax/lib/db";
 import type { DbError } from "@ax/lib/errors";
 import { ProcessService } from "@ax/lib/process";
+import { prettyPrint } from "@ax/lib/json";
 import { prettifyProjectSlug } from "@ax/lib/shared/project-slug";
 import {
     buildRecallNext,
@@ -244,7 +245,7 @@ const cmdRecall = (opts: RecallCliOpts) =>
             requestedSources: sources ?? ["turn"],
         });
         if (opts.json) {
-            console.log(JSON.stringify({ ...result, hits, next }, null, 2));
+            console.log(prettyPrint({ ...result, hits, next }));
             return;
         }
 

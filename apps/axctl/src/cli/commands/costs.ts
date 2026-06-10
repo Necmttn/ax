@@ -6,6 +6,7 @@ import { prettyPrint, surrealLiteral } from "@ax/lib/json";
 import { fetchCostSummary, type CostSummary } from "../../dashboard/cost-query.ts";
 import { fetchLocSummary, type LocSummary, type LocSelector } from "../../dashboard/loc-query.ts";
 import { resolvePwdRepository } from "../../pwd.ts";
+import { stderrExit } from "../output.ts";
 import type { RuntimeManifest } from "./manifest.ts";
 import { jsonFlag, optionalSince, optionValue, positiveLimit } from "./shared.ts";
 
@@ -156,10 +157,7 @@ const cmdCostsFor = (input: {
         if (input.commit || input.branch || input.here) {
             const pwdResolution = yield* resolvePwdRepository().pipe(
                 Effect.catchTag("NotAGitRepoError", (err) =>
-                    Effect.sync(() => {
-                        process.stderr.write(`axctl costs for: --here/--commit/--branch requires a git repository (cwd=${err.cwd})\n`);
-                        process.exit(2);
-                    }),
+                    stderrExit(`axctl costs for: --here/--commit/--branch requires a git repository (cwd=${err.cwd})\n`, 2),
                 ),
             );
             repositoryKey = pwdResolution.repositoryRecordId.id as string;
@@ -266,10 +264,7 @@ const cmdLoc = (input: {
         if (input.here) {
             const pwdResolution = yield* resolvePwdRepository().pipe(
                 Effect.catchTag("NotAGitRepoError", (err) =>
-                    Effect.sync(() => {
-                        process.stderr.write(`axctl loc: --here requires a git repository (cwd=${err.cwd})\n`);
-                        process.exit(2);
-                    }),
+                    stderrExit(`axctl loc: --here requires a git repository (cwd=${err.cwd})\n`, 2),
                 ),
             );
             repositoryKey = pwdResolution.repositoryRecordId.id as string;

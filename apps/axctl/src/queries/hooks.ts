@@ -1,6 +1,5 @@
 import { Effect } from "effect";
 import { SurrealClient } from "@ax/lib/db";
-import type { DbError } from "@ax/lib/errors";
 
 export interface HookSummaryRow {
     readonly command: string;
@@ -101,26 +100,29 @@ export function buildHookSessionQuery(sessionId: string): string {
     ].join("\n");
 }
 
-export const queryHookSummary = (opts: HookQueryOptions): Effect.Effect<readonly HookSummaryRow[], DbError, SurrealClient> =>
-    Effect.gen(function* () {
+export const queryHookSummary = Effect.fn("queries.queryHookSummary")(
+    function* (opts: HookQueryOptions) {
         const db = yield* SurrealClient;
         const [rows] = yield* db.query<[HookSummaryRow[]]>(buildHookSummaryQuery(opts));
-        return rows;
-    });
+        return rows as readonly HookSummaryRow[];
+    },
+);
 
-export const queryHookInvocations = (opts: HookQueryOptions): Effect.Effect<readonly HookInvocationRow[], DbError, SurrealClient> =>
-    Effect.gen(function* () {
+export const queryHookInvocations = Effect.fn("queries.queryHookInvocations")(
+    function* (opts: HookQueryOptions) {
         const db = yield* SurrealClient;
         const [rows] = yield* db.query<[HookInvocationRow[]]>(buildHookInvocationsQuery(opts));
-        return rows;
-    });
+        return rows as readonly HookInvocationRow[];
+    },
+);
 
-export const queryHookSession = (sessionId: string): Effect.Effect<readonly HookSessionRow[], DbError, SurrealClient> =>
-    Effect.gen(function* () {
+export const queryHookSession = Effect.fn("queries.queryHookSession")(
+    function* (sessionId: string) {
         const db = yield* SurrealClient;
         const [rows] = yield* db.query<[HookSessionRow[]]>(buildHookSessionQuery(sessionId));
-        return rows;
-    });
+        return rows as readonly HookSessionRow[];
+    },
+);
 
 const clip = (value: string | null | undefined, max = 80): string => {
     if (!value) return "";

@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { Effect } from "effect";
 import { SurrealClient, type SurrealClientShape } from "@ax/lib/db";
-import type { DbError } from "@ax/lib/errors";
+import { makeTestSurrealClient, type TestSurrealRows } from "@ax/lib/testing/surreal";
 import {
     SKILL_STATS_SQL,
     dedupeRecentSessions,
@@ -9,22 +9,10 @@ import {
 } from "./skill-stats.ts";
 
 function makeMockDb(responses: Array<unknown>): SurrealClientShape {
-    let callIndex = 0;
-    return {
-        query: <T extends unknown[] = unknown[]>(
-            _sql: string,
-            _bindings?: Record<string, unknown>,
-        ): Effect.Effect<T, DbError> => {
-            const resp = responses[callIndex] ?? [[]];
-            callIndex++;
-            return Effect.succeed(resp as unknown as T);
-        },
-        upsert: () => Effect.void,
-        relate: () => Effect.void,
-        putFile: () => Effect.void,
-        getFile: () => Effect.succeed(""),
-        raw: {} as never,
-    } as unknown as SurrealClientShape;
+    return makeTestSurrealClient({
+        denyWrites: true,
+        responses: responses as ReadonlyArray<TestSurrealRows>,
+    }).client;
 }
 
 const runWithMock = <A>(

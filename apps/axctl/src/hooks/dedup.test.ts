@@ -52,6 +52,7 @@ describe("findRecentInjects", () => {
 
     test("returns a set of paths from rows whose file_path appears in hook_fire", async () => {
         const tc = makeTestSurrealClient({
+            denyWrites: true,
             fallback: [[
                 { file_path: "src/a.ts" },
                 { file_path: "src/a.ts" }, // duplicates collapse
@@ -75,6 +76,7 @@ describe("findRecentInjects", () => {
 
 function neverCalledClient(): TestSurrealClient {
     return makeTestSurrealClient({
+        denyWrites: true,
         fallback: () => {
             throw new Error("query should not have been called");
         },

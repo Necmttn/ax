@@ -21,9 +21,11 @@ import type { DbError } from "../errors.ts";
  *   (indexed by call order, counted even when a route matched first).
  * - **Default-empty**: unmatched queries resolve `[[]]` (overridable via
  *   `fallback`).
- * - **Writes**: `upsert` is a no-op that records into `upserts`; `relate`/
- *   `putFile` are plain no-ops and `getFile` resolves `""` (grow recorders
- *   back only when a test actually asserts on them).
+ * - **Writes**: `upsert`/`relate`/`putFile` are no-ops that record into
+ *   `upserts`/`relates`/`files`; `getFile` resolves `""`.
+ * - **denyWrites**: read-only tests (dashboard/query subjects) pass
+ *   `denyWrites: true` so any accidental `upsert`/`relate`/`putFile` fails
+ *   loudly instead of being silently swallowed.
  *
  * For bun:test - no vitest dependency.
  */
@@ -59,6 +61,19 @@ export interface TestSurrealUpsertCall {
     readonly content: Record<string, unknown>;
 }
 
+export interface TestSurrealRelateCall {
+    readonly from: Parameters<SurrealClientShape["relate"]>[0];
+    readonly edge: Parameters<SurrealClientShape["relate"]>[1];
+    readonly to: Parameters<SurrealClientShape["relate"]>[2];
+    readonly data: Record<string, unknown> | undefined;
+}
+
+export interface TestSurrealPutFileCall {
+    readonly bucket: string;
+    readonly path: string;
+    readonly content: string | Uint8Array;
+}
+
 export interface TestSurrealClientOptions {
     /** Pattern → rows for `query` responses. First match wins. */
     readonly routes?: TestSurrealRoutes;
@@ -71,6 +86,12 @@ export interface TestSurrealClientOptions {
     readonly responses?: ReadonlyArray<TestSurrealRows>;
     /** Response when nothing else matched. Default `[[]]`. */
     readonly fallback?: TestSurrealResponder;
+    /**
+     * Fail loudly (defect) on any write (`upsert`/`relate`/`putFile`). Use in
+     * read-only tests so an accidental mutation surfaces instead of being
+     * silently recorded/no-oped.
+     */
+    readonly denyWrites?: boolean;
     /** Escape-hatch raw client; default `{} as never` (crashes if touched). */
     readonly raw?: Surreal;
 }
@@ -85,6 +106,10 @@ export interface TestSurrealClient {
     readonly calls: TestSurrealQueryCall[];
     /** Every recorded `upsert`. */
     readonly upserts: TestSurrealUpsertCall[];
+    /** Every recorded `relate`. */
+    readonly relates: TestSurrealRelateCall[];
+    /** Every recorded `putFile`. */
+    readonly files: TestSurrealPutFileCall[];
 }
 
 const toRoutes = (routes: TestSurrealRoutes | undefined): ReadonlyArray<TestSurrealRoute> => {
@@ -114,8 +139,18 @@ export const makeTestSurrealClient = (
     const captured: string[] = [];
     const calls: TestSurrealQueryCall[] = [];
     const upserts: TestSurrealUpsertCall[] = [];
+    const relates: TestSurrealRelateCall[] = [];
+    const files: TestSurrealPutFileCall[] = [];
     const fallback: TestSurrealResponder = opts.fallback ?? [[]];
     let callIndex = 0;
+
+    const guardWrite = (op: string): void => {
+        if (opts.denyWrites) {
+            throw new Error(
+                `makeTestSurrealClient: ${op} called but denyWrites is set - this test is read-only`,
+            );
+        }
+    };
 
     const client: SurrealClientShape = {
         query: <T extends unknown[] = unknown[]>(
@@ -135,11 +170,20 @@ export const makeTestSurrealClient = (
 
         upsert: (id: RecordId, content: Record<string, unknown>) =>
             Effect.sync(() => {
+                guardWrite("upsert");
                 upserts.push({ id, content });
             }),
 
-        relate: () => Effect.void,
-        putFile: () => Effect.void,
+        relate: (from, edge, to, data) =>
+            Effect.sync(() => {
+                guardWrite("relate");
+                relates.push({ from, edge, to, data });
+            }),
+        putFile: (bucket, path, content) =>
+            Effect.sync(() => {
+                guardWrite("putFile");
+                files.push({ bucket, path, content });
+            }),
         getFile: () => Effect.succeed(""),
 
         raw: opts.raw ?? ({} as never),
@@ -151,5 +195,7 @@ export const makeTestSurrealClient = (
         captured,
         calls,
         upserts,
+        relates,
+        files,
     };
 };

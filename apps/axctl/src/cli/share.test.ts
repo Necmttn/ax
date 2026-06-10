@@ -1,6 +1,26 @@
 import { describe, expect, it } from "bun:test";
 import { minimalShareArtifact, type AxSessionShare } from "../share/artifact.ts";
+import { formatStaleUsageWarning } from "../share/format.ts";
 import { cmdShareWithDeps, parseShareArgs, type ShareCommandDeps } from "./share.ts";
+
+const SESSION_USAGE = {
+    model: "claude-opus-4-5",
+    prompt_tokens: null,
+    completion_tokens: null,
+    cache_creation_input_tokens: null,
+    cache_read_input_tokens: null,
+    estimated_tokens: 5000,
+    estimated_cost_usd: 0.05,
+    pricing_source: "test",
+};
+
+const TURN_USAGE = {
+    ...SESSION_USAGE,
+    seq: 1,
+    fresh_input_tokens: null,
+    usage_source: "api",
+    usage_quality: "exact",
+};
 
 function makeHarness(
     artifact: AxSessionShare | null = minimalShareArtifact({ id: "abc123", source: "codex" }),
@@ -122,6 +142,51 @@ describe("cmdShareWithDeps", () => {
         await cmdShareWithDeps(["abc123", "--yes"], harness.deps);
 
         expect(harness.exitCode()).toBeUndefined();
+    });
+
+    it("emits stale-usage warning to stderr when session has cost but no per-turn usage", async () => {
+        const artifact: AxSessionShare = {
+            ...minimalShareArtifact({ id: "abc123", source: "claude" }),
+            token_usage: SESSION_USAGE,
+            turns: [
+                { id: "t1", seq: 1, role: "user", text: "hello" },
+            ],
+        };
+        const harness = makeHarness(artifact);
+        await cmdShareWithDeps(["abc123", "--dry-run"], harness.deps);
+
+        expect(harness.stderr()).toBe(formatStaleUsageWarning());
+        expect(formatStaleUsageWarning()).toBe(
+            "axctl share: warning: this share has session-level cost but no per-turn usage rows; cost rails may render as $0.\n" +
+            "Re-run ingest with AX_REDERIVE_CLAUDE=1 AX_REDERIVE_SUBAGENTS=1 ax ingest here --stages=claude,subagents --since=N\n",
+        );
+    });
+
+    it("does not emit stale-usage warning when turns have token_usage", async () => {
+        const artifact: AxSessionShare = {
+            ...minimalShareArtifact({ id: "abc123", source: "claude" }),
+            token_usage: SESSION_USAGE,
+            turns: [
+                {
+                    id: "t1",
+                    seq: 1,
+                    role: "assistant",
+                    text: "hello",
+                    token_usage: TURN_USAGE,
+                },
+            ],
+        };
+        const harness = makeHarness(artifact);
+        await cmdShareWithDeps(["abc123", "--dry-run"], harness.deps);
+
+        expect(harness.stderr()).not.toContain("axctl share: warning:");
+    });
+
+    it("does not emit stale-usage warning when there is no session-level usage", async () => {
+        const harness = makeHarness();
+        await cmdShareWithDeps(["abc123", "--dry-run"], harness.deps);
+
+        expect(harness.stderr()).not.toContain("axctl share: warning:");
     });
 
     it("passes public visibility into preview and publisher", async () => {

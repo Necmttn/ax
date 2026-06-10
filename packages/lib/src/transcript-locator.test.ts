@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Effect, Layer } from "effect";
 import { BunFileSystem, BunPath } from "@effect/platform-bun";
-import { SurrealClient, type SurrealClientShape } from "./db.ts";
+import { makeTestSurrealClient } from "./testing/surreal.ts";
 import {
     encodeClaudeProjectSlug,
     type FoundTranscript,
@@ -24,22 +24,11 @@ const onDisk = (sessionId: string, hint: string | null): Promise<FoundTranscript
 
 /** Minimal SurrealClient fake. `query` returns the raw_file the test wants
  *  resolveRawFileFromDb to see; everything else returns empty. */
-function fakeLocatorClient(rawFile: string | null): SurrealClientShape {
-    return {
-        query: <T extends unknown[]>(sql: string) =>
-            Effect.sync(() => {
-                if (sql.includes("SELECT raw_file FROM")) {
-                    return [[{ raw_file: rawFile }]] as T;
-                }
-                return [[]] as T;
-            }),
-        upsert: () => Effect.void,
-        relate: () => Effect.void,
-        putFile: () => Effect.void,
-        getFile: () => Effect.succeed(""),
-        raw: {} as never,
-    };
-}
+const fakeLocatorLayer = (rawFile: string | null) =>
+    makeTestSurrealClient({
+        denyWrites: true,
+        routes: { "SELECT raw_file FROM": [[{ raw_file: rawFile }]] },
+    }).layer;
 
 describe("encodeClaudeProjectSlug", () => {
     test("standard absolute path", () => {
@@ -145,7 +134,7 @@ describe("locateTranscript (with DB hint)", () => {
         await writeFile(file, "");
         const found = await Effect.runPromise(
             locateTranscript("claude-subagent-fromdb").pipe(
-                Effect.provide(Layer.merge(Layer.succeed(SurrealClient, fakeLocatorClient(file)), FsLayer)),
+                Effect.provide(Layer.merge(fakeLocatorLayer(file), FsLayer)),
             ),
         );
         expect(found.path).toBe(file);
@@ -155,7 +144,7 @@ describe("locateTranscript (with DB hint)", () => {
     test("null raw_file in DB plus no on-disk match throws TranscriptNotFoundError", async () => {
         const bogus = `ax-test-db-null-${Date.now()}-${Math.random().toString(36).slice(2)}`;
         const eff = locateTranscript(bogus).pipe(
-            Effect.provide(Layer.merge(Layer.succeed(SurrealClient, fakeLocatorClient(null)), FsLayer)),
+            Effect.provide(Layer.merge(fakeLocatorLayer(null), FsLayer)),
         );
         await expect(Effect.runPromise(eff)).rejects.toThrow(/session transcript not found/);
     });
@@ -163,7 +152,7 @@ describe("locateTranscript (with DB hint)", () => {
     test("TranscriptNotFoundError preserves the session id", async () => {
         const bogus = `ax-test-err-${Date.now()}-${Math.random().toString(36).slice(2)}`;
         const eff = locateTranscript(bogus).pipe(
-            Effect.provide(Layer.merge(Layer.succeed(SurrealClient, fakeLocatorClient(null)), FsLayer)),
+            Effect.provide(Layer.merge(fakeLocatorLayer(null), FsLayer)),
         );
         const exit = await Effect.runPromise(Effect.exit(eff));
         expect(exit._tag).toBe("Failure");

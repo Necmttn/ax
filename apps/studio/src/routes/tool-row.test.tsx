@@ -138,6 +138,40 @@ describe("ToolCallCard (ToolRowItem / ToolRow)", () => {
         expect(html).toContain(skillBody);
     });
 
+    test("Edit old/new args render verbatim with diff tints (SSR = plain pre-highlight fallback)", () => {
+        const html = renderToStaticMarkup(
+            <ToolRowItem
+                call={call({
+                    name: "Edit",
+                    category: "edit",
+                    input: { file_path: "/a/b.ts", old_string: "const x = 1", new_string: "const x = 2" },
+                    command: null,
+                })}
+            />,
+        );
+        // code text survives untouched before the client-side token swap
+        expect(html).toContain("const x = 1");
+        expect(html).toContain("const x = 2");
+        // diff tints on the value cells
+        expect(html).toContain("var(--red) 7%");
+        expect(html).toContain("var(--green) 9%");
+    });
+
+    test("Write content arg renders verbatim; no diff tint", () => {
+        const html = renderToStaticMarkup(
+            <ToolRowItem
+                call={call({
+                    name: "Write",
+                    category: "edit",
+                    input: { file_path: "/a/b.py", content: "print('hi')" },
+                    command: null,
+                })}
+            />,
+        );
+        expect(html).toContain("print(&#x27;hi&#x27;)");
+        expect(html).not.toContain("var(--red) 7%");
+    });
+
     test("skillContentFor wires a Skill call's injected content through ToolRow", () => {
         const html = renderToStaticMarkup(
             <ToolRow

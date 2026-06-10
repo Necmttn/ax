@@ -22,7 +22,7 @@ import { fetchSkillStats } from "../../queries/skill-stats.ts";
 import { fetchUnusedSkills } from "../../queries/unused-skills.ts";
 import { skillsConfigSubcommands } from "../../skills/cli.ts";
 import { printNextLinks } from "../next-format.ts";
-import { catchDbErrorAndExit, wantsJsonFlag } from "../output.ts";
+import { catchDbErrorAndExit, stderrExit, wantsJsonFlag } from "../output.ts";
 import {
     renderSkillsByRoleTable,
     renderSkillsByRoleJson,
@@ -851,10 +851,7 @@ const skillsLintCommand = Command.make(
     ({ taskDir, dryRun, json }) =>
         cmdSkillsLint({ taskDir, dryRun, json }).pipe(
             Effect.catchTag("PlatformError", (e) =>
-                Effect.sync(() => {
-                    process.stderr.write(`axctl skills lint: file error - ${e.message}\n`);
-                    process.exit(1);
-                }),
+                stderrExit(`axctl skills lint: file error - ${e.message}\n`, 1),
             ),
             catchDbErrorAndExit("axctl skills lint"),
         ),

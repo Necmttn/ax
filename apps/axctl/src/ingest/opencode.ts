@@ -1,8 +1,9 @@
 import { Database } from "bun:sqlite";
 import { Effect, FileSystem, Option, Path, Schema } from "effect";
 import { AxConfig } from "@ax/lib/config";
+import { SkillName } from "@ax/lib/brands";
 import { RecordId, SurrealClient } from "@ax/lib/db";
-import { decodeJsonOrNull } from "@ax/lib/decode";
+import { decodeJsonOrNull, jsonParseErrorText } from "@ax/lib/decode";
 import { orAbsent } from "@ax/lib/shared/fs-error";
 import { executeStatements } from "@ax/lib/shared/statement-exec";
 import {
@@ -60,7 +61,7 @@ interface OpenCodeInvocation {
     session: string;
     seq: number;
     ts: string;
-    skill: string;
+    skill: SkillName;
     args: unknown;
 }
 
@@ -209,18 +210,6 @@ function isRecord(input: unknown): input is Record<string, unknown> {
  *  (not `null`) so a literal JSON `null` is distinguishable from a failed
  *  parse. */
 const decodeJsonStringOption = Schema.decodeUnknownOption(Schema.UnknownFromJsonString);
-
-/** Re-derive the native parse error for the warning detail: the Option-based
- *  schema decode drops the `SyntaxError` that the legacy `JSON.parse` warning
- *  surfaced. Runs only on the (rare) failure path. */
-function jsonParseErrorText(raw: string): string {
-    try {
-        JSON.parse(raw);
-        return "schema decode failed";
-    } catch (error) {
-        return error instanceof Error ? error.message : String(error);
-    }
-}
 
 function parseJsonRecord(raw: string | null, label: string, warnings: string[]): Record<string, unknown> | null {
     if (typeof raw !== "string" || raw.trim().length === 0) {
@@ -553,7 +542,8 @@ function processToolPart(input: {
     });
 
     input.toolCalls.push(call);
-    const skillName = `opencode:${toolName}`;
+    // Synthetic provider-tool skill name - branded at the true source.
+    const skillName = SkillName.make(`opencode:${toolName}`);
     input.invocations.push({
         session: input.session.id,
         seq: input.turnSeq,

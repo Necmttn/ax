@@ -31,6 +31,7 @@ import {
     renderClassifierExplainJson,
     renderClassifierExplainMarkdown,
 } from "../classifiers-explain-format.ts";
+import { prettyPrint } from "@ax/lib/json";
 import { catchDbErrorAndExit, wantsJsonFlag } from "../output.ts";
 import type { RuntimeManifest } from "./manifest.ts";
 import {
@@ -567,7 +568,7 @@ const classifiersLabelMiningCommand = Command.make(
                 const result = yield* svc.selfImproveQuery(
                     outPath === undefined ? {} : { out: outPath },
                 );
-                if (json) console.log(JSON.stringify(result, null, 2));
+                if (json) console.log(prettyPrint(result));
                 else console.log(renderSelfImproveText(result));
                 return;
             }
@@ -576,7 +577,7 @@ const classifiersLabelMiningCommand = Command.make(
                     apply,
                     ...(outPath === undefined ? {} : { out: outPath }),
                 });
-                if (json) console.log(JSON.stringify(report, null, 2));
+                if (json) console.log(prettyPrint(report));
                 else console.log(renderGraphProjectionText(report));
                 return;
             }
@@ -584,7 +585,7 @@ const classifiersLabelMiningCommand = Command.make(
             const report = outPath === undefined
                 ? yield* svc.miningReport(reportInput)
                 : yield* svc.writeMiningReport({ ...reportInput, out: outPath });
-            if (json) console.log(JSON.stringify(report, null, 2));
+            if (json) console.log(prettyPrint(report));
             else {
                 console.log(
                     `transcript label mining - candidates ${report.candidate_count}, review rows ${report.review_rows.length}, families ${report.review_diversity.label_family_count}`,

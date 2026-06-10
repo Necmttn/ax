@@ -159,6 +159,36 @@ describe("model pricing", () => {
         expect(cost.outputUsd).toBeCloseTo(0.001);
     });
 
+    it("prices claude-fable-5 turns instead of leaving them null", () => {
+        const cost = estimateCost({
+            modelKey: "claude-fable-5",
+            promptTokens: 1_000_000,
+            completionTokens: 100_000,
+            cacheCreationInputTokens: 200_000,
+            cacheReadInputTokens: 700_000,
+            estimatedTokens: 1_100_000,
+        });
+
+        expect(cost.inputUsd).toBeCloseTo(1); // 100k fresh @ $10/M
+        expect(cost.outputUsd).toBeCloseTo(5); // 100k @ $50/M
+        expect(cost.cacheCreationUsd).toBeCloseTo(2.5); // 200k @ $12.5/M
+        expect(cost.cacheReadUsd).toBeCloseTo(0.7); // 700k @ $1/M
+        expect(cost.pricingSource).not.toBeNull();
+    });
+
+    it("falls back fable and dated haiku ids to their base entries", () => {
+        const catalog = builtInPricingCatalog();
+
+        expect(pricingForModel("claude-fable-5[1m]", catalog)).toMatchObject({
+            inputPerMillionUsd: 10,
+            outputPerMillionUsd: 50,
+        });
+        expect(pricingForModel("claude-haiku-4-5-20251001", catalog)).toMatchObject({
+            inputPerMillionUsd: 1,
+            outputPerMillionUsd: 5,
+        });
+    });
+
     it("falls back gpt-5 point releases to gpt-5 pricing when no exact row exists", () => {
         const catalog = new Map([["gpt-5", builtInPricingCatalog().get("gpt-5")!]]);
 

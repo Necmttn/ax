@@ -2,30 +2,18 @@ import { describe, expect, test } from "bun:test";
 import { Effect, Layer } from "effect";
 import { SurrealClient, type SurrealClientShape } from "@ax/lib/db";
 import { DbError } from "@ax/lib/errors";
+import { makeTestSurrealClient } from "@ax/lib/testing/surreal";
 import { recordHookFire } from "./telemetry.ts";
 
 /**
  * After ADR-0005 the hook telemetry write path no longer calls `db.upsert`;
  * `writeTelemetryRow` builds an `UPSERT` statement and runs it through
  * `executeStatements` → `db.query`. The fake therefore spies on `query`,
- * collecting every emitted SQL string. `upsert` stays on the shape only so
- * the object still satisfies `SurrealClientShape`; it is no longer the
- * assertion target.
+ * collecting every emitted SQL string; it is no longer the assertion target.
  */
 function fakeClient(): { client: SurrealClientShape; statements: string[] } {
-    const statements: string[] = [];
-    const client: SurrealClientShape = {
-        query: <T extends unknown[]>(sql: string) => {
-            statements.push(sql);
-            return Effect.succeed([] as unknown as T);
-        },
-        upsert: () => Effect.void,
-        relate: () => Effect.void,
-        putFile: () => Effect.void,
-        getFile: () => Effect.succeed(""),
-        raw: {} as never,
-    };
-    return { client, statements };
+    const tc = makeTestSurrealClient({ fallback: [] });
+    return { client: tc.client, statements: tc.captured };
 }
 
 const minimalPriorSession = {
@@ -174,15 +162,9 @@ describe("recordHookFire", () => {
     });
 
     test("swallows db errors so the hook still emits output", async () => {
-        const failing: SurrealClientShape = {
-            query: () =>
-                Effect.fail(new DbError({ operation: "query", message: "db is down" })),
-            upsert: () => Effect.void,
-            relate: () => Effect.void,
-            putFile: () => Effect.void,
-            getFile: () => Effect.succeed(""),
-            raw: {} as never,
-        };
+        const failing: SurrealClientShape = makeTestSurrealClient({
+            fallback: Effect.fail(new DbError({ operation: "query", message: "db is down" })),
+        }).client;
 
         await Effect.runPromise(
             recordHookFire({

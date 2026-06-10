@@ -2,22 +2,12 @@ import { describe, expect, test } from "bun:test";
 import { Effect } from "effect";
 import { executeStatements } from "./statement-exec.ts";
 import { SurrealClient, type SurrealClientShape } from "../db.ts";
+import { makeTestSurrealClient } from "../testing/surreal.ts";
 
 /** In-memory recorder adapter - the second adapter that makes this a real seam. */
 const recordingClient = (): { calls: string[]; layer: SurrealClientShape } => {
-    const calls: string[] = [];
-    const layer = {
-        query: <T extends unknown[]>(sql: string) => {
-            calls.push(sql);
-            return Effect.succeed([] as unknown as T);
-        },
-        upsert: () => Effect.void,
-        relate: () => Effect.void,
-        putFile: () => Effect.void,
-        getFile: () => Effect.succeed(""),
-        raw: {} as never,
-    } satisfies SurrealClientShape;
-    return { calls, layer };
+    const tc = makeTestSurrealClient({ fallback: [] });
+    return { calls: tc.captured, layer: tc.client };
 };
 
 const run = (eff: Effect.Effect<unknown, unknown, SurrealClient>, layer: SurrealClientShape) =>

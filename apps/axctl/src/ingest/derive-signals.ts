@@ -1,4 +1,5 @@
 import { Effect, Schema } from "effect";
+import { SkillName } from "@ax/lib/brands";
 import { SurrealClient } from "@ax/lib/db";
 import { AppLayer } from "@ax/lib/layers";
 import type { DbError } from "@ax/lib/errors";
@@ -58,13 +59,18 @@ ORDER BY session ASC, seq ASC;`;
         return groupTurnsBySession(rows);
     });
 
-const fetchSkillNames = (): Effect.Effect<string[], DbError, SurrealClient> =>
+const fetchSkillNames = (): Effect.Effect<SkillName[], DbError, SurrealClient> =>
     Effect.gen(function* () {
         const db = yield* SurrealClient;
         const result = yield* db.query<[Array<{ name: string }>]>(
             `SELECT name FROM skill;`,
         );
-        return (result?.[0] ?? []).map((r) => r.name).filter((n): n is string => Boolean(n));
+        // The skill table is the persisted catalog, i.e. a true producer of
+        // canonical skill names - brand at this read boundary.
+        return (result?.[0] ?? [])
+            .map((r) => r.name)
+            .filter((n): n is string => Boolean(n))
+            .map((n) => SkillName.make(n));
     });
 
 const fetchFailedToolCalls = (

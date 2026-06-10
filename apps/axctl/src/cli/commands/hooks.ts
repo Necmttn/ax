@@ -2,6 +2,7 @@
 import { Effect } from "effect";
 import { Argument, Command, Flag } from "effect/unstable/cli";
 import { prettyPrint } from "@ax/lib/json";
+import { encodeJson } from "@ax/lib/decode";
 import type { TelemetryHarness } from "@ax/lib/telemetry-base";
 import {
     buildFileContextHookResponse,
@@ -97,7 +98,7 @@ const hookFileContextCommand = Command.make(
                 // something to inject; emit nothing otherwise so Claude Code
                 // doesn't show an empty additionalContext block to the user.
                 if (response.inject && response.context.length > 0) {
-                    console.log(JSON.stringify({
+                    console.log(encodeJson({
                         hookSpecificOutput: {
                             hookEventName: "PreToolUse",
                             additionalContext: response.context,

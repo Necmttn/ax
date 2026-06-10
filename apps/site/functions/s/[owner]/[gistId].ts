@@ -7,6 +7,8 @@
  * (/og/:owner/:gistId) and, when the gist manifest is reachable, its real
  * title and numbers.
  */
+import { buildOgImageUrl } from "../../_lib/og-meta";
+
 interface Env {
     readonly ASSETS: { fetch: (req: Request) => Promise<Response> };
 }
@@ -42,16 +44,20 @@ export const onRequestGet: PagesFunction<Env> = async (ctx) => {
     const shell = await ctx.env.ASSETS.fetch(new Request(shellUrl.toString(), { headers: ctx.request.headers }));
 
     // Best-effort real title/description from the share manifest (edge-cached
-    // upstream by GitHub; a failure falls back to generic copy).
+    // upstream by GitHub; a failure falls back to generic copy). The raw text
+    // is kept: its hash versions the og:image URL so re-exported shares bust
+    // the socials' image caches (X et al. key on the literal URL).
     let title = "Shared ax session";
     let desc = "A recorded AI coding-agent session - every turn, tool call, and dollar.";
+    let manifestText: string | undefined;
     try {
         const res = await fetch(
             `https://gist.githubusercontent.com/${owner}/${gistId}/raw/index.json`,
             { headers: { "user-agent": "ax-share-meta" }, cf: { cacheTtl: 3600, cacheEverything: true } } as RequestInit,
         );
         if (res.ok) {
-            const manifest = (await res.json()) as Manifest;
+            manifestText = await res.text();
+            const manifest = JSON.parse(manifestText) as Manifest;
             title = cleanSummary(manifest.session?.summary) ?? title;
             const t = manifest.totals;
             if (t) {
@@ -67,7 +73,7 @@ export const onRequestGet: PagesFunction<Env> = async (ctx) => {
         // generic copy stands
     }
 
-    const og = `https://ax.necmttn.com/og/${owner}/${gistId}`;
+    const og = buildOgImageUrl(owner, gistId, manifestText);
     const pageUrl = `https://ax.necmttn.com/s/${owner}/${gistId}`;
     const set = (attr: "property" | "name", key: string, content: string) => ({
         selector: `meta[${attr}="${key}"]`,

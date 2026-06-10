@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { Effect, Layer } from "effect";
-import { SurrealClient } from "@ax/lib/db";
+import { Effect } from "effect";
+import { makeTestSurrealClient } from "@ax/lib/testing/surreal";
 import { RECALL_COUNT_SQL, RECALL_TURNS_SQL } from "../queries/recall.ts";
 import { fetchRecall } from "./recall.ts";
 
@@ -9,22 +9,10 @@ import { fetchRecall } from "./recall.ts";
 // ---------------------------------------------------------------------------
 
 function makeMockDb(queryResponses: Map<string, unknown[][]> = new Map()) {
-    const impl = {
-        query: <T extends unknown[] = unknown[]>(sql: string, _bindings?: Record<string, unknown>) => {
-            for (const [pattern, response] of queryResponses) {
-                if (sql.includes(pattern)) {
-                    return Effect.succeed(response as T);
-                }
-            }
-            return Effect.succeed([[]] as unknown as T);
-        },
-        upsert: () => Effect.void,
-        relate: () => Effect.void,
-        putFile: () => Effect.void,
-        getFile: () => Effect.succeed(""),
-        raw: undefined as unknown as import("surrealdb").Surreal,
-    };
-    return Layer.succeed(SurrealClient, impl);
+    return makeTestSurrealClient({
+        denyWrites: true,
+        routes: [...queryResponses].map(([match, rows]) => ({ match, rows: rows as unknown[] })),
+    }).layer;
 }
 
 describe("recall pagination", () => {
