@@ -10,7 +10,7 @@ Decision record: `docs/adr/0011-session-metrics-thin-slice-over-signal-framework
 |---|---|---|
 | durability_ratio | `durability_ratio` (`option<float>`) | share of the session's produced commits NOT later reverted; **NONE** when the session produced no commits (distinct from 0) |
 | produced / reverted | `produced_commits`, `reverted_commits` | commit counts behind durability |
-| time_to_land_ms | `time_to_land_ms` (`option<int>`) | ms from `session.ended_at` to the earliest merged PR whose `merge_sha` matches a produced commit; NONE when nothing landed |
+| time_to_land_ms | `time_to_land_ms` (`option<int>`) | fastest commit→merge latency: min over produced commits of `pull_request.merged_at − commit.ts` where `merge_sha` matches; NONE when nothing landed. (Anchored on commit ts, not `ended_at` - long sessions merge PRs while still open, which made the old anchor negative.) |
 | lines_added / lines_removed | `lines_added`, `lines_removed` | whole-line counts over the session's Edit/Write tool calls (reuses `ax loc`'s `editDelta`) |
 
 Surfaced by `ax sessions metrics [--here|--project P|--since N|--limit N|--json]`

@@ -3622,7 +3622,8 @@ const sessionsMetricsCommand = Command.make(
         }),
 ).pipe(Command.withDescription(
     "Graph-derived per-session metrics: durability (commits not later reverted), "
-    + "time-to-land (session→PR merge), lines added/removed, sorted by lowest durability. "
+    + "time-to-land (commit→PR merge), lines added/removed, first-edit latency, cold-start reads, "
+    + "delegation. Sorted by produced commits, then most fragile first. "
     + "--here scopes to the pwd repo, --since N days, --json for machine output.",
 ));
 
