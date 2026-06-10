@@ -49,6 +49,19 @@ describe("deriveToolEvents", () => {
         ], "claude", new Set([5]));
         expect(events).toHaveLength(0); // seq 5 covered by the edge
     });
+
+    it("titles Agent dispatches with the description, not the bare tool name", () => {
+        const events = deriveToolEvents([
+            tc({ seq: 7, name: "Agent", command_text: '{"description": "Implement Task 3: stage registry", "prompt": "You are imp' }),
+            tc({ seq: 8, name: "Agent", command_text: '{"subagent_type": "general-purpose", "prompt": "Review th' }),
+            tc({ seq: 9, name: "Agent" }), // no input captured -> bare name
+        ], "claude", NO_EDGES);
+        expect(events.map((e) => e.title)).toEqual([
+            "Agent: Implement Task 3: stage registry",
+            "Agent: general-purpose",
+            "Agent",
+        ]);
+    });
 });
 
 describe("deriveFailureEvents", () => {
