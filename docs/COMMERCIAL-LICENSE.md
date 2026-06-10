@@ -2,7 +2,7 @@
 
 ax is dual-licensed:
 
-1. **AGPL-3.0** (see [`LICENSE`](./LICENSE)) - free and open source. If you build
+1. **AGPL-3.0** (see [`LICENSE`](../LICENSE)) - free and open source. If you build
    on ax and run it as a network service or ship it inside your product, the
    AGPL requires you to release the complete corresponding source of your work
    under the AGPL too.
