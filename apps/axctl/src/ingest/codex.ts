@@ -1,27 +1,19 @@
-import { Effect, FileSystem, Option, Path, PlatformError, Schema, Stream } from "effect";
+import { Effect, FileSystem, Path, PlatformError, Schema, Stream } from "effect";
 import { RecordId, SurrealClient, filePointer } from "@ax/lib/db";
 import { AxConfig } from "@ax/lib/config";
 import { decodeJsonOrNull } from "@ax/lib/decode";
-import { skillRecordKey } from "@ax/lib/skill-id";
 import { recordRef, surrealDate, surrealJsonOption, surrealObject, surrealOptionInt, surrealOptionString, surrealString } from "@ax/lib/shared/surql";
 import { AppLayer } from "@ax/lib/layers";
 import { BaseStageStats, IngestContext, sinceDaysFromCtx, StageMeta } from "./stage/types.ts";
 import { annotateStageProgress } from "./stage/runner.ts";
 import type { StageDef } from "./stage/registry.ts";
 import {
-    buildPlanSnapshotStatements,
-    buildRelateToolCallSkillStatements,
-    buildToolFileEvidenceStatements,
-    buildToolCallStatements,
     type PlanSnapshotWrite,
     type ToolCallSkillRelationWrite,
     type ToolCallWrite,
 } from "./evidence-writers.ts";
 import {
-    buildAgentEventParentEdgeStatement,
     agentEventRecordKey,
-    buildAgentEventStatements,
-    buildAgentProviderStatements,
     type AgentEventParentEdgeWrite,
     type AgentEventWrite,
 } from "./provider-events.ts";
@@ -31,7 +23,7 @@ import {
     parseCodexFunctionOutput,
     toolKindForName,
 } from "./tool-calls.ts";
-import { buildCompactionStatements, extractCodexCompaction, type CompactionWrite } from "./compaction.ts";
+import { extractCodexCompaction, type CompactionWrite } from "./compaction.ts";
 import { classifyTurnIntent } from "./intent-kind.ts";
 import { providerDelegationSignalAvailability } from "./delegation.ts";
 import {
@@ -39,14 +31,19 @@ import {
     providerPlanSignalAvailability,
     toPlanSnapshotWrite,
 } from "./plans.ts";
-import { invokedRelationRecordKey, toolCallRecordKey, turnRecordKey } from "./record-keys.ts";
+import { toolCallRecordKey, turnRecordKey } from "./record-keys.ts";
 import { extractToolFileEvidence } from "./tool-file-evidence.ts";
+import {
+    buildNormalizedTranscriptStatements,
+    type NormalizedTranscriptBatch,
+} from "./normalized/transcripts.ts";
 import { decodeCodexTranscriptLine } from "./line-schemas.ts";
 import { executeStatements } from "@ax/lib/shared/statement-exec";
 import { isNotFound, skipNotFound } from "@ax/lib/shared/fs-error";
 import { safeKeyPart } from "@ax/lib/shared/derive-keys";
 import { tokenQualityLabels } from "./token-quality.ts";
 import { estimateCost } from "./model-pricing.ts";
+import { walkJsonlFilesStrict } from "./walk-jsonl.ts";
 
 const DEFAULT_CODEX_RAW_MAX_BYTES = 5 * 1024 * 1024;
 const DEFAULT_CODEX_PROGRESS_EVERY = 10;
@@ -454,60 +451,6 @@ function applyToolResult(call: MutableToolCallWrite, result: ToolResultFields): 
     call.durationMs = result.durationMs;
     call.hasError = result.hasError;
 }
-
-interface CodexFileCandidate {
-    path: string;
-    sizeBytes: number;
-}
-
-/**
- * Recursively enumerate `*.jsonl` session files under `root` via the Effect
- * `FileSystem`. The codex sessions dir is nested (year/month/day), so we walk
- * directories depth-first. Resilience matches the prior node-fs walk:
- *   - a `readDirectory` on a vanished/missing dir (NotFound) yields `[]` → skip,
- *   - each entry is `stat`-ed; a vanished entry (NotFound) is skipped,
- *   - `.type === "Directory"` recurses, a `.jsonl` File is collected.
- * Non-NotFound `PlatformError`s (BadResource/PermissionDenied/...) re-raise so a
- * genuine FS fault is a defect, not a silently-dropped half-walk.
- *
- * `File.Info.mtime` is `Option<Date>` (epoch 0 fallback so a missing mtime is
- * never `--since`-skipped); `.size` is a branded bigint coerced to `number`.
- */
-const walkJsonlFiles = (
-    root: string,
-    cutoffMs: number,
-): Effect.Effect<CodexFileCandidate[], PlatformError.PlatformError, FileSystem.FileSystem | Path.Path> =>
-    Effect.gen(function* () {
-        const fs = yield* FileSystem.FileSystem;
-        const path = yield* Path.Path;
-        const out: CodexFileCandidate[] = [];
-
-        const visit = (dir: string): Effect.Effect<void, PlatformError.PlatformError> =>
-            Effect.gen(function* () {
-                const entries = yield* fs.readDirectory(dir).pipe(
-                    skipNotFound([] as string[]),
-                );
-                for (const entry of entries) {
-                    const full = path.join(dir, entry);
-                    const info = yield* fs.stat(full).pipe(
-                        Effect.asSome,
-                        skipNotFound(Option.none()),
-                    );
-                    if (Option.isNone(info)) continue;
-                    const stats = info.value;
-                    if (stats.type === "Directory") {
-                        yield* visit(full);
-                    } else if (stats.type === "File" && full.endsWith(".jsonl")) {
-                        const mtimeMs = Option.getOrElse(stats.mtime, () => new Date(0)).getTime();
-                        if (cutoffMs > 0 && mtimeMs < cutoffMs) continue;
-                        out.push({ path: full, sizeBytes: Number(stats.size) });
-                    }
-                }
-            });
-
-        yield* visit(root);
-        return out;
-    });
 
 export interface CodexExtract {
     session: CodexSession;
@@ -1257,87 +1200,7 @@ export const __testStreamCodexFileGuarded = (
         );
     });
 
-const buildTurnStatements = (turns: readonly CodexTurn[]): string[] =>
-    turns.map(
-        (t) =>
-            `UPSERT turn:\`${turnRecordKey(t.session, t.seq)}\` CONTENT { session: session:\`${t.session}\`, seq: ${t.seq}, ts: d"${t.ts}", role: ${surrealString(t.role)}, message_kind: ${surrealString(t.message_kind)}, intent_kind: ${surrealString(t.intent_kind)}, text: ${t.text === null ? "NONE" : surrealString(t.text)}, text_excerpt: ${t.text_excerpt === null ? "NONE" : surrealString(t.text_excerpt)}, has_tool_use: ${t.has_tool_use}, has_error: false };`,
-    );
-
-const buildSyntheticSkillAndInvocationStatements = (
-    invocations: readonly CodexInvocation[],
-): string[] => {
-    if (invocations.length === 0) return [];
-    const codexTools = new Set(invocations.map((i) => i.skill));
-    const skillStmts = [...codexTools].map(
-        (name) =>
-            `UPSERT skill:\`${skillRecordKey(name)}\` MERGE { name: ${surrealString(name)}, scope: "codex-tool", dir_path: "(synthetic)", content_hash: "codex" };`,
-    );
-
-    const invStmts = invocations.flatMap((inv) => {
-        const turnKey = turnRecordKey(inv.session, inv.seq);
-        const skillKey = skillRecordKey(inv.skill);
-        const args = JSON.stringify(inv.args);
-        const edgeKey = invokedRelationRecordKey({ turnKey, skillKey, args });
-        return [
-            `RELATE turn:\`${turnKey}\`->invoked:\`${edgeKey}\`->skill:\`${skillKey}\` SET session = ${recordRef("session", inv.session)}, ts = d"${inv.ts}", args = ${surrealString(args)}, turn_has_error = false, turn_index = ${inv.seq};`,
-        ];
-    });
-    return [...skillStmts, ...invStmts];
-};
-
 export const __testCompactCodexToolCall = compactCodexToolCall;
-
-const buildCodexProviderStatements = (
-    batch: MutableCodexExtract,
-    clearExisting: boolean,
-): string[] => {
-    if (!batch.session) return [];
-    return [
-        ...buildAgentProviderStatements([
-            {
-                name: "codex",
-                displayName: "Codex",
-                version: batch.session.cli_version,
-                capabilities: {
-                    transcripts: true,
-                    toolCalls: true,
-                    planSignals: providerPlanSignalAvailability.codex,
-                    delegationSignals: providerDelegationSignalAvailability.codex,
-                },
-            },
-        ]),
-        ...buildAgentEventStatements({
-            sessions: [
-                {
-                    provider: "codex",
-                    providerSessionId: batch.session.id,
-                    axSessionId: batch.session.id,
-                    cwd: batch.session.cwd,
-                    project: batch.session.cwd,
-                    model: concreteCodexModel(batch.session),
-                    sourcePath: batch.sourcePath,
-                    raw: {
-                        source: "codex_transcript",
-                        cliVersion: batch.session.cli_version,
-                        modelProvider: batch.session.model_provider,
-                        model: batch.session.model,
-                    },
-                    labels: {
-                        source: "transcript",
-                    },
-                    metrics: {
-                        turns: batch.turns.length,
-                        toolCalls: batch.toolCalls.length,
-                        providerEvents: batch.providerEvents.length,
-                    },
-                    startedAt: batch.session.started_at,
-                    endedAt: batch.session.ended_at,
-                },
-            ],
-            events: batch.providerEvents,
-        }, { clearExisting }),
-    ];
-};
 
 const buildCodexTokenUsageStatements = (usage: CodexTokenUsage | null): string[] => {
     if (!usage) return [];
@@ -1425,30 +1288,94 @@ const buildCodexTurnTokenUsageStatements = (
         ])};`;
     });
 
+const toCodexNormalizedBatch = (
+    batch: MutableCodexExtract,
+    payloadMaxBytes: number,
+): NormalizedTranscriptBatch => ({
+    providers: batch.session
+        ? [{
+            name: "codex",
+            displayName: "Codex",
+            version: batch.session.cli_version,
+            capabilities: {
+                transcripts: true,
+                toolCalls: true,
+                planSignals: providerPlanSignalAvailability.codex,
+                delegationSignals: providerDelegationSignalAvailability.codex,
+            },
+        }]
+        : [],
+    sessions: batch.session
+        ? [{
+            id: batch.session.id,
+            provider: "codex",
+            providerSessionId: batch.session.id,
+            cwd: batch.session.cwd,
+            project: batch.session.cwd,
+            model: concreteCodexModel(batch.session),
+            sourcePath: batch.sourcePath,
+            raw: {
+                source: "codex_transcript",
+                cliVersion: batch.session.cli_version,
+                modelProvider: batch.session.model_provider,
+                model: batch.session.model,
+            },
+            labels: { source: "transcript" },
+            metrics: {
+                turns: batch.turns.length,
+                toolCalls: batch.toolCalls.length,
+                providerEvents: batch.providerEvents.length,
+            },
+            startedAt: batch.session.started_at,
+            endedAt: batch.session.ended_at,
+        }]
+        : [],
+    // Without a session header, NO provider/session/event statements are
+    // emitted; token and evidence statements can still be flushed.
+    events: batch.session ? batch.providerEvents : [],
+    turns: batch.turns.map((turn) => ({
+        sessionId: turn.session,
+        seq: turn.seq,
+        ts: turn.ts,
+        role: turn.role,
+        messageKind: turn.message_kind,
+        intentKind: turn.intent_kind,
+        text: turn.text,
+        textExcerpt: turn.text_excerpt,
+        hasToolUse: turn.has_tool_use,
+        hasError: false,
+        agentEvent: null,
+    })),
+    // Payload compaction applies ONLY to the persisted tool_call rows...
+    toolCalls: batch.toolCalls.map((call) => compactCodexToolCall(call, payloadMaxBytes)),
+    // ...while file evidence is extracted from the UNcompacted calls.
+    toolFileEvidence: extractToolFileEvidence(batch.toolCalls),
+    agentEventParentEdges: batch.parentEdges,
+    syntheticSkillInvocations: batch.invocations.map((invocation) => ({
+        sessionId: invocation.session,
+        seq: invocation.seq,
+        ts: invocation.ts,
+        skillName: invocation.skill,
+        args: invocation.args,
+        skillScope: "codex-tool",
+        skillContentHash: "codex",
+    })),
+    toolCallSkillRelations: batch.skillRelations,
+    planSnapshots: batch.planSnapshots,
+    compactions: batch.compactions ?? [],
+});
+
 const buildCodexBatchStatements = (
     batch: MutableCodexExtract,
     payloadMaxBytes: number,
     clearExisting = true,
 ): string[] => [
-    ...buildCodexProviderStatements(batch, clearExisting),
+    ...buildNormalizedTranscriptStatements(
+        toCodexNormalizedBatch(batch, payloadMaxBytes),
+        { clearExisting },
+    ),
     ...buildCodexTokenUsageStatements(batch.tokenUsage),
-    ...buildTurnStatements(batch.turns),
     ...buildCodexTurnTokenUsageStatements(batch.turnTokenUsages),
-    ...buildToolCallStatements(batch.toolCalls.map((call) =>
-        compactCodexToolCall(call, payloadMaxBytes),
-    )),
-    ...buildToolFileEvidenceStatements(extractToolFileEvidence(batch.toolCalls)),
-    ...batch.parentEdges.map((edge) =>
-        buildAgentEventParentEdgeStatement(edge),
-    ),
-    ...buildSyntheticSkillAndInvocationStatements(batch.invocations),
-    ...batch.skillRelations.flatMap((relation) =>
-        buildRelateToolCallSkillStatements(relation),
-    ),
-    ...batch.planSnapshots.flatMap((snapshot) =>
-        buildPlanSnapshotStatements(snapshot),
-    ),
-    ...buildCompactionStatements(batch.compactions ?? []),
 ];
 
 export const __testBuildCodexBatchStatements = buildCodexBatchStatements;
@@ -1485,7 +1412,7 @@ export const ingestCodex = Effect.fn("codex.ingest")(
         const db = yield* SurrealClient;
         const fs = yield* FileSystem.FileSystem;
         const cutoff = opts.sinceDays ? Date.now() - opts.sinceDays * 86400 * 1000 : 0;
-        const files = yield* walkJsonlFiles(cfg.paths.codexDir, cutoff);
+        const files = yield* walkJsonlFilesStrict(cfg.paths.codexDir, cutoff);
         // `--dry-run` calibration: cap to a small representative slice so we can
         // time real parse+write throughput without processing everything.
         if (typeof opts.limit === "number" && files.length > opts.limit) {

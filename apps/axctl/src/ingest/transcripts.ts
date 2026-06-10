@@ -19,8 +19,6 @@ import {
 } from "./evidence-writers.ts";
 import {
     agentEventRecordKey,
-    buildAgentEventStatements,
-    buildAgentProviderStatements,
     type AgentEventWrite,
 } from "./provider-events.ts";
 import {
@@ -42,6 +40,12 @@ import {
     turnRecordKey,
 } from "./record-keys.ts";
 import { extractToolFileEvidence } from "./tool-file-evidence.ts";
+import {
+    buildNormalizedTranscriptStatements,
+    buildNormalizedTurnStatements,
+    type NormalizedTranscriptBatch,
+    type NormalizedTurnWrite,
+} from "./normalized/transcripts.ts";
 import { decodeClaudeTranscriptLine } from "./line-schemas.ts";
 
 import { selectByIds } from "@ax/lib/shared/record-select";
@@ -60,7 +64,6 @@ import {
 import { safeKeyPart } from "@ax/lib/shared/derive-keys";
 import { estimateCost, normalizeModelName } from "./model-pricing.ts";
 import {
-    buildCompactionStatements,
     extractClaudeCompaction,
     type CompactionWrite,
 } from "./compaction.ts";
@@ -1240,21 +1243,32 @@ const snapshotTranscript = (sessionId: string, filePath: string) =>
         return result;
     });
 
+// Claude turn rows are NEVER agent_event-linked (the transcript
+// extractor keys provider events by tool/turn uuid, not by turn seq), so the
+// adapter passes `agentEvent: null` and the normalized turn builder OMITS the
+// `agent_event` key entirely (plan ledger delta D2).
+const toNormalizedClaudeTurn = (turn: Turn): NormalizedTurnWrite => ({
+    sessionId: turn.session,
+    seq: turn.seq,
+    ts: turn.ts,
+    role: turn.role,
+    messageKind: turn.message_kind,
+    intentKind: turn.intent_kind,
+    text: turn.text,
+    textExcerpt: turn.text_excerpt,
+    hasToolUse: turn.has_tool_use,
+    hasError: turn.has_error,
+    agentEvent: null,
+});
+
 const upsertTurns = (turns: Turn[]) =>
     Effect.gen(function* () {
         if (turns.length === 0) return;
-        yield* queryTranscriptStatements(buildTurnStatements(turns), "upsertTurns");
+        yield* queryTranscriptStatements(
+            buildNormalizedTurnStatements(turns.map(toNormalizedClaudeTurn)),
+            "upsertTurns",
+        );
     });
-
-const buildTurnStatements = (turns: readonly Turn[]): string[] =>
-    turns.map(
-        (t) =>
-            `UPSERT turn:\`${turnRecordKey(t.session, t.seq)}\` CONTENT { session: session:\`${t.session}\`, seq: ${t.seq}, ts: d"${t.ts}", role: "${t.role}", message_kind: ${surrealLiteral(t.message_kind)}, intent_kind: ${surrealLiteral(t.intent_kind)}, text: ${
-                t.text === null ? "NONE" : surrealLiteral(t.text)
-            }, text_excerpt: ${
-                t.text_excerpt === null ? "NONE" : surrealLiteral(t.text_excerpt)
-            }, has_tool_use: ${t.has_tool_use}, has_error: ${t.has_error} };`,
-    );
 
 const escapeRecordKey = (key: string): string =>
     key
@@ -1371,9 +1385,6 @@ const writePlanSnapshots = (snapshots: PlanSnapshotWrite[]) =>
 const writeToolCallStatements = (toolCalls: readonly ToolCallWrite[]) =>
     queryTranscriptStatements(buildToolCallStatements(toolCalls), "toolCalls");
 
-const writeCompactions = (compactions: readonly CompactionWrite[]) =>
-    queryTranscriptStatements(buildCompactionStatements(compactions), "compactions");
-
 const writeHookEvidence = (
     events: readonly HarnessHookEventWrite[],
     invocations: readonly HookCommandInvocationWrite[],
@@ -1383,52 +1394,73 @@ const writeHookEvidence = (
         ...buildHookCommandInvocationStatements(invocations),
     ], "hookEvidence");
 
-const buildClaudeProviderStatements = (extracted: FileExtract): string[] => [
-    ...buildAgentProviderStatements([
-        {
-            name: "claude",
-            displayName: "Claude Code",
-            capabilities: {
-                transcripts: true,
-                toolCalls: true,
-                planSignals: providerPlanSignalAvailability.claude,
-                delegationSignals: providerDelegationSignalAvailability.claude,
-            },
+/**
+ * Adapter onto the parser-normalization seam: one FileExtract (= one claude
+ * transcript file = one session) becomes one NormalizedTranscriptBatch.
+ *
+ * Skill relations are passed in (not read off the extract) because
+ * `ingestTranscripts` resolves invoked skill names onto the real catalog
+ * first, so `concerns` edges land on the real skill row.
+ *
+ * Normalization invariants:
+ * - claude is single-shot per file (no streaming), so the default
+ *   `clearExisting: true` per-session agent_event clear yields one file, one
+ *   session, one batch, one clear.
+ * - REAL skill `invoked` edges stay in the effectful `relateInvocations`
+ *   (catalog lookup + placeholder pre-upsert); routing them through the
+ *   batch's synthetic-skill leg would MERGE synthetic scope/hash onto real
+ *   skill rows.
+ * - hook evidence and token usage are claude-specific extras written outside
+ *   the batch (see plan gap table 1.1).
+ * - `sourcePath` may be null on the test seam; the agent_session statement
+ *   serializes null and undefined identically (`source_path: NONE`).
+ */
+export const toClaudeNormalizedBatch = (
+    extracted: FileExtract,
+    skillRelations: readonly ToolCallSkillRelationWrite[],
+): NormalizedTranscriptBatch => ({
+    providers: [{
+        name: "claude",
+        displayName: "Claude Code",
+        capabilities: {
+            transcripts: true,
+            toolCalls: true,
+            planSignals: providerPlanSignalAvailability.claude,
+            delegationSignals: providerDelegationSignalAvailability.claude,
         },
-    ]),
-    ...buildAgentEventStatements({
-        sessions: [
-            {
-                provider: "claude",
-                providerSessionId: extracted.session.id,
-                axSessionId: extracted.session.id,
-                cwd: extracted.session.cwd,
-                project: extracted.session.project,
-                model: extracted.session.model,
-                sourcePath: extracted.sourcePath,
-                raw: {
-                    source: "claude_transcript",
-                    rawFile: extracted.session.raw_file,
-                },
-                labels: {
-                    source: "transcript",
-                    project: extracted.session.project,
-                },
-                metrics: {
-                    turns: extracted.turns.length,
-                    toolCalls: extracted.toolCalls.length,
-                    providerEvents: extracted.providerEvents.length,
-                },
-                startedAt: extracted.session.started_at,
-                endedAt: extracted.session.ended_at,
-            },
-        ],
-        events: extracted.providerEvents,
-    }),
-];
-
-const writeProviderEvidence = (extracted: FileExtract) =>
-    queryTranscriptStatements(buildClaudeProviderStatements(extracted), "providerEvidence");
+    }],
+    sessions: [{
+        id: extracted.session.id,
+        provider: "claude",
+        providerSessionId: extracted.session.id,
+        cwd: extracted.session.cwd,
+        project: extracted.session.project,
+        model: extracted.session.model,
+        sourcePath: extracted.sourcePath,
+        raw: {
+            source: "claude_transcript",
+            rawFile: extracted.session.raw_file,
+        },
+        labels: {
+            source: "transcript",
+            project: extracted.session.project,
+        },
+        metrics: {
+            turns: extracted.turns.length,
+            toolCalls: extracted.toolCalls.length,
+            providerEvents: extracted.providerEvents.length,
+        },
+        startedAt: extracted.session.started_at,
+        endedAt: extracted.session.ended_at,
+    }],
+    events: extracted.providerEvents,
+    turns: extracted.turns.map(toNormalizedClaudeTurn),
+    toolCalls: extracted.toolCalls,
+    toolFileEvidence: extractToolFileEvidence(extracted.toolCalls),
+    toolCallSkillRelations: skillRelations,
+    planSnapshots: extracted.planSnapshots,
+    compactions: extracted.compactions,
+});
 
 const surrealOptionFloat = (value: number | null | undefined): string =>
     value === null || value === undefined || !Number.isFinite(value)
@@ -1748,28 +1780,32 @@ export const ingestTranscripts = Effect.fn("transcripts.ingest")(
             yield* upsertSessions([extracted.session]);
             sessions += 1;
             yield* writeClaudeTokenUsage(extracted);
-            yield* upsertTurns(extracted.turns);
-            turnCount += extracted.turns.length;
-            yield* writeProviderEvidence(extracted);
-            yield* writeCompactions(extracted.compactions);
-            yield* writeToolCallStatements(extracted.toolCalls);
-            toolCallCount += extracted.toolCalls.length;
-            yield* writeToolFileEvidence(extracted.toolCalls);
             // Resolve invoked names onto the catalog before writing so the
             // `invoked` and `concerns` edges land on the real skill row.
             const resolvedInvocations = extracted.invocations.map((inv) => ({
                 ...inv,
                 skill: resolveSkillName(inv.skill, skillCatalog) ?? inv.skill,
             }));
-            yield* relateInvocations(resolvedInvocations);
-            invCount += resolvedInvocations.length;
             const resolvedSkillRelations = extracted.skillRelations.map((rel) => ({
                 ...rel,
                 skillName: resolveSkillName(rel.skillName, skillCatalog) ?? rel.skillName,
             }));
-            yield* relateToolCallSkills(resolvedSkillRelations);
-            yield* writePlanSnapshots(extracted.planSnapshots);
+            // Seven per-section writes collapsed into ONE normalized-batch
+            // write. transcripts.parity.test.ts keeps golden-shape coverage
+            // for the normalized provider/session/event/turn/tool/plan rows;
+            // token usage above and invoked-edges/hooks below stay separate
+            // per the gap analysis.
+            yield* queryTranscriptStatements(
+                buildNormalizedTranscriptStatements(
+                    toClaudeNormalizedBatch(extracted, resolvedSkillRelations),
+                ),
+                "normalizedBatch",
+            );
+            turnCount += extracted.turns.length;
+            toolCallCount += extracted.toolCalls.length;
             planSnapshotCount += extracted.planSnapshots.length;
+            yield* relateInvocations(resolvedInvocations);
+            invCount += resolvedInvocations.length;
             yield* writeHookEvidence(extracted.hookEvents, extracted.hookCommandInvocations);
             hookEventCount += extracted.hookEvents.length;
             hookCommandInvocationCount += extracted.hookCommandInvocations.length;

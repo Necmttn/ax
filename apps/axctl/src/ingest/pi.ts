@@ -1,6 +1,4 @@
-import { Effect, FileSystem, Option, Path, Schema } from "effect";
-import { orAbsent } from "@ax/lib/shared/fs-error";
-import { classifyNoFollow } from "@ax/lib/shared/fs-classify";
+import { Effect, FileSystem, Path, Schema } from "effect";
 import { AxConfig } from "@ax/lib/config";
 import { RecordId, SurrealClient } from "@ax/lib/db";
 import { decodeJsonOrNull } from "@ax/lib/decode";
@@ -15,26 +13,24 @@ import {
     surrealOptionString,
     surrealString,
 } from "@ax/lib/shared/surql";
-import { skillRecordKey } from "@ax/lib/skill-id";
 import {
-    buildRelateToolCallSkillStatements,
-    buildToolFileEvidenceStatements,
-    buildToolCallStatements,
     type ToolCallSkillRelationWrite,
     type ToolCallWrite,
 } from "./evidence-writers.ts";
-import { buildCompactionStatements, extractPiCompaction, type CompactionWrite } from "./compaction.ts";
+import { extractPiCompaction, type CompactionWrite } from "./compaction.ts";
+import { buildNormalizedTranscriptStatements, type NormalizedTranscriptBatch } from "./normalized/transcripts.ts";
 import { classifyTurnIntent } from "./intent-kind.ts";
 import { providerDelegationSignalAvailability } from "./delegation.ts";
-import { agentEventRecordKey, buildAgentEventStatements, buildAgentProviderStatements, type AgentEventWrite } from "./provider-events.ts";
+import { agentEventRecordKey, type AgentEventWrite } from "./provider-events.ts";
 import { providerPlanSignalAvailability } from "./plans.ts";
-import { invokedRelationRecordKey, toolCallRecordKey, turnRecordKey } from "./record-keys.ts";
+import { toolCallRecordKey, turnRecordKey } from "./record-keys.ts";
 import { BaseStageStats, IngestContext, sinceDaysFromCtx, StageMeta } from "./stage/types.ts";
 import type { StageDef } from "./stage/registry.ts";
 import { extractCommandTool, normalizeCommand, toolKindForName } from "./tool-calls.ts";
 import { extractToolFileEvidence } from "./tool-file-evidence.ts";
 import { decodePiTranscriptLine } from "./line-schemas.ts";
 import { tokenQualityLabels } from "./token-quality.ts";
+import { walkJsonlFilesLenient } from "./walk-jsonl.ts";
 
 export const PiKey = Schema.Literal("pi");
 export type PiKey = typeof PiKey.Type;
@@ -616,89 +612,6 @@ export function __testExtractPiJsonlLines(lines: Iterable<string>): PiExtract | 
     return extractor.finish();
 }
 
-interface PiFileCandidate {
-    path: string;
-}
-
-// OLD: readdir(withFileTypes) in try/catch → `return` (any error skips the
-// dir); classification via `entry.isDirectory()`/`entry.isFile()` (Dirent =>
-// lstat-equivalent, does NOT follow symlinks); then `stat(full)` in try/catch
-// → `continue` (any error skips the entry) ONLY for the mtime of a confirmed
-// regular file. We must preserve the no-follow classification: recurse only on
-// real directories, accept only real `.jsonl` files, and SKIP symlinks (a
-// symlinked dir is not recursed into → no escaping the tree / no cycle hang;
-// a symlinked `.jsonl` is not ingested). The mtime `fs.stat` then runs on a
-// confirmed non-symlink regular file, matching the old follow-free behavior.
-// `orAbsent` recovers every PlatformError to a fallback, matching the old
-// blanket try/catch and clearing the E channel back to `never`.
-const walkJsonlFiles = (
-    root: string,
-    cutoffMs: number,
-): Effect.Effect<PiFileCandidate[], never, FileSystem.FileSystem | Path.Path> =>
-    Effect.gen(function* () {
-        const fs = yield* FileSystem.FileSystem;
-        const path = yield* Path.Path;
-        const out: PiFileCandidate[] = [];
-
-        const visit = (
-            dir: string,
-        ): Effect.Effect<void, never, FileSystem.FileSystem | Path.Path> =>
-            Effect.gen(function* () {
-                const entries = yield* fs.readDirectory(dir).pipe(orAbsent([] as string[]));
-                for (const entry of entries) {
-                    const full = path.join(dir, entry);
-                    const kind = yield* classifyNoFollow(full);
-                    if (kind === "Directory") {
-                        yield* visit(full);
-                    } else if (kind === "File" && full.endsWith(".jsonl")) {
-                        const mtimeMs = yield* fs.stat(full).pipe(
-                            Effect.map((st) =>
-                                Option.getOrElse(st.mtime, () => new Date(0)).getTime()
-                            ),
-                            orAbsent(-1),
-                        );
-                        if (mtimeMs < 0) continue;
-                        if (cutoffMs > 0 && mtimeMs < cutoffMs) continue;
-                        out.push({ path: full });
-                    }
-                }
-            });
-
-        yield* visit(root);
-        return out;
-    });
-
-export const __testWalkJsonlFiles = walkJsonlFiles;
-
-const buildTurnStatements = (turns: readonly PiTurn[]): string[] =>
-    turns.map((turn) => {
-        const eventKey = agentEventRecordKey({
-            provider: "pi",
-            providerSessionId: turn.session,
-            providerEventId: turn.providerEventId,
-            seq: turn.providerEventSeq,
-        });
-        return `UPSERT turn:\`${turnRecordKey(turn.session, turn.seq)}\` CONTENT { session: ${recordRef("session", turn.session)}, agent_event: ${recordRef("agent_event", eventKey)}, seq: ${turn.seq}, ts: ${surrealDate(turn.ts)}, role: ${surrealString(turn.role)}, message_kind: ${surrealString(turn.message_kind)}, intent_kind: ${surrealString(turn.intent_kind)}, text: ${turn.text === null ? "NONE" : surrealString(turn.text)}, text_excerpt: ${turn.text_excerpt === null ? "NONE" : surrealString(turn.text_excerpt)}, has_tool_use: ${turn.has_tool_use}, has_error: ${turn.has_error} };`;
-    });
-
-const buildSyntheticSkillAndInvocationStatements = (
-    invocations: readonly PiInvocation[],
-): string[] => {
-    if (invocations.length === 0) return [];
-    const tools = new Set(invocations.map((invocation) => invocation.skill));
-    const skillStatements = [...tools].map((name) =>
-        `UPSERT skill:\`${skillRecordKey(name)}\` MERGE { name: ${surrealString(name)}, scope: "pi-tool", dir_path: "(synthetic)", content_hash: "pi" };`
-    );
-    const invocationStatements = invocations.map((invocation) => {
-        const turnKey = turnRecordKey(invocation.session, invocation.seq);
-        const skillKey = skillRecordKey(invocation.skill);
-        const args = JSON.stringify(invocation.args ?? {});
-        const edgeKey = invokedRelationRecordKey({ turnKey, skillKey, args });
-        return `RELATE turn:\`${turnKey}\`->invoked:\`${edgeKey}\`->skill:\`${skillKey}\` SET session = ${recordRef("session", invocation.session)}, ts = ${surrealDate(invocation.ts)}, args = ${surrealString(args)}, turn_has_error = false, turn_index = ${invocation.seq};`;
-    });
-    return [...skillStatements, ...invocationStatements];
-};
-
 const buildPiTokenUsageStatements = (extract: PiExtract): string[] => {
     if (!Object.values(extract.usage).some((value) => value > 0)) return [];
     const estimatedTokens = extract.usage.totalTokens > 0
@@ -732,58 +645,79 @@ const buildPiTokenUsageStatements = (extract: PiExtract): string[] => {
     ];
 };
 
-const buildPiBatchStatements = (extract: PiExtract): string[] => [
-    ...buildAgentProviderStatements([
-        {
-            name: "pi",
-            displayName: "Pi",
-            version: extract.session.version === null ? null : String(extract.session.version),
-            capabilities: {
-                transcripts: true,
-                providerGraph: true,
-                planSignals: providerPlanSignalAvailability.pi,
-                delegationSignals: providerDelegationSignalAvailability.pi,
-            },
+const toPiNormalizedBatch = (extract: PiExtract): NormalizedTranscriptBatch => ({
+    providers: [{
+        name: "pi",
+        displayName: "Pi",
+        version: extract.session.version === null ? null : String(extract.session.version),
+        capabilities: {
+            transcripts: true,
+            providerGraph: true,
+            planSignals: providerPlanSignalAvailability.pi,
+            delegationSignals: providerDelegationSignalAvailability.pi,
         },
-    ]),
-    ...buildAgentEventStatements({
-        sessions: [
-            {
-                provider: "pi",
-                providerSessionId: extract.session.id,
-                axSessionId: extract.session.id,
-                cwd: extract.session.cwd,
-                project: extract.session.cwd,
-                model: extract.session.model,
-                sourcePath: extract.sourcePath,
-                raw: {
-                    source: "pi_jsonl",
-                    sourcePath: extract.sourcePath,
-                    version: extract.session.version,
-                },
-                labels: {
-                    source: "pi",
-                },
-                metrics: {
-                    turns: extract.turns.length,
-                    toolCalls: extract.toolCalls.length,
-                    providerEvents: extract.providerEvents.length,
-                    usage: extract.usage,
-                },
-                startedAt: extract.session.started_at,
-                endedAt: extract.session.ended_at,
-            },
-        ],
-        events: extract.providerEvents,
-    }),
-    ...buildTurnStatements(extract.turns),
-    ...buildToolCallStatements(extract.toolCalls),
-    ...buildToolFileEvidenceStatements(extractToolFileEvidence(extract.toolCalls)),
-    ...buildSyntheticSkillAndInvocationStatements(extract.invocations),
-    ...extract.skillRelations.flatMap((relation) =>
-        buildRelateToolCallSkillStatements(relation),
-    ),
-    ...buildCompactionStatements(extract.compactions),
+    }],
+    sessions: [{
+        id: extract.session.id,
+        provider: "pi",
+        providerSessionId: extract.session.id,
+        cwd: extract.session.cwd,
+        project: extract.session.cwd,
+        model: extract.session.model,
+        sourcePath: extract.sourcePath,
+        raw: {
+            source: "pi_jsonl",
+            sourcePath: extract.sourcePath,
+            version: extract.session.version,
+        },
+        labels: { source: "pi" },
+        metrics: {
+            turns: extract.turns.length,
+            toolCalls: extract.toolCalls.length,
+            providerEvents: extract.providerEvents.length,
+            usage: extract.usage,
+        },
+        startedAt: extract.session.started_at,
+        endedAt: extract.session.ended_at,
+    }],
+    events: extract.providerEvents,
+    turns: extract.turns.map((turn) => ({
+        sessionId: turn.session,
+        seq: turn.seq,
+        ts: turn.ts,
+        role: turn.role,
+        messageKind: turn.message_kind,
+        intentKind: turn.intent_kind,
+        text: turn.text,
+        textExcerpt: turn.text_excerpt,
+        hasToolUse: turn.has_tool_use,
+        hasError: turn.has_error,
+        agentEvent: {
+            provider: "pi",
+            providerSessionId: turn.session,
+            providerEventId: turn.providerEventId,
+            seq: turn.providerEventSeq,
+        },
+    })),
+    toolCalls: extract.toolCalls,
+    toolFileEvidence: extractToolFileEvidence(extract.toolCalls),
+    // turnHasError/turnIndex omitted: seam defaults preserve
+    // `turn_has_error = false, turn_index = ${seq}`.
+    syntheticSkillInvocations: extract.invocations.map((invocation) => ({
+        sessionId: invocation.session,
+        seq: invocation.seq,
+        ts: invocation.ts,
+        skillName: invocation.skill,
+        args: invocation.args,
+        skillScope: "pi-tool",
+        skillContentHash: "pi",
+    })),
+    toolCallSkillRelations: extract.skillRelations,
+    compactions: extract.compactions,
+});
+
+const buildPiBatchStatements = (extract: PiExtract): string[] => [
+    ...buildNormalizedTranscriptStatements(toPiNormalizedBatch(extract)),
     ...buildPiTokenUsageStatements(extract),
 ];
 
@@ -799,7 +733,7 @@ export const ingestPi = Effect.fn("pi.ingest")(
         const db = yield* SurrealClient;
         const fs = yield* FileSystem.FileSystem;
         const cutoff = opts.sinceDays ? Date.now() - opts.sinceDays * 86400 * 1000 : 0;
-        const files = yield* walkJsonlFiles(cfg.paths.piDir, cutoff);
+        const files = yield* walkJsonlFilesLenient(cfg.paths.piDir, cutoff);
         let fileCount = 0;
         let sessionCount = 0;
         let eventCount = 0;

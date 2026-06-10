@@ -1,8 +1,13 @@
 import { describe, expect, it } from "bun:test";
+import { Effect, Layer } from "effect";
+import { SurrealClient, type SurrealClientShape } from "@ax/lib/db";
 import {
     buildNormalizedSyntheticSkillInvocationStatements,
     buildNormalizedTranscriptStatements,
     buildNormalizedTurnStatements,
+    writeNormalizedTranscriptBatch,
+    type BuildNormalizedTranscriptStatementsOptions,
+    type NormalizedTranscriptBatch,
 } from "./transcripts.ts";
 import { toolCallRecordKey, turnRecordKey } from "../record-keys.ts";
 
@@ -156,5 +161,96 @@ describe("normalized transcript persistence", () => {
         expect(sql).toContain("->searched_file:");
         expect(sql).toContain("->concerns:");
         expect(sql).toContain("kind = \"invoked_skill\"");
+    });
+
+    it("omits agent_event entirely when the turn has no provider event ref", () => {
+        const sql = buildNormalizedTurnStatements([{
+            sessionId: "s1",
+            seq: 1,
+            ts: "2026-06-10T00:00:00.000Z",
+            role: "assistant",
+            messageKind: "assistant",
+            intentKind: "other",
+            text: null,
+            textExcerpt: null,
+            hasToolUse: false,
+            hasError: false,
+            agentEvent: null,
+        }]).join("\n");
+        expect(sql).not.toContain("agent_event");
+        expect(sql).toContain("CONTENT { session: session:`s1`, seq: 1,");
+    });
+
+    it("emits invoked SET fields in legacy order: session, ts, args, turn_has_error, turn_index", () => {
+        const sql = buildNormalizedSyntheticSkillInvocationStatements([{
+            sessionId: "s1",
+            seq: 2,
+            ts: "2026-06-10T00:00:00.000Z",
+            skillName: "codex:exec_command",
+            args: { command: "ls" },
+            skillScope: "codex-tool",
+            skillContentHash: "codex",
+        }]).join("\n");
+        const setClause = sql.slice(sql.indexOf(" SET "));
+        expect(setClause.indexOf("session = ")).toBeLessThan(setClause.indexOf("ts = "));
+        expect(setClause.indexOf("ts = ")).toBeLessThan(setClause.indexOf("args = "));
+    });
+
+    it("appends parent edges, plan snapshots, and compactions and forwards clearExisting", () => {
+        const batch: NormalizedTranscriptBatch = {
+            sessions: [{ id: "s1", provider: "codex" }],
+            events: [{
+                provider: "codex", providerSessionId: "s1", providerEventId: "e1",
+                seq: 1, ts: "2026-06-10T00:00:00.000Z", type: "message", role: "user",
+            }],
+            turns: [],
+            agentEventParentEdges: [{
+                provider: "codex", providerSessionId: "s1",
+                parentEventKey: "codex__s1__event_e0", childEventKey: "codex__s1__event_e1",
+                kind: "parent", ts: "2026-06-10T00:00:00.000Z",
+            }],
+            compactions: [],
+            planSnapshots: [],
+        };
+        const cleared = buildNormalizedTranscriptStatements(batch).join("\n");
+        expect(cleared).toContain("DELETE (SELECT VALUE id FROM agent_event");
+        expect(cleared).toContain("->agent_event_child:");
+        const notCleared = buildNormalizedTranscriptStatements(batch, { clearExisting: false }).join("\n");
+        expect(notCleared).not.toContain("DELETE (SELECT VALUE id FROM agent_event WHERE");
+    });
+
+    it("threads statement options through writeNormalizedTranscriptBatch", async () => {
+        const batch: NormalizedTranscriptBatch = {
+            sessions: [{ id: "s1", provider: "codex" }],
+            events: [{
+                provider: "codex", providerSessionId: "s1", providerEventId: "e1",
+                seq: 1, ts: "2026-06-10T00:00:00.000Z", type: "message", role: "user",
+            }],
+            turns: [],
+        };
+        const run = async (options?: BuildNormalizedTranscriptStatementsOptions) => {
+            const captured: string[] = [];
+            const impl = {
+                query: <T extends unknown[] = unknown[]>(sql: string) => {
+                    captured.push(sql);
+                    return Effect.succeed([[]] as unknown as T);
+                },
+                upsert: () => Effect.void,
+                relate: () => Effect.void,
+                putFile: () => Effect.void,
+                getFile: () => Effect.succeed(""),
+                raw: {} as never,
+            } as SurrealClientShape;
+            await Effect.runPromise(
+                writeNormalizedTranscriptBatch(batch, options).pipe(
+                    Effect.provide(Layer.succeed(SurrealClient, impl)),
+                ),
+            );
+            return captured.join("\n");
+        };
+
+        expect(await run()).toContain("DELETE (SELECT VALUE id FROM agent_event");
+        expect(await run({ clearExisting: false }))
+            .not.toContain("DELETE (SELECT VALUE id FROM agent_event");
     });
 });
