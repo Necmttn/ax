@@ -63,7 +63,7 @@ const stage = (key: string, deps: string[] = []): StageDef => ({
  * emits TraceEnd{status:error} → mapped to run_finished{failed} by the transport. */
 const failingStage = (key: string, deps: string[] = []): StageDef => ({
     meta: StageMeta.make({ key, deps, tags: ["ingest"] }),
-    run: () => Effect.fail(new DbError({ operation: "stage", message: `${key} blew up` })),
+    run: () => Effect.fail(new DbError({ operation: "query", message: `${key} blew up` })),
 });
 
 const baseServices = (dbLayer: Layer.Layer<SurrealClient>, registry: Layer.Layer<StageRegistry>) => {

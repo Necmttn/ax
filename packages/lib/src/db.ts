@@ -327,7 +327,7 @@ const wrap = (db: Surreal, queryLog?: QueryLogState): SurrealClientShape => ({
                     message: errorMessage(err),
                     sql: `${bucket}:/${path}`,
                 }),
-        }),
+        }).pipe(Effect.retry(transactionConflictRetry)),
 
     raw: db,
 });

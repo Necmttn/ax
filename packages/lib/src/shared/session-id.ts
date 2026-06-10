@@ -25,6 +25,14 @@
  * patterns scattered across the dashboard server modules.
  */
 
+import { SessionId as BareSessionId } from "../brands.ts";
+
+/** Wire alias, NOT yet the brand: dashboard DTOs (`shared/dashboard-types.ts`)
+ *  are populated straight from DB rows, so flipping this alias to the branded
+ *  type would force `.make` calls through every mapper. The brand is adopted
+ *  producer-first: `toBareSessionId` returns the branded form (assignable to
+ *  this alias), and params tighten once all producers brand - see
+ *  `@ax/lib/brands` for the expansion path. */
 export type SessionId = string;
 
 /** Pure alphanumeric + underscore is the only charset SurrealDB accepts for
@@ -36,14 +44,14 @@ const UNQUOTED_RID_RE = /^[A-Za-z0-9_]+$/;
  *  Handles `` session:`uuid` ``, `session:⟨uuid⟩`, `session:uuid`, and bare
  *  `uuid`. Idempotent: bare ids pass through unchanged. Whitespace is trimmed.
  *  Server-side use - call before emitting any session id over HTTP. */
-export const toBareSessionId = (input: string): SessionId => {
+export const toBareSessionId = (input: string): BareSessionId => {
     let s = input.trim();
     if (s.startsWith("session:")) s = s.slice("session:".length);
     // Strip a single layer of backtick or ⟨⟩ wrappers. SurrealDB never nests,
     // but the leading/trailing pair can be either char depending on the
     // surface (raw record id strings vs <string> casts).
     s = s.replace(/^[`⟨]+/, "").replace(/[`⟩]+$/, "");
-    return s;
+    return BareSessionId.make(s);
 };
 
 /** Wrap a bare SessionId in SurrealDB record-id syntax so it can be embedded

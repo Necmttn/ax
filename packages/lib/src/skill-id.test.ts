@@ -1,5 +1,10 @@
 import { describe, expect, test } from "bun:test";
+import { SkillName } from "./brands.ts";
 import { resolveSkillName } from "./skill-id.ts";
+
+// resolveSkillName returns the branded SkillName (see @ax/lib/brands), so
+// expected literals are wrapped in SkillName.make to satisfy toBe's typing.
+const name = (s: string) => SkillName.make(s);
 
 describe("resolveSkillName", () => {
     const catalog = new Set<string>([
@@ -12,29 +17,29 @@ describe("resolveSkillName", () => {
     ]);
 
     test("exact catalog name resolves to itself", () => {
-        expect(resolveSkillName("tdd", catalog)).toBe("tdd");
-        expect(resolveSkillName("codex:rescue", catalog)).toBe("codex:rescue");
-        expect(resolveSkillName("gsd:plan-phase", catalog)).toBe("gsd:plan-phase");
+        expect(resolveSkillName("tdd", catalog)).toBe(name("tdd"));
+        expect(resolveSkillName("codex:rescue", catalog)).toBe(name("codex:rescue"));
+        expect(resolveSkillName("gsd:plan-phase", catalog)).toBe(name("gsd:plan-phase"));
     });
 
     test("bare name resolves to its plugin-namespaced row", () => {
         expect(resolveSkillName("subagent-driven-development", catalog)).toBe(
-            "superpowers:subagent-driven-development",
+            name("superpowers:subagent-driven-development"),
         );
         expect(resolveSkillName("systematic-debugging", catalog)).toBe(
-            "superpowers:systematic-debugging",
+            name("superpowers:systematic-debugging"),
         );
-        expect(resolveSkillName("caveman", catalog)).toBe("caveman:caveman");
+        expect(resolveSkillName("caveman", catalog)).toBe(name("caveman:caveman"));
     });
 
     test("slash-command hyphen form folds to the namespaced row", () => {
         // `codex-rescue` -> `codex:rescue`
-        expect(resolveSkillName("codex-rescue", catalog)).toBe("codex:rescue");
+        expect(resolveSkillName("codex-rescue", catalog)).toBe(name("codex:rescue"));
     });
 
     test("double-prefixed form resolves through the colon segment", () => {
         // `codex:codex-rescue` -> segment `codex-rescue` -> `codex:rescue`
-        expect(resolveSkillName("codex:codex-rescue", catalog)).toBe("codex:rescue");
+        expect(resolveSkillName("codex:codex-rescue", catalog)).toBe(name("codex:rescue"));
     });
 
     test("genuinely unknown skill stays unresolved", () => {
@@ -49,6 +54,6 @@ describe("resolveSkillName", () => {
 
     test("exact match wins over a suffix match", () => {
         const both = new Set<string>(["loop", "plugin:loop"]);
-        expect(resolveSkillName("loop", both)).toBe("loop");
+        expect(resolveSkillName("loop", both)).toBe(name("loop"));
     });
 });
