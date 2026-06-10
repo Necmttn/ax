@@ -330,46 +330,35 @@ describe("insights query builders", () => {
         expect(sql).toContain("ORDER BY ts DESC");
     });
 
-    test("classifierFactsSql joins facts to user turn, prior assistant, and tool failures", () => {
+    // The per-row context (previous assistant / failures / later activity) is
+    // resolved post-query by enrichInsightRows with literal session ids; the
+    // view SQL itself must stay free of correlated $parent.* subqueries.
+    test("classifierFactsSql selects classifier rows without correlated context subqueries", () => {
         const sql = classifierFactsSql(10);
 
         expect(sql).toContain("FROM classifier_result");
         expect(sql).toContain("turn.text_excerpt AS user_text");
-        expect(sql).toContain("AS previous_assistant");
-        expect(sql).toContain('role = "assistant"');
-        expect(sql).toContain("seq < $parent.turn.seq");
-        expect(sql).toContain("FROM tool_call");
-        expect(sql).toContain("has_error = true");
-        expect(sql).toContain("AS recent_tool_failures");
         expect(sql).toContain("WHERE turn IS NOT NONE");
         expect(sql).toContain("ORDER BY ts DESC");
+        expect(sql).not.toContain("$parent");
     });
 
-    test("correctionContextsSql focuses correction facts with causal context", () => {
+    test("correctionContextsSql focuses correction facts without correlated subqueries", () => {
         const sql = correctionContextsSql(10);
 
         expect(sql).toContain("FROM classifier_result");
         expect(sql).toContain('classifier_key = "correction-event" OR label = "correction"');
         expect(sql).toContain("turn.text_excerpt AS user_text");
-        expect(sql).toContain("AS previous_assistant");
-        expect(sql).toContain("FROM tool_call");
-        expect(sql).toContain("has_error = true");
-        expect(sql).toContain("LIMIT 5");
+        expect(sql).not.toContain("$parent");
     });
 
-    test("classifierOutcomesSql connects facts to later tools, outcomes, and user turns", () => {
+    test("classifierOutcomesSql selects classifier rows without correlated subqueries", () => {
         const sql = classifierOutcomesSql(10);
 
         expect(sql).toContain("FROM classifier_result");
         expect(sql).toContain("turn.text_excerpt AS user_text");
-        expect(sql).toContain("AS later_tool_calls");
-        expect(sql).toContain("FROM tool_call");
-        expect(sql).toContain("ts > $parent.ts");
-        expect(sql).toContain("AS later_command_outcomes");
-        expect(sql).toContain("FROM command_outcome");
-        expect(sql).toContain("AS later_user_turns");
-        expect(sql).toContain('role = "user"');
-        expect(sql).toContain("seq > $parent.turn.seq");
+        expect(sql).toContain("WHERE turn IS NOT NONE");
+        expect(sql).not.toContain("$parent");
     });
 
     test("harnessCandidatesSql groups repeated facts into suggested harness actions", () => {

@@ -617,6 +617,12 @@ ORDER BY ts DESC
 LIMIT ${safeLimit};`.trim();
 }
 
+// NOTE (classifier-facts / correction-contexts / classifier-outcomes): the
+// per-row context (previous assistant turn, recent failures, later activity)
+// is resolved AFTER this query by `enrichInsightRows` (insights-enrich.ts)
+// using literal session ids. The correlated `$parent.session` subqueries that
+// used to live here could not use index lookups (SurrealDB v3), so each row
+// cost ~1s of partial scans (~20-38s per view at LIMIT 20).
 export function classifierFactsSql(limit: number): string {
     const safeLimit = checkedLimit(limit);
     return `
@@ -639,34 +645,7 @@ SELECT
     session.cwd AS cwd,
     evidence_json,
     signals,
-    ts,
-    (
-        SELECT
-            id,
-            seq,
-            text_excerpt AS text
-        FROM turn
-        WHERE session = $parent.session
-          AND role = "assistant"
-          AND seq < $parent.turn.seq
-        ORDER BY seq DESC
-        LIMIT 1
-    )[0] AS previous_assistant,
-    (
-        SELECT
-            id,
-            name,
-            command_norm,
-            error_text,
-            output_excerpt,
-            ts
-        FROM tool_call
-        WHERE session = $parent.session
-          AND has_error = true
-          AND ts <= $parent.ts
-        ORDER BY ts DESC
-        LIMIT 3
-    ) AS recent_tool_failures
+    ts
 FROM classifier_result
 WHERE turn IS NOT NONE
 ORDER BY ts DESC
@@ -693,34 +672,7 @@ SELECT
     session.cwd AS cwd,
     evidence_json,
     signals,
-    ts,
-    (
-        SELECT
-            id,
-            seq,
-            text_excerpt AS text
-        FROM turn
-        WHERE session = $parent.session
-          AND role = "assistant"
-          AND seq < $parent.turn.seq
-        ORDER BY seq DESC
-        LIMIT 1
-    )[0] AS previous_assistant,
-    (
-        SELECT
-            id,
-            name,
-            command_norm,
-            error_text,
-            output_excerpt,
-            ts
-        FROM tool_call
-        WHERE session = $parent.session
-          AND has_error = true
-          AND ts <= $parent.ts
-        ORDER BY ts DESC
-        LIMIT 5
-    ) AS recent_tool_failures
+    ts
 FROM classifier_result
 WHERE classifier_key = "correction-event" OR label = "correction"
 ORDER BY ts DESC
@@ -745,54 +697,7 @@ SELECT
     session,
     session.project AS project,
     session.cwd AS cwd,
-    ts,
-    (
-        SELECT
-            id,
-            name,
-            command_norm,
-            has_error,
-            status,
-            exit_code,
-            output_excerpt,
-            error_text,
-            ts
-        FROM tool_call
-        WHERE session = $parent.session
-          AND ts > $parent.ts
-        ORDER BY ts ASC
-        LIMIT 5
-    ) AS later_tool_calls,
-    (
-        SELECT
-            id,
-            kind,
-            status,
-            command_norm,
-            command_tool,
-            text,
-            tool_call,
-            ts
-        FROM command_outcome
-        WHERE session = $parent.session
-          AND ts > $parent.ts
-        ORDER BY ts ASC
-        LIMIT 5
-    ) AS later_command_outcomes,
-    (
-        SELECT
-            id,
-            seq,
-            role,
-            text_excerpt AS text,
-            ts
-        FROM turn
-        WHERE session = $parent.session
-          AND role = "user"
-          AND seq > $parent.turn.seq
-        ORDER BY seq ASC
-        LIMIT 3
-    ) AS later_user_turns
+    ts
 FROM classifier_result
 WHERE turn IS NOT NONE
 ORDER BY ts DESC

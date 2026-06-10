@@ -81,6 +81,7 @@ import { ingestClaudeInsights } from "../ingest/claude-insights.ts";
 import { deriveSignals } from "../ingest/derive-signals.ts";
 import { deriveTurnIntents } from "../ingest/derive-intents.ts";
 import { INSIGHT_VIEWS, insightSqlForView, isInsightView } from "../queries/insights.ts";
+import { enrichInsightRows } from "../queries/insights-enrich.ts";
 import { extractSessionTimeline, SessionTimelineServiceLayer } from "../timeline/service.ts";
 import { formatInsightRows } from "./insights-format.ts";
 import { writeDashboard } from "../dashboard/report.ts";
@@ -606,7 +607,10 @@ const cmdInsights = (args: string[]) =>
         const result = yield* db.query<[Array<Record<string, unknown>>]>(
             insightSqlForView(rawView, limit),
         );
-        console.log(formatInsightRows(rawView, result?.[0] ?? [], { json }));
+        // Classifier views resolve their per-row context here via indexed
+        // lookups (the correlated $parent.session form scanned ~1s/row).
+        const rows = yield* enrichInsightRows(rawView, result?.[0] ?? []);
+        console.log(formatInsightRows(rawView, [...rows], { json }));
     });
 
 const cmdReport = (args: string[]) =>
