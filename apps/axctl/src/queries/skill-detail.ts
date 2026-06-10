@@ -5,6 +5,17 @@
  *
  * Bindings: $name (skill name).
  */
+import { Effect } from "effect";
+import { SurrealClient } from "@ax/lib/db";
+import type { DbError } from "@ax/lib/errors";
+import { dateField, numericField, stringField } from "@ax/lib/shared/row-fields";
+import type {
+    SkillDetailPayload,
+    SkillPair,
+    SkillProposalEvidence,
+    SkillRecentInvocation,
+} from "@ax/lib/shared/dashboard-types";
+
 export const SKILL_DETAIL_SQL = `
 LET $s = (SELECT * FROM skill WHERE name = $name)[0];
 RETURN {
@@ -63,3 +74,85 @@ RETURN {
         LIMIT 5
     )
 };`;
+
+/** Empty-string fallback so mapper guards can test truthiness. */
+const tsField = (raw: Record<string, unknown>, key: string): string =>
+    dateField(raw, key) ?? "";
+
+export const mapSkillRecentRow = (raw: unknown): SkillRecentInvocation | null => {
+    if (!raw || typeof raw !== "object") return null;
+    const row = raw as Record<string, unknown>;
+    const ts = tsField(row, "ts");
+    if (!ts) return null;
+    return {
+        ts,
+        project: stringField(row, "project"),
+        ...(typeof row.turn_has_error === "boolean"
+            ? { turn_has_error: row.turn_has_error }
+            : {}),
+    };
+};
+
+export const mapSkillPairRow = (raw: unknown): SkillPair | null => {
+    if (!raw || typeof raw !== "object") return null;
+    const row = raw as Record<string, unknown>;
+    const partner = stringField(row, "partner");
+    if (!partner) return null;
+    return {
+        partner,
+        count: numericField(row, "count"),
+        last_seen: dateField(row, "last_seen"),
+    };
+};
+
+export const mapSkillProposalRow = (raw: unknown): SkillProposalEvidence | null => {
+    if (!raw || typeof raw !== "object") return null;
+    const row = raw as Record<string, unknown>;
+    const ts = tsField(row, "ts");
+    if (!ts) return null;
+    return {
+        ts,
+        project: stringField(row, "project"),
+        context_excerpt: stringField(row, "context_excerpt"),
+    };
+};
+
+export const fetchSkillDetail = (
+    name: string,
+): Effect.Effect<SkillDetailPayload, DbError, SurrealClient> =>
+    Effect.gen(function* () {
+        const db = yield* SurrealClient;
+        const result = yield* db.query<unknown[]>(SKILL_DETAIL_SQL, { name });
+        // RETURN { ... } gives us [block] where block is the object.
+        const payload = Array.isArray(result)
+            ? ([...result].reverse().find((r) => r != null) as Record<string, unknown> | undefined)
+            : (result as Record<string, unknown> | undefined);
+        const skill = (payload?.skill ?? null) as Record<string, unknown> | null;
+        const invocations = (payload?.invocations ?? {}) as Record<string, unknown>;
+        const recent = Array.isArray(payload?.recent) ? payload.recent : [];
+        const corrections = Array.isArray(payload?.corrections) ? payload.corrections : [];
+        const proposals = Array.isArray(payload?.proposals) ? payload.proposals : [];
+        const paired = Array.isArray(payload?.paired) ? payload.paired : [];
+        return {
+            name,
+            scope: skill ? stringField(skill, "scope") : null,
+            description: skill ? stringField(skill, "description") : null,
+            dir_path: skill ? stringField(skill, "dir_path") : null,
+            invocations: {
+                total: numericField(invocations, "total"),
+                d7: numericField(invocations, "d7"),
+                d30: numericField(invocations, "d30"),
+                last: dateField(invocations, "last"),
+            },
+            recent: recent.map(mapSkillRecentRow).filter((r): r is SkillRecentInvocation => r !== null),
+            corrections: corrections
+                .map(mapSkillRecentRow)
+                .filter((r): r is SkillRecentInvocation => r !== null),
+            proposals: proposals
+                .map(mapSkillProposalRow)
+                .filter((r): r is SkillProposalEvidence => r !== null),
+            paired: paired
+                .map(mapSkillPairRow)
+                .filter((r): r is SkillPair => r !== null),
+        };
+    });
