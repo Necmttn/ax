@@ -167,18 +167,19 @@ export const onRequestGet: PagesFunction = async (ctx) => {
 
     const blocks: Record<string, string> = {
         header: `<div style="display:flex;justify-content:space-between;align-items:center"><div style="display:flex;align-items:baseline"><span style="font-size:32px;color:${INK};font-weight:700">ax</span><span style="font-size:14px;color:${DIM};margin-left:12px;letter-spacing:3px">AGENT EXPERIENCE</span></div><span style="font-size:17px;color:${DIM}">${esc([model, date].filter(Boolean).join(" · "))}</span></div>`,
-        title: `<div style="display:flex;font-size:33px;line-height:1.3;color:${INK};margin-top:26px;font-weight:600;max-width:1100px">${title}</div>`,
+        title: `<div style="display:flex;font-size:33px;line-height:1.3;color:${INK};margin-top:26px;font-weight:600">${title}</div>`,
         stats: `<div style="display:flex;margin-top:30px">${stats}</div>`,
         fleet: t.subagents > 0 ? `<div style="display:flex;flex-direction:column;align-items:flex-start;margin-top:30px"><div style="display:flex">${fleetHtml(manifest.subagents)}</div><span style="font-size:14px;letter-spacing:2px;color:${DIM};margin-top:10px">${t.subagents} SUBAGENTS · BRIGHTER = COSTLIER</span></div>` : "",
         costbar: `<div style="display:flex;margin-top:30px">${costBarHtml(manifest)}</div>`,
-        footer: `<div style="display:flex;flex:1"></div><div style="display:flex;justify-content:space-between"><span style="font-size:15px;letter-spacing:2px;color:${DIM}">EVERY TURN · EVERY TOOL CALL · EVERY DOLLAR</span><span style="font-size:15px;letter-spacing:2px;color:${INK}">RECORDED WITH AX · AX.NECMTTN.COM</span></div>`,
+        footer: `<div style="display:flex;justify-content:space-between;margin-top:24px"><span style="font-size:15px;letter-spacing:2px;color:${DIM}">EVERY TURN · EVERY TOOL CALL · EVERY DOLLAR</span><span style="font-size:15px;letter-spacing:2px;color:${INK}">RECORDED WITH AX · AX.NECMTTN.COM</span></div>`,
     };
     const probe = u.searchParams.get("probe");
-    const order = ["header", "title", "stats", "fleet", "costbar", "footer"];
-    const chosen = probe ? probe.split(",").filter((k) => k in blocks) : order;
-    // Layout: fleet sits beside stats on the full render; in probe mode blocks
-    // simply stack so each can be tested in isolation.
-    const inner = chosen.map((k) => blocks[k]).join("");
+    // Full layout: stats column left, fleet right, then the cost bar; probe
+    // mode stacks individual blocks so each can be tested in isolation.
+    const mid = `<div style="display:flex;flex:1;align-items:center;margin-top:10px"><div style="display:flex;flex:1">${stats}</div>${t.subagents > 0 ? blocks.fleet : ""}</div>`;
+    const inner = probe
+        ? probe.split(",").filter((k) => k in blocks).map((k) => blocks[k]).join("")
+        : `${blocks.header}${blocks.title}${mid}${blocks.costbar}${blocks.footer}`;
     const html = `<div style="display:flex;width:1200px;height:630px;background:${BG};padding:24px;font-family:'JetBrains Mono'"><div style="display:flex;flex-direction:column;flex:1;background:${CARD};border:2px solid ${LINE};border-radius:14px;padding:38px 46px">${inner}</div></div>`;
 
     const font = await fetch(
