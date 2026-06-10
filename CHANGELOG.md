@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.19.1](https://github.com/Necmttn/ax/compare/v0.19.0...v0.19.1) (2026-06-10)
+
+
+### Bug Fixes
+
+* **ingest:** unwedge ingest (quadratic clear DELETE) + OTLP profiling instrumentation ([#180](https://github.com/Necmttn/ax/issues/180)) ([f9bc433](https://github.com/Necmttn/ax/commit/f9bc433005d5d2af9401b914f88737718fa00c97))
+
 ## [0.19.0](https://github.com/Necmttn/ax/compare/v0.18.0...v0.19.0) (2026-06-10)
 
 
