@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.19.0](https://github.com/Necmttn/ax/compare/v0.18.0...v0.19.0) (2026-06-10)
+
+
+### Features
+
+* graph-derived session metrics (ax sessions metrics + ax signals) ([#166](https://github.com/Necmttn/ax/issues/166)) ([df701ad](https://github.com/Necmttn/ax/commit/df701ad490c74195035baca7e35ced166ef98204))
+* **studio:** show studio build version + daemon mismatch nag in live banner ([9b28786](https://github.com/Necmttn/ax/commit/9b28786605a0ec915f59f512b8ecfacac8306891))
+
+
+### Bug Fixes
+
+* **metrics:** anchor time-to-land on commit ts; fix stale sort description ([#169](https://github.com/Necmttn/ax/issues/169)) ([d7f77a6](https://github.com/Necmttn/ax/commit/d7f77a6cd2a631c03b53b94505b5967105efe289))
+* **sessions,ingest,share:** unhang session queries + single-flight ingest + share perf ([#167](https://github.com/Necmttn/ax/issues/167)) ([b66fb0b](https://github.com/Necmttn/ax/commit/b66fb0b7f692e18734824f639127bbb7e63fbbf2))
+* **site:** pass /studio/assets/* through before the studio SPA catch-all ([4b8043f](https://github.com/Necmttn/ax/commit/4b8043fde52ec2a89efb3583cb1116d07e3a8f70))
+* **site:** studio deep-link rewrite targets the dir, not /studio/index.html ([2d7b4a9](https://github.com/Necmttn/ax/commit/2d7b4a91eef9f90ad02c6f3121f449137ab4b274))
+
+
+### Performance
+
+* kill IN-membership scans + correlated $parent.session derefs on read paths ([#168](https://github.com/Necmttn/ax/issues/168)) ([1cf8c3f](https://github.com/Necmttn/ax/commit/1cf8c3f63abd8a64f6dea3a13d51947f7bf8b36d))
+
 ## [0.18.0](https://github.com/Necmttn/ax/compare/v0.17.0...v0.18.0) (2026-06-09)
 
 
