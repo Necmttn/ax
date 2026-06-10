@@ -43,11 +43,9 @@ body,
 body {
     margin: 0;
     color: var(--ink);
-    background:
-        linear-gradient(90deg, rgba(20, 22, 21, 0.045) 1px, transparent 1px),
-        linear-gradient(180deg, rgba(20, 22, 21, 0.045) 1px, transparent 1px),
-        var(--page);
-    background-size: 22px 22px;
+    /* Flat surface. The old 22px graph-paper grid dated the whole app and
+       added texture noise between every panel - linear and quiet wins. */
+    background: var(--page);
     font-family:
         "Avenir Next",
         ui-sans-serif,
@@ -143,17 +141,25 @@ a {
     align-items: center;
 }
 
-/* Shared-session outcome header: what the session did, before the transcript. */
+/* The share view reads as a document - hold a tighter measure than the
+   full dashboard so wide monitors get margin, not stretch. */
+.shell-share {
+    max-width: 1240px;
+}
+
+/* Shared-session outcome header: what the session did, before the transcript.
+   Flat: same white surface as the panel, separated by one hairline - no tinted
+   block, no accent bar. Linear and quiet. */
 .share-hero {
-    background: var(--track);
-    border-left: 4px solid var(--green);
-    padding: 16px 20px;
-    margin: 0 0 4px;
+    background: var(--panel);
+    border-bottom: 1px solid var(--line);
+    padding: 20px var(--strip-x) 16px;
+    margin: 0;
 }
 .share-hero .share-hero-title {
     margin: 0;
     font-family: Georgia, serif;
-    font-size: 22px;
+    font-size: 21px;
     line-height: 1.3;
     color: var(--ink);
     overflow-wrap: anywhere;

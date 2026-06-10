@@ -101,7 +101,7 @@ function Highlights({ data }: { data: SessionTimelinePayload }) {
     const h = data.highlights;
     const sub = [h.model, h.repository, h.started_at?.slice(0, 10)].filter(Boolean).join(" · ");
     return (
-        <div style={{ background: "var(--track)", borderLeft: "4px solid var(--green)", padding: "14px 18px", marginBottom: 16 }}>
+        <div style={{ background: "var(--panel)", borderBottom: "1px solid var(--line)", padding: "4px 0 14px", marginBottom: 16 }}>
             <div style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: "0.06em", color: "var(--muted)", fontFamily: "ui-monospace, monospace" }}>{sub}</div>
             <div style={{ display: "flex", gap: 18, flexWrap: "wrap", marginTop: 12, fontFamily: "ui-monospace, monospace" }}>
                 <Stat n={fmtDur(h.duration_ms) || "-"} label="duration" />
@@ -131,7 +131,7 @@ export function SessionTimelineBody({ data }: { readonly data: SessionTimelinePa
     }, [data]);
 
     return (
-        <div style={{ padding: "8px 24px 40px" }}>
+        <div style={{ padding: "8px var(--strip-x) 40px" }}>
             <Highlights data={data} />
             {data.segments.map((seg) => (
                 <SegmentBlock key={seg.id} seg={seg} events={eventsBySegment.get(seg.id) ?? []} />

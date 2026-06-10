@@ -463,10 +463,9 @@ export function InspectGuide({ data }: { data: Pick<SessionInspectPayload, "tota
 
     return (
         <div style={{
-            margin: "4px 24px 10px",
-            padding: "8px 10px",
-            border: "1px solid var(--line)",
-            background: "var(--page)",
+            margin: 0,
+            padding: "10px var(--strip-x) 12px",
+            borderBottom: "1px solid var(--line)",
             display: "grid",
             gap: 7,
         }}>
@@ -474,7 +473,7 @@ export function InspectGuide({ data }: { data: Pick<SessionInspectPayload, "tota
                 <div style={{ display: "flex", gap: 12, alignItems: "baseline", flexWrap: "wrap" }}>
                     <strong
                         title="Estimated total provider cost for this session from stored token usage and the model pricing catalog."
-                        style={{ color: "#141615", font: "700 15px/1 ui-monospace, monospace" }}
+                        style={{ color: "var(--ink)", font: "700 15px/1 ui-monospace, monospace" }}
                     >
                         {fmtUsd(totalCost)}
                     </strong>
