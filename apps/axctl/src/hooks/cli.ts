@@ -1,8 +1,10 @@
 import { Effect } from "effect";
 import { Argument, Command, Flag } from "effect/unstable/cli";
 import { prettyPrint } from "@ax/lib/json";
+import { HOME } from "@ax/lib/paths";
 import { optionValue } from "../config-core/cli-util.ts";
 import { HookProviderRegistryDefault } from "./providers/registry.ts";
+import { resolveSdkPath, scaffoldWorkspace } from "./sdk-workspace.ts";
 import {
     readAllHooks,
     addHook,
@@ -155,6 +157,34 @@ const enableCommand = Command.make(
         ),
 ).pipe(Command.withDescription("Re-enable a parked hook by id"));
 
+/** Expand a leading `~` to the user's home directory. */
+const expandTilde = (p: string): string =>
+    p === "~" ? HOME : p.startsWith("~/") ? `${HOME}/${p.slice(2)}` : p;
+
+const initCommand = Command.make(
+    "init",
+    {
+        dir: Flag.string("dir").pipe(Flag.withDefault("~/.ax/hooks")),
+        noInstall: Flag.boolean("no-install").pipe(Flag.withDefault(false)),
+    },
+    ({ dir, noInstall }) =>
+        Effect.gen(function* () {
+            const workspaceDir = expandTilde(dir);
+            const sdkPath = yield* resolveSdkPath();
+            const written = yield* scaffoldWorkspace({
+                dir: workspaceDir,
+                sdkPath,
+                install: !noInstall,
+            });
+            console.log(`hook workspace ready at ${workspaceDir}`);
+            for (const path of written) console.log(`  wrote ${path}`);
+            if (noInstall) console.log(`  (skipped bun install - run it in ${workspaceDir} before use)`);
+            console.log("");
+            console.log("next steps:");
+            console.log(`  ax hooks install ${workspaceDir}/enforce-worktree.ts --providers=claude,codex`);
+        }),
+).pipe(Command.withDescription("Scaffold the ~/.ax/hooks workspace (package.json + starter guard hooks)"));
+
 /** Spliced into `hooksCommand`'s subcommand list in cli/index.ts. */
 export const hooksConfigSubcommands = [
     configCommand,
@@ -163,4 +193,5 @@ export const hooksConfigSubcommands = [
     editCommand,
     disableCommand,
     enableCommand,
+    initCommand,
 ];
