@@ -11,10 +11,25 @@ import { SurrealClient } from "@ax/lib/db";
 const makeDb = (sink: string[]) =>
     Layer.succeed(SurrealClient, {
         query: <T>(sql: string) => {
-            if (/UPSERT session_metrics|UPDATE commit|DELETE fragility_cascade/.test(sql)) {
+            if (/UPSERT session_metrics|UPDATE commit|DELETE fragility_cascade|UPDATE session_token_usage/.test(sql)) {
                 sink.push(sql);
                 return Effect.succeed([[]] as unknown as T);
             }
+            // cost-backfill selection (step 0): one never-priced claude row.
+            if (/FROM session_token_usage WHERE estimated_cost_usd IS NONE/.test(sql)) {
+                return Effect.succeed([[{
+                    id: "session_token_usage:`s1`",
+                    model: "claude-opus-4-5",
+                    prompt_tokens: null,
+                    completion_tokens: null,
+                    cache_creation_input_tokens: null,
+                    cache_read_input_tokens: null,
+                    estimated_tokens: 1_000_000,
+                    estimated_cost_usd: null,
+                    pricing_source: null,
+                }]] as unknown as T);
+            }
+            if (/agent_model/.test(sql)) return Effect.succeed([[]] as unknown as T);
             // commit-reverted existing-true set; "WHERE out.reverted" won't match.
             if (/WHERE reverted = true/.test(sql)) return Effect.succeed([[]] as unknown as T);
             // dirty-set: a VALUE select returning one dirty session id.
@@ -46,6 +61,13 @@ describe("deriveMetrics", () => {
         // commits it writes 0 edges but still rewrites (clears) the table.
         expect(stats.cascadeEdges).toBe(0);
         expect(sink.some((s) => /DELETE fragility_cascade;/.test(s))).toBe(true);
+        // Step 0 cost backfill ran and persisted the estimated cost (review
+        // must-fix: stored backfill, not read-time-only fillEstimatedCost).
+        expect(stats.costBackfilled).toBe(1);
+        expect(sink.some((s) =>
+            /UPDATE session_token_usage:`s1` SET/.test(s)
+            && s.includes('pricing_source = "estimated:')
+            && s.includes("WHERE estimated_cost_usd IS NONE"))).toBe(true);
     });
 
     // PR-driven dirty source (issue #172): an OLD session (outside the window)

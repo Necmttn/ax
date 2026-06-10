@@ -15,11 +15,14 @@ import { computeTimeToFirstEdit } from "../metrics/time-to-first-edit.ts";
 import { computeColdStartReads } from "../metrics/cold-start-reads.ts";
 import { computeDelegationRatio } from "../metrics/delegation-ratio.ts";
 import { deriveFragilityCascade } from "../metrics/fragility-cascade.ts";
+import { deriveCostBackfill } from "./derive-cost-backfill.ts";
 
 export interface DeriveMetricsStats {
     readonly sessionsWritten: number;
     readonly revertedCommits: number;
     readonly cascadeEdges: number;
+    /** session_token_usage rows whose estimated cost was persisted this run. */
+    readonly costBackfilled: number;
 }
 
 const num = (n: number | null): string => (n === null ? "NONE" : String(n));
@@ -42,6 +45,15 @@ export const deriveMetrics = (
 ): Effect.Effect<DeriveMetricsStats, DbError, SurrealClient> =>
     Effect.gen(function* () {
         const db = yield* SurrealClient;
+
+        // 0. Stored cost backfill: price `session_token_usage` rows that were
+        //    never priced at ingest and persist `estimated_cost_usd` +
+        //    `pricing_source: "estimated:<catalog>"`, so EVERY reader (dashboard
+        //    cost view, summaries, share manifests) sees the cost without
+        //    needing the read-time `fillEstimatedCost` helper. Independent of
+        //    the dirty set - runs before the empty-dirty early return so daemon
+        //    `--since=1` ingests heal history incrementally.
+        const costs = yield* deriveCostBackfill();
 
         // 1. Freshness backbone - full-history commit.reverted (diff-only writes).
         const reverted = yield* computeRevertedCommits();
@@ -88,7 +100,7 @@ export const deriveMetrics = (
             // "no dirty sessions" means the resolved PRs mapped to no producing
             // sessions - there are no dependent rows to write first.
             if (!prDirty.skipped) yield* advancePrMergeWatermark(prDirty.diff);
-            return { sessionsWritten: 0, revertedCommits: reverted.revertedCount, cascadeEdges };
+            return { sessionsWritten: 0, revertedCommits: reverted.revertedCount, cascadeEdges, costBackfilled: costs.backfilled };
         }
 
         // 2b. Spawn-parent expansion: a dirty CHILD means its parent's
@@ -152,7 +164,7 @@ export const deriveMetrics = (
         // sessions (codex #2).
         if (!reverted.skipped) yield* advanceRevertedWatermark(reverted.fingerprint);
         if (!prDirty.skipped) yield* advancePrMergeWatermark(prDirty.diff);
-        return { sessionsWritten: expandedIds.length, revertedCommits: reverted.revertedCount, cascadeEdges };
+        return { sessionsWritten: expandedIds.length, revertedCommits: reverted.revertedCount, cascadeEdges, costBackfilled: costs.backfilled };
     });
 
 // ---------------------------------------------------------------------------
@@ -166,6 +178,7 @@ export class DeriveMetricsStageStats extends BaseStageStats.extend<DeriveMetrics
     sessionsWritten: Schema.Number,
     revertedCommits: Schema.Number,
     cascadeEdges: Schema.Number,
+    costBackfilled: Schema.Number,
 }) {}
 
 export const deriveMetricsStage: StageDef<DeriveMetricsStageStats, SurrealClient> = {
@@ -176,10 +189,11 @@ export const deriveMetricsStage: StageDef<DeriveMetricsStageStats, SurrealClient
             const r = yield* deriveMetrics({ sinceDays: sinceDaysFromCtx(ctx) });
             return DeriveMetricsStageStats.make({
                 durationMs: Date.now() - t0,
-                summary: `wrote ${r.sessionsWritten} session_metrics rows; ${r.revertedCommits} reverted commits; ${r.cascadeEdges} cascade edges`,
+                summary: `wrote ${r.sessionsWritten} session_metrics rows; ${r.revertedCommits} reverted commits; ${r.cascadeEdges} cascade edges; ${r.costBackfilled} costs backfilled`,
                 sessionsWritten: r.sessionsWritten,
                 revertedCommits: r.revertedCommits,
                 cascadeEdges: r.cascadeEdges,
+                costBackfilled: r.costBackfilled,
             });
         }),
 };
