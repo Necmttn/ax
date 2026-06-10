@@ -50,7 +50,8 @@ const fmtDuration = (ms: number | null): string | null => {
 const fmtUsd = (n: number | null): string | null =>
     n == null ? null : `$${n >= 100 ? n.toFixed(0) : n.toFixed(2)}`;
 
-/** Greedy-packed subagent lanes as absolutely-positioned divs. */
+/** Greedy-packed subagent lanes as one inline SVG (satori renders embedded
+ *  SVG natively, which sidesteps html-parser flex semantics entirely). */
 function laneHtml(cards: ReadonlyArray<SubagentCard>): string {
     const times = cards
         .map((c) => ({ t: Date.parse(c.started_at ?? ""), d: c.duration_ms ?? 0, cost: c.cost_usd ?? 0, failed: (c.stats?.failures ?? 0) > 0 }))
@@ -60,8 +61,9 @@ function laneHtml(cards: ReadonlyArray<SubagentCard>): string {
     const t1 = Math.max(...times.map((c) => c.t + Math.max(c.d, 60_000)));
     const span = Math.max(t1 - t0, 60_000);
     const maxCost = Math.max(0.01, ...times.map((c) => c.cost));
+    const W = 1036;
     const laneEnds: number[] = [];
-    let bars = "";
+    let rects = "";
     for (const c of times.sort((p, q) => p.t - q.t)) {
         const x = (c.t - t0) / span;
         const w = Math.max(c.d / span, 0.008);
@@ -70,9 +72,13 @@ function laneHtml(cards: ReadonlyArray<SubagentCard>): string {
         if (r >= 5) r = 4;
         laneEnds[r] = x + w;
         const opacity = (0.35 + 0.6 * (c.cost / maxCost)).toFixed(2);
-        bars += `<div style="position:absolute;left:${(x * 100).toFixed(2)}%;top:${r * 22}px;width:${Math.max(w * 100, 0.8).toFixed(2)}%;height:16px;border-radius:3px;background:${c.failed ? "#bd443b" : "#b32650"};opacity:${opacity}"></div>`;
+        rects += `<rect x="${Math.round(x * W)}" y="${r * 22}" width="${Math.max(Math.round(w * W), 8)}" height="16" rx="3" fill="${c.failed ? "#bd443b" : "#b32650"}" fill-opacity="${opacity}"/>`;
     }
-    return `<div style="display:flex;position:relative;width:100%;height:${laneEnds.length * 22}px">${bars}</div>`;
+    const H = laneEnds.length * 22;
+    const svg = `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg">${rects}</svg>`;
+    // The worker's html parser only knows a small tag subset (raw <svg> children
+    // get dropped) - but satori renders <img> with an SVG data URI natively.
+    return `<img width="${W}" height="${H}" src="data:image/svg+xml;base64,${btoa(svg)}" />`;
 }
 
 export const onRequestGet: PagesFunction = async (ctx) => {
@@ -115,7 +121,7 @@ export const onRequestGet: PagesFunction = async (ctx) => {
 <div style="display:flex;flex-direction:column;width:1200px;height:630px;background:#f3f6f5;padding:28px;font-family:'JetBrains Mono'">
   <div style="display:flex;flex-direction:column;flex:1;background:#ffffff;border:2px solid #cfd8d4;padding:44px 52px">
     <div style="display:flex;justify-content:space-between;align-items:center">
-      <span style="font-size:30px;color:#141615;font-weight:700">ax<span style="font-size:15px;color:#66706b;margin-left:12px;letter-spacing:2px">AGENT EXPERIENCE</span></span>
+      <div style="display:flex;align-items:baseline"><span style="font-size:30px;color:#141615;font-weight:700">ax</span><span style="font-size:15px;color:#66706b;margin-left:12px;letter-spacing:2px">AGENT EXPERIENCE</span></div>
       <span style="font-size:20px;color:#66706b">${esc(right)}</span>
     </div>
     <div style="display:flex;font-size:38px;line-height:1.25;color:#141615;margin-top:34px;font-weight:600">${title}</div>
@@ -136,18 +142,35 @@ export const onRequestGet: PagesFunction = async (ctx) => {
         "https://cdn.jsdelivr.net/fontsource/fonts/jetbrains-mono@latest/latin-700-normal.ttf",
     ).then((r) => r.arrayBuffer());
 
-    const image = new ImageResponse(html.trim(), {
-        width: 1200,
-        height: 630,
-        fonts: [
-            { name: "JetBrains Mono", data: font, weight: 400, style: "normal" },
-            { name: "JetBrains Mono", data: fontBold, weight: 700, style: "normal" },
-        ],
-    });
-    // Buffer the render: returning the lazy stream produced empty bodies on
-    // Pages, and an empty 200 would get edge-cached for a day.
-    const png = await image.arrayBuffer();
-    if (png.byteLength === 0) return new Response("render failed", { status: 500 });
+    const debug = u.searchParams.get("debug") ?? "";
+    const part = debug.startsWith("part:") ? Number(debug.slice(5)) : 99;
+    const pieces = [
+        `<div style="display:flex;justify-content:space-between;align-items:center"><div style="display:flex;align-items:baseline"><span style="font-size:30px;color:#141615;font-weight:700">ax</span><span style="font-size:15px;color:#66706b;margin-left:12px;letter-spacing:2px">AGENT EXPERIENCE</span></div><span style="font-size:20px;color:#66706b">${esc(right)}</span></div>`,
+        `<div style="display:flex;font-size:38px;line-height:1.25;color:#141615;margin-top:34px;font-weight:600">${title}</div>`,
+        `<div style="display:flex;gap:56px;margin-top:36px">${stats}</div>`,
+        `<div style="display:flex;margin-top:38px">${laneHtml(manifest.subagents)}</div>`,
+        `<div style="display:flex;flex:1"></div><div style="display:flex;justify-content:space-between;font-size:16px;letter-spacing:1px;color:#66706b"><span>${t.subagents > 0 ? `BARS = ${t.subagents} SUBAGENTS · DARKER = COSTLIER` : ""}</span><span>RECORDED WITH AX · AX.NECMTTN.COM</span></div>`,
+    ];
+    const renderHtml = debug === "min"
+        ? `<div style="display:flex;width:1200px;height:630px;background:#fff;font-family:'JetBrains Mono';font-size:60px;align-items:center;justify-content:center">ax og probe</div>`
+        : `<div style="display:flex;flex-direction:column;width:1200px;height:630px;background:#f3f6f5;padding:28px;font-family:'JetBrains Mono'"><div style="display:flex;flex-direction:column;flex:1;background:#ffffff;border:2px solid #cfd8d4;padding:44px 52px">${pieces.slice(0, part).join("")}</div></div>`;
+    let png: ArrayBuffer;
+    try {
+        const image = new ImageResponse(renderHtml, {
+            width: 1200,
+            height: 630,
+            fonts: [
+                { name: "JetBrains Mono", data: font, weight: 400, style: "normal" },
+                { name: "JetBrains Mono", data: fontBold, weight: 700, style: "normal" },
+            ],
+        });
+        // Buffer the render: a lazy stream produced empty bodies on Pages, and
+        // an empty 200 would get edge-cached for a day.
+        png = await image.arrayBuffer();
+    } catch (err) {
+        return new Response(`render error: ${err instanceof Error ? `${err.message}\n${err.stack ?? ""}` : String(err)}`, { status: 500 });
+    }
+    if (png.byteLength === 0) return new Response("render produced 0 bytes", { status: 500 });
     const res = new Response(png, {
         headers: {
             "content-type": "image/png",
