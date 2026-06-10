@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.22.0](https://github.com/Necmttn/ax/compare/v0.21.0...v0.22.0) (2026-06-10)
+
+
+### Features
+
+* **share:** session poster hero + per-session OG images ([#201](https://github.com/Necmttn/ax/issues/201)) ([7239f5a](https://github.com/Necmttn/ax/commit/7239f5a364bdd346f2c787d456a8f504e398844f))
+
+
+### Bug Fixes
+
+* cast stderr stub instead of ts-expect-error (CI strict tsc) ([29e7cb1](https://github.com/Necmttn/ax/commit/29e7cb1a4075887306b07ce0f56c53ff02e34a5e))
+* NavLink retro findings - stderr footer, teaching stats error, full header id ([1900a40](https://github.com/Necmttn/ax/commit/1900a40d7ec7972d09e092076be5173e0b94502c))
+* NavLink retro findings — stderr footer, teaching stats error, full header id ([a80149e](https://github.com/Necmttn/ax/commit/a80149ed54b619c8c95dbefb939ae5fd2f6cdf2b))
+* **og:** buffer the poster render; version the edge cache key ([#203](https://github.com/Necmttn/ax/issues/203)) ([93c011c](https://github.com/Necmttn/ax/commit/93c011cde2487f314e0457182105a48de4f4529e))
+* **og:** make the poster render — error surfacing, px geometry, SVG-img lanes ([#205](https://github.com/Necmttn/ax/issues/205)) ([78f0f48](https://github.com/Necmttn/ax/commit/78f0f487f4a62d2270d919b55e6aee3c40ea7792))
+* **share:** rewrite head meta at the edge so crawlers see the session poster ([#207](https://github.com/Necmttn/ax/issues/207)) ([65d1d25](https://github.com/Necmttn/ax/commit/65d1d2578bb7cac258b372248506aeb02fca48b2))
+
 ## [0.21.0](https://github.com/Necmttn/ax/compare/v0.20.0...v0.21.0) (2026-06-10)
 
 
