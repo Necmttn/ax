@@ -35,7 +35,7 @@ const NEGATION_PATTERNS: ReadonlyArray<readonly [RegExp, string]> = [
 
 const CORRECTION_WINDOW_CHARS = 200;
 
-function matchNegation(text: string): string | null {
+export function matchNegation(text: string): string | null {
     const head = text.slice(0, CORRECTION_WINDOW_CHARS).toLowerCase();
     for (const [re, label] of NEGATION_PATTERNS) {
         if (re.test(head)) return label;
@@ -48,11 +48,11 @@ function matchNegation(text: string): string | null {
  * duplicating. Surreal record-ids escape via backticks, so we strip out the
  * `turn:` prefix and join the two raw keys.
  */
-function correctedByEdgeId(fromTurnKey: string, toTurnKey: string): string {
+export function correctedByEdgeId(fromTurnKey: string, toTurnKey: string): string {
     return `${fromTurnKey}__${toTurnKey}`;
 }
 
-function proposedEdgeId(fromTurnKey: string, skillKey: string): string {
+export function proposedEdgeId(fromTurnKey: string, skillKey: string): string {
     return `${fromTurnKey}__${skillKey}`;
 }
 
@@ -62,7 +62,7 @@ function proposedEdgeId(fromTurnKey: string, skillKey: string): string {
  * short hash of the joined keys keeps the id stable + length-bounded
  * regardless of skill-name length (Surreal record-id segment escaping).
  */
-function skillPairedEdgeId(skillKeyA: string, skillKeyB: string): {
+export function skillPairedEdgeId(skillKeyA: string, skillKeyB: string): {
     edgeId: string;
     fromKey: string;
     toKey: string;
@@ -72,7 +72,7 @@ function skillPairedEdgeId(skillKeyA: string, skillKeyB: string): {
     return { edgeId: `${lo.slice(0, 24)}__${hi.slice(0, 24)}__${hash}`, fromKey: lo, toKey: hi };
 }
 
-function recoveredByEdgeId(fromTurnKey: string, skillKey: string): string {
+export function recoveredByEdgeId(fromTurnKey: string, skillKey: string): string {
     return `${fromTurnKey}__${skillKey}`;
 }
 
@@ -151,7 +151,7 @@ export function shouldDeriveAllTimeSkillPairs(
     return sinceDays === undefined || sinceDays <= 0;
 }
 
-interface TurnRow {
+export interface TurnRow {
     id: { tb: string; id: string } | string;
     seq: number;
     role: string;
@@ -164,7 +164,7 @@ interface TurnRow {
     cwd?: string;
 }
 
-interface SessionTurns {
+export interface SessionTurns {
     sessionId: string;
     repositoryKey: string | null;
     checkoutKey: string | null;
@@ -193,7 +193,7 @@ function tsToIso(ts: TurnRow["ts"]): string {
     return isoTimestamp(ts);
 }
 
-const toolCallStableKey = (call: ToolCallLike, index: number): string => {
+export const toolCallStableKey = (call: ToolCallLike, index: number): string => {
     const idKey = recordKeyPart(call.id, "tool_call");
     if (idKey) return idKey;
 
@@ -342,6 +342,47 @@ export function deriveDiagnosticsFromToolCalls(
     return out;
 }
 
+/** Pure grouping of raw turn rows into per-session bundles. Session ids come
+ *  back from Surreal as either `session:⟨id⟩` strings or `{ tb, id }` objects;
+ *  both normalize to the bare key. First row wins for repo/checkout/cwd meta. */
+export function groupTurnsBySession(
+    rows: ReadonlyArray<TurnRow & { session: unknown }>,
+): SessionTurns[] {
+    const bySession = new Map<string, TurnRow[]>();
+    const metaBySession = new Map<
+        string,
+        { repositoryKey: string | null; checkoutKey: string | null; cwd: string | null }
+    >();
+    for (const row of rows) {
+        const sess = row.session;
+        const sessionId =
+            typeof sess === "string"
+                ? sess.replace(/^session:/, "").replace(/[`⟨⟩]/g, "")
+                : sess && typeof sess === "object" && "id" in sess
+                  ? String((sess as { id: unknown }).id)
+                  : String(sess);
+        const list = bySession.get(sessionId) ?? [];
+        list.push(row);
+        bySession.set(sessionId, list);
+        if (!metaBySession.has(sessionId)) {
+            metaBySession.set(sessionId, {
+                repositoryKey: recordKeyPart(row.repository, "repository"),
+                checkoutKey: recordKeyPart(row.checkout, "checkout"),
+                cwd: nonEmptyString(row.cwd),
+            });
+        }
+    }
+    return [...bySession.entries()].map(([sessionId, turns]) => ({
+        sessionId,
+        ...(metaBySession.get(sessionId) ?? {
+            repositoryKey: null,
+            checkoutKey: null,
+            cwd: null,
+        }),
+        turns,
+    }));
+}
+
 /**
  * Fetch every (session → turns) bundle in one round-trip. Each turn carries
  * its outgoing `->invoked->skill.name` array so we can detect "proposed but
@@ -371,43 +412,10 @@ ${sinceFilter}
 ORDER BY session ASC, seq ASC;`;
         const result = yield* db.query<[TurnRow[] & { session: unknown }[]]>(sql);
         const rows = (result?.[0] ?? []) as Array<TurnRow & { session: unknown }>;
-
-        const bySession = new Map<string, TurnRow[]>();
-        const metaBySession = new Map<
-            string,
-            { repositoryKey: string | null; checkoutKey: string | null; cwd: string | null }
-        >();
-        for (const row of rows) {
-            const sess = row.session;
-            const sessionId =
-                typeof sess === "string"
-                    ? sess.replace(/^session:/, "").replace(/[`⟨⟩]/g, "")
-                    : sess && typeof sess === "object" && "id" in sess
-                      ? String((sess as { id: unknown }).id)
-                      : String(sess);
-            const list = bySession.get(sessionId) ?? [];
-            list.push(row);
-            bySession.set(sessionId, list);
-            if (!metaBySession.has(sessionId)) {
-                metaBySession.set(sessionId, {
-                    repositoryKey: recordKeyPart(row.repository, "repository"),
-                    checkoutKey: recordKeyPart(row.checkout, "checkout"),
-                    cwd: nonEmptyString(row.cwd),
-                });
-            }
-        }
-        return [...bySession.entries()].map(([sessionId, turns]) => ({
-            sessionId,
-            ...(metaBySession.get(sessionId) ?? {
-                repositoryKey: null,
-                checkoutKey: null,
-                cwd: null,
-            }),
-            turns,
-        }));
+        return groupTurnsBySession(rows);
     });
 
-interface CorrectionEdge {
+export interface CorrectionEdge {
     fromTurnKey: string;
     toTurnKey: string;
     pattern: string;
@@ -424,7 +432,7 @@ interface CorrectionEdge {
     correctedSeq: number;
 }
 
-interface ProposedEdge {
+export interface ProposedEdge {
     fromTurnKey: string;
     skillKey: string;
     skillName: string;
@@ -439,7 +447,7 @@ interface ProposedEdge {
  * the user text starts with a negation pattern, emit a correction edge from
  * that assistant turn to the user turn.
  */
-function deriveCorrections(bundle: SessionTurns): CorrectionEdge[] {
+export function deriveCorrections(bundle: SessionTurns): CorrectionEdge[] {
     const out: CorrectionEdge[] = [];
     const turns = bundle.turns;
     let lastAssistantIdx: number | null = null;
@@ -485,7 +493,7 @@ function deriveCorrections(bundle: SessionTurns): CorrectionEdge[] {
  * case-sensitive on the canonical skill name to avoid `gsd:plan-phase`
  * matching the word "plan" everywhere.
  */
-function deriveProposed(
+export function deriveProposed(
     bundle: SessionTurns,
     skillNames: ReadonlyArray<string>,
 ): ProposedEdge[] {
@@ -516,14 +524,14 @@ function deriveProposed(
     return out;
 }
 
-interface SkillPairAccum {
+export interface SkillPairAccum {
     fromKey: string;
     toKey: string;
     count: number;
     lastSeen: string; // ISO
 }
 
-interface RecoveryEdge {
+export interface RecoveryEdge {
     fromTurnKey: string;
     skillKey: string;
     skillName: string;
@@ -538,7 +546,7 @@ interface RecoveryEdge {
  * `(a,b)` and `(b,a)` collapse to a single edge. Skills invoked together in
  * the same turn count too (window includes seq delta = 0).
  */
-function deriveSkillPairs(
+export function deriveSkillPairs(
     bundle: SessionTurns,
     accum: Map<string, SkillPairAccum>,
 ): void {
@@ -590,7 +598,7 @@ function deriveSkillPairs(
  * skill. Only the first invocation in the window counts (one recovery per
  * error).
  */
-function deriveRecovered(bundle: SessionTurns): RecoveryEdge[] {
+export function deriveRecovered(bundle: SessionTurns): RecoveryEdge[] {
     const out: RecoveryEdge[] = [];
     const turns = bundle.turns;
     for (let i = 0; i < turns.length; i += 1) {
@@ -618,7 +626,7 @@ function deriveRecovered(bundle: SessionTurns): RecoveryEdge[] {
     return out;
 }
 
-function deriveFrictionFromCorrections(edges: readonly CorrectionEdge[]): DerivedFrictionEvent[] {
+export function deriveFrictionFromCorrections(edges: readonly CorrectionEdge[]): DerivedFrictionEvent[] {
     return edges.map((edge) => {
         const repository = edge.repositoryKey ? `repository:${edge.repositoryKey}` : null;
         const checkout = edge.checkoutKey ? `checkout:${edge.checkoutKey}` : null;
