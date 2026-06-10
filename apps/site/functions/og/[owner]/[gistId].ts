@@ -128,6 +128,56 @@ function costBarHtml(m: Manifest): string {
     return `<div style="display:flex;flex-direction:column"><div style="display:flex">${segs}</div><div style="display:flex;margin-top:12px">${legend}</div></div>`;
 }
 
+/**
+ * ASCII logo for the header wordmark. Three-line line-stack rendered in
+ * monospace; each line is a separate div to avoid <pre> fragility in
+ * workers-og. Kept small (11px) so it reads as a mark, not a headline.
+ *
+ * A:  /\    X: \/
+ *    /--\      /\
+ *   /    \    /  \
+ *
+ * Rendered as:
+ *   /\  \/
+ *  /--\  X
+ * /    \/  \
+ */
+const ASCII_LOGO_LINES = ["/\\  \\/", "/--\\  X", "/    \\/  \\"] as const;
+
+/** Small three-line ASCII AX wordmark for the poster header. */
+function asciiLogoHtml(color: string): string {
+    const lines = ASCII_LOGO_LINES.map(
+        (line) =>
+            `<div style="display:flex;font-size:11px;line-height:13px;color:${color};letter-spacing:1px;font-weight:700">${esc(line)}</div>`,
+    ).join("");
+    return `<div style="display:flex;flex-direction:column">${lines}</div>`;
+}
+
+/**
+ * Large background ASCII watermark for the ?variant=watermark debug variant.
+ * Positioned absolutely (satori supports position:absolute on root-level
+ * children when the container is position:relative). Low opacity so content
+ * stays readable. Significantly larger glyphs than the header mark.
+ *
+ * Composed as four rows scaled up (font-size:72px).
+ */
+const ASCII_WATERMARK_LINES = [
+    "/\\\\    \\/\\/",
+    "/--\\\\    X",
+    "/    \\\\  / \\\\",
+    "/ ___  \\\\/   \\\\",
+] as const;
+
+function asciiWatermarkHtml(): string {
+    const lines = ASCII_WATERMARK_LINES.map(
+        (line) =>
+            `<div style="display:flex;font-size:72px;line-height:80px;color:${INK};letter-spacing:4px;font-weight:700">${esc(line)}</div>`,
+    ).join("");
+    // opacity via hex alpha channel on color (satori supports 8-digit hex).
+    // We use a separate opacity wrapper; satori handles opacity on leaf nodes.
+    return `<div style="display:flex;flex-direction:column;position:absolute;top:120px;left:80px;opacity:0.06">${lines}</div>`;
+}
+
 export const onRequestGet: PagesFunction = async (ctx) => {
     const owner = String(ctx.params.owner ?? "");
     const gistId = String(ctx.params.gistId ?? "").replace(/\.png$/, "");
@@ -136,8 +186,10 @@ export const onRequestGet: PagesFunction = async (ctx) => {
     }
     const cache = (caches as unknown as { default: Cache }).default;
     // r= version busts stale cached renders when the poster template changes.
+    // Append variant so watermark and default renders cache independently.
     const u = new URL(ctx.request.url);
-    u.searchParams.set("r", "5");
+    const variant = u.searchParams.get("variant") ?? "default";
+    u.searchParams.set("r", `6-${variant}`);
     const cacheKey = new Request(u.toString());
     const hit = await cache.match(cacheKey);
     if (hit) return hit;
@@ -169,7 +221,9 @@ export const onRequestGet: PagesFunction = async (ctx) => {
     const stats = `<div style="display:flex;flex-direction:column"><div style="display:flex;margin-bottom:30px">${statList.slice(0, 3).join("")}</div><div style="display:flex">${statList.slice(3).join("")}</div></div>`;
 
     const blocks: Record<string, string> = {
-        header: `<div style="display:flex;justify-content:space-between;align-items:center"><div style="display:flex;align-items:baseline"><span style="font-size:42px;color:${INK};font-weight:700;font-family:'Gelasio'">ax</span><span style="font-size:14px;color:${DIM};margin-left:14px;letter-spacing:3px">AGENT EXPERIENCE</span></div><span style="font-size:17px;color:${DIM}">${esc([model, date].filter(Boolean).join(" · "))}</span></div>`,
+        // ASCII logo replaces the serif "ax" wordmark. The line-stack avoids
+        // <pre> fragility and keeps display:flex on the container intact.
+        header: `<div style="display:flex;justify-content:space-between;align-items:center"><div style="display:flex;align-items:center"><div style="display:flex;margin-right:14px">${asciiLogoHtml(INK)}</div><span style="font-size:14px;color:${DIM};letter-spacing:3px">AGENT EXPERIENCE</span></div><span style="font-size:17px;color:${DIM}">${esc([model, date].filter(Boolean).join(" · "))}</span></div>`,
         title: `<div style="display:flex;font-size:33px;line-height:1.3;color:${INK};margin-top:26px;font-weight:600">${title}</div>`,
         stats: `<div style="display:flex;margin-top:30px">${stats}</div>`,
         fleet: t.subagents > 0 ? `<div style="display:flex;flex-direction:column;align-items:flex-start;margin-top:30px"><div style="display:flex">${fleetHtml(manifest.subagents)}</div><span style="font-size:14px;letter-spacing:2px;color:${DIM};margin-top:10px">${t.subagents} SUBAGENTS · BRIGHTER = COSTLIER</span></div>` : "",
@@ -183,11 +237,16 @@ export const onRequestGet: PagesFunction = async (ctx) => {
     const inner = probe
         ? probe.split(",").filter((k) => k in blocks).map((k) => blocks[k]).join("")
         : `${blocks.header}${blocks.title}${mid}${blocks.costbar}${blocks.footer}`;
+    // ?variant=watermark: inject a large low-opacity ASCII background mark for
+    // iterating on the treatment without making it the default social card.
+    // position:relative on the outer container lets the absolute child render
+    // behind the content stack. Never active by default.
+    const watermark = variant === "watermark" ? asciiWatermarkHtml() : "";
     // Full bleed, no border: the platform rendering the preview (X / Slack /
     // Discord) draws its own frame + rounded corners - an inner border reads
     // as a nested double-frame. 64px safe margins keep content clear of the
     // platforms' corner clipping (GitHub-card convention).
-    const html = `<div style="display:flex;flex-direction:column;width:1200px;height:630px;background:${CARD};padding:56px 64px;font-family:'JetBrains Mono'">${inner}</div>`;
+    const html = `<div style="display:flex;flex-direction:column;position:relative;width:1200px;height:630px;background:${CARD};padding:56px 64px;font-family:'JetBrains Mono'">${watermark}${inner}</div>`;
 
     const font = await fetch(
         "https://cdn.jsdelivr.net/fontsource/fonts/jetbrains-mono@latest/latin-400-normal.ttf",
