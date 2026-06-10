@@ -1,0 +1,10 @@
+# Git hooks managed by lefthook (installed via the root `prepare` script).
+# https://lefthook.dev
+
+pre-push:
+  jobs:
+    # Warn (non-blocking) when a released version in CHANGELOG.md has no
+    # curated announcement page under docs/releases/. Run with --strict to
+    # make it fail instead: bun run check:release-announcements -- --strict
+    - name: release-announcements
+      run: bun scripts/check-release-announcements.ts

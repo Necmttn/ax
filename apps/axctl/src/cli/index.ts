@@ -1,9 +1,9 @@
 #!/usr/bin/env bun
-import { Effect, FileSystem, Layer, Option, Path, References } from "effect";
-import { BunFileSystem, BunPath } from "@effect/platform-bun";
+import { Cause, Effect, FileSystem, Layer, Option, Path, References } from "effect";
+import { BunFileSystem, BunPath, BunRuntime } from "@effect/platform-bun";
 import { Argument, Command, Flag } from "effect/unstable/cli";
 import { SurrealClient, type SurrealClientShape } from "@ax/lib/db";
-import { listSessionsHere, listSessionsAround, listSessionsNear, type SessionRow } from "../dashboard/sessions-query.ts";
+import { listSessionsHere, listSessionsAround, listSessionsNear, findSessionIdsByPrefix, type SessionRow } from "../dashboard/sessions-query.ts";
 import {
     buildRecallNext,
     buildSessionsNext,
@@ -14,7 +14,7 @@ import {
     buildRolesNext,
     buildImproveProposalsNext,
 } from "../nav/next-links.ts";
-import { renderNextFooter } from "./next-format.ts";
+import { printNextLinks } from "./next-format.ts";
 import { findCommitWindow } from "@ax/lib/git-window";
 import { AxConfig } from "@ax/lib/config";
 import { safeJsonParse } from "@ax/lib/shared/safe-json";
@@ -93,6 +93,8 @@ import { deriveSignals } from "../ingest/derive-signals.ts";
 import { deriveTurnIntents } from "../ingest/derive-intents.ts";
 import { INSIGHT_VIEWS, insightSqlForView, isInsightView } from "../queries/insights.ts";
 import { enrichInsightRows } from "../queries/insights-enrich.ts";
+import { fetchSkillStats } from "../queries/skill-stats.ts";
+import { fetchUnusedSkills } from "../queries/unused-skills.ts";
 import { extractSessionTimeline, SessionTimelineServiceLayer } from "../timeline/service.ts";
 import { formatInsightRows } from "./insights-format.ts";
 import { writeDashboard } from "../dashboard/report.ts";
@@ -164,7 +166,6 @@ import {
 import { guidanceNext, parseSelfImproveArgs, selfImproveWeekly, sessionSummary } from "../self-improve/commands.ts";
 import {
     buildIngestEventStatement,
-    buildIngestRunFinishStatement,
     buildIngestRunStartStatement,
     buildIngestStageFinishStatement,
     buildIngestStageStartStatement,
@@ -180,7 +181,7 @@ import { pipelineTraceTransportLayer, tuiTraceTransportLayer } from "./ingest-tr
 import type { ProgressStage } from "./progress.ts";
 import { selectByKeys, selectByTag } from "../ingest/stage/select.ts";
 import { type BaseStageStats, type StageDef } from "../ingest/stage/types.ts";
-import { runIngest } from "../ingest/run.ts";
+import { runIngest, withIngestRunFinish } from "../ingest/run.ts";
 
 const boolArg = (name: string, enabled: boolean): string[] =>
     enabled ? [`--${name}`] : [];
@@ -559,17 +560,7 @@ const cmdDeriveSignals = (args: string[]) =>
             deriveSignals({ sinceDays, onProgress: progressUpdater(progress, "signals", "derive") }),
             progress,
         ).pipe(
-            Effect.tap(() => db.query(buildIngestRunFinishStatement({ runId, status: "ok" })).pipe(Effect.asVoid)),
-            Effect.catch((error) =>
-                Effect.gen(function* () {
-                    yield* db.query(buildIngestRunFinishStatement({
-                        runId,
-                        status: "error",
-                        metrics: { error: errorText(error) },
-                    }));
-                    return yield* error;
-                }),
-            ),
+            withIngestRunFinish(db, runId),
             Effect.provideService(References.MinimumLogLevel, verbose ? "Debug" : "Info"),
             Effect.ensuring(Effect.sync(() => progress.stop())),
         );
@@ -594,17 +585,7 @@ const cmdIngestInsights = (args: string[] = []) =>
             yield* telemetryStage(db, runId, "claude", "insights", ingestClaudeInsights(), progress);
         });
         yield* program.pipe(
-            Effect.tap(() => db.query(buildIngestRunFinishStatement({ runId, status: "ok" })).pipe(Effect.asVoid)),
-            Effect.catch((error) =>
-                Effect.gen(function* () {
-                    yield* db.query(buildIngestRunFinishStatement({
-                        runId,
-                        status: "error",
-                        metrics: { error: errorText(error) },
-                    }));
-                    return yield* error;
-                }),
-            ),
+            withIngestRunFinish(db, runId),
             Effect.provideService(References.MinimumLogLevel, verbose ? "Debug" : "Info"),
             Effect.ensuring(Effect.sync(() => progress.stop())),
             // ingestClaudeInsights now reads via @effect/platform FileSystem +
@@ -893,10 +874,12 @@ const cmdRecall = (opts: RecallCliOpts) =>
         if (result.hits.length === 0 && !multiSource) {
             console.log(`no matches for "${opts.query}"`);
             // Errors-as-teaching: name the broader queries to try next.
-            const footer = renderNextFooter(next);
-            if (footer) console.log(footer);
+            printNextLinks(next);
             return;
         }
+        // next: block prints FIRST - placement beats `| head` truncation and
+        // `2>&1` stream-folding (see printNextLinks).
+        printNextLinks(next);
         if (result.hits.length > 0) {
             if (multiSource) console.log("\n\x1b[1mturns\x1b[0m");
             const more = result.total_count > result.hits.length
@@ -951,9 +934,6 @@ const cmdRecall = (opts: RecallCliOpts) =>
                 }
             }
         }
-
-        const footer = renderNextFooter(next);
-        if (footer) console.log(footer);
     });
 
 const cmdSearch = (args: string[]) =>
@@ -1093,10 +1073,15 @@ const cmdStats = (args: string[]) =>
     Effect.gen(function* () {
         const name = args.filter((a) => !a.startsWith("--"))[0];
         if (!name) {
-            console.error("axctl skills stats: missing skill name");
+            // Errors-as-teaching: name the command that answers the likely
+            // intent (aggregate ranking) instead of a bare usage error.
+            console.error(
+                "axctl skills stats: missing <skill> (per-skill detail). " +
+                    "For the aggregate usage ranking use `ax skills weighted`; " +
+                    "to find a skill name use `ax recall \"<query>\" --sources=skill`.",
+            );
             process.exit(1);
         }
-        const db = yield* SurrealClient;
         const fs = yield* FileSystem.FileSystem;
         const path = yield* Path.Path;
         const exists = yield* skillExists(name);
@@ -1107,77 +1092,11 @@ const cmdStats = (args: string[]) =>
             );
             process.exit(2);
         }
-        // Issue #43: order recent_sessions by ts DESC (verified server-side),
-        // include the session id so we can de-dup in TS, and capture cwd so
-        // we can render a human-friendly project label rather than the raw
-        // Claude slug.
-        const sql = `
-LET $s = (SELECT * FROM skill WHERE name = $name)[0];
-RETURN {
-    skill: $s,
-    invocations: {
-        total: array::len((SELECT * FROM invoked WHERE out = $s.id)),
-        d7:    array::len((SELECT * FROM invoked WHERE out = $s.id AND ts > time::now() - 7d)),
-        d30:   array::len((SELECT * FROM invoked WHERE out = $s.id AND ts > time::now() - 30d)),
-        d90:   array::len((SELECT * FROM invoked WHERE out = $s.id AND ts > time::now() - 90d)),
-        last:  (SELECT ts FROM invoked WHERE out = $s.id ORDER BY ts DESC LIMIT 1)[0].ts,
-    },
-    recent_sessions: (
-        SELECT
-            in.session AS session_id,
-            in.session.project AS project_slug,
-            in.session.cwd AS cwd,
-            ts
-        FROM invoked
-        WHERE out = $s.id
-        ORDER BY ts DESC
-        LIMIT 50
-    )
-};`;
-        const result = yield* db.query<unknown[]>(sql, { name });
-        const payload = (Array.isArray(result)
-            ? [...result].reverse().find((r) => r != null)
-            : result) as
-            | {
-                  skill?: { dir_path?: string | null } | null;
-                  recent_sessions?: Array<Record<string, unknown>>;
-              }
-            | undefined;
-
-        // Dedupe + cap to the most recent 5 distinct sessions, then prettify.
-        if (payload?.recent_sessions) {
-            const seen = new Set<string>();
-            const clean: Array<{
-                project: string;
-                ts: unknown;
-            }> = [];
-            for (const row of payload.recent_sessions) {
-                const sid = String(row.session_id ?? "");
-                if (sid && seen.has(sid)) continue;
-                if (sid) seen.add(sid);
-                // cwd may come back as an array (per-edge projection) - take
-                // the first scalar for display purposes.
-                const cwdRaw = Array.isArray(row.cwd) ? row.cwd[0] : row.cwd;
-                const slugRaw = Array.isArray(row.project_slug)
-                    ? row.project_slug[0]
-                    : row.project_slug;
-                let project: string;
-                if (typeof cwdRaw === "string" && cwdRaw.length > 0) {
-                    // Mirrors path.basename without pulling node:path here.
-                    const parts = cwdRaw.split("/").filter((p) => p.length > 0);
-                    project = parts.length > 0 ? parts[parts.length - 1] : cwdRaw;
-                } else {
-                    project = prettifyProjectSlug(slugRaw);
-                }
-                clean.push({ project, ts: row.ts });
-                if (clean.length >= 5) break;
-            }
-            (payload as Record<string, unknown>).recent_sessions = clean;
-        }
+        const payload = yield* fetchSkillStats(name);
 
         // Read body lazily from disk via dir_path (DB no longer stores body -
         // multi-file skills + cache-staleness make on-disk the canonical source).
-        const dirPath = payload?.skill?.dir_path;
+        const dirPath = payload.skill?.dir_path;
         // Issue #36: codex-side tools are recorded with a synthetic dir_path
         // sentinel. They have no SKILL.md, so skip the disk read entirely
         // instead of letting Effect.promise(...) crash with ENOENT.
@@ -1233,109 +1152,14 @@ const cmdUnused = (args: string[]) =>
     Effect.gen(function* () {
         const days = parsePositiveIntFlag("unused", "days", args, 7);
         const includeScoped = args.includes("--include-scoped");
-        const db = yield* SurrealClient;
         // Skills declared in a subagent's `skills:` frontmatter load only when
         // that agent is spawned - they're not global dead weight. Recover the
         // skill → agent(s) map from disk so they can be hidden/tagged here.
         const agentScope = yield* loadAgentScopeMap();
-        // PERF (issue #31): Previous form ran a correlated subquery per skill
-        // (`SELECT count() FROM invoked WHERE out = $parent.id AND ts > N`).
-        // On the largest skill (~500k invoked edges) the index walk took
-        // ~1.5s × 137 skills = enough to make this multi-minute.
-        //
-        // Now we (a) compute the recent-active set in one full-scan
-        // GROUP BY over `invoked`, (b) compute total_inv + last_used in
-        // bulk, (c) anti-join in TS. Net round-trip: ~2 cheap queries.
-        const recentSql = `
-SELECT out AS skill_id, count() AS recent
-FROM invoked
-WHERE ts > time::now() - ${days}d
-GROUP BY out;`;
-        // Issue #34: `out.name AS name` over a GROUP BY scan returns the
-        // per-edge name array (e.g. ~500k entries for codex:exec_command).
-        // String() of that is a 17 MB single line. Aggregate over the edge
-        // table only, then look up the skill row by id in a separate cheap
-        // query and merge in TS.
-        const summarySql = `
-SELECT
-    out AS skill_id,
-    count() AS total_inv,
-    math::max(ts) AS last_used
-FROM invoked
-GROUP BY out;`;
-        const skillSql = `SELECT id, name, scope FROM skill;`;
-        // Skills with literally zero invocations don't show up in the
-        // GROUP BY scan; pull them straight from the skill table so the
-        // "never used" rows still appear.
-        const noInvSql = `
-SELECT name, scope FROM skill WHERE array::len(<-invoked) = 0 AND deleted_at IS NONE;`;
-        const [recentRes, summaryRes, skillRes, noInvRes] = yield* Effect.all(
-            [
-                db.query<[Array<Record<string, unknown>>]>(recentSql),
-                db.query<[Array<Record<string, unknown>>]>(summarySql),
-                db.query<[Array<Record<string, unknown>>]>(skillSql),
-                db.query<[Array<Record<string, unknown>>]>(noInvSql),
-            ],
-            { concurrency: 4 },
-        );
-        const recent = new Set<string>(
-            (recentRes?.[0] ?? []).map((r) => String(r.skill_id ?? "")),
-        );
-        const skillById = new Map<
-            string,
-            { name: string; scope: string }
-        >();
-        for (const s of (skillRes?.[0] ?? []) as Array<Record<string, unknown>>) {
-            skillById.set(String(s.id ?? ""), {
-                name: String(s.name ?? ""),
-                scope: String(s.scope ?? ""),
-            });
-        }
-        const summary = (summaryRes?.[0] ?? []) as Array<Record<string, unknown>>;
-        const fmtTs = (v: unknown): string => {
-            if (v == null) return "never";
-            // SurrealDB's math::max returns -Infinity for empty groups; surface
-            // it as "never" rather than the literal "-Infinity" string.
-            if (typeof v === "number" && !Number.isFinite(v)) return "never";
-            if (typeof v === "string") return v;
-            if (v instanceof Date) return v.toISOString();
-            return String(v);
-        };
-        const unused: Array<{
-            name: string;
-            scope: string;
-            total_inv: number;
-            last_used: string;
-        }> = [];
-        for (const r of summary) {
-            const id = String(r.skill_id ?? "");
-            if (recent.has(id)) continue;
-            const meta = skillById.get(id);
-            // Drop orphan invocations whose target skill never had a row
-            // UPSERTed (matches the original FROM-skill behaviour, which
-            // started from skill rows and naturally excluded these).
-            if (!meta || !meta.name) continue;
-            unused.push({
-                name: meta.name,
-                scope: meta.scope,
-                total_inv: Number(r.total_inv ?? 0),
-                last_used: fmtTs(r.last_used),
-            });
-        }
-        for (const r of (noInvRes?.[0] ?? []) as Array<Record<string, unknown>>) {
-            unused.push({
-                name: String(r.name ?? ""),
-                scope: String(r.scope ?? ""),
-                total_inv: 0,
-                last_used: "never",
-            });
-        }
-        unused.sort(
-            (a, b) =>
-                a.total_inv - b.total_inv || a.name.localeCompare(b.name),
-        );
+        const unused = yield* fetchUnusedSkills({ days });
         let hiddenScoped = 0;
         for (const r of unused) {
+            const last = r.last_used ?? "never";
             const agents = agentScope.get(r.name);
             if (agents && agents.length > 0) {
                 // Agent-scoped: not global dead weight. Hide unless asked,
@@ -1345,12 +1169,12 @@ SELECT name, scope FROM skill WHERE array::len(<-invoked) = 0 AND deleted_at IS 
                     continue;
                 }
                 console.log(
-                    `${r.name}  [agent:${agents.join(",")}]  total=${fmtCount(r.total_inv)}  last=${r.last_used}`,
+                    `${r.name}  [agent:${agents.join(",")}]  total=${fmtCount(r.total_inv)}  last=${last}`,
                 );
                 continue;
             }
             console.log(
-                `${r.name}  [${r.scope}]  total=${fmtCount(r.total_inv)}  last=${r.last_used}`,
+                `${r.name}  [${r.scope}]  total=${fmtCount(r.total_inv)}  last=${last}`,
             );
         }
         const shown = unused.length - (includeScoped ? 0 : hiddenScoped);
@@ -1385,9 +1209,8 @@ const cmdSkillsWeighted = (args: string[]) =>
         if (json) {
             console.log(renderWeightedJson(result));
         } else {
+            printNextLinks(buildSkillsWeightedNext(result));
             console.log(renderWeightedTable(result));
-            const footer = renderNextFooter(buildSkillsWeightedNext(result));
-            if (footer) console.log(footer);
         }
     });
 
@@ -1417,9 +1240,8 @@ const cmdSkillsByRole = (args: string[]) =>
         if (json) {
             console.log(renderSkillsByRoleJson(result, role));
         } else {
+            printNextLinks(buildSkillsByRoleNext(result, role));
             console.log(renderSkillsByRoleTable(result, role));
-            const footer = renderNextFooter(buildSkillsByRoleNext(result, role));
-            if (footer) console.log(footer);
         }
     });
 
@@ -1449,9 +1271,8 @@ const cmdRolesForSkill = (args: string[]) =>
         if (json) {
             console.log(renderRolesForSkillJson(result, skill));
         } else {
+            printNextLinks(buildSkillsRolesNext(result, skill));
             console.log(renderRolesForSkillTable(result, skill));
-            const footer = renderNextFooter(buildSkillsRolesNext(result, skill));
-            if (footer) console.log(footer);
         }
     });
 
@@ -1470,9 +1291,8 @@ const cmdRoles = (args: string[]) =>
         if (json) {
             console.log(renderAllRolesJson(result));
         } else {
+            printNextLinks(buildRolesNext(result));
             console.log(renderAllRolesTable(result));
-            const footer = renderNextFooter(buildRolesNext(result));
-            if (footer) console.log(footer);
         }
     });
 
@@ -2576,14 +2396,12 @@ const cmdImproveList = (args: string[]) =>
         );
         if (rows.length === 0) {
             console.log("(no proposals match filter)");
-            const footer = renderNextFooter(improveNext);
-            if (footer) console.log(footer);
+            printNextLinks(improveNext);
             return;
         }
+        printNextLinks(improveNext);
         console.log(`  freq  conf    status      form         dedupe_sig                title`);
         for (const row of rows) console.log(formatProposalLine(row));
-        const footer = renderNextFooter(improveNext);
-        if (footer) console.log(footer);
     });
 
 const cmdImproveShow = (args: string[]) =>
@@ -2675,16 +2493,13 @@ const cmdImproveRecommend = (args: string[]) =>
             console.log(JSON.stringify(items, null, 2));
             return;
         }
+        printNextLinks(
+            buildImproveProposalsNext(
+                items.map((i) => ({ sig: i.shortId, title: i.title })),
+            ),
+        );
         const formatted = formatRecommendations(items);
         console.log(formatted);
-        {
-            const footer = renderNextFooter(
-                buildImproveProposalsNext(
-                    items.map((i) => ({ sig: i.shortId, title: i.title })),
-                ),
-            );
-            if (footer) console.log(footer);
-        }
         if (items.length > 0 && !noClipboard) {
             const copied = copyToClipboard(formatted);
             if (copied) console.log("\n[copied to clipboard]");
@@ -3171,8 +2986,11 @@ function formatSessionsTable(rows: SessionRow[]): string {
         const project = prettifyProjectSlug(row.project ?? "").slice(0, 19).padEnd(20);
         const turns = String(row.turn_count ?? 0).padStart(5);
         const msg = (row.first_user_message ?? "").replace(/\s+/g, " ").trim();
-        const summaryWidth = Math.max(0, termWidth - 26 - 1 - 18 - 1 - 16 - 1 - 20 - 1 - 5 - 2);
-        const summary = summaryWidth > 0 ? msg.slice(0, summaryWidth) : msg.slice(0, 40);
+        // Floor the summary at 60 chars: on narrow terminals the column math
+        // left ~9 chars ("You are r"), making the listing useless for id
+        // resolution (dogfood retro R2). Wrapping beats unreadable.
+        const summaryWidth = Math.max(60, termWidth - 26 - 1 - 18 - 1 - 16 - 1 - 20 - 1 - 5 - 2);
+        const summary = msg.slice(0, summaryWidth);
         lines.push(`${started} ${source} ${repoShort} ${project} ${turns}  ${summary}`);
     }
     return lines.join("\n");
@@ -3291,6 +3109,7 @@ const cmdSessionsHere = (args: string[]) =>
             console.log(JSON.stringify({ sessions, next }, null, 2));
             return;
         }
+        printNextLinks(next);
         console.log(formatSessionsTable(rows));
         const notes: string[] = [];
         if (hiddenSubagents > 0) {
@@ -3300,8 +3119,6 @@ const cmdSessionsHere = (args: string[]) =>
             notes.push(`showing ${rows.length} of ${visible.length} - raise --limit`);
         }
         if (notes.length > 0) console.log(`(${notes.join("; ")})`);
-        const footer = renderNextFooter(next);
-        if (footer) console.log(footer);
     });
 
 // --- sessions around ---
@@ -3357,9 +3174,8 @@ const cmdSessionsAround = (args: string[]) =>
             console.log(JSON.stringify({ sessions, next }, null, 2));
             return;
         }
+        printNextLinks(next);
         console.log(formatSessionsTable(rows));
-        const footer = renderNextFooter(next);
-        if (footer) console.log(footer);
     });
 
 // --- sessions near ---
@@ -3425,9 +3241,8 @@ const cmdSessionsNear = (args: string[]) =>
             console.log(JSON.stringify({ sessions, next }, null, 2));
             return;
         }
+        printNextLinks(next);
         console.log(formatSessionsTable(rows));
-        const footer = renderNextFooter(next);
-        if (footer) console.log(footer);
     });
 
 // ---------------------------------------------------------------------------
@@ -3470,7 +3285,8 @@ const cmdSessionShow = (args: string[]) =>
             }
         }
 
-        const payload = yield* fetchSessionShow({
+        let resolvedId = sessionId;
+        let payload = yield* fetchSessionShow({
             sessionId,
             expand: expandSet,
             expandAll,
@@ -3479,8 +3295,37 @@ const cmdSessionShow = (args: string[]) =>
             catchDbErrorAndExit("axctl session show"),
         );
 
+        // Prefix fallback: agents paste the short ids shown in listings
+        // (dogfood retro R2). Unambiguous prefix → resolve + proceed;
+        // ambiguous → list candidates; no match → teach the lookup path.
+        if (payload.session.overview === null && sessionId.length >= 4) {
+            const candidates = yield* findSessionIdsByPrefix(sessionId).pipe(
+                catchDbErrorAndExit("axctl session show"),
+            );
+            if (candidates.length === 1) {
+                resolvedId = candidates[0]!;
+                process.stderr.write(`resolved id prefix ${sessionId} → ${resolvedId}\n`);
+                payload = yield* fetchSessionShow({
+                    sessionId: resolvedId,
+                    expand: expandSet,
+                    expandAll,
+                    byRole,
+                }).pipe(catchDbErrorAndExit("axctl session show"));
+            } else if (candidates.length > 1) {
+                process.stderr.write(
+                    `session id prefix "${sessionId}" is ambiguous:\n` +
+                        candidates.map((c) => `  ax sessions show ${c}`).join("\n") +
+                        "\n",
+                );
+                process.exit(1);
+            }
+        }
+
         if (payload.session.overview === null) {
-            process.stderr.write(`session ${sessionId} not found\n`);
+            process.stderr.write(
+                `session ${sessionId} not found. Find the full id with ` +
+                    "`ax recall \"<query>\"` or `ax sessions here --days=7`.\n",
+            );
             process.exit(1);
         }
 
@@ -3488,7 +3333,7 @@ const cmdSessionShow = (args: string[]) =>
         // (reverted commits + their later_fixed_by fix chains). Bounded to this
         // session's produced edges; null only when the id fails validation
         // (already excluded above by the not-found check).
-        const metrics = yield* fetchSessionDurabilityDetail(sessionId).pipe(
+        const metrics = yield* fetchSessionDurabilityDetail(resolvedId).pipe(
             catchDbErrorAndExit("axctl session show"),
         );
 
@@ -3497,6 +3342,7 @@ const cmdSessionShow = (args: string[]) =>
         if (useJson) {
             console.log(renderSessionJson(payload, { metrics, next }));
         } else {
+            printNextLinks(next);
             console.log(renderSessionMarkdown(payload, { metrics, next }));
         }
     });
@@ -4929,9 +4775,12 @@ const recallCommand = Command.make(
 
 const statsCommand = Command.make(
     "stats",
-    { skill: Argument.string("skill") },
-    ({ skill }) => cmdStats([skill]),
-).pipe(Command.withDescription("Show detailed stats for one skill"));
+    // Optional so a bare `ax skills stats` reaches our teaching error instead
+    // of the framework's "Missing required argument" dead end - dogfood retro
+    // showed an agent guessing this command for the AGGREGATE ranking.
+    { skill: Argument.string("skill").pipe(Argument.optional) },
+    ({ skill }) => cmdStats(Option.isSome(skill) ? [skill.value] : []),
+).pipe(Command.withDescription("Show detailed stats for ONE skill (requires <skill>). For the aggregate usage ranking use `ax skills weighted`."));
 
 const cmdTimeline = (sessionId: string, json: boolean) =>
     extractSessionTimeline(sessionId).pipe(
@@ -5854,44 +5703,55 @@ export const classifiersPackageOperationsNeedsDb = (args: ReadonlyArray<string>)
         args.includes("--boundary-replay-summary")
     );
 
-async function main() {
-    const [, , ...args] = process.argv;
+/**
+ * Route raw argv to a CLI program. Mirrors the routing that used to live in
+ * an async `main()` that `Effect.runPromise`d each branch - now every branch
+ * RETURNS its Effect so the whole invocation runs as ONE main fiber under
+ * `BunRuntime.runMain`. That makes SIGINT/SIGTERM interrupt the fiber, which
+ * lets finalizers actually run (SurrealDB close, TraceSink/OTLP flush, the
+ * ingest_run finish row + ingest-lock release) instead of hard-killing
+ * mid-run and stranding `ingest_run` rows in status "running".
+ *
+ * Non-Effect legacy commands (version/star/share) are wrapped in
+ * `Effect.promise`; a rejection becomes a defect and flows through the same
+ * `reportCliFailure` path the old `.catch` handled.
+ */
+const dispatch = (args: ReadonlyArray<string>): Effect.Effect<void, unknown> => {
     if (args[0] === undefined) {
         // Bare `ax`: brand landing (ASCII wordmark) then the command list.
-        const { formatLandingBanner } = await import("./banner.ts");
-        process.stdout.write(formatLandingBanner(AX_VERSION, process.stdout.isTTY === true) + "\n");
-        await Effect.runPromise(withoutDb(["--help"]));
-        return;
+        return Effect.gen(function* () {
+            const { formatLandingBanner } = yield* Effect.promise(() => import("./banner.ts"));
+            process.stdout.write(formatLandingBanner(AX_VERSION, process.stdout.isTTY === true) + "\n");
+            yield* withoutDb(["--help"]);
+        });
     }
     if (args[0] === "help" || args[0] === "--help" || args[0] === "-h") {
-        await Effect.runPromise(withoutDb(["--help"]));
-        return;
+        return withoutDb(["--help"]);
     }
     if (args[0] === "-V" || args[0] === "-v" || args[0] === "--version") {
-        await printVersion(args.slice(1), liveVersionDeps);
-        return;
+        return Effect.promise(() => printVersion(args.slice(1), liveVersionDeps));
     }
     if (args[0] === "upgrade") {
-        await Effect.runPromise(withoutDb(["update", ...args.slice(1)]));
-        return;
+        return withoutDb(["update", ...args.slice(1)]);
     }
     if (args[0] === "star") {
-        await cmdStar(args.slice(1));
-        return;
+        return Effect.promise(() => cmdStar(args.slice(1)));
     }
     if (args[0] === "ingest") {
         // Effect's CLI parser silently ignores unknown flags, so the removed
         // `--*-only` flags would otherwise no-op into a full ingest. Reject
-        // them up-front against raw argv before Effect strips them.
+        // them up-front against raw argv before Effect strips them. Nothing
+        // has been acquired yet, so a direct exit(2) is finalizer-safe.
         const removed = detectRemovedIngestFlag(args.slice(1));
         if (removed) {
-            console.error(
-                `axctl ingest: ${removed.flag} was removed. Use ${removed.replacement} instead.`,
-            );
-            process.exit(2);
+            return Effect.sync(() => {
+                console.error(
+                    `axctl ingest: ${removed.flag} was removed. Use ${removed.replacement} instead.`,
+                );
+                process.exit(2);
+            });
         }
-        await Effect.runPromise(withIngest(args));
-        return;
+        return withIngest(args);
     }
     if (
         args[0] === "classifiers" &&
@@ -5899,36 +5759,58 @@ async function main() {
             args[1] === "graph" ||
             args[1] === "lifecycle")
     ) {
-        await Effect.runPromise(withDb(args));
-        return;
+        return withDb(args);
     }
     if (args[0] === "classifiers" && (args[1] === "eval" || args[1] === "list" || args[1] === "package-operations")) {
-        await Effect.runPromise(withoutDb(args));
-        return;
+        return withoutDb(args);
     }
     if (args[0] === "share") {
         if (args[1] === "--help" || args[1] === "-h") {
-            await Effect.runPromise(withoutDb(args));
-            return;
+            return withoutDb(args);
         }
-        await cmdShare(args.slice(1));
-        return;
+        return Effect.promise(() => cmdShare(args.slice(1)));
     }
     if (DB_COMMANDS.has(args[0] ?? "")) {
-        await Effect.runPromise(withDb(args));
-        return;
+        return withDb(args);
     }
-    await Effect.runPromise(withoutDb(args));
-}
+    return withoutDb(args);
+};
+
+/**
+ * Legacy `axctl error:` reporting, run INSIDE the effect so `runMain`
+ * (invoked with `disableErrorReporting: true`) never pretty-logs the cause
+ * itself. Stays silent for:
+ *   - interruption-only causes (Ctrl-C): no error banner, `defaultTeardown`
+ *     maps them to exit 130;
+ *   - `ShowHelp`: `Command.runWith` already rendered help + the ERROR block;
+ *     the failure still propagates so `defaultTeardown` exits 1, matching the
+ *     old `.catch` path for usage errors.
+ */
+const reportCliFailure = (cause: Cause.Cause<unknown>): Effect.Effect<void> =>
+    Effect.sync(() => {
+        if (Cause.hasInterruptsOnly(cause)) return;
+        const err = Cause.squash(cause);
+        if (err && typeof err === "object" && "_tag" in err && err._tag === "ShowHelp") return;
+        console.error("axctl error:", err);
+    });
 
 if (import.meta.main) {
-    main()
-        .then(() => maybePrintStarNudge(process.argv.slice(2)))
-        .catch((err) => {
-            if (err && typeof err === "object" && "_tag" in err && err._tag === "ShowHelp") {
-                process.exit(1);
-            }
-            console.error("axctl error:", err);
-            process.exit(1);
-        });
+    const args = process.argv.slice(2);
+    // BunRuntime.runMain makes the CLI the process main fiber: SIGINT/SIGTERM
+    // interrupt it (finalizers run), then Runtime.defaultTeardown picks the
+    // exit code - 0 success, 1 failure (incl. ShowHelp usage errors), 130 for
+    // interruption-only (Ctrl-C). On success with exit code 0 it does NOT call
+    // process.exit, so long-lived fire-and-forget commands (`serve`, `mcp`)
+    // keep running on their own handles and keep owning their SIGINT shutdown
+    // (runMain removes its signal listeners once the main fiber completes).
+    // v4 beta runMain has no `disablePrettyLogger` option (only
+    // disableErrorReporting + teardown); reportCliFailure owns all
+    // user-facing error output.
+    BunRuntime.runMain(
+        dispatch(args).pipe(
+            Effect.tap(() => Effect.promise(() => maybePrintStarNudge(args))),
+            Effect.tapCause(reportCliFailure),
+        ),
+        { disableErrorReporting: true },
+    );
 }

@@ -1,4 +1,5 @@
 import { Context, Effect, FileSystem, Layer, Path, Schema } from "effect";
+import { jsonArrayField, jsonField } from "@ax/lib/decode";
 import { SurrealClient } from "@ax/lib/db";
 import type { DbError } from "@ax/lib/errors";
 import { prettyPrint } from "@ax/lib/json";
@@ -124,15 +125,15 @@ export interface LabelMiningSelfImproveResult {
     readonly out_path?: string;
 }
 
+/** Typed view of the one `properties_json` field this module inspects. */
+const reviewedPropertiesField = jsonField(Schema.Struct({
+    promotion_safe: Schema.optional(Schema.Boolean),
+}));
+
 const isPromotionSafeFact = (row: LabelMiningGraphFactRow): boolean => {
     if (row.source_kind !== REVIEWED_SOURCE_KIND) return false;
     if (row.predicate !== "reviewed_label") return false;
-    try {
-        const props = JSON.parse(row.properties_json) as { readonly promotion_safe?: unknown };
-        return props.promotion_safe === true;
-    } catch {
-        return false;
-    }
+    return reviewedPropertiesField.decode(row.properties_json)?.promotion_safe === true;
 };
 
 /**
@@ -519,25 +520,14 @@ interface VectorTableRow {
     readonly nearest_scores_json?: string | null;
 }
 
-const parseStringArray = (value: string | null | undefined): readonly string[] => {
-    if (!value) return [];
-    try {
-        const parsed = JSON.parse(value);
-        return Array.isArray(parsed) ? parsed.map((v) => String(v)) : [];
-    } catch {
-        return [];
-    }
-};
+// Coercing reads (String()/Number() per element) preserve the legacy tolerant
+// behavior for vector sidecar columns - hence Array(Unknown) + map, not a
+// strict element schema.
+const parseStringArray = (value: string | null | undefined): readonly string[] =>
+    jsonArrayField.decode(value)?.map((v) => String(v)) ?? [];
 
-const parseNumberArray = (value: string | null | undefined): readonly number[] => {
-    if (!value) return [];
-    try {
-        const parsed = JSON.parse(value);
-        return Array.isArray(parsed) ? parsed.map((v) => Number(v)) : [];
-    } catch {
-        return [];
-    }
-};
+const parseNumberArray = (value: string | null | undefined): readonly number[] =>
+    jsonArrayField.decode(value)?.map((v) => Number(v)) ?? [];
 
 /**
  * Reconstruct projection inputs from persisted review + vector rows. The

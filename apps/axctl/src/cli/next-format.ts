@@ -32,3 +32,21 @@ export const renderNextFooter = (
     );
     return `\nnext:\n${lines.join("\n")}`;
 };
+
+/**
+ * Print the `next:` block to STDOUT, intended to be called BEFORE the data.
+ *
+ * Placement history (two dogfood retros):
+ *   v0.21.0 - footer at the bottom of stdout: decapitated by `| head -N`
+ *     in 9/10 agent calls.
+ *   v0.22.0 - footer on stderr: defeated anyway, because agents reflexively
+ *     write `2>&1 | head`, which folds stderr back into stdout upstream of
+ *     `head`.
+ * Conclusion: placement beats stream routing. The block prints FIRST, so any
+ * `head` keeps it and agents read it before the data. JSON paths are
+ * unaffected - they carry structured `next` on stdout.
+ */
+export const printNextLinks = (links: ReadonlyArray<NavLink>): void => {
+    const block = renderNextFooter(links);
+    if (block) process.stdout.write(`${block.replace(/^\n/, "")}\n\n`);
+};

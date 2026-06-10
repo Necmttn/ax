@@ -1,5 +1,13 @@
 import { homedir } from "node:os";
-import { Context, Effect, FileSystem, Layer } from "effect";
+import {
+    Config,
+    ConfigProvider,
+    Context,
+    Effect,
+    FileSystem,
+    Layer,
+    Redacted,
+} from "effect";
 import { posixPath } from "@ax/lib/shared/path";
 import { dbUrlFromState, readRuntimeState, runtimeStatePath } from "./runtime-state.ts";
 
@@ -9,7 +17,8 @@ export interface AxConfigShape {
         readonly ns: string;
         readonly db: string;
         readonly user: string;
-        readonly pass: string;
+        /** Redacted so the password never leaks via logs/inspect. Unwrap with `Redacted.value`. */
+        readonly pass: Redacted.Redacted<string>;
     };
     readonly paths: {
         readonly home: string;
@@ -51,33 +60,54 @@ const DEFAULTS = {
     sessionsEnrichConcurrency: 16,
 } as const;
 
-const csv = (raw: string | undefined): string[] =>
-    (raw ?? "").split(",").map((s) => s.trim()).filter(Boolean);
+/** Legacy-faithful int knob parsing, byte-identical to the old hand-rolled
+ *  env readers: `Number.parseInt(raw, 10)` prefix-parses (`" 5"` -> 5,
+ *  `"5abc"` -> 5, `"5.5"` -> 5, `"1e2"` -> 1); a missing var, empty string,
+ *  unparseable junk, or a value failing `check` silently degrades to the
+ *  fallback. Operational knobs must keep accepting everything the old parser
+ *  accepted - do NOT swap this for a strict `Config.schema(Int)` decode. */
+const legacyInt = (check: (n: number) => boolean) =>
+    (name: string, fallback: number): Config.Config<number> =>
+        Config.string(name).pipe(
+            Config.map((raw) => {
+                if (!raw) return fallback;
+                const parsed = Number.parseInt(raw, 10);
+                return Number.isFinite(parsed) && check(parsed) ? parsed : fallback;
+            }),
+            Config.withDefault(fallback),
+        );
 
-const positiveInt = (raw: string | undefined, fallback: number): number => {
-    if (!raw) return fallback;
-    const parsed = Number.parseInt(raw, 10);
-    return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
-};
+/** Missing var -> fallback. Junk / zero / negative -> fallback. */
+const positiveInt = legacyInt((n) => n > 0);
 
-const nonNegativeInt = (raw: string | undefined, fallback: number): number => {
-    if (!raw) return fallback;
-    const parsed = Number.parseInt(raw, 10);
-    return Number.isFinite(parsed) && parsed >= 0 ? parsed : fallback;
-};
+/** Missing var -> fallback. Junk / negative -> fallback; zero is allowed. */
+const nonNegativeInt = legacyInt((n) => n >= 0);
+
+/** Comma-separated list: trims entries, drops empties. Missing var -> []. */
+const csvList = (name: string): Config.Config<ReadonlyArray<string>> =>
+    Config.string(name).pipe(
+        Config.map((raw) => raw.split(",").map((s) => s.trim()).filter(Boolean)),
+        Config.withDefault([] as ReadonlyArray<string>),
+    );
+
+/** `env.X ?? fallback` semantics: only a MISSING var falls back (empty string
+ *  is honored as-is, exactly like the previous `??`-based reads). */
+const stringOr = (name: string, fallback: string): Config.Config<string> =>
+    Config.string(name).pipe(Config.withDefault(fallback));
 
 /**
- * Read a fresh snapshot from process.env. Requires `FileSystem` because the
- * persisted DB endpoint is read from `runtime.json` via `readRuntimeState`.
- * Pure path math is done through the shared `posixPath` instance, so no `Path`
- * dependency is incurred. Effect callers should prefer the `AxConfig` service.
+ * The full config recipe, read through the ambient `ConfigProvider`. Requires
+ * `FileSystem` because the persisted DB endpoint comes from `runtime.json` via
+ * `readRuntimeState`. `Effect.orDie` is safe: every leaf has a fallback, so the
+ * only theoretical failure is a provider source error (impossible for env).
  */
-export function envSnapshot(
-    env: Record<string, string | undefined> = process.env,
-): Effect.Effect<AxConfigShape, never, FileSystem.FileSystem> {
-    return Effect.gen(function* () {
-        const home = env.HOME ?? HOME;
-        const dataDir = env.AX_DATA_DIR ?? posixPath.join(home, ".local", "share", "ax");
+const snapshotConfig: Effect.Effect<AxConfigShape, never, FileSystem.FileSystem> =
+    Effect.gen(function* () {
+        const home = yield* stringOr("HOME", HOME);
+        const dataDir = yield* stringOr(
+            "AX_DATA_DIR",
+            posixPath.join(home, ".local", "share", "ax"),
+        );
         const runtime = yield* readRuntimeState(runtimeStatePath(dataDir));
         return {
             db: {
@@ -85,66 +115,117 @@ export function envSnapshot(
                 // install writes runtime.json after a successful port pick, so a one-time
                 // port fallback keeps every later CLI invocation pointed at the right
                 // listener without the user needing to set env vars.
-                url: env.AX_DB_URL ?? dbUrlFromState(runtime),
-                ns: env.AX_DB_NS ?? "ax",
-                db: env.AX_DB_DB ?? "main",
-                user: env.AX_DB_USER ?? "root",
-                pass: env.AX_DB_PASS ?? "root",
+                url: yield* stringOr("AX_DB_URL", dbUrlFromState(runtime)),
+                ns: yield* stringOr("AX_DB_NS", "ax"),
+                db: yield* stringOr("AX_DB_DB", "main"),
+                user: yield* stringOr("AX_DB_USER", "root"),
+                pass: yield* Config.redacted("AX_DB_PASS").pipe(
+                    Config.withDefault(Redacted.make("root")),
+                ),
             },
             paths: {
                 home,
-                transcriptsDir:
-                    env.AX_TRANSCRIPTS_DIR ?? posixPath.join(home, ".claude", "projects"),
-                skillDirs: csv(env.AX_SKILLS_DIRS),
-                commandDirs: csv(env.AX_COMMAND_DIRS),
-                codexDir: env.AX_CODEX_DIR ?? posixPath.join(home, ".codex", "sessions"),
-                piDir: env.AX_PI_DIR ?? posixPath.join(home, ".pi", "agent", "sessions"),
-                opencodeDir: env.AX_OPENCODE_DIR ?? posixPath.join(home, ".local", "share", "opencode"),
-                cursorUserDir:
-                    env.AX_CURSOR_USER_DIR ?? posixPath.join(home, "Library", "Application Support", "Cursor", "User"),
+                transcriptsDir: yield* stringOr(
+                    "AX_TRANSCRIPTS_DIR",
+                    posixPath.join(home, ".claude", "projects"),
+                ),
+                skillDirs: yield* csvList("AX_SKILLS_DIRS"),
+                commandDirs: yield* csvList("AX_COMMAND_DIRS"),
+                codexDir: yield* stringOr(
+                    "AX_CODEX_DIR",
+                    posixPath.join(home, ".codex", "sessions"),
+                ),
+                piDir: yield* stringOr(
+                    "AX_PI_DIR",
+                    posixPath.join(home, ".pi", "agent", "sessions"),
+                ),
+                opencodeDir: yield* stringOr(
+                    "AX_OPENCODE_DIR",
+                    posixPath.join(home, ".local", "share", "opencode"),
+                ),
+                cursorUserDir: yield* stringOr(
+                    "AX_CURSOR_USER_DIR",
+                    posixPath.join(home, "Library", "Application Support", "Cursor", "User"),
+                ),
                 dataDir,
-                claudeUsageDir:
-                    env.AX_CLAUDE_USAGE_DIR ?? posixPath.join(home, ".claude", "usage-data"),
-                repoListFile:
-                    env.AX_REPO_LIST ?? posixPath.join(dataDir, "ax-repos.txt"),
+                claudeUsageDir: yield* stringOr(
+                    "AX_CLAUDE_USAGE_DIR",
+                    posixPath.join(home, ".claude", "usage-data"),
+                ),
+                repoListFile: yield* stringOr(
+                    "AX_REPO_LIST",
+                    posixPath.join(dataDir, "ax-repos.txt"),
+                ),
             },
             knobs: {
-                claudeConcurrency: positiveInt(
-                    env.AX_CLAUDE_CONCURRENCY,
+                claudeConcurrency: yield* positiveInt(
+                    "AX_CLAUDE_CONCURRENCY",
                     DEFAULTS.claudeConcurrency,
                 ),
-                codexConcurrency: positiveInt(
-                    env.AX_CODEX_CONCURRENCY,
+                codexConcurrency: yield* positiveInt(
+                    "AX_CODEX_CONCURRENCY",
                     DEFAULTS.codexConcurrency,
                 ),
-                codexProgressEvery: positiveInt(
-                    env.AX_CODEX_PROGRESS_EVERY,
+                codexProgressEvery: yield* positiveInt(
+                    "AX_CODEX_PROGRESS_EVERY",
                     DEFAULTS.codexProgressEvery,
                 ),
-                codexFlushEvery: positiveInt(
-                    env.AX_CODEX_FLUSH_EVERY,
+                codexFlushEvery: yield* positiveInt(
+                    "AX_CODEX_FLUSH_EVERY",
                     DEFAULTS.codexFlushEvery,
                 ),
-                codexRawMaxBytes: nonNegativeInt(
-                    env.AX_CODEX_RAW_MAX_BYTES,
+                codexRawMaxBytes: yield* nonNegativeInt(
+                    "AX_CODEX_RAW_MAX_BYTES",
                     DEFAULTS.codexRawMaxBytes,
                 ),
-                codexPayloadMaxBytes: nonNegativeInt(
-                    env.AX_CODEX_PAYLOAD_MAX_BYTES,
+                codexPayloadMaxBytes: yield* nonNegativeInt(
+                    "AX_CODEX_PAYLOAD_MAX_BYTES",
                     DEFAULTS.codexPayloadMaxBytes,
                 ),
-                ingestTimeoutSeconds: positiveInt(
-                    env.AX_INGEST_TIMEOUT_SECONDS,
+                ingestTimeoutSeconds: yield* positiveInt(
+                    "AX_INGEST_TIMEOUT_SECONDS",
                     DEFAULTS.ingestTimeoutSeconds,
                 ),
-                sessionsEnrichConcurrency: positiveInt(
-                    env.AX_SESSIONS_ENRICH_CONCURRENCY,
+                sessionsEnrichConcurrency: yield* positiveInt(
+                    "AX_SESSIONS_ENRICH_CONCURRENCY",
                     DEFAULTS.sessionsEnrichConcurrency,
                 ),
             },
         };
-    });
-}
+    }).pipe(Effect.orDie);
+
+/** `process.env`-shaped records carry `undefined` holes; `ConfigProvider.fromEnv`
+ *  wants a dense `Record<string, string>`. */
+const compactEnv = (
+    env: Record<string, string | undefined>,
+): Record<string, string> => {
+    const out: Record<string, string> = {};
+    for (const [k, v] of Object.entries(env)) {
+        if (v !== undefined) out[k] = v;
+    }
+    return out;
+};
+
+/**
+ * Read a fresh snapshot of the config. With no argument, reads `process.env`
+ * at *run* time (same semantics as the previous hand-rolled reader); pass an
+ * explicit env record for hermetic tests. Requires `FileSystem` because the
+ * persisted DB endpoint is read from `runtime.json` via `readRuntimeState`.
+ * Pure path math is done through the shared `posixPath` instance, so no `Path`
+ * dependency is incurred. Effect callers should prefer the `AxConfig` service.
+ */
+export const envSnapshot = Effect.fn("config.envSnapshot")(function* (
+    env?: Record<string, string | undefined>,
+) {
+    // The generator body runs at *effect run* time, so `process.env` is read
+    // per run - same deferred-read semantics as the previous `Effect.suspend`.
+    return yield* snapshotConfig.pipe(
+        Effect.provideService(
+            ConfigProvider.ConfigProvider,
+            ConfigProvider.fromEnv({ env: compactEnv(env ?? process.env) }),
+        ),
+    );
+});
 
 /** Effect service exposing the typed config snapshot. */
 export class AxConfig extends Context.Service<
@@ -166,18 +247,16 @@ export const AxConfigLive: Layer.Layer<AxConfig, never, FileSystem.FileSystem> =
  * `Layer.succeed(AxConfig, yield* makeTestConfig({ db: { url: ... } }))` or via
  * the `AxConfigTest` layer.
  */
-export function makeTestConfig(
+export const makeTestConfig = Effect.fn("config.makeTestConfig")(function* (
     overrides: DeepPartial<AxConfigShape> = {},
-): Effect.Effect<AxConfigShape, never, FileSystem.FileSystem> {
-    return Effect.gen(function* () {
-        const base = yield* envSnapshot({});
-        return {
-            db: { ...base.db, ...(overrides.db ?? {}) },
-            paths: { ...base.paths, ...(overrides.paths ?? {}) },
-            knobs: { ...base.knobs, ...(overrides.knobs ?? {}) },
-        };
-    });
-}
+) {
+    const base = yield* envSnapshot({});
+    return {
+        db: { ...base.db, ...(overrides.db ?? {}) },
+        paths: { ...base.paths, ...(overrides.paths ?? {}) },
+        knobs: { ...base.knobs, ...(overrides.knobs ?? {}) },
+    } satisfies AxConfigShape;
+});
 
 export const AxConfigTest = (
     overrides: DeepPartial<AxConfigShape> = {},
@@ -185,7 +264,12 @@ export const AxConfigTest = (
     Layer.effect(AxConfig)(makeTestConfig(overrides));
 
 type DeepPartial<T> = {
-    [K in keyof T]?: T[K] extends ReadonlyArray<unknown> | string | number | boolean
+    [K in keyof T]?: T[K] extends
+        | ReadonlyArray<unknown>
+        | string
+        | number
+        | boolean
+        | Redacted.Redacted<string>
         ? T[K]
         : DeepPartial<T[K]>;
 };

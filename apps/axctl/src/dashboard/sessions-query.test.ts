@@ -7,9 +7,12 @@
 import { describe, expect, test } from "bun:test";
 import { Effect, Layer } from "effect";
 import { BunFileSystem } from "@effect/platform-bun";
-import { RecordId } from "surrealdb";
-import { SurrealClient, type SurrealClientShape } from "@ax/lib/db";
+import { SurrealClient } from "@ax/lib/db";
 import { AxConfig, AxConfigTest } from "@ax/lib/config";
+import {
+    makeTestSurrealClient,
+    type TestSurrealQueryCall,
+} from "@ax/lib/testing/surreal";
 import {
     listSessionsHere,
     listSessionsAround,
@@ -20,32 +23,15 @@ import {
 // Mock DB helper
 // ---------------------------------------------------------------------------
 
-interface QueryCapture {
-    sql: string;
-    bindings: Record<string, unknown> | undefined;
-}
-
 function makeMockDb(opts?: {
     sessionRows?: ReadonlyArray<Record<string, unknown>>;
-}): { layer: Layer.Layer<SurrealClient>; captured: QueryCapture[] } {
-    const captured: QueryCapture[] = [];
-    let calls = 0;
-    const impl: SurrealClientShape = {
-        query: <T extends unknown[] = unknown[]>(sql: string, bindings?: Record<string, unknown>) => {
-            captured.push({ sql, bindings });
-            calls += 1;
-            if (calls === 1 && opts?.sessionRows) {
-                return Effect.succeed([opts.sessionRows] as unknown as T);
-            }
-            return Effect.succeed([[]] as unknown as T);
-        },
-        upsert: (_id: RecordId, _content: Record<string, unknown>) => Effect.void,
-        relate: () => Effect.void,
-        putFile: () => Effect.void,
-        getFile: () => Effect.succeed(""),
-        raw: undefined as unknown as import("surrealdb").Surreal,
-    };
-    return { layer: Layer.succeed(SurrealClient, impl), captured };
+}): { layer: Layer.Layer<SurrealClient>; captured: TestSurrealQueryCall[] } {
+    // First query call (the session list) answers with `sessionRows`; the
+    // follow-up enrichment queries fall back to `[[]]`.
+    const tc = makeTestSurrealClient(
+        opts?.sessionRows ? { responses: [[[...opts.sessionRows]]] } : {},
+    );
+    return { layer: tc.layer, captured: tc.calls };
 }
 
 // enrichSessions reads its fan-out width from AxConfig.knobs, so the mock DB

@@ -44,6 +44,17 @@ export const numberField = (
     return typeof v === "number" && Number.isFinite(v) ? v : null;
 };
 
+/** Number at `key` coerced from any numeric-ish value (string counts, Date
+ *  no); non-finite or missing → `0`. Use for aggregate counts where a
+ *  missing column means zero. */
+export const numericField = (
+    row: Record<string, unknown>,
+    key: string,
+): number => {
+    const v = Number(row[key] ?? 0);
+    return Number.isFinite(v) ? v : 0;
+};
+
 /** A record id rendered as a string - accepts a string or a `RecordId`-like
  *  object with a meaningful `toString`. */
 export const recordIdString = (v: unknown): string | null => {

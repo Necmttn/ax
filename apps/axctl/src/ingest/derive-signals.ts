@@ -117,10 +117,8 @@ export interface DeriveOpts {
     onProgress: (counts: Record<string, number>) => Effect.Effect<void>;
 }
 
-export const deriveSignals = (
-    opts: Partial<DeriveOpts> = {},
-): Effect.Effect<DeriveStats, DbError, SurrealClient> =>
-    Effect.gen(function* () {
+export const deriveSignals = Effect.fn("derive.signals")(
+    function* (opts: Partial<DeriveOpts> = {}) {
         const skillNames = yield* fetchSkillNames().pipe(
             Effect.withSpan("signals.fetch-skills"),
         );
@@ -274,8 +272,9 @@ export const deriveSignals = (
             recoveries,
             frictionEvents: frictionBatch.length,
             diagnosticEvents: diagnosticBatch.length,
-        };
-    });
+        } satisfies DeriveStats;
+    },
+);
 
 if (import.meta.main) {
     const sinceArg = process.argv.find((a) => a.startsWith("--since="));
@@ -310,18 +309,19 @@ export class SignalsStats extends BaseStageStats.extend<SignalsStats>("SignalsSt
 
 export const signalsStage: StageDef<SignalsStats, SurrealClient> = {
     meta: StageMeta.make({ key: "signals", deps: ["claude", "codex", "pi", "opencode", "cursor", "subagents", "spawned", "git"], tags: ["derive"] }),
-    run: (ctx: IngestContext) =>
-        Effect.gen(function* () {
-            const t0 = Date.now();
-            const sinceDays = sinceDaysFromCtx(ctx);
-            const result = yield* deriveSignals({ sinceDays });
-            return SignalsStats.make({
-                durationMs: Date.now() - t0,
-                summary: `derived ${result.frictionEvents} friction, ${result.diagnosticEvents} diagnostic events`,
-                frictionEvents: result.frictionEvents,
-                diagnosticEvents: result.diagnosticEvents,
-                corrections: result.corrections,
-                proposed: result.proposed,
-            });
-        }),
+    // Unnamed Effect.fn: the stage runner's LiveTrace.step span already names
+    // this boundary by the stage key, so a named span here would double-wrap.
+    run: Effect.fn(function* (ctx: IngestContext) {
+        const t0 = Date.now();
+        const sinceDays = sinceDaysFromCtx(ctx);
+        const result = yield* deriveSignals({ sinceDays });
+        return SignalsStats.make({
+            durationMs: Date.now() - t0,
+            summary: `derived ${result.frictionEvents} friction, ${result.diagnosticEvents} diagnostic events`,
+            frictionEvents: result.frictionEvents,
+            diagnosticEvents: result.diagnosticEvents,
+            corrections: result.corrections,
+            proposed: result.proposed,
+        });
+    }),
 };

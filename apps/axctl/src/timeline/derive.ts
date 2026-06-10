@@ -3,6 +3,7 @@
  * no SurrealDB, no LLM: every event is a deterministic projection of ingested
  * data, so this whole module is unit-testable with plain fixtures.
  */
+import { jsonArrayField, jsonRecordField } from "@ax/lib/decode";
 import type {
     SessionHighlights,
     SessionTimeline,
@@ -103,22 +104,18 @@ const countLines = (s: unknown): number =>
  * parse - return null and the event title stays as-is.
  */
 export const editDelta = (name: string, inputJson: string | null): EditDelta | null => {
-    if (!inputJson) return null;
-    try {
-        const input = JSON.parse(inputJson) as Record<string, unknown>;
-        if (name === "Edit") {
-            return { added: countLines(input.new_string), removed: countLines(input.old_string) };
-        }
-        if (name === "Write") {
-            return { added: countLines(input.content), removed: 0 };
-        }
-        if (name === "NotebookEdit") {
-            return { added: countLines(input.new_source), removed: 0 };
-        }
-        return null;
-    } catch {
-        return null;
+    const input = jsonRecordField.decode(inputJson);
+    if (input === null) return null;
+    if (name === "Edit") {
+        return { added: countLines(input.new_string), removed: countLines(input.old_string) };
     }
+    if (name === "Write") {
+        return { added: countLines(input.content), removed: 0 };
+    }
+    if (name === "NotebookEdit") {
+        return { added: countLines(input.new_source), removed: 0 };
+    }
+    return null;
 };
 
 // --- per-kind derivation ---------------------------------------------------
@@ -257,17 +254,14 @@ export function deriveDecisionEvents(rows: ReadonlyArray<PlanRow>): TimelineEven
         .map((p) => {
             let firstItem = "";
             let count = 0;
-            if (p.items) {
-                try {
-                    const items = JSON.parse(p.items) as Array<{ content?: unknown }>;
-                    if (Array.isArray(items)) {
-                        count = items.length;
-                        const c = items.find((i) => typeof i?.content === "string")?.content;
-                        if (typeof c === "string") firstItem = c;
-                    }
-                } catch {
-                    /* malformed items - fall through to summary */
-                }
+            // Malformed/non-array items -> null - fall through to summary.
+            const items = jsonArrayField.decode(p.items);
+            if (items) {
+                count = items.length;
+                const c = items
+                    .map((i) => (i as { content?: unknown } | null)?.content)
+                    .find((v): v is string => typeof v === "string");
+                if (c !== undefined) firstItem = c;
             }
             const title = p.summary || firstItem || "plan updated";
             return {

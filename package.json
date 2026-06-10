@@ -1,6 +1,6 @@
 {
   "name": "ax",
-  "version": "0.20.0",
+  "version": "0.22.1",
   "private": true,
   "license": "AGPL-3.0-only",
   "description": "ax monorepo root - workspace orchestration for the axctl CLI (apps/axctl), landing site (apps/site), and shared packages (@ax/lib, @ax/schema).",
@@ -12,7 +12,7 @@
       "packages/*"
     ],
     "catalog": {
-      "effect": "4.0.0-beta.70",
+      "effect": "4.0.0-beta.78",
       "typescript": "^5.6.0",
       "@types/bun": "latest",
       "vite": "^8.0.3"
@@ -27,7 +27,7 @@
     "@tanstack/start-server-core": "1.169.4"
   },
   "scripts": {
-    "prepare": "effect-language-service patch",
+    "prepare": "effect-language-service patch && lefthook install --force",
     "postinstall": "[ -f bun.lock ] && bun2nix -o bun.nix || true",
     "typecheck": "tsc --noEmit",
     "ingest": "bun apps/axctl/src/cli/index.ts ingest",
@@ -47,6 +47,7 @@
     "daemon:uninstall": "bash scripts/uninstall-daemon.sh",
     "build": "bun scripts/build-axctl.ts apps/axctl/src/cli/index.ts dist/axctl",
     "check:cli-reference": "bun scripts/check-cli-reference.ts",
+    "check:release-announcements": "bun scripts/check-release-announcements.ts",
     "check:no-node-fs": "bun scripts/check-no-node-fs.ts",
     "check:table-coverage": "bun scripts/check-table-coverage.ts",
     "dashboard:dev": "vite --config apps/axctl/src/dashboard/web/vite.config.ts",
@@ -134,7 +135,7 @@
     "@tanstack/react-query": "^5",
     "@wterm/core": "0.3.0",
     "@wterm/dom": "0.3.0",
-    "effect": "^4.0.0-beta.70",
+    "effect": "^4.0.0-beta.78",
     "node-pty": "1.1.0",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
@@ -151,6 +152,7 @@
     "@vitejs/plugin-react": "^6",
     "bun-types": "1.3.13",
     "bun2nix": "^2.1.0",
+    "lefthook": "^2.1.9",
     "turbo": "^2.9.16",
     "typescript": "^5.5.0",
     "vite": "^8"

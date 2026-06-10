@@ -1,3 +1,4 @@
+import { SkillName } from "./brands.ts";
 import { legacySkillRecordKey as legacyKey, skillRecordKeyV2 } from "./ids.ts";
 
 export function skillRecordKey(name: string): string {
@@ -36,8 +37,8 @@ export function skillRecordLookupKeys(name: string): string[] {
 export function resolveSkillName(
     invoked: string,
     catalog: ReadonlySet<string>,
-): string | null {
-    if (catalog.has(invoked)) return invoked;
+): SkillName | null {
+    if (catalog.has(invoked)) return SkillName.make(invoked);
     const catalogList = [...catalog];
 
     const tryOne = (cand: string): string | null => {
@@ -69,7 +70,7 @@ export function resolveSkillName(
 
     for (const cand of candidates) {
         const hit = tryOne(cand);
-        if (hit) return hit;
+        if (hit) return SkillName.make(hit);
     }
     return null;
 }
