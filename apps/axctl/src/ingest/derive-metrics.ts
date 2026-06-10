@@ -83,8 +83,10 @@ export const deriveMetrics = (
             // BEFORE the watermarks advance, so a crash re-runs it next time.
             const cascadeEdges = reverted.skipped ? 0 : yield* deriveFragilityCascade();
             if (!reverted.skipped) yield* advanceRevertedWatermark(reverted.fingerprint);
-            // Safe here: no dirty sessions means the changed PRs mapped to no
-            // producing sessions, so there are no dependent rows to write first.
+            // Safe here: prDirty.diff only carries PRs whose merge sha RESOLVED
+            // locally (unresolved ones are held back to re-diff next run), so
+            // "no dirty sessions" means the resolved PRs mapped to no producing
+            // sessions - there are no dependent rows to write first.
             if (!prDirty.skipped) yield* advancePrMergeWatermark(prDirty.diff);
             return { sessionsWritten: 0, revertedCommits: reverted.revertedCount, cascadeEdges };
         }

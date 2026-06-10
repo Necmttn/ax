@@ -1,4 +1,4 @@
-import { Effect } from "effect";
+import { Array as Arr, Effect } from "effect";
 import { SurrealClient } from "@ax/lib/db";
 import type { DbError } from "@ax/lib/errors";
 import { recordKeyPart } from "@ax/lib/shared/derive-keys";
@@ -27,6 +27,15 @@ import { executeStatementsWith } from "@ax/lib/shared/statement-exec";
  * advances the watermark via {@link advancePrMergeWatermark} only AFTER the
  * dependent session_metrics rows are written, so a crash in between re-diffs
  * and re-derives next run instead of silently skipping.
+ *
+ * Remote-merge race: `gh` can see a PR's merge BEFORE git ingest has fetched
+ * the merge commit locally. Advancing the watermark for such a PR would mark
+ * it handled while its sessions were never recomputed - when the commit (and
+ * its `produced` edge) arrives on a later incremental ingest, the PR no longer
+ * diffs and `time_to_land_ms` stays stale until a forced full re-derive. So an
+ * upsert whose NEW merge sha did not resolve to a local commit is HELD BACK
+ * from the returned diff (it re-diffs and retries next run); old shas that
+ * never resolve have no producing sessions, hence nothing stale to recompute.
  *
  * Hang-safety: every query is a single bounded set read - the `pull_request`
  * and watermark tables are small (gh fetch caps at 200/repo), and the
@@ -112,16 +121,16 @@ export interface PrMergeDirtyResult {
     readonly changedPrs: number;
     /** True when no PR merge state changed - nothing to advance. */
     readonly skipped: boolean;
-    /** The diff for {@link advancePrMergeWatermark}. The CALLER advances only
-     *  AFTER the dependent session_metrics rows are written. */
+    /** The ADVANCEABLE diff for {@link advancePrMergeWatermark}: upserts whose
+     *  new merge sha resolved to a local commit (plus all deletes). Upserts
+     *  with an unresolved sha are held back so they re-diff next run. The
+     *  CALLER advances only AFTER the dependent session_metrics rows are
+     *  written. */
     readonly diff: PrMergeDiff;
+    /** Changed PRs whose new merge sha is not yet in the local commit graph -
+     *  held back from `diff` so the next run retries the resolution. */
+    readonly deferredPrs: number;
 }
-
-const chunk = <T>(items: readonly T[], size: number): T[][] => {
-    const out: T[][] = [];
-    for (let i = 0; i < items.length; i += size) out.push(items.slice(i, i + size) as T[]);
-    return out;
-};
 
 /**
  * Compute the PR-driven dirty sessions: diff the stored per-PR merge-state
@@ -168,23 +177,28 @@ export const computePrMergeDirtySessions = (): Effect.Effect<PrMergeDirtyResult,
         const diff = diffPrMergeStates(stored, current);
         const changedPrs = diff.upserts.length + diff.deletes.length;
         if (diff.changedShas.length === 0) {
-            return { dirtySessionIds: [], changedPrs, skipped: changedPrs === 0, diff };
+            return { dirtySessionIds: [], changedPrs, skipped: changedPrs === 0, diff, deferredPrs: 0 };
         }
 
         // 4. Resolve changed shas → commits → producing sessions. Chunked
         //    IN-lists over indexed fields; bounded by the changed-PR count.
+        //    Track which shas actually resolved - upserts whose NEW sha is not
+        //    in the local commit graph yet are held back (see header docs).
         const dirty = new Set<string>();
-        for (const shas of chunk(diff.changedShas, 200)) {
+        const resolvedShas = new Set<string>();
+        for (const shas of Arr.chunksOf(diff.changedShas, 200)) {
             const shaList = shas.map((s) => surrealString(s)).join(", ");
-            const commitIds = (yield* db.query<[string[]]>(
-                `SELECT VALUE type::string(id) FROM commit WHERE sha IN [${shaList}];`,
+            const commitRows = (yield* db.query<[Array<{ id?: string; sha?: string }>]>(
+                `SELECT type::string(id) AS id, sha FROM commit WHERE sha IN [${shaList}];`,
             ))?.[0] ?? [];
-            const commitRefs = commitIds
-                .map((id) => (typeof id === "string" ? recordKeyPart(id, "commit") : null))
-                .filter((k): k is string => typeof k === "string" && k.length > 0)
-                .map((k) => recordLiteral("commit", k));
+            const commitRefs: string[] = [];
+            for (const row of commitRows) {
+                if (typeof row.sha === "string" && row.sha.length > 0) resolvedShas.add(row.sha);
+                const key = typeof row.id === "string" ? recordKeyPart(row.id, "commit") : null;
+                if (typeof key === "string" && key.length > 0) commitRefs.push(recordLiteral("commit", key));
+            }
             if (commitRefs.length === 0) continue;
-            for (const refs of chunk(commitRefs, 200)) {
+            for (const refs of Arr.chunksOf(commitRefs, 200)) {
                 const sessions = (yield* db.query<[string[]]>(
                     `SELECT VALUE type::string(in) FROM produced WHERE out IN [${refs.join(", ")}];`,
                 ))?.[0] ?? [];
@@ -192,7 +206,28 @@ export const computePrMergeDirtySessions = (): Effect.Effect<PrMergeDirtyResult,
             }
         }
 
-        return { dirtySessionIds: [...dirty], changedPrs, skipped: false, diff };
+        // 5. Partition the upserts: only PRs whose NEW merge sha resolved to a
+        //    local commit advance the snapshot; the rest stay un-watermarked so
+        //    the next run re-diffs and retries (the commit usually arrives on
+        //    the next git ingest). Deletes always advance - their OLD sha
+        //    either resolved (its sessions are in `dirty` this run) or never
+        //    will (nothing stale to recompute).
+        const advanceable = diff.upserts.filter((u) => {
+            const newSha = mergeShaOfEncoded(u.encoded);
+            return newSha === null || resolvedShas.has(newSha);
+        });
+        const advanceDiff: PrMergeDiff = {
+            changedShas: diff.changedShas,
+            upserts: advanceable,
+            deletes: diff.deletes,
+        };
+        return {
+            dirtySessionIds: [...dirty],
+            changedPrs,
+            skipped: false,
+            diff: advanceDiff,
+            deferredPrs: diff.upserts.length - advanceable.length,
+        };
     });
 
 /**

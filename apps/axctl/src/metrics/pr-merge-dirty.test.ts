@@ -90,7 +90,8 @@ describe("diffPrMergeStates", () => {
 interface MockOpts {
     readonly prRows?: Array<Record<string, unknown>>;
     readonly storedRows?: Array<Record<string, unknown>>;
-    readonly commitIds?: string[];
+    /** Rows for the sha→commit resolution: `{ id, sha }` objects. */
+    readonly commitRows?: Array<Record<string, unknown>>;
     readonly sessionIds?: string[];
 }
 
@@ -101,7 +102,7 @@ const makeDb = (opts: MockOpts) => {
             captured.push(sql);
             if (/FROM pull_request/.test(sql)) return Effect.succeed([opts.prRows ?? []] as unknown as T);
             if (/FROM ingest_file_state/.test(sql)) return Effect.succeed([opts.storedRows ?? []] as unknown as T);
-            if (/FROM commit WHERE sha IN/.test(sql)) return Effect.succeed([opts.commitIds ?? []] as unknown as T);
+            if (/FROM commit WHERE sha IN/.test(sql)) return Effect.succeed([opts.commitRows ?? []] as unknown as T);
             if (/FROM produced WHERE out IN/.test(sql)) return Effect.succeed([opts.sessionIds ?? []] as unknown as T);
             return Effect.succeed([[]] as unknown as T);
         },
@@ -132,13 +133,16 @@ describe("computePrMergeDirtySessions", () => {
         const { layer, captured } = makeDb({
             prRows: [{ id: "pull_request:`pr1`", merge_sha: "abc123", merged_at: "2026-06-01T00:00:00Z" }],
             storedRows: [],
-            commitIds: ["commit:`c9`"],
+            commitRows: [{ id: "commit:`c9`", sha: "abc123" }],
             sessionIds: ["session:`oldSession`"],
         });
         const result = await run(layer);
         expect(result.skipped).toBe(false);
         expect(result.changedPrs).toBe(1);
         expect(result.dirtySessionIds).toEqual(["session:`oldSession`"]);
+        // The sha resolved, so the PR's watermark row IS advanceable.
+        expect(result.diff.upserts).toHaveLength(1);
+        expect(result.deferredPrs).toBe(0);
         // The sha lookup is bounded to the changed shas (IN-list, not a scan of all).
         const shaQuery = captured.find((s) => /FROM commit WHERE sha IN/.test(s));
         expect(shaQuery).toBeDefined();
@@ -149,20 +153,57 @@ describe("computePrMergeDirtySessions", () => {
         expect(prodQuery!).not.toContain("in.session");
     });
 
-    test("changed sha absent from the commit graph → no dirty sessions, not skipped", async () => {
+    test("changed sha absent from the commit graph → not skipped, watermark row HELD BACK", async () => {
         delete process.env.AX_REDERIVE_METRICS;
         const { layer, captured } = makeDb({
             prRows: [{ id: "pull_request:`pr1`", merge_sha: "notIngested", merged_at: "2026-06-01T00:00:00Z" }],
             storedRows: [],
-            commitIds: [],
+            commitRows: [],
         });
         const result = await run(layer);
         expect(result.skipped).toBe(false);
         expect(result.changedPrs).toBe(1);
         expect(result.dirtySessionIds).toEqual([]);
-        // The diff still carries the upsert so the caller can advance the mark.
-        expect(result.diff.upserts).toHaveLength(1);
+        // The unresolved PR must NOT advance: gh saw the remote merge before
+        // git ingest fetched the commit. Advancing would record the PR as
+        // handled with no session_metrics recompute, leaving time_to_land_ms
+        // stale forever (no re-diff once the commit finally lands).
+        expect(result.diff.upserts).toHaveLength(0);
+        expect(result.deferredPrs).toBe(1);
         expect(captured.some((s) => /FROM produced/.test(s))).toBe(false);
+    });
+
+    test("deferred PR re-diffs next run: once the commit lands, sessions go dirty and the mark advances", async () => {
+        delete process.env.AX_REDERIVE_METRICS;
+        const prRows = [{ id: "pull_request:`pr1`", merge_sha: "abc123", merged_at: "2026-06-01T00:00:00Z" }];
+
+        // Run 1: merge sha not yet in the local commit graph.
+        const run1 = await run(makeDb({ prRows, storedRows: [], commitRows: [] }).layer);
+        expect(run1.diff.upserts).toEqual([]); // held back → nothing to advance
+        expect(run1.deferredPrs).toBe(1);
+
+        // Run 2: the commit arrived via git ingest; the watermark row was never
+        // written (run 1 advanced an empty diff), so the PR diffs again.
+        const run2 = await run(makeDb({
+            prRows,
+            storedRows: [], // still empty - run 1 advanced nothing for pr1
+            commitRows: [{ id: "commit:`c9`", sha: "abc123" }],
+            sessionIds: ["session:`oldSession`"],
+        }).layer);
+        expect(run2.dirtySessionIds).toEqual(["session:`oldSession`"]);
+        expect(run2.diff.upserts).toHaveLength(1); // now advanceable
+        expect(run2.deferredPrs).toBe(0);
+    });
+
+    test("merged_at-only PR (null sha) advances - nothing to resolve", async () => {
+        delete process.env.AX_REDERIVE_METRICS;
+        const { layer } = makeDb({
+            prRows: [{ id: "pull_request:`pr1`", merge_sha: null, merged_at: "2026-06-01T00:00:00Z" }],
+            storedRows: [],
+        });
+        const result = await run(layer);
+        expect(result.diff.upserts).toHaveLength(1);
+        expect(result.deferredPrs).toBe(0);
     });
 
     test("AX_REDERIVE_METRICS=1 forces the diff against an empty snapshot", async () => {
@@ -171,7 +212,7 @@ describe("computePrMergeDirtySessions", () => {
             prRows: [{ id: "pull_request:`pr1`", merge_sha: "abc", merged_at: "2026-06-01T00:00:00Z" }],
             // Stored matches exactly - would be skipped without the force.
             storedRows: [{ path: prMergeWatermarkPath("pr1"), sha: "abc|2026-06-01T00:00:00Z" }],
-            commitIds: [],
+            commitRows: [],
         });
         const result = await run(layer);
         expect(result.skipped).toBe(false);

@@ -113,6 +113,22 @@ describe("prListArgs", () => {
         const limitIdx = args.indexOf("--limit");
         expect(args[limitIdx + 1]).toBe("25");
     });
+
+    test("no updatedSince → no --search qualifier (unbounded fetch)", () => {
+        expect(prListArgs(50)).not.toContain("--search");
+    });
+
+    test("updatedSince bounds the listing via --search updated:>=<date>", () => {
+        const args = prListArgs(50, "2026-06-09");
+        const searchIdx = args.indexOf("--search");
+        expect(searchIdx).toBeGreaterThanOrEqual(0);
+        expect(args[searchIdx + 1]).toBe("updated:>=2026-06-09");
+    });
+
+    test("malformed updatedSince is dropped instead of corrupting the search query", () => {
+        expect(prListArgs(50, "yesterday")).not.toContain("--search");
+        expect(prListArgs(50, "2026-06-09T00:00:00Z")).not.toContain("--search");
+    });
 });
 
 describe("parsePrListOutput", () => {
@@ -156,10 +172,21 @@ describe("parsePrListOutput", () => {
 });
 
 describe("fetchPullRequests", () => {
-    test("resolves to [] for a nonexistent cwd (gh will fail)", async () => {
+    test("resolves to a degraded result for a nonexistent cwd (gh will fail)", async () => {
         const result = await Effect.runPromise(
             fetchPullRequests({ cwd: "/nonexistent-xyz-12345", limit: 5 }),
         );
-        expect(result).toEqual([]);
+        expect(result.ok).toBe(false);
+        expect(result.prs).toEqual([]);
+        expect(typeof result.detail).toBe("string");
+    });
+
+    test("kills the subprocess and reports a timeout when gh exceeds timeoutMs", async () => {
+        const result = await Effect.runPromise(
+            fetchPullRequests({ cwd: process.cwd(), limit: 5, timeoutMs: 1 }),
+        );
+        expect(result.ok).toBe(false);
+        expect(result.prs).toEqual([]);
+        expect(result.detail).toContain("timed out after 1ms");
     });
 });

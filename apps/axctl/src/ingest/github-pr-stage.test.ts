@@ -99,6 +99,7 @@ describe("ingestGithubPrs", () => {
 
         expect(totals).toEqual({
             repositoriesScanned: 0,
+            repositoriesDegraded: 0,
             pullRequests: 0,
             reviews: 0,
             checks: 0,
@@ -117,11 +118,12 @@ describe("ingestGithubPrs", () => {
         });
 
         const totals = await run(
-            { fetchImpl: () => Effect.succeed([mergedPrFixture]) },
+            { fetchImpl: () => Effect.succeed({ ok: true, prs: [mergedPrFixture] }) },
             db,
         );
 
         expect(totals.repositoriesScanned).toBe(1);
+        expect(totals.repositoriesDegraded).toBe(0);
         expect(totals.pullRequests).toBe(1);
         expect(totals.reviews).toBe(1);
         expect(totals.checks).toBe(1);
@@ -132,10 +134,12 @@ describe("ingestGithubPrs", () => {
         expect(prStmt).toBeDefined();
         expect(prStmt!).toContain("repository: repository:`r1`");
 
-        // No repoPaths → the discovery SELECT is unfiltered.
+        // No repoPaths → the discovery SELECT is path-unfiltered but does
+        // exclude non-GitHub remotes (gh would fail on every one, every run).
         const selUnscoped = sql.find((s) => s.includes("FROM repository"));
         expect(selUnscoped).toBeDefined();
         expect(selUnscoped!).not.toContain("root_path IN [");
+        expect(selUnscoped!).toContain('remote_url CONTAINS "github"');
     });
 
     test("scopes the repository SELECT to repoPaths when provided", async () => {
@@ -147,7 +151,7 @@ describe("ingestGithubPrs", () => {
         });
 
         await run(
-            { repoPaths: ["/tmp/x"], fetchImpl: () => Effect.succeed([mergedPrFixture]) },
+            { repoPaths: ["/tmp/x"], fetchImpl: () => Effect.succeed({ ok: true, prs: [mergedPrFixture] }) },
             db,
         );
 
@@ -158,5 +162,58 @@ describe("ingestGithubPrs", () => {
         // A worktree path never equals the canonical root_path, so the filter
         // also resolves the repository via the checkout table.
         expect(sel!).toContain("SELECT VALUE repository FROM checkout WHERE path IN [");
+    });
+
+    test("forwards updatedSince to the fetcher (since-bounded gh search)", async () => {
+        const sql: string[] = [];
+        const db = makeMockDb(sql, {
+            repoRows: [
+                [{ id: "repository:`r1`", root_path: "/tmp/x", remote_url: "https://github.com/o/r" }],
+            ],
+        });
+        const seen: Array<{ cwd: string; updatedSince?: string | undefined }> = [];
+
+        await run(
+            {
+                updatedSince: "2026-06-09",
+                fetchImpl: (input) => {
+                    seen.push({ cwd: input.cwd, updatedSince: input.updatedSince });
+                    return Effect.succeed({ ok: true, prs: [] });
+                },
+            },
+            db,
+        );
+
+        expect(seen).toEqual([{ cwd: "/tmp/x", updatedSince: "2026-06-09" }]);
+    });
+
+    test("a failed fetch counts as degraded and writes nothing for that repo", async () => {
+        const sql: string[] = [];
+        const db = makeMockDb(sql, {
+            repoRows: [
+                [
+                    { id: "repository:`bad`", root_path: "/tmp/bad", remote_url: "https://github.com/o/bad" },
+                    { id: "repository:`ok`", root_path: "/tmp/ok", remote_url: "https://github.com/o/ok" },
+                ],
+            ],
+            commitRows: [["commit:`c1`"]],
+            producedRows: [["session:`s1`"]],
+        });
+
+        const totals = await run(
+            {
+                fetchImpl: (input) =>
+                    input.cwd === "/tmp/bad"
+                        ? Effect.succeed({ ok: false, prs: [], detail: "gh pr list timed out after 30000ms" })
+                        : Effect.succeed({ ok: true, prs: [mergedPrFixture] }),
+            },
+            db,
+        );
+
+        expect(totals.repositoriesScanned).toBe(2);
+        expect(totals.repositoriesDegraded).toBe(1);
+        expect(totals.pullRequests).toBe(1); // only the healthy repo wrote
+        const prStmts = sql.filter((s) => s.includes("UPSERT pull_request:"));
+        expect(prStmts.every((s) => s.includes("repository:`ok`"))).toBe(true);
     });
 });

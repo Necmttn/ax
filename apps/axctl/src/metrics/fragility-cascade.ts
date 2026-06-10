@@ -1,8 +1,9 @@
-import { Effect } from "effect";
-import { SurrealClient } from "@ax/lib/db";
+import { Array as Arr, Effect } from "effect";
+import { SurrealClient, type SurrealClientShape } from "@ax/lib/db";
 import type { DbError } from "@ax/lib/errors";
 import { recordKeyPart } from "@ax/lib/shared/derive-keys";
 import { localPathFileRecordKey, recordLiteral, stableDigest } from "@ax/lib/ids";
+import { surrealString } from "@ax/lib/shared/surql";
 import { executeStatementsWith } from "@ax/lib/shared/statement-exec";
 import { isoMs } from "./util.ts";
 
@@ -16,7 +17,7 @@ export interface CascadeEdge {
  * Hard bounds for the derive-time cascade computation. Live data has ~112k
  * `touched` edges on reverted commits (mass reverts touch hundreds of files
  * each), so every query below is anchored + capped - an unbounded fileRefs
- * set would reproduce the documented 87k-edge `in.session` deref hang.
+ * set would reproduce the documented 87k-edge per-edge-deref hang.
  */
 export interface FragilityLimits {
     /** Most-recent reverted commits considered (anchor of the whole derive). */
@@ -38,15 +39,29 @@ export const DEFAULT_FRAGILITY_LIMITS: FragilityLimits = {
     chunkSize: 100,
 };
 
+/** Bounded concurrency for the chunked lookups (each chunk is one indexed /
+ *  primary-key read; serial chunks were a measurable slice of the reported
+ *  ~46s live derive). */
+const LOOKUP_CONCURRENCY = 6;
+
 const ms = (iso: unknown): number => isoMs(iso) ?? 0;
 
 const str = (v: unknown): string | null => (typeof v === "string" && v.length > 0 ? v : null);
 
-const chunked = <T>(items: readonly T[], size: number): T[][] => {
-    const out: T[][] = [];
-    for (let i = 0; i < items.length; i += size) out.push(items.slice(i, i + size));
-    return out;
-};
+/** Run one bounded query per chunk with {@link LOOKUP_CONCURRENCY}, flattening
+ *  the per-chunk row arrays. Order across chunks is irrelevant to every caller
+ *  (results key on row fields, first-wins folds are per-chunk-local). */
+const chunkedQuery = (
+    db: SurrealClientShape,
+    items: readonly string[],
+    size: number,
+    sqlFor: (chunk: readonly string[]) => string,
+): Effect.Effect<Array<Record<string, unknown>>, DbError> =>
+    Effect.forEach(
+        Arr.chunksOf(items, size),
+        (chunk) => db.query<[Array<Record<string, unknown>>]>(sqlFor(chunk)),
+        { concurrency: LOOKUP_CONCURRENCY },
+    ).pipe(Effect.map((results) => results.flatMap((r) => r?.[0] ?? [])));
 
 /** Bare file record keys (no `file:` prefix) of the local-path twins of one
  *  repo-relative path across the repo's checkout roots. Pure - mirrors what
@@ -99,6 +114,41 @@ export const joinCascadeEdges = (
     });
 };
 
+// ---------------------------------------------------------------------------
+// Reverted-set fingerprint gate (issue #171 follow-up)
+// ---------------------------------------------------------------------------
+
+const WATERMARK_SOURCE = "metrics:fragility_cascade";
+const WATERMARK_PATH = "__fragility_cascade__";
+const watermarkId = (): string =>
+    recordLiteral("ingest_file_state", stableDigest(`${WATERMARK_SOURCE}|${WATERMARK_PATH}`));
+
+/** Bounded anchor: bare keys of the most recent reverted commits
+ *  (commit_reverted index). `ts` must appear in the selection for ORDER BY
+ *  under SurrealDB 3.x. */
+const anchorRevertedCommitKeys = (
+    db: SurrealClientShape,
+    limits: FragilityLimits,
+): Effect.Effect<string[], DbError> =>
+    Effect.gen(function* () {
+        const commitRows = (yield* db.query<[Array<Record<string, unknown>>]>(
+            `SELECT type::string(id) AS id, ts FROM commit WHERE reverted = true`
+            + ` ORDER BY ts DESC LIMIT ${limits.maxRevertedCommits};`,
+        ))?.[0] ?? [];
+        return [...new Set(
+            commitRows.map((r) => recordKeyPart(r.id, "commit")).filter((k): k is string => k !== null),
+        )];
+    });
+
+/** Fingerprint of the anchor set - the cascade only changes when the
+ *  reverted-commit anchor changes, so an unchanged fingerprint skips the whole
+ *  recompute (the daemon's `--since=1` path otherwise pays it on every
+ *  transcript change). Trade-off: NEW downstream edits on an unchanged
+ *  reverted set stay invisible until the set moves; acceptable staleness for
+ *  a signal keyed on reverts. */
+const anchorFingerprint = (commitKeys: readonly string[]): string =>
+    stableDigest(`${commitKeys.length}|${[...commitKeys].sort().join("\n")}`, 32);
+
 /**
  * Cross-session fragility cascade, computed BOUNDED for the derive stage.
  *
@@ -106,7 +156,9 @@ export const joinCascadeEdges = (
  * (capped + most-recent-first), `touched` via `touched_in` per commit chunk
  * (NO derefs - file path/repository come from a separate primary-key fetch),
  * `produced` via `produced_out_ts`, `edited` via `edited_out` per candidate
- * chunk (the only `in.session` deref, bounded to actual matches).
+ * chunk (raw `in` only - the turn→session hop is a separate primary-key
+ * record-list fetch on `turn`, NEVER an `in.session` per-edge deref). Chunked
+ * lookups run with bounded concurrency ({@link LOOKUP_CONCURRENCY}).
  *
  * File-key namespace bridge (issue #171): `touched` points at git-ingested
  * files (`file:remote_*`, repo-relative `path`), while `edited` points at
@@ -117,19 +169,16 @@ export const joinCascadeEdges = (
  */
 export const computeFragilityCascade = (
     limits: FragilityLimits = DEFAULT_FRAGILITY_LIMITS,
+    anchorCommitKeys?: readonly string[],
 ): Effect.Effect<CascadeEdge[], DbError, SurrealClient> =>
     Effect.gen(function* () {
         const db = yield* SurrealClient;
 
-        // 1. Bounded anchor: most recent reverted commits (commit_reverted index).
-        // `ts` must appear in the selection for ORDER BY under SurrealDB 3.x.
-        const commitRows = (yield* db.query<[Array<Record<string, unknown>>]>(
-            `SELECT type::string(id) AS id, ts FROM commit WHERE reverted = true`
-            + ` ORDER BY ts DESC LIMIT ${limits.maxRevertedCommits};`,
-        ))?.[0] ?? [];
-        const commitKeys = [...new Set(
-            commitRows.map((r) => recordKeyPart(r.id, "commit")).filter((k): k is string => k !== null),
-        )];
+        // 1. Bounded anchor: most recent reverted commits (precomputed by the
+        //    derive gate when available).
+        const commitKeys = anchorCommitKeys !== undefined
+            ? [...anchorCommitKeys]
+            : yield* anchorRevertedCommitKeys(db, limits);
         if (commitKeys.length === 0) return [];
 
         // 2. Checkout roots per repository (small table, ~tens of rows).
@@ -149,20 +198,16 @@ export const computeFragilityCascade = (
         // 3. touched edges anchored on the commit chunk (touched_in index, no
         //    derefs). Deduped per (commit, file) - one row per checkout exists.
         const filesByCommit = new Map<string, Map<string, number>>(); // commit → file → ts
-        for (const chunk of chunked(commitKeys, limits.chunkSize)) {
-            const refs = chunk.map((k) => recordLiteral("commit", k)).join(", ");
-            const rows = (yield* db.query<[Array<Record<string, unknown>>]>(
-                `SELECT type::string(in) AS commit, type::string(out) AS file, type::string(ts) AS ts`
-                + ` FROM touched WHERE in IN [${refs}];`,
-            ))?.[0] ?? [];
-            for (const r of rows) {
-                const commit = str(r.commit);
-                const file = recordKeyPart(r.file, "file");
-                if (commit === null || file === null) continue;
-                let files = filesByCommit.get(commit);
-                if (!files) { files = new Map(); filesByCommit.set(commit, files); }
-                if (!files.has(file)) files.set(file, ms(r.ts));
-            }
+        const touchedRows = yield* chunkedQuery(db, commitKeys, limits.chunkSize, (chunk) =>
+            `SELECT type::string(in) AS commit, type::string(out) AS file, type::string(ts) AS ts`
+            + ` FROM touched WHERE in IN [${chunk.map((k) => recordLiteral("commit", k)).join(", ")}];`);
+        for (const r of touchedRows) {
+            const commit = str(r.commit);
+            const file = recordKeyPart(r.file, "file");
+            if (commit === null || file === null) continue;
+            let files = filesByCommit.get(commit);
+            if (!files) { files = new Map(); filesByCommit.set(commit, files); }
+            if (!files.has(file)) files.set(file, ms(r.ts));
         }
 
         // 3b. Apply limits: drop mass reverts entirely; cap global fragile set.
@@ -186,34 +231,29 @@ export const computeFragilityCascade = (
         //    WHERE id IN [refs]` silently matches NOTHING on SurrealDB 3.x
         //    (verified live) - select the records directly instead.
         const fileInfo = new Map<string, { path: string; repository: string | null }>();
-        for (const chunk of chunked([...fragileFiles], limits.chunkSize)) {
-            const refs = chunk.map((k) => recordLiteral("file", k)).join(", ");
-            const rows = (yield* db.query<[Array<Record<string, unknown>>]>(
-                `SELECT type::string(id) AS id, path, type::string(repository) AS repository`
-                + ` FROM [${refs}];`,
-            ))?.[0] ?? [];
-            for (const r of rows) {
-                const key = recordKeyPart(r.id, "file");
-                const path = str(r.path);
-                if (key === null || path === null) continue;
-                fileInfo.set(key, { path, repository: str(r.repository) });
-            }
+        const fileRows = yield* chunkedQuery(db, [...fragileFiles], limits.chunkSize, (chunk) =>
+            `SELECT type::string(id) AS id, path, type::string(repository) AS repository`
+            + ` FROM [${chunk.map((k) => recordLiteral("file", k)).join(", ")}];`);
+        for (const r of fileRows) {
+            const key = recordKeyPart(r.id, "file");
+            const path = str(r.path);
+            if (key === null || path === null) continue;
+            fileInfo.set(key, { path, repository: str(r.repository) });
         }
 
         // 5. commit → origin session, anchored on the surviving commits
         //    (produced_out_ts index).
         const originByCommit = new Map<string, string>();
-        for (const chunk of chunked([...survivingCommits].map((c) => recordKeyPart(c, "commit") ?? ""), limits.chunkSize)) {
-            const refs = chunk.filter((k) => k.length > 0).map((k) => recordLiteral("commit", k)).join(", ");
-            if (refs.length === 0) continue;
-            const rows = (yield* db.query<[Array<Record<string, unknown>>]>(
-                `SELECT type::string(out) AS commit, type::string(in) AS session FROM produced WHERE out IN [${refs}];`,
-            ))?.[0] ?? [];
-            for (const r of rows) {
-                const commit = str(r.commit);
-                const session = str(r.session);
-                if (commit !== null && session !== null) originByCommit.set(commit, session);
-            }
+        const survivingKeys = [...survivingCommits]
+            .map((c) => recordKeyPart(c, "commit"))
+            .filter((k): k is string => k !== null && k.length > 0);
+        const producedRows = yield* chunkedQuery(db, survivingKeys, limits.chunkSize, (chunk) =>
+            `SELECT type::string(out) AS commit, type::string(in) AS session FROM produced`
+            + ` WHERE out IN [${chunk.map((k) => recordLiteral("commit", k)).join(", ")}];`);
+        for (const r of producedRows) {
+            const commit = str(r.commit);
+            const session = str(r.session);
+            if (commit !== null && session !== null) originByCommit.set(commit, session);
         }
         if (originByCommit.size === 0) return [];
 
@@ -230,25 +270,45 @@ export const computeFragilityCascade = (
             }
         }
 
-        // 7. Edits on the candidate keys (edited_out index). The `in.session`
-        //    deref is bounded to the rows each chunk actually matches.
+        // 7. Edits on the candidate keys (edited_out index), selecting the RAW
+        //    `in` (turn) ref - a per-edge `in.session` deref over `edited` is
+        //    the documented hang shape and was the bulk of the live ~46s.
+        const rawEdits: Array<{ canonical: string; turn: string; ts: number }> = [];
+        const editedRows = yield* chunkedQuery(db, [...canonicalByCandidate.keys()], limits.chunkSize, (chunk) =>
+            `SELECT type::string(out) AS file, type::string(in) AS turn, type::string(ts) AS ts`
+            + ` FROM edited WHERE out IN [${chunk.map((k) => recordLiteral("file", k)).join(", ")}];`);
+        for (const r of editedRows) {
+            const candidate = recordKeyPart(r.file, "file");
+            const turn = str(r.turn);
+            if (candidate === null || turn === null) continue;
+            const canonical = canonicalByCandidate.get(candidate);
+            if (canonical === undefined) continue;
+            rawEdits.push({ canonical, turn, ts: ms(r.ts) });
+        }
+
+        // 7b. Batch-resolve turn → session via primary-key record-list
+        //     selection on `turn` (`turn.session` is a direct column; `FROM
+        //     [refs]` for the same WHERE-id-IN footgun as step 4).
+        const sessionByTurn = new Map<string, string>();
+        const turnKeys = [...new Set(
+            rawEdits.map((e) => recordKeyPart(e.turn, "turn")).filter((k): k is string => k !== null),
+        )];
+        const turnRows = yield* chunkedQuery(db, turnKeys, limits.chunkSize, (chunk) =>
+            `SELECT type::string(id) AS id, type::string(session) AS session`
+            + ` FROM [${chunk.map((k) => recordLiteral("turn", k)).join(", ")}];`);
+        for (const r of turnRows) {
+            const id = str(r.id);
+            const session = str(r.session);
+            if (id !== null && session !== null) sessionByTurn.set(id, session);
+        }
+
         const editsByFile = new Map<string, FileEdit[]>(); // canonical bare key → edits
-        for (const chunk of chunked([...canonicalByCandidate.keys()], limits.chunkSize)) {
-            const refs = chunk.map((k) => recordLiteral("file", k)).join(", ");
-            const rows = (yield* db.query<[Array<Record<string, unknown>>]>(
-                `SELECT type::string(out) AS file, type::string(in.session) AS session, type::string(ts) AS ts`
-                + ` FROM edited WHERE out IN [${refs}];`,
-            ))?.[0] ?? [];
-            for (const r of rows) {
-                const candidate = recordKeyPart(r.file, "file");
-                const session = str(r.session);
-                if (candidate === null || session === null) continue;
-                const canonical = canonicalByCandidate.get(candidate);
-                if (canonical === undefined) continue;
-                const arr = editsByFile.get(canonical) ?? [];
-                arr.push({ session, ts: ms(r.ts) });
-                editsByFile.set(canonical, arr);
-            }
+        for (const e of rawEdits) {
+            const session = sessionByTurn.get(e.turn);
+            if (session === undefined) continue;
+            const arr = editsByFile.get(e.canonical) ?? [];
+            arr.push({ session, ts: e.ts });
+            editsByFile.set(e.canonical, arr);
         }
 
         // 8. Join + weight by distinct downstream sessions per origin.
@@ -285,13 +345,51 @@ export const persistFragilityCascade = (
         return written;
     });
 
-/** Derive-stage entry: compute (bounded) + persist. Returns edges written. */
+/**
+ * Derive-stage entry: compute (bounded) + persist. Returns edges written (or
+ * the stored row count when the recompute is skipped).
+ *
+ * Gated on the reverted-anchor fingerprint: when the set of (capped,
+ * most-recent) reverted commits is unchanged since the last persisted run, the
+ * whole recompute is skipped - this is what keeps the daemon's per-transcript
+ * `--since=1` ingest off the ~46s path. `AX_REDERIVE_METRICS=1` forces.
+ * Crash-safe ordering mirrors the other metric watermarks: the fingerprint
+ * advances only AFTER the rows are persisted.
+ */
 export const deriveFragilityCascade = (
     limits: FragilityLimits = DEFAULT_FRAGILITY_LIMITS,
 ): Effect.Effect<number, DbError, SurrealClient> =>
     Effect.gen(function* () {
-        const edges = yield* computeFragilityCascade(limits);
-        return yield* persistFragilityCascade(edges);
+        const db = yield* SurrealClient;
+        const commitKeys = yield* anchorRevertedCommitKeys(db, limits);
+        const fingerprint = anchorFingerprint(commitKeys);
+
+        const forced = process.env.AX_REDERIVE_METRICS === "1";
+        if (!forced) {
+            const stored = (yield* db.query<[Array<{ sha?: string }>]>(
+                `SELECT sha FROM ingest_file_state WHERE source_kind = ${surrealString(WATERMARK_SOURCE)};`,
+            ))?.[0]?.[0]?.sha;
+            if (typeof stored === "string" && stored === fingerprint) {
+                const n = (yield* db.query<[Array<{ n?: number }>]>(
+                    `SELECT count() AS n FROM fragility_cascade GROUP ALL;`,
+                ))?.[0]?.[0]?.n ?? 0;
+                return Number(n);
+            }
+        }
+
+        const edges = yield* computeFragilityCascade(limits, commitKeys);
+        const written = yield* persistFragilityCascade(edges);
+        // Advance the fingerprint only now that the rows are persisted.
+        yield* executeStatementsWith(
+            db,
+            [
+                `UPSERT ${watermarkId()} CONTENT { path: ${surrealString(WATERMARK_PATH)},`
+                + ` source_kind: ${surrealString(WATERMARK_SOURCE)}, sha: ${surrealString(fingerprint)},`
+                + ` ingested_at: time::now() };`,
+            ],
+            { chunkSize: 1 },
+        );
+        return written;
     });
 
 /**
