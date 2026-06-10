@@ -1,4 +1,5 @@
 import { Effect } from "effect";
+import { decodeJsonOrNull } from "@ax/lib/decode";
 import { HookConfigParseError, HookConfigSchemaError, HookValidationError } from "../errors.ts";
 import type { ConfiguredHook, HookFileRef, HookInput, HookPatch } from "./types.ts";
 import { deriveHookId, deriveOwner, axMarkerId, genMarkerId, embedMarker, preserveMarker } from "./ownership.ts";
@@ -37,11 +38,13 @@ export interface JsonCodec {
 }
 
 export const makeJsonCodec = (name: string, events: readonly string[]): JsonCodec => {
-    const parseJson = (file: string, raw: string): Effect.Effect<ClaudeSettings, HookConfigParseError> =>
-        Effect.try({
-            try: () => (raw.trim() === "" ? {} : (JSON.parse(raw) as ClaudeSettings)),
-            catch: (e) => new HookConfigParseError({ provider: name, file, reason: String(e) }),
-        });
+    const parseJson = (file: string, raw: string): Effect.Effect<ClaudeSettings, HookConfigParseError> => {
+        if (raw.trim() === "") return Effect.succeed({});
+        const parsed = decodeJsonOrNull(raw);
+        return parsed === null
+            ? Effect.fail(new HookConfigParseError({ provider: name, file, reason: "invalid JSON" }))
+            : Effect.succeed(parsed as ClaudeSettings);
+    };
 
     const serialize = (settings: ClaudeSettings): string => `${JSON.stringify(settings, null, 2)}\n`;
 

@@ -3,6 +3,7 @@ import { homedir } from "node:os";
 import { posixPath } from "@ax/lib/shared/path";
 import { orAbsent } from "@ax/lib/shared/fs-error";
 import { decodeJsonOrNull } from "./decode.ts";
+import { prettyPrint } from "./json.ts";
 
 /**
  * Persistent state for the local daemon (chosen port, schema version, etc).
@@ -89,7 +90,7 @@ export function writeRuntimeState(
         };
         yield* fs.makeDirectory(posixPath.dirname(path), { recursive: true });
         const tmp = `${path}.tmp`;
-        yield* fs.writeFileString(tmp, JSON.stringify(next, null, 2));
+        yield* fs.writeFileString(tmp, prettyPrint(next));
         yield* fs.rename(tmp, path);
         return next;
     });

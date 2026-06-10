@@ -1,6 +1,6 @@
 import { Effect, FileSystem, Path, Schema } from "effect";
 import { orAbsent } from "@ax/lib/shared/fs-error";
-import { decodeJsonOrNull } from "@ax/lib/decode";
+import { decodeJsonOrNull, encodeJson } from "@ax/lib/decode";
 import { AxConfig } from "@ax/lib/config";
 import { SurrealClient, type SurrealClientShape } from "@ax/lib/db";
 import type { DbError } from "@ax/lib/errors";
@@ -515,7 +515,7 @@ const fetchJsonWithCache = (
             }).pipe(Effect.orElseSucceed(() => null as unknown | null));
             if (networkJson !== null) {
                 yield* fs.makeDirectory(path.dirname(cachePath), { recursive: true }).pipe(Effect.ignore);
-                yield* fs.writeFileString(cachePath, `${JSON.stringify(networkJson)}\n`).pipe(Effect.ignore);
+                yield* fs.writeFileString(cachePath, `${encodeJson(networkJson)}\n`).pipe(Effect.ignore);
                 return { json: networkJson, source: "network" as const };
             }
         }

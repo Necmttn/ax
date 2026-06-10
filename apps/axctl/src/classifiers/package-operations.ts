@@ -3,6 +3,7 @@ import { Effect, FileSystem, Option, type PlatformError } from "effect";
 import { orAbsent, skipNotFound } from "@ax/lib/shared/fs-error";
 import { posixPath } from "@ax/lib/shared/path";
 import { safeJsonParse } from "@ax/lib/shared/safe-json";
+import { prettyPrint } from "@ax/lib/json";
 import {
     recordRef,
     surrealJson,
@@ -4377,7 +4378,7 @@ function writeJsonReport(
     return Effect.gen(function* () {
         const fs = yield* FileSystem.FileSystem;
         yield* fs.makeDirectory(posixPath.dirname(path), { recursive: true });
-        yield* fs.writeFileString(path, `${JSON.stringify(report, null, 2)}\n`);
+        yield* fs.writeFileString(path, `${prettyPrint(report)}\n`);
     });
 }
 

@@ -18,6 +18,7 @@ import { SurrealClient } from "@ax/lib/db";
 import { orAbsent } from "@ax/lib/shared/fs-error";
 import { posixPath } from "@ax/lib/shared/path";
 import { surrealLiteral } from "@ax/lib/json";
+import { decodeJsonOrNull } from "@ax/lib/decode";
 import {
     parseAutomationMarkers,
     parseHookCommandMarkers,
@@ -295,7 +296,8 @@ const collectIds = (
     } else if (target.form === "hook") {
         yield* Effect.try({
             try: () => {
-                const parsed = JSON.parse(content);
+                const parsed = decodeJsonOrNull(content);
+                if (parsed === null) throw new Error("invalid JSON in hook config");
                 const commands: string[] = [];
                 collectJsonCommandStrings(parsed, commands);
                 for (const command of commands) {

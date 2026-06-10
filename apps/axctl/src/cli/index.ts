@@ -22,6 +22,7 @@ import { safeJsonParse } from "@ax/lib/shared/safe-json";
 import { orAbsent } from "@ax/lib/shared/fs-error";
 import { ProcessService } from "@ax/lib/process";
 import { prettyPrint, surrealLiteral } from "@ax/lib/json";
+import { decodeJsonOrNull, encodeJson } from "@ax/lib/decode";
 import { prettifyProjectSlug } from "@ax/lib/shared/project-slug";
 import { AppLayer } from "@ax/lib/layers";
 import { deriveCheckpoints } from "../ingest/derive-checkpoints.ts";
@@ -858,7 +859,7 @@ const cmdRecall = (opts: RecallCliOpts) =>
             requestedSources: sources ?? ["turn"],
         });
         if (opts.json) {
-            console.log(JSON.stringify({ ...result, hits, next }, null, 2));
+            console.log(prettyPrint({ ...result, hits, next }));
             return;
         }
 
@@ -2299,7 +2300,7 @@ const classifiersLabelMiningCommand = Command.make(
                 const result = yield* svc.selfImproveQuery(
                     outPath === undefined ? {} : { out: outPath },
                 );
-                if (json) console.log(JSON.stringify(result, null, 2));
+                if (json) console.log(prettyPrint(result));
                 else console.log(renderSelfImproveText(result));
                 return;
             }
@@ -2308,7 +2309,7 @@ const classifiersLabelMiningCommand = Command.make(
                     apply,
                     ...(outPath === undefined ? {} : { out: outPath }),
                 });
-                if (json) console.log(JSON.stringify(report, null, 2));
+                if (json) console.log(prettyPrint(report));
                 else console.log(renderGraphProjectionText(report));
                 return;
             }
@@ -2316,7 +2317,7 @@ const classifiersLabelMiningCommand = Command.make(
             const report = outPath === undefined
                 ? yield* svc.miningReport(reportInput)
                 : yield* svc.writeMiningReport({ ...reportInput, out: outPath });
-            if (json) console.log(JSON.stringify(report, null, 2));
+            if (json) console.log(prettyPrint(report));
             else {
                 console.log(
                     `transcript label mining - candidates ${report.candidate_count}, review rows ${report.review_rows.length}, families ${report.review_diversity.label_family_count}`,
@@ -2432,7 +2433,7 @@ const cmdImproveLint = (args: string[]) =>
             staleDays,
         });
         if (json) {
-            console.log(JSON.stringify(report, null, 2));
+            console.log(prettyPrint(report));
         } else {
             for (const f of report.errors) {
                 console.log(`error  ${f.rule}: ${f.message} (${f.path})`);
@@ -2484,7 +2485,7 @@ const cmdImproveRecommend = (args: string[]) =>
             ...(sinceDays === undefined ? {} : { sinceDays }),
         });
         if (json) {
-            console.log(JSON.stringify(items, null, 2));
+            console.log(prettyPrint(items));
             return;
         }
         printNextLinks(
@@ -2670,16 +2671,12 @@ const improveAcceptCommand = Command.make(
                 let retroSummaries: readonly string[] = [];
                 const baselineRaw = result.proposal.baseline;
                 if (typeof baselineRaw === "string" && baselineRaw.length > 0) {
-                    // Parse failure → undefined: baseline shape may evolve.
-                    const parsed = yield* Effect.try({
-                        try: () =>
-                            JSON.parse(baselineRaw) as {
-                                tool?: string;
-                                sessionKeys?: unknown;
-                                frequency?: number;
-                            },
-                        catch: () => undefined,
-                    }).pipe(Effect.orElseSucceed(() => undefined));
+                    // Parse failure → null: baseline shape may evolve.
+                    const parsed = decodeJsonOrNull(baselineRaw) as {
+                        tool?: string;
+                        sessionKeys?: unknown;
+                        frequency?: number;
+                    } | null;
                     if (parsed && Array.isArray(parsed.sessionKeys)) {
                         const tool = parsed.tool ?? "tool";
                         retroSummaries = parsed.sessionKeys
@@ -3096,7 +3093,7 @@ const cmdSessionsHere = (args: string[]) =>
         const { sessions, next } = buildSessionsNext(rows);
 
         if (json) {
-            console.log(JSON.stringify({ sessions, next }, null, 2));
+            console.log(prettyPrint({ sessions, next }));
             return;
         }
         printNextLinks(next);
@@ -3161,7 +3158,7 @@ const cmdSessionsAround = (args: string[]) =>
         });
 
         if (json) {
-            console.log(JSON.stringify({ sessions, next }, null, 2));
+            console.log(prettyPrint({ sessions, next }));
             return;
         }
         printNextLinks(next);
@@ -3223,7 +3220,7 @@ const cmdSessionsNear = (args: string[]) =>
         const { sessions, next } = buildSessionsNext(rows);
 
         if (json) {
-            console.log(JSON.stringify({ sessions, next }, null, 2));
+            console.log(prettyPrint({ sessions, next }));
             return;
         }
         printNextLinks(next);
@@ -4766,7 +4763,7 @@ const cmdTimeline = (sessionId: string, json: boolean) =>
         Effect.flatMap((tl) =>
             Effect.sync(() => {
                 if (json) {
-                    console.log(JSON.stringify(tl, null, 2));
+                    console.log(prettyPrint(tl));
                     return;
                 }
                 const h = tl.highlights;
@@ -5154,7 +5151,7 @@ const hookFileContextCommand = Command.make(
                 // something to inject; emit nothing otherwise so Claude Code
                 // doesn't show an empty additionalContext block to the user.
                 if (response.inject && response.context.length > 0) {
-                    console.log(JSON.stringify({
+                    console.log(encodeJson({
                         hookSpecificOutput: {
                             hookEventName: "PreToolUse",
                             additionalContext: response.context,

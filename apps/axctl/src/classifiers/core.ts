@@ -1,4 +1,5 @@
 import { Context, Effect, Layer, Option, Schema } from "effect";
+import { decodeJsonOrNull } from "@ax/lib/decode";
 import { safeKeyPart } from "@ax/lib/shared/derive-keys";
 import { isControlOrContextText } from "./control-text.ts";
 
@@ -305,7 +306,9 @@ const validateResult = (
         if (!Number.isFinite(result.confidence) || result.confidence < 0 || result.confidence > 1) {
             throw new Error(`classifier ${classifier.key} emitted invalid confidence ${result.confidence}`);
         }
-        JSON.parse(result.evidenceJson);
+        if (decodeJsonOrNull(result.evidenceJson) === null) {
+            throw new Error(`classifier ${classifier.key} emitted evidenceJson that is not valid JSON`);
+        }
             return Effect.void;
         } catch (error) {
             return Effect.fail(ClassifierInputError.make({

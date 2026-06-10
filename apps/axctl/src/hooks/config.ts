@@ -3,6 +3,7 @@ import type { PlatformError } from "effect/PlatformError";
 import { SurrealClient } from "@ax/lib/db";
 import type { DbError } from "@ax/lib/errors";
 import { writeFileAtomic } from "@ax/lib/atomic-write";
+import { decodeJsonOrNull } from "@ax/lib/decode";
 import { findGitRoot } from "../project/git.ts";
 import { queryHookSummary } from "../queries/hooks.ts";
 import { HookProviderRegistry } from "./providers/registry.ts";
@@ -82,10 +83,13 @@ const readParked = (
         if (!(yield* fs.exists(path))) return [];
         const raw = yield* fs.readFileString(path);
         if (raw.trim() === "") return [];
-        return yield* Effect.try({
-            try: () => JSON.parse(raw) as ReadonlyArray<ParkedEntry>,
-            catch: (e) => new HookConfigParseError({ provider: "ax", file: path, reason: `corrupt park sidecar: ${String(e)}` }),
-        });
+        const parsed = decodeJsonOrNull(raw);
+        if (parsed === null) {
+            return yield* Effect.fail(
+                new HookConfigParseError({ provider: "ax", file: path, reason: "corrupt park sidecar: invalid JSON" }),
+            );
+        }
+        return parsed as ReadonlyArray<ParkedEntry>;
     });
 
 const writeParked = (

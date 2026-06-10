@@ -1,4 +1,5 @@
 import { Effect, FileSystem } from "effect";
+import { decodeJsonOrNull } from "@ax/lib/decode";
 import { posixPath } from "@ax/lib/shared/path";
 import { orAbsent } from "@ax/lib/shared/fs-error";
 import { HOME } from "@ax/lib/paths";
@@ -39,11 +40,13 @@ interface CursorConfig {
     readonly [k: string]: unknown;
 }
 
-const parseJson = (file: string, raw: string): Effect.Effect<CursorConfig, HookConfigParseError> =>
-    Effect.try({
-        try: () => (raw.trim() === "" ? {} : (JSON.parse(raw) as CursorConfig)),
-        catch: (e) => new HookConfigParseError({ provider: NAME, file, reason: String(e) }),
-    });
+const parseJson = (file: string, raw: string): Effect.Effect<CursorConfig, HookConfigParseError> => {
+    if (raw.trim() === "") return Effect.succeed({});
+    const parsed = decodeJsonOrNull(raw);
+    return parsed === null
+        ? Effect.fail(new HookConfigParseError({ provider: NAME, file, reason: "invalid JSON" }))
+        : Effect.succeed(parsed as CursorConfig);
+};
 
 export const decodeCursor = (ref: HookFileRef, cfg: CursorConfig): ConfiguredHook[] => {
     const out: ConfiguredHook[] = [];
