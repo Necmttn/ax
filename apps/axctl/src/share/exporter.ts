@@ -19,6 +19,8 @@ import type {
 import { categoryOf } from "@ax/lib/shared/tool-presentation";
 import { runQuery, runSingleQuery } from "@ax/lib/shared/graph-query";
 import { resolveTurnContent } from "../queries/session-turn-content.ts";
+import { extractSessionTimeline, SessionTimelineServiceLayer } from "../timeline/service.ts";
+import type { SessionTimeline } from "../timeline/types.ts";
 import {
     sessionChildrenQuery,
     sessionOverviewQuery,
@@ -44,6 +46,9 @@ export interface ShareArtifactParts {
     readonly tokenUsage?: SessionTokenUsageDetail | null;
     readonly turns: ReadonlyArray<ShareTurn>;
     readonly timeline: ReadonlyArray<ShareEvent>;
+    /** Segmented highlight timeline (L2 phases + L1 key events), computed at
+     *  export time so the static share viewer can render it without a daemon. */
+    readonly sessionTimeline?: SessionTimeline | null;
     readonly files: ReadonlyArray<ShareFile>;
     readonly children?: ReadonlyArray<AxSessionShare>;
     readonly spawnAnchorTurnSeq?: number | null;
@@ -195,6 +200,7 @@ export function buildShareArtifactFromParts(
             failures,
         },
         token_usage: parts.tokenUsage ?? null,
+        ...(parts.sessionTimeline ? { session_timeline: parts.sessionTimeline } : {}),
         ...(parts.hookFires && parts.hookFires.length > 0 ? { hook_fires: parts.hookFires } : {}),
         ...(parts.harnessHooks && parts.harnessHooks.length > 0 ? { harness_hooks: parts.harnessHooks } : {}),
         turns: parts.turns,
@@ -413,6 +419,14 @@ export const exportSessionShare = (
             turn.text.length > 0 || turn.content != null || (turn.tool_calls?.length ?? 0) > 0
         );
 
+        // Segmented highlight timeline, computed here (where the DB still is)
+        // so the static share viewer can render it daemon-free. Best-effort: a
+        // timeline failure never blocks the export.
+        const sessionTimeline = yield* extractSessionTimeline(recordRef).pipe(
+            Effect.provide(SessionTimelineServiceLayer),
+            Effect.catchDefect(() => Effect.succeed(null)),
+        );
+
         return buildShareArtifactFromParts({
             axVersion,
             exportedAt: new Date().toISOString(),
@@ -422,6 +436,7 @@ export const exportSessionShare = (
             tokenUsage,
             turns,
             timeline: timelineRaw.filter(isPresent),
+            sessionTimeline,
             files: filesRaw.filter(isPresent),
             children,
             hookFires,

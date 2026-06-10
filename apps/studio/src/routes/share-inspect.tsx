@@ -12,7 +12,9 @@ import type {
     TurnTokenUsageDetail,
 } from "@ax/lib/shared/dashboard-types";
 import { shortSessionId } from "@ax/lib/shared/session-id";
+import type { SessionTimelinePayload } from "../api.ts";
 import { compactTokens, useInspectSelection, useVisibleTurnSeq } from "./session-inspect.tsx";
+import { SessionTimelineBody } from "./session-timeline.tsx";
 import { Transcript } from "./transcript.tsx";
 
 type ShareSchemaVersion = 1 | 2 | 3 | 4;
@@ -62,6 +64,8 @@ interface ShareArtifact {
         readonly failures: number;
     };
     readonly token_usage?: SessionTokenUsageDetail | null;
+    /** v4 additive: segmented highlight timeline precomputed at export time. */
+    readonly session_timeline?: SessionTimelinePayload | null;
     readonly hook_fires?: ReadonlyArray<HookFireDto>;
     readonly harness_hooks?: ReadonlyArray<ShareHarnessHookView>;
     readonly turns?: ReadonlyArray<{
@@ -456,6 +460,25 @@ const SUBAGENT_LINK_STYLE: CSSProperties = {
     textDecoration: "underline",
 };
 
+const VIEW_TOGGLE_BAR_STYLE: CSSProperties = {
+    display: "flex",
+    gap: 6,
+    padding: "8px 24px 0",
+};
+
+const VIEW_TOGGLE_BUTTON_STYLE: CSSProperties = {
+    background: "#fff",
+    border: "1px solid var(--line, #d7dbe2)",
+    borderRadius: 4,
+    padding: "3px 12px",
+    cursor: "pointer",
+    color: "#374151",
+    fontFamily: "ui-monospace, monospace",
+    fontSize: 11.5,
+    textTransform: "uppercase",
+    letterSpacing: "0.04em",
+};
+
 /** DOM-id offset so harness-hook markers don't collide with file-context
  *  hook_fire markers (both use `hook-<n>` ids for the shared jump). */
 const HARNESS_HOOK_IDX_BASE = 1_000_000;
@@ -605,26 +628,53 @@ function MultiFileShareView(props: {
     // Selected session is URL-driven (?sub=<file>) so browser back/forward walks
     // the parent <-> subagent navigation instead of being trapped in local state.
     const navigate = useNavigate();
-    const search = useSearch({ strict: false }) as { readonly sub?: string };
+    const search = useSearch({ strict: false }) as { readonly sub?: string; readonly view?: string };
     const selectedFile = search.sub && manifest.subagents.some((c) => c.file === search.sub)
         ? search.sub
         : manifest.root_file;
+    const view: "transcript" | "timeline" = search.view === "timeline" ? "timeline" : "transcript";
+    // This view mounts on both the studio index ("/studio/?shareOwner&gistId",
+    // the public iframe entry) and the "/share/$owner/$gistId" route, so
+    // navigate()'s search-updater can't resolve a single route type. The call
+    // is valid at runtime on either - it swaps search params on the current
+    // location and clears the #turn anchor when switching sessions.
+    const navigateLoose = navigate as unknown as (opts: {
+        readonly search: (prev: Record<string, unknown>) => Record<string, unknown>;
+        readonly hash?: string;
+    }) => void;
     const setSelectedFile = (file: string) => {
         const sub = file === manifest.root_file ? undefined : file;
-        // This view mounts on both the studio index ("/studio/?shareOwner&gistId",
-        // the public iframe entry) and the "/share/$owner/$gistId" route, so
-        // navigate()'s search-updater can't resolve a single route type. The call
-        // is valid at runtime on either - it swaps ?sub on the current location and
-        // clears the #turn anchor (it points at the session we're leaving).
-        const navigateLoose = navigate as unknown as (opts: {
-            readonly search: (prev: Record<string, unknown>) => Record<string, unknown>;
-            readonly hash: string;
-        }) => void;
         navigateLoose({
             search: (prev) => ({ ...prev, sub }),
             hash: "",
         });
     };
+    const setView = (next: "transcript" | "timeline") => {
+        navigateLoose({
+            search: (prev) => ({ ...prev, view: next === "transcript" ? undefined : next }),
+        });
+    };
+    // Jumping between sessions keeps the page's scroll offset, which lands the
+    // reader mid-transcript of a session they've never seen - reset to the top.
+    // Skipped on first mount so a deep link's #turn anchor still wins.
+    const mountedRef = useRef(false);
+    useEffect(() => {
+        if (!mountedRef.current) {
+            mountedRef.current = true;
+            return;
+        }
+        window.scrollTo(0, 0);
+    }, [selectedFile]);
+    // Timeline event rows link to `#turn-N` anchors that only exist in the
+    // transcript - a hash jump while on the timeline flips back to it.
+    useEffect(() => {
+        if (view !== "timeline") return;
+        const onHash = () => {
+            if (window.location.hash.startsWith("#turn-")) setView("transcript");
+        };
+        window.addEventListener("hashchange", onHash);
+        return () => window.removeEventListener("hashchange", onHash);
+    }, [view]);
 
     const fileQuery = useQuery({
         queryKey: ["share-file", owner, gistId, selectedFile],
@@ -738,7 +788,28 @@ function MultiFileShareView(props: {
             ) : null}
             {fileQuery.error ? <div className="error">Error: {String(fileQuery.error)}</div> : null}
             {fileQuery.isLoading && !data ? <div className="loading">Loading session…</div> : null}
-            {data ? (
+            {fileQuery.data?.session_timeline ? (
+                <div style={VIEW_TOGGLE_BAR_STYLE}>
+                    {(["transcript", "timeline"] as const).map((mode) => (
+                        <button
+                            key={mode}
+                            type="button"
+                            onClick={() => setView(mode)}
+                            style={{
+                                ...VIEW_TOGGLE_BUTTON_STYLE,
+                                ...(view === mode
+                                    ? { background: "#1f2937", color: "#fff", borderColor: "#1f2937" }
+                                    : {}),
+                            }}
+                        >
+                            {mode}
+                        </button>
+                    ))}
+                </div>
+            ) : null}
+            {view === "timeline" && fileQuery.data?.session_timeline ? (
+                <SessionTimelineBody data={fileQuery.data.session_timeline} />
+            ) : data ? (
                 <InspectBody
                     data={data}
                     subagentsByTurn={subagentsByTurn}

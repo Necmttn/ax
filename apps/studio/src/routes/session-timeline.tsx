@@ -113,31 +113,39 @@ function Highlights({ data }: { data: SessionTimelinePayload }) {
     );
 }
 
+/** Pure presentational timeline (highlights + segments). Shared by the live
+ *  daemon-backed view below and the static share viewer, which reads a
+ *  precomputed `session_timeline` straight off the gist artifact. */
+export function SessionTimelineBody({ data }: { readonly data: SessionTimelinePayload }) {
+    const eventsBySegment = useMemo(() => {
+        const m = new Map<string, TimelineEvent[]>();
+        for (const e of data.events) {
+            const id = e.segment_id ?? "seg-0";
+            (m.get(id) ?? m.set(id, []).get(id)!).push(e);
+        }
+        return m;
+    }, [data]);
+
+    return (
+        <div style={{ padding: "8px 24px 40px" }}>
+            <Highlights data={data} />
+            {data.segments.map((seg) => (
+                <SegmentBlock key={seg.id} seg={seg} events={eventsBySegment.get(seg.id) ?? []} />
+            ))}
+        </div>
+    );
+}
+
 export function SessionTimelineView({ sessionId }: { readonly sessionId: string }) {
     const q = useQuery({
         queryKey: ["session-timeline", sessionId],
         queryFn: () => api.sessionTimeline(sessionId),
         staleTime: 60_000,
     });
-    const eventsBySegment = useMemo(() => {
-        const m = new Map<string, TimelineEvent[]>();
-        for (const e of q.data?.events ?? []) {
-            const id = e.segment_id ?? "seg-0";
-            (m.get(id) ?? m.set(id, []).get(id)!).push(e);
-        }
-        return m;
-    }, [q.data]);
 
     if (q.isLoading) return <div className="loading" style={{ padding: 24 }}>Building timeline…</div>;
     if (q.error) return <div className="error" style={{ padding: 24 }}>Error: {String(q.error)}</div>;
     if (!q.data) return null;
 
-    return (
-        <div style={{ padding: "8px 24px 40px" }}>
-            <Highlights data={q.data} />
-            {q.data.segments.map((seg) => (
-                <SegmentBlock key={seg.id} seg={seg} events={eventsBySegment.get(seg.id) ?? []} />
-            ))}
-        </div>
-    );
+    return <SessionTimelineBody data={q.data} />;
 }
