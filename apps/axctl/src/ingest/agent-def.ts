@@ -12,7 +12,7 @@
  *
  * @see scripts/extract-stage-rationale.ts for the full annotation contract.
  */
-import { Effect, FileSystem, Path, Schema } from "effect";
+import { Effect, FileSystem, Layer, Path, Schema } from "effect";
 import { RecordId, SurrealClient, type SurrealClientShape } from "@ax/lib/db";
 import { skillRecordKeyV2 } from "@ax/lib/ids";
 import { AppLayer } from "@ax/lib/layers";
@@ -130,8 +130,7 @@ if (import.meta.main) {
     // is insufficient for a standalone run - this main is illustrative.
     await Effect.runPromise(
         ingestAgentDefs().pipe(
-            Effect.provide(AppLayer),
-            Effect.provide(AgentSourceRegistryLive),
+            Effect.provide(Layer.mergeAll(AppLayer, AgentSourceRegistryLive)),
             Effect.scoped,
         ) as Effect.Effect<{ count: number; tombstoned: number; resurrected: number }>,
     );

@@ -24,8 +24,8 @@ const recordingDb = (recorder: QueryRecorder, fixtures: ReadonlyArray<unknown[]>
                 recorder.calls.push(sql);
                 return [fixtures[i++] ?? []] as unknown as T;
             }),
-        upsert: () => Effect.succeed(undefined),
-        relate: () => Effect.succeed(undefined),
+        upsert: () => Effect.void,
+        relate: () => Effect.void,
         putFile: () => Effect.void,
     } as never);
 };
@@ -106,8 +106,7 @@ describe("agents scope round-trip (real fs)", () => {
 
         const res = await Effect.runPromise(
             scopeAgent("reviewer", "commit").pipe(
-                Effect.provide(FS),
-                Effect.provide(reg()),
+                Effect.provide(Layer.mergeAll(FS, reg())),
             ) as Effect.Effect<any, never, never>,
         );
         expect((res as { changed: boolean }).changed).toBe(true);
@@ -131,8 +130,7 @@ describe("agents scope round-trip (real fs)", () => {
         const file = join(dir, "reviewer.md");
         const res = await Effect.runPromise(
             scopeAgent("reviewer", "commit", { remove: true }).pipe(
-                Effect.provide(FS),
-                Effect.provide(reg()),
+                Effect.provide(Layer.mergeAll(FS, reg())),
             ) as Effect.Effect<any, never, never>,
         );
         expect((res as { skills: string[] }).skills).toEqual(["tdd"]);
@@ -149,8 +147,7 @@ describe("agents scope round-trip (real fs)", () => {
                     onSuccess: () => ({ ok: true as const }),
                     onFailure: (e) => ({ ok: false as const, tag: (e as { _tag: string })._tag }),
                 }),
-                Effect.provide(FS),
-                Effect.provide(reg()),
+                Effect.provide(Layer.mergeAll(FS, reg())),
             ) as Effect.Effect<{ ok: true } | { ok: false; tag: string }, never, never>,
         );
         expect(result.ok).toBe(false);
@@ -168,9 +165,7 @@ describe("reconcileAgents (mock SurrealClient)", () => {
         // would=0 (fixture[2]) keeps the safety guard from tripping.
         const report = await Effect.runPromise(
             reconcileAgents().pipe(
-                Effect.provide(recordingDb(rec, [[], [1, 2], [], [], [1, 2]])),
-                Effect.provide(FS),
-                Effect.provide(reg()),
+                Effect.provide(Layer.mergeAll(recordingDb(rec, [[], [1, 2], [], [], [1, 2]]), FS, reg())),
             ) as Effect.Effect<any, never, never>,
         );
 
@@ -188,9 +183,7 @@ describe("reconcileAgents (mock SurrealClient)", () => {
         const rec: QueryRecorder = { calls: [] };
         await Effect.runPromise(
             reconcileAgents({ dryRun: true }).pipe(
-                Effect.provide(recordingDb(rec, [[], [], []])),
-                Effect.provide(FS),
-                Effect.provide(reg()),
+                Effect.provide(Layer.mergeAll(recordingDb(rec, [[], [], []]), FS, reg())),
             ) as Effect.Effect<any, never, never>,
         );
         expect(rec.calls.every((c) => c.startsWith("SELECT"))).toBe(true);
@@ -210,9 +203,7 @@ describe("readAllAgents", () => {
 
         const rows = await Effect.runPromise(
             readAllAgents({ includeDeleted: true }).pipe(
-                Effect.provide(recordingDb(rec, [graphRows])),
-                Effect.provide(FS),
-                Effect.provide(reg()),
+                Effect.provide(Layer.mergeAll(recordingDb(rec, [graphRows]), FS, reg())),
             ) as Effect.Effect<any, never, never>,
         );
 

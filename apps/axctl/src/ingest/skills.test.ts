@@ -153,7 +153,7 @@ describe("looseLineParse list-format fallback", () => {
 
             const { layer } = makeMockDb();
             const stats = await Effect.runPromise(
-                ingestSkills().pipe(Effect.provide(layer), Effect.provide(PlatformLayer)),
+                ingestSkills().pipe(Effect.provide(Layer.mergeAll(layer, PlatformLayer))),
             );
 
             expect(stats.edgesWritten).toBe(2);
@@ -187,7 +187,7 @@ describe("ingestSkills end-to-end role wiring", () => {
 
             const { calls, layer } = makeMockDb();
             await Effect.runPromise(
-                ingestSkills().pipe(Effect.provide(layer), Effect.provide(PlatformLayer)),
+                ingestSkills().pipe(Effect.provide(Layer.mergeAll(layer, PlatformLayer))),
             );
 
             // RELATE query should use literal record ids, not $skill/$role bindings
@@ -224,7 +224,7 @@ describe("ingestSkills end-to-end role wiring", () => {
 
             const { layer } = makeMockDb();
             const stats = await Effect.runPromise(
-                ingestSkills().pipe(Effect.provide(layer), Effect.provide(PlatformLayer)),
+                ingestSkills().pipe(Effect.provide(Layer.mergeAll(layer, PlatformLayer))),
             );
 
             expect(stats.edgesWritten).toBe(2);
@@ -252,7 +252,7 @@ describe("ingestSkills end-to-end role wiring", () => {
 
             const { calls, layer } = makeMockDb();
             const stats = await Effect.runPromise(
-                ingestSkills().pipe(Effect.provide(layer), Effect.provide(PlatformLayer)),
+                ingestSkills().pipe(Effect.provide(Layer.mergeAll(layer, PlatformLayer))),
             );
 
             expect(stats.edgesWritten).toBe(0);

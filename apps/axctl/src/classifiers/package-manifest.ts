@@ -1,6 +1,14 @@
-import { Effect, FileSystem, type PlatformError } from "effect";
+import { Effect, FileSystem, type PlatformError, Schema } from "effect";
 import { safeJsonParse } from "@ax/lib/shared/safe-json";
 import type { ClassifierInputKind, ClassifierKind } from "./core.ts";
+
+/** A classifier package JSON file failed structural validation. */
+export class ClassifierPackageInvalidError extends Schema.TaggedErrorClass<ClassifierPackageInvalidError>(
+    "ClassifierPackageInvalidError",
+)("ClassifierPackageInvalidError", {
+    path: Schema.String,
+    message: Schema.String,
+}) {}
 
 export const CLASSIFIER_PACKAGE_SCHEMA = "ax.classifier.v1";
 const CLASSIFIER_KINDS = new Set<ClassifierKind>(["heuristic", "manual", "local_model", "llm_review"]);
@@ -96,12 +104,15 @@ export function isClassifierPackageManifest(value: unknown): value is Classifier
 
 export function loadClassifierPackageManifest(
     path: string,
-): Effect.Effect<ClassifierPackageManifest, PlatformError.PlatformError | Error, FileSystem.FileSystem> {
+): Effect.Effect<ClassifierPackageManifest, PlatformError.PlatformError | ClassifierPackageInvalidError, FileSystem.FileSystem> {
     return Effect.gen(function* () {
         const fs = yield* FileSystem.FileSystem;
         const parsed = safeJsonParse<unknown>(yield* fs.readFileString(path));
         if (!isClassifierPackageManifest(parsed)) {
-            return yield* Effect.fail(new Error(`invalid classifier package manifest: ${path}`));
+            return yield* new ClassifierPackageInvalidError({
+                path,
+                message: `invalid classifier package manifest: ${path}`,
+            });
         }
         return parsed;
     });

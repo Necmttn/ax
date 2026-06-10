@@ -26,8 +26,9 @@ const runWithService = <A>(
     effect: Effect.Effect<A, unknown, ClassifierPackageService | FileSystem.FileSystem | Path.Path>,
 ): Promise<A> =>
     Effect.runPromise(effect.pipe(
-        Effect.provide(ClassifierPackageServiceLive),
-        Effect.provide(BunFsLayer),
+        // ClassifierPackageServiceLive needs FileSystem+Path itself, so feed
+        // BunFsLayer into it (and keep it merged for the effect's own use).
+        Effect.provide(ClassifierPackageServiceLive.pipe(Layer.provideMerge(BunFsLayer))),
     ));
 
 const runWithServiceAndDb = <A>(
@@ -399,8 +400,7 @@ describe("ClassifierPackageService", () => {
                 operationId: "missing",
             });
         }).pipe(
-            Effect.provide(ClassifierPackageServiceLive),
-            Effect.provide(BunFsLayer),
+            Effect.provide(ClassifierPackageServiceLive.pipe(Layer.provideMerge(BunFsLayer))),
             Effect.flip,
         ));
 

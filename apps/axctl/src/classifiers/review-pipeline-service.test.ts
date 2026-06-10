@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { describe, expect, test } from "bun:test";
-import { Effect, type FileSystem } from "effect";
+import { Effect, type FileSystem, Layer } from "effect";
 import { BunFileSystem } from "@effect/platform-bun";
 import {
     ClassifierReviewPipelineService,
@@ -16,8 +16,7 @@ const runWithService = <A>(
 ): Promise<A> =>
     Effect.runPromise(
         effect.pipe(
-            Effect.provide(ClassifierReviewPipelineServiceLive),
-            Effect.provide(BunFileSystem.layer),
+            Effect.provide(Layer.mergeAll(ClassifierReviewPipelineServiceLive, BunFileSystem.layer)),
         ),
     );
 

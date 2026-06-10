@@ -428,19 +428,22 @@ const buildReport = (input: {
 };
 
 export interface LabelMiningServiceShape {
+    // NOTE: SurrealClient is resolved once at Layer creation
+    // (LabelMiningServiceLive), so it is deliberately NOT part of the method
+    // signatures - callers only owe the file-writing capabilities.
     readonly miningReport: (
         input: LabelMiningReportInput,
-    ) => Effect.Effect<LabelMiningReport, LabelMiningError, SurrealClient>;
+    ) => Effect.Effect<LabelMiningReport, LabelMiningError>;
     readonly writeMiningReport: (
         input: LabelMiningWriteInput,
-    ) => Effect.Effect<LabelMiningReport, LabelMiningError, SurrealClient | FileSystem.FileSystem | Path.Path>;
+    ) => Effect.Effect<LabelMiningReport, LabelMiningError, FileSystem.FileSystem | Path.Path>;
     /**
      * Product read path: separate reviewed promotion-safe facts, weak/advisory
      * candidates, rejected/deferred reviews, and nearest-neighbor explanations.
      */
     readonly selfImproveQuery: (
         input: LabelMiningSelfImproveInput,
-    ) => Effect.Effect<LabelMiningSelfImproveResult, LabelMiningError, SurrealClient | FileSystem.FileSystem | Path.Path>;
+    ) => Effect.Effect<LabelMiningSelfImproveResult, LabelMiningError, FileSystem.FileSystem | Path.Path>;
     /**
      * Project persisted reviewed rows + vector rows into classifier graph facts.
      * Only `accepted` reviews become promotion-safe. With `apply`, the idempotent
@@ -448,7 +451,7 @@ export interface LabelMiningServiceShape {
      */
     readonly projectReviewed: (
         input: LabelMiningProjectInput,
-    ) => Effect.Effect<LabelMiningGraphProjectionReport, LabelMiningError, SurrealClient | FileSystem.FileSystem | Path.Path>;
+    ) => Effect.Effect<LabelMiningGraphProjectionReport, LabelMiningError, FileSystem.FileSystem | Path.Path>;
 }
 
 export class LabelMiningService extends Context.Service<LabelMiningService, LabelMiningServiceShape>()(

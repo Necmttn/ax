@@ -138,7 +138,7 @@ import {
 } from "./progress.ts";
 import { cmdProject } from "./project.ts";
 import { AX_VERSION, liveVersionDeps, printVersion, updateAxctl } from "./version.ts";
-import { wantsJson, catchDbErrorAndExit } from "./output.ts";
+import { wantsJson, catchDbErrorAndExit, stderrExit } from "./output.ts";
 import { cmdDogfoodTerminal } from "../dogfood/wterm.ts";
 import { buildFileContextPack } from "../context/file-context.ts";
 import {
@@ -497,12 +497,7 @@ const cmdIngestHere = (args: string[]) => {
         const registry = yield* StageRegistry;
         const pwd = yield* resolvePwdRepository().pipe(
             Effect.catchTag("NotAGitRepoError", (err) =>
-                Effect.sync(() => {
-                    process.stderr.write(
-                        `axctl ingest here: not in a git repository (cwd=${err.cwd})\n`,
-                    );
-                    process.exit(2);
-                }),
+                stderrExit(`axctl ingest here: not in a git repository (cwd=${err.cwd})\n`, 2),
             ),
         );
 
@@ -582,9 +577,7 @@ const cmdIngestInsights = (args: string[] = []) =>
                 { source: "claude", stage: "insights" },
             ],
         });
-        const program = Effect.gen(function* () {
-            yield* telemetryStage(db, runId, "claude", "insights", ingestClaudeInsights(), progress);
-        });
+        const program = telemetryStage(db, runId, "claude", "insights", ingestClaudeInsights(), progress);
         yield* program.pipe(
             withIngestRunFinish(db, runId),
             Effect.provideService(References.MinimumLogLevel, verbose ? "Debug" : "Info"),
@@ -2677,21 +2670,22 @@ const improveAcceptCommand = Command.make(
                 let retroSummaries: readonly string[] = [];
                 const baselineRaw = result.proposal.baseline;
                 if (typeof baselineRaw === "string" && baselineRaw.length > 0) {
-                    try {
-                        const parsed = JSON.parse(baselineRaw) as {
-                            tool?: string;
-                            sessionKeys?: unknown;
-                            frequency?: number;
-                        };
-                        if (Array.isArray(parsed.sessionKeys)) {
-                            const tool = parsed.tool ?? "tool";
-                            retroSummaries = parsed.sessionKeys
-                                .filter((s): s is string => typeof s === "string")
-                                .slice(0, 5)
-                                .map((s) => `session ${s}: top tool ${tool} failed (cluster freq=${parsed.frequency ?? "?"})`);
-                        }
-                    } catch {
-                        // ignore - baseline shape may evolve
+                    // Parse failure → undefined: baseline shape may evolve.
+                    const parsed = yield* Effect.try({
+                        try: () =>
+                            JSON.parse(baselineRaw) as {
+                                tool?: string;
+                                sessionKeys?: unknown;
+                                frequency?: number;
+                            },
+                        catch: () => undefined,
+                    }).pipe(Effect.orElseSucceed(() => undefined));
+                    if (parsed && Array.isArray(parsed.sessionKeys)) {
+                        const tool = parsed.tool ?? "tool";
+                        retroSummaries = parsed.sessionKeys
+                            .filter((s): s is string => typeof s === "string")
+                            .slice(0, 5)
+                            .map((s) => `session ${s}: top tool ${tool} failed (cluster freq=${parsed.frequency ?? "?"})`);
                     }
                 }
                 console.log("");
@@ -3083,12 +3077,7 @@ const cmdSessionsHere = (args: string[]) =>
 
         const pwdResolution = yield* resolvePwdRepository().pipe(
             Effect.catchTag("NotAGitRepoError", (err) =>
-                Effect.sync(() => {
-                    process.stderr.write(
-                        `axctl sessions here: not in a git repository (cwd=${err.cwd})\n`,
-                    );
-                    process.exit(2);
-                }),
+                stderrExit(`axctl sessions here: not in a git repository (cwd=${err.cwd})\n`, 2),
             ),
         );
 
@@ -3193,12 +3182,7 @@ const cmdSessionsNear = (args: string[]) =>
         // Resolve repository via pwd (near is always pwd-scoped)
         const pwdResolution = yield* resolvePwdRepository().pipe(
             Effect.catchTag("NotAGitRepoError", (err) =>
-                Effect.sync(() => {
-                    process.stderr.write(
-                        `axctl sessions near: not in a git repository (cwd=${err.cwd})\n`,
-                    );
-                    process.exit(2);
-                }),
+                stderrExit(`axctl sessions near: not in a git repository (cwd=${err.cwd})\n`, 2),
             ),
         );
 
@@ -3553,10 +3537,7 @@ const cmdSessionsMetrics = (input: {
         if (input.here) {
             const pwd = yield* resolvePwdRepository().pipe(
                 Effect.catchTag("NotAGitRepoError", (err) =>
-                    Effect.sync(() => {
-                        process.stderr.write(`axctl sessions metrics: --here requires a git repository (cwd=${err.cwd})\n`);
-                        process.exit(2);
-                    }),
+                    stderrExit(`axctl sessions metrics: --here requires a git repository (cwd=${err.cwd})\n`, 2),
                 ),
             );
             project = pwd.repoRoot;
@@ -4286,7 +4267,7 @@ const retroCommand = Command.make("retro").pipe(
 const serveCommand = Command.make(
     "serve",
     { port: Flag.integer("port").pipe(Flag.withDefault(1738)) },
-    ({ port }) => Effect.sync(() => serveDashboard([`--port=${port}`])),
+    ({ port }) => Effect.promise(() => serveDashboard([`--port=${port}`])),
 ).pipe(Command.withDescription("Serve the live web dashboard locally"));
 
 // Manages its own long-lived ManagedRuntime (like serve), so it is deliberately
@@ -4294,7 +4275,7 @@ const serveCommand = Command.make(
 const mcpCommand = Command.make(
     "mcp",
     {},
-    () => Effect.sync(() => serveMcp([])),
+    () => Effect.promise(() => serveMcp([])),
 ).pipe(Command.withDescription("Run an MCP server (stdio) exposing ax's read-only queries"));
 
 const reportCommand = Command.make(
@@ -4453,10 +4434,7 @@ const cmdCostsFor = (input: {
         if (input.commit || input.branch || input.here) {
             const pwdResolution = yield* resolvePwdRepository().pipe(
                 Effect.catchTag("NotAGitRepoError", (err) =>
-                    Effect.sync(() => {
-                        process.stderr.write(`axctl costs for: --here/--commit/--branch requires a git repository (cwd=${err.cwd})\n`);
-                        process.exit(2);
-                    }),
+                    stderrExit(`axctl costs for: --here/--commit/--branch requires a git repository (cwd=${err.cwd})\n`, 2),
                 ),
             );
             repositoryKey = pwdResolution.repositoryRecordId.id as string;
@@ -4563,10 +4541,7 @@ const cmdLoc = (input: {
         if (input.here) {
             const pwdResolution = yield* resolvePwdRepository().pipe(
                 Effect.catchTag("NotAGitRepoError", (err) =>
-                    Effect.sync(() => {
-                        process.stderr.write(`axctl loc: --here requires a git repository (cwd=${err.cwd})\n`);
-                        process.exit(2);
-                    }),
+                    stderrExit(`axctl loc: --here requires a git repository (cwd=${err.cwd})\n`, 2),
                 ),
             );
             repositoryKey = pwdResolution.repositoryRecordId.id as string;
@@ -4924,10 +4899,7 @@ const skillsLintCommand = Command.make(
     ({ taskDir, dryRun, json }) =>
         cmdSkillsLint({ taskDir, dryRun, json }).pipe(
             Effect.catchTag("PlatformError", (e) =>
-                Effect.sync(() => {
-                    process.stderr.write(`axctl skills lint: file error - ${e.message}\n`);
-                    process.exit(1);
-                }),
+                stderrExit(`axctl skills lint: file error - ${e.message}\n`, 1),
             ),
             catchDbErrorAndExit("axctl skills lint"),
         ),
@@ -5747,12 +5719,10 @@ const dispatch = (args: ReadonlyArray<string>): Effect.Effect<void, unknown> => 
         // has been acquired yet, so a direct exit(2) is finalizer-safe.
         const removed = detectRemovedIngestFlag(args.slice(1));
         if (removed) {
-            return Effect.sync(() => {
-                console.error(
-                    `axctl ingest: ${removed.flag} was removed. Use ${removed.replacement} instead.`,
-                );
-                process.exit(2);
-            });
+            return stderrExit(
+                `axctl ingest: ${removed.flag} was removed. Use ${removed.replacement} instead.\n`,
+                2,
+            );
         }
         return withIngest(args);
     }
