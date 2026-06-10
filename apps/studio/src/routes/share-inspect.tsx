@@ -323,11 +323,18 @@ const SESSION_MAP_MAX_ROWS = 4;
 /** Bars whose left edges sit closer than this (strip fraction) to an earlier
  *  bar's right edge pack onto the next row instead of overlapping. */
 const SESSION_MAP_PACK_GAP = 0.002;
-/** Uncovered spans between coverage clusters wider than this (strip fraction)
- *  get compressed - long solo-root stretches must not dominate the strip. */
+/** Uncovered spans between coverage clusters wider than this (strip fraction,
+ *  measured in the RENDERED space) get compressed - long solo-root stretches
+ *  must not dominate the strip. */
 const SESSION_MAP_GAP_MIN = 0.12;
 /** Width every compressed gap collapses to (strip fraction). */
 const SESSION_MAP_GAP_W = 0.04;
+/** Fixed-point iteration cap: compressing one gap stretches the rest, which
+ *  can push a previously sub-threshold gap over the visual threshold. */
+const SESSION_MAP_GAP_PASSES = 4;
+/** Max rendered break bands - beyond this, only the widest gaps compress so
+ *  the strip doesn't become a picket fence. */
+const SESSION_MAP_GAP_MAX = 4;
 
 const parseShareTs = (iso: string | null | undefined): number | null => {
     const t = Date.parse(iso ?? "");
@@ -413,17 +420,40 @@ export function buildSessionMapLanes(manifest: ShareManifest): SessionMapModel |
             if (last && p.x <= last.end) last.end = Math.max(last.end, p.x + p.w);
             else covered.push({ start: p.x, end: p.x + p.w });
         }
-        const domainGaps = covered
+        // Candidates: interior uncovered spans, tracked by their DOMAIN
+        // endpoints (labels must come from domain quantities, never remapped
+        // fractions). Spans no wider than the break width are excluded - they
+        // can't shrink, and excluding them keeps the remap stretch-only
+        // (chosen total > chosen count * GAP_W, hence scale > 1).
+        const candidates = covered
             .slice(1)
             .map((seg, i) => ({ start: covered[i]!.end, end: seg.start }))
-            .filter((g) => g.end - g.start > SESSION_MAP_GAP_MIN);
-        if (domainGaps.length > 0) {
-            const gapTotal = domainGaps.reduce((acc, g) => acc + (g.end - g.start), 0);
-            const scale = (1 - domainGaps.length * SESSION_MAP_GAP_W) / (1 - gapTotal);
+            .filter((g) => g.end - g.start > SESSION_MAP_GAP_W);
+        // Fixed-point selection: a gap qualifies when its RENDERED width
+        // (domain width x current stretch) exceeds the threshold, and every
+        // compression raises the stretch - so iterate, widest first, until no
+        // gap qualifies or the pass/band caps stop it.
+        const chosen: Array<{ start: number; end: number }> = [];
+        for (let pass = 0; pass < SESSION_MAP_GAP_PASSES && chosen.length < SESSION_MAP_GAP_MAX; pass++) {
+            const chosenTotal = chosen.reduce((acc, g) => acc + (g.end - g.start), 0);
+            const stretch = (1 - chosen.length * SESSION_MAP_GAP_W) / (1 - chosenTotal);
+            const qualifying = candidates
+                .filter((g) => !chosen.includes(g) && (g.end - g.start) * stretch > SESSION_MAP_GAP_MIN)
+                .sort((a, b) => (b.end - b.start) - (a.end - a.start));
+            if (qualifying.length === 0) break;
+            for (const g of qualifying) {
+                if (chosen.length >= SESSION_MAP_GAP_MAX) break;
+                chosen.push(g);
+            }
+        }
+        if (chosen.length > 0) {
+            chosen.sort((a, b) => a.start - b.start);
+            const gapTotal = chosen.reduce((acc, g) => acc + (g.end - g.start), 0);
+            const scale = (1 - chosen.length * SESSION_MAP_GAP_W) / (1 - gapTotal);
             remap = (v) => {
                 let out = 0;
                 let prev = 0;
-                for (const g of domainGaps) {
+                for (const g of chosen) {
                     if (v <= g.start) return out + (v - prev) * scale;
                     out += (g.start - prev) * scale;
                     if (v <= g.end) return out + ((v - g.start) / (g.end - g.start)) * SESSION_MAP_GAP_W;
@@ -458,7 +488,7 @@ export function buildSessionMapLanes(manifest: ShareManifest): SessionMapModel |
                 const nextSeq = Math.min(...after.map((p) => p.card.spawn_turn_seq ?? 0));
                 return `${Math.max(nextSeq - prevSeq, 0)} turns`;
             };
-            gaps = domainGaps.map((g) => ({ x: remap(g.start), w: SESSION_MAP_GAP_W, label: gapLabel(g) }));
+            gaps = chosen.map((g) => ({ x: remap(g.start), w: SESSION_MAP_GAP_W, label: gapLabel(g) }));
         }
     }
     const remapped = gaps.length === 0 ? placed : placed.map((p) => {
