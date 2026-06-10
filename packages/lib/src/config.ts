@@ -7,7 +7,6 @@ import {
     FileSystem,
     Layer,
     Redacted,
-    Schema,
 } from "effect";
 import { posixPath } from "@ax/lib/shared/path";
 import { dbUrlFromState, readRuntimeState, runtimeStatePath } from "./runtime-state.ts";
@@ -61,21 +60,28 @@ const DEFAULTS = {
     sessionsEnrichConcurrency: 16,
 } as const;
 
-const PositiveInt = Schema.Int.check(Schema.isGreaterThan(0));
-const NonNegativeInt = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0));
+/** Legacy-faithful int knob parsing, byte-identical to the old hand-rolled
+ *  env readers: `Number.parseInt(raw, 10)` prefix-parses (`" 5"` -> 5,
+ *  `"5abc"` -> 5, `"5.5"` -> 5, `"1e2"` -> 1); a missing var, empty string,
+ *  unparseable junk, or a value failing `check` silently degrades to the
+ *  fallback. Operational knobs must keep accepting everything the old parser
+ *  accepted - do NOT swap this for a strict `Config.schema(Int)` decode. */
+const legacyInt = (check: (n: number) => boolean) =>
+    (name: string, fallback: number): Config.Config<number> =>
+        Config.string(name).pipe(
+            Config.map((raw) => {
+                if (!raw) return fallback;
+                const parsed = Number.parseInt(raw, 10);
+                return Number.isFinite(parsed) && check(parsed) ? parsed : fallback;
+            }),
+            Config.withDefault(fallback),
+        );
 
-/** Missing var -> fallback. Junk / zero / negative -> fallback (matches the old
- *  hand-rolled `positiveInt`: any unusable value silently degrades to default). */
-const positiveInt = (name: string, fallback: number): Config.Config<number> =>
-    Config.schema(PositiveInt, name).pipe(
-        Config.orElse(() => Config.succeed(fallback)),
-    );
+/** Missing var -> fallback. Junk / zero / negative -> fallback. */
+const positiveInt = legacyInt((n) => n > 0);
 
 /** Missing var -> fallback. Junk / negative -> fallback; zero is allowed. */
-const nonNegativeInt = (name: string, fallback: number): Config.Config<number> =>
-    Config.schema(NonNegativeInt, name).pipe(
-        Config.orElse(() => Config.succeed(fallback)),
-    );
+const nonNegativeInt = legacyInt((n) => n >= 0);
 
 /** Comma-separated list: trims entries, drops empties. Missing var -> []. */
 const csvList = (name: string): Config.Config<ReadonlyArray<string>> =>

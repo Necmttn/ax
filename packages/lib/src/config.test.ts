@@ -48,6 +48,45 @@ describe("AxConfig", () => {
         expect(snap.paths.cursorUserDir).toBe("/tmp/home/Library/Application Support/Cursor/User");
     });
 
+    test("int knobs preserve legacy Number.parseInt prefix-parse semantics", async () => {
+        // Oracles: the exact pre-Effect-Config hand-rolled helpers. The new
+        // Config-based readers must be byte-identical to these for every input.
+        const legacyPositiveInt = (raw: string | undefined, fallback: number): number => {
+            if (!raw) return fallback;
+            const parsed = Number.parseInt(raw, 10);
+            return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+        };
+        const legacyNonNegativeInt = (raw: string | undefined, fallback: number): number => {
+            if (!raw) return fallback;
+            const parsed = Number.parseInt(raw, 10);
+            return Number.isFinite(parsed) && parsed >= 0 ? parsed : fallback;
+        };
+
+        // [raw, expected positive-int (fallback 4), expected non-negative-int (fallback 1200)]
+        const cases: ReadonlyArray<readonly [string, number, number]> = [
+            [" 5", 5, 5], // parseInt skips leading whitespace
+            ["5abc", 5, 5], // prefix parse
+            ["5.5", 5, 5], // truncated at the decimal point
+            ["1e2", 1, 1], // parseInt does NOT understand exponents
+            ["", 4, 1200], // empty -> fallback
+            ["nope", 4, 1200], // junk -> fallback
+            ["-1", 4, 1200], // negative -> fallback for both knob kinds
+            ["0", 4, 0], // zero: rejected by positive, allowed by non-negative
+        ];
+
+        for (const [raw, posExpected, nonNegExpected] of cases) {
+            const snap = await run(envSnapshot({
+                HOME: "/tmp/home",
+                AX_CLAUDE_CONCURRENCY: raw,
+                AX_CODEX_PAYLOAD_MAX_BYTES: raw,
+            }));
+            expect(snap.knobs.claudeConcurrency).toBe(posExpected);
+            expect(snap.knobs.claudeConcurrency).toBe(legacyPositiveInt(raw, 4));
+            expect(snap.knobs.codexPayloadMaxBytes).toBe(nonNegExpected);
+            expect(snap.knobs.codexPayloadMaxBytes).toBe(legacyNonNegativeInt(raw, 1200));
+        }
+    });
+
     test("envSnapshot ignores invalid numeric knobs", async () => {
         const snap = await run(envSnapshot({
             AX_CODEX_CONCURRENCY: "nope",
