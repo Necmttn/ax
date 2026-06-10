@@ -2,7 +2,6 @@ import { Effect, FileSystem, Option, Path, PlatformError, Schema, Stream } from 
 import { RecordId, SurrealClient, filePointer } from "@ax/lib/db";
 import { AxConfig } from "@ax/lib/config";
 import { decodeJsonOrNull } from "@ax/lib/decode";
-import { skillRecordKey } from "@ax/lib/skill-id";
 import { recordRef, surrealDate, surrealJsonOption, surrealObject, surrealOptionInt, surrealOptionString, surrealString } from "@ax/lib/shared/surql";
 import { AppLayer } from "@ax/lib/layers";
 import type { DbError } from "@ax/lib/errors";
@@ -10,19 +9,12 @@ import { BaseStageStats, IngestContext, sinceDaysFromCtx, StageMeta } from "./st
 import { annotateStageProgress } from "./stage/runner.ts";
 import type { StageDef } from "./stage/registry.ts";
 import {
-    buildPlanSnapshotStatements,
-    buildRelateToolCallSkillStatements,
-    buildToolFileEvidenceStatements,
-    buildToolCallStatements,
     type PlanSnapshotWrite,
     type ToolCallSkillRelationWrite,
     type ToolCallWrite,
 } from "./evidence-writers.ts";
 import {
-    buildAgentEventParentEdgeStatement,
     agentEventRecordKey,
-    buildAgentEventStatements,
-    buildAgentProviderStatements,
     type AgentEventParentEdgeWrite,
     type AgentEventWrite,
 } from "./provider-events.ts";
@@ -32,7 +24,7 @@ import {
     parseCodexFunctionOutput,
     toolKindForName,
 } from "./tool-calls.ts";
-import { buildCompactionStatements, extractCodexCompaction, type CompactionWrite } from "./compaction.ts";
+import { extractCodexCompaction, type CompactionWrite } from "./compaction.ts";
 import { classifyTurnIntent } from "./intent-kind.ts";
 import { providerDelegationSignalAvailability } from "./delegation.ts";
 import {
@@ -40,7 +32,7 @@ import {
     providerPlanSignalAvailability,
     toPlanSnapshotWrite,
 } from "./plans.ts";
-import { invokedRelationRecordKey, toolCallRecordKey, turnRecordKey } from "./record-keys.ts";
+import { toolCallRecordKey, turnRecordKey } from "./record-keys.ts";
 import { extractToolFileEvidence } from "./tool-file-evidence.ts";
 import {
     buildNormalizedTranscriptStatements,
@@ -1245,87 +1237,7 @@ export const __testStreamCodexFileGuarded = (
         );
     });
 
-const buildTurnStatements = (turns: readonly CodexTurn[]): string[] =>
-    turns.map(
-        (t) =>
-            `UPSERT turn:\`${turnRecordKey(t.session, t.seq)}\` CONTENT { session: session:\`${t.session}\`, seq: ${t.seq}, ts: d"${t.ts}", role: ${surrealString(t.role)}, message_kind: ${surrealString(t.message_kind)}, intent_kind: ${surrealString(t.intent_kind)}, text: ${t.text === null ? "NONE" : surrealString(t.text)}, text_excerpt: ${t.text_excerpt === null ? "NONE" : surrealString(t.text_excerpt)}, has_tool_use: ${t.has_tool_use}, has_error: false };`,
-    );
-
-const buildSyntheticSkillAndInvocationStatements = (
-    invocations: readonly CodexInvocation[],
-): string[] => {
-    if (invocations.length === 0) return [];
-    const codexTools = new Set(invocations.map((i) => i.skill));
-    const skillStmts = [...codexTools].map(
-        (name) =>
-            `UPSERT skill:\`${skillRecordKey(name)}\` MERGE { name: ${surrealString(name)}, scope: "codex-tool", dir_path: "(synthetic)", content_hash: "codex" };`,
-    );
-
-    const invStmts = invocations.flatMap((inv) => {
-        const turnKey = turnRecordKey(inv.session, inv.seq);
-        const skillKey = skillRecordKey(inv.skill);
-        const args = JSON.stringify(inv.args);
-        const edgeKey = invokedRelationRecordKey({ turnKey, skillKey, args });
-        return [
-            `RELATE turn:\`${turnKey}\`->invoked:\`${edgeKey}\`->skill:\`${skillKey}\` SET session = ${recordRef("session", inv.session)}, ts = d"${inv.ts}", args = ${surrealString(args)}, turn_has_error = false, turn_index = ${inv.seq};`,
-        ];
-    });
-    return [...skillStmts, ...invStmts];
-};
-
 export const __testCompactCodexToolCall = compactCodexToolCall;
-
-const buildCodexProviderStatements = (
-    batch: MutableCodexExtract,
-    clearExisting: boolean,
-): string[] => {
-    if (!batch.session) return [];
-    return [
-        ...buildAgentProviderStatements([
-            {
-                name: "codex",
-                displayName: "Codex",
-                version: batch.session.cli_version,
-                capabilities: {
-                    transcripts: true,
-                    toolCalls: true,
-                    planSignals: providerPlanSignalAvailability.codex,
-                    delegationSignals: providerDelegationSignalAvailability.codex,
-                },
-            },
-        ]),
-        ...buildAgentEventStatements({
-            sessions: [
-                {
-                    provider: "codex",
-                    providerSessionId: batch.session.id,
-                    axSessionId: batch.session.id,
-                    cwd: batch.session.cwd,
-                    project: batch.session.cwd,
-                    model: concreteCodexModel(batch.session),
-                    sourcePath: batch.sourcePath,
-                    raw: {
-                        source: "codex_transcript",
-                        cliVersion: batch.session.cli_version,
-                        modelProvider: batch.session.model_provider,
-                        model: batch.session.model,
-                    },
-                    labels: {
-                        source: "transcript",
-                    },
-                    metrics: {
-                        turns: batch.turns.length,
-                        toolCalls: batch.toolCalls.length,
-                        providerEvents: batch.providerEvents.length,
-                    },
-                    startedAt: batch.session.started_at,
-                    endedAt: batch.session.ended_at,
-                },
-            ],
-            events: batch.providerEvents,
-        }, { clearExisting }),
-    ];
-};
 
 const buildCodexTokenUsageStatements = (usage: CodexTokenUsage | null): string[] => {
     if (!usage) return [];
@@ -1413,34 +1325,6 @@ const buildCodexTurnTokenUsageStatements = (
         ])};`;
     });
 
-const legacyBuildCodexBatchStatements = (
-    batch: MutableCodexExtract,
-    payloadMaxBytes: number,
-    clearExisting = true,
-): string[] => [
-    ...buildCodexProviderStatements(batch, clearExisting),
-    ...buildCodexTokenUsageStatements(batch.tokenUsage),
-    ...buildTurnStatements(batch.turns),
-    ...buildCodexTurnTokenUsageStatements(batch.turnTokenUsages),
-    ...buildToolCallStatements(batch.toolCalls.map((call) =>
-        compactCodexToolCall(call, payloadMaxBytes),
-    )),
-    ...buildToolFileEvidenceStatements(extractToolFileEvidence(batch.toolCalls)),
-    ...batch.parentEdges.map((edge) =>
-        buildAgentEventParentEdgeStatement(edge),
-    ),
-    ...buildSyntheticSkillAndInvocationStatements(batch.invocations),
-    ...batch.skillRelations.flatMap((relation) =>
-        buildRelateToolCallSkillStatements(relation),
-    ),
-    ...batch.planSnapshots.flatMap((snapshot) =>
-        buildPlanSnapshotStatements(snapshot),
-    ),
-    ...buildCompactionStatements(batch.compactions ?? []),
-];
-
-export const __legacyBuildCodexBatchStatements = legacyBuildCodexBatchStatements;
-
 const toCodexNormalizedBatch = (
     batch: MutableCodexExtract,
     payloadMaxBytes: number,
@@ -1483,8 +1367,8 @@ const toCodexNormalizedBatch = (
             endedAt: batch.session.ended_at,
         }]
         : [],
-    // Legacy behavior: without a session header, NO provider/session/event
-    // statements were emitted (buildCodexProviderStatements returned []).
+    // Without a session header, NO provider/session/event statements are
+    // emitted; token and evidence statements can still be flushed.
     events: batch.session ? batch.providerEvents : [],
     turns: batch.turns.map((turn) => ({
         sessionId: turn.session,

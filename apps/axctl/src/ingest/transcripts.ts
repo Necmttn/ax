@@ -20,8 +20,6 @@ import {
 } from "./evidence-writers.ts";
 import {
     agentEventRecordKey,
-    buildAgentEventStatements,
-    buildAgentProviderStatements,
     type AgentEventWrite,
 } from "./provider-events.ts";
 import {
@@ -1230,11 +1228,10 @@ const snapshotTranscript = (sessionId: string, filePath: string) =>
         return result;
     });
 
-// Legacy quirk: claude turn rows are NEVER agent_event-linked (the transcript
+// Claude turn rows are NEVER agent_event-linked (the transcript
 // extractor keys provider events by tool/turn uuid, not by turn seq), so the
 // adapter passes `agentEvent: null` and the normalized turn builder OMITS the
-// `agent_event` key entirely - byte-identical to the legacy statement below
-// (plan ledger delta D2).
+// `agent_event` key entirely (plan ledger delta D2).
 const toNormalizedClaudeTurn = (turn: Turn): NormalizedTurnWrite => ({
     sessionId: turn.session,
     seq: turn.seq,
@@ -1257,21 +1254,6 @@ const upsertTurns = (turns: Turn[]) =>
             "upsertTurns",
         );
     });
-
-/** Pre-seam turn builder, kept ONLY as the parity-test oracle
- *  (transcripts.parity.test.ts). Production writes go through
- *  buildNormalizedTurnStatements. */
-const legacyBuildClaudeTurnStatements = (turns: readonly Turn[]): string[] =>
-    turns.map(
-        (t) =>
-            `UPSERT turn:\`${turnRecordKey(t.session, t.seq)}\` CONTENT { session: session:\`${t.session}\`, seq: ${t.seq}, ts: d"${t.ts}", role: "${t.role}", message_kind: ${surrealLiteral(t.message_kind)}, intent_kind: ${surrealLiteral(t.intent_kind)}, text: ${
-                t.text === null ? "NONE" : surrealLiteral(t.text)
-            }, text_excerpt: ${
-                t.text_excerpt === null ? "NONE" : surrealLiteral(t.text_excerpt)
-            }, has_tool_use: ${t.has_tool_use}, has_error: ${t.has_error} };`,
-    );
-
-export const __legacyBuildClaudeTurnStatements = legacyBuildClaudeTurnStatements;
 
 const escapeRecordKey = (key: string): string =>
     key
@@ -1397,55 +1379,6 @@ const writeHookEvidence = (
         ...buildHookCommandInvocationStatements(invocations),
     ], "hookEvidence");
 
-/** Pre-seam provider/session/event builder, kept ONLY as the parity-test
- *  oracle (transcripts.parity.test.ts). Production writes go through
- *  buildNormalizedTranscriptStatements via toClaudeNormalizedBatch. */
-const legacyBuildClaudeProviderStatements = (extracted: FileExtract): string[] => [
-    ...buildAgentProviderStatements([
-        {
-            name: "claude",
-            displayName: "Claude Code",
-            capabilities: {
-                transcripts: true,
-                toolCalls: true,
-                planSignals: providerPlanSignalAvailability.claude,
-                delegationSignals: providerDelegationSignalAvailability.claude,
-            },
-        },
-    ]),
-    ...buildAgentEventStatements({
-        sessions: [
-            {
-                provider: "claude",
-                providerSessionId: extracted.session.id,
-                axSessionId: extracted.session.id,
-                cwd: extracted.session.cwd,
-                project: extracted.session.project,
-                model: extracted.session.model,
-                sourcePath: extracted.sourcePath,
-                raw: {
-                    source: "claude_transcript",
-                    rawFile: extracted.session.raw_file,
-                },
-                labels: {
-                    source: "transcript",
-                    project: extracted.session.project,
-                },
-                metrics: {
-                    turns: extracted.turns.length,
-                    toolCalls: extracted.toolCalls.length,
-                    providerEvents: extracted.providerEvents.length,
-                },
-                startedAt: extracted.session.started_at,
-                endedAt: extracted.session.ended_at,
-            },
-        ],
-        events: extracted.providerEvents,
-    }),
-];
-
-export const __legacyBuildClaudeProviderStatements = legacyBuildClaudeProviderStatements;
-
 /**
  * Adapter onto the parser-normalization seam: one FileExtract (= one claude
  * transcript file = one session) becomes one NormalizedTranscriptBatch.
@@ -1454,11 +1387,10 @@ export const __legacyBuildClaudeProviderStatements = legacyBuildClaudeProviderSt
  * `ingestTranscripts` resolves invoked skill names onto the real catalog
  * first, so `concerns` edges land on the real skill row.
  *
- * Legacy quirks preserved:
+ * Normalization invariants:
  * - claude is single-shot per file (no streaming), so the default
- *   `clearExisting: true` per-session agent_event clear matches the legacy
- *   `buildAgentEventStatements` call exactly - one file, one session, one
- *   batch, one clear.
+ *   `clearExisting: true` per-session agent_event clear yields one file, one
+ *   session, one batch, one clear.
  * - REAL skill `invoked` edges stay in the effectful `relateInvocations`
  *   (catalog lookup + placeholder pre-upsert); routing them through the
  *   batch's synthetic-skill leg would MERGE synthetic scope/hash onto real

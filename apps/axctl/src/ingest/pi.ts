@@ -16,21 +16,17 @@ import {
     surrealOptionString,
     surrealString,
 } from "@ax/lib/shared/surql";
-import { skillRecordKey } from "@ax/lib/skill-id";
 import {
-    buildRelateToolCallSkillStatements,
-    buildToolFileEvidenceStatements,
-    buildToolCallStatements,
     type ToolCallSkillRelationWrite,
     type ToolCallWrite,
 } from "./evidence-writers.ts";
-import { buildCompactionStatements, extractPiCompaction, type CompactionWrite } from "./compaction.ts";
+import { extractPiCompaction, type CompactionWrite } from "./compaction.ts";
 import { buildNormalizedTranscriptStatements, type NormalizedTranscriptBatch } from "./normalized/transcripts.ts";
 import { classifyTurnIntent } from "./intent-kind.ts";
 import { providerDelegationSignalAvailability } from "./delegation.ts";
-import { agentEventRecordKey, buildAgentEventStatements, buildAgentProviderStatements, type AgentEventWrite } from "./provider-events.ts";
+import { agentEventRecordKey, type AgentEventWrite } from "./provider-events.ts";
 import { providerPlanSignalAvailability } from "./plans.ts";
-import { invokedRelationRecordKey, toolCallRecordKey, turnRecordKey } from "./record-keys.ts";
+import { toolCallRecordKey, turnRecordKey } from "./record-keys.ts";
 import { BaseStageStats, IngestContext, sinceDaysFromCtx, StageMeta } from "./stage/types.ts";
 import type { StageDef } from "./stage/registry.ts";
 import { extractCommandTool, normalizeCommand, toolKindForName } from "./tool-calls.ts";
@@ -664,35 +660,6 @@ const walkJsonlFiles = (
 
 export const __testWalkJsonlFiles = walkJsonlFiles;
 
-const buildTurnStatements = (turns: readonly PiTurn[]): string[] =>
-    turns.map((turn) => {
-        const eventKey = agentEventRecordKey({
-            provider: "pi",
-            providerSessionId: turn.session,
-            providerEventId: turn.providerEventId,
-            seq: turn.providerEventSeq,
-        });
-        return `UPSERT turn:\`${turnRecordKey(turn.session, turn.seq)}\` CONTENT { session: ${recordRef("session", turn.session)}, agent_event: ${recordRef("agent_event", eventKey)}, seq: ${turn.seq}, ts: ${surrealDate(turn.ts)}, role: ${surrealString(turn.role)}, message_kind: ${surrealString(turn.message_kind)}, intent_kind: ${surrealString(turn.intent_kind)}, text: ${turn.text === null ? "NONE" : surrealString(turn.text)}, text_excerpt: ${turn.text_excerpt === null ? "NONE" : surrealString(turn.text_excerpt)}, has_tool_use: ${turn.has_tool_use}, has_error: ${turn.has_error} };`;
-    });
-
-const buildSyntheticSkillAndInvocationStatements = (
-    invocations: readonly PiInvocation[],
-): string[] => {
-    if (invocations.length === 0) return [];
-    const tools = new Set(invocations.map((invocation) => invocation.skill));
-    const skillStatements = [...tools].map((name) =>
-        `UPSERT skill:\`${skillRecordKey(name)}\` MERGE { name: ${surrealString(name)}, scope: "pi-tool", dir_path: "(synthetic)", content_hash: "pi" };`
-    );
-    const invocationStatements = invocations.map((invocation) => {
-        const turnKey = turnRecordKey(invocation.session, invocation.seq);
-        const skillKey = skillRecordKey(invocation.skill);
-        const args = JSON.stringify(invocation.args ?? {});
-        const edgeKey = invokedRelationRecordKey({ turnKey, skillKey, args });
-        return `RELATE turn:\`${turnKey}\`->invoked:\`${edgeKey}\`->skill:\`${skillKey}\` SET session = ${recordRef("session", invocation.session)}, ts = ${surrealDate(invocation.ts)}, args = ${surrealString(args)}, turn_has_error = false, turn_index = ${invocation.seq};`;
-    });
-    return [...skillStatements, ...invocationStatements];
-};
-
 const buildPiTokenUsageStatements = (extract: PiExtract): string[] => {
     if (!Object.values(extract.usage).some((value) => value > 0)) return [];
     const estimatedTokens = extract.usage.totalTokens > 0
@@ -782,8 +749,8 @@ const toPiNormalizedBatch = (extract: PiExtract): NormalizedTranscriptBatch => (
     })),
     toolCalls: extract.toolCalls,
     toolFileEvidence: extractToolFileEvidence(extract.toolCalls),
-    // turnHasError/turnIndex omitted: seam defaults (false / seq) match the
-    // legacy hardcoded `turn_has_error = false, turn_index = ${seq}` exactly.
+    // turnHasError/turnIndex omitted: seam defaults preserve
+    // `turn_has_error = false, turn_index = ${seq}`.
     syntheticSkillInvocations: extract.invocations.map((invocation) => ({
         sessionId: invocation.session,
         seq: invocation.seq,
@@ -796,63 +763,6 @@ const toPiNormalizedBatch = (extract: PiExtract): NormalizedTranscriptBatch => (
     toolCallSkillRelations: extract.skillRelations,
     compactions: extract.compactions,
 });
-
-const legacyBuildPiBatchStatements = (extract: PiExtract): string[] => [
-    ...buildAgentProviderStatements([
-        {
-            name: "pi",
-            displayName: "Pi",
-            version: extract.session.version === null ? null : String(extract.session.version),
-            capabilities: {
-                transcripts: true,
-                providerGraph: true,
-                planSignals: providerPlanSignalAvailability.pi,
-                delegationSignals: providerDelegationSignalAvailability.pi,
-            },
-        },
-    ]),
-    ...buildAgentEventStatements({
-        sessions: [
-            {
-                provider: "pi",
-                providerSessionId: extract.session.id,
-                axSessionId: extract.session.id,
-                cwd: extract.session.cwd,
-                project: extract.session.cwd,
-                model: extract.session.model,
-                sourcePath: extract.sourcePath,
-                raw: {
-                    source: "pi_jsonl",
-                    sourcePath: extract.sourcePath,
-                    version: extract.session.version,
-                },
-                labels: {
-                    source: "pi",
-                },
-                metrics: {
-                    turns: extract.turns.length,
-                    toolCalls: extract.toolCalls.length,
-                    providerEvents: extract.providerEvents.length,
-                    usage: extract.usage,
-                },
-                startedAt: extract.session.started_at,
-                endedAt: extract.session.ended_at,
-            },
-        ],
-        events: extract.providerEvents,
-    }),
-    ...buildTurnStatements(extract.turns),
-    ...buildToolCallStatements(extract.toolCalls),
-    ...buildToolFileEvidenceStatements(extractToolFileEvidence(extract.toolCalls)),
-    ...buildSyntheticSkillAndInvocationStatements(extract.invocations),
-    ...extract.skillRelations.flatMap((relation) =>
-        buildRelateToolCallSkillStatements(relation),
-    ),
-    ...buildCompactionStatements(extract.compactions),
-    ...buildPiTokenUsageStatements(extract),
-];
-
-export const __legacyBuildPiBatchStatements = legacyBuildPiBatchStatements;
 
 const buildPiBatchStatements = (extract: PiExtract): string[] => [
     ...buildNormalizedTranscriptStatements(toPiNormalizedBatch(extract)),

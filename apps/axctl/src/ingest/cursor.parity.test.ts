@@ -5,10 +5,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
     extractCursorStateDb,
-    __legacyBuildCursorBatchStatements,
     __testBuildCursorBatchStatements,
 } from "./cursor.ts";
-import { diffStatementSets } from "./normalized/statement-parity.ts";
 
 const composerDiskKvFixture = (withCompaction: boolean): string => {
     const dir = mkdtempSync(join(tmpdir(), "ax-cursor-parity-"));
@@ -61,16 +59,25 @@ const composerDiskKvFixture = (withCompaction: boolean): string => {
 
 describe("cursor normalized-batch parity", () => {
     for (const withCompaction of [false, true]) {
-        it(`new path emits the exact legacy statement multiset (compaction=${withCompaction})`, () => {
+        it(`new path emits golden statement shapes (compaction=${withCompaction})`, () => {
             const dbPath = composerDiskKvFixture(withCompaction);
             const extracted = extractCursorStateDb(dbPath);
             expect(extracted.sessions.length).toBeGreaterThan(0);
             expect(extracted.toolCalls.length).toBeGreaterThan(0);
             if (withCompaction) expect(extracted.compactions.length).toBeGreaterThan(0);
 
-            const legacy = __legacyBuildCursorBatchStatements(extracted, dbPath);
-            const next = __testBuildCursorBatchStatements(extracted, dbPath);
-            expect(diffStatementSets(legacy, next)).toEqual({ missing: [], added: [] });
+            const statements = __testBuildCursorBatchStatements(extracted, dbPath);
+            const sql = statements.join("\n");
+            expect(sql).toContain("UPSERT agent_provider:`cursor`");
+            expect(sql).toContain("UPSERT agent_session:`cursor__");
+            expect(sql).toContain("DELETE (SELECT VALUE id FROM agent_event_child WHERE agent_session = agent_session:`cursor__");
+            expect(sql).toContain("UPSERT agent_event:`cursor__");
+            expect(sql).toMatch(/UPSERT turn:`[^`]+` CONTENT \{ session: session:`[^`]+`, agent_event: agent_event:`cursor__/);
+            expect(sql).toContain("UPSERT tool:`cursor__");
+            expect(sql).toContain("UPSERT tool_call:`");
+            expect(sql).toContain('scope: "cursor-tool", dir_path: "(synthetic)", content_hash: "cursor"');
+            expect(sql).toMatch(/RELATE turn:`[^`]+`->invoked:`[^`]+`->skill:`[^`]+` SET session = session:/);
+            expect(statements.some((statement) => statement.startsWith("UPSERT compaction:"))).toBe(withCompaction);
         });
     }
 });

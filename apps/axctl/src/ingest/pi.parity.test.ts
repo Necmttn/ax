@@ -1,6 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { __legacyBuildPiBatchStatements, __testBuildPiBatchStatements, __testExtractPiJsonlLines } from "./pi.ts";
-import { diffStatementSets } from "./normalized/statement-parity.ts";
+import { __testBuildPiBatchStatements, __testExtractPiJsonlLines } from "./pi.ts";
 import { extractToolFileEvidence } from "./tool-file-evidence.ts";
 
 const fixtureLines = (): string[] => [
@@ -24,7 +23,7 @@ const fixtureLines = (): string[] => [
 ];
 
 describe("pi normalized-batch parity", () => {
-    it("new path emits the exact legacy statement multiset", () => {
+    it("new path emits golden statement shapes", () => {
         const extracted = __testExtractPiJsonlLines(fixtureLines());
         expect(extracted).not.toBeNull();
         expect(extracted!.toolCalls.length).toBe(2);
@@ -34,8 +33,19 @@ describe("pi normalized-batch parity", () => {
         expect(extracted!.invocations.length).toBeGreaterThan(0);
         expect(extracted!.compactions.length).toBeGreaterThan(0);
         expect(extractToolFileEvidence(extracted!.toolCalls).length).toBeGreaterThan(0);
-        const legacy = __legacyBuildPiBatchStatements(extracted!);
-        const next = __testBuildPiBatchStatements(extracted!);
-        expect(diffStatementSets(legacy, next)).toEqual({ missing: [], added: [] });
+        const statements = __testBuildPiBatchStatements(extracted!);
+        const sql = statements.join("\n");
+        expect(sql).toContain("UPSERT agent_provider:`pi`");
+        expect(sql).toMatch(/UPSERT agent_session:`pi__pi_parity__[^`]+`/);
+        expect(sql).toMatch(/UPSERT agent_event:`pi__pi_parity__[^`]+__/);
+        expect(sql).toMatch(/UPSERT turn:`[^`]+` CONTENT \{ session: session:`pi-parity`, agent_event: agent_event:`pi__pi_parity__/);
+        expect(sql).toContain("UPSERT tool:`pi__");
+        expect(sql).toContain("UPSERT tool_call:`");
+        expect(sql).toContain("UPSERT file:`");
+        expect(sql).toMatch(/RELATE tool_call:`[^`]+`->(read_file|mentioned_file):`[^`]+`->file:`[^`]+` SET /);
+        expect(sql).toContain('scope: "pi-tool", dir_path: "(synthetic)", content_hash: "pi"');
+        expect(sql).toMatch(/RELATE turn:`[^`]+`->invoked:`[^`]+`->skill:`[^`]+` SET session = session:`pi-parity`/);
+        expect(statements.some((statement) => statement.startsWith("UPSERT compaction:"))).toBe(true);
+        expect(sql).toContain("UPSERT session_token_usage:`pi_parity`");
     });
 });

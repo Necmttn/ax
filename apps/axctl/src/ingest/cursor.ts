@@ -6,22 +6,18 @@ import type { DbError } from "@ax/lib/errors";
 import { orAbsent } from "@ax/lib/shared/fs-error";
 import { classifyNoFollow } from "@ax/lib/shared/fs-classify";
 import { posixPath } from "@ax/lib/shared/path";
-import { skillRecordKey } from "@ax/lib/skill-id";
 import { executeStatements } from "@ax/lib/shared/statement-exec";
-import { recordRef, surrealDate, surrealString } from "@ax/lib/shared/surql";
 import {
-    buildRelateToolCallSkillStatements,
-    buildToolCallStatements,
     type ToolCallSkillRelationWrite,
     type ToolCallWrite,
 } from "./evidence-writers.ts";
-import { buildCompactionStatements, extractCursorCompaction, type CompactionWrite } from "./compaction.ts";
+import { extractCursorCompaction, type CompactionWrite } from "./compaction.ts";
 import { classifyTurnIntent } from "./intent-kind.ts";
 import { providerDelegationSignalAvailability } from "./delegation.ts";
-import { agentEventRecordKey, buildAgentEventStatements, buildAgentProviderStatements, type AgentEventWrite } from "./provider-events.ts";
+import { agentEventRecordKey, type AgentEventWrite } from "./provider-events.ts";
 import { buildNormalizedTranscriptStatements, type NormalizedTranscriptBatch } from "./normalized/transcripts.ts";
 import { providerPlanSignalAvailability } from "./plans.ts";
-import { identityPart, invokedRelationRecordKey, toolCallRecordKey, turnRecordKey } from "./record-keys.ts";
+import { identityPart, toolCallRecordKey, turnRecordKey } from "./record-keys.ts";
 import { BaseStageStats, IngestContext, sinceDaysFromCtx, StageMeta } from "./stage/types.ts";
 import type { StageDef } from "./stage/registry.ts";
 import { extractCommandTool, normalizeCommand, toolKindForName } from "./tool-calls.ts";
@@ -876,35 +872,6 @@ export function extractCursorStateDb(dbPath: string, options: CursorExtractOptio
     }
 }
 
-const buildTurnStatements = (turns: readonly CursorTurn[]): string[] =>
-    turns.map((turn) => {
-        const eventKey = agentEventRecordKey({
-            provider: "cursor",
-            providerSessionId: turn.session,
-            providerEventId: turn.providerEventId,
-            seq: turn.seq,
-        });
-        return `UPSERT turn:\`${turnRecordKey(turn.session, turn.seq)}\` CONTENT { session: ${recordRef("session", turn.session)}, agent_event: ${recordRef("agent_event", eventKey)}, seq: ${turn.seq}, ts: ${surrealDate(turn.ts)}, role: ${surrealString(turn.role)}, message_kind: ${surrealString(turn.message_kind)}, intent_kind: ${surrealString(turn.intent_kind)}, text: ${turn.text === null ? "NONE" : surrealString(turn.text)}, text_excerpt: ${turn.text_excerpt === null ? "NONE" : surrealString(turn.text_excerpt)}, has_tool_use: ${turn.has_tool_use}, has_error: ${turn.has_error} };`;
-    });
-
-const buildSyntheticSkillAndInvocationStatements = (
-    invocations: readonly CursorInvocation[],
-): string[] => {
-    if (invocations.length === 0) return [];
-    const tools = new Set(invocations.map((invocation) => invocation.skill));
-    const skillStatements = [...tools].map((name) =>
-        `UPSERT skill:\`${skillRecordKey(name)}\` MERGE { name: ${surrealString(name)}, scope: "cursor-tool", dir_path: "(synthetic)", content_hash: "cursor" };`
-    );
-    const invocationStatements = invocations.map((invocation) => {
-        const turnKey = turnRecordKey(invocation.session, invocation.seq);
-        const skillKey = skillRecordKey(invocation.skill);
-        const args = JSON.stringify(invocation.args ?? {});
-        const edgeKey = invokedRelationRecordKey({ turnKey, skillKey, args });
-        return `RELATE turn:\`${turnKey}\`->invoked:\`${edgeKey}\`->skill:\`${skillKey}\` SET session = ${recordRef("session", invocation.session)}, ts = ${surrealDate(invocation.ts)}, args = ${surrealString(args)}, turn_has_error = false, turn_index = ${invocation.seq};`;
-    });
-    return [...skillStatements, ...invocationStatements];
-};
-
 const toCursorNormalizedBatch = (
     extract: CursorExtract,
     sourcePath: string,
@@ -979,60 +946,6 @@ const toCursorNormalizedBatch = (
     toolCallSkillRelations: extract.skillRelations,
     compactions: extract.compactions,
 });
-
-const legacyBuildCursorBatchStatements = (extract: CursorExtract, sourcePath: string): string[] => [
-    ...buildAgentProviderStatements([
-        {
-            name: "cursor",
-            displayName: "Cursor",
-            capabilities: {
-                sqlite: true,
-                transcripts: true,
-                providerGraph: true,
-                toolCalls: true,
-                planSignals: providerPlanSignalAvailability.cursor,
-                delegationSignals: providerDelegationSignalAvailability.cursor,
-            },
-        },
-    ]),
-    ...buildAgentEventStatements({
-        sessions: extract.sessions.map((session) => ({
-            provider: "cursor",
-            providerSessionId: session.id,
-            axSessionId: session.id,
-            title: session.title,
-            sourcePath,
-            raw: {
-                source: "cursor_state_vscdb",
-                sourcePath,
-                dbIdentity: session.dbIdentity,
-                cursorConversationId: session.cursorConversationId,
-            },
-            labels: {
-                source: "cursor",
-                dbIdentity: session.dbIdentity,
-                cursorConversationId: session.cursorConversationId,
-            },
-            metrics: {
-                turns: extract.turns.filter((turn) => turn.session === session.id).length,
-                toolCalls: extract.toolCalls.filter((call) => call.sessionId === session.id).length,
-                providerEvents: extract.providerEvents.filter((event) => event.providerSessionId === session.id).length,
-            },
-            startedAt: session.started_at,
-            endedAt: session.ended_at,
-        })),
-        events: extract.providerEvents,
-    }),
-    ...buildTurnStatements(extract.turns),
-    ...buildToolCallStatements(extract.toolCalls),
-    ...buildSyntheticSkillAndInvocationStatements(extract.invocations),
-    ...extract.skillRelations.flatMap((relation) =>
-        buildRelateToolCallSkillStatements(relation),
-    ),
-    ...buildCompactionStatements(extract.compactions),
-];
-
-export const __legacyBuildCursorBatchStatements = legacyBuildCursorBatchStatements;
 
 const buildCursorBatchStatements = (extract: CursorExtract, sourcePath: string): string[] =>
     buildNormalizedTranscriptStatements(toCursorNormalizedBatch(extract, sourcePath));

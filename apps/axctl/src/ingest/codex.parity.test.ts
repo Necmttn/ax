@@ -1,11 +1,9 @@
 import { describe, expect, it } from "bun:test";
 import {
-    __legacyBuildCodexBatchStatements,
     __testBuildCodexBatchStatements,
     __testExtractCodexJsonlLines,
     __testStreamCodexJsonlLines,
 } from "./codex.ts";
-import { diffStatementSets } from "./normalized/statement-parity.ts";
 import { extractToolFileEvidence } from "./tool-file-evidence.ts";
 
 /**
@@ -159,7 +157,7 @@ const fixtureLines = (): string[] => [
 ];
 
 describe("codex normalized-batch parity", () => {
-    it("single-shot extract emits the exact legacy statement multiset", () => {
+    it("single-shot extract emits golden statement shapes", () => {
         const extracted = __testExtractCodexJsonlLines(fixtureLines());
         expect(extracted).not.toBeNull();
         // Fixture-coverage guards: every codex-specific parity leg must stay
@@ -173,12 +171,29 @@ describe("codex normalized-batch parity", () => {
         expect(extracted!.tokenUsage).not.toBeNull();
         expect(extracted!.turnTokenUsages.length).toBeGreaterThan(0);
         expect(extractToolFileEvidence(extracted!.toolCalls).length).toBeGreaterThan(0);
-        const legacy = __legacyBuildCodexBatchStatements(extracted!, 1200, true);
-        const next = __testBuildCodexBatchStatements(extracted!, 1200, true);
-        expect(diffStatementSets(legacy, next)).toEqual({ missing: [], added: [] });
+        const statements = __testBuildCodexBatchStatements(extracted!, 1200, true);
+        const sql = statements.join("\n");
+        expect(sql).toContain("UPSERT agent_provider:`codex`");
+        expect(sql).toMatch(/UPSERT agent_session:`codex__codex_parity__[^`]+`/);
+        expect(sql).toMatch(/DELETE \(SELECT VALUE id FROM agent_event_child WHERE agent_session = agent_session:`codex__codex_parity__[^`]+`\)/);
+        expect(sql).toMatch(/UPSERT agent_event:`codex__codex_parity__[^`]+__/);
+        expect(sql).toMatch(/UPSERT turn:`[^`]+` CONTENT \{ session: session:`codex-parity`, seq: \d+, ts:/);
+        expect(sql).not.toMatch(/UPSERT turn:`[^`]+` CONTENT \{[^}]*agent_event:/);
+        expect(sql).toContain("UPSERT tool:`codex__");
+        expect(sql).toContain("UPSERT tool_call:`");
+        expect(sql).toContain("UPSERT file:`");
+        expect(sql).toMatch(/RELATE (tool_call|turn):`[^`]+`->(edited|edited_file|mentioned_file|read_file):`[^`]+`->file:`[^`]+` SET /);
+        expect(sql).toContain('scope: "codex-tool", dir_path: "(synthetic)", content_hash: "codex"');
+        expect(sql).toMatch(/RELATE turn:`[^`]+`->invoked:`[^`]+`->skill:`[^`]+` SET session = session:`codex-parity`/);
+        expect(sql).toMatch(/RELATE tool_call:`[^`]+`->concerns:`[^`]+`->skill:`[^`]+` SET /);
+        expect(sql).toContain("UPSERT plan:`");
+        expect(sql).toContain("UPSERT plan_snapshot:`");
+        expect(statements.some((statement) => statement.startsWith("UPSERT compaction:"))).toBe(true);
+        expect(sql).toContain("UPSERT session_token_usage:`codex_parity`");
+        expect(sql).toContain("UPSERT turn_token_usage:`");
     });
 
-    it("streaming batches stay parity-equal with first-batch-only clearExisting", () => {
+    it("streaming batches keep first-batch-only clearing and parent edges", () => {
         const batches = __testStreamCodexJsonlLines(fixtureLines(), 3);
         expect(batches.length).toBeGreaterThan(1);
         // Streaming-only coverage guard: cross-batch agent_event parent edges
@@ -186,9 +201,16 @@ describe("codex normalized-batch parity", () => {
         expect(batches.reduce((sum, batch) => sum + batch.parentEdges.length, 0)).toBeGreaterThan(0);
         batches.forEach((batch, index) => {
             const clearExisting = index === 0;
-            const legacy = __legacyBuildCodexBatchStatements(batch, 1200, clearExisting);
-            const next = __testBuildCodexBatchStatements(batch, 1200, clearExisting);
-            expect(diffStatementSets(legacy, next)).toEqual({ missing: [], added: [] });
+            const statements = __testBuildCodexBatchStatements(batch, 1200, clearExisting);
+            const sql = statements.join("\n");
+            expect(sql.includes("DELETE (SELECT VALUE id FROM agent_event_child")).toBe(clearExisting && batch.session !== null);
+            if (batch.session !== null) {
+                expect(sql).toContain("UPSERT agent_provider:`codex`");
+                expect(sql).toMatch(/UPSERT agent_session:`codex__codex_parity__[^`]+`/);
+            }
+            if (batch.parentEdges.length > 0) {
+                expect(sql).toMatch(/RELATE agent_event:`[^`]+`->agent_event_child:`[^`]+`->agent_event:`[^`]+` SET /);
+            }
         });
     });
 });

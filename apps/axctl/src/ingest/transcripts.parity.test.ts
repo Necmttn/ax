@@ -1,20 +1,10 @@
 import { describe, expect, it } from "bun:test";
 import {
-    __legacyBuildClaudeProviderStatements,
-    __legacyBuildClaudeTurnStatements,
     __testExtractClaudeJsonlLines,
     toClaudeNormalizedBatch,
 } from "./transcripts.ts";
 import { buildNormalizedTranscriptStatements } from "./normalized/transcripts.ts";
-import {
-    buildPlanSnapshotStatements,
-    buildRelateToolCallSkillStatements,
-    buildToolCallStatements,
-    buildToolFileEvidenceStatements,
-} from "./evidence-writers.ts";
-import { buildCompactionStatements } from "./compaction.ts";
 import { extractToolFileEvidence } from "./tool-file-evidence.ts";
-import { diffStatementSets } from "./normalized/statement-parity.ts";
 
 /**
  * Richest claude fixture: a user task line, an assistant line carrying a
@@ -104,7 +94,7 @@ const fixtureLines = (): string[] => [
 ];
 
 describe("claude normalized-batch parity", () => {
-    it("new single-batch path emits the union of the legacy per-section statements", () => {
+    it("new single-batch path emits golden statement shapes", () => {
         const extracted = __testExtractClaudeJsonlLines(
             fixtureLines(),
             "-Users-necmttn-Projects-ax",
@@ -124,31 +114,27 @@ describe("claude normalized-batch parity", () => {
         // clean turns - claude is the first parser writing has_error: true.
         expect(extracted!.turns.some((turn) => turn.has_error)).toBe(true);
         expect(extracted!.turns.some((turn) => !turn.has_error)).toBe(true);
-        // D2 leg: legacy claude turn statements never reference agent_event
-        // (turns are not agent_event-linked on claude; pi covers the linked
-        // leg). The adapter must pass agentEvent: null so the key is OMITTED.
-        expect(
-            __legacyBuildClaudeTurnStatements(extracted!.turns).some((statement) =>
-                statement.includes("agent_event")
-            ),
-        ).toBe(false);
 
-        const legacy = [
-            ...__legacyBuildClaudeProviderStatements(extracted!),
-            ...__legacyBuildClaudeTurnStatements(extracted!.turns),
-            ...buildCompactionStatements(extracted!.compactions),
-            ...buildToolCallStatements(extracted!.toolCalls),
-            ...buildToolFileEvidenceStatements(extractToolFileEvidence(extracted!.toolCalls)),
-            ...extracted!.skillRelations.flatMap((relation) =>
-                buildRelateToolCallSkillStatements(relation)
-            ),
-            ...extracted!.planSnapshots.flatMap((snapshot) =>
-                buildPlanSnapshotStatements(snapshot)
-            ),
-        ];
-        const next = buildNormalizedTranscriptStatements(
+        const statements = buildNormalizedTranscriptStatements(
             toClaudeNormalizedBatch(extracted!, extracted!.skillRelations),
         );
-        expect(diffStatementSets(legacy, next)).toEqual({ missing: [], added: [] });
+        const sql = statements.join("\n");
+        expect(sql).toContain("UPSERT agent_provider:`claude`");
+        expect(sql).toMatch(/UPSERT agent_session:`claude__claude_parity_session__[^`]+`/);
+        expect(sql).toMatch(/DELETE \(SELECT VALUE id FROM agent_event_child WHERE agent_session = agent_session:`claude__claude_parity_session__[^`]+`\)/);
+        expect(sql).toMatch(/UPSERT agent_event:`claude__claude_parity_session__[^`]+__/);
+        const turnStatements = statements.filter((statement) => statement.startsWith("UPSERT turn:"));
+        expect(turnStatements.length).toBe(extracted!.turns.length);
+        expect(turnStatements.some((statement) => statement.includes("has_error: true"))).toBe(true);
+        expect(turnStatements.some((statement) => statement.includes("has_error: false"))).toBe(true);
+        expect(turnStatements.some((statement) => statement.includes("agent_event"))).toBe(false);
+        expect(sql).toContain("UPSERT tool:`claude__");
+        expect(sql).toContain("UPSERT tool_call:`");
+        expect(sql).toContain("UPSERT file:`");
+        expect(sql).toMatch(/RELATE turn:`[^`]+`->edited:`[^`]+`->file:`[^`]+` SET /);
+        expect(sql).toMatch(/RELATE tool_call:`[^`]+`->concerns:`[^`]+`->skill:`[^`]+` SET /);
+        expect(sql).toContain("UPSERT plan:`");
+        expect(sql).toContain("UPSERT plan_snapshot:`");
+        expect(statements.some((statement) => statement.startsWith("UPSERT compaction:"))).toBe(true);
     });
 });
