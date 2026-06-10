@@ -50,7 +50,8 @@ const fmtDuration = (ms: number | null): string | null => {
 const fmtUsd = (n: number | null): string | null =>
     n == null ? null : `$${n >= 100 ? n.toFixed(0) : n.toFixed(2)}`;
 
-/** Greedy-packed subagent lanes as absolutely-positioned divs. */
+/** Greedy-packed subagent lanes as one inline SVG (satori renders embedded
+ *  SVG natively, which sidesteps html-parser flex semantics entirely). */
 function laneHtml(cards: ReadonlyArray<SubagentCard>): string {
     const times = cards
         .map((c) => ({ t: Date.parse(c.started_at ?? ""), d: c.duration_ms ?? 0, cost: c.cost_usd ?? 0, failed: (c.stats?.failures ?? 0) > 0 }))
@@ -60,8 +61,9 @@ function laneHtml(cards: ReadonlyArray<SubagentCard>): string {
     const t1 = Math.max(...times.map((c) => c.t + Math.max(c.d, 60_000)));
     const span = Math.max(t1 - t0, 60_000);
     const maxCost = Math.max(0.01, ...times.map((c) => c.cost));
+    const W = 1036;
     const laneEnds: number[] = [];
-    let bars = "";
+    let rects = "";
     for (const c of times.sort((p, q) => p.t - q.t)) {
         const x = (c.t - t0) / span;
         const w = Math.max(c.d / span, 0.008);
@@ -69,14 +71,11 @@ function laneHtml(cards: ReadonlyArray<SubagentCard>): string {
         while (r < laneEnds.length && laneEnds[r] > x - 0.004) r++;
         if (r >= 5) r = 4;
         laneEnds[r] = x + w;
-        // Integer px only: the worker's html-parser chokes on decimal
-        // percentages inside style attributes, dropping the styles and
-        // tripping satori's display:flex child check.
-        const LANE_W = 1036; // 1200 - page padding - card padding/border
         const opacity = (0.35 + 0.6 * (c.cost / maxCost)).toFixed(2);
-        bars += `<div style="position:absolute;left:${Math.round(x * LANE_W)}px;top:${r * 22}px;width:${Math.max(Math.round(w * LANE_W), 8)}px;height:16px;border-radius:3px;background:${c.failed ? "#bd443b" : "#b32650"};opacity:${opacity}"></div>`;
+        rects += `<rect x="${Math.round(x * W)}" y="${r * 22}" width="${Math.max(Math.round(w * W), 8)}" height="16" rx="3" fill="${c.failed ? "#bd443b" : "#b32650"}" fill-opacity="${opacity}"/>`;
     }
-    return `<div style="display:flex;position:relative;width:1036px;height:${laneEnds.length * 22}px">${bars}</div>`;
+    const H = laneEnds.length * 22;
+    return `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg">${rects}</svg>`;
 }
 
 export const onRequestGet: PagesFunction = async (ctx) => {
