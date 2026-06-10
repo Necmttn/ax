@@ -1,6 +1,7 @@
 import { Database } from "bun:sqlite";
 import { Effect, FileSystem, Option, Path, Schema } from "effect";
 import { AxConfig } from "@ax/lib/config";
+import { SkillName } from "@ax/lib/brands";
 import { RecordId, SurrealClient } from "@ax/lib/db";
 import { orAbsent } from "@ax/lib/shared/fs-error";
 import { classifyNoFollow } from "@ax/lib/shared/fs-classify";
@@ -60,7 +61,7 @@ interface CursorInvocation {
     session: string;
     seq: number;
     ts: string;
-    skill: string;
+    skill: SkillName;
     args: unknown;
 }
 
@@ -437,7 +438,8 @@ function pushCursorToolCall(input: {
 
     input.toolCalls.push(call);
 
-    const skillName = `cursor:${toolName}`;
+    // Synthetic provider-tool skill name - branded at the true source.
+    const skillName = SkillName.make(`cursor:${toolName}`);
     input.invocations.push({
         session: input.session.id,
         seq: input.seq,

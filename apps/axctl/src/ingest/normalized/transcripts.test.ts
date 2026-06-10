@@ -10,6 +10,10 @@ import {
     type NormalizedTranscriptBatch,
 } from "./transcripts.ts";
 import { toolCallRecordKey, turnRecordKey } from "../record-keys.ts";
+import { SkillName } from "@ax/lib/brands";
+
+// Fixture skill names are plain string literals; brand via the schema constructor.
+const sn = (s: string): SkillName => SkillName.make(s);
 
 describe("normalized transcript persistence", () => {
     it("writes escaped turn records with optional agent event links", () => {
@@ -77,7 +81,7 @@ describe("normalized transcript persistence", () => {
             sessionId: "session`a",
             seq: 2,
             ts: "2026-05-29T00:00:00.000Z",
-            skillName: "opencode:grep",
+            skillName: sn("opencode:grep"),
             args: { pattern: "TODO" },
             skillScope: "opencode-tool",
             skillContentHash: "opencode",
@@ -148,7 +152,7 @@ describe("normalized transcript persistence", () => {
             }],
             toolCallSkillRelations: [{
                 toolCallKey,
-                skillName: "opencode:grep",
+                skillName: sn("opencode:grep"),
                 ts: "2026-05-29T00:00:00.000Z",
                 reason: "provider_tool_call",
             }],
@@ -186,7 +190,7 @@ describe("normalized transcript persistence", () => {
             sessionId: "s1",
             seq: 2,
             ts: "2026-06-10T00:00:00.000Z",
-            skillName: "codex:exec_command",
+            skillName: sn("codex:exec_command"),
             args: { command: "ls" },
             skillScope: "codex-tool",
             skillContentHash: "codex",

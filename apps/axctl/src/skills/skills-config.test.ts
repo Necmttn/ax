@@ -12,7 +12,11 @@ import { join } from "node:path";
 import { Effect, Layer } from "effect";
 import { BunFileSystem, BunPath } from "@effect/platform-bun";
 import { SurrealClient } from "@ax/lib/db";
+import { SkillName } from "@ax/lib/brands";
 import { skillRecordKey } from "@ax/lib/skill-id";
+
+// Fixture skill names are plain string literals; brand via the schema constructor.
+const sn = (s: string): SkillName => SkillName.make(s);
 import { makeDirSource } from "./sources/dir.ts";
 import { makeCommandSource } from "./sources/command.ts";
 import { makeSkillSourceRegistryLayer } from "./sources/registry.ts";
@@ -83,8 +87,8 @@ describe("dir source discover", () => {
         const [rec] = await runFs(src.discover(ref(root, "plugin:superpowers", false)));
         expect(rec!.name).toBe("superpowers:caveman");
         // `:`->`__` record-key rule (skill-id.ts) is stable for the namespaced name.
-        expect(skillRecordKey(rec!.name)).toBe(skillRecordKey("superpowers:caveman"));
-        expect(skillRecordKey(rec!.name)).not.toContain(":");
+        expect(skillRecordKey(sn(rec!.name))).toBe(skillRecordKey(sn("superpowers:caveman")));
+        expect(skillRecordKey(sn(rec!.name))).not.toContain(":");
     });
 
     test("skips .ax-parked and non-dir entries", async () => {

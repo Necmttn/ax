@@ -14,7 +14,7 @@
  */
 import { Effect, FileSystem, Path, Schema } from "effect";
 import { RecordId, SurrealClient, type SurrealClientShape } from "@ax/lib/db";
-import { skillRecordKey } from "@ax/lib/skill-id";
+import { skillRecordKeyV2 } from "@ax/lib/ids";
 import { AppLayer } from "@ax/lib/layers";
 import { DbError } from "@ax/lib/errors";
 import { findGitRoot } from "../project/git.ts";
@@ -26,9 +26,11 @@ import type { StageDef } from "./stage/registry.ts";
 
 export const AGENT_DEF_TABLE = "agent_def";
 
-/** Stable record id for an agent by name (reuses skill-id keying for `:` etc.). */
+/** Stable record id for an agent by name. Reuses the raw skill keying scheme
+ *  (`skillRecordKeyV2`) for `:` etc. - agent names are NOT skill names, so we
+ *  deliberately bypass the SkillName-branded `skillRecordKey` wrapper. */
 const agentRecordId = (name: string): RecordId =>
-    new RecordId(AGENT_DEF_TABLE, skillRecordKey(name));
+    new RecordId(AGENT_DEF_TABLE, skillRecordKeyV2(name));
 
 /** Upsert one agent record + stamp `last_seen_at`. Dedups by name (user wins). */
 const upsertAgent = (

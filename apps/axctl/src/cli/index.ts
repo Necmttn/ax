@@ -3,6 +3,7 @@ import { Cause, Effect, FileSystem, Layer, Option, Path, References } from "effe
 import { BunFileSystem, BunPath, BunRuntime } from "@effect/platform-bun";
 import { Argument, Command, Flag } from "effect/unstable/cli";
 import { SurrealClient, type SurrealClientShape } from "@ax/lib/db";
+import { SkillName } from "@ax/lib/brands";
 import { listSessionsHere, listSessionsAround, listSessionsNear, findSessionIdsByPrefix, type SessionRow } from "../dashboard/sessions-query.ts";
 import {
     buildRecallNext,
@@ -3571,7 +3572,9 @@ const cmdSessionsMetrics = (input: {
             const all = yield* fetchAggregateRows({ since, project });
             const rows = applyAggregateFilters(all, { source: input.source, minCostUsd: input.minCost });
             if (input.skill !== null) {
-                const skillSessions = yield* fetchSkillSessionSet(input.skill);
+                // CLI flag is a user-supplied skill name: brand at the input
+                // boundary via the schema constructor.
+                const skillSessions = yield* fetchSkillSessionSet(SkillName.make(input.skill));
                 const efficacy = computeSkillEfficacy(rows, skillSessions, input.skill);
                 if (input.json) {
                     console.log(prettyPrint(efficacy));

@@ -14,6 +14,7 @@ import { createHash } from "node:crypto";
 import { parse as parseYaml } from "yaml";
 import { Effect, FileSystem, Path, Schema } from "effect";
 import { SurrealClient } from "@ax/lib/db";
+import { SkillName } from "@ax/lib/brands";
 import { defaultSkillDirs } from "@ax/lib/paths";
 import { AppLayer } from "@ax/lib/layers";
 import type { DbError } from "@ax/lib/errors";
@@ -256,7 +257,10 @@ export const ingestSkills = (): Effect.Effect<
                     .slice(0, 16);
                 return Effect.gen(function* () {
                     const skillId = yield* upsertSkillByName(db, {
-                        name: item.skill.name,
+                        // On-disk catalog is the canonical source of skill
+                        // names - brand here so the record-key path stays
+                        // SkillName end-to-end.
+                        name: SkillName.make(item.skill.name),
                         scope: item.scope,
                         dir_path: item.dir_path,
                         description: item.skill.description ?? null,

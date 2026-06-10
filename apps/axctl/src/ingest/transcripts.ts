@@ -3,6 +3,7 @@ import { RecordId, SurrealClient, filePointer } from "@ax/lib/db";
 import { AxConfig } from "@ax/lib/config";
 import { surrealLiteral } from "@ax/lib/json";
 import { decodeJsonOrNull } from "@ax/lib/decode";
+import { SkillName } from "@ax/lib/brands";
 import { resolveSkillName, skillRecordKey } from "@ax/lib/skill-id";
 import { AppLayer } from "@ax/lib/layers";
 import { BaseStageStats, IngestContext, sinceDaysFromCtx, StageMeta } from "./stage/types.ts";
@@ -98,7 +99,7 @@ interface Invocation {
     session: string;
     seq: number;
     ts: string;
-    skill: string;
+    skill: SkillName;
     args: unknown;
     // Snapshot of the source turn's `has_error` at relate time. Denormalised
     // onto the edge so cmdTaste's `clean_inv` count can hit a single
@@ -528,9 +529,13 @@ function createClaudeExtractor(path: Path.Path, projectDir: string, sessionId: s
         }
 
         if (name === "Skill" && input) {
-            const skillName =
+            const invokedSkillRaw =
                 stringField(input, "skill") ?? stringField(input, "skill_name");
-            if (skillName) {
+            if (invokedSkillRaw) {
+                // Transcript-recorded invocation target: this is a true
+                // producer of skill names, so brand via the schema
+                // constructor (resolveSkillName re-canonicalizes later).
+                const skillName = SkillName.make(invokedSkillRaw);
                 invocations.push({
                     session: sessionId,
                     seq,

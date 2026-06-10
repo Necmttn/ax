@@ -1,6 +1,7 @@
 import { Database } from "bun:sqlite";
 import { Effect, FileSystem, Option, Path, Schema } from "effect";
 import { AxConfig } from "@ax/lib/config";
+import { SkillName } from "@ax/lib/brands";
 import { RecordId, SurrealClient } from "@ax/lib/db";
 import { decodeJsonOrNull } from "@ax/lib/decode";
 import { orAbsent } from "@ax/lib/shared/fs-error";
@@ -60,7 +61,7 @@ interface OpenCodeInvocation {
     session: string;
     seq: number;
     ts: string;
-    skill: string;
+    skill: SkillName;
     args: unknown;
 }
 
@@ -553,7 +554,8 @@ function processToolPart(input: {
     });
 
     input.toolCalls.push(call);
-    const skillName = `opencode:${toolName}`;
+    // Synthetic provider-tool skill name - branded at the true source.
+    const skillName = SkillName.make(`opencode:${toolName}`);
     input.invocations.push({
         session: input.session.id,
         seq: input.turnSeq,

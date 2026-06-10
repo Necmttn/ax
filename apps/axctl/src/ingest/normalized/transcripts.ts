@@ -31,6 +31,7 @@ import {
     type ToolFileEvidenceWrite,
 } from "../evidence-writers.ts";
 import { buildCompactionStatements, type CompactionWrite } from "../compaction.ts";
+import type { SkillName } from "@ax/lib/brands";
 import { skillRecordKey } from "@ax/lib/skill-id";
 import { invokedRelationRecordKey, turnRecordKey } from "../record-keys.ts";
 
@@ -76,7 +77,7 @@ export interface NormalizedSyntheticSkillInvocationWrite {
     readonly sessionId: string;
     readonly seq: number;
     readonly ts: string | Date;
-    readonly skillName: string;
+    readonly skillName: SkillName;
     readonly args?: unknown;
     readonly turnHasError?: boolean;
     readonly turnIndex?: number;

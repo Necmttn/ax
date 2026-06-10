@@ -10,6 +10,7 @@
  *     divergence that left was_corrected silently dead).
  */
 import { describe, expect, test } from "bun:test";
+import { SkillName } from "@ax/lib/brands";
 import { turnRecordKey } from "@ax/lib/ids";
 import { skillRecordKey } from "@ax/lib/skill-id";
 import { buildNormalizedSyntheticSkillInvocationStatements } from "../normalized/transcripts.ts";
@@ -35,6 +36,10 @@ import {
 } from "./statements.ts";
 import type { CorrectionEdge, SessionTurns, SignalEvidence, SkillPairAccum, ToolCallLike } from "./types.ts";
 
+// Fixture skill names are plain string literals; brand them through the
+// schema constructor so the branded TurnRow/SignalEvidence shapes accept them.
+const sn = (s: string): SkillName => SkillName.make(s);
+
 // One Claude-shaped session exercising every rule at once:
 //   seq 1 user task -> seq 2 assistant proposes a skill + errors ->
 //   seq 3 assistant invokes diagnose (recovery + pair partner) ->
@@ -48,8 +53,8 @@ const session: SessionTurns = {
     turns: [
         { id: { tb: "turn", id: "s1_1" }, seq: 1, role: "user", text_excerpt: "fix the failing ingest test", ts: "2026-06-01T10:00:00.000Z", has_error: false, invoked_skills: [] },
         { id: { tb: "turn", id: "s1_2" }, seq: 2, role: "assistant", text_excerpt: "I'd start with superpowers:systematic-debugging here. TypeError: x is not a function", ts: "2026-06-01T10:00:10.000Z", has_error: true, invoked_skills: [] },
-        { id: { tb: "turn", id: "s1_3" }, seq: 3, role: "assistant", text_excerpt: "running diagnose", ts: "2026-06-01T10:00:20.000Z", has_error: false, invoked_skills: ["diagnose"] },
-        { id: { tb: "turn", id: "s1_4" }, seq: 4, role: "assistant", text_excerpt: "committing", ts: "2026-06-01T10:00:30.000Z", has_error: false, invoked_skills: ["commit"] },
+        { id: { tb: "turn", id: "s1_3" }, seq: 3, role: "assistant", text_excerpt: "running diagnose", ts: "2026-06-01T10:00:20.000Z", has_error: false, invoked_skills: [sn("diagnose")] },
+        { id: { tb: "turn", id: "s1_4" }, seq: 4, role: "assistant", text_excerpt: "committing", ts: "2026-06-01T10:00:30.000Z", has_error: false, invoked_skills: [sn("commit")] },
         { id: { tb: "turn", id: "s1_5" }, seq: 5, role: "user", text_excerpt: undefined, ts: "2026-06-01T10:00:40.000Z", has_error: false, invoked_skills: [] },
         { id: { tb: "turn", id: "s1_6" }, seq: 6, role: "user", text_excerpt: "no - you fixed the wrong test", ts: "2026-06-01T10:00:50.000Z", has_error: false, invoked_skills: [] },
     ],
@@ -64,7 +69,7 @@ const session2: SessionTurns = {
     cwd: null,
     turns: [
         { id: "turn:s2_1", seq: 1, role: "user", text_excerpt: "ship it", ts: "2026-06-02T09:00:00.000Z", has_error: false, invoked_skills: [] },
-        { id: "turn:s2_2", seq: 2, role: "assistant", text_excerpt: "diagnosing then committing", ts: "2026-06-02T09:00:10.000Z", has_error: false, invoked_skills: ["diagnose", "commit"] },
+        { id: "turn:s2_2", seq: 2, role: "assistant", text_excerpt: "diagnosing then committing", ts: "2026-06-02T09:00:10.000Z", has_error: false, invoked_skills: [sn("diagnose"), sn("commit")] },
         { id: "turn:s2_3", seq: 3, role: "user", text_excerpt: "wait, hold on", ts: "2026-06-02T09:00:20.000Z", has_error: false, invoked_skills: [] },
     ],
 };
@@ -83,7 +88,7 @@ const failedToolCalls: ToolCallLike[] = [
     },
 ];
 
-const skillNames = ["superpowers:systematic-debugging", "diagnose", "commit"];
+const skillNames = ["superpowers:systematic-debugging", "diagnose", "commit"].map(sn);
 
 describe("deriveSignalsFromEvidence -> statement builders (stage write order)", () => {
     test("full pipeline on one realistic session", () => {
@@ -99,10 +104,10 @@ describe("deriveSignalsFromEvidence -> statement builders (stage write order)", 
         expect(derived.corrections[0]).toMatchObject({ fromTurnKey: "s1_4", toTurnKey: "s1_6", pattern: "no", correctedSeq: 4 });
         // rule 4: mentioned superpowers:systematic-debugging, never invoked it
         expect(derived.proposed).toHaveLength(1);
-        expect(derived.proposed[0]).toMatchObject({ fromTurnKey: "s1_2", skillKey: skillRecordKey("superpowers:systematic-debugging") });
+        expect(derived.proposed[0]).toMatchObject({ fromTurnKey: "s1_2", skillKey: skillRecordKey(sn("superpowers:systematic-debugging")) });
         // rule 6: error at seq 2 recovered by diagnose at seq 3
         expect(derived.recoveries).toHaveLength(1);
-        expect(derived.recoveries[0]).toMatchObject({ fromTurnKey: "s1_2", skillKey: skillRecordKey("diagnose") });
+        expect(derived.recoveries[0]).toMatchObject({ fromTurnKey: "s1_2", skillKey: skillRecordKey(sn("diagnose")) });
         // rule 5: diagnose (seq 3) + commit (seq 4) pair within the window
         expect(derived.skillPairs).toHaveLength(1);
         expect(derived.skillPairs[0]).toMatchObject({ pair: { count: 1, lastSeen: "2026-06-01T10:00:30.000Z" } });
@@ -189,7 +194,7 @@ describe("was_corrected turn-key contract with the ingest writer", () => {
         // The same (session, seq) the correction marks - written by the
         // ingest path that RELATEs turn->invoked->skill edges.
         const writerStmts = buildNormalizedSyntheticSkillInvocationStatements([
-            { sessionId: session.sessionId, seq: 4, ts: "2026-06-01T10:00:30.000Z", skillName: "commit" },
+            { sessionId: session.sessionId, seq: 4, ts: "2026-06-01T10:00:30.000Z", skillName: sn("commit") },
         ]);
         const relate = writerStmts.find((s) => s.includes("->invoked:"));
         const turnRef = `turn:\`${turnRecordKey(session.sessionId, 4)}\``;
