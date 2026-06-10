@@ -140,8 +140,12 @@ export interface DerivedSignals {
     readonly corrections: CorrectionEdge[];
     readonly proposed: ProposedEdge[];
     readonly recoveries: RecoveryEdge[];
-    readonly skillPairs: SkillPairAccum[];
-    readonly skillPairEdgeIds: string[];
+    /** Accumulated skill pairs, each carrying its deterministic
+     *  `skill_paired` edge record-id (the accumulator map key). */
+    readonly skillPairs: ReadonlyArray<{
+        readonly edgeId: string;
+        readonly pair: SkillPairAccum;
+    }>;
     readonly frictionEvents: DerivedFrictionEvent[];
     readonly diagnosticEvents: DerivedDiagnosticEvent[];
     readonly turnCount: number;

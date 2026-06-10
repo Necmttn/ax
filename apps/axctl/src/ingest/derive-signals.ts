@@ -12,6 +12,7 @@ import type {
     ProposedEdge, RecoveryEdge, SessionTurns, SkillPairAccum,
     ToolCallLike, TurnRow,
 } from "./signals/types.ts";
+// transitional re-export - deleted in Task 5 when consumers import signals/types directly
 export type { DerivedDiagnosticEvent, DerivedFrictionEvent, SessionTurns, SkillPairAccum, ToolCallLike, TurnRow } from "./signals/types.ts";
 
 /**
