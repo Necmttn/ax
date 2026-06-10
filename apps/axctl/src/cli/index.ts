@@ -121,6 +121,7 @@ import { cmdDaemon, cmdDoctor, cmdInstall, cmdSetup, cmdUninstall } from "./inst
 import { insightsCommand, reportCommand, timelineCommand, reportRuntime } from "./commands/report.ts";
 import { signalsCommand, signalsRuntime } from "./commands/signals.ts";
 import { evidenceCommand, evidenceRuntime } from "./commands/evidence.ts";
+import { contextCommand, contextRuntime } from "./commands/context.ts";
 import type { RuntimeManifest } from "./commands/manifest.ts";
 import { resolvePwdRepository } from "../pwd.ts";
 import { detectStaleness } from "@ax/lib/transcript-staleness";
@@ -136,7 +137,6 @@ import { cmdProject } from "./project.ts";
 import { AX_VERSION, liveVersionDeps, printVersion, updateAxctl } from "./version.ts";
 import { wantsJson, catchDbErrorAndExit } from "./output.ts";
 import { cmdDogfoodTerminal } from "../dogfood/wterm.ts";
-import { buildFileContextPack } from "../context/file-context.ts";
 import {
     buildFileContextHookResponse,
     parseFileContextHookFlags,
@@ -4900,35 +4900,6 @@ const projectCommand = Command.make("project").pipe(
     Command.withSubcommands([projectContextCommand, projectVerifyCommand, projectHarnessCommand]),
 );
 
-const contextFileCommand = Command.make(
-    "file",
-    {
-        query: Argument.string("query").pipe(Argument.variadic({ min: 1 })),
-        files: Flag.string("files").pipe(Flag.optional),
-        json: jsonFlag,
-    },
-    ({ query, files, json }) =>
-        Effect.gen(function* () {
-            const pack = yield* buildFileContextPack({
-                q: query.join(" "),
-                files: parseFileHints(files),
-            });
-            if (json) {
-                console.log(prettyPrint(pack));
-                return;
-            }
-            console.log(pack.ai_context);
-            console.log("");
-            console.log("Graph inspection query:");
-            console.log(pack.graph_inspection_query);
-        }),
-).pipe(Command.withDescription("Build graph-derived file context for an agent task"));
-
-const contextCommand = Command.make("context").pipe(
-    Command.withDescription("Build just-in-time context packs for agents"),
-    Command.withSubcommands([contextFileCommand]),
-);
-
 const readStdinAll = (): Promise<string> =>
     new Promise((resolve, reject) => {
         let data = "";
@@ -5462,7 +5433,6 @@ const LEGACY_RUNTIME: RuntimeManifest = {
     skills: "db",
     roles: "db",
     project: "db",
-    context: "db",
     hook: "db",
     hooks: "db",
     agents: "db",
@@ -5475,6 +5445,7 @@ export const RUNTIME_BY_COMMAND: RuntimeManifest = {
     ...reportRuntime,
     ...signalsRuntime,
     ...evidenceRuntime,
+    ...contextRuntime,
 };
 
 // Commands whose handlers reach into SurrealClient via AppLayer (or the
