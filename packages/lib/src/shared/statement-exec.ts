@@ -21,6 +21,9 @@ export const DEFAULT_CHUNK_SIZE = 250;
 export interface ExecuteOptions {
     /** Statements per `db.query()` call. Defaults to {@link DEFAULT_CHUNK_SIZE}. */
     readonly chunkSize?: number;
+    /** Span label identifying the caller (e.g. "upsertTurns") so DB time is
+     *  attributable per write-helper in a trace viewer. Default "statements". */
+    readonly label?: string;
 }
 
 /** Execute pre-built statements against an already-resolved client. Use when
@@ -30,12 +33,28 @@ export const executeStatementsWith = (
     db: SurrealClientShape,
     statements: readonly string[],
     options?: ExecuteOptions,
-): Effect.Effect<void, DbError> =>
-    Effect.forEach(
-        Arr.chunksOf(statements, options?.chunkSize ?? DEFAULT_CHUNK_SIZE),
-        (chunk) => db.query(chunk.join("")),
+): Effect.Effect<void, DbError> => {
+    if (statements.length === 0) return Effect.void;
+    const chunks = Arr.chunksOf(statements, options?.chunkSize ?? DEFAULT_CHUNK_SIZE);
+    return Effect.forEach(
+        chunks,
+        (chunk, i) =>
+            db.query(chunk.join("")).pipe(
+                Effect.asVoid,
+                Effect.withSpan("db.chunk", {
+                    attributes: { "db.chunk.index": i, "db.chunk.statements": chunk.length },
+                }),
+            ),
         { discard: true },
+    ).pipe(
+        Effect.withSpan(`db.exec:${options?.label ?? "statements"}`, {
+            attributes: {
+                "db.exec.statements": statements.length,
+                "db.exec.chunks": chunks.length,
+            },
+        }),
     );
+};
 
 /** Execute pre-built statements, resolving `SurrealClient` from context. */
 export const executeStatements = (

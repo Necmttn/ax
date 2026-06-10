@@ -6,6 +6,7 @@ import { ProcessServiceLive } from "./process.ts";
 import { LiveTraceLayer } from "./live-traces/Tracer.ts";
 import { TraceSinkLive, TraceTransportTag } from "./live-traces/Sink.ts";
 import { NoopTransportLayer } from "./live-traces/transports/console.ts";
+import { otlpTelemetryFromEnv } from "./otel.ts";
 
 /**
  * Library-level composed application layer.
@@ -47,6 +48,9 @@ const AppLayerSansTransport = SurrealClientLive.pipe(
     Layer.merge(ProcessServiceLive),
     Layer.provideMerge(LiveTraceLayer),
     Layer.provideMerge(TraceSinkLive({ flushIntervalMs: 200 })),
+    // OTLP export (AX_OTLP_URL): provided BENEATH LiveTraceLayer so its build
+    // sees the OTLP tracer as the base it decorates - both sinks get every span.
+    Layer.provideMerge(otlpTelemetryFromEnv()),
 );
 
 /** Default app layer: trace events are dropped (NoopTransport), keeping stdout

@@ -175,13 +175,46 @@ const release = (db: Surreal): Effect.Effect<void> =>
         }
     });
 
+// Debug seam (AX_DB_QUERY_LOG=<path>): append a line before and after every
+// db.query() so a wedged statement is identifiable post-mortem - the last
+// "start" without a matching "done" is the in-flight SQL. A single buffered
+// Bun FileSink (flushed per line) keeps ordering exact without node:fs; the
+// env gate keeps production paths allocation-free.
+const queryLogPath = process.env["AX_DB_QUERY_LOG"];
+let queryLogSeq = 0;
+let queryLogSink: ReturnType<ReturnType<typeof Bun.file>["writer"]> | null = null;
+const logQuery = (phase: "start" | "done", seq: number, ms: number, sql?: string): void => {
+    if (!queryLogPath) return;
+    try {
+        queryLogSink ??= Bun.file(queryLogPath).writer();
+        queryLogSink.write(
+            `${new Date().toISOString()} q${seq} ${phase}${phase === "done" ? ` +${ms.toFixed(0)}ms` : ""}${sql === undefined ? "" : ` ${sql.slice(0, 300).replaceAll("\n", " ")}`}\n`,
+        );
+        void queryLogSink.flush();
+        // Full-statement capture for replay: one file per query start.
+        if (phase === "start" && sql !== undefined && process.env["AX_DB_QUERY_LOG_FULL"] === "1") {
+            void Bun.write(`${queryLogPath}.q${seq}.sql`, sql);
+        }
+    } catch {
+        // diagnostics only - never fail the query path
+    }
+};
+
 const wrap = (db: Surreal): SurrealClientShape => ({
     query: <T extends unknown[] = unknown[]>(
         sql: string,
         bindings?: Record<string, unknown>,
     ) =>
         Effect.tryPromise({
-            try: () => db.query<T>(sql, bindings) as Promise<T>,
+            try: async () => {
+                if (!queryLogPath) return await (db.query<T>(sql, bindings) as Promise<T>);
+                const seq = ++queryLogSeq;
+                const t0 = performance.now();
+                logQuery("start", seq, 0, sql);
+                const out = await (db.query<T>(sql, bindings) as Promise<T>);
+                logQuery("done", seq, performance.now() - t0);
+                return out;
+            },
             catch: (err) =>
                 new DbError({
                     operation: "query",

@@ -86,15 +86,17 @@ describe("provider event writer statement builders", () => {
         // the existing rows hold the same (agent_session, seq) under a different
         // record id (seq drift across ingests).
         //
-        // They MUST delete by primary id via an `id IN (SELECT VALUE id ...)`
-        // subquery, NOT a bare `WHERE agent_session = ...`. The latter is planned
+        // They MUST delete the subquery RESULT by primary id
+        // (`DELETE (SELECT VALUE id ...)`), NOT a bare `WHERE agent_session =
+        // ...` and NOT `WHERE id IN (SELECT ...)`. The bare WHERE is planned
         // through the `agent_event_session_seq` secondary index, which can hold
         // stale/ghost entries in a long-lived DB - an index-driven DELETE then
         // silently skips drifted rows while their entries still block the fresh
-        // INSERT, crashing the next ingest. Deleting by primary id sidesteps the
-        // corruptible index entirely.
-        const clearEventStmt = `DELETE agent_event WHERE id IN (SELECT VALUE id FROM agent_event WHERE agent_session = agent_session:\`${sessionKey}\`);`;
-        const clearEdgeStmt = `DELETE agent_event_child WHERE id IN (SELECT VALUE id FROM agent_event_child WHERE agent_session = agent_session:\`${sessionKey}\`);`;
+        // INSERT, crashing the next ingest. The id-IN-subquery form re-evaluates
+        // the inner full-table scan per candidate row - quadratic in table size,
+        // it wedged every ingest once agent_event_child grew to ~460k rows.
+        const clearEventStmt = `DELETE (SELECT VALUE id FROM agent_event WHERE agent_session = agent_session:\`${sessionKey}\`);`;
+        const clearEdgeStmt = `DELETE (SELECT VALUE id FROM agent_event_child WHERE agent_session = agent_session:\`${sessionKey}\`);`;
 
         const clearEventIdx = statements.indexOf(clearEventStmt);
         const clearEdgeIdx = statements.indexOf(clearEdgeStmt);
@@ -109,6 +111,10 @@ describe("provider event writer statement builders", () => {
         // Guard against regressing to the index-driven bare-WHERE delete.
         expect(
             statements.some((s) => /^DELETE agent_event WHERE agent_session =/.test(s)),
+        ).toBe(false);
+        // Guard against regressing to the quadratic id-IN-subquery delete.
+        expect(
+            statements.some((s) => s.includes("WHERE id IN (SELECT")),
         ).toBe(false);
     });
 
