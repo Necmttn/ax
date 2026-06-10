@@ -519,7 +519,10 @@ export function deriveSignalsFromEvidence(
         corrections.push(...deriveCorrections(bundle));
         proposed.push(...deriveProposed(bundle, evidence.skillNames));
         recoveries.push(...deriveRecovered(bundle));
-        deriveSkillPairs(bundle, pairsAccum);
+        // Gate hoisted: when pairs are excluded (scoped derive), don't
+        // accumulate-and-discard. Output is identical - skillPairs is []
+        // either way, and nothing else reads pairsAccum.
+        if (opts.includeSkillPairs) deriveSkillPairs(bundle, pairsAccum);
     }
     const frictionEvents = [
         ...deriveFrictionFromToolCalls(evidence.failedToolCalls),

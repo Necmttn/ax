@@ -16,12 +16,11 @@ import {
     groupTurnsBySession, shouldDeriveAllTimeSkillPairs,
 } from "./signals/core.ts";
 import type {
-    CorrectionEdge, DerivedDiagnosticEvent, DerivedFrictionEvent,
-    ProposedEdge, RecoveryEdge, SessionTurns, SkillPairAccum,
-    ToolCallLike, TurnRow,
+    CorrectionEdge, ProposedEdge, RecoveryEdge,
+    SessionTurns, SkillPairAccum, ToolCallLike, TurnRow,
 } from "./signals/types.ts";
-// transitional re-export - deleted in Task 5 when consumers import signals/types directly
-export type { DerivedDiagnosticEvent, DerivedFrictionEvent, SessionTurns, SkillPairAccum, ToolCallLike, TurnRow } from "./signals/types.ts";
+import { BaseStageStats, IngestContext, sinceAndClause, sinceDaysFromCtx, sinceWhereClause, StageMeta } from "./stage/types.ts";
+import type { StageDef } from "./stage/registry.ts";
 
 // Derivation rules live in ./signals/core.ts (pure, fixture-tested by
 // signals/core.test.ts); this file is stage wiring only: three SELECTs, the
@@ -100,54 +99,6 @@ WHERE has_error = true ${sinceFilter}
 ORDER BY ts DESC;`;
         const result = yield* db.query<[ToolCallLike[]]>(sql);
         return result?.[0] ?? [];
-    });
-
-// Statement templates live in ./signals/statements.ts (pure, golden-tested);
-// the upsert* wrappers below only execute the built batches.
-// `executeStatementsWith` no-ops on empty arrays, so no length guards needed.
-
-const upsertCorrections = (edges: CorrectionEdge[]) =>
-    Effect.gen(function* () {
-        const db = yield* SurrealClient;
-        yield* executeStatementsWith(db, buildCorrectedByStatements(edges), { chunkSize: 500 });
-    });
-
-const markWasCorrected = (edges: CorrectionEdge[]) =>
-    Effect.gen(function* () {
-        const db = yield* SurrealClient;
-        yield* executeStatementsWith(db, buildWasCorrectedStatements(correctedInvokedTurnKeys(edges)), { chunkSize: 500 });
-    });
-
-const upsertProposed = (edges: ProposedEdge[]) =>
-    Effect.gen(function* () {
-        const db = yield* SurrealClient;
-        yield* executeStatementsWith(db, buildProposedStatements(edges), { chunkSize: 500 });
-    });
-
-const upsertSkillPairs = (
-    pairs: ReadonlyArray<{ readonly edgeId: string; readonly pair: SkillPairAccum }>,
-) =>
-    Effect.gen(function* () {
-        const db = yield* SurrealClient;
-        yield* executeStatementsWith(db, buildSkillPairStatements(pairs), { chunkSize: 500 });
-    });
-
-const upsertRecovered = (edges: RecoveryEdge[]) =>
-    Effect.gen(function* () {
-        const db = yield* SurrealClient;
-        yield* executeStatementsWith(db, buildRecoveredStatements(edges), { chunkSize: 500 });
-    });
-
-const upsertFrictionEvents = (events: readonly DerivedFrictionEvent[]) =>
-    Effect.gen(function* () {
-        const db = yield* SurrealClient;
-        yield* executeStatementsWith(db, buildFrictionEventStatements(events), { chunkSize: 500 });
-    });
-
-const upsertDiagnosticEvents = (events: readonly DerivedDiagnosticEvent[]) =>
-    Effect.gen(function* () {
-        const db = yield* SurrealClient;
-        yield* executeStatementsWith(db, buildDiagnosticEventStatements(events), { chunkSize: 500 });
     });
 
 export interface DeriveStats {
@@ -250,41 +201,48 @@ export const deriveSignals = (
             });
         }
 
-        yield* upsertCorrections(correctionBatch).pipe(
+        // Write order is load-bearing (was_corrected denormalises onto
+        // `invoked` edges keyed off the corrections batch). chunkSize 500
+        // matches the pre-split executor calls; executeStatementsWith
+        // no-ops on empty arrays, so no length guards needed.
+        const db = yield* SurrealClient;
+        const exec = (stmts: readonly string[]) =>
+            executeStatementsWith(db, stmts, { chunkSize: 500 });
+        yield* exec(buildCorrectedByStatements(correctionBatch)).pipe(
             Effect.withSpan("signals.write.corrections", {
                 attributes: { "signals.count": correctionBatch.length },
             }),
         );
         // Denormalise was_corrected onto invoked edges so cmdTaste's
         // corrections subquery becomes a pure index/scan filter (issue #31).
-        yield* markWasCorrected(correctionBatch).pipe(
+        yield* exec(buildWasCorrectedStatements(correctedInvokedTurnKeys(correctionBatch))).pipe(
             Effect.withSpan("signals.write.was-corrected", {
                 attributes: { "signals.count": correctionBatch.length },
             }),
         );
-        yield* upsertProposed(proposedBatch).pipe(
+        yield* exec(buildProposedStatements(proposedBatch)).pipe(
             Effect.withSpan("signals.write.proposed", {
                 attributes: { "signals.count": proposedBatch.length },
             }),
         );
         if (shouldWriteSkillPairs) {
-            yield* upsertSkillPairs(pairsList).pipe(
+            yield* exec(buildSkillPairStatements(pairsList)).pipe(
                 Effect.withSpan("signals.write.skill-pairs", {
                     attributes: { "signals.count": pairsList.length },
                 }),
             );
         }
-        yield* upsertRecovered(recoveryBatch).pipe(
+        yield* exec(buildRecoveredStatements(recoveryBatch)).pipe(
             Effect.withSpan("signals.write.recovered", {
                 attributes: { "signals.count": recoveryBatch.length },
             }),
         );
-        yield* upsertFrictionEvents(frictionBatch).pipe(
+        yield* exec(buildFrictionEventStatements(frictionBatch)).pipe(
             Effect.withSpan("signals.write.friction", {
                 attributes: { "signals.count": frictionBatch.length },
             }),
         );
-        yield* upsertDiagnosticEvents(diagnosticBatch).pipe(
+        yield* exec(buildDiagnosticEventStatements(diagnosticBatch)).pipe(
             Effect.withSpan("signals.write.diagnostics", {
                 attributes: { "signals.count": diagnosticBatch.length },
             }),
@@ -326,9 +284,6 @@ if (import.meta.main) {
 // ---------------------------------------------------------------------------
 // Co-located StageDef
 // ---------------------------------------------------------------------------
-
-import { BaseStageStats, IngestContext, sinceAndClause, sinceDaysFromCtx, sinceWhereClause, StageMeta } from "./stage/types.ts";
-import type { StageDef } from "./stage/registry.ts";
 
 export const SignalsKey = Schema.Literal("signals");
 export type SignalsKey = typeof SignalsKey.Type;
