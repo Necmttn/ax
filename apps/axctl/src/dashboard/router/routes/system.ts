@@ -5,6 +5,7 @@
  */
 import { Effect } from "effect";
 import { SurrealClient } from "@ax/lib/db";
+import { AX_VERSION } from "../../../cli/version.ts";
 import { graphHealthSql } from "../../../queries/graph-health.ts";
 import { checkoutActivitySql, gitCorrelationSql } from "../../../queries/insights.ts";
 import { API_VERSION, dashboardApiCapabilities } from "../../capabilities.ts";
@@ -12,6 +13,8 @@ import {
     decodeFail,
     decodeOk,
     jsonRoute,
+    jsonResponse,
+    rawRoute,
     type AnyRoute,
     type Decoded,
     type RouteInput,
@@ -32,18 +35,15 @@ export const decodeQueryParams = ({ body }: RouteInput): Decoded<QueryParams> =>
 };
 
 export const systemRoutes: ReadonlyArray<AnyRoute> = [
-    jsonRoute({
+    rawRoute({
         method: "ANY", // legacy: /api/version answered every method; studio probes it
         path: "/api/version",
-        decode: () => decodeOk(undefined),
-        handler: () => Effect.promise(async () => {
-            const { AX_VERSION } = await import("../../../cli/version.ts");
-            return {
+        handler: () =>
+            jsonResponse({
                 version: AX_VERSION,
                 api_version: API_VERSION,
                 capabilities: dashboardApiCapabilities(),
-            };
-        }),
+            }),
     }),
     jsonRoute({
         method: "POST",
