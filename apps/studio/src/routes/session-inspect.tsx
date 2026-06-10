@@ -1380,7 +1380,7 @@ function TurnImpl({
             <div id={`turn-${turn.seq}`} title={turnTokenUsageTitle(turn)} style={gridStyle}>
                 {seqGutter}
                 <TurnHeader turn={turn} style={s} extras={headerExtras} hideRoleLabel />
-                <div style={{ gridColumn: "2" }}>
+                <div style={{ gridColumn: "2", minWidth: 0 }}>
                     <ToolRow calls={turn.tool_calls!} resultFor={resultFor} skillContentFor={skillContentFor} />
                     <TurnImages paths={imagePaths} />
                 </div>

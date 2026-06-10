@@ -1,4 +1,5 @@
 import type { HookFireDto, InspectTurnContentDto, SessionTokenUsageDetail, ToolCallDto, TurnTokenUsageDetail } from "@ax/lib/shared/dashboard-types";
+import type { SessionTimeline } from "../timeline/types.ts";
 
 export const AX_SESSION_SHARE_SCHEMA_VERSION = 4 as const;
 
@@ -49,6 +50,10 @@ export interface AxSessionShare {
     readonly harness_hooks?: ReadonlyArray<ShareHarnessHook>;
     readonly turns: ReadonlyArray<ShareTurn>;
     readonly timeline: ReadonlyArray<ShareEvent>;
+    /** v4 additive: segmented highlight timeline (L2 phases + L1 key events),
+     *  precomputed at export so the static viewer renders it daemon-free.
+     *  Optional - older bundles simply lack it. */
+    readonly session_timeline?: SessionTimeline | null;
     readonly files: ReadonlyArray<ShareFile>;
     readonly graph: ShareGraph;
     readonly derived: {
