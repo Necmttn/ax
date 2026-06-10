@@ -4,8 +4,10 @@
  * catch-all (`/api/sessions/:id+`) after its sibling subroutes.
  */
 import type { AnyRoute } from "./router.ts";
+import { insightRoutes } from "./routes/insights.ts";
 import { systemRoutes } from "./routes/system.ts";
 
 export const routeTable: ReadonlyArray<AnyRoute> = [
     ...systemRoutes,
+    ...insightRoutes,
 ];

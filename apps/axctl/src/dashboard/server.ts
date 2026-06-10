@@ -15,27 +15,18 @@ import {
     setSkillDecisionsBulk,
 } from "./triage.ts";
 import { fetchSkillDetail } from "../queries/skill-detail.ts";
-import { fetchToolFailureDetail, fetchToolFailures } from "./tool-failures.ts";
 import {
     applySkillDecisionToDisk,
     openSkillTarget,
     readSkillSource,
 } from "./skill-source.ts";
-import { fetchWorkflow } from "./workflow.ts";
 import { fetchSessionDetail } from "./session-detail.ts";
 import { fetchSessionCompare } from "./session-compare.ts";
 import { fetchSessionInspect } from "./session-inspect.ts";
 import { extractSessionTimeline, SessionTimelineServiceLayer } from "../timeline/service.ts";
 import { fetchSessionChildren, fetchSessionsList } from "./sessions-list.ts";
-import { fetchEpisodeTimeline } from "./episode-timeline.ts";
-import { fetchProject } from "./project.ts";
-import { fetchRecall } from "./recall.ts";
-import { fetchGraphExplorer } from "./graph-explorer.ts";
 import { fetchSessionCanvas, fetchSessionOrchestration } from "./session-canvas.ts";
 import { fetchSessionSummary } from "./session-summary.ts";
-import { fetchSkillGraph } from "./skill-graph.ts";
-import { fetchWrapped, sanitizeWrappedProfile } from "./wrapped.ts";
-import { isGraphExplorerEnabled } from "./capabilities.ts";
 import { dispatch, jsonResponse } from "./router/router.ts";
 import { routeTable } from "./router/table.ts";
 
@@ -476,57 +467,6 @@ export async function handleDashboardRequest(req: Request): Promise<Response> {
             },
         });
     }
-    const episodeMatch = url.pathname.match(/^\/api\/episodes\/(.+)$/);
-    if (episodeMatch && req.method === "GET") {
-        const parentId = decodeURIComponent(episodeMatch[1] ?? "");
-        if (!parentId) return jsonResponse({ error: "missing parent id" }, 400);
-        try {
-            const payload = await Effect.runPromise(
-                fetchEpisodeTimeline(parentId).pipe(
-                    Effect.provide(AppLayer),
-                    Effect.scoped,
-                ) as Effect.Effect<unknown>,
-            );
-            return jsonResponse(payload);
-        } catch (err) {
-            return jsonResponse(
-                { error: err instanceof Error ? err.message : String(err) },
-                500,
-            );
-        }
-    }
-    if (url.pathname === "/api/graph-explorer" && req.method === "GET") {
-        if (!isGraphExplorerEnabled()) {
-            return jsonResponse({
-                error: "graph_explorer_disabled",
-                message: "Graph explorer is disabled. Set AX_ENABLE_GRAPH_EXPLORER=1 to enable this experimental endpoint.",
-            }, 404);
-        }
-        const mode = url.searchParams.get("mode");
-        const q = url.searchParams.get("q");
-        const limitParam = url.searchParams.get("limit");
-        const limit = limitParam ? Number(limitParam) : undefined;
-        const params: { mode?: string; q?: string | null; limit?: number } = {};
-        if (mode !== null) params.mode = mode;
-        if (q !== null) params.q = q;
-        if (typeof limit === "number" && Number.isFinite(limit)) {
-            params.limit = limit;
-        }
-        try {
-            const payload = await Effect.runPromise(
-                fetchGraphExplorer(params).pipe(
-                    Effect.provide(AppLayer),
-                    Effect.scoped,
-                ) as Effect.Effect<unknown>,
-            );
-            return jsonResponse(payload);
-        } catch (err) {
-            return jsonResponse(
-                { error: err instanceof Error ? err.message : String(err) },
-                500,
-            );
-        }
-    }
     if (url.pathname === "/api/session-canvas" && req.method === "GET") {
         const limitParam = url.searchParams.get("limit");
         const limit = limitParam ? Number(limitParam) : undefined;
@@ -571,91 +511,6 @@ export async function handleDashboardRequest(req: Request): Promise<Response> {
                     Effect.scoped,
                 ) as Effect.Effect<unknown>,
             );
-            return jsonResponse(payload);
-        } catch (err) {
-            return jsonResponse(
-                { error: err instanceof Error ? err.message : String(err) },
-                500,
-            );
-        }
-    }
-    if (url.pathname === "/api/skill-graph" && req.method === "GET") {
-        const minCountParam = url.searchParams.get("minCount");
-        const limitParam = url.searchParams.get("limit");
-        const minCount = minCountParam ? Number(minCountParam) : undefined;
-        const limit = limitParam ? Number(limitParam) : undefined;
-        const params: { minCount?: number; limit?: number } = {};
-        if (typeof minCount === "number" && Number.isFinite(minCount)) {
-            params.minCount = minCount;
-        }
-        if (typeof limit === "number" && Number.isFinite(limit)) {
-            params.limit = limit;
-        }
-        try {
-            const payload = await Effect.runPromise(
-                fetchSkillGraph(params).pipe(
-                    Effect.provide(AppLayer),
-                    Effect.scoped,
-                ) as Effect.Effect<unknown>,
-            );
-            return jsonResponse(payload);
-        } catch (err) {
-            return jsonResponse(
-                { error: err instanceof Error ? err.message : String(err) },
-                500,
-            );
-        }
-    }
-    if (url.pathname === "/api/recall" && req.method === "GET") {
-        const q = url.searchParams.get("q") ?? "";
-        const offsetParam = Number(url.searchParams.get("offset") ?? "0");
-        const limitParam = Number(url.searchParams.get("limit") ?? "50");
-        const offset = Number.isFinite(offsetParam) ? offsetParam : 0;
-        const limit = Number.isFinite(limitParam) ? limitParam : 50;
-        if (!q.trim()) {
-            return jsonResponse({
-                q,
-                hits: [],
-                commits: [],
-                skills: [],
-                truncated: false,
-                total_count: 0,
-                total_counts: { turn: 0, commit: 0, skill: 0 },
-                window: { offset, limit },
-            });
-        }
-        const project = url.searchParams.get("project");
-        const skill = url.searchParams.get("skill");
-        const since = url.searchParams.get("since");
-        try {
-            const payload = await Effect.runPromise(
-                fetchRecall({ q, project, skill, since, offset, limit }).pipe(
-                    Effect.provide(AppLayer),
-                    Effect.scoped,
-                ) as Effect.Effect<unknown>,
-            );
-            return jsonResponse(payload);
-        } catch (err) {
-            return jsonResponse(
-                { error: err instanceof Error ? err.message : String(err) },
-                500,
-            );
-        }
-    }
-    const projectMatch = url.pathname.match(/^\/api\/projects\/(.+)$/);
-    if (projectMatch && req.method === "GET") {
-        const project = decodeURIComponent(projectMatch[1] ?? "");
-        if (!project) return jsonResponse({ error: "missing project" }, 400);
-        try {
-            const payload = await Effect.runPromise(
-                fetchProject(project).pipe(
-                    Effect.provide(AppLayer),
-                    Effect.scoped,
-                ) as Effect.Effect<unknown>,
-            );
-            if (payload === null) {
-                return jsonResponse({ error: "project not found" }, 404);
-            }
             return jsonResponse(payload);
         } catch (err) {
             return jsonResponse(
@@ -775,92 +630,6 @@ export async function handleDashboardRequest(req: Request): Promise<Response> {
         try {
             const payload = await Effect.runPromise(
                 fetchSessionDetail(sessionId).pipe(
-                    Effect.provide(AppLayer),
-                    Effect.scoped,
-                ) as Effect.Effect<unknown>,
-            );
-            return jsonResponse(payload);
-        } catch (err) {
-            return jsonResponse(
-                { error: err instanceof Error ? err.message : String(err) },
-                500,
-            );
-        }
-    }
-    if (url.pathname === "/api/wrapped" && req.method === "GET") {
-        try {
-            const payload = await Effect.runPromise(
-                fetchWrapped().pipe(
-                    Effect.provide(AppLayer),
-                    Effect.scoped,
-                ) as Effect.Effect<unknown>,
-            );
-            return jsonResponse(payload);
-        } catch (err) {
-            return jsonResponse(
-                { error: err instanceof Error ? err.message : String(err) },
-                500,
-            );
-        }
-    }
-    if (url.pathname === "/api/wrapped/public-preview" && req.method === "GET") {
-        try {
-            const payload = await Effect.runPromise(
-                fetchWrapped().pipe(
-                    Effect.map(sanitizeWrappedProfile),
-                    Effect.provide(AppLayer),
-                    Effect.scoped,
-                ) as Effect.Effect<unknown>,
-            );
-            return jsonResponse(payload);
-        } catch (err) {
-            return jsonResponse(
-                { error: err instanceof Error ? err.message : String(err) },
-                500,
-            );
-        }
-    }
-    if (url.pathname === "/api/workflow" && req.method === "GET") {
-        try {
-            const payload = await Effect.runPromise(
-                fetchWorkflow().pipe(
-                    Effect.provide(AppLayer),
-                    Effect.scoped,
-                ) as Effect.Effect<unknown>,
-            );
-            return jsonResponse(payload);
-        } catch (err) {
-            return jsonResponse(
-                { error: err instanceof Error ? err.message : String(err) },
-                500,
-            );
-        }
-    }
-    if (url.pathname === "/api/tool-failures" && req.method === "GET") {
-        try {
-            const payload = await Effect.runPromise(
-                fetchToolFailures().pipe(
-                    Effect.provide(AppLayer),
-                    Effect.scoped,
-                ) as Effect.Effect<unknown>,
-            );
-            return jsonResponse(payload);
-        } catch (err) {
-            return jsonResponse(
-                { error: err instanceof Error ? err.message : String(err) },
-                500,
-            );
-        }
-    }
-    const failureDetailMatch = url.pathname.match(
-        /^\/api\/tool-failures\/(.+)\/detail$/,
-    );
-    if (failureDetailMatch) {
-        const label = decodeURIComponent(failureDetailMatch[1] ?? "");
-        if (!label) return jsonResponse({ error: "missing label" }, 400);
-        try {
-            const payload = await Effect.runPromise(
-                fetchToolFailureDetail(label).pipe(
                     Effect.provide(AppLayer),
                     Effect.scoped,
                 ) as Effect.Effect<unknown>,
