@@ -856,7 +856,7 @@ export interface DeriveOpts {
     onProgress: (counts: Record<string, number>) => Effect.Effect<void>;
 }
 
-export const deriveSignals = Effect.fn("signals.derive")(
+export const deriveSignals = Effect.fn("derive.signals")(
     function* (opts: Partial<DeriveOpts> = {}) {
         const skillNames = yield* fetchSkillNames().pipe(
             Effect.withSpan("signals.fetch-skills"),

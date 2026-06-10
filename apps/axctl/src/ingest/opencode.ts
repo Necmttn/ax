@@ -210,6 +210,18 @@ function isRecord(input: unknown): input is Record<string, unknown> {
  *  parse. */
 const decodeJsonStringOption = Schema.decodeUnknownOption(Schema.UnknownFromJsonString);
 
+/** Re-derive the native parse error for the warning detail: the Option-based
+ *  schema decode drops the `SyntaxError` that the legacy `JSON.parse` warning
+ *  surfaced. Runs only on the (rare) failure path. */
+function jsonParseErrorText(raw: string): string {
+    try {
+        JSON.parse(raw);
+        return "schema decode failed";
+    } catch (error) {
+        return error instanceof Error ? error.message : String(error);
+    }
+}
+
 function parseJsonRecord(raw: string | null, label: string, warnings: string[]): Record<string, unknown> | null {
     if (typeof raw !== "string" || raw.trim().length === 0) {
         warnings.push(`${label}: missing JSON data`);
@@ -217,7 +229,7 @@ function parseJsonRecord(raw: string | null, label: string, warnings: string[]):
     }
     const parsed = decodeJsonStringOption(raw);
     if (Option.isNone(parsed)) {
-        warnings.push(`${label}: invalid JSON data`);
+        warnings.push(`${label}: invalid JSON data (${jsonParseErrorText(raw)})`);
         return null;
     }
     if (isRecord(parsed.value)) return parsed.value;

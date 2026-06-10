@@ -19,7 +19,7 @@ import { Effect, Option, Schema } from "effect";
  * value matches, `undefined` otherwise (missing key, wrong type, failed
  * refinement). Never fails the surrounding struct.
  */
-export const lenient = <S extends Schema.Top>(schema: S) => {
+const lenient = <S extends Schema.Top>(schema: S) => {
     const orUndefined = Schema.UndefinedOr(schema);
     const tolerant = Schema.catchDecoding<typeof orUndefined>(() =>
         Effect.succeed(Option.some(undefined as (typeof orUndefined)["Type"])),
