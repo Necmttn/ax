@@ -2,8 +2,10 @@ import { describe, expect, test } from "bun:test";
 import {
     formatSseEvent,
     imageContentType,
+    liveRoutes,
     recentIngestEventsSql,
 } from "./live.ts";
+import { matchRoute } from "../router.ts";
 
 describe("imageContentType", () => {
     test("maps known image extensions (case-insensitive)", () => {
@@ -34,6 +36,28 @@ describe("dashboard live routes", () => {
         expect(sql).toContain('WHERE ts > d"2026-05-10T00:00:00.000Z"');
         expect(sql).toContain("ORDER BY ts ASC");
         expect(sql).toContain("LIMIT 12");
+    });
+
+    test("POST /api/events matches the raw SSE route", () => {
+        expect(matchRoute(liveRoutes, "POST", "/api/events").kind).toBe("matched");
+    });
+
+    test("POST /api/image falls through to legacy API not_found", async () => {
+        const { handleDashboardRequest } = await import("../../server.ts");
+        const res = await handleDashboardRequest(
+            new Request("http://127.0.0.1:1738/api/image", { method: "POST" }),
+        );
+        expect(res.status).toBe(200);
+        await expect(res.json()).resolves.toEqual({ error: "not_found" });
+    });
+
+    test("GET /api/ingest falls through to legacy API not_found", async () => {
+        const { handleDashboardRequest } = await import("../../server.ts");
+        const res = await handleDashboardRequest(
+            new Request("http://127.0.0.1:1738/api/ingest"),
+        );
+        expect(res.status).toBe(200);
+        await expect(res.json()).resolves.toEqual({ error: "not_found" });
     });
 
     test("POST /api/ingest without a booted server returns 503 ingest_unavailable", async () => {

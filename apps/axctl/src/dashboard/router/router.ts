@@ -59,6 +59,10 @@ export interface RouteInput {
     readonly body: BodyResult;
 }
 
+export interface RawRouteInput extends RouteInput {
+    readonly runner: EffectRunner;
+}
+
 export type Decoded<P> =
     | { readonly ok: true; readonly value: P }
     | { readonly ok: false; readonly status: number; readonly body: unknown };
@@ -119,7 +123,7 @@ export interface RawRouteDef {
     readonly path: string;
     /** Path matches with the wrong method should behave as unmatched. */
     readonly fallthroughOnMethodMismatch?: boolean;
-    readonly handler: (input: RouteInput) => Response | Promise<Response>;
+    readonly handler: (input: RawRouteInput) => Response | Promise<Response>;
 }
 
 /** Existentially-typed route: P/A are closed over at construction. */
@@ -168,7 +172,7 @@ export const rawRoute = (def: RawRouteDef): AnyRoute => ({
     pattern: compilePattern(def.path),
     fallthroughOnMethodMismatch: def.fallthroughOnMethodMismatch === true,
     readsBody: false,
-    run: (input, _runner) => Promise.resolve(def.handler(input)),
+    run: (input, runner) => Promise.resolve(def.handler({ ...input, runner })),
 });
 
 // ---------------------------------------------------------------- dispatch

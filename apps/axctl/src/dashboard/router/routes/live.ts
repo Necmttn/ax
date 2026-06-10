@@ -8,13 +8,12 @@
  */
 import { Effect } from "effect";
 import { SurrealClient } from "@ax/lib/db";
-import { AppLayer } from "@ax/lib/layers";
 import { IngestRuntimeLayer } from "../../../ingest/stage/runtime.ts";
 import { getServeIngestState } from "../../ingest-state.ts";
 import { ingestStreamName } from "../../ingest-stream.ts";
 import { startIngestWorkflow } from "../../ingest-workflow.ts";
 import { addIngestEventSubscriber, removeIngestEventSubscriber } from "../../telemetry.ts";
-import { jsonResponse, rawRoute, type AnyRoute } from "../router.ts";
+import { jsonResponse, rawRoute, type AnyRoute, type EffectRunner } from "../router.ts";
 
 /**
  * Map of supported image extension -> MIME type. This is the safety allowlist
@@ -88,7 +87,7 @@ async function handleImageRequest(url: URL): Promise<Response> {
     }
 }
 
-function handleEventsRequest(): Response {
+function handleEventsRequest(runner: EffectRunner): Response {
     let subscriber: ((event: unknown) => void) | null = null;
     let interval: ReturnType<typeof setInterval> | null = null;
     let closed = false;
@@ -103,10 +102,10 @@ function handleEventsRequest(): Response {
             interval = setInterval(async () => {
                 if (closed) return;
                 try {
-                    const result = await Effect.runPromise(Effect.gen(function* () {
+                    const result = await runner(Effect.gen(function* () {
                         const db = yield* SurrealClient;
                         return yield* db.query<[Array<Record<string, unknown>>]>(recentIngestEventsSql(sinceIso));
-                    }).pipe(Effect.provide(AppLayer), Effect.scoped) as Effect.Effect<[Array<Record<string, unknown>>]>);
+                    }));
                     for (const row of result?.[0] ?? []) {
                         if (closed) return;
                         controller.enqueue(new TextEncoder().encode(formatSseEvent("ingest_event", row)));
@@ -184,7 +183,17 @@ async function handleIngestTrigger(req: Request): Promise<Response> {
 }
 
 export const liveRoutes: ReadonlyArray<AnyRoute> = [
-    rawRoute({ method: "GET", path: "/api/events", handler: () => handleEventsRequest() }),
-    rawRoute({ method: "GET", path: "/api/image", handler: ({ url }) => handleImageRequest(url) }),
-    rawRoute({ method: "POST", path: "/api/ingest", handler: ({ req }) => handleIngestTrigger(req) }),
+    rawRoute({ method: "ANY", path: "/api/events", handler: ({ runner }) => handleEventsRequest(runner) }),
+    rawRoute({
+        method: "GET",
+        path: "/api/image",
+        fallthroughOnMethodMismatch: true,
+        handler: ({ url }) => handleImageRequest(url),
+    }),
+    rawRoute({
+        method: "POST",
+        path: "/api/ingest",
+        fallthroughOnMethodMismatch: true,
+        handler: ({ req }) => handleIngestTrigger(req),
+    }),
 ];
