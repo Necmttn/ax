@@ -195,6 +195,31 @@ describe("hasStaleUsage", () => {
         expect(hasStaleUsage(artifact)).toBe(false);
     });
 
+    it("returns true when only a grandchild has session usage and no turn usage exists anywhere", () => {
+        const grandchild: AxSessionShare = {
+            ...minimalShareArtifact({ id: "grandchild1", source: "claude" }),
+            token_usage: SESSION_USAGE,
+            turns: [
+                { id: "gt1", seq: 1, role: "assistant", text: "deep" },
+            ],
+        };
+        const child: AxSessionShare = {
+            ...minimalShareArtifact({ id: "child1", source: "claude" }),
+            turns: [
+                { id: "ct1", seq: 1, role: "assistant", text: "sub" },
+            ],
+            children: [grandchild],
+        };
+        const artifact: AxSessionShare = {
+            ...minimalShareArtifact({ id: "abc123", source: "claude" }),
+            turns: [
+                { id: "t1", seq: 1, role: "user", text: "hello" },
+            ],
+            children: [child],
+        };
+        expect(hasStaleUsage(artifact)).toBe(true);
+    });
+
     it("returns true when session usage uses estimated_tokens only (no cost) and no turns have usage", () => {
         const artifact: AxSessionShare = {
             ...minimalShareArtifact({ id: "abc123", source: "claude" }),

@@ -32,12 +32,17 @@ export function totalEstimatedTokens(artifact: AxSessionShare): number | null {
     return sumTrace(artifact, (u) => u.estimated_tokens);
 }
 
-const hasSessionUsage = (artifact: AxSessionShare): boolean => {
+const hasOwnSessionUsage = (artifact: AxSessionShare): boolean => {
     if (!artifact.token_usage) return false;
     const { estimated_cost_usd, estimated_tokens } = artifact.token_usage;
     if (typeof estimated_cost_usd === "number" && estimated_cost_usd > 0) return true;
     if (typeof estimated_tokens === "number" && estimated_tokens > 0) return true;
     return false;
+};
+
+const hasSessionUsage = (artifact: AxSessionShare): boolean => {
+    if (hasOwnSessionUsage(artifact)) return true;
+    return (artifact.children ?? []).some(hasSessionUsage);
 };
 
 const hasTurnUsage = (artifact: AxSessionShare): boolean => {
@@ -52,9 +57,7 @@ const hasTurnUsage = (artifact: AxSessionShare): boolean => {
  * user to re-ingest with AX_REDERIVE_CLAUDE=1 AX_REDERIVE_SUBAGENTS=1.
  */
 export function hasStaleUsage(artifact: AxSessionShare): boolean {
-    const anySession = hasSessionUsage(artifact) ||
-        (artifact.children ?? []).some(hasSessionUsage);
-    if (!anySession) return false;
+    if (!hasSessionUsage(artifact)) return false;
     return !hasTurnUsage(artifact);
 }
 
