@@ -357,6 +357,59 @@ describe("buildSessionMapLanes", () => {
         expect(bad.title).toContain("2 failures");
     });
 
+    test("packs overlapping bars onto separate rows", () => {
+        const model = buildSessionMapLanes(mapManifest([
+            mapCard({ file: "a.json", spawn_turn_seq: 5, duration_ms: 1000 }),
+            mapCard({ file: "b.json", spawn_turn_seq: 5, duration_ms: 1000 }),
+            mapCard({ file: "c.json", spawn_turn_seq: 5, duration_ms: 1000 }),
+        ]));
+        expect(model?.axis).toBe("seq");
+        expect(model?.rows).toBe(3);
+        expect(laneFor(model, "a.json").row).toBe(0);
+        expect(laneFor(model, "b.json").row).toBe(1);
+        expect(laneFor(model, "c.json").row).toBe(2);
+    });
+
+    test("clamps overflow collisions onto the last row instead of growing past the cap", () => {
+        const model = buildSessionMapLanes(mapManifest(
+            ["a", "b", "c", "d", "e", "f"].map((name) =>
+                mapCard({ file: `${name}.json`, spawn_turn_seq: 5, duration_ms: 1000 })),
+        ));
+        expect(model?.rows).toBe(4);
+        expect(model?.lanes.filter((lane) => lane.row === 3)).toHaveLength(3);
+        expect(model?.lanes.every((lane) => lane.row <= 3)).toBe(true);
+    });
+
+    test("rejects the seq axis when any card is nested (spawn seqs are parent-local)", () => {
+        const cards = [
+            mapCard({ file: "a.json", spawn_turn_seq: 3, started_at: "2026-06-01T00:00:00.000Z" }),
+            mapCard({
+                file: "b.json",
+                spawn_turn_seq: 7,
+                depth: 2,
+                parent_id: "claude-subagent-a.json",
+                started_at: "2026-06-01T00:30:00.000Z",
+            }),
+        ];
+        const withWindow = buildSessionMapLanes(mapManifest(
+            cards,
+            { started_at: "2026-06-01T00:00:00.000Z", ended_at: "2026-06-01T01:00:00.000Z" },
+        ));
+        expect(withWindow?.axis).toBe("time");
+        expect(laneFor(withWindow, "b.json").x).toBeCloseTo(0.5, 5);
+        const withoutWindow = buildSessionMapLanes(mapManifest(cards));
+        expect(withoutWindow?.axis).toBe("order");
+    });
+
+    test("treats an inverted root window (ended_at before started_at) as unusable", () => {
+        const model = buildSessionMapLanes(mapManifest(
+            [mapCard({ file: "a.json" }), mapCard({ file: "b.json" })],
+            { started_at: "2026-06-01T01:00:00.000Z", ended_at: "2026-06-01T00:00:00.000Z" },
+        ));
+        expect(model?.axis).toBe("order");
+        expect(model?.rootDurationMs).toBeNull();
+    });
+
     test("returns null for a manifest with zero subagents", () => {
         expect(buildSessionMapLanes(mapManifest([]))).toBeNull();
     });

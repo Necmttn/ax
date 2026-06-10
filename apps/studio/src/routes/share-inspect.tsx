@@ -311,6 +311,9 @@ export interface SessionMapModel {
 
 export const SESSION_MAP_MIN_LANE_W = 0.012;
 const SESSION_MAP_MAX_ROWS = 4;
+/** Bars whose left edges sit closer than this (strip fraction) to an earlier
+ *  bar's right edge pack onto the next row instead of overlapping. */
+const SESSION_MAP_PACK_GAP = 0.002;
 
 const parseShareTs = (iso: string | null | undefined): number | null => {
     const t = Date.parse(iso ?? "");
@@ -319,8 +322,10 @@ const parseShareTs = (iso: string | null | undefined): number | null => {
 
 /**
  * Pure shaper for the share-page session map: manifest in, positioned lanes
- * out. Axis is chosen once per share - spawn seq when every card has one,
- * else start time over the root window, else stable manifest order.
+ * out. Axis is chosen once per share - spawn seq when every card has one AND
+ * every card is a direct child of the root (`spawn_turn_seq` is parent-local,
+ * so a nested card's seq has no meaning on the root's turn axis), else start
+ * time over the root window, else stable manifest order.
  */
 export function buildSessionMapLanes(manifest: ShareManifest): SessionMapModel | null {
     const cards = manifest.subagents;
@@ -334,11 +339,13 @@ export function buildSessionMapLanes(manifest: ShareManifest): SessionMapModel |
     const windowMs = t0 != null && t1 != null && t1 > t0 ? t1 - t0 : null;
     const rootDurationMs = windowMs ?? totalsDuration;
 
-    const seqs = cards.map((c) => c.spawn_turn_seq);
-    const allSeq = seqs.every((s): s is number => typeof s === "number" && Number.isFinite(s));
+    const seqValues = cards
+        .map((c) => c.spawn_turn_seq)
+        .filter((s): s is number => typeof s === "number" && Number.isFinite(s));
+    const allSeq = seqValues.length === cards.length && cards.every((c) => c.depth === 1);
     const axis: SessionMapAxis = allSeq ? "seq" : windowMs != null ? "time" : "order";
-    const minSeq = allSeq ? Math.min(...(seqs as ReadonlyArray<number>)) : 0;
-    const seqRange = allSeq ? Math.max(...(seqs as ReadonlyArray<number>)) - minSeq : 0;
+    const minSeq = allSeq ? Math.min(...seqValues) : 0;
+    const seqRange = allSeq ? Math.max(...seqValues) - minSeq : 0;
 
     const maxChildDuration = Math.max(0, ...cards.map((c) => c.duration_ms ?? 0));
     // No known root duration: scale so the longest child fills a quarter strip.
@@ -349,7 +356,7 @@ export function buildSessionMapLanes(manifest: ShareManifest): SessionMapModel |
     const placed = cards.map((card, i) => {
         let x = 0;
         if (axis === "seq") {
-            x = seqRange > 0 ? ((card.spawn_turn_seq as number) - minSeq) / seqRange : 0;
+            x = seqRange > 0 ? ((card.spawn_turn_seq ?? minSeq) - minSeq) / seqRange : 0;
         } else if (axis === "time") {
             const ts = parseShareTs(card.started_at);
             x = ts != null && t0 != null && windowMs != null ? Math.min(1, Math.max(0, (ts - t0) / windowMs)) : 0;
@@ -384,7 +391,7 @@ export function buildSessionMapLanes(manifest: ShareManifest): SessionMapModel |
         .sort((p, q) => p.x - q.x || p.order - q.order)
         .map(({ card, order: _order, ...lane }): SessionMapLane => {
             let row = 0;
-            while (row < laneEnds.length && (laneEnds[row] ?? 0) > lane.x - 0.002) row++;
+            while (row < laneEnds.length && (laneEnds[row] ?? 0) > lane.x - SESSION_MAP_PACK_GAP) row++;
             if (row >= SESSION_MAP_MAX_ROWS) row = SESSION_MAP_MAX_ROWS - 1;
             laneEnds[row] = Math.max(laneEnds[row] ?? 0, lane.x + lane.w);
             return { ...lane, file: card.file, id: card.id, row };
@@ -862,7 +869,8 @@ function SessionScrubber({ timeline, spawnCards }: {
     };
     const fmtClock = (t: number) => new Date(t).toISOString().slice(5, 16).replace("T", " ");
     // Subagent lanes: each dispatch as a bar on the same time axis, greedy
-    // row packing, opacity by cost - the fan-out made visible (the F2 map).
+    // row packing, opacity by cost - a timeline-local preview of the fan-out
+    // (the standalone F2 session map is ShareSessionMap, rendered separately).
     const lanes: Array<Array<{ x: number; w: number; cost: number; failed: boolean; label: string }>> = [];
     const laneEnds: number[] = [];
     const maxCost = Math.max(0.01, ...(spawnCards ?? []).map((c) => c.cost_usd ?? 0));
