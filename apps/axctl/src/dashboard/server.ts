@@ -10,13 +10,13 @@ import { checkoutActivitySql, gitCorrelationSql } from "../queries/insights.ts";
 import { addIngestEventSubscriber, removeIngestEventSubscriber } from "./telemetry.ts";
 import {
     clearSkillDecision,
-    fetchSkillDetail,
     fetchSkillTriage,
     isTriageDecision,
     listSkillDecisions,
     setSkillDecision,
     setSkillDecisionsBulk,
 } from "./triage.ts";
+import { fetchSkillDetail } from "../queries/skill-detail.ts";
 import { fetchToolFailureDetail, fetchToolFailures } from "./tool-failures.ts";
 import {
     applySkillDecisionToDisk,

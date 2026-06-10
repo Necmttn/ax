@@ -8,13 +8,9 @@ import {
     SKILL_SUMMARY_SQL,
     SKILL_SUMMARY_PROPOSED_ONLY_SQL,
 } from "../queries/skill-summary.ts";
-import { SKILL_DETAIL_SQL } from "../queries/skill-detail.ts";
 import { prettifyProjectSlug } from "@ax/lib/shared/project-slug";
+import { numericField } from "@ax/lib/shared/row-fields";
 import type {
-    SkillDetailPayload,
-    SkillPair,
-    SkillProposalEvidence,
-    SkillRecentInvocation,
     SkillRow,
     SkillTriageEntry,
     SkillTriageNote,
@@ -29,11 +25,6 @@ const STAPLE_INV_30D = 10;                 // workhorse threshold (frequent use)
 const STAPLE_CORRECTION_RATIO = 0.10;      // staple must have <10% correction
 const STALE_DAYS = 45;
 const HIGH_CORRECTION_RATIO = 0.20;        // >=20% of recent invocations corrected
-
-const numericField = (row: Record<string, unknown>, key: string): number => {
-    const value = Number(row[key] ?? 0);
-    return Number.isFinite(value) ? value : 0;
-};
 
 const stringField = (row: Record<string, unknown>, key: string): string | null => {
     const value = row[key];
@@ -449,89 +440,6 @@ export const setSkillDecisionsBulk = (
             if (parsed) out.push(parsed);
         }
         return out;
-    });
-
-const tsField = (raw: Record<string, unknown>, key: string): string => {
-    const date = dateField(raw, key);
-    return date ?? "";
-};
-
-const parseRecent = (raw: unknown): SkillRecentInvocation | null => {
-    if (!raw || typeof raw !== "object") return null;
-    const row = raw as Record<string, unknown>;
-    const ts = tsField(row, "ts");
-    if (!ts) return null;
-    return {
-        ts,
-        project: stringField(row, "project"),
-        ...(typeof row.turn_has_error === "boolean"
-            ? { turn_has_error: row.turn_has_error }
-            : {}),
-    };
-};
-
-const parsePair = (raw: unknown): SkillPair | null => {
-    if (!raw || typeof raw !== "object") return null;
-    const row = raw as Record<string, unknown>;
-    const partner = stringField(row, "partner");
-    if (!partner) return null;
-    return {
-        partner,
-        count: numericField(row, "count"),
-        last_seen: dateField(row, "last_seen"),
-    };
-};
-
-const parseProposal = (raw: unknown): SkillProposalEvidence | null => {
-    if (!raw || typeof raw !== "object") return null;
-    const row = raw as Record<string, unknown>;
-    const ts = tsField(row, "ts");
-    if (!ts) return null;
-    return {
-        ts,
-        project: stringField(row, "project"),
-        context_excerpt: stringField(row, "context_excerpt"),
-    };
-};
-
-export const fetchSkillDetail = (
-    name: string,
-): Effect.Effect<SkillDetailPayload, DbError, SurrealClient> =>
-    Effect.gen(function* () {
-        const db = yield* SurrealClient;
-        const result = yield* db.query<unknown[]>(SKILL_DETAIL_SQL, { name });
-        // RETURN { ... } gives us [block] where block is the object.
-        const payload = Array.isArray(result)
-            ? ([...result].reverse().find((r) => r != null) as Record<string, unknown> | undefined)
-            : (result as Record<string, unknown> | undefined);
-        const skill = (payload?.skill ?? null) as Record<string, unknown> | null;
-        const invocations = (payload?.invocations ?? {}) as Record<string, unknown>;
-        const recent = Array.isArray(payload?.recent) ? payload.recent : [];
-        const corrections = Array.isArray(payload?.corrections) ? payload.corrections : [];
-        const proposals = Array.isArray(payload?.proposals) ? payload.proposals : [];
-        const paired = Array.isArray(payload?.paired) ? payload.paired : [];
-        return {
-            name,
-            scope: skill ? stringField(skill, "scope") : null,
-            description: skill ? stringField(skill, "description") : null,
-            dir_path: skill ? stringField(skill, "dir_path") : null,
-            invocations: {
-                total: numericField(invocations, "total"),
-                d7: numericField(invocations, "d7"),
-                d30: numericField(invocations, "d30"),
-                last: dateField(invocations, "last"),
-            },
-            recent: recent.map(parseRecent).filter((r): r is SkillRecentInvocation => r !== null),
-            corrections: corrections
-                .map(parseRecent)
-                .filter((r): r is SkillRecentInvocation => r !== null),
-            proposals: proposals
-                .map(parseProposal)
-                .filter((r): r is SkillProposalEvidence => r !== null),
-            paired: paired
-                .map(parsePair)
-                .filter((r): r is SkillPair => r !== null),
-        };
     });
 
 export const isTriageDecision = (value: unknown): value is TriageDecision =>
