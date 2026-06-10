@@ -188,6 +188,10 @@ const logQuery = (phase: "start" | "done", seq: number, ms: number, sql?: string
             queryLogPath,
             `${new Date().toISOString()} q${seq} ${phase}${phase === "done" ? ` +${ms.toFixed(0)}ms` : ""}${sql === undefined ? "" : ` ${sql.slice(0, 300).replaceAll("\n", " ")}`}\n`,
         );
+        // Full-statement capture for replay: one file per query start.
+        if (phase === "start" && sql !== undefined && process.env["AX_DB_QUERY_LOG_FULL"] === "1") {
+            require("node:fs").writeFileSync(`${queryLogPath}.q${seq}.sql`, sql);
+        }
     } catch {
         // diagnostics only - never fail the query path
     }
