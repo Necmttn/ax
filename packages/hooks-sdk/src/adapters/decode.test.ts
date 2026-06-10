@@ -35,4 +35,18 @@ describe("decodeHookInput", () => {
     expect(e.tool).toBeNull();
     expect(e.event).toBe("SessionStart");
   });
+  test("malformed JSON surfaces parseError, never throws", () => {
+    const e = decodeHookInput("garbage", {});
+    expect(e.parseError).toBeDefined();
+    expect(e.tool).toBeNull();
+  });
+  test("non-object JSON surfaces parseError", () => {
+    const e = decodeHookInput("[1,2,3]", {});
+    expect(e.parseError).toBeDefined();
+    expect(e.tool).toBeNull();
+  });
+  test("valid empty payload has no parseError", () => {
+    const e = decodeHookInput("{}", {});
+    expect(e.parseError).toBeUndefined();
+  });
 });

@@ -1,7 +1,9 @@
-import type { Harness, HookEvent, HookEventName } from "../event.ts";
+import type { Harness, HookEvent } from "../event.ts";
 
-const asRecord = (v: unknown): Record<string, unknown> =>
-  typeof v === "object" && v !== null && !Array.isArray(v) ? (v as Record<string, unknown>) : {};
+const isRecord = (v: unknown): v is Record<string, unknown> =>
+  typeof v === "object" && v !== null && !Array.isArray(v);
+
+const asRecord = (v: unknown): Record<string, unknown> => (isRecord(v) ? v : {});
 
 const str = (v: unknown): string | null => (typeof v === "string" ? v : null);
 
@@ -10,17 +12,24 @@ const str = (v: unknown): string | null => (typeof v === "string" ? v : null);
  * Priority: stdin JSON (claude + codex contract) → legacy env vars
  * (`TOOL_NAME`/`TOOL_INPUT_command`/`CWD`, the pre-2026 claude shape).
  * Harness detection: codex payloads carry `turn_id`/`tool_use_id`.
+ * Never throws; garbage stdin surfaces as `parseError` on the result.
  */
 export const decodeHookInput = (
   stdinText: string,
   env: Record<string, string | undefined>,
 ): HookEvent => {
   let raw: Record<string, unknown> = {};
+  let parseError: string | undefined;
   if (stdinText.trim().length > 0) {
     try {
-      raw = asRecord(JSON.parse(stdinText));
-    } catch {
-      raw = {};
+      const parsed: unknown = JSON.parse(stdinText);
+      if (isRecord(parsed)) {
+        raw = parsed;
+      } else {
+        parseError = `expected a JSON object, got ${Array.isArray(parsed) ? "array" : typeof parsed}`;
+      }
+    } catch (err) {
+      parseError = String(err);
     }
   }
 
@@ -36,6 +45,7 @@ export const decodeHookInput = (
       cwd: env.CWD ?? process.cwd(),
       tool: { name: env.TOOL_NAME, input },
       raw: {},
+      parseError,
     };
   }
 
@@ -43,10 +53,11 @@ export const decodeHookInput = (
   const toolName = str(raw.tool_name);
   return {
     harness,
-    event: (str(raw.hook_event_name) ?? "PreToolUse") as HookEventName,
+    event: str(raw.hook_event_name) ?? "PreToolUse",
     sessionId: str(raw.session_id),
     cwd: str(raw.cwd) ?? process.cwd(),
     tool: toolName ? { name: toolName, input: asRecord(raw.tool_input) } : null,
     raw,
+    parseError,
   };
 };
