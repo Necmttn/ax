@@ -6,6 +6,22 @@ import {
 } from "./codex.ts";
 import { extractToolFileEvidence } from "./tool-file-evidence.ts";
 
+const countStarting = (statements: readonly string[], prefix: string): number =>
+    statements.filter((statement) => statement.startsWith(prefix)).length;
+
+const countRelation = (statements: readonly string[], relation: string): number =>
+    statements.filter((statement) => statement.includes(`->${relation}:`)).length;
+
+const expectOneStatement = (
+    statements: readonly string[],
+    predicate: (statement: string) => boolean,
+    label: string,
+): string => {
+    const matches = statements.filter(predicate);
+    expect(matches.length, label).toBe(1);
+    return matches[0]!;
+};
+
 /**
  * Richest codex fixture: session_meta, turn_context, plain message turns,
  * function_call + function_call_output (exec_command AND apply_patch, the
@@ -173,6 +189,35 @@ describe("codex normalized-batch parity", () => {
         expect(extractToolFileEvidence(extracted!.toolCalls).length).toBeGreaterThan(0);
         const statements = __testBuildCodexBatchStatements(extracted!, 1200, true);
         const sql = statements.join("\n");
+        expect(countStarting(statements, "UPSERT agent_provider:")).toBe(1);
+        expect(countStarting(statements, "UPSERT agent_session:")).toBe(1);
+        expect(countStarting(statements, "DELETE (SELECT VALUE id FROM agent_event_child")).toBe(1);
+        expect(countStarting(statements, "DELETE (SELECT VALUE id FROM agent_event WHERE")).toBe(1);
+        expect(countStarting(statements, "UPSERT agent_event:")).toBe(extracted!.providerEvents.length);
+        expect(countRelation(statements, "agent_event_child")).toBe(8);
+        expect(countStarting(statements, "UPSERT turn:")).toBe(extracted!.turns.length);
+        expect(countStarting(statements, "UPSERT tool:")).toBe(4);
+        expect(countStarting(statements, "UPSERT tool_call:")).toBe(extracted!.toolCalls.length);
+        expect(countStarting(statements, "UPSERT skill:")).toBe(extracted!.skillRelations.length);
+        expect(countRelation(statements, "invoked")).toBe(extracted!.invocations.length);
+        expect(countRelation(statements, "concerns")).toBe(extracted!.skillRelations.length);
+        expect(countStarting(statements, "UPSERT plan:")).toBe(extracted!.planSnapshots.length);
+        expect(countStarting(statements, "UPSERT plan_snapshot:")).toBe(extracted!.planSnapshots.length);
+        expect(countStarting(statements, "UPSERT compaction:")).toBe(extracted!.compactions.length);
+        expect(countStarting(statements, "UPSERT session_token_usage:")).toBe(1);
+        expect(countStarting(statements, "UPSERT turn_token_usage:")).toBe(extracted!.turnTokenUsages.length);
+
+        expect(statements[0]).toBe('UPSERT agent_provider:`codex` MERGE { name: "codex", display_name: "Codex", version: "0.4.0", capabilities: "{\\"transcripts\\":true,\\"toolCalls\\":true,\\"planSignals\\":{\\"provider\\":\\"codex\\",\\"status\\":\\"available\\",\\"planSources\\":[\\"codex_update_plan\\"],\\"toolNames\\":[\\"update_plan\\"],\\"evidence\\":\\"Codex session JSONL exposes update_plan function call arguments.\\"},\\"delegationSignals\\":{\\"provider\\":\\"codex\\",\\"status\\":\\"available\\",\\"rawSignals\\":[\\"spawn_agent tool output\\"],\\"sharedRecords\\":[\\"spawned\\"],\\"evidence\\":\\"Codex spawn_agent output includes agent_id and nickname; derive-spawned writes spawned edges after the child session exists.\\"}}", updated_at: time::now() };');
+        const sessionStatement = expectOneStatement(statements, (statement) => statement.startsWith("UPSERT agent_session:"), "codex agent_session row");
+        expect(sessionStatement).toContain('provider_session_id: "codex-parity", ax_session: session:`codex-parity`');
+        expect(sessionStatement).toContain('raw: "{\\"source\\":\\"codex_transcript\\",\\"cliVersion\\":\\"0.4.0\\",\\"modelProvider\\":\\"openai\\",\\"model\\":\\"gpt-5.3-codex\\"}"');
+        expect(sessionStatement).toContain('labels: "{\\"source\\":\\"transcript\\"}", metrics: "{\\"turns\\":7,\\"toolCalls\\":3,\\"providerEvents\\":8}"');
+        expect(statements).toContain('UPSERT turn:`codex_parity__01869a265130c185__seq_000001` CONTENT { session: session:`codex-parity`, seq: 1, ts: d"2026-06-10T08:00:02.000Z", role: "user", message_kind: "task", intent_kind: "organic_task", text: "fix the ingest bug", text_excerpt: "fix the ingest bug", has_tool_use: false, has_error: false };');
+        const execToolCall = expectOneStatement(statements, (statement) => statement.startsWith("UPSERT tool_call:") && statement.includes('name: "exec_command"'), "codex exec_command tool_call row");
+        expect(execToolCall).toContain('call_id: "call_exec", ts: d"2026-06-10T08:00:03.000Z", status: "ok"');
+        expect(execToolCall).toContain('input_json: "{\\"cmd\\":\\"git status --short\\"}", output_json: "M apps/axctl/src/ingest/codex.ts\\n"');
+        expect(execToolCall).toContain('command_text: "git status --short", command_norm: "git status"');
+        expect(statements).toContain('RELATE turn:`codex_parity__01869a265130c185__seq_000002`->invoked:`6af5e141725410b0`->skill:`v2__codex_exec_command__83ae52d007aad013` SET session = session:`codex-parity`, ts = d"2026-06-10T08:00:03.000Z", args = "\\"{\\\\\\"cmd\\\\\\":\\\\\\"git status --short\\\\\\"}\\"", turn_has_error = false, turn_index = 2;');
         expect(sql).toContain("UPSERT agent_provider:`codex`");
         expect(sql).toMatch(/UPSERT agent_session:`codex__codex_parity__[^`]+`/);
         expect(sql).toMatch(/DELETE \(SELECT VALUE id FROM agent_event_child WHERE agent_session = agent_session:`codex__codex_parity__[^`]+`\)/);

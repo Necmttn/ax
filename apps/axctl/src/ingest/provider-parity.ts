@@ -159,7 +159,10 @@ export const PROVIDER_PARITY_FEATURES: readonly ProviderParityFeature[] = [
                 { path: "apps/axctl/src/ingest/opencode.ts", contains: "toolCalls: extract.toolCalls" },
                 { path: "apps/axctl/src/ingest/normalized/transcripts.ts", contains: "buildToolCallStatements(batch.toolCalls" },
             ]),
-            cursor: extractorGap("Cursor state parsing does not yet extract concrete tool calls."),
+            cursor: supported("Cursor toolFormerData entries write shared tool_call rows.", [
+                { path: "apps/axctl/src/ingest/cursor.ts", contains: "toolCalls: extract.toolCalls" },
+                { path: "apps/axctl/src/ingest/cursor.ts", contains: "pushCursorToolCall" },
+            ]),
         },
     },
     {
@@ -190,7 +193,10 @@ export const PROVIDER_PARITY_FEATURES: readonly ProviderParityFeature[] = [
                 { path: "apps/axctl/src/ingest/normalized/transcripts.ts", contains: "->invoked:" },
                 { path: "apps/axctl/src/ingest/normalized/transcripts.ts", contains: "buildRelateToolCallSkillStatements" },
             ]),
-            cursor: extractorGap("Cursor tool invocations are not emitted until concrete tool calls are extracted."),
+            cursor: supported("Cursor tool calls write synthetic cursor:<tool> skill invocations.", [
+                { path: "apps/axctl/src/ingest/cursor.ts", contains: "syntheticSkillInvocations" },
+                { path: "apps/axctl/src/ingest/cursor.ts", contains: "toolCallSkillRelations: extract.skillRelations" },
+            ]),
         },
     },
     {

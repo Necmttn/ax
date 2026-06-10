@@ -8,6 +8,22 @@ import {
     __testBuildCursorBatchStatements,
 } from "./cursor.ts";
 
+const countStarting = (statements: readonly string[], prefix: string): number =>
+    statements.filter((statement) => statement.startsWith(prefix)).length;
+
+const countRelation = (statements: readonly string[], relation: string): number =>
+    statements.filter((statement) => statement.includes(`->${relation}:`)).length;
+
+const expectOneStatement = (
+    statements: readonly string[],
+    predicate: (statement: string) => boolean,
+    label: string,
+): string => {
+    const matches = statements.filter(predicate);
+    expect(matches.length, label).toBe(1);
+    return matches[0]!;
+};
+
 const composerDiskKvFixture = (withCompaction: boolean): string => {
     const dir = mkdtempSync(join(tmpdir(), "ax-cursor-parity-"));
     const dbPath = join(dir, "state.vscdb");
@@ -68,6 +84,44 @@ describe("cursor normalized-batch parity", () => {
 
             const statements = __testBuildCursorBatchStatements(extracted, dbPath);
             const sql = statements.join("\n");
+            expect(countStarting(statements, "UPSERT agent_provider:")).toBe(1);
+            expect(countStarting(statements, "UPSERT agent_session:")).toBe(extracted.sessions.length);
+            expect(countStarting(statements, "DELETE (SELECT VALUE id FROM agent_event_child")).toBe(extracted.sessions.length);
+            expect(countStarting(statements, "DELETE (SELECT VALUE id FROM agent_event WHERE")).toBe(extracted.sessions.length);
+            expect(countStarting(statements, "UPSERT agent_event:")).toBe(extracted.providerEvents.length);
+            expect(countRelation(statements, "agent_event_child")).toBe(1);
+            expect(countStarting(statements, "UPSERT turn:")).toBe(extracted.turns.length);
+            expect(countStarting(statements, "UPSERT tool:")).toBe(2);
+            expect(countStarting(statements, "UPSERT tool_call:")).toBe(extracted.toolCalls.length);
+            expect(countStarting(statements, "UPSERT skill:")).toBe(extracted.skillRelations.length);
+            expect(countRelation(statements, "invoked")).toBe(extracted.invocations.length);
+            expect(countRelation(statements, "concerns")).toBe(extracted.skillRelations.length);
+            expect(countStarting(statements, "UPSERT compaction:")).toBe(extracted.compactions.length);
+
+            expect(statements[0]).toBe('UPSERT agent_provider:`cursor` MERGE { name: "cursor", display_name: "Cursor", version: NONE, capabilities: "{\\"sqlite\\":true,\\"transcripts\\":true,\\"providerGraph\\":true,\\"toolCalls\\":true,\\"planSignals\\":{\\"provider\\":\\"cursor\\",\\"status\\":\\"unavailable\\",\\"planSources\\":[],\\"toolNames\\":[],\\"evidence\\":\\"Current Cursor state.vscdb fixtures expose composer messages/bubbles only; no raw plan snapshot payload equivalent is present.\\"},\\"delegationSignals\\":{\\"provider\\":\\"cursor\\",\\"status\\":\\"unavailable\\",\\"rawSignals\\":[],\\"sharedRecords\\":[\\"spawned\\"],\\"evidence\\":\\"Current Cursor state.vscdb fixtures expose composer messages/bubbles only; no child-session id or delegation relation payload is present.\\"}}", updated_at: time::now() };');
+            const sessionStatement = expectOneStatement(statements, (statement) => statement.startsWith("UPSERT agent_session:"), "cursor agent_session row");
+            expect(sessionStatement).toContain('provider: agent_provider:`cursor`');
+            expect(sessionStatement).toContain('provider_session_id: "cursor__');
+            expect(sessionStatement).toContain('title: "Parity session", model: NONE');
+            expect(sessionStatement).toContain('raw: "{\\"source\\":\\"cursor_state_vscdb\\",');
+            expect(sessionStatement).toContain('\\"cursorConversationId\\":\\"composer-parity-1\\"}"');
+            expect(sessionStatement).toContain('labels: "{\\"source\\":\\"cursor\\",');
+            expect(sessionStatement).toContain('metrics: "{\\"turns\\":2,\\"toolCalls\\":1,');
+            const turnStatement = expectOneStatement(statements, (statement) => statement.startsWith("UPSERT turn:") && statement.includes("seq: 2"), "cursor tool turn row");
+            expect(turnStatement).toContain('role: "assistant", message_kind: "tool_call", intent_kind: "tool_call"');
+            expect(turnStatement).toContain('text: "Running git status.", text_excerpt: "Running git status.", has_tool_use: true, has_error: false');
+            const toolCallStatement = expectOneStatement(statements, (statement) => statement.startsWith("UPSERT tool_call:"), "cursor tool_call row");
+            expect(toolCallStatement).toContain('name: "run_terminal_command_v2", seq: 2, call_id: "cursor-tool-call-1"');
+            expect(toolCallStatement).toContain('input_json: "{\\"command\\":\\"git status --short\\"}"');
+            expect(toolCallStatement).toContain('command_text: "git status --short", command_norm: "git status"');
+            const skillStatement = expectOneStatement(statements, (statement) => statement.startsWith("UPSERT skill:"), "cursor synthetic skill row");
+            expect(skillStatement).toBe('UPSERT skill:`v2__cursor_run_terminal_command_v2__5ed1feabe33858f7` MERGE { name: "cursor:run_terminal_command_v2", scope: "cursor-tool", dir_path: "(synthetic)", content_hash: "cursor" };');
+            const invokedStatement = expectOneStatement(statements, (statement) => statement.includes("->invoked:"), "cursor invoked relation");
+            expect(invokedStatement).toContain('->skill:`v2__cursor_run_terminal_command_v2__5ed1feabe33858f7` SET session = session:`cursor__');
+            expect(invokedStatement).toContain('args = "{\\"command\\":\\"git status --short\\"}", turn_has_error = false, turn_index = 2;');
+            const concernsStatement = expectOneStatement(statements, (statement) => statement.includes("->concerns:"), "cursor tool_call concerns relation");
+            expect(concernsStatement).toContain('->skill:`v2__cursor_run_terminal_command_v2__5ed1feabe33858f7` SET kind = "invoked_skill"');
+            expect(concernsStatement).toContain('labels = "{\\"provider\\":\\"cursor\\",\\"toolName\\":\\"run_terminal_command_v2\\",\\"source\\":\\"composerData:composer-parity-1\\"}"');
             expect(sql).toContain("UPSERT agent_provider:`cursor`");
             expect(sql).toContain("UPSERT agent_session:`cursor__");
             expect(sql).toContain("DELETE (SELECT VALUE id FROM agent_event_child WHERE agent_session = agent_session:`cursor__");

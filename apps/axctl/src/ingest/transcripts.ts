@@ -1774,9 +1774,10 @@ export const ingestTranscripts = (
                 skillName: resolveSkillName(rel.skillName, skillCatalog) ?? rel.skillName,
             }));
             // Seven per-section writes collapsed into ONE normalized-batch
-            // write (statement multiset identical - transcripts.parity.test.ts;
-            // plan ledger delta D5). Token usage above and invoked-edges/hooks
-            // below stay separate per the gap analysis.
+            // write. transcripts.parity.test.ts keeps golden-shape coverage
+            // for the normalized provider/session/event/turn/tool/plan rows;
+            // token usage above and invoked-edges/hooks below stay separate
+            // per the gap analysis.
             yield* queryTranscriptStatements(
                 buildNormalizedTranscriptStatements(
                     toClaudeNormalizedBatch(extracted, resolvedSkillRelations),
