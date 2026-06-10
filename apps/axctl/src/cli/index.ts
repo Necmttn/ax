@@ -91,13 +91,8 @@ import { ingestClaudeInsights } from "../ingest/claude-insights.ts";
 // backfillInvokedPositions - Phase B will register this as invokedPositionsStage.
 import { deriveSignals } from "../ingest/derive-signals.ts";
 import { deriveTurnIntents } from "../ingest/derive-intents.ts";
-import { INSIGHT_VIEWS, insightSqlForView, isInsightView } from "../queries/insights.ts";
-import { enrichInsightRows } from "../queries/insights-enrich.ts";
 import { fetchSkillStats } from "../queries/skill-stats.ts";
 import { fetchUnusedSkills } from "../queries/unused-skills.ts";
-import { extractSessionTimeline, SessionTimelineServiceLayer } from "../timeline/service.ts";
-import { formatInsightRows } from "./insights-format.ts";
-import { writeDashboard } from "../dashboard/report.ts";
 import { serveDashboard } from "../dashboard/server.ts";
 import { serveMcp } from "../mcp/server.ts";
 import { fetchRecall, type RecallSource, type RecallScope } from "../dashboard/recall.ts";
@@ -125,6 +120,8 @@ import { fetchLocSummary, type LocSummary, type LocSelector } from "../dashboard
 import { renderSessionMarkdown, renderSessionJson } from "./session-show-format.ts";
 import { renderCompareTable, renderCompareJson } from "./session-compare-format.ts";
 import { cmdDaemon, cmdDoctor, cmdInstall, cmdSetup, cmdUninstall } from "./install.ts";
+import { insightsCommand, reportCommand, timelineCommand, reportRuntime } from "./commands/report.ts";
+import type { RuntimeManifest } from "./commands/manifest.ts";
 import { resolvePwdRepository } from "../pwd.ts";
 import { detectStaleness } from "@ax/lib/transcript-staleness";
 import { ingestTranscripts } from "../ingest/transcripts.ts";
@@ -584,43 +581,6 @@ const cmdIngestInsights = (args: string[] = []) =>
             Effect.provide(Layer.mergeAll(BunFileSystem.layer, BunPath.layer)),
         );
     }).pipe(Effect.asVoid);
-
-const cmdInsights = (args: string[]) =>
-    Effect.gen(function* () {
-        const rawView =
-            args.filter((a) => !a.startsWith("--"))[0] ?? "repositories";
-        if (!isInsightView(rawView)) {
-            console.error(
-                `axctl insights: unknown view "${rawView}" (expected ${INSIGHT_VIEWS.join(", ")})`,
-            );
-            process.exit(2);
-        }
-        const limit = parsePositiveIntFlag("insights", "limit", args, 20);
-        const json = args.includes("--json");
-        const db = yield* SurrealClient;
-        const result = yield* db.query<[Array<Record<string, unknown>>]>(
-            insightSqlForView(rawView, limit),
-        );
-        // Classifier views resolve their per-row context here via indexed
-        // lookups (the correlated $parent.session form scanned ~1s/row).
-        const rows = yield* enrichInsightRows(rawView, result?.[0] ?? []);
-        console.log(formatInsightRows(rawView, [...rows], { json }));
-    });
-
-const cmdReport = (args: string[]) =>
-    Effect.gen(function* () {
-        const limit = parsePositiveIntFlag("report", "limit", args, 12);
-        const out = flag("out", args);
-        const result = yield* writeDashboard({ out, limit });
-        console.log(`report: ${result.url}`);
-        console.log(
-            `evidence: tools=${fmtCount(result.data.counts.toolCalls)} plans=${fmtCount(
-                result.data.counts.planSnapshots,
-            )} friction=${fmtCount(
-                result.data.counts.frictionEvents,
-            )} sessions=${fmtCount(result.data.counts.sessions)}`,
-        );
-    });
 
 const VALID_SOURCES: ReadonlySet<string> = new Set(["turn", "commit", "skill"]);
 
@@ -1747,18 +1707,6 @@ const deriveCommand = Command.make("derive").pipe(
             .pipe(Command.withDescription(deriveIntentsDescription)),
     ]),
 );
-
-const insightView = Argument.choice("view", INSIGHT_VIEWS).pipe(Argument.withDefault("repositories"));
-
-const insightsCommand = Command.make(
-    "insights",
-    {
-        view: insightView,
-        limit: positiveLimit(20),
-        json: jsonFlag,
-    },
-    ({ view, limit, json }) => cmdInsights([view, `--limit=${limit}`, ...boolArg("json", json)]),
-).pipe(Command.withDescription("Run built-in graph insight queries"));
 
 const classifiersEvalCommand = Command.make(
     "eval",
@@ -4278,15 +4226,6 @@ const mcpCommand = Command.make(
     () => Effect.sync(() => serveMcp([])),
 ).pipe(Command.withDescription("Run an MCP server (stdio) exposing ax's read-only queries"));
 
-const reportCommand = Command.make(
-    "report",
-    {
-        limit: positiveLimit(12),
-        out: Flag.string("out").pipe(Flag.optional),
-    },
-    ({ limit, out }) => cmdReport([`--limit=${limit}`, ...stringArg("out", optionValue(out))]),
-).pipe(Command.withDescription("Write a static evidence report (one-shot HTML snapshot)"));
-
 const usd = (value: unknown): string => {
     const n = typeof value === "number" ? value : typeof value === "string" ? Number(value) : NaN;
     return Number.isFinite(n) ? `$${n.toFixed(4)}` : "$0.0000";
@@ -4765,37 +4704,6 @@ const statsCommand = Command.make(
     { skill: Argument.string("skill").pipe(Argument.optional) },
     ({ skill }) => cmdStats(Option.isSome(skill) ? [skill.value] : []),
 ).pipe(Command.withDescription("Show detailed stats for ONE skill (requires <skill>). For the aggregate usage ranking use `ax skills weighted`."));
-
-const cmdTimeline = (sessionId: string, json: boolean) =>
-    extractSessionTimeline(sessionId).pipe(
-        Effect.provide(SessionTimelineServiceLayer),
-        Effect.flatMap((tl) =>
-            Effect.sync(() => {
-                if (json) {
-                    console.log(JSON.stringify(tl, null, 2));
-                    return;
-                }
-                const h = tl.highlights;
-                const dur = h.duration_ms != null ? `${(h.duration_ms / 3_600_000).toFixed(1)}h` : "?";
-                const total = Object.values(h.event_counts).reduce((a, b) => a + b, 0);
-                console.log(`${h.model ?? "?"} · ${h.repository ?? ""} · ${dur} · ${h.turns} turns · ${h.tool_calls} tools · ${h.tool_errors} errs · ${h.files_changed} files · $${h.cost_usd?.toFixed(2) ?? "?"}`);
-                console.log(`${tl.segments.length} segments · ${tl.events.length} key events (of ${total})\n`);
-                for (const s of tl.segments) {
-                    const r = s.rollup;
-                    console.log(`  ${s.id} [${s.boundary}] ${s.title}`);
-                    console.log(`     ${s.event_count} evts · ${r.tool_calls} tools · ${r.file_edits} edits · ${r.failures} fail/${r.recovered} rec · ${r.decisions} dec · ${r.checkpoints} chk · ${r.corrections} corr`);
-                }
-            })
-        ),
-    );
-
-const timelineCommand = Command.make(
-    "timeline",
-    { sessionId: Argument.string("session-id"), json: jsonFlag },
-    ({ sessionId, json }) => cmdTimeline(sessionId, json),
-).pipe(Command.withDescription(
-    "Highlight/event timeline for a session (segments + ranked events, LLM-free). --json for the full structure.",
-));
 
 const recentCommand = Command.make(
     "recent",
@@ -5640,37 +5548,49 @@ const withoutDb = (args: ReadonlyArray<string>): CliProgram => {
     );
 };
 
-// Commands whose handlers reach into SurrealClient via AppLayer. Anything
-// outside this set runs through `withoutDb` so the user gets fast, honest
-// errors (e.g. "unknown command") instead of a 5s connect timeout.
-export const DB_COMMANDS: ReadonlySet<string> = new Set([
-    "ingest",
-    "derive",
-    "derive-signals",
-    "derive-intents",
-    "insights",
-    "classifiers",
-    "sessions",
-    "signals",
-    "improve",
-    "retro",
-    "report",
-    "costs",
-    "loc",
-    "pricing",
-    "recall",
-    "skills",
-    "roles",
-    "project",
-    "context",
-    "hook",
-    "hooks",
-    "agents",
-    "evidence",
-    "timeline",
-    "tui",
-    "dogfood",
-]);
+// Names not yet migrated to a commands/<family>.ts module. Shrinks each task;
+// deleted in the final cleanup task. Mirrors the legacy DB_COMMANDS exactly.
+const LEGACY_RUNTIME: RuntimeManifest = {
+    ingest: "ingest",
+    derive: "db",
+    "derive-signals": "db",
+    "derive-intents": "db",
+    classifiers: "db",
+    sessions: "db",
+    signals: "db",
+    improve: "db",
+    retro: "db",
+    costs: "db",
+    loc: "db",
+    pricing: "db",
+    recall: "db",
+    skills: "db",
+    roles: "db",
+    project: "db",
+    context: "db",
+    hook: "db",
+    hooks: "db",
+    agents: "db",
+    evidence: "db",
+    tui: "db",
+    dogfood: "db",
+};
+
+export const RUNTIME_BY_COMMAND: RuntimeManifest = {
+    ...LEGACY_RUNTIME,
+    ...reportRuntime,
+};
+
+// Commands whose handlers reach into SurrealClient via AppLayer (or the
+// ingest superset layer). Anything outside this set runs through `withoutDb`
+// so the user gets fast, honest errors (e.g. "unknown command") instead of a
+// 5s connect timeout. Derived - do not hand-edit; declare runtime in the
+// owning commands/<family>.ts manifest instead.
+export const DB_COMMANDS: ReadonlySet<string> = new Set(
+    Object.entries(RUNTIME_BY_COMMAND)
+        .filter(([, runtime]) => runtime === "db" || runtime === "ingest")
+        .map(([name]) => name),
+);
 
 export const classifiersPackageOperationsNeedsDb = (args: ReadonlyArray<string>): boolean =>
     args[0] === "classifiers" &&
