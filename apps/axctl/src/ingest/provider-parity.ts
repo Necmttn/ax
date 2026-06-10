@@ -153,7 +153,7 @@ export const PROVIDER_PARITY_FEATURES: readonly ProviderParityFeature[] = [
                 { path: "apps/axctl/src/ingest/codex.ts", contains: "buildToolCallStatements(batch.toolCalls" },
             ]),
             pi: supported("Pi tool blocks write shared tool_call rows.", [
-                { path: "apps/axctl/src/ingest/pi.ts", contains: "buildToolCallStatements(extract.toolCalls)" },
+                { path: "apps/axctl/src/ingest/pi.ts", contains: "toolCalls: extract.toolCalls" },
             ]),
             opencode: supported("OpenCode structured tool parts write shared tool_call rows.", [
                 { path: "apps/axctl/src/ingest/opencode.ts", contains: "toolCalls: extract.toolCalls" },
@@ -181,8 +181,8 @@ export const PROVIDER_PARITY_FEATURES: readonly ProviderParityFeature[] = [
                 { path: "apps/axctl/src/ingest/codex.ts", contains: "buildRelateToolCallSkillStatements" },
             ]),
             pi: supported("Pi tool blocks write synthetic pi:<tool> skill invocations.", [
-                { path: "apps/axctl/src/ingest/pi.ts", contains: "->invoked:" },
-                { path: "apps/axctl/src/ingest/pi.ts", contains: "buildRelateToolCallSkillStatements" },
+                { path: "apps/axctl/src/ingest/pi.ts", contains: "syntheticSkillInvocations" },
+                { path: "apps/axctl/src/ingest/pi.ts", contains: "toolCallSkillRelations: extract.skillRelations" },
             ]),
             opencode: supported("OpenCode tool parts write synthetic opencode:<tool> skill invocations.", [
                 { path: "apps/axctl/src/ingest/opencode.ts", contains: "syntheticSkillInvocations" },
@@ -231,7 +231,7 @@ export const PROVIDER_PARITY_FEATURES: readonly ProviderParityFeature[] = [
                 { path: "apps/axctl/src/ingest/tool-file-evidence.ts", contains: "patchPaths" },
             ]),
             pi: supported("Pi structured edit/write tool arguments write edited edges to file rows.", [
-                { path: "apps/axctl/src/ingest/pi.ts", contains: "buildToolFileEvidenceStatements(extractToolFileEvidence(extract.toolCalls))" },
+                { path: "apps/axctl/src/ingest/pi.ts", contains: "toolFileEvidence: extractToolFileEvidence(extract.toolCalls)" },
                 { path: "apps/axctl/src/ingest/tool-file-evidence.ts", contains: "EDIT_TOOLS" },
             ]),
             opencode: extractorGap("OpenCode file edit evidence depends on concrete tool-call extraction."),
@@ -258,7 +258,7 @@ export const PROVIDER_PARITY_FEATURES: readonly ProviderParityFeature[] = [
                 { path: "apps/axctl/src/ingest/tool-file-evidence.ts", contains: "SEARCH_COMMANDS" },
             ]),
             pi: supported("Pi structured read/search tool arguments write read_file and searched_file edges.", [
-                { path: "apps/axctl/src/ingest/pi.ts", contains: "buildToolFileEvidenceStatements(extractToolFileEvidence(extract.toolCalls))" },
+                { path: "apps/axctl/src/ingest/pi.ts", contains: "toolFileEvidence: extractToolFileEvidence(extract.toolCalls)" },
                 { path: "apps/axctl/src/ingest/tool-file-evidence.ts", contains: "READ_TOOLS" },
                 { path: "apps/axctl/src/ingest/tool-file-evidence.ts", contains: "SEARCH_TOOLS" },
             ]),

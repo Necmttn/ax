@@ -25,6 +25,7 @@ import {
     type ToolCallWrite,
 } from "./evidence-writers.ts";
 import { buildCompactionStatements, extractPiCompaction, type CompactionWrite } from "./compaction.ts";
+import { buildNormalizedTranscriptStatements, type NormalizedTranscriptBatch } from "./normalized/transcripts.ts";
 import { classifyTurnIntent } from "./intent-kind.ts";
 import { providerDelegationSignalAvailability } from "./delegation.ts";
 import { agentEventRecordKey, buildAgentEventStatements, buildAgentProviderStatements, type AgentEventWrite } from "./provider-events.ts";
@@ -725,7 +726,78 @@ const buildPiTokenUsageStatements = (extract: PiExtract): string[] => {
     ];
 };
 
-const buildPiBatchStatements = (extract: PiExtract): string[] => [
+const toPiNormalizedBatch = (extract: PiExtract): NormalizedTranscriptBatch => ({
+    providers: [{
+        name: "pi",
+        displayName: "Pi",
+        version: extract.session.version === null ? null : String(extract.session.version),
+        capabilities: {
+            transcripts: true,
+            providerGraph: true,
+            planSignals: providerPlanSignalAvailability.pi,
+            delegationSignals: providerDelegationSignalAvailability.pi,
+        },
+    }],
+    sessions: [{
+        id: extract.session.id,
+        provider: "pi",
+        providerSessionId: extract.session.id,
+        cwd: extract.session.cwd,
+        project: extract.session.cwd,
+        model: extract.session.model,
+        sourcePath: extract.sourcePath,
+        raw: {
+            source: "pi_jsonl",
+            sourcePath: extract.sourcePath,
+            version: extract.session.version,
+        },
+        labels: { source: "pi" },
+        metrics: {
+            turns: extract.turns.length,
+            toolCalls: extract.toolCalls.length,
+            providerEvents: extract.providerEvents.length,
+            usage: extract.usage,
+        },
+        startedAt: extract.session.started_at,
+        endedAt: extract.session.ended_at,
+    }],
+    events: extract.providerEvents,
+    turns: extract.turns.map((turn) => ({
+        sessionId: turn.session,
+        seq: turn.seq,
+        ts: turn.ts,
+        role: turn.role,
+        messageKind: turn.message_kind,
+        intentKind: turn.intent_kind,
+        text: turn.text,
+        textExcerpt: turn.text_excerpt,
+        hasToolUse: turn.has_tool_use,
+        hasError: turn.has_error,
+        agentEvent: {
+            provider: "pi",
+            providerSessionId: turn.session,
+            providerEventId: turn.providerEventId,
+            seq: turn.providerEventSeq,
+        },
+    })),
+    toolCalls: extract.toolCalls,
+    toolFileEvidence: extractToolFileEvidence(extract.toolCalls),
+    // turnHasError/turnIndex omitted: seam defaults (false / seq) match the
+    // legacy hardcoded `turn_has_error = false, turn_index = ${seq}` exactly.
+    syntheticSkillInvocations: extract.invocations.map((invocation) => ({
+        sessionId: invocation.session,
+        seq: invocation.seq,
+        ts: invocation.ts,
+        skillName: invocation.skill,
+        args: invocation.args,
+        skillScope: "pi-tool",
+        skillContentHash: "pi",
+    })),
+    toolCallSkillRelations: extract.skillRelations,
+    compactions: extract.compactions,
+});
+
+const legacyBuildPiBatchStatements = (extract: PiExtract): string[] => [
     ...buildAgentProviderStatements([
         {
             name: "pi",
@@ -777,6 +849,13 @@ const buildPiBatchStatements = (extract: PiExtract): string[] => [
         buildRelateToolCallSkillStatements(relation),
     ),
     ...buildCompactionStatements(extract.compactions),
+    ...buildPiTokenUsageStatements(extract),
+];
+
+export const __legacyBuildPiBatchStatements = legacyBuildPiBatchStatements;
+
+const buildPiBatchStatements = (extract: PiExtract): string[] => [
+    ...buildNormalizedTranscriptStatements(toPiNormalizedBatch(extract)),
     ...buildPiTokenUsageStatements(extract),
 ];
 
