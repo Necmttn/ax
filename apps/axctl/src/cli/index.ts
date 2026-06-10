@@ -1,12 +1,11 @@
 #!/usr/bin/env bun
 import { Cause, Effect, Layer } from "effect";
 import { BunFileSystem, BunPath, BunRuntime } from "@effect/platform-bun";
-import { Command, Flag } from "effect/unstable/cli";
+import { Command } from "effect/unstable/cli";
 import { SurrealClient, type SurrealClientShape } from "@ax/lib/db";
 import { AppLayer } from "@ax/lib/layers";
 import { cmdShare } from "./share.ts";
 import { cmdStar, maybePrintStarNudge } from "./star-nudge.ts";
-import { cmdDaemon, cmdDoctor, cmdInstall, cmdSetup, cmdUninstall } from "./install.ts";
 import { insightsCommand, reportCommand, timelineCommand, reportRuntime } from "./commands/report.ts";
 import { signalsCommand, signalsRuntime } from "./commands/signals.ts";
 import { evidenceCommand, evidenceRuntime } from "./commands/evidence.ts";
@@ -32,118 +31,23 @@ import {
     detectRemovedIngestFlag,
 } from "./commands/ingest.ts";
 import type { RuntimeManifest } from "./commands/manifest.ts";
-import { AX_VERSION, liveVersionDeps, printVersion, updateAxctl } from "./version.ts";
+import {
+    versionCommand,
+    updateCommand,
+    installCommand,
+    setupCommand,
+    daemonCommand,
+    doctorCommand,
+    uninstallCommand,
+    lifecycleRuntime,
+} from "./commands/lifecycle.ts";
+import { AX_VERSION, liveVersionDeps, printVersion } from "./version.ts";
 import { agentsCommand } from "../agents/cli.ts";
 import { ALL_STAGES } from "../ingest/stage/registry.ts";
 import { IngestRuntimeLayer, ingestRuntimeLayerWith } from "../ingest/stage/runtime.ts";
 import { ConsoleTransportLayer } from "@ax/lib/live-traces/transports/console";
 import { pipelineTraceTransportLayer, tuiTraceTransportLayer } from "./ingest-trace-progress.ts";
 import type { ProgressStage } from "./progress.ts";
-import {
-    boolArg,
-    jsonFlag,
-} from "./commands/shared.ts";
-
-const checkFlag = Flag.boolean("check").pipe(Flag.withDefault(false));
-const bannerFlag = Flag.boolean("banner").pipe(Flag.withDefault(false));
-
-const versionCommand = Command.make(
-    "version",
-    {
-        check: checkFlag,
-        json: jsonFlag,
-        banner: bannerFlag,
-    },
-    ({ check, json, banner }) =>
-        Effect.promise(() =>
-            printVersion(
-                [...boolArg("check", check), ...boolArg("json", json), ...boolArg("banner", banner)],
-                liveVersionDeps,
-            ),
-        ),
-).pipe(Command.withDescription("Print the installed version and optionally check GitHub releases"));
-
-const updateCommand = Command.make(
-    "update",
-    {
-        check: checkFlag,
-        json: jsonFlag,
-    },
-    ({ check, json }) =>
-        Effect.promise(() =>
-            updateAxctl([...boolArg("check", check), ...boolArg("json", json)], liveVersionDeps),
-        ),
-).pipe(Command.withDescription("Update axctl from the latest GitHub release"));
-
-const installCommand = Command.make("install", {}, () =>
-    cmdInstall(),
-).pipe(Command.withDescription("One-shot setup: daemon, watcher, symlink (then runs `ax setup`)"));
-
-const setupCommand = Command.make(
-    "setup",
-    {
-        agents: Flag.string("agents").pipe(Flag.optional),
-        yes: Flag.boolean("yes").pipe(Flag.withDefault(false)),
-        agentPrompt: Flag.boolean("agent-prompt").pipe(Flag.withDefault(false)),
-    },
-    ({ agents, yes, agentPrompt }) =>
-        cmdSetup({
-            ...(agents._tag === "Some"
-                ? { agents: agents.value.split(",").map((s) => s.trim()).filter(Boolean) }
-                : {}),
-            yes,
-            agentPromptOnly: agentPrompt,
-        }),
-).pipe(
-    Command.withDescription(
-        "Install the agent skills and verify; hands ingest to your agent via the onboarding brief. " +
-        "--agents=claude-code,codex  --yes  --agent-prompt (print just the paste-to-agent block)",
-    ),
-);
-
-const daemonStatusCommand = Command.make(
-    "status",
-    { json: jsonFlag },
-    ({ json }) => cmdDaemon(["status", ...boolArg("json", json)]),
-).pipe(Command.withDescription("Show daemon and watcher status"));
-
-const daemonStartCommand = Command.make("start", {}, () =>
-    cmdDaemon(["start"]),
-).pipe(Command.withDescription("Start the daemon and watcher"));
-
-const daemonStopCommand = Command.make("stop", {}, () =>
-    cmdDaemon(["stop"]),
-).pipe(Command.withDescription("Stop the daemon and watcher without deleting plists"));
-
-const daemonRestartCommand = Command.make("restart", {}, () =>
-    cmdDaemon(["restart"]),
-).pipe(Command.withDescription("Restart the daemon and watcher"));
-
-const daemonCommand = Command.make("daemon").pipe(
-    Command.withDescription("Manage local launchd services"),
-    Command.withSubcommands([
-        daemonStatusCommand,
-        daemonStartCommand,
-        daemonStopCommand,
-        daemonRestartCommand,
-    ]),
-);
-
-const doctorCommand = Command.make(
-    "doctor",
-    { json: jsonFlag },
-    ({ json }) => cmdDoctor(boolArg("json", json)),
-).pipe(Command.withDescription("Check local installation health"));
-
-const uninstallCommand = Command.make(
-    "uninstall",
-    { purge: Flag.boolean("purge").pipe(Flag.withDefault(false)) },
-    ({ purge }) => cmdUninstall(purge),
-).pipe(
-    Command.withDescription(
-        "Remove launchd plists and the axctl symlink (--purge also deletes ~/.local/share/ax: binary + data)",
-    ),
-);
 
 const devOnlyCommands = process.env.AX_DEV === "1" ? [dogfoodCommand] : [];
 
@@ -340,6 +244,7 @@ export const RUNTIME_BY_COMMAND: RuntimeManifest = {
     ...skillsRuntime,
     ...classifiersRuntime,
     ...ingestRuntime,
+    ...lifecycleRuntime,
 };
 
 // Commands whose handlers reach into SurrealClient via AppLayer (or the
