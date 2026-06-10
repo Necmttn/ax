@@ -10,12 +10,12 @@
   <line x1="80" y1="104" x2="1200" y2="104" stroke="#111" stroke-width="2"/>
 
   <!-- hero: the message is the mark -->
-  <text x="74" y="292" font-family="Georgia, 'Times New Roman', serif"
-        font-size="185" fill="#0a0a0a" letter-spacing="-3">make your</text>
-  <text x="74" y="462" font-family="Georgia, 'Times New Roman', serif"
-        font-size="185" fill="#0a0a0a" letter-spacing="-3">agent learn</text>
+  <text x="74" y="280" font-family="Georgia, 'Times New Roman', serif"
+        font-size="160" fill="#0a0a0a">make your</text>
+  <text x="74" y="468" font-family="Georgia, 'Times New Roman', serif"
+        font-size="160" fill="#0a0a0a">agent learn</text>
   <!-- the full stop is the live pulse -->
-  <g transform="translate(998 448)">
+  <g transform="translate(905 454)">
     <circle r="15" fill="#2f9e44"/>
     <circle r="25" fill="none" stroke="#2f9e44" stroke-opacity="0.3" stroke-width="3"/>
   </g>

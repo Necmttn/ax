@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 480" width="1280" height="480">
+  <!-- paper -->
+  <rect width="1280" height="480" fill="#f6f5f0"/>
+
+  <!-- the loop: stacked words -->
+  <g font-family="Menlo, SFMono-Regular, monospace" font-size="72">
+    <text x="70" y="138" fill="#111">tried</text>
+    <text x="70" y="226" fill="#2f9e44">worked</text>
+    <text x="70" y="314" fill="#111">failed</text>
+    <text x="70" y="402" fill="#111">next</text>
+  </g>
+
+  <!-- loop rail: next feeds back into tried -->
+  <path d="M 271 377 H 392 V 113 H 321" fill="none" stroke="#111" stroke-width="2.5"/>
+  <polygon points="305,113 323,104 323,122" fill="#111"/>
+  <text transform="translate(414 245) rotate(-90)" text-anchor="middle"
+        font-family="Menlo, SFMono-Regular, monospace"
+        font-size="12" letter-spacing="2" fill="#888">EVERY SESSION</text>
+
+  <!-- mechanism: quiet mono chain -->
+  <g font-family="Menlo, SFMono-Regular, monospace" font-size="20" fill="#555">
+    <text x="620" y="166">session ends</text>
+    <text x="644" y="206"><tspan fill="#9a988f">&#8594;</tspan><tspan dx="14">retro lands in the graph</tspan></text>
+    <text x="668" y="246"><tspan fill="#9a988f">&#8594;</tspan><tspan dx="14">friction becomes proposals</tspan></text>
+    <text x="692" y="286"><tspan fill="#9a988f">&#8594;</tspan><tspan dx="14">proposals become experiments</tspan></text>
+    <text x="716" y="326"><tspan fill="#9a988f">&#8594;</tspan><tspan dx="14">verdicts at t+7 / t+30 / t+90</tspan></text>
+  </g>
+</svg>

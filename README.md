@@ -3,7 +3,7 @@
 ###### the retro loop for AI coding agents
 
 **Make your agent learn.**
-Reflects. Experiments. Improves. Across every session.
+Turn every agent session into a better next run.
 
 ---
 
@@ -12,7 +12,11 @@ figured out - which command failed three times before the right one, which
 file actually mattered, which approach to skip - dies with it. The next
 sub-agent rediscovers it from scratch. Your own next session does too.
 
-`ax` is the loop that closes before the session ends. A Stop hook fires
+`ax` watches every session your harness runs, spots the mistakes it
+repeats, and turns them into small, repo-specific fixes you review and
+apply - one at a time.
+
+Under the hood, it's the loop that closes before the session ends. A Stop hook fires
 at session-end (main or sub-agent), asks the agent for a structured retro
 (*tried · worked · failed · next*), and indexes the result as a typed
 experiment in a local graph. Friction patterns become proposals you
@@ -28,9 +32,34 @@ verdicts. The next session reads what worked.
 ## 60 seconds in
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Necmttn/ax/main/install.sh | bash
+curl -fsSL ax.necmttn.com/install | sh
 PATH="$HOME/.local/bin:$PATH" ax setup   # agent skills + first ingest + doctor
 ```
+
+Or skip the terminal entirely - paste this into Claude Code / Codex and your
+agent installs ax, ingests your history, labels your skills, and tells you
+which ones to actually use:
+
+<details>
+<summary><strong>the setup prompt - give this to your agent</strong></summary>
+
+```text
+Set up ax for me, end to end. ax is a local agent-experience graph over my Claude Code + Codex history - it runs locally and I review every change.
+
+1. INSTALL - run `curl -fsSL ax.necmttn.com/install | sh` to install the ax CLI. Reference: https://ax.necmttn.com/docs
+
+2. INGEST MY HISTORY - first run `ax ingest --dry-run` and tell me, in plain words, how long a full backfill will take. Then start the ingest in the BACKGROUND so we can keep working: run `ax ingest` as a background job with AX_PROGRESS=plain, and watch its output for progress and completion. Tell me I can watch it fill live in the dashboard - run `ax serve` and open http://127.0.0.1:8520. When the ingest finishes, summarize what landed: total sessions, turns, and the top skills/tools I actually use. Then continue with the steps below.
+
+3. VERIFY - run `ax doctor`. If anything isn't ok, diagnose and fix it, then re-run until it is.
+
+4. LABEL what ax can't classify - run `ax skills classify`. It writes one `.ax/tasks/classify-<skill>.md` brief per skill I use but ax can't role-tag. For each brief: read the skill, decide its role(s), and fill the YAML at the bottom (`primary_role:` is required; `secondary_roles`, `confidence`, `rationale` are optional). Run `ax roles` to see labels already in use. Then run `ax skills lint` to apply them. If it says "no unclassified skills", that's fine.
+
+5. SHOW me the result - run `ax skills weighted` and `ax skills config`. Tell me which skills you labeled and why, and flag anything ax marked orphan or out-of-scope.
+
+6. GIVE ME A NEXT STEP - recommend 1-2 under-used skills you'd reach for based on what you saw, then end with a concrete CTA: the exact command or prompt I should run next, and what outcome it will produce.
+```
+
+</details>
 
 Then ask the graph things you couldn't ask before:
 
@@ -59,6 +88,7 @@ seconds. A launchd watcher keeps it current as you work. Everything runs on
 
 Signals are normalized across harnesses: "context ran out and got summarized"
 is one queryable compaction event whether it came from Claude Code or Codex.
+The pipeline in one line: **every event → typed graph → ranked interventions**.
 
 ```mermaid
 flowchart LR
@@ -177,8 +207,12 @@ under your account; the viewer just renders it.
 - **Metrics** - `ax sessions metrics` and `ax signals` surface graph-derived
   session health (fragility cascades, plan churn, tool retries), and
   `ax sessions compare` puts two runs side by side.
+- **Harness doctor** - grades how well your setup is actually working;
+  every fix you apply moves the score.
 
 ## Close the loop: grounded agent files
+
+![tried · worked · failed · next - the retro loop](docs/images/retro-loop.png)
 
 ax recommends changes to your `AGENTS.md` / `CLAUDE.md` / skills - grounded in
 evidence from your own sessions - and tracks which lines came from it:
@@ -251,6 +285,8 @@ Questions, feedback, or want to shape where ax goes next? Join the Discord:
 [discord.gg/E4R88Cvr5R](https://discord.gg/E4R88Cvr5R)
 
 ## License
+
+If it shapes your agent, you should be able to fork it.
 
 [AGPL-3.0-only](LICENSE) © 2025 Necmettin Karakaya. A
 [commercial license](docs/COMMERCIAL-LICENSE.md) is available for use that the
