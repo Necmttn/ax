@@ -91,7 +91,8 @@ import { fetchRecall, type RecallSource, type RecallScope } from "../dashboard/r
 import { fetchSessionShow } from "../dashboard/session-show.ts";
 import { fetchSessionCompare } from "../dashboard/session-compare.ts";
 import { fetchCostSummary, type CostSummary } from "../dashboard/cost-query.ts";
-import { fetchSessionMetrics, type SessionMetricsRow } from "../metrics/session-metrics-query.ts";
+import { fetchSessionMetrics } from "../metrics/session-metrics-query.ts";
+import { formatSessionMetrics, SESSION_METRICS_LEGEND } from "../metrics/util.ts";
 import { SIGNAL_CATALOG, findSignal, runRelationSignal } from "../metrics/catalog.ts";
 import type { CascadeEdge } from "../metrics/fragility-cascade.ts";
 import { fetchLocSummary, type LocSummary, type LocSelector } from "../dashboard/loc-query.ts";
@@ -3201,6 +3202,10 @@ const cmdSessionsHere = (args: string[]) =>
     Effect.gen(function* () {
         const days = parsePositiveIntFlag("sessions here", "days", args, 14);
         const json = wantsJson(args);
+        const includeSubagents = args.includes("--include-subagents");
+        const limit = flag("limit", args) === undefined
+            ? null
+            : parsePositiveIntFlag("sessions here", "limit", args);
 
         const pwdResolution = yield* resolvePwdRepository().pipe(
             Effect.catchTag("NotAGitRepoError", (err) =>
@@ -3215,13 +3220,30 @@ const cmdSessionsHere = (args: string[]) =>
 
         const repositoryKey = pwdResolution.repositoryRecordId.id as string;
         yield* maybeAutoIngestStale("sessions here", pwdResolution.repoRoot, args);
-        const rows = yield* listSessionsHere({ repositoryKey, days });
+        const allRows = yield* listSessionsHere({ repositoryKey, days });
+
+        // claude-subagent sessions are orchestrated children and routinely
+        // outnumber real sessions by 10x+; hide them by default (mirrors
+        // `retro pending`). --include-subagents restores them. (#178)
+        const visible = includeSubagents
+            ? allRows
+            : allRows.filter((r) => r.source !== "claude-subagent");
+        const hiddenSubagents = allRows.length - visible.length;
+        const rows = limit === null ? visible : visible.slice(0, limit);
 
         if (json) {
             console.log(JSON.stringify(rows, null, 2));
             return;
         }
         console.log(formatSessionsTable(rows));
+        const notes: string[] = [];
+        if (hiddenSubagents > 0) {
+            notes.push(`${hiddenSubagents} subagent session(s) hidden - pass --include-subagents to show`);
+        }
+        if (limit !== null && visible.length > rows.length) {
+            notes.push(`showing ${rows.length} of ${visible.length} - raise --limit`);
+        }
+        if (notes.length > 0) console.log(`(${notes.join("; ")})`);
     });
 
 // --- sessions around ---
@@ -3437,17 +3459,25 @@ const sessionsHereCommand = Command.make(
     "here",
     {
         days: Flag.integer("days").pipe(Flag.withDefault(14)),
+        limit: Flag.integer("limit").pipe(Flag.optional),
+        includeSubagents: Flag.boolean("include-subagents").pipe(Flag.withDefault(false)),
         json: jsonFlag,
         noStaleCheck: noStaleCheckFlag,
         staleThreshold: staleThresholdFlag,
     },
-    ({ days, json, noStaleCheck, staleThreshold }) =>
+    ({ days, limit, includeSubagents, json, noStaleCheck, staleThreshold }) =>
         cmdSessionsHere([
             `--days=${days}`,
+            ...intArg("limit", optionValue(limit)),
+            ...boolArg("include-subagents", includeSubagents),
             ...boolArg("json", json),
             ...staleCheckArgs(noStaleCheck, staleThreshold),
         ]),
-).pipe(Command.withDescription("List sessions for the current git repository (default: last 14 days)"));
+).pipe(Command.withDescription(
+    "List sessions for the current git repository (default: last 14 days). "
+    + "Subagent (claude-subagent) sessions are hidden by default - --include-subagents shows them; "
+    + "--limit N caps the rows printed.",
+));
 
 const sessionsAroundCommand = Command.make(
     "around",
@@ -3549,34 +3579,15 @@ const sessionsCompareCommand = Command.make(
 // ax sessions metrics - graph-derived per-session metrics listing
 // ---------------------------------------------------------------------------
 
-const metricPct = (v: number | null): string => (v === null ? "  -" : `${Math.round(v * 100)}%`.padStart(4));
-const metricMs = (v: number | null): string =>
-    v === null ? "-" : v >= 3600000 ? `${(v / 3600000).toFixed(1)}h` : `${Math.max(1, Math.round(v / 60000))}m`;
-
-const formatSessionMetrics = (rows: SessionMetricsRow[]): string => {
-    if (rows.length === 0) return "no session_metrics rows (run `ax ingest` to populate).";
-    const lines: string[] = [];
-    lines.push(
-        `${"session".padEnd(20)} ${"durab".padStart(5)} ${"commits".padStart(7)} ${"land".padStart(5)} ${"+/-loc".padStart(12)} `
-        + `${"1st-edit".padStart(8)} ${"reads".padStart(5)} ${"deleg%".padStart(6)}  task`,
-    );
-    for (const r of rows.slice(0, 50)) {
-        lines.push(
-            `${r.session.replace(/^session:/, "").replace(/[`⟨⟩]/g, "").slice(0, 20).padEnd(20)} `
-            + `${metricPct(r.durabilityRatio)} ${String(r.producedCommits).padStart(7)} ${metricMs(r.timeToLandMs).padStart(5)} `
-            + `${`+${r.linesAdded}/-${r.linesRemoved}`.padStart(12)} `
-            + `${metricMs(r.timeToFirstEditMs).padStart(8)} ${String(r.coldStartReads).padStart(5)} ${metricPct(r.delegationRatio)}  `
-            + `${(r.taskLabel ?? "").replace(/\s+/g, " ").slice(0, 50)}`,
-        );
-    }
-    return lines.join("\n");
-};
+// Table formatting (metricPct/metricMs/formatSessionMetrics + legend) lives in
+// ../metrics/util.ts so the pure helpers stay unit-testable.
 
 const cmdSessionsMetrics = (input: {
     readonly sinceDays: number | null;
     readonly project: string | null;
     readonly here: boolean;
     readonly limit: number;
+    readonly fullIds: boolean;
     readonly json: boolean;
 }) =>
     Effect.gen(function* () {
@@ -3600,7 +3611,12 @@ const cmdSessionsMetrics = (input: {
             console.log(prettyPrint(rows));
             return;
         }
-        console.log(formatSessionMetrics(rows));
+        console.log(formatSessionMetrics(rows, { fullIds: input.fullIds }));
+        // Column names alone are too terse (dogfood finding #178); explain them
+        // on interactive output only - piped consumers get just the table.
+        if (rows.length > 0 && process.stdout.isTTY) {
+            console.log(`\n${SESSION_METRICS_LEGEND}`);
+        }
     });
 
 const sessionsMetricsCommand = Command.make(
@@ -3610,21 +3626,26 @@ const sessionsMetricsCommand = Command.make(
         project: Flag.string("project").pipe(Flag.optional),
         here: Flag.boolean("here").pipe(Flag.withDefault(false)),
         limit: positiveLimit(50),
+        fullIds: Flag.boolean("full-ids").pipe(Flag.withDefault(false)),
         json: jsonFlag,
     },
-    ({ since, project, here, limit, json }) =>
+    ({ since, project, here, limit, fullIds, json }) =>
         cmdSessionsMetrics({
             sinceDays: optionValue(since) ?? null,
             project: optionValue(project) ?? null,
             here,
             limit,
+            fullIds,
             json,
         }),
 ).pipe(Command.withDescription(
-    "Graph-derived per-session metrics: durability (commits not later reverted), "
-    + "time-to-land (commit→PR merge), lines added/removed, first-edit latency, cold-start reads, "
-    + "delegation. Sorted by produced commits, then most fragile first. "
-    + "--here scopes to the pwd repo, --since N days, --json for machine output.",
+    "Graph-derived per-session metrics: durab (commits not later reverted / produced), "
+    + "land (first commit→PR merge; squash merges legitimately land at ~0 → \"<1m\"), lines added/removed, "
+    + "1st-edit (session start→first Edit/Write), reads (Read/Grep/Glob before first edit), "
+    + "deleg% (subagent-produced commits / all). Sorted by produced commits, then most fragile first. "
+    + "--here scopes to the pwd repo, --since N days, --full-ids prints untruncated session ids "
+    + "(feed into `ax sessions show` / `compare`), --json for machine output. "
+    + "See `ax signals` for cross-session relation signals (e.g. fragility cascades).",
 ));
 
 const sessionsCommand = Command.make("sessions").pipe(
@@ -5486,17 +5507,23 @@ export const rootCommand = Command.make("axctl").pipe(
         retroCommand,
         recallCommand,
         skillsCommand,
+        signalsCommand,
+        rolesCommand,
+        hooksCommand,
         serveCommand,
         mcpCommand,
         tuiCommand,
         shareCommand,
         installCommand,
         setupCommand,
-        // Hidden: advanced / agent-driven / maintenance verbs. `withHidden` omits
-        // them from `--help`, shell completions, and "did you mean?" while leaving
-        // them callable by exact name. `derive-signals`/`derive-intents` MUST stay
-        // callable - the installed LaunchAgent plists invoke them by name.
-        Command.withHidden(signalsCommand),
+        // Visibility policy (#173): read-only insight surfaces (sessions, recall,
+        // skills, signals, roles, hooks) MUST be visible - a hidden command is
+        // invisible to agents discovering the tool via --help, so it never gets
+        // used (blind-dogfood finding). Hide only mutating / maintenance /
+        // plumbing verbs. `withHidden` omits a command from `--help`, shell
+        // completions, and "did you mean?" while leaving it callable by exact
+        // name. `derive-signals`/`derive-intents` MUST stay callable - the
+        // installed LaunchAgent plists invoke them by name.
         Command.withHidden(deriveCommand),
         Command.withHidden(deriveSignalsCommand),
         Command.withHidden(deriveIntentsCommand),
@@ -5506,10 +5533,8 @@ export const rootCommand = Command.make("axctl").pipe(
         Command.withHidden(costsGroupCommand),
         Command.withHidden(locCommand),
         Command.withHidden(pricingCommand),
-        Command.withHidden(rolesCommand),
         Command.withHidden(contextCommand),
-        Command.withHidden(hookCommand),
-        Command.withHidden(hooksCommand),
+        Command.withHidden(hookCommand), // harness plumbing (invoked by hook configs), not for humans
         Command.withHidden(agentsCommand),
         Command.withHidden(projectCommand),
         Command.withHidden(evidenceCommand),

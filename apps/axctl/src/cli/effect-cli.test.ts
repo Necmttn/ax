@@ -69,6 +69,21 @@ describe("effect cli", () => {
         expect(names).not.toContain("dogfood");
     });
 
+    test("read-only insight surfaces are visible; maintenance verbs stay hidden (#173)", () => {
+        const byName = new Map(
+            rootCommand.subcommands.flatMap((g) => g.commands.map((c) => [c.name, c] as const)),
+        );
+        // Visibility policy: hidden = invisible to agents discovering the tool
+        // via --help = never used. Insight surfaces must show in help.
+        for (const name of ["sessions", "recall", "skills", "signals", "roles", "hooks"]) {
+            expect(byName.get(name)?.hidden).toBe(false);
+        }
+        // Mutating / maintenance / plumbing verbs stay hidden (but callable).
+        for (const name of ["derive-signals", "derive-intents", "insights", "hook", "daemon", "uninstall"]) {
+            expect(byName.get(name)?.hidden).toBe(true);
+        }
+    });
+
     test("skills group exposes the moved query subcommands", () => {
         const skills = rootCommand.subcommands
             .flatMap((g) => g.commands)
