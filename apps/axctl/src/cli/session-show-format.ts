@@ -17,12 +17,17 @@ import type {
 import type { RevertedCommitDetail, SessionDurabilityDetail } from "../metrics/reverted-commits.ts";
 import { renderByRoleSection } from "./role-format.ts";
 import { prettifyProjectSlug } from "@ax/lib/shared/project-slug";
+import type { NavLink } from "@ax/lib/shared/nav-link";
+import { renderNextFooter } from "./next-format.ts";
 
 /** Optional enrichments rendered alongside the base session payload. */
 export interface SessionShowExtras {
     /** Durability drill-down (#176): the commits behind durability_ratio.
      *  Null/undefined → no Metrics section rendered. */
     readonly metrics?: SessionDurabilityDetail | null;
+    /** NavLink follow-ups (resume command, parent, expand-subagents).
+     *  Rendered as a `next:` footer (markdown) / `next` field (JSON). */
+    readonly next?: ReadonlyArray<NavLink>;
 }
 
 /** Last `n` hex chars of a UUID-like string, same pattern as cmdRecall. */
@@ -339,6 +344,12 @@ export function renderSessionMarkdown(
         }
     }
 
+    // ── next: footer (NavLinks - resume / parent / expand) ───────────────────
+    if (extras.next && extras.next.length > 0) {
+        const footer = renderNextFooter(extras.next);
+        if (footer) lines.push(footer);
+    }
+
     return lines.join("\n");
 }
 
@@ -360,6 +371,9 @@ export function renderSessionJson(
                 : {}),
             ...(extras.metrics !== null && extras.metrics !== undefined
                 ? { metrics: extras.metrics }
+                : {}),
+            ...(extras.next !== undefined && extras.next.length > 0
+                ? { next: extras.next }
                 : {}),
         },
         null,

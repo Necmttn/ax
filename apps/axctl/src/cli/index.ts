@@ -4,6 +4,17 @@ import { BunFileSystem, BunPath } from "@effect/platform-bun";
 import { Argument, Command, Flag } from "effect/unstable/cli";
 import { SurrealClient, type SurrealClientShape } from "@ax/lib/db";
 import { listSessionsHere, listSessionsAround, listSessionsNear, type SessionRow } from "../dashboard/sessions-query.ts";
+import {
+    buildRecallNext,
+    buildSessionsNext,
+    buildSessionShowNext,
+    buildSkillsWeightedNext,
+    buildSkillsByRoleNext,
+    buildSkillsRolesNext,
+    buildRolesNext,
+    buildImproveProposalsNext,
+} from "../nav/next-links.ts";
+import { renderNextFooter } from "./next-format.ts";
 import { findCommitWindow } from "@ax/lib/git-window";
 import { AxConfig } from "@ax/lib/config";
 import { safeJsonParse } from "@ax/lib/shared/safe-json";
@@ -868,8 +879,11 @@ const cmdRecall = (opts: RecallCliOpts) =>
             ...(sources !== null ? { sources } : {}),
             scope,
         });
+        const { hits, next } = buildRecallNext(result, {
+            requestedSources: sources ?? ["turn"],
+        });
         if (opts.json) {
-            console.log(JSON.stringify(result, null, 2));
+            console.log(JSON.stringify({ ...result, hits, next }, null, 2));
             return;
         }
 
@@ -878,6 +892,9 @@ const cmdRecall = (opts: RecallCliOpts) =>
         // --- turns section ---
         if (result.hits.length === 0 && !multiSource) {
             console.log(`no matches for "${opts.query}"`);
+            // Errors-as-teaching: name the broader queries to try next.
+            const footer = renderNextFooter(next);
+            if (footer) console.log(footer);
             return;
         }
         if (result.hits.length > 0) {
@@ -935,6 +952,8 @@ const cmdRecall = (opts: RecallCliOpts) =>
             }
         }
 
+        const footer = renderNextFooter(next);
+        if (footer) console.log(footer);
     });
 
 const cmdSearch = (args: string[]) =>
@@ -1367,6 +1386,8 @@ const cmdSkillsWeighted = (args: string[]) =>
             console.log(renderWeightedJson(result));
         } else {
             console.log(renderWeightedTable(result));
+            const footer = renderNextFooter(buildSkillsWeightedNext(result));
+            if (footer) console.log(footer);
         }
     });
 
@@ -1397,6 +1418,8 @@ const cmdSkillsByRole = (args: string[]) =>
             console.log(renderSkillsByRoleJson(result, role));
         } else {
             console.log(renderSkillsByRoleTable(result, role));
+            const footer = renderNextFooter(buildSkillsByRoleNext(result, role));
+            if (footer) console.log(footer);
         }
     });
 
@@ -1427,6 +1450,8 @@ const cmdRolesForSkill = (args: string[]) =>
             console.log(renderRolesForSkillJson(result, skill));
         } else {
             console.log(renderRolesForSkillTable(result, skill));
+            const footer = renderNextFooter(buildSkillsRolesNext(result, skill));
+            if (footer) console.log(footer);
         }
     });
 
@@ -1446,6 +1471,8 @@ const cmdRoles = (args: string[]) =>
             console.log(renderAllRolesJson(result));
         } else {
             console.log(renderAllRolesTable(result));
+            const footer = renderNextFooter(buildRolesNext(result));
+            if (footer) console.log(footer);
         }
     });
 
@@ -2544,12 +2571,19 @@ const cmdImproveList = (args: string[]) =>
             console.log(prettyPrint(rows));
             return;
         }
+        const improveNext = buildImproveProposalsNext(
+            rows.map((r) => ({ sig: r.dedupe_sig, title: r.title })),
+        );
         if (rows.length === 0) {
             console.log("(no proposals match filter)");
+            const footer = renderNextFooter(improveNext);
+            if (footer) console.log(footer);
             return;
         }
         console.log(`  freq  conf    status      form         dedupe_sig                title`);
         for (const row of rows) console.log(formatProposalLine(row));
+        const footer = renderNextFooter(improveNext);
+        if (footer) console.log(footer);
     });
 
 const cmdImproveShow = (args: string[]) =>
@@ -2643,6 +2677,14 @@ const cmdImproveRecommend = (args: string[]) =>
         }
         const formatted = formatRecommendations(items);
         console.log(formatted);
+        {
+            const footer = renderNextFooter(
+                buildImproveProposalsNext(
+                    items.map((i) => ({ sig: i.shortId, title: i.title })),
+                ),
+            );
+            if (footer) console.log(footer);
+        }
         if (items.length > 0 && !noClipboard) {
             const copied = copyToClipboard(formatted);
             if (copied) console.log("\n[copied to clipboard]");
@@ -3243,9 +3285,10 @@ const cmdSessionsHere = (args: string[]) =>
             : allRows.filter((r) => r.source !== "claude-subagent");
         const hiddenSubagents = allRows.length - visible.length;
         const rows = limit === null ? visible : visible.slice(0, limit);
+        const { sessions, next } = buildSessionsNext(rows);
 
         if (json) {
-            console.log(JSON.stringify(rows, null, 2));
+            console.log(JSON.stringify({ sessions, next }, null, 2));
             return;
         }
         console.log(formatSessionsTable(rows));
@@ -3257,6 +3300,8 @@ const cmdSessionsHere = (args: string[]) =>
             notes.push(`showing ${rows.length} of ${visible.length} - raise --limit`);
         }
         if (notes.length > 0) console.log(`(${notes.join("; ")})`);
+        const footer = renderNextFooter(next);
+        if (footer) console.log(footer);
     });
 
 // --- sessions around ---
@@ -3302,12 +3347,19 @@ const cmdSessionsAround = (args: string[]) =>
         }
 
         const rows = yield* listSessionsAround({ date, days, project });
+        const { sessions, next } = buildSessionsNext(rows, {
+            date: positional,
+            days,
+            project,
+        });
 
         if (json) {
-            console.log(JSON.stringify(rows, null, 2));
+            console.log(JSON.stringify({ sessions, next }, null, 2));
             return;
         }
         console.log(formatSessionsTable(rows));
+        const footer = renderNextFooter(next);
+        if (footer) console.log(footer);
     });
 
 // --- sessions near ---
@@ -3367,12 +3419,15 @@ const cmdSessionsNear = (args: string[]) =>
         }
 
         const rows = yield* listSessionsNear({ from, to, repositoryKey });
+        const { sessions, next } = buildSessionsNext(rows);
 
         if (json) {
-            console.log(JSON.stringify(rows, null, 2));
+            console.log(JSON.stringify({ sessions, next }, null, 2));
             return;
         }
         console.log(formatSessionsTable(rows));
+        const footer = renderNextFooter(next);
+        if (footer) console.log(footer);
     });
 
 // ---------------------------------------------------------------------------
@@ -3437,10 +3492,12 @@ const cmdSessionShow = (args: string[]) =>
             catchDbErrorAndExit("axctl session show"),
         );
 
+        const next = buildSessionShowNext(payload);
+
         if (useJson) {
-            console.log(renderSessionJson(payload, { metrics }));
+            console.log(renderSessionJson(payload, { metrics, next }));
         } else {
-            console.log(renderSessionMarkdown(payload, { metrics }));
+            console.log(renderSessionMarkdown(payload, { metrics, next }));
         }
     });
 
@@ -3468,7 +3525,8 @@ const sessionShowCommand = Command.make(
         "commits that fixed them). " +
         "--expand=<uuid> (repeatable) or --all expands subagent timelines inline. " +
         "--by-role groups the Top skills section by role. " +
-        "Auto markdown on TTY, JSON when piped. --json forces JSON.",
+        "Auto markdown on TTY, JSON when piped. --json forces JSON. " +
+        "Output ends with a `next:` footer of copy-paste follow-up commands (resume in harness, open parent, expand subagents).",
     ),
 );
 
@@ -3507,7 +3565,8 @@ const sessionsHereCommand = Command.make(
 ).pipe(Command.withDescription(
     "List sessions for the current git repository (default: last 14 days). "
     + "Subagent (claude-subagent) sessions are hidden by default - --include-subagents shows them; "
-    + "--limit N caps the rows printed.",
+    + "--limit N caps the rows printed. "
+    + "Output ends with a `next:` footer of copy-paste follow-up commands (drill-in, harness resume); --json carries the same links as a {sessions, next} envelope.",
 ));
 
 const sessionsAroundCommand = Command.make(
@@ -3525,7 +3584,10 @@ const sessionsAroundCommand = Command.make(
             ...stringArg("project", optionValue(project)),
             ...boolArg("json", json),
         ]),
-).pipe(Command.withDescription("List sessions in a ±N-day window around a date (YYYY-MM-DD or ISO8601)"));
+).pipe(Command.withDescription(
+    "List sessions in a ±N-day window around a date (YYYY-MM-DD or ISO8601). "
+    + "Output ends with a `next:` footer of copy-paste follow-up commands (drill-in, harness resume); --json carries the same links as a {sessions, next} envelope.",
+));
 
 const sessionsNearCommand = Command.make(
     "near",
@@ -3540,7 +3602,8 @@ const sessionsNearCommand = Command.make(
 ).pipe(Command.withDescription(
     "List sessions that overlapped with a git commit window (from the predecessor commit's timestamp to this commit's timestamp). " +
     "Pass a full or short SHA. Must be inside the target git repo. " +
-    "See the ax:extract-workflow skill for narrating workflows around a sha.",
+    "See the ax:extract-workflow skill for narrating workflows around a sha. " +
+    "Output ends with a `next:` footer of copy-paste follow-up commands; --json carries the same links as a {sessions, next} envelope.",
 ));
 
 // ---------------------------------------------------------------------------
@@ -4859,7 +4922,8 @@ const recallCommand = Command.make(
         "Cross-session text search (BM25). --sources=turn,commit,skill chooses record types (default turn). " +
         "--scope=here filters to the current repo (auto-detected); --scope=all overrides. " +
         "--project=? / --skill=? opens an interactive picker. " +
-        "See the ax:extract-workflow skill for narrating workflows behind shipped artifacts.",
+        "See the ax:extract-workflow skill for narrating workflows behind shipped artifacts. " +
+        "Output ends with a `next:` footer of copy-paste follow-up commands (drill into a session, resume it in its harness); --json carries the same links in a `next` field.",
     ),
 );
 

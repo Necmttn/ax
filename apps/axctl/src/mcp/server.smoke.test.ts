@@ -173,21 +173,93 @@ describe("sessions_around date parsing", () => {
         await expect(tool.run({}, unreachableRt)).rejects.toThrow(/Invalid date/);
     });
 
-    it("maps a valid ISO date to a Date and calls the runtime", async () => {
-        let captured: { date?: Date } | undefined;
+    it("maps a valid ISO date to a Date and returns the {sessions, next} envelope", async () => {
         const rt = {
-            runPromise: (_eff: unknown) => {
-                // listSessionsAround was already invoked with the parsed opts by
-                // the time we get here; we can't see opts directly, so instead
-                // re-run the mapping check via a spy on Date construction below.
-                return Promise.resolve([]);
-            },
+            runPromise: (_eff: unknown) => Promise.resolve([]),
         } as never;
-        const result = await tool.run({ date: "2026-01-15" }, rt);
-        expect(result).toEqual([]);
+        const result = (await tool.run({ date: "2026-01-15" }, rt)) as {
+            sessions: ReadonlyArray<unknown>;
+            next: ReadonlyArray<{ description: string }>;
+        };
+        expect(result.sessions).toEqual([]);
+        // empty window + date → errors-as-teaching widen link
+        expect(result.next.length).toBeGreaterThan(0);
         // sanity: the same valid string parses to a valid Date
-        captured = { date: new Date("2026-01-15") };
-        expect(Number.isNaN(captured.date!.getTime())).toBe(false);
+        expect(Number.isNaN(new Date("2026-01-15").getTime())).toBe(false);
+    });
+});
+
+describe("NavLink next[] wiring", () => {
+    const byName = (n: string) => axMcpTools.find((t) => t.name === n)!;
+
+    it("recall / sessions_around / session_show descriptions teach the next protocol", () => {
+        for (const name of ["recall", "sessions_around", "session_show"]) {
+            expect(byName(name).description).toContain("`next`");
+        }
+    });
+
+    it("recall result carries per-hit and top-level next links", async () => {
+        const stub = {
+            q: "timeline",
+            hits: [
+                {
+                    turn_id: "turn:1",
+                    session_id: "019e2531-b552-7b53-a029-c780adbb6560",
+                    project: null,
+                    source: "codex",
+                    cwd: null,
+                    role: "user",
+                    ts: "2026-06-09T02:00:00.000Z",
+                    snippet: "x",
+                },
+            ],
+            commits: [],
+            skills: [],
+            truncated: false,
+            total_count: 5,
+            total_counts: { turn: 5, commit: 0, skill: 0 },
+            window: { offset: 0, limit: 50 },
+        };
+        const rt = { runPromise: () => Promise.resolve(stub) } as never;
+        const result = (await byName("recall").run({ q: "timeline" }, rt)) as {
+            hits: ReadonlyArray<{ next?: ReadonlyArray<unknown> }>;
+            next: ReadonlyArray<{ cmd?: string }>;
+        };
+        expect(result.hits[0]?.next).toHaveLength(1);
+        expect(
+            result.next.some((l) => l.cmd === "codex resume 019e2531-b552-7b53-a029-c780adbb6560"),
+        ).toBe(true);
+    });
+
+    it("session_show result carries next with a resume link", async () => {
+        const stub = {
+            session: {
+                overview: {
+                    id: "019e2531-b552-7b53-a029-c780adbb6560",
+                    project: null,
+                    cwd: "/tmp/p",
+                    model: null,
+                    source: "claude",
+                    started_at: null,
+                    ended_at: null,
+                },
+                top_skills: [],
+                tool_calls: [],
+                children: [],
+                parent: null,
+                agent_delegations: [],
+                token_usage: null,
+            },
+            expanded_subagents: [],
+            by_role: null,
+            compactions: [],
+        };
+        const rt = { runPromise: () => Promise.resolve(stub) } as never;
+        const result = (await byName("session_show").run(
+            { sessionId: "019e2531-b552-7b53-a029-c780adbb6560" },
+            rt,
+        )) as { next: ReadonlyArray<{ cmd?: string }> };
+        expect(result.next.some((l) => l.cmd?.includes("claude --resume"))).toBe(true);
     });
 });
 

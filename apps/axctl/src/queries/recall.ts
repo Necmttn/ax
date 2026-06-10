@@ -31,6 +31,7 @@ SELECT
     session,
     session.project AS project,
     session.source AS source,
+    session.cwd AS cwd,
     role,
     ts,
     text_excerpt
@@ -158,6 +159,7 @@ export const recallTurnsQuery = defineQuery<
             session_id: toBareSessionId(session),
             project: stringField(raw, "project"),
             source: stringField(raw, "source"),
+            cwd: stringField(raw, "cwd"),
             role: stringField(raw, "role"),
             ts: dateField(raw, "ts"),
             snippet: truncate(text, 240),
