@@ -205,6 +205,115 @@ a {
     font-weight: 600;
 }
 
+/* v2 hero: verdict + title row, one-sentence lede, session scrubber. */
+.share-hero-top {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 16px;
+}
+.share-hero-verdict {
+    font-family: ui-monospace, Menlo, monospace;
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--green);
+    margin-right: 10px;
+    white-space: nowrap;
+    vertical-align: 2px;
+}
+.share-hero-right {
+    font-family: ui-monospace, Menlo, monospace;
+    font-size: 12px;
+    color: var(--muted);
+    white-space: nowrap;
+}
+.share-hero-lede {
+    margin: 6px 0 0;
+    font-size: 13.5px;
+    line-height: 1.5;
+    color: var(--muted);
+}
+.share-hero-lede b {
+    color: var(--ink);
+    font-weight: 600;
+}
+.share-hero-fail {
+    color: var(--red);
+}
+.scrub-wrap {
+    margin-top: 14px;
+}
+.scrub {
+    position: relative;
+    height: 32px;
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    overflow: hidden;
+    background: var(--panel);
+}
+.scrub-seg {
+    position: absolute;
+    top: 0;
+    height: 100%;
+    margin: 0;
+    padding: 0;
+    background: transparent;
+    border: none;
+    border-right: 1px solid var(--line);
+    cursor: pointer;
+    overflow: hidden;
+}
+.scrub-seg:hover {
+    background: color-mix(in srgb, var(--blue) 7%, var(--panel));
+}
+.scrub-seg span {
+    position: absolute;
+    left: 6px;
+    top: 50%;
+    transform: translateY(-50%);
+    font-family: ui-monospace, Menlo, monospace;
+    font-size: 9px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--muted);
+    white-space: nowrap;
+    pointer-events: none;
+}
+.scrub i {
+    position: absolute;
+    pointer-events: none;
+}
+.scrub-commit {
+    bottom: 0;
+    width: 2px;
+    height: 9px;
+    background: var(--green);
+}
+.scrub-fail {
+    top: 0;
+    width: 2px;
+    height: 7px;
+    background: var(--red);
+}
+.scrub-spawn {
+    top: 50%;
+    width: 3px;
+    height: 3px;
+    margin-top: -1.5px;
+    border-radius: 50%;
+    background: var(--rose);
+}
+.scrub-axis {
+    display: flex;
+    justify-content: space-between;
+    font-family: ui-monospace, Menlo, monospace;
+    font-size: 9px;
+    color: var(--muted);
+    padding: 3px 1px 0;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
 .share-cta {
     font-family: ui-monospace, Menlo, monospace;
     font-size: 12px;
