@@ -378,3 +378,38 @@ held; profiled before changing, real test isolation).
 - 7. `reaction_event.session` backfill+index (drop the `user_turn.session` deref).
 - Then the risky/test-coupled ones (1b buildFileContextPack swap, 2 insights
   $parent.session, 3 ingest write batching) — each its own time-boxed iteration.
+
+---
+
+## Iteration 9 — profile recall / loc-query / content_atom index (2026-06-10 08:15 WITA)
+
+**Tried.** Profiled the next three backlog candidates before touching anything.
+
+**Worked — all non-actionable (valid negative findings):**
+- **recall** (`session IN [ids]` skill path + `session.repository` deref): 0.92s
+  scope=here (2005 hits), 0.57s scope=all (2302), 1.35s --skill. The BM25 FTS
+  index narrows first, so the session filters apply to a small set. Healthy.
+- **content_atom session index**: `content_atom WHERE session=X AND
+  source_kind='turn'` IS 12.5s (the `(session,kind)` index is defeated by the
+  source_kind filter). BUT the only `FROM content_atom` query (session-turn-
+  content.ts) was made per-document in iter-2, so NOTHING queries atoms by
+  session. Adding `(session,source_kind)` would be a speculative index (ingest
+  + DB cost, no consumer) — skipped per profile-first discipline.
+- **loc-query** `tool_call name IN [edit tools]`: 0.54s over 150k rows, and in
+  practice gated by `session = X` (indexed) or an FTS subquery + LIMIT. Fine.
+
+**Conclusion.** The clean, low-risk read hotspots are exhausted — the big wins
+(enrichSessions, share content, file-context lean, session-canvas orch) are
+shipped; the remaining IN-patterns are over small/medium tables or gated by
+index/FTS/LIMIT and run <1s. What's left is the RISKY set, each its own
+time-boxed iteration:
+- 2. `insights.ts` `$parent.session` correlated derefs (633-774) — profile first
+  (is it used + slow on `ax signals`/wrapped/health?); expect test coupling.
+- 1b. `buildFileContextPack` → lean swap (mock rewrite + title-priority).
+- 3. ingest write batching (per-row UPSERT → per-file txn) — write path.
+
+**Next (iter 10).** Profile `insights.ts` queries on a real invocation; if a
+`$parent.session` query is genuinely slow AND has test isolation, fix it
+(time-boxed, ship-safe-subset rule). Otherwise document and consider the loop
+converged on safe read wins — report status and pause for direction on the
+risky/write-path targets.
