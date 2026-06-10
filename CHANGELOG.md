@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.22.2](https://github.com/Necmttn/ax/compare/v0.22.1...v0.22.2) (2026-06-10)
+
+
+### Bug Fixes
+
+* **ingest:** add claude-fable-5 + claude-haiku-4-5 to builtin pricing catalog ([#225](https://github.com/Necmttn/ax/issues/225)) ([0830a49](https://github.com/Necmttn/ax/commit/0830a49d62dcfc7da299c8b3c36312fd3bdc5aa7))
+
 ## [0.22.1](https://github.com/Necmttn/ax/compare/v0.22.0...v0.22.1) (2026-06-10)
 
 
