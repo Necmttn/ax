@@ -4,9 +4,15 @@ import type { DbError } from "@ax/lib/errors";
 import { isoMs, sessionRefList } from "./util.ts";
 
 /**
- * Latency from a session's end to when its work landed: the earliest
- * `merged_at` over PRs whose `merge_sha` matches a commit the session
- * `produced`, minus `session.ended_at`, in ms. null when nothing merged.
+ * How long the session's work took to LAND: the minimum, across the session's
+ * produced commits that match a merged PR's `merge_sha`, of
+ * `pull_request.merged_at - commit.ts` (ms). null when nothing merged.
+ *
+ * Anchored on the COMMIT timestamp, not `session.ended_at`: long-running
+ * sessions routinely merge PRs while still open, which made the ended_at
+ * anchor negative in ~94% of real rows (blind-dogfood finding). commit→merge
+ * is monotonic (a commit precedes its merge), so the metric is now a real
+ * latency; residual negatives (clock skew across machines) are dropped.
  *
  * Two flat queries joined in JS rather than a correlated subquery - SurrealDB
  * rejects the `FROM pull_request AS pr` table alias used by the inline form, and
@@ -22,9 +28,9 @@ export const computeTimeToLand = (
         for (const id of sessionIds) map.set(id, null);
 
         const refs = sessionRefList(sessionIds);
-        // Produced commits (sha) + the producing session's end time.
+        // Produced commits: sha + the commit's own timestamp.
         const produced = (yield* db.query<[Array<Record<string, unknown>>]>(
-            `SELECT type::string(in) AS session, type::string(in.ended_at) AS ended_at, out.sha AS sha`
+            `SELECT type::string(in) AS session, type::string(out.ts) AS commit_ts, out.sha AS sha`
             + ` FROM produced WHERE in IN [${refs}];`,
         ))?.[0] ?? [];
         // Merged PRs → sha→merged_at lookup (one read over all merged PRs).
@@ -43,13 +49,14 @@ export const computeTimeToLand = (
         for (const r of produced) {
             const session = String(r.session);
             const sha = typeof r.sha === "string" ? r.sha : null;
-            const endedMs = isoMs(r.ended_at);
-            if (sha === null || endedMs === null) continue;
+            const commitMs = isoMs(r.commit_ts);
+            if (sha === null || commitMs === null) continue;
             const mergedAt = mergedAtBySha.get(sha);
             if (mergedAt === undefined) continue;
             const mergedMs = isoMs(mergedAt);
             if (mergedMs === null) continue;
-            const ms = mergedMs - endedMs;
+            const ms = mergedMs - commitMs;
+            if (ms < 0) continue; // clock skew guard - a commit precedes its merge
             const cur = best.get(session);
             if (cur === undefined || ms < cur) best.set(session, ms);
         }
