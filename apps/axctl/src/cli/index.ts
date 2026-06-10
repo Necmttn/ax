@@ -42,7 +42,7 @@ import {
     lifecycleRuntime,
 } from "./commands/lifecycle.ts";
 import { AX_VERSION, liveVersionDeps, printVersion } from "./version.ts";
-import { agentsCommand } from "../agents/cli.ts";
+import { agentsCommand, agentsRuntime } from "../agents/cli.ts";
 import { ALL_STAGES } from "../ingest/stage/registry.ts";
 import { IngestRuntimeLayer, ingestRuntimeLayerWith } from "../ingest/stage/runtime.ts";
 import { ConsoleTransportLayer } from "@ax/lib/live-traces/transports/console";
@@ -219,14 +219,12 @@ const withoutDb = (args: ReadonlyArray<string>): CliProgram => {
     );
 };
 
-// Names not yet migrated to a commands/<family>.ts module. Shrinks each task;
-// deleted in the final cleanup task. Mirrors the legacy DB_COMMANDS exactly.
-const LEGACY_RUNTIME: RuntimeManifest = {
-    agents: "db",
-};
-
+// Spread of every family RuntimeManifest (18 commands/<family>.ts modules +
+// src/agents/cli.ts). effect-cli.test.ts enforces that every registered
+// top-level command appears here, so new families can't silently fall through
+// to the no-DB Proxy at runtime.
 export const RUNTIME_BY_COMMAND: RuntimeManifest = {
-    ...LEGACY_RUNTIME,
+    ...agentsRuntime,
     ...reportRuntime,
     ...signalsRuntime,
     ...evidenceRuntime,

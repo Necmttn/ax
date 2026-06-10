@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
     DB_COMMANDS,
+    RUNTIME_BY_COMMAND,
     classifiersPackageOperationsNeedsDb,
     detectRemovedIngestFlag,
     insightsOnlyConflicts,
@@ -67,6 +68,12 @@ describe("effect cli", () => {
     test("dogfood is hidden by default", () => {
         const names = topLevelNames();
         expect(names).not.toContain("dogfood");
+    });
+
+    test("every registered top-level command declares its runtime (anti-drift, replaces hand-maintained DB_COMMANDS)", () => {
+        for (const name of topLevelNames()) {
+            expect(RUNTIME_BY_COMMAND[name], `command "${name}" missing from a family RuntimeManifest`).toBeDefined();
+        }
     });
 
     test("read-only insight surfaces are visible; maintenance verbs stay hidden (#173)", () => {
