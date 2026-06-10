@@ -1,4 +1,4 @@
-import { Effect, FileSystem, Option, Path, PlatformError, Schema, Stream } from "effect";
+import { Effect, FileSystem, Path, PlatformError, Schema, Stream } from "effect";
 import { RecordId, SurrealClient, filePointer } from "@ax/lib/db";
 import { AxConfig } from "@ax/lib/config";
 import { decodeJsonOrNull } from "@ax/lib/decode";
@@ -43,6 +43,7 @@ import { isNotFound, skipNotFound } from "@ax/lib/shared/fs-error";
 import { safeKeyPart } from "@ax/lib/shared/derive-keys";
 import { tokenQualityLabels } from "./token-quality.ts";
 import { estimateCost } from "./model-pricing.ts";
+import { walkJsonlFilesStrict } from "./walk-jsonl.ts";
 
 const DEFAULT_CODEX_RAW_MAX_BYTES = 5 * 1024 * 1024;
 const DEFAULT_CODEX_PROGRESS_EVERY = 10;
@@ -450,60 +451,6 @@ function applyToolResult(call: MutableToolCallWrite, result: ToolResultFields): 
     call.durationMs = result.durationMs;
     call.hasError = result.hasError;
 }
-
-interface CodexFileCandidate {
-    path: string;
-    sizeBytes: number;
-}
-
-/**
- * Recursively enumerate `*.jsonl` session files under `root` via the Effect
- * `FileSystem`. The codex sessions dir is nested (year/month/day), so we walk
- * directories depth-first. Resilience matches the prior node-fs walk:
- *   - a `readDirectory` on a vanished/missing dir (NotFound) yields `[]` → skip,
- *   - each entry is `stat`-ed; a vanished entry (NotFound) is skipped,
- *   - `.type === "Directory"` recurses, a `.jsonl` File is collected.
- * Non-NotFound `PlatformError`s (BadResource/PermissionDenied/...) re-raise so a
- * genuine FS fault is a defect, not a silently-dropped half-walk.
- *
- * `File.Info.mtime` is `Option<Date>` (epoch 0 fallback so a missing mtime is
- * never `--since`-skipped); `.size` is a branded bigint coerced to `number`.
- */
-const walkJsonlFiles = (
-    root: string,
-    cutoffMs: number,
-): Effect.Effect<CodexFileCandidate[], PlatformError.PlatformError, FileSystem.FileSystem | Path.Path> =>
-    Effect.gen(function* () {
-        const fs = yield* FileSystem.FileSystem;
-        const path = yield* Path.Path;
-        const out: CodexFileCandidate[] = [];
-
-        const visit = (dir: string): Effect.Effect<void, PlatformError.PlatformError> =>
-            Effect.gen(function* () {
-                const entries = yield* fs.readDirectory(dir).pipe(
-                    skipNotFound([] as string[]),
-                );
-                for (const entry of entries) {
-                    const full = path.join(dir, entry);
-                    const info = yield* fs.stat(full).pipe(
-                        Effect.asSome,
-                        skipNotFound(Option.none()),
-                    );
-                    if (Option.isNone(info)) continue;
-                    const stats = info.value;
-                    if (stats.type === "Directory") {
-                        yield* visit(full);
-                    } else if (stats.type === "File" && full.endsWith(".jsonl")) {
-                        const mtimeMs = Option.getOrElse(stats.mtime, () => new Date(0)).getTime();
-                        if (cutoffMs > 0 && mtimeMs < cutoffMs) continue;
-                        out.push({ path: full, sizeBytes: Number(stats.size) });
-                    }
-                }
-            });
-
-        yield* visit(root);
-        return out;
-    });
 
 export interface CodexExtract {
     session: CodexSession;
@@ -1449,7 +1396,7 @@ export const ingestCodex = (
         const db = yield* SurrealClient;
         const fs = yield* FileSystem.FileSystem;
         const cutoff = opts.sinceDays ? Date.now() - opts.sinceDays * 86400 * 1000 : 0;
-        const files = yield* walkJsonlFiles(cfg.paths.codexDir, cutoff);
+        const files = yield* walkJsonlFilesStrict(cfg.paths.codexDir, cutoff);
         // `--dry-run` calibration: cap to a small representative slice so we can
         // time real parse+write throughput without processing everything.
         if (typeof opts.limit === "number" && files.length > opts.limit) {

@@ -1,6 +1,4 @@
-import { Effect, FileSystem, Option, Path, PlatformError, Schema } from "effect";
-import { orAbsent } from "@ax/lib/shared/fs-error";
-import { classifyNoFollow } from "@ax/lib/shared/fs-classify";
+import { Effect, FileSystem, Path, PlatformError, Schema } from "effect";
 import { AxConfig } from "@ax/lib/config";
 import { RecordId, SurrealClient } from "@ax/lib/db";
 import { decodeJsonOrNull } from "@ax/lib/decode";
@@ -32,6 +30,7 @@ import type { StageDef } from "./stage/registry.ts";
 import { extractCommandTool, normalizeCommand, toolKindForName } from "./tool-calls.ts";
 import { extractToolFileEvidence } from "./tool-file-evidence.ts";
 import { tokenQualityLabels } from "./token-quality.ts";
+import { walkJsonlFilesLenient } from "./walk-jsonl.ts";
 
 export const PiKey = Schema.Literal("pi");
 export type PiKey = typeof PiKey.Type;
@@ -606,60 +605,6 @@ export function __testExtractPiJsonlLines(lines: Iterable<string>): PiExtract | 
     return extractor.finish();
 }
 
-interface PiFileCandidate {
-    path: string;
-}
-
-// OLD: readdir(withFileTypes) in try/catch → `return` (any error skips the
-// dir); classification via `entry.isDirectory()`/`entry.isFile()` (Dirent =>
-// lstat-equivalent, does NOT follow symlinks); then `stat(full)` in try/catch
-// → `continue` (any error skips the entry) ONLY for the mtime of a confirmed
-// regular file. We must preserve the no-follow classification: recurse only on
-// real directories, accept only real `.jsonl` files, and SKIP symlinks (a
-// symlinked dir is not recursed into → no escaping the tree / no cycle hang;
-// a symlinked `.jsonl` is not ingested). The mtime `fs.stat` then runs on a
-// confirmed non-symlink regular file, matching the old follow-free behavior.
-// `orAbsent` recovers every PlatformError to a fallback, matching the old
-// blanket try/catch and clearing the E channel back to `never`.
-const walkJsonlFiles = (
-    root: string,
-    cutoffMs: number,
-): Effect.Effect<PiFileCandidate[], never, FileSystem.FileSystem | Path.Path> =>
-    Effect.gen(function* () {
-        const fs = yield* FileSystem.FileSystem;
-        const path = yield* Path.Path;
-        const out: PiFileCandidate[] = [];
-
-        const visit = (
-            dir: string,
-        ): Effect.Effect<void, never, FileSystem.FileSystem | Path.Path> =>
-            Effect.gen(function* () {
-                const entries = yield* fs.readDirectory(dir).pipe(orAbsent([] as string[]));
-                for (const entry of entries) {
-                    const full = path.join(dir, entry);
-                    const kind = yield* classifyNoFollow(full);
-                    if (kind === "Directory") {
-                        yield* visit(full);
-                    } else if (kind === "File" && full.endsWith(".jsonl")) {
-                        const mtimeMs = yield* fs.stat(full).pipe(
-                            Effect.map((st) =>
-                                Option.getOrElse(st.mtime, () => new Date(0)).getTime()
-                            ),
-                            orAbsent(-1),
-                        );
-                        if (mtimeMs < 0) continue;
-                        if (cutoffMs > 0 && mtimeMs < cutoffMs) continue;
-                        out.push({ path: full });
-                    }
-                }
-            });
-
-        yield* visit(root);
-        return out;
-    });
-
-export const __testWalkJsonlFiles = walkJsonlFiles;
-
 const buildPiTokenUsageStatements = (extract: PiExtract): string[] => {
     if (!Object.values(extract.usage).some((value) => value > 0)) return [];
     const estimatedTokens = extract.usage.totalTokens > 0
@@ -783,7 +728,7 @@ export const ingestPi = (
         const db = yield* SurrealClient;
         const fs = yield* FileSystem.FileSystem;
         const cutoff = opts.sinceDays ? Date.now() - opts.sinceDays * 86400 * 1000 : 0;
-        const files = yield* walkJsonlFiles(cfg.paths.piDir, cutoff);
+        const files = yield* walkJsonlFilesLenient(cfg.paths.piDir, cutoff);
         let fileCount = 0;
         let sessionCount = 0;
         let eventCount = 0;
