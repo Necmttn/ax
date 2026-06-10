@@ -3233,12 +3233,20 @@ const cmdSessionsAround = (args: string[]) =>
             console.error("axctl sessions around: missing <date> argument");
             process.exit(2);
         }
-        // Parse date: YYYY-MM-DD or full ISO8601
+        // Parse date: YYYY-MM-DD or full ISO8601. Require the YYYY-MM-DD
+        // prefix explicitly - a bare `new Date(positional)` accepts junk like
+        // "1" (V8 parses it as year 2001), silently querying an empty window
+        // instead of erroring.
         let date: Date;
         if (/^\d{4}-\d{2}-\d{2}$/.test(positional)) {
             date = new Date(`${positional}T00:00:00.000Z`);
-        } else {
+        } else if (/^\d{4}-\d{2}-\d{2}[T ]/.test(positional)) {
             date = new Date(positional);
+        } else {
+            console.error(
+                `axctl sessions around: invalid date "${positional}" (expected YYYY-MM-DD or ISO8601)`,
+            );
+            process.exit(2);
         }
         if (isNaN(date.getTime())) {
             console.error(
