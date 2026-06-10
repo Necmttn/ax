@@ -3,6 +3,7 @@ import { Effect, Layer } from "effect";
 import { SurrealClient } from "@ax/lib/db";
 import {
     ESTIMATED_PRICING_PREFIX,
+    fetchSessionCostMap,
     fillEstimatedCost,
     isEstimatedPricingSource,
     loadPricingCatalogForModels,
@@ -137,5 +138,63 @@ describe("loadPricingCatalogForModels", () => {
         expect(capture.sql).toContain("agent_model:`claude-haiku-4-5-20251001`");
         expect(capture.sql).toContain("agent_model:`claude-opus-4`");
         expect(capture.sql).not.toContain("synthetic");
+    });
+});
+
+describe("fetchSessionCostMap", () => {
+    /** Dispatching mock: token-usage batch vs pricing fetch. */
+    const db = (input: {
+        usage?: Array<Record<string, unknown>>;
+        pricing?: Array<Record<string, unknown>>;
+        seenSql?: string[];
+    }) =>
+        Layer.succeed(SurrealClient, {
+            query: <T>(sql: string) => {
+                input.seenSql?.push(sql);
+                if (sql.includes("FROM session_token_usage")) return Effect.succeed([input.usage ?? []] as unknown as T);
+                return Effect.succeed([input.pricing ?? []] as unknown as T);
+            },
+        } as never);
+
+    test("bounded fetch keys by normalized session id; stored cost preserved, missing cost estimated (#175)", async () => {
+        const seenSql: string[] = [];
+        const out = await Effect.runPromise(fetchSessionCostMap(["session:`s1`", "session:`s2`"]).pipe(Effect.provide(db({
+            usage: [
+                {
+                    session: "session:`s1`", model: "GPT-5-Codex",
+                    prompt_tokens: 1000, completion_tokens: 100, estimated_tokens: 1100,
+                    estimated_cost_usd: 0.42, pricing_source: "litellm",
+                },
+                {
+                    session: "session:⟨s2⟩", model: "claude-haiku-4-5-20251001",
+                    prompt_tokens: null, completion_tokens: null,
+                    estimated_tokens: 1_000_000, estimated_cost_usd: null, pricing_source: null,
+                },
+            ],
+            pricing: [{ name: "claude-haiku-4-5-20251001", provider: "anthropic", input_per_million_usd: 1, output_per_million_usd: 5, pricing_source: "litellm" }],
+            seenSql,
+        }))));
+        expect(out.get("s1")).toMatchObject({
+            model: "gpt-5-codex", // normalized
+            estimatedCostUsd: 0.42, pricingSource: "litellm", estimated: false,
+        });
+        expect(out.get("s2")).toMatchObject({ pricingSource: "estimated:litellm", estimated: true });
+        expect(out.get("s2")!.estimatedCostUsd).toBeCloseTo(1.0, 8); // 1M tokens × $1/M
+        const usageSql = seenSql.find((s) => s.includes("FROM session_token_usage"))!;
+        expect(usageSql).toContain("WHERE session IN [session:`s1`, session:`s2`]");
+    });
+
+    test("empty id list short-circuits without querying", async () => {
+        const seenSql: string[] = [];
+        const out = await Effect.runPromise(fetchSessionCostMap([]).pipe(Effect.provide(db({ seenSql }))));
+        expect(out.size).toBe(0);
+        expect(seenSql).toHaveLength(0);
+    });
+
+    test("null = unbounded full scan (aggregate fallback)", async () => {
+        const seenSql: string[] = [];
+        await Effect.runPromise(fetchSessionCostMap(null).pipe(Effect.provide(db({ seenSql }))));
+        const sql = seenSql.find((s) => s.includes("FROM session_token_usage"))!;
+        expect(sql).not.toContain("WHERE");
     });
 });

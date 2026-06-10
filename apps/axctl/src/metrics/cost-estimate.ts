@@ -11,8 +11,9 @@
  * on `pricing_source` so callers can tell provider-derived cost from our
  * estimate.
  *
- * Hang safety: the only query here is a direct record-id fetch over
- * `agent_model` (a few keys per call) - no edge derefs, no table scans.
+ * Hang safety: queries here are a direct record-id fetch over `agent_model`
+ * (a few keys per call) and an indexed-or-full `session_token_usage` select
+ * (`fetchSessionCostMap`) - no edge derefs.
  */
 import { Effect } from "effect";
 import { SurrealClient } from "@ax/lib/db";
@@ -27,6 +28,7 @@ import {
     type AgentModelPricingRow,
     type ModelPricing,
 } from "../ingest/model-pricing.ts";
+import { chunked, cleanSessionId, numOrNull, numOrZero, sessionRefList, strOrNull } from "./util.ts";
 
 /** Prefix marking a cost we estimated at read time (vs. priced at ingest). */
 export const ESTIMATED_PRICING_PREFIX = "estimated:";
@@ -120,4 +122,80 @@ export const loadPricingCatalogForModels = (
             + ` FROM [${refs}];`,
         ))?.[0] ?? [];
         return mergePricingCatalogs(builtInPricingCatalog(), pricingRowsToCatalog(rows));
+    });
+
+// ---------------------------------------------------------------------------
+// Shared session→cost map (the ONE place the session_token_usage columns +
+// fillEstimatedCost mapping live - both the metrics listing and the aggregate
+// scan consume this, so a pricing-column change is a single edit)
+// ---------------------------------------------------------------------------
+
+/** Resolved cost (+ model) for one session's token-usage row. */
+export interface SessionCostEntry {
+    /** Normalized model name from the usage row (aggregate group-by dimension). */
+    readonly model: string | null;
+    readonly estimatedCostUsd: number | null;
+    readonly pricingSource: string | null;
+    /** True when the cost was estimated at read time (#175 provenance). */
+    readonly estimated: boolean;
+}
+
+/** Snake_case usage row as read back from `session_token_usage`. */
+interface SessionUsageRow extends UsageCostFields {
+    readonly session: string;
+}
+
+const USAGE_SELECT =
+    `SELECT type::string(session) AS session, model, prompt_tokens, completion_tokens,`
+    + ` cache_creation_input_tokens, cache_read_input_tokens, estimated_tokens,`
+    + ` estimated_cost_usd, pricing_source FROM session_token_usage`;
+
+/** Max record refs per `session IN [...]` batch (keeps query strings sane). */
+const IN_CHUNK = 500;
+
+/**
+ * Fetch `session_token_usage` rows and resolve each session's cost: stored
+ * when priced at ingest, estimated from token counts × `agent_model` pricing
+ * otherwise (#175 - the Claude byte-estimate rows were never priced, so every
+ * Claude session showed a null cost).
+ *
+ * `sessionIds === null` scans the whole table (aggregate fallback when the
+ * session set is too large to enumerate); otherwise the select is bounded via
+ * the UNIQUE `session_token_usage_session` index in `IN_CHUNK`-sized batches.
+ * Keys are normalized with `cleanSessionId` - look up with the same.
+ */
+export const fetchSessionCostMap = (
+    sessionIds: readonly string[] | null,
+): Effect.Effect<Map<string, SessionCostEntry>, DbError, SurrealClient> =>
+    Effect.gen(function* () {
+        const out = new Map<string, SessionCostEntry>();
+        if (sessionIds !== null && sessionIds.length === 0) return out;
+        const db = yield* SurrealClient;
+        const usageRows = sessionIds === null
+            ? (yield* db.query<[SessionUsageRow[]]>(`${USAGE_SELECT};`))?.[0] ?? []
+            : (yield* Effect.all(
+                chunked(sessionIds, IN_CHUNK).map((ids) =>
+                    db.query<[SessionUsageRow[]]>(`${USAGE_SELECT} WHERE session IN [${sessionRefList(ids)}];`)),
+                { concurrency: 4 },
+            )).flatMap((batch) => batch?.[0] ?? []);
+        const catalog = yield* loadPricingCatalogForModels(usageRows.map((u) => u.model));
+        for (const u of usageRows) {
+            const filled = fillEstimatedCost({
+                model: strOrNull(u.model),
+                prompt_tokens: numOrNull(u.prompt_tokens),
+                completion_tokens: numOrNull(u.completion_tokens),
+                cache_creation_input_tokens: numOrNull(u.cache_creation_input_tokens),
+                cache_read_input_tokens: numOrNull(u.cache_read_input_tokens),
+                estimated_tokens: numOrZero(u.estimated_tokens),
+                estimated_cost_usd: numOrNull(u.estimated_cost_usd),
+                pricing_source: strOrNull(u.pricing_source),
+            }, catalog);
+            out.set(cleanSessionId(String(u.session ?? "")), {
+                model: normalizeModelName(strOrNull(u.model)),
+                estimatedCostUsd: filled.estimatedCostUsd,
+                pricingSource: filled.pricingSource,
+                estimated: filled.estimated,
+            });
+        }
+        return out;
     });

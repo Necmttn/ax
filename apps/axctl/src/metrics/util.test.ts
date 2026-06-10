@@ -1,12 +1,17 @@
 import { describe, expect, test } from "bun:test";
 import {
+    chunked,
+    cleanSessionId,
     fillDefaults,
     formatSessionMetrics,
     isoMs,
     metricMs,
     metricPct,
+    numOrNull,
+    numOrZero,
     SESSION_METRICS_LEGEND,
     sessionRefList,
+    strOrNull,
 } from "./util.ts";
 import type { SessionMetricsRow } from "./session-metrics-query.ts";
 
@@ -56,14 +61,50 @@ describe("isoMs", () => {
 });
 
 describe("metricPct", () => {
-    test("null → padded dash", () => {
-        expect(metricPct(null)).toBe("  -");
+    test("null → dash", () => {
+        expect(metricPct(null)).toBe("-");
     });
-    test("ratios render as right-aligned whole percents", () => {
-        expect(metricPct(0)).toBe("  0%");
-        expect(metricPct(0.5)).toBe(" 50%");
+    test("ratios render as whole percents (unpadded - alignment is the table's job)", () => {
+        expect(metricPct(0)).toBe("0%");
+        expect(metricPct(0.5)).toBe("50%");
         expect(metricPct(1)).toBe("100%");
-        expect(metricPct(0.666)).toBe(" 67%");
+        expect(metricPct(0.666)).toBe("67%");
+    });
+});
+
+describe("cleanSessionId", () => {
+    test("strips prefix + record-id delimiters", () => {
+        expect(cleanSessionId("session:`abc-123`")).toBe("abc-123");
+        expect(cleanSessionId("session:⟨abc-123⟩")).toBe("abc-123");
+        expect(cleanSessionId("abc-123")).toBe("abc-123");
+    });
+});
+
+describe("chunked", () => {
+    test("splits into fixed-size chunks with a short tail", () => {
+        expect(chunked([1, 2, 3, 4, 5], 2)).toEqual([[1, 2], [3, 4], [5]]);
+    });
+    test("empty input → no chunks", () => {
+        expect(chunked([], 3)).toEqual([]);
+    });
+});
+
+describe("row-field coercion", () => {
+    test("numOrNull: numbers pass, junk → null", () => {
+        expect(numOrNull(3)).toBe(3);
+        expect(numOrNull("4")).toBe(4);
+        expect(numOrNull(null)).toBeNull();
+        expect(numOrNull(undefined)).toBeNull();
+        expect(numOrNull("x")).toBeNull();
+    });
+    test("numOrZero defaults junk to 0", () => {
+        expect(numOrZero(null)).toBe(0);
+        expect(numOrZero(7)).toBe(7);
+    });
+    test("strOrNull: non-empty strings only", () => {
+        expect(strOrNull("a")).toBe("a");
+        expect(strOrNull("")).toBeNull();
+        expect(strOrNull(5)).toBeNull();
     });
 });
 

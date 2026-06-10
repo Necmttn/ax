@@ -3,8 +3,8 @@ import { SurrealClient } from "@ax/lib/db";
 import type { DbError } from "@ax/lib/errors";
 import { surrealDate, surrealString } from "@ax/lib/shared/surql";
 import { nonEmptyString } from "@ax/lib/shared/derive-keys";
-import { fillEstimatedCost, loadPricingCatalogForModels, type UsageCostFields } from "./cost-estimate.ts";
-import { sessionRefList } from "./util.ts";
+import { fetchSessionCostMap } from "./cost-estimate.ts";
+import { chunked, cleanSessionId, numOrNull, numOrZero, sessionRefList, strOrNull } from "./util.ts";
 
 export interface SessionMetricsRow {
     readonly session: string;
@@ -26,55 +26,47 @@ export interface SessionMetricsRow {
     readonly userCorrections: number | null;
 }
 
-const numOrNull = (v: unknown): number | null => {
-    if (v === null || v === undefined) return null;
-    const n = Number(v);
-    return Number.isFinite(n) ? n : null;
-};
-const numOrZero = (v: unknown): number => numOrNull(v) ?? 0;
-const strOrNull = (v: unknown): string | null => (typeof v === "string" && v.length > 0 ? v : null);
+// ---------------------------------------------------------------------------
+// Shared session→health map (batch lookup - never correlated per-row subqueries)
+// ---------------------------------------------------------------------------
 
-/** Snake_case usage row as read back from `session_token_usage`. */
-interface TokenUsageRow extends UsageCostFields {
-    readonly session: string;
+/** The `session_health` scalars the metrics surfaces join in. */
+export interface SessionHealthEntry {
+    readonly taskLabel: string | null;
+    readonly userCorrections: number | null;
 }
 
+const HEALTH_SELECT =
+    `SELECT type::string(session) AS session, task_label, user_corrections FROM session_health`;
+
+/** Max record refs per `session IN [...]` batch (keeps query strings sane). */
+const IN_CHUNK = 500;
+
 /**
- * Batch-fetch the `session_token_usage` rows for the listed sessions (one
- * indexed `session IN [...]` select - `session_token_usage_session` is a
- * UNIQUE index) and resolve each session's cost: stored when priced at ingest,
- * estimated from token counts × `agent_model` pricing otherwise (#175 - the
- * Claude byte-estimate rows were never priced, so every Claude session showed
- * `estimatedCostUsd: null`).
+ * Batch-fetch `session_health` scalars. `sessionIds === null` scans the whole
+ * table (aggregate fallback when the session set is too large to enumerate);
+ * otherwise the select is bounded via the UNIQUE `session_health_session`
+ * index in `IN_CHUNK`-sized batches. Keys are normalized with
+ * `cleanSessionId` - look up with the same.
  */
-const fetchSessionCosts = (
-    sessionIds: readonly string[],
-): Effect.Effect<Map<string, { estimatedCostUsd: number | null; pricingSource: string | null }>, DbError, SurrealClient> =>
+export const fetchSessionHealthMap = (
+    sessionIds: readonly string[] | null,
+): Effect.Effect<Map<string, SessionHealthEntry>, DbError, SurrealClient> =>
     Effect.gen(function* () {
-        const out = new Map<string, { estimatedCostUsd: number | null; pricingSource: string | null }>();
-        if (sessionIds.length === 0) return out;
+        const out = new Map<string, SessionHealthEntry>();
+        if (sessionIds !== null && sessionIds.length === 0) return out;
         const db = yield* SurrealClient;
-        const usageRows = (yield* db.query<[TokenUsageRow[]]>(
-            `SELECT type::string(session) AS session, model, prompt_tokens, completion_tokens,`
-            + ` cache_creation_input_tokens, cache_read_input_tokens, estimated_tokens,`
-            + ` estimated_cost_usd, pricing_source`
-            + ` FROM session_token_usage WHERE session IN [${sessionRefList(sessionIds)}];`,
-        ))?.[0] ?? [];
-        const catalog = yield* loadPricingCatalogForModels(usageRows.map((u) => u.model));
-        for (const usage of usageRows) {
-            const filled = fillEstimatedCost({
-                model: strOrNull(usage.model),
-                prompt_tokens: numOrNull(usage.prompt_tokens),
-                completion_tokens: numOrNull(usage.completion_tokens),
-                cache_creation_input_tokens: numOrNull(usage.cache_creation_input_tokens),
-                cache_read_input_tokens: numOrNull(usage.cache_read_input_tokens),
-                estimated_tokens: numOrZero(usage.estimated_tokens),
-                estimated_cost_usd: numOrNull(usage.estimated_cost_usd),
-                pricing_source: strOrNull(usage.pricing_source),
-            }, catalog);
-            out.set(String(usage.session), {
-                estimatedCostUsd: filled.estimatedCostUsd,
-                pricingSource: filled.pricingSource,
+        const rows = sessionIds === null
+            ? (yield* db.query<[Array<Record<string, unknown>>]>(`${HEALTH_SELECT};`))?.[0] ?? []
+            : (yield* Effect.all(
+                chunked(sessionIds, IN_CHUNK).map((ids) =>
+                    db.query<[Array<Record<string, unknown>>]>(`${HEALTH_SELECT} WHERE session IN [${sessionRefList(ids)}];`)),
+                { concurrency: 4 },
+            )).flatMap((batch) => batch?.[0] ?? []);
+        for (const r of rows) {
+            out.set(cleanSessionId(String(r.session ?? "")), {
+                taskLabel: strOrNull(r.task_label),
+                userCorrections: numOrNull(r.user_corrections),
             });
         }
         return out;
@@ -98,9 +90,7 @@ SELECT
   type::string(session) AS session,
   session.source AS source,
   durability_ratio, produced_commits, time_to_land_ms, lines_added, lines_removed,
-  time_to_first_edit_ms, cold_start_reads, delegation_ratio,
-  (SELECT task_label FROM session_health WHERE session = $parent.session LIMIT 1)[0].task_label AS task_label,
-  (SELECT user_corrections FROM session_health WHERE session = $parent.session LIMIT 1)[0].user_corrections AS user_corrections
+  time_to_first_edit_ms, cold_start_reads, delegation_ratio
 FROM session_metrics
 ${where}
 -- Lead with sessions that did real committing work (NONE-durability rows - 0-commit
@@ -108,13 +98,22 @@ ${where}
 -- then most-fragile-first within them.
 ORDER BY produced_commits DESC, durability_ratio ASC
 LIMIT ${limit};`))?.[0] ?? [];
-        const costs = yield* fetchSessionCosts(rows.map((r) => String(r.session ?? "")).filter((s) => s.length > 0));
+        // Health + cost join only the ≤500 returned sessions, fetched as TWO
+        // indexed batch lookups (not correlated per-row subqueries evaluated
+        // before ORDER/LIMIT) and run concurrently - they are independent.
+        const sessionIds = rows.map((r) => String(r.session ?? "")).filter((s) => s.length > 0);
+        const [costs, health] = yield* Effect.all([
+            fetchSessionCostMap(sessionIds),
+            fetchSessionHealthMap(sessionIds),
+        ], { concurrency: 2 });
         return rows.map((r) => {
             const session = String(r.session ?? "");
-            const cost = costs.get(session) ?? null;
+            const key = cleanSessionId(session);
+            const cost = costs.get(key) ?? null;
+            const h = health.get(key) ?? null;
             return {
                 session,
-                taskLabel: nonEmptyString(r.task_label),
+                taskLabel: h?.taskLabel ?? null,
                 source: nonEmptyString(r.source),
                 durabilityRatio: numOrNull(r.durability_ratio),
                 producedCommits: numOrZero(r.produced_commits),
@@ -126,7 +125,7 @@ LIMIT ${limit};`))?.[0] ?? [];
                 delegationRatio: numOrNull(r.delegation_ratio),
                 estimatedCostUsd: cost?.estimatedCostUsd ?? null,
                 costPricingSource: cost?.pricingSource ?? null,
-                userCorrections: numOrNull(r.user_corrections),
+                userCorrections: h?.userCorrections ?? null,
             };
         });
     });

@@ -11,9 +11,7 @@ import {
     formatGroupAggregates,
     formatSkillEfficacy,
     groupKeyFor,
-    isGroupByKey,
     isoWeekKey,
-    normalizeSessionKey,
     type AggregateSessionRow,
 } from "./aggregates.ts";
 
@@ -35,14 +33,6 @@ const row = (over: Partial<AggregateSessionRow> = {}): AggregateSessionRow => ({
     ...over,
 });
 
-describe("normalizeSessionKey", () => {
-    test("strips prefix + record-id delimiters", () => {
-        expect(normalizeSessionKey("session:`abc-123`")).toBe("abc-123");
-        expect(normalizeSessionKey("session:⟨abc-123⟩")).toBe("abc-123");
-        expect(normalizeSessionKey("abc-123")).toBe("abc-123");
-    });
-});
-
 describe("isoWeekKey", () => {
     test("plain mid-year date", () => {
         expect(isoWeekKey(Date.UTC(2026, 5, 10))).toBe("2026-W24"); // Wed 2026-06-10
@@ -61,14 +51,7 @@ describe("isoWeekKey", () => {
     });
 });
 
-describe("isGroupByKey / groupKeyFor", () => {
-    test("accepts the four documented dimensions only", () => {
-        expect(isGroupByKey("model")).toBe(true);
-        expect(isGroupByKey("repo")).toBe(true);
-        expect(isGroupByKey("source")).toBe(true);
-        expect(isGroupByKey("week")).toBe(true);
-        expect(isGroupByKey("skill")).toBe(false);
-    });
+describe("groupKeyFor", () => {
     test("falls back to (unknown) for missing dimension values", () => {
         const r = row({ model: null, repo: null, source: null, startedAtMs: null });
         expect(groupKeyFor(r, "model")).toBe("(unknown)");
@@ -325,6 +308,31 @@ describe("fetchAggregateRows", () => {
         const s2 = out.find((r) => r.session === "s2")!;
         expect(s2.estimatedCostUsd).toBeCloseTo(1.0, 8); // 1M tokens × $1/M
         expect(s2.costEstimated).toBe(true);
+    });
+
+    test("health + usage joins are bounded by the metrics session-id set (indexed IN, not full scans)", async () => {
+        const seenSql: string[] = [];
+        await Effect.runPromise(fetchAggregateRows({ since: null, project: null }).pipe(Effect.provide(db({
+            metrics: [
+                { session: "session:`s1`", produced_commits: 0, lines_added: 0, lines_removed: 0 },
+                { session: "session:`s2`", produced_commits: 1, lines_added: 1, lines_removed: 0 },
+            ],
+            seenSql,
+        }))));
+        const healthSql = seenSql.find((s) => s.includes("FROM session_health"))!;
+        expect(healthSql).toContain("WHERE session IN [session:`s1`, session:`s2`]");
+        const usageSql = seenSql.find((s) => s.includes("FROM session_token_usage"))!;
+        expect(usageSql).toContain("WHERE session IN [session:`s1`, session:`s2`]");
+    });
+
+    test("empty metrics scan skips the secondary scans entirely", async () => {
+        const seenSql: string[] = [];
+        const out = await Effect.runPromise(fetchAggregateRows({ since: null, project: null }).pipe(
+            Effect.provide(db({ metrics: [], seenSql })),
+        ));
+        expect(out).toEqual([]);
+        expect(seenSql.some((s) => s.includes("FROM session_health"))).toBe(false);
+        expect(seenSql.some((s) => s.includes("FROM session_token_usage"))).toBe(false);
     });
 
     test("since/project narrow the session_metrics WHERE clause (single scan, no edge derefs)", async () => {

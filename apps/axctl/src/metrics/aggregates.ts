@@ -26,9 +26,9 @@ import { recordLiteral } from "@ax/lib/ids";
 import { skillRecordLookupKeys } from "@ax/lib/skill-id";
 import { dateField } from "@ax/lib/shared/row-fields";
 import { surrealDate, surrealString } from "@ax/lib/shared/surql";
-import { normalizeModelName } from "../ingest/model-pricing.ts";
-import { fillEstimatedCost, loadPricingCatalogForModels, type UsageCostFields } from "./cost-estimate.ts";
-import { isoMs, metricPct } from "./util.ts";
+import { fetchSessionCostMap } from "./cost-estimate.ts";
+import { fetchSessionHealthMap } from "./session-metrics-query.ts";
+import { cleanSessionId, isoMs, metricPct, numOrNull, numOrZero, strOrNull } from "./util.ts";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -36,9 +36,6 @@ import { isoMs, metricPct } from "./util.ts";
 
 export const GROUP_BY_KEYS = ["model", "repo", "source", "week"] as const;
 export type GroupByKey = (typeof GROUP_BY_KEYS)[number];
-
-export const isGroupByKey = (v: string): v is GroupByKey =>
-    (GROUP_BY_KEYS as readonly string[]).includes(v);
 
 /** One session's stored scalars, as consumed by the pure aggregation layer. */
 export interface AggregateSessionRow {
@@ -108,11 +105,6 @@ export interface SkillEfficacy {
 // ---------------------------------------------------------------------------
 // Pure helpers
 // ---------------------------------------------------------------------------
-
-/** Strip the `session:` prefix + record-id delimiters so ids from different
- *  surfaces (`type::string(session)` vs raw keys) compare equal. */
-export const normalizeSessionKey = (id: string): string =>
-    id.replace(/^session:/, "").replace(/[`⟨⟩]/g, "");
 
 /** ISO-8601 week label (`2026-W24`) for an epoch-ms timestamp, computed in UTC.
  *  Lexicographic order == chronological order, so week groups sort by key. */
@@ -226,11 +218,12 @@ export const aggregateGroups = (
     const groups = [...buckets.entries()].map(([key, bucket]) => aggregateRows(key, bucket));
     const cap = Math.max(1, limit);
     if (groupBy === "week") {
-        // Chronological ascending; the `(unknown)` bucket pins to the tail
-        // (lexicographically `(` would sort BEFORE the `YYYY-Www` keys).
-        const rank = (k: string): string => (k === UNKNOWN_KEY ? "￿" : k);
-        groups.sort((a, b) => (rank(a.key) < rank(b.key) ? -1 : rank(a.key) > rank(b.key) ? 1 : 0));
-        return groups.slice(-cap);
+        // Chronological ascending (lexicographic == chronological for the
+        // zero-padded `YYYY-Www` keys); the `(unknown)` bucket appends last.
+        const known = groups.filter((g) => g.key !== UNKNOWN_KEY)
+            .sort((a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0));
+        const unknown = groups.filter((g) => g.key === UNKNOWN_KEY);
+        return [...known, ...unknown].slice(-cap);
     }
     groups.sort((a, b) => b.sessions - a.sessions || (a.key < b.key ? -1 : 1));
     return groups.slice(0, cap);
@@ -274,7 +267,7 @@ const fitKey = (key: string): string =>
     key.length <= MAX_KEY_WIDTH ? key : `…${key.slice(-(MAX_KEY_WIDTH - 1))}`;
 
 const durabCell = (g: GroupAggregate): string =>
-    g.meanDurability === null ? "    -" : `${metricPct(g.meanDurability).trim()} (${g.durabilitySessions})`;
+    g.meanDurability === null ? "    -" : `${metricPct(g.meanDurability)} (${g.durabilitySessions})`;
 
 const corrCell = (g: GroupAggregate): string =>
     g.meanCorrections === null ? "-" : g.meanCorrections.toFixed(1);
@@ -331,28 +324,26 @@ export const formatSkillEfficacy = (eff: SkillEfficacy): string => {
 // Fetchers (Effect; each one bounded scan or indexed lookup - see header)
 // ---------------------------------------------------------------------------
 
-const numOrNull = (v: unknown): number | null => {
-    if (v === null || v === undefined) return null;
-    const n = Number(v);
-    return Number.isFinite(n) ? n : null;
-};
-const numOrZero = (v: unknown): number => numOrNull(v) ?? 0;
-const strOrNull = (v: unknown): string | null => (typeof v === "string" && v.length > 0 ? v : null);
 /** Datetime values come back as the SDK's Datetime object (`toJSON`), a JS
  *  Date, or an ISO string depending on the client path - `dateField` handles
  *  all three; epoch ms for week bucketing. */
 const tsMs = (row: Record<string, unknown>, key: string): number | null => isoMs(dateField(row, key));
 
-interface UsageRow extends UsageCostFields {
-    readonly session: string;
-}
+/**
+ * When `--since`/`--project` narrow the metrics scan to at most this many
+ * sessions, the health + usage lookups are bounded by the session-id set
+ * (indexed `session IN [...]` batches) instead of full table scans. Above it,
+ * one full scan is cheaper than thousands of IN-list refs.
+ */
+const BOUNDED_JOIN_MAX_SESSIONS = 1000;
 
 /**
  * Fetch every session's stored scalars for aggregation:
  *  1. one `session_metrics` scan (per-row `session.*` record derefs are
  *     bounded - one record fetch per metrics row, NOT per edge);
- *  2. one `session_health` scan (user_corrections);
- *  3. one `session_token_usage` scan + read-time cost fill (#175);
+ *  2. `session_health` (user_corrections) + `session_token_usage` (+ read-time
+ *     cost fill, #175) fetched CONCURRENTLY, bounded by the metrics session-id
+ *     set when small (see `BOUNDED_JOIN_MAX_SESSIONS`);
  * joined in JS on the normalized session key.
  */
 export const fetchAggregateRows = (
@@ -378,43 +369,18 @@ SELECT
 FROM session_metrics
 ${where};`))?.[0] ?? [];
 
-        const corrections = new Map<string, number | null>();
-        const healthRows = (yield* db.query<[Array<Record<string, unknown>>]>(
-            `SELECT type::string(session) AS session, user_corrections FROM session_health;`,
-        ))?.[0] ?? [];
-        for (const h of healthRows) {
-            corrections.set(normalizeSessionKey(String(h.session ?? "")), numOrNull(h.user_corrections));
-        }
-
-        const usageRows = (yield* db.query<[UsageRow[]]>(
-            `SELECT type::string(session) AS session, model, prompt_tokens, completion_tokens,`
-            + ` cache_creation_input_tokens, cache_read_input_tokens, estimated_tokens,`
-            + ` estimated_cost_usd, pricing_source`
-            + ` FROM session_token_usage;`,
-        ))?.[0] ?? [];
-        const catalog = yield* loadPricingCatalogForModels(usageRows.map((u) => u.model));
-        const usage = new Map<string, { model: string | null; costUsd: number | null; estimated: boolean }>();
-        for (const u of usageRows) {
-            const filled = fillEstimatedCost({
-                model: strOrNull(u.model),
-                prompt_tokens: numOrNull(u.prompt_tokens),
-                completion_tokens: numOrNull(u.completion_tokens),
-                cache_creation_input_tokens: numOrNull(u.cache_creation_input_tokens),
-                cache_read_input_tokens: numOrNull(u.cache_read_input_tokens),
-                estimated_tokens: numOrZero(u.estimated_tokens),
-                estimated_cost_usd: numOrNull(u.estimated_cost_usd),
-                pricing_source: strOrNull(u.pricing_source),
-            }, catalog);
-            usage.set(normalizeSessionKey(String(u.session ?? "")), {
-                model: normalizeModelName(strOrNull(u.model)),
-                costUsd: filled.estimatedCostUsd,
-                estimated: filled.estimated,
-            });
-        }
+        const sessionIds = [...new Set(
+            metrics.map((r) => String(r.session ?? "")).filter((s) => s.length > 0),
+        )];
+        const bound = sessionIds.length <= BOUNDED_JOIN_MAX_SESSIONS ? sessionIds : null;
+        const [health, usage] = yield* Effect.all([
+            fetchSessionHealthMap(bound),
+            fetchSessionCostMap(bound),
+        ], { concurrency: 2 });
 
         return metrics
             .map((r): AggregateSessionRow | null => {
-                const session = normalizeSessionKey(String(r.session ?? ""));
+                const session = cleanSessionId(String(r.session ?? ""));
                 if (session.length === 0) return null;
                 const u = usage.get(session);
                 return {
@@ -428,8 +394,8 @@ ${where};`))?.[0] ?? [];
                     revertedCommits: numOrZero(r.reverted_commits),
                     linesAdded: numOrZero(r.lines_added),
                     linesRemoved: numOrZero(r.lines_removed),
-                    userCorrections: corrections.get(session) ?? null,
-                    estimatedCostUsd: u?.costUsd ?? null,
+                    userCorrections: health.get(session)?.userCorrections ?? null,
+                    estimatedCostUsd: u?.estimatedCostUsd ?? null,
                     costEstimated: u?.estimated ?? false,
                 };
             })
@@ -458,7 +424,7 @@ export const fetchSkillSessionSet = (
         ))?.[0] ?? [];
         const out = new Set<string>();
         for (const r of rows) {
-            const key = normalizeSessionKey(String(r.session ?? ""));
+            const key = cleanSessionId(String(r.session ?? ""));
             if (key.length > 0) out.add(key);
         }
         return out;

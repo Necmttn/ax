@@ -102,10 +102,10 @@ import {
     fetchSkillSessionSet,
     formatGroupAggregates,
     formatSkillEfficacy,
-    isGroupByKey,
+    type GroupByKey,
 } from "../metrics/aggregates.ts";
 import { fetchSessionDurabilityDetail } from "../metrics/reverted-commits.ts";
-import { formatSessionMetrics, SESSION_METRICS_LEGEND } from "../metrics/util.ts";
+import { cleanSessionId, formatSessionMetrics, SESSION_METRICS_LEGEND } from "../metrics/util.ts";
 import { SIGNAL_CATALOG, findSignal, runRelationSignal } from "../metrics/catalog.ts";
 import type { CascadeEdge } from "../metrics/fragility-cascade.ts";
 import { fetchLocSummary, type LocSummary, type LocSelector } from "../dashboard/loc-query.ts";
@@ -3612,7 +3612,7 @@ const cmdSessionsMetrics = (input: {
     readonly limit: number;
     readonly fullIds: boolean;
     readonly json: boolean;
-    readonly groupBy: string | null;
+    readonly groupBy: GroupByKey | null;
     readonly skill: string | null;
     readonly source: string | null;
     readonly minCost: number | null;
@@ -3622,11 +3622,8 @@ const cmdSessionsMetrics = (input: {
             process.stderr.write(`axctl sessions metrics: ${msg}\n`);
             process.exit(2);
         };
-        const groupBy = input.groupBy === null
-            ? null
-            : isGroupByKey(input.groupBy)
-                ? input.groupBy
-                : fail(`unknown --group-by "${input.groupBy}". Valid dimensions: ${GROUP_BY_KEYS.join(", ")}.`);
+        // --group-by values are validated by Flag.choice (GROUP_BY_KEYS).
+        const groupBy = input.groupBy;
         if (groupBy !== null && input.skill !== null) {
             fail("--group-by and --skill are exclusive (--skill is its own with/without comparison).");
         }
@@ -3700,7 +3697,7 @@ const sessionsMetricsCommand = Command.make(
         limit: positiveLimit(50),
         fullIds: Flag.boolean("full-ids").pipe(Flag.withDefault(false)),
         json: jsonFlag,
-        groupBy: Flag.string("group-by").pipe(Flag.optional),
+        groupBy: Flag.choice("group-by", GROUP_BY_KEYS).pipe(Flag.optional),
         skill: Flag.string("skill").pipe(Flag.optional),
         source: Flag.string("source").pipe(Flag.optional),
         minCost: Flag.float("min-cost").pipe(Flag.optional),
@@ -3744,14 +3741,12 @@ const sessionsCommand = Command.make("sessions").pipe(
     ]),
 );
 
-const trimSession = (id: string): string => id.replace(/^session:/, "").replace(/[`⟨⟩]/g, "");
-
 const formatCascadeEdges = (edges: readonly CascadeEdge[], descriptor: { label: string }): string => {
     if (edges.length === 0) return `${descriptor.label}: no edges (no reverted-commit files have downstream fixers).`;
     const lines: string[] = [];
     lines.push(`${descriptor.label} (${edges.length} edge${edges.length === 1 ? "" : "s"}):`);
     for (const e of edges) {
-        lines.push(`  ${trimSession(e.origin)} → ${trimSession(e.downstream)}  (weight ${e.weight})`);
+        lines.push(`  ${cleanSessionId(e.origin)} → ${cleanSessionId(e.downstream)}  (weight ${e.weight})`);
     }
     return lines.join("\n");
 };

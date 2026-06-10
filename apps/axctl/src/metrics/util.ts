@@ -6,6 +6,25 @@ import type { SessionMetricsRow } from "./session-metrics-query.ts";
 export const sessionRefList = (sessionIds: readonly string[]): string =>
     sessionIds.map((id) => recordLiteral("session", recordKeyPart(id, "session") ?? "")).join(", ");
 
+/** Split into fixed-size chunks (for bounded `IN [...]` query batches). */
+export const chunked = <T>(items: readonly T[], size: number): T[][] => {
+    const out: T[][] = [];
+    for (let i = 0; i < items.length; i += size) out.push(items.slice(i, i + size));
+    return out;
+};
+
+// ---------------------------------------------------------------------------
+// Row-field coercion (shared by the metrics fetchers - single copy, #166 review)
+// ---------------------------------------------------------------------------
+
+export const numOrNull = (v: unknown): number | null => {
+    if (v === null || v === undefined) return null;
+    const n = Number(v);
+    return Number.isFinite(n) ? n : null;
+};
+export const numOrZero = (v: unknown): number => numOrNull(v) ?? 0;
+export const strOrNull = (v: unknown): string | null => (typeof v === "string" && v.length > 0 ? v : null);
+
 /** Set absent ids to a default (mutates + returns the map). */
 export const fillDefaults = <V>(map: Map<string, V>, ids: readonly string[], def: V): Map<string, V> => {
     for (const id of ids) if (!map.has(id)) map.set(id, def);
@@ -23,9 +42,10 @@ export const isoMs = (iso: unknown): number | null => {
 // `ax sessions metrics` table formatting (pure - unit-tested in util.test.ts)
 // ---------------------------------------------------------------------------
 
-/** Render a 0..1 ratio as a right-aligned percent column; "  -" when null. */
+/** Render a 0..1 ratio as a whole percent; "-" when null. Unpadded - column
+ *  alignment is the table layout's concern, not the formatter's. */
 export const metricPct = (v: number | null): string =>
-    v === null ? "  -" : `${Math.round(v * 100)}%`.padStart(4);
+    v === null ? "-" : `${Math.round(v * 100)}%`;
 
 /**
  * Render a duration-in-ms metric column: "-" when null, "<1m" under a minute,
@@ -54,8 +74,9 @@ export const SESSION_METRICS_LEGEND =
     + "1st-edit = session start -> first Edit/Write | reads = Read/Grep/Glob calls before the first edit | "
     + "deleg% = commits produced by spawned subagents / all produced commits";
 
-/** Strip the `session:` prefix + record-id delimiters from a session record id string. */
-const cleanSessionId = (id: string): string => id.replace(/^session:/, "").replace(/[`⟨⟩]/g, "");
+/** Strip the `session:` prefix + record-id delimiters so ids from different
+ *  surfaces (`type::string(session)` vs raw keys) compare equal. */
+export const cleanSessionId = (id: string): string => id.replace(/^session:/, "").replace(/[`⟨⟩]/g, "");
 
 export interface FormatSessionMetricsOptions {
     /**
@@ -83,9 +104,9 @@ export const formatSessionMetrics = (
         const id = opts.fullIds === true ? ids[i]! : ids[i]!.slice(0, 20);
         lines.push(
             `${id.padEnd(idWidth)} `
-            + `${metricPct(r.durabilityRatio)} ${String(r.producedCommits).padStart(7)} ${metricMs(r.timeToLandMs).padStart(5)} `
+            + `${metricPct(r.durabilityRatio).padStart(5)} ${String(r.producedCommits).padStart(7)} ${metricMs(r.timeToLandMs).padStart(5)} `
             + `${`+${r.linesAdded}/-${r.linesRemoved}`.padStart(12)} `
-            + `${metricMs(r.timeToFirstEditMs).padStart(8)} ${String(r.coldStartReads).padStart(5)} ${metricPct(r.delegationRatio)}  `
+            + `${metricMs(r.timeToFirstEditMs).padStart(8)} ${String(r.coldStartReads).padStart(5)} ${metricPct(r.delegationRatio).padStart(6)}  `
             + `${(r.taskLabel ?? "").replace(/\s+/g, " ").slice(0, 50)}`,
         );
     }
