@@ -19,6 +19,7 @@ export const numberParam = (url: URL, name: string, fallback: number): number =>
 export const optionalNumberParam = (url: URL, name: string): number | undefined => {
     const raw = url.searchParams.get(name);
     if (raw === null) return undefined;
+    if (raw === "") return undefined;
     return Option.getOrUndefined(finiteFromString(raw));
 };
 

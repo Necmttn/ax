@@ -22,6 +22,9 @@ describe("optionalNumberParam", () => {
     test("missing -> undefined", () => {
         expect(optionalNumberParam(url(""), "minCount")).toBeUndefined();
     });
+    test("empty -> undefined", () => {
+        expect(optionalNumberParam(url("?minCount="), "minCount")).toBeUndefined();
+    });
     test("garbage -> undefined", () => {
         expect(optionalNumberParam(url("?minCount=x"), "minCount")).toBeUndefined();
     });
