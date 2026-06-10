@@ -123,43 +123,42 @@ function contentDocumentRid(value: string): string | null {
     return `${prefix}\`${key.replace(/`/g, "")}\``;
 }
 
-export const resolveTurnContent = (
-    sessionId: string,
-): Effect.Effect<Map<number, InspectTurnContentDto>, never, SurrealClient> =>
-    resolveTurnContentFromDocuments(interpolateRid(TURN_CONTENT_DOCUMENTS_SQL, toBareSessionId(sessionId)), {
-        includeAtoms: true,
-    });
+export const resolveTurnContent = Effect.fn("queries.resolveTurnContent")(
+    function* (sessionId: string) {
+        return yield* resolveTurnContentFromDocuments(interpolateRid(TURN_CONTENT_DOCUMENTS_SQL, toBareSessionId(sessionId)), {
+            includeAtoms: true,
+        });
+    },
+);
 
-export const resolveTurnContentForTurnSeqs = (
-    sessionId: string,
-    turnSeqs: ReadonlyArray<number>,
-): Effect.Effect<Map<number, InspectTurnContentDto>, never, SurrealClient> => {
-    const seqs = [...new Set(turnSeqs)]
-        .filter((seq) => Number.isInteger(seq) && seq >= 0)
-        .sort((a, b) => a - b);
-    if (seqs.length === 0) return Effect.succeed(new Map<number, InspectTurnContentDto>());
-    return resolveTurnContentFromDocuments(
-        interpolateRid(TURN_CONTENT_DOCUMENTS_FOR_SEQS_SQL, toBareSessionId(sessionId)),
-        { seqs },
-        { includeAtoms: true },
-    );
-};
+export const resolveTurnContentForTurnSeqs = Effect.fn("queries.resolveTurnContentForTurnSeqs")(
+    function* (sessionId: string, turnSeqs: ReadonlyArray<number>) {
+        const seqs = [...new Set(turnSeqs)]
+            .filter((seq) => Number.isInteger(seq) && seq >= 0)
+            .sort((a, b) => a - b);
+        if (seqs.length === 0) return new Map<number, InspectTurnContentDto>();
+        return yield* resolveTurnContentFromDocuments(
+            interpolateRid(TURN_CONTENT_DOCUMENTS_FOR_SEQS_SQL, toBareSessionId(sessionId)),
+            { seqs },
+            { includeAtoms: true },
+        );
+    },
+);
 
 const contentDocumentKeyForTurnRef = (sourceRef: string): string =>
     `turn__${identityPart(sourceRef, "source")}`;
 
-export const resolveTurnContentForSourceRefs = (
-    sourceRefs: ReadonlyArray<string>,
-): Effect.Effect<Map<number, InspectTurnContentDto>, never, SurrealClient> => {
-    const refs = [...new Set(sourceRefs)].filter((ref) => ref.length > 0);
-    if (refs.length === 0) return Effect.succeed(new Map<number, InspectTurnContentDto>());
-    const documents = refs
-        .map((ref) => recordRef("content_document", contentDocumentKeyForTurnRef(ref)))
-        .join(", ");
-    // Fast inspector path: direct document/block/atom record fetches avoid the
-    // multi-second `document IN ...` scans seen on large sessions. Atoms are
-    // capped per kind/block so the initial inspect response stays sub-second.
-    return resolveTurnContentFromDocuments(`
+export const resolveTurnContentForSourceRefs = Effect.fn("queries.resolveTurnContentForSourceRefs")(
+    function* (sourceRefs: ReadonlyArray<string>) {
+        const refs = [...new Set(sourceRefs)].filter((ref) => ref.length > 0);
+        if (refs.length === 0) return new Map<number, InspectTurnContentDto>();
+        const documents = refs
+            .map((ref) => recordRef("content_document", contentDocumentKeyForTurnRef(ref)))
+            .join(", ");
+        // Fast inspector path: direct document/block/atom record fetches avoid the
+        // multi-second `document IN ...` scans seen on large sessions. Atoms are
+        // capped per kind/block so the initial inspect response stays sub-second.
+        return yield* resolveTurnContentFromDocuments(`
         SELECT
             source_ref,
             type::string(id) AS document_id,
@@ -170,11 +169,12 @@ export const resolveTurnContentForSourceRefs = (
         FROM [${documents}]
         ORDER BY turn_seq;
     `, undefined, {
-        includeAtoms: false,
-        directBlockLimitPerDocument: 20,
-        directAtomLimitPerKind: 5,
-    });
-};
+            includeAtoms: false,
+            directBlockLimitPerDocument: 20,
+            directAtomLimitPerKind: 5,
+        });
+    },
+);
 
 const FAST_TURN_ATOM_KINDS = [
     "symbol_ref",

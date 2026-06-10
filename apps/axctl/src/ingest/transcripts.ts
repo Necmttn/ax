@@ -1653,6 +1653,11 @@ export const ingestTranscripts = Effect.fn("transcripts.ingest")(
             hookEventCount +
             hookCommandInvocationCount;
 
+        // Deliberately NOT walk-jsonl.ts: the Claude tree is flat (one
+        // project-slug level, sessions directly inside - no recursion), and we
+        // need the full (mtime,size) stat carried forward for the
+        // skip-unchanged watermark below, which the shared skeleton's
+        // cutoff-only walk discards. See walkJsonlCore's header note.
         for (const projectDir of projectDirs) {
             const fullProject = path.join(transcriptsDir, projectDir);
             // A project dir that vanished between the parent readDirectory and
