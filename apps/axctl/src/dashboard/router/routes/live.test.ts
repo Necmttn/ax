@@ -1,0 +1,47 @@
+import { describe, expect, test } from "bun:test";
+import {
+    formatSseEvent,
+    imageContentType,
+    recentIngestEventsSql,
+} from "./live.ts";
+
+describe("imageContentType", () => {
+    test("maps known image extensions (case-insensitive)", () => {
+        expect(imageContentType("/a/x.png")).toBe("image/png");
+        expect(imageContentType("/a/x.JPG")).toBe("image/jpeg");
+        expect(imageContentType("/a/x.jpeg")).toBe("image/jpeg");
+        expect(imageContentType("/a/x.webp")).toBe("image/webp");
+        expect(imageContentType("/a/x.svg")).toBe("image/svg+xml");
+        expect(imageContentType("/a/x.avif")).toBe("image/avif");
+    });
+
+    test("returns null for non-image / extensionless paths", () => {
+        expect(imageContentType("/etc/passwd")).toBeNull();
+        expect(imageContentType("/a/notes.txt")).toBeNull();
+        expect(imageContentType("/a/script.sh")).toBeNull();
+        expect(imageContentType("noext")).toBeNull();
+    });
+});
+
+describe("dashboard live routes", () => {
+    test("formatSseEvent emits valid SSE frame", () => {
+        expect(formatSseEvent("message", { ok: true })).toBe('event: message\ndata: {"ok":true}\n\n');
+    });
+
+    test("recentIngestEventsSql reads persisted ingest events", () => {
+        const sql = recentIngestEventsSql("2026-05-10T00:00:00.000Z", 12);
+        expect(sql).toContain("FROM ingest_event");
+        expect(sql).toContain('WHERE ts > d"2026-05-10T00:00:00.000Z"');
+        expect(sql).toContain("ORDER BY ts ASC");
+        expect(sql).toContain("LIMIT 12");
+    });
+
+    test("POST /api/ingest without a booted server returns 503 ingest_unavailable", async () => {
+        const { handleDashboardRequest } = await import("../../server.ts");
+        const res = await handleDashboardRequest(
+            new Request("http://127.0.0.1:1738/api/ingest", { method: "POST", body: "{}" }),
+        );
+        expect(res.status).toBe(503);
+        await expect(res.json()).resolves.toEqual({ error: "ingest_unavailable" });
+    });
+});

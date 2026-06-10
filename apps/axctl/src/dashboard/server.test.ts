@@ -2,12 +2,9 @@ import { describe, expect, test } from "bun:test";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
-    formatSseEvent,
     handleDashboardRequest,
     handleDashboardRequestWithCors,
-    imageContentType,
     parseDashboardServeArgs,
-    recentIngestEventsSql,
 } from "./server.ts";
 import { dashboardApiCapabilities, isGraphExplorerEnabled } from "./capabilities.ts";
 
@@ -43,24 +40,6 @@ describe("studio CORS / Private Network Access", () => {
         }));
         expect(res.headers.get("access-control-allow-origin")).toBeNull();
         expect(res.headers.get("access-control-allow-private-network")).toBeNull();
-    });
-});
-
-describe("imageContentType", () => {
-    test("maps known image extensions (case-insensitive)", () => {
-        expect(imageContentType("/a/x.png")).toBe("image/png");
-        expect(imageContentType("/a/x.JPG")).toBe("image/jpeg");
-        expect(imageContentType("/a/x.jpeg")).toBe("image/jpeg");
-        expect(imageContentType("/a/x.webp")).toBe("image/webp");
-        expect(imageContentType("/a/x.svg")).toBe("image/svg+xml");
-        expect(imageContentType("/a/x.avif")).toBe("image/avif");
-    });
-
-    test("returns null for non-image / extensionless paths", () => {
-        expect(imageContentType("/etc/passwd")).toBeNull();
-        expect(imageContentType("/a/notes.txt")).toBeNull();
-        expect(imageContentType("/a/script.sh")).toBeNull();
-        expect(imageContentType("noext")).toBeNull();
     });
 });
 
@@ -109,18 +88,6 @@ describe("dashboard server", () => {
 
     test("parseDashboardServeArgs accepts explicit port", () => {
         expect(parseDashboardServeArgs(["--port=1800"]).port).toBe(1800);
-    });
-
-    test("formatSseEvent emits valid SSE frame", () => {
-        expect(formatSseEvent("message", { ok: true })).toBe('event: message\ndata: {"ok":true}\n\n');
-    });
-
-    test("recentIngestEventsSql reads persisted ingest events", () => {
-        const sql = recentIngestEventsSql("2026-05-10T00:00:00.000Z", 12);
-        expect(sql).toContain("FROM ingest_event");
-        expect(sql).toContain('WHERE ts > d"2026-05-10T00:00:00.000Z"');
-        expect(sql).toContain("ORDER BY ts ASC");
-        expect(sql).toContain("LIMIT 12");
     });
 
     test("graph explorer is disabled unless explicitly enabled", () => {
