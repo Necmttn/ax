@@ -1,7 +1,26 @@
 import type { ToolCallDto, ToolCategory } from "@ax/lib/shared/dashboard-types";
+import { Component, lazy, Suspense } from "react";
+import type { ReactNode } from "react";
 import { HighlightedCode } from "../highlight/HighlightedCode.tsx";
 import { langFromPath } from "../highlight/lang.ts";
+import { DIFF_CONSUMED_KEYS, extractDiffPairs } from "./edit-diff.ts";
 import { stripToolResult } from "./tool-result.tsx";
+
+/** Diff rendering is the only consumer of @pierre/diffs (which bundles its own
+ *  shiki) - lazy so it lands in an async chunk, off the main bundle. */
+const ToolDiff = lazy(() => import("./tool-diff.tsx"));
+
+/** If the diff library throws at render time, fall back to the args grid so
+ *  the call's content is never lost. */
+class DiffBoundary extends Component<{ fallback: ReactNode; children: ReactNode }, { failed: boolean }> {
+    override state = { failed: false };
+    static getDerivedStateFromError() {
+        return { failed: true };
+    }
+    override render() {
+        return this.state.failed ? this.props.fallback : this.props.children;
+    }
+}
 
 // Tinted badge tones derived from the calibrated root accents (one recipe,
 // equivalent perceived brightness): blue=net, gold=file, green=edit,
@@ -103,6 +122,50 @@ export function ToolRowItem(
     const command = typeof input?.command === "string" && input.command.length > 0
         ? input.command
         : call.command;
+    // Edit-class calls with recognizable before/after content render as a real
+    // diff instead of the labelled grid; everything else falls through to the
+    // existing command/grid rendering. (Keyed by tool name, not category -
+    // codex apply_patch doesn't classify as "edit".)
+    const diffPairs = extractDiffPairs(call.name, input);
+
+    const renderGrid = (es: ReadonlyArray<[string, unknown]>) =>
+        es.length === 0 ? null : (
+            <div
+                style={{
+                    margin: "0 0 4px",
+                    maxHeight: 170,
+                    overflow: "auto",
+                    display: "grid",
+                    gridTemplateColumns: "minmax(56px,auto) 1fr",
+                    gap: "2px 12px",
+                    font: `11px/1.5 ${mono}`,
+                }}
+            >
+                {es.map(([k, v]) => {
+                    const code = typeof v === "string" && CODE_ARGS.has(k) ? v : null;
+                    const tint = code != null ? argTint(call.name, k) : undefined;
+                    return (
+                        <div key={k} style={{ display: "contents" }}>
+                            <span style={{ color: "var(--muted-2)", textAlign: "right" }}>{k}</span>
+                            <span
+                                style={{
+                                    color: "var(--ink)",
+                                    whiteSpace: "pre-wrap",
+                                    wordBreak: "break-word",
+                                    ...(tint ? { background: tint, borderRadius: 3 } : {}),
+                                }}
+                            >
+                                {code != null
+                                    ? <HighlightedCode code={code} lang={argLang} />
+                                    : typeof v === "string"
+                                    ? v
+                                    : JSON.stringify(v)}
+                            </span>
+                        </div>
+                    );
+                })}
+            </div>
+        );
 
     const rawOutput = result ?? call.output_excerpt ?? "";
     const resultText = rawOutput ? stripToolResult(rawOutput) : "";
@@ -194,7 +257,18 @@ export function ToolRowItem(
                         </div>
                     )
                     : null}
-                {command
+                {diffPairs
+                    ? (
+                        <>
+                            {renderGrid(entries.filter(([k]) => !DIFF_CONSUMED_KEYS.has(k)))}
+                            <DiffBoundary fallback={renderGrid(entries)}>
+                                <Suspense fallback={renderGrid(entries)}>
+                                    <ToolDiff pairs={diffPairs} />
+                                </Suspense>
+                            </DiffBoundary>
+                        </>
+                    )
+                    : command
                     ? (
                         <pre
                             style={{
@@ -211,45 +285,7 @@ export function ToolRowItem(
                             <HighlightedCode code={command} lang="shellscript" />
                         </pre>
                     )
-                    : entries.length > 0
-                    ? (
-                        <div
-                            style={{
-                                margin: "0 0 4px",
-                                maxHeight: 170,
-                                overflow: "auto",
-                                display: "grid",
-                                gridTemplateColumns: "minmax(56px,auto) 1fr",
-                                gap: "2px 12px",
-                                font: `11px/1.5 ${mono}`,
-                            }}
-                        >
-                            {entries.map(([k, v]) => {
-                                const code = typeof v === "string" && CODE_ARGS.has(k) ? v : null;
-                                const tint = code != null ? argTint(call.name, k) : undefined;
-                                return (
-                                    <div key={k} style={{ display: "contents" }}>
-                                        <span style={{ color: "var(--muted-2)", textAlign: "right" }}>{k}</span>
-                                        <span
-                                            style={{
-                                                color: "var(--ink)",
-                                                whiteSpace: "pre-wrap",
-                                                wordBreak: "break-word",
-                                                ...(tint ? { background: tint, borderRadius: 3 } : {}),
-                                            }}
-                                        >
-                                            {code != null
-                                                ? <HighlightedCode code={code} lang={argLang} />
-                                                : typeof v === "string"
-                                                ? v
-                                                : JSON.stringify(v)}
-                                        </span>
-                                    </div>
-                                );
-                            })}
-                        </div>
-                    )
-                    : null}
+                    : renderGrid(entries)}
                 {launchSubline
                     ? (
                         <div
