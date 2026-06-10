@@ -32,11 +32,16 @@ interface Tab {
 
 export function Shell({ children }: { children: ReactNode }) {
     const state = useRouterState();
-    // A shared session (/share/...) is a standalone, read-only gist view: the
-    // local-graph nav + live/offline chrome don't apply (those routes need a
-    // running daemon). Render slim branded chrome with a CTA instead. Branching
-    // on which component renders keeps each one's hooks unconditional.
-    return state.location.pathname.startsWith("/share")
+    // A shared session is a standalone, read-only gist view: the local-graph
+    // nav + live/offline chrome don't apply (those routes need a running
+    // daemon). It arrives two ways - the /share/... route AND the public-embed
+    // index entry /studio/?shareOwner=...&gistId=... - both get the slim
+    // branded chrome with a CTA. Branching on which component renders keeps
+    // each one's hooks unconditional.
+    const search = state.location.search as { shareOwner?: unknown; gistId?: unknown };
+    const isShare = state.location.pathname.startsWith("/share")
+        || (typeof search.shareOwner === "string" && typeof search.gistId === "string");
+    return isShare
         ? <ShareChrome>{children}</ShareChrome>
         : <FullChrome>{children}</FullChrome>;
 }
@@ -56,10 +61,25 @@ function ShareChrome({ children }: { children: ReactNode }) {
                     target="_blank"
                     rel="noopener noreferrer"
                 >
-                    Map your own agent sessions → Get ax
+                    Get ax →
                 </a>
             </header>
             {children}
+            <footer className="share-footer">
+                <span className="share-footer-label">recorded with ax</span>
+                <p className="share-footer-copy">
+                    Trace your own agent sessions - every turn, tool call, and dollar, on your machine.
+                </p>
+                <code className="share-footer-install">curl -fsSL https://ax.necmttn.com/install | sh</code>
+                <a
+                    className="share-footer-link"
+                    href="https://ax.necmttn.com"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                >
+                    ax.necmttn.com →
+                </a>
+            </footer>
         </div>
     );
 }
