@@ -1,9 +1,10 @@
 import { Effect } from "effect";
 import { Argument, Command, Flag } from "effect/unstable/cli";
+import { resolve as pathResolve } from "node:path";
 import { prettyPrint } from "@ax/lib/json";
 import { HOME } from "@ax/lib/paths";
 import { optionValue } from "../config-core/cli-util.ts";
-import { HookProviderRegistryDefault } from "./providers/registry.ts";
+import { HookProviderRegistryDefault, ALL_HOOK_PROVIDERS } from "./providers/registry.ts";
 import { resolveSdkPath, scaffoldWorkspace } from "./sdk-workspace.ts";
 import {
     readAllHooks,
@@ -17,6 +18,7 @@ import {
 } from "./config.ts";
 import type { HookScope } from "./providers/types.ts";
 import { HookNotFoundError } from "./errors.ts";
+import { installHookFile } from "./sdk-install.ts";
 
 /**
  * `ax hooks` config CRUD subcommands (provider-agnostic: claude/cursor/codex/
@@ -185,6 +187,42 @@ const initCommand = Command.make(
         }),
 ).pipe(Command.withDescription("Scaffold the ~/.ax/hooks workspace (package.json + starter guard hooks)"));
 
+const KNOWN_PROVIDERS = ALL_HOOK_PROVIDERS.map((p) => p.name);
+
+const installCommand = Command.make(
+    "install",
+    {
+        file: Argument.string("file"),
+        providers: Flag.string("providers").pipe(Flag.withDefault("claude,codex")),
+        scope: Flag.string("scope").pipe(Flag.withDefault("global")),
+    },
+    ({ file, providers, scope }) =>
+        Effect.gen(function* () {
+            const absFile = pathResolve(file);
+            const providerList = providers.split(",").map((p) => p.trim()).filter(Boolean);
+
+            // Validate provider names against the registry
+            const unknown = providerList.filter((p) => !KNOWN_PROVIDERS.includes(p));
+            if (unknown.length > 0) {
+                console.error(`Unknown providers: ${unknown.join(", ")}. Known: ${KNOWN_PROVIDERS.join(", ")}`);
+                process.exit(1);
+            }
+
+            const results = yield* installHookFile(absFile, providerList, asScope(scope));
+
+            for (const entry of results) {
+                const matcherStr = entry.input.matcher ? ` [matcher: ${entry.input.matcher}]` : "";
+                console.log(`installed ${entry.provider} ${entry.input.event}${matcherStr} -> ${entry.writtenPath}`);
+                console.log(`  command: ${entry.input.command}`);
+            }
+            console.log("");
+            console.log(`${results.length} hook(s) installed.`);
+            if (providerList.includes("codex")) {
+                console.log("note (codex): approve the new hook when prompted (trust review).");
+            }
+        }).pipe(Effect.provide(HookProviderRegistryDefault)),
+).pipe(Command.withDescription("Install a SDK hook file into provider configs (--providers=claude,codex --scope=global)"));
+
 /** Spliced into `hooksCommand`'s subcommand list in cli/index.ts. */
 export const hooksConfigSubcommands = [
     configCommand,
@@ -194,4 +232,5 @@ export const hooksConfigSubcommands = [
     disableCommand,
     enableCommand,
     initCommand,
+    installCommand,
 ];
