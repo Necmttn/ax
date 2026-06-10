@@ -613,8 +613,82 @@ function fmtShareDate(iso?: string): string | null {
     return d.toISOString().slice(0, 10);
 }
 
-/** Outcome-first header for a shared session: what it did + the headline stats,
- *  so a cold reader gets the story before the transcript. */
+/** Strip the `committed <sha> · ` prefix a timeline segment title carries so
+ *  scrubber labels read as work, not bookkeeping. */
+const segmentLabel = (title: string): string =>
+    title.replace(/^committed\s+\S+\s*·\s*/, "").trim() || title;
+
+/**
+ * The session scrubber: the whole run on one wall-clock strip. Segments are
+ * the timeline's phases (proportional to real elapsed time), green ticks are
+ * commits, red ticks failures, rose dots subagent dispatches. Clicking a
+ * phase jumps the transcript to its first turn (the hash flip also leaves
+ * the timeline view if that's where the reader is).
+ */
+function SessionScrubber({ timeline, spawnTimes }: {
+    readonly timeline: SessionTimelinePayload;
+    readonly spawnTimes?: ReadonlyArray<string>;
+}) {
+    const h = timeline.highlights;
+    const t0 = Date.parse(h.started_at ?? "");
+    const t1 = Date.parse(h.ended_at ?? "");
+    if (!Number.isFinite(t0) || !Number.isFinite(t1) || t1 - t0 < 60_000) return null;
+    const span = t1 - t0;
+    const frac = (iso: string | null | undefined): number | null => {
+        const t = Date.parse(iso ?? "");
+        if (!Number.isFinite(t)) return null;
+        return Math.min(1, Math.max(0, (t - t0) / span));
+    };
+    const segs = timeline.segments
+        .map((seg, i) => {
+            const a = frac(seg.started_at);
+            const next = timeline.segments[i + 1];
+            const b = next ? frac(next.started_at) : 1;
+            return a != null && b != null && b > a ? { seg, a, b } : null;
+        })
+        .filter((s): s is { seg: SessionTimelinePayload["segments"][number]; a: number; b: number } => s !== null);
+    if (segs.length < 2) return null;
+    const ticks = (kind: "checkpoint" | "failure") =>
+        timeline.events.filter((e) => e.kind === kind).map((e) => frac(e.ts)).filter((x): x is number => x != null);
+    const jump = (seq: number | null) => {
+        if (seq == null) return;
+        window.location.hash = `turn-${seq}`;
+    };
+    const fmtClock = (t: number) => new Date(t).toISOString().slice(5, 16).replace("T", " ");
+    return (
+        <div className="scrub-wrap">
+            <div className="scrub">
+                {segs.map(({ seg, a, b }) => (
+                    <button
+                        key={seg.id}
+                        type="button"
+                        className="scrub-seg"
+                        style={{ left: `${a * 100}%`, width: `${(b - a) * 100}%` }}
+                        title={`${segmentLabel(seg.title)} - ${fmtDuration(seg.duration_ms) ?? ""} · ${seg.rollup.tool_calls} tools${seg.rollup.failures ? ` · ${seg.rollup.failures} failures` : ""}`}
+                        onClick={() => jump(seg.start_seq)}
+                    >
+                        {(b - a) > 0.08 ? <span>{segmentLabel(seg.title)}</span> : null}
+                    </button>
+                ))}
+                {ticks("checkpoint").map((x, i) => <i key={`c${i}`} className="scrub-commit" style={{ left: `${x * 100}%` }} />)}
+                {ticks("failure").map((x, i) => <i key={`f${i}`} className="scrub-fail" style={{ left: `${x * 100}%` }} />)}
+                {(spawnTimes ?? []).map((iso, i) => {
+                    const x = frac(iso);
+                    return x == null ? null : <i key={`s${i}`} className="scrub-spawn" style={{ left: `${x * 100}%` }} />;
+                })}
+            </div>
+            <div className="scrub-axis">
+                <span>{fmtClock(t0)}</span>
+                <span>commits ↓ · failures ↑ · subagents ◦ - click a phase to jump</span>
+                <span>{fmtClock(t1)}</span>
+            </div>
+        </div>
+    );
+}
+
+/** Outcome-first header for a shared session: verdict, a one-sentence lede
+ *  built from the run's own numbers, and the wall-clock scrubber - so a cold
+ *  reader gets the story AND the shape before the transcript. */
 function ShareOutcomeHeader(props: {
     readonly summary?: string;
     readonly source: string;
@@ -628,33 +702,38 @@ function ShareOutcomeHeader(props: {
     readonly failures: number;
     readonly costUsd: number | null;
     readonly durationMs: number | null;
+    readonly timeline?: SessionTimelinePayload | null;
+    readonly spawnTimes?: ReadonlyArray<string>;
 }) {
     const cost = fmtUsd(props.costUsd);
     const duration = fmtDuration(props.durationMs);
     const date = fmtShareDate(props.startedAt);
-    const sub = [props.model ?? props.source, props.project, date].filter(Boolean).join(" · ");
-    const stat = (n: string, label: string) => (
-        <span className="share-hero-stat"><b>{n}</b><span>{label}</span></span>
-    );
-    // Hero totals roll up the whole spawn tree; the cost rail below counts
-    // only the session on screen - qualify the labels so the two figures
-    // don't read as a contradiction.
-    const all = props.subagents > 0 ? " (incl. subagents)" : "";
+    const tl = props.timeline ?? null;
+    const commits = tl?.highlights.event_counts.checkpoint ?? 0;
+    const failEvents = tl ? tl.events.filter((e) => e.kind === "failure") : [];
+    const recovered = failEvents.filter((e) => e.recovered_by_seq != null).length;
+    const right = [cost, duration, date, props.model ?? props.source].filter(Boolean).join(" · ");
+    // The lede: the headline numbers assembled into one readable sentence
+    // (a stat grid makes the reader do the assembly; a sentence does it).
+    const failPhrase = props.failures > 0
+        ? `${props.failures} failed tool calls${failEvents.length > 0 && recovered === failEvents.length ? " - recovered" : ""}`
+        : null;
     return (
         <div className="share-hero">
-            <h2 className="share-hero-title">{cleanShareSummary(props.summary) ?? "Shared agent session"}</h2>
-            {sub ? <div className="share-hero-sub">{sub}</div> : null}
-            <div className="share-hero-stats">
-                {stat(props.turns.toLocaleString(), `turns${all}`)}
-                {stat(props.toolCalls.toLocaleString(), "tool calls")}
-                {stat(props.files.toLocaleString(), "files")}
-                {props.subagents > 0 ? stat(props.subagents.toLocaleString(), "subagents") : null}
-                {cost ? stat(cost, `cost${all}`) : null}
-                {duration ? stat(duration, "duration") : null}
-                <span className="share-hero-outcome" style={{ color: props.failures > 0 ? "var(--red)" : "var(--green)" }}>
-                    {props.failures > 0 ? `✗ ${props.failures} failed tool calls` : "✓ no failed tool calls"}
-                </span>
+            <div className="share-hero-top">
+                <h2 className="share-hero-title">
+                    {commits > 0 ? <span className="share-hero-verdict">✔ {commits} commits</span> : null}
+                    {cleanShareSummary(props.summary) ?? "Shared agent session"}
+                </h2>
+                {right ? <span className="share-hero-right">{right}</span> : null}
             </div>
+            <p className="share-hero-lede">
+                An agent{props.subagents > 0 ? <> and <b>{props.subagents} subagents</b></> : null}
+                {" - "}<b>{props.turns.toLocaleString()}</b> turns, <b>{props.toolCalls.toLocaleString()}</b> tool calls
+                {props.files > 0 ? <>, <b>{props.files}</b> files</> : null}
+                {failPhrase ? <>, <span className="share-hero-fail">{failPhrase}</span></> : null}.
+            </p>
+            {tl ? <SessionScrubber timeline={tl} spawnTimes={props.spawnTimes} /> : null}
         </div>
     );
 }
@@ -826,6 +905,8 @@ function MultiFileShareView(props: {
                     failures={selectedCard.stats.failures}
                     costUsd={selectedCard.cost_usd}
                     durationMs={selectedCard.duration_ms}
+                    timeline={fileQuery.data?.session_timeline ?? null}
+                    spawnTimes={directChildren.map((c) => c.started_at).filter((t): t is string => !!t)}
                 />
             ) : (
                 <ShareOutcomeHeader
@@ -841,6 +922,8 @@ function MultiFileShareView(props: {
                     failures={totals.failures}
                     costUsd={totals.cost_usd}
                     durationMs={totals.duration_ms}
+                    timeline={fileQuery.data?.session_timeline ?? null}
+                    spawnTimes={directChildren.map((c) => c.started_at).filter((t): t is string => !!t)}
                 />
             )}
             {directChildren.length > 0 ? (
@@ -906,7 +989,7 @@ function MultiFileShareView(props: {
                                     : {}),
                             }}
                         >
-                            {mode}
+                            {mode === "transcript" ? "Read the transcript" : "Scan the timeline"}
                         </button>
                     ))}
                 </div>
@@ -964,6 +1047,7 @@ function LegacyShareView(props: { readonly owner: string; readonly gistId: strin
                     subagents={0}
                     failures={query.data.stats.failures}
                     costUsd={query.data.token_usage?.estimated_cost_usd ?? null}
+                    timeline={query.data.session_timeline ?? null}
                     durationMs={
                         query.data.session.started_at && query.data.session.ended_at
                             ? new Date(query.data.session.ended_at).getTime() - new Date(query.data.session.started_at).getTime()
