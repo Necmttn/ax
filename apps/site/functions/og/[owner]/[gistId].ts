@@ -72,8 +72,10 @@ function shade(hex: string, t: number): string {
     const c = (s: string, i: number) => parseInt(s.slice(i, i + 2), 16);
     const [r1, g1, b1] = [c(hex, 1), c(hex, 3), c(hex, 5)];
     const [r0, g0, b0] = [c(CARD, 1), c(CARD, 3), c(CARD, 5)];
-    const mix = (a: number, b: number) => Math.round(b + (a - b) * t);
-    return `rgb(${mix(r1, r0)},${mix(g1, g0)},${mix(b1, b0)})`;
+    const mix = (a: number, b: number) => Math.round(b + (a - b) * t).toString(16).padStart(2, "0");
+    // Hex, not rgb(): commas inside a style value break the worker's parser
+    // and the declarations after them (display:flex included) get dropped.
+    return `#${mix(r1, r0)}${mix(g1, g0)}${mix(b1, b0)}`;
 }
 
 /** The fleet: one rounded cell per subagent, brightness = cost share. */
