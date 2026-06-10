@@ -93,6 +93,7 @@ import { deriveSignals } from "../ingest/derive-signals.ts";
 import { deriveTurnIntents } from "../ingest/derive-intents.ts";
 import { INSIGHT_VIEWS, insightSqlForView, isInsightView } from "../queries/insights.ts";
 import { enrichInsightRows } from "../queries/insights-enrich.ts";
+import { fetchSkillStats } from "../queries/skill-stats.ts";
 import { extractSessionTimeline, SessionTimelineServiceLayer } from "../timeline/service.ts";
 import { formatInsightRows } from "./insights-format.ts";
 import { writeDashboard } from "../dashboard/report.ts";
@@ -1096,7 +1097,6 @@ const cmdStats = (args: string[]) =>
             console.error("axctl skills stats: missing skill name");
             process.exit(1);
         }
-        const db = yield* SurrealClient;
         const fs = yield* FileSystem.FileSystem;
         const path = yield* Path.Path;
         const exists = yield* skillExists(name);
@@ -1107,77 +1107,11 @@ const cmdStats = (args: string[]) =>
             );
             process.exit(2);
         }
-        // Issue #43: order recent_sessions by ts DESC (verified server-side),
-        // include the session id so we can de-dup in TS, and capture cwd so
-        // we can render a human-friendly project label rather than the raw
-        // Claude slug.
-        const sql = `
-LET $s = (SELECT * FROM skill WHERE name = $name)[0];
-RETURN {
-    skill: $s,
-    invocations: {
-        total: array::len((SELECT * FROM invoked WHERE out = $s.id)),
-        d7:    array::len((SELECT * FROM invoked WHERE out = $s.id AND ts > time::now() - 7d)),
-        d30:   array::len((SELECT * FROM invoked WHERE out = $s.id AND ts > time::now() - 30d)),
-        d90:   array::len((SELECT * FROM invoked WHERE out = $s.id AND ts > time::now() - 90d)),
-        last:  (SELECT ts FROM invoked WHERE out = $s.id ORDER BY ts DESC LIMIT 1)[0].ts,
-    },
-    recent_sessions: (
-        SELECT
-            in.session AS session_id,
-            in.session.project AS project_slug,
-            in.session.cwd AS cwd,
-            ts
-        FROM invoked
-        WHERE out = $s.id
-        ORDER BY ts DESC
-        LIMIT 50
-    )
-};`;
-        const result = yield* db.query<unknown[]>(sql, { name });
-        const payload = (Array.isArray(result)
-            ? [...result].reverse().find((r) => r != null)
-            : result) as
-            | {
-                  skill?: { dir_path?: string | null } | null;
-                  recent_sessions?: Array<Record<string, unknown>>;
-              }
-            | undefined;
-
-        // Dedupe + cap to the most recent 5 distinct sessions, then prettify.
-        if (payload?.recent_sessions) {
-            const seen = new Set<string>();
-            const clean: Array<{
-                project: string;
-                ts: unknown;
-            }> = [];
-            for (const row of payload.recent_sessions) {
-                const sid = String(row.session_id ?? "");
-                if (sid && seen.has(sid)) continue;
-                if (sid) seen.add(sid);
-                // cwd may come back as an array (per-edge projection) - take
-                // the first scalar for display purposes.
-                const cwdRaw = Array.isArray(row.cwd) ? row.cwd[0] : row.cwd;
-                const slugRaw = Array.isArray(row.project_slug)
-                    ? row.project_slug[0]
-                    : row.project_slug;
-                let project: string;
-                if (typeof cwdRaw === "string" && cwdRaw.length > 0) {
-                    // Mirrors path.basename without pulling node:path here.
-                    const parts = cwdRaw.split("/").filter((p) => p.length > 0);
-                    project = parts.length > 0 ? parts[parts.length - 1] : cwdRaw;
-                } else {
-                    project = prettifyProjectSlug(slugRaw);
-                }
-                clean.push({ project, ts: row.ts });
-                if (clean.length >= 5) break;
-            }
-            (payload as Record<string, unknown>).recent_sessions = clean;
-        }
+        const payload = yield* fetchSkillStats(name);
 
         // Read body lazily from disk via dir_path (DB no longer stores body -
         // multi-file skills + cache-staleness make on-disk the canonical source).
-        const dirPath = payload?.skill?.dir_path;
+        const dirPath = payload.skill?.dir_path;
         // Issue #36: codex-side tools are recorded with a synthetic dir_path
         // sentinel. They have no SKILL.md, so skip the disk read entirely
         // instead of letting Effect.promise(...) crash with ENOENT.
