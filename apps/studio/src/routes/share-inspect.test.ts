@@ -1,6 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import {
+    buildScrubberGaps,
     buildSessionMapLanes,
+    compressAxisGaps,
     fetchShareArtifact,
     fetchShareFile,
     fetchShareManifest,
@@ -570,6 +572,71 @@ describe("buildSessionMapLanes", () => {
 
     test("returns null for a manifest with zero subagents", () => {
         expect(buildSessionMapLanes(mapManifest([]))).toBeNull();
+    });
+});
+
+describe("compressAxisGaps", () => {
+    test("compresses an interior uncovered span and anchors the axis endpoints", () => {
+        const { remap, gaps } = compressAxisGaps([
+            { start: 0, end: 0.1 },
+            { start: 0.8, end: 0.9 },
+        ]);
+        expect(gaps).toHaveLength(1);
+        expect(gaps[0]!.domainStart).toBeCloseTo(0.1, 5);
+        expect(gaps[0]!.domainEnd).toBeCloseTo(0.8, 5);
+        // Stretch (1-0.04)/0.3 = 3.2: covered [0,0.1] maps to [0, 0.32].
+        expect(gaps[0]!.x).toBeCloseTo(0.32, 5);
+        expect(gaps[0]!.w).toBeCloseTo(0.04, 5);
+        expect(remap(0)).toBeCloseTo(0, 5);
+        expect(remap(1)).toBeCloseTo(1, 5);
+        // Monotonic across the gap boundary.
+        expect(remap(0.1)).toBeLessThan(remap(0.45));
+        expect(remap(0.45)).toBeLessThan(remap(0.8));
+    });
+
+    test("returns the identity when no uncovered span exceeds the threshold", () => {
+        const { remap, gaps } = compressAxisGaps([
+            { start: 0, end: 0.45 },
+            { start: 0.5, end: 1 },
+        ]);
+        expect(gaps).toHaveLength(0);
+        expect(remap(0.7)).toBe(0.7);
+    });
+});
+
+describe("buildScrubberGaps", () => {
+    test("a lone commit tick anchors coverage and splits a dead stretch", () => {
+        const bars = [{ x: 0, w: 0.1 }, { x: 0.9, w: 0.1 }];
+        const without = buildScrubberGaps({ pointXs: [], bars, spanMs: 3_600_000 });
+        expect(without.gaps).toHaveLength(1);
+        expect(without.gaps[0]!.label).toBe("48m");
+        const withTick = buildScrubberGaps({ pointXs: [0.5], bars, spanMs: 3_600_000 });
+        expect(withTick.gaps).toHaveLength(2);
+        expect(withTick.gaps[0]!.label).toBe("23m 49s");
+        expect(withTick.gaps[1]!.label).toBe("23m 49s");
+    });
+
+    test("commit-only stretches are not gaps", () => {
+        const { remap, gaps } = buildScrubberGaps({
+            pointXs: Array.from({ length: 11 }, (_, i) => i / 10),
+            bars: [],
+            spanMs: 3_600_000,
+        });
+        expect(gaps).toHaveLength(0);
+        expect(remap(0.37)).toBe(0.37);
+    });
+
+    test("ticks and bars share the remap - a tick inside a bar stays inside it", () => {
+        const { remap, gaps } = buildScrubberGaps({
+            pointXs: [0.85],
+            bars: [{ x: 0, w: 0.1 }, { x: 0.8, w: 0.1 }],
+            spanMs: 3_600_000,
+        });
+        expect(gaps).toHaveLength(1);
+        expect(remap(0.85)).toBeGreaterThan(remap(0.8));
+        expect(remap(0.85)).toBeLessThan(remap(0.9));
+        expect(remap(0)).toBeCloseTo(0, 5);
+        expect(remap(1)).toBeCloseTo(1, 5);
     });
 });
 

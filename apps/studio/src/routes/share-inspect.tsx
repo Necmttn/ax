@@ -341,6 +341,118 @@ const parseShareTs = (iso: string | null | undefined): number | null => {
     return Number.isFinite(t) ? t : null;
 };
 
+export interface AxisGapBreak {
+    /** Post-compression band position/width (strip fraction). */
+    readonly x: number;
+    readonly w: number;
+    /** Domain endpoints of the compressed span - compute labels from these,
+     *  never from remapped fractions. */
+    readonly domainStart: number;
+    readonly domainEnd: number;
+}
+
+export interface AxisCompression {
+    /** Monotonic piecewise-linear domain -> strip map; identity when nothing
+     *  was compressed. */
+    readonly remap: (v: number) => number;
+    readonly gaps: ReadonlyArray<AxisGapBreak>;
+}
+
+const IDENTITY_AXIS_COMPRESSION: AxisCompression = { remap: (v) => v, gaps: [] };
+
+/**
+ * Shared fixed-point gap compression for a normalized 0..1 axis. Takes the
+ * coverage intervals (anything "active" on the axis), finds interior
+ * uncovered spans, and collapses the ones that would RENDER wider than
+ * SESSION_MAP_GAP_MIN down to SESSION_MAP_GAP_W, stretching everything else
+ * proportionally. Compressing one gap stretches the rest, which can push a
+ * previously sub-threshold gap over the visual threshold - selection iterates
+ * (widest first) until no gap qualifies, bounded by SESSION_MAP_GAP_PASSES
+ * and the SESSION_MAP_GAP_MAX band cap. Candidates no wider than the break
+ * width are excluded, which keeps the remap stretch-only (chosen total >
+ * chosen count * GAP_W, hence scale > 1) and monotonic; axis endpoints stay
+ * anchored (leading/trailing space is not a gap).
+ */
+export function compressAxisGaps(
+    intervals: ReadonlyArray<{ readonly start: number; readonly end: number }>,
+): AxisCompression {
+    const covered: Array<{ start: number; end: number }> = [];
+    for (const p of [...intervals].sort((a, b) => a.start - b.start)) {
+        const last = covered[covered.length - 1];
+        if (last && p.start <= last.end) last.end = Math.max(last.end, p.end);
+        else covered.push({ start: p.start, end: p.end });
+    }
+    const candidates = covered
+        .slice(1)
+        .map((seg, i) => ({ start: covered[i]!.end, end: seg.start }))
+        .filter((g) => g.end - g.start > SESSION_MAP_GAP_W);
+    const chosen: Array<{ start: number; end: number }> = [];
+    for (let pass = 0; pass < SESSION_MAP_GAP_PASSES && chosen.length < SESSION_MAP_GAP_MAX; pass++) {
+        const chosenTotal = chosen.reduce((acc, g) => acc + (g.end - g.start), 0);
+        const stretch = (1 - chosen.length * SESSION_MAP_GAP_W) / (1 - chosenTotal);
+        const qualifying = candidates
+            .filter((g) => !chosen.includes(g) && (g.end - g.start) * stretch > SESSION_MAP_GAP_MIN)
+            .sort((a, b) => (b.end - b.start) - (a.end - a.start));
+        if (qualifying.length === 0) break;
+        for (const g of qualifying) {
+            if (chosen.length >= SESSION_MAP_GAP_MAX) break;
+            chosen.push(g);
+        }
+    }
+    if (chosen.length === 0) return IDENTITY_AXIS_COMPRESSION;
+    chosen.sort((a, b) => a.start - b.start);
+    const gapTotal = chosen.reduce((acc, g) => acc + (g.end - g.start), 0);
+    const scale = (1 - chosen.length * SESSION_MAP_GAP_W) / (1 - gapTotal);
+    const remap = (v: number): number => {
+        let out = 0;
+        let prev = 0;
+        for (const g of chosen) {
+            if (v <= g.start) return out + (v - prev) * scale;
+            out += (g.start - prev) * scale;
+            if (v <= g.end) return out + ((v - g.start) / (g.end - g.start)) * SESSION_MAP_GAP_W;
+            out += SESSION_MAP_GAP_W;
+            prev = g.end;
+        }
+        return out + (v - prev) * scale;
+    };
+    return {
+        remap,
+        gaps: chosen.map((g) => ({ x: remap(g.start), w: SESSION_MAP_GAP_W, domainStart: g.start, domainEnd: g.end })),
+    };
+}
+
+/** Point events (commit/failure ticks) anchor scrubber coverage as a span
+ *  this wide - an isolated commit in a quiet stretch is still activity. */
+const SCRUBBER_POINT_COVER_W = 0.006;
+
+/**
+ * Scrubber-side gap shaping: coverage is the union of ALL activity on the
+ * wall-clock strip - commit ticks, failure ticks (points, inflated a touch so
+ * they anchor coverage), and subagent bars. A stretch with none of those is a
+ * gap candidate. Labels are wall-clock (the scrubber domain is time).
+ */
+export function buildScrubberGaps(args: {
+    readonly pointXs: ReadonlyArray<number>;
+    readonly bars: ReadonlyArray<{ readonly x: number; readonly w: number }>;
+    readonly spanMs: number;
+}): { readonly remap: (v: number) => number; readonly gaps: ReadonlyArray<SessionMapGap> } {
+    const compression = compressAxisGaps([
+        ...args.pointXs.map((x) => ({
+            start: Math.max(0, x - SCRUBBER_POINT_COVER_W / 2),
+            end: Math.min(1, x + SCRUBBER_POINT_COVER_W / 2),
+        })),
+        ...args.bars.map((b) => ({ start: b.x, end: Math.min(1, b.x + b.w) })),
+    ]);
+    return {
+        remap: compression.remap,
+        gaps: compression.gaps.map((g) => ({
+            x: g.x,
+            w: g.w,
+            label: fmtDuration((g.domainEnd - g.domainStart) * args.spanMs) ?? "",
+        })),
+    };
+}
+
 /**
  * Pure shaper for the share-page session map: manifest in, positioned lanes
  * out. Axis is chosen once per share - spawn seq when every card has one AND
@@ -414,82 +526,39 @@ export function buildSessionMapLanes(manifest: ShareManifest): SessionMapModel |
     let remap = (v: number): number => v;
     let gaps: ReadonlyArray<SessionMapGap> = [];
     if (axis !== "order") {
-        const covered: Array<{ start: number; end: number }> = [];
-        for (const p of [...placed].sort((a, b) => a.x - b.x)) {
-            const last = covered[covered.length - 1];
-            if (last && p.x <= last.end) last.end = Math.max(last.end, p.x + p.w);
-            else covered.push({ start: p.x, end: p.x + p.w });
-        }
-        // Candidates: interior uncovered spans, tracked by their DOMAIN
-        // endpoints (labels must come from domain quantities, never remapped
-        // fractions). Spans no wider than the break width are excluded - they
-        // can't shrink, and excluding them keeps the remap stretch-only
-        // (chosen total > chosen count * GAP_W, hence scale > 1).
-        const candidates = covered
-            .slice(1)
-            .map((seg, i) => ({ start: covered[i]!.end, end: seg.start }))
-            .filter((g) => g.end - g.start > SESSION_MAP_GAP_W);
-        // Fixed-point selection: a gap qualifies when its RENDERED width
-        // (domain width x current stretch) exceeds the threshold, and every
-        // compression raises the stretch - so iterate, widest first, until no
-        // gap qualifies or the pass/band caps stop it.
-        const chosen: Array<{ start: number; end: number }> = [];
-        for (let pass = 0; pass < SESSION_MAP_GAP_PASSES && chosen.length < SESSION_MAP_GAP_MAX; pass++) {
-            const chosenTotal = chosen.reduce((acc, g) => acc + (g.end - g.start), 0);
-            const stretch = (1 - chosen.length * SESSION_MAP_GAP_W) / (1 - chosenTotal);
-            const qualifying = candidates
-                .filter((g) => !chosen.includes(g) && (g.end - g.start) * stretch > SESSION_MAP_GAP_MIN)
-                .sort((a, b) => (b.end - b.start) - (a.end - a.start));
-            if (qualifying.length === 0) break;
-            for (const g of qualifying) {
-                if (chosen.length >= SESSION_MAP_GAP_MAX) break;
-                chosen.push(g);
+        const gapLabel = (g: { readonly start: number; readonly end: number }): string => {
+            if (axis === "time" && windowMs != null) {
+                return fmtDuration((g.end - g.start) * windowMs) ?? "";
             }
-        }
-        if (chosen.length > 0) {
-            chosen.sort((a, b) => a.start - b.start);
-            const gapTotal = chosen.reduce((acc, g) => acc + (g.end - g.start), 0);
-            const scale = (1 - chosen.length * SESSION_MAP_GAP_W) / (1 - gapTotal);
-            remap = (v) => {
-                let out = 0;
-                let prev = 0;
-                for (const g of chosen) {
-                    if (v <= g.start) return out + (v - prev) * scale;
-                    out += (g.start - prev) * scale;
-                    if (v <= g.end) return out + ((v - g.start) / (g.end - g.start)) * SESSION_MAP_GAP_W;
-                    out += SESSION_MAP_GAP_W;
-                    prev = g.end;
-                }
-                return out + (v - prev) * scale;
-            };
-            const gapLabel = (g: { start: number; end: number }): string => {
-                if (axis === "time" && windowMs != null) {
-                    return fmtDuration((g.end - g.start) * windowMs) ?? "";
-                }
-                // Seq axis: prefer wall-clock between the adjacent clusters'
-                // timestamps; fall back to the turn delta when they're missing.
-                const before = placed.filter((p) => p.x + p.w <= g.start + 1e-9);
-                const after = placed.filter((p) => p.x >= g.end - 1e-9);
-                const prevEnds = before
-                    .map((p) => {
-                        const ts = parseShareTs(p.card.started_at);
-                        return ts != null ? ts + (p.card.duration_ms ?? 0) : null;
-                    })
-                    .filter((t): t is number => t != null);
-                const nextStarts = after
-                    .map((p) => parseShareTs(p.card.started_at))
-                    .filter((t): t is number => t != null);
-                if (prevEnds.length > 0 && nextStarts.length > 0) {
-                    const wallClock = Math.min(...nextStarts) - Math.max(...prevEnds);
-                    const label = wallClock > 0 ? fmtDuration(wallClock) : null;
-                    if (label) return label;
-                }
-                const prevSeq = Math.max(...before.map((p) => p.card.spawn_turn_seq ?? 0));
-                const nextSeq = Math.min(...after.map((p) => p.card.spawn_turn_seq ?? 0));
-                return `${Math.max(nextSeq - prevSeq, 0)} turns`;
-            };
-            gaps = chosen.map((g) => ({ x: remap(g.start), w: SESSION_MAP_GAP_W, label: gapLabel(g) }));
-        }
+            // Seq axis: prefer wall-clock between the adjacent clusters'
+            // timestamps; fall back to the turn delta when they're missing.
+            const before = placed.filter((p) => p.x + p.w <= g.start + 1e-9);
+            const after = placed.filter((p) => p.x >= g.end - 1e-9);
+            const prevEnds = before
+                .map((p) => {
+                    const ts = parseShareTs(p.card.started_at);
+                    return ts != null ? ts + (p.card.duration_ms ?? 0) : null;
+                })
+                .filter((t): t is number => t != null);
+            const nextStarts = after
+                .map((p) => parseShareTs(p.card.started_at))
+                .filter((t): t is number => t != null);
+            if (prevEnds.length > 0 && nextStarts.length > 0) {
+                const wallClock = Math.min(...nextStarts) - Math.max(...prevEnds);
+                const label = wallClock > 0 ? fmtDuration(wallClock) : null;
+                if (label) return label;
+            }
+            const prevSeq = Math.max(...before.map((p) => p.card.spawn_turn_seq ?? 0));
+            const nextSeq = Math.min(...after.map((p) => p.card.spawn_turn_seq ?? 0));
+            return `${Math.max(nextSeq - prevSeq, 0)} turns`;
+        };
+        const compression = compressAxisGaps(placed.map((p) => ({ start: p.x, end: p.x + p.w })));
+        remap = compression.remap;
+        gaps = compression.gaps.map((g) => ({
+            x: g.x,
+            w: g.w,
+            label: gapLabel({ start: g.domainStart, end: g.domainEnd }),
+        }));
     }
     const remapped = gaps.length === 0 ? placed : placed.map((p) => {
         const x = remap(p.x);
@@ -1006,34 +1075,52 @@ function SessionScrubber({ timeline, spawnCards }: {
         window.location.hash = `turn-${seq}`;
     };
     const fmtClock = (t: number) => new Date(t).toISOString().slice(5, 16).replace("T", " ");
-    // Subagent lanes: each dispatch as a bar on the same time axis, greedy
-    // row packing, opacity by cost - a timeline-local preview of the fan-out
-    // (the standalone F2 session map is ShareSessionMap, rendered separately).
-    const lanes: Array<Array<{ x: number; w: number; cost: number; failed: boolean; label: string }>> = [];
-    const laneEnds: number[] = [];
+    const commitXs = ticks("checkpoint");
+    const failXs = ticks("failure");
+    // Subagent bars in raw domain coords - row packing happens after the remap.
     const maxCost = Math.max(0.01, ...(spawnCards ?? []).map((c) => c.cost_usd ?? 0));
+    const rawBars: Array<{ x: number; w: number; cost: number; failed: boolean; label: string }> = [];
     for (const card of [...(spawnCards ?? [])].sort((p, q) => (p.started_at ?? "").localeCompare(q.started_at ?? ""))) {
         const x = frac(card.started_at);
         if (x == null) continue;
-        const w = Math.max((card.duration_ms ?? 0) / span, 0.004);
-        let r = 0;
-        while (r < laneEnds.length && laneEnds[r] > x - 0.002) r++;
-        if (r >= 4) r = 3;
-        laneEnds[r] = x + w;
-        (lanes[r] ??= []).push({
+        rawBars.push({
             x,
-            w,
+            w: Math.max((card.duration_ms ?? 0) / span, 0.004),
             cost: card.cost_usd ?? 0,
             failed: (card.stats?.failures ?? 0) > 0,
             label: `${card.task_label ?? card.id} - ${fmtUsd(card.cost_usd) ?? ""}`,
         });
     }
+    // Dead stretches (no commits, no failures, no subagents) compress to
+    // labeled breaks, same machinery as the session map. EVERY positional
+    // value below runs through the same remap - segments, label anchors,
+    // ticks, bars - so nothing drifts off its activity.
+    const { remap, gaps } = buildScrubberGaps({
+        pointXs: [...commitXs, ...failXs],
+        bars: rawBars,
+        spanMs: span,
+    });
+    // Subagent lanes: each dispatch as a bar on the shared (remapped) time
+    // axis, greedy row packing, opacity by cost - a timeline-local preview of
+    // the fan-out (the standalone F2 session map is ShareSessionMap).
+    const lanes: Array<Array<{ x: number; w: number; cost: number; failed: boolean; label: string }>> = [];
+    const laneEnds: number[] = [];
+    for (const bar of rawBars) {
+        const x = remap(bar.x);
+        const w = remap(Math.min(bar.x + bar.w, 1)) - x;
+        let r = 0;
+        while (r < laneEnds.length && laneEnds[r] > x - 0.002) r++;
+        if (r >= 4) r = 3;
+        laneEnds[r] = x + w;
+        (lanes[r] ??= []).push({ ...bar, x, w });
+    }
+    const rsegs = segs.map((s) => ({ seg: s.seg, a: remap(s.a), b: remap(s.b) }));
     return (
         <div className="scrub-wrap">
             {/* Labels live in their own deck so the strip below stays pure
                 signal - inside the strip they collided with the ticks. */}
             <div className="scrub-labels">
-                {segs.filter(({ a, b }) => b - a > 0.08).map(({ seg, a, b }) => (
+                {rsegs.filter(({ a, b }) => b - a > 0.08).map(({ seg, a, b }) => (
                     <span
                         key={`l-${seg.id}`}
                         style={{ left: `${a * 100}%`, width: `${(b - a) * 100}%` }}
@@ -1044,7 +1131,7 @@ function SessionScrubber({ timeline, spawnCards }: {
                 ))}
             </div>
             <div className="scrub">
-                {segs.map(({ seg, a, b }) => (
+                {rsegs.map(({ seg, a, b }) => (
                     <button
                         key={seg.id}
                         type="button"
@@ -1054,8 +1141,32 @@ function SessionScrubber({ timeline, spawnCards }: {
                         onClick={() => jump(seg.start_seq)}
                     />
                 ))}
-                {ticks("checkpoint").map((x, i) => <i key={`c${i}`} className="scrub-commit" style={{ left: `${x * 100}%` }} />)}
-                {ticks("failure").map((x, i) => <i key={`f${i}`} className="scrub-fail" style={{ left: `${x * 100}%` }} />)}
+                {gaps.map((gap, i) => (
+                    <span
+                        key={`g${i}`}
+                        title={`no activity for ${gap.label}`}
+                        style={{
+                            position: "absolute",
+                            left: `${gap.x * 100}%`,
+                            width: `${gap.w * 100}%`,
+                            top: 0,
+                            height: "100%",
+                            borderLeft: "1px dotted var(--muted-2)",
+                            borderRight: "1px dotted var(--muted-2)",
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+                            font: "9px/1.2 ui-monospace, monospace",
+                            color: "var(--muted-2)",
+                            whiteSpace: "nowrap",
+                            overflow: "hidden",
+                        }}
+                    >
+                        {gap.label}
+                    </span>
+                ))}
+                {commitXs.map((x, i) => <i key={`c${i}`} className="scrub-commit" style={{ left: `${remap(x) * 100}%` }} />)}
+                {failXs.map((x, i) => <i key={`f${i}`} className="scrub-fail" style={{ left: `${remap(x) * 100}%` }} />)}
             </div>
             {lanes.length > 0 ? (
                 <div className="scrub-lanes" style={{ height: lanes.length * 8 + 2 }}>
