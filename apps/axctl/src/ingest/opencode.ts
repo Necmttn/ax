@@ -3,7 +3,6 @@ import { Effect, FileSystem, Option, Path, Schema } from "effect";
 import { AxConfig } from "@ax/lib/config";
 import { RecordId, SurrealClient } from "@ax/lib/db";
 import { decodeJsonOrNull } from "@ax/lib/decode";
-import type { DbError } from "@ax/lib/errors";
 import { orAbsent } from "@ax/lib/shared/fs-error";
 import { executeStatements } from "@ax/lib/shared/statement-exec";
 import {
@@ -922,10 +921,8 @@ interface OpenCodeIngestOpts {
     sinceDays: number | undefined;
 }
 
-export const ingestOpenCode = (
-    opts: Partial<OpenCodeIngestOpts> = {},
-): Effect.Effect<OpenCodeStats, DbError, SurrealClient | AxConfig | FileSystem.FileSystem | Path.Path> =>
-    Effect.gen(function* () {
+export const ingestOpenCode = Effect.fn("opencode.ingest")(
+    function* (opts: Partial<OpenCodeIngestOpts> = {}) {
         const cfg = yield* AxConfig;
         const db = yield* SurrealClient;
         const cutoff = opts.sinceDays ? Date.now() - opts.sinceDays * 86400 * 1000 : 0;
@@ -981,8 +978,9 @@ export const ingestOpenCode = (
             toolCalls: extract.toolCalls.length,
             skipped: extract.skipped,
             warnings: extract.warnings.length,
-        };
-    });
+        } satisfies OpenCodeStats;
+    },
+);
 
 export class OpenCodeStageStats extends BaseStageStats.extend<OpenCodeStageStats>("OpenCodeStageStats")({
     sessionsIngested: Schema.Number,
@@ -994,19 +992,20 @@ export class OpenCodeStageStats extends BaseStageStats.extend<OpenCodeStageStats
 
 export const opencodeStage: StageDef<OpenCodeStageStats, SurrealClient | AxConfig | FileSystem.FileSystem | Path.Path> = {
     meta: StageMeta.make({ key: "opencode", deps: ["skills", "commands"], tags: ["ingest"] }),
-    run: (ctx: IngestContext) =>
-        Effect.gen(function* () {
-            const t0 = Date.now();
-            const sinceDays = sinceDaysFromCtx(ctx);
-            const result = yield* ingestOpenCode({ sinceDays });
-            return OpenCodeStageStats.make({
-                durationMs: Date.now() - t0,
-                summary: `ingested ${result.sessions} sessions, ${result.turns} turns, ${result.toolCalls} tool calls, skipped ${result.skipped}, warnings ${result.warnings}`,
-                sessionsIngested: result.sessions,
-                turnsIngested: result.turns,
-                toolCallsIngested: result.toolCalls,
-                skipped: result.skipped,
-                warnings: result.warnings,
-            });
-        }),
+    // Unnamed Effect.fn: the stage runner's LiveTrace.step span already names
+    // this boundary by the stage key, so a named span here would double-wrap.
+    run: Effect.fn(function* (ctx: IngestContext) {
+        const t0 = Date.now();
+        const sinceDays = sinceDaysFromCtx(ctx);
+        const result = yield* ingestOpenCode({ sinceDays });
+        return OpenCodeStageStats.make({
+            durationMs: Date.now() - t0,
+            summary: `ingested ${result.sessions} sessions, ${result.turns} turns, ${result.toolCalls} tool calls, skipped ${result.skipped}, warnings ${result.warnings}`,
+            sessionsIngested: result.sessions,
+            turnsIngested: result.turns,
+            toolCallsIngested: result.toolCalls,
+            skipped: result.skipped,
+            warnings: result.warnings,
+        });
+    }),
 };

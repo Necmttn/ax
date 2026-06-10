@@ -73,27 +73,25 @@ interface CommitWithFiles extends CommitRow {
 // ---------- repo discovery ----------
 
 /** @internal exported for tests: proves OPTIONAL-config read tolerance. */
-export const readRepoListFile = (): Effect.Effect<string[], never, FileSystem.FileSystem> =>
-    Effect.gen(function* () {
+export const readRepoListFile = Effect.fn("git.readRepoListFile")(
+    function* () {
         const fs = yield* FileSystem.FileSystem;
         const txt = yield* fs.readFileString(REPO_LIST_FILE);
         return txt
             .split("\n")
             .map((l) => l.trim())
             .filter((l) => l.length > 0 && !l.startsWith("#"));
-    }).pipe(
-        // An OPTIONAL override file: a missing file (NotFound) is the common
-        // case, but a permission/EISDIR/IO fault on this best-effort config read
-        // must ALSO be treated as "no override" rather than aborting the whole
-        // git ingest stage. orAbsent recovers ANY PlatformError to an empty list.
-        orAbsent<string[]>([]),
-    );
+    },
+    // An OPTIONAL override file: a missing file (NotFound) is the common
+    // case, but a permission/EISDIR/IO fault on this best-effort config read
+    // must ALSO be treated as "no override" rather than aborting the whole
+    // git ingest stage. orAbsent recovers ANY PlatformError to an empty list.
+    orAbsent<string[]>([]),
+);
 
 /** @internal exported for tests: proves discovery-PROBE tolerance. */
-export const isGitRepo = (
-    path: string,
-): Effect.Effect<boolean, never, FileSystem.FileSystem | Path.Path> =>
-    Effect.gen(function* () {
+export const isGitRepo = Effect.fn("git.isGitRepo")(
+    function* (path: string) {
         const fs = yield* FileSystem.FileSystem;
         const pathSvc = yield* Path.Path;
         // A discovery PROBE: `fs.exists` reports presence without throwing on
@@ -103,26 +101,25 @@ export const isGitRepo = (
         // recovers ANY PlatformError to false so a single inaccessible candidate
         // never aborts the whole repo walk.
         return yield* fs.exists(pathSvc.join(path, ".git"));
-    }).pipe(orAbsent(false));
+    },
+    orAbsent<boolean>(false),
+);
 
 /**
  * Walk upward from `cwd` until we find a `.git` entry. Returns null when the
  * filesystem root is reached without a hit. Bounded to 12 levels for safety.
  */
-const findRepoRoot = (
-    cwd: string,
-): Effect.Effect<string | null, PlatformError.PlatformError, FileSystem.FileSystem | Path.Path> =>
-    Effect.gen(function* () {
-        const pathSvc = yield* Path.Path;
-        let cur = cwd;
-        for (let i = 0; i < 12; i += 1) {
-            if (yield* isGitRepo(cur)) return cur;
-            const parent = pathSvc.dirname(cur);
-            if (parent === cur) return null;
-            cur = parent;
-        }
-        return null;
-    });
+const findRepoRoot = Effect.fn("git.findRepoRoot")(function* (cwd: string) {
+    const pathSvc = yield* Path.Path;
+    let cur = cwd;
+    for (let i = 0; i < 12; i += 1) {
+        if (yield* isGitRepo(cur)) return cur;
+        const parent = pathSvc.dirname(cur);
+        if (parent === cur) return null;
+        cur = parent;
+    }
+    return null;
+});
 
 const deriveReposFromSessions = (): Effect.Effect<
     string[],
@@ -308,11 +305,8 @@ const parseNumstat = (raw: string): FileTouch[] => {
     return files;
 };
 
-const fetchCommits = (
-    repo: RepoInfo,
-    sinceDays: number,
-): Effect.Effect<CommitWithFiles[]> =>
-    Effect.gen(function* () {
+const fetchCommits = Effect.fn("git.fetchCommits")(
+    function* (repo: RepoInfo, sinceDays: number) {
         const since = `${sinceDays}.days.ago`;
         const log = yield* runGit(repo.path, [
             "log",
@@ -343,7 +337,8 @@ const fetchCommits = (
             { concurrency: 4 },
         );
         return enriched;
-    });
+    },
+);
 
 // ---------- DB writers ----------
 
@@ -608,12 +603,12 @@ export function deriveRepositoryDisplayName(
     return remoteName && remoteName.length > 0 ? remoteName : posixPath.basename(repoPath);
 }
 
-const writeRepo = (
-    repo: RepoInfo,
-    commits: CommitWithFiles[],
-    allRepoPaths: readonly string[],
-) =>
-    Effect.gen(function* () {
+const writeRepo = Effect.fn("git.writeRepo")(
+    function* (
+        repo: RepoInfo,
+        commits: CommitWithFiles[],
+        allRepoPaths: readonly string[],
+    ) {
         const db = yield* SurrealClient;
         const repositoryId = recordLiteral("repository", repo.repositoryKey);
         const checkoutId = recordLiteral("checkout", repo.checkoutKey);
@@ -789,7 +784,8 @@ const writeRepo = (
             touched: touchedCount,
             sessions: linkedSessions,
         } satisfies WriteStats;
-    });
+    },
+);
 
 // ---------- skip-unchanged watermark (hypothesis 007) ----------
 //
@@ -873,14 +869,8 @@ export interface GitStats {
     sessions: number;
 }
 
-export const ingestGit = (
-    opts: Partial<GitIngestOpts> = {},
-): Effect.Effect<
-    GitStats,
-    DbError | PlatformError.PlatformError,
-    SurrealClient | FileSystem.FileSystem | Path.Path
-> =>
-    Effect.gen(function* () {
+export const ingestGit = Effect.fn("git.ingest")(
+    function* (opts: Partial<GitIngestOpts> = {}) {
         const requested = opts.sinceDays ?? DEFAULT_SINCE_DAYS;
         const sinceDays = Math.min(Math.max(requested, 1), MAX_SINCE_DAYS);
 
@@ -991,7 +981,8 @@ export const ingestGit = (
         const out: GitStats = { repos: repos.length, ...totals };
         yield* Effect.logDebug("git ingest complete", out);
         return out;
-    });
+    },
+);
 
 if (import.meta.main) {
     const sinceArg = process.argv.find((a) => a.startsWith("--since="));
@@ -1029,8 +1020,11 @@ export const gitStage: StageDef<
     SurrealClient | FileSystem.FileSystem | Path.Path
 > = {
     meta: StageMeta.make({ key: "git", deps: [], tags: ["ingest"] }),
-    run: (ctx: IngestContext) =>
-        Effect.gen(function* () {
+    // Unnamed Effect.fn: stack-frame boundary only. The stage runner already
+    // wraps each run in a LiveTrace.step span named by the stage key, so a
+    // named span here would double-wrap.
+    run: Effect.fn(
+        function* (ctx: IngestContext) {
             const t0 = Date.now();
             const sinceDays = sinceDaysFromCtx(ctx);
             // Repo discovery tolerates a vanished override file / missing `.git`
@@ -1048,5 +1042,6 @@ export const gitStage: StageDef<
                 commitsIngested: result.commits,
                 repositoriesSeen: result.repos,
             });
-        }),
+        },
+    ),
 };

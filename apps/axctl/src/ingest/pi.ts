@@ -1,10 +1,9 @@
-import { Effect, FileSystem, Option, Path, PlatformError, Schema } from "effect";
+import { Effect, FileSystem, Option, Path, Schema } from "effect";
 import { orAbsent } from "@ax/lib/shared/fs-error";
 import { classifyNoFollow } from "@ax/lib/shared/fs-classify";
 import { AxConfig } from "@ax/lib/config";
 import { RecordId, SurrealClient } from "@ax/lib/db";
 import { decodeJsonOrNull } from "@ax/lib/decode";
-import type { DbError } from "@ax/lib/errors";
 import { safeKeyPart } from "@ax/lib/shared/derive-keys";
 import { executeStatements } from "@ax/lib/shared/statement-exec";
 import {
@@ -794,10 +793,8 @@ interface PiIngestOpts {
     sinceDays: number | undefined;
 }
 
-export const ingestPi = (
-    opts: Partial<PiIngestOpts> = {},
-): Effect.Effect<PiStats, DbError | PlatformError.PlatformError, SurrealClient | AxConfig | FileSystem.FileSystem | Path.Path> =>
-    Effect.gen(function* () {
+export const ingestPi = Effect.fn("pi.ingest")(
+    function* (opts: Partial<PiIngestOpts> = {}) {
         const cfg = yield* AxConfig;
         const db = yield* SurrealClient;
         const fs = yield* FileSystem.FileSystem;
@@ -855,8 +852,9 @@ export const ingestPi = (
             toolCalls: toolCallCount,
             skipped,
             warnings: warningCount,
-        };
-    });
+        } satisfies PiStats;
+    },
+);
 
 export class PiStageStats extends BaseStageStats.extend<PiStageStats>("PiStageStats")({
     filesIngested: Schema.Number,
@@ -870,27 +868,28 @@ export class PiStageStats extends BaseStageStats.extend<PiStageStats>("PiStageSt
 
 export const piStage: StageDef<PiStageStats, SurrealClient | AxConfig | FileSystem.FileSystem | Path.Path> = {
     meta: StageMeta.make({ key: "pi", deps: ["skills", "commands"], tags: ["ingest"] }),
-    run: (ctx: IngestContext) =>
-        Effect.gen(function* () {
-            const t0 = Date.now();
-            const sinceDays = sinceDaysFromCtx(ctx);
-            // The directory walk recovers every PlatformError internally; the
-            // only PlatformError that can escape `ingestPi` is a per-file
-            // `readFileString` fault, which (like claude/codex) dies as a defect
-            // rather than masquerading as a recoverable DbError.
-            const result = yield* ingestPi({ sinceDays }).pipe(
-                Effect.catchTag("PlatformError", (e) => Effect.die(e)),
-            );
-            return PiStageStats.make({
-                durationMs: Date.now() - t0,
-                summary: `ingested ${result.files} files, ${result.sessions} sessions, ${result.events} events, ${result.turns} turns, ${result.toolCalls} tool calls, skipped ${result.skipped}, warnings ${result.warnings}`,
-                filesIngested: result.files,
-                sessionsIngested: result.sessions,
-                eventsIngested: result.events,
-                turnsIngested: result.turns,
-                toolCallsIngested: result.toolCalls,
-                skipped: result.skipped,
-                warnings: result.warnings,
-            });
-        }),
+    // Unnamed Effect.fn: the stage runner's LiveTrace.step span already names
+    // this boundary by the stage key, so a named span here would double-wrap.
+    run: Effect.fn(function* (ctx: IngestContext) {
+        const t0 = Date.now();
+        const sinceDays = sinceDaysFromCtx(ctx);
+        // The directory walk recovers every PlatformError internally; the
+        // only PlatformError that can escape `ingestPi` is a per-file
+        // `readFileString` fault, which (like claude/codex) dies as a defect
+        // rather than masquerading as a recoverable DbError.
+        const result = yield* ingestPi({ sinceDays }).pipe(
+            Effect.catchTag("PlatformError", (e) => Effect.die(e)),
+        );
+        return PiStageStats.make({
+            durationMs: Date.now() - t0,
+            summary: `ingested ${result.files} files, ${result.sessions} sessions, ${result.events} events, ${result.turns} turns, ${result.toolCalls} tool calls, skipped ${result.skipped}, warnings ${result.warnings}`,
+            filesIngested: result.files,
+            sessionsIngested: result.sessions,
+            eventsIngested: result.events,
+            turnsIngested: result.turns,
+            toolCallsIngested: result.toolCalls,
+            skipped: result.skipped,
+            warnings: result.warnings,
+        });
+    }),
 };

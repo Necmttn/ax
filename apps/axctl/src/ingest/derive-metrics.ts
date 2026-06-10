@@ -1,6 +1,5 @@
 import { Effect, Schema } from "effect";
 import { SurrealClient } from "@ax/lib/db";
-import type { DbError } from "@ax/lib/errors";
 import { recordLiteral } from "@ax/lib/ids";
 import { recordKeyPart } from "@ax/lib/shared/derive-keys";
 import { executeStatementsWith } from "@ax/lib/shared/statement-exec";
@@ -40,10 +39,8 @@ const num = (n: number | null): string => (n === null ? "NONE" : String(n));
  * scalars for the dirty set; (4) UPSERT one `session_metrics` row per dirty
  * session.
  */
-export const deriveMetrics = (
-    opts: { sinceDays: number | undefined },
-): Effect.Effect<DeriveMetricsStats, DbError, SurrealClient> =>
-    Effect.gen(function* () {
+export const deriveMetrics = Effect.fn("derive.metrics")(
+    function* (opts: { sinceDays: number | undefined }) {
         const db = yield* SurrealClient;
 
         // 0. Stored cost backfill: price `session_token_usage` rows that were
@@ -197,8 +194,9 @@ export const deriveMetrics = (
         // sessions (codex #2).
         if (!reverted.skipped) yield* advanceRevertedWatermark(reverted.fingerprint);
         if (!prDirty.skipped) yield* advancePrMergeWatermark(prDirty.diff);
-        return { sessionsWritten: expandedIds.length, revertedCommits: reverted.revertedCount, cascadeEdges, costBackfilled: costs.backfilled };
-    });
+        return { sessionsWritten: expandedIds.length, revertedCommits: reverted.revertedCount, cascadeEdges, costBackfilled: costs.backfilled } satisfies DeriveMetricsStats;
+    },
+);
 
 // ---------------------------------------------------------------------------
 // Co-located StageDef
@@ -216,17 +214,18 @@ export class DeriveMetricsStageStats extends BaseStageStats.extend<DeriveMetrics
 
 export const deriveMetricsStage: StageDef<DeriveMetricsStageStats, SurrealClient> = {
     meta: StageMeta.make({ key: "derive-metrics", deps: ["git", "session-health", "spawned"], tags: ["derive"] }),
-    run: (ctx: IngestContext) =>
-        Effect.gen(function* () {
-            const t0 = Date.now();
-            const r = yield* deriveMetrics({ sinceDays: sinceDaysFromCtx(ctx) });
-            return DeriveMetricsStageStats.make({
-                durationMs: Date.now() - t0,
-                summary: `wrote ${r.sessionsWritten} session_metrics rows; ${r.revertedCommits} reverted commits; ${r.cascadeEdges} cascade edges; ${r.costBackfilled} costs backfilled`,
-                sessionsWritten: r.sessionsWritten,
-                revertedCommits: r.revertedCommits,
-                cascadeEdges: r.cascadeEdges,
-                costBackfilled: r.costBackfilled,
-            });
-        }),
+    // Unnamed Effect.fn: the stage runner's LiveTrace.step span already names
+    // this boundary by the stage key, so a named span here would double-wrap.
+    run: Effect.fn(function* (ctx: IngestContext) {
+        const t0 = Date.now();
+        const r = yield* deriveMetrics({ sinceDays: sinceDaysFromCtx(ctx) });
+        return DeriveMetricsStageStats.make({
+            durationMs: Date.now() - t0,
+            summary: `wrote ${r.sessionsWritten} session_metrics rows; ${r.revertedCommits} reverted commits; ${r.cascadeEdges} cascade edges; ${r.costBackfilled} costs backfilled`,
+            sessionsWritten: r.sessionsWritten,
+            revertedCommits: r.revertedCommits,
+            cascadeEdges: r.cascadeEdges,
+            costBackfilled: r.costBackfilled,
+        });
+    }),
 };

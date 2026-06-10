@@ -110,24 +110,24 @@ export const spawnScoped = (
  * child before the effect settles. Resolves with the `ProcessResult` for any
  * exit code; fails with `ProcessError` only when the spawn itself fails.
  */
-export const runCommand = (
-    command: string,
-    args: ReadonlyArray<string>,
-    options: SpawnOptions = {},
-): Effect.Effect<ProcessResult, ProcessError> =>
-    Effect.scoped(
-        Effect.gen(function* () {
-            const proc = yield* spawnScoped(command, args, options);
-            const [stdout, stderr] = yield* Effect.promise(() =>
-                Promise.all([
-                    new Response(proc.stdout).text(),
-                    new Response(proc.stderr).text(),
-                ]),
-            );
-            yield* Effect.promise(() => proc.exited);
-            return { stdout, stderr, code: proc.exitCode ?? 0 };
-        }),
-    );
+export const runCommand = Effect.fn("process.runCommand")(
+    function* (
+        command: string,
+        args: ReadonlyArray<string>,
+        options: SpawnOptions = {},
+    ) {
+        const proc = yield* spawnScoped(command, args, options);
+        const [stdout, stderr] = yield* Effect.promise(() =>
+            Promise.all([
+                new Response(proc.stdout).text(),
+                new Response(proc.stderr).text(),
+            ]),
+        );
+        yield* Effect.promise(() => proc.exited);
+        return { stdout, stderr, code: proc.exitCode ?? 0 } satisfies ProcessResult;
+    },
+    (effect) => Effect.scoped(effect),
+);
 
 const liveExec = (
     command: string,

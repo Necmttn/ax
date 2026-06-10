@@ -5,7 +5,6 @@ import { surrealLiteral } from "@ax/lib/json";
 import { decodeJsonOrNull } from "@ax/lib/decode";
 import { resolveSkillName, skillRecordKey } from "@ax/lib/skill-id";
 import { AppLayer } from "@ax/lib/layers";
-import type { DbError } from "@ax/lib/errors";
 import { BaseStageStats, IngestContext, sinceDaysFromCtx, StageMeta } from "./stage/types.ts";
 import { annotateStageProgress } from "./stage/runner.ts";
 import type { StageDef } from "./stage/registry.ts";
@@ -1150,12 +1149,16 @@ const extractFile = (
  * `PlatformError` (`reason._tag === "NotFound"`) the caller can catch and
  * skip - rather than an unrecoverable defect that aborts the whole run.
  */
-export const extractFileWithSessionId = (
-    filePath: string,
-    projectDir: string,
-    sessionId: string,
-): Effect.Effect<FileExtract | null, PlatformError.PlatformError, FileSystem.FileSystem | Path.Path> =>
-    Effect.gen(function* () {
+export const extractFileWithSessionId = Effect.fn("transcripts.extractFileWithSessionId")(
+    function* (
+        filePath: string,
+        projectDir: string,
+        sessionId: string,
+    ): Effect.fn.Return<
+        FileExtract | null,
+        PlatformError.PlatformError,
+        FileSystem.FileSystem | Path.Path
+    > {
         const fs = yield* FileSystem.FileSystem;
         const path = yield* Path.Path;
         const extractor = createClaudeExtractor(path, projectDir, sessionId);
@@ -1167,7 +1170,8 @@ export const extractFileWithSessionId = (
         const extracted = extractor.finish();
         if (!extracted) return null;
         return { ...extracted, sourcePath: filePath };
-    });
+    },
+);
 
 export {
     upsertSessions as upsertSessionsForSubagents,
@@ -1563,10 +1567,8 @@ export interface TranscriptStats {
     malformedLines: number;
 }
 
-export const ingestTranscripts = (
-    opts: Partial<IngestOpts> = {},
-): Effect.Effect<TranscriptStats, DbError | PlatformError.PlatformError, SurrealClient | AxConfig | FileSystem.FileSystem | Path.Path> =>
-    Effect.gen(function* () {
+export const ingestTranscripts = Effect.fn("transcripts.ingest")(
+    function* (opts: Partial<IngestOpts> = {}) {
         const cfg = yield* AxConfig;
         const fs = yield* FileSystem.FileSystem;
         const path = yield* Path.Path;
@@ -1841,8 +1843,9 @@ export const ingestTranscripts = (
             hookEvents: hookEventCount,
             hookCommandInvocations: hookCommandInvocationCount,
             malformedLines: malformedLineCount,
-        };
-    });
+        } satisfies TranscriptStats;
+    },
+);
 
 if (import.meta.main) {
     const sinceArg = process.argv.find((a) => a.startsWith("--since="));
@@ -1879,26 +1882,27 @@ export class ClaudeStats extends BaseStageStats.extend<ClaudeStats>("ClaudeStats
 
 export const claudeStage: StageDef<ClaudeStats, SurrealClient | AxConfig | FileSystem.FileSystem | Path.Path> = {
     meta: StageMeta.make({ key: "claude", deps: ["skills", "commands"], tags: ["ingest"] }),
-    run: (ctx: IngestContext) =>
-        Effect.gen(function* () {
-            const t0 = Date.now();
-            const sinceDays = sinceDaysFromCtx(ctx);
-            // The vanished-transcript case is caught + skipped inside
-            // `ingestTranscripts`; any PlatformError that escapes here is a
-            // genuine FS failure (e.g. an unreadable transcripts root or a
-            // non-NotFound stat/stream error) so it dies as a defect rather
-            // than masquerading as a recoverable DbError.
-            const result = yield* ingestTranscripts({ sinceDays, project: ctx.claudeProject, onProgress: annotateStageProgress }).pipe(
-                Effect.catchTag("PlatformError", (e) => Effect.die(e)),
-            );
-            return ClaudeStats.make({
-                durationMs: Date.now() - t0,
-                summary: `ingested ${result.sessions} sessions, ${result.turns} turns, ${result.toolCalls} tool calls` +
-                    (result.malformedLines > 0 ? `, ${result.malformedLines} malformed lines skipped` : ""),
-                sessionsIngested: result.sessions,
-                turnsIngested: result.turns,
-                toolCallsIngested: result.toolCalls,
-                malformedLines: result.malformedLines,
-            });
-        }),
+    // Unnamed Effect.fn: the stage runner's LiveTrace.step span already names
+    // this boundary by the stage key, so a named span here would double-wrap.
+    run: Effect.fn(function* (ctx: IngestContext) {
+        const t0 = Date.now();
+        const sinceDays = sinceDaysFromCtx(ctx);
+        // The vanished-transcript case is caught + skipped inside
+        // `ingestTranscripts`; any PlatformError that escapes here is a
+        // genuine FS failure (e.g. an unreadable transcripts root or a
+        // non-NotFound stat/stream error) so it dies as a defect rather
+        // than masquerading as a recoverable DbError.
+        const result = yield* ingestTranscripts({ sinceDays, project: ctx.claudeProject, onProgress: annotateStageProgress }).pipe(
+            Effect.catchTag("PlatformError", (e) => Effect.die(e)),
+        );
+        return ClaudeStats.make({
+            durationMs: Date.now() - t0,
+            summary: `ingested ${result.sessions} sessions, ${result.turns} turns, ${result.toolCalls} tool calls` +
+                (result.malformedLines > 0 ? `, ${result.malformedLines} malformed lines skipped` : ""),
+            sessionsIngested: result.sessions,
+            turnsIngested: result.turns,
+            toolCallsIngested: result.toolCalls,
+            malformedLines: result.malformedLines,
+        });
+    }),
 };

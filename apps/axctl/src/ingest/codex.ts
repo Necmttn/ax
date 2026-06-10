@@ -5,7 +5,6 @@ import { decodeJsonOrNull } from "@ax/lib/decode";
 import { skillRecordKey } from "@ax/lib/skill-id";
 import { recordRef, surrealDate, surrealJsonOption, surrealObject, surrealOptionInt, surrealOptionString, surrealString } from "@ax/lib/shared/surql";
 import { AppLayer } from "@ax/lib/layers";
-import type { DbError } from "@ax/lib/errors";
 import { BaseStageStats, IngestContext, sinceDaysFromCtx, StageMeta } from "./stage/types.ts";
 import { annotateStageProgress } from "./stage/runner.ts";
 import type { StageDef } from "./stage/registry.ts";
@@ -1480,10 +1479,8 @@ export interface CodexStats {
     malformedLines: number;
 }
 
-export const ingestCodex = (
-    opts: Partial<CodexIngestOpts> = {},
-): Effect.Effect<CodexStats, DbError | PlatformError.PlatformError, SurrealClient | AxConfig | FileSystem.FileSystem | Path.Path> =>
-    Effect.gen(function* () {
+export const ingestCodex = Effect.fn("codex.ingest")(
+    function* (opts: Partial<CodexIngestOpts> = {}) {
         const cfg = yield* AxConfig;
         const db = yield* SurrealClient;
         const fs = yield* FileSystem.FileSystem;
@@ -1777,8 +1774,9 @@ export const ingestCodex = (
             toolCalls: toolCallCount,
             planSnapshots: planSnapshotCount,
             malformedLines: malformedLineCount,
-        };
-    });
+        } satisfies CodexStats;
+    },
+);
 
 if (import.meta.main) {
     const sinceArg = process.argv.find((a) => a.startsWith("--since="));
@@ -1816,26 +1814,27 @@ export class CodexStageStats extends BaseStageStats.extend<CodexStageStats>("Cod
 
 export const codexStage: StageDef<CodexStageStats, SurrealClient | AxConfig | FileSystem.FileSystem | Path.Path> = {
     meta: StageMeta.make({ key: "codex", deps: ["skills", "commands"], tags: ["ingest"] }),
-    run: (ctx: IngestContext) =>
-        Effect.gen(function* () {
-            const t0 = Date.now();
-            const sinceDays = sinceDaysFromCtx(ctx);
-            // A vanished session file is caught + skipped inside `ingestCodex`;
-            // any PlatformError that escapes here is a genuine FS fault (e.g. an
-            // unreadable sessions root or a non-NotFound stat/stream error), so
-            // it dies as a defect rather than masquerading as a recoverable
-            // DbError - mirroring `claudeStage`.
-            const result = yield* ingestCodex({ sinceDays, onProgress: annotateStageProgress }).pipe(
-                Effect.catchTag("PlatformError", (e) => Effect.die(e)),
-            );
-            return CodexStageStats.make({
-                durationMs: Date.now() - t0,
-                summary: `ingested ${result.sessions} sessions, ${result.turns} turns, ${result.toolCalls} tool calls` +
-                    (result.malformedLines > 0 ? `, ${result.malformedLines} malformed lines skipped` : ""),
-                sessionsIngested: result.sessions,
-                turnsIngested: result.turns,
-                toolCallsIngested: result.toolCalls,
-                malformedLines: result.malformedLines,
-            });
-        }),
+    // Unnamed Effect.fn: the stage runner's LiveTrace.step span already names
+    // this boundary by the stage key, so a named span here would double-wrap.
+    run: Effect.fn(function* (ctx: IngestContext) {
+        const t0 = Date.now();
+        const sinceDays = sinceDaysFromCtx(ctx);
+        // A vanished session file is caught + skipped inside `ingestCodex`;
+        // any PlatformError that escapes here is a genuine FS fault (e.g. an
+        // unreadable sessions root or a non-NotFound stat/stream error), so
+        // it dies as a defect rather than masquerading as a recoverable
+        // DbError - mirroring `claudeStage`.
+        const result = yield* ingestCodex({ sinceDays, onProgress: annotateStageProgress }).pipe(
+            Effect.catchTag("PlatformError", (e) => Effect.die(e)),
+        );
+        return CodexStageStats.make({
+            durationMs: Date.now() - t0,
+            summary: `ingested ${result.sessions} sessions, ${result.turns} turns, ${result.toolCalls} tool calls` +
+                (result.malformedLines > 0 ? `, ${result.malformedLines} malformed lines skipped` : ""),
+            sessionsIngested: result.sessions,
+            turnsIngested: result.turns,
+            toolCallsIngested: result.toolCalls,
+            malformedLines: result.malformedLines,
+        });
+    }),
 };

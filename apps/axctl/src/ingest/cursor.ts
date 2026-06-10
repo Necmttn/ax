@@ -2,7 +2,6 @@ import { Database } from "bun:sqlite";
 import { Effect, FileSystem, Option, Path, Schema } from "effect";
 import { AxConfig } from "@ax/lib/config";
 import { RecordId, SurrealClient } from "@ax/lib/db";
-import type { DbError } from "@ax/lib/errors";
 import { orAbsent } from "@ax/lib/shared/fs-error";
 import { classifyNoFollow } from "@ax/lib/shared/fs-classify";
 import { posixPath } from "@ax/lib/shared/path";
@@ -1023,10 +1022,8 @@ interface CursorIngestOpts {
     sinceDays: number | undefined;
 }
 
-export const ingestCursor = (
-    opts: Partial<CursorIngestOpts> = {},
-): Effect.Effect<CursorStats, DbError, SurrealClient | AxConfig | FileSystem.FileSystem | Path.Path> =>
-    Effect.gen(function* () {
+export const ingestCursor = Effect.fn("cursor.ingest")(
+    function* (opts: Partial<CursorIngestOpts> = {}) {
         const cfg = yield* AxConfig;
         const db = yield* SurrealClient;
         const cutoff = opts.sinceDays ? Date.now() - opts.sinceDays * 86400 * 1000 : 0;
@@ -1069,8 +1066,9 @@ export const ingestCursor = (
             toolCalls: toolCallCount,
             skipped,
             warnings,
-        };
-    });
+        } satisfies CursorStats;
+    },
+);
 
 export class CursorStageStats extends BaseStageStats.extend<CursorStageStats>("CursorStageStats")({
     sessionsIngested: Schema.Number,
@@ -1082,19 +1080,20 @@ export class CursorStageStats extends BaseStageStats.extend<CursorStageStats>("C
 
 export const cursorStage: StageDef<CursorStageStats, SurrealClient | AxConfig | FileSystem.FileSystem | Path.Path> = {
     meta: StageMeta.make({ key: "cursor", deps: ["skills", "commands"], tags: ["ingest"] }),
-    run: (ctx: IngestContext) =>
-        Effect.gen(function* () {
-            const t0 = Date.now();
-            const sinceDays = sinceDaysFromCtx(ctx);
-            const result = yield* ingestCursor({ sinceDays });
-            return CursorStageStats.make({
-                durationMs: Date.now() - t0,
-                summary: `ingested ${result.sessions} sessions, ${result.turns} turns, ${result.toolCalls} tool calls, skipped ${result.skipped}, warnings ${result.warnings}`,
-                sessionsIngested: result.sessions,
-                turnsIngested: result.turns,
-                toolCallsIngested: result.toolCalls,
-                skipped: result.skipped,
-                warnings: result.warnings,
-            });
-        }),
+    // Unnamed Effect.fn: the stage runner's LiveTrace.step span already names
+    // this boundary by the stage key, so a named span here would double-wrap.
+    run: Effect.fn(function* (ctx: IngestContext) {
+        const t0 = Date.now();
+        const sinceDays = sinceDaysFromCtx(ctx);
+        const result = yield* ingestCursor({ sinceDays });
+        return CursorStageStats.make({
+            durationMs: Date.now() - t0,
+            summary: `ingested ${result.sessions} sessions, ${result.turns} turns, ${result.toolCalls} tool calls, skipped ${result.skipped}, warnings ${result.warnings}`,
+            sessionsIngested: result.sessions,
+            turnsIngested: result.turns,
+            toolCallsIngested: result.toolCalls,
+            skipped: result.skipped,
+            warnings: result.warnings,
+        });
+    }),
 };

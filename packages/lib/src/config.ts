@@ -208,18 +208,18 @@ const compactEnv = (
  * Pure path math is done through the shared `posixPath` instance, so no `Path`
  * dependency is incurred. Effect callers should prefer the `AxConfig` service.
  */
-export function envSnapshot(
+export const envSnapshot = Effect.fn("config.envSnapshot")(function* (
     env?: Record<string, string | undefined>,
-): Effect.Effect<AxConfigShape, never, FileSystem.FileSystem> {
-    return Effect.suspend(() =>
-        snapshotConfig.pipe(
-            Effect.provideService(
-                ConfigProvider.ConfigProvider,
-                ConfigProvider.fromEnv({ env: compactEnv(env ?? process.env) }),
-            ),
+) {
+    // The generator body runs at *effect run* time, so `process.env` is read
+    // per run - same deferred-read semantics as the previous `Effect.suspend`.
+    return yield* snapshotConfig.pipe(
+        Effect.provideService(
+            ConfigProvider.ConfigProvider,
+            ConfigProvider.fromEnv({ env: compactEnv(env ?? process.env) }),
         ),
     );
-}
+});
 
 /** Effect service exposing the typed config snapshot. */
 export class AxConfig extends Context.Service<
@@ -241,18 +241,16 @@ export const AxConfigLive: Layer.Layer<AxConfig, never, FileSystem.FileSystem> =
  * `Layer.succeed(AxConfig, yield* makeTestConfig({ db: { url: ... } }))` or via
  * the `AxConfigTest` layer.
  */
-export function makeTestConfig(
+export const makeTestConfig = Effect.fn("config.makeTestConfig")(function* (
     overrides: DeepPartial<AxConfigShape> = {},
-): Effect.Effect<AxConfigShape, never, FileSystem.FileSystem> {
-    return Effect.gen(function* () {
-        const base = yield* envSnapshot({});
-        return {
-            db: { ...base.db, ...(overrides.db ?? {}) },
-            paths: { ...base.paths, ...(overrides.paths ?? {}) },
-            knobs: { ...base.knobs, ...(overrides.knobs ?? {}) },
-        };
-    });
-}
+) {
+    const base = yield* envSnapshot({});
+    return {
+        db: { ...base.db, ...(overrides.db ?? {}) },
+        paths: { ...base.paths, ...(overrides.paths ?? {}) },
+        knobs: { ...base.knobs, ...(overrides.knobs ?? {}) },
+    } satisfies AxConfigShape;
+});
 
 export const AxConfigTest = (
     overrides: DeepPartial<AxConfigShape> = {},
