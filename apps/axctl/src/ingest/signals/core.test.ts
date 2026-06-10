@@ -342,6 +342,27 @@ describe("deriveFrictionFromCorrections", () => {
         });
     });
 
+    test("checkout scope wins when repository is absent, even with cwd set", () => {
+        const [event] = deriveFrictionFromCorrections([
+            { ...edge, checkoutKey: "github_com_necmttn_ax__main", cwd: "/Users/necmttn/Projects/ax" },
+        ]);
+        expect(event!.labels).toMatchObject({
+            checkout: "checkout:github_com_necmttn_ax__main",
+            scope: "checkout",
+            scopeId: "checkout:github_com_necmttn_ax__main",
+        });
+    });
+
+    test("cwd alone resolves to workspace scope", () => {
+        const [event] = deriveFrictionFromCorrections([
+            { ...edge, cwd: "/Users/necmttn/Projects/ax" },
+        ]);
+        expect(event!.labels).toMatchObject({
+            scope: "workspace",
+            scopeId: "/Users/necmttn/Projects/ax",
+        });
+    });
+
     test("falls back to session scope when repo/checkout/cwd are all null", () => {
         const [event] = deriveFrictionFromCorrections([edge]);
         expect(event!.labels).toMatchObject({
@@ -451,8 +472,12 @@ describe("groupTurnsBySession", () => {
                 cwd: "/Users/necmttn/Projects/ax",
             },
             {
+                // Conflicting meta on a later row: must NOT overwrite row 1's
+                // values (pins first-row-wins against last-row-wins drift).
                 ...turn({ id: "turn:t2", seq: 2, role: "assistant", text_excerpt: "done" }),
                 session: { tb: "session", id: "0a1b" },
+                repository: "repository:github_com_other_repo",
+                cwd: "/tmp/elsewhere",
             },
         ];
         const bundles = groupTurnsBySession(rows);
