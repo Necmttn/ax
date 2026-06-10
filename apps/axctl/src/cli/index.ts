@@ -3,6 +3,7 @@ import { Cause, Effect, FileSystem, Layer, Option, Path, References } from "effe
 import { BunFileSystem, BunPath, BunRuntime } from "@effect/platform-bun";
 import { Argument, Command, Flag } from "effect/unstable/cli";
 import { SurrealClient, type SurrealClientShape } from "@ax/lib/db";
+import { SkillName } from "@ax/lib/brands";
 import { listSessionsHere, listSessionsAround, listSessionsNear, findSessionIdsByPrefix, type SessionRow } from "../dashboard/sessions-query.ts";
 import {
     buildRecallNext,
@@ -21,6 +22,7 @@ import { safeJsonParse } from "@ax/lib/shared/safe-json";
 import { orAbsent } from "@ax/lib/shared/fs-error";
 import { ProcessService } from "@ax/lib/process";
 import { prettyPrint, surrealLiteral } from "@ax/lib/json";
+import { decodeJsonOrNull, encodeJson } from "@ax/lib/decode";
 import { prettifyProjectSlug } from "@ax/lib/shared/project-slug";
 import { AppLayer } from "@ax/lib/layers";
 import { deriveCheckpoints } from "../ingest/derive-checkpoints.ts";
@@ -137,7 +139,7 @@ import {
 } from "./progress.ts";
 import { cmdProject } from "./project.ts";
 import { AX_VERSION, liveVersionDeps, printVersion, updateAxctl } from "./version.ts";
-import { wantsJson, catchDbErrorAndExit } from "./output.ts";
+import { wantsJson, catchDbErrorAndExit, stderrExit } from "./output.ts";
 import { cmdDogfoodTerminal } from "../dogfood/wterm.ts";
 import { buildFileContextPack } from "../context/file-context.ts";
 import {
@@ -496,12 +498,7 @@ const cmdIngestHere = (args: string[]) => {
         const registry = yield* StageRegistry;
         const pwd = yield* resolvePwdRepository().pipe(
             Effect.catchTag("NotAGitRepoError", (err) =>
-                Effect.sync(() => {
-                    process.stderr.write(
-                        `axctl ingest here: not in a git repository (cwd=${err.cwd})\n`,
-                    );
-                    process.exit(2);
-                }),
+                stderrExit(`axctl ingest here: not in a git repository (cwd=${err.cwd})\n`, 2),
             ),
         );
 
@@ -581,9 +578,7 @@ const cmdIngestInsights = (args: string[] = []) =>
                 { source: "claude", stage: "insights" },
             ],
         });
-        const program = Effect.gen(function* () {
-            yield* telemetryStage(db, runId, "claude", "insights", ingestClaudeInsights(), progress);
-        });
+        const program = telemetryStage(db, runId, "claude", "insights", ingestClaudeInsights(), progress);
         yield* program.pipe(
             withIngestRunFinish(db, runId),
             Effect.provideService(References.MinimumLogLevel, verbose ? "Debug" : "Info"),
@@ -864,7 +859,7 @@ const cmdRecall = (opts: RecallCliOpts) =>
             requestedSources: sources ?? ["turn"],
         });
         if (opts.json) {
-            console.log(JSON.stringify({ ...result, hits, next }, null, 2));
+            console.log(prettyPrint({ ...result, hits, next }));
             return;
         }
 
@@ -2305,7 +2300,7 @@ const classifiersLabelMiningCommand = Command.make(
                 const result = yield* svc.selfImproveQuery(
                     outPath === undefined ? {} : { out: outPath },
                 );
-                if (json) console.log(JSON.stringify(result, null, 2));
+                if (json) console.log(prettyPrint(result));
                 else console.log(renderSelfImproveText(result));
                 return;
             }
@@ -2314,7 +2309,7 @@ const classifiersLabelMiningCommand = Command.make(
                     apply,
                     ...(outPath === undefined ? {} : { out: outPath }),
                 });
-                if (json) console.log(JSON.stringify(report, null, 2));
+                if (json) console.log(prettyPrint(report));
                 else console.log(renderGraphProjectionText(report));
                 return;
             }
@@ -2322,7 +2317,7 @@ const classifiersLabelMiningCommand = Command.make(
             const report = outPath === undefined
                 ? yield* svc.miningReport(reportInput)
                 : yield* svc.writeMiningReport({ ...reportInput, out: outPath });
-            if (json) console.log(JSON.stringify(report, null, 2));
+            if (json) console.log(prettyPrint(report));
             else {
                 console.log(
                     `transcript label mining - candidates ${report.candidate_count}, review rows ${report.review_rows.length}, families ${report.review_diversity.label_family_count}`,
@@ -2438,7 +2433,7 @@ const cmdImproveLint = (args: string[]) =>
             staleDays,
         });
         if (json) {
-            console.log(JSON.stringify(report, null, 2));
+            console.log(prettyPrint(report));
         } else {
             for (const f of report.errors) {
                 console.log(`error  ${f.rule}: ${f.message} (${f.path})`);
@@ -2490,7 +2485,7 @@ const cmdImproveRecommend = (args: string[]) =>
             ...(sinceDays === undefined ? {} : { sinceDays }),
         });
         if (json) {
-            console.log(JSON.stringify(items, null, 2));
+            console.log(prettyPrint(items));
             return;
         }
         printNextLinks(
@@ -2676,21 +2671,18 @@ const improveAcceptCommand = Command.make(
                 let retroSummaries: readonly string[] = [];
                 const baselineRaw = result.proposal.baseline;
                 if (typeof baselineRaw === "string" && baselineRaw.length > 0) {
-                    try {
-                        const parsed = JSON.parse(baselineRaw) as {
-                            tool?: string;
-                            sessionKeys?: unknown;
-                            frequency?: number;
-                        };
-                        if (Array.isArray(parsed.sessionKeys)) {
-                            const tool = parsed.tool ?? "tool";
-                            retroSummaries = parsed.sessionKeys
-                                .filter((s): s is string => typeof s === "string")
-                                .slice(0, 5)
-                                .map((s) => `session ${s}: top tool ${tool} failed (cluster freq=${parsed.frequency ?? "?"})`);
-                        }
-                    } catch {
-                        // ignore - baseline shape may evolve
+                    // Parse failure → null: baseline shape may evolve.
+                    const parsed = decodeJsonOrNull(baselineRaw) as {
+                        tool?: string;
+                        sessionKeys?: unknown;
+                        frequency?: number;
+                    } | null;
+                    if (parsed && Array.isArray(parsed.sessionKeys)) {
+                        const tool = parsed.tool ?? "tool";
+                        retroSummaries = parsed.sessionKeys
+                            .filter((s): s is string => typeof s === "string")
+                            .slice(0, 5)
+                            .map((s) => `session ${s}: top tool ${tool} failed (cluster freq=${parsed.frequency ?? "?"})`);
                     }
                 }
                 console.log("");
@@ -3082,12 +3074,7 @@ const cmdSessionsHere = (args: string[]) =>
 
         const pwdResolution = yield* resolvePwdRepository().pipe(
             Effect.catchTag("NotAGitRepoError", (err) =>
-                Effect.sync(() => {
-                    process.stderr.write(
-                        `axctl sessions here: not in a git repository (cwd=${err.cwd})\n`,
-                    );
-                    process.exit(2);
-                }),
+                stderrExit(`axctl sessions here: not in a git repository (cwd=${err.cwd})\n`, 2),
             ),
         );
 
@@ -3106,7 +3093,7 @@ const cmdSessionsHere = (args: string[]) =>
         const { sessions, next } = buildSessionsNext(rows);
 
         if (json) {
-            console.log(JSON.stringify({ sessions, next }, null, 2));
+            console.log(prettyPrint({ sessions, next }));
             return;
         }
         printNextLinks(next);
@@ -3171,7 +3158,7 @@ const cmdSessionsAround = (args: string[]) =>
         });
 
         if (json) {
-            console.log(JSON.stringify({ sessions, next }, null, 2));
+            console.log(prettyPrint({ sessions, next }));
             return;
         }
         printNextLinks(next);
@@ -3192,12 +3179,7 @@ const cmdSessionsNear = (args: string[]) =>
         // Resolve repository via pwd (near is always pwd-scoped)
         const pwdResolution = yield* resolvePwdRepository().pipe(
             Effect.catchTag("NotAGitRepoError", (err) =>
-                Effect.sync(() => {
-                    process.stderr.write(
-                        `axctl sessions near: not in a git repository (cwd=${err.cwd})\n`,
-                    );
-                    process.exit(2);
-                }),
+                stderrExit(`axctl sessions near: not in a git repository (cwd=${err.cwd})\n`, 2),
             ),
         );
 
@@ -3238,7 +3220,7 @@ const cmdSessionsNear = (args: string[]) =>
         const { sessions, next } = buildSessionsNext(rows);
 
         if (json) {
-            console.log(JSON.stringify({ sessions, next }, null, 2));
+            console.log(prettyPrint({ sessions, next }));
             return;
         }
         printNextLinks(next);
@@ -3552,10 +3534,7 @@ const cmdSessionsMetrics = (input: {
         if (input.here) {
             const pwd = yield* resolvePwdRepository().pipe(
                 Effect.catchTag("NotAGitRepoError", (err) =>
-                    Effect.sync(() => {
-                        process.stderr.write(`axctl sessions metrics: --here requires a git repository (cwd=${err.cwd})\n`);
-                        process.exit(2);
-                    }),
+                    stderrExit(`axctl sessions metrics: --here requires a git repository (cwd=${err.cwd})\n`, 2),
                 ),
             );
             project = pwd.repoRoot;
@@ -3571,7 +3550,9 @@ const cmdSessionsMetrics = (input: {
             const all = yield* fetchAggregateRows({ since, project });
             const rows = applyAggregateFilters(all, { source: input.source, minCostUsd: input.minCost });
             if (input.skill !== null) {
-                const skillSessions = yield* fetchSkillSessionSet(input.skill);
+                // CLI flag is a user-supplied skill name: brand at the input
+                // boundary via the schema constructor.
+                const skillSessions = yield* fetchSkillSessionSet(SkillName.make(input.skill));
                 const efficacy = computeSkillEfficacy(rows, skillSessions, input.skill);
                 if (input.json) {
                     console.log(prettyPrint(efficacy));
@@ -4283,7 +4264,7 @@ const retroCommand = Command.make("retro").pipe(
 const serveCommand = Command.make(
     "serve",
     { port: Flag.integer("port").pipe(Flag.withDefault(1738)) },
-    ({ port }) => Effect.sync(() => serveDashboard([`--port=${port}`])),
+    ({ port }) => Effect.promise(() => serveDashboard([`--port=${port}`])),
 ).pipe(Command.withDescription("Serve the live web dashboard locally"));
 
 // Manages its own long-lived ManagedRuntime (like serve), so it is deliberately
@@ -4291,7 +4272,7 @@ const serveCommand = Command.make(
 const mcpCommand = Command.make(
     "mcp",
     {},
-    () => Effect.sync(() => serveMcp([])),
+    () => Effect.promise(() => serveMcp([])),
 ).pipe(Command.withDescription("Run an MCP server (stdio) exposing ax's read-only queries"));
 
 const reportCommand = Command.make(
@@ -4450,10 +4431,7 @@ const cmdCostsFor = (input: {
         if (input.commit || input.branch || input.here) {
             const pwdResolution = yield* resolvePwdRepository().pipe(
                 Effect.catchTag("NotAGitRepoError", (err) =>
-                    Effect.sync(() => {
-                        process.stderr.write(`axctl costs for: --here/--commit/--branch requires a git repository (cwd=${err.cwd})\n`);
-                        process.exit(2);
-                    }),
+                    stderrExit(`axctl costs for: --here/--commit/--branch requires a git repository (cwd=${err.cwd})\n`, 2),
                 ),
             );
             repositoryKey = pwdResolution.repositoryRecordId.id as string;
@@ -4560,10 +4538,7 @@ const cmdLoc = (input: {
         if (input.here) {
             const pwdResolution = yield* resolvePwdRepository().pipe(
                 Effect.catchTag("NotAGitRepoError", (err) =>
-                    Effect.sync(() => {
-                        process.stderr.write(`axctl loc: --here requires a git repository (cwd=${err.cwd})\n`);
-                        process.exit(2);
-                    }),
+                    stderrExit(`axctl loc: --here requires a git repository (cwd=${err.cwd})\n`, 2),
                 ),
             );
             repositoryKey = pwdResolution.repositoryRecordId.id as string;
@@ -4788,7 +4763,7 @@ const cmdTimeline = (sessionId: string, json: boolean) =>
         Effect.flatMap((tl) =>
             Effect.sync(() => {
                 if (json) {
-                    console.log(JSON.stringify(tl, null, 2));
+                    console.log(prettyPrint(tl));
                     return;
                 }
                 const h = tl.highlights;
@@ -4921,10 +4896,7 @@ const skillsLintCommand = Command.make(
     ({ taskDir, dryRun, json }) =>
         cmdSkillsLint({ taskDir, dryRun, json }).pipe(
             Effect.catchTag("PlatformError", (e) =>
-                Effect.sync(() => {
-                    process.stderr.write(`axctl skills lint: file error - ${e.message}\n`);
-                    process.exit(1);
-                }),
+                stderrExit(`axctl skills lint: file error - ${e.message}\n`, 1),
             ),
             catchDbErrorAndExit("axctl skills lint"),
         ),
@@ -5179,7 +5151,7 @@ const hookFileContextCommand = Command.make(
                 // something to inject; emit nothing otherwise so Claude Code
                 // doesn't show an empty additionalContext block to the user.
                 if (response.inject && response.context.length > 0) {
-                    console.log(JSON.stringify({
+                    console.log(encodeJson({
                         hookSpecificOutput: {
                             hookEventName: "PreToolUse",
                             additionalContext: response.context,
@@ -5744,12 +5716,10 @@ const dispatch = (args: ReadonlyArray<string>): Effect.Effect<void, unknown> => 
         // has been acquired yet, so a direct exit(2) is finalizer-safe.
         const removed = detectRemovedIngestFlag(args.slice(1));
         if (removed) {
-            return Effect.sync(() => {
-                console.error(
-                    `axctl ingest: ${removed.flag} was removed. Use ${removed.replacement} instead.`,
-                );
-                process.exit(2);
-            });
+            return stderrExit(
+                `axctl ingest: ${removed.flag} was removed. Use ${removed.replacement} instead.\n`,
+                2,
+            );
         }
         return withIngest(args);
     }

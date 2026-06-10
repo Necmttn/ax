@@ -14,7 +14,7 @@
  *  - $limit (int) - hard ceiling on edges returned (keeps SVG render bounded).
  */
 import { defineQuery } from "@ax/lib/shared/query";
-import { isRecord, stringField, dateField, numberField } from "@ax/lib/shared/row-fields";
+import { isRecord, stringField, dateField, numberFieldOrNull } from "@ax/lib/shared/row-fields";
 import type { SkillGraphEdge } from "@ax/lib/shared/dashboard-types";
 
 export const SKILL_GRAPH_EDGES_SQL = `
@@ -52,7 +52,7 @@ export const skillGraphEdgesQuery = defineQuery<
         const source = stringField(raw, "source");
         const target = stringField(raw, "target");
         if (!source || !target || source === target) return null;
-        const count = numberField(raw, "count") ?? 0;
+        const count = numberFieldOrNull(raw, "count") ?? 0;
         return {
             source,
             target,

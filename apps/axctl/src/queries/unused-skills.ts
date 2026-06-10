@@ -15,7 +15,6 @@
  */
 import { Effect } from "effect";
 import { SurrealClient } from "@ax/lib/db";
-import type { DbError } from "@ax/lib/errors";
 import { dateField } from "@ax/lib/shared/row-fields";
 
 const checkedDays = (days: number): number => {
@@ -119,10 +118,8 @@ export interface UnusedSkillsParams {
     readonly days: number;
 }
 
-export const fetchUnusedSkills = (
-    params: UnusedSkillsParams,
-): Effect.Effect<ReadonlyArray<UnusedSkillRow>, DbError, SurrealClient> =>
-    Effect.gen(function* () {
+export const fetchUnusedSkills = Effect.fn("queries.fetchUnusedSkills")(
+    function* (params: UnusedSkillsParams) {
         const db = yield* SurrealClient;
         const [recentRes, summaryRes, skillRes, noInvRes] = yield* Effect.all(
             [
@@ -139,4 +136,5 @@ export const fetchUnusedSkills = (
             skills: skillRes?.[0] ?? [],
             neverInvoked: noInvRes?.[0] ?? [],
         });
-    });
+    },
+);

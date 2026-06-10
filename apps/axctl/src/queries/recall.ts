@@ -21,7 +21,7 @@
  * invoked table tanks perf (we hit this for episodes in R16-A).
  */
 import { defineQuery } from "@ax/lib/shared/query";
-import { isRecord, stringField, dateField, numberField, recordIdString } from "@ax/lib/shared/row-fields";
+import { isRecord, stringField, dateField, numberFieldOrNull, recordIdString } from "@ax/lib/shared/row-fields";
 import { toBareSessionId } from "@ax/lib/shared/session-id";
 import type { RecallHit, RecallCommitHit, RecallSkillHit } from "@ax/lib/shared/dashboard-types";
 
@@ -201,7 +201,7 @@ export const recallCommitsQuery = defineQuery<
             repository: recordIdString(raw.repository),
             ts: dateField(raw, "ts"),
             snippet: stringField(raw, "snippet") ?? sha,
-            score: numberField(raw, "score") ?? 0,
+            score: numberFieldOrNull(raw, "score") ?? 0,
         };
     },
 });
@@ -232,7 +232,7 @@ export const recallSkillsQuery = defineQuery<
             name,
             description: stringField(raw, "description"),
             snippet: stringField(raw, "snippet") ?? name,
-            score: numberField(raw, "score") ?? 0,
+            score: numberFieldOrNull(raw, "score") ?? 0,
         };
     },
 });

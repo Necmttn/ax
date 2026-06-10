@@ -1,15 +1,23 @@
 import { SkillName } from "./brands.ts";
 import { legacySkillRecordKey as legacyKey, skillRecordKeyV2 } from "./ids.ts";
 
-export function skillRecordKey(name: string): string {
+/**
+ * Canonical `skill` record key for a skill name. Takes the branded
+ * {@link SkillName} so raw, unvalidated strings can't silently mint record
+ * ids; producers brand at the true source (`resolveSkillName`, transcript
+ * parsers, the on-disk catalog ingest) via `SkillName.make`. The key bytes
+ * are unchanged from the pre-brand era: plugin-namespaced names (`a:b`) keep
+ * the same `v2__a_b__<digest>` encoding (see skill-id.test.ts regression).
+ */
+export function skillRecordKey(name: SkillName): string {
     return skillRecordKeyV2(name);
 }
 
-export function legacySkillRecordKey(name: string): string {
+export function legacySkillRecordKey(name: SkillName): string {
     return legacyKey(name);
 }
 
-export function skillRecordLookupKeys(name: string): string[] {
+export function skillRecordLookupKeys(name: SkillName): string[] {
     const modern = skillRecordKey(name);
     const legacy = legacySkillRecordKey(name);
     return modern === legacy ? [modern] : [modern, legacy];

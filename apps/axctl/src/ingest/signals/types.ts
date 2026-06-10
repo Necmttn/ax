@@ -1,3 +1,4 @@
+import type { SkillName } from "@ax/lib/brands";
 import type { TimestampInput } from "@ax/lib/shared/derive-keys";
 
 export type RecordRefLike = string | { tb?: string; id?: unknown };
@@ -73,7 +74,7 @@ export interface TurnRow {
     text_excerpt: string | undefined;
     ts: string | Date;
     has_error: boolean;
-    invoked_skills: ReadonlyArray<string>; // skill names this turn already invoked
+    invoked_skills: ReadonlyArray<SkillName>; // skill names this turn already invoked
     repository?: RecordRefLike;
     checkout?: RecordRefLike;
     cwd?: string;
@@ -131,7 +132,7 @@ export interface RecoveryEdge {
  *  three SELECTs in derive-signals.ts. */
 export interface SignalEvidence {
     readonly bundles: ReadonlyArray<SessionTurns>;
-    readonly skillNames: ReadonlyArray<string>;
+    readonly skillNames: ReadonlyArray<SkillName>;
     readonly failedToolCalls: ReadonlyArray<ToolCallLike>;
 }
 

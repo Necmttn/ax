@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
-import { Effect, Exit, Fiber, Layer } from "effect";
-import { SurrealClient, type SurrealClientShape } from "@ax/lib/db";
+import { Effect, Exit, Fiber, Layer, Schema } from "effect";
+import { makeTestSurrealClient } from "@ax/lib/testing/surreal";
 import { LiveTraceLayer } from "@ax/lib/live-traces/Tracer";
 import {
     TraceSinkLive,
@@ -13,20 +13,8 @@ import { BaseStageStats, StageMeta } from "./stage/types.ts";
 import { runIngest, stageEventName, withIngestRunFinish } from "./run.ts";
 
 const fakeDb = () => {
-    const queries: string[] = [];
-    const client: SurrealClientShape = {
-        query: <T extends unknown[] = unknown[]>(sql: string) =>
-            Effect.sync(() => {
-                queries.push(sql);
-                return [] as unknown as T;
-            }),
-        upsert: () => Effect.succeed({}),
-        relate: () => Effect.succeed({}),
-        putFile: () => Effect.void,
-        getFile: () => Effect.succeed(""),
-        raw: {} as SurrealClientShape["raw"],
-    };
-    return { queries, client, layer: Layer.succeed(SurrealClient, client) };
+    const tc = makeTestSurrealClient({ fallback: [] });
+    return { queries: tc.captured, client: tc.client, layer: tc.layer };
 };
 
 const stage = (key: string, deps: string[] = []): StageDef => ({
@@ -73,9 +61,12 @@ describe("withIngestRunFinish", () => {
     });
 
     it("writes status error with the failure text and re-fails", async () => {
+        class BoomError extends Schema.TaggedErrorClass<BoomError>("BoomError")("BoomError", {
+            message: Schema.String,
+        }) {}
         const db = fakeDb();
         const exit = await Effect.runPromiseExit(
-            withIngestRunFinish(db.client, "r1")(Effect.fail(new Error("boom"))),
+            withIngestRunFinish(db.client, "r1")(Effect.fail(new BoomError({ message: "boom" }))),
         );
         expect(Exit.isFailure(exit)).toBe(true);
         const writes = finishWrites(db.queries);

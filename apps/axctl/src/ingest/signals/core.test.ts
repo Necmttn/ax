@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { SkillName } from "@ax/lib/brands";
 import { skillRecordKey } from "@ax/lib/skill-id";
 // Task 4 flipped these imports from "../derive-signals.ts" to "./core.ts" /
 // "./types.ts" - that flip was the before/after behavior-preservation
@@ -24,14 +25,21 @@ import type {
     TurnRow,
 } from "./types.ts";
 
+// Fixture skill names are plain string literals; brand them through the
+// schema constructor so fixtures stay terse while TurnRow carries SkillName.
+const sn = (s: string): SkillName => SkillName.make(s);
+
 const turn = (
-    partial: Partial<TurnRow> & Pick<TurnRow, "id" | "seq" | "role">,
+    partial: Partial<Omit<TurnRow, "invoked_skills">> &
+        Pick<TurnRow, "id" | "seq" | "role"> & {
+            invoked_skills?: ReadonlyArray<string>;
+        },
 ): TurnRow => ({
     text_excerpt: undefined,
     ts: "2026-06-01T10:00:00.000Z",
     has_error: false,
-    invoked_skills: [],
     ...partial,
+    invoked_skills: (partial.invoked_skills ?? []).map(sn),
 });
 
 const bundle = (turns: TurnRow[], meta?: Partial<SessionTurns>): SessionTurns => ({
@@ -144,7 +152,7 @@ describe("deriveCorrections", () => {
 });
 
 describe("deriveProposed", () => {
-    const skillNames = ["superpowers:test-driven-development", "diagnose", "tdd"];
+    const skillNames = ["superpowers:test-driven-development", "diagnose", "tdd"].map(sn);
     const mention = "Run superpowers:test-driven-development first.";
 
     test("assistant mention of a known skill it did not invoke emits a proposed edge", () => {
@@ -163,7 +171,7 @@ describe("deriveProposed", () => {
         expect(edges).toEqual([
             {
                 fromTurnKey: "0a1b2c3d__seq_000002",
-                skillKey: skillRecordKey("superpowers:test-driven-development"),
+                skillKey: skillRecordKey(sn("superpowers:test-driven-development")),
                 skillName: "superpowers:test-driven-development",
                 ts: "2026-06-01T10:00:00.000Z",
                 contextExcerpt: mention, // short text: +/-40 chars covers it all
@@ -192,8 +200,8 @@ describe("deriveProposed", () => {
 
 describe("deriveSkillPairs", () => {
     const keysSorted = (a: string, b: string): [string, string] => {
-        const ka = skillRecordKey(a);
-        const kb = skillRecordKey(b);
+        const ka = skillRecordKey(sn(a));
+        const kb = skillRecordKey(sn(b));
         return ka < kb ? [ka, kb] : [kb, ka];
     };
 
@@ -238,8 +246,8 @@ describe("deriveSkillPairs", () => {
     });
 
     test("skillPairedEdgeId is symmetric and orders keys lexicographically", () => {
-        const a = skillRecordKey("commit");
-        const b = skillRecordKey("diagnose");
+        const a = skillRecordKey(sn("commit"));
+        const b = skillRecordKey(sn("diagnose"));
         const fwd = skillPairedEdgeId(a, b);
         const rev = skillPairedEdgeId(b, a);
         expect(fwd).toEqual(rev);
@@ -270,14 +278,14 @@ describe("deriveRecovered", () => {
         expect(edges).toEqual([
             {
                 fromTurnKey: "0a1b2c3d__seq_000002",
-                skillKey: skillRecordKey("diagnose"),
+                skillKey: skillRecordKey(sn("diagnose")),
                 skillName: "diagnose",
                 ts: "2026-06-01T10:01:00.000Z",
                 errorExcerpt: "TypeError: Cannot read properties of undefined (reading 'turns')",
             },
             {
                 fromTurnKey: "0a1b2c3d__seq_000002",
-                skillKey: skillRecordKey("failure-recovery"),
+                skillKey: skillRecordKey(sn("failure-recovery")),
                 skillName: "failure-recovery",
                 ts: "2026-06-01T10:01:00.000Z",
                 errorExcerpt: "TypeError: Cannot read properties of undefined (reading 'turns')",

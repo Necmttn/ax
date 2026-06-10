@@ -1,4 +1,4 @@
-import { Effect, type Layer, ManagedRuntime } from "effect";
+import { Effect, Layer, ManagedRuntime } from "effect";
 import { SurrealClient } from "@ax/lib/db";
 import { AppLayer } from "@ax/lib/layers";
 import { IngestRuntimeLayer } from "../ingest/stage/runtime.ts";
@@ -880,8 +880,10 @@ export async function handleDashboardRequest(req: Request): Promise<Response> {
         try {
             const payload = await Effect.runPromise(
                 extractSessionTimeline(sessionId).pipe(
-                    Effect.provide(SessionTimelineServiceLayer),
-                    Effect.provide(AppLayer),
+                    // The timeline layer needs SurrealClient from AppLayer;
+                    // provideMerge feeds it in while keeping AppLayer's
+                    // services available to the effect itself.
+                    Effect.provide(SessionTimelineServiceLayer.pipe(Layer.provideMerge(AppLayer))),
                     Effect.scoped,
                 ) as Effect.Effect<unknown>,
             );

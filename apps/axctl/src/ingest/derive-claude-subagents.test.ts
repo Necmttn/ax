@@ -13,6 +13,7 @@ import { Effect, Layer } from "effect";
 import { BunFileSystem, BunPath } from "@effect/platform-bun";
 import { RecordId } from "surrealdb";
 import { SurrealClient } from "@ax/lib/db";
+import { makeTestSurrealClient } from "@ax/lib/testing/surreal";
 import { AxConfig, makeTestConfig } from "@ax/lib/config";
 import { deriveClaudeSubagents } from "./derive-claude-subagents.ts";
 
@@ -20,44 +21,17 @@ import { deriveClaudeSubagents } from "./derive-claude-subagents.ts";
 // Helpers
 // ---------------------------------------------------------------------------
 
-type Call =
-    | { kind: "query"; sql: string; bindings?: Record<string, unknown> }
-    | { kind: "upsert"; id: string; content: Record<string, unknown> };
-
 /**
  * Build a mock SurrealClient layer. The `queryResponses` map lets callers
  * drive what each SELECT returns; unrecognised queries return [[]].
- * All calls are recorded in `calls`.
+ * All calls are recorded in `calls` / `upserts`.
  */
 function makeMockDb(queryResponses: Map<string, unknown[][]> = new Map()) {
-    const calls: Call[] = [];
-
-    const impl = {
-        query: <T extends unknown[] = unknown[]>(sql: string, bindings?: Record<string, unknown>) => {
-            const call: Call = bindings !== undefined
-                ? { kind: "query", sql, bindings }
-                : { kind: "query", sql };
-            calls.push(call);
-            // Find first matching key that the sql CONTAINS
-            for (const [pattern, response] of queryResponses) {
-                if (sql.includes(pattern)) {
-                    return Effect.succeed(response as T);
-                }
-            }
-            return Effect.succeed([[]] as unknown as T);
-        },
-        upsert: (id: RecordId, content: Record<string, unknown>) => {
-            calls.push({ kind: "upsert", id: String(id), content });
-            return Effect.void;
-        },
-        relate: () => Effect.void,
-        putFile: () => Effect.void,
-        getFile: () => Effect.succeed(""),
-        raw: undefined as unknown as import("surrealdb").Surreal,
-    };
-
-    const layer = Layer.succeed(SurrealClient, impl);
-    return { calls, layer };
+    const tc = makeTestSurrealClient({
+        // Find first matching key that the sql CONTAINS
+        routes: [...queryResponses].map(([match, rows]) => ({ match, rows: rows as unknown[] })),
+    });
+    return { calls: tc.calls, upserts: tc.upserts, layer: tc.layer };
 }
 
 /**
@@ -137,7 +111,6 @@ describe("repository backfill (F7)", () => {
         // Should have issued the backfill SELECT query
         const backfillSelect = calls.find(
             (c) =>
-                c.kind === "query" &&
                 c.sql.includes('source = "claude-subagent"') &&
                 c.sql.includes("repository IS NONE"),
         );
@@ -146,14 +119,13 @@ describe("repository backfill (F7)", () => {
         // Should have issued an UPDATE for the found subagent
         const updateCall = calls.find(
             (c) =>
-                c.kind === "query" &&
                 c.sql.includes("claude-subagent-abc") &&
                 (c.sql.includes("SET repository") || c.sql.includes("repository =")),
         );
         expect(updateCall).toBeDefined();
 
         // repository is now embedded as a record literal in SQL - not a binding
-        if (updateCall?.kind === "query") {
+        if (updateCall) {
             expect(updateCall.sql).toContain("repository = repository:`my-repo`");
             expect(updateCall.bindings?.["repo"]).toBeUndefined();
             expect(updateCall.bindings?.["checkout"]).toBe("checkout:abc123");
@@ -173,7 +145,6 @@ describe("repository backfill (F7)", () => {
         // No UPDATE query for backfill
         const updateCalls = calls.filter(
             (c) =>
-                c.kind === "query" &&
                 c.sql.includes("SET repository") &&
                 c.sql.includes("claude-subagent"),
         );
@@ -336,7 +307,7 @@ describe("repository inheritance on new subagents (F7)", () => {
         // Backfill: no rows need repair
         responses.set('source = "claude-subagent" AND repository IS NONE', [[]]);
 
-        const { calls, layer } = makeMockDb(responses);
+        const { upserts, layer } = makeMockDb(responses);
         const stats = await runWith(layer, makeFixtureConfig(fixture.root));
 
         // Stage should have discovered 1 subagent and written it
@@ -348,11 +319,11 @@ describe("repository inheritance on new subagents (F7)", () => {
         expect(stats.repositoryInherited).toBeGreaterThan(0);
 
         // Verify the upsert payload for the subagent session
-        const upsertCall = calls.find(
-            (c) => c.kind === "upsert" && c.id.includes(fixture.subagentSessionId),
+        const upsertCall = upserts.find(
+            (c) => String(c.id).includes(fixture.subagentSessionId),
         );
         expect(upsertCall).toBeDefined();
-        if (upsertCall?.kind === "upsert") {
+        if (upsertCall) {
             expect(upsertCall.content["repository"]).toBe("repository:test-repo");
             expect(upsertCall.content["checkout"]).toBe("checkout:abc123");
             // cwd inherits from parent because extractor produced none
@@ -380,17 +351,17 @@ describe("repository inheritance on new subagents (F7)", () => {
         ]]);
         responses.set('source = "claude-subagent" AND repository IS NONE', [[]]);
 
-        const { calls, layer } = makeMockDb(responses);
+        const { upserts, layer } = makeMockDb(responses);
         const stats = await runWith(layer, makeFixtureConfig(fixture.root));
 
         expect(stats.discovered).toBe(1);
         expect(stats.written).toBe(1);
 
-        const upsertCall = calls.find(
-            (c) => c.kind === "upsert" && c.id.includes(fixture.subagentSessionId),
+        const upsertCall = upserts.find(
+            (c) => String(c.id).includes(fixture.subagentSessionId),
         );
         expect(upsertCall).toBeDefined();
-        if (upsertCall?.kind === "upsert") {
+        if (upsertCall) {
             // repository and checkout unconditionally inherited from parent
             expect(upsertCall.content["repository"]).toBe("repository:test-repo-2");
             expect(upsertCall.content["checkout"]).toBe("checkout:def456");

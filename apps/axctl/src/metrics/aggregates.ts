@@ -20,6 +20,7 @@
  * `aggregateRows`/`computeComparison` - do NOT fork the math.
  */
 import { Effect } from "effect";
+import type { SkillName } from "@ax/lib/brands";
 import { SurrealClient } from "@ax/lib/db";
 import type { DbError } from "@ax/lib/errors";
 import { recordLiteral } from "@ax/lib/ids";
@@ -410,7 +411,7 @@ ${where};`))?.[0] ?? [];
  * repaired by the schema's UPDATE, NONE rows are skipped here).
  */
 export const fetchSkillSessionSet = (
-    skillName: string,
+    skillName: SkillName,
 ): Effect.Effect<Set<string>, DbError, SurrealClient> =>
     Effect.gen(function* () {
         const db = yield* SurrealClient;

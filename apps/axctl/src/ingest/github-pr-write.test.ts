@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { Effect, Layer } from "effect";
-import { SurrealClient, type SurrealClientShape } from "@ax/lib/db";
+import { Effect } from "effect";
+import { makeTestSurrealClient, type TestSurrealClient } from "@ax/lib/testing/surreal";
 import { writePullRequests } from "./github-pr-write.ts";
 
 /**
@@ -8,31 +8,19 @@ import { writePullRequests } from "./github-pr-write.ts";
  * the two read queries (commit lookup, produced-session lookup) with stub rows.
  */
 const makeMockDb = (
-    captured: string[],
     overrides?: { commitRows?: unknown; producedRows?: unknown },
-): SurrealClientShape => ({
-    query: <T extends unknown[]>(sql: string) =>
-        Effect.sync(() => {
-            captured.push(sql);
-            if (sql.includes("FROM commit")) {
-                return (overrides?.commitRows ?? [["commit:`abc123`"]]) as T;
-            }
-            if (sql.includes("FROM produced")) {
-                return (overrides?.producedRows ?? [["session:`sess-1`"]]) as T;
-            }
-            return [[]] as T;
-        }),
-    upsert: () => Effect.void,
-    relate: () => Effect.void,
-    putFile: () => Effect.void,
-    getFile: () => Effect.succeed(""),
-    raw: {} as never,
-});
+): TestSurrealClient =>
+    makeTestSurrealClient({
+        routes: [
+            { match: "FROM commit", rows: (overrides?.commitRows ?? [["commit:`abc123`"]]) as unknown[] },
+            { match: "FROM produced", rows: (overrides?.producedRows ?? [["session:`sess-1`"]]) as unknown[] },
+        ],
+    });
 
-const run = (input: Parameters<typeof writePullRequests>[0], db: SurrealClientShape) =>
+const run = (input: Parameters<typeof writePullRequests>[0], db: TestSurrealClient) =>
     Effect.runPromise(
         writePullRequests(input).pipe(
-            Effect.provide(Layer.succeed(SurrealClient, db)),
+            Effect.provide(db.layer),
         ),
     );
 
@@ -77,8 +65,8 @@ const mergedPrFixture = {
 
 describe("writePullRequests", () => {
     test("writes pull_request, review_event, check_run, delivery_outcome for a merged PR", async () => {
-        const sql: string[] = [];
-        const db = makeMockDb(sql);
+        const db = makeMockDb();
+        const sql = db.captured;
 
         const stats = await run(
             {
@@ -143,8 +131,8 @@ describe("writePullRequests", () => {
     });
 
     test("skips a PR with number: null (zero stats)", async () => {
-        const sql: string[] = [];
-        const db = makeMockDb(sql);
+        const db = makeMockDb();
+        const sql = db.captured;
 
         const stats = await run(
             {
@@ -165,8 +153,8 @@ describe("writePullRequests", () => {
     });
 
     test("writes pull_request but no delivery_outcome when the commit is not in the graph", async () => {
-        const sql: string[] = [];
-        const db = makeMockDb(sql, { commitRows: [[]] });
+        const db = makeMockDb({ commitRows: [[]] });
+        const sql = db.captured;
 
         const stats = await run(
             {
@@ -190,8 +178,8 @@ describe("writePullRequests", () => {
     });
 
     test("skips a review whose normalized state is null", async () => {
-        const sql: string[] = [];
-        const db = makeMockDb(sql);
+        const db = makeMockDb();
+        const sql = db.captured;
 
         const stats = await run(
             {
@@ -216,8 +204,8 @@ describe("writePullRequests", () => {
     });
 
     test("skips a check with both name and status null", async () => {
-        const sql: string[] = [];
-        const db = makeMockDb(sql);
+        const db = makeMockDb();
+        const sql = db.captured;
 
         const stats = await run(
             {

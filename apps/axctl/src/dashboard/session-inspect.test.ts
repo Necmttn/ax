@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { Effect, Layer } from "effect";
 import { BunFileSystem, BunPath } from "@effect/platform-bun";
 import { SurrealClient, type SurrealClientShape } from "@ax/lib/db";
-import type { DbError } from "@ax/lib/errors";
+import { makeTestSurrealClient } from "@ax/lib/testing/surreal";
 import { codexContentToInspectorText, fetchSessionInspect, jsonlBlockToInspectorText, parseClaudeLine, parseCodexLine, shareTurnToolCallToDto } from "./session-inspect.ts";
 import type { ShareTurnToolCall } from "../queries/session-detail.ts";
 
@@ -150,43 +150,39 @@ describe("jsonlBlockToInspectorText", () => {
 });
 
 function makeInspectDb(): { readonly db: SurrealClientShape; readonly sql: string[] } {
-    const sql: string[] = [];
-    const db = {
-        query: <T extends unknown[] = unknown[]>(
-            statement: string,
-            _bindings?: Record<string, unknown>,
-        ): Effect.Effect<T, DbError> => {
-            sql.push(statement);
+    const tc = makeTestSurrealClient({
+        denyWrites: true,
+        fallback: (statement) => {
             if (statement.includes("FROM spawned") && statement.includes("WHERE out")) {
-                return Effect.succeed([[ ]] as unknown as T);
+                return [[ ]];
             }
             if (statement.includes("SELECT project, cwd, raw_file, source FROM session")) {
-                return Effect.succeed([[
+                return [[
                     { project: "repo", cwd: "/repo", raw_file: "/slow/transcript.jsonl", source: "codex" },
-                ]] as unknown as T);
+                ]];
             }
             if (statement.includes("FROM spawned") && statement.includes("WHERE in")) {
-                return Effect.succeed([[ ]] as unknown as T);
+                return [[ ]];
             }
             if (statement.includes("FROM hook_fire")) {
-                return Effect.succeed([[ ]] as unknown as T);
+                return [[ ]];
             }
             if (statement.includes("FROM session_token_usage")) {
-                return Effect.succeed([[ ]] as unknown as T);
+                return [[ ]];
             }
             if (statement.includes("FROM turn_token_usage")) {
-                return Effect.succeed([[ ]] as unknown as T);
+                return [[ ]];
             }
             if (statement.includes("SELECT source_ref, type::string(id) AS document_id")) {
-                return Effect.succeed([[ ]] as unknown as T);
+                return [[ ]];
             }
             if (statement.includes("FROM session_health:")) {
-                return Effect.succeed([[
+                return [[
                     { turns: 2 },
-                ]] as unknown as T);
+                ]];
             }
             if (statement.includes("FROM [turn:")) {
-                return Effect.succeed([[
+                return [[
                     {
                         seq: 1,
                         role: "user",
@@ -199,17 +195,12 @@ function makeInspectDb(): { readonly db: SurrealClientShape; readonly sql: strin
                         ts: "2026-06-09T00:00:01.000Z",
                         text: "done",
                     },
-                ]] as unknown as T);
+                ]];
             }
-            return Effect.succeed([[ ]] as unknown as T);
+            return [[ ]];
         },
-        upsert: () => Effect.void,
-        relate: () => Effect.void,
-        putFile: () => Effect.void,
-        getFile: () => Effect.succeed(""),
-        raw: {} as never,
-    } as unknown as SurrealClientShape;
-    return { db, sql };
+    });
+    return { db: tc.client, sql: tc.captured };
 }
 
 describe("fetchSessionInspect graph-backed paging", () => {

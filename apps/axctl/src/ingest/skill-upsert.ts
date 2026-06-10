@@ -1,11 +1,12 @@
 import { RecordId } from "@ax/lib/db";
+import type { SkillName } from "@ax/lib/brands";
 import { skillRecordKey } from "@ax/lib/skill-id";
 import type { DbError } from "@ax/lib/errors";
 import type { SurrealClientShape } from "@ax/lib/db";
 import { Effect } from "effect";
 
 export interface SkillContent {
-    readonly name: string;
+    readonly name: SkillName;
     readonly scope: string;
     readonly dir_path: string;
     readonly description: string | null | undefined;
@@ -17,7 +18,7 @@ interface SkillLookupRow {
     readonly id?: unknown;
 }
 
-export function skillRecordIdFromLookup(raw: unknown, fallbackName: string): RecordId {
+export function skillRecordIdFromLookup(raw: unknown, fallbackName: SkillName): RecordId {
     if (raw instanceof RecordId) return raw;
     if (typeof raw === "string") {
         const backticked = raw.match(/^skill:`(.+)`$/);

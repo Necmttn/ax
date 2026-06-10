@@ -35,8 +35,9 @@ export const dateField = (
     return null;
 };
 
-/** Finite number at `key`, else `null`. */
-export const numberField = (
+/** Finite number at `key`, else `null` (no coercion - a string `"3"` is
+ *  `null`). Naming follows metrics/util.ts `numOrNull`/`numOrZero`. */
+export const numberFieldOrNull = (
     row: Record<string, unknown>,
     key: string,
 ): number | null => {
@@ -47,7 +48,7 @@ export const numberField = (
 /** Number at `key` coerced from any numeric-ish value (string counts, Date
  *  no); non-finite or missing → `0`. Use for aggregate counts where a
  *  missing column means zero. */
-export const numericField = (
+export const numberFieldOrZero = (
     row: Record<string, unknown>,
     key: string,
 ): number => {

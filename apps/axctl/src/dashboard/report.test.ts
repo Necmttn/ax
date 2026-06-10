@@ -1,22 +1,14 @@
 import { describe, expect, test } from "bun:test";
 import { Effect, FileSystem, Layer } from "effect";
 import { BunFileSystem, BunPath } from "@effect/platform-bun";
-import { SurrealClient } from "@ax/lib/db";
+import { makeTestSurrealClient } from "@ax/lib/testing/surreal";
 import type { DashboardData } from "./report.ts";
 import { renderDashboardHtml, writeDashboard } from "./report.ts";
 
 /** Mock SurrealClient that returns empty result sets for every query, so
  *  `fetchDashboardData` produces a zeroed-out DashboardData without a real DB. */
 function makeEmptyDb() {
-    const impl = {
-        query: <T extends unknown[] = unknown[]>() => Effect.succeed([[]] as unknown as T),
-        upsert: () => Effect.void,
-        relate: () => Effect.void,
-        putFile: () => Effect.void,
-        getFile: () => Effect.succeed(""),
-        raw: undefined as unknown as import("surrealdb").Surreal,
-    };
-    return Layer.succeed(SurrealClient, impl);
+    return makeTestSurrealClient({ denyWrites: true }).layer;
 }
 
 const sampleData: DashboardData = {

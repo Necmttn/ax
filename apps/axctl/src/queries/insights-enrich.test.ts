@@ -8,39 +8,34 @@
  * unchanged.
  */
 import { describe, expect, test } from "bun:test";
-import { Effect, Layer } from "effect";
-import { SurrealClient, type SurrealClientShape } from "@ax/lib/db";
+import { Effect, type Layer } from "effect";
+import { SurrealClient } from "@ax/lib/db";
+import { makeTestSurrealClient } from "@ax/lib/testing/surreal";
 import { enrichInsightRows } from "./insights-enrich.ts";
 
 function makeMockDb(): { layer: Layer.Layer<SurrealClient>; captured: string[] } {
-    const captured: string[] = [];
-    const impl: SurrealClientShape = {
-        query: <T extends unknown[] = unknown[]>(sql: string) => {
-            captured.push(sql);
+    const tc = makeTestSurrealClient({
+        denyWrites: true,
+        fallback: (sql) => {
             if (sql.includes("FROM turn") && sql.includes('role = "assistant"')) {
-                return Effect.succeed([[{ id: "turn:prev", seq: 4, text: "previous reply" }]] as unknown as T);
+                return [[{ id: "turn:prev", seq: 4, text: "previous reply" }]];
             }
             if (sql.includes("FROM tool_call") && sql.includes("has_error = true")) {
-                return Effect.succeed([[{ id: "tool_call:f1", name: "Bash", command_norm: "bun", error_text: "boom", output_excerpt: null, ts: "2026-05-01T00:00:00.000Z" }]] as unknown as T);
+                return [[{ id: "tool_call:f1", name: "Bash", command_norm: "bun", error_text: "boom", output_excerpt: null, ts: "2026-05-01T00:00:00.000Z" }]];
             }
             if (sql.includes("FROM tool_call")) {
-                return Effect.succeed([[{ id: "tool_call:l1", name: "Edit", ts: "2026-05-01T00:10:00.000Z" }]] as unknown as T);
+                return [[{ id: "tool_call:l1", name: "Edit", ts: "2026-05-01T00:10:00.000Z" }]];
             }
             if (sql.includes("FROM command_outcome")) {
-                return Effect.succeed([[{ id: "command_outcome:o1", kind: "expected_feedback", ts: "2026-05-01T00:11:00.000Z" }]] as unknown as T);
+                return [[{ id: "command_outcome:o1", kind: "expected_feedback", ts: "2026-05-01T00:11:00.000Z" }]];
             }
             if (sql.includes("FROM turn") && sql.includes('role = "user"')) {
-                return Effect.succeed([[{ id: "turn:u6", seq: 6, role: "user", text: "next ask", ts: "2026-05-01T00:12:00.000Z" }]] as unknown as T);
+                return [[{ id: "turn:u6", seq: 6, role: "user", text: "next ask", ts: "2026-05-01T00:12:00.000Z" }]];
             }
-            return Effect.succeed([[]] as unknown as T);
+            return [[]];
         },
-        upsert: () => Effect.void,
-        relate: () => Effect.void,
-        putFile: () => Effect.void,
-        getFile: () => Effect.succeed(""),
-        raw: {} as never,
-    };
-    return { layer: Layer.succeed(SurrealClient, impl), captured };
+    });
+    return { layer: tc.layer, captured: tc.captured };
 }
 
 const baseRow = {

@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import { parse as parseYaml } from "yaml";
 import { Effect, FileSystem, Path, Schema } from "effect";
 import { SurrealClient } from "@ax/lib/db";
+import { SkillName } from "@ax/lib/brands";
 import { BaseStageStats, IngestContext, StageMeta } from "./stage/types.ts";
 import type { StageDef } from "./stage/registry.ts";
 import { AppLayer } from "@ax/lib/layers";
@@ -287,7 +288,9 @@ export const ingestCommands = (): Effect.Effect<
                 // Schema is `option<string>` for description and bytes, so
                 // coalesce to `undefined` (NONE) instead of leaving JS null.
                 return upsertSkillByName(db, {
-                    name: item.parsed.name,
+                    // Commands are catalog entries too - brand at the on-disk
+                    // source like ingestSkills does.
+                    name: SkillName.make(item.parsed.name),
                     scope: item.scope,
                     dir_path: item.dir_path,
                     description: item.parsed.description ?? undefined,

@@ -8,12 +8,10 @@
 import { describe, expect, test } from "bun:test";
 import { Effect, Layer } from "effect";
 import { BunFileSystem, BunPath } from "@effect/platform-bun";
-import { RecordId } from "surrealdb";
 import { mkdtemp, mkdir, writeFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { SurrealClient } from "@ax/lib/db";
-import type { SurrealClientShape } from "@ax/lib/db";
+import { makeTestSurrealClient } from "@ax/lib/testing/surreal";
 import { ingestSkills } from "./skills.ts";
 
 // ingestSkills now reads the on-disk fixtures through the @effect/platform
@@ -45,30 +43,11 @@ function extractRoles(fm: Record<string, unknown>): string[] {
 // Mock DB helpers
 // ---------------------------------------------------------------------------
 
-type Call =
-    | { kind: "query"; sql: string; bindings?: Record<string, unknown> }
-    | { kind: "upsert"; id: RecordId; content: Record<string, unknown> };
-
 function makeMockDb(queryResponses: Map<string, unknown[][]> = new Map()) {
-    const calls: Call[] = [];
-    const impl: SurrealClientShape = {
-        query: <T extends unknown[] = unknown[]>(sql: string, bindings?: Record<string, unknown>) => {
-            calls.push(bindings !== undefined ? { kind: "query", sql, bindings } : { kind: "query", sql });
-            for (const [pattern, response] of queryResponses) {
-                if (sql.includes(pattern)) return Effect.succeed(response as T);
-            }
-            return Effect.succeed([[]] as unknown as T);
-        },
-        upsert: (id: RecordId, content: Record<string, unknown>) => {
-            calls.push({ kind: "upsert", id, content });
-            return Effect.void;
-        },
-        relate: () => Effect.void,
-        putFile: () => Effect.void,
-        getFile: () => Effect.succeed(""),
-        raw: undefined as unknown as import("surrealdb").Surreal,
-    };
-    return { calls, layer: Layer.succeed(SurrealClient, impl) };
+    const tc = makeTestSurrealClient({
+        routes: [...queryResponses].map(([match, rows]) => ({ match, rows: rows as unknown[] })),
+    });
+    return { calls: tc.calls, layer: tc.layer };
 }
 
 // ---------------------------------------------------------------------------
@@ -153,7 +132,7 @@ describe("looseLineParse list-format fallback", () => {
 
             const { layer } = makeMockDb();
             const stats = await Effect.runPromise(
-                ingestSkills().pipe(Effect.provide(layer), Effect.provide(PlatformLayer)),
+                ingestSkills().pipe(Effect.provide(Layer.mergeAll(layer, PlatformLayer))),
             );
 
             expect(stats.edgesWritten).toBe(2);
@@ -187,13 +166,12 @@ describe("ingestSkills end-to-end role wiring", () => {
 
             const { calls, layer } = makeMockDb();
             await Effect.runPromise(
-                ingestSkills().pipe(Effect.provide(layer), Effect.provide(PlatformLayer)),
+                ingestSkills().pipe(Effect.provide(Layer.mergeAll(layer, PlatformLayer))),
             );
 
             // RELATE query should use literal record ids, not $skill/$role bindings
             const relateCall = calls.find(
-                (c): c is Extract<Call, { kind: "query" }> =>
-                    c.kind === "query" && c.sql.includes("RELATE") && c.sql.includes('"frontmatter"'),
+                (c) => c.sql.includes("RELATE") && c.sql.includes('"frontmatter"'),
             );
             expect(relateCall).toBeDefined();
             expect(relateCall!.sql).toContain("role:`framing`");
@@ -224,7 +202,7 @@ describe("ingestSkills end-to-end role wiring", () => {
 
             const { layer } = makeMockDb();
             const stats = await Effect.runPromise(
-                ingestSkills().pipe(Effect.provide(layer), Effect.provide(PlatformLayer)),
+                ingestSkills().pipe(Effect.provide(Layer.mergeAll(layer, PlatformLayer))),
             );
 
             expect(stats.edgesWritten).toBe(2);
@@ -252,16 +230,13 @@ describe("ingestSkills end-to-end role wiring", () => {
 
             const { calls, layer } = makeMockDb();
             const stats = await Effect.runPromise(
-                ingestSkills().pipe(Effect.provide(layer), Effect.provide(PlatformLayer)),
+                ingestSkills().pipe(Effect.provide(Layer.mergeAll(layer, PlatformLayer))),
             );
 
             expect(stats.edgesWritten).toBe(0);
             expect(stats.rolesUpserted).toBe(0);
 
-            const relateCall = calls.find(
-                (c): c is Extract<Call, { kind: "query" }> =>
-                    c.kind === "query" && c.sql.includes("RELATE"),
-            );
+            const relateCall = calls.find((c) => c.sql.includes("RELATE"));
             expect(relateCall).toBeUndefined();
         } finally {
             if (prevSkillDirs === undefined) delete process.env["AX_SKILLS_DIRS"];

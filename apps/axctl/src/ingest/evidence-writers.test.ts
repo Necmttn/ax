@@ -1,7 +1,11 @@
 import { describe, expect, test } from "bun:test";
 import { Effect } from "effect";
 import { makeTestSurrealClient, type TestSurrealClient } from "@ax/lib/testing/surreal";
+import { SkillName } from "@ax/lib/brands";
 import { skillRecordKey } from "@ax/lib/skill-id";
+
+// Fixture skill names are plain string literals; brand via the schema constructor.
+const sn = (s: string): SkillName => SkillName.make(s);
 import {
     buildPlanSnapshotStatements,
     buildRelateToolCallSkillStatements,
@@ -125,7 +129,7 @@ describe("evidence writer statement builders", () => {
     test("tool-call-to-skill relation uses concerns instead of invoked", () => {
         const statements = buildRelateToolCallSkillStatements({
             toolCallKey: "session__call",
-            skillName: "superpowers:test-driven-development",
+            skillName: sn("superpowers:test-driven-development"),
             ts: "2026-05-09T10:00:00.000Z",
             reason: "Skill tool call referenced the TDD workflow.",
             labels: { source: "codex" },
@@ -136,7 +140,7 @@ describe("evidence writer statement builders", () => {
 
         expect(sql).not.toContain("DELETE concerns WHERE");
         expect(sql).toContain(`RELATE tool_call:\`session__call\`->concerns:\``);
-        expect(sql).toContain(`->skill:\`${skillRecordKey("superpowers:test-driven-development")}\``);
+        expect(sql).toContain(`->skill:\`${skillRecordKey(sn("superpowers:test-driven-development"))}\``);
         expect(sql).toContain("kind = \"invoked_skill\"");
         expect(sql).toContain("labels = \"{\\\"source\\\":\\\"codex\\\"}\"");
         expect(sql).toContain("metrics = \"{\\\"confidence\\\":1}\"");
@@ -200,16 +204,16 @@ describe("evidence writer statement builders", () => {
 
     test("placeholder skill statements are separate from relation statements", () => {
         const placeholderSql = buildSkillPlaceholderStatements(
-            "superpowers:test-driven-development",
+            sn("superpowers:test-driven-development"),
         ).join("\n");
         const relationSql = buildRelateToolCallSkillStatements({
             toolCallKey: "session__call",
-            skillName: "superpowers:test-driven-development",
+            skillName: sn("superpowers:test-driven-development"),
             ts: "2026-05-09T10:00:00.000Z",
         }).join("\n");
 
         expect(placeholderSql).toContain(
-            `UPSERT skill:\`${skillRecordKey("superpowers:test-driven-development")}\` CONTENT`,
+            `UPSERT skill:\`${skillRecordKey(sn("superpowers:test-driven-development"))}\` CONTENT`,
         );
         expect(placeholderSql).toContain("scope: \"unknown\"");
         expect(relationSql).not.toContain("scope: \"unknown\"");
@@ -222,12 +226,12 @@ describe("evidence writer statement builders", () => {
         await Effect.runPromise(
             relateToolCallSkill({
                 toolCallKey: "session__call",
-                skillName: "superpowers:test-driven-development",
+                skillName: sn("superpowers:test-driven-development"),
                 ts: "2026-05-09T10:00:00.000Z",
             }).pipe(Effect.provide(tc.layer)),
         );
 
-        expect(tc.captured[0]).toContain(`SELECT VALUE id FROM skill:\`${skillRecordKey("superpowers:test-driven-development")}\``);
+        expect(tc.captured[0]).toContain(`SELECT VALUE id FROM skill:\`${skillRecordKey(sn("superpowers:test-driven-development"))}\``);
         expect(tc.captured.slice(1).join("\n")).not.toContain("UPSERT skill:");
         expect(tc.captured.slice(1).join("\n")).toContain("->concerns:");
     });

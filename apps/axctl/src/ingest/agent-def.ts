@@ -12,9 +12,9 @@
  *
  * @see scripts/extract-stage-rationale.ts for the full annotation contract.
  */
-import { Effect, FileSystem, Path, Schema } from "effect";
+import { Effect, FileSystem, Layer, Path, Schema } from "effect";
 import { RecordId, SurrealClient, type SurrealClientShape } from "@ax/lib/db";
-import { skillRecordKey } from "@ax/lib/skill-id";
+import { skillRecordKeyV2 } from "@ax/lib/ids";
 import { AppLayer } from "@ax/lib/layers";
 import { DbError } from "@ax/lib/errors";
 import { findGitRoot } from "../project/git.ts";
@@ -26,9 +26,11 @@ import type { StageDef } from "./stage/registry.ts";
 
 export const AGENT_DEF_TABLE = "agent_def";
 
-/** Stable record id for an agent by name (reuses skill-id keying for `:` etc.). */
+/** Stable record id for an agent by name. Reuses the raw skill keying scheme
+ *  (`skillRecordKeyV2`) for `:` etc. - agent names are NOT skill names, so we
+ *  deliberately bypass the SkillName-branded `skillRecordKey` wrapper. */
 const agentRecordId = (name: string): RecordId =>
-    new RecordId(AGENT_DEF_TABLE, skillRecordKey(name));
+    new RecordId(AGENT_DEF_TABLE, skillRecordKeyV2(name));
 
 /** Upsert one agent record + stamp `last_seen_at`. Dedups by name (user wins). */
 const upsertAgent = (
@@ -128,8 +130,7 @@ if (import.meta.main) {
     // is insufficient for a standalone run - this main is illustrative.
     await Effect.runPromise(
         ingestAgentDefs().pipe(
-            Effect.provide(AppLayer),
-            Effect.provide(AgentSourceRegistryLive),
+            Effect.provide(Layer.mergeAll(AppLayer, AgentSourceRegistryLive)),
             Effect.scoped,
         ) as Effect.Effect<{ count: number; tombstoned: number; resurrected: number }>,
     );
