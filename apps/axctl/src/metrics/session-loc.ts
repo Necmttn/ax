@@ -7,7 +7,8 @@ import {
     editToolSqlFilter,
     isApplyPatchCall,
     isEditTool,
-} from "./tool-classes.ts";
+    toolClassInputOf,
+} from "@ax/lib/shared/tool-classes";
 import { fillDefaults, sessionRefList } from "./util.ts";
 
 export interface SessionLoc { readonly added: number; readonly removed: number; }
@@ -56,7 +57,7 @@ export const applyPatchDelta = (inputJson: string | null): SessionLoc => {
  *
  * Bounded, deref-free read: session IN-list + stored name/command_norm
  * columns (`tool_call_session_ts` index); classification happens in JS on the
- * fetched rows (see tool-classes.ts).
+ * fetched rows (see @ax/lib/shared/tool-classes).
  */
 export const computeSessionLoc = (
     sessionIds: readonly string[],
@@ -71,10 +72,7 @@ SELECT type::string(session) AS session, name, command_norm, input_json
 FROM tool_call
 WHERE session IN [${refs}] AND ${editToolSqlFilter};`))?.[0] ?? [];
         for (const r of rows) {
-            const call = {
-                name: String(r.name ?? ""),
-                command_norm: typeof r.command_norm === "string" ? r.command_norm : null,
-            };
+            const call = toolClassInputOf(r);
             if (!isEditTool(call)) continue;
             const inputJson = typeof r.input_json === "string" ? r.input_json : null;
             const d = isApplyPatchCall(call)

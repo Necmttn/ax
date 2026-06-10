@@ -1,15 +1,27 @@
 import { posixPath } from "@ax/lib/shared/path";
+import {
+    EDIT_COMMANDS,
+    EDIT_TOOL_NAMES,
+    FILE_READ_COMMANDS,
+    FILE_READ_TOOL_NAMES,
+    FILE_SEARCH_COMMANDS,
+    FILE_SEARCH_TOOL_NAMES,
+    isApplyPatchCall,
+} from "@ax/lib/shared/tool-classes";
 import type { ToolCallWrite } from "./evidence-writers.ts";
 import { toolCallRecordKey } from "./record-keys.ts";
 
 export type ToolFileEvidenceKind = "read_file" | "searched_file";
 export type ToolFileRelationKind = "edited" | ToolFileEvidenceKind;
 
-const READ_TOOLS = new Set(["read"]);
-const SEARCH_TOOLS = new Set(["grep", "glob"]);
-const EDIT_TOOLS = new Set(["edit", "write", "multiedit", "notebookedit", "apply_patch"]);
-const READ_COMMANDS = new Set(["cat", "sed", "nl", "head", "tail", "less"]);
-const SEARCH_COMMANDS = new Set(["rg", "grep", "git grep", "fd", "find"]);
+// Canonical sets live in @ax/lib/shared/tool-classes (shared with the
+// timeline + metrics classifiers so the three can't drift); the local names
+// are kept because provider-parity evidence references them.
+const READ_TOOLS = FILE_READ_TOOL_NAMES;
+const SEARCH_TOOLS = FILE_SEARCH_TOOL_NAMES;
+const EDIT_TOOLS = EDIT_TOOL_NAMES;
+const READ_COMMANDS = FILE_READ_COMMANDS;
+const SEARCH_COMMANDS = FILE_SEARCH_COMMANDS;
 const STRUCTURED_PATH_FIELDS = ["file_path", "path", "notebook_path", "file"] as const;
 
 export interface ToolFileEvidenceInput {
@@ -121,15 +133,18 @@ function pathsForKind(call: ToolCallWrite, kind: ToolFileRelationKind): string[]
     const structured = structuredPaths(call.inputJson);
     if (kind !== "edited") return structured;
 
-    const name = call.toolName.trim().toLowerCase();
-    if (name === "apply_patch") return unique([...structured, ...patchPaths(call.inputJson)]);
+    const patchCall = isApplyPatchCall({ name: call.toolName, command_norm: call.commandNorm ?? null });
+    if (patchCall) return unique([...structured, ...patchPaths(call.inputJson)]);
     return structured;
 }
 
 function editKindForTool(toolName: string): string | null {
     const name = toolName.trim().toLowerCase();
     if (name === "write") return "write";
-    if (name === "apply_patch" || name === "edit" || name === "multiedit" || name === "notebookedit") {
+    if (
+        name === "apply_patch" || name === "edit" || name === "multiedit" || name === "notebookedit"
+        || name === "edit_file" || name === "apply_diff"
+    ) {
         return "edit";
     }
     return null;
@@ -142,8 +157,12 @@ export function extractToolFileEvidence(
 
     for (const call of calls) {
         const name = call.toolName.trim().toLowerCase();
+        const command = call.commandNorm?.trim().toLowerCase() ?? "";
         const kinds: ToolFileRelationKind[] = [
-            ...(EDIT_TOOLS.has(name) ? ["edited" as const] : []),
+            // Name- AND command-based edit detection (shell tee/patch/dd/
+            // apply_patch); shell edits rarely carry structured paths, so
+            // they usually contribute no rows, but never misclassify as read.
+            ...(EDIT_TOOLS.has(name) || EDIT_COMMANDS.has(command) ? ["edited" as const] : []),
             ...classifyToolFileEvidence({
                 name: call.toolName,
                 commandNorm: call.commandNorm ?? null,

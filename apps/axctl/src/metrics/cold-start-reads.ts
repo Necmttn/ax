@@ -1,13 +1,18 @@
 import { Effect } from "effect";
 import { SurrealClient } from "@ax/lib/db";
 import type { DbError } from "@ax/lib/errors";
-import { editOrReadToolSqlFilter, isEditTool, isReadTool } from "./tool-classes.ts";
+import {
+    editOrReadToolSqlFilter,
+    isEditTool,
+    isReadTool,
+    toolClassInputOf,
+} from "@ax/lib/shared/tool-classes";
 import { isoMs, sessionRefList } from "./util.ts";
 
 /**
  * Count of read/search tool_calls that happened BEFORE the session's first
  * edit. When the session never edited, ALL its reads/searches count. Default
- * 0. Classification is multi-provider (see tool-classes.ts): Claude
+ * 0. Classification is multi-provider (see @ax/lib/shared/tool-classes): Claude
  * Read/Grep/Glob + shell reads/searches (cat/sed/rg/... via the stored
  * `command_norm`); edits are Edit/Write/... + apply_patch / shell edits.
  *
@@ -36,10 +41,7 @@ export const computeColdStartReads = (
         const readMs = new Map<string, number[]>();
         for (const r of rows) {
             const session = String(r.session);
-            const call = {
-                name: String(r.name ?? ""),
-                command_norm: typeof r.command_norm === "string" ? r.command_norm : null,
-            };
+            const call = toolClassInputOf(r);
             const ms = isoMs(r.ts);
             if (isEditTool(call)) {
                 if (ms === null) continue;

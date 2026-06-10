@@ -1,13 +1,19 @@
 import { describe, expect, test } from "bun:test";
-import { classifyToolFileEvidence } from "../ingest/tool-file-evidence.ts";
 import {
+    CODEX_TIMELINE_EDIT_HINT_COMMANDS,
+    EDIT_COMMANDS,
+    EDIT_TOOL_NAMES,
+    READ_COMMANDS,
+    READ_TOOL_NAMES,
     canonicalEditToolName,
     editOrReadToolSqlFilter,
     editToolSqlFilter,
     isApplyPatchCall,
     isEditTool,
     isReadTool,
-} from "./tool-classes.ts";
+} from "@ax/lib/shared/tool-classes";
+import { classifyToolFileEvidence, extractToolFileEvidence } from "../ingest/tool-file-evidence.ts";
+import { classifyTool } from "../timeline/providers.ts";
 
 describe("isEditTool", () => {
     test("Claude edit tool names (any casing)", () => {
@@ -54,25 +60,6 @@ describe("isReadTool", () => {
         expect(isReadTool({ name: "TodoWrite" })).toBe(false);
         expect(isReadTool({ name: "exec_command", command_norm: null })).toBe(false);
     });
-    test("agrees with the ingest file-evidence classifier on read/search inputs", () => {
-        // Every input the file-evidence classifier marks read/search must be a
-        // metrics read too (modulo edit precedence) - guards set drift.
-        const inputs = [
-            { name: "Read", commandNorm: null },
-            { name: "grep", commandNorm: null },
-            { name: "Glob", commandNorm: null },
-            { name: "Bash", commandNorm: "cat" },
-            { name: "Bash", commandNorm: "sed" },
-            { name: "exec_command", commandNorm: "rg" },
-            { name: "exec_command", commandNorm: "git grep" },
-            { name: "Bash", commandNorm: "fd" },
-        ];
-        for (const input of inputs) {
-            const evidenceKinds = classifyToolFileEvidence(input);
-            expect(evidenceKinds.length).toBeGreaterThan(0);
-            expect(isReadTool({ name: input.name, command_norm: input.commandNorm })).toBe(true);
-        }
-    });
 });
 
 describe("isApplyPatchCall", () => {
@@ -109,5 +96,113 @@ describe("SQL filter fragments", () => {
         expect(editOrReadToolSqlFilter).toContain('"rg"');
         expect(editOrReadToolSqlFilter).toContain('"git grep"');
         expect(editOrReadToolSqlFilter).not.toMatch(/\bin\.|\bout\./);
+    });
+});
+
+// ---------------------------------------------------------------------------
+// Drift guard: ingest (tool-file-evidence), timeline (providers), and metrics
+// (the shared predicates) all consume @ax/lib/shared/tool-classes. These tests
+// pin the BEHAVIOR of each consumer against the shared sets so a local
+// override / re-fork in any consumer fails here.
+// ---------------------------------------------------------------------------
+
+/** Minimal ToolCallWrite for extractToolFileEvidence. */
+const toolCallWrite = (toolName: string, commandNorm: string | null = null) => ({
+    sessionId: "session-drift",
+    provider: "test",
+    toolName,
+    toolKind: "tool",
+    seq: 1,
+    ts: "2026-06-10T00:00:00Z",
+    inputJson: { file_path: "/tmp/drift.ts" },
+    commandNorm,
+    hasError: false,
+});
+
+describe("drift guard: edit sets across consumers", () => {
+    test("every shared edit TOOL NAME is an edit in metrics, timeline, and ingest", () => {
+        for (const name of EDIT_TOOL_NAMES) {
+            // metrics predicate
+            expect(isEditTool({ name })).toBe(true);
+            // timeline classification (name check is source-independent)
+            for (const source of ["claude", "codex", "cursor"] as const) {
+                expect(classifyTool(source, { name, command_norm: null, command_text: null }).kind)
+                    .toBe("file_edit");
+            }
+            // ingest file evidence emits an `edited` relation
+            const evidence = extractToolFileEvidence([toolCallWrite(name)]);
+            expect(evidence.map((e) => e.kind)).toContain("edited");
+        }
+    });
+
+    test("every shared edit COMMAND is an edit in metrics, timeline, and ingest", () => {
+        for (const command of EDIT_COMMANDS) {
+            expect(isEditTool({ name: "exec_command", command_norm: command })).toBe(true);
+            expect(
+                classifyTool("codex", { name: "exec_command", command_norm: command, command_text: command }).kind,
+            ).toBe("file_edit");
+            const evidence = extractToolFileEvidence([toolCallWrite("exec_command", command)]);
+            expect(evidence.map((e) => e.kind)).toContain("edited");
+            // and never double-classified as a read by ingest
+            expect(classifyToolFileEvidence({ name: "exec_command", commandNorm: command })).toEqual([]);
+        }
+    });
+
+    test("timeline's edit-hint set is EXACTLY the shared edit commands + the named sed exception", () => {
+        expect([...CODEX_TIMELINE_EDIT_HINT_COMMANDS].sort())
+            .toEqual([...EDIT_COMMANDS, "sed"].sort());
+    });
+
+    test("THE sed DECISION: read for metrics + ingest, edit hint on the timeline only", () => {
+        const sed = { name: "exec_command", command_norm: "sed" };
+        // metrics boundaries: sed is a read, never an edit
+        expect(isEditTool(sed)).toBe(false);
+        expect(isReadTool(sed)).toBe(true);
+        // ingest file evidence: read_file, not edited
+        expect(classifyToolFileEvidence({ name: "exec_command", commandNorm: "sed" }))
+            .toEqual(["read_file"]);
+        // timeline keeps the explicit edit-hint exception
+        expect(classifyTool("codex", { ...sed, command_text: "sed -i s/a/b/ x.ts" }).kind)
+            .toBe("file_edit");
+    });
+});
+
+describe("drift guard: read sets across consumers", () => {
+    test("every shared read/search TOOL NAME is a read in metrics + ingest and noise on the timeline", () => {
+        for (const name of READ_TOOL_NAMES) {
+            expect(isReadTool({ name })).toBe(true);
+            expect(classifyToolFileEvidence({ name }).length).toBeGreaterThan(0);
+            expect(classifyTool("claude", { name, command_norm: null, command_text: null }).kind)
+                .toBe("noise");
+        }
+    });
+
+    test("every shared read/search COMMAND is a read in metrics + ingest", () => {
+        for (const command of READ_COMMANDS) {
+            expect(isReadTool({ name: "exec_command", command_norm: command })).toBe(true);
+            expect(isReadTool({ name: "Bash", command_norm: command })).toBe(true);
+            const kinds = classifyToolFileEvidence({ name: "exec_command", commandNorm: command });
+            expect(kinds.length).toBeGreaterThan(0);
+        }
+    });
+
+    test("agrees with the ingest file-evidence classifier on read/search inputs", () => {
+        // Every input the file-evidence classifier marks read/search must be a
+        // metrics read too (modulo edit precedence) - guards set drift.
+        const inputs = [
+            { name: "Read", commandNorm: null },
+            { name: "grep", commandNorm: null },
+            { name: "Glob", commandNorm: null },
+            { name: "Bash", commandNorm: "cat" },
+            { name: "Bash", commandNorm: "sed" },
+            { name: "exec_command", commandNorm: "rg" },
+            { name: "exec_command", commandNorm: "git grep" },
+            { name: "Bash", commandNorm: "fd" },
+        ];
+        for (const input of inputs) {
+            const evidenceKinds = classifyToolFileEvidence(input);
+            expect(evidenceKinds.length).toBeGreaterThan(0);
+            expect(isReadTool({ name: input.name, command_norm: input.commandNorm })).toBe(true);
+        }
     });
 });

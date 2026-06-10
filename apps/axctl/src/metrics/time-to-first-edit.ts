@@ -1,14 +1,14 @@
 import { Effect } from "effect";
 import { SurrealClient } from "@ax/lib/db";
 import type { DbError } from "@ax/lib/errors";
-import { editToolSqlFilter, isEditTool } from "./tool-classes.ts";
+import { editToolSqlFilter, isEditTool, toolClassInputOf } from "@ax/lib/shared/tool-classes";
 import { isoMs, sessionRefList } from "./util.ts";
 
 /**
  * Time from a session's `started_at` to its first edit, in ms. null when the
  * session never edited (distinct from 0). Edit detection is multi-provider:
  * Claude Edit/Write tools AND codex/pi apply_patch / shell edits via the
- * stored `command_norm` column (see tool-classes.ts).
+ * stored `command_norm` column (see @ax/lib/shared/tool-classes).
  *
  * Two flat set-based reads joined in JS. Edit candidates are taken from
  * `tool_call` (session/name/command_norm/ts are stored columns, indexed by
@@ -44,10 +44,7 @@ export const computeTimeToFirstEdit = (
 
         const firstEdit = new Map<string, number>();
         for (const r of editRows) {
-            const call = {
-                name: String(r.name ?? ""),
-                command_norm: typeof r.command_norm === "string" ? r.command_norm : null,
-            };
+            const call = toolClassInputOf(r);
             if (!isEditTool(call)) continue;
             const ms = isoMs(r.ts);
             if (ms === null) continue;
