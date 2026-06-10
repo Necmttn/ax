@@ -42,6 +42,8 @@ import {
 import { recommend, type RecommendInput } from "../improve/recommend.ts";
 import { showExperiment } from "../improve/show.ts";
 import { listProposals, type ListProposalsInput } from "../improve/list.ts";
+import { fetchSessionMetrics } from "../metrics/session-metrics-query.ts";
+import { SIGNAL_CATALOG, findSignal, runRelationSignal } from "../metrics/catalog.ts";
 
 /**
  * The long-lived MCP runtime, built from `AppLayer` (SurrealClient + config +
@@ -359,6 +361,91 @@ const improveListTool: AxMcpTool = {
     },
 };
 
+const sessionMetricsTool: AxMcpTool = {
+    name: "session_metrics",
+    description:
+        "Graph-derived per-session metrics: durability ratio (commits not later reverted), produced commits, time-to-land (commit -> PR merge), lines added/removed, first-edit latency, cold-start reads, delegation ratio, estimated cost, and user corrections. Sorted by produced commits (desc), then most fragile first.",
+    inputSchema: {
+        sinceDays: z
+            .number()
+            .int()
+            .positive()
+            .max(3650)
+            .optional()
+            .describe("Only sessions started within the last N days (default: all time)."),
+        limit: z
+            .number()
+            .int()
+            .positive()
+            .max(500)
+            .optional()
+            .describe("Max session rows to return (default 50, max 500)."),
+        project: z
+            .string()
+            .optional()
+            .describe("Filter to sessions whose project or cwd equals this path (e.g. a repo root)."),
+    },
+    run: async (args, rt) => {
+        const sinceDays = typeof args.sinceDays === "number" ? args.sinceDays : undefined;
+        // Mirror the CLI's clamp (1..3650 days) so MCP and `ax sessions metrics`
+        // agree on window semantics.
+        const since = sinceDays !== undefined
+            ? new Date(Date.now() - Math.min(Math.max(Math.trunc(sinceDays), 1), 3650) * 86_400_000)
+            : null;
+        const limit = typeof args.limit === "number" ? args.limit : 50;
+        const project =
+            typeof args.project === "string" && args.project.length > 0
+                ? args.project
+                : null;
+        return await rt.runPromise(fetchSessionMetrics({ since, limit, project }));
+    },
+};
+
+const signalShowTool: AxMcpTool = {
+    name: "signal_show",
+    description:
+        "Signal catalog access. With no `id`: list all signal descriptors (id, kind, label, description). With an `id` (e.g. fragility_cascade): run that relation signal and return its edges sorted by weight (descending). Unknown ids error with the list of valid ids.",
+    inputSchema: {
+        id: z
+            .string()
+            .optional()
+            .describe('Signal id to run (e.g. "fragility_cascade"). Omit to list the catalog.'),
+        limit: z
+            .number()
+            .int()
+            .positive()
+            .max(500)
+            .optional()
+            .describe("Max edges to return when running a signal (default 30)."),
+    },
+    run: async (args, rt) => {
+        const id =
+            typeof args.id === "string" && args.id.trim().length > 0
+                ? args.id.trim()
+                : undefined;
+        if (id === undefined) {
+            return { signals: SIGNAL_CATALOG };
+        }
+        const descriptor = findSignal(id);
+        if (descriptor === undefined) {
+            const ids = SIGNAL_CATALOG.map((s) => s.id).join(", ");
+            throw new Error(`Unknown signal "${id}". Valid ids: ${ids}`);
+        }
+        if (descriptor.kind !== "relation") {
+            // Mirrors the CLI: aggregate signals have no runnable rendering yet.
+            return {
+                signal: descriptor,
+                edges: null,
+                note: "aggregate signals are not runnable via MCP yet",
+            };
+        }
+        const limit = typeof args.limit === "number" ? args.limit : 30;
+        const all = await rt.runPromise(runRelationSignal(descriptor.id));
+        const edges = [...all].sort((a, b) => b.weight - a.weight).slice(0, limit);
+        return { signal: descriptor, edges };
+    },
+};
+
 /**
  * All registered MCP tools. `server.ts` iterates this array to register +
  * wrap each one.
@@ -379,4 +466,6 @@ export const axMcpTools: ReadonlyArray<AxMcpTool> = [
     improveRecommendTool,
     improveShowTool,
     improveListTool,
+    sessionMetricsTool,
+    signalShowTool,
 ];

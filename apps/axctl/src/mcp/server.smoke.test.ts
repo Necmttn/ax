@@ -23,6 +23,8 @@ const EXPECTED_TOOLS = [
     "improve_recommend",
     "improve_show",
     "improve_list",
+    "session_metrics",
+    "signal_show",
 ] as const;
 
 describe("axMcpTools registry", () => {
@@ -36,7 +38,7 @@ describe("axMcpTools registry", () => {
         expect(recall!.inputSchema).toHaveProperty("q");
     });
 
-    it("registers all 10 read-only tools, each well-formed", () => {
+    it("registers all 12 read-only tools, each well-formed", () => {
         expect(axMcpTools.map((t) => t.name).sort()).toEqual(
             [...EXPECTED_TOOLS].sort(),
         );
@@ -63,6 +65,91 @@ describe("axMcpTools registry", () => {
         expect(required(byName("improve_show").inputSchema, "sigOrId")).toBe(true);
         // optional fields are not required
         expect(required(byName("sessions_around").inputSchema, "days")).toBe(false);
+        // metrics/signal tools are fully optional-arg: no required fields.
+        expect(required(byName("session_metrics").inputSchema, "sinceDays")).toBe(false);
+        expect(required(byName("session_metrics").inputSchema, "limit")).toBe(false);
+        expect(required(byName("session_metrics").inputSchema, "project")).toBe(false);
+        expect(required(byName("signal_show").inputSchema, "id")).toBe(false);
+        expect(required(byName("signal_show").inputSchema, "limit")).toBe(false);
+    });
+});
+
+describe("session_metrics arg mapping", () => {
+    const tool = axMcpTools.find((t) => t.name === "session_metrics")!;
+
+    it("calls the runtime and returns its result with no args", async () => {
+        let ran = false;
+        const rt = {
+            runPromise: () => {
+                ran = true;
+                return Promise.resolve([]);
+            },
+        } as never;
+        const result = await tool.run({}, rt);
+        expect(ran).toBe(true);
+        expect(result).toEqual([]);
+    });
+
+    it("ignores non-numeric sinceDays/limit and non-string project", async () => {
+        const rt = {
+            runPromise: () => Promise.resolve([{ session: "session:x" }]),
+        } as never;
+        const result = await tool.run(
+            { sinceDays: "7", limit: "10", project: 42 },
+            rt,
+        );
+        expect(result).toEqual([{ session: "session:x" }]);
+    });
+});
+
+describe("signal_show", () => {
+    const tool = axMcpTools.find((t) => t.name === "signal_show")!;
+    // These paths must resolve BEFORE any DB call - no seeded DB here.
+    const unreachableRt = {
+        runPromise: () => {
+            throw new Error("runtime should not be reached");
+        },
+    } as never;
+
+    it("lists the catalog without touching the runtime when id is omitted", async () => {
+        const result = (await tool.run({}, unreachableRt)) as {
+            signals: ReadonlyArray<{ id: string; kind: string }>;
+        };
+        expect(result.signals.length).toBeGreaterThan(0);
+        expect(result.signals.map((s) => s.id)).toContain("fragility_cascade");
+    });
+
+    it("treats a blank id as a catalog listing", async () => {
+        const result = (await tool.run({ id: "   " }, unreachableRt)) as {
+            signals: ReadonlyArray<{ id: string }>;
+        };
+        expect(result.signals.map((s) => s.id)).toContain("fragility_cascade");
+    });
+
+    it("rejects an unknown id before hitting the runtime", async () => {
+        await expect(tool.run({ id: "nope" }, unreachableRt)).rejects.toThrow(
+            /Unknown signal "nope"/,
+        );
+    });
+
+    it("runs a known relation signal, sorting edges by weight desc and applying limit", async () => {
+        const rt = {
+            runPromise: () =>
+                Promise.resolve([
+                    { origin: "session:a", downstream: "session:b", weight: 1 },
+                    { origin: "session:c", downstream: "session:d", weight: 5 },
+                    { origin: "session:e", downstream: "session:f", weight: 3 },
+                ]),
+        } as never;
+        const result = (await tool.run(
+            { id: "fragility_cascade", limit: 2 },
+            rt,
+        )) as {
+            signal: { id: string };
+            edges: ReadonlyArray<{ weight: number }>;
+        };
+        expect(result.signal.id).toBe("fragility_cascade");
+        expect(result.edges.map((e) => e.weight)).toEqual([5, 3]);
     });
 });
 
