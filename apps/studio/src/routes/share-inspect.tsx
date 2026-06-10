@@ -287,16 +287,35 @@ function InspectBody({
     harnessHooks,
     onSelectSubagent,
     onPrefetchSubagent,
+    landOnFirstTurn = false,
 }: {
     readonly data: SessionInspectPayload;
     readonly subagentsByTurn?: ReadonlyMap<number, ReadonlyArray<ShareSubagentCard>>;
     readonly harnessHooks?: ReadonlyArray<ShareHarnessHookView>;
     readonly onSelectSubagent?: (file: string) => void;
     readonly onPrefetchSubagent?: (file: string) => void;
+    /** Land on the first message instead of page top (subagent continuity:
+     *  the reader just clicked this session's task in the parent transcript). */
+    readonly landOnFirstTurn?: boolean;
 }) {
     const [anchoredSeq, setAnchoredSeq] = useState<number | null>(() => hashSeq());
     const turnsRef = useRef<ReadonlyArray<InspectTurnDto>>([]);
     turnsRef.current = data.turns;
+
+    // Landing on mount (the component is keyed per session file): a #turn
+    // anchor wins via the anchoredSeq effect below; otherwise a subagent
+    // continues at its first message; otherwise reset to the page top.
+    useEffect(() => {
+        if (hashSeq() != null) return;
+        const first = turnsRef.current[0];
+        if (landOnFirstTurn && first) {
+            document.getElementById(`turn-${first.seq}`)?.scrollIntoView({ behavior: "auto", block: "start" });
+            return;
+        }
+        window.scrollTo(0, 0);
+        // Mount-only: landing is a one-shot decision per keyed session view.
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
 
     // Mount-windowing: render the first N turns, grow on scroll / on a jump that
     // targets a turn past the window. The full list stays in `data.turns` so
@@ -642,18 +661,25 @@ function MultiFileShareView(props: {
         readonly search: (prev: Record<string, unknown>) => Record<string, unknown>;
         readonly hash?: string;
     }) => void;
-    const setSelectedFile = (file: string) => {
+    const setSelectedFile = (file: string, anchorSeq?: number | null) => {
         const sub = file === manifest.root_file ? undefined : file;
         // Drop the #turn anchor BEFORE the navigate re-renders: the freshly
         // keyed InspectBody reads location.hash at mount, and a stale anchor
         // would scroll the new session to the old session's turn number.
+        // `anchorSeq` re-anchors deliberately (back-nav returns to the spawn turn).
         if (window.location.hash) {
             window.history.replaceState(null, "", window.location.pathname + window.location.search);
         }
-        navigateLoose({
-            search: (prev) => ({ ...prev, sub }),
-            hash: "",
-        });
+        const go = () =>
+            navigateLoose({
+                search: (prev) => ({ ...prev, sub }),
+                hash: anchorSeq != null ? `turn-${anchorSeq}` : "",
+            });
+        // Crossfade the session switch where the View Transitions API exists.
+        const startViewTransition = (document as { startViewTransition?: (cb: () => unknown) => unknown })
+            .startViewTransition?.bind(document);
+        if (startViewTransition) startViewTransition(go);
+        else go();
     };
     const setView = (next: "transcript" | "timeline") => {
         navigateLoose({
@@ -664,17 +690,8 @@ function MultiFileShareView(props: {
             hash: window.location.hash.replace(/^#/, ""),
         });
     };
-    // Jumping between sessions keeps the page's scroll offset, which lands the
-    // reader mid-transcript of a session they've never seen - reset to the top.
-    // Skipped on first mount so a deep link's #turn anchor still wins.
-    const mountedRef = useRef(false);
-    useEffect(() => {
-        if (!mountedRef.current) {
-            mountedRef.current = true;
-            return;
-        }
-        window.scrollTo(0, 0);
-    }, [selectedFile]);
+    // Landing position on session switch lives in InspectBody's mount effect
+    // (anchor > first turn > top), so nothing scrolls here.
     // Timeline event rows link to `#turn-N` anchors that only exist in the
     // transcript - a hash jump while on the timeline flips back to it.
     useEffect(() => {
@@ -803,7 +820,7 @@ function MultiFileShareView(props: {
                 <div style={SUBAGENT_BAR_STYLE}>
                     <button
                         type="button"
-                        onClick={() => setSelectedFile(parentFile)}
+                        onClick={() => setSelectedFile(parentFile, selectedCard.spawn_turn_seq)}
                         onMouseEnter={() => prefetch(parentFile)}
                         style={{ ...SUBAGENT_LINK_STYLE, fontWeight: 700 }}
                     >
@@ -847,6 +864,7 @@ function MultiFileShareView(props: {
                     harnessHooks={fileQuery.data?.harness_hooks}
                     onSelectSubagent={setSelectedFile}
                     onPrefetchSubagent={prefetch}
+                    landOnFirstTurn={selectedFile !== manifest.root_file}
                 />
             ) : null}
         </section>

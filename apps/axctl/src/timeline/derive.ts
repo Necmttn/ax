@@ -16,6 +16,7 @@ import type {
     CorrectionRow,
     CostRow,
     EditRow,
+    EditStatRow,
     HealthRow,
     LastTurnRow,
     OverviewRow,
@@ -53,11 +54,71 @@ const DISPATCH_TOOLS = new Set(["Agent", "Task"]);
  */
 export const dispatchLabel = (commandText: string | null): string | null => {
     if (!commandText) return null;
-    const pick = (key: string): string | null =>
-        new RegExp(`"${key}"\\s*:\\s*"((?:[^"\\\\]|\\\\.)*)"`).exec(commandText)?.[1] ?? null;
-    const label = pick("description") ?? pick("subagent_type");
+    const label = jsonStringField(commandText, "description") ?? jsonStringField(commandText, "subagent_type");
     if (!label) return null;
-    return label.replace(/\\n/g, " ").replace(/\\"/g, '"').trim() || null;
+    return unescapeJson(label) || null;
+};
+
+/** Regex-extract one string field from (possibly truncated) raw JSON text. */
+const jsonStringField = (text: string | null, key: string): string | null =>
+    text ? new RegExp(`"${key}"\\s*:\\s*"((?:[^"\\\\]|\\\\.)*)"`).exec(text)?.[1] ?? null : null;
+
+const unescapeJson = (s: string): string =>
+    s.replace(/\\n/g, " ").replace(/\\t/g, " ").replace(/\\"/g, '"').replace(/\\\\/g, "\\").trim();
+
+/** Shell wrappers whose bare name says nothing about what actually ran. */
+const WRAPPER_NORMS = new Set(["echo", "printf", "cd", "true", "set", "export", "eval"]);
+
+/**
+ * Better title for a shell call whose normalized command is a wrapper (`echo`
+ * piggybacking a compound command, `cd x && bun test`, heredoc logging, ...).
+ * Splits the raw command on `&&`/`||`/`;`/`|`/newlines, surfaces the first
+ * segment that is NOT a wrapper, and appends the agent's stated `description`
+ * when present. Returns null when there is nothing better than the norm.
+ */
+export const shellTitle = (commandText: string | null): string | null => {
+    const rawCmd = jsonStringField(commandText, "command");
+    const desc = jsonStringField(commandText, "description");
+    const segments = rawCmd
+        ? unescapeJson(rawCmd).split(/&&|\|\||[;|\n]/).map((s) => s.trim()).filter((s) => s.length > 0)
+        : [];
+    const meaningful = segments.find((s) => !WRAPPER_NORMS.has((s.split(/\s+/)[0] ?? "").toLowerCase()));
+    const cmdLabel = meaningful ? clip(meaningful, 48) : null;
+    const descLabel = desc ? unescapeJson(desc) : null;
+    if (cmdLabel && descLabel) return `${cmdLabel} - ${descLabel}`;
+    return cmdLabel ?? descLabel;
+};
+
+export interface EditDelta {
+    readonly added: number;
+    readonly removed: number;
+}
+
+const countLines = (s: unknown): number =>
+    typeof s === "string" && s.length > 0 ? s.split("\n").length : 0;
+
+/**
+ * +/- line counts for one Edit/Write/NotebookEdit call from its full input.
+ * Best-effort: the input is sliced at 32k chars, so a giant Write may not
+ * parse - return null and the event title stays as-is.
+ */
+export const editDelta = (name: string, inputJson: string | null): EditDelta | null => {
+    if (!inputJson) return null;
+    try {
+        const input = JSON.parse(inputJson) as Record<string, unknown>;
+        if (name === "Edit") {
+            return { added: countLines(input.new_string), removed: countLines(input.old_string) };
+        }
+        if (name === "Write") {
+            return { added: countLines(input.content), removed: 0 };
+        }
+        if (name === "NotebookEdit") {
+            return { added: countLines(input.new_source), removed: 0 };
+        }
+        return null;
+    } catch {
+        return null;
+    }
 };
 
 // --- per-kind derivation ---------------------------------------------------
@@ -94,11 +155,16 @@ export function deriveToolEvents(
             continue;
         }
         const dispatch = DISPATCH_TOOLS.has(t.name) ? dispatchLabel(t.command_text) : null;
+        // A wrapper norm (`echo`, `cd`, ...) hides the real work - pull the
+        // meaningful pipeline segment + the agent's intent out of the input.
+        const smart = !dispatch && t.command_norm && WRAPPER_NORMS.has(t.command_norm.toLowerCase())
+            ? shellTitle(t.command_text)
+            : null;
         out.push({
             kind: "tool_call",
             ts: t.ts,
             seq: t.seq,
-            title: clip(dispatch ? `${t.name}: ${dispatch}` : t.command_norm ?? t.name, TITLE_MAX),
+            title: clip(dispatch ? `${t.name}: ${dispatch}` : smart ?? t.command_norm ?? t.name, TITLE_MAX),
             ...(firstLine(t.output_excerpt) ? { detail: clip(firstLine(t.output_excerpt), DETAIL_MAX) } : {}),
             status: "ok",
             refs: [...(t.call_id ? [{ type: "tool" as const, id: t.call_id }] : []), ...turnRef],
@@ -128,20 +194,29 @@ export function deriveFailureEvents(rows: ReadonlyArray<ToolCallRow>): TimelineE
         });
 }
 
-export function deriveFileEvents(rows: ReadonlyArray<EditRow>): TimelineEvent[] {
+export function deriveFileEvents(
+    rows: ReadonlyArray<EditRow>,
+    deltaBySeq: ReadonlyMap<number, EditDelta> = new Map(),
+): TimelineEvent[] {
     return rows
         .filter((e) => e.path != null && e.ts != null)
-        .map((e) => ({
-            kind: "file_edit" as const,
-            ts: e.ts as string,
-            seq: e.seq,
-            title: clip(e.path as string, TITLE_MAX),
-            ...(e.tool || e.edit_kind ? { detail: [e.tool, e.edit_kind].filter(Boolean).join(" · ") } : {}),
-            refs: [
-                { type: "file" as const, id: e.path as string },
-                ...(e.seq != null ? [{ type: "turn" as const, id: String(e.seq) }] : []),
-            ],
-        }));
+        .map((e) => {
+            const delta = e.seq != null ? deltaBySeq.get(e.seq) : undefined;
+            const suffix = delta && (delta.added > 0 || delta.removed > 0)
+                ? `  +${delta.added}/-${delta.removed}`
+                : "";
+            return {
+                kind: "file_edit" as const,
+                ts: e.ts as string,
+                seq: e.seq,
+                title: clip(`${e.path as string}${suffix}`, TITLE_MAX),
+                ...(e.tool || e.edit_kind ? { detail: [e.tool, e.edit_kind].filter(Boolean).join(" · ") } : {}),
+                refs: [
+                    { type: "file" as const, id: e.path as string },
+                    ...(e.seq != null ? [{ type: "turn" as const, id: String(e.seq) }] : []),
+                ],
+            };
+        });
 }
 
 export function deriveSkillEvents(
@@ -330,6 +405,8 @@ export interface TimelineInputs {
     readonly cost: CostRow | null;
     readonly toolCalls: ReadonlyArray<ToolCallRow>;
     readonly edits: ReadonlyArray<EditRow>;
+    /** Full Edit/Write inputs for +/- line counts; optional (older callers). */
+    readonly editStats?: ReadonlyArray<EditStatRow>;
     readonly skills: ReadonlyArray<SkillRow>;
     readonly corrections: ReadonlyArray<CorrectionRow>;
     readonly plans: ReadonlyArray<PlanRow>;
@@ -348,10 +425,21 @@ export function buildTimeline(input: TimelineInputs): SessionTimeline {
         input.edits.map((e) => e.seq).filter((s): s is number => s != null),
     );
     const failures = pairRecoveries(deriveFailureEvents(input.toolCalls), input.toolCalls, input.edits);
+    // +/- per turn seq, summed when one turn carries several edit calls.
+    const deltaBySeq = new Map<number, EditDelta>();
+    for (const stat of input.editStats ?? []) {
+        if (stat.seq == null) continue;
+        const delta = editDelta(stat.name, stat.input_json);
+        if (!delta) continue;
+        const prev = deltaBySeq.get(stat.seq);
+        deltaBySeq.set(stat.seq, prev
+            ? { added: prev.added + delta.added, removed: prev.removed + delta.removed }
+            : delta);
+    }
     const events = [
         ...deriveToolEvents(input.toolCalls, input.source, editedSeqs),
         ...failures,
-        ...deriveFileEvents(input.edits),
+        ...deriveFileEvents(input.edits, deltaBySeq),
         ...deriveSkillEvents(input.skills, input.source),
         ...deriveCorrectionEvents(input.corrections),
         ...deriveDecisionEvents(input.plans),
