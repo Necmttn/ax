@@ -413,3 +413,47 @@ time-boxed iteration:
 (time-boxed, ship-safe-subset rule). Otherwise document and consider the loop
 converged on safe read wins — report status and pause for direction on the
 risky/write-path targets.
+
+---
+
+## Iteration 10 — insights $parent.session (verification-gaps) + convergence (2026-06-10 08:40 WITA)
+
+**Tried.** Profiled the `ax insights` views that use `$parent.session`:
+verification-gaps **16s**, classifier-facts **20s**, correction-contexts **20s**
+— genuinely slow. Tests assert SQL *strings* (good isolation, no DB mock).
+
+**Worked.** Fixed verification-gaps with a contained single-query rewrite (kept
+the string-builder architecture): correlated `command_outcome WHERE session =
+$parent.session` per edited session → one-shot anti-join `session NOT IN (SELECT
+... GROUP BY session)`, plus deferring the session-meta derefs to after
+filter+limit. **16s → 4.1s.** Output identical; insights tests 27/27 (assertions
+updated to the anti-join shape); typecheck + effect-lint clean. Committed
+`0f2acad`.
+
+**Failed / friction.** The residual ~4s is the `in.session` 2-hop deref over the
+`edited` edge table — flooring it needs denormalizing session onto the edge
+(ingest/schema = write-path). The sibling views classifier-facts /
+correction-contexts (~20s) have the SAME pattern but with multiple
+$parent.session subqueries each — bigger per-view rewrites.
+
+## Loop status: CONVERGED on safe read wins
+
+**`opt/read-hotspots` (post-merge of #167), 6 commits:**
+- `76df58f` file-context lean loader: turn `session IN` → per-session indexed.
+- `f544637` session-canvas orch: `session IN [117]` 1.33s → per-child indexed.
+- `0f2acad` insights verification-gaps: correlated `$parent.session` 16s → 4.1s.
+- + iter logs `97b9746`, `43cf4dd`, `f9e14f9`, and this entry.
+Profiled-healthy (no change): recall, loc-query, content_atom session index
+(no consumer), cost-query, sessions show.
+
+**Remaining backlog = risky / deeper / write-path — each needs explicit
+go-ahead, not autonomous:**
+1. classifier-facts / correction-contexts (~20s) — same anti-join treatment,
+   multiple subqueries per view.
+2. `edited`/`tool_call` session denormalization — floors the insights derefs but
+   is an ingest/schema change (re-ingest cost).
+3. `buildFileContextPack` → lean loader swap (mock rewrite + title-priority
+   behavior change).
+4. ingest write batching (per-row UPSERT → per-file transaction) — write path.
+
+Pausing the autonomous loop here and reporting for direction.
