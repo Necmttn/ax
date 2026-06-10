@@ -688,7 +688,7 @@ export function DockedRail({
     setSelection: (selection: InspectSelection | null) => void;
 }) {
     return (
-        <div style={{
+        <div className="docked-rail" style={{
             flex: "0 0 320px",
             alignSelf: "flex-start",
             position: "sticky",
@@ -1377,7 +1377,7 @@ function TurnImpl({
 
     if (toolOnly) {
         return (
-            <div id={`turn-${turn.seq}`} title={turnTokenUsageTitle(turn)} style={gridStyle}>
+            <div id={`turn-${turn.seq}`} className="turn-row" title={turnTokenUsageTitle(turn)} style={gridStyle}>
                 {seqGutter}
                 <TurnHeader turn={turn} style={s} extras={headerExtras} hideRoleLabel />
                 <div style={{ gridColumn: "2", minWidth: 0 }}>
@@ -1389,7 +1389,7 @@ function TurnImpl({
     }
 
     return (
-        <div id={`turn-${turn.seq}`} title={turnTokenUsageTitle(turn)} style={gridStyle}>
+        <div id={`turn-${turn.seq}`} className="turn-row" title={turnTokenUsageTitle(turn)} style={gridStyle}>
             {seqGutter}
             <TurnHeader turn={turn} style={s} extras={headerExtras} rightSlot={inspectingBadge} />
             <div style={{ gridColumn: "2", minWidth: 0 }}>

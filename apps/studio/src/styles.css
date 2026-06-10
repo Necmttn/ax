@@ -2117,3 +2117,98 @@ td.skill-cell .description {
     border-color: #ef4444;
     box-shadow: inset 0 0 0 1px rgba(239, 68, 68, 0.4);
 }
+
+/* --- shared-session view: mobile + CTA footer ----------------------------- */
+
+/* Unbroken code strings (gist source paths) must never widen the page. */
+.panel code {
+    overflow-wrap: anywhere;
+    word-break: break-all;
+}
+
+/* Raw share summaries can be many lines of payload at 22px serif - clamp. */
+.share-hero .share-hero-title {
+    display: -webkit-box;
+    -webkit-line-clamp: 4;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+}
+
+/* "Recorded with ax" CTA card at the end of a shared transcript. */
+.share-footer {
+    border: 1px solid var(--line);
+    background: #fff;
+    padding: 16px 20px 18px;
+    margin-top: 16px;
+    display: grid;
+    gap: 8px;
+    justify-items: start;
+}
+.share-footer-label {
+    font: 700 10px/1 ui-monospace, Menlo, monospace;
+    text-transform: uppercase;
+    letter-spacing: 0.14em;
+    color: var(--muted);
+}
+.share-footer-copy {
+    margin: 0;
+    font-size: 13px;
+    color: var(--ink);
+    max-width: 52ch;
+}
+.share-footer-install {
+    font: 12px/1.4 ui-monospace, Menlo, monospace;
+    background: var(--page);
+    border: 1px solid var(--line);
+    padding: 8px 12px;
+    white-space: nowrap;
+    overflow-x: auto;
+    max-width: 100%;
+}
+.share-footer-link {
+    font: 600 11px/1 ui-monospace, Menlo, monospace;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--ink);
+    text-decoration: none;
+    border-bottom: 1px solid var(--ink);
+    padding-bottom: 2px;
+}
+
+@media (max-width: 768px) {
+    /* The docked inspector/cost rail is hover-driven - useless on touch and
+       it squeezes the transcript to ~110px. Inline styles win specificity,
+       hence !important. */
+    .docked-rail {
+        display: none !important;
+    }
+    /* Jump bar: one horizontally-scrollable row instead of a 5-row sticky
+       block covering a third of the viewport. */
+    .filter-bar {
+        flex-wrap: nowrap !important;
+        overflow-x: auto;
+        padding: 6px 12px !important;
+        -webkit-overflow-scrolling: touch;
+    }
+    .filter-bar > * {
+        flex: 0 0 auto;
+    }
+    /* Turn rows: 100px of gutter+padding per 390px line is too rich. */
+    .turn-row {
+        padding: 8px 10px !important;
+        grid-template-columns: 26px 1fr !important;
+    }
+    .shell {
+        padding: 12px;
+    }
+    .masthead .brand-tag {
+        display: none;
+    }
+    .masthead-share {
+        flex-wrap: wrap;
+    }
+    .share-cta {
+        font-size: 11px;
+        padding: 6px 10px;
+    }
+}

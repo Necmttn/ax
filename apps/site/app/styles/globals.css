@@ -52,6 +52,7 @@ main, header, footer {
   width: 100vw;
   max-width: none;
   min-height: 100vh;
+  min-height: 100dvh; /* iOS Safari: don't clip behind the toolbar */
   margin: 0;
   padding: 0;
   background: #f3f6f5;
@@ -61,6 +62,7 @@ main, header, footer {
   display: block;
   width: 100%;
   height: 100vh;
+  height: 100dvh; /* iOS Safari: don't clip behind the toolbar */
   border: 0;
 }
 
