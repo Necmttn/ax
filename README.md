@@ -20,24 +20,45 @@ triage. Accepted proposals become experiments with t+7 / t+30 / t+90
 verdicts. The next session reads what worked.
 
 > *What did this sub-agent learn? Which experiments are still open?
-> Which skills earned their keep? Which hooks blocked anything useful?*
+> Which skills earned their keep? What did that branch cost in tokens?*
 > `ax` answers these by reading what already happened.
 
 ![ax · the retro loop for AI coding agents](docs/images/og.png)
 
-## What is AX
+## 60 seconds in
 
-`AX` (agent experience) is what the agent perceives across sessions,
-reflects on at the end of each, and turns into the next experiment. It
-is to AI coding agents what retros and post-mortems are to engineering
-teams - a structured reflection step that compounds.
+```bash
+curl -fsSL https://raw.githubusercontent.com/Necmttn/ax/main/install.sh | bash
+PATH="$HOME/.local/bin:$PATH" ax setup   # agent skills + first ingest + doctor
+```
 
-`ax` (lowercase) is the reference implementation. Local typed graph,
-Stop-hook-driven retros, agent-readable queries, React dashboard, AGPL-3.0.
-A longer take: [`docs/manifesto.md`](docs/manifesto.md). Vocabulary:
-[`docs/language.md`](docs/language.md).
+Then ask the graph things you couldn't ask before:
 
-## How it fits together
+```bash
+ax recall "auth bug"          # full-text recall across every past session
+ax skills taste               # which skills earned their keep
+ax costs for --branch main    # what a branch cost in tokens
+ax sessions metrics           # graph-derived session health
+ax share <session-id>         # publish a session anyone can read
+ax serve                      # live dashboard at http://127.0.0.1:8520
+```
+
+Requires Bun ≥ 1.3 and SurrealDB ≥ 3.0. macOS-first; Linux works for ingest
+and CLI (no launchd reactivity). Dev install, schema, queries, benchmarks:
+[`docs/development.md`](docs/development.md).
+
+## Every harness, one graph
+
+Five harnesses - Claude Code, Codex, Pi, OpenCode, Cursor - plus installed
+skills, local git history, and GitHub PRs with their reviews and checks, all
+ingested into one local SurrealDB graph: sessions, turns, tool calls, plans,
+skills, commits, files, friction, compaction, derived signals. Ingest is a
+staged Effect pipeline; unchanged sources are skipped, so re-ingest takes
+seconds. A launchd watcher keeps it current as you work. Everything runs on
+`127.0.0.1` - no network round-trip, no third party.
+
+Signals are normalized across harnesses: "context ran out and got summarized"
+is one queryable compaction event whether it came from Claude Code or Codex.
 
 ```mermaid
 flowchart LR
@@ -47,6 +68,7 @@ flowchart LR
   oc["OpenCode + Cursor<br/>SQLite stores"]
   sk["installed skills<br/>(.claude, .agents, plugins)"]
   g[("local git history")]
+  gh["GitHub PRs<br/>reviews + checks"]
 
   cc --> ingest
   cx --> ingest
@@ -54,41 +76,22 @@ flowchart LR
   oc --> ingest
   sk --> ingest
   g  --> ingest
+  gh --> ingest
 
   ingest["axctl ingest<br/>(Effect pipelines)"] --> db
   db[("the ax graph<br/>session · turn · tool_call · skill · plan<br/>repository · checkout · commit · file<br/>friction · diagnostic · compaction · insight")]
 
   db --> cli["axctl CLI<br/>recall · skills · insights · evidence"]
-  db --> dash["axctl serve<br/>live dashboard"]
+  db --> dash["axctl serve<br/>live dashboard + studio"]
   db --> agent["agent skill + ax mcp<br/>project context · verify · harness"]
 ```
 
-Everything runs on `127.0.0.1`. The agent and the CLI both read the same
-graph; the dashboard is a thin React view over the same queries.
+## Recall every session you ever ran
 
-## A taste of the output
-
-Which skills earned their keep, by composite score over the last 30 days:
+Full-text BM25 search across turns, commits, and skills - milliseconds, local:
 
 ```text
-$ axctl skills taste --limit=8
-skill                              scope        score    7d     30d    total
-codex:exec_command                 codex-tool  40902.5  1,124  30,500  40,389
-codex:write_stdin                  codex-tool   6,957     166   4,932   6,451
-codex:rescue                       command        781       0     389     605
-codex:update_plan                  codex-tool   766.5      14     338     391
-simplify                           user         718.5       5      89     101
-codex:wait_agent                   codex-tool     713       3     497     507
-codex:spawn_agent                  codex-tool     647       2     439     442
-superpowers:systematic-debugging   plugin        26.5       0       6       6
-
-(8 / 288 skills shown)
-```
-
-Recall past work across every session, in milliseconds:
-
-```text
-$ axctl recall "auth middleware"
+$ ax recall "auth middleware"
 4 matches
 
 2026-05-23T15:19  codex      user       acme-app   alright lets commit auth related work for now
@@ -97,10 +100,29 @@ $ axctl recall "auth middleware"
 2026-05-19T11:08  claude     user       ax         the auth middleware retry loop - we still see exit-code 1 from bun check after …
 ```
 
-Which tools fail most often, so you know what to skill-up around:
+## Know which skills earned their keep
+
+Composite score over the last 30 days, across every installed skill:
 
 ```text
-$ axctl insights tools --limit=5
+$ ax skills taste --limit=8
+skill                              scope        score    7d     30d    total
+codex:exec_command                 codex-tool  40902.5  1,124  30,500  40,389
+codex:write_stdin                  codex-tool   6,957     166   4,932   6,451
+codex:rescue                       command        781       0     389     605
+codex:update_plan                  codex-tool   766.5      14     338     391
+simplify                           user         718.5       5      89     101
+codex:wait_agent                   codex-tool     713       3     497     507
+codex:spawn_agent                  codex-tool     647       2     439     442
+superpowers:systematic-debugging   plugin         26.5      0       6       6
+
+(8 / 288 skills shown)
+```
+
+And which tools fail most often, so you know what to skill-up around:
+
+```text
+$ ax insights tools --limit=5
 name           failure_count   exit_code   last_seen
 write_stdin    647             1           2026-05-23T14:34
 Edit           483             -           2026-05-23T05:14
@@ -108,6 +130,85 @@ Skill          475             -           2026-05-05T13:34
 exec_command   421             1           2026-05-22T18:50
 Bash           318             1           2026-05-21T22:12
 ```
+
+31 read-only graph views in `ax insights`; full list in
+[`docs/insights-cli-reference.md`](docs/insights-cli-reference.md).
+
+## Put a price on everything
+
+Token cost resolved through model pricing rows - prompt, output, cache
+read/write, estimated USD - queryable by session, text, commit, or branch:
+
+```bash
+ax costs summary --since=7              # by provider/model, last 7 days
+ax costs for --query "live-traces"      # cost of sessions matching turn text
+ax costs for --commit 464c80b           # cost of the sessions behind a commit
+ax costs for --branch feat/share        # cost of a whole feature branch
+```
+
+So "what did that refactor cost" has an answer with a dollar sign on it.
+
+## Share a session like a gist
+
+```bash
+ax share <session-id>
+# → https://ax.necmttn.com/s/<owner>/<gist-id>
+```
+
+Exports the full session - subagent transcripts, harness hook fires, per-turn
+pricing - sanitizes it, publishes it as a GitHub Gist, and serves it through a
+hosted viewer: unified tool-call cards, session timeline, cost rail, and a
+per-session poster image for the link unfurl. The data stays in your gist,
+under your account; the viewer just renders it.
+
+## Watch your agents work
+
+`ax serve` runs the dashboard + studio over the same graph:
+
+- **Transcript view** - tool call and result as one card, skill and image
+  turns folded, subagent spawns with their metrics.
+- **Session timeline** - highlights, segments, and events derived from the
+  graph, no LLM in the loop.
+- **Session canvas** - a semantic-zoom lineage graph of sessions and the
+  subagents they spawned: swimlanes, time-axis zoom up to 2000x, hover detail
+  in ~30ms.
+- **Live ingest** - trigger a run from the dashboard and watch stages stream;
+  refresh mid-run and it resumes where it was.
+- **Metrics** - `ax sessions metrics` and `ax signals` surface graph-derived
+  session health (fragility cascades, plan churn, tool retries), and
+  `ax sessions compare` puts two runs side by side.
+
+## Close the loop: grounded agent files
+
+ax recommends changes to your `AGENTS.md` / `CLAUDE.md` / skills - grounded in
+evidence from your own sessions - and tracks which lines came from it:
+
+```text
+session ends           ax retro emit          # structured note: tried · worked · failed · next
+proposals derive       ax improve recommend   # ranked by confidence × recency × frequency
+pick one               ax improve accept <id> # writes .ax/tasks/<id>.md - hand to your agent
+reconcile              ax improve lint        # marker ↔ DB ↔ task files
+verdict at +3/+10/+30  ax improve verdict --set=adopted|ignored|regressed|partial
+sessions               # session-count windows, not calendar days
+```
+
+Every proposal carries its evidence trail (`ax improve show <id>`). Verdicts
+land on session-count windows, so a skill that stopped firing gets caught, not
+forgotten.
+
+## Your agent can query all of this mid-session
+
+Two integration paths, same graph:
+
+```bash
+npx skills add Necmttn/ax           # agent skills: setup, retro, extract-workflow, …
+claude mcp add ax -- ax mcp         # MCP server: read-only graph queries as tools
+```
+
+Recommended agent loop: `ax project context --json` before work (stack, recent
+friction, verification commands), do the work, `ax project verify --json`
+before reporting done. For Codex, add `ax mcp` to `~/.codex/config.toml`. Tool
+list and details: [`docs/cli.md`](docs/cli.md#mcp-server-tools).
 
 ## Why an experience layer
 
@@ -117,270 +218,29 @@ slow, lossy) or vague vector retrieval (no structure, no grounding in real
 events).
 
 `ax` takes a different shape: a **typed graph of evidence** built from the
-agent's own logs. Sessions, turns, tool calls, plans, skills, commits, files,
-friction, compaction events, and derived signals - all queryable, all local, no
-network round-trip, no third party. Signals like compaction are normalized the
-same way across every harness, so "context ran out and got summarized" is one
-queryable event whether it came from Claude Code, Codex, Pi, OpenCode, or Cursor.
-
-Three things fall out of that, and they're the three things "agent
-experience" actually means in practice:
+agent's own logs. Three things fall out of that, and they're the three things
+"agent experience" actually means in practice:
 
 1. **Skill triage** - which of your installed skills get used, which never
    fire, which correlate with stuck sessions.
-2. **Pre-flight grounding** - `axctl project context` hands the next agent
+2. **Pre-flight grounding** - `ax project context` hands the next agent
    stack info, recent friction, and verification commands.
 3. **Retro signal** - query the graph after a hard session: tool retries,
    plan churn, file edit pairings. Feed it back into the next run.
 
-## Install
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/Necmttn/ax/main/install.sh | bash
-PATH="$HOME/.local/bin:$PATH" axctl ingest --since=7
-```
-
-Skills are distributed via the [skills.sh](https://skills.sh) marketplace.
-After the CLI is installed, drop the agent skills into your Claude Code
-session with:
-
-```bash
-npx skills add Necmttn/ax           # installs the ax agent skills (setup, retro, repo, …)
-```
-
-Requires Bun ≥ 1.3 and SurrealDB ≥ 3.0. macOS-first; Linux works for ingest
-and CLI (no launchd reactivity).
-
-For dev install, schema, queries, and benchmarks, see
-[`docs/development.md`](docs/development.md).
-
-## Quickstart
-
-```bash
-axctl ingest --since=7     # backfill last 7 days of transcripts + skills + git
-axctl serve                # live dashboard at http://127.0.0.1:8520
-axctl skills taste         # CLI view: which skills earned their keep
-axctl recall "auth bug"    # full-text recall across past sessions
-```
-
-### Live ingest in the dashboard
-
-`axctl serve` exposes `POST /api/ingest` (also wired to the dashboard's **Live**
-tab): it triggers an in-process ingest run and streams progress to a per-run
-[Durable Stream](docs/superpowers/research/durable-streams-api.md) named
-`ingest:<runId>`. The live view replays history from the start and then
-continues live, so a mid-run refresh or reconnect rehydrates finished stages
-and resumes the tail (offset-resume, not raw SSE). An `IngestStreamBus` seam
-keeps the local Durable-Streams-in-Bun backing swappable for a hosted backend
-without touching producers or UI; the CLI `axctl ingest` and its terminal
-animation are unchanged.
-
-> Live ingest requires running ax **from source** (the `bin/axctl` shim already
-> does). The compiled standalone binary serves the dashboard but disables live
-> ingest, since native lmdb can't be bundled into the `--compile` binary.
-
-## Agent integration
-
-`ax` ships a set of installable skills so a Claude Code / Codex agent can drive
-and query its own evidence graph mid-session - `setup` (install + verify),
-`retro` and `retro-meta` (the experiment loop), `ax-extract-workflow`
-(reconstruct what made a past result work), `ax-repo` (star / file issues / open
-PRs), and `release-announcement`:
-
-```bash
-npx skills add Necmttn/ax -g -a claude-code -a codex -y   # all ax agent skills
-```
-
-Recommended agent loop:
-
-1. `axctl project context --json` before work - stack, recent friction,
-   verification commands.
-2. Do the work.
-3. `axctl project verify --json` before reporting done - runs the checks
-   the project actually expects.
-
-## MCP server
-
-`ax mcp` runs a [Model Context Protocol](https://modelcontextprotocol.io)
-server over stdio that exposes ax's read-only graph queries as tools, so a
-coding agent (Claude Code, Codex) can query the ax graph in-context instead of
-shelling out. It complements the installable skills above. (`ax` and `axctl`
-are the same binary.)
-
-Register it with **Claude Code**:
-
-```bash
-claude mcp add ax -- ax mcp        # add --scope user to make it global
-```
-
-Register it with **Codex** by adding to `~/.codex/config.toml`:
-
-```toml
-[mcp_servers.ax]
-command = "ax"
-args = ["mcp"]
-```
-
-The 10 tools, each mirroring the matching CLI command:
-
-- **recall** - full-text recall across turns / commits / skills (`ax recall`).
-- **sessions_around** - sessions in a date window (`ax sessions around`).
-- **session_show** - one session's detail, with optional subagent expansion
-  and skill-by-role grouping (`ax sessions show`).
-- **skills_weighted** - usage x role-weight skill ranking (`ax skills weighted`).
-- **skills_by_role** - skills tagged with a given role (`ax skills by-role`).
-- **skills_roles** - roles for a given skill (`ax skills roles`).
-- **roles** - the full role vocabulary (`ax roles`).
-- **improve_recommend** - top improvement proposals, ranked (`ax improve recommend`).
-- **improve_show** - one proposal's evidence trail (`ax improve show`).
-- **improve_list** - proposals filtered by status / form (`ax improve list`).
-
-> **Read-only.** Mutating ops (`improve accept/reject/verdict`, `skills
-> tag/lint`, `ingest`) stay on the CLI - they write task files / edges a human
-> reviews - so v0 exposes no mutating tools.
->
-> **Run it from source** (the `bin/axctl` shim does this). Unlike live ingest,
-> the MCP server pulls in no native deps (just the JS MCP SDK + the SurrealDB
-> client), so the compiled standalone binary should serve it too - that path is
-> just untested in v0.
->
-> `sessions_here` / `sessions_near` are intentionally deferred - they need a
-> git/cwd-resolved repository key, a documented follow-up.
-
-## CLI shape
-
-```text
-axctl ingest [--since=N] [--reset] [--stages=<list>]   # backfill the graph
-axctl ingest here [--since=Nd] [--stages=<list>]       # scope ingest to the git repo at $PWD
-axctl derive <signals|intents>              # re-run a derive pass standalone
-axctl serve                                 # live web dashboard
-axctl mcp                                   # MCP server (stdio) - read-only graph queries for agents
-axctl report                                # one-shot static HTML
-axctl tui                                   # interactive terminal dashboard
-
-axctl recall <query> [--sources=turn,commit,skill] [--scope=here|all]
-                                            # cross-session BM25 full-text search
-axctl context [file] [<query>]              # file/agent-context grounding
-axctl skills <search|taste|unused|pairs|recovery|stats|recent|classify|tag|lint|weighted|by-role|roles|config|reconcile|scope|park|unpark|rm>
-axctl agents <config|reconcile|scope|park|unpark|rm>   # agent-file registry + overrides
-axctl insights <view>                       # 31 read-only graph views
-axctl classifiers <list|eval|explain|...>   # classifier coverage, graph, lifecycle, label-mining
-axctl costs <summary>                       # token/cost usage by provider/model quality
-axctl sessions <here|around <date>|near <sha>|show <id>|compare|metrics>
-                                            # windowed session queries + graph-derived metrics
-axctl signals <list|show <id>>              # relation-signal catalog (fragility cascade, ...)
-axctl costs summary [--since=N]             # estimated token cost by provider/model
-axctl costs for --session <id>              # cost for one session
-axctl costs for --query <text> [--limit=N]  # cost for sessions matching turn text
-axctl costs for --terms <a,b,c> [--since=N] # cost for sessions matching any term
-axctl costs for --commit <sha>              # cost for sessions that produced a commit
-axctl costs for --branch <name>             # cost for sessions linked to a branch
-axctl pricing [--query <model>]             # inspect imported model pricing rows
-axctl share <session-id>                    # publish a sanitized session share via GitHub Gist
-axctl roles                                 # list role labels with skill counts
-axctl project <context|verify|harness>
-axctl evidence <guidance-next|session-summary|weekly>
-axctl improve <list|show|accept|reject|verdict|checkpoint|reset>
-axctl retro <emit|list|pending|brief|reflect|meta|plan>   # the retro-loop CLI
-axctl hook <fire>                           # hook helper invoked from settings.json
-axctl hooks <summary|invocations|backtest|session|config ...>   # + hook-config CRUD
-
-axctl daemon <status|start|stop|restart>
-axctl doctor                                # local-install health check
-axctl install                               # wire launchd + hooks + DB (then runs setup)
-axctl setup [--agents=… --no-ingest --yes]  # install agent skills + first ingest + doctor
-axctl uninstall                             # remove launchd + bin symlink
-axctl update [--check]                      # pull latest release
-axctl version [--check|--banner]
-```
-
-> `axctl --help` lists the everyday commands plus the read-only insight
-> surfaces (`ingest`, `sessions`, `signals`, `improve`, `retro`, `recall`,
-> `skills`, `hooks`, `roles`, `serve`, `mcp`, `tui`, `share`, `install`,
-> `setup`) to keep it lean. The rest (`derive`, `agents`, `costs`,
-> `report`, `context`, `hook`, `project`, `evidence`, `classifiers`,
-> `insights`, `daemon`, `doctor`, `uninstall`, `update`, `version`) are hidden
-> from `--help` but remain fully invokable by name. This block can drift - run
-> `axctl <command> --help` for the authoritative subcommand set.
-
-Full reference: [`docs/insights-cli-reference.md`](docs/insights-cli-reference.md).
-
-### Token cost queries
-
-`axctl costs` reads the local `session_token_usage` graph. Provider adapters
-write actual token counters when they exist; otherwise ax falls back to a rough
-transcript-byte estimate. `session-health` resolves model names through
-`agent_model` pricing rows and stores prompt, output, cache-read, cache-write,
-and total estimated USD.
-
-Examples:
-
-```bash
-axctl costs summary --since=2
-axctl costs for --query "live-traces" --limit=20
-axctl costs for --terms "live trace,livetrace,live-traces" --since=2 --limit=50
-axctl costs for --terms "live trace,livetrace,live-traces" --since=2 --project /Users/me/project
-axctl costs for --query "checkout bug" --since=7 --here
-axctl costs for --commit 464c80b
-axctl costs for --branch main --limit=20
-axctl sessions show <session-id>
-axctl pricing --query gpt-5.5
-```
-
-`--query` and `--terms` can be constrained with `--since=N`, `--project <path>`,
-or `--here`. `--here`, `--commit`, and `--branch` use repository graph evidence
-from the current git checkout. Direct `--pr <number>` is not wired yet; use the
-PR branch or a commit SHA for now.
-
-### Grounded agent files
-
-ax can recommend changes to your `AGENTS.md` / `CLAUDE.md` (and skill files)
-and track which lines came from it.
-
-End-to-end flow:
-
-```text
-session ends           axctl retro emit        # structured note: tried · worked · failed · next
-proposals derive       axctl improve recommend # ranked by confidence × recency × frequency
-pick one               axctl improve accept <id>
-                       # default: writes .ax/tasks/<id>.md - hand to your agent
-                       # --auto-scaffold:    skips the brief, writes SKILL.md directly
-                       # --with-agent:       scaffolds + dispatches `claude -p` subagent
-                       #                     to enrich the stub with real triggers + steps
-reconcile              axctl improve lint     # marker ↔ DB ↔ task files
-verdict at +3/+10/+30  axctl improve verdict --set=adopted|ignored|regressed|partial
-sessions               # session-count windows, not calendar days (#83)
-```
-
-Commands:
-
-- `axctl improve recommend [--limit=N] [--form=skill] [--apply]` - print N
-  ranked proposals as paste-ready blocks (already wrapped in `<!--ax:id-->`
-  provenance markers). `--apply` enters an interactive accept loop.
-- `axctl improve accept <id> [--with-agent] [--auto-scaffold] [--force]` -
-  Default emits `.ax/tasks/<id>.md`, a brief your agent (Claude Code,
-  Codex) executes. `--auto-scaffold` writes `SKILL.md` directly.
-  `--with-agent` adds a `claude -p` subagent pass that reads the stub +
-  sibling skills and rewrites it with concrete triggers, steps, and
-  anti-patterns. Optionally writes a sibling `PLAN.md`.
-- `axctl improve lint [--root=<dir>] [--stale-days=N]` - scan grounded agent
-  files, reconcile markers with the DB, remove consumed task files, warn on
-  orphans or tasks older than `--stale-days` (default 7).
-- `axctl improve show <id>` - full evidence trail for one proposal.
-- `axctl improve list [--status=open|accepted|rejected|all]` - browse the
-  proposal queue.
-- `axctl improve verdict <id> [--set=...]` - inspect or lock the +30-session verdict.
-- `axctl improve reject <id> [--reason=...]` - dedupes future re-proposals
-  of the same trigger.
+`AX` (agent experience) is what the agent perceives across sessions, reflects
+on at the end of each, and turns into the next experiment. It is to AI coding
+agents what retros and post-mortems are to engineering teams - a structured
+reflection step that compounds. A longer take:
+[`docs/manifesto.md`](docs/manifesto.md).
 
 ## Docs
 
+- [`docs/cli.md`](docs/cli.md) - full CLI reference, costs, improve, MCP tools
 - [`docs/manifesto.md`](docs/manifesto.md) - the missing layer in the agent stack
-- [`docs/origin.html`](docs/origin.html) - origin notes on the loop ax closes
 - [`docs/language.md`](docs/language.md) - coined vocabulary, the AX glossary
 - [`docs/brand.md`](docs/brand.md) - design system + voice rules
 - [`docs/development.md`](docs/development.md) - local setup, schema, queries, benchmarks
-- [`docs/plans/ax-mcp-server.md`](docs/plans/ax-mcp-server.md) - the `ax mcp` server plan
 - [`CONTRIBUTING.md`](CONTRIBUTING.md) - PR conventions, ground rules
 - [`CONTEXT.md`](CONTEXT.md) - domain glossary (Repository vs. Checkout vs. …)
 - [`docs/adr/`](docs/adr/) - architecture decisions
