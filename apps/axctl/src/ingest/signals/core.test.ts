@@ -1,7 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import { skillRecordKey } from "@ax/lib/skill-id";
-// Task 4 flips these two imports to "./core.ts" / "./types.ts" - that flip is
-// the before/after behavior-preservation harness. Do not edit assertions then.
+// Task 4 flipped these imports from "../derive-signals.ts" to "./core.ts" /
+// "./types.ts" - that flip was the before/after behavior-preservation
+// harness. Assertions are characterization-pinned; do not edit them.
 import {
     deriveCorrections,
     deriveDiagnosticsFromToolCalls,
@@ -15,11 +16,13 @@ import {
     shouldDeriveAllTimeSkillPairs,
     skillPairedEdgeId,
     toolCallStableKey,
-    type SessionTurns,
-    type SkillPairAccum,
-    type ToolCallLike,
-    type TurnRow,
-} from "../derive-signals.ts";
+} from "./core.ts";
+import type {
+    SessionTurns,
+    SkillPairAccum,
+    ToolCallLike,
+    TurnRow,
+} from "./types.ts";
 
 const turn = (
     partial: Partial<TurnRow> & Pick<TurnRow, "id" | "seq" | "role">,
