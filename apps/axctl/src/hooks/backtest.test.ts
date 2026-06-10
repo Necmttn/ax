@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { Effect } from "effect";
-import { replayRows, summarize } from "./backtest.ts";
+import { formatReport, replayRows, summarize } from "./backtest.ts";
 import { GitEnvTest } from "@ax/hooks-sdk/git-env";
 import enforceWorktree from "@ax/hooks-sdk/hooks/enforce-worktree";
 
@@ -54,6 +54,8 @@ describe("replayRows", () => {
         expect(s.total).toBe(3);
         expect(s.wouldBlock).toBe(1);
         expect(s.wouldWarn).toBe(0);
+        expect(s.skippedRows).toBe(0);
+        expect(s.providers).toEqual(["claude", "codex"]);
         expect(s.byProject["/repo"]).toEqual({ total: 2, blocked: 1 });
         expect(s.byProject["/other"]).toEqual({ total: 1, blocked: 0 });
     });
@@ -155,5 +157,66 @@ describe("summarize", () => {
         ];
         const s = summarize(results);
         expect(s.byProject["(unknown)"]).toEqual({ total: 1, blocked: 0 });
+    });
+
+    test("skippedRows passthrough + distinct providers from rows", () => {
+        const makeResult = (source: "claude" | "codex") => ({
+            row: {
+                name: "Bash",
+                input: { command: "ls" },
+                cwd: "/repo",
+                source,
+                project: "/repo",
+                ts: new Date(),
+            },
+            verdict: { _tag: "Allow" as const },
+        });
+        const s = summarize([makeResult("claude"), makeResult("claude")], 7);
+        expect(s.skippedRows).toBe(7);
+        expect(s.providers).toEqual(["claude"]);
+
+        const s2 = summarize([makeResult("claude"), makeResult("codex")]);
+        expect(s2.skippedRows).toBe(0);
+        expect(s2.providers).toEqual(["claude", "codex"]);
+    });
+});
+
+describe("formatReport", () => {
+    const baseSummary = {
+        total: 100,
+        wouldBlock: 5,
+        wouldWarn: 0,
+        skippedRows: 0,
+        providers: ["claude"],
+        byProject: { "/repo": { total: 100, blocked: 5 } },
+        samples: [],
+    };
+
+    test("provider count derived from summary, not hardcoded", () => {
+        const one = formatReport("my-hook", 7, baseSummary);
+        expect(one).toContain("(last 7d, 1 provider)");
+
+        const two = formatReport("my-hook", 7, {
+            ...baseSummary,
+            providers: ["claude", "codex"],
+        });
+        expect(two).toContain("(last 7d, 2 providers)");
+    });
+
+    test("skipped line only when skippedRows > 0; caveat always present", () => {
+        const clean = formatReport("my-hook", 7, baseSummary);
+        expect(clean).not.toContain("skipped");
+        expect(clean).toContain(
+            "caveat: state-dependent checks (branch, dirty) used CURRENT repo state.",
+        );
+
+        const withSkips = formatReport("my-hook", 7, {
+            ...baseSummary,
+            skippedRows: 12,
+        });
+        expect(withSkips).toContain("skipped 12 rows (unparseable input)");
+        expect(withSkips).toContain(
+            "caveat: state-dependent checks (branch, dirty) used CURRENT repo state.",
+        );
     });
 });

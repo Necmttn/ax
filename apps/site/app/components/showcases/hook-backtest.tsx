@@ -62,12 +62,12 @@ export function HookBacktestShowcase() {
               <span className="term-dot term-dot-y" />
               <span className="term-dot term-dot-g" />
               <span className="term-title">
-                ax <span className="seg">·</span> hooks backtest{" "}
+                ax <span className="seg">·</span> hooks cases{" "}
                 <span className="seg">·</span> ~/Projects/ax
               </span>
             </header>
             <pre className="term-body">
-<span className="term-line"><span className="t-prompt">~/.claude $</span> <span className="t-cmd">ax hooks backtest</span> pre-tool-main-branch-guard <span className="t-flag">--since=</span><span className="t-num">7d</span></span>{"\n"}
+<span className="term-line"><span className="t-prompt">~/.claude $</span> <span className="t-cmd">ax hooks cases</span> pre-tool-main-branch-guard <span className="t-flag">--since=</span><span className="t-num">7d</span></span>{"\n"}
 <span className="term-line"><span className="t-muted">  ↳ replay window  </span> 2026-05-21 → 2026-05-28  <span className="t-muted">(7d)</span></span>{"\n"}
 <span className="term-line"><span className="t-muted">  ↳ sessions       </span> <span className="t-num">14</span> claude_code, <span className="t-num">3</span> codex  <span className="t-muted">(17 total)</span></span>{"\n"}
 <span className="term-line"><span className="t-muted">  ↳ tool_calls     </span> <span className="t-num">1,247</span> bash invocations indexed</span>{"\n"}

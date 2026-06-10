@@ -272,7 +272,7 @@ const backtestCommand = Command.make(
             const toolNames = hookDef.matcher?.tools ? [...hookDef.matcher.tools] : [];
 
             // Fetch rows from DB (read-only SELECTs). DB unavailable -> friendly error + exit.
-            const rows = yield* fetchRows(days, toolNames, providerFilter).pipe(
+            const fetched = yield* fetchRows(days, toolNames, providerFilter).pipe(
                 Effect.catchTag("DbError", (e) =>
                     Effect.promise(async () => {
                         process.stderr.write(
@@ -286,11 +286,11 @@ const backtestCommand = Command.make(
 
             // Replay through the hook with GitEnvLive (state-dependent checks
             // use the CURRENT repo state - see caveat in report).
-            const results = yield* replayRows(hookDef, rows).pipe(
+            const results = yield* replayRows(hookDef, fetched.rows).pipe(
                 Effect.provide(GitEnvLive),
             );
 
-            const summary = summarize(results);
+            const summary = summarize(results, fetched.skipped);
 
             if (asJson) {
                 console.log(prettyPrint(summary));

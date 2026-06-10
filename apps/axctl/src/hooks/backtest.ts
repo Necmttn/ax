@@ -36,6 +36,10 @@ export interface BacktestSummary {
     readonly total: number;
     readonly wouldBlock: number;
     readonly wouldWarn: number;
+    /** rows dropped before replay (missing/malformed input_json). */
+    readonly skippedRows: number;
+    /** distinct harness sources actually seen in the replayed rows. */
+    readonly providers: ReadonlyArray<string>;
     readonly byProject: Record<string, { total: number; blocked: number }>;
     readonly samples: ReadonlyArray<{ command: string; reason: string }>;
 }
@@ -79,13 +83,20 @@ export const replayRows = (
 /**
  * Aggregate replay results into a summary suitable for the CLI report or
  * --json output. First 10 Block verdicts are captured as samples.
+ * `skippedRows` is the count of DB rows dropped before replay (missing or
+ * malformed input_json) - surfaced so caps are never silent.
  */
-export const summarize = (results: ReadonlyArray<ReplayResult>): BacktestSummary => {
+export const summarize = (
+    results: ReadonlyArray<ReplayResult>,
+    skippedRows = 0,
+): BacktestSummary => {
     const byProject: Record<string, { total: number; blocked: number }> = {};
     const samples: Array<{ command: string; reason: string }> = [];
+    const sources = new Set<string>();
     let wouldBlock = 0;
     let wouldWarn = 0;
     for (const { row, verdict } of results) {
+        sources.add(row.source);
         const key = row.project ?? "(unknown)";
         byProject[key] ??= { total: 0, blocked: 0 };
         byProject[key].total += 1;
@@ -103,7 +114,15 @@ export const summarize = (results: ReadonlyArray<ReplayResult>): BacktestSummary
         }
         if (verdict._tag === "Warn") wouldWarn += 1;
     }
-    return { total: results.length, wouldBlock, wouldWarn, byProject, samples };
+    return {
+        total: results.length,
+        wouldBlock,
+        wouldWarn,
+        skippedRows,
+        providers: [...sources].sort(),
+        byProject,
+        samples,
+    };
 };
 
 // ---------------------------------------------------------------------------
@@ -127,9 +146,11 @@ interface RawSessionRow {
     readonly project: string | null | undefined;
 }
 
+// All sessions, no time window: the session table is small (tool_call is the
+// big one), and a timestamp filter would drop NULL-timestamp sessions - losing
+// their cwd/source and silently misclassifying codex rows as claude.
 const SESSION_Q = `
-SELECT id, source, cwd, project FROM session
-WHERE started_at > $since OR ended_at > $since;`;
+SELECT id, source, cwd, project FROM session;`;
 
 const TOOL_CALL_Q_ALL = `
 SELECT id, name, input_json, ts, session FROM tool_call
@@ -153,6 +174,12 @@ const recordKey = (v: unknown): string | null => {
 const toHarness = (source: string | null | undefined): Harness =>
     source === "codex" ? "codex" : "claude";
 
+export interface FetchedRows {
+    readonly rows: BacktestRow[];
+    /** count of rows dropped for missing/malformed input_json. */
+    readonly skipped: number;
+}
+
 /**
  * Fetch and join tool_call + session rows from the local DB.
  * Uses two flat SELECT queries; the join is done in JS.
@@ -165,7 +192,7 @@ export const fetchRows = (
     days: number,
     tools: ReadonlyArray<string>,
     providerFilter?: string | null,
-): Effect.Effect<BacktestRow[], DbError, SurrealClient> =>
+): Effect.Effect<FetchedRows, DbError, SurrealClient> =>
     Effect.gen(function* () {
         const db = yield* SurrealClient;
         // SurrealDB datetime fields require JS Date objects via the SDK.
@@ -177,8 +204,9 @@ export const fetchRows = (
             tools.length > 0 ? { since, tools: [...tools] } : { since };
         const [callRows] = yield* db.query<[RawToolCallRow[]]>(sql, bindings);
 
-        // q2: session metadata
-        const [sessionRows] = yield* db.query<[RawSessionRow[]]>(SESSION_Q, { since });
+        // q2: ALL session metadata (small table; no time filter so
+        // NULL-timestamp sessions still contribute cwd/source).
+        const [sessionRows] = yield* db.query<[RawSessionRow[]]>(SESSION_Q);
 
         // Build a session-id -> session map for the JS join.
         const sessionMap = new Map<string, RawSessionRow>();
@@ -188,8 +216,9 @@ export const fetchRows = (
         }
 
         const out: BacktestRow[] = [];
+        let skipped = 0;
         for (const row of callRows) {
-            // Parse input_json; skip rows that fail to parse.
+            // Parse input_json; count + skip rows that fail to parse.
             let input: Record<string, unknown> | null = null;
             if (typeof row.input_json === "string") {
                 try {
@@ -198,10 +227,13 @@ export const fetchRows = (
                         input = parsed as Record<string, unknown>;
                     }
                 } catch {
-                    // skip unparseable rows
+                    // counted below
                 }
             }
-            if (!input) continue;
+            if (!input) {
+                skipped += 1;
+                continue;
+            }
 
             // Join session for cwd/project/source.
             const sessKey = recordKey(row.session);
@@ -235,7 +267,7 @@ export const fetchRows = (
                 ts,
             });
         }
-        return out;
+        return { rows: out, skipped };
     });
 
 // ---------------------------------------------------------------------------
@@ -261,9 +293,10 @@ export const formatReport = (
     summary: BacktestSummary,
 ): string => {
     const lines: string[] = [];
-    const providerCount = 2; // claude + codex
+    const providerCount = summary.providers.length;
+    const providerLabel = `${providerCount} provider${providerCount === 1 ? "" : "s"}`;
     lines.push(
-        `backtest: ${hookName} (last ${days}d, ${providerCount} providers)`,
+        `backtest: ${hookName} (last ${days}d, ${providerLabel})`,
     );
     lines.push(
         `  replayed   ${summary.total.toLocaleString()} tool calls`,
@@ -274,6 +307,11 @@ export const formatReport = (
     lines.push(
         `  would-warn    ${summary.wouldWarn.toLocaleString()}`,
     );
+    if (summary.skippedRows > 0) {
+        lines.push(
+            `  skipped ${summary.skippedRows.toLocaleString()} rows (unparseable input)`,
+        );
+    }
 
     // Top projects sorted by total desc.
     const projects = Object.entries(summary.byProject).sort(
