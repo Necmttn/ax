@@ -1,5 +1,30 @@
 # Changelog
 
+## [0.21.0](https://github.com/Necmttn/ax/compare/v0.20.0...v0.21.0) (2026-06-10)
+
+
+### Features
+
+* extend NavLink next[] to skills, roles, and improve surfaces ([8488108](https://github.com/Necmttn/ax/commit/848810899cc1fd6992cf118ebe014b8284b1ea26))
+* NavLink next[] follow-ups — self-documenting query surface (HATEOAS for LLMs) ([f875e10](https://github.com/Necmttn/ax/commit/f875e10a5ab862d56cbc51c2bd7dfd0f7b1cfe77))
+* NavLink next[] follow-ups on recall/sessions/session-show ([be51240](https://github.com/Necmttn/ax/commit/be512401f8f1e28d2daa4ccfd60ec6aebe317196))
+* **otel:** deep span instrumentation for ingest stages ([#197](https://github.com/Necmttn/ax/issues/197)) ([939f974](https://github.com/Necmttn/ax/commit/939f974b5a3a5f6fcf7338bc64bc0d5f55667e22))
+* **timeline:** +/- line counts, smart shell titles, subagent landing continuity ([#191](https://github.com/Necmttn/ax/issues/191)) ([903c3eb](https://github.com/Necmttn/ax/commit/903c3ebb20e70795d610bcf303906a7cacb01c9c))
+
+
+### Bug Fixes
+
+* **share:** mobile layout + 'recorded with ax' CTA ([#192](https://github.com/Necmttn/ax/issues/192)) ([452d504](https://github.com/Necmttn/ax/commit/452d50493882425c68b7365a0ad5f49c25562629))
+* **share:** subagent nav state isolation + deep-linkable sub/view + timeline turn jumps ([#190](https://github.com/Necmttn/ax/issues/190)) ([277c94c](https://github.com/Necmttn/ax/commit/277c94c1b9aa77bf4e68aa75f4e83f30151b960f))
+* **studio:** share-view polish - overflow, scroll reset, embedded timeline ([#187](https://github.com/Necmttn/ax/issues/187)) ([6e58a41](https://github.com/Necmttn/ax/commit/6e58a4151133cf56c7cf95cf5f81da7995d0d480))
+* **timeline:** title Agent dispatches with their description ([#189](https://github.com/Necmttn/ax/issues/189)) ([da594e5](https://github.com/Necmttn/ax/commit/da594e597c29a726b451354f5317a5520fd7e143))
+* **timeline:** widen command_text slice so shell descriptions survive ([#193](https://github.com/Necmttn/ax/issues/193)) ([39d9b2e](https://github.com/Necmttn/ax/commit/39d9b2e91c187f5352500dcce64a180cbc542f41))
+
+
+### Performance
+
+* **ingest:** github-pr per-repo fetch cooldown + OTLP env passthrough in installed plists ([#194](https://github.com/Necmttn/ax/issues/194)) ([aad3285](https://github.com/Necmttn/ax/commit/aad328525e48a4460ef5034c541d1c750be53494))
+
 ## [0.20.0](https://github.com/Necmttn/ax/compare/v0.19.1...v0.20.0) (2026-06-10)
 
 
