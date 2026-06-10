@@ -129,53 +129,47 @@ function costBarHtml(m: Manifest): string {
 }
 
 /**
- * ASCII logo for the header wordmark. Three-line line-stack rendered in
- * monospace; each line is a separate div to avoid <pre> fragility in
- * workers-og. Kept small (11px) so it reads as a mark, not a headline.
+ * ASCII AX mark, two lines, monospace column-aligned:
  *
- * A:  /\    X: \/
- *    /--\      /\
- *   /    \    /  \
+ *    col: 0123456
+ *          /\  \/
+ *         /--\ /\
  *
- * Rendered as:
- *   /\  \/
- *  /--\  X
- * /    \/  \
+ * A = ` /\` over `/--\` (cols 0-3), X = `\/` over `/\` (cols 5-6). Shared by
+ * the small header logo and the large ?variant=watermark background; each
+ * line renders as its own div (line-stack) to avoid <pre> fragility in
+ * workers-og.
  */
-const ASCII_LOGO_LINES = ["/\\  \\/", "/--\\  X", "/    \\/  \\"] as const;
+const ASCII_AX_LINES = [" /\\  \\/", "/--\\ /\\"] as const;
 
-/** Small three-line ASCII AX wordmark for the poster header. */
+// Satori collapses runs of regular spaces under its default white-space
+// handling, which destroys column alignment. Swap every space (leading and
+// internal) for a literal non-breaking space, which satori renders as-is.
+const artLine = (line: string): string => esc(line).replace(/ /g, "\u00A0");
+
+/** Small two-line ASCII AX wordmark for the poster header. */
 function asciiLogoHtml(color: string): string {
-    const lines = ASCII_LOGO_LINES.map(
+    const lines = ASCII_AX_LINES.map(
         (line) =>
-            `<div style="display:flex;font-size:11px;line-height:13px;color:${color};letter-spacing:1px;font-weight:700">${esc(line)}</div>`,
+            `<div style="display:flex;font-size:14px;line-height:16px;color:${color};letter-spacing:1px;font-weight:700">${artLine(line)}</div>`,
     ).join("");
     return `<div style="display:flex;flex-direction:column">${lines}</div>`;
 }
 
 /**
- * Large background ASCII watermark for the ?variant=watermark debug variant.
- * Positioned absolutely (satori supports position:absolute on root-level
- * children when the container is position:relative). Low opacity so content
- * stays readable. Significantly larger glyphs than the header mark.
- *
- * Composed as four rows scaled up (font-size:72px).
+ * Large background ASCII watermark for the ?variant=watermark debug variant:
+ * the same AX mark as the header, scaled up. Positioned absolutely (satori
+ * supports position:absolute when the container is position:relative). Low
+ * opacity so content stays readable.
  */
-const ASCII_WATERMARK_LINES = [
-    "/\\\\    \\/\\/",
-    "/--\\\\    X",
-    "/    \\\\  / \\\\",
-    "/ ___  \\\\/   \\\\",
-] as const;
-
 function asciiWatermarkHtml(): string {
-    const lines = ASCII_WATERMARK_LINES.map(
+    const lines = ASCII_AX_LINES.map(
         (line) =>
-            `<div style="display:flex;font-size:72px;line-height:80px;color:${INK};letter-spacing:4px;font-weight:700">${esc(line)}</div>`,
+            `<div style="display:flex;font-size:120px;line-height:132px;color:${INK};letter-spacing:4px;font-weight:700">${artLine(line)}</div>`,
     ).join("");
-    // opacity via hex alpha channel on color (satori supports 8-digit hex).
-    // We use a separate opacity wrapper; satori handles opacity on leaf nodes.
-    return `<div style="display:flex;flex-direction:column;position:absolute;top:120px;left:80px;opacity:0.06">${lines}</div>`;
+    // Faded via an opacity wrapper on the container (not a hex alpha channel
+    // on the color) - satori applies opacity to the whole subtree.
+    return `<div style="display:flex;flex-direction:column;position:absolute;top:160px;left:120px;opacity:0.06">${lines}</div>`;
 }
 
 export const onRequestGet: PagesFunction = async (ctx) => {
