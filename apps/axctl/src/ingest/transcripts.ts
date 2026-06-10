@@ -1186,7 +1186,9 @@ const upsertSessions = (sessions: Session[]) =>
                 }),
             { concurrency: 4, discard: true },
         );
-    });
+    }).pipe(Effect.withSpan("transcripts.upsertSessions", {
+        attributes: { "sessions.count": sessions.length },
+    }));
 
 /**
  * Snapshot the original transcript jsonl into the `transcripts` bucket and
@@ -1215,6 +1217,9 @@ const snapshotTranscript = (sessionId: string, filePath: string) =>
                         message: err.message,
                     }).pipe(Effect.as(null as string | null)),
                 ),
+                Effect.withSpan("transcripts.snapshot", {
+                    attributes: { "snapshot.bytes": content.length, "snapshot.session": sessionId },
+                }),
             );
         return result;
     });
@@ -1222,7 +1227,7 @@ const snapshotTranscript = (sessionId: string, filePath: string) =>
 const upsertTurns = (turns: Turn[]) =>
     Effect.gen(function* () {
         if (turns.length === 0) return;
-        yield* queryTranscriptStatements(buildTurnStatements(turns));
+        yield* queryTranscriptStatements(buildTurnStatements(turns), "upsertTurns");
     });
 
 const buildTurnStatements = (turns: readonly Turn[]): string[] =>
@@ -1265,8 +1270,8 @@ const buildHookCommandInvocationStatements = (invocations: readonly HookCommandI
         `UPSERT ${recordRef("hook_command_invocation", invocation.key)} CONTENT { hook_event: ${recordRef("harness_hook_event", invocation.hook_event_key)}, session: ${recordRef("session", invocation.session)}, ts: d"${invocation.ts}", harness: ${surrealLiteral(invocation.harness)}, event_name: ${surrealLiteral(invocation.event_name)}, hook_name: ${surrealLiteral(invocation.hook_name)}, tool_call_id: ${optionString(invocation.tool_call_id)}, tool_call: ${optionRecordRef("tool_call", invocation.tool_call_key)}, command: ${surrealLiteral(invocation.command)}, command_hash: ${surrealLiteral(invocation.command_hash)}, provider_status: ${surrealLiteral(invocation.provider_status)}, effect: ${surrealLiteral(invocation.effect)}, exit_code: ${optionInt(invocation.exit_code)}, duration_ms: ${optionInt(invocation.duration_ms)}, stdout_excerpt: ${optionString(invocation.stdout_excerpt)}, stderr_excerpt: ${optionString(invocation.stderr_excerpt)}, content_excerpt: ${optionString(invocation.content_excerpt)}, blocking_error_excerpt: ${optionString(invocation.blocking_error_excerpt)} };`,
     );
 
-const queryTranscriptStatements = (statements: readonly string[]) =>
-    executeStatements(statements, { chunkSize: 500 });
+const queryTranscriptStatements = (statements: readonly string[], label?: string) =>
+    executeStatements(statements, { chunkSize: 500, ...(label === undefined ? {} : { label }) });
 
 const relateInvocations = (invocations: Invocation[]) =>
     Effect.gen(function* () {
@@ -1308,7 +1313,7 @@ const relateInvocations = (invocations: Invocation[]) =>
                     (n) =>
                         `UPSERT skill:\`${skillRecordKey(n)}\` MERGE { name: ${surrealLiteral(n)}, scope: "unknown", dir_path: "(unknown)", content_hash: "unknown" };`,
                 );
-                yield* executeStatementsWith(db, placeholders, { chunkSize: 500 });
+                yield* executeStatementsWith(db, placeholders, { chunkSize: 500, label: "skillPlaceholders" });
             }
         }
 
@@ -1321,20 +1326,20 @@ const relateInvocations = (invocations: Invocation[]) =>
                 `RELATE turn:\`${turnKey}\`->invoked:\`${edgeKey}\`->skill:\`${skillKey}\` SET session = ${recordRef("session", inv.session)}, ts = d"${inv.ts}", args = ${surrealLiteral(args)}, turn_has_error = ${inv.turn_has_error}, turn_index = ${inv.seq};`,
             ];
         });
-        yield* executeStatementsWith(db, stmts, { chunkSize: 500 });
+        yield* executeStatementsWith(db, stmts, { chunkSize: 500, label: "invokedEdges" });
     });
 
 const writeToolFileEvidence = (toolCalls: readonly ToolCallWrite[]) =>
     queryTranscriptStatements(buildToolFileEvidenceStatements(
         extractToolFileEvidence(toolCalls),
-    ));
+    ), "toolFileEvidence");
 
 const relateToolCallSkills = (relations: ToolCallSkillRelationWrite[]) =>
     Effect.gen(function* () {
         if (relations.length === 0) return;
         yield* queryTranscriptStatements(relations.flatMap((relation) =>
             buildRelateToolCallSkillStatements(relation),
-        ));
+        ), "toolCallSkills");
     });
 
 const writePlanSnapshots = (snapshots: PlanSnapshotWrite[]) =>
@@ -1342,14 +1347,14 @@ const writePlanSnapshots = (snapshots: PlanSnapshotWrite[]) =>
         if (snapshots.length === 0) return;
         yield* queryTranscriptStatements(snapshots.flatMap((snapshot) =>
             buildPlanSnapshotStatements(snapshot),
-        ));
+        ), "planSnapshots");
     });
 
 const writeToolCallStatements = (toolCalls: readonly ToolCallWrite[]) =>
-    queryTranscriptStatements(buildToolCallStatements(toolCalls));
+    queryTranscriptStatements(buildToolCallStatements(toolCalls), "toolCalls");
 
 const writeCompactions = (compactions: readonly CompactionWrite[]) =>
-    queryTranscriptStatements(buildCompactionStatements(compactions));
+    queryTranscriptStatements(buildCompactionStatements(compactions), "compactions");
 
 const writeHookEvidence = (
     events: readonly HarnessHookEventWrite[],
@@ -1358,7 +1363,7 @@ const writeHookEvidence = (
     queryTranscriptStatements([
         ...buildHarnessHookEventStatements(events),
         ...buildHookCommandInvocationStatements(invocations),
-    ]);
+    ], "hookEvidence");
 
 const buildClaudeProviderStatements = (extracted: FileExtract): string[] => [
     ...buildAgentProviderStatements([
@@ -1405,7 +1410,7 @@ const buildClaudeProviderStatements = (extracted: FileExtract): string[] => [
 ];
 
 const writeProviderEvidence = (extracted: FileExtract) =>
-    queryTranscriptStatements(buildClaudeProviderStatements(extracted));
+    queryTranscriptStatements(buildClaudeProviderStatements(extracted), "providerEvidence");
 
 const surrealOptionFloat = (value: number | null | undefined): string =>
     value === null || value === undefined || !Number.isFinite(value)
@@ -1706,6 +1711,9 @@ export const ingestTranscripts = (
             // advances the watermark. Non-NotFound failures re-raise.
             const extracted = yield* extractFile(candidate.filePath, candidate.projectDir).pipe(
                 skipNotFound(null),
+                Effect.withSpan("transcripts.parse", {
+                    attributes: { "file.size": candidate.size },
+                }),
             );
             if (!extracted) {
                 activeFiles -= 1;
@@ -1788,7 +1796,9 @@ export const ingestTranscripts = (
             // succeeded, so a mid-file failure re-processes next run.
             yield* wm.commit(candidate.filePath, candidate.mtimeMs, candidate.size);
             activeFiles -= 1;
-        }), { concurrency, discard: true });
+        }).pipe(Effect.withSpan("transcripts.file", {
+            attributes: { "file.path": candidate.filePath, "file.size": candidate.size },
+        })), { concurrency, discard: true });
         yield* Effect.logDebug("transcript ingest complete", {
             files,
             records: recordCount(),
