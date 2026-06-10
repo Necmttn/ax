@@ -16,6 +16,7 @@ import { SurrealClient } from "@ax/lib/db";
 import type { DbError } from "@ax/lib/errors";
 import { recordLiteral } from "@ax/lib/ids";
 import { surrealString } from "@ax/lib/shared/surql";
+import { watermarkRecordKey } from "@ax/lib/shared/watermark";
 import { BaseStageStats, IngestContext, StageMeta } from "./stage/types.ts";
 import type { StageDef } from "./stage/registry.ts";
 import { fetchPullRequests, type PrFetchInput, type PrFetchResult } from "./github-pr-fetch.ts";
@@ -28,10 +29,37 @@ export type GithubPrKey = typeof GithubPrKey.Type;
  *  subprocess + a write batch; serial was the multi-repo stall shape). */
 const FETCH_CONCURRENCY = 4;
 
+/**
+ * Per-repo fetch cooldown for INCREMENTAL runs (the daemon's `--since=1`
+ * path fires on every transcript change; PRs do not move that fast). A repo
+ * whose last successful `gh` fetch is younger than the cooldown is skipped
+ * this run. Degraded fetches never advance the watermark, so failures retry
+ * on the next ingest. Full re-ingests (epoch-zero `since` sentinel) bypass
+ * the cooldown entirely. Tune via `AX_GITHUB_PR_FETCH_COOLDOWN_SECONDS`
+ * (`0` disables).
+ */
+const DEFAULT_FETCH_COOLDOWN_MS = 15 * 60 * 1000;
+const FETCH_COOLDOWN_ENV = "AX_GITHUB_PR_FETCH_COOLDOWN_SECONDS";
+
+/** `ingest_file_state` bookkeeping for the per-repo fetch watermark. The
+ *  `path` column is table-UNIQUE, hence the namespacing prefix (same trick as
+ *  `__pr_merge__/` in metrics/pr-merge-dirty). Last fetch time lives in
+ *  `mtime_ms`. */
+const COOLDOWN_SOURCE = "github-pr:fetch";
+const cooldownPath = (rootPath: string): string => `__github_pr_fetch__/${rootPath}`;
+
+export const resolveFetchCooldownMs = (env: NodeJS.ProcessEnv = process.env): number => {
+    const raw = env[FETCH_COOLDOWN_ENV];
+    if (raw === undefined || raw === "") return DEFAULT_FETCH_COOLDOWN_MS;
+    const secs = Number(raw);
+    return Number.isFinite(secs) && secs >= 0 ? secs * 1000 : DEFAULT_FETCH_COOLDOWN_MS;
+};
+
 /** Stats reported by the github-pr stage. */
 export class GithubPrStageStats extends BaseStageStats.extend<GithubPrStageStats>("GithubPrStageStats")({
     repositoriesScanned: Schema.Number,
     repositoriesDegraded: Schema.Number,
+    repositoriesSkippedCooldown: Schema.Number,
     pullRequestsIngested: Schema.Number,
     reviewsIngested: Schema.Number,
     checksIngested: Schema.Number,
@@ -53,6 +81,14 @@ export interface GithubPrIngestDeps {
      * fetch (forced full re-ingest / epoch-zero sentinel).
      */
     readonly updatedSince?: string;
+    /**
+     * Skip repos whose last successful fetch is younger than this (ms).
+     * `0`/absent → no cooldown. The stage passes a non-zero value only on
+     * incremental runs; tests inject directly.
+     */
+    readonly fetchCooldownMs?: number;
+    /** Injectable clock for cooldown tests. */
+    readonly now?: () => number;
 }
 
 /**
@@ -72,6 +108,9 @@ interface GithubPrTotals {
     /** Repos whose `gh` fetch failed (timeout/auth/network) - logged as a
      *  degraded-stage warning, NOT silently treated as "no PRs". */
     repositoriesDegraded: number;
+    /** Repos skipped this run because their last successful fetch is within
+     *  the cooldown window (incremental runs only). */
+    repositoriesSkippedCooldown: number;
     pullRequests: number;
     reviews: number;
     checks: number;
@@ -114,10 +153,37 @@ export const ingestGithubPrs = (
         >(
             `SELECT type::string(id) AS id, root_path, remote_url FROM repository WHERE remote_url != NONE AND remote_url CONTAINS "github" AND root_path != NONE${repoPathFilter};`,
         );
-        const repos = (repoRows?.[0] ?? []).filter(
+        const allRepos = (repoRows?.[0] ?? []).filter(
             (r): r is typeof r & { root_path: string } =>
                 typeof r.root_path === "string" && r.root_path.length > 0,
         );
+
+        // Cooldown partition: drop repos whose last SUCCESSFUL fetch is
+        // younger than the window. One small indexed-source_kind read; the
+        // watermark advances only after a non-degraded fetch (below), so
+        // degraded repos stay hot and retry next run.
+        const cooldownMs = deps?.fetchCooldownMs ?? 0;
+        const now = deps?.now ?? Date.now;
+        let skippedCooldown = 0;
+        let repos = allRepos;
+        if (cooldownMs > 0 && allRepos.length > 0) {
+            const wmRows = yield* db.query<[Array<{ path: string; mtime_ms: number | null }>]>(
+                `SELECT path, mtime_ms FROM ingest_file_state WHERE source_kind = ${surrealString(COOLDOWN_SOURCE)};`,
+            );
+            const lastFetch = new Map<string, number>();
+            for (const row of wmRows?.[0] ?? []) {
+                if (typeof row.mtime_ms === "number") lastFetch.set(row.path, row.mtime_ms);
+            }
+            const cutoff = now() - cooldownMs;
+            repos = allRepos.filter((r) => {
+                const last = lastFetch.get(cooldownPath(r.root_path));
+                if (last !== undefined && last > cutoff) {
+                    skippedCooldown += 1;
+                    return false;
+                }
+                return true;
+            });
+        }
 
         // Bounded-concurrency per-repo fetch+write. Each fetch is hard-bounded
         // by the fetcher's kill timeout, and (when the caller passed
@@ -143,18 +209,25 @@ export const ingestGithubPrs = (
                         });
                         return { degraded: true as const, pullRequests: 0, reviews: 0, checks: 0, deliveryOutcomes: 0 };
                     }
-                    if (fetched.prs.length === 0) {
-                        return { degraded: false as const, pullRequests: 0, reviews: 0, checks: 0, deliveryOutcomes: 0 };
-                    }
-                    const stats = yield* writePullRequests({ repositoryId, repositoryKey: key, prs: fetched.prs });
+                    const stats =
+                        fetched.prs.length === 0
+                            ? { pullRequests: 0, reviews: 0, checks: 0, deliveryOutcomes: 0 }
+                            : yield* writePullRequests({ repositoryId, repositoryKey: key, prs: fetched.prs });
+                    // Successful fetch (even 0 PRs - gh ran clean): advance the
+                    // per-repo cooldown watermark.
+                    const wmPath = cooldownPath(repo.root_path);
+                    yield* db.query(
+                        `UPSERT ${recordLiteral("ingest_file_state", watermarkRecordKey(COOLDOWN_SOURCE, wmPath))} CONTENT { path: ${surrealString(wmPath)}, source_kind: ${surrealString(COOLDOWN_SOURCE)}, mtime_ms: ${Math.trunc(now())}, ingested_at: time::now() };`,
+                    );
                     return { degraded: false as const, ...stats };
                 }),
             { concurrency: FETCH_CONCURRENCY },
         );
 
         const totals: GithubPrTotals = {
-            repositoriesScanned: repos.length,
+            repositoriesScanned: allRepos.length,
             repositoriesDegraded: 0,
+            repositoriesSkippedCooldown: skippedCooldown,
             pullRequests: 0,
             reviews: 0,
             checks: 0,
@@ -186,16 +259,23 @@ export const githubPrStage: StageDef<GithubPrStageStats, SurrealClient> = {
             // fetch; otherwise bound the gh search to the ingest window (the
             // date floor of `since` is inclusive-safe for `updated:>=`).
             const updatedSince = ctx.since.getTime() > 0 ? ctx.since.toISOString().slice(0, 10) : undefined;
+            // Cooldown only applies to incremental runs - a forced full
+            // re-ingest must always hit the network.
+            const fetchCooldownMs = updatedSince === undefined ? 0 : resolveFetchCooldownMs();
             const result = yield* ingestGithubPrs({
                 ...(ctx.repoPaths === undefined ? {} : { repoPaths: ctx.repoPaths }),
                 ...(updatedSince === undefined ? {} : { updatedSince }),
+                fetchCooldownMs,
             });
             const degraded = result.repositoriesDegraded > 0 ? ` (${result.repositoriesDegraded} degraded)` : "";
+            const cooled =
+                result.repositoriesSkippedCooldown > 0 ? ` (${result.repositoriesSkippedCooldown} on cooldown)` : "";
             return GithubPrStageStats.make({
                 durationMs: Date.now() - t0,
-                summary: `ingested ${result.pullRequests} PRs from ${result.repositoriesScanned} repos${degraded}`,
+                summary: `ingested ${result.pullRequests} PRs from ${result.repositoriesScanned} repos${cooled}${degraded}`,
                 repositoriesScanned: result.repositoriesScanned,
                 repositoriesDegraded: result.repositoriesDegraded,
+                repositoriesSkippedCooldown: result.repositoriesSkippedCooldown,
                 pullRequestsIngested: result.pullRequests,
                 reviewsIngested: result.reviews,
                 checksIngested: result.checks,

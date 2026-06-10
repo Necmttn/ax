@@ -105,6 +105,20 @@ const dbPlist = (
 </plist>
 `;
 
+/**
+ * Optional OTLP passthrough for the background agents: when the user installs
+ * with `AX_OTLP_URL` set (e.g. a local Maple/Jaeger on 127.0.0.1:4318), bake it
+ * into the generated plists so watcher/daily ingests export traces too.
+ * Re-running `axctl install` without the env removes it again.
+ */
+const otlpEnvEntry = (): string => {
+    const url = process.env["AX_OTLP_URL"];
+    if (!url) return "";
+    return `
+    <key>AX_OTLP_URL</key>
+    <string>${url}</string>`;
+};
+
 const watchPlist = (binPath: string): string => `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -133,7 +147,7 @@ const watchPlist = (binPath: string): string => `<?xml version="1.0" encoding="U
   <key>EnvironmentVariables</key>
   <dict>
     <key>PATH</key>
-    <string>${HOME}/.bun/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+    <string>${HOME}/.bun/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>${otlpEnvEntry()}
   </dict>
 </dict>
 </plist>
@@ -168,7 +182,7 @@ const derivePlist = (binPath: string): string => `<?xml version="1.0" encoding="
   <key>EnvironmentVariables</key>
   <dict>
     <key>PATH</key>
-    <string>${HOME}/.bun/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+    <string>${HOME}/.bun/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>${otlpEnvEntry()}
   </dict>
 </dict>
 </plist>
