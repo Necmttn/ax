@@ -37,9 +37,9 @@ When a Release Please release PR merges, the `release-announcement` job in
    grounded in the embedded commit/diff evidence only.
 3. The job opens `release-announcement/vX.Y.Z` as a PR and (with
    `AUTO_MERGE: "true"`, the default) squash-merges it immediately.
-4. The merge to main triggers `.github/workflows/deploy-site.yml`, which
-   builds the site and deploys it to Cloudflare Pages, publishing the
-   announcement at `/changelog/X.Y.Z`.
+4. Cloudflare Pages' GitHub integration on the `ax` project picks up the
+   merge to main, rebuilds the site, and publishes the announcement at
+   `/changelog/X.Y.Z`.
 
 Set `AUTO_MERGE: "false"` in the workflow to hold the PR for human review
 before publishing. The manual flow below still works and produces richer,
