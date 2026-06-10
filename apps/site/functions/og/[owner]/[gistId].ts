@@ -75,7 +75,10 @@ function laneHtml(cards: ReadonlyArray<SubagentCard>): string {
         rects += `<rect x="${Math.round(x * W)}" y="${r * 22}" width="${Math.max(Math.round(w * W), 8)}" height="16" rx="3" fill="${c.failed ? "#bd443b" : "#b32650"}" fill-opacity="${opacity}"/>`;
     }
     const H = laneEnds.length * 22;
-    return `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg">${rects}</svg>`;
+    const svg = `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg">${rects}</svg>`;
+    // The worker's html parser only knows a small tag subset (raw <svg> children
+    // get dropped) - but satori renders <img> with an SVG data URI natively.
+    return `<img width="${W}" height="${H}" src="data:image/svg+xml;base64,${btoa(svg)}" />`;
 }
 
 export const onRequestGet: PagesFunction = async (ctx) => {
