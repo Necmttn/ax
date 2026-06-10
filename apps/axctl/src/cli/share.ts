@@ -13,6 +13,8 @@ import {
 import {
     formatSharePreview,
     formatShareSuccess,
+    formatStaleUsageWarning,
+    hasStaleUsage,
 } from "../share/format.ts";
 import { redactShareArtifact } from "../share/redact.ts";
 import { AX_VERSION } from "./version.ts";
@@ -106,6 +108,10 @@ export async function cmdShareWithDeps(
 
     const { artifact } = redactShareArtifact(exported);
     const bundle = buildShareBundle(artifact);
+
+    if (hasStaleUsage(artifact)) {
+        deps.writeStderr(formatStaleUsageWarning());
+    }
 
     if (parsed.dryRun) {
         // Emit the full multi-file bundle keyed by gist filename so the dry-run

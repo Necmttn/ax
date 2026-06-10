@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
-import { minimalShareArtifact } from "./artifact.ts";
-import { formatSharePreview, formatShareSuccess } from "./format.ts";
+import { minimalShareArtifact, type AxSessionShare } from "./artifact.ts";
+import { formatSharePreview, formatShareSuccess, hasStaleUsage } from "./format.ts";
 
 describe("share formatter", () => {
     it("prints a concise default private preview", () => {
@@ -92,5 +92,146 @@ describe("share formatter", () => {
 
         expect(text).toContain("Published session share:");
         expect(text).toContain("https://ax.necmttn.com/s/necmttn/abc123");
+    });
+});
+
+const SESSION_USAGE = {
+    model: "claude-opus-4-5",
+    prompt_tokens: null,
+    completion_tokens: null,
+    cache_creation_input_tokens: null,
+    cache_read_input_tokens: null,
+    estimated_tokens: 5000,
+    estimated_cost_usd: 0.05,
+    pricing_source: "test",
+};
+
+const TURN_USAGE = {
+    ...SESSION_USAGE,
+    seq: 2,
+    fresh_input_tokens: null,
+    usage_source: "api",
+    usage_quality: "exact",
+};
+
+describe("hasStaleUsage", () => {
+    it("returns true when session-level usage exists but no turns have token_usage", () => {
+        const artifact: AxSessionShare = {
+            ...minimalShareArtifact({ id: "abc123", source: "claude" }),
+            token_usage: SESSION_USAGE,
+            turns: [
+                { id: "t1", seq: 1, role: "user", text: "hello" },
+                { id: "t2", seq: 2, role: "assistant", text: "world" },
+            ],
+        };
+        expect(hasStaleUsage(artifact)).toBe(true);
+    });
+
+    it("returns false when at least one turn has token_usage", () => {
+        const artifact: AxSessionShare = {
+            ...minimalShareArtifact({ id: "abc123", source: "claude" }),
+            token_usage: SESSION_USAGE,
+            turns: [
+                { id: "t1", seq: 1, role: "user", text: "hello" },
+                {
+                    id: "t2",
+                    seq: 2,
+                    role: "assistant",
+                    text: "world",
+                    token_usage: TURN_USAGE,
+                },
+            ],
+        };
+        expect(hasStaleUsage(artifact)).toBe(false);
+    });
+
+    it("returns false when there is no session-level usage", () => {
+        const artifact: AxSessionShare = {
+            ...minimalShareArtifact({ id: "abc123", source: "claude" }),
+            turns: [
+                { id: "t1", seq: 1, role: "user", text: "hello" },
+            ],
+        };
+        expect(hasStaleUsage(artifact)).toBe(false);
+    });
+
+    it("returns false when session usage values are zero", () => {
+        const artifact: AxSessionShare = {
+            ...minimalShareArtifact({ id: "abc123", source: "claude" }),
+            token_usage: {
+                ...SESSION_USAGE,
+                estimated_tokens: 0,
+                estimated_cost_usd: 0,
+            },
+            turns: [
+                { id: "t1", seq: 1, role: "user", text: "hello" },
+            ],
+        };
+        expect(hasStaleUsage(artifact)).toBe(false);
+    });
+
+    it("returns false when a descendant turn has token_usage", () => {
+        const child: AxSessionShare = {
+            ...minimalShareArtifact({ id: "child1", source: "claude" }),
+            token_usage: SESSION_USAGE,
+            turns: [
+                {
+                    id: "ct1",
+                    seq: 1,
+                    role: "assistant",
+                    text: "sub",
+                    token_usage: { ...TURN_USAGE, seq: 1 },
+                },
+            ],
+        };
+        const artifact: AxSessionShare = {
+            ...minimalShareArtifact({ id: "abc123", source: "claude" }),
+            token_usage: SESSION_USAGE,
+            turns: [
+                { id: "t1", seq: 1, role: "user", text: "hello" },
+            ],
+            children: [child],
+        };
+        expect(hasStaleUsage(artifact)).toBe(false);
+    });
+
+    it("returns true when only a grandchild has session usage and no turn usage exists anywhere", () => {
+        const grandchild: AxSessionShare = {
+            ...minimalShareArtifact({ id: "grandchild1", source: "claude" }),
+            token_usage: SESSION_USAGE,
+            turns: [
+                { id: "gt1", seq: 1, role: "assistant", text: "deep" },
+            ],
+        };
+        const child: AxSessionShare = {
+            ...minimalShareArtifact({ id: "child1", source: "claude" }),
+            turns: [
+                { id: "ct1", seq: 1, role: "assistant", text: "sub" },
+            ],
+            children: [grandchild],
+        };
+        const artifact: AxSessionShare = {
+            ...minimalShareArtifact({ id: "abc123", source: "claude" }),
+            turns: [
+                { id: "t1", seq: 1, role: "user", text: "hello" },
+            ],
+            children: [child],
+        };
+        expect(hasStaleUsage(artifact)).toBe(true);
+    });
+
+    it("returns true when session usage uses estimated_tokens only (no cost) and no turns have usage", () => {
+        const artifact: AxSessionShare = {
+            ...minimalShareArtifact({ id: "abc123", source: "claude" }),
+            token_usage: {
+                ...SESSION_USAGE,
+                estimated_cost_usd: null,
+                estimated_tokens: 3000,
+            },
+            turns: [
+                { id: "t1", seq: 1, role: "user", text: "hello" },
+            ],
+        };
+        expect(hasStaleUsage(artifact)).toBe(true);
     });
 });
