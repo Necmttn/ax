@@ -905,7 +905,7 @@ const buildSyntheticSkillAndInvocationStatements = (
     return [...skillStatements, ...invocationStatements];
 };
 
-export const toCursorNormalizedBatch = (
+const toCursorNormalizedBatch = (
     extract: CursorExtract,
     sourcePath: string,
 ): NormalizedTranscriptBatch => ({

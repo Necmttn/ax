@@ -42,6 +42,10 @@ import {
 } from "./plans.ts";
 import { invokedRelationRecordKey, toolCallRecordKey, turnRecordKey } from "./record-keys.ts";
 import { extractToolFileEvidence } from "./tool-file-evidence.ts";
+import {
+    buildNormalizedTranscriptStatements,
+    type NormalizedTranscriptBatch,
+} from "./normalized/transcripts.ts";
 import { executeStatements } from "@ax/lib/shared/statement-exec";
 import { isNotFound, skipNotFound } from "@ax/lib/shared/fs-error";
 import { safeKeyPart } from "@ax/lib/shared/derive-keys";
@@ -1409,7 +1413,7 @@ const buildCodexTurnTokenUsageStatements = (
         ])};`;
     });
 
-const buildCodexBatchStatements = (
+const legacyBuildCodexBatchStatements = (
     batch: MutableCodexExtract,
     payloadMaxBytes: number,
     clearExisting = true,
@@ -1433,6 +1437,98 @@ const buildCodexBatchStatements = (
         buildPlanSnapshotStatements(snapshot),
     ),
     ...buildCompactionStatements(batch.compactions ?? []),
+];
+
+export const __legacyBuildCodexBatchStatements = legacyBuildCodexBatchStatements;
+
+const toCodexNormalizedBatch = (
+    batch: MutableCodexExtract,
+    payloadMaxBytes: number,
+): NormalizedTranscriptBatch => ({
+    providers: batch.session
+        ? [{
+            name: "codex",
+            displayName: "Codex",
+            version: batch.session.cli_version,
+            capabilities: {
+                transcripts: true,
+                toolCalls: true,
+                planSignals: providerPlanSignalAvailability.codex,
+                delegationSignals: providerDelegationSignalAvailability.codex,
+            },
+        }]
+        : [],
+    sessions: batch.session
+        ? [{
+            id: batch.session.id,
+            provider: "codex",
+            providerSessionId: batch.session.id,
+            cwd: batch.session.cwd,
+            project: batch.session.cwd,
+            model: concreteCodexModel(batch.session),
+            sourcePath: batch.sourcePath,
+            raw: {
+                source: "codex_transcript",
+                cliVersion: batch.session.cli_version,
+                modelProvider: batch.session.model_provider,
+                model: batch.session.model,
+            },
+            labels: { source: "transcript" },
+            metrics: {
+                turns: batch.turns.length,
+                toolCalls: batch.toolCalls.length,
+                providerEvents: batch.providerEvents.length,
+            },
+            startedAt: batch.session.started_at,
+            endedAt: batch.session.ended_at,
+        }]
+        : [],
+    // Legacy behavior: without a session header, NO provider/session/event
+    // statements were emitted (buildCodexProviderStatements returned []).
+    events: batch.session ? batch.providerEvents : [],
+    turns: batch.turns.map((turn) => ({
+        sessionId: turn.session,
+        seq: turn.seq,
+        ts: turn.ts,
+        role: turn.role,
+        messageKind: turn.message_kind,
+        intentKind: turn.intent_kind,
+        text: turn.text,
+        textExcerpt: turn.text_excerpt,
+        hasToolUse: turn.has_tool_use,
+        hasError: false,
+        agentEvent: null,
+    })),
+    // Payload compaction applies ONLY to the persisted tool_call rows...
+    toolCalls: batch.toolCalls.map((call) => compactCodexToolCall(call, payloadMaxBytes)),
+    // ...while file evidence is extracted from the UNcompacted calls.
+    toolFileEvidence: extractToolFileEvidence(batch.toolCalls),
+    agentEventParentEdges: batch.parentEdges,
+    syntheticSkillInvocations: batch.invocations.map((invocation) => ({
+        sessionId: invocation.session,
+        seq: invocation.seq,
+        ts: invocation.ts,
+        skillName: invocation.skill,
+        args: invocation.args,
+        skillScope: "codex-tool",
+        skillContentHash: "codex",
+    })),
+    toolCallSkillRelations: batch.skillRelations,
+    planSnapshots: batch.planSnapshots,
+    compactions: batch.compactions ?? [],
+});
+
+const buildCodexBatchStatements = (
+    batch: MutableCodexExtract,
+    payloadMaxBytes: number,
+    clearExisting = true,
+): string[] => [
+    ...buildNormalizedTranscriptStatements(
+        toCodexNormalizedBatch(batch, payloadMaxBytes),
+        { clearExisting },
+    ),
+    ...buildCodexTokenUsageStatements(batch.tokenUsage),
+    ...buildCodexTurnTokenUsageStatements(batch.turnTokenUsages),
 ];
 
 export const __testBuildCodexBatchStatements = buildCodexBatchStatements;

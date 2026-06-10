@@ -150,7 +150,7 @@ export const PROVIDER_PARITY_FEATURES: readonly ProviderParityFeature[] = [
                 { path: "apps/axctl/src/ingest/transcripts.ts", contains: "buildToolCallStatements(toolCalls)" },
             ]),
             codex: supported("Codex function/tool events write shared tool_call rows.", [
-                { path: "apps/axctl/src/ingest/codex.ts", contains: "buildToolCallStatements(batch.toolCalls" },
+                { path: "apps/axctl/src/ingest/codex.ts", contains: "toolCalls: batch.toolCalls.map((call) => compactCodexToolCall" },
             ]),
             pi: supported("Pi tool blocks write shared tool_call rows.", [
                 { path: "apps/axctl/src/ingest/pi.ts", contains: "toolCalls: extract.toolCalls" },
@@ -177,8 +177,8 @@ export const PROVIDER_PARITY_FEATURES: readonly ProviderParityFeature[] = [
                 { path: "apps/axctl/src/ingest/transcripts.ts", contains: "buildRelateToolCallSkillStatements" },
             ]),
             codex: supported("Codex tool calls write synthetic codex:<tool> skill invocations.", [
-                { path: "apps/axctl/src/ingest/codex.ts", contains: "->invoked:" },
-                { path: "apps/axctl/src/ingest/codex.ts", contains: "buildRelateToolCallSkillStatements" },
+                { path: "apps/axctl/src/ingest/codex.ts", contains: "syntheticSkillInvocations" },
+                { path: "apps/axctl/src/ingest/codex.ts", contains: "toolCallSkillRelations: batch.skillRelations" },
             ]),
             pi: supported("Pi tool blocks write synthetic pi:<tool> skill invocations.", [
                 { path: "apps/axctl/src/ingest/pi.ts", contains: "syntheticSkillInvocations" },
@@ -206,7 +206,7 @@ export const PROVIDER_PARITY_FEATURES: readonly ProviderParityFeature[] = [
                 { path: "apps/axctl/src/ingest/transcripts.ts", contains: "buildPlanSnapshotStatements(snapshot)" },
             ]),
             codex: supported("Codex update_plan evidence writes plan snapshots.", [
-                { path: "apps/axctl/src/ingest/codex.ts", contains: "buildPlanSnapshotStatements(snapshot)" },
+                { path: "apps/axctl/src/ingest/codex.ts", contains: "planSnapshots: batch.planSnapshots" },
             ]),
             pi: rawGap("Pi transcript blocks observed by this extractor do not expose a plan-update raw signal."),
             opencode: extractorGap("OpenCode plan-like events are not extracted into shared plan rows yet."),
@@ -227,7 +227,7 @@ export const PROVIDER_PARITY_FEATURES: readonly ProviderParityFeature[] = [
                 { path: "apps/axctl/src/ingest/tool-file-evidence.ts", contains: "EDIT_TOOLS" },
             ]),
             codex: supported("Codex apply_patch tool arguments write edited edges to file rows when structured patch headers are present.", [
-                { path: "apps/axctl/src/ingest/codex.ts", contains: "buildToolFileEvidenceStatements(extractToolFileEvidence(batch.toolCalls))" },
+                { path: "apps/axctl/src/ingest/codex.ts", contains: "toolFileEvidence: extractToolFileEvidence(batch.toolCalls)" },
                 { path: "apps/axctl/src/ingest/tool-file-evidence.ts", contains: "patchPaths" },
             ]),
             pi: supported("Pi structured edit/write tool arguments write edited edges to file rows.", [
@@ -253,7 +253,7 @@ export const PROVIDER_PARITY_FEATURES: readonly ProviderParityFeature[] = [
                 { path: "apps/axctl/src/ingest/tool-file-evidence.ts", contains: "SEARCH_TOOLS" },
             ]),
             codex: supported("Codex structured read/search tool arguments write read_file and searched_file edges.", [
-                { path: "apps/axctl/src/ingest/codex.ts", contains: "buildToolFileEvidenceStatements(extractToolFileEvidence(batch.toolCalls))" },
+                { path: "apps/axctl/src/ingest/codex.ts", contains: "toolFileEvidence: extractToolFileEvidence(batch.toolCalls)" },
                 { path: "apps/axctl/src/ingest/tool-file-evidence.ts", contains: "READ_COMMANDS" },
                 { path: "apps/axctl/src/ingest/tool-file-evidence.ts", contains: "SEARCH_COMMANDS" },
             ]),
