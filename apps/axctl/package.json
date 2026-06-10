@@ -29,7 +29,7 @@
     "@ax/schema": "workspace:*",
     "@durable-streams/client": "^0.2.6",
     "@durable-streams/server": "^0.3.5",
-    "@effect/platform-bun": "4.0.0-beta.70",
+    "@effect/platform-bun": "4.0.0-beta.78",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "@opentui/core": "^0.2.5",
     "@opentui/react": "^0.2.5",
