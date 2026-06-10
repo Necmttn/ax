@@ -82,7 +82,10 @@ export const onRequestGet: PagesFunction = async (ctx) => {
         return new Response("bad request", { status: 400 });
     }
     const cache = (caches as unknown as { default: Cache }).default;
-    const cacheKey = new Request(ctx.request.url);
+    // r= version busts stale cached renders when the poster template changes.
+    const u = new URL(ctx.request.url);
+    u.searchParams.set("r", "2");
+    const cacheKey = new Request(u.toString());
     const hit = await cache.match(cacheKey);
     if (hit) return hit;
 
@@ -133,7 +136,7 @@ export const onRequestGet: PagesFunction = async (ctx) => {
         "https://cdn.jsdelivr.net/fontsource/fonts/jetbrains-mono@latest/latin-700-normal.ttf",
     ).then((r) => r.arrayBuffer());
 
-    const image = new ImageResponse(html, {
+    const image = new ImageResponse(html.trim(), {
         width: 1200,
         height: 630,
         fonts: [
@@ -141,7 +144,11 @@ export const onRequestGet: PagesFunction = async (ctx) => {
             { name: "JetBrains Mono", data: fontBold, weight: 700, style: "normal" },
         ],
     });
-    const res = new Response(image.body, {
+    // Buffer the render: returning the lazy stream produced empty bodies on
+    // Pages, and an empty 200 would get edge-cached for a day.
+    const png = await image.arrayBuffer();
+    if (png.byteLength === 0) return new Response("render failed", { status: 500 });
+    const res = new Response(png, {
         headers: {
             "content-type": "image/png",
             "cache-control": "public, max-age=86400, s-maxage=86400",
