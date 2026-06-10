@@ -35,9 +35,10 @@ describe("compilePattern", () => {
     });
 
     test("static patterns escape regex metacharacters", () => {
-        const p = compilePattern("/api/wrapped");
-        expect("/api/wrapped".match(p.regex)).not.toBeNull();
-        expect("/api/wrappedX".match(p.regex)).toBeNull();
+        const p = compilePattern("/api/a.b+c/[x]");
+        expect("/api/a.b+c/[x]".match(p.regex)).not.toBeNull();
+        expect("/api/abbc/x".match(p.regex)).toBeNull();
+        expect("/api/aZbbbc/x".match(p.regex)).toBeNull();
     });
 });
 
