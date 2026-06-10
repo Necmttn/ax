@@ -3,9 +3,13 @@ import { SurrealClient } from "@ax/lib/db";
 import { skillRecordKey } from "@ax/lib/skill-id";
 import { AppLayer } from "@ax/lib/layers";
 import type { DbError } from "@ax/lib/errors";
-import { recordRef } from "./evidence-writers.ts";
-import { surrealDate, surrealJsonTextOption, surrealObject, surrealOptionRecord, surrealOptionString, surrealString } from "@ax/lib/shared/surql";
 import { executeStatementsWith } from "@ax/lib/shared/statement-exec";
+import {
+    buildCorrectedByStatements, buildDiagnosticEventStatements,
+    buildFrictionEventStatements, buildProposedStatements,
+    buildRecoveredStatements, buildSkillPairStatements,
+    buildWasCorrectedStatements, correctedInvokedTurnKeys,
+} from "./signals/statements.ts";
 import { isoTimestamp, nonEmptyString, recordKeyPart, safeKeyPart } from "@ax/lib/shared/derive-keys";
 import type {
     CorrectionEdge, DerivedDiagnosticEvent, DerivedFrictionEvent, JsonRecord,
@@ -51,19 +55,6 @@ export function matchNegation(text: string): string | null {
 }
 
 /**
- * Build a deterministic edge record-id so re-runs upsert instead of
- * duplicating. Surreal record-ids escape via backticks, so we strip out the
- * `turn:` prefix and join the two raw keys.
- */
-export function correctedByEdgeId(fromTurnKey: string, toTurnKey: string): string {
-    return `${fromTurnKey}__${toTurnKey}`;
-}
-
-export function proposedEdgeId(fromTurnKey: string, skillKey: string): string {
-    return `${fromTurnKey}__${skillKey}`;
-}
-
-/**
  * Deterministic edge id for `skill_paired`. Pair is treated as undirected, so
  * the lexicographically-smaller skill key always sits in the `in` slot. A
  * short hash of the joined keys keeps the id stable + length-bounded
@@ -77,10 +68,6 @@ export function skillPairedEdgeId(skillKeyA: string, skillKeyB: string): {
     const [lo, hi] = skillKeyA < skillKeyB ? [skillKeyA, skillKeyB] : [skillKeyB, skillKeyA];
     const hash = Bun.hash(`${lo}__${hi}`).toString(16).slice(0, 12);
     return { edgeId: `${lo.slice(0, 24)}__${hi.slice(0, 24)}__${hash}`, fromKey: lo, toKey: hi };
-}
-
-export function recoveredByEdgeId(fromTurnKey: string, skillKey: string): string {
-    return `${fromTurnKey}__${skillKey}`;
 }
 
 const PAIR_WINDOW = 3;
@@ -587,144 +574,52 @@ ORDER BY ts DESC;`;
         return result?.[0] ?? [];
     });
 
-/**
- * Idempotent RELATE on the `corrected_by` relation. SurrealDB rejects raw
- * `UPSERT` against a RELATION-typed table ("is not a relation"), but
- * `RELATE in -> table:⟨id⟩ -> out` overwrites in place when the same edge
- * record-id is reused. Building the id deterministically from both endpoint
- * keys keeps re-runs side-effect-free.
- */
+// Statement templates live in ./signals/statements.ts (pure, golden-tested);
+// the upsert* wrappers below only execute the built batches.
+// `executeStatementsWith` no-ops on empty arrays, so no length guards needed.
+
 const upsertCorrections = (edges: CorrectionEdge[]) =>
     Effect.gen(function* () {
-        if (edges.length === 0) return;
         const db = yield* SurrealClient;
-        const stmts = edges.map((e) => {
-            const edgeId = correctedByEdgeId(e.fromTurnKey, e.toTurnKey);
-            return `RELATE turn:\`${e.fromTurnKey}\` -> corrected_by:\`${edgeId}\` -> turn:\`${e.toTurnKey}\` SET pattern = ${surrealString(e.pattern)}, ts = d"${e.ts}";`;
-        });
-        yield* executeStatementsWith(db, stmts, { chunkSize: 500 });
+        yield* executeStatementsWith(db, buildCorrectedByStatements(edges), { chunkSize: 500 });
     });
 
-/**
- * For each correction edge, mark every `invoked` edge whose source turn falls
- * in `[correctedSeq - 3, correctedSeq]` of the same session as
- * `was_corrected = true`. This denormalises the +3-seq-window check that
- * cmdTaste's `corrections` subquery used to do per row (~6s on the largest
- * skill); after this, the same count becomes a single GROUP BY scan with no
- * record fetch. See issue #31.
- *
- * The window is inclusive on both ends: an invocation IS considered
- * corrected if its turn is the one that got pushed back, OR if a later turn
- * within 3 steps got pushed back. Mirrors the original SurrealQL predicate
- * `in.seq >= $parent.in.seq AND in.seq <= $parent.in.seq + 3`.
- */
 const markWasCorrected = (edges: CorrectionEdge[]) =>
     Effect.gen(function* () {
-        if (edges.length === 0) return;
         const db = yield* SurrealClient;
-        // Build the universe of (session, seq) tuples that should be marked.
-        // Multiple correction edges may overlap; dedupe via a Set keyed by
-        // the deterministic turn record-key so we issue exactly one UPDATE
-        // per turn regardless of overlap.
-        const turnsToMark = new Set<string>();
-        for (const e of edges) {
-            const lo = Math.max(1, e.correctedSeq - 3);
-            const hi = e.correctedSeq;
-            for (let seq = lo; seq <= hi; seq += 1) {
-                // turnRecordKey strips `-` from session id; replicate inline
-                // (separate file so we can't import the private helper).
-                const sess = e.correctedSession.replace(/-/g, "");
-                turnsToMark.add(`${sess}_${seq}`);
-            }
-        }
-        if (turnsToMark.size === 0) return;
-        const stmts = [...turnsToMark].map(
-            (turnKey) =>
-                `UPDATE invoked SET was_corrected = true WHERE in = turn:\`${turnKey}\` RETURN NONE;`,
-        );
-        yield* executeStatementsWith(db, stmts, { chunkSize: 500 });
+        yield* executeStatementsWith(db, buildWasCorrectedStatements(correctedInvokedTurnKeys(edges)), { chunkSize: 500 });
     });
 
 const upsertProposed = (edges: ProposedEdge[]) =>
     Effect.gen(function* () {
-        if (edges.length === 0) return;
         const db = yield* SurrealClient;
-        const stmts = edges.map((e) => {
-            const edgeId = proposedEdgeId(e.fromTurnKey, e.skillKey);
-            return `RELATE turn:\`${e.fromTurnKey}\` -> proposed:\`${edgeId}\` -> skill:\`${e.skillKey}\` SET ts = d"${e.ts}", context_excerpt = ${surrealString(e.contextExcerpt)};`;
-        });
-        yield* executeStatementsWith(db, stmts, { chunkSize: 500 });
+        yield* executeStatementsWith(db, buildProposedStatements(edges), { chunkSize: 500 });
     });
 
-/**
- * Idempotent RELATE for `skill_paired`. We aggregate counts in-memory across
- * all sessions in scope, then RELATE once per unique pair using a
- * deterministic edge id so re-running `derive-signals` overwrites in place
- * with identical totals (no count drift from re-fires).
- */
-const upsertSkillPairs = (pairs: SkillPairAccum[], edgeIds: string[]) =>
+const upsertSkillPairs = (
+    pairs: ReadonlyArray<{ readonly edgeId: string; readonly pair: SkillPairAccum }>,
+) =>
     Effect.gen(function* () {
-        if (pairs.length === 0) return;
         const db = yield* SurrealClient;
-        const stmts = pairs.map((p, i) => {
-            const edgeId = edgeIds[i];
-            return `RELATE skill:\`${p.fromKey}\` -> skill_paired:\`${edgeId}\` -> skill:\`${p.toKey}\` SET count = ${p.count}, last_seen = d"${p.lastSeen}";`;
-        });
-        yield* executeStatementsWith(db, stmts, { chunkSize: 500 });
+        yield* executeStatementsWith(db, buildSkillPairStatements(pairs), { chunkSize: 500 });
     });
 
 const upsertRecovered = (edges: RecoveryEdge[]) =>
     Effect.gen(function* () {
-        if (edges.length === 0) return;
         const db = yield* SurrealClient;
-        const stmts = edges.map((e) => {
-            const edgeId = recoveredByEdgeId(e.fromTurnKey, e.skillKey);
-            const excerpt =
-                e.errorExcerpt == null ? "NONE" : surrealString(e.errorExcerpt);
-            return `RELATE turn:\`${e.fromTurnKey}\` -> recovered_by:\`${edgeId}\` -> skill:\`${e.skillKey}\` SET ts = d"${e.ts}", error_excerpt = ${excerpt};`;
-        });
-        yield* executeStatementsWith(db, stmts, { chunkSize: 500 });
+        yield* executeStatementsWith(db, buildRecoveredStatements(edges), { chunkSize: 500 });
     });
 
 const upsertFrictionEvents = (events: readonly DerivedFrictionEvent[]) =>
     Effect.gen(function* () {
-        if (events.length === 0) return;
         const db = yield* SurrealClient;
-        const stmts = events.map(
-            (event) =>
-                `UPSERT ${recordRef("friction_event", event.key)} MERGE ${surrealObject([
-                    ["session", surrealOptionRecord("session", event.sessionId)],
-                    ["turn", surrealOptionRecord("turn", event.turnKey)],
-                    ["kind", surrealString(event.kind)],
-                    ["text", surrealOptionString(event.text)],
-                    ["labels", surrealJsonTextOption(event.labels)],
-                    ["metrics", surrealJsonTextOption(event.metrics)],
-                    ["raw", surrealJsonTextOption(event.raw)],
-                    ["ts", surrealDate(event.ts)],
-                ])};`,
-        );
-        yield* executeStatementsWith(db, stmts, { chunkSize: 500 });
+        yield* executeStatementsWith(db, buildFrictionEventStatements(events), { chunkSize: 500 });
     });
 
 const upsertDiagnosticEvents = (events: readonly DerivedDiagnosticEvent[]) =>
     Effect.gen(function* () {
-        if (events.length === 0) return;
         const db = yield* SurrealClient;
-        const stmts = events.map(
-            (event) =>
-                `UPSERT ${recordRef("diagnostic_event", event.key)} MERGE ${surrealObject([
-                    ["session", surrealOptionRecord("session", event.sessionId)],
-                    ["turn", surrealOptionRecord("turn", event.turnKey)],
-                    ["kind", surrealString(event.kind)],
-                    ["status", surrealOptionString(event.status)],
-                    ["text", surrealOptionString(event.text)],
-                    ["labels", surrealJsonTextOption(event.labels)],
-                    ["metrics", surrealJsonTextOption(event.metrics)],
-                    ["raw", surrealJsonTextOption(event.raw)],
-                    ["ts", surrealDate(event.ts)],
-                ])};`,
-        );
-        yield* executeStatementsWith(db, stmts, { chunkSize: 500 });
+        yield* executeStatementsWith(db, buildDiagnosticEventStatements(events), { chunkSize: 500 });
     });
 
 export interface DeriveStats {
@@ -793,8 +688,9 @@ export const deriveSignals = (
         }
 
         const shouldWriteSkillPairs = shouldDeriveAllTimeSkillPairs(opts.sinceDays);
-        const pairsList = shouldWriteSkillPairs ? [...pairsAccum.values()] : [];
-        const pairEdgeIds = shouldWriteSkillPairs ? [...pairsAccum.keys()] : [];
+        const pairsList = shouldWriteSkillPairs
+            ? [...pairsAccum.entries()].map(([edgeId, pair]) => ({ edgeId, pair }))
+            : [];
         if (opts.onProgress) {
             yield* opts.onProgress({
                 sessions: bundles.length,
@@ -844,7 +740,7 @@ export const deriveSignals = (
             }),
         );
         if (shouldWriteSkillPairs) {
-            yield* upsertSkillPairs(pairsList, pairEdgeIds).pipe(
+            yield* upsertSkillPairs(pairsList).pipe(
                 Effect.withSpan("signals.write.skill-pairs", {
                     attributes: { "signals.count": pairsList.length },
                 }),
