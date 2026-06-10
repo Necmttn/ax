@@ -14,6 +14,7 @@ import {
 } from "./config.ts";
 import { reconcileAgents } from "./reconcile.ts";
 import type { AgentScope } from "./source.ts";
+import type { RuntimeManifest } from "../cli/commands/manifest.ts";
 
 /**
  * `ax agents` group: config/reconcile/scope/park/unpark/rm for agent definition
@@ -122,3 +123,6 @@ export const agentsCommand = Command.make("agents").pipe(
         rmCommand,
     ]),
 );
+
+/** Routing declaration consumed by cli/index.ts (Phase 2 command-family split). */
+export const agentsRuntime: RuntimeManifest = { agents: "db" };
