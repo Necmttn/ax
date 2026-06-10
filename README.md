@@ -392,5 +392,6 @@ Questions, feedback, or want to shape where ax goes next? Join the Discord:
 
 ## License
 
-[AGPL-3.0-only](LICENSE) © 2025 Necmettin Karakaya. A commercial license is
-available for use that the AGPL doesn't permit - reach out via the Discord above.
+[AGPL-3.0-only](LICENSE) © 2025 Necmettin Karakaya. A
+[commercial license](docs/COMMERCIAL-LICENSE.md) is available for use that the
+AGPL doesn't permit - reach out via the Discord above.

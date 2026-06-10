@@ -1,38 +1,3 @@
-ax is dual-licensed.
-
-================================================================================
- OPTION 1 — GNU Affero General Public License v3.0 (AGPL-3.0) — default, free
-================================================================================
-
-ax is free and open source under the AGPL-3.0 (full text below).
-
-In plain terms: you may use, study, modify, and redistribute ax for free.
-But the AGPL is a strong network copyleft license. If you run a modified
-version of ax to provide a service over a network, or distribute it as part
-of your own product, you must release the COMPLETE corresponding source code
-of your work — including your modifications and the surrounding application —
-to your users under the AGPL-3.0.
-
-================================================================================
- OPTION 2 — Commercial License — for closed / proprietary use
-================================================================================
-
-If you want to use, embed, host, or resell ax as part of a closed-source or
-proprietary product or service WITHOUT the AGPL's source-disclosure
-obligations, you need a separate commercial license.
-
-Commercial licenses are available from the copyright holder. See
-LICENSE-COMMERCIAL.md or contact:
-
-    Necmettin Karakaya <necmettin.karakaya@gmail.com>
-
-Copyright (c) 2025 Necmettin Karakaya. All rights reserved.
-
-The full text of the AGPL-3.0 follows.
-
-================================================================================
-
-
                     GNU AFFERO GENERAL PUBLIC LICENSE
                        Version 3, 19 November 2007
 
