@@ -42,6 +42,7 @@ import {
 } from "./plans.ts";
 import { invokedRelationRecordKey, toolCallRecordKey, turnRecordKey } from "./record-keys.ts";
 import { extractToolFileEvidence } from "./tool-file-evidence.ts";
+import { decodeCodexTranscriptLine } from "./line-schemas.ts";
 import { executeStatements } from "@ax/lib/shared/statement-exec";
 import { isNotFound, skipNotFound } from "@ax/lib/shared/fs-error";
 import { safeKeyPart } from "@ax/lib/shared/derive-keys";
@@ -568,6 +569,7 @@ function createCodexExtractor(
     const pendingProviderEventIds = new Set<string>();
     let lastProviderEventId: string | null = null;
     let seq = 0;
+    let malformedLines = 0;
 
     const pushProviderEvent = (event: Omit<AgentEventWrite, "provider" | "providerSessionId" | "axSessionId">, currentSession: CodexSession): void => {
         const {
@@ -874,12 +876,22 @@ function createCodexExtractor(
     return {
         processLine(line: string): void {
             if (!line.trim()) return;
-            const entry = parseJsonl(line);
-            if (!entry) return;
-            const type = stringField(entry, "type");
-            const ts = stringField(entry, "timestamp");
+            const rawEntry = parseJsonl(line);
+            if (!rawEntry) {
+                malformedLines += 1;
+                return;
+            }
+            // Typed, tolerant view of the line head (see line-schemas.ts).
+            // The `payload` varies per `type` and stays a raw probe.
+            const entry = decodeCodexTranscriptLine(rawEntry);
+            if (!entry) {
+                malformedLines += 1;
+                return;
+            }
+            const type = entry.type ?? null;
+            const ts = entry.timestamp ?? null;
             if (!ts) return;
-            const payload = isRecord(entry.payload) ? entry.payload : null;
+            const payload = isRecord(rawEntry.payload) ? rawEntry.payload : null;
 
             if (type === "session_meta" && payload) {
                 session = {
@@ -1027,6 +1039,11 @@ function createCodexExtractor(
             };
         },
         drain,
+        /** Lines that failed the JSONL boundary decode (unparseable JSON or a
+         *  non-record payload). Counted, never thrown. */
+        malformedLines(): number {
+            return malformedLines;
+        },
     };
 }
 
@@ -1459,6 +1476,8 @@ export interface CodexStats {
     invocations: number;
     toolCalls: number;
     planSnapshots: number;
+    /** JSONL lines skipped at the decode boundary (unparseable / non-record). */
+    malformedLines: number;
 }
 
 export const ingestCodex = (
@@ -1490,6 +1509,7 @@ export const ingestCodex = (
         let invCount = 0;
         let toolCallCount = 0;
         let planSnapshotCount = 0;
+        let malformedLineCount = 0;
         let activeFiles = 0;
         const recordCount = () => turnCount + invCount + toolCallCount + planSnapshotCount;
 
@@ -1644,6 +1664,7 @@ export const ingestCodex = (
 
             const finalBatch = extractor.drain(true);
             yield* writeBatch(finalBatch);
+            malformedLineCount += extractor.malformedLines();
             const completedSession = finalBatch.session ?? currentSession;
             if (!completedSession) {
                 activeFiles -= 1;
@@ -1755,6 +1776,7 @@ export const ingestCodex = (
             invocations: invCount,
             toolCalls: toolCallCount,
             planSnapshots: planSnapshotCount,
+            malformedLines: malformedLineCount,
         };
     });
 
@@ -1788,6 +1810,8 @@ export class CodexStageStats extends BaseStageStats.extend<CodexStageStats>("Cod
     sessionsIngested: Schema.Number,
     turnsIngested: Schema.Number,
     toolCallsIngested: Schema.Number,
+    /** JSONL lines skipped at the decode boundary (unparseable / non-record). */
+    malformedLines: Schema.Number,
 }) {}
 
 export const codexStage: StageDef<CodexStageStats, SurrealClient | AxConfig | FileSystem.FileSystem | Path.Path> = {
@@ -1806,10 +1830,12 @@ export const codexStage: StageDef<CodexStageStats, SurrealClient | AxConfig | Fi
             );
             return CodexStageStats.make({
                 durationMs: Date.now() - t0,
-                summary: `ingested ${result.sessions} sessions, ${result.turns} turns, ${result.toolCalls} tool calls`,
+                summary: `ingested ${result.sessions} sessions, ${result.turns} turns, ${result.toolCalls} tool calls` +
+                    (result.malformedLines > 0 ? `, ${result.malformedLines} malformed lines skipped` : ""),
                 sessionsIngested: result.sessions,
                 turnsIngested: result.turns,
                 toolCallsIngested: result.toolCalls,
+                malformedLines: result.malformedLines,
             });
         }),
 };

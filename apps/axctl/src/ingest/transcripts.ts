@@ -43,6 +43,7 @@ import {
     turnRecordKey,
 } from "./record-keys.ts";
 import { extractToolFileEvidence } from "./tool-file-evidence.ts";
+import { decodeClaudeTranscriptLine } from "./line-schemas.ts";
 
 import { selectByIds } from "@ax/lib/shared/record-select";
 import { executeStatements, executeStatementsWith } from "@ax/lib/shared/statement-exec";
@@ -349,6 +350,9 @@ interface FileExtract {
     compactions: CompactionWrite[];
     tokenUsage: ClaudeTokenUsage | null;
     turnTokenUsages: ClaudeTurnTokenUsage[];
+    /** Lines that failed the JSONL boundary decode (unparseable JSON or a
+     *  non-record payload). Counted, never thrown. */
+    malformedLines: number;
 }
 
 function createClaudeExtractor(path: Path.Path, projectDir: string, sessionId: string) {
@@ -370,6 +374,7 @@ function createClaudeExtractor(path: Path.Path, projectDir: string, sessionId: s
     const anonymousToolUseCountsByTurn = new Map<number, number>();
     let seq = 0;
     let providerSeq = 0;
+    let malformedLines = 0;
     let cwd: string | null = null;
     let model: string | null = null;
     let lastProviderEventId: string | null = null;
@@ -873,25 +878,33 @@ function createClaudeExtractor(path: Path.Path, projectDir: string, sessionId: s
     return {
         processLine(line: string): void {
             if (!line.trim()) return;
-            const entry = parseJsonl(line);
-            if (!entry) return;
-            const type = entry.type as string | undefined;
+            const rawEntry = parseJsonl(line);
+            if (!rawEntry) {
+                malformedLines += 1;
+                return;
+            }
+            // Typed, tolerant view of the line head (see line-schemas.ts).
+            // Deeper shapes (content blocks, hook data/attachment payloads)
+            // stay on `rawEntry` and are probed where they are consumed.
+            const entry = decodeClaudeTranscriptLine(rawEntry);
+            if (!entry) {
+                malformedLines += 1;
+                return;
+            }
+            const type = entry.type;
             if (type === "summary") return;
 
-            const ts =
-                (entry.timestamp as string | undefined) ??
-                (entry.ts as string | undefined) ??
-                null;
+            const ts = entry.timestamp ?? entry.ts ?? null;
             if (!ts) return;
-            const turnCwd = typeof entry.cwd === "string" ? entry.cwd : cwd;
+            const turnCwd = entry.cwd ?? cwd;
             if (!cwd && turnCwd) cwd = turnCwd;
-            const data = isRecord(entry.data) ? entry.data : null;
+            const data = isRecord(rawEntry.data) ? rawEntry.data : null;
             if (data && stringField(data, "type") === "hook_progress") {
-                processHookProgress(data, ts, turnCwd, entry);
+                processHookProgress(data, ts, turnCwd, rawEntry);
             }
-            const attachment = isRecord(entry.attachment) ? entry.attachment : null;
+            const attachment = isRecord(rawEntry.attachment) ? rawEntry.attachment : null;
             if (attachment) {
-                processHookAttachment(attachment, ts, turnCwd, entry);
+                processHookAttachment(attachment, ts, turnCwd, rawEntry);
             }
             if (!session) {
                 session = {
@@ -908,11 +921,9 @@ function createClaudeExtractor(path: Path.Path, projectDir: string, sessionId: s
             if (cwd && !session.cwd) session.cwd = cwd;
 
             seq += 1;
-            const role = (type as string) ?? "unknown";
-            const message = isRecord(entry.message) ? entry.message : null;
-            const entryModel =
-                (message ? stringField(message, "model") : null) ??
-                stringField(entry, "model");
+            const role = type ?? "unknown";
+            const message = entry.message ?? null;
+            const entryModel = message?.model ?? entry.model ?? null;
             if (entryModel) {
                 model = entryModel;
                 if (session) session.model = entryModel;
@@ -920,13 +931,13 @@ function createClaudeExtractor(path: Path.Path, projectDir: string, sessionId: s
             // Anthropic emits `usage` on each assistant message. Sum across the
             // session; subagent transcripts live in separate files, so this
             // never double-counts a child's tokens into its parent.
-            const usage = message && isRecord(message.usage) ? message.usage : null;
+            const usage = message?.usage ?? null;
             if (usage) {
                 sawUsage = true;
-                const freshInput = numberField(usage, "input_tokens") ?? 0;
-                const completion = numberField(usage, "output_tokens") ?? 0;
-                const cacheCreation = numberField(usage, "cache_creation_input_tokens") ?? 0;
-                const cacheRead = numberField(usage, "cache_read_input_tokens") ?? 0;
+                const freshInput = usage.input_tokens ?? 0;
+                const completion = usage.output_tokens ?? 0;
+                const cacheCreation = usage.cache_creation_input_tokens ?? 0;
+                const cacheRead = usage.cache_read_input_tokens ?? 0;
                 usageFreshInput += freshInput;
                 usageCompletion += completion;
                 usageCacheCreation += cacheCreation;
@@ -956,7 +967,7 @@ function createClaudeExtractor(path: Path.Path, projectDir: string, sessionId: s
             // block later in the same content array can flip it after the
             // tool_use that emitted the invocation).
             const turnInvStart = invocations.length;
-            const providerEventId = stringField(entry, "uuid");
+            const providerEventId = entry.uuid ?? null;
             const kind = messageKind(role, messageContent, textExcerpt);
             const intentKind = classifyTurnIntent({ role, messageKind: kind, source: "claude", text });
 
@@ -967,8 +978,7 @@ function createClaudeExtractor(path: Path.Path, projectDir: string, sessionId: s
             // pollutes turn/recall data (it is transcript-only, not a real turn).
             const isCompactSummary =
                 entry.isCompactSummary === true ||
-                (isRecord(entry.message) &&
-                    (entry.message as Record<string, unknown>).isCompactSummary === true);
+                message?.isCompactSummary === true;
             if (isCompactSummary) {
                 const compactionSeq = nextProviderSeq();
                 const eventKey = agentEventRecordKey({
@@ -985,7 +995,7 @@ function createClaudeExtractor(path: Path.Path, projectDir: string, sessionId: s
                     role: null,
                     text,
                     textExcerpt,
-                    raw: entry,
+                    raw: rawEntry,
                     labels: {
                         source: "claude_transcript",
                         messageKind: kind,
@@ -1018,7 +1028,7 @@ function createClaudeExtractor(path: Path.Path, projectDir: string, sessionId: s
                 role,
                 text,
                 textExcerpt,
-                raw: entry,
+                raw: rawEntry,
                 labels: {
                     source: "claude_transcript",
                     messageKind: kind,
@@ -1101,6 +1111,7 @@ function createClaudeExtractor(path: Path.Path, projectDir: string, sessionId: s
                       }
                     : null,
                 turnTokenUsages,
+                malformedLines,
             };
         },
     };
@@ -1548,6 +1559,8 @@ export interface TranscriptStats {
     planSnapshots: number;
     hookEvents: number;
     hookCommandInvocations: number;
+    /** JSONL lines skipped at the decode boundary (unparseable / non-record). */
+    malformedLines: number;
 }
 
 export const ingestTranscripts = (
@@ -1594,6 +1607,7 @@ export const ingestTranscripts = (
         let planSnapshotCount = 0;
         let hookEventCount = 0;
         let hookCommandInvocationCount = 0;
+        let malformedLineCount = 0;
         let activeFiles = 0;
         const concurrency = cfg.knobs.claudeConcurrency;
         const recordCount = () =>
@@ -1723,6 +1737,7 @@ export const ingestTranscripts = (
                 return;
             }
             files += 1;
+            malformedLineCount += extracted.malformedLines;
             const pointer = yield* snapshotTranscript(
                 extracted.session.id,
                 candidate.filePath,
@@ -1825,6 +1840,7 @@ export const ingestTranscripts = (
             planSnapshots: planSnapshotCount,
             hookEvents: hookEventCount,
             hookCommandInvocations: hookCommandInvocationCount,
+            malformedLines: malformedLineCount,
         };
     });
 
@@ -1857,6 +1873,8 @@ export class ClaudeStats extends BaseStageStats.extend<ClaudeStats>("ClaudeStats
     sessionsIngested: Schema.Number,
     turnsIngested: Schema.Number,
     toolCallsIngested: Schema.Number,
+    /** JSONL lines skipped at the decode boundary (unparseable / non-record). */
+    malformedLines: Schema.Number,
 }) {}
 
 export const claudeStage: StageDef<ClaudeStats, SurrealClient | AxConfig | FileSystem.FileSystem | Path.Path> = {
@@ -1875,10 +1893,12 @@ export const claudeStage: StageDef<ClaudeStats, SurrealClient | AxConfig | FileS
             );
             return ClaudeStats.make({
                 durationMs: Date.now() - t0,
-                summary: `ingested ${result.sessions} sessions, ${result.turns} turns, ${result.toolCalls} tool calls`,
+                summary: `ingested ${result.sessions} sessions, ${result.turns} turns, ${result.toolCalls} tool calls` +
+                    (result.malformedLines > 0 ? `, ${result.malformedLines} malformed lines skipped` : ""),
                 sessionsIngested: result.sessions,
                 turnsIngested: result.turns,
                 toolCallsIngested: result.toolCalls,
+                malformedLines: result.malformedLines,
             });
         }),
 };

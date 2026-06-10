@@ -206,20 +206,24 @@ function isRecord(input: unknown): input is Record<string, unknown> {
     return typeof input === "object" && input !== null && !Array.isArray(input);
 }
 
+/** Effect-Schema-backed JSON decode at the SQLite blob boundary. `Option`
+ *  (not `null`) so a literal JSON `null` is distinguishable from a failed
+ *  parse. */
+const decodeJsonStringOption = Schema.decodeUnknownOption(Schema.UnknownFromJsonString);
+
 function parseJsonRecord(raw: string | null, label: string, warnings: string[]): Record<string, unknown> | null {
     if (typeof raw !== "string" || raw.trim().length === 0) {
         warnings.push(`${label}: missing JSON data`);
         return null;
     }
-    try {
-        const parsed = JSON.parse(raw) as unknown;
-        if (isRecord(parsed)) return parsed;
-        warnings.push(`${label}: JSON data is not an object`);
-        return null;
-    } catch (error) {
-        warnings.push(`${label}: invalid JSON data (${error instanceof Error ? error.message : String(error)})`);
+    const parsed = decodeJsonStringOption(raw);
+    if (Option.isNone(parsed)) {
+        warnings.push(`${label}: invalid JSON data`);
         return null;
     }
+    if (isRecord(parsed.value)) return parsed.value;
+    warnings.push(`${label}: JSON data is not an object`);
+    return null;
 }
 
 function stringField(input: Record<string, unknown>, field: string): string | null {

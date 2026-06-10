@@ -34,6 +34,7 @@ import { BaseStageStats, IngestContext, sinceDaysFromCtx, StageMeta } from "./st
 import type { StageDef } from "./stage/registry.ts";
 import { extractCommandTool, normalizeCommand, toolKindForName } from "./tool-calls.ts";
 import { extractToolFileEvidence } from "./tool-file-evidence.ts";
+import { decodePiTranscriptLine } from "./line-schemas.ts";
 import { tokenQualityLabels } from "./token-quality.ts";
 
 export const PiKey = Schema.Literal("pi");
@@ -439,21 +440,28 @@ function createPiExtractor(filePath: string) {
                 skipped += 1;
                 return;
             }
+            // Typed, tolerant view of the line head (see line-schemas.ts).
+            // The `message` payload stays a raw probe.
+            const head = decodePiTranscriptLine(entry);
+            if (!head) {
+                skipped += 1;
+                return;
+            }
 
-            const type = stringField(entry, "type") ?? "unknown";
+            const type = head.type ?? "unknown";
             if (type === "session") {
                 if (session) return;
-                const timestamp = stringField(entry, "timestamp");
+                const timestamp = head.timestamp ?? null;
                 const startedAt = timestamp ? validIsoTimestamp(timestamp) : null;
                 if (!startedAt) {
                     warnings.push(
-                        `invalid session timestamp for ${stringField(entry, "id") ?? filePath}: ${timestamp ?? "(missing)"}`,
+                        `invalid session timestamp for ${head.id ?? filePath}: ${timestamp ?? "(missing)"}`,
                     );
                 }
                 session = {
-                    id: stringField(entry, "id") ?? filePath,
-                    version: numberField(entry, "version"),
-                    cwd: stringField(entry, "cwd"),
+                    id: head.id ?? filePath,
+                    version: head.version ?? null,
+                    cwd: head.cwd ?? null,
                     started_at: startedAt ?? SAFE_FALLBACK_TS,
                     ended_at: startedAt ?? SAFE_FALLBACK_TS,
                     model: null,
@@ -471,8 +479,8 @@ function createPiExtractor(filePath: string) {
             if (timestamp.warning) warnings.push(timestamp.warning);
             const ts = timestamp.ts;
             session.ended_at = ts;
-            const providerEventId = stringField(entry, "id");
-            const parentProviderEventId = stringField(entry, "parentId");
+            const providerEventId = head.id ?? null;
+            const parentProviderEventId = head.parentId ?? null;
             const message = isRecord(entry.message) ? entry.message : null;
             const role = message ? stringField(message, "role") : null;
             const text = message ? textFromPiContent(message.content) : null;
@@ -490,7 +498,7 @@ function createPiExtractor(filePath: string) {
             if (entryUsage) addUsage(usage, entryUsage);
 
             if (type === "model_change") {
-                session.model = stringField(entry, "modelId") ?? session.model;
+                session.model = head.modelId ?? session.model;
             } else if (role === "assistant" && message) {
                 session.model = stringField(message, "model") ?? session.model;
             }
