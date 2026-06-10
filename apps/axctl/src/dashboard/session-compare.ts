@@ -33,6 +33,7 @@ import type {
     SessionTokenUsageDetail,
 } from "@ax/lib/shared/dashboard-types";
 import { runQuery, runSingleQuery } from "@ax/lib/shared/graph-query";
+import { fillEstimatedCost, loadPricingCatalogForModels } from "../metrics/cost-estimate.ts";
 
 export interface SessionCompareOptions {
     /** Attach the per-turn timeline (P1). Off by default - summary only. */
@@ -92,11 +93,17 @@ const argMinUnique = (
     return tied ? null : best.id;
 };
 
-const computeWinners = (
+/** Exported for unit tests (pure). */
+export const computeWinners = (
     entries: ReadonlyArray<SessionCompareEntry>,
 ): SessionCompareWinners => ({
     fastest: argMinUnique(entries, (e) => e.duration_ms),
-    cheapest: argMinUnique(entries, (e) => e.token_usage?.estimated_cost_usd ?? null),
+    // "Cheapest" is only decidable when EVERY session's cost is known - an
+    // unknown cost is unknown, not $0, so a priced session must not win by
+    // default over one we simply could not price (#175).
+    cheapest: entries.every((e) => (e.token_usage?.estimated_cost_usd ?? null) !== null)
+        ? argMinUnique(entries, (e) => e.token_usage?.estimated_cost_usd ?? null)
+        : null,
     fewest_tokens: argMinUnique(entries, (e) => e.token_usage?.estimated_tokens ?? null),
     cleanest: argMinUnique(entries, (e) => e.noise_score),
 });
@@ -196,10 +203,43 @@ export const fetchSessionCompare = (
             });
         }
 
+        // #175: Claude byte-estimate usage rows were never priced at ingest, so
+        // their stored estimated_cost_usd is null. Backfill an estimate from the
+        // row's token counts × agent_model pricing (pricing_source gains an
+        // `estimated:` prefix) so "cheapest" compares real numbers - and stays
+        // undecided when a session genuinely cannot be priced.
+        const catalog = yield* loadPricingCatalogForModels(
+            entries.map((e) => e.token_usage?.model ?? e.model),
+        );
+        const priced = entries.map((entry) => {
+            if (entry.token_usage === null) return entry;
+            const usage = entry.token_usage;
+            const filled = fillEstimatedCost({
+                model: usage.model ?? entry.model,
+                prompt_tokens: usage.prompt_tokens,
+                completion_tokens: usage.completion_tokens,
+                cache_creation_input_tokens: usage.cache_creation_input_tokens,
+                cache_read_input_tokens: usage.cache_read_input_tokens,
+                estimated_tokens: usage.estimated_tokens,
+                estimated_cost_usd: usage.estimated_cost_usd,
+                pricing_source: usage.pricing_source,
+            }, catalog);
+            return filled.estimated
+                ? {
+                    ...entry,
+                    token_usage: {
+                        ...usage,
+                        estimated_cost_usd: filled.estimatedCostUsd,
+                        pricing_source: filled.pricingSource,
+                    },
+                }
+                : entry;
+        });
+
         return {
-            task_label: sharedTaskLabel(entries),
-            sessions: entries,
-            winners: computeWinners(entries),
+            task_label: sharedTaskLabel(priced),
+            sessions: priced,
+            winners: computeWinners(priced),
             not_found: notFound,
         };
     });

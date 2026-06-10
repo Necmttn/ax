@@ -222,6 +222,43 @@ describe("renderCompareTable --turns appendix", () => {
     });
 });
 
+describe("renderCompareTable - estimated cost provenance (#175)", () => {
+    const withEstimated = (): SessionComparePayload => {
+        const p = payload();
+        return {
+            ...p,
+            sessions: [
+                p.sessions[0]!,
+                {
+                    ...p.sessions[1]!,
+                    token_usage: {
+                        ...p.sessions[1]!.token_usage!,
+                        estimated_cost_usd: 2.5,
+                        pricing_source: "estimated:litellm",
+                    },
+                },
+            ],
+        };
+    };
+
+    test("estimated costs render with a ~ prefix", () => {
+        const out = renderCompareTable(withEstimated());
+        expect(out).toContain("~$2.50");
+        expect(out).toContain("$3.40"); // ingest-priced cell stays unprefixed
+        expect(out).not.toContain("~$3.40");
+    });
+
+    test("footnote explains the ~ marker when any cost is estimated", () => {
+        const out = renderCompareTable(withEstimated());
+        expect(out).toContain("~ = cost estimated from token counts");
+    });
+
+    test("no footnote when every cost is provider/ingest priced", () => {
+        const out = renderCompareTable(payload());
+        expect(out).not.toContain("~ = cost estimated");
+    });
+});
+
 describe("renderCompareJson", () => {
     test("round-trips the payload", () => {
         const p = payload();

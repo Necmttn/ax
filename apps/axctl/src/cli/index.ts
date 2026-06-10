@@ -92,6 +92,7 @@ import { fetchSessionShow } from "../dashboard/session-show.ts";
 import { fetchSessionCompare } from "../dashboard/session-compare.ts";
 import { fetchCostSummary, type CostSummary } from "../dashboard/cost-query.ts";
 import { fetchSessionMetrics } from "../metrics/session-metrics-query.ts";
+import { fetchSessionDurabilityDetail } from "../metrics/reverted-commits.ts";
 import { formatSessionMetrics, SESSION_METRICS_LEGEND } from "../metrics/util.ts";
 import { SIGNAL_CATALOG, findSignal, runRelationSignal } from "../metrics/catalog.ts";
 import type { CascadeEdge } from "../metrics/fragility-cascade.ts";
@@ -3408,10 +3409,18 @@ const cmdSessionShow = (args: string[]) =>
             process.exit(1);
         }
 
+        // #176: durability drill-down - the commits behind durability_ratio
+        // (reverted commits + their later_fixed_by fix chains). Bounded to this
+        // session's produced edges; null only when the id fails validation
+        // (already excluded above by the not-found check).
+        const metrics = yield* fetchSessionDurabilityDetail(sessionId).pipe(
+            catchDbErrorAndExit("axctl session show"),
+        );
+
         if (useJson) {
-            console.log(renderSessionJson(payload));
+            console.log(renderSessionJson(payload, { metrics }));
         } else {
-            console.log(renderSessionMarkdown(payload));
+            console.log(renderSessionMarkdown(payload, { metrics }));
         }
     });
 
@@ -3434,7 +3443,9 @@ const sessionShowCommand = Command.make(
         ]),
 ).pipe(
     Command.withDescription(
-        "Display a session's timeline (tool calls + subagent spawns). " +
+        "Display a session's timeline (tool calls + subagent spawns) plus a Metrics " +
+        "block showing the commits behind durability_ratio (reverted commits + the " +
+        "commits that fixed them). " +
         "--expand=<uuid> (repeatable) or --all expands subagent timelines inline. " +
         "--by-role groups the Top skills section by role. " +
         "Auto markdown on TTY, JSON when piped. --json forces JSON.",

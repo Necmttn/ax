@@ -113,6 +113,7 @@ describe("formatSessionMetrics", () => {
         coldStartReads: 0,
         delegationRatio: null,
         estimatedCostUsd: null,
+        costPricingSource: null,
         userCorrections: null,
         ...overrides,
     });

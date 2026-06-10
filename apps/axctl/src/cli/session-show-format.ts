@@ -14,8 +14,16 @@ import type {
     SessionLink,
     SessionToolCall,
 } from "@ax/lib/shared/dashboard-types";
+import type { RevertedCommitDetail, SessionDurabilityDetail } from "../metrics/reverted-commits.ts";
 import { renderByRoleSection } from "./role-format.ts";
 import { prettifyProjectSlug } from "@ax/lib/shared/project-slug";
+
+/** Optional enrichments rendered alongside the base session payload. */
+export interface SessionShowExtras {
+    /** Durability drill-down (#176): the commits behind durability_ratio.
+     *  Null/undefined → no Metrics section rendered. */
+    readonly metrics?: SessionDurabilityDetail | null;
+}
 
 /** Last `n` hex chars of a UUID-like string, same pattern as cmdRecall. */
 function shortId(id: string, n = 12): string {
@@ -109,6 +117,76 @@ function renderTimeline(payload: SessionDetailPayload, prefix = ""): string[] {
     return lines;
 }
 
+/** Short display sha: 7-char abbreviated sha, falling back to the commit
+ *  record id tail when the sha column is empty. */
+function shortSha(commit: { readonly sha: string | null; readonly commitId: string }): string {
+    if (commit.sha) return commit.sha.slice(0, 7);
+    const tail = commit.commitId.replace(/[`⟨⟩]/g, "").split(":").pop() ?? commit.commitId;
+    return tail.slice(-12);
+}
+
+function fmtDay(ts: string | null): string {
+    return ts ? ts.slice(0, 10) : "?";
+}
+
+function fmtPct(ratio: number | null): string {
+    return ratio === null ? "-" : `${Math.round(ratio * 100)}%`;
+}
+
+/** Render caps: real sessions fan out hard (one mass-revert can carry dozens
+ *  of fix edges and 100+ reverted commits) - cap the markdown block and point
+ *  at --json for the full list. */
+const MAX_REVERTED_SHOWN = 10;
+const MAX_FIXES_SHOWN = 3;
+
+function revertedCommitLines(commit: RevertedCommitDetail): string[] {
+    const msg = (commit.message ?? "").split("\n")[0]!.slice(0, 72);
+    const lines = [`- ${shortSha(commit)}  ${msg}  (${fmtDay(commit.ts)})`];
+    if (commit.fixes.length === 0) {
+        // commit.reverted is full-history but later_fixed_by is rebuilt
+        // window-bounded - the fix exists, it just landed outside the window.
+        lines.push("    fixed by: (outside ingest window - rerun a full `ax ingest` to link)");
+        return lines;
+    }
+    for (const fix of commit.fixes.slice(0, MAX_FIXES_SHOWN)) {
+        const fixMsg = (fix.message ?? "").split("\n")[0]!.slice(0, 64);
+        const days = fix.daysBetween === null ? "" : ` +${fix.daysBetween.toFixed(1)}d`;
+        const conf = fix.confidence ? ` · ${fix.confidence}` : "";
+        lines.push(`    fixed by ${shortSha(fix)}  ${fixMsg}  (${fmtDay(fix.ts)}${days}${conf})`);
+    }
+    if (commit.fixes.length > MAX_FIXES_SHOWN) {
+        lines.push(`    … and ${commit.fixes.length - MAX_FIXES_SHOWN} more fixing commits`);
+    }
+    return lines;
+}
+
+/**
+ * Render the `## Metrics` durability drill-down (#176): the ratio plus the
+ * actual commits that died and what replaced them. Returns [] when no detail
+ * was provided, so callers can append unconditionally.
+ */
+function renderMetricsBlock(metrics: SessionDurabilityDetail | null | undefined): string[] {
+    if (metrics === null || metrics === undefined) return [];
+    const lines: string[] = ["## Metrics", ""];
+    if (metrics.producedCommits === 0) {
+        lines.push("durability  -  (session produced no commits)");
+        return lines;
+    }
+    lines.push(
+        `durability  ${fmtPct(metrics.durabilityRatio)}  ·  ${metrics.producedCommits} produced / ${metrics.revertedCommits} reverted`,
+    );
+    if (metrics.reverted.length > 0) {
+        lines.push("reverted commits:");
+        for (const commit of metrics.reverted.slice(0, MAX_REVERTED_SHOWN)) {
+            lines.push(...revertedCommitLines(commit));
+        }
+        if (metrics.reverted.length > MAX_REVERTED_SHOWN) {
+            lines.push(`… and ${metrics.reverted.length - MAX_REVERTED_SHOWN} more reverted commits (use --json for the full list)`);
+        }
+    }
+    return lines;
+}
+
 /**
  * Render the `## Compaction` section listing context-compaction boundaries.
  * Returns "" when there are none, so callers can append unconditionally.
@@ -132,6 +210,7 @@ function renderCompaction(payload: SessionShowPayload): string[] {
  */
 export function renderSessionMarkdown(
     payload: SessionShowPayload,
+    extras: SessionShowExtras = {},
 ): string {
     const { session } = payload;
     const expandedMap = new Map<string, SessionDetailPayload>();
@@ -183,6 +262,13 @@ export function renderSessionMarkdown(
         : "none";
     lines.push(`parent    ${parentStr}`);
     lines.push("");
+
+    // ── metrics (durability drill-down, #176) ────────────────────────────────
+    const metricsLines = renderMetricsBlock(extras.metrics);
+    if (metricsLines.length > 0) {
+        lines.push(...metricsLines);
+        lines.push("");
+    }
 
     // ── top skills / by-role ─────────────────────────────────────────────────
     if (payload.by_role !== null && payload.by_role !== undefined) {
@@ -261,13 +347,19 @@ export function renderSessionMarkdown(
  * Emits the full fetchSessionDetail payload plus expanded_subagents array.
  * P3.7: includes by_role when populated.
  */
-export function renderSessionJson(payload: SessionShowPayload): string {
+export function renderSessionJson(
+    payload: SessionShowPayload,
+    extras: SessionShowExtras = {},
+): string {
     return JSON.stringify(
         {
             ...payload.session,
             expanded_subagents: payload.expanded_subagents,
             ...(payload.by_role !== null && payload.by_role !== undefined
                 ? { by_role: payload.by_role }
+                : {}),
+            ...(extras.metrics !== null && extras.metrics !== undefined
+                ? { metrics: extras.metrics }
                 : {}),
         },
         null,
