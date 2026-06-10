@@ -3,7 +3,7 @@ import { Effect, FileSystem, Layer, Option, Path, References } from "effect";
 import { BunFileSystem, BunPath } from "@effect/platform-bun";
 import { Argument, Command, Flag } from "effect/unstable/cli";
 import { SurrealClient, type SurrealClientShape } from "@ax/lib/db";
-import { listSessionsHere, listSessionsAround, listSessionsNear, type SessionRow } from "../dashboard/sessions-query.ts";
+import { listSessionsHere, listSessionsAround, listSessionsNear, findSessionIdsByPrefix, type SessionRow } from "../dashboard/sessions-query.ts";
 import {
     buildRecallNext,
     buildSessionsNext,
@@ -14,7 +14,7 @@ import {
     buildRolesNext,
     buildImproveProposalsNext,
 } from "../nav/next-links.ts";
-import { printNextFooter } from "./next-format.ts";
+import { printNextLinks } from "./next-format.ts";
 import { findCommitWindow } from "@ax/lib/git-window";
 import { AxConfig } from "@ax/lib/config";
 import { safeJsonParse } from "@ax/lib/shared/safe-json";
@@ -893,9 +893,12 @@ const cmdRecall = (opts: RecallCliOpts) =>
         if (result.hits.length === 0 && !multiSource) {
             console.log(`no matches for "${opts.query}"`);
             // Errors-as-teaching: name the broader queries to try next.
-            printNextFooter(next);
+            printNextLinks(next);
             return;
         }
+        // next: block prints FIRST - placement beats `| head` truncation and
+        // `2>&1` stream-folding (see printNextLinks).
+        printNextLinks(next);
         if (result.hits.length > 0) {
             if (multiSource) console.log("\n\x1b[1mturns\x1b[0m");
             const more = result.total_count > result.hits.length
@@ -950,8 +953,6 @@ const cmdRecall = (opts: RecallCliOpts) =>
                 }
             }
         }
-
-        printNextFooter(next);
     });
 
 const cmdSearch = (args: string[]) =>
@@ -1389,8 +1390,8 @@ const cmdSkillsWeighted = (args: string[]) =>
         if (json) {
             console.log(renderWeightedJson(result));
         } else {
+            printNextLinks(buildSkillsWeightedNext(result));
             console.log(renderWeightedTable(result));
-            printNextFooter(buildSkillsWeightedNext(result));
         }
     });
 
@@ -1420,8 +1421,8 @@ const cmdSkillsByRole = (args: string[]) =>
         if (json) {
             console.log(renderSkillsByRoleJson(result, role));
         } else {
+            printNextLinks(buildSkillsByRoleNext(result, role));
             console.log(renderSkillsByRoleTable(result, role));
-            printNextFooter(buildSkillsByRoleNext(result, role));
         }
     });
 
@@ -1451,8 +1452,8 @@ const cmdRolesForSkill = (args: string[]) =>
         if (json) {
             console.log(renderRolesForSkillJson(result, skill));
         } else {
+            printNextLinks(buildSkillsRolesNext(result, skill));
             console.log(renderRolesForSkillTable(result, skill));
-            printNextFooter(buildSkillsRolesNext(result, skill));
         }
     });
 
@@ -1471,8 +1472,8 @@ const cmdRoles = (args: string[]) =>
         if (json) {
             console.log(renderAllRolesJson(result));
         } else {
+            printNextLinks(buildRolesNext(result));
             console.log(renderAllRolesTable(result));
-            printNextFooter(buildRolesNext(result));
         }
     });
 
@@ -2576,12 +2577,12 @@ const cmdImproveList = (args: string[]) =>
         );
         if (rows.length === 0) {
             console.log("(no proposals match filter)");
-            printNextFooter(improveNext);
+            printNextLinks(improveNext);
             return;
         }
+        printNextLinks(improveNext);
         console.log(`  freq  conf    status      form         dedupe_sig                title`);
         for (const row of rows) console.log(formatProposalLine(row));
-        printNextFooter(improveNext);
     });
 
 const cmdImproveShow = (args: string[]) =>
@@ -2673,13 +2674,13 @@ const cmdImproveRecommend = (args: string[]) =>
             console.log(JSON.stringify(items, null, 2));
             return;
         }
-        const formatted = formatRecommendations(items);
-        console.log(formatted);
-        printNextFooter(
+        printNextLinks(
             buildImproveProposalsNext(
                 items.map((i) => ({ sig: i.shortId, title: i.title })),
             ),
         );
+        const formatted = formatRecommendations(items);
+        console.log(formatted);
         if (items.length > 0 && !noClipboard) {
             const copied = copyToClipboard(formatted);
             if (copied) console.log("\n[copied to clipboard]");
@@ -3166,8 +3167,11 @@ function formatSessionsTable(rows: SessionRow[]): string {
         const project = prettifyProjectSlug(row.project ?? "").slice(0, 19).padEnd(20);
         const turns = String(row.turn_count ?? 0).padStart(5);
         const msg = (row.first_user_message ?? "").replace(/\s+/g, " ").trim();
-        const summaryWidth = Math.max(0, termWidth - 26 - 1 - 18 - 1 - 16 - 1 - 20 - 1 - 5 - 2);
-        const summary = summaryWidth > 0 ? msg.slice(0, summaryWidth) : msg.slice(0, 40);
+        // Floor the summary at 60 chars: on narrow terminals the column math
+        // left ~9 chars ("You are r"), making the listing useless for id
+        // resolution (dogfood retro R2). Wrapping beats unreadable.
+        const summaryWidth = Math.max(60, termWidth - 26 - 1 - 18 - 1 - 16 - 1 - 20 - 1 - 5 - 2);
+        const summary = msg.slice(0, summaryWidth);
         lines.push(`${started} ${source} ${repoShort} ${project} ${turns}  ${summary}`);
     }
     return lines.join("\n");
@@ -3286,6 +3290,7 @@ const cmdSessionsHere = (args: string[]) =>
             console.log(JSON.stringify({ sessions, next }, null, 2));
             return;
         }
+        printNextLinks(next);
         console.log(formatSessionsTable(rows));
         const notes: string[] = [];
         if (hiddenSubagents > 0) {
@@ -3295,7 +3300,6 @@ const cmdSessionsHere = (args: string[]) =>
             notes.push(`showing ${rows.length} of ${visible.length} - raise --limit`);
         }
         if (notes.length > 0) console.log(`(${notes.join("; ")})`);
-        printNextFooter(next);
     });
 
 // --- sessions around ---
@@ -3351,8 +3355,8 @@ const cmdSessionsAround = (args: string[]) =>
             console.log(JSON.stringify({ sessions, next }, null, 2));
             return;
         }
+        printNextLinks(next);
         console.log(formatSessionsTable(rows));
-        printNextFooter(next);
     });
 
 // --- sessions near ---
@@ -3418,8 +3422,8 @@ const cmdSessionsNear = (args: string[]) =>
             console.log(JSON.stringify({ sessions, next }, null, 2));
             return;
         }
+        printNextLinks(next);
         console.log(formatSessionsTable(rows));
-        printNextFooter(next);
     });
 
 // ---------------------------------------------------------------------------
@@ -3462,7 +3466,8 @@ const cmdSessionShow = (args: string[]) =>
             }
         }
 
-        const payload = yield* fetchSessionShow({
+        let resolvedId = sessionId;
+        let payload = yield* fetchSessionShow({
             sessionId,
             expand: expandSet,
             expandAll,
@@ -3471,8 +3476,37 @@ const cmdSessionShow = (args: string[]) =>
             catchDbErrorAndExit("axctl session show"),
         );
 
+        // Prefix fallback: agents paste the short ids shown in listings
+        // (dogfood retro R2). Unambiguous prefix → resolve + proceed;
+        // ambiguous → list candidates; no match → teach the lookup path.
+        if (payload.session.overview === null && sessionId.length >= 4) {
+            const candidates = yield* findSessionIdsByPrefix(sessionId).pipe(
+                catchDbErrorAndExit("axctl session show"),
+            );
+            if (candidates.length === 1) {
+                resolvedId = candidates[0]!;
+                process.stderr.write(`resolved id prefix ${sessionId} → ${resolvedId}\n`);
+                payload = yield* fetchSessionShow({
+                    sessionId: resolvedId,
+                    expand: expandSet,
+                    expandAll,
+                    byRole,
+                }).pipe(catchDbErrorAndExit("axctl session show"));
+            } else if (candidates.length > 1) {
+                process.stderr.write(
+                    `session id prefix "${sessionId}" is ambiguous:\n` +
+                        candidates.map((c) => `  ax sessions show ${c}`).join("\n") +
+                        "\n",
+                );
+                process.exit(1);
+            }
+        }
+
         if (payload.session.overview === null) {
-            process.stderr.write(`session ${sessionId} not found\n`);
+            process.stderr.write(
+                `session ${sessionId} not found. Find the full id with ` +
+                    "`ax recall \"<query>\"` or `ax sessions here --days=7`.\n",
+            );
             process.exit(1);
         }
 
@@ -3480,7 +3514,7 @@ const cmdSessionShow = (args: string[]) =>
         // (reverted commits + their later_fixed_by fix chains). Bounded to this
         // session's produced edges; null only when the id fails validation
         // (already excluded above by the not-found check).
-        const metrics = yield* fetchSessionDurabilityDetail(sessionId).pipe(
+        const metrics = yield* fetchSessionDurabilityDetail(resolvedId).pipe(
             catchDbErrorAndExit("axctl session show"),
         );
 
@@ -3489,8 +3523,8 @@ const cmdSessionShow = (args: string[]) =>
         if (useJson) {
             console.log(renderSessionJson(payload, { metrics, next }));
         } else {
+            printNextLinks(next);
             console.log(renderSessionMarkdown(payload, { metrics, next }));
-            printNextFooter(next);
         }
     });
 

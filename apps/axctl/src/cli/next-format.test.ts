@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { NavLink } from "@ax/lib/shared/nav-link";
-import { printNextFooter, renderNextFooter } from "./next-format.ts";
+import { printNextLinks, renderNextFooter } from "./next-format.ts";
 
 const link = (over: Partial<NavLink>): NavLink => ({
     description: "do thing",
@@ -36,35 +36,38 @@ describe("renderNextFooter", () => {
     });
 });
 
-describe("printNextFooter", () => {
-    test("writes to stderr (survives stdout | head truncation), not stdout", () => {
+describe("printNextLinks", () => {
+    test("writes the block to STDOUT (printed before data, so | head keeps it)", () => {
         const written: string[] = [];
-        const orig = process.stderr.write.bind(process.stderr);
-        process.stderr.write = ((chunk: string) => {
+        const orig = process.stdout.write.bind(process.stdout);
+        process.stdout.write = ((chunk: string) => {
             written.push(String(chunk));
             return true;
-        }) as typeof process.stderr.write;
+        }) as typeof process.stdout.write;
         try {
-            printNextFooter([link({ cmd: "codex resume abc" })]);
+            printNextLinks([link({ cmd: "codex resume abc" })]);
         } finally {
-            process.stderr.write = orig;
+            process.stdout.write = orig;
         }
-        expect(written.join("")).toContain("codex resume abc");
+        const out = written.join("");
+        expect(out).toContain("codex resume abc");
+        // No leading blank line - the block opens the output.
+        expect(out.startsWith("next:")).toBe(true);
     });
 
     test("writes nothing when no link has a cmd", () => {
         const written: string[] = [];
-        const orig = process.stderr.write.bind(process.stderr);
-        process.stderr.write = ((chunk: string) => {
+        const orig = process.stdout.write.bind(process.stdout);
+        process.stdout.write = ((chunk: string) => {
             written.push(String(chunk));
             return true;
-        }) as typeof process.stderr.write;
+        }) as typeof process.stdout.write;
         try {
-            printNextFooter([
+            printNextLinks([
                 { description: "mcp only", call: { tool: "recall", arguments: {} } },
             ]);
         } finally {
-            process.stderr.write = orig;
+            process.stdout.write = orig;
         }
         expect(written).toHaveLength(0);
     });
