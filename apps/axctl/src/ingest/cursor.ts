@@ -19,6 +19,7 @@ import { buildCompactionStatements, extractCursorCompaction, type CompactionWrit
 import { classifyTurnIntent } from "./intent-kind.ts";
 import { providerDelegationSignalAvailability } from "./delegation.ts";
 import { agentEventRecordKey, buildAgentEventStatements, buildAgentProviderStatements, type AgentEventWrite } from "./provider-events.ts";
+import { buildNormalizedTranscriptStatements, type NormalizedTranscriptBatch } from "./normalized/transcripts.ts";
 import { providerPlanSignalAvailability } from "./plans.ts";
 import { identityPart, invokedRelationRecordKey, toolCallRecordKey, turnRecordKey } from "./record-keys.ts";
 import { BaseStageStats, IngestContext, sinceDaysFromCtx, StageMeta } from "./stage/types.ts";
@@ -904,7 +905,82 @@ const buildSyntheticSkillAndInvocationStatements = (
     return [...skillStatements, ...invocationStatements];
 };
 
-const buildCursorBatchStatements = (extract: CursorExtract, sourcePath: string): string[] => [
+export const toCursorNormalizedBatch = (
+    extract: CursorExtract,
+    sourcePath: string,
+): NormalizedTranscriptBatch => ({
+    providers: [{
+        name: "cursor",
+        displayName: "Cursor",
+        capabilities: {
+            sqlite: true,
+            transcripts: true,
+            providerGraph: true,
+            toolCalls: true,
+            planSignals: providerPlanSignalAvailability.cursor,
+            delegationSignals: providerDelegationSignalAvailability.cursor,
+        },
+    }],
+    sessions: extract.sessions.map((session) => ({
+        id: session.id,
+        provider: "cursor",
+        providerSessionId: session.id,
+        title: session.title,
+        sourcePath,
+        raw: {
+            source: "cursor_state_vscdb",
+            sourcePath,
+            dbIdentity: session.dbIdentity,
+            cursorConversationId: session.cursorConversationId,
+        },
+        labels: {
+            source: "cursor",
+            dbIdentity: session.dbIdentity,
+            cursorConversationId: session.cursorConversationId,
+        },
+        metrics: {
+            turns: extract.turns.filter((turn) => turn.session === session.id).length,
+            toolCalls: extract.toolCalls.filter((call) => call.sessionId === session.id).length,
+            providerEvents: extract.providerEvents.filter((event) => event.providerSessionId === session.id).length,
+        },
+        startedAt: session.started_at,
+        endedAt: session.ended_at,
+    })),
+    events: extract.providerEvents,
+    turns: extract.turns.map((turn) => ({
+        sessionId: turn.session,
+        seq: turn.seq,
+        ts: turn.ts,
+        role: turn.role,
+        messageKind: turn.message_kind,
+        intentKind: turn.intent_kind,
+        text: turn.text,
+        textExcerpt: turn.text_excerpt,
+        hasToolUse: turn.has_tool_use,
+        hasError: turn.has_error,
+        agentEvent: {
+            provider: "cursor",
+            providerSessionId: turn.session,
+            providerEventId: turn.providerEventId,
+            seq: turn.seq,
+        },
+    })),
+    toolCalls: extract.toolCalls,
+    // Cursor intentionally emits NO tool-file evidence today; do not add it here.
+    syntheticSkillInvocations: extract.invocations.map((invocation) => ({
+        sessionId: invocation.session,
+        seq: invocation.seq,
+        ts: invocation.ts,
+        skillName: invocation.skill,
+        args: invocation.args,
+        skillScope: "cursor-tool",
+        skillContentHash: "cursor",
+    })),
+    toolCallSkillRelations: extract.skillRelations,
+    compactions: extract.compactions,
+});
+
+const legacyBuildCursorBatchStatements = (extract: CursorExtract, sourcePath: string): string[] => [
     ...buildAgentProviderStatements([
         {
             name: "cursor",
@@ -955,6 +1031,11 @@ const buildCursorBatchStatements = (extract: CursorExtract, sourcePath: string):
     ),
     ...buildCompactionStatements(extract.compactions),
 ];
+
+export const __legacyBuildCursorBatchStatements = legacyBuildCursorBatchStatements;
+
+const buildCursorBatchStatements = (extract: CursorExtract, sourcePath: string): string[] =>
+    buildNormalizedTranscriptStatements(toCursorNormalizedBatch(extract, sourcePath));
 
 export const __testBuildCursorBatchStatements = buildCursorBatchStatements;
 
