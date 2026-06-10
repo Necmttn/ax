@@ -92,6 +92,18 @@ import { fetchSessionShow } from "../dashboard/session-show.ts";
 import { fetchSessionCompare } from "../dashboard/session-compare.ts";
 import { fetchCostSummary, type CostSummary } from "../dashboard/cost-query.ts";
 import { fetchSessionMetrics } from "../metrics/session-metrics-query.ts";
+import {
+    AGGREGATE_LEGEND,
+    GROUP_BY_KEYS,
+    aggregateGroups,
+    applyAggregateFilters,
+    computeSkillEfficacy,
+    fetchAggregateRows,
+    fetchSkillSessionSet,
+    formatGroupAggregates,
+    formatSkillEfficacy,
+    isGroupByKey,
+} from "../metrics/aggregates.ts";
 import { fetchSessionDurabilityDetail } from "../metrics/reverted-commits.ts";
 import { formatSessionMetrics, SESSION_METRICS_LEGEND } from "../metrics/util.ts";
 import { SIGNAL_CATALOG, findSignal, runRelationSignal } from "../metrics/catalog.ts";
@@ -3600,8 +3612,28 @@ const cmdSessionsMetrics = (input: {
     readonly limit: number;
     readonly fullIds: boolean;
     readonly json: boolean;
+    readonly groupBy: string | null;
+    readonly skill: string | null;
+    readonly source: string | null;
+    readonly minCost: number | null;
 }) =>
     Effect.gen(function* () {
+        const fail = (msg: string): never => {
+            process.stderr.write(`axctl sessions metrics: ${msg}\n`);
+            process.exit(2);
+        };
+        const groupBy = input.groupBy === null
+            ? null
+            : isGroupByKey(input.groupBy)
+                ? input.groupBy
+                : fail(`unknown --group-by "${input.groupBy}". Valid dimensions: ${GROUP_BY_KEYS.join(", ")}.`);
+        if (groupBy !== null && input.skill !== null) {
+            fail("--group-by and --skill are exclusive (--skill is its own with/without comparison).");
+        }
+        const aggregateMode = groupBy !== null || input.skill !== null;
+        if (!aggregateMode && (input.source !== null || input.minCost !== null)) {
+            fail("--source/--min-cost filter the aggregate scan; combine them with --group-by or --skill.");
+        }
         let project = input.project;
         if (input.here) {
             const pwd = yield* resolvePwdRepository().pipe(
@@ -3617,6 +3649,35 @@ const cmdSessionsMetrics = (input: {
         const since = input.sinceDays === null
             ? null
             : new Date(Date.now() - Math.min(Math.max(Math.trunc(input.sinceDays), 1), 3650) * 86400 * 1000);
+
+        if (aggregateMode) {
+            // Aggregates join the STORED session_metrics scalars (one bounded
+            // scan + JS group-by, issue #177) - never per-edge derefs over the
+            // ~87k-edge invoked/edited graph (docs/metrics.md + ADR-0011).
+            const all = yield* fetchAggregateRows({ since, project });
+            const rows = applyAggregateFilters(all, { source: input.source, minCostUsd: input.minCost });
+            if (input.skill !== null) {
+                const skillSessions = yield* fetchSkillSessionSet(input.skill);
+                const efficacy = computeSkillEfficacy(rows, skillSessions, input.skill);
+                if (input.json) {
+                    console.log(prettyPrint(efficacy));
+                    return;
+                }
+                console.log(formatSkillEfficacy(efficacy));
+            } else if (groupBy !== null) {
+                const groups = aggregateGroups(rows, groupBy, input.limit);
+                if (input.json) {
+                    console.log(prettyPrint(groups));
+                    return;
+                }
+                console.log(formatGroupAggregates(groups, groupBy));
+            }
+            if (process.stdout.isTTY) {
+                console.log(`\n${AGGREGATE_LEGEND}`);
+            }
+            return;
+        }
+
         const rows = yield* fetchSessionMetrics({ since, limit: input.limit, project });
         if (input.json) {
             console.log(prettyPrint(rows));
@@ -3639,8 +3700,12 @@ const sessionsMetricsCommand = Command.make(
         limit: positiveLimit(50),
         fullIds: Flag.boolean("full-ids").pipe(Flag.withDefault(false)),
         json: jsonFlag,
+        groupBy: Flag.string("group-by").pipe(Flag.optional),
+        skill: Flag.string("skill").pipe(Flag.optional),
+        source: Flag.string("source").pipe(Flag.optional),
+        minCost: Flag.float("min-cost").pipe(Flag.optional),
     },
-    ({ since, project, here, limit, fullIds, json }) =>
+    ({ since, project, here, limit, fullIds, json, groupBy, skill, source, minCost }) =>
         cmdSessionsMetrics({
             sinceDays: optionValue(since) ?? null,
             project: optionValue(project) ?? null,
@@ -3648,6 +3713,10 @@ const sessionsMetricsCommand = Command.make(
             limit,
             fullIds,
             json,
+            groupBy: optionValue(groupBy) ?? null,
+            skill: optionValue(skill) ?? null,
+            source: optionValue(source) ?? null,
+            minCost: optionValue(minCost) ?? null,
         }),
 ).pipe(Command.withDescription(
     "Graph-derived per-session metrics: durab (commits not later reverted / produced), "
@@ -3656,6 +3725,10 @@ const sessionsMetricsCommand = Command.make(
     + "deleg% (subagent-produced commits / all). Sorted by produced commits, then most fragile first. "
     + "--here scopes to the pwd repo, --since N days, --full-ids prints untruncated session ids "
     + "(feed into `ax sessions show` / `compare`), --json for machine output. "
+    + "Aggregates: --group-by=model|repo|source|week folds sessions into per-group durability/commit/"
+    + "correction/cost rollups (week = ISO-week trend, oldest→newest); --skill=<name> compares sessions "
+    + "that invoked the skill vs not (skill_durability_efficacy). --source=<provider> and --min-cost=<usd> "
+    + "filter the aggregate scan; --limit caps groups. "
     + "See `ax signals` for cross-session relation signals (e.g. fragility cascades).",
 ));
 
