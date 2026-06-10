@@ -13,6 +13,7 @@ import {
 import {
     formatSharePreview,
     formatShareSuccess,
+    hasStaleUsage,
 } from "../share/format.ts";
 import { redactShareArtifact } from "../share/redact.ts";
 import { AX_VERSION } from "./version.ts";
@@ -106,6 +107,13 @@ export async function cmdShareWithDeps(
 
     const { artifact } = redactShareArtifact(exported);
     const bundle = buildShareBundle(artifact);
+
+    if (hasStaleUsage(artifact)) {
+        deps.writeStderr(
+            "axctl share: warning: this share has session-level cost but no per-turn usage rows; cost rails may render as $0.\n" +
+            "Re-run ingest with AX_REDERIVE_CLAUDE=1 AX_REDERIVE_SUBAGENTS=1 ax ingest here --stages=claude,subagents --since=N\n",
+        );
+    }
 
     if (parsed.dryRun) {
         // Emit the full multi-file bundle keyed by gist filename so the dry-run

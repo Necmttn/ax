@@ -32,6 +32,32 @@ export function totalEstimatedTokens(artifact: AxSessionShare): number | null {
     return sumTrace(artifact, (u) => u.estimated_tokens);
 }
 
+const hasSessionUsage = (artifact: AxSessionShare): boolean => {
+    if (!artifact.token_usage) return false;
+    const { estimated_cost_usd, estimated_tokens } = artifact.token_usage;
+    if (typeof estimated_cost_usd === "number" && estimated_cost_usd > 0) return true;
+    if (typeof estimated_tokens === "number" && estimated_tokens > 0) return true;
+    return false;
+};
+
+const hasTurnUsage = (artifact: AxSessionShare): boolean => {
+    if (artifact.turns.some((turn) => turn.token_usage != null)) return true;
+    return (artifact.children ?? []).some(hasTurnUsage);
+};
+
+/**
+ * Returns true when the exported tree has session-level cost/token usage but
+ * no per-turn usage rows anywhere in the root or descendants. That means the
+ * cost rails will render as $0 on a per-turn basis. Callers should warn the
+ * user to re-ingest with AX_REDERIVE_CLAUDE=1 AX_REDERIVE_SUBAGENTS=1.
+ */
+export function hasStaleUsage(artifact: AxSessionShare): boolean {
+    const anySession = hasSessionUsage(artifact) ||
+        (artifact.children ?? []).some(hasSessionUsage);
+    if (!anySession) return false;
+    return !hasTurnUsage(artifact);
+}
+
 export function formatSharePreview(
     artifact: AxSessionShare,
     options: { readonly public?: boolean } = {},
