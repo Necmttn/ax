@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import { Effect, Exit, Fiber, Layer, Schema } from "effect";
-import { SurrealClient, type SurrealClientShape } from "@ax/lib/db";
+import { makeTestSurrealClient } from "@ax/lib/testing/surreal";
 import { LiveTraceLayer } from "@ax/lib/live-traces/Tracer";
 import {
     TraceSinkLive,
@@ -13,20 +13,8 @@ import { BaseStageStats, StageMeta } from "./stage/types.ts";
 import { runIngest, stageEventName, withIngestRunFinish } from "./run.ts";
 
 const fakeDb = () => {
-    const queries: string[] = [];
-    const client: SurrealClientShape = {
-        query: <T extends unknown[] = unknown[]>(sql: string) =>
-            Effect.sync(() => {
-                queries.push(sql);
-                return [] as unknown as T;
-            }),
-        upsert: () => Effect.succeed({}),
-        relate: () => Effect.succeed({}),
-        putFile: () => Effect.void,
-        getFile: () => Effect.succeed(""),
-        raw: {} as SurrealClientShape["raw"],
-    };
-    return { queries, client, layer: Layer.succeed(SurrealClient, client) };
+    const tc = makeTestSurrealClient({ fallback: [] });
+    return { queries: tc.captured, client: tc.client, layer: tc.layer };
 };
 
 const stage = (key: string, deps: string[] = []): StageDef => ({

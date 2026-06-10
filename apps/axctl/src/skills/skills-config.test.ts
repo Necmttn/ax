@@ -11,7 +11,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Effect, Layer } from "effect";
 import { BunFileSystem, BunPath } from "@effect/platform-bun";
-import { SurrealClient } from "@ax/lib/db";
+import { makeTestSurrealClient } from "@ax/lib/testing/surreal";
 import { SkillName } from "@ax/lib/brands";
 import { skillRecordKey } from "@ax/lib/skill-id";
 
@@ -194,17 +194,12 @@ const recordingDb = (
     rows: unknown[][],
 ) => {
     let i = 0;
-    return Layer.succeed(SurrealClient, {
-        query: <T>(sql: string, bindings?: Record<string, unknown>) => {
+    return makeTestSurrealClient({
+        fallback: (sql, bindings) => {
             calls.push({ sql, bindings });
-            return Effect.succeed([rows[i++] ?? []] as unknown as T);
+            return [rows[i++] ?? []];
         },
-        upsert: () => Effect.void,
-        relate: () => Effect.void,
-        putFile: () => Effect.void,
-        getFile: () => Effect.succeed(""),
-        raw: undefined as never,
-    } as never);
+    }).layer;
 };
 
 describe("reconcileSkills", () => {

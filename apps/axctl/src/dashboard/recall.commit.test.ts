@@ -5,8 +5,8 @@
  * No real DB connection required.
  */
 import { describe, expect, test } from "bun:test";
-import { Effect, Layer } from "effect";
-import { SurrealClient } from "@ax/lib/db";
+import { Effect } from "effect";
+import { makeTestSurrealClient } from "@ax/lib/testing/surreal";
 import {
     RECALL_COMMITS_SQL,
     RECALL_SKILLS_SQL,
@@ -19,40 +19,11 @@ import { fetchRecall } from "./recall.ts";
 // Mock DB helper (mirrors derive-claude-subagents.test.ts pattern)
 // ---------------------------------------------------------------------------
 
-type MockCall = {
-    kind: "query";
-    sql: string;
-    bindings?: Record<string, unknown>;
-};
-
 function makeMockDb(queryResponses: Map<string, unknown[][]> = new Map()) {
-    const calls: MockCall[] = [];
-
-    const impl = {
-        query: <T extends unknown[] = unknown[]>(
-            sql: string,
-            bindings?: Record<string, unknown>,
-        ) => {
-            const call: MockCall = bindings !== undefined
-                ? { kind: "query", sql, bindings }
-                : { kind: "query", sql };
-            calls.push(call);
-            for (const [pattern, response] of queryResponses) {
-                if (sql.includes(pattern)) {
-                    return Effect.succeed(response as T);
-                }
-            }
-            return Effect.succeed([[]] as unknown as T);
-        },
-        upsert: () => Effect.void,
-        relate: () => Effect.void,
-        putFile: () => Effect.void,
-        getFile: () => Effect.succeed(""),
-        raw: undefined as unknown as import("surrealdb").Surreal,
-    };
-
-    const layer = Layer.succeed(SurrealClient, impl);
-    return { calls, layer };
+    const tc = makeTestSurrealClient({
+        routes: [...queryResponses].map(([match, rows]) => ({ match, rows: rows as unknown[] })),
+    });
+    return { calls: tc.calls, layer: tc.layer };
 }
 
 // ---------------------------------------------------------------------------

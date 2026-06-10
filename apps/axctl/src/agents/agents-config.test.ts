@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Effect, Layer } from "effect";
 import { BunFileSystem, BunPath } from "@effect/platform-bun";
-import { SurrealClient } from "@ax/lib/db";
+import { makeTestSurrealClient } from "@ax/lib/testing/surreal";
 import { userSource, projectSource } from "./source.ts";
 import { AgentSourceRegistryFrom } from "./registry.ts";
 import { scopeAgent, readAllAgents } from "./config.ts";
@@ -18,16 +18,12 @@ interface QueryRecorder {
 }
 const recordingDb = (recorder: QueryRecorder, fixtures: ReadonlyArray<unknown[]>) => {
     let i = 0;
-    return Layer.succeed(SurrealClient, {
-        query: <T>(sql: string) =>
-            Effect.sync(() => {
-                recorder.calls.push(sql);
-                return [fixtures[i++] ?? []] as unknown as T;
-            }),
-        upsert: () => Effect.void,
-        relate: () => Effect.void,
-        putFile: () => Effect.void,
-    } as never);
+    return makeTestSurrealClient({
+        fallback: (sql) => {
+            recorder.calls.push(sql);
+            return [fixtures[i++] ?? []];
+        },
+    }).layer;
 };
 
 let prevAgentDirs: string | undefined;

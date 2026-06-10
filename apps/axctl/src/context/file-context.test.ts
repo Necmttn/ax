@@ -1,17 +1,16 @@
 import { describe, expect, test } from "bun:test";
-import { Effect, Layer } from "effect";
-import { SurrealClient, type SurrealClientShape } from "@ax/lib/db";
+import { Effect } from "effect";
+import { makeTestSurrealClient } from "@ax/lib/testing/surreal";
 import { buildFileContextPack, extractFileContextSignals } from "./file-context.ts";
 
-function fakeContextClient(): SurrealClientShape {
-    return {
-        query: <T extends unknown[]>(sql: string) =>
-            Effect.sync(() => {
-                if (sql.includes("FROM file")) {
+function fakeContextLayer() {
+    return makeTestSurrealClient({
+        fallback: (sql) => {
+            if (sql.includes("FROM file")) {
                     return [[
                         { id: "file:f1", path: "src/ingest/codex.ts", repo: "ax", repository: "repository:ax" },
                         { id: "file:f2", path: "schema/schema.surql", repo: "ax", repository: "repository:ax" },
-                    ]] as T;
+                    ]];
                 }
                 if (sql.includes("FROM read_file")) {
                     return [[
@@ -25,7 +24,7 @@ function fakeContextClient(): SurrealClientShape {
                             command_norm: "sed",
                             turn: { seq: 7, intent_kind: "organic_task", session: { id: "session:s1", source: "codex" } },
                         },
-                    ]] as T;
+                    ]];
                 }
                 if (sql.includes("FROM searched_file")) {
                     return [[
@@ -49,14 +48,14 @@ function fakeContextClient(): SurrealClientShape {
                             command_norm: "rg",
                             turn: { seq: 9, intent_kind: "organic_task", session: { id: "session:s1", source: "codex" } },
                         },
-                    ]] as T;
+                    ]];
                 }
                 if (sql.includes("FROM touched") && sql.includes("SELECT out.path")) {
                     return [[
                         { path: "package.json" },
                         { path: "package.json" },
                         { path: "src/ingest/codex.ts" },
-                    ]] as T;
+                    ]];
                 }
                 if (sql.includes("FROM touched")) {
                     return [[
@@ -82,7 +81,7 @@ function fakeContextClient(): SurrealClientShape {
                                 sessions: [{ id: "session:s1", source: "codex", cwd: "/repo" }],
                             },
                         },
-                    ]] as T;
+                    ]];
                 }
                 if (sql.includes("FROM mentioned_file") || sql.includes("FROM mentioned_symbol") || sql.includes("FROM mentioned_error")) {
                     return [[
@@ -106,7 +105,7 @@ function fakeContextClient(): SurrealClientShape {
                             score: 8,
                             why: "text: src/ingest/codex.ts",
                         },
-                    ]] as T;
+                    ]];
                 }
                 if (sql.includes("FROM edited")) {
                     return [[
@@ -152,7 +151,7 @@ function fakeContextClient(): SurrealClientShape {
                             pr_size: "small",
                             pr_title: "Fix Codex ingest intent",
                         },
-                    ]] as T;
+                    ]];
                 }
                 if (sql.includes("FROM turn")) {
                     return [[
@@ -176,16 +175,11 @@ function fakeContextClient(): SurrealClientShape {
                             intent_kind: "preference",
                             text_excerpt: "can we fix ingest intent bug in codex transcript",
                         },
-                    ]] as T;
+                    ]];
                 }
-                return [[]] as T;
-            }),
-        upsert: () => Effect.void,
-        relate: () => Effect.void,
-        putFile: () => Effect.void,
-        getFile: () => Effect.succeed(""),
-        raw: {} as never,
-    };
+                return [[]];
+        },
+    }).layer;
 }
 
 describe("file context signals", () => {
@@ -206,7 +200,7 @@ describe("file context signals", () => {
             buildFileContextPack({
                 q: "fix ingest intent bug in src/ingest/codex.ts",
                 files: ["schema/schema.surql"],
-            }).pipe(Effect.provide(Layer.succeed(SurrealClient, fakeContextClient()))),
+            }).pipe(Effect.provide(fakeContextLayer())),
         );
 
         expect(pack.files.map((file) => file.path)).toEqual(["src/ingest/codex.ts", "schema/schema.surql"]);

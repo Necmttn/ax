@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
-import { Effect, Layer } from "effect";
+import { Effect } from "effect";
 import { SurrealClient, type SurrealClientShape } from "../db.ts";
 import { DbError } from "../errors.ts";
+import { makeTestSurrealClient, type TestSurrealClient } from "../testing/surreal.ts";
 import {
     interpolateRid,
     queryMany,
@@ -12,31 +13,16 @@ import {
 /** Builds a fake SurrealClient that yields `result` from `query` (or fails
  *  with `DbError` when `result` is an Error). Captures the SQL/bindings the
  *  helper passed so tests can assert on them. */
-function fakeClient(result: unknown, capture?: { sql?: string; bindings?: unknown }): SurrealClientShape {
-    return {
-        query: <T extends unknown[]>(sql: string, bindings?: Record<string, unknown>) =>
-            Effect.suspend(() => {
-                if (capture) {
-                    capture.sql = sql;
-                    capture.bindings = bindings;
-                }
-                if (result instanceof Error) {
-                    return Effect.fail(
-                        new DbError({ operation: "query", message: result.message }),
-                    );
-                }
-                return Effect.succeed(result as T);
-            }),
-        upsert: () => Effect.void,
-        relate: () => Effect.void,
-        putFile: () => Effect.void,
-        getFile: () => Effect.succeed(""),
-        raw: {} as never,
-    };
+function fakeClient(result: unknown): TestSurrealClient {
+    return makeTestSurrealClient({
+        fallback:
+            result instanceof Error
+                ? Effect.fail(new DbError({ operation: "query", message: result.message }))
+                : (result as unknown[]),
+    });
 }
 
-const provideClient = (client: SurrealClientShape) =>
-    Effect.provide(Layer.succeed(SurrealClient, client));
+const provideClient = (client: TestSurrealClient) => Effect.provide(client.layer);
 
 let consoleErrorSpy: ReturnType<typeof mock>;
 let originalConsoleError: typeof console.error;
@@ -93,8 +79,7 @@ describe("queryOptional", () => {
     });
 
     test("forwards bindings to the SDK", async () => {
-        const capture: { sql?: string; bindings?: unknown } = {};
-        const client = fakeClient([[{ name: "bob" }]], capture);
+        const client = fakeClient([[{ name: "bob" }]]);
         await Effect.runPromise(
             queryOptional<{ name: string }, string>(
                 "SELECT name FROM person WHERE id = $id LIMIT 1;",
@@ -103,7 +88,7 @@ describe("queryOptional", () => {
                 { id: "person:bob" },
             ).pipe(provideClient(client)),
         );
-        expect(capture.bindings).toEqual({ id: "person:bob" });
+        expect(client.calls.at(-1)?.bindings).toEqual({ id: "person:bob" });
     });
 });
 
@@ -221,14 +206,8 @@ describe("queryPagedWithCount", () => {
 import { runQuery, runSingleQuery } from "./graph-query.ts";
 import { defineQuery, defineSingleQuery } from "./query.ts";
 
-const clientReturning = (rows: unknown[]): SurrealClientShape => ({
-    query: <T extends unknown[]>() => Effect.succeed([rows] as unknown as T),
-    upsert: () => Effect.void,
-    relate: () => Effect.void,
-    putFile: () => Effect.void,
-    getFile: () => Effect.succeed(""),
-    raw: {} as never,
-});
+const clientReturning = (rows: unknown[]): SurrealClientShape =>
+    makeTestSurrealClient({ fallback: [rows] }).client;
 
 const run = (eff: Effect.Effect<unknown, unknown, SurrealClient>, c: SurrealClientShape) =>
     Effect.runPromise(eff.pipe(Effect.provideService(SurrealClient, c)));
@@ -245,11 +224,9 @@ describe("runQuery", () => {
         expect(out).toEqual(["1", "2"]);
     });
     test("DB error degrades to []", async () => {
-        const failing: SurrealClientShape = {
-            ...clientReturning([]),
-            query: <T extends unknown[]>(_sql: string, _bindings?: Record<string, unknown>): Effect.Effect<T, DbError> =>
-                Effect.fail(new DbError({ operation: "query", message: "boom" })) as Effect.Effect<T, DbError>,
-        };
+        const failing: SurrealClientShape = makeTestSurrealClient({
+            fallback: Effect.fail(new DbError({ operation: "query", message: "boom" })),
+        }).client;
         const out = await run(runQuery(demo, {}), failing);
         expect(out).toEqual([]);
     });
@@ -271,11 +248,9 @@ describe("runSingleQuery", () => {
             sql: () => "SELECT * FROM x LIMIT 1;",
             mapRow: (row) => String(row.id ?? ""),
         });
-        const failing: SurrealClientShape = {
-            ...clientReturning([]),
-            query: <T extends unknown[]>() =>
-                Effect.fail(new DbError({ operation: "query", message: "boom" })) as Effect.Effect<T, DbError>,
-        };
+        const failing: SurrealClientShape = makeTestSurrealClient({
+            fallback: Effect.fail(new DbError({ operation: "query", message: "boom" })),
+        }).client;
         expect(await run(runSingleQuery(one, {}), failing)).toBe(null);
     });
 });

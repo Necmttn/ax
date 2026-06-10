@@ -2,7 +2,8 @@ import { describe, expect, it } from "bun:test";
 import { Effect, Layer } from "effect";
 import { BunFileSystem } from "@effect/platform-bun";
 import { DbError } from "@ax/lib/errors";
-import { SurrealClient, type SurrealClientShape } from "@ax/lib/db";
+import type { SurrealClient } from "@ax/lib/db";
+import { makeTestSurrealClient } from "@ax/lib/testing/surreal";
 import { AxConfigLive } from "@ax/lib/config";
 import { ProcessServiceTest } from "@ax/lib/process";
 import { StageRegistry, StageRegistryLive, type StageDef } from "../ingest/stage/registry.ts";
@@ -13,45 +14,21 @@ import type { IngestStreamEvent } from "../ingest/stream-events.ts";
 import { startIngestWorkflow } from "./ingest-workflow.ts";
 
 const fakeDb = () => {
-    const queries: string[] = [];
-    const client: SurrealClientShape = {
-        query: <T extends unknown[] = unknown[]>(sql: string) =>
-            Effect.sync(() => {
-                queries.push(sql);
-                return [] as unknown as T;
-            }),
-        upsert: () => Effect.succeed({}),
-        relate: () => Effect.succeed({}),
-        putFile: () => Effect.void,
-        getFile: () => Effect.succeed(""),
-        raw: {} as SurrealClientShape["raw"],
-    };
-    return { queries, layer: Layer.succeed(SurrealClient, client) };
+    const tc = makeTestSurrealClient({ fallback: [] });
+    return { queries: tc.captured, layer: tc.layer };
 };
 
 /** A fake DB whose first query fails - simulates a DbError thrown BEFORE the
  * tracer wraps the pipeline (the `buildIngestRunStartStatement` query in
  * runIngest runs before `LiveTrace.withTrace`), so no TraceEnd is ever emitted. */
 const fakeFailingDb = () => {
-    let calls = 0;
-    const client: SurrealClientShape = {
-        query: <T extends unknown[] = unknown[]>() =>
-            Effect.suspend(() => {
-                calls += 1;
-                if (calls === 1) {
-                    return Effect.fail(
-                        new DbError({ operation: "query", message: "boom: run-start failed" }),
-                    ) as Effect.Effect<T, DbError>;
-                }
-                return Effect.succeed([] as unknown as T);
-            }),
-        upsert: () => Effect.succeed({}),
-        relate: () => Effect.succeed({}),
-        putFile: () => Effect.void,
-        getFile: () => Effect.succeed(""),
-        raw: {} as SurrealClientShape["raw"],
-    };
-    return { layer: Layer.succeed(SurrealClient, client) };
+    const tc = makeTestSurrealClient({
+        responses: [
+            Effect.fail(new DbError({ operation: "query", message: "boom: run-start failed" })),
+        ],
+        fallback: [],
+    });
+    return { layer: tc.layer };
 };
 
 const stage = (key: string, deps: string[] = []): StageDef => ({

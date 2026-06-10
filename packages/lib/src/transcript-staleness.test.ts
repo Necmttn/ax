@@ -5,28 +5,14 @@ import { mkdtemp, mkdir, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { detectStaleness } from "./transcript-staleness.ts";
-import { SurrealClient, type SurrealClientShape } from "./db.ts";
+import { SurrealClient } from "./db.ts";
+import { makeTestSurrealClient } from "./testing/surreal.ts";
 
 const FsLayer = Layer.merge(BunFileSystem.layer, BunPath.layer);
 
-type Capture = { sql: string; bindings: Record<string, unknown> | undefined };
-
-const makeMockDb = (
-    seenRows: ReadonlyArray<{ raw_file: string }>,
-): { layer: Layer.Layer<SurrealClient>; captured: Capture[] } => {
-    const captured: Capture[] = [];
-    const impl: SurrealClientShape = {
-        query: (sql, bindings) => {
-            captured.push({ sql, bindings });
-            return Effect.succeed([seenRows] as never);
-        },
-        upsert: () => Effect.void,
-        relate: () => Effect.void,
-        putFile: () => Effect.void,
-        getFile: () => Effect.succeed(""),
-        raw: undefined as never,
-    };
-    return { layer: Layer.succeed(SurrealClient, impl), captured };
+const makeMockDb = (seenRows: ReadonlyArray<{ raw_file: string }>) => {
+    const tc = makeTestSurrealClient({ fallback: [seenRows] });
+    return { layer: tc.layer, captured: tc.calls };
 };
 
 const run = <A>(

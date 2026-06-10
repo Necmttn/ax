@@ -8,8 +8,9 @@
  */
 
 import { describe, expect, it } from "bun:test";
-import { Effect, Layer } from "effect";
-import { SurrealClient, type SurrealClientShape } from "@ax/lib/db";
+import { Effect, type Layer } from "effect";
+import { SurrealClient } from "@ax/lib/db";
+import { makeTestSurrealClient } from "@ax/lib/testing/surreal";
 import {
     fetchSkillsByRole,
     fetchRolesForSkill,
@@ -23,17 +24,10 @@ import {
 /** Build a Layer from a query stub that always returns the given results. */
 function stubLayer(
     queryResults: Array<Array<Record<string, unknown>>>,
-    callCount = { n: 0 },
 ): Layer.Layer<SurrealClient> {
-    let call = 0;
-    return Layer.succeed(SurrealClient, {
-        query: (_sql: unknown) => {
-            callCount.n++;
-            const result = queryResults[call] ?? [];
-            call++;
-            return Effect.succeed([result]);
-        },
-    } as unknown as SurrealClientShape);
+    return makeTestSurrealClient({
+        responses: queryResults.map((result) => [result]),
+    }).layer;
 }
 
 // ---------------------------------------------------------------------------

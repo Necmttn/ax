@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
-import { Effect, Layer } from "effect";
-import { SurrealClient, type SurrealClientShape } from "@ax/lib/db";
+import { Effect } from "effect";
+import { makeTestSurrealClient } from "@ax/lib/testing/surreal";
 import {
     buildNormalizedSyntheticSkillInvocationStatements,
     buildNormalizedTranscriptStatements,
@@ -233,24 +233,13 @@ describe("normalized transcript persistence", () => {
             turns: [],
         };
         const run = async (options?: BuildNormalizedTranscriptStatementsOptions) => {
-            const captured: string[] = [];
-            const impl = {
-                query: <T extends unknown[] = unknown[]>(sql: string) => {
-                    captured.push(sql);
-                    return Effect.succeed([[]] as unknown as T);
-                },
-                upsert: () => Effect.void,
-                relate: () => Effect.void,
-                putFile: () => Effect.void,
-                getFile: () => Effect.succeed(""),
-                raw: {} as never,
-            } as SurrealClientShape;
+            const tc = makeTestSurrealClient();
             await Effect.runPromise(
                 writeNormalizedTranscriptBatch(batch, options).pipe(
-                    Effect.provide(Layer.succeed(SurrealClient, impl)),
+                    Effect.provide(tc.layer),
                 ),
             );
-            return captured.join("\n");
+            return tc.captured.join("\n");
         };
 
         expect(await run()).toContain("DELETE (SELECT VALUE id FROM agent_event");

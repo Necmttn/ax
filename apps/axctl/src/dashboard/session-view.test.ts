@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
-import { Effect, Layer } from "effect";
-import { SurrealClient, type SurrealClientShape } from "@ax/lib/db";
+import { Effect } from "effect";
+import { makeTestSurrealClient } from "@ax/lib/testing/surreal";
 import type {
     SessionLink,
     SessionTopSkill,
@@ -95,69 +95,68 @@ describe("fetchSessionView", () => {
         const childId = "claude-subagent-a41ef01d6ca8d521c";
         const seenRoleBindings: unknown[] = [];
 
-        const query: SurrealClientShape["query"] = <T extends unknown[] = unknown[]>(
-            sql: string,
-            bindings?: Record<string, unknown>,
-        ) => {
-            if (sql.includes("FROM plays_role")) {
-                seenRoleBindings.push(bindings);
-                return Effect.succeed([
-                    [
-                        { skill_name: "plan-skill", role_name: "planning" },
-                        { skill_name: "debug-skill", role_name: "debugging" },
-                    ],
-                ] as unknown as T);
-            }
+        const tc = makeTestSurrealClient({
+            fallback: (sql, bindings) => {
+                if (sql.includes("FROM plays_role")) {
+                    seenRoleBindings.push(bindings);
+                    return [
+                        [
+                            { skill_name: "plan-skill", role_name: "planning" },
+                            { skill_name: "debug-skill", role_name: "debugging" },
+                        ],
+                    ];
+                }
 
-            const isChild = sql.includes(`session:⟨${childId}⟩`);
+                const isChild = sql.includes(`session:⟨${childId}⟩`);
 
-            if (sql.includes("FROM session:")) {
-                const id = isChild ? childId : primaryId;
-                return Effect.succeed([
-                    [
-                        {
-                            id: `session:⟨${id}⟩`,
-                            project: "test-project",
-                            cwd: "/tmp/test-project",
-                            source: "claude",
-                            started_at: "2026-05-28T10:00:00Z",
-                            ended_at: "2026-05-28T10:10:00Z",
-                        },
-                    ],
-                ] as unknown as T);
-            }
+                if (sql.includes("FROM session:")) {
+                    const id = isChild ? childId : primaryId;
+                    return [
+                        [
+                            {
+                                id: `session:⟨${id}⟩`,
+                                project: "test-project",
+                                cwd: "/tmp/test-project",
+                                source: "claude",
+                                started_at: "2026-05-28T10:00:00Z",
+                                ended_at: "2026-05-28T10:10:00Z",
+                            },
+                        ],
+                    ];
+                }
 
-            if (sql.includes("FROM invoked")) {
-                return Effect.succeed([
-                    isChild
-                        ? []
-                        : [
-                              { skill: "plan-skill", count: 8, last_used: null },
-                              { skill: "debug-skill", count: 3, last_used: null },
-                              { skill: "raw-skill", count: 2, last_used: null },
-                          ],
-                ] as unknown as T);
-            }
+                if (sql.includes("FROM invoked")) {
+                    return [
+                        isChild
+                            ? []
+                            : [
+                                  { skill: "plan-skill", count: 8, last_used: null },
+                                  { skill: "debug-skill", count: 3, last_used: null },
+                                  { skill: "raw-skill", count: 2, last_used: null },
+                              ],
+                    ];
+                }
 
-            if (sql.includes("FROM spawned") && sql.includes("WHERE in =")) {
-                return Effect.succeed([
-                    isChild
-                        ? []
-                        : [
-                              {
-                                  child: `session:⟨${childId}⟩`,
-                                  project: "test-project",
-                                  started_at: "2026-05-28T10:01:00Z",
-                                  nickname: "worker",
-                                  tool: "Agent",
-                                  ts: "2026-05-28T10:01:00Z",
-                              },
-                          ],
-                ] as unknown as T);
-            }
+                if (sql.includes("FROM spawned") && sql.includes("WHERE in =")) {
+                    return [
+                        isChild
+                            ? []
+                            : [
+                                  {
+                                      child: `session:⟨${childId}⟩`,
+                                      project: "test-project",
+                                      started_at: "2026-05-28T10:01:00Z",
+                                      nickname: "worker",
+                                      tool: "Agent",
+                                      ts: "2026-05-28T10:01:00Z",
+                                  },
+                              ],
+                    ];
+                }
 
-            return Effect.succeed([[]] as unknown as T);
-        };
+                return [[]];
+            },
+        });
 
         const result = await Effect.runPromise(
             fetchSessionView({
@@ -166,11 +165,7 @@ describe("fetchSessionView", () => {
                 expandAll: false,
                 byRole: true,
             }).pipe(
-                Effect.provide(
-                    Layer.succeed(SurrealClient, {
-                        query,
-                    } as unknown as SurrealClientShape),
-                ),
+                Effect.provide(tc.layer),
             ),
         );
 

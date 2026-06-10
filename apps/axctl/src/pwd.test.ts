@@ -10,7 +10,7 @@ import { tmpdir } from "node:os";
 import { Effect, Layer } from "effect";
 import { BunFileSystem } from "@effect/platform-bun";
 import { RecordId } from "surrealdb";
-import { SurrealClient, type SurrealClientShape } from "@ax/lib/db";
+import { makeTestSurrealClient } from "@ax/lib/testing/surreal";
 import { ProcessServiceLive } from "@ax/lib/process";
 import { resolvePwdRepository } from "./pwd.ts";
 
@@ -72,19 +72,10 @@ async function initRepoWithCommit(dir: string): Promise<string> {
 
 /** Build a mock SurrealClient layer. */
 function makeMockDb(existsResponse: boolean) {
-    const impl: SurrealClientShape = {
-        query: <T extends unknown[] = unknown[]>(_sql: string, _bindings?: Record<string, unknown>) => {
-            // Return a row (exists) or empty (not exists)
-            const rows = existsResponse ? [{ id: "repository:somekey" }] : [];
-            return Effect.succeed([[...rows]] as unknown as T);
-        },
-        upsert: (_id: RecordId, _content: Record<string, unknown>) => Effect.void,
-        relate: () => Effect.void,
-        putFile: () => Effect.void,
-        getFile: () => Effect.succeed(""),
-        raw: undefined as unknown as import("surrealdb").Surreal,
-    };
-    return Layer.succeed(SurrealClient, impl);
+    // Return a row (exists) or empty (not exists)
+    return makeTestSurrealClient({
+        fallback: [existsResponse ? [{ id: "repository:somekey" }] : []],
+    }).layer;
 }
 
 /** Run resolvePwdRepository with real ProcessService and mock DB. */
