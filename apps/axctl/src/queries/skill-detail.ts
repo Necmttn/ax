@@ -1,6 +1,7 @@
 /**
- * Per-skill detail payload powering both the TUI DetailPane and the web
- * dashboard's "click recommendation reason → see evidence" expand panel.
+ * Per-skill detail payload powering the TUI DetailPane (incl. the 30-day
+ * `daily` sparkline buckets), the web dashboard's "click recommendation
+ * reason → see evidence" expand panel, and `GET /api/skills/:name/detail`.
  *
  * Bindings: $name (skill name).
  */
@@ -20,6 +21,11 @@ RETURN {
         WHERE out = $s.id
         ORDER BY ts DESC
         LIMIT 10
+    ),
+    daily: (
+        SELECT ts FROM invoked
+        WHERE out = $s.id AND ts > time::now() - 30d
+        ORDER BY ts ASC
     ),
     corrections: (
         SELECT ts, in.session.project AS project
