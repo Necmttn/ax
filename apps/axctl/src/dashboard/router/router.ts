@@ -102,6 +102,8 @@ export interface JsonRouteDef<P, A> {
     /** "ANY" answers every method (legacy /api/version behavior). */
     readonly method: Method | ReadonlyArray<Method> | "ANY";
     readonly path: string;
+    /** Path matches with the wrong method should behave as unmatched. */
+    readonly fallthroughOnMethodMismatch?: boolean;
     /** Set true to have dispatch read+parse the JSON body before decode. */
     readonly readsBody?: boolean;
     readonly decode: (input: RouteInput) => Decoded<P>;
@@ -115,6 +117,8 @@ export interface JsonRouteDef<P, A> {
 export interface RawRouteDef {
     readonly method: Method | ReadonlyArray<Method> | "ANY";
     readonly path: string;
+    /** Path matches with the wrong method should behave as unmatched. */
+    readonly fallthroughOnMethodMismatch?: boolean;
     readonly handler: (input: RouteInput) => Response | Promise<Response>;
 }
 
@@ -123,6 +127,7 @@ export interface AnyRoute {
     /** Empty array = ANY method. */
     readonly methods: ReadonlyArray<Method>;
     readonly pattern: CompiledPattern;
+    readonly fallthroughOnMethodMismatch: boolean;
     readonly readsBody: boolean;
     readonly run: (input: RouteInput, runner: EffectRunner) => Promise<Response>;
 }
@@ -141,6 +146,7 @@ const errorMessage = (err: unknown): string => {
 export const jsonRoute = <P, A>(def: JsonRouteDef<P, A>): AnyRoute => ({
     methods: toMethods(def.method),
     pattern: compilePattern(def.path),
+    fallthroughOnMethodMismatch: def.fallthroughOnMethodMismatch === true,
     readsBody: def.readsBody === true,
     run: async (input, runner) => {
         const decoded = def.decode(input);
@@ -160,6 +166,7 @@ export const jsonRoute = <P, A>(def: JsonRouteDef<P, A>): AnyRoute => ({
 export const rawRoute = (def: RawRouteDef): AnyRoute => ({
     methods: toMethods(def.method),
     pattern: compilePattern(def.path),
+    fallthroughOnMethodMismatch: def.fallthroughOnMethodMismatch === true,
     readsBody: false,
     run: (input, _runner) => Promise.resolve(def.handler(input)),
 });
@@ -181,6 +188,7 @@ export function matchRoute(
         const m = pathname.match(route.pattern.regex);
         if (!m) continue;
         if (route.methods.length > 0 && !route.methods.includes(method as Method)) {
+            if (route.fallthroughOnMethodMismatch) continue;
             sawPathMatch = true;
             continue;
         }

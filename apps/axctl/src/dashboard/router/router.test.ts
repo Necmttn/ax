@@ -65,6 +65,28 @@ describe("matchRoute", () => {
     test("matched path with wrong method reports method_mismatch", () => {
         expect(matchRoute(table, "POST", "/api/thing/x").kind).toBe("method_mismatch");
     });
+
+    test("routes can opt into wrong-method fallthrough", async () => {
+        const fallthroughTable: ReadonlyArray<AnyRoute> = [
+            {
+                ...jsonRoute({
+                    method: "GET",
+                    path: "/api/legacy-get",
+                    decode: () => decodeOk(undefined),
+                    handler: () => Effect.succeed({ ok: true }),
+                }),
+                fallthroughOnMethodMismatch: true,
+            },
+        ];
+
+        expect(matchRoute(fallthroughTable, "POST", "/api/legacy-get").kind).toBe("unmatched");
+        await expect(dispatch(
+            fallthroughTable,
+            post("/api/legacy-get"),
+            new URL("http://h/api/legacy-get"),
+            testRunner,
+        )).resolves.toBeNull();
+    });
 });
 
 describe("dispatch", () => {

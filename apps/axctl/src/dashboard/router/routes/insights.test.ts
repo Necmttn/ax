@@ -3,7 +3,9 @@ import {
     decodeGraphExplorerParams,
     decodeRecallParams,
     decodeSkillGraphParams,
+    insightRoutes,
 } from "./insights.ts";
+import { matchRoute } from "../router.ts";
 import type { RouteInput } from "../router.ts";
 
 const input = (urlStr: string, path: Record<string, string> = {}): RouteInput => ({
@@ -59,5 +61,15 @@ describe("decodeGraphExplorerParams", () => {
             { AX_ENABLE_GRAPH_EXPLORER: "1" },
         );
         expect(d).toEqual({ ok: true, value: { mode: "skills", q: "x", limit: 5 } });
+    });
+});
+
+describe("insightRoutes method behavior", () => {
+    test("migrated legacy GET-only routes fall through on wrong method", () => {
+        expect(matchRoute(insightRoutes, "POST", "/api/recall").kind).toBe("unmatched");
+    });
+
+    test("tool failure detail keeps the planned wrong-method 405 delta", () => {
+        expect(matchRoute(insightRoutes, "PUT", "/api/tool-failures/bash/detail").kind).toBe("method_mismatch");
     });
 });

@@ -20,6 +20,15 @@ import {
     type RouteInput,
 } from "../router.ts";
 
+const legacyGetRoute = <P, A>(
+    def: Omit<Parameters<typeof jsonRoute<P, A>>[0], "method" | "fallthroughOnMethodMismatch">,
+): AnyRoute =>
+    jsonRoute({
+        ...def,
+        method: "GET",
+        fallthroughOnMethodMismatch: true,
+    });
+
 export const decodeRecallParams = ({ url }: RouteInput): Decoded<RecallParams> =>
     decodeOk({
         q: url.searchParams.get("q") ?? "",
@@ -70,26 +79,22 @@ const requiredPath = (
 };
 
 export const insightRoutes: ReadonlyArray<AnyRoute> = [
-    jsonRoute({
-        method: "GET",
+    legacyGetRoute({
         path: "/api/episodes/:parentId+",
         decode: ({ path }) => requiredPath(path, "parentId", "missing parent id"),
         handler: (parentId) => fetchEpisodeTimeline(parentId),
     }),
-    jsonRoute({
-        method: "GET",
+    legacyGetRoute({
         path: "/api/graph-explorer",
         decode: (input) => decodeGraphExplorerParams(input),
         handler: (params) => fetchGraphExplorer(params),
     }),
-    jsonRoute({
-        method: "GET",
+    legacyGetRoute({
         path: "/api/skill-graph",
         decode: decodeSkillGraphParams,
         handler: (params) => fetchSkillGraph(params),
     }),
-    jsonRoute({
-        method: "GET",
+    legacyGetRoute({
         path: "/api/recall",
         decode: decodeRecallParams,
         handler: (params) =>
@@ -99,8 +104,7 @@ export const insightRoutes: ReadonlyArray<AnyRoute> = [
                 )
                 : fetchRecall(params),
     }),
-    jsonRoute({
-        method: "GET",
+    legacyGetRoute({
         path: "/api/projects/:project+",
         decode: ({ path }) => requiredPath(path, "project", "missing project"),
         handler: (project) => fetchProject(project),
@@ -109,26 +113,22 @@ export const insightRoutes: ReadonlyArray<AnyRoute> = [
                 ? jsonResponse({ error: "project not found" }, 404)
                 : jsonResponse(payload),
     }),
-    jsonRoute({
-        method: "GET",
+    legacyGetRoute({
         path: "/api/wrapped",
         decode: () => decodeOk(undefined),
         handler: () => fetchWrapped(),
     }),
-    jsonRoute({
-        method: "GET",
+    legacyGetRoute({
         path: "/api/wrapped/public-preview",
         decode: () => decodeOk(undefined),
         handler: () => fetchWrapped().pipe(Effect.map(sanitizeWrappedProfile)),
     }),
-    jsonRoute({
-        method: "GET",
+    legacyGetRoute({
         path: "/api/workflow",
         decode: () => decodeOk(undefined),
         handler: () => fetchWorkflow(),
     }),
-    jsonRoute({
-        method: "GET",
+    legacyGetRoute({
         path: "/api/tool-failures",
         decode: () => decodeOk(undefined),
         handler: () => fetchToolFailures(),
