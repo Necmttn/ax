@@ -12,4 +12,8 @@ export {
     SKILL_SUMMARY_SQL,
 } from "../queries/skill-summary.ts";
 
-export { SKILL_DETAIL_SQL } from "../queries/skill-detail.ts";
+// The TUI DetailPane re-queries per (debounced) row selection, so it gets the
+// lightweight variant - the full SKILL_DETAIL_SQL adds dashboard evidence
+// blocks (corrections/proposals/paired) the TUI never renders, and `paired`
+// scans skill_paired by both endpoints (unindexed).
+export { SKILL_DETAIL_BASIC_SQL as SKILL_DETAIL_SQL } from "../queries/skill-detail.ts";

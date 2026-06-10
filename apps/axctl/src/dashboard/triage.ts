@@ -9,6 +9,7 @@ import {
     SKILL_SUMMARY_PROPOSED_ONLY_SQL,
 } from "../queries/skill-summary.ts";
 import { prettifyProjectSlug } from "@ax/lib/shared/project-slug";
+import { numericField } from "@ax/lib/shared/row-fields";
 import type {
     SkillRow,
     SkillTriageEntry,
@@ -24,11 +25,6 @@ const STAPLE_INV_30D = 10;                 // workhorse threshold (frequent use)
 const STAPLE_CORRECTION_RATIO = 0.10;      // staple must have <10% correction
 const STALE_DAYS = 45;
 const HIGH_CORRECTION_RATIO = 0.20;        // >=20% of recent invocations corrected
-
-const numericField = (row: Record<string, unknown>, key: string): number => {
-    const value = Number(row[key] ?? 0);
-    return Number.isFinite(value) ? value : 0;
-};
 
 const stringField = (row: Record<string, unknown>, key: string): string | null => {
     const value = row[key];

@@ -13,7 +13,7 @@ import { Effect } from "effect";
 import { SurrealClient } from "@ax/lib/db";
 import type { DbError } from "@ax/lib/errors";
 import { dateField, numericField } from "@ax/lib/shared/row-fields";
-import { prettifyProjectSlug } from "@ax/lib/shared/project-slug";
+import { sessionProjectLabel } from "@ax/lib/shared/project-slug";
 
 export const SKILL_STATS_SQL = `
 LET $s = (SELECT * FROM skill WHERE name = $name)[0];
@@ -61,10 +61,10 @@ export interface SkillStatsPayload {
 }
 
 /**
- * Dedupe + cap to the most recent `cap` distinct sessions, then prettify the
- * project label (cwd basename when available, else the prettified slug).
- * cwd/project_slug may come back as arrays (per-edge projection) - take the
- * first scalar for display purposes.
+ * Dedupe + cap to the most recent `cap` distinct sessions, then label the
+ * project via the shared `sessionProjectLabel` (prettified slug, falling back
+ * to the cwd basename). cwd/project_slug may come back as arrays (per-edge
+ * projection) - take the first scalar for display purposes.
  */
 export const dedupeRecentSessions = (
     rows: ReadonlyArray<Record<string, unknown>>,
@@ -80,14 +80,10 @@ export const dedupeRecentSessions = (
         const slugRaw = Array.isArray(row.project_slug)
             ? row.project_slug[0]
             : row.project_slug;
-        let project: string;
-        if (typeof cwdRaw === "string" && cwdRaw.length > 0) {
-            // Mirrors path.basename without pulling node:path here.
-            const parts = cwdRaw.split("/").filter((p) => p.length > 0);
-            project = parts.length > 0 ? parts[parts.length - 1] : cwdRaw;
-        } else {
-            project = prettifyProjectSlug(slugRaw);
-        }
+        const project = sessionProjectLabel(
+            typeof slugRaw === "string" ? slugRaw : null,
+            typeof cwdRaw === "string" ? cwdRaw : null,
+        );
         clean.push({ project, ts: dateField(row, "ts") });
         if (clean.length >= cap) break;
     }

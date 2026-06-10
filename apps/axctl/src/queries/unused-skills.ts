@@ -65,10 +65,7 @@ export interface UnusedSkillRow {
  * `dateField` extractor (string passthrough, Date/`{toJSON}` → ISO, anything
  * else → null).
  */
-export const normalizeLastUsed = (v: unknown): string | null => {
-    if (typeof v === "number" && !Number.isFinite(v)) return null;
-    return dateField({ v }, "v");
-};
+export const normalizeLastUsed = (v: unknown): string | null => dateField({ v }, "v");
 
 export interface UnusedScanRows {
     readonly recent: ReadonlyArray<Record<string, unknown>>;

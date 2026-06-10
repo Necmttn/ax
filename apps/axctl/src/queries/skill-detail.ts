@@ -16,6 +16,42 @@ import type {
     SkillRecentInvocation,
 } from "@ax/lib/shared/dashboard-types";
 
+/**
+ * Two variants share this module:
+ *
+ * - `SKILL_DETAIL_BASIC_SQL` - the TUI hot path. The DetailPane re-queries on
+ *   every (debounced) j/k selection change, so it only carries the lightweight
+ *   blocks it renders: skill row, invocation counts, recent list, daily
+ *   sparkline buckets. All filtered by the indexed `invoked.out`.
+ * - `SKILL_DETAIL_SQL` - the full dashboard payload. Adds the evidence blocks
+ *   (`corrections`, `proposals`, `paired`); `paired` scans `skill_paired` by
+ *   both endpoints (no endpoint index), which is fine for an explicit
+ *   click-to-expand panel but too heavy for the TUI's per-row selection.
+ */
+export const SKILL_DETAIL_BASIC_SQL = `
+LET $s = (SELECT * FROM skill WHERE name = $name)[0];
+RETURN {
+    skill: $s,
+    invocations: {
+        total: array::len((SELECT * FROM invoked WHERE out = $s.id)),
+        d7:    array::len((SELECT * FROM invoked WHERE out = $s.id AND ts > time::now() - 7d)),
+        d30:   array::len((SELECT * FROM invoked WHERE out = $s.id AND ts > time::now() - 30d)),
+        last:  (SELECT ts FROM invoked WHERE out = $s.id ORDER BY ts DESC LIMIT 1)[0].ts,
+    },
+    recent: (
+        SELECT ts, in.session.project AS project
+        FROM invoked
+        WHERE out = $s.id
+        ORDER BY ts DESC
+        LIMIT 10
+    ),
+    daily: (
+        SELECT ts FROM invoked
+        WHERE out = $s.id AND ts > time::now() - 30d
+        ORDER BY ts ASC
+    )
+};`;
+
 export const SKILL_DETAIL_SQL = `
 LET $s = (SELECT * FROM skill WHERE name = $name)[0];
 RETURN {
@@ -75,14 +111,10 @@ RETURN {
     )
 };`;
 
-/** Empty-string fallback so mapper guards can test truthiness. */
-const tsField = (raw: Record<string, unknown>, key: string): string =>
-    dateField(raw, key) ?? "";
-
 export const mapSkillRecentRow = (raw: unknown): SkillRecentInvocation | null => {
     if (!raw || typeof raw !== "object") return null;
     const row = raw as Record<string, unknown>;
-    const ts = tsField(row, "ts");
+    const ts = dateField(row, "ts") ?? "";
     if (!ts) return null;
     return {
         ts,
@@ -108,7 +140,7 @@ export const mapSkillPairRow = (raw: unknown): SkillPair | null => {
 export const mapSkillProposalRow = (raw: unknown): SkillProposalEvidence | null => {
     if (!raw || typeof raw !== "object") return null;
     const row = raw as Record<string, unknown>;
-    const ts = tsField(row, "ts");
+    const ts = dateField(row, "ts") ?? "";
     if (!ts) return null;
     return {
         ts,
