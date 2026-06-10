@@ -182,18 +182,17 @@ import type { ProgressStage } from "./progress.ts";
 import { selectByKeys, selectByTag } from "../ingest/stage/select.ts";
 import { type BaseStageStats, type StageDef } from "../ingest/stage/types.ts";
 import { runIngest, withIngestRunFinish } from "../ingest/run.ts";
-
-const boolArg = (name: string, enabled: boolean): string[] =>
-    enabled ? [`--${name}`] : [];
-
-const intArg = (name: string, value: number | undefined): string[] =>
-    value === undefined ? [] : [`--${name}=${value}`];
-
-const stringArg = (name: string, value: string | undefined): string[] =>
-    value === undefined ? [] : [`--${name}=${value}`];
-
-const optionValue = <A>(value: Option.Option<A>): A | undefined =>
-    Option.getOrUndefined(value);
+import {
+    boolArg,
+    fmtCount,
+    intArg,
+    jsonFlag,
+    optionValue,
+    optionalSince,
+    parseFileHints,
+    positiveLimit,
+    stringArg,
+} from "./commands/shared.ts";
 
 function flag(name: string, args: string[]): string | undefined {
     const found = args.find((a) => a.startsWith(`--${name}=`));
@@ -249,17 +248,6 @@ function parseOptionalPositiveIntFlag(
         process.exit(2);
     }
     return n;
-}
-
-/**
- * Format a numeric counter with thousand-separators (issue #46). Keeps short
- * values short; long ones become e.g. `597,508` rather than blowing the
- * column.
- */
-function fmtCount(v: unknown): string {
-    const n = Number(v ?? 0);
-    if (!Number.isFinite(n)) return "0";
-    return n.toLocaleString("en-US");
 }
 
 function runIdFor(command: string): string {
@@ -1570,10 +1558,6 @@ LIMIT ${limit};`;
         }
     });
 
-const positiveLimit = (fallback: number) =>
-    Flag.integer("limit").pipe(Flag.withDefault(fallback));
-const optionalSince = Flag.integer("since").pipe(Flag.optional);
-const jsonFlag = Flag.boolean("json").pipe(Flag.withDefault(false));
 const checkFlag = Flag.boolean("check").pipe(Flag.withDefault(false));
 const verboseFlag = Flag.boolean("verbose").pipe(Flag.withDefault(false));
 /**
@@ -5072,12 +5056,6 @@ const projectCommand = Command.make("project").pipe(
     Command.withDescription("Ground agent work in the current repository"),
     Command.withSubcommands([projectContextCommand, projectVerifyCommand, projectHarnessCommand]),
 );
-
-const parseFileHints = (value: Option.Option<string>): readonly string[] =>
-    (Option.getOrUndefined(value) ?? "")
-        .split(",")
-        .map((file) => file.trim())
-        .filter((file) => file.length > 0);
 
 const contextFileCommand = Command.make(
     "file",
