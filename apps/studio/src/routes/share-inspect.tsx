@@ -644,6 +644,12 @@ function MultiFileShareView(props: {
     }) => void;
     const setSelectedFile = (file: string) => {
         const sub = file === manifest.root_file ? undefined : file;
+        // Drop the #turn anchor BEFORE the navigate re-renders: the freshly
+        // keyed InspectBody reads location.hash at mount, and a stale anchor
+        // would scroll the new session to the old session's turn number.
+        if (window.location.hash) {
+            window.history.replaceState(null, "", window.location.pathname + window.location.search);
+        }
         navigateLoose({
             search: (prev) => ({ ...prev, sub }),
             hash: "",
@@ -652,6 +658,10 @@ function MultiFileShareView(props: {
     const setView = (next: "transcript" | "timeline") => {
         navigateLoose({
             search: (prev) => ({ ...prev, view: next === "transcript" ? undefined : next }),
+            // Preserve the #turn anchor across the toggle: a timeline event's
+            // "→ turn N" link sets the hash first, then flips the view, and the
+            // mounting transcript scrolls to it.
+            hash: window.location.hash.replace(/^#/, ""),
         });
     };
     // Jumping between sessions keeps the page's scroll offset, which lands the
@@ -675,6 +685,24 @@ function MultiFileShareView(props: {
         window.addEventListener("hashchange", onHash);
         return () => window.removeEventListener("hashchange", onHash);
     }, [view]);
+    // Mirror the selected subagent + view onto the embedding page's URL (the
+    // public /s/<owner>/<gistId> shell iframes this same-origin), so copying
+    // the address bar shares exactly what is on screen. replaceState bypasses
+    // the parent's router, so the iframe src stays stable - no reload loop.
+    const subParam = selectedFile === manifest.root_file ? undefined : selectedFile;
+    useEffect(() => {
+        if (window.parent === window) return;
+        try {
+            const url = new URL(window.parent.location.href);
+            if (subParam) url.searchParams.set("sub", subParam);
+            else url.searchParams.delete("sub");
+            if (view === "timeline") url.searchParams.set("view", view);
+            else url.searchParams.delete("view");
+            window.parent.history.replaceState(null, "", url.toString());
+        } catch {
+            // Cross-origin embed: leave the parent URL alone.
+        }
+    }, [subParam, view]);
 
     const fileQuery = useQuery({
         queryKey: ["share-file", owner, gistId, selectedFile],
@@ -811,6 +839,9 @@ function MultiFileShareView(props: {
                 <SessionTimelineBody data={fileQuery.data.session_timeline} />
             ) : data ? (
                 <InspectBody
+                    // Keyed by file: jump-cursor/anchor state must not leak from
+                    // one session's transcript into another's.
+                    key={selectedFile}
                     data={data}
                     subagentsByTurn={subagentsByTurn}
                     harnessHooks={fileQuery.data?.harness_hooks}

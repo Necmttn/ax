@@ -62,6 +62,12 @@ describe("site session share helpers", () => {
     );
   });
 
+  it("forwards subagent + view selection into the Studio embed URL", () => {
+    expect(studioShareUrl("Necmttn", "abc123", { sub: "subagent-a1.json", view: "timeline" })).toBe(
+      "/studio/?shareOwner=Necmttn&gistId=abc123&sub=subagent-a1.json&view=timeline",
+    );
+  });
+
   it("selects ax-session.json raw URL from a Gist response", () => {
     const raw = rawSessionFileUrlFromGist({
       owner: { login: "necmttn" },

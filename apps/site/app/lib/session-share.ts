@@ -77,8 +77,15 @@ export function gistApiUrl(gistId: string): string {
   return `https://api.github.com/gists/${encodeURIComponent(gistId)}`;
 }
 
-export function studioShareUrl(owner: string, gistId: string): string {
-  return `/studio/?shareOwner=${encodeURIComponent(owner)}&gistId=${encodeURIComponent(gistId)}`;
+export function studioShareUrl(
+  owner: string,
+  gistId: string,
+  extra?: { readonly sub?: string; readonly view?: string },
+): string {
+  let url = `/studio/?shareOwner=${encodeURIComponent(owner)}&gistId=${encodeURIComponent(gistId)}`;
+  if (extra?.sub) url += `&sub=${encodeURIComponent(extra.sub)}`;
+  if (extra?.view) url += `&view=${encodeURIComponent(extra.view)}`;
+  return url;
 }
 
 export function gistOwnerMatches(value: unknown, owner: string): boolean {
