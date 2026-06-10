@@ -301,12 +301,21 @@ export interface SessionMapLane {
     readonly title: string;
 }
 
+/** A compressed empty span between coverage clusters, post-compression
+ *  coordinates. The label is the gap's magnitude (wall-clock or turn delta). */
+export interface SessionMapGap {
+    readonly x: number;
+    readonly w: number;
+    readonly label: string;
+}
+
 export interface SessionMapModel {
     /** One axis semantic per share - never mixed per card. */
     readonly axis: SessionMapAxis;
     readonly rows: number;
     readonly rootDurationMs: number | null;
     readonly lanes: ReadonlyArray<SessionMapLane>;
+    readonly gaps: ReadonlyArray<SessionMapGap>;
 }
 
 export const SESSION_MAP_MIN_LANE_W = 0.012;
@@ -314,6 +323,11 @@ const SESSION_MAP_MAX_ROWS = 4;
 /** Bars whose left edges sit closer than this (strip fraction) to an earlier
  *  bar's right edge pack onto the next row instead of overlapping. */
 const SESSION_MAP_PACK_GAP = 0.002;
+/** Uncovered spans between coverage clusters wider than this (strip fraction)
+ *  get compressed - long solo-root stretches must not dominate the strip. */
+const SESSION_MAP_GAP_MIN = 0.12;
+/** Width every compressed gap collapses to (strip fraction). */
+const SESSION_MAP_GAP_W = 0.04;
 
 const parseShareTs = (iso: string | null | undefined): number | null => {
     const t = Date.parse(iso ?? "");
@@ -385,9 +399,76 @@ export function buildSessionMapLanes(manifest: ShareManifest): SessionMapModel |
         };
     });
 
+    // Gap compression: wide uncovered spans between coverage clusters collapse
+    // to a fixed-width break so a few far-apart dispatches don't leave the
+    // strip mostly blank. Leading/trailing space is kept (axis endpoints stay
+    // anchored at the root window edges), the order axis is already evenly
+    // spaced, and every lane runs through the same monotonic piecewise remap.
+    let remap = (v: number): number => v;
+    let gaps: ReadonlyArray<SessionMapGap> = [];
+    if (axis !== "order") {
+        const covered: Array<{ start: number; end: number }> = [];
+        for (const p of [...placed].sort((a, b) => a.x - b.x)) {
+            const last = covered[covered.length - 1];
+            if (last && p.x <= last.end) last.end = Math.max(last.end, p.x + p.w);
+            else covered.push({ start: p.x, end: p.x + p.w });
+        }
+        const domainGaps = covered
+            .slice(1)
+            .map((seg, i) => ({ start: covered[i]!.end, end: seg.start }))
+            .filter((g) => g.end - g.start > SESSION_MAP_GAP_MIN);
+        if (domainGaps.length > 0) {
+            const gapTotal = domainGaps.reduce((acc, g) => acc + (g.end - g.start), 0);
+            const scale = (1 - domainGaps.length * SESSION_MAP_GAP_W) / (1 - gapTotal);
+            remap = (v) => {
+                let out = 0;
+                let prev = 0;
+                for (const g of domainGaps) {
+                    if (v <= g.start) return out + (v - prev) * scale;
+                    out += (g.start - prev) * scale;
+                    if (v <= g.end) return out + ((v - g.start) / (g.end - g.start)) * SESSION_MAP_GAP_W;
+                    out += SESSION_MAP_GAP_W;
+                    prev = g.end;
+                }
+                return out + (v - prev) * scale;
+            };
+            const gapLabel = (g: { start: number; end: number }): string => {
+                if (axis === "time" && windowMs != null) {
+                    return fmtDuration((g.end - g.start) * windowMs) ?? "";
+                }
+                // Seq axis: prefer wall-clock between the adjacent clusters'
+                // timestamps; fall back to the turn delta when they're missing.
+                const before = placed.filter((p) => p.x + p.w <= g.start + 1e-9);
+                const after = placed.filter((p) => p.x >= g.end - 1e-9);
+                const prevEnds = before
+                    .map((p) => {
+                        const ts = parseShareTs(p.card.started_at);
+                        return ts != null ? ts + (p.card.duration_ms ?? 0) : null;
+                    })
+                    .filter((t): t is number => t != null);
+                const nextStarts = after
+                    .map((p) => parseShareTs(p.card.started_at))
+                    .filter((t): t is number => t != null);
+                if (prevEnds.length > 0 && nextStarts.length > 0) {
+                    const wallClock = Math.min(...nextStarts) - Math.max(...prevEnds);
+                    const label = wallClock > 0 ? fmtDuration(wallClock) : null;
+                    if (label) return label;
+                }
+                const prevSeq = Math.max(...before.map((p) => p.card.spawn_turn_seq ?? 0));
+                const nextSeq = Math.min(...after.map((p) => p.card.spawn_turn_seq ?? 0));
+                return `${Math.max(nextSeq - prevSeq, 0)} turns`;
+            };
+            gaps = domainGaps.map((g) => ({ x: remap(g.start), w: SESSION_MAP_GAP_W, label: gapLabel(g) }));
+        }
+    }
+    const remapped = gaps.length === 0 ? placed : placed.map((p) => {
+        const x = remap(p.x);
+        return { ...p, x, w: remap(p.x + p.w) - x };
+    });
+
     // Greedy row packing on the shared axis - overlapping bars stack downward.
     const laneEnds: number[] = [];
-    const lanes = [...placed]
+    const lanes = [...remapped]
         .sort((p, q) => p.x - q.x || p.order - q.order)
         .map(({ card, order: _order, ...lane }): SessionMapLane => {
             let row = 0;
@@ -402,6 +483,7 @@ export function buildSessionMapLanes(manifest: ShareManifest): SessionMapModel |
         rows: lanes.reduce((acc, lane) => Math.max(acc, lane.row + 1), 1),
         rootDurationMs,
         lanes,
+        gaps,
     };
 }
 
@@ -448,6 +530,32 @@ function ShareSessionMap(props: {
                 <span>{[duration ? `root ${duration}` : null, SESSION_MAP_AXIS_CAPTION[model.axis]].filter(Boolean).join(" · ")}</span>
             </div>
             <div style={{ position: "relative", height: model.rows * SESSION_MAP_ROW_H, marginTop: 8 }}>
+                {model.gaps.map((gap, i) => (
+                    <div
+                        key={`gap-${i}`}
+                        title={`no subagent activity for ${gap.label}`}
+                        style={{
+                            position: "absolute",
+                            left: `${gap.x * 100}%`,
+                            width: `${gap.w * 100}%`,
+                            top: 0,
+                            height: "100%",
+                            borderLeft: "1px dotted var(--muted-2)",
+                            borderRight: "1px dotted var(--muted-2)",
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+                        }}
+                    >
+                        <span style={{
+                            font: "10px/1.2 ui-monospace, monospace",
+                            color: "var(--muted-2)",
+                            whiteSpace: "nowrap",
+                        }}>
+                            {gap.label}
+                        </span>
+                    </div>
+                ))}
                 {model.lanes.map((lane) => {
                     const selected = lane.file === props.selectedFile;
                     return (
