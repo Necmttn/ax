@@ -13,6 +13,7 @@
     "typecheck": "tsc --noEmit",
     "test": "bun test"
   },
+  "comment": "deps are PINNED, not catalog: - this package is consumed via a file: dependency from ~/.ax/hooks (outside the workspace), where catalog: cannot resolve. Keep versions in sync with the root workspaces.catalog.",
   "dependencies": {
     "effect": "4.0.0-beta.78"
   },
