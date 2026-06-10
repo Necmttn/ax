@@ -170,7 +170,7 @@ const cmdImproveRecommend = (input: {
                 process.stdout.write(`  ${i + 1}. ${item.shortId}  ${item.title}\n`);
             });
             process.stdout.write(`\nPick indices to accept (e.g. \`1 3\` or \`1-3\`): `);
-            const input = yield* Effect.promise(
+            const answer = yield* Effect.promise(
                 () =>
                     new Promise<string>((resolve) => {
                         process.stdin.once("data", (b) => {
@@ -180,7 +180,7 @@ const cmdImproveRecommend = (input: {
                         process.stdin.resume();
                     }),
             );
-            const picked = selectByIndices(items, parseIndexInput(input, items.length));
+            const picked = selectByIndices(items, parseIndexInput(answer, items.length));
             for (const item of picked) {
                 const result = yield* acceptProposal({ sigOrId: item.shortId });
                 const taskSuffix = result.task_path ? ` -> ${result.task_path}` : "";
@@ -211,7 +211,7 @@ const improveRecommendCommand = Command.make(
             noClipboard,
             apply,
         }),
-).pipe(Command.withDescription("Rank open proposals by confidence x recency x frequency and print the top N as paste-ready blocks (with `<!--ax:id-->` provenance markers). --apply for interactive accept loop."));
+).pipe(Command.withDescription("Rank open proposals by confidence × recency × frequency and print the top N as paste-ready blocks (with `<!--ax:id-->` provenance markers). --apply for interactive accept loop."));
 
 const improveLintCommand = Command.make(
     "lint",
@@ -337,7 +337,7 @@ const improveAcceptCommand = Command.make(
                     }
                 }
                 console.log("");
-                console.log("spawning claude subagent to enrich the stub...");
+                console.log("spawning claude subagent to enrich the stub…");
                 const agentResult = yield* runAgentAccept({
                     skillPath: result.artifact_path!,
                     proposalTitle: result.proposal!.title,
