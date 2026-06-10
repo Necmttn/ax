@@ -1,4 +1,4 @@
-import { Effect, References } from "effect";
+import { Effect, Exit, References } from "effect";
 import { AxConfig } from "@ax/lib/config";
 import { SurrealClient, type SurrealClientShape } from "@ax/lib/db";
 import type { DbError } from "@ax/lib/errors";
@@ -264,6 +264,21 @@ export const runIngest = (
                     }));
                     return yield* error;
                 }),
+            ),
+            // Ctrl-C: tap/catch above never run on interruption, so without
+            // this the row stays status "running" forever. Finalizers run
+            // uninterruptibly BEFORE the SurrealClient layer closes (inner
+            // scope unwinds first), so this last write still has a live
+            // connection. Requires the process main fiber to actually be
+            // interrupted on SIGINT - see BunRuntime.runMain in cli/index.ts.
+            Effect.onExit((exit) =>
+                Exit.hasInterrupts(exit)
+                    ? db.query(buildIngestRunFinishStatement({
+                        runId,
+                        status: "error",
+                        metrics: { error: "interrupted" },
+                    })).pipe(Effect.ignore)
+                    : Effect.void,
             ),
             Effect.provideService(References.MinimumLogLevel, opts.verbose ? "Debug" : "Info"),
         );
