@@ -351,7 +351,7 @@ FROM session_health;`).pipe(Effect.map((rows) => rows?.[0] ?? [])),
             forceRederive
                 ? Effect.succeed<string | undefined>(undefined)
                 : loadClosureWatermark(db),
-        ], { concurrency: 4 });
+        ], { concurrency: 4 }).pipe(Effect.withSpan("closure.fetch"));
         const rows = deriveClosureRows({ commits, touched, sessionHealth });
         const stats: ClosureStats = {
             commitClassifications: rows.classifications.length,
@@ -369,8 +369,10 @@ FROM session_health;`).pipe(Effect.map((rows) => rows?.[0] ?? [])),
             ...rows.fixChains.flatMap(fixChainStatements),
             ...rows.skillCandidates.flatMap(skillCandidateStatements),
         ];
-        yield* db.query("DELETE later_fixed_by;DELETE suggests_skill;DELETE skill_candidate;DELETE commit_classification;");
-        yield* executeStatementsWith(db, statements, { chunkSize: 500 });
+        yield* db.query("DELETE later_fixed_by;DELETE suggests_skill;DELETE skill_candidate;DELETE commit_classification;").pipe(
+            Effect.withSpan("closure.delete"),
+        );
+        yield* executeStatementsWith(db, statements, { chunkSize: 500, label: "closure" });
         yield* upsertClosureWatermark(db, digest);
         return stats;
     });

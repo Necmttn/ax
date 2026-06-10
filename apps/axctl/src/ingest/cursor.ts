@@ -1039,7 +1039,11 @@ export const ingestCursor = (
         for (const dbPath of dbPaths) {
             const extract = yield* Effect.sync(() =>
                 extractCursorStateDb(dbPath, { cursorUserDir: cfg.paths.cursorUserDir })
-            );
+            ).pipe(Effect.withSpan("cursor.db", {
+                // Last two segments (`<workspace-hash>/state.vscdb`) - the
+                // basename alone is always "state.vscdb".
+                attributes: { "file.name": dbPath.split("/").slice(-2).join("/") },
+            }));
             skipped += extract.skipped;
             warnings += extract.warnings.length;
             if (extract.sessions.length === 0) continue;
@@ -1052,7 +1056,7 @@ export const ingestCursor = (
                     raw_file: session.sourcePath,
                 });
             }
-            yield* executeStatements(buildCursorBatchStatements(extract, dbPath), { chunkSize: 500 });
+            yield* executeStatements(buildCursorBatchStatements(extract, dbPath), { chunkSize: 500, label: "cursor" });
             sessionCount += extract.sessions.length;
             turnCount += extract.turns.length;
             toolCallCount += extract.toolCalls.length;

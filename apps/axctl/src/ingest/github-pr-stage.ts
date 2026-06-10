@@ -220,7 +220,23 @@ export const ingestGithubPrs = (
                         `UPSERT ${recordLiteral("ingest_file_state", watermarkRecordKey(COOLDOWN_SOURCE, wmPath))} CONTENT { path: ${surrealString(wmPath)}, source_kind: ${surrealString(COOLDOWN_SOURCE)}, mtime_ms: ${Math.trunc(now())}, ingested_at: time::now() };`,
                     );
                     return { degraded: false as const, ...stats };
-                }),
+                }).pipe(
+                    // Annotate INSIDE the span (tap runs before withSpan closes
+                    // it) so each parallel repo bar carries its own PR count +
+                    // degraded flag in the trace waterfall.
+                    Effect.tap((r) =>
+                        Effect.all([
+                            Effect.annotateCurrentSpan("github_pr.prs", r.pullRequests),
+                            Effect.annotateCurrentSpan("github_pr.degraded", r.degraded),
+                        ]),
+                    ),
+                    Effect.withSpan("github-pr.repo", {
+                        attributes: {
+                            // Basename only - privacy-light attribute for exported traces.
+                            "repo.name": repo.root_path.slice(repo.root_path.lastIndexOf("/") + 1),
+                        },
+                    }),
+                ),
             { concurrency: FETCH_CONCURRENCY },
         );
 

@@ -860,8 +860,13 @@ export const deriveSignals = (
     opts: Partial<DeriveOpts> = {},
 ): Effect.Effect<DeriveStats, DbError, SurrealClient> =>
     Effect.gen(function* () {
-        const skillNames = yield* fetchSkillNames();
-        const bundles = yield* fetchSessionTurns(opts.sinceDays);
+        const skillNames = yield* fetchSkillNames().pipe(
+            Effect.withSpan("signals.fetch-skills"),
+        );
+        const bundles = yield* fetchSessionTurns(opts.sinceDays).pipe(
+            Effect.tap((b) => Effect.annotateCurrentSpan("signals.sessions", b.length)),
+            Effect.withSpan("signals.fetch-turns"),
+        );
         if (opts.onProgress) yield* opts.onProgress({ sessions: bundles.length });
 
         let corrections = 0;
@@ -913,7 +918,10 @@ export const deriveSignals = (
                 skillPairs: pairsList.length,
             });
         }
-        const failedToolCalls = yield* fetchFailedToolCalls(opts.sinceDays);
+        const failedToolCalls = yield* fetchFailedToolCalls(opts.sinceDays).pipe(
+            Effect.tap((calls) => Effect.annotateCurrentSpan("signals.failed_tool_calls", calls.length)),
+            Effect.withSpan("signals.fetch-failed-tools"),
+        );
         const toolFrictionBatch = deriveFrictionFromToolCalls(failedToolCalls);
         const correctionFrictionBatch = deriveFrictionFromCorrections(correctionBatch);
         const frictionBatch = [...toolFrictionBatch, ...correctionFrictionBatch];
@@ -931,17 +939,45 @@ export const deriveSignals = (
             });
         }
 
-        yield* upsertCorrections(correctionBatch);
+        yield* upsertCorrections(correctionBatch).pipe(
+            Effect.withSpan("signals.write.corrections", {
+                attributes: { "signals.count": correctionBatch.length },
+            }),
+        );
         // Denormalise was_corrected onto invoked edges so cmdTaste's
         // corrections subquery becomes a pure index/scan filter (issue #31).
-        yield* markWasCorrected(correctionBatch);
-        yield* upsertProposed(proposedBatch);
+        yield* markWasCorrected(correctionBatch).pipe(
+            Effect.withSpan("signals.write.was-corrected", {
+                attributes: { "signals.count": correctionBatch.length },
+            }),
+        );
+        yield* upsertProposed(proposedBatch).pipe(
+            Effect.withSpan("signals.write.proposed", {
+                attributes: { "signals.count": proposedBatch.length },
+            }),
+        );
         if (shouldWriteSkillPairs) {
-            yield* upsertSkillPairs(pairsList, pairEdgeIds);
+            yield* upsertSkillPairs(pairsList, pairEdgeIds).pipe(
+                Effect.withSpan("signals.write.skill-pairs", {
+                    attributes: { "signals.count": pairsList.length },
+                }),
+            );
         }
-        yield* upsertRecovered(recoveryBatch);
-        yield* upsertFrictionEvents(frictionBatch);
-        yield* upsertDiagnosticEvents(diagnosticBatch);
+        yield* upsertRecovered(recoveryBatch).pipe(
+            Effect.withSpan("signals.write.recovered", {
+                attributes: { "signals.count": recoveryBatch.length },
+            }),
+        );
+        yield* upsertFrictionEvents(frictionBatch).pipe(
+            Effect.withSpan("signals.write.friction", {
+                attributes: { "signals.count": frictionBatch.length },
+            }),
+        );
+        yield* upsertDiagnosticEvents(diagnosticBatch).pipe(
+            Effect.withSpan("signals.write.diagnostics", {
+                attributes: { "signals.count": diagnosticBatch.length },
+            }),
+        );
 
         yield* Effect.logDebug("signals derived", {
             sessions: bundles.length,
