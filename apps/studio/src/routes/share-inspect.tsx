@@ -460,9 +460,8 @@ function InspectBody({
 }
 
 const SUBAGENT_BAR_STYLE: CSSProperties = {
-    padding: "8px var(--strip-x)",
-    background: "var(--page)",
-    borderTop: "1px solid var(--line)",
+    padding: "10px var(--strip-x)",
+    background: "var(--panel)",
     borderBottom: "1px solid var(--line)",
     fontSize: 12,
 };

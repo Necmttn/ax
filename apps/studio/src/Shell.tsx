@@ -49,7 +49,7 @@ export function Shell({ children }: { children: ReactNode }) {
 /** Slim chrome for a standalone shared-session gist view. */
 function ShareChrome({ children }: { children: ReactNode }) {
     return (
-        <div className="shell">
+        <div className="shell shell-share">
             <header className="masthead masthead-share">
                 <div className="brand">
                     <h1>ax</h1>

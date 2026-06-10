@@ -196,7 +196,7 @@ export function FilterBar({
         <div className="filter-bar" style={{
             position: "sticky", top: 0, zIndex: 10,
             display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center",
-            padding: "6px var(--strip-x)", borderTop: "1px solid var(--line)", background: "var(--page)",
+            padding: "8px var(--strip-x)", background: "var(--page)",
             borderBottom: "1px solid var(--line)",
             fontFamily: "ui-monospace, monospace", fontSize: 11,
         }}>
