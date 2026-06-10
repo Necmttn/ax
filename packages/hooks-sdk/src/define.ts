@@ -46,6 +46,10 @@ export const runHook = (
 
 /** Process entrypoint for `bun <hook>.ts`. Call under `import.meta.main`. */
 export const runMain = async (def: HookDefinition): Promise<void> => {
+  if (process.stdin.isTTY) {
+    process.stderr.write(`${def.name}: hook expects JSON on stdin (see @ax/hooks-sdk)\n`);
+    process.exit(0);
+  }
   const stdinText = await Bun.stdin.text();
   const outcome = await Effect.runPromise(
     runHook(def, stdinText, process.env as Record<string, string | undefined>).pipe(
