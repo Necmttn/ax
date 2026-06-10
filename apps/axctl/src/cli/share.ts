@@ -13,6 +13,7 @@ import {
 import {
     formatSharePreview,
     formatShareSuccess,
+    formatStaleUsageWarning,
     hasStaleUsage,
 } from "../share/format.ts";
 import { redactShareArtifact } from "../share/redact.ts";
@@ -109,10 +110,7 @@ export async function cmdShareWithDeps(
     const bundle = buildShareBundle(artifact);
 
     if (hasStaleUsage(artifact)) {
-        deps.writeStderr(
-            "axctl share: warning: this share has session-level cost but no per-turn usage rows; cost rails may render as $0.\n" +
-            "Re-run ingest with AX_REDERIVE_CLAUDE=1 AX_REDERIVE_SUBAGENTS=1 ax ingest here --stages=claude,subagents --since=N\n",
-        );
+        deps.writeStderr(formatStaleUsageWarning());
     }
 
     if (parsed.dryRun) {

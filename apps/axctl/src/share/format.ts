@@ -55,10 +55,21 @@ const hasTurnUsage = (artifact: AxSessionShare): boolean => {
  * no per-turn usage rows anywhere in the root or descendants. That means the
  * cost rails will render as $0 on a per-turn basis. Callers should warn the
  * user to re-ingest with AX_REDERIVE_CLAUDE=1 AX_REDERIVE_SUBAGENTS=1.
+ * Asymmetric by spec: session usage counts only when positive, while turn
+ * usage counts on presence alone (`token_usage != null`).
  */
 export function hasStaleUsage(artifact: AxSessionShare): boolean {
     if (!hasSessionUsage(artifact)) return false;
     return !hasTurnUsage(artifact);
+}
+
+/** The stale-ingest stderr warning `ax share` emits when `hasStaleUsage` is
+ *  true. `N` in `--since=N` is a literal placeholder the user fills in. */
+export function formatStaleUsageWarning(): string {
+    return (
+        "axctl share: warning: this share has session-level cost but no per-turn usage rows; cost rails may render as $0.\n" +
+        "Re-run ingest with AX_REDERIVE_CLAUDE=1 AX_REDERIVE_SUBAGENTS=1 ax ingest here --stages=claude,subagents --since=N\n"
+    );
 }
 
 export function formatSharePreview(
