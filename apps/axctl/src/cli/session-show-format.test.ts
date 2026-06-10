@@ -77,11 +77,13 @@ const MINIMAL_PAYLOAD: SessionShowPayload = {
 // ---------------------------------------------------------------------------
 
 describe("renderSessionMarkdown - sections", () => {
-    it("includes a header with short session id", () => {
+    it("includes a header with the FULL session id (short form misled - see retro)", () => {
         const out = renderSessionMarkdown(MINIMAL_PAYLOAD);
-        expect(out).toContain("# session");
-        // Short id = last 12 chars of the uuid part
-        expect(out).toContain("000000000001");
+        const headerLine = out.split("\n")[0]!;
+        expect(headerLine.startsWith("# session ")).toBe(true);
+        // Full id, not a 12-char slice: the header must echo exactly what the
+        // user queried.
+        expect(headerLine).toContain(String(MINIMAL_PAYLOAD.session.overview!.id));
     });
 
     it("includes started_at and source in overview", () => {

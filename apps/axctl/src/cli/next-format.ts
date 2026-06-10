@@ -32,3 +32,19 @@ export const renderNextFooter = (
     );
     return `\nnext:\n${lines.join("\n")}`;
 };
+
+/**
+ * Print the `next:` footer to STDERR.
+ *
+ * stderr, not stdout, deliberately: agents reflexively pipe text output
+ * through `| head -N`, and a stdout footer printed last gets decapitated
+ * (observed in 9/10 calls of the v0.21.0 dogfood retro). On a TTY both
+ * streams hit the terminal in order so the rendering is identical; under a
+ * pipe the footer stays visible on the terminal instead of vanishing into
+ * the truncated pipe. JSON paths are unaffected - they carry structured
+ * `next` on stdout.
+ */
+export const printNextFooter = (links: ReadonlyArray<NavLink>): void => {
+    const footer = renderNextFooter(links);
+    if (footer) process.stderr.write(`${footer}\n`);
+};

@@ -18,7 +18,6 @@ import type { RevertedCommitDetail, SessionDurabilityDetail } from "../metrics/r
 import { renderByRoleSection } from "./role-format.ts";
 import { prettifyProjectSlug } from "@ax/lib/shared/project-slug";
 import type { NavLink } from "@ax/lib/shared/nav-link";
-import { renderNextFooter } from "./next-format.ts";
 
 /** Optional enrichments rendered alongside the base session payload. */
 export interface SessionShowExtras {
@@ -235,7 +234,11 @@ export function renderSessionMarkdown(
     const ov = session.overview;
 
     // ── header ───────────────────────────────────────────────────────────────
-    const sid = ov ? shortId(String(ov.id)) : "unknown";
+    // Full id, not shortId: the last-12-chars short form printed a header id
+    // that didn't match what the user queried (e.g. `ax sessions show
+    // b23ebb28-…` answering `# session ec6c9e19f9d8`), which reads as a
+    // wrong-record bug. Short forms stay in lists; the header is the record.
+    const sid = ov ? String(ov.id) : "unknown";
     lines.push(`# session ${sid}`);
     lines.push("");
 
@@ -342,12 +345,6 @@ export function renderSessionMarkdown(
                 lines.push(formatChildOneLiner(child, { description: child.nickname }));
             }
         }
-    }
-
-    // ── next: footer (NavLinks - resume / parent / expand) ───────────────────
-    if (extras.next && extras.next.length > 0) {
-        const footer = renderNextFooter(extras.next);
-        if (footer) lines.push(footer);
     }
 
     return lines.join("\n");

@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { NavLink } from "@ax/lib/shared/nav-link";
-import { renderNextFooter } from "./next-format.ts";
+import { printNextFooter, renderNextFooter } from "./next-format.ts";
 
 const link = (over: Partial<NavLink>): NavLink => ({
     description: "do thing",
@@ -33,5 +33,39 @@ describe("renderNextFooter", () => {
         expect(out).toContain("cmd-5");
         expect(out).not.toContain("cmd-1");
         expect(out.indexOf("cmd-5")).toBeLessThan(out.indexOf("cmd-2"));
+    });
+});
+
+describe("printNextFooter", () => {
+    test("writes to stderr (survives stdout | head truncation), not stdout", () => {
+        const written: string[] = [];
+        const orig = process.stderr.write.bind(process.stderr);
+        process.stderr.write = ((chunk: string) => {
+            written.push(String(chunk));
+            return true;
+        }) as typeof process.stderr.write;
+        try {
+            printNextFooter([link({ cmd: "codex resume abc" })]);
+        } finally {
+            process.stderr.write = orig;
+        }
+        expect(written.join("")).toContain("codex resume abc");
+    });
+
+    test("writes nothing when no link has a cmd", () => {
+        const written: string[] = [];
+        const orig = process.stderr.write.bind(process.stderr);
+        process.stderr.write = ((chunk: string) => {
+            written.push(String(chunk));
+            return true;
+        }) as typeof process.stderr.write;
+        try {
+            printNextFooter([
+                { description: "mcp only", call: { tool: "recall", arguments: {} } },
+            ]);
+        } finally {
+            process.stderr.write = orig;
+        }
+        expect(written).toHaveLength(0);
     });
 });
