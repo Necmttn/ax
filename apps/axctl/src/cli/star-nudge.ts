@@ -7,8 +7,9 @@
 // (`ax star`) or dismisses it (`ax star --done`). Agents and the background
 // watcher run non-TTY, so they never see it.
 
-import { Effect, FileSystem, Layer } from "effect";
+import { Effect, FileSystem, Layer, Schema } from "effect";
 import { BunFileSystem, BunPath } from "@effect/platform-bun";
+import { jsonField } from "@ax/lib/decode";
 import { homedir } from "node:os";
 import { orAbsent } from "@ax/lib/shared/fs-error";
 import { posixPath } from "@ax/lib/shared/path";
@@ -98,18 +99,21 @@ export function renderNudge(): string {
     ].join("\n");
 }
 
+// optionalKey (exact-optional, no `| undefined`) matches NudgeState under
+// exactOptionalPropertyTypes.
+const nudgeStateField = jsonField(Schema.Struct({
+    starred: Schema.optionalKey(Schema.Boolean),
+    lastShownAt: Schema.optionalKey(Schema.Number),
+    shownCount: Schema.optionalKey(Schema.Number),
+}));
+
 const readState = (): Effect.Effect<NudgeState, never, FileSystem.FileSystem> =>
     Effect.gen(function* () {
         const fs = yield* FileSystem.FileSystem;
         // Original: existsSync-guard + readFileSync in a try/catch, ANY error
-        // (missing file, unreadable, malformed JSON) -> {}.
+        // (missing file, unreadable, malformed/mistyped JSON) -> {}.
         const raw = yield* fs.readFileString(statePath()).pipe(orAbsent<string | null>(null));
-        if (raw === null) return {};
-        try {
-            return JSON.parse(raw) as NudgeState;
-        } catch {
-            return {};
-        }
+        return nudgeStateField.decode(raw) ?? {};
     });
 
 const writeState = (next: NudgeState): Effect.Effect<void, never, FileSystem.FileSystem> =>

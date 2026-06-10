@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
-import { Effect, FileSystem, Layer, Option, Path, References } from "effect";
-import { BunFileSystem, BunPath } from "@effect/platform-bun";
+import { Cause, Effect, FileSystem, Layer, Option, Path, References } from "effect";
+import { BunFileSystem, BunPath, BunRuntime } from "@effect/platform-bun";
 import { Argument, Command, Flag } from "effect/unstable/cli";
 import { SurrealClient, type SurrealClientShape } from "@ax/lib/db";
 import { listSessionsHere, listSessionsAround, listSessionsNear, findSessionIdsByPrefix, type SessionRow } from "../dashboard/sessions-query.ts";
@@ -164,7 +164,6 @@ import {
 import { guidanceNext, parseSelfImproveArgs, selfImproveWeekly, sessionSummary } from "../self-improve/commands.ts";
 import {
     buildIngestEventStatement,
-    buildIngestRunFinishStatement,
     buildIngestRunStartStatement,
     buildIngestStageFinishStatement,
     buildIngestStageStartStatement,
@@ -180,7 +179,7 @@ import { pipelineTraceTransportLayer, tuiTraceTransportLayer } from "./ingest-tr
 import type { ProgressStage } from "./progress.ts";
 import { selectByKeys, selectByTag } from "../ingest/stage/select.ts";
 import { type BaseStageStats, type StageDef } from "../ingest/stage/types.ts";
-import { runIngest } from "../ingest/run.ts";
+import { runIngest, withIngestRunFinish } from "../ingest/run.ts";
 
 const boolArg = (name: string, enabled: boolean): string[] =>
     enabled ? [`--${name}`] : [];
@@ -559,17 +558,7 @@ const cmdDeriveSignals = (args: string[]) =>
             deriveSignals({ sinceDays, onProgress: progressUpdater(progress, "signals", "derive") }),
             progress,
         ).pipe(
-            Effect.tap(() => db.query(buildIngestRunFinishStatement({ runId, status: "ok" })).pipe(Effect.asVoid)),
-            Effect.catch((error) =>
-                Effect.gen(function* () {
-                    yield* db.query(buildIngestRunFinishStatement({
-                        runId,
-                        status: "error",
-                        metrics: { error: errorText(error) },
-                    }));
-                    return yield* error;
-                }),
-            ),
+            withIngestRunFinish(db, runId),
             Effect.provideService(References.MinimumLogLevel, verbose ? "Debug" : "Info"),
             Effect.ensuring(Effect.sync(() => progress.stop())),
         );
@@ -594,17 +583,7 @@ const cmdIngestInsights = (args: string[] = []) =>
             yield* telemetryStage(db, runId, "claude", "insights", ingestClaudeInsights(), progress);
         });
         yield* program.pipe(
-            Effect.tap(() => db.query(buildIngestRunFinishStatement({ runId, status: "ok" })).pipe(Effect.asVoid)),
-            Effect.catch((error) =>
-                Effect.gen(function* () {
-                    yield* db.query(buildIngestRunFinishStatement({
-                        runId,
-                        status: "error",
-                        metrics: { error: errorText(error) },
-                    }));
-                    return yield* error;
-                }),
-            ),
+            withIngestRunFinish(db, runId),
             Effect.provideService(References.MinimumLogLevel, verbose ? "Debug" : "Info"),
             Effect.ensuring(Effect.sync(() => progress.stop())),
             // ingestClaudeInsights now reads via @effect/platform FileSystem +
@@ -5884,44 +5863,55 @@ export const classifiersPackageOperationsNeedsDb = (args: ReadonlyArray<string>)
         args.includes("--boundary-replay-summary")
     );
 
-async function main() {
-    const [, , ...args] = process.argv;
+/**
+ * Route raw argv to a CLI program. Mirrors the routing that used to live in
+ * an async `main()` that `Effect.runPromise`d each branch - now every branch
+ * RETURNS its Effect so the whole invocation runs as ONE main fiber under
+ * `BunRuntime.runMain`. That makes SIGINT/SIGTERM interrupt the fiber, which
+ * lets finalizers actually run (SurrealDB close, TraceSink/OTLP flush, the
+ * ingest_run finish row + ingest-lock release) instead of hard-killing
+ * mid-run and stranding `ingest_run` rows in status "running".
+ *
+ * Non-Effect legacy commands (version/star/share) are wrapped in
+ * `Effect.promise`; a rejection becomes a defect and flows through the same
+ * `reportCliFailure` path the old `.catch` handled.
+ */
+const dispatch = (args: ReadonlyArray<string>): Effect.Effect<void, unknown> => {
     if (args[0] === undefined) {
         // Bare `ax`: brand landing (ASCII wordmark) then the command list.
-        const { formatLandingBanner } = await import("./banner.ts");
-        process.stdout.write(formatLandingBanner(AX_VERSION, process.stdout.isTTY === true) + "\n");
-        await Effect.runPromise(withoutDb(["--help"]));
-        return;
+        return Effect.gen(function* () {
+            const { formatLandingBanner } = yield* Effect.promise(() => import("./banner.ts"));
+            process.stdout.write(formatLandingBanner(AX_VERSION, process.stdout.isTTY === true) + "\n");
+            yield* withoutDb(["--help"]);
+        });
     }
     if (args[0] === "help" || args[0] === "--help" || args[0] === "-h") {
-        await Effect.runPromise(withoutDb(["--help"]));
-        return;
+        return withoutDb(["--help"]);
     }
     if (args[0] === "-V" || args[0] === "-v" || args[0] === "--version") {
-        await printVersion(args.slice(1), liveVersionDeps);
-        return;
+        return Effect.promise(() => printVersion(args.slice(1), liveVersionDeps));
     }
     if (args[0] === "upgrade") {
-        await Effect.runPromise(withoutDb(["update", ...args.slice(1)]));
-        return;
+        return withoutDb(["update", ...args.slice(1)]);
     }
     if (args[0] === "star") {
-        await cmdStar(args.slice(1));
-        return;
+        return Effect.promise(() => cmdStar(args.slice(1)));
     }
     if (args[0] === "ingest") {
         // Effect's CLI parser silently ignores unknown flags, so the removed
         // `--*-only` flags would otherwise no-op into a full ingest. Reject
-        // them up-front against raw argv before Effect strips them.
+        // them up-front against raw argv before Effect strips them. Nothing
+        // has been acquired yet, so a direct exit(2) is finalizer-safe.
         const removed = detectRemovedIngestFlag(args.slice(1));
         if (removed) {
-            console.error(
-                `axctl ingest: ${removed.flag} was removed. Use ${removed.replacement} instead.`,
-            );
-            process.exit(2);
+            return Effect.sync(() => {
+                console.error(
+                    `axctl ingest: ${removed.flag} was removed. Use ${removed.replacement} instead.`,
+                );
+                process.exit(2);
+            });
         }
-        await Effect.runPromise(withIngest(args));
-        return;
+        return withIngest(args);
     }
     if (
         args[0] === "classifiers" &&
@@ -5929,36 +5919,58 @@ async function main() {
             args[1] === "graph" ||
             args[1] === "lifecycle")
     ) {
-        await Effect.runPromise(withDb(args));
-        return;
+        return withDb(args);
     }
     if (args[0] === "classifiers" && (args[1] === "eval" || args[1] === "list" || args[1] === "package-operations")) {
-        await Effect.runPromise(withoutDb(args));
-        return;
+        return withoutDb(args);
     }
     if (args[0] === "share") {
         if (args[1] === "--help" || args[1] === "-h") {
-            await Effect.runPromise(withoutDb(args));
-            return;
+            return withoutDb(args);
         }
-        await cmdShare(args.slice(1));
-        return;
+        return Effect.promise(() => cmdShare(args.slice(1)));
     }
     if (DB_COMMANDS.has(args[0] ?? "")) {
-        await Effect.runPromise(withDb(args));
-        return;
+        return withDb(args);
     }
-    await Effect.runPromise(withoutDb(args));
-}
+    return withoutDb(args);
+};
+
+/**
+ * Legacy `axctl error:` reporting, run INSIDE the effect so `runMain`
+ * (invoked with `disableErrorReporting: true`) never pretty-logs the cause
+ * itself. Stays silent for:
+ *   - interruption-only causes (Ctrl-C): no error banner, `defaultTeardown`
+ *     maps them to exit 130;
+ *   - `ShowHelp`: `Command.runWith` already rendered help + the ERROR block;
+ *     the failure still propagates so `defaultTeardown` exits 1, matching the
+ *     old `.catch` path for usage errors.
+ */
+const reportCliFailure = (cause: Cause.Cause<unknown>): Effect.Effect<void> =>
+    Effect.sync(() => {
+        if (Cause.hasInterruptsOnly(cause)) return;
+        const err = Cause.squash(cause);
+        if (err && typeof err === "object" && "_tag" in err && err._tag === "ShowHelp") return;
+        console.error("axctl error:", err);
+    });
 
 if (import.meta.main) {
-    main()
-        .then(() => maybePrintStarNudge(process.argv.slice(2)))
-        .catch((err) => {
-            if (err && typeof err === "object" && "_tag" in err && err._tag === "ShowHelp") {
-                process.exit(1);
-            }
-            console.error("axctl error:", err);
-            process.exit(1);
-        });
+    const args = process.argv.slice(2);
+    // BunRuntime.runMain makes the CLI the process main fiber: SIGINT/SIGTERM
+    // interrupt it (finalizers run), then Runtime.defaultTeardown picks the
+    // exit code - 0 success, 1 failure (incl. ShowHelp usage errors), 130 for
+    // interruption-only (Ctrl-C). On success with exit code 0 it does NOT call
+    // process.exit, so long-lived fire-and-forget commands (`serve`, `mcp`)
+    // keep running on their own handles and keep owning their SIGINT shutdown
+    // (runMain removes its signal listeners once the main fiber completes).
+    // v4 beta runMain has no `disablePrettyLogger` option (only
+    // disableErrorReporting + teardown); reportCliFailure owns all
+    // user-facing error output.
+    BunRuntime.runMain(
+        dispatch(args).pipe(
+            Effect.tap(() => Effect.promise(() => maybePrintStarNudge(args))),
+            Effect.tapCause(reportCliFailure),
+        ),
+        { disableErrorReporting: true },
+    );
 }

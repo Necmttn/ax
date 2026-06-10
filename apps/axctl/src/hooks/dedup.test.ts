@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { Effect, Layer } from "effect";
-import { SurrealClient, type SurrealClientShape } from "@ax/lib/db";
+import { Effect } from "effect";
+import { makeTestSurrealClient, type TestSurrealClient } from "@ax/lib/testing/surreal";
 import { buildRecentInjectsQuery, findRecentInjects } from "./dedup.ts";
 
 describe("buildRecentInjectsQuery", () => {
@@ -34,7 +34,7 @@ describe("findRecentInjects", () => {
                 sessionId: undefined,
                 filePaths: ["src/a.ts"],
                 windowMinutes: 30,
-            }).pipe(Effect.provide(Layer.succeed(SurrealClient, neverCalledClient()))),
+            }).pipe(Effect.provide(neverCalledClient().layer)),
         );
         expect(result.size).toBe(0);
     });
@@ -45,53 +45,38 @@ describe("findRecentInjects", () => {
                 sessionId: "session:abc",
                 filePaths: [],
                 windowMinutes: 30,
-            }).pipe(Effect.provide(Layer.succeed(SurrealClient, neverCalledClient()))),
+            }).pipe(Effect.provide(neverCalledClient().layer)),
         );
         expect(result.size).toBe(0);
     });
 
     test("returns a set of paths from rows whose file_path appears in hook_fire", async () => {
-        let lastSql = "";
-        const client: SurrealClientShape = {
-            query: <T extends unknown[]>(sql: string) =>
-                Effect.sync(() => {
-                    lastSql = sql;
-                    return [[
-                        { file_path: "src/a.ts" },
-                        { file_path: "src/a.ts" }, // duplicates collapse
-                    ]] as T;
-                }),
-            upsert: () => Effect.void,
-            relate: () => Effect.void,
-            putFile: () => Effect.void,
-            getFile: () => Effect.succeed(""),
-            raw: {} as never,
-        };
+        const tc = makeTestSurrealClient({
+            fallback: [[
+                { file_path: "src/a.ts" },
+                { file_path: "src/a.ts" }, // duplicates collapse
+            ]],
+        });
 
         const result = await Effect.runPromise(
             findRecentInjects({
                 sessionId: "session:abc",
                 filePaths: ["src/a.ts", "src/b.ts"],
                 windowMinutes: 30,
-            }).pipe(Effect.provide(Layer.succeed(SurrealClient, client))),
+            }).pipe(Effect.provide(tc.layer)),
         );
 
         expect(result.has("src/a.ts")).toBe(true);
         expect(result.has("src/b.ts")).toBe(false);
         expect(result.size).toBe(1);
-        expect(lastSql).toContain("hook_fire");
+        expect(tc.captured.at(-1)).toContain("hook_fire");
     });
 });
 
-function neverCalledClient(): SurrealClientShape {
-    return {
-        query: () => {
+function neverCalledClient(): TestSurrealClient {
+    return makeTestSurrealClient({
+        fallback: () => {
             throw new Error("query should not have been called");
         },
-        upsert: () => Effect.void,
-        relate: () => Effect.void,
-        putFile: () => Effect.void,
-        getFile: () => Effect.succeed(""),
-        raw: {} as never,
-    };
+    });
 }

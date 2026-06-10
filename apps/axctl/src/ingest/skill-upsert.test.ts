@@ -1,6 +1,7 @@
 import { describe, expect, it, test } from "bun:test";
 import { Effect, Schema } from "effect";
-import { RecordId, type SurrealClientShape } from "@ax/lib/db";
+import { RecordId } from "@ax/lib/db";
+import { makeTestSurrealClient } from "@ax/lib/testing/surreal";
 import { skillRecordKey } from "@ax/lib/skill-id";
 import { skillRecordIdFromLookup, upsertSkillByName } from "./skill-upsert.ts";
 import { SkillsKey, SkillsStats, skillsStage } from "./skills.ts";
@@ -13,15 +14,9 @@ describe("skill upsert", () => {
     });
 
     test("falls back to modern v2 id when no existing skill has the name", async () => {
-        const upserts: string[] = [];
-        const db = {
-            query: <T extends unknown[]>() => Effect.succeed([[]] as unknown as T),
-            upsert: (id: RecordId) => Effect.sync(() => {
-                upserts.push(String(id));
-            }),
-        } as unknown as SurrealClientShape;
+        const tc = makeTestSurrealClient();
 
-        await Effect.runPromise(upsertSkillByName(db, {
+        await Effect.runPromise(upsertSkillByName(tc.client, {
             name: "new:skill",
             scope: "test",
             dir_path: "/tmp/new-skill",
@@ -30,7 +25,7 @@ describe("skill upsert", () => {
             bytes: 1,
         }));
 
-        expect(upserts).toEqual([`skill:${skillRecordKey("new:skill")}`]);
+        expect(tc.upserts.map((u) => String(u.id))).toEqual([`skill:${skillRecordKey("new:skill")}`]);
     });
 });
 

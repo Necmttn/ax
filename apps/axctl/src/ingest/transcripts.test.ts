@@ -1291,4 +1291,54 @@ describe("claude token usage", () => {
         );
         expect(buildClaudeTurnTokenUsageStatements(extracted!)).toEqual([]);
     });
+
+    test("counts malformed lines at the decode boundary without dropping valid ones", () => {
+        const extracted = __testExtractClaudeJsonlLines(
+            [
+                "{ not json at all",
+                JSON.stringify(["an", "array", "line"]),
+                JSON.stringify({
+                    type: "user",
+                    timestamp: "2026-05-09T09:00:00.000Z",
+                    message: { role: "user", content: "Do the thing." },
+                }),
+                "\"just a string\"",
+                JSON.stringify({
+                    type: "assistant",
+                    timestamp: "2026-05-09T09:00:01.000Z",
+                    message: {
+                        role: "assistant",
+                        content: [{ type: "text", text: "Done." }],
+                    },
+                }),
+            ],
+            "-tmp-project",
+            "cl-malformed",
+        );
+        expect(extracted).not.toBeNull();
+        expect(extracted!.turns).toHaveLength(2);
+        // unparseable JSON + two parseable-but-non-record lines
+        expect(extracted!.malformedLines).toBe(3);
+    });
+
+    test("tolerates wrong-typed head fields on otherwise valid lines", () => {
+        const extracted = __testExtractClaudeJsonlLines(
+            [
+                JSON.stringify({
+                    type: "user",
+                    timestamp: "2026-05-09T09:00:00.000Z",
+                    cwd: { not: "a-string" },
+                    isCompactSummary: "not-a-boolean",
+                    message: { role: "user", content: "hello" },
+                }),
+            ],
+            "-tmp-project",
+            "cl-tolerant",
+        );
+        expect(extracted).not.toBeNull();
+        expect(extracted!.malformedLines).toBe(0);
+        expect(extracted!.turns).toHaveLength(1);
+        expect(extracted!.turns[0].text).toBe("hello");
+        expect(extracted!.session.cwd).toBeNull();
+    });
 });

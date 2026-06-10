@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { Effect, Layer } from "effect";
-import { SurrealClient, type SurrealClientShape } from "@ax/lib/db";
+import { Effect } from "effect";
+import { makeTestSurrealClient, type TestSurrealClient } from "@ax/lib/testing/surreal";
 import { skillRecordKey } from "@ax/lib/skill-id";
 import {
     buildPlanSnapshotStatements,
@@ -60,19 +60,11 @@ function unescapedBacktickCount(value: string): number {
     return count;
 }
 
-function fakeClientForQueries(queries: string[]): SurrealClientShape {
-    return {
-        query: <T extends unknown[]>(sql: string) =>
-            Effect.sync(() => {
-                queries.push(sql);
-                return (sql.startsWith("SELECT VALUE id") ? [[{ id: "skill:known" }]] : []) as T;
-            }),
-        upsert: () => Effect.void,
-        relate: () => Effect.void,
-        putFile: () => Effect.void,
-        getFile: () => Effect.succeed(""),
-        raw: {} as never,
-    };
+function fakeClient(): TestSurrealClient {
+    return makeTestSurrealClient({
+        routes: [{ match: /^SELECT VALUE id/, rows: [[{ id: "skill:known" }]] }],
+        fallback: [],
+    });
 }
 
 describe("evidence writer statement builders", () => {
@@ -225,20 +217,19 @@ describe("evidence writer statement builders", () => {
     });
 
     test("relateToolCallSkill skips placeholder creation for existing skills", async () => {
-        const queries: string[] = [];
-        const client = fakeClientForQueries(queries);
+        const tc = fakeClient();
 
         await Effect.runPromise(
             relateToolCallSkill({
                 toolCallKey: "session__call",
                 skillName: "superpowers:test-driven-development",
                 ts: "2026-05-09T10:00:00.000Z",
-            }).pipe(Effect.provide(Layer.succeed(SurrealClient, client))),
+            }).pipe(Effect.provide(tc.layer)),
         );
 
-        expect(queries[0]).toContain(`SELECT VALUE id FROM skill:\`${skillRecordKey("superpowers:test-driven-development")}\``);
-        expect(queries.slice(1).join("\n")).not.toContain("UPSERT skill:");
-        expect(queries.slice(1).join("\n")).toContain("->concerns:");
+        expect(tc.captured[0]).toContain(`SELECT VALUE id FROM skill:\`${skillRecordKey("superpowers:test-driven-development")}\``);
+        expect(tc.captured.slice(1).join("\n")).not.toContain("UPSERT skill:");
+        expect(tc.captured.slice(1).join("\n")).toContain("->concerns:");
     });
 
     test("plan snapshot statements persist snapshot items and item raw JSON", () => {

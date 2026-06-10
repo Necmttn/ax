@@ -24,6 +24,7 @@
  */
 
 import { Effect, FileSystem, Option, Schema } from "effect";
+import { jsonArrayField } from "@ax/lib/decode";
 import { homedir } from "node:os";
 import { orAbsent } from "@ax/lib/shared/fs-error";
 import { SurrealClient } from "@ax/lib/db";
@@ -139,13 +140,8 @@ export const opportunityKey = (experimentKey: string, evidenceKey: string): stri
     `${safeKeyPart(experimentKey).slice(0, 48)}__${safeKeyPart(evidenceKey).slice(0, 48)}__${Bun.hash(`${experimentKey}:${evidenceKey}`).toString(16).slice(0, 12)}`;
 
 export const parseOverlapFiles = (raw: string | null): string[] => {
-    if (!raw) return [];
-    try {
-        const parsed = JSON.parse(raw);
-        return Array.isArray(parsed) ? parsed.filter((s): s is string => typeof s === "string") : [];
-    } catch {
-        return [];
-    }
+    const parsed = jsonArrayField.decode(raw);
+    return parsed ? parsed.filter((s): s is string => typeof s === "string") : [];
 };
 
 export const triggerTokensFromCandidate = (candidateKey: string): string[] => {

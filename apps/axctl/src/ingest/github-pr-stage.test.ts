@@ -1,47 +1,34 @@
 import { describe, expect, test } from "bun:test";
-import { Effect, Layer, Schema } from "effect";
-import { SurrealClient, type SurrealClientShape } from "@ax/lib/db";
+import { Effect, Schema } from "effect";
+import { makeTestSurrealClient, type TestSurrealClient } from "@ax/lib/testing/surreal";
 import { GithubPrKey, githubPrStage, ingestGithubPrs, resolveFetchCooldownMs } from "./github-pr-stage.ts";
 
 /**
- * Build a mock SurrealClient that captures every issued SQL string. The
+ * Mock SurrealClient (shared factory) capturing every issued SQL string. The
  * `repoRows` override answers the `FROM repository` discovery SELECT; the writer's
  * `FROM commit` / `FROM produced` reads get stub rows; everything else is `[[]]`.
  */
-const makeMockDb = (
-    captured: string[],
-    overrides?: { repoRows?: unknown; commitRows?: unknown; producedRows?: unknown; watermarkRows?: unknown },
-): SurrealClientShape => ({
-    query: <T extends unknown[]>(sql: string) =>
-        Effect.sync(() => {
-            captured.push(sql);
-            if (sql.includes("FROM repository")) {
-                return (overrides?.repoRows ?? [[]]) as T;
-            }
-            if (sql.includes("FROM ingest_file_state")) {
-                return (overrides?.watermarkRows ?? [[]]) as T;
-            }
-            if (sql.includes("FROM commit")) {
-                return (overrides?.commitRows ?? [["commit:`c1`"]]) as T;
-            }
-            if (sql.includes("FROM produced")) {
-                return (overrides?.producedRows ?? [["session:`s1`"]]) as T;
-            }
-            return [[]] as T;
-        }),
-    upsert: () => Effect.void,
-    relate: () => Effect.void,
-    putFile: () => Effect.void,
-    getFile: () => Effect.succeed(""),
-    raw: {} as never,
-});
+const makeMockDb = (overrides?: {
+    repoRows?: unknown[];
+    commitRows?: unknown[];
+    producedRows?: unknown[];
+    watermarkRows?: unknown[];
+}): TestSurrealClient =>
+    makeTestSurrealClient({
+        routes: {
+            "FROM repository": overrides?.repoRows ?? [[]],
+            "FROM ingest_file_state": overrides?.watermarkRows ?? [[]],
+            "FROM commit": overrides?.commitRows ?? [["commit:`c1`"]],
+            "FROM produced": overrides?.producedRows ?? [["session:`s1`"]],
+        },
+    });
 
 const run = (
     deps: Parameters<typeof ingestGithubPrs>[0],
-    db: SurrealClientShape,
+    db: TestSurrealClient,
 ) =>
     Effect.runPromise(
-        ingestGithubPrs(deps).pipe(Effect.provide(Layer.succeed(SurrealClient, db))),
+        ingestGithubPrs(deps).pipe(Effect.provide(db.layer)),
     );
 
 /** A realistic gh `pr list --json` PR object (merged, 1 review, 1 check). */
@@ -94,8 +81,7 @@ describe("githubPrStage", () => {
 
 describe("ingestGithubPrs", () => {
     test("returns zeros when no repositories have a remote + path", async () => {
-        const sql: string[] = [];
-        const db = makeMockDb(sql, { repoRows: [[]] });
+        const db = makeMockDb({ repoRows: [[]] });
 
         // No deps → real fetchPullRequests, but it's never called (no repos).
         const totals = await run(undefined, db);
@@ -112,8 +98,7 @@ describe("ingestGithubPrs", () => {
     });
 
     test("composes fetch → normalize → write for a discovered repo", async () => {
-        const sql: string[] = [];
-        const db = makeMockDb(sql, {
+        const db = makeMockDb({
             repoRows: [
                 [{ id: "repository:`r1`", root_path: "/tmp/x", remote_url: "https://github.com/o/r" }],
             ],
@@ -134,21 +119,20 @@ describe("ingestGithubPrs", () => {
         expect(totals.deliveryOutcomes).toBe(1);
 
         // The writer ran with the resolved repository ref.
-        const prStmt = sql.find((s) => s.includes("UPSERT pull_request:"));
+        const prStmt = db.captured.find((s) => s.includes("UPSERT pull_request:"));
         expect(prStmt).toBeDefined();
         expect(prStmt!).toContain("repository: repository:`r1`");
 
         // No repoPaths → the discovery SELECT is path-unfiltered but does
         // exclude non-GitHub remotes (gh would fail on every one, every run).
-        const selUnscoped = sql.find((s) => s.includes("FROM repository"));
+        const selUnscoped = db.captured.find((s) => s.includes("FROM repository"));
         expect(selUnscoped).toBeDefined();
         expect(selUnscoped!).not.toContain("root_path IN [");
         expect(selUnscoped!).toContain('remote_url CONTAINS "github"');
     });
 
     test("scopes the repository SELECT to repoPaths when provided", async () => {
-        const sql: string[] = [];
-        const db = makeMockDb(sql, {
+        const db = makeMockDb({
             repoRows: [
                 [{ id: "repository:`r1`", root_path: "/tmp/x", remote_url: "https://github.com/o/r" }],
             ],
@@ -159,7 +143,7 @@ describe("ingestGithubPrs", () => {
             db,
         );
 
-        const sel = sql.find((s) => s.includes("FROM repository"));
+        const sel = db.captured.find((s) => s.includes("FROM repository"));
         expect(sel).toBeDefined();
         expect(sel!).toContain("root_path IN [");
         expect(sel!).toContain('"/tmp/x"');
@@ -169,8 +153,7 @@ describe("ingestGithubPrs", () => {
     });
 
     test("forwards updatedSince to the fetcher (since-bounded gh search)", async () => {
-        const sql: string[] = [];
-        const db = makeMockDb(sql, {
+        const db = makeMockDb({
             repoRows: [
                 [{ id: "repository:`r1`", root_path: "/tmp/x", remote_url: "https://github.com/o/r" }],
             ],
@@ -192,8 +175,7 @@ describe("ingestGithubPrs", () => {
     });
 
     test("a failed fetch counts as degraded and writes nothing for that repo", async () => {
-        const sql: string[] = [];
-        const db = makeMockDb(sql, {
+        const db = makeMockDb({
             repoRows: [
                 [
                     { id: "repository:`bad`", root_path: "/tmp/bad", remote_url: "https://github.com/o/bad" },
@@ -217,7 +199,7 @@ describe("ingestGithubPrs", () => {
         expect(totals.repositoriesScanned).toBe(2);
         expect(totals.repositoriesDegraded).toBe(1);
         expect(totals.pullRequests).toBe(1); // only the healthy repo wrote
-        const prStmts = sql.filter((s) => s.includes("UPSERT pull_request:"));
+        const prStmts = db.captured.filter((s) => s.includes("UPSERT pull_request:"));
         expect(prStmts.every((s) => s.includes("repository:`ok`"))).toBe(true);
     });
 });
@@ -230,8 +212,7 @@ describe("fetch cooldown", () => {
     const COOLDOWN = 15 * 60 * 1000;
 
     test("skips a repo whose last successful fetch is within the cooldown", async () => {
-        const sql: string[] = [];
-        const db = makeMockDb(sql, {
+        const db = makeMockDb({
             repoRows,
             watermarkRows: [[{ path: "__github_pr_fetch__//tmp/x", mtime_ms: NOW - 60_000 }]],
         });
@@ -255,8 +236,7 @@ describe("fetch cooldown", () => {
     });
 
     test("fetches when the watermark is older than the cooldown, and advances it", async () => {
-        const sql: string[] = [];
-        const db = makeMockDb(sql, {
+        const db = makeMockDb({
             repoRows,
             watermarkRows: [[{ path: "__github_pr_fetch__//tmp/x", mtime_ms: NOW - COOLDOWN - 1 }]],
         });
@@ -276,15 +256,14 @@ describe("fetch cooldown", () => {
 
         expect(fetchCalls).toBe(1);
         expect(totals.repositoriesSkippedCooldown).toBe(0);
-        const wm = sql.find((s) => s.includes("UPSERT ingest_file_state:") && s.includes("github-pr:fetch"));
+        const wm = db.captured.find((s) => s.includes("UPSERT ingest_file_state:") && s.includes("github-pr:fetch"));
         expect(wm).toBeDefined();
         expect(wm!).toContain(`mtime_ms: ${NOW}`);
         expect(wm!).toContain('"__github_pr_fetch__//tmp/x"');
     });
 
     test("a degraded fetch does NOT advance the watermark (retries next run)", async () => {
-        const sql: string[] = [];
-        const db = makeMockDb(sql, { repoRows });
+        const db = makeMockDb({ repoRows });
 
         const totals = await run(
             {
@@ -296,13 +275,12 @@ describe("fetch cooldown", () => {
         );
 
         expect(totals.repositoriesDegraded).toBe(1);
-        const wm = sql.find((s) => s.includes("UPSERT ingest_file_state:"));
+        const wm = db.captured.find((s) => s.includes("UPSERT ingest_file_state:"));
         expect(wm).toBeUndefined();
     });
 
     test("cooldown disabled (0/absent) → no watermark read, every repo fetched", async () => {
-        const sql: string[] = [];
-        const db = makeMockDb(sql, { repoRows });
+        const db = makeMockDb({ repoRows });
         let fetchCalls = 0;
 
         await run(
@@ -316,7 +294,7 @@ describe("fetch cooldown", () => {
         );
 
         expect(fetchCalls).toBe(1);
-        expect(sql.some((s) => s.includes("SELECT path, mtime_ms FROM ingest_file_state"))).toBe(false);
+        expect(db.captured.some((s) => s.includes("SELECT path, mtime_ms FROM ingest_file_state"))).toBe(false);
     });
 
     test("resolveFetchCooldownMs: default 15m, env seconds override, 0 disables, junk falls back", () => {

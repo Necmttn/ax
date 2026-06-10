@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { Effect, Layer } from "effect";
+import { Effect, Exit, Fiber, Layer } from "effect";
 import { SurrealClient, type SurrealClientShape } from "@ax/lib/db";
 import { LiveTraceLayer } from "@ax/lib/live-traces/Tracer";
 import {
@@ -10,7 +10,7 @@ import {
 import type { TraceEvent } from "@ax/lib/live-traces/types";
 import { StageRegistryLive, type StageDef } from "./stage/registry.ts";
 import { BaseStageStats, StageMeta } from "./stage/types.ts";
-import { runIngest, stageEventName } from "./run.ts";
+import { runIngest, stageEventName, withIngestRunFinish } from "./run.ts";
 
 const fakeDb = () => {
     const queries: string[] = [];
@@ -26,7 +26,7 @@ const fakeDb = () => {
         getFile: () => Effect.succeed(""),
         raw: {} as SurrealClientShape["raw"],
     };
-    return { queries, layer: Layer.succeed(SurrealClient, client) };
+    return { queries, client, layer: Layer.succeed(SurrealClient, client) };
 };
 
 const stage = (key: string, deps: string[] = []): StageDef => ({
@@ -54,6 +54,48 @@ describe("stageEventName", () => {
         expect(stageEventName("pricing")).toEqual({ source: "pricing", stage: "models" });
         expect(stageEventName("turn-analysis")).toEqual({ source: "turn-analysis", stage: "derive" });
         expect(stageEventName("unknown-provider")).toEqual({ source: "unknown-provider", stage: "run" });
+    });
+});
+
+describe("withIngestRunFinish", () => {
+    const finishWrites = (queries: string[]) =>
+        queries.filter((q) => q.startsWith("UPDATE ingest_run:`r1`"));
+
+    it("writes status ok on success", async () => {
+        const db = fakeDb();
+        const result = await Effect.runPromise(
+            withIngestRunFinish(db.client, "r1")(Effect.succeed("done")),
+        );
+        expect(result).toBe("done");
+        const writes = finishWrites(db.queries);
+        expect(writes).toHaveLength(1);
+        expect(writes[0]).toContain('status = "ok"');
+    });
+
+    it("writes status error with the failure text and re-fails", async () => {
+        const db = fakeDb();
+        const exit = await Effect.runPromiseExit(
+            withIngestRunFinish(db.client, "r1")(Effect.fail(new Error("boom"))),
+        );
+        expect(Exit.isFailure(exit)).toBe(true);
+        const writes = finishWrites(db.queries);
+        expect(writes).toHaveLength(1);
+        expect(writes[0]).toContain('status = "error"');
+        expect(writes[0]).toContain("boom");
+    });
+
+    it("writes status error + interrupted on fiber interruption", async () => {
+        const db = fakeDb();
+        const fiber = Effect.runFork(
+            withIngestRunFinish(db.client, "r1")(Effect.never),
+        );
+        // Let the fiber start (and register the onExit finalizer) first.
+        await new Promise((resolve) => setTimeout(resolve, 10));
+        await Effect.runPromise(Fiber.interrupt(fiber));
+        const writes = finishWrites(db.queries);
+        expect(writes).toHaveLength(1);
+        expect(writes[0]).toContain('status = "error"');
+        expect(writes[0]).toContain("interrupted");
     });
 });
 
