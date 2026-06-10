@@ -93,8 +93,6 @@ import { deriveSignals } from "../ingest/derive-signals.ts";
 import { deriveTurnIntents } from "../ingest/derive-intents.ts";
 import { fetchSkillStats } from "../queries/skill-stats.ts";
 import { fetchUnusedSkills } from "../queries/unused-skills.ts";
-import { serveDashboard } from "../dashboard/server.ts";
-import { serveMcp } from "../mcp/server.ts";
 import { fetchRecall, type RecallSource, type RecallScope } from "../dashboard/recall.ts";
 import { fetchSessionShow } from "../dashboard/session-show.ts";
 import { fetchSessionCompare } from "../dashboard/session-compare.ts";
@@ -123,6 +121,7 @@ import { signalsCommand, signalsRuntime } from "./commands/signals.ts";
 import { evidenceCommand, evidenceRuntime } from "./commands/evidence.ts";
 import { contextCommand, contextRuntime } from "./commands/context.ts";
 import { projectCommand, projectRuntime } from "./commands/project.ts";
+import { serveCommand, mcpCommand, tuiCommand, serveRuntime } from "./commands/serve.ts";
 import type { RuntimeManifest } from "./commands/manifest.ts";
 import { resolvePwdRepository } from "../pwd.ts";
 import { detectStaleness } from "@ax/lib/transcript-staleness";
@@ -4147,20 +4146,6 @@ const retroCommand = Command.make("retro").pipe(
     Command.withSubcommands([retroEmitCommand, retroListCommand, retroPendingCommand, retroBriefCommand, retroReflectCommand, retroMetaCommand, retroPlanCommand]),
 );
 
-const serveCommand = Command.make(
-    "serve",
-    { port: Flag.integer("port").pipe(Flag.withDefault(1738)) },
-    ({ port }) => Effect.sync(() => serveDashboard([`--port=${port}`])),
-).pipe(Command.withDescription("Serve the live web dashboard locally"));
-
-// Manages its own long-lived ManagedRuntime (like serve), so it is deliberately
-// NOT in DB_COMMANDS - it routes through `withoutDb` and builds AppLayer itself.
-const mcpCommand = Command.make(
-    "mcp",
-    {},
-    () => Effect.sync(() => serveMcp([])),
-).pipe(Command.withDescription("Run an MCP server (stdio) exposing ax's read-only queries"));
-
 const usd = (value: unknown): string => {
     const n = typeof value === "number" ? value : typeof value === "string" ? Number(value) : NaN;
     return Number.isFinite(n) ? `$${n.toFixed(4)}` : "$0.0000";
@@ -5142,16 +5127,6 @@ const updateCommand = Command.make(
         ),
 ).pipe(Command.withDescription("Update axctl from the latest GitHub release"));
 
-const tuiCommand = Command.make("tui", {}, () =>
-    Effect.promise(async () => {
-        // TUI manages its own AppLayer scope so the SurrealDB connection
-        // outlives the React tree. Dynamic import keeps React/opentui out
-        // of the load path for non-TUI commands.
-        const { runTui } = await import("../tui/index.tsx");
-        await runTui();
-    }),
-).pipe(Command.withDescription("Open the interactive dashboard"));
-
 const installCommand = Command.make("install", {}, () =>
     cmdInstall(),
 ).pipe(Command.withDescription("One-shot setup: daemon, watcher, symlink (then runs `ax setup`)"));
@@ -5412,7 +5387,6 @@ const LEGACY_RUNTIME: RuntimeManifest = {
     hook: "db",
     hooks: "db",
     agents: "db",
-    tui: "db",
     dogfood: "db",
 };
 
@@ -5423,6 +5397,7 @@ export const RUNTIME_BY_COMMAND: RuntimeManifest = {
     ...evidenceRuntime,
     ...contextRuntime,
     ...projectRuntime,
+    ...serveRuntime,
 };
 
 // Commands whose handlers reach into SurrealClient via AppLayer (or the
