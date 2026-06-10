@@ -122,6 +122,7 @@ import { evidenceCommand, evidenceRuntime } from "./commands/evidence.ts";
 import { contextCommand, contextRuntime } from "./commands/context.ts";
 import { projectCommand, projectRuntime } from "./commands/project.ts";
 import { serveCommand, mcpCommand, tuiCommand, serveRuntime } from "./commands/serve.ts";
+import { shareCommand, shareRuntime } from "./commands/share.ts";
 import type { RuntimeManifest } from "./commands/manifest.ts";
 import { resolvePwdRepository } from "../pwd.ts";
 import { detectStaleness } from "@ax/lib/transcript-staleness";
@@ -4839,29 +4840,6 @@ const rolesCommand = Command.make(
     ),
 );
 
-const shareCommand = Command.make(
-    "share",
-    {
-        args: Argument.string("arg").pipe(Argument.variadic({ min: 0 })),
-        dryRun: Flag.boolean("dry-run").pipe(Flag.withDefault(false)),
-        open: Flag.boolean("open").pipe(Flag.withDefault(false)),
-        public: Flag.boolean("public").pipe(Flag.withDefault(false)),
-        yes: Flag.boolean("yes").pipe(Flag.withDefault(false)),
-    },
-    ({ args, dryRun, open, public: publicGist, yes }) =>
-        Effect.promise(() =>
-            cmdShare([
-                ...args,
-                ...boolArg("dry-run", dryRun),
-                ...boolArg("open", open),
-                ...boolArg("public", publicGist),
-                ...boolArg("yes", yes),
-            ]),
-        ),
-).pipe(
-    Command.withDescription("Publish a redacted session share Gist"),
-);
-
 const readStdinAll = (): Promise<string> =>
     new Promise((resolve, reject) => {
         let data = "";
@@ -5398,6 +5376,7 @@ export const RUNTIME_BY_COMMAND: RuntimeManifest = {
     ...contextRuntime,
     ...projectRuntime,
     ...serveRuntime,
+    ...shareRuntime,
 };
 
 // Commands whose handlers reach into SurrealClient via AppLayer (or the
