@@ -9,7 +9,14 @@ import { createJavaScriptRegexEngine } from "shiki/engine/javascript";
 
 export type { ThemedToken };
 
-export const THEME = "github-light";
+/** light = transcript surfaces (white/panel bg); dark = terminal output
+ *  blocks. catppuccin-mocha's editor background is #1e1e2e - exactly the
+ *  studio's --term-bg - so dark tokens sit on the block's own color. */
+export type HighlightTheme = "light" | "dark";
+const THEME_NAME: Record<HighlightTheme, string> = {
+    light: "github-light",
+    dark: "catppuccin-mocha",
+};
 
 const LANG_LOADERS: Record<string, () => Promise<unknown>> = {
     typescript: () => import("@shikijs/langs/typescript"),
@@ -36,7 +43,7 @@ let corePromise: Promise<HighlighterCore> | null = null;
 
 function getCore(): Promise<HighlighterCore> {
     corePromise ??= createHighlighterCore({
-        themes: [import("@shikijs/themes/github-light")],
+        themes: [import("@shikijs/themes/github-light"), import("@shikijs/themes/catppuccin-mocha")],
         langs: [],
         engine: createJavaScriptRegexEngine(),
     });
@@ -65,8 +72,12 @@ function ensureLang(lang: string): Promise<boolean> {
 }
 
 /** Themed token lines for `code`, or null when the grammar is unavailable. */
-export async function tokenize(code: string, lang: string): Promise<ThemedToken[][] | null> {
+export async function tokenize(
+    code: string,
+    lang: string,
+    theme: HighlightTheme = "light",
+): Promise<ThemedToken[][] | null> {
     if (!(await ensureLang(lang))) return null;
     const core = await getCore();
-    return core.codeToTokens(code, { lang, theme: THEME }).tokens;
+    return core.codeToTokens(code, { lang, theme: THEME_NAME[theme] }).tokens;
 }
