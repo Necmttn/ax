@@ -85,9 +85,11 @@ const readParked = (
         if (raw.trim() === "") return [];
         const parsed = decodeJsonOrNull(raw);
         if (parsed === null) {
-            return yield* Effect.fail(
-                new HookConfigParseError({ provider: "ax", file: path, reason: "corrupt park sidecar: invalid JSON" }),
-            );
+            return yield* new HookConfigParseError({
+                provider: "ax",
+                file: path,
+                reason: "corrupt park sidecar: invalid JSON",
+            });
         }
         return parsed as ReadonlyArray<ParkedEntry>;
     });
