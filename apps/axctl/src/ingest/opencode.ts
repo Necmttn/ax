@@ -944,7 +944,9 @@ export const ingestOpenCode = (
             } catch (error) {
                 return failedExtract(dbPath, error);
             }
-        });
+        }).pipe(Effect.withSpan("opencode.extract", {
+            attributes: { "file.name": dbPath.slice(dbPath.lastIndexOf("/") + 1) },
+        }));
 
         if (extract.sessions.length === 0) {
             return {
@@ -967,7 +969,7 @@ export const ingestOpenCode = (
                 raw_file: dbPath,
             });
         }
-        yield* executeStatements(buildOpenCodeBatchStatements(extract, dbPath), { chunkSize: 500 });
+        yield* executeStatements(buildOpenCodeBatchStatements(extract, dbPath), { chunkSize: 500, label: "opencode" });
 
         return {
             sessions: extract.sessions.length,

@@ -1438,7 +1438,7 @@ const buildCodexBatchStatements = (
 export const __testBuildCodexBatchStatements = buildCodexBatchStatements;
 
 const queryCodexStatements = (statements: readonly string[]) =>
-    executeStatements(statements, { chunkSize: 500 });
+    executeStatements(statements, { chunkSize: 500, label: "codex" });
 
 interface CodexIngestOpts {
     sinceDays: number | undefined;
@@ -1730,7 +1730,14 @@ export const ingestCodex = (
                 yield* Effect.logDebug("codex ingest progress", counts);
             }
             activeFiles -= 1;
-        }), { concurrency, discard: true });
+        }).pipe(Effect.withSpan("codex.file", {
+            // Basename only: keeps exported-trace attributes small (the full
+            // session path is reconstructable locally if ever needed).
+            attributes: {
+                "file.name": file.path.slice(file.path.lastIndexOf("/") + 1),
+                "file.bytes": file.sizeBytes,
+            },
+        })), { concurrency, discard: true });
         yield* Effect.logDebug("codex ingest complete", {
             files: fileCount,
             records: recordCount(),

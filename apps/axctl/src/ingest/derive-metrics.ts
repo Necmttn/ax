@@ -53,17 +53,30 @@ export const deriveMetrics = (
         //    needing the read-time `fillEstimatedCost` helper. Independent of
         //    the dirty set - runs before the empty-dirty early return so daemon
         //    `--since=1` ingests heal history incrementally.
-        const costs = yield* deriveCostBackfill();
+        const costs = yield* deriveCostBackfill().pipe(
+            Effect.tap((c) => Effect.annotateCurrentSpan("derive.cost.backfilled", c.backfilled)),
+            Effect.withSpan("derive.cost-backfill"),
+        );
 
         // 1. Freshness backbone - full-history commit.reverted (diff-only writes).
-        const reverted = yield* computeRevertedCommits();
+        const reverted = yield* computeRevertedCommits().pipe(
+            Effect.tap((r) =>
+                Effect.all([
+                    Effect.annotateCurrentSpan("derive.reverted.count", r.revertedCount),
+                    Effect.annotateCurrentSpan("derive.reverted.skipped", r.skipped),
+                ]),
+            ),
+            Effect.withSpan("derive.commit-reverted"),
+        );
 
         // 1b. PR-driven dirty source (issue #172): sessions producing commits
         //     whose pull_request merge_sha/merged_at changed since the last
         //     github-pr ingest. Without this, an OLD session whose PR merges
         //     LATER keeps a stale/NULL time_to_land_ms on the daemon's
         //     `--since=1` path until a full re-derive.
-        const prDirty = yield* computePrMergeDirtySessions();
+        const prDirty = yield* computePrMergeDirtySessions().pipe(
+            Effect.withSpan("derive.pr-merge-dirty"),
+        );
 
         // 2. Dirty set: sessions in the window, PLUS any session that produced a
         //    commit whose `reverted` flag *changed* this run (either direction).
@@ -79,7 +92,7 @@ export const deriveMetrics = (
             : "";
         const dirty = (yield* db.query<[string[]]>(
             `SELECT VALUE type::string(id) FROM session WHERE ${sinceClause}${changedClause};`,
-        ))?.[0] ?? [];
+        ).pipe(Effect.withSpan("derive.dirty-set")))?.[0] ?? [];
         const dirtySet = new Set(
             (dirty as unknown as unknown[]).filter(
                 (s): s is string => typeof s === "string" && s.length > 0,
@@ -93,7 +106,14 @@ export const deriveMetrics = (
             // reverted set itself changed (no new sessions ⇒ no new `edited`
             // edges), so the bounded cascade re-derive runs only on that path -
             // BEFORE the watermarks advance, so a crash re-runs it next time.
-            const cascadeEdges = reverted.skipped ? 0 : yield* deriveFragilityCascade();
+            const cascadeEdges = reverted.skipped
+                ? 0
+                : yield* deriveFragilityCascade().pipe(
+                    Effect.tap((edges) => Effect.annotateCurrentSpan("derive.cascade.edges", edges)),
+                    Effect.withSpan("derive.fragility-cascade", {
+                        attributes: { "derive.cascade.path": "empty-dirty" },
+                    }),
+                );
             if (!reverted.skipped) yield* advanceRevertedWatermark(reverted.fingerprint);
             // Safe here: prDirty.diff only carries PRs whose merge sha RESOLVED
             // locally (unresolved ones are held back to re-diff next run), so
@@ -115,7 +135,9 @@ export const deriveMetrics = (
             const refs = [...frontier].map((id) => recordLiteral("session", recordKeyPart(id, "session") ?? "")).join(", ");
             const parents = (yield* db.query<[string[]]>(
                 `SELECT VALUE type::string(in) FROM spawned WHERE out IN [${refs}];`,
-            ))?.[0] ?? [];
+            ).pipe(Effect.withSpan("derive.spawn-parents", {
+                attributes: { "derive.spawn.depth": depth, "derive.spawn.frontier": frontier.size },
+            })))?.[0] ?? [];
             frontier = new Set();
             for (const p of parents) if (typeof p === "string" && !all.has(p)) { all.add(p); frontier.add(p); }
         }
@@ -132,6 +154,12 @@ export const deriveMetrics = (
                 computeDelegationRatio(expandedIds),
             ],
             { concurrency: 6 },
+        ).pipe(
+            // ONE span for the whole per-session metric computation (NOT per
+            // session - bounded cardinality), carrying the dirty-set size.
+            Effect.withSpan("derive.session-metrics", {
+                attributes: { "derive.sessions": expandedIds.length },
+            }),
         );
 
         // 4. One session_metrics row per dirty session (+ spawn parents).
@@ -149,14 +177,19 @@ export const deriveMetrics = (
                 + `delegation_ratio: ${num(del.get(id) ?? null)}, `
                 + `ts: time::now() };`;
         });
-        yield* executeStatementsWith(db, stmts, { chunkSize: 500 });
+        yield* executeStatementsWith(db, stmts, { chunkSize: 500, label: "sessionMetrics" });
 
         // 5. Fragility-cascade precompute (issue #171): bounded full rewrite of
         //    the `fragility_cascade` table so `ax signals show fragility_cascade`
         //    reads stored rows instead of doing live edge derefs. Runs whenever
         //    sessions were dirty (new `edited` edges can add downstream fixers)
         //    and on reverted-set changes (handled above for the empty dirty set).
-        const cascadeEdges = yield* deriveFragilityCascade();
+        const cascadeEdges = yield* deriveFragilityCascade().pipe(
+            Effect.tap((edges) => Effect.annotateCurrentSpan("derive.cascade.edges", edges)),
+            Effect.withSpan("derive.fragility-cascade", {
+                attributes: { "derive.cascade.path": "dirty" },
+            }),
+        );
 
         // Advance the commit-reverted + PR-merge watermarks ONLY now that the
         // dependent session_metrics rows are persisted - a crash before this

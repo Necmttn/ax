@@ -832,7 +832,7 @@ export const ingestPi = (
                 ended_at: new Date(extracted.session.ended_at),
                 raw_file: extracted.sourcePath ?? undefined,
             });
-            yield* executeStatements(buildPiBatchStatements(extracted), { chunkSize: 500 });
+            yield* executeStatements(buildPiBatchStatements(extracted), { chunkSize: 500, label: "pi" });
             sessionCount += 1;
             eventCount += extracted.providerEvents.length;
             turnCount += extracted.turns.length;

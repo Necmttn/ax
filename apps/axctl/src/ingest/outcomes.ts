@@ -249,7 +249,10 @@ export const deriveOutcomes = (opts: { sinceDays: number | undefined } = { since
     Effect.gen(function* () {
         const db = yield* SurrealClient;
         const [toolCalls, userTurns] = yield* Effect.all(
-            [fetchToolCalls(opts.sinceDays), fetchUserTurns(opts.sinceDays)],
+            [
+                fetchToolCalls(opts.sinceDays).pipe(Effect.withSpan("outcomes.fetch-tool-calls")),
+                fetchUserTurns(opts.sinceDays).pipe(Effect.withSpan("outcomes.fetch-user-turns")),
+            ],
             { concurrency: 2 },
         );
         const outcomes = deriveCommandOutcomes(toolCalls);
@@ -258,8 +261,10 @@ export const deriveOutcomes = (opts: { sinceDays: number | undefined } = { since
             ...outcomes.map(commandOutcomeStatement),
             ...ngrams.map(ngramStatement),
         ];
-        yield* db.query("DELETE user_message_ngram;");
-        yield* executeStatementsWith(db, statements, { chunkSize: 500 });
+        yield* db.query("DELETE user_message_ngram;").pipe(
+            Effect.withSpan("outcomes.delete-ngrams"),
+        );
+        yield* executeStatementsWith(db, statements, { chunkSize: 500, label: "outcomes" });
         return {
             commandOutcomes: outcomes.length,
             userMessageNgrams: ngrams.length,
