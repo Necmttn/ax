@@ -117,14 +117,25 @@ export const runCommand = Effect.fn("process.runCommand")(
         options: SpawnOptions = {},
     ) {
         const proc = yield* spawnScoped(command, args, options);
-        const [stdout, stderr] = yield* Effect.promise(() =>
-            Promise.all([
-                new Response(proc.stdout).text(),
-                new Response(proc.stderr).text(),
-            ]),
-        );
-        yield* Effect.promise(() => proc.exited);
-        return { stdout, stderr, code: proc.exitCode ?? 0 } satisfies ProcessResult;
+        // Stream reads and the exit wait can reject (e.g. a torn-down stream);
+        // wrap them so the failure stays a typed ProcessError instead of
+        // escaping as a defect (same coverage as the old single-tryPromise
+        // bunExec).
+        return yield* Effect.tryPromise({
+            try: async () => {
+                const [stdout, stderr] = await Promise.all([
+                    new Response(proc.stdout).text(),
+                    new Response(proc.stderr).text(),
+                ]);
+                await proc.exited;
+                return { stdout, stderr, code: proc.exitCode ?? 0 } satisfies ProcessResult;
+            },
+            catch: (err) =>
+                new ProcessError({
+                    command: `${command} ${args.join(" ")}`,
+                    message: err instanceof Error ? err.message : String(err),
+                }),
+        });
     },
     (effect) => Effect.scoped(effect),
 );

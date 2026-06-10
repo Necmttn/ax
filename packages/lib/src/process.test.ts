@@ -123,6 +123,30 @@ describe("spawnScoped / runCommand", () => {
         expect(outcome).toBe("ProcessError");
     });
 
+    test("stream-read rejection surfaces as a typed ProcessError, not a defect", async () => {
+        // There is no injection seam for the Bun stream readers, so stub the
+        // global `Response` (the only consumer inside runCommand's read block)
+        // to force a read rejection, and restore it afterwards.
+        const RealResponse = globalThis.Response;
+        class FailingResponse {
+            text(): Promise<string> {
+                return Promise.reject(new Error("forced read failure"));
+            }
+        }
+        globalThis.Response = FailingResponse as unknown as typeof Response;
+        try {
+            // Effect.flip only converts typed failures; a defect would reject
+            // the runPromise instead of resolving with the error.
+            const error = await Effect.runPromise(
+                runCommand("/bin/echo", ["hi"]).pipe(Effect.flip),
+            );
+            expect(error._tag).toBe("ProcessError");
+            expect(error.message).toContain("forced read failure");
+        } finally {
+            globalThis.Response = RealResponse;
+        }
+    });
+
     test("interrupting the fiber kills the spawned child", async () => {
         let pid = 0;
         const program = Effect.scoped(
