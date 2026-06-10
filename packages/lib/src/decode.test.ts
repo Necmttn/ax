@@ -2,7 +2,6 @@ import { describe, expect, test } from "bun:test";
 import { Schema } from "effect";
 import {
     decodeJsonOrNull,
-    decodeJsonOrNullAs,
     decodeJsonRecordOrNull,
     encodeJsonOrNull,
     jsonArrayField,
@@ -27,17 +26,17 @@ describe("decodeJsonOrNull", () => {
         expect(decodeJsonOrNull("{")).toBeNull();
     });
 
-    test("validates decoded JSON against a typed Schema", () => {
-        const HookPayload = Schema.Struct({
+    test("validates decoded JSON against a typed Schema via jsonField", () => {
+        const hookPayloadField = jsonField(Schema.Struct({
             event: Schema.String,
             files: Schema.Array(Schema.String),
-        });
+        }));
 
-        expect(decodeJsonOrNullAs(HookPayload, '{"event":"read","files":["src/a.ts"]}')).toEqual({
+        expect(hookPayloadField.decode('{"event":"read","files":["src/a.ts"]}')).toEqual({
             event: "read",
             files: ["src/a.ts"],
         });
-        expect(decodeJsonOrNullAs(HookPayload, '{"event":"read","files":[1]}')).toBeNull();
+        expect(hookPayloadField.decode('{"event":"read","files":[1]}')).toBeNull();
     });
 
     test("decodes only JSON object records for record boundaries", () => {
@@ -77,15 +76,6 @@ describe("jsonField", () => {
         expect(metricsField.decode("not json")).toBeNull();
         expect(metricsField.decode('{"fix_chain_count":"four"}')).toBeNull();
         expect(metricsField.decode("[1,2]")).toBeNull();
-    });
-
-    test("counts decode failures via onDecodeFailure without changing the result", () => {
-        const failures: string[] = [];
-        const counted = jsonField(Metrics, { onDecodeFailure: (input) => failures.push(input) });
-        expect(counted.decode('{"fix_chain_count":1}')).toEqual({ fix_chain_count: 1 });
-        expect(counted.decode("{corrupt")).toBeNull();
-        expect(counted.decode(null)).toBeNull(); // null input is absent, not corrupt
-        expect(failures).toEqual(["{corrupt"]);
     });
 
     test("round-trips encode -> decode", () => {

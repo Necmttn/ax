@@ -104,38 +104,20 @@ describe("makeTestSurrealClient - sequenced responses", () => {
     });
 });
 
-describe("makeTestSurrealClient - write recording", () => {
-    test("upsert and relate record their arguments and succeed", async () => {
+describe("makeTestSurrealClient - writes", () => {
+    test("upsert records its arguments and succeeds", async () => {
         const tc = makeTestSurrealClient();
         const id = new RecordId("skill", "tdd");
         await Effect.runPromise(tc.client.upsert(id, { name: "tdd" }));
+        expect(tc.upserts).toEqual([{ id, content: { name: "tdd" } }]);
+    });
+
+    test("relate/putFile are no-ops and getFile resolves ''", async () => {
+        const tc = makeTestSurrealClient();
         await Effect.runPromise(
             tc.client.relate(new RecordId("a", "1"), new RecordId("edge", "e"), new RecordId("b", "2"), { w: 1 }),
         );
-        expect(tc.upserts).toEqual([{ id, content: { name: "tdd" } }]);
-        expect(tc.relates).toHaveLength(1);
-        expect(String(tc.relates[0]!.from)).toBe("a:⟨1⟩");
-        expect(tc.relates[0]!.data).toEqual({ w: 1 });
-    });
-
-    test("putFile stores and getFile reads it back (default '')", async () => {
-        const tc = makeTestSurrealClient();
-        expect(await Effect.runPromise(tc.client.getFile("b", "missing.txt"))).toBe("");
         await Effect.runPromise(tc.client.putFile("b", "x.jsonl", "line1"));
-        expect(tc.files.get("b:/x.jsonl")).toBe("line1");
-        expect(await Effect.runPromise(tc.client.getFile("b", "x.jsonl"))).toBe("line1");
-    });
-
-    test("overrides replace the recording defaults", async () => {
-        const seen: string[] = [];
-        const tc = makeTestSurrealClient({
-            upsert: (id) =>
-                Effect.sync(() => {
-                    seen.push(String(id));
-                }),
-        });
-        await Effect.runPromise(tc.client.upsert(new RecordId("skill", "x"), {}));
-        expect(seen).toEqual(["skill:x"]);
-        expect(tc.upserts).toEqual([]); // default recorder bypassed
+        expect(await Effect.runPromise(tc.client.getFile("b", "x.jsonl"))).toBe("");
     });
 });

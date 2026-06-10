@@ -20,10 +20,10 @@ export const decodeJsonOrNull = (input: string): unknown | null => {
 
 /**
  * Decode a JSON string and validate the parsed payload against an Effect
- * Schema. This is the preferred boundary helper when callers know the shape
- * they expect from stdin, JSONL, DB labels, or file payloads.
+ * Schema. Internal building block for `decodeJsonRecordOrNull`; external
+ * callers wanting a typed JSON-string codec should use `jsonField`.
  */
-export const decodeJsonOrNullAs = <T>(
+const decodeJsonOrNullAs = <T>(
     schema: Schema.Decoder<T, never>,
     input: string,
 ): T | null => {
@@ -58,22 +58,11 @@ export type PureSchema = Schema.Top & {
     readonly EncodingServices: never;
 };
 
-export interface JsonFieldOptions {
-    /**
-     * Called when a non-null input fails to decode (malformed JSON or a
-     * schema mismatch). Lets callers count "corrupted" rows without giving
-     * up the lenient typed-or-null decode contract.
-     */
-    readonly onDecodeFailure?: (input: string) => void;
-}
-
 /**
  * Typed codec for a SurrealDB-v3 JSON-encoded nested field (nested objects
  * are stored as strings - see "Schema rules of thumb" in CLAUDE.md).
  */
 export interface JsonField<S extends PureSchema> {
-    /** The underlying `Schema.fromJsonString(schema)` for composition. */
-    readonly schema: Schema.fromJsonString<S>;
     /**
      * Lenient decode: `null`/`undefined` input, malformed JSON, or a schema
      * mismatch all yield `null`. Callers handle the `null` branch the same
@@ -97,19 +86,15 @@ export interface JsonField<S extends PureSchema> {
  */
 export const jsonField = <S extends PureSchema>(
     schema: S,
-    options?: JsonFieldOptions,
 ): JsonField<S> => {
     const json = Schema.fromJsonString(schema);
     const decodeOption = Schema.decodeUnknownOption(json);
     const encodeOption = Schema.encodeUnknownOption(json);
     return {
-        schema: json,
         decode: (input) => {
             if (input === null || input === undefined) return null;
             const result = decodeOption(input);
-            if (Option.isSome(result)) return result.value;
-            options?.onDecodeFailure?.(input);
-            return null;
+            return Option.isSome(result) ? result.value : null;
         },
         encode: (value) => {
             const result = encodeOption(value);

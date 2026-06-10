@@ -1,5 +1,5 @@
 import { Effect, Layer } from "effect";
-import type { AnyRecordId, RecordId, Surreal, Table } from "surrealdb";
+import type { RecordId, Surreal } from "surrealdb";
 import { SurrealClient, type SurrealClientShape } from "../db.ts";
 import type { DbError } from "../errors.ts";
 
@@ -21,9 +21,9 @@ import type { DbError } from "../errors.ts";
  *   (indexed by call order, counted even when a route matched first).
  * - **Default-empty**: unmatched queries resolve `[[]]` (overridable via
  *   `fallback`).
- * - **Write recording**: `upsert`/`relate` are no-ops that record into
- *   `upserts`/`relates`; `putFile` records into `files`; `getFile` reads
- *   `files` (default `""`). All overridable per option.
+ * - **Writes**: `upsert` is a no-op that records into `upserts`; `relate`/
+ *   `putFile` are plain no-ops and `getFile` resolves `""` (grow recorders
+ *   back only when a test actually asserts on them).
  *
  * For bun:test - no vitest dependency.
  */
@@ -59,13 +59,6 @@ export interface TestSurrealUpsertCall {
     readonly content: Record<string, unknown>;
 }
 
-export interface TestSurrealRelateCall {
-    readonly from: AnyRecordId;
-    readonly edge: Table | RecordId;
-    readonly to: AnyRecordId;
-    readonly data: Record<string, unknown> | undefined;
-}
-
 export interface TestSurrealClientOptions {
     /** Pattern → rows for `query` responses. First match wins. */
     readonly routes?: TestSurrealRoutes;
@@ -78,14 +71,6 @@ export interface TestSurrealClientOptions {
     readonly responses?: ReadonlyArray<TestSurrealRows>;
     /** Response when nothing else matched. Default `[[]]`. */
     readonly fallback?: TestSurrealResponder;
-    /** Override the recording no-op `upsert`. */
-    readonly upsert?: SurrealClientShape["upsert"];
-    /** Override the recording no-op `relate`. */
-    readonly relate?: SurrealClientShape["relate"];
-    /** Override the recording no-op `putFile`. */
-    readonly putFile?: SurrealClientShape["putFile"];
-    /** Override `getFile` (default: serves what `putFile` stored, else `""`). */
-    readonly getFile?: SurrealClientShape["getFile"];
     /** Escape-hatch raw client; default `{} as never` (crashes if touched). */
     readonly raw?: Surreal;
 }
@@ -98,12 +83,8 @@ export interface TestSurrealClient {
     readonly captured: string[];
     /** Every `query` call with its bindings. */
     readonly calls: TestSurrealQueryCall[];
-    /** Every recorded `upsert` (unless overridden). */
+    /** Every recorded `upsert`. */
     readonly upserts: TestSurrealUpsertCall[];
-    /** Every recorded `relate` (unless overridden). */
-    readonly relates: TestSurrealRelateCall[];
-    /** `bucket:/path` → content stored via the default `putFile`. */
-    readonly files: Map<string, string | Uint8Array>;
 }
 
 const toRoutes = (routes: TestSurrealRoutes | undefined): ReadonlyArray<TestSurrealRoute> => {
@@ -133,8 +114,6 @@ export const makeTestSurrealClient = (
     const captured: string[] = [];
     const calls: TestSurrealQueryCall[] = [];
     const upserts: TestSurrealUpsertCall[] = [];
-    const relates: TestSurrealRelateCall[] = [];
-    const files = new Map<string, string | Uint8Array>();
     const fallback: TestSurrealResponder = opts.fallback ?? [[]];
     let callIndex = 0;
 
@@ -154,42 +133,14 @@ export const makeTestSurrealClient = (
                 return resolve(responder, sql, bindings);
             }) as Effect.Effect<T, DbError>,
 
-        upsert:
-            opts.upsert ??
-            ((id: RecordId, content: Record<string, unknown>) =>
-                Effect.sync(() => {
-                    upserts.push({ id, content });
-                })),
+        upsert: (id: RecordId, content: Record<string, unknown>) =>
+            Effect.sync(() => {
+                upserts.push({ id, content });
+            }),
 
-        relate:
-            opts.relate ??
-            ((
-                from: AnyRecordId,
-                edge: Table | RecordId,
-                to: AnyRecordId,
-                data?: Record<string, unknown>,
-            ) =>
-                Effect.sync(() => {
-                    relates.push({ from, edge, to, data });
-                })),
-
-        putFile:
-            opts.putFile ??
-            ((bucket: string, path: string, content: string | Uint8Array) =>
-                Effect.sync(() => {
-                    files.set(`${bucket}:/${path}`, content);
-                })),
-
-        getFile:
-            opts.getFile ??
-            ((bucket: string, path: string) =>
-                Effect.sync(() => {
-                    const stored = files.get(`${bucket}:/${path}`);
-                    if (stored === undefined) return "";
-                    return typeof stored === "string"
-                        ? stored
-                        : new TextDecoder().decode(stored);
-                })),
+        relate: () => Effect.void,
+        putFile: () => Effect.void,
+        getFile: () => Effect.succeed(""),
 
         raw: opts.raw ?? ({} as never),
     };
@@ -200,7 +151,5 @@ export const makeTestSurrealClient = (
         captured,
         calls,
         upserts,
-        relates,
-        files,
     };
 };
