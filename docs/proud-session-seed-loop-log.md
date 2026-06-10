@@ -457,3 +457,38 @@ go-ahead, not autonomous:**
 4. ingest write batching (per-row UPSERT → per-file transaction) — write path.
 
 Pausing the autonomous loop here and reporting for direction.
+
+---
+
+## Iteration 11 — classifier views: correlated context → enrichment pass (2026-06-10 ~09:20 WITA)
+
+**Context.** User said continue past convergence — taking the remaining backlog
+item #1 (the other $parent.session views).
+
+**Tried.** classifier-facts / correction-contexts / classifier-outcomes
+(20s / 20s / 38s): outer LIMIT already bounds rows, but each row ran 2-3
+correlated `$parent.session` subqueries (~1s partial scan each). Pure SQL can't
+fix this ($parent defeats the index), so: slimmed the view SQL to just the
+classifier rows and added `insights-enrich.ts` — a post-query pass that resolves
+the same context per row with LITERAL session ids (indexed) at concurrency 8.
+Field names/shapes preserved → formatInsightRows untouched; non-classifier
+views pass through.
+
+**Worked.** **20.3s → 0.44s / 20.2s → 0.49s / 37.7s → 0.49s** (~40-77x).
+Differential parity proven: literal vs correlated lookup on a failure-heavy
+session returns identical rows/order. Tests 32/32 (insights SQL-shape +
+5 new enrich tests). typecheck + effect-lint clean. Committed `bd19bac`.
+
+**Failed / friction.**
+- First sanity check looked alarming (failures/later_tool_calls all 0) — turned
+  out GENUINE (recent classifier rows come from clean sessions, incl. this
+  loop's own); proven by manual queries + the differential check.
+- SurrealDB 3.1 parse rule bit my ad-hoc test query: ORDER BY fields must
+  appear in the SELECT projection ("Missing order idiom") — production queries
+  all comply.
+
+**Next.** Remaining deep backlog: (a) verification-gaps residual ~4s = in.session
+deref over `edited` (needs edge denormalization, write-path); (b)
+buildFileContextPack → lean swap (title-priority behavior decision); (c) ingest
+write batching. All write-path/behavioral — propose PR'ing the branch first
+(4 perf commits accumulated), then tackle with fresh review.
