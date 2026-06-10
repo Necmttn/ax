@@ -918,6 +918,21 @@ DEFINE FIELD delegation_ratio   ON session_metrics TYPE option<float>;
 DEFINE FIELD ts                 ON session_metrics TYPE datetime DEFAULT time::now();
 DEFINE INDEX IF NOT EXISTS session_metrics_session ON session_metrics FIELDS session UNIQUE;
 
+-- Precomputed fragility_cascade signal edges (`ax signals show fragility_cascade`).
+-- A session (origin) produced a reverted commit touching a file; a LATER, OTHER
+-- session (downstream) edited the same file. Derived by derive-metrics with hard
+-- limits (bounded reverted-commit anchor, mass reverts skipped, capped fragile
+-- file set) and fully rewritten each run - the on-demand form risked the
+-- documented 87k-edge `in.session` deref hang. The git↔tool-call file-key
+-- namespace gap is bridged at derive time via checkout-root local-path twin
+-- keys (issue #171; see apps/axctl/src/metrics/fragility-cascade.ts).
+DEFINE TABLE fragility_cascade SCHEMAFULL;
+DEFINE FIELD origin     ON fragility_cascade TYPE record<session>;
+DEFINE FIELD downstream ON fragility_cascade TYPE record<session>;
+DEFINE FIELD weight     ON fragility_cascade TYPE int DEFAULT 0;
+DEFINE FIELD ts         ON fragility_cascade TYPE datetime DEFAULT time::now();
+DEFINE INDEX IF NOT EXISTS fragility_cascade_pair ON fragility_cascade FIELDS origin, downstream UNIQUE;
+
 DEFINE TABLE commit_classification SCHEMAFULL;
 DEFINE FIELD commit        ON commit_classification TYPE record<commit>;
 DEFINE FIELD repository    ON commit_classification TYPE option<record<repository>>;
@@ -1185,11 +1200,11 @@ DEFINE FIELD edit_kind    ON edited TYPE option<string>;
 -- `edited` lookups by source turn (e.g., 'which files did this session edit').
 DEFINE INDEX IF NOT EXISTS edited_in ON edited FIELDS in;
 DEFINE INDEX IF NOT EXISTS edited_in_out_tool ON edited FIELDS in, out, tool;
--- edited_out backs fragility_cascade's `edited WHERE out IN [files]` lookup so it
--- uses the index instead of scanning the edited table (codex #3 hardening). The
--- per-match `in.session` deref is still bounded to the fragile-file set; before
--- enabling fragility on real data (after the file-key namespace fix), move it to
--- a derive-stage precompute with limits - see docs/metrics.md.
+-- edited_out backs the fragility-cascade derive's chunked `edited WHERE out IN
+-- [files]` lookups so each chunk seeks the index instead of scanning the edited
+-- table (codex #3 hardening). The per-match `in.session` deref stays bounded by
+-- the capped fragile-file candidate set; results are precomputed into the
+-- fragility_cascade table by derive-metrics (issue #171) - see docs/metrics.md.
 DEFINE INDEX IF NOT EXISTS edited_out ON edited FIELDS out;
 
 DEFINE TABLE mentioned_file TYPE RELATION FROM turn TO file;

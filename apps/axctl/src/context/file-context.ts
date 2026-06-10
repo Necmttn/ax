@@ -2,6 +2,7 @@ import { Effect } from "effect";
 import { SurrealClient } from "@ax/lib/db";
 import type { DbError } from "@ax/lib/errors";
 import { errorSignatureRecordKey, symbolRecordKey } from "../ingest/record-keys.ts";
+import { refListSource } from "@ax/lib/shared/record-select";
 import { surrealString } from "@ax/lib/shared/surql";
 import { normalizeErrorSignature } from "../ingest/turn-references.ts";
 import { classifyTurnIntent } from "../ingest/intent-kind.ts";
@@ -643,8 +644,13 @@ const loadPriorFileSessionsLean = (fileIds: readonly string[], limit: number) =>
 
         const [sessionsResult, producedResult, deliveryResult, healthResult] =
             yield* Effect.all([
+                // Record-list selection for the by-id fetch - `FROM session
+                // WHERE id IN [...]` happens to work on `session` today, but
+                // the id IN-list form silently matches nothing on other tables
+                // (see @ax/lib/shared/record-select); don't rely on it. The
+                // non-id field IN-lists below are fine.
                 db.query<[Array<{ id: string; project: string | null; source: string | null; started_at: string | null; ended_at: string | null }>]>(
-                    `SELECT <string>id AS id, project, source, started_at, ended_at FROM session WHERE id IN [${sidLiteral}];`,
+                    `SELECT <string>id AS id, project, source, started_at, ended_at FROM ${refListSource(sessionIds)};`,
                 ),
                 db.query<[Array<{ in: string }>]>(
                     `SELECT <string>in AS in FROM produced WHERE in IN [${sidLiteral}];`,

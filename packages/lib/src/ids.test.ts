@@ -1,5 +1,22 @@
 import { describe, it, expect } from "bun:test";
-import { recordLiteral, safeRecordKey } from "./ids.ts";
+import { fileRecordKey, localPathFileRecordKey, recordLiteral, safeRecordKey } from "./ids.ts";
+
+describe("localPathFileRecordKey", () => {
+    it("matches the historical fileRecordKey('_', path) derivation exactly", () => {
+        // Existing tool-call file rows were written under fileRecordKey("_", absPath).
+        // This equality is load-bearing: a drift orphans every edited/read_file edge.
+        const path = "/Users/u/proj/src/index.ts";
+        expect(localPathFileRecordKey(path)).toBe(fileRecordKey("_", path));
+    });
+
+    it("lives in the file:repository__* namespace (identity_scope = local_path)", () => {
+        expect(localPathFileRecordKey("/tmp/a.ts").startsWith("repository__")).toBe(true);
+    });
+
+    it("is path-sensitive: different absolute paths → different keys", () => {
+        expect(localPathFileRecordKey("/a/x.ts")).not.toBe(localPathFileRecordKey("/b/x.ts"));
+    });
+});
 
 describe("recordLiteral", () => {
     it("valid key → returns table:`key`", () => {

@@ -5,11 +5,11 @@ import { skillRecordKey } from "@ax/lib/skill-id";
 import { executeStatements, executeStatementsWith } from "@ax/lib/shared/statement-exec";
 import {
     editedRelationRecordKey,
-    fileRecordKey,
     toolCallRecordKey,
     toolFileRelationRecordKey,
     toolRecordKey,
 } from "./record-keys.ts";
+import { localPathFileRecordKey } from "@ax/lib/ids";
 import {
     surrealString,
     surrealDate,
@@ -210,7 +210,9 @@ export function buildRelateToolCallSkillStatements(
 }
 
 export function toolEvidenceFileRecordKey(path: string): string {
-    return fileRecordKey("_", path);
+    // Canonical derivation lives in @ax/lib/ids so derive-time consumers
+    // (fragility-cascade's namespace bridge) compute the SAME key.
+    return localPathFileRecordKey(path);
 }
 
 export function buildToolFileEvidenceStatements(

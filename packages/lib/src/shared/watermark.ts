@@ -41,8 +41,13 @@ const MIGRATION_SENTINEL_KEY = "id-unify-v1";
  * source kind: `stableDigest("<sourceKind>|<path>")`. This unifies the two
  * pre-seam derivations (transcripts hashed the bare path; subagents hashed it a
  * different way) so the same logical file maps to exactly one row.
+ *
+ * Exported for the metrics watermarks (`commit-reverted.ts`,
+ * `pr-merge-dirty.ts`, `fragility-cascade.ts`), which store their dirty-set
+ * fingerprints in the same `ingest_file_state` table and must share this id
+ * scheme rather than hand-roll the digest.
  */
-const watermarkRecordKey = (sourceKind: string, path: string): string =>
+export const watermarkRecordKey = (sourceKind: string, path: string): string =>
     stableDigest(`${sourceKind}|${path}`);
 
 export interface FileWatermark {

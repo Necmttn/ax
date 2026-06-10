@@ -10,6 +10,12 @@
  * Evidence: docs/design/session-timeline-plan.md.
  */
 
+import {
+    CODEX_EDIT_TEXT_HINTS,
+    CODEX_TIMELINE_EDIT_HINT_COMMANDS,
+    EDIT_TOOL_NAMES,
+} from "@ax/lib/shared/tool-classes";
+
 export type UnifiedKind = "tool" | "file_edit" | "skill" | "subagent" | "noise";
 export type Importance = "high" | "med" | "low";
 
@@ -30,11 +36,8 @@ export type ProviderSource =
 const isClaudeLike = (source: ProviderSource): boolean =>
     source === "claude" || source === "claude-subagent";
 
-/** Lowercased tool names that mean "this edited a file" across claude/pi/opencode. */
-const EDIT_TOOL_NAMES = new Set([
-    "edit", "write", "multiedit", "notebookedit", // claude
-    "edit_file", "apply_diff", // cursor
-]);
+// Edit-tool names come from the shared classifier (@ax/lib/shared/tool-classes)
+// so timeline/ingest/metrics can't drift; includes codex `apply_patch`.
 const SUBAGENT_TOOL_NAMES = new Set([
     "task", // claude / opencode
     "spawn_agent", "wait_agent", "close_agent", "resume_agent", // codex
@@ -52,10 +55,11 @@ const META_NAMES = new Set([
     "update_plan", "get_goal", "update_goal", "create_goal", "write_stdin", "send_input",
 ]);
 
-/** Base command (command_norm) of a codex `exec_command` that is really a file edit. */
-const CODEX_EDIT_COMMANDS = new Set(["sed", "tee", "patch", "dd", "apply_patch"]);
-/** Substrings in an exec command that indicate an in-place file write. */
-const CODEX_EDIT_HINTS = ["apply_patch", "<<'eof'", "<<eof", "> /", ">> /", "tee "];
+// Codex shell-edit detection. The command set is the shared EDIT_COMMANDS
+// plus sed - the deliberate, named timeline-only exception (sed flags are not
+// stored on command_norm, so metrics keep sed a READ; here a false edit hint
+// only over-ranks one card). See "THE sed DECISION" in
+// @ax/lib/shared/tool-classes.
 
 export interface ClassifyInput {
     readonly name: string;
@@ -76,8 +80,8 @@ export function classifyTool(source: ProviderSource, t: ClassifyInput): Classifi
         const cmd = (t.command_norm ?? "").toLowerCase();
         const text = (t.command_text ?? "").toLowerCase();
         const isEdit =
-            CODEX_EDIT_COMMANDS.has(cmd) ||
-            CODEX_EDIT_HINTS.some((h) => text.includes(h));
+            CODEX_TIMELINE_EDIT_HINT_COMMANDS.has(cmd) ||
+            CODEX_EDIT_TEXT_HINTS.some((h) => text.includes(h));
         return isEdit ? { kind: "file_edit", importance: "high" } : { kind: "tool", importance: "high" };
     }
 

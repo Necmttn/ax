@@ -11,7 +11,7 @@ Decision record: `docs/adr/0011-session-metrics-thin-slice-over-signal-framework
 | durability_ratio | `durability_ratio` (`option<float>`) | share of the session's produced commits NOT later reverted; **NONE** when the session produced no commits (distinct from 0) |
 | produced / reverted | `produced_commits`, `reverted_commits` | commit counts behind durability |
 | time_to_land_ms | `time_to_land_ms` (`option<int>`) | fastest commit→merge latency: min over produced commits of `pull_request.merged_at − commit.ts` where `merge_sha` matches; NONE when nothing landed. (Anchored on commit ts, not `ended_at` - long sessions merge PRs while still open, which made the old anchor negative.) |
-| lines_added / lines_removed | `lines_added`, `lines_removed` | whole-line counts over the session's Edit/Write tool calls (reuses `ax loc`'s `editDelta`) |
+| lines_added / lines_removed | `lines_added`, `lines_removed` | whole-line counts over the session's edit-class tool calls: Claude Edit/Write (reuses `ax loc`'s `editDelta`) + codex/pi `apply_patch` (tool name or `exec_command` `command_norm`; counts +/- patch lines) |
 
 Surfaced by `ax sessions metrics [--here|--project P|--since N|--limit N|--json]`
 (sorted by lowest durability). `--here` scopes to the pwd repo; from inside a
@@ -70,8 +70,8 @@ Then sanity-check counts (ns=ax db=main on 127.0.0.1:8521):
 
 | metric | column on `session_metrics` | meaning |
 |---|---|---|
-| time_to_first_edit_ms | `time_to_first_edit_ms` (`option<int>`) | ms from `session.started_at` to the session's first Edit/Write tool call; NONE when the session never edited |
-| cold_start_reads | `cold_start_reads` (`int`) | count of Read/Grep/Glob tool calls before the session's first edit (how much orientation the session needed before acting) |
+| time_to_first_edit_ms | `time_to_first_edit_ms` (`option<int>`) | ms from `session.started_at` to the session's first edit-class tool call (Edit/Write, `apply_patch`, shell `tee`/`patch`/`dd` via `command_norm`); NONE when the session never edited |
+| cold_start_reads | `cold_start_reads` (`int`) | count of read/search tool calls (Read/Grep/Glob + shell `cat`/`sed`/`rg`/... via `command_norm`) before the session's first edit (how much orientation the session needed before acting) |
 | delegation_ratio | `delegation_ratio` (`option<float>`) | share of the session's produced commits attributable to spawned sub-agents vs. direct work; NONE when the session produced nothing |
 
 ## What ships in wave 3
@@ -86,7 +86,9 @@ minimal (a flat catalog array + a switch, NOT a registry/DAG/codegen).
   weight (top `--limit`, default 30). Unknown id → stderr error + exit 2 listing
   valid ids; `--json` emits the raw edges.
 - `fragility_cascade` (relation, cross-session) is now browsable through this
-  surface - the bounded `fragility-cascade.ts` computation wired to the CLI.
+  surface. `ax signals show fragility_cascade` reads the **precomputed**
+  `fragility_cascade` table (written by the `derive-metrics` stage) - a single
+  small-table scan, no live edge derefs on the read path.
   Catalog: `apps/axctl/src/metrics/catalog.ts`.
 
 ## Deferred
@@ -98,29 +100,52 @@ minimal (a flat catalog array + a switch, NOT a registry/DAG/codegen).
   need a hang-safe **bounded** design - e.g. a derive-stage precompute that joins
   the already-stored `session_metrics.durability_ratio` rather than an on-demand
   per-edge deref - and are deferred to a later wave.
-- **`fragility_cascade` is gated, not live.** It returns empty today because the
-  `touched` (git) file keys (`file:remote_*`) and `edited` (tool-call) file keys
-  (`file:repository__*`) are **disjoint namespaces** - the cross-session join can
-  never match. The signal logic + surface are correct; before it produces real
-  edges, the file-key derivation across the git and tool-call ingest paths must be
-  reconciled (join on file `path` within a repo, or unify the keys). AND, once the
-  namespace gap is fixed, the on-demand `edited WHERE out IN [files]` + `in.session`
-  deref must move to a **derive-stage precompute with limits** - reverted-touched
-  files can be numerous, so a broad fileRefs set would reproduce the documented
-  87k-edge deref hang (the `edited_out` index helps the lookup but not the deref).
-- **Incremental freshness gaps (reconciled by deep/full ingest).** On the daemon's
-  `--since=1` path, `time_to_land_ms` can stay stale for an OLD session whose PR
-  merges LATER (the dirty set keys on the time window + changed reverted commits,
-  not on PR changes). Likewise delegation depends on the spawn-tree. A full ingest
-  (no `--since`, or `AX_REDERIVE_METRICS=1`) recomputes all sessions and reconciles
-  these; the weekly deep-scan backfill is the intended reconciler. A PR-driven dirty
-  source (sessions producing commits whose PR `merge_sha`/`merged_at` changed) is
-  the proper incremental fix - deferred.
+- **`fragility_cascade` file-identity bridge (issue #171, shipped).** The
+  `touched` (git) file keys (`file:remote_*`, repo-relative `path`) and `edited`
+  (tool-call) file keys (`file:repository__*`, ABSOLUTE path) remain **disjoint
+  namespaces** - unifying them at ingest (resolving the repository inside the
+  transcript hot path) or migrating ~5k existing local-path file rows + their
+  edges was judged riskier than bridging. Instead the join is bridged
+  **deterministically at derive time**: for each fragile repo file, its
+  local-path twin keys are recomputed as
+  `localPathFileRecordKey(checkout.path + "/" + relPath)` - the exact derivation
+  tool-call ingest uses, now canonical in `@ax/lib/ids` - across the repo's
+  checkout roots, and twin edits fold back onto the canonical git file. Works on
+  ALL existing data, no migration. The computation runs as a **derive-stage
+  precompute with hard limits** in `derive-metrics` (live data has ~112k
+  reverted-touched edges): bounded reverted-commit anchor
+  (`maxRevertedCommits`), mass reverts skipped (`maxFilesPerCommit`), capped
+  fragile-file set (`maxFragileFiles`), every lookup chunked + index-anchored
+  (`touched_in`, `produced_out_ts`, `edited_out`), and the only `in.session`
+  deref bounded to candidate matches. Results land in the `fragility_cascade`
+  table (full rewrite per run); the CLI reads stored rows. Known gap: edits in a
+  checkout whose root the `checkout` table has never seen don't bridge.
+- **Incremental freshness gaps (reconciled by deep/full ingest).** The
+  `time_to_land_ms` gap is now CLOSED (issue #172): a PR-driven dirty source
+  (`apps/axctl/src/metrics/pr-merge-dirty.ts`, mirroring the commit-reverted
+  watermark) snapshots each PR's `merge_sha|merged_at` into per-PR
+  `ingest_file_state` rows (source_kind `metrics:pr_merge`); on every
+  `derive-metrics` run the diff against the current `pull_request` rows yields
+  the changed merge shas, which resolve (sha → commit → `produced.in`) to the
+  sessions whose `time_to_land_ms` must re-derive - so an OLD session whose PR
+  merges LATER refreshes on the daemon's `--since=1` path. The watermark
+  advances only AFTER the dependent `session_metrics` rows are written
+  (crash-safe, same ordering as commit-reverted). Prerequisite: the `github-pr`
+  ingest stage is restored (it was removed in 2cd3fd1 only because the
+  stage-count test lagged the registry; its `gh`-CLI fetch already degrades to
+  0 PRs offline / unauthenticated / in CI). Remaining gap: delegation depends
+  on the spawn-tree; a full ingest (no `--since`, or `AX_REDERIVE_METRICS=1`)
+  recomputes all sessions, and the weekly deep-scan backfill remains the
+  belt-and-braces reconciler.
 - The registry/DAG/`fn::` extraction - only once ~5–6 signals make the
   per-metric edits feel like copy-paste (the ADR-0011 gate).
-- **Multi-provider tool-name parity**: `time_to_first_edit_ms` +
-  `cold_start_reads` currently recognize only Claude tool names
-  (`Edit`/`Write`/`MultiEdit`/`NotebookEdit` for edits, `Read`/`Grep`/`Glob` for
-  reads/searches); Codex/Pi `apply_patch` + shell read/search commands (via
-  `tool_call.command_norm`/`command_tool`) are not yet counted -- multi-provider
-  parity is a later refinement.
+- **Multi-provider tool-name parity** (#170): DONE for `time_to_first_edit_ms`,
+  `cold_start_reads`, and `lines_added`/`lines_removed` - classification is
+  centralized in `apps/axctl/src/metrics/tool-classes.ts` (mirrors the ingest
+  file-evidence classifier `ingest/tool-file-evidence.ts`): Claude tool names
+  PLUS codex/pi `apply_patch` and shell read/search/edit commands via the
+  stored `tool_call.command_norm` column, classified in JS over the
+  session-bounded rows (no extra derefs). Still deferred: cursor/opencode
+  provider-specific read tool names (`read_file`, `codebase_search`, ...) and
+  loc estimates for non-`apply_patch` shell edits (`tee`/`patch`/`dd` count as
+  edits but contribute 0/0 lines).

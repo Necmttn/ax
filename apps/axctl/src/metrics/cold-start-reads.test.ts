@@ -17,13 +17,42 @@ describe("computeColdStartReads", () => {
         const out = await Effect.runPromise(computeColdStartReads(["session:`s1`"]).pipe(Effect.provide(db(rows))));
         expect(out.get("session:`s1`")).toBe(2);
     });
+    test("codex shell reads before an apply_patch edit count", async () => {
+        const rows = [
+            { session: "session:`cx`", name: "exec_command", command_norm: "cat", ts: "2026-06-01T00:00:01.000Z" },
+            { session: "session:`cx`", name: "exec_command", command_norm: "rg", ts: "2026-06-01T00:00:02.000Z" },
+            { session: "session:`cx`", name: "exec_command", command_norm: "sed", ts: "2026-06-01T00:00:03.000Z" },
+            { session: "session:`cx`", name: "exec_command", command_norm: "apply_patch", ts: "2026-06-01T00:00:04.000Z" },
+            { session: "session:`cx`", name: "exec_command", command_norm: "cat", ts: "2026-06-01T00:00:05.000Z" }, // after edit
+        ];
+        const out = await Effect.runPromise(computeColdStartReads(["session:`cx`"]).pipe(Effect.provide(db(rows))));
+        expect(out.get("session:`cx`")).toBe(3);
+    });
+    test("claude Bash shell reads count alongside Read/Grep", async () => {
+        const rows = [
+            { session: "session:`b1`", name: "Bash", command_norm: "sed", ts: "2026-06-01T00:00:01.000Z" },
+            { session: "session:`b1`", name: "Read", ts: "2026-06-01T00:00:02.000Z" },
+            { session: "session:`b1`", name: "Write", ts: "2026-06-01T00:00:03.000Z" },
+        ];
+        const out = await Effect.runPromise(computeColdStartReads(["session:`b1`"]).pipe(Effect.provide(db(rows))));
+        expect(out.get("session:`b1`")).toBe(2);
+    });
     test("never edited → ALL reads/searches count", async () => {
         const rows = [
             { session: "session:`s2`", name: "Read", ts: "2026-06-01T00:00:01.000Z" },
             { session: "session:`s2`", name: "Glob", ts: "2026-06-01T00:00:02.000Z" },
+            { session: "session:`s2`", name: "exec_command", command_norm: "rg", ts: "2026-06-01T00:00:03.000Z" },
         ];
         const out = await Effect.runPromise(computeColdStartReads(["session:`s2`"]).pipe(Effect.provide(db(rows))));
-        expect(out.get("session:`s2`")).toBe(2);
+        expect(out.get("session:`s2`")).toBe(3);
+    });
+    test("non-read non-edit shell rows are ignored", async () => {
+        const rows = [
+            { session: "session:`s5`", name: "Bash", command_norm: "bun", ts: "2026-06-01T00:00:01.000Z" },
+            { session: "session:`s5`", name: "Read", ts: "2026-06-01T00:00:02.000Z" },
+        ];
+        const out = await Effect.runPromise(computeColdStartReads(["session:`s5`"]).pipe(Effect.provide(db(rows))));
+        expect(out.get("session:`s5`")).toBe(1);
     });
     test("no reads → 0", async () => {
         const rows = [{ session: "session:`s3`", name: "Edit", ts: "2026-06-01T00:00:01.000Z" }];

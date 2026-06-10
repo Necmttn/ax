@@ -79,6 +79,35 @@ export function commitRecordKey(repositoryKey: string, sha: string): string {
     return `${identityPart(normalizeRepositoryKey(repositoryKey), "repository")}__${identityPart(sha, "commit")}`;
 }
 
+/**
+ * Repo scope used for tool-call file evidence, where only an absolute local
+ * path is known (no repository resolution happens in the transcript hot path).
+ *
+ * The "_" is load-bearing: `identityPart("_", "repository")` sanitizes to the
+ * literal `repository` fallback prefix, which is the namespace ALL existing
+ * `file:repository__*` rows (identity_scope = "local_path") were written
+ * under. Changing it orphans every edited/read_file/searched_file edge.
+ */
+export const LOCAL_PATH_FILE_SCOPE = "_";
+
+/**
+ * Canonical file key for tool-call evidence on an ABSOLUTE local path.
+ *
+ * File identity is split across two namespaces:
+ * - git ingest: `fileRecordKey(repoKey, relativePath)` → `file:remote_*` /
+ *   `file:initial_*` / `file:local_*` (identity_scope = "repository")
+ * - tool-call ingest: this function → `file:repository__*`
+ *   (identity_scope = "local_path")
+ *
+ * The two are bridged DETERMINISTICALLY at derive time: given a repo file's
+ * relative path and a `checkout.path` root, the local-path twin key is
+ * `localPathFileRecordKey(`${root}/${relativePath}`)` - no scan or migration
+ * needed (see apps/axctl/src/metrics/fragility-cascade.ts).
+ */
+export function localPathFileRecordKey(absolutePath: string): string {
+    return fileRecordKey(LOCAL_PATH_FILE_SCOPE, absolutePath);
+}
+
 export function skillRecordKeyV2(name: string): string {
     return `v2__${identityPart(name, "skill")}`;
 }

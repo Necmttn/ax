@@ -365,6 +365,141 @@ describe("renderSessionMarkdown - empty session", () => {
 });
 
 // ---------------------------------------------------------------------------
+// Tests: renderSessionMarkdown - Metrics block (durability drill-down, #176)
+// ---------------------------------------------------------------------------
+
+import type { SessionDurabilityDetail } from "../metrics/reverted-commits.ts";
+
+const DURABILITY_DETAIL: SessionDurabilityDetail = {
+    producedCommits: 3,
+    revertedCommits: 1,
+    durabilityRatio: 2 / 3,
+    reverted: [
+        {
+            commitId: "commit:`feat_key`",
+            sha: "92417acaeaa7afcee3f7b61cc89f4b02373aa5f8",
+            message: "feat: add widget",
+            ts: "2026-05-25T02:13:28Z",
+            fixes: [
+                {
+                    commitId: "commit:`fix_key`",
+                    sha: "134bd7bd67f2177c134bd7bd67f2177c134bd7bd",
+                    message: "fix: widget broke",
+                    ts: "2026-05-26T08:00:00Z",
+                    daysBetween: 1.24,
+                    confidence: "high",
+                },
+            ],
+        },
+    ],
+};
+
+describe("renderSessionMarkdown - Metrics block (#176)", () => {
+    it("renders durability ratio with produced/reverted counts", () => {
+        const out = renderSessionMarkdown(MINIMAL_PAYLOAD, { metrics: DURABILITY_DETAIL });
+        expect(out).toContain("## Metrics");
+        expect(out).toContain("durability  67%");
+        expect(out).toContain("3 produced / 1 reverted");
+    });
+
+    it("lists reverted commits with short sha + message", () => {
+        const out = renderSessionMarkdown(MINIMAL_PAYLOAD, { metrics: DURABILITY_DETAIL });
+        expect(out).toContain("92417ac");
+        expect(out).toContain("feat: add widget");
+    });
+
+    it("lists the fixing commit with sha, days and confidence", () => {
+        const out = renderSessionMarkdown(MINIMAL_PAYLOAD, { metrics: DURABILITY_DETAIL });
+        expect(out).toContain("fixed by 134bd7b");
+        expect(out).toContain("fix: widget broke");
+        expect(out).toContain("+1.2d");
+        expect(out).toContain("high");
+    });
+
+    it("notes when the fix landed outside the ingest window", () => {
+        const noFix: SessionDurabilityDetail = {
+            ...DURABILITY_DETAIL,
+            reverted: [{ ...DURABILITY_DETAIL.reverted[0]!, fixes: [] }],
+        };
+        const out = renderSessionMarkdown(MINIMAL_PAYLOAD, { metrics: noFix });
+        expect(out).toContain("outside ingest window");
+    });
+
+    it("zero-commit session renders an explicit no-commits durability line", () => {
+        const empty: SessionDurabilityDetail = {
+            producedCommits: 0,
+            revertedCommits: 0,
+            durabilityRatio: null,
+            reverted: [],
+        };
+        const out = renderSessionMarkdown(MINIMAL_PAYLOAD, { metrics: empty });
+        expect(out).toContain("## Metrics");
+        expect(out).toContain("produced no commits");
+    });
+
+    it("omits the Metrics section without detail (back-compat)", () => {
+        expect(renderSessionMarkdown(MINIMAL_PAYLOAD)).not.toContain("## Metrics");
+        expect(renderSessionMarkdown(MINIMAL_PAYLOAD, { metrics: null })).not.toContain("## Metrics");
+    });
+
+    it("caps fixing commits at 3 with an overflow line", () => {
+        const manyFixes: SessionDurabilityDetail = {
+            ...DURABILITY_DETAIL,
+            reverted: [{
+                ...DURABILITY_DETAIL.reverted[0]!,
+                fixes: Array.from({ length: 7 }, (_, i) => ({
+                    ...DURABILITY_DETAIL.reverted[0]!.fixes[0]!,
+                    commitId: `commit:\`fix_${i}\``,
+                    sha: `${i}`.repeat(40),
+                })),
+            }],
+        };
+        const out = renderSessionMarkdown(MINIMAL_PAYLOAD, { metrics: manyFixes });
+        expect(out).toContain("… and 4 more fixing commits");
+        expect(out.split("\n").filter((l) => l.includes("fixed by ")).length).toBe(3);
+    });
+
+    it("caps the reverted list at 10 with a --json pointer", () => {
+        const many: SessionDurabilityDetail = {
+            producedCommits: 30,
+            revertedCommits: 14,
+            durabilityRatio: 16 / 30,
+            reverted: Array.from({ length: 14 }, (_, i) => ({
+                ...DURABILITY_DETAIL.reverted[0]!,
+                commitId: `commit:\`feat_${i}\``,
+            })),
+        };
+        const out = renderSessionMarkdown(MINIMAL_PAYLOAD, { metrics: many });
+        expect(out).toContain("… and 4 more reverted commits (use --json for the full list)");
+    });
+
+    it("no reverted-commits list when everything survived", () => {
+        const clean: SessionDurabilityDetail = {
+            producedCommits: 2,
+            revertedCommits: 0,
+            durabilityRatio: 1,
+            reverted: [],
+        };
+        const out = renderSessionMarkdown(MINIMAL_PAYLOAD, { metrics: clean });
+        expect(out).toContain("durability  100%");
+        expect(out).not.toContain("reverted commits:");
+    });
+});
+
+describe("renderSessionJson - metrics (#176)", () => {
+    it("includes the metrics key when detail is provided", () => {
+        const parsed = JSON.parse(renderSessionJson(MINIMAL_PAYLOAD, { metrics: DURABILITY_DETAIL }));
+        expect(parsed.metrics.producedCommits).toBe(3);
+        expect(parsed.metrics.reverted[0].fixes[0].confidence).toBe("high");
+    });
+
+    it("omits the metrics key without detail", () => {
+        const parsed = JSON.parse(renderSessionJson(MINIMAL_PAYLOAD));
+        expect("metrics" in parsed).toBe(false);
+    });
+});
+
+// ---------------------------------------------------------------------------
 // Tests: renderSessionJson
 // ---------------------------------------------------------------------------
 

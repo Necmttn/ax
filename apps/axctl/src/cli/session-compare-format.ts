@@ -9,6 +9,7 @@ import type {
     SessionCompareTurn,
     SessionId,
 } from "@ax/lib/shared/dashboard-types";
+import { isEstimatedPricingSource } from "../metrics/cost-estimate.ts";
 
 /** Lane tag for a session column, 1-indexed: [1], [2], … Synthetic subagent
  *  ids share a long common prefix, so a truncated short-id is ambiguous as a
@@ -36,8 +37,12 @@ const fmtTokens = (n: number | null | undefined): string => {
     return String(n);
 };
 
-const fmtCost = (n: number | null | undefined): string =>
-    n === null || n === undefined ? "-" : `$${n.toFixed(2)}`;
+/** `~$x.xx` when the cost was estimated at read time (pricing_source carries
+ *  the `estimated:` provenance prefix - #175) vs. priced at ingest. */
+const fmtCost = (n: number | null | undefined, pricingSource?: string | null): string =>
+    n === null || n === undefined
+        ? "-"
+        : `${isEstimatedPricingSource(pricingSource) ? "~" : ""}$${n.toFixed(2)}`;
 
 const fmtInt = (n: number | null | undefined): string =>
     n === null || n === undefined ? "-" : String(n);
@@ -91,7 +96,11 @@ const buildRows = (payload: SessionComparePayload): ReadonlyArray<MetricRow> => 
         },
         {
             label: "cost",
-            values: col((e) => fmtCost(e.token_usage?.estimated_cost_usd ?? null)),
+            values: col((e) =>
+                fmtCost(
+                    e.token_usage?.estimated_cost_usd ?? null,
+                    e.token_usage?.pricing_source ?? null,
+                )),
             winner: winnerIndex(s, payload.winners.cheapest),
         },
         {
@@ -232,6 +241,10 @@ export const renderCompareTable = (payload: SessionComparePayload): string => {
     if (fewest) winnerBits.push(`fewest tokens ${fewest}`);
     if (cleanest) winnerBits.push(`cleanest ${cleanest}`);
     lines.push(winnerBits.length > 0 ? `Winners: ${winnerBits.join(" · ")}` : "Winners: (no clear winner)");
+
+    if (sessions.some((e) => isEstimatedPricingSource(e.token_usage?.pricing_source))) {
+        lines.push("~ = cost estimated from token counts × model pricing (not provider-reported)");
+    }
 
     if (payload.not_found.length > 0) {
         lines.push(`Not found: ${payload.not_found.join(", ")}`);
