@@ -59,7 +59,7 @@ export const systemRoutes: ReadonlyArray<AnyRoute> = [
         errorStatus: () => 400, // legacy: DB errors on /api/query were 400
     }),
     jsonRoute({
-        method: "GET",
+        method: "ANY",
         path: "/api/graph-health",
         decode: () => decodeOk(undefined),
         handler: () => Effect.gen(function* () {
@@ -68,7 +68,7 @@ export const systemRoutes: ReadonlyArray<AnyRoute> = [
         }),
     }),
     jsonRoute({
-        method: "GET",
+        method: "ANY",
         path: "/api/worktrees",
         decode: () => decodeOk(undefined),
         handler: () => Effect.gen(function* () {
@@ -79,7 +79,7 @@ export const systemRoutes: ReadonlyArray<AnyRoute> = [
         }),
     }),
     jsonRoute({
-        method: "GET",
+        method: "ANY",
         path: "/api/self-improve",
         decode: () => decodeOk(undefined),
         handler: () => Effect.gen(function* () {
@@ -93,7 +93,7 @@ LIMIT 50;`);
         }),
     }),
     jsonRoute({
-        method: "GET",
+        method: "ANY",
         path: "/api/improve",
         decode: () => decodeOk(undefined),
         handler: () => Effect.gen(function* () {
