@@ -6,10 +6,12 @@
 import type { AnyRoute } from "./router.ts";
 import { insightRoutes } from "./routes/insights.ts";
 import { sessionRoutes } from "./routes/sessions.ts";
+import { skillRoutes } from "./routes/skills.ts";
 import { systemRoutes } from "./routes/system.ts";
 
 export const routeTable: ReadonlyArray<AnyRoute> = [
     ...systemRoutes,
     ...insightRoutes,
     ...sessionRoutes,
+    ...skillRoutes,
 ];
