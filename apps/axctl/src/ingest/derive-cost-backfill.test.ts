@@ -60,7 +60,7 @@ describe("deriveCostBackfill", () => {
         // 1M estimated tokens × claude-opus-4-5 input $5/M (byte-estimate rows
         // price the whole count at the input rate - honest lower bound).
         expect(stmt).toContain("estimated_cost_usd = 5.00000000");
-        expect(stmt).toContain('pricing_source = "estimated:built_in_catalog_2026-05-29"');
+        expect(stmt).toContain('pricing_source = "estimated:built_in_catalog_2026-06-10"');
         // Race guard: a concurrently ingest-priced cost wins at write time.
         expect(stmt).toContain("WHERE estimated_cost_usd IS NONE");
     });
@@ -94,8 +94,8 @@ describe("deriveCostBackfill", () => {
         const stats = await Effect.runPromise(
             deriveCostBackfill().pipe(Effect.provide(makeDb([
                 // Should be excluded by the selection - never rewritten even if returned.
-                row({ pricing_source: "estimated:built_in_catalog_2026-05-29" }),
-                row({ id: "session_token_usage:`s2`", estimated_cost_usd: 1.23, pricing_source: "built_in_catalog_2026-05-29" }),
+                row({ pricing_source: "estimated:built_in_catalog_2026-06-10" }),
+                row({ id: "session_token_usage:`s2`", estimated_cost_usd: 1.23, pricing_source: "built_in_catalog_2026-06-10" }),
             ], sink))),
         );
         expect(stats.backfilled).toBe(0);

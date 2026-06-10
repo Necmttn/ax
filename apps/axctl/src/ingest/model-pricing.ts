@@ -13,7 +13,7 @@ import type { StageDef } from "./stage/registry.ts";
 const LITELLM_PRICING_URL = "https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json";
 const MODELS_DEV_API_URL = "https://models.dev/api.json";
 
-export const MODEL_PRICING_SOURCE = "built_in_catalog_2026-05-29";
+export const MODEL_PRICING_SOURCE = "built_in_catalog_2026-06-10";
 
 export interface ModelPricing {
     readonly provider: string;
@@ -267,6 +267,24 @@ export const BUILTIN_MODEL_PRICING_CATALOG: Readonly<Record<string, ModelPricing
         fastMultiplier: 1,
         pricingSource: MODEL_PRICING_SOURCE,
     },
+    "claude-fable-5": {
+        provider: "anthropic",
+        inputPerMillionUsd: 10,
+        outputPerMillionUsd: 50,
+        cacheCreationPerMillionUsd: 12.5,
+        cacheReadPerMillionUsd: 1,
+        fastMultiplier: 1,
+        pricingSource: MODEL_PRICING_SOURCE,
+    },
+    "claude-haiku-4-5": {
+        provider: "anthropic",
+        inputPerMillionUsd: 1,
+        outputPerMillionUsd: 5,
+        cacheCreationPerMillionUsd: 1.25,
+        cacheReadPerMillionUsd: 0.1,
+        fastMultiplier: 1,
+        pricingSource: MODEL_PRICING_SOURCE,
+    },
 };
 
 export function normalizeModelName(model: string | null | undefined): string | null {
@@ -392,6 +410,8 @@ export function pricingForModel(
     const exact = catalog.get(modelKey);
     if (exact) return exact;
     if (/^gpt-5(?:\.\d+)?$/i.test(modelKey)) return catalog.get("gpt-5") ?? null;
+    if (modelKey.startsWith("claude-fable-5")) return catalog.get("claude-fable-5") ?? null;
+    if (modelKey.startsWith("claude-haiku-4-5")) return catalog.get("claude-haiku-4-5") ?? null;
     if (modelKey.startsWith("claude-opus-4")) return catalog.get("claude-opus-4") ?? null;
     if (modelKey.startsWith("claude-sonnet-4")) return catalog.get("claude-sonnet-4") ?? null;
     return null;
