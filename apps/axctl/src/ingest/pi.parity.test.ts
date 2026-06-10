@@ -1,6 +1,7 @@
 import { describe, expect, it } from "bun:test";
 import { __legacyBuildPiBatchStatements, __testBuildPiBatchStatements, __testExtractPiJsonlLines } from "./pi.ts";
 import { diffStatementSets } from "./normalized/statement-parity.ts";
+import { extractToolFileEvidence } from "./tool-file-evidence.ts";
 
 const fixtureLines = (): string[] => [
     JSON.stringify({ type: "session", version: 3, id: "pi-parity", timestamp: "2026-06-10T06:00:00.000Z", cwd: "/Users/necmttn/Projects/ax" }),
@@ -13,22 +14,26 @@ const fixtureLines = (): string[] => [
             content: [
                 { type: "text", text: "Listing." },
                 { type: "toolCall", id: "call-1", name: "exec_command", input: { command: "ls -la" } },
+                { type: "toolCall", id: "call-2", name: "read", input: { path: "README.md" } },
             ],
         },
     }),
     JSON.stringify({ type: "message", id: "result-1", parentId: "assistant-1", timestamp: "2026-06-10T06:00:03.000Z", message: { role: "toolResult", toolCallId: "call-1", content: [{ type: "text", text: "total 8" }] } }),
-    JSON.stringify({ type: "compaction", id: "compaction-1", parentId: "result-1", timestamp: "2026-06-10T06:00:04.000Z", summary: "compacted history" }),
+    JSON.stringify({ type: "message", id: "result-2", parentId: "result-1", timestamp: "2026-06-10T06:00:03.500Z", message: { role: "toolResult", toolCallId: "call-2", content: [{ type: "text", text: "# ax" }] } }),
+    JSON.stringify({ type: "compaction", id: "compaction-1", parentId: "result-2", timestamp: "2026-06-10T06:00:04.000Z", summary: "compacted history" }),
 ];
 
 describe("pi normalized-batch parity", () => {
     it("new path emits the exact legacy statement multiset", () => {
         const extracted = __testExtractPiJsonlLines(fixtureLines());
         expect(extracted).not.toBeNull();
-        expect(extracted!.toolCalls.length).toBe(1);
-        // Fixture-coverage guards: synthetic-invocation and compaction parity
-        // coverage must not silently shrink if the fixture drifts.
+        expect(extracted!.toolCalls.length).toBe(2);
+        // Fixture-coverage guards: synthetic-invocation, compaction, and
+        // tool-file-evidence parity coverage must not silently shrink if the
+        // fixture drifts.
         expect(extracted!.invocations.length).toBeGreaterThan(0);
         expect(extracted!.compactions.length).toBeGreaterThan(0);
+        expect(extractToolFileEvidence(extracted!.toolCalls).length).toBeGreaterThan(0);
         const legacy = __legacyBuildPiBatchStatements(extracted!);
         const next = __testBuildPiBatchStatements(extracted!);
         expect(diffStatementSets(legacy, next)).toEqual({ missing: [], added: [] });
