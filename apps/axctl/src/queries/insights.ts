@@ -380,25 +380,40 @@ LIMIT ${safeLimit};`.trim();
 
 export function verificationGapsSql(limit: number): string {
     const safeLimit = checkedLimit(limit);
+    // "Sessions that edited but never verified." The old form ran a correlated
+    // `command_outcome WHERE session = $parent.session` subquery per edited
+    // session (thousands) - $parent.session can't use an index, so ~16s. This
+    // instead: (1) anti-join against the verified-session set computed ONCE
+    // (`session NOT IN (... GROUP BY session)`); (2) filter + limit on the cheap
+    // (session, edits) projection, deref session meta only for the final N rows.
+    // verification_commands is 0 by construction of the filter. ~16s -> ~6s; the
+    // residual is the `in.session` deref over the edited edge table.
     return `
-SELECT * FROM (
-    SELECT
-        session AS id,
-        session.project AS project,
-        session.cwd AS cwd,
-        session.started_at AS started_at,
-        session.ended_at AS ended_at,
-        edits,
-        array::len((SELECT id FROM command_outcome WHERE session = $parent.session AND kind IN ["expected_feedback", "product_bug_signal", "guardrail"])) AS verification_commands
+SELECT
+    id,
+    id.project AS project,
+    id.cwd AS cwd,
+    id.started_at AS started_at,
+    id.ended_at AS ended_at,
+    edits,
+    0 AS verification_commands
+FROM (
+    SELECT session AS id, edits
     FROM (
         SELECT in.session AS session, count() AS edits
         FROM edited
         GROUP BY session
     )
+    WHERE edits > 0
+      AND session NOT IN (
+        SELECT VALUE session FROM command_outcome
+        WHERE kind IN ["expected_feedback", "product_bug_signal", "guardrail"]
+        GROUP BY session
+      )
+    ORDER BY edits DESC
+    LIMIT ${safeLimit}
 )
-WHERE edits > 0 AND verification_commands = 0
-ORDER BY edits DESC, ended_at DESC
-LIMIT ${safeLimit};`.trim();
+ORDER BY edits DESC, ended_at DESC;`.trim();
 }
 
 export function userLanguageSql(limit: number): string {
@@ -602,6 +617,12 @@ ORDER BY ts DESC
 LIMIT ${safeLimit};`.trim();
 }
 
+// NOTE (classifier-facts / correction-contexts / classifier-outcomes): the
+// per-row context (previous assistant turn, recent failures, later activity)
+// is resolved AFTER this query by `enrichInsightRows` (insights-enrich.ts)
+// using literal session ids. The correlated `$parent.session` subqueries that
+// used to live here could not use index lookups (SurrealDB v3), so each row
+// cost ~1s of partial scans (~20-38s per view at LIMIT 20).
 export function classifierFactsSql(limit: number): string {
     const safeLimit = checkedLimit(limit);
     return `
@@ -624,34 +645,7 @@ SELECT
     session.cwd AS cwd,
     evidence_json,
     signals,
-    ts,
-    (
-        SELECT
-            id,
-            seq,
-            text_excerpt AS text
-        FROM turn
-        WHERE session = $parent.session
-          AND role = "assistant"
-          AND seq < $parent.turn.seq
-        ORDER BY seq DESC
-        LIMIT 1
-    )[0] AS previous_assistant,
-    (
-        SELECT
-            id,
-            name,
-            command_norm,
-            error_text,
-            output_excerpt,
-            ts
-        FROM tool_call
-        WHERE session = $parent.session
-          AND has_error = true
-          AND ts <= $parent.ts
-        ORDER BY ts DESC
-        LIMIT 3
-    ) AS recent_tool_failures
+    ts
 FROM classifier_result
 WHERE turn IS NOT NONE
 ORDER BY ts DESC
@@ -678,34 +672,7 @@ SELECT
     session.cwd AS cwd,
     evidence_json,
     signals,
-    ts,
-    (
-        SELECT
-            id,
-            seq,
-            text_excerpt AS text
-        FROM turn
-        WHERE session = $parent.session
-          AND role = "assistant"
-          AND seq < $parent.turn.seq
-        ORDER BY seq DESC
-        LIMIT 1
-    )[0] AS previous_assistant,
-    (
-        SELECT
-            id,
-            name,
-            command_norm,
-            error_text,
-            output_excerpt,
-            ts
-        FROM tool_call
-        WHERE session = $parent.session
-          AND has_error = true
-          AND ts <= $parent.ts
-        ORDER BY ts DESC
-        LIMIT 5
-    ) AS recent_tool_failures
+    ts
 FROM classifier_result
 WHERE classifier_key = "correction-event" OR label = "correction"
 ORDER BY ts DESC
@@ -730,54 +697,7 @@ SELECT
     session,
     session.project AS project,
     session.cwd AS cwd,
-    ts,
-    (
-        SELECT
-            id,
-            name,
-            command_norm,
-            has_error,
-            status,
-            exit_code,
-            output_excerpt,
-            error_text,
-            ts
-        FROM tool_call
-        WHERE session = $parent.session
-          AND ts > $parent.ts
-        ORDER BY ts ASC
-        LIMIT 5
-    ) AS later_tool_calls,
-    (
-        SELECT
-            id,
-            kind,
-            status,
-            command_norm,
-            command_tool,
-            text,
-            tool_call,
-            ts
-        FROM command_outcome
-        WHERE session = $parent.session
-          AND ts > $parent.ts
-        ORDER BY ts ASC
-        LIMIT 5
-    ) AS later_command_outcomes,
-    (
-        SELECT
-            id,
-            seq,
-            role,
-            text_excerpt AS text,
-            ts
-        FROM turn
-        WHERE session = $parent.session
-          AND role = "user"
-          AND seq > $parent.turn.seq
-        ORDER BY seq ASC
-        LIMIT 3
-    ) AS later_user_turns
+    ts
 FROM classifier_result
 WHERE turn IS NOT NONE
 ORDER BY ts DESC

@@ -599,6 +599,9 @@ function durationMs(startedAt: string | null | undefined, endedAt: string | null
  * then issues five batched `IN [sessions]` queries in parallel and aggregates
  * counts client-side. Same shape, ~27 ms instead of ~3500 ms.
  */
+/** Per-session fan-out width for the indexed turn reads in the lean loader. */
+const CONTEXT_TURN_FANOUT = 16;
+
 const loadPriorFileSessionsLean = (fileIds: readonly string[], limit: number) =>
     Effect.gen(function* () {
         const db = yield* SurrealClient;
@@ -625,13 +628,23 @@ const loadPriorFileSessionsLean = (fileIds: readonly string[], limit: number) =>
         const sessionIds = Array.from(new Set(aggRows.map((r) => r.session)));
         const sidLiteral = sessionIds.join(", ");
 
-        const [sessionsResult, turnsResult, producedResult, deliveryResult, healthResult, titleResult] =
+        // Per-session INDEXED turn reads. `turn WHERE session IN [<sids>]` is a
+        // membership scan over the 560k-row turn table (~3s for 50 sessions),
+        // the same trap fixed in enrichSessions / share content. `session = <lit>`
+        // hits turn_session_seq (~1ms); fanned out, this is sub-second. The other
+        // reads stay batched: session/produced/delivery_outcome (97 rows) /
+        // session_health (3519) are tiny, so an IN-list there is cheap.
+        const perSessionTurns = <Row>(sqlFor: (sid: string) => string) =>
+            Effect.forEach(
+                sessionIds,
+                (sid) => db.query<[Row[]]>(sqlFor(sid)).pipe(Effect.map(([rows]) => rows ?? [])),
+                { concurrency: CONTEXT_TURN_FANOUT },
+            ).pipe(Effect.map((chunks) => chunks.flat()));
+
+        const [sessionsResult, producedResult, deliveryResult, healthResult] =
             yield* Effect.all([
                 db.query<[Array<{ id: string; project: string | null; source: string | null; started_at: string | null; ended_at: string | null }>]>(
                     `SELECT <string>id AS id, project, source, started_at, ended_at FROM session WHERE id IN [${sidLiteral}];`,
-                ),
-                db.query<[Array<{ session: string; role: string; intent_kind: string | null }>]>(
-                    `SELECT <string>session AS session, role, intent_kind FROM turn WHERE session IN [${sidLiteral}] AND role IN ['user','assistant'];`,
                 ),
                 db.query<[Array<{ in: string }>]>(
                     `SELECT <string>in AS in FROM produced WHERE in IN [${sidLiteral}];`,
@@ -642,17 +655,19 @@ const loadPriorFileSessionsLean = (fileIds: readonly string[], limit: number) =>
                 db.query<[Array<{ session: string; interruptions: number }>]>(
                     `SELECT <string>session AS session, interruptions FROM session_health WHERE session IN [${sidLiteral}];`,
                 ),
-                db.query<[Array<{ session: string; text_excerpt: string; seq: number; intent_kind: string | null }>]>(
-                    `SELECT <string>session AS session, text_excerpt, seq, intent_kind FROM turn WHERE session IN [${sidLiteral}] AND role = 'user' AND message_kind = 'task' AND intent_kind IN ['organic_task','preference','correction'] AND text_excerpt IS NOT NONE ORDER BY seq ASC;`,
-                ),
             ], { concurrency: "unbounded" });
 
+        const turnsRows = yield* perSessionTurns<{ session: string; role: string; intent_kind: string | null }>(
+            (sid) => `SELECT <string>session AS session, role, intent_kind FROM turn WHERE session = ${sid} AND role IN ['user','assistant'];`,
+        );
+        const titleRows = yield* perSessionTurns<{ session: string; text_excerpt: string; seq: number; intent_kind: string | null }>(
+            (sid) => `SELECT <string>session AS session, text_excerpt, seq, intent_kind FROM turn WHERE session = ${sid} AND role = 'user' AND message_kind = 'task' AND intent_kind IN ['organic_task','preference','correction'] AND text_excerpt IS NOT NONE ORDER BY seq ASC;`,
+        );
+
         const [sessionsRows] = sessionsResult;
-        const [turnsRows] = turnsResult;
         const [producedRows] = producedResult;
         const [deliveryRows] = deliveryResult;
         const [healthRows] = healthResult;
-        const [titleRows] = titleResult;
 
         const sessionMeta = new Map<string, { project: string | null; source: string | null; started_at: string | null; ended_at: string | null }>();
         for (const row of sessionsRows) sessionMeta.set(row.id, row);

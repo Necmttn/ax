@@ -314,3 +314,181 @@ PR summary ready, branch green. Remaining: the final wind-down within ~30min of
 08:30 — re-enable `com.necmttn.ax-watch`, one catch-up `ax ingest --since=1`
 (lock-protected), confirm `sessions here` + `share --dry-run` still fast, then
 mark the loop complete. Interim wakes are just health pings.
+
+---
+
+## Iteration 7 — optimization loop target #1: file-context turn IN-scans (2026-06-10 07:10 WITA)
+
+Branch `opt/read-hotspots` off the merged main (#167 + #166). Working the
+10-target optimization backlog from the post-merge review.
+
+**Tried.** Target #1 = `context/file-context.ts` `session IN [...]` cluster.
+Found two layers:
+- `loadPriorFileSessionsLean` (hook limit-5 path): `turn WHERE session IN [≤50]`
+  for user/assistant counts + task titles = ~3s membership scan over 560k turns.
+- `loadPriorFileSessions` (the `$parent.session` correlated version `ax context
+  file` actually uses): ~12 partial scans/row, ~3.2s.
+
+**Worked.** Fixed the lean loader: both turn reads → per-session `session = <lit>`
+indexed fan-out (concurrency 16); small-table reads stay batched. typecheck 0,
+file-context + hook tests 26/26, effect-lint clean. Committed `76df58f`.
+
+**Failed / friction (important lesson).** Tried to also swap
+`buildFileContextPack` onto the lean loader + delete the slow correlated one —
+but (a) the unit test mocks the slow query's single fat response, so it needs a
+full per-session mock rewrite, and (b) the lean loader prioritizes `pr_title`
+for the session title while the slow one prioritizes the first user-turn text —
+a real BEHAVIORAL difference, not just perf. Reverted the swap to pristine and
+shipped only the safe, tested lean-loader fix. **Loop rule going forward:
+time-box each target; if it turns into a test-coupling / behavior-change rabbit
+hole, ship the safe subset and split the rest into its own iteration.**
+
+**Next (optimization backlog, re-ordered for low-risk-first).**
+- 1b. `buildFileContextPack` → lean loader swap (needs mock rewrite + title-
+  priority decision). Its own iteration.
+- 2. `insights.ts` `$parent.session` correlated subqueries (633-774) — same
+  pattern; likely same test coupling, time-box it.
+- 3. ingest write batching (`transcripts.ts` per-row UPSERTs → per-file txn).
+- 4. session-canvas orch `session IN [childRefs]` (small, self-contained).
+- 5. recall.ts session-IN scope filter. 6. schema diff-apply on install.
+- 7. reaction_event.session backfill+index. 8. loc-query name-IN.
+- 9. content_atom(session,source_kind) index. 10. DB retention/compaction.
+
+---
+
+## Iteration 8 — optimization target #4: session-canvas orch IN-scan (2026-06-10 07:55 WITA)
+
+**Tried.** Profiled `session-canvas.ts` `orchTasksSql` on the worst-case
+orchestration (`72f97b36`, **117 spawned children**): `turn WHERE session IN
+[117] AND role='user' ORDER BY seq` = **1.33s** (fetches 3106 rows just to keep
+the first per child). Per-child `session = X ... LIMIT 1` = 0.016s.
+
+**Worked.** Replaced with per-child indexed `LIMIT 1` fan-out (concurrency 16) —
+117 rows instead of 3106, and indexed. The view only needs each child's first
+user turn (dispatch prompt), so the result is identical. Added
+`session-canvas.test.ts` (regression guard: per-child `session =`, never
+`session IN`, + task→subagent mapping). typecheck 0, test 1/1, effect-lint clean.
+Committed `f544637`. Clean, isolated target — no rabbit hole (the time-box rule
+held; profiled before changing, real test isolation).
+
+**Next.**
+- 5. `recall.ts:116` `AND session IN [ids]` scope filter — profile with a large
+  `--scope=here` (many sessions) before changing; fix only if slow.
+- 9. `content_atom(session, source_kind)` index (defeated `(session,kind)` today).
+- 7. `reaction_event.session` backfill+index (drop the `user_turn.session` deref).
+- Then the risky/test-coupled ones (1b buildFileContextPack swap, 2 insights
+  $parent.session, 3 ingest write batching) — each its own time-boxed iteration.
+
+---
+
+## Iteration 9 — profile recall / loc-query / content_atom index (2026-06-10 08:15 WITA)
+
+**Tried.** Profiled the next three backlog candidates before touching anything.
+
+**Worked — all non-actionable (valid negative findings):**
+- **recall** (`session IN [ids]` skill path + `session.repository` deref): 0.92s
+  scope=here (2005 hits), 0.57s scope=all (2302), 1.35s --skill. The BM25 FTS
+  index narrows first, so the session filters apply to a small set. Healthy.
+- **content_atom session index**: `content_atom WHERE session=X AND
+  source_kind='turn'` IS 12.5s (the `(session,kind)` index is defeated by the
+  source_kind filter). BUT the only `FROM content_atom` query (session-turn-
+  content.ts) was made per-document in iter-2, so NOTHING queries atoms by
+  session. Adding `(session,source_kind)` would be a speculative index (ingest
+  + DB cost, no consumer) — skipped per profile-first discipline.
+- **loc-query** `tool_call name IN [edit tools]`: 0.54s over 150k rows, and in
+  practice gated by `session = X` (indexed) or an FTS subquery + LIMIT. Fine.
+
+**Conclusion.** The clean, low-risk read hotspots are exhausted — the big wins
+(enrichSessions, share content, file-context lean, session-canvas orch) are
+shipped; the remaining IN-patterns are over small/medium tables or gated by
+index/FTS/LIMIT and run <1s. What's left is the RISKY set, each its own
+time-boxed iteration:
+- 2. `insights.ts` `$parent.session` correlated derefs (633-774) — profile first
+  (is it used + slow on `ax signals`/wrapped/health?); expect test coupling.
+- 1b. `buildFileContextPack` → lean swap (mock rewrite + title-priority).
+- 3. ingest write batching (per-row UPSERT → per-file txn) — write path.
+
+**Next (iter 10).** Profile `insights.ts` queries on a real invocation; if a
+`$parent.session` query is genuinely slow AND has test isolation, fix it
+(time-boxed, ship-safe-subset rule). Otherwise document and consider the loop
+converged on safe read wins — report status and pause for direction on the
+risky/write-path targets.
+
+---
+
+## Iteration 10 — insights $parent.session (verification-gaps) + convergence (2026-06-10 08:40 WITA)
+
+**Tried.** Profiled the `ax insights` views that use `$parent.session`:
+verification-gaps **16s**, classifier-facts **20s**, correction-contexts **20s**
+— genuinely slow. Tests assert SQL *strings* (good isolation, no DB mock).
+
+**Worked.** Fixed verification-gaps with a contained single-query rewrite (kept
+the string-builder architecture): correlated `command_outcome WHERE session =
+$parent.session` per edited session → one-shot anti-join `session NOT IN (SELECT
+... GROUP BY session)`, plus deferring the session-meta derefs to after
+filter+limit. **16s → 4.1s.** Output identical; insights tests 27/27 (assertions
+updated to the anti-join shape); typecheck + effect-lint clean. Committed
+`0f2acad`.
+
+**Failed / friction.** The residual ~4s is the `in.session` 2-hop deref over the
+`edited` edge table — flooring it needs denormalizing session onto the edge
+(ingest/schema = write-path). The sibling views classifier-facts /
+correction-contexts (~20s) have the SAME pattern but with multiple
+$parent.session subqueries each — bigger per-view rewrites.
+
+## Loop status: CONVERGED on safe read wins
+
+**`opt/read-hotspots` (post-merge of #167), 6 commits:**
+- `76df58f` file-context lean loader: turn `session IN` → per-session indexed.
+- `f544637` session-canvas orch: `session IN [117]` 1.33s → per-child indexed.
+- `0f2acad` insights verification-gaps: correlated `$parent.session` 16s → 4.1s.
+- + iter logs `97b9746`, `43cf4dd`, `f9e14f9`, and this entry.
+Profiled-healthy (no change): recall, loc-query, content_atom session index
+(no consumer), cost-query, sessions show.
+
+**Remaining backlog = risky / deeper / write-path — each needs explicit
+go-ahead, not autonomous:**
+1. classifier-facts / correction-contexts (~20s) — same anti-join treatment,
+   multiple subqueries per view.
+2. `edited`/`tool_call` session denormalization — floors the insights derefs but
+   is an ingest/schema change (re-ingest cost).
+3. `buildFileContextPack` → lean loader swap (mock rewrite + title-priority
+   behavior change).
+4. ingest write batching (per-row UPSERT → per-file transaction) — write path.
+
+Pausing the autonomous loop here and reporting for direction.
+
+---
+
+## Iteration 11 — classifier views: correlated context → enrichment pass (2026-06-10 ~09:20 WITA)
+
+**Context.** User said continue past convergence — taking the remaining backlog
+item #1 (the other $parent.session views).
+
+**Tried.** classifier-facts / correction-contexts / classifier-outcomes
+(20s / 20s / 38s): outer LIMIT already bounds rows, but each row ran 2-3
+correlated `$parent.session` subqueries (~1s partial scan each). Pure SQL can't
+fix this ($parent defeats the index), so: slimmed the view SQL to just the
+classifier rows and added `insights-enrich.ts` — a post-query pass that resolves
+the same context per row with LITERAL session ids (indexed) at concurrency 8.
+Field names/shapes preserved → formatInsightRows untouched; non-classifier
+views pass through.
+
+**Worked.** **20.3s → 0.44s / 20.2s → 0.49s / 37.7s → 0.49s** (~40-77x).
+Differential parity proven: literal vs correlated lookup on a failure-heavy
+session returns identical rows/order. Tests 32/32 (insights SQL-shape +
+5 new enrich tests). typecheck + effect-lint clean. Committed `bd19bac`.
+
+**Failed / friction.**
+- First sanity check looked alarming (failures/later_tool_calls all 0) — turned
+  out GENUINE (recent classifier rows come from clean sessions, incl. this
+  loop's own); proven by manual queries + the differential check.
+- SurrealDB 3.1 parse rule bit my ad-hoc test query: ORDER BY fields must
+  appear in the SELECT projection ("Missing order idiom") — production queries
+  all comply.
+
+**Next.** Remaining deep backlog: (a) verification-gaps residual ~4s = in.session
+deref over `edited` (needs edge denormalization, write-path); (b)
+buildFileContextPack → lean swap (title-priority behavior decision); (c) ingest
+write batching. All write-path/behavioral — propose PR'ing the branch first
+(4 perf commits accumulated), then tackle with fresh review.

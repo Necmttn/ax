@@ -312,13 +312,17 @@ SELECT <string>out AS id, (nickname ?? NONE) AS nickname, ts,
        out.started_at AS started_at, out.ended_at AS ended_at
 FROM spawned WHERE <string>in = $id ORDER BY ts ASC;`;
 
-// First user turn per child session = the subagent's task. ONE query over the
-// child id set (built from `out` refs) instead of a correlated per-child scan
-// (which was the issue-#77 trap - ~10s for 50+ children). Rows arrive seq-ASC,
-// so the first row seen per session is its lowest-seq (= the dispatch prompt).
-const orchTasksSql = (childRefs: ReadonlyArray<string>): string => `
+// First user turn per child session = the subagent's dispatch task. Per-child
+// INDEXED `session = <ref>` LIMIT 1 (hits turn_session_seq) instead of
+// `turn WHERE session IN [<all children>]`, which is a membership scan over the
+// 560k-row turn table (~1.3s for 117 children) - the same trap fixed in
+// enrichSessions. `childRef` is the exact `session:⟨uuid⟩` record-ref literal.
+const orchTaskSql = (childRef: string): string => `
 SELECT <string>session AS s, text_excerpt, seq
-FROM turn WHERE session IN [${childRefs.join(", ")}] AND role = "user" ORDER BY seq ASC;`;
+FROM turn WHERE session = ${childRef} AND role = "user" ORDER BY seq ASC LIMIT 1;`;
+
+/** Per-child fan-out width for the dispatch-task reads. */
+const ORCH_TASK_FANOUT = 16;
 
 const QUICK_SUBAGENT_MS = 60_000;
 
@@ -371,13 +375,21 @@ export const fetchSessionOrchestration = (
         const parent = yield* db.query<[Array<Record<string, unknown>>]>(ORCH_PARENT_SQL, { id: sessionId });
         const children = yield* db.query<[Array<Record<string, unknown>>]>(ORCH_CHILDREN_SQL, { id: sessionId });
         const childRows = children?.[0] ?? [];
-        // batched task fetch: one query over all child ids (the `id` field is the
-        // exact `session:⟨uuid⟩` record-ref literal, safe to inline in the IN set).
+        // Per-child INDEXED task fetch (the `id` field is the exact
+        // `session:⟨uuid⟩` record-ref literal). Fanned out instead of a single
+        // `session IN [<all children>]` membership scan over the turn table.
         const childRefs = childRows.map((r) => str(r, "id")).filter((s): s is string => !!s);
         const tasksById = new Map<string, string>();
         if (childRefs.length > 0) {
-            const taskRows = yield* db.query<[Array<Record<string, unknown>>]>(orchTasksSql(childRefs), {});
-            for (const r of taskRows?.[0] ?? []) {
+            const perChild = yield* Effect.forEach(
+                childRefs,
+                (ref) =>
+                    db.query<[Array<Record<string, unknown>>]>(orchTaskSql(ref), {})
+                        .pipe(Effect.map(([rows]) => rows?.[0])),
+                { concurrency: ORCH_TASK_FANOUT },
+            );
+            for (const r of perChild) {
+                if (!r) continue;
                 const s = str(r, "s");
                 const ex = str(r, "text_excerpt");
                 if (s && ex && !tasksById.has(s)) tasksById.set(s, ex); // first (lowest seq) wins
