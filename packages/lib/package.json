@@ -8,6 +8,7 @@
     "./shared/fs-classify": "./src/shared/fs-classify.ts",
     "./shared/path": "./src/shared/path.ts",
     "./testing/test-filesystem": "./src/testing/test-filesystem.ts",
+    "./testing/surreal": "./src/testing/surreal.ts",
     "./*": {
       "types": "./src/*.ts",
       "import": "./src/*.ts"
@@ -17,7 +18,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@effect/platform-bun": "4.0.0-beta.70",
+    "@effect/platform-bun": "4.0.0-beta.78",
     "effect": "catalog:",
     "surrealdb": "^2.0.0"
   },

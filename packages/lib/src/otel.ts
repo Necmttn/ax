@@ -11,7 +11,7 @@
  * below it means both systems see every span (LiveTrace for the progress
  * UI/dashboard, OTLP for flame-graph inspection in Maple).
  */
-import { Layer } from "effect";
+import { Config, Effect, Layer, Option } from "effect";
 import { FetchHttpClient } from "effect/unstable/http";
 import { Otlp } from "effect/unstable/observability";
 
@@ -43,12 +43,38 @@ export const otlpTelemetryLayer = (opts: OtlpTelemetryOptions): Layer.Layer<neve
     }).pipe(Layer.provide(FetchHttpClient.layer));
 
 /**
- * Env-gated variant: real exporter when `AX_OTLP_URL` is set, `Layer.empty`
- * otherwise. Read once at layer build (config snapshot, not reactive).
+ * The OTLP gate as a `Config`: `Some(baseUrl)` when `AX_OTLP_URL` is set to a
+ * non-empty string, `None` when missing OR empty - exactly the previous
+ * `baseUrl && baseUrl.length > 0` process.env gate. Exported for hermetic
+ * tests (`otlpBaseUrlConfig.parse(ConfigProvider.fromEnv({ env }))`).
  */
-export const otlpTelemetryFromEnv = (serviceName?: string): Layer.Layer<never> => {
-    const baseUrl = process.env[AX_OTLP_URL_ENV];
-    return baseUrl && baseUrl.length > 0
-        ? otlpTelemetryLayer(serviceName === undefined ? { baseUrl } : { baseUrl, serviceName })
-        : Layer.empty;
-};
+export const otlpBaseUrlConfig: Config.Config<Option.Option<string>> = Config.string(
+    AX_OTLP_URL_ENV,
+).pipe(
+    Config.option,
+    Config.map(Option.filter((url) => url.length > 0)),
+);
+
+/**
+ * Env-gated variant: real exporter when `AX_OTLP_URL` is set, `Layer.empty`
+ * otherwise. The env var is read through the ambient `ConfigProvider` once at
+ * layer BUILD (`Layer.unwrap`) - same one-shot snapshot semantics as the old
+ * direct `process.env` read, but overridable in tests via
+ * `ConfigProvider.layer`. `Effect.orDie` is safe: `Config.option` absorbs the
+ * missing-value case and the default env provider cannot fail.
+ */
+export const otlpTelemetryFromEnv = (serviceName?: string): Layer.Layer<never> =>
+    Layer.unwrap(
+        Effect.gen(function* () {
+            const baseUrl = yield* otlpBaseUrlConfig;
+            return Option.match(baseUrl, {
+                onNone: () => Layer.empty,
+                onSome: (url) =>
+                    otlpTelemetryLayer(
+                        serviceName === undefined
+                            ? { baseUrl: url }
+                            : { baseUrl: url, serviceName },
+                    ),
+            });
+        }).pipe(Effect.orDie),
+    );

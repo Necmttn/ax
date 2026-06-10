@@ -1,52 +1,31 @@
 /**
  * P3.6 tests: fetchSkillsWeighted data layer.
  *
- * Uses a mock SurrealClient (Effect.succeed per call) to assert:
+ * Uses the shared mock SurrealClient factory (sequenced responses) to assert:
  * - The invocation query includes/omits a WHERE window clause.
  * - Rows are merged correctly (role weights summed, floor 1.0).
  * - Doctor count and advice trigger at the threshold.
  */
 import { describe, it, expect } from "bun:test";
 import { Effect } from "effect";
-import { SurrealClient, type SurrealClientShape } from "@ax/lib/db";
+import { SurrealClient } from "@ax/lib/db";
+import { makeTestSurrealClient, type TestSurrealClient } from "@ax/lib/testing/surreal";
 import { fetchSkillsWeighted } from "./skills-weighted.ts";
-import { DbError } from "@ax/lib/errors";
 
 // ---------------------------------------------------------------------------
 // Test helpers
 // ---------------------------------------------------------------------------
 
-/**
- * Build a mock SurrealClientShape that returns responses in order per call.
- * query() returns Effect.succeed(...) so it integrates with Effect.all.
- */
-function makeMockDb(responses: Array<unknown>): SurrealClientShape {
-    let callIndex = 0;
-    return {
-        query: <T extends unknown[] = unknown[]>(
-            _sql: string,
-            _bindings?: Record<string, unknown>,
-        ): Effect.Effect<T, DbError> => {
-            const resp = responses[callIndex] ?? [[]];
-            callIndex++;
-            return Effect.succeed(resp as unknown as T);
-        },
-        upsert: () => Effect.void,
-        relate: () => Effect.void,
-        putFile: () => Effect.void,
-        getFile: () => Effect.succeed(""),
-        raw: {} as never,
-    } as unknown as SurrealClientShape;
-}
+/** Mock SurrealClient answering query() calls with `responses` in call order. */
+const makeMockDb = (responses: Array<unknown>): TestSurrealClient =>
+    makeTestSurrealClient({ responses: responses as Array<unknown[]> });
 
-/** Run an Effect with mock SurrealClient. */
+/** Run an Effect with the mock SurrealClient. */
 const runWithMock = <A>(
-    db: SurrealClientShape,
+    db: TestSurrealClient,
     effect: Effect.Effect<A, unknown, SurrealClient>,
 ): Promise<A> =>
-    Effect.runPromise(
-        effect.pipe(Effect.provideService(SurrealClient, db)),
-    );
+    Effect.runPromise(effect.pipe(Effect.provide(db.layer)));
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -149,79 +128,38 @@ describe("fetchSkillsWeighted", () => {
     });
 
     it("includeTools=true keeps tools and drops the synthetic doctor clause", async () => {
-        const capturedSqls: string[] = [];
-        const base = makeMockDb([
+        const db = makeMockDb([
             invWithTool, mockRoleRows, mockDoctorBelow, [[]], synthIds, nameRows,
         ]);
-        const db: SurrealClientShape = {
-            ...base,
-            query: <T extends unknown[] = unknown[]>(sql: string, b?: Record<string, unknown>) => {
-                capturedSqls.push(sql);
-                return base.query<T>(sql, b);
-            },
-        } as unknown as SurrealClientShape;
 
         const result = await runWithMock(db, fetchSkillsWeighted({ includeTools: true }));
 
         // Tool is ranked (and named) when opted in.
         expect(result.rows[0]!.skill_name).toBe("codex:exec_command");
         // Doctor SQL (index 2) must NOT exclude synthetics when includeTools.
-        expect(capturedSqls[2]).not.toContain('dir_path = "(synthetic)"');
+        expect(db.captured[2]).not.toContain('dir_path = "(synthetic)"');
     });
 
     it("doctor SQL excludes synthetics by default", async () => {
-        const capturedSqls: string[] = [];
-        const db: SurrealClientShape = {
-            query: <T extends unknown[] = unknown[]>(sql: string): Effect.Effect<T, DbError> => {
-                capturedSqls.push(sql);
-                return Effect.succeed([[]] as unknown as T);
-            },
-            upsert: () => Effect.void,
-            relate: () => Effect.void,
-            putFile: () => Effect.void,
-            getFile: () => Effect.succeed(""),
-            raw: {} as never,
-        } as unknown as SurrealClientShape;
+        const db = makeTestSurrealClient();
 
         await runWithMock(db, fetchSkillsWeighted());
-        expect(capturedSqls[2]).toContain('dir_path = "(synthetic)"');
+        expect(db.captured[2]).toContain('dir_path = "(synthetic)"');
     });
 
     it("includes window clause when windowDays is set", async () => {
-        const capturedSqls: string[] = [];
-        const db: SurrealClientShape = {
-            query: <T extends unknown[] = unknown[]>(sql: string): Effect.Effect<T, DbError> => {
-                capturedSqls.push(sql);
-                return Effect.succeed([[]] as unknown as T);
-            },
-            upsert: () => Effect.void,
-            relate: () => Effect.void,
-            putFile: () => Effect.void,
-            getFile: () => Effect.succeed(""),
-            raw: {} as never,
-        } as unknown as SurrealClientShape;
+        const db = makeTestSurrealClient();
 
         await runWithMock(db, fetchSkillsWeighted({ windowDays: 30 }));
         // First SQL is the invocation query
-        expect(capturedSqls[0]).toContain("ts >= time::now() - 30d");
+        expect(db.captured[0]).toContain("ts >= time::now() - 30d");
     });
 
     it("omits window clause when windowDays is not set", async () => {
-        const capturedSqls: string[] = [];
-        const db: SurrealClientShape = {
-            query: <T extends unknown[] = unknown[]>(sql: string): Effect.Effect<T, DbError> => {
-                capturedSqls.push(sql);
-                return Effect.succeed([[]] as unknown as T);
-            },
-            upsert: () => Effect.void,
-            relate: () => Effect.void,
-            putFile: () => Effect.void,
-            getFile: () => Effect.succeed(""),
-            raw: {} as never,
-        } as unknown as SurrealClientShape;
+        const db = makeTestSurrealClient();
 
         await runWithMock(db, fetchSkillsWeighted());
-        expect(capturedSqls[0]).not.toContain("ts >= time::now()");
+        expect(db.captured[0]).not.toContain("ts >= time::now()");
     });
 
     it("doctor: no advice when count < threshold", async () => {

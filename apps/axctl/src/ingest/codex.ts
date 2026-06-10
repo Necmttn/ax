@@ -4,7 +4,6 @@ import { AxConfig } from "@ax/lib/config";
 import { decodeJsonOrNull } from "@ax/lib/decode";
 import { recordRef, surrealDate, surrealJsonOption, surrealObject, surrealOptionInt, surrealOptionString, surrealString } from "@ax/lib/shared/surql";
 import { AppLayer } from "@ax/lib/layers";
-import type { DbError } from "@ax/lib/errors";
 import { BaseStageStats, IngestContext, sinceDaysFromCtx, StageMeta } from "./stage/types.ts";
 import { annotateStageProgress } from "./stage/runner.ts";
 import type { StageDef } from "./stage/registry.ts";
@@ -38,6 +37,7 @@ import {
     buildNormalizedTranscriptStatements,
     type NormalizedTranscriptBatch,
 } from "./normalized/transcripts.ts";
+import { decodeCodexTranscriptLine } from "./line-schemas.ts";
 import { executeStatements } from "@ax/lib/shared/statement-exec";
 import { isNotFound, skipNotFound } from "@ax/lib/shared/fs-error";
 import { safeKeyPart } from "@ax/lib/shared/derive-keys";
@@ -511,6 +511,7 @@ function createCodexExtractor(
     const pendingProviderEventIds = new Set<string>();
     let lastProviderEventId: string | null = null;
     let seq = 0;
+    let malformedLines = 0;
 
     const pushProviderEvent = (event: Omit<AgentEventWrite, "provider" | "providerSessionId" | "axSessionId">, currentSession: CodexSession): void => {
         const {
@@ -817,12 +818,22 @@ function createCodexExtractor(
     return {
         processLine(line: string): void {
             if (!line.trim()) return;
-            const entry = parseJsonl(line);
-            if (!entry) return;
-            const type = stringField(entry, "type");
-            const ts = stringField(entry, "timestamp");
+            const rawEntry = parseJsonl(line);
+            if (!rawEntry) {
+                malformedLines += 1;
+                return;
+            }
+            // Typed, tolerant view of the line head (see line-schemas.ts).
+            // The `payload` varies per `type` and stays a raw probe.
+            const entry = decodeCodexTranscriptLine(rawEntry);
+            if (!entry) {
+                malformedLines += 1;
+                return;
+            }
+            const type = entry.type ?? null;
+            const ts = entry.timestamp ?? null;
             if (!ts) return;
-            const payload = isRecord(entry.payload) ? entry.payload : null;
+            const payload = isRecord(rawEntry.payload) ? rawEntry.payload : null;
 
             if (type === "session_meta" && payload) {
                 session = {
@@ -970,6 +981,11 @@ function createCodexExtractor(
             };
         },
         drain,
+        /** Lines that failed the JSONL boundary decode (unparseable JSON or a
+         *  non-record payload). Counted, never thrown. */
+        malformedLines(): number {
+            return malformedLines;
+        },
     };
 }
 
@@ -1386,12 +1402,12 @@ export interface CodexStats {
     invocations: number;
     toolCalls: number;
     planSnapshots: number;
+    /** JSONL lines skipped at the decode boundary (unparseable / non-record). */
+    malformedLines: number;
 }
 
-export const ingestCodex = (
-    opts: Partial<CodexIngestOpts> = {},
-): Effect.Effect<CodexStats, DbError | PlatformError.PlatformError, SurrealClient | AxConfig | FileSystem.FileSystem | Path.Path> =>
-    Effect.gen(function* () {
+export const ingestCodex = Effect.fn("codex.ingest")(
+    function* (opts: Partial<CodexIngestOpts> = {}) {
         const cfg = yield* AxConfig;
         const db = yield* SurrealClient;
         const fs = yield* FileSystem.FileSystem;
@@ -1417,6 +1433,7 @@ export const ingestCodex = (
         let invCount = 0;
         let toolCallCount = 0;
         let planSnapshotCount = 0;
+        let malformedLineCount = 0;
         let activeFiles = 0;
         const recordCount = () => turnCount + invCount + toolCallCount + planSnapshotCount;
 
@@ -1571,6 +1588,7 @@ export const ingestCodex = (
 
             const finalBatch = extractor.drain(true);
             yield* writeBatch(finalBatch);
+            malformedLineCount += extractor.malformedLines();
             const completedSession = finalBatch.session ?? currentSession;
             if (!completedSession) {
                 activeFiles -= 1;
@@ -1682,8 +1700,10 @@ export const ingestCodex = (
             invocations: invCount,
             toolCalls: toolCallCount,
             planSnapshots: planSnapshotCount,
-        };
-    });
+            malformedLines: malformedLineCount,
+        } satisfies CodexStats;
+    },
+);
 
 if (import.meta.main) {
     const sinceArg = process.argv.find((a) => a.startsWith("--since="));
@@ -1715,28 +1735,33 @@ export class CodexStageStats extends BaseStageStats.extend<CodexStageStats>("Cod
     sessionsIngested: Schema.Number,
     turnsIngested: Schema.Number,
     toolCallsIngested: Schema.Number,
+    /** JSONL lines skipped at the decode boundary (unparseable / non-record). */
+    malformedLines: Schema.Number,
 }) {}
 
 export const codexStage: StageDef<CodexStageStats, SurrealClient | AxConfig | FileSystem.FileSystem | Path.Path> = {
     meta: StageMeta.make({ key: "codex", deps: ["skills", "commands"], tags: ["ingest"] }),
-    run: (ctx: IngestContext) =>
-        Effect.gen(function* () {
-            const t0 = Date.now();
-            const sinceDays = sinceDaysFromCtx(ctx);
-            // A vanished session file is caught + skipped inside `ingestCodex`;
-            // any PlatformError that escapes here is a genuine FS fault (e.g. an
-            // unreadable sessions root or a non-NotFound stat/stream error), so
-            // it dies as a defect rather than masquerading as a recoverable
-            // DbError - mirroring `claudeStage`.
-            const result = yield* ingestCodex({ sinceDays, onProgress: annotateStageProgress }).pipe(
-                Effect.catchTag("PlatformError", (e) => Effect.die(e)),
-            );
-            return CodexStageStats.make({
-                durationMs: Date.now() - t0,
-                summary: `ingested ${result.sessions} sessions, ${result.turns} turns, ${result.toolCalls} tool calls`,
-                sessionsIngested: result.sessions,
-                turnsIngested: result.turns,
-                toolCallsIngested: result.toolCalls,
-            });
-        }),
+    // Unnamed Effect.fn: the stage runner's LiveTrace.step span already names
+    // this boundary by the stage key, so a named span here would double-wrap.
+    run: Effect.fn(function* (ctx: IngestContext) {
+        const t0 = Date.now();
+        const sinceDays = sinceDaysFromCtx(ctx);
+        // A vanished session file is caught + skipped inside `ingestCodex`;
+        // any PlatformError that escapes here is a genuine FS fault (e.g. an
+        // unreadable sessions root or a non-NotFound stat/stream error), so
+        // it dies as a defect rather than masquerading as a recoverable
+        // DbError - mirroring `claudeStage`.
+        const result = yield* ingestCodex({ sinceDays, onProgress: annotateStageProgress }).pipe(
+            Effect.catchTag("PlatformError", (e) => Effect.die(e)),
+        );
+        return CodexStageStats.make({
+            durationMs: Date.now() - t0,
+            summary: `ingested ${result.sessions} sessions, ${result.turns} turns, ${result.toolCalls} tool calls` +
+                (result.malformedLines > 0 ? `, ${result.malformedLines} malformed lines skipped` : ""),
+            sessionsIngested: result.sessions,
+            turnsIngested: result.turns,
+            toolCallsIngested: result.toolCalls,
+            malformedLines: result.malformedLines,
+        });
+    }),
 };

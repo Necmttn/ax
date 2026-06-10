@@ -5,21 +5,40 @@ import {
     type AnyRecordId,
     type Table,
 } from "surrealdb";
-import { Context, Effect, Layer, Schedule } from "effect";
+import { Config, ConfigProvider, Context, Effect, Layer, Option, Redacted, Schedule } from "effect";
 import { AxConfig, type AxConfigShape } from "./config.ts";
 import { DbError } from "./errors.ts";
 
 export type DbConfig = AxConfigShape["db"];
 
+/**
+ * Plain-string variant of {@link DbConfig} for non-Effect callers
+ * (`scripts/*`): same env vars + defaults as `AxConfig.db`, but `pass` stays a
+ * raw string so it can be fed straight to `db.signin`.
+ */
+export interface DbEnvConfig {
+    readonly url: string;
+    readonly ns: string;
+    readonly db: string;
+    readonly user: string;
+    readonly pass: string;
+}
+
+/** Config recipe behind {@link envConfig}. Exported for hermetic tests
+ *  (`dbEnvConfig.parse(ConfigProvider.fromEnv({ env }))`). */
+export const dbEnvConfig: Config.Config<DbEnvConfig> = Config.all({
+    url: Config.string("AX_DB_URL").pipe(Config.withDefault("ws://127.0.0.1:8521")),
+    ns: Config.string("AX_DB_NS").pipe(Config.withDefault("ax")),
+    db: Config.string("AX_DB_DB").pipe(Config.withDefault("main")),
+    user: Config.string("AX_DB_USER").pipe(Config.withDefault("root")),
+    pass: Config.string("AX_DB_PASS").pipe(Config.withDefault("root")),
+});
+
 /** Back-compat: read DB knobs straight from env. Prefer the AxConfig service. */
-export function envConfig(): DbConfig {
-    return {
-        url: process.env.AX_DB_URL ?? "ws://127.0.0.1:8521",
-        ns: process.env.AX_DB_NS ?? "ax",
-        db: process.env.AX_DB_DB ?? "main",
-        user: process.env.AX_DB_USER ?? "root",
-        pass: process.env.AX_DB_PASS ?? "root",
-    };
+export function envConfig(): DbEnvConfig {
+    // Fresh provider per call so process.env is read at call time, exactly
+    // like the previous direct reads. fromEnv loads synchronously.
+    return Effect.runSync(dbEnvConfig.parse(ConfigProvider.fromEnv()));
 }
 
 const sqlExcerpt = (sql: unknown): string | undefined => {
@@ -145,7 +164,7 @@ const acquire = (cfg: DbConfig): Effect.Effect<Surreal, DbError> =>
         try: async () => {
             const db = new Surreal();
             await db.connect(cfg.url);
-            await db.signin({ username: cfg.user, password: cfg.pass });
+            await db.signin({ username: cfg.user, password: Redacted.value(cfg.pass) });
             await db.use({ namespace: cfg.ns, database: cfg.db });
             return db;
         },
@@ -179,40 +198,64 @@ const release = (db: Surreal): Effect.Effect<void> =>
 // db.query() so a wedged statement is identifiable post-mortem - the last
 // "start" without a matching "done" is the in-flight SQL. A single buffered
 // Bun FileSink (flushed per line) keeps ordering exact without node:fs; the
-// env gate keeps production paths allocation-free.
-const queryLogPath = process.env["AX_DB_QUERY_LOG"];
+// env gate keeps production paths allocation-free. The gate is read once at
+// layer build via Config (see `queryLogConfig`).
+interface QueryLogState {
+    readonly path: string;
+    /** AX_DB_QUERY_LOG_FULL=1: also write one full-statement file per query. */
+    readonly full: boolean;
+}
+
+const queryLogConfig: Effect.Effect<QueryLogState | undefined> = Effect.gen(
+    function* () {
+        const path = Option.getOrUndefined(
+            yield* Config.string("AX_DB_QUERY_LOG").pipe(Config.option),
+        );
+        if (path === undefined || path.length === 0) return undefined;
+        const full = Option.getOrUndefined(
+            yield* Config.string("AX_DB_QUERY_LOG_FULL").pipe(Config.option),
+        );
+        return { path, full: full === "1" };
+    },
+).pipe(Effect.orDie);
+
 let queryLogSeq = 0;
 let queryLogSink: ReturnType<ReturnType<typeof Bun.file>["writer"]> | null = null;
-const logQuery = (phase: "start" | "done", seq: number, ms: number, sql?: string): void => {
-    if (!queryLogPath) return;
+const logQuery = (
+    log: QueryLogState,
+    phase: "start" | "done",
+    seq: number,
+    ms: number,
+    sql?: string,
+): void => {
     try {
-        queryLogSink ??= Bun.file(queryLogPath).writer();
+        queryLogSink ??= Bun.file(log.path).writer();
         queryLogSink.write(
             `${new Date().toISOString()} q${seq} ${phase}${phase === "done" ? ` +${ms.toFixed(0)}ms` : ""}${sql === undefined ? "" : ` ${sql.slice(0, 300).replaceAll("\n", " ")}`}\n`,
         );
         void queryLogSink.flush();
         // Full-statement capture for replay: one file per query start.
-        if (phase === "start" && sql !== undefined && process.env["AX_DB_QUERY_LOG_FULL"] === "1") {
-            void Bun.write(`${queryLogPath}.q${seq}.sql`, sql);
+        if (phase === "start" && sql !== undefined && log.full) {
+            void Bun.write(`${log.path}.q${seq}.sql`, sql);
         }
     } catch {
         // diagnostics only - never fail the query path
     }
 };
 
-const wrap = (db: Surreal): SurrealClientShape => ({
+const wrap = (db: Surreal, queryLog?: QueryLogState): SurrealClientShape => ({
     query: <T extends unknown[] = unknown[]>(
         sql: string,
         bindings?: Record<string, unknown>,
     ) =>
         Effect.tryPromise({
             try: async () => {
-                if (!queryLogPath) return await (db.query<T>(sql, bindings) as Promise<T>);
+                if (!queryLog) return await (db.query<T>(sql, bindings) as Promise<T>);
                 const seq = ++queryLogSeq;
                 const t0 = performance.now();
-                logQuery("start", seq, 0, sql);
+                logQuery(queryLog, "start", seq, 0, sql);
                 const out = await (db.query<T>(sql, bindings) as Promise<T>);
-                logQuery("done", seq, performance.now() - t0);
+                logQuery(queryLog, "done", seq, performance.now() - t0);
                 return out;
             },
             catch: (err) =>
@@ -284,7 +327,7 @@ const wrap = (db: Surreal): SurrealClientShape => ({
                     message: errorMessage(err),
                     sql: `${bucket}:/${path}`,
                 }),
-        }),
+        }).pipe(Effect.retry(transactionConflictRetry)),
 
     raw: db,
 });
@@ -297,8 +340,9 @@ export const SurrealClientLive: Layer.Layer<SurrealClient, DbError, AxConfig> =
     Layer.effect(SurrealClient)(
         Effect.gen(function* () {
             const cfg = yield* AxConfig;
+            const queryLog = yield* queryLogConfig;
             const db = yield* Effect.acquireRelease(acquire(cfg.db), release);
-            return wrap(db);
+            return wrap(db, queryLog);
         }),
     );
 

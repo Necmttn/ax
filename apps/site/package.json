@@ -11,8 +11,9 @@
     "build": "bun ../../scripts/extract-stage-rationale.ts && cp ../../install.sh public/install && bun ../../scripts/stage-studio.ts && vite build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
-    "deploy": "bun run build && wrangler pages deploy dist/client --project-name=ax --branch=main",
-    "deploy:check": "bun run build && echo 'dist/client/ ready for: wrangler pages deploy dist/client --project-name=ax'"
+    "deploy": "bun run build && wrangler pages deploy dist/client --project-name=ax --branch=main && bun run verify:functions",
+    "deploy:check": "bun run build && echo 'dist/client/ ready for: wrangler pages deploy dist/client --project-name=ax'",
+    "verify:functions": "sleep 3 && curl -s -o /dev/null -w '%{content_type}' 'https://ax.necmttn.com/og/Necmttn/a6d4c2215bbe0998c93b38ad11db2ccb' | grep -q image/png && echo 'functions OK on production' || (echo 'PRODUCTION IS MISSING THE PAGES FUNCTIONS (/og, /s meta)' && exit 1)"
   },
   "dependencies": {
     "@ax/studio": "workspace:*",
@@ -30,6 +31,7 @@
     "rehype-slug": "^6.0.0",
     "remark-gfm": "^4.0.1",
     "shiki": "^4.1.0",
+    "workers-og": "^0.0.27",
     "zod": "^4.1.11"
   },
   "devDependencies": {

@@ -1,4 +1,5 @@
 import { Effect } from "effect";
+import { jsonRecordField } from "@ax/lib/decode";
 import { SurrealClient } from "@ax/lib/db";
 import type { DbError } from "@ax/lib/errors";
 import { recordLiteral } from "@ax/lib/ids";
@@ -80,15 +81,8 @@ interface EditDelta {
  * Returns zeros for shapes we can't parse so a bad row never breaks the rollup.
  */
 export const editDelta = (name: string, inputJson: string | null): EditDelta => {
-    if (inputJson === null) return { added: 0, removed: 0 };
-    let input: Record<string, unknown>;
-    try {
-        const parsed: unknown = JSON.parse(inputJson);
-        if (parsed === null || typeof parsed !== "object") return { added: 0, removed: 0 };
-        input = parsed as Record<string, unknown>;
-    } catch {
-        return { added: 0, removed: 0 };
-    }
+    const input = jsonRecordField.decode(inputJson);
+    if (input === null) return { added: 0, removed: 0 };
 
     switch (name) {
         case "Edit":

@@ -1,4 +1,5 @@
 import { Effect, Ref } from "effect";
+import { jsonRecordField } from "@ax/lib/decode";
 import {
     AX_SESSION_SHARE_SCHEMA_VERSION,
     type AxSessionShare,
@@ -262,15 +263,8 @@ const attachTurnTokenUsage = (
 };
 
 const toShareToolCall = (call: ShareTurnToolCall): ToolCallDto => {
-    let input: Record<string, unknown> | null = null;
-    if (call.input_json) {
-        try {
-            const parsed = JSON.parse(call.input_json) as unknown;
-            if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
-                input = parsed as Record<string, unknown>;
-            }
-        } catch { /* leave input null */ }
-    }
+    // Malformed/non-record input_json -> null (input stays absent in the DTO).
+    const input = jsonRecordField.decode(call.input_json) as Record<string, unknown> | null;
     return {
         seq: call.seq,
         name: call.name,

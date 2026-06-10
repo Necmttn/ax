@@ -3,37 +3,27 @@ import { Effect } from "effect";
 import { ensureWatermarkIdMigration, fileWatermark } from "./watermark.ts";
 import { SurrealClient, type SurrealClientShape } from "../db.ts";
 import { stableDigest } from "../ids.ts";
+import { makeTestSurrealClient } from "../testing/surreal.ts";
 
 type Row = { path?: unknown; mtime_ms?: unknown; size?: unknown };
 
 /**
  * In-memory recording adapter (the second adapter that makes the seam real),
- * mirroring statement-exec.test.ts. `query` returns canned rows keyed by a
+ * built on the shared test factory. `query` returns canned rows keyed by a
  * crude match on the SQL text and records every call; writes are stubbed.
  */
 const recordingClient = (
     rowsForSelect: readonly Row[],
 ): { calls: string[]; layer: SurrealClientShape } => {
-    const calls: string[] = [];
-    const layer = {
-        query: <T extends unknown[]>(sql: string) => {
-            calls.push(sql);
+    const tc = makeTestSurrealClient({
+        routes: [
             // The sentinel SELECT must look absent so the migration runs.
-            if (sql.includes("__watermark_migration__")) {
-                return Effect.succeed([[]] as unknown as T);
-            }
-            if (sql.startsWith("SELECT")) {
-                return Effect.succeed([rowsForSelect] as unknown as T);
-            }
-            return Effect.succeed([] as unknown as T);
-        },
-        upsert: () => Effect.void,
-        relate: () => Effect.void,
-        putFile: () => Effect.void,
-        getFile: () => Effect.succeed(""),
-        raw: {} as never,
-    } satisfies SurrealClientShape;
-    return { calls, layer };
+            { match: "__watermark_migration__", rows: [[]] },
+            { match: /^SELECT/, rows: [[...rowsForSelect]] },
+        ],
+        fallback: [],
+    });
+    return { calls: tc.captured, layer: tc.client };
 };
 
 const run = <A>(eff: Effect.Effect<A, unknown, SurrealClient>, layer: SurrealClientShape) =>
@@ -112,22 +102,13 @@ describe("ensureWatermarkIdMigration", () => {
     });
 
     test("sentinel present ⇒ no DELETE", async () => {
-        const calls: string[] = [];
-        const layer = {
-            query: <T extends unknown[]>(sql: string) => {
-                calls.push(sql);
-                if (sql.includes("__watermark_migration__") && sql.startsWith("SELECT")) {
-                    return Effect.succeed([[{ id: "x" }]] as unknown as T);
-                }
-                return Effect.succeed([[]] as unknown as T);
-            },
-            upsert: () => Effect.void,
-            relate: () => Effect.void,
-            putFile: () => Effect.void,
-            getFile: () => Effect.succeed(""),
-            raw: {} as never,
-        } satisfies SurrealClientShape;
-        await run(ensureWatermarkIdMigration, layer);
-        expect(calls.some((c) => c.includes("DELETE ingest_file_state"))).toBe(false);
+        const tc = makeTestSurrealClient({
+            fallback: (sql) =>
+                sql.includes("__watermark_migration__") && sql.startsWith("SELECT")
+                    ? [[{ id: "x" }]]
+                    : [[]],
+        });
+        await run(ensureWatermarkIdMigration, tc.client);
+        expect(tc.captured.some((c) => c.includes("DELETE ingest_file_state"))).toBe(false);
     });
 });

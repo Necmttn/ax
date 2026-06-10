@@ -1,8 +1,7 @@
-import { Effect, FileSystem, Path, PlatformError, Schema } from "effect";
+import { Effect, FileSystem, Path, Schema } from "effect";
 import { AxConfig } from "@ax/lib/config";
 import { RecordId, SurrealClient } from "@ax/lib/db";
 import { decodeJsonOrNull } from "@ax/lib/decode";
-import type { DbError } from "@ax/lib/errors";
 import { safeKeyPart } from "@ax/lib/shared/derive-keys";
 import { executeStatements } from "@ax/lib/shared/statement-exec";
 import {
@@ -29,6 +28,7 @@ import { BaseStageStats, IngestContext, sinceDaysFromCtx, StageMeta } from "./st
 import type { StageDef } from "./stage/registry.ts";
 import { extractCommandTool, normalizeCommand, toolKindForName } from "./tool-calls.ts";
 import { extractToolFileEvidence } from "./tool-file-evidence.ts";
+import { decodePiTranscriptLine } from "./line-schemas.ts";
 import { tokenQualityLabels } from "./token-quality.ts";
 import { walkJsonlFilesLenient } from "./walk-jsonl.ts";
 
@@ -435,21 +435,28 @@ function createPiExtractor(filePath: string) {
                 skipped += 1;
                 return;
             }
+            // Typed, tolerant view of the line head (see line-schemas.ts).
+            // The `message` payload stays a raw probe.
+            const head = decodePiTranscriptLine(entry);
+            if (!head) {
+                skipped += 1;
+                return;
+            }
 
-            const type = stringField(entry, "type") ?? "unknown";
+            const type = head.type ?? "unknown";
             if (type === "session") {
                 if (session) return;
-                const timestamp = stringField(entry, "timestamp");
+                const timestamp = head.timestamp ?? null;
                 const startedAt = timestamp ? validIsoTimestamp(timestamp) : null;
                 if (!startedAt) {
                     warnings.push(
-                        `invalid session timestamp for ${stringField(entry, "id") ?? filePath}: ${timestamp ?? "(missing)"}`,
+                        `invalid session timestamp for ${head.id ?? filePath}: ${timestamp ?? "(missing)"}`,
                     );
                 }
                 session = {
-                    id: stringField(entry, "id") ?? filePath,
-                    version: numberField(entry, "version"),
-                    cwd: stringField(entry, "cwd"),
+                    id: head.id ?? filePath,
+                    version: head.version ?? null,
+                    cwd: head.cwd ?? null,
                     started_at: startedAt ?? SAFE_FALLBACK_TS,
                     ended_at: startedAt ?? SAFE_FALLBACK_TS,
                     model: null,
@@ -467,8 +474,8 @@ function createPiExtractor(filePath: string) {
             if (timestamp.warning) warnings.push(timestamp.warning);
             const ts = timestamp.ts;
             session.ended_at = ts;
-            const providerEventId = stringField(entry, "id");
-            const parentProviderEventId = stringField(entry, "parentId");
+            const providerEventId = head.id ?? null;
+            const parentProviderEventId = head.parentId ?? null;
             const message = isRecord(entry.message) ? entry.message : null;
             const role = message ? stringField(message, "role") : null;
             const text = message ? textFromPiContent(message.content) : null;
@@ -486,7 +493,7 @@ function createPiExtractor(filePath: string) {
             if (entryUsage) addUsage(usage, entryUsage);
 
             if (type === "model_change") {
-                session.model = stringField(entry, "modelId") ?? session.model;
+                session.model = head.modelId ?? session.model;
             } else if (role === "assistant" && message) {
                 session.model = stringField(message, "model") ?? session.model;
             }
@@ -720,10 +727,8 @@ interface PiIngestOpts {
     sinceDays: number | undefined;
 }
 
-export const ingestPi = (
-    opts: Partial<PiIngestOpts> = {},
-): Effect.Effect<PiStats, DbError | PlatformError.PlatformError, SurrealClient | AxConfig | FileSystem.FileSystem | Path.Path> =>
-    Effect.gen(function* () {
+export const ingestPi = Effect.fn("pi.ingest")(
+    function* (opts: Partial<PiIngestOpts> = {}) {
         const cfg = yield* AxConfig;
         const db = yield* SurrealClient;
         const fs = yield* FileSystem.FileSystem;
@@ -781,8 +786,9 @@ export const ingestPi = (
             toolCalls: toolCallCount,
             skipped,
             warnings: warningCount,
-        };
-    });
+        } satisfies PiStats;
+    },
+);
 
 export class PiStageStats extends BaseStageStats.extend<PiStageStats>("PiStageStats")({
     filesIngested: Schema.Number,
@@ -796,27 +802,28 @@ export class PiStageStats extends BaseStageStats.extend<PiStageStats>("PiStageSt
 
 export const piStage: StageDef<PiStageStats, SurrealClient | AxConfig | FileSystem.FileSystem | Path.Path> = {
     meta: StageMeta.make({ key: "pi", deps: ["skills", "commands"], tags: ["ingest"] }),
-    run: (ctx: IngestContext) =>
-        Effect.gen(function* () {
-            const t0 = Date.now();
-            const sinceDays = sinceDaysFromCtx(ctx);
-            // The directory walk recovers every PlatformError internally; the
-            // only PlatformError that can escape `ingestPi` is a per-file
-            // `readFileString` fault, which (like claude/codex) dies as a defect
-            // rather than masquerading as a recoverable DbError.
-            const result = yield* ingestPi({ sinceDays }).pipe(
-                Effect.catchTag("PlatformError", (e) => Effect.die(e)),
-            );
-            return PiStageStats.make({
-                durationMs: Date.now() - t0,
-                summary: `ingested ${result.files} files, ${result.sessions} sessions, ${result.events} events, ${result.turns} turns, ${result.toolCalls} tool calls, skipped ${result.skipped}, warnings ${result.warnings}`,
-                filesIngested: result.files,
-                sessionsIngested: result.sessions,
-                eventsIngested: result.events,
-                turnsIngested: result.turns,
-                toolCallsIngested: result.toolCalls,
-                skipped: result.skipped,
-                warnings: result.warnings,
-            });
-        }),
+    // Unnamed Effect.fn: the stage runner's LiveTrace.step span already names
+    // this boundary by the stage key, so a named span here would double-wrap.
+    run: Effect.fn(function* (ctx: IngestContext) {
+        const t0 = Date.now();
+        const sinceDays = sinceDaysFromCtx(ctx);
+        // The directory walk recovers every PlatformError internally; the
+        // only PlatformError that can escape `ingestPi` is a per-file
+        // `readFileString` fault, which (like claude/codex) dies as a defect
+        // rather than masquerading as a recoverable DbError.
+        const result = yield* ingestPi({ sinceDays }).pipe(
+            Effect.catchTag("PlatformError", (e) => Effect.die(e)),
+        );
+        return PiStageStats.make({
+            durationMs: Date.now() - t0,
+            summary: `ingested ${result.files} files, ${result.sessions} sessions, ${result.events} events, ${result.turns} turns, ${result.toolCalls} tool calls, skipped ${result.skipped}, warnings ${result.warnings}`,
+            filesIngested: result.files,
+            sessionsIngested: result.sessions,
+            eventsIngested: result.events,
+            turnsIngested: result.turns,
+            toolCallsIngested: result.toolCalls,
+            skipped: result.skipped,
+            warnings: result.warnings,
+        });
+    }),
 };

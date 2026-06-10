@@ -2,7 +2,6 @@ import { Database } from "bun:sqlite";
 import { Effect, FileSystem, Option, Path, Schema } from "effect";
 import { AxConfig } from "@ax/lib/config";
 import { RecordId, SurrealClient } from "@ax/lib/db";
-import type { DbError } from "@ax/lib/errors";
 import { orAbsent } from "@ax/lib/shared/fs-error";
 import { classifyNoFollow } from "@ax/lib/shared/fs-classify";
 import { posixPath } from "@ax/lib/shared/path";
@@ -196,31 +195,44 @@ function decodeSqliteValue(value: SQLiteValue | undefined): string | null {
     return null;
 }
 
+/** Effect-Schema-backed JSON decode at the SQLite blob boundary. `Option`
+ *  (not `null`) so a literal JSON `null` is distinguishable from a failed
+ *  parse. */
+const decodeJsonStringOption = Schema.decodeUnknownOption(Schema.UnknownFromJsonString);
+
+/** Re-derive the native parse error for the warning detail: the Option-based
+ *  schema decode drops the `SyntaxError` that the legacy `JSON.parse` warning
+ *  surfaced. Runs only on the (rare) failure path. */
+function jsonParseErrorText(raw: string): string {
+    try {
+        JSON.parse(raw);
+        return "schema decode failed";
+    } catch (error) {
+        return error instanceof Error ? error.message : String(error);
+    }
+}
+
 function parseJsonRecord(raw: string | null, label: string, warnings: string[]): Record<string, unknown> | null {
     if (raw === null || raw.trim().length === 0) {
         warnings.push(`${label}: missing JSON data`);
         return null;
     }
-    try {
-        const parsed = JSON.parse(raw) as unknown;
-        if (isRecord(parsed)) return parsed;
-        warnings.push(`${label}: JSON data is not an object`);
-        return null;
-    } catch (error) {
-        warnings.push(`${label}: invalid JSON data (${error instanceof Error ? error.message : String(error)})`);
+    const parsed = decodeJsonStringOption(raw);
+    if (Option.isNone(parsed)) {
+        warnings.push(`${label}: invalid JSON data (${jsonParseErrorText(raw)})`);
         return null;
     }
+    if (isRecord(parsed.value)) return parsed.value;
+    warnings.push(`${label}: JSON data is not an object`);
+    return null;
 }
 
 function parseJsonValue(input: unknown): unknown {
     if (typeof input !== "string") return input;
     const trimmed = input.trim();
     if (trimmed.length === 0) return null;
-    try {
-        return JSON.parse(trimmed) as unknown;
-    } catch {
-        return input;
-    }
+    const parsed = decodeJsonStringOption(trimmed);
+    return Option.isSome(parsed) ? parsed.value : input;
 }
 
 function boundExcerpt(input: unknown, max = 1200): string | null {
@@ -1016,10 +1028,8 @@ interface CursorIngestOpts {
     sinceDays: number | undefined;
 }
 
-export const ingestCursor = (
-    opts: Partial<CursorIngestOpts> = {},
-): Effect.Effect<CursorStats, DbError, SurrealClient | AxConfig | FileSystem.FileSystem | Path.Path> =>
-    Effect.gen(function* () {
+export const ingestCursor = Effect.fn("cursor.ingest")(
+    function* (opts: Partial<CursorIngestOpts> = {}) {
         const cfg = yield* AxConfig;
         const db = yield* SurrealClient;
         const cutoff = opts.sinceDays ? Date.now() - opts.sinceDays * 86400 * 1000 : 0;
@@ -1062,8 +1072,9 @@ export const ingestCursor = (
             toolCalls: toolCallCount,
             skipped,
             warnings,
-        };
-    });
+        } satisfies CursorStats;
+    },
+);
 
 export class CursorStageStats extends BaseStageStats.extend<CursorStageStats>("CursorStageStats")({
     sessionsIngested: Schema.Number,
@@ -1075,19 +1086,20 @@ export class CursorStageStats extends BaseStageStats.extend<CursorStageStats>("C
 
 export const cursorStage: StageDef<CursorStageStats, SurrealClient | AxConfig | FileSystem.FileSystem | Path.Path> = {
     meta: StageMeta.make({ key: "cursor", deps: ["skills", "commands"], tags: ["ingest"] }),
-    run: (ctx: IngestContext) =>
-        Effect.gen(function* () {
-            const t0 = Date.now();
-            const sinceDays = sinceDaysFromCtx(ctx);
-            const result = yield* ingestCursor({ sinceDays });
-            return CursorStageStats.make({
-                durationMs: Date.now() - t0,
-                summary: `ingested ${result.sessions} sessions, ${result.turns} turns, ${result.toolCalls} tool calls, skipped ${result.skipped}, warnings ${result.warnings}`,
-                sessionsIngested: result.sessions,
-                turnsIngested: result.turns,
-                toolCallsIngested: result.toolCalls,
-                skipped: result.skipped,
-                warnings: result.warnings,
-            });
-        }),
+    // Unnamed Effect.fn: the stage runner's LiveTrace.step span already names
+    // this boundary by the stage key, so a named span here would double-wrap.
+    run: Effect.fn(function* (ctx: IngestContext) {
+        const t0 = Date.now();
+        const sinceDays = sinceDaysFromCtx(ctx);
+        const result = yield* ingestCursor({ sinceDays });
+        return CursorStageStats.make({
+            durationMs: Date.now() - t0,
+            summary: `ingested ${result.sessions} sessions, ${result.turns} turns, ${result.toolCalls} tool calls, skipped ${result.skipped}, warnings ${result.warnings}`,
+            sessionsIngested: result.sessions,
+            turnsIngested: result.turns,
+            toolCallsIngested: result.toolCalls,
+            skipped: result.skipped,
+            warnings: result.warnings,
+        });
+    }),
 };

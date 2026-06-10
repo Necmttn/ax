@@ -13,7 +13,6 @@
 
 import { Effect, Schema } from "effect";
 import { SurrealClient } from "@ax/lib/db";
-import type { DbError } from "@ax/lib/errors";
 import { recordLiteral } from "@ax/lib/ids";
 import { surrealString } from "@ax/lib/shared/surql";
 import { watermarkRecordKey } from "@ax/lib/shared/watermark";
@@ -122,10 +121,8 @@ interface GithubPrTotals {
  * write their PRs. The fetcher defaults to the real `gh`-spawning
  * `fetchPullRequests` but is injectable for tests.
  */
-export const ingestGithubPrs = (
-    deps?: GithubPrIngestDeps,
-): Effect.Effect<GithubPrTotals, DbError, SurrealClient> =>
-    Effect.gen(function* () {
+export const ingestGithubPrs = Effect.fn("github-pr.ingest")(
+    function* (deps?: GithubPrIngestDeps) {
         const db = yield* SurrealClient;
         const limit = deps?.limit ?? 200;
         const fetchImpl = deps?.fetchImpl ?? fetchPullRequests;
@@ -257,7 +254,8 @@ export const ingestGithubPrs = (
             totals.deliveryOutcomes += r.deliveryOutcomes;
         }
         return totals;
-    });
+    },
+);
 
 /**
  * github-pr stage - fetches + normalizes + persists GitHub PRs and links them
@@ -268,34 +266,35 @@ export const ingestGithubPrs = (
  */
 export const githubPrStage: StageDef<GithubPrStageStats, SurrealClient> = {
     meta: StageMeta.make({ key: "github-pr", deps: ["git"], tags: ["ingest"] }),
-    run: (ctx: IngestContext) =>
-        Effect.gen(function* () {
-            const t0 = Date.now();
-            // Epoch-zero `since` is the "full re-derive" sentinel → unbounded
-            // fetch; otherwise bound the gh search to the ingest window (the
-            // date floor of `since` is inclusive-safe for `updated:>=`).
-            const updatedSince = ctx.since.getTime() > 0 ? ctx.since.toISOString().slice(0, 10) : undefined;
-            // Cooldown only applies to incremental runs - a forced full
-            // re-ingest must always hit the network.
-            const fetchCooldownMs = updatedSince === undefined ? 0 : resolveFetchCooldownMs();
-            const result = yield* ingestGithubPrs({
-                ...(ctx.repoPaths === undefined ? {} : { repoPaths: ctx.repoPaths }),
-                ...(updatedSince === undefined ? {} : { updatedSince }),
-                fetchCooldownMs,
-            });
-            const degraded = result.repositoriesDegraded > 0 ? ` (${result.repositoriesDegraded} degraded)` : "";
-            const cooled =
-                result.repositoriesSkippedCooldown > 0 ? ` (${result.repositoriesSkippedCooldown} on cooldown)` : "";
-            return GithubPrStageStats.make({
-                durationMs: Date.now() - t0,
-                summary: `ingested ${result.pullRequests} PRs from ${result.repositoriesScanned} repos${cooled}${degraded}`,
-                repositoriesScanned: result.repositoriesScanned,
-                repositoriesDegraded: result.repositoriesDegraded,
-                repositoriesSkippedCooldown: result.repositoriesSkippedCooldown,
-                pullRequestsIngested: result.pullRequests,
-                reviewsIngested: result.reviews,
-                checksIngested: result.checks,
-                deliveryOutcomes: result.deliveryOutcomes,
-            });
-        }),
+    // Unnamed Effect.fn: the stage runner's LiveTrace.step span already names
+    // this boundary by the stage key, so a named span here would double-wrap.
+    run: Effect.fn(function* (ctx: IngestContext) {
+        const t0 = Date.now();
+        // Epoch-zero `since` is the "full re-derive" sentinel → unbounded
+        // fetch; otherwise bound the gh search to the ingest window (the
+        // date floor of `since` is inclusive-safe for `updated:>=`).
+        const updatedSince = ctx.since.getTime() > 0 ? ctx.since.toISOString().slice(0, 10) : undefined;
+        // Cooldown only applies to incremental runs - a forced full
+        // re-ingest must always hit the network.
+        const fetchCooldownMs = updatedSince === undefined ? 0 : resolveFetchCooldownMs();
+        const result = yield* ingestGithubPrs({
+            ...(ctx.repoPaths === undefined ? {} : { repoPaths: ctx.repoPaths }),
+            ...(updatedSince === undefined ? {} : { updatedSince }),
+            fetchCooldownMs,
+        });
+        const degraded = result.repositoriesDegraded > 0 ? ` (${result.repositoriesDegraded} degraded)` : "";
+        const cooled =
+            result.repositoriesSkippedCooldown > 0 ? ` (${result.repositoriesSkippedCooldown} on cooldown)` : "";
+        return GithubPrStageStats.make({
+            durationMs: Date.now() - t0,
+            summary: `ingested ${result.pullRequests} PRs from ${result.repositoriesScanned} repos${cooled}${degraded}`,
+            repositoriesScanned: result.repositoriesScanned,
+            repositoriesDegraded: result.repositoriesDegraded,
+            repositoriesSkippedCooldown: result.repositoriesSkippedCooldown,
+            pullRequestsIngested: result.pullRequests,
+            reviewsIngested: result.reviews,
+            checksIngested: result.checks,
+            deliveryOutcomes: result.deliveryOutcomes,
+        });
+    }),
 };

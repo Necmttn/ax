@@ -1,4 +1,5 @@
 import { Effect } from "effect";
+import { jsonRecordField } from "@ax/lib/decode";
 import { SurrealClient } from "@ax/lib/db";
 import type { DbError } from "@ax/lib/errors";
 import { toBareSessionId } from "@ax/lib/shared/session-id";
@@ -328,11 +329,10 @@ const stringFieldOrId = (
 const parseSnapshotPayload = (rows: ReadonlyArray<Record<string, unknown>>): WorkflowResponse | null => {
     const payload = stringField(rows[0] ?? {}, "payload");
     if (!payload) return null;
-    try {
-        return JSON.parse(payload) as WorkflowResponse;
-    } catch {
-        return null;
-    }
+    // The snapshot payload is a WorkflowResponse we serialized ourselves;
+    // decode the JSON-string boundary as a record, keep the structural cast.
+    const parsed = jsonRecordField.decode(payload);
+    return parsed === null ? null : (parsed as unknown as WorkflowResponse);
 };
 
 export const computeWorkflow = (): Effect.Effect<
@@ -377,7 +377,7 @@ export const computeWorkflow = (): Effect.Effect<
                 episodeInvocationRows?.[0] ?? [],
             );
         const episodes: WorkflowEpisode[] = (episodeRows?.[0] ?? [])
-            .map((raw) => {
+            .map((raw): WorkflowEpisode | null => {
                 const parent = stringFieldOrId(raw, "parent");
                 if (!parent) return null;
                 // SurrealDB GROUP BY collects non-aggregate cols into arrays;

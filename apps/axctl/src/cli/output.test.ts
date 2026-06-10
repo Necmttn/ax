@@ -71,7 +71,7 @@ describe("catchDbErrorAndExit", () => {
     });
 
     it("DbError caught → writes correct message to stderr and calls exit(1)", async () => {
-        const err = new DbError({ operation: "SELECT", message: "connection refused" });
+        const err = new DbError({ operation: "query", message: "connection refused" });
         const eff: Effect.Effect<never, DbError> = Effect.fail(err);
         await Effect.runPromiseExit(eff.pipe(catchDbErrorAndExit("axctl test-cmd")));
         // process.exit throws in our mock, so the effect surfaces as a Die.

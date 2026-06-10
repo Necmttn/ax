@@ -24,28 +24,22 @@ summary: "One sentence written for humans, not commit logs."
 ---
 ```
 
-## Automated flow (default)
+## Coverage lint
 
-When a Release Please release PR merges, the `release-announcement` job in
-`.github/workflows/release-please.yml` runs automatically:
+`bun run check:release-announcements` compares the versions in `CHANGELOG.md`
+against this directory and lists every released version with no announcement
+page. The lefthook `pre-push` hook (see `lefthook.yml`, installed by
+`bun install` via the root `prepare` script) runs it in warn mode on every
+push, printing the scaffold command and the `ax:release-announcement` skill
+invocation for the missing versions. Pass `--strict` to make missing pages a
+hard failure.
 
-1. `scripts/create-release-announcement.ts` generates the evidence draft for
-   the new version.
-2. `openai/codex-action` (Codex CLI, API-key billing via the `OPENAI_API_KEY`
-   secret) rewrites the draft into the final announcement following the
-   authoring rules below. CI has no ax session graph, so the narrative is
-   grounded in the embedded commit/diff evidence only.
-3. The job opens `release-announcement/vX.Y.Z` as a PR and (with
-   `AUTO_MERGE: "true"`, the default) squash-merges it immediately.
-4. Cloudflare Pages' GitHub integration on the `ax` project picks up the
-   merge to main, rebuilds the site, and publishes the announcement at
-   `/changelog/X.Y.Z`.
+Announcements are written locally - with the ax session graph available - so
+they can explain how the release came together, not just what merged. The
+site picks the page up on merge to main via Cloudflare Pages' GitHub
+integration and publishes it at `/changelog/X.Y.Z`.
 
-Set `AUTO_MERGE: "false"` in the workflow to hold the PR for human review
-before publishing. The manual flow below still works and produces richer,
-session-grounded announcements.
-
-## Manual flow
+## Writing flow
 
 1. Let Release Please open or update the release PR.
 2. Trigger `ax:release-announcement` or run
