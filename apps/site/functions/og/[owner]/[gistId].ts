@@ -156,14 +156,17 @@ export const onRequestGet: PagesFunction = async (ctx) => {
     const date = (manifest.session.started_at ?? "").slice(0, 10);
 
     const stat = (n: string, label: string, color: string = INK) =>
-        `<div style="display:flex;flex-direction:column;margin-right:54px"><span style="font-size:52px;font-weight:700;color:${color}">${n}</span><span style="font-size:15px;letter-spacing:2px;color:${DIM};margin-top:2px">${label}</span></div>`;
-    const stats = [
+        `<div style="display:flex;flex-direction:column;margin-right:46px;width:200px"><span style="font-size:46px;font-weight:700;color:${color}">${n}</span><span style="font-size:14px;letter-spacing:2px;color:${DIM};margin-top:2px">${label}</span></div>`;
+    const statList = [
         stat(t.turns.toLocaleString("en-US"), "TURNS"),
         stat(t.tool_calls.toLocaleString("en-US"), "TOOL CALLS"),
         fmtDuration(t.duration_ms) ? stat(fmtDuration(t.duration_ms)!, "WALL CLOCK") : "",
         fmtUsd(t.cost_usd) ? stat(fmtUsd(t.cost_usd)!, "TOTAL COST", GREEN) : "",
         t.failures > 0 ? stat(String(t.failures), "FAILED TOOL CALLS", RED) : "",
-    ].filter(Boolean).join("");
+    ].filter(Boolean);
+    // Two rows so the stat column shares the band with the fleet waffle
+    // instead of running underneath it.
+    const stats = `<div style="display:flex;flex-direction:column"><div style="display:flex;margin-bottom:30px">${statList.slice(0, 3).join("")}</div><div style="display:flex">${statList.slice(3).join("")}</div></div>`;
 
     const blocks: Record<string, string> = {
         header: `<div style="display:flex;justify-content:space-between;align-items:center"><div style="display:flex;align-items:baseline"><span style="font-size:32px;color:${INK};font-weight:700">ax</span><span style="font-size:14px;color:${DIM};margin-left:12px;letter-spacing:3px">AGENT EXPERIENCE</span></div><span style="font-size:17px;color:${DIM}">${esc([model, date].filter(Boolean).join(" · "))}</span></div>`,
