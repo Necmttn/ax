@@ -139,7 +139,7 @@ export interface ShareSubagentCard {
 }
 
 export interface ShareManifest {
-    readonly schema_version: 3;
+    readonly schema_version: 3 | 4;
     readonly kind: "manifest";
     readonly exported_at: string;
     readonly ax_version?: string;
@@ -162,7 +162,7 @@ export function isShareManifest(value: unknown): value is ShareManifest {
     return (
         isRecord(value) &&
         value.kind === "manifest" &&
-        value.schema_version === 3 &&
+        (value.schema_version === 3 || value.schema_version === 4) &&
         isRecord(value.session) &&
         typeof value.session.id === "string" &&
         isRecord(value.totals) &&

@@ -100,6 +100,18 @@ describe("isShareManifest", () => {
         })).toBe(true);
         expect(isShareManifest({ schema_version: 3, session: { id: "s1" }, turns: [] })).toBe(false);
     });
+
+    test("accepts a v4 manifest (current CLI export version)", () => {
+        expect(isShareManifest({
+            schema_version: 4,
+            kind: "manifest",
+            session: { id: "s1", source: "claude" },
+            totals: { cost_usd: null, duration_ms: null, tool_calls: 0, turns: 0, subagents: 0, failures: 0 },
+            root_file: "session.json",
+            subagents: [],
+        })).toBe(true);
+        expect(isShareManifest({ schema_version: 5, kind: "manifest", session: { id: "s1" }, totals: {}, root_file: "session.json", subagents: [] })).toBe(false);
+    });
 });
 
 describe("fetchShareManifest", () => {
