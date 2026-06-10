@@ -52,6 +52,13 @@ describe("guard A: branch switch on primary tree", () => {
     const r = await withEnv("ALLOW_BRANCH_CHECKOUT", () => run("git checkout main"));
     expect((r as { _tag: string })._tag).toBe("Allow");
   });
+  test("git checkout -B hotfix -> Allow (uppercase create)", async () => {
+    expect((await run("git checkout -B hotfix"))._tag).toBe("Allow");
+  });
+  test("ALLOW_DIRTY_MAIN_MUTATION=1 does NOT bypass guard A", async () => {
+    const r = await withEnv("ALLOW_DIRTY_MAIN_MUTATION", () => run("git checkout main"));
+    expect((r as { _tag: string })._tag).toBe("Block");
+  });
 });
 
 describe("guard B: history mutation into dirty primary tree", () => {
@@ -70,6 +77,24 @@ describe("guard B: history mutation into dirty primary tree", () => {
   });
   test("non-git command -> Allow", async () => {
     expect((await run("echo git merge"))._tag).toBe("Allow");
+  });
+  test("echo git merge, dirty primary -> Allow (substring false-positive regression)", async () => {
+    expect((await run("echo git merge", { dirty: true }))._tag).toBe("Allow");
+  });
+  test('echo "git merge x", dirty primary -> Allow', async () => {
+    expect((await run('echo "git merge x"', { dirty: true }))._tag).toBe("Allow");
+  });
+  test("cd /x && git merge y, dirty -> Block", async () => {
+    expect((await run("cd /x && git merge y", { dirty: true }))._tag).toBe("Block");
+  });
+  test("FOO=1 git merge x, dirty -> Block", async () => {
+    expect((await run("FOO=1 git merge x", { dirty: true }))._tag).toBe("Block");
+  });
+  test("git -c user.name=x merge y, dirty -> Block", async () => {
+    expect((await run("git -c user.name=x merge y", { dirty: true }))._tag).toBe("Block");
+  });
+  test("something | git rebase main, dirty -> Block", async () => {
+    expect((await run("something | git rebase main", { dirty: true }))._tag).toBe("Block");
   });
   test("bypass ALLOW_DIRTY_MAIN_MUTATION=1 -> Allow", async () => {
     const r = await withEnv("ALLOW_DIRTY_MAIN_MUTATION", () => run("git merge x", { dirty: true }));

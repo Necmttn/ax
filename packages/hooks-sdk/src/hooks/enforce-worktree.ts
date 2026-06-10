@@ -2,17 +2,35 @@ import { Effect } from "effect";
 import { defineHook, runMain } from "../define.ts";
 import { GitEnv } from "../git-env.ts";
 import { Verdict } from "../verdict.ts";
+import { findGitInvocations, type GitInvocation } from "./git-command.ts";
 
-const GIT_CMD = /(^|[^a-zA-Z0-9_-])git\s/;
-const MERGE_REBASE = /git\s+(?:\S.*\s)?(merge|rebase)(\s|$)/;
-const RESET_HARD = /git\s+(?:\S.*\s)?reset\s+.*--hard/;
-const CHECKOUT_SWITCH = /git\s+(?:\S.*\s)?(checkout|switch)\s/;
-const CREATE_B = /checkout\s+-[bB]\s/;
-const CREATE_C = /switch\s+-[cC]\s/;
-const FILE_RESTORE = /checkout\s+--(\s|$)/;
-const DOT_RESTORE = /checkout\s+\.(\s|$)/;
-const GIT_DASH_C = /git\s+-C\s+("([^"]+)"|'([^']+)'|([^\s]+))/;
-const SWITCH_TO_BRANCH = /(^|[^a-zA-Z0-9_-])git\s+(checkout|switch)\s+/;
+/** checkout/switch forms that create a branch or restore files - always allowed. */
+const isCreateOrRestore = (verb: string, args: ReadonlyArray<string>): boolean => {
+  const a0 = args[0];
+  if (verb === "checkout") {
+    if (a0 === "-b" || a0 === "-B") return true; // create
+    if (a0 === "--") return true; // file restore
+    if (a0 === "." && args.length === 1) return true; // restore all
+    return false;
+  }
+  if (verb === "switch") {
+    return a0 === "-c" || a0 === "-C"; // create
+  }
+  return false;
+};
+
+/** Guard B verb set: ops that rewrite the target tree's state/history. */
+const isGuardedMutation = (inv: GitInvocation): boolean => {
+  if (inv.verb === "merge" || inv.verb === "rebase") return true;
+  if (inv.verb === "reset" && inv.args.includes("--hard")) return true;
+  if (
+    (inv.verb === "checkout" || inv.verb === "switch") &&
+    !isCreateOrRestore(inv.verb, inv.args)
+  ) {
+    return true;
+  }
+  return false;
+};
 
 const blockDirtyMsg = (target: string, branch: string, command: string) =>
   `BLOCKED: history-mutating git op against a DIRTY primary working tree.
@@ -48,15 +66,15 @@ const hook = defineHook({
       const command = String(event.tool?.input.command ?? "");
       if (command === "") return Verdict.allow;
 
-      // ---- Guard B ----
-      if (process.env.ALLOW_DIRTY_MAIN_MUTATION !== "1" && GIT_CMD.test(command)) {
-        let guarded = MERGE_REBASE.test(command) || RESET_HARD.test(command);
-        if (!guarded && CHECKOUT_SWITCH.test(command)) {
-          guarded = !(CREATE_B.test(command) || CREATE_C.test(command) || FILE_RESTORE.test(command) || DOT_RESTORE.test(command));
-        }
-        if (guarded) {
-          const m = command.match(GIT_DASH_C);
-          const target = m ? (m[2] ?? m[3] ?? m[4] ?? event.cwd) : event.cwd;
+      const invocations = findGitInvocations(command);
+      if (invocations.length === 0) return Verdict.allow;
+
+      // ---- Guard B: history mutation into a DIRTY primary tree ----
+      if (process.env.ALLOW_DIRTY_MAIN_MUTATION !== "1") {
+        for (const inv of invocations) {
+          if (!isGuardedMutation(inv)) continue;
+          // Target tree: explicit `git -C <path>` wins, else the event cwd.
+          const target = inv.cPath ?? event.cwd;
           if ((yield* git.isPrimaryTree(target)) && (yield* git.isDirty(target))) {
             const branch = (yield* git.currentBranch(target)) ?? "(detached)";
             return Verdict.block(blockDirtyMsg(target, branch, command));
@@ -64,16 +82,18 @@ const hook = defineHook({
         }
       }
 
-      // ---- Guard A ----
+      // ---- Guard A: branch switching on the primary tree (cwd-scoped) ----
       if (process.env.ALLOW_BRANCH_CHECKOUT === "1") return Verdict.allow;
-      if (!SWITCH_TO_BRANCH.test(command)) return Verdict.allow;
-      if (GIT_DASH_C.test(command)) return Verdict.allow;
-      if (/git\s+checkout\s+-[bB]\s/.test(command)) return Verdict.allow;
-      if (/git\s+switch\s+-[cC]\s/.test(command)) return Verdict.allow;
-      if (/git\s+checkout\s+--\s/.test(command)) return Verdict.allow;
-      if (/git\s+checkout\s+\.\s*$/.test(command)) return Verdict.allow;
-      if (!(yield* git.isPrimaryTree(event.cwd))) return Verdict.allow;
-      return Verdict.block(blockSwitchMsg);
+      for (const inv of invocations) {
+        if (inv.verb !== "checkout" && inv.verb !== "switch") continue;
+        // Explicit `git -C <path>` targets another tree - guard B territory.
+        if (inv.cPath !== null) continue;
+        if (isCreateOrRestore(inv.verb, inv.args)) continue;
+        if (yield* git.isPrimaryTree(event.cwd)) {
+          return Verdict.block(blockSwitchMsg);
+        }
+      }
+      return Verdict.allow;
     }),
 });
 
