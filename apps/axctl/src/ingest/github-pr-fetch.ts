@@ -17,6 +17,7 @@
  */
 
 import { Effect } from "effect";
+import { runCommand } from "@ax/lib/process";
 
 /**
  * Comma-joined field list passed to `gh pr list --json`.
@@ -96,41 +97,36 @@ export function parsePrListOutput(stdout: string): unknown[] {
 /**
  * Spawn `gh pr list` in `input.cwd` and return the parsed PR array.
  * Always resolves - never rejects and never surfaces an error channel. The
- * subprocess is killed after `timeoutMs` (default {@link DEFAULT_FETCH_TIMEOUT_MS}).
+ * subprocess is killed after `timeoutMs` (default {@link DEFAULT_FETCH_TIMEOUT_MS}):
+ * `Effect.timeoutOrElse` interrupts the spawn scope (which kills the child,
+ * see `spawnScoped` in `@ax/lib/process`) and yields the degraded result.
  */
-export const fetchPullRequests = (input: PrFetchInput): Effect.Effect<PrFetchResult, never, never> =>
-    Effect.promise(async () => {
-        const timeoutMs = input.timeoutMs ?? DEFAULT_FETCH_TIMEOUT_MS;
-        try {
-            const proc = Bun.spawn(["gh", ...prListArgs(input.limit, input.updatedSince)], {
-                cwd: input.cwd,
-                stdout: "pipe",
-                stderr: "pipe",
-            });
-
-            let timedOut = false;
-            const timer = setTimeout(() => {
-                timedOut = true;
-                proc.kill();
-            }, timeoutMs);
-
-            const [stdout, stderr, exitCode] = await Promise.all([
-                new Response(proc.stdout).text(),
-                new Response(proc.stderr).text(),
-                proc.exited,
-            ]);
-            clearTimeout(timer);
-
-            if (timedOut) {
-                return { ok: false, prs: [], detail: `gh pr list timed out after ${timeoutMs}ms` };
+export const fetchPullRequests = (input: PrFetchInput): Effect.Effect<PrFetchResult, never, never> => {
+    const timeoutMs = input.timeoutMs ?? DEFAULT_FETCH_TIMEOUT_MS;
+    return runCommand("gh", prListArgs(input.limit, input.updatedSince), { cwd: input.cwd }).pipe(
+        Effect.map((result): PrFetchResult => {
+            if (result.code !== 0) {
+                const firstLine = result.stderr.trim().split("\n")[0] ?? "";
+                return {
+                    ok: false,
+                    prs: [],
+                    detail: `gh exited ${result.code}${firstLine ? `: ${firstLine}` : ""}`,
+                };
             }
-            if (exitCode !== 0) {
-                const firstLine = stderr.trim().split("\n")[0] ?? "";
-                return { ok: false, prs: [], detail: `gh exited ${exitCode}${firstLine ? `: ${firstLine}` : ""}` };
-            }
-
-            return { ok: true, prs: parsePrListOutput(stdout) };
-        } catch (err) {
-            return { ok: false, prs: [], detail: err instanceof Error ? err.message : String(err) };
-        }
-    });
+            return { ok: true, prs: parsePrListOutput(result.stdout) };
+        }),
+        Effect.timeoutOrElse({
+            duration: timeoutMs,
+            orElse: () =>
+                Effect.succeed<PrFetchResult>({
+                    ok: false,
+                    prs: [],
+                    detail: `gh pr list timed out after ${timeoutMs}ms`,
+                }),
+        }),
+        // Spawn failures (gh missing, bad cwd, ...) degrade instead of failing.
+        Effect.catch((err) =>
+            Effect.succeed<PrFetchResult>({ ok: false, prs: [], detail: err.message }),
+        ),
+    );
+};

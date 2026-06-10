@@ -1,6 +1,7 @@
 import { homedir } from "node:os";
 import { Effect, FileSystem, Path, type PlatformError, Schema } from "effect";
 import { SurrealClient, type SurrealClientShape } from "@ax/lib/db";
+import { runCommand } from "@ax/lib/process";
 import { AppLayer } from "@ax/lib/layers";
 import type { DbError } from "@ax/lib/errors";
 import { BaseStageStats, IngestContext, sinceDaysFromCtx, StageMeta } from "./stage/types.ts";
@@ -198,15 +199,11 @@ interface RunResult {
 }
 
 const runGit = (cwd: string, args: string[]): Effect.Effect<RunResult> =>
-    Effect.promise(async () => {
-        const proc = Bun.spawn(["git", "-C", cwd, ...args], {
-            stdout: "pipe",
-            stderr: "pipe",
-        });
-        const stdout = await new Response(proc.stdout).text();
-        await proc.exited;
-        return { stdout, code: proc.exitCode ?? 0 };
-    });
+    runCommand("git", ["-C", cwd, ...args]).pipe(
+        Effect.map((result): RunResult => ({ stdout: result.stdout, code: result.code })),
+        // Spawn failure was a defect before (Effect.promise); keep it that way.
+        Effect.orDie,
+    );
 
 const trimmedGitOutput = (cwd: string, args: string[]): Effect.Effect<string | null> =>
     Effect.gen(function* () {

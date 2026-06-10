@@ -1,4 +1,4 @@
-import { Context, Effect, Layer, Schema } from "effect";
+import { Context, Effect, Layer, Schema, type Scope } from "effect";
 
 export interface ProcessResult {
     readonly stdout: string;
@@ -11,6 +11,11 @@ export interface ProcessRunOptions {
     readonly timeoutMs?: number;
     readonly env?: Record<string, string | undefined>;
 }
+
+/** Spawn options for the scoped helpers. Deadlines are applied by the caller
+ *  via `Effect.timeout`/`Effect.timeoutOrElse` (interruption kills the child),
+ *  so there is no `timeoutMs` here. */
+export type SpawnOptions = Omit<ProcessRunOptions, "timeoutMs">;
 
 export class ProcessError extends Schema.TaggedErrorClass<ProcessError>(
     "ProcessError",
@@ -45,64 +50,107 @@ export class ProcessService extends Context.Service<
 
 const shellQuote = (value: string): string => `'${value.replace(/'/g, "'\\''")}'`;
 
-const bunExec = (
+const spawnChild = (
     command: string,
     args: ReadonlyArray<string>,
-    options: ProcessRunOptions,
-): Promise<ProcessResult> =>
-    new Promise((resolve, reject) => {
-        const proc = Bun.spawn([command, ...args], {
-            stdout: "pipe",
-            stderr: "pipe",
-            ...(options.cwd !== undefined ? { cwd: options.cwd } : {}),
-            ...(options.env !== undefined
-                ? { env: options.env as Record<string, string> }
-                : {}),
-        });
-        let timer: ReturnType<typeof setTimeout> | undefined;
-        let timedOut = false;
-        if (options.timeoutMs) {
-            timer = setTimeout(() => {
-                timedOut = true;
-                try {
-                    proc.kill();
-                } catch {
-                    /* best effort */
-                }
-            }, options.timeoutMs);
-        }
-        Promise.all([
-            new Response(proc.stdout).text(),
-            new Response(proc.stderr).text(),
-            proc.exited,
-        ])
-            .then(([stdout, stderr]) => {
-                if (timer) clearTimeout(timer);
-                if (timedOut) {
-                    reject(new Error(`process timed out after ${options.timeoutMs}ms`));
-                    return;
-                }
-                resolve({ stdout, stderr, code: proc.exitCode ?? 0 });
-            })
-            .catch((err) => {
-                if (timer) clearTimeout(timer);
-                reject(err);
-            });
+    options: SpawnOptions,
+) =>
+    Bun.spawn([command, ...args], {
+        stdout: "pipe",
+        stderr: "pipe",
+        ...(options.cwd !== undefined ? { cwd: options.cwd } : {}),
+        ...(options.env !== undefined
+            ? { env: options.env as Record<string, string> }
+            : {}),
     });
+
+export type SpawnedProcess = ReturnType<typeof spawnChild>;
+
+/** Kill the child if it is still alive, then await its actual exit so the
+ *  scope never closes while the process lingers. Never fails. */
+const releaseChild = (proc: SpawnedProcess): Effect.Effect<void> =>
+    Effect.promise(async () => {
+        if (proc.exitCode === null && proc.signalCode === null) {
+            try {
+                proc.kill();
+            } catch {
+                /* already dead */
+            }
+        }
+        await Promise.resolve(proc.exited).catch(() => undefined);
+    });
+
+/**
+ * Canonical interruption-safe spawn: acquires a `Bun.Subprocess` as a scoped
+ * resource. Acquisition is uninterruptible (`Effect.acquireRelease` default);
+ * when the scope closes - success, failure, OR fiber interruption (including
+ * an `Effect.timeout` racing the region) - the release finalizer kills the
+ * child if it is still running and waits for it to be reaped.
+ */
+export const spawnScoped = (
+    command: string,
+    args: ReadonlyArray<string>,
+    options: SpawnOptions = {},
+): Effect.Effect<SpawnedProcess, ProcessError, Scope.Scope> =>
+    Effect.acquireRelease(
+        Effect.try({
+            try: () => spawnChild(command, args, options),
+            catch: (err) =>
+                new ProcessError({
+                    command: `${command} ${args.join(" ")}`,
+                    message: err instanceof Error ? err.message : String(err),
+                }),
+        }),
+        releaseChild,
+    );
+
+/**
+ * Spawn a command and await its full output. Built on {@link spawnScoped}, so
+ * interrupting the calling fiber (directly or via `Effect.timeout`) kills the
+ * child before the effect settles. Resolves with the `ProcessResult` for any
+ * exit code; fails with `ProcessError` only when the spawn itself fails.
+ */
+export const runCommand = (
+    command: string,
+    args: ReadonlyArray<string>,
+    options: SpawnOptions = {},
+): Effect.Effect<ProcessResult, ProcessError> =>
+    Effect.scoped(
+        Effect.gen(function* () {
+            const proc = yield* spawnScoped(command, args, options);
+            const [stdout, stderr] = yield* Effect.promise(() =>
+                Promise.all([
+                    new Response(proc.stdout).text(),
+                    new Response(proc.stderr).text(),
+                ]),
+            );
+            yield* Effect.promise(() => proc.exited);
+            return { stdout, stderr, code: proc.exitCode ?? 0 };
+        }),
+    );
 
 const liveExec = (
     command: string,
     args: ReadonlyArray<string>,
     options: ProcessRunOptions = {},
-): Effect.Effect<ProcessResult, ProcessError> =>
-    Effect.tryPromise({
-        try: () => bunExec(command, args, options),
-        catch: (err) =>
-            new ProcessError({
-                command: `${command} ${args.join(" ")}`,
-                message: err instanceof Error ? err.message : String(err),
-            }),
-    });
+): Effect.Effect<ProcessResult, ProcessError> => {
+    const { timeoutMs, ...spawnOptions } = options;
+    const base = runCommand(command, args, spawnOptions);
+    if (!timeoutMs) return base;
+    return base.pipe(
+        // On timeout the fiber running `base` is interrupted, which closes the
+        // spawn scope and kills the child (see spawnScoped).
+        Effect.timeout(timeoutMs),
+        Effect.catchTag("TimeoutError", () =>
+            Effect.fail(
+                new ProcessError({
+                    command: `${command} ${args.join(" ")}`,
+                    message: `process timed out after ${timeoutMs}ms`,
+                }),
+            ),
+        ),
+    );
+};
 
 const liveShape: ProcessServiceShape = {
     exec: liveExec,
