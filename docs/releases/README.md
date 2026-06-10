@@ -24,7 +24,28 @@ summary: "One sentence written for humans, not commit logs."
 ---
 ```
 
-Recommended release flow:
+## Automated flow (default)
+
+When a Release Please release PR merges, the `release-announcement` job in
+`.github/workflows/release-please.yml` runs automatically:
+
+1. `scripts/create-release-announcement.ts` generates the evidence draft for
+   the new version.
+2. `openai/codex-action` (Codex CLI, API-key billing via the `OPENAI_API_KEY`
+   secret) rewrites the draft into the final announcement following the
+   authoring rules below. CI has no ax session graph, so the narrative is
+   grounded in the embedded commit/diff evidence only.
+3. The job opens `release-announcement/vX.Y.Z` as a PR and (with
+   `AUTO_MERGE: "true"`, the default) squash-merges it immediately.
+4. The merge to main triggers `.github/workflows/deploy-site.yml`, which
+   builds the site and deploys it to Cloudflare Pages, publishing the
+   announcement at `/changelog/X.Y.Z`.
+
+Set `AUTO_MERGE: "false"` in the workflow to hold the PR for human review
+before publishing. The manual flow below still works and produces richer,
+session-grounded announcements.
+
+## Manual flow
 
 1. Let Release Please open or update the release PR.
 2. Trigger `ax:release-announcement` or run
