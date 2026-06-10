@@ -3,8 +3,9 @@ import {
     decodeBulkDecisionParams,
     decodeSkillDecisionParams,
     decodeSkillOpenParams,
+    skillRoutes,
 } from "./skills.ts";
-import type { RouteInput } from "../router.ts";
+import { matchRoute, type RouteInput } from "../router.ts";
 
 const input = (body: RouteInput["body"], path: Record<string, string> = { name: "tdd" }): RouteInput => ({
     req: new Request("http://h/api/skills/tdd/decide", { method: "POST" }),
@@ -57,5 +58,17 @@ describe("decodeSkillOpenParams", () => {
     test("anything else -> legacy 400 message", () => {
         const d = decodeSkillOpenParams(input({ kind: "json", value: { target: "terminal" } }));
         expect(d).toMatchObject({ ok: false, status: 400, body: { error: "target must be 'finder' or 'editor'" } });
+    });
+});
+
+describe("skillRoutes method behavior", () => {
+    test("legacy list GET routes fall through on wrong method", () => {
+        expect(matchRoute(skillRoutes, "POST", "/api/skills").kind).toBe("unmatched");
+        expect(matchRoute(skillRoutes, "POST", "/api/decisions").kind).toBe("unmatched");
+    });
+
+    test("detail/source GET routes keep the planned wrong-method 405 delta", () => {
+        expect(matchRoute(skillRoutes, "POST", "/api/skills/tdd/detail").kind).toBe("method_mismatch");
+        expect(matchRoute(skillRoutes, "POST", "/api/skills/tdd/source").kind).toBe("method_mismatch");
     });
 });

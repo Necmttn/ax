@@ -46,6 +46,15 @@ const requiredName = (path: Readonly<Record<string, string>>): Decoded<string> =
     return name ? decodeOk(name) : decodeFail("missing skill name", 400);
 };
 
+const legacyGetRoute = <P, A>(
+    def: Omit<Parameters<typeof jsonRoute<P, A>>[0], "method" | "fallthroughOnMethodMismatch">,
+): AnyRoute =>
+    jsonRoute({
+        ...def,
+        method: "GET",
+        fallthroughOnMethodMismatch: true,
+    });
+
 export interface SkillDecisionParams {
     readonly name: string;
     readonly decision: TriageDecision;
@@ -97,14 +106,12 @@ export const decodeSkillOpenParams = ({ path, body }: RouteInput): Decoded<Skill
 };
 
 export const skillRoutes: ReadonlyArray<AnyRoute> = [
-    jsonRoute({
-        method: "GET",
+    legacyGetRoute({
         path: "/api/decisions",
         decode: () => decodeOk(undefined),
         handler: () => listSkillDecisions().pipe(Effect.map((notes) => ({ decisions: notes }))),
     }),
-    jsonRoute({
-        method: "GET",
+    legacyGetRoute({
         path: "/api/skills",
         decode: () => decodeOk(undefined),
         handler: () => fetchSkillTriage(),
