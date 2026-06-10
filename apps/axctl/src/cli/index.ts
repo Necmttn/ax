@@ -122,6 +122,7 @@ import { insightsCommand, reportCommand, timelineCommand, reportRuntime } from "
 import { signalsCommand, signalsRuntime } from "./commands/signals.ts";
 import { evidenceCommand, evidenceRuntime } from "./commands/evidence.ts";
 import { contextCommand, contextRuntime } from "./commands/context.ts";
+import { projectCommand, projectRuntime } from "./commands/project.ts";
 import type { RuntimeManifest } from "./commands/manifest.ts";
 import { resolvePwdRepository } from "../pwd.ts";
 import { detectStaleness } from "@ax/lib/transcript-staleness";
@@ -133,7 +134,6 @@ import {
     parseProgressMode,
     type ProgressReporter,
 } from "./progress.ts";
-import { cmdProject } from "./project.ts";
 import { AX_VERSION, liveVersionDeps, printVersion, updateAxctl } from "./version.ts";
 import { wantsJson, catchDbErrorAndExit } from "./output.ts";
 import { cmdDogfoodTerminal } from "../dogfood/wterm.ts";
@@ -4877,29 +4877,6 @@ const shareCommand = Command.make(
     Command.withDescription("Publish a redacted session share Gist"),
 );
 
-const projectContextCommand = Command.make(
-    "context",
-    { json: jsonFlag },
-    ({ json }) => cmdProject(["context", ...boolArg("json", json)]),
-).pipe(Command.withDescription("Print repo grounding context"));
-
-const projectVerifyCommand = Command.make(
-    "verify",
-    { json: jsonFlag },
-    ({ json }) => cmdProject(["verify", ...boolArg("json", json)]),
-).pipe(Command.withDescription("Print verification checks for the current diff"));
-
-const projectHarnessCommand = Command.make(
-    "harness",
-    { json: jsonFlag },
-    ({ json }) => cmdProject(["harness", ...boolArg("json", json)]),
-).pipe(Command.withDescription("Print Harness Doctor and local learning candidates"));
-
-const projectCommand = Command.make("project").pipe(
-    Command.withDescription("Ground agent work in the current repository"),
-    Command.withSubcommands([projectContextCommand, projectVerifyCommand, projectHarnessCommand]),
-);
-
 const readStdinAll = (): Promise<string> =>
     new Promise((resolve, reject) => {
         let data = "";
@@ -5432,7 +5409,6 @@ const LEGACY_RUNTIME: RuntimeManifest = {
     recall: "db",
     skills: "db",
     roles: "db",
-    project: "db",
     hook: "db",
     hooks: "db",
     agents: "db",
@@ -5446,6 +5422,7 @@ export const RUNTIME_BY_COMMAND: RuntimeManifest = {
     ...signalsRuntime,
     ...evidenceRuntime,
     ...contextRuntime,
+    ...projectRuntime,
 };
 
 // Commands whose handlers reach into SurrealClient via AppLayer (or the
