@@ -266,8 +266,9 @@ axctl agents <config|reconcile|scope|park|unpark|rm>   # agent-file registry + o
 axctl insights <view>                       # 31 read-only graph views
 axctl classifiers <list|eval|explain|...>   # classifier coverage, graph, lifecycle, label-mining
 axctl costs <summary>                       # token/cost usage by provider/model quality
-axctl sessions <here|around <date>|near <sha>|show <id>|compare>
-                                            # windowed session queries
+axctl sessions <here|around <date>|near <sha>|show <id>|compare|metrics>
+                                            # windowed session queries + graph-derived metrics
+axctl signals <list|show <id>>              # relation-signal catalog (fragility cascade, ...)
 axctl costs summary [--since=N]             # estimated token cost by provider/model
 axctl costs for --session <id>              # cost for one session
 axctl costs for --query <text> [--limit=N]  # cost for sessions matching turn text
@@ -293,10 +294,11 @@ axctl update [--check]                      # pull latest release
 axctl version [--check|--banner]
 ```
 
-> `axctl --help` lists only the everyday commands (`ingest`, `sessions`,
-> `improve`, `retro`, `recall`, `skills`, `serve`, `mcp`, `tui`, `share`,
-> `install`, `setup`) to keep it lean. The rest (`derive`, `agents`, `costs`,
-> `report`, `roles`, `context`, `hook(s)`, `project`, `evidence`, `classifiers`,
+> `axctl --help` lists the everyday commands plus the read-only insight
+> surfaces (`ingest`, `sessions`, `signals`, `improve`, `retro`, `recall`,
+> `skills`, `hooks`, `roles`, `serve`, `mcp`, `tui`, `share`, `install`,
+> `setup`) to keep it lean. The rest (`derive`, `agents`, `costs`,
+> `report`, `context`, `hook`, `project`, `evidence`, `classifiers`,
 > `insights`, `daemon`, `doctor`, `uninstall`, `update`, `version`) are hidden
 > from `--help` but remain fully invokable by name. This block can drift - run
 > `axctl <command> --help` for the authoritative subcommand set.
