@@ -89,9 +89,16 @@ function fleetHtml(cards: ReadonlyArray<SubagentCard>): string {
         const failed = (c.stats?.failures ?? 0) > 0;
         const t = 0.25 + 0.75 * ((c.cost_usd ?? 0) / maxCost);
         const color = failed ? shade(RED, Math.max(t, 0.55)) : shade(ROSE, t);
-        return `<div style="width:${cell}px;height:${cell}px;border-radius:6px;background:${color}"></div>`;
-    }).join("");
-    return `<div style="display:flex;flex-wrap:wrap;gap:6px;width:${(cell + 6) * 8}px">${cells}</div>`;
+        return `<div style="display:flex;width:${cell}px;height:${cell}px;border-radius:6px;background:${color};margin-right:6px"></div>`;
+    });
+    // Manual row chunking - flex-wrap is one of the properties the worker's
+    // style parser stops at, taking display:flex down with it.
+    const perRow = 8;
+    const rows: string[] = [];
+    for (let i = 0; i < cells.length; i += perRow) {
+        rows.push(`<div style="display:flex;margin-bottom:6px">${cells.slice(i, i + perRow).join("")}</div>`);
+    }
+    return `<div style="display:flex;flex-direction:column">${rows.join("")}</div>`;
 }
 
 /** Stacked cost-anatomy bar: fresh / cache write / cache read / output / subagents. */
@@ -111,10 +118,12 @@ function costBarHtml(m: Manifest): string {
     const segs = parts.map((p) =>
         `<div style="display:flex;width:${Math.max(Math.round((p.v / total) * W), 6)}px;height:14px;background:${p.color}"></div>`
     ).join("");
+    // No overflow:hidden / border-radius on the track: unknown properties
+    // truncate the style and the container loses display:flex.
     const legend = parts.map((p) =>
         `<div style="display:flex;align-items:center"><div style="width:10px;height:10px;border-radius:2px;background:${p.color};margin-right:8px"></div><span style="font-size:15px;color:${DIM}">${p.label.toUpperCase()} ${fmtUsd(p.v)}</span></div>`
     ).join("");
-    return `<div style="display:flex;flex-direction:column"><div style="display:flex;border-radius:4px;overflow:hidden">${segs}</div><div style="display:flex;gap:26px;margin-top:12px">${legend}</div></div>`;
+    return `<div style="display:flex;flex-direction:column"><div style="display:flex">${segs}</div><div style="display:flex;gap:26px;margin-top:12px">${legend}</div></div>`;
 }
 
 export const onRequestGet: PagesFunction = async (ctx) => {
