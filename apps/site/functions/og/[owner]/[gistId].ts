@@ -69,10 +69,14 @@ function laneHtml(cards: ReadonlyArray<SubagentCard>): string {
         while (r < laneEnds.length && laneEnds[r] > x - 0.004) r++;
         if (r >= 5) r = 4;
         laneEnds[r] = x + w;
+        // Integer px only: the worker's html-parser chokes on decimal
+        // percentages inside style attributes, dropping the styles and
+        // tripping satori's display:flex child check.
+        const LANE_W = 1036; // 1200 - page padding - card padding/border
         const opacity = (0.35 + 0.6 * (c.cost / maxCost)).toFixed(2);
-        bars += `<div style="position:absolute;left:${(x * 100).toFixed(2)}%;top:${r * 22}px;width:${Math.max(w * 100, 0.8).toFixed(2)}%;height:16px;border-radius:3px;background:${c.failed ? "#bd443b" : "#b32650"};opacity:${opacity}"></div>`;
+        bars += `<div style="position:absolute;left:${Math.round(x * LANE_W)}px;top:${r * 22}px;width:${Math.max(Math.round(w * LANE_W), 8)}px;height:16px;border-radius:3px;background:${c.failed ? "#bd443b" : "#b32650"};opacity:${opacity}"></div>`;
     }
-    return `<div style="display:flex;position:relative;width:100%;height:${laneEnds.length * 22}px">${bars}</div>`;
+    return `<div style="display:flex;position:relative;width:1036px;height:${laneEnds.length * 22}px">${bars}</div>`;
 }
 
 export const onRequestGet: PagesFunction = async (ctx) => {
