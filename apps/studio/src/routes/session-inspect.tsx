@@ -605,11 +605,13 @@ export function CostRail({
                 ? { flex: "0 0 auto" }
                 : {
                     position: "sticky",
-                    top: 48,
+                    // Clear the sticky jump bar (two rows ~92px) - at 48 the
+                    // rail's header slid underneath it.
+                    top: 104,
                     alignSelf: "flex-start",
                     flex: "0 0 228px",
                     margin: "0 24px 16px 0",
-                    maxHeight: "calc(100vh - 64px)",
+                    maxHeight: "calc(100vh - 120px)",
                     overflow: "auto",
                 }),
             border: "1px solid var(--line)",
@@ -704,8 +706,9 @@ export function DockedRail({
             flex: "0 0 320px",
             alignSelf: "flex-start",
             position: "sticky",
-            top: 48,
-            maxHeight: "calc(100vh - 64px)",
+            // Clear the sticky jump bar (two rows ~92px).
+            top: 104,
+            maxHeight: "calc(100vh - 120px)",
             overflow: "auto",
             margin: "0 24px 16px 0",
             display: "flex",
