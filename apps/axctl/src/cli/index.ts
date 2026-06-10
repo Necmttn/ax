@@ -94,6 +94,7 @@ import { deriveTurnIntents } from "../ingest/derive-intents.ts";
 import { INSIGHT_VIEWS, insightSqlForView, isInsightView } from "../queries/insights.ts";
 import { enrichInsightRows } from "../queries/insights-enrich.ts";
 import { fetchSkillStats } from "../queries/skill-stats.ts";
+import { fetchUnusedSkills } from "../queries/unused-skills.ts";
 import { extractSessionTimeline, SessionTimelineServiceLayer } from "../timeline/service.ts";
 import { formatInsightRows } from "./insights-format.ts";
 import { writeDashboard } from "../dashboard/report.ts";
@@ -1167,109 +1168,14 @@ const cmdUnused = (args: string[]) =>
     Effect.gen(function* () {
         const days = parsePositiveIntFlag("unused", "days", args, 7);
         const includeScoped = args.includes("--include-scoped");
-        const db = yield* SurrealClient;
         // Skills declared in a subagent's `skills:` frontmatter load only when
         // that agent is spawned - they're not global dead weight. Recover the
         // skill → agent(s) map from disk so they can be hidden/tagged here.
         const agentScope = yield* loadAgentScopeMap();
-        // PERF (issue #31): Previous form ran a correlated subquery per skill
-        // (`SELECT count() FROM invoked WHERE out = $parent.id AND ts > N`).
-        // On the largest skill (~500k invoked edges) the index walk took
-        // ~1.5s × 137 skills = enough to make this multi-minute.
-        //
-        // Now we (a) compute the recent-active set in one full-scan
-        // GROUP BY over `invoked`, (b) compute total_inv + last_used in
-        // bulk, (c) anti-join in TS. Net round-trip: ~2 cheap queries.
-        const recentSql = `
-SELECT out AS skill_id, count() AS recent
-FROM invoked
-WHERE ts > time::now() - ${days}d
-GROUP BY out;`;
-        // Issue #34: `out.name AS name` over a GROUP BY scan returns the
-        // per-edge name array (e.g. ~500k entries for codex:exec_command).
-        // String() of that is a 17 MB single line. Aggregate over the edge
-        // table only, then look up the skill row by id in a separate cheap
-        // query and merge in TS.
-        const summarySql = `
-SELECT
-    out AS skill_id,
-    count() AS total_inv,
-    math::max(ts) AS last_used
-FROM invoked
-GROUP BY out;`;
-        const skillSql = `SELECT id, name, scope FROM skill;`;
-        // Skills with literally zero invocations don't show up in the
-        // GROUP BY scan; pull them straight from the skill table so the
-        // "never used" rows still appear.
-        const noInvSql = `
-SELECT name, scope FROM skill WHERE array::len(<-invoked) = 0 AND deleted_at IS NONE;`;
-        const [recentRes, summaryRes, skillRes, noInvRes] = yield* Effect.all(
-            [
-                db.query<[Array<Record<string, unknown>>]>(recentSql),
-                db.query<[Array<Record<string, unknown>>]>(summarySql),
-                db.query<[Array<Record<string, unknown>>]>(skillSql),
-                db.query<[Array<Record<string, unknown>>]>(noInvSql),
-            ],
-            { concurrency: 4 },
-        );
-        const recent = new Set<string>(
-            (recentRes?.[0] ?? []).map((r) => String(r.skill_id ?? "")),
-        );
-        const skillById = new Map<
-            string,
-            { name: string; scope: string }
-        >();
-        for (const s of (skillRes?.[0] ?? []) as Array<Record<string, unknown>>) {
-            skillById.set(String(s.id ?? ""), {
-                name: String(s.name ?? ""),
-                scope: String(s.scope ?? ""),
-            });
-        }
-        const summary = (summaryRes?.[0] ?? []) as Array<Record<string, unknown>>;
-        const fmtTs = (v: unknown): string => {
-            if (v == null) return "never";
-            // SurrealDB's math::max returns -Infinity for empty groups; surface
-            // it as "never" rather than the literal "-Infinity" string.
-            if (typeof v === "number" && !Number.isFinite(v)) return "never";
-            if (typeof v === "string") return v;
-            if (v instanceof Date) return v.toISOString();
-            return String(v);
-        };
-        const unused: Array<{
-            name: string;
-            scope: string;
-            total_inv: number;
-            last_used: string;
-        }> = [];
-        for (const r of summary) {
-            const id = String(r.skill_id ?? "");
-            if (recent.has(id)) continue;
-            const meta = skillById.get(id);
-            // Drop orphan invocations whose target skill never had a row
-            // UPSERTed (matches the original FROM-skill behaviour, which
-            // started from skill rows and naturally excluded these).
-            if (!meta || !meta.name) continue;
-            unused.push({
-                name: meta.name,
-                scope: meta.scope,
-                total_inv: Number(r.total_inv ?? 0),
-                last_used: fmtTs(r.last_used),
-            });
-        }
-        for (const r of (noInvRes?.[0] ?? []) as Array<Record<string, unknown>>) {
-            unused.push({
-                name: String(r.name ?? ""),
-                scope: String(r.scope ?? ""),
-                total_inv: 0,
-                last_used: "never",
-            });
-        }
-        unused.sort(
-            (a, b) =>
-                a.total_inv - b.total_inv || a.name.localeCompare(b.name),
-        );
+        const unused = yield* fetchUnusedSkills({ days });
         let hiddenScoped = 0;
         for (const r of unused) {
+            const last = r.last_used ?? "never";
             const agents = agentScope.get(r.name);
             if (agents && agents.length > 0) {
                 // Agent-scoped: not global dead weight. Hide unless asked,
@@ -1279,12 +1185,12 @@ SELECT name, scope FROM skill WHERE array::len(<-invoked) = 0 AND deleted_at IS 
                     continue;
                 }
                 console.log(
-                    `${r.name}  [agent:${agents.join(",")}]  total=${fmtCount(r.total_inv)}  last=${r.last_used}`,
+                    `${r.name}  [agent:${agents.join(",")}]  total=${fmtCount(r.total_inv)}  last=${last}`,
                 );
                 continue;
             }
             console.log(
-                `${r.name}  [${r.scope}]  total=${fmtCount(r.total_inv)}  last=${r.last_used}`,
+                `${r.name}  [${r.scope}]  total=${fmtCount(r.total_inv)}  last=${last}`,
             );
         }
         const shown = unused.length - (includeScoped ? 0 : hiddenScoped);
