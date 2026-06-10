@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.22.1](https://github.com/Necmttn/ax/compare/v0.22.0...v0.22.1) (2026-06-10)
+
+
+### Bug Fixes
+
+* **deploy:** functions for the Pages git integration + post-deploy verification ([#214](https://github.com/Necmttn/ax/issues/214)) ([18e508d](https://github.com/Necmttn/ax/commit/18e508ddbf1f4dd593446155a6467923c8c8fa51))
+* NavLink round-3 - next block first, session id prefix resolve, summary floor ([df4e346](https://github.com/Necmttn/ax/commit/df4e3463d51b6f5579d9f90f0d7f369f9f23cb3a))
+* NavLink round-3 — next block first, session id prefix resolve, summary floor ([b0d4698](https://github.com/Necmttn/ax/commit/b0d4698aa0759adb526508f2d0225807494ceb60))
+* **studio:** cost rail sticky offset clears the jump bar ([#212](https://github.com/Necmttn/ax/issues/212)) ([d35d03a](https://github.com/Necmttn/ax/commit/d35d03a101ab746e9e93b49fe361325d33333db2))
+
 ## [0.22.0](https://github.com/Necmttn/ax/compare/v0.21.0...v0.22.0) (2026-06-10)
 
 
