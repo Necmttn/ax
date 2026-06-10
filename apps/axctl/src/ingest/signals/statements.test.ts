@@ -37,20 +37,29 @@ describe("buildCorrectedByStatements", () => {
 });
 
 describe("correctedInvokedTurnKeys + buildWasCorrectedStatements", () => {
-    test("expands the inclusive [seq-3, seq] window on the dash-stripped session, clamped at 1", () => {
+    // Keys are turnRecordKey(correctedSession, seq) - the format ingest
+    // writers RELATE invoked edges under since 43e59a58. The old inline
+    // `${sess-without-dashes}_${seq}` synth matched zero rows (dead
+    // was_corrected bug); these goldens pin the fixed format.
+    test("expands the inclusive [seq-3, seq] window as centralized turn keys, clamped at 1", () => {
         // correctedSeq 3 -> lo = max(1, 0) = 1 -> seqs 1..3
         expect(correctedInvokedTurnKeys([correction])).toEqual([
-            "0a1b2c3d_1",
-            "0a1b2c3d_2",
-            "0a1b2c3d_3",
+            "0a1b_2c3d__972912600f45e9d0__seq_000001",
+            "0a1b_2c3d__972912600f45e9d0__seq_000002",
+            "0a1b_2c3d__972912600f45e9d0__seq_000003",
         ]);
     });
 
     test("overlapping corrections dedupe to one UPDATE per turn", () => {
         const keys = correctedInvokedTurnKeys([correction, { ...correction, correctedSeq: 4 }]);
-        expect(keys).toEqual(["0a1b2c3d_1", "0a1b2c3d_2", "0a1b2c3d_3", "0a1b2c3d_4"]);
+        expect(keys).toEqual([
+            "0a1b_2c3d__972912600f45e9d0__seq_000001",
+            "0a1b_2c3d__972912600f45e9d0__seq_000002",
+            "0a1b_2c3d__972912600f45e9d0__seq_000003",
+            "0a1b_2c3d__972912600f45e9d0__seq_000004",
+        ]);
         expect(buildWasCorrectedStatements(keys)[0]).toBe(
-            "UPDATE invoked SET was_corrected = true WHERE in = turn:`0a1b2c3d_1` RETURN NONE;",
+            "UPDATE invoked SET was_corrected = true WHERE in = turn:`0a1b_2c3d__972912600f45e9d0__seq_000001` RETURN NONE;",
         );
         expect(buildWasCorrectedStatements(keys)).toHaveLength(4);
     });

@@ -6,6 +6,7 @@
  * tables); friction/diagnostic events use UPSERT..MERGE on deterministic
  * keys. All text literals route through @ax/lib/shared/surql.
  */
+import { turnRecordKey } from "@ax/lib/ids";
 import {
     recordRef,
     surrealDate,
@@ -61,10 +62,12 @@ export const correctedInvokedTurnKeys = (edges: readonly CorrectionEdge[]): stri
         const lo = Math.max(1, e.correctedSeq - 3);
         const hi = e.correctedSeq;
         for (let seq = lo; seq <= hi; seq += 1) {
-            // turnRecordKey strips `-` from session id; replicate inline
-            // (separate file so we can't import the private helper).
-            const sess = e.correctedSession.replace(/-/g, "");
-            turnsToMark.add(`${sess}_${seq}`);
+            // Must use the centralized turnRecordKey - the same key the
+            // ingest writers RELATE invoked edges under since 43e59a58
+            // (`<sanitized>__<digest>__seq_NNNNNN`). The previous inline
+            // `${sess-without-dashes}_${seq}` synth matched zero invoked
+            // edges, leaving was_corrected silently dead.
+            turnsToMark.add(turnRecordKey(e.correctedSession, seq));
         }
     }
     return [...turnsToMark];
