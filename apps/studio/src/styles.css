@@ -1,8 +1,9 @@
 :root {
     --ink: #141615;
     --muted: #66706b;
-    /* Tertiary text (placeholders, faint counts) - between --muted and --page. */
-    --muted-2: color-mix(in srgb, var(--muted) 55%, var(--page));
+    /* Tertiary text (faint counts). 80% keeps it visibly lighter than --muted
+       while staying near 4:1 on white - the old 55% mix was 2.3:1, illegible. */
+    --muted-2: color-mix(in srgb, var(--muted) 80%, var(--page));
     --page: #f3f6f5;
     --line: #cfd8d4;
     --panel: #ffffff;
@@ -11,7 +12,22 @@
     --blue: #2567a8;
     --red: #bd443b;
     --gold: #a66d10;
+    /* Two more accents, luminance-matched to the four above. */
+    --violet: #6650b8; /* tools / output */
+    --rose: #b32650;   /* subagents */
+    /* The one intentional dark island: tool output terminal blocks. */
+    --term-bg: #1e1e2e;
+    --term-fg: #cdd6f4;
+    /* Shared left inset for transcript chrome strips - the "content spine":
+       turn body text starts at accent 3 + row pad 16 + gutter 36 + gap 8 =
+       63px, so strips indent to match. Overridden to 12px on mobile. */
+    --strip-x: 63px;
     color-scheme: light;
+}
+
+:focus-visible {
+    outline: 2px solid var(--blue);
+    outline-offset: 2px;
 }
 
 * {
@@ -77,8 +93,8 @@ a {
     border-color: var(--green);
 }
 .studio-banner-warn {
-    background: color-mix(in srgb, var(--orange) 8%, var(--page));
-    border-color: var(--orange);
+    background: color-mix(in srgb, var(--gold) 8%, var(--page));
+    border-color: var(--gold);
 }
 
 .shell {
@@ -189,8 +205,8 @@ a {
     font-weight: 600;
     text-decoration: none;
     color: #fff;
-    background: var(--ink, #0f172a);
-    border: 1px solid var(--ink, #0f172a);
+    background: var(--ink);
+    border: 1px solid var(--ink);
     border-radius: 6px;
     padding: 8px 14px;
     white-space: nowrap;
@@ -1880,23 +1896,23 @@ td.skill-cell .description {
     flex: 0 0 120px;
     height: 6px;
     border-radius: 3px;
-    background: var(--border, #30363d);
+    background: var(--track);
     overflow: hidden;
 }
 
 .ingest-stage-bar-fill {
     display: block;
     height: 100%;
-    background: #2ea043;
+    background: var(--green);
     transition: width 0.2s ease-out;
 }
 
 .ingest-stage.ok .ingest-stage-glyph {
-    color: #2ea043;
+    color: var(--green);
 }
 
 .ingest-stage.error .ingest-stage-glyph {
-    color: #f85149;
+    color: var(--red);
 }
 
 .ingest-stage.running .ingest-stage-glyph {
@@ -2065,20 +2081,20 @@ td.skill-cell .description {
     min-width: 26px;
     font-family: ui-monospace, monospace;
     font-weight: 700;
-    color: #475569;
+    color: var(--muted);
 }
 .compare-table td.win {
     background: rgba(34, 197, 94, 0.12);
 }
 .compare-table td.win strong {
-    color: #15803d;
+    color: var(--green);
 }
 .swimlane-wrap {
     margin-top: 20px;
 }
 .swimlane-wrap h3 {
     font-size: 13px;
-    color: #475569;
+    color: var(--muted);
     margin: 0 0 8px;
 }
 .swimlane {
@@ -2095,14 +2111,14 @@ td.skill-cell .description {
     font-family: ui-monospace, monospace;
     font-weight: 700;
     font-size: 12px;
-    color: #475569;
+    color: var(--muted);
     text-align: center;
     padding-bottom: 4px;
 }
 .turn-cell {
     font-family: ui-monospace, monospace;
     font-size: 10px;
-    color: #0f172a;
+    color: var(--ink);
     text-align: center;
     padding: 2px 4px;
     border-radius: 3px;
@@ -2111,10 +2127,10 @@ td.skill-cell .description {
 }
 .turn-cell.empty {
     background: transparent !important;
-    border: 1px dashed #e2e8f0;
+    border: 1px dashed var(--line);
 }
 .turn-cell.err {
-    border-color: #ef4444;
+    border-color: var(--red);
     box-shadow: inset 0 0 0 1px rgba(239, 68, 68, 0.4);
 }
 
@@ -2175,7 +2191,19 @@ td.skill-cell .description {
     padding-bottom: 2px;
 }
 
+@media (prefers-reduced-motion: reduce) {
+    .live-indicator.on .live-dot,
+    .ingest-stage.running .ingest-stage-glyph,
+    tr.row-just-saved td {
+        animation: none;
+    }
+}
+
 @media (max-width: 768px) {
+    /* Strips share the 12px mobile spine. */
+    :root {
+        --strip-x: 12px;
+    }
     /* The docked inspector/cost rail is hover-driven - useless on touch and
        it squeezes the transcript to ~110px. Inline styles win specificity,
        hence !important. */
@@ -2183,23 +2211,45 @@ td.skill-cell .description {
         display: none !important;
     }
     /* Jump bar: one horizontally-scrollable row instead of a 5-row sticky
-       block covering a third of the viewport. */
+       block covering a third of the viewport. Buttons get real tap targets. */
     .filter-bar {
         flex-wrap: nowrap !important;
         overflow-x: auto;
-        padding: 6px 12px !important;
         -webkit-overflow-scrolling: touch;
     }
     .filter-bar > * {
         flex: 0 0 auto;
     }
-    /* Turn rows: 100px of gutter+padding per 390px line is too rich. */
+    .filter-bar button {
+        min-height: 40px;
+    }
+    /* Any input under 16px zooms the whole page on iOS focus. */
+    .filter-bar input {
+        font-size: 16px;
+        min-height: 40px;
+    }
+    /* Turn rows: the 26px seq gutter held one 10.5px number then ran empty
+       for the turn's whole height - 20-25% of the screen dead down the left.
+       Drop the grid; the seq anchor (the row's first child) floats into the
+       header line instead. The header is a flex BFC, so it sits beside the
+       float and the body clears it naturally. */
     .turn-row {
-        padding: 8px 10px !important;
-        grid-template-columns: 26px 1fr !important;
+        display: block !important;
+        padding: 8px 12px !important;
+    }
+    .turn-row > a:first-child {
+        float: left;
+        margin-right: 8px;
+    }
+    /* Body text is the page's reading content - keep it >= 13px on phones. */
+    .turn-row pre {
+        font-size: 13px !important;
     }
     .shell {
-        padding: 12px;
+        padding: 12px 8px;
+    }
+    .panel {
+        padding: 12px 8px;
     }
     .masthead .brand-tag {
         display: none;
@@ -2208,7 +2258,7 @@ td.skill-cell .description {
         flex-wrap: wrap;
     }
     .share-cta {
-        font-size: 11px;
-        padding: 6px 10px;
+        font-size: 12px;
+        padding: 8px 12px;
     }
 }

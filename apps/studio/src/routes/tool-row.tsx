@@ -1,14 +1,17 @@
 import type { ToolCallDto, ToolCategory } from "@ax/lib/shared/dashboard-types";
 import { stripToolResult } from "./tool-result.tsx";
 
+// Tinted badge tones derived from the calibrated root accents (one recipe,
+// equivalent perceived brightness): blue=net, gold=file, green=edit,
+// violet=search, rose=agent (matches the subagent spawn system), grey=shell.
 const CATEGORY_TONE: Record<ToolCategory, { bg: string; fg: string }> = {
-    net: { bg: "#e4f3ff", fg: "#1f7ac4" },
-    file: { bg: "#fff0db", fg: "#b5730a" },
-    edit: { bg: "#fde7ef", fg: "#b5306a" },
-    sh: { bg: "#eceff3", fg: "#566173" },
-    search: { bg: "#efeaff", fg: "#6b46ff" },
-    agent: { bg: "#ffe9f3", fg: "#c43d7a" },
-    other: { bg: "#eef2f6", fg: "#5a6472" },
+    net: { bg: "color-mix(in srgb, var(--blue) 10%, var(--panel))", fg: "color-mix(in srgb, var(--blue) 45%, var(--ink))" },
+    file: { bg: "color-mix(in srgb, var(--gold) 14%, var(--panel))", fg: "color-mix(in srgb, var(--gold) 45%, var(--ink))" },
+    edit: { bg: "color-mix(in srgb, var(--green) 10%, var(--panel))", fg: "color-mix(in srgb, var(--green) 45%, var(--ink))" },
+    sh: { bg: "var(--track)", fg: "var(--muted)" },
+    search: { bg: "color-mix(in srgb, var(--violet) 10%, var(--panel))", fg: "color-mix(in srgb, var(--violet) 45%, var(--ink))" },
+    agent: { bg: "color-mix(in srgb, var(--rose) 10%, var(--panel))", fg: "color-mix(in srgb, var(--rose) 45%, var(--ink))" },
+    other: { bg: "var(--track)", fg: "var(--muted)" },
 };
 
 const mono = "ui-monospace, SFMono-Regular, Menlo, monospace";
@@ -93,7 +96,7 @@ export function ToolRowItem(
     const hasOutput = output.trim().length > 0;
 
     return (
-        <div style={{ display: "flex", gap: 9, margin: "2px 0 8px" }}>
+        <div style={{ display: "flex", gap: 8, margin: "0 0 8px" }}>
             <div
                 aria-hidden
                 style={{ flex: "0 0 2px", borderRadius: 2, background: tone.fg, opacity: 0.4 }}
@@ -105,13 +108,13 @@ export function ToolRowItem(
                         alignItems: "baseline",
                         gap: 8,
                         font: `12.5px/1.5 ${mono}`,
-                        color: call.has_error ? "#c4361f" : "#2d2840",
-                        padding: "0 0 3px",
+                        color: call.has_error ? "var(--red)" : "var(--ink)",
+                        padding: "0 0 4px",
                     }}
                 >
                     <span
                         style={{
-                            font: `700 9.5px/1.7 ${mono}`,
+                            font: `700 10px/1.6 ${mono}`,
                             letterSpacing: "0.03em",
                             textTransform: "uppercase",
                             borderRadius: 3,
@@ -128,7 +131,7 @@ export function ToolRowItem(
                         ? (
                             <span
                                 style={{
-                                    color: "#8b8398",
+                                    color: "var(--muted)",
                                     minWidth: 0,
                                     overflow: "hidden",
                                     textOverflow: "ellipsis",
@@ -143,14 +146,14 @@ export function ToolRowItem(
                         : null}
                     {call.has_error
                         ? (
-                            <span data-testid="tool-row-error" title="error" style={{ color: "#c4361f", flex: "0 0 auto" }}>
+                            <span data-testid="tool-row-error" title="error" style={{ color: "var(--red)", flex: "0 0 auto" }}>
                                 ⚠
                             </span>
                         )
                         : null}
                     {call.tokens != null
                         ? (
-                            <span style={{ marginLeft: "auto", color: "#b3b8c2", fontSize: 10.5, flex: "0 0 auto" }}>
+                            <span style={{ marginLeft: "auto", color: "var(--muted-2)", fontSize: 10.5, flex: "0 0 auto" }}>
                                 {call.tokens.toLocaleString()}
                             </span>
                         )
@@ -175,16 +178,16 @@ export function ToolRowItem(
                     ? (
                         <pre
                             style={{
-                                margin: "0 0 6px",
+                                margin: "0 0 4px",
                                 font: `11px/1.5 ${mono}`,
-                                color: "#8b8398",
+                                color: "var(--muted)",
                                 whiteSpace: "pre-wrap",
                                 wordBreak: "break-word",
                                 maxHeight: 130,
                                 overflow: "auto",
                             }}
                         >
-                            <span style={{ color: "#c0a3e8", userSelect: "none" }}>$ </span>
+                            <span aria-hidden style={{ color: "#c0a3e8", userSelect: "none" }}>$ </span>
                             {call.command}
                         </pre>
                     )
@@ -192,7 +195,7 @@ export function ToolRowItem(
                     ? (
                         <div
                             style={{
-                                margin: "0 0 6px",
+                                margin: "0 0 4px",
                                 maxHeight: 170,
                                 overflow: "auto",
                                 display: "grid",
@@ -203,8 +206,8 @@ export function ToolRowItem(
                         >
                             {entries.map(([k, v]) => (
                                 <div key={k} style={{ display: "contents" }}>
-                                    <span style={{ color: "#b3b8c2", textAlign: "right" }}>{k}</span>
-                                    <span style={{ color: "#3a3550", whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
+                                    <span style={{ color: "var(--muted-2)", textAlign: "right" }}>{k}</span>
+                                    <span style={{ color: "var(--ink)", whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
                                         {typeof v === "string" ? v : JSON.stringify(v)}
                                     </span>
                                 </div>
@@ -217,9 +220,9 @@ export function ToolRowItem(
                         <div
                             data-testid="skill-launch-line"
                             style={{
-                                margin: "0 0 5px",
+                                margin: "0 0 4px",
                                 font: `11px/1.5 ${mono}`,
-                                color: "#8b8398",
+                                color: "var(--muted)",
                                 whiteSpace: "pre-wrap",
                                 wordBreak: "break-word",
                             }}
@@ -236,9 +239,9 @@ export function ToolRowItem(
                                 margin: 0,
                                 padding: "8px 12px",
                                 borderRadius: 6,
-                                background: "#1e1e2e",
-                                color: "#cdd6f4",
-                                font: `11.5px/1.55 ${mono}`,
+                                background: "var(--term-bg)",
+                                color: "var(--term-fg)",
+                                font: `12.5px/1.55 ${mono}`,
                                 whiteSpace: "pre-wrap",
                                 wordBreak: "break-word",
                                 overflow: "auto",
@@ -268,7 +271,7 @@ export function ToolRow(
 ) {
     if (calls.length === 0) return null;
     return (
-        <div style={{ padding: "2px 0 2px", fontFamily: mono }}>
+        <div style={{ fontFamily: mono }}>
             {calls.map((call, i) => (
                 <ToolRowItem
                     key={`${call.seq}-${call.name}-${i}`}

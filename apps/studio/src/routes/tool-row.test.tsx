@@ -66,8 +66,8 @@ describe("ToolCallCard (ToolRowItem / ToolRow)", () => {
         expect(html).toContain('data-testid="tool-card-output"');
         expect(html).toContain("hello world");
         expect(html).not.toContain("local-command-stdout");
-        // terminal styling
-        expect(html).toContain("#1e1e2e");
+        // terminal styling (the named dark-island tokens)
+        expect(html).toContain("var(--term-bg)");
     });
 
     test(">600-char output renders in FULL (no truncation)", () => {

@@ -63,10 +63,11 @@ test("tool-only turn condenses the chrome (no kind badge / size·span)", () => {
     );
     // The card still renders the tool.
     expect(html).toContain("Bash");
-    // Tool-only turns drop the redundant role label (the card states identity)
-    // and the old structure readout - only the shared dim grid header remains.
+    // Tool-only turns drop the VISIBLE role label (the card states identity)
+    // and the old structure readout - the role survives only as an sr-only
+    // span for screen readers (the accent bar alone is color-only signal).
     expect(html).not.toContain("ASSISTANT TEXT");
-    expect(html).not.toContain("tool use");
+    expect(html).toContain('class="sr-only">tool use turn');
     expect(html).not.toContain("0span");
     // But the anchor is still reachable in the gutter.
     expect(html).toContain('href="#turn-3"');

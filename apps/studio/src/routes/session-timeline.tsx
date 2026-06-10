@@ -40,11 +40,16 @@ function Stat({ n, label }: { n: string; label: string }) {
 
 function EventRow({ e }: { e: TimelineEvent }) {
     const color = KIND_COLOR[e.kind];
+    // Tool/edit rows dominate a segment - repeating their uppercase label per
+    // row is over-labeling (the glyph + color already encode the kind, the
+    // hover carries the word). Keep the text label for the rarer, story-level
+    // kinds where the word IS the signal.
+    const showLabel = e.kind !== "tool_call" && e.kind !== "file_edit";
     return (
         <div style={{ display: "flex", alignItems: "baseline", gap: 8, padding: "3px 0", fontFamily: "ui-monospace, Menlo, monospace", fontSize: 12 }}>
-            <span style={{ color, width: 14, textAlign: "center", flex: "0 0 auto" }}>{KIND_GLYPH[e.kind]}</span>
+            <span title={e.kind.replace("_", " ")} style={{ color, width: 14, textAlign: "center", flex: "0 0 auto" }}>{KIND_GLYPH[e.kind]}</span>
             <span style={{ color: "var(--muted)", textTransform: "uppercase", fontSize: 10, letterSpacing: "0.04em", flex: "0 0 92px" }}>
-                {e.kind.replace("_", " ")}
+                {showLabel ? e.kind.replace("_", " ") : ""}
             </span>
             <span style={{ color: "var(--ink)", minWidth: 0, overflowWrap: "anywhere" }}>
                 {e.title}
@@ -53,7 +58,7 @@ function EventRow({ e }: { e: TimelineEvent }) {
                 ) : null}
             </span>
             {e.seq != null ? (
-                <a href={`#turn-${e.seq}`} style={{ marginLeft: "auto", flex: "0 0 auto", color: "var(--blue)", fontSize: 11, textDecoration: "none" }}>
+                <a href={`#turn-${e.seq}`} style={{ marginLeft: "auto", flex: "0 0 auto", color: "var(--blue)", fontSize: 11, textDecoration: "none", padding: "4px 0 4px 8px" }}>
                     → turn {e.seq}
                 </a>
             ) : null}
@@ -94,7 +99,6 @@ function SegmentBlock({ seg, events }: { seg: TimelineSegment; events: ReadonlyA
 
 function Highlights({ data }: { data: SessionTimelinePayload }) {
     const h = data.highlights;
-    const totalEvents = Object.values(h.event_counts).reduce((a, b) => a + b, 0);
     const sub = [h.model, h.repository, h.started_at?.slice(0, 10)].filter(Boolean).join(" · ");
     return (
         <div style={{ background: "var(--track)", borderLeft: "4px solid var(--green)", padding: "14px 18px", marginBottom: 16 }}>
@@ -107,7 +111,7 @@ function Highlights({ data }: { data: SessionTimelinePayload }) {
                 {h.tool_errors ? <Stat n={String(h.tool_errors)} label="failures" /> : null}
                 {fmtUsd(h.cost_usd) ? <Stat n={fmtUsd(h.cost_usd)} label="cost" /> : null}
                 <Stat n={`${data.segments.length}`} label="segments" />
-                <Stat n={`${data.events.length}/${totalEvents}`} label="key events" />
+                <Stat n={data.events.length.toLocaleString()} label="key events" />
             </div>
         </div>
     );
