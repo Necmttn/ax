@@ -20,6 +20,8 @@ export interface SessionRow {
     readonly ended_at: string | null;
     readonly source: string;
     readonly project: string | null;
+    /** Session working directory - feeds the resume-command NavLink. */
+    readonly cwd: string | null;
     readonly repository: string | null;
     readonly turn_count: number;
     readonly first_user_message: string | null;
@@ -40,6 +42,7 @@ const SESSION_SELECT = `
     type::string(ended_at) AS ended_at,
     source,
     project,
+    cwd,
     type::string(repository) AS repository
 FROM session`.trim();
 
@@ -74,6 +77,7 @@ const enrichSessions = (
         readonly ended_at: string | null;
         readonly source: string;
         readonly project: string | null;
+        readonly cwd: string | null;
         readonly repository: string | null;
     }>,
 ): Effect.Effect<SessionRow[], DbError, SurrealClient | AxConfig> =>

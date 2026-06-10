@@ -463,10 +463,9 @@ export function InspectGuide({ data }: { data: Pick<SessionInspectPayload, "tota
 
     return (
         <div style={{
-            margin: "4px 24px 10px",
-            padding: "8px 10px",
-            border: "1px solid var(--line)",
-            background: "var(--page)",
+            margin: 0,
+            padding: "10px var(--strip-x) 12px",
+            borderBottom: "1px solid var(--line)",
             display: "grid",
             gap: 7,
         }}>
@@ -474,7 +473,7 @@ export function InspectGuide({ data }: { data: Pick<SessionInspectPayload, "tota
                 <div style={{ display: "flex", gap: 12, alignItems: "baseline", flexWrap: "wrap" }}>
                     <strong
                         title="Estimated total provider cost for this session from stored token usage and the model pricing catalog."
-                        style={{ color: "#141615", font: "700 15px/1 ui-monospace, monospace" }}
+                        style={{ color: "var(--ink)", font: "700 15px/1 ui-monospace, monospace" }}
                     >
                         {fmtUsd(totalCost)}
                     </strong>
@@ -606,11 +605,13 @@ export function CostRail({
                 ? { flex: "0 0 auto" }
                 : {
                     position: "sticky",
-                    top: 48,
+                    // Clear the sticky jump bar (two rows ~92px) - at 48 the
+                    // rail's header slid underneath it.
+                    top: 104,
                     alignSelf: "flex-start",
                     flex: "0 0 228px",
                     margin: "0 24px 16px 0",
-                    maxHeight: "calc(100vh - 64px)",
+                    maxHeight: "calc(100vh - 120px)",
                     overflow: "auto",
                 }),
             border: "1px solid var(--line)",
@@ -705,8 +706,9 @@ export function DockedRail({
             flex: "0 0 320px",
             alignSelf: "flex-start",
             position: "sticky",
-            top: 48,
-            maxHeight: "calc(100vh - 64px)",
+            // Clear the sticky jump bar (two rows ~92px).
+            top: 104,
+            maxHeight: "calc(100vh - 120px)",
             overflow: "auto",
             margin: "0 24px 16px 0",
             display: "flex",

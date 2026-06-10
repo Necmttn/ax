@@ -4,6 +4,17 @@ import { BunFileSystem, BunPath, BunRuntime } from "@effect/platform-bun";
 import { Argument, Command, Flag } from "effect/unstable/cli";
 import { SurrealClient, type SurrealClientShape } from "@ax/lib/db";
 import { listSessionsHere, listSessionsAround, listSessionsNear, type SessionRow } from "../dashboard/sessions-query.ts";
+import {
+    buildRecallNext,
+    buildSessionsNext,
+    buildSessionShowNext,
+    buildSkillsWeightedNext,
+    buildSkillsByRoleNext,
+    buildSkillsRolesNext,
+    buildRolesNext,
+    buildImproveProposalsNext,
+} from "../nav/next-links.ts";
+import { printNextFooter } from "./next-format.ts";
 import { findCommitWindow } from "@ax/lib/git-window";
 import { AxConfig } from "@ax/lib/config";
 import { safeJsonParse } from "@ax/lib/shared/safe-json";
@@ -847,8 +858,11 @@ const cmdRecall = (opts: RecallCliOpts) =>
             ...(sources !== null ? { sources } : {}),
             scope,
         });
+        const { hits, next } = buildRecallNext(result, {
+            requestedSources: sources ?? ["turn"],
+        });
         if (opts.json) {
-            console.log(JSON.stringify(result, null, 2));
+            console.log(JSON.stringify({ ...result, hits, next }, null, 2));
             return;
         }
 
@@ -857,6 +871,8 @@ const cmdRecall = (opts: RecallCliOpts) =>
         // --- turns section ---
         if (result.hits.length === 0 && !multiSource) {
             console.log(`no matches for "${opts.query}"`);
+            // Errors-as-teaching: name the broader queries to try next.
+            printNextFooter(next);
             return;
         }
         if (result.hits.length > 0) {
@@ -914,6 +930,7 @@ const cmdRecall = (opts: RecallCliOpts) =>
             }
         }
 
+        printNextFooter(next);
     });
 
 const cmdSearch = (args: string[]) =>
@@ -1053,7 +1070,13 @@ const cmdStats = (args: string[]) =>
     Effect.gen(function* () {
         const name = args.filter((a) => !a.startsWith("--"))[0];
         if (!name) {
-            console.error("axctl skills stats: missing skill name");
+            // Errors-as-teaching: name the command that answers the likely
+            // intent (aggregate ranking) instead of a bare usage error.
+            console.error(
+                "axctl skills stats: missing <skill> (per-skill detail). " +
+                    "For the aggregate usage ranking use `ax skills weighted`; " +
+                    "to find a skill name use `ax recall \"<query>\" --sources=skill`.",
+            );
             process.exit(1);
         }
         const db = yield* SurrealClient;
@@ -1346,6 +1369,7 @@ const cmdSkillsWeighted = (args: string[]) =>
             console.log(renderWeightedJson(result));
         } else {
             console.log(renderWeightedTable(result));
+            printNextFooter(buildSkillsWeightedNext(result));
         }
     });
 
@@ -1376,6 +1400,7 @@ const cmdSkillsByRole = (args: string[]) =>
             console.log(renderSkillsByRoleJson(result, role));
         } else {
             console.log(renderSkillsByRoleTable(result, role));
+            printNextFooter(buildSkillsByRoleNext(result, role));
         }
     });
 
@@ -1406,6 +1431,7 @@ const cmdRolesForSkill = (args: string[]) =>
             console.log(renderRolesForSkillJson(result, skill));
         } else {
             console.log(renderRolesForSkillTable(result, skill));
+            printNextFooter(buildSkillsRolesNext(result, skill));
         }
     });
 
@@ -1425,6 +1451,7 @@ const cmdRoles = (args: string[]) =>
             console.log(renderAllRolesJson(result));
         } else {
             console.log(renderAllRolesTable(result));
+            printNextFooter(buildRolesNext(result));
         }
     });
 
@@ -2523,12 +2550,17 @@ const cmdImproveList = (args: string[]) =>
             console.log(prettyPrint(rows));
             return;
         }
+        const improveNext = buildImproveProposalsNext(
+            rows.map((r) => ({ sig: r.dedupe_sig, title: r.title })),
+        );
         if (rows.length === 0) {
             console.log("(no proposals match filter)");
+            printNextFooter(improveNext);
             return;
         }
         console.log(`  freq  conf    status      form         dedupe_sig                title`);
         for (const row of rows) console.log(formatProposalLine(row));
+        printNextFooter(improveNext);
     });
 
 const cmdImproveShow = (args: string[]) =>
@@ -2622,6 +2654,11 @@ const cmdImproveRecommend = (args: string[]) =>
         }
         const formatted = formatRecommendations(items);
         console.log(formatted);
+        printNextFooter(
+            buildImproveProposalsNext(
+                items.map((i) => ({ sig: i.shortId, title: i.title })),
+            ),
+        );
         if (items.length > 0 && !noClipboard) {
             const copied = copyToClipboard(formatted);
             if (copied) console.log("\n[copied to clipboard]");
@@ -3222,9 +3259,10 @@ const cmdSessionsHere = (args: string[]) =>
             : allRows.filter((r) => r.source !== "claude-subagent");
         const hiddenSubagents = allRows.length - visible.length;
         const rows = limit === null ? visible : visible.slice(0, limit);
+        const { sessions, next } = buildSessionsNext(rows);
 
         if (json) {
-            console.log(JSON.stringify(rows, null, 2));
+            console.log(JSON.stringify({ sessions, next }, null, 2));
             return;
         }
         console.log(formatSessionsTable(rows));
@@ -3236,6 +3274,7 @@ const cmdSessionsHere = (args: string[]) =>
             notes.push(`showing ${rows.length} of ${visible.length} - raise --limit`);
         }
         if (notes.length > 0) console.log(`(${notes.join("; ")})`);
+        printNextFooter(next);
     });
 
 // --- sessions around ---
@@ -3281,12 +3320,18 @@ const cmdSessionsAround = (args: string[]) =>
         }
 
         const rows = yield* listSessionsAround({ date, days, project });
+        const { sessions, next } = buildSessionsNext(rows, {
+            date: positional,
+            days,
+            project,
+        });
 
         if (json) {
-            console.log(JSON.stringify(rows, null, 2));
+            console.log(JSON.stringify({ sessions, next }, null, 2));
             return;
         }
         console.log(formatSessionsTable(rows));
+        printNextFooter(next);
     });
 
 // --- sessions near ---
@@ -3346,12 +3391,14 @@ const cmdSessionsNear = (args: string[]) =>
         }
 
         const rows = yield* listSessionsNear({ from, to, repositoryKey });
+        const { sessions, next } = buildSessionsNext(rows);
 
         if (json) {
-            console.log(JSON.stringify(rows, null, 2));
+            console.log(JSON.stringify({ sessions, next }, null, 2));
             return;
         }
         console.log(formatSessionsTable(rows));
+        printNextFooter(next);
     });
 
 // ---------------------------------------------------------------------------
@@ -3416,10 +3463,13 @@ const cmdSessionShow = (args: string[]) =>
             catchDbErrorAndExit("axctl session show"),
         );
 
+        const next = buildSessionShowNext(payload);
+
         if (useJson) {
-            console.log(renderSessionJson(payload, { metrics }));
+            console.log(renderSessionJson(payload, { metrics, next }));
         } else {
-            console.log(renderSessionMarkdown(payload, { metrics }));
+            console.log(renderSessionMarkdown(payload, { metrics, next }));
+            printNextFooter(next);
         }
     });
 
@@ -3447,7 +3497,8 @@ const sessionShowCommand = Command.make(
         "commits that fixed them). " +
         "--expand=<uuid> (repeatable) or --all expands subagent timelines inline. " +
         "--by-role groups the Top skills section by role. " +
-        "Auto markdown on TTY, JSON when piped. --json forces JSON.",
+        "Auto markdown on TTY, JSON when piped. --json forces JSON. " +
+        "Output ends with a `next:` footer of copy-paste follow-up commands (resume in harness, open parent, expand subagents).",
     ),
 );
 
@@ -3486,7 +3537,8 @@ const sessionsHereCommand = Command.make(
 ).pipe(Command.withDescription(
     "List sessions for the current git repository (default: last 14 days). "
     + "Subagent (claude-subagent) sessions are hidden by default - --include-subagents shows them; "
-    + "--limit N caps the rows printed.",
+    + "--limit N caps the rows printed. "
+    + "Output ends with a `next:` footer of copy-paste follow-up commands (drill-in, harness resume); --json carries the same links as a {sessions, next} envelope.",
 ));
 
 const sessionsAroundCommand = Command.make(
@@ -3504,7 +3556,10 @@ const sessionsAroundCommand = Command.make(
             ...stringArg("project", optionValue(project)),
             ...boolArg("json", json),
         ]),
-).pipe(Command.withDescription("List sessions in a ±N-day window around a date (YYYY-MM-DD or ISO8601)"));
+).pipe(Command.withDescription(
+    "List sessions in a ±N-day window around a date (YYYY-MM-DD or ISO8601). "
+    + "Output ends with a `next:` footer of copy-paste follow-up commands (drill-in, harness resume); --json carries the same links as a {sessions, next} envelope.",
+));
 
 const sessionsNearCommand = Command.make(
     "near",
@@ -3519,7 +3574,8 @@ const sessionsNearCommand = Command.make(
 ).pipe(Command.withDescription(
     "List sessions that overlapped with a git commit window (from the predecessor commit's timestamp to this commit's timestamp). " +
     "Pass a full or short SHA. Must be inside the target git repo. " +
-    "See the ax:extract-workflow skill for narrating workflows around a sha.",
+    "See the ax:extract-workflow skill for narrating workflows around a sha. " +
+    "Output ends with a `next:` footer of copy-paste follow-up commands; --json carries the same links as a {sessions, next} envelope.",
 ));
 
 // ---------------------------------------------------------------------------
@@ -4838,15 +4894,19 @@ const recallCommand = Command.make(
         "Cross-session text search (BM25). --sources=turn,commit,skill chooses record types (default turn). " +
         "--scope=here filters to the current repo (auto-detected); --scope=all overrides. " +
         "--project=? / --skill=? opens an interactive picker. " +
-        "See the ax:extract-workflow skill for narrating workflows behind shipped artifacts.",
+        "See the ax:extract-workflow skill for narrating workflows behind shipped artifacts. " +
+        "Output ends with a `next:` footer of copy-paste follow-up commands (drill into a session, resume it in its harness); --json carries the same links in a `next` field.",
     ),
 );
 
 const statsCommand = Command.make(
     "stats",
-    { skill: Argument.string("skill") },
-    ({ skill }) => cmdStats([skill]),
-).pipe(Command.withDescription("Show detailed stats for one skill"));
+    // Optional so a bare `ax skills stats` reaches our teaching error instead
+    // of the framework's "Missing required argument" dead end - dogfood retro
+    // showed an agent guessing this command for the AGGREGATE ranking.
+    { skill: Argument.string("skill").pipe(Argument.optional) },
+    ({ skill }) => cmdStats(Option.isSome(skill) ? [skill.value] : []),
+).pipe(Command.withDescription("Show detailed stats for ONE skill (requires <skill>). For the aggregate usage ranking use `ax skills weighted`."));
 
 const cmdTimeline = (sessionId: string, json: boolean) =>
     extractSessionTimeline(sessionId).pipe(

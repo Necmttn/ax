@@ -645,6 +645,8 @@ export interface RecallHit {
     readonly session_id: SessionId;
     readonly project: string | null;
     readonly source: string | null;
+    /** Session working directory - feeds the resume-command NavLink. */
+    readonly cwd: string | null;
     readonly role: string | null;
     readonly ts: string | null;
     readonly snippet: string;

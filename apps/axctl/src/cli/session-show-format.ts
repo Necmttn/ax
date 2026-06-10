@@ -17,12 +17,16 @@ import type {
 import type { RevertedCommitDetail, SessionDurabilityDetail } from "../metrics/reverted-commits.ts";
 import { renderByRoleSection } from "./role-format.ts";
 import { prettifyProjectSlug } from "@ax/lib/shared/project-slug";
+import type { NavLink } from "@ax/lib/shared/nav-link";
 
 /** Optional enrichments rendered alongside the base session payload. */
 export interface SessionShowExtras {
     /** Durability drill-down (#176): the commits behind durability_ratio.
      *  Null/undefined → no Metrics section rendered. */
     readonly metrics?: SessionDurabilityDetail | null;
+    /** NavLink follow-ups (resume command, parent, expand-subagents).
+     *  Rendered as a `next:` footer (markdown) / `next` field (JSON). */
+    readonly next?: ReadonlyArray<NavLink>;
 }
 
 /** Last `n` hex chars of a UUID-like string, same pattern as cmdRecall. */
@@ -230,7 +234,11 @@ export function renderSessionMarkdown(
     const ov = session.overview;
 
     // ── header ───────────────────────────────────────────────────────────────
-    const sid = ov ? shortId(String(ov.id)) : "unknown";
+    // Full id, not shortId: the last-12-chars short form printed a header id
+    // that didn't match what the user queried (e.g. `ax sessions show
+    // b23ebb28-…` answering `# session ec6c9e19f9d8`), which reads as a
+    // wrong-record bug. Short forms stay in lists; the header is the record.
+    const sid = ov ? String(ov.id) : "unknown";
     lines.push(`# session ${sid}`);
     lines.push("");
 
@@ -360,6 +368,9 @@ export function renderSessionJson(
                 : {}),
             ...(extras.metrics !== null && extras.metrics !== undefined
                 ? { metrics: extras.metrics }
+                : {}),
+            ...(extras.next !== undefined && extras.next.length > 0
+                ? { next: extras.next }
                 : {}),
         },
         null,

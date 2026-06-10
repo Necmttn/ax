@@ -24,7 +24,22 @@ summary: "One sentence written for humans, not commit logs."
 ---
 ```
 
-Recommended release flow:
+## Coverage lint
+
+`bun run check:release-announcements` compares the versions in `CHANGELOG.md`
+against this directory and lists every released version with no announcement
+page. The lefthook `pre-push` hook (see `lefthook.yml`, installed by
+`bun install` via the root `prepare` script) runs it in warn mode on every
+push, printing the scaffold command and the `ax:release-announcement` skill
+invocation for the missing versions. Pass `--strict` to make missing pages a
+hard failure.
+
+Announcements are written locally - with the ax session graph available - so
+they can explain how the release came together, not just what merged. The
+site picks the page up on merge to main via Cloudflare Pages' GitHub
+integration and publishes it at `/changelog/X.Y.Z`.
+
+## Writing flow
 
 1. Let Release Please open or update the release PR.
 2. Trigger `ax:release-announcement` or run

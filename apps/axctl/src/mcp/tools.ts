@@ -44,6 +44,17 @@ import { showExperiment } from "../improve/show.ts";
 import { listProposals, type ListProposalsInput } from "../improve/list.ts";
 import { fetchSessionMetrics } from "../metrics/session-metrics-query.ts";
 import { SIGNAL_CATALOG, findSignal, runRelationSignal } from "../metrics/catalog.ts";
+import {
+    NEXT_PROTOCOL_HINT,
+    buildRecallNext,
+    buildSessionsNext,
+    buildSessionShowNext,
+    buildSkillsWeightedNext,
+    buildSkillsByRoleNext,
+    buildSkillsRolesNext,
+    buildRolesNext,
+    buildImproveProposalsNext,
+} from "../nav/next-links.ts";
 
 /**
  * The long-lived MCP runtime, built from `AppLayer` (SurrealClient + config +
@@ -73,7 +84,7 @@ const RECALL_SOURCES = ["turn", "commit", "skill"] as const;
 const recallTool: AxMcpTool = {
     name: "recall",
     description:
-        "Full-text recall across the ax graph: search turns (conversation excerpts), git commits, and skills. Returns scored hits with source, excerpt, and provenance.",
+        `Full-text recall across the ax graph: search turns (conversation excerpts), git commits, and skills. Returns scored hits with source, excerpt, and provenance. ${NEXT_PROTOCOL_HINT}`,
     inputSchema: {
         q: z.string().describe("Search query (required). Matched against turn text, commit messages, and skill metadata."),
         limit: z
@@ -105,14 +116,18 @@ const recallTool: AxMcpTool = {
             ...(sources && sources.length > 0 ? { sources } : {}),
         };
 
-        return await rt.runPromise(fetchRecall(params));
+        const result = await rt.runPromise(fetchRecall(params));
+        const { hits, next } = buildRecallNext(result, {
+            requestedSources: params.sources ?? ["turn"],
+        });
+        return { ...result, hits, next };
     },
 };
 
 const sessionsAroundTool: AxMcpTool = {
     name: "sessions_around",
     description:
-        "List agent sessions in a time window centred on a date (default +/-3 days). Returns session rows with turn counts and the first user message. Use to find what work happened around a given day.",
+        `List agent sessions in a time window centred on a date (default +/-3 days). Returns an envelope { sessions, next } - session rows with turn counts and the first user message. Use to find what work happened around a given day. ${NEXT_PROTOCOL_HINT}`,
     inputSchema: {
         date: z
             .string()
@@ -141,14 +156,19 @@ const sessionsAroundTool: AxMcpTool = {
             ...(days !== undefined ? { days } : {}),
             ...(project !== undefined ? { project } : {}),
         };
-        return await rt.runPromise(listSessionsAround(opts));
+        const rows = await rt.runPromise(listSessionsAround(opts));
+        return buildSessionsNext(rows, {
+            date: dateStr,
+            ...(days !== undefined ? { days } : {}),
+            ...(project !== undefined ? { project } : {}),
+        });
     },
 };
 
 const sessionShowTool: AxMcpTool = {
     name: "session_show",
     description:
-        "Show one session in detail: base facts, optionally expanded subagent children, and optional skill-by-role grouping. Use after sessions_around / recall to drill into a specific session id.",
+        `Show one session in detail: base facts, optionally expanded subagent children, and optional skill-by-role grouping. Use after sessions_around / recall to drill into a specific session id. ${NEXT_PROTOCOL_HINT}`,
     inputSchema: {
         sessionId: z
             .string()
@@ -179,14 +199,15 @@ const sessionShowTool: AxMcpTool = {
             expandAll,
             ...(byRole !== undefined ? { byRole } : {}),
         };
-        return await rt.runPromise(fetchSessionShow(opts));
+        const payload = await rt.runPromise(fetchSessionShow(opts));
+        return { ...payload, next: buildSessionShowNext(payload) };
     },
 };
 
 const skillsWeightedTool: AxMcpTool = {
     name: "skills_weighted",
     description:
-        "Rank skills by usage x role-weight (score = invocations x role-weight). Returns ranked rows plus a doctor summary of unclassified skills. Use to see which skills actually carry weight in recent work.",
+        `Rank skills by usage x role-weight (score = invocations x role-weight). Returns ranked rows plus a doctor summary of unclassified skills. Use to see which skills actually carry weight in recent work. ${NEXT_PROTOCOL_HINT}`,
     inputSchema: {
         windowDays: z
             .number()
@@ -208,14 +229,15 @@ const skillsWeightedTool: AxMcpTool = {
             ...(windowDays !== undefined ? { windowDays } : {}),
             ...(limit !== undefined ? { limit } : {}),
         };
-        return await rt.runPromise(fetchSkillsWeighted(params));
+        const result = await rt.runPromise(fetchSkillsWeighted(params));
+        return { ...result, next: buildSkillsWeightedNext(result) };
     },
 };
 
 const skillsByRoleTool: AxMcpTool = {
     name: "skills_by_role",
     description:
-        "List skills tagged with a given role, ranked by invocation count. Returns rows with source/confidence/rationale and whether any skill matched the role.",
+        `List skills tagged with a given role, ranked by invocation count. Returns rows with source/confidence/rationale and whether any skill matched the role. ${NEXT_PROTOCOL_HINT}`,
     inputSchema: {
         role: z
             .string()
@@ -234,14 +256,15 @@ const skillsByRoleTool: AxMcpTool = {
             role,
             ...(limit !== undefined ? { limit } : {}),
         };
-        return await rt.runPromise(fetchSkillsByRole(params));
+        const result = await rt.runPromise(fetchSkillsByRole(params));
+        return { ...result, next: buildSkillsByRoleNext(result, role) };
     },
 };
 
 const skillsRolesTool: AxMcpTool = {
     name: "skills_roles",
     description:
-        "List the roles a given skill plays, with weights, source, confidence and rationale. Returns whether the skill exists. The inverse of skills_by_role.",
+        `List the roles a given skill plays, with weights, source, confidence and rationale. Returns whether the skill exists. The inverse of skills_by_role. ${NEXT_PROTOCOL_HINT}`,
     inputSchema: {
         skill: z
             .string()
@@ -249,17 +272,19 @@ const skillsRolesTool: AxMcpTool = {
     },
     run: async (args, rt) => {
         const skill = String(args.skill ?? "");
-        return await rt.runPromise(fetchRolesForSkill({ skill }));
+        const result = await rt.runPromise(fetchRolesForSkill({ skill }));
+        return { ...result, next: buildSkillsRolesNext(result, skill) };
     },
 };
 
 const rolesTool: AxMcpTool = {
     name: "roles",
     description:
-        "List the full role vocabulary with each role's weight and the number of skills classified into it. Use to discover valid role labels for skills_by_role.",
+        `List the full role vocabulary with each role's weight and the number of skills classified into it. Use to discover valid role labels for skills_by_role. ${NEXT_PROTOCOL_HINT}`,
     inputSchema: {},
     run: async (_args, rt) => {
-        return await rt.runPromise(fetchAllRoles());
+        const result = await rt.runPromise(fetchAllRoles());
+        return { ...result, next: buildRolesNext(result) };
     },
 };
 
@@ -268,7 +293,7 @@ const RECOMMEND_AGENTS = ["claude", "codex"] as const;
 const improveRecommendTool: AxMcpTool = {
     name: "improve_recommend",
     description:
-        "Rank open self-improvement proposals by confidence x recency x frequency. Returns the shortlist of grounded suggestions the agent could accept. Use to surface what to improve next.",
+        `Rank open self-improvement proposals by confidence x recency x frequency. Returns an envelope { proposals, next } - the shortlist of grounded suggestions the agent could accept. Use to surface what to improve next. ${NEXT_PROTOCOL_HINT}`,
     inputSchema: {
         limit: z
             .number()
@@ -308,7 +333,11 @@ const improveRecommendTool: AxMcpTool = {
             ...(agent !== undefined ? { agent } : {}),
             ...(sinceDays !== undefined ? { sinceDays } : {}),
         };
-        return await rt.runPromise(recommend(input));
+        const items = await rt.runPromise(recommend(input));
+        const next = buildImproveProposalsNext(
+            items.map((i) => ({ sig: i.shortId, title: i.title })),
+        );
+        return { proposals: items, next };
     },
 };
 
@@ -331,7 +360,7 @@ const improveShowTool: AxMcpTool = {
 const improveListTool: AxMcpTool = {
     name: "improve_list",
     description:
-        "List the experiment-loop proposal shortlist, filterable by status and form. Returns proposal rows ordered by frequency. Use to browse proposals beyond the ranked improve_recommend view.",
+        `List the experiment-loop proposal shortlist, filterable by status and form. Returns an envelope { proposals, next } - proposal rows ordered by frequency. Use to browse proposals beyond the ranked improve_recommend view. ${NEXT_PROTOCOL_HINT}`,
     inputSchema: {
         status: z
             .string()
@@ -357,7 +386,11 @@ const improveListTool: AxMcpTool = {
             ...(form !== undefined ? { form } : {}),
             ...(limit !== undefined ? { limit } : {}),
         };
-        return await rt.runPromise(listProposals(input));
+        const rows = await rt.runPromise(listProposals(input));
+        const next = buildImproveProposalsNext(
+            rows.map((r) => ({ sig: r.dedupe_sig, title: r.title })),
+        );
+        return { proposals: rows, next };
     },
 };
 
