@@ -137,7 +137,7 @@ export const onRequestGet: PagesFunction = async (ctx) => {
     const cache = (caches as unknown as { default: Cache }).default;
     // r= version busts stale cached renders when the poster template changes.
     const u = new URL(ctx.request.url);
-    u.searchParams.set("r", "4");
+    u.searchParams.set("r", "5");
     const cacheKey = new Request(u.toString());
     const hit = await cache.match(cacheKey);
     if (hit) return hit;
@@ -169,12 +169,12 @@ export const onRequestGet: PagesFunction = async (ctx) => {
     const stats = `<div style="display:flex;flex-direction:column"><div style="display:flex;margin-bottom:30px">${statList.slice(0, 3).join("")}</div><div style="display:flex">${statList.slice(3).join("")}</div></div>`;
 
     const blocks: Record<string, string> = {
-        header: `<div style="display:flex;justify-content:space-between;align-items:center"><div style="display:flex;align-items:baseline"><span style="font-size:32px;color:${INK};font-weight:700">ax</span><span style="font-size:14px;color:${DIM};margin-left:12px;letter-spacing:3px">AGENT EXPERIENCE</span></div><span style="font-size:17px;color:${DIM}">${esc([model, date].filter(Boolean).join(" · "))}</span></div>`,
+        header: `<div style="display:flex;justify-content:space-between;align-items:center"><div style="display:flex;align-items:baseline"><span style="font-size:42px;color:${INK};font-weight:700;font-family:'Gelasio'">ax</span><span style="font-size:14px;color:${DIM};margin-left:14px;letter-spacing:3px">AGENT EXPERIENCE</span></div><span style="font-size:17px;color:${DIM}">${esc([model, date].filter(Boolean).join(" · "))}</span></div>`,
         title: `<div style="display:flex;font-size:33px;line-height:1.3;color:${INK};margin-top:26px;font-weight:600">${title}</div>`,
         stats: `<div style="display:flex;margin-top:30px">${stats}</div>`,
         fleet: t.subagents > 0 ? `<div style="display:flex;flex-direction:column;align-items:flex-start;margin-top:30px"><div style="display:flex">${fleetHtml(manifest.subagents)}</div><span style="font-size:14px;letter-spacing:2px;color:${DIM};margin-top:10px">${t.subagents} SUBAGENTS · BRIGHTER = COSTLIER</span></div>` : "",
         costbar: `<div style="display:flex;margin-top:30px">${costBarHtml(manifest)}</div>`,
-        footer: `<div style="display:flex;justify-content:space-between;margin-top:24px"><span style="font-size:15px;letter-spacing:2px;color:${DIM}">EVERY TURN · EVERY TOOL CALL · EVERY DOLLAR</span><span style="font-size:15px;letter-spacing:2px;color:${INK}">RECORDED WITH AX · AX.NECMTTN.COM</span></div>`,
+        footer: `<div style="display:flex;justify-content:space-between;align-items:center;margin-top:24px"><span style="font-size:15px;letter-spacing:2px;color:${DIM}">EVERY TURN · EVERY TOOL CALL · EVERY DOLLAR</span><div style="display:flex;align-items:baseline"><span style="font-size:14px;letter-spacing:2px;color:${DIM};margin-right:10px">RECORDED WITH</span><span style="font-size:24px;color:${INK};font-weight:700;font-family:'Gelasio'">ax</span><span style="font-size:14px;letter-spacing:2px;color:${DIM};margin-left:12px">· AX.NECMTTN.COM</span></div></div>`,
     };
     const probe = u.searchParams.get("probe");
     // Full layout: stats column left, fleet right, then the cost bar; probe
@@ -183,13 +183,22 @@ export const onRequestGet: PagesFunction = async (ctx) => {
     const inner = probe
         ? probe.split(",").filter((k) => k in blocks).map((k) => blocks[k]).join("")
         : `${blocks.header}${blocks.title}${mid}${blocks.costbar}${blocks.footer}`;
-    const html = `<div style="display:flex;width:1200px;height:630px;background:${BG};padding:24px;font-family:'JetBrains Mono'"><div style="display:flex;flex-direction:column;flex:1;background:${CARD};border:2px solid ${LINE};border-radius:14px;padding:38px 46px">${inner}</div></div>`;
+    // Full bleed, no border: the platform rendering the preview (X / Slack /
+    // Discord) draws its own frame + rounded corners - an inner border reads
+    // as a nested double-frame. 64px safe margins keep content clear of the
+    // platforms' corner clipping (GitHub-card convention).
+    const html = `<div style="display:flex;flex-direction:column;width:1200px;height:630px;background:${CARD};padding:56px 64px;font-family:'JetBrains Mono'">${inner}</div>`;
 
     const font = await fetch(
         "https://cdn.jsdelivr.net/fontsource/fonts/jetbrains-mono@latest/latin-400-normal.ttf",
     ).then((r) => r.arrayBuffer());
     const fontBold = await fetch(
         "https://cdn.jsdelivr.net/fontsource/fonts/jetbrains-mono@latest/latin-700-normal.ttf",
+    ).then((r) => r.arrayBuffer());
+    // Brand wordmark serif - Gelasio is metric-compatible with Georgia (the
+    // site's wordmark face), which is not licensable for embedding.
+    const fontSerif = await fetch(
+        "https://cdn.jsdelivr.net/fontsource/fonts/gelasio@latest/latin-700-normal.ttf",
     ).then((r) => r.arrayBuffer());
 
     let png: ArrayBuffer;
@@ -200,6 +209,7 @@ export const onRequestGet: PagesFunction = async (ctx) => {
             fonts: [
                 { name: "JetBrains Mono", data: font, weight: 400, style: "normal" },
                 { name: "JetBrains Mono", data: fontBold, weight: 700, style: "normal" },
+                { name: "Gelasio", data: fontSerif, weight: 700, style: "normal" },
             ],
         });
         // Buffer the render: a lazy stream produced empty bodies on Pages, and
