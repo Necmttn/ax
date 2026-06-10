@@ -11,7 +11,7 @@ Decision record: `docs/adr/0011-session-metrics-thin-slice-over-signal-framework
 | durability_ratio | `durability_ratio` (`option<float>`) | share of the session's produced commits NOT later reverted; **NONE** when the session produced no commits (distinct from 0) |
 | produced / reverted | `produced_commits`, `reverted_commits` | commit counts behind durability |
 | time_to_land_ms | `time_to_land_ms` (`option<int>`) | fastest commit→merge latency: min over produced commits of `pull_request.merged_at − commit.ts` where `merge_sha` matches; NONE when nothing landed. (Anchored on commit ts, not `ended_at` - long sessions merge PRs while still open, which made the old anchor negative.) |
-| lines_added / lines_removed | `lines_added`, `lines_removed` | whole-line counts over the session's Edit/Write tool calls (reuses `ax loc`'s `editDelta`) |
+| lines_added / lines_removed | `lines_added`, `lines_removed` | whole-line counts over the session's edit-class tool calls: Claude Edit/Write (reuses `ax loc`'s `editDelta`) + codex/pi `apply_patch` (tool name or `exec_command` `command_norm`; counts +/- patch lines) |
 
 Surfaced by `ax sessions metrics [--here|--project P|--since N|--limit N|--json]`
 (sorted by lowest durability). `--here` scopes to the pwd repo; from inside a
@@ -70,8 +70,8 @@ Then sanity-check counts (ns=ax db=main on 127.0.0.1:8521):
 
 | metric | column on `session_metrics` | meaning |
 |---|---|---|
-| time_to_first_edit_ms | `time_to_first_edit_ms` (`option<int>`) | ms from `session.started_at` to the session's first Edit/Write tool call; NONE when the session never edited |
-| cold_start_reads | `cold_start_reads` (`int`) | count of Read/Grep/Glob tool calls before the session's first edit (how much orientation the session needed before acting) |
+| time_to_first_edit_ms | `time_to_first_edit_ms` (`option<int>`) | ms from `session.started_at` to the session's first edit-class tool call (Edit/Write, `apply_patch`, shell `tee`/`patch`/`dd` via `command_norm`); NONE when the session never edited |
+| cold_start_reads | `cold_start_reads` (`int`) | count of read/search tool calls (Read/Grep/Glob + shell `cat`/`sed`/`rg`/... via `command_norm`) before the session's first edit (how much orientation the session needed before acting) |
 | delegation_ratio | `delegation_ratio` (`option<float>`) | share of the session's produced commits attributable to spawned sub-agents vs. direct work; NONE when the session produced nothing |
 
 ## What ships in wave 3
@@ -118,9 +118,13 @@ minimal (a flat catalog array + a switch, NOT a registry/DAG/codegen).
   the proper incremental fix - deferred.
 - The registry/DAG/`fn::` extraction - only once ~5–6 signals make the
   per-metric edits feel like copy-paste (the ADR-0011 gate).
-- **Multi-provider tool-name parity**: `time_to_first_edit_ms` +
-  `cold_start_reads` currently recognize only Claude tool names
-  (`Edit`/`Write`/`MultiEdit`/`NotebookEdit` for edits, `Read`/`Grep`/`Glob` for
-  reads/searches); Codex/Pi `apply_patch` + shell read/search commands (via
-  `tool_call.command_norm`/`command_tool`) are not yet counted -- multi-provider
-  parity is a later refinement.
+- **Multi-provider tool-name parity** (#170): DONE for `time_to_first_edit_ms`,
+  `cold_start_reads`, and `lines_added`/`lines_removed` - classification is
+  centralized in `apps/axctl/src/metrics/tool-classes.ts` (mirrors the ingest
+  file-evidence classifier `ingest/tool-file-evidence.ts`): Claude tool names
+  PLUS codex/pi `apply_patch` and shell read/search/edit commands via the
+  stored `tool_call.command_norm` column, classified in JS over the
+  session-bounded rows (no extra derefs). Still deferred: cursor/opencode
+  provider-specific read tool names (`read_file`, `codebase_search`, ...) and
+  loc estimates for non-`apply_patch` shell edits (`tee`/`patch`/`dd` count as
+  edits but contribute 0/0 lines).
