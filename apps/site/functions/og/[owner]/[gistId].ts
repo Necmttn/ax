@@ -9,6 +9,7 @@
  * html parser drops unknown tags).
  */
 import { ImageResponse } from "workers-og";
+import { OG_RENDER_REV } from "../../_lib/og-meta";
 
 interface SubagentCard {
     readonly cost_usd: number | null;
@@ -179,11 +180,12 @@ export const onRequestGet: PagesFunction = async (ctx) => {
         return new Response("bad request", { status: 400 });
     }
     const cache = (caches as unknown as { default: Cache }).default;
-    // r= version busts stale cached renders when the poster template changes.
+    // r= version (OG_RENDER_REV, shared with the /s/ meta rewriter's ?v=
+    // og:image param) busts stale cached renders when the template changes.
     // Append variant so watermark and default renders cache independently.
     const u = new URL(ctx.request.url);
     const variant = u.searchParams.get("variant") ?? "default";
-    u.searchParams.set("r", `6-${variant}`);
+    u.searchParams.set("r", `${OG_RENDER_REV}-${variant}`);
     const cacheKey = new Request(u.toString());
     const hit = await cache.match(cacheKey);
     if (hit) return hit;
