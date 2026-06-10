@@ -7,6 +7,7 @@ import { executeStatementsWith } from "@ax/lib/shared/statement-exec";
 import { BaseStageStats, type IngestContext, sinceDaysFromCtx, StageMeta } from "./stage/types.ts";
 import type { StageDef } from "./stage/registry.ts";
 import { advanceRevertedWatermark, computeRevertedCommits } from "../metrics/commit-reverted.ts";
+import { advancePrMergeWatermark, computePrMergeDirtySessions } from "../metrics/pr-merge-dirty.ts";
 import { computeDurability } from "../metrics/durability.ts";
 import { computeTimeToLand } from "../metrics/time-to-land.ts";
 import { computeSessionLoc } from "../metrics/session-loc.ts";
@@ -28,10 +29,13 @@ const num = (n: number | null): string => (n === null ? "NONE" : String(n));
  *
  * Order matters: (1) refresh the full-history `commit.reverted` primitive
  * (ADR-0011 freshness backbone); (2) compute the *dirty set* - sessions started
- * within the ingest window OR that produced a now-reverted commit - so an old
- * session's durability recomputes when a NEW fix lands for its OLD commit, not
- * just when the session itself is re-ingested; (3) derive the wave-1 scalars for
- * the dirty set; (4) UPSERT one `session_metrics` row per dirty session.
+ * within the ingest window, OR that produced a now-reverted commit, OR that
+ * produced a commit whose PR merge state changed since the last run (issue
+ * #172) - so an old session's durability recomputes when a NEW fix lands for
+ * its OLD commit, and its time_to_land recomputes when its PR merges LATER,
+ * not just when the session itself is re-ingested; (3) derive the wave-1
+ * scalars for the dirty set; (4) UPSERT one `session_metrics` row per dirty
+ * session.
  */
 export const deriveMetrics = (
     opts: { sinceDays: number | undefined },
@@ -41,6 +45,13 @@ export const deriveMetrics = (
 
         // 1. Freshness backbone - full-history commit.reverted (diff-only writes).
         const reverted = yield* computeRevertedCommits();
+
+        // 1b. PR-driven dirty source (issue #172): sessions producing commits
+        //     whose pull_request merge_sha/merged_at changed since the last
+        //     github-pr ingest. Without this, an OLD session whose PR merges
+        //     LATER keeps a stale/NULL time_to_land_ms on the daemon's
+        //     `--since=1` path until a full re-derive.
+        const prDirty = yield* computePrMergeDirtySessions();
 
         // 2. Dirty set: sessions in the window, PLUS any session that produced a
         //    commit whose `reverted` flag *changed* this run (either direction).
@@ -57,16 +68,24 @@ export const deriveMetrics = (
         const dirty = (yield* db.query<[string[]]>(
             `SELECT VALUE type::string(id) FROM session WHERE ${sinceClause}${changedClause};`,
         ))?.[0] ?? [];
-        const sessionIds = (dirty as unknown as unknown[]).filter(
-            (s): s is string => typeof s === "string" && s.length > 0,
+        const dirtySet = new Set(
+            (dirty as unknown as unknown[]).filter(
+                (s): s is string => typeof s === "string" && s.length > 0,
+            ),
         );
+        // Merge the PR-driven dirty sessions (already `type::string(id)` strings).
+        for (const id of prDirty.dirtySessionIds) dirtySet.add(id);
+        const sessionIds = [...dirtySet];
         if (sessionIds.length === 0) {
             // No dirty sessions. New cascade edges are only possible when the
             // reverted set itself changed (no new sessions ⇒ no new `edited`
             // edges), so the bounded cascade re-derive runs only on that path -
-            // BEFORE the watermark advances, so a crash re-runs it next time.
+            // BEFORE the watermarks advance, so a crash re-runs it next time.
             const cascadeEdges = reverted.skipped ? 0 : yield* deriveFragilityCascade();
             if (!reverted.skipped) yield* advanceRevertedWatermark(reverted.fingerprint);
+            // Safe here: no dirty sessions means the changed PRs mapped to no
+            // producing sessions, so there are no dependent rows to write first.
+            if (!prDirty.skipped) yield* advancePrMergeWatermark(prDirty.diff);
             return { sessionsWritten: 0, revertedCommits: reverted.revertedCount, cascadeEdges };
         }
 
@@ -125,10 +144,12 @@ export const deriveMetrics = (
         //    and on reverted-set changes (handled above for the empty dirty set).
         const cascadeEdges = yield* deriveFragilityCascade();
 
-        // Advance the commit-reverted watermark ONLY now that the dependent
-        // session_metrics rows are persisted - a crash before this point re-scans
-        // next run instead of silently skipping the affected sessions (codex #2).
+        // Advance the commit-reverted + PR-merge watermarks ONLY now that the
+        // dependent session_metrics rows are persisted - a crash before this
+        // point re-scans next run instead of silently skipping the affected
+        // sessions (codex #2).
         if (!reverted.skipped) yield* advanceRevertedWatermark(reverted.fingerprint);
+        if (!prDirty.skipped) yield* advancePrMergeWatermark(prDirty.diff);
         return { sessionsWritten: expandedIds.length, revertedCommits: reverted.revertedCount, cascadeEdges };
     });
 

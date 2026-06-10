@@ -159,9 +159,10 @@ describe("effect cli", () => {
     });
 
     test("resolveIngestStages: default runs every stage", () => {
-        // 26 = 24 original + agentDefStage (config-front-door agents domain)
-        //    + deriveMetricsStage (graph-derived session metrics rollup).
-        expect(resolveIngestStages(testRegistry, [])).toHaveLength(26);
+        // 27 = 24 original + agentDefStage (config-front-door agents domain)
+        //    + deriveMetricsStage (graph-derived session metrics rollup)
+        //    + githubPrStage (restored GitHub PR ingest - issue #172).
+        expect(resolveIngestStages(testRegistry, [])).toHaveLength(27);
     });
 
     test("resolveIngestStages: local agent provider stages can be selected", () => {

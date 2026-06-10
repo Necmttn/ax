@@ -120,14 +120,23 @@ minimal (a flat catalog array + a switch, NOT a registry/DAG/codegen).
   deref bounded to candidate matches. Results land in the `fragility_cascade`
   table (full rewrite per run); the CLI reads stored rows. Known gap: edits in a
   checkout whose root the `checkout` table has never seen don't bridge.
-- **Incremental freshness gaps (reconciled by deep/full ingest).** On the daemon's
-  `--since=1` path, `time_to_land_ms` can stay stale for an OLD session whose PR
-  merges LATER (the dirty set keys on the time window + changed reverted commits,
-  not on PR changes). Likewise delegation depends on the spawn-tree. A full ingest
-  (no `--since`, or `AX_REDERIVE_METRICS=1`) recomputes all sessions and reconciles
-  these; the weekly deep-scan backfill is the intended reconciler. A PR-driven dirty
-  source (sessions producing commits whose PR `merge_sha`/`merged_at` changed) is
-  the proper incremental fix - deferred.
+- **Incremental freshness gaps (reconciled by deep/full ingest).** The
+  `time_to_land_ms` gap is now CLOSED (issue #172): a PR-driven dirty source
+  (`apps/axctl/src/metrics/pr-merge-dirty.ts`, mirroring the commit-reverted
+  watermark) snapshots each PR's `merge_sha|merged_at` into per-PR
+  `ingest_file_state` rows (source_kind `metrics:pr_merge`); on every
+  `derive-metrics` run the diff against the current `pull_request` rows yields
+  the changed merge shas, which resolve (sha → commit → `produced.in`) to the
+  sessions whose `time_to_land_ms` must re-derive - so an OLD session whose PR
+  merges LATER refreshes on the daemon's `--since=1` path. The watermark
+  advances only AFTER the dependent `session_metrics` rows are written
+  (crash-safe, same ordering as commit-reverted). Prerequisite: the `github-pr`
+  ingest stage is restored (it was removed in 2cd3fd1 only because the
+  stage-count test lagged the registry; its `gh`-CLI fetch already degrades to
+  0 PRs offline / unauthenticated / in CI). Remaining gap: delegation depends
+  on the spawn-tree; a full ingest (no `--since`, or `AX_REDERIVE_METRICS=1`)
+  recomputes all sessions, and the weekly deep-scan backfill remains the
+  belt-and-braces reconciler.
 - The registry/DAG/`fn::` extraction - only once ~5–6 signals make the
   per-metric edits feel like copy-paste (the ADR-0011 gate).
 - **Multi-provider tool-name parity** (#170): DONE for `time_to_first_edit_ms`,
