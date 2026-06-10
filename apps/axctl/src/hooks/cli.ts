@@ -19,6 +19,9 @@ import {
 import type { HookScope } from "./providers/types.ts";
 import { HookNotFoundError } from "./errors.ts";
 import { installHookFile } from "./sdk-install.ts";
+import { GitEnvLive } from "@ax/hooks-sdk/git-env";
+import { fetchRows, replayRows, summarize, formatReport } from "./backtest.ts";
+import type { HookDefinition } from "@ax/hooks-sdk/define";
 
 /**
  * `ax hooks` config CRUD subcommands (provider-agnostic: claude/cursor/codex/
@@ -229,6 +232,75 @@ const installCommand = Command.make(
         }).pipe(Effect.provide(HookProviderRegistryDefault)),
 ).pipe(Command.withDescription("Install a SDK hook file into provider configs (--providers=claude,codex --scope=global)"));
 
+const backtestCommand = Command.make(
+    "backtest",
+    {
+        file: Argument.string("file"),
+        days: Flag.integer("days").pipe(Flag.withDefault(30)),
+        provider: Flag.string("provider").pipe(Flag.optional),
+        json: Flag.boolean("json").pipe(Flag.withDefault(false)),
+    },
+    ({ file, days, provider, json: asJson }) =>
+        Effect.gen(function* () {
+            const absFile = pathResolve(expandTilde(file));
+
+            // Import the hook module. A failed import exits non-zero immediately.
+            const modResult = yield* Effect.promise(
+                () =>
+                    import(absFile).catch((e: unknown) => {
+                        process.stderr.write(
+                            `cannot import hook file ${absFile}: ${e instanceof Error ? e.message : String(e)}\n`,
+                        );
+                        process.exit(1);
+                    }) as Promise<{ default?: unknown }>,
+            );
+
+            const def = modResult?.default as HookDefinition | undefined;
+            if (
+                !def ||
+                typeof def !== "object" ||
+                typeof (def as HookDefinition).run !== "function"
+            ) {
+                process.stderr.write(
+                    `${absFile}: default export must be a defineHook() result with a 'run' function\n`,
+                );
+                process.exit(1);
+            }
+
+            const hookDef = def as HookDefinition;
+            const providerFilter = optionValue(provider) ?? null;
+            const toolNames = hookDef.matcher?.tools ? [...hookDef.matcher.tools] : [];
+
+            // Fetch rows from DB (read-only SELECTs). DB unavailable -> friendly error + exit.
+            const rows = yield* fetchRows(days, toolNames, providerFilter).pipe(
+                Effect.catchTag("DbError", (e) =>
+                    Effect.promise(async () => {
+                        process.stderr.write(
+                            `DB unreachable or query failed: ${e.message}\n` +
+                            "Start the DB with 'axctl daemon start' and retry.\n",
+                        );
+                        process.exit(1);
+                    }),
+                ),
+            );
+
+            // Replay through the hook with GitEnvLive (state-dependent checks
+            // use the CURRENT repo state - see caveat in report).
+            const results = yield* replayRows(hookDef, rows).pipe(
+                Effect.provide(GitEnvLive),
+            );
+
+            const summary = summarize(results);
+
+            if (asJson) {
+                console.log(prettyPrint(summary));
+                return;
+            }
+
+            console.log(formatReport(hookDef.name, days, summary));
+        }),
+).pipe(Command.withDescription("Replay historical tool_call rows through an SDK hook in-process (--days=30 --provider=claude --json)"));
+
 /** Spliced into `hooksCommand`'s subcommand list in cli/index.ts. */
 export const hooksConfigSubcommands = [
     configCommand,
@@ -239,4 +311,5 @@ export const hooksConfigSubcommands = [
     enableCommand,
     initCommand,
     installCommand,
+    backtestCommand,
 ];

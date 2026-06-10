@@ -5306,8 +5306,8 @@ const hooksBacktestCase = Argument.choice("case", ["enforce-worktree"] as const)
     Argument.withDefault("enforce-worktree"),
 );
 
-const hooksBacktestCommand = Command.make(
-    "backtest",
+const hooksCasesCommand = Command.make(
+    "cases",
     {
         caseName: hooksBacktestCase,
         since: Flag.integer("since").pipe(Flag.optional),
@@ -5339,7 +5339,7 @@ const hooksCommand = Command.make("hooks").pipe(
         hooksSummaryCommand,
         hooksInvocationsCommand,
         hooksSessionCommand,
-        hooksBacktestCommand,
+        hooksCasesCommand,
     ]),
 );
 
