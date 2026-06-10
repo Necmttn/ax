@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.20.0](https://github.com/Necmttn/ax/compare/v0.19.1...v0.20.0) (2026-06-10)
+
+
+### Features
+
+* **metrics:** dogfood follow-ups — provider parity, fragility cascade, PR freshness, cost, aggregates ([#170](https://github.com/Necmttn/ax/issues/170)-[#178](https://github.com/Necmttn/ax/issues/178)) ([#183](https://github.com/Necmttn/ax/issues/183)) ([30f903c](https://github.com/Necmttn/ax/commit/30f903cec55f4138288e862890d389c480b3cec8))
+
+
+### Bug Fixes
+
+* **cli:** reject non-date args to sessions around instead of empty window ([#184](https://github.com/Necmttn/ax/issues/184)) ([aef5d7c](https://github.com/Necmttn/ax/commit/aef5d7c7afe650dd57e17007df1680a66dc09b3f))
+* **studio:** accept schema_version 4 share manifests ([#186](https://github.com/Necmttn/ax/issues/186)) ([69652d0](https://github.com/Necmttn/ax/commit/69652d0f63e8274c919913ce7088957c909fdfce))
+
 ## [0.19.1](https://github.com/Necmttn/ax/compare/v0.19.0...v0.19.1) (2026-06-10)
 
 
