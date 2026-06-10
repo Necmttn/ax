@@ -6,7 +6,13 @@ import type { DbError } from "@ax/lib/errors";
 import { recordRef } from "./evidence-writers.ts";
 import { surrealDate, surrealJsonTextOption, surrealObject, surrealOptionRecord, surrealOptionString, surrealString } from "@ax/lib/shared/surql";
 import { executeStatementsWith } from "@ax/lib/shared/statement-exec";
-import { isoTimestamp, nonEmptyString, recordKeyPart, safeKeyPart, type TimestampInput } from "@ax/lib/shared/derive-keys";
+import { isoTimestamp, nonEmptyString, recordKeyPart, safeKeyPart } from "@ax/lib/shared/derive-keys";
+import type {
+    CorrectionEdge, DerivedDiagnosticEvent, DerivedFrictionEvent, JsonRecord,
+    ProposedEdge, RecoveryEdge, SessionTurns, SkillPairAccum,
+    ToolCallLike, TurnRow,
+} from "./signals/types.ts";
+export type { DerivedDiagnosticEvent, DerivedFrictionEvent, SessionTurns, SkillPairAccum, ToolCallLike, TurnRow } from "./signals/types.ts";
 
 /**
  * Negation patterns that signal a user pushed back on the previous assistant
@@ -76,72 +82,6 @@ export function recoveredByEdgeId(fromTurnKey: string, skillKey: string): string
     return `${fromTurnKey}__${skillKey}`;
 }
 
-type RecordRefLike = string | { tb?: string; id?: unknown };
-type JsonRecord = Record<string, unknown>;
-
-export interface ToolCallLike {
-    readonly id?: RecordRefLike;
-    readonly session?: RecordRefLike;
-    readonly turn?: RecordRefLike;
-    readonly tool?: RecordRefLike | { name?: unknown };
-    readonly tool_name?: string;
-    readonly toolName?: string;
-    readonly name?: string;
-    readonly command_norm?: string;
-    readonly commandNorm?: string;
-    readonly output_excerpt?: string;
-    readonly outputExcerpt?: string;
-    readonly error_text?: string;
-    readonly errorText?: string;
-    readonly exit_code?: number;
-    readonly exitCode?: number;
-    readonly duration_ms?: number;
-    readonly durationMs?: number;
-    readonly status?: string;
-    readonly has_error?: boolean;
-    readonly hasError?: boolean;
-    readonly ts?: TimestampInput;
-    readonly cwd?: string;
-    readonly seq?: number;
-    readonly call_id?: string;
-    readonly callId?: string;
-    readonly repository?: RecordRefLike;
-    readonly checkout?: RecordRefLike;
-}
-
-export interface DerivedFrictionEvent {
-    readonly key: string;
-    readonly kind: string;
-    readonly sessionId: string | null;
-    readonly turnKey: string | null;
-    readonly targetType?: string;
-    readonly targetName?: string;
-    readonly source?: string;
-    readonly confidence?: number;
-    readonly text: string | null;
-    readonly labels: JsonRecord;
-    readonly metrics: JsonRecord;
-    readonly raw: JsonRecord;
-    readonly ts: string;
-}
-
-export interface DerivedDiagnosticEvent {
-    readonly key: string;
-    readonly kind: string;
-    readonly status: string | null;
-    readonly sessionId: string | null;
-    readonly turnKey: string | null;
-    readonly targetType?: string;
-    readonly targetName?: string;
-    readonly source?: string;
-    readonly confidence?: number;
-    readonly text: string | null;
-    readonly labels: JsonRecord;
-    readonly metrics: JsonRecord;
-    readonly raw: JsonRecord;
-    readonly ts: string;
-}
-
 const PAIR_WINDOW = 3;
 const RECOVERY_WINDOW = 3;
 
@@ -150,28 +90,6 @@ export function shouldDeriveAllTimeSkillPairs(
 ): boolean {
     return sinceDays === undefined || sinceDays <= 0;
 }
-
-export interface TurnRow {
-    id: { tb: string; id: string } | string;
-    seq: number;
-    role: string;
-    text_excerpt: string | undefined;
-    ts: string | Date;
-    has_error: boolean;
-    invoked_skills: ReadonlyArray<string>; // skill names this turn already invoked
-    repository?: RecordRefLike;
-    checkout?: RecordRefLike;
-    cwd?: string;
-}
-
-export interface SessionTurns {
-    sessionId: string;
-    repositoryKey: string | null;
-    checkoutKey: string | null;
-    cwd: string | null;
-    turns: TurnRow[];
-}
-
 
 const compactRecord = (input: JsonRecord): JsonRecord =>
     Object.fromEntries(
@@ -415,31 +333,6 @@ ORDER BY session ASC, seq ASC;`;
         return groupTurnsBySession(rows);
     });
 
-export interface CorrectionEdge {
-    fromTurnKey: string;
-    toTurnKey: string;
-    pattern: string;
-    text: string;
-    ts: string;
-    repositoryKey: string | null;
-    checkoutKey: string | null;
-    cwd: string | null;
-    // Session + seq of the corrected (assistant) turn. Used to mark
-    // invoked edges as `was_corrected = true` for any invocation whose
-    // turn falls in [correctedSeq - 3, correctedSeq] (matches the
-    // pre-denormalisation cmdTaste +3 seq window). See issue #31.
-    correctedSession: string;
-    correctedSeq: number;
-}
-
-export interface ProposedEdge {
-    fromTurnKey: string;
-    skillKey: string;
-    skillName: string;
-    ts: string;
-    contextExcerpt: string;
-}
-
 /**
  * Walk turns in order. Whenever a user turn arrives, look back for the most
  * recent assistant turn (skipping tool_call / reasoning / function_call_output
@@ -522,21 +415,6 @@ export function deriveProposed(
         }
     }
     return out;
-}
-
-export interface SkillPairAccum {
-    fromKey: string;
-    toKey: string;
-    count: number;
-    lastSeen: string; // ISO
-}
-
-export interface RecoveryEdge {
-    fromTurnKey: string;
-    skillKey: string;
-    skillName: string;
-    ts: string;
-    errorExcerpt: string | undefined;
 }
 
 /**
