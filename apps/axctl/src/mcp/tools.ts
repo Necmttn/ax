@@ -44,6 +44,12 @@ import { showExperiment } from "../improve/show.ts";
 import { listProposals, type ListProposalsInput } from "../improve/list.ts";
 import { fetchSessionMetrics } from "../metrics/session-metrics-query.ts";
 import { SIGNAL_CATALOG, findSignal, runRelationSignal } from "../metrics/catalog.ts";
+import {
+    NEXT_PROTOCOL_HINT,
+    buildRecallNext,
+    buildSessionsNext,
+    buildSessionShowNext,
+} from "../nav/next-links.ts";
 
 /**
  * The long-lived MCP runtime, built from `AppLayer` (SurrealClient + config +
@@ -73,7 +79,7 @@ const RECALL_SOURCES = ["turn", "commit", "skill"] as const;
 const recallTool: AxMcpTool = {
     name: "recall",
     description:
-        "Full-text recall across the ax graph: search turns (conversation excerpts), git commits, and skills. Returns scored hits with source, excerpt, and provenance.",
+        `Full-text recall across the ax graph: search turns (conversation excerpts), git commits, and skills. Returns scored hits with source, excerpt, and provenance. ${NEXT_PROTOCOL_HINT}`,
     inputSchema: {
         q: z.string().describe("Search query (required). Matched against turn text, commit messages, and skill metadata."),
         limit: z
@@ -105,14 +111,18 @@ const recallTool: AxMcpTool = {
             ...(sources && sources.length > 0 ? { sources } : {}),
         };
 
-        return await rt.runPromise(fetchRecall(params));
+        const result = await rt.runPromise(fetchRecall(params));
+        const { hits, next } = buildRecallNext(result, {
+            requestedSources: params.sources ?? ["turn"],
+        });
+        return { ...result, hits, next };
     },
 };
 
 const sessionsAroundTool: AxMcpTool = {
     name: "sessions_around",
     description:
-        "List agent sessions in a time window centred on a date (default +/-3 days). Returns session rows with turn counts and the first user message. Use to find what work happened around a given day.",
+        `List agent sessions in a time window centred on a date (default +/-3 days). Returns an envelope { sessions, next } - session rows with turn counts and the first user message. Use to find what work happened around a given day. ${NEXT_PROTOCOL_HINT}`,
     inputSchema: {
         date: z
             .string()
@@ -141,14 +151,19 @@ const sessionsAroundTool: AxMcpTool = {
             ...(days !== undefined ? { days } : {}),
             ...(project !== undefined ? { project } : {}),
         };
-        return await rt.runPromise(listSessionsAround(opts));
+        const rows = await rt.runPromise(listSessionsAround(opts));
+        return buildSessionsNext(rows, {
+            date: dateStr,
+            ...(days !== undefined ? { days } : {}),
+            ...(project !== undefined ? { project } : {}),
+        });
     },
 };
 
 const sessionShowTool: AxMcpTool = {
     name: "session_show",
     description:
-        "Show one session in detail: base facts, optionally expanded subagent children, and optional skill-by-role grouping. Use after sessions_around / recall to drill into a specific session id.",
+        `Show one session in detail: base facts, optionally expanded subagent children, and optional skill-by-role grouping. Use after sessions_around / recall to drill into a specific session id. ${NEXT_PROTOCOL_HINT}`,
     inputSchema: {
         sessionId: z
             .string()
@@ -179,7 +194,8 @@ const sessionShowTool: AxMcpTool = {
             expandAll,
             ...(byRole !== undefined ? { byRole } : {}),
         };
-        return await rt.runPromise(fetchSessionShow(opts));
+        const payload = await rt.runPromise(fetchSessionShow(opts));
+        return { ...payload, next: buildSessionShowNext(payload) };
     },
 };
 
