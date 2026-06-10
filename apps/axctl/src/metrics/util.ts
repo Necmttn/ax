@@ -1,10 +1,20 @@
 import { recordLiteral } from "@ax/lib/ids";
 import { recordKeyPart } from "@ax/lib/shared/derive-keys";
+import { recordListSource } from "@ax/lib/shared/record-select";
+import { toBareSessionId } from "@ax/lib/shared/session-id";
 import type { SessionMetricsRow } from "./session-metrics-query.ts";
 
 /** Comma-joined `session:`key`` record-literal IN-list body for the given session ids. */
 export const sessionRefList = (sessionIds: readonly string[]): string =>
     sessionIds.map((id) => recordLiteral("session", recordKeyPart(id, "session") ?? "")).join(", ");
+
+/**
+ * Record-list FROM source (`[session:`k1`, ...]`) for fetching session rows by
+ * id. Use this - NEVER `FROM session WHERE id IN [...]`, which silently
+ * matches nothing on some tables (see @ax/lib/shared/record-select).
+ */
+export const sessionRecordSource = (sessionIds: readonly string[]): string =>
+    recordListSource("session", sessionIds.map((id) => recordKeyPart(id, "session") ?? ""));
 
 /** Split into fixed-size chunks (for bounded `IN [...]` query batches). */
 export const chunked = <T>(items: readonly T[], size: number): T[][] => {
@@ -75,8 +85,9 @@ export const SESSION_METRICS_LEGEND =
     + "deleg% = commits produced by spawned subagents / all produced commits";
 
 /** Strip the `session:` prefix + record-id delimiters so ids from different
- *  surfaces (`type::string(session)` vs raw keys) compare equal. */
-export const cleanSessionId = (id: string): string => id.replace(/^session:/, "").replace(/[`⟨⟩]/g, "");
+ *  surfaces (`type::string(session)` vs raw keys) compare equal. The metrics-
+ *  facing name for the shared normalizer (@ax/lib/shared/session-id). */
+export const cleanSessionId = (id: string): string => toBareSessionId(id);
 
 export interface FormatSessionMetricsOptions {
     /**

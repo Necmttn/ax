@@ -2,9 +2,10 @@ import { Array as Arr, Effect } from "effect";
 import { SurrealClient } from "@ax/lib/db";
 import type { DbError } from "@ax/lib/errors";
 import { recordKeyPart } from "@ax/lib/shared/derive-keys";
-import { recordLiteral, stableDigest } from "@ax/lib/ids";
+import { recordLiteral } from "@ax/lib/ids";
 import { surrealString } from "@ax/lib/shared/surql";
 import { executeStatementsWith } from "@ax/lib/shared/statement-exec";
+import { watermarkRecordKey } from "@ax/lib/shared/watermark";
 
 /**
  * PR-driven dirty source for derive-metrics (issue #172).
@@ -49,9 +50,9 @@ const PATH_PREFIX = "__pr_merge__/";
 /** The `ingest_file_state.path` for a PR's merge-state watermark row. */
 export const prMergeWatermarkPath = (prKey: string): string => `${PATH_PREFIX}${prKey}`;
 
-/** Deterministic watermark row id - same scheme as `@ax/lib/shared/watermark`. */
+/** Deterministic watermark row id - the shared `@ax/lib/shared/watermark` id scheme. */
 const watermarkRowId = (prKey: string): string =>
-    recordLiteral("ingest_file_state", stableDigest(`${WATERMARK_SOURCE}|${prMergeWatermarkPath(prKey)}`));
+    recordLiteral("ingest_file_state", watermarkRecordKey(WATERMARK_SOURCE, prMergeWatermarkPath(prKey)));
 
 /**
  * Encode a PR's merge state as the watermark `sha` payload. The merge sha is

@@ -2,7 +2,7 @@ import { Effect } from "effect";
 import { SurrealClient } from "@ax/lib/db";
 import type { DbError } from "@ax/lib/errors";
 import { editToolSqlFilter, isEditTool, toolClassInputOf } from "@ax/lib/shared/tool-classes";
-import { isoMs, sessionRefList } from "./util.ts";
+import { isoMs, sessionRecordSource, sessionRefList } from "./util.ts";
 
 /**
  * Time from a session's `started_at` to its first edit, in ms. null when the
@@ -33,13 +33,12 @@ export const computeTimeToFirstEdit = (
             `SELECT type::string(session) AS session, name, command_norm, type::string(ts) AS ts`
             + ` FROM tool_call WHERE session IN [${refs}] AND ${editToolSqlFilter};`,
         ))?.[0] ?? [];
-        // Session start times. Direct record access (`FROM [refs]`), NOT
-        // `FROM session WHERE id IN [...]` - the latter silently matches
-        // nothing on the live DB (primary-id IN lookup misses; verified
-        // 2026-06-10 while dogfooding #170), which made every ttfe null.
+        // Session start times. Record-list selection, NOT `FROM session WHERE
+        // id IN [...]` - the id IN-list form silently matches nothing on some
+        // tables (invariant + live verification: @ax/lib/shared/record-select).
         const starts = (yield* db.query<[Array<Record<string, unknown>>]>(
             `SELECT type::string(id) AS session, type::string(started_at) AS started_at`
-            + ` FROM [${refs}];`,
+            + ` FROM ${sessionRecordSource(sessionIds)};`,
         ))?.[0] ?? [];
 
         const firstEdit = new Map<string, number>();

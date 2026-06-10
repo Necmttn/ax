@@ -5,12 +5,13 @@ import { recordKeyPart } from "@ax/lib/shared/derive-keys";
 import { recordLiteral, stableDigest } from "@ax/lib/ids";
 import { surrealString } from "@ax/lib/shared/surql";
 import { executeStatementsWith } from "@ax/lib/shared/statement-exec";
+import { watermarkRecordKey } from "@ax/lib/shared/watermark";
 import { deriveClosureRows } from "../ingest/closure.ts";
 
 const WATERMARK_SOURCE = "metrics:commit_reverted";
 const WATERMARK_PATH = "__commit_reverted__";
 const watermarkId = (): string =>
-    recordLiteral("ingest_file_state", stableDigest(`${WATERMARK_SOURCE}|${WATERMARK_PATH}`));
+    recordLiteral("ingest_file_state", watermarkRecordKey(WATERMARK_SOURCE, WATERMARK_PATH));
 
 export interface RevertedResult {
     readonly revertedCount: number;

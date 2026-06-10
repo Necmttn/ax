@@ -3,8 +3,10 @@ import { SurrealClient, type SurrealClientShape } from "@ax/lib/db";
 import type { DbError } from "@ax/lib/errors";
 import { recordKeyPart } from "@ax/lib/shared/derive-keys";
 import { localPathFileRecordKey, recordLiteral, stableDigest } from "@ax/lib/ids";
+import { selectByIds } from "@ax/lib/shared/record-select";
 import { surrealString } from "@ax/lib/shared/surql";
 import { executeStatementsWith } from "@ax/lib/shared/statement-exec";
+import { watermarkRecordKey } from "@ax/lib/shared/watermark";
 import { isoMs } from "./util.ts";
 
 export interface CascadeEdge {
@@ -121,7 +123,7 @@ export const joinCascadeEdges = (
 const WATERMARK_SOURCE = "metrics:fragility_cascade";
 const WATERMARK_PATH = "__fragility_cascade__";
 const watermarkId = (): string =>
-    recordLiteral("ingest_file_state", stableDigest(`${WATERMARK_SOURCE}|${WATERMARK_PATH}`));
+    recordLiteral("ingest_file_state", watermarkRecordKey(WATERMARK_SOURCE, WATERMARK_PATH));
 
 /** Bounded anchor: bare keys of the most recent reverted commits
  *  (commit_reverted index). `ts` must appear in the selection for ORDER BY
@@ -227,13 +229,12 @@ export const computeFragilityCascade = (
 
         // 4. File rows by primary id - path + repository for the fragile set
         //    only (instead of an out.path deref on every touched edge).
-        //    `FROM [refs]` (record-list selection) is load-bearing: `FROM file
-        //    WHERE id IN [refs]` silently matches NOTHING on SurrealDB 3.x
-        //    (verified live) - select the records directly instead.
+        //    Record-list selection is load-bearing: `WHERE id IN [refs]`
+        //    silently matches NOTHING on some tables (invariant + live
+        //    verification: @ax/lib/shared/record-select).
         const fileInfo = new Map<string, { path: string; repository: string | null }>();
         const fileRows = yield* chunkedQuery(db, [...fragileFiles], limits.chunkSize, (chunk) =>
-            `SELECT type::string(id) AS id, path, type::string(repository) AS repository`
-            + ` FROM [${chunk.map((k) => recordLiteral("file", k)).join(", ")}];`);
+            selectByIds("type::string(id) AS id, path, type::string(repository) AS repository", "file", chunk));
         for (const r of fileRows) {
             const key = recordKeyPart(r.id, "file");
             const path = str(r.path);
@@ -287,15 +288,14 @@ export const computeFragilityCascade = (
         }
 
         // 7b. Batch-resolve turn → session via primary-key record-list
-        //     selection on `turn` (`turn.session` is a direct column; `FROM
-        //     [refs]` for the same WHERE-id-IN footgun as step 4).
+        //     selection on `turn` (`turn.session` is a direct column; same
+        //     WHERE-id-IN footgun as step 4 - see @ax/lib/shared/record-select).
         const sessionByTurn = new Map<string, string>();
         const turnKeys = [...new Set(
             rawEdits.map((e) => recordKeyPart(e.turn, "turn")).filter((k): k is string => k !== null),
         )];
         const turnRows = yield* chunkedQuery(db, turnKeys, limits.chunkSize, (chunk) =>
-            `SELECT type::string(id) AS id, type::string(session) AS session`
-            + ` FROM [${chunk.map((k) => recordLiteral("turn", k)).join(", ")}];`);
+            selectByIds("type::string(id) AS id, type::string(session) AS session", "turn", chunk));
         for (const r of turnRows) {
             const id = str(r.id);
             const session = str(r.session);

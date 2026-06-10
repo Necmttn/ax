@@ -19,7 +19,9 @@ import { Effect } from "effect";
 import { SurrealClient } from "@ax/lib/db";
 import type { DbError } from "@ax/lib/errors";
 import { recordKeyPart } from "@ax/lib/shared/derive-keys";
+import { toBareSessionId } from "@ax/lib/shared/session-id";
 import { recordLiteral } from "@ax/lib/ids";
+import { numOrNull, strOrNull } from "./util.ts";
 
 /** Cap on produced edges read per session (matches the timeline query cap). */
 const MAX_COMMITS = 200;
@@ -53,22 +55,14 @@ export interface SessionDurabilityDetail {
 }
 
 // Mirrors the session-id validation in dashboard/session-view.ts so the
-// record ref can be safely inlined.
+// record ref can be safely inlined. Normalization is the shared
+// `toBareSessionId` (@ax/lib/shared/session-id); the charset gate stays local
+// because it doubles as the inline-SQL safety check.
 const SESSION_ID_RE = /^[A-Za-z0-9_-]{6,80}$/;
 
 const sessionRecordRef = (sessionId: string): string | null => {
-    const uuid = sessionId
-        .replace(/^session:⟨/, "")
-        .replace(/⟩$/, "")
-        .replace(/^session:/, "");
+    const uuid = toBareSessionId(sessionId);
     return SESSION_ID_RE.test(uuid) ? `session:⟨${uuid}⟩` : null;
-};
-
-const strOrNull = (v: unknown): string | null => (typeof v === "string" && v.length > 0 ? v : null);
-const numOrNull = (v: unknown): number | null => {
-    if (v === null || v === undefined) return null;
-    const n = Number(v);
-    return Number.isFinite(n) ? n : null;
 };
 
 interface ProducedRow {

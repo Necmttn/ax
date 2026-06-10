@@ -44,6 +44,7 @@ import {
 } from "./record-keys.ts";
 import { extractToolFileEvidence } from "./tool-file-evidence.ts";
 
+import { selectByIds } from "@ax/lib/shared/record-select";
 import { executeStatements, executeStatementsWith } from "@ax/lib/shared/statement-exec";
 import { fileWatermark } from "@ax/lib/shared/watermark";
 import { skipNotFound } from "@ax/lib/shared/fs-error";
@@ -1288,14 +1289,16 @@ const relateInvocations = (invocations: Invocation[]) =>
             // the proper scope/dir_path/description on known skills with
             // our 'unknown' placeholder. Idempotent re-runs of ingest stay
             // a no-op for everything that has a real on-disk source.
-            const ids = [...uniqueSkills].map(
-                (n) => `skill:\`${skillRecordKey(n)}\``,
-            );
-            // Use `WHERE id IN [...]` rather than `FROM [...]` because the
-            // latter form is broken in SurrealDB 3.0 (returns DatabaseEmpty)
-            // - so we filter the full skill table by id list instead.
+            // Record-list selection (`FROM [refs]`), NEVER `FROM skill WHERE
+            // id IN [...]`: the id IN-list form silently matches NOTHING on
+            // the skill table (verified live on SurrealDB 3.1.0 - invariant
+            // documented in @ax/lib/shared/record-select), which made this
+            // lookup return empty and clobbered real skill rows with the
+            // 'unknown' placeholder MERGE below. (The previous comment here
+            // claimed the opposite - that `FROM [...]` returns DatabaseEmpty -
+            // which does not reproduce on 3.1.0: missing records are skipped.)
             const existing = (yield* db.query<[Array<{ name?: string }>]>(
-                `SELECT name FROM skill WHERE id IN [${ids.join(",")}];`,
+                selectByIds("name", "skill", [...uniqueSkills].map(skillRecordKey)),
             )) as [Array<{ name?: string }>];
             const knownNames = new Set(
                 (existing[0] ?? [])
