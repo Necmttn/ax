@@ -234,8 +234,12 @@ describe("insights query builders", () => {
 
         expect(sql).toContain("FROM edited");
         expect(sql).toContain("GROUP BY session");
-        expect(sql).toContain("FROM command_outcome WHERE session = $parent.session");
-        expect(sql).toContain("verification_commands = 0");
+        // Anti-join against the verified-session set (computed once), not a
+        // per-row correlated `session = $parent.session` subquery.
+        expect(sql).not.toContain("$parent.session");
+        expect(sql).toContain("session NOT IN");
+        expect(sql).toContain("FROM command_outcome");
+        expect(sql).toContain("0 AS verification_commands");
     });
 
     test("userLanguageSql reads user-message ngrams", () => {

@@ -380,25 +380,40 @@ LIMIT ${safeLimit};`.trim();
 
 export function verificationGapsSql(limit: number): string {
     const safeLimit = checkedLimit(limit);
+    // "Sessions that edited but never verified." The old form ran a correlated
+    // `command_outcome WHERE session = $parent.session` subquery per edited
+    // session (thousands) - $parent.session can't use an index, so ~16s. This
+    // instead: (1) anti-join against the verified-session set computed ONCE
+    // (`session NOT IN (... GROUP BY session)`); (2) filter + limit on the cheap
+    // (session, edits) projection, deref session meta only for the final N rows.
+    // verification_commands is 0 by construction of the filter. ~16s -> ~6s; the
+    // residual is the `in.session` deref over the edited edge table.
     return `
-SELECT * FROM (
-    SELECT
-        session AS id,
-        session.project AS project,
-        session.cwd AS cwd,
-        session.started_at AS started_at,
-        session.ended_at AS ended_at,
-        edits,
-        array::len((SELECT id FROM command_outcome WHERE session = $parent.session AND kind IN ["expected_feedback", "product_bug_signal", "guardrail"])) AS verification_commands
+SELECT
+    id,
+    id.project AS project,
+    id.cwd AS cwd,
+    id.started_at AS started_at,
+    id.ended_at AS ended_at,
+    edits,
+    0 AS verification_commands
+FROM (
+    SELECT session AS id, edits
     FROM (
         SELECT in.session AS session, count() AS edits
         FROM edited
         GROUP BY session
     )
+    WHERE edits > 0
+      AND session NOT IN (
+        SELECT VALUE session FROM command_outcome
+        WHERE kind IN ["expected_feedback", "product_bug_signal", "guardrail"]
+        GROUP BY session
+      )
+    ORDER BY edits DESC
+    LIMIT ${safeLimit}
 )
-WHERE edits > 0 AND verification_commands = 0
-ORDER BY edits DESC, ended_at DESC
-LIMIT ${safeLimit};`.trim();
+ORDER BY edits DESC, ended_at DESC;`.trim();
 }
 
 export function userLanguageSql(limit: number): string {
