@@ -4,7 +4,7 @@ import { Command, Flag } from "effect/unstable/cli";
 import { cmdDaemon, cmdDoctor, cmdInstall, cmdSetup, cmdUninstall } from "../install.ts";
 import { liveVersionDeps, printVersion, updateAxctl } from "../version.ts";
 import type { RuntimeManifest } from "./manifest.ts";
-import { boolArg, jsonFlag } from "./shared.ts";
+import { boolArg, jsonFlag, parseFileHints } from "./shared.ts";
 
 const checkFlag = Flag.boolean("check").pipe(Flag.withDefault(false));
 const bannerFlag = Flag.boolean("banner").pipe(Flag.withDefault(false));
@@ -50,9 +50,7 @@ export const setupCommand = Command.make(
     },
     ({ agents, yes, agentPrompt }) =>
         cmdSetup({
-            ...(agents._tag === "Some"
-                ? { agents: agents.value.split(",").map((s) => s.trim()).filter(Boolean) }
-                : {}),
+            ...(agents._tag === "Some" ? { agents: parseFileHints(agents) } : {}),
             yes,
             agentPromptOnly: agentPrompt,
         }),

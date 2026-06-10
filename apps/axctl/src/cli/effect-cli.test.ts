@@ -76,6 +76,21 @@ describe("effect cli", () => {
         }
     });
 
+    test("every manifest-declared command is actually registered (reverse anti-drift: no ghost DB_COMMANDS entries)", () => {
+        const registered = new Set(topLevelNames());
+        // Sanctioned ghost: dogfood's manifest entry is always spread into
+        // RUNTIME_BY_COMMAND, but the command itself only registers under
+        // AX_DEV=1 (see devOnlyCommands in index.ts).
+        const sanctionedGhosts = new Set(["dogfood"]);
+        for (const name of Object.keys(RUNTIME_BY_COMMAND)) {
+            if (sanctionedGhosts.has(name)) continue;
+            expect(
+                registered.has(name),
+                `manifest declares "${name}" but no top-level command registers it (ghost RUNTIME_BY_COMMAND/DB_COMMANDS entry)`,
+            ).toBe(true);
+        }
+    });
+
     test("read-only insight surfaces are visible; maintenance verbs stay hidden (#173)", () => {
         const byName = new Map(
             rootCommand.subcommands.flatMap((g) => g.commands.map((c) => [c.name, c] as const)),

@@ -114,7 +114,7 @@ export const rootCommand = Command.make("axctl").pipe(
  * even though they are satisfied implicitly at runtime. This is the only
  * place the cast lives - callers stay type-safe.
  */
-export const runCli = (args: ReadonlyArray<string>): Effect.Effect<void, unknown, SurrealClient> =>
+const runCli = (args: ReadonlyArray<string>): Effect.Effect<void, unknown, SurrealClient> =>
     Command.runWith(rootCommand, { version: AX_VERSION })(args) as unknown as Effect.Effect<void, unknown, SurrealClient>;
 
 /** CLI invocation that has had its `SurrealClient` requirement satisfied. */

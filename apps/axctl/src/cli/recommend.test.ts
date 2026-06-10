@@ -11,7 +11,8 @@ describe("axctl improve recommend", () => {
         expect(commandBlock).toContain('Flag.integer("limit")');
         expect(commandBlock).toContain('Flag.string("form")');
         expect(commandBlock).toContain('Flag.integer("since")');
-        expect(commandBlock).toContain('Flag.boolean("json")');
+        // --json uses the shared spec (Flag.boolean("json") + default false) from commands/shared.ts
+        expect(commandBlock).toContain("json: jsonFlag");
         expect(commandBlock).toContain('Flag.boolean("no-clipboard")');
     });
 });

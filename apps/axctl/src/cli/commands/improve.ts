@@ -1,5 +1,5 @@
 // Extracted from cli/index.ts (Phase 2 CLI split)
-import { Effect } from "effect";
+import { Effect, Option } from "effect";
 import { Argument, Command, Flag } from "effect/unstable/cli";
 import { SurrealClient } from "@ax/lib/db";
 import { prettyPrint, surrealLiteral } from "@ax/lib/json";
@@ -16,7 +16,7 @@ import { showExperiment, formatShow } from "../../improve/show.ts";
 import { buildImproveProposalsNext } from "../../nav/next-links.ts";
 import { printNextLinks } from "../next-format.ts";
 import type { RuntimeManifest } from "./manifest.ts";
-import { jsonFlag, optionValue, positiveLimit, requireOptionalPositiveInt, requirePositiveInt } from "./shared.ts";
+import { jsonFlag, optionValue, parseFileHints, positiveLimit, requireOptionalPositiveInt, requirePositiveInt } from "./shared.ts";
 
 /**
  * axctl improve - surface the experiment-loop proposal shortlist.
@@ -143,7 +143,7 @@ const cmdImproveRecommend = (input: {
         const apply = input.apply;
         const limit = requirePositiveInt("improve recommend", "limit", input.limit);
         const sinceDays = requireOptionalPositiveInt("improve recommend", "since", input.sinceDays);
-        const forms = input.forms.flatMap((v) => v.split(",").map((s) => s.trim()).filter((s) => s.length > 0));
+        const forms = input.forms.flatMap((v) => parseFileHints(Option.some(v)));
         const items = yield* recommend({
             limit,
             ...(forms.length > 0 ? { forms } : {}),
@@ -196,7 +196,7 @@ const improveRecommendCommand = Command.make(
         limit: Flag.integer("limit").pipe(Flag.withDefault(5)),
         form: Flag.string("form").pipe(Flag.atLeast(0)),
         since: Flag.integer("since").pipe(Flag.optional),
-        json: Flag.boolean("json").pipe(Flag.withDefault(false)),
+        json: jsonFlag,
         noClipboard: Flag.boolean("no-clipboard").pipe(Flag.withDefault(false)),
         apply: Flag.boolean("apply").pipe(
             Flag.withDefault(false),

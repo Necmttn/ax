@@ -434,7 +434,7 @@ export const ingestCommand = Command.make(
         // Estimate how long a full backfill takes (counts sources + times a
         // small sample) and exit without running the full ingest.
         dryRun: Flag.boolean("dry-run").pipe(Flag.withDefault(false)),
-        json: Flag.boolean("json").pipe(Flag.withDefault(false)),
+        json: jsonFlag,
         since: optionalSince,
         progress: progressFlag,
         verbose: verboseFlag,

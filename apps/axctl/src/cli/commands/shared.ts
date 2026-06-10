@@ -10,6 +10,7 @@
  */
 import { Option } from "effect";
 import { Flag } from "effect/unstable/cli";
+import { fmtCount as fmtCountLib } from "@ax/lib/shared/formatters";
 
 export const boolArg = (name: string, enabled: boolean): string[] =>
     enabled ? [`--${name}`] : [];
@@ -55,17 +56,15 @@ export function requireOptionalPositiveInt(
 }
 
 /**
- * Format a numeric counter with thousand-separators (issue #46). Keeps short
- * values short; long ones become e.g. `597,508` rather than blowing the
- * column.
+ * Format a numeric counter with thousand-separators (issue #46). Thin
+ * unknown-typed bridge over `@ax/lib/shared/formatters` fmtCount for the raw
+ * `Record<string, unknown>` DB rows the CLI tables format - the cast is safe
+ * because the lib version `Number(...)`-coerces and guards non-finite input.
  */
-export function fmtCount(v: unknown): string {
-    const n = Number(v ?? 0);
-    if (!Number.isFinite(n)) return "0";
-    return n.toLocaleString("en-US");
-}
+export const fmtCount = (v: unknown): string =>
+    fmtCountLib(v as number | null | undefined);
 
-/** Split a comma-separated file-hint flag into trimmed non-empty entries. */
+/** Split a comma-separated flag value (file hints, agent ids, forms) into trimmed non-empty entries. */
 export const parseFileHints = (value: Option.Option<string>): readonly string[] =>
     (Option.getOrUndefined(value) ?? "")
         .split(",")
