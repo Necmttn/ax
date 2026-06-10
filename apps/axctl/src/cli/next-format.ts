@@ -34,17 +34,19 @@ export const renderNextFooter = (
 };
 
 /**
- * Print the `next:` footer to STDERR.
+ * Print the `next:` block to STDOUT, intended to be called BEFORE the data.
  *
- * stderr, not stdout, deliberately: agents reflexively pipe text output
- * through `| head -N`, and a stdout footer printed last gets decapitated
- * (observed in 9/10 calls of the v0.21.0 dogfood retro). On a TTY both
- * streams hit the terminal in order so the rendering is identical; under a
- * pipe the footer stays visible on the terminal instead of vanishing into
- * the truncated pipe. JSON paths are unaffected - they carry structured
- * `next` on stdout.
+ * Placement history (two dogfood retros):
+ *   v0.21.0 - footer at the bottom of stdout: decapitated by `| head -N`
+ *     in 9/10 agent calls.
+ *   v0.22.0 - footer on stderr: defeated anyway, because agents reflexively
+ *     write `2>&1 | head`, which folds stderr back into stdout upstream of
+ *     `head`.
+ * Conclusion: placement beats stream routing. The block prints FIRST, so any
+ * `head` keeps it and agents read it before the data. JSON paths are
+ * unaffected - they carry structured `next` on stdout.
  */
-export const printNextFooter = (links: ReadonlyArray<NavLink>): void => {
-    const footer = renderNextFooter(links);
-    if (footer) process.stderr.write(`${footer}\n`);
+export const printNextLinks = (links: ReadonlyArray<NavLink>): void => {
+    const block = renderNextFooter(links);
+    if (block) process.stdout.write(`${block.replace(/^\n/, "")}\n\n`);
 };
