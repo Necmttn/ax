@@ -147,7 +147,7 @@ export const PROVIDER_PARITY_FEATURES: readonly ProviderParityFeature[] = [
         ],
         providers: {
             claude: supported("Claude tool use/result blocks write shared tool_call rows.", [
-                { path: "apps/axctl/src/ingest/transcripts.ts", contains: "buildToolCallStatements(toolCalls)" },
+                { path: "apps/axctl/src/ingest/transcripts.ts", contains: "toolCalls: extracted.toolCalls" },
             ]),
             codex: supported("Codex function/tool events write shared tool_call rows.", [
                 { path: "apps/axctl/src/ingest/codex.ts", contains: "toolCalls: batch.toolCalls.map((call) => compactCodexToolCall" },
@@ -203,7 +203,7 @@ export const PROVIDER_PARITY_FEATURES: readonly ProviderParityFeature[] = [
         ],
         providers: {
             claude: supported("Claude TodoWrite evidence writes plan snapshots.", [
-                { path: "apps/axctl/src/ingest/transcripts.ts", contains: "buildPlanSnapshotStatements(snapshot)" },
+                { path: "apps/axctl/src/ingest/transcripts.ts", contains: "planSnapshots: extracted.planSnapshots" },
             ]),
             codex: supported("Codex update_plan evidence writes plan snapshots.", [
                 { path: "apps/axctl/src/ingest/codex.ts", contains: "planSnapshots: batch.planSnapshots" },
@@ -223,7 +223,7 @@ export const PROVIDER_PARITY_FEATURES: readonly ProviderParityFeature[] = [
         ],
         providers: {
             claude: supported("Claude edit/write tool arguments write edited edges to file rows.", [
-                { path: "apps/axctl/src/ingest/transcripts.ts", contains: "buildToolFileEvidenceStatements" },
+                { path: "apps/axctl/src/ingest/transcripts.ts", contains: "toolFileEvidence: extractToolFileEvidence(extracted.toolCalls)" },
                 { path: "apps/axctl/src/ingest/tool-file-evidence.ts", contains: "EDIT_TOOLS" },
             ]),
             codex: supported("Codex apply_patch tool arguments write edited edges to file rows when structured patch headers are present.", [
@@ -248,7 +248,7 @@ export const PROVIDER_PARITY_FEATURES: readonly ProviderParityFeature[] = [
         ],
         providers: {
             claude: supported("Claude Read/Grep/Glob tool arguments write read_file and searched_file edges.", [
-                { path: "apps/axctl/src/ingest/transcripts.ts", contains: "buildToolFileEvidenceStatements" },
+                { path: "apps/axctl/src/ingest/transcripts.ts", contains: "toolFileEvidence: extractToolFileEvidence(extracted.toolCalls)" },
                 { path: "apps/axctl/src/ingest/tool-file-evidence.ts", contains: "READ_TOOLS" },
                 { path: "apps/axctl/src/ingest/tool-file-evidence.ts", contains: "SEARCH_TOOLS" },
             ]),
