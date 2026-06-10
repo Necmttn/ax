@@ -1,7 +1,9 @@
 import { Database } from "bun:sqlite";
 import { Effect, FileSystem, Option, Path, Schema } from "effect";
 import { AxConfig } from "@ax/lib/config";
+import { SkillName } from "@ax/lib/brands";
 import { RecordId, SurrealClient } from "@ax/lib/db";
+import { jsonParseErrorText } from "@ax/lib/decode";
 import { orAbsent } from "@ax/lib/shared/fs-error";
 import { classifyNoFollow } from "@ax/lib/shared/fs-classify";
 import { posixPath } from "@ax/lib/shared/path";
@@ -60,7 +62,7 @@ interface CursorInvocation {
     session: string;
     seq: number;
     ts: string;
-    skill: string;
+    skill: SkillName;
     args: unknown;
 }
 
@@ -199,18 +201,6 @@ function decodeSqliteValue(value: SQLiteValue | undefined): string | null {
  *  (not `null`) so a literal JSON `null` is distinguishable from a failed
  *  parse. */
 const decodeJsonStringOption = Schema.decodeUnknownOption(Schema.UnknownFromJsonString);
-
-/** Re-derive the native parse error for the warning detail: the Option-based
- *  schema decode drops the `SyntaxError` that the legacy `JSON.parse` warning
- *  surfaced. Runs only on the (rare) failure path. */
-function jsonParseErrorText(raw: string): string {
-    try {
-        JSON.parse(raw);
-        return "schema decode failed";
-    } catch (error) {
-        return error instanceof Error ? error.message : String(error);
-    }
-}
 
 function parseJsonRecord(raw: string | null, label: string, warnings: string[]): Record<string, unknown> | null {
     if (raw === null || raw.trim().length === 0) {
@@ -437,7 +427,8 @@ function pushCursorToolCall(input: {
 
     input.toolCalls.push(call);
 
-    const skillName = `cursor:${toolName}`;
+    // Synthetic provider-tool skill name - branded at the true source.
+    const skillName = SkillName.make(`cursor:${toolName}`);
     input.invocations.push({
         session: input.session.id,
         seq: input.seq,

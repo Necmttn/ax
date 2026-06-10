@@ -11,7 +11,7 @@
  * The (has_error, ts) index keeps the WHERE clause cheap.
  */
 import { defineQuery } from "@ax/lib/shared/query";
-import { isRecord, stringField, dateField, numberField } from "@ax/lib/shared/row-fields";
+import { isRecord, stringField, dateField, numberFieldOrNull } from "@ax/lib/shared/row-fields";
 import { toBareSessionId } from "@ax/lib/shared/session-id";
 import type { ToolFailureRow, ToolFailureSample } from "@ax/lib/shared/dashboard-types";
 
@@ -71,8 +71,8 @@ export const toolFailuresQuery = defineQuery<
     sql: () => TOOL_FAILURES_SQL,
     mapRow: (raw) => {
         if (!isRecord(raw)) return null;
-        const failure = numberField(raw, "failure_count") ?? 0;
-        const total = numberField(raw, "total_calls") ?? 0;
+        const failure = numberFieldOrNull(raw, "failure_count") ?? 0;
+        const total = numberFieldOrNull(raw, "total_calls") ?? 0;
         const rate = total > 0 ? failure / total : 0;
         return {
             label: String(raw.label ?? "(unknown)"),
@@ -80,7 +80,7 @@ export const toolFailuresQuery = defineQuery<
             last_seen: dateField(raw, "last_seen"),
             last_error_text: stringField(raw, "last_error_text"),
             last_project: stringField(raw, "last_project"),
-            distinct_sessions: numberField(raw, "distinct_sessions") ?? 0,
+            distinct_sessions: numberFieldOrNull(raw, "distinct_sessions") ?? 0,
             total_calls: total,
             failure_rate: rate,
             exit_codes: intArrayField(raw, "exit_codes"),

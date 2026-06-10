@@ -1,6 +1,11 @@
 import { describe, expect, test } from "bun:test";
 import { SkillName } from "./brands.ts";
-import { resolveSkillName } from "./skill-id.ts";
+import {
+    legacySkillRecordKey,
+    resolveSkillName,
+    skillRecordKey,
+    skillRecordLookupKeys,
+} from "./skill-id.ts";
 
 // resolveSkillName returns the branded SkillName (see @ax/lib/brands), so
 // expected literals are wrapped in SkillName.make to satisfy toBe's typing.
@@ -55,5 +60,39 @@ describe("resolveSkillName", () => {
     test("exact match wins over a suffix match", () => {
         const both = new Set<string>(["loop", "plugin:loop"]);
         expect(resolveSkillName("loop", both)).toBe(name("loop"));
+    });
+});
+
+// Issue #222: skillRecordKey now takes the branded SkillName. The brand is a
+// type-level change only - record-id bytes MUST stay identical to the
+// pre-brand outputs, or every existing `skill:` row orphans. These literals
+// were captured by running the pre-change implementation; do not regenerate
+// them from the code under test.
+describe("skill record-key byte compatibility (pre-SkillName-brand pins)", () => {
+    test("plain skill names keep their v2 keys", () => {
+        expect(skillRecordKey(name("tdd"))).toBe("v2__tdd__163554672ca4907c");
+    });
+
+    test("plugin-namespaced names keep the `__` encoding for `:`", () => {
+        expect(skillRecordKey(name("superpowers:test-driven-development"))).toBe(
+            "v2__superpowers_test_driven_development__6a86593eda518006",
+        );
+        expect(skillRecordKey(name("codex:rescue"))).toBe(
+            "v2__codex_rescue__06b903f527d40fa6",
+        );
+        expect(legacySkillRecordKey(name("superpowers:test-driven-development"))).toBe(
+            "superpowers__test-driven-development",
+        );
+    });
+
+    test("lookup keys pair modern + legacy, deduping when identical", () => {
+        expect(skillRecordLookupKeys(name("superpowers:test-driven-development"))).toEqual([
+            "v2__superpowers_test_driven_development__6a86593eda518006",
+            "superpowers__test-driven-development",
+        ]);
+        expect(skillRecordLookupKeys(name("tdd"))).toEqual([
+            "v2__tdd__163554672ca4907c",
+            "tdd",
+        ]);
     });
 });

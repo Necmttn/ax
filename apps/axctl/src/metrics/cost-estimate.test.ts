@@ -40,12 +40,12 @@ const catalog = new Map<string, ModelPricing>([
 describe("fillEstimatedCost", () => {
     test("keeps a stored cost untouched (estimated=false, source preserved)", () => {
         const out = fillEstimatedCost(
-            usage({ estimated_cost_usd: 50.5, pricing_source: "built_in_catalog_2026-05-29" }),
+            usage({ estimated_cost_usd: 50.5, pricing_source: "built_in_catalog_2026-06-10" }),
             catalog,
         );
         expect(out).toEqual({
             estimatedCostUsd: 50.5,
-            pricingSource: "built_in_catalog_2026-05-29",
+            pricingSource: "built_in_catalog_2026-06-10",
             estimated: false,
         });
     });

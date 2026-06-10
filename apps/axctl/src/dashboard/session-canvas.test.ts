@@ -7,41 +7,39 @@
  * 560k-row turn table, ~1.3s for 117 children).
  */
 import { describe, expect, test } from "bun:test";
-import { Effect, Layer } from "effect";
-import { SurrealClient, type SurrealClientShape } from "@ax/lib/db";
+import { Effect, type Layer } from "effect";
+import { SurrealClient } from "@ax/lib/db";
+import { makeTestSurrealClient } from "@ax/lib/testing/surreal";
 import { fetchSessionOrchestration } from "./session-canvas.ts";
 
 function makeMockDb(): { layer: Layer.Layer<SurrealClient>; captured: string[] } {
-    const captured: string[] = [];
-    const impl: SurrealClientShape = {
-        query: <T extends unknown[] = unknown[]>(sql: string) => {
-            captured.push(sql);
-            if (sql.includes("FROM session WHERE <string>id")) {
-                return Effect.succeed([[
+    const tc = makeTestSurrealClient({
+        denyWrites: true,
+        routes: [
+            {
+                match: "FROM session WHERE <string>id",
+                rows: [[
                     { id: "session:parent", label: "Parent", started_at: "2026-05-01T00:00:00.000Z", ended_at: "2026-05-01T01:00:00.000Z" },
-                ]] as unknown as T);
-            }
-            if (sql.includes("FROM spawned")) {
-                return Effect.succeed([[
+                ]],
+            },
+            {
+                match: "FROM spawned",
+                rows: [[
                     { id: "session:`c1`", nickname: "scout", ts: "2026-05-01T00:05:00.000Z", started_at: "2026-05-01T00:05:00.000Z", ended_at: "2026-05-01T00:10:00.000Z" },
                     { id: "session:`c2`", nickname: null, ts: "2026-05-01T00:06:00.000Z", started_at: "2026-05-01T00:06:00.000Z", ended_at: "2026-05-01T00:12:00.000Z" },
-                ]] as unknown as T);
-            }
-            if (sql.includes("FROM turn WHERE session = session:`c1`")) {
-                return Effect.succeed([[{ s: "session:`c1`", text_excerpt: "do task A", seq: 0 }]] as unknown as T);
-            }
-            if (sql.includes("FROM turn WHERE session = session:`c2`")) {
-                return Effect.succeed([[{ s: "session:`c2`", text_excerpt: "do task B", seq: 1 }]] as unknown as T);
-            }
-            return Effect.succeed([[]] as unknown as T);
-        },
-        upsert: () => Effect.void,
-        relate: () => Effect.void,
-        putFile: () => Effect.void,
-        getFile: () => Effect.succeed(""),
-        raw: {} as never,
-    };
-    return { layer: Layer.succeed(SurrealClient, impl), captured };
+                ]],
+            },
+            {
+                match: "FROM turn WHERE session = session:`c1`",
+                rows: [[{ s: "session:`c1`", text_excerpt: "do task A", seq: 0 }]],
+            },
+            {
+                match: "FROM turn WHERE session = session:`c2`",
+                rows: [[{ s: "session:`c2`", text_excerpt: "do task B", seq: 1 }]],
+            },
+        ],
+    });
+    return { layer: tc.layer, captured: tc.captured };
 }
 
 describe("fetchSessionOrchestration task fetch", () => {

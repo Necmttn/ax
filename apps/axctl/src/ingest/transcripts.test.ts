@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { SkillName } from "@ax/lib/brands";
 import { agentEventRecordKey } from "./provider-events.ts";
 import { fileRecordKey, toolCallRecordKey, turnRecordKey } from "./record-keys.ts";
 import { extractToolFileEvidence } from "./tool-file-evidence.ts";
@@ -9,6 +10,9 @@ import {
     claudeConcurrency,
     transcriptEditFileRecordKey,
 } from "./transcripts.ts";
+
+// Fixture skill names are plain string literals; brand via the schema constructor.
+const sn = (s: string): SkillName => SkillName.make(s);
 
 describe("Claude transcript extraction", () => {
     test("claudeConcurrency rejects invalid values", () => {
@@ -508,7 +512,7 @@ describe("Claude transcript extraction", () => {
                     seq: 1,
                     callId: "toolu_skill",
                 }),
-                skillName: "superpowers:test-driven-development",
+                skillName: sn("superpowers:test-driven-development"),
                 ts: "2026-05-09T10:00:00.000Z",
                 reason: "Claude Skill tool invocation",
                 labels: { provider: "claude", toolName: "Skill", source: "transcript" },

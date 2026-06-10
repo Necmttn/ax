@@ -28,9 +28,10 @@ function makeMockDb(opts?: {
 }): { layer: Layer.Layer<SurrealClient>; captured: TestSurrealQueryCall[] } {
     // First query call (the session list) answers with `sessionRows`; the
     // follow-up enrichment queries fall back to `[[]]`.
-    const tc = makeTestSurrealClient(
-        opts?.sessionRows ? { responses: [[[...opts.sessionRows]]] } : {},
-    );
+    const tc = makeTestSurrealClient({
+        denyWrites: true,
+        ...(opts?.sessionRows ? { responses: [[[...opts.sessionRows]]] } : {}),
+    });
     return { layer: tc.layer, captured: tc.calls };
 }
 

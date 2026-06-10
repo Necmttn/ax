@@ -1,5 +1,6 @@
 import { Effect } from "effect";
 import { SurrealClient, type SurrealClientShape } from "@ax/lib/db";
+import type { SkillName } from "@ax/lib/brands";
 import type { DbError } from "@ax/lib/errors";
 import { skillRecordKey } from "@ax/lib/skill-id";
 import { executeStatements, executeStatementsWith } from "@ax/lib/shared/statement-exec";
@@ -57,7 +58,7 @@ export interface ToolCallWrite {
 
 export interface ToolCallSkillRelationWrite {
     readonly toolCallKey: string;
-    readonly skillName: string;
+    readonly skillName: SkillName;
     readonly ts: TimestampInput;
     readonly labels?: JsonInput;
     readonly metrics?: JsonInput;
@@ -272,7 +273,7 @@ export function buildToolFileEvidenceStatements(
     return statements;
 }
 
-export function buildSkillPlaceholderStatements(skillName: string): string[] {
+export function buildSkillPlaceholderStatements(skillName: SkillName): string[] {
     const skillRef = recordRef("skill", skillRecordKey(skillName));
 
     return [
@@ -354,7 +355,7 @@ export function buildPlanSnapshotStatements(snapshot: PlanSnapshotWrite): string
 
 const skillExists = (
     db: SurrealClientShape,
-    skillName: string,
+    skillName: SkillName,
 ): Effect.Effect<boolean, DbError> =>
     Effect.gen(function* () {
         const skillRef = recordRef("skill", skillRecordKey(skillName));

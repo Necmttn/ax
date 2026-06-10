@@ -1,5 +1,5 @@
 import { Effect } from "effect";
-import { jsonRecordField } from "@ax/lib/decode";
+import { encodeJson, jsonRecordField } from "@ax/lib/decode";
 import { SurrealClient } from "@ax/lib/db";
 import type { DbError } from "@ax/lib/errors";
 import { toBareSessionId } from "@ax/lib/shared/session-id";
@@ -433,7 +433,7 @@ export const refreshWorkflowSnapshot = (): Effect.Effect<
             };`,
             {
                 generated_at: new Date(payload.generatedAt),
-                payload: JSON.stringify(payload),
+                payload: encodeJson(payload),
             },
         );
         return payload;

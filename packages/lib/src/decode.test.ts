@@ -1,11 +1,13 @@
 import { describe, expect, test } from "bun:test";
-import { Schema } from "effect";
+import { Option, Schema } from "effect";
 import {
+    decodeJsonOption,
     decodeJsonOrNull,
     decodeJsonRecordOrNull,
     encodeJsonOrNull,
     jsonArrayField,
     jsonField,
+    jsonParseErrorText,
     jsonRecordField,
 } from "./decode.ts";
 
@@ -48,6 +50,29 @@ describe("decodeJsonOrNull", () => {
     test("encodes machine-boundary JSON through Schema", () => {
         expect(encodeJsonOrNull({ a: 1 })).toBe('{"a":1}');
         expect(encodeJsonOrNull(["x", true])).toBe('["x",true]');
+    });
+});
+
+describe("decodeJsonOption", () => {
+    test("distinguishes the JSON document null from a parse failure", () => {
+        expect(decodeJsonOption("null")).toEqual(Option.some(null));
+        expect(Option.isNone(decodeJsonOption("{broken"))).toBe(true);
+        expect(Option.isNone(decodeJsonOption(""))).toBe(true);
+    });
+
+    test("decodes valid JSON to Some of its parsed value", () => {
+        expect(decodeJsonOption('{"a":1}')).toEqual(Option.some({ a: 1 }));
+        expect(decodeJsonOption("false")).toEqual(Option.some(false));
+    });
+});
+
+describe("jsonParseErrorText", () => {
+    test("surfaces the native SyntaxError detail for malformed JSON", () => {
+        expect(jsonParseErrorText("{broken")).toMatch(/JSON/);
+    });
+
+    test("falls back when the raw input is actually parseable", () => {
+        expect(jsonParseErrorText("null")).toBe("schema decode failed");
     });
 });
 

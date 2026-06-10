@@ -1,6 +1,7 @@
 import { Effect, FileSystem, type PlatformError } from "effect";
 import type { SurrealClient } from "@ax/lib/db";
 import { safeJsonParse } from "@ax/lib/shared/safe-json";
+import { prettyPrint } from "@ax/lib/json";
 import {
     ClassifierPackageService,
     type ClassifierQualityStatusReport,
@@ -1162,7 +1163,7 @@ export const runClassifiersPackageOperations = (
                     ...(input.workflowStatusPath === undefined ? {} : { workflowStatusPath: input.workflowStatusPath }),
                 });
             if (input.json) {
-                console.log(JSON.stringify(report, null, 2));
+                console.log(prettyPrint(report));
             } else if (!input.out) {
                 console.log(renderClassifierPackageExecutionApplyText(report));
             }
@@ -1177,7 +1178,7 @@ export const runClassifiersPackageOperations = (
                 ? yield* packages.writeClassifierQualityStatusReport({ sourceReportPath, out: input.out })
                 : yield* packages.classifierQualityStatusReport({ sourceReportPath });
             if (input.json) {
-                console.log(JSON.stringify(report, null, 2));
+                console.log(prettyPrint(report));
             } else if (!input.out) {
                 console.log(renderClassifierQualityStatusText(report));
             }
@@ -1211,7 +1212,7 @@ export const runClassifiersPackageOperations = (
                 ? yield* packages.writeBoundaryReplaySummaryReport({ out: input.out, query })
                 : yield* packages.boundaryReplaySummaryReport({ query });
             if (input.json) {
-                console.log(JSON.stringify(report, null, 2));
+                console.log(prettyPrint(report));
             } else if (!input.out) {
                 console.log(renderClassifierGraphBoundaryReplaySummaryText(report));
             }
@@ -1246,7 +1247,7 @@ export const runClassifiersPackageOperations = (
                     ? yield* packages.writeExecutionGraphQuerySuggestionRoutingSummaryReport({ out: input.out, query })
                     : yield* packages.executionGraphQuerySuggestionRoutingSummary({ query });
                 if (input.json) {
-                    console.log(JSON.stringify(report, null, 2));
+                    console.log(prettyPrint(report));
                 } else if (!input.out) {
                     console.log(renderClassifierGraphQuerySuggestionRoutingSummaryText(report));
                 }
@@ -1256,7 +1257,7 @@ export const runClassifiersPackageOperations = (
                 ? yield* packages.writeExecutionGraphHealthReport({ out: input.out, query })
                 : yield* packages.executionGraphHealthReport({ query });
             if (input.json) {
-                console.log(JSON.stringify(report, null, 2));
+                console.log(prettyPrint(report));
             } else if (!input.out) {
                 console.log(renderClassifierPackageExecutionGraphHealthText(report));
             }
@@ -1278,7 +1279,7 @@ export const runClassifiersPackageOperations = (
                     ...(input.workflowStatusPath === undefined ? {} : { workflowStatusPath: input.workflowStatusPath }),
                 });
             if (input.json) {
-                console.log(JSON.stringify(report, null, 2));
+                console.log(prettyPrint(report));
             } else if (!input.out) {
                 console.log(renderClassifierPackageExecutionWritePlanText(report));
             }
@@ -1297,7 +1298,7 @@ export const runClassifiersPackageOperations = (
                     ...(input.workflowStatusPath === undefined ? {} : { workflowStatusPath: input.workflowStatusPath }),
                 });
             if (input.json) {
-                console.log(JSON.stringify(report, null, 2));
+                console.log(prettyPrint(report));
             } else if (!input.out) {
                 console.log(renderClassifierPackageExecutionFactsText(report));
             }
@@ -1309,7 +1310,7 @@ export const runClassifiersPackageOperations = (
                 ? yield* packages.writeExecutionHistoryReport({ root, out: input.out })
                 : yield* packages.executionHistoryReport({ root });
             if (input.json) {
-                console.log(JSON.stringify(report, null, 2));
+                console.log(prettyPrint(report));
             } else if (!input.out) {
                 console.log(renderClassifierPackageExecutionHistoryText(report));
             }
@@ -1336,7 +1337,7 @@ export const runClassifiersPackageOperations = (
                     allowExpensive: input.allowExpensive ?? false,
                 });
             if (input.json) {
-                console.log(JSON.stringify(report, null, 2));
+                console.log(prettyPrint(report));
             } else if (!input.out) {
                 console.log(renderClassifierPackageOperationExecutionText(report));
             }
@@ -1362,7 +1363,7 @@ export const runClassifiersPackageOperations = (
                     operationId: input.operationId,
                 });
             if (input.json) {
-                console.log(JSON.stringify(report, null, 2));
+                console.log(prettyPrint(report));
             } else if (!input.out) {
                 console.log(renderClassifierPackageOperationDryRunText(report));
             }
@@ -1388,7 +1389,7 @@ export const runClassifiersPackageOperations = (
                     operationId: input.operationId,
                 });
             if (input.json) {
-                console.log(JSON.stringify(report, null, 2));
+                console.log(prettyPrint(report));
             } else if (!input.out) {
                 console.log(renderClassifierPackageOperationPreflightText(report));
             }
@@ -1402,7 +1403,7 @@ export const runClassifiersPackageOperations = (
             : yield* packages.operationsReport(input);
 
         if (input.json) {
-            console.log(JSON.stringify(report, null, 2));
+            console.log(prettyPrint(report));
         } else if (!input.out) {
             console.log(renderClassifierPackageOperationsText(report));
         }
@@ -1452,7 +1453,7 @@ export const runClassifiersLifecycle = (
                 yield* writeClassifierLifecycleRouteExecutionInspectionReport(input.out, report);
             }
             if (input.json) {
-                console.log(JSON.stringify(report, null, 2));
+                console.log(prettyPrint(report));
             } else if (input.out === undefined) {
                 console.log(renderClassifierLifecycleRouteExecutionInspectionText(report));
             }
@@ -1512,7 +1513,7 @@ export const runClassifiersLifecycle = (
             });
 
         if (input.json) {
-            console.log(JSON.stringify(report, null, 2));
+            console.log(prettyPrint(report));
         } else if (!input.out) {
             console.log(routeExecution !== undefined
                 ? renderClassifierLifecycleRouteExecutionText(report as ClassifierLifecycleRouteExecutionReport)
@@ -1561,7 +1562,7 @@ export const runClassifiersPackagesOperations = (
             : yield* packages.packagesOperationsReport({ root });
 
         if (input.json) {
-            console.log(JSON.stringify(report, null, 2));
+            console.log(prettyPrint(report));
         } else if (!input.out) {
             console.log(renderClassifierPackagesOperationsText(report));
         }

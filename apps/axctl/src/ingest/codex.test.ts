@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { agentEventRecordKey } from "./provider-events.ts";
+import { SkillName } from "@ax/lib/brands";
 import { toolCallRecordKey, turnRecordKey } from "./record-keys.ts";
 import {
     __testBuildCodexBatchStatements,
@@ -12,6 +13,9 @@ import {
     codexProgressEvery,
     shouldSnapshotCodexRaw,
 } from "./codex.ts";
+
+// Fixture skill names are plain string literals; brand via the schema constructor.
+const sn = (s: string): SkillName => SkillName.make(s);
 
 describe("Codex transcript extraction", () => {
     test("skips oversized raw artifact snapshots", () => {
@@ -566,7 +570,7 @@ describe("Codex transcript extraction", () => {
                 session: "codex-session",
                 seq: 1,
                 ts: "2026-05-09T10:00:01.000Z",
-                skill: "codex:exec_command",
+                skill: sn("codex:exec_command"),
                 args: JSON.stringify({
                     cmd: "git status --short",
                     workdir: "/Users/necmttn/Projects/ax",
@@ -576,7 +580,7 @@ describe("Codex transcript extraction", () => {
                 session: "codex-session",
                 seq: 3,
                 ts: "2026-05-09T10:00:03.000Z",
-                skill: "codex:update_plan",
+                skill: sn("codex:update_plan"),
                 args: JSON.stringify({
                     explanation: "Tracking task progress.",
                     plan: [
@@ -668,7 +672,7 @@ describe("Codex transcript extraction", () => {
                     seq: 1,
                     callId: "call_exec",
                 }),
-                skillName: "codex:exec_command",
+                skillName: sn("codex:exec_command"),
                 ts: "2026-05-09T10:00:01.000Z",
                 reason: "Codex function call",
                 labels: {
@@ -680,7 +684,7 @@ describe("Codex transcript extraction", () => {
             },
             {
                 toolCallKey: updatePlanKey,
-                skillName: "codex:update_plan",
+                skillName: sn("codex:update_plan"),
                 ts: "2026-05-09T10:00:03.000Z",
                 reason: "Codex function call",
                 labels: {

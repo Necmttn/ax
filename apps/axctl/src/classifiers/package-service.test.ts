@@ -5,6 +5,7 @@ import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { SurrealClient, type SurrealClientShape } from "@ax/lib/db";
+import { makeTestSurrealClient } from "@ax/lib/testing/surreal";
 import {
     ClassifierPackageOperationNotFound,
     ClassifierPackageService,
@@ -26,8 +27,9 @@ const runWithService = <A>(
     effect: Effect.Effect<A, unknown, ClassifierPackageService | FileSystem.FileSystem | Path.Path>,
 ): Promise<A> =>
     Effect.runPromise(effect.pipe(
-        Effect.provide(ClassifierPackageServiceLive),
-        Effect.provide(BunFsLayer),
+        // ClassifierPackageServiceLive needs FileSystem+Path itself, so feed
+        // BunFsLayer into it (and keep it merged for the effect's own use).
+        Effect.provide(ClassifierPackageServiceLive.pipe(Layer.provideMerge(BunFsLayer))),
     ));
 
 const runWithServiceAndDb = <A>(
@@ -399,8 +401,7 @@ describe("ClassifierPackageService", () => {
                 operationId: "missing",
             });
         }).pipe(
-            Effect.provide(ClassifierPackageServiceLive),
-            Effect.provide(BunFsLayer),
+            Effect.provide(ClassifierPackageServiceLive.pipe(Layer.provideMerge(BunFsLayer))),
             Effect.flip,
         ));
 
@@ -643,28 +644,22 @@ describe("ClassifierPackageService", () => {
     });
 
     test("applies Surreal write plans through the service layer", async () => {
-        const statements: string[] = [];
-        const db = {
-            query: (sql: string) => Effect.sync(() => {
-                statements.push(sql);
-                return [];
-            }),
-        } as unknown as SurrealClientShape;
+        const tc = makeTestSurrealClient({ fallback: [] });
 
         const report = await runWithServiceAndDb(Effect.gen(function* () {
             const packages = yield* ClassifierPackageService;
             return yield* packages.applyExecutionSurrealWritePlanReport({ root: ".ax/experiments" });
-        }), db);
+        }), tc.client);
 
         expect(report.schema).toBe("ax.classifier_package_execution_surreal_apply_report.v1");
         expect(report.decision).toBe("applied");
-        expect(report.applied_statement_count).toBe(statements.length);
-        expect(statements.length).toBeGreaterThanOrEqual(1);
+        expect(report.applied_statement_count).toBe(tc.captured.length);
+        expect(tc.captured.length).toBeGreaterThanOrEqual(1);
     });
 
     test("queries classifier graph health through the service layer", async () => {
-        const db = {
-            query: (sql: string) => Effect.sync(() => {
+        const tc = makeTestSurrealClient({
+            fallback: (sql) => {
                 expect(sql).toContain("FROM classifier_graph_node");
                 return [
                     [
@@ -697,13 +692,13 @@ describe("ClassifierPackageService", () => {
                         },
                     ],
                 ];
-            }),
-        } as unknown as SurrealClientShape;
+            },
+        });
 
         const report = await runWithServiceAndDb(Effect.gen(function* () {
             const packages = yield* ClassifierPackageService;
             return yield* packages.executionGraphHealthReport();
-        }), db);
+        }), tc.client);
 
         expect(report.schema).toBe("ax.classifier_package_execution_graph_health_report.v1");
         expect(report.decision).toBe("healthy");
@@ -712,8 +707,8 @@ describe("ClassifierPackageService", () => {
     });
 
     test("summarizes graph query suggestion repair routing through the service layer", async () => {
-        const db = {
-            query: (sql: string) => Effect.sync(() => {
+        const tc = makeTestSurrealClient({
+            fallback: (sql) => {
                 expect(sql).toContain("FROM classifier_graph_node");
                 return [
                     [],
@@ -739,8 +734,8 @@ describe("ClassifierPackageService", () => {
                         },
                     ],
                 ];
-            }),
-        } as unknown as SurrealClientShape;
+            },
+        });
 
         const summary = await runWithServiceAndDb(Effect.gen(function* () {
             const packages = yield* ClassifierPackageService;
@@ -751,7 +746,7 @@ describe("ClassifierPackageService", () => {
                     value_equals: "execute",
                 },
             });
-        }), db);
+        }), tc.client);
 
         expect(summary.has_suggestion).toBe(true);
         expect(summary.query_match_status).toBe("no_match");
@@ -771,8 +766,8 @@ describe("ClassifierPackageService", () => {
 
     test("writes graph query suggestion routing summaries through the service layer", async () => {
         const out = join(mkdtempSync(join(tmpdir(), "ax-query-routing-summary-")), "nested", "summary.json");
-        const db = {
-            query: (sql: string) => Effect.sync(() => {
+        const tc = makeTestSurrealClient({
+            fallback: (sql) => {
                 expect(sql).toContain("FROM classifier_graph_node");
                 return [
                     [],
@@ -798,8 +793,8 @@ describe("ClassifierPackageService", () => {
                         },
                     ],
                 ];
-            }),
-        } as unknown as SurrealClientShape;
+            },
+        });
 
         const summary = await runWithServiceAndDb(Effect.gen(function* () {
             const packages = yield* ClassifierPackageService;
@@ -811,7 +806,7 @@ describe("ClassifierPackageService", () => {
                     value_equals: "execute",
                 },
             });
-        }), db);
+        }), tc.client);
         const saved = await Bun.file(out).json();
 
         expect(summary.suggestion?.repair.execution_status).toBe("ready_to_execute");
@@ -821,10 +816,8 @@ describe("ClassifierPackageService", () => {
     });
 
     test("summarizes boundary replay posture through the service layer", async () => {
-        const statements: string[] = [];
-        const db = {
-            query: (sql: string) => Effect.sync(() => {
-                statements.push(sql);
+        const tc = makeTestSurrealClient({
+            fallback: (sql) => {
                 expect(sql).toContain("FROM classifier_graph_node");
                 return [
                     [],
@@ -872,15 +865,15 @@ describe("ClassifierPackageService", () => {
                         },
                     ],
                 ];
-            }),
-        } as unknown as SurrealClientShape;
+            },
+        });
 
         const summary = await runWithServiceAndDb(Effect.gen(function* () {
             const packages = yield* ClassifierPackageService;
             return yield* packages.boundaryReplaySummaryReport();
-        }), db);
+        }), tc.client);
 
-        expect(statements).toHaveLength(1);
+        expect(tc.captured).toHaveLength(1);
         expect(summary).toMatchObject({
             status: "reviewed_deterministic_facts_available",
             production_posture: "deterministic_and_reviewed_graph_facts_only",
@@ -896,8 +889,8 @@ describe("ClassifierPackageService", () => {
 
     test("writes boundary replay posture summaries through the service layer", async () => {
         const out = join(mkdtempSync(join(tmpdir(), "ax-boundary-replay-summary-")), "nested", "summary.json");
-        const db = {
-            query: (sql: string) => Effect.sync(() => {
+        const tc = makeTestSurrealClient({
+            fallback: (sql) => {
                 expect(sql).toContain("FROM classifier_graph_node");
                 return [
                     [],
@@ -928,13 +921,13 @@ describe("ClassifierPackageService", () => {
                         },
                     ],
                 ];
-            }),
-        } as unknown as SurrealClientShape;
+            },
+        });
 
         const summary = await runWithServiceAndDb(Effect.gen(function* () {
             const packages = yield* ClassifierPackageService;
             return yield* packages.writeBoundaryReplaySummaryReport({ out });
-        }), db);
+        }), tc.client);
         const saved = JSON.parse(readFileSync(out, "utf8"));
 
         expect(summary.status).toBe("reviewed_deterministic_facts_available");
@@ -1021,8 +1014,8 @@ describe("ClassifierPackageService", () => {
             skipped_proposal_count: 1,
             failures: [],
         })}\n`);
-        const db = {
-            query: () => Effect.sync(() => [
+        const tc = makeTestSurrealClient({
+            fallback: [
                 [
                     {
                         graph_id: "classifier_operation:session-section-chunks/blind-review-refresh",
@@ -1069,8 +1062,8 @@ describe("ClassifierPackageService", () => {
                         }),
                     },
                 ],
-            ]),
-        } as unknown as SurrealClientShape;
+            ],
+        });
 
         const result = await runWithServiceAndDb(Effect.gen(function* () {
             const packages = yield* ClassifierPackageService;
@@ -1085,7 +1078,7 @@ describe("ClassifierPackageService", () => {
             const report = yield* packages.lifecycleInsightReport(input);
             const routing = yield* packages.lifecycleRoutingSummaryReport(input);
             return { report, routing };
-        }), db);
+        }), tc.client);
         const { report, routing } = result;
 
         expect(report.schema).toBe("ax.classifier_lifecycle_insight_report.v1");

@@ -10,6 +10,7 @@
 import { Effect, FileSystem, Layer, Schema } from "effect";
 import { BunFileSystem, BunPath } from "@effect/platform-bun";
 import { jsonField } from "@ax/lib/decode";
+import { prettyPrint } from "@ax/lib/json";
 import { homedir } from "node:os";
 import { orAbsent } from "@ax/lib/shared/fs-error";
 import { posixPath } from "@ax/lib/shared/path";
@@ -122,7 +123,7 @@ const writeState = (next: NudgeState): Effect.Effect<void, never, FileSystem.Fil
         // best-effort; a read-only data dir must not break the CLI
         yield* fs.makeDirectory(dataDir(), { recursive: true }).pipe(orAbsent<void>(undefined));
         yield* fs
-            .writeFileString(statePath(), `${JSON.stringify(next, null, 2)}\n`)
+            .writeFileString(statePath(), `${prettyPrint(next)}\n`)
             .pipe(orAbsent<void>(undefined));
     });
 

@@ -1,69 +1,34 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 640" width="1280" height="640" font-family="ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Helvetica Neue', sans-serif">
-  <defs>
-    <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
-      <path d="M 40 0 L 0 0 0 40" fill="none" stroke="#e6e6e2" stroke-width="1"/>
-    </pattern>
-  </defs>
-
-  <!-- background -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 640" width="1280" height="640">
+  <!-- paper -->
   <rect width="1280" height="640" fill="#f6f5f0"/>
-  <rect width="1280" height="640" fill="url(#grid)" opacity="0.5"/>
 
-  <!-- top hairline rule -->
-  <line x1="80" y1="120" x2="1200" y2="120" stroke="#111" stroke-width="2"/>
+  <!-- masthead -->
+  <text x="80" y="80" font-family="Georgia, 'Times New Roman', serif"
+        font-size="44" fill="#0a0a0a" letter-spacing="-1">ax</text>
+  <text x="142" y="80" font-family="Menlo, SFMono-Regular, monospace"
+        font-size="12" letter-spacing="3" fill="#888">AGENT EXPERIENCE</text>
+  <line x1="80" y1="104" x2="1200" y2="104" stroke="#111" stroke-width="2"/>
 
-  <!-- masthead tag (mono uppercase) -->
-  <text x="80" y="103" font-family="ui-monospace, SFMono-Regular, Menlo, monospace"
-        font-size="18" letter-spacing="3" fill="#111" font-weight="500">
-    AX · THE AGENT EXPERIENCE LAYER
-  </text>
-
-  <!-- live pulse dot (top right) -->
-  <g transform="translate(1110 96)">
-    <circle r="6" fill="#2f9e44"/>
-    <circle r="11" fill="none" stroke="#2f9e44" stroke-opacity="0.35" stroke-width="2"/>
-    <text x="22" y="6" font-family="ui-monospace, SFMono-Regular, Menlo, monospace"
-          font-size="12" letter-spacing="2" fill="#777">LIVE</text>
+  <!-- hero: the message is the mark -->
+  <text x="74" y="280" font-family="Georgia, 'Times New Roman', serif"
+        font-size="160" fill="#0a0a0a">make your</text>
+  <text x="74" y="468" font-family="Georgia, 'Times New Roman', serif"
+        font-size="160" fill="#0a0a0a">agent learn</text>
+  <!-- the full stop is the live pulse -->
+  <g transform="translate(905 454)">
+    <circle r="15" fill="#2f9e44"/>
+    <circle r="25" fill="none" stroke="#2f9e44" stroke-opacity="0.3" stroke-width="3"/>
   </g>
 
-  <!-- wordmark -->
-  <text x="80" y="350" font-family="Georgia, 'Times New Roman', serif"
-        font-size="260" fill="#0a0a0a" font-weight="400" letter-spacing="-10">ax</text>
+  <!-- the mechanism, one line -->
+  <text x="80" y="538" font-family="Menlo, SFMono-Regular, monospace"
+        font-size="20" fill="#444">session ends → the agent writes its retro → the next session reads what worked</text>
 
-  <!-- right column: graph evidence -->
-  <g transform="translate(520 200)" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="15" fill="#3a3a3a">
-    <text x="0" y="0"  font-size="11" letter-spacing="2.5" fill="#999">TYPED EVIDENCE</text>
-    <text x="0" y="28">session · turn · tool_call · plan</text>
-    <text x="0" y="52">skill · repository · checkout · commit</text>
-    <text x="0" y="76">file · friction · compaction · insight</text>
-
-    <text x="0" y="124" font-size="11" letter-spacing="2.5" fill="#999">SOURCES → READERS</text>
-    <text x="0" y="152">claude · codex · pi · opencode · cursor</text>
-    <text x="0" y="176">installed skills · local git history</text>
-    <text x="0" y="208" fill="#0a0a0a">axctl CLI · ax serve · ax mcp · agent skills</text>
-  </g>
-
-  <!-- bold descriptor -->
-  <text x="80" y="465" font-family="ui-sans-serif, system-ui, -apple-system, sans-serif"
-        font-size="32" fill="#111" font-weight="700">
-    reflects · experiments · improves - across every session
-  </text>
-
-  <!-- sub line -->
-  <text x="80" y="503" font-family="ui-sans-serif, system-ui, -apple-system, sans-serif"
-        font-size="20" fill="#555" font-weight="400">
-    local-first · typed · AGPL-3.0 · runs on your laptop
-  </text>
-
-  <!-- bottom hairline + url -->
-  <line x1="80" y1="555" x2="1200" y2="555" stroke="#111" stroke-width="2"/>
-  <text x="80" y="600" font-family="ui-monospace, SFMono-Regular, Menlo, monospace"
-        font-size="16" letter-spacing="1" fill="#111">
-    github.com/Necmttn/ax
-  </text>
-  <text x="1200" y="600" text-anchor="end"
-        font-family="ui-monospace, SFMono-Regular, Menlo, monospace"
-        font-size="16" letter-spacing="2" fill="#888">
-    THE MISSING LAYER
-  </text>
+  <!-- footer -->
+  <line x1="80" y1="574" x2="1200" y2="574" stroke="#111" stroke-width="2"/>
+  <text x="80" y="612" font-family="Menlo, SFMono-Regular, monospace"
+        font-size="16" letter-spacing="1" fill="#111">ax.necmttn.com</text>
+  <text x="1200" y="612" text-anchor="end"
+        font-family="Menlo, SFMono-Regular, monospace"
+        font-size="13" fill="#888">claude · codex · pi · opencode · cursor</text>
 </svg>

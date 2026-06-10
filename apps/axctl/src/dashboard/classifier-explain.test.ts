@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { Effect } from "effect";
 import { SurrealClient, type SurrealClientShape } from "@ax/lib/db";
+import { makeTestSurrealClient } from "@ax/lib/testing/surreal";
 import { classifierExplainSql, fetchClassifierExplain, turnRecordRefFromInput } from "./classifier-explain.ts";
 
 describe("classifier explain query", () => {
@@ -19,8 +20,9 @@ describe("classifier explain query", () => {
     });
 
     test("fetches turn and classifier results", async () => {
-        const stub: SurrealClientShape = {
-            query: <T extends unknown[]>() => Effect.succeed([
+        const stub: SurrealClientShape = makeTestSurrealClient({
+            denyWrites: true,
+            fallback: [
                 [{ id: "turn:u1", role: "user", text: "did you run tests?" }],
                 [{
                     id: "classifier_result:r1",
@@ -35,13 +37,8 @@ describe("classifier explain query", () => {
                     evidence_json: "{}",
                     signals: "[]",
                 }],
-            ] as unknown as T),
-            upsert: () => Effect.die("not used"),
-            relate: () => Effect.die("not used"),
-            putFile: () => Effect.die("not used"),
-            getFile: () => Effect.die("not used"),
-            raw: {} as SurrealClientShape["raw"],
-        };
+            ],
+        }).client;
 
         const payload = await Effect.runPromise(
             fetchClassifierExplain("u1").pipe(Effect.provideService(SurrealClient, stub)),

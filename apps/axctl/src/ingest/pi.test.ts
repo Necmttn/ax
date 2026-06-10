@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { SkillName } from "@ax/lib/brands";
 import {
     agentEventRecordKey,
     buildAgentEventStatements,
@@ -9,6 +10,9 @@ import {
     __testExtractPiJsonlLines,
     textFromPiContent,
 } from "./pi.ts";
+
+// Fixture skill names are plain string literals; brand via the schema constructor.
+const sn = (s: string): SkillName => SkillName.make(s);
 
 describe("Pi JSONL extraction", () => {
     const extractAgentEventKeysAndSeqs = (statements: readonly string[]): { key: string; seq: number }[] =>
@@ -433,14 +437,14 @@ describe("Pi JSONL extraction", () => {
                 session: "pi-tools",
                 seq: 1,
                 ts: "2026-05-29T07:00:01.000Z",
-                skill: "pi:read",
+                skill: sn("pi:read"),
                 args: { path: "src/ingest/pi.ts" },
             },
         ]);
         expect(extracted.skillRelations).toEqual([
             {
                 toolCallKey,
-                skillName: "pi:read",
+                skillName: sn("pi:read"),
                 ts: "2026-05-29T07:00:01.000Z",
                 reason: "Pi tool call",
                 labels: {

@@ -178,6 +178,9 @@ describe("async helper wrapped in Effect.promise halts on rejection (BUG 1)", ()
             // success value, the unhandled rejection escapes, and the program
             // proceeds. We attach a no-op catch so the test process does not log
             // an unhandledRejection; the point is `proceeded` flips to true.
+            // This test exists to demonstrate exactly the antipattern the
+            // lazyPromiseInEffectSync diagnostic guards against, so keep it.
+            // @effect-diagnostics-next-line lazyPromiseInEffectSync:off
             const p = yield* Effect.sync(() => rejectingAsync());
             (p as Promise<void>).catch(() => {});
             proceeded = true;

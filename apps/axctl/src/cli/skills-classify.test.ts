@@ -6,6 +6,7 @@ import { readFile, access } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { SurrealClient, type SurrealClientShape } from "@ax/lib/db";
+import { makeTestSurrealClient } from "@ax/lib/testing/surreal";
 import { cmdSkillsClassify } from "./skills-classify.ts";
 import { skillNameToSlug } from "./skills-classify-template.ts";
 import { DbError } from "@ax/lib/errors";
@@ -18,18 +19,7 @@ type MockRow = { name: string; invocations: number; sessions: number };
 
 /** Build a minimal SurrealClientShape mock that returns a fixed row list. */
 function mockDb(rows: MockRow[]): SurrealClientShape {
-    return {
-        query: <T extends unknown[] = unknown[]>(
-            _sql: string,
-            _bindings?: Record<string, unknown>,
-        ): Effect.Effect<T, DbError> =>
-            Effect.succeed([rows] as unknown as T),
-        upsert: () => Effect.void,
-        relate: () => Effect.void,
-        putFile: () => Effect.void,
-        getFile: () => Effect.succeed(""),
-        raw: {} as never,
-    };
+    return makeTestSurrealClient({ denyWrites: true, fallback: [rows] }).client;
 }
 
 // Forced-dependency edit: cmdSkillsClassify now requires FileSystem + Path
@@ -162,17 +152,12 @@ describe("cmdSkillsClassify default mode", () => {
 describe("cmdSkillsClassify explicit mode", () => {
     test("queries the named skills (SQL contains the name)", async () => {
         const outDir = mkdtempSync(join(tmpdir(), "ax-classify-explicit-"));
-        let capturedSql = "";
-        const db: SurrealClientShape = {
-            ...mockDb([{ name: "composto", invocations: 5, sessions: 2 }]),
-            query: <T extends unknown[] = unknown[]>(
-                sql: string,
-            ): Effect.Effect<T, DbError> => {
-                capturedSql = sql;
-                return Effect.succeed([[{ name: "composto", invocations: 5, sessions: 2 }]] as unknown as T);
-            },
-        };
-        await runWith(db, cmdSkillsClassify({ names: ["composto"], outDir, dryRun: false, json: false }));
+        const tc = makeTestSurrealClient({
+            denyWrites: true,
+            fallback: [[{ name: "composto", invocations: 5, sessions: 2 }]],
+        });
+        await runWith(tc.client, cmdSkillsClassify({ names: ["composto"], outDir, dryRun: false, json: false }));
+        const capturedSql = tc.captured.at(-1) ?? "";
         expect(capturedSql).toContain('"composto"');
         // Explicit mode should NOT contain the >= 3 threshold
         expect(capturedSql).not.toContain(">= 3");
@@ -212,17 +197,9 @@ describe("cmdSkillsClassify explicit mode", () => {
 describe("SQL shape (default mode)", () => {
     test("default query requires invocations >= 3 and NOT plays_role", async () => {
         const outDir = mkdtempSync(join(tmpdir(), "ax-classify-sql-"));
-        let capturedSql = "";
-        const db: SurrealClientShape = {
-            ...mockDb([]),
-            query: <T extends unknown[] = unknown[]>(
-                sql: string,
-            ): Effect.Effect<T, DbError> => {
-                capturedSql = sql;
-                return Effect.succeed([[]] as unknown as T);
-            },
-        };
-        await runWith(db, cmdSkillsClassify({ names: [], outDir, dryRun: false, json: false }));
+        const tc = makeTestSurrealClient({ denyWrites: true });
+        await runWith(tc.client, cmdSkillsClassify({ names: [], outDir, dryRun: false, json: false }));
+        const capturedSql = tc.captured.at(-1) ?? "";
         expect(capturedSql).toContain("plays_role");
         expect(capturedSql).toContain(">= 3");
         expect(capturedSql).toContain(`"frontmatter"`);

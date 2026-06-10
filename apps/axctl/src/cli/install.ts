@@ -1,6 +1,6 @@
 import { homedir } from "node:os";
 import { execSync, spawnSync } from "node:child_process";
-import { Cause, Effect, FileSystem, Path } from "effect";
+import { Cause, Effect, FileSystem, Path, Schema } from "effect";
 import { orAbsent } from "@ax/lib/shared/fs-error";
 import { classifyNoFollow } from "@ax/lib/shared/fs-classify";
 import { posixPath } from "@ax/lib/shared/path";
@@ -23,6 +23,17 @@ import {
 import { prettyPrint } from "@ax/lib/json";
 // Schema is embedded at build time so the compiled binary is self-contained.
 import schemaSurql from "@ax/schema/schema.surql" with { type: "text" };
+
+/**
+ * Tagged failure for install steps (surreal resolution, symlinking). Extends
+ * `Error`, so existing `Error`-typed failure channels and `.message` readers
+ * keep working unchanged.
+ */
+export class InstallStepError extends Schema.TaggedErrorClass<InstallStepError>(
+    "InstallStepError",
+)("InstallStepError", {
+    message: Schema.String,
+}) {}
 
 const HOME = homedir();
 const DATA_DIR = process.env.AX_DATA_DIR ?? posixPath.join(HOME, ".local", "share", "ax");
@@ -235,7 +246,7 @@ function ensureSurreal(): Effect.Effect<string, Error, FileSystem.FileSystem | P
         const pinnedSurreal = process.env.AXCTL_SURREAL_PATH;
         if (pinnedSurreal) {
             const v = surrealVersionString(pinnedSurreal);
-            if (!v) return yield* Effect.fail(new Error(`AXCTL_SURREAL_PATH is not executable`));
+            if (!v) return yield* new InstallStepError({ message: `AXCTL_SURREAL_PATH is not executable` });
             console.log(`  surreal: pinned ${pinnedSurreal} (${v})`);
             return pinnedSurreal;
         }
@@ -266,12 +277,11 @@ function ensureSurreal(): Effect.Effect<string, Error, FileSystem.FileSystem | P
 
         const platform = platformArtifact();
         if (!platform) {
-            return yield* Effect.fail(
-                new Error(
+            return yield* new InstallStepError({
+                message:
                     `Unsupported platform ${process.platform}/${process.arch}. ` +
-                        `Install surreal manually: https://surrealdb.com/install`,
-                ),
-            );
+                    `Install surreal manually: https://surrealdb.com/install`,
+            });
         }
 
         const tag = `v${SURREAL_VERSION}`;
@@ -289,9 +299,9 @@ function ensureSurreal(): Effect.Effect<string, Error, FileSystem.FileSystem | P
         return yield* Effect.gen(function* () {
             const res = yield* Effect.promise(() => fetch(url));
             if (!res.ok) {
-                return yield* Effect.fail(
-                    new Error(`download failed: HTTP ${res.status} ${res.statusText}`),
-                );
+                return yield* new InstallStepError({
+                    message: `download failed: HTTP ${res.status} ${res.statusText}`,
+                });
             }
             const buf = yield* Effect.promise(() => res.arrayBuffer());
             const sizeMB = (buf.byteLength / (1024 * 1024)).toFixed(1);
@@ -300,12 +310,12 @@ function ensureSurreal(): Effect.Effect<string, Error, FileSystem.FileSystem | P
             const ex = spawnSync("tar", ["-xzf", tmpTar, "-C", VENDOR_BIN_DIR], {
                 stdio: "inherit",
             });
-            if (ex.status !== 0) return yield* Effect.fail(new Error("tar extract failed"));
+            if (ex.status !== 0) return yield* new InstallStepError({ message: "tar extract failed" });
             yield* fs.chmod(localBin, 0o755);
             yield* fs.remove(tmpTar, { force: true });
 
             const v = surrealVersionString(localBin);
-            if (!v) return yield* Effect.fail(new Error(`downloaded surreal at ${localBin} did not run`));
+            if (!v) return yield* new InstallStepError({ message: `downloaded surreal at ${localBin} did not run` });
             const elapsedSec = ((Date.now() - startedAt) / 1000).toFixed(1);
             console.log(`  surreal: installed ${localBin} (${v}) [${sizeMB} MB in ${elapsedSec}s]`);
             return localBin;
@@ -416,7 +426,7 @@ export function ensureSymlink(
 
         // "File"/"Directory"/"Other": something that is NOT a symlink occupies
         // the slot. Preserve the old hard error (and leave the file intact).
-        return yield* Effect.fail(new Error(`${link} exists and is not a symlink`));
+        return yield* new InstallStepError({ message: `${link} exists and is not a symlink` });
     });
 }
 

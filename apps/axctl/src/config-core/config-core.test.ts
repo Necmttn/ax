@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { Effect, Layer } from "effect";
 import { BunFileSystem, BunPath } from "@effect/platform-bun";
 import { SurrealClient } from "@ax/lib/db";
+import { makeTestSurrealClient } from "@ax/lib/testing/surreal";
 import { writeFileAtomic } from "@ax/lib/atomic-write";
 import { parseFrontmatter, readList, setFrontmatterList } from "./frontmatter.ts";
 import { addSkillToAgent, removeSkillFromAgent } from "./agent-scope-edit.ts";
@@ -119,17 +120,12 @@ describe("agent-scope-edit", () => {
 describe("reconcileTable", () => {
     const recordingDb = (calls: { sql: string; bindings?: Record<string, unknown> | undefined }[], rows: unknown[][]) => {
         let i = 0;
-        return Layer.succeed(SurrealClient, {
-            query: <T>(sql: string, bindings?: Record<string, unknown>) => {
+        return makeTestSurrealClient({
+            fallback: (sql, bindings) => {
                 calls.push({ sql, bindings });
-                return Effect.succeed([rows[i++] ?? []] as unknown as T);
+                return [rows[i++] ?? []];
             },
-            upsert: () => Effect.void,
-            relate: () => Effect.void,
-            putFile: () => Effect.void,
-            getFile: () => Effect.succeed(""),
-            raw: undefined as never,
-        } as never);
+        }).layer;
     };
     const run = <A, E>(eff: Effect.Effect<A, E, SurrealClient>, layer: Layer.Layer<SurrealClient>) =>
         Effect.runPromise(eff.pipe(Effect.provide(layer)) as Effect.Effect<A, E, never>);

@@ -7,8 +7,7 @@
  */
 import { Effect } from "effect";
 import { SurrealClient } from "@ax/lib/db";
-import type { DbError } from "@ax/lib/errors";
-import { dateField, numericField, stringField } from "@ax/lib/shared/row-fields";
+import { dateField, numberFieldOrZero, stringField } from "@ax/lib/shared/row-fields";
 import type {
     SkillDetailPayload,
     SkillPair,
@@ -132,7 +131,7 @@ export const mapSkillPairRow = (raw: unknown): SkillPair | null => {
     if (!partner) return null;
     return {
         partner,
-        count: numericField(row, "count"),
+        count: numberFieldOrZero(row, "count"),
         last_seen: dateField(row, "last_seen"),
     };
 };
@@ -149,10 +148,8 @@ export const mapSkillProposalRow = (raw: unknown): SkillProposalEvidence | null 
     };
 };
 
-export const fetchSkillDetail = (
-    name: string,
-): Effect.Effect<SkillDetailPayload, DbError, SurrealClient> =>
-    Effect.gen(function* () {
+export const fetchSkillDetail = Effect.fn("queries.fetchSkillDetail")(
+    function* (name: string) {
         const db = yield* SurrealClient;
         const result = yield* db.query<unknown[]>(SKILL_DETAIL_SQL, { name });
         // RETURN { ... } gives us [block] where block is the object.
@@ -171,9 +168,9 @@ export const fetchSkillDetail = (
             description: skill ? stringField(skill, "description") : null,
             dir_path: skill ? stringField(skill, "dir_path") : null,
             invocations: {
-                total: numericField(invocations, "total"),
-                d7: numericField(invocations, "d7"),
-                d30: numericField(invocations, "d30"),
+                total: numberFieldOrZero(invocations, "total"),
+                d7: numberFieldOrZero(invocations, "d7"),
+                d30: numberFieldOrZero(invocations, "d30"),
                 last: dateField(invocations, "last"),
             },
             recent: recent.map(mapSkillRecentRow).filter((r): r is SkillRecentInvocation => r !== null),
@@ -186,5 +183,6 @@ export const fetchSkillDetail = (
             paired: paired
                 .map(mapSkillPairRow)
                 .filter((r): r is SkillPair => r !== null),
-        };
-    });
+        } satisfies SkillDetailPayload;
+    },
+);
