@@ -139,6 +139,11 @@ export const deriveSignals = (
         const proposedBatch: ProposedEdge[] = [];
         const recoveryBatch: RecoveryEdge[] = [];
         const pairsAccum = new Map<string, SkillPairAccum>();
+        // Skill pairs are all-time aggregates - a --since-scoped derive must
+        // not clobber them. Hoisted above the loop so we neither accumulate
+        // pairs we'd discard nor report a mid-loop count that resets to 0.
+        // Mirrors the includeSkillPairs gate in core's deriveSignalsFromEvidence.
+        const shouldWriteSkillPairs = shouldDeriveAllTimeSkillPairs(opts.sinceDays);
 
         for (const [index, bundle] of bundles.entries()) {
             turnCount += bundle.turns.length;
@@ -151,7 +156,7 @@ export const deriveSignals = (
             correctionBatch.push(...c);
             proposedBatch.push(...p);
             recoveryBatch.push(...r);
-            deriveSkillPairs(bundle, pairsAccum);
+            if (shouldWriteSkillPairs) deriveSkillPairs(bundle, pairsAccum);
             if (opts.onProgress && (index < 5 || (index + 1) % 50 === 0)) {
                 yield* opts.onProgress({
                     currentFile: index + 1,
@@ -161,12 +166,11 @@ export const deriveSignals = (
                     corrections,
                     proposed,
                     recoveries,
-                    skillPairs: pairsAccum.size,
+                    skillPairs: shouldWriteSkillPairs ? pairsAccum.size : 0,
                 });
             }
         }
 
-        const shouldWriteSkillPairs = shouldDeriveAllTimeSkillPairs(opts.sinceDays);
         const pairsList = shouldWriteSkillPairs
             ? [...pairsAccum.entries()].map(([edgeId, pair]) => ({ edgeId, pair }))
             : [];
@@ -201,10 +205,12 @@ export const deriveSignals = (
             });
         }
 
-        // Write order is load-bearing (was_corrected denormalises onto
-        // `invoked` edges keyed off the corrections batch). chunkSize 500
-        // matches the pre-split executor calls; executeStatementsWith
-        // no-ops on empty arrays, so no length guards needed.
+        // Write order mirrors the pre-split monolith. The batches are
+        // independent (was_corrected keys come from the in-memory corrections
+        // batch, not from previously written rows), so the ordering is for
+        // diff-ability, not correctness. chunkSize 500 matches the pre-split
+        // executor calls; executeStatementsWith no-ops on empty arrays, so no
+        // length guards needed.
         const db = yield* SurrealClient;
         const exec = (stmts: readonly string[]) =>
             executeStatementsWith(db, stmts, { chunkSize: 500 });
@@ -215,9 +221,10 @@ export const deriveSignals = (
         );
         // Denormalise was_corrected onto invoked edges so cmdTaste's
         // corrections subquery becomes a pure index/scan filter (issue #31).
-        yield* exec(buildWasCorrectedStatements(correctedInvokedTurnKeys(correctionBatch))).pipe(
+        const wasCorrectedTurnKeys = correctedInvokedTurnKeys(correctionBatch);
+        yield* exec(buildWasCorrectedStatements(wasCorrectedTurnKeys)).pipe(
             Effect.withSpan("signals.write.was-corrected", {
-                attributes: { "signals.count": correctionBatch.length },
+                attributes: { "signals.count": wasCorrectedTurnKeys.length },
             }),
         );
         yield* exec(buildProposedStatements(proposedBatch)).pipe(
