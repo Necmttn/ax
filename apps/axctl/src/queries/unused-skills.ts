@@ -16,6 +16,7 @@
 import { Effect } from "effect";
 import { SurrealClient } from "@ax/lib/db";
 import type { DbError } from "@ax/lib/errors";
+import { dateField } from "@ax/lib/shared/row-fields";
 
 const checkedDays = (days: number): number => {
     if (!Number.isInteger(days) || days <= 0) {
@@ -60,18 +61,13 @@ export interface UnusedSkillRow {
 /**
  * SurrealDB's math::max returns -Infinity for empty groups; normalise that
  * (and null/undefined) to `null`. Datetimes arrive as string, Date, or a
- * DateTime-like `{toJSON}` object depending on path.
+ * DateTime-like `{toJSON}` object depending on path - delegated to the shared
+ * `dateField` extractor (string passthrough, Date/`{toJSON}` → ISO, anything
+ * else → null).
  */
 export const normalizeLastUsed = (v: unknown): string | null => {
-    if (v == null) return null;
     if (typeof v === "number" && !Number.isFinite(v)) return null;
-    if (typeof v === "string") return v;
-    if (v instanceof Date) return v.toISOString();
-    if (typeof v === "object" && "toJSON" in v) {
-        const j = (v as { toJSON: () => unknown }).toJSON();
-        if (typeof j === "string" && j.length > 0) return j;
-    }
-    return String(v);
+    return dateField({ v }, "v");
 };
 
 export interface UnusedScanRows {

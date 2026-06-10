@@ -81,6 +81,13 @@ describe("normalizeLastUsed", () => {
             "2026-06-01T00:00:00.000Z",
         );
     });
+    test("junk objects / non-datetime values → null (never '[object Object]')", () => {
+        expect(normalizeLastUsed({})).toBeNull();
+        expect(normalizeLastUsed({ foo: 1 })).toBeNull();
+        expect(normalizeLastUsed({ toJSON: () => 42 })).toBeNull();
+        expect(normalizeLastUsed(12345)).toBeNull();
+        expect(normalizeLastUsed(true)).toBeNull();
+    });
 });
 
 describe("mergeUnusedRows", () => {
