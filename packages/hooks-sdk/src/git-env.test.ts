@@ -15,9 +15,12 @@ const makeRepo = () => {
 };
 
 describe("GitEnvLive", () => {
-  test("primary tree detected; linked worktree is not primary", () => {
+  test("primary tree detected; linked worktree is not primary", async () => {
     const repo = makeRepo();
-    const wt = join(repo, ".claude", "worktrees", "x");
+    // Worktree OUTSIDE the repo so the primary tree stays clean - untracked
+    // files count as dirty, matching enforce-worktree.sh's bare
+    // `git status --porcelain` guard.
+    const wt = join(mkdtempSync(join(tmpdir(), "wt-")), "x");
     sh(repo, ["git", "worktree", "add", "-q", wt, "-b", "feat-x"]);
     const program = Effect.gen(function* () {
       const git = yield* GitEnv;
@@ -35,6 +38,16 @@ describe("GitEnvLive", () => {
     expect(r.branch).toBe("main");
     expect(r.root).toBe(realpathSync(repo));
     expect(r.dirty).toBe(false);
+
+    // Untracked files COUNT as dirty (bash guard parity).
+    await Bun.write(join(repo, "untracked.txt"), "x");
+    const dirtyAfter = Effect.runSync(
+      Effect.gen(function* () {
+        const git = yield* GitEnv;
+        return yield* git.isDirty(repo);
+      }).pipe(Effect.provide(GitEnvLive)),
+    );
+    expect(dirtyAfter).toBe(true);
   });
   test("non-repo dir → safe defaults", () => {
     const dir = mkdtempSync(join(tmpdir(), "norepo-"));

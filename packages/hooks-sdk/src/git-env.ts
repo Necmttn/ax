@@ -49,9 +49,7 @@ const liveShape: GitEnvService = {
     }),
 
   isDirty: (dir) =>
-    Effect.sync(
-      () => (gitCmd(dir, ["status", "--porcelain", "--untracked-files=no"]) ?? "") !== "",
-    ),
+    Effect.sync(() => (gitCmd(dir, ["status", "--porcelain"]) ?? "") !== ""),
 
   currentBranch: (dir) =>
     Effect.sync(() => gitCmd(dir, ["symbolic-ref", "--short", "HEAD"])),
