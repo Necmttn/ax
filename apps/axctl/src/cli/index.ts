@@ -4,7 +4,16 @@ import { BunFileSystem, BunPath } from "@effect/platform-bun";
 import { Argument, Command, Flag } from "effect/unstable/cli";
 import { SurrealClient, type SurrealClientShape } from "@ax/lib/db";
 import { listSessionsHere, listSessionsAround, listSessionsNear, type SessionRow } from "../dashboard/sessions-query.ts";
-import { buildRecallNext, buildSessionsNext, buildSessionShowNext } from "../nav/next-links.ts";
+import {
+    buildRecallNext,
+    buildSessionsNext,
+    buildSessionShowNext,
+    buildSkillsWeightedNext,
+    buildSkillsByRoleNext,
+    buildSkillsRolesNext,
+    buildRolesNext,
+    buildImproveProposalsNext,
+} from "../nav/next-links.ts";
 import { renderNextFooter } from "./next-format.ts";
 import { findCommitWindow } from "@ax/lib/git-window";
 import { AxConfig } from "@ax/lib/config";
@@ -1377,6 +1386,8 @@ const cmdSkillsWeighted = (args: string[]) =>
             console.log(renderWeightedJson(result));
         } else {
             console.log(renderWeightedTable(result));
+            const footer = renderNextFooter(buildSkillsWeightedNext(result));
+            if (footer) console.log(footer);
         }
     });
 
@@ -1407,6 +1418,8 @@ const cmdSkillsByRole = (args: string[]) =>
             console.log(renderSkillsByRoleJson(result, role));
         } else {
             console.log(renderSkillsByRoleTable(result, role));
+            const footer = renderNextFooter(buildSkillsByRoleNext(result, role));
+            if (footer) console.log(footer);
         }
     });
 
@@ -1437,6 +1450,8 @@ const cmdRolesForSkill = (args: string[]) =>
             console.log(renderRolesForSkillJson(result, skill));
         } else {
             console.log(renderRolesForSkillTable(result, skill));
+            const footer = renderNextFooter(buildSkillsRolesNext(result, skill));
+            if (footer) console.log(footer);
         }
     });
 
@@ -1456,6 +1471,8 @@ const cmdRoles = (args: string[]) =>
             console.log(renderAllRolesJson(result));
         } else {
             console.log(renderAllRolesTable(result));
+            const footer = renderNextFooter(buildRolesNext(result));
+            if (footer) console.log(footer);
         }
     });
 
@@ -2554,12 +2571,19 @@ const cmdImproveList = (args: string[]) =>
             console.log(prettyPrint(rows));
             return;
         }
+        const improveNext = buildImproveProposalsNext(
+            rows.map((r) => ({ sig: r.dedupe_sig, title: r.title })),
+        );
         if (rows.length === 0) {
             console.log("(no proposals match filter)");
+            const footer = renderNextFooter(improveNext);
+            if (footer) console.log(footer);
             return;
         }
         console.log(`  freq  conf    status      form         dedupe_sig                title`);
         for (const row of rows) console.log(formatProposalLine(row));
+        const footer = renderNextFooter(improveNext);
+        if (footer) console.log(footer);
     });
 
 const cmdImproveShow = (args: string[]) =>
@@ -2653,6 +2677,14 @@ const cmdImproveRecommend = (args: string[]) =>
         }
         const formatted = formatRecommendations(items);
         console.log(formatted);
+        {
+            const footer = renderNextFooter(
+                buildImproveProposalsNext(
+                    items.map((i) => ({ sig: i.shortId, title: i.title })),
+                ),
+            );
+            if (footer) console.log(footer);
+        }
         if (items.length > 0 && !noClipboard) {
             const copied = copyToClipboard(formatted);
             if (copied) console.log("\n[copied to clipboard]");

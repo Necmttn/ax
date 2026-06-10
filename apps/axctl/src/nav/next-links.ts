@@ -28,6 +28,12 @@ import type {
 import type { WithNext } from "@ax/lib/shared/nav-link";
 import type { SessionRow } from "../dashboard/sessions-query.ts";
 import type { RecallSource } from "../dashboard/recall.ts";
+import type { SkillsWeightedResult } from "../dashboard/skills-weighted.ts";
+import type {
+    FetchSkillsByRoleResult,
+    FetchRolesForSkillResult,
+    FetchAllRolesResult,
+} from "../dashboard/role-queries.ts";
 
 // ---------------------------------------------------------------------------
 // Protocol hint - appended to tool/CLI descriptions
@@ -308,5 +314,159 @@ export const buildSessionShowNext = (
         });
     }
 
+    return sortNavLinks(top);
+};
+
+// ---------------------------------------------------------------------------
+// skills weighted / by-role / roles
+// ---------------------------------------------------------------------------
+
+/** skills_by_role link - dual transport. */
+const skillsByRoleLink = (
+    role: string,
+    description: string,
+    priority = 6,
+): NavLink => ({
+    description,
+    call: { tool: "skills_by_role", arguments: { role } },
+    cmd: `ax skills by-role ${role}`,
+    ui: { priority, group: "read" },
+});
+
+/** Top-level links for the weighted skill ranking. */
+export const buildSkillsWeightedNext = (
+    result: SkillsWeightedResult,
+): ReadonlyArray<NavLink> => {
+    const top: NavLink[] = [];
+    if (result.doctor.unclassified_count > 0) {
+        top.push({
+            description: `${result.doctor.unclassified_count} skills are unclassified - emit classify briefs to improve the ranking`,
+            cmd: "ax skills classify",
+            ui: { priority: 9, group: "classify" },
+        });
+    }
+    const topRow = result.rows[0];
+    if (topRow) {
+        top.push(
+            skillRolesLink(
+                topRow.skill_name,
+                "Inspect the roles behind the top-ranked skill",
+                6,
+            ),
+        );
+    }
+    return sortNavLinks(top);
+};
+
+/** Top-level links for a skills-by-role listing. */
+export const buildSkillsByRoleNext = (
+    result: FetchSkillsByRoleResult,
+    _role: string,
+): ReadonlyArray<NavLink> => {
+    const top: NavLink[] = [];
+    if (!result.found || result.rows.length === 0) {
+        // Errors-as-teaching: name the tool that lists valid role labels.
+        top.push({
+            description: "No skills matched this role - list the valid role labels",
+            call: { tool: "roles", arguments: {} },
+            cmd: "ax roles",
+            ui: { priority: 9, group: "search" },
+        });
+        return top;
+    }
+    const topSkill = result.rows[0];
+    if (topSkill) {
+        top.push(
+            skillRolesLink(
+                topSkill.skill_name,
+                "See all roles the top skill plays",
+                6,
+            ),
+        );
+    }
+    return sortNavLinks(top);
+};
+
+/** Top-level links for a roles-of-skill listing. */
+export const buildSkillsRolesNext = (
+    result: FetchRolesForSkillResult,
+    skill: string,
+): ReadonlyArray<NavLink> => {
+    const top: NavLink[] = [];
+    if (!result.skillExists) {
+        // Errors-as-teaching: find the right skill name via recall.
+        top.push({
+            description: `Unknown skill "${skill}" - search the skill catalog for the right name`,
+            call: { tool: "recall", arguments: { q: skill, sources: ["skill"] } },
+            cmd: `ax recall ${JSON.stringify(skill)} --sources=skill`,
+            ui: { priority: 9, group: "search" },
+        });
+        return top;
+    }
+    const topRole = result.rows[0];
+    if (topRole) {
+        top.push(
+            skillsByRoleLink(
+                topRole.role_name,
+                "List the other skills that play this skill's top role",
+                6,
+            ),
+        );
+    }
+    return sortNavLinks(top);
+};
+
+/** Top-level links for the role vocabulary listing. */
+export const buildRolesNext = (
+    result: FetchAllRolesResult,
+): ReadonlyArray<NavLink> => {
+    const top: NavLink[] = [];
+    const biggest = [...result.rows].sort((a, b) => b.skill_count - a.skill_count)[0];
+    if (biggest) {
+        top.push(
+            skillsByRoleLink(
+                biggest.name,
+                `Drill into the largest role (${biggest.skill_count} skills)`,
+                6,
+            ),
+        );
+    }
+    return sortNavLinks(top);
+};
+
+// ---------------------------------------------------------------------------
+// improve (recommend / list)
+// ---------------------------------------------------------------------------
+
+/**
+ * Top-level links for proposal shortlists. `sig` is the dedupe signature /
+ * short id accepted by improve_show and `ax improve accept`. The accept
+ * link is cmd-only: mutating ops are deliberately not exposed over MCP.
+ */
+export const buildImproveProposalsNext = (
+    proposals: ReadonlyArray<{ readonly sig: string; readonly title: string }>,
+): ReadonlyArray<NavLink> => {
+    const top: NavLink[] = [];
+    const first = proposals[0];
+    if (!first) {
+        top.push({
+            description: "No proposals - widen the filter to all statuses",
+            call: { tool: "improve_list", arguments: { status: "all" } },
+            cmd: "ax improve list --status=all",
+            ui: { priority: 8, group: "search" },
+        });
+        return top;
+    }
+    top.push({
+        description: `Inspect the evidence trail behind the top proposal ("${first.title.slice(0, 60)}")`,
+        call: { tool: "improve_show", arguments: { sigOrId: first.sig } },
+        cmd: `ax improve show ${first.sig}`,
+        ui: { priority: 7, group: "read" },
+    });
+    top.push({
+        description: "Accept the top proposal (emits a .ax/tasks brief; CLI-only, mutating)",
+        cmd: `ax improve accept ${first.sig}`,
+        ui: { priority: 5, group: "act" },
+    });
     return sortNavLinks(top);
 };

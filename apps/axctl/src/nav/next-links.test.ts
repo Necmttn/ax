@@ -10,6 +10,11 @@ import {
     buildRecallNext,
     buildSessionsNext,
     buildSessionShowNext,
+    buildSkillsWeightedNext,
+    buildSkillsByRoleNext,
+    buildSkillsRolesNext,
+    buildRolesNext,
+    buildImproveProposalsNext,
 } from "./next-links.ts";
 
 const UUID_A = "019e2531-b552-7b53-a029-c780adbb6560";
@@ -251,5 +256,122 @@ describe("buildSessionShowNext", () => {
     test("no overview → empty next", () => {
         const next = buildSessionShowNext(view(detail({ overview: null })));
         expect(next).toHaveLength(0);
+    });
+});
+
+describe("buildSkillsWeightedNext", () => {
+    const wrow = {
+        skill_id: "skill:tdd",
+        skill_name: "tdd",
+        invocations: 10,
+        session_count: 4,
+        roles: [],
+        weight: 1,
+        score: 10,
+    };
+
+    test("unclassified skills → classify cmd; top row → roles link", () => {
+        const next = buildSkillsWeightedNext({
+            rows: [wrow],
+            doctor: { unclassified_count: 7, threshold: 5, advice: "classify" },
+        });
+        expect(next[0]?.cmd).toBe("ax skills classify");
+        expect(next[1]?.call?.tool).toBe("skills_roles");
+        expect(next[1]?.call?.arguments).toEqual({ skill: "tdd" });
+    });
+
+    test("clean doctor + no rows → empty next", () => {
+        const next = buildSkillsWeightedNext({
+            rows: [],
+            doctor: { unclassified_count: 0, threshold: 5, advice: null },
+        });
+        expect(next).toHaveLength(0);
+    });
+});
+
+describe("buildSkillsByRoleNext", () => {
+    test("role not found → roles teaching link", () => {
+        const next = buildSkillsByRoleNext({ rows: [], found: false }, "nope");
+        expect(next[0]?.call?.tool).toBe("roles");
+        expect(next[0]?.cmd).toBe("ax roles");
+    });
+
+    test("rows → roles-of-top-skill link", () => {
+        const next = buildSkillsByRoleNext(
+            {
+                rows: [
+                    {
+                        skill_id: "skill:tdd",
+                        skill_name: "tdd",
+                        source: "manual",
+                        confidence: 1,
+                        rationale: null,
+                        invocations: 9,
+                    },
+                ],
+                found: true,
+            },
+            "verifier",
+        );
+        expect(next[0]?.call?.arguments).toEqual({ skill: "tdd" });
+    });
+});
+
+describe("buildSkillsRolesNext", () => {
+    test("unknown skill → recall-the-catalog teaching link", () => {
+        const next = buildSkillsRolesNext({ rows: [], skillExists: false }, "tdx");
+        expect(next[0]?.call?.tool).toBe("recall");
+        expect(next[0]?.call?.arguments).toEqual({ q: "tdx", sources: ["skill"] });
+    });
+
+    test("top role → skills_by_role link", () => {
+        const next = buildSkillsRolesNext(
+            {
+                rows: [
+                    {
+                        role_name: "verifier",
+                        role_weight: 2,
+                        source: "manual",
+                        confidence: 1,
+                        edge_weight_override: null,
+                        rationale: null,
+                        since: null,
+                    },
+                ],
+                skillExists: true,
+            },
+            "tdd",
+        );
+        expect(next[0]?.call?.tool).toBe("skills_by_role");
+        expect(next[0]?.cmd).toBe("ax skills by-role verifier");
+    });
+});
+
+describe("buildRolesNext", () => {
+    test("links into the largest role", () => {
+        const next = buildRolesNext({
+            rows: [
+                { name: "verifier", weight: 2, skill_count: 3 },
+                { name: "scout", weight: 1, skill_count: 9 },
+            ],
+        });
+        expect(next[0]?.call?.arguments).toEqual({ role: "scout" });
+    });
+});
+
+describe("buildImproveProposalsNext", () => {
+    test("first proposal → show link + cmd-only accept", () => {
+        const next = buildImproveProposalsNext([
+            { sig: "abc123", title: "Add a guard hook" },
+        ]);
+        const show = next.find((l) => l.call?.tool === "improve_show");
+        expect(show?.call?.arguments).toEqual({ sigOrId: "abc123" });
+        const accept = next.find((l) => l.cmd === "ax improve accept abc123");
+        expect(accept?.call).toBeUndefined(); // mutating - cmd-only, never MCP
+    });
+
+    test("empty shortlist → widen-status teaching link", () => {
+        const next = buildImproveProposalsNext([]);
+        expect(next[0]?.call?.arguments).toEqual({ status: "all" });
     });
 });
