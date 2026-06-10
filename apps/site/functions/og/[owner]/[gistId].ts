@@ -120,10 +120,12 @@ function costBarHtml(m: Manifest): string {
     ).join("");
     // No overflow:hidden / border-radius on the track: unknown properties
     // truncate the style and the container loses display:flex.
+    // margin-right, not gap: gap is another property the style parser stops
+    // at, truncating display:flex with it.
     const legend = parts.map((p) =>
-        `<div style="display:flex;align-items:center"><div style="width:10px;height:10px;border-radius:2px;background:${p.color};margin-right:8px"></div><span style="font-size:15px;color:${DIM}">${p.label.toUpperCase()} ${fmtUsd(p.v)}</span></div>`
+        `<div style="display:flex;align-items:center;margin-right:26px"><div style="display:flex;width:10px;height:10px;border-radius:2px;background:${p.color};margin-right:8px"></div><span style="font-size:15px;color:${DIM}">${p.label.toUpperCase()} ${fmtUsd(p.v)}</span></div>`
     ).join("");
-    return `<div style="display:flex;flex-direction:column"><div style="display:flex">${segs}</div><div style="display:flex;gap:26px;margin-top:12px">${legend}</div></div>`;
+    return `<div style="display:flex;flex-direction:column"><div style="display:flex">${segs}</div><div style="display:flex;margin-top:12px">${legend}</div></div>`;
 }
 
 export const onRequestGet: PagesFunction = async (ctx) => {
