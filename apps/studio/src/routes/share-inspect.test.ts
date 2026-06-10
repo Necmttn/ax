@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
+    buildSessionMapLanes,
     fetchShareArtifact,
     fetchShareFile,
     fetchShareManifest,
@@ -7,7 +8,10 @@ import {
     inspectPayloadFromShare,
     isShareManifest,
     rawSessionFileUrl,
+    SESSION_MAP_MIN_LANE_W,
     spanKindForShareTurn,
+    type ShareManifest,
+    type ShareSubagentCard,
 } from "./share-inspect.tsx";
 
 type ShareTurn = Parameters<typeof spanKindForShareTurn>[0];
@@ -179,6 +183,182 @@ describe("fetchShareManifest", () => {
                 expect(artifact.schema_version).toBe(3);
             },
         );
+    });
+});
+
+const mapStats = (failures = 0): ShareSubagentCard["stats"] => ({
+    turns: 1,
+    tool_calls: 0,
+    files_changed: 0,
+    skills_used: 0,
+    failures,
+});
+
+function mapCard(partial: Partial<ShareSubagentCard> & { readonly file: string }): ShareSubagentCard {
+    return {
+        id: `claude-subagent-${partial.file}`,
+        parent_id: "root-1",
+        depth: 1,
+        spawn_turn_seq: null,
+        source: "claude-subagent",
+        duration_ms: null,
+        stats: mapStats(),
+        cost_usd: null,
+        estimated_tokens: null,
+        had_error: false,
+        ...partial,
+    };
+}
+
+function mapManifest(
+    subagents: ReadonlyArray<ShareSubagentCard>,
+    session: Partial<ShareManifest["session"]> = {},
+    totals: Partial<ShareManifest["totals"]> = {},
+): ShareManifest {
+    return {
+        schema_version: 4,
+        kind: "manifest",
+        exported_at: "2026-06-01T02:00:00.000Z",
+        session: { id: "root-1", source: "claude", ...session },
+        stats: mapStats(),
+        root_file: "session.json",
+        totals: {
+            cost_usd: null,
+            duration_ms: null,
+            tool_calls: 0,
+            turns: 0,
+            subagents: subagents.length,
+            failures: 0,
+            ...totals,
+        },
+        subagents,
+    };
+}
+
+const laneFor = (model: ReturnType<typeof buildSessionMapLanes>, file: string) => {
+    const lane = model?.lanes.find((l) => l.file === file);
+    if (!lane) throw new Error(`no lane for ${file}`);
+    return lane;
+};
+
+describe("buildSessionMapLanes", () => {
+    test("places by spawn_turn_seq normalized over the seq range when every card has one", () => {
+        const model = buildSessionMapLanes(mapManifest([
+            mapCard({ file: "a.json", spawn_turn_seq: 10 }),
+            mapCard({ file: "b.json", spawn_turn_seq: 20 }),
+            mapCard({ file: "c.json", spawn_turn_seq: 30 }),
+        ]));
+        expect(model?.axis).toBe("seq");
+        const a = laneFor(model, "a.json");
+        const b = laneFor(model, "b.json");
+        const c = laneFor(model, "c.json");
+        expect(a.x).toBeCloseTo(0, 5);
+        expect(b.x).toBeCloseTo(0.5, 5);
+        // The last bar is clamped so it stays inside the strip.
+        expect(c.x).toBeCloseTo(1 - c.w, 5);
+    });
+
+    test("falls back to start time over the root window when any seq is missing", () => {
+        const model = buildSessionMapLanes(mapManifest(
+            [
+                mapCard({ file: "a.json", spawn_turn_seq: 5, started_at: "2026-06-01T00:00:00.000Z" }),
+                mapCard({ file: "b.json", started_at: "2026-06-01T00:30:00.000Z" }),
+                mapCard({ file: "c.json", started_at: "2026-06-01T00:45:00.000Z" }),
+            ],
+            { started_at: "2026-06-01T00:00:00.000Z", ended_at: "2026-06-01T01:00:00.000Z" },
+        ));
+        expect(model?.axis).toBe("time");
+        expect(model?.rootDurationMs).toBe(3_600_000);
+        expect(laneFor(model, "a.json").x).toBeCloseTo(0, 5);
+        expect(laneFor(model, "b.json").x).toBeCloseTo(0.5, 5);
+        expect(laneFor(model, "c.json").x).toBeCloseTo(0.75, 5);
+    });
+
+    test("uses root started_at + totals.duration_ms as the window when ended_at is missing", () => {
+        const model = buildSessionMapLanes(mapManifest(
+            [
+                mapCard({ file: "a.json", started_at: "2026-06-01T00:00:00.000Z" }),
+                mapCard({ file: "b.json", started_at: "2026-06-01T00:30:00.000Z" }),
+            ],
+            { started_at: "2026-06-01T00:00:00.000Z" },
+            { duration_ms: 3_600_000 },
+        ));
+        expect(model?.axis).toBe("time");
+        expect(laneFor(model, "b.json").x).toBeCloseTo(0.5, 5);
+    });
+
+    test("falls back to stable even-spaced order when no seqs and no usable root window", () => {
+        const model = buildSessionMapLanes(mapManifest([
+            mapCard({ file: "a.json" }),
+            mapCard({ file: "b.json" }),
+            mapCard({ file: "c.json" }),
+        ]));
+        expect(model?.axis).toBe("order");
+        expect(laneFor(model, "a.json").x).toBeCloseTo(0, 5);
+        expect(laneFor(model, "b.json").x).toBeCloseTo(1 / 3, 5);
+        expect(laneFor(model, "c.json").x).toBeCloseTo(2 / 3, 5);
+    });
+
+    test("applies the minimum bar width for null and tiny durations", () => {
+        const model = buildSessionMapLanes(mapManifest(
+            [
+                mapCard({ file: "null.json", spawn_turn_seq: 1 }),
+                mapCard({ file: "tiny.json", spawn_turn_seq: 2, duration_ms: 1 }),
+                mapCard({ file: "half.json", spawn_turn_seq: 3, duration_ms: 1_800_000 }),
+            ],
+            { started_at: "2026-06-01T00:00:00.000Z", ended_at: "2026-06-01T01:00:00.000Z" },
+        ));
+        expect(laneFor(model, "null.json").w).toBe(SESSION_MAP_MIN_LANE_W);
+        expect(laneFor(model, "tiny.json").w).toBe(SESSION_MAP_MIN_LANE_W);
+        expect(laneFor(model, "half.json").w).toBeCloseTo(0.5, 5);
+    });
+
+    test("scales cost intensity relative to the max subagent cost", () => {
+        const model = buildSessionMapLanes(mapManifest([
+            mapCard({ file: "a.json", cost_usd: 2 }),
+            mapCard({ file: "b.json", cost_usd: 1 }),
+            mapCard({ file: "c.json", cost_usd: null }),
+        ]));
+        expect(laneFor(model, "a.json").intensity).toBeCloseTo(1, 5);
+        expect(laneFor(model, "b.json").intensity).toBeCloseTo(0.5, 5);
+        expect(laneFor(model, "c.json").intensity).toBeCloseTo(0, 5);
+    });
+
+    test("uses flat neutral coloring (null intensity) when no card has a positive cost", () => {
+        const model = buildSessionMapLanes(mapManifest([
+            mapCard({ file: "a.json", cost_usd: null }),
+            mapCard({ file: "b.json", cost_usd: 0 }),
+        ]));
+        expect(laneFor(model, "a.json").intensity).toBeNull();
+        expect(laneFor(model, "b.json").intensity).toBeNull();
+    });
+
+    test("carries the failure flag and count into the lane and tooltip", () => {
+        const model = buildSessionMapLanes(mapManifest([
+            mapCard({ file: "ok.json" }),
+            mapCard({
+                file: "bad.json",
+                stats: mapStats(2),
+                task_label: "fix the parser",
+                model: "claude-opus-4",
+                cost_usd: 1.25,
+                duration_ms: 120_000,
+            }),
+        ]));
+        const ok = laneFor(model, "ok.json");
+        const bad = laneFor(model, "bad.json");
+        expect(ok.failed).toBe(false);
+        expect(bad.failed).toBe(true);
+        expect(bad.failures).toBe(2);
+        expect(bad.title).toContain("fix the parser");
+        expect(bad.title).toContain("claude-opus-4");
+        expect(bad.title).toContain("$1.25");
+        expect(bad.title).toContain("2m");
+        expect(bad.title).toContain("2 failures");
+    });
+
+    test("returns null for a manifest with zero subagents", () => {
+        expect(buildSessionMapLanes(mapManifest([]))).toBeNull();
     });
 });
 
