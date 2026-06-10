@@ -40,11 +40,10 @@ describe("printNextFooter", () => {
     test("writes to stderr (survives stdout | head truncation), not stdout", () => {
         const written: string[] = [];
         const orig = process.stderr.write.bind(process.stderr);
-        // @ts-expect-error - test stub narrows the overloaded signature
-        process.stderr.write = (chunk: string) => {
+        process.stderr.write = ((chunk: string) => {
             written.push(String(chunk));
             return true;
-        };
+        }) as typeof process.stderr.write;
         try {
             printNextFooter([link({ cmd: "codex resume abc" })]);
         } finally {
@@ -56,11 +55,10 @@ describe("printNextFooter", () => {
     test("writes nothing when no link has a cmd", () => {
         const written: string[] = [];
         const orig = process.stderr.write.bind(process.stderr);
-        // @ts-expect-error - test stub narrows the overloaded signature
-        process.stderr.write = (chunk: string) => {
+        process.stderr.write = ((chunk: string) => {
             written.push(String(chunk));
             return true;
-        };
+        }) as typeof process.stderr.write;
         try {
             printNextFooter([
                 { description: "mcp only", call: { tool: "recall", arguments: {} } },
