@@ -41,6 +41,25 @@ const tsValue = (ts: string | null): number => {
     return Number.isFinite(t) ? t : Number.POSITIVE_INFINITY;
 };
 
+/** Subagent-dispatch tool names whose bare name says nothing - their event
+ *  title should carry the dispatch description instead of just "Agent". */
+const DISPATCH_TOOLS = new Set(["Agent", "Task"]);
+
+/**
+ * Best-effort label for an Agent/Task dispatch: the `description` (falling
+ * back to `subagent_type`) from the call's input. `command_text` is the first
+ * 400 chars of `input_json`, so it may be TRUNCATED mid-string - regex-extract
+ * instead of JSON.parse.
+ */
+export const dispatchLabel = (commandText: string | null): string | null => {
+    if (!commandText) return null;
+    const pick = (key: string): string | null =>
+        new RegExp(`"${key}"\\s*:\\s*"((?:[^"\\\\]|\\\\.)*)"`).exec(commandText)?.[1] ?? null;
+    const label = pick("description") ?? pick("subagent_type");
+    if (!label) return null;
+    return label.replace(/\\n/g, " ").replace(/\\"/g, '"').trim() || null;
+};
+
 // --- per-kind derivation ---------------------------------------------------
 
 /**
@@ -74,11 +93,12 @@ export function deriveToolEvents(
             });
             continue;
         }
+        const dispatch = DISPATCH_TOOLS.has(t.name) ? dispatchLabel(t.command_text) : null;
         out.push({
             kind: "tool_call",
             ts: t.ts,
             seq: t.seq,
-            title: clip(t.command_norm ?? t.name, TITLE_MAX),
+            title: clip(dispatch ? `${t.name}: ${dispatch}` : t.command_norm ?? t.name, TITLE_MAX),
             ...(firstLine(t.output_excerpt) ? { detail: clip(firstLine(t.output_excerpt), DETAIL_MAX) } : {}),
             status: "ok",
             refs: [...(t.call_id ? [{ type: "tool" as const, id: t.call_id }] : []), ...turnRef],
