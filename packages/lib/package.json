@@ -8,6 +8,7 @@
     "./shared/fs-classify": "./src/shared/fs-classify.ts",
     "./shared/path": "./src/shared/path.ts",
     "./testing/test-filesystem": "./src/testing/test-filesystem.ts",
+    "./testing/surreal": "./src/testing/surreal.ts",
     "./*": {
       "types": "./src/*.ts",
       "import": "./src/*.ts"
