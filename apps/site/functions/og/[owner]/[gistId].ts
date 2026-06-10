@@ -136,18 +136,27 @@ export const onRequestGet: PagesFunction = async (ctx) => {
         "https://cdn.jsdelivr.net/fontsource/fonts/jetbrains-mono@latest/latin-700-normal.ttf",
     ).then((r) => r.arrayBuffer());
 
-    const image = new ImageResponse(html.trim(), {
-        width: 1200,
-        height: 630,
-        fonts: [
-            { name: "JetBrains Mono", data: font, weight: 400, style: "normal" },
-            { name: "JetBrains Mono", data: fontBold, weight: 700, style: "normal" },
-        ],
-    });
-    // Buffer the render: returning the lazy stream produced empty bodies on
-    // Pages, and an empty 200 would get edge-cached for a day.
-    const png = await image.arrayBuffer();
-    if (png.byteLength === 0) return new Response("render failed", { status: 500 });
+    const debugMin = u.searchParams.get("debug") === "min";
+    const renderHtml = debugMin
+        ? `<div style="display:flex;width:1200px;height:630px;background:#fff;font-family:'JetBrains Mono';font-size:60px;align-items:center;justify-content:center">ax og probe</div>`
+        : html.trim();
+    let png: ArrayBuffer;
+    try {
+        const image = new ImageResponse(renderHtml, {
+            width: 1200,
+            height: 630,
+            fonts: [
+                { name: "JetBrains Mono", data: font, weight: 400, style: "normal" },
+                { name: "JetBrains Mono", data: fontBold, weight: 700, style: "normal" },
+            ],
+        });
+        // Buffer the render: a lazy stream produced empty bodies on Pages, and
+        // an empty 200 would get edge-cached for a day.
+        png = await image.arrayBuffer();
+    } catch (err) {
+        return new Response(`render error: ${err instanceof Error ? `${err.message}\n${err.stack ?? ""}` : String(err)}`, { status: 500 });
+    }
+    if (png.byteLength === 0) return new Response("render produced 0 bytes", { status: 500 });
     const res = new Response(png, {
         headers: {
             "content-type": "image/png",
