@@ -30,6 +30,9 @@ axctl costs for --query <text> [--limit=N]  # cost for sessions matching turn te
 axctl costs for --terms <a,b,c> [--since=N] # cost for sessions matching any term
 axctl costs for --commit <sha>              # cost for sessions that produced a commit
 axctl costs for --branch <name>             # cost for sessions linked to a branch
+axctl cost <models|sessions|split>          # model/cost analytics incl. main-vs-subagent split
+axctl dispatches [--candidates]             # subagent dispatch routing analytics + est savings
+axctl dispatches compile-routing            # regenerate ~/.ax/hooks/routing-table.json
 axctl pricing [--query <model>]             # inspect imported model pricing rows
 axctl share <session-id>                    # publish a sanitized session share via GitHub Gist
 axctl roles                                 # list role labels with skill counts
