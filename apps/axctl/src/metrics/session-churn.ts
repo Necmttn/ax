@@ -268,19 +268,20 @@ export const fetchSessionChurnSummary = (
         const limit = Math.min(Math.max(Math.trunc(input.limit), 1), 1000);
         const project = input.project ?? null;
         const source = input.source ?? null;
+        // Deref-free scan over session's own (indexed) columns; ordering is
+        // irrelevant here - ids feed a Set and events are re-sorted in JS.
         const clauses: string[] = [];
-        if (input.since) clauses.push(`session.started_at >= ${surrealDate(input.since)}`);
+        if (input.since) clauses.push(`started_at >= ${surrealDate(input.since)}`);
         if (project !== null) {
             const projectSql = surrealString(project);
-            clauses.push(`(session.project = ${projectSql} OR session.cwd = ${projectSql})`);
+            clauses.push(`(project = ${projectSql} OR cwd = ${projectSql})`);
         }
-        if (source !== null) clauses.push(`session.source = ${surrealString(source)}`);
+        if (source !== null) clauses.push(`source = ${surrealString(source)}`);
         const where = clauses.length > 0 ? `WHERE ${clauses.join(" AND ")}` : "";
         const baseRows = (yield* db.query<[Array<Record<string, unknown>>]>(`
-SELECT type::string(session) AS session, session.source AS source, session.started_at AS started_at
-FROM session_metrics
-${where}
-ORDER BY session.started_at DESC;`))?.[0] ?? [];
+SELECT type::string(id) AS session, source
+FROM session
+${where};`))?.[0] ?? [];
 
         const sessionIds = uniqueCleanSessionIds(baseRows.map((row) => String(row.session ?? "")));
         const sourceBySession = new Map<string, string | null>();

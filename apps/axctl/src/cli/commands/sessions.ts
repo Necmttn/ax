@@ -746,9 +746,10 @@ export const cmdSessionsChurn = (input: {
             project = pwd.repoRoot;
         }
 
-        const since = input.sinceDays === null
-            ? null
-            : new Date(Date.now() - Math.min(Math.max(Math.trunc(input.sinceDays), 1), 3650) * 86400 * 1000);
+        // Default window keeps the all-session fan-out bounded on mature DBs;
+        // pass a larger --since (up to 3650) for deeper history.
+        const sinceDays = input.sinceDays ?? 30;
+        const since = new Date(Date.now() - Math.min(Math.max(Math.trunc(sinceDays), 1), 3650) * 86400 * 1000);
 
         const summary = yield* fetchSessionChurnSummary({
             since,
@@ -786,7 +787,7 @@ export const sessionsChurnCommand = Command.make(
     "Summarize verification churn by session/source: edit LOC, landed LOC, failed/passed checks, "
     + "episodes opened by failures after edits, and repair LOC before passes. "
     + "--here scopes to the pwd repo, --project filters session.project/cwd, --source filters provider, "
-    + "--since N days, --limit caps hot sessions, --json for machine output.",
+    + "--since N days (default 30, max 3650), --limit caps hot sessions, --json for machine output.",
 ));
 
 export const sessionsCommand = Command.make("sessions").pipe(

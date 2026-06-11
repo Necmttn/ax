@@ -355,11 +355,13 @@ describe("fetchSessionChurnSummary", () => {
             generatedAt: new Date("2026-06-11T00:00:00.000Z"),
         }).pipe(Effect.provide(db({ base: [], seenSql }))));
 
-        const baseSql = seenSql.find((s) => s.includes("FROM session_metrics"))!;
-        expect(baseSql).toContain("session.started_at AS started_at");
-        expect(baseSql).toContain('session.started_at >= d"2026-06-01T00:00:00.000Z"');
-        expect(baseSql).toContain('(session.project = "/repo/ax" OR session.cwd = "/repo/ax")');
-        expect(baseSql).toContain('session.source = "codex"');
+        const baseSql = seenSql[0]!;
+        expect(baseSql).toContain("FROM session");
+        expect(baseSql).not.toContain("session_metrics");
+        expect(baseSql).not.toContain("ORDER BY");
+        expect(baseSql).toContain('started_at >= d"2026-06-01T00:00:00.000Z"');
+        expect(baseSql).toContain('cwd = "/repo/ax"');
+        expect(baseSql).toContain('source = "codex"');
     });
 
     test("empty base sessions skip secondary scans", async () => {
@@ -373,7 +375,8 @@ describe("fetchSessionChurnSummary", () => {
         expect(summary.hotSessions).toEqual([]);
         expect(summary.aggregates).toEqual([]);
         expect(seenSql).toHaveLength(1);
-        expect(seenSql[0]).toContain("FROM session_metrics");
+        expect(seenSql[0]).toContain("FROM session");
+        expect(seenSql[0]).not.toContain("session_metrics");
     });
 
     test("limit only caps hot sessions after ranking, not the base session scan", async () => {
@@ -401,7 +404,8 @@ describe("fetchSessionChurnSummary", () => {
             ],
         }))));
 
-        const baseSql = seenSql.find((s) => s.includes("FROM session_metrics"))!;
+        const baseSql = seenSql[0]!;
+        expect(baseSql).toContain("FROM session");
         expect(baseSql).not.toContain("LIMIT 1");
         expect(summary.hotSessions.map((row) => row.session)).toEqual(["older-hot"]);
         expect(summary.aggregates).toHaveLength(1);
