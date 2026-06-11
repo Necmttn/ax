@@ -1,9 +1,11 @@
 import { describe, expect, test } from "bun:test";
 import {
     buildGuidanceProposalStatements,
+    buildRoutingProposalStatements,
     buildSkillProposalStatements,
     dedupeSig,
     deriveGuidanceProposalRows,
+    deriveRoutingProposalRow,
     deriveSkillProposalRows,
     normalizeTitle,
     parseMetrics,
@@ -166,5 +168,110 @@ describe("deriveGuidanceProposalRows + buildGuidanceProposalStatements (Phase C1
         const { rows, skipped } = deriveGuidanceProposalRows([candidate, candidate]);
         expect(rows).toHaveLength(1);
         expect(skipped).toBe(1);
+    });
+});
+
+describe("deriveRoutingProposalRow", () => {
+    const baseInput = {
+        candidateCount: 12,
+        totalEstSavingsUsd: 25.50,
+        sinceDays: 14,
+        topClasses: [
+            { classId: "search-locate", savings_usd: 18.00 },
+            { classId: "research", savings_usd: 7.50 },
+        ],
+    } as const;
+
+    test("returns null when candidateCount < 5 (signal too thin)", () => {
+        expect(deriveRoutingProposalRow({ ...baseInput, candidateCount: 4 })).toBeNull();
+    });
+
+    test("returns null when totalEstSavingsUsd < 5 (savings too low)", () => {
+        expect(deriveRoutingProposalRow({ ...baseInput, totalEstSavingsUsd: 4.99 })).toBeNull();
+    });
+
+    test("returns null when BOTH thresholds are below minimum", () => {
+        expect(deriveRoutingProposalRow({ ...baseInput, candidateCount: 3, totalEstSavingsUsd: 2 })).toBeNull();
+    });
+
+    test("emits a row when both thresholds pass", () => {
+        const row = deriveRoutingProposalRow(baseInput);
+        expect(row).not.toBeNull();
+        expect(row!.title).toBe("Route mechanical subagent dispatches to cheaper models");
+        expect(row!.frequency).toBe(12);
+        expect(row!.sig.startsWith("hook__")).toBe(true);
+    });
+
+    test("confidence=high when savings >= 50", () => {
+        const row = deriveRoutingProposalRow({ ...baseInput, totalEstSavingsUsd: 60 });
+        expect(row!.confidence).toBe("high");
+    });
+
+    test("confidence=medium when savings >= 15 and < 50", () => {
+        const row = deriveRoutingProposalRow({ ...baseInput, totalEstSavingsUsd: 20 });
+        expect(row!.confidence).toBe("medium");
+    });
+
+    test("confidence=low when savings < 15", () => {
+        const row = deriveRoutingProposalRow({ ...baseInput, totalEstSavingsUsd: 8 });
+        expect(row!.confidence).toBe("low");
+    });
+
+    test("hypothesis includes candidateCount, sinceDays, savings, and top class ids", () => {
+        const row = deriveRoutingProposalRow(baseInput);
+        expect(row!.hypothesis).toContain("12 model-less dispatches");
+        expect(row!.hypothesis).toContain("last 14d");
+        expect(row!.hypothesis).toContain("$25.50");
+        expect(row!.hypothesis).toContain("search-locate");
+        expect(row!.hypothesis).toContain("research");
+    });
+
+    test("dedupe_sig is STABLE across two derivations with different savings amounts", () => {
+        const row1 = deriveRoutingProposalRow({ ...baseInput, totalEstSavingsUsd: 20, candidateCount: 10 });
+        const row2 = deriveRoutingProposalRow({ ...baseInput, totalEstSavingsUsd: 80, candidateCount: 50 });
+        // Savings differ (hypothesis differs) but title is identical → same dedupe_sig
+        expect(row1!.sig).toBe(row2!.sig);
+    });
+
+    test("dedupe_sig is stable across two derivations with identical inputs", () => {
+        const row1 = deriveRoutingProposalRow(baseInput);
+        const row2 = deriveRoutingProposalRow(baseInput);
+        expect(row1!.sig).toBe(row2!.sig);
+    });
+});
+
+describe("buildRoutingProposalStatements", () => {
+    const baseRoutingRow = deriveRoutingProposalRow({
+        candidateCount: 12,
+        totalEstSavingsUsd: 25.50,
+        sinceDays: 14,
+        topClasses: [{ classId: "search-locate", savings_usd: 18.00 }],
+    })!;
+
+    test("new sig: CREATE proposal with form='hook', baseline, status='open'", () => {
+        const stmts = buildRoutingProposalStatements(baseRoutingRow, new Set());
+        const sql = stmts.join("\n");
+        expect(sql).toContain("CREATE proposal:");
+        expect(sql).toContain("form: \"hook\"");
+        expect(sql).toContain("status: \"open\"");
+        expect(sql).toContain("baseline:");
+        expect(sql).toContain(`frequency: ${baseRoutingRow.frequency}`);
+    });
+
+    test("existing sig: UPDATE mutable fields only, no baseline/status touch", () => {
+        const stmts = buildRoutingProposalStatements(baseRoutingRow, new Set([baseRoutingRow.sig]));
+        const sql = stmts.join("\n");
+        expect(sql).toContain("UPDATE proposal:");
+        expect(sql).not.toContain("CREATE proposal:");
+        expect(sql).not.toMatch(/\bstatus\s*=/);
+        expect(sql).not.toMatch(/\bbaseline\s*=/);
+        expect(sql).toMatch(/\bfrequency\s*=\s*12/);
+    });
+
+    test("statement contains form hook and frequency", () => {
+        const stmts = buildRoutingProposalStatements(baseRoutingRow, new Set());
+        const sql = stmts.join("\n");
+        expect(sql).toContain("form: \"hook\"");
+        expect(sql).toContain(String(baseRoutingRow.frequency));
     });
 });
