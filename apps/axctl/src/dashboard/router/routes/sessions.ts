@@ -3,6 +3,7 @@ import { extractSessionTimeline, SessionTimelineServiceLayer } from "../../../ti
 import { fetchSessionCanvas, fetchSessionOrchestration } from "../../session-canvas.ts";
 import { fetchSessionCompare } from "../../session-compare.ts";
 import { fetchSessionDetail } from "../../session-detail.ts";
+import { fetchSessionInsights } from "../../session-insights.ts";
 import { fetchSessionInspect } from "../../session-inspect.ts";
 import { fetchSessionSummary } from "../../session-summary.ts";
 import { fetchSessionChildren, fetchSessionsList, type SessionsListOpts } from "../../sessions-list.ts";
@@ -115,6 +116,11 @@ export const sessionRoutes: ReadonlyArray<AnyRoute> = [
             return decodeOk({ id: id.value, limit: numberParam(input.url, "limit", 500) });
         },
         handler: ({ id, limit }) => fetchSessionChildren(id, { limit }),
+    }),
+    legacyGetRoute({
+        path: "/api/sessions/:id+/insights",
+        decode: requiredSessionId,
+        handler: (id) => fetchSessionInsights(id),
     }),
     legacyGetRoute({
         path: "/api/sessions/:id+/inspect",
