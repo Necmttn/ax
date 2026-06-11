@@ -33,7 +33,7 @@ CI runs both - failing either blocks merge.
 While developing, skip the compiled binary and run the TypeScript directly:
 
 ```bash
-bun src/cli/index.ts serve --port=8520
+bun src/cli/index.ts serve --port=1738
 bun src/cli/index.ts insights friction --limit=10
 bun src/cli/index.ts recall "auth middleware"
 ```

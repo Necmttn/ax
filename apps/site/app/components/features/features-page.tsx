@@ -616,7 +616,7 @@ export function FeaturesPage() {
           <div className="cli-row">
             <span className="cmd">ax serve</span>
             <span className="desc">
-              Local web dashboard at <code className="inline">127.0.0.1:8520</code> with the same data the TUI sees.
+              Local web dashboard at <code className="inline">127.0.0.1:1738</code> with the same data the TUI sees.
             </span>
           </div>
           <div className="cli-row">
@@ -662,7 +662,7 @@ export function FeaturesPage() {
           </div>
           <div className="local-card">
             <span className="lc-eye">dashboard</span>
-            <span className="lc-val">127.0.0.1:8520</span>
+            <span className="lc-val">127.0.0.1:1738</span>
             <span className="lc-desc">Web UI for the graph, findings, and intervention queue. No auth - it&apos;s your loopback.</span>
           </div>
           <div className="local-card">

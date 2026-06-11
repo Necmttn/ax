@@ -298,7 +298,7 @@ else
   printf '    %sax setup%s     %sinstall the agent skills + first ingest%s\n' "$C_BOLD" "$C_RESET" "$C_DIM" "$C_RESET"
 fi
 printf '    %sax doctor%s    %scheck your setup%s\n' "$C_BOLD" "$C_RESET" "$C_DIM" "$C_RESET"
-printf '    %sax serve%s     %sopen the dashboard → http://127.0.0.1:8520%s\n' "$C_BOLD" "$C_RESET" "$C_DIM" "$C_RESET"
+printf '    %sax serve%s     %sopen the dashboard → http://127.0.0.1:1738%s\n' "$C_BOLD" "$C_RESET" "$C_DIM" "$C_RESET"
 printf '    %sax recall%s    %ssearch what your agents actually did%s\n' "$C_BOLD" "$C_RESET" "$C_DIM" "$C_RESET"
 printf '\n'
 

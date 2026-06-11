@@ -1,4 +1,5 @@
 // Extracted from cli/index.ts (Phase 2 CLI split)
+import { DEFAULT_DASHBOARD_PORT } from "@ax/lib/dashboard-port";
 import { Effect } from "effect";
 import { Command, Flag } from "effect/unstable/cli";
 import { serveDashboard } from "../../dashboard/server.ts";
@@ -7,7 +8,7 @@ import type { RuntimeManifest } from "./manifest.ts";
 
 export const serveCommand = Command.make(
     "serve",
-    { port: Flag.integer("port").pipe(Flag.withDefault(1738)) },
+    { port: Flag.integer("port").pipe(Flag.withDefault(DEFAULT_DASHBOARD_PORT)) },
     ({ port }) => Effect.promise(() => serveDashboard([`--port=${port}`])),
 ).pipe(Command.withDescription("Serve the live web dashboard locally"));
 
