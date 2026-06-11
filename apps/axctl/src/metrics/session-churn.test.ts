@@ -260,6 +260,29 @@ describe("computeSessionChurn", () => {
         }]);
     });
 
+    test("source aggregates count multi-session commits once", () => {
+        const summary = computeSessionChurn([
+            edit("s1", 1, 1),
+            fail("s1", 2, "test"),
+            edit("s2", 1, 1),
+            fail("s2", 2, "test"),
+        ], landed([
+            ["s1", { added: 500, removed: 100 }],
+            ["s2", { added: 500, removed: 100 }],
+        ]), health([]), {
+            landedCommits: [{ commit: "c1", sessions: ["s1", "s2"], added: 500, removed: 100 }],
+        });
+
+        expect(summary.hotSessions.map((row) => [row.session, row.landedLinesAdded, row.landedLinesRemoved]))
+            .toEqual([["s1", 500, 100], ["s2", 500, 100]]);
+        expect(summary.aggregates).toHaveLength(1);
+        expect(summary.aggregates[0]).toMatchObject({
+            sessions: 2,
+            landedLinesAdded: 500,
+            landedLinesRemoved: 100,
+        });
+    });
+
     test("filters edit-only, pass-only, and metadata-only sessions from output rows", () => {
         const summary = computeSessionChurn([
             edit("quiet-edit", 1, 5, 1),
@@ -412,6 +435,41 @@ describe("fetchSessionChurnSummary", () => {
             landedLinesAdded: 13,
             landedLinesRemoved: 3,
             verificationFailures: 1,
+        });
+    });
+
+    test("multi-session commits land once per source aggregate when fetched", async () => {
+        const summary = await Effect.runPromise(fetchSessionChurnSummary({
+            since: null,
+            limit: 20,
+            generatedAt: new Date("2026-06-11T00:00:00.000Z"),
+        }).pipe(Effect.provide(db({
+            base: [
+                { session: "session:`s1`", source: "codex" },
+                { session: "session:`s2`", source: "codex" },
+            ],
+            produced: [
+                { session: "session:`s1`", commit: "commit:`c1`" },
+                { session: "session:`s2`", commit: "commit:`c1`" },
+            ],
+            touched: [
+                { commit: "commit:`c1`", file: "file:`f1`", path: "src/a.ts", additions: 10, deletions: 2 },
+            ],
+            edits: [
+                { session: "session:`s1`", ts: "2026-06-11T00:01:00.000Z", name: "Edit", input_json: JSON.stringify({ old_string: "a", new_string: "a\nb" }) },
+                { session: "session:`s2`", ts: "2026-06-11T00:01:00.000Z", name: "Edit", input_json: JSON.stringify({ old_string: "a", new_string: "a\nb" }) },
+            ],
+            outcomes: [
+                { session: "session:`s1`", ts: "2026-06-11T00:02:00.000Z", status: "error", command_norm: "tsc" },
+                { session: "session:`s2`", ts: "2026-06-11T00:02:00.000Z", status: "error", command_norm: "tsc" },
+            ],
+        }))));
+
+        expect(summary.hotSessions.map((row) => row.landedLinesAdded)).toEqual([10, 10]);
+        expect(summary.aggregates[0]).toMatchObject({
+            sessions: 2,
+            landedLinesAdded: 10,
+            landedLinesRemoved: 2,
         });
     });
 

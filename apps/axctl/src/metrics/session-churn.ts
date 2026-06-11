@@ -87,6 +87,19 @@ export interface ChurnLines {
     readonly removed: number;
 }
 
+/** Commit-level landed LOC with every producing session, for aggregate dedupe. */
+export interface LandedCommit {
+    readonly commit: string;
+    readonly sessions: readonly string[];
+    readonly added: number;
+    readonly removed: number;
+}
+
+export interface LandedLoc {
+    readonly bySession: ReadonlyMap<string, ChurnLines>;
+    readonly commits: readonly LandedCommit[];
+}
+
 export interface SessionHealthChurnInput {
     readonly taskLabel?: string | null;
 }
@@ -97,6 +110,13 @@ export interface ComputeSessionChurnOptions {
     readonly project?: string | null;
     readonly source?: string | null;
     readonly limit?: number;
+    /**
+     * When provided, source aggregates compute landed LOC from these commits
+     * (each counted once per source) instead of summing per-session rows -
+     * a commit produced by several sessions keeps full per-session credit
+     * without inflating the source totals.
+     */
+    readonly landedCommits?: readonly LandedCommit[];
 }
 
 interface IndexedChurnEvent extends ChurnEvent {
@@ -221,7 +241,7 @@ export const computeSessionChurn = (
         .filter(({ row }) => hasVerificationSignal(row))
         .filter(({ row }) => sourceFilter === null || row.source === sourceFilter);
 
-    const aggregates = buildAggregates(rowsWithChecks);
+    const aggregates = buildAggregates(rowsWithChecks, options.landedCommits ?? null);
     const hotSessions = rowsWithChecks
         .map(({ row }) => row)
         .sort(compareHotSessions)
@@ -283,16 +303,20 @@ ORDER BY session.started_at DESC;`))?.[0] ?? [];
             fetchHookEvents(sessionIds, sourceBySession),
         ], { concurrency: 5 });
 
-        return computeSessionChurn([...edits, ...commandEvents, ...hookEvents], landed, health, options);
+        return computeSessionChurn([...edits, ...commandEvents, ...hookEvents], landed.bySession, health, {
+            ...options,
+            landedCommits: landed.commits,
+        });
     });
 
 const fetchLandedLocBySession = (
     sessionIds: readonly string[],
-): Effect.Effect<Map<string, ChurnLines>, DbError, SurrealClient> =>
+): Effect.Effect<LandedLoc, DbError, SurrealClient> =>
     Effect.gen(function* () {
         const db = yield* SurrealClient;
         const out = new Map<string, ChurnLines>();
-        if (sessionIds.length === 0) return out;
+        const commitTotals = new Map<string, { added: number; removed: number }>();
+        if (sessionIds.length === 0) return { bySession: out, commits: [] };
 
         const producedRows = (yield* Effect.all(
             chunked(sessionIds, IN_CHUNK).map((ids) =>
@@ -316,7 +340,7 @@ const fetchLandedLocBySession = (
             }
             sessions.add(session);
         }
-        if (sessionsByCommit.size === 0) return out;
+        if (sessionsByCommit.size === 0) return { bySession: out, commits: [] };
 
         const commitIds = [...sessionsByCommit.keys()];
         const touchedRows = (yield* Effect.all(
@@ -344,6 +368,10 @@ const fetchLandedLocBySession = (
 
             const added = numOrZero(row.additions);
             const removed = numOrZero(row.deletions);
+            const commitTotal = commitTotals.get(commit) ?? { added: 0, removed: 0 };
+            commitTotal.added += added;
+            commitTotal.removed += removed;
+            commitTotals.set(commit, commitTotal);
             for (const session of sessions) {
                 const cur = out.get(session) ?? { added: 0, removed: 0 };
                 out.set(session, {
@@ -353,7 +381,13 @@ const fetchLandedLocBySession = (
             }
         }
 
-        return out;
+        const commits: LandedCommit[] = [...commitTotals.entries()].map(([commit, lines]) => ({
+            commit,
+            sessions: [...(sessionsByCommit.get(commit) ?? [])],
+            added: lines.added,
+            removed: lines.removed,
+        }));
+        return { bySession: out, commits };
     });
 
 const fetchEditEvents = (
@@ -668,6 +702,7 @@ const freezeRow = (state: MutableSessionState): SessionChurnRow => ({
 
 const buildAggregates = (
     rows: Array<{ readonly row: SessionChurnRow; readonly checkFailures: ReadonlyMap<string, number> }>,
+    landedCommits: readonly LandedCommit[] | null,
 ): SourceChurnAggregate[] => {
     const aggregates = new Map<string, {
         row: MutableAggregateState;
@@ -700,8 +735,10 @@ const buildAggregates = (
 
         aggregate.row.sessions += 1;
         aggregate.row.sessionsWithFailures += row.verificationFailures > 0 ? 1 : 0;
-        aggregate.row.landedLinesAdded += row.landedLinesAdded;
-        aggregate.row.landedLinesRemoved += row.landedLinesRemoved;
+        if (landedCommits === null) {
+            aggregate.row.landedLinesAdded += row.landedLinesAdded;
+            aggregate.row.landedLinesRemoved += row.landedLinesRemoved;
+        }
         aggregate.row.editLinesAdded += row.editLinesAdded;
         aggregate.row.editLinesRemoved += row.editLinesRemoved;
         aggregate.row.repairLinesAdded += row.repairLinesAdded;
@@ -711,6 +748,23 @@ const buildAggregates = (
         aggregate.row.passedEpisodes += row.passedEpisodes;
         for (const [check, count] of checkFailures) {
             increment(aggregate.checkFailures, check, count);
+        }
+    }
+
+    if (landedCommits !== null) {
+        const sourceBySession = new Map(rows.map(({ row }) => [row.session, row.source ?? "unknown"]));
+        for (const commit of landedCommits) {
+            const sources = new Set<string>();
+            for (const session of commit.sessions) {
+                const source = sourceBySession.get(normalizeSessionKey(session));
+                if (source !== undefined) sources.add(source);
+            }
+            for (const source of sources) {
+                const aggregate = aggregates.get(source);
+                if (aggregate === undefined) continue;
+                aggregate.row.landedLinesAdded += nonNegative(commit.added);
+                aggregate.row.landedLinesRemoved += nonNegative(commit.removed);
+            }
         }
     }
 
