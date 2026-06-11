@@ -1481,7 +1481,10 @@ const surrealOptionFloat = (value: number | null | undefined): string =>
  * preserves these real counts (and leaves the cost fields it never writes
  * intact). Empty when the transcript carried no `usage` blocks.
  */
-export const buildClaudeTokenUsageStatements = (extracted: FileExtract): string[] => {
+export const buildClaudeTokenUsageStatements = (
+    extracted: FileExtract,
+    source: "claude" | "claude-subagent" = "claude",
+): string[] => {
     const usage = extracted.tokenUsage;
     if (!usage) return [];
     const modelKey = normalizeModelName(usage.model);
@@ -1497,7 +1500,7 @@ export const buildClaudeTokenUsageStatements = (extracted: FileExtract): string[
     return [
         `UPSERT ${recordRef("session_token_usage", safeKeyPart(sessionId))} MERGE ${surrealObject([
             ["session", recordRef("session", sessionId)],
-            ["source", surrealString("claude")],
+            ["source", surrealString(source)],
             ["model", surrealOptionString(usage.model)],
             ["prompt_tokens", surrealOptionInt(usage.promptTokens)],
             ["completion_tokens", surrealOptionInt(usage.completionTokens)],
@@ -1526,7 +1529,10 @@ export const buildClaudeTokenUsageStatements = (extracted: FileExtract): string[
  * `usage`. Mirrors the codex turn-usage shape so the inspector's per-turn cost
  * rail lights up for Claude sessions too. Empty when no turns carried usage.
  */
-export const buildClaudeTurnTokenUsageStatements = (extracted: FileExtract): string[] => {
+export const buildClaudeTurnTokenUsageStatements = (
+    extracted: FileExtract,
+    source: "claude" | "claude-subagent" = "claude",
+): string[] => {
     const sessionId = extracted.session.id;
     return extracted.turnTokenUsages.map((usage) => {
         const modelKey = normalizeModelName(usage.model);
@@ -1543,7 +1549,7 @@ export const buildClaudeTurnTokenUsageStatements = (extracted: FileExtract): str
             ["session", recordRef("session", sessionId)],
             ["turn", recordRef("turn", turnKey)],
             ["seq", Math.trunc(usage.seq).toString(10)],
-            ["source", surrealString("claude")],
+            ["source", surrealString(source)],
             ["model", surrealOptionString(usage.model)],
             ["prompt_tokens", surrealOptionInt(usage.promptTokens)],
             ["completion_tokens", surrealOptionInt(usage.completionTokens)],
@@ -1575,7 +1581,21 @@ const writeClaudeTokenUsage = (extracted: FileExtract) => {
         : queryTranscriptStatements(statements);
 };
 
-export { writeClaudeTokenUsage as writeTokenUsageForSubagents };
+/**
+ * Subagent variant: identical rows, but `source = "claude-subagent"` so
+ * origin-level rollups (`ax cost split`) can separate main-loop spend from
+ * dispatched-agent spend. The session-health pass writes the same value from
+ * `session.source`; without this the last writer would flip the field.
+ */
+export const writeTokenUsageForSubagents = (extracted: FileExtract) => {
+    const statements = [
+        ...buildClaudeTokenUsageStatements(extracted, "claude-subagent"),
+        ...buildClaudeTurnTokenUsageStatements(extracted, "claude-subagent"),
+    ];
+    return statements.length === 0
+        ? Effect.void
+        : queryTranscriptStatements(statements);
+};
 
 interface IngestOpts {
     sinceDays: number | undefined;
