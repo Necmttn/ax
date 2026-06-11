@@ -1,0 +1,520 @@
+/**
+ * Tests for dispatch-analytics.ts
+ *
+ * Uses makeMockDb (canned spawned / tool_call / usage rows) to exercise:
+ *   - inherit vs explicit model resolution
+ *   - candidate matching (expensive + routing-class filter)
+ *   - repricing math
+ *   - compile-routing JSON shape via tmp dir
+ */
+import { describe, expect, it } from "bun:test";
+import { Effect, Layer } from "effect";
+import { BunFileSystem, BunPath } from "@effect/platform-bun";
+import { SurrealClient, type SurrealClientShape } from "@ax/lib/db";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { readFileSync } from "node:fs";
+
+import {
+    fetchDispatches,
+    fetchDispatchCandidates,
+    compileRouting,
+    ROUTING_CLASSES,
+    matchRouting,
+} from "./dispatch-analytics.ts";
+
+const fsLayers = Layer.mergeAll(BunFileSystem.layer, BunPath.layer);
+const runCompileRouting = (outPath: string) =>
+    Effect.runPromise(compileRouting(outPath).pipe(Effect.provide(fsLayers)));
+
+// ---------------------------------------------------------------------------
+// Mock DB helper
+// ---------------------------------------------------------------------------
+
+type QueryResult = Array<Record<string, unknown>>;
+
+/**
+ * Build a mock SurrealClient Layer from canned per-query results.
+ * The implementation returns results[0..n] in the order the SQL queries arrive
+ * (multi-statement query returns multiple result arrays).
+ */
+const makeMockDb = (results: QueryResult[]): Layer.Layer<SurrealClient> => {
+    const stub: SurrealClientShape = {
+        query: (_sql: string) => {
+            return Effect.succeed(results as [QueryResult, ...QueryResult[]]);
+        },
+        // biome-ignore lint: other methods not needed
+    } as unknown as SurrealClientShape;
+    return Layer.succeed(SurrealClient, stub);
+};
+
+const run = <A>(eff: Effect.Effect<A, unknown, SurrealClient>, layer: Layer.Layer<SurrealClient>) =>
+    Effect.runPromise(eff.pipe(Effect.provide(layer)));
+
+// ---------------------------------------------------------------------------
+// ROUTING_CLASSES
+// ---------------------------------------------------------------------------
+
+describe("ROUTING_CLASSES", () => {
+    it("has version 1", () => {
+        expect(ROUTING_CLASSES.version).toBe(1);
+    });
+
+    it("has 5 classes", () => {
+        expect(ROUTING_CLASSES.classes).toHaveLength(5);
+    });
+
+    it("has agentTypes for Explore, codebase-locator, codebase-pattern-finder, codebase-analyzer", () => {
+        expect(ROUTING_CLASSES.agentTypes).toHaveProperty("Explore", "haiku");
+        expect(ROUTING_CLASSES.agentTypes).toHaveProperty("codebase-locator", "haiku");
+        expect(ROUTING_CLASSES.agentTypes).toHaveProperty("codebase-pattern-finder", "haiku");
+        expect(ROUTING_CLASSES.agentTypes).toHaveProperty("codebase-analyzer", "sonnet");
+    });
+});
+
+// ---------------------------------------------------------------------------
+// matchRouting
+// ---------------------------------------------------------------------------
+
+describe("matchRouting", () => {
+    it("matches agent-type Explore to haiku", () => {
+        const m = matchRouting(null, "Explore");
+        expect(m).not.toBeNull();
+        expect(m!.suggest).toBe("haiku");
+        expect(m!.source).toBe("agentType");
+    });
+
+    it("agent-type wins over description", () => {
+        const m = matchRouting("spec review of the PR", "Explore");
+        expect(m).not.toBeNull();
+        expect(m!.suggest).toBe("haiku"); // agent-type wins
+    });
+
+    it("matches description 'spec review' to sonnet (spec-review)", () => {
+        const m = matchRouting("spec review the implementation", null);
+        expect(m).not.toBeNull();
+        expect(m!.suggest).toBe("sonnet");
+        expect(m!.classId).toBe("spec-review");
+    });
+
+    it("matches description 'locate all uses' to haiku (search-locate)", () => {
+        const m = matchRouting("locate all uses of X", null);
+        expect(m).not.toBeNull();
+        expect(m!.suggest).toBe("haiku");
+        expect(m!.classId).toBe("search-locate");
+    });
+
+    it("returns null for unmatched description and no agent type", () => {
+        const m = matchRouting("do some analysis", null);
+        expect(m).toBeNull();
+    });
+
+    it("returns null for null inputs", () => {
+        const m = matchRouting(null, null);
+        expect(m).toBeNull();
+    });
+});
+
+// ---------------------------------------------------------------------------
+// fetchDispatches - inherit vs explicit model
+// ---------------------------------------------------------------------------
+
+describe("fetchDispatches", () => {
+    it("returns empty when no spawned rows", async () => {
+        const layer = makeMockDb([[], [], [], []]);
+        const result = await run(fetchDispatches({ sinceDays: 14, limit: 30 }), layer);
+        expect(result.total_dispatches).toBe(0);
+        expect(result.rows).toHaveLength(0);
+        expect(result.inherit_pct).toBe(0);
+        expect(result.total_child_cost_usd).toBe(0);
+    });
+
+    it("resolves dispatch_model='inherit' when no tool_use_id", async () => {
+        const spawnedRows = [
+            {
+                parent_id: "session:parent-1",
+                child_id: "session:claude-subagent-abc",
+                ts: "2026-06-10T10:00:00Z",
+                agent_type: "Explore",
+                description: "find all usages",
+                tool_use_id: null,
+            },
+        ];
+        const usageRows = [
+            {
+                session_id: "session:claude-subagent-abc",
+                model: "claude-fable-5",
+                prompt_tokens: 1000,
+                completion_tokens: 500,
+                cache_read_tokens: 0,
+                cache_create_tokens: 0,
+                cost_usd: 0.05,
+            },
+        ];
+        const layer = makeMockDb([spawnedRows, usageRows, [], []]);
+        const result = await run(fetchDispatches({ sinceDays: 14, limit: 30 }), layer);
+
+        expect(result.total_dispatches).toBe(1);
+        expect(result.rows[0]?.dispatch_model).toBe("inherit");
+        expect(result.rows[0]?.child_model).toBe("claude-fable-5");
+        expect(result.rows[0]?.child_cost_usd).toBe(0.05);
+        expect(result.inherit_pct).toBe(100);
+    });
+
+    it("resolves dispatch_model from Agent tool_call input_json when tool_use_id matches", async () => {
+        const spawnedRows = [
+            {
+                parent_id: "session:parent-1",
+                child_id: "session:claude-subagent-def",
+                ts: "2026-06-10T11:00:00Z",
+                agent_type: "general-purpose",
+                description: "implement task X",
+                tool_use_id: "toolu_xyz123",
+            },
+        ];
+        const usageRows = [
+            {
+                session_id: "session:claude-subagent-def",
+                model: "claude-sonnet-4-6",
+                prompt_tokens: 2000,
+                completion_tokens: 800,
+                cache_read_tokens: 0,
+                cache_create_tokens: 0,
+                cost_usd: 0.02,
+            },
+        ];
+        const toolCallRows = [
+            {
+                session_id: "session:parent-1",
+                call_id: "toolu_xyz123",
+                input_json: JSON.stringify({ model: "sonnet", description: "implement task X" }),
+            },
+        ];
+        const layer = makeMockDb([spawnedRows, usageRows, toolCallRows, []]);
+        const result = await run(fetchDispatches({ sinceDays: 14, limit: 30 }), layer);
+
+        expect(result.rows[0]?.dispatch_model).toBe("sonnet");
+        expect(result.inherit_pct).toBe(0);
+    });
+
+    it("sorts by child_cost_usd desc", async () => {
+        const spawnedRows = [
+            {
+                parent_id: "session:parent-1",
+                child_id: "session:claude-subagent-cheap",
+                ts: "2026-06-10T10:00:00Z",
+                agent_type: "Explore",
+                description: "locate X",
+                tool_use_id: null,
+            },
+            {
+                parent_id: "session:parent-1",
+                child_id: "session:claude-subagent-expensive",
+                ts: "2026-06-10T10:01:00Z",
+                agent_type: "general-purpose",
+                description: "big task",
+                tool_use_id: null,
+            },
+        ];
+        const usageRows = [
+            {
+                session_id: "session:claude-subagent-cheap",
+                model: "claude-haiku-4-5",
+                prompt_tokens: 100,
+                completion_tokens: 50,
+                cache_read_tokens: 0,
+                cache_create_tokens: 0,
+                cost_usd: 0.001,
+            },
+            {
+                session_id: "session:claude-subagent-expensive",
+                model: "claude-fable-5",
+                prompt_tokens: 5000,
+                completion_tokens: 2000,
+                cache_read_tokens: 0,
+                cache_create_tokens: 0,
+                cost_usd: 0.50,
+            },
+        ];
+        const layer = makeMockDb([spawnedRows, usageRows, [], []]);
+        const result = await run(fetchDispatches({ sinceDays: 14, limit: 30 }), layer);
+
+        expect(result.rows[0]?.child_id).toBe("claude-subagent-expensive");
+        expect(result.rows[1]?.child_id).toBe("claude-subagent-cheap");
+        expect(result.total_child_cost_usd).toBeCloseTo(0.501, 3);
+    });
+
+    it("respects limit", async () => {
+        const spawnedRows = Array.from({ length: 5 }, (_, i) => ({
+            parent_id: "session:parent-1",
+            child_id: `session:claude-subagent-${i}`,
+            ts: "2026-06-10T10:00:00Z",
+            agent_type: "Explore",
+            description: "locate X",
+            tool_use_id: null,
+        }));
+        const layer = makeMockDb([spawnedRows, [], [], []]);
+        const result = await run(fetchDispatches({ sinceDays: 14, limit: 2 }), layer);
+
+        expect(result.total_dispatches).toBe(5);
+        expect(result.rows).toHaveLength(2);
+    });
+});
+
+// ---------------------------------------------------------------------------
+// fetchDispatchCandidates - filtering and repricing
+// ---------------------------------------------------------------------------
+
+describe("fetchDispatchCandidates", () => {
+    it("returns empty when no spawned rows", async () => {
+        const layer = makeMockDb([[], [], [], [], []]);
+        const result = await run(fetchDispatchCandidates({ sinceDays: 14 }), layer);
+        expect(result.candidates).toHaveLength(0);
+        expect(result.total_est_savings_usd).toBe(0);
+    });
+
+    it("excludes dispatches with an explicit model (non-inherit)", async () => {
+        const spawnedRows = [
+            {
+                parent_id: "session:parent-1",
+                child_id: "session:claude-subagent-abc",
+                ts: "2026-06-10T10:00:00Z",
+                agent_type: "Explore",
+                description: "find stuff",
+                tool_use_id: "tool-1",
+            },
+        ];
+        const usageRows = [
+            {
+                session_id: "session:claude-subagent-abc",
+                model: "claude-fable-5",
+                prompt_tokens: 1000,
+                completion_tokens: 500,
+                cache_read_tokens: 0,
+                cache_create_tokens: 0,
+                cost_usd: 0.05,
+            },
+        ];
+        const toolCallRows = [
+            {
+                session_id: "session:parent-1",
+                call_id: "tool-1",
+                input_json: JSON.stringify({ model: "fable", description: "find stuff" }),
+            },
+        ];
+        const layer = makeMockDb([spawnedRows, usageRows, toolCallRows, [], []]);
+        const result = await run(fetchDispatchCandidates({ sinceDays: 14 }), layer);
+
+        // dispatch_model is "fable" (not inherit) - excluded
+        expect(result.candidates).toHaveLength(0);
+    });
+
+    it("excludes dispatches where child model is NOT expensive (no fable/opus)", async () => {
+        const spawnedRows = [
+            {
+                parent_id: "session:parent-1",
+                child_id: "session:claude-subagent-cheap",
+                ts: "2026-06-10T10:00:00Z",
+                agent_type: "Explore",
+                description: "locate something",
+                tool_use_id: null,
+            },
+        ];
+        const usageRows = [
+            {
+                session_id: "session:claude-subagent-cheap",
+                model: "claude-haiku-4-5",  // not expensive
+                prompt_tokens: 1000,
+                completion_tokens: 500,
+                cache_read_tokens: 0,
+                cache_create_tokens: 0,
+                cost_usd: 0.001,
+            },
+        ];
+        const layer = makeMockDb([spawnedRows, usageRows, [], [], []]);
+        const result = await run(fetchDispatchCandidates({ sinceDays: 14 }), layer);
+
+        expect(result.candidates).toHaveLength(0);
+    });
+
+    it("excludes dispatches that don't match any routing class", async () => {
+        const spawnedRows = [
+            {
+                parent_id: "session:parent-1",
+                child_id: "session:claude-subagent-unmatched",
+                ts: "2026-06-10T10:00:00Z",
+                agent_type: "general-purpose",  // not in agentTypes table
+                description: "do some random work",  // no pattern match
+                tool_use_id: null,
+            },
+        ];
+        const usageRows = [
+            {
+                session_id: "session:claude-subagent-unmatched",
+                model: "claude-fable-5",
+                prompt_tokens: 1000,
+                completion_tokens: 500,
+                cache_read_tokens: 0,
+                cache_create_tokens: 0,
+                cost_usd: 0.10,
+            },
+        ];
+        const layer = makeMockDb([spawnedRows, usageRows, [], [], []]);
+        const result = await run(fetchDispatchCandidates({ sinceDays: 14 }), layer);
+
+        expect(result.candidates).toHaveLength(0);
+    });
+
+    it("includes candidates that match all three criteria and reprices correctly", async () => {
+        const spawnedRows = [
+            {
+                parent_id: "session:parent-1",
+                child_id: "session:claude-subagent-explore",
+                ts: "2026-06-10T10:00:00Z",
+                agent_type: "Explore",  // -> haiku
+                description: "locate all usages of function X",
+                tool_use_id: null,
+            },
+        ];
+        const usageRows = [
+            {
+                session_id: "session:claude-subagent-explore",
+                model: "claude-fable-5",  // expensive
+                prompt_tokens: 1_000_000,   // 1M tokens -> easy math
+                completion_tokens: 0,
+                cache_read_tokens: 0,
+                cache_create_tokens: 0,
+                cost_usd: 15.0,  // actual fable cost
+            },
+        ];
+        // agent_model pricing: haiku at $0.80/M input
+        const agentModels = [
+            {
+                name: "claude-haiku-4-5-20251001",
+                input_per_million_usd: 0.80,
+                output_per_million_usd: 4.0,
+                cache_read_per_million_usd: 0.08,
+                cache_creation_per_million_usd: 1.0,
+            },
+        ];
+        const layer = makeMockDb([spawnedRows, usageRows, [], [], agentModels]);
+        const result = await run(fetchDispatchCandidates({ sinceDays: 14 }), layer);
+
+        expect(result.candidates).toHaveLength(1);
+        const cand = result.candidates[0]!;
+        expect(cand.routing_match.suggest).toBe("haiku");
+        expect(cand.suggested_model).toBe("claude-haiku-4-5-20251001");
+        // repriced = 1M * 0.80/M = $0.80; savings = $15.0 - $0.80 = $14.20
+        expect(cand.est_savings_usd).toBeCloseTo(14.20, 2);
+        expect(result.total_est_savings_usd).toBeCloseTo(14.20, 2);
+    });
+
+    it("computes top_classes sorted by savings desc", async () => {
+        const spawnedRows = [
+            {
+                parent_id: "session:p1",
+                child_id: "session:claude-subagent-s1",
+                ts: "2026-06-10T10:00:00Z",
+                agent_type: "Explore",  // haiku -> big savings
+                description: "locate large code",
+                tool_use_id: null,
+            },
+            {
+                parent_id: "session:p1",
+                child_id: "session:claude-subagent-s2",
+                ts: "2026-06-10T10:01:00Z",
+                agent_type: null,
+                description: "spec review the PR",  // -> spec-review -> sonnet
+                tool_use_id: null,
+            },
+        ];
+        const usageRows = [
+            {
+                session_id: "session:claude-subagent-s1",
+                model: "claude-fable-5",
+                prompt_tokens: 1_000_000,
+                completion_tokens: 0,
+                cache_read_tokens: 0,
+                cache_create_tokens: 0,
+                cost_usd: 15.0,
+            },
+            {
+                session_id: "session:claude-subagent-s2",
+                model: "claude-opus-4",
+                prompt_tokens: 500_000,
+                completion_tokens: 0,
+                cache_read_tokens: 0,
+                cache_create_tokens: 0,
+                cost_usd: 7.5,
+            },
+        ];
+        const agentModels = [
+            {
+                name: "claude-haiku-4-5-20251001",
+                input_per_million_usd: 0.80,
+                output_per_million_usd: 4.0,
+                cache_read_per_million_usd: 0.08,
+                cache_creation_per_million_usd: 1.0,
+            },
+            {
+                name: "claude-sonnet-4-6",
+                input_per_million_usd: 3.0,
+                output_per_million_usd: 15.0,
+                cache_read_per_million_usd: 0.30,
+                cache_creation_per_million_usd: 3.75,
+            },
+        ];
+        const layer = makeMockDb([spawnedRows, usageRows, [], [], agentModels]);
+        const result = await run(fetchDispatchCandidates({ sinceDays: 14 }), layer);
+
+        expect(result.candidates).toHaveLength(2);
+        // top_classes: agent-type:Explore has bigger savings (~14.20) vs spec-review (~6.0)
+        expect(result.top_classes[0]?.classId).toBe("agent-type:Explore");
+        expect(result.top_classes.length).toBeLessThanOrEqual(3);
+    });
+});
+
+// ---------------------------------------------------------------------------
+// compile-routing
+// ---------------------------------------------------------------------------
+
+describe("compileRouting", () => {
+    it("writes valid JSON to the specified tmp path", async () => {
+        const outPath = join(tmpdir(), `routing-table-test-${Date.now()}.json`);
+        const res = await runCompileRouting(outPath);
+        expect(res.written).toBe(true);
+        expect(res.path).toBe(outPath);
+        const content = readFileSync(outPath, "utf8");
+        const parsed = JSON.parse(content);
+        expect(parsed.version).toBe(1);
+        expect(Array.isArray(parsed.classes)).toBe(true);
+        expect(typeof parsed.agentTypes).toBe("object");
+    });
+
+    it("written JSON has the correct class IDs", async () => {
+        const outPath = join(tmpdir(), `routing-table-ids-test-${Date.now()}.json`);
+        await runCompileRouting(outPath);
+        const parsed = JSON.parse(readFileSync(outPath, "utf8"));
+        const ids = (parsed.classes as Array<{ id: string }>).map((c) => c.id);
+        expect(ids).toContain("spec-review");
+        expect(ids).toContain("search-locate");
+        expect(ids).toContain("research");
+        expect(ids).toContain("well-specified-impl");
+    });
+
+    it("is idempotent - overwriting with same content succeeds", async () => {
+        const outPath = join(tmpdir(), `routing-table-idempotent-test-${Date.now()}.json`);
+        await runCompileRouting(outPath);
+        const first = readFileSync(outPath, "utf8");
+        await runCompileRouting(outPath); // second write
+        const second = readFileSync(outPath, "utf8");
+        expect(first).toBe(second);
+    });
+
+    it("agentTypes match ROUTING_CLASSES", async () => {
+        const outPath = join(tmpdir(), `routing-table-agent-types-test-${Date.now()}.json`);
+        await runCompileRouting(outPath);
+        const parsed = JSON.parse(readFileSync(outPath, "utf8"));
+        expect(parsed.agentTypes).toMatchObject(ROUTING_CLASSES.agentTypes);
+    });
+});

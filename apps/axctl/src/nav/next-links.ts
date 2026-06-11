@@ -35,6 +35,7 @@ import type {
     FetchAllRolesResult,
 } from "../dashboard/role-queries.ts";
 import type { CostModelsResult, CostSplitResult } from "../queries/cost-analytics.ts";
+import type { DispatchesResult, CandidatesResult } from "../queries/dispatch-analytics.ts";
 
 // ---------------------------------------------------------------------------
 // Protocol hint - appended to tool/CLI descriptions
@@ -531,6 +532,64 @@ export const buildImproveProposalsNext = (
         description: "Accept the top proposal (emits a .ax/tasks brief; CLI-only, mutating)",
         cmd: `ax improve accept ${first.sig}`,
         ui: { priority: 5, group: "act" },
+    });
+    return sortNavLinks(top);
+};
+
+// ---------------------------------------------------------------------------
+// dispatches / dispatch candidates
+// ---------------------------------------------------------------------------
+
+/** Top-level links for dispatch analytics. */
+export const buildDispatchesNext = (
+    result: DispatchesResult,
+): ReadonlyArray<NavLink> => {
+    const top: NavLink[] = [];
+    if (result.total_dispatches === 0) {
+        top.push({
+            description: "No dispatches - widen the window",
+            cmd: "ax dispatches --days=30",
+            ui: { priority: 8, group: "search" },
+        });
+        return top;
+    }
+    top.push({
+        description: "Show only routing candidates (inherit + expensive + matching class)",
+        call: { tool: "dispatches", arguments: { days: 14, candidates: true } },
+        cmd: "ax dispatches --candidates",
+        ui: { priority: 7, group: "read" },
+    });
+    top.push({
+        description: "Split cost by origin (main vs subagent) × model",
+        call: { tool: "cost_split", arguments: {} },
+        cmd: "ax cost split",
+        ui: { priority: 6, group: "read" },
+    });
+    return sortNavLinks(top);
+};
+
+/** Top-level links for dispatch candidates. */
+export const buildCandidatesNext = (
+    result: CandidatesResult,
+): ReadonlyArray<NavLink> => {
+    const top: NavLink[] = [];
+    if (result.candidates.length === 0) {
+        top.push({
+            description: "No candidates - see full dispatch table",
+            cmd: "ax dispatches --days=30",
+            ui: { priority: 8, group: "search" },
+        });
+        return top;
+    }
+    top.push({
+        description: "Write routing table to ~/.ax/hooks/routing-table.json",
+        cmd: "ax dispatches compile-routing",
+        ui: { priority: 7, group: "act" },
+    });
+    top.push({
+        description: "Full dispatch table (all dispatches, not just candidates)",
+        cmd: "ax dispatches",
+        ui: { priority: 6, group: "read" },
     });
     return sortNavLinks(top);
 };
