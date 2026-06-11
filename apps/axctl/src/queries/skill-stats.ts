@@ -13,19 +13,12 @@ import { Effect } from "effect";
 import { SurrealClient } from "@ax/lib/db";
 import { dateField, numberFieldOrZero } from "@ax/lib/shared/row-fields";
 import { prettifyProjectSlug } from "@ax/lib/shared/project-slug";
+import { skillWithInvocationsSql } from "./skill-invocations-sql.ts";
 
-export const SKILL_STATS_SQL = `
-LET $s = (SELECT * FROM skill WHERE name = $name)[0];
-RETURN {
-    skill: $s,
-    invocations: {
-        total: array::len((SELECT * FROM invoked WHERE out = $s.id)),
-        d7:    array::len((SELECT * FROM invoked WHERE out = $s.id AND ts > time::now() - 7d)),
-        d30:   array::len((SELECT * FROM invoked WHERE out = $s.id AND ts > time::now() - 30d)),
-        d90:   array::len((SELECT * FROM invoked WHERE out = $s.id AND ts > time::now() - 90d)),
-        last:  (SELECT ts FROM invoked WHERE out = $s.id ORDER BY ts DESC LIMIT 1)[0].ts,
-    },
-    recent_sessions: (
+export const SKILL_STATS_SQL = skillWithInvocationsSql({
+    windows: [7, 30, 90],
+    blocks: [
+        `    recent_sessions: (
         SELECT
             in.session AS session_id,
             in.session.project AS project_slug,
@@ -35,8 +28,9 @@ RETURN {
         WHERE out = $s.id
         ORDER BY ts DESC
         LIMIT 50
-    )
-};`;
+    )`,
+    ],
+});
 
 export interface SkillStatsInvocations {
     readonly total: number;
