@@ -594,7 +594,7 @@ export const formatSessionChurnSummary = (summary: SessionChurnSummary): string 
         loc(row.editLinesAdded, row.editLinesRemoved),
         loc(row.repairLinesAdded, row.repairLinesRemoved),
         row.topCheck ?? "-",
-        row.taskLabel ?? "-",
+        row.taskLabel === null ? "-" : truncate(singleLine(row.taskLabel), 48),
     ]);
 
     return [
@@ -854,6 +854,8 @@ const dateishToIsoOrNull = (value: Date | string | null): string | null =>
     value === null ? null : dateishToIso(value);
 
 const loc = (added: number, removed: number): string => `+${added}/-${removed}`;
+
+const singleLine = (text: string): string => text.split(/\r?\n/, 1)[0]?.trim() ?? text;
 
 const truncate = (text: string, max: number): string =>
     text.length <= max ? text : `${text.slice(0, Math.max(0, max - 3))}...`;

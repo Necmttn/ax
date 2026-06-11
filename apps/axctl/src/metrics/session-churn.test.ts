@@ -664,6 +664,19 @@ describe("fetchSessionChurnSummary", () => {
 });
 
 describe("formatSessionChurnSummary", () => {
+    test("flattens and truncates multi-line task labels in the table", () => {
+        const summary = computeSessionChurn([
+            edit("s1", 1, 1),
+            fail("s1", 2, "test"),
+        ], landed([]), health([["s1", "<goal_context>\nContinue working toward the active thread goal.\nMore lines here that go on and on beyond any reasonable width."]]));
+
+        const rendered = formatSessionChurnSummary(summary);
+        const taskLines = rendered.split("\n").filter((line) => line.includes("<goal_context>"));
+        expect(taskLines).toHaveLength(1);
+        expect(taskLines[0]!.length).toBeLessThanOrEqual(160);
+        expect(rendered).not.toContain("Continue working");
+    });
+
     test("renders the empty formatter hint", () => {
         const summary = computeSessionChurn([], landed([]), health([]));
 

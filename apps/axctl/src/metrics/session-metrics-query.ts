@@ -1,7 +1,7 @@
 import { Effect } from "effect";
 import { SurrealClient } from "@ax/lib/db";
 import type { DbError } from "@ax/lib/errors";
-import { surrealDate, surrealString } from "@ax/lib/shared/surql";
+import { surrealDate } from "@ax/lib/shared/surql";
 import { nonEmptyString } from "@ax/lib/shared/derive-keys";
 import { fetchSessionCostMap } from "./cost-estimate.ts";
 import { chunked, cleanSessionId, numOrNull, numOrZero, sessionRefList, strOrNull } from "./util.ts";
