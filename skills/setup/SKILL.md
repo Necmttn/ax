@@ -74,8 +74,8 @@ ax skills classify        # writes .ax/tasks/classify-<skill>.md per unclassifie
 
 For each brief written:
 1. Read the skill (its SKILL.md / what it does) and the brief's evidence.
-2. Fill the YAML at the bottom of the brief: `primary_role:` (required, one
-   label), plus optional `secondary_roles:`, `confidence:` (0–1), `rationale:`.
+2. Fill the YAML frontmatter at the top of the brief: `primary_role:` (required,
+   one label), plus optional `secondary:`, `confidence:` (0–1), `rationale:`.
    Run `ax roles` to see labels already in use; reuse them when they fit.
 3. Apply + check:
 

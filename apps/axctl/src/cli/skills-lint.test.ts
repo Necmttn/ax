@@ -21,8 +21,8 @@ import { cmdSkillsLint, type LintReport } from "./skills-lint.ts";
 // ---------------------------------------------------------------------------
 // Test fixtures
 // Briefs have YAML frontmatter at the very top (--- block), matching the
-// classify brief spec. The rendering template wraps the YAML in a fenced
-// code block for readability, but filled briefs have the frontmatter at top.
+// classify brief spec. The rendering template scaffolds the frontmatter at
+// the top of the file, so filled briefs keep it there.
 // ---------------------------------------------------------------------------
 
 const FILLED_BRIEF = `---
