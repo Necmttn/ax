@@ -95,6 +95,13 @@ describe("normalizeCheckFamily", () => {
         expect(normalizeCheckFamily("")).toBeNull();
         expect(normalizeCheckFamily("date")).toBeNull();
     });
+
+    test("does not classify commands that merely mention check keywords", () => {
+        expect(normalizeCheckFamily("ls test/")).toBeNull();
+        expect(normalizeCheckFamily("rg foo test/ -l")).toBeNull();
+        expect(normalizeCheckFamily("cat build.log")).toBeNull();
+        expect(normalizeCheckFamily("git checkout build")).toBeNull();
+    });
 });
 
 describe("computeSessionChurn", () => {
@@ -454,6 +461,49 @@ describe("fetchSessionChurnSummary", () => {
             passedEpisodes: 0,
             repairLinesAdded: 2,
         });
+    });
+
+    test("incidental keyword successes and hook names do not close episodes", async () => {
+        const summary = await Effect.runPromise(fetchSessionChurnSummary({
+            since: null,
+            limit: 20,
+            generatedAt: new Date("2026-06-11T00:00:00.000Z"),
+        }).pipe(Effect.provide(db({
+            base: [{ session: "session:`s1`", source: "claude" }],
+            edits: [{ session: "session:`s1`", ts: "2026-06-11T00:01:00.000Z", name: "Edit", input_json: JSON.stringify({ old_string: "a", new_string: "a\nb" }) }],
+            outcomes: [
+                { session: "session:`s1`", ts: "2026-06-11T00:02:00.000Z", kind: "expected_feedback", status: "error", command_text: "bun test" },
+                { session: "session:`s1`", ts: "2026-06-11T00:03:00.000Z", kind: "success", status: "ok", command_text: "ls test/" },
+            ],
+            hooks: [
+                { session: "session:`s1`", ts: "2026-06-11T00:04:00.000Z", provider_status: "success", effect: "allowed", exit_code: 0, command: "bun /Users/x/.ax/hooks/guard.ts", hook_name: "bun-test-blocking" },
+            ],
+        }))));
+
+        expect(summary.hotSessions[0]).toMatchObject({
+            session: "s1",
+            verificationFailures: 1,
+            verificationPasses: 0,
+            episodes: 1,
+            passedEpisodes: 0,
+        });
+    });
+
+    test("fail-side output text never infers a check family", async () => {
+        const summary = await Effect.runPromise(fetchSessionChurnSummary({
+            since: null,
+            limit: 20,
+            generatedAt: new Date("2026-06-11T00:00:00.000Z"),
+        }).pipe(Effect.provide(db({
+            base: [{ session: "session:`s1`", source: "claude" }],
+            edits: [{ session: "session:`s1`", ts: "2026-06-11T00:01:00.000Z", name: "Edit", input_json: JSON.stringify({ old_string: "a", new_string: "a\nb" }) }],
+            outcomes: [
+                { session: "session:`s1`", ts: "2026-06-11T00:02:00.000Z", kind: "unknown", status: "error", command_text: "git push", text: "remote: check your credentials" },
+            ],
+        }))));
+
+        expect(summary.hotSessions).toEqual([]);
+        expect(summary.aggregates).toEqual([]);
     });
 
     test("command_text takes precedence over command_norm and tool names", async () => {

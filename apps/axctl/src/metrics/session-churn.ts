@@ -12,6 +12,7 @@ import {
     toolClassInputOf,
 } from "@ax/lib/shared/tool-classes";
 import { editDelta } from "../dashboard/loc-query.ts";
+import { coerceCheckFamily } from "../ingest/check-family.ts";
 import { applyPatchDelta } from "./session-loc.ts";
 import { fetchSessionHealthMap } from "./session-metrics-query.ts";
 import { cleanSessionId } from "./util.ts";
@@ -140,20 +141,10 @@ interface MutableAggregateState {
 const DEFAULT_LIMIT = 10;
 const IN_CHUNK = 500;
 
-export const normalizeCheckFamily = (raw: string | null): string | null => {
-    if (raw === null) return null;
-    const text = raw.trim().toLowerCase();
-    if (text.length === 0) return null;
-
-    if (/\boxlint\b/.test(text) || /\boxc\b/.test(text)) return "oxlint";
-    if (/\beslint\b/.test(text)) return "eslint";
-    if (/\blint\b/.test(text)) return "lint";
-    if (/\b(tsc|typecheck|tsgo)\b/.test(text)) return "typecheck";
-    if (/\b(bun\s+test|vitest|jest|playwright|test)\b/.test(text)) return "test";
-    if (/\bbuild\b/.test(text)) return "build";
-    if (/\bcheck\b/.test(text)) return "check";
-    return null;
-};
+// Accepts an already-canonical family ("test") or a raw command ("bun test");
+// raw commands classify only when the check is in command position.
+export const normalizeCheckFamily = (raw: string | null): string | null =>
+    coerceCheckFamily(raw);
 
 export const computeSessionChurn = (
     events: readonly ChurnEvent[],
@@ -432,7 +423,7 @@ const fetchCommandOutcomeEvents = (
                     ? "verification_pass"
                     : null;
             if (eventKind === null) continue;
-            const check = commandOutcomeCheck(row, eventKind);
+            const check = commandOutcomeCheck(row);
             if (session.length === 0 || tsMs === null || check === null) continue;
             events.push({
                 session,
@@ -468,7 +459,9 @@ const fetchHookEvents = (
         for (const row of rows) {
             const session = cleanSessionId(String(row.session ?? ""));
             const tsMs = msOrNull(row.ts);
-            const check = normalizedCheckFrom(row.command, row.hook_name);
+            // Classify by the hook's command only - hook_name keywords (e.g.
+            // "bun-test-blocking") must not register as verification events.
+            const check = normalizedCheckFrom(row.command);
             if (session.length === 0 || tsMs === null || check === null) continue;
             const providerStatus = strOrNull(row.provider_status);
             const effect = strOrNull(row.effect);
@@ -725,13 +718,11 @@ const normalizedCheckFrom = (...values: readonly unknown[]): string | null => {
     return null;
 };
 
-const commandOutcomeCheck = (
-    row: Record<string, unknown>,
-    eventKind: "verification_fail" | "verification_pass",
-): string | null =>
-    eventKind === "verification_fail"
-        ? normalizedCheckFrom(row.command_text, row.command_norm, row.command_tool, row.text)
-        : normalizedCheckFrom(row.command_text, row.command_norm, row.command_tool);
+// Classify strictly from the command itself (text, then normalized form).
+// Output text and the provider tool name (command_tool) are never consulted -
+// "remote: check your credentials" is not a check run.
+const commandOutcomeCheck = (row: Record<string, unknown>): string | null =>
+    normalizedCheckFrom(row.command_text, row.command_norm);
 
 const exitCodeOf = (value: unknown): number | null => {
     if (value === null || value === undefined) return null;
