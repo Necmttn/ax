@@ -230,6 +230,16 @@ Every proposal carries its evidence trail (`ax improve show <id>`). Verdicts
 land on session-count windows, so a skill that stopped firing gets caught, not
 forgotten.
 
+## Author your own guards
+
+Write a hook once in typed TypeScript, prove it against your own history, run it in Claude Code and Codex.
+
+```bash
+ax hooks init                                    # scaffold ~/.ax/hooks (TypeScript, @ax/hooks-sdk)
+ax hooks backtest ~/.ax/hooks/my-guard.ts        # replay weeks of real tool calls through it first
+ax hooks install ~/.ax/hooks/my-guard.ts --providers=claude,codex
+```
+
 ## Your agent can query all of this mid-session
 
 Two integration paths, same graph:

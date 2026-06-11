@@ -130,6 +130,28 @@ compiled binary should work too - untested in v0). Mutating
 ops + `sessions_here`/`near` (need a git-resolved repo key) are intentionally not
 exposed. Server: `apps/axctl/src/mcp/server.ts`; registry: `apps/axctl/src/mcp/tools.ts`.
 
+## Hooks SDK
+
+`@ax/hooks-sdk` (packages/hooks-sdk) - author agent hooks once in typed Effect
+TS, run them on Claude Code + Codex. Hook = one file in `~/.ax/hooks/`
+default-exporting `defineHook({ name, events, matcher, run })`; fire path is
+`bun <file>.ts` (no axctl in the hot path; ~70ms). Verdicts: allow / block /
+warn / inject; defects fail OPEN. `GitEnv` service makes guards layer-testable.
+
+- `ax hooks init` - scaffold `~/.ax/hooks` (file: dep on packages/hooks-sdk;
+  re-run after the SDK moves - the dep is an absolute path)
+- `ax hooks install <abs-file> --providers=claude,codex` - idempotent fan-out
+  into provider configs via the existing codecs (ax ownership markers)
+- `ax hooks backtest <file> [--days]` - replay tool_call history through the
+  hook in-process; state-dependent checks use CURRENT repo state (caveat printed)
+- `ax hooks cases` - deterministic feedback-case backtests (enforce-worktree
+  candidate query + structured pass/fail verdict; separate from backtest)
+- Codex: new hook entries written to `~/.codex/hooks.json` when that file
+  exists; falls back to `~/.codex/config.toml` otherwise. New/changed entries
+  require interactive trust approval in the codex TUI before they fire.
+- The worktree guards (enforce-worktree, enforce-worktree-write) run via the
+  SDK in both harnesses; bash originals retired (kept on disk as fallback)
+
 ## Workflow Candidate Guardrails
 
 <!--ax:guidance__workflow_candidate__b7717e979a1fb149-->

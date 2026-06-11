@@ -221,6 +221,14 @@ ${safetyLines(i)}
 }
 \`\`\`
 
+Preferred implementation: author this as an SDK hook instead of a manual entry -
+  1. ax hooks init                          (scaffold ~/.ax/hooks if missing)
+  2. write ~/.ax/hooks/<name>.ts            (defineHook from @ax/hooks-sdk; see existing guards there)
+  3. ax hooks backtest ~/.ax/hooks/<name>.ts --days=14   (validate against history BEFORE installing)
+  4. ax hooks install ~/.ax/hooks/<name>.ts --providers=claude,codex
+
+(The manual-JSON entry above remains the fallback for non-SDK or non-TypeScript cases.)
+
 ## References
 - proposal: ${i.proposalId}
 - experiment: ${i.experimentId}

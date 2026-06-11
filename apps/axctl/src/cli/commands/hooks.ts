@@ -221,14 +221,17 @@ const hooksSessionCommand = Command.make(
         }),
 ).pipe(Command.withDescription("List native harness hook command invocations for one session"));
 
-const hooksBacktestCase = Argument.choice("case", ["enforce-worktree"] as const).pipe(
+const hooksCaseArg = Argument.choice("case", ["enforce-worktree"] as const).pipe(
     Argument.withDefault("enforce-worktree"),
 );
 
-const hooksBacktestCommand = Command.make(
-    "backtest",
+// Renamed from "backtest": that name now belongs to the SDK replay command
+// (hooks/cli.ts) which backtests arbitrary hook files; this one scores known
+// feedback cases.
+const hooksCasesCommand = Command.make(
+    "cases",
     {
-        caseName: hooksBacktestCase,
+        caseName: hooksCaseArg,
         since: Flag.integer("since").pipe(Flag.optional),
         tail: Flag.integer("tail").pipe(Flag.withDefault(100)),
         window: Flag.integer("window").pipe(Flag.withDefault(3)),
@@ -252,13 +255,13 @@ const hooksBacktestCommand = Command.make(
 ).pipe(Command.withDescription("Run deterministic feedback-case backtests for hook evidence"));
 
 export const hooksCommand = Command.make("hooks").pipe(
-    Command.withDescription("Hook config CRUD (config/add/remove/edit/disable/enable) + evidence (summary/invocations/session/backtest)"),
+    Command.withDescription("Hook config CRUD (config/add/remove/edit/disable/enable) + evidence (summary/invocations/session/cases) + SDK hooks (init/install/backtest)"),
     Command.withSubcommands([
         ...hooksConfigSubcommands,
         hooksSummaryCommand,
         hooksInvocationsCommand,
         hooksSessionCommand,
-        hooksBacktestCommand,
+        hooksCasesCommand,
     ]),
 );
 

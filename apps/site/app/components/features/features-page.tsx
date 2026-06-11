@@ -496,58 +496,77 @@ export function FeaturesPage() {
         <div className="section-head">
           <span className="section-num">05 / Hooks</span>
           <h2>
-            Watch tool fires in <em>real time.</em>
+            Write a hook once, <em>run it in both.</em>
           </h2>
           <p className="section-lede">
-            Claude Code and Codex call hook handlers around every tool invocation. ax ships handlers that
-            record each fire as a row, and lets you backtest a candidate hook against your last 7–30 days
-            before turning it on for real.
+            Claude Code and Codex each have their own hook config and zero shared tooling.{" "}
+            <code className="inline">@ax/hooks-sdk</code> lets you author a guardrail once in typed
+            Effect TypeScript, backtest it against your own tool history, and install the same file
+            into both harnesses.
           </p>
         </div>
 
         <div className="hooks-wrap">
           <div className="hook-code">
             <div className="bar">
-              <span className="filename">~/.claude/hooks/ax-record.ts</span>
+              <span className="filename">~/.ax/hooks/enforce-worktree.ts</span>
               <span style={{ marginLeft: "auto" }}>ts</span>
             </div>
             <pre>
-              <span className="kw">import</span> {"{ recordHook } "}
-              <span className="kw">from</span> <span className="str">&quot;ax/hooks&quot;</span>;{"\n\n"}
-              <span className="kw">export default async function</span>{" "}
-              <span className="fn">handler</span>(<span className="pn">event</span>) {"{"}
-              {"\n  "}
-              <span className="cm">{`// every pre-tool fire becomes one row`}</span>
-              {"\n  "}
-              <span className="kw">await</span> <span className="fn">recordHook</span>({"{"}
-              {"\n    phase:   "}
-              <span className="str">&quot;pre_tool&quot;</span>,{"\n    tool:    event.tool_name,\n    session: event.session_id,\n    inputs:  event.tool_input,\n    at:      "}
-              <span className="kw">new</span> Date(),{"\n  });\n}"}
+              <span className="kw">import</span> {"{ defineHook, Verdict, GitEnv } "}
+              <span className="kw">from</span> <span className="str">&quot;@ax/hooks-sdk&quot;</span>;{"\n"}
+              <span className="kw">import</span> {"{ Effect } "}
+              <span className="kw">from</span> <span className="str">&quot;effect&quot;</span>;{"\n\n"}
+              <span className="kw">export default</span> <span className="fn">defineHook</span>({"{"}
+              {"\n  name:    "}
+              <span className="str">&quot;enforce-worktree&quot;</span>,
+              {"\n  events:  ["}
+              <span className="str">&quot;PreToolUse&quot;</span>
+              {"],\n  matcher: { tools: ["}
+              <span className="str">&quot;Bash&quot;</span>
+              {"] },\n  run: (event) =>\n    Effect.gen(function* () {\n      "}
+              <span className="kw">const</span>
+              {" git = "}
+              <span className="kw">yield*</span>
+              {" GitEnv;\n      "}
+              <span className="cm">{`// block branch switches on the primary tree`}</span>
+              {"\n      "}
+              <span className="kw">if</span>
+              {" (switchesBranch(event) &&\n          (yield* git.isPrimaryTree(event.cwd)))\n        "}
+              <span className="kw">return</span>
+              {" Verdict."}
+              <span className="fn">block</span>(<span className="str">&quot;use a worktree instead&quot;</span>);
+              {"\n      "}
+              <span className="kw">return</span>
+              {" Verdict.allow;\n    }),\n});"}
             </pre>
           </div>
 
           <div className="hook-bullets">
             <div className="hook-bullet">
-              <div className="b-title">Phase coverage</div>
+              <div className="b-title">One file, both harnesses</div>
               <div className="b-body">
-                <code className="inline">pre_tool</code>, <code className="inline">post_tool</code>, and{" "}
-                <code className="inline">stop</code> are all captured. Hook rows link back to the{" "}
-                <code className="inline">turn</code> and <code className="inline">tool_call</code> that fired them.
+                <code className="inline">ax hooks init</code> scaffolds <code className="inline">~/.ax/hooks</code>.{" "}
+                <code className="inline">ax hooks install &lt;file&gt; --providers=claude,codex</code> fans the
+                same hook into both provider configs, idempotently. Fire path is{" "}
+                <code className="inline">bun &lt;file&gt;.ts</code> - about 70ms, no daemon.
               </div>
             </div>
             <div className="hook-bullet">
-              <div className="b-title">Inspect + backtest</div>
+              <div className="b-title">Backtest before you trust it</div>
               <div className="b-body">
-                <code className="inline">ax hooks</code> shows fire counts, marker reconciliation, and
-                who-installed-what. <code className="inline">ax hooks backtest ./my-hook.ts --days 14</code>
-                {" "}replays the last two weeks of tool calls through a candidate before you ship it.
+                <code className="inline">ax hooks backtest ./my-hook.ts --days=14</code> replays your real{" "}
+                <code className="inline">tool_call</code> history through the hook in-process: would-block
+                count and rate, per-project breakdown, sample blocked commands. First real run: 10,992
+                calls replayed, 0.8% would-block.
               </div>
             </div>
             <div className="hook-bullet">
-              <div className="b-title">No daemon, no socket</div>
+              <div className="b-title">Fail open, always</div>
               <div className="b-body">
-                Hooks write directly to the local SurrealDB. If ax isn&apos;t running, the handler no-ops in
-                under a millisecond - your agent never blocks on us.
+                <code className="inline">run</code> returns a verdict - allow, block with a reason, warn,
+                or inject context. A hook that throws fails open: the tool call proceeds, and a buggy
+                guard never wedges your agent.
               </div>
             </div>
           </div>
@@ -579,8 +598,10 @@ export function FeaturesPage() {
             <span className="desc">Builds a just-in-time context pack from the graph for the next session.</span>
           </div>
           <div className="cli-row">
-            <span className="cmd">ax hooks</span>
-            <span className="desc">Inspect installed hooks, fire counts, marker reconciliation, and backtest candidates.</span>
+            <span className="cmd">
+              ax hooks <span className="arg">init / install / backtest / cases</span>
+            </span>
+            <span className="desc">Scaffold ~/.ax/hooks, fan a hook into Claude Code + Codex, replay history through it, score known cases.</span>
           </div>
           <div className="cli-row">
             <span className="cmd">ax doctor</span>
