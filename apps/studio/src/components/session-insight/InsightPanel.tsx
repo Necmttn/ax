@@ -5,31 +5,36 @@ import type { SessionInsightsPayload, SessionListRow } from "@ax/lib/shared/dash
 import { StoryBar } from "./StoryBar.tsx";
 
 const LBL: CSSProperties = {
-    fontSize: 10,
+    fontSize: 9,
     color: "var(--sx-ink-500)",
     letterSpacing: "0.06em",
     textTransform: "uppercase",
     fontWeight: 600,
-    marginBottom: 8,
+    marginBottom: 6,
 };
 
 const CAP: CSSProperties = {
     fontSize: 10,
     color: "var(--sx-ink-500)",
-    marginTop: 6,
-    lineHeight: 1.5,
+    marginTop: 5,
+    lineHeight: 1.35,
     whiteSpace: "normal",
     overflowWrap: "anywhere",
 };
 
 const CHART_BAND: CSSProperties = {
-    minHeight: 36,
+    minHeight: 28,
     display: "flex",
     flexDirection: "column",
     justifyContent: "center",
 };
 
 const clamp01 = (n: number): number => Math.min(1, Math.max(0, n));
+
+const compactKind = (kind: string): string => kind
+    .replace(/_/g, " ")
+    .replace(/\btool failure\b/i, "tool fail")
+    .replace(/\buser correction\b/i, "correction");
 
 function OutcomeCell({ p }: { readonly p: SessionInsightsPayload }): ReactNode {
     const hasChecks = p.checks.length > 0;
@@ -38,8 +43,9 @@ function OutcomeCell({ p }: { readonly p: SessionInsightsPayload }): ReactNode {
 
     const reverted = p.commits.filter((c) => c.reverted).length;
     const durability = p.durability === null ? null : clamp01(p.durability);
+    const visibleRuns = 12;
     return (
-        <div style={{ padding: "0 14px", minWidth: 0 }}>
+        <div style={{ minWidth: 0 }}>
             <div style={LBL}>Outcome</div>
             <div style={CHART_BAND}>
                 {p.checks.map((c) => (
@@ -48,33 +54,36 @@ function OutcomeCell({ p }: { readonly p: SessionInsightsPayload }): ReactNode {
                         style={{
                             display: "flex",
                             alignItems: "center",
-                            gap: 5,
+                            gap: 4,
                             fontSize: 10,
                             color: "var(--sx-ink-500)",
-                            height: 13,
+                            height: 12,
                             minWidth: 0,
                         }}
                     >
-                        <span style={{ width: 36, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flexShrink: 0 }}>
-                            {c.kind}
+                        <span title={c.kind} style={{ width: 48, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flexShrink: 0 }}>
+                            {compactKind(c.kind)}
                         </span>
-                        {c.runs.map((r, i) => (
+                        {c.runs.slice(0, visibleRuns).map((r, i) => (
                             <span
                                 key={i}
                                 title={r.ts}
                                 style={{
-                                    width: 6,
-                                    height: 6,
+                                    width: 5,
+                                    height: 5,
                                     borderRadius: "50%",
                                     flexShrink: 0,
                                     background: r.ok ? "var(--sx-green-700)" : "var(--sx-red-700)",
                                 }}
                             />
                         ))}
+                        {c.runs.length > visibleRuns ? (
+                            <span style={{ color: "var(--sx-ink-300)", marginLeft: 2 }}>+{c.runs.length - visibleRuns}</span>
+                        ) : null}
                     </div>
                 ))}
                 {durability !== null ? (
-                    <div style={{ marginTop: 5, maxWidth: 160, height: 6, borderRadius: 2, overflow: "hidden", display: "flex" }}>
+                    <div style={{ marginTop: 5, maxWidth: 130, height: 5, borderRadius: 2, overflow: "hidden", display: "flex" }}>
                         <span style={{ width: `${Math.round(durability * 100)}%`, background: "var(--sx-green-300)" }} />
                         <span style={{ flex: 1, background: "var(--sx-red-300)" }} />
                     </div>
@@ -100,12 +109,12 @@ function LocCell({ p }: { readonly p: SessionInsightsPayload }): ReactNode {
     const total = Math.max(1, added + removed);
     const fmt = (n: number): string => n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n);
     return (
-        <div style={{ padding: "0 14px", minWidth: 0 }}>
+        <div style={{ minWidth: 0 }}>
             <div style={LBL}>Delta LOC</div>
             <div style={CHART_BAND}>
-                <div style={{ display: "flex", alignItems: "center", maxWidth: 180, minWidth: 0 }}>
-                    <span style={{ width: `${(added / total) * 100}%`, height: 6, background: "var(--sx-green-300)", borderRadius: 1 }} />
-                    <span style={{ width: `${(removed / total) * 100}%`, height: 6, background: "var(--sx-red-300)", borderRadius: 1, marginLeft: 2 }} />
+                <div style={{ display: "flex", alignItems: "center", maxWidth: 150, minWidth: 0 }}>
+                    <span style={{ width: `${(added / total) * 100}%`, height: 5, background: "var(--sx-green-300)", borderRadius: 1 }} />
+                    <span style={{ width: `${(removed / total) * 100}%`, height: 5, background: "var(--sx-red-300)", borderRadius: 1, marginLeft: 2 }} />
                 </div>
             </div>
             <div style={CAP}>
@@ -119,22 +128,39 @@ function LocCell({ p }: { readonly p: SessionInsightsPayload }): ReactNode {
 function SkillArcCell({ p }: { readonly p: SessionInsightsPayload }): ReactNode {
     if (p.skills.length === 0) return null;
     const arc = p.skills.filter((s, i) => i === 0 || s.name !== p.skills[i - 1]!.name);
+    const labelOf = (name: string): string => {
+        const normalized = name.replace(/^v\d+:/, "").toLowerCase();
+        if (normalized.includes("spawn_agent")) return "spawn";
+        if (normalized.includes("wait_agent")) return "wait";
+        if (normalized.includes("exec_command")) return "exec";
+        if (normalized.includes("apply_patch")) return "patch";
+        if (normalized.includes("update_plan")) return "plan";
+        if (normalized.includes("view_image")) return "image";
+        if (normalized.includes("web_run")) return "web";
+        if (normalized.includes("read") || normalized.includes("open")) return "read";
+        return normalized
+            .replace(/^codex_/, "")
+            .replace(/^claude_/, "")
+            .replace(/_/g, " ")
+            .replace(/:.*/, "")
+            .slice(0, 18);
+    };
     return (
-        <div style={{ padding: "0 14px", minWidth: 0 }}>
+        <div style={{ minWidth: 0 }}>
             <div style={LBL}>Skill arc</div>
             <div style={CHART_BAND}>
-                <div style={{ lineHeight: 1.7, minWidth: 0, overflow: "hidden" }}>
-                    {arc.slice(0, 8).map((s, i) => (
+                <div style={{ lineHeight: 1.45, minWidth: 0, overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis" }}>
+                    {arc.slice(0, 5).map((s, i) => (
                         <span key={`${s.name}-${i}`}>
-                            {i > 0 ? <span style={{ color: "var(--sx-ink-300)" }}> -&gt; </span> : null}
+                            {i > 0 ? <span style={{ color: "var(--sx-ink-300)" }}> → </span> : null}
                             <span
                                 title={s.name}
                                 style={{
                                     display: "inline-block",
-                                    maxWidth: "100%",
+                                    maxWidth: 130,
                                     fontSize: 10,
-                                    padding: "1px 7px",
-                                    borderRadius: 8,
+                                    padding: "1px 5px",
+                                    borderRadius: 3,
                                     background: "var(--sx-line-100)",
                                     color: "var(--sx-ink-600)",
                                     overflow: "hidden",
@@ -143,11 +169,11 @@ function SkillArcCell({ p }: { readonly p: SessionInsightsPayload }): ReactNode 
                                     verticalAlign: "bottom",
                                 }}
                             >
-                                {s.name}
+                                {labelOf(s.name)}
                             </span>
                         </span>
                     ))}
-                    {arc.length > 8 ? <span style={{ color: "var(--sx-ink-300)" }}> +{arc.length - 8}</span> : null}
+                    {arc.length > 5 ? <span style={{ color: "var(--sx-ink-300)" }}> +{arc.length - 5}</span> : null}
                 </div>
             </div>
             <div style={CAP}>{arc.length} skill{arc.length === 1 ? "" : "s"}</div>
@@ -176,10 +202,10 @@ function ContextCell({ p }: { readonly p: SessionInsightsPayload }): ReactNode {
     });
 
     return (
-        <div style={{ padding: "0 14px", minWidth: 0 }}>
+        <div style={{ minWidth: 0 }}>
             <div style={LBL}>Context</div>
             <div style={CHART_BAND}>
-                <svg width="100%" height={height} viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none" aria-hidden>
+                <svg width="100%" height={height} viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none" aria-hidden style={{ maxWidth: 260 }}>
                     <line
                         x1={0}
                         y1={yOf(0.9)}
@@ -222,7 +248,7 @@ function BaselineFooter({ p }: { readonly p: SessionInsightsPayload }): ReactNod
     return (
         <div style={{
             marginTop: 14,
-            paddingTop: 8,
+            paddingTop: 7,
             borderTop: "1px dashed var(--sx-line-200)",
             fontSize: 10,
             color: "var(--sx-ink-500)",
@@ -300,14 +326,15 @@ export function InsightPanel({ row }: { readonly row: SessionListRow }) {
     ].filter((cell) => cell.node !== null && cell.node !== undefined && cell.node !== false);
 
     return (
-        <div style={{ padding: "12px 16px 14px 38px", minWidth: 0 }}>
+        <div style={{ padding: "10px 16px 10px 38px", minWidth: 0 }}>
             <StoryBar insights={p} startedAt={row.started_at} endedAt={row.ended_at} />
             {cells.length > 0 ? (
                 <div style={{
                     display: "grid",
-                    gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
-                    gap: "14px 0",
-                    marginTop: 16,
+                    gridTemplateColumns: "minmax(150px, 0.85fr) minmax(150px, 0.85fr) minmax(220px, 1.25fr) minmax(220px, 1.15fr)",
+                    gap: "12px 28px",
+                    marginTop: 12,
+                    alignItems: "start",
                 }}>
                     {cells.map((cell) => <div key={cell.key}>{cell.node}</div>)}
                 </div>

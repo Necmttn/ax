@@ -51,26 +51,28 @@ export function StoryBar({ insights, startedAt, endedAt }: {
     const reverted = insights.commits.filter((c) => c.reverted).length;
     const landed = insights.commits.length - reverted;
     const hasLanes = insights.subagent_spans.some((s) => s.started_at !== null);
+    const visibleFriction = insights.friction_ticks.slice(0, 18);
+    const visibleSubagents = insights.subagent_spans.filter((s) => s.started_at !== null).slice(0, 28);
 
     return (
-        <div style={{ maxWidth: 760, minWidth: 0 }}>
+        <div style={{ maxWidth: 720, minWidth: 0 }}>
             <div style={{
-                fontSize: 10,
+                fontSize: 9,
                 color: "var(--sx-ink-500)",
                 letterSpacing: "0.06em",
                 textTransform: "uppercase",
                 fontWeight: 600,
-                marginBottom: 8,
+                marginBottom: 6,
             }}>
                 Story
             </div>
-            <div style={{ position: "relative", width: "100%", height: hasLanes ? 36 : 24 }}>
+            <div style={{ position: "relative", width: "100%", height: hasLanes ? 24 : 18 }}>
                 <span style={{
                     position: "absolute",
-                    top: 1,
+                    top: 0,
                     left: 0,
                     right: 0,
-                    height: 10,
+                    height: 7,
                     background: "var(--sx-phase-idle)",
                 }} />
                 {insights.phases.map((p, i) => {
@@ -83,8 +85,8 @@ export function StoryBar({ insights, startedAt, endedAt }: {
                             title={`${p.phase} ${fmtMs(p.duration_ms)}`}
                             style={{
                                 position: "absolute",
-                                top: 1,
-                                height: 10,
+                                top: 0,
+                                height: 7,
                                 left: `${left}%`,
                                 width: `${Math.max(0.5, right - left)}%`,
                                 background: PHASE_COLOR[p.phase] ?? "var(--sx-phase-exec)",
@@ -92,7 +94,7 @@ export function StoryBar({ insights, startedAt, endedAt }: {
                         />
                     );
                 })}
-                {insights.friction_ticks.map((f, i) => {
+                {visibleFriction.map((f, i) => {
                     const left = pct(f.ts);
                     if (left === null) return null;
                     return (
@@ -101,11 +103,12 @@ export function StoryBar({ insights, startedAt, endedAt }: {
                             title={f.kind}
                             style={{
                                 position: "absolute",
-                                top: -3,
+                                top: -2,
                                 width: 2,
-                                height: 18,
+                                height: 12,
                                 left: `${left}%`,
                                 background: "var(--sx-red-700)",
+                                opacity: 0.82,
                             }}
                         />
                     );
@@ -119,7 +122,7 @@ export function StoryBar({ insights, startedAt, endedAt }: {
                             title={`${c.sha} (reverted)`}
                             style={{
                                 position: "absolute",
-                                top: 13,
+                                top: 8,
                                 left: `${left}%`,
                                 transform: "translateX(-50%)",
                                 color: "var(--sx-red-700)",
@@ -136,9 +139,9 @@ export function StoryBar({ insights, startedAt, endedAt }: {
                             title={c.sha}
                             style={{
                                 position: "absolute",
-                                top: 15,
-                                width: 7,
-                                height: 7,
+                                top: 10,
+                                width: 6,
+                                height: 6,
                                 borderRadius: "50%",
                                 left: `${left}%`,
                                 transform: "translateX(-50%)",
@@ -147,7 +150,7 @@ export function StoryBar({ insights, startedAt, endedAt }: {
                         />
                     );
                 })}
-                {insights.subagent_spans.map((s, i) => {
+                {visibleSubagents.map((s, i) => {
                     const left = pct(s.started_at);
                     if (left === null) return null;
                     const right = pct(s.ended_at) ?? 100;
@@ -157,12 +160,13 @@ export function StoryBar({ insights, startedAt, endedAt }: {
                             title={s.id}
                             style={{
                                 position: "absolute",
-                                top: 27,
-                                height: 5,
+                                top: 19,
+                                height: 4,
                                 borderRadius: 2,
                                 left: `${left}%`,
                                 width: `${Math.max(1, right - left)}%`,
                                 background: "var(--sx-violet-500)",
+                                opacity: 0.72,
                             }}
                         />
                     );
@@ -171,12 +175,12 @@ export function StoryBar({ insights, startedAt, endedAt }: {
             <div style={{
                 fontSize: 10,
                 color: "var(--sx-ink-500)",
-                marginTop: 6,
-                lineHeight: 1.5,
+                marginTop: 4,
+                lineHeight: 1.35,
                 whiteSpace: "normal",
                 overflowWrap: "anywhere",
             }}>
-                {Array.from(phaseTotals.entries()).map(([k, v]) => `${k} ${fmtMs(v)}`).join(" · ")}
+                {Array.from(phaseTotals.entries()).slice(0, 3).map(([k, v]) => `${k} ${fmtMs(v)}`).join(" · ")}
                 {idleMs > 60_000 ? <span style={{ color: "var(--sx-ink-300)" }}> · idle {fmtMs(idleMs)}</span> : null}
                 {insights.friction_ticks.length > 0
                     ? <span style={{ color: "var(--sx-red-700)" }}> · x{insights.friction_ticks.length} corrections</span>
