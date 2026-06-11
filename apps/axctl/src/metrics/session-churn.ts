@@ -265,8 +265,7 @@ export const fetchSessionChurnSummary = (
 SELECT type::string(session) AS session, session.source AS source
 FROM session_metrics
 ${where}
-ORDER BY session.started_at DESC
-LIMIT ${limit};`))?.[0] ?? [];
+ORDER BY session.started_at DESC;`))?.[0] ?? [];
 
         const sessionIds = uniqueCleanSessionIds(baseRows.map((row) => String(row.session ?? "")));
         const sourceBySession = new Map<string, string | null>();
@@ -413,8 +412,9 @@ const fetchCommandOutcomeEvents = (
         const rows = (yield* Effect.all(
             chunked(sessionIds, IN_CHUNK).map((ids) =>
                 db.query<[Array<Record<string, unknown>>]>(
-                    `SELECT type::string(session) AS session, type::string(ts) AS ts, kind, status, command_norm, command_tool, text`
-                    + ` FROM command_outcome WHERE session IN [${sessionRefList(ids)}] ORDER BY ts ASC;`,
+                    `SELECT type::string(session) AS session, type::string(ts) AS ts, kind, status, command_text, command_norm, command_tool, text`
+                    + ` FROM command_outcome WHERE session IN [${sessionRefList(ids)}]`
+                    + ` AND (kind = "expected_feedback" OR status = "ok") ORDER BY ts ASC;`,
                 ),
             ),
             { concurrency: 4 },
@@ -424,8 +424,6 @@ const fetchCommandOutcomeEvents = (
         for (const row of rows) {
             const session = cleanSessionId(String(row.session ?? ""));
             const tsMs = msOrNull(row.ts);
-            const check = normalizedCheckFrom(row.command_norm, row.command_tool, row.text);
-            if (session.length === 0 || tsMs === null || check === null) continue;
             const status = strOrNull(row.status);
             const kind = strOrNull(row.kind);
             const eventKind = kind === "expected_feedback" || status === "error"
@@ -434,6 +432,8 @@ const fetchCommandOutcomeEvents = (
                     ? "verification_pass"
                     : null;
             if (eventKind === null) continue;
+            const check = commandOutcomeCheck(row, eventKind);
+            if (session.length === 0 || tsMs === null || check === null) continue;
             events.push({
                 session,
                 source: sourceBySession.get(session) ?? null,
@@ -724,6 +724,14 @@ const normalizedCheckFrom = (...values: readonly unknown[]): string | null => {
     }
     return null;
 };
+
+const commandOutcomeCheck = (
+    row: Record<string, unknown>,
+    eventKind: "verification_fail" | "verification_pass",
+): string | null =>
+    eventKind === "verification_fail"
+        ? normalizedCheckFrom(row.command_text, row.command_norm, row.command_tool, row.text)
+        : normalizedCheckFrom(row.command_text, row.command_norm, row.command_tool);
 
 const exitCodeOf = (value: unknown): number | null => {
     if (value === null || value === undefined) return null;

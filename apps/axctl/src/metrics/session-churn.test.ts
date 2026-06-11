@@ -54,6 +54,7 @@ const db = (input: {
     outcomes?: Array<Record<string, unknown>>;
     hooks?: Array<Record<string, unknown>>;
     seenSql?: string[];
+    respectBaseLimit?: boolean;
 }) =>
     Layer.succeed(SurrealClient, {
         query: <T>(sql: string) => {
@@ -64,7 +65,9 @@ const db = (input: {
             if (sql.includes("FROM tool_call")) return Effect.succeed([input.edits ?? []] as unknown as T);
             if (sql.includes("FROM command_outcome")) return Effect.succeed([input.outcomes ?? []] as unknown as T);
             if (sql.includes("FROM hook_command_invocation")) return Effect.succeed([input.hooks ?? []] as unknown as T);
-            return Effect.succeed([input.base] as unknown as T);
+            const limit = input.respectBaseLimit ? Number(sql.match(/\bLIMIT\s+(\d+)/)?.[1] ?? NaN) : NaN;
+            const base = Number.isFinite(limit) ? input.base.slice(0, limit) : input.base;
+            return Effect.succeed([base] as unknown as T);
         },
     } as never);
 
@@ -302,6 +305,41 @@ describe("fetchSessionChurnSummary", () => {
         expect(seenSql[0]).toContain("FROM session_metrics");
     });
 
+    test("limit only caps hot sessions after ranking, not the base session scan", async () => {
+        const seenSql: string[] = [];
+        const summary = await Effect.runPromise(fetchSessionChurnSummary({
+            since: null,
+            limit: 1,
+            generatedAt: new Date("2026-06-11T00:00:00.000Z"),
+        }).pipe(Effect.provide(db({
+            respectBaseLimit: true,
+            seenSql,
+            base: [
+                { session: "session:`newer-quiet`", source: "codex" },
+                { session: "session:`older-hot`", source: "codex" },
+                { session: "session:`older-warm`", source: "codex" },
+            ],
+            edits: [
+                { session: "session:`older-hot`", ts: "2026-06-11T00:01:00.000Z", name: "Edit", input_json: JSON.stringify({ old_string: "a", new_string: "a\nb" }) },
+                { session: "session:`older-warm`", ts: "2026-06-11T00:01:00.000Z", name: "Edit", input_json: JSON.stringify({ old_string: "a", new_string: "a\nb" }) },
+            ],
+            outcomes: [
+                { session: "session:`older-hot`", ts: "2026-06-11T00:02:00.000Z", status: "error", command_norm: "tsc" },
+                { session: "session:`older-hot`", ts: "2026-06-11T00:03:00.000Z", status: "error", command_norm: "eslint" },
+                { session: "session:`older-warm`", ts: "2026-06-11T00:02:00.000Z", status: "error", command_norm: "tsc" },
+            ],
+        }))));
+
+        const baseSql = seenSql.find((s) => s.includes("FROM session_metrics"))!;
+        expect(baseSql).not.toContain("LIMIT 1");
+        expect(summary.hotSessions.map((row) => row.session)).toEqual(["older-hot"]);
+        expect(summary.aggregates).toHaveLength(1);
+        expect(summary.aggregates[0]).toMatchObject({
+            sessions: 2,
+            verificationFailures: 3,
+        });
+    });
+
     test("landed LOC joins produced commits to touched files in JS", async () => {
         const summary = await Effect.runPromise(fetchSessionChurnSummary({
             since: null,
@@ -382,6 +420,60 @@ describe("fetchSessionChurnSummary", () => {
             passedEpisodes: 2,
         });
         expect(summary.hotSessions[0].topCheck).toBe("eslint");
+    });
+
+    test("successful command_outcome text does not classify or close verification episodes", async () => {
+        const seenSql: string[] = [];
+        const summary = await Effect.runPromise(fetchSessionChurnSummary({
+            since: null,
+            limit: 20,
+            generatedAt: new Date("2026-06-11T00:00:00.000Z"),
+        }).pipe(Effect.provide(db({
+            seenSql,
+            base: [{ session: "session:`s1`", source: "codex" }],
+            edits: [
+                { session: "session:`s1`", ts: "2026-06-11T00:01:00.000Z", name: "Edit", input_json: JSON.stringify({ old_string: "a", new_string: "a\nb" }) },
+                { session: "session:`s1`", ts: "2026-06-11T00:03:00.000Z", name: "Edit", input_json: JSON.stringify({ old_string: "b", new_string: "b\nc" }) },
+            ],
+            outcomes: [
+                { session: "session:`s1`", ts: "2026-06-11T00:02:00.000Z", kind: "expected_feedback", status: "error", command_norm: "tsc" },
+                { session: "session:`s1`", ts: "2026-06-11T00:04:00.000Z", kind: "success", status: "ok", command_norm: "cat", text: "README mentions bun test and build" },
+                { session: "session:`s1`", ts: "2026-06-11T00:05:00.000Z", kind: "success", status: "ok", command_norm: "bun test" },
+            ],
+        }))));
+
+        const outcomeSql = seenSql.find((s) => s.includes("FROM command_outcome"))!;
+        expect(outcomeSql).toContain('AND (kind = "expected_feedback" OR status = "ok")');
+        expect(summary.hotSessions[0]).toMatchObject({
+            session: "s1",
+            verificationFailures: 1,
+            verificationPasses: 1,
+            episodes: 1,
+            passedEpisodes: 0,
+            repairLinesAdded: 2,
+        });
+    });
+
+    test("command_text takes precedence over command_norm and tool names", async () => {
+        const summary = await Effect.runPromise(fetchSessionChurnSummary({
+            since: null,
+            limit: 20,
+            generatedAt: new Date("2026-06-11T00:00:00.000Z"),
+        }).pipe(Effect.provide(db({
+            base: [{ session: "session:`s1`", source: "codex" }],
+            edits: [{ session: "session:`s1`", ts: "2026-06-11T00:01:00.000Z", name: "Edit", input_json: JSON.stringify({ old_string: "a", new_string: "a\nb" }) }],
+            outcomes: [
+                { session: "session:`s1`", ts: "2026-06-11T00:02:00.000Z", kind: "expected_feedback", status: "error", command_text: "bun run typecheck", command_norm: "bun", command_tool: "test" },
+                { session: "session:`s1`", ts: "2026-06-11T00:03:00.000Z", kind: "success", status: "ok", command_text: "bun run typecheck", command_norm: "bun", command_tool: "test" },
+            ],
+        }))));
+
+        expect(summary.hotSessions[0]).toMatchObject({
+            topCheck: "typecheck",
+            verificationFailures: 1,
+            verificationPasses: 1,
+            passedEpisodes: 1,
+        });
     });
 });
 
