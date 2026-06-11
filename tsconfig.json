@@ -24,13 +24,7 @@
         "name": "@effect/language-service",
         "ignoreEffectWarningsInTscExitCode": true
       }
-    ],
-    "paths": {
-      "@ax/lib": ["./packages/lib/src/index.ts"],
-      "@ax/lib/*": ["./packages/lib/src/*.ts"],
-      "@ax/schema": ["./packages/schema/src/index.ts"],
-      "@ax/schema/*": ["./packages/schema/src/*.ts"]
-    }
+    ]
   },
   "include": ["apps/axctl/src/**/*.ts", "apps/axctl/src/**/*.tsx", "apps/axctl/src/**/*.d.ts", "packages/**/*.ts"],
   "exclude": ["apps/studio/**"]
