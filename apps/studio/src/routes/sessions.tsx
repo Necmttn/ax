@@ -1,7 +1,11 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
+import type { CSSProperties, MouseEvent } from "react";
 import { useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { api } from "../api.ts";
+import { BurnSpark } from "../components/session-insight/BurnSpark.tsx";
+import { InsightPanel } from "../components/session-insight/InsightPanel.tsx";
+import { SignalBadge } from "../components/session-insight/SignalBadge.tsx";
 import { sessionProjectLabel } from "@ax/lib/shared/project-slug";
 import type { SessionListResponse, SessionListRow } from "@ax/lib/shared/dashboard-types";
 import { shortSessionId } from "@ax/lib/shared/session-id";
@@ -46,15 +50,19 @@ function SourceBadge({ source }: { source: string }) {
 interface RowProps {
     readonly s: SessionListRow;
     readonly indent?: boolean;
+    readonly burnP90?: number | null;
     readonly expandedToggle?: { expanded: boolean; childCount: number; loading?: boolean; onToggle: () => void };
+    readonly insight?: { open: boolean; onToggle: () => void };
     readonly select?: { checked: boolean; onToggle: () => void };
 }
 
-function Row({ s, indent, expandedToggle, select }: RowProps) {
+function Row({ s, indent, burnP90, expandedToggle, insight, select }: RowProps) {
     // The wire seam delivers a bare session id (see src/lib/shared/session-id.ts);
     // any backtick/`session:` prefix reaching us would be a server bug.
     const sid = s.id;
     const project = sessionProjectLabel(s.project, s.cwd);
+    const open = insight?.open ?? false;
+    const panelId = `session-insight-${sid}`;
 
     // Warm the inspect-data query on hover/focus - intent-based prefetch
     // avoids stampeding the API when the page has 200 rows.
@@ -68,10 +76,32 @@ function Row({ s, indent, expandedToggle, select }: RowProps) {
         });
     };
 
-    const rowStyle = indent ? { background: "#fafafa" } : undefined;
+    const rowStyle: CSSProperties | undefined = open
+        ? {
+            background: "var(--sx-tint-50)",
+            boxShadow: "inset 3px 0 0 var(--sx-ink-900)",
+            cursor: "pointer",
+        }
+        : indent
+            ? { background: "#fafafa" }
+            : insight
+                ? { cursor: "pointer" }
+                : undefined;
+
+    const onRowClick = (event: MouseEvent<HTMLTableRowElement>) => {
+        if (!insight) return;
+        const target = event.target;
+        if (target instanceof Element && target.closest("a,button,input")) return;
+        insight.onToggle();
+    };
 
     return (
-        <tr style={rowStyle} onMouseEnter={onIntent} onFocus={onIntent}>
+        <tr
+            style={rowStyle}
+            onClick={onRowClick}
+            onMouseEnter={onIntent}
+            onFocus={onIntent}
+        >
             <td style={{ textAlign: "center", width: 28 }}>
                 <input
                     type="checkbox"
@@ -80,7 +110,33 @@ function Row({ s, indent, expandedToggle, select }: RowProps) {
                     aria-label={`Select ${shortSessionId(s.id)} to compare`}
                 />
             </td>
-            <td style={{ fontFamily: "ui-monospace, monospace", fontSize: 12, paddingLeft: indent ? 32 : 8 }}>
+            <td style={{ fontFamily: "ui-monospace, monospace", fontSize: 12, paddingLeft: indent ? 32 : 8, whiteSpace: "nowrap" }}>
+                {insight ? (
+                    <button
+                        type="button"
+                        onClick={insight.onToggle}
+                        aria-expanded={open}
+                        aria-controls={panelId}
+                        title={open ? "Collapse insight panel" : "Expand insight panel"}
+                        style={{
+                            border: "none",
+                            background: "transparent",
+                            padding: 0,
+                            cursor: "pointer",
+                            display: "inline-block",
+                            width: 12,
+                            marginRight: 4,
+                            color: "var(--sx-ink-500)",
+                            transform: open ? "rotate(90deg)" : "rotate(0deg)",
+                            transition: "transform 120ms ease",
+                            fontFamily: "inherit",
+                            fontSize: 12,
+                            lineHeight: 1,
+                        }}
+                    >
+                        ▶
+                    </button>
+                ) : null}
                 {expandedToggle ? (
                     <button
                         onClick={expandedToggle.onToggle}
@@ -98,6 +154,23 @@ function Row({ s, indent, expandedToggle, select }: RowProps) {
                 ) : (
                     <span style={{ display: "inline-block", width: 32 }} />
                 )}
+                {s.is_live ? (
+                    <span
+                        title="Live session"
+                        style={{
+                            display: "inline-block",
+                            width: 7,
+                            height: 7,
+                            borderRadius: "50%",
+                            background: "var(--sx-green-700)",
+                            boxShadow: "0 0 0 3px var(--sx-green-100)",
+                            margin: "0 5px 1px 1px",
+                            verticalAlign: "middle",
+                        }}
+                    >
+                        <span className="sr-only">live session</span>
+                    </span>
+                ) : null}
                 <code title={s.id} style={{ marginLeft: 4 }}>{shortSessionId(s.id)}</code>
             </td>
             <td><SourceBadge source={s.source} /></td>
@@ -105,6 +178,15 @@ function Row({ s, indent, expandedToggle, select }: RowProps) {
             <td style={{ fontFamily: "ui-monospace, monospace", fontSize: 12, color: "var(--muted)" }}>{fmtTs(s.started_at)}</td>
             <td style={{ fontFamily: "ui-monospace, monospace", fontSize: 12, color: "var(--muted)", textAlign: "right" }}>{fmtDuration(s.started_at, s.ended_at)}</td>
             <td style={{ textAlign: "right", fontFamily: "ui-monospace, monospace", fontSize: 12, fontVariantNumeric: "tabular-nums", color: s.turn_count > 0 ? "var(--ink)" : "var(--muted-2)" }}>{s.turn_count > 0 ? s.turn_count.toLocaleString() : "-"}</td>
+            <td style={{ textAlign: "center", padding: "6px 8px" }}>
+                <BurnSpark buckets={s.burn_buckets} p90={burnP90 ?? null} />
+            </td>
+            <td style={{ textAlign: "right", fontFamily: "ui-monospace, monospace", fontSize: 12, fontVariantNumeric: "tabular-nums", color: s.cost_usd != null ? "var(--ink)" : "var(--sx-ink-300)" }}>
+                {s.cost_usd != null ? `$${s.cost_usd.toFixed(2)}` : "–"}
+            </td>
+            <td style={{ textAlign: "left", padding: "6px 8px" }}>
+                <SignalBadge signal={s.signal} friction={s.friction} />
+            </td>
             <td style={{ display: "flex", gap: 8, alignItems: "center" }}>
                 {s.has_raw_file ? (
                     <Link to="/sessions/$sessionId" params={{ sessionId: sid }} preload="intent" style={{ color: "var(--blue)", fontWeight: 600 }}>
@@ -130,6 +212,7 @@ export function SessionsRoute() {
     const [sourceFilter, setSourceFilter] = useState<SourceFilter>("all");
     const [search, setSearch] = useState("");
     const [expanded, setExpanded] = useState<ReadonlySet<string>>(() => new Set());
+    const [insightOpen, setInsightOpen] = useState<ReadonlySet<string>>(() => new Set());
     const [selected, setSelected] = useState<ReadonlySet<string>>(() => new Set());
 
     const toggleSelected = (id: string) => {
@@ -272,6 +355,15 @@ export function SessionsRoute() {
         });
     };
 
+    const toggleInsight = (id: string) => {
+        setInsightOpen((prev) => {
+            const next = new Set(prev);
+            if (next.has(id)) next.delete(id);
+            else next.add(id);
+            return next;
+        });
+    };
+
     const allExpandableIds = useMemo(
         () => filteredRoots.filter((r) => childCountOf(r) > 0).map((r) => r.id),
         [filteredRoots],
@@ -353,7 +445,8 @@ export function SessionsRoute() {
             </div>
             {query.isLoading && !query.data ? <div className="loading">Loading…</div> : null}
             {query.data ? (
-                <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                <div style={{ overflowX: "auto", WebkitOverflowScrolling: "touch" }}>
+                <table style={{ width: "100%", minWidth: 1120, borderCollapse: "collapse" }}>
                     <thead>
                         <tr style={{ background: "var(--page)", fontSize: 11, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.05em" }}>
                             <th style={{ width: 28 }}></th>
@@ -363,6 +456,9 @@ export function SessionsRoute() {
                             <th style={{ textAlign: "left", padding: "6px 8px" }}>started</th>
                             <th style={{ textAlign: "right", padding: "6px 8px" }}>duration</th>
                             <th style={{ textAlign: "right", padding: "6px 8px" }}>turns</th>
+                            <th style={{ textAlign: "center", padding: "6px 8px" }}>burn</th>
+                            <th style={{ textAlign: "right", padding: "6px 8px" }}>cost</th>
+                            <th style={{ textAlign: "left", padding: "6px 8px" }}>signal</th>
                             <th style={{ textAlign: "left", padding: "6px 8px" }}></th>
                         </tr>
                     </thead>
@@ -375,6 +471,8 @@ export function SessionsRoute() {
                                 <Fragment key={parent.id}>
                                     <Row
                                         s={parent}
+                                        burnP90={query.data?.burn_p90 ?? null}
+                                        insight={{ open: insightOpen.has(parent.id), onToggle: () => toggleInsight(parent.id) }}
                                         select={{ checked: selected.has(parent.id), onToggle: () => toggleSelected(parent.id) }}
                                         {...(childCount > 0
                                             ? {
@@ -387,6 +485,21 @@ export function SessionsRoute() {
                                             }
                                             : {})}
                                     />
+                                    {insightOpen.has(parent.id) ? (
+                                        <tr id={`session-insight-${parent.id}`}>
+                                            <td
+                                                colSpan={11}
+                                                style={{
+                                                    padding: 0,
+                                                    background: "var(--sx-tint-50)",
+                                                    boxShadow: "inset 3px 0 0 var(--sx-ink-900)",
+                                                    borderBottom: "1px solid var(--sx-line-200)",
+                                                }}
+                                            >
+                                                <InsightPanel row={parent} />
+                                            </td>
+                                        </tr>
+                                    ) : null}
                                     {isExpanded
                                         ? (kidState?.rows ?? []).map((child) => (
                                             <Row
@@ -402,7 +515,7 @@ export function SessionsRoute() {
                         })}
                         {allRoots.length < totalCount ? (
                             <tr ref={sentinelRef}>
-                                <td colSpan={8} style={{
+                                <td colSpan={11} style={{
                                     padding: "12px 24px", color: "var(--muted)", fontSize: 12,
                                     fontFamily: "ui-monospace, monospace",
                                     textAlign: "center", borderTop: "1px dashed var(--line)",
@@ -428,6 +541,7 @@ export function SessionsRoute() {
                         ) : null}
                     </tbody>
                 </table>
+                </div>
             ) : null}
         </section>
     );

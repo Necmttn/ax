@@ -9,11 +9,18 @@ export function BurnSpark({ buckets, p90 }: {
         return <span style={{ color: "var(--sx-ink-300)" }}>–</span>;
     }
     const max = Math.max(...buckets, 1);
+    const outliers = p90 === null ? 0 : buckets.filter((b) => b > p90).length;
+    const label = `token burn sparkline, ${buckets.length} buckets, peak ${Math.round(max)} tokens${p90 === null ? "" : `, ${outliers} above 30 day p90`}`;
     return (
-        <span style={{ display: "inline-flex", alignItems: "flex-end", gap: 1, height: 14 }} aria-hidden>
+        <span
+            style={{ display: "inline-flex", alignItems: "flex-end", gap: 1, height: 14 }}
+            role="img"
+            aria-label={label}
+        >
             {buckets.map((b, i) => (
                 <i
                     key={i}
+                    aria-hidden
                     style={{
                         display: "block",
                         width: 3,

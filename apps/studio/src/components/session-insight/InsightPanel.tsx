@@ -292,12 +292,12 @@ export function InsightPanel({ row }: { readonly row: SessionListRow }) {
         return <div style={{ padding: "12px 16px", fontSize: 10, color: "var(--sx-ink-300)" }}>no insight data for this session</div>;
     }
 
-    const cells = [
-        ["outcome", OutcomeCell({ p })],
-        ["loc", LocCell({ p })],
-        ["skills", SkillArcCell({ p })],
-        ["context", ContextCell({ p })],
-    ].filter((cell): cell is readonly [string, Exclude<ReactNode, null | undefined | false>] => Boolean(cell[1]));
+    const cells: Array<{ readonly key: string; readonly node: ReactNode }> = [
+        { key: "outcome", node: OutcomeCell({ p }) },
+        { key: "loc", node: LocCell({ p }) },
+        { key: "skills", node: SkillArcCell({ p }) },
+        { key: "context", node: ContextCell({ p }) },
+    ].filter((cell) => cell.node !== null && cell.node !== undefined && cell.node !== false);
 
     return (
         <div style={{ padding: "12px 16px 14px 38px", minWidth: 0 }}>
@@ -309,7 +309,7 @@ export function InsightPanel({ row }: { readonly row: SessionListRow }) {
                     gap: "14px 0",
                     marginTop: 16,
                 }}>
-                    {cells.map(([key, cell]) => <div key={key}>{cell}</div>)}
+                    {cells.map((cell) => <div key={cell.key}>{cell.node}</div>)}
                 </div>
             ) : null}
             <BaselineFooter p={p} />
