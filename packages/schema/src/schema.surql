@@ -1082,6 +1082,9 @@ DEFINE FIELD command       ON ingest_run TYPE string;
 DEFINE FIELD status        ON ingest_run TYPE string DEFAULT 'running';
 DEFINE FIELD since_days    ON ingest_run TYPE option<int>;
 DEFINE FIELD started_at    ON ingest_run TYPE datetime DEFAULT time::now();
+-- Heartbeat: bumped on every stage start/finish so a genuinely-live "running"
+-- run is distinguishable from one stranded by a crash (doctor stale-run check).
+DEFINE FIELD last_progress_at ON ingest_run TYPE option<datetime>;
 DEFINE FIELD ended_at      ON ingest_run TYPE option<datetime>;
 DEFINE FIELD metrics       ON ingest_run TYPE option<string>;
 DEFINE INDEX IF NOT EXISTS ingest_run_status_started ON ingest_run FIELDS status, started_at;

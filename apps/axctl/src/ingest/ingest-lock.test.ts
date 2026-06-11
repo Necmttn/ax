@@ -48,7 +48,7 @@ describe("withIngestLock", () => {
             ),
         );
         expect(ran).toBe(true);
-        expect(result).toBe("ran");
+        expect(result).toEqual({ _tag: "completed", value: "ran" });
         // released after work completes
         expect(existsSync(lockPath)).toBe(false);
     });
@@ -67,7 +67,7 @@ describe("withIngestLock", () => {
             ),
         );
         expect(ran).toBe(false);
-        expect(result).toBe(`busy:${process.pid}`);
+        expect(result).toEqual({ _tag: "busy", value: `busy:${process.pid}` });
     });
 
     test("steals a stale lock (older than staleMs) and runs work", async () => {
@@ -115,7 +115,7 @@ describe("withIngestLock", () => {
         expect(existsSync(lockPath)).toBe(false);
     });
 
-    test("on timeout: KEEPS the lock (cooldown) and runs onTimeout", async () => {
+    test("on timeout: KEEPS the lock (cooldown), runs onTimeout, returns a distinguishable timeout outcome", async () => {
         let timedOut = false;
         const result = await run(
             withIngestLock(
@@ -133,9 +133,33 @@ describe("withIngestLock", () => {
             ),
         );
         expect(timedOut).toBe(true);
-        expect(result).toBeUndefined();
+        // NOT a success value: callers must be able to exit non-zero (#265)
+        expect(result).toEqual({ _tag: "timeout" });
         // lock deliberately left in place so the DB gets a cooldown window
         expect(existsSync(lockPath)).toBe(true);
+    });
+
+    test("onTimeout runs AFTER the interrupted work's finalizers complete", async () => {
+        const order: string[] = [];
+        await run(
+            withIngestLock(
+                {
+                    lockPath,
+                    command: "ingest",
+                    staleMs: STALE_MS,
+                    timeoutSeconds: 1,
+                    now: () => T0,
+                    onBusy: () => Effect.succeed("busy" as const),
+                    onTimeout: () => Effect.sync(() => { order.push("onTimeout"); }),
+                },
+                // work's own finalizer (e.g. withIngestRunFinish settling the
+                // ingest_run row) must have run before onTimeout overwrites it.
+                Effect.never.pipe(
+                    Effect.ensuring(Effect.sync(() => { order.push("work-finalizer"); })),
+                ),
+            ),
+        );
+        expect(order).toEqual(["work-finalizer", "onTimeout"]);
     });
 
     test("atomic acquire: a fresh live holder is never overwritten", async () => {
