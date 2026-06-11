@@ -282,6 +282,21 @@ describe("effect cli", () => {
         expect(DB_COMMANDS.has("pricing")).toBe(true);
     });
 
+    test("share and star route through manifests as no-DB commands - no dispatch bypass (#242)", () => {
+        const names = topLevelNames();
+        expect(names).toContain("share");
+        expect(names).toContain("star");
+        expect(RUNTIME_BY_COMMAND["share"]).toBe("none");
+        expect(RUNTIME_BY_COMMAND["star"]).toBe("none");
+        expect(DB_COMMANDS.has("share")).toBe(false);
+        expect(DB_COMMANDS.has("star")).toBe(false);
+        // star is the nudge target (`ax star --done`), not a discovery surface
+        const byName = new Map(
+            rootCommand.subcommands.flatMap((g) => g.commands.map((c) => [c.name, c] as const)),
+        );
+        expect(byName.get("star")?.hidden).toBe(true);
+    });
+
     test("DB-backed classifier package-operation flags are routed through DB", () => {
         expect(classifiersPackageOperationsNeedsDb([
             "classifiers",
