@@ -14,6 +14,7 @@ import {
 import { editDelta } from "../dashboard/loc-query.ts";
 import { checkFamilyFromCommand, coerceCheckFamily, commandNormNeedsText } from "../ingest/check-family.ts";
 import { applyPatchDelta } from "./session-loc.ts";
+import { sessionProjectClause } from "./session-filter.ts";
 import { fetchSessionHealthMap } from "./session-metrics-query.ts";
 import { cleanSessionId } from "./util.ts";
 import { chunked, numOrZero, sessionRefList, strOrNull } from "./util.ts";
@@ -272,10 +273,7 @@ export const fetchSessionChurnSummary = (
         // irrelevant here - ids feed a Set and events are re-sorted in JS.
         const clauses: string[] = [];
         if (input.since) clauses.push(`started_at >= ${surrealDate(input.since)}`);
-        if (project !== null) {
-            const projectSql = surrealString(project);
-            clauses.push(`(project = ${projectSql} OR cwd = ${projectSql})`);
-        }
+        if (project !== null) clauses.push(sessionProjectClause(project));
         if (source !== null) clauses.push(`source = ${surrealString(source)}`);
         const where = clauses.length > 0 ? `WHERE ${clauses.join(" AND ")}` : "";
         const baseRows = (yield* db.query<[Array<Record<string, unknown>>]>(`
