@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, MouseEvent } from "react";
 import { useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate } from "@tanstack/react-router";
@@ -51,18 +51,40 @@ interface RowProps {
     readonly s: SessionListRow;
     readonly indent?: boolean;
     readonly burnP90?: number | null;
-    readonly expandedToggle?: { expanded: boolean; childCount: number; loading?: boolean; onToggle: () => void };
-    readonly insight?: { open: boolean; onToggle: () => void };
-    readonly select?: { checked: boolean; onToggle: () => void };
+    // Expanded-toggle props (root rows with children only)
+    readonly childCount?: number;
+    readonly childLoading?: boolean;
+    readonly expanded?: boolean;
+    readonly onToggleExpanded?: (id: string) => void;
+    // Insight panel props (root rows only)
+    readonly insightOpen?: boolean;
+    readonly onToggleInsight?: (id: string) => void;
+    // Selection props (all rows)
+    readonly isSelected?: boolean;
+    readonly onToggleSelect: (id: string) => void;
 }
 
-function Row({ s, indent, burnP90, expandedToggle, insight, select }: RowProps) {
+const Row = memo(function Row({
+    s,
+    indent,
+    burnP90,
+    childCount,
+    childLoading,
+    expanded,
+    onToggleExpanded,
+    insightOpen,
+    onToggleInsight,
+    isSelected,
+    onToggleSelect,
+}: RowProps) {
     // The wire seam delivers a bare session id (see src/lib/shared/session-id.ts);
     // any backtick/`session:` prefix reaching us would be a server bug.
     const sid = s.id;
     const project = sessionProjectLabel(s.project, s.cwd);
-    const open = insight?.open ?? false;
+    const open = insightOpen ?? false;
     const panelId = `session-insight-${sid}`;
+    const hasInsight = onToggleInsight != null;
+    const hasExpandedToggle = onToggleExpanded != null && childCount != null && childCount > 0;
 
     // Warm the inspect-data query on hover/focus - intent-based prefetch
     // avoids stampeding the API when the page has 200 rows.
@@ -84,15 +106,15 @@ function Row({ s, indent, burnP90, expandedToggle, insight, select }: RowProps) 
         }
         : indent
             ? { background: "#fafafa" }
-            : insight
+            : hasInsight
                 ? { cursor: "pointer" }
                 : undefined;
 
     const onRowClick = (event: MouseEvent<HTMLTableRowElement>) => {
-        if (!insight) return;
+        if (!hasInsight) return;
         const target = event.target;
         if (target instanceof Element && target.closest("a,button,input")) return;
-        insight.onToggle();
+        onToggleInsight(sid);
     };
 
     return (
@@ -105,16 +127,16 @@ function Row({ s, indent, burnP90, expandedToggle, insight, select }: RowProps) 
             <td style={{ textAlign: "center", width: 28 }}>
                 <input
                     type="checkbox"
-                    checked={select?.checked ?? false}
-                    onChange={() => select?.onToggle()}
+                    checked={isSelected ?? false}
+                    onChange={() => onToggleSelect(sid)}
                     aria-label={`Select ${shortSessionId(s.id)} to compare`}
                 />
             </td>
             <td style={{ fontFamily: "ui-monospace, monospace", fontSize: 12, paddingLeft: indent ? 32 : 8, whiteSpace: "nowrap" }}>
-                {insight ? (
+                {hasInsight ? (
                     <button
                         type="button"
-                        onClick={insight.onToggle}
+                        onClick={() => onToggleInsight(sid)}
                         aria-expanded={open}
                         aria-controls={panelId}
                         title={open ? "Collapse insight panel" : "Expand insight panel"}
@@ -137,17 +159,17 @@ function Row({ s, indent, burnP90, expandedToggle, insight, select }: RowProps) 
                         ▶
                     </button>
                 ) : null}
-                {expandedToggle ? (
+                {hasExpandedToggle ? (
                     <button
-                        onClick={expandedToggle.onToggle}
+                        onClick={() => onToggleExpanded(sid)}
                         style={{
                             border: "none", background: "transparent", cursor: "pointer",
                             padding: "0 6px 0 0", fontFamily: "inherit", fontSize: 12, color: "var(--muted)",
                         }}
-                        title={`${expandedToggle.expanded ? "Collapse" : "Expand"} ${expandedToggle.childCount} subagent${expandedToggle.childCount === 1 ? "" : "s"}`}
+                        title={`${expanded ? "Collapse" : "Expand"} ${childCount} subagent${childCount === 1 ? "" : "s"}`}
                     >
-                        {expandedToggle.expanded ? "▼" : "▶"} {expandedToggle.childCount}
-                        {expandedToggle.loading ? " …" : ""}
+                        {expanded ? "▼" : "▶"} {childCount}
+                        {childLoading ? " …" : ""}
                     </button>
                 ) : indent ? (
                     <span style={{ color: "var(--muted-2)", marginRight: 6 }}>↳</span>
@@ -198,11 +220,14 @@ function Row({ s, indent, burnP90, expandedToggle, insight, select }: RowProps) 
             </td>
         </tr>
     );
-}
+});
 
 /** Number of direct children for a root row. Uses the server-supplied count
  *  (which is always present on `/api/sessions` rows). */
 const childCountOf = (row: SessionListRow): number => row.direct_children_count ?? 0;
+
+// keep in sync with the <th> list below
+const COL_COUNT = 11;
 
 const PAGE_SIZE = 200;
 
@@ -215,14 +240,14 @@ export function SessionsRoute() {
     const [insightOpen, setInsightOpen] = useState<ReadonlySet<string>>(() => new Set());
     const [selected, setSelected] = useState<ReadonlySet<string>>(() => new Set());
 
-    const toggleSelected = (id: string) => {
+    const toggleSelected = useCallback((id: string) => {
         setSelected((prev) => {
             const next = new Set(prev);
             if (next.has(id)) next.delete(id);
             else next.add(id);
             return next;
         });
-    };
+    }, []);
 
     const compareSelected = () => {
         const ids = Array.from(selected);
@@ -346,23 +371,23 @@ export function SessionsRoute() {
         return m;
     }, [expandedIds, childQueries]);
 
-    const toggleExpanded = (id: string) => {
+    const toggleExpanded = useCallback((id: string) => {
         setExpanded((prev) => {
             const next = new Set(prev);
             if (next.has(id)) next.delete(id);
             else next.add(id);
             return next;
         });
-    };
+    }, []);
 
-    const toggleInsight = (id: string) => {
+    const toggleInsight = useCallback((id: string) => {
         setInsightOpen((prev) => {
             const next = new Set(prev);
             if (next.has(id)) next.delete(id);
             else next.add(id);
             return next;
         });
-    };
+    }, []);
 
     const allExpandableIds = useMemo(
         () => filteredRoots.filter((r) => childCountOf(r) > 0).map((r) => r.id),
@@ -472,23 +497,23 @@ export function SessionsRoute() {
                                     <Row
                                         s={parent}
                                         burnP90={query.data?.burn_p90 ?? null}
-                                        insight={{ open: insightOpen.has(parent.id), onToggle: () => toggleInsight(parent.id) }}
-                                        select={{ checked: selected.has(parent.id), onToggle: () => toggleSelected(parent.id) }}
+                                        insightOpen={insightOpen.has(parent.id)}
+                                        onToggleInsight={toggleInsight}
+                                        isSelected={selected.has(parent.id)}
+                                        onToggleSelect={toggleSelected}
                                         {...(childCount > 0
                                             ? {
-                                                expandedToggle: {
-                                                    expanded: isExpanded,
-                                                    childCount,
-                                                    loading: !!kidState?.loading,
-                                                    onToggle: () => toggleExpanded(parent.id),
-                                                },
+                                                childCount,
+                                                childLoading: !!kidState?.loading,
+                                                expanded: isExpanded,
+                                                onToggleExpanded: toggleExpanded,
                                             }
                                             : {})}
                                     />
                                     {insightOpen.has(parent.id) ? (
                                         <tr id={`session-insight-${parent.id}`}>
                                             <td
-                                                colSpan={11}
+                                                colSpan={COL_COUNT}
                                                 style={{
                                                     padding: 0,
                                                     background: "var(--sx-tint-50)",
@@ -506,7 +531,8 @@ export function SessionsRoute() {
                                                 key={child.id}
                                                 s={child}
                                                 indent
-                                                select={{ checked: selected.has(child.id), onToggle: () => toggleSelected(child.id) }}
+                                                isSelected={selected.has(child.id)}
+                                                onToggleSelect={toggleSelected}
                                             />
                                         ))
                                         : null}
@@ -515,7 +541,7 @@ export function SessionsRoute() {
                         })}
                         {allRoots.length < totalCount ? (
                             <tr ref={sentinelRef}>
-                                <td colSpan={11} style={{
+                                <td colSpan={COL_COUNT} style={{
                                     padding: "12px 24px", color: "var(--muted)", fontSize: 12,
                                     fontFamily: "ui-monospace, monospace",
                                     textAlign: "center", borderTop: "1px dashed var(--line)",
