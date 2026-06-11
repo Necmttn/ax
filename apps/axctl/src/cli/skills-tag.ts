@@ -11,6 +11,7 @@ import type { DbError } from "@ax/lib/errors";
 import { recordLiteral } from "@ax/lib/ids";
 import { validateRoleName, validateSkillName } from "@ax/lib/role-name";
 import { surrealString } from "@ax/lib/shared/surql";
+import { fail } from "./commands/shared.ts";
 
 export interface SkillsTagOptions {
     readonly skillName: string;
@@ -71,32 +72,25 @@ export const cmdSkillsTag = (opts: SkillsTagOptions): Effect.Effect<void, DbErro
         // 1. Validate inputs
         const trimmedSkill = safeSkillName(opts.skillName);
         if (trimmedSkill === null) {
-            console.error(
+            fail(
                 `axctl skills tag: invalid skill name "${opts.skillName}" (must be alphanumeric, _ or -, optionally plugin:namespaced)`,
             );
-            process.exit(2);
-            return; // unreachable; satisfies TypeScript
         }
 
         const roleName = safeRoleName(opts.roleName);
         if (roleName === null) {
-            console.error(
+            fail(
                 `axctl skills tag: invalid role name "${opts.roleName}" (must be lowercase alphanumeric, _ or -)`,
             );
-            process.exit(2);
-            return; // unreachable; satisfies TypeScript
         }
         if (opts.confidence < 0 || opts.confidence > 1) {
-            console.error(`axctl skills tag: --confidence must be between 0 and 1 (got ${opts.confidence})`);
-            process.exit(2);
+            fail(`axctl skills tag: --confidence must be between 0 and 1 (got ${opts.confidence})`);
         }
 
         // 2. Resolve skill record id by name
         const skillKey = yield* lookupSkillKey(db, trimmedSkill);
         if (skillKey === null) {
-            console.error(`axctl skills tag: unknown skill "${trimmedSkill}"`);
-            process.exit(2);
-            return; // unreachable but satisfies TypeScript
+            fail(`axctl skills tag: unknown skill "${trimmedSkill}"`);
         }
 
         // Inline record id literal - bypasses SDK RecordId binding which

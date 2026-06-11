@@ -5,6 +5,7 @@ import { orAbsent } from "@ax/lib/shared/fs-error";
 import { classifyNoFollow } from "@ax/lib/shared/fs-classify";
 import { posixPath } from "@ax/lib/shared/path";
 import { buildOnboardingReport, formatInstallOnboardingGuidance } from "./onboarding.ts";
+import { fail } from "./commands/shared.ts";
 import {
     candidatePorts,
     pickFreePort,
@@ -1113,8 +1114,7 @@ export function cmdDaemon(
         if (!isMacos()) {
             console.log(formatDaemonStatus(yield* collectDaemonStatus(), parsed.json));
             if (parsed.command !== "status") {
-                console.error("axctl daemon: start/stop/restart use launchd and are macOS-only");
-                process.exit(2);
+                fail("axctl daemon: start/stop/restart use launchd and are macOS-only");
             }
             return;
         }

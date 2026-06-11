@@ -38,6 +38,7 @@ import {
     boolArg,
     jsonFlag,
     optionValue,
+    parseCsvFlag,
     positiveLimit,
     stringArg,
 } from "./shared.ts";
@@ -282,15 +283,12 @@ const parseRouteInputValues = (value: Option.Option<string>): Readonly<Record<st
         return undefined;
     }
     return Object.fromEntries(
-        text.split(",")
-            .map((entry) => entry.trim())
-            .filter((entry) => entry.length > 0)
-            .map((entry) => {
-                const separator = entry.indexOf("=");
-                return separator === -1
-                    ? [entry, ""]
-                    : [entry.slice(0, separator), entry.slice(separator + 1)];
-            }),
+        parseCsvFlag(text).map((entry) => {
+            const separator = entry.indexOf("=");
+            return separator === -1
+                ? [entry, ""]
+                : [entry.slice(0, separator), entry.slice(separator + 1)];
+        }),
     );
 };
 

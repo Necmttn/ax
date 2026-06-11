@@ -30,6 +30,18 @@ export const optionalSince = Flag.integer("since").pipe(Flag.optional);
 export const jsonFlag = Flag.boolean("json").pipe(Flag.withDefault(false));
 
 /**
+ * Print `message` to stderr and terminate with exit code 2 (usage error).
+ * Owns the `console.error` + `process.exit(2)` pattern that was re-rolled
+ * ad-hoc across the command-family modules (issue #243). Returns `never` so
+ * it composes in expression positions and TypeScript control-flow narrows
+ * after a call, same as a bare `process.exit(2)`.
+ */
+export function fail(message: string): never {
+    console.error(message);
+    process.exit(2);
+}
+
+/**
  * Typed replacement for the old string-based parsePositiveIntFlag: the Effect
  * CLI parser already guarantees an integer; this preserves the positivity
  * check (and exact error wording + exit 2) that used to run on the rebuilt
@@ -37,10 +49,7 @@ export const jsonFlag = Flag.boolean("json").pipe(Flag.withDefault(false));
  */
 export function requirePositiveInt(cmd: string, flagName: string, n: number): number {
     if (!Number.isInteger(n) || n <= 0) {
-        console.error(
-            `axctl ${cmd}: --${flagName} must be a positive integer (got "${n}")`,
-        );
-        process.exit(2);
+        fail(`axctl ${cmd}: --${flagName} must be a positive integer (got "${n}")`);
     }
     return n;
 }
@@ -64,9 +73,13 @@ export function requireOptionalPositiveInt(
 export const fmtCount = (v: unknown): string =>
     fmtCountLib(v as number | null | undefined);
 
-/** Split a comma-separated flag value (file hints, agent ids, forms) into trimmed non-empty entries. */
-export const parseFileHints = (value: Option.Option<string>): readonly string[] =>
-    (Option.getOrUndefined(value) ?? "")
+/** Split a comma-separated flag value into trimmed non-empty entries. */
+export const parseCsvFlag = (value: string | null | undefined): readonly string[] =>
+    (value ?? "")
         .split(",")
-        .map((file) => file.trim())
-        .filter((file) => file.length > 0);
+        .map((entry) => entry.trim())
+        .filter((entry) => entry.length > 0);
+
+/** Option-flag variant of {@link parseCsvFlag} (file hints, agent ids, forms). */
+export const parseFileHints = (value: Option.Option<string>): readonly string[] =>
+    parseCsvFlag(Option.getOrUndefined(value));

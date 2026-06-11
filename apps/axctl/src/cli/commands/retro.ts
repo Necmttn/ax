@@ -11,7 +11,7 @@ import { cmdRetroReflect } from "../retro-reflect.ts";
 import { cmdRetroMeta } from "../retro-meta.ts";
 import { cmdRetroPlan } from "../retro-plan.ts";
 import type { RuntimeManifest } from "./manifest.ts";
-import { boolArg, jsonFlag, optionValue, positiveLimit, requirePositiveInt, stringArg } from "./shared.ts";
+import { boolArg, fail, jsonFlag, optionValue, positiveLimit, requirePositiveInt, stringArg } from "./shared.ts";
 
 /**
  * `ax retro emit` - create/update a retro node + `session -> reviewed -> retro`.
@@ -45,8 +45,7 @@ const cmdRetroEmit = (input: {
             );
             const row = (latest?.[0] ?? [])[0];
             if (!row) {
-                console.error("ax retro emit: no session to retro on (no --session and no rows in DB)");
-                process.exit(2);
+                fail("ax retro emit: no session to retro on (no --session and no rows in DB)");
             }
             const idStr = typeof row.id === "string" ? row.id : `session:${row.id.id}`;
             sessionRecordId = idStr;
@@ -55,19 +54,15 @@ const cmdRetroEmit = (input: {
 
         if (fromFile) {
             const raw = yield* Effect.promise(() => Bun.file(fromFile).text().catch((e) => {
-                console.error(`ax retro emit: could not read --from-file=${fromFile}: ${e}`);
-                process.exit(2);
+                fail(`ax retro emit: could not read --from-file=${fromFile}: ${e}`);
                 return "";
             }));
             const parsed = safeJsonParse<{ tried?: string; worked?: string; failed?: string; next?: string }>(raw);
             if (!parsed) {
-                console.error(`ax retro emit: --from-file is not valid JSON`);
-                process.exit(2);
-                return;
+                fail(`ax retro emit: --from-file is not valid JSON`);
             }
             if (!parsed.tried) {
-                console.error("ax retro emit: payload missing required `tried` field");
-                process.exit(2);
+                fail("ax retro emit: payload missing required `tried` field");
             }
             const sessionKey = sessionRecordId.split(":").slice(1).join(":").replace(/`/g, "");
             yield* upsertRetro({
@@ -91,8 +86,7 @@ const cmdRetroEmit = (input: {
 
         const retroInput = yield* retroFromSession(sessionRecordId);
         if (!retroInput) {
-            console.error(`ax retro emit: session ${sessionRecordId} not found`);
-            process.exit(2);
+            fail(`ax retro emit: session ${sessionRecordId} not found`);
         }
         yield* upsertRetro(retroInput);
         if (json) {
@@ -403,8 +397,7 @@ const cmdRetroBrief = (input: {
         `);
         const row = (rows?.[0] ?? [])[0];
         if (!row) {
-            console.error(`ax retro brief: session ${sessionRecordId} not found`);
-            process.exit(2);
+            fail(`ax retro brief: session ${sessionRecordId} not found`);
         }
         const idStr = typeof row.id === "string" ? row.id : `session:${row.id.id}`;
         const key = idStr.startsWith("session:") ? idStr.slice("session:".length).replace(/`/g, "") : idStr;
