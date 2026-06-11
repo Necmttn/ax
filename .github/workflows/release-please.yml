@@ -30,9 +30,13 @@ jobs:
         with:
           token: ${{ secrets.RELEASE_PLEASE_TOKEN || github.token }}
 
+  # Artifacts build only on the `release: published` event (or manual dispatch
+  # with a tag). The push run that creates the release via release-please must
+  # NOT also build - when it did, its publish job raced the release-event run's
+  # publish job and --clobber uploads interleaved, leaving a checksums.txt from
+  # one build next to a tarball from the other (v0.24.0 incident).
   build-artifacts:
-    needs: release-please
-    if: ${{ always() && (github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && inputs.tag_name != '') || needs.release-please.outputs.releases_created == 'true') }}
+    if: ${{ github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && inputs.tag_name != '') }}
     name: Build ${{ matrix.artifact }}
     runs-on: ${{ matrix.runner }}
     strategy:
@@ -94,9 +98,10 @@ jobs:
           if-no-files-found: error
 
   publish-artifacts:
-    needs: [release-please, build-artifacts]
-    if: ${{ always() && needs.build-artifacts.result == 'success' && (github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && inputs.tag_name != '') || needs.release-please.outputs.releases_created == 'true') }}
+    needs: build-artifacts
     runs-on: ubuntu-latest
+    concurrency:
+      group: release-assets-${{ github.event_name == 'release' && github.event.release.tag_name || inputs.tag_name }}
     permissions:
       contents: write
     steps:
@@ -114,7 +119,8 @@ jobs:
           set -euo pipefail
           cd release-assets
           if [ -z "$TAG_NAME" ]; then
-            TAG_NAME="$(gh release view --repo "$GH_REPO" --json tagName --jq .tagName)"
+            echo "TAG_NAME is empty - refusing to guess the target release" >&2
+            exit 1
           fi
           shasum -a 256 ./*.tar.gz > checksums.txt
           gh release upload "$TAG_NAME" ./*.tar.gz checksums.txt --repo "$GH_REPO" --clobber
