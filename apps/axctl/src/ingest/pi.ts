@@ -29,6 +29,7 @@ import { BaseStageStats, IngestContext, sinceDaysFromCtx, StageMeta } from "./st
 import type { StageDef } from "./stage/registry.ts";
 import { extractCommandTool, normalizeCommand, toolKindForName } from "./tool-calls.ts";
 import { extractToolFileEvidence } from "./tool-file-evidence.ts";
+import { makeFileFailureCollector } from "./file-isolation.ts";
 import { decodePiTranscriptLine } from "./line-schemas.ts";
 import { tokenQualityLabels } from "./token-quality.ts";
 import { walkJsonlFilesLenient } from "./walk-jsonl.ts";
@@ -98,6 +99,8 @@ export interface PiStats {
     readonly toolCalls: number;
     readonly skipped: number;
     readonly warnings: number;
+    /** Files whose pipeline failed and was skipped (retried next run). */
+    readonly failedFiles: number;
 }
 
 const SAFE_FALLBACK_TS = "1970-01-01T00:00:00.000Z";
@@ -744,41 +747,51 @@ export const ingestPi = Effect.fn("pi.ingest")(
         let skipped = 0;
         let warningCount = 0;
 
+        const failures = makeFileFailureCollector({ source: "pi" });
         for (const file of files) {
-            fileCount += 1;
-            // OLD: `Bun.file(path).text()` under `Effect.promise` - a read
-            // rejection became an unrecoverable defect. `readFileString`
-            // surfaces a typed PlatformError that the stage boundary dies on,
-            // preserving "no tolerance for a read fault here".
-            const text = yield* fs.readFileString(file.path);
-            const extractor = createPiExtractor(file.path);
-            for (const line of text.split(/\r?\n/)) {
-                extractor.processLine(line);
-            }
-            const extracted = extractor.finish();
-            if (!extracted) {
-                skipped += 1;
-                warningCount += 1;
-                continue;
-            }
+            // Per-file failure isolation (#261): a bad session file (read
+            // fault or a rejected statement) skips THIS file - it is retried
+            // next run - instead of aborting the whole stage (see
+            // file-isolation.ts). `files` counts only completed files, like
+            // claude/codex.
+            yield* failures.isolate(file.path, Effect.gen(function* () {
+                // OLD: `Bun.file(path).text()` under `Effect.promise` - a read
+                // rejection became an unrecoverable defect. `readFileString`
+                // surfaces a typed PlatformError that the isolation seam
+                // records + skips like any other per-file failure.
+                const text = yield* fs.readFileString(file.path);
+                const extractor = createPiExtractor(file.path);
+                for (const line of text.split(/\r?\n/)) {
+                    extractor.processLine(line);
+                }
+                const extracted = extractor.finish();
+                if (!extracted) {
+                    fileCount += 1;
+                    skipped += 1;
+                    warningCount += 1;
+                    return;
+                }
 
-            skipped += extracted.skipped;
-            warningCount += extracted.warnings.length;
-            yield* db.upsert(new RecordId("session", extracted.session.id), {
-                project: extracted.session.cwd ?? undefined,
-                cwd: extracted.session.cwd ?? undefined,
-                model: extracted.session.model ?? undefined,
-                source: "pi",
-                started_at: new Date(extracted.session.started_at),
-                ended_at: new Date(extracted.session.ended_at),
-                raw_file: extracted.sourcePath ?? undefined,
-            });
-            yield* executeStatements(buildPiBatchStatements(extracted), { chunkSize: 500, label: "pi" });
-            sessionCount += 1;
-            eventCount += extracted.providerEvents.length;
-            turnCount += extracted.turns.length;
-            toolCallCount += extracted.toolCalls.length;
+                skipped += extracted.skipped;
+                warningCount += extracted.warnings.length;
+                yield* db.upsert(new RecordId("session", extracted.session.id), {
+                    project: extracted.session.cwd ?? undefined,
+                    cwd: extracted.session.cwd ?? undefined,
+                    model: extracted.session.model ?? undefined,
+                    source: "pi",
+                    started_at: new Date(extracted.session.started_at),
+                    ended_at: new Date(extracted.session.ended_at),
+                    raw_file: extracted.sourcePath ?? undefined,
+                });
+                yield* executeStatements(buildPiBatchStatements(extracted), { chunkSize: 500, label: "pi" });
+                fileCount += 1;
+                sessionCount += 1;
+                eventCount += extracted.providerEvents.length;
+                turnCount += extracted.turns.length;
+                toolCallCount += extracted.toolCalls.length;
+            }));
         }
+        yield* failures.report;
 
         return {
             files: fileCount,
@@ -788,6 +801,7 @@ export const ingestPi = Effect.fn("pi.ingest")(
             toolCalls: toolCallCount,
             skipped,
             warnings: warningCount,
+            failedFiles: failures.count(),
         } satisfies PiStats;
     },
 );
@@ -800,6 +814,8 @@ export class PiStageStats extends BaseStageStats.extend<PiStageStats>("PiStageSt
     toolCallsIngested: Schema.Number,
     skipped: Schema.Number,
     warnings: Schema.Number,
+    /** Files whose pipeline failed and was skipped (retried next run). */
+    failedFiles: Schema.Number,
 }) {}
 
 export const piStage: StageDef<PiStageStats, SurrealClient | AxConfig | FileSystem.FileSystem | Path.Path> = {
@@ -809,16 +825,16 @@ export const piStage: StageDef<PiStageStats, SurrealClient | AxConfig | FileSyst
     run: Effect.fn(function* (ctx: IngestContext) {
         const t0 = Date.now();
         const sinceDays = sinceDaysFromCtx(ctx);
-        // The directory walk recovers every PlatformError internally; the
-        // only PlatformError that can escape `ingestPi` is a per-file
-        // `readFileString` fault, which (like claude/codex) dies as a defect
-        // rather than masquerading as a recoverable DbError.
-        const result = yield* ingestPi({ sinceDays }).pipe(
-            Effect.catchTag("PlatformError", (e) => Effect.die(e)),
-        );
+        // The directory walk recovers every PlatformError internally, and a
+        // per-file `readFileString` fault is now recorded + skipped by the
+        // per-file isolation seam (#261, see file-isolation.ts), so no
+        // PlatformError escapes `ingestPi`. Only connection loss and failure
+        // storms abort the stage, as a DbError.
+        const result = yield* ingestPi({ sinceDays });
         return PiStageStats.make({
             durationMs: Date.now() - t0,
-            summary: `ingested ${result.files} files, ${result.sessions} sessions, ${result.events} events, ${result.turns} turns, ${result.toolCalls} tool calls, skipped ${result.skipped}, warnings ${result.warnings}`,
+            summary: `ingested ${result.files} files, ${result.sessions} sessions, ${result.events} events, ${result.turns} turns, ${result.toolCalls} tool calls, skipped ${result.skipped}, warnings ${result.warnings}` +
+                (result.failedFiles > 0 ? `, ${result.failedFiles} file(s) failed (retry next run)` : ""),
             filesIngested: result.files,
             sessionsIngested: result.sessions,
             eventsIngested: result.events,
@@ -826,6 +842,7 @@ export const piStage: StageDef<PiStageStats, SurrealClient | AxConfig | FileSyst
             toolCallsIngested: result.toolCalls,
             skipped: result.skipped,
             warnings: result.warnings,
+            failedFiles: result.failedFiles,
         });
     }),
 };
