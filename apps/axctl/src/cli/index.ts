@@ -21,7 +21,7 @@ import { retroCommand, retroRuntime } from "./commands/retro.ts";
 import { improveCommand, improveRuntime } from "./commands/improve.ts";
 import { sessionsCommand, sessionsRuntime } from "./commands/sessions.ts";
 import { skillsCommand, rolesCommand, skillsRuntime } from "./commands/skills.ts";
-import { classifiersCommand, classifiersRuntime, classifiersPackageOperationsNeedsDb } from "./commands/classifiers.ts";
+import { classifiersCommand, classifiersRuntime } from "./commands/classifiers.ts";
 import {
     ingestCommand,
     deriveCommand,
@@ -30,7 +30,7 @@ import {
     ingestRuntime,
     detectRemovedIngestFlag,
 } from "./commands/ingest.ts";
-import type { RuntimeManifest } from "./commands/manifest.ts";
+import { resolveRuntime, type RuntimeManifest } from "./commands/manifest.ts";
 import {
     versionCommand,
     updateCommand,
@@ -250,16 +250,13 @@ export const RUNTIME_BY_COMMAND: RuntimeManifest = {
 // ingest superset layer). Anything outside this set runs through `withoutDb`
 // so the user gets fast, honest errors (e.g. "unknown command") instead of a
 // 5s connect timeout. Derived - do not hand-edit; declare runtime in the
-// owning commands/<family>.ts manifest instead.
+// owning commands/<family>.ts manifest instead. db-conditional families are
+// excluded: dispatch resolves them per-invocation via resolveRuntime.
 export const DB_COMMANDS: ReadonlySet<string> = new Set(
     Object.entries(RUNTIME_BY_COMMAND)
         .filter(([, runtime]) => runtime === "db" || runtime === "ingest")
         .map(([name]) => name),
 );
-
-// Moved to commands/classifiers.ts (Phase 2 CLI split); re-exported here for
-// the existing test contract (effect-cli.test.ts imports it from index.ts).
-export { classifiersPackageOperationsNeedsDb } from "./commands/classifiers.ts";
 
 // Moved to commands/ingest.ts (Phase 2 CLI split); re-exported here for the
 // existing test contract (effect-cli.test.ts imports them from index.ts).
@@ -313,16 +310,17 @@ const dispatch = (args: ReadonlyArray<string>): Effect.Effect<void, unknown> => 
         }
         return withIngest(args);
     }
-    if (
-        args[0] === "classifiers" &&
-        (classifiersPackageOperationsNeedsDb(args) ||
-            args[1] === "graph" ||
-            args[1] === "lifecycle")
-    ) {
-        return withDb(args);
-    }
-    if (args[0] === "classifiers" && (args[1] === "eval" || args[1] === "list" || args[1] === "package-operations")) {
-        return withoutDb(args);
+    // db-conditional families (e.g. classifiers) declare their own
+    // per-subcommand routing in their RuntimeManifest; resolve it here so
+    // dispatch never hard-codes subcommand names or predicates.
+    const declared = RUNTIME_BY_COMMAND[args[0]];
+    if (declared !== undefined && typeof declared !== "string") {
+        const runtime = resolveRuntime(declared, args);
+        return runtime === "db"
+            ? withDb(args)
+            : runtime === "ingest"
+                ? withIngest(args)
+                : withoutDb(args);
     }
     if (args[0] === "share") {
         if (args[1] === "--help" || args[1] === "-h") {
