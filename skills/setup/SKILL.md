@@ -91,6 +91,7 @@ override without a brief: `ax skills tag <skill> <role>`.
 Also surface the config front door when relevant:
 - `ax skills config` - skill lifecycle (live / orphan / out-of-scope / parked).
 - `ax hooks config` - hooks across claude/cursor/codex/opencode (+ add/remove/edit).
+- `ax hooks init` - scaffold `~/.ax/hooks` for authoring custom TypeScript guards (`defineHook` from `@ax/hooks-sdk`); validate with `ax hooks backtest` before `ax hooks install`.
 - `ax agents config` - agent definitions and the skills they scope.
 
 ## What's installed

@@ -17,7 +17,8 @@ worktrees and lands via PR merge.
 Target file that triggered this block:
   ${file}
 
-Bypass for rare config/doc edits: ALLOW_MAIN_WRITE=1`;
+Bypass for rare config/doc edits: ALLOW_MAIN_WRITE=1
+(this guard is an ax SDK hook - author your own: ax hooks init)`;
 
 /** Target paths for this tool call: file_path for Write/Edit/MultiEdit,
  *  patch-envelope paths for apply_patch (relative -> resolved against cwd). */

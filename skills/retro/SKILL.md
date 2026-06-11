@@ -198,6 +198,7 @@ blocking errors. Light touch - this section is read-only.
    - `hook_progress` without a terminal success/blocking event is a
      telemetry gap unless correlated with visible behavior.
    - Prefer deterministic backtests over model judgment.
+   - To author a NEW guard from a recurring failure: `ax hooks init`, write a `defineHook` hook in `~/.ax/hooks/`, `ax hooks backtest` it against history, then `ax hooks install --providers=claude,codex`.
 
 ### Step 5 - Close out
 

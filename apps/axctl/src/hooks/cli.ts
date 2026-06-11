@@ -186,6 +186,7 @@ const initCommand = Command.make(
             if (noInstall) console.log(`  (skipped bun install - run it in ${workspaceDir} before use)`);
             console.log("");
             console.log("next steps:");
+            console.log(`  ax hooks backtest ${workspaceDir}/enforce-worktree.ts --days=14   (replay history through it first)`);
             console.log(`  ax hooks install ${workspaceDir}/enforce-worktree.ts --providers=claude,codex`);
         }),
 ).pipe(Command.withDescription("Scaffold the ~/.ax/hooks workspace (package.json + starter guard hooks)"));

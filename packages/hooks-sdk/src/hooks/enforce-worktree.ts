@@ -46,7 +46,8 @@ Do this instead:
   - Land your work via a PR merge, OR
   - Merge from a CLEAN checkout (fresh linked worktree).
 
-Bypass: ALLOW_DIRTY_MAIN_MUTATION=1`;
+Bypass: ALLOW_DIRTY_MAIN_MUTATION=1
+(this guard is an ax SDK hook - author your own: ax hooks init)`;
 
 const blockSwitchMsg = `BLOCKED: Do not switch branches on the primary working tree.
 
@@ -54,7 +55,8 @@ Use a worktree instead:
   git worktree add .claude/worktrees/<task-name> -b <branch-name>
 
 Allowed here: git checkout -b / git switch -c (create), git checkout -- <file>
-(restore). Bypass (rare): prefix with ALLOW_BRANCH_CHECKOUT=1`;
+(restore). Bypass (rare): prefix with ALLOW_BRANCH_CHECKOUT=1
+(this guard is an ax SDK hook - author your own: ax hooks init)`;
 
 const hook = defineHook({
   name: "enforce-worktree",
