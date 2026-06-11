@@ -532,10 +532,10 @@ export function FeaturesPage() {
               <span className="cm">{`// block branch switches on the primary tree`}</span>
               {"\n      "}
               <span className="kw">if</span>
-              {" (switchesBranch(event) && (yield* git.isPrimaryTree(event.cwd)))\n        "}
+              {" (switchesBranch(event) &&\n          (yield* git.isPrimaryTree(event.cwd)))\n        "}
               <span className="kw">return</span>
               {" Verdict."}
-              <span className="fn">block</span>(<span className="str">&quot;BLOCKED: use a worktree instead&quot;</span>);
+              <span className="fn">block</span>(<span className="str">&quot;use a worktree instead&quot;</span>);
               {"\n      "}
               <span className="kw">return</span>
               {" Verdict.allow;\n    }),\n});"}
