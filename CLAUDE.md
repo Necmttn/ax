@@ -120,6 +120,12 @@ fresh clone.
 `ax cost sessions [--days=N] [--model=<name>] [--limit=N]` - top sessions by cost with id, project, model, started_at (default 14d/20 rows).
 `ax cost split [--days=N]` - origin (main vs subagent) × model matrix with cost and share-of-total; totals row. MCP: `cost_models`, `cost_split`.
 
+### Dispatch routing
+
+`ax dispatches [--days=N] [--limit=N]` - subagent dispatch table sorted by child cost (default 14d/30 rows). Shows ts, agent_type, description, dispatch_model ("inherit" when no explicit model), child_model, child_cost_usd. Summary: count, % inherit, total subagent cost. MCP: `dispatches`.
+`ax dispatches --candidates [--days=N]` - inherit + expensive (fable/opus) + routing-class match filter. Shows suggested model + est savings per dispatch. Footer: total est savings, top 3 classes by savings.
+`ax dispatches compile-routing [--out=PATH]` - write `~/.ax/hooks/routing-table.json` from ROUTING_CLASSES constant (mirrors route-dispatch.ts hook defaults; a unify step is deferred). Idempotent regenerate. --out overrides path (tests use tmp dirs).
+
 ## Recommend + apply guidance to your own agent files
 
 `axctl improve recommend / accept / lint / show` ship the v0 grounded-files

@@ -58,6 +58,8 @@ import {
     buildCostSplitNext,
 } from "../nav/next-links.ts";
 import { fetchCostModels, fetchCostSplit } from "../queries/cost-analytics.ts";
+import { fetchDispatches, fetchDispatchCandidates } from "../queries/dispatch-analytics.ts";
+import { buildDispatchesNext, buildCandidatesNext } from "../nav/next-links.ts";
 
 /**
  * The long-lived MCP runtime, built from `AppLayer` (SurrealClient + config +
@@ -520,6 +522,41 @@ const costSplitTool: AxMcpTool = {
     },
 };
 
+const dispatchesTool: AxMcpTool = {
+    name: "dispatches",
+    description:
+        `Subagent dispatch analytics over the spawned relation. Without candidates: table of dispatches sorted by child cost (ts, agent_type, description, dispatch_model, child_model, child_cost_usd) + summary (count, inherit%, total cost). With candidates=true: only inherit dispatches on expensive models (fable/opus) that match a routing class, with suggested model + est savings. ${NEXT_PROTOCOL_HINT}`,
+    inputSchema: {
+        days: z
+            .number()
+            .int()
+            .positive()
+            .optional()
+            .describe("Window in days (default 14)."),
+        limit: z
+            .number()
+            .int()
+            .positive()
+            .optional()
+            .describe("Max dispatch rows to return (default 30). Ignored when candidates=true."),
+        candidates: z
+            .boolean()
+            .optional()
+            .describe("When true, return only routing-optimisation candidates with est savings."),
+    },
+    run: async (args, rt) => {
+        const days = typeof args.days === "number" ? args.days : 14;
+        const candidates = args.candidates === true;
+        if (candidates) {
+            const result = await rt.runPromise(fetchDispatchCandidates({ sinceDays: days }));
+            return { ...result, next: buildCandidatesNext(result) };
+        }
+        const limit = typeof args.limit === "number" ? args.limit : 30;
+        const result = await rt.runPromise(fetchDispatches({ sinceDays: days, limit }));
+        return { ...result, next: buildDispatchesNext(result) };
+    },
+};
+
 /**
  * All registered MCP tools. `server.ts` iterates this array to register +
  * wrap each one.
@@ -544,4 +581,5 @@ export const axMcpTools: ReadonlyArray<AxMcpTool> = [
     signalShowTool,
     costModelsTool,
     costSplitTool,
+    dispatchesTool,
 ];
