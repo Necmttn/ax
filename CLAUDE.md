@@ -82,7 +82,7 @@ fresh clone.
 
 - `ax serve` → `POST /api/ingest` (or the **Live** tab) forks `runIngest` (same pipeline as CLI) onto the server runtime. Progress flows as `IngestStreamEvent`s through the `IngestStreamBus` seam (`apps/axctl/src/dashboard/ingest-stream.ts`) to a per-run Durable Stream `ingest:<runId>`; the browser subscribes from offset `-1`, so refresh/reconnect mid-run rehydrates. Exactly one terminal `run_finished` event guaranteed. The bus seam lets the Bun backing swap for a hosted backend later untouched.
 - CLI `ax ingest` is unchanged (never passes a `runId`). Progress animates on a TTY by default; non-TTY is silent unless forced with `AX_PROGRESS=on` (or `--progress=plain|pipeline`). `AX_PROGRESS=off` silences. Gated in `withIngest` (`apps/axctl/src/cli/index.ts`).
-- **Live ingest needs ax from source** (the `bin/axctl` shim does this). The compiled `--compile` binary serves the dashboard but returns 503 on `POST /api/ingest` - native lmdb can't bundle, so no sidecar.
+- **Live ingest needs ax from source** (the `bin/axctl` shim does this). The compiled `--compile` binary serves the dashboard but returns 503 on `POST /api/ingest` - native lmdb can't bundle, so no sidecar. `/api/version` advertises this as `live_ingest: false`; the studio Live tab then falls back to polling the count tiles every 5s (`apps/studio/src/poll-fallback.ts`) instead of a dead stream.
 
 ## Workflow extraction commands
 
