@@ -145,18 +145,17 @@ export function deriveToolEvents(
                 kind: "file_edit",
                 ts: t.ts,
                 seq: t.seq,
-                title: clip(t.command_norm ?? t.name, TITLE_MAX),
+                title: clip(shellTitle(t.command_text) ?? t.command_norm ?? t.name, TITLE_MAX),
                 ...(t.command_text ? { detail: clip(t.command_text, DETAIL_MAX) } : {}),
                 refs: turnRef,
             });
             continue;
         }
         const dispatch = DISPATCH_TOOLS.has(t.name) ? dispatchLabel(t.command_text) : null;
-        // A wrapper norm (`echo`, `cd`, ...) hides the real work - pull the
-        // meaningful pipeline segment + the agent's intent out of the input.
-        const smart = !dispatch && t.command_norm && WRAPPER_NORMS.has(t.command_norm.toLowerCase())
-            ? shellTitle(t.command_text)
-            : null;
+        // A bare norm ("rg", "sed", "echo") says nothing about what ran or
+        // why - pull the meaningful pipeline segment + the agent's stated
+        // intent out of the input whenever the call captured one.
+        const smart = !dispatch && t.command_norm ? shellTitle(t.command_text) : null;
         out.push({
             kind: "tool_call",
             ts: t.ts,
