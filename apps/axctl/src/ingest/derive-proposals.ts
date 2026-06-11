@@ -36,10 +36,12 @@ import {
 import { executeStatementsWith } from "@ax/lib/shared/statement-exec";
 import { safeKeyPart, recordKeyPart } from "@ax/lib/shared/derive-keys";
 import type { HarnessLearningCandidate } from "../project/types.ts";
+import { fetchDispatchCandidates } from "../queries/dispatch-analytics.ts";
 
 export interface DeriveProposalsStats {
     readonly skillProposals: number;
     readonly guidanceProposals: number;
+    readonly routingProposals: number;
     readonly skipped: number;
 }
 
@@ -155,8 +157,112 @@ export const buildGuidanceProposalStatements = (
     return stmts;
 };
 
+// ---------------------------------------------------------------------------
+// Routing proposal (form='hook') - model-routing signal from dispatch analytics
+// ---------------------------------------------------------------------------
+
+export interface RoutingProposalRow {
+    readonly proposalKey: string;
+    readonly title: string;
+    readonly hypothesis: string;
+    readonly confidence: string;
+    readonly frequency: number;
+    readonly sig: string;
+}
+
+/**
+ * Derive a single routing-form proposal row from dispatch candidate analytics.
+ *
+ * Returns null when the signal is too thin (candidateCount < 5 OR
+ * totalEstSavingsUsd < 5) so noise doesn't pollute the proposal shortlist.
+ *
+ * The title is intentionally STABLE across runs; savings figures belong in
+ * the hypothesis so dedupe_sig (which hashes the title) accumulates frequency
+ * on the same proposal row rather than forking a new one each ingest.
+ */
+export const deriveRoutingProposalRow = (input: {
+    readonly candidateCount: number;
+    readonly totalEstSavingsUsd: number;
+    readonly sinceDays: number;
+    readonly topClasses: ReadonlyArray<{ readonly classId: string; readonly savings_usd: number }>;
+}): RoutingProposalRow | null => {
+    if (input.candidateCount < 5 || input.totalEstSavingsUsd < 5) return null;
+
+    const title = "Route mechanical subagent dispatches to cheaper models";
+    const normTitle = normalizeTitle(title);
+    const sig = dedupeSig("hook", normTitle);
+
+    const savings = input.totalEstSavingsUsd.toFixed(2);
+    const topStr = input.topClasses
+        .slice(0, 3)
+        .map((c) => `${c.classId} ($${c.savings_usd.toFixed(2)})`)
+        .join(", ");
+    const hypothesis =
+        `${input.candidateCount} model-less dispatches on fable/opus matched mechanical routing classes` +
+        ` in the last ${input.sinceDays}d; est $${savings} redirectable.` +
+        (topStr ? ` Top classes: ${topStr}.` : "") +
+        ` Apply: ax dispatches compile-routing + route-dispatch hook (ax hooks install).`;
+
+    const confidence: string =
+        input.totalEstSavingsUsd >= 50 ? "high" :
+        input.totalEstSavingsUsd >= 15 ? "medium" :
+        "low";
+
+    return {
+        proposalKey: proposalKeyFor("hook", title, sig),
+        title,
+        hypothesis,
+        confidence,
+        frequency: input.candidateCount,
+        sig,
+    };
+};
+
+/**
+ * Build SurrealQL statements for a routing proposal row. Mirrors
+ * buildGuidanceProposalStatements: CREATE on first sight, UPDATE mutable
+ * fields on re-derive. No typed payload table (hook form is self-contained).
+ */
+export const buildRoutingProposalStatements = (
+    row: RoutingProposalRow,
+    existingSigs: ReadonlySet<string> = new Set(),
+): string[] => {
+    const stmts: string[] = [];
+    const proposalRef = recordRef("proposal", row.proposalKey);
+    const baseline = JSON.stringify({ frequency: row.frequency });
+    const isNew = !existingSigs.has(row.sig);
+
+    if (isNew) {
+        stmts.push(
+            `CREATE ${proposalRef} CONTENT ${surrealObject([
+                ["form", surrealString("hook")],
+                ["title", surrealString(row.title)],
+                ["hypothesis", surrealString(row.hypothesis)],
+                ["dedupe_sig", surrealString(row.sig)],
+                ["frequency", String(row.frequency)],
+                ["confidence", surrealString(row.confidence)],
+                ["status", surrealString("open")],
+                ["baseline", surrealOptionString(baseline)],
+                ["updated_at", "time::now()"],
+            ])};`,
+        );
+    } else {
+        stmts.push(
+            `UPDATE ${proposalRef} SET ${[
+                ["hypothesis", surrealString(row.hypothesis)],
+                ["frequency", String(row.frequency)],
+                ["confidence", surrealString(row.confidence)],
+                ["updated_at", "time::now()"],
+            ].map(([n, v]) => `${n} = ${v}`).join(", ")};`,
+        );
+    }
+
+    return stmts;
+};
+
 export interface DeriveProposalsOpts {
     readonly minFrequency: number;
+    readonly sinceDays?: number | undefined;
 }
 
 interface SkillCandidateRow {
@@ -358,10 +464,45 @@ FROM skill_candidate;`).pipe(Effect.map((rows) => rows?.[0] ?? [])),
             deriveGuidanceProposalRows(harnessReport.learningCandidates);
         const guidanceStmts = buildGuidanceProposalStatements(guidanceRows, existingSigs);
 
-        yield* executeStatementsWith(db, [...skillStmts, ...guidanceStmts], { chunkSize: 500 });
+        // Routing proposal (form='hook'): derive from dispatch candidate analytics.
+        // Query failure is tolerated - if dispatch data isn't available the stage
+        // still writes skill + guidance proposals successfully.
+        const sinceDays = opts.sinceDays ?? 14;
+        const dispatchResult = yield* Effect.orElseSucceed(
+            fetchDispatchCandidates({ sinceDays }).pipe(
+                Effect.map((r) => ({
+                    candidateCount: r.candidates.length,
+                    totalEstSavingsUsd: r.total_est_savings_usd,
+                    topClasses: r.top_classes,
+                } as {
+                    candidateCount: number;
+                    totalEstSavingsUsd: number;
+                    topClasses: ReadonlyArray<{ classId: string; savings_usd: number }>;
+                } | null)),
+            ),
+            () => null as {
+                candidateCount: number;
+                totalEstSavingsUsd: number;
+                topClasses: ReadonlyArray<{ classId: string; savings_usd: number }>;
+            } | null,
+        );
+        const routingRow = dispatchResult
+            ? deriveRoutingProposalRow({
+                candidateCount: dispatchResult.candidateCount,
+                totalEstSavingsUsd: dispatchResult.totalEstSavingsUsd,
+                sinceDays,
+                topClasses: dispatchResult.topClasses,
+            })
+            : null;
+        const routingStmts = routingRow
+            ? buildRoutingProposalStatements(routingRow, existingSigs)
+            : [];
+
+        yield* executeStatementsWith(db, [...skillStmts, ...guidanceStmts, ...routingStmts], { chunkSize: 500 });
         return {
             skillProposals: skillRows.length,
             guidanceProposals: guidanceRows.length,
+            routingProposals: routingRow ? 1 : 0,
             skipped: skillSkipped + guidanceSkipped,
         };
     });
@@ -379,7 +520,7 @@ if (import.meta.main) {
 // Co-located StageDef
 // ---------------------------------------------------------------------------
 
-import { BaseStageStats, IngestContext, StageMeta } from "./stage/types.ts";
+import { BaseStageStats, IngestContext, sinceDaysFromCtx, StageMeta } from "./stage/types.ts";
 import type { StageDef } from "./stage/registry.ts";
 import type { ProcessService } from "@ax/lib/process";
 
@@ -387,25 +528,28 @@ export const ProposalsKey = Schema.Literal("proposals");
 export type ProposalsKey = typeof ProposalsKey.Type;
 
 /**
- * Proposals stage - derives Skill + Guidance Proposals from cumulated evidence.
+ * Proposals stage - derives Skill + Guidance + Routing Proposals from cumulated evidence.
  * Depends on {@link ClosureKey}. Consumed by {@link OpportunitiesKey}, {@link RetroProposalsKey}.
  */
 export class ProposalsStats extends BaseStageStats.extend<ProposalsStats>("ProposalsStats")({
     skillProposals: Schema.Number,
     guidanceProposals: Schema.Number,
+    routingProposals: Schema.Number,
 }) {}
 
 export const proposalsStage: StageDef<ProposalsStats, SurrealClient | ProcessService | FileSystem.FileSystem | Path.Path> = {
     meta: StageMeta.make({ key: "proposals", deps: ["closure"], tags: ["derive"] }),
-    run: (_ctx: IngestContext) =>
+    run: (ctx: IngestContext) =>
         Effect.gen(function* () {
             const t0 = Date.now();
-            const result = yield* deriveProposals({ minFrequency: 3 });
+            const sinceDays = sinceDaysFromCtx(ctx);
+            const result = yield* deriveProposals({ minFrequency: 3, sinceDays });
             return ProposalsStats.make({
                 durationMs: Date.now() - t0,
-                summary: `derived ${result.skillProposals} skill proposals, ${result.guidanceProposals} guidance proposals`,
+                summary: `derived ${result.skillProposals} skill proposals, ${result.guidanceProposals} guidance proposals, ${result.routingProposals} routing proposals`,
                 skillProposals: result.skillProposals,
                 guidanceProposals: result.guidanceProposals,
+                routingProposals: result.routingProposals,
             });
         }),
 };
