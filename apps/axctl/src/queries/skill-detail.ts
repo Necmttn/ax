@@ -23,9 +23,9 @@ import type {
  *   blocks it renders: skill row, invocation counts, recent list, daily
  *   sparkline buckets. All filtered by the indexed `invoked.out`.
  * - `SKILL_DETAIL_SQL` - the full dashboard payload. Adds the evidence blocks
- *   (`corrections`, `proposals`, `paired`); `paired` scans `skill_paired` by
- *   both endpoints (no endpoint index), which is fine for an explicit
- *   click-to-expand panel but too heavy for the TUI's per-row selection.
+ *   (`corrections`, `proposals`, `paired`); `paired` looks up `skill_paired`
+ *   by both endpoints (indexed: `skill_paired_in`/`skill_paired_out`). Still
+ *   dashboard-only - the TUI's per-row selection keeps the lighter variant.
  */
 export const SKILL_DETAIL_BASIC_SQL = `
 LET $s = (SELECT * FROM skill WHERE name = $name)[0];

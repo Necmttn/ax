@@ -1400,6 +1400,10 @@ DEFINE INDEX IF NOT EXISTS derived_from_out ON derived_from FIELDS out;
 DEFINE TABLE skill_paired TYPE RELATION FROM skill TO skill;  -- skills co-occurring in same session within N turns
 DEFINE FIELD count        ON skill_paired TYPE int DEFAULT 1;
 DEFINE FIELD last_seen    ON skill_paired TYPE datetime;
+-- Endpoint indexes: the dashboard skill-detail `paired` block filters by
+-- `in = $s.id OR out = $s.id` (apps/axctl/src/queries/skill-detail.ts).
+DEFINE INDEX IF NOT EXISTS skill_paired_in  ON skill_paired FIELDS in;
+DEFINE INDEX IF NOT EXISTS skill_paired_out ON skill_paired FIELDS out;
 
 DEFINE TABLE recovered_by TYPE RELATION FROM turn TO skill;   -- skill invoked after has_error=true turn
 DEFINE FIELD ts            ON recovered_by TYPE datetime;

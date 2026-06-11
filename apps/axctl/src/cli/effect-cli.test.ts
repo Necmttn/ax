@@ -2,12 +2,13 @@ import { describe, expect, test } from "bun:test";
 import {
     DB_COMMANDS,
     RUNTIME_BY_COMMAND,
-    classifiersPackageOperationsNeedsDb,
     detectRemovedIngestFlag,
     insightsOnlyConflicts,
     resolveIngestStages,
     rootCommand,
 } from "./index.ts";
+import { classifiersPackageOperationsNeedsDb } from "./commands/classifiers.ts";
+import { resolveRuntime, type DbConditionalRuntime } from "./commands/manifest.ts";
 import { ALL_STAGES } from "../ingest/stage/registry.ts";
 import type { StageRegistryShape } from "../ingest/stage/registry.ts";
 import type { BaseStageStats, StageDef } from "../ingest/stage/types.ts";
@@ -282,6 +283,21 @@ describe("effect cli", () => {
         expect(DB_COMMANDS.has("pricing")).toBe(true);
     });
 
+    test("share and star route through manifests as no-DB commands - no dispatch bypass (#242)", () => {
+        const names = topLevelNames();
+        expect(names).toContain("share");
+        expect(names).toContain("star");
+        expect(RUNTIME_BY_COMMAND["share"]).toBe("none");
+        expect(RUNTIME_BY_COMMAND["star"]).toBe("none");
+        expect(DB_COMMANDS.has("share")).toBe(false);
+        expect(DB_COMMANDS.has("star")).toBe(false);
+        // star is the nudge target (`ax star --done`), not a discovery surface
+        const byName = new Map(
+            rootCommand.subcommands.flatMap((g) => g.commands.map((c) => [c.name, c] as const)),
+        );
+        expect(byName.get("star")?.hidden).toBe(true);
+    });
+
     test("DB-backed classifier package-operation flags are routed through DB", () => {
         expect(classifiersPackageOperationsNeedsDb([
             "classifiers",
@@ -303,6 +319,78 @@ describe("effect cli", () => {
             "package-operations",
             "--quality-status",
         ])).toBe(false);
+    });
+});
+
+describe("classifiers db-conditional routing (#241)", () => {
+    const classifiersSubNames = (): string[] => {
+        const classifiers = rootCommand.subcommands
+            .flatMap((g) => g.commands)
+            .find((c) => c.name === "classifiers");
+        expect(classifiers).toBeDefined();
+        return classifiers!.subcommands.flatMap((g) => g.commands.map((c) => c.name));
+    };
+
+    const classifiersDeclaration = (): DbConditionalRuntime => {
+        const declared = RUNTIME_BY_COMMAND["classifiers"];
+        expect(declared).toBeDefined();
+        expect(typeof declared).toBe("object");
+        expect((declared as DbConditionalRuntime).kind).toBe("db-conditional");
+        return declared as DbConditionalRuntime;
+    };
+
+    test("classifiers is declared db-conditional and excluded from DB_COMMANDS (dispatch resolves per-invocation)", () => {
+        classifiersDeclaration();
+        expect(DB_COMMANDS.has("classifiers")).toBe(false);
+    });
+
+    test("every registered classifiers subcommand declares its routing (anti-drift)", () => {
+        const declared = classifiersDeclaration().subcommands;
+        for (const name of classifiersSubNames()) {
+            expect(
+                declared[name],
+                `classifiers subcommand "${name}" missing from the db-conditional routing table in commands/classifiers.ts`,
+            ).toBeDefined();
+        }
+    });
+
+    test("every declared classifiers routing entry maps to a registered subcommand (reverse anti-drift)", () => {
+        const registered = new Set(classifiersSubNames());
+        for (const name of Object.keys(classifiersDeclaration().subcommands)) {
+            expect(
+                registered.has(name),
+                `routing table declares classifiers subcommand "${name}" but classifiersCommand does not register it`,
+            ).toBe(true);
+        }
+    });
+
+    test("resolveRuntime preserves the pre-#241 dispatch behavior byte-for-byte", () => {
+        const declared = classifiersDeclaration();
+        // DB subcommands.
+        expect(resolveRuntime(declared, ["classifiers", "graph"])).toBe("db");
+        expect(resolveRuntime(declared, ["classifiers", "lifecycle"])).toBe("db");
+        expect(resolveRuntime(declared, ["classifiers", "explain"])).toBe("db");
+        expect(resolveRuntime(declared, ["classifiers", "workflow-candidates"])).toBe("db");
+        expect(resolveRuntime(declared, ["classifiers", "label-mining"])).toBe("db");
+        // No-DB subcommands.
+        expect(resolveRuntime(declared, ["classifiers", "eval"])).toBe("none");
+        expect(resolveRuntime(declared, ["classifiers", "list"])).toBe("none");
+        // package-operations: DB only with the write-plan/health/replay flags.
+        expect(resolveRuntime(declared, ["classifiers", "package-operations"])).toBe("none");
+        expect(resolveRuntime(declared, ["classifiers", "package-operations", "--quality-status"])).toBe("none");
+        expect(resolveRuntime(declared, ["classifiers", "package-operations", "--apply-write-plan"])).toBe("db");
+        expect(resolveRuntime(declared, ["classifiers", "package-operations", "--graph-health"])).toBe("db");
+        expect(resolveRuntime(declared, ["classifiers", "package-operations", "--boundary-replay-summary"])).toBe("db");
+        // Bare family / --help / unknown subcommand fall back to db (old
+        // behavior: fell through to DB_COMMANDS which contained "classifiers").
+        expect(resolveRuntime(declared, ["classifiers"])).toBe("db");
+        expect(resolveRuntime(declared, ["classifiers", "--help"])).toBe("db");
+    });
+
+    test("static manifest declarations resolve to themselves", () => {
+        expect(resolveRuntime("db", ["sessions"])).toBe("db");
+        expect(resolveRuntime("ingest", ["ingest"])).toBe("ingest");
+        expect(resolveRuntime("none", ["version"])).toBe("none");
     });
 });
 

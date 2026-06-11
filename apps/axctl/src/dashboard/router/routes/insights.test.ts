@@ -64,6 +64,47 @@ describe("decodeGraphExplorerParams", () => {
     });
 });
 
+describe("GET /api/recall", () => {
+    const run = (urlStr: string, runner: (effect: unknown) => Promise<unknown>) => {
+        const matched = matchRoute(insightRoutes, "GET", "/api/recall");
+        if (matched.kind !== "matched") throw new Error("expected /api/recall to match");
+        return matched.match.route.run(input(urlStr), runner as never);
+    };
+
+    test("empty q answers without building AppLayer (runner never invoked)", async () => {
+        // Same DB-less proof as the /api/version route test: a poisoned
+        // runner stands in for appLayerRunner, whose eager SurrealClient
+        // build stalls ~5s without a DB (issue #245).
+        const res = await run(
+            "http://h/api/recall",
+            () => Promise.reject(new Error("AppLayer must not be built for empty q")),
+        );
+        expect(res.status).toBe(200);
+        await expect(res.json()).resolves.toMatchObject({
+            q: "",
+            hits: [],
+            total_count: 0,
+            window: { offset: 0, limit: 50 },
+        });
+    });
+
+    test("non-empty q still runs through the runner", async () => {
+        const sentinel = { q: "hello", hits: [], total_count: 7 };
+        const res = await run("http://h/api/recall?q=hello", () => Promise.resolve(sentinel));
+        expect(res.status).toBe(200);
+        await expect(res.json()).resolves.toEqual(sentinel);
+    });
+
+    test("non-empty q keeps the legacy 500 error mapping", async () => {
+        const res = await run(
+            "http://h/api/recall?q=hello",
+            () => Promise.reject(new Error("db down")),
+        );
+        expect(res.status).toBe(500);
+        await expect(res.json()).resolves.toEqual({ error: "db down" });
+    });
+});
+
 describe("insightRoutes method behavior", () => {
     test("migrated legacy GET-only routes fall through on wrong method", () => {
         expect(matchRoute(insightRoutes, "POST", "/api/recall").kind).toBe("unmatched");

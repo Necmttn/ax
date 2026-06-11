@@ -4,8 +4,7 @@ import { BunFileSystem, BunPath, BunRuntime } from "@effect/platform-bun";
 import { Command } from "effect/unstable/cli";
 import { SurrealClient, type SurrealClientShape } from "@ax/lib/db";
 import { AppLayer } from "@ax/lib/layers";
-import { cmdShare } from "./share.ts";
-import { cmdStar, maybePrintStarNudge } from "./star-nudge.ts";
+import { maybePrintStarNudge } from "./star-nudge.ts";
 import { insightsCommand, reportCommand, timelineCommand, reportRuntime } from "./commands/report.ts";
 import { signalsCommand, signalsRuntime } from "./commands/signals.ts";
 import { evidenceCommand, evidenceRuntime } from "./commands/evidence.ts";
@@ -13,6 +12,7 @@ import { contextCommand, contextRuntime } from "./commands/context.ts";
 import { projectCommand, projectRuntime } from "./commands/project.ts";
 import { serveCommand, mcpCommand, tuiCommand, serveRuntime } from "./commands/serve.ts";
 import { shareCommand, shareRuntime } from "./commands/share.ts";
+import { starCommand, starRuntime } from "./commands/star.ts";
 import { dogfoodCommand, dogfoodRuntime } from "./commands/dogfood.ts";
 import { costsGroupCommand, locCommand, pricingCommand, costsRuntime } from "./commands/costs.ts";
 import { recallCommand, recallRuntime } from "./commands/recall.ts";
@@ -21,7 +21,7 @@ import { retroCommand, retroRuntime } from "./commands/retro.ts";
 import { improveCommand, improveRuntime } from "./commands/improve.ts";
 import { sessionsCommand, sessionsRuntime } from "./commands/sessions.ts";
 import { skillsCommand, rolesCommand, skillsRuntime } from "./commands/skills.ts";
-import { classifiersCommand, classifiersRuntime, classifiersPackageOperationsNeedsDb } from "./commands/classifiers.ts";
+import { classifiersCommand, classifiersRuntime } from "./commands/classifiers.ts";
 import {
     ingestCommand,
     deriveCommand,
@@ -30,7 +30,7 @@ import {
     ingestRuntime,
     detectRemovedIngestFlag,
 } from "./commands/ingest.ts";
-import type { RuntimeManifest } from "./commands/manifest.ts";
+import { resolveRuntime, type RuntimeManifest } from "./commands/manifest.ts";
 import { parseCsvFlag } from "./commands/shared.ts";
 import {
     versionCommand,
@@ -103,6 +103,7 @@ export const rootCommand = Command.make("axctl").pipe(
         Command.withHidden(daemonCommand),
         Command.withHidden(doctorCommand),
         Command.withHidden(uninstallCommand),
+        Command.withHidden(starCommand), // nudge target (`ax star --done`) - pointed at by the star reminder, not for the help list
         ...devOnlyCommands,
     ]),
 );
@@ -234,6 +235,7 @@ export const RUNTIME_BY_COMMAND: RuntimeManifest = {
     ...projectRuntime,
     ...serveRuntime,
     ...shareRuntime,
+    ...starRuntime,
     ...dogfoodRuntime,
     ...costsRuntime,
     ...recallRuntime,
@@ -251,16 +253,13 @@ export const RUNTIME_BY_COMMAND: RuntimeManifest = {
 // ingest superset layer). Anything outside this set runs through `withoutDb`
 // so the user gets fast, honest errors (e.g. "unknown command") instead of a
 // 5s connect timeout. Derived - do not hand-edit; declare runtime in the
-// owning commands/<family>.ts manifest instead.
+// owning commands/<family>.ts manifest instead. db-conditional families are
+// excluded: dispatch resolves them per-invocation via resolveRuntime.
 export const DB_COMMANDS: ReadonlySet<string> = new Set(
     Object.entries(RUNTIME_BY_COMMAND)
         .filter(([, runtime]) => runtime === "db" || runtime === "ingest")
         .map(([name]) => name),
 );
-
-// Moved to commands/classifiers.ts (Phase 2 CLI split); re-exported here for
-// the existing test contract (effect-cli.test.ts imports it from index.ts).
-export { classifiersPackageOperationsNeedsDb } from "./commands/classifiers.ts";
 
 // Moved to commands/ingest.ts (Phase 2 CLI split); re-exported here for the
 // existing test contract (effect-cli.test.ts imports them from index.ts).
@@ -275,9 +274,9 @@ export { resolveIngestStages, detectRemovedIngestFlag, insightsOnlyConflicts } f
  * ingest_run finish row + ingest-lock release) instead of hard-killing
  * mid-run and stranding `ingest_run` rows in status "running".
  *
- * Non-Effect legacy commands (version/star/share) are wrapped in
- * `Effect.promise`; a rejection becomes a defect and flows through the same
- * `reportCliFailure` path the old `.catch` handled.
+ * The one remaining non-Effect legacy path (`-V`/`--version` flag printing)
+ * is wrapped in `Effect.promise`; a rejection becomes a defect and flows
+ * through the same `reportCliFailure` path the old `.catch` handled.
  */
 const dispatch = (args: ReadonlyArray<string>): Effect.Effect<void, unknown> => {
     if (args[0] === undefined) {
@@ -297,9 +296,6 @@ const dispatch = (args: ReadonlyArray<string>): Effect.Effect<void, unknown> => 
     if (args[0] === "upgrade") {
         return withoutDb(["update", ...args.slice(1)]);
     }
-    if (args[0] === "star") {
-        return Effect.promise(() => cmdStar(args.slice(1)));
-    }
     if (args[0] === "ingest") {
         // Effect's CLI parser silently ignores unknown flags, so the removed
         // `--*-only` flags would otherwise no-op into a full ingest. Reject
@@ -314,22 +310,17 @@ const dispatch = (args: ReadonlyArray<string>): Effect.Effect<void, unknown> => 
         }
         return withIngest(args);
     }
-    if (
-        args[0] === "classifiers" &&
-        (classifiersPackageOperationsNeedsDb(args) ||
-            args[1] === "graph" ||
-            args[1] === "lifecycle")
-    ) {
-        return withDb(args);
-    }
-    if (args[0] === "classifiers" && (args[1] === "eval" || args[1] === "list" || args[1] === "package-operations")) {
-        return withoutDb(args);
-    }
-    if (args[0] === "share") {
-        if (args[1] === "--help" || args[1] === "-h") {
-            return withoutDb(args);
-        }
-        return Effect.promise(() => cmdShare(args.slice(1)));
+    // db-conditional families (e.g. classifiers) declare their own
+    // per-subcommand routing in their RuntimeManifest; resolve it here so
+    // dispatch never hard-codes subcommand names or predicates.
+    const declared = RUNTIME_BY_COMMAND[args[0]];
+    if (declared !== undefined && typeof declared !== "string") {
+        const runtime = resolveRuntime(declared, args);
+        return runtime === "db"
+            ? withDb(args)
+            : runtime === "ingest"
+                ? withIngest(args)
+                : withoutDb(args);
     }
     if (DB_COMMANDS.has(args[0] ?? "")) {
         return withDb(args);
