@@ -127,8 +127,8 @@ function LocCell({ p }: { readonly p: SessionInsightsPayload }): ReactNode {
 
 function SkillArcCell({ p }: { readonly p: SessionInsightsPayload }): ReactNode {
     if (p.skills.length === 0) return null;
-    const arc = p.skills.filter((s, i) => i === 0 || s.name !== p.skills[i - 1]!.name);
     const labelOf = (name: string): string => {
+        // Codex tool patterns: match v\d+: prefix or bare codex_ prefix first.
         const normalized = name.replace(/^v\d+:/, "").toLowerCase();
         if (normalized.includes("spawn_agent")) return "spawn";
         if (normalized.includes("wait_agent")) return "wait";
@@ -138,13 +138,21 @@ function SkillArcCell({ p }: { readonly p: SessionInsightsPayload }): ReactNode 
         if (normalized.includes("view_image")) return "image";
         if (normalized.includes("web_run")) return "web";
         if (normalized.includes("read") || normalized.includes("open")) return "read";
-        return normalized
-            .replace(/^codex_/, "")
-            .replace(/^claude_/, "")
-            .replace(/_/g, " ")
-            .replace(/:.*/, "")
-            .slice(0, 18);
+        // Codex-style names without a simple namespace:slug shape
+        if (!normalized.includes(":") || normalized.replace(/^v\d+:/, "").includes("_")) {
+            return normalized
+                .replace(/^codex_/, "")
+                .replace(/^claude_/, "")
+                .replace(/_/g, " ")
+                .slice(0, 18);
+        }
+        // Simple plugin-namespaced skill id: keep post-colon slug as the label.
+        const colonIdx = name.lastIndexOf(":");
+        return name.slice(colonIdx + 1).replace(/_/g, " ").slice(0, 18);
     };
+    // Dedupe consecutive repeats AFTER labeling (same chip text = same label).
+    const withLabels = p.skills.map((s) => ({ ...s, label: labelOf(s.name) }));
+    const arc = withLabels.filter((s, i) => i === 0 || s.label !== withLabels[i - 1]!.label);
     return (
         <div style={{ minWidth: 0 }}>
             <div style={LBL}>Skill arc</div>
@@ -169,7 +177,7 @@ function SkillArcCell({ p }: { readonly p: SessionInsightsPayload }): ReactNode 
                                     verticalAlign: "bottom",
                                 }}
                             >
-                                {labelOf(s.name)}
+                                {s.label}
                             </span>
                         </span>
                     ))}
@@ -196,9 +204,18 @@ function ContextCell({ p }: { readonly p: SessionInsightsPayload }): ReactNode {
         .join(" ");
     const peak = Math.max(...points.map((c) => c.pct));
     const last = points[points.length - 1]!.pct;
-    const compactionDots = p.compactions.slice(0, points.length).map((_, i) => {
-        const index = Math.round(((i + 1) / (p.compactions.length + 1)) * (points.length - 1));
-        return points[index]!;
+    // Position each compaction dot at its real t offset, snapped to the nearest
+    // curve point's y. Dots are only rendered when the curve is non-empty.
+    const compactionDots = points.length === 0 ? [] : p.compactions.map((comp) => {
+        const dotT = comp.t;
+        // Find the curve point nearest in t to dotT.
+        let nearest = points[0]!;
+        let minDist = Math.abs(nearest.t - dotT);
+        for (const pt of points) {
+            const d = Math.abs(pt.t - dotT);
+            if (d < minDist) { minDist = d; nearest = pt; }
+        }
+        return { x: (dotT / tMax) * width, y: yOf(nearest.pct) };
     });
 
     return (
@@ -217,7 +234,7 @@ function ContextCell({ p }: { readonly p: SessionInsightsPayload }): ReactNode {
                     />
                     <path d={path} fill="none" stroke="var(--sx-chart-line)" strokeWidth={1.5} />
                     {compactionDots.map((c, i) => (
-                        <circle key={i} cx={(c.t / tMax) * width} cy={yOf(c.pct)} r={2.4} fill="var(--sx-amber-500)" />
+                        <circle key={i} cx={c.x} cy={c.y} r={2.4} fill="var(--sx-amber-500)" />
                     ))}
                 </svg>
             </div>
@@ -234,6 +251,15 @@ function BaselineFooter({ p }: { readonly p: SessionInsightsPayload }): ReactNod
 
     const delta = (label: string, r: number | null, higherIsWorse: boolean): ReactNode => {
         if (r === null) return null;
+        // When the ratio rounds to 1.0, show a neutral "≈median" instead of "1.0x down/up".
+        if (Math.round(r * 10) === 10) {
+            return (
+                <span>
+                    {" · "}{label}{" "}
+                    <span style={{ color: "var(--sx-ink-500)" }}>≈median</span>
+                </span>
+            );
+        }
         const worse = higherIsWorse ? r > 1 : r < 1;
         return (
             <span>
@@ -331,7 +357,7 @@ export function InsightPanel({ row }: { readonly row: SessionListRow }) {
             {cells.length > 0 ? (
                 <div style={{
                     display: "grid",
-                    gridTemplateColumns: "minmax(150px, 0.85fr) minmax(150px, 0.85fr) minmax(220px, 1.25fr) minmax(220px, 1.15fr)",
+                    gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
                     gap: "12px 28px",
                     marginTop: 12,
                     alignItems: "start",

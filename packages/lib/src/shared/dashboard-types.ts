@@ -888,7 +888,7 @@ export interface SessionInsightsPayload {
     /** Context-fill curve, ≤60 points; t = ms offset from session start,
      *  pct = estimated context fill 0..1 (prompt+cache tokens / window). */
     readonly context_curve: ReadonlyArray<{ readonly t: number; readonly pct: number }>;
-    readonly compactions: ReadonlyArray<{ readonly ts: string }>;
+    readonly compactions: ReadonlyArray<{ readonly ts: string; readonly t: number }>;
     /** Always present; individual ratios are null when this session or the
      *  30d baseline lacks that metric. All-null ratios ≠ missing baseline. */
     readonly baseline: {

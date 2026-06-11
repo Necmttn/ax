@@ -181,6 +181,7 @@ export function StoryBar({ insights, startedAt, endedAt }: {
                 overflowWrap: "anywhere",
             }}>
                 {Array.from(phaseTotals.entries()).slice(0, 3).map(([k, v]) => `${k} ${fmtMs(v)}`).join(" · ")}
+                {phaseTotals.size > 3 ? <span style={{ color: "var(--sx-ink-300)" }}> +{phaseTotals.size - 3} more</span> : null}
                 {idleMs > 60_000 ? <span style={{ color: "var(--sx-ink-300)" }}> · idle {fmtMs(idleMs)}</span> : null}
                 {insights.friction_ticks.length > 0
                     ? <span style={{ color: "var(--sx-red-700)" }}> · x{insights.friction_ticks.length} corrections</span>

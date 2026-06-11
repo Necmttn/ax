@@ -72,8 +72,12 @@ describe("fetchSessionInsights", () => {
             loc: { added: 2100, removed: 940 },
             durability: 0.8,
             delegation_ratio: 0.38,
-            compactions: [{ ts: "2026-06-11T01:40:00Z" }],
         });
+        // Defect 2: compactions carry a t offset from the same t0 as context_curve.
+        // curve t0 = turn seq=1 ts = 2026-06-11T01:01:00Z
+        // compaction ts = 2026-06-11T01:40:00Z -> t = 39 * 60_000 = 2_340_000
+        // but curve tMax = 300_000 (seq=2 - seq=1), so t is clamped to 300_000.
+        expect(payload.compactions).toEqual([{ ts: "2026-06-11T01:40:00Z", t: 300_000 }]);
         expect(payload.commits).toEqual([
             { ts: "2026-06-11T01:25:00Z", sha: "abc123", reverted: true },
             { ts: "2026-06-11T01:30:00Z", sha: "def456", reverted: false },
@@ -189,6 +193,33 @@ describe("fetchSessionInsights", () => {
             land_ratio: null,
             cache_pct: 0.5,
         });
+    });
+
+    test("context curve always keeps t=0 origin point for >60-turn sessions", async () => {
+        // Build 70 turn-usage rows; the downsampler must keep index 0 (t=0).
+        const base = new Date("2026-06-11T02:00:00Z").getTime();
+        const turnRows = Array.from({ length: 70 }, (_, i) => ({
+            seq: i + 1,
+            prompt_tokens: 1000 + i * 100,
+            cache_read_input_tokens: 0,
+            cache_creation_input_tokens: 0,
+            ts: new Date(base + i * 60_000).toISOString(),
+        }));
+        const tc = makeTestSurrealClient({
+            denyWrites: true,
+            responses: [
+                emptyPrimaryResponse,
+                [turnRows],
+                [[]],
+                emptyBaselineResponse,
+            ],
+        });
+
+        const payload = await run(tc.client);
+
+        expect(payload.context_curve.length).toBeGreaterThan(0);
+        expect(payload.context_curve[0]!.t).toBe(0);
+        expect(payload.context_curve.length).toBeLessThanOrEqual(60);
     });
 
     test("resetting baselines cache forces a fresh baseline query", async () => {

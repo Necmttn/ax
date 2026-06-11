@@ -129,10 +129,16 @@ const downsampleCurve = (
 
     if (points.length <= CURVE_MAX_POINTS) return points;
 
-    const stride = Math.ceil(points.length / CURVE_MAX_POINTS);
-    const sampled = points.filter((_, index) => index % stride === 0);
-    const last = points.at(-1);
-    if (last && sampled.at(-1) !== last) return [...sampled, last].slice(-CURVE_MAX_POINTS);
+    // Always keep index 0 (t=0 origin), then stride over the rest to fill
+    // CURVE_MAX_POINTS - 1 slots, then append the last point unconditionally.
+    const target = CURVE_MAX_POINTS - 1;
+    const stride = Math.ceil((points.length - 1) / target);
+    const sampled: Array<{ readonly t: number; readonly pct: number }> = [points[0]!];
+    for (let i = stride; i < points.length - 1; i += stride) {
+        sampled.push(points[i]!);
+    }
+    const last = points.at(-1)!;
+    if (sampled.at(-1) !== last) sampled.push(last);
     return sampled;
 };
 
@@ -232,6 +238,17 @@ export const fetchSessionInsights = (
         const cacheRead = usage?.cache_read_input_tokens ?? null;
         const estimatedTokens = usage?.estimated_tokens ?? null;
 
+        const contextCurve = downsampleCurve(turnUsage, usage?.context_window);
+
+        // Compute t offsets for compaction dots using the same t0 as the curve.
+        const curveT0Ms = turnUsage[0]?.ts ? new Date(turnUsage[0].ts).getTime() : 0;
+        const curveTMax = contextCurve.length > 0 ? Math.max(...contextCurve.map((p) => p.t)) : 0;
+        const compactionsWithT = compactions.map((c) => {
+            const cMs = new Date(c.ts).getTime();
+            const rawT = Number.isFinite(cMs) && Number.isFinite(curveT0Ms) ? Math.max(0, cMs - curveT0Ms) : 0;
+            return { ts: c.ts, t: Math.min(rawT, curveTMax) };
+        });
+
         return {
             session,
             phases,
@@ -253,8 +270,8 @@ export const fetchSessionInsights = (
             durability: metrics?.durability_ratio ?? null,
             delegation_ratio: metrics?.delegation_ratio ?? null,
             skills: invokedSkills.map((row) => ({ name: skillNameFromKey(row.skill), ts: row.ts })),
-            context_curve: downsampleCurve(turnUsage, usage?.context_window),
-            compactions,
+            context_curve: contextCurve,
+            compactions: compactionsWithT,
             baseline: {
                 cost_ratio: finiteRatio(usage?.estimated_cost_usd, baselines?.median_cost_usd),
                 friction_ratio: finiteRatio(friction, baselines?.median_friction),
