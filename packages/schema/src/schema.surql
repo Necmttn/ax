@@ -848,6 +848,7 @@ DEFINE FIELD estimated_cost_usd ON session_token_usage TYPE option<float>;
 DEFINE FIELD pricing_source ON session_token_usage TYPE option<string>;
 DEFINE FIELD labels        ON session_token_usage TYPE option<string>;  -- JSON-encoded
 DEFINE FIELD metrics       ON session_token_usage TYPE option<string>;  -- JSON-encoded
+DEFINE FIELD burn_buckets ON session_token_usage TYPE option<string>;  -- JSON-encoded number[]; sessions-list BURN sparkline
 DEFINE FIELD ts            ON session_token_usage TYPE datetime DEFAULT time::now();
 DEFINE INDEX IF NOT EXISTS session_token_usage_session ON session_token_usage FIELDS session UNIQUE;
 DEFINE INDEX IF NOT EXISTS session_token_usage_epoch ON session_token_usage FIELDS workflow_epoch, source, ts;

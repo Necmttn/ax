@@ -33,4 +33,8 @@ describe("computeBurnBuckets", () => {
     test("non-finite and negative inputs clamp to 0", () => {
         expect(computeBurnBuckets([Number.NaN, -5, 7])).toEqual([0, 0, 7]);
     });
+
+    test("bucketCount <= 0 -> empty array", () => {
+        expect(computeBurnBuckets([1, 2, 3], 0)).toEqual([]);
+    });
 });

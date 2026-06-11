@@ -10,6 +10,7 @@ export const computeBurnBuckets = (
     perTurnTokens: ReadonlyArray<number>,
     bucketCount: number = BURN_BUCKET_COUNT,
 ): number[] => {
+    if (bucketCount <= 0) return [];
     const clean = perTurnTokens.map((t) => (Number.isFinite(t) && t > 0 ? Math.trunc(t) : 0));
     if (clean.length === 0) return [];
     if (clean.length <= bucketCount) return clean;

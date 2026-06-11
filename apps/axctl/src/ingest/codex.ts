@@ -1216,6 +1216,7 @@ const buildCodexTokenUsageStatements = (usage: CodexTokenUsage | null): string[]
         estimatedTokens: usage.estimatedTokens,
     });
     return [
+        // TODO(burn-buckets): codex batching makes per-session series unavailable here; backfill via derive stage
         `UPSERT ${recordRef("session_token_usage", safeKeyPart(usage.session))} MERGE ${surrealObject([
             ["session", recordRef("session", usage.session)],
             ["source", surrealString("codex")],

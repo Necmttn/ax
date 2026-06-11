@@ -41,6 +41,7 @@ import {
     turnRecordKey,
 } from "./record-keys.ts";
 import { extractToolFileEvidence } from "./tool-file-evidence.ts";
+import { computeBurnBuckets } from "./burn-buckets.ts";
 import {
     buildNormalizedTranscriptStatements,
     buildNormalizedTurnStatements,
@@ -1494,6 +1495,11 @@ export const buildClaudeTokenUsageStatements = (extracted: FileExtract): string[
         estimatedTokens: usage.estimatedTokens,
     });
     const sessionId = extracted.session.id;
+    const burnBuckets = computeBurnBuckets(
+        [...extracted.turnTokenUsages]
+            .sort((a, b) => a.seq - b.seq)
+            .map((t) => t.estimatedTokens),
+    );
     return [
         `UPSERT ${recordRef("session_token_usage", safeKeyPart(sessionId))} MERGE ${surrealObject([
             ["session", recordRef("session", sessionId)],
@@ -1516,6 +1522,7 @@ export const buildClaudeTokenUsageStatements = (extracted: FileExtract): string[
                 source: "claude_transcript",
                 token_source: "transcript_usage",
             })],
+            ["burn_buckets", burnBuckets.length > 0 ? surrealString(JSON.stringify(burnBuckets)) : "NONE"],
             ["ts", surrealDate(usage.ts)],
         ])};`,
     ];
