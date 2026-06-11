@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { isRecord, stringField, dateField, numberFieldOrNull, numberFieldOrZero, recordIdString } from "./row-fields.ts";
+import { isRecord, stringField, dateField, numberFieldOrNull, countField, recordIdString } from "./row-fields.ts";
 
 describe("isRecord", () => {
     test("true for plain object, false for array/null", () => {
@@ -40,13 +40,13 @@ describe("numberFieldOrNull", () => {
     });
 });
 
-describe("numberFieldOrZero", () => {
+describe("countField", () => {
     test("coerces numeric-ish values, defaults to 0", () => {
-        expect(numberFieldOrZero({ n: 3 }, "n")).toBe(3);
-        expect(numberFieldOrZero({ n: "3" }, "n")).toBe(3);
-        expect(numberFieldOrZero({}, "n")).toBe(0);
-        expect(numberFieldOrZero({ n: Number.NEGATIVE_INFINITY }, "n")).toBe(0);
-        expect(numberFieldOrZero({ n: "junk" }, "n")).toBe(0);
+        expect(countField({ n: 3 }, "n")).toBe(3);
+        expect(countField({ n: "3" }, "n")).toBe(3);
+        expect(countField({}, "n")).toBe(0);
+        expect(countField({ n: Number.NEGATIVE_INFINITY }, "n")).toBe(0);
+        expect(countField({ n: "junk" }, "n")).toBe(0);
     });
 });
 
