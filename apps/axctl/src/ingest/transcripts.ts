@@ -1328,14 +1328,14 @@ const relateInvocations = (invocations: Invocation[]) =>
             // the proper scope/dir_path/description on known skills with
             // our 'unknown' placeholder. Idempotent re-runs of ingest stay
             // a no-op for everything that has a real on-disk source.
-            // Record-list selection (`FROM [refs]`), NEVER `FROM skill WHERE
-            // id IN [...]`: the id IN-list form silently matches NOTHING on
-            // the skill table (verified live on SurrealDB 3.1.0 - invariant
-            // documented in @ax/lib/shared/record-select), which made this
-            // lookup return empty and clobbered real skill rows with the
-            // 'unknown' placeholder MERGE below. (The previous comment here
-            // claimed the opposite - that `FROM [...]` returns DatabaseEmpty -
-            // which does not reproduce on 3.1.0: missing records are skipped.)
+            // Materialized record-list selection via selectByIds, NEVER
+            // `FROM skill WHERE id IN [...]` (silently matches NOTHING on the
+            // skill table, which made this lookup return empty and clobbered
+            // real skill rows with the 'unknown' placeholder MERGE below) and
+            // NEVER bare `FROM [refs]` (throws "Specify a database to use" on
+            // SurrealDB 3.0.x - issue #251, aborted every Claude/Codex ingest
+            // on fresh installs). Both invariants are documented + verified
+            // in @ax/lib/shared/record-select.
             const existing = (yield* db.query<[Array<{ name?: string }>]>(
                 selectByIds("name", "skill", [...uniqueSkills].map(skillRecordKey)),
             )) as [Array<{ name?: string }>];

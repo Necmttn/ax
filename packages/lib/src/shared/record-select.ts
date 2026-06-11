@@ -2,16 +2,23 @@
  * record-select: the ONE reliable shape for bulk fetch-by-record-id, and the
  * single home of the SurrealDB id-IN-list quirk documentation.
  *
- * INVARIANT (verified live against SurrealDB 3.1.0 on 127.0.0.1:8521,
- * 2026-06-10, scratch script run against real rows of every table below):
+ * INVARIANT (verified live against SurrealDB 3.0.5 AND 3.1.0 in-memory
+ * instances, 2026-06-11, plus 3.1.0 on 127.0.0.1:8521 against real rows on
+ * 2026-06-10):
  *
- *   - `SELECT ... FROM [table:`k1`, table:`k2`]` (record-list selection)
- *     resolved every existing record on EVERY table tested: session, turn,
- *     skill, file, commit, tool_call, pull_request. Missing records are
- *     silently skipped (1 real + 1 missing → 1 row; all missing → 0 rows,
- *     no error). The historical claim that `FROM [...]` returns
- *     `DatabaseEmpty` (old transcripts.ts comment) does NOT reproduce on
- *     3.1.0 - it was either version- or context-specific and is gone.
+ *   - Bare record-list selection `SELECT ... FROM [table:`k1`, table:`k2`]`
+ *     works on 3.1.0 but THROWS "Specify a database to use" on 3.0.x even
+ *     with the session namespace/database set (issue #251 - it aborted every
+ *     Claude/Codex ingest on fresh installs, which pinned SurrealDB 3.0.5).
+ *     Parameterized `FROM $ids` fails identically on 3.0.x.
+ *
+ *   - Materializing the records first - `FROM [refs].map(|$r| $r.*)` -
+ *     resolves every existing record on BOTH 3.0.5 and 3.1.0. Missing
+ *     records dereference to NONE; the appended `.filter(|$o| $o != NONE)`
+ *     drops them explicitly (1 real + 1 missing → 1 row; all missing → 0
+ *     rows, no error). Field expressions over the materialized objects -
+ *     aliases, `type::string(id)`, `<string>id` casts - behave exactly as
+ *     they do over a table source. This is the shape both helpers below emit.
  *
  *   - `SELECT ... FROM <table> WHERE id IN [refs]` is UNRELIABLE: with the
  *     exact same refs it matched 0 rows on skill, file, commit, tool_call and
@@ -34,26 +41,34 @@
 import { recordLiteral } from "../ids.ts";
 
 /**
- * A record-list FROM source from bare record keys:
- * `` [table:`k1`, table:`k2`] ``.
+ * Dereference a record-id list into plain objects so the SELECT source is
+ * version-portable (see the 3.0.x invariant above), dropping missing records.
+ */
+const materialized = (refList: string): string =>
+    `${refList}.map(|$r| $r.*).filter(|$o| $o != NONE)`;
+
+/**
+ * A materialized FROM source from bare record keys:
+ * `` [table:`k1`, table:`k2`].map(|$r| $r.*).filter(|$o| $o != NONE) ``.
  *
  * @throws {Error} when any key is empty or contains a backtick/newline/null
  *   byte (see `recordLiteral`). Filter/normalize keys before calling.
  */
 export const recordListSource = (table: string, keys: readonly string[]): string =>
-    `[${keys.map((k) => recordLiteral(table, k)).join(", ")}]`;
+    materialized(`[${keys.map((k) => recordLiteral(table, k)).join(", ")}]`);
 
 /**
- * A record-list FROM source from refs that are ALREADY valid record literals
+ * A materialized FROM source from refs that are ALREADY valid record literals
  * (e.g. strings produced by `type::string(id)` / `<string>id`, which come back
  * as `` table:`key` `` or `table:⟨key⟩`). No escaping is applied - never pass
  * user input through this form.
  */
 export const refListSource = (refs: readonly string[]): string =>
-    `[${refs.join(", ")}]`;
+    materialized(`[${refs.join(", ")}]`);
 
 /**
- * The full bulk fetch-by-id statement: `SELECT <fields> FROM [refs];`.
+ * The full bulk fetch-by-id statement:
+ * `SELECT <fields> FROM [refs].map(|$r| $r.*).filter(|$o| $o != NONE);`.
  * Missing records are skipped; an all-missing list yields zero rows.
  */
 export const selectByIds = (fields: string, table: string, keys: readonly string[]): string =>

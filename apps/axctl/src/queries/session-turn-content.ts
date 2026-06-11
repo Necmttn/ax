@@ -7,6 +7,7 @@ import type {
 } from "@ax/lib/shared/dashboard-types";
 import { identityPart } from "@ax/lib/ids";
 import { recordKeyPart } from "@ax/lib/shared/derive-keys";
+import { refListSource } from "@ax/lib/shared/record-select";
 import { interpolateRid, queryMany } from "@ax/lib/shared/graph-query";
 import { toBareSessionId } from "@ax/lib/shared/session-id";
 import { recordRef } from "@ax/lib/shared/surql";
@@ -152,9 +153,9 @@ export const resolveTurnContentForSourceRefs = Effect.fn("queries.resolveTurnCon
     function* (sourceRefs: ReadonlyArray<string>) {
         const refs = [...new Set(sourceRefs)].filter((ref) => ref.length > 0);
         if (refs.length === 0) return new Map<number, InspectTurnContentDto>();
-        const documents = refs
-            .map((ref) => recordRef("content_document", contentDocumentKeyForTurnRef(ref)))
-            .join(", ");
+        const documents = refListSource(
+            refs.map((ref) => recordRef("content_document", contentDocumentKeyForTurnRef(ref))),
+        );
         // Fast inspector path: direct document/block/atom record fetches avoid the
         // multi-second `document IN ...` scans seen on large sessions. Atoms are
         // capped per kind/block so the initial inspect response stays sub-second.
@@ -166,7 +167,7 @@ export const resolveTurnContentForSourceRefs = Effect.fn("queries.resolveTurnCon
             parser_version,
             blockset_hash,
             turn.seq AS turn_seq
-        FROM [${documents}]
+        FROM ${documents}
         ORDER BY turn_seq;
     `, undefined, {
             includeAtoms: false,
@@ -238,7 +239,7 @@ const resolveTurnContentFromDocuments = (
                         start_offset,
                         end_offset,
                         confidence
-                    FROM [${directBlockRefs.join(", ")}]
+                    FROM ${refListSource(directBlockRefs)}
                     ORDER BY document_id, seq;
                 `,
                 (row) => row,
@@ -281,7 +282,7 @@ const resolveTurnContentFromDocuments = (
                         normalized,
                         confidence,
                         raw
-                    FROM [${directAtomRefs.join(", ")}]
+                    FROM ${refListSource(directAtomRefs)}
                     ORDER BY document_id, block_seq, kind, value;
                 `,
                 (row) => row,

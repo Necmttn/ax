@@ -29,12 +29,13 @@ SURREAL_BIN="${AX_SURREAL_BIN:-$(command -v surreal || true)}"
 healthy() { curl -fsS "http://127.0.0.1:$AX_DB_PORT/health" >/dev/null 2>&1; }
 
 apply_schema() {
-    # schema.surql hardcodes DEFINE BUCKET paths at the STABLE data dir (SurrealQL
-    # cannot expand env vars). Rewrite them to the dev data dir so dev buckets land
-    # under AX_DATA_DIR and match the dev SurrealDB's bucket allowlist.
+    # schema.surql hardcodes DEFINE BUCKET paths at the COMMITTING machine's
+    # data dir (SurrealQL cannot expand env vars). Rewrite whatever path is
+    # committed to the dev data dir so dev buckets land under AX_DATA_DIR and
+    # match the dev SurrealDB's bucket allowlist (issue #251).
     local tmp
     tmp="$(mktemp)"
-    sed "s#$HOME/.local/share/ax/buckets#$AX_DATA_DIR/buckets#g" \
+    sed -E "s|BACKEND \"file:[^\"]*/buckets/([a-zA-Z0-9_]+)\"|BACKEND \"file:$AX_DATA_DIR/buckets/\1\"|" \
         "$ROOT/packages/schema/src/schema.surql" >"$tmp"
     "$SURREAL_BIN" import \
         --endpoint "http://127.0.0.1:$AX_DB_PORT" \
