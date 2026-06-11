@@ -7,36 +7,15 @@ import { describe, expect, test } from "bun:test";
 import { Effect } from "effect";
 import { RecordId } from "surrealdb";
 import { relateSkillRoles } from "./skill-role.ts";
-import type { SurrealClientShape } from "@ax/lib/db";
+import { makeTestSurrealClient } from "@ax/lib/testing/surreal";
 
 // ---------------------------------------------------------------------------
 // Mock DB helpers
 // ---------------------------------------------------------------------------
 
-type Call =
-    | { kind: "query"; sql: string; bindings?: Record<string, unknown> }
-    | { kind: "upsert"; id: RecordId; content: Record<string, unknown> };
-
 function makeMockDb() {
-    const calls: Call[] = [];
-    const impl: SurrealClientShape = {
-        query: <T extends unknown[] = unknown[]>(
-            sql: string,
-            bindings?: Record<string, unknown>,
-        ) => {
-            calls.push(bindings !== undefined ? { kind: "query", sql, bindings } : { kind: "query", sql });
-            return Effect.succeed([[]] as unknown as T);
-        },
-        upsert: (id: RecordId, content: Record<string, unknown>) => {
-            calls.push({ kind: "upsert", id, content });
-            return Effect.void;
-        },
-        relate: () => Effect.void,
-        putFile: () => Effect.void,
-        getFile: () => Effect.succeed(""),
-        raw: undefined as unknown as import("surrealdb").Surreal,
-    };
-    return { calls, db: impl };
+    const tc = makeTestSurrealClient();
+    return { calls: tc.calls, upserts: tc.upserts, db: tc.client };
 }
 
 const SKILL_ID = new RecordId("skill", "test-skill");
@@ -60,7 +39,7 @@ describe("relateSkillRoles", () => {
         expect(result.rolesUpserted).toBe(1);
         expect(result.edgesWritten).toBe(1);
 
-        const queryCalls = calls.filter((c): c is Extract<Call, { kind: "query" }> => c.kind === "query");
+        const queryCalls = calls;
 
         // One UPSERT ... SET for the role node. SET (not CONTENT) so an
         // existing role's weight survives re-ingest.
@@ -100,26 +79,17 @@ describe("relateSkillRoles", () => {
         expect(result.rolesUpserted).toBe(2);
         expect(result.edgesWritten).toBe(2);
 
-        const roleUpserts = calls.filter(
-            (c): c is Extract<Call, { kind: "query" }> =>
-                c.kind === "query" && c.sql.includes("UPSERT role:"),
-        );
+        const roleUpserts = calls.filter((c) => c.sql.includes("UPSERT role:"));
         expect(roleUpserts).toHaveLength(2);
         const upsertedNames = roleUpserts.map((c) => c.sql.match(/SET name = "([^"]+)"/)?.[1]);
         expect(upsertedNames).toContain("framing");
         expect(upsertedNames).toContain("execution");
 
         // Exactly one sweep DELETE (outside the loop)
-        const deleteCalls = calls.filter(
-            (c): c is Extract<Call, { kind: "query" }> =>
-                c.kind === "query" && c.sql.includes("DELETE plays_role"),
-        );
+        const deleteCalls = calls.filter((c) => c.sql.includes("DELETE plays_role"));
         expect(deleteCalls).toHaveLength(1);
 
-        const relateCalls = calls.filter(
-            (c): c is Extract<Call, { kind: "query" }> =>
-                c.kind === "query" && c.sql.includes("RELATE"),
-        );
+        const relateCalls = calls.filter((c) => c.sql.includes("RELATE"));
         expect(relateCalls).toHaveLength(2);
         // Each RELATE uses the correct role literal
         const relatedRoles = relateCalls.map((c) => {
@@ -143,10 +113,7 @@ describe("relateSkillRoles", () => {
         expect(result.rolesUpserted).toBe(1);
         expect(result.edgesWritten).toBe(1);
 
-        const roleUpserts = calls.filter(
-            (c): c is Extract<Call, { kind: "query" }> =>
-                c.kind === "query" && c.sql.includes("UPSERT role:"),
-        );
+        const roleUpserts = calls.filter((c) => c.sql.includes("UPSERT role:"));
         expect(roleUpserts).toHaveLength(1);
         expect(roleUpserts[0]!.sql).toContain('SET name = "framing"');
     });
@@ -167,14 +134,8 @@ describe("relateSkillRoles", () => {
         );
         expect(calls.length).toBe(firstRunCallCount * 2);
 
-        const allDeleteCalls = calls.filter(
-            (c): c is Extract<Call, { kind: "query" }> =>
-                c.kind === "query" && c.sql.includes("DELETE plays_role"),
-        );
-        const allRelateCalls = calls.filter(
-            (c): c is Extract<Call, { kind: "query" }> =>
-                c.kind === "query" && c.sql.includes("RELATE"),
-        );
+        const allDeleteCalls = calls.filter((c) => c.sql.includes("DELETE plays_role"));
+        const allRelateCalls = calls.filter((c) => c.sql.includes("RELATE"));
         // 2 sweep DELETEs (once per run) + 2 RELATEs (once per run)
         expect(allDeleteCalls.length).toBe(2);
         expect(allRelateCalls.length).toBe(2);
@@ -187,7 +148,7 @@ describe("relateSkillRoles", () => {
             relateSkillRoles(db, { skillId: SKILL_ID, roles: ["framing"] }),
         );
 
-        const queryCalls = calls.filter((c): c is Extract<Call, { kind: "query" }> => c.kind === "query");
+        const queryCalls = calls;
         for (const qc of queryCalls) {
             expect(qc.sql).not.toContain("$skill");
             expect(qc.sql).not.toContain("$role");
@@ -208,8 +169,7 @@ describe("relateSkillRoles", () => {
 
         // Should issue sweep DELETE using literal skill id
         const sweepDelete = calls.find(
-            (c): c is Extract<Call, { kind: "query" }> =>
-                c.kind === "query" &&
+            (c) =>
                 c.sql.includes("DELETE plays_role") &&
                 c.sql.includes(SKILL_LIT) &&
                 c.sql.includes('source = "frontmatter"'),
@@ -218,9 +178,7 @@ describe("relateSkillRoles", () => {
         expect(sweepDelete!.sql).not.toContain("$skill");
 
         // No RELATE for empty roles
-        const relateCall = calls.find(
-            (c): c is Extract<Call, { kind: "query" }> => c.kind === "query" && c.sql.includes("RELATE"),
-        );
+        const relateCall = calls.find((c) => c.sql.includes("RELATE"));
         expect(relateCall).toBeUndefined();
     });
 
@@ -231,10 +189,7 @@ describe("relateSkillRoles", () => {
             relateSkillRoles(db, { skillId: SKILL_ID, roles: ["framing"] }),
         );
 
-        const relateCall = calls.find(
-            (c): c is Extract<Call, { kind: "query" }> =>
-                c.kind === "query" && c.sql.includes("RELATE"),
-        );
+        const relateCall = calls.find((c) => c.sql.includes("RELATE"));
         expect(relateCall).toBeDefined();
         expect(relateCall!.sql).toContain('source = "frontmatter"');
         expect(relateCall!.sql).toContain("confidence = 1.0");
@@ -256,17 +211,14 @@ describe("relateSkillRoles", () => {
         expect(result.rolesSkipped).toBe(1);
 
         // Only valid roles were upserted
-        const roleUpserts = calls.filter(
-            (c): c is Extract<Call, { kind: "query" }> =>
-                c.kind === "query" && c.sql.includes("UPSERT role:"),
-        );
+        const roleUpserts = calls.filter((c) => c.sql.includes("UPSERT role:"));
         const upsertedNames = roleUpserts.map((c) => c.sql.match(/SET name = "([^"]+)"/)?.[1]);
         expect(upsertedNames).toContain("framing");
         expect(upsertedNames).toContain("execution");
         expect(upsertedNames).not.toContain("role`with`backtick");
 
         // No SQL with the backtick role was issued
-        const queryCalls = calls.filter((c): c is Extract<Call, { kind: "query" }> => c.kind === "query");
+        const queryCalls = calls;
         for (const qc of queryCalls) {
             expect(qc.sql).not.toContain("role`with`backtick");
         }
@@ -286,7 +238,7 @@ describe("relateSkillRoles", () => {
         expect(result.rolesUpserted).toBe(1);
         expect(result.edgesWritten).toBe(1);
 
-        const queryCalls = calls.filter((c): c is Extract<Call, { kind: "query" }> => c.kind === "query");
+        const queryCalls = calls;
         for (const qc of queryCalls) {
             expect(qc.sql).not.toContain("DROP TABLE");
         }
@@ -307,16 +259,11 @@ describe("relateSkillRoles", () => {
         expect(result.rolesSkipped).toBe(3);
 
         // Sweep DELETE still fires
-        const sweepDelete = calls.find(
-            (c): c is Extract<Call, { kind: "query" }> =>
-                c.kind === "query" && c.sql.includes("DELETE plays_role"),
-        );
+        const sweepDelete = calls.find((c) => c.sql.includes("DELETE plays_role"));
         expect(sweepDelete).toBeDefined();
 
         // No RELATE issued
-        const relateCall = calls.find(
-            (c): c is Extract<Call, { kind: "query" }> => c.kind === "query" && c.sql.includes("RELATE"),
-        );
+        const relateCall = calls.find((c) => c.sql.includes("RELATE"));
         expect(relateCall).toBeUndefined();
     });
 
@@ -336,10 +283,7 @@ describe("relateSkillRoles", () => {
         );
         expect(result.edgesWritten).toBe(1);
 
-        const deleteCalls = calls.filter(
-            (c): c is Extract<Call, { kind: "query" }> =>
-                c.kind === "query" && c.sql.includes("DELETE plays_role"),
-        );
+        const deleteCalls = calls.filter((c) => c.sql.includes("DELETE plays_role"));
         // One sweep DELETE - not one per role
         expect(deleteCalls).toHaveLength(1);
         expect(deleteCalls[0]!.sql).toContain(SKILL_LIT);

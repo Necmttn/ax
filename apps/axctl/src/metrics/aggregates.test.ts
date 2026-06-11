@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { Effect, Layer } from "effect";
 import { SurrealClient } from "@ax/lib/db";
+import { SkillName } from "@ax/lib/brands";
 import {
     aggregateGroups,
     aggregateRows,
@@ -351,7 +352,7 @@ describe("fetchAggregateRows", () => {
 describe("fetchSkillSessionSet", () => {
     test("indexed out-anchored lookup over the denormalised invoked.session column", async () => {
         const seenSql: string[] = [];
-        const out = await Effect.runPromise(fetchSkillSessionSet("superpowers:tdd").pipe(Effect.provide(db({
+        const out = await Effect.runPromise(fetchSkillSessionSet(SkillName.make("superpowers:tdd")).pipe(Effect.provide(db({
             invoked: [
                 { session: "session:`s1`" },
                 { session: "session:⟨s1⟩" }, // dupes collapse
@@ -367,7 +368,7 @@ describe("fetchSkillSessionSet", () => {
     });
 
     test("no invocations -> empty set", async () => {
-        const out = await Effect.runPromise(fetchSkillSessionSet("ghost").pipe(Effect.provide(db({}))));
+        const out = await Effect.runPromise(fetchSkillSessionSet(SkillName.make("ghost")).pipe(Effect.provide(db({}))));
         expect(out.size).toBe(0);
     });
 });

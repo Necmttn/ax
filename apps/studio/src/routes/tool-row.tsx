@@ -1,4 +1,6 @@
 import type { ToolCallDto, ToolCategory } from "@ax/lib/shared/dashboard-types";
+import { HighlightedCode } from "../highlight/HighlightedCode.tsx";
+import { langFromPath } from "../highlight/lang.ts";
 import { stripToolResult } from "./tool-result.tsx";
 
 // Tinted badge tones derived from the calibrated root accents (one recipe,
@@ -43,6 +45,17 @@ function primaryArg(name: string, input: Record<string, unknown> | null): string
     return null;
 }
 
+/** Args carrying file content for Edit/Write - highlighted with the grammar
+ *  inferred from the call's file_path, and (for Edit) diff-tinted. */
+const CODE_ARGS = new Set(["old_string", "new_string", "content"]);
+
+function argTint(toolName: string, key: string): string | undefined {
+    if (toolName !== "Edit") return undefined;
+    if (key === "old_string") return "color-mix(in srgb, var(--red) 7%, transparent)";
+    if (key === "new_string") return "color-mix(in srgb, var(--green) 9%, transparent)";
+    return undefined;
+}
+
 /**
  * One unified tool-call unit. A category-tinted left rail links the identity
  * header (badge · name · primary arg · tokens) to the full command/args block
@@ -83,6 +96,13 @@ export function ToolRowItem(
     const intent = typeof input?.description === "string" && input.description.length > 0 && input.description !== head
         ? input.description
         : null;
+    // Grammar for Edit/Write file-content args, from the target file's extension.
+    const argLang = call.name === "Edit" || call.name === "Write" ? langFromPath(head) : null;
+    // `call.command` is often just the binary name (ingest excerpt); the full
+    // command string lives in input.command - prefer it when present.
+    const command = typeof input?.command === "string" && input.command.length > 0
+        ? input.command
+        : call.command;
 
     const rawOutput = result ?? call.output_excerpt ?? "";
     const resultText = rawOutput ? stripToolResult(rawOutput) : "";
@@ -174,7 +194,7 @@ export function ToolRowItem(
                         </div>
                     )
                     : null}
-                {call.command
+                {command
                     ? (
                         <pre
                             style={{
@@ -188,7 +208,7 @@ export function ToolRowItem(
                             }}
                         >
                             <span aria-hidden style={{ color: "#c0a3e8", userSelect: "none" }}>$ </span>
-                            {call.command}
+                            <HighlightedCode code={command} lang="shellscript" />
                         </pre>
                     )
                     : entries.length > 0
@@ -204,14 +224,29 @@ export function ToolRowItem(
                                 font: `11px/1.5 ${mono}`,
                             }}
                         >
-                            {entries.map(([k, v]) => (
-                                <div key={k} style={{ display: "contents" }}>
-                                    <span style={{ color: "var(--muted-2)", textAlign: "right" }}>{k}</span>
-                                    <span style={{ color: "var(--ink)", whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
-                                        {typeof v === "string" ? v : JSON.stringify(v)}
-                                    </span>
-                                </div>
-                            ))}
+                            {entries.map(([k, v]) => {
+                                const code = typeof v === "string" && CODE_ARGS.has(k) ? v : null;
+                                const tint = code != null ? argTint(call.name, k) : undefined;
+                                return (
+                                    <div key={k} style={{ display: "contents" }}>
+                                        <span style={{ color: "var(--muted-2)", textAlign: "right" }}>{k}</span>
+                                        <span
+                                            style={{
+                                                color: "var(--ink)",
+                                                whiteSpace: "pre-wrap",
+                                                wordBreak: "break-word",
+                                                ...(tint ? { background: tint, borderRadius: 3 } : {}),
+                                            }}
+                                        >
+                                            {code != null
+                                                ? <HighlightedCode code={code} lang={argLang} />
+                                                : typeof v === "string"
+                                                ? v
+                                                : JSON.stringify(v)}
+                                        </span>
+                                    </div>
+                                );
+                            })}
                         </div>
                     )
                     : null}

@@ -1,6 +1,6 @@
 import { homedir } from "node:os";
 import { execSync, spawnSync } from "node:child_process";
-import { Cause, Effect, FileSystem, Path } from "effect";
+import { Cause, Effect, FileSystem, Path, Schema } from "effect";
 import { orAbsent } from "@ax/lib/shared/fs-error";
 import { classifyNoFollow } from "@ax/lib/shared/fs-classify";
 import { posixPath } from "@ax/lib/shared/path";
@@ -23,6 +23,19 @@ import {
 import { prettyPrint } from "@ax/lib/json";
 // Schema is embedded at build time so the compiled binary is self-contained.
 import schemaSurql from "@ax/schema/schema.surql" with { type: "text" };
+import { bucketNames, renderBucketBackends } from "@ax/schema/render";
+import { envConfig as readDbEnvConfig } from "@ax/lib/db";
+
+/**
+ * Tagged failure for install steps (surreal resolution, symlinking). Extends
+ * `Error`, so existing `Error`-typed failure channels and `.message` readers
+ * keep working unchanged.
+ */
+export class InstallStepError extends Schema.TaggedErrorClass<InstallStepError>(
+    "InstallStepError",
+)("InstallStepError", {
+    message: Schema.String,
+}) {}
 
 const HOME = homedir();
 const DATA_DIR = process.env.AX_DATA_DIR ?? posixPath.join(HOME, ".local", "share", "ax");
@@ -33,7 +46,10 @@ const BIN_DIR = posixPath.join(HOME, ".local", "bin");
 const VENDOR_BIN_DIR = posixPath.join(DATA_DIR, "bin");
 
 // Pin to a known-good SurrealDB. Override via env to test newer versions.
-const SURREAL_VERSION = process.env.AXCTL_SURREAL_VERSION ?? "3.0.5";
+// 3.0.x is NOT acceptable for new downloads: `SELECT ... FROM [recordid]`
+// throws "Specify a database to use" (issue #251). The query shape is now
+// version-portable (see @ax/lib/shared/record-select), but pin past the bug.
+const SURREAL_VERSION = process.env.AXCTL_SURREAL_VERSION ?? "3.1.0";
 
 const DB_LABEL = "com.necmttn.ax-db";
 const WATCH_LABEL = "com.necmttn.ax-watch";
@@ -235,7 +251,7 @@ function ensureSurreal(): Effect.Effect<string, Error, FileSystem.FileSystem | P
         const pinnedSurreal = process.env.AXCTL_SURREAL_PATH;
         if (pinnedSurreal) {
             const v = surrealVersionString(pinnedSurreal);
-            if (!v) return yield* Effect.fail(new Error(`AXCTL_SURREAL_PATH is not executable`));
+            if (!v) return yield* new InstallStepError({ message: `AXCTL_SURREAL_PATH is not executable` });
             console.log(`  surreal: pinned ${pinnedSurreal} (${v})`);
             return pinnedSurreal;
         }
@@ -266,12 +282,11 @@ function ensureSurreal(): Effect.Effect<string, Error, FileSystem.FileSystem | P
 
         const platform = platformArtifact();
         if (!platform) {
-            return yield* Effect.fail(
-                new Error(
+            return yield* new InstallStepError({
+                message:
                     `Unsupported platform ${process.platform}/${process.arch}. ` +
-                        `Install surreal manually: https://surrealdb.com/install`,
-                ),
-            );
+                    `Install surreal manually: https://surrealdb.com/install`,
+            });
         }
 
         const tag = `v${SURREAL_VERSION}`;
@@ -289,9 +304,9 @@ function ensureSurreal(): Effect.Effect<string, Error, FileSystem.FileSystem | P
         return yield* Effect.gen(function* () {
             const res = yield* Effect.promise(() => fetch(url));
             if (!res.ok) {
-                return yield* Effect.fail(
-                    new Error(`download failed: HTTP ${res.status} ${res.statusText}`),
-                );
+                return yield* new InstallStepError({
+                    message: `download failed: HTTP ${res.status} ${res.statusText}`,
+                });
             }
             const buf = yield* Effect.promise(() => res.arrayBuffer());
             const sizeMB = (buf.byteLength / (1024 * 1024)).toFixed(1);
@@ -300,12 +315,12 @@ function ensureSurreal(): Effect.Effect<string, Error, FileSystem.FileSystem | P
             const ex = spawnSync("tar", ["-xzf", tmpTar, "-C", VENDOR_BIN_DIR], {
                 stdio: "inherit",
             });
-            if (ex.status !== 0) return yield* Effect.fail(new Error("tar extract failed"));
+            if (ex.status !== 0) return yield* new InstallStepError({ message: "tar extract failed" });
             yield* fs.chmod(localBin, 0o755);
             yield* fs.remove(tmpTar, { force: true });
 
             const v = surrealVersionString(localBin);
-            if (!v) return yield* Effect.fail(new Error(`downloaded surreal at ${localBin} did not run`));
+            if (!v) return yield* new InstallStepError({ message: `downloaded surreal at ${localBin} did not run` });
             const elapsedSec = ((Date.now() - startedAt) / 1000).toFixed(1);
             console.log(`  surreal: installed ${localBin} (${v}) [${sizeMB} MB in ${elapsedSec}s]`);
             return localBin;
@@ -416,7 +431,7 @@ export function ensureSymlink(
 
         // "File"/"Directory"/"Other": something that is NOT a symlink occupies
         // the slot. Preserve the old hard error (and leave the file intact).
-        return yield* Effect.fail(new Error(`${link} exists and is not a symlink`));
+        return yield* new InstallStepError({ message: `${link} exists and is not a symlink` });
     });
 }
 
@@ -620,6 +635,43 @@ export function formatDaemonStatus(status: DaemonStatus, json = false): string {
     return lines.join("\n");
 }
 
+/**
+ * Buckets schema.surql defines. A missing one means the schema import rolled
+ * back partway - historically a bucket BACKEND path outside the daemon's
+ * allowlist (issue #251) - and transcript snapshots silently no-op.
+ */
+const EXPECTED_BUCKETS = bucketNames(schemaSurql);
+
+/**
+ * Names from EXPECTED_BUCKETS that are NOT defined on the configured ns/db,
+ * or null when the daemon could not be queried (down, auth, non-JSON). Plain
+ * HTTP so doctor needs no SurrealClient layer; creds/ns/db come from the same
+ * AX_DB_* env config the rest of ax uses.
+ */
+async function probeMissingBuckets(endpoint: { host: string; port: number }): Promise<string[] | null> {
+    try {
+        const db = readDbEnvConfig();
+        const res = await fetch(`http://${endpoint.host}:${endpoint.port}/sql`, {
+            method: "POST",
+            headers: {
+                Accept: "application/json",
+                Authorization: `Basic ${Buffer.from(`${db.user}:${db.pass}`).toString("base64")}`,
+                "surreal-ns": db.ns,
+                "surreal-db": db.db,
+            },
+            body: "INFO FOR DB;",
+            signal: AbortSignal.timeout(3000),
+        });
+        if (!res.ok) return null;
+        const out = (await res.json()) as Array<{ result?: { buckets?: Record<string, unknown> } }>;
+        const buckets = out?.[0]?.result?.buckets;
+        if (buckets === undefined) return null;
+        return EXPECTED_BUCKETS.filter((name) => !(name in buckets));
+    } catch {
+        return null;
+    }
+}
+
 export function collectDoctorReport(): Effect.Effect<
     DoctorReport,
     never,
@@ -640,6 +692,9 @@ export function collectDoctorReport(): Effect.Effect<
         const runtimeStateExists = yield* fs
             .exists(daemon.endpoint.runtimeStatePath)
             .pipe(orAbsent(false));
+        const missingBuckets = daemon.dbListening && daemon.endpoint.conflict === null
+            ? yield* Effect.promise(() => probeMissingBuckets(daemon.endpoint))
+            : null;
         const checks: DoctorCheck[] = [
             {
                 name: "platform",
@@ -686,6 +741,15 @@ export function collectDoctorReport(): Effect.Effect<
                 detail: `${agent.loaded ? "loaded" : "not loaded"}; plist=${agent.plistExists ? "present" : "absent"}`,
             })),
         ];
+        if (missingBuckets !== null) {
+            checks.push({
+                name: "db-buckets",
+                ok: missingBuckets.length === 0,
+                detail: missingBuckets.length === 0
+                    ? `${EXPECTED_BUCKETS.join(", ")} defined`
+                    : `missing bucket(s): ${missingBuckets.join(", ")}; re-run 'axctl install' to re-apply the schema`,
+            });
+        }
         const onboarding = yield* buildOnboardingReport();
         const onboardingChecks: DoctorCheck[] = onboarding.checks.map((c) => ({
             name: `onboarding:${c.id}`,
@@ -770,9 +834,13 @@ export function cmdInstall(): Effect.Effect<
         console.log(`  wrote:  ${DERIVE_PLIST}`);
         yield* Effect.promise(() => loadAgent(DERIVE_PLIST));
 
-        // Apply schema from embedded resource via surreal import.
+        // Apply schema from embedded resource via surreal import. Bucket
+        // BACKEND paths are rewritten to THIS machine's buckets dir - the
+        // committed schema.surql carries the committing machine's absolute
+        // path, which the daemon's bucket allowlist would deny here,
+        // rolling back the entire import transaction (issue #251).
         const schemaPath = path.join(DATA_DIR, ".schema-cache.surql");
-        yield* fs.writeFileString(schemaPath, schemaSurql);
+        yield* fs.writeFileString(schemaPath, renderBucketBackends(schemaSurql, BUCKETS_DIR));
         const r = spawnSync(
             surrealPath,
             [

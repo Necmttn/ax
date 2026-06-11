@@ -1,6 +1,6 @@
 {
   "name": "axctl",
-  "version": "0.22.1",
+  "version": "0.23.0",
   "license": "AGPL-3.0-only",
   "description": "ax CLI - local memory and telemetry for coding agents. axctl ingests transcripts, skills, and git history into SurrealDB; surfaces what skills are worth keeping and what the user actually does on demand.",
   "type": "module",

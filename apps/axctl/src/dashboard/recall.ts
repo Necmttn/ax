@@ -50,7 +50,7 @@ export interface RecallParams {
     readonly scope?: RecallScope;
 }
 
-const EMPTY_RESPONSE = (
+export const emptyRecallResponse = (
     q: string,
     offset: number,
     limit: number,
@@ -82,7 +82,7 @@ export const fetchRecall = (
                 : ["turn"];
 
         if (!q) {
-            return EMPTY_RESPONSE(params.q, offset, limit);
+            return emptyRecallResponse(params.q, offset, limit);
         }
 
         // ---------------------------------------------------------------------------

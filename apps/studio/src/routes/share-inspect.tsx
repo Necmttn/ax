@@ -280,6 +280,426 @@ function fmtDuration(ms: number | null | undefined): string | null {
     return `${h}h${m % 60 ? ` ${m % 60}m` : ""}`;
 }
 
+// --- F2 session map (manifest-only) -----------------------------------------
+
+export type SessionMapAxis = "seq" | "time" | "order";
+
+export interface SessionMapLane {
+    readonly file: string;
+    readonly id: string;
+    readonly row: number;
+    /** Left edge as a 0..1 fraction of the strip. */
+    readonly x: number;
+    /** Width as a 0..1 fraction of the strip (minimum applied). */
+    readonly w: number;
+    /** 0..1 cost relative to the max subagent cost; null = flat neutral (no
+     *  card in the share has a positive cost, so intensity carries no signal). */
+    readonly intensity: number | null;
+    readonly failed: boolean;
+    readonly failures: number;
+    readonly label: string;
+    readonly title: string;
+}
+
+/** A compressed empty span between coverage clusters, post-compression
+ *  coordinates. The label is the gap's magnitude (wall-clock or turn delta). */
+export interface SessionMapGap {
+    readonly x: number;
+    readonly w: number;
+    readonly label: string;
+}
+
+export interface SessionMapModel {
+    /** One axis semantic per share - never mixed per card. */
+    readonly axis: SessionMapAxis;
+    readonly rows: number;
+    readonly rootDurationMs: number | null;
+    readonly lanes: ReadonlyArray<SessionMapLane>;
+    readonly gaps: ReadonlyArray<SessionMapGap>;
+}
+
+export const SESSION_MAP_MIN_LANE_W = 0.012;
+const SESSION_MAP_MAX_ROWS = 4;
+/** Bars whose left edges sit closer than this (strip fraction) to an earlier
+ *  bar's right edge pack onto the next row instead of overlapping. */
+const SESSION_MAP_PACK_GAP = 0.002;
+/** Uncovered spans between coverage clusters wider than this (strip fraction,
+ *  measured in the RENDERED space) get compressed - long solo-root stretches
+ *  must not dominate the strip. */
+const SESSION_MAP_GAP_MIN = 0.12;
+/** Width every compressed gap collapses to (strip fraction). */
+const SESSION_MAP_GAP_W = 0.04;
+/** Fixed-point iteration cap: compressing one gap stretches the rest, which
+ *  can push a previously sub-threshold gap over the visual threshold. */
+const SESSION_MAP_GAP_PASSES = 4;
+/** Max rendered break bands - beyond this, only the widest gaps compress so
+ *  the strip doesn't become a picket fence. */
+const SESSION_MAP_GAP_MAX = 4;
+
+const parseShareTs = (iso: string | null | undefined): number | null => {
+    const t = Date.parse(iso ?? "");
+    return Number.isFinite(t) ? t : null;
+};
+
+export interface AxisGapBreak {
+    /** Post-compression band position/width (strip fraction). */
+    readonly x: number;
+    readonly w: number;
+    /** Domain endpoints of the compressed span - compute labels from these,
+     *  never from remapped fractions. */
+    readonly domainStart: number;
+    readonly domainEnd: number;
+}
+
+export interface AxisCompression {
+    /** Monotonic piecewise-linear domain -> strip map; identity when nothing
+     *  was compressed. */
+    readonly remap: (v: number) => number;
+    readonly gaps: ReadonlyArray<AxisGapBreak>;
+}
+
+const IDENTITY_AXIS_COMPRESSION: AxisCompression = { remap: (v) => v, gaps: [] };
+
+/**
+ * Shared fixed-point gap compression for a normalized 0..1 axis. Takes the
+ * coverage intervals (anything "active" on the axis), finds interior
+ * uncovered spans, and collapses the ones that would RENDER wider than
+ * SESSION_MAP_GAP_MIN down to SESSION_MAP_GAP_W, stretching everything else
+ * proportionally. Compressing one gap stretches the rest, which can push a
+ * previously sub-threshold gap over the visual threshold - selection iterates
+ * (widest first) until no gap qualifies, bounded by SESSION_MAP_GAP_PASSES
+ * and the SESSION_MAP_GAP_MAX band cap. Candidates no wider than the break
+ * width are excluded, which keeps the remap stretch-only (chosen total >
+ * chosen count * GAP_W, hence scale > 1) and monotonic; axis endpoints stay
+ * anchored (leading/trailing space is not a gap).
+ */
+export function compressAxisGaps(
+    intervals: ReadonlyArray<{ readonly start: number; readonly end: number }>,
+): AxisCompression {
+    const covered: Array<{ start: number; end: number }> = [];
+    for (const p of [...intervals].sort((a, b) => a.start - b.start)) {
+        const last = covered[covered.length - 1];
+        if (last && p.start <= last.end) last.end = Math.max(last.end, p.end);
+        else covered.push({ start: p.start, end: p.end });
+    }
+    const candidates = covered
+        .slice(1)
+        .map((seg, i) => ({ start: covered[i]!.end, end: seg.start }))
+        .filter((g) => g.end - g.start > SESSION_MAP_GAP_W);
+    const chosen: Array<{ start: number; end: number }> = [];
+    for (let pass = 0; pass < SESSION_MAP_GAP_PASSES && chosen.length < SESSION_MAP_GAP_MAX; pass++) {
+        const chosenTotal = chosen.reduce((acc, g) => acc + (g.end - g.start), 0);
+        const stretch = (1 - chosen.length * SESSION_MAP_GAP_W) / (1 - chosenTotal);
+        const qualifying = candidates
+            .filter((g) => !chosen.includes(g) && (g.end - g.start) * stretch > SESSION_MAP_GAP_MIN)
+            .sort((a, b) => (b.end - b.start) - (a.end - a.start));
+        if (qualifying.length === 0) break;
+        for (const g of qualifying) {
+            if (chosen.length >= SESSION_MAP_GAP_MAX) break;
+            chosen.push(g);
+        }
+    }
+    if (chosen.length === 0) return IDENTITY_AXIS_COMPRESSION;
+    chosen.sort((a, b) => a.start - b.start);
+    const gapTotal = chosen.reduce((acc, g) => acc + (g.end - g.start), 0);
+    const scale = (1 - chosen.length * SESSION_MAP_GAP_W) / (1 - gapTotal);
+    const remap = (v: number): number => {
+        let out = 0;
+        let prev = 0;
+        for (const g of chosen) {
+            if (v <= g.start) return out + (v - prev) * scale;
+            out += (g.start - prev) * scale;
+            if (v <= g.end) return out + ((v - g.start) / (g.end - g.start)) * SESSION_MAP_GAP_W;
+            out += SESSION_MAP_GAP_W;
+            prev = g.end;
+        }
+        return out + (v - prev) * scale;
+    };
+    return {
+        remap,
+        gaps: chosen.map((g) => ({ x: remap(g.start), w: SESSION_MAP_GAP_W, domainStart: g.start, domainEnd: g.end })),
+    };
+}
+
+/** Point events (commit/failure ticks) anchor scrubber coverage as a span
+ *  this wide - an isolated commit in a quiet stretch is still activity. */
+const SCRUBBER_POINT_COVER_W = 0.006;
+
+/**
+ * Scrubber-side gap shaping: coverage is the union of ALL activity on the
+ * wall-clock strip - commit ticks, failure ticks (points, inflated a touch so
+ * they anchor coverage), and subagent bars. A stretch with none of those is a
+ * gap candidate. Labels are wall-clock (the scrubber domain is time).
+ */
+export function buildScrubberGaps(args: {
+    readonly pointXs: ReadonlyArray<number>;
+    readonly bars: ReadonlyArray<{ readonly x: number; readonly w: number }>;
+    readonly spanMs: number;
+}): { readonly remap: (v: number) => number; readonly gaps: ReadonlyArray<SessionMapGap> } {
+    const compression = compressAxisGaps([
+        ...args.pointXs.map((x) => ({
+            start: Math.max(0, x - SCRUBBER_POINT_COVER_W / 2),
+            end: Math.min(1, x + SCRUBBER_POINT_COVER_W / 2),
+        })),
+        ...args.bars.map((b) => ({ start: b.x, end: Math.min(1, b.x + b.w) })),
+    ]);
+    return {
+        remap: compression.remap,
+        gaps: compression.gaps.map((g) => ({
+            x: g.x,
+            w: g.w,
+            label: fmtDuration((g.domainEnd - g.domainStart) * args.spanMs) ?? "",
+        })),
+    };
+}
+
+/**
+ * Pure shaper for the share-page session map: manifest in, positioned lanes
+ * out. Axis is chosen once per share - spawn seq when every card has one AND
+ * every card is a direct child of the root (`spawn_turn_seq` is parent-local,
+ * so a nested card's seq has no meaning on the root's turn axis), else start
+ * time over the root window, else stable manifest order.
+ */
+export function buildSessionMapLanes(manifest: ShareManifest): SessionMapModel | null {
+    const cards = manifest.subagents;
+    if (cards.length === 0) return null;
+
+    const t0 = parseShareTs(manifest.session.started_at);
+    const tEnd = parseShareTs(manifest.session.ended_at);
+    const totalsDuration =
+        manifest.totals.duration_ms != null && manifest.totals.duration_ms > 0 ? manifest.totals.duration_ms : null;
+    const t1 = tEnd ?? (t0 != null && totalsDuration != null ? t0 + totalsDuration : null);
+    const windowMs = t0 != null && t1 != null && t1 > t0 ? t1 - t0 : null;
+    const rootDurationMs = windowMs ?? totalsDuration;
+
+    const seqValues = cards
+        .map((c) => c.spawn_turn_seq)
+        .filter((s): s is number => typeof s === "number" && Number.isFinite(s));
+    const allSeq = seqValues.length === cards.length && cards.every((c) => c.depth === 1);
+    const axis: SessionMapAxis = allSeq ? "seq" : windowMs != null ? "time" : "order";
+    const minSeq = allSeq ? Math.min(...seqValues) : 0;
+    const seqRange = allSeq ? Math.max(...seqValues) - minSeq : 0;
+
+    const maxChildDuration = Math.max(0, ...cards.map((c) => c.duration_ms ?? 0));
+    // No known root duration: scale so the longest child fills a quarter strip.
+    const widthDenom = rootDurationMs ?? (maxChildDuration > 0 ? maxChildDuration * 4 : null);
+
+    const maxCost = Math.max(0, ...cards.map((c) => (c.cost_usd != null && c.cost_usd > 0 ? c.cost_usd : 0)));
+
+    const placed = cards.map((card, i) => {
+        let x = 0;
+        if (axis === "seq") {
+            x = seqRange > 0 ? ((card.spawn_turn_seq ?? minSeq) - minSeq) / seqRange : 0;
+        } else if (axis === "time") {
+            const ts = parseShareTs(card.started_at);
+            x = ts != null && t0 != null && windowMs != null ? Math.min(1, Math.max(0, (ts - t0) / windowMs)) : 0;
+        } else {
+            x = i / cards.length;
+        }
+        const d = card.duration_ms != null && card.duration_ms > 0 ? card.duration_ms : null;
+        const w = Math.min(1, Math.max(SESSION_MAP_MIN_LANE_W, d != null && widthDenom != null ? d / widthDenom : 0));
+        const failures = card.stats.failures;
+        return {
+            card,
+            order: i,
+            x: Math.min(x, 1 - w),
+            w,
+            intensity: maxCost > 0 ? Math.min(1, Math.max(0, (card.cost_usd ?? 0) / maxCost)) : null,
+            failed: failures > 0,
+            failures,
+            label: subagentChipLabel(card.task_label) ?? `${shortSessionId(card.id)}…`,
+            title: [
+                card.task_label ?? card.id,
+                card.model,
+                fmtDuration(card.duration_ms),
+                fmtUsd(card.cost_usd),
+                failures > 0 ? `${failures} failure${failures === 1 ? "" : "s"}` : null,
+            ].filter(Boolean).join(" · "),
+        };
+    });
+
+    // Gap compression: wide uncovered spans between coverage clusters collapse
+    // to a fixed-width break so a few far-apart dispatches don't leave the
+    // strip mostly blank. Leading/trailing space is kept (axis endpoints stay
+    // anchored at the root window edges), the order axis is already evenly
+    // spaced, and every lane runs through the same monotonic piecewise remap.
+    let remap = (v: number): number => v;
+    let gaps: ReadonlyArray<SessionMapGap> = [];
+    if (axis !== "order") {
+        const gapLabel = (g: { readonly start: number; readonly end: number }): string => {
+            if (axis === "time" && windowMs != null) {
+                return fmtDuration((g.end - g.start) * windowMs) ?? "";
+            }
+            // Seq axis: prefer wall-clock between the adjacent clusters'
+            // timestamps; fall back to the turn delta when they're missing.
+            const before = placed.filter((p) => p.x + p.w <= g.start + 1e-9);
+            const after = placed.filter((p) => p.x >= g.end - 1e-9);
+            const prevEnds = before
+                .map((p) => {
+                    const ts = parseShareTs(p.card.started_at);
+                    return ts != null ? ts + (p.card.duration_ms ?? 0) : null;
+                })
+                .filter((t): t is number => t != null);
+            const nextStarts = after
+                .map((p) => parseShareTs(p.card.started_at))
+                .filter((t): t is number => t != null);
+            if (prevEnds.length > 0 && nextStarts.length > 0) {
+                const wallClock = Math.min(...nextStarts) - Math.max(...prevEnds);
+                const label = wallClock > 0 ? fmtDuration(wallClock) : null;
+                if (label) return label;
+            }
+            const prevSeq = Math.max(...before.map((p) => p.card.spawn_turn_seq ?? 0));
+            const nextSeq = Math.min(...after.map((p) => p.card.spawn_turn_seq ?? 0));
+            return `${Math.max(nextSeq - prevSeq, 0)} turns`;
+        };
+        const compression = compressAxisGaps(placed.map((p) => ({ start: p.x, end: p.x + p.w })));
+        remap = compression.remap;
+        gaps = compression.gaps.map((g) => ({
+            x: g.x,
+            w: g.w,
+            label: gapLabel({ start: g.domainStart, end: g.domainEnd }),
+        }));
+    }
+    const remapped = gaps.length === 0 ? placed : placed.map((p) => {
+        const x = remap(p.x);
+        return { ...p, x, w: remap(p.x + p.w) - x };
+    });
+
+    // Greedy row packing on the shared axis - overlapping bars stack downward.
+    const laneEnds: number[] = [];
+    const lanes = [...remapped]
+        .sort((p, q) => p.x - q.x || p.order - q.order)
+        .map(({ card, order: _order, ...lane }): SessionMapLane => {
+            let row = 0;
+            while (row < laneEnds.length && (laneEnds[row] ?? 0) > lane.x - SESSION_MAP_PACK_GAP) row++;
+            if (row >= SESSION_MAP_MAX_ROWS) row = SESSION_MAP_MAX_ROWS - 1;
+            laneEnds[row] = Math.max(laneEnds[row] ?? 0, lane.x + lane.w);
+            return { ...lane, file: card.file, id: card.id, row };
+        });
+
+    return {
+        axis,
+        rows: lanes.reduce((acc, lane) => Math.max(acc, lane.row + 1), 1),
+        rootDurationMs,
+        lanes,
+        gaps,
+    };
+}
+
+const SESSION_MAP_ROW_H = 18;
+const SESSION_MAP_AXIS_CAPTION: Record<SessionMapAxis, string> = {
+    seq: "placed by spawn turn",
+    time: "placed by start time",
+    order: "in spawn order",
+};
+
+/**
+ * Compact session-map strip near the share hero: the root run's fan-out as
+ * one bar per subagent. Renders from the manifest only; clicking a bar uses
+ * the same `?sub=<file>` selection as the rest of the share viewer.
+ */
+function ShareSessionMap(props: {
+    readonly manifest: ShareManifest;
+    readonly selectedFile: string;
+    readonly onSelect: (file: string) => void;
+    readonly onPrefetch: (file: string) => void;
+}) {
+    const model = useMemo(() => buildSessionMapLanes(props.manifest), [props.manifest]);
+    if (!model) return null;
+    const duration = fmtDuration(model.rootDurationMs);
+    const hasCost = model.lanes.some((lane) => lane.intensity != null);
+    const laneBackground = (lane: SessionMapLane): string => {
+        const pct = lane.intensity == null ? 26 : Math.round(18 + 62 * lane.intensity);
+        if (lane.failed) return `color-mix(in srgb, var(--red) ${Math.max(pct, 26)}%, var(--panel))`;
+        if (lane.intensity == null) return "color-mix(in srgb, var(--muted) 22%, var(--panel))";
+        return `color-mix(in srgb, var(--rose) ${pct}%, var(--panel))`;
+    };
+    return (
+        <div style={SUBAGENT_BAR_STYLE} aria-label="Session map">
+            <div style={{
+                display: "flex",
+                justifyContent: "space-between",
+                gap: 12,
+                font: "700 10px/1.5 ui-monospace, monospace",
+                textTransform: "uppercase",
+                letterSpacing: "0.08em",
+                color: "var(--muted)",
+            }}>
+                <span>Session map · {model.lanes.length} subagent{model.lanes.length === 1 ? "" : "s"}</span>
+                <span>{[duration ? `root ${duration}` : null, SESSION_MAP_AXIS_CAPTION[model.axis]].filter(Boolean).join(" · ")}</span>
+            </div>
+            <div style={{ position: "relative", height: model.rows * SESSION_MAP_ROW_H, marginTop: 8 }}>
+                {model.gaps.map((gap, i) => (
+                    <div
+                        key={`gap-${i}`}
+                        title={`no subagent activity for ${gap.label}`}
+                        style={{
+                            position: "absolute",
+                            left: `${gap.x * 100}%`,
+                            width: `${gap.w * 100}%`,
+                            top: 0,
+                            height: "100%",
+                            borderLeft: "1px dotted var(--muted-2)",
+                            borderRight: "1px dotted var(--muted-2)",
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+                        }}
+                    >
+                        <span style={{
+                            font: "10px/1.2 ui-monospace, monospace",
+                            color: "var(--muted-2)",
+                            whiteSpace: "nowrap",
+                        }}>
+                            {gap.label}
+                        </span>
+                    </div>
+                ))}
+                {model.lanes.map((lane) => {
+                    const selected = lane.file === props.selectedFile;
+                    return (
+                        <button
+                            key={lane.file}
+                            type="button"
+                            title={lane.title}
+                            aria-label={`Open subagent: ${lane.title}`}
+                            aria-pressed={selected}
+                            onClick={() => props.onSelect(lane.file)}
+                            onMouseEnter={() => props.onPrefetch(lane.file)}
+                            onFocus={() => props.onPrefetch(lane.file)}
+                            style={{
+                                position: "absolute",
+                                left: `${lane.x * 100}%`,
+                                width: `${lane.w * 100}%`,
+                                minWidth: 10,
+                                maxWidth: "100%",
+                                top: lane.row * SESSION_MAP_ROW_H,
+                                height: SESSION_MAP_ROW_H - 4,
+                                padding: "0 4px",
+                                border: selected ? "1px solid var(--ink)" : "1px solid transparent",
+                                borderRadius: 2,
+                                cursor: "pointer",
+                                background: laneBackground(lane),
+                                overflow: "hidden",
+                                textAlign: "left",
+                                whiteSpace: "nowrap",
+                                textOverflow: "ellipsis",
+                                font: "9px/1.4 ui-monospace, monospace",
+                                color: lane.failed ? "color-mix(in srgb, var(--red) 60%, var(--ink))" : "var(--ink)",
+                            }}
+                        >
+                            {lane.label}
+                        </button>
+                    );
+                })}
+            </div>
+            <div style={{ marginTop: 6, font: "10px/1.4 ui-monospace, monospace", color: "var(--muted-2)" }}>
+                {[hasCost ? "darker = costlier" : null, "click a bar to open the subagent"].filter(Boolean).join(" · ")}
+            </div>
+        </div>
+    );
+}
+
 /** The transcript body for one session - reused by parent + subagent views. */
 function InspectBody({
     data,
@@ -655,33 +1075,52 @@ function SessionScrubber({ timeline, spawnCards }: {
         window.location.hash = `turn-${seq}`;
     };
     const fmtClock = (t: number) => new Date(t).toISOString().slice(5, 16).replace("T", " ");
-    // Subagent lanes: each dispatch as a bar on the same time axis, greedy
-    // row packing, opacity by cost - the fan-out made visible (the F2 map).
-    const lanes: Array<Array<{ x: number; w: number; cost: number; failed: boolean; label: string }>> = [];
-    const laneEnds: number[] = [];
+    const commitXs = ticks("checkpoint");
+    const failXs = ticks("failure");
+    // Subagent bars in raw domain coords - row packing happens after the remap.
     const maxCost = Math.max(0.01, ...(spawnCards ?? []).map((c) => c.cost_usd ?? 0));
+    const rawBars: Array<{ x: number; w: number; cost: number; failed: boolean; label: string }> = [];
     for (const card of [...(spawnCards ?? [])].sort((p, q) => (p.started_at ?? "").localeCompare(q.started_at ?? ""))) {
         const x = frac(card.started_at);
         if (x == null) continue;
-        const w = Math.max((card.duration_ms ?? 0) / span, 0.004);
-        let r = 0;
-        while (r < laneEnds.length && laneEnds[r] > x - 0.002) r++;
-        if (r >= 4) r = 3;
-        laneEnds[r] = x + w;
-        (lanes[r] ??= []).push({
+        rawBars.push({
             x,
-            w,
+            w: Math.max((card.duration_ms ?? 0) / span, 0.004),
             cost: card.cost_usd ?? 0,
             failed: (card.stats?.failures ?? 0) > 0,
             label: `${card.task_label ?? card.id} - ${fmtUsd(card.cost_usd) ?? ""}`,
         });
     }
+    // Dead stretches (no commits, no failures, no subagents) compress to
+    // labeled breaks, same machinery as the session map. EVERY positional
+    // value below runs through the same remap - segments, label anchors,
+    // ticks, bars - so nothing drifts off its activity.
+    const { remap, gaps } = buildScrubberGaps({
+        pointXs: [...commitXs, ...failXs],
+        bars: rawBars,
+        spanMs: span,
+    });
+    // Subagent lanes: each dispatch as a bar on the shared (remapped) time
+    // axis, greedy row packing, opacity by cost - a timeline-local preview of
+    // the fan-out (the standalone F2 session map is ShareSessionMap).
+    const lanes: Array<Array<{ x: number; w: number; cost: number; failed: boolean; label: string }>> = [];
+    const laneEnds: number[] = [];
+    for (const bar of rawBars) {
+        const x = remap(bar.x);
+        const w = remap(Math.min(bar.x + bar.w, 1)) - x;
+        let r = 0;
+        while (r < laneEnds.length && laneEnds[r] > x - 0.002) r++;
+        if (r >= 4) r = 3;
+        laneEnds[r] = x + w;
+        (lanes[r] ??= []).push({ ...bar, x, w });
+    }
+    const rsegs = segs.map((s) => ({ seg: s.seg, a: remap(s.a), b: remap(s.b) }));
     return (
         <div className="scrub-wrap">
             {/* Labels live in their own deck so the strip below stays pure
                 signal - inside the strip they collided with the ticks. */}
             <div className="scrub-labels">
-                {segs.filter(({ a, b }) => b - a > 0.08).map(({ seg, a, b }) => (
+                {rsegs.filter(({ a, b }) => b - a > 0.08).map(({ seg, a, b }) => (
                     <span
                         key={`l-${seg.id}`}
                         style={{ left: `${a * 100}%`, width: `${(b - a) * 100}%` }}
@@ -692,7 +1131,7 @@ function SessionScrubber({ timeline, spawnCards }: {
                 ))}
             </div>
             <div className="scrub">
-                {segs.map(({ seg, a, b }) => (
+                {rsegs.map(({ seg, a, b }) => (
                     <button
                         key={seg.id}
                         type="button"
@@ -702,8 +1141,32 @@ function SessionScrubber({ timeline, spawnCards }: {
                         onClick={() => jump(seg.start_seq)}
                     />
                 ))}
-                {ticks("checkpoint").map((x, i) => <i key={`c${i}`} className="scrub-commit" style={{ left: `${x * 100}%` }} />)}
-                {ticks("failure").map((x, i) => <i key={`f${i}`} className="scrub-fail" style={{ left: `${x * 100}%` }} />)}
+                {gaps.map((gap, i) => (
+                    <span
+                        key={`g${i}`}
+                        title={`no activity for ${gap.label}`}
+                        style={{
+                            position: "absolute",
+                            left: `${gap.x * 100}%`,
+                            width: `${gap.w * 100}%`,
+                            top: 0,
+                            height: "100%",
+                            borderLeft: "1px dotted var(--muted-2)",
+                            borderRight: "1px dotted var(--muted-2)",
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+                            font: "9px/1.2 ui-monospace, monospace",
+                            color: "var(--muted-2)",
+                            whiteSpace: "nowrap",
+                            overflow: "hidden",
+                        }}
+                    >
+                        {gap.label}
+                    </span>
+                ))}
+                {commitXs.map((x, i) => <i key={`c${i}`} className="scrub-commit" style={{ left: `${remap(x) * 100}%` }} />)}
+                {failXs.map((x, i) => <i key={`f${i}`} className="scrub-fail" style={{ left: `${remap(x) * 100}%` }} />)}
             </div>
             {lanes.length > 0 ? (
                 <div className="scrub-lanes" style={{ height: lanes.length * 8 + 2 }}>
@@ -976,6 +1439,14 @@ function MultiFileShareView(props: {
                     spawnCards={directChildren}
                 />
             )}
+            {manifest.subagents.length > 0 ? (
+                <ShareSessionMap
+                    manifest={manifest}
+                    selectedFile={selectedFile}
+                    onSelect={setSelectedFile}
+                    onPrefetch={prefetch}
+                />
+            ) : null}
             {directChildren.length > 0 ? (
                 <details style={SUBAGENT_BAR_STYLE}>
                     <summary style={{

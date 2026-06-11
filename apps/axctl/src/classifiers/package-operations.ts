@@ -3,6 +3,7 @@ import { Effect, FileSystem, Option, type PlatformError } from "effect";
 import { orAbsent, skipNotFound } from "@ax/lib/shared/fs-error";
 import { posixPath } from "@ax/lib/shared/path";
 import { safeJsonParse } from "@ax/lib/shared/safe-json";
+import { prettyPrint } from "@ax/lib/json";
 import {
     recordRef,
     surrealJson,
@@ -13,6 +14,7 @@ import {
     surrealString,
 } from "@ax/lib/shared/surql";
 import {
+    ClassifierPackageInvalidError,
     findClassifierPackageOperation,
     listClassifierPackageOperations,
     type ClassifierPackageManifest,
@@ -2088,12 +2090,15 @@ export function discoverClassifierPackageExecutionReportPaths(
 
 export function loadClassifierPackageExecutionReport(
     path: string,
-): Effect.Effect<ClassifierPackageOperationExecutionReport, PlatformError.PlatformError | Error, FileSystem.FileSystem> {
+): Effect.Effect<ClassifierPackageOperationExecutionReport, PlatformError.PlatformError | ClassifierPackageInvalidError, FileSystem.FileSystem> {
     return Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
     const parsed = safeJsonParse<unknown>(yield* fs.readFileString(path));
     if (!isExecutionReport(parsed)) {
-        return yield* Effect.fail(new Error(`invalid classifier package execution report: ${path}`));
+        return yield* new ClassifierPackageInvalidError({
+            path,
+            message: `invalid classifier package execution report: ${path}`,
+        });
     }
     const normalizedOutputs = Array.isArray((parsed as { readonly outputs?: unknown }).outputs)
         ? (parsed as { readonly outputs: readonly ClassifierPackageOperationInputStatus[] }).outputs
@@ -4373,7 +4378,7 @@ function writeJsonReport(
     return Effect.gen(function* () {
         const fs = yield* FileSystem.FileSystem;
         yield* fs.makeDirectory(posixPath.dirname(path), { recursive: true });
-        yield* fs.writeFileString(path, `${JSON.stringify(report, null, 2)}\n`);
+        yield* fs.writeFileString(path, `${prettyPrint(report)}\n`);
     });
 }
 

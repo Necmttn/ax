@@ -1,5 +1,6 @@
 import { Effect, FileSystem, Path, Schema } from "effect";
 import { AxConfig } from "@ax/lib/config";
+import { SkillName } from "@ax/lib/brands";
 import { RecordId, SurrealClient } from "@ax/lib/db";
 import { decodeJsonOrNull } from "@ax/lib/decode";
 import { safeKeyPart } from "@ax/lib/shared/derive-keys";
@@ -71,7 +72,7 @@ interface PiInvocation {
     session: string;
     seq: number;
     ts: string;
-    skill: string;
+    skill: SkillName;
     args: unknown;
 }
 
@@ -382,7 +383,8 @@ function createPiExtractor(filePath: string) {
             pendingToolResultsByCallId.delete(callId);
         }
 
-        const skillName = `pi:${toolName}`;
+        // Synthetic provider-tool skill name - branded at the true source.
+        const skillName = SkillName.make(`pi:${toolName}`);
         invocations.push({
             session: currentSession.id,
             seq,

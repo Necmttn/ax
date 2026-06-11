@@ -8,19 +8,18 @@
  * session). Also verifies blocks + atoms assemble onto the right turn.
  */
 import { describe, expect, test } from "bun:test";
-import { Effect, Layer } from "effect";
-import { RecordId } from "surrealdb";
-import { SurrealClient, type SurrealClientShape } from "@ax/lib/db";
+import { Effect, type Layer } from "effect";
+import { SurrealClient } from "@ax/lib/db";
+import { makeTestSurrealClient } from "@ax/lib/testing/surreal";
 import { resolveTurnContent } from "./session-turn-content.ts";
 
 const DOC_ID = "content_document:turn__s1_seq_000001__abc";
 
 // Route a mock query by the table/clause it targets, recording every SQL seen.
 function makeMockDb(): { layer: Layer.Layer<SurrealClient>; captured: string[] } {
-    const captured: string[] = [];
-    const impl: SurrealClientShape = {
-        query: <T extends unknown[] = unknown[]>(sql: string) => {
-            captured.push(sql);
+    const tc = makeTestSurrealClient({
+        denyWrites: true,
+        fallback: (sql) => {
             const rows = (() => {
                 if (sql.includes("FROM content_document")) {
                     return [{
@@ -61,15 +60,10 @@ function makeMockDb(): { layer: Layer.Layer<SurrealClient>; captured: string[] }
                 }
                 return [];
             })();
-            return Effect.succeed([rows] as unknown as T);
+            return [rows];
         },
-        upsert: (_id: RecordId, _content: Record<string, unknown>) => Effect.void,
-        relate: () => Effect.void,
-        putFile: () => Effect.void,
-        getFile: () => Effect.succeed(""),
-        raw: undefined as unknown as import("surrealdb").Surreal,
-    };
-    return { layer: Layer.succeed(SurrealClient, impl), captured };
+    });
+    return { layer: tc.layer, captured: tc.captured };
 }
 
 describe("resolveTurnContent (full content / share export)", () => {
@@ -103,24 +97,13 @@ describe("resolveTurnContent (full content / share export)", () => {
     });
 
     test("empty session (no documents) returns an empty map without block/atom queries", async () => {
-        const captured: string[] = [];
-        const impl: SurrealClientShape = {
-            query: <T extends unknown[] = unknown[]>(sql: string) => {
-                captured.push(sql);
-                return Effect.succeed([[]] as unknown as T);
-            },
-            upsert: () => Effect.void,
-            relate: () => Effect.void,
-            putFile: () => Effect.void,
-            getFile: () => Effect.succeed(""),
-            raw: undefined as unknown as import("surrealdb").Surreal,
-        };
+        const tc = makeTestSurrealClient({ denyWrites: true });
         const byTurn = await Effect.runPromise(
-            resolveTurnContent("session:`empty`").pipe(Effect.provide(Layer.succeed(SurrealClient, impl))),
+            resolveTurnContent("session:`empty`").pipe(Effect.provide(tc.layer)),
         );
         expect(byTurn.size).toBe(0);
         // Short-circuits after the document query - no block/atom fan-out.
-        expect(captured.some((s) => s.includes("FROM content_block"))).toBe(false);
-        expect(captured.some((s) => s.includes("FROM content_atom"))).toBe(false);
+        expect(tc.captured.some((s) => s.includes("FROM content_block"))).toBe(false);
+        expect(tc.captured.some((s) => s.includes("FROM content_atom"))).toBe(false);
     });
 });

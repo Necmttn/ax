@@ -119,10 +119,9 @@ const enrichRow = (
 
 /** Enrich the rows of a classifier insight view with per-row context via
  *  indexed lookups. Views outside ENRICHED_VIEWS pass through untouched. */
-export const enrichInsightRows = (
-    view: InsightView,
-    rows: ReadonlyArray<Row>,
-): Effect.Effect<ReadonlyArray<Row>, DbError, SurrealClient> =>
-    ENRICHED_VIEWS.has(view)
-        ? Effect.forEach(rows, (row) => enrichRow(view, row), { concurrency: ENRICH_FANOUT })
-        : Effect.succeed(rows);
+export const enrichInsightRows = Effect.fn("queries.enrichInsightRows")(
+    function* (view: InsightView, rows: ReadonlyArray<Row>) {
+        if (!ENRICHED_VIEWS.has(view)) return rows;
+        return yield* Effect.forEach(rows, (row) => enrichRow(view, row), { concurrency: ENRICH_FANOUT });
+    },
+);

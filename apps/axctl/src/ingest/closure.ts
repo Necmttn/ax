@@ -349,7 +349,7 @@ FROM touched;`).pipe(Effect.map((rows) => rows?.[0] ?? [])),
 SELECT session, tool_errors, user_corrections, interruptions, context_pressure
 FROM session_health;`).pipe(Effect.map((rows) => rows?.[0] ?? [])),
             forceRederive
-                ? Effect.succeed<string | undefined>(undefined)
+                ? (Effect.undefined as Effect.Effect<string | undefined>)
                 : loadClosureWatermark(db),
         ], { concurrency: 4 }).pipe(Effect.withSpan("closure.fetch"));
         const rows = deriveClosureRows({ commits, touched, sessionHealth });

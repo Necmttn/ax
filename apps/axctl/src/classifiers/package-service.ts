@@ -728,9 +728,12 @@ export const ClassifierPackageServiceLive: Layer.Layer<ClassifierPackageService,
         ) {
             const db = yield* SurrealClient;
             const writePlan = yield* executionSurrealWritePlanReport(input);
+            // Run child queries with the surrounding services (tracing etc.)
+            // instead of a detached Effect.runPromise.
+            const services = yield* Effect.context();
             return yield* Effect.tryPromise({
                 try: () => applyExecutionSurrealWritePlanReport(writePlan, async (statement) => {
-                    await Effect.runPromise(db.query(statement));
+                    await Effect.runPromiseWith(services)(db.query(statement));
                 }),
                 catch: (error) => ClassifierPackageReportWriteError.make({
                     path: input?.root ?? ".ax/experiments",

@@ -1,5 +1,6 @@
 import { Effect, FileSystem, Path, PlatformError, Schema, Stream } from "effect";
 import { RecordId, SurrealClient, filePointer } from "@ax/lib/db";
+import { SkillName } from "@ax/lib/brands";
 import { AxConfig } from "@ax/lib/config";
 import { decodeJsonOrNull } from "@ax/lib/decode";
 import { recordRef, surrealDate, surrealJsonOption, surrealObject, surrealOptionInt, surrealOptionString, surrealString } from "@ax/lib/shared/surql";
@@ -78,7 +79,7 @@ interface CodexInvocation {
     session: string;
     seq: number;
     ts: string;
-    skill: string; // namespaced as "codex:<tool>"
+    skill: SkillName; // namespaced as "codex:<tool>"
     args: unknown;
 }
 
@@ -659,7 +660,8 @@ function createCodexExtractor(
             pendingToolResultsByCallId.delete(callId);
         }
 
-        const skillName = `codex:${toolName}`;
+        // Synthetic provider-tool skill name - branded at the true source.
+        const skillName = SkillName.make(`codex:${toolName}`);
         invocations.push({
             session: currentSession.id,
             seq,

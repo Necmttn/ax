@@ -19,6 +19,7 @@ import { Effect } from "effect";
 import { SurrealClient } from "@ax/lib/db";
 import type { DbError } from "@ax/lib/errors";
 import { recordLiteral } from "@ax/lib/ids";
+import { refListSource } from "@ax/lib/shared/record-select";
 import {
     builtInPricingCatalog,
     estimateCost,
@@ -112,14 +113,14 @@ export const loadPricingCatalogForModels = (
             // recordLiteral throws on `/newline/NUL keys - skip rather than defect.
             if (key && !/[`\n\u0000]/.test(key)) keys.add(key);
         }
-        const refs = [...keys].map((k) => recordLiteral("agent_model", k)).join(", ");
+        const refs = refListSource([...keys].map((k) => recordLiteral("agent_model", k)));
         const rows = (yield* db.query<[AgentModelPricingRow[]]>(
             `SELECT name, provider, input_per_million_usd, output_per_million_usd,`
             + ` cache_creation_per_million_usd, cache_read_per_million_usd,`
             + ` input_above_200k_per_million_usd, output_above_200k_per_million_usd,`
             + ` cache_creation_above_200k_per_million_usd, cache_read_above_200k_per_million_usd,`
             + ` fast_multiplier, context_window, pricing_source`
-            + ` FROM [${refs}];`,
+            + ` FROM ${refs};`,
         ))?.[0] ?? [];
         return mergePricingCatalogs(builtInPricingCatalog(), pricingRowsToCatalog(rows));
     });

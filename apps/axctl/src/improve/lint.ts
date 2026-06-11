@@ -18,6 +18,7 @@ import { SurrealClient } from "@ax/lib/db";
 import { orAbsent } from "@ax/lib/shared/fs-error";
 import { posixPath } from "@ax/lib/shared/path";
 import { surrealLiteral } from "@ax/lib/json";
+import { decodeJsonOrNull } from "@ax/lib/decode";
 import {
     parseAutomationMarkers,
     parseHookCommandMarkers,
@@ -272,40 +273,57 @@ const collectIds = (
     }
     const content = contentOpt.value;
     if (target.form === "guidance") {
-        try {
-            // Inline markers (guidance files) carry no explicit experiment id.
-            for (const m of parseInlineMarkers(content)) found.set(m.id, { path: target.path });
-        } catch (err) {
-            errors.push({
-                rule: "marker_parse_error",
-                severity: "error",
-                path: target.path,
-                message: (err as Error).message,
-            });
-        }
+        // Parse fault → a marker_parse_error finding (entries set before the
+        // throw are kept, matching the old try/catch).
+        yield* Effect.try({
+            try: () => {
+                // Inline markers (guidance files) carry no explicit experiment id.
+                for (const m of parseInlineMarkers(content)) found.set(m.id, { path: target.path });
+            },
+            catch: (err) => (err as Error).message,
+        }).pipe(
+            Effect.catch((message) =>
+                Effect.sync(() => {
+                    errors.push({
+                        rule: "marker_parse_error",
+                        severity: "error",
+                        path: target.path,
+                        message,
+                    });
+                }),
+            ),
+        );
     } else if (target.form === "hook") {
-        try {
-            const parsed = JSON.parse(content);
-            const commands: string[] = [];
-            collectJsonCommandStrings(parsed, commands);
-            for (const command of commands) {
-                for (const marker of parseHookCommandMarkers(command)) {
-                    found.set(
-                        marker.id,
-                        marker.experiment === undefined
-                            ? { path: target.path }
-                            : { path: target.path, experiment: marker.experiment },
-                    );
+        yield* Effect.try({
+            try: () => {
+                const parsed = decodeJsonOrNull(content);
+                if (parsed === null) throw new Error("invalid JSON in hook config");
+                const commands: string[] = [];
+                collectJsonCommandStrings(parsed, commands);
+                for (const command of commands) {
+                    for (const marker of parseHookCommandMarkers(command)) {
+                        found.set(
+                            marker.id,
+                            marker.experiment === undefined
+                                ? { path: target.path }
+                                : { path: target.path, experiment: marker.experiment },
+                        );
+                    }
                 }
-            }
-        } catch (err) {
-            errors.push({
-                rule: "marker_parse_error",
-                severity: "error",
-                path: target.path,
-                message: err instanceof Error ? err.message : String(err),
-            });
-        }
+            },
+            catch: (err) => (err instanceof Error ? err.message : String(err)),
+        }).pipe(
+            Effect.catch((message) =>
+                Effect.sync(() => {
+                    errors.push({
+                        rule: "marker_parse_error",
+                        severity: "error",
+                        path: target.path,
+                        message,
+                    });
+                }),
+            ),
+        );
     } else if (target.form === "automation") {
         for (const marker of parseAutomationMarkers(content)) {
             found.set(

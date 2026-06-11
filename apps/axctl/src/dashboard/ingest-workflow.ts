@@ -123,8 +123,10 @@ export const startIngestWorkflow = (
         // only emits a synthetic terminal event when none was published.
         const state: TerminalState = { finished: false };
         const program = runIngest({ ...opts, runId: () => runId }).pipe(
-            Effect.provide(busTraceLayer(bus, state)),
-            Effect.provide(baseLayer),
+            // Single combined provide; `provideMerge` keeps the original
+            // override order (the bus-backed TraceSink wins over any TraceSink
+            // a caller's baseLayer happens to carry - see IngestBaseLayer docs).
+            Effect.provide(busTraceLayer(bus, state).pipe(Layer.provideMerge(baseLayer))),
             Effect.scoped,
             Effect.catchCause((cause) =>
                 Effect.gen(function* () {

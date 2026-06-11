@@ -5,6 +5,7 @@
  * rows shaped like real transcripts. This is where signal-quality bugs live;
  * keep new rules here, not in the stage wiring.
  */
+import type { SkillName } from "@ax/lib/brands";
 import { skillRecordKey } from "@ax/lib/skill-id";
 import {
     isoTimestamp,
@@ -343,7 +344,7 @@ export function deriveCorrections(bundle: SessionTurns): CorrectionEdge[] {
  */
 export function deriveProposed(
     bundle: SessionTurns,
-    skillNames: ReadonlyArray<string>,
+    skillNames: ReadonlyArray<SkillName>,
 ): ProposedEdge[] {
     if (skillNames.length === 0) return [];
     const out: ProposedEdge[] = [];

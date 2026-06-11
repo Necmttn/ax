@@ -9,7 +9,7 @@ import {
     SKILL_SUMMARY_PROPOSED_ONLY_SQL,
 } from "../queries/skill-summary.ts";
 import { prettifyProjectSlug } from "@ax/lib/shared/project-slug";
-import { numericField } from "@ax/lib/shared/row-fields";
+import { numberFieldOrZero } from "@ax/lib/shared/row-fields";
 import type {
     SkillRow,
     SkillTriageEntry,
@@ -119,15 +119,15 @@ const coerceRow = (raw: Record<string, unknown>): SkillRow => ({
     description: stringField(raw, "description"),
     dir_path: stringField(raw, "dir_path"),
     bytes: typeof raw.bytes === "number" ? raw.bytes : null,
-    total_inv: numericField(raw, "total_inv"),
-    inv_7d: numericField(raw, "inv_7d"),
-    inv_30d: numericField(raw, "inv_30d"),
+    total_inv: numberFieldOrZero(raw, "total_inv"),
+    inv_7d: numberFieldOrZero(raw, "inv_7d"),
+    inv_30d: numberFieldOrZero(raw, "inv_30d"),
     last_used: dateField(raw, "last_used"),
     last_project: stringField(raw, "last_project"),
-    corrections: numericField(raw, "corrections"),
-    proposals: numericField(raw, "proposals"),
-    commits_after: numericField(raw, "commits_after"),
-    taste_score: numericField(raw, "taste_score"),
+    corrections: numberFieldOrZero(raw, "corrections"),
+    proposals: numberFieldOrZero(raw, "proposals"),
+    commits_after: numberFieldOrZero(raw, "commits_after"),
+    taste_score: numberFieldOrZero(raw, "taste_score"),
 });
 
 const buildCommitCountsBySession = (
@@ -137,7 +137,7 @@ const buildCommitCountsBySession = (
     for (const raw of rows) {
         const session = recordKey(raw.session);
         if (!session) continue;
-        out.set(session, numericField(raw, "commits_after"));
+        out.set(session, numberFieldOrZero(raw, "commits_after"));
     }
     return out;
 };
@@ -165,9 +165,9 @@ const enrichSummaryRow = (
         (sum, session) => sum + (commitCountsBySession.get(session) ?? 0),
         0,
     );
-    const totalInv = numericField(raw, "total_inv");
-    const corrections = numericField(raw, "corrections");
-    const proposals = numericField(raw, "proposals");
+    const totalInv = numberFieldOrZero(raw, "total_inv");
+    const corrections = numberFieldOrZero(raw, "corrections");
+    const proposals = numberFieldOrZero(raw, "proposals");
     const name = String(raw.name ?? "");
     return {
         ...raw,

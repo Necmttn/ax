@@ -234,7 +234,7 @@ export const computeFragilityCascade = (
         //    verification: @ax/lib/shared/record-select).
         const fileInfo = new Map<string, { path: string; repository: string | null }>();
         const fileRows = yield* chunkedQuery(db, [...fragileFiles], limits.chunkSize, (chunk) =>
-            selectByIds("type::string(id) AS id, path, type::string(repository) AS repository", "file", chunk));
+            selectByIds("type::string(id) AS id, path, type::string(repository) AS repository", "file", chunk, ["id", "path", "repository"]));
         for (const r of fileRows) {
             const key = recordKeyPart(r.id, "file");
             const path = str(r.path);
@@ -295,7 +295,9 @@ export const computeFragilityCascade = (
             rawEdits.map((e) => recordKeyPart(e.turn, "turn")).filter((k): k is string => k !== null),
         )];
         const turnRows = yield* chunkedQuery(db, turnKeys, limits.chunkSize, (chunk) =>
-            selectByIds("type::string(id) AS id, type::string(session) AS session", "turn", chunk));
+            // pick: turn rows carry full message text - materialize only the
+            // two fields this projection reads.
+            selectByIds("type::string(id) AS id, type::string(session) AS session", "turn", chunk, ["id", "session"]));
         for (const r of turnRows) {
             const id = str(r.id);
             const session = str(r.session);

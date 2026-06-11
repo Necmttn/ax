@@ -10,7 +10,11 @@ import {
     toolRecordKey,
     turnRecordKey,
 } from "./record-keys.ts";
+import { SkillName } from "@ax/lib/brands";
 import { legacySkillRecordKey, skillRecordKey } from "@ax/lib/skill-id";
+
+// Fixture skill names are plain string literals; brand via the schema constructor.
+const sn = (s: string): SkillName => SkillName.make(s);
 
 const HASH = "[0-9a-f]{12,16}";
 
@@ -242,9 +246,9 @@ describe("record keys", () => {
 });
 
 test("skillRecordKey does not collide on colon and double underscore names", () => {
-    expect(skillRecordKey("a:b")).not.toBe(skillRecordKey("a__b"));
+    expect(skillRecordKey(sn("a:b"))).not.toBe(skillRecordKey(sn("a__b")));
 });
 
 test("legacySkillRecordKey preserves old lookup behavior", () => {
-    expect(legacySkillRecordKey("plugin:name")).toBe("plugin__name");
+    expect(legacySkillRecordKey(sn("plugin:name"))).toBe("plugin__name");
 });

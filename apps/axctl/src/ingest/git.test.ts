@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { Effect, Layer, PlatformError } from "effect";
 import { BunFileSystem, BunPath } from "@effect/platform-bun";
 import { layerTestFileSystem } from "@ax/lib/testing/test-filesystem";
-import { SurrealClient, type SurrealClientShape } from "@ax/lib/db";
+import { makeTestSurrealClient } from "@ax/lib/testing/surreal";
 import { pathToProjectSlug } from "@ax/lib/shared/project-slug";
 import {
     buildCommitLookupQueries,
@@ -240,21 +240,10 @@ describe("git ingest relation statements", () => {
 
 describe("ingestGit repoPaths bypass", () => {
     test("when repoPaths is provided, only that path's repo is written", async () => {
-        const issued: string[] = [];
-        const fakeDb: SurrealClientShape = {
-            query: <T extends unknown[]>(sql: string) =>
-                Effect.sync(() => {
-                    issued.push(sql);
-                    // Minimal stubs so writeRepo / linkedSessionCount / etc. don't crash.
-                    // Return an empty array for any SELECT, and void for UPDATE/UPSERT/RELATE.
-                    return [[]] as T;
-                }),
-            upsert: () => Effect.void,
-            relate: () => Effect.void,
-            putFile: () => Effect.void,
-            getFile: () => Effect.succeed(""),
-            raw: {} as never,
-        };
+        // Minimal stubs so writeRepo / linkedSessionCount / etc. don't crash.
+        // Return an empty array for any SELECT, and void for UPDATE/UPSERT/RELATE.
+        const fakeDb = makeTestSurrealClient();
+        const issued = fakeDb.captured;
 
         // Use this test checkout as the target - it is a real git repo in CI
         // and in local worktrees, so buildRepoInfo succeeds without depending
@@ -265,7 +254,7 @@ describe("ingestGit repoPaths bypass", () => {
             ingestGit({ repoPaths: [repoRoot], sinceDays: 1 }).pipe(
                 Effect.provide(
                     Layer.mergeAll(
-                        Layer.succeed(SurrealClient, fakeDb),
+                        fakeDb.layer,
                         BunFileSystem.layer,
                         BunPath.layer,
                     ),
@@ -282,19 +271,8 @@ describe("ingestGit repoPaths bypass", () => {
     });
 
     test("issues a canonical-project UPDATE keyed by the repository edge", async () => {
-        const issued: string[] = [];
-        const fakeDb: SurrealClientShape = {
-            query: <T extends unknown[]>(sql: string) =>
-                Effect.sync(() => {
-                    issued.push(sql);
-                    return [[]] as T;
-                }),
-            upsert: () => Effect.void,
-            relate: () => Effect.void,
-            putFile: () => Effect.void,
-            getFile: () => Effect.succeed(""),
-            raw: {} as never,
-        };
+        const fakeDb = makeTestSurrealClient();
+        const issued = fakeDb.captured;
 
         const repoRoot = process.cwd();
         const expectedSlug = pathToProjectSlug(repoRoot);
@@ -303,7 +281,7 @@ describe("ingestGit repoPaths bypass", () => {
             ingestGit({ repoPaths: [repoRoot], sinceDays: 1 }).pipe(
                 Effect.provide(
                     Layer.mergeAll(
-                        Layer.succeed(SurrealClient, fakeDb),
+                        fakeDb.layer,
                         BunFileSystem.layer,
                         BunPath.layer,
                     ),
@@ -319,21 +297,13 @@ describe("ingestGit repoPaths bypass", () => {
     });
 
     test("when repoPaths is empty array, falls back to discovery (returns 0 repos on empty DB)", async () => {
-        const fakeDb: SurrealClientShape = {
-            query: <T extends unknown[]>(_sql: string) =>
-                Effect.sync(() => [[]] as T),
-            upsert: () => Effect.void,
-            relate: () => Effect.void,
-            putFile: () => Effect.void,
-            getFile: () => Effect.succeed(""),
-            raw: {} as never,
-        };
+        const fakeDb = makeTestSurrealClient();
 
         const result = await Effect.runPromise(
             ingestGit({ repoPaths: [], sinceDays: 1 }).pipe(
                 Effect.provide(
                     Layer.mergeAll(
-                        Layer.succeed(SurrealClient, fakeDb),
+                        fakeDb.layer,
                         BunFileSystem.layer,
                         BunPath.layer,
                     ),

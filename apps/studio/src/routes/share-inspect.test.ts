@@ -1,5 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import {
+    buildScrubberGaps,
+    buildSessionMapLanes,
+    compressAxisGaps,
     fetchShareArtifact,
     fetchShareFile,
     fetchShareManifest,
@@ -7,7 +10,10 @@ import {
     inspectPayloadFromShare,
     isShareManifest,
     rawSessionFileUrl,
+    SESSION_MAP_MIN_LANE_W,
     spanKindForShareTurn,
+    type ShareManifest,
+    type ShareSubagentCard,
 } from "./share-inspect.tsx";
 
 type ShareTurn = Parameters<typeof spanKindForShareTurn>[0];
@@ -179,6 +185,458 @@ describe("fetchShareManifest", () => {
                 expect(artifact.schema_version).toBe(3);
             },
         );
+    });
+});
+
+const mapStats = (failures = 0): ShareSubagentCard["stats"] => ({
+    turns: 1,
+    tool_calls: 0,
+    files_changed: 0,
+    skills_used: 0,
+    failures,
+});
+
+function mapCard(partial: Partial<ShareSubagentCard> & { readonly file: string }): ShareSubagentCard {
+    return {
+        id: `claude-subagent-${partial.file}`,
+        parent_id: "root-1",
+        depth: 1,
+        spawn_turn_seq: null,
+        source: "claude-subagent",
+        duration_ms: null,
+        stats: mapStats(),
+        cost_usd: null,
+        estimated_tokens: null,
+        had_error: false,
+        ...partial,
+    };
+}
+
+function mapManifest(
+    subagents: ReadonlyArray<ShareSubagentCard>,
+    session: Partial<ShareManifest["session"]> = {},
+    totals: Partial<ShareManifest["totals"]> = {},
+): ShareManifest {
+    return {
+        schema_version: 4,
+        kind: "manifest",
+        exported_at: "2026-06-01T02:00:00.000Z",
+        session: { id: "root-1", source: "claude", ...session },
+        stats: mapStats(),
+        root_file: "session.json",
+        totals: {
+            cost_usd: null,
+            duration_ms: null,
+            tool_calls: 0,
+            turns: 0,
+            subagents: subagents.length,
+            failures: 0,
+            ...totals,
+        },
+        subagents,
+    };
+}
+
+const laneFor = (model: ReturnType<typeof buildSessionMapLanes>, file: string) => {
+    const lane = model?.lanes.find((l) => l.file === file);
+    if (!lane) throw new Error(`no lane for ${file}`);
+    return lane;
+};
+
+describe("buildSessionMapLanes", () => {
+    test("places by spawn_turn_seq normalized over the seq range when every card has one", () => {
+        // Wide bars keep the strip covered so gap compression stays out of
+        // this test's way.
+        const model = buildSessionMapLanes(mapManifest([
+            mapCard({ file: "a.json", spawn_turn_seq: 0, duration_ms: 1000 }),
+            mapCard({ file: "b.json", spawn_turn_seq: 25, duration_ms: 1000 }),
+            mapCard({ file: "c.json", spawn_turn_seq: 50, duration_ms: 1000 }),
+            mapCard({ file: "d.json", spawn_turn_seq: 75, duration_ms: 1000 }),
+            mapCard({ file: "e.json", spawn_turn_seq: 100, duration_ms: 1000 }),
+        ]));
+        expect(model?.axis).toBe("seq");
+        expect(model?.gaps).toHaveLength(0);
+        const a = laneFor(model, "a.json");
+        const c = laneFor(model, "c.json");
+        const e = laneFor(model, "e.json");
+        expect(a.x).toBeCloseTo(0, 5);
+        expect(c.x).toBeCloseTo(0.5, 5);
+        // The last bar is clamped so it stays inside the strip.
+        expect(e.x).toBeCloseTo(1 - e.w, 5);
+    });
+
+    test("falls back to start time over the root window when any seq is missing", () => {
+        const model = buildSessionMapLanes(mapManifest(
+            [
+                mapCard({ file: "a.json", spawn_turn_seq: 5, started_at: "2026-06-01T00:00:00.000Z", duration_ms: 1_800_000 }),
+                mapCard({ file: "b.json", started_at: "2026-06-01T00:30:00.000Z", duration_ms: 900_000 }),
+                mapCard({ file: "c.json", started_at: "2026-06-01T00:45:00.000Z", duration_ms: 900_000 }),
+            ],
+            { started_at: "2026-06-01T00:00:00.000Z", ended_at: "2026-06-01T01:00:00.000Z" },
+        ));
+        expect(model?.axis).toBe("time");
+        expect(model?.rootDurationMs).toBe(3_600_000);
+        expect(laneFor(model, "a.json").x).toBeCloseTo(0, 5);
+        expect(laneFor(model, "b.json").x).toBeCloseTo(0.5, 5);
+        expect(laneFor(model, "c.json").x).toBeCloseTo(0.75, 5);
+    });
+
+    test("uses root started_at + totals.duration_ms as the window when ended_at is missing", () => {
+        const model = buildSessionMapLanes(mapManifest(
+            [
+                mapCard({ file: "a.json", started_at: "2026-06-01T00:00:00.000Z", duration_ms: 1_800_000 }),
+                mapCard({ file: "b.json", started_at: "2026-06-01T00:30:00.000Z", duration_ms: 1_800_000 }),
+            ],
+            { started_at: "2026-06-01T00:00:00.000Z" },
+            { duration_ms: 3_600_000 },
+        ));
+        expect(model?.axis).toBe("time");
+        expect(laneFor(model, "b.json").x).toBeCloseTo(0.5, 5);
+    });
+
+    test("falls back to stable even-spaced order when no seqs and no usable root window", () => {
+        const model = buildSessionMapLanes(mapManifest([
+            mapCard({ file: "a.json" }),
+            mapCard({ file: "b.json" }),
+            mapCard({ file: "c.json" }),
+        ]));
+        expect(model?.axis).toBe("order");
+        expect(laneFor(model, "a.json").x).toBeCloseTo(0, 5);
+        expect(laneFor(model, "b.json").x).toBeCloseTo(1 / 3, 5);
+        expect(laneFor(model, "c.json").x).toBeCloseTo(2 / 3, 5);
+    });
+
+    test("applies the minimum bar width for null and tiny durations", () => {
+        // Filler cards keep every uncovered span under the compression
+        // threshold so the raw widths survive untouched.
+        const fillers = Array.from({ length: 7 }, (_, i) =>
+            mapCard({ file: `filler-${i}.json`, spawn_turn_seq: i + 3 }));
+        const model = buildSessionMapLanes(mapManifest(
+            [
+                mapCard({ file: "half.json", spawn_turn_seq: 0, duration_ms: 1_800_000 }),
+                mapCard({ file: "tiny.json", spawn_turn_seq: 1, duration_ms: 1 }),
+                mapCard({ file: "null.json", spawn_turn_seq: 2 }),
+                ...fillers,
+            ],
+            { started_at: "2026-06-01T00:00:00.000Z", ended_at: "2026-06-01T01:00:00.000Z" },
+        ));
+        expect(model?.gaps).toHaveLength(0);
+        expect(laneFor(model, "null.json").w).toBe(SESSION_MAP_MIN_LANE_W);
+        expect(laneFor(model, "tiny.json").w).toBe(SESSION_MAP_MIN_LANE_W);
+        expect(laneFor(model, "half.json").w).toBeCloseTo(0.5, 5);
+    });
+
+    test("scales cost intensity relative to the max subagent cost", () => {
+        const model = buildSessionMapLanes(mapManifest([
+            mapCard({ file: "a.json", cost_usd: 2 }),
+            mapCard({ file: "b.json", cost_usd: 1 }),
+            mapCard({ file: "c.json", cost_usd: null }),
+        ]));
+        expect(laneFor(model, "a.json").intensity).toBeCloseTo(1, 5);
+        expect(laneFor(model, "b.json").intensity).toBeCloseTo(0.5, 5);
+        expect(laneFor(model, "c.json").intensity).toBeCloseTo(0, 5);
+    });
+
+    test("uses flat neutral coloring (null intensity) when no card has a positive cost", () => {
+        const model = buildSessionMapLanes(mapManifest([
+            mapCard({ file: "a.json", cost_usd: null }),
+            mapCard({ file: "b.json", cost_usd: 0 }),
+        ]));
+        expect(laneFor(model, "a.json").intensity).toBeNull();
+        expect(laneFor(model, "b.json").intensity).toBeNull();
+    });
+
+    test("carries the failure flag and count into the lane and tooltip", () => {
+        const model = buildSessionMapLanes(mapManifest([
+            mapCard({ file: "ok.json" }),
+            mapCard({
+                file: "bad.json",
+                stats: mapStats(2),
+                task_label: "fix the parser",
+                model: "claude-opus-4",
+                cost_usd: 1.25,
+                duration_ms: 120_000,
+            }),
+        ]));
+        const ok = laneFor(model, "ok.json");
+        const bad = laneFor(model, "bad.json");
+        expect(ok.failed).toBe(false);
+        expect(bad.failed).toBe(true);
+        expect(bad.failures).toBe(2);
+        expect(bad.title).toContain("fix the parser");
+        expect(bad.title).toContain("claude-opus-4");
+        expect(bad.title).toContain("$1.25");
+        expect(bad.title).toContain("2m");
+        expect(bad.title).toContain("2 failures");
+    });
+
+    test("packs overlapping bars onto separate rows", () => {
+        const model = buildSessionMapLanes(mapManifest([
+            mapCard({ file: "a.json", spawn_turn_seq: 5, duration_ms: 1000 }),
+            mapCard({ file: "b.json", spawn_turn_seq: 5, duration_ms: 1000 }),
+            mapCard({ file: "c.json", spawn_turn_seq: 5, duration_ms: 1000 }),
+        ]));
+        expect(model?.axis).toBe("seq");
+        expect(model?.rows).toBe(3);
+        expect(laneFor(model, "a.json").row).toBe(0);
+        expect(laneFor(model, "b.json").row).toBe(1);
+        expect(laneFor(model, "c.json").row).toBe(2);
+    });
+
+    test("clamps overflow collisions onto the last row instead of growing past the cap", () => {
+        const model = buildSessionMapLanes(mapManifest(
+            ["a", "b", "c", "d", "e", "f"].map((name) =>
+                mapCard({ file: `${name}.json`, spawn_turn_seq: 5, duration_ms: 1000 })),
+        ));
+        expect(model?.rows).toBe(4);
+        expect(model?.lanes.filter((lane) => lane.row === 3)).toHaveLength(3);
+        expect(model?.lanes.every((lane) => lane.row <= 3)).toBe(true);
+    });
+
+    test("rejects the seq axis when any card is nested (spawn seqs are parent-local)", () => {
+        const cards = [
+            mapCard({ file: "a.json", spawn_turn_seq: 3, started_at: "2026-06-01T00:00:00.000Z", duration_ms: 1_800_000 }),
+            mapCard({
+                file: "b.json",
+                spawn_turn_seq: 7,
+                depth: 2,
+                parent_id: "claude-subagent-a.json",
+                started_at: "2026-06-01T00:30:00.000Z",
+                duration_ms: 1_800_000,
+            }),
+        ];
+        const withWindow = buildSessionMapLanes(mapManifest(
+            cards,
+            { started_at: "2026-06-01T00:00:00.000Z", ended_at: "2026-06-01T01:00:00.000Z" },
+        ));
+        expect(withWindow?.axis).toBe("time");
+        expect(laneFor(withWindow, "b.json").x).toBeCloseTo(0.5, 5);
+        const withoutWindow = buildSessionMapLanes(mapManifest(cards));
+        expect(withoutWindow?.axis).toBe("order");
+    });
+
+    test("treats an inverted root window (ended_at before started_at) as unusable", () => {
+        const model = buildSessionMapLanes(mapManifest(
+            [mapCard({ file: "a.json" }), mapCard({ file: "b.json" })],
+            { started_at: "2026-06-01T01:00:00.000Z", ended_at: "2026-06-01T00:00:00.000Z" },
+        ));
+        expect(model?.axis).toBe("order");
+        expect(model?.rootDurationMs).toBeNull();
+    });
+
+    test("compresses a wide mid-session gap and labels it with the wall-clock span", () => {
+        const model = buildSessionMapLanes(mapManifest(
+            [
+                mapCard({ file: "a.json", started_at: "2026-06-01T00:00:00.000Z", duration_ms: 360_000 }),
+                mapCard({ file: "b.json", started_at: "2026-06-01T00:48:00.000Z", duration_ms: 360_000 }),
+            ],
+            { started_at: "2026-06-01T00:00:00.000Z", ended_at: "2026-06-01T01:00:00.000Z" },
+        ));
+        expect(model?.axis).toBe("time");
+        expect(model?.gaps).toHaveLength(1);
+        const gap = model!.gaps[0]!;
+        // Domain gap [0.1, 0.8] (42 of 60 minutes) collapses to the fixed
+        // break width; covered segments stretch by (1-0.04)/0.3 = 3.2.
+        expect(gap.label).toBe("42m");
+        expect(gap.w).toBeCloseTo(0.04, 5);
+        expect(gap.x).toBeCloseTo(0.32, 5);
+        const b = laneFor(model, "b.json");
+        expect(b.x).toBeCloseTo(0.36, 5);
+        expect(b.w).toBeCloseTo(0.32, 5);
+    });
+
+    test("leaves gaps below the threshold untouched", () => {
+        const model = buildSessionMapLanes(mapManifest(
+            [
+                mapCard({ file: "a.json", started_at: "2026-06-01T00:00:00.000Z", duration_ms: 1_620_000 }),
+                mapCard({ file: "b.json", started_at: "2026-06-01T00:30:00.000Z", duration_ms: 1_800_000 }),
+            ],
+            { started_at: "2026-06-01T00:00:00.000Z", ended_at: "2026-06-01T01:00:00.000Z" },
+        ));
+        // Uncovered span is 0.05 of the strip - under the threshold.
+        expect(model?.gaps).toHaveLength(0);
+        expect(laneFor(model, "b.json").x).toBeCloseTo(0.5, 5);
+        expect(laneFor(model, "b.json").w).toBeCloseTo(0.5, 5);
+    });
+
+    test("compresses two separate gaps and keeps bar order", () => {
+        const model = buildSessionMapLanes(mapManifest(
+            [
+                mapCard({ file: "a.json", started_at: "2026-06-01T00:00:00.000Z", duration_ms: 1_800_000 }),
+                mapCard({ file: "b.json", started_at: "2026-06-01T04:00:00.000Z", duration_ms: 1_800_000 }),
+                mapCard({ file: "c.json", started_at: "2026-06-01T08:00:00.000Z", duration_ms: 1_800_000 }),
+            ],
+            { started_at: "2026-06-01T00:00:00.000Z", ended_at: "2026-06-01T10:00:00.000Z" },
+        ));
+        expect(model?.gaps).toHaveLength(2);
+        const [g0, g1] = model!.gaps;
+        expect(g0!.label).toBe("3h 30m");
+        expect(g1!.label).toBe("3h 30m");
+        expect(g0!.x).toBeLessThan(g1!.x);
+        const a = laneFor(model, "a.json");
+        const b = laneFor(model, "b.json");
+        const c = laneFor(model, "c.json");
+        expect(a.x).toBeLessThan(b.x);
+        expect(b.x).toBeLessThan(c.x);
+        // Bars sit between the breaks they used to be separated by.
+        expect(b.x).toBeCloseTo(g0!.x + g0!.w, 5);
+        expect(c.x).toBeCloseTo(g1!.x + g1!.w, 5);
+    });
+
+    test("labels a seq-axis gap with wall-clock computed from adjacent cards", () => {
+        // Equal durations widen the bars so only the one big mid-session gap
+        // exists - the iterated compression must not find more.
+        const model = buildSessionMapLanes(mapManifest([
+            mapCard({ file: "a.json", spawn_turn_seq: 0, started_at: "2026-06-01T00:00:00.000Z", duration_ms: 600_000 }),
+            mapCard({ file: "b.json", spawn_turn_seq: 10, started_at: "2026-06-01T00:10:00.000Z", duration_ms: 600_000 }),
+            mapCard({ file: "c.json", spawn_turn_seq: 90, started_at: "2026-06-01T03:00:00.000Z", duration_ms: 600_000 }),
+            mapCard({ file: "d.json", spawn_turn_seq: 100, started_at: "2026-06-01T03:10:00.000Z", duration_ms: 600_000 }),
+        ]));
+        expect(model?.axis).toBe("seq");
+        expect(model?.gaps).toHaveLength(1);
+        // b ends 00:20 (start + duration), c starts 03:00.
+        expect(model!.gaps[0]!.label).toBe("2h 40m");
+    });
+
+    test("falls back to a turn-count label when seq-axis timestamps are missing", () => {
+        const model = buildSessionMapLanes(mapManifest([
+            mapCard({ file: "a.json", spawn_turn_seq: 0, duration_ms: 600_000 }),
+            mapCard({ file: "b.json", spawn_turn_seq: 10, duration_ms: 600_000 }),
+            mapCard({ file: "c.json", spawn_turn_seq: 90, duration_ms: 600_000 }),
+            mapCard({ file: "d.json", spawn_turn_seq: 100, duration_ms: 600_000 }),
+        ]));
+        expect(model?.axis).toBe("seq");
+        expect(model?.gaps).toHaveLength(1);
+        expect(model!.gaps[0]!.label).toBe("80 turns");
+    });
+
+    test("iterates compression: a medium gap promoted over the threshold by the first stretch also compresses", () => {
+        // Domain gaps: [0.05, 0.65] (0.6, way over) and [0.70, 0.80] (0.10,
+        // UNDER the 0.12 threshold in domain space). Compressing the big gap
+        // stretches segments by 0.96/0.4 = 2.4, lifting the medium gap to
+        // 0.24 of the rendered strip - the circled-white-stretch scenario.
+        const model = buildSessionMapLanes(mapManifest(
+            [
+                mapCard({ file: "a.json", started_at: "2026-06-01T00:00:00.000Z", duration_ms: 180_000 }),
+                mapCard({ file: "b.json", started_at: "2026-06-01T00:39:00.000Z", duration_ms: 180_000 }),
+                mapCard({ file: "c.json", started_at: "2026-06-01T00:48:00.000Z", duration_ms: 720_000 }),
+            ],
+            { started_at: "2026-06-01T00:00:00.000Z", ended_at: "2026-06-01T01:00:00.000Z" },
+        ));
+        expect(model?.gaps).toHaveLength(2);
+        const [g0, g1] = model!.gaps;
+        // Labels come from DOMAIN quantities: 0.6 and 0.10 of a 60m window.
+        expect(g0!.label).toBe("36m");
+        expect(g1!.label).toBe("6m");
+        // Final stretch with both compressed: (1 - 0.08) / 0.3.
+        const s = 0.92 / 0.3;
+        expect(laneFor(model, "a.json").w).toBeCloseTo(0.05 * s, 5);
+        expect(g0!.x).toBeCloseTo(0.05 * s, 5);
+        expect(laneFor(model, "b.json").x).toBeCloseTo(0.05 * s + 0.04, 5);
+        expect(g1!.x).toBeCloseTo(0.1 * s + 0.04, 5);
+        expect(laneFor(model, "c.json").x).toBeCloseTo(0.1 * s + 0.08, 5);
+    });
+
+    test("caps the number of breaks at the widest gaps", () => {
+        // Six interior gaps (0.20, 0.18, 0.16, 0.14, 0.13, ~0.106) - five
+        // exceed the threshold, but only the four widest may compress.
+        const starts = [
+            "2026-06-01T00:00:00.000Z",
+            "2026-06-01T02:07:12.000Z",
+            "2026-06-01T04:02:24.000Z",
+            "2026-06-01T05:45:36.000Z",
+            "2026-06-01T07:16:48.000Z",
+            "2026-06-01T08:42:00.000Z",
+            "2026-06-01T10:00:00.000Z",
+        ];
+        const model = buildSessionMapLanes(mapManifest(
+            starts.map((started_at, i) => mapCard({ file: `${i}.json`, started_at })),
+            { started_at: "2026-06-01T00:00:00.000Z", ended_at: "2026-06-01T10:00:00.000Z" },
+        ));
+        expect(model?.gaps).toHaveLength(4);
+        expect(model?.gaps.map((g) => g.label)).toEqual(["2h", "1h 48m", "1h 36m", "1h 24m"]);
+        // Output stays sorted by position.
+        const xs = model!.gaps.map((g) => g.x);
+        expect([...xs].sort((a, b) => a - b)).toEqual(xs);
+    });
+
+    test("never compresses on the order axis (even spacing has no real gaps)", () => {
+        const model = buildSessionMapLanes(mapManifest([
+            mapCard({ file: "a.json" }),
+            mapCard({ file: "b.json" }),
+        ]));
+        expect(model?.axis).toBe("order");
+        expect(model?.gaps).toHaveLength(0);
+        expect(laneFor(model, "b.json").x).toBeCloseTo(0.5, 5);
+    });
+
+    test("returns null for a manifest with zero subagents", () => {
+        expect(buildSessionMapLanes(mapManifest([]))).toBeNull();
+    });
+});
+
+describe("compressAxisGaps", () => {
+    test("compresses an interior uncovered span and anchors the axis endpoints", () => {
+        const { remap, gaps } = compressAxisGaps([
+            { start: 0, end: 0.1 },
+            { start: 0.8, end: 0.9 },
+        ]);
+        expect(gaps).toHaveLength(1);
+        expect(gaps[0]!.domainStart).toBeCloseTo(0.1, 5);
+        expect(gaps[0]!.domainEnd).toBeCloseTo(0.8, 5);
+        // Stretch (1-0.04)/0.3 = 3.2: covered [0,0.1] maps to [0, 0.32].
+        expect(gaps[0]!.x).toBeCloseTo(0.32, 5);
+        expect(gaps[0]!.w).toBeCloseTo(0.04, 5);
+        expect(remap(0)).toBeCloseTo(0, 5);
+        expect(remap(1)).toBeCloseTo(1, 5);
+        // Monotonic across the gap boundary.
+        expect(remap(0.1)).toBeLessThan(remap(0.45));
+        expect(remap(0.45)).toBeLessThan(remap(0.8));
+    });
+
+    test("returns the identity when no uncovered span exceeds the threshold", () => {
+        const { remap, gaps } = compressAxisGaps([
+            { start: 0, end: 0.45 },
+            { start: 0.5, end: 1 },
+        ]);
+        expect(gaps).toHaveLength(0);
+        expect(remap(0.7)).toBe(0.7);
+    });
+});
+
+describe("buildScrubberGaps", () => {
+    test("a lone commit tick anchors coverage and splits a dead stretch", () => {
+        const bars = [{ x: 0, w: 0.1 }, { x: 0.9, w: 0.1 }];
+        const without = buildScrubberGaps({ pointXs: [], bars, spanMs: 3_600_000 });
+        expect(without.gaps).toHaveLength(1);
+        expect(without.gaps[0]!.label).toBe("48m");
+        const withTick = buildScrubberGaps({ pointXs: [0.5], bars, spanMs: 3_600_000 });
+        expect(withTick.gaps).toHaveLength(2);
+        expect(withTick.gaps[0]!.label).toBe("23m 49s");
+        expect(withTick.gaps[1]!.label).toBe("23m 49s");
+    });
+
+    test("commit-only stretches are not gaps", () => {
+        const { remap, gaps } = buildScrubberGaps({
+            pointXs: Array.from({ length: 11 }, (_, i) => i / 10),
+            bars: [],
+            spanMs: 3_600_000,
+        });
+        expect(gaps).toHaveLength(0);
+        expect(remap(0.37)).toBe(0.37);
+    });
+
+    test("ticks and bars share the remap - a tick inside a bar stays inside it", () => {
+        const { remap, gaps } = buildScrubberGaps({
+            pointXs: [0.85],
+            bars: [{ x: 0, w: 0.1 }, { x: 0.8, w: 0.1 }],
+            spanMs: 3_600_000,
+        });
+        expect(gaps).toHaveLength(1);
+        expect(remap(0.85)).toBeGreaterThan(remap(0.8));
+        expect(remap(0.85)).toBeLessThan(remap(0.9));
+        expect(remap(0)).toBeCloseTo(0, 5);
+        expect(remap(1)).toBeCloseTo(1, 5);
     });
 });
 

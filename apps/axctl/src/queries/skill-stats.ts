@@ -11,8 +11,7 @@
  */
 import { Effect } from "effect";
 import { SurrealClient } from "@ax/lib/db";
-import type { DbError } from "@ax/lib/errors";
-import { dateField, numericField } from "@ax/lib/shared/row-fields";
+import { dateField, numberFieldOrZero } from "@ax/lib/shared/row-fields";
 import { prettifyProjectSlug } from "@ax/lib/shared/project-slug";
 
 export const SKILL_STATS_SQL = `
@@ -94,10 +93,8 @@ export const dedupeRecentSessions = (
     return clean;
 };
 
-export const fetchSkillStats = (
-    name: string,
-): Effect.Effect<SkillStatsPayload, DbError, SurrealClient> =>
-    Effect.gen(function* () {
+export const fetchSkillStats = Effect.fn("queries.fetchSkillStats")(
+    function* (name: string) {
         const db = yield* SurrealClient;
         const result = yield* db.query<unknown[]>(SKILL_STATS_SQL, { name });
         // LET → null, RETURN → payload: take the last non-null statement result.
@@ -112,12 +109,13 @@ export const fetchSkillStats = (
         return {
             skill,
             invocations: {
-                total: numericField(invocations, "total"),
-                d7: numericField(invocations, "d7"),
-                d30: numericField(invocations, "d30"),
-                d90: numericField(invocations, "d90"),
+                total: numberFieldOrZero(invocations, "total"),
+                d7: numberFieldOrZero(invocations, "d7"),
+                d30: numberFieldOrZero(invocations, "d30"),
+                d90: numberFieldOrZero(invocations, "d90"),
                 last: dateField(invocations, "last"),
             },
             recent_sessions: dedupeRecentSessions(recentRaw),
-        };
-    });
+        } satisfies SkillStatsPayload;
+    },
+);

@@ -13,6 +13,13 @@ export function wantsJson(args: readonly string[]): boolean {
 }
 
 /**
+ * Typed-flag variant of wantsJson: JSON when --json was passed OR stdout is
+ * piped. Used by handlers converted off the string-array round-trip.
+ */
+export const wantsJsonFlag = (json: boolean): boolean =>
+    json || process.stdout.isTTY === false;
+
+/**
  * Pipe helper: catch a DbError, write the error message to stderr, and exit.
  *
  * Usage:
@@ -29,3 +36,16 @@ export const catchDbErrorAndExit =
                 }),
             ),
         ) as Effect.Effect<A, never, R>;
+
+/**
+ * Write `message` to stderr and terminate the process with `code`.
+ *
+ * `process.exit` returns `never`, so this slot composes anywhere an Effect of
+ * any success type is expected (e.g. inside `Effect.catchTag` fallbacks).
+ * Mirrors the exit shape of {@link catchDbErrorAndExit}.
+ */
+export const stderrExit = (message: string, code: number): Effect.Effect<never> =>
+    Effect.promise<never>(async () => {
+        process.stderr.write(message);
+        return process.exit(code);
+    });

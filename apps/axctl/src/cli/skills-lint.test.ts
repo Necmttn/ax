@@ -11,6 +11,11 @@ import { mkdir, writeFile, access } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { SurrealClient, type SurrealClientShape } from "@ax/lib/db";
+import {
+    makeTestSurrealClient,
+    type TestSurrealQueryCall,
+    type TestSurrealUpsertCall,
+} from "@ax/lib/testing/surreal";
 import { cmdSkillsLint, type LintReport } from "./skills-lint.ts";
 
 // ---------------------------------------------------------------------------
@@ -79,53 +84,31 @@ Just markdown, no frontmatter here.
 // Mock SurrealClient factory
 // ---------------------------------------------------------------------------
 
-type QueryCall = { sql: string; bindings?: unknown };
-
 interface MockDbState {
-    readonly queries: QueryCall[];
-    readonly upserts: Array<{ id: unknown; data: unknown }>;
-    /** skill name -> record key (id part) */
-    readonly knownSkills: Map<string, string>;
+    readonly queries: TestSurrealQueryCall[];
+    readonly upserts: TestSurrealUpsertCall[];
 }
 
 function makeMockDb(knownSkills: Map<string, string>): {
     db: SurrealClientShape;
     state: MockDbState;
 } {
-    const state: MockDbState = {
-        queries: [],
-        upserts: [],
-        knownSkills,
-    };
-
-    const db: SurrealClientShape = {
-        query: (sql: string, bindings?: unknown) => {
-            state.queries.push({ sql, bindings });
+    const tc = makeTestSurrealClient({
+        routes: [{
             // Skill lookup: SELECT id FROM skill WHERE name = $name LIMIT 1;
-            if (
-                typeof sql === "string" &&
-                sql.includes("SELECT id FROM skill WHERE name") &&
-                typeof bindings === "object" &&
-                bindings !== null &&
-                "name" in bindings
-            ) {
-                const name = String((bindings as Record<string, unknown>)["name"]);
+            match: "SELECT id FROM skill WHERE name",
+            rows: (_sql, bindings) => {
+                const name = String(bindings?.["name"]);
                 const key = knownSkills.get(name);
-                if (key === undefined) {
-                    return Effect.succeed([[]] as unknown as never);
-                }
-                return Effect.succeed([[{ id: `skill:${key}` }]] as unknown as never);
-            }
-            // All other queries (DELETE, RELATE) succeed silently
-            return Effect.succeed([] as unknown as never);
-        },
-        upsert: (id: unknown, data: unknown) => {
-            state.upserts.push({ id, data });
-            return Effect.void as Effect.Effect<never>;
-        },
-    } as unknown as SurrealClientShape;
+                if (key === undefined) return [[]];
+                return [[{ id: `skill:${key}` }]];
+            },
+        }],
+        // All other queries (DELETE, RELATE) succeed silently
+        fallback: [],
+    });
 
-    return { db, state };
+    return { db: tc.client, state: { queries: tc.calls, upserts: tc.upserts } };
 }
 
 // ---------------------------------------------------------------------------
@@ -224,7 +207,7 @@ describe("cmdSkillsLint", () => {
         }
 
         // Upserted role nodes: framing, execution, repair
-        const roleNames = state.upserts.map((u) => (u.data as Record<string, unknown>)["name"]);
+        const roleNames = state.upserts.map((u) => u.content["name"]);
         expect(roleNames).toContain("framing");
         expect(roleNames).toContain("execution");
         expect(roleNames).toContain("repair");

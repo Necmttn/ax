@@ -18,6 +18,10 @@ export const cmdClassifiersEval = (
         const summary = yield* Effect.promise(() => runClassifierEvalSuites(suites));
         yield* Console.log(formatClassifierEvalSummary(summary, { json }));
         if (summary.failed > 0) {
-            return yield* Effect.sync(() => process.exit(1));
+            // process.exit never returns; annotate the thunk as void so its
+            // inferred `never` doesn't read as a Promise to the Effect LSP.
+            return yield* Effect.sync((): void => {
+                process.exit(1);
+            });
         }
     });

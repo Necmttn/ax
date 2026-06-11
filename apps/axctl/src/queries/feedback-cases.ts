@@ -1,6 +1,5 @@
 import { Effect } from "effect";
 import { SurrealClient } from "@ax/lib/db";
-import type { DbError } from "@ax/lib/errors";
 import { prettyPrint, surrealLiteral } from "@ax/lib/json";
 import { stableDigest } from "@ax/lib/ids";
 import { recordRef } from "../ingest/evidence-writers.ts";
@@ -178,10 +177,8 @@ export function buildFeedbackCasePersistStatements(
 
 const selectOne = <A>(rows: readonly A[] | undefined): A | null => rows?.[0] ?? null;
 
-export const backtestEnforceWorktreeCase = (
-    opts: FeedbackBacktestOptions = {},
-): Effect.Effect<FeedbackBacktestSummary, DbError, SurrealClient> =>
-    Effect.gen(function* () {
+export const backtestEnforceWorktreeCase = Effect.fn("queries.backtestEnforceWorktreeCase")(
+    function* (opts: FeedbackBacktestOptions = {}) {
         const db = yield* SurrealClient;
         const window = Math.max(1, Math.trunc(opts.window ?? 3));
         const [candidates] = yield* db.query<[HookBacktestCandidateRow[]]>(buildEnforceWorktreeCandidateQuery(opts));
@@ -233,8 +230,9 @@ export const backtestEnforceWorktreeCase = (
             inconclusive,
             pass_rate: decisive === 0 ? null : passed / decisive,
             results,
-        };
-    });
+        } satisfies FeedbackBacktestSummary;
+    },
+);
 
 const dateText = (value: Date | string): string =>
     value instanceof Date ? value.toISOString() : String(value);

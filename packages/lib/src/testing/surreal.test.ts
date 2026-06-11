@@ -112,12 +112,49 @@ describe("makeTestSurrealClient - writes", () => {
         expect(tc.upserts).toEqual([{ id, content: { name: "tdd" } }]);
     });
 
-    test("relate/putFile are no-ops and getFile resolves ''", async () => {
+    test("relate/putFile record their arguments and getFile resolves ''", async () => {
         const tc = makeTestSurrealClient();
-        await Effect.runPromise(
-            tc.client.relate(new RecordId("a", "1"), new RecordId("edge", "e"), new RecordId("b", "2"), { w: 1 }),
-        );
+        const from = new RecordId("a", "1");
+        const edge = new RecordId("edge", "e");
+        const to = new RecordId("b", "2");
+        await Effect.runPromise(tc.client.relate(from, edge, to, { w: 1 }));
         await Effect.runPromise(tc.client.putFile("b", "x.jsonl", "line1"));
+        expect(tc.relates).toEqual([{ from, edge, to, data: { w: 1 } }]);
+        expect(tc.files).toEqual([{ bucket: "b", path: "x.jsonl", content: "line1" }]);
+        expect(await Effect.runPromise(tc.client.getFile("b", "x.jsonl"))).toBe("");
+    });
+});
+
+describe("makeTestSurrealClient - denyWrites", () => {
+    test("upsert fails loudly when denyWrites is set", async () => {
+        const tc = makeTestSurrealClient({ denyWrites: true });
+        await expect(
+            Effect.runPromise(tc.client.upsert(new RecordId("skill", "tdd"), { name: "tdd" })),
+        ).rejects.toThrow(/upsert called but denyWrites is set/);
+        expect(tc.upserts).toEqual([]);
+    });
+
+    test("relate fails loudly when denyWrites is set", async () => {
+        const tc = makeTestSurrealClient({ denyWrites: true });
+        await expect(
+            Effect.runPromise(
+                tc.client.relate(new RecordId("a", "1"), new RecordId("edge", "e"), new RecordId("b", "2")),
+            ),
+        ).rejects.toThrow(/relate called but denyWrites is set/);
+        expect(tc.relates).toEqual([]);
+    });
+
+    test("putFile fails loudly when denyWrites is set", async () => {
+        const tc = makeTestSurrealClient({ denyWrites: true });
+        await expect(
+            Effect.runPromise(tc.client.putFile("b", "x.jsonl", "line1")),
+        ).rejects.toThrow(/putFile called but denyWrites is set/);
+        expect(tc.files).toEqual([]);
+    });
+
+    test("reads still work under denyWrites", async () => {
+        const tc = makeTestSurrealClient({ denyWrites: true, routes: { SELECT: [["row"]] } });
+        expect(await runQuery(tc, "SELECT 1")).toEqual([["row"]]);
         expect(await Effect.runPromise(tc.client.getFile("b", "x.jsonl"))).toBe("");
     });
 });
