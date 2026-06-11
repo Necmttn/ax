@@ -1,5 +1,12 @@
 import { describe, expect, test } from "bun:test";
-import { computeEstimate, formatDuration, formatDryRun, type DryRunResult } from "./dry-run.ts";
+import {
+    computeEstimate,
+    computeRemaining,
+    formatDuration,
+    formatDryRun,
+    type DryRunResult,
+    type SessionTally,
+} from "./dry-run.ts";
 
 describe("computeEstimate", () => {
     test("projects ETA from a sampled rate", () => {
@@ -37,14 +44,52 @@ describe("formatDuration", () => {
     });
 });
 
+const tally = (claude: number, codex: number, pi = 0): SessionTally => ({
+    claude,
+    codex,
+    pi,
+    total: claude + codex + pi,
+});
+
 const baseResult = (over: Partial<DryRunResult> = {}): DryRunResult => ({
     sources: { claude: 1180, codex: 60, pi: 0, opencodeStore: false, cursorStore: false, sessionsTotal: 1240 },
+    inGraph: tally(0, 0),
+    remaining: tally(1180, 60),
     sampled: { items: 30, seconds: 2.1 },
     ratePerSec: 14.3,
     etaSeconds: 210,
     rough: false,
     populated: false,
+    upToDate: false,
     ...over,
+});
+
+describe("computeRemaining", () => {
+    test("subtracts in-graph sessions per source", () => {
+        const remaining = computeRemaining(
+            { claude: 3814, codex: 60, pi: 5, opencodeStore: false, cursorStore: false, sessionsTotal: 3879 },
+            tally(10, 3, 0),
+        );
+        expect(remaining).toEqual(tally(3804, 57, 5));
+    });
+
+    test("clamps per source so an over-counted source can't mask another's backlog", () => {
+        // codex has MORE in graph than on disk (e.g. deleted transcripts);
+        // claude's 100-session backlog must survive untouched.
+        const remaining = computeRemaining(
+            { claude: 100, codex: 5, pi: 0, opencodeStore: false, cursorStore: false, sessionsTotal: 105 },
+            tally(0, 50, 0),
+        );
+        expect(remaining).toEqual(tally(100, 0, 0));
+    });
+
+    test("empty graph leaves the full on-disk total remaining", () => {
+        const remaining = computeRemaining(
+            { claude: 1180, codex: 60, pi: 0, opencodeStore: false, cursorStore: false, sessionsTotal: 1240 },
+            tally(0, 0),
+        );
+        expect(remaining.total).toBe(1240);
+    });
 });
 
 describe("formatDryRun", () => {
@@ -54,6 +99,10 @@ describe("formatDryRun", () => {
         expect(out.etaSeconds).toBe(210);
         expect(out.ratePerSec).toBe(14.3);
         expect(out.sampled.items).toBe(30);
+        expect(out.inGraph.total).toBe(0);
+        expect(out.remaining).toEqual({ claude: 1180, codex: 60, pi: 0, total: 1240 });
+        expect(out.populated).toBe(false);
+        expect(out.upToDate).toBe(false);
     });
 
     test("human output shows per-source counts, total, and ETA", () => {
@@ -69,6 +118,7 @@ describe("formatDryRun", () => {
         const out = formatDryRun(
             baseResult({
                 sources: { claude: 0, codex: 0, pi: 0, opencodeStore: false, cursorStore: false, sessionsTotal: 0 },
+                remaining: tally(0, 0),
                 sampled: { items: 0, seconds: 0 },
                 ratePerSec: null,
                 etaSeconds: null,
@@ -83,11 +133,63 @@ describe("formatDryRun", () => {
         expect(out).toContain("(rough)");
     });
 
-    test("human output reports an already-populated DB as incremental", () => {
-        const out = formatDryRun(baseResult({ ratePerSec: null, etaSeconds: null, populated: true }), false);
-        expect(out).toContain("already populated");
+    test("populated-but-incomplete graph still yields a remaining-scaled ETA", () => {
+        // The watcher-seeded case from issue #267: 13 sessions in the graph,
+        // 3,827 on disk - the user must still get a backfill estimate.
+        const out = formatDryRun(
+            baseResult({
+                sources: { claude: 3814, codex: 13, pi: 0, opencodeStore: false, cursorStore: false, sessionsTotal: 3827 },
+                inGraph: tally(10, 3),
+                remaining: tally(3804, 10),
+                ratePerSec: 14.3,
+                etaSeconds: 267,
+                populated: true,
+                upToDate: false,
+            }),
+            false,
+        );
+        expect(out).toContain("~3,814 remaining (3,804 claude, 10 codex)");
+        expect(out).toContain("remaining: 3,814 sessions   ETA ~4m27s");
+        expect(out).not.toContain("incremental"); // backfill pending, not caught up
+    });
+
+    test("fully-caught-up graph reports up to date / incremental, no ETA", () => {
+        const out = formatDryRun(
+            baseResult({
+                inGraph: tally(1180, 60),
+                remaining: tally(0, 0),
+                sampled: { items: 0, seconds: 0 },
+                ratePerSec: null,
+                etaSeconds: null,
+                populated: true,
+                upToDate: true,
+            }),
+            false,
+        );
+        expect(out).toContain("up to date");
         expect(out).toContain("incremental");
         expect(out).toContain("ax ingest");
-        expect(out).not.toContain("ETA ~"); // no misleading full-total ETA
+        expect(out).not.toContain("ETA ~"); // no misleading ETA
+    });
+
+    test("json keeps remaining + upToDate for the caught-up case", () => {
+        const out = JSON.parse(
+            formatDryRun(
+                baseResult({
+                    inGraph: tally(1180, 60),
+                    remaining: tally(0, 0),
+                    sampled: { items: 0, seconds: 0 },
+                    ratePerSec: null,
+                    etaSeconds: null,
+                    populated: true,
+                    upToDate: true,
+                }),
+                true,
+            ),
+        );
+        expect(out.populated).toBe(true);
+        expect(out.upToDate).toBe(true);
+        expect(out.remaining.total).toBe(0);
+        expect(out.etaSeconds).toBeNull();
     });
 });

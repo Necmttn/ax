@@ -5,9 +5,11 @@
  * Two parts:
  *   1. Count pending source sessions cheaply (recursive `.jsonl` walks for the
  *      claude/codex/pi harnesses; a presence probe for the opencode/cursor
- *      sqlite stores). On a fresh DB - the case that matters most, the first
- *      run - every file is pending, so the raw count is exact. On a populated
- *      DB it is an upper bound (the watermark skips unchanged files at run time).
+ *      sqlite stores), then subtract what's already in the graph (per-source
+ *      session counts) to size the REMAINING backfill. On a fresh DB remaining
+ *      equals the on-disk total, so the ETA is exact; on a watcher-seeded DB
+ *      (sessions land seconds after install) nearly everything is still pending
+ *      and the ETA scales to what's left instead of being skipped outright.
  *   2. Calibrate throughput on THIS machine by timing a small real slice (the
  *      sample) through the normal pipeline. Upserts are idempotent, so the
  *      sampled sessions are reused by the subsequent real run - no wasted work.
@@ -32,6 +34,12 @@ export const DEFAULT_SAMPLE_CAP = 60;
 /** Below this many sampled items the ETA is flagged "rough" - a small sample is
  *  noisy, especially when transcript sizes vary widely. */
 export const ROUGH_SAMPLE_THRESHOLD = 10;
+/** At or below this many remaining sessions the graph counts as caught up: the
+ *  next run is incremental and quick, so sampling for an ETA is pointless. The
+ *  slack (vs. exactly 0) absorbs file↔session count noise - a transcript that
+ *  parses to no session, or a watcher mid-write - without losing the ETA for
+ *  any real backfill. */
+export const UP_TO_DATE_THRESHOLD = 5;
 
 export interface SourceCounts {
     /** claude `.jsonl` transcript files (~one per session). */
@@ -48,20 +56,49 @@ export interface SourceCounts {
     readonly sessionsTotal: number;
 }
 
+/** Per-source session tallies for the jsonl harnesses that drive the ETA. */
+export interface SessionTally {
+    readonly claude: number;
+    readonly codex: number;
+    readonly pi: number;
+    readonly total: number;
+}
+
 export interface DryRunResult {
     readonly sources: SourceCounts;
+    /** sessions already in the graph, per source (opencode/cursor excluded -
+     *  their on-disk counts aren't known either, so they never drive the ETA). */
+    readonly inGraph: SessionTally;
+    /** pending backfill work: max(0, onDisk - inGraph) per source. The ETA is
+     *  projected over `remaining.total`, not the full on-disk total, so a
+     *  watcher-seeded graph (a handful of sessions ingested seconds after
+     *  install) still gets a useful first-backfill estimate. */
+    readonly remaining: SessionTally;
     readonly sampled: { readonly items: number; readonly seconds: number };
     /** sessions/sec measured from the sample, or null when nothing was sampled
-     *  (e.g. the graph is already populated so the slice was skipped). */
+     *  (e.g. the graph is caught up so the slice was skipped). */
     readonly ratePerSec: number | null;
-    /** projected full-backfill seconds, or null when no rate could be measured. */
+    /** projected seconds for the REMAINING backfill, or null when no rate could
+     *  be measured (or nothing remains). */
     readonly etaSeconds: number | null;
     /** true when the sample was small (time-boxed early), so the ETA is noisy. */
     readonly rough: boolean;
-    /** true when the graph already has sessions. A full-total ETA would be
-     *  misleading (the watermark skips already-ingested files), so we report the
-     *  run as incremental instead. */
+    /** true when the graph already has sessions. Kept for backward compat; no
+     *  longer suppresses the ETA on its own - only `remaining ≈ 0` does. */
     readonly populated: boolean;
+    /** true when remaining ≈ 0 (≤ UP_TO_DATE_THRESHOLD): the next run is
+     *  incremental, so no ETA is sampled. */
+    readonly upToDate: boolean;
+}
+
+/** Pure remaining-work math: pending = max(0, onDisk - inGraph) per source.
+ *  On-disk counts are file counts (~one session per jsonl), so per-source
+ *  clamping keeps one over-counted source from masking another's backlog. */
+export function computeRemaining(sources: SourceCounts, inGraph: SessionTally): SessionTally {
+    const claude = Math.max(0, sources.claude - inGraph.claude);
+    const codex = Math.max(0, sources.codex - inGraph.codex);
+    const pi = Math.max(0, sources.pi - inGraph.pi);
+    return { claude, codex, pi, total: claude + codex + pi };
 }
 
 /** Pure ETA math. Returns null rate/eta when the sample measured nothing
@@ -119,21 +156,40 @@ const countJsonl = (
         return count;
     });
 
-/** Cheap "is the graph already populated?" probe. One existence check, not a
- *  full count. Drives the ETA branch: an empty graph means every on-disk file is
- *  pending (so total == pending and the ETA is exact); a populated graph means
- *  the watermark will skip most files, so extrapolating over the full total would
- *  wildly over-estimate - we report incremental instead. */
-const dbHasSessions = (): Effect.Effect<boolean, never, SurrealClient> =>
+const EMPTY_TALLY: SessionTally = { claude: 0, codex: 0, pi: 0, total: 0 };
+
+/** Per-source session counts already in the graph. One cheap aggregate (no
+ *  derefs), so it stays fast even on a large graph. Compared against the
+ *  on-disk counts to size the REMAINING backfill - a binary "has any session?"
+ *  probe is useless in practice because the watcher LaunchAgent seeds sessions
+ *  within seconds of install. */
+const dbSessionCounts = (): Effect.Effect<SessionTally, never, SurrealClient> =>
     Effect.gen(function* () {
         const db = yield* SurrealClient;
-        const rows = (yield* db.query<[Array<{ id: unknown }>]>("SELECT id FROM session LIMIT 1;"))?.[0] ?? [];
-        return rows.length > 0;
+        const rows = (yield* db.query<[Array<{ source?: string; n?: number }>]>(
+            "SELECT source, count() AS n FROM session GROUP BY source;",
+        ))?.[0] ?? [];
+        let claude = 0;
+        let codex = 0;
+        let pi = 0;
+        for (const row of rows) {
+            const n = typeof row.n === "number" ? row.n : 0;
+            // `claude-subagent` sessions are derived from separate
+            // `<sessionId>/subagents/agent-*.jsonl` files that the recursive
+            // on-disk walk also counts, so they fold into the claude tally to
+            // keep the comparison apples-to-apples.
+            if (row.source === "claude" || row.source === "claude-subagent") claude += n;
+            else if (row.source === "codex") codex += n;
+            else if (row.source === "pi") pi += n;
+            // opencode/cursor (and unknown sources) are ignored: their on-disk
+            // session counts aren't known either, so they never drive the ETA.
+        }
+        return { claude, codex, pi, total: claude + codex + pi };
     }).pipe(
         // A missing `session` table (schema not applied yet) or any query failure
-        // means we can't confirm population - treat as empty (first run) rather
+        // means we can't size the graph - treat as empty (first run) rather
         // than crashing the dry-run.
-        Effect.orElseSucceed(() => false),
+        Effect.orElseSucceed(() => EMPTY_TALLY),
     );
 
 const pathExists = (p: string): Effect.Effect<boolean, never, FileSystem.FileSystem> =>
@@ -176,19 +232,37 @@ export const estimateIngest = (
         const sessionsTotal = claude + codex + pi;
         const sources: SourceCounts = { claude, codex, pi, opencodeStore, cursorStore, sessionsTotal };
 
-        // On a populated graph the watermark skips already-ingested files, so a
-        // full-total ETA is meaningless (and sampling would only re-touch a
-        // handful of new files). Report incremental and skip calibration.
-        const populated = yield* dbHasSessions();
-        if (populated) {
-            return { sources, sampled: { items: 0, seconds: 0 }, ratePerSec: null, etaSeconds: null, rough: false, populated };
+        // Size the remaining backfill: on-disk minus already-in-graph, per
+        // source. An empty graph means remaining == total (first run, exact
+        // ETA); a watcher-seeded graph still has nearly everything pending, so
+        // it gets a remaining-scaled ETA instead of a blanket "populated" skip.
+        const inGraph = yield* dbSessionCounts();
+        const populated = inGraph.total > 0;
+        const remaining = computeRemaining(sources, inGraph);
+
+        // Caught up (remaining ≈ 0): the watermark skips already-ingested
+        // files, so the next run is incremental and quick. Sampling would only
+        // re-touch unchanged files - skip calibration and say so.
+        if (populated && remaining.total <= UP_TO_DATE_THRESHOLD) {
+            return {
+                sources,
+                inGraph,
+                remaining,
+                sampled: { items: 0, seconds: 0 },
+                ratePerSec: null,
+                etaSeconds: null,
+                rough: false,
+                populated,
+                upToDate: true,
+            };
         }
 
-        // First run: every on-disk file is pending, so total == pending and the
-        // ETA is exact. Calibrate on whichever jsonl harness has the most work.
-        // Time-boxed: process real files until the budget elapses (or the cap is
-        // hit), then extrapolate.
-        const useCodex = codex > claude;
+        // Real work remains. Calibrate on whichever jsonl harness has the most
+        // pending sessions (the watermark skips already-ingested files inside
+        // the sample, so only genuinely-pending sessions count toward the rate).
+        // Time-boxed: process real files until the budget elapses (or the cap
+        // is hit), then extrapolate over the REMAINING total.
+        const useCodex = remaining.codex > remaining.claude;
         const t0 = now();
         const deadlineMs = t0 + budgetMs;
         const items = useCodex
@@ -196,9 +270,9 @@ export const estimateIngest = (
             : (yield* ingestTranscripts({ sinceDays: opts.sinceDays, limit: cap, deadlineMs })).sessions;
         const seconds = (now() - t0) / 1000;
 
-        const { ratePerSec, etaSeconds } = computeEstimate(sessionsTotal, items, seconds);
+        const { ratePerSec, etaSeconds } = computeEstimate(remaining.total, items, seconds);
         const rough = ratePerSec !== null && items < ROUGH_SAMPLE_THRESHOLD;
-        return { sources, sampled: { items, seconds }, ratePerSec, etaSeconds, rough, populated };
+        return { sources, inGraph, remaining, sampled: { items, seconds }, ratePerSec, etaSeconds, rough, populated, upToDate: false };
     });
 
 /** Render the dry-run result for humans (Paxel-style) or as JSON for the agent. */
@@ -207,17 +281,20 @@ export function formatDryRun(result: DryRunResult, json: boolean): string {
         return JSON.stringify(
             {
                 sources: result.sources,
+                inGraph: result.inGraph,
+                remaining: result.remaining,
                 sampled: result.sampled,
                 ratePerSec: result.ratePerSec,
                 etaSeconds: result.etaSeconds,
                 rough: result.rough,
                 populated: result.populated,
+                upToDate: result.upToDate,
             },
             null,
             2,
         );
     }
-    const { sources: s } = result;
+    const { sources: s, remaining } = result;
     const lines: string[] = ["ax ingest --dry-run", "  counting sources..."];
     if (s.claude > 0) lines.push(`    claude   ${s.claude.toLocaleString()} sessions`);
     if (s.codex > 0) lines.push(`    codex    ${s.codex.toLocaleString()} sessions`);
@@ -230,17 +307,26 @@ export function formatDryRun(result: DryRunResult, json: boolean): string {
         return lines.join("\n");
     }
 
-    if (result.populated) {
-        // Graph already has sessions: runs are incremental (the watermark skips
-        // already-ingested files), so a full-total ETA would be meaningless.
-        lines.push("  graph already populated - the next run is incremental (only new/changed files), so it'll be quick.");
+    if (result.upToDate) {
+        // remaining ≈ 0: runs are incremental (the watermark skips
+        // already-ingested files), so there is no backfill to estimate.
+        lines.push(
+            `  graph is up to date (${result.inGraph.total.toLocaleString()} sessions) - the next run is incremental (only new/changed files), so it'll be quick.`,
+        );
         lines.push("  run it: ax ingest");
         return lines.join("\n");
     }
 
+    if (result.populated) {
+        // Partially-populated graph (e.g. watcher-seeded right after install):
+        // show how much of the backfill is actually left.
+        lines.push(`  in graph: ${result.inGraph.total.toLocaleString()} sessions - ~${remaining.total.toLocaleString()} remaining (${formatRemainingParts(remaining)})`);
+    }
+
     if (result.ratePerSec === null) {
-        // Empty graph but the sample measured nothing usable (e.g. all candidate
-        // files were too short to produce a session). Can't project a rate.
+        // Work remains but the sample measured nothing usable (e.g. all candidate
+        // files were too short to produce a session, or every sampled file was
+        // already ingested and watermark-skipped). Can't project a rate.
         lines.push("  couldn't measure a rate from the sample; just run it:");
         lines.push("  run it: ax ingest");
         return lines.join("\n");
@@ -251,7 +337,19 @@ export function formatDryRun(result: DryRunResult, json: boolean): string {
     );
     const eta = result.etaSeconds === null ? "unknown" : `~${formatDuration(result.etaSeconds)}`;
     const roughTag = result.rough ? " (rough)" : "";
-    lines.push(`  total: ${s.sessionsTotal.toLocaleString()} sessions   ETA ${eta}${roughTag} on this machine`);
+    // ETA is projected over the remaining backfill. On a fresh graph that IS
+    // the full total; on a partially-populated one it's labelled accordingly.
+    const label = result.populated ? "remaining" : "total";
+    lines.push(`  ${label}: ${remaining.total.toLocaleString()} sessions   ETA ${eta}${roughTag} on this machine`);
     lines.push(`  run it: ax ingest   (watch live in ax serve → http://127.0.0.1:${DEFAULT_DASHBOARD_PORT})`);
     return lines.join("\n");
+}
+
+/** "3,800 claude, 14 codex" - zero-count sources omitted. */
+function formatRemainingParts(remaining: SessionTally): string {
+    const parts: string[] = [];
+    if (remaining.claude > 0) parts.push(`${remaining.claude.toLocaleString()} claude`);
+    if (remaining.codex > 0) parts.push(`${remaining.codex.toLocaleString()} codex`);
+    if (remaining.pi > 0) parts.push(`${remaining.pi.toLocaleString()} pi`);
+    return parts.length > 0 ? parts.join(", ") : "none pending";
 }
