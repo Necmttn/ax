@@ -1,7 +1,9 @@
-import { describe, expect, test } from "bun:test";
+import { beforeEach, describe, expect, test } from "bun:test";
 import { Effect } from "effect";
 import { SurrealClient, type SurrealClientShape } from "@ax/lib/db";
+import { DbError } from "@ax/lib/errors";
 import { makeTestSurrealClient } from "@ax/lib/testing/surreal";
+import { _resetBaselineCacheForTests } from "./session-baselines.ts";
 import { fetchSessionsList } from "./sessions-list.ts";
 
 const RID = "session:`aaaaaaaa-0000-0000-0000-000000000001`";
@@ -27,8 +29,14 @@ const run = (stub: SurrealClientShape) =>
 // responder answering EVERY `.query()` call with the same result tuple, so
 // per-call fixtures go through `responses` - one entry per `.query()` call,
 // each entry being that call's full result-set tuple. fetchSessionsList
-// issues 3 calls: page+count (2 sets), spawned counts (1 set), enrichment
-// (3 sets).
+// issues 4 calls: page+count (2 sets), spawned counts (1 set), enrichment
+// (3 sets), baselines (4 sets).
+
+const emptyBaselines = [[], [], [], []];
+
+beforeEach(() => {
+    _resetBaselineCacheForTests();
+});
 
 describe("fetchSessionsList enrichment", () => {
     test("joins health/usage/metrics onto rows and computes signal", async () => {
@@ -54,6 +62,8 @@ describe("fetchSessionsList enrichment", () => {
                         lines_added: 2100, lines_removed: 940,
                     }],
                 ],
+                // call 4: baselines
+                [[{ estimated_cost_usd: 1 }], [{ friction: 1 }], [{ time_to_land_ms: 1 }], [{ estimated_tokens: 900, turns: 3 }]],
             ],
         }).client;
 
@@ -71,6 +81,7 @@ describe("fetchSessionsList enrichment", () => {
         expect(row.lines_removed).toBe(940);
         // ended_at null + fresh health ts -> live
         expect(row.is_live).toBe(true);
+        expect(res.burn_p90).toBe(300);
     });
 
     test("rows without enrichment rows render null fields, signal null, not live", async () => {
@@ -80,6 +91,7 @@ describe("fetchSessionsList enrichment", () => {
                 [[{ ...pageRow, ended_at: "2026-06-11T02:00:00.000Z" }], [{ total: 1 }]],
                 [[]], // spawned
                 [[], [], []], // empty enrichment sets
+                emptyBaselines,
             ],
         }).client;
         const res = await run(stub);
@@ -103,6 +115,7 @@ describe("fetchSessionsList enrichment", () => {
                     [],
                     [],
                 ],
+                emptyBaselines,
             ],
         }).client;
         const res = await run(stub);
@@ -121,10 +134,76 @@ describe("fetchSessionsList enrichment", () => {
                     [{ session: RID, estimated_cost_usd: 1, estimated_tokens: 10, cache_read_input_tokens: 0, burn_buckets: "not json" }],
                     [],
                 ],
+                emptyBaselines,
             ],
         }).client;
         const res = await run(stub);
         expect(res.sessions[0]!.burn_buckets).toBeNull();
         expect(res.sessions[0]!.cost_usd).toBe(1);
+    });
+
+    test("query shape stays on aggregate tables and never scans turns", async () => {
+        const tc = makeTestSurrealClient({
+            denyWrites: true,
+            responses: [
+                [[pageRow], [{ total: 1 }]],
+                [[]],
+                [[], [], []],
+                emptyBaselines,
+            ],
+        });
+
+        await run(tc.client);
+
+        const enrichment = tc.captured[2]!;
+        expect(enrichment).toContain("FROM session_health");
+        expect(enrichment).toContain("FROM session_token_usage");
+        expect(enrichment).toContain("FROM session_metrics");
+        for (const sql of tc.captured) {
+            expect(sql).not.toMatch(/FROM turn\b/);
+            expect(sql).not.toContain("turn_token_usage");
+        }
+    });
+
+    test("stale health ts with open session is not live", async () => {
+        const staleTs = new Date(Date.now() - 11 * 60_000).toISOString();
+        const stub = makeTestSurrealClient({
+            denyWrites: true,
+            responses: [
+                [[pageRow], [{ total: 1 }]],
+                [[]],
+                [
+                    [{ session: RID, turns: 4, tool_errors: 0, user_corrections: 0, context_pressure: "low", ts: staleTs }],
+                    [],
+                    [],
+                ],
+                emptyBaselines,
+            ],
+        }).client;
+
+        const res = await run(stub);
+        expect(res.sessions[0]!.is_live).toBe(false);
+    });
+
+    test("enrichment query failure degrades to bare rows", async () => {
+        const stub = makeTestSurrealClient({
+            denyWrites: true,
+            responses: [
+                [[pageRow], [{ total: 1 }]],
+                [[]],
+                Effect.fail(new DbError({ operation: "query", message: "enrichment failed" })),
+                emptyBaselines,
+            ],
+        }).client;
+
+        const res = await run(stub);
+        const row = res.sessions[0]!;
+        expect(row.id).toBe(BARE);
+        expect(row.turn_count).toBe(0);
+        expect(row.cost_usd).toBeNull();
+        expect(row.friction).toBeNull();
+        expect(row.signal).toBeNull();
+        expect(row.produced_commits).toBeNull();
+        expect(row.is_live).toBe(false);
     });
 });

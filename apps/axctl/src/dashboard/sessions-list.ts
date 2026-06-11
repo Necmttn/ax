@@ -20,6 +20,7 @@ import type {
 import { queryPagedWithCount } from "@ax/lib/shared/graph-query";
 import { clampPagination, type PaginationConfig } from "@ax/lib/shared/pagination";
 import { toBareSessionId, toSessionRid } from "@ax/lib/shared/session-id";
+import { fetchSessionBaselines } from "./session-baselines.ts";
 
 export interface SessionsListOpts {
     readonly offset?: number;
@@ -67,6 +68,8 @@ const formatRecordIdList = (ids: ReadonlyArray<string>): string => ids.join(", "
 /** ended_at-null sessions count as live only when the health derive row was
  *  written recently - the watcher re-ingests live transcripts within ~1 min,
  *  so a stale ts means the session is dead, just never closed. */
+// Wart: deep-backfill can mark old open sessions live/stale by rewriting
+// session_health.ts, but health ts must stay fresh for the dashboard proxy.
 const LIVE_HEALTH_TS_WINDOW_MS = 10 * 60_000;
 
 interface HealthRow {
@@ -215,6 +218,7 @@ export const fetchSessionsList = (opts: SessionsListOpts = {}): Effect.Effect<Se
         const metricsBySession = new Map<string, MetricsRow>();
         if (rawIds.length > 0) {
             const inList = formatRecordIdList(rawIds);
+            // enrichment must never break the base list - degrade to bare rows.
             const [health, usage, metrics] = yield* db.query<[
                 HealthRow[],
                 UsageRow[],
@@ -229,7 +233,9 @@ export const fetchSessionsList = (opts: SessionsListOpts = {}): Effect.Effect<Se
                 SELECT <string>session AS session, produced_commits,
                        reverted_commits, lines_added, lines_removed
                 FROM session_metrics WHERE session IN [${inList}];
-            `);
+            `).pipe(
+                Effect.catch(() => Effect.succeed<[HealthRow[], UsageRow[], MetricsRow[]]>([[], [], []])),
+            );
             for (const h of health) healthBySession.set(h.session, h);
             for (const u of usage) usageBySession.set(u.session, u);
             for (const m of metrics) metricsBySession.set(m.session, m);
@@ -268,8 +274,11 @@ export const fetchSessionsList = (opts: SessionsListOpts = {}): Effect.Effect<Se
         // a concurrent ingest). Falling back to `sessions.length + offset`
         // keeps the UI from claiming fewer rows than it just rendered.
         const total_count = Math.max(paged.total, sessions.length + offset);
+        const baselines = yield* fetchSessionBaselines().pipe(
+            Effect.catch(() => Effect.succeed(null)),
+        );
 
-        return { sessions, total_count, burn_p90: null, window: { offset, limit } };
+        return { sessions, total_count, burn_p90: baselines?.burn_p90 ?? null, window: { offset, limit } };
     });
 
 /**
