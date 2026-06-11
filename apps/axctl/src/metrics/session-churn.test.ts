@@ -286,6 +286,7 @@ describe("fetchSessionChurnSummary", () => {
         }).pipe(Effect.provide(db({ base: [], seenSql }))));
 
         const baseSql = seenSql.find((s) => s.includes("FROM session_metrics"))!;
+        expect(baseSql).toContain("session.started_at AS started_at");
         expect(baseSql).toContain('session.started_at >= d"2026-06-01T00:00:00.000Z"');
         expect(baseSql).toContain('(session.project = "/repo/ax" OR session.cwd = "/repo/ax")');
         expect(baseSql).toContain('session.source = "codex"');

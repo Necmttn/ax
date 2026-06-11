@@ -262,7 +262,7 @@ export const fetchSessionChurnSummary = (
         if (source !== null) clauses.push(`session.source = ${surrealString(source)}`);
         const where = clauses.length > 0 ? `WHERE ${clauses.join(" AND ")}` : "";
         const baseRows = (yield* db.query<[Array<Record<string, unknown>>]>(`
-SELECT type::string(session) AS session, session.source AS source
+SELECT type::string(session) AS session, session.source AS source, session.started_at AS started_at
 FROM session_metrics
 ${where}
 ORDER BY session.started_at DESC;`))?.[0] ?? [];
