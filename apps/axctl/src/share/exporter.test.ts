@@ -1,12 +1,104 @@
 import { describe, expect, it, test } from "bun:test";
 import {
     attachStructuredToolCalls,
+    attachTurnTokenUsage,
     buildShareArtifactFromParts,
     normalizeSessionRecordRef,
 } from "./exporter.ts";
 import type { ShareTurn } from "./artifact.ts";
+import type { TurnTokenUsageDetail } from "@ax/lib/shared/dashboard-types";
 
 const turn = (seq: number, text: string): ShareTurn => ({ id: `t${seq}`, seq, role: "assistant", text });
+
+const usage = (seq: number, over: Partial<TurnTokenUsageDetail> = {}): TurnTokenUsageDetail => ({
+    seq,
+    model: "gpt-5.5",
+    prompt_tokens: 100,
+    completion_tokens: 10,
+    cache_creation_input_tokens: null,
+    cache_read_input_tokens: 50,
+    fresh_input_tokens: 50,
+    estimated_tokens: 110,
+    estimated_input_cost_usd: 0.001,
+    estimated_output_cost_usd: 0.0005,
+    estimated_cache_creation_cost_usd: null,
+    estimated_cache_read_cost_usd: 0.0001,
+    estimated_cost_usd: 0.0016,
+    pricing_source: "built_in",
+    usage_source: "provider",
+    usage_quality: "exact",
+    ...over,
+});
+
+describe("attachTurnTokenUsage", () => {
+    test("exact seq match attaches unchanged", () => {
+        const out = attachTurnTokenUsage([turn(0, "a"), turn(1, "b")], [usage(1)]);
+        expect(out[0]!.token_usage).toBeUndefined();
+        expect(out[1]!.token_usage?.seq).toBe(1);
+        expect(out[1]!.token_usage?.estimated_cost_usd).toBe(0.0016);
+    });
+
+    test("usage on a dropped seq buckets to the nearest preceding kept turn", () => {
+        // Provider event rows (codex token_count) are filtered out of the share
+        // transcript; their usage must land on the preceding kept turn.
+        const out = attachTurnTokenUsage([turn(1, "a"), turn(5, "b"), turn(9, "c")], [usage(7)]);
+        expect(out[0]!.token_usage).toBeUndefined();
+        expect(out[1]!.token_usage?.seq).toBe(5);
+        expect(out[2]!.token_usage).toBeUndefined();
+    });
+
+    test("usage before the first kept turn buckets to the first turn", () => {
+        const out = attachTurnTokenUsage([turn(4, "a"), turn(8, "b")], [usage(2)]);
+        expect(out[0]!.token_usage?.seq).toBe(4);
+    });
+
+    test("several usages in one bucket sum tokens and costs null-aware", () => {
+        const out = attachTurnTokenUsage(
+            [turn(1, "a"), turn(10, "b")],
+            [
+                usage(3, { estimated_cost_usd: 0.5, cache_creation_input_tokens: null }),
+                usage(6, { estimated_cost_usd: 0.25, cache_creation_input_tokens: 30, model: null }),
+            ],
+        );
+        const merged = out[0]!.token_usage!;
+        expect(merged.seq).toBe(1);
+        expect(merged.prompt_tokens).toBe(200);
+        expect(merged.completion_tokens).toBe(20);
+        expect(merged.estimated_tokens).toBe(220);
+        expect(merged.estimated_cost_usd).toBe(0.75);
+        // null + 30 sums to 30; null + null stays null
+        expect(merged.cache_creation_input_tokens).toBe(30);
+        expect(merged.estimated_cache_creation_cost_usd).toBeNull();
+        // first non-null wins for identity fields
+        expect(merged.model).toBe("gpt-5.5");
+    });
+
+    test("pi subagent fixture: every usage row survives and the rail total matches", () => {
+        // Real layout from session 019e729a (codex, gpt-5.5): the DB held 37
+        // usage rows but only 2 seqs intersected the kept share turns, freezing
+        // the viewer's cost-so-far rail. Bucketing must preserve all 37.
+        const keptSeqs = [
+            1, 2, 3, 5, 6, 9, 11, 12, 15, 17, 18, 19, 20, 26, 27, 28, 29, 30, 36, 37, 38, 39,
+            45, 46, 47, 51, 54, 55, 56, 61, 62, 67, 68, 71, 75, 76, 79, 82, 85, 86, 89, 90,
+            91, 92, 97, 100, 103, 104, 105, 109, 110, 114, 115, 118, 119, 120, 121, 126, 127,
+            129, 130, 131, 135, 136, 137, 138, 139, 145, 148, 149, 152, 156, 159, 162, 165,
+            166, 167, 168, 173, 175, 176, 178, 179, 180, 184,
+        ];
+        const usageSeqs = [
+            8, 14, 24, 34, 43, 50, 52, 59, 63, 66, 69, 73, 77, 81, 83, 87, 95, 98, 101, 107,
+            112, 116, 124, 126, 134, 143, 147, 150, 154, 157, 161, 163, 171, 174, 177, 183, 184,
+        ];
+        const out = attachTurnTokenUsage(
+            keptSeqs.map((seq) => turn(seq, "x")),
+            usageSeqs.map((seq) => usage(seq, { estimated_cost_usd: 0.1 })),
+        );
+        const attached = out.filter((t) => t.token_usage != null);
+        const totalCost = attached.reduce((sum, t) => sum + (t.token_usage!.estimated_cost_usd ?? 0), 0);
+        expect(totalCost).toBeCloseTo(0.1 * usageSeqs.length, 10);
+        // cost accumulates across the transcript, not frozen at two turns
+        expect(attached.length).toBeGreaterThan(20);
+    });
+});
 
 describe("attachStructuredToolCalls", () => {
     test("attaches typed tool_calls to the matching empty-text turn", () => {
