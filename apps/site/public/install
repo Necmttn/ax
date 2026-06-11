@@ -225,14 +225,24 @@ EOF
       err "checksums.txt did not include ${artifact}"
       exit 1
     }
+    expected_sha="$(printf '%s\n' "$checksum_line" | awk '{print $1}')"
+    actual_sha=""
     if command -v shasum >/dev/null 2>&1; then
-      (cd "$tmp_dir" && printf '%s\n' "$checksum_line" | shasum -a 256 -c - >/dev/null)
-      ok "checksum verified"
+      actual_sha="$(shasum -a 256 "$tmp_dir/$artifact" | awk '{print $1}')"
     elif command -v sha256sum >/dev/null 2>&1; then
-      (cd "$tmp_dir" && printf '%s\n' "$checksum_line" | sha256sum -c - >/dev/null)
+      actual_sha="$(sha256sum "$tmp_dir/$artifact" | awk '{print $1}')"
+    fi
+    if [[ -z "$actual_sha" ]]; then
+      warn "no sha256 checker found, skipping verification"
+    elif [[ "$actual_sha" == "$expected_sha" ]]; then
       ok "checksum verified"
     else
-      warn "no sha256 checker found, skipping verification"
+      err "checksum mismatch for ${C_BOLD}${artifact}${C_RESET}"
+      printf '    %sexpected%s %s\n' "$C_DIM" "$C_RESET" "$expected_sha" >&2
+      printf '    %sactual  %s %s\n' "$C_DIM" "$C_RESET" "$actual_sha" >&2
+      printf '    %sthis usually means a broken release - please report at%s\n' "$C_DIM" "$C_RESET" >&2
+      printf '    %shttps://github.com/%s/issues%s\n' "$C_BOLD" "$REPO" "$C_RESET" >&2
+      exit 1
     fi
   else
     warn "checksums.txt not found, skipping verification"
