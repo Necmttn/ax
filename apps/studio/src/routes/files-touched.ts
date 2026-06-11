@@ -9,6 +9,11 @@ export interface FileTouch {
     readonly reads: number;
     readonly writes: number;
     readonly errors: number;
+    /** Chars added/removed across this file's edits - Edit counts
+     *  new_string/old_string, Write counts content as added (the replaced
+     *  previous content is unknowable from the call alone). */
+    readonly charsAdded: number;
+    readonly charsRemoved: number;
     /** Turn seq of the first call touching this file - the jump target. */
     readonly firstSeq: number;
     readonly lastSeq: number;
@@ -66,9 +71,37 @@ interface MutableTouch {
     reads: number;
     writes: number;
     errors: number;
+    charsAdded: number;
+    charsRemoved: number;
     firstSeq: number;
     lastSeq: number;
     firstWriteTool: string | null;
+}
+
+const strLen = (v: unknown): number => (typeof v === "string" ? v.length : 0);
+
+/** Char delta of one write call. Edit/MultiEdit replace old with new; Write
+ *  and NotebookEdit supply whole new content with no old side on the call. */
+function charDelta(call: ToolCallDto): { added: number; removed: number } {
+    const input = call.input ?? {};
+    if (call.name === "Edit") {
+        return { added: strLen(input.new_string), removed: strLen(input.old_string) };
+    }
+    if (call.name === "MultiEdit" && Array.isArray(input.edits)) {
+        let added = 0;
+        let removed = 0;
+        for (const e of input.edits) {
+            if (typeof e === "object" && e !== null) {
+                added += strLen((e as Record<string, unknown>).new_string);
+                removed += strLen((e as Record<string, unknown>).old_string);
+            }
+        }
+        return { added, removed };
+    }
+    if (call.name === "NotebookEdit") {
+        return { added: strLen(input.new_source), removed: 0 };
+    }
+    return { added: strLen(input.content), removed: 0 };
 }
 
 /**
@@ -88,12 +121,28 @@ export function buildFilesTouched(turns: ReadonlyArray<InspectTurnDto>): FilesTo
             if (!abs) continue;
             let touch = byPath.get(abs);
             if (!touch) {
-                touch = { absPath: abs, reads: 0, writes: 0, errors: 0, firstSeq: turn.seq, lastSeq: turn.seq, firstWriteTool: null };
+                touch = {
+                    absPath: abs,
+                    reads: 0,
+                    writes: 0,
+                    errors: 0,
+                    charsAdded: 0,
+                    charsRemoved: 0,
+                    firstSeq: turn.seq,
+                    lastSeq: turn.seq,
+                    firstWriteTool: null,
+                };
                 byPath.set(abs, touch);
             }
             if (spec.op === "read") touch.reads++;
             else {
                 touch.writes++;
+                if (!call.has_error) {
+                    // A failed edit changed nothing - only count applied deltas.
+                    const delta = charDelta(call);
+                    touch.charsAdded += delta.added;
+                    touch.charsRemoved += delta.removed;
+                }
                 if (touch.firstWriteTool == null) {
                     // A Write with prior reads is an overwrite, not a creation.
                     touch.firstWriteTool = call.name === "Write" && touch.reads > 0 ? "Edit" : call.name;
@@ -112,6 +161,8 @@ export function buildFilesTouched(turns: ReadonlyArray<InspectTurnDto>): FilesTo
         reads: t.reads,
         writes: t.writes,
         errors: t.errors,
+        charsAdded: t.charsAdded,
+        charsRemoved: t.charsRemoved,
         firstSeq: t.firstSeq,
         lastSeq: t.lastSeq,
         status: t.writes === 0 ? null : t.firstWriteTool === "Write" ? "added" : "modified",

@@ -49,18 +49,33 @@ function summaryLine(model: FilesTouchedModel): string {
     return parts.filter(Boolean).join(" · ");
 }
 
+/** 1234 → "1.2k": row decorations must stay glanceable next to the filename. */
+export function compactChars(n: number): string {
+    if (n < 1000) return String(n);
+    const k = n / 1000;
+    return `${k >= 10 ? Math.round(k) : Math.round(k * 10) / 10}k`;
+}
+
 /** The once-created tree model reads files through this lookup; the panel is
- *  keyed per session file upstream, so the data never changes under it. */
+ *  keyed per session file upstream, so the data never changes under it.
+ *  Edited files read as a diffstat (+chars −chars); read-only files as the
+ *  read count. */
 function decorationFor(model: FilesTouchedModel, path: string): { text: string; title: string } | null {
     const f = model.files.find((file) => file.path === path);
     if (!f) return null;
+    const diffstat = f.charsAdded > 0 || f.charsRemoved > 0
+        ? [
+            f.charsAdded > 0 ? `+${compactChars(f.charsAdded)}` : null,
+            f.charsRemoved > 0 ? `−${compactChars(f.charsRemoved)}` : null,
+        ].filter(Boolean).join(" ")
+        : null;
     const text = [
-        f.writes > 0 ? `${f.writes}w` : null,
-        f.reads > 0 ? `${f.reads}r` : null,
+        diffstat ?? (f.writes > 0 ? `${f.writes}w` : f.reads > 0 ? `${f.reads}r` : null),
         f.errors > 0 ? "⚠" : null,
     ].filter(Boolean).join(" ");
     const title = [
-        f.writes > 0 ? `${f.writes} write${f.writes === 1 ? "" : "s"}` : null,
+        diffstat ? `${f.charsAdded.toLocaleString()} chars added, ${f.charsRemoved.toLocaleString()} removed` : null,
+        f.writes > 0 ? `${f.writes} write call${f.writes === 1 ? "" : "s"}` : null,
         f.reads > 0 ? `${f.reads} read${f.reads === 1 ? "" : "s"}` : null,
         f.errors > 0 ? `${f.errors} failed call${f.errors === 1 ? "" : "s"}` : null,
         `first touched at turn ${f.firstSeq}`,

@@ -99,6 +99,38 @@ describe("buildFilesTouched", () => {
         expect(model.files[0]).toMatchObject({ path: "/r/nb.ipynb".replace(/^\//, ""), writes: 1 });
     });
 
+    test("Edit counts new_string as added and old_string as removed", () => {
+        const model = buildFilesTouched([
+            turn(1, [toolCall({ name: "Edit", input: { file_path: "/r/a.ts", old_string: "ab", new_string: "abcdef" } })]),
+            turn(2, [toolCall({ name: "Edit", input: { file_path: "/r/a.ts", old_string: "xyz", new_string: "x" } })]),
+        ]);
+        expect(model.files[0]).toMatchObject({ charsAdded: 7, charsRemoved: 5 });
+    });
+
+    test("Write counts content as added only", () => {
+        const model = buildFilesTouched([
+            turn(1, [toolCall({ name: "Write", input: { file_path: "/r/a.ts", content: "hello" } })]),
+        ]);
+        expect(model.files[0]).toMatchObject({ charsAdded: 5, charsRemoved: 0 });
+    });
+
+    test("failed edits contribute no char delta", () => {
+        const model = buildFilesTouched([
+            turn(1, [toolCall({ name: "Edit", input: { file_path: "/r/a.ts", old_string: "ab", new_string: "cdef" }, has_error: true })]),
+        ]);
+        expect(model.files[0]).toMatchObject({ charsAdded: 0, charsRemoved: 0, errors: 1 });
+    });
+
+    test("MultiEdit sums deltas across its edits", () => {
+        const model = buildFilesTouched([
+            turn(1, [toolCall({
+                name: "MultiEdit",
+                input: { file_path: "/r/a.ts", edits: [{ old_string: "a", new_string: "bb" }, { old_string: "ccc", new_string: "d" }] },
+            })]),
+        ]);
+        expect(model.files[0]).toMatchObject({ charsAdded: 3, charsRemoved: 4 });
+    });
+
     test("single-file session keeps full path minus leading slash", () => {
         const model = buildFilesTouched([turn(1, [read("/repo/src/a.ts")])]);
         expect(model.files[0]?.path).toBe("repo/src/a.ts");
