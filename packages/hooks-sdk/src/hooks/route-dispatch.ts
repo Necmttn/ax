@@ -54,12 +54,16 @@ type RoutingTableType = Schema.Schema.Type<typeof RoutingTable>;
 const DEFAULT_TABLE: RoutingTableType = {
   version: 1,
   classes: [
+    // Quality reviews and PR reviews deliberately have NO class: the main
+    // model is the Q&A reviewer in this workflow, so only the mechanical
+    // spec-compliance pass routes down. Mirrors ROUTING_CLASSES in
+    // apps/axctl/src/queries/dispatch-analytics.ts (compile-routing unifies).
     {
-      id: "mechanical-review",
-      pattern: "^(spec review|quality review|review pr)",
+      id: "spec-review",
+      pattern: "^spec review",
       flags: "i",
       suggest: "sonnet",
-      reason: "checklist compliance review",
+      reason: "spec-compliance checklist review",
     },
     {
       id: "search-locate",
@@ -77,10 +81,17 @@ const DEFAULT_TABLE: RoutingTableType = {
     },
     {
       id: "well-specified-impl",
-      pattern: "^(implement task|implement p[0-9]|regenerate|standardize)",
+      pattern: "^implement ",
       flags: "i",
       suggest: "sonnet",
       reason: "spec'd implementation",
+    },
+    {
+      id: "bulk-mechanical",
+      pattern: "^(write announcements|regenerate|standardize|merge main)",
+      flags: "i",
+      suggest: "sonnet",
+      reason: "bulk mechanical work",
     },
   ],
   agentTypes: {

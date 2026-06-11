@@ -63,7 +63,7 @@ describe("description matches default routing table", () => {
     expect(v._tag).toBe("Warn");
     if (v._tag === "Warn") {
       expect(v.message).toContain("sonnet");
-      expect(v.message).toContain("checklist compliance review");
+      expect(v.message).toContain("spec-compliance checklist review");
     }
   });
 
