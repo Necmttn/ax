@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { InspectTurnDto, ToolCallDto } from "@ax/lib/shared/dashboard-types";
-import { buildFilesTouched, buildFileStory, commonDirPrefix } from "./files-touched.ts";
+import { buildFilesTouched, buildFileStory, buildHunkPatch, commonDirPrefix } from "./files-touched.ts";
 
 const toolCall = (over: Partial<ToolCallDto> = {}): ToolCallDto => ({
     seq: 0,
@@ -166,5 +166,20 @@ describe("buildFileStory", () => {
             turn(1, [toolCall({ name: "Write", input: { file_path: "/r/a.ts", content: "hello" } })]),
         ], "/r/a.ts");
         expect(story[0]).toMatchObject({ oldString: null, newString: "hello", op: "write" });
+    });
+});
+
+describe("buildHunkPatch", () => {
+    test("replace block emits -old then +new under one hunk", () => {
+        const out = buildHunkPatch("src/a.ts", "old1\nold2", "new1");
+        expect(out).toContain("@@ -1,2 +1,1 @@");
+        expect(out).toContain("-old1\n-old2\n+new1");
+    });
+
+    test("pure add (Write) uses -0,0 old side", () => {
+        const out = buildHunkPatch("a.md", null, "x\ny");
+        expect(out).toContain("@@ -0,0 +1,2 @@");
+        const deletions = out.split("\n").filter((l) => l.startsWith("-") && !l.startsWith("---"));
+        expect(deletions).toHaveLength(0);
     });
 });

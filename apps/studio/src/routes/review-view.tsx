@@ -1,12 +1,13 @@
 import { useMemo, useState, type CSSProperties } from "react";
+import { getSingularPatch } from "@pierre/diffs";
+import { FileDiff } from "@pierre/diffs/react";
 import type { SessionInspectPayload } from "@ax/lib/shared/dashboard-types";
-import { HighlightedCode } from "../highlight/HighlightedCode.tsx";
-import { langFromPath } from "../highlight/lang.ts";
 import { ToolRowItem } from "./tool-row.tsx";
 import { compactChars, FilesTouchedTree } from "./files-touched-panel.tsx";
 import {
     buildFilesTouched,
     buildFileStory,
+    buildHunkPatch,
     type FileStoryEvent,
     type FileTouch,
 } from "./files-touched.ts";
@@ -26,24 +27,19 @@ const PANE_HEADER: CSSProperties = {
     zIndex: 1,
 };
 
-const CODE_BLOCK: CSSProperties = {
-    margin: 0,
-    padding: "6px 10px",
-    font: `11.5px/1.5 ${mono}`,
-    whiteSpace: "pre-wrap",
-    wordBreak: "break-word",
-    maxHeight: 240,
-    overflow: "auto",
-};
-
-/** One write event in the file's story: the replaced block over the inserted
- *  block, diff-tinted like the Edit args grid in tool cards. */
-function HunkCard({ event, lang, onOpenTranscript, onFocusTurn }: {
+/** One write event in the file's story, rendered as a real diff via
+ *  @pierre/diffs - word-level intraline highlights, proper +/- gutter. Line
+ *  numbers are hidden: tool calls carry fragments, not file offsets. */
+function HunkCard({ event, path, onOpenTranscript, onFocusTurn }: {
     readonly event: FileStoryEvent;
-    readonly lang: string | null;
+    readonly path: string;
     readonly onOpenTranscript: (seq: number) => void;
     readonly onFocusTurn: (seq: number) => void;
 }) {
+    const fileDiff = useMemo(
+        () => getSingularPatch(buildHunkPatch(path, event.oldString, event.newString)),
+        [path, event.oldString, event.newString],
+    );
     return (
         <div style={{
             margin: "8px 10px",
@@ -86,16 +82,21 @@ function HunkCard({ event, lang, onOpenTranscript, onFocusTurn }: {
                     open in transcript →
                 </button>
             </div>
-            {event.oldString ? (
-                <pre style={{ ...CODE_BLOCK, background: "color-mix(in srgb, var(--red) 7%, transparent)" }}>
-                    <HighlightedCode code={event.oldString} lang={lang} />
-                </pre>
-            ) : null}
-            {event.newString ? (
-                <pre style={{ ...CODE_BLOCK, background: "color-mix(in srgb, var(--green) 9%, transparent)" }}>
-                    <HighlightedCode code={event.newString} lang={lang} />
-                </pre>
-            ) : null}
+            <div style={{ maxHeight: 360, overflow: "auto", font: `11.5px/1.5 ${mono}` }}>
+                <FileDiff
+                    fileDiff={fileDiff}
+                    options={{
+                        themeType: "light",
+                        diffStyle: "unified",
+                        overflow: "wrap",
+                        lineDiffType: "word-alt",
+                        diffIndicators: "bars",
+                        disableLineNumbers: true,
+                        disableFileHeader: true,
+                        hunkSeparators: "simple",
+                    }}
+                />
+            </div>
         </div>
     );
 }
@@ -123,7 +124,6 @@ export function ReviewView({ data, onOpenTranscript }: {
         () => data.turns.filter((t) => touchingSeqs.has(t.seq)),
         [data.turns, touchingSeqs],
     );
-    const lang = selected ? langFromPath(selected.absPath) : null;
     const writes = story.filter((e) => e.op === "write");
 
     const focusTurn = (seq: number) => {
@@ -175,7 +175,7 @@ export function ReviewView({ data, onOpenTranscript }: {
                         <HunkCard
                             key={`${event.turnSeq}-${event.callIndex}-${i}`}
                             event={event}
-                            lang={lang}
+                            path={selected?.path ?? ""}
                             onOpenTranscript={onOpenTranscript}
                             onFocusTurn={focusTurn}
                         />

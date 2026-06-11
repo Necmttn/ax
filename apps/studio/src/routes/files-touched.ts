@@ -193,6 +193,22 @@ export interface FileStoryEvent {
 }
 
 /**
+ * Synthesize a unified-diff patch for one replace-block hunk so a real diff
+ * renderer (@pierre/diffs) can draw it. Line numbers are synthetic - tool
+ * calls carry fragments, not file offsets - so the renderer should hide them.
+ */
+export function buildHunkPatch(path: string, oldString: string | null, newString: string | null): string {
+    const oldLines = oldString ? oldString.split("\n") : [];
+    const newLines = newString ? newString.split("\n") : [];
+    const header = `@@ -${oldLines.length === 0 ? "0,0" : `1,${oldLines.length}`} +${newLines.length === 0 ? "0,0" : `1,${newLines.length}`} @@`;
+    const body = [
+        ...oldLines.map((l) => `-${l}`),
+        ...newLines.map((l) => `+${l}`),
+    ].join("\n");
+    return `diff --git a/${path} b/${path}\n--- a/${path}\n+++ b/${path}\n${header}\n${body}\n`;
+}
+
+/**
  * The ordered change story of one file: every tool call that touched
  * `absPath`, expanded so a MultiEdit contributes one event per inner edit.
  */

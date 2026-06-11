@@ -1496,7 +1496,7 @@ function MultiFileShareView(props: {
             {/* Keyed by file: the tree model is created once per mount, so it
                 must remount when the session on screen changes. Hidden in
                 review mode - the review sidebar IS this tree. */}
-            {data && view !== "review" ? <FilesTouchedPanel key={selectedFile} turns={data.turns} /> : null}
+            {data && view !== "review" ? <FilesTouchedPanel key={`files-${selectedFile}`} turns={data.turns} /> : null}
             {data || fileQuery.data?.session_timeline ? (
                 <div style={VIEW_TOGGLE_BAR_STYLE}>
                     {([
