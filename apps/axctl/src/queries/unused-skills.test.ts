@@ -8,6 +8,7 @@ import {
     UNUSED_SKILL_ROWS_SQL,
     UNUSED_NEVER_INVOKED_SQL,
     normalizeLastUsed,
+    formatLastUsed,
     mergeUnusedRows,
     fetchUnusedSkills,
 } from "./unused-skills.ts";
@@ -49,8 +50,9 @@ describe("unused-skills SQL", () => {
         expect(UNUSED_NEVER_INVOKED_SQL).toContain("deleted_at IS NONE");
     });
 
-    test("skill rows query is a cheap projection", () => {
+    test("skill rows query is a cheap projection that excludes tombstones", () => {
         expect(UNUSED_SKILL_ROWS_SQL).toContain("SELECT id, name, scope FROM skill");
+        expect(UNUSED_SKILL_ROWS_SQL).toContain("deleted_at IS NONE");
     });
 });
 
@@ -75,6 +77,15 @@ describe("normalizeLastUsed", () => {
         expect(normalizeLastUsed({ toJSON: () => 42 })).toBeNull();
         expect(normalizeLastUsed(12345)).toBeNull();
         expect(normalizeLastUsed(true)).toBeNull();
+    });
+});
+
+describe("formatLastUsed", () => {
+    test("ISO timestamp passes through", () => {
+        expect(formatLastUsed("2026-06-01T00:00:00.000Z")).toBe("2026-06-01T00:00:00.000Z");
+    });
+    test("null (never used) renders the shared sentinel", () => {
+        expect(formatLastUsed(null)).toBe("never");
     });
 });
 
@@ -108,6 +119,22 @@ describe("mergeUnusedRows", () => {
             neverInvoked: [],
         });
         expect(rows).toEqual([]);
+    });
+
+    test("drops tombstoned skills with old invocations (excluded from the skill-rows scan)", () => {
+        // A deleted skill's `invoked` edges survive, so it still shows up in
+        // the summary scan - but UNUSED_SKILL_ROWS_SQL filters it out, which
+        // makes the merge drop it like any other orphan group.
+        const rows = mergeUnusedRows({
+            recent: [],
+            summary: [
+                { skill_id: "skill:dead", total_inv: 12, last_used: "2025-12-01T00:00:00.000Z" },
+                { skill_id: "skill:b", total_inv: 9, last_used: "2026-04-01T00:00:00.000Z" },
+            ],
+            skills, // skill:dead absent - tombstoned rows never reach the merge
+            neverInvoked: [],
+        });
+        expect(rows.map((r) => r.name)).toEqual(["beta"]);
     });
 
     test("appends never-invoked skills with zero totals and null last_used", () => {

@@ -98,6 +98,9 @@ describe("fetchSkillStats", () => {
     });
 
     test("missing skill yields null skill and zeroed invocations", async () => {
+        // `skill === null` doubles as the existence signal: cmdStats folds
+        // its unknown-skill error onto this instead of a separate
+        // skillExists roundtrip.
         const db = makeMockDb([[null, { skill: null, invocations: {}, recent_sessions: [] }]]);
         const result = await runWithMock(db, fetchSkillStats("ghost"));
         expect(result.skill).toBeNull();

@@ -7,7 +7,7 @@
  */
 import { Effect } from "effect";
 import { SurrealClient } from "@ax/lib/db";
-import { dateField, numberFieldOrZero, stringField } from "@ax/lib/shared/row-fields";
+import { dateField, countField, stringField } from "@ax/lib/shared/row-fields";
 import type {
     SkillDetailPayload,
     SkillPair,
@@ -120,7 +120,7 @@ export const mapSkillPairRow = (raw: unknown): SkillPair | null => {
     if (!partner) return null;
     return {
         partner,
-        count: numberFieldOrZero(row, "count"),
+        count: countField(row, "count"),
         last_seen: dateField(row, "last_seen"),
     };
 };
@@ -157,9 +157,9 @@ export const fetchSkillDetail = Effect.fn("queries.fetchSkillDetail")(
             description: skill ? stringField(skill, "description") : null,
             dir_path: skill ? stringField(skill, "dir_path") : null,
             invocations: {
-                total: numberFieldOrZero(invocations, "total"),
-                d7: numberFieldOrZero(invocations, "d7"),
-                d30: numberFieldOrZero(invocations, "d30"),
+                total: countField(invocations, "total"),
+                d7: countField(invocations, "d7"),
+                d30: countField(invocations, "d30"),
                 last: dateField(invocations, "last"),
             },
             recent: recent.map(mapSkillRecentRow).filter((r): r is SkillRecentInvocation => r !== null),

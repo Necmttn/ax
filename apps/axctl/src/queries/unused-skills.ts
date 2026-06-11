@@ -40,8 +40,11 @@ SELECT
 FROM invoked
 GROUP BY out;`;
 
-/** Cheap id → (name, scope) lookup, merged in TS. */
-export const UNUSED_SKILL_ROWS_SQL = `SELECT id, name, scope FROM skill;`;
+/** Cheap id → (name, scope) lookup, merged in TS. Tombstoned skills
+ *  (deleted_at set) are excluded here - their old `invoked` edges survive
+ *  deletion, so without this filter they'd resurface in the unused listing.
+ *  Mirrors the never-invoked branch below. */
+export const UNUSED_SKILL_ROWS_SQL = `SELECT id, name, scope FROM skill WHERE deleted_at IS NONE;`;
 
 /** Skills with literally zero invocations don't show up in the GROUP BY
  *  scan; pull them straight from the skill table so the "never used" rows
@@ -66,6 +69,12 @@ export interface UnusedSkillRow {
  */
 export const normalizeLastUsed = (v: unknown): string | null => dateField({ v }, "v");
 
+/** Display label for a normalized `last_used`: the ISO timestamp, or the
+ *  shared "never" sentinel when the skill was never invoked. Lives at the
+ *  query-module altitude so every consumer renders the same label instead
+ *  of reconstructing it. */
+export const formatLastUsed = (lastUsed: string | null): string => lastUsed ?? "never";
+
 export interface UnusedScanRows {
     readonly recent: ReadonlyArray<Record<string, unknown>>;
     readonly summary: ReadonlyArray<Record<string, unknown>>;
@@ -75,7 +84,8 @@ export interface UnusedScanRows {
 
 /** Anti-join the recent-active set out of the bulk summary, drop orphan
  *  invocation groups (no skill row - matches the original FROM-skill
- *  behaviour), append never-invoked skills, sort by total then name. */
+ *  behaviour; tombstoned skills fall out here too since the skill-rows scan
+ *  excludes them), append never-invoked skills, sort by total then name. */
 export const mergeUnusedRows = (input: UnusedScanRows): UnusedSkillRow[] => {
     const recentIds = new Set<string>(
         input.recent.map((r) => String(r.skill_id ?? "")),

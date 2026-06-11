@@ -11,7 +11,7 @@
  */
 import { Effect } from "effect";
 import { SurrealClient } from "@ax/lib/db";
-import { dateField, numberFieldOrZero } from "@ax/lib/shared/row-fields";
+import { dateField, countField } from "@ax/lib/shared/row-fields";
 import { prettifyProjectSlug } from "@ax/lib/shared/project-slug";
 import { skillWithInvocationsSql } from "./skill-invocations-sql.ts";
 
@@ -103,10 +103,10 @@ export const fetchSkillStats = Effect.fn("queries.fetchSkillStats")(
         return {
             skill,
             invocations: {
-                total: numberFieldOrZero(invocations, "total"),
-                d7: numberFieldOrZero(invocations, "d7"),
-                d30: numberFieldOrZero(invocations, "d30"),
-                d90: numberFieldOrZero(invocations, "d90"),
+                total: countField(invocations, "total"),
+                d7: countField(invocations, "d7"),
+                d30: countField(invocations, "d30"),
+                d90: countField(invocations, "d90"),
                 last: dateField(invocations, "last"),
             },
             recent_sessions: dedupeRecentSessions(recentRaw),

@@ -19,7 +19,7 @@ import {
     buildRolesNext,
 } from "../../nav/next-links.ts";
 import { fetchSkillStats } from "../../queries/skill-stats.ts";
-import { fetchUnusedSkills } from "../../queries/unused-skills.ts";
+import { fetchUnusedSkills, formatLastUsed } from "../../queries/unused-skills.ts";
 import { skillsConfigSubcommands } from "../../skills/cli.ts";
 import { printNextLinks } from "../next-format.ts";
 import { catchDbErrorAndExit, stderrExit, wantsJsonFlag } from "../output.ts";
@@ -203,15 +203,17 @@ const cmdStats = (input: StatsInput) =>
         }
         const fs = yield* FileSystem.FileSystem;
         const path = yield* Path.Path;
-        const exists = yield* skillExists(name);
-        if (!exists) {
+        const payload = yield* fetchSkillStats(name);
+        // Issue #40 existence check, folded into the stats fetch: a null
+        // `payload.skill` already means "no such skill", so the separate
+        // skillExists roundtrip is redundant here.
+        if (payload.skill === null) {
             const hint = name.length > 20 ? name.slice(0, 20) : name;
             console.error(
                 `axctl: no skill named "${name}". try: axctl skills search "${hint}"`,
             );
             process.exit(2);
         }
-        const payload = yield* fetchSkillStats(name);
 
         // Read body lazily from disk via dir_path (DB no longer stores body -
         // multi-file skills + cache-staleness make on-disk the canonical source).
@@ -287,7 +289,7 @@ const cmdUnused = (input: UnusedInput) =>
         const unused = yield* fetchUnusedSkills({ days });
         let hiddenScoped = 0;
         for (const r of unused) {
-            const last = r.last_used ?? "never";
+            const last = formatLastUsed(r.last_used);
             const agents = agentScope.get(r.name);
             if (agents && agents.length > 0) {
                 // Agent-scoped: not global dead weight. Hide unless asked,
