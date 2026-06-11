@@ -1,0 +1,32 @@
+/* apps/studio/src/styles/session-tokens.css
+   Sessions-list design system - one hue per meaning (see
+   docs/superpowers/specs/2026-06-11-sessions-list-remakeover-design.md).
+   red = failure/friction/revert/delete ONLY; green = pass/landed/add/live
+   ONLY; amber = elevated-not-failed ONLY; slate ramp = phases; violet =
+   subagents ONLY; source hues = badges ONLY; selection/open state =
+   monochrome ink. */
+:root {
+  --sx-ink-900: #1c2127;
+  --sx-ink-600: #555c66;
+  --sx-ink-500: #6e7681;
+  --sx-ink-300: #b6bcc4;
+  --sx-line-200: #e4e7eb;
+  --sx-line-100: #f0f2f4;
+  --sx-tint-50: #f7f8fa;
+  --sx-red-700: #b13434;
+  --sx-red-300: #e39891;
+  --sx-red-100: #faeceb;
+  --sx-green-700: #1f7a3f;
+  --sx-green-300: #8fc6a0;
+  --sx-green-100: #e8f3ec;
+  --sx-amber-700: #8f6514;
+  --sx-amber-500: #d99a32;
+  --sx-amber-100: #faf1dc;
+  --sx-phase-plan: #c9d4e0;
+  --sx-phase-exec: #8da2b6;
+  --sx-phase-review: #5e7590;
+  --sx-phase-idle: #ececec;
+  --sx-violet-500: #a193cb;
+  --sx-violet-700: #6f5fa3;
+  --sx-chart-line: #9aa7b6;
+}
