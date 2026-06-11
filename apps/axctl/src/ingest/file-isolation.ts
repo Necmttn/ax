@@ -43,6 +43,15 @@ export interface FileFailure {
     readonly message: string;
 }
 
+/** Cumulative failure state passed to {@link FileFailureCollectorOptions.onFailure}
+ *  after each recorded failure: `total` is uncapped, `failures` is the detail
+ *  list capped at {@link DETAIL_CAP}. Each snapshot supersedes the previous
+ *  one, so consumers can simply keep the latest. */
+export interface FileFailureSnapshot {
+    readonly total: number;
+    readonly failures: ReadonlyArray<FileFailure>;
+}
+
 /** Failures whose detail we keep; beyond this only the count grows. */
 const DETAIL_CAP = 25;
 
@@ -87,6 +96,13 @@ export interface FileFailureCollectorOptions {
      *  "session" (SQLite-store providers). Defaults to "file". */
     readonly unit?: string;
     readonly stormThreshold?: number;
+    /**
+     * Invoked after each recorded failure with the cumulative snapshot
+     * (count + capped detail list). The ingest stages use this to publish the
+     * skipped-file list onto the live progress stream while the stage runs;
+     * leaving it unset keeps the collector log-only (CLI behavior unchanged).
+     */
+    readonly onFailure?: (snapshot: FileFailureSnapshot) => Effect.Effect<void>;
 }
 
 export const makeFileFailureCollector = (
@@ -117,6 +133,9 @@ export const makeFileFailureCollector = (
                         tag: failureTag(err),
                         message: failureMessage(err),
                     });
+                    if (opts.onFailure) {
+                        yield* opts.onFailure({ total, failures: [...failures] });
+                    }
                     if (consecutive >= stormThreshold) {
                         return yield* new DbError({
                             operation: "query",

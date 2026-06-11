@@ -7,7 +7,7 @@ import { SkillName } from "@ax/lib/brands";
 import { resolveSkillName, skillRecordKey } from "@ax/lib/skill-id";
 import { AppLayer } from "@ax/lib/layers";
 import { BaseStageStats, IngestContext, sinceDaysFromCtx, StageMeta } from "./stage/types.ts";
-import { annotateStageProgress } from "./stage/runner.ts";
+import { annotateStageProgress, stageFileFailureAnnotator } from "./stage/runner.ts";
 import type { StageDef } from "./stage/registry.ts";
 import {
     buildPlanSnapshotStatements,
@@ -64,7 +64,7 @@ import {
 } from "@ax/lib/shared/surql";
 import { safeKeyPart } from "@ax/lib/shared/derive-keys";
 import { estimateCost, normalizeModelName } from "./model-pricing.ts";
-import { makeFileFailureCollector } from "./file-isolation.ts";
+import { type FileFailureSnapshot, makeFileFailureCollector } from "./file-isolation.ts";
 import {
     extractClaudeCompaction,
     type CompactionWrite,
@@ -1581,6 +1581,10 @@ interface IngestOpts {
     sinceDays: number | undefined;
     project: string | undefined;
     onProgress: (counts: Record<string, number>) => Effect.Effect<void>;
+    /** Cumulative skipped-file snapshots from the failure collector (see
+     *  file-isolation.ts). The stage wires `stageFileFailureAnnotator` here so
+     *  the dashboard Live tab can list which files were skipped and why. */
+    onFileFailures: (snapshot: FileFailureSnapshot) => Effect.Effect<void>;
     /** Hard cap on transcript files processed - a backstop for `ingest --dry-run`
      *  calibration (paired with `deadlineMs`). */
     limit: number | undefined;
@@ -1737,7 +1741,10 @@ export const ingestTranscripts = Effect.fn("transcripts.ingest")(
             forceEnv: "AX_REDERIVE_CLAUDE",
         });
 
-        const failures = makeFileFailureCollector({ source: "claude" });
+        const failures = makeFileFailureCollector({
+            source: "claude",
+            ...(opts.onFileFailures ? { onFailure: opts.onFileFailures } : {}),
+        });
         yield* Effect.forEach(candidates.map((candidate, index) => ({ candidate, index })), ({ candidate, index }) => Effect.gen(function* () {
             // Time-box (dry-run calibration): once the deadline passes, start no
             // new files. In-flight ones finish, so the sample is whatever
@@ -1945,12 +1952,16 @@ export const claudeStage: StageDef<ClaudeStats, SurrealClient | AxConfig | FileS
     run: Effect.fn(function* (ctx: IngestContext) {
         const t0 = Date.now();
         const sinceDays = sinceDaysFromCtx(ctx);
+        // Capture the stage span HERE (current span = the runner's
+        // LiveTrace.step span) so failure snapshots emitted from deep inside
+        // per-file child spans still key to this stage on the live stream.
+        const onFileFailures = yield* stageFileFailureAnnotator;
         // The vanished-transcript case is caught + skipped inside
         // `ingestTranscripts`; any PlatformError that escapes here is a
         // genuine FS failure (e.g. an unreadable transcripts root or a
         // non-NotFound stat/stream error) so it dies as a defect rather
         // than masquerading as a recoverable DbError.
-        const result = yield* ingestTranscripts({ sinceDays, project: ctx.claudeProject, onProgress: annotateStageProgress }).pipe(
+        const result = yield* ingestTranscripts({ sinceDays, project: ctx.claudeProject, onProgress: annotateStageProgress, onFileFailures }).pipe(
             Effect.catchTag("PlatformError", (e) => Effect.die(e)),
         );
         return ClaudeStats.make({

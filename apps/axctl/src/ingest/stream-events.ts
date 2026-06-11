@@ -1,9 +1,16 @@
 import type { TraceEvent } from "@ax/lib/live-traces/types";
-import type { IngestStreamEvent } from "@ax/lib/shared/ingest-stream-events";
+import type { IngestFileFailure, IngestStreamEvent } from "@ax/lib/shared/ingest-stream-events";
 
 // Re-export so existing axctl importers (`from ".../ingest/stream-events.ts"`)
 // keep resolving the type unchanged after the contract moved to @ax/lib/shared.
 export type { IngestStreamEvent };
+
+/** Span-attribute key carrying a stage's cumulative skipped-file snapshot
+ *  (JSON-encoded {@link IngestFileFailure} list + uncapped total). Producer:
+ *  `stageFileFailureAnnotator` (stage/runner.ts); consumer: the
+ *  `attribute:<key>` SpanEvent branch below. Non-numeric, so the CLI progress
+ *  transports' count parsers ignore it by construction. */
+export const INGEST_FILE_FAILURES_KEY = "ingest.fileFailures";
 
 const runIdOf = (traceId: string): string => traceId.replace(/^ingest:/, "");
 
@@ -34,6 +41,33 @@ const firstFinite = (...vs: Array<number | undefined>): number | undefined => {
     return undefined;
 };
 
+/** Decode the JSON snapshot from an `attribute:ingest.fileFailures` SpanEvent.
+ *  Defensive: a malformed payload yields null (the event is dropped) rather
+ *  than crashing the transport. */
+const readFileFailures = (
+    attributes: Record<string, unknown> | undefined,
+): { total: number; failures: IngestFileFailure[] } | null => {
+    const raw = attributes?.value;
+    if (typeof raw !== "string") return null;
+    try {
+        const parsed: unknown = JSON.parse(raw);
+        if (typeof parsed !== "object" || parsed === null) return null;
+        const { total, failures } = parsed as { total?: unknown; failures?: unknown };
+        if (typeof total !== "number" || !Number.isFinite(total) || total <= 0) return null;
+        if (!Array.isArray(failures)) return null;
+        const details: IngestFileFailure[] = [];
+        for (const f of failures) {
+            if (typeof f !== "object" || f === null) return null;
+            const { filePath, tag, message } = f as Record<string, unknown>;
+            if (typeof filePath !== "string" || typeof tag !== "string" || typeof message !== "string") return null;
+            details.push({ filePath, tag, message });
+        }
+        return { total, failures: details };
+    } catch {
+        return null;
+    }
+};
+
 /** Translate a live-trace event into an ingest progress event, or null. */
 export function ingestStreamEventFromTrace(
     event: TraceEvent,
@@ -49,6 +83,20 @@ export function ingestStreamEventFromTrace(
             return { kind: "stage_started", runId: runIdOf(event.traceId), stage: event.name };
         }
         case "SpanEvent": {
+            // Skipped-file snapshot: forward as its own event so the Live tab
+            // can render the per-stage failure list (count climbs live; replay
+            // reconverges on the final cumulative snapshot).
+            if (event.name === `attribute:${INGEST_FILE_FAILURES_KEY}`) {
+                const snapshot = readFileFailures(event.attributes);
+                if (!snapshot) return null;
+                return {
+                    kind: "stage_file_failures",
+                    runId: runIdOf(event.traceId),
+                    stage: ctx.spanNames.get(event.spanId) ?? event.spanId,
+                    total: snapshot.total,
+                    failures: snapshot.failures,
+                };
+            }
             // Accumulate counts; emit a stage_progress only once current + total
             // are both known (a determinate bar), otherwise stay silent.
             const parsed = readCount(event.name, event.attributes);

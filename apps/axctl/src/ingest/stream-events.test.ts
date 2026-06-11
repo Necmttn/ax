@@ -31,6 +31,55 @@ describe("ingest stream events", () => {
         expect(ingestStreamEventFromTrace({ _tag: "SpanEvent", traceId: "ingest:x", spanId: "s", name: "n" } as never, { spanNames: new Map() })).toBeNull();
     });
 
+    test("maps an attribute:ingest.fileFailures SpanEvent to stage_file_failures, keyed to the stage span", () => {
+        const names = new Map([["s1", "claude"]]);
+        const snapshot = {
+            total: 27,
+            failures: [{ filePath: "/p/a.jsonl", tag: "DbError", message: "boom" }],
+        };
+        const ev = ingestStreamEventFromTrace(
+            {
+                _tag: "SpanEvent",
+                traceId: "ingest:run123",
+                spanId: "s1",
+                name: "attribute:ingest.fileFailures",
+                attributes: { value: JSON.stringify(snapshot) },
+            } as never,
+            { spanNames: names },
+        );
+        expect(ev).toEqual({
+            kind: "stage_file_failures",
+            runId: "run123",
+            stage: "claude",
+            total: 27,
+            failures: [{ filePath: "/p/a.jsonl", tag: "DbError", message: "boom" }],
+        } as IngestStreamEvent);
+    });
+
+    test("drops malformed or empty fileFailures payloads instead of crashing", () => {
+        const cases: unknown[] = [
+            undefined,
+            42,
+            "not json",
+            JSON.stringify({ total: 0, failures: [] }),
+            JSON.stringify({ total: 2 }),
+            JSON.stringify({ total: 2, failures: [{ filePath: 1, tag: "x", message: "y" }] }),
+        ];
+        for (const value of cases) {
+            const ev = ingestStreamEventFromTrace(
+                {
+                    _tag: "SpanEvent",
+                    traceId: "ingest:run123",
+                    spanId: "s1",
+                    name: "attribute:ingest.fileFailures",
+                    attributes: { value },
+                } as never,
+                { spanNames: new Map([["s1", "claude"]]) },
+            );
+            expect(ev).toBeNull();
+        }
+    });
+
     test("emits stage_progress once current + total are both known, with rate + eta", () => {
         const ctx = {
             spanNames: new Map<string, string>(),

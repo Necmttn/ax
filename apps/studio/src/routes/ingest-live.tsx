@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, ApiError } from "../api.ts";
 import { POLL_INTERVAL_MS, shouldPollFallback } from "../poll-fallback.ts";
-import { useIngestStream, type StageStatus } from "../use-ingest-stream.ts";
+import { useIngestStream, type StageFileFailures, type StageStatus } from "../use-ingest-stream.ts";
 
 /**
  * Live ingest view over Durable Streams.
@@ -214,26 +214,59 @@ function StageChecklist({ run }: { run: ReturnType<typeof useIngestStream> }) {
                 const status = run.stages[stage] ?? "running";
                 const p = run.progress[stage];
                 const pct = p && p.total > 0 ? Math.min(100, Math.round((p.current / p.total) * 100)) : null;
+                const skipped = run.fileFailures[stage];
                 return (
                     <li key={stage} className={`ingest-stage ${status}`}>
-                        <span className="ingest-stage-glyph">{STAGE_GLYPH[status]}</span>
-                        <span className="ingest-stage-name">{stage}</span>
-                        {status === "running" && p && pct !== null ? (
-                            <span className="ingest-stage-bar" aria-label={`${pct}%`}>
-                                <span className="ingest-stage-bar-fill" style={{ width: `${pct}%` }} />
+                        <div className="ingest-stage-row">
+                            <span className="ingest-stage-glyph">{STAGE_GLYPH[status]}</span>
+                            <span className="ingest-stage-name">{stage}</span>
+                            {status === "running" && p && pct !== null ? (
+                                <span className="ingest-stage-bar" aria-label={`${pct}%`}>
+                                    <span className="ingest-stage-bar-fill" style={{ width: `${pct}%` }} />
+                                </span>
+                            ) : null}
+                            <span className="ingest-stage-status">
+                                {status === "running" && p && pct !== null
+                                    ? `${p.current.toLocaleString()}/${p.total.toLocaleString()} · ${pct}%${
+                                        p.ratePerSec > 0 ? ` · ${p.ratePerSec.toFixed(1)}/s` : ""
+                                    }${p.etaLeftMs !== null ? ` · ~${formatEtaLeft(p.etaLeftMs)} left` : ""}`
+                                    : status}
                             </span>
-                        ) : null}
-                        <span className="ingest-stage-status">
-                            {status === "running" && p && pct !== null
-                                ? `${p.current.toLocaleString()}/${p.total.toLocaleString()} · ${pct}%${
-                                    p.ratePerSec > 0 ? ` · ${p.ratePerSec.toFixed(1)}/s` : ""
-                                }${p.etaLeftMs !== null ? ` · ~${formatEtaLeft(p.etaLeftMs)} left` : ""}`
-                                : status}
-                        </span>
+                        </div>
+                        {skipped && skipped.total > 0 ? <SkippedFiles skipped={skipped} /> : null}
                     </li>
                 );
             })}
         </ul>
+    );
+}
+
+/** Collapsed "N files skipped" row under a stage; expands to the failure
+ *  detail list (path + error). The detail list is capped upstream (25), so a
+ *  larger total gets an "and N more" overflow line. Skipped files retry on
+ *  the next ingest run - they are warnings, not stage errors. */
+function SkippedFiles({ skipped }: { skipped: StageFileFailures }) {
+    const overflow = skipped.total - skipped.failures.length;
+    return (
+        <details className="ingest-stage-skipped">
+            <summary>
+                {skipped.total.toLocaleString()} file{skipped.total === 1 ? "" : "s"} skipped
+                (retry next run)
+            </summary>
+            <ul className="ingest-stage-skipped-list">
+                {skipped.failures.map((f) => (
+                    <li key={f.filePath}>
+                        <code className="ingest-stage-skipped-path">{f.filePath}</code>
+                        <span className="ingest-stage-skipped-error">
+                            [{f.tag}] {f.message}
+                        </span>
+                    </li>
+                ))}
+                {overflow > 0 ? (
+                    <li className="ingest-stage-skipped-overflow">…and {overflow.toLocaleString()} more</li>
+                ) : null}
+            </ul>
+        </details>
     );
 }
 
