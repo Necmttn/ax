@@ -1,19 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import { Effect } from "effect";
-import { makeTestSurrealClient } from "@ax/lib/testing/surreal";
+import { makeMockDb } from "@ax/lib/testing/surreal";
 import { RECALL_COUNT_SQL, RECALL_TURNS_SQL } from "../queries/recall.ts";
 import { fetchRecall } from "./recall.ts";
-
-// ---------------------------------------------------------------------------
-// Minimal mock DB (mirrors recall.commit.test.ts pattern)
-// ---------------------------------------------------------------------------
-
-function makeMockDb(queryResponses: Map<string, unknown[][]> = new Map()) {
-    return makeTestSurrealClient({
-        denyWrites: true,
-        routes: [...queryResponses].map(([match, rows]) => ({ match, rows: rows as unknown[] })),
-    }).layer;
-}
 
 describe("recall pagination", () => {
     test("RECALL_TURNS_SQL uses parameterised offset/limit", () => {
@@ -40,7 +29,7 @@ describe("recall back-compat: sources=turn (default)", () => {
         const responses = new Map<string, unknown[][]>([
             ["count() AS total", [[{ total: 7 }]]],
         ]);
-        const layer = makeMockDb(responses);
+        const { layer } = makeMockDb(responses);
 
         const result = await Effect.runPromise(
             // No sources specified - defaults to ["turn"]

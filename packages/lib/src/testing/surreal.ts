@@ -199,3 +199,65 @@ export const makeTestSurrealClient = (
         files,
     };
 };
+
+// ---------------------------------------------------------------------------
+// makeMockDb / runWithMock - the canonical query-test pattern
+// ---------------------------------------------------------------------------
+
+/**
+ * Responses for {@link makeMockDb}:
+ * - an **array** answers `query` calls positionally (`responses[i]` answers
+ *   the i-th call), or
+ * - a **Map** routes by SQL substring → rows (insertion order, first match
+ *   wins; unmatched queries resolve `[[]]`).
+ */
+export type MockDbResponses =
+    | ReadonlyArray<TestSurrealRows>
+    | ReadonlyMap<string, TestSurrealResponder>;
+
+export interface MockDbOptions {
+    /**
+     * Mock DBs are read-only by default: any `upsert`/`relate`/`putFile`
+     * fails loudly. Pass `false` for write-path tests (writes are then
+     * recorded in `upserts`/`relates`/`files`).
+     */
+    readonly denyWrites?: boolean;
+}
+
+/**
+ * Canonical mock `SurrealClient` for query tests - use this instead of
+ * hand-rolling a `SurrealClientShape` or a local `makeMockDb` in new test
+ * modules (issue #244).
+ *
+ * ```ts
+ * import { makeMockDb, runWithMock } from "@ax/lib/testing/surreal";
+ *
+ * // Positional: responses[i] answers the i-th query() call.
+ * const db = makeMockDb([[[{ total: 7 }]]]);
+ * const result = await runWithMock(db, fetchRecall({ q: "auth" }));
+ *
+ * // Routed: SQL-substring → rows.
+ * const { calls, layer } = makeMockDb(new Map([["count() AS total", [[{ total: 7 }]]]]));
+ * ```
+ *
+ * Returns the full {@link TestSurrealClient}, so call sites can destructure
+ * whatever they need (`layer`, `client`, `calls`, `captured`, `upserts`, ...).
+ * Anything fancier (dynamic responders, fallbacks, raw escape hatch) should
+ * call {@link makeTestSurrealClient} directly.
+ */
+export const makeMockDb = (
+    responses: MockDbResponses = [],
+    opts: MockDbOptions = {},
+): TestSurrealClient =>
+    makeTestSurrealClient({
+        denyWrites: opts.denyWrites ?? true,
+        ...(responses instanceof Map
+            ? { routes: [...responses].map(([match, rows]) => ({ match, rows })) }
+            : { responses: responses as ReadonlyArray<TestSurrealRows> }),
+    });
+
+/** Run an Effect against a {@link makeMockDb} mock's `SurrealClient` layer. */
+export const runWithMock = <A, E>(
+    db: TestSurrealClient,
+    effect: Effect.Effect<A, E, SurrealClient>,
+): Promise<A> => Effect.runPromise(effect.pipe(Effect.provide(db.layer)));

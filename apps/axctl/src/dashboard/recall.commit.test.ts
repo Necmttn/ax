@@ -6,7 +6,7 @@
  */
 import { describe, expect, test } from "bun:test";
 import { Effect } from "effect";
-import { makeTestSurrealClient } from "@ax/lib/testing/surreal";
+import { makeMockDb } from "@ax/lib/testing/surreal";
 import {
     RECALL_COMMITS_SQL,
     RECALL_SKILLS_SQL,
@@ -14,18 +14,6 @@ import {
     RECALL_SKILLS_COUNT_SQL,
 } from "../queries/recall.ts";
 import { fetchRecall } from "./recall.ts";
-
-// ---------------------------------------------------------------------------
-// Mock DB helper (mirrors derive-claude-subagents.test.ts pattern)
-// ---------------------------------------------------------------------------
-
-function makeMockDb(queryResponses: Map<string, unknown[][]> = new Map()) {
-    const tc = makeTestSurrealClient({
-        denyWrites: true,
-        routes: [...queryResponses].map(([match, rows]) => ({ match, rows: rows as unknown[] })),
-    });
-    return { calls: tc.calls, layer: tc.layer };
-}
 
 // ---------------------------------------------------------------------------
 // SQL shape tests (unit - no DB mock needed)
