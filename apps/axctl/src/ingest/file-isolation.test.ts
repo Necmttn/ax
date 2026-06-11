@@ -71,6 +71,18 @@ describe("makeFileFailureCollector", () => {
         expect(c.count()).toBe(0);
     });
 
+    test("a custom unit noun labels the storm abort message", async () => {
+        // SQLite-store providers (opencode/cursor) isolate per SESSION, not
+        // per file (#261); the abort message must say so.
+        const c = makeFileFailureCollector({ source: "test", unit: "session", stormThreshold: 2 });
+        await run(c.isolate("/store.db#s1", Effect.fail(queryError("x"))));
+        const second = await run(c.isolate("/store.db#s2", Effect.fail(queryError("x"))));
+        expect(Exit.isFailure(second)).toBe(true);
+        if (Exit.isFailure(second)) {
+            expect(String(second.cause)).toContain("2 consecutive sessions failed");
+        }
+    });
+
     test("report is a no-op at zero failures and logs otherwise", async () => {
         const clean = makeFileFailureCollector({ source: "test" });
         await Effect.runPromise(clean.report);
