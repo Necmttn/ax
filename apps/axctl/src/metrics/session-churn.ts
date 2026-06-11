@@ -1,3 +1,5 @@
+import { cleanSessionId } from "./util.ts";
+
 export interface ChurnEvent {
     readonly session: string;
     readonly source: string | null;
@@ -119,6 +121,7 @@ export const normalizeCheckFamily = (raw: string | null): string | null => {
 
     if (/\boxlint\b/.test(text) || /\boxc\b/.test(text)) return "oxlint";
     if (/\beslint\b/.test(text)) return "eslint";
+    if (/\blint\b/.test(text)) return "lint";
     if (/\b(tsc|typecheck|tsgo)\b/.test(text)) return "typecheck";
     if (/\b(bun\s+test|vitest|jest|playwright|test)\b/.test(text)) return "test";
     if (/\bbuild\b/.test(text)) return "build";
@@ -137,21 +140,23 @@ export const computeSessionChurn = (
     const generatedAt = dateishToIso(options.generatedAt ?? new Date());
     const states = new Map<string, MutableSessionState>();
     const countedRepairEditKeys = new Set<string>();
+    const normalizedLanded = normalizeLandedMap(landedBySession);
+    const normalizedHealth = normalizeHealthMap(healthBySession);
 
-    for (const session of landedBySession.keys()) {
-        getState(states, session, null, landedBySession, healthBySession);
+    for (const session of normalizedLanded.keys()) {
+        getState(states, session, null, normalizedLanded, normalizedHealth);
     }
-    for (const session of healthBySession.keys()) {
-        getState(states, session, null, landedBySession, healthBySession);
+    for (const session of normalizedHealth.keys()) {
+        getState(states, session, null, normalizedLanded, normalizedHealth);
     }
 
     const sorted = events
-        .map((event, index): IndexedChurnEvent => ({ ...event, index }))
+        .map((event, index): IndexedChurnEvent => ({ ...event, session: normalizeSessionKey(event.session), index }))
         .filter((event) => sourceFilter === null || event.source === sourceFilter)
         .sort((a, b) => a.session.localeCompare(b.session) || a.tsMs - b.tsMs || a.index - b.index);
 
     for (const event of sorted) {
-        const state = getState(states, event.session, event.source, landedBySession, healthBySession);
+        const state = getState(states, event.session, event.source, normalizedLanded, normalizedHealth);
         if (state.source === null && event.source !== null) state.source = event.source;
 
         if (event.kind === "edit") {
@@ -192,6 +197,7 @@ export const computeSessionChurn = (
 
     const rowsWithChecks = [...states.values()]
         .map((state) => ({ row: freezeRow(state), checkFailures: state.checkFailures }))
+        .filter(({ row }) => hasVerificationSignal(row))
         .filter(({ row }) => sourceFilter === null || row.source === sourceFilter);
 
     const aggregates = buildAggregates(rowsWithChecks);
@@ -286,6 +292,41 @@ const getState = (
     states.set(session, state);
     return state;
 };
+
+const normalizeLandedMap = (input: ReadonlyMap<string, ChurnLines>): Map<string, ChurnLines> => {
+    const out = new Map<string, ChurnLines>();
+    for (const [session, lines] of input) {
+        const key = normalizeSessionKey(session);
+        const cur = out.get(key) ?? { added: 0, removed: 0 };
+        out.set(key, {
+            added: cur.added + nonNegative(lines.added),
+            removed: cur.removed + nonNegative(lines.removed),
+        });
+    }
+    return out;
+};
+
+const normalizeHealthMap = (
+    input: ReadonlyMap<string, string | null | SessionHealthChurnInput>,
+): Map<string, string | null | SessionHealthChurnInput> => {
+    const out = new Map<string, string | null | SessionHealthChurnInput>();
+    for (const [session, health] of input) {
+        const key = normalizeSessionKey(session);
+        const existing = out.get(key);
+        if (existing === undefined || taskLabelOf(existing) === null) {
+            out.set(key, health);
+        }
+    }
+    return out;
+};
+
+const normalizeSessionKey = (session: string): string => cleanSessionId(session);
+
+const hasVerificationSignal = (row: SessionChurnRow): boolean =>
+    row.verificationFailures > 0
+    || row.episodes > 0
+    || row.repairLinesAdded > 0
+    || row.repairLinesRemoved > 0;
 
 const freezeRow = (state: MutableSessionState): SessionChurnRow => ({
     session: state.session,

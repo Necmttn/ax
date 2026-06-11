@@ -53,6 +53,10 @@ describe("normalizeCheckFamily", () => {
         expect(normalizeCheckFamily("tsgo")).toBe("typecheck");
         expect(normalizeCheckFamily("oxlint --fix")).toBe("oxlint");
         expect(normalizeCheckFamily("eslint src")).toBe("eslint");
+        expect(normalizeCheckFamily("bun run lint")).toBe("lint");
+        expect(normalizeCheckFamily("pnpm lint")).toBe("lint");
+        expect(normalizeCheckFamily("npm run lint")).toBe("lint");
+        expect(normalizeCheckFamily("lint")).toBe("lint");
         expect(normalizeCheckFamily("bun run build")).toBe("build");
         expect(normalizeCheckFamily("cargo check")).toBe("check");
     });
@@ -178,6 +182,66 @@ describe("computeSessionChurn", () => {
             passedEpisodes: 1,
             topCheck: "typecheck",
         }]);
+    });
+
+    test("filters edit-only, pass-only, and metadata-only sessions from output rows", () => {
+        const summary = computeSessionChurn([
+            edit("quiet-edit", 1, 5, 1),
+            pass("quiet-pass", 1, "typecheck"),
+            edit("noisy", 1, 1),
+            fail("noisy", 2, "typecheck"),
+        ], landed([
+            ["metadata-only", { added: 20, removed: 4 }],
+            ["noisy", { added: 3, removed: 1 }],
+        ]), health([
+            ["metadata-only", "quiet metadata"],
+            ["quiet-edit", "quiet edit"],
+            ["quiet-pass", "quiet pass"],
+            ["noisy", "has verification signal"],
+        ]));
+
+        expect(summary.hotSessions.map((row) => row.session)).toEqual(["noisy"]);
+        expect(summary.aggregates).toHaveLength(1);
+        expect(summary.aggregates[0]).toMatchObject({
+            sessions: 1,
+            landedLinesAdded: 3,
+            editLinesAdded: 1,
+            verificationFailures: 1,
+        });
+    });
+
+    test("returns empty output when all sessions are quiet", () => {
+        const summary = computeSessionChurn([
+            edit("quiet-edit", 1, 5, 1),
+            pass("quiet-pass", 1, "typecheck"),
+        ], landed([["metadata-only", { added: 20, removed: 4 }]]), health([["metadata-only", "quiet metadata"]]));
+
+        expect(summary.hotSessions).toEqual([]);
+        expect(summary.aggregates).toEqual([]);
+        expect(formatSessionChurnSummary(summary)).toBe(
+            "no verification churn rows matched (run `ax ingest`, or loosen --since/--source/--here).",
+        );
+    });
+
+    test("normalizes DB-shaped and bare session ids across events and metadata maps", () => {
+        const summary = computeSessionChurn([
+            edit("session:`mixed-1`", 1, 6, 2),
+            fail("session:`mixed-1`", 2, "typecheck"),
+            edit("session:`mixed-1`", 3, 4, 1),
+        ], landed([["mixed-1", { added: 9, removed: 3 }]]), health([["session:⟨mixed-1⟩", "mixed task"]]));
+
+        expect(summary.hotSessions).toHaveLength(1);
+        expect(summary.hotSessions[0]).toMatchObject({
+            session: "mixed-1",
+            taskLabel: "mixed task",
+            landedLinesAdded: 9,
+            landedLinesRemoved: 3,
+            editLinesAdded: 10,
+            editLinesRemoved: 3,
+            repairLinesAdded: 4,
+            repairLinesRemoved: 1,
+            verificationFailures: 1,
+        });
     });
 });
 
