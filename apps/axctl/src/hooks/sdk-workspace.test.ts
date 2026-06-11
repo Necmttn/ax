@@ -29,15 +29,17 @@ describe("scaffoldWorkspace", () => {
         expect(pkgRaw.endsWith("\n")).toBe(true);
     });
 
-    test("writes both starter hook files", async () => {
+    test("writes all starter hook files", async () => {
         const dir = mk();
         const sdkPath = "/abs/packages/hooks-sdk";
         const written = await run(scaffoldWorkspace({ dir, sdkPath, install: false }));
 
         const ewPath = join(dir, "enforce-worktree.ts");
         const ewwPath = join(dir, "enforce-worktree-write.ts");
+        const rdPath = join(dir, "route-dispatch.ts");
         expect(existsSync(ewPath)).toBe(true);
         expect(existsSync(ewwPath)).toBe(true);
+        expect(existsSync(rdPath)).toBe(true);
 
         const ewContent = readFileSync(ewPath, "utf8");
         expect(ewContent).toContain('@ax/hooks-sdk/hooks/enforce-worktree');
@@ -48,9 +50,13 @@ describe("scaffoldWorkspace", () => {
         const ewwContent = readFileSync(ewwPath, "utf8");
         expect(ewwContent).toContain('@ax/hooks-sdk/hooks/enforce-worktree-write');
 
-        // Both hook files should be in the written list
+        const rdContent = readFileSync(rdPath, "utf8");
+        expect(rdContent).toContain('@ax/hooks-sdk/hooks/route-dispatch');
+
+        // All hook files should be in the written list
         expect(written).toContain(ewPath);
         expect(written).toContain(ewwPath);
+        expect(written).toContain(rdPath);
     });
 
     test("does not overwrite an existing hook file (preserves user edits)", async () => {
@@ -100,7 +106,8 @@ describe("scaffoldWorkspace", () => {
         expect(written).toContain(join(dir, "package.json"));
         expect(written).toContain(join(dir, "enforce-worktree.ts"));
         expect(written).toContain(join(dir, "enforce-worktree-write.ts"));
-        expect(written.length).toBe(3);
+        expect(written).toContain(join(dir, "route-dispatch.ts"));
+        expect(written.length).toBe(4);
     });
 
     test("creates dir if it does not exist", async () => {

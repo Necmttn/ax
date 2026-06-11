@@ -39,6 +39,9 @@ const EXCLUDED_FILES: readonly string[] = [
     // realPath is async - a sync realpath needs node:fs. Runs under plain
     // bun in ~/.ax/hooks workspaces, not the axctl platform runtime.
     "packages/hooks-sdk/src/git-env.ts",
+    // Same fire-path constraint: routing-table.json is read synchronously so
+    // the hook's error channel stays `never` under plain bun (~70ms budget).
+    "packages/hooks-sdk/src/hooks/route-dispatch.ts",
 ];
 
 const BANNED_SPECIFIERS = [

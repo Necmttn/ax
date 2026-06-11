@@ -66,7 +66,13 @@ export interface ScaffoldOptions {
     readonly install: boolean;
 }
 
-const GUARD_NAMES = ["enforce-worktree", "enforce-worktree-write"] as const;
+const GUARD_NAMES = [
+    "enforce-worktree",
+    "enforce-worktree-write",
+    // Claude-only: suggests cheaper model when Agent dispatch has no explicit model set.
+    // Codex has no Agent-tool dispatch equivalent; this hook is a no-op there.
+    "route-dispatch",
+] as const;
 
 const packageJsonContent = (sdkPath: string): string =>
     `${JSON.stringify(
