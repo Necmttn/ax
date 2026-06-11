@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { InspectTurnDto, ToolCallDto } from "@ax/lib/shared/dashboard-types";
-import { buildFilesTouched, commonDirPrefix } from "./files-touched.ts";
+import { buildFilesTouched, buildFileStory, commonDirPrefix } from "./files-touched.ts";
 
 const toolCall = (over: Partial<ToolCallDto> = {}): ToolCallDto => ({
     seq: 0,
@@ -134,5 +134,37 @@ describe("buildFilesTouched", () => {
     test("single-file session keeps full path minus leading slash", () => {
         const model = buildFilesTouched([turn(1, [read("/repo/src/a.ts")])]);
         expect(model.files[0]?.path).toBe("repo/src/a.ts");
+    });
+});
+
+describe("buildFileStory", () => {
+    test("returns only the asked file's touches, in order, reads included", () => {
+        const story = buildFileStory([
+            turn(1, [read("/r/a.ts"), read("/r/b.ts")]),
+            turn(3, [toolCall({ name: "Edit", input: { file_path: "/r/a.ts", old_string: "x", new_string: "yy" } })]),
+            turn(5, [write("/r/b.ts")]),
+        ], "/r/a.ts");
+        expect(story).toHaveLength(2);
+        expect(story[0]).toMatchObject({ turnSeq: 1, op: "read", tool: "Read" });
+        expect(story[1]).toMatchObject({ turnSeq: 3, op: "write", oldString: "x", newString: "yy" });
+    });
+
+    test("expands MultiEdit into one event per inner edit", () => {
+        const story = buildFileStory([
+            turn(2, [toolCall({
+                name: "MultiEdit",
+                input: { file_path: "/r/a.ts", edits: [{ old_string: "a", new_string: "b" }, { old_string: "c", new_string: "d" }] },
+            })]),
+        ], "/r/a.ts");
+        expect(story).toHaveLength(2);
+        expect(story[0]).toMatchObject({ oldString: "a", newString: "b", callIndex: 0 });
+        expect(story[1]).toMatchObject({ oldString: "c", newString: "d", callIndex: 0 });
+    });
+
+    test("Write content lands in newString with null oldString", () => {
+        const story = buildFileStory([
+            turn(1, [toolCall({ name: "Write", input: { file_path: "/r/a.ts", content: "hello" } })]),
+        ], "/r/a.ts");
+        expect(story[0]).toMatchObject({ oldString: null, newString: "hello", op: "write" });
     });
 });

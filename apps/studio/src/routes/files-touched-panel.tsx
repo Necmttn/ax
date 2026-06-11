@@ -1,8 +1,8 @@
-import { useMemo, type CSSProperties } from "react";
+import { useMemo, useRef, type CSSProperties } from "react";
 import type { GitStatusEntry } from "@pierre/trees";
 import { FileTree, useFileTree } from "@pierre/trees/react";
 import type { InspectTurnDto } from "@ax/lib/shared/dashboard-types";
-import { buildFilesTouched, type FilesTouchedModel } from "./files-touched.ts";
+import { buildFilesTouched, type FilesTouchedModel, type FileTouch } from "./files-touched.ts";
 
 const ROW_H = 26;
 const TREE_MAX_H = 360;
@@ -83,10 +83,16 @@ function decorationFor(model: FilesTouchedModel, path: string): { text: string; 
     return { text, title };
 }
 
-function FilesTouchedTree({ model, onJump }: {
+export function FilesTouchedTree({ model, onSelect, initialSelectedPath, maxHeight = TREE_MAX_H }: {
     readonly model: FilesTouchedModel;
-    readonly onJump: (seq: number) => void;
+    /** Fired with the clicked file. The tree model is create-once; the latest
+     *  callback is read through a ref so re-renders don't go stale. */
+    readonly onSelect: (file: FileTouch) => void;
+    readonly initialSelectedPath?: string;
+    readonly maxHeight?: number;
 }) {
+    const onSelectRef = useRef(onSelect);
+    onSelectRef.current = onSelect;
     const gitStatus = useMemo(
         (): GitStatusEntry[] =>
             model.files
@@ -101,10 +107,11 @@ function FilesTouchedTree({ model, onJump }: {
         search: model.files.length >= 8,
         gitStatus,
         itemHeight: ROW_H,
+        ...(initialSelectedPath ? { initialSelectedPaths: [initialSelectedPath] } : {}),
         renderRowDecoration: ({ row }) => (row.kind === "file" ? decorationFor(model, row.path) : null),
         onSelectionChange: (paths) => {
             const f = paths[0] ? model.files.find((file) => file.path === paths[0]) : undefined;
-            if (f) onJump(f.firstSeq);
+            if (f) onSelectRef.current(f);
         },
     });
     // Files + every distinct ancestor dir bounds the row count (flattening only
@@ -115,7 +122,7 @@ function FilesTouchedTree({ model, onJump }: {
             return segs.map((_, i) => segs.slice(0, i + 1).join("/"));
         }),
     ).size;
-    const height = Math.min((model.files.length + dirCount) * ROW_H + 8, TREE_MAX_H);
+    const height = Math.min((model.files.length + dirCount) * ROW_H + 8, maxHeight);
     return (
         <FileTree
             model={tree}
@@ -147,7 +154,7 @@ export function FilesTouchedPanel({ turns, onJump }: {
                 {model.root ? <span style={{ textTransform: "none", letterSpacing: 0, fontWeight: 400 }}> · {model.root}</span> : null}
                 <span style={{ fontWeight: 400, textTransform: "none", letterSpacing: 0 }}> - click a file to jump to where it was touched</span>
             </summary>
-            <FilesTouchedTree model={model} onJump={jump} />
+            <FilesTouchedTree model={model} onSelect={(f) => jump(f.firstSeq)} />
         </details>
     );
 }

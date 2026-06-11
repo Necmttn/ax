@@ -174,3 +174,65 @@ export function buildFilesTouched(turns: ReadonlyArray<InspectTurnDto>): FilesTo
         totalWrites: files.reduce((acc, f) => acc + f.writes, 0),
     };
 }
+
+// --- per-file change story (review view) ------------------------------------
+
+/** One touch of a file, in session order. Write-ops carry the hunk content;
+ *  reads are kept as thin markers so the story shows when the agent looked
+ *  before it leapt. */
+export interface FileStoryEvent {
+    readonly turnSeq: number;
+    readonly callIndex: number;
+    readonly tool: string;
+    readonly op: "read" | "write";
+    /** Replaced text (Edit/MultiEdit). null for Write/NotebookEdit/reads. */
+    readonly oldString: string | null;
+    /** Inserted text (Edit new_string, Write content, NotebookEdit new_source). */
+    readonly newString: string | null;
+    readonly hasError: boolean;
+}
+
+/**
+ * The ordered change story of one file: every tool call that touched
+ * `absPath`, expanded so a MultiEdit contributes one event per inner edit.
+ */
+export function buildFileStory(turns: ReadonlyArray<InspectTurnDto>, absPath: string): FileStoryEvent[] {
+    const events: FileStoryEvent[] = [];
+    for (const turn of turns) {
+        (turn.tool_calls ?? []).forEach((call, callIndex) => {
+            const spec = FILE_TOOLS[call.name];
+            if (!spec || pathOf(call, spec.keys) !== absPath) return;
+            const base = { turnSeq: turn.seq, callIndex, tool: call.name, hasError: call.has_error };
+            if (spec.op === "read") {
+                events.push({ ...base, op: "read", oldString: null, newString: null });
+                return;
+            }
+            const input = call.input ?? {};
+            if (call.name === "MultiEdit" && Array.isArray(input.edits)) {
+                for (const e of input.edits) {
+                    const edit = typeof e === "object" && e !== null ? (e as Record<string, unknown>) : {};
+                    events.push({
+                        ...base,
+                        op: "write",
+                        oldString: typeof edit.old_string === "string" ? edit.old_string : null,
+                        newString: typeof edit.new_string === "string" ? edit.new_string : null,
+                    });
+                }
+                return;
+            }
+            events.push({
+                ...base,
+                op: "write",
+                oldString: typeof input.old_string === "string" ? input.old_string : null,
+                newString: typeof input.new_string === "string"
+                    ? input.new_string
+                    : typeof input.content === "string"
+                    ? input.content
+                    : typeof input.new_source === "string"
+                    ? input.new_source
+                    : null,
+            });
+        });
+    }
+    return events;
+}
