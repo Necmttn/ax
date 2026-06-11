@@ -12,6 +12,7 @@ import { orAbsent } from "@ax/lib/shared/fs-error";
 import { prettyPrint } from "@ax/lib/json";
 import { skillNameToSlug, renderClassifyBrief } from "./skills-classify-template.ts";
 import { validateSkillName } from "@ax/lib/role-name";
+import { fail } from "./commands/shared.ts";
 
 export interface ClassifyRow {
     readonly name: string;
@@ -88,11 +89,9 @@ export const cmdSkillsClassify = (
         if (opts.names.length > 0) {
             for (const name of opts.names) {
                 if (safeSkillName(name) === null) {
-                    console.error(
+                    fail(
                         `axctl skills classify: invalid skill name "${name}" (must be alphanumeric, _ or -, optionally plugin:namespaced)`,
                     );
-                    process.exit(2);
-                    return; // unreachable; satisfies TypeScript
                 }
             }
         }

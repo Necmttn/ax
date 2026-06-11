@@ -37,6 +37,7 @@ import { cmdSkillsTag } from "../skills-tag.ts";
 import { renderWeightedTable, renderWeightedJson } from "../skills-weighted-format.ts";
 import type { RuntimeManifest } from "./manifest.ts";
 import {
+    fail,
     fmtCount,
     jsonFlag,
     optionValue,
@@ -206,10 +207,7 @@ const cmdStats = (input: StatsInput) =>
         const exists = yield* skillExists(name);
         if (!exists) {
             const hint = name.length > 20 ? name.slice(0, 20) : name;
-            console.error(
-                `axctl: no skill named "${name}". try: axctl skills search "${hint}"`,
-            );
-            process.exit(2);
+            fail(`axctl: no skill named "${name}". try: axctl skills search "${hint}"`);
         }
         const payload = yield* fetchSkillStats(name);
 
@@ -405,8 +403,7 @@ const cmdRolesForSkill = (input: RolesForSkillInput) =>
         );
 
         if (!result.skillExists) {
-            process.stderr.write(`axctl skills roles: unknown skill "${skill}"\n`);
-            process.exit(2);
+            fail(`axctl skills roles: unknown skill "${skill}"`);
         }
 
         if (json) {
@@ -663,10 +660,7 @@ const cmdPairs = (input: PairsInput) =>
         const exists = yield* skillExists(name);
         if (!exists) {
             const hint = name.length > 20 ? name.slice(0, 20) : name;
-            console.error(
-                `axctl: no skill named "${name}". try: axctl skills search "${hint}"`,
-            );
-            process.exit(2);
+            fail(`axctl: no skill named "${name}". try: axctl skills search "${hint}"`);
         }
         // Pairs are stored undirected (lexicographically lo->hi). Look the
         // skill up on either endpoint so callers don't have to know the

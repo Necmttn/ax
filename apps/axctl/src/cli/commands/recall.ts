@@ -13,21 +13,18 @@ import { printNextLinks } from "../next-format.ts";
 import { fetchRecall, type RecallSource, type RecallScope } from "../../dashboard/recall.ts";
 import { resolvePwdRepository } from "../../pwd.ts";
 import type { RuntimeManifest } from "./manifest.ts";
-import { jsonFlag } from "./shared.ts";
+import { fail, jsonFlag, parseCsvFlag } from "./shared.ts";
 
 const VALID_SOURCES: ReadonlySet<string> = new Set(["turn", "commit", "skill"]);
 
 function parseSourcesFlag(raw: string | null): ReadonlyArray<RecallSource> | null {
     if (!raw) return null;
-    const parts = raw.split(",").map((s) => s.trim()).filter(Boolean);
+    const parts = parseCsvFlag(raw);
     const invalid = parts.filter((p) => !VALID_SOURCES.has(p));
     if (invalid.length > 0) {
-        console.error(
-            `axctl recall: unknown source(s): ${invalid.join(", ")}. Valid: turn, commit, skill`,
-        );
-        process.exit(2);
+        fail(`axctl recall: unknown source(s): ${invalid.join(", ")}. Valid: turn, commit, skill`);
     }
-    return parts as RecallSource[];
+    return parts as ReadonlyArray<RecallSource>;
 }
 
 interface RecallCliOpts {
@@ -63,8 +60,7 @@ const resolveScope = (
                 Effect.catchTag("NotAGitRepoError", (err) => {
                     if (scopeFlag === "here") {
                         // explicit --scope=here outside a git repo → error
-                        process.stderr.write(`axctl recall: --scope=here requires a git repo (cwd=${err.cwd})\n`);
-                        process.exit(2);
+                        fail(`axctl recall: --scope=here requires a git repo (cwd=${err.cwd})`);
                     }
                     // auto-detect: not a git repo → silent fall-through to all
                     return Effect.succeed(null as import("../../pwd.ts").PwdResolution | null);
@@ -77,8 +73,7 @@ const resolveScope = (
             } as RecallScope;
         }
 
-        console.error(`axctl recall: unknown --scope value "${scopeFlag}". Valid: here, all`);
-        process.exit(2);
+        fail(`axctl recall: unknown --scope value "${scopeFlag}". Valid: here, all`);
     });
 
 /**
@@ -93,14 +88,10 @@ async function pickFromList(
     candidates: ReadonlyArray<{ readonly value: string; readonly hint: string }>,
 ): Promise<string | null> {
     if (!process.stdin.isTTY) {
-        console.error(
-            `axctl recall: --${label} requires a value (stdin is not a TTY)`,
-        );
-        process.exit(2);
+        fail(`axctl recall: --${label} requires a value (stdin is not a TTY)`);
     }
     if (candidates.length === 0) {
-        console.error(`no ${label}s found`);
-        process.exit(2);
+        fail(`no ${label}s found`);
     }
     process.stderr.write(`\nPick a ${label}:\n`);
     candidates.forEach((c, i) => {
@@ -118,8 +109,7 @@ async function pickFromList(
     if (!answer) return null;
     const n = Number(answer);
     if (!Number.isInteger(n) || n < 1 || n > candidates.length) {
-        console.error(`invalid selection: ${answer}`);
-        process.exit(2);
+        fail(`invalid selection: ${answer}`);
     }
     return candidates[n - 1]!.value;
 }
@@ -161,10 +151,7 @@ const resolveProject = (input: string | null) =>
         );
         if (matches.length === 1) return matches[0]!.slug;
         if (matches.length === 0) {
-            console.error(
-                `axctl recall: no project matches "${trimmed}". Try: axctl recall ... --project=?`,
-            );
-            process.exit(2);
+            fail(`axctl recall: no project matches "${trimmed}". Try: axctl recall ... --project=?`);
         }
         return yield* Effect.promise(() =>
             pickFromList(
@@ -207,10 +194,7 @@ const resolveSkill = (input: string | null) =>
         const matches = all.filter((r) => r.name.toLowerCase().includes(lower));
         if (matches.length === 1) return matches[0]!.name;
         if (matches.length === 0) {
-            console.error(
-                `axctl recall: no skill matches "${trimmed}". Try: axctl recall ... --skill=?`,
-            );
-            process.exit(2);
+            fail(`axctl recall: no skill matches "${trimmed}". Try: axctl recall ... --skill=?`);
         }
         return yield* Effect.promise(() =>
             pickFromList(

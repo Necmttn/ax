@@ -6,7 +6,7 @@ import { SIGNAL_CATALOG, findSignal, runRelationSignal } from "../../metrics/cat
 import { cleanSessionId } from "../../metrics/util.ts";
 import type { CascadeEdge } from "../../metrics/fragility-cascade.ts";
 import type { RuntimeManifest } from "./manifest.ts";
-import { jsonFlag, positiveLimit } from "./shared.ts";
+import { fail, jsonFlag, positiveLimit } from "./shared.ts";
 
 const formatCascadeEdges = (edges: readonly CascadeEdge[], descriptor: { label: string }): string => {
     if (edges.length === 0) return `${descriptor.label}: no edges (no reverted-commit files have downstream fixers).`;
@@ -30,9 +30,7 @@ const cmdSignalsShow = (input: { readonly id: string; readonly limit: number; re
         const descriptor = findSignal(input.id);
         if (descriptor === undefined) {
             const ids = SIGNAL_CATALOG.map((s) => s.id).join(", ");
-            process.stderr.write(`axctl signals show: unknown signal "${input.id}". Valid ids: ${ids}\n`);
-            process.exit(2);
-            return;
+            fail(`axctl signals show: unknown signal "${input.id}". Valid ids: ${ids}`);
         }
         if (descriptor.kind === "aggregate") {
             console.log("aggregate rendering is a later wave");

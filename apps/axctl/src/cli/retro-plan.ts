@@ -35,6 +35,7 @@ import {
     surrealString,
 } from "@ax/lib/shared/surql";
 import { safeKeyPart } from "@ax/lib/shared/derive-keys";
+import { fail as sharedFail, parseCsvFlag } from "./commands/shared.ts";
 import { dedupeSig, normalizeTitle } from "../ingest/derive-proposals.ts";
 import {
     type InterventionSafetyContract,
@@ -81,10 +82,7 @@ const flagValue = (args: string[], name: string): string | undefined => {
     return hit?.split("=").slice(1).join("=");
 };
 
-const fail = (message: string): never => {
-    console.error(`ax retro plan: ${message}`);
-    process.exit(2);
-};
+const fail = (message: string): never => sharedFail(`ax retro plan: ${message}`);
 
 /**
  * Parse the CLI argv into a validated RetroPlanArgs. Throws (via
@@ -136,10 +134,7 @@ export const parseRetroPlanArgs = (
     if (!Number.isFinite(frequency) || frequency <= 0) {
         fail(`--frequency must be a positive integer (got ${frequencyRaw})`);
     }
-    const evidenceRetros = evidenceRaw
-        .split(",")
-        .map((s) => s.trim())
-        .filter((s) => s.length > 0);
+    const evidenceRetros = parseCsvFlag(evidenceRaw);
 
     return {
         slug: slug as string,

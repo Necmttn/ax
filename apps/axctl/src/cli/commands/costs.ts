@@ -8,7 +8,7 @@ import { fetchLocSummary, type LocSummary, type LocSelector } from "../../dashbo
 import { resolvePwdRepository } from "../../pwd.ts";
 import { stderrExit } from "../output.ts";
 import type { RuntimeManifest } from "./manifest.ts";
-import { jsonFlag, optionalSince, optionValue, positiveLimit } from "./shared.ts";
+import { fail, jsonFlag, optionalSince, optionValue, parseCsvFlag, positiveLimit } from "./shared.ts";
 
 const usd = (value: unknown): string => {
     const n = typeof value === "number" ? value : typeof value === "string" ? Number(value) : NaN;
@@ -129,13 +129,8 @@ const formatCostSummary = (summary: CostSummary): string => {
     return lines.join("\n");
 };
 
-const splitCostTerms = (value: string | null): string[] =>
-    value === null
-        ? []
-        : value.split(",").map((term) => term.trim()).filter((term) => term.length > 0);
-
-const costQueryTerms = (query: string | null, terms: string | null): string[] => {
-    const parsedTerms = splitCostTerms(terms);
+const costQueryTerms = (query: string | null, terms: string | null): readonly string[] => {
+    const parsedTerms = parseCsvFlag(terms);
     if (parsedTerms.length > 0) return parsedTerms;
     return query === null ? [] : [query];
 };
@@ -180,8 +175,7 @@ const cmdCostsFor = (input: {
             input.branch ? { kind: "branch" as const, branch: input.branch, repositoryKey, limit: input.limit } :
             null;
         if (!selected) {
-            console.error("axctl costs for: pass one of --session, --query, --terms, --commit, --branch");
-            process.exit(2);
+            fail("axctl costs for: pass one of --session, --query, --terms, --commit, --branch");
         }
         const summary = yield* fetchCostSummary(selected);
         if (input.json) {
