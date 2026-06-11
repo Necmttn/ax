@@ -12,7 +12,7 @@ import {
     toolClassInputOf,
 } from "@ax/lib/shared/tool-classes";
 import { editDelta } from "../dashboard/loc-query.ts";
-import { coerceCheckFamily } from "../ingest/check-family.ts";
+import { checkFamilyFromCommand, coerceCheckFamily, commandNormNeedsText } from "../ingest/check-family.ts";
 import { applyPatchDelta } from "./session-loc.ts";
 import { fetchSessionHealthMap } from "./session-metrics-query.ts";
 import { cleanSessionId } from "./util.ts";
@@ -400,31 +400,28 @@ const fetchCommandOutcomeEvents = (
     Effect.gen(function* () {
         const db = yield* SurrealClient;
         if (sessionIds.length === 0) return [];
+        // Deref-free: command_text lives on tool_call only and is batch-joined
+        // below for the few rows whose normalized command is ambiguous.
         const rows = (yield* Effect.all(
             chunked(sessionIds, IN_CHUNK).map((ids) =>
                 db.query<[Array<Record<string, unknown>>]>(
-                    `SELECT type::string(session) AS session, type::string(ts) AS ts, kind, status, tool_call.command_text AS command_text, command_norm, command_tool, text`
-                    + ` FROM command_outcome WHERE session IN [${sessionRefList(ids)}]`
-                    + ` AND (kind = "expected_feedback" OR status = "ok") ORDER BY ts ASC;`,
+                    `SELECT type::string(session) AS session, type::string(ts) AS ts, kind, status, command_norm, type::string(tool_call) AS tool_call_ref`
+                    + ` FROM command_outcome WHERE session IN [${sessionRefList(ids)}];`,
                 ),
             ),
             { concurrency: 4 },
         )).flatMap((batch) => batch?.[0] ?? []);
 
+        interface PendingOutcome {
+            readonly session: string;
+            readonly tsMs: number;
+            readonly eventKind: "verification_fail" | "verification_pass";
+            readonly toolCallKey: string;
+        }
+
         const events: ChurnEvent[] = [];
-        for (const row of rows) {
-            const session = cleanSessionId(String(row.session ?? ""));
-            const tsMs = msOrNull(row.ts);
-            const status = strOrNull(row.status);
-            const kind = strOrNull(row.kind);
-            const eventKind = kind === "expected_feedback" || status === "error"
-                ? "verification_fail"
-                : status === "ok"
-                    ? "verification_pass"
-                    : null;
-            if (eventKind === null) continue;
-            const check = commandOutcomeCheck(row);
-            if (session.length === 0 || tsMs === null || check === null) continue;
+        const pending: PendingOutcome[] = [];
+        const pushEvent = (session: string, tsMs: number, eventKind: PendingOutcome["eventKind"], check: string) => {
             events.push({
                 session,
                 source: sourceBySession.get(session) ?? null,
@@ -434,6 +431,53 @@ const fetchCommandOutcomeEvents = (
                 linesAdded: 0,
                 linesRemoved: 0,
             });
+        };
+
+        for (const row of rows) {
+            const session = cleanSessionId(String(row.session ?? ""));
+            const tsMs = msOrNull(row.ts);
+            const status = strOrNull(row.status);
+            const kind = strOrNull(row.kind);
+            const eventKind = kind === "expected_feedback" || status === "error"
+                ? "verification_fail" as const
+                : status === "ok"
+                    ? "verification_pass" as const
+                    : null;
+            if (eventKind === null || session.length === 0 || tsMs === null) continue;
+
+            const norm = strOrNull(row.command_norm);
+            const check = checkFamilyFromCommand(norm);
+            if (check !== null) {
+                pushEvent(session, tsMs, eventKind, check);
+                continue;
+            }
+            if (!commandNormNeedsText(norm)) continue;
+            const toolCallKey = recordKeyPart(strOrNull(row.tool_call_ref), "tool_call");
+            if (toolCallKey === null || toolCallKey.length === 0) continue;
+            pending.push({ session, tsMs, eventKind, toolCallKey });
+        }
+
+        if (pending.length > 0) {
+            const keys = [...new Set(pending.map((item) => item.toolCallKey))];
+            const textRows = (yield* Effect.all(
+                chunked(keys, IN_CHUNK).map((ids) =>
+                    db.query<[Array<Record<string, unknown>>]>(
+                        `SELECT type::string(id) AS id, command_text FROM tool_call WHERE id IN [${recordRefList("tool_call", ids)}];`,
+                    ),
+                ),
+                { concurrency: 4 },
+            )).flatMap((batch) => batch?.[0] ?? []);
+
+            const textByKey = new Map<string, string | null>();
+            for (const row of textRows) {
+                const key = recordKeyPart(strOrNull(row.id), "tool_call");
+                if (key !== null && key.length > 0) textByKey.set(key, strOrNull(row.command_text));
+            }
+            for (const item of pending) {
+                const check = checkFamilyFromCommand(textByKey.get(item.toolCallKey) ?? null);
+                if (check === null) continue;
+                pushEvent(item.session, item.tsMs, item.eventKind, check);
+            }
         }
         return events;
     });
@@ -717,12 +761,6 @@ const normalizedCheckFrom = (...values: readonly unknown[]): string | null => {
     }
     return null;
 };
-
-// Classify strictly from the command itself (text, then normalized form).
-// Output text and the provider tool name (command_tool) are never consulted -
-// "remote: check your credentials" is not a check run.
-const commandOutcomeCheck = (row: Record<string, unknown>): string | null =>
-    normalizedCheckFrom(row.command_text, row.command_norm);
 
 const exitCodeOf = (value: unknown): number | null => {
     if (value === null || value === undefined) return null;

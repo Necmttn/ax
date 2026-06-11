@@ -53,6 +53,7 @@ const db = (input: {
     edits?: Array<Record<string, unknown>>;
     outcomes?: Array<Record<string, unknown>>;
     hooks?: Array<Record<string, unknown>>;
+    toolTexts?: Array<Record<string, unknown>>;
     seenSql?: string[];
     respectBaseLimit?: boolean;
 }) =>
@@ -62,6 +63,7 @@ const db = (input: {
             if (sql.includes("FROM session_health")) return Effect.succeed([input.health ?? []] as unknown as T);
             if (sql.includes("FROM produced")) return Effect.succeed([input.produced ?? []] as unknown as T);
             if (sql.includes("FROM touched")) return Effect.succeed([input.touched ?? []] as unknown as T);
+            if (sql.includes("FROM tool_call") && sql.includes("WHERE id IN")) return Effect.succeed([input.toolTexts ?? []] as unknown as T);
             if (sql.includes("FROM tool_call")) return Effect.succeed([input.edits ?? []] as unknown as T);
             if (sql.includes("FROM command_outcome")) return Effect.succeed([input.outcomes ?? []] as unknown as T);
             if (sql.includes("FROM hook_command_invocation")) return Effect.succeed([input.hooks ?? []] as unknown as T);
@@ -451,8 +453,8 @@ describe("fetchSessionChurnSummary", () => {
         }))));
 
         const outcomeSql = seenSql.find((s) => s.includes("FROM command_outcome"))!;
-        expect(outcomeSql).toContain("tool_call.command_text AS command_text");
-        expect(outcomeSql).toContain('AND (kind = "expected_feedback" OR status = "ok")');
+        expect(outcomeSql).not.toContain("tool_call.command_text");
+        expect(outcomeSql).not.toContain('kind = "expected_feedback"');
         expect(summary.hotSessions[0]).toMatchObject({
             session: "s1",
             verificationFailures: 1,
@@ -472,8 +474,8 @@ describe("fetchSessionChurnSummary", () => {
             base: [{ session: "session:`s1`", source: "claude" }],
             edits: [{ session: "session:`s1`", ts: "2026-06-11T00:01:00.000Z", name: "Edit", input_json: JSON.stringify({ old_string: "a", new_string: "a\nb" }) }],
             outcomes: [
-                { session: "session:`s1`", ts: "2026-06-11T00:02:00.000Z", kind: "expected_feedback", status: "error", command_text: "bun test" },
-                { session: "session:`s1`", ts: "2026-06-11T00:03:00.000Z", kind: "success", status: "ok", command_text: "ls test/" },
+                { session: "session:`s1`", ts: "2026-06-11T00:02:00.000Z", kind: "expected_feedback", status: "error", command_norm: "bun test" },
+                { session: "session:`s1`", ts: "2026-06-11T00:03:00.000Z", kind: "success", status: "ok", command_norm: "ls" },
             ],
             hooks: [
                 { session: "session:`s1`", ts: "2026-06-11T00:04:00.000Z", provider_status: "success", effect: "allowed", exit_code: 0, command: "bun /Users/x/.ax/hooks/guard.ts", hook_name: "bun-test-blocking" },
@@ -506,7 +508,7 @@ describe("fetchSessionChurnSummary", () => {
         expect(summary.aggregates).toEqual([]);
     });
 
-    test("command_text takes precedence over command_norm and tool names", async () => {
+    test("error rows of any outcome kind count as verification failures", async () => {
         const summary = await Effect.runPromise(fetchSessionChurnSummary({
             since: null,
             limit: 20,
@@ -515,11 +517,43 @@ describe("fetchSessionChurnSummary", () => {
             base: [{ session: "session:`s1`", source: "codex" }],
             edits: [{ session: "session:`s1`", ts: "2026-06-11T00:01:00.000Z", name: "Edit", input_json: JSON.stringify({ old_string: "a", new_string: "a\nb" }) }],
             outcomes: [
-                { session: "session:`s1`", ts: "2026-06-11T00:02:00.000Z", kind: "expected_feedback", status: "error", command_text: "bun run typecheck", command_norm: "bun", command_tool: "test" },
-                { session: "session:`s1`", ts: "2026-06-11T00:03:00.000Z", kind: "success", status: "ok", command_text: "bun run typecheck", command_norm: "bun", command_tool: "test" },
+                { session: "session:`s1`", ts: "2026-06-11T00:02:00.000Z", kind: "product_bug_signal", status: "error", command_norm: "bun test" },
+                { session: "session:`s1`", ts: "2026-06-11T00:03:00.000Z", kind: "environment_blocker", status: "error", command_norm: "tsc" },
+                { session: "session:`s1`", ts: "2026-06-11T00:04:00.000Z", kind: "unknown", status: "error", command_norm: "git push" },
             ],
         }))));
 
+        expect(summary.hotSessions[0]).toMatchObject({
+            session: "s1",
+            verificationFailures: 2,
+            episodes: 2,
+        });
+    });
+
+    test("ambiguous runner norms resolve via batched tool_call text lookup", async () => {
+        const seenSql: string[] = [];
+        const summary = await Effect.runPromise(fetchSessionChurnSummary({
+            since: null,
+            limit: 20,
+            generatedAt: new Date("2026-06-11T00:00:00.000Z"),
+        }).pipe(Effect.provide(db({
+            seenSql,
+            base: [{ session: "session:`s1`", source: "codex" }],
+            edits: [{ session: "session:`s1`", ts: "2026-06-11T00:01:00.000Z", name: "Edit", input_json: JSON.stringify({ old_string: "a", new_string: "a\nb" }) }],
+            outcomes: [
+                { session: "session:`s1`", ts: "2026-06-11T00:02:00.000Z", kind: "product_bug_signal", status: "error", command_norm: "bun run", tool_call_ref: "tool_call:`tc1`" },
+                { session: "session:`s1`", ts: "2026-06-11T00:03:00.000Z", kind: "success", status: "ok", command_norm: "bun run", tool_call_ref: "tool_call:`tc2`" },
+                { session: "session:`s1`", ts: "2026-06-11T00:04:00.000Z", kind: "success", status: "ok", command_norm: "bun run", tool_call_ref: "tool_call:`tc3`" },
+            ],
+            toolTexts: [
+                { id: "tool_call:`tc1`", command_text: "bun run typecheck" },
+                { id: "tool_call:`tc2`", command_text: "bun run typecheck" },
+                { id: "tool_call:`tc3`", command_text: "bun run dev" },
+            ],
+        }))));
+
+        const lookupSql = seenSql.find((s) => s.includes("WHERE id IN"))!;
+        expect(lookupSql).toContain("FROM tool_call");
         expect(summary.hotSessions[0]).toMatchObject({
             topCheck: "typecheck",
             verificationFailures: 1,

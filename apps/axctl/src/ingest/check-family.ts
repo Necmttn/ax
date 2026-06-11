@@ -109,6 +109,15 @@ const segmentFamily = (segment: readonly string[]): CheckFamily | null => {
     return null;
 };
 
+/**
+ * A normalized command ("bun run", "npx") that cannot classify on its own but
+ * may resolve to a check family once the full command text is known.
+ */
+const RUNNER_AMBIGUOUS_NORM = /^(?:bun|npm|pnpm|yarn|deno|npx|bunx|pnpx)(?:\s+(?:run|x|exec))?$/;
+
+export const commandNormNeedsText = (norm: string | null | undefined): boolean =>
+    norm !== null && norm !== undefined && RUNNER_AMBIGUOUS_NORM.test(norm.trim().toLowerCase());
+
 const scriptFamily = (script: string | null | undefined): CheckFamily | null => {
     if (script === null || script === undefined) return null;
     const head = script.split(":")[0] ?? "";
