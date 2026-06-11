@@ -25,6 +25,8 @@ import type { GraphExplorerMode } from "@ax/lib/shared/dashboard-types";
 import { WrappedRoute } from "./routes/wrapped.tsx";
 import { ImproveRoute } from "./routes/improve.tsx";
 import { IngestLiveRoute } from "./routes/ingest-live.tsx";
+import { NarrationPanel } from "./routes/narration-panel.tsx";
+import { sampleNarration } from "./routes/narration-sample.ts";
 import { ShareInspectView } from "./routes/share-inspect.tsx";
 
 const rootRoute = createRootRoute({
@@ -233,6 +235,25 @@ const ingestLiveRoute = createRoute({
     component: IngestLiveRoute,
 });
 
+/** Prototype showcase for the session-narration artifact (sample data). */
+const narrationDemoRoute = createRoute({
+    getParentRoute: () => rootRoute,
+    path: "/narration-demo",
+    component: NarrationDemoRoute,
+});
+
+function NarrationDemoRoute() {
+    return (
+        <section className="panel">
+            <header>
+                <h2>Session narration (prototype)</h2>
+                <span className="meta">sample artifact · schema v1</span>
+            </header>
+            <NarrationPanel narration={sampleNarration} onJumpToTurn={() => {}} />
+        </section>
+    );
+}
+
 const routeTree = rootRoute.addChildren([
     indexRoute,
     skillsRoute,
@@ -253,6 +274,7 @@ const routeTree = rootRoute.addChildren([
     wrappedRoute,
     improveRoute,
     ingestLiveRoute,
+    narrationDemoRoute,
 ]);
 
 // Studio build serves at /studio/; mount router under that basepath so
