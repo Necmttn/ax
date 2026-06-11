@@ -17,6 +17,13 @@ import {
     hasStaleUsage,
 } from "../share/format.ts";
 import { redactShareArtifact } from "../share/redact.ts";
+import {
+    ingestShareTranscript,
+    locateShareTranscript,
+    type ShareIngestOutcome,
+    type ShareTranscriptHit,
+} from "../share/recover.ts";
+import { IngestRuntimeLayer } from "../ingest/stage/runtime.ts";
 import { AX_VERSION } from "./version.ts";
 import { catchDbErrorAndExit } from "./output.ts";
 
@@ -33,6 +40,14 @@ export interface ShareCommandDeps {
         sessionId: string,
         axVersion: string,
     ) => Promise<AxSessionShare | null>;
+    /** Find the session's on-disk transcript when it isn't in the graph. */
+    readonly locateTranscript: (
+        sessionId: string,
+    ) => Promise<ShareTranscriptHit | null>;
+    /** Targeted ingest of a located transcript (single-flight locked). */
+    readonly ingestSession: (
+        hit: ShareTranscriptHit,
+    ) => Promise<ShareIngestOutcome>;
     readonly publish: (input: {
         readonly bundle: ShareBundle;
         readonly public: boolean;
@@ -84,6 +99,57 @@ const openShareUrl = async (ref: GistRef): Promise<void> => {
     });
 };
 
+/**
+ * Export-miss fallback: find the transcript on disk, run a targeted ingest
+ * for it (claude: scoped to its project dir; codex: --since window), then
+ * retry the export once. Every failure mode writes its own stderr message and
+ * sets exit code 1; returns the recovered artifact or null.
+ */
+async function recoverMissingSession(
+    sessionId: string,
+    deps: ShareCommandDeps,
+): Promise<AxSessionShare | null> {
+    const hit = await deps.locateTranscript(sessionId);
+    if (hit === null) {
+        deps.writeStderr(`axctl share: session ${sessionId} not found\n`);
+        deps.setExitCode(1);
+        return null;
+    }
+
+    deps.writeStderr(
+        `axctl share: session ${sessionId} not in graph - ingesting it now…\n`,
+    );
+    const outcome = await deps.ingestSession(hit);
+    if (outcome.kind === "busy") {
+        deps.writeStderr(
+            `axctl share: session ${sessionId} not in graph and another ingest ` +
+                `(pid ${outcome.pid}, ${outcome.command}) is in progress; ` +
+                `re-run ax share once it finishes\n`,
+        );
+        deps.setExitCode(1);
+        return null;
+    }
+    if (outcome.kind === "failed") {
+        deps.writeStderr(
+            `axctl share: session ${sessionId} not found ` +
+                `(targeted ingest of ${hit.path} failed: ${outcome.message})\n`,
+        );
+        deps.setExitCode(1);
+        return null;
+    }
+
+    const exported = await deps.exportArtifact(sessionId, AX_VERSION);
+    if (exported === null) {
+        deps.writeStderr(
+            `axctl share: session ${sessionId} not found ` +
+                `(ingested ${hit.path}, but the session still did not appear in the graph)\n`,
+        );
+        deps.setExitCode(1);
+        return null;
+    }
+    return exported;
+}
+
 export async function cmdShareWithDeps(
     args: string[],
     deps: ShareCommandDeps,
@@ -99,11 +165,13 @@ export async function cmdShareWithDeps(
     }
     deps.clearExitCode();
 
-    const exported = await deps.exportArtifact(parsed.sessionId, AX_VERSION);
+    let exported = await deps.exportArtifact(parsed.sessionId, AX_VERSION);
     if (exported === null) {
-        deps.writeStderr(`axctl share: session ${parsed.sessionId} not found\n`);
-        deps.setExitCode(1);
-        return;
+        // Export miss (#270): the session a user most wants to share - the
+        // live one - is by definition not yet ingested. Locate its transcript
+        // on disk, run a targeted ingest, then retry the export once.
+        exported = await recoverMissingSession(parsed.sessionId, deps);
+        if (exported === null) return; // recoverMissingSession wrote the error + exit code
     }
 
     const { artifact } = redactShareArtifact(exported);
@@ -153,6 +221,22 @@ const liveShareDeps: ShareCommandDeps = {
             exportSessionShare(sessionId, axVersion).pipe(
                 catchDbErrorAndExit("axctl share"),
                 Effect.provide(AppLayer),
+                Effect.scoped,
+            ),
+        ),
+    locateTranscript: (sessionId) =>
+        Effect.runPromise(
+            locateShareTranscript(sessionId).pipe(
+                Effect.provide(AppLayer),
+                Effect.scoped,
+            ),
+        ),
+    ingestSession: (hit) =>
+        Effect.runPromise(
+            ingestShareTranscript(hit).pipe(
+                // The ingest pipeline needs the stage registry on top of the
+                // app services - same runtime layer `ax ingest` runs under.
+                Effect.provide(IngestRuntimeLayer),
                 Effect.scoped,
             ),
         ),
