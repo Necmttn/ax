@@ -216,6 +216,15 @@ const collectSkills = (): Effect.Effect<
 > =>
     Effect.gen(function* () {
         const buckets = defaultSkillDirs();
+        const envOverride = (process.env.AX_SKILLS_DIRS ?? "")
+            .split(",")
+            .map((s) => s.trim())
+            .filter(Boolean).length > 0;
+        if (envOverride) {
+            return yield* Effect.forEach(buckets, ({ dir, scope }) => readSkillDir(dir, scope), {
+                concurrency: "unbounded",
+            }).pipe(Effect.map((xs) => xs.flat()));
+        }
         const [fromBaseDirs, fromPlugins, fromProjects] = yield* Effect.all(
             [
                 Effect.forEach(buckets, ({ dir, scope }) => readSkillDir(dir, scope), {
