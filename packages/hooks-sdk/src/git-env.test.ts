@@ -30,6 +30,7 @@ describe("GitEnvLive", () => {
         branch: yield* git.currentBranch(repo),
         root: yield* git.repoRoot(repo),
         dirty: yield* git.isDirty(repo),
+        trackedDirty: yield* git.hasTrackedChanges(repo),
       };
     });
     const r = Effect.runSync(program.pipe(Effect.provide(GitEnvLive)));
@@ -38,16 +39,21 @@ describe("GitEnvLive", () => {
     expect(r.branch).toBe("main");
     expect(r.root).toBe(realpathSync(repo));
     expect(r.dirty).toBe(false);
+    expect(r.trackedDirty).toBe(false);
 
     // Untracked files COUNT as dirty (bash guard parity).
     await Bun.write(join(repo, "untracked.txt"), "x");
     const dirtyAfter = Effect.runSync(
       Effect.gen(function* () {
         const git = yield* GitEnv;
-        return yield* git.isDirty(repo);
+        return {
+          dirty: yield* git.isDirty(repo),
+          trackedDirty: yield* git.hasTrackedChanges(repo),
+        };
       }).pipe(Effect.provide(GitEnvLive)),
     );
-    expect(dirtyAfter).toBe(true);
+    expect(dirtyAfter.dirty).toBe(true);
+    expect(dirtyAfter.trackedDirty).toBe(false);
   });
   test("non-repo dir → safe defaults", () => {
     const dir = mkdtempSync(join(tmpdir(), "norepo-"));

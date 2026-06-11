@@ -6,6 +6,8 @@ export interface GitEnvService {
   readonly isPrimaryTree: (dir: string) => Effect.Effect<boolean>;
   /** uncommitted changes present? (status --porcelain non-empty) */
   readonly isDirty: (dir: string) => Effect.Effect<boolean>;
+  /** tracked/staged changes present? Ignores untracked files. */
+  readonly hasTrackedChanges: (dir: string) => Effect.Effect<boolean>;
   /** current branch short name, null when detached/not a repo. */
   readonly currentBranch: (dir: string) => Effect.Effect<string | null>;
   /** repo toplevel for dir (walking up past not-yet-existing paths), null outside repos. */
@@ -51,6 +53,13 @@ const liveShape: GitEnvService = {
   isDirty: (dir) =>
     Effect.sync(() => (gitCmd(dir, ["status", "--porcelain"]) ?? "") !== ""),
 
+  hasTrackedChanges: (dir) =>
+    Effect.sync(
+      () =>
+        (gitCmd(dir, ["status", "--porcelain", "--untracked-files=no"]) ?? "") !==
+        "",
+    ),
+
   currentBranch: (dir) =>
     Effect.sync(() => gitCmd(dir, ["symbolic-ref", "--short", "HEAD"])),
 
@@ -75,6 +84,7 @@ export const GitEnvLive: Layer.Layer<GitEnv> = Layer.succeed(GitEnv)(liveShape);
 export const GitEnvTest = (answers: {
   primary?: ReadonlyArray<string>;
   dirty?: ReadonlyArray<string>;
+  trackedDirty?: ReadonlyArray<string>;
   branches?: Record<string, string>;
   roots?: Record<string, string>;
 }): Layer.Layer<GitEnv> =>
@@ -83,6 +93,12 @@ export const GitEnvTest = (answers: {
       Effect.succeed((answers.primary ?? []).some((p) => dir.startsWith(p))),
     isDirty: (dir) =>
       Effect.succeed((answers.dirty ?? []).some((p) => dir.startsWith(p))),
+    hasTrackedChanges: (dir) =>
+      Effect.succeed(
+        (answers.trackedDirty ?? answers.dirty ?? []).some((p) =>
+          dir.startsWith(p),
+        ),
+      ),
     currentBranch: (dir) =>
       Effect.succeed(
         Object.entries(answers.branches ?? {}).find(([p]) =>

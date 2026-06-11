@@ -3,10 +3,11 @@ import { Effect } from "effect";
 import enforceWorktree from "./enforce-worktree.ts";
 import { GitEnvTest } from "../git-env.ts";
 
-const run = (command: string, opts?: { dirty?: boolean; primary?: boolean }) => {
+const run = (command: string, opts?: { dirty?: boolean; trackedDirty?: boolean; primary?: boolean }) => {
   const layer = GitEnvTest({
     primary: (opts?.primary ?? true) ? ["/repo"] : [],
     dirty: opts?.dirty ? ["/repo"] : [],
+    trackedDirty: opts?.trackedDirty ? ["/repo"] : [],
     branches: { "/repo": "main" },
     roots: { "/repo": "/repo" },
   });
@@ -52,6 +53,9 @@ describe("guard A: branch switch on primary tree", () => {
     const r = await withEnv("ALLOW_BRANCH_CHECKOUT", () => run("git checkout main"));
     expect((r as { _tag: string })._tag).toBe("Allow");
   });
+  test("inline bypass ALLOW_BRANCH_CHECKOUT=1 -> Allow", async () => {
+    expect((await run("ALLOW_BRANCH_CHECKOUT=1 git checkout main", { dirty: true }))._tag).toBe("Allow");
+  });
   test("git checkout -B hotfix -> Allow (uppercase create)", async () => {
     expect((await run("git checkout -B hotfix"))._tag).toBe("Allow");
   });
@@ -63,14 +67,14 @@ describe("guard A: branch switch on primary tree", () => {
 
 describe("guard B: history mutation into dirty primary tree", () => {
   test("git merge x, dirty primary -> Block", async () => {
-    expect((await run("git merge x", { dirty: true }))._tag).toBe("Block");
+    expect((await run("git merge x", { trackedDirty: true }))._tag).toBe("Block");
   });
   test("git -C /repo merge x, dirty -> Block (the -C hole)", async () => {
-    expect((await run("git -C /repo merge --ff-only feat", { dirty: true }))._tag).toBe("Block");
+    expect((await run("git -C /repo merge --ff-only feat", { trackedDirty: true }))._tag).toBe("Block");
   });
   test("git reset --hard, dirty -> Block; plain reset -> Allow", async () => {
-    expect((await run("git reset --hard HEAD~1", { dirty: true }))._tag).toBe("Block");
-    expect((await run("git reset HEAD~1", { dirty: true }))._tag).toBe("Allow");
+    expect((await run("git reset --hard HEAD~1", { trackedDirty: true }))._tag).toBe("Block");
+    expect((await run("git reset HEAD~1", { trackedDirty: true }))._tag).toBe("Allow");
   });
   test("git merge x, CLEAN primary -> Allow (PR land flow untouched)", async () => {
     expect((await run("git merge x", { dirty: false }))._tag).toBe("Allow");
@@ -79,25 +83,31 @@ describe("guard B: history mutation into dirty primary tree", () => {
     expect((await run("echo git merge"))._tag).toBe("Allow");
   });
   test("echo git merge, dirty primary -> Allow (substring false-positive regression)", async () => {
-    expect((await run("echo git merge", { dirty: true }))._tag).toBe("Allow");
+    expect((await run("echo git merge", { trackedDirty: true }))._tag).toBe("Allow");
   });
   test('echo "git merge x", dirty primary -> Allow', async () => {
-    expect((await run('echo "git merge x"', { dirty: true }))._tag).toBe("Allow");
+    expect((await run('echo "git merge x"', { trackedDirty: true }))._tag).toBe("Allow");
   });
   test("cd /x && git merge y, dirty -> Block", async () => {
-    expect((await run("cd /x && git merge y", { dirty: true }))._tag).toBe("Block");
+    expect((await run("cd /x && git merge y", { trackedDirty: true }))._tag).toBe("Block");
   });
   test("FOO=1 git merge x, dirty -> Block", async () => {
-    expect((await run("FOO=1 git merge x", { dirty: true }))._tag).toBe("Block");
+    expect((await run("FOO=1 git merge x", { trackedDirty: true }))._tag).toBe("Block");
   });
   test("git -c user.name=x merge y, dirty -> Block", async () => {
-    expect((await run("git -c user.name=x merge y", { dirty: true }))._tag).toBe("Block");
+    expect((await run("git -c user.name=x merge y", { trackedDirty: true }))._tag).toBe("Block");
   });
   test("something | git rebase main, dirty -> Block", async () => {
-    expect((await run("something | git rebase main", { dirty: true }))._tag).toBe("Block");
+    expect((await run("something | git rebase main", { trackedDirty: true }))._tag).toBe("Block");
   });
   test("bypass ALLOW_DIRTY_MAIN_MUTATION=1 -> Allow", async () => {
-    const r = await withEnv("ALLOW_DIRTY_MAIN_MUTATION", () => run("git merge x", { dirty: true }));
+    const r = await withEnv("ALLOW_DIRTY_MAIN_MUTATION", () => run("git merge x", { trackedDirty: true }));
     expect((r as { _tag: string })._tag).toBe("Allow");
+  });
+  test("inline bypass ALLOW_DIRTY_MAIN_MUTATION=1 -> Allow", async () => {
+    expect((await run("ALLOW_DIRTY_MAIN_MUTATION=1 git merge x", { trackedDirty: true }))._tag).toBe("Allow");
+  });
+  test("untracked-only tree is not dirty for history mutation guard", async () => {
+    expect((await run("git merge x", { dirty: true, trackedDirty: false }))._tag).toBe("Allow");
   });
 });

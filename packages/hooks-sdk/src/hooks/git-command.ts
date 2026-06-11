@@ -16,6 +16,8 @@ export interface GitInvocation {
   readonly cPath: string | null;
   /** tokens after the verb. */
   readonly args: ReadonlyArray<string>;
+  /** leading shell VAR=value assignments scoped to this invocation. */
+  readonly env?: Readonly<Record<string, string>>;
 }
 
 const SEPARATORS = /\|\||&&|;|\||\n/;
@@ -39,7 +41,13 @@ export const findGitInvocations = (command: string): GitInvocation[] => {
   for (const segment of command.split(SEPARATORS)) {
     const tokens = segment.trim().split(/\s+/).filter((t) => t !== "");
     let i = 0;
-    while (i < tokens.length && VAR_ASSIGNMENT.test(tokens[i] as string)) i++;
+    const env: Record<string, string> = {};
+    while (i < tokens.length && VAR_ASSIGNMENT.test(tokens[i] as string)) {
+      const token = tokens[i] as string;
+      const eq = token.indexOf("=");
+      env[token.slice(0, eq)] = stripQuotes(token.slice(eq + 1));
+      i++;
+    }
     if (tokens[i] !== "git") continue;
     i++;
 
@@ -66,7 +74,12 @@ export const findGitInvocations = (command: string): GitInvocation[] => {
       break;
     }
     if (verb === null) continue;
-    out.push({ verb, cPath, args: tokens.slice(i) });
+    out.push({
+      verb,
+      cPath,
+      args: tokens.slice(i),
+      ...(Object.keys(env).length > 0 ? { env } : {}),
+    });
   }
   return out;
 };

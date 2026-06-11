@@ -53,12 +53,12 @@ describe("findGitInvocations", () => {
     ]);
   });
 
-  test("leading VAR=value tokens are stripped", () => {
+  test("leading VAR=value tokens are retained as scoped env", () => {
     expect(findGitInvocations("FOO=1 git merge x")).toEqual([
-      { verb: "merge", cPath: null, args: ["x"] },
+      { verb: "merge", cPath: null, args: ["x"], env: { FOO: "1" } },
     ]);
     expect(findGitInvocations("A=1 B=2 git status")).toEqual([
-      { verb: "status", cPath: null, args: [] },
+      { verb: "status", cPath: null, args: [], env: { A: "1", B: "2" } },
     ]);
   });
 

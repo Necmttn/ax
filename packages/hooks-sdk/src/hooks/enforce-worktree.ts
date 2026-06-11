@@ -32,6 +32,9 @@ const isGuardedMutation = (inv: GitInvocation): boolean => {
   return false;
 };
 
+const hasBypass = (name: string, inv: GitInvocation): boolean =>
+  process.env[name] === "1" || inv.env?.[name] === "1";
+
 const blockDirtyMsg = (target: string, branch: string, command: string) =>
   `BLOCKED: history-mutating git op against a DIRTY primary working tree.
 
@@ -72,21 +75,24 @@ const hook = defineHook({
       if (invocations.length === 0) return Verdict.allow;
 
       // ---- Guard B: history mutation into a DIRTY primary tree ----
-      if (process.env.ALLOW_DIRTY_MAIN_MUTATION !== "1") {
-        for (const inv of invocations) {
-          if (!isGuardedMutation(inv)) continue;
-          // Target tree: explicit `git -C <path>` wins, else the event cwd.
-          const target = inv.cPath ?? event.cwd;
-          if ((yield* git.isPrimaryTree(target)) && (yield* git.isDirty(target))) {
-            const branch = (yield* git.currentBranch(target)) ?? "(detached)";
-            return Verdict.block(blockDirtyMsg(target, branch, command));
-          }
+      for (const inv of invocations) {
+        if (hasBypass("ALLOW_DIRTY_MAIN_MUTATION", inv)) continue;
+        if (!isGuardedMutation(inv)) continue;
+        // Target tree: explicit `git -C <path>` wins, else the event cwd.
+        const target = inv.cPath ?? event.cwd;
+        if (
+          (yield* git.isPrimaryTree(target)) &&
+          (yield* git.hasTrackedChanges(target))
+        ) {
+          const branch = (yield* git.currentBranch(target)) ?? "(detached)";
+          return Verdict.block(blockDirtyMsg(target, branch, command));
         }
       }
 
       // ---- Guard A: branch switching on the primary tree (cwd-scoped) ----
       if (process.env.ALLOW_BRANCH_CHECKOUT === "1") return Verdict.allow;
       for (const inv of invocations) {
+        if (hasBypass("ALLOW_BRANCH_CHECKOUT", inv)) continue;
         if (inv.verb !== "checkout" && inv.verb !== "switch") continue;
         // Explicit `git -C <path>` targets another tree - guard B territory.
         if (inv.cPath !== null) continue;
