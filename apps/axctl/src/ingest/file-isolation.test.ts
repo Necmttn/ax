@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { Effect, Exit } from "effect";
 import { DbError } from "@ax/lib/errors";
-import { makeFileFailureCollector } from "./file-isolation.ts";
+import { type FileFailureSnapshot, makeFileFailureCollector } from "./file-isolation.ts";
 
 const queryError = (message: string) => new DbError({ operation: "query", message });
 const connectError = () => new DbError({ operation: "connect", message: "daemon not reachable" });
@@ -69,6 +69,47 @@ describe("makeFileFailureCollector", () => {
         const exit = await run(c.isolate("/a", Effect.die(new Error("bug"))));
         expect(Exit.isFailure(exit)).toBe(true);
         expect(c.count()).toBe(0);
+    });
+
+    test("onFailure receives a cumulative snapshot per recorded failure, never on success", async () => {
+        const snapshots: FileFailureSnapshot[] = [];
+        const c = makeFileFailureCollector({
+            source: "test",
+            onFailure: (snapshot) => Effect.sync(() => snapshots.push(snapshot)),
+        });
+        await run(c.isolate("/ok", Effect.succeed(1)));
+        expect(snapshots).toEqual([]);
+        await run(c.isolate("/a.jsonl", Effect.fail(queryError("boom"))));
+        await run(c.isolate("/b.jsonl", Effect.fail(queryError("crash"))));
+        expect(snapshots).toEqual([
+            { total: 1, failures: [{ filePath: "/a.jsonl", tag: "DbError", message: "boom" }] },
+            {
+                total: 2,
+                failures: [
+                    { filePath: "/a.jsonl", tag: "DbError", message: "boom" },
+                    { filePath: "/b.jsonl", tag: "DbError", message: "crash" },
+                ],
+            },
+        ]);
+        // Snapshots are independent copies - later failures must not mutate
+        // an earlier snapshot a consumer already holds.
+        expect(snapshots[0].failures.length).toBe(1);
+    });
+
+    test("onFailure keeps reporting the uncapped total past the detail cap", async () => {
+        const snapshots: FileFailureSnapshot[] = [];
+        const c = makeFileFailureCollector({
+            source: "test",
+            stormThreshold: 1000,
+            onFailure: (snapshot) => Effect.sync(() => snapshots.push(snapshot)),
+        });
+        for (let i = 0; i < 30; i++) {
+            await run(c.isolate("/ok", Effect.succeed(1)));
+            await run(c.isolate(`/f${i}`, Effect.fail(queryError("x"))));
+        }
+        const last = snapshots.at(-1);
+        expect(last?.total).toBe(30);
+        expect(last?.failures.length).toBe(25);
     });
 
     test("report is a no-op at zero failures and logs otherwise", async () => {

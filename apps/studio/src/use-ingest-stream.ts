@@ -1,6 +1,6 @@
 import { useEffect, useReducer } from "react";
 import { stream, type StreamResponse } from "@durable-streams/client";
-import type { IngestStreamEvent } from "@ax/lib/shared/ingest-stream-events";
+import type { IngestFileFailure, IngestStreamEvent } from "@ax/lib/shared/ingest-stream-events";
 
 /**
  * Live ingest view over Durable Streams.
@@ -29,10 +29,20 @@ export interface StageProgress {
     readonly etaLeftMs: number | null;
 }
 
+/** Per-stage skipped-file state folded from `stage_file_failures` events.
+ *  Each event carries the cumulative snapshot, so the latest one wins -
+ *  `failures` is the capped detail list (25), `total` the uncapped count. */
+export interface StageFileFailures {
+    readonly total: number;
+    readonly failures: ReadonlyArray<IngestFileFailure>;
+}
+
 export interface IngestStreamState {
     readonly stages: Record<string, StageStatus>;
     /** Per-stage live progress (current/total/rate/eta), keyed by stage name. */
     readonly progress: Record<string, StageProgress>;
+    /** Per-stage skipped-file failures, keyed by stage name. Empty on a clean run. */
+    readonly fileFailures: Record<string, StageFileFailures>;
     readonly order: ReadonlyArray<string>;
     readonly finished: boolean;
     readonly runStatus: RunStatus;
@@ -47,6 +57,7 @@ export interface IngestStreamState {
 const IDLE: IngestStreamState = {
     stages: {},
     progress: {},
+    fileFailures: {},
     order: [],
     finished: false,
     runStatus: "running",
@@ -58,8 +69,8 @@ type Action =
     | { readonly type: "error"; readonly message: string };
 
 /** Fold one ingest event into state. Idempotent: re-applying a finished stage
- *  (or a duplicate run_started) leaves state unchanged. */
-function applyEvent(state: IngestStreamState, event: IngestStreamEvent): IngestStreamState {
+ *  (or a duplicate run_started) leaves state unchanged. Exported for tests. */
+export function applyEvent(state: IngestStreamState, event: IngestStreamEvent): IngestStreamState {
     switch (event.kind) {
         case "run_started":
             return { ...state, label: event.label, runStatus: "running" };
@@ -93,6 +104,21 @@ function applyEvent(state: IngestStreamState, event: IngestStreamEvent): IngestS
                     },
                 },
                 order: known ? state.order : [...state.order, event.stage],
+            };
+        }
+        case "stage_file_failures": {
+            // Snapshots are cumulative; the latest one supersedes. Replaying a
+            // finished run re-applies the same snapshots in order, converging
+            // on the identical final state (idempotent rehydrate). Unlike
+            // progress bars, the failure list stays visible after the stage
+            // (and run) finishes - it's the post-run report.
+            if (event.total <= 0) return state;
+            return {
+                ...state,
+                fileFailures: {
+                    ...state.fileFailures,
+                    [event.stage]: { total: event.total, failures: event.failures },
+                },
             };
         }
         case "stage_finished": {

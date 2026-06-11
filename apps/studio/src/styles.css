@@ -2005,12 +2005,63 @@ td.skill-cell .description {
 
 .ingest-stage {
     display: flex;
-    align-items: center;
-    gap: 10px;
+    flex-direction: column;
+    gap: 4px;
     padding: 6px 10px;
     border: 1px solid var(--line);
     background: var(--panel);
     font-size: 13px;
+}
+
+.ingest-stage-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+/* Skipped-file failures under a stage row (per-file isolation, issue #257):
+   collapsed count summary, expands to the capped detail list. */
+.ingest-stage-skipped {
+    margin: 0 0 2px 26px;
+    font-size: 12px;
+}
+
+.ingest-stage-skipped > summary {
+    cursor: pointer;
+    color: var(--gold);
+    width: fit-content;
+}
+
+.ingest-stage-skipped-list {
+    list-style: none;
+    margin: 4px 0 2px;
+    padding: 0 0 0 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    border-left: 2px solid var(--line);
+}
+
+.ingest-stage-skipped-list > li {
+    display: flex;
+    flex-wrap: wrap;
+    column-gap: 8px;
+    min-width: 0;
+}
+
+.ingest-stage-skipped-path {
+    font-family: inherit;
+    overflow-wrap: anywhere;
+}
+
+.ingest-stage-skipped-error {
+    color: var(--muted);
+    overflow-wrap: anywhere;
+}
+
+.ingest-stage-skipped-overflow {
+    color: var(--muted);
+    font-style: italic;
 }
 
 .ingest-stage-glyph {

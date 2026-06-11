@@ -1,6 +1,8 @@
-import { Deferred, Effect, Semaphore } from "effect";
+import { Deferred, Effect, Option, Semaphore } from "effect";
 import type { DbError } from "@ax/lib/errors";
 import { LiveTrace } from "@ax/lib/live-traces/index";
+import type { FileFailureSnapshot } from "../file-isolation.ts";
+import { INGEST_FILE_FAILURES_KEY } from "../stream-events.ts";
 import type { BaseStageStats, IngestContext, StageDef } from "./types.ts";
 
 /** Max stages running their `run` Effect concurrently. Each stage has its own
@@ -51,6 +53,36 @@ export const annotateStageProgress = (
             }
         }
     });
+
+/**
+ * Build a hook that publishes a stage's cumulative skipped-file snapshot onto
+ * the STAGE span as a JSON `ingest.fileFailures` attribute (emitted immediately
+ * as an `attribute:*` SpanEvent - see `WrappedSpan.attribute` - which
+ * `ingestStreamEventFromTrace` turns into a `stage_file_failures` stream
+ * event for the dashboard Live tab).
+ *
+ * Unlike {@link annotateStageProgress}, this can NOT use
+ * `Effect.annotateCurrentSpan` at emission time: the failure collector invokes
+ * its `onFailure` hook deep inside per-file child spans (`transcripts.file`,
+ * `codex.ingest`, ...), so the *current* span there is not the stage span and
+ * the snapshot would be keyed to the wrong stage name. Instead, run this
+ * effect at the top of `StageDef.run` - where the current span IS the stage's
+ * `LiveTrace.step` span - to capture that span once, and pass the returned
+ * hook into the stage's ingest function. Outside a live trace (plain CLI run,
+ * tests) the attribute lands on a regular span (or nowhere when no span
+ * exists) and nothing else changes: the CLI keeps its aggregate warn log.
+ */
+export const stageFileFailureAnnotator: Effect.Effect<
+    (snapshot: FileFailureSnapshot) => Effect.Effect<void>
+> = Effect.gen(function* () {
+    const span = yield* Effect.option(Effect.currentSpan);
+    return (snapshot) =>
+        Effect.sync(() => {
+            if (Option.isSome(span) && snapshot.total > 0) {
+                span.value.attribute(INGEST_FILE_FAILURES_KEY, JSON.stringify(snapshot));
+            }
+        });
+});
 
 /** Kahn's algorithm; throws on cycle. Layers are useful for diagnostics, but
  *  `runPipeline` uses Deferreds for tighter scheduling (no layer barriers). */

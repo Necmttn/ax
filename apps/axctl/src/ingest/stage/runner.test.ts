@@ -8,7 +8,7 @@ import {
 } from "@ax/lib/live-traces/Sink";
 import type { TraceEvent } from "@ax/lib/live-traces/types";
 import { LiveTrace } from "@ax/lib/live-traces/index";
-import { annotateStageProgress, PIPELINE_CONCURRENCY, runPipeline, topoLayers } from "./runner.ts";
+import { annotateStageProgress, PIPELINE_CONCURRENCY, runPipeline, stageFileFailureAnnotator, topoLayers } from "./runner.ts";
 import { BaseStageStats, IngestContext, StageMeta, type StageDef } from "./types.ts";
 
 const stage = (key: string, deps: string[]): StageDef => ({
@@ -224,5 +224,98 @@ describe("annotateStageProgress", () => {
         const recordsValue =
             recordsEvent && "attributes" in recordsEvent ? recordsEvent.attributes?.value : null;
         expect(recordsValue).toBe(42);
+    });
+});
+
+// The failure collector fires its onFailure hook deep inside per-file child
+// spans (transcripts.file etc.). `stageFileFailureAnnotator` must pin the
+// snapshot to the STAGE span captured at StageDef.run entry, not whatever
+// span happens to be current at emission time - otherwise the Live tab keys
+// the skipped-file list to a phantom stage name.
+describe("stageFileFailureAnnotator", () => {
+    it("emits the snapshot on the stage span even when invoked inside a nested child span", async () => {
+        const events: TraceEvent[] = [];
+        const ctx = IngestContext.make({ cwd: "/tmp/ax", since: new Date(0), debug: false });
+        const snapshot = {
+            total: 3,
+            failures: [{ filePath: "/p/a.jsonl", tag: "DbError", message: "boom" }],
+        };
+
+        const demo: StageDef = {
+            meta: StageMeta.make({ key: "demo", deps: [], tags: ["ingest"] }),
+            run: () =>
+                Effect.gen(function* () {
+                    const onFileFailures = yield* stageFileFailureAnnotator;
+                    // Emit from inside a child span, like the per-file loops do.
+                    yield* Effect.withSpan(onFileFailures(snapshot), "demo.file");
+                    return BaseStageStats.make({ durationMs: 1, summary: "demo done" });
+                }),
+        };
+
+        await Effect.runPromise(
+            runPipeline([demo], ctx).pipe(
+                LiveTrace.withTrace({
+                    traceId: "ingest:test",
+                    label: "ingest demo",
+                    scope: { type: "user", id: "test" },
+                }),
+                Effect.provide(traceLayer(events)),
+            ) as Effect.Effect<unknown, never, never>,
+        );
+
+        const failureEvent = events.find(
+            (e) => e._tag === "SpanEvent" && e.name === "attribute:ingest.fileFailures",
+        );
+        expect(failureEvent).toBeDefined();
+        const value = failureEvent && "attributes" in failureEvent ? failureEvent.attributes?.value : null;
+        expect(JSON.parse(String(value))).toEqual(snapshot);
+
+        // Keyed to the stage span: the SpanEvent's spanId must be the span
+        // whose SpanStart carries the stage name, not the nested child span.
+        const stageStart = events.find(
+            (e) => e._tag === "SpanStart" && e.name === "demo",
+        );
+        const childStart = events.find(
+            (e) => e._tag === "SpanStart" && e.name === "demo.file",
+        );
+        expect(stageStart).toBeDefined();
+        expect(childStart).toBeDefined();
+        if (failureEvent?._tag === "SpanEvent" && stageStart?._tag === "SpanStart" && childStart?._tag === "SpanStart") {
+            expect(failureEvent.spanId).toBe(stageStart.spanId);
+            expect(failureEvent.spanId).not.toBe(childStart.spanId);
+        }
+    });
+
+    it("emits nothing for an empty snapshot or outside any span", async () => {
+        const events: TraceEvent[] = [];
+        const ctx = IngestContext.make({ cwd: "/tmp/ax", since: new Date(0), debug: false });
+
+        const demo: StageDef = {
+            meta: StageMeta.make({ key: "demo", deps: [], tags: ["ingest"] }),
+            run: () =>
+                Effect.gen(function* () {
+                    const onFileFailures = yield* stageFileFailureAnnotator;
+                    yield* onFileFailures({ total: 0, failures: [] });
+                    return BaseStageStats.make({ durationMs: 1, summary: "clean" });
+                }),
+        };
+
+        await Effect.runPromise(
+            runPipeline([demo], ctx).pipe(
+                LiveTrace.withTrace({
+                    traceId: "ingest:test",
+                    label: "ingest demo",
+                    scope: { type: "user", id: "test" },
+                }),
+                Effect.provide(traceLayer(events)),
+            ) as Effect.Effect<unknown, never, never>,
+        );
+        expect(
+            events.some((e) => e._tag === "SpanEvent" && e.name === "attribute:ingest.fileFailures"),
+        ).toBe(false);
+
+        // Outside any span (plain CLI/test context): the hook is a no-op, not a crash.
+        const hook = await Effect.runPromise(stageFileFailureAnnotator);
+        await Effect.runPromise(hook({ total: 5, failures: [] }));
     });
 });

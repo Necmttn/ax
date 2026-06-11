@@ -6,7 +6,7 @@ import { decodeJsonOrNull } from "@ax/lib/decode";
 import { recordRef, surrealDate, surrealJsonOption, surrealObject, surrealOptionInt, surrealOptionString, surrealString } from "@ax/lib/shared/surql";
 import { AppLayer } from "@ax/lib/layers";
 import { BaseStageStats, IngestContext, sinceDaysFromCtx, StageMeta } from "./stage/types.ts";
-import { annotateStageProgress } from "./stage/runner.ts";
+import { annotateStageProgress, stageFileFailureAnnotator } from "./stage/runner.ts";
 import type { StageDef } from "./stage/registry.ts";
 import {
     type PlanSnapshotWrite,
@@ -45,7 +45,7 @@ import { safeKeyPart } from "@ax/lib/shared/derive-keys";
 import { tokenQualityLabels } from "./token-quality.ts";
 import { estimateCost } from "./model-pricing.ts";
 import { walkJsonlFilesStrict } from "./walk-jsonl.ts";
-import { makeFileFailureCollector } from "./file-isolation.ts";
+import { type FileFailureSnapshot, makeFileFailureCollector } from "./file-isolation.ts";
 
 const DEFAULT_CODEX_RAW_MAX_BYTES = 5 * 1024 * 1024;
 const DEFAULT_CODEX_PROGRESS_EVERY = 10;
@@ -1389,6 +1389,10 @@ const queryCodexStatements = (statements: readonly string[]) =>
 interface CodexIngestOpts {
     sinceDays: number | undefined;
     onProgress: (counts: Record<string, number>) => Effect.Effect<void>;
+    /** Cumulative skipped-file snapshots from the failure collector (see
+     *  file-isolation.ts). The stage wires `stageFileFailureAnnotator` here so
+     *  the dashboard Live tab can list which files were skipped and why. */
+    onFileFailures: (snapshot: FileFailureSnapshot) => Effect.Effect<void>;
     /** Hard cap on session files processed - a backstop for `ingest --dry-run`
      *  calibration (paired with `deadlineMs`). */
     limit: number | undefined;
@@ -1442,7 +1446,10 @@ export const ingestCodex = Effect.fn("codex.ingest")(
         let activeFiles = 0;
         const recordCount = () => turnCount + invCount + toolCallCount + planSnapshotCount;
 
-        const failures = makeFileFailureCollector({ source: "codex" });
+        const failures = makeFileFailureCollector({
+            source: "codex",
+            ...(opts.onFileFailures ? { onFailure: opts.onFileFailures } : {}),
+        });
         yield* Effect.forEach(files.map((file, index) => ({ file, index })), ({ file, index }) => Effect.gen(function* () {
             // Time-box (dry-run calibration): once the deadline passes, start no
             // new files; in-flight ones finish.
@@ -1759,12 +1766,16 @@ export const codexStage: StageDef<CodexStageStats, SurrealClient | AxConfig | Fi
     run: Effect.fn(function* (ctx: IngestContext) {
         const t0 = Date.now();
         const sinceDays = sinceDaysFromCtx(ctx);
+        // Capture the stage span HERE (current span = the runner's
+        // LiveTrace.step span) so failure snapshots emitted from deep inside
+        // per-file child spans still key to this stage on the live stream.
+        const onFileFailures = yield* stageFileFailureAnnotator;
         // A vanished session file is caught + skipped inside `ingestCodex`;
         // any PlatformError that escapes here is a genuine FS fault (e.g. an
         // unreadable sessions root or a non-NotFound stat/stream error), so
         // it dies as a defect rather than masquerading as a recoverable
         // DbError - mirroring `claudeStage`.
-        const result = yield* ingestCodex({ sinceDays, onProgress: annotateStageProgress }).pipe(
+        const result = yield* ingestCodex({ sinceDays, onProgress: annotateStageProgress, onFileFailures }).pipe(
             Effect.catchTag("PlatformError", (e) => Effect.die(e)),
         );
         return CodexStageStats.make({
