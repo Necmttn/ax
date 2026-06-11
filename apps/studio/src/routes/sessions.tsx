@@ -179,7 +179,7 @@ function Row({ s, indent, burnP90, expandedToggle, insight, select }: RowProps) 
             <td style={{ fontFamily: "ui-monospace, monospace", fontSize: 12, color: "var(--muted)", textAlign: "right" }}>{fmtDuration(s.started_at, s.ended_at)}</td>
             <td style={{ textAlign: "right", fontFamily: "ui-monospace, monospace", fontSize: 12, fontVariantNumeric: "tabular-nums", color: s.turn_count > 0 ? "var(--ink)" : "var(--muted-2)" }}>{s.turn_count > 0 ? s.turn_count.toLocaleString() : "-"}</td>
             <td style={{ textAlign: "center", padding: "6px 8px" }}>
-                <BurnSpark buckets={s.burn_buckets} p90={burnP90 ?? null} />
+                <BurnSpark buckets={s.burn_buckets} p90={burnP90 ?? null} turnCount={s.turn_count > 0 ? s.turn_count : null} />
             </td>
             <td style={{ textAlign: "right", fontFamily: "ui-monospace, monospace", fontSize: 12, fontVariantNumeric: "tabular-nums", color: s.cost_usd != null ? "var(--ink)" : "var(--sx-ink-300)" }}>
                 {s.cost_usd != null ? `$${s.cost_usd.toFixed(2)}` : "–"}

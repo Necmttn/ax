@@ -76,12 +76,13 @@ export const fetchSessionBaselines = (): Effect.Effect<SessionBaselines, DbError
             WHERE ts > time::now() - 30d;
             SELECT time_to_land_ms
             FROM session_metrics
-            WHERE session.started_at > time::now() - 30d
+            WHERE ts > time::now() - 30d
               AND time_to_land_ms IS NOT NONE;
             SELECT estimated_tokens, turns
             FROM session_health
             WHERE ts > time::now() - 30d
-              AND turns > 0;
+              AND turns > 0
+              AND estimated_tokens > 0;
         `);
 
         const burnRates = burnRows

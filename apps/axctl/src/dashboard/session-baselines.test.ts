@@ -71,7 +71,12 @@ describe("fetchSessionBaselines", () => {
         expect(sql).toContain("FROM session_token_usage");
         expect(sql).toContain("FROM session_health");
         expect(sql).toContain("FROM session_metrics");
-        expect(sql).toContain("session.started_at > time::now() - 30d");
+        // session_metrics uses table-own ts field (no per-row deref)
+        expect(sql).toContain("WHERE ts > time::now() - 30d");
+        // zero-token sessions excluded from burn p90
+        expect(sql).toContain("AND estimated_tokens > 0");
+        // guard: no per-row record deref in any baseline statement
+        expect(sql).not.toContain("session.");
         expect(sql).not.toMatch(/FROM turn\b/);
         expect(sql).not.toContain("turn_token_usage");
         expect((sql.match(/SELECT/g) ?? []).length).toBe(4);
