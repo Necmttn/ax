@@ -137,6 +137,15 @@ export const fetchSessionsList = (opts: SessionsListOpts = {}): Effect.Effect<Se
                     parent_session: null,
                     // Filled in below after the spawned-counts query.
                     direct_children_count: 0,
+                    cost_usd: null,
+                    burn_buckets: null,
+                    friction: null,
+                    signal: null,
+                    produced_commits: null,
+                    reverted_commits: null,
+                    lines_added: null,
+                    lines_removed: null,
+                    is_live: false,
                 };
             },
             (row) => row.total,
@@ -170,7 +179,7 @@ export const fetchSessionsList = (opts: SessionsListOpts = {}): Effect.Effect<Se
         // keeps the UI from claiming fewer rows than it just rendered.
         const total_count = Math.max(paged.total, sessions.length + offset);
 
-        return { sessions, total_count, window: { offset, limit } };
+        return { sessions, total_count, burn_p90: null, window: { offset, limit } };
     });
 
 /**
@@ -232,6 +241,15 @@ export const fetchSessionChildren = (
             has_raw_file: !!r.has_raw_file,
             turn_count: 0,
             parent_session,
+            cost_usd: null,
+            burn_buckets: null,
+            friction: null,
+            signal: null,
+            produced_commits: null,
+            reverted_commits: null,
+            lines_added: null,
+            lines_removed: null,
+            is_live: false,
         }));
 
         return { parent_session, children };

@@ -811,6 +811,26 @@ export interface SessionListRow {
      *  SPA to render an expand toggle without first fetching children. Only
      *  populated on roots returned from `/api/sessions`. */
     readonly direct_children_count?: number;
+    /** Enrichment block - every field nullable: aggregate rows may not exist
+     *  for a session (pre-backfill ingests, 8s hook-probes, foreign sources).
+     *  Sourced from session_health / session_token_usage / session_metrics
+     *  batch lookups - NEVER from turn-table scans. */
+    readonly cost_usd: number | null;
+    /** Downsampled per-turn estimated tokens (≤20 buckets) for the BURN
+     *  sparkline. Null when the ingest predates burn_buckets backfill. */
+    readonly burn_buckets: ReadonlyArray<number> | null;
+    /** user_corrections + tool_errors. Null when no session_health row. */
+    readonly friction: number | null;
+    /** 'clean' = health row exists and friction is 0. Null = no health data. */
+    readonly signal: "clean" | "friction" | null;
+    readonly produced_commits: number | null;
+    readonly reverted_commits: number | null;
+    readonly lines_added: number | null;
+    readonly lines_removed: number | null;
+    /** ended_at is null AND the latest health derive write is recent - the
+     *  watcher re-ingests live transcripts within ~1 min, so a fresh
+     *  session_health.ts is the cheapest liveness proxy. */
+    readonly is_live: boolean;
 }
 
 export interface SessionListResponse {
@@ -819,6 +839,9 @@ export interface SessionListResponse {
     readonly sessions: ReadonlyArray<SessionListRow>;
     /** Total root count for the active filter set (independent of window). */
     readonly total_count: number;
+    /** The user's 30-day p90 per-turn token burn. The SPA colors sparkline
+     *  buckets amber only above this threshold. Null when no usage history. */
+    readonly burn_p90: number | null;
     /** The slice that was returned. Stays pinned to the first page on the
      *  SPA side when subsequent pages are appended to the same cache key. */
     readonly window: { readonly offset: number; readonly limit: number };
@@ -827,6 +850,48 @@ export interface SessionListResponse {
 export interface SessionChildrenResponse {
     readonly parent_session: SessionId;
     readonly children: ReadonlyArray<SessionListRow>;
+}
+
+/** Wire format for `/api/sessions/:id/insights` - the expandable insight
+ *  panel on the sessions list. All sections optional-by-emptiness: a session
+ *  with no data for a section gets an empty array / null, and the SPA hides
+ *  that cell. */
+export interface SessionInsightsPayload {
+    readonly session: SessionId;
+    readonly phases: ReadonlyArray<{
+        readonly phase: string;
+        readonly start_ts: string;
+        readonly end_ts: string;
+        readonly duration_ms: number;
+    }>;
+    readonly friction_ticks: ReadonlyArray<{ readonly ts: string; readonly kind: string }>;
+    readonly commits: ReadonlyArray<{ readonly ts: string; readonly sha: string; readonly reverted: boolean }>;
+    readonly subagent_spans: ReadonlyArray<{
+        readonly id: SessionId;
+        readonly started_at: string | null;
+        readonly ended_at: string | null;
+    }>;
+    readonly checks: ReadonlyArray<{
+        readonly kind: string;
+        readonly runs: ReadonlyArray<{ readonly ts: string; readonly ok: boolean }>;
+    }>;
+    readonly loc: {
+        readonly added: number;
+        readonly removed: number;
+    } | null;
+    readonly durability: number | null;
+    readonly delegation_ratio: number | null;
+    readonly skills: ReadonlyArray<{ readonly name: string; readonly ts: string }>;
+    /** Context-fill curve, ≤60 points; t = ms offset from session start,
+     *  pct = estimated context fill 0..1 (prompt+cache tokens / window). */
+    readonly context_curve: ReadonlyArray<{ readonly t: number; readonly pct: number }>;
+    readonly compactions: ReadonlyArray<{ readonly ts: string }>;
+    readonly baseline: {
+        readonly cost_ratio: number | null;
+        readonly friction_ratio: number | null;
+        readonly land_ratio: number | null;
+        readonly cache_pct: number | null;
+    };
 }
 
 /** Session inspector: dissected turns with semantic span labels.
