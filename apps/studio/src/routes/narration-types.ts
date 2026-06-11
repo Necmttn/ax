@@ -98,13 +98,36 @@ export interface TermAnchor {
     readonly definition: string;
 }
 
+/**
+ * A snapshot of a named evolving artifact - architecture pseudo-code, a call
+ * graph, a type shape - as it stands AT this stop. Consecutive stops carrying
+ * the same `artifact` id animate between snapshots (token morph), which is
+ * the register where motion actually explains: a method appears, a shape
+ * renames, an edge case slots in. Unrelated code jumps should be file_hunk
+ * anchors instead - those render as static before/after diffs.
+ */
+export interface CodeStateAnchor {
+    readonly kind: "code_state";
+    /** Stable id of the evolving thing, e.g. "review-architecture". Morphing
+     *  happens only between snapshots sharing this id. */
+    readonly artifact: string;
+    /** One-line label for this snapshot's state. */
+    readonly label: string;
+    /** Canonical grammar id ("typescript", "text", ...). */
+    readonly lang: string;
+    /** The full snapshot - not a fragment; each stop restates the artifact. */
+    readonly code: string;
+    readonly turn_seq?: number;
+}
+
 export type NarrationAnchor =
     | FileHunkAnchor
     | TurnAnchor
     | UserDirectionAnchor
     | CorrectionAnchor
     | ToolFailureAnchor
-    | TermAnchor;
+    | TermAnchor
+    | CodeStateAnchor;
 
 export type NarrationAnchorKind = NarrationAnchor["kind"];
 
@@ -192,6 +215,14 @@ export function isNarrationAnchor(value: unknown): value is NarrationAnchor {
             );
         case "term":
             return isNonEmptyString(value.name) && isNonEmptyString(value.definition);
+        case "code_state":
+            return (
+                isNonEmptyString(value.artifact) &&
+                isNonEmptyString(value.label) &&
+                isNonEmptyString(value.lang) &&
+                isNonEmptyString(value.code) &&
+                isOptionalSeq(value.turn_seq)
+            );
         default:
             return false;
     }

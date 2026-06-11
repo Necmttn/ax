@@ -141,3 +141,27 @@ describe("isNarrationAnchor", () => {
         expect(isNarrationAnchor("turn 4")).toBe(false);
     });
 });
+
+describe("code_state anchor", () => {
+    const valid = {
+        kind: "code_state",
+        artifact: "review-architecture",
+        label: "one fold, one tree",
+        lang: "typescript",
+        code: "interface FileTouch { path: string }",
+    };
+
+    test("accepts a full snapshot", () => {
+        expect(isNarrationAnchor(valid)).toBe(true);
+    });
+
+    test("accepts an optional turn_seq", () => {
+        expect(isNarrationAnchor({ ...valid, turn_seq: 12 })).toBe(true);
+    });
+
+    test("rejects empty code or missing artifact", () => {
+        expect(isNarrationAnchor({ ...valid, code: "" })).toBe(false);
+        expect(isNarrationAnchor({ ...valid, artifact: undefined })).toBe(false);
+        expect(isNarrationAnchor({ ...valid, lang: "" })).toBe(false);
+    });
+});

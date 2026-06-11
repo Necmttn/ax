@@ -69,6 +69,7 @@ for one reason, that is ONE stop with several anchors. Order rules
 | kind | required fields | use for |
 |---|---|---|
 | `file_hunk` | `file`, `old_text`, `new_text`, `label`, opt `turn_seq` | a real code change |
+| `code_state` | `artifact`, `label`, `lang`, `code`, opt `turn_seq` | the evolving architecture snapshot |
 | `turn` | `turn_seq`, `label` | a plain moment in the transcript |
 | `user_direction` | `turn_seq`, `quote` | user steering (not correcting) |
 | `correction` | `turn_seq`, `quote`, `outcome` | user correcting course |
@@ -90,6 +91,16 @@ for one reason, that is ONE stop with several anchors. Order rules
 - Never fabricate turn seqs. Use `ax sessions show` seqs when you have
   them; otherwise count user turns from the start of the conversation
   and say so in the detail.
+- `code_state` is the architecture spine of the narration: pick ONE
+  stable `artifact` id (e.g. `"review-architecture"`) and restate the
+  FULL snapshot at each stop where the design moved - pseudo-code of
+  types/interfaces, how they compose, and the call stack (plan-style:
+  `Caller -> Callee // note`). Consecutive snapshots of the same
+  artifact animate token-by-token in studio, so KEEP shared lines
+  byte-identical between stops and let only the real delta differ - a
+  new method, a renamed shape, an added edge case. Use `code_state`
+  for the evolving design; use `file_hunk` for one-off code jumps
+  (those render as static before/after diffs, not motion).
 
 ## Step 5 - emit the artifact
 

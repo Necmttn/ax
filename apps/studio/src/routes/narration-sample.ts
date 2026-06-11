@@ -38,6 +38,25 @@ export const sampleNarration: SessionNarration = {
             transition: "That panel shipped with call counts, which turned out to be the wrong unit...",
             anchors: [
                 {
+                    kind: "code_state",
+                    artifact: "review-architecture",
+                    label: "one fold, one tree",
+                    lang: "typescript",
+                    turn_seq: 4,
+                    code:
+                        "interface FileTouch {\n" +
+                        "  path: string\n" +
+                        "  reads: number\n" +
+                        "  writes: number\n" +
+                        '  status: "added" | "modified" | null\n' +
+                        "}\n" +
+                        "\n" +
+                        "// call graph\n" +
+                        "buildFilesTouched(turns): FilesTouchedModel\n" +
+                        "  -> FilesTouchedPanel\n" +
+                        "    -> FileTree            // @pierre/trees\n",
+                },
+                {
                     kind: "turn",
                     turn_seq: 4,
                     label: "First cut of the files-touched panel lands, sidebar tree driven by @pierre/trees",
@@ -69,6 +88,27 @@ export const sampleNarration: SessionNarration = {
                 "rejected edit changed nothing.",
             transition: "With the tree speaking diffstat, the next ask was a place to read the changes themselves...",
             anchors: [
+                {
+                    kind: "code_state",
+                    artifact: "review-architecture",
+                    label: "FileTouch learns the diffstat",
+                    lang: "typescript",
+                    turn_seq: 10,
+                    code:
+                        "interface FileTouch {\n" +
+                        "  path: string\n" +
+                        "  reads: number\n" +
+                        "  writes: number\n" +
+                        "  charsAdded: number     // new: the diffstat\n" +
+                        "  charsRemoved: number   // new: the diffstat\n" +
+                        '  status: "added" | "modified" | null\n' +
+                        "}\n" +
+                        "\n" +
+                        "// call graph\n" +
+                        "buildFilesTouched(turns): FilesTouchedModel\n" +
+                        "  -> FilesTouchedPanel\n" +
+                        "    -> FileTree            // @pierre/trees\n",
+                },
                 {
                     kind: "correction",
                     turn_seq: 9,
@@ -109,6 +149,32 @@ export const sampleNarration: SessionNarration = {
             transition: "The middle pane started as plain <pre> text, which is where @pierre/diffs came in...",
             anchors: [
                 {
+                    kind: "code_state",
+                    artifact: "review-architecture",
+                    label: "the panel grows into a three-pane review",
+                    lang: "typescript",
+                    turn_seq: 15,
+                    code:
+                        "interface FileTouch {\n" +
+                        "  path: string\n" +
+                        "  reads: number\n" +
+                        "  writes: number\n" +
+                        "  charsAdded: number\n" +
+                        "  charsRemoved: number\n" +
+                        '  status: "added" | "modified" | null\n' +
+                        "}\n" +
+                        "\n" +
+                        "// call graph\n" +
+                        "ReviewView\n" +
+                        "  -> FilesTouchedTree            // sidebar (left)\n" +
+                        "  -> buildFileStory(turns, path) // change story (center)\n" +
+                        "  -> touching turns              // why pane (right)\n" +
+                        "\n" +
+                        "buildFilesTouched(turns): FilesTouchedModel\n" +
+                        "  -> FilesTouchedPanel\n" +
+                        "    -> FileTree                  // @pierre/trees\n",
+                },
+                {
                     kind: "user_direction",
                     turn_seq: 14,
                     quote:
@@ -134,6 +200,35 @@ export const sampleNarration: SessionNarration = {
                 "text.",
             transition: "All that was left was proving it worked, which the environment made interesting...",
             anchors: [
+                {
+                    kind: "code_state",
+                    artifact: "review-architecture",
+                    label: "the center pane renders real diffs",
+                    lang: "typescript",
+                    turn_seq: 18,
+                    code:
+                        "interface FileTouch {\n" +
+                        "  path: string\n" +
+                        "  reads: number\n" +
+                        "  writes: number\n" +
+                        "  charsAdded: number\n" +
+                        "  charsRemoved: number\n" +
+                        '  status: "added" | "modified" | null\n' +
+                        "}\n" +
+                        "\n" +
+                        "// call graph\n" +
+                        "ReviewView\n" +
+                        "  -> FilesTouchedTree            // sidebar (left)\n" +
+                        "  -> buildFileStory(turns, path) // change story (center)\n" +
+                        "    -> HunkCard\n" +
+                        "      -> buildHunkPatch(path, old, new)\n" +
+                        "      -> getSingularPatch -> FileDiff   // @pierre/diffs\n" +
+                        "  -> touching turns              // why pane (right)\n" +
+                        "\n" +
+                        "buildFilesTouched(turns): FilesTouchedModel\n" +
+                        "  -> FilesTouchedPanel\n" +
+                        "    -> FileTree                  // @pierre/trees\n",
+                },
                 {
                     kind: "file_hunk",
                     file: "apps/studio/src/routes/review-view.tsx",

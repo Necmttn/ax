@@ -15,9 +15,9 @@ import type { HighlighterCore } from "shiki/core";
 import { ShikiMagicMove } from "shiki-magic-move/react";
 import "shiki-magic-move/style.css";
 import { highlighterFor, THEME } from "../highlight/highlighter.ts";
-import { langFromPath } from "../highlight/lang.ts";
 import { buildHunkPatch } from "./files-touched.ts";
 import type {
+    CodeStateAnchor,
     CorrectionAnchor,
     FileHunkAnchor,
     NarrationAnchor,
@@ -276,6 +276,9 @@ function AnchorView({ anchor, onJumpToTurn }: {
             return <ToolFailureBlock anchor={anchor} onJumpToTurn={onJumpToTurn} />;
         case "term":
             return <TermChip anchor={anchor} />;
+        case "code_state":
+            // Snapshots live in the sticky code pane, never inline in a card.
+            return null;
     }
 }
 
@@ -292,8 +295,9 @@ function StopCard({ stop, index, isActive, isLast, onJumpToTurn, onActivate, car
     readonly onActivate: () => void;
     readonly cardRef: (el: HTMLDivElement | null) => void;
 }) {
-    // Code hunks live in the sticky pane; the card keeps the conversation.
-    const inlineAnchors = stop.anchors.filter((a) => a.kind !== "file_hunk");
+    // Code (hunks + artifact snapshots) lives in the sticky pane; the card
+    // keeps the conversation.
+    const inlineAnchors = stop.anchors.filter((a) => a.kind !== "file_hunk" && a.kind !== "code_state");
     return (
         <div
             ref={cardRef}
@@ -339,59 +343,61 @@ function StopCard({ stop, index, isActive, isLast, onJumpToTurn, onActivate, car
 // ---------------------------------------------------------------------------
 
 /**
- * Magic-move morph of one hunk: mounts on the replaced fragment, then
- * animates token-by-token to the inserted one - the change plays as motion.
- * Crossing to another stop morphs from whatever is on screen to the next
- * hunk's old state and replays. Falls back to the static diff while the
- * grammar loads (or when the file has no known grammar).
+ * The morphing snapshot of one evolving artifact. The component is keyed by
+ * `artifact` upstream, so it stays MOUNTED while consecutive stops carry
+ * snapshots of the same thing - the `code` prop changes and shiki-magic-move
+ * animates the delta (a method appears, a shape renames). A different
+ * artifact remounts fresh: no meaningless cross-artifact motion.
  */
-function MorphHunk({ anchor }: { readonly anchor: FileHunkAnchor }) {
-    const lang = langFromPath(anchor.file);
+function ArtifactMorph({ anchor }: { readonly anchor: CodeStateAnchor }) {
     const [highlighter, setHighlighter] = useState<HighlighterCore | null>(null);
     useEffect(() => {
-        if (!lang) return;
         let live = true;
-        highlighterFor(lang).then((core) => {
+        highlighterFor(anchor.lang).then((core) => {
             if (live) setHighlighter(core);
         });
         return () => {
             live = false;
         };
-    }, [lang]);
+    }, [anchor.lang]);
 
-    const oldCode = anchor.old_text;
-    const newCode = anchor.new_text ?? "";
-    const [code, setCode] = useState(oldCode ?? newCode);
-    useEffect(() => {
-        setCode(oldCode ?? newCode);
-        if (oldCode != null && newCode) {
-            // Let the old state paint, then play the morph to the new one.
-            const t = setTimeout(() => setCode(newCode), 500);
-            return () => clearTimeout(t);
-        }
-        return undefined;
-    }, [oldCode, newCode]);
-
-    if (!lang || !highlighter) return <PaneDiff anchor={anchor} />;
+    if (!highlighter) {
+        return (
+            <pre style={{ margin: 0, padding: "4px 12px 10px", font: `11.5px/1.6 ${mono}`, whiteSpace: "pre-wrap" }}>
+                {anchor.code}
+            </pre>
+        );
+    }
     return (
         <div style={{ padding: "4px 12px 10px", font: `11.5px/1.5 ${mono}`, overflow: "auto" }}>
             <ShikiMagicMove
                 highlighter={highlighter}
-                lang={lang}
+                lang={anchor.lang}
                 theme={THEME}
-                code={code}
-                options={{ duration: 650, stagger: 2, lineNumbers: false }}
+                code={anchor.code}
+                options={{ duration: 700, stagger: 2, lineNumbers: false }}
             />
         </div>
     );
 }
 
-function CodePane({ stop, index, onJumpToTurn }: {
-    readonly stop: NarrationStop | null;
+/** Nearest code_state at or before `idx` - the pane keeps the artifact on
+ *  screen through stops that don't restate it, and scrolling up rewinds. */
+function nearestCodeState(stops: ReadonlyArray<NarrationStop>, idx: number): CodeStateAnchor | null {
+    for (let i = Math.min(idx, stops.length - 1); i >= 0; i--) {
+        const found = stops[i]?.anchors.find((a): a is CodeStateAnchor => a.kind === "code_state");
+        if (found) return found;
+    }
+    return null;
+}
+
+function CodePane({ stops, index, onJumpToTurn }: {
+    readonly stops: ReadonlyArray<NarrationStop>;
     readonly index: number;
     readonly onJumpToTurn: (seq: number) => void;
 }) {
-    const [mode, setMode] = useState<"animate" | "diff">("animate");
+    const stop = stops[index] ?? null;
+    const codeState = nearestCodeState(stops, index);
     const hunks = (stop?.anchors ?? []).filter((a): a is FileHunkAnchor => a.kind === "file_hunk");
     return (
         <div style={{
@@ -405,41 +411,37 @@ function CodePane({ stop, index, onJumpToTurn }: {
         }}>
             <div style={{
                 position: "sticky", top: 0, zIndex: 1,
-                display: "flex", alignItems: "baseline", gap: 8,
                 padding: "6px 12px",
                 font: `700 10px/1.6 ${mono}`, textTransform: "uppercase", letterSpacing: "0.08em",
                 color: "var(--muted)", background: "var(--panel)",
                 borderBottom: "1px solid var(--line)",
+                overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
             }}>
-                <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                    {stop ? `${index + 1} · ${stop.title}` : "code"}
-                </span>
-                <span style={{ marginLeft: "auto", display: "flex", gap: 2, flex: "0 0 auto" }}>
-                    {(["animate", "diff"] as const).map((m) => (
-                        <button
-                            key={m}
-                            type="button"
-                            onClick={() => setMode(m)}
-                            aria-pressed={mode === m}
-                            style={{
-                                font: `700 9.5px/1.6 ${mono}`, textTransform: "uppercase", letterSpacing: "0.06em",
-                                padding: "0 7px", borderRadius: 3, cursor: "pointer",
-                                border: "1px solid var(--line)",
-                                background: mode === m ? "var(--ink)" : "transparent",
-                                color: mode === m ? "var(--page)" : "var(--muted)",
-                            }}
-                        >
-                            {m}
-                        </button>
-                    ))}
-                </span>
+                {stop ? `${index + 1} · ${stop.title}` : "code"}
             </div>
-            {hunks.length === 0 ? (
+            {codeState ? (
+                <div style={{ borderBottom: hunks.length > 0 ? "1px solid var(--line)" : "none" }}>
+                    <div style={{ padding: "6px 12px 4px", font: `11px/1.6 ${mono}`, color: "var(--muted)", display: "flex", gap: 8, alignItems: "baseline" }}>
+                        <span style={{ fontWeight: 600, color: "var(--ink)" }}>{codeState.artifact}</span>
+                        <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{codeState.label}</span>
+                        {codeState.turn_seq !== undefined ? (
+                            <span style={{ marginLeft: "auto", flex: "0 0 auto" }}>
+                                <TurnButton seq={codeState.turn_seq} onJumpToTurn={onJumpToTurn} />
+                            </span>
+                        ) : null}
+                    </div>
+                    {/* Keyed by artifact: same artifact persists across stops and
+                        morphs; a new artifact mounts fresh with no animation. */}
+                    <ArtifactMorph key={codeState.artifact} anchor={codeState} />
+                </div>
+            ) : null}
+            {hunks.length === 0 && !codeState ? (
                 <div style={{ padding: "18px 14px", font: `11.5px/1.7 ${mono}`, color: "var(--muted)" }}>
                     No code for this stop - the story is in the card.
                 </div>
             ) : (
-                // Keyed by stop so the pane visibly swaps with the active card.
+                // Hunks are unrelated jumps - they swap statically per stop,
+                // rendered as before/after diffs (no morph between strangers).
                 <div key={index}>
                     {hunks.map((anchor, i) => (
                         <div key={i} style={{ borderBottom: i < hunks.length - 1 ? "1px solid var(--line)" : "none" }}>
@@ -458,7 +460,7 @@ function CodePane({ stop, index, onJumpToTurn }: {
                             <div style={{ padding: "0 12px 4px", font: `11px/1.6 ${mono}`, color: "var(--muted)" }}>
                                 {anchor.label}
                             </div>
-                            {mode === "animate" ? <MorphHunk anchor={anchor} /> : <PaneDiff anchor={anchor} />}
+                            <PaneDiff anchor={anchor} />
                         </div>
                     ))}
                 </div>
@@ -535,8 +537,6 @@ export function NarrationPanel({ narration, onJumpToTurn }: {
         return () => observer.disconnect();
     }, [narration.stops.length]);
 
-    const activeStop = narration.stops[activeIdx] ?? null;
-
     return (
         <div style={{ padding: "12px 14px" }}>
             {/* Header */}
@@ -590,7 +590,7 @@ export function NarrationPanel({ narration, onJumpToTurn }: {
                         {narration.stops.length} stops
                     </div>
                 </div>
-                <CodePane stop={activeStop} index={activeIdx} onJumpToTurn={onJumpToTurn} />
+                <CodePane stops={narration.stops} index={activeIdx} onJumpToTurn={onJumpToTurn} />
             </div>
         </div>
     );

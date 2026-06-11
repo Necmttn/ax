@@ -71,9 +71,12 @@ export async function tokenize(code: string, lang: string): Promise<ThemedToken[
     return core.codeToTokens(code, { lang, theme: THEME }).tokens;
 }
 
+/** Langs shiki tokenizes without a grammar - always available. */
+const PLAIN_LANGS = new Set(["text", "plaintext", "txt", "ansi"]);
+
 /** The shared core with `lang` loaded, for consumers that drive shiki
  *  directly (shiki-magic-move). null when the grammar is unavailable. */
 export async function highlighterFor(lang: string): Promise<HighlighterCore | null> {
-    if (!(await ensureLang(lang))) return null;
+    if (!PLAIN_LANGS.has(lang) && !(await ensureLang(lang))) return null;
     return getCore();
 }
