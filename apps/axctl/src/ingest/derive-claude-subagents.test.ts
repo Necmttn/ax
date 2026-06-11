@@ -13,26 +13,13 @@ import { Effect, Layer } from "effect";
 import { BunFileSystem, BunPath } from "@effect/platform-bun";
 import { RecordId } from "surrealdb";
 import { SurrealClient } from "@ax/lib/db";
-import { makeTestSurrealClient } from "@ax/lib/testing/surreal";
+import { makeMockDb } from "@ax/lib/testing/surreal";
 import { AxConfig, makeTestConfig } from "@ax/lib/config";
 import { deriveClaudeSubagents } from "./derive-claude-subagents.ts";
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-/**
- * Build a mock SurrealClient layer. The `queryResponses` map lets callers
- * drive what each SELECT returns; unrecognised queries return [[]].
- * All calls are recorded in `calls` / `upserts`.
- */
-function makeMockDb(queryResponses: Map<string, unknown[][]> = new Map()) {
-    const tc = makeTestSurrealClient({
-        // Find first matching key that the sql CONTAINS
-        routes: [...queryResponses].map(([match, rows]) => ({ match, rows: rows as unknown[] })),
-    });
-    return { calls: tc.calls, upserts: tc.upserts, layer: tc.layer };
-}
 
 /**
  * Minimal AxConfig layer that provides a transcripts dir that doesn't exist
@@ -105,7 +92,7 @@ describe("repository backfill (F7)", () => {
             },
         ]]);
 
-        const { calls, layer } = makeMockDb(responses);
+        const { calls, layer } = makeMockDb(responses, { denyWrites: false });
         await runWith(layer);
 
         // Should have issued the backfill SELECT query
@@ -139,7 +126,7 @@ describe("repository backfill (F7)", () => {
         // Backfill query returns empty - no subagents need repair
         responses.set('source = "claude-subagent" AND repository IS NONE', [[]]);
 
-        const { calls, layer } = makeMockDb(responses);
+        const { calls, layer } = makeMockDb(responses, { denyWrites: false });
         await runWith(layer);
 
         // No UPDATE query for backfill
@@ -171,7 +158,7 @@ describe("repository backfill (F7)", () => {
             },
         ]]);
 
-        const { layer } = makeMockDb(responses);
+        const { layer } = makeMockDb(responses, { denyWrites: false });
         const stats = await runWith(layer);
 
         expect(stats.repositoryBackfilled).toBe(2);
@@ -182,7 +169,7 @@ describe("repository backfill (F7)", () => {
         responses.set("SELECT name FROM skill", [[]]);
         responses.set('source = "claude-subagent" AND repository IS NONE', [[]]);
 
-        const { layer } = makeMockDb(responses);
+        const { layer } = makeMockDb(responses, { denyWrites: false });
         const stats = await runWith(layer);
 
         expect(stats.repositoryInherited).toBe(0);
@@ -307,7 +294,7 @@ describe("repository inheritance on new subagents (F7)", () => {
         // Backfill: no rows need repair
         responses.set('source = "claude-subagent" AND repository IS NONE', [[]]);
 
-        const { upserts, layer } = makeMockDb(responses);
+        const { upserts, layer } = makeMockDb(responses, { denyWrites: false });
         const stats = await runWith(layer, makeFixtureConfig(fixture.root));
 
         // Stage should have discovered 1 subagent and written it
@@ -351,7 +338,7 @@ describe("repository inheritance on new subagents (F7)", () => {
         ]]);
         responses.set('source = "claude-subagent" AND repository IS NONE', [[]]);
 
-        const { upserts, layer } = makeMockDb(responses);
+        const { upserts, layer } = makeMockDb(responses, { denyWrites: false });
         const stats = await runWith(layer, makeFixtureConfig(fixture.root));
 
         expect(stats.discovered).toBe(1);

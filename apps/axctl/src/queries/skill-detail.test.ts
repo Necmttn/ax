@@ -1,7 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { Effect } from "effect";
-import { SurrealClient, type SurrealClientShape } from "@ax/lib/db";
-import { makeTestSurrealClient, type TestSurrealRows } from "@ax/lib/testing/surreal";
+import { makeMockDb, runWithMock } from "@ax/lib/testing/surreal";
 import {
     SKILL_DETAIL_BASIC_SQL,
     SKILL_DETAIL_SQL,
@@ -11,20 +9,6 @@ import {
     mapSkillRecentRow,
 } from "./skill-detail.ts";
 import { SKILL_DETAIL_SQL as TUI_SKILL_DETAIL_SQL } from "../tui/queries.ts";
-
-/** Mock SurrealClientShape returning canned responses per query() call. */
-function makeMockDb(responses: Array<unknown>): SurrealClientShape {
-    return makeTestSurrealClient({
-        denyWrites: true,
-        responses: responses as ReadonlyArray<TestSurrealRows>,
-    }).client;
-}
-
-const runWithMock = <A>(
-    db: SurrealClientShape,
-    effect: Effect.Effect<A, unknown, SurrealClient>,
-): Promise<A> =>
-    Effect.runPromise(effect.pipe(Effect.provideService(SurrealClient, db)));
 
 describe("SKILL_DETAIL_SQL", () => {
     test("binds the skill by $name", () => {

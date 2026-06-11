@@ -11,7 +11,7 @@ import { BunFileSystem, BunPath } from "@effect/platform-bun";
 import { mkdtemp, mkdir, writeFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { makeTestSurrealClient } from "@ax/lib/testing/surreal";
+import { makeMockDb } from "@ax/lib/testing/surreal";
 import { ingestSkills } from "./skills.ts";
 
 // ingestSkills now reads the on-disk fixtures through the @effect/platform
@@ -37,17 +37,6 @@ function extractRoles(fm: Record<string, unknown>): string[] {
         if (norm) result.push(norm);
     }
     return result;
-}
-
-// ---------------------------------------------------------------------------
-// Mock DB helpers
-// ---------------------------------------------------------------------------
-
-function makeMockDb(queryResponses: Map<string, unknown[][]> = new Map()) {
-    const tc = makeTestSurrealClient({
-        routes: [...queryResponses].map(([match, rows]) => ({ match, rows: rows as unknown[] })),
-    });
-    return { calls: tc.calls, layer: tc.layer };
 }
 
 // ---------------------------------------------------------------------------
@@ -130,7 +119,7 @@ describe("looseLineParse list-format fallback", () => {
                 "utf8",
             );
 
-            const { layer } = makeMockDb();
+            const { layer } = makeMockDb(undefined, { denyWrites: false });
             const stats = await Effect.runPromise(
                 ingestSkills().pipe(Effect.provide(Layer.mergeAll(layer, PlatformLayer))),
             );
@@ -164,7 +153,7 @@ describe("ingestSkills end-to-end role wiring", () => {
                 "utf8",
             );
 
-            const { calls, layer } = makeMockDb();
+            const { calls, layer } = makeMockDb(undefined, { denyWrites: false });
             await Effect.runPromise(
                 ingestSkills().pipe(Effect.provide(Layer.mergeAll(layer, PlatformLayer))),
             );
@@ -200,7 +189,7 @@ describe("ingestSkills end-to-end role wiring", () => {
                 "utf8",
             );
 
-            const { layer } = makeMockDb();
+            const { layer } = makeMockDb(undefined, { denyWrites: false });
             const stats = await Effect.runPromise(
                 ingestSkills().pipe(Effect.provide(Layer.mergeAll(layer, PlatformLayer))),
             );
@@ -228,7 +217,7 @@ describe("ingestSkills end-to-end role wiring", () => {
                 "utf8",
             );
 
-            const { calls, layer } = makeMockDb();
+            const { calls, layer } = makeMockDb(undefined, { denyWrites: false });
             const stats = await Effect.runPromise(
                 ingestSkills().pipe(Effect.provide(Layer.mergeAll(layer, PlatformLayer))),
             );

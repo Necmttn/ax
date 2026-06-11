@@ -7,25 +7,8 @@
  * - Doctor count and advice trigger at the threshold.
  */
 import { describe, it, expect } from "bun:test";
-import { Effect } from "effect";
-import { SurrealClient } from "@ax/lib/db";
-import { makeTestSurrealClient, type TestSurrealClient } from "@ax/lib/testing/surreal";
+import { makeMockDb, runWithMock } from "@ax/lib/testing/surreal";
 import { fetchSkillsWeighted } from "./skills-weighted.ts";
-
-// ---------------------------------------------------------------------------
-// Test helpers
-// ---------------------------------------------------------------------------
-
-/** Mock SurrealClient answering query() calls with `responses` in call order. */
-const makeMockDb = (responses: Array<unknown>): TestSurrealClient =>
-    makeTestSurrealClient({ denyWrites: true, responses: responses as Array<unknown[]> });
-
-/** Run an Effect with the mock SurrealClient. */
-const runWithMock = <A>(
-    db: TestSurrealClient,
-    effect: Effect.Effect<A, unknown, SurrealClient>,
-): Promise<A> =>
-    Effect.runPromise(effect.pipe(Effect.provide(db.layer)));
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -141,14 +124,14 @@ describe("fetchSkillsWeighted", () => {
     });
 
     it("doctor SQL excludes synthetics by default", async () => {
-        const db = makeTestSurrealClient({ denyWrites: true });
+        const db = makeMockDb();
 
         await runWithMock(db, fetchSkillsWeighted());
         expect(db.captured[2]).toContain('dir_path = "(synthetic)"');
     });
 
     it("includes window clause when windowDays is set", async () => {
-        const db = makeTestSurrealClient({ denyWrites: true });
+        const db = makeMockDb();
 
         await runWithMock(db, fetchSkillsWeighted({ windowDays: 30 }));
         // First SQL is the invocation query
@@ -156,7 +139,7 @@ describe("fetchSkillsWeighted", () => {
     });
 
     it("omits window clause when windowDays is not set", async () => {
-        const db = makeTestSurrealClient({ denyWrites: true });
+        const db = makeMockDb();
 
         await runWithMock(db, fetchSkillsWeighted());
         expect(db.captured[0]).not.toContain("ts >= time::now()");
