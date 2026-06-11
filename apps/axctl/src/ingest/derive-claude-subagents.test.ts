@@ -205,6 +205,10 @@ async function buildFixture(opts: {
     parentSessionId: string;
     /** Optional cwd written into the jsonl line so the extractor picks it up. */
     cwdInFile?: string;
+    /** Optional model name written onto the assistant message so the extractor captures it. */
+    modelInFile?: string;
+    /** Optional meta.json content to write next to the jsonl. */
+    meta?: Record<string, string>;
 }) {
     const root = await mkdtemp(join(tmpdir(), "ax-test-subagent-"));
     tmpDirs.push(root);
@@ -224,13 +228,23 @@ async function buildFixture(opts: {
 
     // Write first line (gives parseManifest what it needs: agentId + sessionId)
     // and a second line so finish() produces a non-null session.
-    const secondLine: Record<string, string> = {
+    const secondLine: Record<string, unknown> = {
         agentId: opts.agentId,
         sessionId: opts.parentSessionId,
         type: "assistant",
         timestamp: "2026-01-01T00:00:01.000Z",
     };
+    // Wrap model in a message object so the extractor reads `message.model`.
+    if (opts.modelInFile) {
+        secondLine["message"] = { model: opts.modelInFile };
+    }
     await Bun.write(agentFile, JSON.stringify(firstLine) + "\n" + JSON.stringify(secondLine) + "\n");
+
+    // Write optional meta.json sibling.
+    if (opts.meta) {
+        const metaFile = agentFile.replace(/\.jsonl$/, ".meta.json");
+        await Bun.write(metaFile, JSON.stringify(opts.meta));
+    }
 
     return {
         root,
@@ -355,6 +369,182 @@ describe("repository inheritance on new subagents (F7)", () => {
             // cwd must be the extractor-produced value, NOT the parent's cwd
             expect(upsertCall.content["cwd"]).toBe("/home/user/subagent-working-dir");
             expect(upsertCall.content["cwd"]).not.toBe("/home/user/parent-project");
+        }
+    });
+});
+
+// ---------------------------------------------------------------------------
+// Tests: model attribution (Phase 1 fix)
+// ---------------------------------------------------------------------------
+
+/** Shared mock parent row for model/meta tests. */
+function makeParentResponse(parentSessionId: string): Map<string, unknown[][]> {
+    const responses = new Map<string, unknown[][]>();
+    responses.set("SELECT name FROM skill", [[]]);
+    responses.set(parentSessionId, [[
+        {
+            id: `session:⟨${parentSessionId}⟩`,
+            repository: null,
+            checkout: null,
+            cwd: "/home/user/project",
+        },
+    ]]);
+    responses.set('source = "claude-subagent" AND repository IS NONE', [[]]);
+    return responses;
+}
+
+describe("model attribution on subagent session", () => {
+    test("model from assistant message.model lands on the session upsert", async () => {
+        const fixture = await buildFixture({
+            agentId: "model-test-001",
+            parentSessionId: "parent-model-001",
+            modelInFile: "claude-sonnet-4-6",
+        });
+
+        const { upserts, layer } = makeMockDb(
+            makeParentResponse("parent-model-001"),
+            { denyWrites: false },
+        );
+        await runWith(layer, makeFixtureConfig(fixture.root));
+
+        const upsertCall = upserts.find((c) => String(c.id).includes(fixture.subagentSessionId));
+        expect(upsertCall).toBeDefined();
+        expect(upsertCall?.content["model"]).toBe("claude-sonnet-4-6");
+    });
+
+    test("model is undefined on upsert when no assistant message carries model", async () => {
+        const fixture = await buildFixture({
+            agentId: "model-test-002",
+            parentSessionId: "parent-model-002",
+            // no modelInFile → extractor produces session.model = null
+        });
+
+        const { upserts, layer } = makeMockDb(
+            makeParentResponse("parent-model-002"),
+            { denyWrites: false },
+        );
+        await runWith(layer, makeFixtureConfig(fixture.root));
+
+        const upsertCall = upserts.find((c) => String(c.id).includes(fixture.subagentSessionId));
+        expect(upsertCall).toBeDefined();
+        // null → coerced to undefined → not stored (consistent with upsertSessions pattern)
+        expect(upsertCall?.content["model"]).toBeUndefined();
+    });
+});
+
+// ---------------------------------------------------------------------------
+// Tests: meta.json enrichment on spawned edge
+// ---------------------------------------------------------------------------
+
+describe("meta.json enrichment on spawned edge", () => {
+    test("meta fields land in the RELATE query when meta.json is present", async () => {
+        const fixture = await buildFixture({
+            agentId: "meta-test-001",
+            parentSessionId: "parent-meta-001",
+            meta: {
+                agentType: "design-curator",
+                description: "Accessibility critique share view",
+                name: "critic-a11y",
+                toolUseId: "toolu_01Xshe123abc",
+            },
+        });
+
+        const { calls, layer } = makeMockDb(
+            makeParentResponse("parent-meta-001"),
+            { denyWrites: false },
+        );
+        await runWith(layer, makeFixtureConfig(fixture.root));
+
+        const relateCall = calls.find(
+            (c) => c.sql.includes("RELATE") && c.sql.includes("spawned"),
+        );
+        expect(relateCall).toBeDefined();
+        if (relateCall) {
+            expect(relateCall.sql).toContain("agent_type");
+            expect(relateCall.sql).toContain("design-curator");
+            expect(relateCall.sql).toContain("description");
+            expect(relateCall.sql).toContain("Accessibility critique share view");
+            expect(relateCall.sql).toContain("agent_name");
+            expect(relateCall.sql).toContain("critic-a11y");
+            expect(relateCall.sql).toContain("tool_use_id");
+            expect(relateCall.sql).toContain("toolu_01Xshe123abc");
+        }
+    });
+
+    test("missing meta.json is tolerated: RELATE runs without meta fields", async () => {
+        const fixture = await buildFixture({
+            agentId: "meta-test-002",
+            parentSessionId: "parent-meta-002",
+            // no meta → no meta.json written
+        });
+
+        const { calls, layer } = makeMockDb(
+            makeParentResponse("parent-meta-002"),
+            { denyWrites: false },
+        );
+        // Should not throw
+        const stats = await runWith(layer, makeFixtureConfig(fixture.root));
+        expect(stats.written).toBe(1);
+
+        const relateCall = calls.find(
+            (c) => c.sql.includes("RELATE") && c.sql.includes("spawned"),
+        );
+        expect(relateCall).toBeDefined();
+        // Meta clauses absent when file not present
+        if (relateCall) {
+            expect(relateCall.sql).not.toContain("agent_type");
+            expect(relateCall.sql).not.toContain("tool_use_id");
+        }
+    });
+
+    test("unparseable meta.json is tolerated: RELATE still runs", async () => {
+        const fixture = await buildFixture({
+            agentId: "meta-test-003",
+            parentSessionId: "parent-meta-003",
+        });
+        // Overwrite with invalid JSON
+        const metaFile = fixture.agentFile.replace(/\.jsonl$/, ".meta.json");
+        await Bun.write(metaFile, "not-valid-json{{{");
+
+        const { calls, layer } = makeMockDb(
+            makeParentResponse("parent-meta-003"),
+            { denyWrites: false },
+        );
+        const stats = await runWith(layer, makeFixtureConfig(fixture.root));
+        expect(stats.written).toBe(1);
+
+        const relateCall = calls.find(
+            (c) => c.sql.includes("RELATE") && c.sql.includes("spawned"),
+        );
+        expect(relateCall).toBeDefined();
+    });
+
+    test("partial meta.json only emits present fields", async () => {
+        const fixture = await buildFixture({
+            agentId: "meta-test-004",
+            parentSessionId: "parent-meta-004",
+            meta: {
+                agentType: "codebase-analyzer",
+                // description, name, toolUseId intentionally absent
+            },
+        });
+
+        const { calls, layer } = makeMockDb(
+            makeParentResponse("parent-meta-004"),
+            { denyWrites: false },
+        );
+        await runWith(layer, makeFixtureConfig(fixture.root));
+
+        const relateCall = calls.find(
+            (c) => c.sql.includes("RELATE") && c.sql.includes("spawned"),
+        );
+        expect(relateCall).toBeDefined();
+        if (relateCall) {
+            expect(relateCall.sql).toContain("agent_type");
+            expect(relateCall.sql).toContain("codebase-analyzer");
+            // Absent fields must not appear
+            expect(relateCall.sql).not.toContain("tool_use_id");
+            expect(relateCall.sql).not.toContain("agent_name");
         }
     });
 });

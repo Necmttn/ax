@@ -341,7 +341,10 @@ function tokenUsageStatement(row: SessionTokenUsage): string {
         ["session", recordRef("session", row.sessionKey)],
         ["source", surrealString(row.source)],
         ["workflow_epoch", row.workflowEpoch ? recordRef("workflow_epoch", row.workflowEpoch) : "NONE"],
-        ["model", surrealOptionString(row.model)],
+        // Never clobber a model the transcript-priced pass already wrote: the
+        // subagent ingest writes the real per-transcript model, while this
+        // pass only knows session.model (null for sources that don't set it).
+        ["model", row.model === null ? "IF model != NONE THEN model ELSE NONE END" : surrealOptionString(row.model)],
         ["prompt_tokens", `IF ${existingActualTokenUsage} THEN prompt_tokens ELSE ${surrealOptionInt(row.promptTokens)} END`],
         ["completion_tokens", `IF ${existingActualTokenUsage} THEN completion_tokens ELSE ${surrealOptionInt(row.completionTokens)} END`],
         ["cache_creation_input_tokens", `IF ${existingActualTokenUsage} THEN cache_creation_input_tokens ELSE ${surrealOptionInt(row.cacheCreationInputTokens)} END`],

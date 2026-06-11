@@ -112,5 +112,27 @@ describe("session health derivation", () => {
         expect(statement).toContain("estimated_tokens: IF prompt_tokens != NONE OR completion_tokens != NONE OR cache_creation_input_tokens != NONE OR cache_read_input_tokens != NONE THEN estimated_tokens ELSE 42 END");
         expect(statement).toContain("labels: IF prompt_tokens != NONE OR completion_tokens != NONE OR cache_creation_input_tokens != NONE OR cache_read_input_tokens != NONE THEN labels ELSE");
         expect(statement).toContain("metrics: IF prompt_tokens != NONE OR completion_tokens != NONE OR cache_creation_input_tokens != NONE OR cache_read_input_tokens != NONE THEN metrics ELSE");
+        expect(statement).toContain('model: "gpt-5.5"');
+    });
+
+    test("token usage statement preserves an existing model when session.model is null", () => {
+        const statement = __testTokenUsageStatement({
+            sessionKey: "claude-subagent-abc",
+            source: "claude-subagent",
+            workflowEpoch: null,
+            model: null,
+            promptTokens: null,
+            completionTokens: null,
+            cacheCreationInputTokens: null,
+            cacheReadInputTokens: null,
+            estimatedTokens: 42,
+            transcriptBytes: 168,
+            contextWindow: null,
+            labels: { source: "session_health", token_source: "byte_estimate" },
+            metrics: { turn_bytes: 168 },
+            ts: "2026-05-29T07:00:00.000Z",
+        });
+
+        expect(statement).toContain("model: IF model != NONE THEN model ELSE NONE END");
     });
 });
