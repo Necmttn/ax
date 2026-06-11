@@ -73,6 +73,35 @@ describe("deriveToolEvents", () => {
         expect(events[0]?.title).toBe("bun run typecheck 2>&1 - Typecheck the CLI");
     });
 
+    it("titles plain shell commands with the full command + intent, not the bare norm", () => {
+        const events = deriveToolEvents([
+            tc({
+                seq: 4,
+                name: "Bash",
+                command_norm: "rg",
+                command_text: '{"command": "rg -n detail src/timeline", "description": "Find detail extraction"}',
+            }),
+            tc({ seq: 5, name: "Bash", command_norm: "bun test" }), // no input captured -> norm stays
+        ], "claude", NO_EDGES);
+        expect(events.map((e) => e.title)).toEqual([
+            "rg -n detail src/timeline - Find detail extraction",
+            "bun test",
+        ]);
+    });
+
+    it("titles codex shell edits with the command, not the bare norm", () => {
+        const events = deriveToolEvents([
+            tc({
+                seq: 6,
+                name: "exec_command",
+                command_norm: "sed",
+                command_text: '{"command": "sed -i s/a/b/ x.ts"}',
+            }),
+        ], "codex", NO_EDGES);
+        expect(events[0]?.kind).toBe("file_edit");
+        expect(events[0]?.title).toBe("sed -i s/a/b/ x.ts");
+    });
+
     it("titles Agent dispatches with the description, not the bare tool name", () => {
         const events = deriveToolEvents([
             tc({ seq: 7, name: "Agent", command_text: '{"description": "Implement Task 3: stage registry", "prompt": "You are imp' }),

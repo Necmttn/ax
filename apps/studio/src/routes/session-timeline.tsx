@@ -51,7 +51,7 @@ function EventRow({ e }: { e: TimelineEvent }) {
             <span style={{ color: "var(--muted)", textTransform: "uppercase", fontSize: 10, letterSpacing: "0.04em", flex: "0 0 92px" }}>
                 {showLabel ? e.kind.replace("_", " ") : ""}
             </span>
-            <span style={{ color: "var(--ink)", minWidth: 0, overflowWrap: "anywhere" }}>
+            <span title={e.detail || undefined} style={{ color: "var(--ink)", minWidth: 0, overflowWrap: "anywhere" }}>
                 {e.title}
                 {e.recovered_by_seq != null ? (
                     <span style={{ color: "var(--green)", marginLeft: 6 }}>→ fixed #{e.recovered_by_seq}</span>
