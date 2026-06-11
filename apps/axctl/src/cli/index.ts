@@ -15,6 +15,7 @@ import { shareCommand, shareRuntime } from "./commands/share.ts";
 import { starCommand, starRuntime } from "./commands/star.ts";
 import { dogfoodCommand, dogfoodRuntime } from "./commands/dogfood.ts";
 import { costsGroupCommand, locCommand, pricingCommand, costsRuntime } from "./commands/costs.ts";
+import { costCommand, axCostRuntime } from "./commands/ax-cost.ts";
 import { recallCommand, recallRuntime } from "./commands/recall.ts";
 import { hookCommand, hooksCommand, hooksRuntime } from "./commands/hooks.ts";
 import { retroCommand, retroRuntime } from "./commands/retro.ts";
@@ -71,6 +72,7 @@ export const RUNTIME_BY_COMMAND: RuntimeManifest = {
     ...starRuntime,
     ...dogfoodRuntime,
     ...costsRuntime,
+    ...axCostRuntime,
     ...recallRuntime,
     ...hooksRuntime,
     ...retroRuntime,
@@ -105,6 +107,7 @@ const registeredCommands: ReadonlyArray<Command.Command.Any> = [
     shareCommand,
     installCommand,
     setupCommand,
+    costCommand,
     // Maintenance / plumbing verbs - hidden via their family manifests.
     deriveCommand,
     deriveSignalsCommand,

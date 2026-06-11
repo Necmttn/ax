@@ -54,7 +54,10 @@ import {
     buildSkillsRolesNext,
     buildRolesNext,
     buildImproveProposalsNext,
+    buildCostModelsNext,
+    buildCostSplitNext,
 } from "../nav/next-links.ts";
+import { fetchCostModels, fetchCostSplit } from "../queries/cost-analytics.ts";
 
 /**
  * The long-lived MCP runtime, built from `AppLayer` (SurrealClient + config +
@@ -479,6 +482,44 @@ const signalShowTool: AxMcpTool = {
     },
 };
 
+const costModelsTool: AxMcpTool = {
+    name: "cost_models",
+    description:
+        `Per-model cost rollup over session_token_usage: sessions count, prompt/completion/cache tokens, estimated cost USD, sorted by cost desc. Includes an "(unattributed)" row for sessions with no model recorded. ${NEXT_PROTOCOL_HINT}`,
+    inputSchema: {
+        days: z
+            .number()
+            .int()
+            .positive()
+            .optional()
+            .describe("Window in days (default 14)."),
+    },
+    run: async (args, rt) => {
+        const days = typeof args.days === "number" ? args.days : 14;
+        const result = await rt.runPromise(fetchCostModels({ sinceDays: days }));
+        return { ...result, next: buildCostModelsNext(result) };
+    },
+};
+
+const costSplitTool: AxMcpTool = {
+    name: "cost_split",
+    description:
+        `Cost matrix split by origin (main = non-subagent, subagent = claude-subagent) x model. Returns rows with cost, token sums, and share-of-total percent, plus a totals row. Use to understand how much subagent dispatch costs relative to top-level sessions. ${NEXT_PROTOCOL_HINT}`,
+    inputSchema: {
+        days: z
+            .number()
+            .int()
+            .positive()
+            .optional()
+            .describe("Window in days (default 14)."),
+    },
+    run: async (args, rt) => {
+        const days = typeof args.days === "number" ? args.days : 14;
+        const result = await rt.runPromise(fetchCostSplit({ sinceDays: days }));
+        return { ...result, next: buildCostSplitNext(result) };
+    },
+};
+
 /**
  * All registered MCP tools. `server.ts` iterates this array to register +
  * wrap each one.
@@ -501,4 +542,6 @@ export const axMcpTools: ReadonlyArray<AxMcpTool> = [
     improveListTool,
     sessionMetricsTool,
     signalShowTool,
+    costModelsTool,
+    costSplitTool,
 ];
