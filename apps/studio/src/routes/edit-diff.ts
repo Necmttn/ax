@@ -114,6 +114,50 @@ function patchText(input: Record<string, unknown>): string | null {
     return null;
 }
 
+export interface ReadView {
+    readonly fileName: string;
+    /** File content with the `N→` / `N\t` numbering stripped, for the
+     *  single-file code view (same renderer + theme as the edit diffs). */
+    readonly contents: string;
+    /** 1-based line number of the first content line (the Read offset). The
+     *  view only shows its own gutter when this is 1 - the library can't
+     *  start numbering mid-file, and wrong numbers are worse than none. */
+    readonly startLine: number;
+    /** Result lines after the numbered block (system-reminder footers etc.) -
+     *  still shown in the plain output block. */
+    readonly tail: string;
+}
+
+// Read results number lines as `  N→code` (claude UI arrow) or `N\tcode`
+// (cat -n style, what the stored transcripts carry).
+const READ_LINE = /^\s*(\d+)(?:→|\t)(.*)$/;
+
+/**
+ * Parse a Read tool result's numbered lines into plain file content. Returns
+ * null for non-file results (images, errors, empty) so the caller keeps the
+ * terminal block.
+ */
+export function extractReadView(
+    name: string,
+    input: Record<string, unknown> | null,
+    resultText: string,
+): ReadView | null {
+    if (name.toLowerCase() !== "read" || resultText.length === 0) return null;
+    const fileName = str(input?.file_path) ?? str(input?.path) ?? "file";
+    const lines = resultText.split("\n");
+    let start: number | null = null;
+    const code: string[] = [];
+    let i = 0;
+    for (; i < lines.length; i++) {
+        const m = lines[i]!.match(READ_LINE);
+        if (!m) break;
+        start ??= Number(m[1]);
+        code.push(m[2] ?? "");
+    }
+    if (start == null || code.length === 0) return null;
+    return { fileName, contents: code.join("\n"), startLine: start, tail: lines.slice(i).join("\n").trim() };
+}
+
 /**
  * Extract diff pairs from an edit-class tool call. Returns null when the
  * input doesn't carry recognizable before/after content - the caller keeps

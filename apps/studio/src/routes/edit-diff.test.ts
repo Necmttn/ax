@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { extractDiffPairs } from "./edit-diff.ts";
+import { extractDiffPairs, extractReadView } from "./edit-diff.ts";
 
 describe("extractDiffPairs", () => {
     test("Edit yields one pair keyed to file_path", () => {
@@ -110,5 +110,38 @@ describe("extractDiffPairs", () => {
         expect(extractDiffPairs("apply_patch", { nothing: "here" })).toBeNull();
         expect(extractDiffPairs("Bash", { command: "ls" })).toBeNull();
         expect(extractDiffPairs("Edit", null)).toBeNull();
+    });
+});
+
+describe("extractReadView", () => {
+    test("numbered Read result yields stripped contents with the start offset", () => {
+        const result = ["  4258→const a = 1;", "  4259→const b = 2;"].join("\n");
+        const view = extractReadView("Read", { file_path: "src/cli/index.ts" }, result);
+        expect(view).toEqual({
+            fileName: "src/cli/index.ts",
+            contents: "const a = 1;\nconst b = 2;",
+            startLine: 4258,
+            tail: "",
+        });
+    });
+
+    test("non-numbered trailing lines land in tail", () => {
+        const result = ["  1→x", "", "<system-reminder>note</system-reminder>"].join("\n");
+        const view = extractReadView("Read", { file_path: "a.ts" }, result);
+        expect(view?.contents).toBe("x");
+        expect(view?.startLine).toBe(1);
+        expect(view?.tail).toBe("<system-reminder>note</system-reminder>");
+    });
+
+    test("tab-numbered (cat -n) Read results parse too", () => {
+        const view = extractReadView("Read", { file_path: "a.ts" }, "1\timport x;\n2\texport y;");
+        expect(view?.contents).toBe("import x;\nexport y;");
+        expect(view?.startLine).toBe(1);
+    });
+
+    test("non-Read tools, images, and empty results return null", () => {
+        expect(extractReadView("Bash", { command: "ls" }, "  1→x")).toBeNull();
+        expect(extractReadView("Read", { file_path: "img.png" }, "[Image]")).toBeNull();
+        expect(extractReadView("Read", { file_path: "a.ts" }, "")).toBeNull();
     });
 });
