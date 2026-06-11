@@ -9,7 +9,7 @@ const rows = [
         name: "Bash",
         input: { command: "git checkout main" },
         cwd: "/repo",
-        source: "claude" as const,
+        source: "claude",
         project: "/repo",
         ts: new Date("2026-06-01"),
     },
@@ -17,7 +17,7 @@ const rows = [
         name: "Bash",
         input: { command: "bun test" },
         cwd: "/repo",
-        source: "claude" as const,
+        source: "claude",
         project: "/repo",
         ts: new Date("2026-06-01"),
     },
@@ -25,7 +25,7 @@ const rows = [
         name: "Bash",
         input: { command: "git switch x" },
         cwd: "/other",
-        source: "codex" as const,
+        source: "codex",
         project: "/other",
         ts: new Date("2026-06-02"),
     },
@@ -67,7 +67,7 @@ describe("replayRows", () => {
                 name: "Edit",
                 input: { file_path: "/repo/src/a.ts" },
                 cwd: "/repo",
-                source: "claude" as const,
+                source: "claude",
                 project: "/repo",
                 ts: new Date("2026-06-01"),
             },
@@ -98,7 +98,7 @@ describe("summarize", () => {
             name: "Bash",
             input,
             cwd: project,
-            source: "claude" as const,
+            source: "claude",
             project,
             ts: new Date(),
         });
@@ -129,7 +129,7 @@ describe("summarize", () => {
                 name: "Bash",
                 input: { command: `git checkout branch-${i}` },
                 cwd: "/repo",
-                source: "claude" as const,
+                source: "claude",
                 project: "/repo",
                 ts: new Date(),
             },
@@ -148,7 +148,7 @@ describe("summarize", () => {
                     name: "Bash",
                     input: { command: "bun test" },
                     cwd: "/some/dir",
-                    source: "claude" as const,
+                    source: "claude",
                     project: null,
                     ts: new Date(),
                 },
@@ -160,7 +160,7 @@ describe("summarize", () => {
     });
 
     test("skippedRows passthrough + distinct providers from rows", () => {
-        const makeResult = (source: "claude" | "codex") => ({
+        const makeResult = (source: string) => ({
             row: {
                 name: "Bash",
                 input: { command: "ls" },
@@ -178,6 +178,31 @@ describe("summarize", () => {
         const s2 = summarize([makeResult("claude"), makeResult("codex")]);
         expect(s2.skippedRows).toBe(0);
         expect(s2.providers).toEqual(["claude", "codex"]);
+    });
+
+    test("raw source 'pi' surfaces in providers; replay encodes as claude harness", async () => {
+        // BacktestRow.source is the raw session.source string. Pi is not a hook
+        // harness (no hooks fire from it), but if it appears in the DB it should
+        // appear in BacktestSummary.providers as "pi", not collapsed to "claude".
+        const piRow = {
+            name: "Bash",
+            input: { command: "echo pi-tool" },
+            cwd: "/repo",
+            source: "pi",  // raw source, not a Harness value
+            project: "/repo",
+            ts: new Date("2026-06-01"),
+        };
+        const layer = GitEnvTest({ primary: ["/repo"], branches: { "/repo": "main" }, roots: { "/repo": "/repo" } });
+        const results = await Effect.runPromise(
+            replayRows(enforceWorktree, [piRow]).pipe(Effect.provide(layer)),
+        );
+        // "echo pi-tool" doesn't match git checkout/switch -> Allow
+        expect(results).toHaveLength(1);
+        expect(results[0]?.verdict._tag).toBe("Allow");
+
+        const s = summarize(results);
+        // providers should contain the raw "pi" string, not "claude"
+        expect(s.providers).toEqual(["pi"]);
     });
 });
 

@@ -22,7 +22,13 @@ export interface BacktestRow {
     readonly name: string;
     readonly input: Record<string, unknown>;
     readonly cwd: string;
-    readonly source: Harness;
+    /**
+     * Raw session.source string as stored in the DB (e.g. "claude", "codex",
+     * "pi", "opencode", "cursor"). Used verbatim in BacktestSummary.providers
+     * so callers see honest per-source counts. Mapped to Harness only when
+     * building the synthetic HookEvent for replay (see replayRows).
+     */
+    readonly source: string;
     readonly project: string | null;
     readonly ts: Date;
 }
@@ -61,7 +67,9 @@ export const replayRows = (
         const out: ReplayResult[] = [];
         for (const row of rows) {
             const event = {
-                harness: row.source,
+                // Map raw source to Harness for the synthetic event; pi/opencode/
+                // cursor are not harnesses that fire hooks, so they encode as "claude".
+                harness: toHarness(row.source),
                 event: "PreToolUse" as const,
                 sessionId: null,
                 cwd: row.cwd,
@@ -239,7 +247,10 @@ export const fetchRows = (
             const sessKey = recordKey(row.session);
             const sess = sessKey ? sessionMap.get(sessKey) : undefined;
 
-            const source = toHarness(sess?.source);
+            // Store the raw session.source string so BacktestSummary.providers
+            // reports honest per-source values ("pi", "opencode", etc).
+            // toHarness() is called in replayRows when building the synthetic event.
+            const source = sess?.source ?? "claude";
 
             // Provider filter in JS (no per-row deref needed in SurrealQL).
             if (providerFilter && sess?.source !== providerFilter) continue;
