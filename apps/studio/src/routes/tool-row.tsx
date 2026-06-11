@@ -1,6 +1,8 @@
 import type { ToolCallDto, ToolCategory } from "@ax/lib/shared/dashboard-types";
 import { HighlightedCode } from "../highlight/HighlightedCode.tsx";
 import { langFromPath } from "../highlight/lang.ts";
+import { LogText } from "../highlight/log-line.tsx";
+import { NumberedCode, parseNumberedOutput } from "../highlight/numbered-code.tsx";
 import { stripToolResult } from "./tool-result.tsx";
 
 // Tinted badge tones derived from the calibrated root accents (one recipe,
@@ -114,6 +116,9 @@ export function ToolRowItem(
     // For every other card the result IS the output block.
     const output = hasSkill ? skill : resultText;
     const hasOutput = output.trim().length > 0;
+    // Read results arrive as `NNN<tab>code` - de-gut and highlight with the
+    // file's grammar so reads look like the file, not a pale dump.
+    const readNumbered = call.name === "Read" && hasOutput ? parseNumberedOutput(output) : null;
 
     return (
         <div style={{ display: "flex", gap: 8, margin: "0 0 8px" }}>
@@ -283,7 +288,12 @@ export function ToolRowItem(
                                 maxHeight: 260,
                             }}
                         >
-                            {output}
+                            {readNumbered
+                                ? <NumberedCode parsed={readNumbered} lang={langFromPath(head)} />
+                                : hasSkill
+                                // The injected SKILL.md is markdown - render it as such.
+                                ? <HighlightedCode code={output} lang="markdown" theme="dark" />
+                                : <LogText text={output} />}
                         </pre>
                     )
                     : null}
