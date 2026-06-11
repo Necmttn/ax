@@ -48,7 +48,7 @@ Set up ax for me, end to end. ax is a local agent-experience graph over my Claud
 
 1. INSTALL - run `curl -fsSL ax.necmttn.com/install | sh` to install the ax CLI. Reference: https://ax.necmttn.com/docs
 
-2. INGEST MY HISTORY - first run `ax ingest --dry-run` and tell me, in plain words, how long a full backfill will take. Then start the ingest in the BACKGROUND so we can keep working: run `ax ingest` as a background job with AX_PROGRESS=plain, and watch its output for progress and completion. Tell me I can watch it fill live in the dashboard - run `ax serve` and open http://127.0.0.1:8520. When the ingest finishes, summarize what landed: total sessions, turns, and the top skills/tools I actually use. Then continue with the steps below.
+2. INGEST MY HISTORY - first run `ax ingest --dry-run` and tell me, in plain words, how long a full backfill will take. Then start the ingest in the BACKGROUND so we can keep working: run `ax ingest` as a background job with AX_PROGRESS=plain, and watch its output for progress and completion. Tell me I can watch it fill live in the dashboard - run `ax serve` and open http://127.0.0.1:1738. When the ingest finishes, summarize what landed: total sessions, turns, and the top skills/tools I actually use. Then continue with the steps below.
 
 3. VERIFY - run `ax doctor`. If anything isn't ok, diagnose and fix it, then re-run until it is.
 
@@ -69,7 +69,7 @@ ax skills taste               # which skills earned their keep
 ax costs for --branch main    # what a branch cost in tokens
 ax sessions metrics           # graph-derived session health
 ax share <session-id>         # publish a session anyone can read
-ax serve                      # live dashboard at http://127.0.0.1:8520
+ax serve                      # live dashboard at http://127.0.0.1:1738
 ```
 
 Requires Bun ≥ 1.3 and SurrealDB ≥ 3.0. macOS-first; Linux works for ingest

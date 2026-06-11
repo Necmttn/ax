@@ -17,6 +17,7 @@
  */
 import { Effect, FileSystem, Option, Path, PlatformError } from "effect";
 import { AxConfig } from "@ax/lib/config";
+import { DEFAULT_DASHBOARD_PORT } from "@ax/lib/dashboard-port";
 import { SurrealClient } from "@ax/lib/db";
 import type { DbError } from "@ax/lib/errors";
 import { ingestTranscripts } from "./transcripts.ts";
@@ -251,6 +252,6 @@ export function formatDryRun(result: DryRunResult, json: boolean): string {
     const eta = result.etaSeconds === null ? "unknown" : `~${formatDuration(result.etaSeconds)}`;
     const roughTag = result.rough ? " (rough)" : "";
     lines.push(`  total: ${s.sessionsTotal.toLocaleString()} sessions   ETA ${eta}${roughTag} on this machine`);
-    lines.push("  run it: ax ingest   (watch live in ax serve → http://127.0.0.1:8520)");
+    lines.push(`  run it: ax ingest   (watch live in ax serve → http://127.0.0.1:${DEFAULT_DASHBOARD_PORT})`);
     return lines.join("\n");
 }
