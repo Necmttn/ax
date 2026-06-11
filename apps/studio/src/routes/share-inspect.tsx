@@ -13,11 +13,15 @@ import type {
 } from "@ax/lib/shared/dashboard-types";
 import { shortSessionId } from "@ax/lib/shared/session-id";
 import type { SessionTimelinePayload } from "../api.ts";
+import { FilesTouchedPanel } from "./files-touched-panel.tsx";
+import { ReviewView } from "./review-view.tsx";
 import { compactTokens, useInspectSelection, useVisibleTurnSeq } from "./session-inspect.tsx";
 import { SessionTimelineBody } from "./session-timeline.tsx";
 import { Transcript } from "./transcript.tsx";
 
 type ShareSchemaVersion = 1 | 2 | 3 | 4;
+
+type ShareViewMode = "transcript" | "timeline" | "review";
 
 // A published gist's files are immutable for a viewing session, so cache them
 // forever and never refetch on focus/remount - the 1.26MB session.json should
@@ -1275,7 +1279,7 @@ function MultiFileShareView(props: {
     const selectedFile = search.sub && manifest.subagents.some((c) => c.file === search.sub)
         ? search.sub
         : manifest.root_file;
-    const view: "transcript" | "timeline" = search.view === "timeline" ? "timeline" : "transcript";
+    const view: ShareViewMode = search.view === "timeline" ? "timeline" : search.view === "review" ? "review" : "transcript";
     // This view mounts on both the studio index ("/studio/?shareOwner&gistId",
     // the public iframe entry) and the "/share/$owner/$gistId" route, so
     // navigate()'s search-updater can't resolve a single route type. The call
@@ -1305,7 +1309,7 @@ function MultiFileShareView(props: {
         if (startViewTransition) startViewTransition(go);
         else go();
     };
-    const setView = (next: "transcript" | "timeline") => {
+    const setView = (next: ShareViewMode) => {
         navigateLoose({
             search: (prev) => ({ ...prev, view: next === "transcript" ? undefined : next }),
             // Preserve the #turn anchor across the toggle: a timeline event's
@@ -1316,10 +1320,10 @@ function MultiFileShareView(props: {
     };
     // Landing position on session switch lives in InspectBody's mount effect
     // (anchor > first turn > top), so nothing scrolls here.
-    // Timeline event rows link to `#turn-N` anchors that only exist in the
-    // transcript - a hash jump while on the timeline flips back to it.
+    // Timeline/review rows link to `#turn-N` anchors that only exist in the
+    // transcript - a hash jump while off the transcript flips back to it.
     useEffect(() => {
-        if (view !== "timeline") return;
+        if (view === "transcript") return;
         const onHash = () => {
             if (window.location.hash.startsWith("#turn-")) setView("transcript");
         };
@@ -1489,9 +1493,17 @@ function MultiFileShareView(props: {
             ) : null}
             {fileQuery.error ? <div className="error">Error: {String(fileQuery.error)}</div> : null}
             {fileQuery.isLoading && !data ? <div className="loading">Loading session…</div> : null}
-            {fileQuery.data?.session_timeline ? (
+            {/* Keyed by file: the tree model is created once per mount, so it
+                must remount when the session on screen changes. Hidden in
+                review mode - the review sidebar IS this tree. */}
+            {data && view !== "review" ? <FilesTouchedPanel key={`files-${selectedFile}`} turns={data.turns} /> : null}
+            {data || fileQuery.data?.session_timeline ? (
                 <div style={VIEW_TOGGLE_BAR_STYLE}>
-                    {(["transcript", "timeline"] as const).map((mode) => (
+                    {([
+                        ["transcript", "Read the transcript"],
+                        ...(fileQuery.data?.session_timeline ? [["timeline", "Scan the timeline"]] as const : []),
+                        ...(data ? [["review", "Review the changes"]] as const : []),
+                    ] as ReadonlyArray<readonly [ShareViewMode, string]>).map(([mode, label]) => (
                         <button
                             key={mode}
                             type="button"
@@ -1504,13 +1516,27 @@ function MultiFileShareView(props: {
                                     : {}),
                             }}
                         >
-                            {mode === "transcript" ? "Read the transcript" : "Scan the timeline"}
+                            {label}
                         </button>
                     ))}
                 </div>
             ) : null}
             {view === "timeline" && fileQuery.data?.session_timeline ? (
                 <SessionTimelineBody data={fileQuery.data.session_timeline} />
+            ) : view === "review" && data ? (
+                <ReviewView
+                    // Keyed by file for the same reason as InspectBody below.
+                    key={`rev-${selectedFile}`}
+                    data={data}
+                    timeline={fileQuery.data?.session_timeline ?? null}
+                    onOpenTranscript={(seq) => {
+                        // replaceState (no hashchange event) so the off-transcript
+                        // hash listener doesn't double-fire; the keyed InspectBody
+                        // reads the hash at mount.
+                        window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}#turn-${seq}`);
+                        setView("transcript");
+                    }}
+                />
             ) : data ? (
                 <InspectBody
                     // Keyed by file: jump-cursor/anchor state must not leak from
@@ -1572,6 +1598,7 @@ function LegacyShareView(props: { readonly owner: string; readonly gistId: strin
             ) : null}
             {query.error ? <div className="error">Error: {String(query.error)}</div> : null}
             {query.isLoading && !data ? <div className="loading">Loading shared session…</div> : null}
+            {data ? <FilesTouchedPanel turns={data.turns} /> : null}
             {data ? <InspectBody data={data} harnessHooks={query.data?.harness_hooks} /> : null}
         </section>
     );
