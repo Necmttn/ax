@@ -30,7 +30,7 @@ import {
     ingestRuntime,
     detectRemovedIngestFlag,
 } from "./commands/ingest.ts";
-import { resolveRuntime, type RuntimeManifest } from "./commands/manifest.ts";
+import { entryHidden, entryRuntime, resolveRuntime, type RuntimeManifest } from "./commands/manifest.ts";
 import {
     versionCommand,
     updateCommand,
@@ -52,59 +52,97 @@ import type { ProgressStage } from "./progress.ts";
 
 const devOnlyCommands = process.env.AX_DEV === "1" ? [dogfoodCommand] : [];
 
+// Spread of every family RuntimeManifest (18 commands/<family>.ts modules +
+// src/agents/cli.ts). effect-cli.test.ts enforces that every registered
+// top-level command appears here, so new families can't silently fall through
+// to the no-DB Proxy at runtime. Each entry carries BOTH facets of the
+// per-command metadata: routing (runtime) and visibility (hidden) - see
+// commands/manifest.ts for the entry shape (#248).
+export const RUNTIME_BY_COMMAND: RuntimeManifest = {
+    ...agentsRuntime,
+    ...reportRuntime,
+    ...signalsRuntime,
+    ...evidenceRuntime,
+    ...contextRuntime,
+    ...projectRuntime,
+    ...serveRuntime,
+    ...shareRuntime,
+    ...starRuntime,
+    ...dogfoodRuntime,
+    ...costsRuntime,
+    ...recallRuntime,
+    ...hooksRuntime,
+    ...retroRuntime,
+    ...improveRuntime,
+    ...sessionsRuntime,
+    ...skillsRuntime,
+    ...classifiersRuntime,
+    ...ingestRuntime,
+    ...lifecycleRuntime,
+};
+
+// Registration order, not metadata: the first block is the common verbs shown
+// in `axctl --help` - keep it short; it is the human's mental map of the tool
+// (full command reference lives in the README). Whether a command is hidden
+// is NOT decided here: visibility lives next to routing in each family's
+// RuntimeManifest (#248) and is applied by the uniform loop below. Visibility
+// policy itself (#173) is documented on `CommandMeta` in commands/manifest.ts.
+const registeredCommands: ReadonlyArray<Command.Command.Any> = [
+    // Common verbs - shown in `axctl --help`.
+    ingestCommand,
+    sessionsCommand,
+    improveCommand,
+    retroCommand,
+    recallCommand,
+    skillsCommand,
+    signalsCommand,
+    rolesCommand,
+    hooksCommand,
+    serveCommand,
+    mcpCommand,
+    tuiCommand,
+    shareCommand,
+    installCommand,
+    setupCommand,
+    // Maintenance / plumbing verbs - hidden via their family manifests.
+    deriveCommand,
+    deriveSignalsCommand,
+    deriveIntentsCommand,
+    insightsCommand,
+    classifiersCommand,
+    reportCommand,
+    costsGroupCommand,
+    locCommand,
+    pricingCommand,
+    contextCommand,
+    hookCommand,
+    agentsCommand,
+    projectCommand,
+    evidenceCommand,
+    timelineCommand,
+    versionCommand,
+    updateCommand,
+    daemonCommand,
+    doctorCommand,
+    uninstallCommand,
+    starCommand,
+    ...devOnlyCommands,
+];
+
+/**
+ * Uniform manifest-driven registration (#248): apply each command's
+ * manifest-declared visibility at assembly time. A command missing from
+ * RUNTIME_BY_COMMAND registers visible - and fails the effect-cli.test.ts
+ * exhaustiveness guard, so it can't ship undeclared.
+ */
+const withManifestVisibility = (command: Command.Command.Any): Command.Command.Any => {
+    const entry = RUNTIME_BY_COMMAND[command.name];
+    return entry !== undefined && entryHidden(entry) ? Command.withHidden(command) : command;
+};
+
 export const rootCommand = Command.make("axctl").pipe(
     Command.withDescription("ax local memory and telemetry for coding agents"),
-    Command.withSubcommands([
-        // Common verbs - shown in `axctl --help`. Keep this list short; it is the
-        // human's mental map of the tool. Everything else is hidden (still fully
-        // invokable by exact name - agents, plists, and docs use the names) so the
-        // default help stays lean. Full command reference lives in the README.
-        ingestCommand,
-        sessionsCommand,
-        improveCommand,
-        retroCommand,
-        recallCommand,
-        skillsCommand,
-        signalsCommand,
-        rolesCommand,
-        hooksCommand,
-        serveCommand,
-        mcpCommand,
-        tuiCommand,
-        shareCommand,
-        installCommand,
-        setupCommand,
-        // Visibility policy (#173): read-only insight surfaces (sessions, recall,
-        // skills, signals, roles, hooks) MUST be visible - a hidden command is
-        // invisible to agents discovering the tool via --help, so it never gets
-        // used (blind-dogfood finding). Hide only mutating / maintenance /
-        // plumbing verbs. `withHidden` omits a command from `--help`, shell
-        // completions, and "did you mean?" while leaving it callable by exact
-        // name. `derive-signals`/`derive-intents` MUST stay callable - the
-        // installed LaunchAgent plists invoke them by name.
-        Command.withHidden(deriveCommand),
-        Command.withHidden(deriveSignalsCommand),
-        Command.withHidden(deriveIntentsCommand),
-        Command.withHidden(insightsCommand),
-        Command.withHidden(classifiersCommand),
-        Command.withHidden(reportCommand),
-        Command.withHidden(costsGroupCommand),
-        Command.withHidden(locCommand),
-        Command.withHidden(pricingCommand),
-        Command.withHidden(contextCommand),
-        Command.withHidden(hookCommand), // harness plumbing (invoked by hook configs), not for humans
-        Command.withHidden(agentsCommand),
-        Command.withHidden(projectCommand),
-        Command.withHidden(evidenceCommand),
-        Command.withHidden(timelineCommand),
-        Command.withHidden(versionCommand),
-        Command.withHidden(updateCommand),
-        Command.withHidden(daemonCommand),
-        Command.withHidden(doctorCommand),
-        Command.withHidden(uninstallCommand),
-        Command.withHidden(starCommand), // nudge target (`ax star --done`) - pointed at by the star reminder, not for the help list
-        ...devOnlyCommands,
-    ]),
+    Command.withSubcommands(registeredCommands.map(withManifestVisibility)),
 );
 
 /**
@@ -221,33 +259,6 @@ const withoutDb = (args: ReadonlyArray<string>): CliProgram => {
     );
 };
 
-// Spread of every family RuntimeManifest (18 commands/<family>.ts modules +
-// src/agents/cli.ts). effect-cli.test.ts enforces that every registered
-// top-level command appears here, so new families can't silently fall through
-// to the no-DB Proxy at runtime.
-export const RUNTIME_BY_COMMAND: RuntimeManifest = {
-    ...agentsRuntime,
-    ...reportRuntime,
-    ...signalsRuntime,
-    ...evidenceRuntime,
-    ...contextRuntime,
-    ...projectRuntime,
-    ...serveRuntime,
-    ...shareRuntime,
-    ...starRuntime,
-    ...dogfoodRuntime,
-    ...costsRuntime,
-    ...recallRuntime,
-    ...hooksRuntime,
-    ...retroRuntime,
-    ...improveRuntime,
-    ...sessionsRuntime,
-    ...skillsRuntime,
-    ...classifiersRuntime,
-    ...ingestRuntime,
-    ...lifecycleRuntime,
-};
-
 // Commands whose handlers reach into SurrealClient via AppLayer (or the
 // ingest superset layer). Anything outside this set runs through `withoutDb`
 // so the user gets fast, honest errors (e.g. "unknown command") instead of a
@@ -256,6 +267,7 @@ export const RUNTIME_BY_COMMAND: RuntimeManifest = {
 // excluded: dispatch resolves them per-invocation via resolveRuntime.
 export const DB_COMMANDS: ReadonlySet<string> = new Set(
     Object.entries(RUNTIME_BY_COMMAND)
+        .map(([name, entry]) => [name, entryRuntime(entry)] as const)
         .filter(([, runtime]) => runtime === "db" || runtime === "ingest")
         .map(([name]) => name),
 );
@@ -309,20 +321,19 @@ const dispatch = (args: ReadonlyArray<string>): Effect.Effect<void, unknown> => 
         }
         return withIngest(args);
     }
-    // db-conditional families (e.g. classifiers) declare their own
-    // per-subcommand routing in their RuntimeManifest; resolve it here so
-    // dispatch never hard-codes subcommand names or predicates.
+    // Routing is manifest-owned: resolve the family's declared entry (static,
+    // db-conditional, or metadata-wrapped - see commands/manifest.ts) to the
+    // concrete runtime for this invocation, so dispatch never hard-codes
+    // command or subcommand names. Unknown commands / typos fall through to
+    // withoutDb for a fast "unknown command" instead of a DB connect timeout.
     const declared = RUNTIME_BY_COMMAND[args[0]];
-    if (declared !== undefined && typeof declared !== "string") {
+    if (declared !== undefined) {
         const runtime = resolveRuntime(declared, args);
         return runtime === "db"
             ? withDb(args)
             : runtime === "ingest"
                 ? withIngest(args)
                 : withoutDb(args);
-    }
-    if (DB_COMMANDS.has(args[0] ?? "")) {
-        return withDb(args);
     }
     return withoutDb(args);
 };

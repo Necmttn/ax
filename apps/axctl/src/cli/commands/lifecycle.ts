@@ -106,11 +106,11 @@ export const uninstallCommand = Command.make(
 );
 
 export const lifecycleRuntime: RuntimeManifest = {
-    version: "none",
-    update: "none",
+    version: { runtime: "none", hidden: true },
+    update: { runtime: "none", hidden: true },
     install: "none",
     setup: "none",
-    daemon: "none",
-    doctor: "none",
-    uninstall: "none",
+    daemon: { runtime: "none", hidden: true },
+    doctor: { runtime: "none", hidden: true },
+    uninstall: { runtime: "none", hidden: true },
 };

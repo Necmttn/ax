@@ -8,7 +8,7 @@ import {
     rootCommand,
 } from "./index.ts";
 import { classifiersPackageOperationsNeedsDb } from "./commands/classifiers.ts";
-import { resolveRuntime, type DbConditionalRuntime } from "./commands/manifest.ts";
+import { entryHidden, entryRuntime, resolveRuntime, type DbConditionalRuntime } from "./commands/manifest.ts";
 import { ALL_STAGES } from "../ingest/stage/registry.ts";
 import type { StageRegistryShape } from "../ingest/stage/registry.ts";
 import type { BaseStageStats, StageDef } from "../ingest/stage/types.ts";
@@ -89,6 +89,22 @@ describe("effect cli", () => {
                 registered.has(name),
                 `manifest declares "${name}" but no top-level command registers it (ghost RUNTIME_BY_COMMAND/DB_COMMANDS entry)`,
             ).toBe(true);
+        }
+    });
+
+    test("registered visibility mirrors the manifest for every command (uniform loop, #248)", () => {
+        // The root command is assembled by a manifest-driven loop; there must
+        // be no per-command withHidden drift between registration and the
+        // family manifests. Holds for every command, both directions.
+        for (const group of rootCommand.subcommands) {
+            for (const command of group.commands) {
+                const entry = RUNTIME_BY_COMMAND[command.name];
+                expect(entry, `command "${command.name}" missing from a family RuntimeManifest`).toBeDefined();
+                expect(
+                    command.hidden,
+                    `command "${command.name}": registered hidden=${command.hidden} but its manifest declares hidden=${entryHidden(entry!)}`,
+                ).toBe(entryHidden(entry!));
+            }
         }
     });
 
@@ -287,8 +303,8 @@ describe("effect cli", () => {
         const names = topLevelNames();
         expect(names).toContain("share");
         expect(names).toContain("star");
-        expect(RUNTIME_BY_COMMAND["share"]).toBe("none");
-        expect(RUNTIME_BY_COMMAND["star"]).toBe("none");
+        expect(entryRuntime(RUNTIME_BY_COMMAND["share"]!)).toBe("none");
+        expect(entryRuntime(RUNTIME_BY_COMMAND["star"]!)).toBe("none");
         expect(DB_COMMANDS.has("share")).toBe(false);
         expect(DB_COMMANDS.has("star")).toBe(false);
         // star is the nudge target (`ax star --done`), not a discovery surface
@@ -332,8 +348,9 @@ describe("classifiers db-conditional routing (#241)", () => {
     };
 
     const classifiersDeclaration = (): DbConditionalRuntime => {
-        const declared = RUNTIME_BY_COMMAND["classifiers"];
-        expect(declared).toBeDefined();
+        const entry = RUNTIME_BY_COMMAND["classifiers"];
+        expect(entry).toBeDefined();
+        const declared = entryRuntime(entry!);
         expect(typeof declared).toBe("object");
         expect((declared as DbConditionalRuntime).kind).toBe("db-conditional");
         return declared as DbConditionalRuntime;

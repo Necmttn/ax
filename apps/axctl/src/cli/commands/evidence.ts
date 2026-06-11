@@ -46,5 +46,5 @@ export const evidenceCommand = Command.make("evidence").pipe(
 );
 
 export const evidenceRuntime: RuntimeManifest = {
-    evidence: "db",
+    evidence: { runtime: "db", hidden: true },
 };

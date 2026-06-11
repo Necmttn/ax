@@ -266,6 +266,7 @@ export const hooksCommand = Command.make("hooks").pipe(
 );
 
 export const hooksRuntime: RuntimeManifest = {
-    hook: "db",
+    // `hook` is harness plumbing (invoked by hook configs), not for humans.
+    hook: { runtime: "db", hidden: true },
     hooks: "db",
 };

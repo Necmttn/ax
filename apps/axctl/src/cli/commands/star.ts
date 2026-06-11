@@ -23,5 +23,7 @@ export const starCommand = Command.make(
 );
 
 export const starRuntime: RuntimeManifest = {
-    star: "none",
+    // Nudge target (`ax star --done`) - pointed at by the star reminder, not
+    // for the help list.
+    star: { runtime: "none", hidden: true },
 };

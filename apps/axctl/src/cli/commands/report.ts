@@ -101,7 +101,7 @@ export const timelineCommand = Command.make(
 ));
 
 export const reportRuntime: RuntimeManifest = {
-    report: "db",
-    insights: "db",
-    timeline: "db",
+    report: { runtime: "db", hidden: true },
+    insights: { runtime: "db", hidden: true },
+    timeline: { runtime: "db", hidden: true },
 };

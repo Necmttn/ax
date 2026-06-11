@@ -36,5 +36,5 @@ export const contextCommand = Command.make("context").pipe(
 );
 
 export const contextRuntime: RuntimeManifest = {
-    context: "db",
+    context: { runtime: "db", hidden: true },
 };

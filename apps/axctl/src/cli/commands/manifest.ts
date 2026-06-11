@@ -42,17 +42,54 @@ export interface DbConditionalRuntime {
 /** A family's routing declaration: static runtime or per-subcommand conditional. */
 export type RuntimeDeclaration = CommandRuntime | DbConditionalRuntime;
 
-export type RuntimeManifest = Readonly<Record<string, RuntimeDeclaration>>;
+/**
+ * Per-command metadata beyond routing. Visibility policy (#173): a hidden
+ * command is omitted from `--help`, shell completions, and "did you mean?"
+ * while staying fully invokable by exact name (agents, plists, and docs use
+ * the names). Read-only insight surfaces MUST stay visible - a hidden command
+ * is invisible to agents discovering the tool via `--help`, so it never gets
+ * used (blind-dogfood finding). Hide only mutating / maintenance / plumbing
+ * verbs.
+ */
+export interface CommandMeta {
+    readonly runtime: RuntimeDeclaration;
+    /** Omit the command from `--help` / completions (still callable by name). */
+    readonly hidden: boolean;
+}
 
 /**
- * Resolve a declaration to the concrete runtime for one invocation. Static
+ * One manifest entry: a bare routing declaration (the command is visible) or
+ * routing wrapped with metadata (`{ runtime, hidden }`). Families fully own
+ * their commands' metadata here; cli/index.ts assembles the root command via
+ * a uniform loop over these entries (issue #248) - no per-command
+ * `withHidden` calls at the assembly site.
+ */
+export type ManifestEntry = RuntimeDeclaration | CommandMeta;
+
+export type RuntimeManifest = Readonly<Record<string, ManifestEntry>>;
+
+/** Discriminate `CommandMeta` from a bare `DbConditionalRuntime` declaration. */
+const isCommandMeta = (entry: ManifestEntry): entry is CommandMeta =>
+    typeof entry !== "string" && !("kind" in entry);
+
+/** The routing declaration of an entry, unwrapping `CommandMeta` if present. */
+export const entryRuntime = (entry: ManifestEntry): RuntimeDeclaration =>
+    isCommandMeta(entry) ? entry.runtime : entry;
+
+/** Whether the entry's command is hidden from `--help` (bare entries are visible). */
+export const entryHidden = (entry: ManifestEntry): boolean =>
+    isCommandMeta(entry) ? entry.hidden : false;
+
+/**
+ * Resolve a manifest entry to the concrete runtime for one invocation. Static
  * declarations resolve to themselves; db-conditional ones look up argv[1] in
  * the family's subcommand table (falling back for bare/--help/unknown).
  */
 export const resolveRuntime = (
-    declaration: RuntimeDeclaration,
+    entry: ManifestEntry,
     args: ReadonlyArray<string>,
 ): CommandRuntime => {
+    const declaration = entryRuntime(entry);
     if (typeof declaration === "string") return declaration;
     const sub = declaration.subcommands[args[1] ?? ""];
     if (sub === undefined) return declaration.fallback;
