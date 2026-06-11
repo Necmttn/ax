@@ -4,15 +4,15 @@ export function HookBacktestShowcase() {
   return (
     <section id="hook-backtest" className="showcase-hook-backtest">
       <main className="wrap">
-        <p className="eyebrow">before-you-ship · backtest</p>
+        <p className="eyebrow">before-you-ship · cases</p>
         <h2>
           Ask the graph what your hook <em>would have</em> caught.
         </h2>
         <p className="lede">
           You write a guardrail. You don&apos;t know if it&apos;ll catch real mistakes or
-          just become noise. ax replays your last week of actual sessions against
-          the hook before you install it, so the decision to ship is evidence,
-          not vibes.
+          just become noise. ax hooks cases scores the candidate against labeled
+          cases from your own session history - true and false positives, a real
+          precision number - so the decision to ship is evidence, not vibes.
         </p>
 
         <div className="split">
@@ -20,38 +20,37 @@ export function HookBacktestShowcase() {
           <article className="hook-card" aria-label="proposed hook">
             <header className="hook-head">
               <span className="filename">
-                ~/.claude/hooks/
+                ~/.ax/hooks/
                 <b style={{ color: "var(--ink)", fontWeight: 500 }}>
-                  pre-tool-main-branch-guard.ts
+                  main-branch-guard.ts
                 </b>
               </span>
               <span className="badge">candidate</span>
             </header>
             <pre className="hook-source">
-<span className="c-com">{"// fires on Bash tool_call before execution"}</span>{"\n"}
-<span className="c-key">export const</span>{" hook = {\n  "}
-<span className="c-key">on</span>{": "}
-<span className="c-str">{"\"pre_tool\""}</span>{",\n  "}
-<span className="c-key">tool</span>{": "}
-<span className="c-str">{"\"Bash\""}</span>{",\n  "}
-<span className="c-fn">match</span>{"(call) {\n    "}
-<span className="c-key">const</span>{" cmd = call.input.command ?? "}
-<span className="c-str">{"\"\""}</span>{";\n    "}
+<span className="c-key">import</span>{" { defineHook, Verdict, GitEnv } "}<span className="c-key">from</span>{" "}<span className="c-str">{"\"@ax/hooks-sdk\""}</span>{";\n\n"}
+<span className="c-key">export default</span>{" "}<span className="c-fn">defineHook</span>{"({\n  name: "}
+<span className="c-str">{"\"main-branch-guard\""}</span>{",\n  events: ["}
+<span className="c-str">{"\"PreToolUse\""}</span>{"],\n  matcher: { tools: ["}
+<span className="c-str">{"\"Bash\""}</span>{"] },\n  run: (event) =>\n    Effect.gen("}
+<span className="c-key">function*</span>{" () {\n      "}
+<span className="c-key">const</span>{" cmd = event.tool?.input.command ?? "}
+<span className="c-str">{"\"\""}</span>{";\n      "}
 <span className="c-key">if</span>{" (!"}
-<span className="c-str">{"/^\\s*git\\s+(push|commit)\\b/"}</span>{".test(cmd)) "}
-<span className="c-key">return false</span>{";\n    "}
-<span className="c-key">const</span>{" branch = call.context.git?.branch ?? "}
-<span className="c-str">{"\"\""}</span>{";\n    "}
-<span className="c-key">return</span>{" "}
-<span className="c-str">{"/^(main|master|production)$/"}</span>{".test(branch);\n  },\n  "}
-<span className="c-fn">action</span>{": "}
-<span className="c-str">{"\"block\""}</span>{",\n  "}
-<span className="c-key">reason</span>{": "}
-<span className="c-str">{"\"direct write to protected branch\""}</span>{",\n};"}
+<span className="c-str">{"/^git (push|commit)\\b/"}</span>{".test(cmd)) "}
+<span className="c-key">return</span>{" Verdict.allow;\n      "}
+<span className="c-key">const</span>{" branch = "}
+<span className="c-key">yield*</span>{" (yield* GitEnv).currentBranch(event.cwd);\n      "}
+<span className="c-key">if</span>{" ("}
+<span className="c-str">{"/^(main|master|production)$/"}</span>{".test(branch ?? "}
+<span className="c-str">{"\"\""}</span>{"))\n        "}
+<span className="c-key">return</span>{" Verdict."}
+<span className="c-fn">block</span>{"("}<span className="c-str">{"\"direct write to protected branch\""}</span>{");\n      "}
+<span className="c-key">return</span>{" Verdict.allow;\n    }),\n});"}
             </pre>
             <footer className="hook-foot">
-              <span>pre-tool · Bash</span>
-              <span className="gut">12 lines · gut-check before backtest</span>
+              <span>PreToolUse · Bash</span>
+              <span className="gut">16 lines · gut-check before the replay</span>
             </footer>
           </article>
 
@@ -67,7 +66,7 @@ export function HookBacktestShowcase() {
               </span>
             </header>
             <pre className="term-body">
-<span className="term-line"><span className="t-prompt">~/.claude $</span> <span className="t-cmd">ax hooks cases</span> pre-tool-main-branch-guard <span className="t-flag">--since=</span><span className="t-num">7d</span></span>{"\n"}
+<span className="term-line"><span className="t-prompt">~/.claude $</span> <span className="t-cmd">ax hooks cases</span> main-branch-guard <span className="t-flag">--since=</span><span className="t-num">7</span></span>{"\n"}
 <span className="term-line"><span className="t-muted">  ↳ replay window  </span> 2026-05-21 → 2026-05-28  <span className="t-muted">(7d)</span></span>{"\n"}
 <span className="term-line"><span className="t-muted">  ↳ sessions       </span> <span className="t-num">14</span> claude_code, <span className="t-num">3</span> codex  <span className="t-muted">(17 total)</span></span>{"\n"}
 <span className="term-line"><span className="t-muted">  ↳ tool_calls     </span> <span className="t-num">1,247</span> bash invocations indexed</span>{"\n"}
@@ -92,7 +91,7 @@ export function HookBacktestShowcase() {
 <span className="term-line"><span className="t-muted">  one to review:</span></span>{"\n"}
 <span className="term-line"><span className="t-muted">    </span><span className="t-id">sess_8af3·turn-42</span>  <span className="t-warn">hotfix/prod-token-leak</span>  <span className="t-muted">→ allow-list?</span></span>{"\n"}
 <span className="term-line"> </span>{"\n"}
-<span className="term-line"><span className="t-ok">  install with:</span> <span className="t-cmd">ax hooks install</span> pre-tool-main-branch-guard <span className="t-flag">--allow=hotfix/*</span></span>{"\n"}
+<span className="term-line"><span className="t-ok">  install with:</span> <span className="t-cmd">ax hooks install</span> ~/.ax/hooks/main-branch-guard.ts <span className="t-flag">--providers=</span>claude,codex</span>{"\n"}
 <span className="term-line"><span className="t-prompt">~/.claude $</span> <span className="term-caret" aria-hidden="true" /></span>
             </pre>
           </section>
@@ -303,11 +302,12 @@ export function HookBacktestShowcase() {
         <aside className="caption">
           <span className="tag">the move</span>
           <p>
-            Before you install a guardrail, ax replays your last seven days of
-            sessions against it. You see exactly what it would have blocked,
-            what it would have broken, and which calls it traced to a later
-            rollback - so a hook ships with a precision number attached, not a
-            hunch.{" "}
+            Before you install a guardrail, ax replays your own history against
+            it. <b>cases</b> scores a known candidate against labeled outcomes:
+            precision, recall, the false positive to review. <b>backtest</b>{" "}
+            replays any hook file through your raw tool_call history for a
+            would-block rate. Either way a hook ships with a number attached,
+            not a hunch.{" "}
             <em>
               No other agent tooling can do this; no one else has the typed
               session graph.
