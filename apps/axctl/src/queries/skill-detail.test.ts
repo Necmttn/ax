@@ -63,9 +63,8 @@ describe("SKILL_DETAIL_BASIC_SQL", () => {
     });
 
     test("excludes the dashboard evidence blocks (TUI hot-path regression)", () => {
-        // The TUI DetailPane queries per row selection; the evidence blocks
-        // (esp. `paired`, an unindexed skill_paired endpoint scan) must never
-        // leak back into the basic variant.
+        // The TUI DetailPane queries per row selection; the dashboard-only
+        // evidence blocks must never leak back into the basic variant.
         expect(SKILL_DETAIL_BASIC_SQL).not.toContain("corrections:");
         expect(SKILL_DETAIL_BASIC_SQL).not.toContain("proposals:");
         expect(SKILL_DETAIL_BASIC_SQL).not.toContain("paired:");
