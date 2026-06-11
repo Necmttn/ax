@@ -16,13 +16,10 @@
     "@ax/lib": "workspace:*",
     "@durable-streams/client": "^0.2.6",
     "@pierre/diffs": "^1.2.9",
-    "@shikijs/langs": "^4.2.0",
-    "@shikijs/themes": "^4.2.0",
     "@tanstack/react-query": "^5",
     "@tanstack/react-router": "^1.169",
     "react": "^19.2.0",
-    "react-dom": "^19.2.0",
-    "shiki": "^4.2.0"
+    "react-dom": "^19.2.0"
   },
   "devDependencies": {
     "@types/react": "^19.2.0",
