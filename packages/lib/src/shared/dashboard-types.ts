@@ -801,6 +801,8 @@ export interface SessionListRow {
     readonly ended_at: string | null;
     /** True when a raw transcript pointer exists (session is inspectable). */
     readonly has_raw_file: boolean;
+    /** From session_health.turns when a health row exists; 0 is a sentinel for
+     *  "no health data", not a literal zero-turn session. */
     readonly turn_count: number;
     /** Parent session id when this row was spawned by another session (e.g. a
      *  Claude subagent / Codex agent). Null for top-level sessions. Always
@@ -823,6 +825,7 @@ export interface SessionListRow {
     readonly friction: number | null;
     /** 'clean' = health row exists and friction is 0. Null = no health data. */
     readonly signal: "clean" | "friction" | null;
+    /** Commit/LOC outcome from session_metrics (git-derived at ingest). */
     readonly produced_commits: number | null;
     readonly reverted_commits: number | null;
     readonly lines_added: number | null;
@@ -886,6 +889,8 @@ export interface SessionInsightsPayload {
      *  pct = estimated context fill 0..1 (prompt+cache tokens / window). */
     readonly context_curve: ReadonlyArray<{ readonly t: number; readonly pct: number }>;
     readonly compactions: ReadonlyArray<{ readonly ts: string }>;
+    /** Always present; individual ratios are null when this session or the
+     *  30d baseline lacks that metric. All-null ratios ≠ missing baseline. */
     readonly baseline: {
         readonly cost_ratio: number | null;
         readonly friction_ratio: number | null;
