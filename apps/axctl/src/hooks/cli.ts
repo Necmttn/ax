@@ -1,6 +1,5 @@
-import { Effect } from "effect";
+import { Effect, Path } from "effect";
 import { Argument, Command, Flag } from "effect/unstable/cli";
-import { resolve as pathResolve } from "node:path";
 import { prettyPrint } from "@ax/lib/json";
 import { HOME } from "@ax/lib/paths";
 import { optionValue } from "../config-core/cli-util.ts";
@@ -202,7 +201,8 @@ const installCommand = Command.make(
     },
     ({ file, providers, scope }) =>
         Effect.gen(function* () {
-            const absFile = pathResolve(file);
+            const path = yield* Path.Path;
+            const absFile = path.resolve(file);
             const providerList = providers.split(",").map((p) => p.trim()).filter(Boolean);
 
             // Validate provider names against the registry
@@ -243,7 +243,8 @@ const backtestCommand = Command.make(
     },
     ({ file, days, provider, json: asJson }) =>
         Effect.gen(function* () {
-            const absFile = pathResolve(expandTilde(file));
+            const path = yield* Path.Path;
+            const absFile = path.resolve(expandTilde(file));
 
             // Import the hook module. A failed import exits non-zero immediately.
             const modResult = yield* Effect.promise(
