@@ -1,6 +1,9 @@
 import { describe, expect, test } from "bun:test";
+import { Effect, Layer } from "effect";
+import { SurrealClient } from "@ax/lib/db";
 import {
     computeSessionChurn,
+    fetchSessionChurnSummary,
     formatSessionChurnSummary,
     normalizeCheckFamily,
     type ChurnEvent,
@@ -41,6 +44,29 @@ const landed = (entries: Array<readonly [string, { readonly added: number; reado
 
 const health = (entries: Array<readonly [string, string | null]>) =>
     new Map(entries);
+
+const db = (input: {
+    base: Array<Record<string, unknown>>;
+    health?: Array<Record<string, unknown>>;
+    produced?: Array<Record<string, unknown>>;
+    touched?: Array<Record<string, unknown>>;
+    edits?: Array<Record<string, unknown>>;
+    outcomes?: Array<Record<string, unknown>>;
+    hooks?: Array<Record<string, unknown>>;
+    seenSql?: string[];
+}) =>
+    Layer.succeed(SurrealClient, {
+        query: <T>(sql: string) => {
+            input.seenSql?.push(sql);
+            if (sql.includes("FROM session_health")) return Effect.succeed([input.health ?? []] as unknown as T);
+            if (sql.includes("FROM produced")) return Effect.succeed([input.produced ?? []] as unknown as T);
+            if (sql.includes("FROM touched")) return Effect.succeed([input.touched ?? []] as unknown as T);
+            if (sql.includes("FROM tool_call")) return Effect.succeed([input.edits ?? []] as unknown as T);
+            if (sql.includes("FROM command_outcome")) return Effect.succeed([input.outcomes ?? []] as unknown as T);
+            if (sql.includes("FROM hook_command_invocation")) return Effect.succeed([input.hooks ?? []] as unknown as T);
+            return Effect.succeed([input.base] as unknown as T);
+        },
+    } as never);
 
 describe("normalizeCheckFamily", () => {
     test("normalizes known verification families", () => {
@@ -242,6 +268,120 @@ describe("computeSessionChurn", () => {
             repairLinesRemoved: 1,
             verificationFailures: 1,
         });
+    });
+});
+
+describe("fetchSessionChurnSummary", () => {
+    test("base query includes since, project, and source filters", async () => {
+        const seenSql: string[] = [];
+        await Effect.runPromise(fetchSessionChurnSummary({
+            since: new Date("2026-06-01T00:00:00.000Z"),
+            project: "/repo/ax",
+            source: "codex",
+            limit: 20,
+            generatedAt: new Date("2026-06-11T00:00:00.000Z"),
+        }).pipe(Effect.provide(db({ base: [], seenSql }))));
+
+        const baseSql = seenSql.find((s) => s.includes("FROM session_metrics"))!;
+        expect(baseSql).toContain('session.started_at >= d"2026-06-01T00:00:00.000Z"');
+        expect(baseSql).toContain('(session.project = "/repo/ax" OR session.cwd = "/repo/ax")');
+        expect(baseSql).toContain('session.source = "codex"');
+    });
+
+    test("empty base sessions skip secondary scans", async () => {
+        const seenSql: string[] = [];
+        const summary = await Effect.runPromise(fetchSessionChurnSummary({
+            since: null,
+            limit: 20,
+            generatedAt: new Date("2026-06-11T00:00:00.000Z"),
+        }).pipe(Effect.provide(db({ base: [], seenSql }))));
+
+        expect(summary.hotSessions).toEqual([]);
+        expect(summary.aggregates).toEqual([]);
+        expect(seenSql).toHaveLength(1);
+        expect(seenSql[0]).toContain("FROM session_metrics");
+    });
+
+    test("landed LOC joins produced commits to touched files in JS", async () => {
+        const summary = await Effect.runPromise(fetchSessionChurnSummary({
+            since: null,
+            limit: 20,
+            generatedAt: new Date("2026-06-11T00:00:00.000Z"),
+        }).pipe(Effect.provide(db({
+            base: [{ session: "session:`s1`", source: "codex" }],
+            health: [{ session: "session:`s1`", task_label: "landed loc" }],
+            produced: [{ session: "session:`s1`", commit: "commit:`c1`" }],
+            touched: [
+                { commit: "commit:`c1`", file: "file:`f1`", path: "src/a.ts", additions: 10, deletions: 2 },
+                { commit: "commit:`c1`", file: "file:`f1`", path: "src/a.ts", additions: 10, deletions: 2 },
+                { commit: "commit:`c1`", file: "file:`f2`", path: "src/b.ts", additions: 3, deletions: 1 },
+            ],
+            edits: [{ session: "session:`s1`", ts: "2026-06-11T00:01:00.000Z", name: "Edit", input_json: JSON.stringify({ old_string: "a", new_string: "a\nb" }) }],
+            outcomes: [{ session: "session:`s1`", ts: "2026-06-11T00:02:00.000Z", status: "error", command_norm: "tsc" }],
+        }))));
+
+        expect(summary.hotSessions[0]).toMatchObject({
+            session: "s1",
+            taskLabel: "landed loc",
+            landedLinesAdded: 13,
+            landedLinesRemoved: 3,
+            verificationFailures: 1,
+        });
+    });
+
+    test("edit tool rows produce line-delta edit events", async () => {
+        const summary = await Effect.runPromise(fetchSessionChurnSummary({
+            since: null,
+            limit: 20,
+            generatedAt: new Date("2026-06-11T00:00:00.000Z"),
+        }).pipe(Effect.provide(db({
+            base: [{ session: "session:`s1`", source: "claude" }],
+            edits: [
+                { session: "session:`s1`", ts: "2026-06-11T00:01:00.000Z", name: "Write", input_json: JSON.stringify({ content: "a\nb\nc" }) },
+                { session: "session:`s1`", ts: "2026-06-11T00:02:00.000Z", name: "exec_command", command_norm: "apply_patch", input_json: JSON.stringify({ patch: "+new\n-old\n+++ b/file\n--- a/file" }) },
+            ],
+            outcomes: [{ session: "session:`s1`", ts: "2026-06-11T00:03:00.000Z", status: "error", command_norm: "bun test" }],
+        }))));
+
+        expect(summary.hotSessions[0]).toMatchObject({
+            session: "s1",
+            editEvents: 2,
+            editLinesAdded: 4,
+            editLinesRemoved: 1,
+            repairLinesAdded: 0,
+            repairLinesRemoved: 0,
+            verificationFailures: 1,
+            topCheck: "test",
+        });
+    });
+
+    test("command_outcome and hook rows produce verification fail/pass events", async () => {
+        const summary = await Effect.runPromise(fetchSessionChurnSummary({
+            since: null,
+            limit: 20,
+            generatedAt: new Date("2026-06-11T00:00:00.000Z"),
+        }).pipe(Effect.provide(db({
+            base: [{ session: "session:`s1`", source: "codex" }],
+            edits: [{ session: "session:`s1`", ts: "2026-06-11T00:01:00.000Z", name: "Edit", input_json: JSON.stringify({ old_string: "a", new_string: "a\nb" }) }],
+            outcomes: [
+                { session: "session:`s1`", ts: "2026-06-11T00:02:00.000Z", kind: "expected_feedback", status: "ok", command_norm: "eslint" },
+                { session: "session:`s1`", ts: "2026-06-11T00:04:00.000Z", kind: "check", status: "ok", command_norm: "eslint" },
+                { session: "session:`s1`", ts: "2026-06-11T00:05:00.000Z", kind: "check", status: "ok", command_norm: "deploy" },
+            ],
+            hooks: [
+                { session: "session:`s1`", ts: "2026-06-11T00:03:00.000Z", provider_status: "blocking_error", effect: "blocked", exit_code: 1, command: "bun test" },
+                { session: "session:`s1`", ts: "2026-06-11T00:06:00.000Z", provider_status: "success", effect: "allowed", exit_code: null, command: "bun test" },
+            ],
+        }))));
+
+        expect(summary.hotSessions[0]).toMatchObject({
+            session: "s1",
+            verificationFailures: 2,
+            verificationPasses: 2,
+            episodes: 2,
+            passedEpisodes: 2,
+        });
+        expect(summary.hotSessions[0].topCheck).toBe("eslint");
     });
 });
 

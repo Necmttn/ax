@@ -1,4 +1,21 @@
+import { Effect } from "effect";
+import { recordLiteral } from "@ax/lib/ids";
+import { recordKeyPart } from "@ax/lib/shared/derive-keys";
+import { SurrealClient } from "@ax/lib/db";
+import type { DbError } from "@ax/lib/errors";
+import { surrealDate, surrealString } from "@ax/lib/shared/surql";
+import {
+    canonicalEditToolName,
+    editToolSqlFilter,
+    isApplyPatchCall,
+    isEditTool,
+    toolClassInputOf,
+} from "@ax/lib/shared/tool-classes";
+import { editDelta } from "../dashboard/loc-query.ts";
+import { applyPatchDelta } from "./session-loc.ts";
+import { fetchSessionHealthMap } from "./session-metrics-query.ts";
 import { cleanSessionId } from "./util.ts";
+import { chunked, numOrZero, sessionRefList, strOrNull } from "./util.ts";
 
 export interface ChurnEvent {
     readonly session: string;
@@ -54,6 +71,14 @@ export interface SessionChurnSummary {
     };
     readonly aggregates: SourceChurnAggregate[];
     readonly hotSessions: SessionChurnRow[];
+}
+
+export interface FetchSessionChurnInput {
+    readonly since: Date | null;
+    readonly project?: string | null;
+    readonly source?: string | null;
+    readonly limit: number;
+    readonly generatedAt?: Date | string;
 }
 
 export interface ChurnLines {
@@ -113,6 +138,7 @@ interface MutableAggregateState {
 }
 
 const DEFAULT_LIMIT = 10;
+const IN_CHUNK = 500;
 
 export const normalizeCheckFamily = (raw: string | null): string | null => {
     if (raw === null) return null;
@@ -218,6 +244,253 @@ export const computeSessionChurn = (
         hotSessions,
     };
 };
+
+export const fetchSessionChurnSummary = (
+    input: FetchSessionChurnInput,
+): Effect.Effect<SessionChurnSummary, DbError, SurrealClient> =>
+    Effect.gen(function* () {
+        const db = yield* SurrealClient;
+        const limit = Math.min(Math.max(Math.trunc(input.limit), 1), 1000);
+        const project = input.project ?? null;
+        const source = input.source ?? null;
+        const clauses: string[] = [];
+        if (input.since) clauses.push(`session.started_at >= ${surrealDate(input.since)}`);
+        if (project !== null) {
+            const projectSql = surrealString(project);
+            clauses.push(`(session.project = ${projectSql} OR session.cwd = ${projectSql})`);
+        }
+        if (source !== null) clauses.push(`session.source = ${surrealString(source)}`);
+        const where = clauses.length > 0 ? `WHERE ${clauses.join(" AND ")}` : "";
+        const baseRows = (yield* db.query<[Array<Record<string, unknown>>]>(`
+SELECT type::string(session) AS session, session.source AS source
+FROM session_metrics
+${where}
+ORDER BY session.started_at DESC
+LIMIT ${limit};`))?.[0] ?? [];
+
+        const sessionIds = uniqueCleanSessionIds(baseRows.map((row) => String(row.session ?? "")));
+        const sourceBySession = new Map<string, string | null>();
+        for (const row of baseRows) {
+            const session = cleanSessionId(String(row.session ?? ""));
+            if (session.length === 0) continue;
+            sourceBySession.set(session, strOrNull(row.source));
+        }
+        const options = churnOptions(input, project, source, limit);
+
+        if (sessionIds.length === 0) {
+            return computeSessionChurn([], new Map(), new Map(), options);
+        }
+
+        const [health, landed, edits, commandEvents, hookEvents] = yield* Effect.all([
+            fetchSessionHealthMap(sessionIds),
+            fetchLandedLocBySession(sessionIds),
+            fetchEditEvents(sessionIds, sourceBySession),
+            fetchCommandOutcomeEvents(sessionIds, sourceBySession),
+            fetchHookEvents(sessionIds, sourceBySession),
+        ], { concurrency: 5 });
+
+        return computeSessionChurn([...edits, ...commandEvents, ...hookEvents], landed, health, options);
+    });
+
+const fetchLandedLocBySession = (
+    sessionIds: readonly string[],
+): Effect.Effect<Map<string, ChurnLines>, DbError, SurrealClient> =>
+    Effect.gen(function* () {
+        const db = yield* SurrealClient;
+        const out = new Map<string, ChurnLines>();
+        if (sessionIds.length === 0) return out;
+
+        const producedRows = (yield* Effect.all(
+            chunked(sessionIds, IN_CHUNK).map((ids) =>
+                db.query<[Array<Record<string, unknown>>]>(
+                    `SELECT type::string(in) AS session, type::string(out) AS commit`
+                    + ` FROM produced WHERE in IN [${sessionRefList(ids)}];`,
+                ),
+            ),
+            { concurrency: 4 },
+        )).flatMap((batch) => batch?.[0] ?? []);
+
+        const sessionsByCommit = new Map<string, Set<string>>();
+        for (const row of producedRows) {
+            const session = cleanSessionId(String(row.session ?? ""));
+            const commit = String(row.commit ?? "");
+            if (session.length === 0 || commit.length === 0) continue;
+            let sessions = sessionsByCommit.get(commit);
+            if (sessions === undefined) {
+                sessions = new Set();
+                sessionsByCommit.set(commit, sessions);
+            }
+            sessions.add(session);
+        }
+        if (sessionsByCommit.size === 0) return out;
+
+        const commitIds = [...sessionsByCommit.keys()];
+        const touchedRows = (yield* Effect.all(
+            chunked(commitIds, IN_CHUNK).map((ids) =>
+                db.query<[Array<Record<string, unknown>>]>(
+                    `SELECT type::string(in) AS commit, type::string(out) AS file, out.path AS path, old_path, new_path, additions, deletions`
+                    + ` FROM touched WHERE in IN [${recordRefList("commit", ids)}];`,
+                ),
+            ),
+            { concurrency: 4 },
+        )).flatMap((batch) => batch?.[0] ?? []);
+
+        const seenTouched = new Set<string>();
+        for (const row of touchedRows) {
+            const commit = String(row.commit ?? "");
+            const sessions = sessionsByCommit.get(commit);
+            if (sessions === undefined) continue;
+
+            const identity = touchedIdentity(row);
+            if (identity !== null) {
+                const key = `${commit}:${identity}`;
+                if (seenTouched.has(key)) continue;
+                seenTouched.add(key);
+            }
+
+            const added = numOrZero(row.additions);
+            const removed = numOrZero(row.deletions);
+            for (const session of sessions) {
+                const cur = out.get(session) ?? { added: 0, removed: 0 };
+                out.set(session, {
+                    added: cur.added + added,
+                    removed: cur.removed + removed,
+                });
+            }
+        }
+
+        return out;
+    });
+
+const fetchEditEvents = (
+    sessionIds: readonly string[],
+    sourceBySession: ReadonlyMap<string, string | null>,
+): Effect.Effect<ChurnEvent[], DbError, SurrealClient> =>
+    Effect.gen(function* () {
+        const db = yield* SurrealClient;
+        if (sessionIds.length === 0) return [];
+        const rows = (yield* Effect.all(
+            chunked(sessionIds, IN_CHUNK).map((ids) =>
+                db.query<[Array<Record<string, unknown>>]>(
+                    `SELECT type::string(session) AS session, type::string(ts) AS ts, name, command_norm, input_json`
+                    + ` FROM tool_call WHERE session IN [${sessionRefList(ids)}] AND ${editToolSqlFilter} ORDER BY ts ASC;`,
+                ),
+            ),
+            { concurrency: 4 },
+        )).flatMap((batch) => batch?.[0] ?? []);
+
+        const events: ChurnEvent[] = [];
+        for (const row of rows) {
+            const call = toolClassInputOf(row);
+            if (!isEditTool(call)) continue;
+            const session = cleanSessionId(String(row.session ?? ""));
+            const tsMs = msOrNull(row.ts);
+            if (session.length === 0 || tsMs === null) continue;
+            const inputJson = strOrNull(row.input_json);
+            const delta = isApplyPatchCall(call)
+                ? applyPatchDelta(inputJson)
+                : editDelta(canonicalEditToolName(call.name), inputJson);
+            events.push({
+                session,
+                source: sourceBySession.get(session) ?? null,
+                tsMs,
+                kind: "edit",
+                check: null,
+                linesAdded: delta.added,
+                linesRemoved: delta.removed,
+            });
+        }
+        return events;
+    });
+
+const fetchCommandOutcomeEvents = (
+    sessionIds: readonly string[],
+    sourceBySession: ReadonlyMap<string, string | null>,
+): Effect.Effect<ChurnEvent[], DbError, SurrealClient> =>
+    Effect.gen(function* () {
+        const db = yield* SurrealClient;
+        if (sessionIds.length === 0) return [];
+        const rows = (yield* Effect.all(
+            chunked(sessionIds, IN_CHUNK).map((ids) =>
+                db.query<[Array<Record<string, unknown>>]>(
+                    `SELECT type::string(session) AS session, type::string(ts) AS ts, kind, status, command_norm, command_tool, text`
+                    + ` FROM command_outcome WHERE session IN [${sessionRefList(ids)}] ORDER BY ts ASC;`,
+                ),
+            ),
+            { concurrency: 4 },
+        )).flatMap((batch) => batch?.[0] ?? []);
+
+        const events: ChurnEvent[] = [];
+        for (const row of rows) {
+            const session = cleanSessionId(String(row.session ?? ""));
+            const tsMs = msOrNull(row.ts);
+            const check = normalizedCheckFrom(row.command_norm, row.command_tool, row.text);
+            if (session.length === 0 || tsMs === null || check === null) continue;
+            const status = strOrNull(row.status);
+            const kind = strOrNull(row.kind);
+            const eventKind = kind === "expected_feedback" || status === "error"
+                ? "verification_fail"
+                : status === "ok"
+                    ? "verification_pass"
+                    : null;
+            if (eventKind === null) continue;
+            events.push({
+                session,
+                source: sourceBySession.get(session) ?? null,
+                tsMs,
+                kind: eventKind,
+                check,
+                linesAdded: 0,
+                linesRemoved: 0,
+            });
+        }
+        return events;
+    });
+
+const fetchHookEvents = (
+    sessionIds: readonly string[],
+    sourceBySession: ReadonlyMap<string, string | null>,
+): Effect.Effect<ChurnEvent[], DbError, SurrealClient> =>
+    Effect.gen(function* () {
+        const db = yield* SurrealClient;
+        if (sessionIds.length === 0) return [];
+        const rows = (yield* Effect.all(
+            chunked(sessionIds, IN_CHUNK).map((ids) =>
+                db.query<[Array<Record<string, unknown>>]>(
+                    `SELECT type::string(session) AS session, type::string(ts) AS ts, provider_status, effect, exit_code, command, hook_name`
+                    + ` FROM hook_command_invocation WHERE session IN [${sessionRefList(ids)}] ORDER BY ts ASC;`,
+                ),
+            ),
+            { concurrency: 4 },
+        )).flatMap((batch) => batch?.[0] ?? []);
+
+        const events: ChurnEvent[] = [];
+        for (const row of rows) {
+            const session = cleanSessionId(String(row.session ?? ""));
+            const tsMs = msOrNull(row.ts);
+            const check = normalizedCheckFrom(row.command, row.hook_name);
+            if (session.length === 0 || tsMs === null || check === null) continue;
+            const providerStatus = strOrNull(row.provider_status);
+            const effect = strOrNull(row.effect);
+            const exitCode = exitCodeOf(row.exit_code);
+            const eventKind = providerStatus === "blocking_error" || effect === "blocked" || (exitCode !== null && exitCode !== 0)
+                ? "verification_fail"
+                : providerStatus === "success" && effect !== "blocked" && (exitCode === null || exitCode === 0)
+                    ? "verification_pass"
+                    : null;
+            if (eventKind === null) continue;
+            events.push({
+                session,
+                source: sourceBySession.get(session) ?? null,
+                tsMs,
+                kind: eventKind,
+                check,
+                linesAdded: 0,
+                linesRemoved: 0,
+            });
+        }
+        return events;
+    });
 
 export const formatSessionChurnSummary = (summary: SessionChurnSummary): string => {
     if (summary.aggregates.length === 0) {
@@ -412,6 +685,58 @@ const topCheck = (counts: ReadonlyMap<string, number>): string | null => {
 
 const increment = (counts: Map<string, number>, key: string, amount: number): void => {
     counts.set(key, (counts.get(key) ?? 0) + amount);
+};
+
+const uniqueCleanSessionIds = (ids: readonly string[]): string[] =>
+    [...new Set(ids.map((id) => cleanSessionId(id)).filter((id) => id.length > 0))];
+
+const churnOptions = (
+    input: FetchSessionChurnInput,
+    project: string | null,
+    source: string | null,
+    limit: number,
+): ComputeSessionChurnOptions => ({
+    since: input.since,
+    project,
+    source,
+    limit,
+    ...(input.generatedAt !== undefined ? { generatedAt: input.generatedAt } : {}),
+});
+
+const recordRefList = (table: string, ids: readonly string[]): string =>
+    ids
+        .map((id) => recordKeyPart(id, table))
+        .filter((id): id is string => id !== null && id.length > 0)
+        .map((id) => recordLiteral(table, id))
+        .join(", ");
+
+const touchedIdentity = (row: Record<string, unknown>): string | null => {
+    const file = strOrNull(row.file);
+    if (file !== null) return file;
+    const path = strOrNull(row.path) ?? strOrNull(row.new_path) ?? strOrNull(row.old_path);
+    return path;
+};
+
+const normalizedCheckFrom = (...values: readonly unknown[]): string | null => {
+    for (const value of values) {
+        const check = normalizeCheckFamily(strOrNull(value));
+        if (check !== null) return check;
+    }
+    return null;
+};
+
+const exitCodeOf = (value: unknown): number | null => {
+    if (value === null || value === undefined) return null;
+    const n = Number(value);
+    return Number.isFinite(n) ? n : null;
+};
+
+const msOrNull = (value: unknown): number | null => {
+    if (value instanceof Date) return value.getTime();
+    if (typeof value === "number" && Number.isFinite(value)) return value;
+    if (typeof value !== "string" || value.length === 0) return null;
+    const ms = new Date(value).getTime();
+    return Number.isFinite(ms) ? ms : null;
 };
 
 const taskLabelOf = (input: string | null | SessionHealthChurnInput | undefined): string | null => {
