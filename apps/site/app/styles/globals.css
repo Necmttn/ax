@@ -7016,6 +7016,8 @@ footer .right {
 }
 .features-page .iv-brief pre {
   margin: 0;
+  background: transparent; /* global `pre` paints var(--panel); this card is dark */
+  border: 0;
   padding: 18px 20px;
   font-family: var(--mono);
   font-size: 12px;
@@ -7062,6 +7064,8 @@ footer .right {
 }
 .features-page .hook-code pre {
   margin: 0;
+  background: transparent; /* global `pre` paints var(--panel); this card is dark */
+  border: 0;
   padding: 18px 20px;
   font-family: var(--mono);
   font-size: 12.5px;

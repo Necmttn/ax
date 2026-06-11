@@ -1,8 +1,10 @@
-import { Effect } from "effect";
+import { Effect, Path } from "effect";
 import { Argument, Command, Flag } from "effect/unstable/cli";
 import { prettyPrint } from "@ax/lib/json";
+import { HOME } from "@ax/lib/paths";
 import { optionValue } from "../config-core/cli-util.ts";
-import { HookProviderRegistryDefault } from "./providers/registry.ts";
+import { HookProviderRegistryDefault, ALL_HOOK_PROVIDERS } from "./providers/registry.ts";
+import { resolveSdkPath, scaffoldWorkspace } from "./sdk-workspace.ts";
 import {
     readAllHooks,
     addHook,
@@ -15,6 +17,10 @@ import {
 } from "./config.ts";
 import type { HookScope } from "./providers/types.ts";
 import { HookNotFoundError } from "./errors.ts";
+import { installHookFile } from "./sdk-install.ts";
+import { GitEnvLive } from "@ax/hooks-sdk/git-env";
+import { fetchRows, replayRows, summarize, formatReport } from "./backtest.ts";
+import type { HookDefinition } from "@ax/hooks-sdk/define";
 
 /**
  * `ax hooks` config CRUD subcommands (provider-agnostic: claude/cursor/codex/
@@ -155,6 +161,148 @@ const enableCommand = Command.make(
         ),
 ).pipe(Command.withDescription("Re-enable a parked hook by id"));
 
+/** Expand a leading `~` to the user's home directory. */
+const expandTilde = (p: string): string =>
+    p === "~" ? HOME : p.startsWith("~/") ? `${HOME}/${p.slice(2)}` : p;
+
+const initCommand = Command.make(
+    "init",
+    {
+        dir: Flag.string("dir").pipe(Flag.withDefault("~/.ax/hooks")),
+        noInstall: Flag.boolean("no-install").pipe(Flag.withDefault(false)),
+    },
+    ({ dir, noInstall }) =>
+        Effect.gen(function* () {
+            const workspaceDir = expandTilde(dir);
+            const sdkPath = yield* resolveSdkPath();
+            const written = yield* scaffoldWorkspace({
+                dir: workspaceDir,
+                sdkPath,
+                install: !noInstall,
+            });
+            console.log(`hook workspace ready at ${workspaceDir}`);
+            for (const path of written) console.log(`  wrote ${path}`);
+            if (noInstall) console.log(`  (skipped bun install - run it in ${workspaceDir} before use)`);
+            console.log("");
+            console.log("next steps:");
+            console.log(`  ax hooks backtest ${workspaceDir}/enforce-worktree.ts --days=14   (replay history through it first)`);
+            console.log(`  ax hooks install ${workspaceDir}/enforce-worktree.ts --providers=claude,codex`);
+        }),
+).pipe(Command.withDescription("Scaffold the ~/.ax/hooks workspace (package.json + starter guard hooks)"));
+
+const KNOWN_PROVIDERS = ALL_HOOK_PROVIDERS.map((p) => p.name);
+
+const installCommand = Command.make(
+    "install",
+    {
+        file: Argument.string("file"),
+        providers: Flag.string("providers").pipe(Flag.withDefault("claude,codex")),
+        scope: Flag.string("scope").pipe(Flag.withDefault("global")),
+    },
+    ({ file, providers, scope }) =>
+        Effect.gen(function* () {
+            const path = yield* Path.Path;
+            const absFile = path.resolve(file);
+            const providerList = providers.split(",").map((p) => p.trim()).filter(Boolean);
+
+            // Validate provider names against the registry
+            const unknown = providerList.filter((p) => !KNOWN_PROVIDERS.includes(p));
+            if (unknown.length > 0) {
+                console.error(`Unknown providers: ${unknown.join(", ")}. Known: ${KNOWN_PROVIDERS.join(", ")}`);
+                process.exit(1);
+            }
+
+            const results = yield* installHookFile(absFile, providerList, asScope(scope));
+
+            for (const entry of results) {
+                const matcherStr = entry.input.matcher ? ` [matcher: ${entry.input.matcher}]` : "";
+                if (entry.skipped) {
+                    console.log(`already installed - skipped ${entry.provider} ${entry.input.event}${matcherStr}`);
+                    continue;
+                }
+                console.log(`installed ${entry.provider} ${entry.input.event}${matcherStr} -> ${entry.writtenPath}`);
+                console.log(`  command: ${entry.input.command}`);
+            }
+            const installed = results.filter((r) => !r.skipped).length;
+            const skipped = results.length - installed;
+            console.log("");
+            console.log(`${installed} hook(s) installed${skipped > 0 ? `, ${skipped} skipped (already installed)` : ""}.`);
+            if (installed > 0 && providerList.includes("codex")) {
+                console.log("note (codex): approve the new hook when prompted (trust review).");
+            }
+        }).pipe(Effect.provide(HookProviderRegistryDefault)),
+).pipe(Command.withDescription("Install a SDK hook file into provider configs (--providers=claude,codex --scope=global)"));
+
+const backtestCommand = Command.make(
+    "backtest",
+    {
+        file: Argument.string("file"),
+        days: Flag.integer("days").pipe(Flag.withDefault(30)),
+        provider: Flag.string("provider").pipe(Flag.optional),
+        json: Flag.boolean("json").pipe(Flag.withDefault(false)),
+    },
+    ({ file, days, provider, json: asJson }) =>
+        Effect.gen(function* () {
+            const path = yield* Path.Path;
+            const absFile = path.resolve(expandTilde(file));
+
+            // Import the hook module. A failed import exits non-zero immediately.
+            const modResult = yield* Effect.promise(
+                () =>
+                    import(absFile).catch((e: unknown) => {
+                        process.stderr.write(
+                            `cannot import hook file ${absFile}: ${e instanceof Error ? e.message : String(e)}\n`,
+                        );
+                        process.exit(1);
+                    }) as Promise<{ default?: unknown }>,
+            );
+
+            const def = modResult?.default as HookDefinition | undefined;
+            if (
+                !def ||
+                typeof def !== "object" ||
+                typeof (def as HookDefinition).run !== "function"
+            ) {
+                process.stderr.write(
+                    `${absFile}: default export must be a defineHook() result with a 'run' function\n`,
+                );
+                process.exit(1);
+            }
+
+            const hookDef = def as HookDefinition;
+            const providerFilter = optionValue(provider) ?? null;
+            const toolNames = hookDef.matcher?.tools ? [...hookDef.matcher.tools] : [];
+
+            // Fetch rows from DB (read-only SELECTs). DB unavailable -> friendly error + exit.
+            const fetched = yield* fetchRows(days, toolNames, providerFilter).pipe(
+                Effect.catchTag("DbError", (e) =>
+                    Effect.promise(async () => {
+                        process.stderr.write(
+                            `DB unreachable or query failed: ${e.message}\n` +
+                            "Start the DB with 'axctl daemon start' and retry.\n",
+                        );
+                        process.exit(1);
+                    }),
+                ),
+            );
+
+            // Replay through the hook with GitEnvLive (state-dependent checks
+            // use the CURRENT repo state - see caveat in report).
+            const results = yield* replayRows(hookDef, fetched.rows).pipe(
+                Effect.provide(GitEnvLive),
+            );
+
+            const summary = summarize(results, fetched.skipped);
+
+            if (asJson) {
+                console.log(prettyPrint(summary));
+                return;
+            }
+
+            console.log(formatReport(hookDef.name, days, summary));
+        }),
+).pipe(Command.withDescription("Replay historical tool_call rows through an SDK hook in-process (--days=30 --provider=claude --json)"));
+
 /** Spliced into `hooksCommand`'s subcommand list in cli/index.ts. */
 export const hooksConfigSubcommands = [
     configCommand,
@@ -163,4 +311,7 @@ export const hooksConfigSubcommands = [
     editCommand,
     disableCommand,
     enableCommand,
+    initCommand,
+    installCommand,
+    backtestCommand,
 ];

@@ -949,6 +949,42 @@ axctl roles
 axctl roles --json
 ```
 
+## Hooks SDK CLI (`ax hooks`)
+
+`@ax/hooks-sdk` hooks are single TypeScript files in `~/.ax/hooks/` that
+default-export `defineHook({ name, events, matcher, run })` and return a
+verdict: allow, block(reason), warn, or inject. Defects fail open - a buggy
+hook never wedges the agent. Fire path is `bun <file>.ts` (~70ms).
+
+### `ax hooks init [--dir=~/.ax/hooks] [--no-install]`
+
+Scaffold the `~/.ax/hooks` workspace (package.json + starter guard hooks).
+
+### `ax hooks install <file> [--providers=claude,codex] [--scope=global]`
+
+Idempotent fan-out of one SDK hook file into the Claude Code and Codex
+provider configs, with ax ownership markers.
+
+### `ax hooks backtest <file> [--days=N] [--provider=claude] [--json]`
+
+Replay historical `tool_call` rows through the hook in-process before
+installing it: would-block count and rate, per-project breakdown, sample
+blocked commands. Default window 30 days. State-dependent checks run against
+current repo state (caveat printed).
+
+### `ax hooks cases <case> [--since=N] [--tail=N] [--window=N] [--no-persist] [--json]`
+
+Deterministic feedback-case verdict runner - separate from `backtest`. Scores
+a known candidate (currently `enforce-worktree`) against labeled cases and
+reports a structured pass/fail verdict.
+
+```bash
+axctl hooks init
+axctl hooks install ~/.ax/hooks/enforce-worktree.ts --providers=claude,codex
+axctl hooks backtest ~/.ax/hooks/enforce-worktree.ts --days=14
+axctl hooks cases enforce-worktree --since=14
+```
+
 ## Empty DB Benchmarks
 
 Use `scripts/bench-empty-db.sh` for cold ingest timing without mutating

@@ -10,13 +10,25 @@ import { getSharedHighlighter, type ThemedToken } from "@pierre/diffs";
 
 export type { ThemedToken };
 
-export const THEME = "github-light";
+/** light = transcript surfaces (white/panel bg); dark = terminal output
+ *  blocks. catppuccin-mocha's editor background is #1e1e2e - exactly the
+ *  studio's --term-bg - so dark tokens sit on the block's own color. */
+export type HighlightTheme = "light" | "dark";
+const THEME_NAME: Record<HighlightTheme, string> = {
+    light: "github-light",
+    dark: "catppuccin-mocha",
+};
 
 /** Themed token lines for `code`, or null when the grammar is unavailable. */
-export async function tokenize(code: string, lang: string): Promise<ThemedToken[][] | null> {
+export async function tokenize(
+    code: string,
+    lang: string,
+    theme: HighlightTheme = "light",
+): Promise<ThemedToken[][] | null> {
     try {
-        const highlighter = await getSharedHighlighter({ themes: [THEME], langs: [lang] });
-        return highlighter.codeToTokens(code, { lang, theme: THEME }).tokens;
+        const themeName = THEME_NAME[theme];
+        const highlighter = await getSharedHighlighter({ themes: [themeName], langs: [lang] });
+        return highlighter.codeToTokens(code, { lang, theme: themeName }).tokens;
     } catch {
         // Unknown grammar or failed chunk load degrades to plain text; the
         // resolver doesn't cache rejections, so a later attempt can retry.

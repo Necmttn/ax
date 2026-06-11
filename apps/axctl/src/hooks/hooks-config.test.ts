@@ -1,8 +1,8 @@
 import { describe, expect, test } from "bun:test";
-import { mkdtempSync, existsSync } from "node:fs";
+import { mkdtempSync, existsSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Effect, Layer } from "effect";
+import { Effect, FileSystem, Layer } from "effect";
 import { BunFileSystem, BunPath } from "@effect/platform-bun";
 import { SurrealClient } from "@ax/lib/db";
 import { claudeProvider } from "./providers/claude.ts";
@@ -19,7 +19,7 @@ import {
     disableHook,
     enableHook,
 } from "./config.ts";
-import type { HookFileRef } from "./providers/types.ts";
+import type { HookFileRef, HookProvider } from "./providers/types.ts";
 
 /** Run a no-requirements (pure-ish) provider Effect to a value. Failures throw. */
 const runPure = <A, E>(eff: Effect.Effect<A, E>): A => Effect.runSync(eff as Effect.Effect<A, never>);
@@ -416,6 +416,88 @@ describe("config orchestration", () => {
                 .pipe(Effect.exit, Effect.provide(fullLayer())),
         );
         expect(exit._tag).toBe("Failure");
+    });
+
+    // -----------------------------------------------------------------------
+    // codex write-target selection: prefers hooks.json when it exists on disk,
+    // falls back to config.toml when only that file exists (back-compat).
+    // We use a custom provider stub that exposes two files under a tmpdir so
+    // the test does not touch real ~/.codex paths.
+    // -----------------------------------------------------------------------
+
+    const makeCodexStubProvider = (tomlPath: string, jsonPath: string): HookProvider => ({
+        ...codexProvider,
+        name: "codex-stub",
+        configFiles: (scope) => {
+            if (scope !== "global") return [];
+            return [
+                { path: tomlPath, scope, format: "toml" },
+                { path: jsonPath, scope, format: "json" },
+            ];
+        },
+        installed: () => Effect.succeed(true),
+    });
+
+    test("codex write-target: hooks.json exists -> addHook writes json, toml untouched", async () => {
+        const dir = mk();
+        const tomlPath = join(dir, "config.toml");
+        const jsonPath = join(dir, "hooks.json");
+        // Pre-create hooks.json (empty); config.toml absent.
+        writeFileSync(jsonPath, "");
+
+        const stub = makeCodexStubProvider(tomlPath, jsonPath);
+        const layer = Layer.mergeAll(fsLayers, HookProviderRegistryLive([stub]), mockDb([]));
+
+        const writtenPath = await Effect.runPromise(
+            addHook({ provider: "codex-stub", scope: "global", repoRoot: null, input: { event: "PreToolUse", matcher: "Bash", command: "echo hooks-json" } })
+                .pipe(Effect.provide(layer)),
+        );
+
+        // Written to hooks.json, not config.toml.
+        expect(writtenPath).toBe(jsonPath);
+        expect(existsSync(tomlPath)).toBe(false);
+
+        // hooks.json now has the hook in JSON format.
+        const rows = await Effect.runPromise(
+            Effect.gen(function* () {
+                const fs = yield* FileSystem.FileSystem;
+                const raw = yield* fs.readFileString(jsonPath);
+                return yield* stub.parse({ path: jsonPath, scope: "global", format: "json" }, raw);
+            }).pipe(Effect.provide(layer)),
+        );
+        expect(rows).toHaveLength(1);
+        expect(rows[0]!.command).toContain("echo hooks-json");
+    });
+
+    test("codex write-target: only config.toml exists -> addHook writes toml (back-compat)", async () => {
+        const dir = mk();
+        const tomlPath = join(dir, "config.toml");
+        const jsonPath = join(dir, "hooks.json");
+        // Pre-create config.toml (empty); hooks.json absent.
+        writeFileSync(tomlPath, "");
+
+        const stub = makeCodexStubProvider(tomlPath, jsonPath);
+        const layer = Layer.mergeAll(fsLayers, HookProviderRegistryLive([stub]), mockDb([]));
+
+        const writtenPath = await Effect.runPromise(
+            addHook({ provider: "codex-stub", scope: "global", repoRoot: null, input: { event: "PreToolUse", matcher: "Bash", command: "echo toml-compat" } })
+                .pipe(Effect.provide(layer)),
+        );
+
+        // Written to config.toml, not hooks.json.
+        expect(writtenPath).toBe(tomlPath);
+        expect(existsSync(jsonPath)).toBe(false);
+
+        // config.toml now has the hook in TOML format.
+        const rows = await Effect.runPromise(
+            Effect.gen(function* () {
+                const fs = yield* FileSystem.FileSystem;
+                const raw = yield* fs.readFileString(tomlPath);
+                return yield* stub.parse({ path: tomlPath, scope: "global", format: "toml" }, raw);
+            }).pipe(Effect.provide(layer)),
+        );
+        expect(rows).toHaveLength(1);
+        expect(rows[0]!.command).toContain("echo toml-compat");
     });
 });
 

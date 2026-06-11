@@ -34,6 +34,11 @@ const EXCLUDED_FILES: readonly string[] = [
     // Build-time config: runs under vite/node (not the Effect runtime), so
     // node:path is the correct dependency here.
     "apps/axctl/src/dashboard/web/vite.config.ts",
+    // Fire-path hook runtime: GitEnvLive must stay Effect.runSync-compatible
+    // (hooks fire as `bun <file>.ts` on every tool call), and FileSystem's
+    // realPath is async - a sync realpath needs node:fs. Runs under plain
+    // bun in ~/.ax/hooks workspaces, not the axctl platform runtime.
+    "packages/hooks-sdk/src/git-env.ts",
 ];
 
 const BANNED_SPECIFIERS = [

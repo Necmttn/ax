@@ -251,13 +251,67 @@ const attachTurnContent = (
         return content ? { ...turn, content } : turn;
     });
 
-const attachTurnTokenUsage = (
+type ShareTurnUsage = NonNullable<ShareTurn["token_usage"]>;
+
+const addNullable = (a: number | null | undefined, b: number | null | undefined): number | null =>
+    a == null && b == null ? null : (a ?? 0) + (b ?? 0);
+
+const mergeTurnUsage = (a: ShareTurnUsage, b: ShareTurnUsage, seq: number): ShareTurnUsage => ({
+    seq,
+    model: a.model ?? b.model,
+    prompt_tokens: addNullable(a.prompt_tokens, b.prompt_tokens),
+    completion_tokens: addNullable(a.completion_tokens, b.completion_tokens),
+    cache_creation_input_tokens: addNullable(a.cache_creation_input_tokens, b.cache_creation_input_tokens),
+    cache_read_input_tokens: addNullable(a.cache_read_input_tokens, b.cache_read_input_tokens),
+    fresh_input_tokens: addNullable(a.fresh_input_tokens, b.fresh_input_tokens),
+    estimated_tokens: a.estimated_tokens + b.estimated_tokens,
+    estimated_input_cost_usd: addNullable(a.estimated_input_cost_usd, b.estimated_input_cost_usd),
+    estimated_output_cost_usd: addNullable(a.estimated_output_cost_usd, b.estimated_output_cost_usd),
+    estimated_cache_creation_cost_usd: addNullable(a.estimated_cache_creation_cost_usd, b.estimated_cache_creation_cost_usd),
+    estimated_cache_read_cost_usd: addNullable(a.estimated_cache_read_cost_usd, b.estimated_cache_read_cost_usd),
+    estimated_cost_usd: addNullable(a.estimated_cost_usd, b.estimated_cost_usd),
+    pricing_source: a.pricing_source ?? b.pricing_source,
+    usage_source: a.usage_source,
+    usage_quality: a.usage_quality,
+});
+
+/**
+ * Usage rows are keyed by provider-event seq, but the share transcript keeps
+ * only renderable turns (codex event rows like token_count are filtered out),
+ * so an exact seq join drops most usage and freezes the viewer's cost-so-far
+ * rail. Bucket each usage row onto the nearest kept turn at or before its seq
+ * (the first turn when none precedes it) and sum buckets that collect several
+ * rows, so the cumulative cost over the transcript is preserved.
+ */
+export const attachTurnTokenUsage = (
     turns: ReadonlyArray<ShareTurn>,
     usages: ReadonlyArray<NonNullable<ShareTurn["token_usage"]>>,
 ): ReadonlyArray<ShareTurn> => {
-    const bySeq = new Map(usages.map((usage) => [usage.seq, usage]));
+    if (turns.length === 0 || usages.length === 0) return turns;
+    const keptSeqs = turns.map((turn) => turn.seq).sort((a, b) => a - b);
+    const bucketOf = (seq: number): number => {
+        let lo = 0;
+        let hi = keptSeqs.length - 1;
+        let found = keptSeqs[0]!;
+        while (lo <= hi) {
+            const mid = (lo + hi) >> 1;
+            if (keptSeqs[mid]! <= seq) {
+                found = keptSeqs[mid]!;
+                lo = mid + 1;
+            } else {
+                hi = mid - 1;
+            }
+        }
+        return found;
+    };
+    const buckets = new Map<number, ShareTurnUsage>();
+    for (const usage of usages) {
+        const seq = bucketOf(usage.seq);
+        const prev = buckets.get(seq);
+        buckets.set(seq, prev ? mergeTurnUsage(prev, usage, seq) : { ...usage, seq });
+    }
     return turns.map((turn) => {
-        const tokenUsage = bySeq.get(turn.seq);
+        const tokenUsage = buckets.get(turn.seq);
         return tokenUsage ? { ...turn, token_usage: tokenUsage } : turn;
     });
 };
@@ -400,17 +454,19 @@ export const exportSessionShare = (
             )
         ).filter(isPresent);
 
-        // Build turns: attach structured tool calls, usage + content, then drop
-        // turns that ended up with no text, no content, and no tool calls (empty
-        // assistant / thinking shells) so the shared transcript has no blank rows.
-        const turns = attachTurnContent(
-            attachTurnTokenUsage(
+        // Build turns: attach structured tool calls + content, drop turns that
+        // ended up with no text, no content, and no tool calls (empty assistant
+        // / thinking shells), then attach usage. Usage goes last so it buckets
+        // onto the turns that actually survive into the artifact - attaching
+        // before the filter loses rows whose turn gets dropped.
+        const turns = attachTurnTokenUsage(
+            attachTurnContent(
                 attachStructuredToolCalls(shareTurns, turnToolCallsRaw.filter(isPresent)),
-                turnTokenUsageRaw.filter(isPresent),
+                turnContent,
+            ).filter((turn) =>
+                turn.text.length > 0 || turn.content != null || (turn.tool_calls?.length ?? 0) > 0
             ),
-            turnContent,
-        ).filter((turn) =>
-            turn.text.length > 0 || turn.content != null || (turn.tool_calls?.length ?? 0) > 0
+            turnTokenUsageRaw.filter(isPresent),
         );
 
         // Segmented highlight timeline, computed here (where the DB still is)

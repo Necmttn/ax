@@ -3,6 +3,8 @@ import { Component, lazy, Suspense } from "react";
 import type { ReactNode } from "react";
 import { HighlightedCode } from "../highlight/HighlightedCode.tsx";
 import { langFromPath } from "../highlight/lang.ts";
+import { LogText } from "../highlight/log-line.tsx";
+import { NumberedCode, parseNumberedOutput } from "../highlight/numbered-code.tsx";
 import { DIFF_CONSUMED_KEYS, extractDiffPairs, extractReadView } from "./edit-diff.ts";
 import { stripToolResult } from "./tool-result.tsx";
 
@@ -182,6 +184,16 @@ export function ToolRowItem(
     // component as edits - one renderer, one theme, real line numbers.
     const readView = hasSkill || call.has_error ? null : extractReadView(call.name, input, resultText);
 
+    // Inside the dark terminal block: Reads that didn't qualify for the file
+    // card still arrive as `NNN<tab>code` - de-gut and highlight with the
+    // file's grammar; injected SKILL.md is markdown; everything else gets
+    // log-line tinting (paths/severities/numbers/diff lines).
+    const renderOutputBody = (text: string) => {
+        const numbered = call.name === "Read" ? parseNumberedOutput(text) : null;
+        if (numbered) return <NumberedCode parsed={numbered} lang={langFromPath(head)} />;
+        if (hasSkill) return <HighlightedCode code={text} lang="markdown" theme="dark" />;
+        return <LogText text={text} />;
+    };
     const renderOutput = (text: string) =>
         text.trim().length === 0 ? null : (
             <pre
@@ -199,7 +211,7 @@ export function ToolRowItem(
                     maxHeight: 260,
                 }}
             >
-                {text}
+                {renderOutputBody(text)}
             </pre>
         );
 
