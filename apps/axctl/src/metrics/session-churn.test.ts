@@ -189,6 +189,44 @@ describe("computeSessionChurn", () => {
         });
     });
 
+    test("open episodes expire after 30 minutes and stop tainting edits", () => {
+        const M = 60_000;
+        const summary = computeSessionChurn([
+            edit("s1", 1 * M, 2),
+            fail("s1", 2 * M, "typecheck"),
+            edit("s1", 5 * M, 3, 1),
+            edit("s1", 40 * M, 50, 10),
+            pass("s1", 41 * M, "typecheck"),
+        ], landed([]), health([]));
+
+        expect(summary.hotSessions[0]).toMatchObject({
+            episodes: 1,
+            passedEpisodes: 0,
+            repairLinesAdded: 3,
+            repairLinesRemoved: 1,
+            verificationPasses: 1,
+        });
+    });
+
+    test("repeated failures refresh the episode expiry window", () => {
+        const M = 60_000;
+        const summary = computeSessionChurn([
+            edit("s1", 1 * M, 2),
+            fail("s1", 2 * M, "typecheck"),
+            fail("s1", 25 * M, "typecheck"),
+            edit("s1", 50 * M, 7, 2),
+            pass("s1", 51 * M, "typecheck"),
+        ], landed([]), health([]));
+
+        expect(summary.hotSessions[0]).toMatchObject({
+            episodes: 1,
+            passedEpisodes: 1,
+            verificationFailures: 2,
+            repairLinesAdded: 7,
+            repairLinesRemoved: 2,
+        });
+    });
+
     test("source aggregate includes top check and passed episode totals", () => {
         const summary = computeSessionChurn([
             edit("s1", 1, 2, 0, "codex"),

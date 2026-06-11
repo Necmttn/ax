@@ -119,7 +119,8 @@ interface MutableSessionState {
     episodes: number;
     passedEpisodes: number;
     hasPriorEdit: boolean;
-    openChecks: Set<string>;
+    /** check family -> tsMs of the failure that opened/refreshed the episode */
+    openChecks: Map<string, number>;
     checkFailures: Map<string, number>;
 }
 
@@ -141,6 +142,13 @@ interface MutableAggregateState {
 const DEFAULT_LIMIT = 10;
 const IN_CHUNK = 500;
 
+/**
+ * An open episode whose failure saw no same-family verification event for
+ * this long stops attributing edits as repair churn - one uncaptured pass
+ * must not taint the rest of the session.
+ */
+export const EPISODE_EXPIRY_MS = 30 * 60_000;
+
 // Accepts an already-canonical family ("test") or a raw command ("bun test");
 // raw commands classify only when the check is in command position.
 export const normalizeCheckFamily = (raw: string | null): string | null =>
@@ -156,7 +164,6 @@ export const computeSessionChurn = (
     const limit = Math.max(0, Math.trunc(options.limit ?? DEFAULT_LIMIT));
     const generatedAt = dateishToIso(options.generatedAt ?? new Date());
     const states = new Map<string, MutableSessionState>();
-    const countedRepairEditKeys = new Set<string>();
     const normalizedLanded = normalizeLandedMap(landedBySession);
     const normalizedHealth = normalizeHealthMap(healthBySession);
 
@@ -175,6 +182,7 @@ export const computeSessionChurn = (
     for (const event of sorted) {
         const state = getState(states, event.session, event.source, normalizedLanded, normalizedHealth);
         if (state.source === null && event.source !== null) state.source = event.source;
+        expireOpenChecks(state, event.tsMs);
 
         if (event.kind === "edit") {
             state.editEvents += 1;
@@ -183,12 +191,8 @@ export const computeSessionChurn = (
             state.hasPriorEdit = true;
 
             if (state.openChecks.size > 0) {
-                const repairKey = `${event.session}:${event.index}`;
-                if (!countedRepairEditKeys.has(repairKey)) {
-                    countedRepairEditKeys.add(repairKey);
-                    state.repairLinesAdded += nonNegative(event.linesAdded);
-                    state.repairLinesRemoved += nonNegative(event.linesRemoved);
-                }
+                state.repairLinesAdded += nonNegative(event.linesAdded);
+                state.repairLinesRemoved += nonNegative(event.linesRemoved);
             }
             continue;
         }
@@ -199,9 +203,9 @@ export const computeSessionChurn = (
         if (event.kind === "verification_fail") {
             state.verificationFailures += 1;
             increment(state.checkFailures, check, 1);
-            if (state.hasPriorEdit && !state.openChecks.has(check)) {
-                state.openChecks.add(check);
-                state.episodes += 1;
+            if (state.hasPriorEdit) {
+                if (!state.openChecks.has(check)) state.episodes += 1;
+                state.openChecks.set(check, event.tsMs);
             }
             continue;
         }
@@ -596,7 +600,7 @@ const getState = (
         episodes: 0,
         passedEpisodes: 0,
         hasPriorEdit: false,
-        openChecks: new Set(),
+        openChecks: new Map(),
         checkFailures: new Map(),
     };
     states.set(session, state);
@@ -631,6 +635,12 @@ const normalizeHealthMap = (
 };
 
 const normalizeSessionKey = (session: string): string => cleanSessionId(session);
+
+const expireOpenChecks = (state: MutableSessionState, tsMs: number): void => {
+    for (const [check, openedAt] of state.openChecks) {
+        if (tsMs - openedAt > EPISODE_EXPIRY_MS) state.openChecks.delete(check);
+    }
+};
 
 const hasVerificationSignal = (row: SessionChurnRow): boolean =>
     row.verificationFailures > 0
