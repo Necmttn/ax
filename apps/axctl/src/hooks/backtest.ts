@@ -9,7 +9,7 @@ import { Effect } from "effect";
 import type { HookDefinition } from "@ax/hooks-sdk/define";
 import { matches } from "@ax/hooks-sdk/define";
 import type { GitEnv } from "@ax/hooks-sdk/git-env";
-import type { Verdict } from "@ax/hooks-sdk/verdict";
+import { Verdict } from "@ax/hooks-sdk/verdict";
 import type { Harness } from "@ax/hooks-sdk/event";
 import { SurrealClient } from "@ax/lib/db";
 import type { DbError } from "@ax/lib/errors";
@@ -71,10 +71,10 @@ export const replayRows = (
             const verdict: Verdict = matches(def, event)
                 ? yield* def.run(event).pipe(
                       Effect.catchDefect(() =>
-                          Effect.succeed({ _tag: "Allow" } as Verdict),
+                          Effect.succeed(Verdict.allow),
                       ),
                   )
-                : ({ _tag: "Allow" } as Verdict);
+                : Verdict.allow;
             out.push({ row, verdict });
         }
         return out;
