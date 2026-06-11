@@ -82,7 +82,7 @@ fresh clone.
 
 - `ax serve` → `POST /api/ingest` (or the **Live** tab) forks `runIngest` (same pipeline as CLI) onto the server runtime. Progress flows as `IngestStreamEvent`s through the `IngestStreamBus` seam (`apps/axctl/src/dashboard/ingest-stream.ts`) to a per-run Durable Stream `ingest:<runId>`; the browser subscribes from offset `-1`, so refresh/reconnect mid-run rehydrates. Exactly one terminal `run_finished` event guaranteed. The bus seam lets the Bun backing swap for a hosted backend later untouched.
 - CLI `ax ingest` is unchanged (never passes a `runId`). Progress animates on a TTY by default; non-TTY is silent unless forced with `AX_PROGRESS=on` (or `--progress=plain|pipeline`). `AX_PROGRESS=off` silences. Gated in `withIngest` (`apps/axctl/src/cli/index.ts`).
-- **Live ingest needs ax from source** (the `bin/axctl` shim does this). The compiled `--compile` binary serves the dashboard but returns 503 on `POST /api/ingest` - native lmdb can't bundle, so no sidecar.
+- **Live ingest needs ax from source** (the `bin/axctl` shim does this). The compiled `--compile` binary serves the dashboard but returns 503 on `POST /api/ingest` - native lmdb can't bundle, so no sidecar. `/api/version` advertises this as `live_ingest: false`; the studio Live tab then falls back to polling the count tiles every 5s (`apps/studio/src/poll-fallback.ts`) instead of a dead stream.
 
 ## Workflow extraction commands
 
@@ -129,6 +129,28 @@ agent can query the graph in-context. Run from source (no native deps, so the
 compiled binary should work too - untested in v0). Mutating
 ops + `sessions_here`/`near` (need a git-resolved repo key) are intentionally not
 exposed. Server: `apps/axctl/src/mcp/server.ts`; registry: `apps/axctl/src/mcp/tools.ts`.
+
+## Hooks SDK
+
+`@ax/hooks-sdk` (packages/hooks-sdk) - author agent hooks once in typed Effect
+TS, run them on Claude Code + Codex. Hook = one file in `~/.ax/hooks/`
+default-exporting `defineHook({ name, events, matcher, run })`; fire path is
+`bun <file>.ts` (no axctl in the hot path; ~70ms). Verdicts: allow / block /
+warn / inject; defects fail OPEN. `GitEnv` service makes guards layer-testable.
+
+- `ax hooks init` - scaffold `~/.ax/hooks` (file: dep on packages/hooks-sdk;
+  re-run after the SDK moves - the dep is an absolute path)
+- `ax hooks install <abs-file> --providers=claude,codex` - idempotent fan-out
+  into provider configs via the existing codecs (ax ownership markers)
+- `ax hooks backtest <file> [--days]` - replay tool_call history through the
+  hook in-process; state-dependent checks use CURRENT repo state (caveat printed)
+- `ax hooks cases` - deterministic feedback-case backtests (enforce-worktree
+  candidate query + structured pass/fail verdict; separate from backtest)
+- Codex: new hook entries written to `~/.codex/hooks.json` when that file
+  exists; falls back to `~/.codex/config.toml` otherwise. New/changed entries
+  require interactive trust approval in the codex TUI before they fire.
+- The worktree guards (enforce-worktree, enforce-worktree-write) run via the
+  SDK in both harnesses; bash originals retired (kept on disk as fallback)
 
 ## Workflow Candidate Guardrails
 

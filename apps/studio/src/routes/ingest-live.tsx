@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { api } from "../api.ts";
+import { api, ApiError } from "../api.ts";
+import { POLL_INTERVAL_MS, shouldPollFallback } from "../poll-fallback.ts";
 import { useIngestStream, type StageStatus } from "../use-ingest-stream.ts";
 
 /**
@@ -10,6 +11,13 @@ import { useIngestStream, type StageStatus } from "../use-ingest-stream.ts";
  * stages tick green as they finish + dashboard count tiles climb live. A
  * refresh mid-run rehydrates from the persisted stream URL (the hook replays
  * the stream from the start, so finished stages show as done).
+ *
+ * Polling fallback: on the compiled binary the Durable Streams sidecar can't
+ * load, so the stream path is dead. The daemon advertises that via
+ * `live_ingest: false` on GET /api/version (older daemons: we catch the 503
+ * from POST /api/ingest instead) and this view drops to refetching the count
+ * tiles every 5s so a CLI-driven backfill is still visible. See
+ * poll-fallback.ts; the streaming path stays preferred and untouched.
  */
 
 const STREAM_URL_KEY = "ax-ingest-live-stream-url";
@@ -46,8 +54,24 @@ export function IngestLiveRoute() {
     const [streamUrl, setStreamUrl] = useState<string | null>(() => readPersistedStreamUrl());
     const [busy, setBusy] = useState(false);
     const [triggerError, setTriggerError] = useState<string | null>(null);
+    /** HTTP status of the last failed POST /api/ingest (503 = sidecar gone). */
+    const [triggerStatus, setTriggerStatus] = useState<number | undefined>(undefined);
 
     const run = useIngestStream(streamUrl);
+
+    // Capability probe: the daemon says up front whether the Durable Streams
+    // sidecar is hosting live ingest (false on the compiled binary). Older
+    // daemons omit the flag - then the 503 catch in start() is the trigger.
+    const versionQuery = useQuery({
+        queryKey: ["daemon-version"],
+        queryFn: () => api.version(),
+        staleTime: 60_000,
+        retry: false,
+    });
+    const polling = shouldPollFallback({
+        liveIngest: versionQuery.data?.live_ingest,
+        triggerStatus,
+    });
 
     // While a run is live, invalidate the count-tile query keys on each new
     // delta so the numbers refetch and visibly climb. These are the same keys
@@ -95,7 +119,13 @@ export function IngestLiveRoute() {
             persistStreamUrl(res.stream);
             setStreamUrl(res.stream);
         } catch (err) {
-            setTriggerError(err instanceof Error ? err.message : String(err));
+            if (err instanceof ApiError && err.status === 503) {
+                // Sidecar unavailable (compiled binary) - switch to the
+                // polling fallback instead of dead-ending on the error.
+                setTriggerStatus(err.status);
+            } else {
+                setTriggerError(err instanceof Error ? err.message : String(err));
+            }
         } finally {
             setBusy(false);
         }
@@ -111,7 +141,7 @@ export function IngestLiveRoute() {
                 <span className="meta">
                     {run.label ? `${run.label} · ` : ""}
                     {idle
-                        ? "idle"
+                        ? polling ? "polling" : "idle"
                         : run.finished
                         ? run.runStatus === "completed"
                             ? "completed"
@@ -125,7 +155,8 @@ export function IngestLiveRoute() {
                     type="button"
                     className="badge keep"
                     onClick={start}
-                    disabled={busy || Boolean(live)}
+                    disabled={busy || Boolean(live) || polling}
+                    title={polling ? "Live ingest needs ax running from source" : undefined}
                 >
                     {busy ? "Starting…" : live ? "Running…" : "Run ingest"}
                 </button>
@@ -143,15 +174,29 @@ export function IngestLiveRoute() {
                     session restarted - try Run ingest again.
                 </div>
             ) : null}
+            {polling ? (
+                <div className="empty" role="status">
+                    Live stream unavailable - polling every {POLL_INTERVAL_MS / 1000}s.
+                </div>
+            ) : null}
 
-            <CountTiles />
+            <CountTiles pollMs={polling ? POLL_INTERVAL_MS : false} />
 
             {idle ? (
-                <div className="empty">
-                    No active run. Hit <strong>Run ingest</strong> to stream a live
-                    ingest pass - stages tick green and the counts above climb as data
-                    lands.
-                </div>
+                polling ? (
+                    <div className="empty">
+                        Live streaming needs ax running from source (the compiled binary
+                        can't host the Durable Streams sidecar). Run{" "}
+                        <strong>ax ingest</strong> in a terminal - the counts above
+                        refresh automatically while it fills.
+                    </div>
+                ) : (
+                    <div className="empty">
+                        No active run. Hit <strong>Run ingest</strong> to stream a live
+                        ingest pass - stages tick green and the counts above climb as data
+                        lands.
+                    </div>
+                )
             ) : (
                 <StageChecklist run={run} />
             )}
@@ -201,19 +246,24 @@ function formatEtaLeft(ms: number): string {
 }
 
 /** Count tiles reusing the same React Query keys the live SSE hook invalidates,
- *  so they refetch and climb as the run progresses. */
-function CountTiles() {
+ *  so they refetch and climb as the run progresses. `pollMs` is the polling
+ *  fallback: when the live stream can't run (compiled binary) the tiles
+ *  refetch on an interval instead of waiting for stream-driven invalidation. */
+function CountTiles({ pollMs = false }: { pollMs?: number | false }) {
     const skillsQuery = useQuery({
         queryKey: ["skills"],
         queryFn: () => api.skills(),
+        refetchInterval: pollMs,
     });
     const sessionsQuery = useQuery({
         queryKey: ["sessions", "all"],
         queryFn: () => api.sessions({ limit: 1 }),
+        refetchInterval: pollMs,
     });
     const failuresQuery = useQuery({
         queryKey: ["tool-failures"],
         queryFn: () => api.toolFailures(),
+        refetchInterval: pollMs,
     });
 
     const skills = skillsQuery.data?.skills.length ?? null;

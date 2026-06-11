@@ -1,7 +1,29 @@
 import type { ToolCallDto, ToolCategory } from "@ax/lib/shared/dashboard-types";
+import { Component, lazy, Suspense } from "react";
+import type { ReactNode } from "react";
 import { HighlightedCode } from "../highlight/HighlightedCode.tsx";
 import { langFromPath } from "../highlight/lang.ts";
+import { LogText } from "../highlight/log-line.tsx";
+import { NumberedCode, parseNumberedOutput } from "../highlight/numbered-code.tsx";
+import { DIFF_CONSUMED_KEYS, extractDiffPairs, extractReadView } from "./edit-diff.ts";
 import { stripToolResult } from "./tool-result.tsx";
+
+/** Diff rendering is the only consumer of @pierre/diffs (which bundles its own
+ *  shiki) - lazy so it lands in an async chunk, off the main bundle. */
+const ToolDiff = lazy(() => import("./tool-diff.tsx"));
+const ToolFileView = lazy(() => import("./tool-diff.tsx").then((m) => ({ default: m.ToolFileView })));
+
+/** If the diff library throws at render time, fall back to the args grid so
+ *  the call's content is never lost. */
+class DiffBoundary extends Component<{ fallback: ReactNode; children: ReactNode }, { failed: boolean }> {
+    override state = { failed: false };
+    static getDerivedStateFromError() {
+        return { failed: true };
+    }
+    override render() {
+        return this.state.failed ? this.props.fallback : this.props.children;
+    }
+}
 
 // Tinted badge tones derived from the calibrated root accents (one recipe,
 // equivalent perceived brightness): blue=net, gold=file, green=edit,
@@ -103,6 +125,50 @@ export function ToolRowItem(
     const command = typeof input?.command === "string" && input.command.length > 0
         ? input.command
         : call.command;
+    // Edit-class calls with recognizable before/after content render as a real
+    // diff instead of the labelled grid; everything else falls through to the
+    // existing command/grid rendering. (Keyed by tool name, not category -
+    // codex apply_patch doesn't classify as "edit".)
+    const diffPairs = extractDiffPairs(call.name, input);
+
+    const renderGrid = (es: ReadonlyArray<[string, unknown]>) =>
+        es.length === 0 ? null : (
+            <div
+                style={{
+                    margin: "0 0 4px",
+                    maxHeight: 170,
+                    overflow: "auto",
+                    display: "grid",
+                    gridTemplateColumns: "minmax(56px,auto) 1fr",
+                    gap: "2px 12px",
+                    font: `11px/1.5 ${mono}`,
+                }}
+            >
+                {es.map(([k, v]) => {
+                    const code = typeof v === "string" && CODE_ARGS.has(k) ? v : null;
+                    const tint = code != null ? argTint(call.name, k) : undefined;
+                    return (
+                        <div key={k} style={{ display: "contents" }}>
+                            <span style={{ color: "var(--muted-2)", textAlign: "right" }}>{k}</span>
+                            <span
+                                style={{
+                                    color: "var(--ink)",
+                                    whiteSpace: "pre-wrap",
+                                    wordBreak: "break-word",
+                                    ...(tint ? { background: tint, borderRadius: 3 } : {}),
+                                }}
+                            >
+                                {code != null
+                                    ? <HighlightedCode code={code} lang={argLang} />
+                                    : typeof v === "string"
+                                    ? v
+                                    : JSON.stringify(v)}
+                            </span>
+                        </div>
+                    );
+                })}
+            </div>
+        );
 
     const rawOutput = result ?? call.output_excerpt ?? "";
     const resultText = rawOutput ? stripToolResult(rawOutput) : "";
@@ -114,6 +180,40 @@ export function ToolRowItem(
     // For every other card the result IS the output block.
     const output = hasSkill ? skill : resultText;
     const hasOutput = output.trim().length > 0;
+    // Read results with numbered file content render through the same diff
+    // component as edits - one renderer, one theme, real line numbers.
+    const readView = hasSkill || call.has_error ? null : extractReadView(call.name, input, resultText);
+
+    // Inside the dark terminal block: Reads that didn't qualify for the file
+    // card still arrive as `NNN<tab>code` - de-gut and highlight with the
+    // file's grammar; injected SKILL.md is markdown; everything else gets
+    // log-line tinting (paths/severities/numbers/diff lines).
+    const renderOutputBody = (text: string) => {
+        const numbered = call.name === "Read" ? parseNumberedOutput(text) : null;
+        if (numbered) return <NumberedCode parsed={numbered} lang={langFromPath(head)} />;
+        if (hasSkill) return <HighlightedCode code={text} lang="markdown" theme="dark" />;
+        return <LogText text={text} />;
+    };
+    const renderOutput = (text: string) =>
+        text.trim().length === 0 ? null : (
+            <pre
+                data-testid="tool-card-output"
+                style={{
+                    margin: 0,
+                    padding: "8px 12px",
+                    borderRadius: 6,
+                    background: "var(--term-bg)",
+                    color: "var(--term-fg)",
+                    font: `12.5px/1.55 ${mono}`,
+                    whiteSpace: "pre-wrap",
+                    wordBreak: "break-word",
+                    overflow: "auto",
+                    maxHeight: 260,
+                }}
+            >
+                {renderOutputBody(text)}
+            </pre>
+        );
 
     return (
         <div style={{ display: "flex", gap: 8, margin: "0 0 8px" }}>
@@ -194,7 +294,18 @@ export function ToolRowItem(
                         </div>
                     )
                     : null}
-                {command
+                {diffPairs
+                    ? (
+                        <>
+                            {renderGrid(entries.filter(([k]) => !DIFF_CONSUMED_KEYS.has(k)))}
+                            <DiffBoundary fallback={renderGrid(entries)}>
+                                <Suspense fallback={renderGrid(entries)}>
+                                    <ToolDiff pairs={diffPairs} />
+                                </Suspense>
+                            </DiffBoundary>
+                        </>
+                    )
+                    : command
                     ? (
                         <pre
                             style={{
@@ -211,45 +322,7 @@ export function ToolRowItem(
                             <HighlightedCode code={command} lang="shellscript" />
                         </pre>
                     )
-                    : entries.length > 0
-                    ? (
-                        <div
-                            style={{
-                                margin: "0 0 4px",
-                                maxHeight: 170,
-                                overflow: "auto",
-                                display: "grid",
-                                gridTemplateColumns: "minmax(56px,auto) 1fr",
-                                gap: "2px 12px",
-                                font: `11px/1.5 ${mono}`,
-                            }}
-                        >
-                            {entries.map(([k, v]) => {
-                                const code = typeof v === "string" && CODE_ARGS.has(k) ? v : null;
-                                const tint = code != null ? argTint(call.name, k) : undefined;
-                                return (
-                                    <div key={k} style={{ display: "contents" }}>
-                                        <span style={{ color: "var(--muted-2)", textAlign: "right" }}>{k}</span>
-                                        <span
-                                            style={{
-                                                color: "var(--ink)",
-                                                whiteSpace: "pre-wrap",
-                                                wordBreak: "break-word",
-                                                ...(tint ? { background: tint, borderRadius: 3 } : {}),
-                                            }}
-                                        >
-                                            {code != null
-                                                ? <HighlightedCode code={code} lang={argLang} />
-                                                : typeof v === "string"
-                                                ? v
-                                                : JSON.stringify(v)}
-                                        </span>
-                                    </div>
-                                );
-                            })}
-                        </div>
-                    )
-                    : null}
+                    : renderGrid(entries)}
                 {launchSubline
                     ? (
                         <div
@@ -266,26 +339,19 @@ export function ToolRowItem(
                         </div>
                     )
                     : null}
-                {hasOutput
+                {readView
                     ? (
-                        <pre
-                            data-testid="tool-card-output"
-                            style={{
-                                margin: 0,
-                                padding: "8px 12px",
-                                borderRadius: 6,
-                                background: "var(--term-bg)",
-                                color: "var(--term-fg)",
-                                font: `12.5px/1.55 ${mono}`,
-                                whiteSpace: "pre-wrap",
-                                wordBreak: "break-word",
-                                overflow: "auto",
-                                maxHeight: 260,
-                            }}
-                        >
-                            {output}
-                        </pre>
+                        <>
+                            <DiffBoundary fallback={renderOutput(output)}>
+                                <Suspense fallback={renderOutput(output)}>
+                                    <ToolFileView view={readView} />
+                                </Suspense>
+                            </DiffBoundary>
+                            {renderOutput(readView.tail)}
+                        </>
                     )
+                    : hasOutput
+                    ? renderOutput(output)
                     : null}
             </div>
         </div>

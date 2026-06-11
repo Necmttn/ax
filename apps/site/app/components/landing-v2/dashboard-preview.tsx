@@ -17,11 +17,11 @@ const AGENT_PROMPT = `Set up ax for me, end to end. ax is a local agent-experien
 
 1. INSTALL - run \`${INSTALL_CMD}\` to install the ax CLI. Reference: ${DOCS_URL}
 
-2. INGEST MY HISTORY - first run \`ax ingest --dry-run\` and tell me, in plain words, how long a full backfill will take. Then start the ingest in the BACKGROUND so we can keep working: run \`ax ingest\` as a background job with AX_PROGRESS=plain, and watch its output for progress and completion. Tell me I can watch it fill live in the dashboard - run \`ax serve\` and open http://127.0.0.1:8520. When the ingest finishes, summarize what landed: total sessions, turns, and the top skills/tools I actually use. Then continue with the steps below.
+2. INGEST MY HISTORY - first run \`ax ingest --dry-run\` and tell me, in plain words, how long a full backfill will take. Then start the ingest in the BACKGROUND so we can keep working: run \`ax ingest\` as a background job with AX_PROGRESS=plain, and watch its output for progress and completion. Tell me I can watch it fill live in the dashboard - run \`ax serve\` and open http://127.0.0.1:1738. When the ingest finishes, summarize what landed: total sessions, turns, and the top skills/tools I actually use. Then continue with the steps below.
 
 3. VERIFY - run \`ax doctor\`. If anything isn't ok, diagnose and fix it, then re-run until it is.
 
-4. LABEL what ax can't classify - run \`ax skills classify\`. It writes one \`.ax/tasks/classify-<skill>.md\` brief per skill I use but ax can't role-tag. For each brief: read the skill, decide its role(s), and fill the YAML at the bottom (\`primary_role:\` is required; \`secondary_roles\`, \`confidence\`, \`rationale\` are optional). Run \`ax roles\` to see labels already in use. Then run \`ax skills lint\` to apply them. If it says "no unclassified skills", that's fine.
+4. LABEL what ax can't classify - run \`ax skills classify\`. It writes one \`.ax/tasks/classify-<skill>.md\` brief per skill I use but ax can't role-tag. For each brief: read the skill, decide its role(s), and fill the YAML frontmatter at the top (\`primary_role:\` is required; \`secondary\`, \`confidence\`, \`rationale\` are optional). Run \`ax roles\` to see labels already in use. Then run \`ax skills lint\` to apply them. If it says "no unclassified skills", that's fine.
 
 5. SHOW me the result - run \`ax skills weighted\` and \`ax skills config\`. Tell me which skills you labeled and why, and flag anything ax marked orphan or out-of-scope.
 
@@ -143,7 +143,7 @@ export function DashboardPreview() {
         <div
           className="browser"
           role="img"
-          aria-label="ax dashboard preview at 127.0.0.1:8520"
+          aria-label="ax dashboard preview at 127.0.0.1:1738"
         >
           <div className="browser-bar">
             <div className="browser-dots">
@@ -151,7 +151,7 @@ export function DashboardPreview() {
               <span></span>
               <span></span>
             </div>
-            <div className="browser-url">127.0.0.1:8520</div>
+            <div className="browser-url">127.0.0.1:1738</div>
             <div className="browser-spacer"></div>
           </div>
 

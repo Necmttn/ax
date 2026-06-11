@@ -183,7 +183,7 @@ blocking errors. Light touch - this section is read-only.
 3. Backtest known feedback cases:
 
    ```bash
-   ax hooks backtest enforce-worktree --tail=50 --window=3
+   ax hooks cases enforce-worktree --tail=50 --window=3
    ```
 
    Treat each backtest result as one case type. Report pass/fail/
@@ -198,6 +198,7 @@ blocking errors. Light touch - this section is read-only.
    - `hook_progress` without a terminal success/blocking event is a
      telemetry gap unless correlated with visible behavior.
    - Prefer deterministic backtests over model judgment.
+   - To author a NEW guard from a recurring failure: `ax hooks init`, write a `defineHook` hook in `~/.ax/hooks/`, `ax hooks backtest` it against history, then `ax hooks install --providers=claude,codex`.
 
 ### Step 5 - Close out
 
@@ -256,7 +257,7 @@ ax retro list [--since=N] [--limit=N] [--json]
 
 ax hooks summary [--since=N] [--tail=N]
 ax hooks invocations [--command="<name>"] [--tail=N]
-ax hooks backtest <case-name> [--tail=N] [--window=N]
+ax hooks cases <case-name> [--tail=N] [--window=N]
 ```
 
 `--force` on `accept` overwrites an existing SKILL.md scaffold. Only use

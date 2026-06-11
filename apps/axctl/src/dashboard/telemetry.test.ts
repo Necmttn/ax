@@ -4,6 +4,7 @@ import {
     buildIngestEventStatement,
     buildIngestStageFinishStatement,
     buildIngestStageStartStatement,
+    buildIngestRunFinishStatement,
     buildIngestRunStartStatement,
     makeIngestEvent,
     publishIngestEvent,
@@ -25,9 +26,33 @@ describe("dashboard telemetry", () => {
         expect(event.counts).toEqual({ commits: 2 });
     });
 
-    test("buildIngestRunStartStatement writes run record", () => {
-        expect(buildIngestRunStartStatement({ runId: "r1", command: "ingest", sinceDays: 1 }))
-            .toContain("UPSERT ingest_run:`r1`");
+    test("buildIngestRunStartStatement writes run record with an initial heartbeat", () => {
+        const sql = buildIngestRunStartStatement({ runId: "r1", command: "ingest", sinceDays: 1 });
+        expect(sql).toContain("UPSERT ingest_run:`r1`");
+        expect(sql).toContain("last_progress_at: time::now()");
+    });
+
+    test("buildIngestRunFinishStatement supports the partial status (timeout/interrupt)", () => {
+        const sql = buildIngestRunFinishStatement({
+            runId: "r1",
+            status: "partial",
+            metrics: { error: "timeout after 900s" },
+        });
+        expect(sql).toContain("UPDATE ingest_run:`r1`");
+        expect(sql).toContain('status = "partial"');
+        expect(sql).toContain("timeout after 900s");
+    });
+
+    test("stage start/finish statements bump the run heartbeat", () => {
+        expect(buildIngestStageStartStatement({ runId: "r1", source: "git", stage: "fetch" }))
+            .toContain("UPDATE ingest_run:`r1` SET last_progress_at = time::now()");
+        expect(buildIngestStageFinishStatement({
+            runId: "r1",
+            source: "git",
+            stage: "fetch",
+            status: "ok",
+            counts: {},
+        })).toContain("UPDATE ingest_run:`r1` SET last_progress_at = time::now()");
     });
 
     test("buildIngestEventStatement stores JSON counts", () => {

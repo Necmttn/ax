@@ -75,7 +75,7 @@ describe("withIngestRunFinish", () => {
         expect(writes[0]).toContain("boom");
     });
 
-    it("writes status error + interrupted on fiber interruption", async () => {
+    it("writes status partial + interrupted on fiber interruption (progress is saved)", async () => {
         const db = fakeDb();
         const fiber = Effect.runFork(
             withIngestRunFinish(db.client, "r1")(Effect.never),
@@ -85,8 +85,20 @@ describe("withIngestRunFinish", () => {
         await Effect.runPromise(Fiber.interrupt(fiber));
         const writes = finishWrites(db.queries);
         expect(writes).toHaveLength(1);
-        expect(writes[0]).toContain('status = "error"');
+        expect(writes[0]).toContain('status = "partial"');
         expect(writes[0]).toContain("interrupted");
+    });
+
+    it("writes status error on a defect so the row never stays running", async () => {
+        const db = fakeDb();
+        const exit = await Effect.runPromiseExit(
+            withIngestRunFinish(db.client, "r1")(Effect.die(new Error("kaboom"))),
+        );
+        expect(Exit.isFailure(exit)).toBe(true);
+        const writes = finishWrites(db.queries);
+        expect(writes).toHaveLength(1);
+        expect(writes[0]).toContain('status = "error"');
+        expect(writes[0]).toContain("kaboom");
     });
 });
 
@@ -108,12 +120,42 @@ describe("runIngest", () => {
             runId: "test_run",
             selectedStages: ["skills", "commands"],
             status: "ok",
+            // BaseStageStats carries only durationMs (excluded) + summary, so
+            // the numeric totals are empty here.
+            totals: {},
         });
         const sql = db.queries.join("\n");
         expect(sql).toContain("UPSERT ingest_run:`test_run`");
         expect(sql).toContain("UPSERT ingest_stage:`test_run__skills__upsert`");
         expect(sql).toContain("UPSERT ingest_stage:`test_run__commands__upsert`");
         expect(sql).toContain("status = \"ok\"");
+    });
+
+    it("sums numeric stage stats into totals (excluding durationMs)", async () => {
+        const db = fakeDb();
+        const statStage: StageDef = {
+            meta: StageMeta.make({ key: "skills", deps: [], tags: ["ingest"] }),
+            run: () =>
+                Effect.succeed({
+                    ...BaseStageStats.make({ durationMs: 5, summary: "skills done" }),
+                    sessions: 3,
+                    failedFiles: 2,
+                }),
+        };
+        const registry = StageRegistryLive([statStage]);
+        const program = runIngest({
+            command: "ingest",
+            args: [],
+            cwd: "/tmp/ax",
+            now: () => new Date("2026-05-29T00:00:00.000Z"),
+            runId: () => "test_run",
+        }).pipe(Effect.provide(Layer.mergeAll(db.layer, registry, traceLayer())));
+
+        const result = await Effect.runPromise(
+            program as Effect.Effect<unknown, never, never>,
+        ) as { totals: Record<string, number> };
+
+        expect(result.totals).toEqual({ sessions: 3, failedFiles: 2 });
     });
 
     it("rejects reset with stage filters before deleting graph rows", async () => {

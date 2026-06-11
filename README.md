@@ -48,11 +48,11 @@ Set up ax for me, end to end. ax is a local agent-experience graph over my Claud
 
 1. INSTALL - run `curl -fsSL ax.necmttn.com/install | sh` to install the ax CLI. Reference: https://ax.necmttn.com/docs
 
-2. INGEST MY HISTORY - first run `ax ingest --dry-run` and tell me, in plain words, how long a full backfill will take. Then start the ingest in the BACKGROUND so we can keep working: run `ax ingest` as a background job with AX_PROGRESS=plain, and watch its output for progress and completion. Tell me I can watch it fill live in the dashboard - run `ax serve` and open http://127.0.0.1:8520. When the ingest finishes, summarize what landed: total sessions, turns, and the top skills/tools I actually use. Then continue with the steps below.
+2. INGEST MY HISTORY - first run `ax ingest --dry-run` and tell me, in plain words, how long a full backfill will take. Then start the ingest in the BACKGROUND so we can keep working: run `ax ingest` as a background job with AX_PROGRESS=plain, and watch its output for progress and completion. Tell me I can watch it fill live in the dashboard - run `ax serve` and open http://127.0.0.1:1738. When the ingest finishes, summarize what landed: total sessions, turns, and the top skills/tools I actually use. Then continue with the steps below.
 
 3. VERIFY - run `ax doctor`. If anything isn't ok, diagnose and fix it, then re-run until it is.
 
-4. LABEL what ax can't classify - run `ax skills classify`. It writes one `.ax/tasks/classify-<skill>.md` brief per skill I use but ax can't role-tag. For each brief: read the skill, decide its role(s), and fill the YAML at the bottom (`primary_role:` is required; `secondary_roles`, `confidence`, `rationale` are optional). Run `ax roles` to see labels already in use. Then run `ax skills lint` to apply them. If it says "no unclassified skills", that's fine.
+4. LABEL what ax can't classify - run `ax skills classify`. It writes one `.ax/tasks/classify-<skill>.md` brief per skill I use but ax can't role-tag. For each brief: read the skill, decide its role(s), and fill the YAML frontmatter at the top (`primary_role:` is required; `secondary`, `confidence`, `rationale` are optional). Run `ax roles` to see labels already in use. Then run `ax skills lint` to apply them. If it says "no unclassified skills", that's fine.
 
 5. SHOW me the result - run `ax skills weighted` and `ax skills config`. Tell me which skills you labeled and why, and flag anything ax marked orphan or out-of-scope.
 
@@ -69,7 +69,7 @@ ax skills taste               # which skills earned their keep
 ax costs for --branch main    # what a branch cost in tokens
 ax sessions metrics           # graph-derived session health
 ax share <session-id>         # publish a session anyone can read
-ax serve                      # live dashboard at http://127.0.0.1:8520
+ax serve                      # live dashboard at http://127.0.0.1:1738
 ```
 
 Requires Bun ≥ 1.3 and SurrealDB ≥ 3.0. macOS-first; Linux works for ingest
@@ -229,6 +229,16 @@ sessions               # session-count windows, not calendar days
 Every proposal carries its evidence trail (`ax improve show <id>`). Verdicts
 land on session-count windows, so a skill that stopped firing gets caught, not
 forgotten.
+
+## Author your own guards
+
+Write a hook once in typed TypeScript, prove it against your own history, run it in Claude Code and Codex.
+
+```bash
+ax hooks init                                    # scaffold ~/.ax/hooks (TypeScript, @ax/hooks-sdk)
+ax hooks backtest ~/.ax/hooks/my-guard.ts        # replay weeks of real tool calls through it first
+ax hooks install ~/.ax/hooks/my-guard.ts --providers=claude,codex
+```
 
 ## Your agent can query all of this mid-session
 

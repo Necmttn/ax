@@ -11,10 +11,9 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { getSingularPatch } from "@pierre/diffs";
 import { FileDiff } from "@pierre/diffs/react";
-import type { HighlighterCore } from "shiki/core";
 import { ShikiMagicMove } from "shiki-magic-move/react";
 import "shiki-magic-move/style.css";
-import { highlighterFor, THEME } from "../highlight/highlighter.ts";
+import { highlighterFor, THEME, type DiffsHighlighter } from "../highlight/highlighter.ts";
 import { buildHunkPatch } from "./files-touched.ts";
 import type {
     CodeStateAnchor,
@@ -350,7 +349,7 @@ function StopCard({ stop, index, isActive, isLast, onJumpToTurn, onActivate, car
  * artifact remounts fresh: no meaningless cross-artifact motion.
  */
 function ArtifactMorph({ anchor }: { readonly anchor: CodeStateAnchor }) {
-    const [highlighter, setHighlighter] = useState<HighlighterCore | null>(null);
+    const [highlighter, setHighlighter] = useState<DiffsHighlighter | null>(null);
     useEffect(() => {
         let live = true;
         highlighterFor(anchor.lang).then((core) => {

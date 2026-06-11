@@ -214,3 +214,9 @@ describe("content block artifact schema", () => {
         expect(schema).toContain("DEFINE INDEX IF NOT EXISTS mentions_file_document ON mentions_file FIELDS document");
     });
 });
+
+describe("ingest_run lifecycle schema", () => {
+    test("last_progress_at heartbeat field on ingest_run is present", () => {
+        expect(schema).toContain("DEFINE FIELD last_progress_at ON ingest_run TYPE option<datetime>");
+    });
+});

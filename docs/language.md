@@ -45,8 +45,8 @@ The CLI binary. Use when the technical layer matters. `axctl install`,
 ### ax studio
 
 The live dashboard at `axctl serve`. Use the studio name in prose
-("open ax studio at `127.0.0.1:8520`"), use the command name in
-instructions (`axctl serve --port=8520`).
+("open ax studio at `127.0.0.1:1738`"), use the command name in
+instructions (`axctl serve --port=1738`).
 
 ### ax pilot
 

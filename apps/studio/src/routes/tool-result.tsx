@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { LogText } from "../highlight/log-line.tsx";
 
 const mono = "ui-monospace, SFMono-Regular, Menlo, monospace";
 
@@ -110,7 +111,7 @@ export function ToolResultView({ text, open: openProp }: { text: string; open?: 
                             maxHeight: 360,
                         }}
                     >
-                        {output}
+                        <LogText text={output} />
                     </pre>
                 )
                 : null}

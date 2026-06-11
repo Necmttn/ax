@@ -23,6 +23,9 @@ import {
 import { prettyPrint } from "@ax/lib/json";
 // Schema is embedded at build time so the compiled binary is self-contained.
 import schemaSurql from "@ax/schema/schema.surql" with { type: "text" };
+import { bucketNames, renderBucketBackends } from "@ax/schema/render";
+import { envConfig as readDbEnvConfig } from "@ax/lib/db";
+import { DEFAULT_INGEST_TIMEOUT_SECONDS } from "@ax/lib/config";
 
 /**
  * Tagged failure for install steps (surreal resolution, symlinking). Extends
@@ -44,7 +47,10 @@ const BIN_DIR = posixPath.join(HOME, ".local", "bin");
 const VENDOR_BIN_DIR = posixPath.join(DATA_DIR, "bin");
 
 // Pin to a known-good SurrealDB. Override via env to test newer versions.
-const SURREAL_VERSION = process.env.AXCTL_SURREAL_VERSION ?? "3.0.5";
+// 3.0.x is NOT acceptable for new downloads: `SELECT ... FROM [recordid]`
+// throws "Specify a database to use" (issue #251). The query shape is now
+// version-portable (see @ax/lib/shared/record-select), but pin past the bug.
+const SURREAL_VERSION = process.env.AXCTL_SURREAL_VERSION ?? "3.1.0";
 
 const DB_LABEL = "com.necmttn.ax-db";
 const WATCH_LABEL = "com.necmttn.ax-watch";
@@ -630,6 +636,113 @@ export function formatDaemonStatus(status: DaemonStatus, json = false): string {
     return lines.join("\n");
 }
 
+/**
+ * Buckets schema.surql defines. A missing one means the schema import rolled
+ * back partway - historically a bucket BACKEND path outside the daemon's
+ * allowlist (issue #251) - and transcript snapshots silently no-op.
+ */
+const EXPECTED_BUCKETS = bucketNames(schemaSurql);
+
+/**
+ * Names from EXPECTED_BUCKETS that are NOT defined on the configured ns/db,
+ * or null when the daemon could not be queried (down, auth, non-JSON). Plain
+ * HTTP so doctor needs no SurrealClient layer; creds/ns/db come from the same
+ * AX_DB_* env config the rest of ax uses.
+ */
+async function probeMissingBuckets(endpoint: { host: string; port: number }): Promise<string[] | null> {
+    try {
+        const db = readDbEnvConfig();
+        const res = await fetch(`http://${endpoint.host}:${endpoint.port}/sql`, {
+            method: "POST",
+            headers: {
+                Accept: "application/json",
+                Authorization: `Basic ${Buffer.from(`${db.user}:${db.pass}`).toString("base64")}`,
+                "surreal-ns": db.ns,
+                "surreal-db": db.db,
+            },
+            body: "INFO FOR DB;",
+            signal: AbortSignal.timeout(3000),
+        });
+        if (!res.ok) return null;
+        const out = (await res.json()) as Array<{ result?: { buckets?: Record<string, unknown> } }>;
+        const buckets = out?.[0]?.result?.buckets;
+        if (buckets === undefined) return null;
+        return EXPECTED_BUCKETS.filter((name) => !(name in buckets));
+    } catch {
+        return null;
+    }
+}
+
+/** A row from `SELECT ... FROM ingest_run WHERE status = 'running'`. */
+export interface RunningIngestRunRow {
+    readonly id?: unknown;
+    readonly command?: unknown;
+    readonly started_at?: unknown;
+    readonly last_progress_at?: unknown;
+}
+
+/**
+ * Ingest wall-clock budget (seconds). Doctor runs on the no-DB code path
+ * (no AxConfig layer), so mirror the `AX_INGEST_TIMEOUT_SECONDS` knob with
+ * the same lenient parse-or-fallback the config layer uses.
+ */
+function ingestTimeoutSecondsFromEnv(): number {
+    const parsed = Number.parseInt(process.env.AX_INGEST_TIMEOUT_SECONDS ?? "", 10);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_INGEST_TIMEOUT_SECONDS;
+}
+
+/**
+ * Rows whose newest heartbeat (`last_progress_at`, else `started_at`) is older
+ * than `staleAfterMs`. A run still in status "running" past the ingest timeout
+ * was crashed/killed without finalizing - every clean exit path (ok, error,
+ * interrupt, timeout) settles the row, so a stale "running" row is a lie that
+ * misleads diagnosis (issue #269). Exported for tests.
+ */
+export function staleRunningIngestRuns(
+    rows: readonly RunningIngestRunRow[],
+    nowMs: number,
+    staleAfterMs: number,
+): RunningIngestRunRow[] {
+    return rows.filter((row) => {
+        const beat = Date.parse(String(row.last_progress_at ?? row.started_at ?? ""));
+        // No parseable timestamp at all: can't prove it's live, flag it.
+        if (!Number.isFinite(beat)) return true;
+        return nowMs - beat > staleAfterMs;
+    });
+}
+
+/**
+ * ingest_run rows stuck in status "running" longer than `staleAfterMs`, or
+ * null when the daemon could not be queried. Plain HTTP for the same reason
+ * as {@link probeMissingBuckets}: doctor has no SurrealClient layer.
+ */
+async function probeStaleIngestRuns(
+    endpoint: { host: string; port: number },
+    staleAfterMs: number,
+): Promise<RunningIngestRunRow[] | null> {
+    try {
+        const db = readDbEnvConfig();
+        const res = await fetch(`http://${endpoint.host}:${endpoint.port}/sql`, {
+            method: "POST",
+            headers: {
+                Accept: "application/json",
+                Authorization: `Basic ${Buffer.from(`${db.user}:${db.pass}`).toString("base64")}`,
+                "surreal-ns": db.ns,
+                "surreal-db": db.db,
+            },
+            body: "SELECT id, command, started_at, last_progress_at FROM ingest_run WHERE status = 'running';",
+            signal: AbortSignal.timeout(3000),
+        });
+        if (!res.ok) return null;
+        const out = (await res.json()) as Array<{ result?: RunningIngestRunRow[] }>;
+        const rows = out?.[0]?.result;
+        if (!Array.isArray(rows)) return null;
+        return staleRunningIngestRuns(rows, Date.now(), staleAfterMs);
+    } catch {
+        return null;
+    }
+}
+
 export function collectDoctorReport(): Effect.Effect<
     DoctorReport,
     never,
@@ -650,6 +763,18 @@ export function collectDoctorReport(): Effect.Effect<
         const runtimeStateExists = yield* fs
             .exists(daemon.endpoint.runtimeStatePath)
             .pipe(orAbsent(false));
+        const dbReachable = daemon.dbListening && daemon.endpoint.conflict === null;
+        const missingBuckets = dbReachable
+            ? yield* Effect.promise(() => probeMissingBuckets(daemon.endpoint))
+            : null;
+        // Stale "running" runs: anything past the ingest timeout (+grace, same
+        // margin the ingest lock uses) without a heartbeat is a crashed run
+        // that never finalized.
+        const ingestTimeoutSeconds = ingestTimeoutSecondsFromEnv();
+        const staleIngestRuns = dbReachable
+            ? yield* Effect.promise(() =>
+                probeStaleIngestRuns(daemon.endpoint, (ingestTimeoutSeconds + 60) * 1000))
+            : null;
         const checks: DoctorCheck[] = [
             {
                 name: "platform",
@@ -696,6 +821,27 @@ export function collectDoctorReport(): Effect.Effect<
                 detail: `${agent.loaded ? "loaded" : "not loaded"}; plist=${agent.plistExists ? "present" : "absent"}`,
             })),
         ];
+        if (missingBuckets !== null) {
+            checks.push({
+                name: "db-buckets",
+                ok: missingBuckets.length === 0,
+                detail: missingBuckets.length === 0
+                    ? `${EXPECTED_BUCKETS.join(", ")} defined`
+                    : `missing bucket(s): ${missingBuckets.join(", ")}; re-run 'axctl install' to re-apply the schema`,
+            });
+        }
+        if (staleIngestRuns !== null) {
+            const ids = staleIngestRuns.slice(0, 3).map((row) => String(row.id ?? "?")).join(", ");
+            checks.push({
+                name: "ingest-runs",
+                ok: staleIngestRuns.length === 0,
+                detail: staleIngestRuns.length === 0
+                    ? `no ingest_run rows stuck in status "running"`
+                    : `${staleIngestRuns.length} ingest_run row(s) stuck in status "running" past the ` +
+                        `${ingestTimeoutSeconds}s ingest timeout (${ids}); the run crashed or was killed ` +
+                        `without finalizing - ignore the rows for diagnosis and re-run 'ax ingest'`,
+            });
+        }
         const onboarding = yield* buildOnboardingReport();
         const onboardingChecks: DoctorCheck[] = onboarding.checks.map((c) => ({
             name: `onboarding:${c.id}`,
@@ -780,9 +926,13 @@ export function cmdInstall(): Effect.Effect<
         console.log(`  wrote:  ${DERIVE_PLIST}`);
         yield* Effect.promise(() => loadAgent(DERIVE_PLIST));
 
-        // Apply schema from embedded resource via surreal import.
+        // Apply schema from embedded resource via surreal import. Bucket
+        // BACKEND paths are rewritten to THIS machine's buckets dir - the
+        // committed schema.surql carries the committing machine's absolute
+        // path, which the daemon's bucket allowlist would deny here,
+        // rolling back the entire import transaction (issue #251).
         const schemaPath = path.join(DATA_DIR, ".schema-cache.surql");
-        yield* fs.writeFileString(schemaPath, schemaSurql);
+        yield* fs.writeFileString(schemaPath, renderBucketBackends(schemaSurql, BUCKETS_DIR));
         const r = spawnSync(
             surrealPath,
             [

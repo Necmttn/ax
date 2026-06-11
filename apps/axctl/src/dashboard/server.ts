@@ -1,3 +1,4 @@
+import { DEFAULT_DASHBOARD_PORT } from "@ax/lib/dashboard-port";
 import { ManagedRuntime } from "effect";
 import { IngestRuntimeLayer } from "../ingest/stage/runtime.ts";
 import { createDurableIngestStream, type DurableIngestStream } from "./ingest-stream-durable.ts";
@@ -7,7 +8,7 @@ import { routeTable } from "./router/table.ts";
 
 export function parseDashboardServeArgs(args: string[]): { port: number } {
     const raw = args.find((arg) => arg.startsWith("--port="))?.split("=")[1];
-    const port = raw === undefined ? 1738 : Number(raw);
+    const port = raw === undefined ? DEFAULT_DASHBOARD_PORT : Number(raw);
     if (!Number.isInteger(port) || port <= 0) throw new Error(`--port must be a positive integer (got ${raw})`);
     return { port };
 }
@@ -17,7 +18,7 @@ export async function handleDashboardRequest(req: Request): Promise<Response> {
     const routed = await dispatch(routeTable, req, url);
     if (routed !== null) return routed;
     if (url.pathname.startsWith("/api/")) return jsonResponse({ error: "not_found" });
-    if (req.method === "GET") return serveRootLanding(url.port || "1738");
+    if (req.method === "GET") return serveRootLanding(url.port || String(DEFAULT_DASHBOARD_PORT));
     return new Response("not found", { status: 404 });
 }
 

@@ -21,7 +21,7 @@ import { surrealString } from "@ax/lib/shared/surql";
 // ---------------------------------------------------------------------------
 
 /** Parsed frontmatter from a classify brief. */
-interface BriefFrontmatter {
+export interface BriefFrontmatter {
     readonly ax_classify: string;
     readonly primary_role: string;
     readonly secondary: string[];
@@ -74,8 +74,10 @@ function extractFrontmatter(content: string): string | null {
  * Returns null when the brief is pending (no primary_role) so the caller can
  * skip it silently.
  * Throws a descriptive string error when the brief is malformed.
+ *
+ * Exported for the template round-trip test (skills-classify-template.test.ts).
  */
-function parseBrief(
+export function parseBrief(
     content: string,
     filePath: string,
 ): BriefFrontmatter | null | { error: string } {

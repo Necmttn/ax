@@ -32,6 +32,26 @@ Both live session-inspect and public share routes render through shared `Transcr
 - `lang.test.ts` - ext map, alias resolution, fence parsing (basic / unclosed / no-fence / reconstruction invariant).
 - `tool-row.test.tsx` - command + Edit/Write arg rendering still emit code text (SSR renders the plain fallback; token swap is client-only).
 
+## Increment 2: stdout enrichment (2026-06-11)
+
+Tool output blocks read as one pale slab. Data facts: stored outputs carry no
+ANSI codes; Read results are `NNN<tab>code` (cat -n) lines; Bash outputs are
+mostly paths/logs. So:
+
+- **Dark theme** - second Shiki theme `catppuccin-mocha` (its editor bg
+  #1e1e2e === `--term-bg`), threaded as a `theme` param through
+  tokenize/useHighlightTokens/HighlightedCode.
+- **Read results** (`numbered-code.tsx`) - strip the line-number gutter,
+  highlight the code with `langFromPath(file_path)` on the dark theme,
+  re-attach the gutter dim. Unnumbered tails survive verbatim.
+- **Everything else** (`log-line.tsx`) - tiny synchronous log tokenizer:
+  file paths (blue), error/warn words (red/amber), numbers-with-units
+  (peach), diff +/- lines (green/red, only when the text looks like a
+  unified diff). Applied in the tool-card output block and ToolResultView.
+- **Skill cards** - injected SKILL.md renders as dark-theme markdown.
+
+Same invariants as increment 1: rendered text === input, >50KB renders plain.
+
 ## Risks
 
 - Shiki async load: handled by plain-text fallback state.

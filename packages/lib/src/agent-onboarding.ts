@@ -6,15 +6,17 @@
  * (the classify/lint loop) -> explore.
  */
 
+import { DEFAULT_DASHBOARD_PORT } from "./dashboard-port.ts";
+
 /** The raw prompt text the user pastes into Claude Code / Codex. */
 export const AGENT_ONBOARDING_PROMPT = [
     "Set up ax for me. ax is my local agent-experience graph over my Claude Code + Codex history. Do this end to end:",
     "",
-    "1. INGEST MY HISTORY - first run `ax ingest --dry-run` and tell me, in plain words, how long a full backfill will take. Then start the ingest in the BACKGROUND so we can keep working: run `ax ingest` as a background job with AX_PROGRESS=plain, and watch its output for progress and completion. Tell me I can watch it fill live in the dashboard - run `ax serve` and open http://127.0.0.1:8520. When the ingest finishes, summarize what landed: total sessions, turns, and the top skills/tools I actually use. Then continue with the steps below.",
+    `1. INGEST MY HISTORY - first run \`ax ingest --dry-run\` and tell me, in plain words, how long a full backfill will take. Then start the ingest in the BACKGROUND so we can keep working: run \`ax ingest\` as a background job with AX_PROGRESS=plain, and watch its output for progress and completion. Tell me I can watch it fill live in the dashboard - run \`ax serve\` and open http://127.0.0.1:${DEFAULT_DASHBOARD_PORT}. When the ingest finishes, summarize what landed: total sessions, turns, and the top skills/tools I actually use. Then continue with the steps below.`,
     "",
     "2. VERIFY - run `ax doctor`. If anything isn't ok, diagnose and fix it, then re-run until it is.",
     "",
-    "3. LABEL what ax can't classify - run `ax skills classify`. It writes one `.ax/tasks/classify-<skill>.md` brief per skill I use but ax can't role-tag. For each brief: read the skill, decide its role(s), and fill the YAML at the bottom (`primary_role:` is required; `secondary_roles`, `confidence`, `rationale` are optional). Run `ax roles` to see labels already in use. Then run `ax skills lint` to apply them. If it says \"no unclassified skills\", that's fine - nothing to label yet.",
+    "3. LABEL what ax can't classify - run `ax skills classify`. It writes one `.ax/tasks/classify-<skill>.md` brief per skill I use but ax can't role-tag. For each brief: read the skill, decide its role(s), and fill the YAML frontmatter at the top (`primary_role:` is required; `secondary`, `confidence`, `rationale` are optional). Run `ax roles` to see labels already in use. Then run `ax skills lint` to apply them. If it says \"no unclassified skills\", that's fine - nothing to label yet.",
     "",
     "4. SHOW me the result - run `ax skills weighted` (usage x role ranking) and `ax skills config` (lifecycle view). Tell me which skills you labeled and why, and flag anything ax marked orphan or out-of-scope.",
     "",

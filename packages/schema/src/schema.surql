@@ -144,8 +144,12 @@ DEFINE INDEX IF NOT EXISTS agent_event_session_ts ON agent_event FIELDS agent_se
 -- ==== File buckets (SurrealDB 3.0 experimental) ====
 -- Requires: surreal start --allow-experimental files
 --           SURREAL_BUCKET_FOLDER_ALLOWLIST=$AX_DATA_DIR/buckets
--- Bucket paths are hardcoded because SurrealQL does not interpolate env vars.
--- apply-schema.sh warns if $AX_DATA_DIR differs from the default.
+-- Bucket BACKEND paths below are literals (SurrealQL does not interpolate
+-- env vars) and reflect the committing machine. NEVER import this file
+-- verbatim on another machine: every apply path must rewrite the paths to
+-- the local $AX_DATA_DIR/buckets first (issue #251) - axctl install uses
+-- renderBucketBackends (packages/schema/src/render.ts); shell paths go
+-- through apply-schema.sh's sed (dev-db.sh delegates to it).
 
 DEFINE BUCKET IF NOT EXISTS transcripts
     BACKEND "file:/Users/necmttn/.local/share/ax/buckets/transcripts";
@@ -1078,6 +1082,9 @@ DEFINE FIELD command       ON ingest_run TYPE string;
 DEFINE FIELD status        ON ingest_run TYPE string DEFAULT 'running';
 DEFINE FIELD since_days    ON ingest_run TYPE option<int>;
 DEFINE FIELD started_at    ON ingest_run TYPE datetime DEFAULT time::now();
+-- Heartbeat: bumped on every stage start/finish so a genuinely-live "running"
+-- run is distinguishable from one stranded by a crash (doctor stale-run check).
+DEFINE FIELD last_progress_at ON ingest_run TYPE option<datetime>;
 DEFINE FIELD ended_at      ON ingest_run TYPE option<datetime>;
 DEFINE FIELD metrics       ON ingest_run TYPE option<string>;
 DEFINE INDEX IF NOT EXISTS ingest_run_status_started ON ingest_run FIELDS status, started_at;

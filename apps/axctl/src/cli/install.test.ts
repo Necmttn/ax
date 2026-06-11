@@ -3,6 +3,7 @@ import {
     formatDaemonStatus,
     formatDoctorReport,
     parseDaemonCommand,
+    staleRunningIngestRuns,
     type DaemonStatus,
     type DoctorReport,
 } from "./install.ts";
@@ -88,5 +89,40 @@ describe("cli install operations", () => {
             name: "binary",
             ok: true,
         });
+    });
+});
+
+describe("doctor stale ingest_run detection", () => {
+    const NOW = Date.parse("2026-06-11T12:00:00.000Z");
+    const STALE_AFTER_MS = 960_000; // 900s timeout + 60s grace
+
+    const at = (msAgo: number) => new Date(NOW - msAgo).toISOString();
+
+    test("flags a running row whose newest heartbeat is older than the threshold", () => {
+        const rows = [
+            { id: "ingest_run:dead", started_at: at(3_600_000) }, // 1h ago, no heartbeat
+        ];
+        expect(staleRunningIngestRuns(rows, NOW, STALE_AFTER_MS)).toEqual(rows);
+    });
+
+    test("a fresh heartbeat keeps an old run out of the stale set", () => {
+        const rows = [
+            {
+                id: "ingest_run:live",
+                started_at: at(3_600_000), // started long ago...
+                last_progress_at: at(30_000), // ...but heartbeat 30s ago
+            },
+        ];
+        expect(staleRunningIngestRuns(rows, NOW, STALE_AFTER_MS)).toEqual([]);
+    });
+
+    test("a recent start without heartbeat is not stale", () => {
+        const rows = [{ id: "ingest_run:young", started_at: at(60_000) }];
+        expect(staleRunningIngestRuns(rows, NOW, STALE_AFTER_MS)).toEqual([]);
+    });
+
+    test("rows with no parseable timestamp are flagged (cannot prove liveness)", () => {
+        const rows = [{ id: "ingest_run:mystery" }];
+        expect(staleRunningIngestRuns(rows, NOW, STALE_AFTER_MS)).toEqual(rows);
     });
 });

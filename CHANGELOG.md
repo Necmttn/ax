@@ -1,5 +1,49 @@
 # Changelog
 
+## [0.25.0](https://github.com/Necmttn/ax/compare/v0.24.0...v0.25.0) (2026-06-11)
+
+
+### Features
+
+* **ingest:** per-file failure isolation for Claude + Codex stages ([#257](https://github.com/Necmttn/ax/issues/257)) ([9a0ab11](https://github.com/Necmttn/ax/commit/9a0ab115edb1ff3c19347cc12f0489f21e4ba14e))
+* **share:** target-ingest the session when it isn't in the graph yet ([#277](https://github.com/Necmttn/ax/issues/277)) ([84d4891](https://github.com/Necmttn/ax/commit/84d48914d6eb39d7111c0c608756fdd727737257)), closes [#270](https://github.com/Necmttn/ax/issues/270)
+* **studio:** enrich tool stdout blocks - Read files highlighted, log outputs tinted ([#238](https://github.com/Necmttn/ax/issues/238)) ([738bff7](https://github.com/Necmttn/ax/commit/738bff79deaf7764c4bbe54b1c242e832d5a2816))
+* **studio:** poll stats when the live stream sidecar is unavailable ([#278](https://github.com/Necmttn/ax/issues/278)) ([b7cef15](https://github.com/Necmttn/ax/commit/b7cef156735d2a7d8959e808541035d278eec82e)), closes [#272](https://github.com/Necmttn/ax/issues/272)
+* **studio:** render edit tool calls as syntax-highlighted diffs ([#239](https://github.com/Necmttn/ax/issues/239)) ([7fcdab8](https://github.com/Necmttn/ax/commit/7fcdab82070b62d25fa635a750026a312d31309b))
+* **timeline:** carry command + intent in tool event titles ([#256](https://github.com/Necmttn/ax/issues/256)) ([1e9a7d9](https://github.com/Necmttn/ax/commit/1e9a7d9b0e82e276f25ea0dbc18a4285554cae94))
+
+
+### Bug Fixes
+
+* **ci:** stop release publish jobs racing on asset upload ([#260](https://github.com/Necmttn/ax/issues/260)) ([0350e23](https://github.com/Necmttn/ax/commit/0350e232e3c99f9777aa06ea1262d4e590548c6c))
+* **docs:** align dashboard port references with serve default 1738 ([#275](https://github.com/Necmttn/ax/issues/275)) ([02cd27f](https://github.com/Necmttn/ax/commit/02cd27f5523a12cc4ab6dd8cfffa279f4c7eb673)), closes [#268](https://github.com/Necmttn/ax/issues/268)
+* **ingest:** dry-run estimates remaining backfill instead of refusing when populated ([#276](https://github.com/Necmttn/ax/issues/276)) ([f69798a](https://github.com/Necmttn/ax/commit/f69798a79ecb98aca0400b5cf95f5680d9e10434)), closes [#267](https://github.com/Necmttn/ax/issues/267)
+* **ingest:** finalize run lifecycle on every exit path, honest exit codes ([#279](https://github.com/Necmttn/ax/issues/279)) ([86fa208](https://github.com/Necmttn/ax/commit/86fa20882450c82e01dc7d55469dc8f69f7aac04))
+* **install:** report expected vs actual hash on checksum mismatch instead of silent abort ([#273](https://github.com/Necmttn/ax/issues/273)) ([a56bc57](https://github.com/Necmttn/ax/commit/a56bc574485fccf01c0e09fc35e50505b63c25a0)), closes [#271](https://github.com/Necmttn/ax/issues/271)
+* **share:** adapt recover to discriminated ingest-lock outcome ([#280](https://github.com/Necmttn/ax/issues/280)) ([31b5289](https://github.com/Necmttn/ax/commit/31b52891c0b2fa92d3a49496fbb74ad7901ba051))
+* **skills:** emit classify briefs as top-of-file frontmatter so lint can parse them ([#274](https://github.com/Necmttn/ax/issues/274)) ([92fab55](https://github.com/Necmttn/ax/commit/92fab55c621bc299beb07fdd1886727324248457)), closes [#264](https://github.com/Necmttn/ax/issues/264)
+
+## [0.24.0](https://github.com/Necmttn/ax/compare/v0.23.0...v0.24.0) (2026-06-11)
+
+
+### Features
+
+* @ax/hooks-sdk - typed cross-harness hooks with install + backtest ([#252](https://github.com/Necmttn/ax/issues/252)) ([a7aaf92](https://github.com/Necmttn/ax/commit/a7aaf92cbc8197bf01a7211ffd4125fa59c3f5fa))
+
+
+### Bug Fixes
+
+* **ingest:** SurrealDB 3.0.x record-list select abort + per-machine bucket paths ([#253](https://github.com/Necmttn/ax/issues/253)) ([1c71f36](https://github.com/Necmttn/ax/commit/1c71f369502dbfdbdc06b170eb6c99abdd7c0922))
+* **share:** bucket turn usage onto kept turns so cost-so-far accumulates ([#237](https://github.com/Necmttn/ax/issues/237)) ([3306631](https://github.com/Necmttn/ax/commit/330663135e0f72ba59e4c7ae6209611d095b967f))
+
+## [0.23.0](https://github.com/Necmttn/ax/compare/v0.22.2...v0.23.0) (2026-06-10)
+
+
+### Features
+
+* **og:** version og:image URLs so social caches pick up poster changes ([#234](https://github.com/Necmttn/ax/issues/234)) ([1fdd2d0](https://github.com/Necmttn/ax/commit/1fdd2d077562bde59c8eeacf9a0ce228d9ce8d64))
+* **studio:** syntax highlighting in session/share transcript views ([6d9a182](https://github.com/Necmttn/ax/commit/6d9a182b344182bee6310fb80743f60ac5212a09))
+
 ## [0.22.2](https://github.com/Necmttn/ax/compare/v0.22.1...v0.22.2) (2026-06-10)
 
 
