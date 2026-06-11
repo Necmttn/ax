@@ -1,6 +1,7 @@
 import { describe, expect, it } from "bun:test";
 import { minimalShareArtifact, type AxSessionShare } from "../share/artifact.ts";
 import { formatStaleUsageWarning } from "../share/format.ts";
+import type { ShareTranscriptHit } from "../share/recover.ts";
 import { cmdShareWithDeps, parseShareArgs, type ShareCommandDeps } from "./share.ts";
 
 const SESSION_USAGE = {
@@ -24,13 +25,24 @@ const TURN_USAGE = {
 
 function makeHarness(
     artifact: AxSessionShare | null = minimalShareArtifact({ id: "abc123", source: "codex" }),
+    overrides: Partial<ShareCommandDeps> = {},
 ) {
     let stdout = "";
     let stderr = "";
     let exitCode: number | undefined;
     const published: Parameters<ShareCommandDeps["publish"]>[0][] = [];
+    const locateCalls: string[] = [];
+    const ingestCalls: ShareTranscriptHit[] = [];
     const deps: ShareCommandDeps = {
         exportArtifact: async () => artifact,
+        locateTranscript: async (sessionId) => {
+            locateCalls.push(sessionId);
+            return null;
+        },
+        ingestSession: async (hit) => {
+            ingestCalls.push(hit);
+            return { kind: "ingested" };
+        },
         publish: async (input) => {
             published.push(input);
             return { owner: "necmttn", gistId: "gist123" };
@@ -48,11 +60,14 @@ function makeHarness(
         clearExitCode: () => {
             exitCode = undefined;
         },
+        ...overrides,
     };
 
     return {
         deps,
         published,
+        locateCalls,
+        ingestCalls,
         exitCode: () => exitCode,
         setStaleExitCode: (code: number) => {
             exitCode = code;
@@ -61,6 +76,11 @@ function makeHarness(
         stderr: () => stderr,
     };
 }
+
+const CLAUDE_HIT: ShareTranscriptHit = {
+    path: "/home/u/.claude/projects/-Users-u-Projects-ax/abc123.jsonl",
+    harness: "claude",
+};
 
 describe("parseShareArgs", () => {
     it("parses dry-run share args", () => {
@@ -117,12 +137,98 @@ describe("cmdShareWithDeps", () => {
         expect(harness.published).toHaveLength(0);
     });
 
-    it("sets exitCode 1 when the session is missing", async () => {
+    it("sets exitCode 1 when the session is missing and no transcript exists on disk", async () => {
         const harness = makeHarness(null);
         await cmdShareWithDeps(["missing123"], harness.deps);
 
         expect(harness.exitCode()).toBe(1);
         expect(harness.stderr()).toContain("axctl share: session missing123 not found");
+        expect(harness.locateCalls).toEqual(["missing123"]);
+        expect(harness.ingestCalls).toHaveLength(0);
+        expect(harness.published).toHaveLength(0);
+    });
+
+    it("does not touch the disk fallback when the export succeeds first try", async () => {
+        const harness = makeHarness();
+        await cmdShareWithDeps(["abc123", "--dry-run"], harness.deps);
+
+        expect(harness.locateCalls).toHaveLength(0);
+        expect(harness.ingestCalls).toHaveLength(0);
+    });
+
+    it("ingests the on-disk transcript and retries the export on a graph miss", async () => {
+        const artifact = minimalShareArtifact({ id: "abc123", source: "claude" });
+        const exports: Array<AxSessionShare | null> = [null, artifact];
+        const harness = makeHarness(null, {
+            exportArtifact: async () => exports.shift() ?? null,
+            locateTranscript: async () => CLAUDE_HIT,
+        });
+        await cmdShareWithDeps(["abc123", "--dry-run"], harness.deps);
+
+        expect(harness.stderr()).toContain(
+            "axctl share: session abc123 not in graph - ingesting it now…",
+        );
+        expect(harness.ingestCalls).toEqual([CLAUDE_HIT]);
+        expect(harness.exitCode()).toBeUndefined();
+        // --dry-run semantics intact after the recovery: bundle on stdout, no publish.
+        const bundle = JSON.parse(harness.stdout());
+        expect(bundle["index.json"].session.id).toBe("abc123");
+        expect(harness.published).toHaveLength(0);
+    });
+
+    it("publishes after a successful miss->ingest->retry with --yes", async () => {
+        const artifact = minimalShareArtifact({ id: "abc123", source: "claude" });
+        const exports: Array<AxSessionShare | null> = [null, artifact];
+        const harness = makeHarness(null, {
+            exportArtifact: async () => exports.shift() ?? null,
+            locateTranscript: async () => CLAUDE_HIT,
+        });
+        await cmdShareWithDeps(["abc123", "--yes"], harness.deps);
+
+        expect(harness.exitCode()).toBeUndefined();
+        expect(harness.published).toHaveLength(1);
+        expect(harness.stdout()).toContain("https://ax.necmttn.com/s/necmttn/gist123");
+    });
+
+    it("reports a busy ingest lock instead of deadlocking", async () => {
+        const harness = makeHarness(null, {
+            locateTranscript: async () => CLAUDE_HIT,
+            ingestSession: async () => ({ kind: "busy", pid: 4242, command: "ingest" }),
+        });
+        await cmdShareWithDeps(["abc123"], harness.deps);
+
+        expect(harness.exitCode()).toBe(1);
+        expect(harness.stderr()).toContain(
+            "another ingest (pid 4242, ingest) is in progress",
+        );
+        expect(harness.published).toHaveLength(0);
+    });
+
+    it("reports a failed targeted ingest with what was attempted", async () => {
+        const harness = makeHarness(null, {
+            locateTranscript: async () => CLAUDE_HIT,
+            ingestSession: async () => ({ kind: "failed", message: "db exploded" }),
+        });
+        await cmdShareWithDeps(["abc123"], harness.deps);
+
+        expect(harness.exitCode()).toBe(1);
+        expect(harness.stderr()).toContain(
+            `targeted ingest of ${CLAUDE_HIT.path} failed: db exploded`,
+        );
+        expect(harness.published).toHaveLength(0);
+    });
+
+    it("fails with what was attempted when the session is still missing after ingest", async () => {
+        const harness = makeHarness(null, {
+            locateTranscript: async () => CLAUDE_HIT,
+        });
+        await cmdShareWithDeps(["abc123"], harness.deps);
+
+        expect(harness.ingestCalls).toEqual([CLAUDE_HIT]);
+        expect(harness.exitCode()).toBe(1);
+        expect(harness.stderr()).toContain(
+            `ingested ${CLAUDE_HIT.path}, but the session still did not appear in the graph`,
+        );
         expect(harness.published).toHaveLength(0);
     });
 
