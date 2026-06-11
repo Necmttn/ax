@@ -14,9 +14,33 @@ import type {
     SkillProposalEvidence,
     SkillRecentInvocation,
 } from "@ax/lib/shared/dashboard-types";
+import { skillWithInvocationsSql } from "./skill-invocations-sql.ts";
 
 /**
- * Two variants share this module:
+ * `daily` sparkline buckets - shared verbatim by both variants below.
+ */
+const DAILY_BLOCK = `    daily: (
+        SELECT ts FROM invoked
+        WHERE out = $s.id AND ts > time::now() - 30d
+        ORDER BY ts ASC
+    )`;
+
+/**
+ * 10 most recent invocations. The full variant additionally projects
+ * `turn_has_error` for the dashboard's error badges; the TUI doesn't render
+ * it, so the basic variant keeps the projection minimal.
+ */
+const recentBlock = (extraColumns: string) => `    recent: (
+        SELECT ts, in.session.project AS project${extraColumns}
+        FROM invoked
+        WHERE out = $s.id
+        ORDER BY ts DESC
+        LIMIT 10
+    )`;
+
+/**
+ * Two variants share this module (both compose the canonical
+ * skill+invocations scaffold from `skill-invocations-sql.ts`):
  *
  * - `SKILL_DETAIL_BASIC_SQL` - the TUI hot path. The DetailPane re-queries on
  *   every (debounced) j/k selection change, so it only carries the lightweight
@@ -27,60 +51,24 @@ import type {
  *   by both endpoints (indexed: `skill_paired_in`/`skill_paired_out`). Still
  *   dashboard-only - the TUI's per-row selection keeps the lighter variant.
  */
-export const SKILL_DETAIL_BASIC_SQL = `
-LET $s = (SELECT * FROM skill WHERE name = $name)[0];
-RETURN {
-    skill: $s,
-    invocations: {
-        total: array::len((SELECT * FROM invoked WHERE out = $s.id)),
-        d7:    array::len((SELECT * FROM invoked WHERE out = $s.id AND ts > time::now() - 7d)),
-        d30:   array::len((SELECT * FROM invoked WHERE out = $s.id AND ts > time::now() - 30d)),
-        last:  (SELECT ts FROM invoked WHERE out = $s.id ORDER BY ts DESC LIMIT 1)[0].ts,
-    },
-    recent: (
-        SELECT ts, in.session.project AS project
-        FROM invoked
-        WHERE out = $s.id
-        ORDER BY ts DESC
-        LIMIT 10
-    ),
-    daily: (
-        SELECT ts FROM invoked
-        WHERE out = $s.id AND ts > time::now() - 30d
-        ORDER BY ts ASC
-    )
-};`;
+export const SKILL_DETAIL_BASIC_SQL = skillWithInvocationsSql({
+    windows: [7, 30],
+    blocks: [recentBlock(""), DAILY_BLOCK],
+});
 
-export const SKILL_DETAIL_SQL = `
-LET $s = (SELECT * FROM skill WHERE name = $name)[0];
-RETURN {
-    skill: $s,
-    invocations: {
-        total: array::len((SELECT * FROM invoked WHERE out = $s.id)),
-        d7:    array::len((SELECT * FROM invoked WHERE out = $s.id AND ts > time::now() - 7d)),
-        d30:   array::len((SELECT * FROM invoked WHERE out = $s.id AND ts > time::now() - 30d)),
-        last:  (SELECT ts FROM invoked WHERE out = $s.id ORDER BY ts DESC LIMIT 1)[0].ts,
-    },
-    recent: (
-        SELECT ts, in.session.project AS project, turn_has_error
-        FROM invoked
-        WHERE out = $s.id
-        ORDER BY ts DESC
-        LIMIT 10
-    ),
-    daily: (
-        SELECT ts FROM invoked
-        WHERE out = $s.id AND ts > time::now() - 30d
-        ORDER BY ts ASC
-    ),
-    corrections: (
+export const SKILL_DETAIL_SQL = skillWithInvocationsSql({
+    windows: [7, 30],
+    blocks: [
+        recentBlock(", turn_has_error"),
+        DAILY_BLOCK,
+        `    corrections: (
         SELECT ts, in.session.project AS project
         FROM invoked
         WHERE out = $s.id AND was_corrected = true
         ORDER BY ts DESC
         LIMIT 5
-    ),
-    proposals: (
+    )`,
+        `    proposals: (
         -- Some legacy proposed edges have ts = epoch (ingest path used to skip
         -- the field). Fall back to the source turn's ts so the timeline reads
         -- correctly.
@@ -92,8 +80,8 @@ RETURN {
         WHERE out = $s.id
         ORDER BY ts DESC
         LIMIT 5
-    ),
-    paired: (
+    )`,
+        `    paired: (
         -- Skills that co-occurred in the same session within a turn window
         -- (denormalised by derive-signals). The pair is undirected, so we
         -- check both directions and surface the partner's name.
@@ -107,8 +95,9 @@ RETURN {
         WHERE in = $s.id OR out = $s.id
         ORDER BY count DESC
         LIMIT 5
-    )
-};`;
+    )`,
+    ],
+});
 
 export const mapSkillRecentRow = (raw: unknown): SkillRecentInvocation | null => {
     if (!raw || typeof raw !== "object") return null;
