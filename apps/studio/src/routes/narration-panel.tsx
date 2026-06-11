@@ -11,6 +11,11 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { getSingularPatch } from "@pierre/diffs";
 import { FileDiff } from "@pierre/diffs/react";
+import type { HighlighterCore } from "shiki/core";
+import { ShikiMagicMove } from "shiki-magic-move/react";
+import "shiki-magic-move/style.css";
+import { highlighterFor, THEME } from "../highlight/highlighter.ts";
+import { langFromPath } from "../highlight/lang.ts";
 import { buildHunkPatch } from "./files-touched.ts";
 import type {
     CorrectionAnchor,
@@ -333,11 +338,60 @@ function StopCard({ stop, index, isActive, isLast, onJumpToTurn, onActivate, car
 // Sticky code pane (right column) - the active stop's hunks
 // ---------------------------------------------------------------------------
 
+/**
+ * Magic-move morph of one hunk: mounts on the replaced fragment, then
+ * animates token-by-token to the inserted one - the change plays as motion.
+ * Crossing to another stop morphs from whatever is on screen to the next
+ * hunk's old state and replays. Falls back to the static diff while the
+ * grammar loads (or when the file has no known grammar).
+ */
+function MorphHunk({ anchor }: { readonly anchor: FileHunkAnchor }) {
+    const lang = langFromPath(anchor.file);
+    const [highlighter, setHighlighter] = useState<HighlighterCore | null>(null);
+    useEffect(() => {
+        if (!lang) return;
+        let live = true;
+        highlighterFor(lang).then((core) => {
+            if (live) setHighlighter(core);
+        });
+        return () => {
+            live = false;
+        };
+    }, [lang]);
+
+    const oldCode = anchor.old_text;
+    const newCode = anchor.new_text ?? "";
+    const [code, setCode] = useState(oldCode ?? newCode);
+    useEffect(() => {
+        setCode(oldCode ?? newCode);
+        if (oldCode != null && newCode) {
+            // Let the old state paint, then play the morph to the new one.
+            const t = setTimeout(() => setCode(newCode), 500);
+            return () => clearTimeout(t);
+        }
+        return undefined;
+    }, [oldCode, newCode]);
+
+    if (!lang || !highlighter) return <PaneDiff anchor={anchor} />;
+    return (
+        <div style={{ padding: "4px 12px 10px", font: `11.5px/1.5 ${mono}`, overflow: "auto" }}>
+            <ShikiMagicMove
+                highlighter={highlighter}
+                lang={lang}
+                theme={THEME}
+                code={code}
+                options={{ duration: 650, stagger: 2, lineNumbers: false }}
+            />
+        </div>
+    );
+}
+
 function CodePane({ stop, index, onJumpToTurn }: {
     readonly stop: NarrationStop | null;
     readonly index: number;
     readonly onJumpToTurn: (seq: number) => void;
 }) {
+    const [mode, setMode] = useState<"animate" | "diff">("animate");
     const hunks = (stop?.anchors ?? []).filter((a): a is FileHunkAnchor => a.kind === "file_hunk");
     return (
         <div style={{
@@ -351,12 +405,34 @@ function CodePane({ stop, index, onJumpToTurn }: {
         }}>
             <div style={{
                 position: "sticky", top: 0, zIndex: 1,
+                display: "flex", alignItems: "baseline", gap: 8,
                 padding: "6px 12px",
                 font: `700 10px/1.6 ${mono}`, textTransform: "uppercase", letterSpacing: "0.08em",
                 color: "var(--muted)", background: "var(--panel)",
                 borderBottom: "1px solid var(--line)",
             }}>
-                {stop ? `${index + 1} · ${stop.title}` : "code"}
+                <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {stop ? `${index + 1} · ${stop.title}` : "code"}
+                </span>
+                <span style={{ marginLeft: "auto", display: "flex", gap: 2, flex: "0 0 auto" }}>
+                    {(["animate", "diff"] as const).map((m) => (
+                        <button
+                            key={m}
+                            type="button"
+                            onClick={() => setMode(m)}
+                            aria-pressed={mode === m}
+                            style={{
+                                font: `700 9.5px/1.6 ${mono}`, textTransform: "uppercase", letterSpacing: "0.06em",
+                                padding: "0 7px", borderRadius: 3, cursor: "pointer",
+                                border: "1px solid var(--line)",
+                                background: mode === m ? "var(--ink)" : "transparent",
+                                color: mode === m ? "var(--page)" : "var(--muted)",
+                            }}
+                        >
+                            {m}
+                        </button>
+                    ))}
+                </span>
             </div>
             {hunks.length === 0 ? (
                 <div style={{ padding: "18px 14px", font: `11.5px/1.7 ${mono}`, color: "var(--muted)" }}>
@@ -382,7 +458,7 @@ function CodePane({ stop, index, onJumpToTurn }: {
                             <div style={{ padding: "0 12px 4px", font: `11px/1.6 ${mono}`, color: "var(--muted)" }}>
                                 {anchor.label}
                             </div>
-                            <PaneDiff anchor={anchor} />
+                            {mode === "animate" ? <MorphHunk anchor={anchor} /> : <PaneDiff anchor={anchor} />}
                         </div>
                     ))}
                 </div>

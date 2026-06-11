@@ -70,3 +70,10 @@ export async function tokenize(code: string, lang: string): Promise<ThemedToken[
     const core = await getCore();
     return core.codeToTokens(code, { lang, theme: THEME }).tokens;
 }
+
+/** The shared core with `lang` loaded, for consumers that drive shiki
+ *  directly (shiki-magic-move). null when the grammar is unavailable. */
+export async function highlighterFor(lang: string): Promise<HighlighterCore | null> {
+    if (!(await ensureLang(lang))) return null;
+    return getCore();
+}
