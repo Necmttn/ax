@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.24.0](https://github.com/Necmttn/ax/compare/v0.23.0...v0.24.0) (2026-06-11)
+
+
+### Features
+
+* @ax/hooks-sdk - typed cross-harness hooks with install + backtest ([#252](https://github.com/Necmttn/ax/issues/252)) ([a7aaf92](https://github.com/Necmttn/ax/commit/a7aaf92cbc8197bf01a7211ffd4125fa59c3f5fa))
+
+
+### Bug Fixes
+
+* **ingest:** SurrealDB 3.0.x record-list select abort + per-machine bucket paths ([#253](https://github.com/Necmttn/ax/issues/253)) ([1c71f36](https://github.com/Necmttn/ax/commit/1c71f369502dbfdbdc06b170eb6c99abdd7c0922))
+* **share:** bucket turn usage onto kept turns so cost-so-far accumulates ([#237](https://github.com/Necmttn/ax/issues/237)) ([3306631](https://github.com/Necmttn/ax/commit/330663135e0f72ba59e4c7ae6209611d095b967f))
+
 ## [0.23.0](https://github.com/Necmttn/ax/compare/v0.22.2...v0.23.0) (2026-06-10)
 
 
