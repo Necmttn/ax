@@ -412,7 +412,7 @@ const fetchCommandOutcomeEvents = (
         const rows = (yield* Effect.all(
             chunked(sessionIds, IN_CHUNK).map((ids) =>
                 db.query<[Array<Record<string, unknown>>]>(
-                    `SELECT type::string(session) AS session, type::string(ts) AS ts, kind, status, command_text, command_norm, command_tool, text`
+                    `SELECT type::string(session) AS session, type::string(ts) AS ts, kind, status, tool_call.command_text AS command_text, command_norm, command_tool, text`
                     + ` FROM command_outcome WHERE session IN [${sessionRefList(ids)}]`
                     + ` AND (kind = "expected_feedback" OR status = "ok") ORDER BY ts ASC;`,
                 ),

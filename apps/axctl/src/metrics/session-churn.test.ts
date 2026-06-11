@@ -444,6 +444,7 @@ describe("fetchSessionChurnSummary", () => {
         }))));
 
         const outcomeSql = seenSql.find((s) => s.includes("FROM command_outcome"))!;
+        expect(outcomeSql).toContain("tool_call.command_text AS command_text");
         expect(outcomeSql).toContain('AND (kind = "expected_feedback" OR status = "ok")');
         expect(summary.hotSessions[0]).toMatchObject({
             session: "s1",
