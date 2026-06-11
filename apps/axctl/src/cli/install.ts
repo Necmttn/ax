@@ -23,6 +23,8 @@ import {
 import { prettyPrint } from "@ax/lib/json";
 // Schema is embedded at build time so the compiled binary is self-contained.
 import schemaSurql from "@ax/schema/schema.surql" with { type: "text" };
+import { bucketNames, renderBucketBackends } from "@ax/schema/render";
+import { envConfig as readDbEnvConfig } from "@ax/lib/db";
 
 /**
  * Tagged failure for install steps (surreal resolution, symlinking). Extends
@@ -44,7 +46,10 @@ const BIN_DIR = posixPath.join(HOME, ".local", "bin");
 const VENDOR_BIN_DIR = posixPath.join(DATA_DIR, "bin");
 
 // Pin to a known-good SurrealDB. Override via env to test newer versions.
-const SURREAL_VERSION = process.env.AXCTL_SURREAL_VERSION ?? "3.0.5";
+// 3.0.x is NOT acceptable for new downloads: `SELECT ... FROM [recordid]`
+// throws "Specify a database to use" (issue #251). The query shape is now
+// version-portable (see @ax/lib/shared/record-select), but pin past the bug.
+const SURREAL_VERSION = process.env.AXCTL_SURREAL_VERSION ?? "3.1.0";
 
 const DB_LABEL = "com.necmttn.ax-db";
 const WATCH_LABEL = "com.necmttn.ax-watch";
@@ -630,6 +635,43 @@ export function formatDaemonStatus(status: DaemonStatus, json = false): string {
     return lines.join("\n");
 }
 
+/**
+ * Buckets schema.surql defines. A missing one means the schema import rolled
+ * back partway - historically a bucket BACKEND path outside the daemon's
+ * allowlist (issue #251) - and transcript snapshots silently no-op.
+ */
+const EXPECTED_BUCKETS = bucketNames(schemaSurql);
+
+/**
+ * Names from EXPECTED_BUCKETS that are NOT defined on the configured ns/db,
+ * or null when the daemon could not be queried (down, auth, non-JSON). Plain
+ * HTTP so doctor needs no SurrealClient layer; creds/ns/db come from the same
+ * AX_DB_* env config the rest of ax uses.
+ */
+async function probeMissingBuckets(endpoint: { host: string; port: number }): Promise<string[] | null> {
+    try {
+        const db = readDbEnvConfig();
+        const res = await fetch(`http://${endpoint.host}:${endpoint.port}/sql`, {
+            method: "POST",
+            headers: {
+                Accept: "application/json",
+                Authorization: `Basic ${Buffer.from(`${db.user}:${db.pass}`).toString("base64")}`,
+                "surreal-ns": db.ns,
+                "surreal-db": db.db,
+            },
+            body: "INFO FOR DB;",
+            signal: AbortSignal.timeout(3000),
+        });
+        if (!res.ok) return null;
+        const out = (await res.json()) as Array<{ result?: { buckets?: Record<string, unknown> } }>;
+        const buckets = out?.[0]?.result?.buckets;
+        if (buckets === undefined) return null;
+        return EXPECTED_BUCKETS.filter((name) => !(name in buckets));
+    } catch {
+        return null;
+    }
+}
+
 export function collectDoctorReport(): Effect.Effect<
     DoctorReport,
     never,
@@ -650,6 +692,9 @@ export function collectDoctorReport(): Effect.Effect<
         const runtimeStateExists = yield* fs
             .exists(daemon.endpoint.runtimeStatePath)
             .pipe(orAbsent(false));
+        const missingBuckets = daemon.dbListening && daemon.endpoint.conflict === null
+            ? yield* Effect.promise(() => probeMissingBuckets(daemon.endpoint))
+            : null;
         const checks: DoctorCheck[] = [
             {
                 name: "platform",
@@ -696,6 +741,15 @@ export function collectDoctorReport(): Effect.Effect<
                 detail: `${agent.loaded ? "loaded" : "not loaded"}; plist=${agent.plistExists ? "present" : "absent"}`,
             })),
         ];
+        if (missingBuckets !== null) {
+            checks.push({
+                name: "db-buckets",
+                ok: missingBuckets.length === 0,
+                detail: missingBuckets.length === 0
+                    ? `${EXPECTED_BUCKETS.join(", ")} defined`
+                    : `missing bucket(s): ${missingBuckets.join(", ")}; re-run 'axctl install' to re-apply the schema`,
+            });
+        }
         const onboarding = yield* buildOnboardingReport();
         const onboardingChecks: DoctorCheck[] = onboarding.checks.map((c) => ({
             name: `onboarding:${c.id}`,
@@ -780,9 +834,13 @@ export function cmdInstall(): Effect.Effect<
         console.log(`  wrote:  ${DERIVE_PLIST}`);
         yield* Effect.promise(() => loadAgent(DERIVE_PLIST));
 
-        // Apply schema from embedded resource via surreal import.
+        // Apply schema from embedded resource via surreal import. Bucket
+        // BACKEND paths are rewritten to THIS machine's buckets dir - the
+        // committed schema.surql carries the committing machine's absolute
+        // path, which the daemon's bucket allowlist would deny here,
+        // rolling back the entire import transaction (issue #251).
         const schemaPath = path.join(DATA_DIR, ".schema-cache.surql");
-        yield* fs.writeFileString(schemaPath, schemaSurql);
+        yield* fs.writeFileString(schemaPath, renderBucketBackends(schemaSurql, BUCKETS_DIR));
         const r = spawnSync(
             surrealPath,
             [

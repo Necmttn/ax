@@ -6,19 +6,23 @@ PASS="${AX_DB_PASS:-root}"
 NS="${AX_DB_NS:-ax}"
 DB="${AX_DB_DB:-main}"
 SCHEMA="$(dirname "$0")/../packages/schema/src/schema.surql"
+SURREAL_BIN="${AX_SURREAL_BIN:-surreal}"
 
-# Bucket paths are hardcoded in schema.surql to /Users/necmttn/.local/share/ax/buckets/*
-# because SurrealQL does not expand env vars. Warn if the runtime data dir differs.
+# Bucket BACKEND paths in schema.surql carry the committing machine's absolute
+# path (SurrealQL cannot expand env vars). Rewrite them to THIS machine's
+# buckets dir before import - a mismatched path is denied by the daemon's
+# SURREAL_BUCKET_FOLDER_ALLOWLIST and rolls back the whole import (issue #251).
+# Mirrors renderBucketBackends in packages/schema/src/render.ts.
 DATA_DIR="${AX_DATA_DIR:-$HOME/.local/share/ax}"
-HARDCODED_DATA_DIR="/Users/necmttn/.local/share/ax"
-if [ "$DATA_DIR" != "$HARDCODED_DATA_DIR" ]; then
-  echo "[axctl] WARNING: AX_DATA_DIR=$DATA_DIR but schema buckets point at $HARDCODED_DATA_DIR" >&2
-  echo "[axctl] WARNING: edit packages/schema/src/schema.surql DEFINE BUCKET BACKEND paths to match, or unset AX_DATA_DIR" >&2
-fi
+BUCKETS_DIR="$DATA_DIR/buckets"
+RENDERED="$(mktemp -t ax-schema.XXXXXX.surql)"
+trap 'rm -f "$RENDERED"' EXIT
+sed -E "s|BACKEND \"file:[^\"]*/buckets/([a-zA-Z0-9_]+)\"|BACKEND \"file:$BUCKETS_DIR/\1\"|" \
+  "$SCHEMA" > "$RENDERED"
 
-surreal import \
+"$SURREAL_BIN" import \
   --endpoint "http://127.0.0.1:$PORT" \
   --user "$USER" --pass "$PASS" \
   --ns "$NS" --db "$DB" \
-  "$SCHEMA"
-echo "[axctl] schema applied to $NS/$DB"
+  "$RENDERED"
+echo "[axctl] schema applied to $NS/$DB (buckets at $BUCKETS_DIR)"

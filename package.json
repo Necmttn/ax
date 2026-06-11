@@ -49,6 +49,7 @@
     "check:cli-reference": "bun scripts/check-cli-reference.ts",
     "check:release-announcements": "bun scripts/check-release-announcements.ts",
     "check:no-node-fs": "bun scripts/check-no-node-fs.ts",
+    "check:record-select": "bun scripts/check-record-select.ts",
     "check:table-coverage": "bun scripts/check-table-coverage.ts",
     "dashboard:dev": "vite --config apps/axctl/src/dashboard/web/vite.config.ts",
     "dashboard:build": "vite build --config apps/axctl/src/dashboard/web/vite.config.ts",

@@ -8,7 +8,11 @@
       "types": "./src/types.ts",
       "import": "./src/types.ts"
     },
-    "./schema.surql": "./src/schema.surql"
+    "./schema.surql": "./src/schema.surql",
+    "./render": {
+      "types": "./src/render.ts",
+      "import": "./src/render.ts"
+    }
   },
   "scripts": {
     "typecheck": "tsc --noEmit"

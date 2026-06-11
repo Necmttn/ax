@@ -39,6 +39,7 @@ import { safeKeyPart } from "@ax/lib/shared/derive-keys";
 import { clampPagination, type PaginationConfig } from "@ax/lib/shared/pagination";
 import { toBareSessionId, toSessionRid } from "@ax/lib/shared/session-id";
 import { recordRef } from "@ax/lib/shared/surql";
+import { refListSource } from "@ax/lib/shared/record-select";
 
 const INSPECT_TURNS_PAGINATION: PaginationConfig = { defaultLimit: 2000, maxLimit: 2000 };
 
@@ -660,7 +661,9 @@ const resolveTurnTokenUsageForSourceRefs = (
     const refs = sourceRefs.map((key) => recordRef("turn_token_usage", key));
     if (refs.length === 0) return Effect.succeed(new Map<number, TurnTokenUsageDetail>());
     return queryMany<TurnTokenUsageRow, TurnTokenUsageDetail>(
-        TURN_TOKEN_USAGE_FOR_REFS_SQL.split("$refs").join(`[${refs.join(", ")}]`),
+        // Materialized record-list source - bare `FROM [refs]` throws on
+        // SurrealDB 3.0.x (see @ax/lib/shared/record-select, issue #251).
+        TURN_TOKEN_USAGE_FOR_REFS_SQL.split("$refs").join(refListSource(refs)),
         mapTurnTokenUsageRow,
         "session-inspect resolveTurnTokenUsageForSourceRefs",
     ).pipe(
@@ -687,11 +690,16 @@ const resolveGraphTurnWindow = (
 ): Effect.Effect<ReadonlyArray<GraphTurnRow>, never, SurrealClient> => {
     const turnRefs = turnSourceRefsForWindow(sessionId, turnOffset, turnLimit);
     if (turnRefs.length === 0) return Effect.succeed([]);
-    const from = turnRefs.map((key) => recordRef("turn", key)).join(", ");
+    // pick: turn rows carry full message text in several fields; materialize
+    // only what the projection + WHERE touch (text itself is selected).
+    const from = refListSource(
+        turnRefs.map((key) => recordRef("turn", key)),
+        ["seq", "role", "ts", "text", "has_tool_use"],
+    );
     return queryMany<GraphTurnRow, GraphTurnRow>(
         `
             SELECT seq, role, type::string(ts) AS ts, text
-            FROM [${from}]
+            FROM ${from}
             WHERE text IS NOT NONE OR has_tool_use = true
             ORDER BY seq ASC;
         `,
