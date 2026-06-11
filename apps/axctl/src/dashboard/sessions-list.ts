@@ -64,6 +64,45 @@ const safeLiteral = (value: string): string => {
  */
 const formatRecordIdList = (ids: ReadonlyArray<string>): string => ids.join(", ");
 
+/** ended_at-null sessions count as live only when the health derive row was
+ *  written recently - the watcher re-ingests live transcripts within ~1 min,
+ *  so a stale ts means the session is dead, just never closed. */
+const LIVE_HEALTH_TS_WINDOW_MS = 10 * 60_000;
+
+interface HealthRow {
+    readonly session: string;
+    readonly turns: number | null;
+    readonly tool_errors: number | null;
+    readonly user_corrections: number | null;
+    readonly context_pressure: string | null;
+    readonly ts: string | null;
+}
+interface UsageRow {
+    readonly session: string;
+    readonly estimated_cost_usd: number | null;
+    readonly estimated_tokens: number | null;
+    readonly cache_read_input_tokens: number | null;
+    readonly burn_buckets: string | null;
+}
+interface MetricsRow {
+    readonly session: string;
+    readonly produced_commits: number | null;
+    readonly reverted_commits: number | null;
+    readonly lines_added: number | null;
+    readonly lines_removed: number | null;
+}
+
+const parseBurnBuckets = (raw: string | null): number[] | null => {
+    if (!raw) return null;
+    try {
+        const parsed: unknown = JSON.parse(raw);
+        if (!Array.isArray(parsed)) return null;
+        return parsed.map((v) => (typeof v === "number" && Number.isFinite(v) ? v : 0));
+    } catch {
+        return null;
+    }
+};
+
 export const fetchSessionsList = (opts: SessionsListOpts = {}): Effect.Effect<SessionListResponse, DbError, SurrealClient> =>
     Effect.gen(function* () {
         const db = yield* SurrealClient;
@@ -128,11 +167,11 @@ export const fetchSessionsList = (opts: SessionsListOpts = {}): Effect.Effect<Se
                     started_at: r.started_at,
                     ended_at: r.ended_at,
                     has_raw_file: !!r.has_raw_file,
-                    // turn_count intentionally NOT joined here: the cross-
-                    // session turn table is huge and a batched IN-list count
-                    // still takes ~8 s at the 200-row scale we want. Surface
-                    // 0 in the wire format; per-session detail view fetches
-                    // it on demand.
+                    // turn_count intentionally NOT counted from `turn` here:
+                    // the cross-session turn table is huge and a batched
+                    // IN-list count still takes ~8 s at the 200-row scale we
+                    // want. Filled below from session_health.turns (0 when no
+                    // health row exists).
                     turn_count: 0,
                     parent_session: null,
                     // Filled in below after the spawned-counts query.
@@ -167,11 +206,62 @@ export const fetchSessionsList = (opts: SessionsListOpts = {}): Effect.Effect<Se
                 childCountByRawId.set(r.parent, Number(r.c) || 0);
             }
         }
-        const sessions: SessionListRow[] = paged.items.map((s) => ({
-            ...s,
-            direct_children_count:
-                childCountByRawId.get(rawIdByBare.get(s.id) ?? "") ?? 0,
-        }));
+        // Enrichment: one multi-statement round-trip against the three
+        // per-session aggregate tables. All keyed `session IN [...]` on
+        // UNIQUE session indexes - no turn scans, no graph derefs (the two
+        // documented hang classes for this surface).
+        const healthBySession = new Map<string, HealthRow>();
+        const usageBySession = new Map<string, UsageRow>();
+        const metricsBySession = new Map<string, MetricsRow>();
+        if (rawIds.length > 0) {
+            const inList = formatRecordIdList(rawIds);
+            const [health, usage, metrics] = yield* db.query<[
+                HealthRow[],
+                UsageRow[],
+                MetricsRow[],
+            ]>(`
+                SELECT <string>session AS session, turns, tool_errors,
+                       user_corrections, context_pressure, <string>ts AS ts
+                FROM session_health WHERE session IN [${inList}];
+                SELECT <string>session AS session, estimated_cost_usd,
+                       estimated_tokens, cache_read_input_tokens, burn_buckets
+                FROM session_token_usage WHERE session IN [${inList}];
+                SELECT <string>session AS session, produced_commits,
+                       reverted_commits, lines_added, lines_removed
+                FROM session_metrics WHERE session IN [${inList}];
+            `);
+            for (const h of health) healthBySession.set(h.session, h);
+            for (const u of usage) usageBySession.set(u.session, u);
+            for (const m of metrics) metricsBySession.set(m.session, m);
+        }
+
+        const now = Date.now();
+        const sessions: SessionListRow[] = paged.items.map((s) => {
+            const rawId = rawIdByBare.get(s.id) ?? "";
+            const health = healthBySession.get(rawId);
+            const usage = usageBySession.get(rawId);
+            const metrics = metricsBySession.get(rawId);
+            const friction = health
+                ? (Number(health.user_corrections) || 0) + (Number(health.tool_errors) || 0)
+                : null;
+            const healthTs = health?.ts ? new Date(health.ts).getTime() : Number.NaN;
+            return {
+                ...s,
+                direct_children_count: childCountByRawId.get(rawId) ?? 0,
+                turn_count: health?.turns ?? 0,
+                cost_usd: usage?.estimated_cost_usd ?? null,
+                burn_buckets: parseBurnBuckets(usage?.burn_buckets ?? null),
+                friction,
+                signal: friction === null ? null : friction === 0 ? "clean" : "friction",
+                produced_commits: metrics?.produced_commits ?? null,
+                reverted_commits: metrics?.reverted_commits ?? null,
+                lines_added: metrics?.lines_added ?? null,
+                lines_removed: metrics?.lines_removed ?? null,
+                is_live: s.ended_at === null
+                    && Number.isFinite(healthTs)
+                    && now - healthTs < LIVE_HEALTH_TS_WINDOW_MS,
+            };
+        });
 
         // why: same defence as recall.ts - the count query can legitimately
         // return 0 (empty row, GROUP ALL on empty filter set, or a race with
