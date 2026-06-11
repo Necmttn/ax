@@ -38,10 +38,12 @@ import {
 import type { RuntimeManifest } from "./manifest.ts";
 import {
     boolArg,
+    fail,
     intArg,
     jsonFlag,
     optionValue,
     optionalSince,
+    parseCsvFlag,
     requireOptionalPositiveInt,
     stringArg,
 } from "./shared.ts";
@@ -156,16 +158,11 @@ export const resolveIngestStages = (
 ): ReadonlyArray<StageDef<BaseStageStats, unknown>> => {
     const stagesArg = args.find((a) => a.startsWith("--stages="));
     if (stagesArg) {
-        const raw = stagesArg
-            .slice("--stages=".length)
-            .split(",")
-            .map((s) => s.trim())
-            .filter((s) => s.length > 0);
+        const raw = parseCsvFlag(stagesArg.slice("--stages=".length));
         try {
             return selectByKeys(registry, raw);
         } catch (err) {
-            process.stderr.write(`axctl ingest: ${(err as Error).message}\n`);
-            process.exit(2);
+            fail(`axctl ingest: ${(err as Error).message}`);
         }
     }
     if (args.includes("--derive-only")) return selectByTag(registry, "derive");
@@ -536,17 +533,13 @@ export const ingestCommand = Command.make(
         }
         if (insightsOnly) {
             if (reset) {
-                console.error("axctl ingest: --reset cannot be combined with --insights-only");
-                process.exit(2);
+                fail("axctl ingest: --reset cannot be combined with --insights-only");
             }
             const conflicts = insightsOnlyConflicts({
                 hasSince: Option.isSome(since),
             });
             if (conflicts.length > 0) {
-                console.error(
-                    `axctl ingest: --insights-only is mutually exclusive with ${conflicts.join(", ")}`,
-                );
-                process.exit(2);
+                fail(`axctl ingest: --insights-only is mutually exclusive with ${conflicts.join(", ")}`);
             }
             return cmdIngestInsights({ progress, verbose });
         }

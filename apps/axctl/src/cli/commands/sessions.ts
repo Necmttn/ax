@@ -43,6 +43,7 @@ import { renderCompareTable, renderCompareJson } from "../session-compare-format
 import { renderSessionMarkdown, renderSessionJson } from "../session-show-format.ts";
 import type { RuntimeManifest } from "./manifest.ts";
 import {
+    fail,
     jsonFlag,
     optionalSince,
     optionValue,
@@ -243,16 +244,10 @@ const cmdSessionsAround = (input: {
         } else if (/^\d{4}-\d{2}-\d{2}[T ]/.test(positional)) {
             date = new Date(positional);
         } else {
-            console.error(
-                `axctl sessions around: invalid date "${positional}" (expected YYYY-MM-DD or ISO8601)`,
-            );
-            process.exit(2);
+            fail(`axctl sessions around: invalid date "${positional}" (expected YYYY-MM-DD or ISO8601)`);
         }
         if (isNaN(date.getTime())) {
-            console.error(
-                `axctl sessions around: invalid date "${positional}" (expected YYYY-MM-DD or ISO8601)`,
-            );
-            process.exit(2);
+            fail(`axctl sessions around: invalid date "${positional}" (expected YYYY-MM-DD or ISO8601)`);
         }
 
         const days = requirePositiveInt("sessions around", "days", input.days);
@@ -309,17 +304,14 @@ const cmdSessionsNear = (input: {
         const window = yield* findCommitWindow(repoRoot, sha).pipe(
             Effect.catchTag("ProcessError", () =>
                 Effect.sync(() => {
-                    console.error(`axctl sessions near: unknown sha ${sha}`);
-                    process.exit(2);
+                    fail(`axctl sessions near: unknown sha ${sha}`);
                     return { kind: "not_found" as const };
                 }),
             ),
         );
 
         if (window.kind === "not_found") {
-            console.error(`axctl sessions near: unknown sha ${sha}`);
-            process.exit(2);
-            return;
+            fail(`axctl sessions near: unknown sha ${sha}`);
         }
 
         let from: Date;
@@ -624,18 +616,14 @@ const cmdSessionsMetrics = (input: {
     readonly minCost: number | null;
 }) =>
     Effect.gen(function* () {
-        const fail = (msg: string): never => {
-            process.stderr.write(`axctl sessions metrics: ${msg}\n`);
-            process.exit(2);
-        };
         // --group-by values are validated by Flag.choice (GROUP_BY_KEYS).
         const groupBy = input.groupBy;
         if (groupBy !== null && input.skill !== null) {
-            fail("--group-by and --skill are exclusive (--skill is its own with/without comparison).");
+            fail("axctl sessions metrics: --group-by and --skill are exclusive (--skill is its own with/without comparison).");
         }
         const aggregateMode = groupBy !== null || input.skill !== null;
         if (!aggregateMode && (input.source !== null || input.minCost !== null)) {
-            fail("--source/--min-cost filter the aggregate scan; combine them with --group-by or --skill.");
+            fail("axctl sessions metrics: --source/--min-cost filter the aggregate scan; combine them with --group-by or --skill.");
         }
         let project = input.project;
         if (input.here) {

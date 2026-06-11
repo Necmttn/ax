@@ -16,7 +16,7 @@ import { showExperiment, formatShow } from "../../improve/show.ts";
 import { buildImproveProposalsNext } from "../../nav/next-links.ts";
 import { printNextLinks } from "../next-format.ts";
 import type { RuntimeManifest } from "./manifest.ts";
-import { jsonFlag, optionValue, parseFileHints, positiveLimit, requireOptionalPositiveInt, requirePositiveInt } from "./shared.ts";
+import { fail, jsonFlag, optionValue, parseFileHints, positiveLimit, requireOptionalPositiveInt, requirePositiveInt } from "./shared.ts";
 
 /**
  * axctl improve - surface the experiment-loop proposal shortlist.
@@ -80,8 +80,7 @@ const cmdImproveShow = (input: {
             return;
         }
         if (result === null) {
-            process.stderr.write(`no proposal matched ${positional}\n`);
-            process.exit(2);
+            fail(`no proposal matched ${positional}`);
         }
         console.log(formatShow(result));
     });
@@ -274,8 +273,7 @@ const improveAcceptCommand = Command.make(
             const result = yield* acceptProposal({ sigOrId: id, force, autoScaffold });
 
             if (result.status === "not_found") {
-                console.error(result.message ?? `no proposal matched ${id}`);
-                process.exit(2);
+                fail(result.message ?? `no proposal matched ${id}`);
             }
             if (result.status === "wrong_status") {
                 console.error(result.message ?? "proposal already processed");
@@ -289,16 +287,13 @@ const improveAcceptCommand = Command.make(
                 process.exit(2);
             }
             if (result.status === "unsupported_form") {
-                console.error(result.message ?? "unsupported form");
-                process.exit(2);
+                fail(result.message ?? "unsupported form");
             }
             if (result.status === "missing_payload") {
-                console.error(result.message ?? "missing payload");
-                process.exit(2);
+                fail(result.message ?? "missing payload");
             }
             if (result.status === "scaffold_exists") {
-                console.error(result.message ?? "scaffold already exists (use --force to overwrite)");
-                process.exit(2);
+                fail(result.message ?? "scaffold already exists (use --force to overwrite)");
             }
 
             // status === "ok"
@@ -367,8 +362,7 @@ const cmdImproveReject = (input: {
         const reason = input.reason ?? "not_worth_packaging";
         const result = yield* rejectProposal({ sigOrId: positional, reason });
         if (result.status !== "ok") {
-            console.error(result.message ?? `failed to reject proposal ${positional}`);
-            process.exit(2);
+            fail(result.message ?? `failed to reject proposal ${positional}`);
         }
         console.log(`proposal status -> rejected (reason: ${result.reason})`);
     });
@@ -461,19 +455,16 @@ const cmdImproveVerdict = (input: {
         );
         const row = (sel?.[0] ?? [])[0];
         if (!row) {
-            console.error(`no experiment matched ${positional} (check \`axctl improve list --status=accepted\`)`);
-            process.exit(2);
+            fail(`no experiment matched ${positional} (check \`axctl improve list --status=accepted\`)`);
         }
         const checkpoints = (row.checkpoints as Array<Record<string, unknown>> | undefined) ?? [];
 
         if (setValue !== undefined) {
             if (!ALLOWED_VERDICTS.has(setValue)) {
-                console.error(`--set must be one of: ${[...ALLOWED_VERDICTS].sort().join(", ")}`);
-                process.exit(2);
+                fail(`--set must be one of: ${[...ALLOWED_VERDICTS].sort().join(", ")}`);
             }
             if (row.locked_verdict) {
-                console.error(`experiment already locked: ${String(row.locked_verdict)}`);
-                process.exit(2);
+                fail(`experiment already locked: ${String(row.locked_verdict)}`);
             }
             const experimentId = String(row.id ?? "");
             const latestCp = checkpoints[0];
@@ -543,11 +534,12 @@ const improveVerdictCommand = Command.make(
 const cmdImproveReset = (input: { readonly yes: boolean }) =>
     Effect.gen(function* () {
         if (!input.yes) {
-            console.error("axctl improve reset: refusing to wipe without --yes");
-            console.error("  drops: checkpoint, opportunity, experiment, cites_evidence,");
-            console.error("         skill_proposal, subagent_proposal, hook_proposal,");
-            console.error("         guidance_proposal, automation_proposal, proposal");
-            process.exit(2);
+            fail(
+                "axctl improve reset: refusing to wipe without --yes\n" +
+                "  drops: checkpoint, opportunity, experiment, cites_evidence,\n" +
+                "         skill_proposal, subagent_proposal, hook_proposal,\n" +
+                "         guidance_proposal, automation_proposal, proposal",
+            );
         }
         const db = yield* SurrealClient;
         // Dependency order: checkpoint -> opportunity -> experiment ->

@@ -31,6 +31,7 @@ import {
     detectRemovedIngestFlag,
 } from "./commands/ingest.ts";
 import type { RuntimeManifest } from "./commands/manifest.ts";
+import { parseCsvFlag } from "./commands/shared.ts";
 import {
     versionCommand,
     updateCommand,
@@ -146,7 +147,7 @@ const withDb = (args: ReadonlyArray<string>): CliProgram =>
 const resolveProgressStages = (args: ReadonlyArray<string>): ProgressStage[] => {
     const stagesArg = args.find((a) => a.startsWith("--stages="));
     const keys = stagesArg
-        ? stagesArg.slice("--stages=".length).split(",").map((s) => s.trim()).filter(Boolean)
+        ? parseCsvFlag(stagesArg.slice("--stages=".length))
         : args.includes("--derive-only")
             ? ALL_STAGES.filter((s) => s.meta.tags.includes("derive")).map((s) => s.meta.key)
             : ALL_STAGES.map((s) => s.meta.key);
