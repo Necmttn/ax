@@ -637,18 +637,21 @@ export const classifiersPackageOperationsNeedsDb = (args: ReadonlyArray<string>)
 // against classifiersCommand's registered subcommands in both directions.
 export const classifiersRuntime: RuntimeManifest = {
     classifiers: {
-        kind: "db-conditional",
-        fallback: "db",
-        subcommands: {
-            list: "none",
-            eval: "none",
-            explain: "db",
-            graph: "db",
-            lifecycle: "db",
-            "package-operations": (args) =>
-                classifiersPackageOperationsNeedsDb(args) ? "db" : "none",
-            "workflow-candidates": "db",
-            "label-mining": "db",
+        hidden: true,
+        runtime: {
+            kind: "db-conditional",
+            fallback: "db",
+            subcommands: {
+                list: "none",
+                eval: "none",
+                explain: "db",
+                graph: "db",
+                lifecycle: "db",
+                "package-operations": (args) =>
+                    classifiersPackageOperationsNeedsDb(args) ? "db" : "none",
+                "workflow-candidates": "db",
+                "label-mining": "db",
+            },
         },
     },
 };

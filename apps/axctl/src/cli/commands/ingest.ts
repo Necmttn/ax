@@ -628,7 +628,9 @@ export const deriveCommand = Command.make("derive").pipe(
 
 export const ingestRuntime: RuntimeManifest = {
     ingest: "ingest",
-    derive: "db",
-    "derive-signals": "db",
-    "derive-intents": "db",
+    // Hidden maintenance verbs. `derive-signals`/`derive-intents` MUST stay
+    // callable - the installed LaunchAgent plists invoke them by name.
+    derive: { runtime: "db", hidden: true },
+    "derive-signals": { runtime: "db", hidden: true },
+    "derive-intents": { runtime: "db", hidden: true },
 };

@@ -359,7 +359,7 @@ export const pricingCommand = Command.make(
 ).pipe(Command.withDescription("Inspect imported model pricing rows"));
 
 export const costsRuntime: RuntimeManifest = {
-    costs: "db",
-    loc: "db",
-    pricing: "db",
+    costs: { runtime: "db", hidden: true },
+    loc: { runtime: "db", hidden: true },
+    pricing: { runtime: "db", hidden: true },
 };
