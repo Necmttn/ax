@@ -103,6 +103,16 @@ export function imageSrc(absolutePath: string): string {
     return endpoint ? endpoint + path : path;
 }
 
+/** Fetch error that carries the HTTP status so callers can branch on it
+ *  (e.g. 503 from POST /api/ingest = Durable Streams sidecar unavailable on
+ *  the compiled binary → engage the polling fallback). */
+export class ApiError extends Error {
+    constructor(message: string, readonly status: number) {
+        super(message);
+        this.name = "ApiError";
+    }
+}
+
 async function jsonFetch<T>(input: RequestInfo, init?: RequestInit): Promise<T> {
     if (STUDIO_MOCK) {
         const endpoint = readEndpoint();
@@ -126,7 +136,7 @@ async function jsonFetch<T>(input: RequestInfo, init?: RequestInit): Promise<T> 
         } catch {
             /* fall through */
         }
-        throw new Error(detail);
+        throw new ApiError(detail, res.status);
     }
     return (await res.json()) as T;
 }
@@ -143,6 +153,10 @@ export interface DaemonVersion {
     readonly version: string;
     readonly api_version: number;
     readonly capabilities: ReadonlyArray<string>;
+    /** Whether the daemon's Durable Streams sidecar is hosting live ingest.
+     *  `false` on the compiled binary (POST /api/ingest would 503) → the Live
+     *  tab polls counts instead. Optional: older daemons omit it. */
+    readonly live_ingest?: boolean;
 }
 
 // --- session timeline (highlight zoom) -------------------------------------
