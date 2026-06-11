@@ -126,13 +126,15 @@ export const ingestShareTranscript = (
             work,
         );
 
-        // undefined = timed out; the lock is deliberately left as a cooldown
-        // (see ingest-lock.ts header).
-        const timedOut: ShareIngestOutcome = {
-            kind: "failed",
-            message: `ingest exceeded ${timeoutSeconds}s and was cancelled; retry shortly`,
-        };
-        return outcome ?? timedOut;
+        // On timeout the lock is deliberately left as a cooldown (see
+        // ingest-lock.ts header); completed/busy both carry a ShareIngestOutcome.
+        if (outcome._tag === "timeout") {
+            return {
+                kind: "failed",
+                message: `ingest exceeded ${timeoutSeconds}s and was cancelled; retry shortly`,
+            } satisfies ShareIngestOutcome;
+        }
+        return outcome.value;
     }).pipe(
         Effect.catch((error) =>
             Effect.succeed<ShareIngestOutcome>({
