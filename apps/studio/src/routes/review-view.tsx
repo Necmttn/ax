@@ -2,12 +2,14 @@ import { useMemo, useState, type CSSProperties } from "react";
 import { getSingularPatch } from "@pierre/diffs";
 import { FileDiff } from "@pierre/diffs/react";
 import type { SessionInspectPayload } from "@ax/lib/shared/dashboard-types";
+import type { SessionTimelinePayload } from "../api.ts";
 import { ToolRowItem } from "./tool-row.tsx";
 import { compactChars, FilesTouchedTree } from "./files-touched-panel.tsx";
 import {
     buildFilesTouched,
     buildFileStory,
     buildHunkPatch,
+    buildTouchContexts,
     type FileStoryEvent,
     type FileTouch,
 } from "./files-touched.ts";
@@ -107,8 +109,11 @@ function HunkCard({ event, path, onOpenTranscript, onFocusTurn }: {
  * applied, in order) in the center, and the transcript turns that touched
  * that file on the right - so a reviewer can read WHY next to WHAT.
  */
-export function ReviewView({ data, onOpenTranscript }: {
+export function ReviewView({ data, timeline, onOpenTranscript }: {
     readonly data: SessionInspectPayload;
+    /** Share timeline (when present) - its segments label each touching turn
+     *  with the phase the agent was in. */
+    readonly timeline?: SessionTimelinePayload | null;
     /** Switch to the transcript view anchored at a turn. */
     readonly onOpenTranscript: (seq: number) => void;
 }) {
@@ -124,6 +129,24 @@ export function ReviewView({ data, onOpenTranscript }: {
         () => data.turns.filter((t) => touchingSeqs.has(t.seq)),
         [data.turns, touchingSeqs],
     );
+    const contexts = useMemo(
+        () => buildTouchContexts(data.turns, [...touchingSeqs]),
+        [data.turns, touchingSeqs],
+    );
+    // seq → enclosing timeline segment title ("the phase the agent was in").
+    const segmentFor = useMemo(() => {
+        const segments = (timeline?.segments ?? [])
+            .filter((s) => s.start_seq != null)
+            .sort((a, b) => (a.start_seq ?? 0) - (b.start_seq ?? 0));
+        return (seq: number): string | null => {
+            let title: string | null = null;
+            for (const s of segments) {
+                if ((s.start_seq ?? 0) > seq) break;
+                title = s.title.replace(/^committed\s+\S+\s*·\s*/, "").trim() || s.title;
+            }
+            return title;
+        };
+    }, [timeline]);
     const writes = story.filter((e) => e.op === "write");
 
     const focusTurn = (seq: number) => {
@@ -206,8 +229,77 @@ export function ReviewView({ data, onOpenTranscript }: {
                         return [input.file_path, input.path, input.notebook_path].includes(selected?.absPath);
                     });
                     const text = (turn.raw_text ?? "").trim();
+                    const ctx = contexts.get(turn.seq);
+                    const phase = segmentFor(turn.seq);
+                    const chips = [
+                        phase ? { label: phase, title: "session phase (timeline segment)" } : null,
+                        ctx?.activeTodo ? { label: `☐ ${ctx.activeTodo}`, title: "active plan item (latest TodoWrite)" } : null,
+                    ].filter((c): c is { label: string; title: string } => c != null);
                     return (
                         <div key={turn.seq} id={`rev-t-${turn.seq}`} style={{ padding: "8px 10px", borderBottom: "1px solid var(--line)" }}>
+                            {chips.length > 0 ? (
+                                <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginBottom: 4 }}>
+                                    {chips.map((chip) => (
+                                        <span
+                                            key={chip.label}
+                                            title={chip.title}
+                                            style={{
+                                                font: `10px/1.6 ${mono}`,
+                                                color: "var(--muted)",
+                                                background: "var(--panel)",
+                                                border: "1px solid var(--line)",
+                                                borderRadius: 3,
+                                                padding: "0 6px",
+                                                maxWidth: "100%",
+                                                overflow: "hidden",
+                                                textOverflow: "ellipsis",
+                                                whiteSpace: "nowrap",
+                                            }}
+                                        >
+                                            {chip.label}
+                                        </span>
+                                    ))}
+                                </div>
+                            ) : null}
+                            {ctx?.userDirection ? (
+                                <div style={{
+                                    margin: "0 0 6px",
+                                    padding: "4px 8px",
+                                    borderLeft: "3px solid var(--blue)",
+                                    background: "color-mix(in srgb, var(--blue) 6%, var(--panel))",
+                                    borderRadius: 3,
+                                    font: `11.5px/1.5 ${mono}`,
+                                    color: "var(--ink)",
+                                    whiteSpace: "pre-wrap",
+                                    wordBreak: "break-word",
+                                    maxHeight: 120,
+                                    overflow: "auto",
+                                }}>
+                                    <button
+                                        type="button"
+                                        onClick={() => onOpenTranscript(ctx.userDirection!.seq)}
+                                        style={{ background: "none", border: "none", padding: 0, cursor: "pointer", font: `700 10px/1.6 ${mono}`, color: "var(--blue)", display: "block" }}
+                                    >
+                                        user · turn {ctx.userDirection.seq} →
+                                    </button>
+                                    {ctx.userDirection.text.length > 600 ? `${ctx.userDirection.text.slice(0, 600)}…` : ctx.userDirection.text}
+                                </div>
+                            ) : null}
+                            {ctx?.reasoning && ctx.reasoning.seq !== turn.seq ? (
+                                <div style={{
+                                    margin: "0 0 6px",
+                                    padding: "4px 8px",
+                                    borderLeft: "3px solid var(--line)",
+                                    font: `11.5px/1.5 ${mono}`,
+                                    color: "var(--muted)",
+                                    whiteSpace: "pre-wrap",
+                                    wordBreak: "break-word",
+                                    maxHeight: 120,
+                                    overflow: "auto",
+                                }}>
+                                    {ctx.reasoning.text.length > 600 ? `${ctx.reasoning.text.slice(0, 600)}…` : ctx.reasoning.text}
+                                </div>
+                            ) : null}
                             <button
                                 type="button"
                                 onClick={() => onOpenTranscript(turn.seq)}

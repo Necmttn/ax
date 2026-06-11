@@ -175,6 +175,74 @@ export function buildFilesTouched(turns: ReadonlyArray<InspectTurnDto>): FilesTo
     };
 }
 
+// --- touch context (review view "why" pane) ---------------------------------
+
+/** The context that explains WHY a touching turn happened: the user direction
+ *  and assistant reasoning since the previous touch, and the plan item active
+ *  at that point. Phase (timeline segment) is the caller's join - segments
+ *  live in the share timeline payload, not the turns. */
+export interface TouchTurnContext {
+    readonly seq: number;
+    /** Nearest user_input turn since the previous touch - the instruction
+     *  driving this edit. null when no new direction arrived in between. */
+    readonly userDirection: { readonly seq: number; readonly text: string } | null;
+    /** Last assistant_text turn before this touch (since the previous one) -
+     *  the agent's stated reasoning going into the change. */
+    readonly reasoning: { readonly seq: number; readonly text: string } | null;
+    /** The in_progress item of the latest TodoWrite at or before this turn. */
+    readonly activeTodo: string | null;
+}
+
+function activeTodoOf(call: ToolCallDto): string | null {
+    if (call.name !== "TodoWrite" || !call.input || !Array.isArray(call.input.todos)) return null;
+    const todos = call.input.todos as ReadonlyArray<Record<string, unknown>>;
+    const active = todos.find((t) => t?.status === "in_progress") ?? todos.find((t) => t?.status === "pending");
+    const label = active?.activeForm ?? active?.content;
+    return typeof label === "string" && label.length > 0 ? label : null;
+}
+
+/**
+ * For each touching turn, walk the turns between it and the previous touch to
+ * recover the nearest user direction and assistant reasoning, plus the active
+ * todo from the latest TodoWrite anywhere before it. One linear pass.
+ */
+export function buildTouchContexts(
+    turns: ReadonlyArray<InspectTurnDto>,
+    touchSeqs: ReadonlyArray<number>,
+): Map<number, TouchTurnContext> {
+    const touches = new Set(touchSeqs);
+    const out = new Map<number, TouchTurnContext>();
+    let userDirection: TouchTurnContext["userDirection"] = null;
+    let reasoning: TouchTurnContext["reasoning"] = null;
+    let activeTodo: string | null = null;
+    for (const turn of turns) {
+        for (const call of turn.tool_calls ?? []) {
+            const todo = activeTodoOf(call);
+            if (todo != null) activeTodo = todo;
+        }
+        const text = (turn.raw_text ?? "").trim();
+        if (turn.semantic_role === "user_input" && text) {
+            userDirection = { seq: turn.seq, text };
+        } else if (turn.semantic_role === "assistant_text" && text) {
+            reasoning = { seq: turn.seq, text };
+        }
+        if (touches.has(turn.seq)) {
+            // The touching turn's own preamble text beats older reasoning.
+            const ownText = turn.role === "assistant" && text ? { seq: turn.seq, text } : null;
+            out.set(turn.seq, {
+                seq: turn.seq,
+                userDirection,
+                reasoning: ownText ?? reasoning,
+                activeTodo,
+            });
+            // Direction/reasoning are "since previous touch" - consume them.
+            userDirection = null;
+            reasoning = null;
+        }
+    }
+    return out;
+}
+
 // --- per-file change story (review view) ------------------------------------
 
 /** One touch of a file, in session order. Write-ops carry the hunk content;

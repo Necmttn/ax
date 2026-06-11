@@ -1528,6 +1528,7 @@ function MultiFileShareView(props: {
                     // Keyed by file for the same reason as InspectBody below.
                     key={`rev-${selectedFile}`}
                     data={data}
+                    timeline={fileQuery.data?.session_timeline ?? null}
                     onOpenTranscript={(seq) => {
                         // replaceState (no hashchange event) so the off-transcript
                         // hash listener doesn't double-fire; the keyed InspectBody

@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { InspectTurnDto, ToolCallDto } from "@ax/lib/shared/dashboard-types";
-import { buildFilesTouched, buildFileStory, buildHunkPatch, commonDirPrefix } from "./files-touched.ts";
+import { buildFilesTouched, buildFileStory, buildHunkPatch, buildTouchContexts, commonDirPrefix } from "./files-touched.ts";
 
 const toolCall = (over: Partial<ToolCallDto> = {}): ToolCallDto => ({
     seq: 0,
@@ -181,5 +181,67 @@ describe("buildHunkPatch", () => {
         expect(out).toContain("@@ -0,0 +1,2 @@");
         const deletions = out.split("\n").filter((l) => l.startsWith("-") && !l.startsWith("---"));
         expect(deletions).toHaveLength(0);
+    });
+});
+
+describe("buildTouchContexts", () => {
+    const textTurn = (seq: number, role: "user_input" | "assistant_text", text: string): InspectTurnDto => ({
+        seq,
+        role: role === "user_input" ? "user" : "assistant",
+        semantic_role: role,
+        ts: null,
+        char_count: text.length,
+        raw_text: text,
+        spans: [],
+        token_usage: null,
+    });
+
+    test("attaches nearest direction + reasoning since previous touch", () => {
+        const turns = [
+            textTurn(1, "user_input", "add the panel"),
+            textTurn(2, "assistant_text", "I'll build the tree first"),
+            turn(3, [edit("/r/a.ts")]),
+            textTurn(4, "user_input", "use diffstat instead"),
+            turn(5, [edit("/r/a.ts")]),
+        ];
+        const ctx = buildTouchContexts(turns, [3, 5]);
+        expect(ctx.get(3)).toMatchObject({
+            userDirection: { seq: 1, text: "add the panel" },
+            reasoning: { seq: 2, text: "I'll build the tree first" },
+        });
+        expect(ctx.get(5)?.userDirection).toMatchObject({ seq: 4, text: "use diffstat instead" });
+        // No new reasoning between touch 3 and 5.
+        expect(ctx.get(5)?.reasoning).toBeNull();
+    });
+
+    test("direction does not leak across touches when nothing new arrived", () => {
+        const turns = [
+            textTurn(1, "user_input", "do it"),
+            turn(2, [edit("/r/a.ts")]),
+            turn(4, [edit("/r/a.ts")]),
+        ];
+        const ctx = buildTouchContexts(turns, [2, 4]);
+        expect(ctx.get(2)?.userDirection?.seq).toBe(1);
+        expect(ctx.get(4)?.userDirection).toBeNull();
+    });
+
+    test("tracks active todo from the latest TodoWrite", () => {
+        const todoCall = toolCall({
+            name: "TodoWrite",
+            input: { todos: [{ content: "wire panel", status: "completed" }, { content: "swap diffs", activeForm: "Swapping to pierre diffs", status: "in_progress" }] },
+        });
+        const turns = [
+            turn(1, [todoCall]),
+            turn(3, [edit("/r/a.ts")]),
+        ];
+        const ctx = buildTouchContexts(turns, [3]);
+        expect(ctx.get(3)?.activeTodo).toBe("Swapping to pierre diffs");
+    });
+
+    test("touching turn's own preamble wins over older reasoning", () => {
+        const touch: InspectTurnDto = { ...turn(5, [edit("/r/a.ts")]), raw_text: "Now fix the import." };
+        const turns = [textTurn(2, "assistant_text", "older thought"), touch];
+        const ctx = buildTouchContexts(turns, [5]);
+        expect(ctx.get(5)?.reasoning).toMatchObject({ seq: 5, text: "Now fix the import." });
     });
 });
