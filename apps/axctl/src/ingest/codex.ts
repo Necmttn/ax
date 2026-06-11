@@ -45,6 +45,7 @@ import { safeKeyPart } from "@ax/lib/shared/derive-keys";
 import { tokenQualityLabels } from "./token-quality.ts";
 import { estimateCost } from "./model-pricing.ts";
 import { walkJsonlFilesStrict } from "./walk-jsonl.ts";
+import { makeFileFailureCollector } from "./file-isolation.ts";
 
 const DEFAULT_CODEX_RAW_MAX_BYTES = 5 * 1024 * 1024;
 const DEFAULT_CODEX_PROGRESS_EVERY = 10;
@@ -1406,6 +1407,8 @@ export interface CodexStats {
     planSnapshots: number;
     /** JSONL lines skipped at the decode boundary (unparseable / non-record). */
     malformedLines: number;
+    /** Files whose pipeline failed and was skipped (retried next run). */
+    failedFiles: number;
 }
 
 export const ingestCodex = Effect.fn("codex.ingest")(
@@ -1439,6 +1442,7 @@ export const ingestCodex = Effect.fn("codex.ingest")(
         let activeFiles = 0;
         const recordCount = () => turnCount + invCount + toolCallCount + planSnapshotCount;
 
+        const failures = makeFileFailureCollector({ source: "codex" });
         yield* Effect.forEach(files.map((file, index) => ({ file, index })), ({ file, index }) => Effect.gen(function* () {
             // Time-box (dry-run calibration): once the deadline passes, start no
             // new files; in-flight ones finish.
@@ -1446,51 +1450,217 @@ export const ingestCodex = Effect.fn("codex.ingest")(
                 return;
             }
             activeFiles += 1;
-            if (opts.onProgress && (index < 5 || index % 10 === 0)) {
-                yield* opts.onProgress({
-                    currentFile: index + 1,
-                    totalFiles: files.length,
-                    currentFileBytes: file.sizeBytes,
-                    totalBytes,
-                    files: fileCount,
-                    bytes: byteCount,
-                    records: recordCount(),
-                    lines: 0,
-                    activeFiles,
-                    phase: 1,
-                    sessions: sessionCount,
-                    turns: turnCount,
-                    invocations: invCount,
-                    toolCalls: toolCallCount,
-                    planSnapshots: planSnapshotCount,
-                });
-            }
-            const filePath = file.path;
-            const fileStartedAt = Date.now();
-            const sizeBytes = file.sizeBytes;
-            const snapshotRaw = shouldSnapshotCodexRaw(sizeBytes, rawMaxBytes);
-            if (!snapshotRaw) {
-                yield* Effect.logDebug("codex raw snapshot skipped", {
-                    file: fileCount + 1,
-                    totalFiles: files.length,
-                    size: formatBytes(sizeBytes),
-                    max: formatBytes(rawMaxBytes),
-                    path: filePath,
-                });
-            }
+            // Per-file failure isolation: a bad transcript (or a rejected
+            // statement) skips THIS file - it is retried next run - instead of
+            // aborting the whole stage (see file-isolation.ts).
+            yield* failures.isolate(file.path, Effect.gen(function* () {
+                if (opts.onProgress && (index < 5 || index % 10 === 0)) {
+                    yield* opts.onProgress({
+                        currentFile: index + 1,
+                        totalFiles: files.length,
+                        currentFileBytes: file.sizeBytes,
+                        totalBytes,
+                        files: fileCount,
+                        bytes: byteCount,
+                        records: recordCount(),
+                        lines: 0,
+                        activeFiles,
+                        phase: 1,
+                        sessions: sessionCount,
+                        turns: turnCount,
+                        invocations: invCount,
+                        toolCalls: toolCallCount,
+                        planSnapshots: planSnapshotCount,
+                    });
+                }
+                const filePath = file.path;
+                const fileStartedAt = Date.now();
+                const sizeBytes = file.sizeBytes;
+                const snapshotRaw = shouldSnapshotCodexRaw(sizeBytes, rawMaxBytes);
+                if (!snapshotRaw) {
+                    yield* Effect.logDebug("codex raw snapshot skipped", {
+                        file: fileCount + 1,
+                        totalFiles: files.length,
+                        size: formatBytes(sizeBytes),
+                        max: formatBytes(rawMaxBytes),
+                        path: filePath,
+                    });
+                }
 
-            const extractor = createCodexExtractor(filePath, payloadMaxBytes);
-            let lineCount = 0;
-            let currentSession: CodexSession | null = null;
-            let sessionUpserted = false;
-            let fileTurns = 0;
-            let fileInvocations = 0;
-            let fileToolCalls = 0;
-            let filePlanSnapshots = 0;
+                const extractor = createCodexExtractor(filePath, payloadMaxBytes);
+                let lineCount = 0;
+                let currentSession: CodexSession | null = null;
+                let sessionUpserted = false;
+                let fileTurns = 0;
+                let fileInvocations = 0;
+                let fileToolCalls = 0;
+                let filePlanSnapshots = 0;
 
-            const emitProgress = (phase: number) =>
-                opts.onProgress
-                    ? opts.onProgress({
+                const emitProgress = (phase: number) =>
+                    opts.onProgress
+                        ? opts.onProgress({
+                            currentFile: index + 1,
+                            totalFiles: files.length,
+                            currentFileBytes: sizeBytes,
+                            totalBytes,
+                            files: fileCount,
+                            bytes: byteCount,
+                            records: recordCount(),
+                            lines: lineCount,
+                            fileTurns,
+                            fileToolCalls,
+                            activeFiles,
+                            phase,
+                            sessions: sessionCount + (sessionUpserted ? 1 : 0),
+                            turns: turnCount,
+                            invocations: invCount,
+                            toolCalls: toolCallCount,
+                            planSnapshots: planSnapshotCount,
+                        })
+                        : Effect.void;
+
+                const upsertSession = (
+                    session: CodexSession,
+                    rawPointer: string | null,
+                ) =>
+                    db.upsert(new RecordId("session", session.id), {
+                        project: session.cwd ?? undefined,
+                        cwd: session.cwd ?? undefined,
+                        model: concreteCodexModel(session) ?? undefined,
+                        source: "codex",
+                        started_at: new Date(session.started_at),
+                        ended_at: new Date(session.ended_at),
+                        raw_file: rawPointer ?? undefined,
+                    });
+
+                let providerEventsCleared = false;
+                const writeBatch = (batch: MutableCodexExtract) =>
+                    Effect.gen(function* () {
+                        if (!batch.session) return;
+                        currentSession = batch.session;
+                        if (!sessionUpserted) {
+                            yield* upsertSession(batch.session, null);
+                            sessionUpserted = true;
+                        }
+                        // Clear pre-existing agent_event rows once, on the first
+                        // batch for this session. Subsequent streaming batches must
+                        // NOT re-clear or they would wipe this ingest's own events.
+                        const clearExisting = !providerEventsCleared;
+                        providerEventsCleared = true;
+                        yield* queryCodexStatements(buildCodexBatchStatements(batch, payloadMaxBytes, clearExisting));
+                        turnCount += batch.turns.length;
+                        fileTurns += batch.turns.length;
+                        toolCallCount += batch.toolCalls.length;
+                        fileToolCalls += batch.toolCalls.length;
+                        invCount += batch.invocations.length;
+                        fileInvocations += batch.invocations.length;
+                        planSnapshotCount += batch.planSnapshots.length;
+                        filePlanSnapshots += batch.planSnapshots.length;
+                    });
+
+                // Stream the file the SAME way the test seams do, via the shared
+                // `streamCodexFile` body (NOT a node fh): `FileSystem.stream` so a
+                // session that VANISHED between discovery and here (e.g. a cleaned-up
+                // session dir) surfaces as a typed NotFound `PlatformError`. The
+                // flush/progress cadence is threaded INTO the per-line Effect (via
+                // `onFlush`/`onProgress`) so a 30 MB session still drains in bounded
+                // batches at `flushEvery` intervals - identical to before. `onLine`
+                // keeps our outer `lineCount` live mid-stream so the progress emitter
+                // sees the running total AND so the NotFound guard below sees the
+                // real count even when the stream fails before returning.
+                //
+                // NotFound handling is GUARDED: a vanished file is only a benign skip
+                // when NOTHING was persisted yet (no line processed AND no session
+                // upserted). If NotFound strikes AFTER a mid-stream flush already wrote
+                // partial rows (`sessionUpserted`), swallowing it would leave a
+                // partial/incomplete session in the DB while reporting "skipped" - a
+                // silent partial ingest. In that case we let it propagate as a loud
+                // stage-level failure instead. Other PlatformErrors always re-raise.
+                const vanished = yield* streamCodexFile(filePath, extractor, {
+                    flushEvery,
+                    onFlush: writeBatch,
+                    onProgress: emitProgress,
+                    onLine: (count) => {
+                        lineCount = count;
+                    },
+                }).pipe(
+                    Effect.as(false),
+                    Effect.catchTag("PlatformError", (e) =>
+                        isNotFound(e) && lineCount === 0 && !sessionUpserted
+                            ? Effect.succeed(true)
+                            : Effect.fail(e),
+                    ),
+                );
+                if (vanished) {
+                    return;
+                }
+
+                const finalBatch = extractor.drain(true);
+                yield* writeBatch(finalBatch);
+                malformedLineCount += extractor.malformedLines();
+                const completedSession = finalBatch.session ?? currentSession;
+                if (!completedSession) {
+                    return;
+                }
+
+                // Snapshot the raw codex jsonl into the `codex_artifacts` bucket as
+                // best-effort cold storage for modest files. Large Codex sessions
+                // are parsed line-by-line above; reading them again just to copy the
+                // raw transcript can dominate benchmark runs.
+                const bucketPath = `${completedSession.id}.jsonl`;
+                const rawContent = snapshotRaw
+                    ? yield* emitProgress(3).pipe(
+                        Effect.andThen(
+                            // Best-effort cold-storage copy: a file that vanished
+                            // after streaming tolerates to null so the snapshot is
+                            // simply skipped - the parsed rows are already persisted.
+                            // Matches `transcripts.ts`: NotFound recovers to null,
+                            // genuine read faults re-raise rather than being silently
+                            // swallowed.
+                            fs.readFileString(filePath).pipe(
+                                skipNotFound(null as string | null),
+                            ),
+                        ),
+                    )
+                    : null;
+                let rawPointer: string | null = null;
+                if (rawContent !== null) {
+                    rawPointer = yield* db
+                        .putFile("codex_artifacts", bucketPath, rawContent)
+                        .pipe(
+                            Effect.map(() => filePointer("codex_artifacts", bucketPath)),
+                            Effect.catch((err) =>
+                                Effect.logDebug("codex raw snapshot failed", {
+                                    sessionId: completedSession.id,
+                                    message: err.message,
+                                }).pipe(Effect.as(null as string | null)),
+                            ),
+                        );
+                }
+
+                // Final session upsert carries the latest ended_at and raw artifact
+                // pointer after the streaming writes have completed.
+                yield* upsertSession(completedSession, rawPointer);
+                fileCount += 1;
+                byteCount += sizeBytes;
+                sessionCount += 1;
+
+                if (!snapshotRaw) {
+                    yield* Effect.logDebug("codex file ingested", {
+                        file: fileCount,
+                        totalFiles: files.length,
+                        bytes: formatBytes(byteCount),
+                        totalBytes: formatBytes(totalBytes),
+                        sessionId: completedSession.id,
+                        ms: Date.now() - fileStartedAt,
+                        lines: lineCount,
+                        turns: fileTurns,
+                        toolCalls: fileToolCalls,
+                    });
+                }
+
+                if (fileCount % progressEvery === 0) {
+                    const counts = {
                         currentFile: index + 1,
                         totalFiles: files.length,
                         currentFileBytes: sizeBytes,
@@ -1502,180 +1672,17 @@ export const ingestCodex = Effect.fn("codex.ingest")(
                         fileTurns,
                         fileToolCalls,
                         activeFiles,
-                        phase,
-                        sessions: sessionCount + (sessionUpserted ? 1 : 0),
+                        phase: 2,
+                        sessions: sessionCount,
                         turns: turnCount,
                         invocations: invCount,
                         toolCalls: toolCallCount,
                         planSnapshots: planSnapshotCount,
-                    })
-                    : Effect.void;
-
-            const upsertSession = (
-                session: CodexSession,
-                rawPointer: string | null,
-            ) =>
-                db.upsert(new RecordId("session", session.id), {
-                    project: session.cwd ?? undefined,
-                    cwd: session.cwd ?? undefined,
-                    model: concreteCodexModel(session) ?? undefined,
-                    source: "codex",
-                    started_at: new Date(session.started_at),
-                    ended_at: new Date(session.ended_at),
-                    raw_file: rawPointer ?? undefined,
-                });
-
-            let providerEventsCleared = false;
-            const writeBatch = (batch: MutableCodexExtract) =>
-                Effect.gen(function* () {
-                    if (!batch.session) return;
-                    currentSession = batch.session;
-                    if (!sessionUpserted) {
-                        yield* upsertSession(batch.session, null);
-                        sessionUpserted = true;
-                    }
-                    // Clear pre-existing agent_event rows once, on the first
-                    // batch for this session. Subsequent streaming batches must
-                    // NOT re-clear or they would wipe this ingest's own events.
-                    const clearExisting = !providerEventsCleared;
-                    providerEventsCleared = true;
-                    yield* queryCodexStatements(buildCodexBatchStatements(batch, payloadMaxBytes, clearExisting));
-                    turnCount += batch.turns.length;
-                    fileTurns += batch.turns.length;
-                    toolCallCount += batch.toolCalls.length;
-                    fileToolCalls += batch.toolCalls.length;
-                    invCount += batch.invocations.length;
-                    fileInvocations += batch.invocations.length;
-                    planSnapshotCount += batch.planSnapshots.length;
-                    filePlanSnapshots += batch.planSnapshots.length;
-                });
-
-            // Stream the file the SAME way the test seams do, via the shared
-            // `streamCodexFile` body (NOT a node fh): `FileSystem.stream` so a
-            // session that VANISHED between discovery and here (e.g. a cleaned-up
-            // session dir) surfaces as a typed NotFound `PlatformError`. The
-            // flush/progress cadence is threaded INTO the per-line Effect (via
-            // `onFlush`/`onProgress`) so a 30 MB session still drains in bounded
-            // batches at `flushEvery` intervals - identical to before. `onLine`
-            // keeps our outer `lineCount` live mid-stream so the progress emitter
-            // sees the running total AND so the NotFound guard below sees the
-            // real count even when the stream fails before returning.
-            //
-            // NotFound handling is GUARDED: a vanished file is only a benign skip
-            // when NOTHING was persisted yet (no line processed AND no session
-            // upserted). If NotFound strikes AFTER a mid-stream flush already wrote
-            // partial rows (`sessionUpserted`), swallowing it would leave a
-            // partial/incomplete session in the DB while reporting "skipped" - a
-            // silent partial ingest. In that case we let it propagate as a loud
-            // stage-level failure instead. Other PlatformErrors always re-raise.
-            const vanished = yield* streamCodexFile(filePath, extractor, {
-                flushEvery,
-                onFlush: writeBatch,
-                onProgress: emitProgress,
-                onLine: (count) => {
-                    lineCount = count;
-                },
-            }).pipe(
-                Effect.as(false),
-                Effect.catchTag("PlatformError", (e) =>
-                    isNotFound(e) && lineCount === 0 && !sessionUpserted
-                        ? Effect.succeed(true)
-                        : Effect.fail(e),
-                ),
-            );
-            if (vanished) {
-                activeFiles -= 1;
-                return;
-            }
-
-            const finalBatch = extractor.drain(true);
-            yield* writeBatch(finalBatch);
-            malformedLineCount += extractor.malformedLines();
-            const completedSession = finalBatch.session ?? currentSession;
-            if (!completedSession) {
-                activeFiles -= 1;
-                return;
-            }
-
-            // Snapshot the raw codex jsonl into the `codex_artifacts` bucket as
-            // best-effort cold storage for modest files. Large Codex sessions
-            // are parsed line-by-line above; reading them again just to copy the
-            // raw transcript can dominate benchmark runs.
-            const bucketPath = `${completedSession.id}.jsonl`;
-            const rawContent = snapshotRaw
-                ? yield* emitProgress(3).pipe(
-                    Effect.andThen(
-                        // Best-effort cold-storage copy: a file that vanished
-                        // after streaming tolerates to null so the snapshot is
-                        // simply skipped - the parsed rows are already persisted.
-                        // Matches `transcripts.ts`: NotFound recovers to null,
-                        // genuine read faults re-raise rather than being silently
-                        // swallowed.
-                        fs.readFileString(filePath).pipe(
-                            skipNotFound(null as string | null),
-                        ),
-                    ),
-                )
-                : null;
-            let rawPointer: string | null = null;
-            if (rawContent !== null) {
-                rawPointer = yield* db
-                    .putFile("codex_artifacts", bucketPath, rawContent)
-                    .pipe(
-                        Effect.map(() => filePointer("codex_artifacts", bucketPath)),
-                        Effect.catch((err) =>
-                            Effect.logDebug("codex raw snapshot failed", {
-                                sessionId: completedSession.id,
-                                message: err.message,
-                            }).pipe(Effect.as(null as string | null)),
-                        ),
-                    );
-            }
-
-            // Final session upsert carries the latest ended_at and raw artifact
-            // pointer after the streaming writes have completed.
-            yield* upsertSession(completedSession, rawPointer);
-            fileCount += 1;
-            byteCount += sizeBytes;
-            sessionCount += 1;
-
-            if (!snapshotRaw) {
-                yield* Effect.logDebug("codex file ingested", {
-                    file: fileCount,
-                    totalFiles: files.length,
-                    bytes: formatBytes(byteCount),
-                    totalBytes: formatBytes(totalBytes),
-                    sessionId: completedSession.id,
-                    ms: Date.now() - fileStartedAt,
-                    lines: lineCount,
-                    turns: fileTurns,
-                    toolCalls: fileToolCalls,
-                });
-            }
-
-            if (fileCount % progressEvery === 0) {
-                const counts = {
-                    currentFile: index + 1,
-                    totalFiles: files.length,
-                    currentFileBytes: sizeBytes,
-                    totalBytes,
-                    files: fileCount,
-                    bytes: byteCount,
-                    records: recordCount(),
-                    lines: lineCount,
-                    fileTurns,
-                    fileToolCalls,
-                    activeFiles,
-                    phase: 2,
-                    sessions: sessionCount,
-                    turns: turnCount,
-                    invocations: invCount,
-                    toolCalls: toolCallCount,
-                    planSnapshots: planSnapshotCount,
-                };
-                if (opts.onProgress) yield* opts.onProgress(counts);
-                yield* Effect.logDebug("codex ingest progress", counts);
-            }
+                    };
+                    if (opts.onProgress) yield* opts.onProgress(counts);
+                    yield* Effect.logDebug("codex ingest progress", counts);
+                }
+            }));
             activeFiles -= 1;
         }).pipe(Effect.withSpan("codex.file", {
             // Basename only: keeps exported-trace attributes small (the full
@@ -1685,6 +1692,7 @@ export const ingestCodex = Effect.fn("codex.ingest")(
                 "file.bytes": file.sizeBytes,
             },
         })), { concurrency, discard: true });
+        yield* failures.report;
         yield* Effect.logDebug("codex ingest complete", {
             files: fileCount,
             records: recordCount(),
@@ -1703,6 +1711,7 @@ export const ingestCodex = Effect.fn("codex.ingest")(
             toolCalls: toolCallCount,
             planSnapshots: planSnapshotCount,
             malformedLines: malformedLineCount,
+            failedFiles: failures.count(),
         } satisfies CodexStats;
     },
 );
@@ -1739,6 +1748,8 @@ export class CodexStageStats extends BaseStageStats.extend<CodexStageStats>("Cod
     toolCallsIngested: Schema.Number,
     /** JSONL lines skipped at the decode boundary (unparseable / non-record). */
     malformedLines: Schema.Number,
+    /** Files whose pipeline failed and was skipped (retried next run). */
+    failedFiles: Schema.Number,
 }) {}
 
 export const codexStage: StageDef<CodexStageStats, SurrealClient | AxConfig | FileSystem.FileSystem | Path.Path> = {
@@ -1759,11 +1770,13 @@ export const codexStage: StageDef<CodexStageStats, SurrealClient | AxConfig | Fi
         return CodexStageStats.make({
             durationMs: Date.now() - t0,
             summary: `ingested ${result.sessions} sessions, ${result.turns} turns, ${result.toolCalls} tool calls` +
-                (result.malformedLines > 0 ? `, ${result.malformedLines} malformed lines skipped` : ""),
+                (result.malformedLines > 0 ? `, ${result.malformedLines} malformed lines skipped` : "") +
+                (result.failedFiles > 0 ? `, ${result.failedFiles} file(s) failed (retry next run)` : ""),
             sessionsIngested: result.sessions,
             turnsIngested: result.turns,
             toolCallsIngested: result.toolCalls,
             malformedLines: result.malformedLines,
+            failedFiles: result.failedFiles,
         });
     }),
 };

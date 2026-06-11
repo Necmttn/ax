@@ -64,6 +64,7 @@ import {
 } from "@ax/lib/shared/surql";
 import { safeKeyPart } from "@ax/lib/shared/derive-keys";
 import { estimateCost, normalizeModelName } from "./model-pricing.ts";
+import { makeFileFailureCollector } from "./file-isolation.ts";
 import {
     extractClaudeCompaction,
     type CompactionWrite,
@@ -1602,6 +1603,8 @@ export interface TranscriptStats {
     hookCommandInvocations: number;
     /** JSONL lines skipped at the decode boundary (unparseable / non-record). */
     malformedLines: number;
+    /** Files whose pipeline failed and was skipped (retried next run). */
+    failedFiles: number;
 }
 
 export const ingestTranscripts = Effect.fn("transcripts.ingest")(
@@ -1734,6 +1737,7 @@ export const ingestTranscripts = Effect.fn("transcripts.ingest")(
             forceEnv: "AX_REDERIVE_CLAUDE",
         });
 
+        const failures = makeFileFailureCollector({ source: "claude" });
         yield* Effect.forEach(candidates.map((candidate, index) => ({ candidate, index })), ({ candidate, index }) => Effect.gen(function* () {
             // Time-box (dry-run calibration): once the deadline passes, start no
             // new files. In-flight ones finish, so the sample is whatever
@@ -1748,123 +1752,128 @@ export const ingestTranscripts = Effect.fn("transcripts.ingest")(
                 return;
             }
             activeFiles += 1;
-            if (opts.onProgress && (index < 5 || index % 10 === 0)) {
-                yield* opts.onProgress({
-                    currentFile: index + 1,
-                    totalFiles: candidates.length,
-                    files,
-                    activeFiles,
-                    records: recordCount(),
-                    sessions,
-                    turns: turnCount,
-                    invocations: invCount,
-                    edits: editCount,
-                    toolCalls: toolCallCount,
-                    planSnapshots: planSnapshotCount,
-                    hookEvents: hookEventCount,
-                    hookCommandInvocations: hookCommandInvocationCount,
-                });
-            }
-            // A transcript that VANISHED between discovery and here (e.g. a
-            // git worktree cleaned up mid-run) surfaces as a typed
-            // PlatformError; NotFound→null SKIPS it. The skip short-circuits
-            // BEFORE `files += 1` / `wm.commit` below, so a vanished file never
-            // advances the watermark. Non-NotFound failures re-raise.
-            const extracted = yield* extractFile(candidate.filePath, candidate.projectDir).pipe(
-                skipNotFound(null),
-                Effect.withSpan("transcripts.parse", {
-                    attributes: { "file.size": candidate.size },
-                }),
-            );
-            if (!extracted) {
-                activeFiles -= 1;
-                return;
-            }
-            files += 1;
-            malformedLineCount += extracted.malformedLines;
-            const pointer = yield* snapshotTranscript(
-                extracted.session.id,
-                candidate.filePath,
-            );
-            extracted.session.raw_file = pointer;
-            yield* upsertSessions([extracted.session]);
-            sessions += 1;
-            yield* writeClaudeTokenUsage(extracted);
-            // Resolve invoked names onto the catalog before writing so the
-            // `invoked` and `concerns` edges land on the real skill row.
-            const resolvedInvocations = extracted.invocations.map((inv) => ({
-                ...inv,
-                skill: resolveSkillName(inv.skill, skillCatalog) ?? inv.skill,
+            // Per-file failure isolation: a bad transcript (or a rejected
+            // statement) skips THIS file - it is retried next run - instead of
+            // aborting the whole stage (see file-isolation.ts).
+            yield* failures.isolate(candidate.filePath, Effect.gen(function* () {
+                if (opts.onProgress && (index < 5 || index % 10 === 0)) {
+                    yield* opts.onProgress({
+                        currentFile: index + 1,
+                        totalFiles: candidates.length,
+                        files,
+                        activeFiles,
+                        records: recordCount(),
+                        sessions,
+                        turns: turnCount,
+                        invocations: invCount,
+                        edits: editCount,
+                        toolCalls: toolCallCount,
+                        planSnapshots: planSnapshotCount,
+                        hookEvents: hookEventCount,
+                        hookCommandInvocations: hookCommandInvocationCount,
+                    });
+                }
+                // A transcript that VANISHED between discovery and here (e.g. a
+                // git worktree cleaned up mid-run) surfaces as a typed
+                // PlatformError; NotFound→null SKIPS it. The skip short-circuits
+                // BEFORE `files += 1` / `wm.commit` below, so a vanished file never
+                // advances the watermark. Non-NotFound failures re-raise.
+                const extracted = yield* extractFile(candidate.filePath, candidate.projectDir).pipe(
+                    skipNotFound(null),
+                    Effect.withSpan("transcripts.parse", {
+                        attributes: { "file.size": candidate.size },
+                    }),
+                );
+                if (!extracted) {
+                    return;
+                }
+                files += 1;
+                malformedLineCount += extracted.malformedLines;
+                const pointer = yield* snapshotTranscript(
+                    extracted.session.id,
+                    candidate.filePath,
+                );
+                extracted.session.raw_file = pointer;
+                yield* upsertSessions([extracted.session]);
+                sessions += 1;
+                yield* writeClaudeTokenUsage(extracted);
+                // Resolve invoked names onto the catalog before writing so the
+                // `invoked` and `concerns` edges land on the real skill row.
+                const resolvedInvocations = extracted.invocations.map((inv) => ({
+                    ...inv,
+                    skill: resolveSkillName(inv.skill, skillCatalog) ?? inv.skill,
+                }));
+                const resolvedSkillRelations = extracted.skillRelations.map((rel) => ({
+                    ...rel,
+                    skillName: resolveSkillName(rel.skillName, skillCatalog) ?? rel.skillName,
+                }));
+                // Seven per-section writes collapsed into ONE normalized-batch
+                // write. transcripts.parity.test.ts keeps golden-shape coverage
+                // for the normalized provider/session/event/turn/tool/plan rows;
+                // token usage above and invoked-edges/hooks below stay separate
+                // per the gap analysis.
+                yield* queryTranscriptStatements(
+                    buildNormalizedTranscriptStatements(
+                        toClaudeNormalizedBatch(extracted, resolvedSkillRelations),
+                    ),
+                    "normalizedBatch",
+                );
+                turnCount += extracted.turns.length;
+                toolCallCount += extracted.toolCalls.length;
+                planSnapshotCount += extracted.planSnapshots.length;
+                yield* relateInvocations(resolvedInvocations);
+                invCount += resolvedInvocations.length;
+                yield* writeHookEvidence(extracted.hookEvents, extracted.hookCommandInvocations);
+                hookEventCount += extracted.hookEvents.length;
+                hookCommandInvocationCount += extracted.hookCommandInvocations.length;
+                editCount += extracted.edits.length;
+                if (opts.onProgress && (files <= 5 || files % 10 === 0)) {
+                    yield* opts.onProgress({
+                        currentFile: index + 1,
+                        totalFiles: candidates.length,
+                        files,
+                        activeFiles,
+                        records: recordCount(),
+                        sessions,
+                        turns: turnCount,
+                        invocations: invCount,
+                        edits: editCount,
+                        toolCalls: toolCallCount,
+                        planSnapshots: planSnapshotCount,
+                        hookEvents: hookEventCount,
+                        hookCommandInvocations: hookCommandInvocationCount,
+                    });
+                }
+                if (files % 50 === 0) {
+                    const counts = {
+                        currentFile: index + 1,
+                        totalFiles: candidates.length,
+                        files,
+                        activeFiles,
+                        records: recordCount(),
+                        sessions,
+                        turns: turnCount,
+                        invocations: invCount,
+                        edits: editCount,
+                        toolCalls: toolCallCount,
+                        planSnapshots: planSnapshotCount,
+                        hookEvents: hookEventCount,
+                        hookCommandInvocations: hookCommandInvocationCount,
+                    };
+                    if (opts.onProgress) yield* opts.onProgress(counts);
+                    yield* Effect.logDebug("transcript ingest progress", {
+                        ...counts,
+                    });
+                }
+                // Record the watermark only after every write for this file
+                // succeeded, so a mid-file failure re-processes next run.
+                yield* wm.commit(candidate.filePath, candidate.mtimeMs, candidate.size);
             }));
-            const resolvedSkillRelations = extracted.skillRelations.map((rel) => ({
-                ...rel,
-                skillName: resolveSkillName(rel.skillName, skillCatalog) ?? rel.skillName,
-            }));
-            // Seven per-section writes collapsed into ONE normalized-batch
-            // write. transcripts.parity.test.ts keeps golden-shape coverage
-            // for the normalized provider/session/event/turn/tool/plan rows;
-            // token usage above and invoked-edges/hooks below stay separate
-            // per the gap analysis.
-            yield* queryTranscriptStatements(
-                buildNormalizedTranscriptStatements(
-                    toClaudeNormalizedBatch(extracted, resolvedSkillRelations),
-                ),
-                "normalizedBatch",
-            );
-            turnCount += extracted.turns.length;
-            toolCallCount += extracted.toolCalls.length;
-            planSnapshotCount += extracted.planSnapshots.length;
-            yield* relateInvocations(resolvedInvocations);
-            invCount += resolvedInvocations.length;
-            yield* writeHookEvidence(extracted.hookEvents, extracted.hookCommandInvocations);
-            hookEventCount += extracted.hookEvents.length;
-            hookCommandInvocationCount += extracted.hookCommandInvocations.length;
-            editCount += extracted.edits.length;
-            if (opts.onProgress && (files <= 5 || files % 10 === 0)) {
-                yield* opts.onProgress({
-                    currentFile: index + 1,
-                    totalFiles: candidates.length,
-                    files,
-                    activeFiles,
-                    records: recordCount(),
-                    sessions,
-                    turns: turnCount,
-                    invocations: invCount,
-                    edits: editCount,
-                    toolCalls: toolCallCount,
-                    planSnapshots: planSnapshotCount,
-                    hookEvents: hookEventCount,
-                    hookCommandInvocations: hookCommandInvocationCount,
-                });
-            }
-            if (files % 50 === 0) {
-                const counts = {
-                    currentFile: index + 1,
-                    totalFiles: candidates.length,
-                    files,
-                    activeFiles,
-                    records: recordCount(),
-                    sessions,
-                    turns: turnCount,
-                    invocations: invCount,
-                    edits: editCount,
-                    toolCalls: toolCallCount,
-                    planSnapshots: planSnapshotCount,
-                    hookEvents: hookEventCount,
-                    hookCommandInvocations: hookCommandInvocationCount,
-                };
-                if (opts.onProgress) yield* opts.onProgress(counts);
-                yield* Effect.logDebug("transcript ingest progress", {
-                    ...counts,
-                });
-            }
-            // Record the watermark only after every write for this file
-            // succeeded, so a mid-file failure re-processes next run.
-            yield* wm.commit(candidate.filePath, candidate.mtimeMs, candidate.size);
             activeFiles -= 1;
         }).pipe(Effect.withSpan("transcripts.file", {
             attributes: { "file.path": candidate.filePath, "file.size": candidate.size },
         })), { concurrency, discard: true });
+        yield* failures.report;
         yield* Effect.logDebug("transcript ingest complete", {
             files,
             records: recordCount(),
@@ -1889,6 +1898,7 @@ export const ingestTranscripts = Effect.fn("transcripts.ingest")(
             hookEvents: hookEventCount,
             hookCommandInvocations: hookCommandInvocationCount,
             malformedLines: malformedLineCount,
+            failedFiles: failures.count(),
         } satisfies TranscriptStats;
     },
 );
@@ -1924,6 +1934,8 @@ export class ClaudeStats extends BaseStageStats.extend<ClaudeStats>("ClaudeStats
     toolCallsIngested: Schema.Number,
     /** JSONL lines skipped at the decode boundary (unparseable / non-record). */
     malformedLines: Schema.Number,
+    /** Files whose pipeline failed and was skipped (retried next run). */
+    failedFiles: Schema.Number,
 }) {}
 
 export const claudeStage: StageDef<ClaudeStats, SurrealClient | AxConfig | FileSystem.FileSystem | Path.Path> = {
@@ -1944,11 +1956,13 @@ export const claudeStage: StageDef<ClaudeStats, SurrealClient | AxConfig | FileS
         return ClaudeStats.make({
             durationMs: Date.now() - t0,
             summary: `ingested ${result.sessions} sessions, ${result.turns} turns, ${result.toolCalls} tool calls` +
-                (result.malformedLines > 0 ? `, ${result.malformedLines} malformed lines skipped` : ""),
+                (result.malformedLines > 0 ? `, ${result.malformedLines} malformed lines skipped` : "") +
+                (result.failedFiles > 0 ? `, ${result.failedFiles} file(s) failed (retry next run)` : ""),
             sessionsIngested: result.sessions,
             turnsIngested: result.turns,
             toolCallsIngested: result.toolCalls,
             malformedLines: result.malformedLines,
+            failedFiles: result.failedFiles,
         });
     }),
 };
