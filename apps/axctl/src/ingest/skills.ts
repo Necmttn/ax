@@ -15,7 +15,7 @@ import { parse as parseYaml } from "yaml";
 import { Effect, FileSystem, Path, Schema } from "effect";
 import { SurrealClient } from "@ax/lib/db";
 import { SkillName } from "@ax/lib/brands";
-import { defaultSkillDirs } from "@ax/lib/paths";
+import { defaultSkillDirs, skillDirsOverridden } from "@ax/lib/paths";
 import { AppLayer } from "@ax/lib/layers";
 import type { DbError } from "@ax/lib/errors";
 import { upsertSkillByName } from "./skill-upsert.ts";
@@ -216,11 +216,8 @@ const collectSkills = (): Effect.Effect<
 > =>
     Effect.gen(function* () {
         const buckets = defaultSkillDirs();
-        const envOverride = (process.env.AX_SKILLS_DIRS ?? "")
-            .split(",")
-            .map((s) => s.trim())
-            .filter(Boolean).length > 0;
-        if (envOverride) {
+        // AX_SKILLS_DIRS is a full override: when set (tests, sandboxes), plugin + project discovery is skipped so collection stays hermetic.
+        if (skillDirsOverridden()) {
             return yield* Effect.forEach(buckets, ({ dir, scope }) => readSkillDir(dir, scope), {
                 concurrency: "unbounded",
             }).pipe(Effect.map((xs) => xs.flat()));
