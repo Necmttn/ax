@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import schemaSurql from "./schema.surql" with { type: "text" };
-import { renderBucketBackends } from "./render.ts";
+import { bucketNames, renderBucketBackends } from "./render.ts";
 
 describe("renderBucketBackends", () => {
     test("rewrites every DEFINE BUCKET backend to the given buckets dir", () => {
@@ -23,6 +23,10 @@ describe("renderBucketBackends", () => {
         const rendered = renderBucketBackends(schemaSurql, "/tmp/ax-buckets");
         const rewritten = (rendered.match(/BACKEND "file:\/tmp\/ax-buckets\//g) ?? []).length;
         expect(rewritten).toBe(bucketCount);
+    });
+
+    test("bucketNames lists the shipped buckets in declaration order", () => {
+        expect(bucketNames(schemaSurql)).toEqual(["transcripts", "codex_artifacts"]);
     });
 
     test("leaves non-bucket content untouched", () => {

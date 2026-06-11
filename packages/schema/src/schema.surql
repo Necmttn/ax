@@ -148,8 +148,8 @@ DEFINE INDEX IF NOT EXISTS agent_event_session_ts ON agent_event FIELDS agent_se
 -- env vars) and reflect the committing machine. NEVER import this file
 -- verbatim on another machine: every apply path must rewrite the paths to
 -- the local $AX_DATA_DIR/buckets first (issue #251) - axctl install uses
--- renderBucketBackends (packages/schema/src/render.ts); apply-schema.sh
--- and dev-db.sh sed-substitute.
+-- renderBucketBackends (packages/schema/src/render.ts); shell paths go
+-- through apply-schema.sh's sed (dev-db.sh delegates to it).
 
 DEFINE BUCKET IF NOT EXISTS transcripts
     BACKEND "file:/Users/necmttn/.local/share/ax/buckets/transcripts";

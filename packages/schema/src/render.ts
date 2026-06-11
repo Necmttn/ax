@@ -11,7 +11,7 @@
  * resolved local buckets dir first.
  */
 
-const BUCKET_BACKEND_RE = /(DEFINE BUCKET IF NOT EXISTS (\w+)\s+BACKEND\s+")file:[^"]*(")/g;
+const BUCKET_BACKEND_RE = /(DEFINE BUCKET IF NOT EXISTS (\w+)\s+BACKEND\s+")file:[^"]*"/g;
 
 /**
  * Rewrite every `DEFINE BUCKET ... BACKEND "file:..."` in `schema` so the
@@ -21,6 +21,13 @@ const BUCKET_BACKEND_RE = /(DEFINE BUCKET IF NOT EXISTS (\w+)\s+BACKEND\s+")file
 export const renderBucketBackends = (schema: string, bucketsDir: string): string =>
     schema.replace(
         BUCKET_BACKEND_RE,
-        (_m, prefix: string, name: string, suffix: string) =>
-            `${prefix}file:${bucketsDir}/${name}${suffix}`,
+        (_m, prefix: string, name: string) => `${prefix}file:${bucketsDir}/${name}"`,
     );
+
+/**
+ * Bucket names the schema defines, in declaration order. The single source of
+ * truth for "which buckets must exist" - doctor checks etc. derive from this
+ * instead of hand-maintaining a list that drifts when schema.surql changes.
+ */
+export const bucketNames = (schema: string): string[] =>
+    [...schema.matchAll(/DEFINE BUCKET IF NOT EXISTS (\w+)/g)].map((m) => m[1] as string);

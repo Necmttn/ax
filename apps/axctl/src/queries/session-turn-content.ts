@@ -155,6 +155,7 @@ export const resolveTurnContentForSourceRefs = Effect.fn("queries.resolveTurnCon
         if (refs.length === 0) return new Map<number, InspectTurnContentDto>();
         const documents = refListSource(
             refs.map((ref) => recordRef("content_document", contentDocumentKeyForTurnRef(ref))),
+            ["id", "source_ref", "parser_id", "parser_version", "blockset_hash", "turn"],
         );
         // Fast inspector path: direct document/block/atom record fetches avoid the
         // multi-second `document IN ...` scans seen on large sessions. Atoms are
@@ -239,7 +240,7 @@ const resolveTurnContentFromDocuments = (
                         start_offset,
                         end_offset,
                         confidence
-                    FROM ${refListSource(directBlockRefs)}
+                    FROM ${refListSource(directBlockRefs, ["id", "document", "seq", "parent_seq", "kind", "role", "heading", "text", "text_excerpt", "start_offset", "end_offset", "confidence"])}
                     ORDER BY document_id, seq;
                 `,
                 (row) => row,
@@ -282,7 +283,7 @@ const resolveTurnContentFromDocuments = (
                         normalized,
                         confidence,
                         raw
-                    FROM ${refListSource(directAtomRefs)}
+                    FROM ${refListSource(directAtomRefs, ["document", "block", "kind", "value", "normalized", "confidence", "raw"])}
                     ORDER BY document_id, block_seq, kind, value;
                 `,
                 (row) => row,

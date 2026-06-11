@@ -23,7 +23,8 @@ import {
 import { prettyPrint } from "@ax/lib/json";
 // Schema is embedded at build time so the compiled binary is self-contained.
 import schemaSurql from "@ax/schema/schema.surql" with { type: "text" };
-import { renderBucketBackends } from "@ax/schema/render";
+import { bucketNames, renderBucketBackends } from "@ax/schema/render";
+import { envConfig as readDbEnvConfig } from "@ax/lib/db";
 
 /**
  * Tagged failure for install steps (surreal resolution, symlinking). Extends
@@ -639,22 +640,24 @@ export function formatDaemonStatus(status: DaemonStatus, json = false): string {
  * back partway - historically a bucket BACKEND path outside the daemon's
  * allowlist (issue #251) - and transcript snapshots silently no-op.
  */
-const EXPECTED_BUCKETS = ["transcripts", "codex_artifacts"];
+const EXPECTED_BUCKETS = bucketNames(schemaSurql);
 
 /**
- * Names from EXPECTED_BUCKETS that are NOT defined on ns=ax/db=main, or null
- * when the daemon could not be queried (down, auth, non-JSON). Plain HTTP so
- * doctor needs no SurrealClient layer.
+ * Names from EXPECTED_BUCKETS that are NOT defined on the configured ns/db,
+ * or null when the daemon could not be queried (down, auth, non-JSON). Plain
+ * HTTP so doctor needs no SurrealClient layer; creds/ns/db come from the same
+ * AX_DB_* env config the rest of ax uses.
  */
 async function probeMissingBuckets(endpoint: { host: string; port: number }): Promise<string[] | null> {
     try {
+        const db = readDbEnvConfig();
         const res = await fetch(`http://${endpoint.host}:${endpoint.port}/sql`, {
             method: "POST",
             headers: {
                 Accept: "application/json",
-                Authorization: `Basic ${Buffer.from("root:root").toString("base64")}`,
-                "surreal-ns": "ax",
-                "surreal-db": "main",
+                Authorization: `Basic ${Buffer.from(`${db.user}:${db.pass}`).toString("base64")}`,
+                "surreal-ns": db.ns,
+                "surreal-db": db.db,
             },
             body: "INFO FOR DB;",
             signal: AbortSignal.timeout(3000),
@@ -732,21 +735,21 @@ export function collectDoctorReport(): Effect.Effect<
                 ok: runtimeStateExists,
                 detail: daemon.endpoint.runtimeStatePath,
             },
-            ...(missingBuckets === null
-                ? []
-                : [{
-                    name: "db-buckets",
-                    ok: missingBuckets.length === 0,
-                    detail: missingBuckets.length === 0
-                        ? `${EXPECTED_BUCKETS.join(", ")} defined`
-                        : `missing bucket(s): ${missingBuckets.join(", ")}; re-run 'axctl install' to re-apply the schema`,
-                }]),
             ...daemon.agents.map((agent): DoctorCheck => ({
                 name: agent.label,
                 ok: !isMacos() || (agent.plistExists && agent.loaded),
                 detail: `${agent.loaded ? "loaded" : "not loaded"}; plist=${agent.plistExists ? "present" : "absent"}`,
             })),
         ];
+        if (missingBuckets !== null) {
+            checks.push({
+                name: "db-buckets",
+                ok: missingBuckets.length === 0,
+                detail: missingBuckets.length === 0
+                    ? `${EXPECTED_BUCKETS.join(", ")} defined`
+                    : `missing bucket(s): ${missingBuckets.join(", ")}; re-run 'axctl install' to re-apply the schema`,
+            });
+        }
         const onboarding = yield* buildOnboardingReport();
         const onboardingChecks: DoctorCheck[] = onboarding.checks.map((c) => ({
             name: `onboarding:${c.id}`,

@@ -40,12 +40,29 @@
 
 import { recordLiteral } from "../ids.ts";
 
+const IDENT_RE = /^[A-Za-z_][A-Za-z0-9_]*$/;
+
 /**
  * Dereference a record-id list into plain objects so the SELECT source is
  * version-portable (see the 3.0.x invariant above), dropping missing records.
+ *
+ * `pick` narrows the materialization to a destructured field subset
+ * (`$r.{a, b}`) - use it on tables with heavy payload fields (e.g. `turn.text`,
+ * `content_block.search_text`) so the server doesn't copy the full record just
+ * to project two columns. It must include EVERY field the surrounding
+ * statement touches: SELECT expressions (`type::string(id)` needs `id`,
+ * `turn.seq` needs `turn`), WHERE, and ORDER BY.
  */
-const materialized = (refList: string): string =>
-    `${refList}.map(|$r| $r.*).filter(|$o| $o != NONE)`;
+const materialized = (refList: string, pick?: readonly string[]): string => {
+    if (pick !== undefined) {
+        if (pick.length === 0) throw new Error("record-select: empty pick");
+        for (const field of pick) {
+            if (!IDENT_RE.test(field)) throw new Error(`record-select: invalid pick field ${JSON.stringify(field)}`);
+        }
+    }
+    const shape = pick === undefined ? "*" : `{${pick.join(", ")}}`;
+    return `${refList}.map(|$r| $r.${shape}).filter(|$o| $o != NONE)`;
+};
 
 /**
  * A materialized FROM source from bare record keys:
@@ -54,8 +71,8 @@ const materialized = (refList: string): string =>
  * @throws {Error} when any key is empty or contains a backtick/newline/null
  *   byte (see `recordLiteral`). Filter/normalize keys before calling.
  */
-export const recordListSource = (table: string, keys: readonly string[]): string =>
-    materialized(`[${keys.map((k) => recordLiteral(table, k)).join(", ")}]`);
+export const recordListSource = (table: string, keys: readonly string[], pick?: readonly string[]): string =>
+    materialized(`[${keys.map((k) => recordLiteral(table, k)).join(", ")}]`, pick);
 
 /**
  * A materialized FROM source from refs that are ALREADY valid record literals
@@ -63,13 +80,13 @@ export const recordListSource = (table: string, keys: readonly string[]): string
  * as `` table:`key` `` or `table:⟨key⟩`). No escaping is applied - never pass
  * user input through this form.
  */
-export const refListSource = (refs: readonly string[]): string =>
-    materialized(`[${refs.join(", ")}]`);
+export const refListSource = (refs: readonly string[], pick?: readonly string[]): string =>
+    materialized(`[${refs.join(", ")}]`, pick);
 
 /**
  * The full bulk fetch-by-id statement:
  * `SELECT <fields> FROM [refs].map(|$r| $r.*).filter(|$o| $o != NONE);`.
  * Missing records are skipped; an all-missing list yields zero rows.
  */
-export const selectByIds = (fields: string, table: string, keys: readonly string[]): string =>
-    `SELECT ${fields} FROM ${recordListSource(table, keys)};`;
+export const selectByIds = (fields: string, table: string, keys: readonly string[], pick?: readonly string[]): string =>
+    `SELECT ${fields} FROM ${recordListSource(table, keys, pick)};`;

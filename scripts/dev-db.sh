@@ -29,21 +29,13 @@ SURREAL_BIN="${AX_SURREAL_BIN:-$(command -v surreal || true)}"
 healthy() { curl -fsS "http://127.0.0.1:$AX_DB_PORT/health" >/dev/null 2>&1; }
 
 apply_schema() {
-    # schema.surql hardcodes DEFINE BUCKET paths at the COMMITTING machine's
-    # data dir (SurrealQL cannot expand env vars). Rewrite whatever path is
-    # committed to the dev data dir so dev buckets land under AX_DATA_DIR and
-    # match the dev SurrealDB's bucket allowlist (issue #251).
-    local tmp
-    tmp="$(mktemp)"
-    sed -E "s|BACKEND \"file:[^\"]*/buckets/([a-zA-Z0-9_]+)\"|BACKEND \"file:$AX_DATA_DIR/buckets/\1\"|" \
-        "$ROOT/packages/schema/src/schema.surql" >"$tmp"
-    "$SURREAL_BIN" import \
-        --endpoint "http://127.0.0.1:$AX_DB_PORT" \
-        --user "$DB_USER" --pass "$DB_PASS" \
-        --ns "$NS" --db "$DB" \
-        "$tmp"
-    rm -f "$tmp"
-    echo "[ax-dev] schema applied to $NS/$DB on :$AX_DB_PORT"
+    # Delegates to apply-schema.sh, which rewrites the committed DEFINE BUCKET
+    # paths to $AX_DATA_DIR/buckets before import (issue #251) - one rewrite
+    # implementation instead of a drifting copy here. AX_DATA_DIR/AX_DB_PORT
+    # are already exported above; pass the rest explicitly.
+    AX_SURREAL_BIN="$SURREAL_BIN" AX_DB_USER="$DB_USER" AX_DB_PASS="$DB_PASS" \
+        AX_DB_NS="$NS" AX_DB_DB="$DB" \
+        "$ROOT/scripts/apply-schema.sh"
 }
 
 stop_db() {

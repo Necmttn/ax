@@ -6,6 +6,7 @@ PASS="${AX_DB_PASS:-root}"
 NS="${AX_DB_NS:-ax}"
 DB="${AX_DB_DB:-main}"
 SCHEMA="$(dirname "$0")/../packages/schema/src/schema.surql"
+SURREAL_BIN="${AX_SURREAL_BIN:-surreal}"
 
 # Bucket BACKEND paths in schema.surql carry the committing machine's absolute
 # path (SurrealQL cannot expand env vars). Rewrite them to THIS machine's
@@ -19,7 +20,7 @@ trap 'rm -f "$RENDERED"' EXIT
 sed -E "s|BACKEND \"file:[^\"]*/buckets/([a-zA-Z0-9_]+)\"|BACKEND \"file:$BUCKETS_DIR/\1\"|" \
   "$SCHEMA" > "$RENDERED"
 
-surreal import \
+"$SURREAL_BIN" import \
   --endpoint "http://127.0.0.1:$PORT" \
   --user "$USER" --pass "$PASS" \
   --ns "$NS" --db "$DB" \

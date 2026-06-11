@@ -31,3 +31,19 @@ describe("selectByIds", () => {
         expect(sql).not.toContain("WHERE id IN");
     });
 });
+
+describe("pick projection", () => {
+    test("narrows materialization to a destructured field subset", () => {
+        expect(recordListSource("turn", ["t1"], ["id", "session"]))
+            .toBe("[turn:`t1`].map(|$r| $r.{id, session}).filter(|$o| $o != NONE)");
+        expect(refListSource(["turn:`t1`"], ["seq", "text"]))
+            .toBe("[turn:`t1`].map(|$r| $r.{seq, text}).filter(|$o| $o != NONE)");
+        expect(selectByIds("session", "turn", ["t1"], ["id", "session"]))
+            .toBe("SELECT session FROM [turn:`t1`].map(|$r| $r.{id, session}).filter(|$o| $o != NONE);");
+    });
+    test("rejects empty and non-identifier pick fields", () => {
+        expect(() => recordListSource("turn", ["t1"], [])).toThrow(/empty pick/);
+        expect(() => recordListSource("turn", ["t1"], ["a b"])).toThrow(/invalid pick field/);
+        expect(() => refListSource(["turn:`t1`"], ["x;DROP"])).toThrow(/invalid pick field/);
+    });
+});
