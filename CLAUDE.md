@@ -114,6 +114,12 @@ fresh clone.
 
 `ax roles` - list known role labels.
 
+### Cost analytics
+
+`ax cost models [--days=N]` - per-model rollup: sessions, prompt/completion/cache tokens, estimated cost USD (default 14d).
+`ax cost sessions [--days=N] [--model=<name>] [--limit=N]` - top sessions by cost with id, project, model, started_at (default 14d/20 rows).
+`ax cost split [--days=N]` - origin (main vs subagent) × model matrix with cost and share-of-total; totals row. MCP: `cost_models`, `cost_split`.
+
 ## Recommend + apply guidance to your own agent files
 
 `axctl improve recommend / accept / lint / show` ship the v0 grounded-files

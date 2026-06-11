@@ -34,6 +34,7 @@ import type {
     FetchRolesForSkillResult,
     FetchAllRolesResult,
 } from "../dashboard/role-queries.ts";
+import type { CostModelsResult, CostSplitResult } from "../queries/cost-analytics.ts";
 
 // ---------------------------------------------------------------------------
 // Protocol hint - appended to tool/CLI descriptions
@@ -431,6 +432,69 @@ export const buildRolesNext = (
             ),
         );
     }
+    return sortNavLinks(top);
+};
+
+// ---------------------------------------------------------------------------
+// improve (recommend / list)
+// ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// cost models / split
+// ---------------------------------------------------------------------------
+
+/** Top-level links for cost models rollup. */
+export const buildCostModelsNext = (
+    result: CostModelsResult,
+): ReadonlyArray<NavLink> => {
+    const top: NavLink[] = [];
+    if (result.rows.length === 0) {
+        top.push({
+            description: "No cost data - widen the window",
+            cmd: "ax cost models --days=30",
+            ui: { priority: 8, group: "search" },
+        });
+        return top;
+    }
+    top.push({
+        description: "Show top sessions by cost",
+        call: { tool: "cost_models", arguments: { days: 14 } },
+        cmd: "ax cost sessions",
+        ui: { priority: 7, group: "read" },
+    });
+    top.push({
+        description: "Split cost by origin (main vs subagent) × model",
+        call: { tool: "cost_split", arguments: {} },
+        cmd: "ax cost split",
+        ui: { priority: 6, group: "read" },
+    });
+    return sortNavLinks(top);
+};
+
+/** Top-level links for cost split matrix. */
+export const buildCostSplitNext = (
+    result: CostSplitResult,
+): ReadonlyArray<NavLink> => {
+    const top: NavLink[] = [];
+    if (result.totals.cost_usd === 0) {
+        top.push({
+            description: "No cost data - widen the window",
+            cmd: "ax cost split --days=30",
+            ui: { priority: 8, group: "search" },
+        });
+        return top;
+    }
+    top.push({
+        description: "Per-model rollup with session counts",
+        call: { tool: "cost_models", arguments: {} },
+        cmd: "ax cost models",
+        ui: { priority: 7, group: "read" },
+    });
+    top.push({
+        description: "Top sessions by cost",
+        cmd: "ax cost sessions",
+        ui: { priority: 6, group: "read" },
+    });
     return sortNavLinks(top);
 };
 
