@@ -31,6 +31,14 @@ interface SubagentManifest {
     readonly file: string;
 }
 
+/** Parsed content of `agent-<id>.meta.json` - all fields optional. */
+interface SubagentMeta {
+    readonly agentType?: string;
+    readonly description?: string;
+    readonly name?: string;
+    readonly toolUseId?: string;
+}
+
 export interface DeriveClaudeSubagentsOpts {
     readonly onProgress?: (counts: Record<string, number>) => Effect.Effect<void>;
 }
@@ -119,6 +127,32 @@ const buildManifest = (
         file: filePath,
     };
 }
+
+/**
+ * Attempt to read `agent-<id>.meta.json` (sibling of the `.jsonl` file).
+ * Returns partial/empty object on any failure – callers treat every field optional.
+ */
+const readSubagentMeta = (
+    jsonlPath: string,
+): Effect.Effect<SubagentMeta, never, FileSystem.FileSystem> =>
+    Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const metaPath = jsonlPath.replace(/\.jsonl$/, ".meta.json");
+        const text = yield* fs.readFileString(metaPath).pipe(orAbsent<string | null>(null));
+        if (text === null) return {};
+        const parsed = decodeJsonOrNull(text);
+        if (!isRecord(parsed)) return {};
+        const agentType = stringField(parsed, "agentType");
+        const description = stringField(parsed, "description");
+        const name = stringField(parsed, "name");
+        const toolUseId = stringField(parsed, "toolUseId");
+        return {
+            ...(agentType !== null ? { agentType } : {}),
+            ...(description !== null ? { description } : {}),
+            ...(name !== null ? { name } : {}),
+            ...(toolUseId !== null ? { toolUseId } : {}),
+        };
+    });
 
 export interface DeriveClaudeSubagentsStats {
     readonly discovered: number;
@@ -268,6 +302,10 @@ export const deriveClaudeSubagents = (
                 ),
             );
 
+            // Read adjacent meta.json for dispatch metadata (agent type, description, etc.).
+            // Missing / unparseable file yields {}; all fields remain optional.
+            const meta = yield* readSubagentMeta(m.file);
+
             // Inherit repository/checkout from parent unconditionally (the extractor
             // never sets them). Inherit cwd from parent only if extractor produced none.
             const parentRepository = parentRow["repository"] ?? undefined;
@@ -303,6 +341,7 @@ export const deriveClaudeSubagents = (
                     project: extracted.session.project ?? m.project ?? undefined,
                     cwd: cwdValue,
                     source: "claude-subagent",
+                    model: extracted.session.model ?? undefined,
                     started_at: extracted.session.started_at
                         ? new Date(extracted.session.started_at)
                         : m.startedAt
@@ -347,8 +386,15 @@ export const deriveClaudeSubagents = (
             yield* db.query(
                 `DELETE spawned WHERE in = ${parentRid} AND out = ${subagentRef} AND tool = "Agent";`,
             );
+            // Build optional meta SET clauses from adjacent meta.json fields.
+            const metaClauses = [
+                meta.agentType !== undefined ? `, agent_type = ${surrealLiteral(meta.agentType)}` : "",
+                meta.description !== undefined ? `, description = ${surrealLiteral(meta.description)}` : "",
+                meta.name !== undefined ? `, agent_name = ${surrealLiteral(meta.name)}` : "",
+                meta.toolUseId !== undefined ? `, tool_use_id = ${surrealLiteral(meta.toolUseId)}` : "",
+            ].join("");
             yield* db.query(
-                `RELATE ${parentRid} -> spawned -> ${subagentRef} SET ts = d${surrealLiteral(m.startedAt ?? new Date().toISOString())}, tool = "Agent", nickname = ${surrealLiteral(m.agentId.slice(0, 12))};`,
+                `RELATE ${parentRid} -> spawned -> ${subagentRef} SET ts = d${surrealLiteral(m.startedAt ?? new Date().toISOString())}, tool = "Agent", nickname = ${surrealLiteral(m.agentId.slice(0, 12))}${metaClauses};`,
             );
             written += 1;
 

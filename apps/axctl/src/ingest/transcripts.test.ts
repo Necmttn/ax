@@ -1230,6 +1230,18 @@ describe("claude token usage", () => {
         expect(stmt).toContain('source: "claude"');
     });
 
+    test("subagent source override lands on session and turn usage rows", () => {
+        const extracted = __testExtractClaudeJsonlLines(
+            usageLines("claude-opus-4-8"),
+            "-tmp",
+            "claude-subagent-abc",
+        );
+        const [stmt] = buildClaudeTokenUsageStatements(extracted!, "claude-subagent");
+        expect(stmt).toContain('source: "claude-subagent"');
+        const [turnStmt] = buildClaudeTurnTokenUsageStatements(extracted!, "claude-subagent");
+        expect(turnStmt).toContain('source: "claude-subagent"');
+    });
+
     test("emits no statements when the transcript carries no usage", () => {
         const extracted = __testExtractClaudeJsonlLines(
             [

@@ -1422,6 +1422,10 @@ DEFINE FIELD ts           ON spawned TYPE datetime DEFAULT time::now();
 DEFINE FIELD tool         ON spawned TYPE option<string>;       -- e.g. "spawn_agent" | "Task"
 DEFINE FIELD tool_call    ON spawned TYPE option<record<tool_call>>;
 DEFINE FIELD nickname     ON spawned TYPE option<string>;       -- codex assigns "Turing", "Babbage", etc.
+DEFINE FIELD agent_type   ON spawned TYPE option<string>;       -- from agent-<id>.meta.json agentType
+DEFINE FIELD description  ON spawned TYPE option<string>;       -- from agent-<id>.meta.json description
+DEFINE FIELD agent_name   ON spawned TYPE option<string>;       -- from agent-<id>.meta.json name
+DEFINE FIELD tool_use_id  ON spawned TYPE option<string>;       -- from agent-<id>.meta.json toolUseId; joins parent tool_call.call_id
 DEFINE INDEX IF NOT EXISTS spawned_in   ON spawned FIELDS in;
 DEFINE INDEX IF NOT EXISTS spawned_out  ON spawned FIELDS out;
 
