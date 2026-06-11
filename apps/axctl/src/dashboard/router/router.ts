@@ -6,7 +6,10 @@
  *   - jsonRoute: pure param decoder -> Effect handler -> JSON encode, with
  *     optional respond/errorStatus overrides.
  *   - rawRoute: full Request -> Response escape hatch (SSE /api/events,
- *     binary /api/image, POST /api/ingest - the IngestStreamBus seam).
+ *     binary /api/image, POST /api/ingest - the IngestStreamBus seam - plus
+ *     the pure responses that must never build AppLayer: /api/version and
+ *     empty-q /api/recall, whose eager SurrealClient build would stall ~5s
+ *     without a DB).
  *
  * The Effect runner is injectable so router/route unit tests never build
  * AppLayer (and therefore never touch SurrealDB).
@@ -139,7 +142,7 @@ export interface AnyRoute {
 const toMethods = (m: Method | ReadonlyArray<Method> | "ANY"): ReadonlyArray<Method> =>
     m === "ANY" ? [] : Array.isArray(m) ? m : [m as Method];
 
-const errorMessage = (err: unknown): string => {
+export const errorMessage = (err: unknown): string => {
     if (err instanceof Error) return err.message;
     if (typeof err === "object" && err !== null && "message" in err) {
         return String(err.message);

@@ -10,6 +10,7 @@ import {
     type ToolCallSkillRelationWrite,
     type ToolCallWrite,
 } from "./evidence-writers.ts";
+import { makeFileFailureCollector } from "./file-isolation.ts";
 import { classifyTurnIntent } from "./intent-kind.ts";
 import { providerDelegationSignalAvailability } from "./delegation.ts";
 import { buildNormalizedTranscriptStatements } from "./normalized/transcripts.ts";
@@ -71,6 +72,10 @@ export interface OpenCodeStats {
     readonly toolCalls: number;
     readonly skipped: number;
     readonly warnings: number;
+    /** Sessions whose write pipeline failed and was skipped (retried next
+     *  run). Named `failedFiles` to match the cross-provider stage-stats key
+     *  the run totals + CLI skip summary aggregate (#261). */
+    readonly failedFiles: number;
 }
 
 const SAFE_FALLBACK_TS = "1970-01-01T00:00:00.000Z";
@@ -809,6 +814,36 @@ export function extractOpenCodeDatabase(dbPath: string): OpenCodeExtract {
     }
 }
 
+/**
+ * Narrow a whole-store extract down to ONE session - the unit of isolation
+ * for SQLite-backed providers (#261). The store is re-extracted on every run,
+ * so a session skipped by the isolation seam is naturally retried next run.
+ * `skipped`/`warnings` stay store-level and are NOT attributed to slices.
+ */
+const sliceOpenCodeExtractForSession = (
+    extract: OpenCodeExtract,
+    sessionId: string,
+): OpenCodeExtract => {
+    const toolCalls = extract.toolCalls.filter((call) => call.sessionId === sessionId);
+    // Skill relations carry no session field; correlate through the same
+    // toolCallRecordKey their tool calls were keyed with at extraction time.
+    const toolCallKeys = new Set(toolCalls.map((call) =>
+        toolCallRecordKey({ sessionId, seq: call.seq, callId: call.callId ?? null })
+    ));
+    return {
+        sessions: extract.sessions.filter((session) => session.id === sessionId),
+        turns: extract.turns.filter((turn) => turn.session === sessionId),
+        providerEvents: extract.providerEvents.filter((event) => event.providerSessionId === sessionId),
+        toolCalls,
+        invocations: extract.invocations.filter((invocation) => invocation.session === sessionId),
+        skillRelations: extract.skillRelations.filter((relation) => toolCallKeys.has(relation.toolCallKey)),
+        skipped: 0,
+        warnings: [],
+    };
+};
+
+export const __testSliceOpenCodeExtractForSession = sliceOpenCodeExtractForSession;
+
 const buildOpenCodeBatchStatements = (
     extract: OpenCodeExtract,
     sourcePath: string,
@@ -937,6 +972,7 @@ export const ingestOpenCode = Effect.fn("opencode.ingest")(
                 toolCalls: 0,
                 skipped: 0,
                 warnings: 0,
+                failedFiles: 0,
             };
         }
 
@@ -958,28 +994,44 @@ export const ingestOpenCode = Effect.fn("opencode.ingest")(
                 toolCalls: 0,
                 skipped: extract.skipped,
                 warnings: extract.warnings.length,
+                failedFiles: 0,
             };
         }
 
+        const failures = makeFileFailureCollector({ source: "opencode", unit: "session" });
+        let sessionCount = 0;
+        let turnCount = 0;
+        let toolCallCount = 0;
         for (const session of extract.sessions) {
-            yield* db.upsert(new RecordId("session", session.id), {
-                project: session.cwd ?? undefined,
-                cwd: session.cwd ?? undefined,
-                model: session.model ?? undefined,
-                source: "opencode",
-                started_at: new Date(session.started_at),
-                ended_at: new Date(session.ended_at),
-                raw_file: dbPath,
-            });
+            const slice = sliceOpenCodeExtractForSession(extract, session.id);
+            // Per-session failure isolation (#261): one undecodable / rejected
+            // session skips THIS session - the store is re-read next run -
+            // instead of aborting the whole stage (see file-isolation.ts).
+            yield* failures.isolate(`${dbPath}#${session.id}`, Effect.gen(function* () {
+                yield* db.upsert(new RecordId("session", session.id), {
+                    project: session.cwd ?? undefined,
+                    cwd: session.cwd ?? undefined,
+                    model: session.model ?? undefined,
+                    source: "opencode",
+                    started_at: new Date(session.started_at),
+                    ended_at: new Date(session.ended_at),
+                    raw_file: dbPath,
+                });
+                yield* executeStatements(buildOpenCodeBatchStatements(slice, dbPath), { chunkSize: 500, label: "opencode" });
+                sessionCount += 1;
+                turnCount += slice.turns.length;
+                toolCallCount += slice.toolCalls.length;
+            }));
         }
-        yield* executeStatements(buildOpenCodeBatchStatements(extract, dbPath), { chunkSize: 500, label: "opencode" });
+        yield* failures.report;
 
         return {
-            sessions: extract.sessions.length,
-            turns: extract.turns.length,
-            toolCalls: extract.toolCalls.length,
+            sessions: sessionCount,
+            turns: turnCount,
+            toolCalls: toolCallCount,
             skipped: extract.skipped,
             warnings: extract.warnings.length,
+            failedFiles: failures.count(),
         } satisfies OpenCodeStats;
     },
 );
@@ -990,6 +1042,10 @@ export class OpenCodeStageStats extends BaseStageStats.extend<OpenCodeStageStats
     toolCallsIngested: Schema.Number,
     skipped: Schema.Number,
     warnings: Schema.Number,
+    /** Sessions whose write pipeline failed and was skipped (retried next
+     *  run). Named `failedFiles` to match the cross-provider stage-stats key
+     *  the run totals + CLI skip summary aggregate (#261). */
+    failedFiles: Schema.Number,
 }) {}
 
 export const opencodeStage: StageDef<OpenCodeStageStats, SurrealClient | AxConfig | FileSystem.FileSystem | Path.Path> = {
@@ -1002,12 +1058,14 @@ export const opencodeStage: StageDef<OpenCodeStageStats, SurrealClient | AxConfi
         const result = yield* ingestOpenCode({ sinceDays });
         return OpenCodeStageStats.make({
             durationMs: Date.now() - t0,
-            summary: `ingested ${result.sessions} sessions, ${result.turns} turns, ${result.toolCalls} tool calls, skipped ${result.skipped}, warnings ${result.warnings}`,
+            summary: `ingested ${result.sessions} sessions, ${result.turns} turns, ${result.toolCalls} tool calls, skipped ${result.skipped}, warnings ${result.warnings}` +
+                (result.failedFiles > 0 ? `, ${result.failedFiles} session(s) failed (retry next run)` : ""),
             sessionsIngested: result.sessions,
             turnsIngested: result.turns,
             toolCallsIngested: result.toolCalls,
             skipped: result.skipped,
             warnings: result.warnings,
+            failedFiles: result.failedFiles,
         });
     }),
 };

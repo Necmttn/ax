@@ -1,7 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { Effect } from "effect";
-import { SurrealClient, type SurrealClientShape } from "@ax/lib/db";
-import { makeTestSurrealClient, type TestSurrealRows } from "@ax/lib/testing/surreal";
+import { makeMockDb, runWithMock } from "@ax/lib/testing/surreal";
 import {
     UNUSED_RECENT_SQL,
     UNUSED_SUMMARY_SQL,
@@ -12,19 +10,6 @@ import {
     mergeUnusedRows,
     fetchUnusedSkills,
 } from "./unused-skills.ts";
-
-function makeMockDb(responses: Array<unknown>): SurrealClientShape {
-    return makeTestSurrealClient({
-        denyWrites: true,
-        responses: responses as ReadonlyArray<TestSurrealRows>,
-    }).client;
-}
-
-const runWithMock = <A>(
-    db: SurrealClientShape,
-    effect: Effect.Effect<A, unknown, SurrealClient>,
-): Promise<A> =>
-    Effect.runPromise(effect.pipe(Effect.provideService(SurrealClient, db)));
 
 describe("unused-skills SQL", () => {
     test("recent scan splices a validated day window and groups by out", () => {

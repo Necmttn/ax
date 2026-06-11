@@ -9,6 +9,14 @@
  * swallowed - the file's watermark never commits, so the next run retries it
  * - while the stage keeps going.
  *
+ * The "file" is really a *unit of isolation*: for transcript providers
+ * (claude/codex/pi) it is a session file, for SQLite-store providers
+ * (opencode/cursor) it is one session within the store - re-extracted on the
+ * next run either way, so skip-and-retry semantics carry over unchanged
+ * (#261). `filePath` then holds a source locator (`<store path>#<session id>`)
+ * rather than a literal path, and {@link FileFailureCollectorOptions.unit}
+ * relabels the log lines.
+ *
  * Two classes of failure still abort the stage, on purpose:
  *
  *  - connection loss (`DbError` with `operation: "connect"`): nothing after
@@ -27,6 +35,8 @@ import { Effect } from "effect";
 import { DbError } from "@ax/lib/errors";
 
 export interface FileFailure {
+    /** Source locator: a transcript file path, or `<store path>#<session id>`
+     *  for SQLite-store providers where the unit of isolation is a session. */
     readonly filePath: string;
     /** Error tag (`DbError`, `SkillParseError`, ...) or constructor name. */
     readonly tag: string;
@@ -71,8 +81,11 @@ export interface FileFailureCollector {
 }
 
 export interface FileFailureCollectorOptions {
-    /** Provider label for log lines, e.g. "claude" / "codex". */
+    /** Provider label for log lines, e.g. "claude" / "codex" / "pi". */
     readonly source: string;
+    /** Isolation-unit noun for log lines: "file" (transcript providers) or
+     *  "session" (SQLite-store providers). Defaults to "file". */
+    readonly unit?: string;
     readonly stormThreshold?: number;
 }
 
@@ -80,6 +93,7 @@ export const makeFileFailureCollector = (
     opts: FileFailureCollectorOptions,
 ): FileFailureCollector => {
     const stormThreshold = opts.stormThreshold ?? DEFAULT_STORM_THRESHOLD;
+    const unit = opts.unit ?? "file";
     const failures: FileFailure[] = [];
     let total = 0;
     let consecutive = 0;
@@ -98,7 +112,7 @@ export const makeFileFailureCollector = (
                     if (failures.length < DETAIL_CAP) {
                         failures.push({ filePath, tag: failureTag(err), message: failureMessage(err) });
                     }
-                    yield* Effect.logWarning(`${opts.source} ingest: file failed, skipping (will retry next run)`, {
+                    yield* Effect.logWarning(`${opts.source} ingest: ${unit} failed, skipping (will retry next run)`, {
                         filePath,
                         tag: failureTag(err),
                         message: failureMessage(err),
@@ -107,7 +121,7 @@ export const makeFileFailureCollector = (
                         return yield* new DbError({
                             operation: "query",
                             message:
-                                `${opts.source} ingest aborted: ${consecutive} consecutive files failed ` +
+                                `${opts.source} ingest aborted: ${consecutive} consecutive ${unit}s failed ` +
                                 `(${total} total) - systemic failure, not bad input. Last: ${filePath}: ${failureMessage(err)}`,
                         });
                     }
@@ -122,7 +136,7 @@ export const makeFileFailureCollector = (
         isolate,
         report: Effect.suspend(() => {
             if (total === 0) return Effect.void;
-            return Effect.logWarning(`${opts.source} ingest: ${total} file(s) failed and were skipped; they retry next run`, {
+            return Effect.logWarning(`${opts.source} ingest: ${total} ${unit}(s) failed and were skipped; they retry next run`, {
                 failures: failures.map((f) => `${f.filePath}: [${f.tag}] ${f.message}`),
                 detailCapped: total > failures.length,
             });

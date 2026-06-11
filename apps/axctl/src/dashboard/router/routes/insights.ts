@@ -13,8 +13,10 @@ import {
     decodeFail,
     decodeFailWith,
     decodeOk,
+    errorMessage,
     jsonResponse,
     jsonRoute,
+    rawRoute,
     type AnyRoute,
     type Decoded,
     type RouteInput,
@@ -94,15 +96,28 @@ export const insightRoutes: ReadonlyArray<AnyRoute> = [
         decode: decodeSkillGraphParams,
         handler: (params) => fetchSkillGraph(params),
     }),
-    legacyGetRoute({
+    rawRoute({
+        // rawRoute (not jsonRoute) so the empty-q case answers before the
+        // runner: building AppLayer eagerly opens SurrealClient and stalls
+        // ~5s without a DB - same class as /api/version (issue #245).
+        method: "GET",
         path: "/api/recall",
-        decode: decodeRecallParams,
-        handler: (params) =>
-            params.q.trim().length === 0
-                ? Effect.succeed(
+        fallthroughOnMethodMismatch: true,
+        handler: async (input) => {
+            const decoded = decodeRecallParams(input);
+            if (!decoded.ok) return jsonResponse(decoded.body, decoded.status);
+            const params = decoded.value;
+            if (params.q.trim().length === 0) {
+                return jsonResponse(
                     emptyRecallResponse(params.q, params.offset ?? 0, params.limit ?? 50),
-                )
-                : fetchRecall(params),
+                );
+            }
+            try {
+                return jsonResponse(await input.runner(fetchRecall(params)));
+            } catch (err) {
+                return jsonResponse({ error: errorMessage(err) }, 500);
+            }
+        },
     }),
     legacyGetRoute({
         path: "/api/projects/:project+",

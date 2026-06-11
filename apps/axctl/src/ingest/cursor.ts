@@ -13,6 +13,7 @@ import {
     type ToolCallWrite,
 } from "./evidence-writers.ts";
 import { extractCursorCompaction, type CompactionWrite } from "./compaction.ts";
+import { makeFileFailureCollector } from "./file-isolation.ts";
 import { classifyTurnIntent } from "./intent-kind.ts";
 import { providerDelegationSignalAvailability } from "./delegation.ts";
 import { agentEventRecordKey, type AgentEventWrite } from "./provider-events.ts";
@@ -32,6 +33,10 @@ export interface CursorStats {
     readonly toolCalls: number;
     readonly skipped: number;
     readonly warnings: number;
+    /** Sessions whose write pipeline failed and was skipped (retried next
+     *  run). Named `failedFiles` to match the cross-provider stage-stats key
+     *  the run totals + CLI skip summary aggregate (#261). */
+    readonly failedFiles: number;
 }
 
 interface CursorSession {
@@ -955,6 +960,37 @@ const buildCursorBatchStatements = (extract: CursorExtract, sourcePath: string):
 
 export const __testBuildCursorBatchStatements = buildCursorBatchStatements;
 
+/**
+ * Narrow a whole-store extract down to ONE session - the unit of isolation
+ * for SQLite-backed providers (#261). The store is re-extracted on every run,
+ * so a session skipped by the isolation seam is naturally retried next run.
+ * `skipped`/`warnings` stay store-level and are NOT attributed to slices.
+ */
+const sliceCursorExtractForSession = (
+    extract: CursorExtract,
+    sessionId: string,
+): CursorExtract => {
+    const toolCalls = extract.toolCalls.filter((call) => call.sessionId === sessionId);
+    // Skill relations carry no session field; correlate through the same
+    // toolCallRecordKey their tool calls were keyed with at extraction time.
+    const toolCallKeys = new Set(toolCalls.map((call) =>
+        toolCallRecordKey({ sessionId, seq: call.seq, callId: call.callId ?? null })
+    ));
+    return {
+        sessions: extract.sessions.filter((session) => session.id === sessionId),
+        turns: extract.turns.filter((turn) => turn.session === sessionId),
+        invocations: extract.invocations.filter((invocation) => invocation.session === sessionId),
+        toolCalls,
+        providerEvents: extract.providerEvents.filter((event) => event.providerSessionId === sessionId),
+        skillRelations: extract.skillRelations.filter((relation) => toolCallKeys.has(relation.toolCallKey)),
+        compactions: extract.compactions.filter((compaction) => compaction.sessionId === sessionId),
+        skipped: 0,
+        warnings: [],
+    };
+};
+
+export const __testSliceCursorExtractForSession = sliceCursorExtractForSession;
+
 // All fs ops below are discovery PROBES: the OLD code guarded every access with
 // `existsSync`/`readdir`-in-try/catch and treated any miss/fault as "absent,
 // skip". `orAbsent` reproduces that exactly (recovers ANY PlatformError to the
@@ -1031,6 +1067,9 @@ export const ingestCursor = Effect.fn("cursor.ingest")(
         let skipped = 0;
         let warnings = 0;
 
+        // One collector across all state DBs: a failure storm spanning stores
+        // is just as systemic as one inside a single store.
+        const failures = makeFileFailureCollector({ source: "cursor", unit: "session" });
         for (const dbPath of dbPaths) {
             const extract = yield* Effect.sync(() =>
                 extractCursorStateDb(dbPath, { cursorUserDir: cfg.paths.cursorUserDir })
@@ -1044,18 +1083,26 @@ export const ingestCursor = Effect.fn("cursor.ingest")(
             if (extract.sessions.length === 0) continue;
 
             for (const session of extract.sessions) {
-                yield* db.upsert(new RecordId("session", session.id), {
-                    source: "cursor",
-                    started_at: new Date(session.started_at),
-                    ended_at: new Date(session.ended_at),
-                    raw_file: session.sourcePath,
-                });
+                const slice = sliceCursorExtractForSession(extract, session.id);
+                // Per-session failure isolation (#261): one undecodable /
+                // rejected session skips THIS session - the store is re-read
+                // next run - instead of aborting the whole stage (see
+                // file-isolation.ts).
+                yield* failures.isolate(`${dbPath}#${session.id}`, Effect.gen(function* () {
+                    yield* db.upsert(new RecordId("session", session.id), {
+                        source: "cursor",
+                        started_at: new Date(session.started_at),
+                        ended_at: new Date(session.ended_at),
+                        raw_file: session.sourcePath,
+                    });
+                    yield* executeStatements(buildCursorBatchStatements(slice, dbPath), { chunkSize: 500, label: "cursor" });
+                    sessionCount += 1;
+                    turnCount += slice.turns.length;
+                    toolCallCount += slice.toolCalls.length;
+                }));
             }
-            yield* executeStatements(buildCursorBatchStatements(extract, dbPath), { chunkSize: 500, label: "cursor" });
-            sessionCount += extract.sessions.length;
-            turnCount += extract.turns.length;
-            toolCallCount += extract.toolCalls.length;
         }
+        yield* failures.report;
 
         return {
             sessions: sessionCount,
@@ -1063,6 +1110,7 @@ export const ingestCursor = Effect.fn("cursor.ingest")(
             toolCalls: toolCallCount,
             skipped,
             warnings,
+            failedFiles: failures.count(),
         } satisfies CursorStats;
     },
 );
@@ -1073,6 +1121,10 @@ export class CursorStageStats extends BaseStageStats.extend<CursorStageStats>("C
     toolCallsIngested: Schema.Number,
     skipped: Schema.Number,
     warnings: Schema.Number,
+    /** Sessions whose write pipeline failed and was skipped (retried next
+     *  run). Named `failedFiles` to match the cross-provider stage-stats key
+     *  the run totals + CLI skip summary aggregate (#261). */
+    failedFiles: Schema.Number,
 }) {}
 
 export const cursorStage: StageDef<CursorStageStats, SurrealClient | AxConfig | FileSystem.FileSystem | Path.Path> = {
@@ -1085,12 +1137,14 @@ export const cursorStage: StageDef<CursorStageStats, SurrealClient | AxConfig | 
         const result = yield* ingestCursor({ sinceDays });
         return CursorStageStats.make({
             durationMs: Date.now() - t0,
-            summary: `ingested ${result.sessions} sessions, ${result.turns} turns, ${result.toolCalls} tool calls, skipped ${result.skipped}, warnings ${result.warnings}`,
+            summary: `ingested ${result.sessions} sessions, ${result.turns} turns, ${result.toolCalls} tool calls, skipped ${result.skipped}, warnings ${result.warnings}` +
+                (result.failedFiles > 0 ? `, ${result.failedFiles} session(s) failed (retry next run)` : ""),
             sessionsIngested: result.sessions,
             turnsIngested: result.turns,
             toolCallsIngested: result.toolCalls,
             skipped: result.skipped,
             warnings: result.warnings,
+            failedFiles: result.failedFiles,
         });
     }),
 };
