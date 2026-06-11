@@ -633,6 +633,24 @@ export const classifiersPackageOperationsNeedsDb = (args: ReadonlyArray<string>)
         args.includes("--boundary-replay-summary")
     );
 
+// The classifiers family owns its sub-routing (issue #241): dispatch reads
+// this db-conditional declaration via resolveRuntime instead of hard-coding
+// subcommand names. effect-cli.test.ts enforces this table is exhaustive
+// against classifiersCommand's registered subcommands in both directions.
 export const classifiersRuntime: RuntimeManifest = {
-    classifiers: "db",
+    classifiers: {
+        kind: "db-conditional",
+        fallback: "db",
+        subcommands: {
+            list: "none",
+            eval: "none",
+            explain: "db",
+            graph: "db",
+            lifecycle: "db",
+            "package-operations": (args) =>
+                classifiersPackageOperationsNeedsDb(args) ? "db" : "none",
+            "workflow-candidates": "db",
+            "label-mining": "db",
+        },
+    },
 };

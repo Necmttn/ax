@@ -1,4 +1,4 @@
-import { Effect } from "effect";
+import { Array as Arr, Effect } from "effect";
 import type { SurrealClient } from "@ax/lib/db";
 import type {
     InspectContentAtomDto,
@@ -81,6 +81,43 @@ const TURN_CONTENT_ATOMS_FOR_DOC_SQL = `
 /** Per-document fan-out width for full content resolution (share export). */
 const CONTENT_FANOUT_CONCURRENCY = 16;
 
+/**
+ * Max record refs a single materialized record-list query may carry on the
+ * fast inspector path. Unbounded, a session at the inspect pagination cap
+ * (2000 turns) packed 2000 x 20 = 40k block refs - and up to 40k x 8 kinds x 5
+ * = 1.6M atom refs - into ONE SurrealQL statement, risking dashboard timeouts
+ * and DB stalls. Exported for the query-capture regression tests.
+ */
+export const DIRECT_REF_BUDGET_PER_QUERY = 200;
+
+/** Bounded concurrency for the chunked direct-ref fetches - same chunked-query
+ *  discipline as the metrics fetchers (see metrics/fragility-cascade.ts). */
+const DIRECT_REF_CONCURRENCY = 8;
+
+/**
+ * Hard ceiling on total speculative direct refs per request (block + atom
+ * stages combined). Past it the speculative fetch degrades to the
+ * per-document indexed fan-out the slow path already uses (~1ms per document
+ * via content_block_document_seq / content_atom_document_kind), which beats
+ * issuing hundreds of record-list chunks that mostly dereference to NONE.
+ * Exported for the fan-out regression tests.
+ */
+export const MAX_SPECULATIVE_REFS_PER_REQUEST = 24_000;
+
+/** Run one bounded record-list query per ref chunk (each query carries at
+ *  most {@link DIRECT_REF_BUDGET_PER_QUERY} refs), flattening the per-chunk
+ *  rows. Callers re-sort in JS - cross-chunk order is not meaningful. */
+const chunkedRefQuery = <Row>(
+    refs: ReadonlyArray<string>,
+    sqlForChunk: (chunk: ReadonlyArray<string>) => string,
+    context: string,
+): Effect.Effect<ReadonlyArray<Row>, never, SurrealClient> =>
+    Effect.forEach(
+        Arr.chunksOf(refs, DIRECT_REF_BUDGET_PER_QUERY),
+        (chunk) => queryMany<Row, Row>(sqlForChunk(chunk), (row) => row, context),
+        { concurrency: DIRECT_REF_CONCURRENCY },
+    ).pipe(Effect.map((results) => results.flat()));
+
 interface TurnContentDocumentRow {
     readonly source_ref: string | null;
     readonly document_id: string;
@@ -115,6 +152,17 @@ interface TurnContentAtomRow {
     readonly raw: unknown;
 }
 
+const compareStrings = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
+
+const byDocumentThenSeq = (a: TurnContentBlockRow, b: TurnContentBlockRow): number =>
+    compareStrings(a.document_id, b.document_id) || a.seq - b.seq;
+
+const byDocumentBlockKindValue = (a: TurnContentAtomRow, b: TurnContentAtomRow): number =>
+    compareStrings(a.document_id, b.document_id) ||
+    a.block_seq - b.block_seq ||
+    compareStrings(a.kind, b.kind) ||
+    compareStrings(a.value, b.value);
+
 function contentDocumentRid(value: string): string | null {
     const prefix = "content_document:";
     if (!value.startsWith(prefix)) return null;
@@ -126,9 +174,14 @@ function contentDocumentRid(value: string): string | null {
 
 export const resolveTurnContent = Effect.fn("queries.resolveTurnContent")(
     function* (sessionId: string) {
-        return yield* resolveTurnContentFromDocuments(interpolateRid(TURN_CONTENT_DOCUMENTS_SQL, toBareSessionId(sessionId)), {
-            includeAtoms: true,
-        });
+        return yield* resolveTurnContentFromDocuments(
+            queryMany<TurnContentDocumentRow, TurnContentDocumentRow>(
+                interpolateRid(TURN_CONTENT_DOCUMENTS_SQL, toBareSessionId(sessionId)),
+                (row) => row,
+                "session-turn-content resolveDocuments",
+            ),
+            { includeAtoms: true },
+        );
     },
 );
 
@@ -139,8 +192,12 @@ export const resolveTurnContentForTurnSeqs = Effect.fn("queries.resolveTurnConte
             .sort((a, b) => a - b);
         if (seqs.length === 0) return new Map<number, InspectTurnContentDto>();
         return yield* resolveTurnContentFromDocuments(
-            interpolateRid(TURN_CONTENT_DOCUMENTS_FOR_SEQS_SQL, toBareSessionId(sessionId)),
-            { seqs },
+            queryMany<TurnContentDocumentRow, TurnContentDocumentRow>(
+                interpolateRid(TURN_CONTENT_DOCUMENTS_FOR_SEQS_SQL, toBareSessionId(sessionId)),
+                (row) => row,
+                "session-turn-content resolveDocuments",
+                { seqs },
+            ),
             { includeAtoms: true },
         );
     },
@@ -153,24 +210,32 @@ export const resolveTurnContentForSourceRefs = Effect.fn("queries.resolveTurnCon
     function* (sourceRefs: ReadonlyArray<string>) {
         const refs = [...new Set(sourceRefs)].filter((ref) => ref.length > 0);
         if (refs.length === 0) return new Map<number, InspectTurnContentDto>();
-        const documents = refListSource(
-            refs.map((ref) => recordRef("content_document", contentDocumentKeyForTurnRef(ref))),
-            ["id", "source_ref", "parser_id", "parser_version", "blockset_hash", "turn"],
+        const documentRefs = refs.map((ref) =>
+            recordRef("content_document", contentDocumentKeyForTurnRef(ref)),
         );
         // Fast inspector path: direct document/block/atom record fetches avoid the
         // multi-second `document IN ...` scans seen on large sessions. Atoms are
         // capped per kind/block so the initial inspect response stays sub-second.
-        return yield* resolveTurnContentFromDocuments(`
-        SELECT
-            source_ref,
-            type::string(id) AS document_id,
-            parser_id,
-            parser_version,
-            blockset_hash,
-            turn.seq AS turn_seq
-        FROM ${documents}
-        ORDER BY turn_seq;
-    `, undefined, {
+        // Every record-list fetch is chunked to DIRECT_REF_BUDGET_PER_QUERY refs;
+        // a window at the pagination cap stays a series of small indexed queries
+        // instead of one enormous statement.
+        const fetchDocuments = chunkedRefQuery<TurnContentDocumentRow>(
+            documentRefs,
+            (chunk) => `
+                SELECT
+                    source_ref,
+                    type::string(id) AS document_id,
+                    parser_id,
+                    parser_version,
+                    blockset_hash,
+                    turn.seq AS turn_seq
+                FROM ${refListSource(chunk, ["id", "source_ref", "parser_id", "parser_version", "blockset_hash", "turn"])};
+            `,
+            "session-turn-content resolveDocumentsDirect",
+        ).pipe(
+            Effect.map((rows) => [...rows].sort((a, b) => (a.turn_seq ?? 0) - (b.turn_seq ?? 0))),
+        );
+        return yield* resolveTurnContentFromDocuments(fetchDocuments, {
             includeAtoms: false,
             directBlockLimitPerDocument: 20,
             directAtomLimitPerKind: 5,
@@ -190,8 +255,7 @@ const FAST_TURN_ATOM_KINDS = [
 ] as const;
 
 const resolveTurnContentFromDocuments = (
-    documentsSql: string,
-    bindings?: Record<string, unknown>,
+    fetchDocuments: Effect.Effect<ReadonlyArray<TurnContentDocumentRow>, never, SurrealClient>,
     opts: {
         readonly includeAtoms: boolean;
         readonly directBlockLimitPerDocument?: number;
@@ -199,12 +263,7 @@ const resolveTurnContentFromDocuments = (
     } = { includeAtoms: true },
 ): Effect.Effect<Map<number, InspectTurnContentDto>, never, SurrealClient> =>
     Effect.gen(function* () {
-        const documentRows = yield* queryMany<TurnContentDocumentRow, TurnContentDocumentRow>(
-            documentsSql,
-            (row) => row,
-            "session-turn-content resolveDocuments",
-            bindings,
-        );
+        const documentRows = yield* fetchDocuments;
         if (documentRows.length === 0) return new Map<number, InspectTurnContentDto>();
 
         const documents = documentRows
@@ -224,9 +283,16 @@ const resolveTurnContentFromDocuments = (
                 );
             })
             : [];
-        const blockRows = directBlockRefs.length > 0
-            ? yield* queryMany<TurnContentBlockRow, TurnContentBlockRow>(
-                `
+        // Hard ceiling on the speculative fan-out: past it, fall back to the
+        // per-document indexed path - issuing one ~1ms indexed query per
+        // document beats flooding the DB with speculative refs that mostly
+        // dereference to NONE.
+        const useDirectBlocks =
+            directBlockRefs.length > 0 && directBlockRefs.length <= MAX_SPECULATIVE_REFS_PER_REQUEST;
+        const blockRows = useDirectBlocks
+            ? [...(yield* chunkedRefQuery<TurnContentBlockRow>(
+                directBlockRefs,
+                (chunk) => `
                     SELECT
                         type::string(id) AS id,
                         type::string(document) AS document_id,
@@ -240,12 +306,10 @@ const resolveTurnContentFromDocuments = (
                         start_offset,
                         end_offset,
                         confidence
-                    FROM ${refListSource(directBlockRefs, ["id", "document", "seq", "parent_seq", "kind", "role", "heading", "text", "text_excerpt", "start_offset", "end_offset", "confidence"])}
-                    ORDER BY document_id, seq;
+                    FROM ${refListSource(chunk, ["id", "document", "seq", "parent_seq", "kind", "role", "heading", "text", "text_excerpt", "start_offset", "end_offset", "confidence"])};
                 `,
-                (row) => row,
                 "session-turn-content resolveBlocksDirect",
-            )
+            ))].sort(byDocumentThenSeq)
             // Per-document indexed fan-out instead of a `document IN [<all docs>]`
             // membership scan (see TURN_CONTENT_BLOCKS_FOR_DOC_SQL).
             : (yield* Effect.forEach(
@@ -258,7 +322,9 @@ const resolveTurnContentFromDocuments = (
                     ),
                 { concurrency: CONTENT_FANOUT_CONCURRENCY },
             )).flat();
-        const directAtomRefs = opts.directAtomLimitPerKind
+        // Speculative atom refs only make sense while the request is still in
+        // direct mode; once blocks fell back per-document, atoms follow.
+        const directAtomRefs = useDirectBlocks && opts.directAtomLimitPerKind
             ? blockRows.flatMap((block) => {
                 const blockKey = recordKeyPart(block.id, "content_block");
                 if (!blockKey) return [];
@@ -272,9 +338,18 @@ const resolveTurnContentFromDocuments = (
                 );
             })
             : [];
-        const atomRows = directAtomRefs.length > 0
-            ? yield* queryMany<TurnContentAtomRow, TurnContentAtomRow>(
-                `
+        const useDirectAtoms =
+            directAtomRefs.length > 0 &&
+            directBlockRefs.length + directAtomRefs.length <= MAX_SPECULATIVE_REFS_PER_REQUEST;
+        // On the fast path, atoms past the ceiling degrade to the per-document
+        // indexed fetch too (still correct - just no longer capped per kind).
+        const wantsAtomFallback =
+            opts.includeAtoms ||
+            (opts.directAtomLimitPerKind !== undefined && !useDirectAtoms && blockRows.length > 0);
+        const atomRows = useDirectAtoms
+            ? [...(yield* chunkedRefQuery<TurnContentAtomRow>(
+                directAtomRefs,
+                (chunk) => `
                     SELECT
                         type::string(document) AS document_id,
                         block.seq AS block_seq,
@@ -283,13 +358,11 @@ const resolveTurnContentFromDocuments = (
                         normalized,
                         confidence,
                         raw
-                    FROM ${refListSource(directAtomRefs, ["document", "block", "kind", "value", "normalized", "confidence", "raw"])}
-                    ORDER BY document_id, block_seq, kind, value;
+                    FROM ${refListSource(chunk, ["document", "block", "kind", "value", "normalized", "confidence", "raw"])};
                 `,
-                (row) => row,
                 "session-turn-content resolveAtomsDirect",
-            )
-            : opts.includeAtoms
+            ))].sort(byDocumentBlockKindValue)
+            : wantsAtomFallback
               // Per-document indexed fan-out instead of a `document IN [...]` scan.
               ? (yield* Effect.forEach(
                   documents,
