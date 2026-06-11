@@ -80,15 +80,23 @@ const errorText = (error: unknown): string =>
  *  - success       -> status "ok"
  *  - typed failure -> status "error" + `{ error: <message> }`; the original
  *                     failure still propagates
- *  - interruption  -> status "error" + `{ error: "interrupted" }` (best
- *                     effort - the write itself is `Effect.ignore`d)
+ *  - interruption  -> status "partial" + `{ error: "interrupted" }` (best
+ *                     effort - the write itself is `Effect.ignore`d).
+ *                     "partial", not "error": ingest is incremental, so a
+ *                     Ctrl-C/timeout keeps everything persisted so far and a
+ *                     re-run continues (#266). The timeout path in
+ *                     cmdIngest's `onTimeout` then overwrites the metrics
+ *                     with the honest timeout reason.
+ *  - defect        -> status "error" + the squashed defect text (best
+ *                     effort) - a crash must never strand the row in
+ *                     "running" (#269); the defect still propagates
  *
- * Pure defects write nothing, mirroring the old trio (tap/catch never saw
- * them). The finalizer runs while the SurrealClient scope is still open
- * (inner scope unwinds before the layer closes the connection), so the last
- * write has a live connection. The interruption arm requires the process
- * main fiber to actually be interrupted on SIGINT - see BunRuntime.runMain
- * in cli/index.ts.
+ * The finalizer runs while the SurrealClient scope is still open (inner
+ * scope unwinds before the layer closes the connection), so the last write
+ * has a live connection. The interruption arm requires the process main
+ * fiber to actually be interrupted on SIGINT - see BunRuntime.runMain in
+ * cli/index.ts. A hard kill (SIGKILL/power loss) runs no finalizer at all;
+ * `ax doctor`'s stale-run check catches those rows.
  */
 export const withIngestRunFinish = (db: SurrealClientShape, runId: string) =>
     <A, E, R>(effect: Effect.Effect<A, E, R>): Effect.Effect<A, E | DbError, R> =>
@@ -103,18 +111,25 @@ export const withIngestRunFinish = (db: SurrealClientShape, runId: string) =>
             if (Exit.hasInterrupts(exit)) {
                 return db.query(buildIngestRunFinishStatement({
                     runId,
-                    status: "error",
+                    status: "partial",
                     metrics: { error: "interrupted" },
                 })).pipe(Effect.ignore);
             }
             const failure = Cause.findErrorOption(cause);
-            return Option.isSome(failure)
-                ? db.query(buildIngestRunFinishStatement({
+            if (Option.isSome(failure)) {
+                return db.query(buildIngestRunFinishStatement({
                     runId,
                     status: "error",
                     metrics: { error: errorText(failure.value) },
-                })).pipe(Effect.asVoid)
-                : Effect.void;
+                })).pipe(Effect.asVoid);
+            }
+            // Defect: still settle the row (never leave "running"), best
+            // effort; the defect itself propagates past this finalizer.
+            return db.query(buildIngestRunFinishStatement({
+                runId,
+                status: "error",
+                metrics: { error: errorText(Cause.squash(cause)) },
+            })).pipe(Effect.ignore);
         });
 
 const numericCounts = (value: unknown): Record<string, number> => {
@@ -246,6 +261,10 @@ export interface RunIngestResult {
     readonly runId: string;
     readonly selectedStages: readonly string[];
     readonly status: "ok";
+    /** Numeric stage stats summed across all stages (e.g. `sessions`,
+     *  `failedFiles` from the per-file isolation guards). `durationMs` is
+     *  excluded - summing wall-clocks across concurrent stages is noise. */
+    readonly totals: Record<string, number>;
 }
 
 const defaultRunId = (command: string): string =>
@@ -293,7 +312,7 @@ export const runIngest = (
             )
         );
 
-        yield* runPipeline(wrappedStages, ctx).pipe(
+        const stageStats = yield* runPipeline(wrappedStages, ctx).pipe(
             LiveTrace.withTrace({
                 traceId: `ingest:${runId}`,
                 label: `ingest ${selectedStages.map((s) => s.meta.key).join(",")}`,
@@ -303,9 +322,18 @@ export const runIngest = (
             Effect.provideService(References.MinimumLogLevel, opts.verbose ? "Debug" : "Info"),
         );
 
+        const totals: Record<string, number> = {};
+        for (const stats of stageStats) {
+            for (const [key, value] of Object.entries(stats)) {
+                if (key === "durationMs" || typeof value !== "number" || !Number.isFinite(value)) continue;
+                totals[key] = (totals[key] ?? 0) + value;
+            }
+        }
+
         return {
             runId,
             selectedStages: selectedStages.map((s) => s.meta.key),
             status: "ok" as const,
+            totals,
         };
     });

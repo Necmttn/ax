@@ -35,6 +35,18 @@ export interface IngestLockInfo {
 }
 
 /**
+ * Discriminated result of {@link withIngestLock}, so callers can tell a
+ * timed-out run apart from a busy skip or a completed run. The distinction is
+ * load-bearing: `ax ingest` must exit non-zero on timeout (#265) while a busy
+ * skip stays exit 0 (the watcher re-fires anyway). An earlier version
+ * collapsed timeout into `undefined`, which read as success.
+ */
+export type IngestLockOutcome<A, A2> =
+    | { readonly _tag: "completed"; readonly value: A }
+    | { readonly _tag: "busy"; readonly value: A2 }
+    | { readonly _tag: "timeout" };
+
+/**
  * Is `pid` a live process this user could signal? `kill(pid, 0)` sends no
  * signal; it only probes existence. ESRCH => gone; EPERM => alive but owned by
  * another user (still "alive" for our purposes).
@@ -67,8 +79,10 @@ const readHolder = (
  * Run `work` while holding the ingest lock. If a fresh lock owned by a live
  * process is already held, run `onBusy(holder)` instead and skip `work`.
  *
- * Returns the work's value on success, the `onBusy` value when busy, or
- * `undefined` when `work` timed out (the lock is then left to age out).
+ * Returns `{ _tag: "completed", value }` with the work's value on success,
+ * `{ _tag: "busy", value }` with the `onBusy` value when skipped, or
+ * `{ _tag: "timeout" }` when `work` timed out (the lock is then left to age
+ * out as a cooldown).
  */
 export const withIngestLock = <A, E, R, A2, E2, R2>(
     opts: {
@@ -80,12 +94,15 @@ export const withIngestLock = <A, E, R, A2, E2, R2>(
         readonly timeoutSeconds?: number;
         readonly now?: () => number;
         readonly onBusy: (holder: IngestLockInfo) => Effect.Effect<A2, E2, R2>;
-        /** logged when `work` exceeds `timeoutSeconds` (lock left to age) */
+        /** run when `work` exceeds `timeoutSeconds` (lock left to age) - e.g.
+         *  finalize the run row + tell the user; runs AFTER the interrupted
+         *  work's own finalizers have completed */
         readonly onTimeout?: () => Effect.Effect<void, never, never>;
     },
     work: Effect.Effect<A, E, R>,
-): Effect.Effect<A | A2 | undefined, E | E2, R | R2 | FileSystem.FileSystem | Path.Path> =>
+): Effect.Effect<IngestLockOutcome<A, A2>, E | E2, R | R2 | FileSystem.FileSystem | Path.Path> =>
     Effect.gen(function* () {
+        const busy = (value: A2): IngestLockOutcome<A, A2> => ({ _tag: "busy", value });
         const fs = yield* FileSystem.FileSystem;
         const path = yield* Path.Path;
         const now = opts.now ?? (() => Date.now());
@@ -110,7 +127,7 @@ export const withIngestLock = <A, E, R, A2, E2, R2>(
             if (Option.isSome(holder)) {
                 const h = holder.value;
                 if (now() - h.startedAt < opts.staleMs && isProcessAlive(h.pid)) {
-                    return yield* opts.onBusy(h);
+                    return busy(yield* opts.onBusy(h));
                 }
             }
             // Stale / dead / unreadable: steal it, then re-create atomically. If
@@ -119,9 +136,9 @@ export const withIngestLock = <A, E, R, A2, E2, R2>(
             owned = yield* tryCreate();
             if (!owned) {
                 const h2 = yield* readHolder(opts.lockPath);
-                return yield* opts.onBusy(
+                return busy(yield* opts.onBusy(
                     Option.getOrElse(h2, () => ({ pid: -1, startedAt: now(), command: "unknown" })),
-                );
+                ));
             }
         }
 
@@ -152,7 +169,7 @@ export const withIngestLock = <A, E, R, A2, E2, R2>(
 
         if (Option.isNone(result)) {
             if (opts.onTimeout) yield* opts.onTimeout();
-            return undefined;
+            return { _tag: "timeout" } as IngestLockOutcome<A, A2>;
         }
-        return result.value;
+        return { _tag: "completed", value: result.value } as IngestLockOutcome<A, A2>;
     });

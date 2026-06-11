@@ -60,6 +60,11 @@ const DEFAULTS = {
     sessionsEnrichConcurrency: 16,
 } as const;
 
+/** Default hard wall-clock cap on a single CLI ingest (seconds). Exported for
+ *  code paths that run without AxConfig (e.g. `ax doctor` on the no-DB-layer
+ *  route) but must mirror the `AX_INGEST_TIMEOUT_SECONDS` knob's default. */
+export const DEFAULT_INGEST_TIMEOUT_SECONDS = DEFAULTS.ingestTimeoutSeconds;
+
 /** Legacy-faithful int knob parsing, byte-identical to the old hand-rolled
  *  env readers: `Number.parseInt(raw, 10)` prefix-parses (`" 5"` -> 5,
  *  `"5abc"` -> 5, `"5.5"` -> 5, `"1e2"` -> 1); a missing var, empty string,

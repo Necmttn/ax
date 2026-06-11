@@ -29,15 +29,28 @@ export function buildIngestRunStartStatement(input: {
     readonly sinceDays?: number | null;
 }): string {
     const since = input.sinceDays === null || input.sinceDays === undefined ? "NONE" : String(input.sinceDays);
-    return `UPSERT ingest_run:\`${input.runId}\` MERGE { command: ${surrealString(input.command)}, status: "running", since_days: ${since}, started_at: time::now() };`;
+    return `UPSERT ingest_run:\`${input.runId}\` MERGE { command: ${surrealString(input.command)}, status: "running", since_days: ${since}, started_at: time::now(), last_progress_at: time::now() };`;
 }
+
+/** Terminal `ingest_run` statuses: "ok" = clean finish, "error" = the run
+ *  failed, "partial" = interrupted/timed out with progress saved (re-running
+ *  `ax ingest` continues incrementally). "running" is never terminal - a row
+ *  stuck there means the process died without finalizing (doctor warns). */
+export type IngestRunFinishStatus = "ok" | "error" | "partial";
 
 export function buildIngestRunFinishStatement(input: {
     readonly runId: string;
-    readonly status: "ok" | "error";
+    readonly status: IngestRunFinishStatus;
     readonly metrics?: unknown;
 }): string {
     return `UPDATE ingest_run:\`${input.runId}\` SET status = ${surrealString(input.status)}, ended_at = time::now(), metrics = ${surrealJson(input.metrics ?? {})} RETURN NONE;`;
+}
+
+/** Heartbeat on the parent run row: stage start/finish bumps
+ *  `last_progress_at` so a genuinely-live "running" run is distinguishable
+ *  from one stranded by a crash (doctor's stale-run check, issue #269). */
+function ingestRunHeartbeatStatement(runId: string): string {
+    return `UPDATE ingest_run:\`${runId}\` SET last_progress_at = time::now() RETURN NONE;`;
 }
 
 export function buildIngestStageStartStatement(input: {
@@ -46,7 +59,7 @@ export function buildIngestStageStartStatement(input: {
     readonly stage: string;
 }): string {
     const id = `${sqlIdPart(input.runId)}__${sqlIdPart(input.source)}__${sqlIdPart(input.stage)}`;
-    return `UPSERT ingest_stage:\`${id}\` MERGE { run: ingest_run:\`${input.runId}\`, source: ${surrealString(input.source)}, stage: ${surrealString(input.stage)}, status: "running", started_at: time::now() };`;
+    return `UPSERT ingest_stage:\`${id}\` MERGE { run: ingest_run:\`${input.runId}\`, source: ${surrealString(input.source)}, stage: ${surrealString(input.stage)}, status: "running", started_at: time::now() }; ${ingestRunHeartbeatStatement(input.runId)}`;
 }
 
 export function buildIngestStageFinishStatement(input: {
@@ -59,7 +72,7 @@ export function buildIngestStageFinishStatement(input: {
 }): string {
     const id = `${sqlIdPart(input.runId)}__${sqlIdPart(input.source)}__${sqlIdPart(input.stage)}`;
     const errorText = input.errorText === undefined ? "NONE" : surrealString(input.errorText);
-    return `UPDATE ingest_stage:\`${id}\` SET status = ${surrealString(input.status)}, ended_at = time::now(), counts = ${surrealJson(input.counts ?? {})}, error_text = ${errorText} RETURN NONE;`;
+    return `UPDATE ingest_stage:\`${id}\` SET status = ${surrealString(input.status)}, ended_at = time::now(), counts = ${surrealJson(input.counts ?? {})}, error_text = ${errorText} RETURN NONE; ${ingestRunHeartbeatStatement(input.runId)}`;
 }
 
 export function buildIngestEventStatement(event: IngestEvent): string {

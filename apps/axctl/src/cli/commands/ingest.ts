@@ -25,8 +25,10 @@ import {
     type ProgressReporter,
 } from "../progress.ts";
 import { stderrExit } from "../output.ts";
+import { safeJsonParse } from "@ax/lib/shared/safe-json";
 import {
     buildIngestEventStatement,
+    buildIngestRunFinishStatement,
     buildIngestRunStartStatement,
     buildIngestStageFinishStatement,
     buildIngestStageStartStatement,
@@ -207,6 +209,45 @@ interface IngestCommandOpts {
  */
 const INGEST_LOCK_STALE_GRACE_MS = 60_000;
 
+/** `ax ingest-here` resumes as `ax ingest here`; everything else as-is. */
+const resumeCommand = (command: string): string =>
+    command === "ingest-here" ? "ax ingest here" : `ax ${command}`;
+
+/** One-line verdicts (#265) printed to stderr so the outcome of a run is
+ *  legible without grepping cascade teardown. Exported for tests. */
+export const formatIngestTimeoutVerdict = (command: string, timeoutSeconds: number): string =>
+    `ingest: timed out after ${timeoutSeconds}s (AX_INGEST_TIMEOUT_SECONDS) - ` +
+    `progress saved, re-run '${resumeCommand(command)}' to continue`;
+
+export const formatIngestFailedVerdict = (sessions: number, firstError: string): string =>
+    `ingest: FAILED after ${sessions} sessions - ${firstError}`;
+
+export const formatIngestSkipSummary = (skippedFiles: number): string =>
+    `ingest: ok - ${skippedFiles} file(s) skipped (per-file isolation; retried next run)`;
+
+/**
+ * Sessions persisted by this run so far, summed from the per-stage `counts`
+ * JSON already written to `ingest_stage` rows. Feeds the FAILED verdict
+ * (#265) - the stage stats themselves are lost down the error channel.
+ */
+const completedSessionCount = (
+    db: SurrealClientShape,
+    runId: string,
+): Effect.Effect<number, DbError> =>
+    Effect.gen(function* () {
+        const res = yield* db.query<[Array<{ counts: string | null }>]>(
+            `SELECT counts FROM ingest_stage WHERE run = ingest_run:\`${runId}\`;`,
+        );
+        let sessions = 0;
+        for (const row of res?.[0] ?? []) {
+            if (typeof row.counts !== "string") continue;
+            const parsed = safeJsonParse<Record<string, unknown>>(row.counts);
+            const n = parsed?.["sessions"];
+            if (typeof n === "number" && Number.isFinite(n)) sessions += n;
+        }
+        return sessions;
+    });
+
 // EXCEPTION to the typed-options rule: runIngest({ args }) forwards raw CLI
 // args into the stage pipeline (src/ingest/run.ts does its own --stages/
 // --since/--reset parsing). Until runIngest grows a typed options contract,
@@ -216,9 +257,13 @@ const cmdIngest = (args: string[], opts: IngestCommandOpts = {}) =>
     Effect.gen(function* () {
         const commandName = opts.command ?? "ingest";
         const cfg = yield* AxConfig;
+        const db = yield* SurrealClient;
         const path = yield* Path.Path;
         const lockPath = path.join(cfg.paths.dataDir, "ingest.lock");
         const timeoutSeconds = cfg.knobs.ingestTimeoutSeconds;
+        // The runId is minted HERE (not inside runIngest) so the timeout and
+        // failure paths below can address the `ingest_run` row.
+        const runId = runIdFor(commandName);
 
         const work = runIngest({
             command: commandName,
@@ -228,7 +273,8 @@ const cmdIngest = (args: string[], opts: IngestCommandOpts = {}) =>
             ...(opts.claudeProject ? { claudeProject: opts.claudeProject } : {}),
             debug: args.includes("--debug"),
             verbose: args.includes("--verbose"),
-        }).pipe(Effect.asVoid);
+            runId: () => runId,
+        });
 
         // Single-flight + hard wall-clock cap, both owned by the lock. While one
         // ingest holds the lock another SKIPS (the watcher re-fires anyway, so a
@@ -237,7 +283,7 @@ const cmdIngest = (args: string[], opts: IngestCommandOpts = {}) =>
         // lock to age into a cooldown - interrupting the fiber doesn't prove
         // SurrealDB stopped server-side, so the next ingest must hold off until
         // the lock goes stale rather than charging a still-busy DB.
-        yield* withIngestLock(
+        const outcome = yield* withIngestLock(
             {
                 lockPath,
                 command: commandName,
@@ -250,16 +296,51 @@ const cmdIngest = (args: string[], opts: IngestCommandOpts = {}) =>
                                 `is in progress; skipping.\n`,
                         )
                     ),
+                // The interrupt finalizer (withIngestRunFinish) has already
+                // settled the row as "partial"/interrupted by the time this
+                // runs; overwrite the metrics with the honest timeout reason so
+                // diagnosis doesn't need wall-clock correlation (#266, #269).
+                // Best-effort: a dead DB must not mask the timeout verdict.
                 onTimeout: () =>
-                    Effect.sync(() =>
-                        process.stderr.write(
-                            `axctl ${commandName}: ingest exceeded ${timeoutSeconds}s and was cancelled; ` +
-                                `lock held as cooldown. Raise AX_INGEST_TIMEOUT_SECONDS for a large first backfill.\n`,
-                        )
-                    ),
+                    db.query(buildIngestRunFinishStatement({
+                        runId,
+                        status: "partial",
+                        metrics: { error: `timeout after ${timeoutSeconds}s` },
+                    })).pipe(Effect.ignore),
             },
             work,
+        ).pipe(
+            // Typed failure: print the one-line FAILED verdict (#265) before the
+            // error propagates (BunRuntime.runMain then exits 1).
+            Effect.tapError((error) =>
+                Effect.gen(function* () {
+                    const sessions = yield* completedSessionCount(db, runId).pipe(
+                        Effect.orElseSucceed(() => 0),
+                    );
+                    process.stderr.write(
+                        `${formatIngestFailedVerdict(sessions, errorText(error))}\n`,
+                    );
+                }),
+            ),
         );
+
+        if (outcome._tag === "timeout") {
+            // Timed-out run must not look like success (#265): honest verdict +
+            // resume hint (#266), then a non-zero exit. The ingest_run row is
+            // already finalized as "partial" by onTimeout above.
+            return yield* stderrExit(
+                `${formatIngestTimeoutVerdict(commandName, timeoutSeconds)}\n`,
+                1,
+            );
+        }
+        if (outcome._tag === "completed") {
+            // Per-file isolation (#257) skips broken files instead of failing
+            // the run; say so instead of a silent exit 0.
+            const skipped = outcome.value.totals["failedFiles"] ?? 0;
+            if (skipped > 0) {
+                process.stderr.write(`${formatIngestSkipSummary(skipped)}\n`);
+            }
+        }
     });
 
 /**
