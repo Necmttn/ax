@@ -167,24 +167,46 @@ const selectProvider = (
         );
     });
 
-/** Resolve which config file a provider/scope writes to. An exact `file` (from
- *  the located row) wins, else a `format` match, else the first ref - so a codex
- *  hook found in `hooks.json` is mutated there, not in `config.toml`. */
+/** Resolve which config file a provider/scope writes to.
+ *  Priority: (1) exact `file` match from a located row; (2) explicit `format`
+ *  hint; (3) first ref whose file already EXISTS on disk (so a codex user who
+ *  has hooks.json gets writes there instead of config.toml); (4) first ref as
+ *  the default (new installations). */
 const targetRef = (
     provider: HookProvider,
     scope: HookScope,
     repoRoot: string | null,
     opts: { file?: string | undefined; format?: "json" | "toml" | undefined } = {},
-): Effect.Effect<HookFileRef, HookValidationError> => {
-    const refs = provider.configFiles(scope, repoRoot);
-    const ref =
-        (opts.file ? refs.find((r) => r.path === opts.file) : undefined) ??
-        (opts.format ? refs.find((r) => r.format === opts.format) : undefined) ??
-        refs[0];
-    return ref
-        ? Effect.succeed(ref)
-        : Effect.fail(new HookValidationError({ provider: provider.name, reason: "no_config_file", detail: `no config file for scope ${scope}` }));
-};
+): Effect.Effect<HookFileRef, HookValidationError, FileSystem.FileSystem> =>
+    Effect.gen(function* () {
+        const refs = provider.configFiles(scope, repoRoot);
+        if (refs.length === 0) {
+            return yield* Effect.fail(new HookValidationError({ provider: provider.name, reason: "no_config_file", detail: `no config file for scope ${scope}` }));
+        }
+
+        // (1) exact file match wins unconditionally (routing a codex hook found
+        //     in hooks.json back to hooks.json on edit/remove).
+        if (opts.file) {
+            const found = refs.find((r) => r.path === opts.file);
+            if (found) return found;
+        }
+
+        // (2) explicit format hint (e.g. --format=toml from the CLI).
+        if (opts.format) {
+            const found = refs.find((r) => r.format === opts.format);
+            if (found) return found;
+        }
+
+        // (3) prefer whichever file already exists on disk (codex: hooks.json
+        //     wins over config.toml when both are listed and hooks.json is present).
+        const fs = yield* FileSystem.FileSystem;
+        for (const r of refs) {
+            if (yield* fs.exists(r.path).pipe(Effect.orElseSucceed(() => false))) return r;
+        }
+
+        // (4) fall back to the first listed ref (new installations default).
+        return refs[0]!;
+    });
 
 export interface MutateOptions {
     readonly provider: string;
