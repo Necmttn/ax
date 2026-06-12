@@ -26,8 +26,10 @@ export class DaemonVersion extends Schema.Class<DaemonVersion>("ax/DaemonVersion
     capabilities: Schema.Array(Schema.String),
     /** Whether the Durable Streams sidecar is hosting live ingest. False on
      *  the compiled binary (native lmdb can't bundle), where POST /api/ingest
-     *  503s - the studio reads this to engage its polling fallback. */
-    live_ingest: Schema.Boolean,
+     *  503s - the studio reads this to engage its polling fallback. Optional
+     *  on the wire: daemons older than the field omit it, and the hosted
+     *  studio must keep decoding their responses. */
+    live_ingest: Schema.optionalKey(Schema.Boolean),
 }) {}
 
 /** POST /api/query rejection: non-read SQL or a database error. Legacy

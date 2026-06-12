@@ -104,15 +104,12 @@ export function imageSrc(absolutePath: string): string {
     return endpoint ? endpoint + path : path;
 }
 
-/** Fetch error that carries the HTTP status so callers can branch on it
- *  (e.g. 503 from POST /api/ingest = Durable Streams sidecar unavailable on
- *  the compiled binary → engage the polling fallback). */
-export class ApiError extends Error {
-    constructor(message: string, readonly status: number) {
-        super(message);
-        this.name = "ApiError";
-    }
-}
+// Moved to its own module so the contract client can throw it without an
+// import cycle; re-exported here so existing importers keep working.
+export { ApiError } from "./api-error.ts";
+import { ApiError } from "./api-error.ts";
+import { contractVersion } from "./contract-client.ts";
+import type { DaemonVersion } from "@ax/lib/shared/api-contract";
 
 async function jsonFetch<T>(input: RequestInfo, init?: RequestInit): Promise<T> {
     if (STUDIO_MOCK) {
@@ -150,15 +147,9 @@ export interface IngestTriggerResponse {
     readonly streamBaseUrl: string;
 }
 
-export interface DaemonVersion {
-    readonly version: string;
-    readonly api_version: number;
-    readonly capabilities: ReadonlyArray<string>;
-    /** Whether the daemon's Durable Streams sidecar is hosting live ingest.
-     *  `false` on the compiled binary (POST /api/ingest would 503) → the Live
-     *  tab polls counts instead. Optional: older daemons omit it. */
-    readonly live_ingest?: boolean;
-}
+// The version handshake type now comes from the Insights Surface Contract -
+// the same Schema the daemon serves - so the two cannot drift.
+export type { DaemonVersion } from "@ax/lib/shared/api-contract";
 
 // --- session timeline (highlight zoom) -------------------------------------
 
@@ -214,7 +205,20 @@ export interface SessionTimelinePayload {
 }
 
 export const api = {
-    version: (): Promise<DaemonVersion> => jsonFetch("/api/version"),
+    // First contract-client call (ADR-0013): typed end-to-end against the
+    // same Schema the daemon serves. Mock mode without a connected endpoint
+    // keeps the legacy mockFetch behavior (no /api/version fixture -> throws).
+    version: async (): Promise<DaemonVersion> => {
+        if (STUDIO_MOCK) {
+            const endpoint = readEndpoint();
+            if (!endpoint) {
+                const { mockFetch } = await import("./mock-fixtures.ts");
+                return mockFetch("/api/version");
+            }
+            return contractVersion(endpoint);
+        }
+        return contractVersion(null);
+    },
     skills: (): Promise<SkillTriageResponse> => jsonFetch("/api/skills"),
     decide: (
         name: string,
