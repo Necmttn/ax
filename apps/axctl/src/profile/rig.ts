@@ -7,10 +7,21 @@
  */
 import type { SkillInvocationRow } from "./queries.ts";
 
+/**
+ * Live scopes look like: user, agents-shared, command, unknown,
+ * plugin:<id>, project:<name>, project-command:<name>, codex-tool,
+ * opencode-tool. Only plugin ids are safe to expose; everything else
+ * collapses to "local" - project:<name> scopes carry project names and the
+ * profile is aggregates-only (never project names or paths).
+ */
 export function skillSource(scope: string): string {
     if (scope.startsWith("plugin:")) return scope.slice("plugin:".length);
-    if (scope === "user" || scope === "project" || scope === "agents-shared") return "local";
-    return scope;
+    return "local";
+}
+
+/** Harness tool pseudo-skills (codex-tool, opencode-tool) are not skills. */
+export function isToolScope(scope: string): boolean {
+    return scope.endsWith("-tool");
 }
 
 export function countRules(markdown: string): number {
@@ -33,11 +44,13 @@ export interface Rig {
 }
 
 export function deriveRig(inputs: RigInputs): Rig {
-    const skills = inputs.invocations.map((row) => ({
-        name: row.skill,
-        source: skillSource(inputs.scopes.get(row.skill) ?? "user"),
-        runs_30d: row.count,
-    }));
+    const skills = inputs.invocations
+        .filter((row) => !isToolScope(inputs.scopes.get(row.skill) ?? "user"))
+        .map((row) => ({
+            name: row.skill,
+            source: skillSource(inputs.scopes.get(row.skill) ?? "user"),
+            runs_30d: row.count,
+        }));
     const hooks = inputs.hookFiles
         .filter((f) => f.endsWith(".ts") && !f.endsWith(".test.ts"))
         .map((f) => f.replace(/\.ts$/, ""))

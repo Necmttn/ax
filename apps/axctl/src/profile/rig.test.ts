@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { countRules, deriveRig, skillSource } from "./rig.ts";
+import { countRules, deriveRig, isToolScope, skillSource } from "./rig.ts";
 
 describe("skillSource", () => {
     test("plugin scope -> plugin id", () => {
@@ -10,8 +10,21 @@ describe("skillSource", () => {
         expect(skillSource("project")).toBe("local");
         expect(skillSource("agents-shared")).toBe("local");
     });
-    test("unknown scope passes through", () => {
-        expect(skillSource("weird")).toBe("weird");
+    test("project:<name> scopes never leak the project name", () => {
+        expect(skillSource("project:necmttn")).toBe("local");
+        expect(skillSource("project-command:secret-client")).toBe("local");
+    });
+    test("unknown scopes collapse to local (no passthrough)", () => {
+        expect(skillSource("weird")).toBe("local");
+    });
+});
+
+describe("isToolScope", () => {
+    test("harness tool pseudo-skill scopes detected", () => {
+        expect(isToolScope("codex-tool")).toBe(true);
+        expect(isToolScope("opencode-tool")).toBe(true);
+        expect(isToolScope("user")).toBe(false);
+        expect(isToolScope("plugin:superpowers")).toBe(false);
     });
 });
 
@@ -60,5 +73,22 @@ describe("deriveRig", () => {
         });
         expect(rig.skills[0]!.source).toBe("local");
         expect(rig.rules).toBeUndefined();
+    });
+
+    test("tool pseudo-skills (codex-tool / opencode-tool scopes) are excluded", () => {
+        const rig = deriveRig({
+            invocations: [
+                { skill: "codex:exec_command", count: 59_870 },
+                { skill: "tdd", count: 88 },
+            ],
+            scopes: new Map([
+                ["codex:exec_command", "codex-tool"],
+                ["tdd", "plugin:superpowers"],
+            ]),
+            hookFiles: [],
+            hasRoutingTable: false,
+            rulesMarkdown: null,
+        });
+        expect(rig.skills).toEqual([{ name: "tdd", source: "superpowers", runs_30d: 88 }]);
     });
 });
