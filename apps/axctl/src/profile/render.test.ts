@@ -7,6 +7,8 @@ import { buildProfile } from "./render.ts";
 // 5 skillScopes  6 acceptedProposals  7 costModels
 // 8 dailyActivityFull(sessions)  9 dailyActivityFull(tokens)
 // 10 sessionDurations  11 peakHour  12 spawnedCount  13 commitCount  14 topTools
+// 15 wrappedCounts(toolAgg)  16 wrappedCounts(turnCount)
+// 17 wrappedCounts(distinctSkills)  18 wrappedCounts(reposCount)
 const mockResults = [
     [[{ prompt_tokens: 31_000_000, completion_tokens: 7_000_000, sessions: 142 }]],
     [[{ date: "2026-06-11" }, { date: "2026-06-12" }]],
@@ -35,6 +37,18 @@ const mockResults = [
     [[{ count: 420 }]],
     [[{ count: 1000 }]],
     [[{ tool: "Bash", count: 5000 }, { tool: "Read", count: 3200 }]],
+    // 15: wrappedCounts toolAgg (Bash=verification, Read=context)
+    [[
+        { tool: "bun test", count: 900, failures: 10 },
+        { tool: "Read", count: 2000, failures: 5 },
+        { tool: "Bash", count: 3000, failures: 50 },
+    ]],
+    // 16: wrappedCounts turnCount
+    [[{ count: 41200 }]],
+    // 17: wrappedCounts distinctSkills
+    [[{ count: 56 }]],
+    // 18: wrappedCounts reposCount
+    [[{ count: 12 }]],
 ];
 
 const env = {
@@ -85,6 +99,15 @@ describe("buildProfile", () => {
             { name: "Bash", runs: 5000 },
             { name: "Read", runs: 3200 },
         ]);
+        // wrapped-style counts
+        expect(p.insights!.turns).toBe(41200);
+        expect(p.insights!.tool_calls).toBe(5900); // 900+2000+3000
+        expect(p.insights!.tool_failures).toBe(65); // 10+5+50
+        expect(p.insights!.distinct_tools).toBe(3);
+        expect(p.insights!.distinct_skills).toBe(56);
+        expect(p.insights!.repos_count).toBe(12);
+        expect(p.insights!.verification_calls).toBe(900); // "bun test" matches
+        expect(p.insights!.context_calls).toBe(2000); // "Read" matches
     });
 
     test("includeCost=false strips cost everywhere; share falls back to sessions", async () => {

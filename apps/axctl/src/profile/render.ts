@@ -20,6 +20,7 @@ import {
     fetchSpawnedCount,
     fetchTokenTotals,
     fetchTopTools,
+    fetchWrappedCounts,
 } from "./queries.ts";
 import { deriveInsights } from "./insights.ts";
 import { deriveRig } from "./rig.ts";
@@ -51,6 +52,7 @@ export const buildProfile = Effect.fn("profile.buildProfile")(
         // 5 skillScopes  6 acceptedProposals  7 costModels
         // 8+9 dailyActivityFull (sessions, tokens)  10 sessionDurations
         // 11 peakHour  12 spawnedCount  13 commitCount  14 topTools
+        // 15+16+17+18 wrappedCounts (toolAgg, turnCount, distinctSkills, reposCount)
         const totals = yield* fetchTokenTotals({ windowDays });
         const daily = yield* fetchDailyActivity({ windowDays });
         const harnesses = yield* fetchHarnesses({ windowDays });
@@ -64,6 +66,7 @@ export const buildProfile = Effect.fn("profile.buildProfile")(
         const spawnedCount = yield* fetchSpawnedCount({ windowDays });
         const commitCount = yield* fetchCommitCount({ windowDays });
         const topTools = yield* fetchTopTools({ windowDays });
+        const wrappedCounts = yield* fetchWrappedCounts({ windowDays });
 
         const streak = computeStreak(daily, env.today);
 
@@ -91,6 +94,7 @@ export const buildProfile = Effect.fn("profile.buildProfile")(
             commits: commitCount,
             tools: topTools,
             daily: dailyFull,
+            wrapped: wrappedCounts,
         });
 
         // decodeProfile throws on invariant breach -> Effect defect (die),
