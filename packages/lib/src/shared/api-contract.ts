@@ -49,6 +49,11 @@ export class NotFoundError extends Schema.ErrorClass<NotFoundError>("ax/NotFound
     error: Schema.String,
 }, { httpApiStatus: 404 }) {}
 
+/** A request with invalid/missing parameters - `{ error }` with HTTP 400. */
+export class BadRequestError extends Schema.ErrorClass<BadRequestError>("ax/BadRequestError")({
+    error: Schema.String,
+}, { httpApiStatus: 400 }) {}
+
 /** POST /api/query - the read-only SQL console (SELECT/RETURN/INFO only). */
 export class QueryResult extends Schema.Class<QueryResult>("ax/QueryResult")({
     result: Schema.Unknown,
@@ -157,9 +162,95 @@ export const InsightsGroup = HttpApiGroup.make("insights")
         }),
     );
 
+/**
+ * The sessions family: per-session detail, list, canvas, compare, inspect,
+ * timeline, insights, orchestration, children, and summary. Payloads are
+ * `Schema.Unknown` (same later-pass deal); paths, params, and status mapping
+ * are the contract. Path params are single-segment (client URL-encodes ids);
+ * the legacy greedy `:param+` rows remain mounted for raw-slash ids.
+ */
+export const SessionsGroup = HttpApiGroup.make("sessions")
+    .add(
+        HttpApiEndpoint.get("sessionCanvas", "/api/session-canvas", {
+            query: {
+                limit: Schema.optionalKey(Schema.Number),
+            },
+            success: Schema.Unknown,
+            error: InternalError,
+        }),
+        HttpApiEndpoint.get("sessionSummary", "/api/session-summary", {
+            query: {
+                id: Schema.String,
+            },
+            success: Schema.Unknown,
+            error: InternalError,
+        }),
+        HttpApiEndpoint.get("sessionOrchestration", "/api/session-orchestration", {
+            query: {
+                id: Schema.String,
+            },
+            success: Schema.Unknown,
+            error: InternalError,
+        }),
+        HttpApiEndpoint.get("sessionsList", "/api/sessions", {
+            query: {
+                offset: Schema.optionalKey(Schema.Number),
+                limit: Schema.optionalKey(Schema.Number),
+                source: Schema.optionalKey(Schema.String),
+                project: Schema.optionalKey(Schema.String),
+            },
+            success: Schema.Unknown,
+            error: InternalError,
+        }),
+        // Static path must precede the single-segment param path: HttpApi's
+        // FindMyWay router gives static paths precedence, so /api/sessions/compare
+        // resolves here even though it also matches /api/sessions/:id.
+        HttpApiEndpoint.get("sessionCompare", "/api/sessions/compare", {
+            query: {
+                ids: Schema.String,
+                turns: Schema.optionalKey(Schema.String),
+            },
+            success: Schema.Unknown,
+            error: [BadRequestError, InternalError],
+        }),
+        HttpApiEndpoint.get("sessionChildren", "/api/sessions/:id/children", {
+            params: { id: Schema.String },
+            query: {
+                limit: Schema.optionalKey(Schema.Number),
+            },
+            success: Schema.Unknown,
+            error: InternalError,
+        }),
+        HttpApiEndpoint.get("sessionInsights", "/api/sessions/:id/insights", {
+            params: { id: Schema.String },
+            success: Schema.Unknown,
+            error: InternalError,
+        }),
+        HttpApiEndpoint.get("sessionInspect", "/api/sessions/:id/inspect", {
+            params: { id: Schema.String },
+            query: {
+                turn_offset: Schema.optionalKey(Schema.Number),
+                turn_limit: Schema.optionalKey(Schema.Number),
+            },
+            success: Schema.Unknown,
+            error: [NotFoundError, InternalError],
+        }),
+        HttpApiEndpoint.get("sessionTimeline", "/api/sessions/:id/timeline", {
+            params: { id: Schema.String },
+            success: Schema.Unknown,
+            error: [NotFoundError, InternalError],
+        }),
+        HttpApiEndpoint.get("sessionDetail", "/api/sessions/:id", {
+            params: { id: Schema.String },
+            success: Schema.Unknown,
+            error: InternalError,
+        }),
+    );
+
 /** The Insights Surface Contract. Families join as they migrate (ADR-0013). */
 export const AxApi = HttpApi.make("ax")
     .add(SystemGroup)
     .add(InsightsGroup)
+    .add(SessionsGroup)
     .annotate(OpenApi.Title, "ax daemon API")
     .annotate(OpenApi.Version, "1");

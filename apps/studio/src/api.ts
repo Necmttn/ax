@@ -274,22 +274,30 @@ export const api = {
         jsonFetch("/api/decisions"),
     workflow: (): Promise<WorkflowResponse> =>
         viaContract("/api/workflow", (c) => c.insights.workflow()),
-    sessions: (params: { offset?: number; limit?: number; source?: string; project?: string } = {}): Promise<SessionListResponse> => {
-        const usp = new URLSearchParams();
-        if (params.offset != null) usp.set("offset", String(params.offset));
-        if (params.limit != null) usp.set("limit", String(params.limit));
-        if (params.source) usp.set("source", params.source);
-        if (params.project) usp.set("project", params.project);
-        const qs = usp.toString();
-        return jsonFetch(qs ? `/api/sessions?${qs}` : "/api/sessions");
-    },
+    sessions: (params: { offset?: number; limit?: number; source?: string; project?: string } = {}): Promise<SessionListResponse> =>
+        viaContract("/api/sessions", (c) =>
+            c.sessions.sessionsList({
+                query: {
+                    ...(params.offset != null ? { offset: params.offset } : {}),
+                    ...(params.limit != null ? { limit: params.limit } : {}),
+                    ...(params.source ? { source: params.source } : {}),
+                    ...(params.project ? { project: params.project } : {}),
+                },
+            })),
     sessionDetail: (sessionId: string): Promise<SessionDetailPayload> =>
-        jsonFetch(`/api/sessions/${encodeURIComponent(sessionId)}`),
+        viaContract(
+            `/api/sessions/${encodeURIComponent(sessionId)}`,
+            (c) => c.sessions.sessionDetail({ params: { id: sessionId } }),
+        ),
     sessionChildren: (parentId: string): Promise<SessionChildrenResponse> =>
-        jsonFetch(`/api/sessions/${encodeURIComponent(parentId)}/children`),
+        viaContract(
+            `/api/sessions/${encodeURIComponent(parentId)}/children`,
+            (c) => c.sessions.sessionChildren({ params: { id: parentId }, query: {} }),
+        ),
     sessionInsights: async (sessionId: string): Promise<SessionInsightsPayload> => {
-        const payload = await jsonFetch<SessionInsightsPayload>(
+        const payload = await viaContract<SessionInsightsPayload>(
             `/api/sessions/${encodeURIComponent(sessionId)}/insights`,
+            (c) => c.sessions.sessionInsights({ params: { id: sessionId } }),
         );
         // Daemons older than the /insights route answer via the /api/sessions/:id+
         // catch-all with a 200 + session-detail shape. Reject it here so callers
@@ -299,23 +307,30 @@ export const api = {
         }
         return payload;
     },
-    sessionInspect: (sessionId: string, params: { turnOffset?: number; turnLimit?: number } = {}): Promise<SessionInspectPayload> => {
-        const usp = new URLSearchParams();
-        if (params.turnOffset != null) usp.set("turn_offset", String(params.turnOffset));
-        if (params.turnLimit != null) usp.set("turn_limit", String(params.turnLimit));
-        const qs = usp.toString();
-        return jsonFetch(qs
-            ? `/api/sessions/${encodeURIComponent(sessionId)}/inspect?${qs}`
-            : `/api/sessions/${encodeURIComponent(sessionId)}/inspect`);
-    },
+    sessionInspect: (sessionId: string, params: { turnOffset?: number; turnLimit?: number } = {}): Promise<SessionInspectPayload> =>
+        viaContract(
+            `/api/sessions/${encodeURIComponent(sessionId)}/inspect`,
+            (c) => c.sessions.sessionInspect({
+                params: { id: sessionId },
+                query: {
+                    ...(params.turnOffset != null ? { turn_offset: params.turnOffset } : {}),
+                    ...(params.turnLimit != null ? { turn_limit: params.turnLimit } : {}),
+                },
+            }),
+        ),
     sessionTimeline: (sessionId: string): Promise<SessionTimelinePayload> =>
-        jsonFetch(`/api/sessions/${encodeURIComponent(sessionId)}/timeline`),
-    sessionCompare: (ids: ReadonlyArray<string>, params: { turns?: boolean } = {}): Promise<SessionComparePayload> => {
-        const usp = new URLSearchParams();
-        usp.set("ids", ids.join(","));
-        if (params.turns) usp.set("turns", "1");
-        return jsonFetch(`/api/sessions/compare?${usp.toString()}`);
-    },
+        viaContract(
+            `/api/sessions/${encodeURIComponent(sessionId)}/timeline`,
+            (c) => c.sessions.sessionTimeline({ params: { id: sessionId } }),
+        ),
+    sessionCompare: (ids: ReadonlyArray<string>, params: { turns?: boolean } = {}): Promise<SessionComparePayload> =>
+        viaContract("/api/sessions/compare", (c) =>
+            c.sessions.sessionCompare({
+                query: {
+                    ids: ids.join(","),
+                    ...(params.turns ? { turns: "1" } : {}),
+                },
+            })),
     episodeTimeline: (parentId: string): Promise<EpisodeTimelinePayload> =>
         viaContract(
             `/api/episodes/${encodeURIComponent(parentId)}`,
@@ -338,16 +353,17 @@ export const api = {
         const qs = usp.toString();
         return jsonFetch(qs ? `/api/graph-explorer?${qs}` : "/api/graph-explorer");
     },
-    sessionCanvas: (params: { limit?: number } = {}): Promise<SessionCanvasPayload> => {
-        const usp = new URLSearchParams();
-        if (params.limit != null) usp.set("limit", String(params.limit));
-        const qs = usp.toString();
-        return jsonFetch(qs ? `/api/session-canvas?${qs}` : "/api/session-canvas");
-    },
+    sessionCanvas: (params: { limit?: number } = {}): Promise<SessionCanvasPayload> =>
+        viaContract("/api/session-canvas", (c) =>
+            c.sessions.sessionCanvas({
+                query: params.limit != null ? { limit: params.limit } : {},
+            })),
     sessionOrchestration: (id: string): Promise<SessionOrchestration> =>
-        jsonFetch(`/api/session-orchestration?id=${encodeURIComponent(id)}`),
+        viaContract("/api/session-orchestration", (c) =>
+            c.sessions.sessionOrchestration({ query: { id } })),
     sessionSummary: (id: string): Promise<SessionSummary> =>
-        jsonFetch(`/api/session-summary?id=${encodeURIComponent(id)}`),
+        viaContract("/api/session-summary", (c) =>
+            c.sessions.sessionSummary({ query: { id } })),
     skillGraph: (params: { minCount?: number; limit?: number } = {}): Promise<SkillGraphPayload> =>
         viaContract("/api/skill-graph", (c) =>
             c.insights.skillGraph({
