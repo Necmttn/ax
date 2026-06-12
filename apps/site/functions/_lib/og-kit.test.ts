@@ -4,6 +4,7 @@ import {
     artLine,
     fmtUsd,
     compactNumber,
+    compactUsd,
     statHtml,
     footerHtml,
     blockLogoHtml,
@@ -48,14 +49,26 @@ describe("fmtUsd", () => {
 });
 
 describe("compactNumber", () => {
+    test("formats billions", () => {
+        expect(compactNumber(19_620_900_000)).toBe("19.6B");
+    });
     test("formats millions", () => {
         expect(compactNumber(1_500_000)).toBe("1.5M");
     });
     test("formats thousands", () => {
-        expect(compactNumber(2500)).toBe("2.5k");
+        expect(compactNumber(2500)).toBe("2.5K");
     });
     test("leaves small numbers as-is", () => {
         expect(compactNumber(42)).toBe("42");
+    });
+});
+
+describe("compactUsd", () => {
+    test("humanizes big spend with approx marker", () => {
+        expect(compactUsd(22_882)).toBe("~$22.9K");
+    });
+    test("small spend stays exact", () => {
+        expect(compactUsd(42.4)).toBe("$42");
     });
 });
 
