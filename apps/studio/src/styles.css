@@ -2691,15 +2691,30 @@ td.skill-cell .description {
     line-height: 1.35;
     color: var(--ink);
 }
-.next-action-evidence {
+/* The problem statement - what's actually going wrong. Ink, not muted:
+   it's the reason the card exists. */
+.next-action-problem {
     margin: 0;
     font-size: 13px;
     line-height: 1.5;
-    color: var(--muted);
+    color: var(--ink);
     display: -webkit-box;
-    -webkit-line-clamp: 2;
+    -webkit-line-clamp: 3;
     -webkit-box-orient: vertical;
     overflow: hidden;
+}
+.next-action-fix {
+    margin: 0;
+    font-size: 13px;
+    line-height: 1.45;
+    color: var(--muted);
+}
+.next-action-fix-label {
+    font-family: ui-monospace, Menlo, monospace;
+    font-size: 11px;
+    color: var(--card-accent);
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
 }
 .next-action-foot {
     margin-top: auto;

@@ -90,7 +90,10 @@ export const proposalCards = (
                     id: `proposal:${p.dedupe_sig}`,
                     kind: "proposal",
                     title: `Decide proposal: ${p.title}`,
-                    evidence: `${p.form} proposal, confidence ${p.confidence}, seen ${p.frequency}x`,
+                    // The card's body line answers "what is the problem" -
+                    // the hypothesis IS the mined problem statement. Metadata
+                    // (form/confidence/frequency) lives in the chip + registry.
+                    evidence: p.hypothesis,
                     // agent-origin proposals outrank mined ones at equal confidence x frequency
                     impact: KIND_WEIGHT.proposal + bonus(cw * Math.log2(p.frequency + 1) + ((p.origin ?? "mined") === "agent" ? 1 : 0)),
                     brief: proposalReviewBrief(p),

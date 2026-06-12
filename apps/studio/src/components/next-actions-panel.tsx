@@ -98,8 +98,12 @@ function NextActionCardView({
         <article className={`next-action-card accent-${KIND_ACCENT[card.kind] ?? "blue"}`}>
             <span className="next-action-eyebrow">$ {KIND_LABEL[card.kind] ?? card.kind}</span>
             <strong className={`next-action-hero${heroIsTitle ? " is-title" : ""}`}>{hero}</strong>
-            {heroIsTitle ? null : <h4 className="next-action-title">{title}</h4>}
-            <p className="next-action-evidence">{card.evidence}</p>
+            <p className="next-action-problem">{card.evidence}</p>
+            {heroIsTitle ? null : (
+                <p className="next-action-fix">
+                    <span className="next-action-fix-label">fix &#8594;</span> {title}
+                </p>
+            )}
             <div className="next-action-foot">
                 {acceptSig ? (
                     <button
