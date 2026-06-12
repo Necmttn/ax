@@ -9950,3 +9950,318 @@ footer .right {
     .pf-empty { padding: 28px 22px 20px; margin-top: 48px; }
     .pf-empty h1 { padding-right: 0; font-size: 27px; margin-top: 28px; }
 }
+
+/* ============================================================
+   ----- routing page -----
+   /routing - cost-routing feature page. Inherits the
+   .features-page vocabulary (hero, eyebrow, section-head,
+   scale stats); classes below are routing-specific.
+   ============================================================ */
+
+.routing-page .rt-hero-note {
+  margin: 14px 0 0;
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.02em;
+  color: var(--soft, #8a8780);
+}
+
+/* --- the loop: four step cards --- */
+.routing-page .rt-loop {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 14px;
+}
+.routing-page .rt-step {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--panel);
+  padding: 22px 22px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  transition: border-color 0.18s ease, transform 0.18s ease;
+}
+.routing-page .rt-step:hover {
+  border-color: rgba(10, 10, 10, 0.16);
+  transform: translateY(-2px);
+  box-shadow: 0 10px 30px -20px rgba(10, 10, 10, 0.3);
+}
+.routing-page .rt-step.new {
+  border-color: var(--ink);
+  position: relative;
+}
+.routing-page .rt-step.new::after {
+  content: "shipped today";
+  position: absolute;
+  top: -8px;
+  right: 14px;
+  font-family: var(--mono);
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.18em;
+  background: var(--ink);
+  color: var(--page);
+  padding: 2px 8px;
+  border-radius: 999px;
+}
+.routing-page .rt-step-head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+.routing-page .rt-step-num {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--soft, #8a8780);
+  letter-spacing: 0.08em;
+}
+.routing-page .rt-step-verb {
+  font-family: var(--mono);
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.18em;
+  color: var(--ink);
+}
+.routing-page .rt-step-cmd {
+  display: block;
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.5;
+  background: #1a1916;
+  color: #e8e4dc;
+  border: 0;
+  border-radius: 6px;
+  padding: 10px 14px;
+  overflow-x: auto;
+  white-space: nowrap;
+}
+.routing-page .rt-step-cmd::before {
+  content: "$ ";
+  color: #c3e88d;
+}
+.routing-page .rt-step-body {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.55;
+  color: #2a2a26;
+}
+.routing-page .rt-step-body em {
+  font-style: italic;
+}
+
+/* --- terminal showcase --- */
+.routing-page .rt-term {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #1a1916;
+  overflow: hidden;
+}
+.routing-page .rt-term .bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  border-bottom: 1px solid #2c2a25;
+  font-family: var(--mono);
+  font-size: 10.5px;
+  color: #aaa6a0;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+}
+.routing-page .rt-term .bar .dots {
+  display: inline-flex;
+  gap: 6px;
+}
+.routing-page .rt-term .bar .dots span {
+  width: 9px;
+  height: 9px;
+  border-radius: 999px;
+  background: #3a3833;
+}
+.routing-page .rt-term .bar .filename {
+  color: #e8e4dc;
+  font-size: 11px;
+  text-transform: none;
+  letter-spacing: 0.02em;
+}
+.routing-page .rt-term pre {
+  margin: 0;
+  background: transparent; /* global `pre` paints var(--panel); this card is dark */
+  border: 0;
+  padding: 20px 22px;
+  font-family: var(--mono);
+  font-size: 12.5px;
+  line-height: 1.7;
+  color: #e8e4dc;
+  white-space: pre;
+  overflow-x: auto;
+}
+.routing-page .rt-term .p { color: #c3e88d; }
+.routing-page .rt-term .cmd { color: #fff; font-weight: 600; }
+.routing-page .rt-term .fig { color: #ffcb6b; font-weight: 600; }
+.routing-page .rt-term .dim { color: #8a867f; }
+
+.routing-page .rt-fine {
+  margin: 18px 0 0;
+  max-width: 70ch;
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--muted);
+  border-left: 2px solid var(--line);
+  padding-left: 14px;
+}
+
+/* --- safety lanes --- */
+.routing-page .rt-lanes {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+}
+.routing-page .rt-lane {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--panel);
+  padding: 22px 24px;
+}
+.routing-page .rt-lane.is-frontier {
+  border-color: var(--ink);
+  background: var(--page);
+}
+.routing-page .rt-lane h3 {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin: 0 0 14px;
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.16em;
+  color: var(--ink);
+}
+.routing-page .rt-lane .dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  flex: none;
+}
+.routing-page .rt-lane.is-down .dot { background: var(--green); }
+.routing-page .rt-lane.is-frontier .dot { background: var(--ink); }
+.routing-page .rt-lane ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+}
+.routing-page .rt-lane li {
+  font-size: 13.5px;
+  line-height: 1.5;
+  color: var(--ink);
+  padding: 7px 0;
+  border-bottom: 1px dashed var(--line);
+}
+.routing-page .rt-lane li:last-child { border-bottom: none; }
+.routing-page .rt-lane li .dim { color: var(--muted); }
+
+.routing-page .rt-brief-note {
+  margin-top: 24px;
+  border-left: 3px solid var(--ink);
+  background: var(--panel);
+  padding: 14px 18px;
+  border-radius: 0 8px 8px 0;
+  font-family: var(--serif);
+  font-size: 16.5px;
+  line-height: 1.45;
+  color: var(--ink);
+  letter-spacing: -0.1px;
+}
+.routing-page .rt-brief-note b { font-weight: 600; }
+
+/* --- cta --- */
+.routing-page .rt-cta {
+  text-align: center;
+  padding: 88px 0 96px;
+}
+.routing-page .rt-cta h2 {
+  font-family: var(--serif);
+  font-weight: 400;
+  font-size: 40px;
+  line-height: 1.1;
+  letter-spacing: -0.6px;
+  margin: 0 auto 14px;
+  max-width: 22ch;
+}
+.routing-page .rt-cta h2 em {
+  font-style: italic;
+  color: var(--muted);
+}
+.routing-page .rt-cta > p {
+  font-family: var(--mono);
+  font-size: 12px;
+  letter-spacing: 0.02em;
+  color: var(--muted);
+  margin: 0 auto 28px;
+}
+.routing-page .rt-install {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-width: 560px;
+  margin: 0 auto 22px;
+}
+.routing-page .rt-install code {
+  display: block;
+  font-family: var(--mono);
+  font-size: 13.5px;
+  text-align: left;
+  background: var(--ink);
+  color: var(--page);
+  padding: 13px 18px;
+  border-radius: 8px;
+  overflow-x: auto;
+  white-space: nowrap;
+}
+.routing-page .rt-install code .p {
+  color: var(--green);
+  margin-right: 2px;
+}
+.routing-page .rt-cta-links {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 10px 22px;
+}
+.routing-page .rt-cta-links a {
+  font-family: var(--mono);
+  font-size: 12px;
+  text-decoration: none;
+  color: var(--muted);
+  letter-spacing: 0.04em;
+}
+.routing-page .rt-cta-links a:hover { color: var(--ink); }
+.routing-page .rt-cta-links .rt-gh {
+  color: var(--page);
+  background: var(--ink);
+  border: 1px solid var(--ink);
+  border-radius: 999px;
+  padding: 8px 18px;
+}
+.routing-page .rt-cta-links .rt-gh:hover {
+  background: #000;
+  color: var(--page);
+}
+
+@media (max-width: 880px) {
+  .routing-page .rt-loop { grid-template-columns: 1fr; }
+  .routing-page .rt-lanes { grid-template-columns: 1fr; }
+}
+@media (max-width: 600px) {
+  .routing-page .rt-cta { padding: 64px 0 72px; }
+  .routing-page .rt-cta h2 { font-size: 30px; }
+  .routing-page .rt-term pre { font-size: 11px; padding: 16px; }
+  .routing-page .rt-install code { font-size: 12px; }
+}
