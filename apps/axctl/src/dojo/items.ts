@@ -58,9 +58,12 @@ export const proposalMintItem = (openProposalCount: number): DojoItem | null =>
             cost_class: "m",
         };
 
+/** Repair LOC above this marks a session a churn hotspot even when every episode passed. */
+export const REPAIR_LINE_HOTSPOT_THRESHOLD = 200;
+
 export const churnHotspotItems = (rows: readonly SessionChurnRow[]): DojoItem[] =>
     rows
-        .filter((r) => r.episodes > r.passedEpisodes || r.repairLinesAdded > 200)
+        .filter((r) => r.episodes > r.passedEpisodes || r.repairLinesAdded > REPAIR_LINE_HOTSPOT_THRESHOLD)
         .sort((a, b) => b.repairLinesAdded - a.repairLinesAdded)
         .slice(0, 2)
         .map((r) => ({

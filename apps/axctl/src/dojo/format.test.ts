@@ -30,6 +30,14 @@ describe("renderAgenda", () => {
         expect(out).toContain("   done when: locked");
     });
 
+    test("null binding window renders the no-window label", () => {
+        const out = renderAgenda({
+            ...agenda,
+            budget: { ...agenda.budget, binding_window: null },
+        });
+        expect(out).toContain("budget: 20% spendable (no window, 35% left, 15% reserve)");
+    });
+
     test("no-surplus agenda warns about --force", () => {
         const out = renderAgenda({
             ...agenda,

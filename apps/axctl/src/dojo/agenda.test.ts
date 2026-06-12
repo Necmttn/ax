@@ -48,11 +48,21 @@ describe("assembleAgenda", () => {
         );
         expect(fat.items.some((i) => i.kind === "spar")).toBe(true);
     });
+
+    test("spar gate boundary: spendable exactly 30 includes spar (>=)", () => {
+        const edge = assembleAgenda(
+            { ...budget, spendable_pct: 30 },
+            [item("v1", "verdict_pending")],
+            { nowMs: 0, spar: true },
+        );
+        expect(edge.items.some((i) => i.kind === "spar")).toBe(true);
+    });
 });
 
 describe("collectAgendaItems", () => {
-    // Every query returns one empty result set - an empty graph. fetchDispatches
-    // destructures a 4-tuple, but each missing slot degrades to [] internally.
+    // Every query returns one empty result set - an empty graph. fetchTuneProposals
+    // (which calls fetchDispatches internally) destructures a 4-tuple, but each
+    // missing slot degrades to [] internally.
     const emptyClient: SurrealClientShape = {
         query: <T extends unknown[]>(_sql: string, _bindings?: Record<string, unknown>) =>
             Effect.succeed([[]] as unknown[] as T),

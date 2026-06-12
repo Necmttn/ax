@@ -98,6 +98,14 @@ describe("item mappers", () => {
         expect(items[0]?.cost_class).toBe("l");
     });
 
+    test("churn hotspots: repair-only branch - all episodes passed but repair LOC over threshold", () => {
+        const items = churnHotspotItems([
+            churnRow("s5", 2, 2, 300), // episodes === passedEpisodes, repair > threshold -> included
+            churnRow("s6", 2, 2, 100), // episodes === passedEpisodes, repair under threshold -> excluded
+        ]);
+        expect(items.map((i) => i.id)).toEqual(["experiment:s5"]);
+    });
+
     test("proposal mint emitted only when open proposals are scarce", () => {
         expect(proposalMintItem(0)).not.toBeNull();
         expect(proposalMintItem(2)).not.toBeNull();

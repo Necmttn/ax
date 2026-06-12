@@ -88,7 +88,7 @@ const soft = <A, E, R>(
  */
 export const collectAgendaItems = (
     opts: CollectOptions,
-): Effect.Effect<DojoItem[], never, SurrealClient | FileSystem.FileSystem> =>
+): Effect.Effect<readonly DojoItem[], never, SurrealClient | FileSystem.FileSystem> =>
     Effect.gen(function* () {
         const verdicts = yield* soft("verdicts", listPendingVerdicts(), []);
         const briefs = yield* soft("briefs", scanTaskDir(opts.taskDir ?? defaultTaskDir()), []);
