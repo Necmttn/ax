@@ -138,15 +138,18 @@
   .tbl tbody tr td.right { text-align: right; }
   .tbl tbody tr:first-child td { padding-top: 12px; }
 
-  .tbl .col-id    { width: 180px; }
-  .tbl .col-pat   { width: 260px; }
-  .tbl .col-sug   { width: 120px; }
+  .tbl .col-id    { width: 175px; }
+  .tbl .col-pat   { width: 245px; }
+  .tbl .col-sug   { width: 105px; }
   .tbl .col-cnt   { width: 80px; text-align: right; }
-  .tbl .col-addr  { width: 140px; text-align: right; }
+  .tbl .col-addr  { width: 135px; text-align: right; }
+  .tbl .col-judg  { width: 110px; text-align: right; }
 
   .id-text { color: #c4c0b6; }
   .sug-text { color: var(--green); }
   .addr-text { color: #ccc8bf; }
+  .judg-no  { color: #55524d; }
+  .judg-yes { color: #c9a050; font-weight: 600; letter-spacing: 0.04em; }
 
   .ellipsis-row td {
     color: var(--faint);
@@ -218,39 +221,44 @@
               <th class="col-sug">suggest</th>
               <th class="col-cnt right">count</th>
               <th class="col-addr right">addressable</th>
+              <th class="col-judg right">judgment</th>
             </tr>
           </thead>
           <tbody>
             <tr>
-              <td class="col-id"><span class="id-text">hard-task</span></td>
-              <td class="col-pat"><span style="color:#6e6b65">^hard\s+task\b</span></td>
+              <td class="col-id"><span class="id-text">issue-N</span></td>
+              <td class="col-pat"><span style="color:#6e6b65">^issue\s+\d+\b</span></td>
+              <td class="col-sug"><span class="sug-text">sonnet</span></td>
+              <td class="col-cnt right">12</td>
+              <td class="col-addr right"><span class="addr-text">$161.42</span></td>
+              <td class="col-judg right"><span class="judg-no">no</span></td>
+            </tr>
+            <tr>
+              <td class="col-id"><span class="id-text">quality-review</span></td>
+              <td class="col-pat"><span style="color:#6e6b65">^quality\s+review\b</span></td>
+              <td class="col-sug"><span class="sug-text">sonnet</span></td>
+              <td class="col-cnt right">43</td>
+              <td class="col-addr right"><span class="addr-text">$105.90</span></td>
+              <td class="col-judg right"><span class="judg-yes">YES</span></td>
+            </tr>
+            <tr>
+              <td class="col-id"><span class="id-text">plan-phase</span></td>
+              <td class="col-pat"><span style="color:#6e6b65">^plan\s+phase\b</span></td>
               <td class="col-sug"><span class="sug-text">sonnet</span></td>
               <td class="col-cnt right">4</td>
-              <td class="col-addr right"><span class="addr-text">$1.04</span></td>
+              <td class="col-addr right"><span class="addr-text">$77.64</span></td>
+              <td class="col-judg right"><span class="judg-yes">YES</span></td>
             </tr>
             <tr>
-              <td class="col-id"><span class="id-text">write-tests</span></td>
-              <td class="col-pat"><span style="color:#6e6b65">^write\s+tests?\b</span></td>
+              <td class="col-id"><span class="id-text">final-review</span></td>
+              <td class="col-pat"><span style="color:#6e6b65">^final\s+review\b</span></td>
               <td class="col-sug"><span class="sug-text">sonnet</span></td>
-              <td class="col-cnt right">9</td>
-              <td class="col-addr right"><span class="addr-text">$18.22</span></td>
-            </tr>
-            <tr>
-              <td class="col-id"><span class="id-text">implement-feat</span></td>
-              <td class="col-pat"><span style="color:#6e6b65">^implement\s+\w</span></td>
-              <td class="col-sug"><span class="sug-text">sonnet</span></td>
-              <td class="col-cnt right">17</td>
-              <td class="col-addr right"><span class="addr-text">$64.11</span></td>
-            </tr>
-            <tr>
-              <td class="col-id"><span class="id-text">fix-bug</span></td>
-              <td class="col-pat"><span style="color:#6e6b65">^fix\s+\w+\s+bug\b</span></td>
-              <td class="col-sug"><span class="sug-text">sonnet</span></td>
-              <td class="col-cnt right">14</td>
-              <td class="col-addr right"><span class="addr-text">$62.08</span></td>
+              <td class="col-cnt right">16</td>
+              <td class="col-addr right"><span class="addr-text">$75.70</span></td>
+              <td class="col-judg right"><span class="judg-yes">YES</span></td>
             </tr>
             <tr class="ellipsis-row">
-              <td colspan="5" style="letter-spacing: 0.12em; padding-top: 6px; color: #3e3c38;">· · ·</td>
+              <td colspan="6" style="letter-spacing: 0.12em; padding-top: 6px; color: #3e3c38;">· · ·</td>
             </tr>
           </tbody>
         </table>

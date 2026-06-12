@@ -137,20 +137,18 @@
   .tbl tbody tr:first-child td { padding-top: 12px; }
   .tbl tbody tr td.right { text-align: right; }
 
-  .col-ts    { width: 170px; }
-  .col-type  { width: 100px; }
-  .col-desc  { width: 310px; }
-  .col-dmod  { width: 90px; }
-  .col-cmod  { width: 120px; }
-  .col-sug   { width: 90px; }
+  .col-ts    { width: 160px; }
+  .col-type  { width: 145px; }
+  .col-desc  { width: 330px; }
+  .col-sug   { width: 175px; }
+  .col-cost  { width: 110px; text-align: right; }
   .col-save  { width: 120px; text-align: right; }
 
   .ts-text   { color: #5a5752; font-size: 11px; }
   .type-text { color: #7a7671; }
-  .desc-text { color: #c0bcb2; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 310px; display: block; }
-  .dmod-inherit { color: #6e6b65; }
-  .cmod-text { color: #9da3a8; }
+  .desc-text { color: #c0bcb2; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 330px; display: block; }
   .sug-text  { color: var(--green); font-weight: 600; }
+  .cost-text { color: #9a968d; }
   .save-text { color: var(--amber); font-weight: 500; }
 
   .ellipsis-row td {
@@ -219,44 +217,40 @@
           <thead>
             <tr>
               <th class="col-ts">ts</th>
-              <th class="col-type">type</th>
+              <th class="col-type">agent_type</th>
               <th class="col-desc">description</th>
-              <th class="col-dmod">d-model</th>
-              <th class="col-cmod">c-model</th>
               <th class="col-sug">suggest</th>
+              <th class="col-cost right">child cost</th>
               <th class="col-save right">est savings</th>
             </tr>
           </thead>
           <tbody>
             <tr>
-              <td class="col-ts"><span class="ts-text">Jun 11 14:02</span></td>
-              <td class="col-type"><span class="type-text">subagent</span></td>
-              <td class="col-desc"><span class="desc-text">implement the effect http layer</span></td>
-              <td class="col-dmod"><span class="dmod-inherit">inherit</span></td>
-              <td class="col-cmod"><span class="cmod-text">claude-fable</span></td>
-              <td class="col-sug"><span class="sug-text">sonnet</span></td>
-              <td class="col-save right"><span class="save-text">$41.20</span></td>
+              <td class="col-ts"><span class="ts-text">2026-06-10 13:30</span></td>
+              <td class="col-type"><span class="type-text">general-purpose</span></td>
+              <td class="col-desc"><span class="desc-text">Implement Task 3: session map strip</span></td>
+              <td class="col-sug"><span class="sug-text">claude-sonnet-4-6</span></td>
+              <td class="col-cost right"><span class="cost-text">$50.26</span></td>
+              <td class="col-save right"><span class="save-text">$35.18</span></td>
             </tr>
             <tr>
-              <td class="col-ts"><span class="ts-text">Jun 10 09:18</span></td>
-              <td class="col-type"><span class="type-text">subagent</span></td>
-              <td class="col-desc"><span class="desc-text">well-specified: add cost split cmd</span></td>
-              <td class="col-dmod"><span class="dmod-inherit">inherit</span></td>
-              <td class="col-cmod"><span class="cmod-text">claude-fable</span></td>
-              <td class="col-sug"><span class="sug-text">sonnet</span></td>
-              <td class="col-save right"><span class="save-text">$38.55</span></td>
+              <td class="col-ts"><span class="ts-text">2026-06-11 07:41</span></td>
+              <td class="col-type"><span class="type-text">general-purpose</span></td>
+              <td class="col-desc"><span class="desc-text">Fix ingest run lifecycle</span></td>
+              <td class="col-sug"><span class="sug-text">claude-sonnet-4-6</span></td>
+              <td class="col-cost right"><span class="cost-text">$30.98</span></td>
+              <td class="col-save right"><span class="save-text">$21.69</span></td>
             </tr>
             <tr>
-              <td class="col-ts"><span class="ts-text">Jun 09 22:44</span></td>
-              <td class="col-type"><span class="type-text">subagent</span></td>
-              <td class="col-desc"><span class="desc-text">spec review: sessions churn PR</span></td>
-              <td class="col-dmod"><span class="dmod-inherit">inherit</span></td>
-              <td class="col-cmod"><span class="cmod-text">claude-fable</span></td>
-              <td class="col-sug"><span class="sug-text">sonnet</span></td>
-              <td class="col-save right"><span class="save-text">$24.10</span></td>
+              <td class="col-ts"><span class="ts-text">2026-06-10 07:09</span></td>
+              <td class="col-type"><span class="type-text">general-purpose</span></td>
+              <td class="col-desc"><span class="desc-text">Add deep span instrumentation</span></td>
+              <td class="col-sug"><span class="sug-text">claude-sonnet-4-6</span></td>
+              <td class="col-cost right"><span class="cost-text">$26.41</span></td>
+              <td class="col-save right"><span class="save-text">$18.49</span></td>
             </tr>
             <tr class="ellipsis-row">
-              <td colspan="7" style="letter-spacing: 0.12em; padding-top: 8px;">· · ·</td>
+              <td colspan="6" style="letter-spacing: 0.12em; padding-top: 8px;">· · ·</td>
             </tr>
           </tbody>
         </table>
