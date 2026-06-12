@@ -452,6 +452,18 @@ describe("routingCards", () => {
         const cards = routingCards(result);
         expect(cards[0]!.inline_action).toBeNull();
     });
+
+    test("null description and child_model render as 'unknown', never 'null'", () => {
+        const candidate: CandidateRow = {
+            ...makeCandidate("research", 0.05),
+            description: null,
+            child_model: null,
+        };
+        const cards = routingCards(candidatesResult([candidate]));
+        expect(cards[0]!.evidence).toContain("unknown");
+        expect(cards[0]!.evidence).not.toContain("null");
+        expect(cards[0]!.brief).not.toContain(" null");
+    });
 });
 
 // ---------------------------------------------------------------------------

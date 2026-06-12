@@ -40,6 +40,13 @@ const bonus = (n: number): number => Math.max(0, Math.min(9, Math.round(n)));
 /** Maximum cards returned per source builder. */
 const PER_SOURCE_CAP = 5;
 
+/** Shared builder trailer: sort by impact descending, cap at PER_SOURCE_CAP. */
+const capByImpact = (cards: NextActionCard[]): NextActionCard[] =>
+    cards.sort((a, b) => b.impact - a.impact).slice(0, PER_SOURCE_CAP);
+
+/** Null-safe interpolation: nullable DB strings must never render "null". */
+const nn = (v: string | null, fallback = "unknown"): string => v ?? fallback;
+
 // ---------------------------------------------------------------------------
 // proposalCards
 // ---------------------------------------------------------------------------
@@ -50,34 +57,34 @@ const PER_SOURCE_CAP = 5;
 export const proposalCards = (
     proposals: ReadonlyArray<ProposalDto>,
 ): NextActionCard[] =>
-    proposals
-        .filter((p) => p.status === "open")
-        .map((p): NextActionCard => {
-            const cw = CONFIDENCE_WEIGHT[p.confidence] ?? 1;
-            return {
-                id: `proposal:${p.dedupe_sig}`,
-                kind: "proposal",
-                title: `Decide proposal: ${p.title}`,
-                evidence: `${p.form} proposal, confidence ${p.confidence}, seen ${p.frequency}x`,
-                impact: KIND_WEIGHT.proposal + bonus(cw * Math.log2(p.frequency + 1)),
-                brief: renderAgentBrief({
-                    title: p.title,
-                    evidence: `hypothesis: ${p.hypothesis} (seen ${p.frequency}x, confidence ${p.confidence})`,
-                    ask: "Review this proposal; if sound, run `ax improve accept` and act on the emitted .ax/tasks brief.",
-                    verify: "`ax improve show` reflects accepted status; follow the experiment checkpoints.",
-                    source: `ax improve proposal sig=${p.dedupe_sig}`,
-                }),
-                link: null,
-                inline_action: {
-                    type: "accept",
-                    sig: p.dedupe_sig,
-                    skill: null,
-                    suggested_verdict: null,
-                },
-            };
-        })
-        .sort((a, b) => b.impact - a.impact)
-        .slice(0, PER_SOURCE_CAP);
+    capByImpact(
+        proposals
+            .filter((p) => p.status === "open")
+            .map((p): NextActionCard => {
+                const cw = CONFIDENCE_WEIGHT[p.confidence] ?? 1;
+                return {
+                    id: `proposal:${p.dedupe_sig}`,
+                    kind: "proposal",
+                    title: `Decide proposal: ${p.title}`,
+                    evidence: `${p.form} proposal, confidence ${p.confidence}, seen ${p.frequency}x`,
+                    impact: KIND_WEIGHT.proposal + bonus(cw * Math.log2(p.frequency + 1)),
+                    brief: renderAgentBrief({
+                        title: p.title,
+                        evidence: `hypothesis: ${p.hypothesis} (seen ${p.frequency}x, confidence ${p.confidence})`,
+                        ask: "Review this proposal; if sound, run `ax improve accept` and act on the emitted .ax/tasks brief.",
+                        verify: "`ax improve show` reflects accepted status; follow the experiment checkpoints.",
+                        source: `ax improve proposal sig=${p.dedupe_sig}`,
+                    }),
+                    link: null,
+                    inline_action: {
+                        type: "accept",
+                        sig: p.dedupe_sig,
+                        skill: null,
+                        suggested_verdict: null,
+                    },
+                };
+            }),
+    );
 
 // ---------------------------------------------------------------------------
 // verdictCards
@@ -93,44 +100,44 @@ export const proposalCards = (
 export const verdictCards = (
     proposals: ReadonlyArray<ProposalDto>,
 ): NextActionCard[] =>
-    proposals
-        .filter(
-            (p) =>
-                p.status === "accepted" &&
-                p.experiment != null &&
-                (p.experiment.locked_verdict == null),
-        )
-        .map((p): NextActionCard => {
-            const experiment = p.experiment!;
-            const suggested = experiment.latest_checkpoint?.suggested ?? null;
-            const evidenceLine = suggested != null
-                ? `experiment scaffolded, suggested verdict: ${suggested}`
-                : "experiment scaffolded, no checkpoint yet";
+    capByImpact(
+        proposals
+            .filter(
+                (p) =>
+                    p.status === "accepted" &&
+                    p.experiment != null &&
+                    (p.experiment.locked_verdict == null),
+            )
+            .map((p): NextActionCard => {
+                const experiment = p.experiment!;
+                const suggested = experiment.latest_checkpoint?.suggested ?? null;
+                const evidenceLine = suggested != null
+                    ? `experiment scaffolded, suggested verdict: ${suggested}`
+                    : "experiment scaffolded, no checkpoint yet";
 
-            return {
-                id: `verdict:${p.dedupe_sig}`,
-                kind: "verdict",
-                title: `Lock verdict: ${p.title}`,
-                evidence: evidenceLine,
-                impact: KIND_WEIGHT.verdict + (suggested != null ? 3 : 0),
-                brief: renderAgentBrief({
-                    title: `Lock verdict for experiment: ${p.title}`,
-                    evidence: `experiment status: ${experiment.status ?? "unknown"}; ${evidenceLine}`,
-                    ask: `Lock the verdict (suggested: ${suggested ?? "none"}) via the Improve dashboard or \`ax improve\` CLI; if evidence is thin, check retro notes first.`,
-                    verify: "`ax improve show` reports a locked verdict for this experiment.",
-                    source: `ax improve proposal sig=${p.dedupe_sig}`,
-                }),
-                link: null,
-                inline_action: {
-                    type: "verdict",
-                    sig: p.dedupe_sig,
-                    skill: null,
-                    suggested_verdict: suggested as string | null,
-                },
-            };
-        })
-        .sort((a, b) => b.impact - a.impact)
-        .slice(0, PER_SOURCE_CAP);
+                return {
+                    id: `verdict:${p.dedupe_sig}`,
+                    kind: "verdict",
+                    title: `Lock verdict: ${p.title}`,
+                    evidence: evidenceLine,
+                    impact: KIND_WEIGHT.verdict + bonus(suggested != null ? 3 : 0),
+                    brief: renderAgentBrief({
+                        title: `Lock verdict for experiment: ${p.title}`,
+                        evidence: `experiment status: ${experiment.status ?? "unknown"}; ${evidenceLine}`,
+                        ask: `Lock the verdict (suggested: ${suggested ?? "none"}) via the Improve dashboard or \`ax improve\` CLI; if evidence is thin, check retro notes first.`,
+                        verify: "`ax improve show` reports a locked verdict for this experiment.",
+                        source: `ax improve proposal sig=${p.dedupe_sig}`,
+                    }),
+                    link: null,
+                    inline_action: {
+                        type: "verdict",
+                        sig: p.dedupe_sig,
+                        skill: null,
+                        suggested_verdict: suggested as string | null,
+                    },
+                };
+            }),
+    );
 
 // ---------------------------------------------------------------------------
 // toolFailureCards
@@ -142,35 +149,35 @@ export const verdictCards = (
 export const toolFailureCards = (
     failures: ReadonlyArray<ToolFailureEntry>,
 ): NextActionCard[] =>
-    failures
-        .filter((f) => f.recommendation === "fix")
-        .map((f): NextActionCard => {
-            const extraEvidence: string[] = [];
-            if (f.last_error_text != null) extraEvidence.push(`last error: ${f.last_error_text}`);
-            if (f.last_project != null) extraEvidence.push(`project: ${f.last_project}`);
+    capByImpact(
+        failures
+            .filter((f) => f.recommendation === "fix")
+            .map((f): NextActionCard => {
+                const extraEvidence: string[] = [];
+                if (f.last_error_text != null) extraEvidence.push(`last error: ${f.last_error_text}`);
+                if (f.last_project != null) extraEvidence.push(`project: ${f.last_project}`);
 
-            return {
-                id: `tool_failure:${f.label}`,
-                kind: "tool_failure",
-                title: `Fix \`${f.label}\` failure cluster`,
-                evidence: `${f.failure_count} failures / ${f.distinct_sessions} sessions, exits [${f.exit_codes.join(", ")}]`,
-                impact: KIND_WEIGHT.tool_failure + bonus(Math.log2(f.failure_count)),
-                brief: renderAgentBrief({
+                return {
+                    id: `tool_failure:${f.label}`,
+                    kind: "tool_failure",
                     title: `Fix \`${f.label}\` failure cluster`,
-                    evidence: [
-                        `${f.failure_count} failures across ${f.distinct_sessions} sessions`,
-                        ...extraEvidence,
-                    ].join("; "),
-                    ask: "Diagnose the dominant failure mode and fix root cause (env, flag, or guard).",
-                    verify: `failure_count for this label stops growing in /api/tool-failures over the next 7d`,
-                    source: `ax tool-failure label=${f.label}`,
-                }),
-                link: "/tools",
-                inline_action: null,
-            };
-        })
-        .sort((a, b) => b.impact - a.impact)
-        .slice(0, PER_SOURCE_CAP);
+                    evidence: `${f.failure_count} failures / ${f.distinct_sessions} sessions, exits [${f.exit_codes.join(", ")}]`,
+                    impact: KIND_WEIGHT.tool_failure + bonus(Math.log2(f.failure_count)),
+                    brief: renderAgentBrief({
+                        title: `Fix \`${f.label}\` failure cluster`,
+                        evidence: [
+                            `${f.failure_count} failures across ${f.distinct_sessions} sessions`,
+                            ...extraEvidence,
+                        ].join("; "),
+                        ask: "Diagnose the dominant failure mode and fix root cause (env, flag, or guard).",
+                        verify: `failure_count for this label stops growing in /api/tool-failures over the next 7d`,
+                        source: `ax tool-failure label=${f.label}`,
+                    }),
+                    link: "/tools",
+                    inline_action: null,
+                };
+            }),
+    );
 
 // ---------------------------------------------------------------------------
 // churnCards
@@ -184,20 +191,16 @@ export const toolFailureCards = (
  *   - verificationFailures >= 5
  */
 export const churnCards = (summary: SessionChurnSummary): NextActionCard[] =>
-    summary.hotSessions
-        .filter((row) => {
+    capByImpact(
+        summary.hotSessions.flatMap((row): NextActionCard[] => {
             const repair = row.repairLinesAdded + row.repairLinesRemoved;
             const landed = row.landedLinesAdded + row.landedLinesRemoved;
             const repairOutlier = repair >= 100 && repair >= 0.5 * Math.max(landed, 1);
             const failureOutlier = row.verificationFailures >= 5;
-            return repairOutlier || failureOutlier;
-        })
-        .map((row): NextActionCard => {
-            const repair = row.repairLinesAdded + row.repairLinesRemoved;
-            const landed = row.landedLinesAdded + row.landedLinesRemoved;
-            const label = row.taskLabel ?? row.source ?? "unknown";
+            if (!repairOutlier && !failureOutlier) return [];
 
-            return {
+            const label = row.taskLabel ?? row.source ?? "unknown";
+            return [{
                 id: `churn:${row.session}`,
                 kind: "churn",
                 title: `Investigate churny session ${row.session}`,
@@ -212,10 +215,9 @@ export const churnCards = (summary: SessionChurnSummary): NextActionCard[] =>
                 }),
                 link: `/sessions/${row.session}`,
                 inline_action: null,
-            };
-        })
-        .sort((a, b) => b.impact - a.impact)
-        .slice(0, PER_SOURCE_CAP);
+            }];
+        }),
+    );
 
 // ---------------------------------------------------------------------------
 // routingCards
@@ -238,29 +240,29 @@ export const routingCards = (result: CandidatesResult): NextActionCard[] => {
         }
     }
 
-    return [...byClass.values()]
-        .filter((c) => c.est_savings_usd >= 0.01)
-        .map((c): NextActionCard => {
-            const classId = c.routing_match.classId;
-            return {
-                id: `routing:${classId}`,
-                kind: "routing",
-                title: `Route ${classId} dispatches to ${c.suggested_model}`,
-                evidence: `$${c.est_savings_usd.toFixed(2)} est savings - "${c.description}" went to ${c.child_model}`,
-                impact: KIND_WEIGHT.routing + bonus(c.est_savings_usd),
-                brief: renderAgentBrief({
+    return capByImpact(
+        [...byClass.values()]
+            .filter((c) => c.est_savings_usd >= 0.01)
+            .map((c): NextActionCard => {
+                const classId = c.routing_match.classId;
+                return {
+                    id: `routing:${classId}`,
+                    kind: "routing",
                     title: `Route ${classId} dispatches to ${c.suggested_model}`,
-                    evidence: `${c.routing_match.reason}; child ran on ${c.child_model}; est savings $${c.est_savings_usd.toFixed(2)}`,
-                    ask: "Add an explicit model to this dispatch pattern (or extend the routing class) so it stops inheriting the frontier model.",
-                    verify: "`ax dispatches --candidates` no longer lists this class.",
-                    source: `ax dispatches class=${classId}`,
-                }),
-                link: null,
-                inline_action: null,
-            };
-        })
-        .sort((a, b) => b.impact - a.impact)
-        .slice(0, PER_SOURCE_CAP);
+                    evidence: `$${c.est_savings_usd.toFixed(2)} est savings - "${nn(c.description)}" went to ${nn(c.child_model)}`,
+                    impact: KIND_WEIGHT.routing + bonus(c.est_savings_usd),
+                    brief: renderAgentBrief({
+                        title: `Route ${classId} dispatches to ${c.suggested_model}`,
+                        evidence: `${c.routing_match.reason}; child ran on ${nn(c.child_model)}; est savings $${c.est_savings_usd.toFixed(2)}`,
+                        ask: "Add an explicit model to this dispatch pattern (or extend the routing class) so it stops inheriting the frontier model.",
+                        verify: "`ax dispatches --candidates` no longer lists this class.",
+                        source: `ax dispatches class=${classId}`,
+                    }),
+                    link: null,
+                    inline_action: null,
+                };
+            }),
+    );
 };
 
 // ---------------------------------------------------------------------------
@@ -273,8 +275,8 @@ export const routingCards = (result: CandidatesResult): NextActionCard[] => {
 export const skillHygieneCards = (
     rows: ReadonlyArray<SkillHygieneRow>,
 ): NextActionCard[] =>
-    rows
-        .map((row): NextActionCard => ({
+    capByImpact(
+        rows.map((row): NextActionCard => ({
             id: `skill_hygiene:${row.name}`,
             kind: "skill_hygiene",
             title: `Classify skill ${row.name}`,
@@ -294,6 +296,5 @@ export const skillHygieneCards = (
                 skill: row.name,
                 suggested_verdict: null,
             },
-        }))
-        .sort((a, b) => b.impact - a.impact)
-        .slice(0, PER_SOURCE_CAP);
+        })),
+    );
