@@ -495,7 +495,9 @@ export function VerdictTimelineShowcase() {
           checkpoint joins evidence from the same graph that generated the proposal.
           Sessions, not days &mdash; a weekend doesn&apos;t artificially delay; a
           productive afternoon doesn&apos;t artificially rush. The verdict at +30
-          sessions is locked and feeds the next round.
+          sessions is locked and feeds the next round. Verdicts live in the improve
+          queue &mdash; <code>ax improve verdict</code> confirms or overrides one from
+          the CLI.
         </p>
       </figure>
 
