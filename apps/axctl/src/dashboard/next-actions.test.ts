@@ -570,9 +570,12 @@ describe("fetchNextActions", () => {
 
         expect(payload.cards).toEqual([]);
         // tool_failure uses runQuery (internal fail-open), so it does NOT add a note
-        // on DB failure - it silently returns []. Other 4 sources use db.query directly
-        // and do add notes. The contract is: no defect escapes, notes >= 4.
-        expect(payload.notes.length).toBeGreaterThanOrEqual(4);
+        // on DB failure - it silently returns []. The other 4 sources use db.query
+        // directly and do add notes. Exact set: if runQuery's internal swallow ever
+        // changes and tool_failure starts noting, this surfaces it.
+        expect(new Set(payload.notes.map((n) => n.source))).toEqual(
+            new Set(["proposal", "churn", "routing", "skill_hygiene"]),
+        );
         expect(typeof payload.generatedAt).toBe("string");
     });
 });

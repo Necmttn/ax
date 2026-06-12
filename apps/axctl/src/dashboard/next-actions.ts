@@ -17,6 +17,7 @@ import type {
     NextActionsSourceNote,
     ProposalDto,
     ToolFailureEntry,
+    ToolFailuresResponse,
 } from "@ax/lib/shared/dashboard-types";
 import type { SessionChurnSummary } from "../metrics/session-churn.ts";
 import { fetchSessionChurnSummary } from "../metrics/session-churn.ts";
@@ -324,6 +325,8 @@ const ROUTING_WINDOW_DAYS = 14;
  * failures; only truly unexpected defects (bugs) can still escape.
  */
 export const fetchNextActions = Effect.fn("dashboard.fetchNextActions")(function* () {
+    // Mutated from concurrent legs; safe because JS fibers interleave only at
+    // yield points - the push inside Effect.sync runs atomically.
     const notes: Array<NextActionsSourceNote> = [];
 
     /** Wrap an effect so errors become notes + an empty fallback value. */
@@ -344,11 +347,7 @@ export const fetchNextActions = Effect.fn("dashboard.fetchNextActions")(function
     const [proposals, failures, churn, routing, hygiene] = yield* Effect.all(
         [
             guarded("proposal", fetchImproveProposals(), [] as ReadonlyArray<ProposalDto>),
-            guarded(
-                "tool_failure",
-                fetchToolFailures() as Effect.Effect<{ failures: ReadonlyArray<ToolFailureEntry> }, unknown, SurrealClient>,
-                null as { failures: ReadonlyArray<ToolFailureEntry> } | null,
-            ),
+            guarded("tool_failure", fetchToolFailures(), null as ToolFailuresResponse | null),
             guarded(
                 "churn",
                 fetchSessionChurnSummary({
