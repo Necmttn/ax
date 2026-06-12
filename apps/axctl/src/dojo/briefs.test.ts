@@ -1,6 +1,6 @@
 // apps/axctl/src/dojo/briefs.test.ts
 import { describe, expect, test } from "bun:test";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Effect } from "effect";
@@ -72,5 +72,17 @@ describe("scanTaskDir", () => {
         expect(items).toHaveLength(1);
         expect(items[0]?.id).toBe("brief:classify-superpowers__tdd.md");
         expect(items[0]?.kind).toBe("brief_unfilled");
+    });
+
+    test("subdirectory in the task dir is skipped, not a fatal BadResource", async () => {
+        const dir = mkdtempSync(join(tmpdir(), "ax-dojo-briefs-"));
+        mkdirSync(join(dir, "some-subdir.md")); // .md-named dir: worst case for the old read path
+        writeFileSync(
+            join(dir, "classify-superpowers__tdd.md"),
+            "---\nax_classify: superpowers:tdd\nprimary_role:\n---\n",
+        );
+        const items = await runScan(dir);
+        expect(items).toHaveLength(1);
+        expect(items[0]?.id).toBe("brief:classify-superpowers__tdd.md");
     });
 });

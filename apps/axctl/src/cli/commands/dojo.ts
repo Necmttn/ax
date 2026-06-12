@@ -26,8 +26,11 @@ import { jsonFlag } from "./shared.ts";
 export const untilToIso = (until: string, nowMs: number): string | null => {
     const m = /^(\d{1,2}):(\d{2})$/.exec(until);
     if (!m) return null;
+    const h = Number(m[1]);
+    const min = Number(m[2]);
+    if (h > 23 || min > 59) return null;
     const d = new Date(nowMs);
-    d.setHours(Number(m[1]), Number(m[2]), 0, 0);
+    d.setHours(h, min, 0, 0);
     if (d.getTime() <= nowMs) d.setDate(d.getDate() + 1);
     return d.toISOString();
 };
@@ -53,11 +56,15 @@ export const dojoCommand = Command.make(
                 Effect.map((r) => r.snapshot),
                 Effect.catch(() => Effect.succeed(null)), // budget degrades, agenda still renders
             );
+            const untilIso = until ? untilToIso(until, nowMs) : null;
+            if (until && untilIso === null) {
+                console.error("ax dojo: invalid --until, expected HH:MM"); // degrade, don't fail
+            }
             const envelope = computeBudgetEnvelope(
                 quota,
                 {
                     budgetPctOverride: budget > 0 ? budget : null,
-                    untilIso: until ? untilToIso(until, nowMs) : null,
+                    untilIso,
                     force,
                 },
                 nowMs,
@@ -69,7 +76,7 @@ export const dojoCommand = Command.make(
     },
 ).pipe(
     Command.withDescription(
-        "Training agenda: quota budget envelope + prioritized self-improvement work items (consumed by the ax:dojo skill loop)",
+        "Training agenda: quota budget envelope + prioritized self-improvement work items (--budget=N, --until=HH:MM, --spar, --force, --days=N, --json; consumed by the ax:dojo skill loop)",
     ),
 );
 

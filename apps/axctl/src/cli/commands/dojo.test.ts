@@ -13,4 +13,8 @@ describe("untilToIso", () => {
     test("garbage returns null", () => {
         expect(untilToIso("late", NOW)).toBeNull();
     });
+    test("out-of-range hours/minutes return null", () => {
+        expect(untilToIso("25:00", NOW)).toBeNull();
+        expect(untilToIso("0:60", NOW)).toBeNull();
+    });
 });

@@ -1,4 +1,5 @@
 import { Effect, FileSystem, type PlatformError } from "effect";
+import { classifyNoFollow } from "@ax/lib/shared/fs-classify";
 import { orAbsent, skipNotFound } from "@ax/lib/shared/fs-error";
 import { posixPath } from "@ax/lib/shared/path";
 import type { DojoItem } from "./schema.ts";
@@ -54,11 +55,14 @@ export const classifyBriefFile = (name: string, content: string): DojoItem | nul
  * Effect glue: scan the task dir (AX_TASK_DIR ?? $PWD/.ax/tasks) into items.
  *
  * Discovery probes (exists/readDirectory) use `orAbsent` - a missing or
- * unreadable dir means "no open briefs". The per-file content read uses
- * `skipNotFound(null)` + skip-on-null: a brief that vanished mid-scan is
- * SKIPPED (never classified from an empty string into a spurious unfilled
- * item); any other read fault (permission, IO) re-raises so real data is
- * never silently dropped.
+ * unreadable dir means "no open briefs". Each entry is classified first
+ * (`classifyNoFollow`, the house pattern from ingest) and non-files
+ * (subdirectories, symlinks) are skipped - readFileString on a directory
+ * raises BadResource and would otherwise kill the whole source. The per-file
+ * content read uses `skipNotFound(null)` + skip-on-null: a brief that
+ * vanished mid-scan is SKIPPED (never classified from an empty string into a
+ * spurious unfilled item); any other read fault (permission, IO) re-raises so
+ * real data is never silently dropped.
  */
 export const scanTaskDir = (
     taskDir: string,
@@ -69,9 +73,10 @@ export const scanTaskDir = (
         const names = yield* fs.readDirectory(taskDir).pipe(orAbsent([] as string[]));
         const items: DojoItem[] = [];
         for (const name of names) {
-            const content = yield* fs
-                .readFileString(posixPath.join(taskDir, name))
-                .pipe(skipNotFound(null));
+            const path = posixPath.join(taskDir, name);
+            const kind = yield* classifyNoFollow(path);
+            if (kind !== "File") continue; // subdir/symlink/etc - not a brief
+            const content = yield* fs.readFileString(path).pipe(skipNotFound(null));
             if (content === null) continue; // vanished mid-scan - skip, don't misclassify
             const item = classifyBriefFile(name, content);
             if (item) items.push(item);
