@@ -39,4 +39,16 @@ describe("GitHubEnvTest", () => {
         );
         expect(result).toBe("err:404");
     });
+
+    test("login defaults to null when not canned", async () => {
+        const t = GitHubEnvTest({ responses: {} });
+        const login = await run(
+            Effect.gen(function* () {
+                const gh = yield* GitHubEnv;
+                return yield* gh.login();
+            }),
+            t,
+        );
+        expect(login).toBeNull();
+    });
 });

@@ -61,6 +61,8 @@ const liveShape: GitHubEnvService = {
     api: (method, path, body) =>
         Effect.tryPromise({
             try: () => ghApi(method, path, body),
+            // status 0 = spawn/JSON-parse failure (not an HTTP status);
+            // status 1 = gh exited non-zero without an HTTP code on stderr.
             catch: (e) =>
                 e instanceof GitHubApiError
                     ? e
