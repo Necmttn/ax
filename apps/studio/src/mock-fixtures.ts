@@ -198,15 +198,34 @@ const IMPROVE: ImprovePayload = {
 
 const NEXT_ACTIONS: NextActionsPayload = {
     generatedAt: NOW,
+    // Mirrors apps/axctl/src/dashboard/next-actions.ts builders: impact is an
+    // integer KIND_WEIGHT (verdict 90, proposal 80, tool_failure 70) + bonus
+    // (0..9); proposal/verdict cards have link: null, only tool_failure links
+    // to /tools; sorted impact-descending.
     cards: [
+        {
+            id: "verdict:skill__508c34566d2f1d85",
+            kind: "verdict",
+            title: "Post-feature verification checklist - verdict due",
+            evidence: "Experiment scaffolded 12d ago; 26 verification passes observed since",
+            impact: 93,
+            brief: "## Post-feature verification checklist\n\nThe experiment has been running for 12 days. Evidence suggests the skill is working as intended. Suggested verdict: adopted.",
+            link: null,
+            inline_action: {
+                type: "verdict",
+                sig: "skill__508c34566d2f1d85",
+                skill: null,
+                suggested_verdict: "adopted",
+            },
+        },
         {
             id: "proposal:skill__4555aa4f87404b1",
             kind: "proposal",
             title: "Session closure quality guardrail",
             evidence: "1072 sessions ended without commit while a plan was still open",
-            impact: 9.4,
+            impact: 85,
             brief: "## Session closure quality guardrail\n\nWarn the agent before stop when session has no commit + plan still open.\n\n**Trigger:** session-end without commit + plan still open\n**Proposed behavior:** warn the agent before stop with the plan delta",
-            link: "/improve",
+            link: null,
             inline_action: {
                 type: "accept",
                 sig: "skill__4555aa4f87404b1",
@@ -219,25 +238,10 @@ const NEXT_ACTIONS: NextActionsPayload = {
             kind: "tool_failure",
             title: "Bash: repeated `cd` path-not-found errors",
             evidence: "14 failures in the last 7 days across 3 projects",
-            impact: 6.1,
+            impact: 74,
             brief: "## Bash cd failures\n\nThe agent repeatedly attempts `cd` with relative paths that don't exist. Consider using absolute paths or checking directory existence first.",
             link: "/tools",
             inline_action: null,
-        },
-        {
-            id: "verdict:skill__508c34566d2f1d85",
-            kind: "verdict",
-            title: "Post-feature verification checklist - verdict due",
-            evidence: "Experiment scaffolded 12d ago; 26 verification passes observed since",
-            impact: 7.8,
-            brief: "## Post-feature verification checklist\n\nThe experiment has been running for 12 days. Evidence suggests the skill is working as intended. Suggested verdict: adopted.",
-            link: null,
-            inline_action: {
-                type: "verdict",
-                sig: "skill__508c34566d2f1d85",
-                skill: null,
-                suggested_verdict: "adopted",
-            },
         },
     ],
     notes: [],

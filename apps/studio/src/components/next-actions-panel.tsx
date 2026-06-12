@@ -1,4 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
+import { Link } from "@tanstack/react-router";
 import type { NextActionCard } from "@ax/lib/shared/dashboard-types";
 import { api } from "../api.ts";
 import { CopyButton } from "./copy-button.tsx";
@@ -83,9 +84,9 @@ function NextActionCardView({
                     </button>
                 ) : null}
                 {card.link ? (
-                    <a href={card.link} className="badge review">
+                    <Link to={card.link} className="badge review">
                         details &#8594;
-                    </a>
+                    </Link>
                 ) : null}
             </div>
         </article>
