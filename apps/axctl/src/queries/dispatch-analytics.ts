@@ -84,6 +84,31 @@ export const ROUTING_CLASSES: RoutingTable = {
             suggest: "sonnet",
             reason: "bulk mechanical work",
         },
+        // Mined by /routing-tune 2026-06-12 (adversarially backtested over 90d;
+        // brief: .ax/tasks/routing-tune-undated.md). The colon in task-N-impl
+        // is load-bearing: "Task 4 spec compliance review" (no colon) must NOT
+        // match - reviews stay on the main model.
+        {
+            id: "task-N-impl",
+            pattern: "^Task \\d+:",
+            flags: "i",
+            suggest: "sonnet",
+            reason: "numbered plan-task implementation",
+        },
+        {
+            id: "bug-fix",
+            pattern: "^Fix\\s",
+            flags: "i",
+            suggest: "sonnet",
+            reason: "bounded bug-fix remediation",
+        },
+        {
+            id: "feature-add",
+            pattern: "^Add\\s",
+            flags: "i",
+            suggest: "sonnet",
+            reason: "additive feature with a clear target",
+        },
     ],
     agentTypes: {
         Explore: "haiku",

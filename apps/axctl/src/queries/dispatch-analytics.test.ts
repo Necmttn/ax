@@ -62,8 +62,8 @@ describe("ROUTING_CLASSES", () => {
         expect(ROUTING_CLASSES.version).toBe(1);
     });
 
-    it("has 5 classes", () => {
-        expect(ROUTING_CLASSES.classes).toHaveLength(5);
+    it("has 8 classes", () => {
+        expect(ROUTING_CLASSES.classes).toHaveLength(8);
     });
 
     it("has agentTypes for Explore, codebase-locator, codebase-pattern-finder, codebase-analyzer", () => {
