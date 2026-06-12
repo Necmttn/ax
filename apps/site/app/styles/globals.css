@@ -10576,28 +10576,6 @@ footer .right {
     flex: none;
 }
 
-/* delta list (compare mode) */
-.pf-sign-delta {
-    display: grid !important;
-    grid-template-columns: 44px 44px 1fr;
-    gap: 16px;
-    align-items: baseline;
-}
-.pf-sign-delta-self, .pf-sign-delta-vs {
-    font-family: var(--mono);
-    font-size: 13px;
-    text-align: right;
-    font-weight: 600;
-}
-.pf-sign-delta-lead {
-    font-family: var(--mono);
-    font-size: 10.5px;
-    letter-spacing: 0.04em;
-    color: var(--muted);
-    text-align: left;
-    padding-left: 6px;
-}
-
 /* compare control */
 .pf-sign-compare {
     margin-top: 22px;
@@ -10643,7 +10621,82 @@ footer .right {
     font-size: 11px;
     color: var(--muted);
 }
+/* normalization explainer under the kicker */
+.pf-sign-method {
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.03em;
+    color: var(--muted);
+    margin: -12px 0 24px;
+    max-width: 64ch;
+}
+
+/* raw values reference table */
+.pf-rawvals { margin-top: 40px; }
+.pf-rawvals-head {
+    display: flex;
+    align-items: baseline;
+    gap: 12px;
+    margin-bottom: 12px;
+}
+.pf-rawvals-kicker {
+    font-family: var(--mono);
+    font-size: 10.5px;
+    text-transform: uppercase;
+    letter-spacing: 0.14em;
+    color: var(--ink);
+}
+.pf-rawvals-note {
+    font-family: var(--mono);
+    font-size: 10.5px;
+    letter-spacing: 0.04em;
+    color: var(--muted);
+}
+.pf-rawvals-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-family: var(--mono);
+    font-size: 12.5px;
+}
+.pf-rawvals-table th, .pf-rawvals-table td { padding: 8px 0; }
+.pf-rawvals-table thead th {
+    font-size: 10.5px;
+    font-weight: 400;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    color: var(--muted);
+    text-align: right;
+    border-bottom: 1px solid color-mix(in srgb, var(--ink) 28%, var(--line));
+}
+.pf-rawvals-table thead th:first-child { text-align: left; }
+.pf-rawvals-table thead th span { font-weight: 600; text-transform: none; letter-spacing: 0.03em; }
+.pf-rawvals-table tbody tr { border-bottom: 1px solid var(--line); }
+.pf-rawvals-table tbody th {
+    font-size: 10.5px;
+    font-weight: 400;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    color: var(--muted);
+    text-align: left;
+    width: 110px;
+}
+.pf-rawvals-val {
+    text-align: right;
+    color: var(--ink);
+    white-space: nowrap;
+}
+.pf-rawvals-val--lead { font-weight: 600; }
+.pf-rawvals-dot {
+    display: inline-block;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--green);
+    margin-left: 7px;
+    transform: translateY(-1px);
+}
 @media (max-width: 560px) {
     .pf-sign-name { font-size: 32px; }
-    .pf-sign-delta { grid-template-columns: 38px 38px minmax(0, 1fr); }
+    .pf-rawvals-table tbody th { width: 84px; }
+    .pf-rawvals-val { white-space: normal; }
 }

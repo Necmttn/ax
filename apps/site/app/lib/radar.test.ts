@@ -161,6 +161,74 @@ describe("profileToAxes - partial / missing", () => {
     });
 });
 
+/* ---------- raw values (reference-table labels) ---------- */
+
+describe("profileToAxes - raws", () => {
+    it("formats the un-normalised number behind every axis", () => {
+        const a = profileToAxes(profile({
+            tokensTotal: 19.6e9,
+            sessions: 100,
+            insights: baseInsights({
+                hours_total: 2300,
+                deep_session_share: 0.077,
+                subagents_spawned: 87,
+                verification_calls: 29,
+                tool_calls: 1000,
+                distinct_skills: 84,
+                repos_count: 12,
+            }),
+        }));
+        expect(a.raws.DEPTH.label).toBe("7.7% deep sessions");
+        expect(a.raws.SCALE.label).toBe("19.6B tokens");
+        expect(a.raws.RIGOR.label).toBe("2.9% verification share");
+        expect(a.raws.DELEGATION.label).toBe("0.87 subagents/session");
+        expect(a.raws.BREADTH.label).toBe("84 skills · 12 repos");
+        expect(a.raws.ENDURANCE.label).toBe("2.3K hrs");
+    });
+
+    it("carries comparable numerics matching the axis direction", () => {
+        const a = profileToAxes(profile({
+            tokensTotal: 1e9,
+            sessions: 50,
+            insights: baseInsights({
+                hours_total: 100,
+                deep_session_share: 0.3,
+                subagents_spawned: 25,
+                verification_calls: 75,
+                tool_calls: 1000,
+                distinct_skills: 50,
+                repos_count: 10,
+            }),
+        }));
+        expect(a.raws.DEPTH.value).toBeCloseTo(0.3, 5);
+        expect(a.raws.SCALE.value).toBe(1e9);
+        expect(a.raws.RIGOR.value).toBeCloseTo(0.075, 5);
+        expect(a.raws.DELEGATION.value).toBeCloseTo(0.5, 5);
+        expect(a.raws.BREADTH.value).toBeCloseTo(50 * 0.8 + 10 * 2, 5); // uncapped blend
+        expect(a.raws.ENDURANCE.value).toBe(100);
+    });
+
+    it("missing inputs yield a null value and an em-dash label", () => {
+        const a = profileToAxes(profile({ tokensTotal: 1e9, insights: undefined }));
+        expect(a.raws.DEPTH).toEqual({ label: "-", value: null });
+        expect(a.raws.RIGOR).toEqual({ label: "-", value: null });
+        expect(a.raws.DELEGATION).toEqual({ label: "-", value: null });
+        expect(a.raws.BREADTH).toEqual({ label: "-", value: null });
+        expect(a.raws.ENDURANCE).toEqual({ label: "-", value: null });
+        // SCALE is always measurable
+        expect(a.raws.SCALE.value).toBe(1e9);
+        expect(a.raws.SCALE.label).toBe("1B tokens");
+    });
+
+    it("every axis key has a raw entry", () => {
+        const a = profileToAxes(profile({ insights: baseInsights() }));
+        for (const k of RADAR_AXIS_KEYS) {
+            expect(a.raws[k]).toBeDefined();
+            expect(typeof a.raws[k].label).toBe("string");
+        }
+    });
+});
+
 /* ---------- determinism ---------- */
 
 describe("determinism", () => {
@@ -178,6 +246,16 @@ describe("determinism", () => {
 
 /* ---------- archetype matrix coverage ---------- */
 
+// hand-built axes need a raws record too; tests above cover real derivation
+const emptyRaws = (): Record<RadarAxisKey, { label: string; value: number | null }> => ({
+    DEPTH: { label: "-", value: null },
+    SCALE: { label: "-", value: null },
+    RIGOR: { label: "-", value: null },
+    DELEGATION: { label: "-", value: null },
+    BREADTH: { label: "-", value: null },
+    ENDURANCE: { label: "-", value: null },
+});
+
 // build an axes object that ranks two chosen axes highest, deterministically
 function axesWithTop(top: RadarAxisKey, second: RadarAxisKey): RadarAxes {
     const scores: Record<RadarAxisKey, number> = {
@@ -185,7 +263,7 @@ function axesWithTop(top: RadarAxisKey, second: RadarAxisKey): RadarAxes {
     };
     scores[top] = 90;
     scores[second] = 80;
-    return { scores, partial: false, missing: [] };
+    return { scores, raws: emptyRaws(), partial: false, missing: [] };
 }
 
 describe("archetypeFor - matrix coverage", () => {
@@ -222,6 +300,7 @@ describe("archetypeFor - matrix coverage", () => {
     it("all-zero axes yield the void sign", () => {
         const zero: RadarAxes = {
             scores: { DEPTH: 0, SCALE: 0, RIGOR: 0, DELEGATION: 0, BREADTH: 0, ENDURANCE: 0 },
+            raws: emptyRaws(),
             partial: true,
             missing: [...RADAR_AXIS_KEYS],
         };
@@ -232,6 +311,7 @@ describe("archetypeFor - matrix coverage", () => {
         // all equal -> top two are DEPTH, SCALE (first in RADAR_AXIS_KEYS)
         const flat: RadarAxes = {
             scores: { DEPTH: 50, SCALE: 50, RIGOR: 50, DELEGATION: 50, BREADTH: 50, ENDURANCE: 50 },
+            raws: emptyRaws(),
             partial: false,
             missing: [],
         };

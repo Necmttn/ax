@@ -415,6 +415,10 @@ function SignSection({ n, profile, vs }: { n: string; profile: ProfileV1; vs: Vs
     return (
         <section className="pf-section">
             <Kicker n={n} title="The sign" note="six axes, one archetype" />
+            <p className="pf-sign-method">
+                Axes are log-anchored to fixed scales (not min-max), so shapes compare
+                across any two profiles.
+            </p>
             <div className="pf-sign">
                 <div className="pf-sign-chart">
                     <RadarChart series={series} size={420} />
@@ -442,11 +446,9 @@ function SignSection({ n, profile, vs }: { n: string; profile: ProfileV1; vs: Vs
                     </div>
                     <p className="pf-sign-blurb">{selfArch.blurb}</p>
 
-                    {vsReady && vsAxes ? (
-                        <DeltaList self={selfAxes} selfLogin={profile.github} vs={vsAxes} vsLogin={vsReady.login} />
-                    ) : (
-                        <ScoreList axes={selfAxes} />
-                    )}
+                    {/* compare mode: the raw-values table below carries the
+                        per-axis comparison - one table, not two summaries */}
+                    {!(vsReady && vsAxes) && <ScoreList axes={selfAxes} />}
 
                     {/* compare control */}
                     <div className="pf-sign-compare">
@@ -477,6 +479,12 @@ function SignSection({ n, profile, vs }: { n: string; profile: ProfileV1; vs: Vs
                     </div>
                 </div>
             </div>
+
+            <RawTable
+                self={selfAxes}
+                selfLogin={profile.github}
+                vs={vsReady && vsAxes ? { axes: vsAxes, login: vsReady.login } : undefined}
+            />
         </section>
     );
 }
@@ -503,30 +511,65 @@ function ScoreList({ axes }: { axes: RadarAxes }) {
     );
 }
 
-function DeltaList({
-    self, selfLogin, vs, vsLogin,
-}: { self: RadarAxes; selfLogin: string; vs: RadarAxes; vsLogin: string }) {
+/**
+ * "Raw values" reference table - the un-normalised numbers behind the chart,
+ * straight off RadarAxes.raws (never re-derived here). In compare mode each
+ * row gets two value columns and the per-metric leader is marked with a small
+ * green dot; ties and unmeasurable rows get no dot.
+ */
+function RawTable({
+    self, selfLogin, vs,
+}: {
+    self: RadarAxes;
+    selfLogin: string;
+    vs?: { axes: RadarAxes; login: string };
+}) {
     return (
-        <dl className="pf-sign-scores pf-sign-scores--delta">
-            {RADAR_AXES_META.map((m) => {
-                const sv = self.scores[m.key];
-                const vv = vs.scores[m.key];
-                const diff = sv - vv;
-                const leader = Math.abs(diff) < 0.05 ? "tie" : diff > 0 ? selfLogin : vsLogin;
-                return (
-                    <div className="pf-sign-score" key={m.key}>
-                        <dt>{m.label}</dt>
-                        <dd className="pf-sign-delta">
-                            <span className="pf-sign-delta-self" style={{ color: SELF_COLOR }}>{fmtScore(sv)}</span>
-                            <span className="pf-sign-delta-vs" style={{ color: VS_COLOR }}>{fmtScore(vv)}</span>
-                            <span className="pf-sign-delta-lead">
-                                {leader === "tie" ? "even" : `@${leader} +${fmtScore(Math.abs(diff))}`}
-                            </span>
-                        </dd>
-                    </div>
-                );
-            })}
-        </dl>
+        <div className="pf-rawvals">
+            <div className="pf-rawvals-head">
+                <span className="pf-rawvals-kicker">raw values</span>
+                <span className="pf-rawvals-note">un-normalised numbers behind the chart</span>
+            </div>
+            <table className="pf-rawvals-table">
+                <thead>
+                    <tr>
+                        <th scope="col">metric</th>
+                        <th scope="col" className="pf-rawvals-col">
+                            {vs ? <span style={{ color: SELF_COLOR }}>@{selfLogin}</span> : "value"}
+                        </th>
+                        {vs && (
+                            <th scope="col" className="pf-rawvals-col">
+                                <span style={{ color: VS_COLOR }}>@{vs.login}</span>
+                            </th>
+                        )}
+                    </tr>
+                </thead>
+                <tbody>
+                    {RADAR_AXES_META.map((m) => {
+                        const a = self.raws[m.key];
+                        const b = vs?.axes.raws[m.key];
+                        // leader: strictly greater comparable numeric; null never leads
+                        const aLeads = vs !== undefined && a.value !== null && (b?.value === null || b === undefined || a.value > b.value);
+                        const bLeads = vs !== undefined && b !== undefined && b.value !== null && (a.value === null || b.value > a.value);
+                        return (
+                            <tr key={m.key}>
+                                <th scope="row">{m.label}</th>
+                                <td className={aLeads ? "pf-rawvals-val pf-rawvals-val--lead" : "pf-rawvals-val"}>
+                                    {a.label}
+                                    {aLeads && <span className="pf-rawvals-dot" aria-label="leads" />}
+                                </td>
+                                {vs && b && (
+                                    <td className={bLeads ? "pf-rawvals-val pf-rawvals-val--lead" : "pf-rawvals-val"}>
+                                        {b.label}
+                                        {bLeads && <span className="pf-rawvals-dot" aria-label="leads" />}
+                                    </td>
+                                )}
+                            </tr>
+                        );
+                    })}
+                </tbody>
+            </table>
+        </div>
     );
 }
 

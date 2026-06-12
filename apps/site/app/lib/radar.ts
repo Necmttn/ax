@@ -25,9 +25,22 @@ export const RADAR_AXIS_KEYS = [
 
 export type RadarAxisKey = (typeof RADAR_AXIS_KEYS)[number];
 
+/**
+ * The un-normalised number behind one axis, pre-formatted for the "raw
+ * values" reference table so the UI never re-derives. `value` is the
+ * comparable numeric used to pick a leader in compare mode (same direction
+ * as the axis: bigger = leads); null when the input was missing.
+ */
+export interface AxisRaw {
+    readonly label: string;
+    readonly value: number | null;
+}
+
 export interface RadarAxes {
     /** each value is 0..100, comparable across users */
     readonly scores: Readonly<Record<RadarAxisKey, number>>;
+    /** un-normalised raw value + display label per axis */
+    readonly raws: Readonly<Record<RadarAxisKey, AxisRaw>>;
     /**
      * true when one or more axes had to default to 0 because the profile
      * (an older ax version) lacked the optional input. The UI captions this so
@@ -125,11 +138,20 @@ export function profileToAxes(p: ProfileV1): RadarAxes {
     const ins = p.insights;
     const sessions = p.stats.sessions;
     const missing: RadarAxisKey[] = [];
+    const MISSING_RAW: AxisRaw = { label: "-", value: null };
 
     // DEPTH - present whenever insights exist
     let depth = 0;
-    if (ins) depth = score((ins.deep_session_share / 0.6) * 100);
-    else missing.push("DEPTH");
+    let depthRaw = MISSING_RAW;
+    if (ins) {
+        depth = score((ins.deep_session_share / 0.6) * 100);
+        depthRaw = {
+            label: `${pct1(ins.deep_session_share * 100)} deep sessions`,
+            value: ins.deep_session_share,
+        };
+    } else {
+        missing.push("DEPTH");
+    }
 
     // SCALE - tokens.total is always validated/present
     const scale = logAnchored(p.stats.tokens.total, [
@@ -139,35 +161,55 @@ export function profileToAxes(p: ProfileV1): RadarAxes {
         [1e10, 85],
         [1e11, 100],
     ]);
+    const scaleRaw: AxisRaw = {
+        label: `${fmtCompact.format(p.stats.tokens.total)} tokens`,
+        value: p.stats.tokens.total,
+    };
 
     // RIGOR - needs verification_calls + tool_calls
     let rigor = 0;
+    let rigorRaw = MISSING_RAW;
     if (ins && ins.verification_calls !== undefined && ins.tool_calls !== undefined && ins.tool_calls > 0) {
-        rigor = score((ins.verification_calls / ins.tool_calls / 0.15) * 100);
+        const share = ins.verification_calls / ins.tool_calls;
+        rigor = score((share / 0.15) * 100);
+        rigorRaw = { label: `${pct1(share * 100)} verification share`, value: share };
     } else {
         missing.push("RIGOR");
     }
 
     // DELEGATION - subagents per session
     let delegation = 0;
+    let delegationRaw = MISSING_RAW;
     if (ins && sessions > 0) {
-        delegation = score((ins.subagents_spawned / sessions / 2.0) * 100);
+        const ratio = ins.subagents_spawned / sessions;
+        delegation = score((ratio / 2.0) * 100);
+        delegationRaw = {
+            label: `${(Math.round(ratio * 100) / 100).toFixed(2)} subagents/session`,
+            value: ratio,
+        };
     } else {
         missing.push("DELEGATION");
     }
 
     // BREADTH - distinct_skills + repos_count blend
     let breadth = 0;
+    let breadthRaw = MISSING_RAW;
     if (ins && (ins.distinct_skills !== undefined || ins.repos_count !== undefined)) {
         const skills = ins.distinct_skills ?? 0;
         const repos = ins.repos_count ?? 0;
         breadth = score(skills * 0.8 + repos * 2);
+        breadthRaw = {
+            label: `${fmtCompact.format(skills)} skills · ${fmtCompact.format(repos)} repos`,
+            // the uncapped blend, so a leader is picked the same way the axis ranks
+            value: skills * 0.8 + repos * 2,
+        };
     } else {
         missing.push("BREADTH");
     }
 
     // ENDURANCE - hours_total log-anchored
     let endurance = 0;
+    let enduranceRaw = MISSING_RAW;
     if (ins) {
         endurance = logAnchored(ins.hours_total, [
             [10, 20],
@@ -175,6 +217,7 @@ export function profileToAxes(p: ProfileV1): RadarAxes {
             [1000, 80],
             [3000, 100],
         ]);
+        enduranceRaw = { label: `${fmtCompact.format(ins.hours_total)} hrs`, value: ins.hours_total };
     } else {
         missing.push("ENDURANCE");
     }
@@ -187,6 +230,14 @@ export function profileToAxes(p: ProfileV1): RadarAxes {
             DELEGATION: delegation,
             BREADTH: breadth,
             ENDURANCE: endurance,
+        },
+        raws: {
+            DEPTH: depthRaw,
+            SCALE: scaleRaw,
+            RIGOR: rigorRaw,
+            DELEGATION: delegationRaw,
+            BREADTH: breadthRaw,
+            ENDURANCE: enduranceRaw,
         },
         partial: missing.length > 0,
         missing,
