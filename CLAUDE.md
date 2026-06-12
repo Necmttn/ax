@@ -122,6 +122,19 @@ fresh clone.
 `ax cost sessions [--days=N] [--model=<name>] [--limit=N]` - top sessions by cost with id, project, model, started_at (default 14d/20 rows).
 `ax cost split [--days=N]` - origin (main vs subagent) × model matrix with cost and share-of-total; totals row. MCP: `cost_models`, `cost_split`.
 
+### Plan quota
+
+`ax quota [--json|--statusline|--swiftbar] [--max-age=N] [--fresh]` - live Claude
+plan usage (5h/7d windows) from the undocumented `api.anthropic.com/api/oauth/usage`
+endpoint, claude-meter style. Reads the Claude Code OAuth token (macOS Keychain
+`Claude Code-credentials`, fallback `~/.claude/.credentials.json`); never refreshes
+it. Responses cached at `~/.ax/quota-cache.json` (TTL `--max-age`, default 60s) so
+statusline/menubar callers can poll freely; fetch failures degrade to the stale
+cache. `--statusline` is one plain line for the Claude Code `statusLine` command;
+`--swiftbar` emits a SwiftBar/xbar plugin body (installable plugin:
+`scripts/swiftbar/ax-quota.2m.sh`). Module: `apps/axctl/src/quota/` (QuotaEnv seam,
+Live/Test layers). No DB (runtime "none").
+
 ### Profile
 
 `ax profile show [--window=N] [--no-cost] [--json]` - render your local ax
