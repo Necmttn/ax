@@ -181,6 +181,23 @@ describe("buildSessionsNext", () => {
         expect(next.filter((l) => l.ui?.group === "resume")).toHaveLength(0);
     });
 
+    test("non-empty window suggests the churn rollup", () => {
+        const { next } = buildSessionsNext([row({})], { project: "/Users/x/proj" });
+        const churn = next.find((l) => l.cmd?.includes("sessions churn"));
+        expect(churn?.cmd).toBe('ax sessions churn --project="/Users/x/proj"');
+    });
+
+    test("non-empty window without project suggests bare churn", () => {
+        const { next } = buildSessionsNext([row({})]);
+        const churn = next.find((l) => l.cmd?.includes("sessions churn"));
+        expect(churn?.cmd).toBe("ax sessions churn");
+    });
+
+    test("empty window has no churn link", () => {
+        const { next } = buildSessionsNext([], { date: "2026-06-09", days: 3 });
+        expect(next.find((l) => l.cmd?.includes("sessions churn"))).toBeUndefined();
+    });
+
     test("empty window with date teaches widening", () => {
         const { next } = buildSessionsNext([], { date: "2026-06-09", days: 3 });
         const widen = next.find((l) => l.call?.tool === "sessions_around");

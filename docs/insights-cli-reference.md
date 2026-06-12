@@ -225,6 +225,19 @@ plan snapshots, estimated tokens, cache ratios, and a coarse context-pressure
 bucket. These rows power `token-impact`, `cache-health`, `workflow-impact`, and
 `codex-health`.
 
+## Verification Churn (`ax sessions churn`)
+
+`ax sessions churn [--here|--project=P] [--source=S] [--since=N] [--json]`
+rolls verification churn up by session and source: landed LOC (commits via
+`produced`/`touched`), edit LOC (edit-class tool calls), and repair LOC -
+edits made while a verification episode is open. An episode opens when a
+check command (test / typecheck / lint / build) fails after prior edits and
+closes when a same-family check passes; open episodes expire after 30
+minutes. Check classification is anchored to command position (`bun test`
+counts, `ls test/` does not). Default window is 30 days; `--here` scopes to
+the current repo (project slug, cwd, and worktree/subdirectory sessions all
+match).
+
 ## Closure Quality And Skill Candidate Tables
 
 The closure-quality slice adds:

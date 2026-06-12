@@ -96,6 +96,7 @@ fresh clone.
 `ax sessions around <date> [--days=N] [--project=PATH]` - date window, default ±3d.
 `ax sessions near <sha>` - predecessor→commit window (adaptive); falls back to ±3d for orphan commits.
 `ax sessions show <id> [--expand=<uuid>|--all] [--by-role] [--json]` - drill into one session.
+`ax sessions churn [--here|--project=PATH] [--source=S] [--since=N]` - verification churn by session/source: landed vs edit vs repair LOC, failed checks, episodes (failure opens, same-family pass closes, 30min expiry). Default 30d window.
 
 ### Cross-source recall
 

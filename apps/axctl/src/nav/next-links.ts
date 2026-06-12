@@ -243,6 +243,18 @@ export const buildSessionsNext = (
         }
     }
 
+    // ③ Churn rollup over the same scope - cmd-only until an MCP
+    //    sessions_churn tool exists.
+    if (rows.length > 0) {
+        top.push({
+            description: "Aggregate verification churn (edit vs repair LOC, failed checks) for this scope",
+            cmd: opts.project
+                ? `ax sessions churn --project="${opts.project}"`
+                : "ax sessions churn",
+            ui: { priority: 5, group: "read" },
+        });
+    }
+
     // ⑤ Empty window - teach widening / dropping the filter.
     if (rows.length === 0 && opts.date) {
         const widened = (opts.days ?? 3) * 2;
