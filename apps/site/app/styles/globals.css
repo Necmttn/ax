@@ -10265,3 +10265,54 @@ footer .right {
   .routing-page .rt-term pre { font-size: 11px; padding: 16px; }
   .routing-page .rt-install code { font-size: 12px; }
 }
+
+/* ----- visitor CTA ----- */
+.pf-cta {
+    margin-top: 72px;
+    border: 1px solid var(--line);
+    border-top: 3px solid var(--ink);
+    background: var(--panel);
+    padding: 40px 40px 32px;
+}
+.pf-cta-headline {
+    font-family: var(--serif);
+    font-size: clamp(24px, 3.5vw, 36px);
+    font-weight: 400;
+    letter-spacing: -0.5px;
+    line-height: 1.15;
+    margin: 0 0 10px;
+}
+.pf-cta-sub {
+    font-size: 14.5px;
+    line-height: 1.55;
+    color: var(--muted);
+    margin: 0 0 24px;
+}
+.pf-cta-cmds {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-bottom: 20px;
+}
+.pf-cta-cmd {
+    display: block;
+    font-family: var(--mono);
+    font-size: 13.5px;
+    background: var(--ink);
+    color: var(--page);
+    padding: 11px 16px;
+    white-space: pre;
+}
+.pf-cta-cmd::before { content: "$ "; color: var(--green); }
+.pf-cta-repo {
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--muted);
+    text-decoration: none;
+    letter-spacing: 0.04em;
+}
+.pf-cta-repo:hover { color: var(--ink); }
+@media (max-width: 560px) {
+    .pf-cta { padding: 28px 22px 22px; }
+    .pf-cta-cmd { white-space: normal; word-break: break-all; }
+}

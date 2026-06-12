@@ -19,7 +19,11 @@ const stubDb = Layer.mock(SurrealClient, {
 
 const handlers: ContractWebHandler[] = [];
 function make(liveIngest = false): ContractWebHandler {
-    const h = makeContractWebHandler({ liveIngest, services: stubDb });
+    // A truthy fake stream handle is enough: version only null-checks it.
+    const h = makeContractWebHandler({
+        ingestStream: liveIngest ? ({} as never) : null,
+        services: stubDb,
+    });
     handlers.push(h);
     return h;
 }
@@ -49,8 +53,8 @@ describe("isContractRequest", () => {
         // method-ANY quirk) until the family is fully cut over.
         expect(isContractRequest("POST", "/api/version")).toBe(false);
         expect(isContractRequest("GET", "/api/query")).toBe(false);
-        // Unmigrated families never route here.
-        expect(isContractRequest("GET", "/api/sessions")).toBe(false);
+        // The deliberately-unmigrated route never routes here.
+        expect(isContractRequest("GET", "/api/graph-explorer")).toBe(false);
     });
 });
 

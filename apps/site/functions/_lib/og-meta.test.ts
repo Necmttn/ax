@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { OG_RENDER_REV, buildOgImageUrl, ogImageVersion } from "./og-meta";
+import { OG_RENDER_REV, buildOgImageUrl, ogImageVersion, OG_PROFILE_RENDER_REV, buildProfileOgImageUrl } from "./og-meta";
 
 describe("og-meta", () => {
     test("bare render revision when no manifest text is in hand", () => {
@@ -26,5 +26,18 @@ describe("og-meta", () => {
 
     test("empty manifest text still versions with a hash, not bare rev", () => {
         expect(ogImageVersion("")).toMatch(new RegExp(`^${OG_RENDER_REV}-[0-9a-f]{8}$`));
+    });
+});
+
+describe("buildProfileOgImageUrl", () => {
+    test("returns absolute og-profile URL with render revision", () => {
+        expect(buildProfileOgImageUrl("necmttn")).toBe(
+            `https://ax.necmttn.com/og-profile/necmttn?r=${OG_PROFILE_RENDER_REV}`,
+        );
+    });
+
+    test("preserves login casing in URL", () => {
+        const url = buildProfileOgImageUrl("MyUser");
+        expect(url).toContain("/og-profile/MyUser");
     });
 });

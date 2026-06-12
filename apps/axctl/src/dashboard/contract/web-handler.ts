@@ -28,9 +28,14 @@ import { HttpApiBuilder, HttpApiScalar } from "effect/unstable/httpapi";
 import type { SurrealClient } from "@ax/lib/db";
 import { AppLayer } from "@ax/lib/layers";
 import { AxApi } from "@ax/lib/shared/api-contract";
+import type { DurableIngestStream } from "../ingest-stream-durable.ts";
 import { jsonResponse } from "../router/router.ts";
 import { errorText } from "./common.ts";
+import { ImproveGroupLive } from "./improve.ts";
 import { InsightsGroupLive } from "./insights.ts";
+import { LiveGroupLive } from "./live.ts";
+import { SessionsGroupLive } from "./sessions.ts";
+import { SkillsGroupLive } from "./skills.ts";
 import { ContractServeInfo, SystemGroupLive } from "./system.ts";
 
 /** Everything the contract handlers reach for; widens as families join. */
@@ -50,6 +55,20 @@ const CONTRACT_ROUTES: ReadonlySet<string> = new Set([
     "GET /api/wrapped/public-preview",
     "GET /api/workflow",
     "GET /api/tool-failures",
+    // sessions
+    "GET /api/session-canvas",
+    "GET /api/session-summary",
+    "GET /api/session-orchestration",
+    "GET /api/sessions",
+    "GET /api/sessions/compare",
+    // skills
+    "GET /api/decisions",
+    "GET /api/skills",
+    "POST /api/skills/decide-bulk",
+    // improve
+    "GET /api/improve",
+    // live (SSE /api/events + binary /api/image stay raw legacy routes)
+    "POST /api/ingest",
     // docs
     "GET /docs",
     "GET /openapi.json",
@@ -61,6 +80,17 @@ const CONTRACT_PATTERNS: ReadonlyArray<{ readonly method: string; readonly patte
     { method: "GET", pattern: /^\/api\/episodes\/[^/]+$/ },
     { method: "GET", pattern: /^\/api\/projects\/[^/]+$/ },
     { method: "GET", pattern: /^\/api\/tool-failures\/[^/]+\/detail$/ },
+    // /api/sessions/compare also matches the single-segment pattern below.
+    // That is intentional: both route into the contract and FindMyWay gives
+    // static paths precedence over :param paths, so compare wins correctly.
+    { method: "GET", pattern: /^\/api\/sessions\/[^/]+$/ },
+    { method: "GET", pattern: /^\/api\/sessions\/[^/]+\/(children|insights|inspect|timeline)$/ },
+    { method: "GET", pattern: /^\/api\/skills\/[^/]+\/(detail|source)$/ },
+    { method: "POST", pattern: /^\/api\/skills\/[^/]+\/(decide|open)$/ },
+    { method: "DELETE", pattern: /^\/api\/skills\/[^/]+\/decide$/ },
+    // Unknown improve actions fall to the legacy row's 404 decode; only the
+    // three known actions reach the contract's Literals-typed param.
+    { method: "POST", pattern: /^\/api\/improve\/[^/]+\/(accept|reject|verdict)$/ },
 ];
 
 export const isContractRequest = (method: string, pathname: string): boolean =>
@@ -73,8 +103,9 @@ export interface ContractWebHandler {
 }
 
 export interface MakeContractWebHandlerOptions {
-    /** Whether the Durable Streams sidecar is hosting live ingest. */
-    readonly liveIngest: boolean;
+    /** Durable Streams sidecar handle, or null when it could not start
+     *  (compiled binary). Drives `live_ingest` and POST /api/ingest. */
+    readonly ingestStream: DurableIngestStream | null;
     /** Share with the server runtime so AppLayer builds once (see above). */
     readonly memoMap?: Layer.MemoMap;
     /** Test seam: services the handlers need (default: production AppLayer). */
@@ -82,17 +113,30 @@ export interface MakeContractWebHandlerOptions {
 }
 
 export function makeContractWebHandler(opts: MakeContractWebHandlerOptions): ContractWebHandler {
-    // Handler services (SurrealClient, ContractServeInfo) must be part of the
-    // app layer's OUTPUT: route handlers declare them through the router's
+    // Handler services (SurrealClient, ContractServeInfo, FileSystem/Path
+    // for the transcript-reading session handlers) must be part of the app
+    // layer's OUTPUT: route handlers declare them through the router's
     // `Requires` channel, which `toWebHandler` satisfies from the built
     // context at request time - `Layer.provide` into the group does not.
     const appLayer = Layer.mergeAll(
         HttpApiBuilder.layer(AxApi, { openapiPath: "/openapi.json" }),
         HttpApiScalar.layer(AxApi, { path: "/docs" }),
-        Layer.succeed(ContractServeInfo)({ liveIngest: opts.liveIngest }),
+        Layer.succeed(ContractServeInfo)({ ingestStream: opts.ingestStream }),
         opts.services ?? AppLayer,
+        BunFileSystem.layer,
+        BunPath.layer,
     ).pipe(
-        Layer.provide([SystemGroupLive, InsightsGroupLive]),
+        Layer.provide([
+            SystemGroupLive,
+            InsightsGroupLive,
+            SessionsGroupLive,
+            SkillsGroupLive,
+            ImproveGroupLive,
+            LiveGroupLive,
+        ]),
+        // FileSystem/Path appear twice deliberately: in the mergeAll OUTPUT
+        // for request-time handler requirements, and here for the build-time
+        // needs of HttpApiBuilder.layer (same layer objects, memoized once).
         Layer.provide([BunHttpPlatform.layer, BunFileSystem.layer, BunPath.layer, Etag.layer]),
     );
     const build = (): ContractWebHandler =>

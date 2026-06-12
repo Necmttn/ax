@@ -37,3 +37,10 @@ export const ogImageVersion = (manifestText?: string): string =>
 /** Absolute /og/ poster URL with the cache-busting ?v= version param. */
 export const buildOgImageUrl = (owner: string, gistId: string, manifestText?: string): string =>
     `https://ax.necmttn.com/og/${owner}/${gistId}?v=${ogImageVersion(manifestText)}`;
+
+/** Bump when the profile poster template changes; busts edge + social image caches. */
+export const OG_PROFILE_RENDER_REV = 1;
+
+/** Absolute /og-profile/ poster URL for a profile login with the cache-busting ?r= param. */
+export const buildProfileOgImageUrl = (login: string): string =>
+    `https://ax.necmttn.com/og-profile/${login}?r=${OG_PROFILE_RENDER_REV}`;

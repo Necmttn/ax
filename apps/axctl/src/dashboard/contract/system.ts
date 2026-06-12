@@ -21,13 +21,14 @@ import { checkoutActivitySql, gitCorrelationSql } from "../../queries/insights.t
 import { API_VERSION, dashboardApiCapabilities } from "../capabilities.ts";
 
 /**
- * Boot-time facts the contract handlers need from `serveDashboard` (whether
- * the Durable Streams sidecar came up). Provided as a layer when the web
- * handler is built - the contract module itself must stay daemon-agnostic.
+ * Boot-time facts the contract handlers need from `serveDashboard`: the
+ * Durable Streams sidecar handle when it came up (null on the compiled
+ * binary). Provided as a layer when the web handler is built - the
+ * contract module itself must stay daemon-agnostic.
  */
 export class ContractServeInfo extends Context.Service<
     ContractServeInfo,
-    { readonly liveIngest: boolean }
+    { readonly ingestStream: import("../ingest-stream-durable.ts").DurableIngestStream | null }
 >()("axctl/dashboard/ContractServeInfo") {}
 
 const errorText = (err: unknown): string =>
@@ -44,7 +45,7 @@ export const SystemGroupLive = HttpApiBuilder.group(AxApi, "system", (handlers) 
                     version: AX_VERSION,
                     api_version: API_VERSION,
                     capabilities: dashboardApiCapabilities(),
-                    live_ingest: info.liveIngest,
+                    live_ingest: info.ingestStream !== null,
                 });
             }))
         .handle("query", ({ payload }) =>
