@@ -28,6 +28,7 @@ export const fetchImproveProposals = Effect.fn("dashboard.fetchImproveProposals"
     function* () {
         const db = yield* SurrealClient;
         const result = yield* db.query<[Array<Record<string, unknown>>]>(PROPOSALS_SQL);
-        return (result?.[0] ?? []) as unknown as ReadonlyArray<ProposalDto>;
+        // TODO: replace with schema decode when the proposal wire shape stabilizes
+        return (result[0] ?? []) as unknown as ReadonlyArray<ProposalDto>;
     },
 );
