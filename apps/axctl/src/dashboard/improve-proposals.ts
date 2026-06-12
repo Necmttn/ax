@@ -8,7 +8,7 @@ import { renderAgentBrief } from "./agent-brief.ts";
 // See docs/superpowers/plans/2026-05-25-experiment-loop-cleanup-and-rebuild.md
 // (Phase C10). Moved verbatim from server.ts queryApi (166-182).
 const PROPOSALS_SQL = `
-SELECT id, form, title, hypothesis, dedupe_sig, frequency, confidence, status, origin, reject_reason,
+SELECT id, form, title, hypothesis, dedupe_sig, frequency, confidence, status, origin, baseline, reject_reason,
     type::string(created_at) AS created_at,
     (SELECT trigger_pattern, suspected_gap, proposed_behavior, expected_impact FROM skill_proposal      WHERE proposal = $parent.id LIMIT 1)[0] AS skill_payload,
     (SELECT bounded_role, delegation_trigger, example_task_patterns FROM subagent_proposal   WHERE proposal = $parent.id LIMIT 1)[0] AS subagent_payload,

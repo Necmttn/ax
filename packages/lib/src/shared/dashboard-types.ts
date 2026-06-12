@@ -1207,6 +1207,8 @@ export interface ProposalDto {
     readonly experiment?: ExperimentDto | null;
     /** "mined" (signal-derived) or "agent" (ax improve propose); served coalesced. */
     readonly origin?: string;
+    /** JSON snapshot frozen at creation - evidence/frequency provenance */
+    readonly baseline?: string | null;
     /** server-rendered markdown agent brief */
     readonly brief?: string;
 }
@@ -1237,6 +1239,19 @@ export interface NextActionInlineAction {
     readonly suggested_verdict: string | null;
 }
 
+/** Projected impact for a proposal - estimated/backtested from the user's
+ *  own history. Every number carries its basis and an honesty tier. */
+export interface ImpactEstimate {
+    readonly kind: "savings_usd" | "addressable_failures" | "correction_pressure" | "frequency";
+    /** the centerpiece line, e.g. "~$297 redirectable over 30d" */
+    readonly headline: string;
+    /** one paragraph: how the number was derived */
+    readonly detail: string;
+    /** data window + method, honestly stated */
+    readonly basis: string;
+    readonly confidence: "measured" | "estimated" | "indicative";
+}
+
 export interface NextActionCard {
     /** stable id: `${kind}:${key}` */
     readonly id: string;
@@ -1251,6 +1266,8 @@ export interface NextActionCard {
     /** SPA drill-down path, e.g. /tools */
     readonly link: string | null;
     readonly inline_action: NextActionInlineAction | null;
+    /** cheap value teaser parsed from the proposal baseline/hypothesis */
+    readonly impact_chip?: string | null;
 }
 
 export interface NextActionsSourceNote {
