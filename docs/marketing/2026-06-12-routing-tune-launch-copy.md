@@ -14,6 +14,8 @@ Numbers measured on the author's machine, 14-day window ending 2026-06-12
 
 **Post 1** [IMAGE: 16:9 receipt visual]
 
+![receipt visual 16:9](./2026-06-12-receipt-visual-wide.png)
+
 You'd think Claude Code sends the grunt work it spawns to cheaper models. It doesn't. Every sub-task runs on your most expensive model unless something tells it otherwise.
 
 My last 14 days: $19,270. 663 sub-tasks. 75% on the priciest model for no reason.
@@ -34,7 +36,9 @@ The smart model keeps the thinking - planning, judgment, review. The routine imp
 
 You don't change how you work. The bill changes.
 
-**Post 4** [SCREENSHOT: ax routing tune --dry-run output, cropped to footer]
+**Post 4** [SCREENSHOT: ax routing tune --dry-run output]
+
+![tune dry-run screenshot](./2026-06-12-shot-tune-dryrun.png)
 
 Shipped today: ax routing tune.
 
@@ -42,7 +46,9 @@ It reads your own usage history and finds the routine work that keeps getting bi
 
 First run on my data: 20 patterns, $591.57 of addressable spend over 30 days.
 
-**Post 5** [SCREENSHOT: ax dispatches --candidates output, cropped to footer]
+**Post 5** [SCREENSHOT: ax dispatches --candidates output]
+
+![candidates screenshot](./2026-06-12-shot-candidates.png)
 
 Then the receipts: every sub-task that ran on the expensive model gets repriced against what the cheaper one would have cost, from the actual tokens it burned.
 
