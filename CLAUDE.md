@@ -163,9 +163,13 @@ first nightly compile). Both client-fetch from raw.githubusercontent / gist
 raw; validation in `apps/site/app/lib/community.ts` (manual - the site does
 not depend on effect).
 
+### Thinking analytics
+
+`ax thinking [--days=N] [--json]` - reasoning-spend rollup. Claude: per-turn `thinking_blocks`/`thinking_tokens` on `turn` - transcripts strip thinking text (empty `thinking` + signature only), but thinking-only assistant events carry their own `usage.output_tokens`, which IS the thinking spend (mixed turns report 0 → lower bound). Effort levels on `session.reasoning_effort`: codex turn_context effort + claude `settings.json` `effortLevel` (no per-session field exists - stamped only on sessions active within 30min of ingest, history never backstamped; `apps/axctl/src/ingest/claude-effort.ts`). Codex also gets `reasoning_output_tokens` on `session_token_usage`/`turn_token_usage`. Fields populate at ingest - pre-existing sessions read zero until their files are re-ingested. Module: `apps/axctl/src/queries/thinking-analytics.ts`.
+
 ### Dispatch routing
 
-`ax dispatches [--days=N] [--limit=N]` - subagent dispatch table sorted by child cost (default 14d/30 rows). Shows ts, agent_type, description, dispatch_model ("inherit" when no explicit model), child_model, child_cost_usd. Summary: count, % inherit, total subagent cost. MCP: `dispatches`.
+`ax dispatches [--days=N] [--limit=N]` - subagent dispatch table sorted by child cost (default 14d/30 rows). Shows ts, agent_type, description, dispatch_model ("inherit" when no explicit model), child_model, child_cost_usd. Summary: count, % inherit, total subagent cost. MCP: `dispatches`. Routed dispatches whose child ran legs on another model are marked `!` with a dropped-cost footer - the harness drops the Agent `model` override on SendMessage/compact continuations; per-model legs come from `turn_token_usage` (`child_legs`/`model_dropped`/`dropped_cost_usd` in `--json`).
 `ax dispatches --candidates [--days=N]` - inherit + expensive (fable/opus) + routing-class match filter. Shows suggested model + est savings per dispatch. Footer: total est savings, top 3 classes by savings.
 `ax routing compile [--out=PATH]` - merge-preserving regenerate of `~/.ax/hooks/routing-table.json` (defaults refresh, `origin: user` classes survive; refuses to overwrite a corrupt file). `ax dispatches compile-routing` is an alias.
 `ax routing tune [--days=N] [--dry-run] [--emit-brief] [--apply=id,...] [--out=PATH]` - mine unmatched expensive inherit dispatches for new routing classes (two-token prefix clustering, ≥3 members, suggests sonnet). Auto-applies non-judgment proposals to `~/.ax/hooks/routing-table.json` as `origin: user`; judgment-flagged ones (review/design/plan/audit/...) only ship via `--emit-brief` → `.ax/tasks/routing-tune-<date>.md` → agent backtest → `--apply=ids` (carry the brief's `--days` window).

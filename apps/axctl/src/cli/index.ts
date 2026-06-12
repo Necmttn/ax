@@ -20,6 +20,7 @@ import { quotaCommand, quotaRuntime } from "./commands/quota.ts";
 import { profileCommand, axProfileRuntime } from "./commands/profile.ts";
 import { dispatchesRootCommand, axDispatchesRuntime } from "./commands/ax-dispatches.ts";
 import { routingRootCommand, axRoutingRuntime } from "./commands/ax-routing.ts";
+import { thinkingCommand, axThinkingRuntime } from "./commands/ax-thinking.ts";
 import { recallCommand, recallRuntime } from "./commands/recall.ts";
 import { hookCommand, hooksCommand, hooksRuntime } from "./commands/hooks.ts";
 import { retroCommand, retroRuntime } from "./commands/retro.ts";
@@ -82,6 +83,7 @@ export const RUNTIME_BY_COMMAND: RuntimeManifest = {
     ...axProfileRuntime,
     ...axDispatchesRuntime,
     ...axRoutingRuntime,
+    ...axThinkingRuntime,
     ...recallRuntime,
     ...hooksRuntime,
     ...retroRuntime,
@@ -123,6 +125,7 @@ const registeredCommands: ReadonlyArray<Command.Command.Any> = [
     profileCommand,
     dispatchesRootCommand,
     routingRootCommand,
+    thinkingCommand,
     // Maintenance / plumbing verbs - hidden via their family manifests.
     deriveCommand,
     deriveSignalsCommand,

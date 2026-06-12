@@ -151,6 +151,13 @@ interface AgentModelRow {
 // Dispatch row (post-join)
 // ---------------------------------------------------------------------------
 
+/** One model's share of a child session, from per-turn usage rows. */
+export interface DispatchLeg {
+    readonly model: string;
+    readonly cost_usd: number;
+    readonly turns: number;
+}
+
 export interface DispatchRow {
     readonly ts: string;
     readonly parent_id: string;
@@ -162,6 +169,14 @@ export interface DispatchRow {
     /** Model the child actually ran on (from usage or session.model) */
     readonly child_model: string | null;
     readonly child_cost_usd: number;
+    /** Per-model legs of the child session (turn_token_usage granularity). */
+    readonly child_legs: ReadonlyArray<DispatchLeg>;
+    /** True when an explicitly routed dispatch ran legs on a different model
+     *  (Claude Code drops the model override on SendMessage/compact
+     *  continuations - the continued legs inherit the parent model). */
+    readonly model_dropped: boolean;
+    /** Cost of the legs that ran on a model other than the requested one. */
+    readonly dropped_cost_usd: number;
     /** Prompt tokens (for repricing) */
     readonly prompt_tokens: number;
     /** Completion tokens (for repricing) */
@@ -177,6 +192,10 @@ export interface DispatchesResult {
     readonly total_dispatches: number;
     readonly inherit_pct: number;
     readonly total_child_cost_usd: number;
+    /** Routed (non-inherit) dispatches whose child ran off-model legs. */
+    readonly dropped_count: number;
+    /** Total cost of off-model legs across dropped dispatches. */
+    readonly dropped_cost_usd: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -245,6 +264,26 @@ WHERE source != 'claude-subagent'
   AND started_at > time::now() - ${Math.max(1, Math.trunc(sinceDays))}d;
 `;
 
+/**
+ * Per-model legs of each subagent session. Grouped aggregate stays deref-free
+ * (raw fields only); the outer select stringifies the grouped record id, the
+ * inner/outer shape mirrors graph-explorer's FILE_ATTENTION_SQL.
+ */
+const CHILD_LEGS_SQL = (sinceDays: number) => `
+SELECT type::string(session) AS session_id, model, cost_usd, turns FROM (
+    SELECT
+        session,
+        model,
+        math::sum(estimated_cost_usd ?? 0) AS cost_usd,
+        count() AS turns
+    FROM turn_token_usage
+    WHERE ts > time::now() - ${Math.max(1, Math.trunc(sinceDays))}d
+      AND source = 'claude-subagent'
+      AND model != NONE
+    GROUP BY session, model
+);
+`;
+
 const AGENT_MODELS_SQL = `
 SELECT
     name,
@@ -261,6 +300,53 @@ FROM agent_model;
 
 const cleanSessionId = (id: string): string =>
     id.replace(/^session:/, "").replace(/^`(.*)`$/, "$1");
+
+// ---------------------------------------------------------------------------
+// Model-drop detection (continuation legs on a non-requested model)
+// ---------------------------------------------------------------------------
+
+/**
+ * Does a child leg's model satisfy the dispatch-time request? Aliases match
+ * by family ("sonnet" matches claude-sonnet-4-6); full names match exactly
+ * (a leg on any other model counts as a drop).
+ */
+export const legMatchesDispatchModel = (
+    legModel: string,
+    dispatchModel: string,
+): boolean => {
+    const lm = legModel.toLowerCase();
+    const dm = dispatchModel.toLowerCase();
+    return lm === dm || lm.includes(dm);
+};
+
+export interface ModelDrop {
+    readonly dropped: boolean;
+    readonly dropped_cost_usd: number;
+}
+
+/**
+ * Detect dropped-model legs for a routed dispatch. Claude Code applies the
+ * Agent `model` param to the first leg only; SendMessage follow-ups and
+ * post-compact resumes continue on the parent session's model. Falls back to
+ * the session-level child model when no per-turn legs exist.
+ */
+export const computeModelDrop = (
+    dispatchModel: string,
+    legs: ReadonlyArray<DispatchLeg>,
+    fallbackChildModel: string | null,
+    fallbackChildCost: number,
+): ModelDrop => {
+    if (dispatchModel === "inherit") return { dropped: false, dropped_cost_usd: 0 };
+    if (legs.length > 0) {
+        const off = legs.filter((l) => !legMatchesDispatchModel(l.model, dispatchModel));
+        const cost = off.reduce((s, l) => s + l.cost_usd, 0);
+        return { dropped: off.length > 0, dropped_cost_usd: cost };
+    }
+    if (fallbackChildModel && !legMatchesDispatchModel(fallbackChildModel, dispatchModel)) {
+        return { dropped: true, dropped_cost_usd: fallbackChildCost };
+    }
+    return { dropped: false, dropped_cost_usd: 0 };
+};
 
 const parseInputJson = (raw: string | null): Record<string, unknown> => {
     if (!raw) return {};
@@ -279,8 +365,9 @@ export const fetchDispatches = Effect.fn("queries.fetchDispatches")(
     function* (opts: { readonly sinceDays: number; readonly limit: number }) {
         const db = yield* SurrealClient;
 
-        const [spawnedResult, usageResult, toolCallsResult, parentSessionsResult] =
+        const [spawnedResult, usageResult, toolCallsResult, parentSessionsResult, childLegsResult] =
             yield* db.query<[
+                Array<Record<string, unknown>>,
                 Array<Record<string, unknown>>,
                 Array<Record<string, unknown>>,
                 Array<Record<string, unknown>>,
@@ -289,7 +376,8 @@ export const fetchDispatches = Effect.fn("queries.fetchDispatches")(
                 SPAWNED_SQL(opts.sinceDays) +
                 USAGE_SQL(opts.sinceDays) +
                 TOOL_CALLS_SQL(opts.sinceDays) +
-                PARENT_SESSIONS_SQL(opts.sinceDays),
+                PARENT_SESSIONS_SQL(opts.sinceDays) +
+                CHILD_LEGS_SQL(opts.sinceDays),
             );
 
         const spawnedRows: SpawnedRow[] = (spawnedResult ?? []).map((r) => ({
@@ -321,6 +409,21 @@ export const fetchDispatches = Effect.fn("queries.fetchDispatches")(
             session_id: String(r.session_id ?? ""),
             model: r.model == null ? null : String(r.model),
         }));
+
+        // Per-model legs keyed by bare child session id
+        const legsByChildId = new Map<string, DispatchLeg[]>();
+        for (const r of childLegsResult ?? []) {
+            const model = r.model == null ? null : String(r.model);
+            if (!model) continue;
+            const bare = cleanSessionId(String(r.session_id ?? ""));
+            const list = legsByChildId.get(bare) ?? [];
+            list.push({
+                model,
+                cost_usd: Number(r.cost_usd ?? 0),
+                turns: Number(r.turns ?? 0),
+            });
+            legsByChildId.set(bare, list);
+        }
 
         // Build lookup maps
         const usageByChildId = new Map<string, UsageRow>();
@@ -375,6 +478,10 @@ export const fetchDispatches = Effect.fn("queries.fetchDispatches")(
                 childModel = parentModelById.get(bareParent) ?? parentModelById.get(sp.parent_id) ?? null;
             }
 
+            const childLegs = legsByChildId.get(bareChild) ?? [];
+            const childCost = usage?.cost_usd ?? 0;
+            const drop = computeModelDrop(dispatchModel, childLegs, childModel, childCost);
+
             rows.push({
                 ts: sp.ts,
                 parent_id: bareParent,
@@ -383,7 +490,10 @@ export const fetchDispatches = Effect.fn("queries.fetchDispatches")(
                 description: sp.description,
                 dispatch_model: dispatchModel,
                 child_model: childModel,
-                child_cost_usd: usage?.cost_usd ?? 0,
+                child_cost_usd: childCost,
+                child_legs: childLegs,
+                model_dropped: drop.dropped,
+                dropped_cost_usd: drop.dropped_cost_usd,
                 prompt_tokens: usage?.prompt_tokens ?? 0,
                 completion_tokens: usage?.completion_tokens ?? 0,
                 cache_read_tokens: usage?.cache_read_tokens ?? 0,
@@ -399,12 +509,15 @@ export const fetchDispatches = Effect.fn("queries.fetchDispatches")(
         const inheritCount = rows.filter((r) => r.dispatch_model === "inherit").length;
         const inherit_pct = total_dispatches > 0 ? (inheritCount / total_dispatches) * 100 : 0;
         const total_child_cost_usd = rows.reduce((s, r) => s + r.child_cost_usd, 0);
+        const droppedRows = rows.filter((r) => r.model_dropped);
 
         return {
             rows: limited,
             total_dispatches,
             inherit_pct,
             total_child_cost_usd,
+            dropped_count: droppedRows.length,
+            dropped_cost_usd: droppedRows.reduce((s, r) => s + r.dropped_cost_usd, 0),
         } satisfies DispatchesResult;
     },
 );
@@ -580,6 +693,11 @@ export const fetchDispatchCandidates = Effect.fn("queries.fetchDispatchCandidate
                 dispatch_model: dispatchModel,
                 child_model: childModel,
                 child_cost_usd: childCostUsd,
+                // Candidates are inherit-only: a model drop requires an explicit
+                // dispatch model, so these are structurally empty here.
+                child_legs: [],
+                model_dropped: false,
+                dropped_cost_usd: 0,
                 prompt_tokens: usage?.prompt_tokens ?? 0,
                 completion_tokens: usage?.completion_tokens ?? 0,
                 cache_read_tokens: usage?.cache_read_tokens ?? 0,

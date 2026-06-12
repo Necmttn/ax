@@ -1358,3 +1358,78 @@ describe("claude token usage", () => {
         expect(extracted!.session.cwd).toBeNull();
     });
 });
+
+describe("thinking block extraction", () => {
+    test("thinking-only assistant turns carry their usage output_tokens as thinking_tokens", () => {
+        // Real transcript shape: thinking text is stripped (empty `thinking`
+        // + signature), and the thinking-only event has its own usage.
+        const extracted = __testExtractClaudeJsonlLines(
+            [
+                JSON.stringify({
+                    type: "assistant",
+                    timestamp: "2026-06-13T09:00:00.000Z",
+                    message: {
+                        role: "assistant",
+                        model: "claude-fable-5",
+                        usage: { input_tokens: 10, output_tokens: 385 },
+                        content: [{ type: "thinking", thinking: "", signature: "opaque-sig" }],
+                    },
+                }),
+                JSON.stringify({
+                    type: "assistant",
+                    timestamp: "2026-06-13T09:00:01.000Z",
+                    message: {
+                        role: "assistant",
+                        model: "claude-fable-5",
+                        usage: { input_tokens: 10, output_tokens: 120 },
+                        content: [{ type: "text", text: "the answer" }],
+                    },
+                }),
+                JSON.stringify({
+                    type: "user",
+                    timestamp: "2026-06-13T09:00:02.000Z",
+                    message: { role: "user", content: "thanks" },
+                }),
+            ],
+            "/tmp/project",
+            "session-thinking",
+        );
+
+        const turns = extracted?.turns ?? [];
+        const thinkingTurn = turns.find((t) => t.thinking_blocks === 1);
+        expect(thinkingTurn?.thinking_tokens).toBe(385);
+
+        const textTurn = turns.find((t) => t.role === "assistant" && t.thinking_blocks === 0);
+        expect(textTurn?.thinking_tokens).toBe(0);
+
+        const user = turns.find((t) => t.role === "user");
+        expect(user?.thinking_blocks).toBeNull();
+        expect(user?.thinking_tokens).toBeNull();
+    });
+
+    test("mixed thinking+text turns count blocks but report 0 thinking_tokens (lower bound)", () => {
+        const extracted = __testExtractClaudeJsonlLines(
+            [
+                JSON.stringify({
+                    type: "assistant",
+                    timestamp: "2026-06-13T09:00:00.000Z",
+                    message: {
+                        role: "assistant",
+                        model: "claude-fable-5",
+                        usage: { input_tokens: 10, output_tokens: 500 },
+                        content: [
+                            { type: "thinking", thinking: "", signature: "sig" },
+                            { type: "redacted_thinking", data: "opaque" },
+                            { type: "text", text: "answer" },
+                        ],
+                    },
+                }),
+            ],
+            "/tmp/project",
+            "session-mixed-thinking",
+        );
+        const assistant = extracted?.turns.find((t) => t.role === "assistant");
+        expect(assistant?.thinking_blocks).toBe(2);
+        expect(assistant?.thinking_tokens).toBe(0);
+    });
+});

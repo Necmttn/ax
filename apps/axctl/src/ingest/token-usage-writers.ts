@@ -39,6 +39,10 @@ export interface SessionTokenUsageStatementInput {
     readonly completionTokens: number | null;
     readonly cacheCreationInputTokens: number | null;
     readonly cacheReadInputTokens: number | null;
+    /** Provider-reported reasoning/thinking output tokens (codex). The field
+     *  pair is omitted entirely when undefined, keeping providers without the
+     *  signal byte-identical. */
+    readonly reasoningOutputTokens?: number | null;
     readonly estimatedTokens: number;
     readonly contextWindow: number | null;
     /** When present, the model_ref + estimated-cost + pricing_source field
@@ -78,6 +82,9 @@ export const buildSessionTokenUsageStatement = (
         ["completion_tokens", surrealOptionInt(input.completionTokens)],
         ["cache_creation_input_tokens", surrealOptionInt(input.cacheCreationInputTokens)],
         ["cache_read_input_tokens", surrealOptionInt(input.cacheReadInputTokens)],
+        ...(input.reasoningOutputTokens === undefined
+            ? []
+            : [["reasoning_output_tokens", surrealOptionInt(input.reasoningOutputTokens)] as const]),
         ["estimated_tokens", Math.trunc(input.estimatedTokens).toString(10)],
         ["transcript_bytes", "0"],
         ["context_window", surrealOptionInt(input.contextWindow)],
@@ -96,6 +103,9 @@ export interface TurnTokenUsageStatementInput {
     readonly completionTokens: number | null;
     readonly cacheCreationInputTokens: number | null;
     readonly cacheReadInputTokens: number | null;
+    /** Provider-reported reasoning/thinking output tokens (codex). Field pair
+     *  omitted entirely when undefined. */
+    readonly reasoningOutputTokens?: number | null;
     readonly freshInputTokens: number | null;
     readonly estimatedTokens: number;
     /** Key for the `model_ref` record link (claude normalizes the model name
@@ -126,6 +136,9 @@ export const buildTurnTokenUsageStatement = (
         ["completion_tokens", surrealOptionInt(input.completionTokens)],
         ["cache_creation_input_tokens", surrealOptionInt(input.cacheCreationInputTokens)],
         ["cache_read_input_tokens", surrealOptionInt(input.cacheReadInputTokens)],
+        ...(input.reasoningOutputTokens === undefined
+            ? []
+            : [["reasoning_output_tokens", surrealOptionInt(input.reasoningOutputTokens)] as const]),
         ["fresh_input_tokens", surrealOptionInt(input.freshInputTokens)],
         ["estimated_tokens", Math.trunc(input.estimatedTokens).toString(10)],
         ...costFieldPairs(input.modelRefKey, input.cost),

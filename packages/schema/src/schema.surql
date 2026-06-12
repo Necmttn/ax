@@ -59,6 +59,7 @@ DEFINE TABLE session SCHEMAFULL;
 DEFINE FIELD project        ON session TYPE option<string>;
 DEFINE FIELD cwd            ON session TYPE option<string>;
 DEFINE FIELD model          ON session TYPE option<string>;
+DEFINE FIELD reasoning_effort ON session TYPE option<string>;  -- codex: turn_context effort (minimal|low|medium|high|xhigh, last seen); claude: settings.json effortLevel (high|medium|low), stamped only on sessions active at ingest time
 DEFINE FIELD source         ON session TYPE string DEFAULT 'claude';  -- 'claude' | 'codex'
 DEFINE FIELD started_at     ON session TYPE option<datetime>;
 DEFINE FIELD ended_at       ON session TYPE option<datetime>;
@@ -168,6 +169,8 @@ DEFINE FIELD text           ON turn TYPE option<string>;  -- full extracted mess
 DEFINE FIELD text_excerpt   ON turn TYPE option<string>;  -- first ~500 chars
 DEFINE FIELD has_tool_use   ON turn TYPE bool DEFAULT false;
 DEFINE FIELD has_error      ON turn TYPE bool DEFAULT false;
+DEFINE FIELD thinking_blocks ON turn TYPE option<int>;     -- count of thinking + redacted_thinking content blocks (claude assistant turns)
+DEFINE FIELD thinking_tokens ON turn TYPE option<int>;     -- output_tokens of thinking-only assistant turns (transcripts strip thinking text, so the thinking-only event's own usage is the measurable signal; mixed turns read 0 = lower bound)
 DEFINE INDEX IF NOT EXISTS turn_session_seq ON turn FIELDS session, seq UNIQUE;
 DEFINE INDEX IF NOT EXISTS turn_ts        ON turn FIELDS ts;
 DEFINE INDEX IF NOT EXISTS turn_agent_event ON turn FIELDS agent_event;
@@ -836,6 +839,7 @@ DEFINE FIELD prompt_tokens ON session_token_usage TYPE option<int>;
 DEFINE FIELD completion_tokens ON session_token_usage TYPE option<int>;
 DEFINE FIELD cache_creation_input_tokens ON session_token_usage TYPE option<int>;
 DEFINE FIELD cache_read_input_tokens ON session_token_usage TYPE option<int>;
+DEFINE FIELD reasoning_output_tokens ON session_token_usage TYPE option<int>;  -- codex total_token_usage.reasoning_output_tokens (claude has no split)
 DEFINE FIELD estimated_tokens ON session_token_usage TYPE int;
 DEFINE FIELD transcript_bytes ON session_token_usage TYPE int;
 DEFINE FIELD context_window ON session_token_usage TYPE option<int>;
@@ -864,6 +868,7 @@ DEFINE FIELD prompt_tokens ON turn_token_usage TYPE option<int>;
 DEFINE FIELD completion_tokens ON turn_token_usage TYPE option<int>;
 DEFINE FIELD cache_creation_input_tokens ON turn_token_usage TYPE option<int>;
 DEFINE FIELD cache_read_input_tokens ON turn_token_usage TYPE option<int>;
+DEFINE FIELD reasoning_output_tokens ON turn_token_usage TYPE option<int>;  -- codex per-turn reasoning tokens (delta or last_token_usage)
 DEFINE FIELD fresh_input_tokens ON turn_token_usage TYPE option<int>;
 DEFINE FIELD estimated_tokens ON turn_token_usage TYPE int;
 DEFINE FIELD model_ref      ON turn_token_usage TYPE option<record<agent_model>>;

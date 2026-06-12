@@ -267,3 +267,47 @@ describe("normalized transcript persistence", () => {
             .not.toContain("DELETE (SELECT VALUE id FROM agent_event");
     });
 });
+
+describe("turn thinking fields", () => {
+    it("renders thinking_blocks/thinking_tokens when present", () => {
+        const sql = buildNormalizedTurnStatements([
+            {
+                sessionId: "s1",
+                seq: 1,
+                ts: "2026-06-13T00:00:00.000Z",
+                role: "assistant",
+                messageKind: "assistant",
+                intentKind: "organic_task",
+                text: "answer",
+                textExcerpt: "answer",
+                hasToolUse: false,
+                hasError: false,
+                thinkingBlocks: 3,
+                thinkingTokens: 1200,
+            },
+        ]).join("\n");
+        expect(sql).toContain("thinking_blocks: 3");
+        expect(sql).toContain("thinking_tokens: 1200");
+    });
+
+    it("omits thinking fields when null/undefined (non-assistant turns, other providers)", () => {
+        const sql = buildNormalizedTurnStatements([
+            {
+                sessionId: "s1",
+                seq: 2,
+                ts: "2026-06-13T00:00:01.000Z",
+                role: "user",
+                messageKind: "task",
+                intentKind: "organic_task",
+                text: "ask",
+                textExcerpt: "ask",
+                hasToolUse: false,
+                hasError: false,
+                thinkingBlocks: null,
+                thinkingTokens: null,
+            },
+        ]).join("\n");
+        expect(sql).not.toContain("thinking_blocks");
+        expect(sql).not.toContain("thinking_tokens");
+    });
+});

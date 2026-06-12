@@ -118,7 +118,9 @@ const cmdDispatches = (input: {
             const at = truncate(row.agent_type, 24);
             const desc = truncate(row.description, descW);
             const dm = row.dispatch_model.slice(0, dmW);
-            const cm = (row.child_model ?? "?").slice(0, cmW);
+            // "!" marks a routed dispatch whose child ran legs on another model
+            // (Claude Code drops the model override on continuations).
+            const cm = `${row.model_dropped ? "!" : ""}${row.child_model ?? "?"}`.slice(0, cmW);
             console.log(
                 `${ts.padEnd(19)}  ${at.padEnd(24)}  ${desc.padEnd(descW)}  ` +
                 `${dm.padEnd(dmW)}  ${cm.padEnd(cmW)}  ${usd(row.child_cost_usd).padStart(10)}`,
@@ -129,6 +131,13 @@ const cmdDispatches = (input: {
             `\n${result.total_dispatches} dispatches  ${pct(result.inherit_pct)} inherit  ` +
             `total subagent cost: ${usd(result.total_child_cost_usd)}  (${input.sinceDays} days)`,
         );
+        if (result.dropped_count > 0) {
+            console.log(
+                `model drops: ${result.dropped_count} routed dispatches continued on a different model ` +
+                `(${usd(result.dropped_cost_usd)} on dropped legs, marked "!")  - the harness drops the ` +
+                `model override on SendMessage/compact continuations`,
+            );
+        }
     });
 
 const dispatchesMainCommand = Command.make(

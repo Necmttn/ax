@@ -99,6 +99,36 @@ or `--here`. `--here`, `--commit`, and `--branch` use repository graph evidence
 from the current git checkout. Direct `--pr <number>` is not wired yet; use the
 PR branch or a commit SHA for now.
 
+## Thinking analytics
+
+`ax thinking [--days=N] [--json]` rolls up reasoning spend per model:
+
+- **Claude**: per-turn `thinking_blocks` / `thinking_tokens`. Transcripts strip
+  thinking text (empty `thinking` + signature) and carry no thinking-level
+  field, but thinking-only assistant events have their own `usage.output_tokens`
+  - that is the thinking spend. Mixed thinking+text turns can't be split and
+  report 0, so the aggregate is a lower bound. Shows assistant turns, thinking
+  turns, % with thinking, block count, token volume, avg tokens/turn.
+- **Effort levels** (`session.reasoning_effort`): codex turn_context effort
+  (minimal/low/medium/high/xhigh) and claude `settings.json` `effortLevel`
+  (high/medium/low). Claude has no per-session effort field, so the global
+  setting is stamped only on sessions active within 30 minutes of ingest -
+  live sessions get accurate values, history is never backstamped.
+- **Codex reasoning tokens**: `reasoning_output_tokens` as a share of output
+  tokens (from `token_count.total_token_usage`).
+
+Fields populate at ingest; sessions ingested before the fields existed read as
+zero until their files are re-ingested (the command prints a hint).
+
+## Dispatch model drops
+
+`ax dispatches` flags routed dispatches whose child ran legs on a different
+model: the harness applies the Agent `model` param to the first leg only, and
+SendMessage follow-ups / post-compact resumes continue on the parent session's
+model. Rows are marked `!` in the child_model column; the footer sums dropped
+dispatches and the cost of off-model legs. Per-model legs come from
+`turn_token_usage` (`child_legs` in `--json`).
+
 ## Grounded agent files (`axctl improve`)
 
 - `axctl improve recommend [--limit=N] [--form=skill] [--apply]` - print N

@@ -53,6 +53,7 @@ import {
     surrealOptionFloat,
 } from "./token-usage-writers.ts";
 import { decodeClaudeTranscriptLine } from "./line-schemas.ts";
+import { claudeEffortStamp, loadClaudeEffortLevel } from "./claude-effort.ts";
 
 import { selectByIds } from "@ax/lib/shared/record-select";
 import { executeStatements, executeStatementsWith } from "@ax/lib/shared/statement-exec";
@@ -99,6 +100,9 @@ interface Turn {
     text_excerpt: string | null;
     has_tool_use: boolean;
     has_error: boolean;
+    /** Thinking content-block stats; null on non-assistant turns. */
+    thinking_blocks: number | null;
+    thinking_tokens: number | null;
 }
 
 interface Invocation {
@@ -947,6 +951,7 @@ function createClaudeExtractor(path: Path.Path, projectDir: string, sessionId: s
             const textExcerpt = text === null ? null : text.slice(0, 500);
             let hasToolUse = false;
             let hasError = false;
+            let thinkingBlocks = 0;
             // Track invocation indices added this iteration so we can backfill
             // `turn_has_error` once `hasError` is finalised below (a tool_result
             // block later in the same content array can flip it after the
@@ -1034,7 +1039,22 @@ function createClaudeExtractor(path: Path.Path, projectDir: string, sessionId: s
                 if (blockType === "tool_result" && processToolResult(block, ts, role, providerEventId)) {
                     hasError = true;
                 }
+                if (blockType === "thinking" || blockType === "redacted_thinking") {
+                    thinkingBlocks += 1;
+                }
             }
+
+            // Thinking tokens: transcripts strip thinking text (empty
+            // `thinking` + signature only), but thinking-only assistant
+            // events carry their own `usage.output_tokens` - that IS the
+            // thinking spend. Mixed-content turns can't be split, so they
+            // report 0 (the aggregate is a lower bound).
+            const thinkingOnly = thinkingBlocks > 0 &&
+                content.every((block) => {
+                    const t = stringField(block, "type");
+                    return t === "thinking" || t === "redacted_thinking";
+                });
+            const thinkingTokens = thinkingOnly ? (usage?.output_tokens ?? 0) : 0;
 
             // Propagate the (now finalised) hasError onto every invocation
             // emitted by this turn so the edge-side flag matches the turn-side
@@ -1056,6 +1076,8 @@ function createClaudeExtractor(path: Path.Path, projectDir: string, sessionId: s
                 text_excerpt: textExcerpt,
                 has_tool_use: hasToolUse,
                 has_error: hasError,
+                thinking_blocks: role === "assistant" ? thinkingBlocks : null,
+                thinking_tokens: role === "assistant" ? thinkingTokens : null,
             });
         },
         finish(): FileExtract | null {
@@ -1172,6 +1194,11 @@ export {
 const upsertSessions = (sessions: Session[]) =>
     Effect.gen(function* () {
         const db = yield* SurrealClient;
+        // Claude effort level is global (settings.json), not in transcripts -
+        // stamped only on sessions active within the freshness window, so the
+        // current setting never gets attributed to historical sessions.
+        const effortLevel = yield* loadClaudeEffortLevel;
+        const nowMs = Date.now();
         yield* Effect.forEach(
             sessions,
             (s) =>
@@ -1181,6 +1208,7 @@ const upsertSessions = (sessions: Session[]) =>
                     project: s.project ?? undefined,
                     cwd: s.cwd ?? undefined,
                     model: s.model ?? undefined,
+                    reasoning_effort: claudeEffortStamp(effortLevel, s.ended_at, nowMs),
                     source: "claude",
                     started_at: s.started_at ? new Date(s.started_at) : undefined,
                     ended_at: s.ended_at ? new Date(s.ended_at) : undefined,
@@ -1241,6 +1269,8 @@ const toNormalizedClaudeTurn = (turn: Turn): NormalizedTurnWrite => ({
     textExcerpt: turn.text_excerpt,
     hasToolUse: turn.has_tool_use,
     hasError: turn.has_error,
+    thinkingBlocks: turn.thinking_blocks,
+    thinkingTokens: turn.thinking_tokens,
     agentEvent: null,
 });
 
