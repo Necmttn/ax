@@ -32,6 +32,9 @@ mirror it:
 | research | `^(research\|investigate docs\|study)` | sonnet |
 | well-specified-impl | `^implement ` | sonnet |
 | bulk-mechanical | `^(write announcements\|regenerate\|standardize\|merge main)` | sonnet |
+| task-N-impl | `^Task \d+:` | sonnet |
+| bug-fix | `^Fix\s` | sonnet |
+| feature-add | `^Add\s` | sonnet |
 | agent types | Explore, codebase-locator, codebase-pattern-finder → haiku; codebase-analyzer → sonnet | |
 <!-- /ax:routing-table -->
 
