@@ -1,4 +1,10 @@
 import { DEFAULT_DASHBOARD_PORT } from "@ax/lib/dashboard-port";
+import { Layer } from "effect";
+import {
+    isContractRequest,
+    makeContractWebHandler,
+    type ContractWebHandler,
+} from "./contract/web-handler.ts";
 import { createDurableIngestStream, type DurableIngestStream } from "./ingest-stream-durable.ts";
 import { dispatch, jsonResponse, type EffectRunner, type ServeContext } from "./router/router.ts";
 import { routeTable } from "./router/table.ts";
@@ -11,7 +17,7 @@ import {
     removeServePidfile,
     writeServePidfile,
 } from "./serve-instance.ts";
-import { makeServeRuntime } from "./serve-runtime.ts";
+import { defaultRuntimeFactory, makeServeRuntime } from "./serve-runtime.ts";
 
 export function parseDashboardServeArgs(args: string[]): { port: number } {
     const raw = args.find((arg) => arg.startsWith("--port="))?.split("=")[1];
@@ -33,8 +39,15 @@ export async function handleDashboardRequest(
     req: Request,
     runner: EffectRunner = unavailableRunner,
     serve: ServeContext | null = null,
+    contract: ContractWebHandler | null = null,
 ): Promise<Response> {
     const url = new URL(req.url);
+    // Strangler seam (ADR-0013): (method, path) pairs the Insights Surface
+    // Contract owns route into the v4 HttpRouter; everything else falls
+    // through to the legacy route table untouched.
+    if (contract !== null && isContractRequest(req.method, url.pathname)) {
+        return contract.handler(req);
+    }
     const routed = await dispatch(routeTable, req, url, runner, serve);
     if (routed !== null) return routed;
     if (url.pathname.startsWith("/api/")) return jsonResponse({ error: "not_found" });
@@ -124,6 +137,7 @@ export async function handleDashboardRequestWithCors(
     req: Request,
     runner?: EffectRunner,
     serve: ServeContext | null = null,
+    contract: ContractWebHandler | null = null,
 ): Promise<Response> {
     const origin = req.headers.get("origin");
     const cors = corsHeadersFor(origin);
@@ -145,7 +159,7 @@ export async function handleDashboardRequestWithCors(
         return new Response(null, { status: 204, headers });
     }
 
-    const response = await handleDashboardRequest(req, runner, serve);
+    const response = await handleDashboardRequest(req, runner, serve, contract);
     for (const [k, v] of Object.entries(cors)) response.headers.set(k, v);
     return response;
 }
@@ -196,7 +210,12 @@ export async function serveDashboard(args: string[]): Promise<void> {
     // can still land here despite the pre-flight (race, or a non-HTTP
     // listener the probe can't identify) - report it cleanly instead of
     // rethrowing into the `axctl error:` stack dump; everything else rethrows.
-    const handle = makeServeRuntime();
+    // One memoMap shared between the server runtime and the contract web
+    // handler: both compose the same AppLayer object, so its services (the
+    // SurrealDB connection, trace sink) build once and are reused by both.
+    const memoMap = Layer.makeMemoMapUnsafe();
+    const handle = makeServeRuntime(defaultRuntimeFactory({ memoMap }));
+    const contract = makeContractWebHandler({ liveIngest: stream !== null, memoMap });
     const serve: ServeContext = { ingestStream: stream };
     let server: ReturnType<typeof Bun.serve>;
     try {
@@ -212,11 +231,12 @@ export async function serveDashboard(args: string[]): Promise<void> {
         // (no full-text index yet) and can take 5-15s on a year-old graph.
         server = Bun.serve({
             port,
-            fetch: (req) => handleDashboardRequestWithCors(req, handle.runner, serve),
+            fetch: (req) => handleDashboardRequestWithCors(req, handle.runner, serve, contract),
             idleTimeout: 60,
         });
     } catch (err) {
         if (stream) await stream.stop().catch(() => undefined);
+        await contract.dispose().catch(() => undefined);
         await handle.dispose().catch(() => undefined);
         if (isAddrInUse(err)) {
             const { formatServePortBusy } = await import("../cli/banner.ts");
@@ -253,6 +273,7 @@ export async function serveDashboard(args: string[]): Promise<void> {
         if (pidfile?.pid === process.pid) await removeServePidfile();
         await server.stop();
         if (stream) await stream.stop().catch(() => undefined);
+        await contract.dispose().catch(() => undefined);
         await handle.dispose().catch(() => undefined);
         process.removeListener("SIGINT", onSigint);
         process.removeListener("SIGTERM", onSigterm);

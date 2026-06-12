@@ -1,0 +1,89 @@
+/**
+ * Handlers for the system group of the Insights Surface Contract
+ * (@ax/lib/shared/api-contract). Behavior parity with the legacy
+ * router/routes/system.ts rows is the contract here: same payloads, same
+ * status mapping (query failures -> 400, read failures -> { error } 500).
+ */
+import { Context, Effect } from "effect";
+import { HttpApiBuilder } from "effect/unstable/httpapi";
+import {
+    AxApi,
+    DaemonVersion,
+    InternalError,
+    QueryRejected,
+    QueryResult,
+    WorktreesResult,
+} from "@ax/lib/shared/api-contract";
+import { SurrealClient } from "@ax/lib/db";
+import { AX_VERSION } from "../../cli/version.ts";
+import { graphHealthSql } from "../../queries/graph-health.ts";
+import { checkoutActivitySql, gitCorrelationSql } from "../../queries/insights.ts";
+import { API_VERSION, dashboardApiCapabilities } from "../capabilities.ts";
+
+/**
+ * Boot-time facts the contract handlers need from `serveDashboard` (whether
+ * the Durable Streams sidecar came up). Provided as a layer when the web
+ * handler is built - the contract module itself must stay daemon-agnostic.
+ */
+export class ContractServeInfo extends Context.Service<
+    ContractServeInfo,
+    { readonly liveIngest: boolean }
+>()("axctl/dashboard/ContractServeInfo") {}
+
+const errorText = (err: unknown): string =>
+    err instanceof Error ? err.message : String(err);
+
+const internal = (err: unknown) => new InternalError({ error: errorText(err) });
+
+export const SystemGroupLive = HttpApiBuilder.group(AxApi, "system", (handlers) =>
+    handlers
+        .handle("version", () =>
+            Effect.gen(function* () {
+                const info = yield* ContractServeInfo;
+                return new DaemonVersion({
+                    version: AX_VERSION,
+                    api_version: API_VERSION,
+                    capabilities: dashboardApiCapabilities(),
+                    live_ingest: info.liveIngest,
+                });
+            }))
+        .handle("query", ({ payload }) =>
+            Effect.gen(function* () {
+                const sql = payload.sql.trim();
+                if (!sql) return yield* new QueryRejected({ error: "SQL is required" });
+                if (!/^(SELECT|RETURN|INFO)\b/i.test(sql)) {
+                    return yield* new QueryRejected({
+                        error: "Only SELECT, RETURN, and INFO queries are allowed",
+                    });
+                }
+                const started = performance.now();
+                const db = yield* SurrealClient;
+                const result = yield* db.query(sql).pipe(
+                    Effect.mapError((err) => new QueryRejected({ error: errorText(err) })),
+                );
+                return new QueryResult({
+                    result,
+                    durationMs: Math.round(performance.now() - started),
+                });
+            }))
+        .handle("graphHealth", () =>
+            Effect.gen(function* () {
+                const db = yield* SurrealClient;
+                return yield* db.query(graphHealthSql(25)).pipe(Effect.mapError(internal));
+            }))
+        .handle("worktrees", () =>
+            Effect.gen(function* () {
+                const db = yield* SurrealClient;
+                const activity = yield* db.query(checkoutActivitySql(50)).pipe(Effect.mapError(internal));
+                const git = yield* db.query(gitCorrelationSql(50)).pipe(Effect.mapError(internal));
+                return new WorktreesResult({ activity, git });
+            }))
+        .handle("selfImprove", () =>
+            Effect.gen(function* () {
+                const db = yield* SurrealClient;
+                return yield* db.query(`
+SELECT id, guidance, version, text, status, scope, risk, evidence, metrics_before, metrics_after, created_at
+FROM guidance_version
+ORDER BY created_at DESC
+LIMIT 50;`).pipe(Effect.mapError(internal));
+            })));
