@@ -178,6 +178,26 @@ ax costs for --branch feat/share        # cost of a whole feature branch
 
 So "what did that refactor cost" has an answer with a dollar sign on it.
 
+## Route the expensive model where it earns its keep
+
+Your frontier model burns 3-10x cheaper-model rates on mechanical subagent
+work unless you route it. ax measures the leak, nudges at dispatch time, and
+proves whether the routing worked:
+
+```bash
+ax cost split --days=7              # main loop vs subagents, by model
+ax dispatches --candidates          # model-less dispatches + est savings
+ax dispatches compile-routing       # regenerate the routing table
+ax hooks install ~/.ax/hooks/route-dispatch.ts --providers=claude
+```
+
+The `route-dispatch` hook warns when a mechanical dispatch forgets an explicit
+model; the `efficient-dispatch` skill (via `npx skills add Necmttn/ax`) teaches
+the orchestration pattern; `ax improve recommend` surfaces a proposal when
+missed savings accumulate; `/routing-tune` (committed workflow) re-mines the
+routing classes from your own dispatch history. One source of truth, measured
+end to end - see [docs/design/cost-routing.md](docs/design/cost-routing.md).
+
 ## Share a session like a gist
 
 ```bash
