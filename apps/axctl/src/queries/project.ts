@@ -42,6 +42,7 @@ SELECT
     time::max(ts) AS last_used
 FROM invoked
 WHERE in.session.project = $project AND out.name IS NOT NONE
+    AND out NOT IN (SELECT VALUE id FROM skill WHERE dir_path = "(synthetic)")
 GROUP BY skill
 ORDER BY count DESC
 LIMIT 25;`;
