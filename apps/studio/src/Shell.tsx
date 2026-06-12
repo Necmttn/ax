@@ -2,6 +2,7 @@ import { useEffect, useState, type ReactNode } from "react";
 import { Link, useRouterState } from "@tanstack/react-router";
 import { useQueryClient } from "@tanstack/react-query";
 import { api, studioConnection, type DaemonVersion } from "./api.ts";
+import { IngestSplash } from "./components/ingest-splash.tsx";
 import { useIngestEvents } from "./use-ingest-events.ts";
 import { fmtLastUsed } from "@ax/lib/shared/formatters";
 import { cmpSemver, STUDIO_VERSION } from "./version.ts";
@@ -158,6 +159,7 @@ function FullChrome({ children }: { children: ReactNode }) {
                     <span className="live-dot" />
                     {live.connected ? "live" : "offline"}
                 </span>
+                <IngestSplash />
                 <nav className="tabs">
                     {TABS.map((tab) => {
                         const active =

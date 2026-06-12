@@ -1,23 +1,19 @@
 import { useEffect, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, ApiError } from "../api.ts";
-import { POLL_INTERVAL_MS, shouldPollFallback } from "../poll-fallback.ts";
+import { shouldPollFallback } from "../poll-fallback.ts";
 import { useIngestStream, type StageFileFailures, type StageStatus } from "../use-ingest-stream.ts";
 
 /**
- * Live ingest view over Durable Streams.
+ * App-wide ingest splash over Durable Streams - the Live tab's stream plumbing
+ * reborn as an overlay (spec: improve-first dashboard, PR2).
  *
- * "Run ingest" → POST /api/ingest → subscribe to the returned sidecar stream →
- * stages tick green as they finish + dashboard count tiles climb live. A
- * refresh mid-run rehydrates from the persisted stream URL (the hook replays
- * the stream from the start, so finished stages show as done).
- *
- * Polling fallback: on the compiled binary the Durable Streams sidecar can't
- * load, so the stream path is dead. The daemon advertises that via
- * `live_ingest: false` on GET /api/version (older daemons: we catch the 503
- * from POST /api/ingest instead) and this view drops to refetching the count
- * tiles every 5s so a CLI-driven backfill is still visible. See
- * poll-fallback.ts; the streaming path stays preferred and untouched.
+ * Landing while a run is active (persisted stream URL) re-attaches and shows
+ * the overlay immediately; the masthead "Ingest" button starts a fresh run.
+ * On the compiled binary the sidecar can't host live ingest (`live_ingest:
+ * false` on /api/version) - the button hides and no overlay ever shows; the
+ * SSE-driven query invalidation in use-ingest-events still refreshes views
+ * during a CLI-driven backfill.
  */
 
 const STREAM_URL_KEY = "ax-ingest-live-stream-url";
@@ -48,20 +44,22 @@ const STAGE_GLYPH: Record<StageStatus, string> = {
     error: "✗",
 };
 
-export function IngestLiveRoute() {
+/** How long the finished state lingers before the overlay auto-dismisses. */
+const FINISH_LINGER_MS = 1500;
+
+export function IngestSplash() {
     const queryClient = useQueryClient();
-    // Rehydrate the active stream URL on mount so a refresh mid-run re-attaches.
+    // Rehydrate the active stream URL on mount so landing mid-run shows the splash.
     const [streamUrl, setStreamUrl] = useState<string | null>(() => readPersistedStreamUrl());
     const [busy, setBusy] = useState(false);
+    const [dismissed, setDismissed] = useState(false);
     const [triggerError, setTriggerError] = useState<string | null>(null);
     /** HTTP status of the last failed POST /api/ingest (503 = sidecar gone). */
     const [triggerStatus, setTriggerStatus] = useState<number | undefined>(undefined);
 
     const run = useIngestStream(streamUrl);
 
-    // Capability probe: the daemon says up front whether the Durable Streams
-    // sidecar is hosting live ingest (false on the compiled binary). Older
-    // daemons omit the flag - then the 503 catch in start() is the trigger.
+    // Capability probe: live_ingest=false (compiled binary) hides the trigger.
     const versionQuery = useQuery({
         queryKey: ["daemon-version"],
         queryFn: () => api.version(),
@@ -73,10 +71,7 @@ export function IngestLiveRoute() {
         triggerStatus,
     });
 
-    // While a run is live, invalidate the count-tile query keys on each new
-    // delta so the numbers refetch and visibly climb. These are the same keys
-    // `use-ingest-events.ts` drives (skills / tool-failures / sessions /
-    // workflow). On `run_finished` we do a final sweep.
+    // Invalidate the dashboard query keys on each stage delta so views climb live.
     const stageSig = run.order.map((s) => `${s}:${run.stages[s]}`).join("|");
     useEffect(() => {
         if (!streamUrl) return;
@@ -84,28 +79,31 @@ export function IngestLiveRoute() {
         void queryClient.invalidateQueries({ queryKey: ["tool-failures"] });
         void queryClient.invalidateQueries({ queryKey: ["sessions"] });
         void queryClient.invalidateQueries({ queryKey: ["workflow"] });
+        void queryClient.invalidateQueries({ queryKey: ["next-actions"] });
     }, [stageSig, run.finished, streamUrl, queryClient]);
 
-    // Clear the persisted URL once the run finishes so a later refresh doesn't
-    // re-attach to a completed run. (A refresh DURING a run still rehydrates,
-    // because the URL is persisted while live.)
+    // Once finished: clear the persisted URL, linger briefly, then dismiss.
     const finishedRef = useRef(false);
     useEffect(() => {
         if (run.finished && !finishedRef.current) {
             finishedRef.current = true;
             persistStreamUrl(null);
+            const t = setTimeout(() => {
+                setStreamUrl(null);
+                setDismissed(false);
+            }, FINISH_LINGER_MS);
+            return () => clearTimeout(t);
         }
+        return undefined;
     }, [run.finished]);
 
-    // A stale persisted stream URL (a sidecar port from a previous serve session)
-    // can't connect and never delivers events. Clear it so we stop hammering a
-    // dead port, drop back to idle, and tell the user to re-run.
+    // Stale persisted URL from a previous serve session: clear and drop to idle.
     useEffect(() => {
         if (streamUrl && run.error && run.order.length === 0 && !run.finished) {
             persistStreamUrl(null);
             setStreamUrl(null);
             setTriggerError(
-                "Previous run's live stream was unreachable (serve restarted). Cleared - click Run ingest to start fresh.",
+                "Previous run's live stream was unreachable (serve restarted). Cleared - hit Ingest to start fresh.",
             );
         }
     }, [streamUrl, run.error, run.order.length, run.finished]);
@@ -113,6 +111,7 @@ export function IngestLiveRoute() {
     const start = async () => {
         setBusy(true);
         setTriggerError(null);
+        setDismissed(false);
         finishedRef.current = false;
         try {
             const res = await api.ingest();
@@ -120,8 +119,7 @@ export function IngestLiveRoute() {
             setStreamUrl(res.stream);
         } catch (err) {
             if (err instanceof ApiError && err.status === 503) {
-                // Sidecar unavailable (compiled binary) - switch to the
-                // polling fallback instead of dead-ending on the error.
+                // Sidecar unavailable (compiled binary) - hide the trigger.
                 setTriggerStatus(err.status);
             } else {
                 setTriggerError(err instanceof Error ? err.message : String(err));
@@ -131,76 +129,51 @@ export function IngestLiveRoute() {
         }
     };
 
-    const idle = !streamUrl;
-    const live = streamUrl && !run.finished;
+    const live = streamUrl !== null;
+    const overlayVisible = live && !dismissed;
 
     return (
-        <section className="panel">
-            <header>
-                <h2>Live Ingest</h2>
-                <span className="meta">
-                    {run.label ? `${run.label} · ` : ""}
-                    {idle
-                        ? polling ? "polling" : "idle"
-                        : run.finished
-                        ? run.runStatus === "completed"
-                            ? "completed"
-                            : "failed"
-                        : "running…"}
-                </span>
-            </header>
-
-            <div className="actions" style={{ margin: "8px 0 16px" }}>
+        <>
+            {polling ? null : (
                 <button
                     type="button"
-                    className="badge keep"
-                    onClick={start}
-                    disabled={busy || Boolean(live) || polling}
-                    title={polling ? "Live ingest needs ax running from source" : undefined}
+                    className="masthead-ingest-btn"
+                    onClick={() => (live ? setDismissed(false) : void start())}
+                    disabled={busy}
+                    title={live ? "Show ingest progress" : "Run an ingest pass"}
                 >
-                    {busy ? "Starting…" : live ? "Running…" : "Run ingest"}
+                    {busy ? "Starting…" : live && !run.finished ? "Ingesting…" : "Ingest"}
                 </button>
-                {run.finished ? (
-                    <button type="button" onClick={start} disabled={busy}>
-                        Run again
-                    </button>
-                ) : null}
-            </div>
-
-            {triggerError ? <div className="error">Error: {triggerError}</div> : null}
-            {run.error ? (
-                <div className="error">
-                    Stream error: {run.error}. The run may have finished or the serve
-                    session restarted - try Run ingest again.
-                </div>
-            ) : null}
-            {polling ? (
-                <div className="empty" role="status">
-                    Live stream unavailable - polling every {POLL_INTERVAL_MS / 1000}s.
-                </div>
-            ) : null}
-
-            <CountTiles pollMs={polling ? POLL_INTERVAL_MS : false} />
-
-            {idle ? (
-                polling ? (
-                    <div className="empty">
-                        Live streaming needs ax running from source (the compiled binary
-                        can't host the Durable Streams sidecar). Run{" "}
-                        <strong>ax ingest</strong> in a terminal - the counts above
-                        refresh automatically while it fills.
-                    </div>
-                ) : (
-                    <div className="empty">
-                        No active run. Hit <strong>Run ingest</strong> to stream a live
-                        ingest pass - stages tick green and the counts above climb as data
-                        lands.
-                    </div>
-                )
-            ) : (
-                <StageChecklist run={run} />
             )}
-        </section>
+            {triggerError ? <span className="meta masthead-ingest-error">{triggerError}</span> : null}
+            {overlayVisible ? (
+                <div className="ingest-splash" role="status" aria-live="polite">
+                    <div className="ingest-splash-panel panel">
+                        <header>
+                            <h2>
+                                {run.finished
+                                    ? run.runStatus === "completed" ? "Ingest complete" : "Ingest failed"
+                                    : "Ingesting…"}
+                            </h2>
+                            <span className="meta">{run.label ?? "live ingest run"}</span>
+                        </header>
+                        {run.error ? (
+                            <div className="error">
+                                Stream error: {run.error}. The run may have finished or the serve
+                                session restarted.
+                            </div>
+                        ) : null}
+                        <CountTiles />
+                        <StageChecklist run={run} />
+                        <div className="actions" style={{ marginTop: 12 }}>
+                            <button type="button" className="badge review" onClick={() => setDismissed(true)}>
+                                Continue in background
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            ) : null}
+        </>
     );
 }
 
@@ -242,9 +215,8 @@ function StageChecklist({ run }: { run: ReturnType<typeof useIngestStream> }) {
 }
 
 /** Collapsed "N files skipped" row under a stage; expands to the failure
- *  detail list (path + error). The detail list is capped upstream (25), so a
- *  larger total gets an "and N more" overflow line. Skipped files retry on
- *  the next ingest run - they are warnings, not stage errors. */
+ *  detail list (path + error). Skipped files retry on the next ingest run -
+ *  they are warnings, not stage errors. */
 function SkippedFiles({ skipped }: { skipped: StageFileFailures }) {
     const overflow = skipped.total - skipped.failures.length;
     return (
@@ -278,25 +250,20 @@ function formatEtaLeft(ms: number): string {
     return `${m}m${(s % 60).toString().padStart(2, "0")}s`;
 }
 
-/** Count tiles reusing the same React Query keys the live SSE hook invalidates,
- *  so they refetch and climb as the run progresses. `pollMs` is the polling
- *  fallback: when the live stream can't run (compiled binary) the tiles
- *  refetch on an interval instead of waiting for stream-driven invalidation. */
-function CountTiles({ pollMs = false }: { pollMs?: number | false }) {
+/** Count tiles on the same React Query keys the stage-delta effect invalidates,
+ *  so the numbers visibly climb while the run fills the graph. */
+function CountTiles() {
     const skillsQuery = useQuery({
         queryKey: ["skills"],
         queryFn: () => api.skills(),
-        refetchInterval: pollMs,
     });
     const sessionsQuery = useQuery({
         queryKey: ["sessions", "all"],
         queryFn: () => api.sessions({ limit: 1 }),
-        refetchInterval: pollMs,
     });
     const failuresQuery = useQuery({
         queryKey: ["tool-failures"],
         queryFn: () => api.toolFailures(),
-        refetchInterval: pollMs,
     });
 
     const skills = skillsQuery.data?.skills.length ?? null;
