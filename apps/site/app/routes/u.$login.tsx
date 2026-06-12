@@ -292,6 +292,8 @@ function ProfileDossier({ profile: p }: { profile: ProfileV1 }) {
                 </section>
             )}
 
+            <VisitorCTA />
+
             {/* colophon */}
             <footer className="pf-colophon">
                 <span>compiled by ax from local agent transcripts · nothing leaves the machine unreviewed</span>
@@ -447,6 +449,32 @@ function UnclaimedDossier({ login }: { login: string }) {
                 New to ax? <Link to="/">Start here</Link> - install takes 30 seconds,
                 the first ingest does the rest.
             </p>
+        </section>
+    );
+}
+
+/* ---------- visitor CTA ---------- */
+
+function VisitorCTA() {
+    return (
+        <section className="pf-cta" aria-label="get ax">
+            <h2 className="pf-cta-headline">This dossier compiled itself.</h2>
+            <p className="pf-cta-sub">
+                ax measures your real agent usage locally and publishes only the aggregate
+                - to a gist you own.
+            </p>
+            <div className="pf-cta-cmds">
+                <code className="pf-cta-cmd">curl -fsSL ax.necmttn.com/install | bash</code>
+                <code className="pf-cta-cmd">ax profile publish</code>
+            </div>
+            <a
+                className="pf-cta-repo"
+                href="https://github.com/Necmttn/ax"
+                target="_blank"
+                rel="noopener noreferrer"
+            >
+                or star the repo →
+            </a>
         </section>
     );
 }
