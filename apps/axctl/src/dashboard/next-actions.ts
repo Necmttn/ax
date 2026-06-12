@@ -312,8 +312,9 @@ const ROUTING_WINDOW_DAYS = 14;
 
 /**
  * Per-source timeout: a slow source degrades to a note instead of blocking
- * the panel. The churn leg currently exceeds this (see issue follow-up for a
- * dedicated fix); routing and others are typically fast but may spike.
+ * the panel. The churn leg currently exceeds this (~9s fixed cost - see
+ * https://github.com/Necmttn/ax/issues/326); routing and others are typically
+ * fast but may spike.
  */
 const SOURCE_TIMEOUT_MS = 4_000;
 

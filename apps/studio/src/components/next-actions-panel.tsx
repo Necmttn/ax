@@ -7,6 +7,8 @@ import { CopyButton } from "./copy-button.tsx";
 export interface NextActionsHandlers {
     readonly onAccept: (sig: string) => void;
     readonly onVerdict: (sig: string, verdict: string) => void;
+    // "decide" inline actions (skill hygiene) intentionally have no one-click
+    // handler - role choice needs thought, so those cards offer copy + link only.
     /** true while any action mutation is in flight - disables all card buttons */
     readonly pending: boolean;
 }
