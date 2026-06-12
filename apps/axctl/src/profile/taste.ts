@@ -49,6 +49,7 @@ export function deriveTastePatterns(rows: ReadonlyArray<ProposalRow>): TastePatt
         const name = slugify(row.title);
         if (name === "") continue;
         const existing = byName.get(name);
+        // Equal frequency: first encountered wins (DB feeds rows frequency DESC).
         if (existing && existing.row.frequency >= row.frequency) continue;
         const reinforced = row.updated_at ?? row.created_at;
         const category: ProseCategory = FORM_TO_CATEGORY[row.form] ?? "workflow";
