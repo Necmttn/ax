@@ -1188,6 +1188,8 @@ export interface ProposalDto {
     readonly guidance_payload?: GuidanceProposalPayload | null;
     readonly automation_payload?: AutomationProposalPayload | null;
     readonly experiment?: ExperimentDto | null;
+    /** "mined" (signal-derived) or "agent" (ax improve propose); served coalesced. */
+    readonly origin?: string;
     /** server-rendered markdown agent brief */
     readonly brief?: string;
 }

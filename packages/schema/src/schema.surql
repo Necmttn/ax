@@ -1605,6 +1605,9 @@ DEFINE FIELD confidence    ON proposal TYPE string;
     -- low | medium | high
 DEFINE FIELD status        ON proposal TYPE string DEFAULT 'open';
     -- open | accepted | rejected | superseded
+DEFINE FIELD origin        ON proposal TYPE string DEFAULT 'mined';
+    -- mined (signal-derived) | agent (written via `ax improve propose`)
+    -- old rows read NONE - consumers coalesce to 'mined'
 DEFINE FIELD reject_reason ON proposal TYPE option<string>;
 DEFINE FIELD baseline      ON proposal TYPE option<string>;
 DEFINE FIELD created_at    ON proposal TYPE datetime DEFAULT time::now();

@@ -93,6 +93,16 @@ describe("fetchImproveProposals - brief attachment", () => {
         expect(brief).not.toContain("ax improve accept");
     });
 
+    it("coalesces missing origin to mined; preserves explicit agent", async () => {
+        const rows = await run(
+            fetchImproveProposals(),
+            makeMockDb([[openRow, { ...openRow, dedupe_sig: "sig-agent", origin: "agent" }]]),
+        ) as ReadonlyArray<ProposalDto>;
+
+        expect(rows[0]?.origin).toBe("mined");
+        expect(rows[1]?.origin).toBe("agent");
+    });
+
     it("returns empty array for empty DB result", async () => {
         const rows = await run(
             fetchImproveProposals(),
