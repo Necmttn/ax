@@ -2,7 +2,6 @@
 import { useState } from "react";
 import { Link } from "@tanstack/react-router";
 import { HeroLogoField, PROVIDERS } from "./supports-strip";
-import { ScoreClimb } from "./score-climb";
 import { RetroTerminal } from "./retro-terminal";
 
 const INSTALL_CMD = "curl -fsSL ax.necmttn.com/install | sh";
@@ -126,24 +125,25 @@ export function DashboardPreview() {
       {/* ============= retro terminal: the mechanism ============= */}
       <RetroTerminal />
 
-      {/* ============= demo: dashboard preview ============= */}
+      {/* ============= demo: improve deck (mirrors studio /improve) ============= */}
       <section className="demo">
         <div className="demo-intro">
-          <span className="eyebrow">as you use it, it gets better</span>
+          <span className="eyebrow">open the dashboard, fixes are waiting</span>
           <h2>
-            Every applied fix moves the&nbsp;score.
+            Your next fixes, already&nbsp;mined.
           </h2>
           <p>
-            Harness Doctor grades how well your setup is working. ax keeps
-            finding small fixes&nbsp;&mdash; you apply the ones you like, and the
-            number climbs.
+            The Improve deck turns your history into ranked proposals &mdash;
+            spend to reroute, failures that recur, tools that keep breaking.
+            Accept one, and ax measures your next 30 sessions to see if it
+            actually worked.
           </p>
         </div>
 
         <div
           className="browser"
           role="img"
-          aria-label="ax dashboard preview at 127.0.0.1:1738"
+          aria-label="ax dashboard, Improve view at 127.0.0.1:1738"
         >
           <div className="browser-bar">
             <div className="browser-dots">
@@ -155,197 +155,140 @@ export function DashboardPreview() {
             <div className="browser-spacer"></div>
           </div>
 
-          <div className="dash">
-            <p className="dash-head">Harness Doctor &middot; this week</p>
+          <div className="dash dash--improve">
+            <div className="dash-tabs" aria-hidden="true">
+              <span>Wrapped</span>
+              <span className="is-active">Improve</span>
+              <span>Sessions</span>
+              <span>Skills</span>
+              <span>Workflow</span>
+            </div>
 
-            <ScoreClimb />
-
-            <div className="ministats">
-              {/* 1: turns indexed */}
-              <div className="mini">
-                <div className="mini-label">Turns indexed</div>
-                <div className="mini-value">
-                  369<span className="unit">k</span>
-                </div>
-                <div className="mini-chart">
-                  <svg
-                    className="spark"
-                    viewBox="0 0 100 28"
-                    preserveAspectRatio="none"
-                    aria-hidden="true"
-                  >
-                    <polyline
-                      points="0,22 12,20 24,18 36,14 48,16 60,11 72,8 84,5 100,3"
-                      fill="none"
-                      stroke="#0a0a0a"
-                      strokeWidth="1.2"
-                    />
-                    <polyline
-                      points="0,22 12,20 24,18 36,14 48,16 60,11 72,8 84,5 100,3 100,28 0,28"
-                      fill="rgba(10,10,10,0.05)"
-                      stroke="none"
-                    />
-                    <circle cx="100" cy="3" r="2" fill="#2f9e44" />
-                  </svg>
-                </div>
-                <div className="mini-sub">
-                  <b>14.2M</b> tokens &middot; <span className="pos">+20%</span>
-                </div>
+            <div className="nx-head">
+              <div>
+                <p className="nx-eyebrow">$ what&apos;s next</p>
+                <p className="nx-title">20 actions waiting</p>
+                <p className="nx-sub">
+                  Mined from your sessions &mdash; savings to route, fixes that
+                  recur, verdicts due.
+                </p>
               </div>
+              <span className="nx-brief">copy analysis brief</span>
+            </div>
 
-              {/* 2: skills firing */}
-              <div className="mini">
-                <div className="mini-label">Skills firing</div>
-                <div className="mini-value">
-                  11<span className="unit">/ 20</span>
+            <div className="nx-grid">
+              <article className="nx-card">
+                <p className="nx-tag">$ proposal</p>
+                <h3 className="nx-card-title">~$605 redirectable</h3>
+                <p className="nx-card-desc">
+                  252 model-less dispatches on expensive models matched
+                  mechanical routing classes.
+                </p>
+                <p className="nx-fix">
+                  <b>FIX &rarr; NEW HOOK:</b> route mechanical subagent
+                  dispatches to cheaper models
+                </p>
+                <div className="nx-actions">
+                  <span className="nx-btn">REVIEW &rarr;</span>
+                  <span className="nx-copy">copy brief</span>
                 </div>
-                <div className="mini-chart">
-                  <div className="dotgrid" aria-hidden="true">
-                    <span className="lit"></span>
-                    <span className="lit"></span>
-                    <span></span>
-                    <span className="lit"></span>
-                    <span className="lit"></span>
-                    <span></span>
-                    <span className="lit"></span>
-                    <span className="lit"></span>
-                    <span></span>
-                    <span className="lit"></span>
-                    <span className="lit"></span>
-                    <span></span>
-                    <span className="lit"></span>
-                    <span></span>
-                    <span className="lit"></span>
-                    <span></span>
-                    <span></span>
-                    <span className="lit"></span>
-                    <span></span>
-                    <span></span>
+              </article>
+
+              <article className="nx-card">
+                <p className="nx-tag">$ proposal</p>
+                <h3 className="nx-card-title">26&times; recurring</h3>
+                <p className="nx-card-desc">
+                  Feature closure needs stronger same-file follow-up
+                  verification.
+                </p>
+                <p className="nx-fix">
+                  <b>FIX &rarr; NEW SKILL:</b> post-feature verification
+                  checklist
+                </p>
+                <div className="nx-actions">
+                  <span className="nx-btn">REVIEW &rarr;</span>
+                  <span className="nx-copy">copy brief</span>
+                </div>
+              </article>
+
+              <article className="nx-card nx-card--alert">
+                <p className="nx-tag nx-tag--alert">$ failing tool</p>
+                <h3 className="nx-card-title">
+                  Fix <code>write_stdin</code> cluster
+                </h3>
+                <p className="nx-card-desc">
+                  1,681 failures across 205 sessions &mdash; one flaky tool
+                  taxing every run.
+                </p>
+                <p className="nx-exits">
+                  exits [2, 1, 130, -1, 127&hellip;]
+                </p>
+                <div className="nx-actions">
+                  <span className="nx-btn">DETAILS &rarr;</span>
+                  <span className="nx-copy">copy brief</span>
+                </div>
+              </article>
+            </div>
+
+            <p className="nx-foot">+17 more in the registry below</p>
+
+            <div className="nx-exp">
+              <div className="nx-exp-head">
+                <p className="nx-exp-title">
+                  <span className="nx-eyebrow">$ experiments</span> Past bets,
+                  measured
+                </p>
+                <span className="nx-exp-meta">
+                  checkpoints at +3 / +10 / +30 sessions
+                </span>
+              </div>
+              <div className="nx-exp-empty">
+                <div className="nx-exp-empty-copy">
+                  <p className="nx-exp-empty-title">No bets placed yet.</p>
+                  <p className="nx-exp-note">
+                    Every accepted fix becomes a bet. ax watches your next 30
+                    sessions &mdash; a trace bar that shrinks to zero is a
+                    confirmed win.
+                  </p>
+                </div>
+                <div className="nx-trace" aria-hidden="true">
+                  <div className="nx-trace-row">
+                    <span className="nx-trace-label">+3</span>
+                    <span className="nx-trace-track">
+                      <span
+                        className="nx-trace-bar"
+                        style={{ width: "92%" }}
+                      ></span>
+                    </span>
+                  </div>
+                  <div className="nx-trace-row">
+                    <span className="nx-trace-label">+10</span>
+                    <span className="nx-trace-track">
+                      <span
+                        className="nx-trace-bar"
+                        style={{ width: "44%" }}
+                      ></span>
+                    </span>
+                  </div>
+                  <div className="nx-trace-row">
+                    <span className="nx-trace-label">+30</span>
+                    <span className="nx-trace-track">
+                      <span
+                        className="nx-trace-bar nx-trace-bar--win"
+                        style={{ width: "7%" }}
+                      ></span>
+                      <span className="nx-trace-win">&#10003; confirmed win</span>
+                    </span>
                   </div>
                 </div>
-                <div className="mini-sub">
-                  <span className="neg">9 unused</span> this week
-                </div>
-              </div>
-
-              {/* 3: interventions */}
-              <div className="mini">
-                <div className="mini-label">Interventions</div>
-                <div className="mini-value">8</div>
-                <div className="mini-chart">
-                  <div className="stack-wrap">
-                    <div className="stackbar" aria-label="interventions by form">
-                      <div
-                        className="seg form-skill"
-                        style={{ width: "25%" }}
-                        title="skill x2"
-                      ></div>
-                      <div
-                        className="seg form-guidance"
-                        style={{ width: "25%" }}
-                        title="guidance x2"
-                      ></div>
-                      <div
-                        className="seg form-subagent"
-                        style={{ width: "12.5%" }}
-                        title="subagent x1"
-                      ></div>
-                      <div
-                        className="seg form-hook"
-                        style={{ width: "25%" }}
-                        title="hook x2"
-                      ></div>
-                      <div
-                        className="seg form-harness"
-                        style={{ width: "12.5%" }}
-                        title="harness_check x1"
-                      ></div>
-                    </div>
-                    <div className="stack-legend">
-                      <span
-                        className="sw"
-                        style={{ background: "#0a0a0a" }}
-                      ></span>
-                      SKILL &nbsp;
-                      <span
-                        className="sw"
-                        style={{ background: "#4a4640" }}
-                      ></span>
-                      GUIDE &nbsp;
-                      <span
-                        className="sw"
-                        style={{ background: "var(--blue)" }}
-                      ></span>
-                      SUBAGENT
-                      <br />
-                      <span
-                        className="sw"
-                        style={{ background: "var(--amber)" }}
-                      ></span>
-                      HOOK &nbsp;
-                      <span
-                        className="sw"
-                        style={{ background: "var(--green)" }}
-                      ></span>
-                      AUTO &nbsp;
-                      <span
-                        className="sw"
-                        style={{ background: "var(--claude)" }}
-                      ></span>
-                      HARNESS
-                    </div>
-                  </div>
-                </div>
-                <div className="mini-sub">
-                  across <b>6</b> forms &middot; <b>3</b> accepted
-                </div>
-              </div>
-
-              {/* 4: safety contract */}
-              <div className="mini">
-                <div className="mini-label">Safety contract</div>
-                <div className="mini-value">
-                  100<span className="unit">%</span>
-                </div>
-                <div className="mini-chart">
-                  <div className="safety-wrap">
-                    <svg
-                      className="safety-ring"
-                      viewBox="0 0 36 36"
-                      aria-hidden="true"
-                    >
-                      <circle
-                        className="track"
-                        cx="18"
-                        cy="18"
-                        r="14"
-                      ></circle>
-                      <circle
-                        className="fill"
-                        cx="18"
-                        cy="18"
-                        r="14"
-                        strokeDasharray="87.96 87.96"
-                        strokeDashoffset="0"
-                      ></circle>
-                    </svg>
-                    <div className="safety-bullets">
-                      <b>recovery_path</b>
-                      <br />
-                      <b>smoke_test</b>
-                      <br />
-                      <b>disable_command</b>
-                    </div>
-                  </div>
-                </div>
-                <div className="mini-sub">accepted hooks carry full contract</div>
               </div>
             </div>
           </div>
         </div>
 
         <p className="demo-caption">
-          Run <code>ax serve</code> to see yours.
+          Run <code>ax serve</code> to see yours &mdash; Improve deck, Agent
+          Wrapped, sessions, skill triage.
         </p>
       </section>
     </>
