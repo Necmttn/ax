@@ -8,6 +8,8 @@ import type {
     WrappedUsageDay,
 } from "@ax/lib/shared/dashboard-types";
 import { fmtCount, fmtTs } from "@ax/lib/shared/formatters";
+import { CopyButton } from "../components/copy-button.tsx";
+import { WrappedCardGrid } from "../components/wrapped-cards.tsx";
 
 const hourLabel = (hour: number | null): string => {
     if (hour == null) return "n/a";
@@ -56,23 +58,43 @@ export function WrappedRoute() {
                         ? `${data.period.label} · generated ${fmtTs(data.generatedAt)}`
                         : ""}
                 </span>
+                <GenerateBriefButton hasCards={(data?.cards?.length ?? 0) > 0} />
             </header>
 
             {error ? <div className="error">Error: {error}</div> : null}
             {loading && !data ? <div className="loading">Loading…</div> : null}
 
             {data ? (
-                <>
-                    <WrappedHero profile={data} />
-                    <MetricGrid profile={data} />
-                    <DailyHeatmap days={data.usage.days} />
-                    <Facts facts={data.facts} />
-                    <PublicPreview
-                        profile={publicProfile}
-                        loading={publicQuery.isLoading}
-                        error={publicError}
-                    />
-                </>
+                (data.cards?.length ?? 0) > 0 ? (
+                    <>
+                        <WrappedCardGrid cards={data.cards ?? []} />
+                        <details style={{ marginTop: 24 }}>
+                            <summary style={{ cursor: "pointer" }}><strong>The numbers</strong></summary>
+                            <WrappedHero profile={data} />
+                            <MetricGrid profile={data} />
+                            <DailyHeatmap days={data.usage.days} />
+                            <Facts facts={data.facts} />
+                        </details>
+                        <PublicPreview
+                            profile={publicProfile}
+                            loading={publicQuery.isLoading}
+                            error={publicError}
+                        />
+                    </>
+                ) : (
+                    <>
+                        <GenerateCta />
+                        <WrappedHero profile={data} />
+                        <MetricGrid profile={data} />
+                        <DailyHeatmap days={data.usage.days} />
+                        <Facts facts={data.facts} />
+                        <PublicPreview
+                            profile={publicProfile}
+                            loading={publicQuery.isLoading}
+                            error={publicError}
+                        />
+                    </>
+                )
             ) : null}
         </section>
     );
@@ -223,5 +245,35 @@ function PublicPreview({
                 </div>
             ) : null}
         </>
+    );
+}
+
+/** Header action: copies the generation brief for an agent session. */
+function GenerateBriefButton({ hasCards }: { readonly hasCards: boolean }) {
+    const query = useQuery({
+        queryKey: ["wrapped", "generate-brief"],
+        queryFn: () => api.wrappedGenerateBrief(),
+        staleTime: Infinity,
+    });
+    if (!query.data) return null;
+    return (
+        <CopyButton
+            text={query.data.brief}
+            label={hasCards ? "Regenerate wrapped" : "Copy wrapped brief"}
+        />
+    );
+}
+
+/** Empty-deck call to action above the mechanical fallback view. */
+function GenerateCta() {
+    return (
+        <div className="wrapped-cta panel">
+            <h3 style={{ margin: "0 0 4px" }}>Make this page yours</h3>
+            <p className="meta" style={{ margin: 0 }}>
+                These are the mechanical numbers. Copy the wrapped brief (top right),
+                paste it into an agent session, and it will mine your graph and publish
+                headline cards here via <code>ax wrapped publish</code>.
+            </p>
+        </div>
     );
 }

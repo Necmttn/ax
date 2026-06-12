@@ -2500,3 +2500,72 @@ td.skill-cell .description {
 .masthead-ingest-error {
     max-width: 280px;
 }
+
+/* ---- wrapped recap cards (Paxel-style) ---- */
+.wrapped-cards {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+    gap: 20px;
+    margin: 16px 0 8px;
+}
+.wrapped-card {
+    border: 1px solid var(--accent, #e8590c);
+    outline: 1px dashed color-mix(in srgb, var(--accent, #e8590c) 55%, transparent);
+    outline-offset: -6px;
+    background: var(--paper, #fff);
+    display: flex;
+    flex-direction: column;
+    min-height: 280px;
+    box-shadow: 2px 3px 0 color-mix(in srgb, var(--accent, #e8590c) 25%, transparent);
+}
+.wrapped-card-art {
+    height: 110px;
+    position: relative;
+    background-color: color-mix(in srgb, var(--accent, #e8590c) 14%, #fff);
+    background-image:
+        radial-gradient(color-mix(in srgb, var(--accent, #e8590c) 75%, transparent) 1.2px, transparent 1.3px),
+        radial-gradient(color-mix(in srgb, var(--accent, #e8590c) 45%, transparent) 1px, transparent 1.1px);
+    background-size: 7px 7px, 11px 11px;
+    background-position: 0 0, 3px 5px;
+}
+.wrapped-card-art.v1 { background-size: 5px 5px, 9px 9px; }
+.wrapped-card-art.v2 { background-size: 9px 9px, 13px 13px; background-position: 2px 1px, 0 0; }
+.wrapped-card-art.v3 { background-size: 6px 6px, 14px 14px; }
+.wrapped-card-dots {
+    position: absolute;
+    top: 8px;
+    right: 10px;
+    display: flex;
+    gap: 5px;
+}
+.wrapped-card-dots i {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #fff;
+}
+.wrapped-card-copy {
+    padding: 14px 16px 18px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+.wrapped-card-eyebrow {
+    color: var(--accent, #e8590c);
+    font-size: 12px;
+    letter-spacing: 0.02em;
+}
+.wrapped-card-headline {
+    margin: 0;
+    font-size: clamp(22px, 2.2vw, 28px);
+    line-height: 1.08;
+    letter-spacing: -0.01em;
+}
+.wrapped-card-body {
+    margin: 0;
+    font-size: 14px;
+    line-height: 1.45;
+    color: var(--ink-soft, #444);
+}
+.wrapped-card-flag { align-self: flex-start; margin-top: 4px; }
+.wrapped-cta { margin: 12px 0 16px; padding: 14px 16px; }
