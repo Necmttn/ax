@@ -13,7 +13,7 @@
  */
 
 /** Bump when the poster template changes; busts edge + social image caches. */
-export const OG_RENDER_REV = 6;
+export const OG_RENDER_REV = 8;
 
 /** FNV-1a 32-bit as 8 hex chars - tiny, synchronous, stable across runtimes. */
 const fnv1a = (s: string): string => {
