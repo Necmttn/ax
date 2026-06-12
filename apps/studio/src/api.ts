@@ -152,12 +152,14 @@ async function jsonFetch<T>(input: RequestInfo, init?: RequestInit): Promise<T> 
 async function viaContract<T>(
     mockPath: string,
     call: (client: AxClient) => Effect.Effect<unknown, unknown>,
+    mockInit?: RequestInit,
 ): Promise<T> {
     if (STUDIO_MOCK) {
         const endpoint = readEndpoint();
         if (!endpoint) {
             const { mockFetch } = await import("./mock-fixtures.ts");
-            return mockFetch<T>(mockPath);
+            // mockInit carries the method for fixtures keyed on POST/DELETE.
+            return mockFetch<T>(mockPath, mockInit);
         }
         return await runContract(endpoint, call) as T;
     }
@@ -232,46 +234,60 @@ export interface SessionTimelinePayload {
 export const api = {
     version: (): Promise<DaemonVersion> =>
         viaContract("/api/version", (c) => c.system.version()),
-    skills: (): Promise<SkillTriageResponse> => jsonFetch("/api/skills"),
+    skills: (): Promise<SkillTriageResponse> =>
+        viaContract("/api/skills", (c) => c.skills.skills()),
     decide: (
         name: string,
         decision: TriageDecision,
         reason?: string | null,
     ): Promise<SkillTriageNote> =>
-        jsonFetch(`/api/skills/${encodeURIComponent(name)}/decide`, {
-            method: "POST",
-            headers: { "content-type": "application/json" },
-            body: JSON.stringify({ decision, reason: reason ?? null }),
-        }),
+        viaContract(
+            `/api/skills/${encodeURIComponent(name)}/decide`,
+            (c) => c.skills.skillDecide({
+                params: { name },
+                payload: { decision, reason: reason ?? null },
+            }),
+            { method: "POST" },
+        ),
     clearDecision: (name: string): Promise<{ cleared: boolean; skill_name: string }> =>
-        jsonFetch(`/api/skills/${encodeURIComponent(name)}/decide`, {
-            method: "DELETE",
-        }),
+        viaContract(
+            `/api/skills/${encodeURIComponent(name)}/decide`,
+            (c) => c.skills.skillDecideClear({ params: { name } }),
+            { method: "DELETE" },
+        ),
     decideBulk: (
         names: ReadonlyArray<string>,
         decision: TriageDecision,
         reason?: string | null,
     ): Promise<{ notes: ReadonlyArray<SkillTriageNote> }> =>
-        jsonFetch("/api/skills/decide-bulk", {
-            method: "POST",
-            headers: { "content-type": "application/json" },
-            body: JSON.stringify({ names, decision, reason: reason ?? null }),
-        }),
+        viaContract(
+            "/api/skills/decide-bulk",
+            (c) => c.skills.skillDecideBulk({
+                payload: { names, decision, reason: reason ?? null },
+            }),
+            { method: "POST" },
+        ),
     detail: (name: string): Promise<SkillDetailPayload> =>
-        jsonFetch(`/api/skills/${encodeURIComponent(name)}/detail`),
+        viaContract(
+            `/api/skills/${encodeURIComponent(name)}/detail`,
+            (c) => c.skills.skillDetail({ params: { name } }),
+        ),
     skillSource: (name: string): Promise<SkillSourcePayload> =>
-        jsonFetch(`/api/skills/${encodeURIComponent(name)}/source`),
+        viaContract(
+            `/api/skills/${encodeURIComponent(name)}/source`,
+            (c) => c.skills.skillSource({ params: { name } }),
+        ),
     openSkill: (
         name: string,
         target: "finder" | "editor",
     ): Promise<{ launched: string }> =>
-        jsonFetch(`/api/skills/${encodeURIComponent(name)}/open`, {
-            method: "POST",
-            headers: { "content-type": "application/json" },
-            body: JSON.stringify({ target }),
-        }),
+        viaContract(
+            `/api/skills/${encodeURIComponent(name)}/open`,
+            (c) => c.skills.skillOpen({ params: { name }, payload: { target } }),
+            { method: "POST" },
+        ),
     decisions: (): Promise<{ decisions: ReadonlyArray<SkillTriageNote> }> =>
-        jsonFetch("/api/decisions"),
+        viaContract("/api/decisions", (c) => c.skills.decisions()),
     workflow: (): Promise<WorkflowResponse> =>
         viaContract("/api/workflow", (c) => c.insights.workflow()),
     sessions: (params: { offset?: number; limit?: number; source?: string; project?: string } = {}): Promise<SessionListResponse> =>
@@ -395,11 +411,13 @@ export const api = {
      *  the browser subscribes to directly (the sidecar has permissive CORS and
      *  runs on its own localhost port). */
     ingest: (params: { since?: number } = {}): Promise<IngestTriggerResponse> =>
-        jsonFetch("/api/ingest", {
-            method: "POST",
-            headers: { "content-type": "application/json" },
-            body: JSON.stringify(params.since != null ? { since: params.since } : {}),
-        }),
+        viaContract(
+            "/api/ingest",
+            (c) => c.live.ingestTrigger({
+                payload: params.since != null ? { since: params.since } : {},
+            }),
+            { method: "POST" },
+        ),
     toolFailures: (): Promise<ToolFailuresResponse> =>
         viaContract("/api/tool-failures", (c) => c.insights.toolFailures()),
     toolFailureDetail: (label: string): Promise<ToolFailureDetailPayload> =>
@@ -416,23 +434,33 @@ export const api = {
 
     // Experiment loop - see
     // docs/superpowers/plans/2026-05-25-experiment-loop-cleanup-and-rebuild.md
-    improve: (): Promise<ImprovePayload> => jsonFetch("/api/improve"),
+    improve: (): Promise<ImprovePayload> =>
+        viaContract("/api/improve", (c) => c.improve.improveList()),
     improveAccept: (sig: string, force = false): Promise<ImproveActionResponse> =>
-        jsonFetch(`/api/improve/${encodeURIComponent(sig)}/accept`, {
-            method: "POST",
-            headers: { "content-type": "application/json" },
-            body: JSON.stringify({ force }),
-        }),
+        viaContract(
+            `/api/improve/${encodeURIComponent(sig)}/accept`,
+            (c) => c.improve.improveAction({
+                params: { sig, action: "accept" },
+                payload: { force },
+            }),
+            { method: "POST" },
+        ),
     improveReject: (sig: string, reason?: string | null): Promise<ImproveActionResponse> =>
-        jsonFetch(`/api/improve/${encodeURIComponent(sig)}/reject`, {
-            method: "POST",
-            headers: { "content-type": "application/json" },
-            body: JSON.stringify({ reason: reason ?? null }),
-        }),
+        viaContract(
+            `/api/improve/${encodeURIComponent(sig)}/reject`,
+            (c) => c.improve.improveAction({
+                params: { sig, action: "reject" },
+                payload: { reason: reason ?? null },
+            }),
+            { method: "POST" },
+        ),
     improveSetVerdict: (sig: string, verdict: string): Promise<ImproveActionResponse> =>
-        jsonFetch(`/api/improve/${encodeURIComponent(sig)}/verdict`, {
-            method: "POST",
-            headers: { "content-type": "application/json" },
-            body: JSON.stringify({ verdict }),
-        }),
+        viaContract(
+            `/api/improve/${encodeURIComponent(sig)}/verdict`,
+            (c) => c.improve.improveAction({
+                params: { sig, action: "verdict" },
+                payload: { verdict },
+            }),
+            { method: "POST" },
+        ),
 };

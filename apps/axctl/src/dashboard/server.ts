@@ -215,7 +215,7 @@ export async function serveDashboard(args: string[]): Promise<void> {
     // SurrealDB connection, trace sink) build once and are reused by both.
     const memoMap = Layer.makeMemoMapUnsafe();
     const handle = makeServeRuntime(defaultRuntimeFactory({ memoMap }));
-    const contract = makeContractWebHandler({ liveIngest: stream !== null, memoMap });
+    const contract = makeContractWebHandler({ ingestStream: stream, memoMap });
     const serve: ServeContext = { ingestStream: stream };
     let server: ReturnType<typeof Bun.serve>;
     try {

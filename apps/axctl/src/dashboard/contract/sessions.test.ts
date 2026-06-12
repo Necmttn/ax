@@ -22,7 +22,7 @@ const emptyDb = Layer.mock(SurrealClient, {
 
 const handlers: ContractWebHandler[] = [];
 function make(services: Parameters<typeof makeContractWebHandler>[0]["services"] = emptyDb): ContractWebHandler {
-    const h = makeContractWebHandler({ liveIngest: false, services });
+    const h = makeContractWebHandler({ ingestStream: null, services });
     handlers.push(h);
     return h;
 }

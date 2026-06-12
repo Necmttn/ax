@@ -247,10 +247,136 @@ export const SessionsGroup = HttpApiGroup.make("sessions")
         }),
     );
 
+/** Conflicting state transition (improve actions) - `{ error }` HTTP 409. */
+export class ConflictError extends Schema.ErrorClass<ConflictError>("ax/ConflictError")({
+    error: Schema.String,
+}, { httpApiStatus: 409 }) {}
+
+/** Live-ingest unavailable (no sidecar) - `{ error }` HTTP 503. */
+export class ServiceUnavailableError extends Schema.ErrorClass<ServiceUnavailableError>("ax/ServiceUnavailableError")({
+    error: Schema.String,
+}, { httpApiStatus: 503 }) {}
+
+/** Skill triage decision states (mirrors dashboard-types TriageDecision). */
+export const TriageDecisionSchema = Schema.Literals(["keep", "archive", "review"]);
+
+/**
+ * The skills family: triage listing, per-skill decide (POST/DELETE),
+ * bulk decide, detail, source, open-in, and the decisions list. Payloads
+ * `Schema.Unknown` except the mutation request bodies, which are typed.
+ */
+export const SkillsGroup = HttpApiGroup.make("skills")
+    .add(
+        HttpApiEndpoint.get("decisions", "/api/decisions", {
+            success: Schema.Unknown,
+            error: InternalError,
+        }),
+        HttpApiEndpoint.get("skills", "/api/skills", {
+            success: Schema.Unknown,
+            error: InternalError,
+        }),
+        HttpApiEndpoint.post("skillDecideBulk", "/api/skills/decide-bulk", {
+            payload: Schema.Struct({
+                names: Schema.Array(Schema.String),
+                decision: TriageDecisionSchema,
+                reason: Schema.optionalKey(Schema.NullOr(Schema.String)),
+            }),
+            success: Schema.Unknown,
+            error: [BadRequestError, InternalError],
+        }),
+        HttpApiEndpoint.post("skillDecide", "/api/skills/:name/decide", {
+            params: { name: Schema.String },
+            payload: Schema.Struct({
+                decision: TriageDecisionSchema,
+                reason: Schema.optionalKey(Schema.NullOr(Schema.String)),
+            }),
+            success: Schema.Unknown,
+            error: InternalError,
+        }),
+        HttpApiEndpoint.delete("skillDecideClear", "/api/skills/:name/decide", {
+            params: { name: Schema.String },
+            success: Schema.Unknown,
+            error: InternalError,
+        }),
+        HttpApiEndpoint.get("skillDetail", "/api/skills/:name/detail", {
+            params: { name: Schema.String },
+            success: Schema.Unknown,
+            error: InternalError,
+        }),
+        HttpApiEndpoint.get("skillSource", "/api/skills/:name/source", {
+            params: { name: Schema.String },
+            success: Schema.Unknown,
+            error: InternalError,
+        }),
+        HttpApiEndpoint.post("skillOpen", "/api/skills/:name/open", {
+            params: { name: Schema.String },
+            payload: Schema.Struct({
+                target: Schema.Literals(["finder", "editor"]),
+            }),
+            success: Schema.Unknown,
+            error: InternalError,
+        }),
+    );
+
+/**
+ * The improve family (experiment loop): the proposals list and the three
+ * proposal actions. Action results carry a status string the daemon maps
+ * to HTTP (ok -> 200 body, otherwise the matching error class).
+ */
+export const ImproveGroup = HttpApiGroup.make("improve")
+    .add(
+        HttpApiEndpoint.get("improveList", "/api/improve", {
+            success: Schema.Unknown,
+            error: InternalError,
+        }),
+        HttpApiEndpoint.post("improveAction", "/api/improve/:sig/:action", {
+            params: {
+                sig: Schema.String,
+                // The routing matcher only sends known actions here; an
+                // unknown action falls to the legacy row's 404 decode.
+                action: Schema.Literals(["accept", "reject", "verdict"]),
+            },
+            payload: Schema.Struct({
+                force: Schema.optionalKey(Schema.Boolean),
+                reason: Schema.optionalKey(Schema.NullOr(Schema.String)),
+                verdict: Schema.optionalKey(Schema.String),
+            }),
+            success: Schema.Unknown,
+            error: [BadRequestError, NotFoundError, ConflictError, InternalError],
+        }),
+    );
+
+/** POST /api/ingest - trigger a live ingest run (Durable Streams sidecar). */
+export class IngestTriggerResult extends Schema.Class<IngestTriggerResult>("ax/IngestTriggerResult")({
+    runId: Schema.String,
+    /** Full sidecar stream URL the browser subscribes to directly. */
+    stream: Schema.String,
+    streamName: Schema.String,
+    streamBaseUrl: Schema.String,
+}) {}
+
+/**
+ * The live family's JSON endpoint. SSE /api/events and binary /api/image
+ * stay OUTSIDE the contract permanently (module doc above).
+ */
+export const LiveGroup = HttpApiGroup.make("live")
+    .add(
+        HttpApiEndpoint.post("ingestTrigger", "/api/ingest", {
+            payload: Schema.Struct({
+                since: Schema.optionalKey(Schema.Number),
+            }),
+            success: IngestTriggerResult,
+            error: [ServiceUnavailableError, InternalError],
+        }),
+    );
+
 /** The Insights Surface Contract. Families join as they migrate (ADR-0013). */
 export const AxApi = HttpApi.make("ax")
     .add(SystemGroup)
     .add(InsightsGroup)
     .add(SessionsGroup)
+    .add(SkillsGroup)
+    .add(ImproveGroup)
+    .add(LiveGroup)
     .annotate(OpenApi.Title, "ax daemon API")
     .annotate(OpenApi.Version, "1");
