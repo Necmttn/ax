@@ -9716,11 +9716,51 @@ footer .right {
 }
 .pf-card {
     background: var(--panel);
-    padding: 18px 20px 20px;
-    min-height: 158px;
+    min-height: 220px;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    overflow: hidden;
+}
+/* generative dither art band - bleeds to the card's top + side edges */
+.pf-card-art {
+    position: relative;
+    height: 64px;
+    flex: none;
+    background: var(--panel);
+    border-bottom: 1px solid color-mix(in srgb, var(--line) 70%, var(--panel));
+    overflow: hidden;
+}
+.pf-card-art-svg {
+    display: block;
+    width: 100%;
+    height: 100%;
+    /* crisp pixel cells, no smoothing */
+    shape-rendering: crispEdges;
+}
+.pf-card-art-dots {
+    position: absolute;
+    top: 7px;
+    left: 9px;
+    display: flex;
+    gap: 4px;
+}
+.pf-card-art-dots span {
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+    background: color-mix(in srgb, var(--muted) 55%, var(--panel));
+    box-shadow: 0 0 0 0.5px color-mix(in srgb, var(--line) 80%, transparent);
+}
+.pf-card-art-dots span:nth-child(2) { background: color-mix(in srgb, var(--muted) 40%, var(--panel)); }
+.pf-card-art-dots span:nth-child(3) { background: color-mix(in srgb, var(--muted) 28%, var(--panel)); }
+
+.pf-card-body {
+    padding: 16px 20px 18px;
     display: flex;
     flex-direction: column;
     gap: 8px;
+    flex: 1;
     min-width: 0;
 }
 .pf-card-q {
@@ -9746,6 +9786,54 @@ footer .right {
     color: var(--muted);
 }
 .pf-card-s { font-size: 12.5px; line-height: 1.45; color: var(--muted); }
+
+/* mini trace-viz - tiny, mono, slots between answer and support line */
+.pf-card-viz { height: 16px; display: flex; align-items: center; }
+.pf-viz { display: block; width: 100%; }
+.pf-viz-bar {
+    position: relative;
+    height: 6px;
+    background: color-mix(in srgb, var(--line) 55%, var(--panel));
+}
+.pf-viz-bar-fill { display: block; height: 100%; background: var(--green); }
+.pf-viz-bar-fill--red { background: var(--red); }
+.pf-viz-ticks { display: flex; gap: 3px; align-items: flex-end; height: 12px; flex-wrap: nowrap; }
+.pf-viz-tick {
+    width: 4px;
+    height: 12px;
+    background: color-mix(in srgb, var(--green) 62%, var(--panel));
+    flex: none;
+}
+.pf-viz-tick--fade { opacity: 0.5; }
+.pf-viz-tick--rail {
+    flex: 1;
+    min-width: 12px;
+    height: 12px;
+    margin-left: 3px;
+    align-self: flex-end;
+    margin-bottom: 5px;
+    border-top: 1px dashed color-mix(in srgb, var(--green) 55%, var(--panel));
+}
+.pf-viz-rail { position: relative; height: 12px; }
+.pf-viz-rail-track {
+    position: absolute;
+    top: 50%;
+    left: 0;
+    right: 0;
+    height: 2px;
+    transform: translateY(-50%);
+    background: color-mix(in srgb, var(--line) 60%, var(--panel));
+}
+.pf-viz-rail-marker {
+    position: absolute;
+    top: 50%;
+    width: 7px;
+    height: 7px;
+    transform: translate(-50%, -50%);
+    background: var(--green);
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--green) 22%, transparent);
+}
+
 @media (max-width: 980px) { .pf-cards { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 460px) {
     .pf-cards { grid-template-columns: minmax(0, 1fr); }
