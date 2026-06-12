@@ -31,11 +31,9 @@ import {
     renderTuneBrief,
     type TuneProposal,
 } from "../../queries/routing-tune.ts";
+import { usd } from "../render.ts";
 import type { RuntimeManifest } from "./manifest.ts";
 import { fail, jsonFlag, optionValue, parseCsvFlag } from "./shared.ts";
-
-const usd = (n: number): string =>
-    Number.isFinite(n) ? `$${n.toFixed(2)}` : "$0.00";
 
 const printProposals = (proposals: ReadonlyArray<TuneProposal>) => {
     console.log(
@@ -44,7 +42,7 @@ const printProposals = (proposals: ReadonlyArray<TuneProposal>) => {
     for (const p of proposals) {
         console.log(
             `${p.id.padEnd(28)}  ${p.pattern.padEnd(32)}  ${p.suggest.padEnd(8)}  ` +
-            `${String(p.count).padStart(5)}  ${usd(p.total_cost_usd).padStart(11)}  ${p.judgment ? "YES" : "no"}`,
+            `${String(p.count).padStart(5)}  ${usd(p.total_cost_usd, 2).padStart(11)}  ${p.judgment ? "YES" : "no"}`,
         );
     }
 };
@@ -100,7 +98,7 @@ const tuneCommand = Command.make(
                 }
                 printProposals(proposals);
                 console.log(
-                    `\n${proposals.length} proposals  addressable spend: ${usd(proposals.reduce((s, p) => s + p.total_cost_usd, 0))}  (${days} days)`,
+                    `\n${proposals.length} proposals  addressable spend: ${usd(proposals.reduce((s, p) => s + p.total_cost_usd, 0), 2)}  (${days} days)`,
                 );
                 console.log(
                     `apply non-judgment: ax routing tune --days=${days}   brief: ax routing tune --emit-brief`,

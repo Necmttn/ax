@@ -28,23 +28,9 @@ import {
 } from "../../queries/dispatch-analytics.ts";
 import { loadEffectiveRoutingTable } from "../../queries/routing-table-io.ts";
 import { buildDispatchesNext, buildCandidatesNext } from "../../nav/next-links.ts";
+import { pct, truncate, usd } from "../render.ts";
 import type { RuntimeManifest } from "./manifest.ts";
 import { fail, jsonFlag, optionValue, positiveLimit } from "./shared.ts";
-
-// ---------------------------------------------------------------------------
-// Formatters
-// ---------------------------------------------------------------------------
-
-const usd = (n: number): string =>
-    Number.isFinite(n) ? `$${n.toFixed(4)}` : "$0.0000";
-
-const pct = (n: number): string =>
-    Number.isFinite(n) ? `${n.toFixed(1)}%` : "0.0%";
-
-const truncate = (s: string | null, len: number): string => {
-    if (!s) return "";
-    return s.length <= len ? s : `${s.slice(0, len - 1)}…`;
-};
 
 // ---------------------------------------------------------------------------
 // ax dispatches [--days=N] [--limit=N] [--candidates] [--json]

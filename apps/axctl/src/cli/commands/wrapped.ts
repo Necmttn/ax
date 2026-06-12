@@ -15,6 +15,7 @@ import { Effect } from "effect";
 import { Command, Flag } from "effect/unstable/cli";
 import { renderWrappedGenerateBrief } from "../../dashboard/wrapped-generate-brief.ts";
 import { runPublishCards } from "../../dashboard/wrapped-cards.ts";
+import { compactPrint } from "../render.ts";
 import type { RuntimeManifest } from "./manifest.ts";
 import { jsonFlag, optionValue } from "./shared.ts";
 
@@ -47,7 +48,7 @@ const cmdWrappedPublish = (input: { readonly file: string | undefined; readonly 
         });
         const result = yield* runPublishCards(parsed);
         if (input.json) {
-            console.log(JSON.stringify(result));
+            console.log(compactPrint(result));
         } else {
             console.log(`published ${result.count} wrapped cards - the dashboard landing serves them now`);
         }
