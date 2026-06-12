@@ -319,19 +319,121 @@ export class ServiceUnavailableError extends Schema.ErrorClass<ServiceUnavailabl
 /** Skill triage decision states (mirrors dashboard-types TriageDecision). */
 export const TriageDecisionSchema = Schema.Literals(["keep", "archive", "review"]);
 
+// ---- skills payloads (Schema.Struct: encode-safe for plain handler returns) -
+// Mirror the dashboard-types Skill* interfaces exactly. Handlers JS-map their
+// rows, so plain objects encode cleanly through these (see RecallResponse).
+
+export const SkillTriageNote = Schema.Struct({
+    skill_name: Schema.String,
+    decision: TriageDecisionSchema,
+    reason: Schema.NullOr(Schema.String),
+    decided_at: Schema.String,
+});
+
+const SkillRowFields = {
+    name: Schema.String,
+    scope: Schema.String,
+    description: Schema.NullOr(Schema.String),
+    dir_path: Schema.NullOr(Schema.String),
+    bytes: Schema.NullOr(Schema.Number),
+    total_inv: Schema.Number,
+    inv_7d: Schema.Number,
+    inv_30d: Schema.Number,
+    last_used: Schema.NullOr(Schema.String),
+    last_project: Schema.NullOr(Schema.String),
+    corrections: Schema.Number,
+    proposals: Schema.Number,
+    commits_after: Schema.Number,
+    taste_score: Schema.Number,
+};
+
+export const SkillTriageEntry = Schema.Struct({
+    ...SkillRowFields,
+    recommendation: TriageDecisionSchema,
+    recommendation_reason: Schema.String,
+    decision: Schema.NullOr(SkillTriageNote),
+});
+
+export const SkillTriageResponse = Schema.Struct({
+    generatedAt: Schema.String,
+    skills: Schema.Array(SkillTriageEntry),
+});
+
+const SkillRecentInvocation = Schema.Struct({
+    ts: Schema.String,
+    project: Schema.NullOr(Schema.String),
+    turn_has_error: Schema.optionalKey(Schema.Boolean),
+});
+
+const SkillProposalEvidence = Schema.Struct({
+    ts: Schema.String,
+    project: Schema.NullOr(Schema.String),
+    context_excerpt: Schema.optionalKey(Schema.NullOr(Schema.String)),
+});
+
+const SkillPair = Schema.Struct({
+    partner: Schema.String,
+    count: Schema.Number,
+    last_seen: Schema.NullOr(Schema.String),
+});
+
+export const SkillDetailPayload = Schema.Struct({
+    name: Schema.String,
+    scope: Schema.NullOr(Schema.String),
+    description: Schema.NullOr(Schema.String),
+    dir_path: Schema.NullOr(Schema.String),
+    invocations: Schema.Struct({
+        total: Schema.Number,
+        d7: Schema.Number,
+        d30: Schema.Number,
+        last: Schema.NullOr(Schema.String),
+    }),
+    recent: Schema.Array(SkillRecentInvocation),
+    corrections: Schema.Array(SkillRecentInvocation),
+    proposals: Schema.Array(SkillProposalEvidence),
+    paired: Schema.Array(SkillPair),
+});
+
+export const SkillSourcePayload = Schema.Struct({
+    name: Schema.String,
+    scope: Schema.String,
+    dir_path: Schema.NullOr(Schema.String),
+    file_path: Schema.NullOr(Schema.String),
+    frontmatter: Schema.NullOr(Schema.String),
+    body: Schema.NullOr(Schema.String),
+    state: Schema.Literals(["active", "disabled", "missing"]),
+    editable: Schema.Boolean,
+    error: Schema.NullOr(Schema.String),
+});
+
+export const SkillDecisionsResponse = Schema.Struct({
+    decisions: Schema.Array(SkillTriageNote),
+});
+
+export const SkillDecideBulkResponse = Schema.Struct({
+    notes: Schema.Array(SkillTriageNote),
+});
+
+export const SkillDecideClearResponse = Schema.Struct({
+    cleared: Schema.Boolean,
+    skill_name: Schema.String,
+});
+
+export const SkillOpenResponse = Schema.Struct({ launched: Schema.String });
+
 /**
  * The skills family: triage listing, per-skill decide (POST/DELETE),
- * bulk decide, detail, source, open-in, and the decisions list. Payloads
- * `Schema.Unknown` except the mutation request bodies, which are typed.
+ * bulk decide, detail, source, open-in, and the decisions list. Request
+ * bodies AND responses are schema-typed; the handlers return plain objects.
  */
 export const SkillsGroup = HttpApiGroup.make("skills")
     .add(
         HttpApiEndpoint.get("decisions", "/api/decisions", {
-            success: Schema.Unknown,
+            success: SkillDecisionsResponse,
             error: InternalError,
         }),
         HttpApiEndpoint.get("skills", "/api/skills", {
-            success: Schema.Unknown,
+            success: SkillTriageResponse,
             error: InternalError,
         }),
         HttpApiEndpoint.post("skillDecideBulk", "/api/skills/decide-bulk", {
@@ -340,7 +442,7 @@ export const SkillsGroup = HttpApiGroup.make("skills")
                 decision: TriageDecisionSchema,
                 reason: Schema.optionalKey(Schema.NullOr(Schema.String)),
             }),
-            success: Schema.Unknown,
+            success: SkillDecideBulkResponse,
             error: [BadRequestError, InternalError],
         }),
         HttpApiEndpoint.post("skillDecide", "/api/skills/:name/decide", {
@@ -349,22 +451,22 @@ export const SkillsGroup = HttpApiGroup.make("skills")
                 decision: TriageDecisionSchema,
                 reason: Schema.optionalKey(Schema.NullOr(Schema.String)),
             }),
-            success: Schema.Unknown,
+            success: SkillTriageNote,
             error: InternalError,
         }),
         HttpApiEndpoint.delete("skillDecideClear", "/api/skills/:name/decide", {
             params: { name: Schema.String },
-            success: Schema.Unknown,
+            success: SkillDecideClearResponse,
             error: InternalError,
         }),
         HttpApiEndpoint.get("skillDetail", "/api/skills/:name/detail", {
             params: { name: Schema.String },
-            success: Schema.Unknown,
+            success: SkillDetailPayload,
             error: InternalError,
         }),
         HttpApiEndpoint.get("skillSource", "/api/skills/:name/source", {
             params: { name: Schema.String },
-            success: Schema.Unknown,
+            success: SkillSourcePayload,
             error: InternalError,
         }),
         HttpApiEndpoint.post("skillOpen", "/api/skills/:name/open", {
@@ -372,7 +474,7 @@ export const SkillsGroup = HttpApiGroup.make("skills")
             payload: Schema.Struct({
                 target: Schema.Literals(["finder", "editor"]),
             }),
-            success: Schema.Unknown,
+            success: SkillOpenResponse,
             error: InternalError,
         }),
     );
