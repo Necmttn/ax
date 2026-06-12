@@ -7,7 +7,8 @@ import { emptyRecallResponse, fetchRecall, type RecallParams } from "../../recal
 import { fetchSkillGraph, type SkillGraphParams } from "../../skill-graph.ts";
 import { fetchToolFailureDetail, fetchToolFailures } from "../../tool-failures.ts";
 import { fetchWorkflow } from "../../workflow.ts";
-import { fetchWrapped, sanitizeWrappedProfile } from "../../wrapped.ts";
+import { sanitizeWrappedProfile } from "../../wrapped.ts";
+import { fetchWrappedCached } from "../../wrapped-cache.ts";
 import { numberParam, optionalNumberParam } from "../params.ts";
 import {
     decodeFail,
@@ -131,12 +132,12 @@ export const insightRoutes: ReadonlyArray<AnyRoute> = [
     legacyGetRoute({
         path: "/api/wrapped",
         decode: () => decodeOk(undefined),
-        handler: () => fetchWrapped(),
+        handler: () => fetchWrappedCached(),
     }),
     legacyGetRoute({
         path: "/api/wrapped/public-preview",
         decode: () => decodeOk(undefined),
-        handler: () => fetchWrapped().pipe(Effect.map(sanitizeWrappedProfile)),
+        handler: () => fetchWrappedCached().pipe(Effect.map(sanitizeWrappedProfile)),
     }),
     legacyGetRoute({
         path: "/api/workflow",

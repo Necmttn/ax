@@ -2456,3 +2456,47 @@ td.skill-cell .description {
         padding: 8px 12px;
     }
 }
+
+/* ---- shell footer (Lab link) ---- */
+.shell-footer {
+    margin-top: 32px;
+    padding: 12px 0 20px;
+    text-align: center;
+}
+.shell-footer a {
+    color: var(--muted, #888);
+    font-size: 12px;
+    text-decoration: none;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+}
+.shell-footer a:hover {
+    text-decoration: underline;
+}
+
+/* ---- ingest splash overlay ---- */
+.ingest-splash {
+    position: fixed;
+    inset: 0;
+    z-index: 90;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(20, 18, 14, 0.45);
+    backdrop-filter: blur(2px);
+}
+.ingest-splash-panel {
+    width: min(560px, calc(100vw - 32px));
+    max-height: calc(100vh - 64px);
+    overflow-y: auto;
+    background: var(--paper, #fff);
+    box-shadow: 0 12px 48px rgba(0, 0, 0, 0.25);
+}
+.masthead-ingest-btn {
+    font-size: 12px;
+    padding: 4px 10px;
+    cursor: pointer;
+}
+.masthead-ingest-error {
+    max-width: 280px;
+}

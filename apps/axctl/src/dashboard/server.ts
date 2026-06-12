@@ -260,6 +260,13 @@ export async function serveDashboard(args: string[]): Promise<void> {
     const { formatServeBanner } = await import("../cli/banner.ts");
     console.log(formatServeBanner(port));
 
+    // Warm the expensive read caches in the background AFTER listen so the
+    // first visitor lands on hot caches (wrapped landing, next actions,
+    // skill triage). Fire-and-forget - a failure just means the first
+    // caller of that endpoint pays the compute instead.
+    const { prewarmDashboardCaches } = await import("./prewarm.ts");
+    void handle.runner(prewarmDashboardCaches()).catch(() => undefined);
+
     // Tear down the sidecar + runtime on shutdown. Bun's serve never resolves,
     // so the process exits via a signal; close the open run streams and dispose
     // the runtime (which interrupts any in-flight ingest daemon) first.

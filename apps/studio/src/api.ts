@@ -432,6 +432,14 @@ export const api = {
 
     nextActions: (): Promise<NextActionsPayload> => jsonFetch("/api/next-actions"),
 
+    /** Read-only SQL console (Lab) - daemon accepts SELECT/RETURN/INFO only. */
+    query: (sql: string): Promise<{ result: unknown; durationMs: number }> =>
+        jsonFetch("/api/query", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ sql }),
+        }),
+
     // Experiment loop - see
     // docs/superpowers/plans/2026-05-25-experiment-loop-cleanup-and-rebuild.md
     improve: (): Promise<ImprovePayload> =>
