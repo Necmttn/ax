@@ -2,15 +2,34 @@
 import { DEFAULT_DASHBOARD_PORT } from "@ax/lib/dashboard-port";
 import { Effect } from "effect";
 import { Command, Flag } from "effect/unstable/cli";
+import { serveStatus, serveStop } from "../../dashboard/serve-control.ts";
 import { serveDashboard } from "../../dashboard/server.ts";
 import { serveMcp } from "../../mcp/server.ts";
 import type { RuntimeManifest } from "./manifest.ts";
+
+// status/stop are deliberately flag-free: they resolve the port from the
+// pidfile the daemon writes on startup (falling back to the default port),
+// so they find the instance wherever it was started.
+const serveStatusCommand = Command.make("status", {}, () =>
+    Effect.promise(async () => {
+        process.exitCode = await serveStatus();
+    }),
+).pipe(Command.withDescription("Show whether the local daemon is running, its pid, and its URLs"));
+
+const serveStopCommand = Command.make("stop", {}, () =>
+    Effect.promise(async () => {
+        process.exitCode = await serveStop();
+    }),
+).pipe(Command.withDescription("Stop the running local daemon (SIGTERM to the port's listener)"));
 
 export const serveCommand = Command.make(
     "serve",
     { port: Flag.integer("port").pipe(Flag.withDefault(DEFAULT_DASHBOARD_PORT)) },
     ({ port }) => Effect.promise(() => serveDashboard([`--port=${port}`])),
-).pipe(Command.withDescription("Serve the live web dashboard locally"));
+).pipe(
+    Command.withDescription("Serve the live web dashboard locally (status/stop manage a running daemon)"),
+    Command.withSubcommands([serveStatusCommand, serveStopCommand]),
+);
 
 // Manages its own long-lived ManagedRuntime (like serve), so it is deliberately
 // NOT in DB_COMMANDS - it routes through `withoutDb` and builds AppLayer itself.

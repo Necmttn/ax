@@ -49,12 +49,46 @@ const STUDIO_BASE = "https://ax.necmttn.com/studio/";
  */
 export function formatServeBanner(port: number): string {
     const localUrl = `http://localhost:${port}`;
-    const localIp = `http://127.0.0.1:${port}`;
-    const studioUrl = `${STUDIO_BASE}?endpoint=${encodeURIComponent(localIp)}`;
+    const studioUrl = serveStudioUrl(port);
     return [
         WORDMARK_ASCII,
         `  local daemon      ${localUrl}`,
         `  open in studio    ${studioUrl}`,
         "",
+    ].join("\n");
+}
+
+/** Deep link to the public studio auto-connected to a local daemon port. */
+export function serveStudioUrl(port: number): string {
+    return `${STUDIO_BASE}?endpoint=${encodeURIComponent(`http://127.0.0.1:${port}`)}`;
+}
+
+/**
+ * Printed when `ax serve` finds an ax daemon already answering on the port.
+ * The goal ("open the dashboard") is already achievable, so this leads with
+ * the URLs, not the failure.
+ */
+export function formatServeAlreadyRunning(
+    port: number,
+    info: { readonly version: string; readonly pid: number | null },
+): string {
+    const pid = info.pid === null
+        ? "pid unknown - find it: lsof -nP -iTCP:" + port + " -sTCP:LISTEN"
+        : `pid ${info.pid}`;
+    return [
+        `[ax] ax serve is already running on port ${port} (${pid}, v${info.version})`,
+        `  local daemon      http://localhost:${port}`,
+        `  open in studio    ${serveStudioUrl(port)}`,
+        "",
+        "  manage it:        ax serve status · ax serve stop",
+    ].join("\n");
+}
+
+/** Printed when the port is held by something that is not an ax daemon. */
+export function formatServePortBusy(port: number): string {
+    return [
+        `[ax] port ${port} is in use by another process (not ax serve).`,
+        `  see who holds it  lsof -nP -iTCP:${port} -sTCP:LISTEN`,
+        `  or pick a port    ax serve --port=${port + 1}`,
     ].join("\n");
 }

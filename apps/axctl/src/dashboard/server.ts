@@ -5,6 +5,15 @@ import { createDurableIngestStream, type DurableIngestStream } from "./ingest-st
 import { setServeIngestState, type ServeIngestState } from "./ingest-state.ts";
 import { dispatch, jsonResponse } from "./router/router.ts";
 import { routeTable } from "./router/table.ts";
+import {
+    findListenerPid,
+    isAddrInUse,
+    isPidAlive,
+    probeServePort,
+    readServePidfile,
+    removeServePidfile,
+    writeServePidfile,
+} from "./serve-instance.ts";
 
 export function parseDashboardServeArgs(args: string[]): { port: number } {
     const raw = args.find((arg) => arg.startsWith("--port="))?.split("=")[1];
@@ -129,6 +138,27 @@ export async function handleDashboardRequestWithCors(req: Request): Promise<Resp
 export async function serveDashboard(args: string[]): Promise<void> {
     const { port } = parseDashboardServeArgs(args);
 
+    // Pre-flight: ask whoever already holds the port to identify itself,
+    // BEFORE any sidecar/runtime noise. The common failure here is "I forgot
+    // ax serve is already running somewhere" - the right response to that is
+    // the dashboard URL, not an EADDRINUSE stack trace.
+    const existing = await probeServePort(port);
+    if (existing.kind === "ax") {
+        const pidfile = await readServePidfile();
+        const pid = pidfile !== null && pidfile.port === port && isPidAlive(pidfile.pid)
+            ? pidfile.pid
+            : await findListenerPid(port);
+        const { formatServeAlreadyRunning } = await import("../cli/banner.ts");
+        console.log(formatServeAlreadyRunning(port, { version: existing.version, pid }));
+        return;
+    }
+    if (existing.kind === "foreign") {
+        const { formatServePortBusy } = await import("../cli/banner.ts");
+        console.error(formatServePortBusy(port));
+        process.exitCode = 1;
+        return;
+    }
+
     // Start the Durable Streams sidecar ONCE, before we accept requests, so
     // POST /api/ingest can publish progress the browser subscribes to directly
     // (the sidecar has permissive CORS). Graceful degradation: the sidecar
@@ -144,10 +174,11 @@ export async function serveDashboard(args: string[]): Promise<void> {
     }
 
     // Build the long-lived runtime regardless (it doesn't need the sidecar).
-    // If anything before a successful `Bun.serve` listen throws (most commonly
-    // EADDRINUSE - port in use), tear down what we already started so we don't
-    // leak the sidecar port, then rethrow. Only the success path leaves
-    // ingest state + the shutdown handler in place.
+    // If anything before a successful `Bun.serve` listen throws, tear down
+    // what we already started so we don't leak the sidecar port. EADDRINUSE
+    // can still land here despite the pre-flight (race, or a non-HTTP
+    // listener the probe can't identify) - report it cleanly instead of
+    // rethrowing into the `axctl error:` stack dump; everything else rethrows.
     let runtime: ServeIngestState["runtime"] | undefined;
     let server: ReturnType<typeof Bun.serve>;
     try {
@@ -161,8 +192,24 @@ export async function serveDashboard(args: string[]): Promise<void> {
         setServeIngestState(null);
         if (stream) await stream.stop().catch(() => undefined);
         if (runtime) await runtime.dispose().catch(() => undefined);
+        if (isAddrInUse(err)) {
+            const { formatServePortBusy } = await import("../cli/banner.ts");
+            console.error(formatServePortBusy(port));
+            process.exitCode = 1;
+            return;
+        }
         throw err;
     }
+
+    // Record this instance for `ax serve status|stop` and the pre-flight pid
+    // lookup. Best-effort: a failed write must not take the daemon down.
+    const { AX_VERSION } = await import("../cli/version.ts");
+    await writeServePidfile({
+        pid: process.pid,
+        port,
+        startedAt: new Date().toISOString(),
+        axVersion: AX_VERSION,
+    }).catch(() => undefined);
 
     const { formatServeBanner } = await import("../cli/banner.ts");
     console.log(formatServeBanner(port));
@@ -175,6 +222,10 @@ export async function serveDashboard(args: string[]): Promise<void> {
         if (shuttingDown) return;
         shuttingDown = true;
         setServeIngestState(null);
+        // The pidfile is single-slot: only delete it if this process still
+        // owns it (a later `ax serve --port=N` instance may have overwritten it).
+        const pidfile = await readServePidfile().catch(() => null);
+        if (pidfile?.pid === process.pid) await removeServePidfile();
         await server.stop();
         if (stream) await stream.stop().catch(() => undefined);
         await runtime.dispose().catch(() => undefined);
