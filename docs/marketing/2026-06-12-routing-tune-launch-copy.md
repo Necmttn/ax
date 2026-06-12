@@ -196,3 +196,51 @@ C leads with the bill for the publish-your-own-numbers crowd.
 - June 22 / 2x Opus / $10-$50 per M are public Anthropic pricing facts.
   Do not extrapolate beyond them (no projected bills, no "this will cost
   you $X/month" math on other people's usage).
+
+### Storytelling singles
+
+Direction change: no 7-post thread. Standalone tweets, iterated one at a
+time. Winning hook is the $19K spend told as a first-person story; Fable
+named explicitly. Each carries the 16:9 receipt image. One CTA per tweet -
+"ax routing tune" or ax.necmttn.com/routing, never both.
+
+**V1 - pure story** (~261 chars)
+
+> I spent $19,270 on Claude Code in 14 days. Felt impossible, so I pulled
+> the receipts. 663 sub-tasks, 75% on Fable - and most of them were file
+> searches and routine work it was never meant to do. It never downshifts
+> on its own. ax routing tune fixes the default.
+
+**V2 - Fable-centered** (~268 chars)
+
+> Fable is incredible at hard thinking. On my machine it was running my
+> file searches. 14-day bill: $19,270 - 663 sub-tasks, 75% on Fable, most
+> of it routine work it was never meant to do. That's where the allowance
+> goes. It never downshifts on its own. ax routing tune
+
+**V3 - confession/wry** (~243 chars)
+
+> I spent $19,270 on Claude Code in 14 days and assumed that was the price
+> of hard problems. Then I read the receipt: 663 sub-tasks, 75% on Fable,
+> mostly file searches and routine work. I was paying frontier rates to
+> grep. ax.necmttn.com/routing
+
+**Optional follow-up (the how)** (~273 chars)
+
+> How it works: ax reads your own usage history, finds the routine work
+> being billed at top rates, and switches those sub-tasks to cheaper
+> models. Judgment work never moves. Local-only - transcripts never leave
+> your machine.
+>
+> curl -fsSL https://ax.necmttn.com/install | bash
+
+Notes:
+
+- V1 is the safest opener for the iteration loop: clean arc, every number
+  lands, CTA explains itself.
+- V2 is the one that names the waste ("running my file searches") - best
+  fit while Fable burn is the live complaint.
+- V3 trades the explicit "never downshifts" beat for the punchline; the
+  follow-up tweet carries the mechanism if it travels.
+- Post the follow-up only as a reply to whichever single gets traction,
+  not preemptively.
