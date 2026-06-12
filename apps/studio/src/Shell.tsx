@@ -177,6 +177,9 @@ function FullChrome({ children }: { children: ReactNode }) {
                 </nav>
             </header>
             {children}
+            <footer className="shell-footer">
+                <Link to="/lab">Lab</Link>
+            </footer>
         </div>
     );
 }

@@ -22,6 +22,7 @@ import { CanvasRoute } from "./routes/canvas.tsx";
 import type { GraphExplorerMode } from "@ax/lib/shared/dashboard-types";
 import { WrappedRoute } from "./routes/wrapped.tsx";
 import { ImproveRoute } from "./routes/improve.tsx";
+import { LabRoute } from "./routes/lab.tsx";
 import { ReviewView } from "./routes/review-view.tsx";
 import { sampleNarration, sampleNarrationTurns } from "./routes/narration-sample.ts";
 import { ShareInspectView } from "./routes/share-inspect.tsx";
@@ -203,6 +204,12 @@ const improveRoute = createRoute({
     component: ImproveRoute,
 });
 
+const labRoute = createRoute({
+    getParentRoute: () => rootRoute,
+    path: "/lab",
+    component: LabRoute,
+});
+
 /** Prototype showcase for the Story review surface (sample narration + turns). */
 const narrationDemoRoute = createRoute({
     getParentRoute: () => rootRoute,
@@ -243,6 +250,7 @@ const routeTree = rootRoute.addChildren([
     canvasRoute,
     wrappedRoute,
     improveRoute,
+    labRoute,
     narrationDemoRoute,
 ]);
 

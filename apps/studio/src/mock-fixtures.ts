@@ -364,5 +364,13 @@ export async function mockFetch<T>(input: RequestInfo, init?: RequestInit): Prom
     if (path.startsWith("/api/recall")) return EMPTY_RECALL as unknown as T;
     if (path === "/api/wrapped" || path === "/api/wrapped/public-preview") return EMPTY_WRAPPED as unknown as T;
 
+    // Lab SQL console
+    if (path === "/api/query" && method === "POST") {
+        return {
+            result: [[{ note: "mock mode - connect a local daemon to run real queries" }]],
+            durationMs: 0,
+        } as unknown as T;
+    }
+
     notFound();
 }

@@ -2456,3 +2456,20 @@ td.skill-cell .description {
         padding: 8px 12px;
     }
 }
+
+/* ---- shell footer (Lab link) ---- */
+.shell-footer {
+    margin-top: 32px;
+    padding: 12px 0 20px;
+    text-align: center;
+}
+.shell-footer a {
+    color: var(--muted, #888);
+    font-size: 12px;
+    text-decoration: none;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+}
+.shell-footer a:hover {
+    text-decoration: underline;
+}
