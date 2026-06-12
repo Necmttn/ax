@@ -9,7 +9,6 @@ import { AX_VERSION } from "../../../cli/version.ts";
 import { graphHealthSql } from "../../../queries/graph-health.ts";
 import { checkoutActivitySql, gitCorrelationSql } from "../../../queries/insights.ts";
 import { API_VERSION, dashboardApiCapabilities } from "../../capabilities.ts";
-import { getServeIngestState } from "../../ingest-state.ts";
 import {
     decodeFail,
     decodeOk,
@@ -39,7 +38,7 @@ export const systemRoutes: ReadonlyArray<AnyRoute> = [
     rawRoute({
         method: "ANY", // legacy: /api/version answered every method; studio probes it
         path: "/api/version",
-        handler: () =>
+        handler: ({ serve }) =>
             jsonResponse({
                 version: AX_VERSION,
                 api_version: API_VERSION,
@@ -49,7 +48,7 @@ export const systemRoutes: ReadonlyArray<AnyRoute> = [
                 // bundle), where POST /api/ingest would 503 - the studio reads
                 // this to engage its polling fallback up front. Additive
                 // optional field: forward-compatible, no api_version bump.
-                live_ingest: getServeIngestState()?.stream != null,
+                live_ingest: serve?.ingestStream != null,
             }),
     }),
     jsonRoute({

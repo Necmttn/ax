@@ -11,34 +11,35 @@
  *     empty-q /api/recall, whose eager SurrealClient build would stall ~5s
  *     without a DB).
  *
- * The Effect runner is injectable so router/route unit tests never build
- * AppLayer (and therefore never touch SurrealDB).
+ * The Effect runner is injectable: production passes the server-scoped
+ * runtime's runner (serve-runtime.ts), so layers are built once per server
+ * lifetime; router/route unit tests pass a stub so they never build AppLayer
+ * (and therefore never touch SurrealDB).
  */
-import { Effect, type Layer } from "effect";
-import { AppLayer } from "@ax/lib/layers";
+import type { Effect, Layer } from "effect";
+import type { AppLayer } from "@ax/lib/layers";
+import type { DurableIngestStream } from "../ingest-stream-durable.ts";
 
 export type Method = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
 
 /** Everything AppLayer provides; the upper bound for jsonRoute handler envs. */
 export type DashboardEnv = Layer.Success<typeof AppLayer>;
 
-/** Runs a handler effect to a Promise. Production = appLayerRunner. */
+/** Runs a handler effect to a Promise. Production = ServeRuntimeHandle.runner. */
 export type EffectRunner = {
     bivarianceHack<A>(effect: Effect.Effect<A, unknown, DashboardEnv>): Promise<A>;
 }["bivarianceHack"];
 
 /**
- * The ONE place the per-request AppLayer provide + error-channel cast lives
- * (it replaces ~30 scattered `as Effect.Effect<unknown>` casts in the old
- * if-chain). runPromise rejects on any typed failure; the route runner's
- * catch maps it to an HTTP status.
+ * Server-boot context threaded into raw routes. `null` means the request is
+ * being handled WITHOUT a booted server (unit tests, direct invocation);
+ * `ingestStream` is null when the Durable Streams sidecar could not start
+ * (the compiled binary, which can't load native lmdb). /api/version reports
+ * the second case as `live_ingest: false` and POST /api/ingest 503s on both.
  */
-export const appLayerRunner: EffectRunner = <A>(
-    effect: Effect.Effect<A, unknown, DashboardEnv>,
-): Promise<A> =>
-    Effect.runPromise(
-        effect.pipe(Effect.provide(AppLayer), Effect.scoped) as Effect.Effect<A>,
-    );
+export interface ServeContext {
+    readonly ingestStream: DurableIngestStream | null;
+}
 
 export function jsonResponse(value: unknown, status = 200): Response {
     return new Response(JSON.stringify(value), {
@@ -60,6 +61,8 @@ export interface RouteInput {
     /** Captured path params, already decodeURIComponent-ed. */
     readonly path: Readonly<Record<string, string>>;
     readonly body: BodyResult;
+    /** Optional so hand-built test inputs stay terse; absent reads as null. */
+    readonly serve?: ServeContext | null;
 }
 
 export interface RawRouteInput extends RouteInput {
@@ -217,7 +220,8 @@ export async function dispatch(
     table: ReadonlyArray<AnyRoute>,
     req: Request,
     url: URL,
-    runner: EffectRunner = appLayerRunner,
+    runner: EffectRunner,
+    serve: ServeContext | null = null,
 ): Promise<Response | null> {
     const outcome = matchRoute(table, req.method, url.pathname);
     if (outcome.kind === "method_mismatch") {
@@ -230,5 +234,5 @@ export async function dispatch(
             .then((value): BodyResult => ({ kind: "json", value }))
             .catch((): BodyResult => ({ kind: "invalid" }))
         : { kind: "none" };
-    return route.run({ req, url, path, body }, runner);
+    return route.run({ req, url, path, body, serve }, runner);
 }

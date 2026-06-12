@@ -86,6 +86,13 @@ The dashboard, website, or app interface that turns graph evidence into visible
 session, repository, file, friction, and recommendation insights.
 _Avoid_: report export
 
+**Insights Surface Contract**:
+The schema-typed HTTP API definition (Effect `HttpApi` groups + Schemas in
+`@ax/lib/shared`) that the daemon serves and the studio consumes - the single
+source of truth for routes, params, responses, errors, generated docs, and the
+generated client. SSE and binary escape hatches sit outside it as raw routes.
+_Avoid_: route table, endpoint list
+
 **Turn**:
 A single message in an agent session transcript: one user or assistant
 JSONL record. The atomic unit of the transcript stream. A Turn may carry
