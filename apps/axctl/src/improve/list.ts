@@ -27,6 +27,36 @@ export interface ListProposalsInput {
     readonly limit?: number;    // default 30
 }
 
+/** Default proposal status filter ("all" disables it). Shared by CLI + MCP. */
+export const LIST_PROPOSALS_DEFAULT_STATUS = "open";
+/** Default row cap for the proposal shortlist. Shared by CLI + MCP. */
+export const LIST_PROPOSALS_DEFAULT_LIMIT = 30;
+
+/**
+ * Transport-agnostic raw input for `listProposals`. The CLI flag parser and the
+ * MCP zod schema both decode into this then call {@link normalizeListProposalsInput}
+ * so the status/limit defaults live in one place and cannot drift.
+ *
+ * `limit` positivity (CLI `requirePositiveInt`, MCP zod `.positive()`) stays in
+ * the transports; this only fills defaults + presence rules.
+ */
+export interface ListProposalsQueryArgs {
+    readonly status?: string | undefined;
+    readonly form?: string | undefined;
+    readonly limit?: number | undefined;
+}
+
+export const normalizeListProposalsInput = (
+    args: ListProposalsQueryArgs,
+): ListProposalsInput => ({
+    status: args.status ?? LIST_PROPOSALS_DEFAULT_STATUS,
+    ...(args.form !== undefined ? { form: args.form } : {}),
+    limit:
+        typeof args.limit === "number" && Number.isFinite(args.limit)
+            ? args.limit
+            : LIST_PROPOSALS_DEFAULT_LIMIT,
+});
+
 export const listProposals = (
     input: ListProposalsInput,
 ): Effect.Effect<ReadonlyArray<ProposalRow>, DbError, SurrealClient> =>

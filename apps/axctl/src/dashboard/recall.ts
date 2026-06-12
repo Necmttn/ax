@@ -50,6 +50,24 @@ export interface RecallParams {
     readonly scope?: RecallScope;
 }
 
+/**
+ * The source set `fetchRecall` searches when none is requested. Exported so the
+ * CLI flag parser and the MCP zod handler use the same default when they build
+ * the `next` links (`requestedSources`) instead of re-spelling `["turn"]`.
+ */
+export const RECALL_DEFAULT_SOURCES: ReadonlyArray<RecallSource> = ["turn"];
+
+/**
+ * Resolve the effective source set for a recall request: a non-empty requested
+ * set, else {@link RECALL_DEFAULT_SOURCES}. This is the single semantic the
+ * query, the CLI, and the MCP tool share - `fetchRecall` applies the same rule
+ * internally for the actual fan-out.
+ */
+export const resolveRecallSources = (
+    requested: ReadonlyArray<RecallSource> | null | undefined,
+): ReadonlyArray<RecallSource> =>
+    requested && requested.length > 0 ? requested : RECALL_DEFAULT_SOURCES;
+
 export const emptyRecallResponse = (
     q: string,
     offset: number,
@@ -76,10 +94,7 @@ export const fetchRecall = (
             RECALL_PAGINATION,
         );
 
-        const sources: ReadonlyArray<RecallSource> =
-            params.sources && params.sources.length > 0
-                ? params.sources
-                : ["turn"];
+        const sources = resolveRecallSources(params.sources);
 
         if (!q) {
             return emptyRecallResponse(params.q, offset, limit);

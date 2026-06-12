@@ -17,6 +17,7 @@ import {
     listSessionsAround,
     listSessionsNear,
     findSessionIdsByPrefix,
+    normalizeSessionsAroundOpts,
     type SessionRow,
 } from "../../dashboard/sessions-query.ts";
 import { ingestTranscripts } from "../../ingest/transcripts.ts";
@@ -262,7 +263,9 @@ const cmdSessionsAround = (input: {
                 : projectRaw;
         }
 
-        const rows = yield* listSessionsAround({ date, days, project });
+        const rows = yield* listSessionsAround(
+            normalizeSessionsAroundOpts({ date, days, project }),
+        );
         const { sessions, next } = buildSessionsNext(rows, {
             date: positional,
             days,

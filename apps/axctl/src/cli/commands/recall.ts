@@ -10,7 +10,7 @@ import {
     buildRecallNext,
 } from "../../nav/next-links.ts";
 import { printNextLinks } from "../next-format.ts";
-import { fetchRecall, type RecallSource, type RecallScope } from "../../dashboard/recall.ts";
+import { fetchRecall, resolveRecallSources, type RecallSource, type RecallScope } from "../../dashboard/recall.ts";
 import { resolvePwdRepository } from "../../pwd.ts";
 import type { RuntimeManifest } from "./manifest.ts";
 import { fail, jsonFlag, parseCsvFlag } from "./shared.ts";
@@ -226,7 +226,7 @@ const cmdRecall = (opts: RecallCliOpts) =>
             scope,
         });
         const { hits, next } = buildRecallNext(result, {
-            requestedSources: sources ?? ["turn"],
+            requestedSources: resolveRecallSources(sources),
         });
         if (opts.json) {
             console.log(prettyPrint({ ...result, hits, next }));

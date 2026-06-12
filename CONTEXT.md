@@ -103,6 +103,16 @@ source of truth for routes, params, responses, errors, generated docs, and the
 generated client. SSE and binary escape hatches sit outside it as raw routes.
 _Avoid_: route table, endpoint list
 
+**Query Input Contract**:
+The typed input shape plus a `normalize` function a query module exports as the
+single seam every transport (CLI, MCP, HTTP) delegates to for argument semantics
+- defaults, clamping, default windows, presence rules - so the meaning of an
+argument cannot drift between transports. Protocol-level decoding (CLI flags,
+MCP zod schemas) and user-facing error wording stay transport-local; only the
+semantic normalization is shared. Where transports legitimately differ (e.g. a
+divergent limit default) the difference is a parameter, never silently unified.
+_Avoid_: arg parser
+
 **Turn**:
 A single message in an agent session transcript: one user or assistant
 JSONL record. The atomic unit of the transcript stream. A Turn may carry
