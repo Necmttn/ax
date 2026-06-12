@@ -44,6 +44,7 @@ Install: `curl -fsSL https://ax.necmttn.com/install | bash`, then `npx skills ad
 ### Self-improvement loop
 - `ax improve recommend / accept / lint / show` - evidence-backed proposals (guidance, skills, hooks, automations) derived from the graph; accept emits a task brief, lint reconciles applied guidance
 - `ax retro emit / pending / brief` + `ax:retro` skill - guided experiment-loop retrospective: triage proposals, lock verdicts, review hook effectiveness
+- `ax:dojo` skill - surplus-quota overnight training loop: budget-bounded self-improvement (verdicts, briefs, routing, proposals, experiments); install via `npx skills add Necmttn/ax`
 - `ax hooks init / install / backtest / cases` - author typed TypeScript hooks once, run them on Claude Code + Codex; replay history through a hook before installing it
 
 ### Graph insights
