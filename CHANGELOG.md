@@ -1,5 +1,30 @@
 # Changelog
 
+## [0.28.0](https://github.com/Necmttn/ax/compare/v0.27.0...v0.28.0) (2026-06-12)
+
+
+### Features
+
+* **contract:** tighten bounded sessions payloads - completes curated-payload typing ([#349](https://github.com/Necmttn/ax/issues/349)) ([7f5e57a](https://github.com/Necmttn/ax/commit/7f5e57adb1340d6666b0c1015c13594f12b230f3))
+* **contract:** tighten curated payloads - skills + insights families (13 endpoints) ([#347](https://github.com/Necmttn/ax/issues/347)) ([698d1c3](https://github.com/Necmttn/ax/commit/698d1c3218ec8f31891d2da334dfe6d8bc253380))
+* **contract:** tighten the recall response to a real Schema (payload-typing template) ([#346](https://github.com/Necmttn/ax/issues/346)) ([c7a4ee3](https://github.com/Necmttn/ax/commit/c7a4ee3aa1a2f38dbf9a8d57f312bb76c7593d61))
+* **improve:** agent write-path - ax improve propose/analyze + origin badges (PR3) ([#340](https://github.com/Necmttn/ax/issues/340)) ([4ca3574](https://github.com/Necmttn/ax/commit/4ca35742fbcab74ee66ab9ca2ee0abbd644b1675))
+* **og:** design-review polish - crisp single-color mark, named peak, full-bleed grid ([#341](https://github.com/Necmttn/ax/issues/341)) ([9bce56c](https://github.com/Necmttn/ax/commit/9bce56cdb78ad4f95b05ea494e498f13b8f9fc2f))
+* **site:** shared og-kit, canonical block AX logo, dense profile card ([#337](https://github.com/Necmttn/ax/issues/337)) ([1b1d7c2](https://github.com/Necmttn/ax/commit/1b1d7c2463f660bf4a26185cd3fed17cecba3996))
+* **studio:** nav re-home + ingest splash overlay (PR2) ([#332](https://github.com/Necmttn/ax/issues/332)) ([e96eb44](https://github.com/Necmttn/ax/commit/e96eb44941835815a96cff1836406999b1275b9e))
+* **wrapped:** paxel-style agent-generated recap cards (PR4) ([#344](https://github.com/Necmttn/ax/issues/344)) ([e6618bd](https://github.com/Necmttn/ax/commit/e6618bdac7a3ea63746a57ec0c35399546048a8a))
+
+
+### Bug Fixes
+
+* **marketing+site:** plain-language pass - kill pinned/mines jargon, add the misconception hook ([#352](https://github.com/Necmttn/ax/issues/352)) ([a84002c](https://github.com/Necmttn/ax/commit/a84002c58be567936803777ff5f13749c3165878))
+* **site:** /routing speaks to the reader + mobile layout fixes ([#342](https://github.com/Necmttn/ax/issues/342)) ([adea4a3](https://github.com/Necmttn/ax/commit/adea4a310cee7c29c3b28fdbbb51b8c0b725592b))
+
+
+### Performance
+
+* **dashboard:** worktrees overview via deref-free aggregates - 57s timeout to under 4s ([#343](https://github.com/Necmttn/ax/issues/343)) ([ad955cc](https://github.com/Necmttn/ax/commit/ad955cc6516848ae076689fd9d1c9663b8ce3d00))
+
 ## [0.27.0](https://github.com/Necmttn/ax/compare/v0.26.0...v0.27.0) (2026-06-12)
 
 
