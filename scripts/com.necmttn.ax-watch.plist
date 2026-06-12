@@ -8,7 +8,7 @@
   <array>
     <string>/bin/bash</string>
     <string>-lc</string>
-    <string>cd __AX_DIR__ &amp;&amp; bun src/cli/index.ts ingest --since=1 &gt;&gt;__LOG_DIR__/watcher.log 2&gt;&amp;1</string>
+    <string>cd __AX_DIR__ &amp;&amp; bun src/cli/index.ts ingest --since=1 &gt;&gt;__LOG_DIR__/watcher.log 2&gt;&amp;1; bun src/cli/index.ts profile publish --if-stale=6 &gt;&gt;__LOG_DIR__/watcher.log 2&gt;&amp;1 || true</string>
   </array>
   <key>WatchPaths</key>
   <array>
