@@ -34,8 +34,12 @@ export const makeTtlCachedFetch = <A, E, R>(
     });
     return {
         fetch: Effect.fn(`dashboard.${name}.cached`)(function* () {
-            const [cached] = yield* ensure;
-            return yield* cached;
+            const [cached, invalidate] = yield* ensure;
+            // cachedInvalidateWithTTL stores the EXIT - a failed or
+            // interrupted compute would otherwise be served instantly for the
+            // whole TTL window. Never cache failures: drop the entry so the
+            // next caller recomputes.
+            return yield* cached.pipe(Effect.tapCause(() => invalidate));
         }),
         invalidate: Effect.fn(`dashboard.${name}.invalidate`)(function* () {
             if (holder !== null) {
