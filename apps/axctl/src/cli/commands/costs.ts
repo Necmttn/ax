@@ -7,18 +7,9 @@ import { fetchCostSummary, type CostSummary } from "../../dashboard/cost-query.t
 import { fetchLocSummary, type LocSummary, type LocSelector } from "../../dashboard/loc-query.ts";
 import { resolvePwdRepository } from "../../pwd.ts";
 import { stderrExit } from "../output.ts";
+import { integer, usd } from "../render.ts";
 import type { RuntimeManifest } from "./manifest.ts";
 import { fail, jsonFlag, optionalSince, optionValue, parseCsvFlag, positiveLimit } from "./shared.ts";
-
-const usd = (value: unknown): string => {
-    const n = typeof value === "number" ? value : typeof value === "string" ? Number(value) : NaN;
-    return Number.isFinite(n) ? `$${n.toFixed(4)}` : "$0.0000";
-};
-
-const integer = (value: unknown): string => {
-    const n = typeof value === "number" ? value : typeof value === "string" ? Number(value) : NaN;
-    return Number.isFinite(n) ? Math.trunc(n).toLocaleString("en-US") : "0";
-};
 
 const cmdCosts = (input: { readonly limit: number; readonly source: string | null; readonly sinceDays: number | null; readonly json: boolean }) =>
     Effect.gen(function* () {

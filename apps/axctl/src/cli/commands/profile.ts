@@ -9,6 +9,7 @@ import { Command, Flag } from "effect/unstable/cli";
 import { prettyPrint } from "@ax/lib/json";
 import { buildProfile, type ProfileEnv } from "../../profile/render.ts";
 import type { ProfileV1 } from "../../profile/schema.ts";
+import { integer } from "../render.ts";
 import type { RuntimeManifest } from "./manifest.ts";
 import { fail, jsonFlag, optionValue } from "./shared.ts";
 import { GitHubEnvLive } from "../../profile/github-env.ts";
@@ -84,9 +85,6 @@ const gatherEnv = Effect.gen(function* () {
 // ---------------------------------------------------------------------------
 // Formatting
 // ---------------------------------------------------------------------------
-
-const integer = (n: number): string =>
-    Number.isFinite(n) ? Math.trunc(n).toLocaleString("en-US") : "0";
 
 /** Human money: >=1000 -> "~$22.6K", else "$22". */
 const money = (n: number): string => {

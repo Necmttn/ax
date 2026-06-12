@@ -1,10 +1,8 @@
 import type { InsightView } from "../queries/insights.ts";
 import { prettyPrint } from "@ax/lib/json";
+import { textOf, truncateText } from "./render.ts";
 
 type InsightRow = Record<string, unknown>;
-
-const textOf = (value: unknown): string =>
-    typeof value === "string" ? value : value === undefined || value === null ? "" : String(value);
 
 const numberOf = (value: unknown): number | null =>
     typeof value === "number" && Number.isFinite(value) ? value : null;
@@ -14,10 +12,7 @@ const compactDate = (value: unknown): string => {
     return text.length >= 19 ? text.slice(0, 19).replace("T", " ") : text;
 };
 
-const truncate = (value: unknown, max = 180): string => {
-    const text = textOf(value).replace(/\s+/g, " ").trim();
-    return text.length <= max ? text : `${text.slice(0, Math.max(0, max - 1)).trimEnd()}…`;
-};
+const truncate = (value: unknown, max = 180): string => truncateText(value, max);
 
 const firstExampleText = (row: InsightRow): string => {
     const examples = row.examples;

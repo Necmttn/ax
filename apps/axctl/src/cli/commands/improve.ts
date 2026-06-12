@@ -18,6 +18,7 @@ import { runPropose } from "../../improve/propose.ts";
 import { runHousekeep } from "../../improve/housekeep.ts";
 import { buildImproveProposalsNext } from "../../nav/next-links.ts";
 import { printNextLinks } from "../next-format.ts";
+import { compactPrint } from "../render.ts";
 import type { RuntimeManifest } from "./manifest.ts";
 import { fail, jsonFlag, optionValue, parseFileHints, positiveLimit, requireOptionalPositiveInt, requirePositiveInt } from "./shared.ts";
 
@@ -614,7 +615,7 @@ const cmdImprovePropose = (input: { readonly file: string | undefined; readonly 
         });
         const result = yield* runPropose(parsed);
         if (input.json) {
-            console.log(JSON.stringify(result));
+            console.log(compactPrint(result));
         } else {
             console.log(`${result.status}: ${result.form} proposal "${result.title}" (sig=${result.sig})`);
             console.log("next: ax improve list - or review it in the dashboard Improve tab");
@@ -659,7 +660,7 @@ const cmdImproveHousekeep = (input: { readonly days: number; readonly dryRun: bo
     Effect.gen(function* () {
         const report = yield* runHousekeep({ days: input.days, dryRun: input.dryRun });
         if (input.json) {
-            console.log(JSON.stringify(report));
+            console.log(compactPrint(report));
             return;
         }
         if (report.staleProposals.length === 0 && report.removedTaskFiles.length === 0) {

@@ -17,21 +17,9 @@ import {
     buildCostModelsNext,
     buildCostSplitNext,
 } from "../../nav/next-links.ts";
+import { integer, pct, usd } from "../render.ts";
 import type { RuntimeManifest } from "./manifest.ts";
 import { fail, jsonFlag, optionValue, positiveLimit } from "./shared.ts";
-
-// ---------------------------------------------------------------------------
-// Formatters
-// ---------------------------------------------------------------------------
-
-const usd = (n: number): string =>
-    Number.isFinite(n) ? `$${n.toFixed(4)}` : "$0.0000";
-
-const integer = (n: number): string =>
-    Number.isFinite(n) ? Math.trunc(n).toLocaleString("en-US") : "0";
-
-const pct = (n: number): string =>
-    Number.isFinite(n) ? `${n.toFixed(1)}%` : "0.0%";
 
 // ---------------------------------------------------------------------------
 // ax cost models [--days=N] [--json]
