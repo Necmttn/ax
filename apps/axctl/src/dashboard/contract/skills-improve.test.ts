@@ -48,11 +48,11 @@ describe("isContractRequest - skills/improve/live routing", () => {
         expect(isContractRequest("POST", "/api/skills/a/b/decide")).toBe(false);
     });
 
-    test("only the three known improve actions route; unknown actions stay legacy (404 decode)", () => {
+    test("all improve actions route to the contract (handler 404s unknown ones)", () => {
         expect(isContractRequest("POST", "/api/improve/sig123/accept")).toBe(true);
         expect(isContractRequest("POST", "/api/improve/sig123/reject")).toBe(true);
         expect(isContractRequest("POST", "/api/improve/sig123/verdict")).toBe(true);
-        expect(isContractRequest("POST", "/api/improve/sig123/explode")).toBe(false);
+        expect(isContractRequest("POST", "/api/improve/sig123/explode")).toBe(true);
     });
 
     test("SSE and image stay raw legacy routes", () => {
@@ -86,6 +86,13 @@ describe("skills handlers", () => {
 });
 
 describe("improve handlers", () => {
+    test("unknown action answers the legacy 404 { error: unknown_improve_action }", async () => {
+        const { handler } = make();
+        const res = await handler(req("POST", "/api/improve/sig123/explode", {}));
+        expect(res.status).toBe(404);
+        await expect(res.json()).resolves.toEqual({ error: "unknown_improve_action" });
+    });
+
     test("improveList survives rows carrying class instances (RecordId regression)", async () => {
         // Real SurrealDB rows contain RecordId class instances; Schema.Unknown's
         // JSON codec rejects class instances on encode (empty 400) unless the

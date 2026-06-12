@@ -60,12 +60,17 @@ describe("dashboard live routes", () => {
         await expect(res.json()).resolves.toEqual({ error: "not_found" });
     });
 
-    test("POST /api/ingest without a booted server returns 503 ingest_unavailable", async () => {
+    test("POST /api/ingest without a booted server falls through to not_found", async () => {
+        // The ingest trigger is contract-served; without a booted server
+        // there is no contract handler, and the legacy table no longer has
+        // an ingest row - the /api/* not_found quirk answers. A booted
+        // server (the only real deployment) routes this to the contract,
+        // which 503s when the sidecar is down (covered in contract tests).
         const { handleDashboardRequest } = await import("../../server.ts");
         const res = await handleDashboardRequest(
             new Request("http://127.0.0.1:1738/api/ingest", { method: "POST", body: "{}" }),
         );
-        expect(res.status).toBe(503);
-        await expect(res.json()).resolves.toEqual({ error: "ingest_unavailable" });
+        expect(res.status).toBe(200);
+        await expect(res.json()).resolves.toEqual({ error: "not_found" });
     });
 });
