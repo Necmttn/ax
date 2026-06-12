@@ -16,8 +16,13 @@
  */
 import { Effect, FileSystem, Path } from "effect";
 import { SurrealClient } from "@ax/lib/db";
-import { homedir } from "node:os";
 import { estimateCost, type ModelPricing } from "../ingest/model-pricing.ts";
+import {
+    defaultRoutingTablePath,
+    loadStoredRoutingTable,
+    mergeRoutingTables,
+    saveStoredRoutingTable,
+} from "./routing-table-io.ts";
 
 // ---------------------------------------------------------------------------
 // Routing classes
@@ -125,7 +130,7 @@ const MODEL_ALIASES: Record<string, string> = {
 };
 
 // Expensive model tiers (candidate filter)
-const EXPENSIVE_TIER_RE = /fable|opus/i;
+export const EXPENSIVE_TIER_RE = /fable|opus/i;
 
 // ---------------------------------------------------------------------------
 // Routing match
@@ -138,13 +143,14 @@ export interface RoutingMatch {
     readonly source: "agentType" | "description";
 }
 
-export const matchRouting = (
+export const matchRoutingWith = (
+    table: RoutingTable,
     description: string | null,
     agentType: string | null,
 ): RoutingMatch | null => {
     // Agent-type rules win first (more specific)
     if (agentType) {
-        const suggest = ROUTING_CLASSES.agentTypes[agentType];
+        const suggest = table.agentTypes[agentType];
         if (suggest) {
             return {
                 classId: `agent-type:${agentType}`,
@@ -155,7 +161,7 @@ export const matchRouting = (
         }
     }
     if (description) {
-        for (const cls of ROUTING_CLASSES.classes) {
+        for (const cls of table.classes) {
             try {
                 const re = new RegExp(cls.pattern, cls.flags);
                 if (re.test(description)) {
@@ -173,6 +179,11 @@ export const matchRouting = (
     }
     return null;
 };
+
+export const matchRouting = (
+    description: string | null,
+    agentType: string | null,
+): RoutingMatch | null => matchRoutingWith(ROUTING_CLASSES, description, agentType);
 
 // ---------------------------------------------------------------------------
 // Raw DB row interfaces (query results before joining)
@@ -483,7 +494,8 @@ export const fetchDispatches = Effect.fn("queries.fetchDispatches")(
 // ---------------------------------------------------------------------------
 
 export const fetchDispatchCandidates = Effect.fn("queries.fetchDispatchCandidates")(
-    function* (opts: { readonly sinceDays: number }) {
+    function* (opts: { readonly sinceDays: number; readonly table?: RoutingTable }) {
+        const table = opts.table ?? ROUTING_CLASSES;
         const db = yield* SurrealClient;
 
         const [spawnedResult, usageResult, toolCallsResult, parentSessionsResult, agentModelsResult] =
@@ -627,7 +639,7 @@ export const fetchDispatchCandidates = Effect.fn("queries.fetchDispatchCandidate
             if (!childModel || !EXPENSIVE_TIER_RE.test(childModel)) continue;
 
             // Candidate criterion (c): description or agent_type matches a routing class
-            const routingMatch = matchRouting(sp.description, sp.agent_type);
+            const routingMatch = matchRoutingWith(table, sp.description, sp.agent_type);
             if (!routingMatch) continue;
 
             // Resolve suggested model name
@@ -689,6 +701,9 @@ export const fetchDispatchCandidates = Effect.fn("queries.fetchDispatchCandidate
 export interface CompileRoutingResult {
     readonly path: string;
     readonly written: boolean;
+    readonly preserved_user_classes: number;
+    /** True when the file exists but is unparseable - we refuse to overwrite. */
+    readonly corrupt: boolean;
 }
 
 export const compileRouting = (
@@ -696,12 +711,18 @@ export const compileRouting = (
 ): Effect.Effect<CompileRoutingResult, never, FileSystem.FileSystem | Path.Path> =>
     Effect.gen(function* () {
         const fs = yield* FileSystem.FileSystem;
-        const path = yield* Path.Path;
-        const resolvedPath = outPath ?? path.join(homedir(), ".ax", "hooks", "routing-table.json");
-        const json = JSON.stringify(ROUTING_CLASSES, null, 2);
-        yield* fs.makeDirectory(path.dirname(resolvedPath), { recursive: true }).pipe(Effect.orDie);
-        yield* fs.writeFileString(resolvedPath, json).pipe(Effect.orDie);
-        return { path: resolvedPath, written: true };
+        const resolvedPath = outPath ?? defaultRoutingTablePath();
+        const exists = yield* fs.exists(resolvedPath).pipe(Effect.orElseSucceed(() => false));
+        const existing = yield* loadStoredRoutingTable(resolvedPath);
+        if (exists && existing === null) {
+            // File present but corrupt/unparseable: overwriting would silently
+            // destroy any mined user classes. Refuse and surface it.
+            return { path: resolvedPath, written: false, preserved_user_classes: 0, corrupt: true };
+        }
+        const merged = mergeRoutingTables(ROUTING_CLASSES, existing);
+        yield* saveStoredRoutingTable(resolvedPath, merged);
+        const preserved = merged.classes.filter((c) => c.origin === "user").length;
+        return { path: resolvedPath, written: true, preserved_user_classes: preserved, corrupt: false };
     });
 
 // ---------------------------------------------------------------------------

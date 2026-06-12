@@ -26,6 +26,7 @@ import {
     compileRouting,
     compileRoutingSkillMd,
 } from "../../queries/dispatch-analytics.ts";
+import { loadEffectiveRoutingTable } from "../../queries/routing-table-io.ts";
 import { buildDispatchesNext, buildCandidatesNext } from "../../nav/next-links.ts";
 import type { RuntimeManifest } from "./manifest.ts";
 import { fail, jsonFlag, optionValue, positiveLimit } from "./shared.ts";
@@ -57,7 +58,8 @@ const cmdDispatches = (input: {
 }) =>
     Effect.gen(function* () {
         if (input.candidates) {
-            const result = yield* fetchDispatchCandidates({ sinceDays: input.sinceDays });
+            const table = yield* loadEffectiveRoutingTable();
+            const result = yield* fetchDispatchCandidates({ sinceDays: input.sinceDays, table });
 
             if (input.json) {
                 console.log(prettyPrint(result));
@@ -193,15 +195,23 @@ const compileRoutingCommand = Command.make(
         }
         const outPath = optionValue(out);
         const result = yield* compileRouting(outPath);
+        if (result.corrupt) {
+            fail(`routing-table NOT written: ${result.path} is unparseable - fix or delete it, then re-run`);
+        }
         if (json) {
             console.log(prettyPrint(result));
         } else {
-            console.log(`routing-table written: ${result.path}`);
+            console.log(
+                result.preserved_user_classes > 0
+                    ? `routing-table written: ${result.path} (${result.preserved_user_classes} user classes preserved)`
+                    : `routing-table written: ${result.path}`,
+            );
         }
     }),
 ).pipe(
     Command.withDescription(
-        "Write ~/.ax/hooks/routing-table.json from the built-in ROUTING_CLASSES constant. " +
+        "Write ~/.ax/hooks/routing-table.json from the built-in ROUTING_CLASSES constant, " +
+        "preserving origin:user classes (alias of `ax routing compile`). " +
         "Idempotent regenerate. --out=PATH overrides default path. " +
         "--skill-md=PATH instead regenerates the ax:routing-table section of a skill markdown. --json",
     ),

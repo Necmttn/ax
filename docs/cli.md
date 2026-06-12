@@ -34,7 +34,9 @@ axctl costs for --commit <sha>              # cost for sessions that produced a 
 axctl costs for --branch <name>             # cost for sessions linked to a branch
 axctl cost <models|sessions|split>          # model/cost analytics incl. main-vs-subagent split
 axctl dispatches [--candidates]             # subagent dispatch routing analytics + est savings
-axctl dispatches compile-routing            # regenerate ~/.ax/hooks/routing-table.json
+axctl routing tune [--dry-run|--emit-brief] # mine YOUR dispatch history for new routing classes
+axctl routing compile                       # regenerate ~/.ax/hooks/routing-table.json (user classes preserved)
+axctl routing show                          # effective routing table with class origins
 axctl profile show [--window=N] [--no-cost] # local profile: stats + rig + taste from the graph
 axctl profile publish [--if-stale=H] [--yes] [--skip-registration]
                                             # publish profile gist + one-time community registration PR

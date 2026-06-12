@@ -18,6 +18,7 @@ import { costsGroupCommand, locCommand, pricingCommand, costsRuntime } from "./c
 import { costCommand, axCostRuntime } from "./commands/ax-cost.ts";
 import { profileCommand, axProfileRuntime } from "./commands/profile.ts";
 import { dispatchesRootCommand, axDispatchesRuntime } from "./commands/ax-dispatches.ts";
+import { routingRootCommand, axRoutingRuntime } from "./commands/ax-routing.ts";
 import { recallCommand, recallRuntime } from "./commands/recall.ts";
 import { hookCommand, hooksCommand, hooksRuntime } from "./commands/hooks.ts";
 import { retroCommand, retroRuntime } from "./commands/retro.ts";
@@ -77,6 +78,7 @@ export const RUNTIME_BY_COMMAND: RuntimeManifest = {
     ...axCostRuntime,
     ...axProfileRuntime,
     ...axDispatchesRuntime,
+    ...axRoutingRuntime,
     ...recallRuntime,
     ...hooksRuntime,
     ...retroRuntime,
@@ -114,6 +116,7 @@ const registeredCommands: ReadonlyArray<Command.Command.Any> = [
     costCommand,
     profileCommand,
     dispatchesRootCommand,
+    routingRootCommand,
     // Maintenance / plumbing verbs - hidden via their family manifests.
     deriveCommand,
     deriveSignalsCommand,

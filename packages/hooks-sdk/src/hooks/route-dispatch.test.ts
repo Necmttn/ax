@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { Effect } from "effect";
-import routeDispatch from "./route-dispatch.ts";
+import { Effect, Result, Schema } from "effect";
+import routeDispatch, { RoutingTableSchema } from "./route-dispatch.ts";
 import { GitEnvTest } from "../git-env.ts";
 
 // ---------------------------------------------------------------------------
@@ -275,5 +275,52 @@ describe("matcher guard", () => {
     expect(result.exitCode).toBe(0);
     // No systemMessage in stdout (warn would produce it)
     expect(result.stdout).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// RoutingTableSchema export: accepts origin-tagged classes
+// ---------------------------------------------------------------------------
+
+describe("route-dispatch routing-table schema", () => {
+  test("accepts origin-tagged classes written by ax routing compile/tune", () => {
+    const decode = Schema.decodeUnknownResult(RoutingTableSchema);
+    const result = decode({
+      version: 1,
+      classes: [
+        { id: "spec-review", pattern: "^spec review", flags: "i", suggest: "sonnet", reason: "x", origin: "default" },
+        { id: "mined", pattern: "^summarize", flags: "i", suggest: "haiku", reason: "y", origin: "user" },
+      ],
+      agentTypes: { Explore: "haiku" },
+    });
+    expect(Result.isSuccess(result)).toBe(true);
+  });
+
+  test("decodes a legacy origin-less table", () => {
+    // Pre-existing on-disk format: no origin fields anywhere.
+    const decode = Schema.decodeUnknownResult(RoutingTableSchema);
+    const result = decode({
+      version: 1,
+      classes: [
+        { id: "spec-review", pattern: "^spec review", flags: "i", suggest: "sonnet", reason: "x" },
+      ],
+      agentTypes: { Explore: "haiku" },
+    });
+    expect(Result.isSuccess(result)).toBe(true);
+  });
+
+  test("tolerates unknown origin values", () => {
+    // origin is a plain optional string, not a literal union: the hook never
+    // reads origin, so an unrecognized value (e.g. a hand-edited "mined")
+    // must NOT fail the whole-table decode and silently revert the user's
+    // routing table to DEFAULT_TABLE.
+    const decode = Schema.decodeUnknownResult(RoutingTableSchema);
+    const result = decode({
+      version: 1,
+      classes: [
+        { id: "mined", pattern: "^summarize", flags: "i", suggest: "haiku", reason: "y", origin: "mined" },
+      ],
+    });
+    expect(Result.isSuccess(result)).toBe(true);
   });
 });
