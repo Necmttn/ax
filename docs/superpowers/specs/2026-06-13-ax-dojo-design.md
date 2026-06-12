@@ -108,6 +108,21 @@ Per lap:
 The skill text contains no discovery logic - only loop mechanics + per-kind
 playbooks.
 
+**Heavy items become goal packages** (`/goal` composition, one level down):
+
+- /loop and /goal terminate differently: /loop ends on budget/deadline
+  (dojo's outer driver - "done" is never "objective complete"); /goal ends
+  on objective gates. So /goal never drives the night, but a *heavy agenda
+  item* - a spar campaign, a multi-replay experiment - is exactly a goal:
+  objective, checkpoint index, gates, evidence log (prior art:
+  `docs/superpowers/goals/*.md`, e.g. the SetFit goal's E0-E498 arc).
+- Dojo lap on a heavy item: create-or-resume its goal file, advance
+  checkpoints until the lap budget says stop, leave the checkpoint index
+  updated. The NEXT dojo session resumes the same goal where it stopped.
+- Net effect: the goals dir is dojo's **curriculum** - cross-night memory
+  for experiments too big for one surplus window; gates decide when a
+  campaign is concluded and its proposal ships.
+
 ### Training output = proposals
 
 - **Code experiments**: worktrees only (existing enforce-worktree hooks
