@@ -37,17 +37,18 @@ export interface SkillHygieneInput {
 // SQL - deref-free, three flat statements
 // ---------------------------------------------------------------------------
 
+// Record ids are coerced to strings IN SQL via type::string() (sibling idiom,
+// dispatch-analytics.ts) - the SDK can return RecordId objects, and String()
+// on those yields garbage that misses every JS map lookup.
+// GROUP BY on the function-aliased field (sid) verified against the live
+// SurrealDB 3 instance (127.0.0.1:8521) on 2026-06-12.
+// Invocation counts are deliberately ALL-TIME (lifetime hygiene signal; no
+// sinceDays window).
 const SQL = `
-SELECT out AS sid, count() AS invocations FROM invoked GROUP BY sid;
-SELECT id, name, dir_path FROM skill;
-SELECT VALUE in FROM plays_role WHERE source IN ["frontmatter", "brief", "user"];
+SELECT type::string(out) AS sid, count() AS invocations FROM invoked GROUP BY sid;
+SELECT type::string(id) AS id, name, dir_path FROM skill;
+SELECT VALUE type::string(in) FROM plays_role WHERE source IN ["frontmatter", "brief", "user"];
 `;
-
-// ---------------------------------------------------------------------------
-// Helper: stringify any SurrealDB record id or value
-// ---------------------------------------------------------------------------
-
-const rid = (v: unknown): string => String(v);
 
 // ---------------------------------------------------------------------------
 // Query
@@ -58,27 +59,27 @@ export const fetchSkillHygiene = Effect.fn("queries.fetchSkillHygiene")(function
 ) {
     const db = yield* SurrealClient;
     const [counts, skills, classified] = yield* db.query<[
-        Array<{ sid: unknown; invocations: number }>,
-        Array<{ id: unknown; name: string; dir_path: string | null }>,
-        Array<unknown>,
+        Array<{ sid: string; invocations: number }>,
+        Array<{ id: string; name: string; dir_path: string | null }>,
+        Array<string>,
     ]>(SQL);
 
     // Build lookup structures from the flat result sets
-    const classifiedIds = new Set((classified ?? []).map(rid));
+    const classifiedIds = new Set(classified ?? []);
     const byId = new Map(
-        (skills ?? []).map((s) => [rid(s.id), { name: s.name, dir_path: s.dir_path }]),
+        (skills ?? []).map((s) => [s.id, { name: s.name, dir_path: s.dir_path }]),
     );
 
     // Join, filter, collect
     const rows: SkillHygieneRow[] = [];
     for (const c of counts ?? []) {
-        const sid = rid(c.sid);
-        const skill = byId.get(sid);
+        const skill = byId.get(c.sid);
         if (!skill) continue;                                  // no matching skill row
         if (skill.dir_path === "(synthetic)") continue;        // tool shims, not real skills
-        if (classifiedIds.has(sid)) continue;                  // already tagged
-        if (c.invocations < input.minInvocations) continue;   // below threshold
-        rows.push({ name: skill.name, invocations: c.invocations });
+        if (classifiedIds.has(c.sid)) continue;                // already tagged
+        const inv = Number(c.invocations ?? 0);
+        if (inv < input.minInvocations) continue;              // below threshold
+        rows.push({ name: skill.name, invocations: inv });
     }
 
     rows.sort((a, b) => b.invocations - a.invocations);
