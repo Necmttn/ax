@@ -1,9 +1,17 @@
 // apps/site/app/routes/u.$login.tsx
-import { createFileRoute, Link } from "@tanstack/react-router";
-import { useEffect, useState, type ReactNode } from "react";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
+import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 import { SiteHeader } from "~/components/landing-sections/site-header";
 import { SiteFooter } from "~/components/landing-sections/site-footer";
 import { CardArt, type CardArtAccent } from "~/components/dossier-card-art";
+import { RadarChart, type RadarSeries } from "~/components/radar-chart";
+import {
+    archetypeFor,
+    dominantPair,
+    profileToAxes,
+    RADAR_AXES_META,
+    type RadarAxes,
+} from "~/lib/radar";
 import {
     fetchProfile,
     type ProfileV1,
@@ -12,7 +20,16 @@ import {
     type ProfileSkill,
 } from "~/lib/community";
 
+// mirrors LOGIN_RE in community.ts - GitHub handles only, sanitised before use.
+const LOGIN_RE = /^[A-Za-z0-9-]{1,39}$/;
+// series colours: primary profile = ax green, comparison = ax blue.
+const SELF_COLOR = "var(--green)";
+const VS_COLOR = "#2567a8";
+
 export const Route = createFileRoute("/u/$login")({
+    validateSearch: (search: Record<string, unknown>) => ({
+        vs: typeof search.vs === "string" && LOGIN_RE.test(search.vs) ? search.vs : undefined,
+    }),
     head: ({ params }) => ({
         meta: [
             { title: `@${params.login} - ax profile` },
@@ -28,9 +45,21 @@ type State =
     | { kind: "error"; message: string }
     | { kind: "ready"; profile: ProfileV1 };
 
+// comparison-profile load state, kept separate from the primary dossier so a
+// missing/invalid `?vs=` peer degrades to a quiet inline note, never an error
+// page for the profile the visitor actually came to see.
+type VsState =
+    | { kind: "none" }
+    | { kind: "loading"; login: string }
+    | { kind: "not-found"; login: string }
+    | { kind: "error"; login: string }
+    | { kind: "ready"; login: string; profile: ProfileV1 };
+
 function ProfilePage() {
     const { login } = Route.useParams();
+    const { vs } = Route.useSearch();
     const [state, setState] = useState<State>({ kind: "loading" });
+    const [vsState, setVsState] = useState<VsState>({ kind: "none" });
 
     useEffect(() => {
         let alive = true;
@@ -57,6 +86,31 @@ function ProfilePage() {
         return () => { alive = false; };
     }, [login]);
 
+    useEffect(() => {
+        let alive = true;
+        if (!vs || vs.toLowerCase() === login.toLowerCase()) {
+            // self-compare is allowed (proves the overlay path); only skip the
+            // empty case so we don't double-render the same series silently.
+            if (!vs) { setVsState({ kind: "none" }); return; }
+        }
+        setVsState({ kind: "loading", login: vs });
+        fetchProfile(vs)
+            .then((profile) => {
+                if (!alive) return;
+                if (profile.github.toLowerCase() !== vs.toLowerCase()) {
+                    setVsState({ kind: "error", login: vs });
+                    return;
+                }
+                setVsState({ kind: "ready", login: vs, profile });
+            })
+            .catch((e: unknown) => {
+                if (!alive) return;
+                const notFound = typeof e === "object" && e !== null && (e as { notFound?: boolean }).notFound === true;
+                setVsState(notFound ? { kind: "not-found", login: vs } : { kind: "error", login: vs });
+            });
+        return () => { alive = false; };
+    }, [vs, login]);
+
     return (
         <>
             <SiteHeader />
@@ -64,7 +118,7 @@ function ProfilePage() {
                 {state.kind === "loading" && <p className="pf-loading">pulling the dossier on @{login}…</p>}
                 {state.kind === "not-found" && <UnclaimedDossier login={login} />}
                 {state.kind === "error" && <p className="pf-loading">couldn't load profile: {state.message}</p>}
-                {state.kind === "ready" && <ProfileDossier profile={state.profile} />}
+                {state.kind === "ready" && <ProfileDossier profile={state.profile} vs={vsState} />}
             </main>
             <SiteFooter />
         </>
@@ -109,7 +163,7 @@ const clampPct = (x: number): number => (Number.isFinite(x) ? Math.min(100, Math
 
 /* ---------- the dossier ---------- */
 
-function ProfileDossier({ profile: p }: { profile: ProfileV1 }) {
+function ProfileDossier({ profile: p, vs }: { profile: ProfileV1; vs: VsState }) {
     const daily = p.activity && p.activity.daily.length > 0
         ? [...p.activity.daily].sort((a, b) => (a.date < b.date ? -1 : 1))
         : [];
@@ -196,6 +250,9 @@ function ProfileDossier({ profile: p }: { profile: ProfileV1 }) {
                     </div>
                 </section>
             )}
+
+            {/* the sign: radar + agent archetype */}
+            <SignSection n={nextSection()} profile={p} vs={vs} />
 
             {/* tool taste */}
             {tools.length > 0 && (
@@ -329,6 +386,194 @@ function Kicker({ n, title, note }: { n: string; title: string; note?: string })
         </div>
     );
 }
+
+/* ---------- the sign: radar + archetype ---------- */
+
+function SignSection({ n, profile, vs }: { n: string; profile: ProfileV1; vs: VsState }) {
+    const navigate = useNavigate({ from: "/u/$login" });
+    const [draft, setDraft] = useState("");
+
+    const selfAxes = profileToAxes(profile);
+    const selfArch = archetypeFor(selfAxes, profile);
+
+    const vsReady = vs.kind === "ready" ? vs : null;
+    const vsAxes = vsReady ? profileToAxes(vsReady.profile) : null;
+    const vsArch = vsReady && vsAxes ? archetypeFor(vsAxes, vsReady.profile) : null;
+
+    const series: RadarSeries[] = [{ login: profile.github, axes: selfAxes, color: SELF_COLOR }];
+    if (vsReady && vsAxes) series.push({ login: vsReady.login, axes: vsAxes, color: VS_COLOR });
+
+    const submit = (e: FormEvent) => {
+        e.preventDefault();
+        const target = draft.trim().replace(/^@/, "");
+        if (!LOGIN_RE.test(target)) return;
+        void navigate({ search: { vs: target } });
+        setDraft("");
+    };
+    const clearCompare = () => void navigate({ search: { vs: undefined } });
+
+    return (
+        <section className="pf-section">
+            <Kicker n={n} title="The sign" note="six axes, one archetype" />
+            <p className="pf-sign-method">
+                Axes are log-anchored to fixed scales (not min-max), so shapes compare
+                across any two profiles.
+            </p>
+            <div className="pf-sign">
+                <div className="pf-sign-chart">
+                    <RadarChart series={series} size={420} />
+                    {selfAxes.partial && (
+                        <p className="pf-sign-partial">
+                            some axes read 0 - they need a newer ax version to populate.
+                        </p>
+                    )}
+                </div>
+
+                <div className="pf-sign-read">
+                    {vsArch && vsReady ? (
+                        <p className="pf-sign-versus">
+                            <span style={{ color: SELF_COLOR }}>@{profile.github}</span> is {selfArch.sign}
+                            {" · "}
+                            <span style={{ color: VS_COLOR }}>@{vsReady.login}</span> is {vsArch.sign}
+                        </p>
+                    ) : (
+                        <span className="pf-sign-kicker">your agent sign</span>
+                    )}
+
+                    <div className="pf-sign-head">
+                        <span className="pf-sign-glyph" aria-hidden="true">{selfArch.symbol}</span>
+                        <h3 className="pf-sign-name">{selfArch.sign}</h3>
+                    </div>
+                    <p className="pf-sign-blurb">{selfArch.blurb}</p>
+
+                    {/* compare mode: the raw-values table below carries the
+                        per-axis comparison - one table, not two summaries */}
+                    {!(vsReady && vsAxes) && <ScoreList axes={selfAxes} />}
+
+                    {/* compare control */}
+                    <div className="pf-sign-compare">
+                        {vsReady ? (
+                            <button type="button" className="pf-sign-clear" onClick={clearCompare}>
+                                clear comparison
+                            </button>
+                        ) : (
+                            <form className="pf-sign-form" onSubmit={submit}>
+                                <span className="pf-sign-form-label">compare with</span>
+                                <input
+                                    className="pf-sign-input"
+                                    type="text"
+                                    value={draft}
+                                    onChange={(e) => setDraft(e.currentTarget.value)}
+                                    placeholder="github handle"
+                                    aria-label="github handle to compare with"
+                                    spellCheck={false}
+                                    autoCapitalize="off"
+                                    autoCorrect="off"
+                                />
+                                <button type="submit" className="pf-sign-go">overlay</button>
+                            </form>
+                        )}
+                        {vs.kind === "loading" && <span className="pf-sign-msg">pulling @{vs.login}…</span>}
+                        {vs.kind === "not-found" && <span className="pf-sign-msg">no dossier on file for @{vs.login}.</span>}
+                        {vs.kind === "error" && <span className="pf-sign-msg">couldn't load @{vs.login}.</span>}
+                    </div>
+                </div>
+            </div>
+
+            <RawTable
+                self={selfAxes}
+                selfLogin={profile.github}
+                vs={vsReady && vsAxes ? { axes: vsAxes, login: vsReady.login } : undefined}
+            />
+        </section>
+    );
+}
+
+function ScoreList({ axes }: { axes: RadarAxes }) {
+    const [a, b] = dominantPair(axes);
+    return (
+        <dl className="pf-sign-scores">
+            {RADAR_AXES_META.map((m) => {
+                const dom = m.key === a || m.key === b;
+                return (
+                    <div className={dom ? "pf-sign-score pf-sign-score--dom" : "pf-sign-score"} key={m.key}>
+                        <dt>{m.label}</dt>
+                        <dd>
+                            <span className="pf-sign-bar" aria-hidden="true">
+                                <span className="pf-sign-bar-fill" style={{ width: `${clampPct(axes.scores[m.key])}%` }} />
+                            </span>
+                            <span className="pf-sign-val">{fmtScore(axes.scores[m.key])}</span>
+                        </dd>
+                    </div>
+                );
+            })}
+        </dl>
+    );
+}
+
+/**
+ * "Raw values" reference table - the un-normalised numbers behind the chart,
+ * straight off RadarAxes.raws (never re-derived here). In compare mode each
+ * row gets two value columns and the per-metric leader is marked with a small
+ * green dot; ties and unmeasurable rows get no dot.
+ */
+function RawTable({
+    self, selfLogin, vs,
+}: {
+    self: RadarAxes;
+    selfLogin: string;
+    vs?: { axes: RadarAxes; login: string };
+}) {
+    return (
+        <div className="pf-rawvals">
+            <div className="pf-rawvals-head">
+                <span className="pf-rawvals-kicker">raw values</span>
+                <span className="pf-rawvals-note">un-normalised numbers behind the chart</span>
+            </div>
+            <table className="pf-rawvals-table">
+                <thead>
+                    <tr>
+                        <th scope="col">metric</th>
+                        <th scope="col" className="pf-rawvals-col">
+                            {vs ? <span style={{ color: SELF_COLOR }}>@{selfLogin}</span> : "value"}
+                        </th>
+                        {vs && (
+                            <th scope="col" className="pf-rawvals-col">
+                                <span style={{ color: VS_COLOR }}>@{vs.login}</span>
+                            </th>
+                        )}
+                    </tr>
+                </thead>
+                <tbody>
+                    {RADAR_AXES_META.map((m) => {
+                        const a = self.raws[m.key];
+                        const b = vs?.axes.raws[m.key];
+                        // leader: strictly greater comparable numeric; null never leads
+                        const aLeads = vs !== undefined && a.value !== null && (b?.value === null || b === undefined || a.value > b.value);
+                        const bLeads = vs !== undefined && b !== undefined && b.value !== null && (a.value === null || b.value > a.value);
+                        return (
+                            <tr key={m.key}>
+                                <th scope="row">{m.label}</th>
+                                <td className={aLeads ? "pf-rawvals-val pf-rawvals-val--lead" : "pf-rawvals-val"}>
+                                    {a.label}
+                                    {aLeads && <span className="pf-rawvals-dot" aria-label="leads" />}
+                                </td>
+                                {vs && b && (
+                                    <td className={bLeads ? "pf-rawvals-val pf-rawvals-val--lead" : "pf-rawvals-val"}>
+                                        {b.label}
+                                        {bLeads && <span className="pf-rawvals-dot" aria-label="leads" />}
+                                    </td>
+                                )}
+                            </tr>
+                        );
+                    })}
+                </tbody>
+            </table>
+        </div>
+    );
+}
+
+const fmtScore = (n: number): string => String(Math.round(n));
 
 function ActivityTimeline({ daily, busiest }: { daily: readonly ProfileDailyRow[]; busiest?: string }) {
     const maxSessions = daily.reduce((m, d) => Math.max(m, d.sessions), 0);
