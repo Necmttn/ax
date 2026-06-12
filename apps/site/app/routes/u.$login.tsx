@@ -369,7 +369,7 @@ function ActivityTimeline({ daily, busiest }: { daily: readonly ProfileDailyRow[
 interface InsightCard { readonly q: string; readonly a: ReactNode; readonly s: string }
 
 function buildInsightCards(ins: ProfileInsights): InsightCard[] {
-    return [
+    const cards: InsightCard[] = [
         {
             q: "How deep do you go?",
             a: fmtPct(ins.deep_session_share),
@@ -411,6 +411,38 @@ function buildInsightCards(ins: ProfileInsights): InsightCard[] {
             s: "of recorded agent time on the clock",
         },
     ];
+
+    // wrapped-style cards - only shown when fields are present
+    if (ins.verification_calls !== undefined && ins.tool_calls !== undefined && ins.tool_calls > 0) {
+        cards.push({
+            q: "How often do you verify?",
+            a: fmtPct(ins.verification_calls / ins.tool_calls),
+            s: `of tool calls are tests, checks, and lints`,
+        });
+    }
+    if (ins.tool_failures !== undefined && ins.tool_calls !== undefined && ins.tool_calls > 0) {
+        cards.push({
+            q: "Tool failure rate?",
+            a: fmtPct(ins.tool_failures / ins.tool_calls),
+            s: `failed calls across ${fmtCompact(ins.tool_calls)} tool runs`,
+        });
+    }
+    if (ins.distinct_skills !== undefined && ins.distinct_tools !== undefined) {
+        cards.push({
+            q: "How wide is the rig?",
+            a: `${fmtInt(ins.distinct_skills)} skills`,
+            s: `across ${fmtInt(ins.distinct_tools)} distinct tools`,
+        });
+    }
+    if (ins.repos_count !== undefined) {
+        cards.push({
+            q: "How many repos?",
+            a: fmtInt(ins.repos_count),
+            s: "repositories touched this window",
+        });
+    }
+
+    return cards;
 }
 
 interface SkillGroup { readonly source: string; readonly skills: ProfileSkill[]; readonly runs: number }

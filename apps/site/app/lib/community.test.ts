@@ -114,6 +114,49 @@ describe("validateProfileV1 - activity + insights sections", () => {
         expect(() => validateProfileV1(bad)).toThrow();
     });
 
+    test("accepts insights with all new optional wrapped-style fields", () => {
+        const p = validateProfileV1({
+            ...profileWithSections,
+            insights: {
+                ...profileWithSections.insights,
+                turns: 41200,
+                tool_calls: 88000,
+                tool_failures: 3100,
+                distinct_skills: 56,
+                distinct_tools: 41,
+                repos_count: 12,
+                verification_calls: 9100,
+                context_calls: 22000,
+            },
+        });
+        expect(p.insights!.turns).toBe(41200);
+        expect(p.insights!.tool_calls).toBe(88000);
+        expect(p.insights!.tool_failures).toBe(3100);
+        expect(p.insights!.distinct_skills).toBe(56);
+        expect(p.insights!.distinct_tools).toBe(41);
+        expect(p.insights!.repos_count).toBe(12);
+        expect(p.insights!.verification_calls).toBe(9100);
+        expect(p.insights!.context_calls).toBe(22000);
+    });
+
+    test("new optional wrapped fields absent is valid (old gist back-compat)", () => {
+        // profileWithSections has no wrapped fields
+        const p = validateProfileV1(profileWithSections);
+        expect(p.insights!.turns).toBeUndefined();
+        expect(p.insights!.repos_count).toBeUndefined();
+    });
+
+    test("rejects non-number in optional wrapped field", () => {
+        const bad = {
+            ...profileWithSections,
+            insights: {
+                ...profileWithSections.insights,
+                turns: "lots",
+            },
+        };
+        expect(() => validateProfileV1(bad)).toThrow();
+    });
+
     test("rejects daily row with non-number sessions", () => {
         const bad = {
             ...profileWithSections,

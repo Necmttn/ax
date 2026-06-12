@@ -134,6 +134,21 @@ export function formatProfile(p: ProfileV1): string {
         lines.push(
             `  peak hour: ${String(ins.peak_hour_utc).padStart(2, "0")}:00 UTC  ·  max parallel: ${ins.max_parallel_sessions}  ·  spawned: ${integer(ins.subagents_spawned)}  ·  commits: ${integer(ins.commits)}`,
         );
+        if (ins.tool_calls !== undefined && ins.tool_calls > 0) {
+            const verifPct = ins.verification_calls !== undefined
+                ? `${(ins.verification_calls / ins.tool_calls * 100).toFixed(1)}% verification`
+                : null;
+            const failPct = ins.tool_failures !== undefined
+                ? `${(ins.tool_failures / ins.tool_calls * 100).toFixed(1)}% failure rate`
+                : null;
+            const reposPart = ins.repos_count !== undefined
+                ? `${ins.repos_count} repos`
+                : null;
+            const parts = [verifPct, failPct, reposPart].filter(Boolean);
+            if (parts.length > 0) {
+                lines.push(`  ${parts.join("  ·  ")}`);
+            }
+        }
         if (ins.tools_top.length > 0) {
             lines.push("  top tools:");
             for (const t of ins.tools_top.slice(0, 5)) {
