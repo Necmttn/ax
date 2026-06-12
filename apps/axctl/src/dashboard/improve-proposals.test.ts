@@ -89,7 +89,7 @@ describe("fetchImproveProposals - brief attachment", () => {
         const { brief } = rows[0];
         expect(brief).toBeTypeOf("string");
         expect(brief).toContain("sig=sig-accepted-002");
-        expect(brief).toContain("experiment artifact");
+        expect(brief).toContain("lock a verdict");
         expect(brief).not.toContain("ax improve accept");
     });
 

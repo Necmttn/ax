@@ -24,18 +24,28 @@ FROM proposal
 ORDER BY frequency DESC, created_at DESC
 LIMIT 100;`;
 
-const withBrief = (p: ProposalDto): ProposalDto => ({
-    ...p,
-    brief: renderAgentBrief({
+/** Brief shown for an open proposal - shared by /api/improve rows and next-action cards. */
+export const proposalReviewBrief = (p: ProposalDto): string =>
+    renderAgentBrief({
         title: p.title,
         evidence: `hypothesis: ${p.hypothesis} (seen ${p.frequency}x, confidence ${p.confidence})`,
-        ask:
-            p.status === "open"
-                ? "Review this proposal; if sound, run `ax improve accept` and act on the emitted .ax/tasks brief."
-                : "Act on the experiment artifact/task for this proposal.",
+        ask: "Review this proposal; if sound, run `ax improve accept` and act on the emitted .ax/tasks brief.",
         verify: "`ax improve show` reflects the new status; follow the experiment checkpoints.",
         source: `ax improve proposal sig=${p.dedupe_sig}`,
-    }),
+    });
+
+const withBrief = (p: ProposalDto): ProposalDto => ({
+    ...p,
+    brief:
+        p.status === "open"
+            ? proposalReviewBrief(p)
+            : renderAgentBrief({
+                  title: p.title,
+                  evidence: `hypothesis: ${p.hypothesis} (seen ${p.frequency}x, confidence ${p.confidence})`,
+                  ask: "Act on the experiment for this proposal - check its artifact/task and lock a verdict via the Improve dashboard or `ax improve` CLI.",
+                  verify: "`ax improve show` reflects the new status; follow the experiment checkpoints.",
+                  source: `ax improve proposal sig=${p.dedupe_sig}`,
+              }),
 });
 
 /** Raw proposal rows, loosely typed at the edge like the legacy queryApi endpoints. */

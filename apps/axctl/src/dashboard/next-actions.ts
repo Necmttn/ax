@@ -25,7 +25,7 @@ import type { CandidatesResult } from "../queries/dispatch-analytics.ts";
 import { fetchDispatchCandidates } from "../queries/dispatch-analytics.ts";
 import type { SkillHygieneRow } from "../queries/skill-hygiene.ts";
 import { fetchSkillHygiene } from "../queries/skill-hygiene.ts";
-import { fetchImproveProposals } from "./improve-proposals.ts";
+import { fetchImproveProposals, proposalReviewBrief } from "./improve-proposals.ts";
 import { fetchToolFailures } from "./tool-failures.ts";
 import { renderAgentBrief } from "./agent-brief.ts";
 
@@ -78,13 +78,7 @@ export const proposalCards = (
                     title: `Decide proposal: ${p.title}`,
                     evidence: `${p.form} proposal, confidence ${p.confidence}, seen ${p.frequency}x`,
                     impact: KIND_WEIGHT.proposal + bonus(cw * Math.log2(p.frequency + 1)),
-                    brief: renderAgentBrief({
-                        title: p.title,
-                        evidence: `hypothesis: ${p.hypothesis} (seen ${p.frequency}x, confidence ${p.confidence})`,
-                        ask: "Review this proposal; if sound, run `ax improve accept` and act on the emitted .ax/tasks brief.",
-                        verify: "`ax improve show` reflects accepted status; follow the experiment checkpoints.",
-                        source: `ax improve proposal sig=${p.dedupe_sig}`,
-                    }),
+                    brief: proposalReviewBrief(p),
                     link: null,
                     inline_action: {
                         type: "accept",

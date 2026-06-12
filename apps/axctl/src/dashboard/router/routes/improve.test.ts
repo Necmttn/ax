@@ -1,7 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { decodeImproveActionParams, improveHttpStatus, improveRoutes } from "./improve.ts";
-import { matchRoute } from "../router.ts";
-import type { RouteInput } from "../router.ts";
+import { matchRoute, type RouteInput } from "../router.ts";
 
 const input = (path: Record<string, string>, body: RouteInput["body"]): RouteInput => ({
     req: new Request("http://h/api/improve/sig1/accept", { method: "POST" }),
