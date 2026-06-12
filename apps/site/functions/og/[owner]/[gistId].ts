@@ -12,7 +12,7 @@ import { ImageResponse } from "workers-og";
 import { OG_RENDER_REV } from "../../_lib/og-meta";
 import {
     INK, DIM, CARD, GREEN, RED, ROSE, GOLD, BLUE, VIOLET,
-    esc, fmtUsd, statHtml, footerHtml, blockLogoHtml, loadOgFonts,
+    esc, fmtUsd, statHtml, footerHtml, blockLogoHtml, loadOgFonts, PAPER,
 } from "../../_lib/og-kit";
 
 interface SubagentCard {
@@ -158,8 +158,11 @@ export const onRequestGet: PagesFunction = async (ctx) => {
 
     // Block logo (pixel grid) replaces the old ASCII two-liner; same header
     // position, small scale so it fits in the 56px header band.
-    const logo = blockLogoHtml({ scale: 4, color: INK, dimColor: DIM });
-    // Watermark variant: large low-opacity block logo centered behind content.
+    // Single-color paper, no shadow: the two-tone ANSI shadow reads as mud
+    // below ~scale 8 (see og-kit blockLogoHtml).
+    const logo = blockLogoHtml({ scale: 5, color: PAPER, dimColor: "transparent" });
+    // Watermark variant: large enough that the two-tone shadow reads as
+    // intentional texture rather than blur.
     const watermarkLogo = blockLogoHtml({ scale: 10, color: INK, dimColor: DIM });
 
     const blocks: Record<string, string> = {
