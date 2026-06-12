@@ -1929,26 +1929,11 @@ td.skill-cell .description {
     overflow-wrap: anywhere;
 }
 
-.wrapped-score {
-    align-self: stretch;
-    border: 1px solid var(--line);
-    background: var(--panel);
-    display: flex;
-    flex-direction: column;
-    justify-content: center;
-    align-items: center;
-    min-width: 0;
-    padding: 12px;
-    text-align: center;
+.wrapped-confidence {
+    color: var(--muted);
+    font-size: 12px;
 }
 
-.wrapped-score strong {
-    font-size: 40px;
-    line-height: 1;
-    font-variant-numeric: tabular-nums;
-}
-
-.wrapped-score span,
 .wrapped-metric span,
 .wrapped-public-preview small,
 .wrapped-redactions {
@@ -2121,40 +2106,24 @@ td.skill-cell .description {
 
 .wrapped-heatmap {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(42px, 1fr));
-    gap: 4px;
-    padding: 10px;
+    grid-template-columns: repeat(auto-fill, minmax(14px, 1fr));
+    gap: 3px;
+    padding: 12px;
     border: 1px solid var(--line);
     background: var(--panel);
 }
 
 .wrapped-day {
-    min-height: 32px;
-    border: 1px solid rgba(20, 22, 21, 0.08);
+    aspect-ratio: 1;
+    border-radius: 2px;
+    border: 1px solid rgba(20, 22, 21, 0.06);
     background: var(--track);
-    display: flex;
-    align-items: end;
-    justify-content: center;
-    padding: 3px;
-    overflow: hidden;
-}
-
-.wrapped-day span {
-    color: var(--muted);
-    font-family: ui-monospace, Menlo, monospace;
-    font-size: 10px;
-    white-space: nowrap;
 }
 
 .wrapped-day.level-1 { background: rgba(37, 103, 168, 0.16); }
 .wrapped-day.level-2 { background: rgba(37, 103, 168, 0.32); }
 .wrapped-day.level-3 { background: rgba(22, 132, 94, 0.42); }
 .wrapped-day.level-4 { background: rgba(22, 132, 94, 0.68); }
-
-.wrapped-day.level-3 span,
-.wrapped-day.level-4 span {
-    color: var(--panel);
-}
 
 .wrapped-facts {
     display: grid;

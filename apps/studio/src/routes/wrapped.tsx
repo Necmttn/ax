@@ -21,7 +21,7 @@ const hourLabel = (hour: number | null): string => {
 const maybeCount = (value: number | null): string => (value == null ? "n/a" : fmtCount(value));
 
 const scoreLabel = (archetype: WrappedArchetype): string =>
-    `${Math.round(archetype.score)} score · ${archetype.confidence} confidence`;
+    `${archetype.confidence} confidence`;
 
 const heatLevel = (day: WrappedUsageDay, max: number): number => {
     if (max <= 0 || day.sessions <= 0) return 0;
@@ -70,10 +70,10 @@ export function WrappedRoute() {
                         <WrappedCardGrid cards={data.cards ?? []} />
                         <details style={{ marginTop: 24 }}>
                             <summary style={{ cursor: "pointer" }}><strong>The numbers</strong></summary>
-                            <WrappedHero profile={data} />
+                            {/* The agent deck supersedes the mechanical hero +
+                                facts - only the raw stats live here. */}
                             <MetricGrid profile={data} />
                             <DailyHeatmap days={data.usage.days} />
-                            <Facts facts={data.facts} />
                         </details>
                         <PublicPreview
                             profile={publicProfile}
@@ -109,10 +109,9 @@ function WrappedHero({ profile }: { profile: WrappedProfile }) {
                 <h3>{archetype.label}</h3>
                 <p className="wrapped-public-line">{archetype.publicLine}</p>
                 <p className="wrapped-internal">{archetype.internalExplanation || "No internal explanation available."}</p>
-            </div>
-            <div className="wrapped-score">
-                <strong>{Math.round(archetype.score)}</strong>
-                <span>{archetype.confidence} confidence</span>
+                {/* The raw archetype score is an internal ranking value -
+                    only the confidence band means anything to a reader. */}
+                <small className="wrapped-confidence">{archetype.confidence} confidence</small>
             </div>
         </div>
     );
@@ -161,9 +160,7 @@ function DailyHeatmap({ days }: { days: ReadonlyArray<WrappedUsageDay> }) {
                                 key={day.date}
                                 className={`wrapped-day level-${heatLevel(day, maxSessions)}`}
                                 title={activityLabel(day)}
-                            >
-                                <span>{day.date.slice(5)}</span>
-                            </span>
+                            />
                         ))}
                     </div>
                     <ul className="sr-only" aria-label="Daily activity values">
