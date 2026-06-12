@@ -256,6 +256,52 @@ describe("applyProposals", () => {
         expect(result.skipped_judgment).toHaveLength(0);
     });
 
+    it("re-apply of an already-present id reports skipped_existing, not applied", async () => {
+        const dir = mkdtempSync(join(tmpdir(), "ax-tune-apply-twice-"));
+        const p = join(dir, "routing-table.json");
+        const proposals: TuneProposal[] = [
+            { id: "summarize-the", pattern: "^summarize\\s+the\\b", flags: "i", suggest: "sonnet", reason: "mined", count: 3, total_cost_usd: 6, examples: [], judgment: false },
+        ];
+        const first = await Effect.runPromise(
+            applyProposals(p, proposals, { ids: null }).pipe(Effect.provide(fsLayers)),
+        );
+        expect(first.applied.map((a) => a.id)).toEqual(["summarize-the"]);
+        expect(first.skipped_existing).toHaveLength(0);
+        const second = await Effect.runPromise(
+            applyProposals(p, proposals, { ids: null }).pipe(Effect.provide(fsLayers)),
+        );
+        expect(second.applied).toHaveLength(0);
+        expect(second.skipped_existing.map((s) => s.id)).toEqual(["summarize-the"]);
+        const stored = JSON.parse(readFileSync(p, "utf8"));
+        const matches = stored.classes.filter((c: { id: string }) => c.id === "summarize-the");
+        expect(matches).toHaveLength(1);
+    });
+
+    it("reports unknown explicit ids instead of silently dropping them", async () => {
+        const dir = mkdtempSync(join(tmpdir(), "ax-tune-apply-unknown-"));
+        const p = join(dir, "routing-table.json");
+        const proposals: TuneProposal[] = [
+            { id: "review-architecture", pattern: "^review\\s+architecture\\b", flags: "i", suggest: "sonnet", reason: "mined", count: 3, total_cost_usd: 15, examples: [], judgment: true },
+        ];
+        const result = await Effect.runPromise(
+            applyProposals(p, proposals, { ids: ["review-architecture", "typo-id"] }).pipe(Effect.provide(fsLayers)),
+        );
+        expect(result.applied.map((a) => a.id)).toEqual(["review-architecture"]);
+        expect(result.unknown_ids).toEqual(["typo-id"]);
+    });
+
+    it("unknown_ids is empty in auto mode", async () => {
+        const dir = mkdtempSync(join(tmpdir(), "ax-tune-apply-auto-"));
+        const p = join(dir, "routing-table.json");
+        const proposals: TuneProposal[] = [
+            { id: "summarize-the", pattern: "^summarize\\s+the\\b", flags: "i", suggest: "sonnet", reason: "mined", count: 3, total_cost_usd: 6, examples: [], judgment: false },
+        ];
+        const result = await Effect.runPromise(
+            applyProposals(p, proposals, { ids: null }).pipe(Effect.provide(fsLayers)),
+        );
+        expect(result.unknown_ids).toEqual([]);
+    });
+
     it("refuses to overwrite a corrupt routing-table file", async () => {
         const dir = mkdtempSync(join(tmpdir(), "ax-tune-apply-corrupt-"));
         const p = join(dir, "routing-table.json");

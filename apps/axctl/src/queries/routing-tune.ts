@@ -18,6 +18,10 @@
  * routing stays the job of the agent-type rules already in the table: the
  * haiku-tier agent types are exactly the ones ROUTING_CLASSES.agentTypes
  * routes, so they never reach the unmatched set this miner clusters.
+ *
+ * Beyond mining, this module also WRITES the live routing table: applyProposals
+ * appends surviving proposals to the stored routing-table.json as origin:user
+ * classes (with the same corrupt-file guard as `ax routing compile`).
  */
 import { Effect, FileSystem, Path } from "effect";
 import {
@@ -200,8 +204,13 @@ export const renderTuneBrief = (
 
 export interface ApplyResult {
     readonly path: string;
+    /** Proposals that actually landed in the table (not already present). */
     readonly applied: ReadonlyArray<TuneProposal>;
+    /** Selected but already present in the table by id - nothing written for these. */
+    readonly skipped_existing: ReadonlyArray<TuneProposal>;
     readonly skipped_judgment: ReadonlyArray<TuneProposal>;
+    /** Explicit ids with no matching proposal (always empty in auto mode). */
+    readonly unknown_ids: ReadonlyArray<string>;
     /** True when the file exists but is corrupt - we refuse to overwrite. */
     readonly corrupt: boolean;
 }
@@ -211,6 +220,15 @@ export interface ApplyResult {
  * ids === null  -> auto mode: apply all NON-judgment proposals, report skips.
  * ids === [...] -> explicit mode (post-brief): apply exactly those ids;
  *                  judgment flags are ignored because an agent vetted them.
+ *
+ * Reporting is honest: `applied` only contains proposals that actually landed.
+ * Ids already present in the table go to `skipped_existing` (appendUserClasses
+ * dedupes by id, first wins); explicit ids matching no proposal surface in
+ * `unknown_ids` instead of being silently dropped.
+ *
+ * Writing goes through mergeRoutingTables, so an apply ALSO refreshes the
+ * default classes/agentTypes to current ROUTING_CLASSES - necessary because
+ * the stored file is read as the whole table by the route-dispatch hook.
  *
  * Corrupt-file guard (mirrors compileRouting): if the file exists but is
  * unparseable, refuse to write and return corrupt: true. Overwriting would
@@ -227,14 +245,28 @@ export const applyProposals = (
         const existing = yield* loadStoredRoutingTable(tablePath);
         if (exists && existing === null) {
             // File present but corrupt/unparseable: refuse to overwrite.
-            return { path: tablePath, applied: [], skipped_judgment: [], corrupt: true };
+            return {
+                path: tablePath,
+                applied: [],
+                skipped_existing: [],
+                skipped_judgment: [],
+                unknown_ids: [],
+                corrupt: true,
+            };
         }
-        const selected = opts.ids === null
+        const ids = opts.ids;
+        const selected = ids === null
             ? proposals.filter((p) => !p.judgment)
-            : proposals.filter((p) => opts.ids!.includes(p.id));
-        const skipped = opts.ids === null ? proposals.filter((p) => p.judgment) : [];
+            : proposals.filter((p) => ids.includes(p.id));
+        const skippedJudgment = ids === null ? proposals.filter((p) => p.judgment) : [];
+        const unknownIds = ids === null
+            ? []
+            : ids.filter((id) => !proposals.some((p) => p.id === id));
         const base = mergeRoutingTables(ROUTING_CLASSES, existing);
-        const additions: StoredRoutingClass[] = selected.map((p) => ({
+        const baseIds = new Set(base.classes.map((c) => c.id));
+        const landed = selected.filter((p) => !baseIds.has(p.id));
+        const skippedExisting = selected.filter((p) => baseIds.has(p.id));
+        const additions: StoredRoutingClass[] = landed.map((p) => ({
             id: p.id,
             pattern: p.pattern,
             flags: p.flags,
@@ -244,5 +276,12 @@ export const applyProposals = (
         }));
         const next = appendUserClasses(base, additions);
         yield* saveStoredRoutingTable(tablePath, next);
-        return { path: tablePath, applied: selected, skipped_judgment: skipped, corrupt: false };
+        return {
+            path: tablePath,
+            applied: landed,
+            skipped_existing: skippedExisting,
+            skipped_judgment: skippedJudgment,
+            unknown_ids: unknownIds,
+            corrupt: false,
+        };
     });
