@@ -87,14 +87,20 @@ export function formatProfile(p: ProfileV1): string {
     );
     lines.push("");
     lines.push("models:");
+    const topSkills = p.rig.skills.slice(0, 10);
+    const nameWidth = Math.max(
+        28,
+        ...p.stats.models.map((m) => m.name.length),
+        ...topSkills.map((s) => s.name.length),
+    );
     for (const m of p.stats.models) {
         const c = m.cost_usd !== undefined ? `  $${m.cost_usd.toFixed(2)}` : "";
-        lines.push(`  ${m.name.padEnd(28)} ${(m.share * 100).toFixed(0).padStart(3)}%${c}`);
+        lines.push(`  ${m.name.padEnd(nameWidth)} ${(m.share * 100).toFixed(0).padStart(3)}%${c}`);
     }
     lines.push("");
     lines.push(`rig: ${p.rig.skills.length} skills · ${p.rig.hooks.length} hooks · routing_table: ${p.rig.routing_table}${p.rig.rules ? ` · ${p.rig.rules.count} rules` : ""}`);
-    for (const s of p.rig.skills.slice(0, 10)) {
-        lines.push(`  ${s.name.padEnd(28)} ${integer(s.runs_30d).padStart(6)} runs  (${s.source})`);
+    for (const s of topSkills) {
+        lines.push(`  ${s.name.padEnd(nameWidth)} ${integer(s.runs_30d).padStart(6)} runs  (${s.source})`);
     }
     if (p.taste) {
         lines.push("");
