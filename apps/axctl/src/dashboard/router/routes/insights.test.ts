@@ -73,8 +73,8 @@ describe("GET /api/recall", () => {
 
     test("empty q answers without building AppLayer (runner never invoked)", async () => {
         // Same DB-less proof as the /api/version route test: a poisoned
-        // runner stands in for appLayerRunner, whose eager SurrealClient
-        // build stalls ~5s without a DB (issue #245).
+        // runner stands in for the production runner, whose eager
+        // SurrealClient build stalls ~5s without a DB (issue #245).
         const res = await run(
             "http://h/api/recall",
             () => Promise.reject(new Error("AppLayer must not be built for empty q")),

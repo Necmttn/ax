@@ -1,0 +1,11 @@
+{
+  "enforce-worktree": {
+    "users": 1
+  },
+  "enforce-worktree-write": {
+    "users": 1
+  },
+  "route-dispatch": {
+    "users": 1
+  }
+}

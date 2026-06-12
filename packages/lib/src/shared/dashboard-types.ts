@@ -1188,10 +1188,63 @@ export interface ProposalDto {
     readonly guidance_payload?: GuidanceProposalPayload | null;
     readonly automation_payload?: AutomationProposalPayload | null;
     readonly experiment?: ExperimentDto | null;
+    /** server-rendered markdown agent brief */
+    readonly brief?: string;
 }
 
 export interface ImprovePayload {
     readonly proposals: ReadonlyArray<ProposalDto>;
+}
+
+// ---------------------------------------------------------------------------
+// Next actions (improve-first dashboard)
+// ---------------------------------------------------------------------------
+
+export type NextActionKind =
+    | "proposal"
+    | "verdict"
+    | "tool_failure"
+    | "churn"
+    | "routing"
+    | "skill_hygiene";
+
+export interface NextActionInlineAction {
+    readonly type: "accept" | "reject" | "verdict" | "decide";
+    /** proposal dedupe_sig for accept/reject/verdict */
+    readonly sig: string | null;
+    /** skill name for decide */
+    readonly skill: string | null;
+    /** suggested verdict for one-click lock */
+    readonly suggested_verdict: string | null;
+}
+
+export interface NextActionCard {
+    /** stable id: `${kind}:${key}` */
+    readonly id: string;
+    readonly kind: NextActionKind;
+    readonly title: string;
+    /** one-line evidence summary */
+    readonly evidence: string;
+    /** rank score, higher first; KIND_WEIGHT + per-source bonus */
+    readonly impact: number;
+    /** server-rendered markdown agent brief */
+    readonly brief: string;
+    /** SPA drill-down path, e.g. /tools */
+    readonly link: string | null;
+    readonly inline_action: NextActionInlineAction | null;
+}
+
+export interface NextActionsSourceNote {
+    /** which aggregation leg failed/skipped - keyed by card kind by design */
+    readonly source: NextActionKind;
+    readonly note: string;
+}
+
+export interface NextActionsPayload {
+    readonly generatedAt: string;
+    readonly cards: ReadonlyArray<NextActionCard>;
+    /** sources that failed or were skipped - fail-open, never 500 the panel */
+    readonly notes: ReadonlyArray<NextActionsSourceNote>;
 }
 
 export type ImproveActionStatus =

@@ -122,6 +122,34 @@ fresh clone.
 `ax cost sessions [--days=N] [--model=<name>] [--limit=N]` - top sessions by cost with id, project, model, started_at (default 14d/20 rows).
 `ax cost split [--days=N]` - origin (main vs subagent) × model matrix with cost and share-of-total; totals row. MCP: `cost_models`, `cost_split`.
 
+### Profile
+
+`ax profile show [--window=N] [--no-cost] [--json]` - render your local ax
+profile (ProfileV1: stats + rig + taste patterns) from the graph.
+`ax profile publish [--window=N] [--no-cost] [--if-stale=H] [--yes] [--skip-registration]` -
+publish to a public gist (create once, PATCH in place). First run: consent
+prompt showing the exact JSON, then fork + community/users/<login>.json
+registration PR into Necmttn/ax (git-data API, no local clone). The watcher
+runs `--if-stale=6` after ingest - silent no-op until first consent.
+`--no-cost` is sticky across republishes; `ax profile unpublish` (delete
+gist + local state) resets it. State: `~/.ax/profile-publish.json`. Spec:
+docs/superpowers/specs/2026-06-12-ax-profiles-design.md; site routes land
+in plan 4.
+
+Community rails: `community/users/<login>.json` registrations are validated
+(schema + author==filename, `scripts/validate-community-users.ts`) and
+auto-merged by `community-users.yml` (pull_request_target; PR head is data
+only, never executed); `community-nightly.yml` compiles registered gists
+into `community/{leaderboard,skill-stats,hook-stats,state/<year>}.json`
+(`scripts/compile-community.ts`, ETag-cached, absurd rows dropped). Compiled
+files are generated - never hand-edit.
+
+Site: `/u/<login>` renders a registered user's gist profile live;
+`/leaders` renders compiled boards + trending skills (empty-state until the
+first nightly compile). Both client-fetch from raw.githubusercontent / gist
+raw; validation in `apps/site/app/lib/community.ts` (manual - the site does
+not depend on effect).
+
 ### Dispatch routing
 
 `ax dispatches [--days=N] [--limit=N]` - subagent dispatch table sorted by child cost (default 14d/30 rows). Shows ts, agent_type, description, dispatch_model ("inherit" when no explicit model), child_model, child_cost_usd. Summary: count, % inherit, total subagent cost. MCP: `dispatches`.

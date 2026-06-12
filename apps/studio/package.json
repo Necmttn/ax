@@ -21,7 +21,8 @@
     "@tanstack/react-router": "^1.169",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
-    "shiki-magic-move": "^1.4.0"
+    "shiki-magic-move": "^1.4.0",
+    "effect": "catalog:"
   },
   "devDependencies": {
     "@types/react": "^19.2.0",

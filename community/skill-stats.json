@@ -1,0 +1,226 @@
+{
+  "local:agent-browser": {
+    "users": 1,
+    "runs": 6
+  },
+  "local:ax-repo": {
+    "users": 1,
+    "runs": 4
+  },
+  "local:batch-read-upfront": {
+    "users": 1,
+    "runs": 27
+  },
+  "local:claude-api": {
+    "users": 1,
+    "runs": 2
+  },
+  "local:code-review": {
+    "users": 1,
+    "runs": 2
+  },
+  "local:codex:rescue": {
+    "users": 1,
+    "runs": 3
+  },
+  "local:codex:review": {
+    "users": 1,
+    "runs": 1
+  },
+  "local:commit": {
+    "users": 1,
+    "runs": 5
+  },
+  "local:composto": {
+    "users": 1,
+    "runs": 26
+  },
+  "local:dev-browser": {
+    "users": 1,
+    "runs": 1
+  },
+  "local:diagnose": {
+    "users": 1,
+    "runs": 3
+  },
+  "local:dogfood": {
+    "users": 1,
+    "runs": 2
+  },
+  "local:effect-lint": {
+    "users": 1,
+    "runs": 4
+  },
+  "local:effect-solutions": {
+    "users": 1,
+    "runs": 2
+  },
+  "local:effect-testing": {
+    "users": 1,
+    "runs": 3
+  },
+  "local:electron": {
+    "users": 1,
+    "runs": 1
+  },
+  "local:expo-deployment": {
+    "users": 1,
+    "runs": 1
+  },
+  "local:fork-daemon-observability": {
+    "users": 1,
+    "runs": 1
+  },
+  "local:grill-me": {
+    "users": 1,
+    "runs": 2
+  },
+  "local:grill-with-docs": {
+    "users": 1,
+    "runs": 2
+  },
+  "local:gsd:execute-phase": {
+    "users": 1,
+    "runs": 1
+  },
+  "local:handoff": {
+    "users": 1,
+    "runs": 4
+  },
+  "local:linear-cli": {
+    "users": 1,
+    "runs": 1
+  },
+  "local:loop": {
+    "users": 1,
+    "runs": 1
+  },
+  "local:monitor-release": {
+    "users": 1,
+    "runs": 1
+  },
+  "local:observability": {
+    "users": 1,
+    "runs": 4
+  },
+  "local:plannotator-annotate": {
+    "users": 1,
+    "runs": 8
+  },
+  "local:pre-bash-guard": {
+    "users": 1,
+    "runs": 1
+  },
+  "local:pre-edit-planning": {
+    "users": 1,
+    "runs": 1
+  },
+  "local:project-investigation": {
+    "users": 1,
+    "runs": 4
+  },
+  "local:read-once": {
+    "users": 1,
+    "runs": 4
+  },
+  "local:release-announcement": {
+    "users": 1,
+    "runs": 3
+  },
+  "local:retro-meta": {
+    "users": 1,
+    "runs": 2
+  },
+  "local:review-all": {
+    "users": 1,
+    "runs": 26
+  },
+  "local:roast": {
+    "users": 1,
+    "runs": 2
+  },
+  "local:run": {
+    "users": 1,
+    "runs": 1
+  },
+  "local:schedule": {
+    "users": 1,
+    "runs": 1
+  },
+  "local:sim-test": {
+    "users": 1,
+    "runs": 1
+  },
+  "local:simplify": {
+    "users": 1,
+    "runs": 23
+  },
+  "local:to-issues": {
+    "users": 1,
+    "runs": 2
+  },
+  "local:update-config": {
+    "users": 1,
+    "runs": 2
+  },
+  "local:upgrading-expo": {
+    "users": 1,
+    "runs": 1
+  },
+  "local:wait-for-staging": {
+    "users": 1,
+    "runs": 1
+  },
+  "local:worktree-permissions": {
+    "users": 1,
+    "runs": 4
+  },
+  "local:worktree-read-strategy": {
+    "users": 1,
+    "runs": 26
+  },
+  "local:write-a-skill": {
+    "users": 1,
+    "runs": 1
+  },
+  "superpowers:superpowers:brainstorming": {
+    "users": 1,
+    "runs": 23
+  },
+  "superpowers:superpowers:dispatching-parallel-agents": {
+    "users": 1,
+    "runs": 1
+  },
+  "superpowers:superpowers:executing-plans": {
+    "users": 1,
+    "runs": 2
+  },
+  "superpowers:superpowers:finishing-a-development-branch": {
+    "users": 1,
+    "runs": 15
+  },
+  "superpowers:superpowers:receiving-code-review": {
+    "users": 1,
+    "runs": 1
+  },
+  "superpowers:superpowers:subagent-driven-development": {
+    "users": 1,
+    "runs": 29
+  },
+  "superpowers:superpowers:systematic-debugging": {
+    "users": 1,
+    "runs": 2
+  },
+  "superpowers:superpowers:test-driven-development": {
+    "users": 1,
+    "runs": 3
+  },
+  "superpowers:superpowers:using-git-worktrees": {
+    "users": 1,
+    "runs": 11
+  },
+  "superpowers:superpowers:writing-plans": {
+    "users": 1,
+    "runs": 22
+  }
+}

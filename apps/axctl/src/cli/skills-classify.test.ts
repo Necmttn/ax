@@ -206,6 +206,14 @@ describe("SQL shape (default mode)", () => {
         expect(capturedSql).toContain(`"brief"`);
         expect(capturedSql).toContain(`"user"`);
     });
+
+    test("default query excludes synthetic provider-tool skills", async () => {
+        const outDir = mkdtempSync(join(tmpdir(), "ax-classify-synthetic-"));
+        const tc = makeTestSurrealClient({ denyWrites: true });
+        await runWith(tc.client, cmdSkillsClassify({ names: [], outDir, dryRun: false, json: false }));
+        const capturedSql = tc.captured.at(-1) ?? "";
+        expect(capturedSql).toContain('dir_path != "(synthetic)"');
+    });
 });
 
 // ---------------------------------------------------------------------------
