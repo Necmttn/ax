@@ -122,10 +122,12 @@ Identity proof: CI requires PR author == `github` field == filename.
 - `ax contribute skill <name>` / `ax contribute hook <file>` - v1 thin: copy
   artifact + metadata onto a branch in the user's existing fork, open PR into
   `community/skills/` / `community/hooks/`. No registry semantics yet.
-- `ax contribute tip` - opens $EDITOR with a frontmatter template (author,
-  tags[], harness[], created), PRs `community/tips/<slug>.md` via the same
-  fork rails. Tips are the lowest-friction contribution unit - the gateway
-  to skills/hooks contributions.
+- `ax contribute pattern` - picker over the user's own profile
+  `taste.patterns` to promote one to `community/patterns/<category>/<name>.json`
+  via the same fork rails; authoring fresh goes through schema-validated
+  structured prompts (never a blank editor). Lowest-friction contribution
+  unit - the gateway to skills/hooks contributions. No free-form tips dir:
+  tips ARE patterns (see 3c).
 
 All GitHub operations (gist CRUD, fork, remote commit, PR) go through a
 `GitHubEnv` Effect service (mirrors hooks-sdk `GitEnv`) so commands are
@@ -164,10 +166,24 @@ community/state/<year>.json   // anonymized distributions: model share, harness 
 
 ### 3c. Community contributions
 
-`community/skills/`, `community/hooks/`, and `community/tips/` PRs follow the
-normal human-reviewed flow. Adoption stats from 3b can badge skill/hook
-READMEs; GitHub reactions on merged tip PRs serve as a lightweight quality
-signal later.
+`community/skills/` and `community/hooks/` PRs follow the normal
+human-reviewed flow. Adoption stats from 3b can badge their READMEs.
+
+`community/patterns/<category>/<name>.json` - shared tips/tricks as
+structured patterns, same schema as a gist `taste.patterns` entry. Messiness
+controls are mechanical, not editorial:
+
+- Closed category enum only - no free tags.
+- CI schema validation (same machinery as registration PRs).
+- Dedupe by filename: a collision forces engaging the existing pattern
+  (extend or `links[]` it) instead of duplicating.
+- `evidence` distinguishes measured patterns from drive-by opinion.
+- GitHub reactions on merged pattern PRs = lightweight quality signal later.
+
+One pattern schema everywhere: gist (personal taste), `community/patterns/`
+(shared), `state/<year>.json` (distribution). Prose-length tricks that need
+paragraphs belong in blog posts/discussions, not the registry - intentional
+non-goal.
 
 ## 4. Site (apps/site)
 
@@ -180,8 +196,9 @@ signal later.
   timestamp; self-reported nature stated on page.
 - `/skills/<source>:<name>` - adoption page ("used by 41 devs, 2.2k runs/30d")
   driven by `skill-stats.json`. Stretch within v1 if cheap; else first v2 item.
-- `/tips` - browsable tips & tricks from `community/tips/`, filterable by
-  tag/harness; each tip links its author's `/u/<login>`.
+- `/patterns` - browsable community patterns by category (failure-modes with
+  linked recoveries, strategies, workflows); each links its author's
+  `/u/<login>`.
 - All gist-sourced strings escaped; nothing from user JSON is interpreted as
   HTML.
 
