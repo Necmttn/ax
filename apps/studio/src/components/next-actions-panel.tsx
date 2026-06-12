@@ -5,7 +5,9 @@ import { api } from "../api.ts";
 import { CopyButton } from "./copy-button.tsx";
 
 export interface NextActionsHandlers {
-    readonly onAccept: (sig: string) => void;
+    /** open the proposal case file (detail) - accepting happens THERE,
+     *  next to the plan rail and projected impact, not from the card. */
+    readonly onReview: (sig: string) => void;
     readonly onVerdict: (sig: string, verdict: string) => void;
     /** true while any action mutation is in flight - disables all card buttons */
     readonly pending: boolean;
@@ -112,10 +114,9 @@ function NextActionCardView({
                     <button
                         type="button"
                         className="next-action-primary"
-                        disabled={handlers.pending}
-                        onClick={() => handlers.onAccept(acceptSig)}
+                        onClick={() => handlers.onReview(acceptSig)}
                     >
-                        {handlers.pending ? "…" : "Accept & scaffold"}
+                        Review &#8594;
                     </button>
                 ) : verdictSig && suggestedVerdict ? (
                     <button

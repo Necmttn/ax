@@ -2899,3 +2899,16 @@ td.skill-cell .description {
     color: var(--muted);
 }
 .lifecycle-rail li.current .lifecycle-label { color: var(--ink); font-weight: 600; }
+
+.proposal-case {
+    margin: 16px 0 4px;
+    position: relative;
+    border-left: 4px solid var(--green);
+}
+.proposal-case-close {
+    position: absolute;
+    top: 12px;
+    right: 14px;
+    z-index: 1;
+}
+.improve-history { margin-top: 24px; }

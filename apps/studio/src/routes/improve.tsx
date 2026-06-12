@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api.ts";
 import type {
@@ -66,10 +66,16 @@ export function ImproveRoute() {
         },
         [proposals, formFilter, statusFilter],
     );
+    // The case file opens only on an explicit Review/row click - no
+    // auto-select - and resolves from ALL proposals, not the filtered view.
     const selected = useMemo(
-        () => filtered.find((p) => p.dedupe_sig === selectedSig) ?? filtered[0] ?? null,
-        [filtered, selectedSig],
+        () => proposals.find((p) => p.dedupe_sig === selectedSig) ?? null,
+        [proposals, selectedSig],
     );
+    const caseRef = useRef<HTMLDivElement | null>(null);
+    useEffect(() => {
+        if (selectedSig !== null) caseRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, [selectedSig]);
 
     const onActionResult = (action: string, res: ImproveActionResponse) => {
         if (res.status === "ok") {
@@ -122,7 +128,7 @@ export function ImproveRoute() {
             </header>
 
             <NextActionsPanel handlers={{
-                onAccept: (sig) => acceptMutation.mutate(sig),
+                onReview: (sig) => setSelectedSig(sig),
                 onVerdict: (sig, v) => verdictMutation.mutate({ sig, verdict: v }),
                 pending: acceptMutation.isPending || rejectMutation.isPending || verdictMutation.isPending,
             }} />
@@ -131,8 +137,30 @@ export function ImproveRoute() {
             {actionError ? <div className="error">{actionError}</div> : null}
             {actionInfo ? <div className="empty" style={{ color: "var(--green)" }}>{actionInfo}</div> : null}
 
+            {selected ? (
+                <div className="proposal-case panel" ref={caseRef}>
+                    <button
+                        type="button"
+                        className="next-action-ghost proposal-case-close"
+                        onClick={() => setSelectedSig(null)}
+                    >
+                        close &#10005;
+                    </button>
+                    <ProposalDetail
+                        proposal={selected}
+                        rejectReason={rejectReason}
+                        onRejectReason={setRejectReason}
+                        onAccept={() => acceptMutation.mutate(selected.dedupe_sig)}
+                        onReject={() => rejectMutation.mutate({ sig: selected.dedupe_sig, reason: rejectReason || null })}
+                        onSetVerdict={(verdict) => verdictMutation.mutate({ sig: selected.dedupe_sig, verdict })}
+                        pending={acceptMutation.isPending || rejectMutation.isPending || verdictMutation.isPending}
+                    />
+                </div>
+            ) : null}
+
+            <details className="improve-history">
+            <summary style={{ cursor: "pointer" }}><strong>All proposals</strong> <span className="meta">{proposals.length} total - history and filters</span></summary>
             <div className="improve-registry-head">
-                <h3>All proposals</h3>
                 <span className="meta" title="Ranked by confidence × frequency - click a row for details">
                     {proposals.length} proposals · {filtered.length} shown
                 </span>
@@ -158,8 +186,7 @@ export function ImproveRoute() {
                 <div className="empty">No proposals match the current filters.</div>
             ) : null}
 
-            <div className="improve-grid">
-                <table className="skills">
+            <table className="skills">
                     <thead>
                         <tr>
                             <th>Freq</th>
@@ -211,23 +238,7 @@ export function ImproveRoute() {
                         })}
                     </tbody>
                 </table>
-
-                <aside className="panel" style={{ position: "sticky", top: 16, alignSelf: "flex-start" }}>
-                    {selected ? (
-                        <ProposalDetail
-                            proposal={selected}
-                            rejectReason={rejectReason}
-                            onRejectReason={setRejectReason}
-                            onAccept={() => acceptMutation.mutate(selected.dedupe_sig)}
-                            onReject={() => rejectMutation.mutate({ sig: selected.dedupe_sig, reason: rejectReason || null })}
-                            onSetVerdict={(verdict) => verdictMutation.mutate({ sig: selected.dedupe_sig, verdict })}
-                            pending={acceptMutation.isPending || rejectMutation.isPending || verdictMutation.isPending}
-                        />
-                    ) : (
-                        <div className="empty">Select a proposal to see details, accept it, or set a verdict.</div>
-                    )}
-                </aside>
-            </div>
+            </details>
 
             <details style={{ marginTop: 24 }}>
                 <summary style={{ cursor: "pointer" }}><strong>Decision log</strong></summary>
