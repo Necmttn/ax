@@ -43,6 +43,26 @@ export interface TastePattern {
     readonly context?: string;
     readonly evidence: { readonly sessions: number; readonly confidence: number; readonly last_reinforced?: string; readonly trend?: string };
 }
+export interface ProfileDailyRow {
+    readonly date: string;
+    readonly sessions: number;
+    readonly tokens: number;
+}
+export interface ProfileToolRun {
+    readonly name: string;
+    readonly runs: number;
+}
+export interface ProfileInsights {
+    readonly hours_total: number;
+    readonly longest_session_minutes: number;
+    readonly deep_session_share: number;
+    readonly peak_hour_utc: number;
+    readonly busiest_day: { readonly date: string; readonly sessions: number };
+    readonly max_parallel_sessions: number;
+    readonly subagents_spawned: number;
+    readonly commits: number;
+    readonly tools_top: readonly ProfileToolRun[];
+}
 export interface ProfileV1 {
     readonly v: 1;
     readonly github: string;
@@ -64,6 +84,8 @@ export interface ProfileV1 {
         readonly rules?: { readonly count: number };
     };
     readonly taste?: { readonly patterns: readonly TastePattern[] };
+    readonly activity?: { readonly daily: readonly ProfileDailyRow[] };
+    readonly insights?: ProfileInsights;
 }
 
 const optNum = (v: unknown, what: string): void => {
@@ -124,6 +146,37 @@ export function validateProfileV1(value: unknown): ProfileV1 {
             num(p.evidence.sessions, "evidence.sessions");
             num(p.evidence.confidence, "evidence.confidence");
             optStr(p.evidence.trend, "evidence.trend");
+        }
+    }
+    if (value.activity !== undefined) {
+        if (!isRecord(value.activity) || !Array.isArray(value.activity.daily)) {
+            throw new Error("invalid activity");
+        }
+        for (const d of value.activity.daily) {
+            if (!isRecord(d)) throw new Error("invalid activity.daily row");
+            str(d.date, "activity.daily.date");
+            num(d.sessions, "activity.daily.sessions");
+            num(d.tokens, "activity.daily.tokens");
+        }
+    }
+    if (value.insights !== undefined) {
+        const ins = value.insights;
+        if (!isRecord(ins)) throw new Error("invalid insights");
+        num(ins.hours_total, "insights.hours_total");
+        num(ins.longest_session_minutes, "insights.longest_session_minutes");
+        num(ins.deep_session_share, "insights.deep_session_share");
+        num(ins.peak_hour_utc, "insights.peak_hour_utc");
+        if (!isRecord(ins.busiest_day)) throw new Error("invalid insights.busiest_day");
+        str(ins.busiest_day.date, "insights.busiest_day.date");
+        num(ins.busiest_day.sessions, "insights.busiest_day.sessions");
+        num(ins.max_parallel_sessions, "insights.max_parallel_sessions");
+        num(ins.subagents_spawned, "insights.subagents_spawned");
+        num(ins.commits, "insights.commits");
+        if (!Array.isArray(ins.tools_top)) throw new Error("invalid insights.tools_top");
+        for (const t of ins.tools_top) {
+            if (!isRecord(t)) throw new Error("invalid tools_top row");
+            str(t.name, "tools_top.name");
+            num(t.runs, "tools_top.runs");
         }
     }
     return value as unknown as ProfileV1;

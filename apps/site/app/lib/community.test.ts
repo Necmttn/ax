@@ -50,6 +50,81 @@ describe("validateProfileV1", () => {
     });
 });
 
+describe("validateProfileV1 - activity + insights sections", () => {
+    const profileWithSections = {
+        ...validProfile,
+        activity: {
+            daily: [
+                { date: "2026-06-09", sessions: 31, tokens: 800_000 },
+            ],
+        },
+        insights: {
+            hours_total: 307.2,
+            longest_session_minutes: 960,
+            deep_session_share: 0.58,
+            peak_hour_utc: 13,
+            busiest_day: { date: "2026-06-09", sessions: 31 },
+            max_parallel_sessions: 11,
+            subagents_spawned: 420,
+            commits: 1000,
+            tools_top: [
+                { name: "Bash", runs: 5000 },
+            ],
+        },
+    };
+
+    test("accepts profile with valid activity + insights", () => {
+        const p = validateProfileV1(profileWithSections);
+        expect(p.activity!.daily[0]!.sessions).toBe(31);
+        expect(p.insights!.peak_hour_utc).toBe(13);
+        expect(p.insights!.busiest_day.date).toBe("2026-06-09");
+        expect(p.insights!.tools_top[0]!.name).toBe("Bash");
+    });
+
+    test("rejects non-number in tools_top.runs", () => {
+        const bad = {
+            ...profileWithSections,
+            insights: {
+                ...profileWithSections.insights,
+                tools_top: [{ name: "Bash", runs: "five-thousand" }],
+            },
+        };
+        expect(() => validateProfileV1(bad)).toThrow();
+    });
+
+    test("rejects non-string in tools_top.name", () => {
+        const bad = {
+            ...profileWithSections,
+            insights: {
+                ...profileWithSections.insights,
+                tools_top: [{ name: 42, runs: 100 }],
+            },
+        };
+        expect(() => validateProfileV1(bad)).toThrow();
+    });
+
+    test("rejects non-number hours_total", () => {
+        const bad = {
+            ...profileWithSections,
+            insights: {
+                ...profileWithSections.insights,
+                hours_total: "307.2",
+            },
+        };
+        expect(() => validateProfileV1(bad)).toThrow();
+    });
+
+    test("rejects daily row with non-number sessions", () => {
+        const bad = {
+            ...profileWithSections,
+            activity: {
+                daily: [{ date: "2026-06-09", sessions: "31", tokens: 800_000 }],
+            },
+        };
+        expect(() => validateProfileV1(bad)).toThrow();
+    });
+});
+
 describe("validateRegistration", () => {
     test("accepts {github, gist_id, joined}; rejects junk", () => {
         expect(validateRegistration({ github: "a", gist_id: "f00", joined: "2026-06-12" }).gist_id).toBe("f00");
