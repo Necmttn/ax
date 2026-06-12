@@ -36,6 +36,7 @@ export interface ProfileSkill {
     readonly name: string;
     readonly source: string;
     readonly runs: number;
+    readonly downstream_share?: number;
 }
 export interface TastePattern {
     readonly category: string;
@@ -46,10 +47,24 @@ export interface TastePattern {
     readonly context?: string;
     readonly evidence: { readonly sessions: number; readonly confidence: number; readonly last_reinforced?: string; readonly trend?: string };
 }
+export interface ProfileDailyModelRow {
+    readonly name: string;
+    readonly tokens: number;
+}
 export interface ProfileDailyRow {
     readonly date: string;
     readonly sessions: number;
     readonly tokens: number;
+    readonly models?: readonly ProfileDailyModelRow[];
+    readonly tool_calls?: number;
+    readonly commits?: number;
+}
+export interface WorkflowArc {
+    readonly steps: readonly string[];
+    readonly count: number;
+}
+export interface ProfileWorkflow {
+    readonly arcs: readonly WorkflowArc[];
 }
 export interface ProfileToolRun {
     readonly name: string;
@@ -98,6 +113,7 @@ export interface ProfileV1 {
     readonly taste?: { readonly patterns: readonly TastePattern[] };
     readonly activity?: { readonly daily: readonly ProfileDailyRow[] };
     readonly insights?: ProfileInsights;
+    readonly workflow?: ProfileWorkflow;
 }
 
 const optNum = (v: unknown, what: string): void => {
@@ -146,6 +162,7 @@ export function validateProfileV1(value: unknown): ProfileV1 {
         str(s.name, "skill.name");
         str(s.source, "skill.source");
         num(s.runs, "skill.runs");
+        optNum(s.downstream_share, "skill.downstream_share");
     }
     if (value.taste !== undefined) {
         if (!isRecord(value.taste) || !Array.isArray(value.taste.patterns)) throw new Error("invalid taste");
@@ -169,6 +186,17 @@ export function validateProfileV1(value: unknown): ProfileV1 {
             str(d.date, "activity.daily.date");
             num(d.sessions, "activity.daily.sessions");
             num(d.tokens, "activity.daily.tokens");
+            // New optional daily fields
+            optNum(d.tool_calls, "activity.daily.tool_calls");
+            optNum(d.commits, "activity.daily.commits");
+            if (d.models !== undefined) {
+                if (!Array.isArray(d.models)) throw new Error("invalid activity.daily.models");
+                for (const m of d.models) {
+                    if (!isRecord(m)) throw new Error("invalid daily model row");
+                    str(m.name, "daily.model.name");
+                    num(m.tokens, "daily.model.tokens");
+                }
+            }
         }
     }
     if (value.insights !== undefined) {
@@ -199,6 +227,17 @@ export function validateProfileV1(value: unknown): ProfileV1 {
         optNum(ins.repos_count, "insights.repos_count");
         optNum(ins.verification_calls, "insights.verification_calls");
         optNum(ins.context_calls, "insights.context_calls");
+    }
+    if (value.workflow !== undefined) {
+        if (!isRecord(value.workflow) || !Array.isArray(value.workflow.arcs)) {
+            throw new Error("invalid workflow");
+        }
+        for (const arc of value.workflow.arcs) {
+            if (!isRecord(arc)) throw new Error("invalid workflow arc");
+            if (!Array.isArray(arc.steps)) throw new Error("invalid workflow arc.steps");
+            for (const step of arc.steps) str(step, "workflow.arc.step");
+            num(arc.count, "workflow.arc.count");
+        }
     }
     return value as unknown as ProfileV1;
 }
