@@ -44,6 +44,11 @@ export class InternalError extends Schema.ErrorClass<InternalError>("ax/Internal
     error: Schema.String,
 }, { httpApiStatus: 500 }) {}
 
+/** A looked-up entity does not exist - `{ error }` with HTTP 404. */
+export class NotFoundError extends Schema.ErrorClass<NotFoundError>("ax/NotFoundError")({
+    error: Schema.String,
+}, { httpApiStatus: 404 }) {}
+
 /** POST /api/query - the read-only SQL console (SELECT/RETURN/INFO only). */
 export class QueryResult extends Schema.Class<QueryResult>("ax/QueryResult")({
     result: Schema.Unknown,
@@ -88,8 +93,73 @@ export const SystemGroup = HttpApiGroup.make("system")
         }),
     );
 
+/**
+ * The insights family: cross-source recall, project pages, episode
+ * timelines, the skill graph, wrapped profiles, workflow rollups, and tool
+ * failures. Payloads are `Schema.Unknown` for now (same later-pass deal as
+ * the system raw rows); paths, params, and status mapping are the contract.
+ *
+ * Path params are single-segment: every client URL-encodes ids, and the
+ * legacy greedy `:param+` rows remain mounted for raw-slash ids.
+ */
+export const InsightsGroup = HttpApiGroup.make("insights")
+    .add(
+        HttpApiEndpoint.get("recall", "/api/recall", {
+            query: {
+                q: Schema.optionalKey(Schema.String),
+                project: Schema.optionalKey(Schema.String),
+                skill: Schema.optionalKey(Schema.String),
+                since: Schema.optionalKey(Schema.String),
+                offset: Schema.optionalKey(Schema.Number),
+                limit: Schema.optionalKey(Schema.Number),
+            },
+            success: Schema.Unknown,
+            error: InternalError,
+        }),
+        HttpApiEndpoint.get("episodeTimeline", "/api/episodes/:parentId", {
+            params: { parentId: Schema.String },
+            success: Schema.Unknown,
+            error: InternalError,
+        }),
+        HttpApiEndpoint.get("skillGraph", "/api/skill-graph", {
+            query: {
+                minCount: Schema.optionalKey(Schema.Number),
+                limit: Schema.optionalKey(Schema.Number),
+            },
+            success: Schema.Unknown,
+            error: InternalError,
+        }),
+        HttpApiEndpoint.get("project", "/api/projects/:project", {
+            params: { project: Schema.String },
+            success: Schema.Unknown,
+            error: [NotFoundError, InternalError],
+        }),
+        HttpApiEndpoint.get("wrapped", "/api/wrapped", {
+            success: Schema.Unknown,
+            error: InternalError,
+        }),
+        HttpApiEndpoint.get("wrappedPublicPreview", "/api/wrapped/public-preview", {
+            success: Schema.Unknown,
+            error: InternalError,
+        }),
+        HttpApiEndpoint.get("workflow", "/api/workflow", {
+            success: Schema.Unknown,
+            error: InternalError,
+        }),
+        HttpApiEndpoint.get("toolFailures", "/api/tool-failures", {
+            success: Schema.Unknown,
+            error: InternalError,
+        }),
+        HttpApiEndpoint.get("toolFailureDetail", "/api/tool-failures/:label/detail", {
+            params: { label: Schema.String },
+            success: Schema.Unknown,
+            error: InternalError,
+        }),
+    );
+
 /** The Insights Surface Contract. Families join as they migrate (ADR-0013). */
 export const AxApi = HttpApi.make("ax")
     .add(SystemGroup)
+    .add(InsightsGroup)
     .annotate(OpenApi.Title, "ax daemon API")
     .annotate(OpenApi.Version, "1");

@@ -108,7 +108,8 @@ export function imageSrc(absolutePath: string): string {
 // import cycle; re-exported here so existing importers keep working.
 export { ApiError } from "./api-error.ts";
 import { ApiError } from "./api-error.ts";
-import { contractVersion } from "./contract-client.ts";
+import { runContract, type AxClient } from "./contract-client.ts";
+import type { Effect } from "effect";
 import type { DaemonVersion } from "@ax/lib/shared/api-contract";
 
 async function jsonFetch<T>(input: RequestInfo, init?: RequestInit): Promise<T> {
@@ -137,6 +138,29 @@ async function jsonFetch<T>(input: RequestInfo, init?: RequestInit): Promise<T> 
         throw new ApiError(detail, res.status);
     }
     return (await res.json()) as T;
+}
+
+/**
+ * Route a call through the Insights Surface Contract client (ADR-0013).
+ * Mock mode without a connected endpoint keeps the legacy mock-fixtures
+ * behavior, keyed by the same bare path jsonFetch used; otherwise the
+ * generated client runs against the connected endpoint (or same-origin).
+ * The `T` cast preserves the dashboard-types interfaces the UI was already
+ * trusting under jsonFetch<T> - contract payloads tighten in a later pass.
+ */
+async function viaContract<T>(
+    mockPath: string,
+    call: (client: AxClient) => Effect.Effect<unknown, unknown>,
+): Promise<T> {
+    if (STUDIO_MOCK) {
+        const endpoint = readEndpoint();
+        if (!endpoint) {
+            const { mockFetch } = await import("./mock-fixtures.ts");
+            return mockFetch<T>(mockPath);
+        }
+        return await runContract(endpoint, call) as T;
+    }
+    return await runContract(null, call) as T;
 }
 
 export interface IngestTriggerResponse {
@@ -205,20 +229,8 @@ export interface SessionTimelinePayload {
 }
 
 export const api = {
-    // First contract-client call (ADR-0013): typed end-to-end against the
-    // same Schema the daemon serves. Mock mode without a connected endpoint
-    // keeps the legacy mockFetch behavior (no /api/version fixture -> throws).
-    version: async (): Promise<DaemonVersion> => {
-        if (STUDIO_MOCK) {
-            const endpoint = readEndpoint();
-            if (!endpoint) {
-                const { mockFetch } = await import("./mock-fixtures.ts");
-                return mockFetch("/api/version");
-            }
-            return contractVersion(endpoint);
-        }
-        return contractVersion(null);
-    },
+    version: (): Promise<DaemonVersion> =>
+        viaContract("/api/version", (c) => c.system.version()),
     skills: (): Promise<SkillTriageResponse> => jsonFetch("/api/skills"),
     decide: (
         name: string,
@@ -259,7 +271,8 @@ export const api = {
         }),
     decisions: (): Promise<{ decisions: ReadonlyArray<SkillTriageNote> }> =>
         jsonFetch("/api/decisions"),
-    workflow: (): Promise<WorkflowResponse> => jsonFetch("/api/workflow"),
+    workflow: (): Promise<WorkflowResponse> =>
+        viaContract("/api/workflow", (c) => c.insights.workflow()),
     sessions: (params: { offset?: number; limit?: number; source?: string; project?: string } = {}): Promise<SessionListResponse> => {
         const usp = new URLSearchParams();
         if (params.offset != null) usp.set("offset", String(params.offset));
@@ -303,9 +316,15 @@ export const api = {
         return jsonFetch(`/api/sessions/compare?${usp.toString()}`);
     },
     episodeTimeline: (parentId: string): Promise<EpisodeTimelinePayload> =>
-        jsonFetch(`/api/episodes/${encodeURIComponent(parentId)}`),
+        viaContract(
+            `/api/episodes/${encodeURIComponent(parentId)}`,
+            (c) => c.insights.episodeTimeline({ params: { parentId } }),
+        ),
     project: (slug: string): Promise<ProjectPagePayload> =>
-        jsonFetch(`/api/projects/${encodeURIComponent(slug)}`),
+        viaContract(
+            `/api/projects/${encodeURIComponent(slug)}`,
+            (c) => c.insights.project({ params: { project: slug } }),
+        ),
     graphExplorer: (params: {
         mode?: GraphExplorerMode;
         q?: string | null;
@@ -328,13 +347,14 @@ export const api = {
         jsonFetch(`/api/session-orchestration?id=${encodeURIComponent(id)}`),
     sessionSummary: (id: string): Promise<SessionSummary> =>
         jsonFetch(`/api/session-summary?id=${encodeURIComponent(id)}`),
-    skillGraph: (params: { minCount?: number; limit?: number } = {}): Promise<SkillGraphPayload> => {
-        const usp = new URLSearchParams();
-        if (params.minCount != null) usp.set("minCount", String(params.minCount));
-        if (params.limit != null) usp.set("limit", String(params.limit));
-        const qs = usp.toString();
-        return jsonFetch(qs ? `/api/skill-graph?${qs}` : "/api/skill-graph");
-    },
+    skillGraph: (params: { minCount?: number; limit?: number } = {}): Promise<SkillGraphPayload> =>
+        viaContract("/api/skill-graph", (c) =>
+            c.insights.skillGraph({
+                query: {
+                    ...(params.minCount != null ? { minCount: params.minCount } : {}),
+                    ...(params.limit != null ? { limit: params.limit } : {}),
+                },
+            })),
     recall: (params: {
         q: string;
         project?: string | null;
@@ -342,16 +362,18 @@ export const api = {
         since?: string | null;
         offset?: number;
         limit?: number;
-    }): Promise<RecallResponse> => {
-        const usp = new URLSearchParams();
-        usp.set("q", params.q);
-        if (params.project) usp.set("project", params.project);
-        if (params.skill) usp.set("skill", params.skill);
-        if (params.since) usp.set("since", params.since);
-        if (params.offset != null) usp.set("offset", String(params.offset));
-        if (params.limit != null) usp.set("limit", String(params.limit));
-        return jsonFetch(`/api/recall?${usp.toString()}`);
-    },
+    }): Promise<RecallResponse> =>
+        viaContract("/api/recall", (c) =>
+            c.insights.recall({
+                query: {
+                    q: params.q,
+                    ...(params.project ? { project: params.project } : {}),
+                    ...(params.skill ? { skill: params.skill } : {}),
+                    ...(params.since ? { since: params.since } : {}),
+                    ...(params.offset != null ? { offset: params.offset } : {}),
+                    ...(params.limit != null ? { limit: params.limit } : {}),
+                },
+            })),
     /** Trigger a live ingest run. Returns the full Durable Streams sidecar URL
      *  the browser subscribes to directly (the sidecar has permissive CORS and
      *  runs on its own localhost port). */
@@ -361,12 +383,17 @@ export const api = {
             headers: { "content-type": "application/json" },
             body: JSON.stringify(params.since != null ? { since: params.since } : {}),
         }),
-    toolFailures: (): Promise<ToolFailuresResponse> => jsonFetch("/api/tool-failures"),
+    toolFailures: (): Promise<ToolFailuresResponse> =>
+        viaContract("/api/tool-failures", (c) => c.insights.toolFailures()),
     toolFailureDetail: (label: string): Promise<ToolFailureDetailPayload> =>
-        jsonFetch(`/api/tool-failures/${encodeURIComponent(label)}/detail`),
-    wrapped: (): Promise<WrappedProfile> => jsonFetch("/api/wrapped"),
+        viaContract(
+            `/api/tool-failures/${encodeURIComponent(label)}/detail`,
+            (c) => c.insights.toolFailureDetail({ params: { label } }),
+        ),
+    wrapped: (): Promise<WrappedProfile> =>
+        viaContract("/api/wrapped", (c) => c.insights.wrapped()),
     wrappedPublicPreview: (): Promise<WrappedProfile> =>
-        jsonFetch("/api/wrapped/public-preview"),
+        viaContract("/api/wrapped/public-preview", (c) => c.insights.wrappedPublicPreview()),
 
     // Experiment loop - see
     // docs/superpowers/plans/2026-05-25-experiment-loop-cleanup-and-rebuild.md
