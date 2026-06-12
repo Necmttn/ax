@@ -88,11 +88,18 @@ const gatherEnv = Effect.gen(function* () {
 const integer = (n: number): string =>
     Number.isFinite(n) ? Math.trunc(n).toLocaleString("en-US") : "0";
 
+/** Human money: >=1000 -> "~$22.6K", else "$22". */
+const money = (n: number): string => {
+    if (!Number.isFinite(n)) return "$0";
+    if (n >= 1000) return `~$${(n / 1000).toFixed(1)}K`;
+    return `$${n.toFixed(0)}`;
+};
+
 export function formatProfile(p: ProfileV1): string {
     const lines: string[] = [];
     lines.push(`ax profile - @${p.github}  (last ${p.window_days}d)`);
     lines.push("");
-    const cost = p.stats.cost_usd !== undefined ? `  ·  $${p.stats.cost_usd.toFixed(2)} est` : "";
+    const cost = p.stats.cost_usd !== undefined ? `  ·  ${money(p.stats.cost_usd)} est` : "";
     lines.push(
         `${integer(p.stats.sessions)} sessions  ·  ${integer(p.stats.tokens.total)} tokens${cost}`,
     );
@@ -108,13 +115,31 @@ export function formatProfile(p: ProfileV1): string {
         ...topSkills.map((s) => s.name.length),
     );
     for (const m of p.stats.models) {
-        const c = m.cost_usd !== undefined ? `  $${m.cost_usd.toFixed(2)}` : "";
+        const c = m.cost_usd !== undefined ? `  ${money(m.cost_usd)}` : "";
         lines.push(`  ${m.name.padEnd(nameWidth)} ${(m.share * 100).toFixed(0).padStart(3)}%${c}`);
     }
     lines.push("");
     lines.push(`rig: ${p.rig.skills.length} skills · ${p.rig.hooks.length} hooks · routing_table: ${p.rig.routing_table}${p.rig.rules ? ` · ${p.rig.rules.count} rules` : ""}`);
     for (const s of topSkills) {
         lines.push(`  ${s.name.padEnd(nameWidth)} ${integer(s.runs).padStart(6)} runs  (${s.source})`);
+    }
+    if (p.insights) {
+        const ins = p.insights;
+        const deepPct = (ins.deep_session_share * 100).toFixed(0);
+        lines.push("");
+        lines.push("insights:");
+        lines.push(
+            `  ${ins.hours_total.toFixed(1)}h total  ·  longest: ${integer(ins.longest_session_minutes)}min  ·  deep (>=90min): ${deepPct}%`,
+        );
+        lines.push(
+            `  peak hour: ${String(ins.peak_hour_utc).padStart(2, "0")}:00 UTC  ·  max parallel: ${ins.max_parallel_sessions}  ·  spawned: ${integer(ins.subagents_spawned)}  ·  commits: ${integer(ins.commits)}`,
+        );
+        if (ins.tools_top.length > 0) {
+            lines.push("  top tools:");
+            for (const t of ins.tools_top.slice(0, 5)) {
+                lines.push(`    ${t.name.padEnd(20)} ${integer(t.runs).padStart(7)} runs`);
+            }
+        }
     }
     if (p.taste) {
         lines.push("");
