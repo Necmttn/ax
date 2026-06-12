@@ -9469,7 +9469,6 @@ footer .right {
 }
 .stat-row { display: flex; gap: 28px; flex-wrap: wrap; margin: 20px 0; }
 .stat-value { font-size: 1.6rem; font-family: var(--mono); }
-.muted { color: var(--muted); }
 .bar-row { display: flex; align-items: center; gap: 10px; margin: 4px 0; font-family: var(--mono); font-size: 0.85rem; }
 .bar-label { width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .bar-track { flex: 1; height: 8px; background: var(--line); border-radius: 4px; overflow: hidden; }

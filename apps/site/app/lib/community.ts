@@ -66,6 +66,18 @@ export interface ProfileV1 {
     readonly taste?: { readonly patterns: readonly TastePattern[] };
 }
 
+const optNum = (v: unknown, what: string): void => {
+    if (v !== undefined) num(v, what);
+};
+const optStr = (v: unknown, what: string): void => {
+    if (v !== undefined) str(v, what);
+};
+
+/**
+ * Every field a route renders as a JSX child or calls a method on MUST be
+ * validated here - a hostile gist value that survives this function can
+ * only ever render as text, never crash the page.
+ */
 export function validateProfileV1(value: unknown): ProfileV1 {
     if (!isRecord(value) || value.v !== 1) throw new Error("not a v1 ax profile");
     const stats = value.stats;
@@ -73,19 +85,32 @@ export function validateProfileV1(value: unknown): ProfileV1 {
     if (!isRecord(stats) || !isRecord(rig)) throw new Error("profile missing stats/rig");
     const tokens = stats.tokens;
     if (!isRecord(tokens)) throw new Error("profile missing tokens");
-    num(stats.sessions, "sessions");
-    num(tokens.total, "tokens.total");
     str(value.github, "github");
+    str(value.generated_at, "generated_at");
+    num(value.window_days, "window_days");
+    num(stats.sessions, "sessions");
+    num(stats.active_days, "active_days");
+    num(stats.streak_days, "streak_days");
+    num(tokens.total, "tokens.total");
+    optNum(stats.cost_usd, "cost_usd");
     if (!Array.isArray(stats.models) || !Array.isArray(stats.harnesses)) throw new Error("invalid stats arrays");
+    for (const h of stats.harnesses) str(h, "harness");
     if (!Array.isArray(rig.skills) || !Array.isArray(rig.hooks)) throw new Error("invalid rig arrays");
+    for (const h of rig.hooks) str(h, "hook");
+    if (rig.rules !== undefined) {
+        if (!isRecord(rig.rules)) throw new Error("invalid rules");
+        num(rig.rules.count, "rules.count");
+    }
     for (const m of stats.models) {
         if (!isRecord(m)) throw new Error("invalid model row");
         str(m.name, "model.name");
         num(m.share, "model.share");
+        optNum(m.cost_usd, "model.cost_usd");
     }
     for (const s of rig.skills) {
         if (!isRecord(s)) throw new Error("invalid skill row");
         str(s.name, "skill.name");
+        str(s.source, "skill.source");
         num(s.runs, "skill.runs");
     }
     if (value.taste !== undefined) {
@@ -94,6 +119,11 @@ export function validateProfileV1(value: unknown): ProfileV1 {
             if (!isRecord(p) || !isRecord(p.evidence)) throw new Error("invalid pattern");
             str(p.category, "pattern.category");
             str(p.name, "pattern.name");
+            optStr(p.summary, "pattern.summary");
+            optStr(p.slot, "pattern.slot");
+            num(p.evidence.sessions, "evidence.sessions");
+            num(p.evidence.confidence, "evidence.confidence");
+            optStr(p.evidence.trend, "evidence.trend");
         }
     }
     return value as unknown as ProfileV1;
@@ -162,7 +192,8 @@ export function validateSkillStats(value: unknown): SkillStats {
     const out: Record<string, { users: number; runs: number }> = {};
     for (const [k, v] of Object.entries(value)) {
         if (!isRecord(v)) continue;
-        if (typeof v.users === "number" && typeof v.runs === "number") {
+        if (typeof v.users === "number" && Number.isFinite(v.users)
+            && typeof v.runs === "number" && Number.isFinite(v.runs)) {
             out[k] = { users: v.users, runs: v.runs };
         }
     }

@@ -29,7 +29,17 @@ function ProfilePage() {
         let alive = true;
         setState({ kind: "loading" });
         fetchProfile(login)
-            .then((profile) => alive && setState({ kind: "ready", profile }))
+            .then((profile) => {
+                if (!alive) return;
+                // Identity binding: the registered login must match the
+                // gist's claimed github handle, else a hostile gist could
+                // impersonate another user on its /u/ page.
+                if (profile.github.toLowerCase() !== login.toLowerCase()) {
+                    setState({ kind: "error", message: "profile identity mismatch" });
+                    return;
+                }
+                setState({ kind: "ready", profile });
+            })
             .catch((e: unknown) => {
                 if (!alive) return;
                 const notFound = typeof e === "object" && e !== null && (e as { notFound?: boolean }).notFound === true;
@@ -79,10 +89,10 @@ function ProfileCard({ profile: p }: { profile: ProfileV1 }) {
 
             <section>
                 <h2>models</h2>
-                {p.stats.models.map((m) => (
-                    <div className="bar-row" key={m.name}>
+                {p.stats.models.map((m, i) => (
+                    <div className="bar-row" key={`${m.name}-${i}`}>
                         <span className="bar-label">{m.name}</span>
-                        <span className="bar-track"><span className="bar-fill" style={{ width: `${Math.min(100, m.share * 100)}%` }} /></span>
+                        <span className="bar-track"><span className="bar-fill" style={{ width: `${Math.min(100, Math.max(0, m.share * 100))}%` }} /></span>
                         <span className="bar-value">{(m.share * 100).toFixed(0)}%{m.cost_usd !== undefined ? ` · $${m.cost_usd.toFixed(0)}` : ""}</span>
                     </div>
                 ))}

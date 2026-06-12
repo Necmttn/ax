@@ -59,8 +59,9 @@ function LeadersPage() {
             <main className="leaders-page">
                 <h1>leaders</h1>
                 <p className="muted">
-                    Measured from real agent telemetry (last 30 days), self-reported by each
-                    user's local ax graph. Join: <code>ax profile publish</code>
+                    Measured from real agent telemetry (last{" "}
+                    {state.kind === "ready" ? state.lb.window_days : 30} days), self-reported
+                    by each user's local ax graph. Join: <code>ax profile publish</code>
                 </p>
 
                 {state.kind === "loading" && <p className="muted">loading…</p>}
