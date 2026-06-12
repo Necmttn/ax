@@ -9632,32 +9632,104 @@ footer .right {
     gap: 44px;
     align-items: start;
 }
-.pf-window--solo { grid-template-columns: minmax(0, 1fr); max-width: 640px; }
 @media (max-width: 880px) {
     .pf-window { grid-template-columns: minmax(0, 1fr); gap: 36px; }
 }
 
-.pf-chart {
+/* stacked-bar chart: one model-keyed column per day, hover tooltip */
+.pf-stack-wrap { min-width: 0; }
+.pf-stack {
+    position: relative;
     display: flex;
     align-items: flex-end;
     gap: 3px;
-    height: 132px;
+    height: 156px;
     border-bottom: 2px solid var(--ink);
 }
-.pf-chart-day {
+.pf-stack-day {
+    position: relative;
     flex: 1 1 0;
     min-width: 0;
     height: 100%;
     display: flex;
     align-items: flex-end;
+    justify-content: stretch;
+    padding: 0;
+    margin: 0;
+    border: 0;
+    background: none;
+    cursor: default;
+    appearance: none;
 }
-.pf-chart-fill { width: 100%; display: block; }
-.pf-chart-fill.pf-q1 { background: color-mix(in srgb, var(--green) 28%, var(--page)); }
-.pf-chart-fill.pf-q2 { background: color-mix(in srgb, var(--green) 52%, var(--page)); }
-.pf-chart-fill.pf-q3 { background: color-mix(in srgb, var(--green) 78%, var(--page)); }
-.pf-chart-fill.pf-q4 { background: var(--green); }
-.pf-chart-fill.is-peak { background: var(--red); }
-.pf-chart-day:hover .pf-chart-fill { background: var(--ink); }
+.pf-stack-day:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+.pf-stack-col {
+    position: relative;
+    width: 100%;
+    display: flex;
+    flex-direction: column-reverse; /* first (largest) segment at the base */
+    min-height: 0;
+    transition: opacity 0.08s ease;
+}
+.pf-stack-seg { display: block; flex-basis: 0; min-height: 1px; }
+/* dim the rest of the chart when one day is hovered, so the focused bar pops */
+.pf-stack:hover .pf-stack-day:not(.is-hover) .pf-stack-col { opacity: 0.45; }
+.pf-stack-day.is-peak .pf-stack-col { box-shadow: 0 0 0 1.5px var(--ink); }
+.pf-stack-peak {
+    position: absolute;
+    bottom: -16px;
+    left: 50%;
+    transform: translateX(-50%);
+    font-size: 8px;
+    line-height: 1;
+    color: var(--ink);
+}
+@media (max-width: 560px) {
+    .pf-stack { gap: 2px; height: 116px; }
+}
+
+/* hover tooltip - heatmap-style, all daily metrics */
+.pf-tip {
+    position: absolute;
+    bottom: calc(100% + 10px);
+    z-index: 5;
+    width: max-content;
+    max-width: 220px;
+    background: var(--ink);
+    color: var(--page);
+    border: 1px solid var(--ink);
+    padding: 9px 11px 10px;
+    box-shadow: 4px 4px 0 color-mix(in srgb, var(--ink) 14%, transparent);
+    pointer-events: none;
+    font-family: var(--mono);
+}
+.pf-tip-date {
+    font-size: 11px;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: color-mix(in srgb, var(--page) 70%, var(--ink));
+    margin-bottom: 6px;
+}
+.pf-tip-rows {
+    display: grid;
+    grid-template-columns: auto auto;
+    gap: 2px 14px;
+    font-size: 12px;
+    margin-bottom: 6px;
+}
+.pf-tip-k { color: color-mix(in srgb, var(--page) 62%, var(--ink)); }
+.pf-tip-v { text-align: right; font-weight: 600; }
+.pf-tip-models {
+    border-top: 1px solid color-mix(in srgb, var(--page) 28%, var(--ink));
+    padding-top: 6px;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+}
+.pf-tip-model { display: grid; grid-template-columns: 9px 1fr auto; gap: 8px; align-items: center; font-size: 11.5px; }
+.pf-tip-chip { width: 9px; height: 9px; display: block; }
+.pf-tip-model-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pf-tip-model-tok { color: color-mix(in srgb, var(--page) 70%, var(--ink)); }
+
 .pf-chart-axis {
     display: flex;
     justify-content: space-between;
@@ -9670,41 +9742,35 @@ footer .right {
 }
 .pf-chart-axis-mid { text-align: center; }
 @media (max-width: 560px) {
-    .pf-chart { gap: 2px; height: 96px; }
     .pf-chart-axis-mid { display: none; }
 }
 
-.pf-models { min-width: 0; }
-.pf-models-head {
+/* legend: color chip + model + share% + cost - replaces the old split rows */
+.pf-legend { min-width: 0; align-self: start; }
+.pf-legend-head {
     font-family: var(--mono);
     font-size: 10.5px;
     text-transform: uppercase;
     letter-spacing: 0.13em;
     color: var(--muted);
     padding-bottom: 9px;
-    margin-bottom: 16px;
+    margin-bottom: 12px;
     border-bottom: 1px solid var(--line);
 }
-.pf-model { margin-bottom: 15px; }
-.pf-model-top {
-    display: flex;
-    justify-content: space-between;
+.pf-legend-row {
+    display: grid;
+    grid-template-columns: 11px minmax(0, 1fr) auto;
+    gap: 10px;
     align-items: baseline;
-    gap: 14px;
+    padding: 6px 0;
     font-family: var(--mono);
     font-size: 13px;
+    border-bottom: 1px solid var(--line);
 }
-.pf-model-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
-.pf-model-meta { color: var(--muted); white-space: nowrap; font-size: 12px; }
-.pf-model-meta strong { color: var(--ink); font-weight: 600; font-size: 13px; }
-.pf-model-track {
-    display: block;
-    height: 6px;
-    background: color-mix(in srgb, var(--line) 55%, var(--page));
-    margin-top: 6px;
-}
-.pf-model-fill { display: block; height: 100%; background: var(--ink); }
-.pf-model-fill--lead { background: var(--green); }
+.pf-legend-chip { width: 11px; height: 11px; display: block; align-self: center; box-shadow: 0 0 0 0.5px color-mix(in srgb, var(--ink) 18%, transparent); }
+.pf-legend-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.pf-legend-meta { color: var(--muted); white-space: nowrap; font-size: 12px; }
+.pf-legend-meta strong { color: var(--ink); font-weight: 600; font-size: 13px; }
 
 /* ----- 02 insight cards (wrapped-style) ----- */
 .pf-cards {
@@ -9841,29 +9907,51 @@ footer .right {
     .pf-card-a { font-size: 32px; }
 }
 
-/* ----- 03 tool taste ----- */
-.pf-tools { max-width: 760px; }
-.pf-tool {
-    display: grid;
-    grid-template-columns: 26px minmax(96px, 168px) minmax(0, 1fr) 64px;
+/* ----- the rig: workflow arcs ----- */
+.pf-workflow { margin-bottom: 36px; }
+.pf-workflow-head {
+    display: flex;
+    align-items: baseline;
     gap: 14px;
-    align-items: center;
-    font-family: var(--mono);
-    font-size: 13px;
-    padding: 8px 0;
-    border-bottom: 1px solid var(--line);
+    border-bottom: 1px solid var(--ink);
+    padding-bottom: 6px;
+    margin-bottom: 14px;
 }
-.pf-tool-rank { color: var(--muted); font-size: 11px; }
-.pf-tool-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.pf-tool-track { display: block; min-width: 0; }
-.pf-tool-bar { display: block; height: 9px; background: var(--ink); }
-.pf-tool-bar--lead { background: var(--green); }
-.pf-tool-runs { text-align: right; color: var(--muted); font-size: 12px; }
-@media (max-width: 560px) {
-    .pf-tool { grid-template-columns: 22px minmax(72px, 110px) minmax(0, 1fr) 52px; gap: 10px; font-size: 12px; }
+.pf-workflow-title {
+    font-family: var(--serif);
+    font-size: 19px;
+    letter-spacing: -0.3px;
+    color: var(--ink);
+}
+.pf-workflow-note { font-family: var(--mono); font-size: 11.5px; color: var(--muted); }
+.pf-arcs { display: flex; flex-direction: column; gap: 10px; }
+.pf-arc {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+}
+.pf-arc-chain { display: flex; align-items: center; flex-wrap: wrap; gap: 0; min-width: 0; }
+.pf-arc-step-wrap { display: inline-flex; align-items: center; }
+.pf-arc-sep { color: var(--muted); margin: 0 7px; font-size: 13px; }
+.pf-arc-chip {
+    font-family: var(--mono);
+    font-size: 12.5px;
+    border: 1px solid var(--line);
+    background: var(--panel);
+    color: var(--ink);
+    padding: 3px 9px;
+    white-space: nowrap;
+}
+.pf-arc-count {
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--green);
+    font-weight: 600;
+    white-space: nowrap;
 }
 
-/* ----- 04 the rig ----- */
+/* ----- the rig ----- */
 .pf-rig {
     display: grid;
     grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
@@ -9888,18 +9976,37 @@ footer .right {
     margin-bottom: 4px;
 }
 .pf-rig-group-head span:first-child { color: var(--ink); }
+.pf-rig-group-hint {
+    font-family: var(--mono);
+    font-size: 10.5px;
+    line-height: 1.4;
+    color: var(--muted);
+    padding: 6px 0 8px;
+}
 .pf-skill {
-    display: flex;
-    justify-content: space-between;
-    align-items: baseline;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
     gap: 16px;
-    padding: 6px 0;
+    padding: 7px 0;
     border-bottom: 1px solid var(--line);
     font-family: var(--mono);
     font-size: 13px;
 }
 .pf-skill-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
-.pf-skill-runs { color: var(--muted); font-size: 11.5px; white-space: nowrap; }
+.pf-skill-lev { display: flex; align-items: center; gap: 9px; white-space: nowrap; }
+.pf-skill-track {
+    display: block;
+    width: 60px;
+    height: 7px;
+    background: color-mix(in srgb, var(--line) 55%, var(--page));
+}
+.pf-skill-bar { display: block; height: 100%; background: var(--green); }
+.pf-skill-share { font-size: 12px; color: var(--ink); font-weight: 600; min-width: 30px; text-align: right; }
+.pf-skill-runs { color: var(--muted); font-size: 11.5px; }
+@media (max-width: 560px) {
+    .pf-skill-track { width: 40px; }
+}
 .pf-rig-more {
     font-family: var(--mono);
     font-size: 11px;
