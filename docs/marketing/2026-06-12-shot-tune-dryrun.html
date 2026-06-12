@@ -1,0 +1,288 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>ax routing tune --dry-run</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link
+  href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&display=swap"
+  rel="stylesheet"
+/>
+<style>
+  :root {
+    --bg: #111111;
+    --window-bg: #1a1a1a;
+    --titlebar-bg: #242424;
+    --border: #333333;
+    --text: #e8e4dc;
+    --dim: #8a8680;
+    --faint: #5a5752;
+    --amber: #ffcb6b;
+    --green: #c3e88d;
+    --red: #f07178;
+    --blue: #89ddff;
+    --prompt: #c3e88d;
+    --mono: "JetBrains Mono", ui-monospace, Menlo, monospace;
+  }
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body {
+    width: 1200px;
+    height: 675px;
+    background: var(--bg);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: var(--mono);
+  }
+
+  .window {
+    width: 1120px;
+    height: 607px;
+    background: var(--window-bg);
+    border-radius: 12px;
+    border: 1px solid var(--border);
+    box-shadow:
+      0 0 0 0.5px #000,
+      0 32px 80px rgba(0,0,0,0.85),
+      0 8px 20px rgba(0,0,0,0.6);
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+  }
+
+  /* Title bar */
+  .titlebar {
+    height: 44px;
+    background: var(--titlebar-bg);
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    padding: 0 16px;
+    flex-shrink: 0;
+    position: relative;
+  }
+  .dots {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+  }
+  .dot {
+    width: 13px;
+    height: 13px;
+    border-radius: 50%;
+  }
+  .dot.close  { background: #ff5f57; border: 0.5px solid rgba(0,0,0,0.15); }
+  .dot.min    { background: #febc2e; border: 0.5px solid rgba(0,0,0,0.15); }
+  .dot.max    { background: #28c840; border: 0.5px solid rgba(0,0,0,0.15); }
+  .titlebar-label {
+    position: absolute;
+    left: 50%;
+    transform: translateX(-50%);
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--faint);
+    letter-spacing: 0.02em;
+  }
+
+  /* Terminal body */
+  .terminal {
+    flex: 1;
+    padding: 36px 40px 36px;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+  }
+
+  .spacer { flex: 1; min-height: 24px; max-height: 80px; }
+
+  /* Command line */
+  .cmd-line {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    margin-bottom: 20px;
+  }
+  .prompt { color: var(--prompt); font-size: 15px; font-weight: 600; }
+  .cmd { color: var(--text); font-size: 15px; font-weight: 500; }
+  .cmd .flag { color: var(--blue); }
+
+  /* Table */
+  .table-wrap {
+    flex-shrink: 0;
+    margin-bottom: 24px;
+  }
+
+  .tbl {
+    width: 100%;
+    border-collapse: collapse;
+  }
+  .tbl thead tr th {
+    text-align: left;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--faint);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    padding: 0 0 10px 0;
+    border-bottom: 1px solid #2a2a2a;
+  }
+  .tbl thead tr th.right { text-align: right; }
+  .tbl tbody tr td {
+    font-size: 13px;
+    font-weight: 400;
+    color: var(--dim);
+    padding: 7px 0;
+  }
+  .tbl tbody tr td.right { text-align: right; }
+  .tbl tbody tr:first-child td { padding-top: 12px; }
+
+  .tbl .col-id    { width: 175px; }
+  .tbl .col-pat   { width: 245px; }
+  .tbl .col-sug   { width: 105px; }
+  .tbl .col-cnt   { width: 80px; text-align: right; }
+  .tbl .col-addr  { width: 135px; text-align: right; }
+  .tbl .col-judg  { width: 110px; text-align: right; }
+
+  .id-text { color: #c4c0b6; }
+  .sug-text { color: var(--green); }
+  .addr-text { color: #ccc8bf; }
+  .judg-no  { color: #55524d; }
+  .judg-yes { color: #c9a050; font-weight: 600; letter-spacing: 0.04em; }
+
+  .ellipsis-row td {
+    color: var(--faint);
+    font-size: 13px;
+    padding: 6px 0;
+    letter-spacing: 0.04em;
+  }
+
+  /* Divider */
+  .divider {
+    border: none;
+    border-top: 1px solid #252525;
+    margin: 4px 0 20px;
+    flex-shrink: 0;
+  }
+
+  /* Footer section */
+  .footer-section {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+  }
+
+  .summary-line {
+    font-size: 24px;
+    font-weight: 700;
+    color: var(--text);
+    line-height: 1.4;
+    margin-bottom: 8px;
+  }
+  .summary-line .num { color: var(--amber); font-weight: 700; }
+  .summary-line .days { color: var(--dim); font-weight: 400; font-size: 20px; }
+
+  .action-line {
+    font-size: 15px;
+    font-weight: 400;
+    color: var(--dim);
+    line-height: 1.8;
+    margin-top: 2px;
+  }
+  .action-line .label { color: var(--faint); }
+  .action-line .cmd-ref { color: var(--amber); font-weight: 500; }
+</style>
+</head>
+<body>
+  <div class="window">
+    <div class="titlebar">
+      <div class="dots">
+        <div class="dot close"></div>
+        <div class="dot min"></div>
+        <div class="dot max"></div>
+      </div>
+      <div class="titlebar-label">ax - routing tune</div>
+    </div>
+
+    <div class="terminal">
+
+      <div class="cmd-line">
+        <span class="prompt">$</span>
+        <span class="cmd">ax routing tune <span class="flag">--dry-run</span> <span class="flag">--days=30</span></span>
+      </div>
+
+      <div class="table-wrap">
+        <table class="tbl">
+          <thead>
+            <tr>
+              <th class="col-id">id</th>
+              <th class="col-pat">pattern</th>
+              <th class="col-sug">suggest</th>
+              <th class="col-cnt right">count</th>
+              <th class="col-addr right">addressable</th>
+              <th class="col-judg right">judgment</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td class="col-id"><span class="id-text">issue-N</span></td>
+              <td class="col-pat"><span style="color:#6e6b65">^issue\s+\d+\b</span></td>
+              <td class="col-sug"><span class="sug-text">sonnet</span></td>
+              <td class="col-cnt right">12</td>
+              <td class="col-addr right"><span class="addr-text">$161.42</span></td>
+              <td class="col-judg right"><span class="judg-no">no</span></td>
+            </tr>
+            <tr>
+              <td class="col-id"><span class="id-text">quality-review</span></td>
+              <td class="col-pat"><span style="color:#6e6b65">^quality\s+review\b</span></td>
+              <td class="col-sug"><span class="sug-text">sonnet</span></td>
+              <td class="col-cnt right">43</td>
+              <td class="col-addr right"><span class="addr-text">$105.90</span></td>
+              <td class="col-judg right"><span class="judg-yes">YES</span></td>
+            </tr>
+            <tr>
+              <td class="col-id"><span class="id-text">plan-phase</span></td>
+              <td class="col-pat"><span style="color:#6e6b65">^plan\s+phase\b</span></td>
+              <td class="col-sug"><span class="sug-text">sonnet</span></td>
+              <td class="col-cnt right">4</td>
+              <td class="col-addr right"><span class="addr-text">$77.64</span></td>
+              <td class="col-judg right"><span class="judg-yes">YES</span></td>
+            </tr>
+            <tr>
+              <td class="col-id"><span class="id-text">final-review</span></td>
+              <td class="col-pat"><span style="color:#6e6b65">^final\s+review\b</span></td>
+              <td class="col-sug"><span class="sug-text">sonnet</span></td>
+              <td class="col-cnt right">16</td>
+              <td class="col-addr right"><span class="addr-text">$75.70</span></td>
+              <td class="col-judg right"><span class="judg-yes">YES</span></td>
+            </tr>
+            <tr class="ellipsis-row">
+              <td colspan="6" style="letter-spacing: 0.12em; padding-top: 6px; color: #3e3c38;">· · ·</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="spacer"></div>
+
+      <hr class="divider" />
+
+      <div class="footer-section">
+        <div class="summary-line">
+          20 proposals &nbsp;&nbsp;addressable spend: <span class="num">$591.57</span>
+          <span class="days">&nbsp;(30 days)</span>
+        </div>
+
+        <div class="action-line">
+          <span class="label">apply non-judgment: &nbsp;</span><span class="cmd-ref">ax routing tune --days=30</span>
+        </div>
+        <div class="action-line">
+          <span class="label">brief: &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</span><span class="cmd-ref">ax routing tune --emit-brief</span>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</body>
+</html>
