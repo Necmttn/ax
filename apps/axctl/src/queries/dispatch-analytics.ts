@@ -16,8 +16,13 @@
  */
 import { Effect, FileSystem, Path } from "effect";
 import { SurrealClient } from "@ax/lib/db";
-import { homedir } from "node:os";
 import { estimateCost, type ModelPricing } from "../ingest/model-pricing.ts";
+import {
+    defaultRoutingTablePath,
+    loadStoredRoutingTable,
+    mergeRoutingTables,
+    saveStoredRoutingTable,
+} from "./routing-table-io.ts";
 
 // ---------------------------------------------------------------------------
 // Routing classes
@@ -696,19 +701,19 @@ export const fetchDispatchCandidates = Effect.fn("queries.fetchDispatchCandidate
 export interface CompileRoutingResult {
     readonly path: string;
     readonly written: boolean;
+    readonly preserved_user_classes: number;
 }
 
 export const compileRouting = (
     outPath?: string,
 ): Effect.Effect<CompileRoutingResult, never, FileSystem.FileSystem | Path.Path> =>
     Effect.gen(function* () {
-        const fs = yield* FileSystem.FileSystem;
-        const path = yield* Path.Path;
-        const resolvedPath = outPath ?? path.join(homedir(), ".ax", "hooks", "routing-table.json");
-        const json = JSON.stringify(ROUTING_CLASSES, null, 2);
-        yield* fs.makeDirectory(path.dirname(resolvedPath), { recursive: true }).pipe(Effect.orDie);
-        yield* fs.writeFileString(resolvedPath, json).pipe(Effect.orDie);
-        return { path: resolvedPath, written: true };
+        const resolvedPath = outPath ?? defaultRoutingTablePath();
+        const existing = yield* loadStoredRoutingTable(resolvedPath);
+        const merged = mergeRoutingTables(ROUTING_CLASSES, existing);
+        yield* saveStoredRoutingTable(resolvedPath, merged);
+        const preserved = merged.classes.filter((c) => c.origin === "user").length;
+        return { path: resolvedPath, written: true, preserved_user_classes: preserved };
     });
 
 // ---------------------------------------------------------------------------

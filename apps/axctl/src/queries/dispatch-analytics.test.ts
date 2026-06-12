@@ -13,7 +13,7 @@ import { BunFileSystem, BunPath } from "@effect/platform-bun";
 import { SurrealClient, type SurrealClientShape } from "@ax/lib/db";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { readFileSync } from "node:fs";
+import { readFileSync, writeFileSync, mkdtempSync } from "node:fs";
 
 import {
     fetchDispatches,
@@ -629,5 +629,33 @@ describe("fetchDispatchCandidates with a custom table", () => {
         );
         expect(result.candidates).toHaveLength(1);
         expect(result.candidates[0]!.routing_match.classId).toBe("summarize");
+    });
+});
+
+// ---------------------------------------------------------------------------
+// compileRouting merge-preserve
+// ---------------------------------------------------------------------------
+
+describe("compileRouting merge-preserve", () => {
+    it("preserves user classes across regeneration and tags defaults", async () => {
+        const dir = mkdtempSync(join(tmpdir(), "ax-compile-routing-"));
+        const p = join(dir, "routing-table.json");
+        // seed
+        await runCompileRouting(p);
+        // hand-add a user class (simulating a prior `ax routing tune` apply)
+        const seeded = JSON.parse(readFileSync(p, "utf8"));
+        seeded.classes.push({
+            id: "my-mined-class", pattern: "^summarize", flags: "i",
+            suggest: "haiku", reason: "mined", origin: "user",
+        });
+        writeFileSync(p, JSON.stringify(seeded));
+        // regenerate
+        const result = await runCompileRouting(p);
+        expect(result.written).toBe(true);
+        const after = JSON.parse(readFileSync(p, "utf8"));
+        const ids = after.classes.map((c: { id: string }) => c.id);
+        expect(ids).toContain("my-mined-class");
+        expect(after.classes[0].origin).toBe("default");
+        expect(after.classes.filter((c: { id: string }) => c.id === "spec-review")).toHaveLength(1);
     });
 });

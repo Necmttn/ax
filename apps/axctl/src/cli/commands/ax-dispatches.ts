@@ -196,7 +196,11 @@ const compileRoutingCommand = Command.make(
         if (json) {
             console.log(prettyPrint(result));
         } else {
-            console.log(`routing-table written: ${result.path}`);
+            console.log(
+                result.preserved_user_classes > 0
+                    ? `routing-table written: ${result.path} (${result.preserved_user_classes} user classes preserved)`
+                    : `routing-table written: ${result.path}`,
+            );
         }
     }),
 ).pipe(
