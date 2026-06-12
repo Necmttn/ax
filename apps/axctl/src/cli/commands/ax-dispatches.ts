@@ -24,6 +24,7 @@ import {
     fetchDispatches,
     fetchDispatchCandidates,
     compileRouting,
+    compileRoutingSkillMd,
 } from "../../queries/dispatch-analytics.ts";
 import { buildDispatchesNext, buildCandidatesNext } from "../../nav/next-links.ts";
 import type { RuntimeManifest } from "./manifest.ts";
@@ -171,9 +172,25 @@ const compileRoutingCommand = Command.make(
     "compile-routing",
     {
         out: Flag.string("out").pipe(Flag.optional),
+        skillMd: Flag.string("skill-md").pipe(Flag.optional),
         json: jsonFlag,
     },
-    ({ out, json }) => Effect.gen(function* () {
+    ({ out, skillMd, json }) => Effect.gen(function* () {
+        const skillPath = optionValue(skillMd);
+        if (skillPath !== undefined) {
+            const result = yield* compileRoutingSkillMd(skillPath);
+            if (result.error) {
+                fail(`compile-routing --skill-md: ${result.error} in ${result.path}`);
+            }
+            if (json) {
+                console.log(prettyPrint(result));
+            } else {
+                console.log(result.written
+                    ? `skill routing table regenerated: ${result.path}`
+                    : `skill routing table already current: ${result.path}`);
+            }
+            return;
+        }
         const outPath = optionValue(out);
         const result = yield* compileRouting(outPath);
         if (json) {
@@ -185,7 +202,8 @@ const compileRoutingCommand = Command.make(
 ).pipe(
     Command.withDescription(
         "Write ~/.ax/hooks/routing-table.json from the built-in ROUTING_CLASSES constant. " +
-        "Idempotent regenerate. --out=PATH overrides default path. --json",
+        "Idempotent regenerate. --out=PATH overrides default path. " +
+        "--skill-md=PATH instead regenerates the ax:routing-table section of a skill markdown. --json",
     ),
 );
 

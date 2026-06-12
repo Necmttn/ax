@@ -1,6 +1,7 @@
 import { describe, expect, it } from "bun:test";
 import { minimalShareArtifact, type AxSessionShare } from "../share/artifact.ts";
 import { formatStaleUsageWarning } from "../share/format.ts";
+import type { ShareNarrationArtifact } from "../share/manifest.ts";
 import type { ShareTranscriptHit } from "../share/recover.ts";
 import { cmdShareWithDeps, parseShareArgs, type ShareCommandDeps } from "./share.ts";
 
@@ -23,6 +24,28 @@ const TURN_USAGE = {
     usage_quality: "exact",
 };
 
+const NARRATION: ShareNarrationArtifact = {
+    schema_version: 1,
+    kind: "narration",
+    meta: {
+        session_id: "abc123",
+        generated_at: "2026-06-11T00:00:00.000Z",
+        generator: "skill",
+        model: "test-model",
+    },
+    title: "Share narration",
+    intent: "Explain why the session changed.",
+    before: "No story tab.",
+    after: "A story tab is available.",
+    stops: [{
+        title: "Attach the artifact",
+        gist: "The bundle carries the narration file.",
+        detail: "The viewer can fetch `narration.json` from the same gist.",
+        transition: "",
+        anchors: [{ kind: "turn", turn_seq: 1, label: "narration generated" }],
+    }],
+};
+
 function makeHarness(
     artifact: AxSessionShare | null = minimalShareArtifact({ id: "abc123", source: "codex" }),
     overrides: Partial<ShareCommandDeps> = {},
@@ -43,6 +66,7 @@ function makeHarness(
             ingestCalls.push(hit);
             return { kind: "ingested" };
         },
+        loadNarration: async () => null,
         publish: async (input) => {
             published.push(input);
             return { owner: "necmttn", gistId: "gist123" };
@@ -125,6 +149,18 @@ describe("cmdShareWithDeps", () => {
         expect(bundle["session.json"].session.id).toBe("abc123");
         expect(harness.stderr()).toBe("");
         expect(harness.published).toHaveLength(0);
+    });
+
+    it("includes a local narration artifact in the dry-run bundle when present", async () => {
+        const harness = makeHarness(undefined, {
+            loadNarration: async (sessionId) => sessionId === "abc123" ? NARRATION : null,
+        });
+        await cmdShareWithDeps(["abc123", "--dry-run"], harness.deps);
+
+        const bundle = JSON.parse(harness.stdout());
+        expect(bundle["index.json"].schema_version).toBe(5);
+        expect(bundle["index.json"].narration_file).toBe("narration.json");
+        expect(bundle["narration.json"].title).toBe("Share narration");
     });
 
     it("shows preview without publishing when --yes is omitted", async () => {

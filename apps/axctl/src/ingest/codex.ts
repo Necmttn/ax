@@ -597,7 +597,11 @@ function createCodexExtractor(
 
         const transcriptCallId = stringField(payload, "call_id");
         const callId = transcriptCallId ?? nextAnonymousFunctionCallId();
-        const inputJson = parseCodexArguments(payload.arguments);
+        // function_call carries JSON `arguments`; custom_tool_call (apply_patch)
+        // carries the raw patch text in `input` - wrap it so apply-patch LOC
+        // consumers find their `patch` field.
+        const customInput = payload.arguments === undefined ? stringField(payload, "input") : null;
+        const inputJson = customInput !== null ? { patch: customInput } : parseCodexArguments(payload.arguments);
         const turnKey = turnRecordKey(currentSession.id, seq);
         const toolCallKey = toolCallRecordKey({
             sessionId: currentSession.id,
@@ -914,8 +918,12 @@ function createCodexExtractor(
                 seq += 1;
                 const itemType = stringField(payload, "type");
                 const message = codexMessageRecord(payload);
+                // apply_patch arrives as custom_tool_call (a freeform tool),
+                // not function_call - treat both as tool calls or codex edits
+                // never reach the tool_call table.
+                const isToolCall = itemType === "function_call" || itemType === "custom_tool_call";
                 const role =
-                    itemType === "function_call"
+                    isToolCall
                         ? "tool_call"
                         : itemType === "message"
                           ? (stringField(message ?? {}, "role") ?? "assistant")
@@ -923,8 +931,6 @@ function createCodexExtractor(
 
                 const text = textFromCodexContent(message?.content);
                 const textExcerpt = text === null ? null : text.slice(0, 500);
-
-                const isToolCall = itemType === "function_call";
                 const kind = codexMessageKind(role, itemType, textExcerpt);
                 turns.push({
                     session: session.id,
@@ -940,7 +946,7 @@ function createCodexExtractor(
 
                 if (isToolCall) {
                     processFunctionCall(payload, ts, session);
-                } else if (itemType === "function_call_output") {
+                } else if (itemType === "function_call_output" || itemType === "custom_tool_call_output") {
                     processFunctionOutput(payload, ts, session);
                 } else {
                     pushProviderEvent({

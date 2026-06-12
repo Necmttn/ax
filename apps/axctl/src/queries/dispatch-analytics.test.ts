@@ -19,6 +19,8 @@ import {
     fetchDispatches,
     fetchDispatchCandidates,
     compileRouting,
+    renderRoutingTableMarkdown,
+    replaceSkillRoutingSection,
     ROUTING_CLASSES,
     matchRouting,
 } from "./dispatch-analytics.ts";
@@ -60,8 +62,8 @@ describe("ROUTING_CLASSES", () => {
         expect(ROUTING_CLASSES.version).toBe(1);
     });
 
-    it("has 5 classes", () => {
-        expect(ROUTING_CLASSES.classes).toHaveLength(5);
+    it("has 8 classes", () => {
+        expect(ROUTING_CLASSES.classes).toHaveLength(8);
     });
 
     it("has agentTypes for Explore, codebase-locator, codebase-pattern-finder, codebase-analyzer", () => {
@@ -516,5 +518,53 @@ describe("compileRouting", () => {
         await runCompileRouting(outPath);
         const parsed = JSON.parse(readFileSync(outPath, "utf8"));
         expect(parsed.agentTypes).toMatchObject(ROUTING_CLASSES.agentTypes);
+    });
+});
+
+// ---------------------------------------------------------------------------
+// skill-md routing section
+// ---------------------------------------------------------------------------
+
+describe("renderRoutingTableMarkdown / replaceSkillRoutingSection", () => {
+    it("renders one row per class plus an agent-types row, pipes escaped", () => {
+        const md = renderRoutingTableMarkdown();
+        for (const cls of ROUTING_CLASSES.classes) {
+            expect(md).toContain(`| ${cls.id} |`);
+        }
+        expect(md).toContain("agent types");
+        // Alternation pipes inside patterns must be escaped for the table.
+        expect(md).toContain("\\|");
+    });
+
+    it("replaces only the marked section and is idempotent", () => {
+        const doc = [
+            "# heading",
+            "",
+            "<!-- ax:routing-table -->",
+            "stale table",
+            "<!-- /ax:routing-table -->",
+            "",
+            "tail text",
+        ].join("\n");
+        const once = replaceSkillRoutingSection(doc);
+        expect(once).not.toBeNull();
+        expect(once!).toContain("# heading");
+        expect(once!).toContain("tail text");
+        expect(once!).not.toContain("stale table");
+        expect(once!).toContain("| spec-review |");
+        const twice = replaceSkillRoutingSection(once!);
+        expect(twice).toBe(once!);
+    });
+
+    it("returns null when markers are missing", () => {
+        expect(replaceSkillRoutingSection("no markers here")).toBeNull();
+    });
+
+    it("the shipped efficient-dispatch skill is in sync with ROUTING_CLASSES", () => {
+        const skillPath = join(import.meta.dir, "../../../../skills/efficient-dispatch/SKILL.md");
+        const content = readFileSync(skillPath, "utf8");
+        const regenerated = replaceSkillRoutingSection(content);
+        expect(regenerated).not.toBeNull();
+        expect(regenerated!).toBe(content);
     });
 });

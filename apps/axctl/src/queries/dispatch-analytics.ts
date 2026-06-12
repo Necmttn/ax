@@ -84,6 +84,31 @@ export const ROUTING_CLASSES: RoutingTable = {
             suggest: "sonnet",
             reason: "bulk mechanical work",
         },
+        // Mined by /routing-tune 2026-06-12 (adversarially backtested over 90d;
+        // brief: .ax/tasks/routing-tune-undated.md). The colon in task-N-impl
+        // is load-bearing: "Task 4 spec compliance review" (no colon) must NOT
+        // match - reviews stay on the main model.
+        {
+            id: "task-N-impl",
+            pattern: "^Task \\d+:",
+            flags: "i",
+            suggest: "sonnet",
+            reason: "numbered plan-task implementation",
+        },
+        {
+            id: "bug-fix",
+            pattern: "^Fix\\s",
+            flags: "i",
+            suggest: "sonnet",
+            reason: "bounded bug-fix remediation",
+        },
+        {
+            id: "feature-add",
+            pattern: "^Add\\s",
+            flags: "i",
+            suggest: "sonnet",
+            reason: "additive feature with a clear target",
+        },
     ],
     agentTypes: {
         Explore: "haiku",
@@ -677,4 +702,77 @@ export const compileRouting = (
         yield* fs.makeDirectory(path.dirname(resolvedPath), { recursive: true }).pipe(Effect.orDie);
         yield* fs.writeFileString(resolvedPath, json).pipe(Effect.orDie);
         return { path: resolvedPath, written: true };
+    });
+
+// ---------------------------------------------------------------------------
+// compile-routing --skill-md: regenerate the routing table inside a skill doc
+// ---------------------------------------------------------------------------
+
+const SKILL_TABLE_OPEN = "<!-- ax:routing-table -->";
+const SKILL_TABLE_CLOSE = "<!-- /ax:routing-table -->";
+
+/** Render ROUTING_CLASSES as the markdown table embedded in skill docs. */
+export const renderRoutingTableMarkdown = (): string => {
+    const lines = [
+        "| class | description pattern | model |",
+        "|---|---|---|",
+    ];
+    for (const cls of ROUTING_CLASSES.classes) {
+        // Escape pipes so regex alternations don't break the table.
+        const pattern = cls.pattern.replace(/\|/g, "\\|");
+        lines.push(`| ${cls.id} | \`${pattern}\` | ${cls.suggest} |`);
+    }
+    const byModel = new Map<string, string[]>();
+    for (const [agentType, model] of Object.entries(ROUTING_CLASSES.agentTypes ?? {})) {
+        const list = byModel.get(model) ?? [];
+        list.push(agentType);
+        byModel.set(model, list);
+    }
+    const agentTypes = [...byModel.entries()]
+        .map(([model, types]) => `${types.join(", ")} → ${model}`)
+        .join("; ");
+    if (agentTypes) lines.push(`| agent types | ${agentTypes} | |`);
+    return lines.join("\n");
+};
+
+/**
+ * Replace the marked routing-table section in a skill markdown body.
+ * Returns null when the markers are missing (caller surfaces the error).
+ */
+export const replaceSkillRoutingSection = (content: string): string | null => {
+    const open = content.indexOf(SKILL_TABLE_OPEN);
+    const close = content.indexOf(SKILL_TABLE_CLOSE);
+    if (open === -1 || close === -1 || close < open) return null;
+    return (
+        content.slice(0, open + SKILL_TABLE_OPEN.length) +
+        "\n" + renderRoutingTableMarkdown() + "\n" +
+        content.slice(close)
+    );
+};
+
+export interface CompileSkillMdResult {
+    readonly path: string;
+    readonly written: boolean;
+    readonly error?: string;
+}
+
+/** Regenerate the `ax:routing-table` section of a skill markdown file in place. */
+export const compileRoutingSkillMd = (
+    skillPath: string,
+): Effect.Effect<CompileSkillMdResult, never, FileSystem.FileSystem> =>
+    Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const content = yield* fs.readFileString(skillPath).pipe(Effect.orDie);
+        const updated = replaceSkillRoutingSection(content);
+        if (updated === null) {
+            return {
+                path: skillPath,
+                written: false,
+                error: `missing ${SKILL_TABLE_OPEN} ... ${SKILL_TABLE_CLOSE} markers`,
+            };
+        }
+        if (updated !== content) {
+            yield* fs.writeFileString(skillPath, updated).pipe(Effect.orDie);
+        }
+        return { path: skillPath, written: updated !== content };
     });

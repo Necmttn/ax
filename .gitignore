@@ -14,7 +14,11 @@ dist/
 # local agent + harness state
 .ax/
 .claude/agents/
-.claude/workflows/
+# committed named workflows (Bun-repo pattern) - keep *.workflow.js versioned,
+# ignore everything else in the dir (gitignore can't re-include inside an
+# excluded DIRECTORY, so exclude contents with /* instead)
+.claude/workflows/*
+!.claude/workflows/*.workflow.js
 .claude/worktrees/
 .claude/scheduled_tasks.lock
 

@@ -5,7 +5,30 @@ import {
     deriveShareTaskLabel,
     isAxSessionShareManifest,
     subagentFileName,
+    type ShareNarrationArtifact,
 } from "./manifest.ts";
+
+const narration: ShareNarrationArtifact = {
+    schema_version: 1,
+    kind: "narration",
+    meta: {
+        session_id: "solo",
+        generated_at: "2026-06-11T00:00:00.000Z",
+        generator: "skill",
+        model: "test-model",
+    },
+    title: "Share narration",
+    intent: "Explain why the session changed.",
+    before: "No story tab.",
+    after: "A story tab is available.",
+    stops: [{
+        title: "Attach the artifact",
+        gist: "The bundle carries the narration file.",
+        detail: "The viewer can fetch `narration.json` from the same gist.",
+        transition: "",
+        anchors: [{ kind: "turn", turn_seq: 1, label: "narration generated" }],
+    }],
+};
 
 const child = (
     id: string,
@@ -132,6 +155,14 @@ describe("buildShareBundle", () => {
         const bundle = buildShareBundle(minimalShareArtifact({ id: "solo", source: "codex" }));
         expect(bundle.files.map((f) => f.name)).toEqual(["index.json", "session.json"]);
         expect(bundle.manifest.totals.subagents).toBe(0);
+    });
+
+    it("emits narration.json and points the v5 manifest at it when provided", () => {
+        const bundle = buildShareBundle(minimalShareArtifact({ id: "solo", source: "codex" }), narration);
+        expect(bundle.manifest.schema_version).toBe(5);
+        expect(bundle.manifest.narration_file).toBe("narration.json");
+        expect(bundle.files.map((f) => f.name)).toEqual(["index.json", "session.json", "narration.json"]);
+        expect(bundle.files.find((f) => f.name === "narration.json")?.content).toBe(narration);
     });
 
     it("validates a produced manifest", () => {

@@ -417,13 +417,13 @@ describe("sessions command", () => {
         expect(names).toContain("sessions");
     });
 
-    test("sessions exposes here, around, near subcommands", () => {
+    test("sessions exposes here, around, near, churn subcommands", () => {
         const sessions = rootCommand.subcommands
             .flatMap((g) => g.commands)
             .find((c) => c.name === "sessions");
         expect(sessions).toBeDefined();
         const subNames = sessions!.subcommands.flatMap((g) => g.commands.map((c) => c.name));
-        expect(subNames).toEqual(expect.arrayContaining(["here", "around", "near"]));
+        expect(subNames).toEqual(expect.arrayContaining(["here", "around", "near", "churn"]));
     });
 
     test("sessions is routed as a DB command", () => {

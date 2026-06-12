@@ -25,8 +25,8 @@ import type { GraphExplorerMode } from "@ax/lib/shared/dashboard-types";
 import { WrappedRoute } from "./routes/wrapped.tsx";
 import { ImproveRoute } from "./routes/improve.tsx";
 import { IngestLiveRoute } from "./routes/ingest-live.tsx";
-import { NarrationPanel } from "./routes/narration-panel.tsx";
-import { sampleNarration } from "./routes/narration-sample.ts";
+import { ReviewView } from "./routes/review-view.tsx";
+import { sampleNarration, sampleNarrationTurns } from "./routes/narration-sample.ts";
 import { ShareInspectView } from "./routes/share-inspect.tsx";
 
 const rootRoute = createRootRoute({
@@ -235,7 +235,7 @@ const ingestLiveRoute = createRoute({
     component: IngestLiveRoute,
 });
 
-/** Prototype showcase for the session-narration artifact (sample data). */
+/** Prototype showcase for the Story review surface (sample narration + turns). */
 const narrationDemoRoute = createRoute({
     getParentRoute: () => rootRoute,
     path: "/narration-demo",
@@ -246,10 +246,14 @@ function NarrationDemoRoute() {
     return (
         <section className="panel">
             <header>
-                <h2>Session narration (prototype)</h2>
-                <span className="meta">sample artifact · schema v1</span>
+                <h2>Story review surface (prototype)</h2>
+                <span className="meta">sample narration · schema v1</span>
             </header>
-            <NarrationPanel narration={sampleNarration} onJumpToTurn={() => {}} />
+            <ReviewView
+                data={{ turns: sampleNarrationTurns }}
+                narration={sampleNarration}
+                onOpenTranscript={() => {}}
+            />
         </section>
     );
 }

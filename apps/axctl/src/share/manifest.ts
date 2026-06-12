@@ -19,6 +19,15 @@ import {
  */
 export const SHARE_MANIFEST_FILE = "index.json" as const;
 export const SHARE_ROOT_FILE = "session.json" as const;
+export const SHARE_NARRATION_FILE = "narration.json" as const;
+export const AX_SESSION_SHARE_MANIFEST_SCHEMA_VERSION = 5 as const;
+export const SUPPORTED_SHARE_MANIFEST_SCHEMA_VERSIONS = [3, 4, 5] as const;
+
+export interface ShareNarrationArtifact {
+    readonly schema_version: number;
+    readonly kind: "narration";
+    readonly [key: string]: unknown;
+}
 
 /** Filename for a descendant's full share, derived from its session id. */
 export function subagentFileName(sessionId: string): string {
@@ -70,7 +79,7 @@ export interface ShareTotals {
 }
 
 export interface AxSessionShareManifest {
-    readonly schema_version: typeof AX_SESSION_SHARE_SCHEMA_VERSION;
+    readonly schema_version: typeof AX_SESSION_SHARE_SCHEMA_VERSION | typeof AX_SESSION_SHARE_MANIFEST_SCHEMA_VERSION;
     readonly kind: "manifest";
     readonly exported_at: string;
     readonly ax_version: string;
@@ -79,6 +88,8 @@ export interface AxSessionShareManifest {
     readonly token_usage?: SessionTokenUsageDetail | null;
     /** Filename of the root session's full share. */
     readonly root_file: typeof SHARE_ROOT_FILE;
+    /** v5 additive: optional generated narration artifact in this gist. */
+    readonly narration_file?: typeof SHARE_NARRATION_FILE;
     readonly totals: ShareTotals;
     readonly subagents: ReadonlyArray<ShareSubagentCard>;
     readonly redactions: AxSessionShare["redactions"];
@@ -87,7 +98,7 @@ export interface AxSessionShareManifest {
 /** One gist file: a name plus its parsed JSON payload. */
 export interface ShareBundleFile {
     readonly name: string;
-    readonly content: AxSessionShare | AxSessionShareManifest;
+    readonly content: AxSessionShare | AxSessionShareManifest | ShareNarrationArtifact;
 }
 
 /** The complete multi-file bundle ready to publish or print. */
@@ -149,7 +160,7 @@ const sum = (values: ReadonlyArray<number>): number => values.reduce((a, b) => a
  * multi-file bundle: a manifest with per-descendant cards + whole-trace
  * totals, the root file, and one file per descendant.
  */
-export function buildShareBundle(root: AxSessionShare): ShareBundle {
+export function buildShareBundle(root: AxSessionShare, narration?: ShareNarrationArtifact): ShareBundle {
     const cards: ShareSubagentCard[] = [];
     const descendantFiles: ShareBundleFile[] = [];
 
@@ -168,7 +179,7 @@ export function buildShareBundle(root: AxSessionShare): ShareBundle {
     const childDurations = cards.map((c) => c.duration_ms).filter((v): v is number => v !== null);
 
     const manifest: AxSessionShareManifest = {
-        schema_version: AX_SESSION_SHARE_SCHEMA_VERSION,
+        schema_version: narration ? AX_SESSION_SHARE_MANIFEST_SCHEMA_VERSION : AX_SESSION_SHARE_SCHEMA_VERSION,
         kind: "manifest",
         exported_at: root.exported_at,
         ax_version: root.ax_version,
@@ -188,6 +199,7 @@ export function buildShareBundle(root: AxSessionShare): ShareBundle {
         },
         subagents: cards,
         redactions: root.redactions,
+        ...(narration ? { narration_file: SHARE_NARRATION_FILE } : {}),
     };
 
     return {
@@ -196,6 +208,7 @@ export function buildShareBundle(root: AxSessionShare): ShareBundle {
             { name: SHARE_MANIFEST_FILE, content: manifest },
             { name: SHARE_ROOT_FILE, content: withoutChildren(root) },
             ...descendantFiles,
+            ...(narration ? [{ name: SHARE_NARRATION_FILE, content: narration }] : []),
         ],
     };
 }
@@ -207,11 +220,13 @@ export function isAxSessionShareManifest(value: unknown): value is AxSessionShar
     return (
         isRecord(value) &&
         value.kind === "manifest" &&
-        value.schema_version === AX_SESSION_SHARE_SCHEMA_VERSION &&
+        typeof value.schema_version === "number" &&
+        (SUPPORTED_SHARE_MANIFEST_SCHEMA_VERSIONS as readonly number[]).includes(value.schema_version) &&
         isRecord(value.session) &&
         typeof value.session.id === "string" &&
         isRecord(value.totals) &&
         Array.isArray(value.subagents) &&
-        typeof value.root_file === "string"
+        typeof value.root_file === "string" &&
+        (value.narration_file === undefined || value.narration_file === SHARE_NARRATION_FILE)
     );
 }

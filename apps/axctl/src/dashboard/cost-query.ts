@@ -3,6 +3,7 @@ import { SurrealClient } from "@ax/lib/db";
 import type { DbError } from "@ax/lib/errors";
 import { recordLiteral } from "@ax/lib/ids";
 import { surrealDate, surrealString } from "@ax/lib/shared/surql";
+import { sessionProjectClause } from "../metrics/session-filter.ts";
 
 export interface CostSessionRow {
     readonly session: string;
@@ -171,10 +172,7 @@ const emptySummary = (selector: string, evidence: string): CostSummary => summar
 const querySessionClauses = (selector: Extract<CostSelector, { kind: "query" }>): string[] => {
     const clauses: string[] = [];
     if (selector.since) clauses.push(`session.started_at >= ${surrealDate(selector.since)}`);
-    if (selector.project) {
-        const project = surrealString(selector.project);
-        clauses.push(`(session.cwd = ${project} OR session.project = ${project})`);
-    }
+    if (selector.project) clauses.push(sessionProjectClause(selector.project, "session."));
     if (selector.repositoryKey) {
         clauses.push(`session.repository = ${recordLiteral("repository", selector.repositoryKey)}`);
     }

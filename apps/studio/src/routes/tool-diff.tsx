@@ -1,38 +1,8 @@
-import { getFiletypeFromFileName, getSharedHighlighter } from "@pierre/diffs";
 import { File, MultiFileDiff } from "@pierre/diffs/react";
 import type { FileProps, MultiFileDiffProps } from "@pierre/diffs/react";
-import { useEffect, useState } from "react";
+import type { ReactNode } from "react";
 import type { DiffPair, ReadView } from "./edit-diff.ts";
-
-const THEMES = ["github-light", "pierre-dark"];
-
-/**
- * Gate rendering until the shared shiki highlighter has this card's themes +
- * languages attached. The library's components tokenize synchronously on
- * mount and - with the worker pool disabled - never retry when the
- * highlighter isn't ready yet, leaving a permanently empty card on first
- * page load. Preloading makes the first render the successful one.
- */
-function useHighlighterReady(fileNames: ReadonlyArray<string>): boolean {
-    const [ready, setReady] = useState(false);
-    const key = fileNames.join("\n");
-    useEffect(() => {
-        let alive = true;
-        const langs = Array.from(new Set(fileNames.map((n) => getFiletypeFromFileName(n))));
-        getSharedHighlighter({ themes: THEMES, langs })
-            // Render regardless of preload failure - the components fall back
-            // to plain text once the highlighter exists in any state.
-            .catch(() => undefined)
-            .then(() => {
-                if (alive) setReady(true);
-            });
-        return () => {
-            alive = false;
-        };
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [key]);
-    return ready;
-}
+import { useHighlighterReady } from "./use-highlighter-ready.ts";
 
 /**
  * Syntax-highlighted diff rendering for edit-class tool calls, one
@@ -63,9 +33,12 @@ const READ_OPTIONS: FileProps<undefined>["options"] = {
     overflow: "wrap",
 };
 
-export function ToolFileView({ view }: { view: ReadView }) {
+/** `fallback` renders while the highlighter loads (and in SSR, where it never
+ *  loads) - the same plain markup the caller hands to its Suspense boundary,
+ *  so module-resolved-but-highlighter-pending never blanks the card. */
+export function ToolFileView({ view, fallback = null }: { view: ReadView; fallback?: ReactNode }) {
     const ready = useHighlighterReady([view.fileName]);
-    if (!ready) return null;
+    if (!ready) return fallback;
     return (
         <div
             data-testid="tool-card-file"
@@ -80,9 +53,12 @@ export function ToolFileView({ view }: { view: ReadView }) {
     );
 }
 
-export default function ToolDiff({ pairs }: { pairs: ReadonlyArray<DiffPair> }) {
+export default function ToolDiff({ pairs, fallback = null }: {
+    pairs: ReadonlyArray<DiffPair>;
+    fallback?: ReactNode;
+}) {
     const ready = useHighlighterReady(pairs.map((p) => p.fileName));
-    if (!ready) return null;
+    if (!ready) return fallback;
     return (
         <div
             data-testid="tool-card-diff"

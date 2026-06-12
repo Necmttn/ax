@@ -501,6 +501,53 @@ describe("Codex transcript extraction", () => {
         ]);
     });
 
+    test("extracts custom_tool_call apply_patch items as edit tool calls", () => {
+        const extracted = __testExtractCodexJsonlLines([
+            JSON.stringify({
+                type: "session_meta",
+                timestamp: "2026-05-09T13:00:00.000Z",
+                payload: {
+                    id: "codex-patch",
+                    cwd: "/Users/necmttn/Projects/ax",
+                    timestamp: "2026-05-09T13:00:00.000Z",
+                },
+            }),
+            JSON.stringify({
+                type: "response_item",
+                timestamp: "2026-05-09T13:00:01.000Z",
+                payload: {
+                    type: "custom_tool_call",
+                    status: "completed",
+                    name: "apply_patch",
+                    call_id: "call-patch",
+                    input: "*** Begin Patch\n*** Update File: a.ts\n+added line\n-removed line\n*** End Patch\n",
+                },
+            }),
+            JSON.stringify({
+                type: "response_item",
+                timestamp: "2026-05-09T13:00:02.000Z",
+                payload: {
+                    type: "custom_tool_call_output",
+                    call_id: "call-patch",
+                    output: "Exit code: 0\nWall time: 0 seconds\nOutput:\nSuccess. Updated the following files:\nM a.ts",
+                },
+            }),
+        ]);
+
+        expect(extracted).not.toBeNull();
+        if (!extracted) return;
+
+        expect(extracted.toolCalls).toHaveLength(1);
+        const call = extracted.toolCalls[0]!;
+        expect(call.toolName).toBe("apply_patch");
+        expect(call.callId).toBe("call-patch");
+        expect(call.inputJson).toEqual({ patch: expect.stringContaining("*** Begin Patch") });
+        expect(call.outputExcerpt ?? "").toContain("Success.");
+
+        const toolTurn = extracted.turns.find((turn) => turn.has_tool_use);
+        expect(toolTurn).toMatchObject({ role: "tool_call" });
+    });
+
     test("extracts function calls, matched outputs, synthetic skill relations, and update_plan snapshots", () => {
         const execOutput =
             "Chunk ID: abc\nWall time: 0.2000 seconds\nProcess exited with code 1\nOriginal token count: 30\nOutput:\nfatal: not a git repository\n";

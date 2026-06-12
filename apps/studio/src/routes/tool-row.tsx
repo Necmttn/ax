@@ -300,7 +300,10 @@ export function ToolRowItem(
                             {renderGrid(entries.filter(([k]) => !DIFF_CONSUMED_KEYS.has(k)))}
                             <DiffBoundary fallback={renderGrid(entries)}>
                                 <Suspense fallback={renderGrid(entries)}>
-                                    <ToolDiff pairs={diffPairs} />
+                                    {/* Same fallback inside: once the lazy module
+                                        resolves, the highlighter may still be
+                                        loading - the grid must not blank out. */}
+                                    <ToolDiff pairs={diffPairs} fallback={renderGrid(entries)} />
                                 </Suspense>
                             </DiffBoundary>
                         </>
@@ -344,7 +347,7 @@ export function ToolRowItem(
                         <>
                             <DiffBoundary fallback={renderOutput(output)}>
                                 <Suspense fallback={renderOutput(output)}>
-                                    <ToolFileView view={readView} />
+                                    <ToolFileView view={readView} fallback={renderOutput(output)} />
                                 </Suspense>
                             </DiffBoundary>
                             {renderOutput(readView.tail)}

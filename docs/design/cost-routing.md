@@ -126,6 +126,23 @@ stage (form=hook) so accumulated candidate savings surface in
 - Keep tool-heavy loops (build/test cycles, browser QA) OUT of the expensive
   main context - the dominant cost is the main loop re-reading ~250k context
   on every tool call, not subagent output tokens.
-- Measured ceiling on this machine: ~$275/3d redirectable via dispatch
-  routing alone; several times that from moving grunt loops out of the main
-  context.
+- Measured on this machine (30d window): ~$404 of identified redirectable
+  dispatch spend with the hand-written classes, ~$573 after `/routing-tune`
+  mined three more (+42% detector coverage). Several times that is available
+  from moving grunt loops out of the main context.
+
+## Reading the numbers honestly
+
+`--candidates` totals are **identified redirectable spend** - a retrospective,
+hypothetical repricing of past dispatches, NOT realized savings and NOT a
+spend change. Growing the number means the detector got better at naming the
+leak; no dollars moved. Realized savings only appear go-forward, as the hook
+and skill change dispatch behavior - measure them as the inherit rate
+dropping (`ax dispatches`) and subagent spend shifting toward cheap models
+(`ax cost split`) across an adoption boundary. And compare like windows:
+a 3-day figure and a 30-day figure are different questions.
+
+Scope note vs billing tools (ccusage etc.): ax prices from `agent_model`
+list rates and counts subagent transcripts as separate rows; billing tools
+see plan-level accounting and usually only main session files. Use ax for
+"where inside the work did it go", billing data for "what did I pay".

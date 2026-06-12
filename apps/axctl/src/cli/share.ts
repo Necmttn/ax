@@ -1,10 +1,12 @@
-import { Effect } from "effect";
+import { Effect, FileSystem, Layer, Path, type PlatformError } from "effect";
 import { execFile } from "node:child_process";
 import { AppLayer } from "@ax/lib/layers";
+import { BunFileSystem, BunPath } from "@ax/lib/bun-platform";
+import { skipNotFound } from "@ax/lib/shared/fs-error";
 import { prettyPrint } from "@ax/lib/json";
 import type { AxSessionShare } from "../share/artifact.ts";
 import { exportSessionShare } from "../share/exporter.ts";
-import { buildShareBundle, type ShareBundle } from "../share/manifest.ts";
+import { buildShareBundle, type ShareBundle, type ShareNarrationArtifact } from "../share/manifest.ts";
 import {
     createSessionGist,
     shareUrlForGist,
@@ -52,6 +54,8 @@ export interface ShareCommandDeps {
         readonly bundle: ShareBundle;
         readonly public: boolean;
     }) => Promise<GistRef>;
+    /** Optional local `.ax/narrations/<session-id>.json` artifact. */
+    readonly loadNarration: (sessionId: string) => Promise<ShareNarrationArtifact | null>;
     readonly open: (ref: GistRef) => Promise<void>;
     readonly writeStdout: (text: string) => void;
     readonly writeStderr: (text: string) => void;
@@ -98,6 +102,43 @@ const openShareUrl = async (ref: GistRef): Promise<void> => {
         child.on("error", () => resolve());
     });
 };
+
+function isShareNarrationArtifact(value: unknown): value is ShareNarrationArtifact {
+    return (
+        typeof value === "object" &&
+        value !== null &&
+        !Array.isArray(value) &&
+        (value as { kind?: unknown }).kind === "narration" &&
+        typeof (value as { schema_version?: unknown }).schema_version === "number"
+    );
+}
+
+/** Read `.ax/narrations/<session-id>.json` from the cwd. Missing file or
+ *  malformed JSON → null (the share just has no Story tab); any other fs
+ *  error (permissions, IO) re-raises. */
+export const loadLocalNarrationEffect = (
+    sessionId: string,
+): Effect.Effect<ShareNarrationArtifact | null, PlatformError.PlatformError, FileSystem.FileSystem | Path.Path> =>
+    Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const file = path.join(process.cwd(), ".ax", "narrations", `${sessionId}.json`);
+        const raw = yield* fs.readFileString(file).pipe(skipNotFound(null));
+        if (raw === null) return null;
+        try {
+            const parsed: unknown = JSON.parse(raw);
+            return isShareNarrationArtifact(parsed) ? parsed : null;
+        } catch {
+            return null;
+        }
+    });
+
+export const loadLocalNarration = (sessionId: string): Promise<ShareNarrationArtifact | null> =>
+    Effect.runPromise(
+        loadLocalNarrationEffect(sessionId).pipe(
+            Effect.provide(Layer.mergeAll(BunFileSystem.layer, BunPath.layer)),
+        ),
+    );
 
 /**
  * Export-miss fallback: find the transcript on disk, run a targeted ingest
@@ -175,7 +216,8 @@ export async function cmdShareWithDeps(
     }
 
     const { artifact } = redactShareArtifact(exported);
-    const bundle = buildShareBundle(artifact);
+    const narration = await deps.loadNarration(artifact.session.id);
+    const bundle = buildShareBundle(artifact, narration ?? undefined);
 
     if (hasStaleUsage(artifact)) {
         deps.writeStderr(formatStaleUsageWarning());
@@ -241,6 +283,7 @@ const liveShareDeps: ShareCommandDeps = {
             ),
         ),
     publish: (input) => Effect.runPromise(createSessionGist(input)),
+    loadNarration: loadLocalNarration,
     open: openShareUrl,
     writeStdout: (text) => {
         process.stdout.write(text);

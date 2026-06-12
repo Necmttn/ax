@@ -33,6 +33,7 @@ import {
     type GroupByKey,
 } from "../../metrics/aggregates.ts";
 import { fetchSessionDurabilityDetail } from "../../metrics/reverted-commits.ts";
+import { fetchSessionChurnSummary, formatSessionChurnSummary } from "../../metrics/session-churn.ts";
 import { fetchSessionMetrics } from "../../metrics/session-metrics-query.ts";
 import { formatSessionMetrics, SESSION_METRICS_LEGEND } from "../../metrics/util.ts";
 import { buildSessionsNext, buildSessionShowNext } from "../../nav/next-links.ts";
@@ -722,8 +723,75 @@ const sessionsMetricsCommand = Command.make(
     + "See `ax signals` for cross-session relation signals (e.g. fragility cascades).",
 ));
 
+// ---------------------------------------------------------------------------
+// ax sessions churn - verification failures plus repair/edit churn
+// ---------------------------------------------------------------------------
+
+export const cmdSessionsChurn = (input: {
+    readonly sinceDays: number | null;
+    readonly project: string | null;
+    readonly here: boolean;
+    readonly source: string | null;
+    readonly limit: number;
+    readonly json: boolean;
+}) =>
+    Effect.gen(function* () {
+        let project = input.project;
+        if (input.here) {
+            const pwd = yield* resolvePwdRepository().pipe(
+                Effect.catchTag("NotAGitRepoError", (err) =>
+                    stderrExit(`axctl sessions churn: --here requires a git repository (cwd=${err.cwd})\n`, 2),
+                ),
+            );
+            project = pwd.repoRoot;
+        }
+
+        // Default window keeps the all-session fan-out bounded on mature DBs;
+        // pass a larger --since (up to 3650) for deeper history.
+        const sinceDays = input.sinceDays ?? 30;
+        const since = new Date(Date.now() - Math.min(Math.max(Math.trunc(sinceDays), 1), 3650) * 86400 * 1000);
+
+        const summary = yield* fetchSessionChurnSummary({
+            since,
+            project,
+            source: input.source,
+            limit: input.limit,
+        });
+        if (input.json) {
+            console.log(prettyPrint(summary));
+            return;
+        }
+        console.log(formatSessionChurnSummary(summary));
+    });
+
+export const sessionsChurnCommand = Command.make(
+    "churn",
+    {
+        since: optionalSince,
+        project: Flag.string("project").pipe(Flag.optional),
+        here: Flag.boolean("here").pipe(Flag.withDefault(false)),
+        source: Flag.string("source").pipe(Flag.optional),
+        limit: positiveLimit(20),
+        json: jsonFlag,
+    },
+    ({ since, project, here, source, limit, json }) =>
+        cmdSessionsChurn({
+            sinceDays: optionValue(since) ?? null,
+            project: optionValue(project) ?? null,
+            here,
+            source: optionValue(source) ?? null,
+            limit,
+            json,
+        }),
+).pipe(Command.withDescription(
+    "Summarize verification churn by session/source: edit LOC, landed LOC, failed/passed checks, "
+    + "episodes opened by failures after edits, and repair LOC before passes. "
+    + "--here scopes to the pwd repo, --project filters session.project/cwd, --source filters provider, "
+    + "--since N days (default 30, max 3650), --limit caps hot sessions, --json for machine output.",
+));
+
 export const sessionsCommand = Command.make("sessions").pipe(
-    Command.withDescription("Windowed session queries: here (pwd-repo), around (date), near (sha), show (detail), compare (side-by-side), metrics (graph-derived)"),
+    Command.withDescription("Windowed session queries: here (pwd-repo), around (date), near (sha), show (detail), compare (side-by-side), metrics (graph-derived), churn (verification repair churn)"),
     Command.withSubcommands([
         sessionsHereCommand,
         sessionsAroundCommand,
@@ -731,6 +799,7 @@ export const sessionsCommand = Command.make("sessions").pipe(
         sessionShowCommand,
         sessionsCompareCommand,
         sessionsMetricsCommand,
+        sessionsChurnCommand,
     ]),
 );
 
