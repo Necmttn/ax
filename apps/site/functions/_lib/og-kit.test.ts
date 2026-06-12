@@ -100,10 +100,12 @@ describe("footerHtml", () => {
         const html = footerHtml("anything");
         expect(html).toContain("AX.NECMTTN.COM");
     });
-    test("includes serif ax wordmark", () => {
+    test("carries the block mark, not a serif wordmark (one logo, two scales)", () => {
         const html = footerHtml("anything");
-        expect(html).toContain("Gelasio");
-        expect(html).toContain(">ax<");
+        expect(html).not.toContain("Gelasio");
+        expect(html).toContain("AX.NECMTTN.COM");
+        // pixel cells from the embedded block logo at scale 3
+        expect(html).toContain("width:3px;height:3px");
     });
 });
 
