@@ -120,6 +120,13 @@ fresh clone.
 `ax cost sessions [--days=N] [--model=<name>] [--limit=N]` - top sessions by cost with id, project, model, started_at (default 14d/20 rows).
 `ax cost split [--days=N]` - origin (main vs subagent) × model matrix with cost and share-of-total; totals row. MCP: `cost_models`, `cost_split`.
 
+### Profile
+
+`ax profile show [--window=N] [--no-cost] [--json]` - render your local ax
+profile (ProfileV1: stats + rig + taste patterns) from the graph. Local-only
+preview; publish/gist/leaderboard land in later plans
+(docs/superpowers/specs/2026-06-12-ax-profiles-design.md).
+
 ### Dispatch routing
 
 `ax dispatches [--days=N] [--limit=N]` - subagent dispatch table sorted by child cost (default 14d/30 rows). Shows ts, agent_type, description, dispatch_model ("inherit" when no explicit model), child_model, child_cost_usd. Summary: count, % inherit, total subagent cost. MCP: `dispatches`.
