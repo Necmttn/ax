@@ -60,6 +60,8 @@ interface CodexSession {
     cli_version: string | null;
     model_provider: string | null;
     model: string | null;
+    /** Last-seen turn_context reasoning effort: minimal|low|medium|high|xhigh. */
+    reasoning_effort: string | null;
     started_at: string;
     ended_at: string;
 }
@@ -90,6 +92,8 @@ interface CodexTokenUsage {
     promptTokens: number | null;
     completionTokens: number | null;
     cacheReadInputTokens: number | null;
+    /** total_token_usage.reasoning_output_tokens - codex thinking spend. */
+    reasoningOutputTokens: number | null;
     estimatedTokens: number;
     contextWindow: number | null;
     totalTokenUsage: Record<string, unknown>;
@@ -107,6 +111,8 @@ export interface CodexTurnTokenUsage {
     completionTokens: number | null;
     cacheCreationInputTokens: number | null;
     cacheReadInputTokens: number | null;
+    /** Per-turn reasoning tokens (delta or last_token_usage). */
+    reasoningOutputTokens: number | null;
     freshInputTokens: number | null;
     estimatedTokens: number;
     usageSource: string;
@@ -344,6 +350,7 @@ function codexTokenUsageFromPayload(
     const promptTokens = numberField(totalTokenUsage, "input_tokens");
     const completionTokens = numberField(totalTokenUsage, "output_tokens");
     const cacheReadInputTokens = numberField(totalTokenUsage, "cached_input_tokens");
+    const reasoningOutputTokens = numberField(totalTokenUsage, "reasoning_output_tokens");
     const estimatedTokens = numberField(totalTokenUsage, "total_tokens") ??
         (promptTokens ?? 0) + (completionTokens ?? 0);
     const lastTokenUsage = isRecord(info.last_token_usage) ? info.last_token_usage : null;
@@ -354,6 +361,7 @@ function codexTokenUsageFromPayload(
         promptTokens,
         completionTokens,
         cacheReadInputTokens,
+        reasoningOutputTokens,
         estimatedTokens,
         contextWindow: numberField(info, "model_context_window"),
         totalTokenUsage,
@@ -374,6 +382,7 @@ const tokenMetricsFromRecord = (usage: Record<string, unknown>) => {
     const completionTokens = numberField(usage, "output_tokens");
     const cacheReadInputTokens = numberField(usage, "cached_input_tokens");
     const cacheCreationInputTokens = numberField(usage, "cache_creation_input_tokens");
+    const reasoningOutputTokens = numberField(usage, "reasoning_output_tokens");
     const estimatedTokens = numberField(usage, "total_tokens") ??
         (promptTokens ?? 0) + (completionTokens ?? 0);
     const freshInputTokens = promptTokens === null
@@ -384,6 +393,7 @@ const tokenMetricsFromRecord = (usage: Record<string, unknown>) => {
         completionTokens,
         cacheCreationInputTokens,
         cacheReadInputTokens,
+        reasoningOutputTokens,
         freshInputTokens,
         estimatedTokens,
     };
@@ -415,6 +425,7 @@ function codexTurnTokenUsageFromPayload(
     const completionTokens = positiveDelta(current.completionTokens, previous?.completionTokens ?? null);
     const cacheCreationInputTokens = positiveDelta(current.cacheCreationInputTokens, previous?.cacheCreationInputTokens ?? null);
     const cacheReadInputTokens = positiveDelta(current.cacheReadInputTokens, previous?.cacheReadInputTokens ?? null);
+    const reasoningOutputTokens = positiveDelta(current.reasoningOutputTokens, previous?.reasoningOutputTokens ?? null);
     const estimatedTokens = positiveDelta(current.estimatedTokens, previous?.estimatedTokens ?? null) ?? current.estimatedTokens;
     const freshInputTokens = promptTokens === null
         ? null
@@ -428,6 +439,7 @@ function codexTurnTokenUsageFromPayload(
         completionTokens,
         cacheCreationInputTokens,
         cacheReadInputTokens,
+        reasoningOutputTokens,
         freshInputTokens,
         estimatedTokens,
         usageSource: previousTotalUsage
@@ -849,6 +861,7 @@ function createCodexExtractor(
                     cli_version: stringField(payload, "cli_version"),
                     model_provider: stringField(payload, "model_provider"),
                     model: stringField(payload, "model"),
+                    reasoning_effort: null,
                     started_at: stringField(payload, "timestamp") ?? ts,
                     ended_at: ts,
                 };
@@ -858,12 +871,16 @@ function createCodexExtractor(
             session.ended_at = ts;
 
             if (type === "turn_context" && payload) {
+                const collabSettings = isRecord(payload.collaboration_mode) &&
+                    isRecord(payload.collaboration_mode.settings)
+                    ? payload.collaboration_mode.settings
+                    : null;
                 const model = stringField(payload, "model")
-                    ?? (isRecord(payload.collaboration_mode) &&
-                        isRecord(payload.collaboration_mode.settings)
-                        ? stringField(payload.collaboration_mode.settings, "model")
-                        : null);
+                    ?? (collabSettings ? stringField(collabSettings, "model") : null);
                 if (model) session.model = model;
+                const effort = stringField(payload, "effort")
+                    ?? (collabSettings ? stringField(collabSettings, "reasoning_effort") : null);
+                if (effort) session.reasoning_effort = effort;
                 return;
             }
 
@@ -1232,6 +1249,7 @@ const buildCodexTokenUsageStatements = (usage: CodexTokenUsage | null): string[]
             ["completion_tokens", surrealOptionInt(usage.completionTokens)],
             ["cache_creation_input_tokens", "NONE"],
             ["cache_read_input_tokens", surrealOptionInt(usage.cacheReadInputTokens)],
+            ["reasoning_output_tokens", surrealOptionInt(usage.reasoningOutputTokens)],
             ["estimated_tokens", Math.trunc(usage.estimatedTokens).toString(10)],
             ["transcript_bytes", "0"],
             ["context_window", surrealOptionInt(usage.contextWindow)],
@@ -1282,6 +1300,7 @@ const buildCodexTurnTokenUsageStatements = (
             ["completion_tokens", surrealOptionInt(usage.completionTokens)],
             ["cache_creation_input_tokens", surrealOptionInt(usage.cacheCreationInputTokens)],
             ["cache_read_input_tokens", surrealOptionInt(usage.cacheReadInputTokens)],
+            ["reasoning_output_tokens", surrealOptionInt(usage.reasoningOutputTokens)],
             ["fresh_input_tokens", surrealOptionInt(usage.freshInputTokens)],
             ["estimated_tokens", Math.trunc(usage.estimatedTokens).toString(10)],
             ["model_ref", usage.model ? recordRef("agent_model", usage.model) : "NONE"],
@@ -1541,6 +1560,7 @@ export const ingestCodex = Effect.fn("codex.ingest")(
                         project: session.cwd ?? undefined,
                         cwd: session.cwd ?? undefined,
                         model: concreteCodexModel(session) ?? undefined,
+                        reasoning_effort: session.reasoning_effort ?? undefined,
                         source: "codex",
                         started_at: new Date(session.started_at),
                         ended_at: new Date(session.ended_at),

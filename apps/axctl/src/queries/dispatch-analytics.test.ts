@@ -684,3 +684,99 @@ describe("compileRouting merge-preserve", () => {
         expect(parsed.classes.length).toBeGreaterThan(0);
     });
 });
+
+// ---------------------------------------------------------------------------
+// Model-drop detection (continuation legs)
+// ---------------------------------------------------------------------------
+
+import { computeModelDrop, legMatchesDispatchModel } from "./dispatch-analytics.ts";
+
+describe("legMatchesDispatchModel", () => {
+    it("alias family matches any model containing it", () => {
+        expect(legMatchesDispatchModel("claude-sonnet-4-6", "sonnet")).toBe(true);
+        expect(legMatchesDispatchModel("claude-haiku-4-5-20251001", "haiku")).toBe(true);
+        expect(legMatchesDispatchModel("claude-fable-5", "sonnet")).toBe(false);
+    });
+
+    it("full model names match exactly", () => {
+        expect(legMatchesDispatchModel("claude-sonnet-4-6", "claude-sonnet-4-6")).toBe(true);
+        expect(legMatchesDispatchModel("claude-opus-4-8", "claude-sonnet-4-6")).toBe(false);
+    });
+});
+
+describe("computeModelDrop", () => {
+    it("inherit dispatches never drop", () => {
+        const drop = computeModelDrop("inherit", [
+            { model: "claude-fable-5", cost_usd: 10, turns: 5 },
+        ], "claude-fable-5", 10);
+        expect(drop.dropped).toBe(false);
+        expect(drop.dropped_cost_usd).toBe(0);
+    });
+
+    it("flags off-model legs and sums their cost (the S2-T4 shape)", () => {
+        // Dispatched sonnet; first leg honored, continuation legs ran fable.
+        const drop = computeModelDrop("sonnet", [
+            { model: "claude-sonnet-4-6", cost_usd: 1.2, turns: 44 },
+            { model: "claude-fable-5", cost_usd: 116.3, turns: 290 },
+        ], "claude-fable-5", 117.5);
+        expect(drop.dropped).toBe(true);
+        expect(drop.dropped_cost_usd).toBeCloseTo(116.3);
+    });
+
+    it("fully honored dispatches do not drop", () => {
+        const drop = computeModelDrop("sonnet", [
+            { model: "claude-sonnet-4-6", cost_usd: 3.1, turns: 20 },
+        ], "claude-sonnet-4-6", 3.1);
+        expect(drop.dropped).toBe(false);
+    });
+
+    it("falls back to session-level child model when no legs exist", () => {
+        const drop = computeModelDrop("sonnet", [], "claude-fable-5", 23.4);
+        expect(drop.dropped).toBe(true);
+        expect(drop.dropped_cost_usd).toBeCloseTo(23.4);
+    });
+});
+
+describe("fetchDispatches model-drop join", () => {
+    it("joins child legs and reports drop totals", async () => {
+        const spawned = [{
+            parent_id: "session:p1",
+            child_id: "session:`claude-subagent-c1`",
+            ts: "2026-06-12T15:43:09Z",
+            agent_type: "general-purpose",
+            description: "Implement S2-T4: migrate mutations to bus",
+            tool_use_id: "toolu_1",
+        }];
+        const usage = [{
+            session_id: "session:`claude-subagent-c1`",
+            model: "claude-fable-5",
+            prompt_tokens: 1000,
+            completion_tokens: 100,
+            cache_read_tokens: 0,
+            cache_create_tokens: 0,
+            cost_usd: 117.5,
+        }];
+        const toolCalls = [{
+            session_id: "session:p1",
+            call_id: "toolu_1",
+            input_json: JSON.stringify({ model: "sonnet", description: "Implement S2-T4: migrate mutations to bus" }),
+        }];
+        const parents = [{ session_id: "session:p1", model: "claude-fable-5" }];
+        const legs = [
+            { session_id: "session:`claude-subagent-c1`", model: "claude-sonnet-4-6", cost_usd: 1.2, turns: 44 },
+            { session_id: "session:`claude-subagent-c1`", model: "claude-fable-5", cost_usd: 116.3, turns: 290 },
+        ];
+
+        const layer = makeMockDb([spawned, usage, toolCalls, parents, legs]);
+        const result = await run(fetchDispatches({ sinceDays: 30, limit: 10 }), layer);
+
+        expect(result.rows).toHaveLength(1);
+        const row = result.rows[0];
+        expect(row.dispatch_model).toBe("sonnet");
+        expect(row.model_dropped).toBe(true);
+        expect(row.dropped_cost_usd).toBeCloseTo(116.3);
+        expect(row.child_legs).toHaveLength(2);
+        expect(result.dropped_count).toBe(1);
+        expect(result.dropped_cost_usd).toBeCloseTo(116.3);
+    });
+});

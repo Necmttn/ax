@@ -1112,3 +1112,80 @@ describe("codex compaction", () => {
         expect(c.agentEventKey).toBe(agentEventRecordKey(compactionEvent!));
     });
 });
+
+describe("codex reasoning signals", () => {
+    test("captures turn_context effort and reasoning_output_tokens", () => {
+        const extracted = __testExtractCodexJsonlLines([
+            JSON.stringify({
+                type: "session_meta",
+                timestamp: "2026-06-13T10:00:00.000Z",
+                payload: {
+                    id: "codex-effort",
+                    cwd: "/Users/necmttn/Projects/ax",
+                    model_provider: "openai",
+                    timestamp: "2026-06-13T10:00:00.000Z",
+                },
+            }),
+            JSON.stringify({
+                type: "turn_context",
+                timestamp: "2026-06-13T10:00:01.000Z",
+                payload: {
+                    model: "gpt-5.5",
+                    effort: "medium",
+                    collaboration_mode: {
+                        mode: "default",
+                        settings: { model: "gpt-5.5", reasoning_effort: "medium" },
+                    },
+                },
+            }),
+            JSON.stringify({
+                type: "event_msg",
+                timestamp: "2026-06-13T10:00:02.000Z",
+                payload: {
+                    type: "token_count",
+                    info: {
+                        model_context_window: 258400,
+                        total_token_usage: {
+                            input_tokens: 1000,
+                            cached_input_tokens: 250,
+                            output_tokens: 125,
+                            reasoning_output_tokens: 75,
+                            total_tokens: 1200,
+                        },
+                        last_token_usage: {
+                            input_tokens: 1000,
+                            cached_input_tokens: 250,
+                            output_tokens: 125,
+                            reasoning_output_tokens: 75,
+                            total_tokens: 1200,
+                        },
+                    },
+                },
+            }),
+        ]);
+
+        expect(extracted?.session.reasoning_effort).toBe("medium");
+        expect(extracted?.tokenUsage?.reasoningOutputTokens).toBe(75);
+
+        const sql = __testBuildCodexBatchStatements(extracted!, 1200).join("\n");
+        expect(sql).toContain("reasoning_output_tokens: 75");
+    });
+
+    test("falls back to collaboration_mode.settings.reasoning_effort when payload.effort missing", () => {
+        const extracted = __testExtractCodexJsonlLines([
+            JSON.stringify({
+                type: "session_meta",
+                timestamp: "2026-06-13T10:00:00.000Z",
+                payload: { id: "codex-effort-2", cwd: "/tmp", timestamp: "2026-06-13T10:00:00.000Z" },
+            }),
+            JSON.stringify({
+                type: "turn_context",
+                timestamp: "2026-06-13T10:00:01.000Z",
+                payload: {
+                    collaboration_mode: { mode: "plan", settings: { model: "gpt-5.5", reasoning_effort: "xhigh" } },
+                },
+            }),
+        ]);
+        expect(extracted?.session.reasoning_effort).toBe("xhigh");
+    });
+});

@@ -70,6 +70,13 @@ export interface NormalizedTurnWrite {
     readonly textExcerpt: string | null;
     readonly hasToolUse: boolean;
     readonly hasError: boolean;
+    /** Thinking content-block count for assistant turns; omitted when the
+     *  provider has no thinking representation (codex effort lives on the
+     *  session instead). */
+    readonly thinkingBlocks?: number | null;
+    /** output_tokens of thinking-only assistant turns (transcripts strip
+     *  thinking text, so the event's own usage is the signal). */
+    readonly thinkingTokens?: number | null;
     readonly agentEvent?: NormalizedTurnAgentEventRef | null;
 }
 
@@ -160,7 +167,11 @@ export const buildNormalizedTurnStatements = (
         const agentEventField = turn.agentEvent
             ? `agent_event: ${recordRef("agent_event", agentEventRecordKey(turn.agentEvent))}, `
             : "";
-        return `UPSERT ${recordRef("turn", turnRecordKey(turn.sessionId, turn.seq))} CONTENT { session: ${recordRef("session", turn.sessionId)}, ${agentEventField}seq: ${turn.seq}, ts: ${surrealDate(turn.ts)}, role: ${surrealString(turn.role)}, message_kind: ${surrealString(turn.messageKind)}, intent_kind: ${surrealString(turn.intentKind)}, text: ${turn.text === null ? "NONE" : surrealString(turn.text)}, text_excerpt: ${turn.textExcerpt === null ? "NONE" : surrealString(turn.textExcerpt)}, has_tool_use: ${turn.hasToolUse}, has_error: ${turn.hasError} };`;
+        const thinkingFields =
+            turn.thinkingBlocks === undefined || turn.thinkingBlocks === null
+                ? ""
+                : `, thinking_blocks: ${Math.trunc(turn.thinkingBlocks)}, thinking_tokens: ${Math.trunc(turn.thinkingTokens ?? 0)}`;
+        return `UPSERT ${recordRef("turn", turnRecordKey(turn.sessionId, turn.seq))} CONTENT { session: ${recordRef("session", turn.sessionId)}, ${agentEventField}seq: ${turn.seq}, ts: ${surrealDate(turn.ts)}, role: ${surrealString(turn.role)}, message_kind: ${surrealString(turn.messageKind)}, intent_kind: ${surrealString(turn.intentKind)}, text: ${turn.text === null ? "NONE" : surrealString(turn.text)}, text_excerpt: ${turn.textExcerpt === null ? "NONE" : surrealString(turn.textExcerpt)}, has_tool_use: ${turn.hasToolUse}, has_error: ${turn.hasError}${thinkingFields} };`;
     });
 
 export const buildNormalizedSyntheticSkillInvocationStatements = (

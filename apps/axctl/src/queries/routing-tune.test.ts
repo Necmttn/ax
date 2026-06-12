@@ -30,6 +30,7 @@ const row = (description: string, agent_type = "general-purpose", cost = 1): Dis
     ts: "2026-06-12T00:00:00Z", parent_id: "p", child_id: "c",
     agent_type, description, dispatch_model: "inherit",
     child_model: "claude-fable-5", child_cost_usd: cost,
+    child_legs: [], model_dropped: false, dropped_cost_usd: 0,
     prompt_tokens: 0, completion_tokens: 0, cache_read_tokens: 0, cache_create_tokens: 0,
 });
 
