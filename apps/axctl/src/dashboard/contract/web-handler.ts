@@ -68,6 +68,7 @@ const CONTRACT_ROUTES: ReadonlySet<string> = new Set([
     // improve
     "GET /api/improve",
     "GET /api/next-actions",
+    "GET /api/improve/analyze-brief",
     // live (SSE /api/events + binary /api/image stay raw legacy routes)
     "POST /api/ingest",
     // docs

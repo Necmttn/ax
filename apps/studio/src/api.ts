@@ -433,6 +433,9 @@ export const api = {
     nextActions: (): Promise<NextActionsPayload> =>
         viaContract("/api/next-actions", (c) => c.improve.nextActions()),
 
+    improveAnalyzeBrief: (): Promise<{ brief: string }> =>
+        viaContract("/api/improve/analyze-brief", (c) => c.improve.analyzeBrief()),
+
     /** Read-only SQL console (Lab) - daemon accepts SELECT/RETURN/INFO only. */
     query: (sql: string): Promise<{ result: unknown; durationMs: number }> =>
         viaContract(
