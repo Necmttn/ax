@@ -3,7 +3,6 @@ import type { TriageDecision } from "@ax/lib/shared/dashboard-types";
 import { fetchSkillDetail } from "../../../queries/skill-detail.ts";
 import {
     clearSkillDecision,
-    fetchSkillTriage,
     listSkillDecisions,
     setSkillDecision,
     setSkillDecisionsBulk,
@@ -13,6 +12,7 @@ import {
     openSkillTarget,
     readSkillSource,
 } from "../../skill-source.ts";
+import { fetchSkillTriageCached, invalidateSkillCaches } from "../../read-caches.ts";
 import {
     decodeFail,
     decodeOk,
@@ -114,7 +114,7 @@ export const skillRoutes: ReadonlyArray<AnyRoute> = [
     legacyGetRoute({
         path: "/api/skills",
         decode: () => decodeOk(undefined),
-        handler: () => fetchSkillTriage(),
+        handler: () => fetchSkillTriageCached(),
     }),
     // Static before param routes within the family.
     jsonRoute({
@@ -128,6 +128,7 @@ export const skillRoutes: ReadonlyArray<AnyRoute> = [
             for (const skillName of names) {
                 yield* applySkillDecisionToDisk(skillName, decision);
             }
+            yield* invalidateSkillCaches();
             return { notes: saved };
         }),
     }),
@@ -140,6 +141,7 @@ export const skillRoutes: ReadonlyArray<AnyRoute> = [
             const saved = yield* setSkillDecision(name, decision, reason);
             // `archive` disables the skill on disk; `keep`/`review` restores it.
             yield* applySkillDecisionToDisk(name, decision);
+            yield* invalidateSkillCaches();
             return saved;
         }),
     }),
@@ -151,6 +153,7 @@ export const skillRoutes: ReadonlyArray<AnyRoute> = [
             yield* clearSkillDecision(name);
             // Clearing a decision restores the skill on disk.
             yield* applySkillDecisionToDisk(name, null);
+            yield* invalidateSkillCaches();
             return { cleared: true, skill_name: name };
         }),
     }),

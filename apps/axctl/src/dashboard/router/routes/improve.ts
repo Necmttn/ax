@@ -13,7 +13,7 @@ import {
     type Decoded,
     type RouteInput,
 } from "../router.ts";
-import { fetchNextActions } from "../../next-actions.ts";
+import { fetchNextActionsCached, invalidateNextActionsCache } from "../../read-caches.ts";
 
 const decodeAction = Schema.decodeUnknownOption(
     Schema.Literals(["accept", "reject", "verdict"]),
@@ -60,7 +60,7 @@ export const improveRoutes: ReadonlyArray<AnyRoute> = [
         method: "GET",
         path: "/api/next-actions",
         decode: () => decodeOk(undefined),
-        handler: () => fetchNextActions(),
+        handler: () => fetchNextActionsCached(),
     }),
     jsonRoute({
         method: "POST",
@@ -70,16 +70,18 @@ export const improveRoutes: ReadonlyArray<AnyRoute> = [
         handler: (p: ImproveActionParams): Effect.Effect<ImproveActionResult, unknown, never> =>
             Effect.gen(function* () {
                 const actions = yield* Effect.promise(() => import("../../../improve/actions.ts"));
-                if (p.action === "accept") {
-                    return yield* actions.acceptProposal({ sigOrId: p.sig, force: p.force });
-                }
-                if (p.action === "reject") {
-                    return yield* actions.rejectProposal({
+                const result: ImproveActionResult = p.action === "accept"
+                    ? yield* actions.acceptProposal({ sigOrId: p.sig, force: p.force })
+                    : p.action === "reject"
+                    ? yield* actions.rejectProposal({
                         sigOrId: p.sig,
                         ...(p.reason === undefined ? {} : { reason: p.reason }),
-                    });
-                }
-                return yield* actions.setVerdict({ sigOrId: p.sig, verdict: p.verdict });
+                    })
+                    : yield* actions.setVerdict({ sigOrId: p.sig, verdict: p.verdict });
+                // The action changes proposal/verdict cards - drop the cache so
+                // the panel's refetch sees the new state immediately.
+                yield* invalidateNextActionsCache();
+                return result;
             }) as Effect.Effect<ImproveActionResult, unknown, never>,
         respond: (result) => jsonResponse(result, improveHttpStatus(result.status)),
     }),
