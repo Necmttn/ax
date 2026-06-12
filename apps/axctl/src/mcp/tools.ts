@@ -16,7 +16,7 @@
  * `apps/axctl/src/dashboard/server.ts`.
  */
 import { z, type ZodRawShape } from "zod";
-import type { ManagedRuntime, Layer } from "effect";
+import { Effect, type ManagedRuntime, type Layer } from "effect";
 import type { AppLayer } from "@ax/lib/layers";
 import {
     fetchRecall,
@@ -59,6 +59,7 @@ import {
 } from "../nav/next-links.ts";
 import { fetchCostModels, fetchCostSplit } from "../queries/cost-analytics.ts";
 import { fetchDispatches, fetchDispatchCandidates } from "../queries/dispatch-analytics.ts";
+import { loadEffectiveRoutingTable } from "../queries/routing-table-io.ts";
 import { buildDispatchesNext, buildCandidatesNext } from "../nav/next-links.ts";
 
 /**
@@ -548,7 +549,14 @@ const dispatchesTool: AxMcpTool = {
         const days = typeof args.days === "number" ? args.days : 14;
         const candidates = args.candidates === true;
         if (candidates) {
-            const result = await rt.runPromise(fetchDispatchCandidates({ sinceDays: days }));
+            // Match against the live routing table (same file the hook and the
+            // CLI candidates path read), not the baked-in defaults.
+            const result = await rt.runPromise(
+                Effect.gen(function* () {
+                    const table = yield* loadEffectiveRoutingTable();
+                    return yield* fetchDispatchCandidates({ sinceDays: days, table });
+                }),
+            );
             return { ...result, next: buildCandidatesNext(result) };
         }
         const limit = typeof args.limit === "number" ? args.limit : 30;
