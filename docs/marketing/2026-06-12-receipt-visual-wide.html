@@ -192,8 +192,8 @@
   .pin-line {
     margin-top: 46px;
     display: flex;
-    align-items: center;
-    gap: 18px;
+    align-items: baseline;
+    gap: 16px;
   }
   .pin-line .pct {
     font-family: "VT323", monospace;
@@ -203,7 +203,14 @@
   }
   .pin-line .pin-text {
     font-family: var(--mono);
-    font-size: 21px;
+    font-size: 27px;
+    font-weight: 500;
+    color: var(--off);
+  }
+  .pin-sub {
+    margin-top: 12px;
+    font-family: var(--mono);
+    font-size: 20px;
     line-height: 1.45;
     color: #c9c5bc;
   }
@@ -267,8 +274,8 @@
 
           <div class="rule">----------------------------------</div>
           <div class="tally">
-            <div>663 SUBAGENT DISPATCHES</div>
-            <div>75% NEVER PINNED A MODEL</div>
+            <div>663 SUB-TASKS SPAWNED</div>
+            <div>75% ON THE PRICIEST MODEL</div>
           </div>
           <div class="rule">----------------------------------</div>
 
@@ -286,17 +293,18 @@
     <!-- right: the message -->
     <div class="pullout">
       <div class="big-total">$19,270</div>
-      <div class="big-sub">14 days of agent spend</div>
+      <div class="big-sub">in 14 days of agent spend</div>
 
       <div class="pin-line">
-        <span class="pct">75%</span>
-        <span class="pin-text">of dispatches never<br />pinned a model</span>
+        <span class="pct">663</span>
+        <span class="pin-text">sub-tasks</span>
       </div>
+      <div class="pin-sub">75% ran on the most expensive model</div>
 
       <hr class="thin-rule" />
 
       <div class="prompt"><span class="p">$</span>ax routing tune</div>
-      <div class="prompt-sub">mines the fix from your own dispatch history</div>
+      <div class="prompt-sub">finds the routine work you&rsquo;re overpaying for</div>
     </div>
 
     <div class="corner-url">ax.necmttn.com/routing</div>
