@@ -440,3 +440,161 @@ export const fetchWrappedCounts = Effect.fn("profile.fetchWrappedCounts")(
         } satisfies WrappedCounts;
     },
 );
+
+// --- per-day per-model tokens -----------------------------------------------
+
+export interface DailyModelRow {
+    readonly date: string;
+    readonly model: string;
+    readonly tokens: number;
+}
+
+const DAILY_MODEL_TOKENS_SQL = (d: number) => `
+SELECT
+    time::format(ts, "%Y-%m-%d") AS date,
+    model,
+    math::sum(prompt_tokens ?? 0) + math::sum(completion_tokens ?? 0) AS tokens
+FROM session_token_usage
+WHERE ts > time::now() - ${win(d)} AND ts IS NOT NONE
+GROUP BY date, model
+ORDER BY date ASC, tokens DESC;`;
+
+export const fetchDailyModels = Effect.fn("profile.fetchDailyModels")(
+    function* (opts: { readonly windowDays: number }) {
+        const db = yield* SurrealClient;
+        const rows = yield* db
+            .query<[Array<Record<string, unknown>>]>(DAILY_MODEL_TOKENS_SQL(opts.windowDays))
+            .pipe(Effect.map((r) => r?.[0] ?? []));
+        return rows.map((r) => ({
+            date: String(r.date),
+            model: r.model == null ? "(unattributed)" : String(r.model),
+            tokens: Number(r.tokens ?? 0),
+        })) satisfies DailyModelRow[];
+    },
+);
+
+// --- per-day tool call counts ------------------------------------------------
+
+export interface DailyToolCallRow {
+    readonly date: string;
+    readonly tool_calls: number;
+}
+
+const DAILY_TOOL_CALLS_SQL = (d: number) => `
+SELECT
+    time::format(ts, "%Y-%m-%d") AS date,
+    count() AS tool_calls
+FROM tool_call
+WHERE ts > time::now() - ${win(d)} AND ts IS NOT NONE
+GROUP BY date
+ORDER BY date ASC;`;
+
+export const fetchDailyToolCalls = Effect.fn("profile.fetchDailyToolCalls")(
+    function* (opts: { readonly windowDays: number }) {
+        const db = yield* SurrealClient;
+        const rows = yield* db
+            .query<[Array<Record<string, unknown>>]>(DAILY_TOOL_CALLS_SQL(opts.windowDays))
+            .pipe(Effect.map((r) => r?.[0] ?? []));
+        return rows
+            .map((r) => ({
+                date: String(r.date),
+                tool_calls: Number(r.tool_calls ?? 0),
+            }))
+            .filter((r) => r.date !== "undefined" && r.date !== "null") satisfies DailyToolCallRow[];
+    },
+);
+
+// --- per-day commit counts ---------------------------------------------------
+
+export interface DailyCommitRow {
+    readonly date: string;
+    readonly commits: number;
+}
+
+const DAILY_COMMITS_SQL = (d: number) => `
+SELECT
+    time::format(ts, "%Y-%m-%d") AS date,
+    count() AS commits
+FROM commit
+WHERE ts > time::now() - ${win(d)} AND ts IS NOT NONE
+GROUP BY date
+ORDER BY date ASC;`;
+
+export const fetchDailyCommits = Effect.fn("profile.fetchDailyCommits")(
+    function* (opts: { readonly windowDays: number }) {
+        const db = yield* SurrealClient;
+        const rows = yield* db
+            .query<[Array<Record<string, unknown>>]>(DAILY_COMMITS_SQL(opts.windowDays))
+            .pipe(Effect.map((r) => r?.[0] ?? []));
+        return rows
+            .map((r) => ({
+                date: String(r.date),
+                commits: Number(r.commits ?? 0),
+            }))
+            .filter((r) => r.date !== "undefined" && r.date !== "null") satisfies DailyCommitRow[];
+    },
+);
+
+// --- windowed invocation events (for workflow + downstream_share) ------------
+
+export interface WindowedInvocationRow {
+    readonly session: string;
+    readonly skill: string;
+    readonly ts: string;
+}
+
+const WINDOWED_INVOCATIONS_SQL = (d: number) => `
+SELECT
+    type::string(in.session) AS session,
+    out.name AS skill,
+    type::string(ts) AS ts
+FROM invoked
+WHERE ts > time::now() - ${win(d)};`;
+
+export const fetchWindowedInvocations = Effect.fn("profile.fetchWindowedInvocations")(
+    function* (opts: { readonly windowDays: number }) {
+        const db = yield* SurrealClient;
+        const rows = yield* db
+            .query<[Array<Record<string, unknown>>]>(WINDOWED_INVOCATIONS_SQL(opts.windowDays))
+            .pipe(Effect.map((r) => r?.[0] ?? []));
+        return rows
+            .filter((r) => r.session != null && r.skill != null && r.session !== "null" && r.skill !== "null")
+            .map((r) => ({
+                session: String(r.session),
+                skill: String(r.skill),
+                ts: String(r.ts),
+            })) satisfies WindowedInvocationRow[];
+    },
+);
+
+// --- windowed session times (for downstream_share) --------------------------
+
+export interface WindowedSessionRow {
+    readonly id: string;
+    readonly s: string;
+    readonly e: string;
+}
+
+const WINDOWED_SESSIONS_SQL = (d: number) => `
+SELECT
+    type::string(id) AS id,
+    type::string(started_at) AS s,
+    type::string(ended_at) AS e
+FROM session
+WHERE started_at > time::now() - ${win(d)} AND ended_at IS NOT NONE;`;
+
+export const fetchWindowedSessions = Effect.fn("profile.fetchWindowedSessions")(
+    function* (opts: { readonly windowDays: number }) {
+        const db = yield* SurrealClient;
+        const rows = yield* db
+            .query<[Array<Record<string, unknown>>]>(WINDOWED_SESSIONS_SQL(opts.windowDays))
+            .pipe(Effect.map((r) => r?.[0] ?? []));
+        return rows
+            .filter((r) => r.id != null && r.s != null && r.e != null)
+            .map((r) => ({
+                id: String(r.id),
+                s: String(r.s),
+                e: String(r.e),
+            })) satisfies WindowedSessionRow[];
+    },
+);
