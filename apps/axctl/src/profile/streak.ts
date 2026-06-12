@@ -3,6 +3,8 @@
  * Date.now() in pure code) - callers pass the current UTC day. A streak is
  * the run of consecutive days ending today or yesterday (grace: today's
  * sessions may not exist yet when the profile renders in the morning).
+ * Inputs must be valid ISO-8601 dates; malformed entries produce
+ * unspecified results.
  */
 export interface StreakResult {
     readonly active_days: number;
