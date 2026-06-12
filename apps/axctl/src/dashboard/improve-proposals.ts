@@ -1,6 +1,7 @@
 import { Effect } from "effect";
 import { SurrealClient } from "@ax/lib/db";
 import type { ProposalDto } from "@ax/lib/shared/dashboard-types";
+import { estimateImpactCached, ROUTING_PROPOSAL_TITLE } from "../improve/impact.ts";
 import { renderAgentBrief } from "./agent-brief.ts";
 
 // Experiment-loop shortlist + verdict state. Reads proposal +
@@ -74,9 +75,32 @@ export function resetHydrateCacheForTest(): void {
     hydrateCache.clear();
 }
 
+/** The mined routing proposal predates hypothesis_template/evidence_query,
+ *  so its dollar figure freezes at mine time while the impact endpoint
+ *  recomputes live. Builtin hydrator: rebuild the hypothesis from the SAME
+ *  cached estimate the drawer serves - card chip, card body, brief, and
+ *  drawer impact then cannot disagree. Fail-open: any error keeps the
+ *  frozen text. */
+const hydrateRoutingHypothesis = Effect.fn("dashboard.hydrateRoutingHypothesis")(
+    function* (p: ProposalDto) {
+        const est = yield* estimateImpactCached(p, Date.now()).pipe(
+            Effect.catch(() => Effect.succeed(null)),
+        );
+        if (est === null || est.kind !== "savings_usd") return p;
+        // the frozen "Apply: ..." tail is the action, not a measurement - keep it
+        const apply = / Apply: .*$/.exec(p.hypothesis)?.[0] ?? "";
+        // "~$608 redirectable over 30d" -> "est $608 ..." (the card chip parses "est $")
+        const headline = est.headline.replace(/^~\$/, "est $");
+        return { ...p, hypothesis: `${est.detail} ${headline}.${apply}` };
+    },
+);
+
 const hydrateHypothesis = Effect.fn("dashboard.hydrateHypothesis")(function* (
     p: ProposalDto,
 ) {
+    if (p.form === "hook" && p.title === ROUTING_PROPOSAL_TITLE) {
+        return yield* hydrateRoutingHypothesis(p);
+    }
     const template = p.hypothesis_template;
     const query = p.evidence_query;
     if (!template || !query || !/^(SELECT|RETURN)\b/i.test(query.trim())) return p;

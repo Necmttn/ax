@@ -629,11 +629,11 @@ describe("fetchNextActions", () => {
         expect(typeof payload.generatedAt).toBe("string");
     });
 
-    test("a hanging source (Effect.never) is timed out and noted; all 5 sources noted", async () => {
+    test("a hanging source (Effect.never) is timed out and noted; all 6 sources noted", async () => {
         // db.query returns Effect.never - simulates a hung DB / slow query.
         // runQuery's internal Effect.catch only catches DbError failures; it does NOT
         // prevent fiber interruption from timeoutOrElse. The timeout fires, the
-        // orElse failure propagates to our guarded catch, and ALL 5 sources add a
+        // orElse failure propagates to our guarded catch, and ALL 6 sources add a
         // note - including tool_failure which normally swallows DB errors internally.
         const stub: SurrealClientShape = {
             query: (_sql: string) => Effect.never,
@@ -646,10 +646,10 @@ describe("fetchNextActions", () => {
         );
 
         expect(payload.cards).toEqual([]);
-        // All 5 direct-DB sources time out; tool_failure is also noted because
+        // All 6 direct-DB sources time out; tool_failure is also noted because
         // timeoutOrElse interrupts the fiber before runQuery's internal swallow fires.
         expect(new Set(payload.notes.map((n) => n.source))).toEqual(
-            new Set(["proposal", "tool_failure", "churn", "routing", "skill_hygiene"]),
+            new Set(["proposal", "tool_failure", "churn", "routing", "skill_hygiene", "housekeeping"]),
         );
         // At least one note should mention timed out (two words - our orElse uses "timed out after Nms")
         expect(payload.notes.some((n) => /timed out/i.test(n.note))).toBe(true);

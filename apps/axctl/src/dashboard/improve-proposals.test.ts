@@ -7,6 +7,7 @@
 import { describe, expect, it } from "bun:test";
 import { Effect, Layer } from "effect";
 import { SurrealClient, type SurrealClientShape } from "@ax/lib/db";
+import { resetImpactCacheForTest } from "../improve/impact.ts";
 import { fetchImproveProposals, renderHypothesisTemplate, resetHydrateCacheForTest } from "./improve-proposals.ts";
 import type { ProposalDto } from "@ax/lib/shared/dashboard-types";
 
@@ -105,6 +106,33 @@ describe("fetchImproveProposals - hypothesis hydration", () => {
             makeSequencedDb([[[dynamicRow]], [[{ n: 42 }]]]),
         ) as ReadonlyArray<ProposalDto>;
         expect(rows[0]?.hypothesis).toBe("live: 42 occurrences");
+    });
+
+    it("mined routing proposal: hypothesis rebuilt from the live impact estimate", async () => {
+        resetHydrateCacheForTest();
+        resetImpactCacheForTest();
+        const routingRow = {
+            ...openRow,
+            form: "hook",
+            title: "Route mechanical subagent dispatches to cheaper models",
+            dedupe_sig: "sig-routing",
+            hypothesis:
+                "39 model-less dispatches on fable/opus matched mechanical routing classes in the last 2d; est $209.59 redirectable. Apply: ax dispatches compile-routing + route-dispatch hook (ax hooks install).",
+        };
+        const rows = await run(
+            fetchImproveProposals(),
+            // call 1: proposals list; call 2: fetchDispatchCandidates multi-statement
+            // (oversized empty tuple satisfies its destructuring with zero rows)
+            makeSequencedDb([[[routingRow]], Array.from({ length: 8 }, () => []) as QueryResult[]]),
+        ) as ReadonlyArray<ProposalDto>;
+        const h = rows[0]!.hypothesis;
+        // live figure (here $0.00 - empty candidates) replaces the frozen $209.59
+        expect(h).not.toContain("$209.59");
+        expect(h).toContain("est $0.00 redirectable over 30d");
+        // chip regex in next-actions reads "est $..." - keep that shape
+        expect(/est \$[\d,]+(?:\.\d+)?/.test(h)).toBe(true);
+        // the action tail survives hydration
+        expect(h).toContain("Apply: ax dispatches compile-routing");
     });
 
     it("fail-open: non-readonly or failing query keeps the frozen hypothesis", async () => {
