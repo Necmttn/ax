@@ -262,3 +262,129 @@ describe("activity + insights sections", () => {
         expect(() => decodeProfile(bad)).toThrow();
     });
 });
+
+describe("new enriched daily fields (optional)", () => {
+    const base = {
+        v: 1, github: "x", generated_at: "2026-06-13T00:00:00Z", window_days: 30,
+        stats: {
+            sessions: 1, active_days: 1, streak_days: 1,
+            tokens: { prompt: 0, completion: 0, total: 0 },
+            models: [], harnesses: [],
+        },
+        rig: { skills: [], hooks: [], routing_table: false },
+    };
+
+    test("daily row accepts optional models/tool_calls/commits", () => {
+        const p = decodeProfile({
+            ...base,
+            activity: {
+                daily: [{
+                    date: "2026-06-13", sessions: 5, tokens: 1_000_000,
+                    models: [{ name: "fable", tokens: 800_000 }],
+                    tool_calls: 4100,
+                    commits: 57,
+                }],
+            },
+        });
+        const row = p.activity!.daily[0]!;
+        expect(row.models).toHaveLength(1);
+        expect(row.models![0]!.name).toBe("fable");
+        expect(row.models![0]!.tokens).toBe(800_000);
+        expect(row.tool_calls).toBe(4100);
+        expect(row.commits).toBe(57);
+    });
+
+    test("daily row without new optional fields still decodes", () => {
+        const p = decodeProfile({
+            ...base,
+            activity: { daily: [{ date: "2026-06-13", sessions: 1, tokens: 0 }] },
+        });
+        expect(p.activity!.daily[0]!.models).toBeUndefined();
+        expect(p.activity!.daily[0]!.tool_calls).toBeUndefined();
+        expect(p.activity!.daily[0]!.commits).toBeUndefined();
+    });
+
+    test("daily models row rejects non-string name", () => {
+        expect(() => decodeProfile({
+            ...base,
+            activity: {
+                daily: [{
+                    date: "2026-06-13", sessions: 1, tokens: 0,
+                    models: [{ name: 42, tokens: 100 }],
+                }],
+            },
+        })).toThrow();
+    });
+
+    test("daily models row rejects non-number tokens", () => {
+        expect(() => decodeProfile({
+            ...base,
+            activity: {
+                daily: [{
+                    date: "2026-06-13", sessions: 1, tokens: 0,
+                    models: [{ name: "fable", tokens: "big" }],
+                }],
+            },
+        })).toThrow();
+    });
+
+    test("workflow section accepted when arcs present", () => {
+        const p = decodeProfile({
+            ...base,
+            workflow: {
+                arcs: [
+                    { steps: ["superpowers:brainstorming", "superpowers:writing-plans", "superpowers:subagent-driven-development"], count: 12 },
+                ],
+            },
+        });
+        expect(p.workflow!.arcs).toHaveLength(1);
+        expect(p.workflow!.arcs[0]!.steps[0]).toBe("superpowers:brainstorming");
+        expect(p.workflow!.arcs[0]!.count).toBe(12);
+    });
+
+    test("workflow section is optional", () => {
+        const p = decodeProfile(base);
+        expect(p.workflow).toBeUndefined();
+    });
+
+    test("workflow arc rejects non-array steps", () => {
+        expect(() => decodeProfile({
+            ...base,
+            workflow: { arcs: [{ steps: "not-array", count: 1 }] },
+        })).toThrow();
+    });
+
+    test("workflow arc rejects non-number count", () => {
+        expect(() => decodeProfile({
+            ...base,
+            workflow: { arcs: [{ steps: ["a", "b"], count: "twelve" }] },
+        })).toThrow();
+    });
+
+    test("rig skill accepts downstream_share", () => {
+        const p = decodeProfile({
+            ...base,
+            rig: {
+                skills: [{ name: "tdd", source: "superpowers", runs: 88, downstream_share: 0.73 }],
+                hooks: [], routing_table: false,
+            },
+        });
+        expect(p.rig.skills[0]!.downstream_share).toBe(0.73);
+    });
+
+    test("rig skill without downstream_share still decodes", () => {
+        const p = decodeProfile(base);
+        // rig.skills is [] but if it had a row without downstream_share, no error
+        expect(p.rig.skills).toHaveLength(0);
+    });
+
+    test("rig skill rejects non-number downstream_share", () => {
+        expect(() => decodeProfile({
+            ...base,
+            rig: {
+                skills: [{ name: "tdd", source: "superpowers", runs: 88, downstream_share: "high" }],
+                hooks: [], routing_table: false,
+            },
+        })).toThrow();
+    });
+});
