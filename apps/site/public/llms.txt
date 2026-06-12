@@ -1,0 +1,63 @@
+# ax - the agent experience layer
+
+> ax is a local taste & telemetry graph for AI coding agents. It ingests
+> transcripts from Claude Code, Codex, Pi, OpenCode, and Cursor into a local
+> SurrealDB, then turns that history into evidence: which skills earn their
+> keep, what work actually cost, where expensive models burn tokens on
+> mechanical work, and which guardrails measurably help. Everything runs on
+> the user's machine; nothing leaves it unless they share a session.
+
+Site: https://ax.necmttn.com
+Repo: https://github.com/Necmttn/ax
+Install: `curl -fsSL https://ax.necmttn.com/install | bash`, then `npx skills add Necmttn/ax`
+
+## What users can do
+
+### Recall and reconstruct
+- `ax recall <query>` - full-text search across turns, commits, and skills
+- `ax sessions here | around <date> | near <sha> | show <id>` - windowed session queries; drill into any session turn by turn
+- `ax:extract-workflow` skill - reconstruct the workflow behind a shipped artifact ("what made X work")
+- `ax share <session-id>` - publish a sanitized session share via GitHub Gist, viewable in the hosted studio
+
+### Skills intelligence
+- `ax skills search | taste | unused | pairs | recovery | stats | weighted` - which installed skills actually get used, and what they pair with
+- `ax skills classify / tag / lint / by-role / roles` - role-tag skills via review briefs; usage x role-weight ranking
+- `ax skills config` - skill lifecycle (live / orphan / out-of-scope / parked)
+
+### Cost and model routing
+- `ax cost models | sessions | split` - spend by model; the split shows main-loop vs subagent spend so users see what their frontier model burns on mechanical work
+- `ax dispatches [--candidates]` - subagent dispatches that inherited an expensive model + estimated savings at cheaper-model pricing
+- `ax dispatches compile-routing` - regenerate the routing table that drives the route-dispatch hook and the efficient-dispatch skill
+- `efficient-dispatch` skill - orchestration pattern: the main model keeps judgment and review, mechanical dispatches carry an explicit cheaper model
+- `route-dispatch` hook - deterministic dispatch-time nudge when a mechanical dispatch forgets an explicit model
+- `ax costs summary | for --session/--query/--commit/--branch` - what any session, feature, or branch cost in tokens and USD
+
+### Self-improvement loop
+- `ax improve recommend / accept / lint / show` - evidence-backed proposals (guidance, skills, hooks, automations) derived from the graph; accept emits a task brief, lint reconciles applied guidance
+- `ax retro emit / pending / brief` + `ax:retro` skill - guided experiment-loop retrospective: triage proposals, lock verdicts, review hook effectiveness
+- `ax hooks init / install / backtest / cases` - author typed TypeScript hooks once, run them on Claude Code + Codex; replay history through a hook before installing it
+
+### Graph insights
+- `ax insights <view>` - 31 read-only graph views
+- `ax signals list | show` - relation-signal catalog (fragility cascades, etc.)
+- `ax sessions metrics`, `ax evidence weekly` - session health and weekly evidence rollups
+- `ax serve` - local dashboard with live ingest, session browser, and health views
+- `ax tui` - terminal skills browser
+
+### Setup and ingest
+- `ax setup` / `ax install` - first-time install: CLI, local SurrealDB, transcript watcher
+- `ax ingest [here] [--since=Nd]` - ingest transcripts, skills, and git history; `here` scopes to the current repo; the watcher does this automatically on new transcripts
+- `ax roles` - list role labels used for skill classification
+- `ax doctor` - validate the install (db, watcher, skills)
+
+### For agents (MCP)
+- `ax mcp` - stdio MCP server exposing read-only graph queries as tools: recall, sessions_around, session_show, skills_weighted, skills_by_role, skills_roles, roles, improve_recommend, improve_show, improve_list, session_metrics, signal_show, cost_models, cost_split, dispatches
+
+## Pages
+- [How it works](https://ax.necmttn.com/how-it-works): ingest -> graph -> evidence loop
+- [Features](https://ax.necmttn.com/features): feature tour
+- [CLI reference](https://ax.necmttn.com/docs/cli-reference): every command
+- [Docs](https://ax.necmttn.com/docs): concepts and language
+- [Manifesto](https://ax.necmttn.com/manifesto): why the agent experience layer exists
+- [Changelog](https://ax.necmttn.com/changelog): release narratives
+- [Registry](https://ax.necmttn.com/registry): community registry direction
