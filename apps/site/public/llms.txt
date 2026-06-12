@@ -106,6 +106,35 @@ A: Say "let's do an ax retro" - proposal triage + verdict review against your re
 **Q: Is my install healthy / why is nothing ingesting?**
 A: `ax doctor` - validates DB, watcher, and skills. The watcher ingests new transcripts automatically; `ax ingest here --since=1` forces a scoped pass.
 
+## Q&A - multi-hop graph questions (where the graph beats grep)
+
+These need relations chained across sessions, commits, files, and verdicts -
+derived at ingest, queryable in one command.
+
+**Q: Which of my past mistakes are still costing OTHER work?**
+A: `ax signals show fragility_cascade` - sessions whose reverted commits' files later forced edits by *other* sessions. Three hops: origin session -> reverted commit -> touched files -> downstream sessions that had to fix them, weighted by distinct downstream fixers.
+
+**Q: Which features needed fixes after shipping?**
+A: `ax insights post-feature-fixes` - feature commits joined to the fix commits that followed them. Pair with `ax costs for --commit` to price the cleanup.
+
+**Q: What do I correct my agent about most often?**
+A: `ax insights friction` for the correction/interruption hotspots; `ax insights reaction-themes` clusters classified user reactions into recurring themes - the raw material the improve loop mines.
+
+**Q: Where does my agent claim "done" without verifying?**
+A: `ax insights verification-gaps` - completion claims with no verification evidence behind them.
+
+**Q: Which sessions burned tokens without producing anything?**
+A: `ax insights token-impact` and `ax insights cache-health` - token spend joined to outcome evidence, cache-read ratios flagging context-thrash sessions.
+
+**Q: Which skills rescue sessions that go wrong?**
+A: `ax skills recovery` - failure -> recovery arcs: what got invoked after things broke, and whether the session recovered.
+
+**Q: How does ax decide WHAT to propose improving?**
+A: The derive pipeline chains hops at ingest: classified reactions + correction contexts + skill candidates + dispatch analytics flow into `proposal` rows with evidence refs. `ax improve recommend` ranks them (confidence x recency x frequency); accepting stamps the moment; `ax:retro` verdicts close the loop. Improvement is graph-derived, not vibes.
+
+**Q: My question isn't on this list - can I ask the graph directly?**
+A: Yes. The whole graph is local SurrealDB (`127.0.0.1:8521`, schema in the repo); `ax insights <view>` covers 31 prebuilt traversals, and via `ax mcp` an agent can chain recall -> sessions_around -> session_show hops itself to answer novel multi-hop questions in-context.
+
 ## Pages
 - [How it works](https://ax.necmttn.com/how-it-works): ingest -> graph -> evidence loop
 - [Features](https://ax.necmttn.com/features): feature tour
