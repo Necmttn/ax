@@ -16,7 +16,7 @@ import { ImageResponse } from "workers-og";
 import { OG_RENDER_REV } from "../_lib/og-meta";
 import {
     INK, DIM, CARD, GREEN, RED,
-    esc, statHtml, footerHtml, blockLogoHtml, compactNumber, loadOgFonts,
+    esc, statHtml, footerHtml, blockLogoHtml, compactNumber, compactUsd, loadOgFonts,
 } from "../_lib/og-kit";
 
 const LOGIN_RE = /^[A-Za-z0-9_-]{1,39}$/;
@@ -188,16 +188,14 @@ export const onRequestGet: PagesFunction = async (ctx) => {
     // Big @login in Gelasio serif
     const loginHtml = `<div style="display:flex;align-items:baseline;margin-top:12px"><span style="font-size:48px;font-weight:700;color:${DIM};font-family:'Gelasio';margin-right:4px">@</span><span style="font-size:88px;font-weight:700;color:${INK};font-family:'Gelasio';line-height:1">${esc(login)}</span></div>`;
 
-    // Stat band 1
-    const spendStr = spendUsd != null
-        ? (spendUsd >= 100 ? `$${spendUsd.toFixed(0)}` : `$${spendUsd.toFixed(2)}`)
-        : "-";
+    // Stat band 1 - humanized numerals (19.6B, ~$22.9K, 2.3K) per the
+    // profile design language.
     const statBand1 = `<div style="display:flex">${[
         statHtml(sessions != null ? sessions.toLocaleString("en-US") : "-", "SESSIONS"),
         statHtml(tokens  != null ? compactNumber(tokens)             : "-", "TOKENS"),
-        statHtml(spendStr,                                               "EST. SPEND", GREEN),
+        statHtml(spendUsd != null ? compactUsd(spendUsd)             : "-", "EST. SPEND", GREEN),
         statHtml(streakDays  != null ? `${streakDays}d`             : "-", "STREAK"),
-        statHtml(activeHours != null ? `${activeHours}h`            : "-", "HOURS"),
+        statHtml(activeHours != null ? compactNumber(activeHours)   : "-", "HOURS"),
     ].join("")}</div>`;
 
     // Filler: bar chart or second stat row (fills dead space)

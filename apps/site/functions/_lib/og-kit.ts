@@ -42,10 +42,15 @@ export const fmtUsd = (n: number | null): string | null =>
     n == null ? null : `$${n >= 100 ? n.toFixed(0) : n.toFixed(2)}`;
 
 export const compactNumber = (n: number): string => {
-    if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
-    if (n >= 1_000)     return `${(n / 1_000).toFixed(1)}k`;
+    if (n >= 1_000_000_000) return `${(n / 1_000_000_000).toFixed(1)}B`;
+    if (n >= 1_000_000)     return `${(n / 1_000_000).toFixed(1)}M`;
+    if (n >= 1_000)         return `${(n / 1_000).toFixed(1)}K`;
     return n.toLocaleString("en-US");
 };
+
+/** Humanized money for big stat numerals: 22882 -> "~$22.9K". */
+export const compactUsd = (n: number): string =>
+    n >= 1_000 ? `~$${compactNumber(n)}` : `$${n.toFixed(0)}`;
 
 // ---------------------------------------------------------------------------
 // Stat block - 46px numeral + 14px letter-spaced label (matches share card)
