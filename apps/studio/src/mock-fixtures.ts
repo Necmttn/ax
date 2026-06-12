@@ -12,6 +12,7 @@ import type {
     EpisodeTimelinePayload,
     GraphExplorerPayload,
     ImprovePayload,
+    NextActionsPayload,
     ProjectPagePayload,
     RecallResponse,
     SessionChildrenResponse,
@@ -192,6 +193,57 @@ const IMPROVE: ImprovePayload = {
 } as never;
 
 // ---------------------------------------------------------------------------
+// Next Actions - companion panel mock
+// ---------------------------------------------------------------------------
+
+const NEXT_ACTIONS: NextActionsPayload = {
+    generatedAt: NOW,
+    cards: [
+        {
+            id: "proposal:skill__4555aa4f87404b1",
+            kind: "proposal",
+            title: "Session closure quality guardrail",
+            evidence: "1072 sessions ended without commit while a plan was still open",
+            impact: 9.4,
+            brief: "## Session closure quality guardrail\n\nWarn the agent before stop when session has no commit + plan still open.\n\n**Trigger:** session-end without commit + plan still open\n**Proposed behavior:** warn the agent before stop with the plan delta",
+            link: "/improve",
+            inline_action: {
+                type: "accept",
+                sig: "skill__4555aa4f87404b1",
+                skill: null,
+                suggested_verdict: null,
+            },
+        },
+        {
+            id: "tool_failure:Bash:cd-not-found",
+            kind: "tool_failure",
+            title: "Bash: repeated `cd` path-not-found errors",
+            evidence: "14 failures in the last 7 days across 3 projects",
+            impact: 6.1,
+            brief: "## Bash cd failures\n\nThe agent repeatedly attempts `cd` with relative paths that don't exist. Consider using absolute paths or checking directory existence first.",
+            link: "/tools",
+            inline_action: null,
+        },
+        {
+            id: "verdict:skill__508c34566d2f1d85",
+            kind: "verdict",
+            title: "Post-feature verification checklist - verdict due",
+            evidence: "Experiment scaffolded 12d ago; 26 verification passes observed since",
+            impact: 7.8,
+            brief: "## Post-feature verification checklist\n\nThe experiment has been running for 12 days. Evidence suggests the skill is working as intended. Suggested verdict: adopted.",
+            link: null,
+            inline_action: {
+                type: "verdict",
+                sig: "skill__508c34566d2f1d85",
+                skill: null,
+                suggested_verdict: "adopted",
+            },
+        },
+    ],
+    notes: [],
+};
+
+// ---------------------------------------------------------------------------
 // Empty-but-typed responses for the other endpoints
 // ---------------------------------------------------------------------------
 
@@ -288,6 +340,9 @@ export async function mockFetch<T>(input: RequestInfo, init?: RequestInit): Prom
 
     // Workflow
     if (path === "/api/workflow") return WORKFLOW as unknown as T;
+
+    // Next Actions
+    if (path === "/api/next-actions") return NEXT_ACTIONS as unknown as T;
 
     // Improve
     if (path === "/api/improve") return IMPROVE as unknown as T;
