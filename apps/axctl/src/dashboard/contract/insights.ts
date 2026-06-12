@@ -17,6 +17,7 @@ import { fetchToolFailureDetail, fetchToolFailures } from "../tool-failures.ts";
 import { fetchWorkflow } from "../workflow.ts";
 import { sanitizeWrappedProfile } from "../wrapped.ts";
 import { fetchWrappedCached } from "../wrapped-cache.ts";
+import { fetchWrappedCards, sanitizeWrappedCards } from "../wrapped-cards.ts";
 import { orInternal } from "./common.ts";
 
 export const InsightsGroupLive = HttpApiBuilder.group(AxApi, "insights", (handlers) =>
@@ -51,9 +52,24 @@ export const InsightsGroupLive = HttpApiBuilder.group(AxApi, "insights", (handle
                         : Effect.succeed(payload)
                 ),
             ))
-        .handle("wrapped", () => orInternal(fetchWrappedCached()))
+        // Agent-authored cards merge onto the cached mechanical profile.
+        // The cards read is uncached on purpose: `ax wrapped publish` runs in
+        // a separate process and can't drop the daemon's in-memory TTL cache.
+        .handle("wrapped", () =>
+            orInternal(
+                Effect.all([fetchWrappedCached(), fetchWrappedCards()]).pipe(
+                    Effect.map(([profile, cards]) => ({ ...profile, cards })),
+                ),
+            ))
         .handle("wrappedPublicPreview", () =>
-            orInternal(fetchWrappedCached().pipe(Effect.map(sanitizeWrappedProfile))))
+            orInternal(
+                Effect.all([fetchWrappedCached(), fetchWrappedCards()]).pipe(
+                    Effect.map(([profile, cards]) => ({
+                        ...sanitizeWrappedProfile(profile),
+                        cards: sanitizeWrappedCards(cards),
+                    })),
+                ),
+            ))
         .handle("workflow", () => orInternal(fetchWorkflow()))
         .handle("toolFailures", () => orInternal(fetchToolFailures()))
         .handle("toolFailureDetail", ({ params }) => orInternal(fetchToolFailureDetail(params.label))));
