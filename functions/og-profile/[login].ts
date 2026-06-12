@@ -6,4 +6,4 @@
  * production (manual `wrangler pages deploy` runs from apps/site and uses
  * apps/site/functions). Keep both in sync by re-exporting, never duplicating.
  */
-export { onRequestGet } from "../../../apps/site/functions/og-profile/[login]";
+export { onRequestGet } from "../../apps/site/functions/og-profile/[login]";
