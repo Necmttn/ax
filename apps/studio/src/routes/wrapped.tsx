@@ -223,7 +223,17 @@ function PublicPreview({
                         <small>{scoreLabel(profile.primaryArchetype)}</small>
                     </div>
                     <ul>
-                        {profile.facts.length === 0 ? (
+                        {/* The agent deck is the public artifact - list its
+                            surviving (non-sensitive) cards; mechanical facts
+                            only appear when no deck exists yet. */}
+                        {(profile.cards?.length ?? 0) > 0 ? (
+                            profile.cards!.map((card) => (
+                                <li key={`${card.position}-${card.headline}`}>
+                                    <strong>{card.headline}</strong>
+                                    <span>{card.body}</span>
+                                </li>
+                            ))
+                        ) : profile.facts.length === 0 ? (
                             <li>No public facts available.</li>
                         ) : (
                             profile.facts.map((fact) => (
