@@ -2618,3 +2618,20 @@ td.skill-cell .description {
     color: var(--muted);
     font-size: 12px;
 }
+
+.wrapped-improve-cta {
+    margin-top: 20px;
+    padding: 16px 18px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    flex-wrap: wrap;
+    border: 1px solid var(--ink);
+}
+.wrapped-improve-link {
+    text-decoration: none;
+    white-space: nowrap;
+    font-size: 14px;
+    padding: 8px 14px;
+}
