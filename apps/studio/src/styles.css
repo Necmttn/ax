@@ -2473,9 +2473,21 @@ td.skill-cell .description {
 /* ---- wrapped recap cards (trace cards) ---- */
 .wrapped-cards {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+    /* Explicit column counts per viewport: a 12-card deck divides into
+       clean full rows at 4/3/2/1 - auto-fill packed 5 ragged columns on
+       wide screens and starved the headlines. */
+    grid-template-columns: repeat(4, minmax(0, 1fr));
     gap: 16px;
     margin: 16px 0 8px;
+}
+@media (max-width: 1500px) {
+    .wrapped-cards { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+@media (max-width: 1020px) {
+    .wrapped-cards { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 640px) {
+    .wrapped-cards { grid-template-columns: 1fr; }
 }
 .wrapped-card {
     border: 1px solid var(--line);
