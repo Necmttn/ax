@@ -36,6 +36,7 @@ const RoutingClass = Schema.Struct({
   flags: Schema.optional(Schema.String),
   suggest: Schema.String,
   reason: Schema.String,
+  origin: Schema.optional(Schema.Literals(["default", "user"])),
 });
 
 const RoutingTable = Schema.Struct({
@@ -45,6 +46,8 @@ const RoutingTable = Schema.Struct({
 });
 
 type RoutingTableType = Schema.Schema.Type<typeof RoutingTable>;
+
+export { RoutingTable as RoutingTableSchema };
 
 // ---------------------------------------------------------------------------
 // Built-in defaults (used when ~/.ax/hooks/routing-table.json is absent /

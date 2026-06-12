@@ -1,6 +1,7 @@
-import { describe, expect, test } from "bun:test";
-import { Effect } from "effect";
+import { describe, expect, it, test } from "bun:test";
+import { Effect, Result, Schema } from "effect";
 import routeDispatch from "./route-dispatch.ts";
+import { RoutingTableSchema } from "./route-dispatch.ts";
 import { GitEnvTest } from "../git-env.ts";
 
 // ---------------------------------------------------------------------------
@@ -275,5 +276,24 @@ describe("matcher guard", () => {
     expect(result.exitCode).toBe(0);
     // No systemMessage in stdout (warn would produce it)
     expect(result.stdout).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// RoutingTableSchema export: accepts origin-tagged classes
+// ---------------------------------------------------------------------------
+
+describe("route-dispatch routing-table schema", () => {
+  it("accepts origin-tagged classes written by ax routing compile/tune", () => {
+    const decode = Schema.decodeUnknownResult(RoutingTableSchema);
+    const result = decode({
+      version: 1,
+      classes: [
+        { id: "spec-review", pattern: "^spec review", flags: "i", suggest: "sonnet", reason: "x", origin: "default" },
+        { id: "mined", pattern: "^summarize", flags: "i", suggest: "haiku", reason: "y", origin: "user" },
+      ],
+      agentTypes: { Explore: "haiku" },
+    });
+    expect(Result.isSuccess(result)).toBe(true);
   });
 });
