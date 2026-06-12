@@ -17,6 +17,7 @@ import type {
     SessionChildrenResponse,
     SessionDetailPayload,
     SessionInspectPayload,
+    SessionInsightsPayload,
     SessionListResponse,
     SkillDetailPayload,
     SkillGraphPayload,
@@ -207,6 +208,26 @@ const EMPTY_SESSION_COMPARE = {
     winners: { fastest: null, cheapest: null, fewest_tokens: null, cleanest: null },
     not_found: [],
 } as never;
+const EMPTY_SESSION_INSIGHTS: SessionInsightsPayload = {
+    session: "mock",
+    phases: [],
+    friction_ticks: [],
+    commits: [],
+    subagent_spans: [],
+    checks: [],
+    loc: null,
+    durability: null,
+    delegation_ratio: null,
+    skills: [],
+    context_curve: [],
+    compactions: [],
+    baseline: {
+        cost_ratio: null,
+        friction_ratio: null,
+        land_ratio: null,
+        cache_pct: null,
+    },
+};
 
 const EMPTY_TOOL_FAILURES: ToolFailuresResponse = { rows: [], total: 0 } as never;
 const EMPTY_GRAPH: GraphExplorerPayload = { mode: "file-attention", limit: 0, nodes: [], edges: [], query: null } as never;
@@ -276,6 +297,7 @@ export async function mockFetch<T>(input: RequestInfo, init?: RequestInit): Prom
 
     // Empties
     if (path.startsWith("/api/sessions/compare")) return EMPTY_SESSION_COMPARE as unknown as T;
+    if (/^\/api\/sessions\/[^/]+\/insights$/.test(path)) return EMPTY_SESSION_INSIGHTS as unknown as T;
     if (path.startsWith("/api/sessions")) return EMPTY_SESSION_LIST as unknown as T;
     if (path === "/api/tool-failures" || path.startsWith("/api/tool-failures/")) return EMPTY_TOOL_FAILURES as unknown as T;
     if (path.startsWith("/api/graph-explorer")) return EMPTY_GRAPH as unknown as T;

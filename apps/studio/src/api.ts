@@ -14,6 +14,7 @@ import type {
     SessionComparePayload,
     SessionDetailPayload,
     SessionInspectPayload,
+    SessionInsightsPayload,
     SessionListResponse,
     SkillDetailPayload,
     SkillSourcePayload,
@@ -268,6 +269,8 @@ export const api = {
         jsonFetch(`/api/sessions/${encodeURIComponent(sessionId)}`),
     sessionChildren: (parentId: string): Promise<SessionChildrenResponse> =>
         jsonFetch(`/api/sessions/${encodeURIComponent(parentId)}/children`),
+    sessionInsights: (sessionId: string): Promise<SessionInsightsPayload> =>
+        jsonFetch(`/api/sessions/${encodeURIComponent(sessionId)}/insights`),
     sessionInspect: (sessionId: string, params: { turnOffset?: number; turnLimit?: number } = {}): Promise<SessionInspectPayload> => {
         const usp = new URLSearchParams();
         if (params.turnOffset != null) usp.set("turn_offset", String(params.turnOffset));
