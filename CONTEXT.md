@@ -47,6 +47,10 @@ _Avoid_: ground truth
 The agent-neutral logic that turns normalized sessions, edits, commits, and touched files into **Change Sets** and **File Memories**.
 _Avoid_: Codex parser, adapter
 
+**Parser Toolkit**:
+The shared write-builder and JSON-access layer of the **Derivation Engine** that provider parsers compose - field probes, JSONL/SQLite JSON decoding, and the common tool-call, compaction, and token-usage write shapes.
+_Avoid_: helper utils, parser utils
+
 **Ingest Stage**:
 One named unit of the ingest run - skills, commands, claude, codex, subagents,
 spawned, git, signals, outcomes, session-health, closure, learning-registry, or

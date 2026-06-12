@@ -2,8 +2,7 @@ import { Effect, FileSystem, Path, PlatformError, Schema, Stream } from "effect"
 import { RecordId, SurrealClient, filePointer } from "@ax/lib/db";
 import { SkillName } from "@ax/lib/brands";
 import { AxConfig } from "@ax/lib/config";
-import { decodeJsonOrNull } from "@ax/lib/decode";
-import { recordRef, surrealDate, surrealJsonOption, surrealObject, surrealOptionInt, surrealOptionString, surrealString } from "@ax/lib/shared/surql";
+import { surrealJsonOption } from "@ax/lib/shared/surql";
 import { AppLayer } from "@ax/lib/layers";
 import { BaseStageStats, IngestContext, sinceDaysFromCtx, StageMeta } from "./stage/types.ts";
 import { annotateStageProgress, stageFileFailureAnnotator } from "./stage/runner.ts";
@@ -18,12 +17,7 @@ import {
     type AgentEventParentEdgeWrite,
     type AgentEventWrite,
 } from "./provider-events.ts";
-import {
-    extractCommandTool,
-    normalizeCommand,
-    parseCodexFunctionOutput,
-    toolKindForName,
-} from "./tool-calls.ts";
+import { parseCodexFunctionOutput } from "./tool-calls.ts";
 import { extractCodexCompaction, type CompactionWrite } from "./compaction.ts";
 import { classifyTurnIntent } from "./intent-kind.ts";
 import { providerDelegationSignalAvailability } from "./delegation.ts";
@@ -32,16 +26,27 @@ import {
     providerPlanSignalAvailability,
     toPlanSnapshotWrite,
 } from "./plans.ts";
-import { toolCallRecordKey, turnRecordKey } from "./record-keys.ts";
+import { toolCallRecordKey } from "./record-keys.ts";
 import { extractToolFileEvidence } from "./tool-file-evidence.ts";
 import {
     buildNormalizedTranscriptStatements,
     type NormalizedTranscriptBatch,
 } from "./normalized/transcripts.ts";
+// Codex token counts arrive as numbers OR numeric strings - the toolkit's
+// integer probe (`intField`) is this parser's `numberField`.
+import { intField as numberField, isRecord, jsonText, parseJsonl, parseMaybeJson, stringField } from "./normalized/toolkit.ts";
+import {
+    applyCommandFields,
+    makeToolCallWrite,
+    type MutableToolCallWrite,
+} from "./normalized/tool-call-write.ts";
+import {
+    buildSessionTokenUsageStatement,
+    buildTurnTokenUsageStatement,
+} from "./token-usage-writers.ts";
 import { decodeCodexTranscriptLine } from "./line-schemas.ts";
 import { executeStatements } from "@ax/lib/shared/statement-exec";
 import { isNotFound, skipNotFound } from "@ax/lib/shared/fs-error";
-import { safeKeyPart } from "@ax/lib/shared/derive-keys";
 import { tokenQualityLabels } from "./token-quality.ts";
 import { estimateCost } from "./model-pricing.ts";
 import { walkJsonlFilesStrict } from "./walk-jsonl.ts";
@@ -113,46 +118,6 @@ export interface CodexTurnTokenUsage {
     usageQuality: string;
     raw: Record<string, unknown>;
 }
-
-function parseJsonl(line: string): Record<string, unknown> | null {
-    const decoded = decodeJsonOrNull(line);
-    return isRecord(decoded) ? decoded : null;
-}
-
-function isRecord(input: unknown): input is Record<string, unknown> {
-    return typeof input === "object" && input !== null && !Array.isArray(input);
-}
-
-function stringField(input: Record<string, unknown>, field: string): string | null {
-    const value = input[field];
-    return typeof value === "string" ? value : null;
-}
-
-function numberField(input: Record<string, unknown>, field: string): number | null {
-    const value = input[field];
-    const n = typeof value === "number" ? value : typeof value === "string" ? Number(value) : NaN;
-    return Number.isFinite(n) ? Math.trunc(n) : null;
-}
-
-function parseCodexArguments(input: unknown): unknown {
-    if (typeof input !== "string") return input ?? null;
-    const decoded = decodeJsonOrNull(input);
-    return decoded ?? input;
-}
-
-function jsonText(input: unknown): string | null {
-    try {
-        const encoded = JSON.stringify(input);
-        return encoded === undefined ? null : encoded;
-    } catch {
-        return null;
-    }
-}
-
-const surrealOptionFloat = (value: number | null | undefined): string =>
-    value === null || value === undefined || !Number.isFinite(value)
-        ? "NONE"
-        : Number(value.toFixed(8)).toString();
 
 function outputText(input: unknown): string | null {
     return typeof input === "string" ? input : jsonText(input);
@@ -301,10 +266,6 @@ function compactCodexFunctionOutputEventRaw(
         output: compactPayload(payload.output, maxBytes),
     };
 }
-
-type MutableToolCallWrite = {
-    -readonly [Key in keyof ToolCallWrite]: ToolCallWrite[Key];
-};
 
 type ToolResultFields = {
     outputJson: unknown;
@@ -601,33 +562,23 @@ function createCodexExtractor(
         // carries the raw patch text in `input` - wrap it so apply-patch LOC
         // consumers find their `patch` field.
         const customInput = payload.arguments === undefined ? stringField(payload, "input") : null;
-        const inputJson = customInput !== null ? { patch: customInput } : parseCodexArguments(payload.arguments);
-        const turnKey = turnRecordKey(currentSession.id, seq);
+        const inputJson = customInput !== null ? { patch: customInput } : parseMaybeJson(payload.arguments);
         const toolCallKey = toolCallRecordKey({
             sessionId: currentSession.id,
             seq,
             callId,
         });
-        const call: MutableToolCallWrite = {
+        const call: MutableToolCallWrite = makeToolCallWrite({
             provider: "codex",
             toolName,
-            toolKind: toolKindForName(toolName),
             sessionId: currentSession.id,
             seq,
-            turnKey,
-            agentEventKey: agentEventRecordKey({
-                provider: "codex",
-                providerSessionId: currentSession.id,
-                providerEventId: callId,
-                seq,
-            }),
             callId,
             ts,
             cwd: currentSession.cwd,
             inputJson,
             rawJson: payload,
-            hasError: false,
-        };
+        });
 
         pushProviderEvent({
             providerEventId: callId,
@@ -646,14 +597,7 @@ function createCodexExtractor(
             metrics: { turnSeq: seq },
         }, currentSession);
 
-        if (toolName === "exec_command" && isRecord(inputJson)) {
-            const command = stringField(inputJson, "command") ?? stringField(inputJson, "cmd");
-            if (command) {
-                call.commandText = command;
-                call.commandToolName = extractCommandTool(command);
-                call.commandNorm = normalizeCommand(command);
-            }
-        }
+        if (toolName === "exec_command") applyCommandFields(call, inputJson);
 
         toolCalls.push(call);
         toolCallsByCallId.set(callId, call);
@@ -1223,80 +1167,64 @@ const buildCodexTokenUsageStatements = (usage: CodexTokenUsage | null): string[]
     });
     return [
         // TODO(burn-buckets): codex batching makes per-session series unavailable here; backfill via derive stage
-        `UPSERT ${recordRef("session_token_usage", safeKeyPart(usage.session))} MERGE ${surrealObject([
-            ["session", recordRef("session", usage.session)],
-            ["source", surrealString("codex")],
-            ["workflow_epoch", "NONE"],
-            ["model", surrealOptionString(usage.model)],
-            ["prompt_tokens", surrealOptionInt(usage.promptTokens)],
-            ["completion_tokens", surrealOptionInt(usage.completionTokens)],
-            ["cache_creation_input_tokens", "NONE"],
-            ["cache_read_input_tokens", surrealOptionInt(usage.cacheReadInputTokens)],
-            ["estimated_tokens", Math.trunc(usage.estimatedTokens).toString(10)],
-            ["transcript_bytes", "0"],
-            ["context_window", surrealOptionInt(usage.contextWindow)],
-            ["model_ref", usage.model ? recordRef("agent_model", usage.model) : "NONE"],
-            ["estimated_input_cost_usd", surrealOptionFloat(cost.inputUsd)],
-            ["estimated_output_cost_usd", surrealOptionFloat(cost.outputUsd)],
-            ["estimated_cache_creation_cost_usd", surrealOptionFloat(cost.cacheCreationUsd)],
-            ["estimated_cache_read_cost_usd", surrealOptionFloat(cost.cacheReadUsd)],
-            ["estimated_cost_usd", surrealOptionFloat(cost.totalUsd)],
-            ["pricing_source", surrealOptionString(cost.pricingSource)],
-            ["labels", surrealJsonOption(tokenQualityLabels({
+        buildSessionTokenUsageStatement({
+            sessionId: usage.session,
+            source: "codex",
+            model: usage.model,
+            promptTokens: usage.promptTokens,
+            completionTokens: usage.completionTokens,
+            cacheCreationInputTokens: null,
+            cacheReadInputTokens: usage.cacheReadInputTokens,
+            estimatedTokens: usage.estimatedTokens,
+            contextWindow: usage.contextWindow,
+            cost: { modelRefKey: usage.model, estimate: cost },
+            labels: surrealJsonOption(tokenQualityLabels({
                 source: "codex_token_count",
                 tokenSourceQuality: "explicit",
                 tokenSourceDetail: "codex_token_count.total_token_usage",
                 model: usage.model,
                 modelSourceDetail: usage.model ? "codex_session.model_provider" : "missing_codex_model_provider",
-            }))],
-            ["metrics", surrealJsonOption({
+            })),
+            metrics: surrealJsonOption({
                 total_token_usage: usage.totalTokenUsage,
                 last_token_usage: usage.lastTokenUsage,
                 token_count_events: usage.tokenCountEvents,
-            })],
-            ["ts", surrealDate(usage.ts)],
-        ])};`,
+            }),
+            ts: usage.ts,
+        }),
     ];
 };
 
 const buildCodexTurnTokenUsageStatements = (
     usages: readonly CodexTurnTokenUsage[],
 ): string[] =>
-    usages.map((usage) => {
-        const cost = estimateCost({
-            modelKey: usage.model,
+    usages.map((usage) =>
+        buildTurnTokenUsageStatement({
+            sessionId: usage.session,
+            seq: usage.seq,
+            source: "codex",
+            model: usage.model,
             promptTokens: usage.promptTokens,
             completionTokens: usage.completionTokens,
             cacheCreationInputTokens: usage.cacheCreationInputTokens,
             cacheReadInputTokens: usage.cacheReadInputTokens,
+            freshInputTokens: usage.freshInputTokens,
             estimatedTokens: usage.estimatedTokens,
-        });
-        const turnKey = turnRecordKey(usage.session, usage.seq);
-        return `UPSERT ${recordRef("turn_token_usage", turnKey)} MERGE ${surrealObject([
-            ["session", recordRef("session", usage.session)],
-            ["turn", recordRef("turn", turnKey)],
-            ["seq", Math.trunc(usage.seq).toString(10)],
-            ["source", surrealString("codex")],
-            ["model", surrealOptionString(usage.model)],
-            ["prompt_tokens", surrealOptionInt(usage.promptTokens)],
-            ["completion_tokens", surrealOptionInt(usage.completionTokens)],
-            ["cache_creation_input_tokens", surrealOptionInt(usage.cacheCreationInputTokens)],
-            ["cache_read_input_tokens", surrealOptionInt(usage.cacheReadInputTokens)],
-            ["fresh_input_tokens", surrealOptionInt(usage.freshInputTokens)],
-            ["estimated_tokens", Math.trunc(usage.estimatedTokens).toString(10)],
-            ["model_ref", usage.model ? recordRef("agent_model", usage.model) : "NONE"],
-            ["estimated_input_cost_usd", surrealOptionFloat(cost.inputUsd)],
-            ["estimated_output_cost_usd", surrealOptionFloat(cost.outputUsd)],
-            ["estimated_cache_creation_cost_usd", surrealOptionFloat(cost.cacheCreationUsd)],
-            ["estimated_cache_read_cost_usd", surrealOptionFloat(cost.cacheReadUsd)],
-            ["estimated_cost_usd", surrealOptionFloat(cost.totalUsd)],
-            ["pricing_source", surrealOptionString(cost.pricingSource)],
-            ["usage_source", surrealString(usage.usageSource)],
-            ["usage_quality", surrealString(usage.usageQuality)],
-            ["raw", surrealJsonOption(usage.raw)],
-            ["ts", surrealDate(usage.ts)],
-        ])};`;
-    });
+            modelRefKey: usage.model,
+            cost: estimateCost({
+                modelKey: usage.model,
+                promptTokens: usage.promptTokens,
+                completionTokens: usage.completionTokens,
+                cacheCreationInputTokens: usage.cacheCreationInputTokens,
+                cacheReadInputTokens: usage.cacheReadInputTokens,
+                estimatedTokens: usage.estimatedTokens,
+            }),
+            usageSource: usage.usageSource,
+            usageQuality: usage.usageQuality,
+            raw: surrealJsonOption(usage.raw),
+            ts: usage.ts,
+        })
+    );
 
 const toCodexNormalizedBatch = (
     batch: MutableCodexExtract,
@@ -1372,7 +1300,7 @@ const toCodexNormalizedBatch = (
     })),
     toolCallSkillRelations: batch.skillRelations,
     planSnapshots: batch.planSnapshots,
-    compactions: batch.compactions ?? [],
+    compactions: batch.compactions,
 });
 
 const buildCodexBatchStatements = (

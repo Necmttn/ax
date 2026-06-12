@@ -86,21 +86,27 @@ export interface NormalizedSyntheticSkillInvocationWrite {
     readonly skillContentHash?: string;
 }
 
+/**
+ * Every array field is REQUIRED: a parser with no such data passes an
+ * explicit empty array, so "this provider emits none of X" is a visible
+ * decision at each `to*NormalizedBatch` converter rather than an implicit
+ * `?? []` fallback inside the seam.
+ */
 export interface NormalizedTranscriptBatch {
-    readonly providers?: readonly AgentProviderWrite[];
+    readonly providers: readonly AgentProviderWrite[];
     readonly sessions: readonly NormalizedSessionWrite[];
-    readonly events?: readonly AgentEventWrite[];
+    readonly events: readonly AgentEventWrite[];
     readonly turns: readonly NormalizedTurnWrite[];
-    readonly toolCalls?: readonly ToolCallWrite[];
-    readonly toolFileEvidence?: readonly ToolFileEvidenceWrite[];
+    readonly toolCalls: readonly ToolCallWrite[];
+    readonly toolFileEvidence: readonly ToolFileEvidenceWrite[];
     /** Cross-batch agent_event parent edges (streaming parsers resolve parents
      *  flushed in an earlier batch themselves; within-batch edges are derived
      *  by buildAgentEventStatements). */
-    readonly agentEventParentEdges?: readonly AgentEventParentEdgeWrite[];
-    readonly syntheticSkillInvocations?: readonly NormalizedSyntheticSkillInvocationWrite[];
-    readonly toolCallSkillRelations?: readonly ToolCallSkillRelationWrite[];
-    readonly planSnapshots?: readonly PlanSnapshotWrite[];
-    readonly compactions?: readonly CompactionWrite[];
+    readonly agentEventParentEdges: readonly AgentEventParentEdgeWrite[];
+    readonly syntheticSkillInvocations: readonly NormalizedSyntheticSkillInvocationWrite[];
+    readonly toolCallSkillRelations: readonly ToolCallSkillRelationWrite[];
+    readonly planSnapshots: readonly PlanSnapshotWrite[];
+    readonly compactions: readonly CompactionWrite[];
 }
 
 export interface BuildNormalizedTranscriptStatementsOptions {
@@ -204,23 +210,23 @@ export const buildNormalizedTranscriptStatements = (
     batch: NormalizedTranscriptBatch,
     options?: BuildNormalizedTranscriptStatementsOptions,
 ): string[] => [
-    ...buildAgentProviderStatements(batch.providers ?? []),
+    ...buildAgentProviderStatements(batch.providers),
     ...buildAgentEventStatements(
-        { sessions: batch.sessions.map(toAgentSession), events: batch.events ?? [] },
+        { sessions: batch.sessions.map(toAgentSession), events: batch.events },
         { clearExisting: options?.clearExisting ?? true },
     ),
     ...buildNormalizedTurnStatements(batch.turns),
-    ...buildToolCallStatements(batch.toolCalls ?? []),
-    ...buildToolFileEvidenceStatements(batch.toolFileEvidence ?? []),
-    ...(batch.agentEventParentEdges ?? []).map(buildAgentEventParentEdgeStatement),
-    ...buildNormalizedSyntheticSkillInvocationStatements(batch.syntheticSkillInvocations ?? []),
-    ...(batch.toolCallSkillRelations ?? []).flatMap((relation) =>
+    ...buildToolCallStatements(batch.toolCalls),
+    ...buildToolFileEvidenceStatements(batch.toolFileEvidence),
+    ...batch.agentEventParentEdges.map(buildAgentEventParentEdgeStatement),
+    ...buildNormalizedSyntheticSkillInvocationStatements(batch.syntheticSkillInvocations),
+    ...batch.toolCallSkillRelations.flatMap((relation) =>
         buildRelateToolCallSkillStatements(relation)
     ),
-    ...(batch.planSnapshots ?? []).flatMap((snapshot) =>
+    ...batch.planSnapshots.flatMap((snapshot) =>
         buildPlanSnapshotStatements(snapshot)
     ),
-    ...buildCompactionStatements(batch.compactions ?? []),
+    ...buildCompactionStatements(batch.compactions),
 ];
 
 export const writeNormalizedTranscriptBatch = (
