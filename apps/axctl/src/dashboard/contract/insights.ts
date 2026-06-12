@@ -19,7 +19,7 @@ import { sanitizeWrappedProfile } from "../wrapped.ts";
 import { fetchWrappedCached } from "../wrapped-cache.ts";
 import { fetchWrappedCards, sanitizeWrappedCards } from "../wrapped-cards.ts";
 import { renderWrappedGenerateBrief } from "../wrapped-generate-brief.ts";
-import { orInternal } from "./common.ts";
+import { asJsonValue, orInternal } from "./common.ts";
 
 export const InsightsGroupLive = HttpApiBuilder.group(AxApi, "insights", (handlers) =>
     handlers
@@ -59,16 +59,18 @@ export const InsightsGroupLive = HttpApiBuilder.group(AxApi, "insights", (handle
         .handle("wrapped", () =>
             orInternal(
                 Effect.all([fetchWrappedCached(), fetchWrappedCards()]).pipe(
-                    Effect.map(([profile, cards]) => ({ ...profile, cards })),
+                    // asJsonValue: card rows are raw query rows - see common.ts.
+                    Effect.map(([profile, cards]) => asJsonValue({ ...profile, cards })),
                 ),
             ))
         .handle("wrappedPublicPreview", () =>
             orInternal(
                 Effect.all([fetchWrappedCached(), fetchWrappedCards()]).pipe(
-                    Effect.map(([profile, cards]) => ({
-                        ...sanitizeWrappedProfile(profile),
-                        cards: sanitizeWrappedCards(cards),
-                    })),
+                    Effect.map(([profile, cards]) =>
+                        asJsonValue({
+                            ...sanitizeWrappedProfile(profile),
+                            cards: sanitizeWrappedCards(cards),
+                        })),
                 ),
             ))
         .handle("wrappedGenerateBrief", () =>
