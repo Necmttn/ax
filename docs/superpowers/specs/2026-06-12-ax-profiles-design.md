@@ -122,6 +122,10 @@ Identity proof: CI requires PR author == `github` field == filename.
 - `ax contribute skill <name>` / `ax contribute hook <file>` - v1 thin: copy
   artifact + metadata onto a branch in the user's existing fork, open PR into
   `community/skills/` / `community/hooks/`. No registry semantics yet.
+- `ax contribute tip` - opens $EDITOR with a frontmatter template (author,
+  tags[], harness[], created), PRs `community/tips/<slug>.md` via the same
+  fork rails. Tips are the lowest-friction contribution unit - the gateway
+  to skills/hooks contributions.
 
 All GitHub operations (gist CRUD, fork, remote commit, PR) go through a
 `GitHubEnv` Effect service (mirrors hooks-sdk `GitEnv`) so commands are
@@ -148,6 +152,8 @@ committed only when changed:
 community/leaderboard.json    // all boards precomputed: tokens, sessions, streak, cost
 community/skill-stats.json    // { "superpowers:tdd": { "users": 41, "runs_30d": 2210, "trend_pct": 12 } }
 community/hook-stats.json     // { "enforce-worktree": { "users": 17 } }
+community/state/<year>.json   // anonymized distributions: model share, harness mix,
+                              // cost percentiles, skill/hook adoption, taste-pattern frequency
 ```
 
 - Aggregation key for skills/hooks: `source + name`.
@@ -158,8 +164,10 @@ community/hook-stats.json     // { "enforce-worktree": { "users": 17 } }
 
 ### 3c. Community contributions
 
-`community/skills/` and `community/hooks/` PRs follow the normal
-human-reviewed flow. Adoption stats from 3b can badge their READMEs.
+`community/skills/`, `community/hooks/`, and `community/tips/` PRs follow the
+normal human-reviewed flow. Adoption stats from 3b can badge skill/hook
+READMEs; GitHub reactions on merged tip PRs serve as a lightweight quality
+signal later.
 
 ## 4. Site (apps/site)
 
@@ -172,6 +180,8 @@ human-reviewed flow. Adoption stats from 3b can badge their READMEs.
   timestamp; self-reported nature stated on page.
 - `/skills/<source>:<name>` - adoption page ("used by 41 devs, 2.2k runs/30d")
   driven by `skill-stats.json`. Stretch within v1 if cheap; else first v2 item.
+- `/tips` - browsable tips & tricks from `community/tips/`, filterable by
+  tag/harness; each tip links its author's `/u/<login>`.
 - All gist-sourced strings escaped; nothing from user JSON is interpreted as
   HTML.
 
@@ -231,6 +241,15 @@ human-reviewed flow. Adoption stats from 3b can badge their READMEs.
   joining one user's failure-modes to recovery strategies proven by others
   (the registry+mesh wedge).
 - Sharded `community/users/<a>/<name>.json` layout past ~10k users.
+- `/state/<year>` report page - "State of Agent Engineering", stateofjs-style
+  scrolly report rendered from `community/state/<year>.json`. Differentiator
+  vs survey-based State of AI (stateofai.dev, Devographics): measured
+  telemetry, not self-reported answers - actual model split, token spend,
+  skill adoption curves, failure-mode frequency. Distributions compile from
+  day one (above); the report page ships when user count makes the headline
+  credible. Optional survey layer later for opinion questions telemetry
+  cannot answer; a Devographics pairing (their survey + our telemetry) is a
+  possible collab.
 
 ## Open questions
 
