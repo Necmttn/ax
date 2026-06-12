@@ -1,98 +1,108 @@
 # ax routing tune - launch copy (2026-06-12)
 
+## v2 - post-feedback
+
+Rewritten after user testing. Key changes: the misconception ("Claude Code
+already downshifts for sub-tasks") leads; all jargon killed in the thread
+(no "pin a model", no "dispatch", no "mines", no "routing classes");
+burn-rate/usage-limit framing for the Max audience. v1 is in git history.
+
 Numbers measured on the author's machine, 14-day window ending 2026-06-12
 (30d for the tune mining figure). Refresh before publishing if stale.
 
 ## X/Twitter thread (7 posts)
 
-**Post 1**
+**Post 1** [IMAGE: 16:9 receipt visual]
 
-My agent bill for the last 14 days: $19,270.
+You'd think Claude Code sends the grunt work it spawns to cheaper models. It doesn't. Every sub-task runs on your most expensive model unless something tells it otherwise.
 
-663 subagent dispatches. 75% inherited the frontier model because nobody pinned one.
-
-File searches billed at opus rates.
-
-I built the fix into ax. The last piece shipped today.
+My last 14 days: $19,270. 663 sub-tasks. 75% on the priciest model for no reason.
 
 **Post 2**
 
-The failure mode: any subagent dispatch that doesn't pin a model inherits the expensive one.
+That's why your weekly usage limit dies in a couple of hours instead of lasting the week.
 
-On my machine: $2,301 of subagent spend on fable/opus vs $83 on sonnet. That's 28:1.
+On my machine: $2,301 of sub-task spend on fable/opus vs $83 on sonnet. 28:1.
 
-Most of it was mechanical work. File search. Spec'd implementation. Bug fixes.
+Most of it was routine. File searches. Spec'd implementations. Bug fixes.
 
 **Post 3**
 
-The loop:
+The fix: ax lets your harness switch models automatically.
 
-MEASURE - ax cost split breaks spend into main loop vs subagents, by model.
+The smart model keeps the thinking - planning, judgment, review. The routine implementation work it spawns goes to cheaper models.
 
-NUDGE - a route-dispatch hook warns at dispatch time when a mechanical dispatch forgets to pin a model.
+You don't change how you work. The bill changes.
 
-That got me partway. The routing table was still hand-written.
-
-**Post 4**
+**Post 4** [SCREENSHOT: ax routing tune --dry-run output, cropped to footer]
 
 Shipped today: ax routing tune.
 
-It mines your own dispatch history for new routing classes. Deterministic clustering, no LLM in the loop.
+It reads your own usage history and finds the routine work that keeps getting billed at top rates. No AI guessing - just deterministic pattern-matching.
 
-First run on my data: 20 new classes, $591.57 of addressable spend over 30 days.
+First run on my data: 20 patterns, $591.57 of addressable spend over 30 days.
 
-[SCREENSHOT: ax routing tune --dry-run output, cropped to footer]
+**Post 5** [SCREENSHOT: ax dispatches --candidates output, cropped to footer]
 
-**Post 5**
+Then the receipts: every sub-task that ran on the expensive model gets repriced against what the cheaper one would have cost, from the actual tokens it burned.
 
-VERIFY - ax dispatches --candidates reprices every expensive inherited dispatch against the updated table.
-
-Current table: $512.91 in flagged savings, repriced from the real token buckets those dispatches burned.
-
-[SCREENSHOT: ax dispatches --candidates output, cropped to footer]
+On my machine right now: $512.91 flagged.
 
 **Post 6**
 
-Judgment work never auto-tiers down.
+Work that needs judgment never moves. Code review, design, planning, audits - always on the smart model.
 
-Code review, design, planning, audits - the miner detects these and routes the proposal through a brief your agent adversarially backtests before anything applies.
+Only the routine work gets cheaper. Quality doesn't drop; the meter just stops running on file searches.
 
-Quality stays on the frontier model. Only mechanical work moves.
+**Post 7** [LINK CARD: ax.necmttn.com/routing]
 
-**Post 7**
-
-Everything runs local. Your transcripts never leave your machine.
+Everything runs on your machine. Your transcripts never leave it.
 
 curl -fsSL https://ax.necmttn.com/install | bash
 then: ax routing tune
 
-github.com/Necmttn/ax
-
-[GIF: tune apply loop]
+Full breakdown: ax.necmttn.com/routing
 
 ## Standalone tweet
 
-14 days, $19,270 of agent spend. 75% of my 663 subagent dispatches inherited the frontier model by default.
+My last 14 days of Claude Code: $19,270. 75% of the 663 sub-tasks it spawned ran on the most expensive model - file searches billed at opus rates.
 
-Shipped today: ax routing tune mines your own dispatch history for routing classes. 20 classes, $591.57/30d addressable on my machine. Local-only.
+It doesn't downshift on its own. ax does it for you: smart model thinks, cheaper models grind. Local-only.
 
 github.com/Necmttn/ax
 
 ## LinkedIn post
 
-I published my own AI agent bill: $19,270 over 14 days.
+Most people assume Claude Code automatically uses cheaper models for the routine work it spawns - the file searches, the spec'd bug fixes. It doesn't. Every sub-task inherits your default model, which is usually the most expensive one. That's why a weekly usage limit that should last the week is gone in a couple of hours.
 
-The expensive part wasn't the hard work. When you orchestrate with subagents, any dispatch that doesn't pin a model inherits the frontier one. On my machine, 75% of 663 dispatches did exactly that. File searches and spec'd bug fixes were billed at opus rates: $2,301 on frontier models vs $83 on sonnet.
+I measured it on my own machine: $19,270 of agent spend in 14 days. 663 sub-tasks, 75% on the top-tier model. $2,301 of that routine work billed at frontier rates vs $83 on sonnet - 28:1, for work that mostly didn't need the smart model.
 
-Today I shipped the last piece of the fix in ax, my local telemetry graph for coding agents. `ax routing tune` mines your own dispatch history for routing classes - deterministic clustering, no LLM involved. First run found 20 classes covering $591.57 of addressable spend in 30 days. `ax dispatches --candidates` then reprices against real token buckets: $512.91 flagged.
+Today I shipped the fix in ax, my local telemetry tool for coding agents. ax lets your harness switch models automatically: the smart model keeps the thinking - planning, review, design - and the routine implementation work goes to cheaper models. `ax routing tune` reads your own usage history and finds the kinds of routine work being overbilled. First run: 20 patterns, $591.57 of addressable spend over 30 days. Then it reprices every overbilled sub-task against the actual tokens it burned: $512.91 flagged on my machine.
 
-One rule: judgment work (review, design, planning) never auto-routes to cheaper models. Only mechanical work tiers down.
+One hard rule: judgment work never auto-downgrades. Quality stays where it was. Only the grunt work gets cheaper.
 
-All local. github.com/Necmttn/ax
+Everything runs locally. Your transcripts never leave your machine. github.com/Necmttn/ax
+
+## 16:9 image - right panel lines
+
+Plain-language overlay text, in order:
+
+1. $19,270 in 14 days of agent spend
+2. 663 sub-tasks - 75% ran on the most expensive model
+3. `$ ax routing tune` - finds the routine work you're overpaying for
 
 ## Production notes
 
-- Crop both screenshots to the footer lines (totals + top classes) so dollar figures read at mobile width.
-- Post 6 is the objection-killer ("won't quality drop") - keep it late in the thread but never cut it.
-- "addressable spend" for the tune figure, "flagged/est savings" for candidates - never "realized savings" (retrospective repricing, per PR #312 semantics).
-- GIF: VHS tape of dispatches --candidates -> routing tune -> applied diff -> savings footer (sub-project B plan).
+- Post 1 carries the receipt visual; posts 4 and 5 carry the cropped CLI
+  screenshots; post 7 carries the ax.necmttn.com/routing link card.
+- Crop both screenshots to the footer lines (totals + top patterns) so dollar
+  figures read at mobile width.
+- Post 6 is the objection-killer ("won't quality drop") - keep it late in the
+  thread but never cut it.
+- "addressable spend" for the tune figure, "flagged" for candidates - never
+  "realized savings" (retrospective repricing, per PR #312 semantics).
+- Thread vocabulary is locked plain: "sub-tasks", "routine work", "switch
+  models automatically". The /routing page may keep precise terms (dispatch,
+  routing classes); the thread may not.
+- GIF (optional, replaces post 7 link card only if the card renders badly):
+  VHS tape of candidates -> tune -> applied diff -> savings footer.
