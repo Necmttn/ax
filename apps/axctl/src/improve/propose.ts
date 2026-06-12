@@ -26,6 +26,10 @@ const common = {
     confidence: Schema.Literals(["high", "medium", "low"]),
     frequency: Schema.optional(Schema.Int),
     evidence: Schema.optional(Schema.String),
+    /** hypothesis with {{placeholders}} hydrated at serve time - numbers stay live */
+    hypothesis_template: Schema.optional(Schema.String),
+    /** read-only SurrealQL (SELECT/RETURN) whose first row fills the template */
+    evidence_query: Schema.optional(Schema.String),
 };
 
 const SkillPayload = Schema.Struct({
@@ -174,6 +178,8 @@ export const buildProposeStatements = (
                 ["status", surrealString("open")],
                 ["origin", surrealString("agent")],
                 ["baseline", surrealOptionString(baseline)],
+                ["hypothesis_template", surrealOptionString(input.hypothesis_template ?? null)],
+                ["evidence_query", surrealOptionString(input.evidence_query ?? null)],
                 ["updated_at", "time::now()"],
             ])};`,
         );
@@ -201,8 +207,22 @@ export const buildProposeStatements = (
 export const decodeProposeInput = (raw: unknown) =>
     Schema.decodeUnknownEffect(ProposeInputSchema)(raw);
 
+/** Same guard as the dashboard SQL console: read-only statements only. */
+export const isReadOnlyEvidenceQuery = (sql: string): boolean =>
+    /^(SELECT|RETURN)\b/i.test(sql.trim());
+
 export const runPropose = Effect.fn("improve.runPropose")(function* (raw: unknown) {
     const input = yield* decodeProposeInput(raw);
+    if (input.evidence_query !== undefined && !isReadOnlyEvidenceQuery(input.evidence_query)) {
+        return yield* Effect.fail(
+            new Error("evidence_query must be a read-only SELECT or RETURN statement"),
+        );
+    }
+    if ((input.hypothesis_template === undefined) !== (input.evidence_query === undefined)) {
+        return yield* Effect.fail(
+            new Error("hypothesis_template and evidence_query must be provided together"),
+        );
+    }
     const sig = dedupeSig(input.form, normalizeTitle(input.title));
     const db = yield* SurrealClient;
     const existing = yield* db.query<[Array<{ id: unknown }>]>(

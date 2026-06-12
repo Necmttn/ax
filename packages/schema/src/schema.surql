@@ -1608,6 +1608,12 @@ DEFINE FIELD status        ON proposal TYPE string DEFAULT 'open';
 DEFINE FIELD origin        ON proposal TYPE string DEFAULT 'mined';
     -- mined (signal-derived) | agent (written via `ax improve propose`)
     -- old rows read NONE - consumers coalesce to 'mined'
+DEFINE FIELD hypothesis_template ON proposal TYPE option<string>;
+    -- hypothesis with {{placeholders}} hydrated at serve time from
+    -- evidence_query's first row - numbers never expire
+DEFINE FIELD evidence_query      ON proposal TYPE option<string>;
+    -- read-only SurrealQL (SELECT/RETURN only, validated at write AND
+    -- serve) producing the row that fills hypothesis_template
 DEFINE FIELD reject_reason ON proposal TYPE option<string>;
 DEFINE FIELD baseline      ON proposal TYPE option<string>;
 DEFINE FIELD created_at    ON proposal TYPE datetime DEFAULT time::now();

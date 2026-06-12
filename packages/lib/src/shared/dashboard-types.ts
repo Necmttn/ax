@@ -1211,6 +1211,10 @@ export interface ProposalDto {
     readonly origin?: string;
     /** JSON snapshot frozen at creation - evidence/frequency provenance */
     readonly baseline?: string | null;
+    /** hypothesis with {{placeholders}} - hydrated server-side from evidence_query */
+    readonly hypothesis_template?: string | null;
+    /** read-only query (SELECT/RETURN) whose first row fills the template */
+    readonly evidence_query?: string | null;
     /** server-rendered markdown agent brief */
     readonly brief?: string;
 }
