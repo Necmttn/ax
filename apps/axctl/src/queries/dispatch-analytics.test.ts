@@ -23,6 +23,8 @@ import {
     replaceSkillRoutingSection,
     ROUTING_CLASSES,
     matchRouting,
+    matchRoutingWith,
+    EXPENSIVE_TIER_RE,
 } from "./dispatch-analytics.ts";
 
 const fsLayers = Layer.mergeAll(BunFileSystem.layer, BunPath.layer);
@@ -566,5 +568,66 @@ describe("renderRoutingTableMarkdown / replaceSkillRoutingSection", () => {
         const regenerated = replaceSkillRoutingSection(content);
         expect(regenerated).not.toBeNull();
         expect(regenerated!).toBe(content);
+    });
+});
+
+// ---------------------------------------------------------------------------
+// matchRoutingWith - table-parameterized matching
+// ---------------------------------------------------------------------------
+
+describe("matchRoutingWith", () => {
+    const customTable = {
+        version: 1 as const,
+        classes: [
+            { id: "summarize", pattern: "^summarize", flags: "i", suggest: "haiku", reason: "bulk summaries" },
+        ],
+        agentTypes: {},
+    };
+
+    it("matches against the supplied table, not ROUTING_CLASSES", () => {
+        const m = matchRoutingWith(customTable, "Summarize the changelog", null);
+        expect(m?.classId).toBe("summarize");
+        // a ROUTING_CLASSES-only pattern must NOT match through the custom table
+        expect(matchRoutingWith(customTable, "Implement Task 1: foo", null)).toBeNull();
+    });
+
+    it("matchRouting still delegates to the built-in table", () => {
+        expect(matchRouting("Implement the parser", null)?.classId).toBe("well-specified-impl");
+    });
+});
+
+describe("EXPENSIVE_TIER_RE", () => {
+    it("matches fable and opus, not sonnet/haiku", () => {
+        expect(EXPENSIVE_TIER_RE.test("claude-fable-5")).toBe(true);
+        expect(EXPENSIVE_TIER_RE.test("claude-opus-4-8")).toBe(true);
+        expect(EXPENSIVE_TIER_RE.test("claude-sonnet-4-6")).toBe(false);
+    });
+});
+
+describe("fetchDispatchCandidates with a custom table", () => {
+    it("uses the supplied table for matching", async () => {
+        // one spawned row whose description only matches the custom table
+        const spawned = [{
+            parent_id: "session:p1", child_id: "session:c1", ts: "2026-06-12T00:00:00Z",
+            agent_type: "general-purpose", description: "Summarize the changelog", tool_use_id: "tu1",
+        }];
+        const usage = [{
+            session_id: "session:c1", model: "claude-fable-5",
+            prompt_tokens: 1000, completion_tokens: 100,
+            cache_read_tokens: 0, cache_create_tokens: 0, cost_usd: 1.0,
+        }];
+        const toolCalls = [{ session_id: "session:p1", call_id: "tu1", input_json: "{}" }];
+        const layer = makeMockDb([spawned, usage, toolCalls, [], []]);
+        const customTable = {
+            version: 1 as const,
+            classes: [{ id: "summarize", pattern: "^summarize", flags: "i", suggest: "haiku", reason: "bulk summaries" }],
+            agentTypes: {},
+        };
+        const result = await run(
+            fetchDispatchCandidates({ sinceDays: 14, table: customTable }),
+            layer,
+        );
+        expect(result.candidates).toHaveLength(1);
+        expect(result.candidates[0]!.routing_match.classId).toBe("summarize");
     });
 });

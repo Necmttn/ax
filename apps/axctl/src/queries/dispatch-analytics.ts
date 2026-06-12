@@ -125,7 +125,7 @@ const MODEL_ALIASES: Record<string, string> = {
 };
 
 // Expensive model tiers (candidate filter)
-const EXPENSIVE_TIER_RE = /fable|opus/i;
+export const EXPENSIVE_TIER_RE = /fable|opus/i;
 
 // ---------------------------------------------------------------------------
 // Routing match
@@ -138,13 +138,14 @@ export interface RoutingMatch {
     readonly source: "agentType" | "description";
 }
 
-export const matchRouting = (
+export const matchRoutingWith = (
+    table: RoutingTable,
     description: string | null,
     agentType: string | null,
 ): RoutingMatch | null => {
     // Agent-type rules win first (more specific)
     if (agentType) {
-        const suggest = ROUTING_CLASSES.agentTypes[agentType];
+        const suggest = table.agentTypes[agentType];
         if (suggest) {
             return {
                 classId: `agent-type:${agentType}`,
@@ -155,7 +156,7 @@ export const matchRouting = (
         }
     }
     if (description) {
-        for (const cls of ROUTING_CLASSES.classes) {
+        for (const cls of table.classes) {
             try {
                 const re = new RegExp(cls.pattern, cls.flags);
                 if (re.test(description)) {
@@ -173,6 +174,11 @@ export const matchRouting = (
     }
     return null;
 };
+
+export const matchRouting = (
+    description: string | null,
+    agentType: string | null,
+): RoutingMatch | null => matchRoutingWith(ROUTING_CLASSES, description, agentType);
 
 // ---------------------------------------------------------------------------
 // Raw DB row interfaces (query results before joining)
@@ -483,7 +489,8 @@ export const fetchDispatches = Effect.fn("queries.fetchDispatches")(
 // ---------------------------------------------------------------------------
 
 export const fetchDispatchCandidates = Effect.fn("queries.fetchDispatchCandidates")(
-    function* (opts: { readonly sinceDays: number }) {
+    function* (opts: { readonly sinceDays: number; readonly table?: RoutingTable }) {
+        const table = opts.table ?? ROUTING_CLASSES;
         const db = yield* SurrealClient;
 
         const [spawnedResult, usageResult, toolCallsResult, parentSessionsResult, agentModelsResult] =
@@ -627,7 +634,7 @@ export const fetchDispatchCandidates = Effect.fn("queries.fetchDispatchCandidate
             if (!childModel || !EXPENSIVE_TIER_RE.test(childModel)) continue;
 
             // Candidate criterion (c): description or agent_type matches a routing class
-            const routingMatch = matchRouting(sp.description, sp.agent_type);
+            const routingMatch = matchRoutingWith(table, sp.description, sp.agent_type);
             if (!routingMatch) continue;
 
             // Resolve suggested model name
