@@ -1,7 +1,8 @@
 /**
  * `ax profile show` - render the local profile (ProfileV1) from the graph.
- * Local-only preview; publish (gist + fork registration) lands in a later
- * plan. Mirrors the commands/ax-cost.ts pattern: read-only, `db` runtime.
+ * `ax profile publish` - publish ProfileV1 to a public gist (create once, PATCH in place);
+ *   first run shows the exact JSON, asks for consent, then opens a community registration PR.
+ * `ax profile unpublish` - delete the published gist and local publish state.
  */
 import { Effect } from "effect";
 import { Command, Flag } from "effect/unstable/cli";
@@ -9,7 +10,20 @@ import { prettyPrint } from "@ax/lib/json";
 import { buildProfile, type ProfileEnv } from "../../profile/render.ts";
 import type { ProfileV1 } from "../../profile/schema.ts";
 import type { RuntimeManifest } from "./manifest.ts";
-import { fail, jsonFlag } from "./shared.ts";
+import { fail, jsonFlag, optionValue } from "./shared.ts";
+import { GitHubEnvLive } from "../../profile/github-env.ts";
+import {
+    createProfileGist,
+    deleteProfileGist,
+    ensureRegistration,
+    isStale,
+    patchProfileGist,
+} from "../../profile/publish.ts";
+import {
+    defaultPublishStatePath,
+    loadPublishState,
+    savePublishState,
+} from "../../profile/publish-state.ts";
 
 // ---------------------------------------------------------------------------
 // Environment gathering (the only IO in this file)
@@ -147,11 +161,142 @@ const profileShowCommand = Command.make(
     ),
 );
 
+// ---------------------------------------------------------------------------
+// ax profile publish [--window=N] [--no-cost] [--if-stale=H] [--yes] [--skip-registration]
+// ---------------------------------------------------------------------------
+
+const cmdProfilePublish = (input: {
+    readonly window: number;
+    readonly noCost: boolean;
+    readonly ifStaleHours: number | null;
+    readonly yes: boolean;
+    readonly skipRegistration: boolean;
+}) =>
+    Effect.gen(function* () {
+        const statePath = defaultPublishStatePath();
+        const state = yield* Effect.promise(() => loadPublishState(statePath));
+        const nowIso = new Date().toISOString();
+
+        if (input.ifStaleHours !== null) {
+            // --if-stale is the watcher path: no state file -> silent no-op (never prompts).
+            if (state === null) return;
+            if (!isStale(state.published_at, input.ifStaleHours, nowIso)) return;
+        }
+
+        const env = yield* gatherEnv;
+        const noCost = input.noCost || (state?.no_cost ?? false);
+        const profile = yield* buildProfile({
+            windowDays: input.window,
+            includeCost: !noCost,
+            env,
+        });
+
+        if (state === null) {
+            // First publish: consent gate. Show EXACTLY what leaves the machine
+            // (incl. taste summaries - see profile/taste.ts PUBLISH GATE).
+            console.log(prettyPrint(profile));
+            console.log("\nThis exact JSON will be published as a PUBLIC gist under your GitHub account.");
+            if (!input.yes) {
+                const ans = (globalThis.prompt?.("Publish? [y/N]") ?? "").trim().toLowerCase();
+                if (ans !== "y" && ans !== "yes") {
+                    console.log("Aborted. Nothing was published.");
+                    return;
+                }
+            }
+            const ref = yield* createProfileGist(profile);
+            yield* Effect.promise(() =>
+                savePublishState(statePath, {
+                    v: 1,
+                    gist_id: ref.gistId,
+                    owner: ref.owner,
+                    consented_at: nowIso,
+                    published_at: nowIso,
+                    no_cost: noCost,
+                }),
+            );
+            console.log(`\npublished: https://gist.github.com/${ref.owner}/${ref.gistId}`);
+
+            if (!input.skipRegistration) {
+                const result = yield* ensureRegistration({
+                    login: ref.owner,
+                    gistId: ref.gistId,
+                    joined: nowIso.slice(0, 10),
+                });
+                console.log(
+                    result.status === "pr-opened"
+                        ? `registration PR: ${result.prUrl}`
+                        : "already registered in the community directory.",
+                );
+            }
+            return;
+        }
+
+        // Subsequent publish: PATCH gist, update state.
+        yield* patchProfileGist(state.gist_id, profile);
+        yield* Effect.promise(() =>
+            savePublishState(statePath, { ...state, published_at: nowIso, no_cost: noCost }),
+        );
+        console.log(`updated: https://gist.github.com/${state.owner}/${state.gist_id}`);
+    }).pipe(Effect.provide(GitHubEnvLive));
+
+const profilePublishCommand = Command.make(
+    "publish",
+    {
+        window: Flag.integer("window").pipe(Flag.withDefault(30)),
+        noCost: Flag.boolean("no-cost").pipe(Flag.withDefault(false)),
+        ifStale: Flag.integer("if-stale").pipe(Flag.optional),
+        yes: Flag.boolean("yes").pipe(Flag.withDefault(false)),
+        skipRegistration: Flag.boolean("skip-registration").pipe(Flag.withDefault(false)),
+    },
+    ({ window, noCost, ifStale, yes, skipRegistration }) => {
+        if (!Number.isInteger(window) || window <= 0) {
+            fail(`ax profile publish: --window must be a positive integer (got "${window}")`);
+        }
+        const ifStaleHours = optionValue(ifStale) ?? null;
+        if (ifStaleHours !== null && (!Number.isInteger(ifStaleHours) || ifStaleHours <= 0)) {
+            fail(`ax profile publish: --if-stale must be positive hours (got "${ifStaleHours}")`);
+        }
+        return cmdProfilePublish({ window, noCost, ifStaleHours, yes, skipRegistration });
+    },
+).pipe(
+    Command.withDescription(
+        "Publish your profile to a public gist (create once, update in place); " +
+        "first run asks for consent and opens the community registration PR. " +
+        "--window=N  --no-cost  --if-stale=<hours>  --yes  --skip-registration",
+    ),
+);
+
+// ---------------------------------------------------------------------------
+// ax profile unpublish
+// ---------------------------------------------------------------------------
+
+const cmdProfileUnpublish = () =>
+    Effect.gen(function* () {
+        const statePath = defaultPublishStatePath();
+        const state = yield* Effect.promise(() => loadPublishState(statePath));
+        if (state === null) {
+            console.log("not published (no local publish state).");
+            return;
+        }
+        yield* deleteProfileGist(state.gist_id);
+        yield* Effect.promise(async () => {
+            await Bun.$`rm -f ${statePath}`.quiet().nothrow();
+        });
+        console.log(`deleted gist ${state.gist_id} and local publish state.`);
+        console.log(
+            `If you registered, open a removal PR for community/users/${state.owner}.json in Necmttn/ax.`,
+        );
+    }).pipe(Effect.provide(GitHubEnvLive));
+
+const profileUnpublishCommand = Command.make("unpublish", {}, () => cmdProfileUnpublish()).pipe(
+    Command.withDescription("Delete the published profile gist and local publish state."),
+);
+
 export const profileCommand = Command.make("profile").pipe(
     Command.withDescription(
         "Your ax profile: stats, rig, and taste rendered from the local graph",
     ),
-    Command.withSubcommands([profileShowCommand]),
+    Command.withSubcommands([profileShowCommand, profilePublishCommand, profileUnpublishCommand]),
 );
 
 export const axProfileRuntime: RuntimeManifest = {
