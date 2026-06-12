@@ -7,6 +7,9 @@
  */
 
 const REPO_RAW = "https://raw.githubusercontent.com/Necmttn/ax/main";
+// Compiled outputs live on the community-data branch (nightly bot pushes
+// there; main has a required-checks ruleset that blocks bot pushes).
+const DATA_RAW = "https://raw.githubusercontent.com/Necmttn/ax/community-data";
 const LOGIN_RE = /^[A-Za-z0-9-]{1,39}$/;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -283,8 +286,8 @@ export function profileGistRawUrl(owner: string, gistId: string): string {
     return `https://gist.githubusercontent.com/${owner}/${gistId}/raw/ax-profile.json`;
 }
 
-export const leaderboardUrl = `${REPO_RAW}/community/leaderboard.json`;
-export const skillStatsUrl = `${REPO_RAW}/community/skill-stats.json`;
+export const leaderboardUrl = `${DATA_RAW}/community/leaderboard.json`;
+export const skillStatsUrl = `${DATA_RAW}/community/skill-stats.json`;
 
 async function fetchJson(url: string): Promise<unknown> {
     const res = await fetch(url);
