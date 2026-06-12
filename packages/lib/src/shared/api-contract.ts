@@ -351,6 +351,10 @@ export const InsightsGroup = HttpApiGroup.make("insights")
             success: Schema.Unknown,
             error: InternalError,
         }),
+        HttpApiEndpoint.get("wrappedGenerateBrief", "/api/wrapped/generate-brief", {
+            success: Schema.Unknown,
+            error: InternalError,
+        }),
         HttpApiEndpoint.get("workflow", "/api/workflow", {
             success: WorkflowResponse,
             error: InternalError,

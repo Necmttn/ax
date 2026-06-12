@@ -1929,26 +1929,11 @@ td.skill-cell .description {
     overflow-wrap: anywhere;
 }
 
-.wrapped-score {
-    align-self: stretch;
-    border: 1px solid var(--line);
-    background: var(--panel);
-    display: flex;
-    flex-direction: column;
-    justify-content: center;
-    align-items: center;
-    min-width: 0;
-    padding: 12px;
-    text-align: center;
+.wrapped-confidence {
+    color: var(--muted);
+    font-size: 12px;
 }
 
-.wrapped-score strong {
-    font-size: 40px;
-    line-height: 1;
-    font-variant-numeric: tabular-nums;
-}
-
-.wrapped-score span,
 .wrapped-metric span,
 .wrapped-public-preview small,
 .wrapped-redactions {
@@ -2121,40 +2106,24 @@ td.skill-cell .description {
 
 .wrapped-heatmap {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(42px, 1fr));
-    gap: 4px;
-    padding: 10px;
+    grid-template-columns: repeat(auto-fill, minmax(14px, 1fr));
+    gap: 3px;
+    padding: 12px;
     border: 1px solid var(--line);
     background: var(--panel);
 }
 
 .wrapped-day {
-    min-height: 32px;
-    border: 1px solid rgba(20, 22, 21, 0.08);
+    aspect-ratio: 1;
+    border-radius: 2px;
+    border: 1px solid rgba(20, 22, 21, 0.06);
     background: var(--track);
-    display: flex;
-    align-items: end;
-    justify-content: center;
-    padding: 3px;
-    overflow: hidden;
-}
-
-.wrapped-day span {
-    color: var(--muted);
-    font-family: ui-monospace, Menlo, monospace;
-    font-size: 10px;
-    white-space: nowrap;
 }
 
 .wrapped-day.level-1 { background: rgba(37, 103, 168, 0.16); }
 .wrapped-day.level-2 { background: rgba(37, 103, 168, 0.32); }
 .wrapped-day.level-3 { background: rgba(22, 132, 94, 0.42); }
 .wrapped-day.level-4 { background: rgba(22, 132, 94, 0.68); }
-
-.wrapped-day.level-3 span,
-.wrapped-day.level-4 span {
-    color: var(--panel);
-}
 
 .wrapped-facts {
     display: grid;
@@ -2499,4 +2468,170 @@ td.skill-cell .description {
 }
 .masthead-ingest-error {
     max-width: 280px;
+}
+
+/* ---- wrapped recap cards (trace cards) ---- */
+.wrapped-cards {
+    display: grid;
+    /* Explicit column counts per viewport: a 12-card deck divides into
+       clean full rows at 4/3/2/1 - auto-fill packed 5 ragged columns on
+       wide screens and starved the headlines. */
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 16px;
+    margin: 16px 0 8px;
+}
+@media (max-width: 1500px) {
+    .wrapped-cards { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+@media (max-width: 1020px) {
+    .wrapped-cards { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 640px) {
+    .wrapped-cards { grid-template-columns: 1fr; }
+}
+.wrapped-card {
+    border: 1px solid var(--line);
+    background: var(--panel);
+    display: flex;
+    flex-direction: column;
+    min-height: 250px;
+}
+.wrapped-card.accent-green  { --card-accent: var(--green); }
+.wrapped-card.accent-blue   { --card-accent: var(--blue); }
+.wrapped-card.accent-gold   { --card-accent: var(--gold); }
+.wrapped-card.accent-violet { --card-accent: var(--violet); }
+.wrapped-card.accent-rose   { --card-accent: var(--rose); }
+.wrapped-card-strip {
+    display: flex;
+    align-items: flex-end;
+    gap: 3px;
+    height: 56px;
+    padding: 10px 14px 0;
+    border-bottom: 1px solid var(--line);
+    background: color-mix(in srgb, var(--card-accent) 6%, var(--panel));
+}
+.wrapped-card-strip i {
+    flex: 1;
+    background: color-mix(in srgb, var(--card-accent) 78%, var(--panel));
+    border-radius: 1px 1px 0 0;
+    min-height: 4px;
+}
+.wrapped-card-copy {
+    padding: 14px 16px 18px;
+    display: flex;
+    flex-direction: column;
+    gap: 7px;
+}
+.wrapped-card-eyebrow {
+    color: var(--card-accent);
+    font-family: ui-monospace, Menlo, monospace;
+    font-size: 12px;
+    letter-spacing: 0.01em;
+}
+.wrapped-card-headline {
+    margin: 0;
+    font-family: Georgia, serif;
+    font-weight: 600;
+    font-size: clamp(24px, 2.4vw, 30px);
+    line-height: 1.06;
+    letter-spacing: -0.01em;
+    color: var(--ink);
+}
+.wrapped-card-body {
+    margin: 0;
+    font-size: 14px;
+    line-height: 1.5;
+    color: var(--muted);
+}
+.wrapped-card-flag { align-self: flex-start; margin-top: 4px; }
+.wrapped-cta { margin: 12px 0 16px; padding: 14px 16px; }
+
+/* ---- token scale (tokens -> novels -> Eiffel towers) ---- */
+.token-scale {
+    border: 1px solid var(--line);
+    background: var(--panel);
+    padding: 14px 16px;
+    margin-top: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+.token-scale-chain {
+    font-family: ui-monospace, Menlo, monospace;
+    font-size: 13px;
+    color: var(--ink);
+    line-height: 1.6;
+}
+.token-scale-shelf {
+    display: flex;
+    align-items: flex-end;
+    gap: 2px;
+    height: 34px;
+    border-bottom: 2px solid var(--ink);
+    padding: 0 2px;
+}
+.token-scale-shelf i {
+    flex: 1;
+    border-radius: 1px 1px 0 0;
+}
+.token-scale-shelf i:nth-child(5n + 1) { background: color-mix(in srgb, var(--green) 75%, var(--panel)); }
+.token-scale-shelf i:nth-child(5n + 2) { background: color-mix(in srgb, var(--blue) 75%, var(--panel)); }
+.token-scale-shelf i:nth-child(5n + 3) { background: color-mix(in srgb, var(--gold) 75%, var(--panel)); }
+.token-scale-shelf i:nth-child(5n + 4) { background: color-mix(in srgb, var(--violet) 75%, var(--panel)); }
+.token-scale-shelf i:nth-child(5n + 5) { background: color-mix(in srgb, var(--rose) 75%, var(--panel)); }
+.token-scale-towers {
+    display: flex;
+    align-items: flex-end;
+    gap: 6px;
+    color: var(--muted);
+}
+.token-scale-tower {
+    width: 22px;
+    height: 38px;
+}
+.token-scale-tower-overflow {
+    font-family: ui-monospace, Menlo, monospace;
+    font-size: 13px;
+    color: var(--ink);
+    margin-left: 4px;
+    align-self: center;
+}
+.token-scale-note {
+    color: var(--muted-2);
+    font-size: 11.5px;
+}
+
+.wrapped-card-strip { position: relative; }
+.wrapped-card-series-label {
+    position: absolute;
+    top: 4px;
+    right: 8px;
+    font-family: ui-monospace, Menlo, monospace;
+    font-size: 10px;
+    color: var(--card-accent);
+    background: color-mix(in srgb, var(--panel) 80%, transparent);
+    padding: 0 4px;
+    border-radius: 2px;
+}
+
+.token-scale-chain-alt {
+    color: var(--muted);
+    font-size: 12px;
+}
+
+.wrapped-improve-cta {
+    margin-top: 20px;
+    padding: 16px 18px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    flex-wrap: wrap;
+    border: 1px solid var(--ink);
+}
+.wrapped-improve-link {
+    text-decoration: none;
+    white-space: nowrap;
+    font-size: 14px;
+    padding: 8px 14px;
 }

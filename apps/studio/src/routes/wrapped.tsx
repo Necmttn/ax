@@ -1,13 +1,14 @@
-import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { Link } from "@tanstack/react-router";
 import { api } from "../api.ts";
 import type {
-    WrappedArchetype,
     WrappedFact,
     WrappedProfile,
-    WrappedUsageDay,
 } from "@ax/lib/shared/dashboard-types";
 import { fmtCount, fmtTs } from "@ax/lib/shared/formatters";
+import { CopyButton } from "../components/copy-button.tsx";
+import { WrappedCardGrid } from "../components/wrapped-cards.tsx";
+import { TokenScale } from "../components/token-scale.tsx";
 
 const hourLabel = (hour: number | null): string => {
     if (hour == null) return "n/a";
@@ -18,34 +19,15 @@ const hourLabel = (hour: number | null): string => {
 
 const maybeCount = (value: number | null): string => (value == null ? "n/a" : fmtCount(value));
 
-const scoreLabel = (archetype: WrappedArchetype): string =>
-    `${Math.round(archetype.score)} score · ${archetype.confidence} confidence`;
-
-const heatLevel = (day: WrappedUsageDay, max: number): number => {
-    if (max <= 0 || day.sessions <= 0) return 0;
-    return Math.max(1, Math.min(4, Math.ceil((day.sessions / max) * 4)));
-};
-
-const activityLabel = (day: WrappedUsageDay): string =>
-    `${day.date}: ${fmtCount(day.sessions)} sessions, ${fmtCount(day.turns)} turns, ${
-        day.tokens == null ? "tokens not available" : `${fmtCount(day.tokens)} tokens`
-    }`;
-
 export function WrappedRoute() {
     const wrappedQuery = useQuery({
         queryKey: ["wrapped"],
         queryFn: () => api.wrapped(),
     });
-    const publicQuery = useQuery({
-        queryKey: ["wrapped", "public-preview"],
-        queryFn: () => api.wrappedPublicPreview(),
-    });
 
     const data = wrappedQuery.data ?? null;
-    const publicProfile = publicQuery.data ?? null;
     const loading = wrappedQuery.isLoading;
     const error = wrappedQuery.error ? String(wrappedQuery.error) : null;
-    const publicError = publicQuery.error ? String(publicQuery.error) : null;
 
     return (
         <section className="panel wrapped-page">
@@ -56,23 +38,35 @@ export function WrappedRoute() {
                         ? `${data.period.label} · generated ${fmtTs(data.generatedAt)}`
                         : ""}
                 </span>
+                <GenerateBriefButton hasCards={(data?.cards?.length ?? 0) > 0} />
             </header>
 
             {error ? <div className="error">Error: {error}</div> : null}
             {loading && !data ? <div className="loading">Loading…</div> : null}
 
             {data ? (
-                <>
-                    <WrappedHero profile={data} />
-                    <MetricGrid profile={data} />
-                    <DailyHeatmap days={data.usage.days} />
-                    <Facts facts={data.facts} />
-                    <PublicPreview
-                        profile={publicProfile}
-                        loading={publicQuery.isLoading}
-                        error={publicError}
-                    />
-                </>
+                (data.cards?.length ?? 0) > 0 ? (
+                    <>
+                        <WrappedCardGrid cards={data.cards ?? []} />
+                        <ImproveCta />
+                        <details open style={{ marginTop: 24 }}>
+                            <summary style={{ cursor: "pointer" }}><strong>The numbers</strong></summary>
+                            {/* The agent deck supersedes the mechanical hero +
+                                facts - only the raw stats live here. */}
+                            <MetricGrid profile={data} />
+                            <TokenScale tokens={data.usage.totalTokens} />
+                        </details>
+                    </>
+                ) : (
+                    <>
+                        <GenerateCta />
+                        <WrappedHero profile={data} />
+                        <MetricGrid profile={data} />
+                        <TokenScale tokens={data.usage.totalTokens} />
+                        <Facts facts={data.facts} />
+                        <ImproveCta />
+                    </>
+                )
             ) : null}
         </section>
     );
@@ -87,10 +81,9 @@ function WrappedHero({ profile }: { profile: WrappedProfile }) {
                 <h3>{archetype.label}</h3>
                 <p className="wrapped-public-line">{archetype.publicLine}</p>
                 <p className="wrapped-internal">{archetype.internalExplanation || "No internal explanation available."}</p>
-            </div>
-            <div className="wrapped-score">
-                <strong>{Math.round(archetype.score)}</strong>
-                <span>{archetype.confidence} confidence</span>
+                {/* The raw archetype score is an internal ranking value -
+                    only the confidence band means anything to a reader. */}
+                <small className="wrapped-confidence">{archetype.confidence} confidence</small>
             </div>
         </div>
     );
@@ -120,40 +113,6 @@ function MetricGrid({ profile }: { profile: WrappedProfile }) {
     );
 }
 
-function DailyHeatmap({ days }: { days: ReadonlyArray<WrappedUsageDay> }) {
-    const maxSessions = useMemo(
-        () => days.reduce((max, day) => Math.max(max, day.sessions), 0),
-        [days],
-    );
-
-    return (
-        <>
-            <h3 className="wrapped-h3">Daily activity</h3>
-            {days.length === 0 ? (
-                <div className="empty">No daily activity in this period.</div>
-            ) : (
-                <>
-                    <div className="wrapped-heatmap" aria-hidden="true">
-                        {days.map((day) => (
-                            <span
-                                key={day.date}
-                                className={`wrapped-day level-${heatLevel(day, maxSessions)}`}
-                                title={activityLabel(day)}
-                            >
-                                <span>{day.date.slice(5)}</span>
-                            </span>
-                        ))}
-                    </div>
-                    <ul className="sr-only" aria-label="Daily activity values">
-                        {days.map((day) => (
-                            <li key={day.date}>{activityLabel(day)}</li>
-                        ))}
-                    </ul>
-                </>
-            )}
-        </>
-    );
-}
 
 function Facts({ facts }: { facts: ReadonlyArray<WrappedFact> }) {
     return (
@@ -179,49 +138,59 @@ function Facts({ facts }: { facts: ReadonlyArray<WrappedFact> }) {
     );
 }
 
-function PublicPreview({
-    profile,
-    loading,
-    error,
-}: {
-    profile: WrappedProfile | null;
-    loading: boolean;
-    error: string | null;
-}) {
+
+/** Header action: copies the generation brief for an agent session. */
+function GenerateBriefButton({ hasCards }: { readonly hasCards: boolean }) {
+    const query = useQuery({
+        queryKey: ["wrapped", "generate-brief"],
+        queryFn: () => api.wrappedGenerateBrief(),
+        staleTime: Infinity,
+    });
+    if (!query.data) return null;
     return (
-        <>
-            <h3 className="wrapped-h3">Public preview</h3>
-            {error ? <div className="error">Public preview error: {error}</div> : null}
-            {loading && !profile ? <div className="loading">Loading public preview…</div> : null}
-            {profile ? (
-                <div className="wrapped-public-preview">
-                    <div>
-                        <span className="badge keep">
-                            {profile.privacy.publicSafe ? "public safe" : "check"}
-                        </span>
-                        <h4>{profile.primaryArchetype.label}</h4>
-                        <p>{profile.primaryArchetype.publicLine}</p>
-                        <small>{scoreLabel(profile.primaryArchetype)}</small>
-                    </div>
-                    <ul>
-                        {profile.facts.length === 0 ? (
-                            <li>No public facts available.</li>
-                        ) : (
-                            profile.facts.map((fact) => (
-                                <li key={fact.id}>
-                                    <strong>{fact.title}</strong>
-                                    <span>{fact.publicText}</span>
-                                </li>
-                            ))
-                        )}
-                    </ul>
-                    {profile.privacy.redactedFields.length > 0 ? (
-                        <p className="wrapped-redactions">
-                            Redacted: {profile.privacy.redactedFields.join(", ")}
-                        </p>
-                    ) : null}
-                </div>
-            ) : null}
-        </>
+        <CopyButton
+            text={query.data.brief}
+            label={hasCards ? "Regenerate wrapped" : "Copy wrapped brief"}
+        />
+    );
+}
+
+/** Empty-deck call to action above the mechanical fallback view. */
+function GenerateCta() {
+    return (
+        <div className="wrapped-cta panel">
+            <h3 style={{ margin: "0 0 4px" }}>Make this page yours</h3>
+            <p className="meta" style={{ margin: 0 }}>
+                These are the mechanical numbers. Copy the wrapped brief (top right),
+                paste it into an agent session, and it will mine your graph and publish
+                headline cards here via <code>ax wrapped publish</code>.
+            </p>
+        </div>
+    );
+}
+
+/** The bridge from "cool shareable recap" to the product's real job:
+ *  the improve loop. Counts come from the (cached) next-actions feed. */
+function ImproveCta() {
+    const query = useQuery({
+        queryKey: ["next-actions"],
+        queryFn: () => api.nextActions(),
+        staleTime: 60_000,
+    });
+    const count = query.data?.cards.length ?? 0;
+    return (
+        <div className="wrapped-improve-cta panel">
+            <div>
+                <h3 style={{ margin: "0 0 4px" }}>Now make it better</h3>
+                <p className="meta" style={{ margin: 0 }}>
+                    {count > 0
+                        ? `ax mined ${count} concrete next actions from this data - proposals to decide, failures to fix, savings to route.`
+                        : "ax mines your sessions for concrete next actions - proposals, failure fixes, routing savings."}
+                </p>
+            </div>
+            <Link to="/improve" className="badge keep wrapped-improve-link">
+                {count > 0 ? `What's next (${count}) →` : "Open the improve loop →"}
+            </Link>
+        </div>
     );
 }

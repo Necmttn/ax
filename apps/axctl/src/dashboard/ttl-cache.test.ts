@@ -37,6 +37,25 @@ describe("makeTtlCachedFetch", () => {
         expect(await Effect.runPromise(cache.fetch())).toBe(42);
     });
 
+    test("a failed compute is NOT cached - next fetch retries", async () => {
+        let calls = 0;
+        const cache = makeTtlCachedFetch(
+            "test",
+            () =>
+                Effect.suspend(() => {
+                    calls += 1;
+                    return calls === 1
+                        ? Effect.fail(new Error("db hiccup"))
+                        : Effect.succeed(calls);
+                }),
+            "1 minute",
+        );
+        await expect(Effect.runPromise(cache.fetch())).rejects.toThrow("db hiccup");
+        const second = await Effect.runPromise(cache.fetch());
+        expect(second).toBe(2);
+        expect(calls).toBe(2);
+    });
+
     test("concurrent first callers share one compute", async () => {
         let computes = 0;
         const cache = makeTtlCachedFetch(

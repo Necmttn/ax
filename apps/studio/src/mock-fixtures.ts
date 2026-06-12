@@ -364,6 +364,9 @@ export async function mockFetch<T>(input: RequestInfo, init?: RequestInit): Prom
     if (path.startsWith("/api/recall")) return EMPTY_RECALL as unknown as T;
     if (path === "/api/wrapped" || path === "/api/wrapped/public-preview") return EMPTY_WRAPPED as unknown as T;
 
+    if (path === "/api/wrapped/generate-brief") {
+        return { brief: "## Task: Write my Agent Wrapped cards (mock)\n\nConnect a local daemon for the real brief." } as unknown as T;
+    }
     if (path === "/api/improve/analyze-brief") {
         return { brief: "## Task: Deep-analysis pass (mock)\n\nConnect a local daemon for the real brief." } as unknown as T;
     }
