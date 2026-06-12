@@ -17,7 +17,7 @@
  * fresh one is swapped in for the next request. A rejection AFTER a
  * successful build is a handler error and never triggers a swap.
  */
-import { Effect, ManagedRuntime } from "effect";
+import { Effect, ManagedRuntime, type Layer } from "effect";
 import { IngestRuntimeLayer } from "../ingest/stage/runtime.ts";
 import type { DashboardEnv, EffectRunner } from "./router/router.ts";
 
@@ -47,9 +47,18 @@ export interface ServeRuntimeHandle {
     readonly dispose: () => Promise<void>;
 }
 
-const makeDefault = (): RuntimeLike => ManagedRuntime.make(IngestRuntimeLayer);
+/**
+ * Production runtime factory. Pass a `memoMap` to share layer builds with
+ * other consumers of the same layer objects - `serveDashboard` shares one
+ * memoMap between this runtime and the contract web handler
+ * (contract/web-handler.ts) so AppLayer's SurrealDB connection is built once.
+ */
+export const defaultRuntimeFactory = (
+    options?: { readonly memoMap?: Layer.MemoMap },
+): (() => RuntimeLike) =>
+() => ManagedRuntime.make(IngestRuntimeLayer, options?.memoMap ? { memoMap: options.memoMap } : undefined);
 
-export function makeServeRuntime(make: () => RuntimeLike = makeDefault): ServeRuntimeHandle {
+export function makeServeRuntime(make: () => RuntimeLike = defaultRuntimeFactory()): ServeRuntimeHandle {
     let runtime = make();
     let disposed = false;
 
