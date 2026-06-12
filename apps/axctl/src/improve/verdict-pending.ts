@@ -33,7 +33,7 @@ export const listPendingVerdicts = (): Effect.Effect<PendingVerdictRow[], DbErro
             FROM experiment
             WHERE locked_verdict IS NONE AND status != 'retired'
             ORDER BY created_at ASC
-            LIMIT 20;`;
+            LIMIT 20;`; // cap keeps the dojo agenda to one reviewable sitting
         const result = yield* db.query<[Array<PendingVerdictRow & { created_at?: string }>]>(sql);
         return (result?.[0] ?? []).map(({ id, title, status }) => ({ id, title, status }));
     });
