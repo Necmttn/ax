@@ -39,11 +39,15 @@ function toApiError(err: unknown): ApiError {
     return new ApiError(message, status);
 }
 
+export type { AxClient };
+
 /**
  * Run one contract call: build the per-call client against `baseUrl`
  * (null = same-origin relative URLs) and normalize failures to ApiError.
+ * The generic seam every api.ts method migrated to the contract goes
+ * through (via api.ts's viaContract, which owns the mock-mode branch).
  */
-async function runContract<A, E>(
+export async function runContract<A, E>(
     baseUrl: string | null,
     call: (client: AxClient) => Effect.Effect<A, E>,
 ): Promise<A> {

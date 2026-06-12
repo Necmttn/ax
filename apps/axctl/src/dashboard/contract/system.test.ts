@@ -38,7 +38,10 @@ const req = (method: string, path: string, body?: unknown): Request =>
 
 describe("isContractRequest", () => {
     test("owns exactly the migrated (method, path) pairs", () => {
-        expect(isContractRequest("GET", "/api/version")).toBe(true);
+        // /api/version is in the contract (docs, generated client) but is
+        // ROUTED to the DB-free legacy row so the daemon's identity probe
+        // keeps answering when SurrealDB is down - see web-handler.ts.
+        expect(isContractRequest("GET", "/api/version")).toBe(false);
         expect(isContractRequest("POST", "/api/query")).toBe(true);
         expect(isContractRequest("GET", "/docs")).toBe(true);
         expect(isContractRequest("GET", "/openapi.json")).toBe(true);
