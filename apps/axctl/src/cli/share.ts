@@ -1,8 +1,8 @@
-import { Effect } from "effect";
+import { Effect, FileSystem, Layer, Path, type PlatformError } from "effect";
 import { execFile } from "node:child_process";
-import { readFile } from "node:fs/promises";
-import { join } from "node:path";
 import { AppLayer } from "@ax/lib/layers";
+import { BunFileSystem, BunPath } from "@ax/lib/bun-platform";
+import { skipNotFound } from "@ax/lib/shared/fs-error";
 import { prettyPrint } from "@ax/lib/json";
 import type { AxSessionShare } from "../share/artifact.ts";
 import { exportSessionShare } from "../share/exporter.ts";
@@ -113,17 +113,32 @@ function isShareNarrationArtifact(value: unknown): value is ShareNarrationArtifa
     );
 }
 
-export async function loadLocalNarration(sessionId: string): Promise<ShareNarrationArtifact | null> {
-    try {
-        const raw = await readFile(join(process.cwd(), ".ax", "narrations", `${sessionId}.json`), "utf8");
-        const parsed: unknown = JSON.parse(raw);
-        return isShareNarrationArtifact(parsed) ? parsed : null;
-    } catch (error) {
-        const code = (error as { code?: unknown }).code;
-        if (code === "ENOENT" || error instanceof SyntaxError) return null;
-        throw error;
-    }
-}
+/** Read `.ax/narrations/<session-id>.json` from the cwd. Missing file or
+ *  malformed JSON → null (the share just has no Story tab); any other fs
+ *  error (permissions, IO) re-raises. */
+export const loadLocalNarrationEffect = (
+    sessionId: string,
+): Effect.Effect<ShareNarrationArtifact | null, PlatformError.PlatformError, FileSystem.FileSystem | Path.Path> =>
+    Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const file = path.join(process.cwd(), ".ax", "narrations", `${sessionId}.json`);
+        const raw = yield* fs.readFileString(file).pipe(skipNotFound(null));
+        if (raw === null) return null;
+        try {
+            const parsed: unknown = JSON.parse(raw);
+            return isShareNarrationArtifact(parsed) ? parsed : null;
+        } catch {
+            return null;
+        }
+    });
+
+export const loadLocalNarration = (sessionId: string): Promise<ShareNarrationArtifact | null> =>
+    Effect.runPromise(
+        loadLocalNarrationEffect(sessionId).pipe(
+            Effect.provide(Layer.mergeAll(BunFileSystem.layer, BunPath.layer)),
+        ),
+    );
 
 /**
  * Export-miss fallback: find the transcript on disk, run a targeted ingest
