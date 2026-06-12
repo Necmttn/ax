@@ -10,6 +10,7 @@ import type {
 import { fmtCount, fmtTs } from "@ax/lib/shared/formatters";
 import { CopyButton } from "../components/copy-button.tsx";
 import { WrappedCardGrid } from "../components/wrapped-cards.tsx";
+import { TokenScale } from "../components/token-scale.tsx";
 
 const hourLabel = (hour: number | null): string => {
     if (hour == null) return "n/a";
@@ -73,6 +74,7 @@ export function WrappedRoute() {
                             {/* The agent deck supersedes the mechanical hero +
                                 facts - only the raw stats live here. */}
                             <MetricGrid profile={data} />
+                            <TokenScale tokens={data.usage.totalTokens} />
                             <DailyHeatmap days={data.usage.days} />
                         </details>
                         <PublicPreview
@@ -86,6 +88,7 @@ export function WrappedRoute() {
                         <GenerateCta />
                         <WrappedHero profile={data} />
                         <MetricGrid profile={data} />
+                        <TokenScale tokens={data.usage.totalTokens} />
                         <DailyHeatmap days={data.usage.days} />
                         <Facts facts={data.facts} />
                         <PublicPreview

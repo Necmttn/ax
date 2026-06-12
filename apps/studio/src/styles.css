@@ -2533,3 +2533,58 @@ td.skill-cell .description {
 }
 .wrapped-card-flag { align-self: flex-start; margin-top: 4px; }
 .wrapped-cta { margin: 12px 0 16px; padding: 14px 16px; }
+
+/* ---- token scale (tokens -> novels -> Eiffel towers) ---- */
+.token-scale {
+    border: 1px solid var(--line);
+    background: var(--panel);
+    padding: 14px 16px;
+    margin-top: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+.token-scale-chain {
+    font-family: ui-monospace, Menlo, monospace;
+    font-size: 13px;
+    color: var(--ink);
+    line-height: 1.6;
+}
+.token-scale-shelf {
+    display: flex;
+    align-items: flex-end;
+    gap: 2px;
+    height: 34px;
+    border-bottom: 2px solid var(--ink);
+    padding: 0 2px;
+}
+.token-scale-shelf i {
+    flex: 1;
+    border-radius: 1px 1px 0 0;
+}
+.token-scale-shelf i:nth-child(5n + 1) { background: color-mix(in srgb, var(--green) 75%, var(--panel)); }
+.token-scale-shelf i:nth-child(5n + 2) { background: color-mix(in srgb, var(--blue) 75%, var(--panel)); }
+.token-scale-shelf i:nth-child(5n + 3) { background: color-mix(in srgb, var(--gold) 75%, var(--panel)); }
+.token-scale-shelf i:nth-child(5n + 4) { background: color-mix(in srgb, var(--violet) 75%, var(--panel)); }
+.token-scale-shelf i:nth-child(5n + 5) { background: color-mix(in srgb, var(--rose) 75%, var(--panel)); }
+.token-scale-towers {
+    display: flex;
+    align-items: flex-end;
+    gap: 6px;
+    color: var(--muted);
+}
+.token-scale-tower {
+    width: 22px;
+    height: 38px;
+}
+.token-scale-tower-overflow {
+    font-family: ui-monospace, Menlo, monospace;
+    font-size: 13px;
+    color: var(--ink);
+    margin-left: 4px;
+    align-self: center;
+}
+.token-scale-note {
+    color: var(--muted-2);
+    font-size: 11.5px;
+}
