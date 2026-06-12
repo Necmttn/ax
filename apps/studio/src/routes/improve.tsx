@@ -22,6 +22,8 @@ const ALL_STATUSES: ReadonlyArray<ProposalStatus | "all"> = [
 const VERDICTS: ReadonlyArray<string> = [
     "adopted", "ignored", "regressed", "partial", "no_longer_needed",
 ];
+const CONF_W: Record<string, number> = { high: 3, medium: 2, low: 1 };
+const score = (p: ProposalDto) => (CONF_W[p.confidence] ?? 1) * Math.log2(p.frequency + 1);
 
 export function ImproveRoute() {
     const queryClient = useQueryClient();
@@ -37,8 +39,6 @@ export function ImproveRoute() {
         queryFn: () => api.improve(),
     });
     const proposals = query.data?.proposals ?? [];
-    const CONF_W: Record<string, number> = { high: 3, medium: 2, low: 1 };
-    const score = (p: ProposalDto) => (CONF_W[p.confidence] ?? 1) * Math.log2(p.frequency + 1);
     const filtered = useMemo(
         () => {
             const matches = proposals.filter((p) => {

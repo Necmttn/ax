@@ -34,7 +34,7 @@ FROM session
 WHERE project = $project
 GROUP BY project;`;
 
-/** Top skills used in this project. */
+/** Top skills used in this project. Excludes synthetic provider-tool skill rows (codex:<tool> etc.) via dir_path filter. */
 export const PROJECT_TOP_SKILLS_SQL = `
 SELECT
     out.name AS skill,
