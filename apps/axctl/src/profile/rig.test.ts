@@ -35,7 +35,7 @@ describe("deriveRig", () => {
                 ["tdd", "plugin:superpowers"],
                 ["my-local", "user"],
             ]),
-            hookFiles: ["enforce-worktree.ts", "route-dispatch.ts"],
+            hookFiles: ["enforce-worktree.ts", "route-dispatch.ts", "guard.test.ts", "notes.md"],
             hasRoutingTable: true,
             rulesMarkdown: "- a\n- b",
         });

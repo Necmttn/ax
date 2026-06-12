@@ -39,7 +39,7 @@ export function deriveRig(inputs: RigInputs): Rig {
         runs_30d: row.count,
     }));
     const hooks = inputs.hookFiles
-        .filter((f) => f.endsWith(".ts"))
+        .filter((f) => f.endsWith(".ts") && !f.endsWith(".test.ts"))
         .map((f) => f.replace(/\.ts$/, ""))
         .sort();
     const rulesCount = inputs.rulesMarkdown === null ? 0 : countRules(inputs.rulesMarkdown);
