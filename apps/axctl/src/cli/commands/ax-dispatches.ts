@@ -193,6 +193,9 @@ const compileRoutingCommand = Command.make(
         }
         const outPath = optionValue(out);
         const result = yield* compileRouting(outPath);
+        if (result.corrupt) {
+            fail(`routing-table NOT written: ${result.path} is unparseable - fix or delete it, then re-run`);
+        }
         if (json) {
             console.log(prettyPrint(result));
         } else {

@@ -702,18 +702,27 @@ export interface CompileRoutingResult {
     readonly path: string;
     readonly written: boolean;
     readonly preserved_user_classes: number;
+    /** True when the file exists but is unparseable - we refuse to overwrite. */
+    readonly corrupt: boolean;
 }
 
 export const compileRouting = (
     outPath?: string,
 ): Effect.Effect<CompileRoutingResult, never, FileSystem.FileSystem | Path.Path> =>
     Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
         const resolvedPath = outPath ?? defaultRoutingTablePath();
+        const exists = yield* fs.exists(resolvedPath).pipe(Effect.orElseSucceed(() => false));
         const existing = yield* loadStoredRoutingTable(resolvedPath);
+        if (exists && existing === null) {
+            // File present but corrupt/unparseable: overwriting would silently
+            // destroy any mined user classes. Refuse and surface it.
+            return { path: resolvedPath, written: false, preserved_user_classes: 0, corrupt: true };
+        }
         const merged = mergeRoutingTables(ROUTING_CLASSES, existing);
         yield* saveStoredRoutingTable(resolvedPath, merged);
         const preserved = merged.classes.filter((c) => c.origin === "user").length;
-        return { path: resolvedPath, written: true, preserved_user_classes: preserved };
+        return { path: resolvedPath, written: true, preserved_user_classes: preserved, corrupt: false };
     });
 
 // ---------------------------------------------------------------------------

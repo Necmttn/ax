@@ -652,10 +652,35 @@ describe("compileRouting merge-preserve", () => {
         // regenerate
         const result = await runCompileRouting(p);
         expect(result.written).toBe(true);
+        expect(result.preserved_user_classes).toBe(1);
+        expect(result.corrupt).toBe(false);
         const after = JSON.parse(readFileSync(p, "utf8"));
         const ids = after.classes.map((c: { id: string }) => c.id);
         expect(ids).toContain("my-mined-class");
         expect(after.classes[0].origin).toBe("default");
         expect(after.classes.filter((c: { id: string }) => c.id === "spec-review")).toHaveLength(1);
+    });
+
+    it("refuses to overwrite a corrupt routing-table file", async () => {
+        const dir = mkdtempSync(join(tmpdir(), "ax-compile-routing-corrupt-"));
+        const p = join(dir, "routing-table.json");
+        writeFileSync(p, "{not json");
+        const result = await runCompileRouting(p);
+        expect(result.corrupt).toBe(true);
+        expect(result.written).toBe(false);
+        expect(result.preserved_user_classes).toBe(0);
+        // file content untouched
+        expect(readFileSync(p, "utf8")).toBe("{not json");
+    });
+
+    it("seeds normally when the file is missing", async () => {
+        const dir = mkdtempSync(join(tmpdir(), "ax-compile-routing-missing-"));
+        const p = join(dir, "routing-table.json");
+        const result = await runCompileRouting(p);
+        expect(result.written).toBe(true);
+        expect(result.corrupt).toBe(false);
+        const parsed = JSON.parse(readFileSync(p, "utf8"));
+        expect(parsed.version).toBe(1);
+        expect(parsed.classes.length).toBeGreaterThan(0);
     });
 });
