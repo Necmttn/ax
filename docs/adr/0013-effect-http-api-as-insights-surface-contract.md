@@ -41,3 +41,15 @@ preserving the old per-request runner's recover-when-DB-comes-up behavior.
   build is NOT healed by the swap logic (same exposure as the MCP server's
   long-lived runtime); restart the daemon. The healing only covers builds that
   never succeeded.
+
+## Effect RPC
+
+`RpcServer.layerHttp` registers into the same layer-collected `HttpRouter`, so
+RPC groups can mount beside the contract later without touching it. Considered
+and deliberately NOT part of the Insights Surface Contract: RPC has no
+OpenAPI/Scalar/curl story and no capability probing for daemon↔studio version
+skew, and it does not replace the Durable Streams run-progress channel
+(ADR-0007/0008 - RPC streams have no offset-resume). It is reserved for
+ax-owned bidirectional seams where both ends version together - first
+candidate: studio-desktop's Electron main↔backend IPC via the worker/socket
+transports.
