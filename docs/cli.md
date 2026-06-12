@@ -38,6 +38,7 @@ axctl routing tune [--dry-run|--emit-brief] # mine YOUR dispatch history for new
 axctl routing compile                       # regenerate ~/.ax/hooks/routing-table.json (user classes preserved)
 axctl routing show                          # effective routing table with class origins
 axctl profile show [--window=N] [--no-cost] # local profile: stats + rig + taste from the graph
+axctl wrapped <generate|publish>            # agent-authored Wrapped recap cards for the dashboard landing
 axctl profile publish [--if-stale=H] [--yes] [--skip-registration]
                                             # publish profile gist + one-time community registration PR
 axctl profile unpublish                     # delete the published gist + local consent
