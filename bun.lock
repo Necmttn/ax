@@ -37,7 +37,7 @@
     },
     "apps/axctl": {
       "name": "axctl",
-      "version": "0.25.0",
+      "version": "0.26.0",
       "bin": {
         "axctl": "./bin/axctl",
       },
@@ -119,6 +119,7 @@
         "@pierre/trees": "^1.0.0-beta.4",
         "@tanstack/react-query": "^5",
         "@tanstack/react-router": "^1.169",
+        "effect": "catalog:",
         "react": "^19.2.0",
         "react-dom": "^19.2.0",
         "shiki-magic-move": "^1.4.0",
