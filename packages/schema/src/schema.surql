@@ -1860,4 +1860,8 @@ DEFINE FIELD headline     ON wrapped_card TYPE string;   -- the big line, <=6 wo
 DEFINE FIELD body         ON wrapped_card TYPE string;   -- <=2 supporting lines
 DEFINE FIELD sensitivity  ON wrapped_card TYPE string DEFAULT 'public';  -- public | sensitive
 DEFINE FIELD position     ON wrapped_card TYPE int DEFAULT 0;
+DEFINE FIELD series       ON wrapped_card TYPE array<number> DEFAULT [];
+    -- optional grounding sparkline - REAL data points (e.g. daily sessions
+    -- on the card's model), rendered as the card's bar strip
+DEFINE FIELD series_label ON wrapped_card TYPE option<string>;
 DEFINE FIELD generated_at ON wrapped_card TYPE datetime DEFAULT time::now();

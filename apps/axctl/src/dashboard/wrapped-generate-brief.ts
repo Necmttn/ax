@@ -48,6 +48,12 @@ echo '<json>' | ax wrapped publish
 
 **Card rules:**
 - headline <= 6 words; body <= 2 short sentences; question is the eyebrow.
+- GROUND the card visually when you can: attach \`"series": [..]\` - 14-30 REAL
+  data points that back the claim (daily sessions on that model, redirects per
+  week, commits per hour-of-day) plus a short \`"series_label"\` (e.g.
+  "sessions/day on fable"). The dashboard draws it as the card's bar strip -
+  real shapes beat decoration. Mine the numbers with the SQL console
+  (\`POST /api/query\`) or the CLIs above.
 - Every card grounded in a real number or real quote from the data - no inventions.
 - Mix: archetype, model loyalty, productivity rhythm, prompt style, a funny
   low-light (failed run, all-caps moment), shipping volume, delegation habits.

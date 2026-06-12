@@ -16,6 +16,9 @@ const CardSchema = Schema.Struct({
     headline: Schema.String,
     body: Schema.String,
     sensitivity: Schema.optional(Schema.Literals(["public", "sensitive"])),
+    /** real grounding data points, rendered as the card's bar strip */
+    series: Schema.optional(Schema.Array(Schema.Number)),
+    series_label: Schema.optional(Schema.String),
 });
 
 export const PublishInputSchema = Schema.Struct({
@@ -26,7 +29,7 @@ export type PublishInput = typeof PublishInputSchema.Type;
 
 const MAX_CARDS = 24;
 
-const CARDS_SQL = `SELECT question, headline, body, sensitivity, position FROM wrapped_card ORDER BY position ASC;`;
+const CARDS_SQL = `SELECT question, headline, body, sensitivity, position, series, series_label FROM wrapped_card ORDER BY position ASC;`;
 
 export const fetchWrappedCards = Effect.fn("dashboard.fetchWrappedCards")(
     function* () {
@@ -52,6 +55,11 @@ export const buildPublishStatements = (input: PublishInput): string[] => [
             ["body", surrealString(card.body)],
             ["sensitivity", surrealString(card.sensitivity ?? "public")],
             ["position", String(index)],
+            // grounding series capped at 64 points - enough for daily/weekly shapes
+            ["series", `[${(card.series ?? []).slice(0, 64).map((n) => String(Number(n) || 0)).join(", ")}]`],
+            ...(card.series_label !== undefined
+                ? ([["series_label", surrealString(card.series_label)]] as const)
+                : []),
         ])};`,
     ),
 ];

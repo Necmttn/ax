@@ -39,15 +39,33 @@ function* seededBars(seed: string, count: number): Generator<number> {
 
 const BAR_COUNT = 22;
 
+/** Normalize a real data series into 8..100% bar heights. */
+const normalizeSeries = (series: ReadonlyArray<number>): number[] => {
+    const max = Math.max(...series, 1);
+    return series.map((v) => 8 + Math.round((Math.max(0, v) / max) * 92));
+};
+
 function WrappedCardView({ card, index }: { readonly card: WrappedCardDto; readonly index: number }) {
     const accent = ACCENTS[index % ACCENTS.length];
-    const bars = [...seededBars(card.headline, BAR_COUNT)];
+    // Grounded cards draw their REAL series (e.g. daily sessions on the
+    // card's model); ungrounded ones get a deterministic decorative strip.
+    const grounded = (card.series?.length ?? 0) >= 2;
+    const bars = grounded
+        ? normalizeSeries(card.series ?? [])
+        : [...seededBars(card.headline, BAR_COUNT)];
     return (
         <article className={`wrapped-card accent-${accent}`}>
-            <div className="wrapped-card-strip" aria-hidden="true">
+            <div
+                className="wrapped-card-strip"
+                aria-hidden={grounded ? undefined : true}
+                title={grounded ? (card.series_label ?? undefined) : undefined}
+            >
                 {bars.map((h, i) => (
                     <i key={i} style={{ height: `${h}%` }} />
                 ))}
+                {grounded && card.series_label ? (
+                    <span className="wrapped-card-series-label">{card.series_label}</span>
+                ) : null}
             </div>
             <div className="wrapped-card-copy">
                 <span className="wrapped-card-eyebrow">$ {card.question}</span>

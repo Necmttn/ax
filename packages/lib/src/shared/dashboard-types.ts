@@ -778,6 +778,9 @@ export interface WrappedCardDto {
     /** 'sensitive' cards are dropped from the public preview */
     readonly sensitivity: string;
     readonly position: number;
+    /** optional REAL data series grounding the card (drawn as its bar strip) */
+    readonly series?: ReadonlyArray<number>;
+    readonly series_label?: string | null;
 }
 
 export interface WrappedProfile {

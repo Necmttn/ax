@@ -2588,3 +2588,16 @@ td.skill-cell .description {
     color: var(--muted-2);
     font-size: 11.5px;
 }
+
+.wrapped-card-strip { position: relative; }
+.wrapped-card-series-label {
+    position: absolute;
+    top: 4px;
+    right: 8px;
+    font-family: ui-monospace, Menlo, monospace;
+    font-size: 10px;
+    color: var(--card-accent);
+    background: color-mix(in srgb, var(--panel) 80%, transparent);
+    padding: 0 4px;
+    border-radius: 2px;
+}
