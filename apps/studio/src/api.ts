@@ -4,6 +4,7 @@ import type {
     GraphExplorerPayload,
     ImproveActionResponse,
     ImprovePayload,
+    NextActionsPayload,
     ProjectPagePayload,
     RecallResponse,
     SkillGraphPayload,
@@ -363,6 +364,8 @@ export const api = {
     wrapped: (): Promise<WrappedProfile> => jsonFetch("/api/wrapped"),
     wrappedPublicPreview: (): Promise<WrappedProfile> =>
         jsonFetch("/api/wrapped/public-preview"),
+
+    nextActions: (): Promise<NextActionsPayload> => jsonFetch("/api/next-actions"),
 
     // Experiment loop - see
     // docs/superpowers/plans/2026-05-25-experiment-loop-cleanup-and-rebuild.md
