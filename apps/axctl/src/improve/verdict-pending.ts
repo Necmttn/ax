@@ -11,6 +11,7 @@ import type { DbError } from "@ax/lib/errors";
 
 export interface PendingVerdictRow {
     readonly id: string;      // full record id string, e.g. "experiment:aaa"
+    readonly sig: string;     // proposal dedupe_sig - the only id `ax improve verdict` resolves
     readonly title: string;   // proposal title
     readonly status: string;
 }
@@ -27,6 +28,7 @@ export const listPendingVerdicts = (): Effect.Effect<PendingVerdictRow[], DbErro
         // projection, so created_at is selected and stripped below.
         const sql = `SELECT
                 type::string(id) AS id,
+                proposal.dedupe_sig AS sig,
                 proposal.title AS title,
                 status,
                 type::string(created_at) AS created_at
@@ -35,5 +37,5 @@ export const listPendingVerdicts = (): Effect.Effect<PendingVerdictRow[], DbErro
             ORDER BY created_at ASC
             LIMIT 20;`; // cap keeps the dojo agenda to one reviewable sitting
         const result = yield* db.query<[Array<PendingVerdictRow & { created_at?: string }>]>(sql);
-        return (result?.[0] ?? []).map(({ id, title, status }) => ({ id, title, status }));
+        return (result?.[0] ?? []).map(({ id, sig, title, status }) => ({ id, sig, title, status }));
     });

@@ -12,7 +12,7 @@ docs/superpowers/specs/2026-06-13-ax-dojo-design.md (in the Necmttn/ax repo).
 ## Entry
 
 1. Run `ax dojo --json`. If it fails with a connection error, tell the user
-   to run `scripts/db-start.sh` (or `ax doctor`) and STOP.
+   to run `ax doctor` and STOP.
 2. If `budget.has_surplus` is false: report the envelope and STOP unless the
    user re-invokes with `--force` (then pass `--force` on every lap).
 3. On Claude Code: enter loop mode now - invoke the `/loop` skill with

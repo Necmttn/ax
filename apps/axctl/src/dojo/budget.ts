@@ -3,6 +3,9 @@ import type { BindingWindow, BudgetEnvelope } from "./schema.ts";
 
 export const DEFAULT_RESERVE_PCT = 15;
 
+/** Forced training window when quota is unreachable: 2 hours from now. */
+export const FORCED_FALLBACK_WINDOW_MS = 2 * 60 * 60 * 1000;
+
 export interface BudgetOptions {
     /** keep this many percentage points untouched (default 15) */
     readonly reservePct?: number;
@@ -44,7 +47,8 @@ export const computeBudgetEnvelope = (
             binding_window: null,
             window_remaining_pct: 0,
             reserve_pct: reserve,
-            deadline: opts.untilIso ?? new Date(nowMs).toISOString(),
+            deadline: opts.untilIso
+                ?? new Date(opts.force === true ? nowMs + FORCED_FALLBACK_WINDOW_MS : nowMs).toISOString(),
             source: opts.force === true ? "forced" : "unavailable",
         };
     }

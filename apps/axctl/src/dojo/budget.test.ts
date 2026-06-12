@@ -61,9 +61,21 @@ describe("computeBudgetEnvelope", () => {
         expect(env.has_surplus).toBe(false);
         expect(env.source).toBe("unavailable");
         expect(env.binding_window).toBeNull();
+        expect(env.deadline).toBe(new Date(NOW_MS).toISOString());
         const forced = computeBudgetEnvelope(null, { force: true }, NOW_MS);
         expect(forced.has_surplus).toBe(true);
         expect(forced.source).toBe("forced");
+    });
+
+    test("forced with null snapshot: deadline falls back to 2h after now, --until still wins", () => {
+        const forced = computeBudgetEnvelope(null, { force: true }, NOW_MS);
+        expect(forced.deadline).toBe(new Date(NOW_MS + 2 * 60 * 60 * 1000).toISOString());
+        const until = computeBudgetEnvelope(
+            null,
+            { force: true, untilIso: "2026-06-13T11:30:00.000Z" },
+            NOW_MS,
+        );
+        expect(until.deadline).toBe("2026-06-13T11:30:00.000Z");
     });
 
     test("missing windows are skipped; lone five_hour window binds", () => {

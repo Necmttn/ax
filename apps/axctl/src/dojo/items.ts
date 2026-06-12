@@ -10,16 +10,14 @@ import type { SessionChurnRow } from "../metrics/session-churn.ts";
 import type { TuneProposal } from "../queries/routing-tune.ts";
 import type { DojoItem } from "./schema.ts";
 
-const shortId = (recordId: string): string => recordId.split(":").pop() ?? recordId;
-
 export const pendingVerdictItems = (rows: readonly PendingVerdictRow[]): DojoItem[] =>
     rows.map((r) => ({
         id: `verdict:${r.id}`,
         kind: "verdict_pending",
         title: `Lock verdict: ${r.title}`,
         commands: [
-            `ax improve verdict ${shortId(r.id)}`,
-            `ax improve verdict ${shortId(r.id)} --set <verdict>`,
+            `ax improve verdict ${r.sig}`,
+            `ax improve verdict ${r.sig} --set <verdict>`,
         ],
         success: "experiment.locked_verdict set",
         cost_class: "s",
@@ -61,6 +59,10 @@ export const proposalMintItem = (openProposalCount: number): DojoItem | null =>
 /** Repair LOC above this marks a session a churn hotspot even when every episode passed. */
 export const REPAIR_LINE_HOTSPOT_THRESHOLD = 200;
 
+/** Last 8 chars of the session id, sanitized to [a-z0-9-] for worktree/branch names. */
+const sessionShort = (session: string): string =>
+    session.toLowerCase().replace(/[^a-z0-9-]/g, "-").slice(-8);
+
 export const churnHotspotItems = (rows: readonly SessionChurnRow[]): DojoItem[] =>
     rows
         .filter((r) => r.episodes > r.passedEpisodes || r.repairLinesAdded > REPAIR_LINE_HOTSPOT_THRESHOLD)
@@ -72,7 +74,7 @@ export const churnHotspotItems = (rows: readonly SessionChurnRow[]): DojoItem[] 
             title: `Worktree experiment: reduce ${r.topCheck} churn (${r.taskLabel})`,
             commands: [
                 `ax sessions show ${r.session}`,
-                "git worktree add .claude/worktrees/dojo-experiment -b dojo/experiment",
+                `git worktree add .claude/worktrees/dojo-${sessionShort(r.session)} -b dojo/${sessionShort(r.session)}`,
                 "ax improve recommend  # package the result as a proposal",
             ],
             success: "experiment branch + evidence captured as an improve proposal",

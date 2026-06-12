@@ -56,14 +56,14 @@ const churnRow = (
 describe("item mappers", () => {
     test("pending verdicts -> verdict_pending items with improve verdict commands", () => {
         const items = pendingVerdictItems([
-            { id: "experiment:aaa", title: "Stop bare bun test", status: "scaffolded" },
+            { id: "experiment:aaa", sig: "sig-aaa", title: "Stop bare bun test", status: "scaffolded" },
         ]);
         expect(items).toEqual([
             {
                 id: "verdict:experiment:aaa",
                 kind: "verdict_pending",
                 title: "Lock verdict: Stop bare bun test",
-                commands: ["ax improve verdict aaa", "ax improve verdict aaa --set <verdict>"],
+                commands: ["ax improve verdict sig-aaa", "ax improve verdict sig-aaa --set <verdict>"],
                 success: "experiment.locked_verdict set",
                 cost_class: "s",
             },
@@ -96,6 +96,9 @@ describe("item mappers", () => {
         expect(items.map((i) => i.id)).toEqual(["experiment:s3", "experiment:s1"]); // by repair desc, top 2
         expect(items[0]?.kind).toBe("experiment");
         expect(items[0]?.cost_class).toBe("l");
+        // worktree path/branch are session-derived so the two items never collide
+        expect(items[0]?.commands).toContain("git worktree add .claude/worktrees/dojo-s3 -b dojo/s3");
+        expect(items[1]?.commands).toContain("git worktree add .claude/worktrees/dojo-s1 -b dojo/s1");
     });
 
     test("churn hotspots: repair-only branch - all episodes passed but repair LOC over threshold", () => {

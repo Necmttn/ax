@@ -15,15 +15,15 @@ describe("listPendingVerdicts", () => {
         // created_at is in the projection only to satisfy SurrealDB's
         // ORDER BY rules; the query must strip it from returned rows.
         const layer = layerWith([
-            { id: "experiment:aaa", title: "Stop using bare bun test", status: "scaffolded", created_at: "2026-01-01T00:00:00Z" },
-            { id: "experiment:bbb", title: "Guard worktree merges", status: "task_emitted", created_at: "2026-01-01T00:00:00Z" },
+            { id: "experiment:aaa", sig: "sig-aaa", title: "Stop using bare bun test", status: "scaffolded", created_at: "2026-01-01T00:00:00Z" },
+            { id: "experiment:bbb", sig: "sig-bbb", title: "Guard worktree merges", status: "task_emitted", created_at: "2026-01-01T00:00:00Z" },
         ]);
         const rows = await Effect.runPromise(
             listPendingVerdicts().pipe(Effect.provide(layer)),
         );
         expect(rows).toEqual([
-            { id: "experiment:aaa", title: "Stop using bare bun test", status: "scaffolded" },
-            { id: "experiment:bbb", title: "Guard worktree merges", status: "task_emitted" },
+            { id: "experiment:aaa", sig: "sig-aaa", title: "Stop using bare bun test", status: "scaffolded" },
+            { id: "experiment:bbb", sig: "sig-bbb", title: "Guard worktree merges", status: "task_emitted" },
         ]);
         expect(rows[0]).not.toHaveProperty("created_at");
     });
