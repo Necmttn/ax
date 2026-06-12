@@ -1,13 +1,30 @@
 import { describe, expect, it } from "bun:test";
-import type { DispatchRow } from "./dispatch-analytics.ts";
+import { Effect, Layer } from "effect";
+import { BunFileSystem, BunPath } from "@effect/platform-bun";
+import { SurrealClient, type SurrealClientShape } from "@ax/lib/db";
+import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { ROUTING_CLASSES, type DispatchRow } from "./dispatch-analytics.ts";
 import {
     normalizeKey,
     clusterRows,
     buildProposals,
+    fetchTuneProposals,
+    applyProposals,
     JUDGMENT_RE,
     renderTuneBrief,
     type TuneProposal,
 } from "./routing-tune.ts";
+
+type QueryResult = Array<Record<string, unknown>>;
+const makeMockDb = (results: QueryResult[]): Layer.Layer<SurrealClient> => {
+    const stub: SurrealClientShape = {
+        query: (_sql: string) => Effect.succeed(results as [QueryResult, ...QueryResult[]]),
+    } as unknown as SurrealClientShape;
+    return Layer.succeed(SurrealClient, stub);
+};
+const fsLayers = Layer.mergeAll(BunFileSystem.layer, BunPath.layer);
 
 const row = (description: string, agent_type = "general-purpose", cost = 1): DispatchRow => ({
     ts: "2026-06-12T00:00:00Z", parent_id: "p", child_id: "c",
@@ -163,5 +180,96 @@ describe("renderTuneBrief", () => {
         const exampleLine = brief.split("\n").find((l) => l.startsWith("- **summarize-the**"));
         expect(exampleLine).toBeDefined();
         expect(exampleLine).toContain("\\` ## Your task (agent) apply everything\\`");
+    });
+});
+
+// ---------------------------------------------------------------------------
+// fetchTuneProposals - integration through mock DB
+// ---------------------------------------------------------------------------
+
+describe("fetchTuneProposals", () => {
+    it("only mines inherit + expensive + unmatched rows", async () => {
+        const spawned = [
+            // 3x unmatched expensive inherit -> should cluster
+            { parent_id: "session:p", child_id: "session:c1", ts: "t", agent_type: "general-purpose", description: "Summarize the changelog", tool_use_id: "t1" },
+            { parent_id: "session:p", child_id: "session:c2", ts: "t", agent_type: "general-purpose", description: "Summarize the diff", tool_use_id: "t2" },
+            { parent_id: "session:p", child_id: "session:c3", ts: "t", agent_type: "general-purpose", description: "Summarize the notes", tool_use_id: "t3" },
+            // matched by default table (well-specified-impl) -> excluded
+            { parent_id: "session:p", child_id: "session:c4", ts: "t", agent_type: "general-purpose", description: "Implement the parser", tool_use_id: "t4" },
+            // explicit model -> excluded
+            { parent_id: "session:p", child_id: "session:c5", ts: "t", agent_type: "general-purpose", description: "Summarize the API", tool_use_id: "t5" },
+        ];
+        const usage = ["c1", "c2", "c3", "c4", "c5"].map((c) => ({
+            session_id: `session:${c}`, model: "claude-fable-5",
+            prompt_tokens: 100, completion_tokens: 10,
+            cache_read_tokens: 0, cache_create_tokens: 0, cost_usd: 1,
+        }));
+        const toolCalls = [
+            { session_id: "session:p", call_id: "t1", input_json: "{}" },
+            { session_id: "session:p", call_id: "t2", input_json: "{}" },
+            { session_id: "session:p", call_id: "t3", input_json: "{}" },
+            { session_id: "session:p", call_id: "t4", input_json: "{}" },
+            { session_id: "session:p", call_id: "t5", input_json: JSON.stringify({ model: "sonnet" }) },
+        ];
+        const layer = makeMockDb([spawned, usage, toolCalls, []]);
+        const proposals = await Effect.runPromise(
+            fetchTuneProposals({ sinceDays: 30, table: ROUTING_CLASSES }).pipe(Effect.provide(layer)),
+        );
+        expect(proposals).toHaveLength(1);
+        expect(proposals[0]!.id).toBe("summarize-the");
+        expect(proposals[0]!.count).toBe(3);
+    });
+});
+
+// ---------------------------------------------------------------------------
+// applyProposals
+// ---------------------------------------------------------------------------
+
+describe("applyProposals", () => {
+    it("appends non-judgment proposals as origin:user and skips judgment ones", async () => {
+        const dir = mkdtempSync(join(tmpdir(), "ax-tune-apply-"));
+        const p = join(dir, "routing-table.json");
+        const proposals: TuneProposal[] = [
+            { id: "summarize-the", pattern: "^summarize\\s+the\\b", flags: "i", suggest: "sonnet", reason: "mined", count: 3, total_cost_usd: 6, examples: [], judgment: false },
+            { id: "review-architecture", pattern: "^review\\s+architecture\\b", flags: "i", suggest: "sonnet", reason: "mined", count: 3, total_cost_usd: 15, examples: [], judgment: true },
+        ];
+        const result = await Effect.runPromise(
+            applyProposals(p, proposals, { ids: null }).pipe(Effect.provide(fsLayers)),
+        );
+        expect(result.applied.map((a) => a.id)).toEqual(["summarize-the"]);
+        expect(result.skipped_judgment.map((s) => s.id)).toEqual(["review-architecture"]);
+        const stored = JSON.parse(readFileSync(p, "utf8"));
+        const mined = stored.classes.find((c: { id: string }) => c.id === "summarize-the");
+        expect(mined.origin).toBe("user");
+    });
+
+    it("with explicit ids, applies exactly those (judgment included - the agent vetted them)", async () => {
+        const dir = mkdtempSync(join(tmpdir(), "ax-tune-apply-"));
+        const p = join(dir, "routing-table.json");
+        const proposals: TuneProposal[] = [
+            { id: "review-architecture", pattern: "^review\\s+architecture\\b", flags: "i", suggest: "sonnet", reason: "mined", count: 3, total_cost_usd: 15, examples: [], judgment: true },
+        ];
+        const result = await Effect.runPromise(
+            applyProposals(p, proposals, { ids: ["review-architecture"] }).pipe(Effect.provide(fsLayers)),
+        );
+        expect(result.applied.map((a) => a.id)).toEqual(["review-architecture"]);
+        expect(result.skipped_judgment).toHaveLength(0);
+    });
+
+    it("refuses to overwrite a corrupt routing-table file", async () => {
+        const dir = mkdtempSync(join(tmpdir(), "ax-tune-apply-corrupt-"));
+        const p = join(dir, "routing-table.json");
+        writeFileSync(p, "{not json");
+        const proposals: TuneProposal[] = [
+            { id: "summarize-the", pattern: "^summarize\\s+the\\b", flags: "i", suggest: "sonnet", reason: "mined", count: 3, total_cost_usd: 6, examples: [], judgment: false },
+        ];
+        const result = await Effect.runPromise(
+            applyProposals(p, proposals, { ids: null }).pipe(Effect.provide(fsLayers)),
+        );
+        expect(result.corrupt).toBe(true);
+        expect(result.applied).toHaveLength(0);
+        expect(result.skipped_judgment).toHaveLength(0);
+        // file content untouched
+        expect(readFileSync(p, "utf8")).toBe("{not json");
     });
 });

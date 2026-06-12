@@ -19,14 +19,22 @@
  * haiku-tier agent types are exactly the ones ROUTING_CLASSES.agentTypes
  * routes, so they never reach the unmatched set this miner clusters.
  */
-import { Effect } from "effect";
+import { Effect, FileSystem, Path } from "effect";
 import {
     fetchDispatches,
     matchRoutingWith,
     EXPENSIVE_TIER_RE,
+    ROUTING_CLASSES,
     type DispatchRow,
     type RoutingTable,
 } from "./dispatch-analytics.ts";
+import {
+    appendUserClasses,
+    loadStoredRoutingTable,
+    mergeRoutingTables,
+    saveStoredRoutingTable,
+    type StoredRoutingClass,
+} from "./routing-table-io.ts";
 
 export const JUDGMENT_RE =
     /\b(review\w*|critique\w*|critic\w*|design\w*|plan(s|ned|ning)?|audit\w*|judg\w*|verif\w*|assess\w*|architect\w*)\b/i;
@@ -185,3 +193,56 @@ export const renderTuneBrief = (
     lines.push("");
     return lines.join("\n");
 };
+
+// ---------------------------------------------------------------------------
+// applyProposals - write surviving proposals into the stored routing table
+// ---------------------------------------------------------------------------
+
+export interface ApplyResult {
+    readonly path: string;
+    readonly applied: ReadonlyArray<TuneProposal>;
+    readonly skipped_judgment: ReadonlyArray<TuneProposal>;
+    /** True when the file exists but is corrupt - we refuse to overwrite. */
+    readonly corrupt: boolean;
+}
+
+/**
+ * Apply proposals to the stored routing table.
+ * ids === null  -> auto mode: apply all NON-judgment proposals, report skips.
+ * ids === [...] -> explicit mode (post-brief): apply exactly those ids;
+ *                  judgment flags are ignored because an agent vetted them.
+ *
+ * Corrupt-file guard (mirrors compileRouting): if the file exists but is
+ * unparseable, refuse to write and return corrupt: true. Overwriting would
+ * silently destroy any previously mined user classes.
+ */
+export const applyProposals = (
+    tablePath: string,
+    proposals: ReadonlyArray<TuneProposal>,
+    opts: { readonly ids: ReadonlyArray<string> | null },
+): Effect.Effect<ApplyResult, never, FileSystem.FileSystem | Path.Path> =>
+    Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const exists = yield* fs.exists(tablePath).pipe(Effect.orElseSucceed(() => false));
+        const existing = yield* loadStoredRoutingTable(tablePath);
+        if (exists && existing === null) {
+            // File present but corrupt/unparseable: refuse to overwrite.
+            return { path: tablePath, applied: [], skipped_judgment: [], corrupt: true };
+        }
+        const selected = opts.ids === null
+            ? proposals.filter((p) => !p.judgment)
+            : proposals.filter((p) => opts.ids!.includes(p.id));
+        const skipped = opts.ids === null ? proposals.filter((p) => p.judgment) : [];
+        const base = mergeRoutingTables(ROUTING_CLASSES, existing);
+        const additions: StoredRoutingClass[] = selected.map((p) => ({
+            id: p.id,
+            pattern: p.pattern,
+            flags: p.flags,
+            suggest: p.suggest,
+            reason: p.reason,
+            origin: "user" as const,
+        }));
+        const next = appendUserClasses(base, additions);
+        yield* saveStoredRoutingTable(tablePath, next);
+        return { path: tablePath, applied: selected, skipped_judgment: skipped, corrupt: false };
+    });
