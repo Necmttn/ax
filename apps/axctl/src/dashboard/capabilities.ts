@@ -26,6 +26,7 @@ export const baseApiCapabilities = [
     "wrapped",     // /api/wrapped + public-preview
     "improve",     // /api/improve + accept/reject/verdict
     "next-actions", // /api/next-actions ranked action cards + agent briefs
+    "improve-analyze", // GET /api/improve/analyze-brief - deep-analysis brief for agents
     "events",      // /api/events (SSE)
     "ingest",      // POST /api/ingest -> { runId, stream } + Durable Streams sidecar
     "image",       // GET /api/image?path= -> local on-disk image bytes
