@@ -51,10 +51,11 @@ export interface RigInputs {
     readonly hookFiles: ReadonlyArray<string>;
     readonly hasRoutingTable: boolean;
     readonly rulesMarkdown: string | null;
+    readonly shareMap?: ReadonlyMap<string, number>;
 }
 
 export interface Rig {
-    readonly skills: ReadonlyArray<{ name: string; source: string; runs: number }>;
+    readonly skills: ReadonlyArray<{ name: string; source: string; runs: number; downstream_share?: number }>;
     readonly hooks: ReadonlyArray<string>;
     readonly routing_table: boolean;
     readonly rules?: { readonly count: number };
@@ -65,10 +66,13 @@ export function deriveRig(inputs: RigInputs): Rig {
         .filter((row) => !isToolScope(inputs.scopes.get(row.skill) ?? "user"))
         .map((row) => {
             const scope = inputs.scopes.get(row.skill) ?? "user";
+            const name = publicSkillName(row.skill, scope);
+            const downstream_share = inputs.shareMap?.get(name);
             return {
-                name: publicSkillName(row.skill, scope),
+                name,
                 source: skillSource(scope),
                 runs: row.count,
+                ...(downstream_share !== undefined ? { downstream_share } : {}),
             };
         });
     const hooks = inputs.hookFiles
