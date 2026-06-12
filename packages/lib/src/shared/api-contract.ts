@@ -155,6 +155,151 @@ export const RecallResponse = Schema.Struct({
 /** Studio-facing type derived from the contract (single source of truth). */
 export type RecallResponse = typeof RecallResponse.Type;
 
+// ---- tool-failures, skill-graph, episode-timeline, workflow payloads -----
+// Bounded curated shapes mirroring the dashboard-types interfaces. SessionId
+// is a branded string on the wire, so Schema.String here.
+
+const ToolFailureEntry = Schema.Struct({
+    label: Schema.String,
+    failure_count: Schema.Number,
+    last_seen: Schema.NullOr(Schema.String),
+    last_error_text: Schema.NullOr(Schema.String),
+    last_project: Schema.NullOr(Schema.String),
+    distinct_sessions: Schema.Number,
+    total_calls: Schema.Number,
+    failure_rate: Schema.Number,
+    exit_codes: Schema.Array(Schema.Number),
+    recommendation: Schema.Literals(["fix", "watch", "ignore"]),
+    recommendation_reason: Schema.String,
+});
+
+export const ToolFailuresResponse = Schema.Struct({
+    generatedAt: Schema.String,
+    failures: Schema.Array(ToolFailureEntry),
+});
+
+const ToolFailureSample = Schema.Struct({
+    ts: Schema.String,
+    exit_code: Schema.NullOr(Schema.Number),
+    error_text: Schema.NullOr(Schema.String),
+    output_excerpt: Schema.NullOr(Schema.String),
+    command_text: Schema.NullOr(Schema.String),
+    project: Schema.NullOr(Schema.String),
+    session_id: Schema.NullOr(Schema.String),
+    cwd: Schema.NullOr(Schema.String),
+});
+
+export const ToolFailureDetailPayload = Schema.Struct({
+    label: Schema.String,
+    samples: Schema.Array(ToolFailureSample),
+});
+
+const SkillGraphNode = Schema.Struct({
+    name: Schema.String,
+    weight: Schema.Number,
+    last_seen: Schema.NullOr(Schema.String),
+});
+
+const SkillGraphEdge = Schema.Struct({
+    source: Schema.String,
+    target: Schema.String,
+    count: Schema.Number,
+    last_seen: Schema.NullOr(Schema.String),
+});
+
+export const SkillGraphPayload = Schema.Struct({
+    min_count: Schema.Number,
+    limit: Schema.Number,
+    node_count: Schema.Number,
+    edge_count: Schema.Number,
+    max_edge_count: Schema.Number,
+    nodes: Schema.Array(SkillGraphNode),
+    edges: Schema.Array(SkillGraphEdge),
+});
+
+const PhaseLiteral = Schema.Literals(["plan", "execute", "review", "merge"]);
+
+const EpisodeNode = Schema.Struct({
+    session_id: Schema.String,
+    role: Schema.Literals(["parent", "child"]),
+    project: Schema.NullOr(Schema.String),
+    source: Schema.NullOr(Schema.String),
+    started_at: Schema.NullOr(Schema.String),
+    ended_at: Schema.NullOr(Schema.String),
+    duration_ms: Schema.NullOr(Schema.Number),
+    phase: Schema.Literals(["plan", "execute", "review", "merge", "other", "mixed"]),
+    top_skills: Schema.Array(Schema.Struct({ skill: Schema.String, count: Schema.Number })),
+    invocation_count: Schema.Number,
+});
+
+export const EpisodeTimelinePayload = Schema.Struct({
+    parent_session_id: Schema.String,
+    project: Schema.NullOr(Schema.String),
+    started_at: Schema.NullOr(Schema.String),
+    ended_at: Schema.NullOr(Schema.String),
+    duration_ms: Schema.NullOr(Schema.Number),
+    node_count: Schema.Number,
+    nodes: Schema.Array(EpisodeNode),
+    shape: Schema.String,
+});
+
+const WorkflowWeekBucket = Schema.Struct({
+    week: Schema.String,
+    counts: Schema.Array(Schema.Struct({ label: Schema.String, count: Schema.Number })),
+});
+
+const WorkflowConvergencePoint = Schema.Struct({
+    week: Schema.String,
+    jaccard: Schema.NullOr(Schema.Number),
+    topK: Schema.Array(Schema.String),
+    newcomers: Schema.Array(Schema.String),
+    dropouts: Schema.Array(Schema.String),
+});
+
+const WorkflowSessionShape = Schema.Struct({
+    week: Schema.String,
+    session_count: Schema.Number,
+});
+
+const SessionShapeAggregate = Schema.Struct({
+    shape: Schema.String,
+    phases: Schema.Array(PhaseLiteral),
+    session_count: Schema.Number,
+    example_session_ids: Schema.Array(Schema.String),
+});
+
+const WorkflowEpisode = Schema.Struct({
+    parent_session_id: Schema.String,
+    project: Schema.NullOr(Schema.String),
+    started_at: Schema.NullOr(Schema.String),
+    child_count: Schema.Number,
+    distinct_nicknames: Schema.Number,
+});
+
+const EpisodeShapeAggregate = Schema.Struct({
+    shape: Schema.String,
+    phases: Schema.Array(PhaseLiteral),
+    episode_count: Schema.Number,
+    example_parent_ids: Schema.Array(Schema.String),
+    avg_children: Schema.Number,
+});
+
+export const WorkflowResponse = Schema.Struct({
+    generatedAt: Schema.String,
+    weeksLookback: Schema.Number,
+    topK: Schema.Number,
+    skills: Schema.Array(WorkflowWeekBucket),
+    tools: Schema.Array(WorkflowWeekBucket),
+    sessionShape: Schema.Array(WorkflowSessionShape),
+    convergence: Schema.Array(WorkflowConvergencePoint),
+    shapes: Schema.Array(SessionShapeAggregate),
+    shapesTotal: Schema.Number,
+    episodes: Schema.Array(WorkflowEpisode),
+    episode_shapes: Schema.Array(EpisodeShapeAggregate),
+    episode_shapes_total: Schema.Number,
+    narrative: Schema.String,
+});
+
 /**
  * The insights family: cross-source recall, project pages, episode
  * timelines, the skill graph, wrapped profiles, workflow rollups, and tool
@@ -182,7 +327,7 @@ export const InsightsGroup = HttpApiGroup.make("insights")
         }),
         HttpApiEndpoint.get("episodeTimeline", "/api/episodes/:parentId", {
             params: { parentId: Schema.String },
-            success: Schema.Unknown,
+            success: EpisodeTimelinePayload,
             error: InternalError,
         }),
         HttpApiEndpoint.get("skillGraph", "/api/skill-graph", {
@@ -190,7 +335,7 @@ export const InsightsGroup = HttpApiGroup.make("insights")
                 minCount: Schema.optionalKey(Schema.Number),
                 limit: Schema.optionalKey(Schema.Number),
             },
-            success: Schema.Unknown,
+            success: SkillGraphPayload,
             error: InternalError,
         }),
         HttpApiEndpoint.get("project", "/api/projects/:project", {
@@ -207,16 +352,16 @@ export const InsightsGroup = HttpApiGroup.make("insights")
             error: InternalError,
         }),
         HttpApiEndpoint.get("workflow", "/api/workflow", {
-            success: Schema.Unknown,
+            success: WorkflowResponse,
             error: InternalError,
         }),
         HttpApiEndpoint.get("toolFailures", "/api/tool-failures", {
-            success: Schema.Unknown,
+            success: ToolFailuresResponse,
             error: InternalError,
         }),
         HttpApiEndpoint.get("toolFailureDetail", "/api/tool-failures/:label/detail", {
             params: { label: Schema.String },
-            success: Schema.Unknown,
+            success: ToolFailureDetailPayload,
             error: InternalError,
         }),
     );
@@ -319,19 +464,121 @@ export class ServiceUnavailableError extends Schema.ErrorClass<ServiceUnavailabl
 /** Skill triage decision states (mirrors dashboard-types TriageDecision). */
 export const TriageDecisionSchema = Schema.Literals(["keep", "archive", "review"]);
 
+// ---- skills payloads (Schema.Struct: encode-safe for plain handler returns) -
+// Mirror the dashboard-types Skill* interfaces exactly. Handlers JS-map their
+// rows, so plain objects encode cleanly through these (see RecallResponse).
+
+export const SkillTriageNote = Schema.Struct({
+    skill_name: Schema.String,
+    decision: TriageDecisionSchema,
+    reason: Schema.NullOr(Schema.String),
+    decided_at: Schema.String,
+});
+
+const SkillRowFields = {
+    name: Schema.String,
+    scope: Schema.String,
+    description: Schema.NullOr(Schema.String),
+    dir_path: Schema.NullOr(Schema.String),
+    bytes: Schema.NullOr(Schema.Number),
+    total_inv: Schema.Number,
+    inv_7d: Schema.Number,
+    inv_30d: Schema.Number,
+    last_used: Schema.NullOr(Schema.String),
+    last_project: Schema.NullOr(Schema.String),
+    corrections: Schema.Number,
+    proposals: Schema.Number,
+    commits_after: Schema.Number,
+    taste_score: Schema.Number,
+};
+
+export const SkillTriageEntry = Schema.Struct({
+    ...SkillRowFields,
+    recommendation: TriageDecisionSchema,
+    recommendation_reason: Schema.String,
+    decision: Schema.NullOr(SkillTriageNote),
+});
+
+export const SkillTriageResponse = Schema.Struct({
+    generatedAt: Schema.String,
+    skills: Schema.Array(SkillTriageEntry),
+});
+
+const SkillRecentInvocation = Schema.Struct({
+    ts: Schema.String,
+    project: Schema.NullOr(Schema.String),
+    turn_has_error: Schema.optionalKey(Schema.Boolean),
+});
+
+const SkillProposalEvidence = Schema.Struct({
+    ts: Schema.String,
+    project: Schema.NullOr(Schema.String),
+    context_excerpt: Schema.optionalKey(Schema.NullOr(Schema.String)),
+});
+
+const SkillPair = Schema.Struct({
+    partner: Schema.String,
+    count: Schema.Number,
+    last_seen: Schema.NullOr(Schema.String),
+});
+
+export const SkillDetailPayload = Schema.Struct({
+    name: Schema.String,
+    scope: Schema.NullOr(Schema.String),
+    description: Schema.NullOr(Schema.String),
+    dir_path: Schema.NullOr(Schema.String),
+    invocations: Schema.Struct({
+        total: Schema.Number,
+        d7: Schema.Number,
+        d30: Schema.Number,
+        last: Schema.NullOr(Schema.String),
+    }),
+    recent: Schema.Array(SkillRecentInvocation),
+    corrections: Schema.Array(SkillRecentInvocation),
+    proposals: Schema.Array(SkillProposalEvidence),
+    paired: Schema.Array(SkillPair),
+});
+
+export const SkillSourcePayload = Schema.Struct({
+    name: Schema.String,
+    scope: Schema.String,
+    dir_path: Schema.NullOr(Schema.String),
+    file_path: Schema.NullOr(Schema.String),
+    frontmatter: Schema.NullOr(Schema.String),
+    body: Schema.NullOr(Schema.String),
+    state: Schema.Literals(["active", "disabled", "missing"]),
+    editable: Schema.Boolean,
+    error: Schema.NullOr(Schema.String),
+});
+
+export const SkillDecisionsResponse = Schema.Struct({
+    decisions: Schema.Array(SkillTriageNote),
+});
+
+export const SkillDecideBulkResponse = Schema.Struct({
+    notes: Schema.Array(SkillTriageNote),
+});
+
+export const SkillDecideClearResponse = Schema.Struct({
+    cleared: Schema.Boolean,
+    skill_name: Schema.String,
+});
+
+export const SkillOpenResponse = Schema.Struct({ launched: Schema.String });
+
 /**
  * The skills family: triage listing, per-skill decide (POST/DELETE),
- * bulk decide, detail, source, open-in, and the decisions list. Payloads
- * `Schema.Unknown` except the mutation request bodies, which are typed.
+ * bulk decide, detail, source, open-in, and the decisions list. Request
+ * bodies AND responses are schema-typed; the handlers return plain objects.
  */
 export const SkillsGroup = HttpApiGroup.make("skills")
     .add(
         HttpApiEndpoint.get("decisions", "/api/decisions", {
-            success: Schema.Unknown,
+            success: SkillDecisionsResponse,
             error: InternalError,
         }),
         HttpApiEndpoint.get("skills", "/api/skills", {
-            success: Schema.Unknown,
+            success: SkillTriageResponse,
             error: InternalError,
         }),
         HttpApiEndpoint.post("skillDecideBulk", "/api/skills/decide-bulk", {
@@ -340,7 +587,7 @@ export const SkillsGroup = HttpApiGroup.make("skills")
                 decision: TriageDecisionSchema,
                 reason: Schema.optionalKey(Schema.NullOr(Schema.String)),
             }),
-            success: Schema.Unknown,
+            success: SkillDecideBulkResponse,
             error: [BadRequestError, InternalError],
         }),
         HttpApiEndpoint.post("skillDecide", "/api/skills/:name/decide", {
@@ -349,22 +596,22 @@ export const SkillsGroup = HttpApiGroup.make("skills")
                 decision: TriageDecisionSchema,
                 reason: Schema.optionalKey(Schema.NullOr(Schema.String)),
             }),
-            success: Schema.Unknown,
+            success: SkillTriageNote,
             error: InternalError,
         }),
         HttpApiEndpoint.delete("skillDecideClear", "/api/skills/:name/decide", {
             params: { name: Schema.String },
-            success: Schema.Unknown,
+            success: SkillDecideClearResponse,
             error: InternalError,
         }),
         HttpApiEndpoint.get("skillDetail", "/api/skills/:name/detail", {
             params: { name: Schema.String },
-            success: Schema.Unknown,
+            success: SkillDetailPayload,
             error: InternalError,
         }),
         HttpApiEndpoint.get("skillSource", "/api/skills/:name/source", {
             params: { name: Schema.String },
-            success: Schema.Unknown,
+            success: SkillSourcePayload,
             error: InternalError,
         }),
         HttpApiEndpoint.post("skillOpen", "/api/skills/:name/open", {
@@ -372,7 +619,7 @@ export const SkillsGroup = HttpApiGroup.make("skills")
             payload: Schema.Struct({
                 target: Schema.Literals(["finder", "editor"]),
             }),
-            success: Schema.Unknown,
+            success: SkillOpenResponse,
             error: InternalError,
         }),
     );
