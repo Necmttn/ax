@@ -2501,71 +2501,66 @@ td.skill-cell .description {
     max-width: 280px;
 }
 
-/* ---- wrapped recap cards (Paxel-style) ---- */
+/* ---- wrapped recap cards (trace cards) ---- */
 .wrapped-cards {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
-    gap: 20px;
+    grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+    gap: 16px;
     margin: 16px 0 8px;
 }
 .wrapped-card {
-    border: 1px solid var(--accent, #e8590c);
-    outline: 1px dashed color-mix(in srgb, var(--accent, #e8590c) 55%, transparent);
-    outline-offset: -6px;
-    background: var(--paper, #fff);
+    border: 1px solid var(--line);
+    background: var(--panel);
     display: flex;
     flex-direction: column;
-    min-height: 280px;
-    box-shadow: 2px 3px 0 color-mix(in srgb, var(--accent, #e8590c) 25%, transparent);
+    min-height: 250px;
 }
-.wrapped-card-art {
-    height: 110px;
-    position: relative;
-    background-color: color-mix(in srgb, var(--accent, #e8590c) 14%, #fff);
-    background-image:
-        radial-gradient(color-mix(in srgb, var(--accent, #e8590c) 75%, transparent) 1.2px, transparent 1.3px),
-        radial-gradient(color-mix(in srgb, var(--accent, #e8590c) 45%, transparent) 1px, transparent 1.1px);
-    background-size: 7px 7px, 11px 11px;
-    background-position: 0 0, 3px 5px;
-}
-.wrapped-card-art.v1 { background-size: 5px 5px, 9px 9px; }
-.wrapped-card-art.v2 { background-size: 9px 9px, 13px 13px; background-position: 2px 1px, 0 0; }
-.wrapped-card-art.v3 { background-size: 6px 6px, 14px 14px; }
-.wrapped-card-dots {
-    position: absolute;
-    top: 8px;
-    right: 10px;
+.wrapped-card.accent-green  { --card-accent: var(--green); }
+.wrapped-card.accent-blue   { --card-accent: var(--blue); }
+.wrapped-card.accent-gold   { --card-accent: var(--gold); }
+.wrapped-card.accent-violet { --card-accent: var(--violet); }
+.wrapped-card.accent-rose   { --card-accent: var(--rose); }
+.wrapped-card-strip {
     display: flex;
-    gap: 5px;
+    align-items: flex-end;
+    gap: 3px;
+    height: 56px;
+    padding: 10px 14px 0;
+    border-bottom: 1px solid var(--line);
+    background: color-mix(in srgb, var(--card-accent) 6%, var(--panel));
 }
-.wrapped-card-dots i {
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-    background: #fff;
+.wrapped-card-strip i {
+    flex: 1;
+    background: color-mix(in srgb, var(--card-accent) 78%, var(--panel));
+    border-radius: 1px 1px 0 0;
+    min-height: 4px;
 }
 .wrapped-card-copy {
     padding: 14px 16px 18px;
     display: flex;
     flex-direction: column;
-    gap: 6px;
+    gap: 7px;
 }
 .wrapped-card-eyebrow {
-    color: var(--accent, #e8590c);
+    color: var(--card-accent);
+    font-family: ui-monospace, Menlo, monospace;
     font-size: 12px;
-    letter-spacing: 0.02em;
+    letter-spacing: 0.01em;
 }
 .wrapped-card-headline {
     margin: 0;
-    font-size: clamp(22px, 2.2vw, 28px);
-    line-height: 1.08;
+    font-family: Georgia, serif;
+    font-weight: 600;
+    font-size: clamp(24px, 2.4vw, 30px);
+    line-height: 1.06;
     letter-spacing: -0.01em;
+    color: var(--ink);
 }
 .wrapped-card-body {
     margin: 0;
     font-size: 14px;
-    line-height: 1.45;
-    color: var(--ink-soft, #444);
+    line-height: 1.5;
+    color: var(--muted);
 }
 .wrapped-card-flag { align-self: flex-start; margin-top: 4px; }
 .wrapped-cta { margin: 12px 0 16px; padding: 14px 16px; }
