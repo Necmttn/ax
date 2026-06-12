@@ -213,7 +213,11 @@ under your account; the viewer just renders it.
 
 ## Watch your agents work
 
-`ax serve` runs the dashboard + studio over the same graph:
+`ax serve` runs the dashboard + studio over the same graph. The daemon knows
+itself: re-running `ax serve` while one is already up prints the dashboard URL
+instead of a port error, and `ax serve status` / `ax serve stop` find and
+manage the running instance (pidfile + port probe, even for daemons started by
+older versions):
 
 - **Transcript view** - tool call and result as one card, skill and image
   turns folded, subagent spawns with their metrics.
