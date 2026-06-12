@@ -1847,3 +1847,17 @@ DEFINE FIELD since_days  ON ingest_file_state TYPE option<number>;  -- git histo
 DEFINE FIELD ingested_at ON ingest_file_state TYPE datetime DEFAULT time::now();
 DEFINE INDEX IF NOT EXISTS ingest_file_state_path_uq ON ingest_file_state FIELDS path UNIQUE;
 DEFINE INDEX IF NOT EXISTS ingest_file_state_source  ON ingest_file_state FIELDS source_kind;
+
+-- ---------------------------------------------------------------------------
+-- wrapped_card - agent-authored Wrapped recap cards (improve-first dashboard
+-- PR4). `ax wrapped generate` emits a brief; an agent mines the graph and
+-- publishes 10-16 headline cards via `ax wrapped publish` (full replace).
+-- The dashboard serves them merged onto /api/wrapped; `sensitivity =
+-- 'sensitive'` cards are dropped from the public preview.
+DEFINE TABLE wrapped_card SCHEMAFULL;
+DEFINE FIELD question     ON wrapped_card TYPE string;   -- eyebrow, e.g. "Which archetype are you?"
+DEFINE FIELD headline     ON wrapped_card TYPE string;   -- the big line, <=6 words
+DEFINE FIELD body         ON wrapped_card TYPE string;   -- <=2 supporting lines
+DEFINE FIELD sensitivity  ON wrapped_card TYPE string DEFAULT 'public';  -- public | sensitive
+DEFINE FIELD position     ON wrapped_card TYPE int DEFAULT 0;
+DEFINE FIELD generated_at ON wrapped_card TYPE datetime DEFAULT time::now();

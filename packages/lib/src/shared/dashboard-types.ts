@@ -768,6 +768,18 @@ export interface WrappedPrivacySummary {
     readonly redactedFields: ReadonlyArray<string>;
 }
 
+/** Agent-authored Wrapped recap card (ax wrapped publish). */
+export interface WrappedCardDto {
+    /** eyebrow question, e.g. "Which archetype are you?" */
+    readonly question: string;
+    /** the big line - headlines carry the card */
+    readonly headline: string;
+    readonly body: string;
+    /** 'sensitive' cards are dropped from the public preview */
+    readonly sensitivity: string;
+    readonly position: number;
+}
+
 export interface WrappedProfile {
     readonly generatedAt: string;
     readonly period: WrappedPeriod;
@@ -777,6 +789,8 @@ export interface WrappedProfile {
     readonly facts: ReadonlyArray<WrappedFact>;
     readonly metrics: WrappedMetrics;
     readonly privacy: WrappedPrivacySummary;
+    /** agent-authored recap cards; absent/empty until `ax wrapped publish` */
+    readonly cards?: ReadonlyArray<WrappedCardDto>;
 }
 
 export interface IngestEvent {
