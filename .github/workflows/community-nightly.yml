@@ -12,6 +12,11 @@ jobs:
   compile:
     runs-on: ubuntu-24.04
     steps:
+      # Sources (registrations, scripts) come from main; compiled outputs land
+      # on the community-data branch. main carries a required-checks ruleset
+      # that blocks bot pushes (GitHub Actions can't be a bypass actor on
+      # personal repos), and generated data has no business churning main
+      # anyway - the site reads the compiled JSON from community-data raw URLs.
       - uses: actions/checkout@v4
 
       - uses: oven-sh/setup-bun@v2
@@ -25,20 +30,21 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: bun scripts/compile-community.ts
 
-      - name: Commit if changed
+      - name: Publish to community-data branch
         run: |
           set -euo pipefail
-          # Stage compiled outputs but not the ETag cache (it's machine-local;
-          # skipping it means cold fetches each nightly run, acceptable at current scale).
-          git add community/ && git reset community/.gist-etag-cache.json || true
-          # -I ignores lines matching the pattern (compiled_at-only churn).
-          # Verified: `git diff --cached --quiet -I '"compiled_at"'` exits 0
-          # when only compiled_at lines differ, exits 1 when real data changed.
-          if git diff --cached --quiet -I '"compiled_at"'; then
-            echo "no changes beyond compiled_at timestamp - skipping commit"
-            exit 0
-          fi
           git config user.name "ax-community-bot"
           git config user.email "actions@github.com"
+          # Fresh orphan-style commit each night: community-data carries main's
+          # tree + the latest compiled outputs, no compile history accumulation.
+          git add community/ && git reset community/.gist-etag-cache.json || true
+          # -I ignores compiled_at-only churn (verified: exits 0 when only
+          # compiled_at lines differ, 1 when real data changed) - compare
+          # against what community-data already serves, not main.
+          git fetch origin community-data
+          if git diff origin/community-data --cached --quiet -I '"compiled_at"' -- community/; then
+            echo "no changes beyond compiled_at timestamp - skipping publish"
+            exit 0
+          fi
           git commit -m "chore(community): nightly compile"
-          git push
+          git push origin HEAD:community-data --force

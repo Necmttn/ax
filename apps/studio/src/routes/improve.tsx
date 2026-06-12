@@ -23,7 +23,10 @@ const VERDICTS: ReadonlyArray<string> = [
     "adopted", "ignored", "regressed", "partial", "no_longer_needed",
 ];
 const CONF_W: Record<string, number> = { high: 3, medium: 2, low: 1 };
-const score = (p: ProposalDto) => (CONF_W[p.confidence] ?? 1) * Math.log2(p.frequency + 1);
+const score = (p: ProposalDto) =>
+    (CONF_W[p.confidence] ?? 1) * Math.log2(p.frequency + 1) +
+    // agent-origin tiebreak above mined at equal confidence x frequency
+    ((p.origin ?? "mined") === "agent" ? 0.5 : 0);
 
 export function ImproveRoute() {
     const queryClient = useQueryClient();
@@ -95,6 +98,7 @@ export function ImproveRoute() {
                 <span className="meta">
                     {proposals.length} proposals · {filtered.length} shown
                 </span>
+                <AnalysisBriefButton />
             </header>
 
             <NextActionsPanel handlers={{
@@ -168,7 +172,12 @@ export function ImproveRoute() {
                                         : <span className="meta">-</span>}
                                     </td>
                                     <td>{verdict}</td>
-                                    <td>{p.title}</td>
+                                    <td>
+                                        {(p.origin ?? "mined") === "agent"
+                                            ? <span className="badge keep" style={{ marginRight: 6 }}>agent</span>
+                                            : null}
+                                        {p.title}
+                                    </td>
                                 </tr>
                             );
                         })}
@@ -240,7 +249,7 @@ function ProposalDetail({
         <>
             <header>
                 <h3 style={{ margin: 0 }}>{proposal.title}</h3>
-                <span className="meta">{proposal.dedupe_sig}</span>
+                <span className="meta">{proposal.dedupe_sig} · {proposal.origin ?? "mined"}</span>
             </header>
             <dl className="kv">
                 <dt>Form</dt><dd>{proposal.form}</dd>
@@ -422,4 +431,16 @@ function SafetyFields({
             <dt>Failure mode</dt><dd>{payload.failure_mode ?? "-"}</dd>
         </>
     );
+}
+
+/** Fetches the deep-analysis brief once and offers it as a copy action -
+ *  paste into an agent session; findings return via `ax improve propose`. */
+function AnalysisBriefButton() {
+    const query = useQuery({
+        queryKey: ["improve", "analyze-brief"],
+        queryFn: () => api.improveAnalyzeBrief(),
+        staleTime: Infinity,
+    });
+    if (!query.data) return null;
+    return <CopyButton text={query.data.brief} label="Copy analysis brief" />;
 }

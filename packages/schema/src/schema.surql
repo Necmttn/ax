@@ -1605,6 +1605,9 @@ DEFINE FIELD confidence    ON proposal TYPE string;
     -- low | medium | high
 DEFINE FIELD status        ON proposal TYPE string DEFAULT 'open';
     -- open | accepted | rejected | superseded
+DEFINE FIELD origin        ON proposal TYPE string DEFAULT 'mined';
+    -- mined (signal-derived) | agent (written via `ax improve propose`)
+    -- old rows read NONE - consumers coalesce to 'mined'
 DEFINE FIELD reject_reason ON proposal TYPE option<string>;
 DEFINE FIELD baseline      ON proposal TYPE option<string>;
 DEFINE FIELD created_at    ON proposal TYPE datetime DEFAULT time::now();
@@ -1844,3 +1847,21 @@ DEFINE FIELD since_days  ON ingest_file_state TYPE option<number>;  -- git histo
 DEFINE FIELD ingested_at ON ingest_file_state TYPE datetime DEFAULT time::now();
 DEFINE INDEX IF NOT EXISTS ingest_file_state_path_uq ON ingest_file_state FIELDS path UNIQUE;
 DEFINE INDEX IF NOT EXISTS ingest_file_state_source  ON ingest_file_state FIELDS source_kind;
+
+-- ---------------------------------------------------------------------------
+-- wrapped_card - agent-authored Wrapped recap cards (improve-first dashboard
+-- PR4). `ax wrapped generate` emits a brief; an agent mines the graph and
+-- publishes 10-16 headline cards via `ax wrapped publish` (full replace).
+-- The dashboard serves them merged onto /api/wrapped; `sensitivity =
+-- 'sensitive'` cards are dropped from the public preview.
+DEFINE TABLE wrapped_card SCHEMAFULL;
+DEFINE FIELD question     ON wrapped_card TYPE string;   -- eyebrow, e.g. "Which archetype are you?"
+DEFINE FIELD headline     ON wrapped_card TYPE string;   -- the big line, <=6 words
+DEFINE FIELD body         ON wrapped_card TYPE string;   -- <=2 supporting lines
+DEFINE FIELD sensitivity  ON wrapped_card TYPE string DEFAULT 'public';  -- public | sensitive
+DEFINE FIELD position     ON wrapped_card TYPE int DEFAULT 0;
+DEFINE FIELD series       ON wrapped_card TYPE array<number> DEFAULT [];
+    -- optional grounding sparkline - REAL data points (e.g. daily sessions
+    -- on the card's model), rendered as the card's bar strip
+DEFINE FIELD series_label ON wrapped_card TYPE option<string>;
+DEFINE FIELD generated_at ON wrapped_card TYPE datetime DEFAULT time::now();

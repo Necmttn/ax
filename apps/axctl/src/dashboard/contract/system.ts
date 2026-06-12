@@ -17,8 +17,9 @@ import {
 import { SurrealClient } from "@ax/lib/db";
 import { AX_VERSION } from "../../cli/version.ts";
 import { graphHealthSql } from "../../queries/graph-health.ts";
-import { checkoutActivitySql, gitCorrelationSql } from "../../queries/insights.ts";
 import { API_VERSION, dashboardApiCapabilities } from "../capabilities.ts";
+import { fetchWorktreesOverview } from "../worktrees-overview.ts";
+import { asJsonValue } from "./common.ts";
 
 /**
  * Boot-time facts the contract handlers need from `serveDashboard`: the
@@ -74,10 +75,14 @@ export const SystemGroupLive = HttpApiBuilder.group(AxApi, "system", (handlers) 
             }))
         .handle("worktrees", () =>
             Effect.gen(function* () {
-                const db = yield* SurrealClient;
-                const activity = yield* db.query(checkoutActivitySql(50)).pipe(Effect.mapError(internal));
-                const git = yield* db.query(gitCorrelationSql(50)).pipe(Effect.mapError(internal));
-                return new WorktreesResult({ activity, git });
+                // Deref-free aggregates + JS join: the legacy correlated SQL
+                // took 50+ seconds and died on the 60s idleTimeout.
+                const overview = yield* fetchWorktreesOverview(50).pipe(Effect.mapError(internal));
+                // asJsonValue: rows carry RecordId instances - see common.ts.
+                return new WorktreesResult({
+                    activity: asJsonValue(overview.activity),
+                    git: asJsonValue(overview.git),
+                });
             }))
         .handle("selfImprove", () =>
             Effect.gen(function* () {

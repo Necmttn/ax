@@ -10,9 +10,14 @@ export function RoutingPage() {
           Your frontier model is doing <em>intern work.</em>
         </h1>
         <p className="lede">
-          Any subagent dispatch that doesn&rsquo;t pin a model inherits the expensive one. ax
-          measures the leak, nudges at dispatch time, tunes a routing table from your own
-          history, and verifies the savings &mdash; all on your laptop.
+          You&rsquo;d think Claude Code already sends the routine work it spawns to cheaper
+          models. It doesn&rsquo;t &mdash; every sub-task runs on your most expensive model
+          unless something tells it which one to use, and your weekly usage limit dies in
+          hours, not days. ax measures the leak, warns as it happens, learns the fix from
+          your own history, and verifies the savings &mdash; all on your laptop.
+        </p>
+        <p className="rt-receipts-label">
+          what the leak looks like on one real machine running ax &middot; 14 days of receipts
         </p>
         <div className="scale">
           <div className="stat">
@@ -21,11 +26,11 @@ export function RoutingPage() {
           </div>
           <div className="stat">
             <span className="v">663</span>
-            <span className="k">subagent dispatches</span>
+            <span className="k">sub-tasks spawned</span>
           </div>
           <div className="stat">
             <span className="v">75%</span>
-            <span className="k">inherited the frontier model</span>
+            <span className="k">ran on the expensive default</span>
           </div>
           <div className="stat">
             <span className="v">28:1</span>
@@ -33,8 +38,8 @@ export function RoutingPage() {
           </div>
         </div>
         <p className="rt-hero-note">
-          measured on the author&rsquo;s machine &middot; $2,301 of subagent spend on
-          fable/opus vs $83 on sonnet
+          $2,301 of sub-task spend on fable/opus vs $83 on sonnet, on this machine. Run{" "}
+          <code>ax cost split</code> to see yours.
         </p>
       </section>
 
@@ -46,9 +51,9 @@ export function RoutingPage() {
             Measure. Nudge. Tune. <em>Verify.</em>
           </h2>
           <p className="section-lede">
-            Four commands close the loop &mdash; see where the inherited dispatches hide, get
-            warned before the next one, mine your history for routing classes, then reprice
-            against the tokens those dispatches actually burned.
+            Four commands close the loop &mdash; see where the expensive defaults hide, get
+            warned before the next one, learn the fix from what your agents actually do,
+            then reprice against the tokens your sub-tasks actually burned.
           </p>
         </div>
 
@@ -60,8 +65,8 @@ export function RoutingPage() {
             </div>
             <code className="rt-step-cmd">ax cost split --days=7</code>
             <p className="rt-step-body">
-              Breaks spend into main loop vs subagents, by model. The 28:1 ratio above came
-              out of this table.
+              Breaks your spend into main session vs the sub-tasks your agent spawns, by
+              model. The 28:1 above came out of this table &mdash; run it to see your ratio.
             </p>
           </div>
 
@@ -74,8 +79,8 @@ export function RoutingPage() {
               ax hooks install ~/.ax/hooks/route-dispatch.ts --providers=claude
             </code>
             <p className="rt-step-body">
-              The <code className="inline">route-dispatch</code> hook warns at dispatch time
-              when mechanical work forgets to pin a model.
+              The <code className="inline">route-dispatch</code> hook warns in the moment,
+              right as a routine sub-task is about to run on the expensive default.
             </p>
           </div>
 
@@ -86,8 +91,8 @@ export function RoutingPage() {
             </div>
             <code className="rt-step-cmd">ax routing tune</code>
             <p className="rt-step-body">
-              Mines <em>your</em> dispatch history for new routing classes. Deterministic
-              clustering &mdash; no LLM in the loop.
+              Finds the routine work <em>you</em> keep overpaying for, from what your agents
+              actually do. Deterministic pattern-matching &mdash; no AI guessing.
             </p>
           </div>
 
@@ -98,8 +103,8 @@ export function RoutingPage() {
             </div>
             <code className="rt-step-cmd">ax dispatches --candidates</code>
             <p className="rt-step-body">
-              Reprices every expensive inherited dispatch from the real token buckets it
-              burned. No projections.
+              Reprices every overbilled sub-task against what the cheaper model would have
+              cost, from the actual tokens it burned. Your savings, not projections.
             </p>
           </div>
         </div>
@@ -108,13 +113,15 @@ export function RoutingPage() {
       {/* ============= 02 on real data ============= */}
       <section id="numbers">
         <div className="section-head">
-          <span className="section-num">02 / On real data</span>
+          <span className="section-num">02 / The receipts</span>
           <h2>
-            First run on 30 days of <em>my own dispatches.</em>
+            One machine, 30 days, <em>verbatim.</em>
           </h2>
           <p className="section-lede">
-            20 routing classes mined, $591.57 of addressable spend found, $512.91 flagged
-            once the table was applied. The output below is verbatim.
+            20 patterns of routine work found, $591.57 of addressable spend, $512.91 flagged
+            once the table applied &mdash; the same machine as the numbers above.{" "}
+            <code className="inline">ax routing tune --dry-run</code> prints yours in one
+            command.
           </p>
         </div>
 
@@ -155,9 +162,10 @@ export function RoutingPage() {
         </div>
 
         <p className="rt-fine">
-          Honest numbers, on purpose: &ldquo;addressable spend&rdquo; is what those dispatches
-          actually cost over the window. ax reprices retrospectively from real token buckets
-          &mdash; it never reports fabricated projected savings.
+          Honest numbers, on purpose: &ldquo;addressable spend&rdquo; is what the flagged
+          sub-tasks actually cost over the window &mdash; yours included. ax reprices what
+          already happened, from the actual tokens burned, and never reports fabricated
+          projected savings.
         </p>
       </section>
 
@@ -169,8 +177,9 @@ export function RoutingPage() {
             Judgment work <em>never</em> tiers down.
           </h2>
           <p className="section-lede">
-            The obvious objection is &ldquo;won&rsquo;t quality drop?&rdquo; It doesn&rsquo;t,
-            because the miner refuses to auto-route anything that needs taste.
+            Your obvious objection: won&rsquo;t quality drop? No &mdash; ax refuses to
+            auto-route anything that needs taste. Your reviews, your design calls, your
+            plans stay on the frontier model.
           </p>
         </div>
 
@@ -216,10 +225,10 @@ export function RoutingPage() {
         </div>
 
         <div className="rt-brief-note">
-          <b>Judgment proposals ship as a brief, not a change.</b> When the miner detects a
-          judgment-shaped class, it routes the proposal through a written brief your agent
-          adversarially backtests against your own history before anything applies. Quality
-          stays on the frontier model; only mechanical work moves.
+          <b>Judgment proposals ship as a brief, not a change.</b> When ax spots
+          judgment-shaped work, it ships the proposal as a written brief your agent
+          stress-tests against your own history before anything applies. Quality stays on
+          the frontier model; only routine work moves.
         </div>
       </section>
 

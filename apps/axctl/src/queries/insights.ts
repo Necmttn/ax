@@ -167,6 +167,7 @@ export const SCHEMA_TABLES: readonly SchemaTableSpec[] = [
     { table: "cites_evidence", stage: "active", note: "Proposal-to-evidence edges." },
     { table: "opportunity", stage: "active", note: "Experiment trigger recurrence evidence edges." },
     { table: "reviewed", stage: "active", note: "Session-to-retro review edges." },
+    { table: "wrapped_card", stage: "active", note: "Agent-authored Wrapped recap cards (ax wrapped publish)." },
 ] as const;
 
 export function isInsightView(value: string): value is InsightView {

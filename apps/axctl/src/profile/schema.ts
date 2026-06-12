@@ -128,6 +128,15 @@ const Insights = Schema.Struct({
     subagents_spawned: Schema.Number,
     commits: Schema.Number,
     tools_top: Schema.Array(ToolRun),
+    // wrapped-style window aggregates - all optional so old gists stay valid
+    turns: Schema.optional(Schema.Number),
+    tool_calls: Schema.optional(Schema.Number),
+    tool_failures: Schema.optional(Schema.Number),
+    distinct_skills: Schema.optional(Schema.Number),
+    distinct_tools: Schema.optional(Schema.Number),
+    repos_count: Schema.optional(Schema.Number),
+    verification_calls: Schema.optional(Schema.Number),
+    context_calls: Schema.optional(Schema.Number),
 });
 
 export const ProfileV1 = Schema.Struct({

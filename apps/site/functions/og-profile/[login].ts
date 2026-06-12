@@ -15,8 +15,8 @@
 import { ImageResponse } from "workers-og";
 import { OG_RENDER_REV } from "../_lib/og-meta";
 import {
-    INK, DIM, CARD, GREEN, RED,
-    esc, statHtml, footerHtml, blockLogoHtml, compactNumber, loadOgFonts,
+    INK, PAPER, DIM, CARD, GREEN, RED,
+    esc, statHtml, footerHtml, blockLogoHtml, compactNumber, compactUsd, loadOgFonts,
 } from "../_lib/og-kit";
 
 const LOGIN_RE = /^[A-Za-z0-9_-]{1,39}$/;
@@ -35,6 +35,7 @@ interface ProfileStats {
     readonly streak_days: number;
     readonly tokens: { readonly total: number };
     readonly cost_usd?: number;
+    readonly harnesses?: ReadonlyArray<string>;
 }
 
 interface ProfileInsights {
@@ -70,6 +71,7 @@ interface ProfileStub {
     readonly longest_run_hours?: number;
     readonly commits?: number;
     readonly subagents?: number;
+    readonly harnesses?: ReadonlyArray<string>;
     readonly activity?: { readonly daily?: ReadonlyArray<DailyActivity> };
 }
 
@@ -83,13 +85,31 @@ function barChartHtml(daily: ReadonlyArray<DailyActivity>): string {
     const busyIdx = slice.reduce((best, d, i) =>
         d.sessions > (slice[best]?.sessions ?? 0) ? i : best, 0);
     const BAR_H = 80; // max bar height px
-    const BAR_W = 28; // bar width px
+    const BAR_W = 32; // bar width px
     const bars = slice.map((d, i) => {
         const h = Math.max(4, Math.round((d.sessions / maxSessions) * BAR_H));
         const color = i === busyIdx ? RED : GREEN;
-        return `<div style="display:flex;flex-direction:column;justify-content:flex-end;height:${BAR_H}px;margin-right:4px"><div style="display:flex;width:${BAR_W}px;height:${h}px;background:${color}"></div></div>`;
+        return `<div style="display:flex;flex-direction:column;justify-content:flex-end;height:${BAR_H}px"><div style="display:flex;width:${BAR_W}px;height:${h}px;background:${color}"></div></div>`;
     }).join("");
-    return `<div style="display:flex;flex-direction:column"><div style="display:flex;align-items:flex-end">${bars}</div><span style="font-size:13px;letter-spacing:2px;color:${DIM};margin-top:10px">DAILY SESSIONS · 30 DAYS</span></div>`;
+    // Full-bleed: fixed-width bars on a space-between 1072px track distribute
+    // the slack as even gaps - exact edge-to-edge without fractional margins.
+    // The caption NAMES the red bar: unexplained red reads as "error", named
+    // red reads as "peak".
+    const busy = slice[busyIdx];
+    const peakLabel = busy
+        ? ` · PEAK ${fmtDayLabel(busy.date)} · ${busy.sessions.toLocaleString("en-US")} SESSIONS`
+        : "";
+    return `<div style="display:flex;flex-direction:column"><div style="display:flex;align-items:flex-end;justify-content:space-between;width:1072px">${bars}</div><span style="font-size:13px;letter-spacing:2px;color:${DIM};margin-top:10px">DAILY SESSIONS · 30 DAYS${esc(peakLabel)}</span></div>`;
+}
+
+const MONTHS = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"] as const;
+
+/** "2026-06-10" -> "JUN 10"; falls back to the raw string. */
+function fmtDayLabel(iso: string): string {
+    const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(iso);
+    if (!m) return iso;
+    const month = MONTHS[Number(m[2]) - 1];
+    return month ? `${month} ${Number(m[3])}` : iso;
 }
 
 // ---------------------------------------------------------------------------
@@ -151,6 +171,7 @@ export const onRequestGet: PagesFunction = async (ctx) => {
     let longestRunHours: number | null   = null;
     let commits: number | null     = null;
     let subagents: number | null   = null;
+    let harnesses: ReadonlyArray<string> | null = null;
     let daily: ReadonlyArray<DailyActivity> | null = null;
 
     if (stub) {
@@ -163,6 +184,7 @@ export const onRequestGet: PagesFunction = async (ctx) => {
         longestRunHours  = stub.longest_run_hours ?? null;
         commits      = stub.commits ?? null;
         subagents    = stub.subagents ?? null;
+        harnesses    = stub.harnesses ?? null;
         daily        = stub.activity?.daily ?? null;
     } else if (gistProfile) {
         const s  = gistProfile.stats;
@@ -176,40 +198,50 @@ export const onRequestGet: PagesFunction = async (ctx) => {
         longestRunHours  = ins?.longest_run_hours ?? null;
         commits      = ins?.commits ?? null;
         subagents    = ins?.subagents_total ?? null;
+        harnesses    = s.harnesses ?? null;
         daily        = gistProfile.activity?.daily ?? null;
     }
 
     // --- Build layout sections ---
 
-    // Header row: block logo left, kicker right
-    const logo   = blockLogoHtml({ scale: 4, color: INK, dimColor: DIM });
-    const header = `<div style="display:flex;justify-content:space-between;align-items:flex-start"><div style="display:flex">${logo}</div><span style="font-size:13px;letter-spacing:3px;color:${DIM}">AGENT TELEMETRY DOSSIER · LAST 30 DAYS</span></div>`;
+    // Header row: block logo left (single-color paper, no shadow - the
+    // two-tone treatment reads as mud below ~scale 8), kicker right.
+    const logo   = blockLogoHtml({ scale: 5, color: PAPER, dimColor: "transparent" });
+    const header = `<div style="display:flex;justify-content:space-between;align-items:center"><div style="display:flex">${logo}</div><span style="font-size:13px;letter-spacing:2px;color:${DIM}">AGENT TELEMETRY DOSSIER · LAST 30 DAYS</span></div>`;
 
-    // Big @login in Gelasio serif
-    const loginHtml = `<div style="display:flex;align-items:baseline;margin-top:12px"><span style="font-size:48px;font-weight:700;color:${DIM};font-family:'Gelasio';margin-right:4px">@</span><span style="font-size:88px;font-weight:700;color:${INK};font-family:'Gelasio';line-height:1">${esc(login)}</span></div>`;
+    // Name row: serif @login left (green @ = live handle), harness chips
+    // right - the chips claim the dead right half of the row.
+    const chipNames = (harnesses ?? [])
+        .filter((h) => !h.endsWith("-subagent"))
+        .slice(0, 4);
+    const chips = chipNames.length > 0
+        ? `<div style="display:flex;align-items:center">${chipNames.map((h) =>
+            `<div style="display:flex;padding:8px 16px;background:#262735;color:${DIM};font-size:14px;letter-spacing:2px;margin-left:10px">${esc(h.toUpperCase())}</div>`,
+        ).join("")}</div>`
+        : "";
+    const loginHtml = `<div style="display:flex;justify-content:space-between;align-items:center;margin-top:40px"><div style="display:flex;align-items:baseline"><span style="font-size:64px;font-weight:700;color:${GREEN};font-family:'Gelasio';margin-right:2px">@</span><span style="font-size:88px;font-weight:700;color:${INK};font-family:'Gelasio';line-height:1">${esc(login)}</span></div>${chips}</div>`;
 
-    // Stat band 1
-    const spendStr = spendUsd != null
-        ? (spendUsd >= 100 ? `$${spendUsd.toFixed(0)}` : `$${spendUsd.toFixed(2)}`)
-        : "-";
-    const statBand1 = `<div style="display:flex">${[
-        statHtml(sessions != null ? sessions.toLocaleString("en-US") : "-", "SESSIONS"),
-        statHtml(tokens  != null ? compactNumber(tokens)             : "-", "TOKENS"),
-        statHtml(spendStr,                                               "EST. SPEND", GREEN),
-        statHtml(streakDays  != null ? `${streakDays}d`             : "-", "STREAK"),
-        statHtml(activeHours != null ? `${activeHours}h`            : "-", "HOURS"),
+    // Stat band - full-bleed via space-between (no trailing margins); the
+    // green spend numeral is the hero and wins by SIZE, not just color.
+    const noMr = { marginRight: 0 };
+    const statBand1 = `<div style="display:flex;justify-content:space-between;align-items:flex-end;margin-top:36px">${[
+        statHtml(sessions != null ? sessions.toLocaleString("en-US") : "-", "SESSIONS", INK, noMr),
+        statHtml(tokens  != null ? compactNumber(tokens)             : "-", "TOKENS", INK, noMr),
+        statHtml(spendUsd != null ? compactUsd(spendUsd)             : "-", "EST. SPEND", GREEN, { size: 60, marginRight: 0 }),
+        statHtml(streakDays  != null ? `${streakDays}d`             : "-", "STREAK", INK, noMr),
+        statHtml(activeHours != null ? compactNumber(activeHours)   : "-", "HOURS", INK, noMr),
     ].join("")}</div>`;
 
     // Filler: bar chart or second stat row (fills dead space)
     let filler: string;
     if (daily && daily.length > 0) {
-        filler = barChartHtml(daily);
+        filler = `<div style="display:flex;margin-top:44px">${barChartHtml(daily)}</div>`;
     } else if (parallelSessions != null || longestRunHours != null || commits != null || subagents != null) {
-        filler = `<div style="display:flex">${[
-            statHtml(parallelSessions != null ? String(parallelSessions)          : "-", "PARALLEL"),
-            statHtml(longestRunHours  != null ? `${longestRunHours}h`             : "-", "LONGEST RUN"),
-            statHtml(commits          != null ? commits.toLocaleString("en-US")   : "-", "COMMITS"),
-            statHtml(subagents        != null ? compactNumber(subagents)          : "-", "SUBAGENTS"),
+        filler = `<div style="display:flex;justify-content:space-between;margin-top:44px">${[
+            statHtml(parallelSessions != null ? String(parallelSessions)          : "-", "PARALLEL", INK, { marginRight: 0 }),
+            statHtml(longestRunHours  != null ? `${longestRunHours}h`             : "-", "LONGEST RUN", INK, { marginRight: 0 }),
+            statHtml(commits          != null ? commits.toLocaleString("en-US")   : "-", "COMMITS", INK, { marginRight: 0 }),
+            statHtml(subagents        != null ? compactNumber(subagents)          : "-", "SUBAGENTS", INK, { marginRight: 0 }),
         ].join("")}</div>`;
     } else {
         filler = "";
@@ -217,8 +249,12 @@ export const onRequestGet: PagesFunction = async (ctx) => {
 
     const footer = footerHtml("COMPILED FROM LOCAL TRANSCRIPTS");
 
-    // justify-content:space-between distributes sections across full 630px
-    const html = `<div style="display:flex;flex-direction:column;justify-content:space-between;width:1200px;height:630px;background:${CARD};padding:56px 64px;font-family:'JetBrains Mono'">${header}${loginHtml}${statBand1}${filler}${footer}</div>`;
+    // Top bands live in one inner column with designed margin-top gaps;
+    // outer space-between then has exactly two children, which pins the
+    // footer to the bottom padding instead of inflating the chart-to-footer
+    // gap with the leftover slack.
+    const inner = `<div style="display:flex;flex-direction:column">${header}${loginHtml}${statBand1}${filler}</div>`;
+    const html = `<div style="display:flex;flex-direction:column;justify-content:space-between;width:1200px;height:630px;background:${CARD};padding:56px 64px;font-family:'JetBrains Mono'">${inner}${footer}</div>`;
 
     const { regular, bold, serif } = await loadOgFonts();
 

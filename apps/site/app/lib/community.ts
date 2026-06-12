@@ -7,6 +7,9 @@
  */
 
 const REPO_RAW = "https://raw.githubusercontent.com/Necmttn/ax/main";
+// Compiled outputs live on the community-data branch (nightly bot pushes
+// there; main has a required-checks ruleset that blocks bot pushes).
+const DATA_RAW = "https://raw.githubusercontent.com/Necmttn/ax/community-data";
 const LOGIN_RE = /^[A-Za-z0-9-]{1,39}$/;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -62,6 +65,15 @@ export interface ProfileInsights {
     readonly subagents_spawned: number;
     readonly commits: number;
     readonly tools_top: readonly ProfileToolRun[];
+    // wrapped-style window aggregates (optional - old gists may omit them)
+    readonly turns?: number;
+    readonly tool_calls?: number;
+    readonly tool_failures?: number;
+    readonly distinct_skills?: number;
+    readonly distinct_tools?: number;
+    readonly repos_count?: number;
+    readonly verification_calls?: number;
+    readonly context_calls?: number;
 }
 export interface ProfileV1 {
     readonly v: 1;
@@ -178,6 +190,15 @@ export function validateProfileV1(value: unknown): ProfileV1 {
             str(t.name, "tools_top.name");
             num(t.runs, "tools_top.runs");
         }
+        // wrapped-style optional fields
+        optNum(ins.turns, "insights.turns");
+        optNum(ins.tool_calls, "insights.tool_calls");
+        optNum(ins.tool_failures, "insights.tool_failures");
+        optNum(ins.distinct_skills, "insights.distinct_skills");
+        optNum(ins.distinct_tools, "insights.distinct_tools");
+        optNum(ins.repos_count, "insights.repos_count");
+        optNum(ins.verification_calls, "insights.verification_calls");
+        optNum(ins.context_calls, "insights.context_calls");
     }
     return value as unknown as ProfileV1;
 }
@@ -265,8 +286,8 @@ export function profileGistRawUrl(owner: string, gistId: string): string {
     return `https://gist.githubusercontent.com/${owner}/${gistId}/raw/ax-profile.json`;
 }
 
-export const leaderboardUrl = `${REPO_RAW}/community/leaderboard.json`;
-export const skillStatsUrl = `${REPO_RAW}/community/skill-stats.json`;
+export const leaderboardUrl = `${DATA_RAW}/community/leaderboard.json`;
+export const skillStatsUrl = `${DATA_RAW}/community/skill-stats.json`;
 
 async function fetchJson(url: string): Promise<unknown> {
     const res = await fetch(url);

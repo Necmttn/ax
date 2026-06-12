@@ -1,0 +1,277 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>ax dispatches --candidates</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link
+  href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&display=swap"
+  rel="stylesheet"
+/>
+<style>
+  :root {
+    --bg: #111111;
+    --window-bg: #1a1a1a;
+    --titlebar-bg: #242424;
+    --border: #333333;
+    --text: #e8e4dc;
+    --dim: #8a8680;
+    --faint: #5a5752;
+    --amber: #ffcb6b;
+    --green: #c3e88d;
+    --red: #f07178;
+    --blue: #89ddff;
+    --prompt: #c3e88d;
+    --mono: "JetBrains Mono", ui-monospace, Menlo, monospace;
+  }
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body {
+    width: 1200px;
+    height: 675px;
+    background: var(--bg);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: var(--mono);
+  }
+
+  .window {
+    width: 1120px;
+    height: 607px;
+    background: var(--window-bg);
+    border-radius: 12px;
+    border: 1px solid var(--border);
+    box-shadow:
+      0 0 0 0.5px #000,
+      0 32px 80px rgba(0,0,0,0.85),
+      0 8px 20px rgba(0,0,0,0.6);
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+  }
+
+  /* Title bar */
+  .titlebar {
+    height: 44px;
+    background: var(--titlebar-bg);
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    padding: 0 16px;
+    flex-shrink: 0;
+    position: relative;
+  }
+  .dots {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+  }
+  .dot {
+    width: 13px;
+    height: 13px;
+    border-radius: 50%;
+  }
+  .dot.close  { background: #ff5f57; border: 0.5px solid rgba(0,0,0,0.15); }
+  .dot.min    { background: #febc2e; border: 0.5px solid rgba(0,0,0,0.15); }
+  .dot.max    { background: #28c840; border: 0.5px solid rgba(0,0,0,0.15); }
+  .titlebar-label {
+    position: absolute;
+    left: 50%;
+    transform: translateX(-50%);
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--faint);
+    letter-spacing: 0.02em;
+  }
+
+  /* Terminal body */
+  .terminal {
+    flex: 1;
+    padding: 36px 40px 36px;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .spacer { flex: 1; min-height: 20px; max-height: 60px; }
+
+  /* Command line */
+  .cmd-line {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    margin-bottom: 32px;
+    flex-shrink: 0;
+  }
+  .prompt { color: var(--prompt); font-size: 15px; font-weight: 600; }
+  .cmd { color: var(--text); font-size: 15px; font-weight: 500; }
+  .cmd .flag { color: var(--blue); }
+
+  /* Dispatch table - compact preview rows */
+  .table-wrap {
+    flex-shrink: 0;
+    margin-bottom: 0;
+  }
+  .tbl {
+    width: 100%;
+    border-collapse: collapse;
+  }
+  .tbl thead tr th {
+    text-align: left;
+    font-size: 11.5px;
+    font-weight: 600;
+    color: var(--faint);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    padding: 0 0 10px 0;
+    border-bottom: 1px solid #2a2a2a;
+  }
+  .tbl thead tr th.right { text-align: right; }
+  .tbl tbody tr td {
+    font-size: 12.5px;
+    font-weight: 400;
+    color: var(--dim);
+    padding: 6px 0;
+  }
+  .tbl tbody tr:first-child td { padding-top: 12px; }
+  .tbl tbody tr td.right { text-align: right; }
+
+  .col-ts    { width: 160px; }
+  .col-type  { width: 145px; }
+  .col-desc  { width: 330px; }
+  .col-sug   { width: 175px; }
+  .col-cost  { width: 110px; text-align: right; }
+  .col-save  { width: 120px; text-align: right; }
+
+  .ts-text   { color: #5a5752; font-size: 11px; }
+  .type-text { color: #7a7671; }
+  .desc-text { color: #c0bcb2; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 330px; display: block; }
+  .sug-text  { color: var(--green); font-weight: 600; }
+  .cost-text { color: #9a968d; }
+  .save-text { color: var(--amber); font-weight: 500; }
+
+  .ellipsis-row td {
+    color: #3e3c38;
+    font-size: 13px;
+    padding: 6px 0;
+    letter-spacing: 0.12em;
+  }
+
+  /* Divider */
+  .divider {
+    border: none;
+    border-top: 1px solid #252525;
+    margin: 4px 0 20px;
+    flex-shrink: 0;
+  }
+
+  /* Footer */
+  .footer-section {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+  }
+
+  .total-line {
+    font-size: 26px;
+    font-weight: 700;
+    color: var(--text);
+    line-height: 1.4;
+    margin-bottom: 12px;
+  }
+  .total-line .label { color: var(--dim); font-weight: 400; font-size: 21px; }
+  .total-line .num { color: var(--amber); }
+
+  .classes-line {
+    font-size: 15px;
+    font-weight: 400;
+    color: var(--dim);
+    line-height: 1.6;
+  }
+  .classes-line .prefix { color: var(--faint); }
+  .classes-line .cls-name { color: #c4c0b6; font-weight: 500; }
+  .classes-line .cls-val { color: var(--amber); font-weight: 600; }
+</style>
+</head>
+<body>
+  <div class="window">
+    <div class="titlebar">
+      <div class="dots">
+        <div class="dot close"></div>
+        <div class="dot min"></div>
+        <div class="dot max"></div>
+      </div>
+      <div class="titlebar-label">ax - dispatches</div>
+    </div>
+
+    <div class="terminal">
+
+      <div class="cmd-line">
+        <span class="prompt">$</span>
+        <span class="cmd">ax dispatches <span class="flag">--candidates</span> <span class="flag">--days=14</span></span>
+      </div>
+
+      <div class="table-wrap">
+        <table class="tbl">
+          <thead>
+            <tr>
+              <th class="col-ts">ts</th>
+              <th class="col-type">agent_type</th>
+              <th class="col-desc">description</th>
+              <th class="col-sug">suggest</th>
+              <th class="col-cost right">child cost</th>
+              <th class="col-save right">est savings</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td class="col-ts"><span class="ts-text">2026-06-10 13:30</span></td>
+              <td class="col-type"><span class="type-text">general-purpose</span></td>
+              <td class="col-desc"><span class="desc-text">Implement Task 3: session map strip</span></td>
+              <td class="col-sug"><span class="sug-text">claude-sonnet-4-6</span></td>
+              <td class="col-cost right"><span class="cost-text">$50.26</span></td>
+              <td class="col-save right"><span class="save-text">$35.18</span></td>
+            </tr>
+            <tr>
+              <td class="col-ts"><span class="ts-text">2026-06-11 07:41</span></td>
+              <td class="col-type"><span class="type-text">general-purpose</span></td>
+              <td class="col-desc"><span class="desc-text">Fix ingest run lifecycle</span></td>
+              <td class="col-sug"><span class="sug-text">claude-sonnet-4-6</span></td>
+              <td class="col-cost right"><span class="cost-text">$30.98</span></td>
+              <td class="col-save right"><span class="save-text">$21.69</span></td>
+            </tr>
+            <tr>
+              <td class="col-ts"><span class="ts-text">2026-06-10 07:09</span></td>
+              <td class="col-type"><span class="type-text">general-purpose</span></td>
+              <td class="col-desc"><span class="desc-text">Add deep span instrumentation</span></td>
+              <td class="col-sug"><span class="sug-text">claude-sonnet-4-6</span></td>
+              <td class="col-cost right"><span class="cost-text">$26.41</span></td>
+              <td class="col-save right"><span class="save-text">$18.49</span></td>
+            </tr>
+            <tr class="ellipsis-row">
+              <td colspan="6" style="letter-spacing: 0.12em; padding-top: 8px;">· · ·</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="spacer"></div>
+
+      <hr class="divider" />
+
+      <div class="footer-section">
+        <div class="total-line">
+          <span class="label">total est savings: </span><span class="num">$512.9076</span>
+        </div>
+        <div class="classes-line">
+          <span class="prefix">top classes: </span><span class="cls-name">well-specified-impl</span> <span class="cls-val">($222.78)</span><span style="color:#3e3c38">,</span>&nbsp;
+          <span class="cls-name">spec-review</span> <span class="cls-val">($69.75)</span><span style="color:#3e3c38">,</span>&nbsp;
+          <span class="cls-name">bug-fix</span> <span class="cls-val">($62.08)</span>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</body>
+</html>

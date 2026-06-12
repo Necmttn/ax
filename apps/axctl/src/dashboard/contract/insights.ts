@@ -15,8 +15,11 @@ import { emptyRecallResponse, fetchRecall, type RecallParams } from "../recall.t
 import { fetchSkillGraph } from "../skill-graph.ts";
 import { fetchToolFailureDetail, fetchToolFailures } from "../tool-failures.ts";
 import { fetchWorkflow } from "../workflow.ts";
-import { fetchWrapped, sanitizeWrappedProfile } from "../wrapped.ts";
-import { orInternal } from "./common.ts";
+import { sanitizeWrappedProfile } from "../wrapped.ts";
+import { fetchWrappedCached } from "../wrapped-cache.ts";
+import { fetchWrappedCards, sanitizeWrappedCards } from "../wrapped-cards.ts";
+import { renderWrappedGenerateBrief } from "../wrapped-generate-brief.ts";
+import { asJsonValue, orInternal } from "./common.ts";
 
 export const InsightsGroupLive = HttpApiBuilder.group(AxApi, "insights", (handlers) =>
     handlers
@@ -50,9 +53,30 @@ export const InsightsGroupLive = HttpApiBuilder.group(AxApi, "insights", (handle
                         : Effect.succeed(payload)
                 ),
             ))
-        .handle("wrapped", () => orInternal(fetchWrapped()))
+        // Agent-authored cards merge onto the cached mechanical profile.
+        // The cards read is uncached on purpose: `ax wrapped publish` runs in
+        // a separate process and can't drop the daemon's in-memory TTL cache.
+        .handle("wrapped", () =>
+            orInternal(
+                Effect.all([fetchWrappedCached(), fetchWrappedCards()]).pipe(
+                    // asJsonValue: card rows are raw query rows - see common.ts.
+                    Effect.map(([profile, cards]) => asJsonValue({ ...profile, cards })),
+                ),
+            ))
         .handle("wrappedPublicPreview", () =>
-            orInternal(fetchWrapped().pipe(Effect.map(sanitizeWrappedProfile))))
+            orInternal(
+                Effect.all([fetchWrappedCached(), fetchWrappedCards()]).pipe(
+                    Effect.map(([profile, cards]) =>
+                        asJsonValue({
+                            ...sanitizeWrappedProfile(profile),
+                            cards: sanitizeWrappedCards(cards),
+                        })),
+                ),
+            ))
+        .handle("wrappedGenerateBrief", () =>
+            Effect.sync(() => ({
+                brief: renderWrappedGenerateBrief({ date: new Date().toISOString().slice(0, 10) }),
+            })))
         .handle("workflow", () => orInternal(fetchWorkflow()))
         .handle("toolFailures", () => orInternal(fetchToolFailures()))
         .handle("toolFailureDetail", ({ params }) => orInternal(fetchToolFailureDetail(params.label))));

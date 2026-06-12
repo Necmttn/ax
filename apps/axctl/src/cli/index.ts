@@ -16,6 +16,7 @@ import { starCommand, starRuntime } from "./commands/star.ts";
 import { dogfoodCommand, dogfoodRuntime } from "./commands/dogfood.ts";
 import { costsGroupCommand, locCommand, pricingCommand, costsRuntime } from "./commands/costs.ts";
 import { costCommand, axCostRuntime } from "./commands/ax-cost.ts";
+import { quotaCommand, quotaRuntime } from "./commands/quota.ts";
 import { profileCommand, axProfileRuntime } from "./commands/profile.ts";
 import { dispatchesRootCommand, axDispatchesRuntime } from "./commands/ax-dispatches.ts";
 import { routingRootCommand, axRoutingRuntime } from "./commands/ax-routing.ts";
@@ -23,6 +24,7 @@ import { recallCommand, recallRuntime } from "./commands/recall.ts";
 import { hookCommand, hooksCommand, hooksRuntime } from "./commands/hooks.ts";
 import { retroCommand, retroRuntime } from "./commands/retro.ts";
 import { improveCommand, improveRuntime } from "./commands/improve.ts";
+import { wrappedCommand, wrappedRuntime } from "./commands/wrapped.ts";
 import { sessionsCommand, sessionsRuntime } from "./commands/sessions.ts";
 import { skillsCommand, rolesCommand, skillsRuntime } from "./commands/skills.ts";
 import { classifiersCommand, classifiersRuntime } from "./commands/classifiers.ts";
@@ -76,6 +78,7 @@ export const RUNTIME_BY_COMMAND: RuntimeManifest = {
     ...dogfoodRuntime,
     ...costsRuntime,
     ...axCostRuntime,
+    ...quotaRuntime,
     ...axProfileRuntime,
     ...axDispatchesRuntime,
     ...axRoutingRuntime,
@@ -83,6 +86,7 @@ export const RUNTIME_BY_COMMAND: RuntimeManifest = {
     ...hooksRuntime,
     ...retroRuntime,
     ...improveRuntime,
+    ...wrappedRuntime,
     ...sessionsRuntime,
     ...skillsRuntime,
     ...classifiersRuntime,
@@ -101,6 +105,7 @@ const registeredCommands: ReadonlyArray<Command.Command.Any> = [
     ingestCommand,
     sessionsCommand,
     improveCommand,
+    wrappedCommand,
     retroCommand,
     recallCommand,
     skillsCommand,
@@ -114,6 +119,7 @@ const registeredCommands: ReadonlyArray<Command.Command.Any> = [
     installCommand,
     setupCommand,
     costCommand,
+    quotaCommand,
     profileCommand,
     dispatchesRootCommand,
     routingRootCommand,

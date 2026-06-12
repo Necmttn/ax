@@ -430,7 +430,22 @@ export const api = {
     wrappedPublicPreview: (): Promise<WrappedProfile> =>
         viaContract("/api/wrapped/public-preview", (c) => c.insights.wrappedPublicPreview()),
 
-    nextActions: (): Promise<NextActionsPayload> => jsonFetch("/api/next-actions"),
+    nextActions: (): Promise<NextActionsPayload> =>
+        viaContract("/api/next-actions", (c) => c.improve.nextActions()),
+
+    improveAnalyzeBrief: (): Promise<{ brief: string }> =>
+        viaContract("/api/improve/analyze-brief", (c) => c.improve.analyzeBrief()),
+
+    wrappedGenerateBrief: (): Promise<{ brief: string }> =>
+        viaContract("/api/wrapped/generate-brief", (c) => c.insights.wrappedGenerateBrief()),
+
+    /** Read-only SQL console (Lab) - daemon accepts SELECT/RETURN/INFO only. */
+    query: (sql: string): Promise<{ result: unknown; durationMs: number }> =>
+        viaContract(
+            "/api/query",
+            (c) => c.system.query({ payload: { sql } }),
+            { method: "POST" },
+        ),
 
     // Experiment loop - see
     // docs/superpowers/plans/2026-05-25-experiment-loop-cleanup-and-rebuild.md

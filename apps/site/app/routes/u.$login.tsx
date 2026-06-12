@@ -1,8 +1,17 @@
 // apps/site/app/routes/u.$login.tsx
-import { createFileRoute, Link } from "@tanstack/react-router";
-import { useEffect, useState, type ReactNode } from "react";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
+import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 import { SiteHeader } from "~/components/landing-sections/site-header";
 import { SiteFooter } from "~/components/landing-sections/site-footer";
+import { CardArt, type CardArtAccent } from "~/components/dossier-card-art";
+import { RadarChart, type RadarSeries } from "~/components/radar-chart";
+import {
+    archetypeFor,
+    dominantPair,
+    profileToAxes,
+    RADAR_AXES_META,
+    type RadarAxes,
+} from "~/lib/radar";
 import {
     fetchProfile,
     type ProfileV1,
@@ -11,7 +20,16 @@ import {
     type ProfileSkill,
 } from "~/lib/community";
 
+// mirrors LOGIN_RE in community.ts - GitHub handles only, sanitised before use.
+const LOGIN_RE = /^[A-Za-z0-9-]{1,39}$/;
+// series colours: primary profile = ax green, comparison = ax blue.
+const SELF_COLOR = "var(--green)";
+const VS_COLOR = "#2567a8";
+
 export const Route = createFileRoute("/u/$login")({
+    validateSearch: (search: Record<string, unknown>) => ({
+        vs: typeof search.vs === "string" && LOGIN_RE.test(search.vs) ? search.vs : undefined,
+    }),
     head: ({ params }) => ({
         meta: [
             { title: `@${params.login} - ax profile` },
@@ -27,9 +45,21 @@ type State =
     | { kind: "error"; message: string }
     | { kind: "ready"; profile: ProfileV1 };
 
+// comparison-profile load state, kept separate from the primary dossier so a
+// missing/invalid `?vs=` peer degrades to a quiet inline note, never an error
+// page for the profile the visitor actually came to see.
+type VsState =
+    | { kind: "none" }
+    | { kind: "loading"; login: string }
+    | { kind: "not-found"; login: string }
+    | { kind: "error"; login: string }
+    | { kind: "ready"; login: string; profile: ProfileV1 };
+
 function ProfilePage() {
     const { login } = Route.useParams();
+    const { vs } = Route.useSearch();
     const [state, setState] = useState<State>({ kind: "loading" });
+    const [vsState, setVsState] = useState<VsState>({ kind: "none" });
 
     useEffect(() => {
         let alive = true;
@@ -56,6 +86,31 @@ function ProfilePage() {
         return () => { alive = false; };
     }, [login]);
 
+    useEffect(() => {
+        let alive = true;
+        if (!vs || vs.toLowerCase() === login.toLowerCase()) {
+            // self-compare is allowed (proves the overlay path); only skip the
+            // empty case so we don't double-render the same series silently.
+            if (!vs) { setVsState({ kind: "none" }); return; }
+        }
+        setVsState({ kind: "loading", login: vs });
+        fetchProfile(vs)
+            .then((profile) => {
+                if (!alive) return;
+                if (profile.github.toLowerCase() !== vs.toLowerCase()) {
+                    setVsState({ kind: "error", login: vs });
+                    return;
+                }
+                setVsState({ kind: "ready", login: vs, profile });
+            })
+            .catch((e: unknown) => {
+                if (!alive) return;
+                const notFound = typeof e === "object" && e !== null && (e as { notFound?: boolean }).notFound === true;
+                setVsState(notFound ? { kind: "not-found", login: vs } : { kind: "error", login: vs });
+            });
+        return () => { alive = false; };
+    }, [vs, login]);
+
     return (
         <>
             <SiteHeader />
@@ -63,7 +118,7 @@ function ProfilePage() {
                 {state.kind === "loading" && <p className="pf-loading">pulling the dossier on @{login}…</p>}
                 {state.kind === "not-found" && <UnclaimedDossier login={login} />}
                 {state.kind === "error" && <p className="pf-loading">couldn't load profile: {state.message}</p>}
-                {state.kind === "ready" && <ProfileDossier profile={state.profile} />}
+                {state.kind === "ready" && <ProfileDossier profile={state.profile} vs={vsState} />}
             </main>
             <SiteFooter />
         </>
@@ -108,7 +163,7 @@ const clampPct = (x: number): number => (Number.isFinite(x) ? Math.min(100, Math
 
 /* ---------- the dossier ---------- */
 
-function ProfileDossier({ profile: p }: { profile: ProfileV1 }) {
+function ProfileDossier({ profile: p, vs }: { profile: ProfileV1; vs: VsState }) {
     const daily = p.activity && p.activity.daily.length > 0
         ? [...p.activity.daily].sort((a, b) => (a.date < b.date ? -1 : 1))
         : [];
@@ -183,14 +238,21 @@ function ProfileDossier({ profile: p }: { profile: ProfileV1 }) {
                     <div className="pf-cards">
                         {buildInsightCards(ins).map((c) => (
                             <div className="pf-card" key={c.q}>
-                                <span className="pf-card-q">{c.q}</span>
-                                <span className="pf-card-a">{c.a}</span>
-                                <span className="pf-card-s">{c.s}</span>
+                                <CardArt seed={c.q} accent={c.accent ?? "green"} />
+                                <div className="pf-card-body">
+                                    <span className="pf-card-q">{c.q}</span>
+                                    <span className="pf-card-a">{c.a}</span>
+                                    {c.viz && <div className="pf-card-viz" aria-hidden="true">{c.viz}</div>}
+                                    <span className="pf-card-s">{c.s}</span>
+                                </div>
                             </div>
                         ))}
                     </div>
                 </section>
             )}
+
+            {/* the sign: radar + agent archetype */}
+            <SignSection n={nextSection()} profile={p} vs={vs} />
 
             {/* tool taste */}
             {tools.length > 0 && (
@@ -325,6 +387,194 @@ function Kicker({ n, title, note }: { n: string; title: string; note?: string })
     );
 }
 
+/* ---------- the sign: radar + archetype ---------- */
+
+function SignSection({ n, profile, vs }: { n: string; profile: ProfileV1; vs: VsState }) {
+    const navigate = useNavigate({ from: "/u/$login" });
+    const [draft, setDraft] = useState("");
+
+    const selfAxes = profileToAxes(profile);
+    const selfArch = archetypeFor(selfAxes, profile);
+
+    const vsReady = vs.kind === "ready" ? vs : null;
+    const vsAxes = vsReady ? profileToAxes(vsReady.profile) : null;
+    const vsArch = vsReady && vsAxes ? archetypeFor(vsAxes, vsReady.profile) : null;
+
+    const series: RadarSeries[] = [{ login: profile.github, axes: selfAxes, color: SELF_COLOR }];
+    if (vsReady && vsAxes) series.push({ login: vsReady.login, axes: vsAxes, color: VS_COLOR });
+
+    const submit = (e: FormEvent) => {
+        e.preventDefault();
+        const target = draft.trim().replace(/^@/, "");
+        if (!LOGIN_RE.test(target)) return;
+        void navigate({ search: { vs: target } });
+        setDraft("");
+    };
+    const clearCompare = () => void navigate({ search: { vs: undefined } });
+
+    return (
+        <section className="pf-section">
+            <Kicker n={n} title="The sign" note="six axes, one archetype" />
+            <p className="pf-sign-method">
+                Axes are log-anchored to fixed scales (not min-max), so shapes compare
+                across any two profiles.
+            </p>
+            <div className="pf-sign">
+                <div className="pf-sign-chart">
+                    <RadarChart series={series} size={420} />
+                    {selfAxes.partial && (
+                        <p className="pf-sign-partial">
+                            some axes read 0 - they need a newer ax version to populate.
+                        </p>
+                    )}
+                </div>
+
+                <div className="pf-sign-read">
+                    {vsArch && vsReady ? (
+                        <p className="pf-sign-versus">
+                            <span style={{ color: SELF_COLOR }}>@{profile.github}</span> is {selfArch.sign}
+                            {" · "}
+                            <span style={{ color: VS_COLOR }}>@{vsReady.login}</span> is {vsArch.sign}
+                        </p>
+                    ) : (
+                        <span className="pf-sign-kicker">your agent sign</span>
+                    )}
+
+                    <div className="pf-sign-head">
+                        <span className="pf-sign-glyph" aria-hidden="true">{selfArch.symbol}</span>
+                        <h3 className="pf-sign-name">{selfArch.sign}</h3>
+                    </div>
+                    <p className="pf-sign-blurb">{selfArch.blurb}</p>
+
+                    {/* compare mode: the raw-values table below carries the
+                        per-axis comparison - one table, not two summaries */}
+                    {!(vsReady && vsAxes) && <ScoreList axes={selfAxes} />}
+
+                    {/* compare control */}
+                    <div className="pf-sign-compare">
+                        {vsReady ? (
+                            <button type="button" className="pf-sign-clear" onClick={clearCompare}>
+                                clear comparison
+                            </button>
+                        ) : (
+                            <form className="pf-sign-form" onSubmit={submit}>
+                                <span className="pf-sign-form-label">compare with</span>
+                                <input
+                                    className="pf-sign-input"
+                                    type="text"
+                                    value={draft}
+                                    onChange={(e) => setDraft(e.currentTarget.value)}
+                                    placeholder="github handle"
+                                    aria-label="github handle to compare with"
+                                    spellCheck={false}
+                                    autoCapitalize="off"
+                                    autoCorrect="off"
+                                />
+                                <button type="submit" className="pf-sign-go">overlay</button>
+                            </form>
+                        )}
+                        {vs.kind === "loading" && <span className="pf-sign-msg">pulling @{vs.login}…</span>}
+                        {vs.kind === "not-found" && <span className="pf-sign-msg">no dossier on file for @{vs.login}.</span>}
+                        {vs.kind === "error" && <span className="pf-sign-msg">couldn't load @{vs.login}.</span>}
+                    </div>
+                </div>
+            </div>
+
+            <RawTable
+                self={selfAxes}
+                selfLogin={profile.github}
+                vs={vsReady && vsAxes ? { axes: vsAxes, login: vsReady.login } : undefined}
+            />
+        </section>
+    );
+}
+
+function ScoreList({ axes }: { axes: RadarAxes }) {
+    const [a, b] = dominantPair(axes);
+    return (
+        <dl className="pf-sign-scores">
+            {RADAR_AXES_META.map((m) => {
+                const dom = m.key === a || m.key === b;
+                return (
+                    <div className={dom ? "pf-sign-score pf-sign-score--dom" : "pf-sign-score"} key={m.key}>
+                        <dt>{m.label}</dt>
+                        <dd>
+                            <span className="pf-sign-bar" aria-hidden="true">
+                                <span className="pf-sign-bar-fill" style={{ width: `${clampPct(axes.scores[m.key])}%` }} />
+                            </span>
+                            <span className="pf-sign-val">{fmtScore(axes.scores[m.key])}</span>
+                        </dd>
+                    </div>
+                );
+            })}
+        </dl>
+    );
+}
+
+/**
+ * "Raw values" reference table - the un-normalised numbers behind the chart,
+ * straight off RadarAxes.raws (never re-derived here). In compare mode each
+ * row gets two value columns and the per-metric leader is marked with a small
+ * green dot; ties and unmeasurable rows get no dot.
+ */
+function RawTable({
+    self, selfLogin, vs,
+}: {
+    self: RadarAxes;
+    selfLogin: string;
+    vs?: { axes: RadarAxes; login: string };
+}) {
+    return (
+        <div className="pf-rawvals">
+            <div className="pf-rawvals-head">
+                <span className="pf-rawvals-kicker">raw values</span>
+                <span className="pf-rawvals-note">un-normalised numbers behind the chart</span>
+            </div>
+            <table className="pf-rawvals-table">
+                <thead>
+                    <tr>
+                        <th scope="col">metric</th>
+                        <th scope="col" className="pf-rawvals-col">
+                            {vs ? <span style={{ color: SELF_COLOR }}>@{selfLogin}</span> : "value"}
+                        </th>
+                        {vs && (
+                            <th scope="col" className="pf-rawvals-col">
+                                <span style={{ color: VS_COLOR }}>@{vs.login}</span>
+                            </th>
+                        )}
+                    </tr>
+                </thead>
+                <tbody>
+                    {RADAR_AXES_META.map((m) => {
+                        const a = self.raws[m.key];
+                        const b = vs?.axes.raws[m.key];
+                        // leader: strictly greater comparable numeric; null never leads
+                        const aLeads = vs !== undefined && a.value !== null && (b?.value === null || b === undefined || a.value > b.value);
+                        const bLeads = vs !== undefined && b !== undefined && b.value !== null && (a.value === null || b.value > a.value);
+                        return (
+                            <tr key={m.key}>
+                                <th scope="row">{m.label}</th>
+                                <td className={aLeads ? "pf-rawvals-val pf-rawvals-val--lead" : "pf-rawvals-val"}>
+                                    {a.label}
+                                    {aLeads && <span className="pf-rawvals-dot" aria-label="leads" />}
+                                </td>
+                                {vs && b && (
+                                    <td className={bLeads ? "pf-rawvals-val pf-rawvals-val--lead" : "pf-rawvals-val"}>
+                                        {b.label}
+                                        {bLeads && <span className="pf-rawvals-dot" aria-label="leads" />}
+                                    </td>
+                                )}
+                            </tr>
+                        );
+                    })}
+                </tbody>
+            </table>
+        </div>
+    );
+}
+
+const fmtScore = (n: number): string => String(Math.round(n));
+
 function ActivityTimeline({ daily, busiest }: { daily: readonly ProfileDailyRow[]; busiest?: string }) {
     const maxSessions = daily.reduce((m, d) => Math.max(m, d.sessions), 0);
     const maxTokens = daily.reduce((m, d) => Math.max(m, d.tokens), 0);
@@ -366,51 +616,162 @@ function ActivityTimeline({ daily, busiest }: { daily: readonly ProfileDailyRow[
     );
 }
 
-interface InsightCard { readonly q: string; readonly a: ReactNode; readonly s: string }
+interface InsightCard {
+    readonly q: string;
+    readonly a: ReactNode;
+    readonly s: string;
+    readonly accent?: CardArtAccent;
+    readonly viz?: ReactNode;
+}
+
+/* ----- mini trace-viz: tiny, mono, data-driven ----- */
+
+/** slim horizontal track with a filled segment; for share/ratio cards */
+function VizBar({ value, tone = "green" }: { value: number; tone?: "green" | "red" }) {
+    const pct = clampPct(value * 100);
+    return (
+        <span className="pf-viz pf-viz-bar">
+            <span
+                className={tone === "red" ? "pf-viz-bar-fill pf-viz-bar-fill--red" : "pf-viz-bar-fill"}
+                style={{ width: `${pct}%` }}
+            />
+        </span>
+    );
+}
+
+/**
+ * A row of ticks; caps at `cap`. When the real count exceeds the cap the last
+ * few ticks fade out and a dashed rail follows - signalling "more than fits"
+ * without misrepresenting the magnitude (the caption stays the source of
+ * truth). Small counts render exactly.
+ */
+function VizTicks({ count, cap = 20 }: { count: number; cap?: number }) {
+    const n = Math.max(0, Math.round(count));
+    const shown = Math.min(n, cap);
+    const overflow = n > cap;
+    return (
+        <span className="pf-viz pf-viz-ticks">
+            {Array.from({ length: shown }, (_, i) => {
+                const fade = overflow && i >= shown - 3;
+                return <span className={fade ? "pf-viz-tick pf-viz-tick--fade" : "pf-viz-tick"} key={i} />;
+            })}
+            {overflow && <span className="pf-viz-tick--rail" />}
+        </span>
+    );
+}
+
+/** slim rail with a marker positioned proportionally; for time/position cards */
+function VizRail({ pos }: { pos: number }) {
+    const p = clampPct(pos * 100);
+    return (
+        <span className="pf-viz pf-viz-rail">
+            <span className="pf-viz-rail-track" />
+            <span className="pf-viz-rail-marker" style={{ left: `${p}%` }} />
+        </span>
+    );
+}
 
 function buildInsightCards(ins: ProfileInsights): InsightCard[] {
-    return [
+    // weekday index of the busiest day (0=Sun..6=Sat) for the rail position
+    const busiestDow = (() => {
+        const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(ins.busiest_day.date);
+        if (!m) return undefined;
+        const d = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+        return Number.isNaN(d.getTime()) ? undefined : d.getDay();
+    })();
+
+    const cards: InsightCard[] = [
         {
             q: "How deep do you go?",
             a: fmtPct(ins.deep_session_share),
             s: "of sessions ran 90+ minutes - deliberate, not drive-by",
+            viz: <VizBar value={ins.deep_session_share} />,
         },
         {
             q: "How many agents at once?",
             a: fmtInt(ins.max_parallel_sessions),
             s: "sessions running in parallel at peak",
+            viz: <VizTicks count={ins.max_parallel_sessions} />,
         },
         {
             q: "Longest single run?",
             a: fmtDuration(ins.longest_session_minutes),
             s: "one session, end to end, without letting go",
+            viz: <VizRail pos={Math.min(1, ins.longest_session_minutes / (24 * 60))} />,
         },
         {
             q: "When are you most alive?",
             a: <>{fmtHour(ins.peak_hour_utc)}<small> UTC</small></>,
             s: "the hour the graph lights up",
+            viz: <VizRail pos={Math.min(1, Math.max(0, ins.peak_hour_utc) / 23)} />,
         },
         {
             q: "Busiest day?",
             a: fmtDay(ins.busiest_day.date),
             s: `${fmtInt(ins.busiest_day.sessions)} sessions in a single day`,
+            accent: "ink",
+            viz: busiestDow !== undefined ? <VizRail pos={busiestDow / 6} /> : undefined,
         },
         {
             q: "How many hands?",
             a: fmtCompact(ins.subagents_spawned),
             s: "subagents dispatched to do the legwork",
+            viz: <VizTicks count={ins.subagents_spawned} />,
         },
         {
             q: "What actually shipped?",
             a: fmtCompact(ins.commits),
             s: "commits landed across the window",
+            accent: "ink",
+            viz: <VizTicks count={ins.commits} />,
         },
         {
             q: "Time in the loop?",
             a: <>{fmtCompact(ins.hours_total)}<small> hrs</small></>,
             s: "of recorded agent time on the clock",
+            accent: "ink",
         },
     ];
+
+    // wrapped-style cards - only shown when fields are present
+    if (ins.verification_calls !== undefined && ins.tool_calls !== undefined && ins.tool_calls > 0) {
+        const share = ins.verification_calls / ins.tool_calls;
+        cards.push({
+            q: "How often do you verify?",
+            a: fmtPct(share),
+            s: `of tool calls are tests, checks, and lints`,
+            viz: <VizBar value={share} />,
+        });
+    }
+    if (ins.tool_failures !== undefined && ins.tool_calls !== undefined && ins.tool_calls > 0) {
+        const share = ins.tool_failures / ins.tool_calls;
+        cards.push({
+            q: "Tool failure rate?",
+            a: fmtPct(share),
+            s: `failed calls across ${fmtCompact(ins.tool_calls)} tool runs`,
+            accent: "red",
+            viz: <VizBar value={share} tone="red" />,
+        });
+    }
+    if (ins.distinct_skills !== undefined && ins.distinct_tools !== undefined) {
+        cards.push({
+            q: "How wide is the rig?",
+            a: `${fmtInt(ins.distinct_skills)} skills`,
+            s: `across ${fmtInt(ins.distinct_tools)} distinct tools`,
+            accent: "ink",
+            viz: <VizTicks count={ins.distinct_skills} />,
+        });
+    }
+    if (ins.repos_count !== undefined) {
+        cards.push({
+            q: "How many repos?",
+            a: fmtInt(ins.repos_count),
+            s: "repositories touched this window",
+            viz: <VizTicks count={ins.repos_count} />,
+        });
+    }
+
+    return cards;
 }
 
 interface SkillGroup { readonly source: string; readonly skills: ProfileSkill[]; readonly runs: number }

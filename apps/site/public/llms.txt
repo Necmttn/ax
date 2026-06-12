@@ -33,10 +33,12 @@ Install: `curl -fsSL https://ax.necmttn.com/install | bash`, then `npx skills ad
 - `efficient-dispatch` skill - orchestration pattern: the main model keeps judgment and review, mechanical dispatches carry an explicit cheaper model
 - `route-dispatch` hook - deterministic dispatch-time nudge when a mechanical dispatch forgets an explicit model
 - `ax costs summary | for --session/--query/--commit/--branch` - what any session, feature, or branch cost in tokens and USD
+- `ax quota [--statusline|--swiftbar|--json]` - live Claude plan usage (5h/7d windows) from the Anthropic usage endpoint, cached locally; one-line statusline output and a SwiftBar menubar plugin ship with it
 
 ### Profile
 - `ax profile show [--window=N] [--no-cost]` - your local agent profile rendered from the graph: usage stats, rig (skills/hooks/rules), and evidence-grounded taste patterns
 - `ax profile publish` - share it: consent-gated public gist (updated in place by the watcher) + one-time community registration PR; `ax profile unpublish` reverses it
+- `ax wrapped generate / publish` - agent-authored Wrapped recap cards: generate emits a mining brief, publish replaces the card deck the dashboard landing serves
 
 ### Self-improvement loop
 - `ax improve recommend / accept / lint / show` - evidence-backed proposals (guidance, skills, hooks, automations) derived from the graph; accept emits a task brief, lint reconciles applied guidance

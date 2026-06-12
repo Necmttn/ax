@@ -77,7 +77,8 @@ export const proposalCards = (
                     kind: "proposal",
                     title: `Decide proposal: ${p.title}`,
                     evidence: `${p.form} proposal, confidence ${p.confidence}, seen ${p.frequency}x`,
-                    impact: KIND_WEIGHT.proposal + bonus(cw * Math.log2(p.frequency + 1)),
+                    // agent-origin proposals outrank mined ones at equal confidence x frequency
+                    impact: KIND_WEIGHT.proposal + bonus(cw * Math.log2(p.frequency + 1) + ((p.origin ?? "mined") === "agent" ? 1 : 0)),
                     brief: proposalReviewBrief(p),
                     link: null,
                     inline_action: {

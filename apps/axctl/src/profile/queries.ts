@@ -338,3 +338,105 @@ export const fetchTopTools = Effect.fn("profile.fetchTopTools")(
         })) satisfies TopToolRow[];
     },
 );
+
+// --- wrapped-style aggregates ------------------------------------------------
+// Counts only; no names, no paths (privacy invariant).
+//
+// One combined SQL returns all per-tool rows (mirroring WRAPPED_TOOLS_SQL) so
+// we can compute verification/context pattern matches in JS just as
+// dashboard/wrapped.ts does (contextToolPattern / verificationToolPattern).
+// Separate SQL for turn count, distinct skills, and repo count (distinct
+// grouped aggregates; deref-free per the SurrealDB 3.x hang rule).
+
+export interface WrappedCounts {
+    readonly turns: number;
+    readonly tool_calls: number;
+    readonly tool_failures: number;
+    readonly distinct_tools: number;
+    readonly distinct_skills: number;
+    readonly repos_count: number;
+    readonly verification_calls: number;
+    readonly context_calls: number;
+}
+
+// Matches dashboard/wrapped.ts ArchetypeSignals computation.
+const verificationToolPattern = /test|check|verify|lint|typecheck|tsc|vitest|bun test/i;
+const contextToolPattern = /recall|context|rg|sed|cat|find|grep|open|read/i;
+
+// Per-tool rows (name, count, failures) - same shape as WRAPPED_TOOLS_SQL but windowed.
+const TOOL_AGG_SQL = (d: number) => `
+SELECT
+    (command_norm ?? name) AS tool,
+    count() AS count,
+    math::sum(IF has_error = true THEN 1 ELSE 0 END) AS failures
+FROM tool_call
+WHERE ts > time::now() - ${win(d)}
+  AND (command_norm ?? name) IS NOT NONE
+GROUP BY tool
+ORDER BY count DESC
+LIMIT 200;`;
+
+// Total turn count in window.
+const TURN_COUNT_SQL = (d: number) => `
+SELECT count() AS count
+FROM turn
+WHERE ts > time::now() - ${win(d)}
+GROUP ALL;`;
+
+// Distinct invoked skill names in window.
+const DISTINCT_SKILLS_SQL = (d: number) => `
+SELECT count() AS count
+FROM (
+    SELECT out.name AS skill
+    FROM invoked
+    WHERE ts > time::now() - ${win(d)} AND out.name IS NOT NONE
+    GROUP BY skill
+) GROUP ALL;`;
+
+// Count of distinct non-null repositories in window (count only, never names).
+const REPOS_COUNT_SQL = (d: number) => `
+SELECT count() AS count
+FROM (
+    SELECT repository
+    FROM session
+    WHERE started_at > time::now() - ${win(d)} AND repository IS NOT NONE
+    GROUP BY repository
+) GROUP ALL;`;
+
+export const fetchWrappedCounts = Effect.fn("profile.fetchWrappedCounts")(
+    function* (opts: { readonly windowDays: number }) {
+        const db = yield* SurrealClient;
+        const toolRows = yield* db
+            .query<[Array<Record<string, unknown>>]>(TOOL_AGG_SQL(opts.windowDays))
+            .pipe(Effect.map((r) => r?.[0] ?? []));
+        const turnRows = yield* db
+            .query<[Array<Record<string, unknown>>]>(TURN_COUNT_SQL(opts.windowDays))
+            .pipe(Effect.map((r) => r?.[0] ?? []));
+        const skillRows = yield* db
+            .query<[Array<Record<string, unknown>>]>(DISTINCT_SKILLS_SQL(opts.windowDays))
+            .pipe(Effect.map((r) => r?.[0] ?? []));
+        const repoRows = yield* db
+            .query<[Array<Record<string, unknown>>]>(REPOS_COUNT_SQL(opts.windowDays))
+            .pipe(Effect.map((r) => r?.[0] ?? []));
+
+        const tool_calls = toolRows.reduce((s, r) => s + Number(r.count ?? 0), 0);
+        const tool_failures = toolRows.reduce((s, r) => s + Number(r.failures ?? 0), 0);
+        const distinct_tools = toolRows.length;
+
+        const toolCount = (pattern: RegExp): number =>
+            toolRows
+                .filter((r) => pattern.test(String(r.tool ?? "")))
+                .reduce((s, r) => s + Number(r.count ?? 0), 0);
+
+        return {
+            turns: Number(turnRows[0]?.count ?? 0),
+            tool_calls,
+            tool_failures,
+            distinct_tools,
+            distinct_skills: Number(skillRows[0]?.count ?? 0),
+            repos_count: Number(repoRows[0]?.count ?? 0),
+            verification_calls: toolCount(verificationToolPattern),
+            context_calls: toolCount(contextToolPattern),
+        } satisfies WrappedCounts;
+    },
+);

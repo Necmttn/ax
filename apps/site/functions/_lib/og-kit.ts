@@ -13,6 +13,7 @@
 // Color palette (same values as share card)
 // ---------------------------------------------------------------------------
 export const INK    = "#e7e9ec";
+export const PAPER  = "#f6f5f0";
 export const DIM    = "#8b93a1";
 export const BG     = "#15161d";
 export const CARD   = "#1e1f2a";
@@ -42,10 +43,15 @@ export const fmtUsd = (n: number | null): string | null =>
     n == null ? null : `$${n >= 100 ? n.toFixed(0) : n.toFixed(2)}`;
 
 export const compactNumber = (n: number): string => {
-    if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
-    if (n >= 1_000)     return `${(n / 1_000).toFixed(1)}k`;
+    if (n >= 1_000_000_000) return `${(n / 1_000_000_000).toFixed(1)}B`;
+    if (n >= 1_000_000)     return `${(n / 1_000_000).toFixed(1)}M`;
+    if (n >= 1_000)         return `${(n / 1_000).toFixed(1)}K`;
     return n.toLocaleString("en-US");
 };
+
+/** Humanized money for big stat numerals: 22882 -> "~$22.9K". */
+export const compactUsd = (n: number): string =>
+    n >= 1_000 ? `~$${compactNumber(n)}` : `$${n.toFixed(0)}`;
 
 // ---------------------------------------------------------------------------
 // Stat block - 46px numeral + 14px letter-spaced label (matches share card)
@@ -54,14 +60,22 @@ export const statHtml = (
     value: string,
     label: string,
     color: string = INK,
-): string =>
-    `<div style="display:flex;flex-direction:column;margin-right:46px"><span style="font-size:46px;font-weight:700;color:${color}">${esc(value)}</span><span style="font-size:14px;letter-spacing:2px;color:${DIM};margin-top:2px">${esc(label)}</span></div>`;
+    opts: { size?: number; marginRight?: number } = {},
+): string => {
+    const size = opts.size ?? 46;
+    const mr = opts.marginRight ?? 46;
+    // Labels: 16px / 1px tracking - 14px/2px is unreadable at the ~500px
+    // social-unfurl render size.
+    return `<div style="display:flex;flex-direction:column;margin-right:${mr}px"><span style="font-size:${size}px;font-weight:700;color:${color}">${esc(value)}</span><span style="font-size:16px;letter-spacing:1px;color:${DIM};margin-top:2px">${esc(label)}</span></div>`;
+};
 
 // ---------------------------------------------------------------------------
-// Footer band - serif "ax" wordmark + AX.NECMTTN.COM right side
+// Footer band - the SAME block mark at small scale (one logo, two scales;
+// the serif "ax" wordmark was a third typeface and read invisible at 24px).
+// align-items:center because the pixel mark has no text baseline.
 // ---------------------------------------------------------------------------
 export const footerHtml = (leftText: string): string =>
-    `<div style="display:flex;justify-content:space-between;align-items:center"><span style="font-size:15px;letter-spacing:2px;color:${DIM}">${esc(leftText)}</span><div style="display:flex;align-items:baseline"><span style="font-size:14px;letter-spacing:2px;color:${DIM};margin-right:10px">RECORDED WITH</span><span style="font-size:24px;color:${INK};font-weight:700;font-family:'Gelasio'">ax</span><span style="font-size:14px;letter-spacing:2px;color:${DIM};margin-left:12px">· AX.NECMTTN.COM</span></div></div>`;
+    `<div style="display:flex;justify-content:space-between;align-items:center"><span style="font-size:15px;letter-spacing:2px;color:${DIM}">${esc(leftText)}</span><div style="display:flex;align-items:center"><span style="font-size:14px;letter-spacing:2px;color:${DIM};margin-right:12px">RECORDED WITH</span>${blockLogoHtml({ scale: 3, color: PAPER, dimColor: "transparent" })}<span style="font-size:14px;letter-spacing:2px;color:${DIM};margin-left:12px">· AX.NECMTTN.COM</span></div></div>`;
 
 // ---------------------------------------------------------------------------
 // Block logo - ANSI-shadow pixel grid (font-independent)
@@ -106,10 +120,13 @@ export const blockLogoHtml = ({ scale, color, dimColor }: BlockLogoOpts): string
             if (SOLID_CHARS.has(ch)) {
                 return `<div style="display:flex;width:${scale}px;height:${scale}px;background:${color}"></div>`;
             }
-            if (FRAME_CHARS.has(ch)) {
+            // At small scales the ANSI drop-shadow blurs into the letterform
+            // and reads as mud - "transparent" skips painting it entirely so
+            // the mark renders single-color and crisp.
+            if (FRAME_CHARS.has(ch) && dimColor !== "transparent") {
                 return `<div style="display:flex;width:${scale}px;height:${scale}px;background:${dimColor}"></div>`;
             }
-            // space → empty cell
+            // space / skipped shadow → empty cell
             return `<div style="display:flex;width:${scale}px;height:${scale}px"></div>`;
         }).join("");
         return `<div style="display:flex">${cells}</div>`;

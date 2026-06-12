@@ -98,11 +98,215 @@ export const SystemGroup = HttpApiGroup.make("system")
         }),
     );
 
+// ---- recall payload (the first tightened insights response) -------------
+// These mirror the dashboard-types Recall* interfaces exactly. They are
+// Schema.Struct (not Schema.Class) on purpose: HttpApi ENCODES a handler's
+// return through the success schema, and a class schema's encode demands
+// actual class instances, while the recall handler returns plain JS-mapped
+// objects. A struct's Type is a plain object, so it encodes cleanly.
+
+export const RecallHit = Schema.Struct({
+    turn_id: Schema.String,
+    session_id: Schema.String,
+    project: Schema.NullOr(Schema.String),
+    source: Schema.NullOr(Schema.String),
+    cwd: Schema.NullOr(Schema.String),
+    role: Schema.NullOr(Schema.String),
+    ts: Schema.NullOr(Schema.String),
+    snippet: Schema.String,
+});
+
+export const RecallCommitHit = Schema.Struct({
+    commit_id: Schema.String,
+    sha: Schema.String,
+    repo: Schema.NullOr(Schema.String),
+    repository: Schema.NullOr(Schema.String),
+    ts: Schema.NullOr(Schema.String),
+    snippet: Schema.String,
+    score: Schema.Number,
+});
+
+export const RecallSkillHit = Schema.Struct({
+    skill_id: Schema.String,
+    name: Schema.String,
+    description: Schema.NullOr(Schema.String),
+    snippet: Schema.String,
+    score: Schema.Number,
+});
+
+export const RecallResponse = Schema.Struct({
+    q: Schema.String,
+    hits: Schema.Array(RecallHit),
+    commits: Schema.Array(RecallCommitHit),
+    skills: Schema.Array(RecallSkillHit),
+    truncated: Schema.Boolean,
+    total_count: Schema.Number,
+    total_counts: Schema.Struct({
+        turn: Schema.Number,
+        commit: Schema.Number,
+        skill: Schema.Number,
+    }),
+    window: Schema.Struct({
+        offset: Schema.Number,
+        limit: Schema.Number,
+    }),
+});
+
+/** Studio-facing type derived from the contract (single source of truth). */
+export type RecallResponse = typeof RecallResponse.Type;
+
+// ---- tool-failures, skill-graph, episode-timeline, workflow payloads -----
+// Bounded curated shapes mirroring the dashboard-types interfaces. SessionId
+// is a branded string on the wire, so Schema.String here.
+
+const ToolFailureEntry = Schema.Struct({
+    label: Schema.String,
+    failure_count: Schema.Number,
+    last_seen: Schema.NullOr(Schema.String),
+    last_error_text: Schema.NullOr(Schema.String),
+    last_project: Schema.NullOr(Schema.String),
+    distinct_sessions: Schema.Number,
+    total_calls: Schema.Number,
+    failure_rate: Schema.Number,
+    exit_codes: Schema.Array(Schema.Number),
+    recommendation: Schema.Literals(["fix", "watch", "ignore"]),
+    recommendation_reason: Schema.String,
+});
+
+export const ToolFailuresResponse = Schema.Struct({
+    generatedAt: Schema.String,
+    failures: Schema.Array(ToolFailureEntry),
+});
+
+const ToolFailureSample = Schema.Struct({
+    ts: Schema.String,
+    exit_code: Schema.NullOr(Schema.Number),
+    error_text: Schema.NullOr(Schema.String),
+    output_excerpt: Schema.NullOr(Schema.String),
+    command_text: Schema.NullOr(Schema.String),
+    project: Schema.NullOr(Schema.String),
+    session_id: Schema.NullOr(Schema.String),
+    cwd: Schema.NullOr(Schema.String),
+});
+
+export const ToolFailureDetailPayload = Schema.Struct({
+    label: Schema.String,
+    samples: Schema.Array(ToolFailureSample),
+});
+
+const SkillGraphNode = Schema.Struct({
+    name: Schema.String,
+    weight: Schema.Number,
+    last_seen: Schema.NullOr(Schema.String),
+});
+
+const SkillGraphEdge = Schema.Struct({
+    source: Schema.String,
+    target: Schema.String,
+    count: Schema.Number,
+    last_seen: Schema.NullOr(Schema.String),
+});
+
+export const SkillGraphPayload = Schema.Struct({
+    min_count: Schema.Number,
+    limit: Schema.Number,
+    node_count: Schema.Number,
+    edge_count: Schema.Number,
+    max_edge_count: Schema.Number,
+    nodes: Schema.Array(SkillGraphNode),
+    edges: Schema.Array(SkillGraphEdge),
+});
+
+const PhaseLiteral = Schema.Literals(["plan", "execute", "review", "merge"]);
+
+const EpisodeNode = Schema.Struct({
+    session_id: Schema.String,
+    role: Schema.Literals(["parent", "child"]),
+    project: Schema.NullOr(Schema.String),
+    source: Schema.NullOr(Schema.String),
+    started_at: Schema.NullOr(Schema.String),
+    ended_at: Schema.NullOr(Schema.String),
+    duration_ms: Schema.NullOr(Schema.Number),
+    phase: Schema.Literals(["plan", "execute", "review", "merge", "other", "mixed"]),
+    top_skills: Schema.Array(Schema.Struct({ skill: Schema.String, count: Schema.Number })),
+    invocation_count: Schema.Number,
+});
+
+export const EpisodeTimelinePayload = Schema.Struct({
+    parent_session_id: Schema.String,
+    project: Schema.NullOr(Schema.String),
+    started_at: Schema.NullOr(Schema.String),
+    ended_at: Schema.NullOr(Schema.String),
+    duration_ms: Schema.NullOr(Schema.Number),
+    node_count: Schema.Number,
+    nodes: Schema.Array(EpisodeNode),
+    shape: Schema.String,
+});
+
+const WorkflowWeekBucket = Schema.Struct({
+    week: Schema.String,
+    counts: Schema.Array(Schema.Struct({ label: Schema.String, count: Schema.Number })),
+});
+
+const WorkflowConvergencePoint = Schema.Struct({
+    week: Schema.String,
+    jaccard: Schema.NullOr(Schema.Number),
+    topK: Schema.Array(Schema.String),
+    newcomers: Schema.Array(Schema.String),
+    dropouts: Schema.Array(Schema.String),
+});
+
+const WorkflowSessionShape = Schema.Struct({
+    week: Schema.String,
+    session_count: Schema.Number,
+});
+
+const SessionShapeAggregate = Schema.Struct({
+    shape: Schema.String,
+    phases: Schema.Array(PhaseLiteral),
+    session_count: Schema.Number,
+    example_session_ids: Schema.Array(Schema.String),
+});
+
+const WorkflowEpisode = Schema.Struct({
+    parent_session_id: Schema.String,
+    project: Schema.NullOr(Schema.String),
+    started_at: Schema.NullOr(Schema.String),
+    child_count: Schema.Number,
+    distinct_nicknames: Schema.Number,
+});
+
+const EpisodeShapeAggregate = Schema.Struct({
+    shape: Schema.String,
+    phases: Schema.Array(PhaseLiteral),
+    episode_count: Schema.Number,
+    example_parent_ids: Schema.Array(Schema.String),
+    avg_children: Schema.Number,
+});
+
+export const WorkflowResponse = Schema.Struct({
+    generatedAt: Schema.String,
+    weeksLookback: Schema.Number,
+    topK: Schema.Number,
+    skills: Schema.Array(WorkflowWeekBucket),
+    tools: Schema.Array(WorkflowWeekBucket),
+    sessionShape: Schema.Array(WorkflowSessionShape),
+    convergence: Schema.Array(WorkflowConvergencePoint),
+    shapes: Schema.Array(SessionShapeAggregate),
+    shapesTotal: Schema.Number,
+    episodes: Schema.Array(WorkflowEpisode),
+    episode_shapes: Schema.Array(EpisodeShapeAggregate),
+    episode_shapes_total: Schema.Number,
+    narrative: Schema.String,
+});
+
 /**
  * The insights family: cross-source recall, project pages, episode
  * timelines, the skill graph, wrapped profiles, workflow rollups, and tool
- * failures. Payloads are `Schema.Unknown` for now (same later-pass deal as
- * the system raw rows); paths, params, and status mapping are the contract.
+ * failures. Recall is the first response with a real Schema; the rest stay
+ * `Schema.Unknown` for now - tightening is per-family follow-up work, and
+ * raw-row passthroughs (graph-health, worktrees, self-improve) keep Unknown
+ * deliberately (validating untyped DB rows buys little and risks 400s).
  *
  * Path params are single-segment: every client URL-encodes ids, and the
  * legacy greedy `:param+` rows remain mounted for raw-slash ids.
@@ -118,12 +322,12 @@ export const InsightsGroup = HttpApiGroup.make("insights")
                 offset: Schema.optionalKey(Schema.Number),
                 limit: Schema.optionalKey(Schema.Number),
             },
-            success: Schema.Unknown,
+            success: RecallResponse,
             error: InternalError,
         }),
         HttpApiEndpoint.get("episodeTimeline", "/api/episodes/:parentId", {
             params: { parentId: Schema.String },
-            success: Schema.Unknown,
+            success: EpisodeTimelinePayload,
             error: InternalError,
         }),
         HttpApiEndpoint.get("skillGraph", "/api/skill-graph", {
@@ -131,7 +335,7 @@ export const InsightsGroup = HttpApiGroup.make("insights")
                 minCount: Schema.optionalKey(Schema.Number),
                 limit: Schema.optionalKey(Schema.Number),
             },
-            success: Schema.Unknown,
+            success: SkillGraphPayload,
             error: InternalError,
         }),
         HttpApiEndpoint.get("project", "/api/projects/:project", {
@@ -147,27 +351,200 @@ export const InsightsGroup = HttpApiGroup.make("insights")
             success: Schema.Unknown,
             error: InternalError,
         }),
-        HttpApiEndpoint.get("workflow", "/api/workflow", {
+        HttpApiEndpoint.get("wrappedGenerateBrief", "/api/wrapped/generate-brief", {
             success: Schema.Unknown,
             error: InternalError,
         }),
+        HttpApiEndpoint.get("workflow", "/api/workflow", {
+            success: WorkflowResponse,
+            error: InternalError,
+        }),
         HttpApiEndpoint.get("toolFailures", "/api/tool-failures", {
-            success: Schema.Unknown,
+            success: ToolFailuresResponse,
             error: InternalError,
         }),
         HttpApiEndpoint.get("toolFailureDetail", "/api/tool-failures/:label/detail", {
             params: { label: Schema.String },
-            success: Schema.Unknown,
+            success: ToolFailureDetailPayload,
             error: InternalError,
         }),
     );
 
+// ---- sessions payloads (the bounded ones) -------------------------------
+// Mirror the dashboard-types Session* interfaces. The deeply-nested
+// detail/inspect/insights payloads stay Schema.Unknown below (transcribing
+// the 54k-line inspect handler's output exactly is high-drift, low-value).
+
+const SessionListRow = Schema.Struct({
+    id: Schema.String,
+    project: Schema.NullOr(Schema.String),
+    source: Schema.String,
+    cwd: Schema.NullOr(Schema.String),
+    model: Schema.NullOr(Schema.String),
+    started_at: Schema.NullOr(Schema.String),
+    ended_at: Schema.NullOr(Schema.String),
+    has_raw_file: Schema.Boolean,
+    turn_count: Schema.Number,
+    parent_session: Schema.NullOr(Schema.String),
+    direct_children_count: Schema.optionalKey(Schema.Number),
+    cost_usd: Schema.NullOr(Schema.Number),
+    burn_buckets: Schema.NullOr(Schema.Array(Schema.Number)),
+    friction: Schema.NullOr(Schema.Number),
+    signal: Schema.NullOr(Schema.Literals(["clean", "friction"])),
+    produced_commits: Schema.NullOr(Schema.Number),
+    reverted_commits: Schema.NullOr(Schema.Number),
+    lines_added: Schema.NullOr(Schema.Number),
+    lines_removed: Schema.NullOr(Schema.Number),
+    is_live: Schema.Boolean,
+});
+
+export const SessionListResponse = Schema.Struct({
+    sessions: Schema.Array(SessionListRow),
+    total_count: Schema.Number,
+    burn_p90: Schema.NullOr(Schema.Number),
+    window: Schema.Struct({ offset: Schema.Number, limit: Schema.Number }),
+});
+
+export const SessionChildrenResponse = Schema.Struct({
+    parent_session: Schema.String,
+    children: Schema.Array(SessionListRow),
+});
+
+export const SessionSummary = Schema.Struct({
+    session_id: Schema.String,
+    task: Schema.NullOr(Schema.String),
+    first_ask: Schema.NullOr(Schema.String),
+    last_assistant: Schema.NullOr(Schema.String),
+    correction: Schema.NullOr(Schema.String),
+    turns: Schema.Number,
+    tokens: Schema.NullOr(Schema.Number),
+    cost_usd: Schema.NullOr(Schema.Number),
+    model: Schema.NullOr(Schema.String),
+    subagents: Schema.Number,
+    tools: Schema.Array(Schema.Struct({ name: Schema.String, count: Schema.Number })),
+});
+
+const SessionOrchestrationSubagent = Schema.Struct({
+    id: Schema.String,
+    nickname: Schema.NullOr(Schema.String),
+    task: Schema.NullOr(Schema.String),
+    started_at: Schema.NullOr(Schema.String),
+    ended_at: Schema.NullOr(Schema.String),
+    tone: Schema.String,
+    duration_ms: Schema.NullOr(Schema.Number),
+});
+
+export const SessionOrchestration = Schema.Struct({
+    session_id: Schema.String,
+    label: Schema.String,
+    started_at: Schema.NullOr(Schema.String),
+    ended_at: Schema.NullOr(Schema.String),
+    wait_pct: Schema.Number,
+    subagents: Schema.Array(SessionOrchestrationSubagent),
+});
+
+const SessionTokenUsageDetail = Schema.Struct({
+    model: Schema.NullOr(Schema.String),
+    prompt_tokens: Schema.NullOr(Schema.Number),
+    completion_tokens: Schema.NullOr(Schema.Number),
+    cache_creation_input_tokens: Schema.NullOr(Schema.Number),
+    cache_read_input_tokens: Schema.NullOr(Schema.Number),
+    estimated_tokens: Schema.Number,
+    estimated_input_cost_usd: Schema.optionalKey(Schema.NullOr(Schema.Number)),
+    estimated_output_cost_usd: Schema.optionalKey(Schema.NullOr(Schema.Number)),
+    estimated_cache_creation_cost_usd: Schema.optionalKey(Schema.NullOr(Schema.Number)),
+    estimated_cache_read_cost_usd: Schema.optionalKey(Schema.NullOr(Schema.Number)),
+    estimated_cost_usd: Schema.NullOr(Schema.Number),
+    pricing_source: Schema.NullOr(Schema.String),
+});
+
+const SessionHealthSummary = Schema.Struct({
+    turns: Schema.Number,
+    tool_calls: Schema.Number,
+    tool_errors: Schema.Number,
+    user_corrections: Schema.Number,
+    interruptions: Schema.Number,
+    subagent_dispatches: Schema.Number,
+    task_label: Schema.NullOr(Schema.String),
+});
+
+const SessionCompareTurn = Schema.Struct({
+    seq: Schema.Number,
+    role: Schema.NullOr(Schema.String),
+    ts: Schema.NullOr(Schema.String),
+    gap_ms: Schema.NullOr(Schema.Number),
+    est_tokens: Schema.NullOr(Schema.Number),
+    est_cost_usd: Schema.NullOr(Schema.Number),
+    has_error: Schema.Boolean,
+});
+
+const SessionCompareEntry = Schema.Struct({
+    session_id: Schema.String,
+    source: Schema.String,
+    model: Schema.NullOr(Schema.String),
+    project: Schema.NullOr(Schema.String),
+    started_at: Schema.NullOr(Schema.String),
+    ended_at: Schema.NullOr(Schema.String),
+    duration_ms: Schema.NullOr(Schema.Number),
+    token_usage: Schema.NullOr(SessionTokenUsageDetail),
+    health: Schema.NullOr(SessionHealthSummary),
+    commit_count: Schema.Number,
+    noise_score: Schema.NullOr(Schema.Number),
+    turns: Schema.optionalKey(Schema.Array(SessionCompareTurn)),
+});
+
+export const SessionComparePayload = Schema.Struct({
+    task_label: Schema.NullOr(Schema.String),
+    sessions: Schema.Array(SessionCompareEntry),
+    winners: Schema.Struct({
+        fastest: Schema.NullOr(Schema.String),
+        cheapest: Schema.NullOr(Schema.String),
+        fewest_tokens: Schema.NullOr(Schema.String),
+        cleanest: Schema.NullOr(Schema.String),
+    }),
+    not_found: Schema.Array(Schema.String),
+});
+
+const SessionCanvasNode = Schema.Struct({
+    id: Schema.String,
+    label: Schema.String,
+    project: Schema.NullOr(Schema.String),
+    source: Schema.String,
+    started_at: Schema.NullOr(Schema.String),
+    ended_at: Schema.NullOr(Schema.String),
+    size: Schema.Number,
+    turns: Schema.Number,
+    epochs: Schema.Number,
+    compactions: Schema.Array(Schema.Struct({ pre_tokens: Schema.Number, trigger: Schema.String })),
+    context_pressure: Schema.String,
+    corrections: Schema.Number,
+    tone: Schema.String,
+    is_subagent: Schema.Boolean,
+    subagent_count: Schema.Number,
+    wait_segments: Schema.Array(Schema.Struct({ start: Schema.Number, end: Schema.Number })),
+});
+
+const SessionCanvasEdge = Schema.Struct({
+    source: Schema.String,
+    target: Schema.String,
+    relation: Schema.String,
+    label: Schema.NullOr(Schema.String),
+});
+
+export const SessionCanvasPayload = Schema.Struct({
+    generatedAt: Schema.String,
+    nodes: Schema.Array(SessionCanvasNode),
+    edges: Schema.Array(SessionCanvasEdge),
+    warnings: Schema.Array(Schema.String),
+});
+
 /**
- * The sessions family: per-session detail, list, canvas, compare, inspect,
- * timeline, insights, orchestration, children, and summary. Payloads are
- * `Schema.Unknown` (same later-pass deal); paths, params, and status mapping
- * are the contract. Path params are single-segment (client URL-encodes ids);
- * the legacy greedy `:param+` rows remain mounted for raw-slash ids.
+ * The sessions family: list, children, summary, orchestration, compare, and
+ * canvas are schema-typed. The detail/inspect/insights/timeline payloads
+ * stay `Schema.Unknown` deliberately - they are deeply-nested mega-payloads
+ * (inspect comes from the 54k-line session-inspect handler) where exact
+ * transcription is high-drift and low-value. Path params are single-segment
+ * (client URL-encodes ids); the legacy greedy `:param+` rows are retired.
  */
 export const SessionsGroup = HttpApiGroup.make("sessions")
     .add(
@@ -175,21 +552,21 @@ export const SessionsGroup = HttpApiGroup.make("sessions")
             query: {
                 limit: Schema.optionalKey(Schema.Number),
             },
-            success: Schema.Unknown,
+            success: SessionCanvasPayload,
             error: InternalError,
         }),
         HttpApiEndpoint.get("sessionSummary", "/api/session-summary", {
             query: {
                 id: Schema.String,
             },
-            success: Schema.Unknown,
+            success: SessionSummary,
             error: InternalError,
         }),
         HttpApiEndpoint.get("sessionOrchestration", "/api/session-orchestration", {
             query: {
                 id: Schema.String,
             },
-            success: Schema.Unknown,
+            success: SessionOrchestration,
             error: InternalError,
         }),
         HttpApiEndpoint.get("sessionsList", "/api/sessions", {
@@ -199,7 +576,7 @@ export const SessionsGroup = HttpApiGroup.make("sessions")
                 source: Schema.optionalKey(Schema.String),
                 project: Schema.optionalKey(Schema.String),
             },
-            success: Schema.Unknown,
+            success: SessionListResponse,
             error: InternalError,
         }),
         // Static path must precede the single-segment param path: HttpApi's
@@ -210,7 +587,7 @@ export const SessionsGroup = HttpApiGroup.make("sessions")
                 ids: Schema.String,
                 turns: Schema.optionalKey(Schema.String),
             },
-            success: Schema.Unknown,
+            success: SessionComparePayload,
             error: [BadRequestError, InternalError],
         }),
         HttpApiEndpoint.get("sessionChildren", "/api/sessions/:id/children", {
@@ -218,7 +595,7 @@ export const SessionsGroup = HttpApiGroup.make("sessions")
             query: {
                 limit: Schema.optionalKey(Schema.Number),
             },
-            success: Schema.Unknown,
+            success: SessionChildrenResponse,
             error: InternalError,
         }),
         HttpApiEndpoint.get("sessionInsights", "/api/sessions/:id/insights", {
@@ -260,19 +637,121 @@ export class ServiceUnavailableError extends Schema.ErrorClass<ServiceUnavailabl
 /** Skill triage decision states (mirrors dashboard-types TriageDecision). */
 export const TriageDecisionSchema = Schema.Literals(["keep", "archive", "review"]);
 
+// ---- skills payloads (Schema.Struct: encode-safe for plain handler returns) -
+// Mirror the dashboard-types Skill* interfaces exactly. Handlers JS-map their
+// rows, so plain objects encode cleanly through these (see RecallResponse).
+
+export const SkillTriageNote = Schema.Struct({
+    skill_name: Schema.String,
+    decision: TriageDecisionSchema,
+    reason: Schema.NullOr(Schema.String),
+    decided_at: Schema.String,
+});
+
+const SkillRowFields = {
+    name: Schema.String,
+    scope: Schema.String,
+    description: Schema.NullOr(Schema.String),
+    dir_path: Schema.NullOr(Schema.String),
+    bytes: Schema.NullOr(Schema.Number),
+    total_inv: Schema.Number,
+    inv_7d: Schema.Number,
+    inv_30d: Schema.Number,
+    last_used: Schema.NullOr(Schema.String),
+    last_project: Schema.NullOr(Schema.String),
+    corrections: Schema.Number,
+    proposals: Schema.Number,
+    commits_after: Schema.Number,
+    taste_score: Schema.Number,
+};
+
+export const SkillTriageEntry = Schema.Struct({
+    ...SkillRowFields,
+    recommendation: TriageDecisionSchema,
+    recommendation_reason: Schema.String,
+    decision: Schema.NullOr(SkillTriageNote),
+});
+
+export const SkillTriageResponse = Schema.Struct({
+    generatedAt: Schema.String,
+    skills: Schema.Array(SkillTriageEntry),
+});
+
+const SkillRecentInvocation = Schema.Struct({
+    ts: Schema.String,
+    project: Schema.NullOr(Schema.String),
+    turn_has_error: Schema.optionalKey(Schema.Boolean),
+});
+
+const SkillProposalEvidence = Schema.Struct({
+    ts: Schema.String,
+    project: Schema.NullOr(Schema.String),
+    context_excerpt: Schema.optionalKey(Schema.NullOr(Schema.String)),
+});
+
+const SkillPair = Schema.Struct({
+    partner: Schema.String,
+    count: Schema.Number,
+    last_seen: Schema.NullOr(Schema.String),
+});
+
+export const SkillDetailPayload = Schema.Struct({
+    name: Schema.String,
+    scope: Schema.NullOr(Schema.String),
+    description: Schema.NullOr(Schema.String),
+    dir_path: Schema.NullOr(Schema.String),
+    invocations: Schema.Struct({
+        total: Schema.Number,
+        d7: Schema.Number,
+        d30: Schema.Number,
+        last: Schema.NullOr(Schema.String),
+    }),
+    recent: Schema.Array(SkillRecentInvocation),
+    corrections: Schema.Array(SkillRecentInvocation),
+    proposals: Schema.Array(SkillProposalEvidence),
+    paired: Schema.Array(SkillPair),
+});
+
+export const SkillSourcePayload = Schema.Struct({
+    name: Schema.String,
+    scope: Schema.String,
+    dir_path: Schema.NullOr(Schema.String),
+    file_path: Schema.NullOr(Schema.String),
+    frontmatter: Schema.NullOr(Schema.String),
+    body: Schema.NullOr(Schema.String),
+    state: Schema.Literals(["active", "disabled", "missing"]),
+    editable: Schema.Boolean,
+    error: Schema.NullOr(Schema.String),
+});
+
+export const SkillDecisionsResponse = Schema.Struct({
+    decisions: Schema.Array(SkillTriageNote),
+});
+
+export const SkillDecideBulkResponse = Schema.Struct({
+    notes: Schema.Array(SkillTriageNote),
+});
+
+export const SkillDecideClearResponse = Schema.Struct({
+    cleared: Schema.Boolean,
+    skill_name: Schema.String,
+});
+
+export const SkillOpenResponse = Schema.Struct({ launched: Schema.String });
+
 /**
  * The skills family: triage listing, per-skill decide (POST/DELETE),
- * bulk decide, detail, source, open-in, and the decisions list. Payloads
- * `Schema.Unknown` except the mutation request bodies, which are typed.
+ * bulk decide, detail, source, open-in, and the decisions list. Request
+ * bodies AND responses are schema-typed; the handlers return plain objects.
  */
 export const SkillsGroup = HttpApiGroup.make("skills")
     .add(
         HttpApiEndpoint.get("decisions", "/api/decisions", {
-            success: Schema.Unknown,
+            success: SkillDecisionsResponse,
             error: InternalError,
         }),
         HttpApiEndpoint.get("skills", "/api/skills", {
-            success: Schema.Unknown,
+            success: SkillTriageResponse,
             error: InternalError,
         }),
         HttpApiEndpoint.post("skillDecideBulk", "/api/skills/decide-bulk", {
@@ -281,7 +760,7 @@ export const SkillsGroup = HttpApiGroup.make("skills")
                 decision: TriageDecisionSchema,
                 reason: Schema.optionalKey(Schema.NullOr(Schema.String)),
             }),
-            success: Schema.Unknown,
+            success: SkillDecideBulkResponse,
             error: [BadRequestError, InternalError],
         }),
         HttpApiEndpoint.post("skillDecide", "/api/skills/:name/decide", {
@@ -290,22 +769,22 @@ export const SkillsGroup = HttpApiGroup.make("skills")
                 decision: TriageDecisionSchema,
                 reason: Schema.optionalKey(Schema.NullOr(Schema.String)),
             }),
-            success: Schema.Unknown,
+            success: SkillTriageNote,
             error: InternalError,
         }),
         HttpApiEndpoint.delete("skillDecideClear", "/api/skills/:name/decide", {
             params: { name: Schema.String },
-            success: Schema.Unknown,
+            success: SkillDecideClearResponse,
             error: InternalError,
         }),
         HttpApiEndpoint.get("skillDetail", "/api/skills/:name/detail", {
             params: { name: Schema.String },
-            success: Schema.Unknown,
+            success: SkillDetailPayload,
             error: InternalError,
         }),
         HttpApiEndpoint.get("skillSource", "/api/skills/:name/source", {
             params: { name: Schema.String },
-            success: Schema.Unknown,
+            success: SkillSourcePayload,
             error: InternalError,
         }),
         HttpApiEndpoint.post("skillOpen", "/api/skills/:name/open", {
@@ -313,7 +792,7 @@ export const SkillsGroup = HttpApiGroup.make("skills")
             payload: Schema.Struct({
                 target: Schema.Literals(["finder", "editor"]),
             }),
-            success: Schema.Unknown,
+            success: SkillOpenResponse,
             error: InternalError,
         }),
     );
@@ -329,12 +808,21 @@ export const ImproveGroup = HttpApiGroup.make("improve")
             success: Schema.Unknown,
             error: InternalError,
         }),
+        HttpApiEndpoint.get("nextActions", "/api/next-actions", {
+            success: Schema.Unknown,
+            error: InternalError,
+        }),
+        HttpApiEndpoint.get("analyzeBrief", "/api/improve/analyze-brief", {
+            success: Schema.Unknown,
+            error: InternalError,
+        }),
         HttpApiEndpoint.post("improveAction", "/api/improve/:sig/:action", {
             params: {
                 sig: Schema.String,
-                // The routing matcher only sends known actions here; an
-                // unknown action falls to the legacy row's 404 decode.
-                action: Schema.Literals(["accept", "reject", "verdict"]),
+                // String, not Literals: an unknown action must answer the
+                // legacy 404 `{ error: "unknown_improve_action" }`, which the
+                // handler produces - a Literals decode failure would be a 400.
+                action: Schema.String,
             },
             payload: Schema.Struct({
                 force: Schema.optionalKey(Schema.Boolean),

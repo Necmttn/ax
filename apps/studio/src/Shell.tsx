@@ -2,6 +2,7 @@ import { useEffect, useState, type ReactNode } from "react";
 import { Link, useRouterState } from "@tanstack/react-router";
 import { useQueryClient } from "@tanstack/react-query";
 import { api, studioConnection, type DaemonVersion } from "./api.ts";
+import { IngestSplash } from "./components/ingest-splash.tsx";
 import { useIngestEvents } from "./use-ingest-events.ts";
 import { fmtLastUsed } from "@ax/lib/shared/formatters";
 import { cmpSemver, STUDIO_VERSION } from "./version.ts";
@@ -14,18 +15,11 @@ const STUDIO_MIN_API_VERSION = 1;
 
 interface Tab {
     readonly to:
-        | "/skills"
-        | "/skills/graph"
-        | "/graph"
-        | "/canvas"
-        | "/tools"
-        | "/decisions"
-        | "/workflow"
-        | "/recall"
-        | "/sessions"
-        | "/wrapped"
+        | "/"
         | "/improve"
-        | "/ingest-live";
+        | "/sessions"
+        | "/skills"
+        | "/workflow";
     readonly label: string;
     readonly prefetch: () => Promise<unknown>;
 }
@@ -92,12 +86,27 @@ function FullChrome({ children }: { children: ReactNode }) {
 
     const TABS: ReadonlyArray<Tab> = [
         {
-            to: "/workflow",
-            label: "Workflow",
+            to: "/",
+            label: "Wrapped",
+            prefetch: () =>
+                Promise.all([
+                    queryClient.prefetchQuery({
+                        queryKey: ["wrapped"],
+                        queryFn: () => api.wrapped(),
+                    }),
+                    queryClient.prefetchQuery({
+                        queryKey: ["wrapped", "public-preview"],
+                        queryFn: () => api.wrappedPublicPreview(),
+                    }),
+                ]),
+        },
+        {
+            to: "/improve",
+            label: "Improve",
             prefetch: () =>
                 queryClient.prefetchQuery({
-                    queryKey: ["workflow"],
-                    queryFn: () => api.workflow(),
+                    queryKey: ["improve"],
+                    queryFn: () => api.improve(),
                 }),
         },
         {
@@ -119,65 +128,13 @@ function FullChrome({ children }: { children: ReactNode }) {
                 }),
         },
         {
-            to: "/canvas",
-            label: "Canvas",
+            to: "/workflow",
+            label: "Workflow",
             prefetch: () =>
                 queryClient.prefetchQuery({
-                    queryKey: ["session-canvas"],
-                    queryFn: () => api.sessionCanvas({ limit: 800 }),
+                    queryKey: ["workflow"],
+                    queryFn: () => api.workflow(),
                 }),
-        },
-        {
-            to: "/tools",
-            label: "Tools",
-            prefetch: () =>
-                queryClient.prefetchQuery({
-                    queryKey: ["tool-failures"],
-                    queryFn: () => api.toolFailures(),
-                }),
-        },
-        {
-            to: "/decisions",
-            label: "Decisions",
-            prefetch: () =>
-                queryClient.prefetchQuery({
-                    queryKey: ["decisions"],
-                    queryFn: () => api.decisions().then((r) => r.decisions),
-                }),
-        },
-        {
-            to: "/improve",
-            label: "Improve",
-            prefetch: () =>
-                queryClient.prefetchQuery({
-                    queryKey: ["improve"],
-                    queryFn: () => api.improve(),
-                }),
-        },
-        {
-            to: "/recall",
-            label: "Recall",
-            prefetch: () => Promise.resolve(undefined),
-        },
-        {
-            to: "/ingest-live",
-            label: "Live",
-            prefetch: () => Promise.resolve(undefined),
-        },
-        {
-            to: "/wrapped",
-            label: "Wrapped",
-            prefetch: () =>
-                Promise.all([
-                    queryClient.prefetchQuery({
-                        queryKey: ["wrapped"],
-                        queryFn: () => api.wrapped(),
-                    }),
-                    queryClient.prefetchQuery({
-                        queryKey: ["wrapped", "public-preview"],
-                        queryFn: () => api.wrappedPublicPreview(),
-                    }),
-                ]),
         },
     ];
 
@@ -202,10 +159,11 @@ function FullChrome({ children }: { children: ReactNode }) {
                     <span className="live-dot" />
                     {live.connected ? "live" : "offline"}
                 </span>
+                <IngestSplash />
                 <nav className="tabs">
                     {TABS.map((tab) => {
                         const active =
-                            path === tab.to || (tab.to === "/skills" && path === "/");
+                            path === tab.to || (tab.to === "/" && path === "/wrapped");
                         return (
                             <Link
                                 key={tab.to}
@@ -221,6 +179,9 @@ function FullChrome({ children }: { children: ReactNode }) {
                 </nav>
             </header>
             {children}
+            <footer className="shell-footer">
+                <Link to="/lab">Lab</Link>
+            </footer>
         </div>
     );
 }

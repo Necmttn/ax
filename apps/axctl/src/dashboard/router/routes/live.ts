@@ -1,18 +1,15 @@
 /**
- * Raw escape hatches: routes that cannot be jsonRoutes.
+ * Raw escape hatches: the two routes that stay OUTSIDE the Insights Surface
+ * Contract permanently (ADR-0013):
  *   - GET /api/events: long-lived SSE stream (ReadableStream response).
  *   - GET /api/image: binary body + cache headers, allowlisted extensions.
- *   - POST /api/ingest: forks runIngest onto the server's long-lived
- *     ManagedRuntime via the IngestStreamBus/Durable Streams seam.
- *     DO NOT restructure the workflow here (ADR-0007/0008).
+ * POST /api/ingest is served by the contract router (contract/live.ts);
+ * the IngestStreamBus/Durable Streams seam is unchanged (ADR-0007/0008).
  */
 import { Effect } from "effect";
 import { SurrealClient } from "@ax/lib/db";
-import { IngestRuntimeLayer } from "../../../ingest/stage/runtime.ts";
-import { ingestStreamName } from "../../ingest-stream.ts";
-import { startIngestWorkflow } from "../../ingest-workflow.ts";
 import { addIngestEventSubscriber, removeIngestEventSubscriber } from "../../telemetry.ts";
-import { jsonResponse, rawRoute, type AnyRoute, type EffectRunner, type ServeContext } from "../router.ts";
+import { rawRoute, type AnyRoute, type EffectRunner } from "../router.ts";
 
 /**
  * Map of supported image extension -> MIME type. This is the safety allowlist
@@ -135,57 +132,6 @@ function handleEventsRequest(runner: EffectRunner): Response {
     });
 }
 
-/** Handle `POST /api/ingest`: trigger an in-process run, return its `runId`. */
-async function handleIngestTrigger(
-    req: Request,
-    runner: EffectRunner,
-    serve: ServeContext | null,
-): Promise<Response> {
-    if (serve === null) {
-        // The handler can be invoked directly in tests without a running
-        // server; the sidecar + runtime only exist once serveDashboard boots.
-        return jsonResponse({ error: "ingest_unavailable" }, 503);
-    }
-    const stream = serve.ingestStream;
-    if (stream === null) {
-        // The Durable Streams sidecar failed to start (e.g. the compiled
-        // single-file binary, which can't load native lmdb). The dashboard +
-        // all other routes still work; live ingest is the only casualty.
-        return jsonResponse({
-            error: "live ingest unavailable: run ax from source (the compiled binary can't host the Durable Streams sidecar)",
-        }, 503);
-    }
-    const body = (await req.json().catch(() => ({}))) as Record<string, unknown>;
-    const sinceDays = typeof body.since === "number" && Number.isInteger(body.since) && body.since > 0
-        ? body.since
-        : undefined;
-    try {
-        // `runIngest` reads `--since=N` from `args` (see ingest/run.ts), so the
-        // server-triggered run is shaped exactly like the CLI's `ax ingest`.
-        // The runner is the server-scoped runtime (serve-runtime.ts), so the
-        // detached daemon fiber the workflow forks outlives this request.
-        const { runId } = await runner(
-            startIngestWorkflow(
-                {
-                    command: "ingest",
-                    args: sinceDays === undefined ? [] : [`--since=${sinceDays}`],
-                    cwd: process.cwd(),
-                },
-                stream,
-                IngestRuntimeLayer,
-            ),
-        );
-        return jsonResponse({
-            runId,
-            stream: stream.streamUrl(runId),
-            streamName: ingestStreamName(runId),
-            streamBaseUrl: stream.baseUrl,
-        });
-    } catch (err) {
-        return jsonResponse({ error: err instanceof Error ? err.message : String(err) }, 500);
-    }
-}
-
 export const liveRoutes: ReadonlyArray<AnyRoute> = [
     rawRoute({ method: "ANY", path: "/api/events", handler: ({ runner }) => handleEventsRequest(runner) }),
     rawRoute({
@@ -193,11 +139,5 @@ export const liveRoutes: ReadonlyArray<AnyRoute> = [
         path: "/api/image",
         fallthroughOnMethodMismatch: true,
         handler: ({ url }) => handleImageRequest(url),
-    }),
-    rawRoute({
-        method: "POST",
-        path: "/api/ingest",
-        fallthroughOnMethodMismatch: true,
-        handler: ({ req, runner, serve }) => handleIngestTrigger(req, runner, serve ?? null),
     }),
 ];

@@ -13,6 +13,8 @@ import { lintFiles } from "../../improve/lint.ts";
 import { listProposals, type ProposalRow } from "../../improve/list.ts";
 import { recommend, formatRecommendations, copyToClipboard, selectByIndices, parseIndexInput } from "../../improve/recommend.ts";
 import { showExperiment, formatShow } from "../../improve/show.ts";
+import { renderAnalyzeBrief } from "../../improve/analyze-brief.ts";
+import { runPropose } from "../../improve/propose.ts";
 import { buildImproveProposalsNext } from "../../nav/next-links.ts";
 import { printNextLinks } from "../next-format.ts";
 import type { RuntimeManifest } from "./manifest.ts";
@@ -600,6 +602,58 @@ const improveCheckpointCommand = Command.make(
     ({ force, json }) => cmdImproveCheckpoint({ force, json }),
 ).pipe(Command.withDescription("Compute checkpoint snapshots at +3/+10/+30 sessions for active experiments (session-count windows, not calendar days - see issue #83)"));
 
+const cmdImprovePropose = (input: { readonly file: string | undefined; readonly json: boolean }) =>
+    Effect.gen(function* () {
+        const raw = input.file !== undefined
+            ? yield* Effect.tryPromise(() => Bun.file(input.file as string).text())
+            : yield* Effect.tryPromise(() => Bun.stdin.text());
+        const parsed = yield* Effect.try({
+            try: () => JSON.parse(raw) as unknown,
+            catch: (err) => new Error(`invalid JSON on ${input.file ? input.file : "stdin"}: ${err instanceof Error ? err.message : String(err)}`),
+        });
+        const result = yield* runPropose(parsed);
+        if (input.json) {
+            console.log(JSON.stringify(result));
+        } else {
+            console.log(`${result.status}: ${result.form} proposal "${result.title}" (sig=${result.sig})`);
+            console.log("next: ax improve list - or review it in the dashboard Improve tab");
+        }
+    });
+
+const improveProposeCommand = Command.make(
+    "propose",
+    {
+        file: Flag.string("file").pipe(Flag.optional),
+        json: jsonFlag,
+    },
+    ({ file, json }) => cmdImprovePropose({ file: optionValue(file), json }),
+).pipe(Command.withDescription("Agent write-path: read one proposal as JSON (stdin or --file), validate, and insert it with origin 'agent'. Same title bumps frequency instead of duplicating."));
+
+const cmdImproveAnalyze = (input: { readonly force: boolean }) =>
+    Effect.gen(function* () {
+        const date = new Date().toISOString().slice(0, 10);
+        const dir = ".ax/tasks";
+        const path = `${dir}/analyze-improve-${date}.md`;
+        const exists = yield* Effect.tryPromise(() => Bun.file(path).exists());
+        if (exists && !input.force) {
+            console.log(`already exists: ${path} (re-run with --force to overwrite)`);
+            return;
+        }
+        // Bun.write creates parent directories itself - no fs import needed
+        // (repo gate: check:no-node-fs).
+        yield* Effect.tryPromise(() => Bun.write(path, renderAnalyzeBrief({ date })));
+        console.log(`analysis brief written: ${path}`);
+        console.log("hand it to an agent session; findings come back via `ax improve propose`");
+    });
+
+const improveAnalyzeCommand = Command.make(
+    "analyze",
+    {
+        force: Flag.boolean("force").pipe(Flag.withDefault(false)),
+    },
+    ({ force }) => cmdImproveAnalyze({ force }),
+).pipe(Command.withDescription("Emit .ax/tasks/analyze-improve-<date>.md - a deep-analysis brief instructing an agent to mine the graph and write proposals back via `ax improve propose`."));
+
 export const improveCommand = Command.make("improve").pipe(
     Command.withDescription("Experiment loop: rank proposals (recommend), accept (emit task brief or scaffold + dispatch subagent), lint grounded agent files, track verdicts at +3/+10/+30 sessions after accept."),
     Command.withSubcommands([
@@ -612,6 +666,8 @@ export const improveCommand = Command.make("improve").pipe(
         improveCheckpointCommand,
         improveVerdictCommand,
         improveResetCommand,
+        improveProposeCommand,
+        improveAnalyzeCommand,
     ]),
 );
 

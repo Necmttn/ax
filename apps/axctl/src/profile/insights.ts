@@ -5,7 +5,7 @@
  * multi-day "sessions" behind). Returns null when there is no data at all
  * (both durations and daily empty) so the renderer can omit the section.
  */
-import type { DailyActivityRow, SessionDurationRow, TopToolRow } from "./queries.ts";
+import type { DailyActivityRow, SessionDurationRow, TopToolRow, WrappedCounts } from "./queries.ts";
 
 const MAX_SESSION_MS = 24 * 60 * 60 * 1000; // 24h cap per session
 const DEEP_THRESHOLD_MIN = 90;
@@ -17,6 +17,8 @@ export interface InsightsInput {
     readonly commits: number;
     readonly tools: ReadonlyArray<TopToolRow>;
     readonly daily: ReadonlyArray<DailyActivityRow>;
+    /** Optional wrapped-style window counts; omitted when not fetched. */
+    readonly wrapped?: WrappedCounts;
 }
 
 export interface InsightsResult {
@@ -29,6 +31,15 @@ export interface InsightsResult {
     readonly subagents_spawned: number;
     readonly commits: number;
     readonly tools_top: ReadonlyArray<TopToolRow>;
+    // wrapped-style window aggregates (all optional for back-compat with old gists)
+    readonly turns?: number;
+    readonly tool_calls?: number;
+    readonly tool_failures?: number;
+    readonly distinct_skills?: number;
+    readonly distinct_tools?: number;
+    readonly repos_count?: number;
+    readonly verification_calls?: number;
+    readonly context_calls?: number;
 }
 
 export function deriveInsights(input: InsightsInput): InsightsResult | null {
@@ -93,5 +104,15 @@ export function deriveInsights(input: InsightsInput): InsightsResult | null {
         subagents_spawned: spawned,
         commits,
         tools_top: tools,
+        ...(input.wrapped !== undefined ? {
+            turns: input.wrapped.turns,
+            tool_calls: input.wrapped.tool_calls,
+            tool_failures: input.wrapped.tool_failures,
+            distinct_skills: input.wrapped.distinct_skills,
+            distinct_tools: input.wrapped.distinct_tools,
+            repos_count: input.wrapped.repos_count,
+            verification_calls: input.wrapped.verification_calls,
+            context_calls: input.wrapped.context_calls,
+        } : {}),
     };
 }

@@ -1,39 +1,14 @@
 /**
- * System family: version/capability metadata, the read-only SQL console,
- * and the four legacy queryApi endpoints (raw-row responses kept loosely
- * typed exactly as before - typing them is future work, not this phase).
+ * System family: only GET /api/version remains in the legacy table. It is
+ * the daemon's identity probe (`ax serve` pre-flight, studio connect,
+ * desktop arbitration) and must answer when SurrealDB is down, so it stays
+ * a DB-free rawRoute here even though the endpoint is part of the Insights
+ * Surface Contract (docs + generated client). Everything else in this
+ * family is served by the contract router (ADR-0013).
  */
-import { Effect } from "effect";
-import { SurrealClient } from "@ax/lib/db";
 import { AX_VERSION } from "../../../cli/version.ts";
-import { graphHealthSql } from "../../../queries/graph-health.ts";
-import { checkoutActivitySql, gitCorrelationSql } from "../../../queries/insights.ts";
-import { fetchImproveProposals } from "../../improve-proposals.ts";
 import { API_VERSION, dashboardApiCapabilities } from "../../capabilities.ts";
-import {
-    decodeFail,
-    decodeOk,
-    jsonRoute,
-    jsonResponse,
-    rawRoute,
-    type AnyRoute,
-    type Decoded,
-    type RouteInput,
-} from "../router.ts";
-
-export interface QueryParams { readonly sql: string }
-
-export const decodeQueryParams = ({ body }: RouteInput): Decoded<QueryParams> => {
-    if (body.kind !== "json") return decodeFail("invalid_json", 400);
-    const sql = typeof (body.value as { sql?: unknown } | null)?.sql === "string"
-        ? ((body.value as { sql: string }).sql).trim()
-        : "";
-    if (!sql) return decodeFail("SQL is required", 400);
-    if (!/^(SELECT|RETURN|INFO)\b/i.test(sql)) {
-        return decodeFail("Only SELECT, RETURN, and INFO queries are allowed", 400);
-    }
-    return decodeOk({ sql });
-};
+import { jsonResponse, rawRoute, type AnyRoute } from "../router.ts";
 
 export const systemRoutes: ReadonlyArray<AnyRoute> = [
     rawRoute({
@@ -51,61 +26,5 @@ export const systemRoutes: ReadonlyArray<AnyRoute> = [
                 // optional field: forward-compatible, no api_version bump.
                 live_ingest: serve?.ingestStream != null,
             }),
-    }),
-    jsonRoute({
-        method: "POST",
-        path: "/api/query",
-        readsBody: true,
-        decode: decodeQueryParams,
-        handler: ({ sql }) => Effect.gen(function* () {
-            const started = performance.now();
-            const db = yield* SurrealClient;
-            const result = yield* db.query(sql);
-            return { result, durationMs: Math.round(performance.now() - started) };
-        }),
-        errorStatus: () => 400, // legacy: DB errors on /api/query were 400
-    }),
-    jsonRoute({
-        method: "ANY",
-        path: "/api/graph-health",
-        decode: () => decodeOk(undefined),
-        handler: () => Effect.gen(function* () {
-            const db = yield* SurrealClient;
-            return yield* db.query(graphHealthSql(25));
-        }),
-    }),
-    jsonRoute({
-        method: "ANY",
-        path: "/api/worktrees",
-        decode: () => decodeOk(undefined),
-        handler: () => Effect.gen(function* () {
-            const db = yield* SurrealClient;
-            const activity = yield* db.query(checkoutActivitySql(50));
-            const git = yield* db.query(gitCorrelationSql(50));
-            return { activity, git };
-        }),
-    }),
-    jsonRoute({
-        method: "ANY",
-        path: "/api/self-improve",
-        decode: () => decodeOk(undefined),
-        handler: () => Effect.gen(function* () {
-            const db = yield* SurrealClient;
-            // moved verbatim from server.ts queryApi (lines 155-159)
-            return yield* db.query(`
-SELECT id, guidance, version, text, status, scope, risk, evidence, metrics_before, metrics_after, created_at
-FROM guidance_version
-ORDER BY created_at DESC
-LIMIT 50;`);
-        }),
-    }),
-    jsonRoute({
-        method: "ANY",
-        path: "/api/improve",
-        decode: () => decodeOk(undefined),
-        handler: () =>
-            fetchImproveProposals().pipe(
-                Effect.map((proposals) => ({ proposals })),
-            ),
     }),
 ];

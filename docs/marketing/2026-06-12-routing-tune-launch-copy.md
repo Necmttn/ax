@@ -1,98 +1,292 @@
 # ax routing tune - launch copy (2026-06-12)
 
+## v2 - post-feedback
+
+Rewritten after user testing. Key changes: the misconception ("Claude Code
+already downshifts for sub-tasks") leads; all jargon killed in the thread
+(no "pin a model", no "dispatch", no "mines", no "routing classes");
+burn-rate/usage-limit framing for the Max audience. v1 is in git history.
+
 Numbers measured on the author's machine, 14-day window ending 2026-06-12
 (30d for the tune mining figure). Refresh before publishing if stale.
 
 ## X/Twitter thread (7 posts)
 
-**Post 1**
+**Post 1** [IMAGE: 16:9 receipt visual]
 
-My agent bill for the last 14 days: $19,270.
+![receipt visual 16:9](./2026-06-12-receipt-visual-wide.png)
 
-663 subagent dispatches. 75% inherited the frontier model because nobody pinned one.
+You'd think Claude Code sends the grunt work it spawns to cheaper models. It doesn't. Every sub-task runs on your most expensive model unless something tells it otherwise.
 
-File searches billed at opus rates.
-
-I built the fix into ax. The last piece shipped today.
+My last 14 days: $19,270. 663 sub-tasks. 75% on the priciest model for no reason.
 
 **Post 2**
 
-The failure mode: any subagent dispatch that doesn't pin a model inherits the expensive one.
+That's why your weekly usage limit dies in a couple of hours instead of lasting the week.
 
-On my machine: $2,301 of subagent spend on fable/opus vs $83 on sonnet. That's 28:1.
+On my machine: $2,301 of sub-task spend on fable/opus vs $83 on sonnet. 28:1.
 
-Most of it was mechanical work. File search. Spec'd implementation. Bug fixes.
+Most of it was routine. File searches. Spec'd implementations. Bug fixes.
 
 **Post 3**
 
-The loop:
+The fix: ax lets your harness switch models automatically.
 
-MEASURE - ax cost split breaks spend into main loop vs subagents, by model.
+The smart model keeps the thinking - planning, judgment, review. The routine implementation work it spawns goes to cheaper models.
 
-NUDGE - a route-dispatch hook warns at dispatch time when a mechanical dispatch forgets to pin a model.
+You don't change how you work. The bill changes.
 
-That got me partway. The routing table was still hand-written.
+**Post 4** [SCREENSHOT: ax routing tune --dry-run output]
 
-**Post 4**
+![tune dry-run screenshot](./2026-06-12-shot-tune-dryrun.png)
 
 Shipped today: ax routing tune.
 
-It mines your own dispatch history for new routing classes. Deterministic clustering, no LLM in the loop.
+It reads your own usage history and finds the routine work that keeps getting billed at top rates. No AI guessing - just deterministic pattern-matching.
 
-First run on my data: 20 new classes, $591.57 of addressable spend over 30 days.
+First run on my data: 20 patterns, $591.57 of addressable spend over 30 days.
 
-[SCREENSHOT: ax routing tune --dry-run output, cropped to footer]
+**Post 5** [SCREENSHOT: ax dispatches --candidates output]
 
-**Post 5**
+![candidates screenshot](./2026-06-12-shot-candidates.png)
 
-VERIFY - ax dispatches --candidates reprices every expensive inherited dispatch against the updated table.
+Then the receipts: every sub-task that ran on the expensive model gets repriced against what the cheaper one would have cost, from the actual tokens it burned.
 
-Current table: $512.91 in flagged savings, repriced from the real token buckets those dispatches burned.
-
-[SCREENSHOT: ax dispatches --candidates output, cropped to footer]
+On my machine right now: $512.91 flagged.
 
 **Post 6**
 
-Judgment work never auto-tiers down.
+Work that needs judgment never moves. Code review, design, planning, audits - always on the smart model.
 
-Code review, design, planning, audits - the miner detects these and routes the proposal through a brief your agent adversarially backtests before anything applies.
+Only the routine work gets cheaper. Quality doesn't drop; the meter just stops running on file searches.
 
-Quality stays on the frontier model. Only mechanical work moves.
+**Post 7** [LINK CARD: ax.necmttn.com/routing]
 
-**Post 7**
-
-Everything runs local. Your transcripts never leave your machine.
+Everything runs on your machine. Your transcripts never leave it.
 
 curl -fsSL https://ax.necmttn.com/install | bash
 then: ax routing tune
 
-github.com/Necmttn/ax
-
-[GIF: tune apply loop]
+Full breakdown: ax.necmttn.com/routing
 
 ## Standalone tweet
 
-14 days, $19,270 of agent spend. 75% of my 663 subagent dispatches inherited the frontier model by default.
+My last 14 days of Claude Code: $19,270. 75% of the 663 sub-tasks it spawned ran on the most expensive model - file searches billed at opus rates.
 
-Shipped today: ax routing tune mines your own dispatch history for routing classes. 20 classes, $591.57/30d addressable on my machine. Local-only.
+It doesn't downshift on its own. ax does it for you: smart model thinks, cheaper models grind. Local-only.
 
 github.com/Necmttn/ax
 
 ## LinkedIn post
 
-I published my own AI agent bill: $19,270 over 14 days.
+Most people assume Claude Code automatically uses cheaper models for the routine work it spawns - the file searches, the spec'd bug fixes. It doesn't. Every sub-task inherits your default model, which is usually the most expensive one. That's why a weekly usage limit that should last the week is gone in a couple of hours.
 
-The expensive part wasn't the hard work. When you orchestrate with subagents, any dispatch that doesn't pin a model inherits the frontier one. On my machine, 75% of 663 dispatches did exactly that. File searches and spec'd bug fixes were billed at opus rates: $2,301 on frontier models vs $83 on sonnet.
+I measured it on my own machine: $19,270 of agent spend in 14 days. 663 sub-tasks, 75% on the top-tier model. $2,301 of that routine work billed at frontier rates vs $83 on sonnet - 28:1, for work that mostly didn't need the smart model.
 
-Today I shipped the last piece of the fix in ax, my local telemetry graph for coding agents. `ax routing tune` mines your own dispatch history for routing classes - deterministic clustering, no LLM involved. First run found 20 classes covering $591.57 of addressable spend in 30 days. `ax dispatches --candidates` then reprices against real token buckets: $512.91 flagged.
+Today I shipped the fix in ax, my local telemetry tool for coding agents. ax lets your harness switch models automatically: the smart model keeps the thinking - planning, review, design - and the routine implementation work goes to cheaper models. `ax routing tune` reads your own usage history and finds the kinds of routine work being overbilled. First run: 20 patterns, $591.57 of addressable spend over 30 days. Then it reprices every overbilled sub-task against the actual tokens it burned: $512.91 flagged on my machine.
 
-One rule: judgment work (review, design, planning) never auto-routes to cheaper models. Only mechanical work tiers down.
+One hard rule: judgment work never auto-downgrades. Quality stays where it was. Only the grunt work gets cheaper.
 
-All local. github.com/Necmttn/ax
+Everything runs locally. Your transcripts never leave your machine. github.com/Necmttn/ax
+
+## 16:9 image - right panel lines
+
+Plain-language overlay text, in order:
+
+1. $19,270 in 14 days of agent spend
+2. 663 sub-tasks - 75% ran on the most expensive model
+3. `$ ax routing tune` - finds the routine work you're overpaying for
 
 ## Production notes
 
-- Crop both screenshots to the footer lines (totals + top classes) so dollar figures read at mobile width.
-- Post 6 is the objection-killer ("won't quality drop") - keep it late in the thread but never cut it.
-- "addressable spend" for the tune figure, "flagged/est savings" for candidates - never "realized savings" (retrospective repricing, per PR #312 semantics).
-- GIF: VHS tape of dispatches --candidates -> routing tune -> applied diff -> savings footer (sub-project B plan).
+- Post 1 carries the receipt visual; posts 4 and 5 carry the cropped CLI
+  screenshots; post 7 carries the ax.necmttn.com/routing link card.
+- Crop both screenshots to the footer lines (totals + top patterns) so dollar
+  figures read at mobile width.
+- Post 6 is the objection-killer ("won't quality drop") - keep it late in the
+  thread but never cut it.
+- "addressable spend" for the tune figure, "flagged" for candidates - never
+  "realized savings" (retrospective repricing, per PR #312 semantics).
+- Thread vocabulary is locked plain: "sub-tasks", "routine work", "switch
+  models automatically". The /routing page may keep precise terms (dispatch,
+  routing classes); the thread may not.
+- GIF (optional, replaces post 7 link card only if the card renders badly):
+  VHS tape of candidates -> tune -> applied diff -> savings footer.
+
+## v3 - trend angle (June 22 window)
+
+Context (verified 2026-06-12): X is full of Max-plan users posting dead 5-hour
+windows and evaporated weekly allowances on Fable. Anthropic's promo ends
+June 22 - after that, Fable leaves the flat plan and bills as usage credits
+on top ($10/M input, $50/M output - double Opus). These variants ride that
+wave. Same locked vocabulary as v2. All numbers are the same measured set
+(75%, 663, $19,270, 28:1, $591.57); June 22 / per-token pricing are public
+Anthropic facts - state plainly, no speculation past them.
+
+### Trend post 1 (replaces v2 post 1 when riding the trend)
+
+Rest of thread unchanged. Post 2's opener ("That's why your weekly usage
+limit dies...") slightly overlaps hook A - acceptable as expansion since
+post 2 carries the 28:1 numbers.
+
+**Hook A - direct address (PICK)**
+
+> If you're sitting out a 5-hour window right now: your limit didn't die
+> because you coded too much. It died because every sub-task Claude Code
+> spawned ran on Fable. My last 14 days: 663 sub-tasks, 75% on the priciest
+> model. It never downshifts on its own.
+
+(~254 chars)
+
+**Hook B - the unmeasured why**
+
+> Everyone's posting screenshots of dead 5-hour windows. Nobody's measuring
+> why. Claude Code spawns sub-tasks and runs every one on Fable by default.
+> My last 14 days: 663 sub-tasks, 75% on the most expensive model. File
+> searches, billed at frontier rates.
+
+(~250 chars)
+
+**Hook C - follow the money**
+
+> While you wait for your window to reset: Claude Code ran 75% of my 663
+> sub-tasks on Fable for no reason. $19,270 in 14 days, most of it file
+> searches and routine bug fixes. The harness never downshifts on its own.
+> That's where your allowance went.
+
+(~248 chars)
+
+Why A: it talks to the person mid-cooldown at the exact moment they're
+scrolling, and reframes the cause in one move. B is the safest QT-bait;
+C leads with the bill for the publish-your-own-numbers crowd.
+
+### June 22 urgency post (standalone, or slot as thread post 1.5)
+
+> 10 days left. Until June 22, Fable lives inside your plan limits - the
+> damage is a dead window. After that it bills on top of your plan: $10/M
+> in, $50/M out, double Opus. Every sub-task still defaulting to Fable
+> becomes a line item. ax routing tune before the meter starts.
+
+(~273 chars)
+
+### Quote-tweet template (for viral "my limit is gone again" posts)
+
+> Same boat - my 14-day bill was $19,270. 75% of the 663 sub-tasks Claude
+> Code spawned ran on the most expensive model by default. It never
+> downshifts. ax routing tune fixes the default.
+
+(~184 chars)
+
+### Reply-guy second line (optional follow-up to the QT)
+
+> curl -fsSL https://ax.necmttn.com/install | bash && ax routing tune
+> Reads your own usage history, local-only. Shows the routine work you're
+> overpaying for.
+
+### v3 production notes
+
+- The urgency post stands alone fine; if used inside the thread, slot it
+  between posts 1 and 2 and keep post 2 unchanged.
+- QT first line is always empathy + own bill. Never open with the product.
+  Drop the second line only if the original poster engages or the QT
+  travels.
+- After June 22, retire the urgency post and swap hook A's framing from
+  "limit died" to "line items" - the cooldown complaint becomes a billing
+  complaint.
+- June 22 / 2x Opus / $10-$50 per M are public Anthropic pricing facts.
+  Do not extrapolate beyond them (no projected bills, no "this will cost
+  you $X/month" math on other people's usage).
+
+### Storytelling singles
+
+Direction change: no 7-post thread. Standalone tweets, iterated one at a
+time. Winning hook is the $19K spend told as a first-person story; Fable
+named explicitly. Each carries the 16:9 receipt image. One CTA per tweet -
+"ax routing tune" or ax.necmttn.com/routing, never both.
+
+**V1 - pure story** (~261 chars)
+
+> I spent $19,270 on Claude Code in 14 days. Felt impossible, so I pulled
+> the receipts. 663 sub-tasks, 75% on Fable - and most of them were file
+> searches and routine work it was never meant to do. It never downshifts
+> on its own. ax routing tune fixes the default.
+
+**V2 - Fable-centered** (~268 chars)
+
+> Fable is incredible at hard thinking. On my machine it was running my
+> file searches. 14-day bill: $19,270 - 663 sub-tasks, 75% on Fable, most
+> of it routine work it was never meant to do. That's where the allowance
+> goes. It never downshifts on its own. ax routing tune
+
+**V3 - confession/wry** (~243 chars)
+
+> I spent $19,270 on Claude Code in 14 days and assumed that was the price
+> of hard problems. Then I read the receipt: 663 sub-tasks, 75% on Fable,
+> mostly file searches and routine work. I was paying frontier rates to
+> grep. ax.necmttn.com/routing
+
+**Optional follow-up (the how)** (~273 chars)
+
+> How it works: ax reads your own usage history, finds the routine work
+> being billed at top rates, and switches those sub-tasks to cheaper
+> models. Judgment work never moves. Local-only - transcripts never leave
+> your machine.
+>
+> curl -fsSL https://ax.necmttn.com/install | bash
+
+Notes:
+
+- V1 is the safest opener for the iteration loop: clean arc, every number
+  lands, CTA explains itself.
+- V2 is the one that names the waste ("running my file searches") - best
+  fit while Fable burn is the live complaint.
+- V3 trades the explicit "never downshifts" beat for the punchline; the
+  follow-up tweet carries the mechanism if it travels.
+- Post the follow-up only as a reply to whichever single gets traction,
+  not preemptively.
+
+## FINAL - published versions (2026-06-12)
+
+### Main tweet (V3 final, + receipt image)
+
+> I spent $19,270 on Claude Code in 14 days and figured that was the price of hard problems.
+>
+> Then ax showed me where it went: 663 sub-tasks, 75% on Fable, mostly file searches. I was paying frontier rates to grep.
+>
+> ax routing tune fixes this - cuts that spend by up to 70%.
+
+Notes: "ax showed me" not "read the receipt" (the image carries the receipt
+metaphor, the text doesn't); "up to 70%" = measured per-sub-task repricing
+ratio (fable->sonnet on identical token buckets), cost not token count.
+
+### Follow-up reply (mechanism + link)
+
+> How: ax reads your own usage history, finds the routine work billed at top rates, and your harness starts routing those sub-tasks to cheaper models automatically.
+>
+> Judgment work never moves - reviews, design, planning stay on Fable. Quality doesn't drop.
+>
+> ax.necmttn.com/routing
+
+### Third reply (install, on request)
+
+> curl -fsSL https://ax.necmttn.com/install | bash
+> then: ax routing tune
+>
+> Local-only - your transcripts never leave your machine.
+
+### QT for the $1,000-tier discourse (Theo-style posts)
+
+> You don't need a $1,000 tier. You need the 75% of sub-tasks that run on Fable for no reason to stop.
+>
+> My last 14 days: 663 sub-tasks, 75% on Fable - mostly file searches. The harness never downshifts on its own.
+>
+> ax routing tune fixes the default. Your $200 tier suddenly lasts.
+
+### Standalone discourse riff (own post, can carry receipt image)
+
+> People are offering Anthropic $1,000/month for more Fable while 75% of their current Fable allowance does file searches.
+>
+> The model isn't too expensive. The routing is broken. ax routing tune - cuts that spend up to 70%.
+
+Numbers framing: always "my/mine" - measured on one machine, never claimed
+universal.

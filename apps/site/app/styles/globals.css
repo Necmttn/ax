@@ -9716,11 +9716,51 @@ footer .right {
 }
 .pf-card {
     background: var(--panel);
-    padding: 18px 20px 20px;
-    min-height: 158px;
+    min-height: 220px;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    overflow: hidden;
+}
+/* generative dither art band - bleeds to the card's top + side edges */
+.pf-card-art {
+    position: relative;
+    height: 64px;
+    flex: none;
+    background: var(--panel);
+    border-bottom: 1px solid color-mix(in srgb, var(--line) 70%, var(--panel));
+    overflow: hidden;
+}
+.pf-card-art-svg {
+    display: block;
+    width: 100%;
+    height: 100%;
+    /* crisp pixel cells, no smoothing */
+    shape-rendering: crispEdges;
+}
+.pf-card-art-dots {
+    position: absolute;
+    top: 7px;
+    left: 9px;
+    display: flex;
+    gap: 4px;
+}
+.pf-card-art-dots span {
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+    background: color-mix(in srgb, var(--muted) 55%, var(--panel));
+    box-shadow: 0 0 0 0.5px color-mix(in srgb, var(--line) 80%, transparent);
+}
+.pf-card-art-dots span:nth-child(2) { background: color-mix(in srgb, var(--muted) 40%, var(--panel)); }
+.pf-card-art-dots span:nth-child(3) { background: color-mix(in srgb, var(--muted) 28%, var(--panel)); }
+
+.pf-card-body {
+    padding: 16px 20px 18px;
     display: flex;
     flex-direction: column;
     gap: 8px;
+    flex: 1;
     min-width: 0;
 }
 .pf-card-q {
@@ -9746,6 +9786,54 @@ footer .right {
     color: var(--muted);
 }
 .pf-card-s { font-size: 12.5px; line-height: 1.45; color: var(--muted); }
+
+/* mini trace-viz - tiny, mono, slots between answer and support line */
+.pf-card-viz { height: 16px; display: flex; align-items: center; }
+.pf-viz { display: block; width: 100%; }
+.pf-viz-bar {
+    position: relative;
+    height: 6px;
+    background: color-mix(in srgb, var(--line) 55%, var(--panel));
+}
+.pf-viz-bar-fill { display: block; height: 100%; background: var(--green); }
+.pf-viz-bar-fill--red { background: var(--red); }
+.pf-viz-ticks { display: flex; gap: 3px; align-items: flex-end; height: 12px; flex-wrap: nowrap; }
+.pf-viz-tick {
+    width: 4px;
+    height: 12px;
+    background: color-mix(in srgb, var(--green) 62%, var(--panel));
+    flex: none;
+}
+.pf-viz-tick--fade { opacity: 0.5; }
+.pf-viz-tick--rail {
+    flex: 1;
+    min-width: 12px;
+    height: 12px;
+    margin-left: 3px;
+    align-self: flex-end;
+    margin-bottom: 5px;
+    border-top: 1px dashed color-mix(in srgb, var(--green) 55%, var(--panel));
+}
+.pf-viz-rail { position: relative; height: 12px; }
+.pf-viz-rail-track {
+    position: absolute;
+    top: 50%;
+    left: 0;
+    right: 0;
+    height: 2px;
+    transform: translateY(-50%);
+    background: color-mix(in srgb, var(--line) 60%, var(--panel));
+}
+.pf-viz-rail-marker {
+    position: absolute;
+    top: 50%;
+    width: 7px;
+    height: 7px;
+    transform: translate(-50%, -50%);
+    background: var(--green);
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--green) 22%, transparent);
+}
+
 @media (max-width: 980px) { .pf-cards { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 460px) {
     .pf-cards { grid-template-columns: minmax(0, 1fr); }
@@ -9958,12 +10046,31 @@ footer .right {
    scale stats); classes below are routing-specific.
    ============================================================ */
 
+.routing-page .rt-receipts-label {
+  margin: 36px 0 12px;
+  font-family: var(--mono);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.16em;
+  color: var(--soft, #8a8780);
+}
+.routing-page section.hero .scale { margin-top: 0; }
+
 .routing-page .rt-hero-note {
   margin: 14px 0 0;
   font-family: var(--mono);
   font-size: 11px;
   letter-spacing: 0.02em;
   color: var(--soft, #8a8780);
+}
+.routing-page .rt-hero-note code {
+  font-family: var(--mono);
+  font-size: 10.5px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 1px 5px;
+  color: var(--ink);
 }
 
 /* --- the loop: four step cards --- */
@@ -10255,14 +10362,27 @@ footer .right {
   color: var(--page);
 }
 
+/* overflow safety: grid/flex children must be allowed to shrink so the
+   scrollable code blocks scroll inside their cards, never the page */
+.routing-page .rt-step,
+.routing-page .rt-lane,
+.routing-page .rt-term,
+.routing-page section.hero .scale .stat { min-width: 0; }
+
 @media (max-width: 880px) {
   .routing-page .rt-loop { grid-template-columns: 1fr; }
   .routing-page .rt-lanes { grid-template-columns: 1fr; }
 }
 @media (max-width: 600px) {
+  /* stat strip stays a 2x2 grid on phones (features-page default drops to 1col) */
+  .routing-page section.hero .scale { grid-template-columns: repeat(2, 1fr); gap: 8px; }
+  .routing-page section.hero .scale .stat { padding: 12px 12px; }
+  .routing-page section.hero .scale .stat .v { font-size: 16px; }
+  .routing-page section.hero h1 { font-size: clamp(30px, 11.5vw, 42px); }
   .routing-page .rt-cta { padding: 64px 0 72px; }
-  .routing-page .rt-cta h2 { font-size: 30px; }
+  .routing-page .rt-cta h2 { font-size: clamp(25px, 9.5vw, 30px); }
   .routing-page .rt-term pre { font-size: 11px; padding: 16px; }
+  .routing-page .rt-step-cmd { font-size: 11px; }
   .routing-page .rt-install code { font-size: 12px; }
 }
 
@@ -10315,4 +10435,268 @@ footer .right {
 @media (max-width: 560px) {
     .pf-cta { padding: 28px 22px 22px; }
     .pf-cta-cmd { white-space: normal; word-break: break-all; }
+}
+
+/* ----- the sign: radar + archetype ----- */
+.pf-sign {
+    display: grid;
+    grid-template-columns: 420px minmax(0, 1fr);
+    gap: 52px;
+    align-items: center;
+}
+@media (max-width: 880px) {
+    .pf-sign { grid-template-columns: minmax(0, 1fr); gap: 28px; align-items: start; }
+}
+
+.pf-sign-chart { display: flex; flex-direction: column; align-items: center; gap: 12px; }
+.pf-radar-wrap { display: flex; flex-direction: column; align-items: center; gap: 14px; }
+.pf-radar { width: 100%; max-width: 420px; height: auto; overflow: visible; }
+.pf-sign-partial {
+    font-family: var(--mono);
+    font-size: 10.5px;
+    color: var(--muted);
+    letter-spacing: 0.04em;
+    text-align: center;
+    max-width: 320px;
+    margin: 0;
+}
+
+.pf-radar-ring { fill: none; stroke: var(--line); stroke-width: 1; }
+.pf-radar-ring--outer { stroke: color-mix(in srgb, var(--ink) 28%, var(--line)); }
+.pf-radar-spoke { stroke: var(--line); stroke-width: 1; }
+.pf-radar-axis-label {
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 0.13em;
+    fill: var(--muted);
+    text-transform: uppercase;
+}
+.pf-radar-area {
+    fill: currentColor;
+    fill-opacity: 0.18;
+    stroke: currentColor;
+    stroke-width: 1.75;
+    stroke-linejoin: round;
+}
+.pf-radar-dot { fill: currentColor; stroke: var(--page); stroke-width: 1; }
+
+.pf-radar-legend {
+    display: flex;
+    gap: 16px;
+    flex-wrap: wrap;
+    justify-content: center;
+}
+.pf-radar-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.03em;
+    color: var(--ink);
+}
+.pf-radar-chip-swatch { width: 11px; height: 11px; border-radius: 50%; display: inline-block; }
+
+/* read column */
+.pf-sign-read { min-width: 0; }
+.pf-sign-kicker {
+    font-family: var(--mono);
+    font-size: 10.5px;
+    text-transform: uppercase;
+    letter-spacing: 0.14em;
+    color: var(--muted);
+}
+.pf-sign-versus {
+    font-family: var(--mono);
+    font-size: 12px;
+    letter-spacing: 0.02em;
+    color: var(--muted);
+    margin: 0 0 4px;
+}
+.pf-sign-versus span { font-weight: 600; }
+.pf-sign-head { display: flex; align-items: baseline; gap: 14px; margin-top: 4px; }
+.pf-sign-glyph {
+    font-size: 34px;
+    line-height: 1;
+    color: var(--green);
+    transform: translateY(4px);
+}
+.pf-sign-name {
+    font-family: var(--serif);
+    font-size: 40px;
+    font-weight: 400;
+    letter-spacing: -1px;
+    line-height: 1;
+    margin: 0;
+}
+.pf-sign-blurb {
+    font-family: var(--serif);
+    font-size: 17px;
+    line-height: 1.5;
+    color: color-mix(in srgb, var(--ink) 82%, var(--page));
+    margin: 14px 0 22px;
+    max-width: 46ch;
+}
+
+/* score list */
+.pf-sign-scores { display: flex; flex-direction: column; gap: 0; margin: 0; }
+.pf-sign-score {
+    display: grid;
+    grid-template-columns: 84px minmax(0, 1fr);
+    align-items: center;
+    gap: 14px;
+    padding: 7px 0;
+    border-top: 1px solid var(--line);
+}
+.pf-sign-score:last-child { border-bottom: 1px solid var(--line); }
+.pf-sign-score dt {
+    font-family: var(--mono);
+    font-size: 10.5px;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    color: var(--muted);
+}
+.pf-sign-score--dom dt { color: var(--ink); }
+.pf-sign-score dd { margin: 0; display: flex; align-items: center; gap: 10px; }
+.pf-sign-bar {
+    flex: 1;
+    height: 6px;
+    background: color-mix(in srgb, var(--line) 60%, var(--page));
+    position: relative;
+    overflow: hidden;
+}
+.pf-sign-bar-fill { position: absolute; inset: 0 auto 0 0; background: color-mix(in srgb, var(--green) 60%, var(--page)); }
+.pf-sign-score--dom .pf-sign-bar-fill { background: var(--green); }
+.pf-sign-val {
+    font-family: var(--mono);
+    font-size: 13px;
+    color: var(--ink);
+    width: 26px;
+    text-align: right;
+    flex: none;
+}
+
+/* compare control */
+.pf-sign-compare {
+    margin-top: 22px;
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 12px;
+}
+.pf-sign-form { display: flex; align-items: center; gap: 8px; }
+.pf-sign-form-label {
+    font-family: var(--mono);
+    font-size: 10.5px;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    color: var(--muted);
+}
+.pf-sign-input {
+    font-family: var(--mono);
+    font-size: 12px;
+    padding: 6px 9px;
+    border: 1px solid var(--line);
+    background: var(--panel);
+    color: var(--ink);
+    width: 150px;
+}
+.pf-sign-input:focus { outline: none; border-color: var(--green); }
+.pf-sign-go, .pf-sign-clear {
+    font-family: var(--mono);
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    padding: 6px 12px;
+    border: 1px solid var(--ink);
+    background: var(--ink);
+    color: var(--page);
+    cursor: pointer;
+}
+.pf-sign-clear { background: transparent; color: var(--muted); border-color: var(--line); }
+.pf-sign-go:hover { background: var(--green); border-color: var(--green); }
+.pf-sign-clear:hover { color: var(--ink); border-color: var(--ink); }
+.pf-sign-msg {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--muted);
+}
+/* normalization explainer under the kicker */
+.pf-sign-method {
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.03em;
+    color: var(--muted);
+    margin: -12px 0 24px;
+    max-width: 64ch;
+}
+
+/* raw values reference table */
+.pf-rawvals { margin-top: 40px; }
+.pf-rawvals-head {
+    display: flex;
+    align-items: baseline;
+    gap: 12px;
+    margin-bottom: 12px;
+}
+.pf-rawvals-kicker {
+    font-family: var(--mono);
+    font-size: 10.5px;
+    text-transform: uppercase;
+    letter-spacing: 0.14em;
+    color: var(--ink);
+}
+.pf-rawvals-note {
+    font-family: var(--mono);
+    font-size: 10.5px;
+    letter-spacing: 0.04em;
+    color: var(--muted);
+}
+.pf-rawvals-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-family: var(--mono);
+    font-size: 12.5px;
+}
+.pf-rawvals-table th, .pf-rawvals-table td { padding: 8px 0; }
+.pf-rawvals-table thead th {
+    font-size: 10.5px;
+    font-weight: 400;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    color: var(--muted);
+    text-align: right;
+    border-bottom: 1px solid color-mix(in srgb, var(--ink) 28%, var(--line));
+}
+.pf-rawvals-table thead th:first-child { text-align: left; }
+.pf-rawvals-table thead th span { font-weight: 600; text-transform: none; letter-spacing: 0.03em; }
+.pf-rawvals-table tbody tr { border-bottom: 1px solid var(--line); }
+.pf-rawvals-table tbody th {
+    font-size: 10.5px;
+    font-weight: 400;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    color: var(--muted);
+    text-align: left;
+    width: 110px;
+}
+.pf-rawvals-val {
+    text-align: right;
+    color: var(--ink);
+    white-space: nowrap;
+}
+.pf-rawvals-val--lead { font-weight: 600; }
+.pf-rawvals-dot {
+    display: inline-block;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--green);
+    margin-left: 7px;
+    transform: translateY(-1px);
+}
+@media (max-width: 560px) {
+    .pf-sign-name { font-size: 32px; }
+    .pf-rawvals-table tbody th { width: 84px; }
+    .pf-rawvals-val { white-space: normal; }
 }

@@ -152,6 +152,54 @@ describe("deriveInsights", () => {
         expect(r!.tools_top[0]!.name).toBe("Bash");
     });
 
+    test("wrapped counts passed through when provided", () => {
+        const r = deriveInsights({
+            durations: baseDurations,
+            peakHour: 13,
+            spawned: 5,
+            commits: 20,
+            tools: [],
+            daily: baseDailyFull,
+            wrapped: {
+                turns: 41200,
+                tool_calls: 88000,
+                tool_failures: 3100,
+                distinct_tools: 41,
+                distinct_skills: 56,
+                repos_count: 12,
+                verification_calls: 9100,
+                context_calls: 22000,
+            },
+        });
+        expect(r!.turns).toBe(41200);
+        expect(r!.tool_calls).toBe(88000);
+        expect(r!.tool_failures).toBe(3100);
+        expect(r!.distinct_tools).toBe(41);
+        expect(r!.distinct_skills).toBe(56);
+        expect(r!.repos_count).toBe(12);
+        expect(r!.verification_calls).toBe(9100);
+        expect(r!.context_calls).toBe(22000);
+    });
+
+    test("wrapped counts absent when not provided", () => {
+        const r = deriveInsights({
+            durations: baseDurations,
+            peakHour: 13,
+            spawned: 5,
+            commits: 20,
+            tools: [],
+            daily: baseDailyFull,
+        });
+        expect(r!.turns).toBeUndefined();
+        expect(r!.tool_calls).toBeUndefined();
+        expect(r!.tool_failures).toBeUndefined();
+        expect(r!.distinct_tools).toBeUndefined();
+        expect(r!.distinct_skills).toBeUndefined();
+        expect(r!.repos_count).toBeUndefined();
+        expect(r!.verification_calls).toBeUndefined();
+        expect(r!.context_calls).toBeUndefined();
+    });
+
     test("returns null when both durations and daily are empty", () => {
         const r = deriveInsights({
             durations: [],

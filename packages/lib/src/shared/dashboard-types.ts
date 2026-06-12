@@ -768,6 +768,21 @@ export interface WrappedPrivacySummary {
     readonly redactedFields: ReadonlyArray<string>;
 }
 
+/** Agent-authored Wrapped recap card (ax wrapped publish). */
+export interface WrappedCardDto {
+    /** eyebrow question, e.g. "Which archetype are you?" */
+    readonly question: string;
+    /** the big line - headlines carry the card */
+    readonly headline: string;
+    readonly body: string;
+    /** 'sensitive' cards are dropped from the public preview */
+    readonly sensitivity: string;
+    readonly position: number;
+    /** optional REAL data series grounding the card (drawn as its bar strip) */
+    readonly series?: ReadonlyArray<number>;
+    readonly series_label?: string | null;
+}
+
 export interface WrappedProfile {
     readonly generatedAt: string;
     readonly period: WrappedPeriod;
@@ -777,6 +792,8 @@ export interface WrappedProfile {
     readonly facts: ReadonlyArray<WrappedFact>;
     readonly metrics: WrappedMetrics;
     readonly privacy: WrappedPrivacySummary;
+    /** agent-authored recap cards; absent/empty until `ax wrapped publish` */
+    readonly cards?: ReadonlyArray<WrappedCardDto>;
 }
 
 export interface IngestEvent {
@@ -1188,6 +1205,8 @@ export interface ProposalDto {
     readonly guidance_payload?: GuidanceProposalPayload | null;
     readonly automation_payload?: AutomationProposalPayload | null;
     readonly experiment?: ExperimentDto | null;
+    /** "mined" (signal-derived) or "agent" (ax improve propose); served coalesced. */
+    readonly origin?: string;
     /** server-rendered markdown agent brief */
     readonly brief?: string;
 }
