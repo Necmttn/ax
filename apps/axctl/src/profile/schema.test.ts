@@ -58,6 +58,14 @@ describe("decodeProfile", () => {
         const profile: ProfileV1 = decodeProfile(validProfile);
         expect(profile.github).toBe("necmttn");
         expect(profile.taste!.patterns).toHaveLength(2);
+        const stackChoice = profile.taste!.patterns.find(
+            (p) => p.category === "stack-choice",
+        );
+        if (stackChoice?.category !== "stack-choice") {
+            throw new Error("expected a stack-choice pattern");
+        }
+        expect(stackChoice.slot).toBe("state-management");
+        expect(stackChoice.over).toContain("redux");
     });
 
     test("cost_usd is optional (--no-cost)", () => {
@@ -95,6 +103,41 @@ describe("decodeProfile", () => {
             taste: { patterns: [{ category: "workflow", name: "x", evidence: { sessions: 1, confidence: 0.5 } }] },
         };
         expect(() => decodeProfile(noSummary)).toThrow();
+    });
+
+    test("rejects invalid evidence trend value", () => {
+        const bad = {
+            ...validProfile,
+            taste: {
+                patterns: [
+                    {
+                        category: "workflow",
+                        name: "x",
+                        summary: "y",
+                        evidence: { sessions: 1, confidence: 0.5, trend: "exploding" },
+                    },
+                ],
+            },
+        };
+        expect(() => decodeProfile(bad)).toThrow();
+    });
+
+    test("rejects invalid links[].rel value", () => {
+        const bad = {
+            ...validProfile,
+            taste: {
+                patterns: [
+                    {
+                        category: "workflow",
+                        name: "x",
+                        summary: "y",
+                        evidence: { sessions: 1, confidence: 0.5 },
+                        links: [{ rel: "caused-by", ref: "debugging/some-pattern" }],
+                    },
+                ],
+            },
+        };
+        expect(() => decodeProfile(bad)).toThrow();
     });
 
     test("category enum is exactly the spec set", () => {
