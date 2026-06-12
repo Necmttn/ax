@@ -23,6 +23,7 @@ import { recallCommand, recallRuntime } from "./commands/recall.ts";
 import { hookCommand, hooksCommand, hooksRuntime } from "./commands/hooks.ts";
 import { retroCommand, retroRuntime } from "./commands/retro.ts";
 import { improveCommand, improveRuntime } from "./commands/improve.ts";
+import { wrappedCommand, wrappedRuntime } from "./commands/wrapped.ts";
 import { sessionsCommand, sessionsRuntime } from "./commands/sessions.ts";
 import { skillsCommand, rolesCommand, skillsRuntime } from "./commands/skills.ts";
 import { classifiersCommand, classifiersRuntime } from "./commands/classifiers.ts";
@@ -83,6 +84,7 @@ export const RUNTIME_BY_COMMAND: RuntimeManifest = {
     ...hooksRuntime,
     ...retroRuntime,
     ...improveRuntime,
+    ...wrappedRuntime,
     ...sessionsRuntime,
     ...skillsRuntime,
     ...classifiersRuntime,
@@ -101,6 +103,7 @@ const registeredCommands: ReadonlyArray<Command.Command.Any> = [
     ingestCommand,
     sessionsCommand,
     improveCommand,
+    wrappedCommand,
     retroCommand,
     recallCommand,
     skillsCommand,
