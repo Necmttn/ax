@@ -1,7 +1,9 @@
 /**
  * Windowed stat queries for the profile renderer. These are parameterized
- * variants of queries/wrapped.ts (which hardcodes 365d). All deref-free in
- * grouped aggregates (SurrealDB 3.x hang rule); joins happen in JS.
+ * variants of queries/wrapped.ts (which hardcodes 365d). No stacked
+ * in.*/out.* deref combos inside grouped aggregates (SurrealDB 3.x hang
+ * rule); fetchSkillInvocations carries the single out.name deref that
+ * WRAPPED_SKILLS_SQL already established. Joins happen in JS.
  * Read-only tables: session_token_usage, turn, session, invoked, skill,
  * proposal.
  */
@@ -57,7 +59,9 @@ export const fetchDailyActivity = Effect.fn("profile.fetchDailyActivity")(
         const rows = yield* db
             .query<[Array<Record<string, unknown>>]>(DAILY_ACTIVITY_SQL(opts.windowDays))
             .pipe(Effect.map((r) => r?.[0] ?? []));
-        return rows.map((r) => String(r.date)).filter((d) => d !== "undefined");
+        return rows
+            .map((r) => String(r.date))
+            .filter((d) => d !== "undefined" && d !== "null");
     },
 );
 
