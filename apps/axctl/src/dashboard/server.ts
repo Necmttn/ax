@@ -260,6 +260,13 @@ export async function serveDashboard(args: string[]): Promise<void> {
     const { formatServeBanner } = await import("../cli/banner.ts");
     console.log(formatServeBanner(port));
 
+    // Warm the wrapped-profile cache in the background AFTER listen: the
+    // landing page hits /api/wrapped on first paint and the uncached compute
+    // is a ~20s full-graph pass. Fire-and-forget - a failure here just means
+    // the first visitor pays the compute instead.
+    const { fetchWrappedCached } = await import("./wrapped-cache.ts");
+    void handle.runner(fetchWrappedCached()).catch(() => undefined);
+
     // Tear down the sidecar + runtime on shutdown. Bun's serve never resolves,
     // so the process exits via a signal; close the open run streams and dispose
     // the runtime (which interrupts any in-flight ingest daemon) first.

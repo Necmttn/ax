@@ -15,7 +15,8 @@ import { emptyRecallResponse, fetchRecall, type RecallParams } from "../recall.t
 import { fetchSkillGraph } from "../skill-graph.ts";
 import { fetchToolFailureDetail, fetchToolFailures } from "../tool-failures.ts";
 import { fetchWorkflow } from "../workflow.ts";
-import { fetchWrapped, sanitizeWrappedProfile } from "../wrapped.ts";
+import { sanitizeWrappedProfile } from "../wrapped.ts";
+import { fetchWrappedCached } from "../wrapped-cache.ts";
 import { orInternal } from "./common.ts";
 
 export const InsightsGroupLive = HttpApiBuilder.group(AxApi, "insights", (handlers) =>
@@ -50,9 +51,9 @@ export const InsightsGroupLive = HttpApiBuilder.group(AxApi, "insights", (handle
                         : Effect.succeed(payload)
                 ),
             ))
-        .handle("wrapped", () => orInternal(fetchWrapped()))
+        .handle("wrapped", () => orInternal(fetchWrappedCached()))
         .handle("wrappedPublicPreview", () =>
-            orInternal(fetchWrapped().pipe(Effect.map(sanitizeWrappedProfile))))
+            orInternal(fetchWrappedCached().pipe(Effect.map(sanitizeWrappedProfile))))
         .handle("workflow", () => orInternal(fetchWorkflow()))
         .handle("toolFailures", () => orInternal(fetchToolFailures()))
         .handle("toolFailureDetail", ({ params }) => orInternal(fetchToolFailureDetail(params.label))));
