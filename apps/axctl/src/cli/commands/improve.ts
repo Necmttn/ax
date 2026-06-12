@@ -639,11 +639,9 @@ const cmdImproveAnalyze = (input: { readonly force: boolean }) =>
             console.log(`already exists: ${path} (re-run with --force to overwrite)`);
             return;
         }
-        yield* Effect.tryPromise(async () => {
-            const { mkdir } = await import("node:fs/promises");
-            await mkdir(dir, { recursive: true });
-            await Bun.write(path, renderAnalyzeBrief({ date }));
-        });
+        // Bun.write creates parent directories itself - no fs import needed
+        // (repo gate: check:no-node-fs).
+        yield* Effect.tryPromise(() => Bun.write(path, renderAnalyzeBrief({ date })));
         console.log(`analysis brief written: ${path}`);
         console.log("hand it to an agent session; findings come back via `ax improve propose`");
     });
