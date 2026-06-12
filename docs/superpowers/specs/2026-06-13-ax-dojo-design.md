@@ -74,7 +74,8 @@ New module `apps/axctl/src/dojo/`. Composes two things:
 | 4 | `proposal_mint` | fresh `ax improve recommend` pass | generate new grounded proposals |
 | 5 | `experiment` | churn hotspots (`ax sessions churn`) | worktree experiment: fix/hook/skill, backtest, emit proposal |
 | 6 | `upstream_draft` | findings during any item | write issue draft to outbox with repro + session refs |
-| 7 | `explore` | agenda dry | retro-meta style free investigation |
+| 7 | `spar` | opt-in (`--spar`), needs large surplus | replay benchmark: one variable changed, scored delta (see Sparring) |
+| 8 | `explore` | agenda dry | retro-meta style free investigation |
 
 Each item: `id`, `kind`, `commands` (exact CLI invocations), `success`
 criteria, `cost_class` (s/m/l). The agenda is **derived state** - a locked
@@ -101,11 +102,53 @@ only loop mechanics + per-kind playbooks.
   already block main writes). Branch + evidence, surfaced as an improve
   proposal; optionally a draft PR.
 - **New hooks**: authored via `@ax/hooks-sdk`, validated with
-  `ax hooks backtest` (evidence attached), shipped as a proposal.
+  `ax hooks backtest` (evidence attached), shipped as a proposal. Evidence
+  must show **both sides of the ledger**:
+  - *benefit*: cases from history this hook would have caught/fixed
+  - *cost*: per-fire latency (p50/p95 measured during backtest), estimated
+    fires/day from tool_call history → daily overhead, and the **cumulative
+    installed-chain latency** (every hook rides the ~70ms bun hot path;
+    chains add up). Agenda warns when total chain exceeds a budget
+    (default ~250ms per event); dojo must reject its own hook when overhead
+    outweighs benefit.
 - **New skills**: scaffolded draft + usage evidence from the graph, shipped
   as a proposal.
 - **Merging the proposal activates it.** Morning user reviews a queue, never
   a surprise diff.
+
+### Sparring - opt-in replay benchmarks (`--spar`)
+
+The dojo metaphor's practice matches. Context: the field needs better
+harness/model benchmarks; the user's own transcript history is a benchmark
+corpus nobody else has.
+
+Mechanism - **one task, one delta, scored**:
+
+1. Pick a past task with a known outcome from the graph (a session that
+   landed a commit; `ax sessions near <sha>` gives the window).
+2. Pin a worktree at the parent commit - frozen environment.
+3. Re-run the same task prompt with exactly **one variable changed**:
+   model, skill present/absent, hook present/absent, thinking level, or
+   prompt wording.
+4. Score the delta from the graph's own metrics: tokens spent, turns,
+   verification churn / episodes, wall time, did-it-land.
+5. Output a **spar report** (receipt-style comparison, baseline vs variant)
+   into the dojo report + optionally an improve proposal ("adding skill X
+   to this task class saves ~N tokens").
+
+Guardrails:
+
+- opt-in only (`--spar` flag or config), `cost_class: xl` - agenda includes
+  spar items only when surplus is large (a spar can burn a meaningful slice
+  of the window)
+- pinned worktree, no pushes; baseline = the historical run (free - already
+  in the graph), so one spar = one live re-run, not two
+- variant runs are tagged in the graph (so spar traffic never pollutes
+  taste/usage analytics)
+
+v1 ships the mechanism for skill/hook/prompt deltas inside the same harness
+(model deltas via subagent model override where the harness allows it);
+cross-harness sparring (Claude Code vs Codex on the same task) is v2.
 
 ### Outbox + report
 
@@ -128,6 +171,10 @@ later.
 - outbox, never unattended publishing
 - budget reserve keeps 15% of the window untouched
 - `--force` required to dojo with no surplus
+- hook proposals carry a latency ledger; installed-chain budget warns at
+  ~250ms/event
+- spar is opt-in, surplus-gated, and tagged so benchmark runs never pollute
+  usage analytics
 
 ## Out of scope (v1)
 
@@ -142,3 +189,8 @@ later.
 - Does Codex expose enough loop control for parity, or does v1 Codex run as
   a single long turn?
 - Cost-class estimation: static per-kind, or learned from dispatch history?
+- Spar model deltas: subagent model override covers Claude-family swaps on
+  plan quota; is that enough for v1, or does model comparison need the
+  harness's own model switch?
+- Hook latency measurement: extend `ax hooks backtest` with timing, or a
+  separate `ax hooks bench`? How to attribute fires/day per event type?
