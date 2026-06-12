@@ -1,0 +1,84 @@
+# IMPORTANT: auto-merge is only safe when the `validate` job of this workflow
+# is configured as a REQUIRED status check on main (repo Settings → Branches →
+# Protection rules) and "Allow auto-merge" is enabled on the repo.  Without
+# that, --auto can merge unvalidated synchronize commits.
+name: community-users
+
+on:
+  pull_request_target:
+    paths:
+      - "community/users/**"
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      # pull_request_target runs with base-repo secrets; check out the PR
+      # head EXPLICITLY and never execute its code - we only read JSON files
+      # and run OUR validator from the base ref. The pr-head/ checkout is
+      # DATA-ONLY: nothing inside it is executed, installed, or sourced.
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          path: pr-head
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.3.10"
+
+      - name: Only community/users files changed
+        id: scope
+        # Use the GitHub API (gh pr diff) instead of local git diff: the
+        # pr-head checkout is fetch-depth:1 so base.sha is absent and
+        # `git diff base...head` would fail with "fatal: bad object".
+        # gh pr diff returns paths without any pr-head/ prefix; we add it
+        # below when emitting the files list (the validator reads from the
+        # pr-head checkout).
+        # Filename filter is strict-lowercase: GitHub logins are
+        # case-insensitive but our convention is lowercase filenames and the
+        # validator enforces it.
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          changed=$(gh pr diff ${{ github.event.pull_request.number }} --name-only --repo ${{ github.repository }})
+          echo "$changed"
+          if echo "$changed" | grep -v '^community/users/[a-z0-9-]+\.json$' | grep -q .; then
+            echo "outside=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "outside=false" >> "$GITHUB_OUTPUT"
+            echo "files<<EOF" >> "$GITHUB_OUTPUT"
+            echo "$changed" | sed 's|^|pr-head/|' >> "$GITHUB_OUTPUT"
+            echo "EOF" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Validate registrations
+        if: steps.scope.outputs.outside == 'false'
+        run: |
+          bun install --frozen-lockfile
+          echo "${{ steps.scope.outputs.files }}" | xargs bun scripts/validate-community-users.ts \
+            --author="${{ github.event.pull_request.user.login }}"
+
+      - name: Auto-merge
+        if: steps.scope.outputs.outside == 'false'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh pr merge ${{ github.event.pull_request.number }} --squash --auto --repo ${{ github.repository }}
+
+      - name: Comment when human review needed
+        if: steps.scope.outputs.outside == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh pr comment ${{ github.event.pull_request.number }} --repo ${{ github.repository }} \
+            --body "This PR touches files outside community/users/, so it needs normal human review (no auto-merge)."

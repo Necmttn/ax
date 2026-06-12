@@ -1,0 +1,44 @@
+name: community-nightly
+
+on:
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  compile:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.3.10"
+
+      - run: bun install --frozen-lockfile
+
+      - name: Compile community outputs
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: bun scripts/compile-community.ts
+
+      - name: Commit if changed
+        run: |
+          set -euo pipefail
+          # Stage compiled outputs but not the ETag cache (it's machine-local;
+          # skipping it means cold fetches each nightly run, acceptable at current scale).
+          git add community/ && git reset community/.gist-etag-cache.json || true
+          # -I ignores lines matching the pattern (compiled_at-only churn).
+          # Verified: `git diff --cached --quiet -I '"compiled_at"'` exits 0
+          # when only compiled_at lines differ, exits 1 when real data changed.
+          if git diff --cached --quiet -I '"compiled_at"'; then
+            echo "no changes beyond compiled_at timestamp - skipping commit"
+            exit 0
+          fi
+          git config user.name "ax-community-bot"
+          git config user.email "actions@github.com"
+          git commit -m "chore(community): nightly compile"
+          git push

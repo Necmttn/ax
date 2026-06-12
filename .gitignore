@@ -82,3 +82,6 @@ apps/studio-desktop/resources/studio/
 
 # launch/marketing assets - heavy media (30MB+), captured locally, unredacted
 docs/launch-proof/
+
+# ETag cache for nightly community compile - machine-local, no cross-run persistence needed
+community/.gist-etag-cache.json
