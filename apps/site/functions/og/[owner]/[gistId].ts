@@ -10,6 +10,10 @@
  */
 import { ImageResponse } from "workers-og";
 import { OG_RENDER_REV } from "../../_lib/og-meta";
+import {
+    INK, DIM, CARD, GREEN, RED, ROSE, GOLD, BLUE, VIOLET,
+    esc, fmtUsd, statHtml, footerHtml, blockLogoHtml, loadOgFonts,
+} from "../../_lib/og-kit";
 
 interface SubagentCard {
     readonly cost_usd: number | null;
@@ -38,21 +42,6 @@ interface Manifest {
     readonly subagents: ReadonlyArray<SubagentCard>;
 }
 
-const INK = "#e7e9ec";
-const DIM = "#8b93a1";
-const BG = "#15161d";
-const CARD = "#1e1f2a";
-const LINE = "#33364a";
-const GREEN = "#34d399";
-const RED = "#f87171";
-const ROSE = "#fb7185";
-const GOLD = "#fbbf24";
-const BLUE = "#60a5fa";
-const VIOLET = "#a78bfa";
-
-const esc = (s: string): string =>
-    s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-
 const cleanSummary = (raw: string | undefined): string => {
     const text = (raw ?? "").replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
     return text.length > 0 ? (text.length > 110 ? `${text.slice(0, 109)}…` : text) : "Shared agent session";
@@ -64,9 +53,6 @@ const fmtDuration = (ms: number | null): string | null => {
     const m = Math.round((ms % 3_600_000) / 60_000);
     return h > 0 ? `${h}h ${m}m` : `${m}m`;
 };
-
-const fmtUsd = (n: number | null): string | null =>
-    n == null ? null : `$${n >= 100 ? n.toFixed(0) : n.toFixed(2)}`;
 
 /** Mix a hex color toward the card background (0 = card, 1 = full color). */
 function shade(hex: string, t: number): string {
@@ -129,50 +115,6 @@ function costBarHtml(m: Manifest): string {
     return `<div style="display:flex;flex-direction:column"><div style="display:flex">${segs}</div><div style="display:flex;margin-top:12px">${legend}</div></div>`;
 }
 
-/**
- * ASCII AX mark, two lines, monospace column-aligned:
- *
- *    col: 0123456
- *          /\  \/
- *         /--\ /\
- *
- * A = ` /\` over `/--\` (cols 0-3), X = `\/` over `/\` (cols 5-6). Shared by
- * the small header logo and the large ?variant=watermark background; each
- * line renders as its own div (line-stack) to avoid <pre> fragility in
- * workers-og.
- */
-const ASCII_AX_LINES = [" /\\  \\/", "/--\\ /\\"] as const;
-
-// Satori collapses runs of regular spaces under its default white-space
-// handling, which destroys column alignment. Swap every space (leading and
-// internal) for a literal non-breaking space, which satori renders as-is.
-const artLine = (line: string): string => esc(line).replace(/ /g, "\u00A0");
-
-/** Small two-line ASCII AX wordmark for the poster header. */
-function asciiLogoHtml(color: string): string {
-    const lines = ASCII_AX_LINES.map(
-        (line) =>
-            `<div style="display:flex;font-size:14px;line-height:16px;color:${color};letter-spacing:1px;font-weight:700">${artLine(line)}</div>`,
-    ).join("");
-    return `<div style="display:flex;flex-direction:column">${lines}</div>`;
-}
-
-/**
- * Large background ASCII watermark for the ?variant=watermark debug variant:
- * the same AX mark as the header, scaled up. Positioned absolutely (satori
- * supports position:absolute when the container is position:relative). Low
- * opacity so content stays readable.
- */
-function asciiWatermarkHtml(): string {
-    const lines = ASCII_AX_LINES.map(
-        (line) =>
-            `<div style="display:flex;font-size:120px;line-height:132px;color:${INK};letter-spacing:4px;font-weight:700">${artLine(line)}</div>`,
-    ).join("");
-    // Faded via an opacity wrapper on the container (not a hex alpha channel
-    // on the color) - satori applies opacity to the whole subtree.
-    return `<div style="display:flex;flex-direction:column;position:absolute;top:160px;left:120px;opacity:0.06">${lines}</div>`;
-}
-
 export const onRequestGet: PagesFunction = async (ctx) => {
     const owner = String(ctx.params.owner ?? "");
     const gistId = String(ctx.params.gistId ?? "").replace(/\.png$/, "");
@@ -203,28 +145,31 @@ export const onRequestGet: PagesFunction = async (ctx) => {
     const model = manifest.session.model ?? "";
     const date = (manifest.session.started_at ?? "").slice(0, 10);
 
-    const stat = (n: string, label: string, color: string = INK) =>
-        `<div style="display:flex;flex-direction:column;margin-right:46px;width:200px"><span style="font-size:46px;font-weight:700;color:${color}">${n}</span><span style="font-size:14px;letter-spacing:2px;color:${DIM};margin-top:2px">${label}</span></div>`;
     const statList = [
-        stat(t.turns.toLocaleString("en-US"), "TURNS"),
-        stat(t.tool_calls.toLocaleString("en-US"), "TOOL CALLS"),
-        fmtDuration(t.duration_ms) ? stat(fmtDuration(t.duration_ms)!, "WALL CLOCK") : "",
-        fmtUsd(t.cost_usd) ? stat(fmtUsd(t.cost_usd)!, "TOTAL COST", GREEN) : "",
-        t.failures > 0 ? stat(String(t.failures), "FAILED TOOL CALLS", RED) : "",
+        statHtml(t.turns.toLocaleString("en-US"), "TURNS"),
+        statHtml(t.tool_calls.toLocaleString("en-US"), "TOOL CALLS"),
+        fmtDuration(t.duration_ms) ? statHtml(fmtDuration(t.duration_ms)!, "WALL CLOCK") : "",
+        fmtUsd(t.cost_usd) ? statHtml(fmtUsd(t.cost_usd)!, "TOTAL COST", GREEN) : "",
+        t.failures > 0 ? statHtml(String(t.failures), "FAILED TOOL CALLS", RED) : "",
     ].filter(Boolean);
     // Two rows so the stat column shares the band with the fleet waffle
     // instead of running underneath it.
     const stats = `<div style="display:flex;flex-direction:column"><div style="display:flex;margin-bottom:30px">${statList.slice(0, 3).join("")}</div><div style="display:flex">${statList.slice(3).join("")}</div></div>`;
 
+    // Block logo (pixel grid) replaces the old ASCII two-liner; same header
+    // position, small scale so it fits in the 56px header band.
+    const logo = blockLogoHtml({ scale: 4, color: INK, dimColor: DIM });
+    // Watermark variant: large low-opacity block logo centered behind content.
+    const watermarkLogo = blockLogoHtml({ scale: 10, color: INK, dimColor: DIM });
+
     const blocks: Record<string, string> = {
-        // ASCII logo replaces the serif "ax" wordmark. The line-stack avoids
-        // <pre> fragility and keeps display:flex on the container intact.
-        header: `<div style="display:flex;justify-content:space-between;align-items:center"><div style="display:flex;align-items:center"><div style="display:flex;margin-right:14px">${asciiLogoHtml(INK)}</div><span style="font-size:14px;color:${DIM};letter-spacing:3px">AGENT EXPERIENCE</span></div><span style="font-size:17px;color:${DIM}">${esc([model, date].filter(Boolean).join(" · "))}</span></div>`,
+        // Block logo replaces the ASCII line-stack mark. Same position + kicker.
+        header: `<div style="display:flex;justify-content:space-between;align-items:center"><div style="display:flex;align-items:center"><div style="display:flex;margin-right:14px">${logo}</div><span style="font-size:14px;color:${DIM};letter-spacing:3px">AGENT EXPERIENCE</span></div><span style="font-size:17px;color:${DIM}">${esc([model, date].filter(Boolean).join(" · "))}</span></div>`,
         title: `<div style="display:flex;font-size:33px;line-height:1.3;color:${INK};margin-top:26px;font-weight:600">${title}</div>`,
         stats: `<div style="display:flex;margin-top:30px">${stats}</div>`,
         fleet: t.subagents > 0 ? `<div style="display:flex;flex-direction:column;align-items:flex-start;margin-top:30px"><div style="display:flex">${fleetHtml(manifest.subagents)}</div><span style="font-size:14px;letter-spacing:2px;color:${DIM};margin-top:10px">${t.subagents} SUBAGENTS · BRIGHTER = COSTLIER</span></div>` : "",
         costbar: `<div style="display:flex;margin-top:30px">${costBarHtml(manifest)}</div>`,
-        footer: `<div style="display:flex;justify-content:space-between;align-items:center;margin-top:24px"><span style="font-size:15px;letter-spacing:2px;color:${DIM}">EVERY TURN · EVERY TOOL CALL · EVERY DOLLAR</span><div style="display:flex;align-items:baseline"><span style="font-size:14px;letter-spacing:2px;color:${DIM};margin-right:10px">RECORDED WITH</span><span style="font-size:24px;color:${INK};font-weight:700;font-family:'Gelasio'">ax</span><span style="font-size:14px;letter-spacing:2px;color:${DIM};margin-left:12px">· AX.NECMTTN.COM</span></div></div>`,
+        footer: footerHtml("EVERY TURN · EVERY TOOL CALL · EVERY DOLLAR"),
     };
     const probe = u.searchParams.get("probe");
     // Full layout: stats column left, fleet right, then the cost bar; probe
@@ -233,28 +178,20 @@ export const onRequestGet: PagesFunction = async (ctx) => {
     const inner = probe
         ? probe.split(",").filter((k) => k in blocks).map((k) => blocks[k]).join("")
         : `${blocks.header}${blocks.title}${mid}${blocks.costbar}${blocks.footer}`;
-    // ?variant=watermark: inject a large low-opacity ASCII background mark for
+    // ?variant=watermark: inject a large low-opacity block logo background mark for
     // iterating on the treatment without making it the default social card.
     // position:relative on the outer container lets the absolute child render
     // behind the content stack. Never active by default.
-    const watermark = variant === "watermark" ? asciiWatermarkHtml() : "";
+    const watermark = variant === "watermark"
+        ? `<div style="display:flex;flex-direction:column;position:absolute;top:100px;left:80px;opacity:0.06">${watermarkLogo}</div>`
+        : "";
     // Full bleed, no border: the platform rendering the preview (X / Slack /
     // Discord) draws its own frame + rounded corners - an inner border reads
     // as a nested double-frame. 64px safe margins keep content clear of the
     // platforms' corner clipping (GitHub-card convention).
     const html = `<div style="display:flex;flex-direction:column;position:relative;width:1200px;height:630px;background:${CARD};padding:56px 64px;font-family:'JetBrains Mono'">${watermark}${inner}</div>`;
 
-    const font = await fetch(
-        "https://cdn.jsdelivr.net/fontsource/fonts/jetbrains-mono@latest/latin-400-normal.ttf",
-    ).then((r) => r.arrayBuffer());
-    const fontBold = await fetch(
-        "https://cdn.jsdelivr.net/fontsource/fonts/jetbrains-mono@latest/latin-700-normal.ttf",
-    ).then((r) => r.arrayBuffer());
-    // Brand wordmark serif - Gelasio is metric-compatible with Georgia (the
-    // site's wordmark face), which is not licensable for embedding.
-    const fontSerif = await fetch(
-        "https://cdn.jsdelivr.net/fontsource/fonts/gelasio@latest/latin-700-normal.ttf",
-    ).then((r) => r.arrayBuffer());
+    const { regular, bold, serif } = await loadOgFonts();
 
     let png: ArrayBuffer;
     try {
@@ -262,9 +199,9 @@ export const onRequestGet: PagesFunction = async (ctx) => {
             width: 1200,
             height: 630,
             fonts: [
-                { name: "JetBrains Mono", data: font, weight: 400, style: "normal" },
-                { name: "JetBrains Mono", data: fontBold, weight: 700, style: "normal" },
-                { name: "Gelasio", data: fontSerif, weight: 700, style: "normal" },
+                { name: "JetBrains Mono", data: regular, weight: 400, style: "normal" },
+                { name: "JetBrains Mono", data: bold, weight: 700, style: "normal" },
+                { name: "Gelasio", data: serif, weight: 700, style: "normal" },
             ],
         });
         // Buffer the render: a lazy stream produced empty bodies on Pages, and
