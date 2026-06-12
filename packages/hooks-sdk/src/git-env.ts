@@ -10,6 +10,8 @@ export interface GitEnvService {
   readonly hasTrackedChanges: (dir: string) => Effect.Effect<boolean>;
   /** current branch short name, null when detached/not a repo. */
   readonly currentBranch: (dir: string) => Effect.Effect<string | null>;
+  /** the repo's default branch (origin/HEAD, falling back to main/master). */
+  readonly defaultBranch: (dir: string) => Effect.Effect<string>;
   /** repo toplevel for dir (walking up past not-yet-existing paths), null outside repos. */
   readonly repoRoot: (dir: string) => Effect.Effect<string | null>;
 }
@@ -63,6 +65,26 @@ const liveShape: GitEnvService = {
   currentBranch: (dir) =>
     Effect.sync(() => gitCmd(dir, ["symbolic-ref", "--short", "HEAD"])),
 
+  defaultBranch: (dir) =>
+    Effect.sync(() => {
+      const head = gitCmd(dir, [
+        "symbolic-ref",
+        "--short",
+        "refs/remotes/origin/HEAD",
+      ]);
+      if (head !== null) return head.replace(/^origin\//, "");
+      for (const b of ["main", "master"]) {
+        // gitCmd returns "" (not null) when show-ref exits 0 with no output.
+        if (
+          gitCmd(dir, ["show-ref", "--verify", "--quiet", `refs/heads/${b}`]) !==
+          null
+        ) {
+          return b;
+        }
+      }
+      return "main";
+    }),
+
   repoRoot: (dir) =>
     Effect.sync(() => {
       // Walk up past path segments that don't exist yet (new files staged in
@@ -87,6 +109,7 @@ export const GitEnvTest = (answers: {
   trackedDirty?: ReadonlyArray<string>;
   branches?: Record<string, string>;
   roots?: Record<string, string>;
+  defaults?: Record<string, string>;
 }): Layer.Layer<GitEnv> =>
   Layer.succeed(GitEnv)({
     isPrimaryTree: (dir) =>
@@ -110,5 +133,11 @@ export const GitEnvTest = (answers: {
         Object.entries(answers.roots ?? {}).find(([p]) =>
           dir.startsWith(p),
         )?.[1] ?? null,
+      ),
+    defaultBranch: (dir) =>
+      Effect.succeed(
+        Object.entries(answers.defaults ?? {}).find(([p]) =>
+          dir.startsWith(p),
+        )?.[1] ?? "main",
       ),
   });

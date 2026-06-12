@@ -28,6 +28,7 @@ describe("GitEnvLive", () => {
         primary: yield* git.isPrimaryTree(repo),
         linked: yield* git.isPrimaryTree(wt),
         branch: yield* git.currentBranch(repo),
+        def: yield* git.defaultBranch(repo),
         root: yield* git.repoRoot(repo),
         dirty: yield* git.isDirty(repo),
         trackedDirty: yield* git.hasTrackedChanges(repo),
@@ -37,6 +38,7 @@ describe("GitEnvLive", () => {
     expect(r.primary).toBe(true);
     expect(r.linked).toBe(false);
     expect(r.branch).toBe("main");
+    expect(r.def).toBe("main"); // no origin/HEAD -> refs/heads/main fallback
     expect(r.root).toBe(realpathSync(repo));
     expect(r.dirty).toBe(false);
     expect(r.trackedDirty).toBe(false);

@@ -7,7 +7,7 @@ import enforceWorktree from "@ax/hooks-sdk/hooks/enforce-worktree";
 const rows = [
     {
         name: "Bash",
-        input: { command: "git checkout main" },
+        input: { command: "git checkout feat" },
         cwd: "/repo",
         source: "claude",
         project: "/repo",
@@ -42,7 +42,7 @@ describe("replayRows", () => {
             replayRows(enforceWorktree, rows).pipe(Effect.provide(layer)),
         );
 
-        // row 0: git checkout main, cwd=/repo (primary) -> Block
+        // row 0: git checkout feat, cwd=/repo (primary) -> Block
         // row 1: bun test (no git checkout verb) -> Allow
         // row 2: git switch x, cwd=/other (not primary per layer) -> Allow
         expect(results).toHaveLength(3);
