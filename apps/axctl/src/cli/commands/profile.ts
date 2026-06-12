@@ -9,6 +9,7 @@ import { Command, Flag } from "effect/unstable/cli";
 import { prettyPrint } from "@ax/lib/json";
 import { buildProfile, type ProfileEnv } from "../../profile/render.ts";
 import type { ProfileV1 } from "../../profile/schema.ts";
+import { integer } from "../render.ts";
 import type { RuntimeManifest } from "./manifest.ts";
 import { fail, jsonFlag, optionValue } from "./shared.ts";
 import { GitHubEnvLive } from "../../profile/github-env.ts";
@@ -85,9 +86,6 @@ const gatherEnv = Effect.gen(function* () {
 // Formatting
 // ---------------------------------------------------------------------------
 
-const integer = (n: number): string =>
-    Number.isFinite(n) ? Math.trunc(n).toLocaleString("en-US") : "0";
-
 /** Human money: >=1000 -> "~$22.6K", else "$22". */
 const money = (n: number): string => {
     if (!Number.isFinite(n)) return "$0";
@@ -120,8 +118,15 @@ export function formatProfile(p: ProfileV1): string {
     }
     lines.push("");
     lines.push(`rig: ${p.rig.skills.length} skills · ${p.rig.hooks.length} hooks · routing_table: ${p.rig.routing_table}${p.rig.rules ? ` · ${p.rig.rules.count} rules` : ""}`);
+    if (p.workflow && p.workflow.arcs.length > 0) {
+        const topArc = p.workflow.arcs[0]!;
+        lines.push(`workflow: ${topArc.steps.join(" → ")} (${topArc.count}x)`);
+    }
     for (const s of topSkills) {
-        lines.push(`  ${s.name.padEnd(nameWidth)} ${integer(s.runs).padStart(6)} runs  (${s.source})`);
+        const downstream = s.downstream_share !== undefined
+            ? `  · downstream ${(s.downstream_share * 100).toFixed(0)}%`
+            : "";
+        lines.push(`  ${s.name.padEnd(nameWidth)} ${integer(s.runs).padStart(6)} runs  (${s.source})${downstream}`);
     }
     if (p.insights) {
         const ins = p.insights;

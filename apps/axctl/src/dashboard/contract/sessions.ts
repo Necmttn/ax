@@ -11,9 +11,9 @@ import { Effect } from "effect";
 import { HttpApiBuilder } from "effect/unstable/httpapi";
 import { AxApi, BadRequestError, InternalError, NotFoundError } from "@ax/lib/shared/api-contract";
 import { extractSessionTimeline, SessionTimelineServiceLayer } from "../../timeline/service.ts";
+import { fetchEnrichedSession } from "../../queries/enriched-session.ts";
 import { fetchSessionCanvas, fetchSessionOrchestration } from "../session-canvas.ts";
 import { fetchSessionCompare } from "../session-compare.ts";
-import { fetchSessionDetail } from "../session-detail.ts";
 import { fetchSessionInsights } from "../session-insights.ts";
 import { fetchSessionInspect } from "../session-inspect.ts";
 import { fetchSessionSummary } from "../session-summary.ts";
@@ -73,4 +73,13 @@ export const SessionsGroupLive = HttpApiBuilder.group(AxApi, "sessions", (handle
                 Effect.mapError(notFoundOrInternal),
             ))
         .handle("sessionDetail", ({ params }) =>
-            orInternal(fetchSessionDetail(params.id))));
+            // The Enriched Session facade is the single home for assembling a
+            // session read model. This route fetches strictly LESS than the CLI:
+            // the bare Session Detail base (`base: "detail"`), no metrics, no
+            // insights - so the HTTP response shape stays the bare
+            // SessionDetailPayload and the query count is exactly one, as before.
+            orInternal(
+                fetchEnrichedSession({ sessionId: params.id, base: { kind: "detail" } }).pipe(
+                    Effect.map((enriched) => enriched.detail!),
+                ),
+            )));

@@ -2,7 +2,6 @@ import { Effect, FileSystem, Option, Path, PlatformError, Schema, Stream } from 
 import { RecordId, SurrealClient, filePointer } from "@ax/lib/db";
 import { AxConfig } from "@ax/lib/config";
 import { surrealLiteral } from "@ax/lib/json";
-import { decodeJsonOrNull } from "@ax/lib/decode";
 import { SkillName } from "@ax/lib/brands";
 import { resolveSkillName, skillRecordKey } from "@ax/lib/skill-id";
 import { AppLayer } from "@ax/lib/layers";
@@ -48,6 +47,11 @@ import {
     type NormalizedTranscriptBatch,
     type NormalizedTurnWrite,
 } from "./normalized/transcripts.ts";
+import { isRecord, jsonText, numberField, parseJsonl, stringField } from "./normalized/toolkit.ts";
+import {
+    buildTurnTokenUsageStatement,
+    surrealOptionFloat,
+} from "./token-usage-writers.ts";
 import { decodeClaudeTranscriptLine } from "./line-schemas.ts";
 import { claudeEffortStamp, loadClaudeEffortLevel } from "./claude-effort.ts";
 
@@ -184,15 +188,6 @@ export function transcriptEditFileRecordKey(path: string): string {
     return fileRecordKey("_", path);
 }
 
-function isRecord(input: unknown): input is Record<string, unknown> {
-    return typeof input === "object" && input !== null && !Array.isArray(input);
-}
-
-function parseJsonl(line: string): Record<string, unknown> | null {
-    const decoded = decodeJsonOrNull(line);
-    return isRecord(decoded) ? decoded : null;
-}
-
 function asContentBlocks(input: unknown): Record<string, unknown>[] {
     return Array.isArray(input) ? input.filter(isRecord) : [];
 }
@@ -235,11 +230,6 @@ function messageKind(role: string, content: unknown, textExcerpt: string | null)
     return role;
 }
 
-function stringField(input: Record<string, unknown>, field: string): string | null {
-    const value = input[field];
-    return typeof value === "string" ? value : null;
-}
-
 function stableHash(input: string): string {
     return Bun.hash(input).toString(16).padStart(16, "0");
 }
@@ -259,24 +249,10 @@ function stringOrJsonExcerpt(input: unknown): string | null {
     return excerpt.length > 0 ? excerpt : null;
 }
 
-function numberField(input: Record<string, unknown>, field: string): number | null {
-    const value = input[field];
-    return typeof value === "number" && Number.isFinite(value) ? value : null;
-}
-
 export function claudeConcurrency(raw = process.env.AX_CLAUDE_CONCURRENCY): number {
     if (!raw) return DEFAULT_CLAUDE_CONCURRENCY;
     const parsed = Number.parseInt(raw, 10);
     return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_CLAUDE_CONCURRENCY;
-}
-
-function jsonText(input: unknown): string | null {
-    try {
-        const encoded = JSON.stringify(input);
-        return encoded === undefined ? null : encoded;
-    } catch {
-        return null;
-    }
 }
 
 function outputText(input: unknown): string | null {
@@ -1494,15 +1470,14 @@ export const toClaudeNormalizedBatch = (
     turns: extracted.turns.map(toNormalizedClaudeTurn),
     toolCalls: extracted.toolCalls,
     toolFileEvidence: extractToolFileEvidence(extracted.toolCalls),
+    agentEventParentEdges: [],
+    // Real claude skill invocations flow through the effectful
+    // relateInvocations path (catalog-resolved), never the synthetic builder.
+    syntheticSkillInvocations: [],
     toolCallSkillRelations: skillRelations,
     planSnapshots: extracted.planSnapshots,
     compactions: extracted.compactions,
 });
-
-const surrealOptionFloat = (value: number | null | undefined): string =>
-    value === null || value === undefined || !Number.isFinite(value)
-        ? "NONE"
-        : Number(value.toFixed(8)).toString();
 
 /**
  * Build the `session_token_usage` UPSERT for a Claude session, priced from the
@@ -1573,38 +1548,33 @@ export const buildClaudeTurnTokenUsageStatements = (
     const sessionId = extracted.session.id;
     return extracted.turnTokenUsages.map((usage) => {
         const modelKey = normalizeModelName(usage.model);
-        const cost = estimateCost({
-            modelKey,
+        return buildTurnTokenUsageStatement({
+            sessionId,
+            seq: usage.seq,
+            source,
+            model: usage.model,
             promptTokens: usage.promptTokens,
             completionTokens: usage.completionTokens,
             cacheCreationInputTokens: usage.cacheCreationInputTokens,
             cacheReadInputTokens: usage.cacheReadInputTokens,
+            freshInputTokens: usage.freshInputTokens,
             estimatedTokens: usage.estimatedTokens,
+            // Claude links model_ref through the NORMALIZED model name (the
+            // raw header model string is kept on the `model` column).
+            modelRefKey: modelKey,
+            cost: estimateCost({
+                modelKey,
+                promptTokens: usage.promptTokens,
+                completionTokens: usage.completionTokens,
+                cacheCreationInputTokens: usage.cacheCreationInputTokens,
+                cacheReadInputTokens: usage.cacheReadInputTokens,
+                estimatedTokens: usage.estimatedTokens,
+            }),
+            usageSource: "claude_transcript.message_usage",
+            usageQuality: "provider_turn",
+            // No raw column for claude turn usage rows.
+            ts: usage.ts,
         });
-        const turnKey = turnRecordKey(sessionId, usage.seq);
-        return `UPSERT ${recordRef("turn_token_usage", turnKey)} MERGE ${surrealObject([
-            ["session", recordRef("session", sessionId)],
-            ["turn", recordRef("turn", turnKey)],
-            ["seq", Math.trunc(usage.seq).toString(10)],
-            ["source", surrealString(source)],
-            ["model", surrealOptionString(usage.model)],
-            ["prompt_tokens", surrealOptionInt(usage.promptTokens)],
-            ["completion_tokens", surrealOptionInt(usage.completionTokens)],
-            ["cache_creation_input_tokens", surrealOptionInt(usage.cacheCreationInputTokens)],
-            ["cache_read_input_tokens", surrealOptionInt(usage.cacheReadInputTokens)],
-            ["fresh_input_tokens", surrealOptionInt(usage.freshInputTokens)],
-            ["estimated_tokens", Math.trunc(usage.estimatedTokens).toString(10)],
-            ["model_ref", modelKey ? recordRef("agent_model", modelKey) : "NONE"],
-            ["estimated_input_cost_usd", surrealOptionFloat(cost.inputUsd)],
-            ["estimated_output_cost_usd", surrealOptionFloat(cost.outputUsd)],
-            ["estimated_cache_creation_cost_usd", surrealOptionFloat(cost.cacheCreationUsd)],
-            ["estimated_cache_read_cost_usd", surrealOptionFloat(cost.cacheReadUsd)],
-            ["estimated_cost_usd", surrealOptionFloat(cost.totalUsd)],
-            ["pricing_source", surrealOptionString(cost.pricingSource)],
-            ["usage_source", surrealString("claude_transcript.message_usage")],
-            ["usage_quality", surrealString("provider_turn")],
-            ["ts", surrealDate(usage.ts)],
-        ])};`;
     });
 };
 

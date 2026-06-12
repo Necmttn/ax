@@ -43,9 +43,19 @@ A model-derived summary or classification of an agent session, such as goal,
 outcome, friction, helpfulness, and satisfaction signals.
 _Avoid_: ground truth
 
+**Enriched Session**:
+The assembled read model of one session - session detail plus metrics plus
+**Session Insights** - produced by one facade so every surface reads the same
+shape.
+_Avoid_: session detail blob
+
 **Derivation Engine**:
 The agent-neutral logic that turns normalized sessions, edits, commits, and touched files into **Change Sets** and **File Memories**.
 _Avoid_: Codex parser, adapter
+
+**Parser Toolkit**:
+The shared write-builder and JSON-access layer of the **Derivation Engine** that provider parsers compose - field probes, JSONL/SQLite JSON decoding, and the common tool-call, compaction, and token-usage write shapes.
+_Avoid_: helper utils, parser utils
 
 **Ingest Stage**:
 One named unit of the ingest run - skills, commands, claude, codex, subagents,
@@ -92,6 +102,16 @@ The schema-typed HTTP API definition (Effect `HttpApi` groups + Schemas in
 source of truth for routes, params, responses, errors, generated docs, and the
 generated client. SSE and binary escape hatches sit outside it as raw routes.
 _Avoid_: route table, endpoint list
+
+**Query Input Contract**:
+The typed input shape plus a `normalize` function a query module exports as the
+single seam every transport (CLI, MCP, HTTP) delegates to for argument semantics
+- defaults, clamping, default windows, presence rules - so the meaning of an
+argument cannot drift between transports. Protocol-level decoding (CLI flags,
+MCP zod schemas) and user-facing error wording stay transport-local; only the
+semantic normalization is shared. Where transports legitimately differ (e.g. a
+divergent limit default) the difference is a parameter, never silently unified.
+_Avoid_: arg parser
 
 **Turn**:
 A single message in an agent session transcript: one user or assistant

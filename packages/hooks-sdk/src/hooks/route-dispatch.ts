@@ -17,145 +17,23 @@
  *   - Codex has no Agent-tool dispatch equivalent; this hook is Claude-only
  *     but the SDK fires it for any harness - it will just never match on Codex
  *     because Codex never emits an `Agent` tool name.
+ *
+ * The routing-table schema, built-in defaults, and the fail-open read live in
+ * ../routing-table.ts (ADR-0014) - the same module `ax routing compile|tune`
+ * builds against, so the hook and the CLI can never drift on format.
  */
 
-import { Effect, Result, Schema } from "effect";
-import { readFileSync } from "node:fs";
-import { homedir } from "node:os";
+import { Effect } from "effect";
 import { defineHook, runMain } from "../define.ts";
-import { GitEnv } from "../git-env.ts";
+import {
+  loadRoutingTableOrDefault,
+  type RoutingTableShape,
+} from "../routing-table.ts";
 import { Verdict } from "../verdict.ts";
 
-// ---------------------------------------------------------------------------
-// Routing table schema
-// ---------------------------------------------------------------------------
-
-const RoutingClass = Schema.Struct({
-  id: Schema.String,
-  pattern: Schema.String,
-  flags: Schema.optional(Schema.String),
-  suggest: Schema.String,
-  reason: Schema.String,
-  // Provenance tag written by ax routing compile/tune ("default" | "user").
-  // Kept as a plain optional string: the hook never reads origin, so an
-  // unknown value must not fail the whole-table decode (which would silently
-  // revert the user's routing table to DEFAULT_TABLE).
-  origin: Schema.optional(Schema.String),
-});
-
-const RoutingTable = Schema.Struct({
-  version: Schema.Literal(1),
-  classes: Schema.Array(RoutingClass),
-  agentTypes: Schema.optional(Schema.Record(Schema.String, Schema.String)),
-});
-
-type RoutingTableType = Schema.Schema.Type<typeof RoutingTable>;
-
-export { RoutingTable as RoutingTableSchema };
-
-// ---------------------------------------------------------------------------
-// Built-in defaults (used when ~/.ax/hooks/routing-table.json is absent /
-// unparseable - the hook must work before any compile-routing step exists)
-// ---------------------------------------------------------------------------
-
-const DEFAULT_TABLE: RoutingTableType = {
-  version: 1,
-  classes: [
-    // Quality reviews and PR reviews deliberately have NO class: the main
-    // model is the Q&A reviewer in this workflow, so only the mechanical
-    // spec-compliance pass routes down. Mirrors ROUTING_CLASSES in
-    // apps/axctl/src/queries/dispatch-analytics.ts (compile-routing unifies).
-    {
-      id: "spec-review",
-      pattern: "^spec review",
-      flags: "i",
-      suggest: "sonnet",
-      reason: "spec-compliance checklist review",
-    },
-    {
-      id: "search-locate",
-      pattern: "^(pattern-find|locate|find|map|sweep|grep)",
-      flags: "i",
-      suggest: "haiku",
-      reason: "code search/sweep",
-    },
-    {
-      id: "research",
-      pattern: "^(research|investigate docs|study)",
-      flags: "i",
-      suggest: "sonnet",
-      reason: "web/docs research",
-    },
-    {
-      id: "well-specified-impl",
-      pattern: "^implement ",
-      flags: "i",
-      suggest: "sonnet",
-      reason: "spec'd implementation",
-    },
-    {
-      id: "bulk-mechanical",
-      pattern: "^(write announcements|regenerate|standardize|merge main)",
-      flags: "i",
-      suggest: "sonnet",
-      reason: "bulk mechanical work",
-    },
-    // Mined by /routing-tune 2026-06-12; mirrors dispatch-analytics.ts.
-    {
-      id: "task-N-impl",
-      pattern: "^Task \\d+:",
-      flags: "i",
-      suggest: "sonnet",
-      reason: "numbered plan-task implementation",
-    },
-    {
-      id: "bug-fix",
-      pattern: "^Fix\\s",
-      flags: "i",
-      suggest: "sonnet",
-      reason: "bounded bug-fix remediation",
-    },
-    {
-      id: "feature-add",
-      pattern: "^Add\\s",
-      flags: "i",
-      suggest: "sonnet",
-      reason: "additive feature with a clear target",
-    },
-  ],
-  agentTypes: {
-    Explore: "haiku",
-    "codebase-locator": "haiku",
-    "codebase-pattern-finder": "haiku",
-    "codebase-analyzer": "sonnet",
-  },
-};
-
-// ---------------------------------------------------------------------------
-// Load routing table (synchronous; fails open on any error)
-// ---------------------------------------------------------------------------
-
-const ROUTING_TABLE_PATH = `${homedir()}/.ax/hooks/routing-table.json`;
-
-const decodeRoutingTable = Schema.decodeUnknownResult(RoutingTable);
-
-/**
- * Load and validate the routing table from disk.
- * Returns DEFAULT_TABLE on any error (missing file, bad JSON, schema mismatch).
- */
-const loadRoutingTable = (): RoutingTableType => {
-  try {
-    const text = readFileSync(ROUTING_TABLE_PATH, "utf8");
-    const parsed: unknown = JSON.parse(text);
-    const result = decodeRoutingTable(parsed);
-    if (Result.isSuccess(result)) return result.success;
-    // Schema validation failed - fall back to defaults (fail open)
-    return DEFAULT_TABLE;
-  } catch {
-    // File absent, unreadable, or non-JSON - fall back to defaults
-    return DEFAULT_TABLE;
-  }
-};
+// Re-exported for consumers (ax hooks tooling, tests) that historically
+// imported the schema from the hook file.
+export { RoutingTableSchema } from "../routing-table.ts";
 
 // ---------------------------------------------------------------------------
 // Match logic (pure, synchronous)
@@ -169,7 +47,7 @@ interface MatchResult {
 }
 
 const matchTable = (
-  table: RoutingTableType,
+  table: RoutingTableShape,
   description: string | undefined,
   subagentType: string | undefined,
 ): MatchResult | null => {
@@ -236,13 +114,10 @@ const hook = defineHook({
   events: ["PreToolUse"],
   // Only fire for Agent-tool dispatches.
   matcher: { tools: ["Agent"] },
+  // No GitEnv needed: routing is pure table matching on the tool input.
+  // (R = never is assignable to the HookDefinition's R = GitEnv.)
   run: (event) =>
-    // GitEnv is required by the HookDefinition interface signature, but this
-    // hook does not need git state. We yield* it to satisfy the type, but
-    // never call any of its methods.
-    Effect.gen(function* () {
-      void (yield* GitEnv); // satisfy R=GitEnv; unused
-
+    Effect.sync(() => {
       const input = event.tool?.input ?? {};
       const model = input.model;
       const subagentType =
@@ -259,7 +134,7 @@ const hook = defineHook({
 
       const description = rawDescription ?? rawPrompt;
 
-      const table = loadRoutingTable();
+      const table = loadRoutingTableOrDefault();
       const match = matchTable(table, description, subagentType);
 
       if (match === null) return Verdict.allow;

@@ -1,21 +1,35 @@
 /**
- * Stored routing-table format + IO.
+ * Stored routing-table merge/compile/save logic.
  *
  * ~/.ax/hooks/routing-table.json is the live source of truth read by the
- * route-dispatch hook and `ax dispatches --candidates`. Classes carry an
- * `origin` tag: "default" rows are refreshed from ROUTING_CLASSES on every
- * `ax routing compile`; "user" rows (mined by `ax routing tune` or hand-added)
- * survive regeneration. Merge key: class id; a default id always wins.
+ * route-dispatch hook and `ax dispatches --candidates`. The table SCHEMA
+ * (types + validation) and the READ path live in @ax/hooks-sdk/routing-table
+ * (ADR-0014) - re-exported here for existing consumers; this module owns the
+ * write side: merge, append, save.
+ *
+ * Classes carry an `origin` tag: "default" rows are refreshed from
+ * ROUTING_CLASSES on every `ax routing compile`; "user" rows (mined by
+ * `ax routing tune` or hand-added) survive regeneration. Merge key: class id;
+ * a default id always wins.
  *
  * agentTypes is asymmetric on merge: defaults refresh on every compile
  * (a stale stored copy never shadows an updated default), while user-ADDED
  * keys (absent from defaults) survive.
  */
 import { Effect, FileSystem, Path } from "effect";
-import { homedir } from "node:os";
-import { ROUTING_CLASSES, type RoutingClass, type RoutingTable } from "./dispatch-analytics.ts";
+import {
+    DEFAULT_ROUTING_TABLE,
+    defaultRoutingTablePath,
+    loadStoredRoutingTable,
+    type ClassOrigin,
+    type LoadedRoutingClass,
+    type LoadedRoutingTable,
+    type RoutingClass,
+    type RoutingTable,
+} from "@ax/hooks-sdk/routing-table";
 
-export type ClassOrigin = "default" | "user";
+export { defaultRoutingTablePath, loadStoredRoutingTable };
+export type { ClassOrigin, LoadedRoutingClass, LoadedRoutingTable };
 
 export interface StoredRoutingClass extends RoutingClass {
     readonly origin: ClassOrigin;
@@ -26,25 +40,6 @@ export interface StoredRoutingTable {
     readonly classes: ReadonlyArray<StoredRoutingClass>;
     readonly agentTypes: Readonly<Record<string, string>>;
 }
-
-/**
- * What a load from disk can actually promise: legacy files (written by the
- * pre-origin `ax dispatches compile-routing`) and hand-added rows may lack
- * the origin tag. mergeRoutingTables accepts this shape and always RETURNS
- * definite origins (origin-less rows are migrated to "user").
- */
-export interface LoadedRoutingClass extends RoutingClass {
-    readonly origin?: ClassOrigin;
-}
-
-export interface LoadedRoutingTable {
-    readonly version: 1;
-    readonly classes: ReadonlyArray<LoadedRoutingClass>;
-    readonly agentTypes: Readonly<Record<string, string>>;
-}
-
-export const defaultRoutingTablePath = (): string =>
-    `${homedir()}/.ax/hooks/routing-table.json`;
 
 /**
  * Refresh defaults, keep user classes. Default ids always win on collision.
@@ -88,65 +83,6 @@ export const appendUserClasses = (
     return { ...table, classes: [...table.classes, ...fresh] };
 };
 
-const isRecord = (v: unknown): v is Record<string, unknown> =>
-    typeof v === "object" && v !== null && !Array.isArray(v);
-
-/** Rebuild a class row from untrusted JSON; null when required fields are bad. */
-const normalizeClassRow = (row: unknown): LoadedRoutingClass | null => {
-    if (!isRecord(row)) return null;
-    if (
-        typeof row.id !== "string" ||
-        typeof row.pattern !== "string" ||
-        typeof row.suggest !== "string" ||
-        typeof row.reason !== "string"
-    ) {
-        return null;
-    }
-    const base = {
-        id: row.id,
-        pattern: row.pattern,
-        flags: typeof row.flags === "string" ? row.flags : "",
-        suggest: row.suggest,
-        reason: row.reason,
-    };
-    const origin = row.origin === "default" || row.origin === "user" ? row.origin : undefined;
-    return origin === undefined ? base : { ...base, origin };
-};
-
-/**
- * Read + parse + normalize the stored table. Null on missing file / bad JSON /
- * bad top-level shape. Malformed class rows are dropped; a missing or
- * non-object agentTypes becomes {} (hand-edited files must not type-lie
- * downstream).
- */
-export const loadStoredRoutingTable = (
-    path: string,
-): Effect.Effect<LoadedRoutingTable | null, never, FileSystem.FileSystem> =>
-    Effect.gen(function* () {
-        const fs = yield* FileSystem.FileSystem;
-        const text = yield* fs.readFileString(path).pipe(Effect.orElseSucceed(() => null));
-        if (text === null) return null;
-        try {
-            const parsed: unknown = JSON.parse(text);
-            if (!isRecord(parsed) || parsed.version !== 1 || !Array.isArray(parsed.classes)) {
-                return null;
-            }
-            const classes = parsed.classes
-                .map(normalizeClassRow)
-                .filter((c): c is LoadedRoutingClass => c !== null);
-            const agentTypes: Record<string, string> = isRecord(parsed.agentTypes)
-                ? Object.fromEntries(
-                      Object.entries(parsed.agentTypes).filter(
-                          (e): e is [string, string] => typeof e[1] === "string",
-                      ),
-                  )
-                : {};
-            return { version: 1, classes, agentTypes } satisfies LoadedRoutingTable;
-        } catch {
-            return null;
-        }
-    });
-
 export const saveStoredRoutingTable = (
     path: string,
     table: StoredRoutingTable,
@@ -167,7 +103,7 @@ export const loadEffectiveRoutingTable = (
 ): Effect.Effect<RoutingTable, never, FileSystem.FileSystem> =>
     Effect.gen(function* () {
         const stored = yield* loadStoredRoutingTable(path ?? defaultRoutingTablePath());
-        if (stored === null) return ROUTING_CLASSES;
+        if (stored === null) return DEFAULT_ROUTING_TABLE;
         return {
             version: 1,
             classes: stored.classes,

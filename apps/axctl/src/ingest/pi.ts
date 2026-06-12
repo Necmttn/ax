@@ -2,18 +2,8 @@ import { Effect, FileSystem, Path, Schema } from "effect";
 import { AxConfig } from "@ax/lib/config";
 import { SkillName } from "@ax/lib/brands";
 import { RecordId, SurrealClient } from "@ax/lib/db";
-import { decodeJsonOrNull } from "@ax/lib/decode";
-import { safeKeyPart } from "@ax/lib/shared/derive-keys";
 import { executeStatements } from "@ax/lib/shared/statement-exec";
-import {
-    recordRef,
-    surrealDate,
-    surrealJsonTextOption,
-    surrealObject,
-    surrealOptionInt,
-    surrealOptionString,
-    surrealString,
-} from "@ax/lib/shared/surql";
+import { surrealJsonTextOption } from "@ax/lib/shared/surql";
 import {
     type ToolCallSkillRelationWrite,
     type ToolCallWrite,
@@ -24,10 +14,24 @@ import { classifyTurnIntent } from "./intent-kind.ts";
 import { providerDelegationSignalAvailability } from "./delegation.ts";
 import { agentEventRecordKey, type AgentEventWrite } from "./provider-events.ts";
 import { providerPlanSignalAvailability } from "./plans.ts";
-import { toolCallRecordKey, turnRecordKey } from "./record-keys.ts";
+import { toolCallRecordKey } from "./record-keys.ts";
 import { BaseStageStats, IngestContext, sinceDaysFromCtx, StageMeta } from "./stage/types.ts";
 import type { StageDef } from "./stage/registry.ts";
-import { extractCommandTool, normalizeCommand, toolKindForName } from "./tool-calls.ts";
+import {
+    booleanField,
+    boundedExcerpt,
+    isRecord,
+    numberField,
+    parseJsonl,
+    parseMaybeJson,
+    stringField,
+} from "./normalized/toolkit.ts";
+import {
+    applyCommandFields,
+    makeToolCallWrite,
+    type MutableToolCallWrite,
+} from "./normalized/tool-call-write.ts";
+import { buildSessionTokenUsageStatement } from "./token-usage-writers.ts";
 import { extractToolFileEvidence } from "./tool-file-evidence.ts";
 import { makeFileFailureCollector } from "./file-isolation.ts";
 import { decodePiTranscriptLine } from "./line-schemas.ts";
@@ -106,30 +110,6 @@ export interface PiStats {
 const SAFE_FALLBACK_TS = "1970-01-01T00:00:00.000Z";
 const SYNTHETIC_PROVIDER_SEQ_OFFSET = 1_000_000_000;
 
-function isRecord(input: unknown): input is Record<string, unknown> {
-    return typeof input === "object" && input !== null && !Array.isArray(input);
-}
-
-function stringField(input: Record<string, unknown>, field: string): string | null {
-    const value = input[field];
-    return typeof value === "string" ? value : null;
-}
-
-function numberField(input: Record<string, unknown>, field: string): number | null {
-    const value = input[field];
-    return typeof value === "number" && Number.isFinite(value) ? value : null;
-}
-
-function booleanField(input: Record<string, unknown>, field: string): boolean | null {
-    const value = input[field];
-    return typeof value === "boolean" ? value : null;
-}
-
-function parseJsonl(line: string): Record<string, unknown> | null {
-    const decoded = decodeJsonOrNull(line);
-    return isRecord(decoded) ? decoded : null;
-}
-
 function validIsoTimestamp(input: string | number): string | null {
     const date = new Date(input);
     return Number.isFinite(date.getTime()) ? date.toISOString() : null;
@@ -180,14 +160,6 @@ interface ToolResultFields {
     hasError: boolean;
 }
 
-type MutableToolCallWrite = {
-    -readonly [Key in keyof ToolCallWrite]: ToolCallWrite[Key];
-};
-
-function boundedExcerpt(text: string, max = 1200): string {
-    return text.length <= max ? text : text.slice(0, max);
-}
-
 function piToolCallId(block: Record<string, unknown>): string | null {
     return stringField(block, "id") ??
         stringField(block, "toolCallId") ??
@@ -201,9 +173,7 @@ function piToolName(input: Record<string, unknown>): string | null {
 }
 
 function piToolInput(block: Record<string, unknown>): unknown {
-    const input = block.input ?? block.arguments ?? block.args ?? null;
-    if (typeof input !== "string") return input;
-    return decodeJsonOrNull(input) ?? input;
+    return parseMaybeJson(block.input ?? block.arguments ?? block.args ?? null);
 }
 
 function applyToolResult(call: MutableToolCallWrite, result: ToolResultFields): void {
@@ -329,35 +299,20 @@ function createPiExtractor(filePath: string) {
             seq,
             callId,
         });
-        const call: MutableToolCallWrite = {
+        const call: MutableToolCallWrite = makeToolCallWrite({
             provider: "pi",
             toolName,
-            toolKind: toolKindForName(toolName),
             sessionId: currentSession.id,
             seq,
-            turnKey: turnRecordKey(currentSession.id, seq),
-            agentEventKey: agentEventRecordKey({
-                provider: "pi",
-                providerSessionId: currentSession.id,
-                providerEventId: callId,
-                seq: eventSeq,
-            }),
             callId,
+            eventSeq,
             ts,
             cwd: currentSession.cwd,
             inputJson,
             rawJson: block,
-            hasError: false,
-        };
+        });
 
-        if (toolName === "exec_command" && isRecord(inputJson)) {
-            const command = stringField(inputJson, "command") ?? stringField(inputJson, "cmd");
-            if (command) {
-                call.commandText = command;
-                call.commandToolName = extractCommandTool(command);
-                call.commandNorm = normalizeCommand(command);
-            }
-        }
+        if (toolName === "exec_command") applyCommandFields(call, inputJson);
 
         pushProviderEvent({
             providerEventId: callId,
@@ -623,19 +578,17 @@ const buildPiTokenUsageStatements = (extract: PiExtract): string[] => {
         ? extract.usage.totalTokens
         : extract.usage.input + extract.usage.output;
     return [
-        `UPSERT ${recordRef("session_token_usage", safeKeyPart(extract.session.id))} MERGE ${surrealObject([
-            ["session", recordRef("session", extract.session.id)],
-            ["source", surrealString("pi")],
-            ["workflow_epoch", "NONE"],
-            ["model", surrealOptionString(extract.session.model)],
-            ["prompt_tokens", surrealOptionInt(extract.usage.input || null)],
-            ["completion_tokens", surrealOptionInt(extract.usage.output || null)],
-            ["cache_creation_input_tokens", surrealOptionInt(extract.usage.cacheWrite || null)],
-            ["cache_read_input_tokens", surrealOptionInt(extract.usage.cacheRead || null)],
-            ["estimated_tokens", Math.trunc(estimatedTokens).toString(10)],
-            ["transcript_bytes", "0"],
-            ["context_window", "NONE"],
-            ["labels", surrealJsonTextOption({
+        buildSessionTokenUsageStatement({
+            sessionId: extract.session.id,
+            source: "pi",
+            model: extract.session.model,
+            promptTokens: extract.usage.input || null,
+            completionTokens: extract.usage.output || null,
+            cacheCreationInputTokens: extract.usage.cacheWrite || null,
+            cacheReadInputTokens: extract.usage.cacheRead || null,
+            estimatedTokens,
+            contextWindow: null,
+            labels: surrealJsonTextOption({
                 ...tokenQualityLabels({
                     source: "pi_jsonl",
                     tokenSourceQuality: "explicit",
@@ -643,10 +596,10 @@ const buildPiTokenUsageStatements = (extract: PiExtract): string[] => {
                     model: extract.session.model,
                     modelSourceDetail: extract.session.model ? "pi_session.model" : "missing_pi_session_model",
                 }),
-            })],
-            ["metrics", surrealJsonTextOption({ usage: extract.usage })],
-            ["ts", surrealDate(extract.session.ended_at)],
-        ])};`,
+            }),
+            metrics: surrealJsonTextOption({ usage: extract.usage }),
+            ts: extract.session.ended_at,
+        }),
     ];
 };
 
@@ -706,6 +659,7 @@ const toPiNormalizedBatch = (extract: PiExtract): NormalizedTranscriptBatch => (
     })),
     toolCalls: extract.toolCalls,
     toolFileEvidence: extractToolFileEvidence(extract.toolCalls),
+    agentEventParentEdges: [],
     // turnHasError/turnIndex omitted: seam defaults preserve
     // `turn_has_error = false, turn_index = ${seq}`.
     syntheticSkillInvocations: extract.invocations.map((invocation) => ({
@@ -718,6 +672,7 @@ const toPiNormalizedBatch = (extract: PiExtract): NormalizedTranscriptBatch => (
         skillContentHash: "pi",
     })),
     toolCallSkillRelations: extract.skillRelations,
+    planSnapshots: [],
     compactions: extract.compactions,
 });
 

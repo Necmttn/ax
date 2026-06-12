@@ -19,6 +19,14 @@ import {
     type ProfileInsights,
     type ProfileSkill,
 } from "~/lib/community";
+import {
+    buildModelColors,
+    buildDayColumns,
+    buildDisplayArcs,
+    sortSkillsByLeverage,
+    OTHER_NAME,
+    type DayColumn,
+} from "~/lib/window-chart";
 
 // mirrors LOGIN_RE in community.ts - GitHub handles only, sanitised before use.
 const LOGIN_RE = /^[A-Za-z0-9-]{1,39}$/;
@@ -169,7 +177,8 @@ function ProfileDossier({ profile: p, vs }: { profile: ProfileV1; vs: VsState })
         : [];
     const ins = p.insights;
     const models = [...p.stats.models].sort((a, b) => b.share - a.share);
-    const tools = ins && ins.tools_top.length > 0 ? ins.tools_top.slice(0, 10) : [];
+    const { colorOf } = buildModelColors(models);
+    const arcs = p.workflow ? buildDisplayArcs(p.workflow.arcs, 5) : [];
     let section = 0;
     const nextSection = (): string => String(++section).padStart(2, "0");
 
@@ -200,35 +209,21 @@ function ProfileDossier({ profile: p, vs }: { profile: ProfileV1; vs: VsState })
                 <Vital num={`${fmtInt(p.stats.streak_days)}d`} label="streak" />
             </section>
 
-            {/* the window: activity timeline + model split, one story */}
+            {/* the window: one stacked-bar chart, model-keyed, with a legend */}
             <section className="pf-section">
                 <Kicker n={nextSection()} title="The window" note={`last ${p.window_days} days`} />
-                <div className={daily.length > 0 ? "pf-window" : "pf-window pf-window--solo"}>
-                    {daily.length > 0 && <ActivityTimeline daily={daily} busiest={ins?.busiest_day.date} />}
-                    <div className="pf-models">
-                        <div className="pf-models-head">
-                            model split · {fmtInt(p.stats.sessions)} sessions over {p.window_days} days
-                        </div>
-                        {models.map((m, i) => (
-                            <div className="pf-model" key={`${m.name}-${i}`}>
-                                <div className="pf-model-top">
-                                    <span className="pf-model-name">{m.name}</span>
-                                    <span className="pf-model-meta">
-                                        <strong>{fmtPct(m.share)}</strong>
-                                        {m.cost_usd !== undefined ? ` · ~${fmtMoney(m.cost_usd)}` : ""}
-                                    </span>
-                                </div>
-                                <span className="pf-model-track">
-                                    <span
-                                        className={i === 0 ? "pf-model-fill pf-model-fill--lead" : "pf-model-fill"}
-                                        style={{ width: `${clampPct(m.share * 100)}%` }}
-                                    />
-                                </span>
-                            </div>
-                        ))}
-                        {models.length === 0 && <p className="pf-quiet">no model data in this window.</p>}
-                    </div>
-                </div>
+                {daily.length > 0 ? (
+                    <StackedWindow
+                        daily={daily}
+                        colorOf={colorOf}
+                        busiest={ins?.busiest_day.date}
+                        models={models}
+                        sessions={p.stats.sessions}
+                        windowDays={p.window_days}
+                    />
+                ) : (
+                    <p className="pf-quiet">no daily activity recorded in this window.</p>
+                )}
             </section>
 
             {/* wrapped-style insight cards */}
@@ -254,54 +249,54 @@ function ProfileDossier({ profile: p, vs }: { profile: ProfileV1; vs: VsState })
             {/* the sign: radar + agent archetype */}
             <SignSection n={nextSection()} profile={p} vs={vs} />
 
-            {/* tool taste */}
-            {tools.length > 0 && (
-                <section className="pf-section">
-                    <Kicker n={nextSection()} title="Tool taste" note="what the hands actually reach for" />
-                    <div className="pf-tools">
-                        {tools.map((t, i) => {
-                            const max = tools[0]?.runs ?? 0;
-                            const w = max > 0 ? clampPct((t.runs / max) * 100) : 0;
-                            return (
-                                <div className="pf-tool" key={`${t.name}-${i}`}>
-                                    <span className="pf-tool-rank">{String(i + 1).padStart(2, "0")}</span>
-                                    <span className="pf-tool-name">{t.name}</span>
-                                    <span className="pf-tool-track" aria-hidden="true">
-                                        <span
-                                            className={i === 0 ? "pf-tool-bar pf-tool-bar--lead" : "pf-tool-bar"}
-                                            style={{ width: `${w}%` }}
-                                        />
+            {/* the rig: workflow arcs + leverage-sorted skills + guardrails */}
+            <section className="pf-section">
+                <Kicker n={nextSection()} title="The rig" note={`${fmtInt(p.rig.skills.length)} skills · ${fmtInt(p.rig.hooks.length)} hooks`} />
+                {arcs.length > 0 && (
+                    <div className="pf-workflow">
+                        <div className="pf-workflow-head">
+                            <span className="pf-workflow-title">The workflow</span>
+                            <span className="pf-workflow-note">recurring skill sequences mined from session order</span>
+                        </div>
+                        <div className="pf-arcs">
+                            {arcs.map((arc, i) => (
+                                <div className="pf-arc" key={i}>
+                                    <span className="pf-arc-chain">
+                                        {arc.steps.map((step, j) => (
+                                            <span className="pf-arc-step-wrap" key={j}>
+                                                {j > 0 && <span className="pf-arc-sep" aria-hidden="true">→</span>}
+                                                <span className="pf-arc-chip" title={step.full}>{step.display}</span>
+                                            </span>
+                                        ))}
                                     </span>
-                                    <span className="pf-tool-runs">{fmtCompact(t.runs)}</span>
+                                    <span className="pf-arc-count">×{fmtInt(arc.count)}</span>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                )}
+                <div className="pf-rig">
+                    <div className="pf-rig-skills">
+                        {groupSkills(p.rig.skills).map((g) => {
+                            const skills = sortSkillsByLeverage(g.skills);
+                            return (
+                                <div className="pf-rig-group" key={g.source}>
+                                    <div className="pf-rig-group-head">
+                                        <span>{g.source}</span>
+                                        <span>{fmtInt(g.skills.length)} skills · {fmtCompact(g.runs)} runs</span>
+                                    </div>
+                                    <div className="pf-rig-group-hint">
+                                        sorted by downstream share - how much of the session follows the skill, not how often it fires
+                                    </div>
+                                    {skills.slice(0, 10).map((s) => (
+                                        <SkillRow key={s.name} skill={s} />
+                                    ))}
+                                    {g.skills.length > 10 && (
+                                        <div className="pf-rig-more">+ {fmtInt(g.skills.length - 10)} more</div>
+                                    )}
                                 </div>
                             );
                         })}
-                    </div>
-                </section>
-            )}
-
-            {/* the rig: skills grouped by source + guardrails */}
-            <section className="pf-section">
-                <Kicker n={nextSection()} title="The rig" note={`${fmtInt(p.rig.skills.length)} skills · ${fmtInt(p.rig.hooks.length)} hooks`} />
-                <div className="pf-rig">
-                    <div className="pf-rig-skills">
-                        {groupSkills(p.rig.skills).map((g) => (
-                            <div className="pf-rig-group" key={g.source}>
-                                <div className="pf-rig-group-head">
-                                    <span>{g.source}</span>
-                                    <span>{fmtInt(g.skills.length)} skills · {fmtCompact(g.runs)} runs</span>
-                                </div>
-                                {g.skills.slice(0, 10).map((s) => (
-                                    <div className="pf-skill" key={s.name}>
-                                        <span className="pf-skill-name">{s.name}</span>
-                                        <span className="pf-skill-runs">{fmtCompact(s.runs)} runs</span>
-                                    </div>
-                                ))}
-                                {g.skills.length > 10 && (
-                                    <div className="pf-rig-more">+ {fmtInt(g.skills.length - 10)} more</div>
-                                )}
-                            </div>
-                        ))}
                         {p.rig.skills.length === 0 && <p className="pf-quiet">no skills recorded in this window.</p>}
                     </div>
                     <aside className="pf-guardrails">
@@ -575,43 +570,179 @@ function RawTable({
 
 const fmtScore = (n: number): string => String(Math.round(n));
 
-function ActivityTimeline({ daily, busiest }: { daily: readonly ProfileDailyRow[]; busiest?: string }) {
-    const maxSessions = daily.reduce((m, d) => Math.max(m, d.sessions), 0);
+/* ---------- the window: one model-keyed stacked-bar chart ---------- */
+
+interface ProfileModelLite { readonly name: string; readonly share: number; readonly cost_usd?: number }
+
+/**
+ * GitHub-heatmap-style daily bars, but each bar is segmented by model tokens
+ * and the whole row carries every daily metric in a hover tooltip. Bar height
+ * scales to the busiest token-day; segments are colour-keyed by the same
+ * window-level model->colour map the legend uses, so a model reads identically
+ * everywhere. Keyboard/touch fallback rides the column's `title` attribute.
+ */
+function StackedWindow({
+    daily, colorOf, busiest, models, sessions, windowDays,
+}: {
+    daily: readonly ProfileDailyRow[];
+    colorOf: (name: string) => string;
+    busiest?: string;
+    models: readonly ProfileModelLite[];
+    sessions: number;
+    windowDays: number;
+}) {
+    const cols = buildDayColumns(daily, colorOf, { peakDate: busiest });
+    const [hover, setHover] = useState<number | null>(null);
     const maxTokens = daily.reduce((m, d) => Math.max(m, d.tokens), 0);
-    const totalSessions = daily.reduce((s, d) => s + d.sessions, 0);
-    const avg = daily.length > 0 ? totalSessions / daily.length : 0;
-    const first = daily[0];
-    const last = daily[daily.length - 1];
+    const first = cols[0];
+    const last = cols[cols.length - 1];
+    const hovered = hover !== null ? cols[hover] : undefined;
+
     return (
-        <div className="pf-activity">
-            <div
-                className="pf-chart"
-                role="img"
-                aria-label={`daily sessions over ${daily.length} days, peaking at ${fmtInt(maxSessions)}`}
-            >
-                {daily.map((d) => {
-                    const h = maxSessions > 0 ? clampPct((d.sessions / maxSessions) * 100) : 0;
-                    const q = maxTokens > 0 ? Math.min(4, Math.max(1, Math.ceil((d.tokens / maxTokens) * 4))) : 1;
-                    const peak = busiest !== undefined && d.date === busiest;
-                    return (
-                        <span
-                            className="pf-chart-day"
-                            key={d.date}
-                            title={`${d.date} · ${fmtInt(d.sessions)} sessions · ${fmtCompact(d.tokens)} tokens`}
+        <div className="pf-window">
+            <div className="pf-stack-wrap">
+                <div
+                    className="pf-stack"
+                    role="img"
+                    aria-label={`daily tokens over ${cols.length} days, segmented by model, peaking at ${fmtCompact(maxTokens)} tokens`}
+                    onMouseLeave={() => setHover(null)}
+                >
+                    {cols.map((c, i) => (
+                        <button
+                            type="button"
+                            className={`pf-stack-day${c.isPeak ? " is-peak" : ""}${hover === i ? " is-hover" : ""}`}
+                            key={c.date}
+                            title={tooltipText(c)}
+                            onMouseEnter={() => setHover(i)}
+                            onFocus={() => setHover(i)}
+                            onBlur={() => setHover(null)}
+                            aria-label={tooltipText(c)}
                         >
                             <span
-                                className={`pf-chart-fill pf-q${q}${peak ? " is-peak" : ""}`}
-                                style={{ height: `${Math.max(h, d.sessions > 0 ? 3 : 0)}%` }}
-                            />
-                        </span>
-                    );
-                })}
+                                className="pf-stack-col"
+                                style={{ height: `${Math.max(c.heightShare * 100, c.tokens > 0 ? 2 : 0)}%` }}
+                            >
+                                {c.segments.map((s, j) => (
+                                    <span
+                                        className="pf-stack-seg"
+                                        key={`${s.name}-${j}`}
+                                        style={{ flexGrow: s.share, background: s.color }}
+                                    />
+                                ))}
+                            </span>
+                            {c.isPeak && <span className="pf-stack-peak" aria-hidden="true">▲</span>}
+                        </button>
+                    ))}
+                    {hovered && (
+                        <WindowTooltip
+                            col={hovered}
+                            index={hover!}
+                            total={cols.length}
+                            colorOf={colorOf}
+                        />
+                    )}
+                </div>
+                <div className="pf-chart-axis">
+                    <span>{first ? fmtDay(first.date) : ""}</span>
+                    <span className="pf-chart-axis-mid">
+                        {fmtInt(sessions)} sessions over {windowDays} days · bar height = daily tokens, colour = model{busiest !== undefined ? " · ▲ peak day" : ""}
+                    </span>
+                    <span>{last ? fmtDay(last.date) : ""}</span>
+                </div>
             </div>
-            <div className="pf-chart-axis">
-                <span>{first ? fmtDay(first.date) : ""}</span>
-                <span className="pf-chart-axis-mid">~{fmtInt(avg)} sessions/day · darker = heavier token days{busiest !== undefined ? " · peak in red" : ""}</span>
-                <span>{last ? fmtDay(last.date) : ""}</span>
+
+            {/* legend: replaces the old model-split rows */}
+            {models.length > 0 && (
+                <div className="pf-legend" aria-label="model legend">
+                    <div className="pf-legend-head">model split · window totals</div>
+                    {models.map((m) => (
+                        <div className="pf-legend-row" key={m.name}>
+                            <span className="pf-legend-chip" style={{ background: colorOf(m.name) }} aria-hidden="true" />
+                            <span className="pf-legend-name" title={m.name}>{m.name}</span>
+                            <span className="pf-legend-meta">
+                                <strong>{fmtPct(m.share)}</strong>
+                                {m.cost_usd !== undefined ? ` · ~${fmtMoney(m.cost_usd)}` : ""}
+                            </span>
+                        </div>
+                    ))}
+                </div>
+            )}
+        </div>
+    );
+}
+
+function tooltipText(c: DayColumn): string {
+    const parts = [
+        fmtDay(c.date),
+        `${fmtInt(c.sessions)} sessions`,
+        `${fmtCompact(c.tokens)} tokens`,
+    ];
+    if (c.tool_calls !== undefined) parts.push(`${fmtCompact(c.tool_calls)} tool calls`);
+    if (c.commits !== undefined) parts.push(`${fmtInt(c.commits)} commits`);
+    return parts.join(" · ");
+}
+
+/** Positioned tooltip; clamps to the chart edges via percentage + transform. */
+function WindowTooltip({
+    col, index, total, colorOf,
+}: {
+    col: DayColumn;
+    index: number;
+    total: number;
+    colorOf: (name: string) => string;
+}) {
+    const frac = total > 1 ? index / (total - 1) : 0.5;
+    // clamp the anchor so the box never overflows the chart edges
+    const leftPct = clampPct(frac * 100);
+    const align = frac < 0.18 ? "0%" : frac > 0.82 ? "-100%" : "-50%";
+    return (
+        <div
+            className="pf-tip"
+            style={{ left: `${leftPct}%`, transform: `translateX(${align})` }}
+            role="tooltip"
+        >
+            <div className="pf-tip-date">{fmtDay(col.date)}</div>
+            <div className="pf-tip-rows">
+                <span className="pf-tip-k">sessions</span><span className="pf-tip-v">{fmtInt(col.sessions)}</span>
+                <span className="pf-tip-k">tokens</span><span className="pf-tip-v">{fmtCompact(col.tokens)}</span>
+                {col.tool_calls !== undefined && (
+                    <><span className="pf-tip-k">tool calls</span><span className="pf-tip-v">{fmtCompact(col.tool_calls)}</span></>
+                )}
+                {col.commits !== undefined && (
+                    <><span className="pf-tip-k">commits</span><span className="pf-tip-v">{fmtInt(col.commits)}</span></>
+                )}
             </div>
+            {col.segments.length > 0 && (
+                <div className="pf-tip-models">
+                    {col.segments.map((s, j) => (
+                        <div className="pf-tip-model" key={`${s.name}-${j}`}>
+                            <span className="pf-tip-chip" style={{ background: s.color }} aria-hidden="true" />
+                            <span className="pf-tip-model-name">{s.name === OTHER_NAME ? "other" : s.name}</span>
+                            <span className="pf-tip-model-tok">{fmtCompact(s.tokens)}</span>
+                        </div>
+                    ))}
+                </div>
+            )}
+        </div>
+    );
+}
+
+/** One leverage-sorted skill: name left, leverage bar + share% + runs right. */
+function SkillRow({ skill }: { skill: ProfileSkill }) {
+    const share = skill.downstream_share;
+    const display = skill.name.includes(":") ? skill.name.slice(skill.name.indexOf(":") + 1) : skill.name;
+    return (
+        <div className="pf-skill">
+            <span className="pf-skill-name" title={skill.name}>{display}</span>
+            <span className="pf-skill-lev">
+                <span className="pf-skill-track" aria-hidden="true">
+                    {share !== undefined && (
+                        <span className="pf-skill-bar" style={{ width: `${clampPct(share * 100)}%` }} />
+                    )}
+                </span>
+                <span className="pf-skill-share">{share !== undefined ? fmtPct(share) : "-"}</span>
+                <span className="pf-skill-runs">· {fmtCompact(skill.runs)} runs</span>
+            </span>
         </div>
     );
 }

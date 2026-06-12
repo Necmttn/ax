@@ -116,4 +116,34 @@ describe("deriveRig", () => {
         });
         expect(rig.skills).toEqual([{ name: "commit", source: "local", runs: 5 }]);
     });
+
+    test("attaches downstream_share when shareMap provided", () => {
+        const rig = deriveRig({
+            invocations: [
+                { skill: "tdd", count: 88 },
+                { skill: "my-local", count: 3 },
+            ],
+            scopes: new Map([
+                ["tdd", "plugin:superpowers"],
+                ["my-local", "user"],
+            ]),
+            hookFiles: [],
+            hasRoutingTable: false,
+            rulesMarkdown: null,
+            shareMap: new Map([["tdd", 0.73]]),
+        });
+        expect(rig.skills[0]!.downstream_share).toBe(0.73);
+        expect(rig.skills[1]!.downstream_share).toBeUndefined();
+    });
+
+    test("downstream_share omitted when no shareMap", () => {
+        const rig = deriveRig({
+            invocations: [{ skill: "tdd", count: 88 }],
+            scopes: new Map([["tdd", "plugin:superpowers"]]),
+            hookFiles: [],
+            hasRoutingTable: false,
+            rulesMarkdown: null,
+        });
+        expect(rig.skills[0]!.downstream_share).toBeUndefined();
+    });
 });

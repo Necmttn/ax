@@ -11,12 +11,13 @@ import { prettifyProjectSlug } from "@ax/lib/shared/project-slug";
 import { encodeClaudeProjectSlug } from "@ax/lib/transcript-locator";
 import { detectStaleness } from "@ax/lib/transcript-staleness";
 import { fetchSessionCompare } from "../../dashboard/session-compare.ts";
-import { fetchSessionShow } from "../../dashboard/session-show.ts";
+import { fetchEnrichedSession } from "../../queries/enriched-session.ts";
 import {
     listSessionsHere,
     listSessionsAround,
     listSessionsNear,
     findSessionIdsByPrefix,
+    normalizeSessionsAroundOpts,
     type SessionRow,
 } from "../../dashboard/sessions-query.ts";
 import { ingestTranscripts } from "../../ingest/transcripts.ts";
@@ -262,7 +263,9 @@ const cmdSessionsAround = (input: {
                 : projectRaw;
         }
 
-        const rows = yield* listSessionsAround({ date, days, project });
+        const rows = yield* listSessionsAround(
+            normalizeSessionsAroundOpts({ date, days, project }),
+        );
         const { sessions, next } = buildSessionsNext(rows, {
             date: positional,
             days,
@@ -373,15 +376,28 @@ const cmdSessionShow = (input: {
             input.expand.map((v) => v.trim()).filter((v) => v.length > 0),
         );
 
+        // The Enriched Session facade (`fetchEnrichedSession`) is the single
+        // home for assembling a session's read model. The CLI base is the full
+        // Session View (expand + by-role + compactions). Metrics are fetched in
+        // a distinct step below rather than via `includeMetrics`, because the
+        // durability drill-down must run against the prefix-RESOLVED id; folding
+        // it into this probe would re-issue it on the unresolved id and add a
+        // query (the `ax sessions` hang guard - each caller keeps its exact
+        // query set). `includeInsights` stays off: the CLI never fetched them.
         let resolvedId = sessionId;
-        let payload = yield* fetchSessionShow({
-            sessionId,
+        const viewBase = {
+            kind: "view",
             expand: expandSet,
             expandAll,
             byRole,
+        } as const;
+        let enriched = yield* fetchEnrichedSession({
+            sessionId,
+            base: viewBase,
         }).pipe(
             catchDbErrorAndExit("axctl session show"),
         );
+        let payload = enriched.view!;
 
         // Prefix fallback: agents paste the short ids shown in listings
         // (dogfood retro R2). Unambiguous prefix → resolve + proceed;
@@ -393,12 +409,11 @@ const cmdSessionShow = (input: {
             if (candidates.length === 1) {
                 resolvedId = candidates[0]!;
                 process.stderr.write(`resolved id prefix ${sessionId} → ${resolvedId}\n`);
-                payload = yield* fetchSessionShow({
+                enriched = yield* fetchEnrichedSession({
                     sessionId: resolvedId,
-                    expand: expandSet,
-                    expandAll,
-                    byRole,
+                    base: viewBase,
                 }).pipe(catchDbErrorAndExit("axctl session show"));
+                payload = enriched.view!;
             } else if (candidates.length > 1) {
                 process.stderr.write(
                     `session id prefix "${sessionId}" is ambiguous:\n` +

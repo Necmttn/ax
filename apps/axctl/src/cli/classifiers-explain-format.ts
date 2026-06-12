@@ -1,14 +1,9 @@
 import { prettyPrint } from "@ax/lib/json";
 import { safeJsonParse } from "@ax/lib/shared/safe-json";
 import type { ClassifierExplainPayload, ClassifierExplainResult } from "../dashboard/classifier-explain.ts";
+import { textOf, truncateText } from "./render.ts";
 
-const textOf = (value: unknown): string =>
-    typeof value === "string" ? value : value === null || value === undefined ? "" : String(value);
-
-const truncate = (value: unknown, max = 220): string => {
-    const text = textOf(value).replace(/\s+/g, " ").trim();
-    return text.length <= max ? text : `${text.slice(0, Math.max(0, max - 1)).trimEnd()}…`;
-};
+const truncate = (value: unknown, max = 220): string => truncateText(value, max);
 
 const formatJsonObject = (value: unknown): string => {
     if (value === null || value === undefined) return "";

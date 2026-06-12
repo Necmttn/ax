@@ -289,7 +289,8 @@ export const PROVIDER_PARITY_FEATURES: readonly ProviderParityFeature[] = [
             ]),
             pi: supported("Pi usage fields write explicit token usage when present.", [
                 { path: "apps/axctl/src/ingest/pi.ts", contains: "buildPiTokenUsageStatements" },
-                { path: "apps/axctl/src/ingest/pi.ts", contains: "recordRef(\"session_token_usage\"" },
+                // Statement shape lives in the shared Parser Toolkit writer.
+                { path: "apps/axctl/src/ingest/token-usage-writers.ts", contains: "recordRef(\"session_token_usage\"" },
             ]),
             opencode: supported("OpenCode sessions receive estimated token usage from session-health.", [
                 { path: "apps/axctl/src/ingest/session-health.ts", contains: "UPSERT ${recordRef(\"session_token_usage\"" },

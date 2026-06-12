@@ -192,6 +192,39 @@ export interface SessionsAroundOpts {
     readonly project?: string | null;
 }
 
+/** Shared half-width default for the around-date window (CLI + MCP). */
+export const SESSIONS_AROUND_DEFAULT_DAYS = 3;
+
+/**
+ * Transport-agnostic raw input for `listSessionsAround`. The CLI flag parser
+ * and the MCP zod handler both decode their wire shapes (date string, optional
+ * days/project) into a resolved {@link Date} plus optionals, then call
+ * {@link normalizeSessionsAroundOpts} so the half-width default + project
+ * presence rule live in one place.
+ *
+ * Date parsing/validation (the CLI's strict YYYY-MM-DD guard, the MCP's
+ * `Number.isNaN` reject) stays transport-local - both pass an already-resolved
+ * `Date`. `days` positivity also stays transport-local.
+ */
+export interface SessionsAroundQueryArgs {
+    readonly date: Date;
+    readonly days?: number | undefined;
+    readonly project?: string | null | undefined;
+}
+
+export const normalizeSessionsAroundOpts = (
+    args: SessionsAroundQueryArgs,
+): SessionsAroundOpts => ({
+    date: args.date,
+    days:
+        typeof args.days === "number" && Number.isFinite(args.days)
+            ? args.days
+            : SESSIONS_AROUND_DEFAULT_DAYS,
+    ...(args.project != null && args.project !== ""
+        ? { project: args.project }
+        : {}),
+});
+
 /**
  * List sessions in the window [date - days, date + days].
  *
@@ -202,7 +235,7 @@ export const listSessionsAround = (
 ): Effect.Effect<SessionRow[], DbError, SurrealClient | AxConfig> =>
     Effect.gen(function* () {
         const db = yield* SurrealClient;
-        const days = opts.days ?? 3;
+        const days = opts.days ?? SESSIONS_AROUND_DEFAULT_DAYS;
         const from = new Date(opts.date.getTime() - days * 24 * 60 * 60 * 1000);
         const to = new Date(opts.date.getTime() + days * 24 * 60 * 60 * 1000);
 

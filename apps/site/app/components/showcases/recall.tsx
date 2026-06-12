@@ -89,26 +89,6 @@ export function RecallShowcase() {
         <span className="caret" />
       </div>
 
-      {/* search widget */}
-      <div className="search" role="search">
-        <span className="glyph" aria-hidden="true">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-            <circle cx="11" cy="11" r="7" />
-            <line x1="20" y1="20" x2="16.5" y2="16.5" />
-          </svg>
-        </span>
-        <input
-          id="q"
-          type="text"
-          defaultValue="auth middleware oauth refresh token"
-          spellCheck={false}
-          autoComplete="off"
-        />
-        <span className="kbd">
-          <span>search</span> <b>⏎</b>
-        </span>
-      </div>
-
       <div className="meta-row">
         <div className="scope">
           <span className="chip">14,832 turns</span>

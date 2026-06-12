@@ -10,14 +10,15 @@ import { deriveCheckpoints } from "../../ingest/derive-checkpoints.ts";
 import { runAgentAccept } from "../../improve/agent-accept.ts";
 import { acceptProposal, rejectProposal } from "../../improve/actions.ts";
 import { lintFiles } from "../../improve/lint.ts";
-import { listProposals, type ProposalRow } from "../../improve/list.ts";
-import { recommend, formatRecommendations, copyToClipboard, selectByIndices, parseIndexInput } from "../../improve/recommend.ts";
+import { listProposals, normalizeListProposalsInput, type ProposalRow } from "../../improve/list.ts";
+import { recommend, normalizeRecommendInput, formatRecommendations, copyToClipboard, selectByIndices, parseIndexInput } from "../../improve/recommend.ts";
 import { showExperiment, formatShow } from "../../improve/show.ts";
 import { renderAnalyzeBrief } from "../../improve/analyze-brief.ts";
 import { runPropose } from "../../improve/propose.ts";
 import { runHousekeep } from "../../improve/housekeep.ts";
 import { buildImproveProposalsNext } from "../../nav/next-links.ts";
 import { printNextLinks } from "../next-format.ts";
+import { compactPrint } from "../render.ts";
 import type { RuntimeManifest } from "./manifest.ts";
 import { fail, jsonFlag, optionValue, parseFileHints, positiveLimit, requireOptionalPositiveInt, requirePositiveInt } from "./shared.ts";
 
@@ -44,14 +45,16 @@ const cmdImproveList = (input: {
 }) =>
     Effect.gen(function* () {
         const json = input.json;
+        // Transport-local validation (exit 2 with usage wording) stays here; the
+        // status default + presence rules come from the shared normalizer.
         const limit = requirePositiveInt("improve list", "limit", input.limit);
-        const formFilter = input.form;
-        const statusFilter = input.status ?? "open";
-        const rows = yield* listProposals({
-            status: statusFilter,
-            ...(formFilter !== undefined ? { form: formFilter } : {}),
-            limit,
-        });
+        const rows = yield* listProposals(
+            normalizeListProposalsInput({
+                ...(input.status !== undefined ? { status: input.status } : {}),
+                ...(input.form !== undefined ? { form: input.form } : {}),
+                limit,
+            }),
+        );
         if (json) {
             console.log(prettyPrint(rows));
             return;
@@ -146,11 +149,19 @@ const cmdImproveRecommend = (input: {
         const limit = requirePositiveInt("improve recommend", "limit", input.limit);
         const sinceDays = requireOptionalPositiveInt("improve recommend", "since", input.sinceDays);
         const forms = input.forms.flatMap((v) => parseFileHints(Option.some(v)));
-        const items = yield* recommend({
-            limit,
-            ...(forms.length > 0 ? { forms } : {}),
-            ...(sinceDays === undefined ? {} : { sinceDays }),
-        });
+        // Validation (exit 2) stays here; the CLI limit default is 5 (MCP's is
+        // 10), both passed into the shared normalizer so the constructed input
+        // shape cannot drift between transports.
+        const items = yield* recommend(
+            normalizeRecommendInput(
+                {
+                    limit,
+                    ...(forms.length > 0 ? { forms } : {}),
+                    ...(sinceDays === undefined ? {} : { sinceDays }),
+                },
+                5,
+            ),
+        );
         if (json) {
             console.log(prettyPrint(items));
             return;
@@ -614,7 +625,7 @@ const cmdImprovePropose = (input: { readonly file: string | undefined; readonly 
         });
         const result = yield* runPropose(parsed);
         if (input.json) {
-            console.log(JSON.stringify(result));
+            console.log(compactPrint(result));
         } else {
             console.log(`${result.status}: ${result.form} proposal "${result.title}" (sig=${result.sig})`);
             console.log("next: ax improve list - or review it in the dashboard Improve tab");
@@ -659,7 +670,7 @@ const cmdImproveHousekeep = (input: { readonly days: number; readonly dryRun: bo
     Effect.gen(function* () {
         const report = yield* runHousekeep({ days: input.days, dryRun: input.dryRun });
         if (input.json) {
-            console.log(JSON.stringify(report));
+            console.log(compactPrint(report));
             return;
         }
         if (report.staleProposals.length === 0 && report.removedTaskFiles.length === 0) {

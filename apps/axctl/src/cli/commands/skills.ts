@@ -5,11 +5,15 @@ import { SurrealClient } from "@ax/lib/db";
 import { prettyPrint } from "@ax/lib/json";
 import { orAbsent } from "@ax/lib/shared/fs-error";
 import { prettifyProjectSlug } from "@ax/lib/shared/project-slug";
-import { fetchSkillsWeighted } from "../../dashboard/skills-weighted.ts";
+import {
+    fetchSkillsWeighted,
+    normalizeSkillsWeightedParams,
+} from "../../dashboard/skills-weighted.ts";
 import {
     fetchSkillsByRole,
     fetchRolesForSkill,
     fetchAllRoles,
+    normalizeSkillsByRoleParams,
 } from "../../dashboard/role-queries.ts";
 import { loadAgentScopeMap } from "../../ingest/agent-scope.ts";
 import {
@@ -332,13 +336,16 @@ const cmdSkillsWeighted = (input: SkillsWeightedInput) =>
 
         // --window=0 is invalid: requireOptionalPositiveInt rejects it (n <= 0)
         // with exit 2, mirroring the old parseOptionalPositiveIntFlag behavior.
+        // Validation stays here; defaults/presence come from the shared normalizer.
 
-        const result = yield* fetchSkillsWeighted({
-            ...(windowDays !== undefined ? { windowDays } : {}),
-            limit,
-            doctorThreshold,
-            includeTools,
-        }).pipe(
+        const result = yield* fetchSkillsWeighted(
+            normalizeSkillsWeightedParams({
+                ...(windowDays !== undefined ? { windowDays } : {}),
+                limit,
+                doctorThreshold,
+                includeTools,
+            }),
+        ).pipe(
             catchDbErrorAndExit("axctl skills weighted"),
         );
 
@@ -372,7 +379,9 @@ const cmdSkillsByRole = (input: SkillsByRoleInput) =>
         const json = wantsJsonFlag(input.json);
         const limit = requirePositiveInt("skills by-role", "limit", input.limit);
 
-        const result = yield* fetchSkillsByRole({ role, limit }).pipe(
+        const result = yield* fetchSkillsByRole(
+            normalizeSkillsByRoleParams({ role, limit }),
+        ).pipe(
             catchDbErrorAndExit("axctl skills by-role"),
         );
 
