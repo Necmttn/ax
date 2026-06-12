@@ -51,6 +51,8 @@ export const buildProfile = Effect.fn("profile.buildProfile")(
 
         const totalSessions = cost.rows.reduce((s, r) => s + r.sessions, 0);
         const models = cost.rows.map((r) => {
+            // share is cost-weighted when cost is public, session-weighted
+            // when --no-cost (a cost-derived share would leak spend ratios).
             const share = includeCost
                 ? cost.total_cost_usd > 0 ? r.cost_usd / cost.total_cost_usd : 0
                 : totalSessions > 0 ? r.sessions / totalSessions : 0;
@@ -63,6 +65,8 @@ export const buildProfile = Effect.fn("profile.buildProfile")(
 
         const patterns = deriveTastePatterns(proposals);
 
+        // decodeProfile throws on invariant breach -> Effect defect (die),
+        // intentionally unrecoverable: a malformed profile is a bug here.
         const profile: ProfileV1 = decodeProfile({
             v: 1,
             github: env.github,
