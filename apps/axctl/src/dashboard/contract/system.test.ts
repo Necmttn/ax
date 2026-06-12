@@ -50,7 +50,7 @@ describe("isContractRequest", () => {
         expect(isContractRequest("POST", "/api/version")).toBe(false);
         expect(isContractRequest("GET", "/api/query")).toBe(false);
         // Unmigrated families never route here.
-        expect(isContractRequest("GET", "/api/sessions")).toBe(false);
+        expect(isContractRequest("GET", "/api/skills")).toBe(false);
     });
 });
 
