@@ -18,8 +18,19 @@ export const meta = {
   ],
 };
 
-const days = (args && args.days) || 30;
-const date = (args && args.date) || "undated";
+// Tolerate stringified args - some callers pass args as a JSON string, which
+// would otherwise silently fall through to defaults (first live run produced
+// routing-tune-undated.md this way).
+let parsedArgs = args;
+if (typeof parsedArgs === "string") {
+  try {
+    parsedArgs = JSON.parse(parsedArgs);
+  } catch {
+    parsedArgs = undefined;
+  }
+}
+const days = (parsedArgs && parsedArgs.days) || 30;
+const date = (parsedArgs && parsedArgs.date) || "undated";
 
 const PROPOSAL_SCHEMA = {
   type: "object",
@@ -69,7 +80,10 @@ const mined = await agent(
   `(b) match NO current class, and (c) look mechanical (bounded scope, spec'd, search/summarize/convert work - ` +
   `NOT quality review, PR review, plan synthesis, architecture, or taste-heavy design/copy: those stay on the main model by policy). ` +
   `Cluster their descriptions and propose at most 5 new routing classes with tight ^-anchored patterns - ` +
-  `prefer missing a few over matching judgment work. Also list existing class ids that matched zero dispatches in the window.`,
+  `prefer missing a few over matching judgment work. Also list existing class ids that matched zero dispatches in the window - ` +
+  `but BEWARE sample bias: --limit truncates the cost-sorted list, so cheap dispatches (Explore/locator children) fall off it. ` +
+  `Before claiming a class matched zero dispatches, verify against the UNTRUNCATED window (raise --limit or query the spawned ` +
+  `agent_type distribution directly); when you cannot rule out truncation, do not propose the retirement.`,
   { label: "mine:unmatched", phase: "Mine", schema: PROPOSAL_SCHEMA, model: "sonnet" },
 );
 
