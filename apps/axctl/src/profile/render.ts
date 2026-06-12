@@ -9,12 +9,19 @@ import { Effect } from "effect";
 import { fetchCostModels } from "../queries/cost-analytics.ts";
 import {
     fetchAcceptedProposals,
+    fetchCommitCount,
     fetchDailyActivity,
+    fetchDailyActivityFull,
     fetchHarnesses,
+    fetchPeakHour,
+    fetchSessionDurations,
     fetchSkillInvocations,
     fetchSkillScopes,
+    fetchSpawnedCount,
     fetchTokenTotals,
+    fetchTopTools,
 } from "./queries.ts";
+import { deriveInsights } from "./insights.ts";
 import { deriveRig } from "./rig.ts";
 import { computeStreak } from "./streak.ts";
 import { deriveTastePatterns } from "./taste.ts";
@@ -39,6 +46,11 @@ export const buildProfile = Effect.fn("profile.buildProfile")(
 
         // Sequential on purpose: makeMockDb replays results in call order,
         // and the local DB answers these in milliseconds anyway.
+        // Order (keep render.test.ts mocks aligned):
+        // 1 tokenTotals  2 dailyActivity  3 harnesses  4 skillInvocations
+        // 5 skillScopes  6 acceptedProposals  7 costModels
+        // 8+9 dailyActivityFull (sessions, tokens)  10 sessionDurations
+        // 11 peakHour  12 spawnedCount  13 commitCount  14 topTools
         const totals = yield* fetchTokenTotals({ windowDays });
         const daily = yield* fetchDailyActivity({ windowDays });
         const harnesses = yield* fetchHarnesses({ windowDays });
@@ -46,6 +58,12 @@ export const buildProfile = Effect.fn("profile.buildProfile")(
         const scopes = yield* fetchSkillScopes();
         const proposals = yield* fetchAcceptedProposals();
         const cost = yield* fetchCostModels({ sinceDays: windowDays });
+        const dailyFull = yield* fetchDailyActivityFull({ windowDays });
+        const durations = yield* fetchSessionDurations({ windowDays });
+        const peakHour = yield* fetchPeakHour({ windowDays });
+        const spawnedCount = yield* fetchSpawnedCount({ windowDays });
+        const commitCount = yield* fetchCommitCount({ windowDays });
+        const topTools = yield* fetchTopTools({ windowDays });
 
         const streak = computeStreak(daily, env.today);
 
@@ -64,6 +82,16 @@ export const buildProfile = Effect.fn("profile.buildProfile")(
         });
 
         const patterns = deriveTastePatterns(proposals);
+
+        // null when there is no data at all -> section omitted below.
+        const insights = deriveInsights({
+            durations,
+            peakHour,
+            spawned: spawnedCount,
+            commits: commitCount,
+            tools: topTools,
+            daily: dailyFull,
+        });
 
         // decodeProfile throws on invariant breach -> Effect defect (die),
         // intentionally unrecoverable: a malformed profile is a bug here.
@@ -93,6 +121,8 @@ export const buildProfile = Effect.fn("profile.buildProfile")(
                 rulesMarkdown: env.rulesMarkdown,
             }),
             ...(patterns.length > 0 ? { taste: { patterns } } : {}),
+            ...(dailyFull.length > 0 ? { activity: { daily: dailyFull } } : {}),
+            ...(insights !== null ? { insights } : {}),
         });
         return profile;
     },

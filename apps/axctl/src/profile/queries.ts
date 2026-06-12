@@ -163,3 +163,178 @@ export const fetchAcceptedProposals = Effect.fn("profile.fetchAcceptedProposals"
         })) satisfies ProposalRow[];
     },
 );
+
+// --- daily activity full (sessions + tokens per day) ------------------------
+
+export interface DailyActivityRow {
+    readonly date: string;
+    readonly sessions: number;
+    readonly tokens: number;
+}
+
+const DAILY_SESSIONS_SQL = (d: number) => `
+SELECT
+    time::format(ts, "%Y-%m-%d") AS date,
+    array::len(array::distinct(session)) AS sessions
+FROM turn
+WHERE ts > time::now() - ${win(d)} AND ts IS NOT NONE
+GROUP BY date
+ORDER BY date ASC;`;
+
+const DAILY_TOKENS_SQL = (d: number) => `
+SELECT
+    time::format(ts, "%Y-%m-%d") AS date,
+    math::sum(prompt_tokens ?? 0) + math::sum(completion_tokens ?? 0) AS tokens
+FROM session_token_usage
+WHERE ts > time::now() - ${win(d)} AND ts IS NOT NONE
+GROUP BY date
+ORDER BY date ASC;`;
+
+export const fetchDailyActivityFull = Effect.fn("profile.fetchDailyActivityFull")(
+    function* (opts: { readonly windowDays: number }) {
+        const db = yield* SurrealClient;
+        const sessionRows = yield* db
+            .query<[Array<Record<string, unknown>>]>(DAILY_SESSIONS_SQL(opts.windowDays))
+            .pipe(Effect.map((r) => r?.[0] ?? []));
+        const tokenRows = yield* db
+            .query<[Array<Record<string, unknown>>]>(DAILY_TOKENS_SQL(opts.windowDays))
+            .pipe(Effect.map((r) => r?.[0] ?? []));
+        // Join tokens onto session rows in JS (two grouped queries; SurrealDB
+        // 3.x grouped aggregates stay deref-free per the hang rule).
+        const tokenMap = new Map(
+            tokenRows
+                .map((r) => [String(r.date), Number(r.tokens ?? 0)] as const)
+                .filter(([day]) => day !== "undefined" && day !== "null"),
+        );
+        return sessionRows
+            .map((r) => {
+                const date = String(r.date);
+                return { date, sessions: Number(r.sessions ?? 0), tokens: tokenMap.get(date) ?? 0 };
+            })
+            .filter((r) => r.date !== "undefined" && r.date !== "null") satisfies DailyActivityRow[];
+    },
+);
+
+// --- session durations -------------------------------------------------------
+
+export interface SessionDurationRow {
+    readonly started_at: string;
+    readonly ended_at: string;
+}
+
+const SESSION_DURATIONS_SQL = (d: number) => `
+SELECT
+    type::string(started_at) AS started_at,
+    type::string(ended_at) AS ended_at
+FROM session
+WHERE started_at > time::now() - ${win(d)}
+  AND started_at IS NOT NONE
+  AND ended_at IS NOT NONE;`;
+
+export const fetchSessionDurations = Effect.fn("profile.fetchSessionDurations")(
+    function* (opts: { readonly windowDays: number }) {
+        const db = yield* SurrealClient;
+        const rows = yield* db
+            .query<[Array<Record<string, unknown>>]>(SESSION_DURATIONS_SQL(opts.windowDays))
+            .pipe(Effect.map((r) => r?.[0] ?? []));
+        return rows
+            .filter((r) => r.started_at != null && r.ended_at != null)
+            .map((r) => ({
+                started_at: String(r.started_at),
+                ended_at: String(r.ended_at),
+            })) satisfies SessionDurationRow[];
+    },
+);
+
+// --- peak hour ---------------------------------------------------------------
+
+const PEAK_HOUR_SQL = (d: number) => `
+SELECT
+    time::format(started_at, "%H") AS hour,
+    count() AS count
+FROM session
+WHERE started_at > time::now() - ${win(d)}
+  AND started_at IS NOT NONE
+GROUP BY hour
+ORDER BY count DESC
+LIMIT 1;`;
+
+export const fetchPeakHour = Effect.fn("profile.fetchPeakHour")(
+    function* (opts: { readonly windowDays: number }) {
+        const db = yield* SurrealClient;
+        const rows = yield* db
+            .query<[Array<Record<string, unknown>>]>(PEAK_HOUR_SQL(opts.windowDays))
+            .pipe(Effect.map((r) => r?.[0] ?? []));
+        const row = rows[0];
+        if (row == null) return null;
+        return Number(row.hour ?? 0);
+    },
+);
+
+// --- spawned count -----------------------------------------------------------
+
+const SPAWNED_COUNT_SQL = (d: number) => `
+SELECT count() AS count
+FROM spawned
+WHERE ts > time::now() - ${win(d)}
+GROUP ALL;`;
+
+export const fetchSpawnedCount = Effect.fn("profile.fetchSpawnedCount")(
+    function* (opts: { readonly windowDays: number }) {
+        const db = yield* SurrealClient;
+        const rows = yield* db
+            .query<[Array<Record<string, unknown>>]>(SPAWNED_COUNT_SQL(opts.windowDays))
+            .pipe(Effect.map((r) => r?.[0] ?? []));
+        return Number(rows[0]?.count ?? 0);
+    },
+);
+
+// --- commit count ------------------------------------------------------------
+// commit table uses `ts` (datetime) - confirmed in packages/schema/src/schema.surql.
+
+const COMMIT_COUNT_SQL = (d: number) => `
+SELECT count() AS count
+FROM commit
+WHERE ts > time::now() - ${win(d)}
+GROUP ALL;`;
+
+export const fetchCommitCount = Effect.fn("profile.fetchCommitCount")(
+    function* (opts: { readonly windowDays: number }) {
+        const db = yield* SurrealClient;
+        const rows = yield* db
+            .query<[Array<Record<string, unknown>>]>(COMMIT_COUNT_SQL(opts.windowDays))
+            .pipe(Effect.map((r) => r?.[0] ?? []));
+        return Number(rows[0]?.count ?? 0);
+    },
+);
+
+// --- top tools ---------------------------------------------------------------
+
+export interface TopToolRow {
+    readonly name: string;
+    readonly runs: number;
+}
+
+const TOP_TOOLS_SQL = (d: number) => `
+SELECT
+    (command_norm ?? name) AS tool,
+    count() AS count
+FROM tool_call
+WHERE ts > time::now() - ${win(d)}
+  AND (command_norm ?? name) IS NOT NONE
+GROUP BY tool
+ORDER BY count DESC
+LIMIT 10;`;
+
+export const fetchTopTools = Effect.fn("profile.fetchTopTools")(
+    function* (opts: { readonly windowDays: number }) {
+        const db = yield* SurrealClient;
+        const rows = yield* db
+            .query<[Array<Record<string, unknown>>]>(TOP_TOOLS_SQL(opts.windowDays))
+            .pipe(Effect.map((r) => r?.[0] ?? []));
+        return rows.map((r) => ({
+            name: String(r.tool),
+            runs: Number(r.count ?? 0),
+        })) satisfies TopToolRow[];
+    },
+);

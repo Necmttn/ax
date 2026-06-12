@@ -98,6 +98,38 @@ const Rig = Schema.Struct({
     ),
 });
 
+const DailyRow = Schema.Struct({
+    date: Schema.String,
+    sessions: Schema.Number,
+    tokens: Schema.Number,
+});
+
+const BusiestDay = Schema.Struct({
+    date: Schema.String,
+    sessions: Schema.Number,
+});
+
+const ToolRun = Schema.Struct({
+    name: Schema.String,
+    runs: Schema.Number,
+});
+
+const Activity = Schema.Struct({
+    daily: Schema.Array(DailyRow),
+});
+
+const Insights = Schema.Struct({
+    hours_total: Schema.Number,
+    longest_session_minutes: Schema.Number,
+    deep_session_share: Schema.Number,
+    peak_hour_utc: Schema.Number,
+    busiest_day: BusiestDay,
+    max_parallel_sessions: Schema.Number,
+    subagents_spawned: Schema.Number,
+    commits: Schema.Number,
+    tools_top: Schema.Array(ToolRun),
+});
+
 export const ProfileV1 = Schema.Struct({
     v: Schema.Literal(1),
     github: Schema.String,
@@ -106,6 +138,8 @@ export const ProfileV1 = Schema.Struct({
     stats: Stats,
     rig: Rig,
     taste: Schema.optional(Schema.Struct({ patterns: Schema.Array(TastePattern) })),
+    activity: Schema.optional(Activity),
+    insights: Schema.optional(Insights),
 });
 export type ProfileV1 = typeof ProfileV1.Type;
 
