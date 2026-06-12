@@ -311,25 +311,51 @@ const CHURN_WINDOW_DAYS = 14;
 const ROUTING_WINDOW_DAYS = 14;
 
 /**
+ * Per-source timeout: a slow source degrades to a note instead of blocking
+ * the panel. The churn leg currently exceeds this (see issue follow-up for a
+ * dedicated fix); routing and others are typically fast but may spike.
+ */
+const SOURCE_TIMEOUT_MS = 4_000;
+
+/**
  * Fan-out to 5 data sources (proposals, tool failures, churn, routing, skill
  * hygiene), merge and sort all cards by impact descending.
  *
- * Each leg is fail-open: a DB error becomes a NextActionsSourceNote, never a
- * typed failure. The returned Effect has error type `never` for source
+ * Each leg is fail-open: a DB error or timeout becomes a NextActionsSourceNote,
+ * never a typed failure. The returned Effect has error type `never` for source
  * failures; only truly unexpected defects (bugs) can still escape.
  */
-export const fetchNextActions = Effect.fn("dashboard.fetchNextActions")(function* () {
+export const fetchNextActions = Effect.fn("dashboard.fetchNextActions")(function* (
+    opts?: { readonly sourceTimeoutMs?: number },
+) {
+    const timeoutMs = opts?.sourceTimeoutMs ?? SOURCE_TIMEOUT_MS;
+
     // Mutated from concurrent legs; safe because JS fibers interleave only at
     // yield points - the push inside Effect.sync runs atomically.
     const notes: Array<NextActionsSourceNote> = [];
 
-    /** Wrap an effect so errors become notes + an empty fallback value. */
+    /** Wrap an effect so errors (including timeouts) become notes + an empty fallback value.
+     *
+     * The timeout is applied BEFORE the catch. Effect.timeoutOrElse interrupts
+     * the inner fiber and fails with a timeout error; that error is then caught
+     * by our Effect.catch and lands in notes. This works even when the inner
+     * effect has its own internal swallow (e.g. runQuery's Effect.catch for
+     * DbErrors): fiber interruption from timeoutOrElse bypasses inner catches,
+     * so the orElse failure propagates to our outer catch. Consequently all 5
+     * sources - including tool_failure which normally swallows DB errors
+     * internally - will add a note when the DB hangs.
+     */
     const guarded = <A>(
         source: NextActionKind,
         eff: Effect.Effect<A, unknown, SurrealClient>,
         empty: A,
     ): Effect.Effect<A, never, SurrealClient> =>
         eff.pipe(
+            Effect.timeoutOrElse({
+                duration: `${timeoutMs} millis`,
+                orElse: () =>
+                    Effect.fail(new Error(`source ${source} timed out after ${timeoutMs}ms`)),
+            }),
             Effect.catch((err) =>
                 Effect.sync(() => {
                     notes.push({ source, note: String(err) });

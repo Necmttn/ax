@@ -21,7 +21,7 @@ const KIND_LABEL: Record<NextActionKind, string> = {
 };
 
 export function NextActionsPanel({ handlers }: { readonly handlers: NextActionsHandlers }) {
-    const query = useQuery({ queryKey: ["next-actions"], queryFn: () => api.nextActions() });
+    const query = useQuery({ queryKey: ["next-actions"], queryFn: () => api.nextActions(), staleTime: 60_000 });
     if (query.isLoading) return <div className="loading">Loading next actions&#8230;</div>;
     if (query.error) return <div className="error">next-actions: {String(query.error)}</div>;
     const cards = query.data?.cards ?? [];

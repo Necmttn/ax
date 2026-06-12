@@ -578,4 +578,31 @@ describe("fetchNextActions", () => {
         );
         expect(typeof payload.generatedAt).toBe("string");
     });
+
+    test("a hanging source (Effect.never) is timed out and noted; all 5 sources noted", async () => {
+        // db.query returns Effect.never - simulates a hung DB / slow query.
+        // runQuery's internal Effect.catch only catches DbError failures; it does NOT
+        // prevent fiber interruption from timeoutOrElse. The timeout fires, the
+        // orElse failure propagates to our guarded catch, and ALL 5 sources add a
+        // note - including tool_failure which normally swallows DB errors internally.
+        const stub: SurrealClientShape = {
+            query: (_sql: string) => Effect.never,
+            // biome-ignore lint: other methods not needed
+        } as unknown as SurrealClientShape;
+        const layer = Layer.succeed(SurrealClient, stub);
+
+        const payload = await Effect.runPromise(
+            fetchNextActions({ sourceTimeoutMs: 50 }).pipe(Effect.provide(layer)),
+        );
+
+        expect(payload.cards).toEqual([]);
+        // All 5 direct-DB sources time out; tool_failure is also noted because
+        // timeoutOrElse interrupts the fiber before runQuery's internal swallow fires.
+        expect(new Set(payload.notes.map((n) => n.source))).toEqual(
+            new Set(["proposal", "tool_failure", "churn", "routing", "skill_hygiene"]),
+        );
+        // At least one note should mention timed out (two words - our orElse uses "timed out after Nms")
+        expect(payload.notes.some((n) => /timed out/i.test(n.note))).toBe(true);
+        expect(typeof payload.generatedAt).toBe("string");
+    });
 });
