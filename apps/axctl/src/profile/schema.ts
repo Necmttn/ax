@@ -86,6 +86,7 @@ const Rig = Schema.Struct({
             name: Schema.String,
             source: Schema.String,
             runs: Schema.Number,
+            downstream_share: Schema.optional(Schema.Number),
         }),
     ),
     hooks: Schema.Array(Schema.String),
@@ -98,10 +99,27 @@ const Rig = Schema.Struct({
     ),
 });
 
+const WorkflowArc = Schema.Struct({
+    steps: Schema.Array(Schema.String),
+    count: Schema.Number,
+});
+
+const Workflow = Schema.Struct({
+    arcs: Schema.Array(WorkflowArc),
+});
+
+const DailyModelRow = Schema.Struct({
+    name: Schema.String,
+    tokens: Schema.Number,
+});
+
 const DailyRow = Schema.Struct({
     date: Schema.String,
     sessions: Schema.Number,
     tokens: Schema.Number,
+    models: Schema.optional(Schema.Array(DailyModelRow)),
+    tool_calls: Schema.optional(Schema.Number),
+    commits: Schema.optional(Schema.Number),
 });
 
 const BusiestDay = Schema.Struct({
@@ -149,6 +167,7 @@ export const ProfileV1 = Schema.Struct({
     taste: Schema.optional(Schema.Struct({ patterns: Schema.Array(TastePattern) })),
     activity: Schema.optional(Activity),
     insights: Schema.optional(Insights),
+    workflow: Schema.optional(Workflow),
 });
 export type ProfileV1 = typeof ProfileV1.Type;
 

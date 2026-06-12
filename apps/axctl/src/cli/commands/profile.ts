@@ -120,8 +120,15 @@ export function formatProfile(p: ProfileV1): string {
     }
     lines.push("");
     lines.push(`rig: ${p.rig.skills.length} skills · ${p.rig.hooks.length} hooks · routing_table: ${p.rig.routing_table}${p.rig.rules ? ` · ${p.rig.rules.count} rules` : ""}`);
+    if (p.workflow && p.workflow.arcs.length > 0) {
+        const topArc = p.workflow.arcs[0]!;
+        lines.push(`workflow: ${topArc.steps.join(" → ")} (${topArc.count}x)`);
+    }
     for (const s of topSkills) {
-        lines.push(`  ${s.name.padEnd(nameWidth)} ${integer(s.runs).padStart(6)} runs  (${s.source})`);
+        const downstream = s.downstream_share !== undefined
+            ? `  · downstream ${(s.downstream_share * 100).toFixed(0)}%`
+            : "";
+        lines.push(`  ${s.name.padEnd(nameWidth)} ${integer(s.runs).padStart(6)} runs  (${s.source})${downstream}`);
     }
     if (p.insights) {
         const ins = p.insights;

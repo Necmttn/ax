@@ -12,6 +12,9 @@ import {
     fetchCommitCount,
     fetchDailyActivity,
     fetchDailyActivityFull,
+    fetchDailyCommits,
+    fetchDailyModels,
+    fetchDailyToolCalls,
     fetchHarnesses,
     fetchPeakHour,
     fetchSessionDurations,
@@ -20,6 +23,8 @@ import {
     fetchSpawnedCount,
     fetchTokenTotals,
     fetchTopTools,
+    fetchWindowedInvocations,
+    fetchWindowedSessions,
     fetchWrappedCounts,
 } from "./queries.ts";
 import { deriveInsights } from "./insights.ts";
@@ -27,6 +32,8 @@ import { deriveRig } from "./rig.ts";
 import { computeStreak } from "./streak.ts";
 import { deriveTastePatterns } from "./taste.ts";
 import { decodeProfile, type ProfileV1 } from "./schema.ts";
+import { deriveWorkflowArcs } from "./workflow.ts";
+import { computeDownstreamShares } from "./downstream.ts";
 
 export interface ProfileEnv {
     readonly github: string;
@@ -53,6 +60,8 @@ export const buildProfile = Effect.fn("profile.buildProfile")(
         // 8+9 dailyActivityFull (sessions, tokens)  10 sessionDurations
         // 11 peakHour  12 spawnedCount  13 commitCount  14 topTools
         // 15+16+17+18 wrappedCounts (toolAgg, turnCount, distinctSkills, reposCount)
+        // 19 dailyModels  20 dailyToolCalls  21 dailyCommits
+        // 22 windowedInvocations  23 windowedSessions
         const totals = yield* fetchTokenTotals({ windowDays });
         const daily = yield* fetchDailyActivity({ windowDays });
         const harnesses = yield* fetchHarnesses({ windowDays });
@@ -67,6 +76,12 @@ export const buildProfile = Effect.fn("profile.buildProfile")(
         const commitCount = yield* fetchCommitCount({ windowDays });
         const topTools = yield* fetchTopTools({ windowDays });
         const wrappedCounts = yield* fetchWrappedCounts({ windowDays });
+        // Queries 19-23 (appended; keep mock order in render.test.ts aligned)
+        const dailyModels = yield* fetchDailyModels({ windowDays });
+        const dailyToolCalls = yield* fetchDailyToolCalls({ windowDays });
+        const dailyCommits = yield* fetchDailyCommits({ windowDays });
+        const windowedInvocations = yield* fetchWindowedInvocations({ windowDays });
+        const windowedSessions = yield* fetchWindowedSessions({ windowDays });
 
         const streak = computeStreak(daily, env.today);
 
@@ -97,6 +112,39 @@ export const buildProfile = Effect.fn("profile.buildProfile")(
             wrapped: wrappedCounts,
         });
 
+        // Merge enriched daily fields into dailyFull rows
+        const toolCallMap = new Map(dailyToolCalls.map((r) => [r.date, r.tool_calls]));
+        const commitMap = new Map(dailyCommits.map((r) => [r.date, r.commits]));
+
+        // Group dailyModels by date; pivot to top-6 + "other"
+        const modelsByDate = new Map<string, Array<{ name: string; tokens: number }>>();
+        for (const row of dailyModels) {
+            let arr = modelsByDate.get(row.date);
+            if (arr === undefined) { arr = []; modelsByDate.set(row.date, arr); }
+            arr.push({ name: row.model, tokens: row.tokens });
+        }
+        const pivotModels = (rows: Array<{ name: string; tokens: number }>) => {
+            // Already sorted desc (SQL ORDER BY tokens DESC per date)
+            const top = rows.slice(0, 6);
+            const rest = rows.slice(6);
+            if (rest.length === 0) return top;
+            const otherTokens = rest.reduce((s, r) => s + r.tokens, 0);
+            return [...top, { name: "other", tokens: otherTokens }];
+        };
+
+        const enrichedDaily = dailyFull.map((row) => ({
+            ...row,
+            ...(modelsByDate.has(row.date) ? { models: pivotModels(modelsByDate.get(row.date)!) } : {}),
+            ...(toolCallMap.has(row.date) ? { tool_calls: toolCallMap.get(row.date) } : {}),
+            ...(commitMap.has(row.date) ? { commits: commitMap.get(row.date) } : {}),
+        }));
+
+        // Derive workflow arcs (uses scopes already fetched above)
+        const workflowArcs = deriveWorkflowArcs(windowedInvocations, scopes);
+
+        // Derive downstream shares (pure compute over windowed invocations + sessions)
+        const shareMap = computeDownstreamShares(windowedInvocations, windowedSessions);
+
         // decodeProfile throws on invariant breach -> Effect defect (die),
         // intentionally unrecoverable: a malformed profile is a bug here.
         const profile: ProfileV1 = decodeProfile({
@@ -123,10 +171,12 @@ export const buildProfile = Effect.fn("profile.buildProfile")(
                 hookFiles: env.hookFiles,
                 hasRoutingTable: env.hasRoutingTable,
                 rulesMarkdown: env.rulesMarkdown,
+                shareMap,
             }),
             ...(patterns.length > 0 ? { taste: { patterns } } : {}),
-            ...(dailyFull.length > 0 ? { activity: { daily: dailyFull } } : {}),
+            ...(enrichedDaily.length > 0 ? { activity: { daily: enrichedDaily } } : {}),
             ...(insights !== null ? { insights } : {}),
+            ...(workflowArcs.length > 0 ? { workflow: { arcs: workflowArcs } } : {}),
         });
         return profile;
     },

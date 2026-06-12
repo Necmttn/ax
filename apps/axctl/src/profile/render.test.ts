@@ -9,6 +9,8 @@ import { buildProfile } from "./render.ts";
 // 10 sessionDurations  11 peakHour  12 spawnedCount  13 commitCount  14 topTools
 // 15 wrappedCounts(toolAgg)  16 wrappedCounts(turnCount)
 // 17 wrappedCounts(distinctSkills)  18 wrappedCounts(reposCount)
+// 19 dailyModels  20 dailyToolCalls  21 dailyCommits
+// 22 windowedInvocations  23 windowedSessions
 const mockResults = [
     [[{ prompt_tokens: 31_000_000, completion_tokens: 7_000_000, sessions: 142 }]],
     [[{ date: "2026-06-11" }, { date: "2026-06-12" }]],
@@ -49,6 +51,27 @@ const mockResults = [
     [[{ count: 56 }]],
     // 18: wrappedCounts reposCount
     [[{ count: 12 }]],
+    // 19: dailyModels
+    [[
+        { date: "2026-06-11", model: "fable", tokens: 80_000 },
+        { date: "2026-06-12", model: "fable", tokens: 100_000_000 },
+        { date: "2026-06-12", model: "haiku", tokens: 20_000_000 },
+    ]],
+    // 20: dailyToolCalls
+    [[{ date: "2026-06-11", tool_calls: 200 }, { date: "2026-06-12", tool_calls: 3900 }]],
+    // 21: dailyCommits
+    [[{ date: "2026-06-11", commits: 7 }, { date: "2026-06-12", commits: 50 }]],
+    // 22: windowedInvocations
+    [[
+        { session: "session:1", skill: "tdd", ts: "2026-06-12T10:01:00Z" },
+        { session: "session:1", skill: "tdd", ts: "2026-06-12T10:30:00Z" },
+        { session: "session:2", skill: "tdd", ts: "2026-06-12T11:01:00Z" },
+    ]],
+    // 23: windowedSessions
+    [[
+        { id: "session:1", s: "2026-06-12T10:00:00Z", e: "2026-06-12T12:30:00Z" },
+        { id: "session:2", s: "2026-06-12T09:00:00Z", e: "2026-06-12T10:30:00Z" },
+    ]],
 ];
 
 const env = {
@@ -77,14 +100,35 @@ describe("buildProfile", () => {
             { name: "haiku", share: 0.25, cost_usd: 50 },
         ]);
         expect(p.stats.harnesses).toEqual(["claude", "codex"]);
-        expect(p.rig.skills).toEqual([{ name: "tdd", source: "superpowers", runs: 88 }]);
+        // tdd gets downstream_share from 2 qualifying sessions (avg ~0.5 due to late-fire in s2)
+        expect(p.rig.skills[0]!.name).toBe("tdd");
+        expect(p.rig.skills[0]!.source).toBe("superpowers");
+        expect(p.rig.skills[0]!.runs).toBe(88);
+        expect(p.rig.skills[0]!.downstream_share).toBeDefined();
         expect(p.rig.rules).toEqual({ count: 2 });
         expect(p.taste!.patterns[0]!.name).toBe("stop-edit-loops-early");
         // activity
         expect(p.activity).toBeDefined();
         expect(p.activity!.daily).toHaveLength(2);
-        expect(p.activity!.daily[0]).toEqual({ date: "2026-06-11", sessions: 5, tokens: 100_000 });
-        expect(p.activity!.daily[1]!.tokens).toBe(120_000_000);
+        // enriched daily
+        const day0 = p.activity!.daily[0]!;
+        expect(day0.date).toBe("2026-06-11");
+        expect(day0.sessions).toBe(5);
+        expect(day0.tokens).toBe(100_000);
+        expect(day0.models).toBeDefined();
+        expect(day0.models![0]!.name).toBe("fable");
+        expect(day0.models![0]!.tokens).toBe(80_000);
+        expect(day0.tool_calls).toBe(200);
+        expect(day0.commits).toBe(7);
+        const day1 = p.activity!.daily[1]!;
+        expect(day1.tokens).toBe(120_000_000);
+        expect(day1.models).toHaveLength(2); // fable + haiku
+        expect(day1.tool_calls).toBe(3900);
+        expect(day1.commits).toBe(50);
+        // workflow: tdd only fires in 2 sessions, no pair -> no bigrams >= 3, omitted
+        expect(p.workflow).toBeUndefined();
+        // downstream_share on tdd skill: 2 qualifying sessions -> defined
+        expect(p.rig.skills[0]!.downstream_share).toBeDefined();
         // insights
         expect(p.insights).toBeDefined();
         expect(p.insights!.hours_total).toBeCloseTo(4, 1); // 2.5h + 1.5h

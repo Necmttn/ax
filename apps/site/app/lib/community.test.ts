@@ -190,6 +190,107 @@ describe("validateLeaderboard", () => {
     });
 });
 
+describe("validateProfileV1 - new optional fields (enriched daily, downstream_share, workflow)", () => {
+    const base = {
+        v: 1,
+        github: "necmttn",
+        generated_at: "2026-06-13T00:00:00Z",
+        window_days: 30,
+        stats: {
+            sessions: 1, active_days: 1, streak_days: 1,
+            tokens: { prompt: 0, completion: 0, total: 0 },
+            models: [], harnesses: [],
+        },
+        rig: { skills: [], hooks: [], routing_table: false },
+    };
+
+    test("accepts daily row with models/tool_calls/commits", () => {
+        const p = validateProfileV1({
+            ...base,
+            activity: {
+                daily: [{
+                    date: "2026-06-13", sessions: 1, tokens: 0,
+                    models: [{ name: "fable", tokens: 800_000 }],
+                    tool_calls: 100,
+                    commits: 5,
+                }],
+            },
+        });
+        expect(p.activity!.daily[0]!.models![0]!.name).toBe("fable");
+        expect(p.activity!.daily[0]!.tool_calls).toBe(100);
+        expect(p.activity!.daily[0]!.commits).toBe(5);
+    });
+
+    test("rejects daily models row with non-string name", () => {
+        expect(() => validateProfileV1({
+            ...base,
+            activity: {
+                daily: [{ date: "x", sessions: 1, tokens: 0, models: [{ name: 42, tokens: 100 }] }],
+            },
+        })).toThrow();
+    });
+
+    test("rejects daily models row with non-number tokens", () => {
+        expect(() => validateProfileV1({
+            ...base,
+            activity: {
+                daily: [{ date: "x", sessions: 1, tokens: 0, models: [{ name: "fable", tokens: "big" }] }],
+            },
+        })).toThrow();
+    });
+
+    test("accepts skill with downstream_share", () => {
+        const p = validateProfileV1({
+            ...base,
+            rig: {
+                skills: [{ name: "tdd", source: "superpowers", runs: 88, downstream_share: 0.73 }],
+                hooks: [], routing_table: false,
+            },
+        });
+        expect(p.rig.skills[0]!.downstream_share).toBe(0.73);
+    });
+
+    test("rejects skill with non-number downstream_share", () => {
+        expect(() => validateProfileV1({
+            ...base,
+            rig: {
+                skills: [{ name: "tdd", source: "superpowers", runs: 88, downstream_share: "high" }],
+                hooks: [], routing_table: false,
+            },
+        })).toThrow();
+    });
+
+    test("accepts workflow section with arcs", () => {
+        const p = validateProfileV1({
+            ...base,
+            workflow: {
+                arcs: [{ steps: ["brainstorming", "writing-plans", "subagent-driven-development"], count: 12 }],
+            },
+        });
+        expect(p.workflow!.arcs[0]!.count).toBe(12);
+        expect(p.workflow!.arcs[0]!.steps).toHaveLength(3);
+    });
+
+    test("rejects workflow arc with non-array steps", () => {
+        expect(() => validateProfileV1({
+            ...base,
+            workflow: { arcs: [{ steps: "not-array", count: 1 }] },
+        })).toThrow();
+    });
+
+    test("rejects workflow arc with non-number count", () => {
+        expect(() => validateProfileV1({
+            ...base,
+            workflow: { arcs: [{ steps: ["a"], count: "twelve" }] },
+        })).toThrow();
+    });
+
+    test("workflow section is optional - omit and still validates", () => {
+        const p = validateProfileV1(base);
+        expect(p.workflow).toBeUndefined();
+    });
+});
+
 describe("urls", () => {
     test("registration + gist raw urls", () => {
         expect(registrationRawUrl("Necmttn")).toBe(
