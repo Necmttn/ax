@@ -94,6 +94,20 @@ Also surface the config front door when relevant:
 - `ax hooks init` - scaffold `~/.ax/hooks` for authoring custom TypeScript guards (`defineHook` from `@ax/hooks-sdk`); validate with `ax hooks backtest` before `ax hooks install`.
 - `ax agents config` - agent definitions and the skills they scope.
 
+After the first ingest completes, show the user where their model spend goes -
+this is the fastest "aha" in the product:
+
+```bash
+ax cost split --days=7       # main loop vs subagents, by model
+ax dispatches --candidates   # dispatches that could run on cheaper models
+```
+
+If the candidates list is non-empty, point at the routing loop: the
+`efficient-dispatch` skill (installed with the others), the `route-dispatch`
+hook (`ax hooks init` scaffolds it; install with
+`ax hooks install ~/.ax/hooks/route-dispatch.ts --providers=claude`), and
+`docs/design/cost-routing.md` for the full picture.
+
 ## What's installed
 
 | Component | Where | Owner |

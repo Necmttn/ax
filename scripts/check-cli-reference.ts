@@ -33,4 +33,18 @@ if (missing.length > 0) {
     process.exit(1);
 }
 
-console.log(`README.md + docs/cli.md cover ${subcommands.length} CLI subcommands.`);
+// llms.txt is the machine-readable feature index served at the site root.
+// Unlike the human docs (where one of README/cli.md suffices), it must cover
+// EVERY visible subcommand itself - an LLM reading it gets no second source.
+const llms = readFileSync("apps/site/public/llms.txt", "utf8");
+const missingLlms = subcommands.filter(
+    (command) => !llms.includes(`axctl ${command}`) && !llms.includes(`ax ${command}`),
+);
+
+if (missingLlms.length > 0) {
+    console.error("apps/site/public/llms.txt is missing CLI subcommands:");
+    for (const command of missingLlms) console.error(`  ${command}`);
+    process.exit(1);
+}
+
+console.log(`README.md + docs/cli.md + llms.txt cover ${subcommands.length} CLI subcommands.`);

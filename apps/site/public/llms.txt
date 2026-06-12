@@ -1,0 +1,145 @@
+# ax - the agent experience layer
+
+> ax is a local taste & telemetry graph for AI coding agents. It ingests
+> transcripts from Claude Code, Codex, Pi, OpenCode, and Cursor into a local
+> SurrealDB, then turns that history into evidence: which skills earn their
+> keep, what work actually cost, where expensive models burn tokens on
+> mechanical work, and which guardrails measurably help. Everything runs on
+> the user's machine; nothing leaves it unless they share a session.
+
+Site: https://ax.necmttn.com
+Repo: https://github.com/Necmttn/ax
+Install: `curl -fsSL https://ax.necmttn.com/install | bash`, then `npx skills add Necmttn/ax`
+
+## What users can do
+
+### Recall and reconstruct
+- `ax recall <query>` - full-text search across turns, commits, and skills
+- `ax sessions here | around <date> | near <sha> | show <id>` - windowed session queries; drill into any session turn by turn
+- `ax:extract-workflow` skill - reconstruct the workflow behind a shipped artifact ("what made X work")
+- `ax share <session-id>` - publish a sanitized session share via GitHub Gist, viewable in the hosted studio
+
+### Skills intelligence
+- `ax skills search | taste | unused | pairs | recovery | stats | weighted` - which installed skills actually get used, and what they pair with
+- `ax skills classify / tag / lint / by-role / roles` - role-tag skills via review briefs; usage x role-weight ranking
+- `ax skills config` - skill lifecycle (live / orphan / out-of-scope / parked)
+
+### Cost and model routing
+- `ax cost models | sessions | split` - spend by model; the split shows main-loop vs subagent spend so users see what their frontier model burns on mechanical work
+- `ax dispatches [--candidates]` - subagent dispatches that inherited an expensive model + estimated savings at cheaper-model pricing
+- `ax dispatches compile-routing` - regenerate the routing table that drives the route-dispatch hook and the efficient-dispatch skill
+- `efficient-dispatch` skill - orchestration pattern: the main model keeps judgment and review, mechanical dispatches carry an explicit cheaper model
+- `route-dispatch` hook - deterministic dispatch-time nudge when a mechanical dispatch forgets an explicit model
+- `ax costs summary | for --session/--query/--commit/--branch` - what any session, feature, or branch cost in tokens and USD
+
+### Self-improvement loop
+- `ax improve recommend / accept / lint / show` - evidence-backed proposals (guidance, skills, hooks, automations) derived from the graph; accept emits a task brief, lint reconciles applied guidance
+- `ax retro emit / pending / brief` + `ax:retro` skill - guided experiment-loop retrospective: triage proposals, lock verdicts, review hook effectiveness
+- `ax hooks init / install / backtest / cases` - author typed TypeScript hooks once, run them on Claude Code + Codex; replay history through a hook before installing it
+
+### Graph insights
+- `ax insights <view>` - 31 read-only graph views
+- `ax signals list | show` - relation-signal catalog (fragility cascades, etc.)
+- `ax sessions metrics`, `ax evidence weekly` - session health and weekly evidence rollups
+- `ax serve` - local dashboard with live ingest, session browser, and health views
+- `ax tui` - terminal skills browser
+
+### Setup and ingest
+- `ax setup` / `ax install` - first-time install: CLI, local SurrealDB, transcript watcher
+- `ax ingest [here] [--since=Nd]` - ingest transcripts, skills, and git history; `here` scopes to the current repo; the watcher does this automatically on new transcripts
+- `ax roles` - list role labels used for skill classification
+- `ax doctor` - validate the install (db, watcher, skills)
+
+### For agents (MCP)
+- `ax mcp` - stdio MCP server exposing read-only graph queries as tools: recall, sessions_around, session_show, skills_weighted, skills_by_role, skills_roles, roles, improve_recommend, improve_show, improve_list, session_metrics, signal_show, cost_models, cost_split, dispatches
+
+## Q&A - "how do I..." mapped to the ax answer
+
+**Q: What was I working on last week?**
+A: `ax sessions here --days=7` - sessions scoped to the current repo. `ax sessions around 2026-06-01` for a date window anywhere.
+
+**Q: How did we ship feature X? I need to reconstruct what actually happened.**
+A: `ax sessions near <sha>` finds the sessions behind a commit; the `ax:extract-workflow` skill narrates the ordered steps that produced the artifact.
+
+**Q: Where did we discuss/decide Y? I remember it but can't find it.**
+A: `ax recall "Y"` - full-text search across every turn, commit, and skill, across all five harnesses.
+
+**Q: What did that refactor / branch / PR cost?**
+A: `ax costs for --branch <name>` or `--commit <sha>` or `--query "<text>"` - tokens and USD, priced per model with cache buckets.
+
+**Q: Where does my model spend actually go?**
+A: `ax cost split --days=7` - main loop vs subagents, by model. Usually reveals the frontier model burning cache reads on mechanical work.
+
+**Q: My frontier-model bill is high. What can run on cheaper models?**
+A: `ax dispatches --candidates` - every subagent dispatch that inherited an expensive model while doing mechanical work, with estimated savings repriced from real token buckets.
+
+**Q: How do I make my agent pick cheaper models automatically?**
+A: Three layers: the `efficient-dispatch` skill (orchestration pattern), the `route-dispatch` hook (`ax hooks install ~/.ax/hooks/route-dispatch.ts --providers=claude` - warns at dispatch time), and `ax dispatches compile-routing` (regenerates the routing table both read).
+
+**Q: I installed 100 skills. Which ones actually earn their keep?**
+A: `ax skills weighted` - usage x role-weight ranking. `ax skills unused` for the dead weight; `ax skills config` to park or retire.
+
+**Q: Which skills work well together?**
+A: `ax skills pairs` - co-occurrence across real sessions.
+
+**Q: Did that hook / guardrail / guidance actually help, or does it just feel like it did?**
+A: The experiment loop: `ax improve recommend` proposes changes with evidence, accepting stamps the moment, and `ax:retro` walks verdicts - worked, didn't, no-longer-needed. Hook effectiveness has its own signal.
+
+**Q: Can I test a hook against history before trusting it?**
+A: `ax hooks backtest <file> --days=14` - replays your real tool-call history through the hook in-process and reports would-block/would-warn rates.
+
+**Q: How do I write one guard that runs on both Claude Code and Codex?**
+A: `ax hooks init` scaffolds `~/.ax/hooks` (typed Effect TypeScript, `defineHook`); `ax hooks install <file> --providers=claude,codex` fans it out to both configs.
+
+**Q: Can my agent query its own history mid-session, without me prompting it?**
+A: `ax mcp` - a stdio MCP server exposing the read-only graph queries as 15 tools. The agent asks "where is the spend" or "what did we try before" itself.
+
+**Q: How do I show a session to a teammate?**
+A: `ax share <session-id>` - sanitized share via GitHub Gist, rendered in the hosted studio viewer.
+
+**Q: I'd rather click than type.**
+A: `ax serve` - local dashboard: live ingest, session browser, health views. `ax tui` for the terminal skills browser.
+
+**Q: What should I improve in my setup right now?**
+A: Say "let's do an ax retro" - proposal triage + verdict review against your recent work. `ax improve recommend` for the raw shortlist.
+
+**Q: Is my install healthy / why is nothing ingesting?**
+A: `ax doctor` - validates DB, watcher, and skills. The watcher ingests new transcripts automatically; `ax ingest here --since=1` forces a scoped pass.
+
+## Q&A - multi-hop graph questions (where the graph beats grep)
+
+These need relations chained across sessions, commits, files, and verdicts -
+derived at ingest, queryable in one command.
+
+**Q: Which of my past mistakes are still costing OTHER work?**
+A: `ax signals show fragility_cascade` - sessions whose reverted commits' files later forced edits by *other* sessions. Three hops: origin session -> reverted commit -> touched files -> downstream sessions that had to fix them, weighted by distinct downstream fixers.
+
+**Q: Which features needed fixes after shipping?**
+A: `ax insights post-feature-fixes` - feature commits joined to the fix commits that followed them. Pair with `ax costs for --commit` to price the cleanup.
+
+**Q: What do I correct my agent about most often?**
+A: `ax insights friction` for the correction/interruption hotspots; `ax insights reaction-themes` clusters classified user reactions into recurring themes - the raw material the improve loop mines.
+
+**Q: Where does my agent claim "done" without verifying?**
+A: `ax insights verification-gaps` - completion claims with no verification evidence behind them.
+
+**Q: Which sessions burned tokens without producing anything?**
+A: `ax insights token-impact` and `ax insights cache-health` - token spend joined to outcome evidence, cache-read ratios flagging context-thrash sessions.
+
+**Q: Which skills rescue sessions that go wrong?**
+A: `ax skills recovery` - failure -> recovery arcs: what got invoked after things broke, and whether the session recovered.
+
+**Q: How does ax decide WHAT to propose improving?**
+A: The derive pipeline chains hops at ingest: classified reactions + correction contexts + skill candidates + dispatch analytics flow into `proposal` rows with evidence refs. `ax improve recommend` ranks them (confidence x recency x frequency); accepting stamps the moment; `ax:retro` verdicts close the loop. Improvement is graph-derived, not vibes.
+
+**Q: My question isn't on this list - can I ask the graph directly?**
+A: Yes. The whole graph is local SurrealDB (`127.0.0.1:8521`, schema in the repo); `ax insights <view>` covers 31 prebuilt traversals, and via `ax mcp` an agent can chain recall -> sessions_around -> session_show hops itself to answer novel multi-hop questions in-context.
+
+## Pages
+- [How it works](https://ax.necmttn.com/how-it-works): ingest -> graph -> evidence loop
+- [Features](https://ax.necmttn.com/features): feature tour
+- [CLI reference](https://ax.necmttn.com/docs/cli-reference): every command
+- [Docs](https://ax.necmttn.com/docs): concepts and language
+- [Manifesto](https://ax.necmttn.com/manifesto): why the agent experience layer exists
+- [Changelog](https://ax.necmttn.com/changelog): release narratives
+- [Registry](https://ax.necmttn.com/registry): community registry direction
