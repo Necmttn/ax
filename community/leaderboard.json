@@ -1,10 +1,30 @@
 {
-  "compiled_at": "2026-06-12T08:07:00.577Z",
+  "compiled_at": "2026-06-12T08:14:49.510Z",
   "window_days": 30,
   "boards": {
-    "tokens": [],
-    "sessions": [],
-    "streak": [],
-    "cost": []
+    "tokens": [
+      {
+        "login": "Necmttn",
+        "value": 19473486824
+      }
+    ],
+    "sessions": [
+      {
+        "login": "Necmttn",
+        "value": 2005
+      }
+    ],
+    "streak": [
+      {
+        "login": "Necmttn",
+        "value": 6
+      }
+    ],
+    "cost": [
+      {
+        "login": "Necmttn",
+        "value": 22648.173916399996
+      }
+    ]
   }
 }
