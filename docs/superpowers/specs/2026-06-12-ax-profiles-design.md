@@ -50,6 +50,19 @@ One gist per user, file `ax-profile.json`, updated in-place via
     "skills": [{ "name": "tdd", "source": "superpowers", "runs_30d": 88 }],
     "hooks": ["enforce-worktree", "route-dispatch"],
     "routing_table": true
+  },
+  "taste": {
+    "patterns": [
+      {
+        "category": "failure-mode",
+        "name": "edit-loop-thrash",
+        "summary": "3+ edits to same file → stop, re-read requirements",
+        "evidence": { "sessions": 12, "confidence": 0.8 },
+        "links": [
+          { "rel": "recovered-by", "ref": "problem-solving-strategy/full-file-reread" }
+        ]
+      }
+    ]
   }
 }
 ```
@@ -59,6 +72,30 @@ One gist per user, file `ax-profile.json`, updated in-place via
 - Renderer lives in `apps/axctl/src/profile/` and composes existing queries
   (`cost models`, `skills weighted`, sessions/streaks). Pure function from
   query rows → profile JSON; snapshot-testable.
+
+### Taste section (metapatterns)
+
+The profile's third axis beyond stats (volume) and rig (inventory): the
+user's *taste* - composable metapatterns other agents can consume. Three
+constraints shape it:
+
+- **Closed category enum (v1):** `design-aesthetic` |
+  `problem-solving-strategy` | `debugging` | `failure-mode` | `workflow`.
+  Constraints make patterns organizable, navigable, composable; free-text
+  categories would fragment aggregation. New categories extend the enum
+  deliberately. AI-created groupings happen at *derivation* time
+  (classifier/improve output), not at the type level.
+- **Linkable patterns:** `links[].rel` (`recovered-by`, `pairs-with`,
+  `conflicts-with`) + `ref` = `category/name`. Failure-modes linked to
+  recovery strategies are the cross-agent payoff: one agent's failure mode
+  resolves against another agent's proven recovery pattern.
+- **Evidence-grounded:** `evidence.sessions` + `confidence` separate observed
+  taste from aspiration, and give aggregation an anti-junk signal.
+
+v1 scope: schema + site rendering ship; entries derive from existing
+`ax improve` proposals / classifier output where present, section omitted
+otherwise. Cross-user pattern matching (`pattern-stats.json`, joining
+failure-modes to recovery strategies across users) is deferred to v2.
 
 ### Repo (control plane)
 
@@ -190,6 +227,9 @@ human-reviewed flow. Adoption stats from 3b can badge their READMEs.
   demand it. It would cache, not replace, the compile.
 - `ax contribute` registry semantics (versioning, install counts, reviews -
   see parked registry+mesh design).
+- `pattern-stats.json` in the nightly compile: cross-user taste aggregation,
+  joining one user's failure-modes to recovery strategies proven by others
+  (the registry+mesh wedge).
 - Sharded `community/users/<a>/<name>.json` layout past ~10k users.
 
 ## Open questions
