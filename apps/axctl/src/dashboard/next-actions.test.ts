@@ -11,6 +11,7 @@ import type { CandidatesResult, CandidateRow } from "../queries/dispatch-analyti
 import type { SkillHygieneRow } from "../queries/skill-hygiene.ts";
 import {
     churnCards,
+    housekeepingCards,
     fetchNextActions,
     proposalCards,
     routingCards,
@@ -590,6 +591,21 @@ test("all builders return NextActionCard[] typed arrays", () => {
 // fetchNextActions aggregator
 // ---------------------------------------------------------------------------
 
+describe("housekeepingCards", () => {
+    test("one card when stale proposals exist, none when clean", () => {
+        expect(housekeepingCards([])).toHaveLength(0);
+        const cards = housekeepingCards([
+            { id: "proposal:a", title: "Old A", dedupe_sig: "a", form: "skill", updated_at: null },
+            { id: "proposal:b", title: "Old B", dedupe_sig: "b", form: "guidance", updated_at: null },
+        ]);
+        expect(cards).toHaveLength(1);
+        expect(cards[0]!.kind).toBe("housekeeping");
+        expect(cards[0]!.title).toContain("2 stale proposals");
+        expect(cards[0]!.brief).toContain("ax improve housekeep");
+        expect(cards[0]!.fix_kind).toContain("housekeep");
+    });
+});
+
 describe("fetchNextActions", () => {
     test("a failing source degrades to a note, never a defect", async () => {
         const stub: SurrealClientShape = {
@@ -608,7 +624,7 @@ describe("fetchNextActions", () => {
         // directly and do add notes. Exact set: if runQuery's internal swallow ever
         // changes and tool_failure starts noting, this surfaces it.
         expect(new Set(payload.notes.map((n) => n.source))).toEqual(
-            new Set(["proposal", "churn", "routing", "skill_hygiene"]),
+            new Set(["proposal", "churn", "routing", "skill_hygiene", "housekeeping"]),
         );
         expect(typeof payload.generatedAt).toBe("string");
     });

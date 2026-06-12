@@ -1233,7 +1233,8 @@ export type NextActionKind =
     | "tool_failure"
     | "churn"
     | "routing"
-    | "skill_hygiene";
+    | "skill_hygiene"
+    | "housekeeping";
 
 export interface NextActionInlineAction {
     readonly type: "accept" | "reject" | "verdict" | "decide";

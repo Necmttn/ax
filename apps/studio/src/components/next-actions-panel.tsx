@@ -21,6 +21,7 @@ const KIND_LABEL: Record<NextActionKind, string> = {
     churn: "churn",
     routing: "routing savings",
     skill_hygiene: "skill hygiene",
+    housekeeping: "housekeeping",
 };
 
 /** Semantic accent per kind: money green, failure rose, decision gold. */
@@ -31,6 +32,7 @@ const KIND_ACCENT: Record<NextActionKind, string> = {
     tool_failure: "rose",
     churn: "violet",
     skill_hygiene: "gold",
+    housekeeping: "muted",
 };
 
 /** Three rows of cards max before the registry below buries the page. */

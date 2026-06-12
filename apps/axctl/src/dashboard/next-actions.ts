@@ -26,6 +26,7 @@ import { fetchDispatchCandidates } from "../queries/dispatch-analytics.ts";
 import type { SkillHygieneRow } from "../queries/skill-hygiene.ts";
 import { fetchSkillHygiene } from "../queries/skill-hygiene.ts";
 import { fetchImproveProposals, proposalReviewBrief } from "./improve-proposals.ts";
+import { findStaleOpenProposals, type StaleProposalRow } from "../improve/housekeep.ts";
 import { fetchToolFailures } from "./tool-failures.ts";
 import { renderAgentBrief } from "./agent-brief.ts";
 
@@ -40,6 +41,7 @@ const KIND_WEIGHT: Record<NextActionKind, number> = {
     routing: 60,
     churn: 50,
     skill_hygiene: 40,
+    housekeeping: 30,
 };
 
 const CONFIDENCE_WEIGHT: Record<string, number> = { high: 3, medium: 2, low: 1 };
@@ -344,6 +346,41 @@ export const skillHygieneCards = (
     );
 
 // ---------------------------------------------------------------------------
+// housekeepingCards
+// ---------------------------------------------------------------------------
+
+const HOUSEKEEP_DAYS = 30;
+
+/** One card when the loop itself has gone stale - a loop that suggests
+ *  cleanups must not hoard expired proposals. */
+export const housekeepingCards = (
+    stale: ReadonlyArray<StaleProposalRow>,
+): NextActionCard[] => {
+    if (stale.length === 0) return [];
+    const sample = stale.slice(0, 3).map((r) => r.title).join("; ");
+    return [
+        {
+            id: "housekeeping:stale-proposals",
+            kind: "housekeeping",
+            title: `Sweep ${stale.length} stale proposal${stale.length === 1 ? "" : "s"}`,
+            evidence: `Open >${HOUSEKEEP_DAYS}d without the signal re-occurring: ${sample}${stale.length > 3 ? "\u2026" : ""}. Anything still real gets re-mined.`,
+            impact: KIND_WEIGHT.housekeeping + bonus(Math.log2(stale.length + 1)),
+            brief: renderAgentBrief({
+                title: "Housekeep the improve loop",
+                evidence: `${stale.length} open proposals have not been re-observed in ${HOUSEKEEP_DAYS}d.`,
+                ask: "Run `ax improve housekeep` (use --dry-run first if cautious). Stale proposals are superseded; recurring signals come back on the next mine with the same dedupe_sig.",
+                verify: "`ax improve list --status=open` no longer shows the stale rows.",
+                source: "ax improve housekeep candidates",
+            }),
+            link: null,
+            inline_action: null,
+            impact_chip: null,
+            fix_kind: "run ax improve housekeep",
+        },
+    ];
+};
+
+// ---------------------------------------------------------------------------
 // aggregator
 // ---------------------------------------------------------------------------
 
@@ -405,7 +442,7 @@ export const fetchNextActions = Effect.fn("dashboard.fetchNextActions")(function
             ),
         );
 
-    const [proposals, failures, churn, routing, hygiene] = yield* Effect.all(
+    const [proposals, failures, churn, routing, hygiene, stale] = yield* Effect.all(
         [
             guarded("proposal", fetchImproveProposals(), [] as ReadonlyArray<ProposalDto>),
             guarded("tool_failure", fetchToolFailures(), null as ToolFailuresResponse | null),
@@ -419,6 +456,7 @@ export const fetchNextActions = Effect.fn("dashboard.fetchNextActions")(function
             ),
             guarded("routing", fetchDispatchCandidates({ sinceDays: ROUTING_WINDOW_DAYS }), null as CandidatesResult | null),
             guarded("skill_hygiene", fetchSkillHygiene({ minInvocations: 3, limit: 10 }), [] as ReadonlyArray<SkillHygieneRow>),
+            guarded("housekeeping", findStaleOpenProposals(HOUSEKEEP_DAYS), [] as ReadonlyArray<StaleProposalRow>),
         ] as const,
         { concurrency: 3 },
     );
@@ -430,6 +468,7 @@ export const fetchNextActions = Effect.fn("dashboard.fetchNextActions")(function
         ...(churn != null ? churnCards(churn) : []),
         ...(routing != null ? routingCards(routing) : []),
         ...skillHygieneCards(hygiene),
+        ...housekeepingCards(stale),
     ].sort((a, b) => b.impact - a.impact);
 
     return { generatedAt: new Date().toISOString(), cards, notes } satisfies NextActionsPayload;

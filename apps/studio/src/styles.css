@@ -2668,6 +2668,7 @@ td.skill-cell .description {
 .next-action-card.accent-gold   { --card-accent: var(--gold); }
 .next-action-card.accent-violet { --card-accent: var(--violet); }
 .next-action-card.accent-rose   { --card-accent: var(--rose); }
+.next-action-card.accent-muted  { --card-accent: var(--muted); }
 
 .next-action-eyebrow {
     color: var(--card-accent);

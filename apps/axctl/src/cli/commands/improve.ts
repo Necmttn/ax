@@ -15,6 +15,7 @@ import { recommend, formatRecommendations, copyToClipboard, selectByIndices, par
 import { showExperiment, formatShow } from "../../improve/show.ts";
 import { renderAnalyzeBrief } from "../../improve/analyze-brief.ts";
 import { runPropose } from "../../improve/propose.ts";
+import { runHousekeep } from "../../improve/housekeep.ts";
 import { buildImproveProposalsNext } from "../../nav/next-links.ts";
 import { printNextLinks } from "../next-format.ts";
 import type { RuntimeManifest } from "./manifest.ts";
@@ -654,6 +655,37 @@ const improveAnalyzeCommand = Command.make(
     ({ force }) => cmdImproveAnalyze({ force }),
 ).pipe(Command.withDescription("Emit .ax/tasks/analyze-improve-<date>.md - a deep-analysis brief instructing an agent to mine the graph and write proposals back via `ax improve propose`."));
 
+const cmdImproveHousekeep = (input: { readonly days: number; readonly dryRun: boolean; readonly json: boolean }) =>
+    Effect.gen(function* () {
+        const report = yield* runHousekeep({ days: input.days, dryRun: input.dryRun });
+        if (input.json) {
+            console.log(JSON.stringify(report));
+            return;
+        }
+        if (report.staleProposals.length === 0 && report.removedTaskFiles.length === 0) {
+            console.log(`clean: no open proposals or task briefs older than ${input.days}d`);
+            return;
+        }
+        for (const row of report.staleProposals) {
+            console.log(`${input.dryRun ? "would expire" : "expired"}: [${row.form}] ${row.title} (sig=${row.dedupe_sig})`);
+        }
+        for (const f of report.removedTaskFiles) {
+            console.log(`${input.dryRun ? "would remove" : "removed"}: ${f}`);
+        }
+        if (input.dryRun) console.log("re-run without --dry-run to apply");
+        else console.log("anything still real gets re-mined on the next ingest (same dedupe_sig).");
+    });
+
+const improveHousekeepCommand = Command.make(
+    "housekeep",
+    {
+        days: Flag.integer("days").pipe(Flag.withDefault(30)),
+        dryRun: Flag.boolean("dry-run").pipe(Flag.withDefault(false)),
+        json: jsonFlag,
+    },
+    ({ days, dryRun, json }) => cmdImproveHousekeep({ days, dryRun, json }),
+).pipe(Command.withDescription("Sweep loop staleness: open proposals not re-observed in --days (default 30) are superseded; stale .ax/tasks briefs are deleted. Signals that still recur get re-mined automatically."));
+
 export const improveCommand = Command.make("improve").pipe(
     Command.withDescription("Experiment loop: rank proposals (recommend), accept (emit task brief or scaffold + dispatch subagent), lint grounded agent files, track verdicts at +3/+10/+30 sessions after accept."),
     Command.withSubcommands([
@@ -668,6 +700,7 @@ export const improveCommand = Command.make("improve").pipe(
         improveResetCommand,
         improveProposeCommand,
         improveAnalyzeCommand,
+        improveHousekeepCommand,
     ]),
 );
 
