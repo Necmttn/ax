@@ -90,7 +90,21 @@ export interface RecordedCall {
     readonly body?: unknown;
 }
 
-/** Test layer: canned responses keyed "METHOD path"; records every call. */
+/** Canned error marker: `{ __error: { status, message } }` makes api() fail. */
+const asInjectedError = (value: unknown): GitHubApiError | null => {
+    if (typeof value !== "object" || value === null || !("__error" in value)) return null;
+    const e = (value as { __error: unknown }).__error;
+    if (typeof e !== "object" || e === null) return null;
+    const { status, message } = e as { status?: unknown; message?: unknown };
+    if (typeof status !== "number" || typeof message !== "string") return null;
+    return new GitHubApiError({ status, message });
+};
+
+/**
+ * Test layer: canned responses keyed "METHOD path"; records every call.
+ * Missing key → GitHubApiError 404. A canned value of
+ * `{ __error: { status, message } }` injects a failure with that status.
+ */
 export const GitHubEnvTest = (config: {
     responses: Record<string, unknown>;
     login?: string | null;
@@ -100,7 +114,12 @@ export const GitHubEnvTest = (config: {
         api: (method, path, body) => {
             calls.push(body !== undefined ? { method, path, body } : { method, path });
             const key = `${method} ${path}`;
-            if (key in config.responses) return Effect.succeed(config.responses[key]);
+            if (key in config.responses) {
+                const value = config.responses[key];
+                const injected = asInjectedError(value);
+                if (injected !== null) return Effect.fail(injected);
+                return Effect.succeed(value);
+            }
             return Effect.fail(new GitHubApiError({ status: 404, message: `no canned response for ${key}` }));
         },
         login: () => Effect.succeed(config.login ?? null),

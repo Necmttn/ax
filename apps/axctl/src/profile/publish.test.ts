@@ -53,6 +53,9 @@ describe("createProfileGist / patchProfileGist", () => {
         const ref = await run(createProfileGist(profile).pipe(Effect.provide(t.layer)));
         expect(ref).toEqual({ gistId: "g1", owner: "necmttn" });
         expect(t.calls[0]!.method).toBe("POST");
+        const body = t.calls[0]!.body as { public: boolean; files: Record<string, unknown> };
+        expect(body.public).toBe(true);
+        expect(Object.keys(body.files)).toContain("ax-profile.json");
     });
 
     test("patch PATCHes /gists/:id", async () => {
@@ -102,5 +105,52 @@ describe("ensureRegistration", () => {
         expect(paths).toContain(`POST /repos/${REGISTRY_REPO}/forks`);
         expect(paths).toContain(`POST /repos/${login}/ax/git/blobs`);
         expect(paths).toContain(`POST /repos/${REGISTRY_REPO}/pulls`);
+
+        const callBody = (path: string): unknown =>
+            t.calls.find((c) => c.path === path)?.body;
+        const expectedContent = `${JSON.stringify(
+            { github: login, gist_id: "g1", joined: "2026-06-12" },
+            null,
+            2,
+        )}\n`;
+        expect(callBody(`/repos/${fork}/git/blobs`)).toEqual({
+            content: expectedContent,
+            encoding: "utf-8",
+        });
+        expect(callBody(`/repos/${fork}/git/trees`)).toMatchObject({
+            tree: [
+                {
+                    path: "community/users/necmttn.json",
+                    mode: "100644",
+                    type: "blob",
+                    sha: "blob1",
+                },
+            ],
+        });
+        expect(callBody(`/repos/${fork}/git/commits`)).toMatchObject({ parents: ["base"] });
+        expect(callBody(`/repos/${REGISTRY_REPO}/pulls`)).toMatchObject({
+            head: "necmttn:ax-profile-necmttn",
+            base: "main",
+        });
+    });
+
+    test("non-404 error on contents check fails registration without forking", async () => {
+        const t = GitHubEnvTest({
+            responses: {
+                [`GET /repos/${REGISTRY_REPO}/contents/community/users/necmttn.json`]: {
+                    __error: { status: 500, message: "boom" },
+                },
+            },
+        });
+        const outcome = await run(
+            ensureRegistration({ login: "necmttn", gistId: "g1", joined: "2026-06-12" }).pipe(
+                Effect.map(() => "ok" as const),
+                Effect.catchTag("GitHubApiError", (e) => Effect.succeed(`err:${e.status}`)),
+                Effect.provide(t.layer),
+            ),
+        );
+        expect(outcome).toBe("err:500");
+        const paths = t.calls.map((c) => `${c.method} ${c.path}`);
+        expect(paths).not.toContain(`POST /repos/${REGISTRY_REPO}/forks`);
     });
 });
