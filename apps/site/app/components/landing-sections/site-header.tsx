@@ -31,6 +31,7 @@ export function SiteHeader() {
       <nav className="top-nav">
         <Link to="/features">Features</Link>
         <Link to="/showcases">Showcases</Link>
+        <Link to="/leaders">Leaders</Link>
         <Link to="/how-it-works">How</Link>
         <Link to="/docs">Docs</Link>
         <Link to="/changelog">Changelog</Link>

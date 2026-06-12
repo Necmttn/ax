@@ -9460,3 +9460,23 @@ footer .right {
 .features-page .ascii-graph::-webkit-scrollbar-thumb { background: var(--line); border-radius: 3px; }
 .prose pre::-webkit-scrollbar { height: 6px; }
 .prose pre::-webkit-scrollbar-thumb { background: #3a3a3a; border-radius: 3px; }
+
+/* --- profile + leaders pages --- */
+.profile-page, .leaders-page {
+    max-width: var(--shell-max);
+    margin: 0 auto;
+    padding: 32px var(--shell-pad) 64px;
+}
+.stat-row { display: flex; gap: 28px; flex-wrap: wrap; margin: 20px 0; }
+.stat-value { font-size: 1.6rem; font-family: var(--mono); }
+.bar-row { display: flex; align-items: center; gap: 10px; margin: 4px 0; font-family: var(--mono); font-size: 0.85rem; }
+.bar-label { width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bar-track { flex: 1; height: 8px; background: var(--line); border-radius: 4px; overflow: hidden; }
+.bar-fill { display: block; height: 100%; background: var(--green); }
+.bar-value { width: 110px; text-align: right; }
+.leaders-tabs { display: flex; gap: 8px; margin: 16px 0; flex-wrap: wrap; }
+.leaders-tabs button { font: inherit; padding: 6px 14px; border: 1px solid var(--line); background: var(--panel); cursor: pointer; border-radius: 6px; }
+.leaders-tabs button[aria-selected="true"] { background: var(--ink); color: var(--page); }
+.leaders-table { width: 100%; border-collapse: collapse; font-family: var(--mono); font-size: 0.9rem; }
+.leaders-table td, .leaders-table th { padding: 8px 10px; border-bottom: 1px solid var(--line); text-align: left; }
+.leaders-table td:last-child, .leaders-table th:last-child { text-align: right; }

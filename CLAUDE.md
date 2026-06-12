@@ -144,6 +144,12 @@ into `community/{leaderboard,skill-stats,hook-stats,state/<year>}.json`
 (`scripts/compile-community.ts`, ETag-cached, absurd rows dropped). Compiled
 files are generated - never hand-edit.
 
+Site: `/u/<login>` renders a registered user's gist profile live;
+`/leaders` renders compiled boards + trending skills (empty-state until the
+first nightly compile). Both client-fetch from raw.githubusercontent / gist
+raw; validation in `apps/site/app/lib/community.ts` (manual - the site does
+not depend on effect).
+
 ### Dispatch routing
 
 `ax dispatches [--days=N] [--limit=N]` - subagent dispatch table sorted by child cost (default 14d/30 rows). Shows ts, agent_type, description, dispatch_model ("inherit" when no explicit model), child_model, child_cost_usd. Summary: count, % inherit, total subagent cost. MCP: `dispatches`.
