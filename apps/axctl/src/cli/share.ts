@@ -1,10 +1,12 @@
 import { Effect } from "effect";
 import { execFile } from "node:child_process";
+import { readFile } from "node:fs/promises";
+import { join } from "node:path";
 import { AppLayer } from "@ax/lib/layers";
 import { prettyPrint } from "@ax/lib/json";
 import type { AxSessionShare } from "../share/artifact.ts";
 import { exportSessionShare } from "../share/exporter.ts";
-import { buildShareBundle, type ShareBundle } from "../share/manifest.ts";
+import { buildShareBundle, type ShareBundle, type ShareNarrationArtifact } from "../share/manifest.ts";
 import {
     createSessionGist,
     shareUrlForGist,
@@ -52,6 +54,8 @@ export interface ShareCommandDeps {
         readonly bundle: ShareBundle;
         readonly public: boolean;
     }) => Promise<GistRef>;
+    /** Optional local `.ax/narrations/<session-id>.json` artifact. */
+    readonly loadNarration: (sessionId: string) => Promise<ShareNarrationArtifact | null>;
     readonly open: (ref: GistRef) => Promise<void>;
     readonly writeStdout: (text: string) => void;
     readonly writeStderr: (text: string) => void;
@@ -98,6 +102,28 @@ const openShareUrl = async (ref: GistRef): Promise<void> => {
         child.on("error", () => resolve());
     });
 };
+
+function isShareNarrationArtifact(value: unknown): value is ShareNarrationArtifact {
+    return (
+        typeof value === "object" &&
+        value !== null &&
+        !Array.isArray(value) &&
+        (value as { kind?: unknown }).kind === "narration" &&
+        typeof (value as { schema_version?: unknown }).schema_version === "number"
+    );
+}
+
+export async function loadLocalNarration(sessionId: string): Promise<ShareNarrationArtifact | null> {
+    try {
+        const raw = await readFile(join(process.cwd(), ".ax", "narrations", `${sessionId}.json`), "utf8");
+        const parsed: unknown = JSON.parse(raw);
+        return isShareNarrationArtifact(parsed) ? parsed : null;
+    } catch (error) {
+        const code = (error as { code?: unknown }).code;
+        if (code === "ENOENT" || error instanceof SyntaxError) return null;
+        throw error;
+    }
+}
 
 /**
  * Export-miss fallback: find the transcript on disk, run a targeted ingest
@@ -175,7 +201,8 @@ export async function cmdShareWithDeps(
     }
 
     const { artifact } = redactShareArtifact(exported);
-    const bundle = buildShareBundle(artifact);
+    const narration = await deps.loadNarration(artifact.session.id);
+    const bundle = buildShareBundle(artifact, narration ?? undefined);
 
     if (hasStaleUsage(artifact)) {
         deps.writeStderr(formatStaleUsageWarning());
@@ -241,6 +268,7 @@ const liveShareDeps: ShareCommandDeps = {
             ),
         ),
     publish: (input) => Effect.runPromise(createSessionGist(input)),
+    loadNarration: loadLocalNarration,
     open: openShareUrl,
     writeStdout: (text) => {
         process.stdout.write(text);
