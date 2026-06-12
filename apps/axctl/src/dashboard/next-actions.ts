@@ -4,19 +4,28 @@
  * Each builder takes its data source rows and returns NextActionCard[],
  * sorted by impact descending and capped at PER_SOURCE_CAP.
  *
- * These are PURE functions - no DB access. The Effect aggregator (next task)
- * orchestrates fetching and calls these builders.
+ * These are PURE functions - no DB access. The Effect aggregator
+ * fetchNextActions (below) orchestrates fetching and calls these builders.
  */
 
+import { Effect } from "effect";
+import { SurrealClient } from "@ax/lib/db";
 import type {
     NextActionCard,
     NextActionKind,
+    NextActionsPayload,
+    NextActionsSourceNote,
     ProposalDto,
     ToolFailureEntry,
 } from "@ax/lib/shared/dashboard-types";
 import type { SessionChurnSummary } from "../metrics/session-churn.ts";
+import { fetchSessionChurnSummary } from "../metrics/session-churn.ts";
 import type { CandidatesResult } from "../queries/dispatch-analytics.ts";
+import { fetchDispatchCandidates } from "../queries/dispatch-analytics.ts";
 import type { SkillHygieneRow } from "../queries/skill-hygiene.ts";
+import { fetchSkillHygiene } from "../queries/skill-hygiene.ts";
+import { fetchImproveProposals } from "./improve-proposals.ts";
+import { fetchToolFailures } from "./tool-failures.ts";
 import { renderAgentBrief } from "./agent-brief.ts";
 
 // ---------------------------------------------------------------------------
@@ -298,3 +307,70 @@ export const skillHygieneCards = (
             },
         })),
     );
+
+// ---------------------------------------------------------------------------
+// aggregator
+// ---------------------------------------------------------------------------
+
+const CHURN_WINDOW_DAYS = 14;
+const ROUTING_WINDOW_DAYS = 14;
+
+/**
+ * Fan-out to 5 data sources (proposals, tool failures, churn, routing, skill
+ * hygiene), merge and sort all cards by impact descending.
+ *
+ * Each leg is fail-open: a DB error becomes a NextActionsSourceNote, never a
+ * typed failure. The returned Effect has error type `never` for source
+ * failures; only truly unexpected defects (bugs) can still escape.
+ */
+export const fetchNextActions = Effect.fn("dashboard.fetchNextActions")(function* () {
+    const notes: Array<NextActionsSourceNote> = [];
+
+    /** Wrap an effect so errors become notes + an empty fallback value. */
+    const guarded = <A>(
+        source: NextActionKind,
+        eff: Effect.Effect<A, unknown, SurrealClient>,
+        empty: A,
+    ): Effect.Effect<A, never, SurrealClient> =>
+        eff.pipe(
+            Effect.catch((err) =>
+                Effect.sync(() => {
+                    notes.push({ source, note: String(err) });
+                    return empty;
+                }),
+            ),
+        );
+
+    const [proposals, failures, churn, routing, hygiene] = yield* Effect.all(
+        [
+            guarded("proposal", fetchImproveProposals(), [] as ReadonlyArray<ProposalDto>),
+            guarded(
+                "tool_failure",
+                fetchToolFailures() as Effect.Effect<{ failures: ReadonlyArray<ToolFailureEntry> }, unknown, SurrealClient>,
+                null as { failures: ReadonlyArray<ToolFailureEntry> } | null,
+            ),
+            guarded(
+                "churn",
+                fetchSessionChurnSummary({
+                    since: new Date(Date.now() - CHURN_WINDOW_DAYS * 86_400_000),
+                    limit: 20,
+                }),
+                null as SessionChurnSummary | null,
+            ),
+            guarded("routing", fetchDispatchCandidates({ sinceDays: ROUTING_WINDOW_DAYS }), null as CandidatesResult | null),
+            guarded("skill_hygiene", fetchSkillHygiene({ minInvocations: 3, limit: 10 }), [] as ReadonlyArray<SkillHygieneRow>),
+        ] as const,
+        { concurrency: 3 },
+    );
+
+    const cards: NextActionCard[] = [
+        ...proposalCards(proposals),
+        ...verdictCards(proposals),
+        ...(failures != null ? toolFailureCards(failures.failures) : []),
+        ...(churn != null ? churnCards(churn) : []),
+        ...(routing != null ? routingCards(routing) : []),
+        ...skillHygieneCards(hygiene),
+    ].sort((a, b) => b.impact - a.impact);
+
+    return { generatedAt: new Date().toISOString(), cards, notes } satisfies NextActionsPayload;
+});

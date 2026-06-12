@@ -1,4 +1,6 @@
 import { describe, expect, test } from "bun:test";
+import { Effect, Layer } from "effect";
+import { SurrealClient, type SurrealClientShape } from "@ax/lib/db";
 import type {
     NextActionCard,
     ProposalDto,
@@ -9,6 +11,7 @@ import type { CandidatesResult, CandidateRow } from "../queries/dispatch-analyti
 import type { SkillHygieneRow } from "../queries/skill-hygiene.ts";
 import {
     churnCards,
+    fetchNextActions,
     proposalCards,
     routingCards,
     skillHygieneCards,
@@ -547,4 +550,29 @@ test("all builders return NextActionCard[] typed arrays", () => {
 
     // All present (guards against tree-shaking)
     expect([pc, vc, tc, cc, rc, sc].every(Array.isArray)).toBe(true);
+});
+
+// ---------------------------------------------------------------------------
+// fetchNextActions aggregator
+// ---------------------------------------------------------------------------
+
+describe("fetchNextActions", () => {
+    test("a failing source degrades to a note, never a defect", async () => {
+        const stub: SurrealClientShape = {
+            query: (_sql: string) => Effect.fail(new Error("db down") as never),
+            // biome-ignore lint: other methods not needed
+        } as unknown as SurrealClientShape;
+        const layer = Layer.succeed(SurrealClient, stub);
+
+        const payload = await Effect.runPromise(
+            fetchNextActions().pipe(Effect.provide(layer)),
+        );
+
+        expect(payload.cards).toEqual([]);
+        // tool_failure uses runQuery (internal fail-open), so it does NOT add a note
+        // on DB failure - it silently returns []. Other 4 sources use db.query directly
+        // and do add notes. The contract is: no defect escapes, notes >= 4.
+        expect(payload.notes.length).toBeGreaterThanOrEqual(4);
+        expect(typeof payload.generatedAt).toBe("string");
+    });
 });
