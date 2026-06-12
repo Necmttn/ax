@@ -78,7 +78,9 @@ export const ensureRegistration = Effect.fn("profile.ensureRegistration")(
     function* (input: { readonly login: string; readonly gistId: string; readonly joined: string }) {
         const gh = yield* GitHubEnv;
         const { login, gistId, joined } = input;
-        const filePath = `community/users/${login}.json`;
+        // Filename is ALWAYS the lowercase login - the registry validator and
+        // the site lookup both require it (GitHub logins are case-insensitive).
+        const filePath = `community/users/${login.toLowerCase()}.json`;
 
         const exists = yield* gh.api("GET", `/repos/${REGISTRY_REPO}/contents/${filePath}`).pipe(
             Effect.map(() => true),
@@ -120,7 +122,7 @@ export const ensureRegistration = Effect.fn("profile.ensureRegistration")(
             }),
         );
 
-        const branch = `ax-profile-${login}`;
+        const branch = `ax-profile-${login.toLowerCase()}`;
         yield* gh.api("POST", `/repos/${forkFullName}/git/refs`, {
             ref: `refs/heads/${branch}`,
             sha: commit.sha,

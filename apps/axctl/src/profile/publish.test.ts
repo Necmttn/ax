@@ -134,6 +134,36 @@ describe("ensureRegistration", () => {
         });
     });
 
+    test("uppercase login registers under the lowercase filename and branch", async () => {
+        // Live finding: "Necmttn" produced Necmttn.json, which the registry
+        // validator scope regex rejects and the site lookup (lowercased) 404s.
+        const fork = "Necmttn/ax";
+        const t = GitHubEnvTest({
+            responses: {
+                [`POST /repos/${REGISTRY_REPO}/forks`]: { full_name: fork },
+                [`GET /repos/${fork}/git/ref/heads/main`]: { object: { sha: "base" } },
+                [`POST /repos/${fork}/git/blobs`]: { sha: "blob1" },
+                [`GET /repos/${fork}/git/commits/base`]: { tree: { sha: "tree0" } },
+                [`POST /repos/${fork}/git/trees`]: { sha: "tree1" },
+                [`POST /repos/${fork}/git/commits`]: { sha: "commit1" },
+                [`POST /repos/${fork}/git/refs`]: { ref: "refs/heads/ax-profile-necmttn" },
+                [`POST /repos/${REGISTRY_REPO}/pulls`]: { html_url: "https://github.com/Necmttn/ax/pull/1000" },
+            },
+        });
+        await run(
+            ensureRegistration({ login: "Necmttn", gistId: "g1", joined: "2026-06-12" })
+                .pipe(Effect.provide(t.layer)),
+        );
+        const contentsCheck = t.calls.find((c) => c.method === "GET" && c.path.includes("/contents/"));
+        expect(contentsCheck?.path).toBe(`/repos/${REGISTRY_REPO}/contents/community/users/necmttn.json`);
+        const trees = t.calls.find((c) => c.path === `/repos/${fork}/git/trees`)?.body as {
+            tree: Array<{ path: string }>;
+        };
+        expect(trees.tree[0]!.path).toBe("community/users/necmttn.json");
+        const refs = t.calls.find((c) => c.path === `/repos/${fork}/git/refs`)?.body as { ref: string };
+        expect(refs.ref).toBe("refs/heads/ax-profile-necmttn");
+    });
+
     test("non-404 error on contents check fails registration without forking", async () => {
         const t = GitHubEnvTest({
             responses: {

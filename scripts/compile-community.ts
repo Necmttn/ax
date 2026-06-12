@@ -21,6 +21,7 @@ export interface RegisteredUser {
 
 export type GistFetcher = (
     gistId: string,
+    owner: string,
 ) => Promise<{ profile: unknown; etag: string | null } | null>;
 
 export interface BoardRow {
@@ -69,7 +70,7 @@ export async function compileCommunity(
     const dropped: CompiledOutput["dropped"] = [];
 
     for (const user of [...users].sort((a, b) => a.github.localeCompare(b.github))) {
-        const fetched = await fetchGist(user.gist_id);
+        const fetched = await fetchGist(user.gist_id, user.github);
         if (fetched === null) {
             dropped.push({ login: user.github, reason: "fetch-failed" });
             continue;
@@ -152,26 +153,24 @@ export async function compileCommunity(
 // CLI entry: read users dir, fetch via HTTP with ETag cache, write outputs.
 // ---------------------------------------------------------------------------
 
+/**
+ * Fetch the gist's ax-profile.json via the PUBLIC raw URL, unauthenticated.
+ * Deliberately NOT api.github.com: the Actions GITHUB_TOKEN is an
+ * installation token with no gist scope, so authenticated /gists/:id calls
+ * 404 in CI (live finding, first compile run). The raw CDN endpoint needs
+ * no auth, has no meaningful rate limit, and never truncates.
+ */
 const liveFetcher = (cache: Record<string, { etag: string; profile: unknown }>): GistFetcher =>
-    async (gistId) => {
+    async (gistId, owner) => {
         try {
             const cached = cache[gistId];
-            const res = await fetch(`https://api.github.com/gists/${gistId}`, {
-                headers: {
-                    accept: "application/vnd.github+json",
-                    ...(process.env.GITHUB_TOKEN ? { authorization: `Bearer ${process.env.GITHUB_TOKEN}` } : {}),
-                    ...(cached ? { "if-none-match": cached.etag } : {}),
-                },
-            });
+            const res = await fetch(
+                `https://gist.githubusercontent.com/${owner}/${gistId}/raw/ax-profile.json`,
+                { headers: { ...(cached ? { "if-none-match": cached.etag } : {}) } },
+            );
             if (res.status === 304 && cached) return { profile: cached.profile, etag: cached.etag };
             if (!res.ok) return null;
-            const body = (await res.json()) as {
-                files?: Record<string, { content?: string; truncated?: boolean }>;
-            };
-            const f = body.files?.["ax-profile.json"];
-            if (!f || f.truncated === true || typeof f.content !== "string") return null;
-            const content = f.content;
-            const profile: unknown = JSON.parse(content);
+            const profile: unknown = await res.json();
             const etag = res.headers.get("etag");
             if (etag) cache[gistId] = { etag, profile };
             return { profile, etag };
