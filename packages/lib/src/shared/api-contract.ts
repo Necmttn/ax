@@ -98,11 +98,70 @@ export const SystemGroup = HttpApiGroup.make("system")
         }),
     );
 
+// ---- recall payload (the first tightened insights response) -------------
+// These mirror the dashboard-types Recall* interfaces exactly. They are
+// Schema.Struct (not Schema.Class) on purpose: HttpApi ENCODES a handler's
+// return through the success schema, and a class schema's encode demands
+// actual class instances, while the recall handler returns plain JS-mapped
+// objects. A struct's Type is a plain object, so it encodes cleanly.
+
+export const RecallHit = Schema.Struct({
+    turn_id: Schema.String,
+    session_id: Schema.String,
+    project: Schema.NullOr(Schema.String),
+    source: Schema.NullOr(Schema.String),
+    cwd: Schema.NullOr(Schema.String),
+    role: Schema.NullOr(Schema.String),
+    ts: Schema.NullOr(Schema.String),
+    snippet: Schema.String,
+});
+
+export const RecallCommitHit = Schema.Struct({
+    commit_id: Schema.String,
+    sha: Schema.String,
+    repo: Schema.NullOr(Schema.String),
+    repository: Schema.NullOr(Schema.String),
+    ts: Schema.NullOr(Schema.String),
+    snippet: Schema.String,
+    score: Schema.Number,
+});
+
+export const RecallSkillHit = Schema.Struct({
+    skill_id: Schema.String,
+    name: Schema.String,
+    description: Schema.NullOr(Schema.String),
+    snippet: Schema.String,
+    score: Schema.Number,
+});
+
+export const RecallResponse = Schema.Struct({
+    q: Schema.String,
+    hits: Schema.Array(RecallHit),
+    commits: Schema.Array(RecallCommitHit),
+    skills: Schema.Array(RecallSkillHit),
+    truncated: Schema.Boolean,
+    total_count: Schema.Number,
+    total_counts: Schema.Struct({
+        turn: Schema.Number,
+        commit: Schema.Number,
+        skill: Schema.Number,
+    }),
+    window: Schema.Struct({
+        offset: Schema.Number,
+        limit: Schema.Number,
+    }),
+});
+
+/** Studio-facing type derived from the contract (single source of truth). */
+export type RecallResponse = typeof RecallResponse.Type;
+
 /**
  * The insights family: cross-source recall, project pages, episode
  * timelines, the skill graph, wrapped profiles, workflow rollups, and tool
- * failures. Payloads are `Schema.Unknown` for now (same later-pass deal as
- * the system raw rows); paths, params, and status mapping are the contract.
+ * failures. Recall is the first response with a real Schema; the rest stay
+ * `Schema.Unknown` for now - tightening is per-family follow-up work, and
+ * raw-row passthroughs (graph-health, worktrees, self-improve) keep Unknown
+ * deliberately (validating untyped DB rows buys little and risks 400s).
  *
  * Path params are single-segment: every client URL-encodes ids, and the
  * legacy greedy `:param+` rows remain mounted for raw-slash ids.
@@ -118,7 +177,7 @@ export const InsightsGroup = HttpApiGroup.make("insights")
                 offset: Schema.optionalKey(Schema.Number),
                 limit: Schema.optionalKey(Schema.Number),
             },
-            success: Schema.Unknown,
+            success: RecallResponse,
             error: InternalError,
         }),
         HttpApiEndpoint.get("episodeTimeline", "/api/episodes/:parentId", {
