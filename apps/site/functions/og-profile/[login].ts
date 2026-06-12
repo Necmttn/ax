@@ -1,38 +1,30 @@
 /**
- * Profile OG poster (1200x630 PNG) for /u/<login> pages.
+ * Profile OG card (1200x630 PNG) - dense agent telemetry dossier.
  *
- * Data path: community/users/<login>.json → gist ax-profile.json.
- * Aesthetic: ax paper/ink editorial (light bg, dark type, green accent).
+ * Data path v0: community/users/<login>.json → gist ax-profile.json.
+ * Falls back to ?data=<url-encoded JSON> for local/preview testing without
+ * a published registration.
  *
- * Route: /og-profile/<login> (not /og/u/<login>) - avoids the dynamic-segment
- * collision risk with the existing /og/[owner]/[gistId] function. Cloudflare
- * Pages prefers static segments over params but the second segment would
- * still be captured by [gistId] in the existing function if routing is
- * ambiguous, so we use a non-colliding prefix.
+ * Route: /og-profile/<login> - avoids collision with /og/[owner]/[gistId].
  *
- * Satori-safe rules (learned from the /og/ session card):
- * - No flex-wrap, overflow, gap, max-width, or rgb() commas in style strings.
- * - No raw <svg> children.
- * - Use await image.arrayBuffer() - lazy streams produced empty bodies on Pages.
- * - Hex colors only (commas inside rgb() break the worker's style parser and
- *   drop display:flex from the same declaration).
- * - Manual row-chunking instead of flex-wrap.
- * - Revision r= in cache key; bump OG_PROFILE_RENDER_REV when template changes.
+ * Satori rules (same as share card): display:flex everywhere, integer px,
+ * margin-right not gap, no overflow/border-radius on tracks, no raw svg,
+ * hex colors only (no rgb() - commas break workers-og style parser),
+ * no flex-wrap (takes display:flex down with it).
  */
 import { ImageResponse } from "workers-og";
-import { OG_PROFILE_RENDER_REV } from "../_lib/og-meta";
+import { OG_RENDER_REV } from "../_lib/og-meta";
+import {
+    INK, DIM, CARD, GREEN, RED,
+    esc, statHtml, footerHtml, blockLogoHtml, compactNumber, loadOgFonts,
+} from "../_lib/og-kit";
 
-const LOGIN_RE = /^[A-Za-z0-9-]{1,39}$/;
+const LOGIN_RE = /^[A-Za-z0-9_-]{1,39}$/;
 const REPO_RAW = "https://raw.githubusercontent.com/Necmttn/ax/main";
 
-// --- color palette (paper/ink editorial, matches site CSS tokens) ---
-const PAGE  = "#f6f5f0";  // --page
-const INK   = "#0a0a0a";  // --ink
-const LINE  = "#d8d6cf";  // --line
-const MUTED = "#6b6b66";  // --muted
-const GREEN = "#2f9e44";  // --green
-
-// --- inline types (no app imports in edge functions) ---
+// ---------------------------------------------------------------------------
+// Incoming data shapes - two paths: registered gist or ?data= query stub
+// ---------------------------------------------------------------------------
 interface Registration {
     readonly github: string;
     readonly gist_id: string;
@@ -47,6 +39,15 @@ interface ProfileStats {
 
 interface ProfileInsights {
     readonly hours_total?: number;
+    readonly parallel_sessions?: number;
+    readonly longest_run_hours?: number;
+    readonly commits?: number;
+    readonly subagents_total?: number;
+}
+
+interface DailyActivity {
+    readonly date: string;
+    readonly sessions: number;
 }
 
 interface ProfileV1 {
@@ -55,118 +56,171 @@ interface ProfileV1 {
     readonly window_days: number;
     readonly stats: ProfileStats;
     readonly insights?: ProfileInsights;
+    readonly activity?: { readonly daily?: ReadonlyArray<DailyActivity> };
 }
 
-// --- compact number helpers (no Intl - not reliably available in workers) ---
-function compactNum(n: number): string {
-    if (n >= 1_000_000_000) return `${(n / 1_000_000_000).toFixed(1)}B`;
-    if (n >= 1_000_000)     return `${(n / 1_000_000).toFixed(1)}M`;
-    if (n >= 1_000)         return `${(n / 1_000).toFixed(1)}K`;
-    return String(Math.round(n));
+// Loose shape for the ?data= stub - all fields optional
+interface ProfileStub {
+    readonly sessions?: number;
+    readonly tokens?: number;
+    readonly estimated_spend_usd?: number | null;
+    readonly streak_days?: number;
+    readonly active_hours?: number;
+    readonly parallel_sessions?: number;
+    readonly longest_run_hours?: number;
+    readonly commits?: number;
+    readonly subagents?: number;
+    readonly activity?: { readonly daily?: ReadonlyArray<DailyActivity> };
 }
 
-function compactMoney(usd: number): string {
-    if (usd >= 1_000) return `$${(usd / 1_000).toFixed(1)}K`;
-    return `$${usd >= 100 ? usd.toFixed(0) : usd.toFixed(2)}`;
+// ---------------------------------------------------------------------------
+// Mini bar chart - 30 bars, satori-safe (margin-right not gap, fixed widths)
+// ---------------------------------------------------------------------------
+function barChartHtml(daily: ReadonlyArray<DailyActivity>): string {
+    const slice = daily.slice(-30);
+    if (slice.length === 0) return "";
+    const maxSessions = Math.max(1, ...slice.map((d) => d.sessions));
+    const busyIdx = slice.reduce((best, d, i) =>
+        d.sessions > (slice[best]?.sessions ?? 0) ? i : best, 0);
+    const BAR_H = 80; // max bar height px
+    const BAR_W = 28; // bar width px
+    const bars = slice.map((d, i) => {
+        const h = Math.max(4, Math.round((d.sessions / maxSessions) * BAR_H));
+        const color = i === busyIdx ? RED : GREEN;
+        return `<div style="display:flex;flex-direction:column;justify-content:flex-end;height:${BAR_H}px;margin-right:4px"><div style="display:flex;width:${BAR_W}px;height:${h}px;background:${color}"></div></div>`;
+    }).join("");
+    return `<div style="display:flex;flex-direction:column"><div style="display:flex;align-items:flex-end">${bars}</div><span style="font-size:13px;letter-spacing:2px;color:${DIM};margin-top:10px">DAILY SESSIONS · 30 DAYS</span></div>`;
 }
 
-const esc = (s: string): string =>
-    s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-
-/** One stat cell: big mono number + small uppercase label below. */
-function statCell(value: string, label: string, accent = false): string {
-    const valueColor = accent ? GREEN : INK;
-    return `<div style="display:flex;flex-direction:column;margin-right:48px">`
-        + `<span style="font-size:52px;font-weight:700;color:${valueColor};line-height:1;letter-spacing:-2px">${esc(value)}</span>`
-        + `<span style="font-size:12px;letter-spacing:0.14em;text-transform:uppercase;color:${MUTED};margin-top:8px">${esc(label)}</span>`
-        + `</div>`;
-}
-
+// ---------------------------------------------------------------------------
+// Handler
+// ---------------------------------------------------------------------------
 export const onRequestGet: PagesFunction = async (ctx) => {
     const login = String(ctx.params.login ?? "").replace(/\.png$/, "");
     if (!LOGIN_RE.test(login)) {
         return new Response("bad request", { status: 400 });
     }
 
-    // Cache key includes the render revision so template bumps bust stale renders.
+    // Cache key includes render revision; bumping OG_RENDER_REV busts old renders.
     const cache = (caches as unknown as { default: Cache }).default;
     const u = new URL(ctx.request.url);
-    u.searchParams.set("r", String(OG_PROFILE_RENDER_REV));
+    u.searchParams.set("r", String(OG_RENDER_REV));
     const cacheKey = new Request(u.toString());
     const hit = await cache.match(cacheKey);
     if (hit) return hit;
 
-    // Step 1: resolve registration (login → gist_id)
-    const regRes = await fetch(
-        `${REPO_RAW}/community/users/${login.toLowerCase()}.json`,
-        { headers: { "user-agent": "ax-og-profile" } },
-    );
-    if (!regRes.ok) return new Response("not found", { status: 404 });
-    const reg = (await regRes.json()) as Registration;
-    if (typeof reg.gist_id !== "string" || typeof reg.github !== "string") {
-        return new Response("invalid registration", { status: 404 });
+    // --- Resolve profile data ---
+    // Path A: ?data= stub (local testing / preview)
+    const rawStub = u.searchParams.get("data");
+    let stub: ProfileStub | null = null;
+    if (rawStub) {
+        try { stub = JSON.parse(rawStub) as ProfileStub; } catch { /* ignore */ }
     }
 
-    // Step 2: fetch the profile gist
-    const profileRes = await fetch(
-        `https://gist.githubusercontent.com/${reg.github}/${reg.gist_id}/raw/ax-profile.json`,
-        { headers: { "user-agent": "ax-og-profile" } },
-    );
-    if (!profileRes.ok) return new Response("not found", { status: 404 });
-    const profile = (await profileRes.json()) as ProfileV1;
-    if (profile.v !== 1) return new Response("invalid profile", { status: 404 });
+    // Path B: registered gist via community/users/<login>.json
+    let gistProfile: ProfileV1 | null = null;
+    if (!stub) {
+        try {
+            const regRes = await fetch(
+                `${REPO_RAW}/community/users/${login.toLowerCase()}.json`,
+                { headers: { "user-agent": "ax-og-profile" } },
+            );
+            if (regRes.ok) {
+                const reg = (await regRes.json()) as Registration;
+                if (typeof reg.gist_id === "string" && typeof reg.github === "string") {
+                    const profileRes = await fetch(
+                        `https://gist.githubusercontent.com/${reg.github}/${reg.gist_id}/raw/ax-profile.json`,
+                        { headers: { "user-agent": "ax-og-profile" } },
+                    );
+                    if (profileRes.ok) {
+                        const p = (await profileRes.json()) as ProfileV1;
+                        if (p.v === 1) gistProfile = p;
+                    }
+                }
+            }
+        } catch { /* fallthrough to placeholder card */ }
+    }
 
-    const s = profile.stats;
-    const ins = profile.insights;
+    // --- Extract normalized fields for layout ---
+    let sessions: number | null    = null;
+    let tokens: number | null      = null;
+    let spendUsd: number | null    = null;
+    let streakDays: number | null  = null;
+    let activeHours: number | null = null;
+    let parallelSessions: number | null  = null;
+    let longestRunHours: number | null   = null;
+    let commits: number | null     = null;
+    let subagents: number | null   = null;
+    let daily: ReadonlyArray<DailyActivity> | null = null;
 
-    // Build stat row: sessions · tokens · cost? · streak · hours?
-    const statCells = [
-        statCell(String(s.sessions), "sessions"),
-        statCell(compactNum(s.tokens.total), "tokens"),
-        s.cost_usd !== undefined ? statCell(`~${compactMoney(s.cost_usd)}`, "est. spend", true) : "",
-        statCell(`${s.streak_days}d`, "streak"),
-        ins?.hours_total !== undefined ? statCell(compactNum(ins.hours_total), "hours") : "",
-    ].filter(Boolean).slice(0, 5).join("");
+    if (stub) {
+        sessions     = stub.sessions ?? null;
+        tokens       = stub.tokens ?? null;
+        spendUsd     = stub.estimated_spend_usd ?? null;
+        streakDays   = stub.streak_days ?? null;
+        activeHours  = stub.active_hours ?? null;
+        parallelSessions = stub.parallel_sessions ?? null;
+        longestRunHours  = stub.longest_run_hours ?? null;
+        commits      = stub.commits ?? null;
+        subagents    = stub.subagents ?? null;
+        daily        = stub.activity?.daily ?? null;
+    } else if (gistProfile) {
+        const s  = gistProfile.stats;
+        const ins = gistProfile.insights;
+        sessions     = s.sessions;
+        tokens       = s.tokens.total;
+        spendUsd     = s.cost_usd ?? null;
+        streakDays   = s.streak_days;
+        activeHours  = ins?.hours_total ?? null;
+        parallelSessions = ins?.parallel_sessions ?? null;
+        longestRunHours  = ins?.longest_run_hours ?? null;
+        commits      = ins?.commits ?? null;
+        subagents    = ins?.subagents_total ?? null;
+        daily        = gistProfile.activity?.daily ?? null;
+    }
 
-    // Header: kicker line above big @login
-    const header = `<div style="display:flex;justify-content:space-between;align-items:flex-start">`
-        + `<div style="display:flex;flex-direction:column">`
-        + `<span style="font-size:13px;letter-spacing:0.14em;text-transform:uppercase;color:${MUTED}">`
-        + `agent telemetry dossier · last ${profile.window_days} days`
-        + `</span>`
-        + `<span style="font-size:72px;font-weight:700;letter-spacing:-3px;color:${INK};line-height:1;margin-top:12px">`
-        + `@${esc(login)}`
-        + `</span>`
-        + `</div>`
-        + `<span style="font-size:28px;font-weight:700;color:${GREEN}">ax</span>`
-        + `</div>`;
+    // --- Build layout sections ---
 
-    // Hairline divider
-    const divider = `<div style="display:flex;height:1px;background:${LINE};margin-top:28px;margin-bottom:40px"></div>`;
+    // Header row: block logo left, kicker right
+    const logo   = blockLogoHtml({ scale: 4, color: INK, dimColor: DIM });
+    const header = `<div style="display:flex;justify-content:space-between;align-items:flex-start"><div style="display:flex">${logo}</div><span style="font-size:13px;letter-spacing:3px;color:${DIM}">AGENT TELEMETRY DOSSIER · LAST 30 DAYS</span></div>`;
 
-    // Stats row
-    const statsRow = `<div style="display:flex;align-items:flex-end">${statCells}</div>`;
+    // Big @login in Gelasio serif
+    const loginHtml = `<div style="display:flex;align-items:baseline;margin-top:12px"><span style="font-size:48px;font-weight:700;color:${DIM};font-family:'Gelasio';margin-right:4px">@</span><span style="font-size:88px;font-weight:700;color:${INK};font-family:'Gelasio';line-height:1">${esc(login)}</span></div>`;
 
-    // Footer
-    const footer = `<div style="display:flex;justify-content:space-between;align-items:center;margin-top:48px">`
-        + `<span style="font-size:11px;letter-spacing:0.14em;text-transform:uppercase;color:${MUTED}">`
-        + `compiled from local transcripts · ax.necmttn.com`
-        + `</span>`
-        + `</div>`;
+    // Stat band 1
+    const spendStr = spendUsd != null
+        ? (spendUsd >= 100 ? `$${spendUsd.toFixed(0)}` : `$${spendUsd.toFixed(2)}`)
+        : "-";
+    const statBand1 = `<div style="display:flex">${[
+        statHtml(sessions != null ? sessions.toLocaleString("en-US") : "-", "SESSIONS"),
+        statHtml(tokens  != null ? compactNumber(tokens)             : "-", "TOKENS"),
+        statHtml(spendStr,                                               "EST. SPEND", GREEN),
+        statHtml(streakDays  != null ? `${streakDays}d`             : "-", "STREAK"),
+        statHtml(activeHours != null ? `${activeHours}h`            : "-", "HOURS"),
+    ].join("")}</div>`;
 
-    // Full bleed paper card, no inner border (platforms draw their own frame).
-    // 64px safe margins keep content clear of corner clipping.
-    const html = `<div style="display:flex;flex-direction:column;width:1200px;height:630px;background:${PAGE};padding:60px 72px">`
-        + header + divider + statsRow + footer
-        + `</div>`;
+    // Filler: bar chart or second stat row (fills dead space)
+    let filler: string;
+    if (daily && daily.length > 0) {
+        filler = barChartHtml(daily);
+    } else if (parallelSessions != null || longestRunHours != null || commits != null || subagents != null) {
+        filler = `<div style="display:flex">${[
+            statHtml(parallelSessions != null ? String(parallelSessions)          : "-", "PARALLEL"),
+            statHtml(longestRunHours  != null ? `${longestRunHours}h`             : "-", "LONGEST RUN"),
+            statHtml(commits          != null ? commits.toLocaleString("en-US")   : "-", "COMMITS"),
+            statHtml(subagents        != null ? compactNumber(subagents)          : "-", "SUBAGENTS"),
+        ].join("")}</div>`;
+    } else {
+        filler = "";
+    }
 
-    // Fetch fonts in parallel to minimize latency
-    const [font, fontBold] = await Promise.all([
-        fetch("https://cdn.jsdelivr.net/fontsource/fonts/jetbrains-mono@latest/latin-400-normal.ttf")
-            .then(r => r.arrayBuffer()),
-        fetch("https://cdn.jsdelivr.net/fontsource/fonts/jetbrains-mono@latest/latin-700-normal.ttf")
-            .then(r => r.arrayBuffer()),
-    ]);
+    const footer = footerHtml("COMPILED FROM LOCAL TRANSCRIPTS");
+
+    // justify-content:space-between distributes sections across full 630px
+    const html = `<div style="display:flex;flex-direction:column;justify-content:space-between;width:1200px;height:630px;background:${CARD};padding:56px 64px;font-family:'JetBrains Mono'">${header}${loginHtml}${statBand1}${filler}${footer}</div>`;
+
+    const { regular, bold, serif } = await loadOgFonts();
 
     let png: ArrayBuffer;
     try {
@@ -174,8 +228,9 @@ export const onRequestGet: PagesFunction = async (ctx) => {
             width: 1200,
             height: 630,
             fonts: [
-                { name: "JetBrains Mono", data: font,     weight: 400, style: "normal" },
-                { name: "JetBrains Mono", data: fontBold, weight: 700, style: "normal" },
+                { name: "JetBrains Mono", data: regular, weight: 400, style: "normal" },
+                { name: "JetBrains Mono", data: bold,    weight: 700, style: "normal" },
+                { name: "Gelasio",        data: serif,   weight: 700, style: "normal" },
             ],
         });
         // Buffer the render: a lazy stream produced empty bodies on Pages.
@@ -191,7 +246,7 @@ export const onRequestGet: PagesFunction = async (ctx) => {
     const res = new Response(png, {
         headers: {
             "content-type": "image/png",
-            "cache-control": "public, max-age=86400, s-maxage=86400",
+            "cache-control": "public, max-age=3600, s-maxage=3600",
         },
     });
     ctx.waitUntil(cache.put(cacheKey, res.clone()));
