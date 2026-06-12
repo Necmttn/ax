@@ -58,7 +58,12 @@ One gist per user, file `ax-profile.json`, updated in-place via
         "category": "failure-mode",
         "name": "edit-loop-thrash",
         "summary": "3+ edits to same file → stop, re-read requirements",
-        "evidence": { "sessions": 12, "confidence": 0.8 },
+        "evidence": {
+          "sessions": 12,
+          "confidence": 0.8,
+          "last_reinforced": "2026-06-10",
+          "trend": "rising"
+        },
         "links": [
           { "rel": "recovered-by", "ref": "problem-solving-strategy/full-file-reread" }
         ]
@@ -95,21 +100,41 @@ constraints shape it:
   resolves against another agent's proven recovery pattern.
 - **Evidence-grounded:** `evidence.sessions` + `confidence` separate observed
   taste from aspiration, and give aggregation an anti-junk signal.
+  Confidence is *earned*, not guessed: derived from correction/reaction
+  classifier events, frequency, and retro verdicts. Evidence splits across a
+  privacy boundary - the public gist carries counts, dates, and trend only;
+  full citations (session/turn refs behind each pattern) stay local and
+  power the dashboard's evidence drawer.
+- **Living, not snapshot:** `last_reinforced` + `trend`
+  (`rising | stable | falling | stale`) make freshness first-class.
+  Confidence moves as the user keeps coding (watcher re-ingest already
+  exists); contradictions between new signals and held patterns are flagged
+  at derivation and surface as `conflicts-with` links rather than silent
+  overwrites.
 
 v1 scope: schema + site rendering ship; entries derive from existing
 `ax improve` proposals / classifier output where present, section omitted
 otherwise. Cross-user pattern matching (`pattern-stats.json`, joining
 failure-modes to recovery strategies across users) is deferred to v2.
 
-**Positioning (vs learned-model taste, e.g. commandcode taste-1):** the
-rules/skills/taste layering is becoming industry framing; ax's claim is the
-*open* version of the taste layer. Their taste is opaque model weights in
-their cloud, learned from unexplained accept/reject signals. ax taste is an
-inspectable JSON the user owns (gist, fork), every pattern evidence-grounded
-(sessions, confidence, verdicts), portable across the 5 harnesses ax already
-ingests. "Your taste should be a file you can read, not weights you rent."
-Implementation should preserve this deliberately: no derived pattern without
-evidence refs; schema documented publicly.
+**Positioning (vs Command Code taste profiles):** the rules/skills/taste
+layering is becoming industry framing; ax's claim is the *grounded* version
+of the taste layer. Their shipped artifact (reverse-engineered 2026-06-12)
+is markdown bullets with hand-waved inline `Confidence: 0.xx`, statically
+pushed npm-style - no evidence, no provenance, no freshness, no
+contradiction handling. ax taste is evidence-grounded (earned confidence
+from classifier events + verdicts, with local citations), living
+(trend/freshness updated by the watcher loop), and user-owned (gist, fork),
+portable across the 5 harnesses ax already ingests. Wedges: **trust**
+(earned vs guessed confidence) and **freshness** (living vs snapshot).
+Implementation must preserve: no derived pattern without evidence refs;
+schema documented publicly.
+
+**Interop stance (decided): ax-native only.** No `.commandcode/taste/`
+compatibility layer or export bridge - their format cannot carry evidence,
+provenance, or trends, and a bridge would legitimize the thin format while
+capping ours. Revisit only if their ecosystem reaches a size where a
+migration hook ("switch in one command") outweighs the maintenance.
 
 ### Repo (control plane)
 
@@ -274,6 +299,13 @@ non-goal.
 - Rule-decay receipts: surface hook-effectiveness and `no_longer_needed`
   verdict data on profiles - ax can *measure* the rules-decay problem the
   industry only asserts.
+- Team taste diff/reconciliation: derive each teammate's taste, then diff -
+  per-pattern agreement/disagreement view. Competitors broadcast one
+  person's bullets; ax reconciles a team's. (Collaboration wedge from the
+  Command Code analysis.)
+- Dashboard evidence drawer: click a taste pattern → the actual
+  correction/reaction turns that produced it (local-only data; pairs with
+  the public counts in the gist).
 - Sharded `community/users/<a>/<name>.json` layout past ~10k users.
 - `/state/<year>` report page - "State of Agent Engineering", stateofjs-style
   scrolly report rendered from `community/state/<year>.json`. Differentiator
