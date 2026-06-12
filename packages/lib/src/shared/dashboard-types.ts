@@ -1186,6 +1186,8 @@ export interface ExperimentDto {
     readonly created_at: string;
     readonly scaffolded_at: string | null;
     readonly latest_checkpoint: CheckpointSnapshotDto | null;
+    /** full +3s/+10s/+30s series, observed_at ASC - drives the trace strip */
+    readonly checkpoints?: ReadonlyArray<CheckpointSnapshotDto>;
 }
 
 export interface ProposalDto {
@@ -1207,6 +1209,12 @@ export interface ProposalDto {
     readonly experiment?: ExperimentDto | null;
     /** "mined" (signal-derived) or "agent" (ax improve propose); served coalesced. */
     readonly origin?: string;
+    /** JSON snapshot frozen at creation - evidence/frequency provenance */
+    readonly baseline?: string | null;
+    /** hypothesis with {{placeholders}} - hydrated server-side from evidence_query */
+    readonly hypothesis_template?: string | null;
+    /** read-only query (SELECT/RETURN) whose first row fills the template */
+    readonly evidence_query?: string | null;
     /** server-rendered markdown agent brief */
     readonly brief?: string;
 }
@@ -1225,7 +1233,8 @@ export type NextActionKind =
     | "tool_failure"
     | "churn"
     | "routing"
-    | "skill_hygiene";
+    | "skill_hygiene"
+    | "housekeeping";
 
 export interface NextActionInlineAction {
     readonly type: "accept" | "reject" | "verdict" | "decide";
@@ -1235,6 +1244,19 @@ export interface NextActionInlineAction {
     readonly skill: string | null;
     /** suggested verdict for one-click lock */
     readonly suggested_verdict: string | null;
+}
+
+/** Projected impact for a proposal - estimated/backtested from the user's
+ *  own history. Every number carries its basis and an honesty tier. */
+export interface ImpactEstimate {
+    readonly kind: "savings_usd" | "addressable_failures" | "correction_pressure" | "frequency";
+    /** the centerpiece line, e.g. "~$297 redirectable over 30d" */
+    readonly headline: string;
+    /** one paragraph: how the number was derived */
+    readonly detail: string;
+    /** data window + method, honestly stated */
+    readonly basis: string;
+    readonly confidence: "measured" | "estimated" | "indicative";
 }
 
 export interface NextActionCard {
@@ -1251,6 +1273,10 @@ export interface NextActionCard {
     /** SPA drill-down path, e.g. /tools */
     readonly link: string | null;
     readonly inline_action: NextActionInlineAction | null;
+    /** cheap value teaser parsed from the proposal baseline/hypothesis */
+    readonly impact_chip?: string | null;
+    /** the fix mechanism, human-named: "new skill" | "edit CLAUDE.md" | "new hook" | ... */
+    readonly fix_kind?: string | null;
 }
 
 export interface NextActionsSourceNote {

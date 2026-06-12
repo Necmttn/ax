@@ -20,6 +20,7 @@ import {
 import { fetchImproveProposals } from "../improve-proposals.ts";
 import { fetchNextActionsCached, invalidateNextActionsCache } from "../read-caches.ts";
 import { renderAnalyzeBrief } from "../../improve/analyze-brief.ts";
+import { estimateImpactCached } from "../../improve/impact.ts";
 import { asJsonValue, internal, orInternal } from "./common.ts";
 
 interface ImproveActionResult { readonly status: string; readonly message?: string }
@@ -52,6 +53,18 @@ export const ImproveGroupLive = HttpApiBuilder.group(AxApi, "improve", (handlers
                 Effect.map((proposals) => asJsonValue({ proposals })),
             )))
         .handle("nextActions", () => orInternal(fetchNextActionsCached()))
+        .handle("improveImpact", ({ params }) =>
+            Effect.gen(function* () {
+                const proposals = yield* fetchImproveProposals().pipe(Effect.mapError(internal));
+                const proposal = proposals.find((p) => p.dedupe_sig === params.sig);
+                if (proposal === undefined) {
+                    return yield* new NotFoundError({ error: "proposal not found" });
+                }
+                const estimate = yield* estimateImpactCached(proposal, Date.now()).pipe(
+                    Effect.mapError(internal),
+                );
+                return asJsonValue({ sig: params.sig, impact: estimate });
+            }))
         .handle("analyzeBrief", () =>
             Effect.sync(() => ({
                 brief: renderAnalyzeBrief({ date: new Date().toISOString().slice(0, 10) }),

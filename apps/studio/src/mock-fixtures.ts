@@ -367,6 +367,18 @@ export async function mockFetch<T>(input: RequestInfo, init?: RequestInit): Prom
     if (path === "/api/wrapped/generate-brief") {
         return { brief: "## Task: Write my Agent Wrapped cards (mock)\n\nConnect a local daemon for the real brief." } as unknown as T;
     }
+    if (/^\/api\/improve\/[^/]+\/impact$/.test(path)) {
+        return {
+            sig: decodeURIComponent(path.split("/")[3]),
+            impact: {
+                kind: "savings_usd",
+                headline: "~$297 redirectable over 30d (mock)",
+                detail: "Connect a local daemon for a real estimate.",
+                basis: "mock fixture",
+                confidence: "indicative",
+            },
+        } as unknown as T;
+    }
     if (path === "/api/improve/analyze-brief") {
         return { brief: "## Task: Deep-analysis pass (mock)\n\nConnect a local daemon for the real brief." } as unknown as T;
     }

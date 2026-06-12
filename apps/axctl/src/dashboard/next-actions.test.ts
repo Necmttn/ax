@@ -11,6 +11,7 @@ import type { CandidatesResult, CandidateRow } from "../queries/dispatch-analyti
 import type { SkillHygieneRow } from "../queries/skill-hygiene.ts";
 import {
     churnCards,
+    housekeepingCards,
     fetchNextActions,
     proposalCards,
     routingCards,
@@ -244,6 +245,40 @@ describe("proposalCards", () => {
 // ---------------------------------------------------------------------------
 // verdictCards
 // ---------------------------------------------------------------------------
+
+describe("impactChip", () => {
+    test("routing hypothesis yields a $ chip", () => {
+        const card = proposalCards([
+            openProposal({
+                form: "hook",
+                hypothesis: "71 model-less dispatches; est $296.84 redirectable. Top classes: x",
+            }),
+        ])[0]!;
+        expect(card.impact_chip).toBe("~$296.84 redirectable");
+    });
+
+    test("guidance frequency yields a recurring chip; freq 1 yields none", () => {
+        const a = proposalCards([openProposal({ form: "guidance", frequency: 9 })])[0]!;
+        expect(a.impact_chip).toBe("9x recurring");
+        const b = proposalCards([openProposal({ form: "guidance", frequency: 1 })])[0]!;
+        expect(b.impact_chip).toBeNull();
+    });
+});
+
+describe("fixKind", () => {
+    test("names the mechanism per form, guidance names its file target", () => {
+        expect(proposalCards([openProposal({ form: "skill" })])[0]!.fix_kind).toBe("new skill");
+        expect(proposalCards([openProposal({ form: "hook" })])[0]!.fix_kind).toBe("new hook");
+        expect(
+            proposalCards([
+                openProposal({
+                    form: "guidance",
+                    guidance_payload: { file_target: "CLAUDE.md", section: null, suggested_text: "x" },
+                }),
+            ])[0]!.fix_kind,
+        ).toBe("edit CLAUDE.md");
+    });
+});
 
 describe("verdictCards", () => {
     test("only accepted proposals with experiment and no locked_verdict", () => {
@@ -556,6 +591,21 @@ test("all builders return NextActionCard[] typed arrays", () => {
 // fetchNextActions aggregator
 // ---------------------------------------------------------------------------
 
+describe("housekeepingCards", () => {
+    test("one card when stale proposals exist, none when clean", () => {
+        expect(housekeepingCards([])).toHaveLength(0);
+        const cards = housekeepingCards([
+            { id: "proposal:a", title: "Old A", dedupe_sig: "a", form: "skill", updated_at: null },
+            { id: "proposal:b", title: "Old B", dedupe_sig: "b", form: "guidance", updated_at: null },
+        ]);
+        expect(cards).toHaveLength(1);
+        expect(cards[0]!.kind).toBe("housekeeping");
+        expect(cards[0]!.title).toContain("2 stale proposals");
+        expect(cards[0]!.brief).toContain("ax improve housekeep");
+        expect(cards[0]!.fix_kind).toContain("housekeep");
+    });
+});
+
 describe("fetchNextActions", () => {
     test("a failing source degrades to a note, never a defect", async () => {
         const stub: SurrealClientShape = {
@@ -574,16 +624,16 @@ describe("fetchNextActions", () => {
         // directly and do add notes. Exact set: if runQuery's internal swallow ever
         // changes and tool_failure starts noting, this surfaces it.
         expect(new Set(payload.notes.map((n) => n.source))).toEqual(
-            new Set(["proposal", "churn", "routing", "skill_hygiene"]),
+            new Set(["proposal", "churn", "routing", "skill_hygiene", "housekeeping"]),
         );
         expect(typeof payload.generatedAt).toBe("string");
     });
 
-    test("a hanging source (Effect.never) is timed out and noted; all 5 sources noted", async () => {
+    test("a hanging source (Effect.never) is timed out and noted; all 6 sources noted", async () => {
         // db.query returns Effect.never - simulates a hung DB / slow query.
         // runQuery's internal Effect.catch only catches DbError failures; it does NOT
         // prevent fiber interruption from timeoutOrElse. The timeout fires, the
-        // orElse failure propagates to our guarded catch, and ALL 5 sources add a
+        // orElse failure propagates to our guarded catch, and ALL 6 sources add a
         // note - including tool_failure which normally swallows DB errors internally.
         const stub: SurrealClientShape = {
             query: (_sql: string) => Effect.never,
@@ -596,10 +646,10 @@ describe("fetchNextActions", () => {
         );
 
         expect(payload.cards).toEqual([]);
-        // All 5 direct-DB sources time out; tool_failure is also noted because
+        // All 6 direct-DB sources time out; tool_failure is also noted because
         // timeoutOrElse interrupts the fiber before runQuery's internal swallow fires.
         expect(new Set(payload.notes.map((n) => n.source))).toEqual(
-            new Set(["proposal", "tool_failure", "churn", "routing", "skill_hygiene"]),
+            new Set(["proposal", "tool_failure", "churn", "routing", "skill_hygiene", "housekeeping"]),
         );
         // At least one note should mention timed out (two words - our orElse uses "timed out after Nms")
         expect(payload.notes.some((n) => /timed out/i.test(n.note))).toBe(true);

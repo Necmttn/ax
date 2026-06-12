@@ -816,6 +816,11 @@ export const ImproveGroup = HttpApiGroup.make("improve")
             success: Schema.Unknown,
             error: InternalError,
         }),
+        HttpApiEndpoint.get("improveImpact", "/api/improve/:sig/impact", {
+            params: { sig: Schema.String },
+            success: Schema.Unknown,
+            error: [NotFoundError, InternalError],
+        }),
         HttpApiEndpoint.post("improveAction", "/api/improve/:sig/:action", {
             params: {
                 sig: Schema.String,

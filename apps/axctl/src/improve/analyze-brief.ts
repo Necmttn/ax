@@ -55,6 +55,20 @@ Payloads:
 - **subagent**: { "bounded_role", "delegation_trigger", "example_task_patterns"? }
 - **automation**: { "trigger_signal", "schedule"?, "action", ...same safety fields as hook }
 
+**Keep numbers alive (preferred):** instead of baking counts into the
+hypothesis prose (they expire), also pass:
+
+\`\`\`json
+{
+  "hypothesis": "fallback prose with today's numbers",
+  "hypothesis_template": "{{n}} failed Bash calls in the last 30d keep recurring",
+  "evidence_query": "SELECT count() AS n FROM tool_call WHERE name = 'Bash' AND status = 'error' AND ts > time::now() - 30d GROUP ALL;"
+}
+\`\`\`
+
+The dashboard re-runs the query at view time and fills the {{placeholders}} -
+your numbers never go stale. evidence_query must be read-only (SELECT/RETURN).
+
 **Rules:**
 - Every proposal MUST carry evidence refs (session ids / dedupe sigs / failure counts / $).
 - Re-proposing an existing pattern is fine - same title bumps its frequency instead of duplicating.

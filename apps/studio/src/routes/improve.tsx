@@ -1,7 +1,9 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { createPortal } from "react-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api.ts";
 import type {
+    ExperimentDto,
     ExperimentStatus,
     ImproveActionResponse,
     ProposalDto,
@@ -10,6 +12,7 @@ import type {
 } from "@ax/lib/shared/dashboard-types";
 import { fmtTs } from "@ax/lib/shared/formatters";
 import { NextActionsPanel } from "../components/next-actions-panel.tsx";
+import { ExperimentsSection } from "../components/experiments-section.tsx";
 import { CopyButton } from "../components/copy-button.tsx";
 import { DecisionsSection } from "../components/decisions-section.tsx";
 
@@ -23,6 +26,18 @@ const VERDICTS: ReadonlyArray<string> = [
     "adopted", "ignored", "regressed", "partial", "no_longer_needed",
 ];
 const CONF_W: Record<string, number> = { high: 3, medium: 2, low: 1 };
+
+/** Mirror of the server-side impactChip (next-actions.ts) - cheap parse only. */
+const impactChipOf = (p: ProposalDto): string | null => {
+    if (p.form === "hook") {
+        const m = /est \$([\d,]+(?:\.\d+)?)/.exec(p.hypothesis);
+        if (m) return `~$${m[1]} redirectable`;
+    }
+    if (p.form === "guidance" || p.form === "skill") {
+        return p.frequency > 1 ? `${p.frequency}x recurring` : null;
+    }
+    return null;
+};
 const score = (p: ProposalDto) =>
     (CONF_W[p.confidence] ?? 1) * Math.log2(p.frequency + 1) +
     // agent-origin tiebreak above mined at equal confidence x frequency
@@ -32,7 +47,9 @@ export function ImproveRoute() {
     const queryClient = useQueryClient();
     const [formFilter, setFormFilter] = useState<ProposalForm | "all">("all");
     const [statusFilter, setStatusFilter] = useState<ProposalStatus | "all">("open");
-    const [selectedSig, setSelectedSig] = useState<string | null>(null);
+    const [selectedSig, setSelectedSig] = useState<string | null>(
+        () => new URLSearchParams(window.location.search).get("sig"),
+    );
     const [rejectReason, setRejectReason] = useState<string>("");
     const [actionError, setActionError] = useState<string | null>(null);
     const [actionInfo, setActionInfo] = useState<string | null>(null);
@@ -53,10 +70,26 @@ export function ImproveRoute() {
         },
         [proposals, formFilter, statusFilter],
     );
+    // The case file opens only on an explicit Review/row click - no
+    // auto-select - and resolves from ALL proposals, not the filtered view.
     const selected = useMemo(
-        () => filtered.find((p) => p.dedupe_sig === selectedSig) ?? filtered[0] ?? null,
-        [filtered, selectedSig],
+        () => proposals.find((p) => p.dedupe_sig === selectedSig) ?? null,
+        [proposals, selectedSig],
     );
+    // Drawer is linkable (?sig=) and closes on Escape; fixed overlay = no reflow.
+    useEffect(() => {
+        const url = new URL(window.location.href);
+        if (selectedSig) url.searchParams.set("sig", selectedSig);
+        else url.searchParams.delete("sig");
+        window.history.replaceState(null, "", url);
+    }, [selectedSig]);
+    useEffect(() => {
+        const onKey = (e: KeyboardEvent) => {
+            if (e.key === "Escape") setSelectedSig(null);
+        };
+        window.addEventListener("keydown", onKey);
+        return () => window.removeEventListener("keydown", onKey);
+    }, []);
 
     const onActionResult = (action: string, res: ImproveActionResponse) => {
         if (res.status === "ok") {
@@ -93,40 +126,86 @@ export function ImproveRoute() {
 
     return (
         <section className="panel improve-route">
-            <header>
-                <h2>Experiment Loop</h2>
-                <span className="meta">
-                    {proposals.length} proposals · {filtered.length} shown
-                </span>
+            <header className="improve-lead">
+                <div>
+                    <span className="next-action-eyebrow" style={{ color: "var(--green)" }}>
+                        $ what's next
+                    </span>
+                    <h2 className="improve-headline">
+                        <NextActionsHeadline />
+                    </h2>
+                    <p className="improve-sub">
+                        Mined from your sessions - savings to route, fixes that recur, verdicts due.
+                    </p>
+                </div>
                 <AnalysisBriefButton />
             </header>
 
             <NextActionsPanel handlers={{
-                onAccept: (sig) => acceptMutation.mutate(sig),
+                onReview: (sig) => setSelectedSig(sig),
                 onVerdict: (sig, v) => verdictMutation.mutate({ sig, verdict: v }),
                 pending: acceptMutation.isPending || rejectMutation.isPending || verdictMutation.isPending,
             }} />
 
             {query.error ? <div className="error">Error: {String(query.error)}</div> : null}
             {actionError ? <div className="error">{actionError}</div> : null}
-            {actionInfo ? <div className="empty" style={{ color: "#1d6f3d" }}>{actionInfo}</div> : null}
+            {actionInfo ? <div className="empty" style={{ color: "var(--green)" }}>{actionInfo}</div> : null}
 
-            <div className="filter-bar" style={{ display: "flex", gap: 12, alignItems: "center", marginBottom: 12, flexWrap: "wrap" }}>
-                <label>
-                    form{" "}
-                    <select value={formFilter} onChange={(e) => setFormFilter(e.target.value as ProposalForm | "all")}>
-                        {ALL_FORMS.map((f) => (<option key={f} value={f}>{f}</option>))}
-                    </select>
-                </label>
-                <label>
-                    status{" "}
-                    <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value as ProposalStatus | "all")}>
-                        {ALL_STATUSES.map((s) => (<option key={s} value={s}>{s}</option>))}
-                    </select>
-                </label>
-                <span className="meta">
-                    Ranked by confidence × frequency · click a row for details
+            {selected ? createPortal(
+                <>
+                    <div className="proposal-drawer-scrim" onClick={() => setSelectedSig(null)} />
+                    <aside
+                        className="proposal-drawer"
+                        role="dialog"
+                        aria-modal="true"
+                        aria-label={selected.title}
+                    >
+                        <button
+                            type="button"
+                            className="next-action-ghost proposal-drawer-close"
+                            onClick={() => setSelectedSig(null)}
+                        >
+                            &#8592; close
+                        </button>
+                        <ProposalDetail
+                            proposal={selected}
+                            rejectReason={rejectReason}
+                            onRejectReason={setRejectReason}
+                            onAccept={() => acceptMutation.mutate(selected.dedupe_sig)}
+                            onReject={() => rejectMutation.mutate({ sig: selected.dedupe_sig, reason: rejectReason || null })}
+                            onSetVerdict={(verdict) => verdictMutation.mutate({ sig: selected.dedupe_sig, verdict })}
+                            pending={acceptMutation.isPending || rejectMutation.isPending || verdictMutation.isPending}
+                        />
+                    </aside>
+                </>,
+                document.body,
+            ) : null}
+
+            <ExperimentsSection
+                proposals={proposals}
+                onOpen={(sig) => setSelectedSig(sig)}
+            />
+
+            <details className="improve-history">
+            <summary style={{ cursor: "pointer" }}><strong>All proposals</strong> <span className="meta">{proposals.length} total - history and filters</span></summary>
+            <div className="improve-registry-head">
+                <span className="meta" title="Ranked by confidence × frequency - click a row for details">
+                    {proposals.length} proposals · {filtered.length} shown
                 </span>
+                <div className="filters">
+                    <label>
+                        form{" "}
+                        <select value={formFilter} onChange={(e) => setFormFilter(e.target.value as ProposalForm | "all")}>
+                            {ALL_FORMS.map((f) => (<option key={f} value={f}>{f}</option>))}
+                        </select>
+                    </label>
+                    <label>
+                        status{" "}
+                        <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value as ProposalStatus | "all")}>
+                            {ALL_STATUSES.map((s) => (<option key={s} value={s}>{s}</option>))}
+                        </select>
+                    </label>
+                </div>
             </div>
 
             {query.isLoading ? <div className="loading">Loading…</div> : null}
@@ -135,8 +214,7 @@ export function ImproveRoute() {
                 <div className="empty">No proposals match the current filters.</div>
             ) : null}
 
-            <div className="improve-grid">
-                <table className="skills">
+            <table className="skills">
                     <thead>
                         <tr>
                             <th>Freq</th>
@@ -177,29 +255,18 @@ export function ImproveRoute() {
                                             ? <span className="badge keep" style={{ marginRight: 6 }}>agent</span>
                                             : null}
                                         {p.title}
+                                        {impactChipOf(p) ? (
+                                            <span className="next-action-impact" style={{ marginLeft: 8 }}>
+                                                {impactChipOf(p)}
+                                            </span>
+                                        ) : null}
                                     </td>
                                 </tr>
                             );
                         })}
                     </tbody>
                 </table>
-
-                <aside className="panel" style={{ position: "sticky", top: 16, alignSelf: "flex-start" }}>
-                    {selected ? (
-                        <ProposalDetail
-                            proposal={selected}
-                            rejectReason={rejectReason}
-                            onRejectReason={setRejectReason}
-                            onAccept={() => acceptMutation.mutate(selected.dedupe_sig)}
-                            onReject={() => rejectMutation.mutate({ sig: selected.dedupe_sig, reason: rejectReason || null })}
-                            onSetVerdict={(verdict) => verdictMutation.mutate({ sig: selected.dedupe_sig, verdict })}
-                            pending={acceptMutation.isPending || rejectMutation.isPending || verdictMutation.isPending}
-                        />
-                    ) : (
-                        <div className="empty">Select a proposal to see details, accept it, or set a verdict.</div>
-                    )}
-                </aside>
-            </div>
+            </details>
 
             <details style={{ marginTop: 24 }}>
                 <summary style={{ cursor: "pointer" }}><strong>Decision log</strong></summary>
@@ -234,6 +301,15 @@ interface ProposalDetailProps {
     readonly pending: boolean;
 }
 
+const hasPayload = (p: ProposalDto): boolean =>
+    Boolean(
+        (p.form === "skill" && p.skill_payload) ||
+        (p.form === "guidance" && p.guidance_payload) ||
+        (p.form === "subagent" && p.subagent_payload) ||
+        (p.form === "hook" && p.hook_payload) ||
+        (p.form === "automation" && p.automation_payload),
+    );
+
 function ProposalDetail({
     proposal,
     rejectReason,
@@ -247,50 +323,48 @@ function ProposalDetail({
     const cp = exp?.latest_checkpoint ?? null;
     return (
         <>
-            <header>
-                <h3 style={{ margin: 0 }}>{proposal.title}</h3>
-                <span className="meta">{proposal.dedupe_sig} · {proposal.origin ?? "mined"}</span>
+            <header className="proposal-head">
+                <h3 className="proposal-title">{proposal.title}</h3>
+                <span className="meta">
+                    {proposal.form} · {proposal.origin ?? "mined"} · confidence {proposal.confidence}
+                    {" · "}seen {proposal.frequency}x · {fmtTs(proposal.created_at)}
+                </span>
             </header>
-            <dl className="kv">
-                <dt>Form</dt><dd>{proposal.form}</dd>
-                <dt>Status</dt><dd><StatusPill status={proposal.status} /></dd>
-                <dt>Confidence</dt><dd>{proposal.confidence}</dd>
-                <dt>Frequency</dt><dd>{proposal.frequency}</dd>
-                <dt>Created</dt><dd>{fmtTs(proposal.created_at)}</dd>
-                <dt>Hypothesis</dt><dd>{proposal.hypothesis}</dd>
-                {proposal.reject_reason ? (<><dt>Reject reason</dt><dd>{proposal.reject_reason}</dd></>) : null}
-            </dl>
 
-            <PayloadView proposal={proposal} />
+            <ImpactSection sig={proposal.dedupe_sig} experiment={exp} />
 
-            {exp ? (
-                <section className="panel" style={{ marginTop: 12 }}>
-                    <header>
-                        <h4 style={{ margin: 0 }}>Experiment</h4>
-                        <span className="meta">{fmtTs(exp.created_at)}</span>
-                    </header>
-                    <dl className="kv">
-                        {exp.status ? (<><dt>Exp. Status</dt><dd><ExperimentStatusBadge status={exp.status} /></dd></>) : null}
+            <section className="proposal-section">
+                <h4 className="proposal-section-label">why this fired</h4>
+                <p className="proposal-prose">{proposal.hypothesis}</p>
+                {proposal.reject_reason ? (
+                    <p className="proposal-prose meta">rejected: {proposal.reject_reason}</p>
+                ) : null}
+            </section>
+
+            {hasPayload(proposal) ? (
+                <section className="proposal-section">
+                    <h4 className="proposal-section-label">the fix</h4>
+                    <PayloadView proposal={proposal} />
+                </section>
+            ) : null}
+
+            <section className="proposal-section">
+                <h4 className="proposal-section-label">the plan</h4>
+                <LifecycleRail proposal={proposal} />
+                {exp ? (
+                    <dl className="kv" style={{ marginTop: 8 }}>
                         {exp.artifact_path ? (<><dt>Artifact</dt><dd><code>{exp.artifact_path}</code></dd></>) : null}
                         {exp.task_path && exp.status === "task_emitted"
                             ? (<><dt>Task path</dt><dd>{exp.task_path}</dd></>) : null}
-                        {exp.scaffolded_at ? (<><dt>Scaffolded</dt><dd>{fmtTs(exp.scaffolded_at)}</dd></>) : null}
-                        <dt>Verdict</dt><dd>
-                            {exp.locked_verdict
-                                ? <strong>{exp.locked_verdict} (locked)</strong>
-                                : cp?.suggested
-                                    ? <em>{cp.suggested} (suggested @ {cp.kind})</em>
-                                    : "pending - no checkpoint yet"}
-                        </dd>
                         {cp?.measured ? (
                             <>
-                                <dt>Opportunities</dt>
-                                <dd>{cp.measured.opportunities} ({cp.measured.addressed} addressed)</dd>
+                                <dt>Measured</dt>
+                                <dd>{cp.measured.addressed} of {cp.measured.opportunities} opportunities addressed</dd>
                             </>
                         ) : null}
                     </dl>
-                </section>
-            ) : null}
+                ) : null}
+            </section>
 
             <div className="actions" style={{ marginTop: 16, display: "flex", gap: 8, flexWrap: "wrap" }}>
                 {proposal.brief ? <CopyButton text={proposal.brief} /> : null}
@@ -443,4 +517,76 @@ function AnalysisBriefButton() {
     });
     if (!query.data) return null;
     return <CopyButton text={query.data.brief} label="Copy analysis brief" />;
+}
+
+/** Serif lead: counts what the loop found (shares the cached next-actions query). */
+function NextActionsHeadline() {
+    const query = useQuery({
+        queryKey: ["next-actions"],
+        queryFn: () => api.nextActions(),
+        staleTime: 60_000,
+    });
+    const n = query.data?.cards.length;
+    return <>{n === undefined ? "What's next" : `${n} actions waiting`}</>;
+}
+
+/** Projected impact - the centerpiece. Lazily fetched per proposal; once an
+ *  experiment has measured checkpoints, the measurement shares the stage. */
+function ImpactSection({ sig, experiment }: { readonly sig: string; readonly experiment: ExperimentDto | null }) {
+    const query = useQuery({
+        queryKey: ["improve", "impact", sig],
+        queryFn: () => api.improveImpact(sig),
+        staleTime: 10 * 60_000,
+    });
+    const impact = query.data?.impact;
+    const measured = experiment?.latest_checkpoint?.measured ?? null;
+    if (query.isLoading) return <div className="loading">Estimating impact&#8230;</div>;
+    if (!impact) return null;
+    return (
+        <section className="proposal-impact">
+            <span className="proposal-section-label">
+                projected impact · <em>{impact.confidence}</em>
+            </span>
+            <strong className="proposal-impact-headline">{impact.headline}</strong>
+            <p className="proposal-prose">{impact.detail}</p>
+            {measured ? (
+                <p className="proposal-prose">
+                    <strong>measured so far:</strong> {measured.addressed} of {measured.opportunities} opportunities addressed
+                </p>
+            ) : null}
+            <span className="proposal-impact-basis">basis: {impact.basis}</span>
+        </section>
+    );
+}
+
+/** The accept lifecycle: what actually happens, with the current stage lit. */
+function LifecycleRail({ proposal }: { readonly proposal: ProposalDto }) {
+    const exp = proposal.experiment ?? null;
+    const hasCheckpoint = exp?.latest_checkpoint != null;
+    const locked = exp?.locked_verdict != null;
+    const stage = proposal.status === "open"
+        ? 0
+        : !exp || exp.status === "task_emitted"
+        ? 1
+        : !hasCheckpoint
+        ? 2
+        : !locked
+        ? 2
+        : 3;
+    const stages = [
+        { label: "accept", hint: "emits a task brief / scaffolds the artifact" },
+        { label: "apply", hint: "your agent lands the change" },
+        { label: "checkpoints", hint: "measured at +3/+10/+30 sessions" },
+        { label: "verdict", hint: locked ? `locked: ${exp?.locked_verdict}` : "adopted / ignored / regressed" },
+    ];
+    return (
+        <ol className="lifecycle-rail">
+            {stages.map((s, i) => (
+                <li key={s.label} className={i < stage ? "done" : i === stage ? "current" : ""} title={s.hint}>
+                    <span className="lifecycle-dot" />
+                    <span className="lifecycle-label">{s.label}</span>
+                </li>
+            ))}
+        </ol>
+    );
 }

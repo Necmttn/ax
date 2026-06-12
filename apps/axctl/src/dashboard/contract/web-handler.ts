@@ -91,6 +91,7 @@ const CONTRACT_PATTERNS: ReadonlyArray<{ readonly method: string; readonly patte
     { method: "GET", pattern: /^\/api\/skills\/[^/]+\/(detail|source)$/ },
     { method: "POST", pattern: /^\/api\/skills\/[^/]+\/(decide|open)$/ },
     { method: "DELETE", pattern: /^\/api\/skills\/[^/]+\/decide$/ },
+    { method: "GET", pattern: /^\/api\/improve\/[^/]+\/impact$/ },
     // All actions route to the contract; the handler answers unknown ones
     // with the legacy 404 { error: "unknown_improve_action" }.
     { method: "POST", pattern: /^\/api\/improve\/[^/]+\/[^/]+$/ },
