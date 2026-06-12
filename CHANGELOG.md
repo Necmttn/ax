@@ -1,5 +1,39 @@
 # Changelog
 
+## [0.26.0](https://github.com/Necmttn/ax/compare/v0.25.0...v0.26.0) (2026-06-12)
+
+
+### Features
+
+* **cli:** ax cost models/sessions/split + MCP cost tools ([#301](https://github.com/Necmttn/ax/issues/301)) ([a77a082](https://github.com/Necmttn/ax/commit/a77a082d6c7f6b720b5d4c64385a5b44f54e02f2))
+* **cli:** ax dispatches + --candidates + compile-routing ([#303](https://github.com/Necmttn/ax/issues/303)) ([8d11f5f](https://github.com/Necmttn/ax/commit/8d11f5fc515c7c48f197185de079ec73c2efa0d3))
+* **cli:** ax sessions churn - verification churn insight ([#308](https://github.com/Necmttn/ax/issues/308)) ([f75036d](https://github.com/Necmttn/ax/commit/f75036da7801eb92840df939ed572a7506b79530))
+* **cli:** manifest owns command visibility - uniform registration loop ([#293](https://github.com/Necmttn/ax/issues/293)) ([6d1dabc](https://github.com/Necmttn/ax/commit/6d1dabc0c543cc66909a617282ef6a71eeabf066))
+* **dashboard:** sessions list remakeover - enriched rows + insight accordion ([#299](https://github.com/Necmttn/ax/issues/299)) ([c73dd1f](https://github.com/Necmttn/ax/commit/c73dd1fbdafc3c0c8be2705f1509a039ace9b90a))
+* **dashboard:** surface skipped-file failures from ingest in the Live tab ([#294](https://github.com/Necmttn/ax/issues/294)) ([d3818ef](https://github.com/Necmttn/ax/commit/d3818ef74d8d92943d094ea4db60c541e70540c9)), closes [#262](https://github.com/Necmttn/ax/issues/262)
+* **hooks-sdk:** route-dispatch hook - model-routing suggestions on Agent dispatches ([#302](https://github.com/Necmttn/ax/issues/302)) ([0750963](https://github.com/Necmttn/ax/commit/075096379ba6f93e4509f13b7ab1a393cc285a3d))
+* **improve:** routing proposal rule in the proposals derive stage ([#306](https://github.com/Necmttn/ax/issues/306)) ([739258c](https://github.com/Necmttn/ax/commit/739258c42ffcac81c71cc6a17c90e898f197ce9e))
+* **ingest:** extend per-file failure isolation to Pi, OpenCode, and Cursor ([#295](https://github.com/Necmttn/ax/issues/295)) ([b1cf97c](https://github.com/Necmttn/ax/commit/b1cf97c5f1e1bb9e03a737e7b5664a1b62f52172)), closes [#261](https://github.com/Necmttn/ax/issues/261)
+* **routing:** apply /routing-tune mined classes - task-N-impl, bug-fix, feature-add ([#310](https://github.com/Necmttn/ax/issues/310)) ([009103d](https://github.com/Necmttn/ax/commit/009103d6dd39a981060b0fb70f1162bd97dc75e8))
+* **skills:** efficient-dispatch - measured model-routing orchestration ([#307](https://github.com/Necmttn/ax/issues/307)) ([d999d2e](https://github.com/Necmttn/ax/commit/d999d2e9dc5ffcccc905e2b5078ef4cc395dd6bf))
+* **studio:** files-touched tree, review view, and session narration ([#235](https://github.com/Necmttn/ax/issues/235)) ([ec464f3](https://github.com/Necmttn/ax/commit/ec464f3d5ee2f7b29cdad0451a93a256883435cf))
+* **studio:** Story tab as narration-grounded review surface (share manifest v5) ([#309](https://github.com/Necmttn/ax/issues/309)) ([bb943aa](https://github.com/Necmttn/ax/commit/bb943aa27da8b278af451df872621dc97db0d022))
+
+
+### Bug Fixes
+
+* **cli:** route share/star through family manifests, drop dispatch bypass ([#286](https://github.com/Necmttn/ax/issues/286)) ([f0fe014](https://github.com/Necmttn/ax/commit/f0fe0144107cdfc7023f492077edf381274e8a0d)), closes [#242](https://github.com/Necmttn/ax/issues/242)
+* **dashboard:** short-circuit empty-q /api/recall before AppLayer ([#284](https://github.com/Necmttn/ax/issues/284)) ([683596a](https://github.com/Necmttn/ax/commit/683596a76df2db42a4c6ee852109a5f35fef4377)), closes [#245](https://github.com/Necmttn/ax/issues/245)
+* **hooks-sdk:** align route-dispatch defaults with tuned ROUTING_CLASSES ([#304](https://github.com/Necmttn/ax/issues/304)) ([c1666bc](https://github.com/Necmttn/ax/commit/c1666bc3d26ac8eb8feb4b63ea161cebe156799d))
+* **hooks-sdk:** honor worktree guard bypasses ([0be68e1](https://github.com/Necmttn/ax/commit/0be68e1d98e8ebb5785dd3430c4bc9d115b1c80e))
+* **ingest:** subagent model attribution + spawned edge dispatch metadata ([#300](https://github.com/Necmttn/ax/issues/300)) ([91e86d8](https://github.com/Necmttn/ax/commit/91e86d89d7341915765eaec0f307ba63fc978a25))
+* **inspect:** bound and chunk the direct block/atom ref fan-out ([#290](https://github.com/Necmttn/ax/issues/290)) ([ecdcbf2](https://github.com/Necmttn/ax/commit/ecdcbf2959a2207013d967482e3422452523a254)), closes [#263](https://github.com/Necmttn/ax/issues/263)
+
+
+### Performance
+
+* **schema:** add skill_paired endpoint indexes ([#285](https://github.com/Necmttn/ax/issues/285)) ([fc5c5c5](https://github.com/Necmttn/ax/commit/fc5c5c5a562b77f2a547d60a1978027ba92f4129)), closes [#246](https://github.com/Necmttn/ax/issues/246)
+
 ## [0.25.0](https://github.com/Necmttn/ax/compare/v0.24.0...v0.25.0) (2026-06-11)
 
 
