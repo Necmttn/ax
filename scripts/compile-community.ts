@@ -48,7 +48,7 @@ export interface CompiledOutput {
         readonly skill_adoption: Record<string, number>;
         readonly model_share: Record<string, number>;
     };
-    readonly dropped: Array<{ login: string; reason: "fetch-failed" | "invalid-profile" | "absurd-values" }>;
+    readonly dropped: Array<{ login: string; reason: "fetch-failed" | "invalid-profile" | "absurd-values" | "github-mismatch" }>;
 }
 
 const MAX_TOKENS = 100e9;
@@ -79,6 +79,12 @@ export async function compileCommunity(
             p = decodeProfile(fetched.profile);
         } catch {
             dropped.push({ login: user.github, reason: "invalid-profile" });
+            continue;
+        }
+        // Impersonation guard: the profile's github field must match the
+        // registered login (case-insensitive; logins are canonical).
+        if (p.github.toLowerCase() !== user.github.toLowerCase()) {
+            dropped.push({ login: user.github, reason: "github-mismatch" });
             continue;
         }
         if (p.stats.tokens.total > MAX_TOKENS || p.stats.sessions > MAX_SESSIONS) {
@@ -160,10 +166,11 @@ const liveFetcher = (cache: Record<string, { etag: string; profile: unknown }>):
             if (res.status === 304 && cached) return { profile: cached.profile, etag: cached.etag };
             if (!res.ok) return null;
             const body = (await res.json()) as {
-                files?: Record<string, { content?: string }>;
+                files?: Record<string, { content?: string; truncated?: boolean }>;
             };
-            const content = body.files?.["ax-profile.json"]?.content;
-            if (typeof content !== "string") return null;
+            const f = body.files?.["ax-profile.json"];
+            if (!f || f.truncated === true || typeof f.content !== "string") return null;
+            const content = f.content;
             const profile: unknown = JSON.parse(content);
             const etag = res.headers.get("etag");
             if (etag) cache[gistId] = { etag, profile };
@@ -173,6 +180,10 @@ const liveFetcher = (cache: Record<string, { etag: string; profile: unknown }>):
         }
     };
 
+// GitHub login charset: 1–39 alphanumeric/hyphen chars; gist IDs are hex.
+const GITHUB_LOGIN_RE = /^[A-Za-z0-9-]{1,39}$/;
+const GIST_ID_RE = /^[a-f0-9]+$/i;
+
 if (import.meta.main) {
     const usersDir = "community/users";
     const glob = new Bun.Glob("*.json");
@@ -180,7 +191,17 @@ if (import.meta.main) {
     for await (const name of glob.scan({ cwd: usersDir })) {
         const raw: unknown = JSON.parse(await Bun.file(`${usersDir}/${name}`).text());
         const r = raw as Record<string, unknown>;
-        users.push({ github: String(r.github), gist_id: String(r.gist_id), joined: String(r.joined) });
+        const github = String(r.github);
+        const gist_id = String(r.gist_id);
+        if (!GITHUB_LOGIN_RE.test(github)) {
+            console.log(`[warn] skipping ${name}: invalid github login "${github}"`);
+            continue;
+        }
+        if (!GIST_ID_RE.test(gist_id)) {
+            console.log(`[warn] skipping ${name}: invalid gist_id "${gist_id}"`);
+            continue;
+        }
+        users.push({ github, gist_id, joined: String(r.joined) });
     }
 
     const cachePath = "community/.gist-etag-cache.json";

@@ -1,3 +1,7 @@
+# IMPORTANT: auto-merge is only safe when the `validate` job of this workflow
+# is configured as a REQUIRED status check on main (repo Settings → Branches →
+# Protection rules) and "Allow auto-merge" is enabled on the repo.  Without
+# that, --auto can merge unvalidated synchronize commits.
 name: community-users
 
 on:
@@ -34,11 +38,22 @@ jobs:
 
       - name: Only community/users files changed
         id: scope
+        # Use the GitHub API (gh pr diff) instead of local git diff: the
+        # pr-head checkout is fetch-depth:1 so base.sha is absent and
+        # `git diff base...head` would fail with "fatal: bad object".
+        # gh pr diff returns paths without any pr-head/ prefix; we add it
+        # below when emitting the files list (the validator reads from the
+        # pr-head checkout).
+        # Filename filter is strict-lowercase: GitHub logins are
+        # case-insensitive but our convention is lowercase filenames and the
+        # validator enforces it.
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          changed=$(git -C pr-head diff --name-only ${{ github.event.pull_request.base.sha }}...${{ github.event.pull_request.head.sha }})
+          changed=$(gh pr diff ${{ github.event.pull_request.number }} --name-only --repo ${{ github.repository }})
           echo "$changed"
-          if echo "$changed" | grep -v '^community/users/[a-z0-9-]*\.json$' | grep -q .; then
+          if echo "$changed" | grep -v '^community/users/[a-z0-9-]+\.json$' | grep -q .; then
             echo "outside=true" >> "$GITHUB_OUTPUT"
           else
             echo "outside=false" >> "$GITHUB_OUTPUT"

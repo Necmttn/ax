@@ -28,7 +28,9 @@ jobs:
       - name: Commit if changed
         run: |
           set -euo pipefail
-          git add community/
+          # Stage compiled outputs but not the ETag cache (it's machine-local;
+          # skipping it means cold fetches each nightly run, acceptable at current scale).
+          git add community/ && git reset community/.gist-etag-cache.json || true
           # -I ignores lines matching the pattern (compiled_at-only churn).
           # Verified: `git diff --cached --quiet -I '"compiled_at"'` exits 0
           # when only compiled_at lines differ, exits 1 when real data changed.

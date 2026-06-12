@@ -93,4 +93,17 @@ describe("compileCommunity", () => {
         const b = await compileCommunity(users, f, { now: "2026-06-12T03:00:00Z" });
         expect(JSON.stringify(a)).toBe(JSON.stringify(b));
     });
+
+    test("gist impersonation: mallory's gist claiming github=alice is dropped with github-mismatch", async () => {
+        // mallory registers under their own login but their profile.github
+        // points at a different user (alice) - impersonation attempt.
+        const malloryUsers = [{ github: "mallory", gist_id: "gm", joined: "2026-06-01" }];
+        const out = await compileCommunity(
+            malloryUsers,
+            fetcher({ gm: profile("alice") }), // profile.github = "alice", not "mallory"
+            { now: "2026-06-12T03:00:00Z" },
+        );
+        expect(out.leaderboard.boards.tokens).toHaveLength(0);
+        expect(out.dropped).toEqual([{ login: "mallory", reason: "github-mismatch" }]);
+    });
 });
