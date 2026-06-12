@@ -135,19 +135,23 @@ export interface Leaderboard {
 
 export function validateLeaderboard(value: unknown): Leaderboard {
     if (!isRecord(value) || !isRecord(value.boards)) throw new Error("invalid leaderboard");
-    const boards: Record<string, BoardRow[]> = {};
-    for (const key of ["tokens", "sessions", "streak", "cost"] as const) {
+    const board = (key: string): BoardRow[] => {
         const rows = (value.boards as Record<string, unknown>)[key];
         if (!Array.isArray(rows)) throw new Error(`invalid board ${key}`);
-        boards[key] = rows.map((r) => {
+        return rows.map((r) => {
             if (!isRecord(r)) throw new Error(`invalid row in ${key}`);
             return { login: str(r.login, "login"), value: num(r.value, "value") };
         });
-    }
+    };
     return {
         compiled_at: typeof value.compiled_at === "string" ? value.compiled_at : "",
         window_days: typeof value.window_days === "number" ? value.window_days : 30,
-        boards: boards as Leaderboard["boards"],
+        boards: {
+            tokens: board("tokens"),
+            sessions: board("sessions"),
+            streak: board("streak"),
+            cost: board("cost"),
+        },
     };
 }
 
