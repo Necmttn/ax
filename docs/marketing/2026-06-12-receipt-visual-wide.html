@@ -1,0 +1,305 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>ax routing - receipt visual, 16:9 tweet-fit (1200x675)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link
+  href="https://fonts.googleapis.com/css2?family=VT323&family=Caveat:wght@600;700&family=JetBrains+Mono:wght@400;500;600&display=swap"
+  rel="stylesheet"
+/>
+<style>
+  :root {
+    --bg: #111111;
+    --paper: #f5f1e6;
+    --ink: #33312c;
+    --ink-soft: #55524a;
+    --pen: #c8473b;
+    --off: #ece9e2;
+    --dim: #98948b;
+    --faint: #6f6b63;
+    --amber: #ffcb6b;
+    --mono: "JetBrains Mono", ui-monospace, Menlo, monospace;
+  }
+  html, body { margin: 0; padding: 0; background: var(--bg); }
+
+  .canvas {
+    position: relative;
+    width: 1200px;
+    height: 675px;
+    overflow: hidden;
+    background:
+      radial-gradient(ellipse 980px 640px at 44% 46%, #181816 0%, #121211 58%, #0d0d0c 100%);
+  }
+
+  /* ================= left: the receipt ================= */
+  .receipt-pos {
+    position: absolute;
+    left: 70px;
+    top: 44px;
+    transform: rotate(2.6deg) scale(0.66);
+    transform-origin: top center;
+  }
+  .receipt-wrap {
+    filter: drop-shadow(0 26px 50px rgba(0, 0, 0, 0.65))
+            drop-shadow(0 4px 10px rgba(0, 0, 0, 0.5));
+  }
+  .receipt {
+    width: 560px;
+    box-sizing: border-box;
+    padding: 50px 46px 32px;
+    background:
+      repeating-linear-gradient(
+        0deg,
+        rgba(0, 0, 0, 0.016) 0px,
+        rgba(0, 0, 0, 0.016) 2px,
+        transparent 2px,
+        transparent 5px
+      ),
+      linear-gradient(90deg, #ece7d8 0%, var(--paper) 8%, var(--paper) 92%, #ece7d8 100%),
+      var(--paper);
+    color: var(--ink);
+    font-family: "VT323", "JetBrains Mono", monospace;
+    font-size: 29px;
+    line-height: 1.32;
+  }
+
+  .center { text-align: center; }
+  .head {
+    font-size: 38px;
+    letter-spacing: 0.08em;
+    text-align: center;
+  }
+  .sub {
+    text-align: center;
+    font-size: 25px;
+    color: var(--ink-soft);
+    letter-spacing: 0.06em;
+  }
+  .rule {
+    text-align: center;
+    color: var(--ink-soft);
+    overflow: hidden;
+    white-space: nowrap;
+    margin: 8px 0;
+    letter-spacing: 0.04em;
+  }
+  .cols {
+    display: flex;
+    justify-content: space-between;
+    color: var(--ink-soft);
+    font-size: 24px;
+    letter-spacing: 0.05em;
+    margin-top: 16px;
+  }
+  .item {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    white-space: nowrap;
+  }
+  .item .leader {
+    flex: 1;
+    border-bottom: 3px dotted rgba(51, 49, 44, 0.55);
+    transform: translateY(-7px);
+    min-width: 16px;
+  }
+  .item.fade { opacity: 0.82; }
+
+  .keep-row { position: relative; }
+  .keep-row svg.pen-circle {
+    position: absolute;
+    left: -14px;
+    top: -9px;
+    width: calc(100% + 28px);
+    height: 56px;
+    pointer-events: none;
+  }
+  .keep-row svg.pen-circle path {
+    fill: none;
+    stroke: var(--pen);
+    stroke-width: 2.6px;
+    stroke-linecap: round;
+    opacity: 0.9;
+  }
+  .keep-note {
+    font-family: "Caveat", cursive;
+    font-size: 27px;
+    font-weight: 700;
+    color: var(--pen);
+    text-align: right;
+    margin: -2px 2px 4px 0;
+    transform: rotate(-2deg);
+  }
+
+  .tally {
+    margin-top: 14px;
+    font-size: 26px;
+    letter-spacing: 0.04em;
+  }
+  .tally div { margin: 2px 0; }
+  .total {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    font-size: 34px;
+    margin: 6px 0;
+    white-space: nowrap;
+  }
+  .total .leader {
+    flex: 1;
+    border-bottom: 3px dotted rgba(51, 49, 44, 0.55);
+    transform: translateY(-9px);
+  }
+  .verdict {
+    margin-top: 22px;
+    text-align: center;
+    font-size: 28px;
+    line-height: 1.3;
+    letter-spacing: 0.05em;
+  }
+  .thanks {
+    margin-top: 14px;
+    text-align: center;
+    font-size: 24px;
+    color: var(--ink-soft);
+    letter-spacing: 0.08em;
+  }
+
+  /* ================= right: pulled-out type ================= */
+  .pullout {
+    position: absolute;
+    left: 538px;
+    top: 126px;
+    width: 620px;
+  }
+  .big-total {
+    font-family: "VT323", monospace;
+    font-size: 148px;
+    line-height: 0.9;
+    color: var(--amber);
+    letter-spacing: 0.01em;
+  }
+  .big-sub {
+    margin-top: 14px;
+    font-family: var(--mono);
+    font-size: 19px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--dim);
+  }
+  .pin-line {
+    margin-top: 46px;
+    display: flex;
+    align-items: center;
+    gap: 18px;
+  }
+  .pin-line .pct {
+    font-family: "VT323", monospace;
+    font-size: 76px;
+    line-height: 0.85;
+    color: var(--off);
+  }
+  .pin-line .pin-text {
+    font-family: var(--mono);
+    font-size: 21px;
+    line-height: 1.45;
+    color: #c9c5bc;
+  }
+  .thin-rule {
+    margin: 44px 0 36px;
+    width: 520px;
+    border: 0;
+    border-top: 1px solid #36342c;
+  }
+  .prompt {
+    font-family: var(--mono);
+    font-size: 33px;
+    font-weight: 600;
+    color: var(--amber);
+    letter-spacing: 0.01em;
+  }
+  .prompt .p { color: var(--faint); font-weight: 400; margin-right: 6px; }
+  .prompt-sub {
+    margin-top: 12px;
+    font-family: var(--mono);
+    font-size: 18px;
+    color: var(--dim);
+    letter-spacing: 0.02em;
+  }
+
+  .corner-url {
+    position: absolute;
+    right: 30px;
+    bottom: 22px;
+    font-family: var(--mono);
+    font-size: 14px;
+    letter-spacing: 0.08em;
+    color: var(--faint);
+  }
+</style>
+</head>
+<body>
+  <div class="canvas">
+    <!-- left: receipt running off the bottom edge -->
+    <div class="receipt-pos">
+      <div class="receipt-wrap">
+        <div class="receipt">
+          <div class="head">AX &middot; AGENT SPEND</div>
+          <div class="rule">**********************************</div>
+          <div class="sub">14 DAYS &middot; ONE MACHINE</div>
+          <div class="sub">REG 01 &middot; 2026-06-12</div>
+
+          <div class="cols"><span>ITEM</span><span>BILLED AT</span></div>
+          <div class="rule">----------------------------------</div>
+
+          <div class="item fade"><span>FILE SEARCH</span><span class="leader"></span><span>FRONTIER&nbsp;$$</span></div>
+          <div class="item"><span>SPEC'D IMPLEMENTATION</span><span class="leader"></span><span>FRONTIER&nbsp;$$</span></div>
+          <div class="item fade"><span>BUG FIXES</span><span class="leader"></span><span>FRONTIER&nbsp;$$</span></div>
+          <div class="keep-row">
+            <div class="item"><span>CODE REVIEW</span><span class="leader"></span><span>FRONTIER&nbsp;$$</span></div>
+            <svg class="pen-circle" viewBox="0 0 500 56" preserveAspectRatio="none" aria-hidden="true">
+              <path d="M 96 9 C 260 -4, 472 2, 488 24 C 500 44, 380 54, 232 53 C 96 52, 10 46, 14 28 C 17 14, 52 8, 132 6" />
+            </svg>
+          </div>
+          <div class="keep-note">&#8598; ok, keep this one (judgment)</div>
+
+          <div class="rule">----------------------------------</div>
+          <div class="tally">
+            <div>663 SUBAGENT DISPATCHES</div>
+            <div>75% NEVER PINNED A MODEL</div>
+          </div>
+          <div class="rule">----------------------------------</div>
+
+          <div class="total"><span>TOTAL</span><span class="leader"></span><span>$19,270</span></div>
+          <div class="rule">==================================</div>
+
+          <div class="verdict">
+            YOUR INTERN WORK,<br />BILLED AT FRONTIER RATES
+          </div>
+          <div class="thanks">*** THANK YOU FOR OVERPAYING ***</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- right: the message -->
+    <div class="pullout">
+      <div class="big-total">$19,270</div>
+      <div class="big-sub">14 days of agent spend</div>
+
+      <div class="pin-line">
+        <span class="pct">75%</span>
+        <span class="pin-text">of dispatches never<br />pinned a model</span>
+      </div>
+
+      <hr class="thin-rule" />
+
+      <div class="prompt"><span class="p">$</span>ax routing tune</div>
+      <div class="prompt-sub">mines the fix from your own dispatch history</div>
+    </div>
+
+    <div class="corner-url">ax.necmttn.com/routing</div>
+  </div>
+</body>
+</html>
