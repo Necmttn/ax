@@ -32,9 +32,10 @@ import {
     type TuneProposal,
 } from "../../queries/routing-tune.ts";
 import type { RuntimeManifest } from "./manifest.ts";
-import { fail, jsonFlag, optionValue } from "./shared.ts";
+import { fail, jsonFlag, optionValue, parseCsvFlag } from "./shared.ts";
 
-const usd = (n: number): string => `$${n.toFixed(2)}`;
+const usd = (n: number): string =>
+    Number.isFinite(n) ? `$${n.toFixed(2)}` : "$0.00";
 
 const printProposals = (proposals: ReadonlyArray<TuneProposal>) => {
     console.log(
@@ -71,7 +72,21 @@ const tuneCommand = Command.make(
             const table = yield* loadEffectiveRoutingTable(tablePath);
             const proposals = yield* fetchTuneProposals({ sinceDays: days, table });
 
+            // Parse --apply before the empty-proposals check: an explicit apply
+            // against an empty re-mine must fail loudly, not "keep up" silently.
+            const applyRaw = optionValue(apply);
+            const ids = applyRaw === undefined ? null : parseCsvFlag(applyRaw);
+
             if (proposals.length === 0) {
+                if (ids !== null) {
+                    fail(
+                        `ax routing tune: none of the requested ids (${ids.join(", ")}) were re-mined in the last ${days} days - re-run with the --days window the brief was mined with`,
+                    );
+                }
+                if (json) {
+                    console.log(prettyPrint({ proposals: [] }));
+                    return;
+                }
                 console.log(
                     `(no unmatched expensive inherit clusters in the last ${days} days - table is keeping up)`,
                 );
@@ -106,19 +121,11 @@ const tuneCommand = Command.make(
                 }
                 console.log(`brief written: ${briefPath} (${proposals.length} proposals)`);
                 console.log(
-                    `hand it to your agent; survivors apply with: ax routing tune --apply=<ids>`,
+                    `hand it to your agent; survivors apply with: ax routing tune --days=${days} --apply=<ids>`,
                 );
                 return;
             }
 
-            const applyRaw = optionValue(apply);
-            const ids =
-                applyRaw === undefined
-                    ? null
-                    : applyRaw
-                          .split(",")
-                          .map((s) => s.trim())
-                          .filter((s) => s.length > 0);
             const result = yield* applyProposals(tablePath, proposals, { ids });
             if (result.corrupt) {
                 fail(
@@ -211,10 +218,7 @@ const showCommand = Command.make(
             const stored = yield* loadStoredRoutingTable(tablePath);
             // Re-merge for display: legacy origin-less rows show as "user" -
             // intentional (previews what compile would produce).
-            const merged =
-                stored === null
-                    ? mergeRoutingTables(ROUTING_CLASSES, null)
-                    : mergeRoutingTables(ROUTING_CLASSES, stored);
+            const merged = mergeRoutingTables(ROUTING_CLASSES, stored);
             if (json) {
                 console.log(
                     prettyPrint({ path: tablePath, stored: stored !== null, table: merged }),
@@ -234,7 +238,7 @@ const showCommand = Command.make(
             }
             for (const [agentType, model] of Object.entries(merged.agentTypes)) {
                 console.log(
-                    `${"agent-type:" + agentType}  ${"".padEnd(40)}  ${String(model).padEnd(8)}  default`,
+                    `${("agent-type:" + agentType).padEnd(28)}  ${"".padEnd(40)}  ${String(model).padEnd(8)}  default`,
                 );
             }
         }),
@@ -261,6 +265,7 @@ export const axRoutingRuntime: RuntimeManifest = {
             kind: "db-conditional",
             fallback: "db",
             subcommands: {
+                tune: "db",
                 compile: "none",
                 show: "none",
             },

@@ -2,7 +2,7 @@ import { describe, expect, it } from "bun:test";
 import { Effect, Layer } from "effect";
 import { BunFileSystem, BunPath } from "@effect/platform-bun";
 import { SurrealClient, type SurrealClientShape } from "@ax/lib/db";
-import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ROUTING_CLASSES, type DispatchRow } from "./dispatch-analytics.ts";
@@ -164,7 +164,9 @@ describe("renderTuneBrief", () => {
         const brief = renderTuneBrief(proposals, { days: 30, date: "2026-06-12" });
         expect(brief).toContain("summarize-the");
         expect(brief).toContain("adversarially");
-        expect(brief).toContain("ax routing tune --apply");
+        // The apply command must carry the mining window: re-mining with the
+        // default --days could miss the brief's proposals entirely.
+        expect(brief).toContain("ax routing tune --days=30 --apply");
     });
 
     it("sanitizes examples: newlines collapsed to one line, backticks escaped", () => {
@@ -267,14 +269,33 @@ describe("applyProposals", () => {
         );
         expect(first.applied.map((a) => a.id)).toEqual(["summarize-the"]);
         expect(first.skipped_existing).toHaveLength(0);
+        const bytesBefore = readFileSync(p, "utf8");
+        const mtimeBefore = statSync(p).mtimeMs;
         const second = await Effect.runPromise(
             applyProposals(p, proposals, { ids: null }).pipe(Effect.provide(fsLayers)),
         );
         expect(second.applied).toHaveLength(0);
         expect(second.skipped_existing.map((s) => s.id)).toEqual(["summarize-the"]);
-        const stored = JSON.parse(readFileSync(p, "utf8"));
+        // No-op apply must not rewrite the file at all.
+        expect(readFileSync(p, "utf8")).toBe(bytesBefore);
+        expect(statSync(p).mtimeMs).toBe(mtimeBefore);
+        const stored = JSON.parse(bytesBefore);
         const matches = stored.classes.filter((c: { id: string }) => c.id === "summarize-the");
         expect(matches).toHaveLength(1);
+    });
+
+    it("all-judgment auto run does not create the file when it didn't exist", async () => {
+        const dir = mkdtempSync(join(tmpdir(), "ax-tune-apply-judgment-only-"));
+        const p = join(dir, "routing-table.json");
+        const proposals: TuneProposal[] = [
+            { id: "review-architecture", pattern: "^review\\s+architecture\\b", flags: "i", suggest: "sonnet", reason: "mined", count: 3, total_cost_usd: 15, examples: [], judgment: true },
+        ];
+        const result = await Effect.runPromise(
+            applyProposals(p, proposals, { ids: null }).pipe(Effect.provide(fsLayers)),
+        );
+        expect(result.applied).toHaveLength(0);
+        expect(result.skipped_judgment.map((s) => s.id)).toEqual(["review-architecture"]);
+        expect(existsSync(p)).toBe(false);
     });
 
     it("reports unknown explicit ids instead of silently dropping them", async () => {

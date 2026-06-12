@@ -177,7 +177,9 @@ export const renderTuneBrief = (
         "the survivors:",
         "",
         "```bash",
-        `ax routing tune --apply=<id,id,...>   # apply surviving proposals by id`,
+        // --days must match the mining window: a default-window re-mine could
+        // miss the brief's proposals and the apply would decay silently.
+        `ax routing tune --days=${opts.days} --apply=<id,id,...>   # apply surviving proposals by id`,
         "```",
         "",
         "## Proposals",
@@ -274,8 +276,13 @@ export const applyProposals = (
             reason: p.reason,
             origin: "user" as const,
         }));
-        const next = appendUserClasses(base, additions);
-        yield* saveStoredRoutingTable(tablePath, next);
+        // No-op applies (typo'd --apply, all-judgment auto run, everything
+        // already present) must leave the file untouched - don't rewrite it
+        // and don't create one that didn't exist.
+        if (landed.length > 0) {
+            const next = appendUserClasses(base, additions);
+            yield* saveStoredRoutingTable(tablePath, next);
+        }
         return {
             path: tablePath,
             applied: landed,
