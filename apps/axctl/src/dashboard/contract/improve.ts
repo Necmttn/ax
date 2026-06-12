@@ -18,6 +18,7 @@ import {
     NotFoundError,
 } from "@ax/lib/shared/api-contract";
 import { fetchImproveProposals } from "../improve-proposals.ts";
+import { fetchNextActionsCached, invalidateNextActionsCache } from "../read-caches.ts";
 import { asJsonValue, internal, orInternal } from "./common.ts";
 
 interface ImproveActionResult { readonly status: string; readonly message?: string }
@@ -49,8 +50,14 @@ export const ImproveGroupLive = HttpApiBuilder.group(AxApi, "improve", (handlers
             orInternal(fetchImproveProposals().pipe(
                 Effect.map((proposals) => asJsonValue({ proposals })),
             )))
+        .handle("nextActions", () => orInternal(fetchNextActionsCached()))
         .handle("improveAction", ({ params, payload }) =>
             Effect.gen(function* () {
+                if (params.action !== "accept" && params.action !== "reject" && params.action !== "verdict") {
+                    // Legacy 404 parity for unknown actions (the old route's
+                    // decode answered { error: "unknown_improve_action" }).
+                    return yield* new NotFoundError({ error: "unknown_improve_action" });
+                }
                 // Dynamic import preserved from the legacy handler: the CLI and
                 // HTTP paths share src/improve/actions.ts semantics.
                 const actions = yield* Effect.promise(() => import("../../improve/actions.ts"));
@@ -63,6 +70,9 @@ export const ImproveGroupLive = HttpApiBuilder.group(AxApi, "improve", (handlers
                     })
                     : actions.setVerdict({ sigOrId: params.sig, verdict: payload.verdict ?? "" });
                 const result = (yield* run.pipe(Effect.mapError(internal))) as ImproveActionResult;
+                // The action changes proposal/verdict cards - drop the cache so
+                // the panel's refetch sees the new state immediately.
+                yield* invalidateNextActionsCache().pipe(Effect.mapError(internal));
                 if (result.status !== "ok") return yield* Effect.fail(toActionFailure(result));
                 return result;
             })));

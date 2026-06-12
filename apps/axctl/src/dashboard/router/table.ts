@@ -1,21 +1,19 @@
 /**
- * The ordered dashboard route table. FIRST MATCH WINS - keep static paths
- * before param paths within a family, and keep the sessions detail
- * catch-all (`/api/sessions/:id+`) after its sibling subroutes.
+ * The legacy dashboard route table - now only the routes that deliberately
+ * live OUTSIDE the Insights Surface Contract (ADR-0013):
+ *   - GET /api/version (DB-free identity probe; see routes/system.ts)
+ *   - GET /api/graph-explorer (env-gated experiment; see routes/insights.ts)
+ *   - GET /api/events + GET /api/image (SSE/binary; see routes/live.ts)
+ * Every other endpoint is served by the contract router
+ * (../contract/web-handler.ts) before dispatch reaches this table.
  */
 import type { AnyRoute } from "./router.ts";
-import { improveRoutes } from "./routes/improve.ts";
 import { insightRoutes } from "./routes/insights.ts";
 import { liveRoutes } from "./routes/live.ts";
-import { sessionRoutes } from "./routes/sessions.ts";
-import { skillRoutes } from "./routes/skills.ts";
 import { systemRoutes } from "./routes/system.ts";
 
 export const routeTable: ReadonlyArray<AnyRoute> = [
     ...systemRoutes,
     ...insightRoutes,
-    ...sessionRoutes,
-    ...skillRoutes,
-    ...improveRoutes,
     ...liveRoutes,
 ];

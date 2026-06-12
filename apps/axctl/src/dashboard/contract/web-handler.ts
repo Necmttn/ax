@@ -67,6 +67,7 @@ const CONTRACT_ROUTES: ReadonlySet<string> = new Set([
     "POST /api/skills/decide-bulk",
     // improve
     "GET /api/improve",
+    "GET /api/next-actions",
     // live (SSE /api/events + binary /api/image stay raw legacy routes)
     "POST /api/ingest",
     // docs
@@ -88,9 +89,9 @@ const CONTRACT_PATTERNS: ReadonlyArray<{ readonly method: string; readonly patte
     { method: "GET", pattern: /^\/api\/skills\/[^/]+\/(detail|source)$/ },
     { method: "POST", pattern: /^\/api\/skills\/[^/]+\/(decide|open)$/ },
     { method: "DELETE", pattern: /^\/api\/skills\/[^/]+\/decide$/ },
-    // Unknown improve actions fall to the legacy row's 404 decode; only the
-    // three known actions reach the contract's Literals-typed param.
-    { method: "POST", pattern: /^\/api\/improve\/[^/]+\/(accept|reject|verdict)$/ },
+    // All actions route to the contract; the handler answers unknown ones
+    // with the legacy 404 { error: "unknown_improve_action" }.
+    { method: "POST", pattern: /^\/api\/improve\/[^/]+\/[^/]+$/ },
 ];
 
 export const isContractRequest = (method: string, pathname: string): boolean =>

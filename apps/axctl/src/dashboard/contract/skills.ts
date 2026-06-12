@@ -15,9 +15,9 @@ import {
     openSkillTarget,
     readSkillSource,
 } from "../skill-source.ts";
+import { fetchSkillTriageCached, invalidateSkillCaches } from "../read-caches.ts";
 import {
     clearSkillDecision,
-    fetchSkillTriage,
     listSkillDecisions,
     setSkillDecision,
     setSkillDecisionsBulk,
@@ -31,7 +31,7 @@ export const SkillsGroupLive = HttpApiBuilder.group(AxApi, "skills", (handlers) 
     handlers
         .handle("decisions", () =>
             orInternal(listSkillDecisions().pipe(Effect.map((notes) => ({ decisions: notes })))))
-        .handle("skills", () => orInternal(fetchSkillTriage()))
+        .handle("skills", () => orInternal(fetchSkillTriageCached()))
         .handle("skillDecideBulk", ({ payload }) => {
             const names = payload.names.filter((n) => n.length > 0);
             if (names.length === 0) {
@@ -45,6 +45,7 @@ export const SkillsGroupLive = HttpApiBuilder.group(AxApi, "skills", (handlers) 
                 for (const skillName of names) {
                     yield* applySkillDecisionToDisk(skillName, payload.decision);
                 }
+                yield* invalidateSkillCaches();
                 return { notes: saved };
             }));
         })
@@ -53,6 +54,7 @@ export const SkillsGroupLive = HttpApiBuilder.group(AxApi, "skills", (handlers) 
                 const saved = yield* setSkillDecision(params.name, payload.decision, normalizeReason(payload.reason));
                 // `archive` disables the skill on disk; `keep`/`review` restores it.
                 yield* applySkillDecisionToDisk(params.name, payload.decision);
+                yield* invalidateSkillCaches();
                 return saved;
             })))
         .handle("skillDecideClear", ({ params }) =>
@@ -60,6 +62,7 @@ export const SkillsGroupLive = HttpApiBuilder.group(AxApi, "skills", (handlers) 
                 yield* clearSkillDecision(params.name);
                 // Clearing a decision restores the skill on disk.
                 yield* applySkillDecisionToDisk(params.name, null);
+                yield* invalidateSkillCaches();
                 return { cleared: true, skill_name: params.name };
             })))
         .handle("skillDetail", ({ params }) => orInternal(fetchSkillDetail(params.name)))

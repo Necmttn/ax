@@ -329,12 +329,17 @@ export const ImproveGroup = HttpApiGroup.make("improve")
             success: Schema.Unknown,
             error: InternalError,
         }),
+        HttpApiEndpoint.get("nextActions", "/api/next-actions", {
+            success: Schema.Unknown,
+            error: InternalError,
+        }),
         HttpApiEndpoint.post("improveAction", "/api/improve/:sig/:action", {
             params: {
                 sig: Schema.String,
-                // The routing matcher only sends known actions here; an
-                // unknown action falls to the legacy row's 404 decode.
-                action: Schema.Literals(["accept", "reject", "verdict"]),
+                // String, not Literals: an unknown action must answer the
+                // legacy 404 `{ error: "unknown_improve_action" }`, which the
+                // handler produces - a Literals decode failure would be a 400.
+                action: Schema.String,
             },
             payload: Schema.Struct({
                 force: Schema.optionalKey(Schema.Boolean),
