@@ -41,7 +41,8 @@ const EXCLUDED_FILES: readonly string[] = [
     "packages/hooks-sdk/src/git-env.ts",
     // Same fire-path constraint: routing-table.json is read synchronously so
     // the hook's error channel stays `never` under plain bun (~70ms budget).
-    "packages/hooks-sdk/src/hooks/route-dispatch.ts",
+    // (Was hooks/route-dispatch.ts before the read seam moved here, ADR-0014.)
+    "packages/hooks-sdk/src/routing-table.ts",
 ];
 
 const BANNED_SPECIFIERS = [

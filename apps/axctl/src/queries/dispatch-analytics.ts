@@ -10,12 +10,18 @@
  *   (3) Agent tool_call rows in window: session, call_id, input_json.
  *   (4) Parent session models: SELECT id, model FROM session (non-subagent).
  *
- * Routing classes mirror packages/hooks-sdk/src/hooks/route-dispatch.ts
- * (feat/route-dispatch-hook branch). NOT imported from there - duplicated with
- * a comment. A compile-routing step will unify later.
+ * Routing classes come from @ax/hooks-sdk/routing-table (DEFAULT_ROUTING_TABLE)
+ * - the same module the route-dispatch hook reads, so hook and CLI can never
+ * drift (ADR-0014). ROUTING_CLASSES remains the exported name for the shipped
+ * default seed.
  */
 import { Effect, FileSystem, Path } from "effect";
 import { SurrealClient } from "@ax/lib/db";
+import {
+    DEFAULT_ROUTING_TABLE,
+    type RoutingClass,
+    type RoutingTable,
+} from "@ax/hooks-sdk/routing-table";
 import { estimateCost, type ModelPricing } from "../ingest/model-pricing.ts";
 import {
     defaultRoutingTablePath,
@@ -25,103 +31,17 @@ import {
 } from "./routing-table-io.ts";
 
 // ---------------------------------------------------------------------------
-// Routing classes
-// (mirrors packages/hooks-sdk/src/hooks/route-dispatch.ts DEFAULT_TABLE)
+// Routing classes (schema + defaults owned by @ax/hooks-sdk/routing-table)
 // ---------------------------------------------------------------------------
 
-export interface RoutingClass {
-    readonly id: string;
-    readonly pattern: string;
-    readonly flags: string;
-    readonly suggest: string; // "sonnet" | "haiku"
-    readonly reason: string;
-}
-
-export interface RoutingTable {
-    readonly version: 1;
-    readonly classes: ReadonlyArray<RoutingClass>;
-    readonly agentTypes: Readonly<Record<string, string>>;
-}
+export type { RoutingClass, RoutingTable };
 
 /**
- * ROUTING_CLASSES - exported typed constant.
- * Mirrors route-dispatch.ts DEFAULT_TABLE. Do NOT import from there;
- * a compile-routing step will unify them later.
+ * ROUTING_CLASSES - the shipped default seed (`ax routing compile` refreshes
+ * the stored table's origin:default rows from it). Alias of the hooks-sdk
+ * DEFAULT_ROUTING_TABLE that the route-dispatch hook falls back to.
  */
-export const ROUTING_CLASSES: RoutingTable = {
-    version: 1,
-    classes: [
-        // Quality reviews and PR reviews deliberately have NO class: the main
-        // model is the Q&A reviewer in this workflow, so only the mechanical
-        // spec-compliance pass routes down.
-        {
-            id: "spec-review",
-            pattern: "^spec review",
-            flags: "i",
-            suggest: "sonnet",
-            reason: "spec-compliance checklist review",
-        },
-        {
-            id: "search-locate",
-            pattern: "^(pattern-find|locate|find|map|sweep|grep)",
-            flags: "i",
-            suggest: "haiku",
-            reason: "code search/sweep",
-        },
-        {
-            id: "research",
-            pattern: "^(research|investigate docs|study)",
-            flags: "i",
-            suggest: "sonnet",
-            reason: "web/docs research",
-        },
-        {
-            id: "well-specified-impl",
-            pattern: "^implement ",
-            flags: "i",
-            suggest: "sonnet",
-            reason: "spec'd implementation",
-        },
-        {
-            id: "bulk-mechanical",
-            pattern: "^(write announcements|regenerate|standardize|merge main)",
-            flags: "i",
-            suggest: "sonnet",
-            reason: "bulk mechanical work",
-        },
-        // Mined by /routing-tune 2026-06-12 (adversarially backtested over 90d;
-        // brief: .ax/tasks/routing-tune-undated.md). The colon in task-N-impl
-        // is load-bearing: "Task 4 spec compliance review" (no colon) must NOT
-        // match - reviews stay on the main model.
-        {
-            id: "task-N-impl",
-            pattern: "^Task \\d+:",
-            flags: "i",
-            suggest: "sonnet",
-            reason: "numbered plan-task implementation",
-        },
-        {
-            id: "bug-fix",
-            pattern: "^Fix\\s",
-            flags: "i",
-            suggest: "sonnet",
-            reason: "bounded bug-fix remediation",
-        },
-        {
-            id: "feature-add",
-            pattern: "^Add\\s",
-            flags: "i",
-            suggest: "sonnet",
-            reason: "additive feature with a clear target",
-        },
-    ],
-    agentTypes: {
-        Explore: "haiku",
-        "codebase-locator": "haiku",
-        "codebase-pattern-finder": "haiku",
-        "codebase-analyzer": "sonnet",
-    },
-};
+export const ROUTING_CLASSES: RoutingTable = DEFAULT_ROUTING_TABLE;
 
 // Model name resolution for repricing suggestions
 const MODEL_ALIASES: Record<string, string> = {
