@@ -1,10 +1,13 @@
 /**
  * Hand-written sample narration - the story of the `worktree-files-touched-tree`
  * branch session itself, eating its own dogfood. Used as a render fixture for
- * `NarrationPanel` and as the accept-case for the `isSessionNarration` guard.
+ * the Story review surface and as the accept-case for the `isSessionNarration`
+ * guard. `sampleNarrationTurns` is the matching synthetic transcript so the
+ * demo route can drive the full three-pane review (tree + hunks + why lane).
  */
 
-import type { SessionNarration } from "./narration-types.ts";
+import type { InspectTurnDto } from "@ax/lib/shared/dashboard-types";
+import type { FileHunkAnchor, SessionNarration } from "./narration-types.ts";
 
 export const sampleNarration: SessionNarration = {
     schema_version: 1,
@@ -276,3 +279,98 @@ export const sampleNarration: SessionNarration = {
         },
     ],
 };
+
+// ---------------------------------------------------------------------------
+// Matching synthetic transcript - tool calls whose old/new text quote the
+// narration's file_hunk anchors verbatim, so the demo's review surface shows
+// labeled hunks, a populated tree, and the why lane.
+// ---------------------------------------------------------------------------
+
+const hunkOf = (stopIndex: number, file: string): FileHunkAnchor => {
+    const anchor = sampleNarration.stops[stopIndex]?.anchors.find(
+        (a): a is FileHunkAnchor => a.kind === "file_hunk" && a.file === file,
+    );
+    if (!anchor) throw new Error(`sample narration: no file_hunk for stop ${stopIndex} ${file}`);
+    return anchor;
+};
+
+const REPO = "/ax";
+const FILES_TOUCHED = "apps/studio/src/routes/files-touched.ts";
+const REVIEW_VIEW = "apps/studio/src/routes/review-view.tsx";
+
+const userTurn = (seq: number, text: string): InspectTurnDto => ({
+    seq,
+    role: "user",
+    semantic_role: "user_input",
+    ts: null,
+    char_count: text.length,
+    raw_text: text,
+    spans: [{ kind: "user_input", text }],
+});
+
+const editTurn = (
+    seq: number,
+    text: string,
+    file: string,
+    oldString: string | null,
+    newString: string,
+): InspectTurnDto => ({
+    seq,
+    role: "assistant",
+    semantic_role: "tool_use",
+    ts: null,
+    char_count: text.length,
+    raw_text: text,
+    spans: [{ kind: "tool_use", text }],
+    tool_calls: [{
+        seq,
+        name: oldString === null ? "Write" : "Edit",
+        category: "edit",
+        input: oldString === null
+            ? { file_path: `${REPO}/${file}`, content: newString }
+            : { file_path: `${REPO}/${file}`, old_string: oldString, new_string: newString },
+        command: null,
+        output_excerpt: null,
+        has_error: false,
+        tokens: null,
+    }],
+});
+
+export const sampleNarrationTurns: ReadonlyArray<InspectTurnDto> = [
+    userTurn(3, "build a files-touched panel: which files did the agent touch this session, as a tree"),
+    editTurn(
+        4,
+        "First cut of the files-touched panel - folding file-path-carrying tool calls into per-file rows.",
+        FILES_TOUCHED,
+        null,
+        hunkOf(0, FILES_TOUCHED).new_text ?? "",
+    ),
+    userTurn(9, "don't show read/write call counts on the rows - show +chars/−chars like a git diffstat, counts tell me nothing about the size of the change"),
+    editTurn(
+        10,
+        "Swapping the row metric to character deltas per the correction.",
+        FILES_TOUCHED,
+        hunkOf(1, FILES_TOUCHED).old_text,
+        hunkOf(1, FILES_TOUCHED).new_text ?? "",
+    ),
+    userTurn(
+        14,
+        "now a review view: files tree on the left, the selected file's change story in the middle, and the turns that explain each change on the right",
+    ),
+    editTurn(
+        18,
+        "Replacing the hand-rolled <pre> hunks with @pierre/diffs FileDiff over a synthesized patch.",
+        REVIEW_VIEW,
+        hunkOf(3, REVIEW_VIEW).old_text,
+        hunkOf(3, REVIEW_VIEW).new_text ?? "",
+    ),
+    {
+        seq: 23,
+        role: "assistant",
+        semantic_role: "assistant_text",
+        ts: null,
+        char_count: 64,
+        raw_text: "Suite green: files-touched fold, char deltas, hunk-patch synthesis covered.",
+        spans: [{ kind: "assistant_text", text: "Suite green." }],
+    },
+];

@@ -6,6 +6,7 @@ import {
     fetchShareArtifact,
     fetchShareFile,
     fetchShareManifest,
+    fetchShareNarration,
     gistRawUrl,
     inspectPayloadFromShare,
     isShareManifest,
@@ -15,6 +16,7 @@ import {
     type ShareManifest,
     type ShareSubagentCard,
 } from "./share-inspect.tsx";
+import { sampleNarration } from "./narration-sample.ts";
 
 type ShareTurn = Parameters<typeof spanKindForShareTurn>[0];
 
@@ -107,7 +109,7 @@ describe("isShareManifest", () => {
         expect(isShareManifest({ schema_version: 3, session: { id: "s1" }, turns: [] })).toBe(false);
     });
 
-    test("accepts a v4 manifest (current CLI export version)", () => {
+    test("accepts a v4 manifest", () => {
         expect(isShareManifest({
             schema_version: 4,
             kind: "manifest",
@@ -116,7 +118,27 @@ describe("isShareManifest", () => {
             root_file: "session.json",
             subagents: [],
         })).toBe(true);
-        expect(isShareManifest({ schema_version: 5, kind: "manifest", session: { id: "s1" }, totals: {}, root_file: "session.json", subagents: [] })).toBe(false);
+    });
+
+    test("accepts a v5 manifest with an optional narration file", () => {
+        expect(isShareManifest({
+            schema_version: 5,
+            kind: "manifest",
+            session: { id: "s1", source: "claude" },
+            totals: { cost_usd: null, duration_ms: null, tool_calls: 0, turns: 0, subagents: 0, failures: 0 },
+            root_file: "session.json",
+            narration_file: "narration.json",
+            subagents: [],
+        })).toBe(true);
+        expect(isShareManifest({
+            schema_version: 5,
+            kind: "manifest",
+            session: { id: "s1", source: "claude" },
+            totals: { cost_usd: null, duration_ms: null, tool_calls: 0, turns: 0, subagents: 0, failures: 0 },
+            root_file: "session.json",
+            narration_file: "",
+            subagents: [],
+        })).toBe(false);
     });
 });
 
@@ -183,6 +205,28 @@ describe("fetchShareManifest", () => {
                 const artifact = await fetchShareFile("Necmttn", "abc123", "subagent-x.json");
                 expect(artifact.session.id).toBe("claude-subagent-x");
                 expect(artifact.schema_version).toBe(3);
+            },
+        );
+    });
+
+    test("fetchShareNarration loads and validates a named narration file", async () => {
+        await withFetch(
+            (url) => {
+                expect(url).toBe(gistRawUrl("Necmttn", "abc123", "narration.json"));
+                return new Response(JSON.stringify(sampleNarration), { headers: { "content-type": "application/json" } });
+            },
+            async () => {
+                const narration = await fetchShareNarration("Necmttn", "abc123", "narration.json");
+                expect(narration.title).toBe(sampleNarration.title);
+            },
+        );
+    });
+
+    test("fetchShareNarration returns null for an invalid narration file", async () => {
+        await withFetch(
+            () => new Response(JSON.stringify({ kind: "narration", stops: [] }), { headers: { "content-type": "application/json" } }),
+            async () => {
+                expect(await fetchShareNarration("Necmttn", "abc123", "narration.json")).toBeNull();
             },
         );
     });

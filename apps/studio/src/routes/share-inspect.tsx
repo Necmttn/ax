@@ -14,14 +14,15 @@ import type {
 import { shortSessionId } from "@ax/lib/shared/session-id";
 import type { SessionTimelinePayload } from "../api.ts";
 import { FilesTouchedPanel } from "./files-touched-panel.tsx";
+import { isSessionNarration, type SessionNarration } from "./narration-types.ts";
 import { ReviewView } from "./review-view.tsx";
 import { compactTokens, useInspectSelection, useVisibleTurnSeq } from "./session-inspect.tsx";
 import { SessionTimelineBody } from "./session-timeline.tsx";
 import { Transcript } from "./transcript.tsx";
 
-type ShareSchemaVersion = 1 | 2 | 3 | 4;
+type ShareSchemaVersion = 1 | 2 | 3 | 4 | 5;
 
-type ShareViewMode = "transcript" | "timeline" | "review";
+type ShareViewMode = "transcript" | "timeline" | "review" | "story";
 
 // A published gist's files are immutable for a viewing session, so cache them
 // forever and never refetch on focus/remount - the 1.26MB session.json should
@@ -102,7 +103,7 @@ export function rawSessionFileUrl(owner: string, gistId: string): string {
     return gistRawUrl(owner, gistId, "ax-session.json");
 }
 
-const SUPPORTED_VERSIONS = new Set<number>([1, 2, 3, 4]);
+const SUPPORTED_VERSIONS = new Set<number>([1, 2, 3, 4, 5]);
 
 function validateArtifact(value: unknown): ShareArtifact {
     if (
@@ -147,7 +148,7 @@ export interface ShareSubagentCard {
 }
 
 export interface ShareManifest {
-    readonly schema_version: 3 | 4;
+    readonly schema_version: 3 | 4 | 5;
     readonly kind: "manifest";
     readonly exported_at: string;
     readonly ax_version?: string;
@@ -155,6 +156,8 @@ export interface ShareManifest {
     readonly stats: ShareArtifact["stats"];
     readonly token_usage?: SessionTokenUsageDetail | null;
     readonly root_file: string;
+    /** v5 additive: optional session narration artifact in the same gist. */
+    readonly narration_file?: string;
     readonly totals: {
         readonly cost_usd: number | null;
         readonly duration_ms: number | null;
@@ -170,12 +173,14 @@ export function isShareManifest(value: unknown): value is ShareManifest {
     return (
         isRecord(value) &&
         value.kind === "manifest" &&
-        (value.schema_version === 3 || value.schema_version === 4) &&
+        (value.schema_version === 3 || value.schema_version === 4 || value.schema_version === 5) &&
         isRecord(value.session) &&
         typeof value.session.id === "string" &&
         isRecord(value.totals) &&
         Array.isArray(value.subagents) &&
-        typeof value.root_file === "string"
+        typeof value.root_file === "string" &&
+        (value.narration_file === undefined ||
+            (typeof value.narration_file === "string" && value.narration_file.length > 0))
     );
 }
 
@@ -197,6 +202,17 @@ export async function fetchShareFile(owner: string, gistId: string, file: string
     const response = await fetch(gistRawUrl(owner, gistId, file));
     if (!response.ok) throw new Error(`Could not fetch ${file}`);
     return validateArtifact(await response.json());
+}
+
+export async function fetchShareNarration(
+    owner: string,
+    gistId: string,
+    file: string,
+): Promise<SessionNarration | null> {
+    const response = await fetch(gistRawUrl(owner, gistId, file));
+    if (!response.ok) throw new Error(`Could not fetch ${file}`);
+    const json = await response.json();
+    return isSessionNarration(json) ? json : null;
 }
 
 export function spanKindForShareTurn(turn: NonNullable<ShareArtifact["turns"]>[number]): InspectSpanKind {
@@ -1279,7 +1295,13 @@ function MultiFileShareView(props: {
     const selectedFile = search.sub && manifest.subagents.some((c) => c.file === search.sub)
         ? search.sub
         : manifest.root_file;
-    const view: ShareViewMode = search.view === "timeline" ? "timeline" : search.view === "review" ? "review" : "transcript";
+    const view: ShareViewMode = search.view === "timeline"
+        ? "timeline"
+        : search.view === "review"
+        ? "review"
+        : search.view === "story"
+        ? "story"
+        : "transcript";
     // This view mounts on both the studio index ("/studio/?shareOwner&gistId",
     // the public iframe entry) and the "/share/$owner/$gistId" route, so
     // navigate()'s search-updater can't resolve a single route type. The call
@@ -1341,7 +1363,7 @@ function MultiFileShareView(props: {
             const url = new URL(window.parent.location.href);
             if (subParam) url.searchParams.set("sub", subParam);
             else url.searchParams.delete("sub");
-            if (view === "timeline") url.searchParams.set("view", view);
+            if (view !== "transcript") url.searchParams.set("view", view);
             else url.searchParams.delete("view");
             window.parent.history.replaceState(null, "", url.toString());
         } catch {
@@ -1352,6 +1374,13 @@ function MultiFileShareView(props: {
     const fileQuery = useQuery({
         queryKey: ["share-file", owner, gistId, selectedFile],
         queryFn: () => fetchShareFile(owner, gistId, selectedFile),
+        ...IMMUTABLE_SHARE_QUERY,
+    });
+    const narrationFile = selectedFile === manifest.root_file ? manifest.narration_file : undefined;
+    const narrationQuery = useQuery({
+        queryKey: ["share-narration", owner, gistId, narrationFile],
+        queryFn: () => fetchShareNarration(owner, gistId, narrationFile!),
+        enabled: narrationFile !== undefined,
         ...IMMUTABLE_SHARE_QUERY,
     });
     const data = useMemo(
@@ -1495,11 +1524,12 @@ function MultiFileShareView(props: {
             {fileQuery.isLoading && !data ? <div className="loading">Loading session…</div> : null}
             {/* Keyed by file: the tree model is created once per mount, so it
                 must remount when the session on screen changes. Hidden in
-                review mode - the review sidebar IS this tree. */}
-            {data && view !== "review" ? <FilesTouchedPanel key={`files-${selectedFile}`} turns={data.turns} /> : null}
-            {data || fileQuery.data?.session_timeline ? (
+                review/story modes - their sidebar IS this tree. */}
+            {data && view !== "review" && view !== "story" ? <FilesTouchedPanel key={`files-${selectedFile}`} turns={data.turns} /> : null}
+            {data || fileQuery.data?.session_timeline || narrationQuery.data ? (
                 <div style={VIEW_TOGGLE_BAR_STYLE}>
                     {([
+                        ...(narrationQuery.data && data ? [["story", "Read the story"]] as const : []),
                         ["transcript", "Read the transcript"],
                         ...(fileQuery.data?.session_timeline ? [["timeline", "Scan the timeline"]] as const : []),
                         ...(data ? [["review", "Review the changes"]] as const : []),
@@ -1521,7 +1551,21 @@ function MultiFileShareView(props: {
                     ))}
                 </div>
             ) : null}
-            {view === "timeline" && fileQuery.data?.session_timeline ? (
+            {narrationQuery.error ? <div className="error">Error: {String(narrationQuery.error)}</div> : null}
+            {view === "story" && narrationQuery.data && data ? (
+                // The Story tab is the review surface with the narration as
+                // its why lane - files/diffs primary, narrative as annotation.
+                <ReviewView
+                    key={`story-${selectedFile}`}
+                    data={data}
+                    timeline={fileQuery.data?.session_timeline ?? null}
+                    narration={narrationQuery.data}
+                    onOpenTranscript={(seq) => {
+                        window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}#turn-${seq}`);
+                        setView("transcript");
+                    }}
+                />
+            ) : view === "timeline" && fileQuery.data?.session_timeline ? (
                 <SessionTimelineBody data={fileQuery.data.session_timeline} />
             ) : view === "review" && data ? (
                 <ReviewView
