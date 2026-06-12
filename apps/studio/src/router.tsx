@@ -7,7 +7,6 @@ import {
 } from "@tanstack/react-router";
 import { Shell } from "./Shell.tsx";
 import { SkillsRoute } from "./routes/skills.tsx";
-import { DecisionsRoute } from "./routes/decisions.tsx";
 import { ToolFailuresRoute } from "./routes/tools.tsx";
 import { WorkflowRoute } from "./routes/workflow.tsx";
 import { SessionRoute } from "./routes/session.tsx";
@@ -17,14 +16,12 @@ import { SessionsRoute } from "./routes/sessions.tsx";
 import { SessionsCompareRoute } from "./routes/sessions-compare.tsx";
 import { EpisodeRoute } from "./routes/episode.tsx";
 import { ProjectRoute } from "./routes/project.tsx";
-import { RecallRoute } from "./routes/recall.tsx";
 import { SkillGraphRoute } from "./routes/skill-graph.tsx";
 import { GraphRoute } from "./routes/graph.tsx";
 import { CanvasRoute } from "./routes/canvas.tsx";
 import type { GraphExplorerMode } from "@ax/lib/shared/dashboard-types";
 import { WrappedRoute } from "./routes/wrapped.tsx";
 import { ImproveRoute } from "./routes/improve.tsx";
-import { IngestLiveRoute } from "./routes/ingest-live.tsx";
 import { ReviewView } from "./routes/review-view.tsx";
 import { sampleNarration, sampleNarrationTurns } from "./routes/narration-sample.ts";
 import { ShareInspectView } from "./routes/share-inspect.tsx";
@@ -42,11 +39,11 @@ const rootRoute = createRootRoute({
                 <span className="meta">404</span>
             </header>
             <p style={{ margin: "8px 0 16px" }}>
-                Nothing here. The dashboard only has the Skill Triage view for now.
+                Nothing here.
             </p>
             <div className="actions">
-                <Link to="/skills" className="badge keep" style={{ textDecoration: "none" }}>
-                    ← Back to Skills
+                <Link to="/" className="badge keep" style={{ textDecoration: "none" }}>
+                    ← Back to dashboard
                 </Link>
             </div>
         </section>
@@ -69,7 +66,7 @@ function StudioIndexRoute() {
     if (search.shareOwner && search.gistId) {
         return <ShareInspectView owner={search.shareOwner} gistId={search.gistId} />;
     }
-    return <SkillsRoute />;
+    return <WrappedRoute />;
 }
 
 const skillsRoute = createRoute({
@@ -79,12 +76,6 @@ const skillsRoute = createRoute({
     validateSearch: (search): { q?: string } => ({
         q: typeof search.q === "string" ? search.q : undefined,
     }),
-});
-
-const decisionsRoute = createRoute({
-    getParentRoute: () => rootRoute,
-    path: "/decisions",
-    component: DecisionsRoute,
 });
 
 const toolsRoute = createRoute({
@@ -200,23 +191,6 @@ const canvasRoute = createRoute({
     component: CanvasRoute,
 });
 
-const recallRoute = createRoute({
-    getParentRoute: () => rootRoute,
-    path: "/recall",
-    component: RecallRoute,
-    validateSearch: (search): {
-        q?: string;
-        project?: string;
-        skill?: string;
-        since?: string;
-    } => ({
-        q: typeof search.q === "string" ? search.q : undefined,
-        project: typeof search.project === "string" ? search.project : undefined,
-        skill: typeof search.skill === "string" ? search.skill : undefined,
-        since: typeof search.since === "string" ? search.since : undefined,
-    }),
-});
-
 const wrappedRoute = createRoute({
     getParentRoute: () => rootRoute,
     path: "/wrapped",
@@ -227,12 +201,6 @@ const improveRoute = createRoute({
     getParentRoute: () => rootRoute,
     path: "/improve",
     component: ImproveRoute,
-});
-
-const ingestLiveRoute = createRoute({
-    getParentRoute: () => rootRoute,
-    path: "/ingest-live",
-    component: IngestLiveRoute,
 });
 
 /** Prototype showcase for the Story review surface (sample narration + turns). */
@@ -261,7 +229,6 @@ function NarrationDemoRoute() {
 const routeTree = rootRoute.addChildren([
     indexRoute,
     skillsRoute,
-    decisionsRoute,
     toolsRoute,
     workflowRoute,
     sessionsRoute,
@@ -274,10 +241,8 @@ const routeTree = rootRoute.addChildren([
     skillGraphRoute,
     graphRoute,
     canvasRoute,
-    recallRoute,
     wrappedRoute,
     improveRoute,
-    ingestLiveRoute,
     narrationDemoRoute,
 ]);
 
