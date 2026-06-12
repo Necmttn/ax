@@ -2808,3 +2808,94 @@ td.skill-cell .description {
     text-transform: uppercase;
     color: var(--muted);
 }
+
+/* ---- proposal detail narrative (improve) ---- */
+.proposal-head { border-bottom: 1px solid var(--line); padding-bottom: 8px; }
+.proposal-title {
+    margin: 0 0 2px;
+    font-family: Georgia, serif;
+    font-weight: 600;
+    font-size: 20px;
+    line-height: 1.15;
+}
+.proposal-section { margin-top: 14px; }
+.proposal-section-label {
+    display: block;
+    margin: 0 0 4px;
+    font-family: ui-monospace, Menlo, monospace;
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--muted);
+}
+.proposal-prose { margin: 0 0 4px; font-size: 13px; line-height: 1.55; }
+.proposal-impact {
+    margin-top: 14px;
+    border: 1px solid var(--line);
+    border-left: 4px solid var(--green);
+    background: color-mix(in srgb, var(--green) 5%, var(--panel));
+    padding: 12px 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+.proposal-impact-headline {
+    font-family: Georgia, serif;
+    font-weight: 600;
+    font-size: 24px;
+    line-height: 1.1;
+    letter-spacing: -0.01em;
+}
+.proposal-impact-basis {
+    font-family: ui-monospace, Menlo, monospace;
+    font-size: 11px;
+    color: var(--muted-2);
+}
+.lifecycle-rail {
+    list-style: none;
+    display: flex;
+    gap: 0;
+    margin: 4px 0 0;
+    padding: 0;
+}
+.lifecycle-rail li {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+    position: relative;
+}
+.lifecycle-rail li::before {
+    content: "";
+    position: absolute;
+    top: 5px;
+    left: -50%;
+    width: 100%;
+    height: 2px;
+    background: var(--track);
+}
+.lifecycle-rail li:first-child::before { display: none; }
+.lifecycle-rail li.done::before, .lifecycle-rail li.current::before { background: var(--green); }
+.lifecycle-dot {
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background: var(--track);
+    border: 2px solid var(--panel);
+    z-index: 1;
+}
+.lifecycle-rail li.done .lifecycle-dot { background: var(--green); }
+.lifecycle-rail li.current .lifecycle-dot {
+    background: var(--panel);
+    border: 3px solid var(--green);
+}
+.lifecycle-label {
+    font-family: ui-monospace, Menlo, monospace;
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--muted);
+}
+.lifecycle-rail li.current .lifecycle-label { color: var(--ink); font-weight: 600; }

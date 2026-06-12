@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api.ts";
 import type {
+    ExperimentDto,
     ExperimentStatus,
     ImproveActionResponse,
     ProposalDto,
@@ -261,6 +262,15 @@ interface ProposalDetailProps {
     readonly pending: boolean;
 }
 
+const hasPayload = (p: ProposalDto): boolean =>
+    Boolean(
+        (p.form === "skill" && p.skill_payload) ||
+        (p.form === "guidance" && p.guidance_payload) ||
+        (p.form === "subagent" && p.subagent_payload) ||
+        (p.form === "hook" && p.hook_payload) ||
+        (p.form === "automation" && p.automation_payload),
+    );
+
 function ProposalDetail({
     proposal,
     rejectReason,
@@ -274,50 +284,48 @@ function ProposalDetail({
     const cp = exp?.latest_checkpoint ?? null;
     return (
         <>
-            <header>
-                <h3 style={{ margin: 0 }}>{proposal.title}</h3>
-                <span className="meta">{proposal.dedupe_sig} · {proposal.origin ?? "mined"}</span>
+            <header className="proposal-head">
+                <h3 className="proposal-title">{proposal.title}</h3>
+                <span className="meta">
+                    {proposal.form} · {proposal.origin ?? "mined"} · confidence {proposal.confidence}
+                    {" · "}seen {proposal.frequency}x · {fmtTs(proposal.created_at)}
+                </span>
             </header>
-            <dl className="kv">
-                <dt>Form</dt><dd>{proposal.form}</dd>
-                <dt>Status</dt><dd><StatusPill status={proposal.status} /></dd>
-                <dt>Confidence</dt><dd>{proposal.confidence}</dd>
-                <dt>Frequency</dt><dd>{proposal.frequency}</dd>
-                <dt>Created</dt><dd>{fmtTs(proposal.created_at)}</dd>
-                <dt>Hypothesis</dt><dd>{proposal.hypothesis}</dd>
-                {proposal.reject_reason ? (<><dt>Reject reason</dt><dd>{proposal.reject_reason}</dd></>) : null}
-            </dl>
 
-            <PayloadView proposal={proposal} />
+            <ImpactSection sig={proposal.dedupe_sig} experiment={exp} />
 
-            {exp ? (
-                <section className="panel" style={{ marginTop: 12 }}>
-                    <header>
-                        <h4 style={{ margin: 0 }}>Experiment</h4>
-                        <span className="meta">{fmtTs(exp.created_at)}</span>
-                    </header>
-                    <dl className="kv">
-                        {exp.status ? (<><dt>Exp. Status</dt><dd><ExperimentStatusBadge status={exp.status} /></dd></>) : null}
+            <section className="proposal-section">
+                <h4 className="proposal-section-label">why this fired</h4>
+                <p className="proposal-prose">{proposal.hypothesis}</p>
+                {proposal.reject_reason ? (
+                    <p className="proposal-prose meta">rejected: {proposal.reject_reason}</p>
+                ) : null}
+            </section>
+
+            {hasPayload(proposal) ? (
+                <section className="proposal-section">
+                    <h4 className="proposal-section-label">the fix</h4>
+                    <PayloadView proposal={proposal} />
+                </section>
+            ) : null}
+
+            <section className="proposal-section">
+                <h4 className="proposal-section-label">the plan</h4>
+                <LifecycleRail proposal={proposal} />
+                {exp ? (
+                    <dl className="kv" style={{ marginTop: 8 }}>
                         {exp.artifact_path ? (<><dt>Artifact</dt><dd><code>{exp.artifact_path}</code></dd></>) : null}
                         {exp.task_path && exp.status === "task_emitted"
                             ? (<><dt>Task path</dt><dd>{exp.task_path}</dd></>) : null}
-                        {exp.scaffolded_at ? (<><dt>Scaffolded</dt><dd>{fmtTs(exp.scaffolded_at)}</dd></>) : null}
-                        <dt>Verdict</dt><dd>
-                            {exp.locked_verdict
-                                ? <strong>{exp.locked_verdict} (locked)</strong>
-                                : cp?.suggested
-                                    ? <em>{cp.suggested} (suggested @ {cp.kind})</em>
-                                    : "pending - no checkpoint yet"}
-                        </dd>
                         {cp?.measured ? (
                             <>
-                                <dt>Opportunities</dt>
-                                <dd>{cp.measured.opportunities} ({cp.measured.addressed} addressed)</dd>
+                                <dt>Measured</dt>
+                                <dd>{cp.measured.addressed} of {cp.measured.opportunities} opportunities addressed</dd>
                             </>
                         ) : null}
                     </dl>
-                </section>
-            ) : null}
+                ) : null}
+            </section>
 
             <div className="actions" style={{ marginTop: 16, display: "flex", gap: 8, flexWrap: "wrap" }}>
                 {proposal.brief ? <CopyButton text={proposal.brief} /> : null}
@@ -481,4 +489,65 @@ function NextActionsHeadline() {
     });
     const n = query.data?.cards.length;
     return <>{n === undefined ? "What's next" : `${n} actions waiting`}</>;
+}
+
+/** Projected impact - the centerpiece. Lazily fetched per proposal; once an
+ *  experiment has measured checkpoints, the measurement shares the stage. */
+function ImpactSection({ sig, experiment }: { readonly sig: string; readonly experiment: ExperimentDto | null }) {
+    const query = useQuery({
+        queryKey: ["improve", "impact", sig],
+        queryFn: () => api.improveImpact(sig),
+        staleTime: 10 * 60_000,
+    });
+    const impact = query.data?.impact;
+    const measured = experiment?.latest_checkpoint?.measured ?? null;
+    if (query.isLoading) return <div className="loading">Estimating impact&#8230;</div>;
+    if (!impact) return null;
+    return (
+        <section className="proposal-impact">
+            <span className="proposal-section-label">
+                projected impact · <em>{impact.confidence}</em>
+            </span>
+            <strong className="proposal-impact-headline">{impact.headline}</strong>
+            <p className="proposal-prose">{impact.detail}</p>
+            {measured ? (
+                <p className="proposal-prose">
+                    <strong>measured so far:</strong> {measured.addressed} of {measured.opportunities} opportunities addressed
+                </p>
+            ) : null}
+            <span className="proposal-impact-basis">basis: {impact.basis}</span>
+        </section>
+    );
+}
+
+/** The accept lifecycle: what actually happens, with the current stage lit. */
+function LifecycleRail({ proposal }: { readonly proposal: ProposalDto }) {
+    const exp = proposal.experiment ?? null;
+    const hasCheckpoint = exp?.latest_checkpoint != null;
+    const locked = exp?.locked_verdict != null;
+    const stage = proposal.status === "open"
+        ? 0
+        : !exp || exp.status === "task_emitted"
+        ? 1
+        : !hasCheckpoint
+        ? 2
+        : !locked
+        ? 2
+        : 3;
+    const stages = [
+        { label: "accept", hint: "emits a task brief / scaffolds the artifact" },
+        { label: "apply", hint: "your agent lands the change" },
+        { label: "checkpoints", hint: "measured at +3/+10/+30 sessions" },
+        { label: "verdict", hint: locked ? `locked: ${exp?.locked_verdict}` : "adopted / ignored / regressed" },
+    ];
+    return (
+        <ol className="lifecycle-rail">
+            {stages.map((s, i) => (
+                <li key={s.label} className={i < stage ? "done" : i === stage ? "current" : ""} title={s.hint}>
+                    <span className="lifecycle-dot" />
+                    <span className="lifecycle-label">{s.label}</span>
+                </li>
+            ))}
+        </ol>
+    );
 }
