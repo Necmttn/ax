@@ -366,12 +366,181 @@ export const InsightsGroup = HttpApiGroup.make("insights")
         }),
     );
 
+// ---- sessions payloads (the bounded ones) -------------------------------
+// Mirror the dashboard-types Session* interfaces. The deeply-nested
+// detail/inspect/insights payloads stay Schema.Unknown below (transcribing
+// the 54k-line inspect handler's output exactly is high-drift, low-value).
+
+const SessionListRow = Schema.Struct({
+    id: Schema.String,
+    project: Schema.NullOr(Schema.String),
+    source: Schema.String,
+    cwd: Schema.NullOr(Schema.String),
+    model: Schema.NullOr(Schema.String),
+    started_at: Schema.NullOr(Schema.String),
+    ended_at: Schema.NullOr(Schema.String),
+    has_raw_file: Schema.Boolean,
+    turn_count: Schema.Number,
+    parent_session: Schema.NullOr(Schema.String),
+    direct_children_count: Schema.optionalKey(Schema.Number),
+    cost_usd: Schema.NullOr(Schema.Number),
+    burn_buckets: Schema.NullOr(Schema.Array(Schema.Number)),
+    friction: Schema.NullOr(Schema.Number),
+    signal: Schema.NullOr(Schema.Literals(["clean", "friction"])),
+    produced_commits: Schema.NullOr(Schema.Number),
+    reverted_commits: Schema.NullOr(Schema.Number),
+    lines_added: Schema.NullOr(Schema.Number),
+    lines_removed: Schema.NullOr(Schema.Number),
+    is_live: Schema.Boolean,
+});
+
+export const SessionListResponse = Schema.Struct({
+    sessions: Schema.Array(SessionListRow),
+    total_count: Schema.Number,
+    burn_p90: Schema.NullOr(Schema.Number),
+    window: Schema.Struct({ offset: Schema.Number, limit: Schema.Number }),
+});
+
+export const SessionChildrenResponse = Schema.Struct({
+    parent_session: Schema.String,
+    children: Schema.Array(SessionListRow),
+});
+
+export const SessionSummary = Schema.Struct({
+    session_id: Schema.String,
+    task: Schema.NullOr(Schema.String),
+    first_ask: Schema.NullOr(Schema.String),
+    last_assistant: Schema.NullOr(Schema.String),
+    correction: Schema.NullOr(Schema.String),
+    turns: Schema.Number,
+    tokens: Schema.NullOr(Schema.Number),
+    cost_usd: Schema.NullOr(Schema.Number),
+    model: Schema.NullOr(Schema.String),
+    subagents: Schema.Number,
+    tools: Schema.Array(Schema.Struct({ name: Schema.String, count: Schema.Number })),
+});
+
+const SessionOrchestrationSubagent = Schema.Struct({
+    id: Schema.String,
+    nickname: Schema.NullOr(Schema.String),
+    task: Schema.NullOr(Schema.String),
+    started_at: Schema.NullOr(Schema.String),
+    ended_at: Schema.NullOr(Schema.String),
+    tone: Schema.String,
+    duration_ms: Schema.NullOr(Schema.Number),
+});
+
+export const SessionOrchestration = Schema.Struct({
+    session_id: Schema.String,
+    label: Schema.String,
+    started_at: Schema.NullOr(Schema.String),
+    ended_at: Schema.NullOr(Schema.String),
+    wait_pct: Schema.Number,
+    subagents: Schema.Array(SessionOrchestrationSubagent),
+});
+
+const SessionTokenUsageDetail = Schema.Struct({
+    model: Schema.NullOr(Schema.String),
+    prompt_tokens: Schema.NullOr(Schema.Number),
+    completion_tokens: Schema.NullOr(Schema.Number),
+    cache_creation_input_tokens: Schema.NullOr(Schema.Number),
+    cache_read_input_tokens: Schema.NullOr(Schema.Number),
+    estimated_tokens: Schema.Number,
+    estimated_input_cost_usd: Schema.optionalKey(Schema.NullOr(Schema.Number)),
+    estimated_output_cost_usd: Schema.optionalKey(Schema.NullOr(Schema.Number)),
+    estimated_cache_creation_cost_usd: Schema.optionalKey(Schema.NullOr(Schema.Number)),
+    estimated_cache_read_cost_usd: Schema.optionalKey(Schema.NullOr(Schema.Number)),
+    estimated_cost_usd: Schema.NullOr(Schema.Number),
+    pricing_source: Schema.NullOr(Schema.String),
+});
+
+const SessionHealthSummary = Schema.Struct({
+    turns: Schema.Number,
+    tool_calls: Schema.Number,
+    tool_errors: Schema.Number,
+    user_corrections: Schema.Number,
+    interruptions: Schema.Number,
+    subagent_dispatches: Schema.Number,
+    task_label: Schema.NullOr(Schema.String),
+});
+
+const SessionCompareTurn = Schema.Struct({
+    seq: Schema.Number,
+    role: Schema.NullOr(Schema.String),
+    ts: Schema.NullOr(Schema.String),
+    gap_ms: Schema.NullOr(Schema.Number),
+    est_tokens: Schema.NullOr(Schema.Number),
+    est_cost_usd: Schema.NullOr(Schema.Number),
+    has_error: Schema.Boolean,
+});
+
+const SessionCompareEntry = Schema.Struct({
+    session_id: Schema.String,
+    source: Schema.String,
+    model: Schema.NullOr(Schema.String),
+    project: Schema.NullOr(Schema.String),
+    started_at: Schema.NullOr(Schema.String),
+    ended_at: Schema.NullOr(Schema.String),
+    duration_ms: Schema.NullOr(Schema.Number),
+    token_usage: Schema.NullOr(SessionTokenUsageDetail),
+    health: Schema.NullOr(SessionHealthSummary),
+    commit_count: Schema.Number,
+    noise_score: Schema.NullOr(Schema.Number),
+    turns: Schema.optionalKey(Schema.Array(SessionCompareTurn)),
+});
+
+export const SessionComparePayload = Schema.Struct({
+    task_label: Schema.NullOr(Schema.String),
+    sessions: Schema.Array(SessionCompareEntry),
+    winners: Schema.Struct({
+        fastest: Schema.NullOr(Schema.String),
+        cheapest: Schema.NullOr(Schema.String),
+        fewest_tokens: Schema.NullOr(Schema.String),
+        cleanest: Schema.NullOr(Schema.String),
+    }),
+    not_found: Schema.Array(Schema.String),
+});
+
+const SessionCanvasNode = Schema.Struct({
+    id: Schema.String,
+    label: Schema.String,
+    project: Schema.NullOr(Schema.String),
+    source: Schema.String,
+    started_at: Schema.NullOr(Schema.String),
+    ended_at: Schema.NullOr(Schema.String),
+    size: Schema.Number,
+    turns: Schema.Number,
+    epochs: Schema.Number,
+    compactions: Schema.Array(Schema.Struct({ pre_tokens: Schema.Number, trigger: Schema.String })),
+    context_pressure: Schema.String,
+    corrections: Schema.Number,
+    tone: Schema.String,
+    is_subagent: Schema.Boolean,
+    subagent_count: Schema.Number,
+    wait_segments: Schema.Array(Schema.Struct({ start: Schema.Number, end: Schema.Number })),
+});
+
+const SessionCanvasEdge = Schema.Struct({
+    source: Schema.String,
+    target: Schema.String,
+    relation: Schema.String,
+    label: Schema.NullOr(Schema.String),
+});
+
+export const SessionCanvasPayload = Schema.Struct({
+    generatedAt: Schema.String,
+    nodes: Schema.Array(SessionCanvasNode),
+    edges: Schema.Array(SessionCanvasEdge),
+    warnings: Schema.Array(Schema.String),
+});
+
 /**
- * The sessions family: per-session detail, list, canvas, compare, inspect,
- * timeline, insights, orchestration, children, and summary. Payloads are
- * `Schema.Unknown` (same later-pass deal); paths, params, and status mapping
- * are the contract. Path params are single-segment (client URL-encodes ids);
- * the legacy greedy `:param+` rows remain mounted for raw-slash ids.
+ * The sessions family: list, children, summary, orchestration, compare, and
+ * canvas are schema-typed. The detail/inspect/insights/timeline payloads
+ * stay `Schema.Unknown` deliberately - they are deeply-nested mega-payloads
+ * (inspect comes from the 54k-line session-inspect handler) where exact
+ * transcription is high-drift and low-value. Path params are single-segment
+ * (client URL-encodes ids); the legacy greedy `:param+` rows are retired.
  */
 export const SessionsGroup = HttpApiGroup.make("sessions")
     .add(
@@ -379,21 +548,21 @@ export const SessionsGroup = HttpApiGroup.make("sessions")
             query: {
                 limit: Schema.optionalKey(Schema.Number),
             },
-            success: Schema.Unknown,
+            success: SessionCanvasPayload,
             error: InternalError,
         }),
         HttpApiEndpoint.get("sessionSummary", "/api/session-summary", {
             query: {
                 id: Schema.String,
             },
-            success: Schema.Unknown,
+            success: SessionSummary,
             error: InternalError,
         }),
         HttpApiEndpoint.get("sessionOrchestration", "/api/session-orchestration", {
             query: {
                 id: Schema.String,
             },
-            success: Schema.Unknown,
+            success: SessionOrchestration,
             error: InternalError,
         }),
         HttpApiEndpoint.get("sessionsList", "/api/sessions", {
@@ -403,7 +572,7 @@ export const SessionsGroup = HttpApiGroup.make("sessions")
                 source: Schema.optionalKey(Schema.String),
                 project: Schema.optionalKey(Schema.String),
             },
-            success: Schema.Unknown,
+            success: SessionListResponse,
             error: InternalError,
         }),
         // Static path must precede the single-segment param path: HttpApi's
@@ -414,7 +583,7 @@ export const SessionsGroup = HttpApiGroup.make("sessions")
                 ids: Schema.String,
                 turns: Schema.optionalKey(Schema.String),
             },
-            success: Schema.Unknown,
+            success: SessionComparePayload,
             error: [BadRequestError, InternalError],
         }),
         HttpApiEndpoint.get("sessionChildren", "/api/sessions/:id/children", {
@@ -422,7 +591,7 @@ export const SessionsGroup = HttpApiGroup.make("sessions")
             query: {
                 limit: Schema.optionalKey(Schema.Number),
             },
-            success: Schema.Unknown,
+            success: SessionChildrenResponse,
             error: InternalError,
         }),
         HttpApiEndpoint.get("sessionInsights", "/api/sessions/:id/insights", {

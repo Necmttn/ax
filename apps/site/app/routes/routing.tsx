@@ -10,7 +10,7 @@ export const Route = createFileRoute("/routing")({
       {
         name: "description",
         content:
-          "Any subagent dispatch that doesn't pin a model inherits the expensive one. ax measures the leak, nudges at dispatch time, tunes a routing table from your own dispatch history, and verifies the savings against real token buckets - all local.",
+          "Your coding agent runs every sub-task it spawns on your most expensive model unless something tells it otherwise. ax measures the leak, warns as it happens, finds the routine work you're overpaying for, and verifies the savings from the actual tokens burned - all local.",
       },
     ],
   }),
