@@ -25,7 +25,7 @@ docs/superpowers/specs/2026-06-13-ax-dojo-design.md (in the Necmttn/ax repo).
 
 1. `ax dojo --json` -> agenda.
 2. STOP conditions (write the report, then stop):
-   - `budget.has_surplus` is false (and not forced)
+   - `budget.has_surplus` is false
    - now >= `budget.deadline`
    - `items` is empty
 3. Otherwise: take `items[0]`, follow its playbook below, then go to 1.
@@ -61,7 +61,7 @@ docs/superpowers/specs/2026-06-13-ax-dojo-design.md (in the Necmttn/ax repo).
   would have caught AND the latency ledger (per-fire cost, est fires/day,
   cumulative installed-chain overhead). Reject your own hook when overhead
   outweighs benefit.
-- **spar** - only present when invoked with --spar and surplus is large.
+- **spar** - only present when invoked with --spar and spendable >= 30%.
   One task, one delta, scored: pick a landed task (`ax sessions here`),
   pin a worktree at the parent SHA, re-run it with exactly ONE change
   (skill on/off, hook on/off, prompt, thinking level, model via subagent
@@ -72,7 +72,8 @@ docs/superpowers/specs/2026-06-13-ax-dojo-design.md (in the Necmttn/ax repo).
   through `ax recall` / `ax sessions churn`, and convert anything real
   into a proposal or outbox draft.
 - **Upstream findings (any lap)** - an ax bug or improvement found while
-  training goes to `~/.ax/dojo/outbox/<slug>.md` as a complete issue draft
+  training (items of kind `upstream_draft` are handled by this same rule)
+  goes to `~/.ax/dojo/outbox/<slug>.md` as a complete issue draft
   (title, body, repro, session refs). NEVER publish from the dojo - the
   user reviews and publishes in the morning (ax-repo skill / gh).
 

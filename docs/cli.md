@@ -34,7 +34,7 @@ axctl costs for --commit <sha>              # cost for sessions that produced a 
 axctl costs for --branch <name>             # cost for sessions linked to a branch
 axctl cost <models|sessions|split>          # model/cost analytics incl. main-vs-subagent split
 axctl quota [--statusline|--swiftbar]       # Claude plan usage (5h/7d windows); statusline + menubar output
-axctl dojo [--json|--spar|--budget=N|--until=HH:MM|--force]   # training agenda: quota budget envelope + prioritized self-improvement items for the ax:dojo skill loop
+axctl dojo [--json|--spar|--budget=N|--until=HH:MM|--force|--days=N]   # training agenda: quota budget envelope + prioritized self-improvement items for the ax:dojo skill loop
 axctl dispatches [--candidates]             # subagent dispatch routing analytics + est savings
 axctl routing tune [--dry-run|--emit-brief] # mine YOUR dispatch history for new routing classes
 axctl routing compile                       # regenerate ~/.ax/hooks/routing-table.json (user classes preserved)
