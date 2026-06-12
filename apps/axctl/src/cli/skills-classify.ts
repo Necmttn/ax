@@ -42,6 +42,7 @@ FROM skill
 WHERE
     NOT (SELECT id FROM plays_role WHERE in = $parent.id AND source IN ["frontmatter", "brief", "user"])[0]
     AND array::len((SELECT id FROM invoked WHERE out = $parent.id)) >= 3
+    AND dir_path != "(synthetic)"
 ORDER BY invocations DESC;
 `.trim();
 

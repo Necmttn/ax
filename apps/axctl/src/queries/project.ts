@@ -34,7 +34,7 @@ FROM session
 WHERE project = $project
 GROUP BY project;`;
 
-/** Top skills used in this project. */
+/** Top skills used in this project. Excludes synthetic provider-tool skill rows (codex:<tool> etc.) via dir_path filter. */
 export const PROJECT_TOP_SKILLS_SQL = `
 SELECT
     out.name AS skill,
@@ -42,6 +42,7 @@ SELECT
     time::max(ts) AS last_used
 FROM invoked
 WHERE in.session.project = $project AND out.name IS NOT NONE
+    AND out NOT IN (SELECT VALUE id FROM skill WHERE dir_path = "(synthetic)")
 GROUP BY skill
 ORDER BY count DESC
 LIMIT 25;`;

@@ -13,6 +13,7 @@ import {
     type Decoded,
     type RouteInput,
 } from "../router.ts";
+import { fetchNextActions } from "../../next-actions.ts";
 
 const decodeAction = Schema.decodeUnknownOption(
     Schema.Literals(["accept", "reject", "verdict"]),
@@ -55,6 +56,12 @@ export const improveHttpStatus = (status: string): number =>
 interface ImproveActionResult { readonly status: string; readonly message?: string }
 
 export const improveRoutes: ReadonlyArray<AnyRoute> = [
+    jsonRoute({
+        method: "GET",
+        path: "/api/next-actions",
+        decode: () => decodeOk(undefined),
+        handler: () => fetchNextActions(),
+    }),
     jsonRoute({
         method: "POST",
         path: "/api/improve/:sig/:action",
