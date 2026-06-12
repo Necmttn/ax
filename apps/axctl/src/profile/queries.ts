@@ -1,8 +1,8 @@
 /**
  * Windowed stat queries for the profile renderer. These are parameterized
  * variants of queries/wrapped.ts (which hardcodes 365d). No stacked
- * in.*/out.* deref combos inside grouped aggregates (SurrealDB 3.x hang
- * rule); fetchSkillInvocations carries the single out.name deref that
+ * in/out deref combos inside grouped aggregates (SurrealDB 3.x hang rule);
+ * fetchSkillInvocations carries the single out.name deref that
  * WRAPPED_SKILLS_SQL already established. Joins happen in JS.
  * Read-only tables: session_token_usage, turn, session, invoked, skill,
  * proposal.
