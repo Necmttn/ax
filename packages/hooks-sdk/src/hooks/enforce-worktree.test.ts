@@ -3,18 +3,23 @@ import { Effect } from "effect";
 import enforceWorktree from "./enforce-worktree.ts";
 import { GitEnvTest } from "../git-env.ts";
 
-const run = (command: string, opts?: { dirty?: boolean; trackedDirty?: boolean; primary?: boolean }) => {
+const run = (
+  command: string,
+  opts?: { dirty?: boolean; trackedDirty?: boolean; primary?: boolean; cwd?: string },
+) => {
+  const cwd = opts?.cwd ?? "/repo";
   const layer = GitEnvTest({
     primary: (opts?.primary ?? true) ? ["/repo"] : [],
     dirty: opts?.dirty ? ["/repo"] : [],
     trackedDirty: opts?.trackedDirty ? ["/repo"] : [],
     branches: { "/repo": "main" },
     roots: { "/repo": "/repo" },
+    defaults: { "/repo": "main" },
   });
   return Effect.runPromise(
     enforceWorktree
       .run({
-        harness: "claude", event: "PreToolUse", sessionId: null, cwd: "/repo",
+        harness: "claude", event: "PreToolUse", sessionId: null, cwd,
         tool: { name: "Bash", input: { command } },
         raw: {},
       })
@@ -27,18 +32,27 @@ const withEnv = async (k: string, fn: () => Promise<unknown>) => {
   try { return await fn(); } finally { delete process.env[k]; }
 };
 
-describe("guard A: branch switch on primary tree", () => {
-  test("git checkout main -> Block", async () => {
-    expect((await run("git checkout main"))._tag).toBe("Block");
+describe("guard A: primary tree stays on the default branch", () => {
+  test("git checkout main -> Allow (returning home)", async () => {
+    expect((await run("git checkout main"))._tag).toBe("Allow");
+  });
+  test("git switch main -> Allow (returning home)", async () => {
+    expect((await run("git switch main"))._tag).toBe("Allow");
+  });
+  test("git checkout feat -> Block", async () => {
+    expect((await run("git checkout feat"))._tag).toBe("Block");
   });
   test("git switch other -> Block", async () => {
     expect((await run("git switch other"))._tag).toBe("Block");
   });
-  test("git checkout -b new -> Allow", async () => {
-    expect((await run("git checkout -b new"))._tag).toBe("Allow");
+  test("git checkout -b new -> Block (create drifts primary off main)", async () => {
+    expect((await run("git checkout -b new"))._tag).toBe("Block");
   });
-  test("git switch -c new -> Allow", async () => {
-    expect((await run("git switch -c new"))._tag).toBe("Allow");
+  test("git switch -c new -> Block", async () => {
+    expect((await run("git switch -c new"))._tag).toBe("Block");
+  });
+  test("git checkout -B hotfix -> Block (uppercase create)", async () => {
+    expect((await run("git checkout -B hotfix"))._tag).toBe("Block");
   });
   test("git checkout -- file -> Allow", async () => {
     expect((await run("git checkout -- src/a.ts"))._tag).toBe("Allow");
@@ -46,22 +60,43 @@ describe("guard A: branch switch on primary tree", () => {
   test("git checkout . -> Allow", async () => {
     expect((await run("git checkout ."))._tag).toBe("Allow");
   });
-  test("linked worktree (not primary) -> Allow", async () => {
-    expect((await run("git checkout main", { primary: false }))._tag).toBe("Allow");
+  test("git -C /repo checkout feat from elsewhere -> Block (the -C hole)", async () => {
+    expect((await run("git -C /repo checkout feat", { cwd: "/elsewhere" }))._tag).toBe("Block");
   });
   test("bypass ALLOW_BRANCH_CHECKOUT=1 -> Allow", async () => {
-    const r = await withEnv("ALLOW_BRANCH_CHECKOUT", () => run("git checkout main"));
+    const r = await withEnv("ALLOW_BRANCH_CHECKOUT", () => run("git checkout feat"));
     expect((r as { _tag: string })._tag).toBe("Allow");
   });
   test("inline bypass ALLOW_BRANCH_CHECKOUT=1 -> Allow", async () => {
-    expect((await run("ALLOW_BRANCH_CHECKOUT=1 git checkout main", { dirty: true }))._tag).toBe("Allow");
-  });
-  test("git checkout -B hotfix -> Allow (uppercase create)", async () => {
-    expect((await run("git checkout -B hotfix"))._tag).toBe("Allow");
+    expect((await run("ALLOW_BRANCH_CHECKOUT=1 git checkout feat"))._tag).toBe("Allow");
   });
   test("ALLOW_DIRTY_MAIN_MUTATION=1 does NOT bypass guard A", async () => {
-    const r = await withEnv("ALLOW_DIRTY_MAIN_MUTATION", () => run("git checkout main"));
+    const r = await withEnv("ALLOW_DIRTY_MAIN_MUTATION", () => run("git checkout feat"));
     expect((r as { _tag: string })._tag).toBe("Block");
+  });
+});
+
+describe("guard A: linked worktree must not take the default branch", () => {
+  test("git checkout main in worktree -> Block (locks primary off main)", async () => {
+    expect((await run("git checkout main", { primary: false }))._tag).toBe("Block");
+  });
+  test("git switch main in worktree -> Block", async () => {
+    expect((await run("git switch main", { primary: false }))._tag).toBe("Block");
+  });
+  test("git checkout feat in worktree -> Allow", async () => {
+    expect((await run("git checkout feat", { primary: false }))._tag).toBe("Allow");
+  });
+  test("git checkout -b new in worktree -> Allow", async () => {
+    expect((await run("git checkout -b new", { primary: false }))._tag).toBe("Allow");
+  });
+  test("git checkout --detach in worktree -> Allow (inspect without holding)", async () => {
+    expect((await run("git checkout --detach abc123", { primary: false }))._tag).toBe("Allow");
+  });
+  test("non-repo dir -> Allow (no repo, nothing to guard)", async () => {
+    expect((await run("git checkout main", { primary: false, cwd: "/elsewhere" }))._tag).toBe("Allow");
+  });
+  test("inline bypass ALLOW_BRANCH_CHECKOUT=1 in worktree -> Allow", async () => {
+    expect((await run("ALLOW_BRANCH_CHECKOUT=1 git checkout main", { primary: false }))._tag).toBe("Allow");
   });
 });
 

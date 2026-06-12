@@ -4,20 +4,26 @@ import { GitEnv } from "../git-env.ts";
 import { Verdict } from "../verdict.ts";
 import { findGitInvocations, type GitInvocation } from "./git-command.ts";
 
-/** checkout/switch forms that create a branch or restore files - always allowed. */
-const isCreateOrRestore = (verb: string, args: ReadonlyArray<string>): boolean => {
+/** checkout forms that only restore files - always allowed. */
+const isRestore = (verb: string, args: ReadonlyArray<string>): boolean => {
+  if (verb !== "checkout") return false;
   const a0 = args[0];
-  if (verb === "checkout") {
-    if (a0 === "-b" || a0 === "-B") return true; // create
-    if (a0 === "--") return true; // file restore
-    if (a0 === "." && args.length === 1) return true; // restore all
-    return false;
-  }
-  if (verb === "switch") {
-    return a0 === "-c" || a0 === "-C"; // create
-  }
+  if (a0 === "--") return true; // file restore
+  if (a0 === "." && args.length === 1) return true; // restore all
   return false;
 };
+
+/** checkout/switch forms that create a branch. */
+const isCreate = (verb: string, args: ReadonlyArray<string>): boolean => {
+  const a0 = args[0];
+  if (verb === "checkout") return a0 === "-b" || a0 === "-B";
+  if (verb === "switch") return a0 === "-c" || a0 === "-C";
+  return false;
+};
+
+/** the branch/ref a plain checkout/switch targets (first non-flag arg). */
+const switchTarget = (args: ReadonlyArray<string>): string | null =>
+  args.find((a) => !a.startsWith("-")) ?? null;
 
 /** Guard B verb set: ops that rewrite the target tree's state/history. */
 const isGuardedMutation = (inv: GitInvocation): boolean => {
@@ -25,7 +31,8 @@ const isGuardedMutation = (inv: GitInvocation): boolean => {
   if (inv.verb === "reset" && inv.args.includes("--hard")) return true;
   if (
     (inv.verb === "checkout" || inv.verb === "switch") &&
-    !isCreateOrRestore(inv.verb, inv.args)
+    !isCreate(inv.verb, inv.args) &&
+    !isRestore(inv.verb, inv.args)
   ) {
     return true;
   }
@@ -52,13 +59,26 @@ Do this instead:
 Bypass: ALLOW_DIRTY_MAIN_MUTATION=1
 (this guard is an ax SDK hook - author your own: ax hooks init)`;
 
-const blockSwitchMsg = `BLOCKED: Do not switch branches on the primary working tree.
+const blockSwitchMsg = (def: string) =>
+  `BLOCKED: the primary working tree stays on '${def}'.
 
-Use a worktree instead:
+Feature work happens in a linked worktree:
   git worktree add .claude/worktrees/<task-name> -b <branch-name>
 
-Allowed here: git checkout -b / git switch -c (create), git checkout -- <file>
-(restore). Bypass (rare): prefix with ALLOW_BRANCH_CHECKOUT=1
+Allowed here: git checkout ${def} (return to ${def}), git checkout -- <file>
+(file restore). Bypass (rare): prefix with ALLOW_BRANCH_CHECKOUT=1
+(this guard is an ax SDK hook - author your own: ax hooks init)`;
+
+const blockWorktreeDefaultMsg = (def: string) =>
+  `BLOCKED: do not check out '${def}' in a linked worktree.
+
+A branch can live in only one worktree at a time - holding '${def}' here
+locks the primary working tree off '${def}'.
+
+Do this instead:
+  git checkout --detach origin/${def}   # inspect ${def} without holding it
+
+Bypass (rare): prefix with ALLOW_BRANCH_CHECKOUT=1
 (this guard is an ax SDK hook - author your own: ax hooks init)`;
 
 const hook = defineHook({
@@ -89,16 +109,33 @@ const hook = defineHook({
         }
       }
 
-      // ---- Guard A: branch switching on the primary tree (cwd-scoped) ----
+      // ---- Guard A: the primary tree stays parked on the default branch ----
+      // Block branch create AND switch on the primary tree (only returning to
+      // the default branch is allowed); block linked worktrees from TAKING
+      // the default branch - a branch lives in one worktree at a time, so a
+      // worktree holding it locks the primary tree off it.
       if (process.env.ALLOW_BRANCH_CHECKOUT === "1") return Verdict.allow;
       for (const inv of invocations) {
         if (hasBypass("ALLOW_BRANCH_CHECKOUT", inv)) continue;
         if (inv.verb !== "checkout" && inv.verb !== "switch") continue;
-        // Explicit `git -C <path>` targets another tree - guard B territory.
-        if (inv.cPath !== null) continue;
-        if (isCreateOrRestore(inv.verb, inv.args)) continue;
-        if (yield* git.isPrimaryTree(event.cwd)) {
-          return Verdict.block(blockSwitchMsg);
+        if (isRestore(inv.verb, inv.args)) continue;
+        // Target tree: explicit `git -C <path>` wins, else the event cwd.
+        const target = inv.cPath ?? event.cwd;
+        if (yield* git.isPrimaryTree(target)) {
+          const def = yield* git.defaultBranch(target);
+          if (
+            !isCreate(inv.verb, inv.args) &&
+            switchTarget(inv.args) === def
+          ) {
+            continue; // returning the primary tree home
+          }
+          return Verdict.block(blockSwitchMsg(def));
+        }
+        if (isCreate(inv.verb, inv.args)) continue;
+        if ((yield* git.repoRoot(target)) === null) continue; // not a repo
+        const def = yield* git.defaultBranch(target);
+        if (switchTarget(inv.args) === def) {
+          return Verdict.block(blockWorktreeDefaultMsg(def));
         }
       }
       return Verdict.allow;
