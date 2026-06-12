@@ -1,7 +1,8 @@
+import { homedir } from "node:os";
 import { posixPath } from "@ax/lib/shared/path";
 
 export const defaultDojoDir = (): string =>
-    posixPath.join(process.env.HOME ?? "~", ".ax", "dojo");
+    posixPath.join(homedir(), ".ax", "dojo");
 
 export const dojoOutboxDir = (base: string = defaultDojoDir()): string =>
     posixPath.join(base, "outbox");

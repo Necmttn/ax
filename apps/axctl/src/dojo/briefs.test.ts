@@ -1,6 +1,14 @@
 // apps/axctl/src/dojo/briefs.test.ts
 import { describe, expect, test } from "bun:test";
-import { classifyBriefFile } from "./briefs.ts";
+import { mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { Effect } from "effect";
+import { BunFileSystem } from "@effect/platform-bun";
+import { classifyBriefFile, scanTaskDir } from "./briefs.ts";
+
+const runScan = (dir: string) =>
+    Effect.runPromise(scanTaskDir(dir).pipe(Effect.provide(BunFileSystem.layer)));
 
 describe("classifyBriefFile", () => {
     test("classify brief without primary_role is an unfilled item", () => {
@@ -39,5 +47,30 @@ describe("classifyBriefFile", () => {
 
     test("non-markdown files return null", () => {
         expect(classifyBriefFile(".DS_Store", "")).toBeNull();
+    });
+});
+
+describe("scanTaskDir", () => {
+    test("missing dir yields no items", async () => {
+        const base = mkdtempSync(join(tmpdir(), "ax-dojo-briefs-"));
+        const items = await runScan(join(base, "does-not-exist"));
+        expect(items).toEqual([]);
+    });
+
+    test("scans a real dir: one unfilled classify brief among filled + junk", async () => {
+        const dir = mkdtempSync(join(tmpdir(), "ax-dojo-briefs-"));
+        writeFileSync(
+            join(dir, "classify-superpowers__tdd.md"),
+            "---\nax_classify: superpowers:tdd\nprimary_role:\n---\n",
+        );
+        writeFileSync(
+            join(dir, "classify-superpowers__done.md"),
+            "---\nax_classify: superpowers:done\nprimary_role: verifier\n---\n",
+        );
+        writeFileSync(join(dir, ".DS_Store"), "");
+        const items = await runScan(dir);
+        expect(items).toHaveLength(1);
+        expect(items[0]?.id).toBe("brief:classify-superpowers__tdd.md");
+        expect(items[0]?.kind).toBe("brief_unfilled");
     });
 });

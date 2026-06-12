@@ -1,4 +1,5 @@
-import { Effect, FileSystem } from "effect";
+import { Effect, FileSystem, type PlatformError } from "effect";
+import { orAbsent, skipNotFound } from "@ax/lib/shared/fs-error";
 import { posixPath } from "@ax/lib/shared/path";
 import type { DojoItem } from "./schema.ts";
 
@@ -28,6 +29,8 @@ export const classifyBriefFile = (name: string, content: string): DojoItem | nul
             title: `Backtest + apply routing-tune brief ${name}`,
             commands: [
                 `$EDITOR .ax/tasks/${name}  # review judgment-flagged classes, backtest vs history`,
+                // v0 limitation: --days=30 is a static default; once brief content is
+                // parsed, this should carry the brief's own --days window instead.
                 "ax routing tune --apply=<ids from brief> --days=30",
             ],
             success: "selected classes applied to ~/.ax/hooks/routing-table.json; brief resolved",
@@ -47,20 +50,29 @@ export const classifyBriefFile = (name: string, content: string): DojoItem | nul
     };
 };
 
-/** Effect glue: scan the task dir (AX_TASK_DIR ?? $PWD/.ax/tasks) into items. */
+/**
+ * Effect glue: scan the task dir (AX_TASK_DIR ?? $PWD/.ax/tasks) into items.
+ *
+ * Discovery probes (exists/readDirectory) use `orAbsent` - a missing or
+ * unreadable dir means "no open briefs". The per-file content read uses
+ * `skipNotFound(null)` + skip-on-null: a brief that vanished mid-scan is
+ * SKIPPED (never classified from an empty string into a spurious unfilled
+ * item); any other read fault (permission, IO) re-raises so real data is
+ * never silently dropped.
+ */
 export const scanTaskDir = (
     taskDir: string,
-): Effect.Effect<DojoItem[], never, FileSystem.FileSystem> =>
+): Effect.Effect<DojoItem[], PlatformError.PlatformError, FileSystem.FileSystem> =>
     Effect.gen(function* () {
         const fs = yield* FileSystem.FileSystem;
-        const exists = yield* fs.exists(taskDir).pipe(Effect.orElseSucceed(() => false));
-        if (!exists) return [];
-        const names = yield* fs.readDirectory(taskDir).pipe(Effect.orElseSucceed(() => []));
+        if (!(yield* fs.exists(taskDir).pipe(orAbsent(false)))) return [];
+        const names = yield* fs.readDirectory(taskDir).pipe(orAbsent([] as string[]));
         const items: DojoItem[] = [];
         for (const name of names) {
             const content = yield* fs
                 .readFileString(posixPath.join(taskDir, name))
-                .pipe(Effect.orElseSucceed(() => ""));
+                .pipe(skipNotFound(null));
+            if (content === null) continue; // vanished mid-scan - skip, don't misclassify
             const item = classifyBriefFile(name, content);
             if (item) items.push(item);
         }
