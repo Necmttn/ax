@@ -122,16 +122,13 @@ function CommitsCell({ produced, reverted }: {
     );
 }
 
-type ViewMode = "viz" | "strip";
-
-// keep in sync with the <th> lists below
-const COL_COUNT_VIZ = 12; // ☐ ID SRC PROJECT STARTED DUR TURNS STORY ΔLOC COMMITS COST SIGNAL → link
-const COL_COUNT_STRIP = 10; // ☐ ID SRC PROJECT STARTED DUR TURNS COST SIGNAL → link
+// keep in sync with the <th> list below
+// ☐ ID SRC PROJECT STARTED DUR TURNS STORY ΔLOC COMMITS COST SIGNAL → link
+const COL_COUNT = 12;
 
 interface RowProps {
     readonly s: SessionListRow;
     readonly indent?: boolean;
-    readonly view: ViewMode;
     readonly maxLoc: number;
     // Expanded-toggle props (root rows with children only)
     readonly childCount?: number;
@@ -146,7 +143,6 @@ interface RowProps {
 const Row = memo(function Row({
     s,
     indent,
-    view,
     maxLoc,
     childCount,
     childLoading,
@@ -172,9 +168,7 @@ const Row = memo(function Row({
 
     const rowStyle: CSSProperties | undefined = indent
         ? { background: "#fafafa" }
-        : view === "strip"
-            ? { borderBottom: "none" } // strip-row pair carries the border
-            : undefined;
+        : undefined;
 
     return (
         <tr
@@ -232,31 +226,26 @@ const Row = memo(function Row({
             <td style={{ fontFamily: "ui-monospace, monospace", fontSize: 12, color: "var(--muted)" }}>{fmtTs(s.started_at)}</td>
             <td style={{ fontFamily: "ui-monospace, monospace", fontSize: 12, color: "var(--muted)", textAlign: "right" }}>{fmtDuration(s.started_at, s.ended_at)}</td>
             <td style={{ textAlign: "right", fontFamily: "ui-monospace, monospace", fontSize: 12, fontVariantNumeric: "tabular-nums", color: s.turn_count > 0 ? "var(--ink)" : "var(--muted-2)" }}>{s.turn_count > 0 ? s.turn_count.toLocaleString() : "-"}</td>
-            {view === "viz" ? (
-                <>
-                    <td style={{ textAlign: "center", padding: "6px 8px" }}>
-                        <StoryStrip
-                            sessionId={sid}
-                            startedAt={s.started_at}
-                            endedAt={s.ended_at}
-                            variant="mini"
-                        />
-                    </td>
-                    <td style={{ padding: "4px 8px" }}>
-                        <LocCell
-                            added={s.lines_added}
-                            removed={s.lines_removed}
-                            maxLoc={maxLoc}
-                        />
-                    </td>
-                    <td style={{ padding: "4px 8px" }}>
-                        <CommitsCell
-                            produced={s.produced_commits}
-                            reverted={s.reverted_commits}
-                        />
-                    </td>
-                </>
-            ) : null}
+            <td style={{ textAlign: "center", padding: "6px 8px" }}>
+                <StoryStrip
+                    sessionId={sid}
+                    startedAt={s.started_at}
+                    endedAt={s.ended_at}
+                />
+            </td>
+            <td style={{ padding: "4px 8px" }}>
+                <LocCell
+                    added={s.lines_added}
+                    removed={s.lines_removed}
+                    maxLoc={maxLoc}
+                />
+            </td>
+            <td style={{ padding: "4px 8px" }}>
+                <CommitsCell
+                    produced={s.produced_commits}
+                    reverted={s.reverted_commits}
+                />
+            </td>
             <td style={{ textAlign: "right", fontFamily: "ui-monospace, monospace", fontSize: 12, fontVariantNumeric: "tabular-nums", color: s.cost_usd != null ? "var(--ink)" : "var(--sx-ink-300)" }}>
                 {s.cost_usd != null ? `$${s.cost_usd.toFixed(2)}` : "–"}
             </td>
@@ -286,7 +275,6 @@ export function SessionsRoute() {
     const navigate = useNavigate();
     const [sourceFilter, setSourceFilter] = useState<SourceFilter>("all");
     const [search, setSearch] = useState("");
-    const [view, setView] = useState<ViewMode>("viz");
     const [expanded, setExpanded] = useState<ReadonlySet<string>>(() => new Set());
     const [selected, setSelected] = useState<ReadonlySet<string>>(() => new Set());
 
@@ -350,8 +338,6 @@ export function SessionsRoute() {
             setAppendLoading(false);
         }
     };
-
-    const colCount = view === "viz" ? COL_COUNT_VIZ : COL_COUNT_STRIP;
 
     const sentinelRef = useRef<HTMLTableRowElement | null>(null);
     useEffect(() => {
@@ -459,25 +445,6 @@ export function SessionsRoute() {
                         </button>
                     ))}
                 </div>
-                {/* View toggle: viz / strip */}
-                <div style={{ display: "flex", gap: 0, border: "1px solid var(--line)", borderRadius: 4, overflow: "hidden" }}>
-                    {(["viz", "strip"] as const).map((v) => (
-                        <button
-                            key={v}
-                            onClick={() => setView(v)}
-                            style={{
-                                padding: "4px 10px", fontSize: 11, fontWeight: 600,
-                                border: "none",
-                                background: view === v ? "var(--ink)" : "#fff",
-                                color: view === v ? "#fff" : "var(--muted)",
-                                cursor: "pointer",
-                                borderRight: v === "viz" ? "1px solid var(--line)" : "none",
-                            }}
-                        >
-                            {v}
-                        </button>
-                    ))}
-                </div>
                 <input
                     value={search}
                     onChange={(e) => setSearch(e.target.value)}
@@ -526,7 +493,7 @@ export function SessionsRoute() {
             {query.isLoading && !query.data ? <div className="loading">Loading…</div> : null}
             {query.data ? (
                 <div style={{ overflowX: "auto", WebkitOverflowScrolling: "touch" }}>
-                <table style={{ width: "100%", minWidth: view === "viz" ? 1280 : 1020, borderCollapse: "collapse" }}>
+                <table style={{ width: "100%", minWidth: 1280, borderCollapse: "collapse" }}>
                     <thead>
                         <tr style={{ background: "var(--page)", fontSize: 11, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.05em" }}>
                             <th style={{ width: 28 }}></th>
@@ -536,13 +503,9 @@ export function SessionsRoute() {
                             <th style={{ textAlign: "left", padding: "6px 8px" }}>started</th>
                             <th style={{ textAlign: "right", padding: "6px 8px" }}>duration</th>
                             <th style={{ textAlign: "right", padding: "6px 8px" }}>turns</th>
-                            {view === "viz" ? (
-                                <>
-                                    <th style={{ textAlign: "center", padding: "6px 8px" }}>story</th>
-                                    <th style={{ textAlign: "left", padding: "6px 8px" }}>δloc</th>
-                                    <th style={{ textAlign: "left", padding: "6px 8px" }}>commits</th>
-                                </>
-                            ) : null}
+                            <th style={{ textAlign: "center", padding: "6px 8px" }}>story</th>
+                            <th style={{ textAlign: "left", padding: "6px 8px" }}>δloc</th>
+                            <th style={{ textAlign: "left", padding: "6px 8px" }}>commits</th>
                             <th style={{ textAlign: "right", padding: "6px 8px" }}>cost</th>
                             <th style={{ textAlign: "left", padding: "6px 8px" }}>signal</th>
                             <th style={{ textAlign: "left", padding: "6px 8px" }}></th>
@@ -557,7 +520,6 @@ export function SessionsRoute() {
                                 <Fragment key={parent.id}>
                                     <Row
                                         s={parent}
-                                        view={view}
                                         maxLoc={maxLoc}
                                         isSelected={selected.has(parent.id)}
                                         onToggleSelect={toggleSelected}
@@ -570,29 +532,12 @@ export function SessionsRoute() {
                                             }
                                             : {})}
                                     />
-                                    {/* strip view: underline strip row follows each root row */}
-                                    {view === "strip" ? (
-                                        <tr className="strip-row" style={{ borderBottom: "1px solid var(--sx-line-200)" }}>
-                                            <td
-                                                colSpan={COL_COUNT_STRIP}
-                                                style={{ padding: 0, height: "auto" }}
-                                            >
-                                                <StoryStrip
-                                                    sessionId={parent.id}
-                                                    startedAt={parent.started_at}
-                                                    endedAt={parent.ended_at}
-                                                    variant="underline"
-                                                />
-                                            </td>
-                                        </tr>
-                                    ) : null}
                                     {isExpanded
                                         ? (kidState?.rows ?? []).map((child) => (
                                             <Row
                                                 key={child.id}
                                                 s={child}
                                                 indent
-                                                view={view}
                                                 maxLoc={maxLoc}
                                                 isSelected={selected.has(child.id)}
                                                 onToggleSelect={toggleSelected}
@@ -604,7 +549,7 @@ export function SessionsRoute() {
                         })}
                         {allRoots.length < totalCount ? (
                             <tr ref={sentinelRef}>
-                                <td colSpan={colCount} style={{
+                                <td colSpan={COL_COUNT} style={{
                                     padding: "12px 24px", color: "var(--muted)", fontSize: 12,
                                     fontFamily: "ui-monospace, monospace",
                                     textAlign: "center", borderTop: "1px dashed var(--line)",

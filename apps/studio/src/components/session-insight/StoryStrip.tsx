@@ -192,7 +192,6 @@ function renderTimeline(
     insights: SessionInsightsPayload,
     startedAt: string | null,
     endedAt: string | null,
-    variant: "mini" | "underline",
 ): React.ReactNode {
     const phaseStarts = insights.phases.map((p) => timeOf(p.start_ts)).filter((t): t is number => t !== null);
     const phaseEnds = insights.phases.map((p) => timeOf(p.end_ts)).filter((t): t is number => t !== null);
@@ -204,7 +203,7 @@ function renderTimeline(
         insights.commits.length === 0 &&
         insights.subagent_spans.length === 0;
 
-    const trackH = variant === "mini" ? 8 : 5;
+    const trackH = 8;
     const trackStyle: React.CSSProperties = {
         position: "absolute",
         top: 0,
@@ -215,13 +214,9 @@ function renderTimeline(
     };
 
     if (noData || t0 === null || t1 === null || t1 <= t0) {
-        // fallback: single idle-colored bar or dim dash
-        if (variant === "mini") {
-            return (
-                <span style={{ color: "var(--sx-ink-300)", fontSize: 10 }}>–</span>
-            );
-        }
-        return <span style={trackStyle} />;
+        return (
+            <span style={{ color: "var(--sx-ink-300)", fontSize: 10 }}>–</span>
+        );
     }
 
     // Collect all event anchors for time-warp
@@ -254,7 +249,7 @@ function renderTimeline(
         insights.commits.length > 0 ||
         insights.subagent_spans.length > 0;
 
-    const { segments, pct: warpPct, compressedMs } = buildTimeWarp(
+    const { pct: warpPct } = buildTimeWarp(
         hasEvents ? anchors : [],
         t0,
         t1,
@@ -266,42 +261,10 @@ function renderTimeline(
         return t === null ? null : warpPct(t);
     };
 
-    const hasLanes = variant === "underline" && insights.subagent_spans.some((s) => s.started_at !== null);
-    const wrapperH = variant === "mini" ? 8 : (hasLanes ? 8 : 5);
     const maxFriction = 12;
     const visibleFriction = insights.friction_ticks.slice(0, maxFriction);
 
-    // For underline subagent lane: merge all spans into one
-    let laneLeft: number | null = null;
-    let laneRight: number | null = null;
-    if (hasLanes) {
-        for (const s of insights.subagent_spans) {
-            if (!s.started_at) continue;
-            const l = pct(s.started_at);
-            const r = pct(s.ended_at) ?? 100;
-            if (l !== null) {
-                laneLeft = laneLeft === null ? l : Math.min(laneLeft, l);
-                laneRight = laneRight === null ? r : Math.max(laneRight, r);
-            }
-        }
-    }
-
-    // Commit dot positions with de-overlap (underline only)
-    // Compute raw positions then nudge collisions
     const commitPositions = insights.commits.map((c) => pct(c.ts));
-    if (variant === "underline") {
-        // Single-pass de-overlap: if two non-null dots land within 0.8%, nudge the later one
-        for (let i = 1; i < commitPositions.length; i++) {
-            const prev = commitPositions[i - 1];
-            const cur = commitPositions[i];
-            if (prev !== null && cur !== null && cur - prev < 0.8) {
-                commitPositions[i] = Math.min(100, prev + 0.8);
-            }
-        }
-    }
-
-    // Compressed gap markers for underline variant
-    const compressedSegments = variant === "underline" ? segments.filter((s) => s.compressed) : [];
 
     return (
         <>
@@ -327,39 +290,6 @@ function renderTimeline(
                     />
                 );
             })}
-            {/* compression markers (underline variant only) */}
-            {compressedSegments.map((seg, i) => {
-                const midWarp = (seg.warpStart + seg.warpEnd) / 2;
-                return (
-                    <span key={`cmp-${i}`} style={{ position: "absolute", top: 0, left: `${midWarp}%`, transform: "translateX(-50%)" }}>
-                        {/* two 1px white slits */}
-                        <span
-                            style={{
-                                display: "block",
-                                position: "absolute",
-                                top: 0,
-                                left: -1,
-                                width: 1,
-                                height: 5,
-                                background: "white",
-                                opacity: 0.85,
-                            }}
-                        />
-                        <span
-                            style={{
-                                display: "block",
-                                position: "absolute",
-                                top: 0,
-                                left: 1,
-                                width: 1,
-                                height: 5,
-                                background: "white",
-                                opacity: 0.85,
-                            }}
-                        />
-                    </span>
-                );
-            })}
             {/* friction ticks */}
             {visibleFriction.map((f, i) => {
                 const left = pct(f.ts);
@@ -370,9 +300,9 @@ function renderTimeline(
                         title={f.kind}
                         style={{
                             position: "absolute",
-                            top: variant === "mini" ? -2 : -1,
-                            width: variant === "mini" ? 2 : 1.5,
-                            height: variant === "mini" ? 12 : 7,
+                            top: -2,
+                            width: 2,
+                            height: 12,
                             left: `${left}%`,
                             background: "var(--sx-red-700)",
                             opacity: 0.82,
@@ -390,11 +320,11 @@ function renderTimeline(
                         title={`${c.sha} (reverted)`}
                         style={{
                             position: "absolute",
-                            top: variant === "mini" ? 0 : -1,
+                            top: 0,
                             left: `${left}%`,
                             transform: "translateX(-50%)",
                             color: "var(--sx-red-700)",
-                            fontSize: variant === "mini" ? 8 : 7,
+                            fontSize: 8,
                             fontWeight: 700,
                             lineHeight: 1,
                         }}
@@ -407,9 +337,9 @@ function renderTimeline(
                         title={c.sha}
                         style={{
                             position: "absolute",
-                            top: variant === "mini" ? 1 : 0,
-                            width: variant === "mini" ? 6 : 5,
-                            height: variant === "mini" ? 6 : 5,
+                            top: 1,
+                            width: 6,
+                            height: 6,
                             borderRadius: "50%",
                             left: `${left}%`,
                             transform: "translateX(-50%)",
@@ -418,33 +348,16 @@ function renderTimeline(
                     />
                 );
             })}
-            {/* subagent lane: underline only, merged */}
-            {hasLanes && laneLeft !== null && laneRight !== null ? (
-                <span
-                    title={`${insights.subagent_spans.length} subagents`}
-                    style={{
-                        position: "absolute",
-                        top: 5,
-                        height: 3,
-                        borderRadius: 2,
-                        left: `${laneLeft}%`,
-                        width: `${Math.max(1, laneRight - laneLeft)}%`,
-                        background: "var(--sx-violet-500)",
-                        opacity: 0.72,
-                    }}
-                />
-            ) : null}
         </>
     );
 }
 
 // --- public component --------------------------------------------------------
 
-export function StoryStrip({ sessionId, startedAt, endedAt, variant }: {
+export function StoryStrip({ sessionId, startedAt, endedAt }: {
     readonly sessionId: string;
     readonly startedAt: string | null;
     readonly endedAt: string | null;
-    readonly variant: "mini" | "underline";
 }) {
     const [inView, wrapRef] = useInView("200px");
 
@@ -481,45 +394,21 @@ export function StoryStrip({ sessionId, startedAt, endedAt, variant }: {
         }
     }
 
-    const isMini = variant === "mini";
-
-    if (isMini) {
-        // 120×8 mini timeline cell
-        return (
-            <span
-                ref={wrapRef}
-                title={q.data ? buildTitle(q.data, compressedMs) : undefined}
-                style={{
-                    display: "inline-block",
-                    position: "relative",
-                    width: 120,
-                    height: 8,
-                    verticalAlign: "middle",
-                    background: "var(--sx-phase-idle)",
-                }}
-            >
-                {q.data ? renderTimeline(q.data, startedAt, endedAt, "mini") : null}
-            </span>
-        );
-    }
-
-    // underline: 100% wide, 5px strip
+    // 120×8 mini timeline cell
     return (
         <span
             ref={wrapRef}
             title={q.data ? buildTitle(q.data, compressedMs) : undefined}
             style={{
-                display: "block",
+                display: "inline-block",
                 position: "relative",
-                width: "100%",
-                // 5px strip track + optional 3px subagent lane below = up to 8px
-                height: q.data && q.data.subagent_spans.some((s) => s.started_at !== null)
-                    ? 8
-                    : 5,
+                width: 120,
+                height: 8,
+                verticalAlign: "middle",
                 background: "var(--sx-phase-idle)",
             }}
         >
-            {q.data ? renderTimeline(q.data, startedAt, endedAt, "underline") : null}
+            {q.data ? renderTimeline(q.data, startedAt, endedAt) : null}
         </span>
     );
 }

@@ -267,4 +267,15 @@ fallback turn-scan.
 - Sentiment ribbon, tool-mix/treemap/cadence/hook-lane/plan-burndown/sankey
   charts (gallery items cut in shortlisting - candidates for session detail
   view later).
+
+## Addendum (2026-06-12): accordion retired, inline viz locked
+
+Dogfooding on real data rejected the expandable insight panel ("reads as a
+nested report"). Locked replacement: inline micro-viz columns on every row -
+STORY (120x8 mini timeline with idle-gap time-warp: inter-event gaps >8% of
+the session compress to 2% of the axis), ΔLOC (log-scaled diverging bars),
+COMMITS (dots + reverted ✕). Insights fetched lazily per visible row
+(IntersectionObserver latch, shared TanStack cache). The strip-underline
+variant was prototyped and rejected (unclear). InsightPanel/StoryBar
+components remain on disk for the session detail page.
 - Codex/Pi/OpenCode cwd-filtered ingest (unrelated).
