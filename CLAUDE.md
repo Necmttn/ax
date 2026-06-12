@@ -126,7 +126,10 @@ fresh clone.
 
 `ax dispatches [--days=N] [--limit=N]` - subagent dispatch table sorted by child cost (default 14d/30 rows). Shows ts, agent_type, description, dispatch_model ("inherit" when no explicit model), child_model, child_cost_usd. Summary: count, % inherit, total subagent cost. MCP: `dispatches`.
 `ax dispatches --candidates [--days=N]` - inherit + expensive (fable/opus) + routing-class match filter. Shows suggested model + est savings per dispatch. Footer: total est savings, top 3 classes by savings.
-`ax dispatches compile-routing [--out=PATH]` - write `~/.ax/hooks/routing-table.json` from ROUTING_CLASSES constant (mirrors route-dispatch.ts hook defaults; a unify step is deferred). Idempotent regenerate. --out overrides path (tests use tmp dirs).
+`ax routing compile [--out=PATH]` - merge-preserving regenerate of `~/.ax/hooks/routing-table.json` (defaults refresh, `origin: user` classes survive; refuses to overwrite a corrupt file). `ax dispatches compile-routing` is an alias.
+`ax routing tune [--days=N] [--dry-run] [--emit-brief] [--apply=id,...] [--out=PATH]` - mine unmatched expensive inherit dispatches for new routing classes (two-token prefix clustering, ≥3 members, suggests sonnet). Auto-applies non-judgment proposals to `~/.ax/hooks/routing-table.json` as `origin: user`; judgment-flagged ones (review/design/plan/audit/...) only ship via `--emit-brief` → `.ax/tasks/routing-tune-<date>.md` → agent backtest → `--apply=ids` (carry the brief's `--days` window).
+`ax routing show` - effective table with class origins.
+The routing-table file is now the source of truth for BOTH the route-dispatch hook and `ax dispatches --candidates` (unify done); `ROUTING_CLASSES` remains the shipped default seed. The committed `/routing-tune` workflow stays the dev-side tool for tuning the defaults themselves.
 
 ## Recommend + apply guidance to your own agent files
 

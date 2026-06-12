@@ -187,16 +187,18 @@ proves whether the routing worked:
 ```bash
 ax cost split --days=7              # main loop vs subagents, by model
 ax dispatches --candidates          # model-less dispatches + est savings
-ax dispatches compile-routing       # regenerate the routing table
+ax routing tune                     # mine YOUR history for new routing classes
+ax routing compile                  # regenerate the table (user classes preserved)
 ax hooks install ~/.ax/hooks/route-dispatch.ts --providers=claude
 ```
 
 The `route-dispatch` hook warns when a mechanical dispatch forgets an explicit
 model; the `efficient-dispatch` skill (via `npx skills add Necmttn/ax`) teaches
 the orchestration pattern; `ax improve recommend` surfaces a proposal when
-missed savings accumulate; `/routing-tune` (committed workflow) re-mines the
-routing classes from your own dispatch history. One source of truth, measured
-end to end - see [docs/design/cost-routing.md](docs/design/cost-routing.md).
+missed savings accumulate; `ax routing tune` mines new routing classes from
+your own dispatch history (judgment work is never auto-routed - vet those via
+`--emit-brief`). One source of truth - `~/.ax/hooks/routing-table.json` -
+measured end to end. See [docs/design/cost-routing.md](docs/design/cost-routing.md).
 
 ## Share a session like a gist
 
