@@ -81,6 +81,12 @@ _Avoid_: full-repo static index
 The SurrealDB persistence engine used by `axctl`, separate from product semantics.
 _Avoid_: memory versioning model
 
+**Graph Access Toolkit**:
+The single shared module of safe **Storage Backend** access primitives -
+SurrealQL literals, typed row field access, record selection, statement
+execution, and record-id key derivation - that query modules compose.
+_Avoid_: db utils
+
 **Current View**:
 A materialized SurrealDB table view that exposes current records for ergonomic reads.
 _Avoid_: canonical state

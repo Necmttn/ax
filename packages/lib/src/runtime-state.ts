@@ -3,7 +3,6 @@ import { homedir } from "node:os";
 import { posixPath } from "@ax/lib/shared/path";
 import { orAbsent } from "@ax/lib/shared/fs-error";
 import { decodeJsonOrNull } from "./decode.ts";
-import { prettyPrint } from "./json.ts";
 
 /**
  * Persistent state for the local daemon (chosen port, schema version, etc).
@@ -90,7 +89,13 @@ export function writeRuntimeState(
         };
         yield* fs.makeDirectory(posixPath.dirname(path), { recursive: true });
         const tmp = `${path}.tmp`;
-        yield* fs.writeFileString(tmp, prettyPrint(next));
+        // Inline 2-space stringify (byte-identical to the former `prettyPrint`
+        // from ./json.ts). runtime-state sits in db.ts's init chain
+        // (db -> config -> runtime-state); importing ./json.ts here would form
+        // a json.ts -> shared/surreal.ts -> db.ts -> runtime-state.ts -> json.ts
+        // module-eval cycle (the SurrealQL literal seam now lives behind json's
+        // `surrealLiteral`). Writing runtime.json is a real JSON-IO boundary.
+        yield* fs.writeFileString(tmp, JSON.stringify(next, null, 2));
         yield* fs.rename(tmp, path);
         return next;
     });
