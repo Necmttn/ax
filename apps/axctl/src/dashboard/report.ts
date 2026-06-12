@@ -6,14 +6,13 @@ import { SurrealClient, type SurrealClientShape } from "@ax/lib/db";
 import type { DbError } from "@ax/lib/errors";
 import { posixPath } from "@ax/lib/shared/path";
 import {
-    checkoutActivitySql,
-    gitCorrelationSql,
     recentFrictionSql,
     repositoryOverviewSql,
     schemaCoverageSql,
     sessionEvidenceSql,
     toolFailuresSql,
 } from "../queries/insights.ts";
+import { fetchWorktreesOverview } from "./worktrees-overview.ts";
 
 type Row = Record<string, unknown>;
 
@@ -88,13 +87,14 @@ export const fetchDashboardData = (
 ): Effect.Effect<DashboardData, DbError, SurrealClient> =>
     Effect.gen(function* () {
         const client = yield* SurrealClient;
-        const [countResult, tableCounts, git, checkoutActivity, repositories, friction, tools, sessions] =
+        const [countResult, tableCounts, worktrees, repositories, friction, tools, sessions] =
             yield* Effect.all(
                 [
                     client.query<unknown[]>(COUNT_SQL),
                     queryRows(client, schemaCoverageSql()),
-                    queryRows(client, gitCorrelationSql(limit)),
-                    queryRows(client, checkoutActivitySql(limit)),
+                    // Deref-free aggregates + JS join; the legacy correlated
+                    // SQL full-scanned turn/tool_call once per checkout.
+                    fetchWorktreesOverview(limit),
                     queryRows(client, repositoryOverviewSql(limit)),
                     queryRows(client, recentFrictionSql(limit)),
                     queryRows(client, toolFailuresSql(limit)),
@@ -102,6 +102,8 @@ export const fetchDashboardData = (
                 ],
                 { concurrency: 6 },
             );
+        const git = worktrees.git as DashboardData["git"];
+        const checkoutActivity = worktrees.activity as DashboardData["checkoutActivity"];
 
         return {
             generatedAt: new Date().toISOString(),
