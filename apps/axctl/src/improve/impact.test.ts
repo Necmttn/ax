@@ -61,8 +61,10 @@ describe("estimateImpact", () => {
             makeDb([[[]]]),
         );
         expect(est.kind).toBe("correction_pressure");
-        expect(est.headline).toContain("9×");
+        // headline = LIVE frequency (matches the card chip); frozen baseline (9) becomes a growth note
+        expect(est.headline).toContain("7×");
         expect(est.detail).toContain("9 corrections across 4 sessions");
+        expect(est.detail).toContain("was 9x when first proposed");
         expect(est.confidence).toBe("indicative");
     });
 
@@ -71,8 +73,10 @@ describe("estimateImpact", () => {
             estimateImpact(proposal({ form: "skill", baseline: '{"tool":"Bash","frequency":12}' })),
             makeDb([[[]]]),
         );
-        expect(est.headline).toContain("12×");
+        // live frequency (7 on the fixture), not the frozen baseline 12
+        expect(est.headline).toContain("7×");
         expect(est.headline).toContain("Bash");
+        expect(est.detail).toContain("was 12x when first proposed");
     });
 
     test("hook with target_tool: addressable failures from tool_call stats", async () => {

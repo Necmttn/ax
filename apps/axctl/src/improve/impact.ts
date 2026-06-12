@@ -74,27 +74,35 @@ const hookImpact = Effect.fn("improve.hookImpact")(function* (tool: string) {
     } satisfies ImpactEstimate;
 });
 
+/** The HEADLINE always uses the live frequency (matches the card chip);
+ *  the frozen baseline frequency becomes a growth note when it differs. */
+const growthNote = (p: ProposalDto, baseline: Record<string, unknown>): string => {
+    const frozen = Number(baseline.frequency ?? 0);
+    return frozen > 0 && frozen !== p.frequency
+        ? ` It was ${frozen}x when first proposed - still recurring.`
+        : "";
+};
+
 const guidanceImpact = (p: ProposalDto, baseline: Record<string, unknown>): ImpactEstimate => {
     const evidence = typeof baseline.evidence === "string" ? baseline.evidence : null;
-    const freq = Number(baseline.frequency ?? p.frequency) || p.frequency;
     return {
         kind: "correction_pressure",
-        headline: `${freq}× repeated correction pressure`,
-        detail: evidence
-            ?? "The same correction keeps recurring across sessions; durable guidance removes the repeat-explanation tax.",
-        basis: "correction clusters mined from your transcripts (frozen at proposal creation)",
+        headline: `${p.frequency}× repeated correction pressure`,
+        detail: (evidence
+            ?? "The same correction keeps recurring across sessions; durable guidance removes the repeat-explanation tax.")
+            + growthNote(p, baseline),
+        basis: "correction clusters mined from your transcripts (frequency is the live count; growth vs the frozen baseline noted)",
         confidence: "indicative",
     };
 };
 
 const skillImpact = (p: ProposalDto, baseline: Record<string, unknown>): ImpactEstimate => {
     const tool = typeof baseline.tool === "string" ? baseline.tool : null;
-    const freq = Number(baseline.frequency ?? p.frequency) || p.frequency;
     return {
         kind: "frequency",
-        headline: `${freq}× recurring friction${tool ? ` on ${tool}` : ""}`,
-        detail: p.hypothesis,
-        basis: "failure/correction clusters mined from your transcripts (frozen at proposal creation)",
+        headline: `${p.frequency}× recurring friction${tool ? ` on ${tool}` : ""}`,
+        detail: p.hypothesis + growthNote(p, baseline),
+        basis: "failure/correction clusters mined from your transcripts (frequency is the live count; growth vs the frozen baseline noted)",
         confidence: "indicative",
     };
 };
