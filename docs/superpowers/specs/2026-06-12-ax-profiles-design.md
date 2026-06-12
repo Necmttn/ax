@@ -49,7 +49,8 @@ One gist per user, file `ax-profile.json`, updated in-place via
   "rig": {
     "skills": [{ "name": "tdd", "source": "superpowers", "runs_30d": 88 }],
     "hooks": ["enforce-worktree", "route-dispatch"],
-    "routing_table": true
+    "routing_table": true,
+    "rules": { "count": 14, "topics": ["worktree-discipline", "effect-patterns"] }
   },
   "taste": {
     "patterns": [
@@ -69,6 +70,9 @@ One gist per user, file `ax-profile.json`, updated in-place via
 
 - `source` is mandatory on skills - aggregation key is `source + name`
   (`superpowers:tdd` ≠ local `tdd`); prevents plugin/local collisions.
+- `rig.rules` completes the rules/skills/taste layer stack descriptively:
+  count + coarse topic labels only, never rule content (CLAUDE.md text stays
+  private). Topic labels derive from existing classifiers.
 - Renderer lives in `apps/axctl/src/profile/` and composes existing queries
   (`cost models`, `skills weighted`, sessions/streaks). Pure function from
   query rows → profile JSON; snapshot-testable.
@@ -96,6 +100,16 @@ v1 scope: schema + site rendering ship; entries derive from existing
 `ax improve` proposals / classifier output where present, section omitted
 otherwise. Cross-user pattern matching (`pattern-stats.json`, joining
 failure-modes to recovery strategies across users) is deferred to v2.
+
+**Positioning (vs learned-model taste, e.g. commandcode taste-1):** the
+rules/skills/taste layering is becoming industry framing; ax's claim is the
+*open* version of the taste layer. Their taste is opaque model weights in
+their cloud, learned from unexplained accept/reject signals. ax taste is an
+inspectable JSON the user owns (gist, fork), every pattern evidence-grounded
+(sessions, confidence, verdicts), portable across the 5 harnesses ax already
+ingests. "Your taste should be a file you can read, not weights you rent."
+Implementation should preserve this deliberately: no derived pattern without
+evidence refs; schema documented publicly.
 
 ### Repo (control plane)
 
@@ -257,6 +271,9 @@ non-goal.
 - `pattern-stats.json` in the nightly compile: cross-user taste aggregation,
   joining one user's failure-modes to recovery strategies proven by others
   (the registry+mesh wedge).
+- Rule-decay receipts: surface hook-effectiveness and `no_longer_needed`
+  verdict data on profiles - ax can *measure* the rules-decay problem the
+  industry only asserts.
 - Sharded `community/users/<a>/<name>.json` layout past ~10k users.
 - `/state/<year>` report page - "State of Agent Engineering", stateofjs-style
   scrolly report rendered from `community/state/<year>.json`. Differentiator
