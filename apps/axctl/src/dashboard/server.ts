@@ -1,9 +1,6 @@
 import { DEFAULT_DASHBOARD_PORT } from "@ax/lib/dashboard-port";
-import { ManagedRuntime } from "effect";
-import { IngestRuntimeLayer } from "../ingest/stage/runtime.ts";
 import { createDurableIngestStream, type DurableIngestStream } from "./ingest-stream-durable.ts";
-import { setServeIngestState, type ServeIngestState } from "./ingest-state.ts";
-import { dispatch, jsonResponse } from "./router/router.ts";
+import { dispatch, jsonResponse, type EffectRunner, type ServeContext } from "./router/router.ts";
 import { routeTable } from "./router/table.ts";
 import {
     findListenerPid,
@@ -14,6 +11,7 @@ import {
     removeServePidfile,
     writeServePidfile,
 } from "./serve-instance.ts";
+import { makeServeRuntime } from "./serve-runtime.ts";
 
 export function parseDashboardServeArgs(args: string[]): { port: number } {
     const raw = args.find((arg) => arg.startsWith("--port="))?.split("=")[1];
@@ -22,9 +20,22 @@ export function parseDashboardServeArgs(args: string[]): { port: number } {
     return { port };
 }
 
-export async function handleDashboardRequest(req: Request): Promise<Response> {
+/**
+ * Default runner for direct invocations (unit tests call
+ * handleDashboardRequest without booting a server). Routes that never touch
+ * Effect work as-is; a route that DOES reach for the runner fails loudly
+ * instead of silently building a per-request layer stack.
+ */
+const unavailableRunner: EffectRunner = () =>
+    Promise.reject(new Error("dashboard server runtime not initialized (no booted server)"));
+
+export async function handleDashboardRequest(
+    req: Request,
+    runner: EffectRunner = unavailableRunner,
+    serve: ServeContext | null = null,
+): Promise<Response> {
     const url = new URL(req.url);
-    const routed = await dispatch(routeTable, req, url);
+    const routed = await dispatch(routeTable, req, url, runner, serve);
     if (routed !== null) return routed;
     if (url.pathname.startsWith("/api/")) return jsonResponse({ error: "not_found" });
     if (req.method === "GET") return serveRootLanding(url.port || String(DEFAULT_DASHBOARD_PORT));
@@ -109,7 +120,11 @@ function corsHeadersFor(origin: string | null): Record<string, string> {
     };
 }
 
-export async function handleDashboardRequestWithCors(req: Request): Promise<Response> {
+export async function handleDashboardRequestWithCors(
+    req: Request,
+    runner?: EffectRunner,
+    serve: ServeContext | null = null,
+): Promise<Response> {
     const origin = req.headers.get("origin");
     const cors = corsHeadersFor(origin);
 
@@ -130,7 +145,7 @@ export async function handleDashboardRequestWithCors(req: Request): Promise<Resp
         return new Response(null, { status: 204, headers });
     }
 
-    const response = await handleDashboardRequest(req);
+    const response = await handleDashboardRequest(req, runner, serve);
     for (const [k, v] of Object.entries(cors)) response.headers.set(k, v);
     return response;
 }
@@ -173,25 +188,36 @@ export async function serveDashboard(args: string[]): Promise<void> {
         console.warn(`[ax] live ingest disabled: Durable Streams sidecar unavailable (${err instanceof Error ? err.message : String(err)}). Run ax from source (not the compiled binary) to enable live ingest in the dashboard.`);
     }
 
-    // Build the long-lived runtime regardless (it doesn't need the sidecar).
+    // ONE server-scoped runtime for route handlers AND the detached ingest
+    // daemon fibers (see serve-runtime.ts) - the layer stack (SurrealDB
+    // connection, trace sink, stage registry) is built once, not per request.
     // If anything before a successful `Bun.serve` listen throws, tear down
     // what we already started so we don't leak the sidecar port. EADDRINUSE
     // can still land here despite the pre-flight (race, or a non-HTTP
     // listener the probe can't identify) - report it cleanly instead of
     // rethrowing into the `axctl error:` stack dump; everything else rethrows.
-    let runtime: ServeIngestState["runtime"] | undefined;
+    const handle = makeServeRuntime();
+    const serve: ServeContext = { ingestStream: stream };
     let server: ReturnType<typeof Bun.serve>;
     try {
-        runtime = ManagedRuntime.make(IngestRuntimeLayer);
-        setServeIngestState({ stream, runtime });
+        // Force the layer build before accepting requests so the first hit
+        // doesn't pay the DB connect. Non-fatal: the handle swaps in a fresh
+        // runtime on a failed build, so requests retry once the DB is up.
+        const warm = await handle.warmup();
+        if (!warm.ok) {
+            console.warn(`[ax] dashboard runtime warmup failed (${warm.error instanceof Error ? warm.error.message : String(warm.error)}); will retry on first request.`);
+        }
 
         // 60s idle timeout - recall queries currently full-scan turn excerpts
         // (no full-text index yet) and can take 5-15s on a year-old graph.
-        server = Bun.serve({ port, fetch: handleDashboardRequestWithCors, idleTimeout: 60 });
+        server = Bun.serve({
+            port,
+            fetch: (req) => handleDashboardRequestWithCors(req, handle.runner, serve),
+            idleTimeout: 60,
+        });
     } catch (err) {
-        setServeIngestState(null);
         if (stream) await stream.stop().catch(() => undefined);
-        if (runtime) await runtime.dispose().catch(() => undefined);
+        await handle.dispose().catch(() => undefined);
         if (isAddrInUse(err)) {
             const { formatServePortBusy } = await import("../cli/banner.ts");
             console.error(formatServePortBusy(port));
@@ -221,14 +247,13 @@ export async function serveDashboard(args: string[]): Promise<void> {
     const shutdown = async (signal: NodeJS.Signals): Promise<void> => {
         if (shuttingDown) return;
         shuttingDown = true;
-        setServeIngestState(null);
         // The pidfile is single-slot: only delete it if this process still
         // owns it (a later `ax serve --port=N` instance may have overwritten it).
         const pidfile = await readServePidfile().catch(() => null);
         if (pidfile?.pid === process.pid) await removeServePidfile();
         await server.stop();
         if (stream) await stream.stop().catch(() => undefined);
-        await runtime.dispose().catch(() => undefined);
+        await handle.dispose().catch(() => undefined);
         process.removeListener("SIGINT", onSigint);
         process.removeListener("SIGTERM", onSigterm);
         process.kill(process.pid, signal);
