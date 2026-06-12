@@ -269,8 +269,18 @@ export const api = {
         jsonFetch(`/api/sessions/${encodeURIComponent(sessionId)}`),
     sessionChildren: (parentId: string): Promise<SessionChildrenResponse> =>
         jsonFetch(`/api/sessions/${encodeURIComponent(parentId)}/children`),
-    sessionInsights: (sessionId: string): Promise<SessionInsightsPayload> =>
-        jsonFetch(`/api/sessions/${encodeURIComponent(sessionId)}/insights`),
+    sessionInsights: async (sessionId: string): Promise<SessionInsightsPayload> => {
+        const payload = await jsonFetch<SessionInsightsPayload>(
+            `/api/sessions/${encodeURIComponent(sessionId)}/insights`,
+        );
+        // Daemons older than the /insights route answer via the /api/sessions/:id+
+        // catch-all with a 200 + session-detail shape. Reject it here so callers
+        // hit their query error path instead of crashing on `payload.phases`.
+        if (!Array.isArray((payload as { phases?: unknown }).phases)) {
+            throw new ApiError("daemon too old for session insights - update axctl", 404);
+        }
+        return payload;
+    },
     sessionInspect: (sessionId: string, params: { turnOffset?: number; turnLimit?: number } = {}): Promise<SessionInspectPayload> => {
         const usp = new URLSearchParams();
         if (params.turnOffset != null) usp.set("turn_offset", String(params.turnOffset));
