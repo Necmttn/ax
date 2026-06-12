@@ -1,0 +1,239 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>ax routing - architecture visual (1200x800)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link
+  href="https://fonts.googleapis.com/css2?family=Caveat:wght@500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap"
+  rel="stylesheet"
+/>
+<style>
+  :root {
+    --bg: #111111;
+    --stroke: #ece9e2;
+    --dim: #98948b;
+    --faint: #7c7870;
+    --amber: #ffcb6b;
+    --green: #c3e88d;
+    --hand: "Caveat", cursive;
+    --mono: "JetBrains Mono", ui-monospace, Menlo, monospace;
+  }
+  html, body { margin: 0; padding: 0; background: var(--bg); }
+
+  .canvas {
+    position: relative;
+    width: 1200px;
+    height: 800px;
+    background: var(--bg);
+    overflow: hidden;
+    font-family: var(--hand);
+    color: var(--stroke);
+  }
+
+  /* ---------- title ---------- */
+  .title {
+    position: absolute;
+    top: 34px;
+    left: 0;
+    width: 100%;
+    text-align: center;
+    font-family: var(--mono);
+    font-size: 21px;
+    font-weight: 500;
+    letter-spacing: 0.34em;
+    color: var(--stroke);
+  }
+  .title .dim { color: var(--faint); }
+
+  /* ---------- left margin labels ---------- */
+  .side-label {
+    position: absolute;
+    left: 38px;
+    font-size: 25px;
+    font-weight: 600;
+    color: #a8a399;
+    line-height: 1.1;
+  }
+  .side-label::after {
+    content: "";
+    display: block;
+    width: 46px;
+    margin-top: 6px;
+    border-top: 2px dashed #4a4740;
+  }
+  .side-label.judgment { top: 158px; transform: rotate(-1.2deg); }
+  .side-label.workers  { top: 458px; transform: rotate(-0.8deg); }
+
+  /* ---------- hand-drawn boxes ---------- */
+  .box {
+    position: absolute;
+    text-align: center;
+    padding: 20px 24px 22px;
+    /* the classic wobbly-rectangle radius trick */
+    border-radius: 255px 18px 225px 18px / 18px 225px 18px 255px;
+  }
+  .box .name {
+    font-weight: 700;
+    color: var(--stroke);
+    line-height: 1.05;
+  }
+  .box .sub {
+    font-weight: 500;
+    color: var(--dim);
+    line-height: 1.25;
+    margin-top: 8px;
+  }
+
+  .manager {
+    left: 370px;
+    top: 108px;
+    width: 460px;
+    border: 2.5px solid var(--stroke);
+    transform: rotate(-0.4deg);
+  }
+  .manager .name { font-size: 42px; }
+  .manager .sub  { font-size: 22px; }
+
+  .worker {
+    top: 408px;
+    width: 296px;
+    border: 2.5px dashed #c9c5bc;
+    padding-top: 24px;
+    padding-bottom: 26px;
+  }
+  .worker .name { font-size: 30px; }
+  .worker .sub  { font-size: 20px; }
+  .worker.w1 { left: 86px;  transform: rotate(0.5deg);  }
+  .worker.w2 { left: 452px; transform: rotate(-0.4deg); }
+  .worker.w3 { left: 818px; transform: rotate(0.35deg); }
+
+  /* ---------- annotations ---------- */
+  .hook-note {
+    position: absolute;
+    left: 622px;
+    top: 308px;
+    font-size: 21px;
+    font-weight: 600;
+    color: #b3aea4;
+    transform: rotate(-2deg);
+    white-space: nowrap;
+  }
+
+  .mined-note .you { color: var(--stroke); }
+  .mined-note {
+    position: absolute;
+    right: 56px;
+    top: 582px;
+    width: 330px;
+    text-align: right;
+    font-size: 22px;
+    font-weight: 600;
+    color: var(--dim);
+    line-height: 1.2;
+    transform: rotate(-0.8deg);
+  }
+  .mined-note .cmd { color: var(--amber); }
+
+  /* ---------- install pill ---------- */
+  .pill {
+    position: absolute;
+    left: 50%;
+    top: 700px;
+    transform: translateX(-50%);
+    background: #1d1c19;
+    border: 1.5px solid #3b3931;
+    border-radius: 999px;
+    padding: 13px 28px;
+    font-family: var(--mono);
+    font-size: 15px;
+    font-weight: 500;
+    color: #d6d2c8;
+    white-space: nowrap;
+  }
+  .pill .p { color: var(--green); margin-right: 4px; }
+
+  /* ---------- arrows ---------- */
+  svg.arrows {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+  }
+  svg.arrows path {
+    fill: none;
+    stroke: var(--stroke);
+    stroke-width: 2.2px;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+  svg.arrows path.loop {
+    stroke: #8a857c;
+    stroke-width: 2px;
+    stroke-dasharray: 7 8;
+  }
+  svg.arrows path.loop-head { stroke: #8a857c; }
+</style>
+</head>
+<body>
+  <div class="canvas">
+    <div class="title">ax <span class="dim">/</span> routing</div>
+
+    <!-- left margin labels -->
+    <div class="side-label judgment">Judgment</div>
+    <div class="side-label workers">Sonnet,<br />Haiku</div>
+
+    <!-- manager -->
+    <div class="box manager">
+      <div class="name">Fable / Opus</div>
+      <div class="sub">Orchestrate, plan, review, judge &mdash; never auto-routed</div>
+    </div>
+
+    <!-- workers -->
+    <div class="box worker w1">
+      <div class="name">Search &amp; locate</div>
+      <div class="sub">scan code, docs, sweeps</div>
+    </div>
+    <div class="box worker w2">
+      <div class="name">Spec&rsquo;d implementation</div>
+      <div class="sub">task N, bug fixes, features</div>
+    </div>
+    <div class="box worker w3">
+      <div class="name">Spec review</div>
+      <div class="sub">checklist compliance</div>
+    </div>
+
+    <!-- annotations -->
+    <div class="hook-note">route-dispatch hook</div>
+    <div class="mined-note">
+      classes mined from <span class="you">YOUR</span><br />dispatch history &mdash;
+      <span class="cmd">ax routing tune</span>
+    </div>
+
+    <!-- install pill -->
+    <div class="pill"><span class="p">$</span>curl -fsSL https://ax.necmttn.com/install | bash</div>
+
+    <!-- arrows overlay -->
+    <svg class="arrows" width="1200" height="800" viewBox="0 0 1200 800" aria-hidden="true">
+      <!-- left arrow: manager <-> worker 1 -->
+      <path d="M 520 254 C 478 282, 388 326, 318 364 S 268 388, 248 400" />
+      <path d="M 535 252 L 520 254 L 527 241" />
+      <path d="M 266 388 L 248 400 L 261 408" />
+
+      <!-- middle arrow: manager <-> worker 2 -->
+      <path d="M 600 256 C 597 290, 603 330, 599 360 S 601 384, 600 398" />
+      <path d="M 592 272 L 600 256 L 609 271" />
+      <path d="M 592 383 L 600 398 L 609 382" />
+
+      <!-- right arrow: manager <-> worker 3 -->
+      <path d="M 682 254 C 726 282, 814 326, 884 364 S 934 388, 952 400" />
+      <path d="M 675 241 L 682 254 L 667 253" />
+      <path d="M 940 408 L 952 400 L 935 388" />
+
+      <!-- loop-back: mined classes feed the routing decision -->
+      <path class="loop" d="M 1042 576 C 1112 514, 1126 416, 1066 346 S 964 318, 902 348" />
+      <path class="loop-head" d="M 919 337 L 902 348 L 919 358" />
+    </svg>
+  </div>
+</body>
+</html>
