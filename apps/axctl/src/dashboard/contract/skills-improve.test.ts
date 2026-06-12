@@ -34,6 +34,7 @@ describe("isContractRequest - skills/improve/live routing", () => {
         expect(isContractRequest("GET", "/api/skills")).toBe(true);
         expect(isContractRequest("POST", "/api/skills/decide-bulk")).toBe(true);
         expect(isContractRequest("GET", "/api/improve")).toBe(true);
+        expect(isContractRequest("GET", "/api/improve/analyze-brief")).toBe(true);
         expect(isContractRequest("POST", "/api/ingest")).toBe(true);
     });
 

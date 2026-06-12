@@ -333,6 +333,10 @@ export const ImproveGroup = HttpApiGroup.make("improve")
             success: Schema.Unknown,
             error: InternalError,
         }),
+        HttpApiEndpoint.get("analyzeBrief", "/api/improve/analyze-brief", {
+            success: Schema.Unknown,
+            error: InternalError,
+        }),
         HttpApiEndpoint.post("improveAction", "/api/improve/:sig/:action", {
             params: {
                 sig: Schema.String,
