@@ -157,6 +157,30 @@ describe("ToolCallCard (ToolRowItem / ToolRow)", () => {
         expect(html).toContain("var(--green) 9%");
     });
 
+    test("fallback grid survives once the lazy diff module resolves (order-independence)", async () => {
+        // Any earlier test file that SSR-renders an edit-class call kicks off
+        // the React.lazy import of tool-diff; once it resolves, ToolDiff (not
+        // the Suspense fallback) renders. With the highlighter still pending
+        // it must render the SAME fallback grid - not null - or these SSR
+        // assertions become test-order-dependent (this bit CI on PR #309).
+        const el = (
+            <ToolRowItem
+                call={call({
+                    name: "Edit",
+                    category: "edit",
+                    input: { file_path: "/a/b.ts", old_string: "const x = 1", new_string: "const x = 2" },
+                    command: null,
+                })}
+            />
+        );
+        renderToStaticMarkup(el); // trigger the lazy import
+        await new Promise((resolve) => setTimeout(resolve, 250)); // let it resolve
+        const html = renderToStaticMarkup(el);
+        expect(html).toContain("const x = 1");
+        expect(html).toContain("var(--red) 7%");
+        expect(html).toContain("var(--green) 9%");
+    });
+
     test("Write content arg renders verbatim; no diff tint", () => {
         const html = renderToStaticMarkup(
             <ToolRowItem

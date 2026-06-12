@@ -1,5 +1,6 @@
 import { File, MultiFileDiff } from "@pierre/diffs/react";
 import type { FileProps, MultiFileDiffProps } from "@pierre/diffs/react";
+import type { ReactNode } from "react";
 import type { DiffPair, ReadView } from "./edit-diff.ts";
 import { useHighlighterReady } from "./use-highlighter-ready.ts";
 
@@ -32,9 +33,12 @@ const READ_OPTIONS: FileProps<undefined>["options"] = {
     overflow: "wrap",
 };
 
-export function ToolFileView({ view }: { view: ReadView }) {
+/** `fallback` renders while the highlighter loads (and in SSR, where it never
+ *  loads) - the same plain markup the caller hands to its Suspense boundary,
+ *  so module-resolved-but-highlighter-pending never blanks the card. */
+export function ToolFileView({ view, fallback = null }: { view: ReadView; fallback?: ReactNode }) {
     const ready = useHighlighterReady([view.fileName]);
-    if (!ready) return null;
+    if (!ready) return fallback;
     return (
         <div
             data-testid="tool-card-file"
@@ -49,9 +53,12 @@ export function ToolFileView({ view }: { view: ReadView }) {
     );
 }
 
-export default function ToolDiff({ pairs }: { pairs: ReadonlyArray<DiffPair> }) {
+export default function ToolDiff({ pairs, fallback = null }: {
+    pairs: ReadonlyArray<DiffPair>;
+    fallback?: ReactNode;
+}) {
     const ready = useHighlighterReady(pairs.map((p) => p.fileName));
-    if (!ready) return null;
+    if (!ready) return fallback;
     return (
         <div
             data-testid="tool-card-diff"
