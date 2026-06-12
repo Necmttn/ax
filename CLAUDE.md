@@ -133,8 +133,16 @@ registration PR into Necmttn/ax (git-data API, no local clone). The watcher
 runs `--if-stale=6` after ingest - silent no-op until first consent.
 `--no-cost` is sticky across republishes; `ax profile unpublish` (delete
 gist + local state) resets it. State: `~/.ax/profile-publish.json`. Spec:
-docs/superpowers/specs/2026-06-12-ax-profiles-design.md; leaderboard/site
-land in plans 3-4.
+docs/superpowers/specs/2026-06-12-ax-profiles-design.md; site routes land
+in plan 4.
+
+Community rails: `community/users/<login>.json` registrations are validated
+(schema + author==filename, `scripts/validate-community-users.ts`) and
+auto-merged by `community-users.yml` (pull_request_target; PR head is data
+only, never executed); `community-nightly.yml` compiles registered gists
+into `community/{leaderboard,skill-stats,hook-stats,state/<year>}.json`
+(`scripts/compile-community.ts`, ETag-cached, absurd rows dropped). Compiled
+files are generated - never hand-edit.
 
 ### Dispatch routing
 
