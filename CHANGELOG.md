@@ -1,5 +1,36 @@
 # Changelog
 
+## [0.27.0](https://github.com/Necmttn/ax/compare/v0.26.0...v0.27.0) (2026-06-12)
+
+
+### Features
+
+* **community:** repo rails - registration auto-merge + nightly compile (plan 3) ([#320](https://github.com/Necmttn/ax/issues/320)) ([86f44d4](https://github.com/Necmttn/ax/commit/86f44d493a7fac6750a05f34b51ef1648ee663b5))
+* **dashboard+studio:** insights family on the contract + DB-down hardening ([#329](https://github.com/Necmttn/ax/issues/329)) ([89154ec](https://github.com/Necmttn/ax/commit/89154ec2807c013d4e209d08f483cb6b7f8b9c78))
+* **dashboard+studio:** sessions family on the contract ([#331](https://github.com/Necmttn/ax/issues/331)) ([57dfdb4](https://github.com/Necmttn/ax/commit/57dfdb44d998f5b58806f148f3ae4f0b6ab4b22f))
+* **dashboard+studio:** skills, improve, and ingest on the contract - migration complete ([#334](https://github.com/Necmttn/ax/issues/334)) ([3d4287b](https://github.com/Necmttn/ax/commit/3d4287bf07201b43b9bea1c1eda092999d225eed))
+* **dashboard:** improve-first - next actions panel with agent briefs (PR1) ([#327](https://github.com/Necmttn/ax/issues/327)) ([5d6bc85](https://github.com/Necmttn/ax/commit/5d6bc85fbf5ea18f25c453d4a499a0ef97de5c16))
+* **dashboard:** Insights Surface Contract v1 - system family on Effect HttpApi + Scalar docs ([#322](https://github.com/Necmttn/ax/issues/322)) ([479a8d0](https://github.com/Necmttn/ax/commit/479a8d0d12937813c770e916e32f2ace2cc9f918))
+* **dashboard:** server-scoped Effect runtime behind the EffectRunner seam ([#314](https://github.com/Necmttn/ax/issues/314)) ([d1980fd](https://github.com/Necmttn/ax/commit/d1980fd373162d9470bcb5cbfc78fc71168e3101))
+* **profile:** activity + insights sections & profile-page redesign ([#330](https://github.com/Necmttn/ax/issues/330)) ([9627970](https://github.com/Necmttn/ax/commit/9627970735b63b784f9117612ea4be5b3c5cb73a))
+* **profile:** ax profile publish/unpublish - profiles spec, plan 2 (gist + fork rails) ([#319](https://github.com/Necmttn/ax/issues/319)) ([157b8b2](https://github.com/Necmttn/ax/commit/157b8b26f542bde3210a056b9b68a785ad071435))
+* **profile:** ax profile show - profiles spec, plan 1 (local renderer) ([#318](https://github.com/Necmttn/ax/issues/318)) ([8cc6e6f](https://github.com/Necmttn/ax/commit/8cc6e6ff6418f77a9adfacd296f6204cb64caa37))
+* **routing:** ax routing tune - user-facing routing-table tuning ([#328](https://github.com/Necmttn/ax/issues/328)) ([2dffb62](https://github.com/Necmttn/ax/commit/2dffb6232599b660d6589ee1eeb4a0940244fd30))
+* **serve:** self-aware daemon - friendly already-running UX, status/stop ([#315](https://github.com/Necmttn/ax/issues/315)) ([a262f0e](https://github.com/Necmttn/ax/commit/a262f0efb2f8b658114740bb1713cda2819229be))
+* **site:** /routing feature page + launch marketing assets ([#336](https://github.com/Necmttn/ax/issues/336)) ([56c9658](https://github.com/Necmttn/ax/commit/56c9658d2c2541ae4042538b4a789976097242f7))
+* **site:** /u/&lt;login&gt; profiles + /leaders boards - profiles spec, plan 4 ([#321](https://github.com/Necmttn/ax/issues/321)) ([29a761c](https://github.com/Necmttn/ax/commit/29a761c49c3bb9e2ac081190b03983512eac21fb))
+* **site:** profile OG cards, crawler meta, visitor CTA ([#333](https://github.com/Necmttn/ax/issues/333)) ([46d1ffe](https://github.com/Necmttn/ax/commit/46d1ffe0989a4a73d66f642bf2e72385e4828a87))
+* **studio:** generated HttpApiClient for the version handshake (contract PR B) ([#325](https://github.com/Necmttn/ax/issues/325)) ([6c31aa3](https://github.com/Necmttn/ax/commit/6c31aa35158f97efc969f7980fc8ce79b7110f9d))
+
+
+### Bug Fixes
+
+* **community:** live-test findings - lowercase registration filename, raw-URL gist fetch ([#324](https://github.com/Necmttn/ax/issues/324)) ([b7f42ef](https://github.com/Necmttn/ax/commit/b7f42ef70aae50386589094f767aa354dc8722fd))
+* **community:** lowercase registration filename (necmttn) ([fb84eeb](https://github.com/Necmttn/ax/commit/fb84eeb78b9422547a155fe970c7c33077a996a4))
+* **community:** remove uppercase duplicate registration ([2fdffb9](https://github.com/Necmttn/ax/commit/2fdffb9489168d2e148a240320438974e6b8d8a9))
+* **site:** correct repo-root mirror import depth for 2-level functions ([#335](https://github.com/Necmttn/ax/issues/335)) ([49d2e16](https://github.com/Necmttn/ax/commit/49d2e16016d9b6d30e125555ab50e8ffce5b45c3))
+* **studio:** guard sessionInsights against old-daemon catch-all payload ([#317](https://github.com/Necmttn/ax/issues/317)) ([118afbe](https://github.com/Necmttn/ax/commit/118afbe801068181aa35e161d2cf86027af312ca))
+
 ## [0.26.0](https://github.com/Necmttn/ax/compare/v0.25.0...v0.26.0) (2026-06-12)
 
 
