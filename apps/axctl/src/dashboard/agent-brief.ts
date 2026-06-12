@@ -8,6 +8,7 @@ export interface AgentBrief {
     readonly source: string;
 }
 
+/** Renders an AgentBrief as a copy-pasteable markdown task block. */
 export const renderAgentBrief = (b: AgentBrief): string =>
     [
         `## Task: ${b.title}`,

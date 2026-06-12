@@ -1182,21 +1182,23 @@ export interface ProposalDto {
     readonly status: ProposalStatus | string;
     readonly reject_reason: string | null;
     readonly created_at: string;
-    /** server-rendered markdown agent brief (PR1) */
-    readonly brief?: string;
     readonly skill_payload?: SkillProposalPayload | null;
     readonly subagent_payload?: SubagentProposalPayload | null;
     readonly hook_payload?: HookProposalPayload | null;
     readonly guidance_payload?: GuidanceProposalPayload | null;
     readonly automation_payload?: AutomationProposalPayload | null;
     readonly experiment?: ExperimentDto | null;
+    /** server-rendered markdown agent brief */
+    readonly brief?: string;
 }
 
 export interface ImprovePayload {
     readonly proposals: ReadonlyArray<ProposalDto>;
 }
 
-// ---- Next actions (improve-first dashboard, PR1) ----
+// ---------------------------------------------------------------------------
+// Next actions (improve-first dashboard)
+// ---------------------------------------------------------------------------
 
 export type NextActionKind =
     | "proposal"
@@ -1233,6 +1235,7 @@ export interface NextActionCard {
 }
 
 export interface NextActionsSourceNote {
+    /** which aggregation leg failed/skipped - keyed by card kind by design */
     readonly source: NextActionKind;
     readonly note: string;
 }
