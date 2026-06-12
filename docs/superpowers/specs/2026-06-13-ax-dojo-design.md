@@ -92,9 +92,21 @@ Per lap:
 3. take the top item, follow its playbook
 4. goto 1
 
-On Claude Code it pairs naturally with `/loop` dynamic mode; on Codex the
-same SKILL.md drives the loop. The skill text contains no discovery logic -
-only loop mechanics + per-kind playbooks.
+**Entry mechanics** (user types `/dojo`, nothing else):
+
+- Claude Code: skills compose - the dojo SKILL.md's first step invokes
+  `/loop` dynamic mode with `/dojo` as the prompt, which unlocks
+  `ScheduleWakeup` self-pacing between laps (wakeups re-fire the skill, so
+  the run survives early turn-ends and context growth). Typing `/loop /dojo`
+  directly reaches the same path. A bare skill cannot self-schedule wakeups
+  without entering through /loop - that gating is why dojo composes rather
+  than reimplements.
+- Codex: no /loop equivalent - v1 runs as one long in-turn loop ("do not
+  end the turn until budget exhausted or agenda empty"). Weaker resilience,
+  acceptable for v1.
+
+The skill text contains no discovery logic - only loop mechanics + per-kind
+playbooks.
 
 ### Training output = proposals
 
@@ -186,8 +198,6 @@ later.
 
 ## Open questions
 
-- Does Codex expose enough loop control for parity, or does v1 Codex run as
-  a single long turn?
 - Cost-class estimation: static per-kind, or learned from dispatch history?
 - Spar model deltas: subagent model override covers Claude-family swaps on
   plan quota; is that enough for v1, or does model comparison need the
