@@ -9643,7 +9643,7 @@ footer .right {
     display: flex;
     align-items: flex-end;
     gap: 3px;
-    height: 156px;
+    height: 324px;
     border-bottom: 2px solid var(--ink);
 }
 .pf-stack-day {
