@@ -1,0 +1,299 @@
+/**
+ * Pure card builders for the /api/next-actions panel.
+ *
+ * Each builder takes its data source rows and returns NextActionCard[],
+ * sorted by impact descending and capped at PER_SOURCE_CAP.
+ *
+ * These are PURE functions - no DB access. The Effect aggregator (next task)
+ * orchestrates fetching and calls these builders.
+ */
+
+import type {
+    NextActionCard,
+    NextActionKind,
+    ProposalDto,
+    ToolFailureEntry,
+} from "@ax/lib/shared/dashboard-types";
+import type { SessionChurnSummary } from "../metrics/session-churn.ts";
+import type { CandidatesResult } from "../queries/dispatch-analytics.ts";
+import type { SkillHygieneRow } from "../queries/skill-hygiene.ts";
+import { renderAgentBrief } from "./agent-brief.ts";
+
+// ---------------------------------------------------------------------------
+// Ranking constants
+// ---------------------------------------------------------------------------
+
+const KIND_WEIGHT: Record<NextActionKind, number> = {
+    verdict: 90,
+    proposal: 80,
+    tool_failure: 70,
+    routing: 60,
+    churn: 50,
+    skill_hygiene: 40,
+};
+
+const CONFIDENCE_WEIGHT: Record<string, number> = { high: 3, medium: 2, low: 1 };
+
+/** Clamp a raw per-source score to [0, 9] for the bonus component. */
+const bonus = (n: number): number => Math.max(0, Math.min(9, Math.round(n)));
+
+/** Maximum cards returned per source builder. */
+const PER_SOURCE_CAP = 5;
+
+// ---------------------------------------------------------------------------
+// proposalCards
+// ---------------------------------------------------------------------------
+
+/**
+ * Cards for open improve proposals: review + accept or reject each one.
+ */
+export const proposalCards = (
+    proposals: ReadonlyArray<ProposalDto>,
+): NextActionCard[] =>
+    proposals
+        .filter((p) => p.status === "open")
+        .map((p): NextActionCard => {
+            const cw = CONFIDENCE_WEIGHT[p.confidence] ?? 1;
+            return {
+                id: `proposal:${p.dedupe_sig}`,
+                kind: "proposal",
+                title: `Decide proposal: ${p.title}`,
+                evidence: `${p.form} proposal, confidence ${p.confidence}, seen ${p.frequency}x`,
+                impact: KIND_WEIGHT.proposal + bonus(cw * Math.log2(p.frequency + 1)),
+                brief: renderAgentBrief({
+                    title: p.title,
+                    evidence: `hypothesis: ${p.hypothesis} (seen ${p.frequency}x, confidence ${p.confidence})`,
+                    ask: "Review this proposal; if sound, run `ax improve accept` and act on the emitted .ax/tasks brief.",
+                    verify: "`ax improve show` reflects accepted status; follow the experiment checkpoints.",
+                    source: `ax improve proposal sig=${p.dedupe_sig}`,
+                }),
+                link: null,
+                inline_action: {
+                    type: "accept",
+                    sig: p.dedupe_sig,
+                    skill: null,
+                    suggested_verdict: null,
+                },
+            };
+        })
+        .sort((a, b) => b.impact - a.impact)
+        .slice(0, PER_SOURCE_CAP);
+
+// ---------------------------------------------------------------------------
+// verdictCards
+// ---------------------------------------------------------------------------
+
+/**
+ * Cards for accepted proposals whose experiment needs a verdict locked.
+ * Only includes proposals where:
+ * - status === "accepted"
+ * - experiment exists
+ * - experiment.locked_verdict is null/undefined (not yet decided)
+ */
+export const verdictCards = (
+    proposals: ReadonlyArray<ProposalDto>,
+): NextActionCard[] =>
+    proposals
+        .filter(
+            (p) =>
+                p.status === "accepted" &&
+                p.experiment != null &&
+                (p.experiment.locked_verdict == null),
+        )
+        .map((p): NextActionCard => {
+            const experiment = p.experiment!;
+            const suggested = experiment.latest_checkpoint?.suggested ?? null;
+            const evidenceLine = suggested != null
+                ? `experiment scaffolded, suggested verdict: ${suggested}`
+                : "experiment scaffolded, no checkpoint yet";
+
+            return {
+                id: `verdict:${p.dedupe_sig}`,
+                kind: "verdict",
+                title: `Lock verdict: ${p.title}`,
+                evidence: evidenceLine,
+                impact: KIND_WEIGHT.verdict + (suggested != null ? 3 : 0),
+                brief: renderAgentBrief({
+                    title: `Lock verdict for experiment: ${p.title}`,
+                    evidence: `experiment status: ${experiment.status ?? "unknown"}; ${evidenceLine}`,
+                    ask: `Lock the verdict (suggested: ${suggested ?? "none"}) via the Improve dashboard or \`ax improve\` CLI; if evidence is thin, check retro notes first.`,
+                    verify: "`ax improve show` reports a locked verdict for this experiment.",
+                    source: `ax improve proposal sig=${p.dedupe_sig}`,
+                }),
+                link: null,
+                inline_action: {
+                    type: "verdict",
+                    sig: p.dedupe_sig,
+                    skill: null,
+                    suggested_verdict: suggested as string | null,
+                },
+            };
+        })
+        .sort((a, b) => b.impact - a.impact)
+        .slice(0, PER_SOURCE_CAP);
+
+// ---------------------------------------------------------------------------
+// toolFailureCards
+// ---------------------------------------------------------------------------
+
+/**
+ * Cards for tool failure clusters that warrant fixing.
+ */
+export const toolFailureCards = (
+    failures: ReadonlyArray<ToolFailureEntry>,
+): NextActionCard[] =>
+    failures
+        .filter((f) => f.recommendation === "fix")
+        .map((f): NextActionCard => {
+            const extraEvidence: string[] = [];
+            if (f.last_error_text != null) extraEvidence.push(`last error: ${f.last_error_text}`);
+            if (f.last_project != null) extraEvidence.push(`project: ${f.last_project}`);
+
+            return {
+                id: `tool_failure:${f.label}`,
+                kind: "tool_failure",
+                title: `Fix \`${f.label}\` failure cluster`,
+                evidence: `${f.failure_count} failures / ${f.distinct_sessions} sessions, exits [${f.exit_codes.join(", ")}]`,
+                impact: KIND_WEIGHT.tool_failure + bonus(Math.log2(f.failure_count)),
+                brief: renderAgentBrief({
+                    title: `Fix \`${f.label}\` failure cluster`,
+                    evidence: [
+                        `${f.failure_count} failures across ${f.distinct_sessions} sessions`,
+                        ...extraEvidence,
+                    ].join("; "),
+                    ask: "Diagnose the dominant failure mode and fix root cause (env, flag, or guard).",
+                    verify: `failure_count for this label stops growing in /api/tool-failures over the next 7d`,
+                    source: `ax tool-failure label=${f.label}`,
+                }),
+                link: "/tools",
+                inline_action: null,
+            };
+        })
+        .sort((a, b) => b.impact - a.impact)
+        .slice(0, PER_SOURCE_CAP);
+
+// ---------------------------------------------------------------------------
+// churnCards
+// ---------------------------------------------------------------------------
+
+/**
+ * Cards for churny sessions: sessions with high repair LOC or many verification failures.
+ *
+ * Outlier criteria (either):
+ *   - repair >= 100 AND repair >= 50% of landed LOC
+ *   - verificationFailures >= 5
+ */
+export const churnCards = (summary: SessionChurnSummary): NextActionCard[] =>
+    summary.hotSessions
+        .filter((row) => {
+            const repair = row.repairLinesAdded + row.repairLinesRemoved;
+            const landed = row.landedLinesAdded + row.landedLinesRemoved;
+            const repairOutlier = repair >= 100 && repair >= 0.5 * Math.max(landed, 1);
+            const failureOutlier = row.verificationFailures >= 5;
+            return repairOutlier || failureOutlier;
+        })
+        .map((row): NextActionCard => {
+            const repair = row.repairLinesAdded + row.repairLinesRemoved;
+            const landed = row.landedLinesAdded + row.landedLinesRemoved;
+            const label = row.taskLabel ?? row.source ?? "unknown";
+
+            return {
+                id: `churn:${row.session}`,
+                kind: "churn",
+                title: `Investigate churny session ${row.session}`,
+                evidence: `${row.session} (${label}): ${repair} repair LOC vs ${landed} landed, ${row.verificationFailures} failed checks`,
+                impact: KIND_WEIGHT.churn + bonus(row.verificationFailures),
+                brief: renderAgentBrief({
+                    title: `Churny session: ${row.session}`,
+                    evidence: `${repair} repair LOC vs ${landed} landed; ${row.verificationFailures} verification failures; top check: ${row.topCheck ?? "unknown"}`,
+                    ask: "Reconstruct what kept failing (ax sessions show <id>) and turn the recurring failure into a proposal (guidance/hook/skill).",
+                    verify: "the same failure family does not reopen in `ax sessions churn` next window.",
+                    source: `ax sessions churn session=${row.session}`,
+                }),
+                link: `/sessions/${row.session}`,
+                inline_action: null,
+            };
+        })
+        .sort((a, b) => b.impact - a.impact)
+        .slice(0, PER_SOURCE_CAP);
+
+// ---------------------------------------------------------------------------
+// routingCards
+// ---------------------------------------------------------------------------
+
+/**
+ * Cards for dispatch routing opportunities: inherit+expensive dispatches that match
+ * a routing class and could save money by routing to a cheaper model.
+ *
+ * Dedupes by routing class id - keeps the highest-savings candidate per class.
+ */
+export const routingCards = (result: CandidatesResult): NextActionCard[] => {
+    // Dedupe by classId - keep highest est_savings_usd per class
+    const byClass = new Map<string, (typeof result.candidates)[number]>();
+    for (const candidate of result.candidates) {
+        const classId = candidate.routing_match.classId;
+        const existing = byClass.get(classId);
+        if (existing == null || candidate.est_savings_usd > existing.est_savings_usd) {
+            byClass.set(classId, candidate);
+        }
+    }
+
+    return [...byClass.values()]
+        .filter((c) => c.est_savings_usd >= 0.01)
+        .map((c): NextActionCard => {
+            const classId = c.routing_match.classId;
+            return {
+                id: `routing:${classId}`,
+                kind: "routing",
+                title: `Route ${classId} dispatches to ${c.suggested_model}`,
+                evidence: `$${c.est_savings_usd.toFixed(2)} est savings - "${c.description}" went to ${c.child_model}`,
+                impact: KIND_WEIGHT.routing + bonus(c.est_savings_usd),
+                brief: renderAgentBrief({
+                    title: `Route ${classId} dispatches to ${c.suggested_model}`,
+                    evidence: `${c.routing_match.reason}; child ran on ${c.child_model}; est savings $${c.est_savings_usd.toFixed(2)}`,
+                    ask: "Add an explicit model to this dispatch pattern (or extend the routing class) so it stops inheriting the frontier model.",
+                    verify: "`ax dispatches --candidates` no longer lists this class.",
+                    source: `ax dispatches class=${classId}`,
+                }),
+                link: null,
+                inline_action: null,
+            };
+        })
+        .sort((a, b) => b.impact - a.impact)
+        .slice(0, PER_SOURCE_CAP);
+};
+
+// ---------------------------------------------------------------------------
+// skillHygieneCards
+// ---------------------------------------------------------------------------
+
+/**
+ * Cards for unclassified skills that have enough invocations to warrant tagging.
+ */
+export const skillHygieneCards = (
+    rows: ReadonlyArray<SkillHygieneRow>,
+): NextActionCard[] =>
+    rows
+        .map((row): NextActionCard => ({
+            id: `skill_hygiene:${row.name}`,
+            kind: "skill_hygiene",
+            title: `Classify skill ${row.name}`,
+            evidence: `${row.invocations} invocations, no role`,
+            impact: KIND_WEIGHT.skill_hygiene + bonus(Math.log2(row.invocations)),
+            brief: renderAgentBrief({
+                title: `Classify skill: ${row.name}`,
+                evidence: `${row.invocations} invocations, no role assigned`,
+                ask: `Run \`ax skills classify ${row.name}\` and fill the emitted brief, or \`ax skills tag ${row.name} <role>\`.`,
+                verify: "`ax skills roles` lists a role for it; it leaves the unclassified pool.",
+                source: `ax skills classify candidate=${row.name}`,
+            }),
+            link: "/skills",
+            inline_action: {
+                type: "decide",
+                sig: null,
+                skill: row.name,
+                suggested_verdict: null,
+            },
+        }))
+        .sort((a, b) => b.impact - a.impact)
+        .slice(0, PER_SOURCE_CAP);
