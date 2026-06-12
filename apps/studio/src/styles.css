@@ -2912,3 +2912,159 @@ td.skill-cell .description {
     z-index: 1;
 }
 .improve-history { margin-top: 24px; }
+
+/* ---- proposal drawer (fixed overlay - zero reflow) ---- */
+.proposal-drawer-scrim {
+    position: fixed;
+    inset: 0;
+    z-index: 199;
+    background: rgba(20, 22, 21, 0.18);
+    cursor: pointer;
+}
+.proposal-drawer {
+    position: fixed;
+    top: 0;
+    right: 0;
+    width: clamp(460px, 38vw, 620px);
+    height: 100vh;
+    overflow-y: auto;
+    z-index: 200;
+    background: var(--panel);
+    border-left: 1px solid var(--line);
+    box-shadow: -8px 0 32px rgba(0, 0, 0, 0.12);
+    padding: 20px 28px 40px;
+    animation: drawer-in 220ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+@keyframes drawer-in {
+    from { transform: translateX(100%); }
+    to { transform: translateX(0); }
+}
+.proposal-drawer-close { margin-bottom: 10px; }
+
+/* ---- experiments section (past bets, measured) ---- */
+.experiments-section { margin-top: 28px; }
+.experiments-lead {
+    display: flex;
+    align-items: baseline;
+    gap: 12px;
+    flex-wrap: wrap;
+    margin-bottom: 10px;
+}
+.experiments-headline {
+    margin: 0;
+    font-family: Georgia, serif;
+    font-weight: 600;
+    font-size: 20px;
+    letter-spacing: -0.01em;
+    text-transform: none;
+}
+.experiments-count {
+    font-family: ui-monospace, Menlo, monospace;
+    font-size: 11px;
+    color: var(--muted-2);
+    margin-left: auto;
+}
+.experiments-list { display: flex; flex-direction: column; gap: 8px; }
+.experiment-card {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    width: 100%;
+    text-align: left;
+    border: 1px solid var(--line);
+    border-left: 4px solid var(--card-accent, var(--blue));
+    background: var(--panel);
+    padding: 12px 14px;
+    cursor: pointer;
+    font: inherit;
+    color: inherit;
+}
+.experiment-card.accent-green  { --card-accent: var(--green); }
+.experiment-card.accent-blue   { --card-accent: var(--blue); }
+.experiment-card.accent-gold   { --card-accent: var(--gold); }
+.experiment-card.accent-rose   { --card-accent: var(--rose); }
+.experiment-card.accent-muted  { --card-accent: var(--muted); }
+.experiment-card.state-win        { background: color-mix(in srgb, var(--green) 4%, var(--panel)); }
+.experiment-card.state-regressed  { background: color-mix(in srgb, var(--rose) 4%, var(--panel)); }
+.experiment-card-meta {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    flex: 1;
+    min-width: 0;
+}
+.experiment-card-eyebrow {
+    font-family: ui-monospace, Menlo, monospace;
+    font-size: 11px;
+    color: var(--muted);
+}
+.experiment-card-title {
+    font-family: Georgia, serif;
+    font-size: 15px;
+    color: var(--ink);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.experiment-card-artifact {
+    font-family: ui-monospace, Menlo, monospace;
+    font-size: 12px;
+    color: var(--muted);
+}
+.experiment-card-trace {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 3px;
+    flex-shrink: 0;
+}
+.experiment-trace {
+    display: flex;
+    align-items: flex-end;
+    gap: 3px;
+    width: 64px;
+    height: 28px;
+    position: relative;
+}
+.experiment-trace i {
+    flex: 1;
+    background: color-mix(in srgb, var(--muted) 30%, var(--panel));
+    border-radius: 1px 1px 0 0;
+    position: relative;
+    min-height: 1px;
+}
+.experiment-trace-addr {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    background: var(--card-accent, var(--blue));
+    opacity: 0.85;
+    border-radius: 1px 1px 0 0;
+}
+.experiment-trace.is-win::after {
+    content: "";
+    position: absolute;
+    bottom: -2px;
+    left: 0;
+    right: 0;
+    height: 2px;
+    background: var(--green);
+}
+.experiment-trace-caption {
+    font-family: ui-monospace, Menlo, monospace;
+    font-size: 10px;
+    color: var(--muted);
+    white-space: nowrap;
+}
+.experiments-empty {
+    border: 1px solid var(--line);
+    background: var(--panel);
+    padding: 20px;
+}
+.experiments-empty-head {
+    margin: 0 0 8px;
+    font-family: Georgia, serif;
+    font-size: 18px;
+    color: var(--ink);
+}

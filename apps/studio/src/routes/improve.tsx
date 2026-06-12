@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { createPortal } from "react-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api.ts";
 import type {
@@ -11,6 +12,7 @@ import type {
 } from "@ax/lib/shared/dashboard-types";
 import { fmtTs } from "@ax/lib/shared/formatters";
 import { NextActionsPanel } from "../components/next-actions-panel.tsx";
+import { ExperimentsSection } from "../components/experiments-section.tsx";
 import { CopyButton } from "../components/copy-button.tsx";
 import { DecisionsSection } from "../components/decisions-section.tsx";
 
@@ -45,7 +47,9 @@ export function ImproveRoute() {
     const queryClient = useQueryClient();
     const [formFilter, setFormFilter] = useState<ProposalForm | "all">("all");
     const [statusFilter, setStatusFilter] = useState<ProposalStatus | "all">("open");
-    const [selectedSig, setSelectedSig] = useState<string | null>(null);
+    const [selectedSig, setSelectedSig] = useState<string | null>(
+        () => new URLSearchParams(window.location.search).get("sig"),
+    );
     const [rejectReason, setRejectReason] = useState<string>("");
     const [actionError, setActionError] = useState<string | null>(null);
     const [actionInfo, setActionInfo] = useState<string | null>(null);
@@ -72,10 +76,20 @@ export function ImproveRoute() {
         () => proposals.find((p) => p.dedupe_sig === selectedSig) ?? null,
         [proposals, selectedSig],
     );
-    const caseRef = useRef<HTMLDivElement | null>(null);
+    // Drawer is linkable (?sig=) and closes on Escape; fixed overlay = no reflow.
     useEffect(() => {
-        if (selectedSig !== null) caseRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+        const url = new URL(window.location.href);
+        if (selectedSig) url.searchParams.set("sig", selectedSig);
+        else url.searchParams.delete("sig");
+        window.history.replaceState(null, "", url);
     }, [selectedSig]);
+    useEffect(() => {
+        const onKey = (e: KeyboardEvent) => {
+            if (e.key === "Escape") setSelectedSig(null);
+        };
+        window.addEventListener("keydown", onKey);
+        return () => window.removeEventListener("keydown", onKey);
+    }, []);
 
     const onActionResult = (action: string, res: ImproveActionResponse) => {
         if (res.status === "ok") {
@@ -137,26 +151,40 @@ export function ImproveRoute() {
             {actionError ? <div className="error">{actionError}</div> : null}
             {actionInfo ? <div className="empty" style={{ color: "var(--green)" }}>{actionInfo}</div> : null}
 
-            {selected ? (
-                <div className="proposal-case panel" ref={caseRef}>
-                    <button
-                        type="button"
-                        className="next-action-ghost proposal-case-close"
-                        onClick={() => setSelectedSig(null)}
+            {selected ? createPortal(
+                <>
+                    <div className="proposal-drawer-scrim" onClick={() => setSelectedSig(null)} />
+                    <aside
+                        className="proposal-drawer"
+                        role="dialog"
+                        aria-modal="true"
+                        aria-label={selected.title}
                     >
-                        close &#10005;
-                    </button>
-                    <ProposalDetail
-                        proposal={selected}
-                        rejectReason={rejectReason}
-                        onRejectReason={setRejectReason}
-                        onAccept={() => acceptMutation.mutate(selected.dedupe_sig)}
-                        onReject={() => rejectMutation.mutate({ sig: selected.dedupe_sig, reason: rejectReason || null })}
-                        onSetVerdict={(verdict) => verdictMutation.mutate({ sig: selected.dedupe_sig, verdict })}
-                        pending={acceptMutation.isPending || rejectMutation.isPending || verdictMutation.isPending}
-                    />
-                </div>
+                        <button
+                            type="button"
+                            className="next-action-ghost proposal-drawer-close"
+                            onClick={() => setSelectedSig(null)}
+                        >
+                            &#8592; close
+                        </button>
+                        <ProposalDetail
+                            proposal={selected}
+                            rejectReason={rejectReason}
+                            onRejectReason={setRejectReason}
+                            onAccept={() => acceptMutation.mutate(selected.dedupe_sig)}
+                            onReject={() => rejectMutation.mutate({ sig: selected.dedupe_sig, reason: rejectReason || null })}
+                            onSetVerdict={(verdict) => verdictMutation.mutate({ sig: selected.dedupe_sig, verdict })}
+                            pending={acceptMutation.isPending || rejectMutation.isPending || verdictMutation.isPending}
+                        />
+                    </aside>
+                </>,
+                document.body,
             ) : null}
+
+            <ExperimentsSection
+                proposals={proposals}
+                onOpen={(sig) => setSelectedSig(sig)}
+            />
 
             <details className="improve-history">
             <summary style={{ cursor: "pointer" }}><strong>All proposals</strong> <span className="meta">{proposals.length} total - history and filters</span></summary>

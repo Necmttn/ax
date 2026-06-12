@@ -1186,6 +1186,8 @@ export interface ExperimentDto {
     readonly created_at: string;
     readonly scaffolded_at: string | null;
     readonly latest_checkpoint: CheckpointSnapshotDto | null;
+    /** full +3s/+10s/+30s series, observed_at ASC - drives the trace strip */
+    readonly checkpoints?: ReadonlyArray<CheckpointSnapshotDto>;
 }
 
 export interface ProposalDto {
