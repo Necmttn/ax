@@ -3,7 +3,6 @@ import { Effect, FileSystem, Option, Path, Schema } from "effect";
 import { AxConfig } from "@ax/lib/config";
 import { SkillName } from "@ax/lib/brands";
 import { RecordId, SurrealClient } from "@ax/lib/db";
-import { jsonParseErrorText } from "@ax/lib/decode";
 import { orAbsent } from "@ax/lib/shared/fs-error";
 import { classifyNoFollow } from "@ax/lib/shared/fs-classify";
 import { posixPath } from "@ax/lib/shared/path";
@@ -19,10 +18,12 @@ import { providerDelegationSignalAvailability } from "./delegation.ts";
 import { agentEventRecordKey, type AgentEventWrite } from "./provider-events.ts";
 import { buildNormalizedTranscriptStatements, type NormalizedTranscriptBatch } from "./normalized/transcripts.ts";
 import { providerPlanSignalAvailability } from "./plans.ts";
-import { identityPart, toolCallRecordKey, turnRecordKey } from "./record-keys.ts";
+import { identityPart, toolCallRecordKey } from "./record-keys.ts";
 import { BaseStageStats, IngestContext, sinceDaysFromCtx, StageMeta } from "./stage/types.ts";
 import type { StageDef } from "./stage/registry.ts";
-import { extractCommandTool, normalizeCommand, toolKindForName } from "./tool-calls.ts";
+import { boundExcerpt, isRecord, parseJsonRecord, stringField } from "./normalized/toolkit.ts";
+import { makeToolCallWrite } from "./normalized/tool-call-write.ts";
+import { extractCommandTool, normalizeCommand } from "./tool-calls.ts";
 
 export const CursorKey = Schema.Literal("cursor");
 export type CursorKey = typeof CursorKey.Type;
@@ -119,15 +120,6 @@ export function isAllowedCursorHistoryKey(key: string): boolean {
     return CURSOR_HISTORY_KEYS.has(key) || key.startsWith(CURSOR_COMPOSER_DATA_PREFIX);
 }
 
-function isRecord(input: unknown): input is Record<string, unknown> {
-    return typeof input === "object" && input !== null && !Array.isArray(input);
-}
-
-function stringField(input: Record<string, unknown>, field: string): string | null {
-    const value = input[field];
-    return typeof value === "string" ? value : null;
-}
-
 function validTimestamp(input: unknown, fallback: string): { ts: string; warning: string | null } {
     if (input === null || input === undefined) return { ts: fallback, warning: "missing timestamp" };
     if (typeof input !== "string" && typeof input !== "number") {
@@ -207,44 +199,12 @@ function decodeSqliteValue(value: SQLiteValue | undefined): string | null {
  *  parse. */
 const decodeJsonStringOption = Schema.decodeUnknownOption(Schema.UnknownFromJsonString);
 
-function parseJsonRecord(raw: string | null, label: string, warnings: string[]): Record<string, unknown> | null {
-    if (raw === null || raw.trim().length === 0) {
-        warnings.push(`${label}: missing JSON data`);
-        return null;
-    }
-    const parsed = decodeJsonStringOption(raw);
-    if (Option.isNone(parsed)) {
-        warnings.push(`${label}: invalid JSON data (${jsonParseErrorText(raw)})`);
-        return null;
-    }
-    if (isRecord(parsed.value)) return parsed.value;
-    warnings.push(`${label}: JSON data is not an object`);
-    return null;
-}
-
 function parseJsonValue(input: unknown): unknown {
     if (typeof input !== "string") return input;
     const trimmed = input.trim();
     if (trimmed.length === 0) return null;
     const parsed = decodeJsonStringOption(trimmed);
     return Option.isSome(parsed) ? parsed.value : input;
-}
-
-function boundExcerpt(input: unknown, max = 1200): string | null {
-    let text: string | null = null;
-    if (typeof input === "string") {
-        text = input;
-    } else if (input !== null && input !== undefined) {
-        try {
-            text = JSON.stringify(input);
-        } catch {
-            text = String(input);
-        }
-    }
-    if (text === null) return null;
-    const normalized = text.replace(/\r\n/g, "\n").trim();
-    if (normalized.length === 0) return null;
-    return normalized.length <= max ? normalized : `${normalized.slice(0, max - 1)}…`;
 }
 
 function cursorToolCallId(
@@ -349,7 +309,6 @@ function pushCursorToolCall(input: {
     ordinal: number;
     ts: string;
     sourceKey: string;
-    turnKey: string;
     toolCalls: ToolCallWrite[];
     providerEvents: AgentEventWrite[];
     invocations: CursorInvocation[];
@@ -376,29 +335,26 @@ function pushCursorToolCall(input: {
         : null;
     const eventSeq = SYNTHETIC_PROVIDER_SEQ_OFFSET + (input.seq * 1000) + input.ordinal;
     const call: ToolCallWrite = {
-        provider: "cursor",
-        toolName,
-        toolKind: toolKindForName(toolName),
-        sessionId: input.session.id,
-        seq: input.seq,
-        turnKey: input.turnKey,
-        agentEventKey: agentEventRecordKey({
+        ...makeToolCallWrite({
             provider: "cursor",
-            providerSessionId: input.session.id,
-            providerEventId: callId,
-            seq: eventSeq,
+            toolName,
+            sessionId: input.session.id,
+            seq: input.seq,
+            callId,
+            eventSeq,
+            ts: input.ts,
+            inputJson,
+            rawJson: {
+                source: "cursor_state_vscdb",
+                sourceKey: input.sourceKey,
+                tool: rawToolPayload(input.raw),
+            },
         }),
-        callId,
-        ts: input.ts,
-        inputJson,
         outputJson,
-        rawJson: {
-            source: "cursor_state_vscdb",
-            sourceKey: input.sourceKey,
-            tool: rawToolPayload(input.raw),
-        },
         outputExcerpt: boundExcerpt(outputJson),
         errorText,
+        // Cursor always carries the command triple (possibly null) rather
+        // than the exec_command-gated applyCommandFields path.
         commandText: command,
         commandToolName: extractCommandTool(command),
         commandNorm: normalizeCommand(command),
@@ -577,7 +533,6 @@ function pushCursorMessage(input: {
         },
     });
 
-    const turnKey = turnRecordKey(input.session.id, input.seq);
     activities.forEach((activity, index) => {
         pushCursorToolCall({
             session: input.session,
@@ -586,7 +541,6 @@ function pushCursorMessage(input: {
             ordinal: index + 1,
             ts,
             sourceKey: input.sourceKey,
-            turnKey,
             toolCalls: input.toolCalls,
             providerEvents: input.providerEvents,
             invocations: input.invocations,
@@ -942,6 +896,8 @@ const toCursorNormalizedBatch = (
     })),
     toolCalls: extract.toolCalls,
     // Cursor intentionally emits NO tool-file evidence today; do not add it here.
+    toolFileEvidence: [],
+    agentEventParentEdges: [],
     syntheticSkillInvocations: extract.invocations.map((invocation) => ({
         sessionId: invocation.session,
         seq: invocation.seq,
@@ -952,6 +908,7 @@ const toCursorNormalizedBatch = (
         skillContentHash: "cursor",
     })),
     toolCallSkillRelations: extract.skillRelations,
+    planSnapshots: [],
     compactions: extract.compactions,
 });
 

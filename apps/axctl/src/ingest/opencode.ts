@@ -3,7 +3,6 @@ import { Effect, FileSystem, Option, Path, Schema } from "effect";
 import { AxConfig } from "@ax/lib/config";
 import { SkillName } from "@ax/lib/brands";
 import { RecordId, SurrealClient } from "@ax/lib/db";
-import { decodeJsonOrNull, jsonParseErrorText } from "@ax/lib/decode";
 import { orAbsent } from "@ax/lib/shared/fs-error";
 import { executeStatements } from "@ax/lib/shared/statement-exec";
 import {
@@ -14,12 +13,28 @@ import { makeFileFailureCollector } from "./file-isolation.ts";
 import { classifyTurnIntent } from "./intent-kind.ts";
 import { providerDelegationSignalAvailability } from "./delegation.ts";
 import { buildNormalizedTranscriptStatements } from "./normalized/transcripts.ts";
-import { agentEventRecordKey, type AgentEventWrite } from "./provider-events.ts";
+import { type AgentEventWrite } from "./provider-events.ts";
 import { providerPlanSignalAvailability } from "./plans.ts";
-import { toolCallRecordKey, turnRecordKey } from "./record-keys.ts";
+import { toolCallRecordKey } from "./record-keys.ts";
 import { BaseStageStats, IngestContext, sinceDaysFromCtx, StageMeta } from "./stage/types.ts";
 import type { StageDef } from "./stage/registry.ts";
-import { extractCommandTool, normalizeCommand, toolKindForName } from "./tool-calls.ts";
+// OpenCode reads numbers out of SQLite rows (number | bigint | stringly) -
+// the toolkit's coercing probe is this parser's `numberField`.
+import {
+    booleanField,
+    boundedExcerpt,
+    coercedNumberField as numberField,
+    isRecord,
+    nestedStringField,
+    parseJsonRecord,
+    parseMaybeJson,
+    stringField,
+} from "./normalized/toolkit.ts";
+import {
+    applyCommandFields,
+    makeToolCallWrite,
+    type MutableToolCallWrite,
+} from "./normalized/tool-call-write.ts";
 
 export const OpenCodeKey = Schema.Literal("opencode");
 export type OpenCodeKey = typeof OpenCodeKey.Type;
@@ -139,12 +154,7 @@ interface ToolResultFields {
     readonly durationMs: number | null;
 }
 
-type MutableToolCallWrite = {
-    -readonly [Key in keyof ToolCallWrite]: ToolCallWrite[Key];
-};
-
 const SYNTHETIC_PROVIDER_SEQ_OFFSET = 1_000_000_000;
-const MAX_OUTPUT_EXCERPT_CHARS = 1200;
 
 function validTimestamp(input: SQLiteValue | undefined, fallback: string): { ts: string; warning: string | null } {
     if (input === null || input === undefined) {
@@ -207,70 +217,8 @@ function hasColumns(columns: Set<string>, names: readonly string[]): boolean {
     return names.every((name) => columns.has(name));
 }
 
-function isRecord(input: unknown): input is Record<string, unknown> {
-    return typeof input === "object" && input !== null && !Array.isArray(input);
-}
-
-/** Effect-Schema-backed JSON decode at the SQLite blob boundary. `Option`
- *  (not `null`) so a literal JSON `null` is distinguishable from a failed
- *  parse. */
-const decodeJsonStringOption = Schema.decodeUnknownOption(Schema.UnknownFromJsonString);
-
-function parseJsonRecord(raw: string | null, label: string, warnings: string[]): Record<string, unknown> | null {
-    if (typeof raw !== "string" || raw.trim().length === 0) {
-        warnings.push(`${label}: missing JSON data`);
-        return null;
-    }
-    const parsed = decodeJsonStringOption(raw);
-    if (Option.isNone(parsed)) {
-        warnings.push(`${label}: invalid JSON data (${jsonParseErrorText(raw)})`);
-        return null;
-    }
-    if (isRecord(parsed.value)) return parsed.value;
-    warnings.push(`${label}: JSON data is not an object`);
-    return null;
-}
-
-function stringField(input: Record<string, unknown>, field: string): string | null {
-    const value = input[field];
-    return typeof value === "string" ? value : null;
-}
-
-function numberField(input: Record<string, unknown>, field: string): number | null {
-    const value = input[field];
-    if (typeof value === "number" && Number.isFinite(value)) return value;
-    if (typeof value === "bigint") return Number(value);
-    if (typeof value !== "string" || value.trim().length === 0) return null;
-    const parsed = Number(value);
-    return Number.isFinite(parsed) ? parsed : null;
-}
-
-function booleanField(input: Record<string, unknown>, field: string): boolean | null {
-    const value = input[field];
-    return typeof value === "boolean" ? value : null;
-}
-
-function nestedStringField(
-    input: Record<string, unknown>,
-    objectField: string,
-    field: string,
-): string | null {
-    const value = input[objectField];
-    if (!isRecord(value)) return null;
-    return stringField(value, field);
-}
-
 function hasErrorFlag(input: Record<string, unknown>): boolean {
     return input.error !== null && input.error !== undefined;
-}
-
-function boundedExcerpt(text: string, max = MAX_OUTPUT_EXCERPT_CHARS): string {
-    return text.length <= max ? text : text.slice(0, max);
-}
-
-function parseMaybeJson(input: unknown): unknown {
-    if (typeof input !== "string") return input ?? null;
-    return decodeJsonOrNull(input) ?? input;
 }
 
 function textFromPartData(data: Record<string, unknown>): string | null {
@@ -486,38 +434,29 @@ function processToolPart(input: {
         callId,
     });
     const call: MutableToolCallWrite = {
-        provider: "opencode",
-        toolName,
-        toolKind: toolKindForName(toolName),
-        sessionId: input.session.id,
-        seq: input.turnSeq,
-        turnKey: turnRecordKey(input.session.id, input.turnSeq),
-        agentEventKey: agentEventRecordKey({
+        ...makeToolCallWrite({
             provider: "opencode",
-            providerSessionId: input.session.id,
+            toolName,
+            sessionId: input.session.id,
+            seq: input.turnSeq,
+            callId,
+            // OpenCode keys the tool-call agent_event by the PART row id, not
+            // the call id.
             providerEventId,
-            seq: eventSeq,
+            eventSeq,
+            ts,
+            cwd: input.session.cwd,
+            inputJson,
+            rawJson: input.part.data,
         }),
-        callId,
-        ts,
-        cwd: input.session.cwd,
-        inputJson,
         outputJson: result.outputJson,
-        rawJson: input.part.data,
         outputExcerpt: result.outputExcerpt,
         errorText: result.errorText,
         durationMs: result.durationMs,
         hasError: result.hasError,
     };
 
-    if (isRecord(inputJson)) {
-        const command = stringField(inputJson, "command") ?? stringField(inputJson, "cmd");
-        if (command) {
-            call.commandText = command;
-            call.commandToolName = extractCommandTool(command);
-            call.commandNorm = normalizeCommand(command);
-        }
-    }
+    applyCommandFields(call, inputJson);
 
     input.providerEvents.push({
         provider: "opencode",
@@ -905,6 +844,9 @@ const buildOpenCodeBatchStatements = (
             },
         })),
         toolCalls: extract.toolCalls,
+        // OpenCode emits no tool-file evidence today (pre-toolkit behavior preserved).
+        toolFileEvidence: [],
+        agentEventParentEdges: [],
         syntheticSkillInvocations: extract.invocations.map((invocation) => ({
             sessionId: invocation.session,
             seq: invocation.seq,
@@ -915,6 +857,8 @@ const buildOpenCodeBatchStatements = (
             skillContentHash: "opencode",
         })),
         toolCallSkillRelations: extract.skillRelations,
+        planSnapshots: [],
+        compactions: [],
     });
 
 export const __testBuildOpenCodeBatchStatements = buildOpenCodeBatchStatements;

@@ -15,6 +15,22 @@ import { SkillName } from "@ax/lib/brands";
 // Fixture skill names are plain string literals; brand via the schema constructor.
 const sn = (s: string): SkillName => SkillName.make(s);
 
+// Batch fields are all REQUIRED on the seam; fixtures spread this and
+// override only the sections under test.
+const emptyBatch: NormalizedTranscriptBatch = {
+    providers: [],
+    sessions: [],
+    events: [],
+    turns: [],
+    toolCalls: [],
+    toolFileEvidence: [],
+    agentEventParentEdges: [],
+    syntheticSkillInvocations: [],
+    toolCallSkillRelations: [],
+    planSnapshots: [],
+    compactions: [],
+};
+
 describe("normalized transcript persistence", () => {
     it("writes escaped turn records with optional agent event links", () => {
         const sql = buildNormalizedTurnStatements([
@@ -46,6 +62,7 @@ describe("normalized transcript persistence", () => {
 
     it("builds provider graph, session graph, and turns from one batch", () => {
         const sql = buildNormalizedTranscriptStatements({
+            ...emptyBatch,
             providers: [{
                 name: "cursor",
                 displayName: "Cursor",
@@ -107,6 +124,7 @@ describe("normalized transcript persistence", () => {
         });
         const turnKey = turnRecordKey("session-a", 1);
         const sql = buildNormalizedTranscriptStatements({
+            ...emptyBatch,
             sessions: [{
                 id: "session-a",
                 provider: "opencode",
@@ -202,6 +220,7 @@ describe("normalized transcript persistence", () => {
 
     it("appends parent edges, plan snapshots, and compactions and forwards clearExisting", () => {
         const batch: NormalizedTranscriptBatch = {
+            ...emptyBatch,
             sessions: [{ id: "s1", provider: "codex" }],
             events: [{
                 provider: "codex", providerSessionId: "s1", providerEventId: "e1",
@@ -225,6 +244,7 @@ describe("normalized transcript persistence", () => {
 
     it("threads statement options through writeNormalizedTranscriptBatch", async () => {
         const batch: NormalizedTranscriptBatch = {
+            ...emptyBatch,
             sessions: [{ id: "s1", provider: "codex" }],
             events: [{
                 provider: "codex", providerSessionId: "s1", providerEventId: "e1",
