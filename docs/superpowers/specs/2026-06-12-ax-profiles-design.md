@@ -67,6 +67,14 @@ One gist per user, file `ax-profile.json`, updated in-place via
         "links": [
           { "rel": "recovered-by", "ref": "problem-solving-strategy/full-file-reread" }
         ]
+      },
+      {
+        "category": "stack-choice",
+        "slot": "state-management",
+        "name": "effect-atom",
+        "over": ["redux", "zustand"],
+        "context": "react apps",
+        "evidence": { "sessions": 23, "confidence": 0.9, "last_reinforced": "2026-06-11", "trend": "stable" }
       }
     ]
   }
@@ -89,11 +97,24 @@ user's *taste* - composable metapatterns other agents can consume. Three
 constraints shape it:
 
 - **Closed category enum (v1):** `design-aesthetic` |
-  `problem-solving-strategy` | `debugging` | `failure-mode` | `workflow`.
+  `problem-solving-strategy` | `debugging` | `failure-mode` | `workflow` |
+  `stack-choice`.
   Constraints make patterns organizable, navigable, composable; free-text
   categories would fragment aggregation. New categories extend the enum
   deliberately. AI-created groupings happen at *derivation* time
-  (classifier/improve output), not at the type level.
+  (classifier/improve output), not at the type level. The schema is a
+  discriminated union on `category` (Effect Schema tagged union) -
+  `stack-choice` carries its own fields below.
+- **`stack-choice` - X-vs-Y tool preferences:** `slot` (the role:
+  `state-management`, `db`, `cli-framework`, ...) + `name` (what won) +
+  optional `over[]` (what it beat) and `context` (scope qualifier).
+  Highly derivable from telemetry (deps, imports, commands in sessions).
+  Slots are *curated-open*, unlike categories: seeded canonical slug list
+  with alias normalization (`state-manager` → `state-management`); novel
+  slots accepted but CI-flagged, promoted to canonical when independently
+  used 3+ times. Per-slot aggregation feeds measured X-vs-Y matchups in
+  `state/<year>.json` (stateofjs's signature chart, measured not surveyed),
+  `/patterns` browse-by-slot, and per-slot team diff (v2).
 - **Linkable patterns:** `links[].rel` (`recovered-by`, `pairs-with`,
   `conflicts-with`) + `ref` = `category/name`. Failure-modes linked to
   recovery strategies are the cross-agent payoff: one agent's failure mode
