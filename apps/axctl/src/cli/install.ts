@@ -147,7 +147,7 @@ const watchPlist = (binPath: string): string => `<?xml version="1.0" encoding="U
   <array>
     <string>/bin/bash</string>
     <string>-lc</string>
-    <string>${binPath} ingest --since=1 >>${LOG_DIR}/watcher.log 2>&amp;1 &amp;&amp; ${binPath} derive-signals --since=1 >>${LOG_DIR}/watcher.log 2>&amp;1</string>
+    <string>${binPath} ingest --since=1 >>${LOG_DIR}/watcher.log 2>&amp;1 &amp;&amp; ${binPath} derive-signals --since=1 >>${LOG_DIR}/watcher.log 2>&amp;1; ${binPath} profile publish --if-stale=6 >>${LOG_DIR}/watcher.log 2>&amp;1 || true</string>
   </array>
   <key>WatchPaths</key>
   <array>

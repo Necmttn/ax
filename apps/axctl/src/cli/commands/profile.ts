@@ -195,7 +195,11 @@ const cmdProfilePublish = (input: {
             // First publish: consent gate. Show EXACTLY what leaves the machine
             // (incl. taste summaries - see profile/taste.ts PUBLISH GATE).
             console.log(prettyPrint(profile));
-            console.log("\nThis exact JSON will be published as a PUBLIC gist under your GitHub account.");
+            console.log(
+                "\nThis exact JSON will be published as a PUBLIC gist under your GitHub account,\n" +
+                "and kept fresh automatically (the watcher republishes future data, including new\n" +
+                "taste patterns) until you run `ax profile unpublish`.",
+            );
             if (!input.yes) {
                 const ans = (globalThis.prompt?.("Publish? [y/N]") ?? "").trim().toLowerCase();
                 if (ans !== "y" && ans !== "yes") {
@@ -278,7 +282,15 @@ const cmdProfileUnpublish = () =>
             console.log("not published (no local publish state).");
             return;
         }
-        yield* deleteProfileGist(state.gist_id);
+        // Tolerate an already-deleted gist (404): local state cleanup must
+        // never be blocked by remote state drift.
+        yield* deleteProfileGist(state.gist_id).pipe(
+            Effect.catchTag("GitHubApiError", (e) =>
+                e.status === 404
+                    ? Effect.sync(() => console.log("gist already deleted remotely."))
+                    : Effect.fail(e),
+            ),
+        );
         yield* Effect.promise(async () => {
             await Bun.$`rm -f ${statePath}`.quiet().nothrow();
         });
