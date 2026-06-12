@@ -13,6 +13,11 @@
  * Judgment-work clusters (review/critique/design/...) are NEVER auto-applied:
  * quality reviews stay on the main model by design; those proposals only ship
  * via --emit-brief for an agent to adversarially backtest.
+ *
+ * Mined proposals always suggest "sonnet" (conservative tier-down). Haiku
+ * routing stays the job of the agent-type rules already in the table: the
+ * haiku-tier agent types are exactly the ones ROUTING_CLASSES.agentTypes
+ * routes, so they never reach the unmatched set this miner clusters.
  */
 import { Effect } from "effect";
 import {
@@ -23,9 +28,8 @@ import {
     type RoutingTable,
 } from "./dispatch-analytics.ts";
 
-export const JUDGMENT_RE = /\b(review|critique|design|plan|audit|judge|verif\w*|assess|architect\w*)\b/i;
-
-const HAIKU_AGENT_TYPES = new Set(["Explore", "codebase-locator", "codebase-pattern-finder"]);
+export const JUDGMENT_RE =
+    /\b(review\w*|critique\w*|critic\w*|design\w*|plan(s|ned|ning)?|audit\w*|judg\w*|verif\w*|assess\w*|architect\w*)\b/i;
 
 export interface TuneProposal {
     readonly id: string;
@@ -70,9 +74,16 @@ const MIN_CLUSTER_SIZE = 3;
 
 const escapeToken = (t: string): string => t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
-/** "summarize the" -> "^summarize\s+the"; "task N" -> "^task\s+\d+" */
+/**
+ * "summarize the" -> "^summarize\s+the\b"; "task N" -> "^task\s+\d+\b";
+ * "port vN" -> "^port\s+v\d+\b". Tokens are lowercased before N-injection
+ * (normalizeKey), so the uppercase N sentinel is unambiguous - substitute
+ * \d+ for every N, including digit runs embedded inside tokens.
+ */
 const keyToPattern = (key: string): string =>
-    "^" + key.split(" ").map((t) => (t === "N" ? "\\d+" : escapeToken(t))).join("\\s+");
+    "^" +
+    key.split(" ").map((t) => escapeToken(t).replace(/N/g, "\\d+")).join("\\s+") +
+    "\\b";
 
 export const buildProposals = (
     clusters: Map<string, DispatchRow[]>,
@@ -81,13 +92,18 @@ export const buildProposals = (
     for (const [key, rows] of clusters) {
         if (rows.length < MIN_CLUSTER_SIZE) continue;
         const totalCost = rows.reduce((s, r) => s + r.child_cost_usd, 0);
-        const haikuCount = rows.filter((r) => r.agent_type !== null && HAIKU_AGENT_TYPES.has(r.agent_type)).length;
-        const suggest: "sonnet" | "haiku" = haikuCount * 2 >= rows.length ? "haiku" : "sonnet";
+        // Always sonnet: conservative tier-down. Haiku routing is the job of
+        // the agent-type rules already in the table (see module doc).
+        const suggest: "sonnet" | "haiku" = "sonnet";
         const examples = rows
             .slice(0, 3)
             .map((r) => r.description ?? "")
             .filter((d) => d.length > 0);
-        const judgment = JUDGMENT_RE.test(key) || examples.some((e) => JUDGMENT_RE.test(e));
+        // Judgment scans the key and EVERY row's description (not just the
+        // first-3 examples) - one judgment-work member taints the cluster.
+        const judgment =
+            JUDGMENT_RE.test(key) ||
+            rows.some((r) => r.description !== null && JUDGMENT_RE.test(r.description));
         proposals.push({
             id: key.replace(/\s+/g, "-"),
             pattern: keyToPattern(key),
@@ -121,6 +137,14 @@ export const fetchTuneProposals = Effect.fn("queries.fetchTuneProposals")(
         return buildProposals(clusterRows(unmatched));
     },
 );
+
+/**
+ * Dispatch descriptions flow verbatim into the brief - the safety-gate
+ * document an agent reads. Collapse newlines and escape backticks so an
+ * adversarial description can't inject markdown structure or close a fence.
+ */
+const sanitizeExample = (e: string): string =>
+    e.replace(/[\r\n]+/g, " ").replace(/`/g, "\\`");
 
 export const renderTuneBrief = (
     proposals: ReadonlyArray<TuneProposal>,
@@ -156,7 +180,7 @@ export const renderTuneBrief = (
     }
     lines.push("", "### Examples per proposal", "");
     for (const p of proposals) {
-        lines.push(`- **${p.id}**: ${p.examples.map((e) => `"${e}"`).join(", ")}`);
+        lines.push(`- **${p.id}**: ${p.examples.map((e) => `"${sanitizeExample(e)}"`).join(", ")}`);
     }
     lines.push("");
     return lines.join("\n");
