@@ -3,6 +3,7 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useState, type ReactNode } from "react";
 import { SiteHeader } from "~/components/landing-sections/site-header";
 import { SiteFooter } from "~/components/landing-sections/site-footer";
+import { CardArt, type CardArtAccent } from "~/components/dossier-card-art";
 import {
     fetchProfile,
     type ProfileV1,
@@ -183,9 +184,13 @@ function ProfileDossier({ profile: p }: { profile: ProfileV1 }) {
                     <div className="pf-cards">
                         {buildInsightCards(ins).map((c) => (
                             <div className="pf-card" key={c.q}>
-                                <span className="pf-card-q">{c.q}</span>
-                                <span className="pf-card-a">{c.a}</span>
-                                <span className="pf-card-s">{c.s}</span>
+                                <CardArt seed={c.q} accent={c.accent ?? "green"} />
+                                <div className="pf-card-body">
+                                    <span className="pf-card-q">{c.q}</span>
+                                    <span className="pf-card-a">{c.a}</span>
+                                    {c.viz && <div className="pf-card-viz" aria-hidden="true">{c.viz}</div>}
+                                    <span className="pf-card-s">{c.s}</span>
+                                </div>
                             </div>
                         ))}
                     </div>
@@ -366,65 +371,141 @@ function ActivityTimeline({ daily, busiest }: { daily: readonly ProfileDailyRow[
     );
 }
 
-interface InsightCard { readonly q: string; readonly a: ReactNode; readonly s: string }
+interface InsightCard {
+    readonly q: string;
+    readonly a: ReactNode;
+    readonly s: string;
+    readonly accent?: CardArtAccent;
+    readonly viz?: ReactNode;
+}
+
+/* ----- mini trace-viz: tiny, mono, data-driven ----- */
+
+/** slim horizontal track with a filled segment; for share/ratio cards */
+function VizBar({ value, tone = "green" }: { value: number; tone?: "green" | "red" }) {
+    const pct = clampPct(value * 100);
+    return (
+        <span className="pf-viz pf-viz-bar">
+            <span
+                className={tone === "red" ? "pf-viz-bar-fill pf-viz-bar-fill--red" : "pf-viz-bar-fill"}
+                style={{ width: `${pct}%` }}
+            />
+        </span>
+    );
+}
+
+/**
+ * A row of ticks; caps at `cap`. When the real count exceeds the cap the last
+ * few ticks fade out and a dashed rail follows - signalling "more than fits"
+ * without misrepresenting the magnitude (the caption stays the source of
+ * truth). Small counts render exactly.
+ */
+function VizTicks({ count, cap = 20 }: { count: number; cap?: number }) {
+    const n = Math.max(0, Math.round(count));
+    const shown = Math.min(n, cap);
+    const overflow = n > cap;
+    return (
+        <span className="pf-viz pf-viz-ticks">
+            {Array.from({ length: shown }, (_, i) => {
+                const fade = overflow && i >= shown - 3;
+                return <span className={fade ? "pf-viz-tick pf-viz-tick--fade" : "pf-viz-tick"} key={i} />;
+            })}
+            {overflow && <span className="pf-viz-tick--rail" />}
+        </span>
+    );
+}
+
+/** slim rail with a marker positioned proportionally; for time/position cards */
+function VizRail({ pos }: { pos: number }) {
+    const p = clampPct(pos * 100);
+    return (
+        <span className="pf-viz pf-viz-rail">
+            <span className="pf-viz-rail-track" />
+            <span className="pf-viz-rail-marker" style={{ left: `${p}%` }} />
+        </span>
+    );
+}
 
 function buildInsightCards(ins: ProfileInsights): InsightCard[] {
+    // weekday index of the busiest day (0=Sun..6=Sat) for the rail position
+    const busiestDow = (() => {
+        const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(ins.busiest_day.date);
+        if (!m) return undefined;
+        const d = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+        return Number.isNaN(d.getTime()) ? undefined : d.getDay();
+    })();
+
     const cards: InsightCard[] = [
         {
             q: "How deep do you go?",
             a: fmtPct(ins.deep_session_share),
             s: "of sessions ran 90+ minutes - deliberate, not drive-by",
+            viz: <VizBar value={ins.deep_session_share} />,
         },
         {
             q: "How many agents at once?",
             a: fmtInt(ins.max_parallel_sessions),
             s: "sessions running in parallel at peak",
+            viz: <VizTicks count={ins.max_parallel_sessions} />,
         },
         {
             q: "Longest single run?",
             a: fmtDuration(ins.longest_session_minutes),
             s: "one session, end to end, without letting go",
+            viz: <VizRail pos={Math.min(1, ins.longest_session_minutes / (24 * 60))} />,
         },
         {
             q: "When are you most alive?",
             a: <>{fmtHour(ins.peak_hour_utc)}<small> UTC</small></>,
             s: "the hour the graph lights up",
+            viz: <VizRail pos={Math.min(1, Math.max(0, ins.peak_hour_utc) / 23)} />,
         },
         {
             q: "Busiest day?",
             a: fmtDay(ins.busiest_day.date),
             s: `${fmtInt(ins.busiest_day.sessions)} sessions in a single day`,
+            accent: "ink",
+            viz: busiestDow !== undefined ? <VizRail pos={busiestDow / 6} /> : undefined,
         },
         {
             q: "How many hands?",
             a: fmtCompact(ins.subagents_spawned),
             s: "subagents dispatched to do the legwork",
+            viz: <VizTicks count={ins.subagents_spawned} />,
         },
         {
             q: "What actually shipped?",
             a: fmtCompact(ins.commits),
             s: "commits landed across the window",
+            accent: "ink",
+            viz: <VizTicks count={ins.commits} />,
         },
         {
             q: "Time in the loop?",
             a: <>{fmtCompact(ins.hours_total)}<small> hrs</small></>,
             s: "of recorded agent time on the clock",
+            accent: "ink",
         },
     ];
 
     // wrapped-style cards - only shown when fields are present
     if (ins.verification_calls !== undefined && ins.tool_calls !== undefined && ins.tool_calls > 0) {
+        const share = ins.verification_calls / ins.tool_calls;
         cards.push({
             q: "How often do you verify?",
-            a: fmtPct(ins.verification_calls / ins.tool_calls),
+            a: fmtPct(share),
             s: `of tool calls are tests, checks, and lints`,
+            viz: <VizBar value={share} />,
         });
     }
     if (ins.tool_failures !== undefined && ins.tool_calls !== undefined && ins.tool_calls > 0) {
+        const share = ins.tool_failures / ins.tool_calls;
         cards.push({
             q: "Tool failure rate?",
-            a: fmtPct(ins.tool_failures / ins.tool_calls),
+            a: fmtPct(share),
             s: `failed calls across ${fmtCompact(ins.tool_calls)} tool runs`,
+            accent: "red",
+            viz: <VizBar value={share} tone="red" />,
         });
     }
     if (ins.distinct_skills !== undefined && ins.distinct_tools !== undefined) {
@@ -432,6 +513,8 @@ function buildInsightCards(ins: ProfileInsights): InsightCard[] {
             q: "How wide is the rig?",
             a: `${fmtInt(ins.distinct_skills)} skills`,
             s: `across ${fmtInt(ins.distinct_tools)} distinct tools`,
+            accent: "ink",
+            viz: <VizTicks count={ins.distinct_skills} />,
         });
     }
     if (ins.repos_count !== undefined) {
@@ -439,6 +522,7 @@ function buildInsightCards(ins: ProfileInsights): InsightCard[] {
             q: "How many repos?",
             a: fmtInt(ins.repos_count),
             s: "repositories touched this window",
+            viz: <VizTicks count={ins.repos_count} />,
         });
     }
 
