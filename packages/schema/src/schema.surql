@@ -59,7 +59,7 @@ DEFINE TABLE session SCHEMAFULL;
 DEFINE FIELD project        ON session TYPE option<string>;
 DEFINE FIELD cwd            ON session TYPE option<string>;
 DEFINE FIELD model          ON session TYPE option<string>;
-DEFINE FIELD reasoning_effort ON session TYPE option<string>;  -- codex turn_context effort: 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' (last seen)
+DEFINE FIELD reasoning_effort ON session TYPE option<string>;  -- codex: turn_context effort (minimal|low|medium|high|xhigh, last seen); claude: settings.json effortLevel (high|medium|low), stamped only on sessions active at ingest time
 DEFINE FIELD source         ON session TYPE string DEFAULT 'claude';  -- 'claude' | 'codex'
 DEFINE FIELD started_at     ON session TYPE option<datetime>;
 DEFINE FIELD ended_at       ON session TYPE option<datetime>;

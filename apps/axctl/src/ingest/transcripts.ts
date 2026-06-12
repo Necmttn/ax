@@ -49,6 +49,7 @@ import {
     type NormalizedTurnWrite,
 } from "./normalized/transcripts.ts";
 import { decodeClaudeTranscriptLine } from "./line-schemas.ts";
+import { claudeEffortStamp, loadClaudeEffortLevel } from "./claude-effort.ts";
 
 import { selectByIds } from "@ax/lib/shared/record-select";
 import { executeStatements, executeStatementsWith } from "@ax/lib/shared/statement-exec";
@@ -1217,6 +1218,11 @@ export {
 const upsertSessions = (sessions: Session[]) =>
     Effect.gen(function* () {
         const db = yield* SurrealClient;
+        // Claude effort level is global (settings.json), not in transcripts -
+        // stamped only on sessions active within the freshness window, so the
+        // current setting never gets attributed to historical sessions.
+        const effortLevel = yield* loadClaudeEffortLevel;
+        const nowMs = Date.now();
         yield* Effect.forEach(
             sessions,
             (s) =>
@@ -1226,6 +1232,7 @@ const upsertSessions = (sessions: Session[]) =>
                     project: s.project ?? undefined,
                     cwd: s.cwd ?? undefined,
                     model: s.model ?? undefined,
+                    reasoning_effort: claudeEffortStamp(effortLevel, s.ended_at, nowMs),
                     source: "claude",
                     started_at: s.started_at ? new Date(s.started_at) : undefined,
                     ended_at: s.ended_at ? new Date(s.ended_at) : undefined,

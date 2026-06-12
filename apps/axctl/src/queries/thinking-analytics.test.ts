@@ -65,7 +65,8 @@ describe("fetchThinking", () => {
             { session_id: "session:`s1`", model: "claude-fable-5", source: "claude" },
         ];
         const efforts = [
-            { model: "gpt-5.5", reasoning_effort: "medium", sessions: 7 },
+            { source: "codex", model: "gpt-5.5", reasoning_effort: "medium", sessions: 7 },
+            { source: "claude", model: "claude-fable-5", reasoning_effort: "high", sessions: 3 },
         ];
         const reasoning = [
             { model: "gpt-5.5", sessions: 7, reasoning_tokens: 5000, completion_tokens: 20000 },
@@ -77,8 +78,9 @@ describe("fetchThinking", () => {
         expect(result.models).toHaveLength(1);
         expect(result.models[0].model).toBe("claude-fable-5");
         expect(result.models[0].thinking_tokens).toBe(800);
-        expect(result.codex_efforts).toEqual([
-            { model: "gpt-5.5", reasoning_effort: "medium", sessions: 7 },
+        expect(result.efforts).toEqual([
+            { source: "codex", model: "gpt-5.5", reasoning_effort: "medium", sessions: 7 },
+            { source: "claude", model: "claude-fable-5", reasoning_effort: "high", sessions: 3 },
         ]);
         expect(result.codex_reasoning[0].reasoning_share_pct).toBeCloseTo(25);
         expect(result.window_days).toBe(14);

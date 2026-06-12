@@ -165,7 +165,7 @@ not depend on effect).
 
 ### Thinking analytics
 
-`ax thinking [--days=N] [--json]` - reasoning-spend rollup. Claude: per-turn `thinking_blocks`/`thinking_tokens` on `turn` - transcripts strip thinking text (empty `thinking` + signature only), but thinking-only assistant events carry their own `usage.output_tokens`, which IS the thinking spend (mixed turns report 0 → lower bound). Codex: `session.reasoning_effort` (turn_context effort) + `reasoning_output_tokens` on `session_token_usage`/`turn_token_usage`. Fields populate at ingest - pre-existing sessions read zero until their files are re-ingested. Module: `apps/axctl/src/queries/thinking-analytics.ts`.
+`ax thinking [--days=N] [--json]` - reasoning-spend rollup. Claude: per-turn `thinking_blocks`/`thinking_tokens` on `turn` - transcripts strip thinking text (empty `thinking` + signature only), but thinking-only assistant events carry their own `usage.output_tokens`, which IS the thinking spend (mixed turns report 0 → lower bound). Effort levels on `session.reasoning_effort`: codex turn_context effort + claude `settings.json` `effortLevel` (no per-session field exists - stamped only on sessions active within 30min of ingest, history never backstamped; `apps/axctl/src/ingest/claude-effort.ts`). Codex also gets `reasoning_output_tokens` on `session_token_usage`/`turn_token_usage`. Fields populate at ingest - pre-existing sessions read zero until their files are re-ingested. Module: `apps/axctl/src/queries/thinking-analytics.ts`.
 
 ### Dispatch routing
 

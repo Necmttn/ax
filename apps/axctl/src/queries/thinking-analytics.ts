@@ -6,8 +6,10 @@
  *     (counted from `thinking` + `redacted_thinking` content blocks at
  *     ingest). The transcript has no thinking-level field, so volume is
  *     the measurable proxy.
- *   - Codex: `session.reasoning_effort` (last-seen turn_context effort:
- *     minimal|low|medium|high|xhigh).
+ *   - Effort levels on `session.reasoning_effort`: codex turn_context effort
+ *     (minimal|low|medium|high|xhigh) + claude settings.json effortLevel
+ *     (high|medium|low; stamped only on sessions active at ingest time -
+ *     transcripts carry no per-session effort field).
  *
  * Query shape follows dispatch-analytics: flat grouped aggregates (no record
  * derefs), JS-side join on stringified session ids.
@@ -33,7 +35,8 @@ export interface ThinkingModelRow {
     readonly avg_tokens_per_thinking_turn: number;
 }
 
-export interface CodexEffortRow {
+export interface EffortRow {
+    readonly source: string;
     readonly model: string;
     readonly reasoning_effort: string;
     readonly sessions: number;
@@ -50,7 +53,9 @@ export interface CodexReasoningRow {
 
 export interface ThinkingResult {
     readonly models: ReadonlyArray<ThinkingModelRow>;
-    readonly codex_efforts: ReadonlyArray<CodexEffortRow>;
+    /** Effort distribution across sources (codex turn_context effort + claude
+     *  settings effortLevel stamped on live sessions at ingest). */
+    readonly efforts: ReadonlyArray<EffortRow>;
     readonly codex_reasoning: ReadonlyArray<CodexReasoningRow>;
     readonly window_days: number;
 }
@@ -85,14 +90,13 @@ FROM session
 WHERE started_at > time::now() - ${days(sinceDays)}d;
 `;
 
-const CODEX_EFFORT_SQL = (sinceDays: number) => `
-SELECT model, reasoning_effort, count() AS sessions FROM (
-    SELECT model, reasoning_effort
+const EFFORT_SQL = (sinceDays: number) => `
+SELECT source, model, reasoning_effort, count() AS sessions FROM (
+    SELECT source, model, reasoning_effort
     FROM session
-    WHERE source = 'codex'
-      AND started_at > time::now() - ${days(sinceDays)}d
+    WHERE started_at > time::now() - ${days(sinceDays)}d
       AND reasoning_effort != NONE
-) GROUP BY model, reasoning_effort;
+) GROUP BY source, model, reasoning_effort;
 `;
 
 const CODEX_REASONING_SQL = (sinceDays: number) => `
@@ -186,7 +190,7 @@ export const fetchThinking = Effect.fn("queries.fetchThinking")(
         ]>(
             SESSION_THINKING_SQL(opts.sinceDays) +
             SESSION_MODELS_SQL(opts.sinceDays) +
-            CODEX_EFFORT_SQL(opts.sinceDays) +
+            EFFORT_SQL(opts.sinceDays) +
             CODEX_REASONING_SQL(opts.sinceDays),
         );
 
@@ -206,9 +210,10 @@ export const fetchThinking = Effect.fn("queries.fetchThinking")(
             );
         }
 
-        const codex_efforts: CodexEffortRow[] = (effortResult ?? [])
+        const efforts: EffortRow[] = (effortResult ?? [])
             .filter((r) => r.reasoning_effort != null)
             .map((r) => ({
+                source: r.source == null ? "(unknown)" : String(r.source),
                 model: r.model == null ? "(unknown)" : String(r.model),
                 reasoning_effort: String(r.reasoning_effort),
                 sessions: Number(r.sessions ?? 0),
@@ -231,7 +236,7 @@ export const fetchThinking = Effect.fn("queries.fetchThinking")(
 
         return {
             models: rollupThinkingByModel(sessionRows, modelBySession),
-            codex_efforts,
+            efforts,
             codex_reasoning,
             window_days: opts.sinceDays,
         } satisfies ThinkingResult;

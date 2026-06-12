@@ -3,8 +3,9 @@
  *
  *   ax thinking [--days=N] [--json]
  *     Per-model rollup of Claude thinking volume (blocks/tokens counted from
- *     thinking content blocks at ingest) + Codex reasoning-effort
- *     distribution (session.reasoning_effort from turn_context).
+ *     thinking content blocks at ingest) + reasoning-effort distribution
+ *     across sources (codex turn_context effort; claude settings.json
+ *     effortLevel stamped on sessions active at ingest time).
  *
  * Rows ingested before the thinking fields existed read as zero; a re-ingest
  * backfills them (the command prints a hint when everything is zero).
@@ -31,7 +32,7 @@ const cmdThinking = (input: { readonly sinceDays: number; readonly json: boolean
         }
 
         const totalTokens = result.models.reduce((s, m) => s + m.thinking_tokens, 0);
-        if (result.models.length === 0 && result.codex_efforts.length === 0) {
+        if (result.models.length === 0 && result.efforts.length === 0) {
             console.log("(no sessions in the requested window)");
             return;
         }
@@ -56,16 +57,17 @@ const cmdThinking = (input: { readonly sinceDays: number; readonly json: boolean
             );
         }
 
-        if (result.codex_efforts.length > 0) {
-            console.log("\ncodex reasoning effort (sessions):");
-            for (const e of result.codex_efforts) {
+        if (result.efforts.length > 0) {
+            console.log("\nreasoning effort (sessions):");
+            for (const e of result.efforts) {
                 console.log(
-                    `  ${e.model.slice(0, 28).padEnd(28)}  ${e.reasoning_effort.padEnd(8)}  ${num(e.sessions).padStart(8)}`,
+                    `  ${e.source.padEnd(8)}  ${e.model.slice(0, 28).padEnd(28)}  ${e.reasoning_effort.padEnd(8)}  ${num(e.sessions).padStart(8)}`,
                 );
             }
         } else {
             console.log(
-                "\n(no codex reasoning-effort data - populated at ingest from turn_context; re-ingest to backfill)",
+                "\n(no reasoning-effort data - codex effort comes from turn_context at ingest; " +
+                "claude effortLevel is stamped on sessions active at ingest time)",
             );
         }
 
@@ -98,7 +100,7 @@ export const thinkingCommand = Command.make(
 ).pipe(
     Command.withDescription(
         "Extended-thinking analytics: per-model Claude thinking volume (turns/blocks/tokens) + " +
-        "Codex reasoning-effort distribution. --days=N (default 14)  --json",
+        "reasoning-effort distribution (codex turn_context, claude settings effortLevel). --days=N (default 14)  --json",
     ),
 );
 
