@@ -135,6 +135,21 @@ cache. `--statusline` is one plain line for the Claude Code `statusLine` command
 `scripts/swiftbar/ax-quota.2m.sh`). Module: `apps/axctl/src/quota/` (QuotaEnv seam,
 Live/Test layers). No DB (runtime "none").
 
+### Dojo
+
+`ax dojo [--json] [--spar] [--budget=N] [--until=HH:MM] [--force] [--days=N]` -
+training agenda for the ax:dojo skill loop (burn surplus plan quota on
+self-improvement). Composes a budget envelope from the quota module (binding
+window remaining minus 15% reserve, deadline = earliest window reset) with a
+derived, self-clearing item list: pending verdicts, unfilled .ax/tasks briefs,
+judgment-flagged routing backtests, proposal minting (when open pool < 3),
+churn-hotspot experiments, opt-in spar (needs --spar AND >=30% spendable),
+explore fallback. Items vanish once the underlying system records the work
+(verdict locked / brief consumed / proposal created). State dirs:
+`~/.ax/dojo/outbox/` (upstream issue drafts, publish on review) and
+`~/.ax/dojo/reports/<date>.md`. Module: `apps/axctl/src/dojo/`. Spec:
+docs/superpowers/specs/2026-06-13-ax-dojo-design.md.
+
 ### Profile
 
 `ax profile show [--window=N] [--no-cost] [--json]` - render your local ax
