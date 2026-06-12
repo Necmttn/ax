@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { decodeImproveActionParams, improveHttpStatus } from "./improve.ts";
+import { decodeImproveActionParams, improveHttpStatus, improveRoutes } from "./improve.ts";
+import { matchRoute } from "../router.ts";
 import type { RouteInput } from "../router.ts";
 
 const input = (path: Record<string, string>, body: RouteInput["body"]): RouteInput => ({
@@ -42,5 +43,13 @@ describe("improveHttpStatus (verbatim status map from server.ts 224-228)", () =>
         expect(improveHttpStatus("missing_payload")).toBe(400);
         expect(improveHttpStatus("invalid_verdict")).toBe(400);
         expect(improveHttpStatus("anything_else")).toBe(500);
+    });
+});
+
+describe("/api/next-actions", () => {
+    test("GET matches and decodes", () => {
+        const match = matchRoute(improveRoutes, "GET", "/api/next-actions");
+        expect(match).not.toBeNull();
+        expect(match.kind).toBe("matched");
     });
 });

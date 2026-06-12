@@ -1,6 +1,7 @@
 import { Effect } from "effect";
 import { SurrealClient } from "@ax/lib/db";
 import type { ProposalDto } from "@ax/lib/shared/dashboard-types";
+import { renderAgentBrief } from "./agent-brief.ts";
 
 // Experiment-loop shortlist + verdict state. Reads proposal +
 // per-form payloads + the active experiment + newest checkpoint.
@@ -23,12 +24,27 @@ FROM proposal
 ORDER BY frequency DESC, created_at DESC
 LIMIT 100;`;
 
+const withBrief = (p: ProposalDto): ProposalDto => ({
+    ...p,
+    brief: renderAgentBrief({
+        title: p.title,
+        evidence: `hypothesis: ${p.hypothesis} (seen ${p.frequency}x, confidence ${p.confidence})`,
+        ask:
+            p.status === "open"
+                ? "Review this proposal; if sound, run `ax improve accept` and act on the emitted .ax/tasks brief."
+                : "Act on the experiment artifact/task for this proposal.",
+        verify: "`ax improve show` reflects the new status; follow the experiment checkpoints.",
+        source: `ax improve proposal sig=${p.dedupe_sig}`,
+    }),
+});
+
 /** Raw proposal rows, loosely typed at the edge like the legacy queryApi endpoints. */
 export const fetchImproveProposals = Effect.fn("dashboard.fetchImproveProposals")(
     function* () {
         const db = yield* SurrealClient;
         const result = yield* db.query<[Array<Record<string, unknown>>]>(PROPOSALS_SQL);
         // TODO: replace with schema decode when the proposal wire shape stabilizes
-        return (result[0] ?? []) as unknown as ReadonlyArray<ProposalDto>;
+        const rows = (result[0] ?? []) as unknown as ReadonlyArray<ProposalDto>;
+        return rows.map(withBrief);
     },
 );
