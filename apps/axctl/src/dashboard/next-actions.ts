@@ -57,6 +57,20 @@ const capByImpact = (cards: NextActionCard[]): NextActionCard[] =>
 /** Null-safe interpolation: nullable DB strings must never render "null". */
 const nn = (v: string | null, fallback = "unknown"): string => v ?? fallback;
 
+/** Cheap value teaser - parsed from what the proposal row already carries
+ *  (no recompute; the full estimate lives at /api/improve/:sig/impact).
+ *  Mined routing proposals carry their savings figure in the hypothesis. */
+export const impactChip = (p: ProposalDto): string | null => {
+    if (p.form === "hook") {
+        const m = /est \$([\d,]+(?:\.\d+)?)/.exec(p.hypothesis);
+        if (m) return `~$${m[1]} redirectable`;
+    }
+    if (p.form === "guidance" || p.form === "skill") {
+        return p.frequency > 1 ? `${p.frequency}x recurring` : null;
+    }
+    return null;
+};
+
 // ---------------------------------------------------------------------------
 // proposalCards
 // ---------------------------------------------------------------------------
@@ -87,6 +101,7 @@ export const proposalCards = (
                         skill: null,
                         suggested_verdict: null,
                     },
+                    impact_chip: impactChip(p),
                 };
             }),
     );
@@ -140,6 +155,7 @@ export const verdictCards = (
                         skill: null,
                         suggested_verdict: suggested as string | null,
                     },
+                    impact_chip: impactChip(p),
                 };
             }),
     );

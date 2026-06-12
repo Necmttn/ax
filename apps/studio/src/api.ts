@@ -1,4 +1,5 @@
 import type {
+    ImpactEstimate,
     EpisodeTimelinePayload,
     GraphExplorerMode,
     GraphExplorerPayload,
@@ -435,6 +436,10 @@ export const api = {
 
     improveAnalyzeBrief: (): Promise<{ brief: string }> =>
         viaContract("/api/improve/analyze-brief", (c) => c.improve.analyzeBrief()),
+
+    improveImpact: (sig: string): Promise<{ sig: string; impact: ImpactEstimate }> =>
+        viaContract(`/api/improve/${encodeURIComponent(sig)}/impact`, (c) =>
+            c.improve.improveImpact({ params: { sig } })),
 
     wrappedGenerateBrief: (): Promise<{ brief: string }> =>
         viaContract("/api/wrapped/generate-brief", (c) => c.insights.wrappedGenerateBrief()),

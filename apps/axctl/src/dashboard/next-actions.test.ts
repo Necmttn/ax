@@ -245,6 +245,25 @@ describe("proposalCards", () => {
 // verdictCards
 // ---------------------------------------------------------------------------
 
+describe("impactChip", () => {
+    test("routing hypothesis yields a $ chip", () => {
+        const card = proposalCards([
+            openProposal({
+                form: "hook",
+                hypothesis: "71 model-less dispatches; est $296.84 redirectable. Top classes: x",
+            }),
+        ])[0]!;
+        expect(card.impact_chip).toBe("~$296.84 redirectable");
+    });
+
+    test("guidance frequency yields a recurring chip; freq 1 yields none", () => {
+        const a = proposalCards([openProposal({ form: "guidance", frequency: 9 })])[0]!;
+        expect(a.impact_chip).toBe("9x recurring");
+        const b = proposalCards([openProposal({ form: "guidance", frequency: 1 })])[0]!;
+        expect(b.impact_chip).toBeNull();
+    });
+});
+
 describe("verdictCards", () => {
     test("only accepted proposals with experiment and no locked_verdict", () => {
         const proposals = [

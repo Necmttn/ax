@@ -23,6 +23,18 @@ const VERDICTS: ReadonlyArray<string> = [
     "adopted", "ignored", "regressed", "partial", "no_longer_needed",
 ];
 const CONF_W: Record<string, number> = { high: 3, medium: 2, low: 1 };
+
+/** Mirror of the server-side impactChip (next-actions.ts) - cheap parse only. */
+const impactChipOf = (p: ProposalDto): string | null => {
+    if (p.form === "hook") {
+        const m = /est \$([\d,]+(?:\.\d+)?)/.exec(p.hypothesis);
+        if (m) return `~$${m[1]} redirectable`;
+    }
+    if (p.form === "guidance" || p.form === "skill") {
+        return p.frequency > 1 ? `${p.frequency}x recurring` : null;
+    }
+    return null;
+};
 const score = (p: ProposalDto) =>
     (CONF_W[p.confidence] ?? 1) * Math.log2(p.frequency + 1) +
     // agent-origin tiebreak above mined at equal confidence x frequency
@@ -177,6 +189,11 @@ export function ImproveRoute() {
                                             ? <span className="badge keep" style={{ marginRight: 6 }}>agent</span>
                                             : null}
                                         {p.title}
+                                        {impactChipOf(p) ? (
+                                            <span className="next-action-impact" style={{ marginLeft: 8 }}>
+                                                {impactChipOf(p)}
+                                            </span>
+                                        ) : null}
                                     </td>
                                 </tr>
                             );

@@ -2635,3 +2635,10 @@ td.skill-cell .description {
     font-size: 14px;
     padding: 8px 14px;
 }
+
+.next-action-impact {
+    color: var(--green);
+    font-family: ui-monospace, Menlo, monospace;
+    font-size: 12px;
+    font-weight: 600;
+}

@@ -63,7 +63,13 @@ function NextActionCardView({
                 </span>
                 <h4 style={{ margin: 0 }}>{card.title}</h4>
             </header>
-            <p className="meta">{card.evidence}</p>
+            <p className="meta">
+                {card.impact_chip ? (
+                    <strong className="next-action-impact">{card.impact_chip}</strong>
+                ) : null}
+                {card.impact_chip ? " · " : null}
+                {card.evidence}
+            </p>
             <div className="actions" style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                 <CopyButton text={card.brief} />
                 {acceptSig ? (
