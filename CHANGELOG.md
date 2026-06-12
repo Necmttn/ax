@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.29.0](https://github.com/Necmttn/ax/compare/v0.28.0...v0.29.0) (2026-06-12)
+
+
+### Features
+
+* **axctl:** ax quota - Claude plan usage in CLI, statusline, and menubar ([#365](https://github.com/Necmttn/ax/issues/365)) ([cdaebed](https://github.com/Necmttn/ax/commit/cdaebedc1b3acb5b1fdba890e1c9e15c206490e6))
+* **improve:** impact engine - backtested projected value per proposal (PR5a) ([#361](https://github.com/Necmttn/ax/issues/361)) ([2581e33](https://github.com/Necmttn/ax/commit/2581e339df47e850c8847db166fb4af2f523f82d))
+* **profile:** port wrapped-style aggregates into ProfileV1 insights ([#359](https://github.com/Necmttn/ax/issues/359)) ([4e361b8](https://github.com/Necmttn/ax/commit/4e361b8c23d7d92b6b8dbb063f1cf8893428ab52))
+* **site:** /routing marketing page + og-kit shared OG primitives ([#366](https://github.com/Necmttn/ax/issues/366)) ([599b99e](https://github.com/Necmttn/ax/commit/599b99e74249887ed7ac049bda1533c74ed9935d))
+* **site:** agent-sign radar - six-axis spider chart, compare overlay, raw-values table ([#364](https://github.com/Necmttn/ax/issues/364)) ([4092f42](https://github.com/Necmttn/ax/commit/4092f428ca54555158149bb471beb0b693e96efc))
+* **site:** generative dither art + trace minis on dossier insight cards ([#363](https://github.com/Necmttn/ax/issues/363)) ([6d93daa](https://github.com/Necmttn/ax/commit/6d93daa5761aab827a3404682a39689418c0eaf3))
+
+
+### Bug Fixes
+
+* **ci:** community-users validate reports on every PR (required-check safe) ([#358](https://github.com/Necmttn/ax/issues/358)) ([17a10df](https://github.com/Necmttn/ax/commit/17a10df059403147aa5d82a40a151e384d862629))
+* **community:** compiled outputs move to the community-data branch ([#362](https://github.com/Necmttn/ax/issues/362)) ([74f24f1](https://github.com/Necmttn/ax/commit/74f24f1c3a5a6493a160500372b7eaa9da864fd8))
+
 ## [0.28.0](https://github.com/Necmttn/ax/compare/v0.27.0...v0.28.0) (2026-06-12)
 
 
