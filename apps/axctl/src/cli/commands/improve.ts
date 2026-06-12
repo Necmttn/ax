@@ -2,9 +2,9 @@
 import { Effect, Option } from "effect";
 import { Argument, Command, Flag } from "effect/unstable/cli";
 import { SurrealClient } from "@ax/lib/db";
-import { prettyPrint, surrealLiteral } from "@ax/lib/json";
+import { prettyPrint } from "@ax/lib/json";
 import { decodeJsonOrNull } from "@ax/lib/decode";
-import { surrealString } from "@ax/lib/shared/surql";
+import { surrealString } from "@ax/lib/shared/surreal";
 import { homedir } from "node:os";
 import { deriveCheckpoints } from "../../ingest/derive-checkpoints.ts";
 import { runAgentAccept } from "../../improve/agent-accept.ts";
@@ -13,6 +13,7 @@ import { lintFiles } from "../../improve/lint.ts";
 import { listProposals, normalizeListProposalsInput, type ProposalRow } from "../../improve/list.ts";
 import { recommend, normalizeRecommendInput, formatRecommendations, copyToClipboard, selectByIndices, parseIndexInput } from "../../improve/recommend.ts";
 import { showExperiment, formatShow } from "../../improve/show.ts";
+import { listVerdicts, showVerdict } from "../../improve/verdicts.ts";
 import { renderAnalyzeBrief } from "../../improve/analyze-brief.ts";
 import { runPropose } from "../../improve/propose.ts";
 import { runHousekeep } from "../../improve/housekeep.ts";
@@ -419,18 +420,7 @@ const cmdImproveVerdict = (input: {
         const json = input.json;
         const db = yield* SurrealClient;
         if (positional === undefined) {
-            const rows = yield* db.query<[Array<Record<string, unknown>>]>(
-                `SELECT
-                    proposal.title AS title,
-                    proposal.dedupe_sig AS dedupe_sig,
-                    artifact_path,
-                    type::string(created_at) AS created_at,
-                    type::string(scaffolded_at) AS scaffolded_at,
-                    locked_verdict,
-                    (SELECT kind, suggested, user_verdict, type::string(observed_at) AS observed_at FROM checkpoint WHERE experiment = $parent.id ORDER BY observed_at DESC LIMIT 1)[0] AS latest_checkpoint
-                FROM experiment ORDER BY created_at DESC LIMIT 30;`,
-            );
-            const list = rows?.[0] ?? [];
+            const list = yield* listVerdicts();
             if (json) { console.log(prettyPrint(list)); return; }
             if (list.length === 0) {
                 console.log("(no experiments yet - accept a proposal first via `axctl improve accept <sig>`)");
@@ -451,23 +441,7 @@ const cmdImproveVerdict = (input: {
             console.log("Run `axctl improve verdict <sig> --set <verdict>` to lock.");
             return;
         }
-        const idLiteral = surrealLiteral(positional);
-        const sel = yield* db.query<[Array<Record<string, unknown>>]>(
-            `SELECT
-                id,
-                proposal.title AS title,
-                proposal.dedupe_sig AS dedupe_sig,
-                proposal.status AS proposal_status,
-                artifact_path,
-                type::string(created_at) AS created_at,
-                type::string(scaffolded_at) AS scaffolded_at,
-                locked_verdict,
-                (SELECT id, kind, suggested, user_verdict, measured, type::string(observed_at) AS observed_at FROM checkpoint WHERE experiment = $parent.id ORDER BY observed_at DESC) AS checkpoints
-            FROM experiment
-            WHERE proposal.dedupe_sig = ${idLiteral} OR id = ${idLiteral}
-            LIMIT 1;`,
-        );
-        const row = (sel?.[0] ?? [])[0];
+        const row = yield* showVerdict(positional);
         if (!row) {
             fail(`no experiment matched ${positional} (check \`axctl improve list --status=accepted\`)`);
         }

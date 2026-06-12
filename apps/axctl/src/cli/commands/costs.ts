@@ -1,9 +1,9 @@
 // Extracted from cli/index.ts (Phase 2 CLI split)
 import { Effect } from "effect";
 import { Command, Flag } from "effect/unstable/cli";
-import { SurrealClient } from "@ax/lib/db";
-import { prettyPrint, surrealLiteral } from "@ax/lib/json";
+import { prettyPrint } from "@ax/lib/json";
 import { fetchCostSummary, type CostSummary } from "../../dashboard/cost-query.ts";
+import { fetchCostSummaryRollup, fetchPricingRows } from "../../dashboard/cost-summary-query.ts";
 import { fetchLocSummary, type LocSummary, type LocSelector } from "../../dashboard/loc-query.ts";
 import { resolvePwdRepository } from "../../pwd.ts";
 import { stderrExit } from "../output.ts";
@@ -13,40 +13,11 @@ import { fail, jsonFlag, optionalSince, optionValue, parseCsvFlag, positiveLimit
 
 const cmdCosts = (input: { readonly limit: number; readonly source: string | null; readonly sinceDays: number | null; readonly json: boolean }) =>
     Effect.gen(function* () {
-        const db = yield* SurrealClient;
-        const where = ["estimated_cost_usd != NONE"];
-        if (input.source) where.push(`source = ${surrealLiteral(input.source)}`);
-        if (input.sinceDays !== null) {
-            const since = Math.min(Math.max(Math.trunc(input.sinceDays), 1), 3650);
-            where.push(`ts > time::now() - ${since}d`);
-        }
-        const whereClause = `WHERE ${where.join(" AND ")}`;
-        const [totals, byModel, recent] = yield* Effect.all([
-            db.query<[Array<Record<string, unknown>>]>(`
-SELECT count() AS sessions, math::sum(estimated_tokens) AS tokens, math::sum(prompt_tokens) AS prompt_tokens,
-       math::sum(completion_tokens) AS completion_tokens, math::sum(cache_creation_input_tokens) AS cache_creation_input_tokens,
-       math::sum(cache_read_input_tokens) AS cache_read_input_tokens, math::sum(estimated_cost_usd) AS cost
-FROM session_token_usage
-${whereClause}
-GROUP ALL;`).pipe(Effect.map((rows) => rows?.[0] ?? [])),
-            db.query<[Array<Record<string, unknown>>]>(`
-SELECT source, model, pricing_source, count() AS sessions, math::sum(estimated_tokens) AS tokens,
-       math::sum(prompt_tokens) AS prompt_tokens, math::sum(completion_tokens) AS completion_tokens,
-       math::sum(cache_creation_input_tokens) AS cache_creation_input_tokens,
-       math::sum(cache_read_input_tokens) AS cache_read_input_tokens,
-       math::sum(estimated_cost_usd) AS cost
-FROM session_token_usage
-${whereClause}
-GROUP BY source, model, pricing_source
-ORDER BY cost DESC
-LIMIT ${Math.min(Math.max(input.limit, 1), 200)};`).pipe(Effect.map((rows) => rows?.[0] ?? [])),
-            db.query<[Array<Record<string, unknown>>]>(`
-SELECT session, source, model, estimated_tokens, estimated_cost_usd, pricing_source, type::string(ts) AS ts
-FROM session_token_usage
-${whereClause}
-ORDER BY ts DESC
-LIMIT ${Math.min(Math.max(input.limit, 1), 200)};`).pipe(Effect.map((rows) => rows?.[0] ?? [])),
-        ], { concurrency: 3 });
+        const { totals, byModel, recent } = yield* fetchCostSummaryRollup({
+            limit: input.limit,
+            source: input.source,
+            sinceDays: input.sinceDays,
+        });
         const payload = { totals: totals[0] ?? null, byModel, recent };
         if (input.json) {
             console.log(prettyPrint(payload));
@@ -296,14 +267,7 @@ export const locCommand = Command.make(
 
 const cmdPricing = (input: { readonly limit: number; readonly query: string | null; readonly json: boolean }) =>
     Effect.gen(function* () {
-        const db = yield* SurrealClient;
-        const rows = yield* db.query<[Array<Record<string, unknown>>]>(`
-SELECT name, provider, display_name, input_per_million_usd, output_per_million_usd,
-       cache_creation_per_million_usd, cache_read_per_million_usd,
-       fast_multiplier, context_window, pricing_source
-FROM agent_model
-ORDER BY provider, name
-LIMIT 5000;`).pipe(Effect.map((result) => result?.[0] ?? []));
+        const rows = yield* fetchPricingRows();
         const q = input.query?.trim().toLowerCase() ?? "";
         const filtered = (q.length === 0
             ? rows
