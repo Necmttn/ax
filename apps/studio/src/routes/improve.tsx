@@ -9,6 +9,9 @@ import type {
     ProposalStatus,
 } from "@ax/lib/shared/dashboard-types";
 import { fmtTs } from "@ax/lib/shared/formatters";
+import { NextActionsPanel } from "../components/next-actions-panel.tsx";
+import { CopyButton } from "../components/copy-button.tsx";
+import { DecisionsSection } from "../components/decisions-section.tsx";
 
 const ALL_FORMS: ReadonlyArray<ProposalForm | "all"> = [
     "all", "skill", "subagent", "hook", "guidance", "automation",
@@ -34,13 +37,17 @@ export function ImproveRoute() {
         queryFn: () => api.improve(),
     });
     const proposals = query.data?.proposals ?? [];
+    const CONF_W: Record<string, number> = { high: 3, medium: 2, low: 1 };
+    const score = (p: ProposalDto) => (CONF_W[p.confidence] ?? 1) * Math.log2(p.frequency + 1);
     const filtered = useMemo(
-        () =>
-            proposals.filter((p) => {
+        () => {
+            const matches = proposals.filter((p) => {
                 if (formFilter !== "all" && p.form !== formFilter) return false;
                 if (statusFilter !== "all" && p.status !== statusFilter) return false;
                 return true;
-            }),
+            });
+            return [...matches].sort((a, b) => score(b) - score(a));
+        },
         [proposals, formFilter, statusFilter],
     );
     const selected = useMemo(
@@ -54,6 +61,7 @@ export function ImproveRoute() {
             setActionInfo(`${action}: ok${path ? ` → ${path}` : ""}`);
             setActionError(null);
             queryClient.invalidateQueries({ queryKey: ["improve"] });
+            queryClient.invalidateQueries({ queryKey: ["next-actions"] });
         } else {
             setActionError(`${action}: ${res.status}${res.message ? ` - ${res.message}` : ""}`);
             setActionInfo(null);
@@ -89,6 +97,12 @@ export function ImproveRoute() {
                 </span>
             </header>
 
+            <NextActionsPanel handlers={{
+                onAccept: (sig) => acceptMutation.mutate(sig),
+                onVerdict: (sig, v) => verdictMutation.mutate({ sig, verdict: v }),
+                pending: acceptMutation.isPending || rejectMutation.isPending || verdictMutation.isPending,
+            }} />
+
             {query.error ? <div className="error">Error: {String(query.error)}</div> : null}
             {actionError ? <div className="error">{actionError}</div> : null}
             {actionInfo ? <div className="empty" style={{ color: "#1d6f3d" }}>{actionInfo}</div> : null}
@@ -107,7 +121,7 @@ export function ImproveRoute() {
                     </select>
                 </label>
                 <span className="meta">
-                    Ranked by frequency · click a row for details
+                    Ranked by confidence × frequency · click a row for details
                 </span>
             </div>
 
@@ -177,6 +191,11 @@ export function ImproveRoute() {
                     )}
                 </aside>
             </div>
+
+            <details style={{ marginTop: 24 }}>
+                <summary style={{ cursor: "pointer" }}><strong>Decision log</strong></summary>
+                <DecisionsSection />
+            </details>
         </section>
     );
 }
@@ -265,6 +284,7 @@ function ProposalDetail({
             ) : null}
 
             <div className="actions" style={{ marginTop: 16, display: "flex", gap: 8, flexWrap: "wrap" }}>
+                {proposal.brief ? <CopyButton text={proposal.brief} /> : null}
                 {proposal.status === "open" ? (
                     <>
                         <button
