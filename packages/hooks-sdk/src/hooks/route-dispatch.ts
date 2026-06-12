@@ -36,7 +36,11 @@ const RoutingClass = Schema.Struct({
   flags: Schema.optional(Schema.String),
   suggest: Schema.String,
   reason: Schema.String,
-  origin: Schema.optional(Schema.Literals(["default", "user"])),
+  // Provenance tag written by ax routing compile/tune ("default" | "user").
+  // Kept as a plain optional string: the hook never reads origin, so an
+  // unknown value must not fail the whole-table decode (which would silently
+  // revert the user's routing table to DEFAULT_TABLE).
+  origin: Schema.optional(Schema.String),
 });
 
 const RoutingTable = Schema.Struct({
