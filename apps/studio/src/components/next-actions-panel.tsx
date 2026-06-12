@@ -1,16 +1,17 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
-import type { NextActionCard } from "@ax/lib/shared/dashboard-types";
+import type { NextActionCard, NextActionKind } from "@ax/lib/shared/dashboard-types";
 import { api } from "../api.ts";
 import { CopyButton } from "./copy-button.tsx";
 
 export interface NextActionsHandlers {
     readonly onAccept: (sig: string) => void;
     readonly onVerdict: (sig: string, verdict: string) => void;
+    /** true while any action mutation is in flight - disables all card buttons */
     readonly pending: boolean;
 }
 
-const KIND_LABEL: Record<string, string> = {
+const KIND_LABEL: Record<NextActionKind, string> = {
     proposal: "proposal",
     verdict: "verdict due",
     tool_failure: "tool failure",
@@ -83,6 +84,7 @@ function NextActionCardView({
                         Lock: {suggestedVerdict}
                     </button>
                 ) : null}
+                {/* card.link values come from the server-side builders, which only emit registered SPA paths */}
                 {card.link ? (
                     <Link to={card.link} className="badge review">
                         details &#8594;
