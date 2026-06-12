@@ -87,7 +87,7 @@ function LeadersPage() {
                                     {state.lb.boards[board].map((row, i) => (
                                         <tr key={row.login}>
                                             <td>{i + 1}</td>
-                                            <td><Link to="/u/$login" params={{ login: row.login }}>@{row.login}</Link></td>
+                                            <td><Link to="/u/$login" params={{ login: row.login }} search={{ vs: undefined }}>@{row.login}</Link></td>
                                             <td>{valueLabel[board](row.value)}</td>
                                         </tr>
                                     ))}
