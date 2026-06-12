@@ -43,6 +43,12 @@ A model-derived summary or classification of an agent session, such as goal,
 outcome, friction, helpfulness, and satisfaction signals.
 _Avoid_: ground truth
 
+**Enriched Session**:
+The assembled read model of one session - session detail plus metrics plus
+**Session Insights** - produced by one facade so every surface reads the same
+shape.
+_Avoid_: session detail blob
+
 **Derivation Engine**:
 The agent-neutral logic that turns normalized sessions, edits, commits, and touched files into **Change Sets** and **File Memories**.
 _Avoid_: Codex parser, adapter
