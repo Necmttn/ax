@@ -69,7 +69,7 @@ export function WrappedRoute() {
                 (data.cards?.length ?? 0) > 0 ? (
                     <>
                         <WrappedCardGrid cards={data.cards ?? []} />
-                        <details style={{ marginTop: 24 }}>
+                        <details open style={{ marginTop: 24 }}>
                             <summary style={{ cursor: "pointer" }}><strong>The numbers</strong></summary>
                             {/* The agent deck supersedes the mechanical hero +
                                 facts - only the raw stats live here. */}

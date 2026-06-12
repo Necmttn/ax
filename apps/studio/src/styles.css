@@ -2601,3 +2601,8 @@ td.skill-cell .description {
     padding: 0 4px;
     border-radius: 2px;
 }
+
+.token-scale-chain-alt {
+    color: var(--muted);
+    font-size: 12px;
+}

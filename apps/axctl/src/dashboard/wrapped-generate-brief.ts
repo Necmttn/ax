@@ -27,7 +27,7 @@ people read headlines, not paragraphs. Personality over template-speak:
 - \`ax recall <phrase>\` - hunt a specific memorable moment (the best card
   is often one real quote or one absurd number)
 
-**Then publish 10-16 cards:**
+**Then publish ~12 cards (10 minimum, 16 max):**
 
 \`\`\`bash
 echo '<json>' | ax wrapped publish
@@ -57,6 +57,15 @@ echo '<json>' | ax wrapped publish
 - Every card grounded in a real number or real quote from the data - no inventions.
 - Mix: archetype, model loyalty, productivity rhythm, prompt style, a funny
   low-light (failed run, all-caps moment), shipping volume, delegation habits.
+- ALWAYS include a value-multiplier card: \`ax cost models --days=30\` gives
+  API-priced usage in USD; compare it to what the user actually pays in
+  subscriptions (ask or assume Claude Code + Codex tiers). "$400 in,
+  $23.9K out - a 60x multiplier" - then make the dollars physical: that's
+  N base-model Honda Civics a year, M years of rent, you name it.
+- Physical-scale comparisons are welcome on any big number (books stacked
+  to Eiffel Towers, paper weighed in blue whales, distance flown by a 747) -
+  the dashboard already draws a token-scale board, so aim yours at OTHER
+  numbers (cost, tool calls, lines shipped).
 - Cards order = array order (most shareable first).
 - Mark \`"sensitivity": "sensitive"\` on anything with private paths, client
   names, or embarrassing specifics - those stay off the public preview.
