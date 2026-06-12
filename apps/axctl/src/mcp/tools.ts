@@ -20,28 +20,29 @@ import { Effect, type ManagedRuntime, type Layer } from "effect";
 import type { AppLayer } from "@ax/lib/layers";
 import {
     fetchRecall,
+    resolveRecallSources,
     type RecallParams,
     type RecallSource,
 } from "../dashboard/recall.ts";
 import {
     listSessionsAround,
-    type SessionsAroundOpts,
+    normalizeSessionsAroundOpts,
 } from "../dashboard/sessions-query.ts";
 import { fetchSessionShow } from "../dashboard/session-show.ts";
 import type { FetchSessionViewOptions } from "../dashboard/session-view.ts";
 import {
     fetchSkillsWeighted,
-    type SkillsWeightedParams,
+    normalizeSkillsWeightedParams,
 } from "../dashboard/skills-weighted.ts";
 import {
     fetchSkillsByRole,
     fetchRolesForSkill,
     fetchAllRoles,
-    type FetchSkillsByRoleParams,
+    normalizeSkillsByRoleParams,
 } from "../dashboard/role-queries.ts";
-import { recommend, type RecommendInput } from "../improve/recommend.ts";
+import { recommend, normalizeRecommendInput } from "../improve/recommend.ts";
 import { showExperiment } from "../improve/show.ts";
-import { listProposals, type ListProposalsInput } from "../improve/list.ts";
+import { listProposals, normalizeListProposalsInput } from "../improve/list.ts";
 import { fetchSessionMetrics } from "../metrics/session-metrics-query.ts";
 import { SIGNAL_CATALOG, findSignal, runRelationSignal } from "../metrics/catalog.ts";
 import {
@@ -124,7 +125,7 @@ const recallTool: AxMcpTool = {
 
         const result = await rt.runPromise(fetchRecall(params));
         const { hits, next } = buildRecallNext(result, {
-            requestedSources: params.sources ?? ["turn"],
+            requestedSources: resolveRecallSources(params.sources),
         });
         return { ...result, hits, next };
     },
@@ -157,11 +158,11 @@ const sessionsAroundTool: AxMcpTool = {
         }
         const days = typeof args.days === "number" ? args.days : undefined;
         const project = typeof args.project === "string" ? args.project : undefined;
-        const opts: SessionsAroundOpts = {
+        const opts = normalizeSessionsAroundOpts({
             date,
             ...(days !== undefined ? { days } : {}),
             ...(project !== undefined ? { project } : {}),
-        };
+        });
         const rows = await rt.runPromise(listSessionsAround(opts));
         return buildSessionsNext(rows, {
             date: dateStr,
@@ -231,10 +232,10 @@ const skillsWeightedTool: AxMcpTool = {
     run: async (args, rt) => {
         const windowDays = typeof args.windowDays === "number" ? args.windowDays : undefined;
         const limit = typeof args.limit === "number" ? args.limit : undefined;
-        const params: SkillsWeightedParams = {
+        const params = normalizeSkillsWeightedParams({
             ...(windowDays !== undefined ? { windowDays } : {}),
             ...(limit !== undefined ? { limit } : {}),
-        };
+        });
         const result = await rt.runPromise(fetchSkillsWeighted(params));
         return { ...result, next: buildSkillsWeightedNext(result) };
     },
@@ -258,10 +259,10 @@ const skillsByRoleTool: AxMcpTool = {
     run: async (args, rt) => {
         const role = String(args.role ?? "");
         const limit = typeof args.limit === "number" ? args.limit : undefined;
-        const params: FetchSkillsByRoleParams = {
+        const params = normalizeSkillsByRoleParams({
             role,
             ...(limit !== undefined ? { limit } : {}),
-        };
+        });
         const result = await rt.runPromise(fetchSkillsByRole(params));
         return { ...result, next: buildSkillsByRoleNext(result, role) };
     },
@@ -323,22 +324,26 @@ const improveRecommendTool: AxMcpTool = {
             .describe("Only proposals updated within the last N days."),
     },
     run: async (args, rt) => {
-        // `limit` is required on RecommendInput with no internal default - so
-        // default it to 10 here. cwd/project are deliberately not exposed (they
-        // are cwd-bound and meaningless at the MCP boundary).
-        const limit = typeof args.limit === "number" ? args.limit : 10;
+        // cwd/project are deliberately not exposed (they are cwd-bound and
+        // meaningless at the MCP boundary). The MCP limit default is 10 (the
+        // CLI's is 5) - both pass their own default into the shared normalizer,
+        // which is why `defaultLimit` is a parameter rather than baked in.
+        const limit = typeof args.limit === "number" ? args.limit : undefined;
         const forms = Array.isArray(args.forms)
             ? args.forms.map((v) => String(v))
             : undefined;
         const agent =
             args.agent === "claude" || args.agent === "codex" ? args.agent : undefined;
         const sinceDays = typeof args.sinceDays === "number" ? args.sinceDays : undefined;
-        const input: RecommendInput = {
-            limit,
-            ...(forms !== undefined ? { forms } : {}),
-            ...(agent !== undefined ? { agent } : {}),
-            ...(sinceDays !== undefined ? { sinceDays } : {}),
-        };
+        const input = normalizeRecommendInput(
+            {
+                ...(limit !== undefined ? { limit } : {}),
+                ...(forms !== undefined ? { forms } : {}),
+                ...(agent !== undefined ? { agent } : {}),
+                ...(sinceDays !== undefined ? { sinceDays } : {}),
+            },
+            10,
+        );
         const items = await rt.runPromise(recommend(input));
         const next = buildImproveProposalsNext(
             items.map((i) => ({ sig: i.shortId, title: i.title })),
@@ -387,11 +392,11 @@ const improveListTool: AxMcpTool = {
         const status = typeof args.status === "string" ? args.status : undefined;
         const form = typeof args.form === "string" ? args.form : undefined;
         const limit = typeof args.limit === "number" ? args.limit : undefined;
-        const input: ListProposalsInput = {
+        const input = normalizeListProposalsInput({
             ...(status !== undefined ? { status } : {}),
             ...(form !== undefined ? { form } : {}),
             ...(limit !== undefined ? { limit } : {}),
-        };
+        });
         const rows = await rt.runPromise(listProposals(input));
         const next = buildImproveProposalsNext(
             rows.map((r) => ({ sig: r.dedupe_sig, title: r.title })),

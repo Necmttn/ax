@@ -10,8 +10,8 @@ import { deriveCheckpoints } from "../../ingest/derive-checkpoints.ts";
 import { runAgentAccept } from "../../improve/agent-accept.ts";
 import { acceptProposal, rejectProposal } from "../../improve/actions.ts";
 import { lintFiles } from "../../improve/lint.ts";
-import { listProposals, type ProposalRow } from "../../improve/list.ts";
-import { recommend, formatRecommendations, copyToClipboard, selectByIndices, parseIndexInput } from "../../improve/recommend.ts";
+import { listProposals, normalizeListProposalsInput, type ProposalRow } from "../../improve/list.ts";
+import { recommend, normalizeRecommendInput, formatRecommendations, copyToClipboard, selectByIndices, parseIndexInput } from "../../improve/recommend.ts";
 import { showExperiment, formatShow } from "../../improve/show.ts";
 import { renderAnalyzeBrief } from "../../improve/analyze-brief.ts";
 import { runPropose } from "../../improve/propose.ts";
@@ -44,14 +44,16 @@ const cmdImproveList = (input: {
 }) =>
     Effect.gen(function* () {
         const json = input.json;
+        // Transport-local validation (exit 2 with usage wording) stays here; the
+        // status default + presence rules come from the shared normalizer.
         const limit = requirePositiveInt("improve list", "limit", input.limit);
-        const formFilter = input.form;
-        const statusFilter = input.status ?? "open";
-        const rows = yield* listProposals({
-            status: statusFilter,
-            ...(formFilter !== undefined ? { form: formFilter } : {}),
-            limit,
-        });
+        const rows = yield* listProposals(
+            normalizeListProposalsInput({
+                ...(input.status !== undefined ? { status: input.status } : {}),
+                ...(input.form !== undefined ? { form: input.form } : {}),
+                limit,
+            }),
+        );
         if (json) {
             console.log(prettyPrint(rows));
             return;
@@ -146,11 +148,19 @@ const cmdImproveRecommend = (input: {
         const limit = requirePositiveInt("improve recommend", "limit", input.limit);
         const sinceDays = requireOptionalPositiveInt("improve recommend", "since", input.sinceDays);
         const forms = input.forms.flatMap((v) => parseFileHints(Option.some(v)));
-        const items = yield* recommend({
-            limit,
-            ...(forms.length > 0 ? { forms } : {}),
-            ...(sinceDays === undefined ? {} : { sinceDays }),
-        });
+        // Validation (exit 2) stays here; the CLI limit default is 5 (MCP's is
+        // 10), both passed into the shared normalizer so the constructed input
+        // shape cannot drift between transports.
+        const items = yield* recommend(
+            normalizeRecommendInput(
+                {
+                    limit,
+                    ...(forms.length > 0 ? { forms } : {}),
+                    ...(sinceDays === undefined ? {} : { sinceDays }),
+                },
+                5,
+            ),
+        );
         if (json) {
             console.log(prettyPrint(items));
             return;

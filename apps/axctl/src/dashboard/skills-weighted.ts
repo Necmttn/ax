@@ -49,6 +49,43 @@ export interface SkillsWeightedParams {
     readonly includeTools?: boolean;
 }
 
+/** Shared defaults for the weighted-skills ranking (CLI + MCP). */
+export const SKILLS_WEIGHTED_DEFAULT_LIMIT = 25;
+export const SKILLS_WEIGHTED_DEFAULT_DOCTOR_THRESHOLD = 5;
+
+/**
+ * Transport-agnostic raw input. The CLI flag parser and the MCP zod handler
+ * decode into this then call {@link normalizeSkillsWeightedParams} so the
+ * limit/doctor-threshold/includeTools defaults live in one place.
+ *
+ * Positivity validation of `limit`, `windowDays`, and `doctorThreshold` stays
+ * in the transports (CLI `requirePositiveInt`/`requireOptionalPositiveInt`
+ * exit 2; MCP zod `.positive()` rejects at the edge); this only fills defaults
+ * + presence rules.
+ */
+export interface SkillsWeightedQueryArgs {
+    readonly windowDays?: number | undefined;
+    readonly limit?: number | undefined;
+    readonly doctorThreshold?: number | undefined;
+    readonly includeTools?: boolean | undefined;
+}
+
+export const normalizeSkillsWeightedParams = (
+    args: SkillsWeightedQueryArgs,
+): SkillsWeightedParams => ({
+    ...(args.windowDays !== undefined ? { windowDays: args.windowDays } : {}),
+    limit:
+        typeof args.limit === "number" && Number.isFinite(args.limit)
+            ? args.limit
+            : SKILLS_WEIGHTED_DEFAULT_LIMIT,
+    doctorThreshold:
+        typeof args.doctorThreshold === "number" &&
+        Number.isFinite(args.doctorThreshold)
+            ? args.doctorThreshold
+            : SKILLS_WEIGHTED_DEFAULT_DOCTOR_THRESHOLD,
+    includeTools: args.includeTools ?? false,
+});
+
 // ---------------------------------------------------------------------------
 // SQL helpers
 // ---------------------------------------------------------------------------
@@ -151,8 +188,9 @@ export const fetchSkillsWeighted = (
 ): Effect.Effect<SkillsWeightedResult, DbError, SurrealClient> =>
     Effect.gen(function* () {
         const db = yield* SurrealClient;
-        const limit = params.limit ?? 25;
-        const doctorThreshold = params.doctorThreshold ?? 5;
+        const limit = params.limit ?? SKILLS_WEIGHTED_DEFAULT_LIMIT;
+        const doctorThreshold =
+            params.doctorThreshold ?? SKILLS_WEIGHTED_DEFAULT_DOCTOR_THRESHOLD;
         const includeTools = params.includeTools ?? false;
 
         // Run passes + doctor + tombstone + synthetic-tool id queries concurrently.

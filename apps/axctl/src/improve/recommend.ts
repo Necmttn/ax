@@ -18,6 +18,49 @@ export interface RecommendInput {
     readonly sinceDays?: number;
 }
 
+/**
+ * Transport-agnostic raw input for `recommend`. Both the CLI flag parser and
+ * the MCP zod schema decode their wire shapes into this, then call
+ * {@link normalizeRecommendInput} so the limit default + non-finite guards live
+ * in one place. The CLI and MCP apply DIFFERENT limit defaults (5 vs 10), so
+ * the default is a required parameter here rather than baked in - see
+ * `defaultLimit` below.
+ */
+export interface RecommendQueryArgs {
+    readonly limit?: number | undefined;
+    readonly forms?: ReadonlyArray<string> | undefined;
+    readonly agent?: "claude" | "codex" | undefined;
+    readonly sinceDays?: number | undefined;
+}
+
+/**
+ * Apply default limit + drop empty optional collections. Transports keep their
+ * own limit default (CLI 5, MCP 10) by passing `defaultLimit`; everything else
+ * (forms/agent/sinceDays presence rules) is shared semantics.
+ *
+ * Note: positivity/integer validation of `limit` and `sinceDays` stays in the
+ * transports (CLI `requirePositiveInt` exits 2 with usage wording; MCP zod
+ * rejects at the edge). This function only applies defaults + presence rules so
+ * the constructed {@link RecommendInput} cannot drift between callers.
+ */
+export const normalizeRecommendInput = (
+    args: RecommendQueryArgs,
+    defaultLimit: number,
+): RecommendInput => {
+    const limit =
+        typeof args.limit === "number" && Number.isFinite(args.limit)
+            ? args.limit
+            : defaultLimit;
+    const forms =
+        args.forms && args.forms.length > 0 ? args.forms : undefined;
+    return {
+        limit,
+        ...(forms !== undefined ? { forms } : {}),
+        ...(args.agent !== undefined ? { agent: args.agent } : {}),
+        ...(args.sinceDays !== undefined ? { sinceDays: args.sinceDays } : {}),
+    };
+};
+
 export interface RecommendItem {
     readonly shortId: string;
     readonly title: string;

@@ -49,6 +49,32 @@ export interface FetchSkillsByRoleParams {
     readonly limit?: number;
 }
 
+/** Shared default row cap for `fetchSkillsByRole` (CLI + MCP). */
+export const SKILLS_BY_ROLE_DEFAULT_LIMIT = 50;
+
+/**
+ * Transport-agnostic raw input for `fetchSkillsByRole`. The CLI flag parser and
+ * the MCP zod handler decode into this then call
+ * {@link normalizeSkillsByRoleParams} so the limit default lives in one place.
+ *
+ * `limit` positivity stays in the transports (CLI `requirePositiveInt`, MCP
+ * zod `.positive()`); this only fills the default.
+ */
+export interface SkillsByRoleQueryArgs {
+    readonly role: string;
+    readonly limit?: number | undefined;
+}
+
+export const normalizeSkillsByRoleParams = (
+    args: SkillsByRoleQueryArgs,
+): FetchSkillsByRoleParams => ({
+    role: args.role,
+    limit:
+        typeof args.limit === "number" && Number.isFinite(args.limit)
+            ? args.limit
+            : SKILLS_BY_ROLE_DEFAULT_LIMIT,
+});
+
 export interface FetchSkillsByRoleResult {
     readonly rows: readonly SkillByRoleRow[];
     readonly found: boolean;
@@ -59,7 +85,7 @@ export const fetchSkillsByRole = (
 ): Effect.Effect<FetchSkillsByRoleResult, DbError, SurrealClient> =>
     Effect.gen(function* () {
         const db = yield* SurrealClient;
-        const limit = params.limit ?? 50;
+        const limit = params.limit ?? SKILLS_BY_ROLE_DEFAULT_LIMIT;
 
         const sql = `
 SELECT
