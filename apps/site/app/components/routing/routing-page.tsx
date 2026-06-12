@@ -14,6 +14,9 @@ export function RoutingPage() {
           measures the leak, nudges at dispatch time, tunes a routing table from your own
           history, and verifies the savings &mdash; all on your laptop.
         </p>
+        <p className="rt-receipts-label">
+          what the leak looks like on one real machine running ax &middot; 14 days of receipts
+        </p>
         <div className="scale">
           <div className="stat">
             <span className="v">$19,270</span>
@@ -33,8 +36,8 @@ export function RoutingPage() {
           </div>
         </div>
         <p className="rt-hero-note">
-          measured on the author&rsquo;s machine &middot; $2,301 of subagent spend on
-          fable/opus vs $83 on sonnet
+          $2,301 of subagent spend on fable/opus vs $83 on sonnet, on this machine. Run{" "}
+          <code>ax cost split</code> to see yours.
         </p>
       </section>
 
@@ -46,9 +49,9 @@ export function RoutingPage() {
             Measure. Nudge. Tune. <em>Verify.</em>
           </h2>
           <p className="section-lede">
-            Four commands close the loop &mdash; see where the inherited dispatches hide, get
+            Four commands close the loop &mdash; see where your inherited dispatches hide, get
             warned before the next one, mine your history for routing classes, then reprice
-            against the tokens those dispatches actually burned.
+            against the tokens your dispatches actually burned.
           </p>
         </div>
 
@@ -60,8 +63,8 @@ export function RoutingPage() {
             </div>
             <code className="rt-step-cmd">ax cost split --days=7</code>
             <p className="rt-step-body">
-              Breaks spend into main loop vs subagents, by model. The 28:1 ratio above came
-              out of this table.
+              Breaks your spend into main loop vs subagents, by model. The 28:1 above came
+              out of this table &mdash; run it to see your ratio.
             </p>
           </div>
 
@@ -75,7 +78,7 @@ export function RoutingPage() {
             </code>
             <p className="rt-step-body">
               The <code className="inline">route-dispatch</code> hook warns at dispatch time
-              when mechanical work forgets to pin a model.
+              when one of your mechanical dispatches forgets to pin a model.
             </p>
           </div>
 
@@ -99,7 +102,7 @@ export function RoutingPage() {
             <code className="rt-step-cmd">ax dispatches --candidates</code>
             <p className="rt-step-body">
               Reprices every expensive inherited dispatch from the real token buckets it
-              burned. No projections.
+              burned. Your savings, not projections.
             </p>
           </div>
         </div>
@@ -108,13 +111,15 @@ export function RoutingPage() {
       {/* ============= 02 on real data ============= */}
       <section id="numbers">
         <div className="section-head">
-          <span className="section-num">02 / On real data</span>
+          <span className="section-num">02 / The receipts</span>
           <h2>
-            First run on 30 days of <em>my own dispatches.</em>
+            One machine, 30 days, <em>verbatim.</em>
           </h2>
           <p className="section-lede">
-            20 routing classes mined, $591.57 of addressable spend found, $512.91 flagged
-            once the table was applied. The output below is verbatim.
+            20 routing classes mined, $591.57 of addressable spend, $512.91 flagged once the
+            table applied &mdash; the same machine as the numbers above.{" "}
+            <code className="inline">ax routing tune --dry-run</code> prints yours in one
+            command.
           </p>
         </div>
 
@@ -155,9 +160,10 @@ export function RoutingPage() {
         </div>
 
         <p className="rt-fine">
-          Honest numbers, on purpose: &ldquo;addressable spend&rdquo; is what those dispatches
-          actually cost over the window. ax reprices retrospectively from real token buckets
-          &mdash; it never reports fabricated projected savings.
+          Honest numbers, on purpose: &ldquo;addressable spend&rdquo; is what the flagged
+          dispatches actually cost over the window &mdash; yours included. ax reprices
+          retrospectively from real token buckets and never reports fabricated projected
+          savings.
         </p>
       </section>
 
@@ -169,8 +175,9 @@ export function RoutingPage() {
             Judgment work <em>never</em> tiers down.
           </h2>
           <p className="section-lede">
-            The obvious objection is &ldquo;won&rsquo;t quality drop?&rdquo; It doesn&rsquo;t,
-            because the miner refuses to auto-route anything that needs taste.
+            Your obvious objection: won&rsquo;t quality drop? No &mdash; the miner refuses to
+            auto-route anything that needs taste. Your reviews, your design calls, your
+            plans stay on the frontier model.
           </p>
         </div>
 
