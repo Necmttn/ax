@@ -244,3 +244,49 @@ Notes:
   follow-up tweet carries the mechanism if it travels.
 - Post the follow-up only as a reply to whichever single gets traction,
   not preemptively.
+
+## FINAL - published versions (2026-06-12)
+
+### Main tweet (V3 final, + receipt image)
+
+> I spent $19,270 on Claude Code in 14 days and figured that was the price of hard problems.
+>
+> Then ax showed me where it went: 663 sub-tasks, 75% on Fable, mostly file searches. I was paying frontier rates to grep.
+>
+> ax routing tune fixes this - cuts that spend by up to 70%.
+
+Notes: "ax showed me" not "read the receipt" (the image carries the receipt
+metaphor, the text doesn't); "up to 70%" = measured per-sub-task repricing
+ratio (fable->sonnet on identical token buckets), cost not token count.
+
+### Follow-up reply (mechanism + link)
+
+> How: ax reads your own usage history, finds the routine work billed at top rates, and your harness starts routing those sub-tasks to cheaper models automatically.
+>
+> Judgment work never moves - reviews, design, planning stay on Fable. Quality doesn't drop.
+>
+> ax.necmttn.com/routing
+
+### Third reply (install, on request)
+
+> curl -fsSL https://ax.necmttn.com/install | bash
+> then: ax routing tune
+>
+> Local-only - your transcripts never leave your machine.
+
+### QT for the $1,000-tier discourse (Theo-style posts)
+
+> You don't need a $1,000 tier. You need the 75% of sub-tasks that run on Fable for no reason to stop.
+>
+> My last 14 days: 663 sub-tasks, 75% on Fable - mostly file searches. The harness never downshifts on its own.
+>
+> ax routing tune fixes the default. Your $200 tier suddenly lasts.
+
+### Standalone discourse riff (own post, can carry receipt image)
+
+> People are offering Anthropic $1,000/month for more Fable while 75% of their current Fable allowance does file searches.
+>
+> The model isn't too expensive. The routing is broken. ax routing tune - cuts that spend up to 70%.
+
+Numbers framing: always "my/mine" - measured on one machine, never claimed
+universal.
