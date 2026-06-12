@@ -20,7 +20,7 @@ const validProfile = {
         harnesses: ["claude-code", "codex"],
     },
     rig: {
-        skills: [{ name: "tdd", source: "superpowers", runs_30d: 88 }],
+        skills: [{ name: "tdd", source: "superpowers", runs: 88 }],
         hooks: ["enforce-worktree", "route-dispatch"],
         routing_table: true,
         rules: { count: 14 },

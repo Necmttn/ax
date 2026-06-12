@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { countRules, deriveRig, isToolScope, skillSource } from "./rig.ts";
+import { countRules, deriveRig, isToolScope, publicSkillName, skillSource } from "./rig.ts";
 
 describe("skillSource", () => {
     test("plugin scope -> plugin id", () => {
@@ -25,6 +25,20 @@ describe("isToolScope", () => {
         expect(isToolScope("opencode-tool")).toBe(true);
         expect(isToolScope("user")).toBe(false);
         expect(isToolScope("plugin:superpowers")).toBe(false);
+    });
+});
+
+describe("publicSkillName", () => {
+    test("strips project prefix from project-scoped skill names", () => {
+        expect(publicSkillName("apps:expo-deployment", "project:apps")).toBe("expo-deployment");
+        expect(publicSkillName("secret-client:commit", "project-command:secret-client")).toBe("commit");
+    });
+    test("leaves non-project names untouched", () => {
+        expect(publicSkillName("superpowers:tdd", "plugin:superpowers")).toBe("superpowers:tdd");
+        expect(publicSkillName("composto", "user")).toBe("composto");
+    });
+    test("project scope without matching name prefix is untouched", () => {
+        expect(publicSkillName("expo-deployment", "project:apps")).toBe("expo-deployment");
     });
 });
 
@@ -54,8 +68,8 @@ describe("deriveRig", () => {
         });
         expect(rig).toEqual({
             skills: [
-                { name: "tdd", source: "superpowers", runs_30d: 88 },
-                { name: "my-local", source: "local", runs_30d: 3 },
+                { name: "tdd", source: "superpowers", runs: 88 },
+                { name: "my-local", source: "local", runs: 3 },
             ],
             hooks: ["enforce-worktree", "route-dispatch"],
             routing_table: true,
@@ -89,6 +103,17 @@ describe("deriveRig", () => {
             hasRoutingTable: false,
             rulesMarkdown: null,
         });
-        expect(rig.skills).toEqual([{ name: "tdd", source: "superpowers", runs_30d: 88 }]);
+        expect(rig.skills).toEqual([{ name: "tdd", source: "superpowers", runs: 88 }]);
+    });
+
+    test("project-scoped skill names are scrubbed of the project prefix", () => {
+        const rig = deriveRig({
+            invocations: [{ skill: "secret-client:commit", count: 5 }],
+            scopes: new Map([["secret-client:commit", "project-command:secret-client"]]),
+            hookFiles: [],
+            hasRoutingTable: false,
+            rulesMarkdown: null,
+        });
+        expect(rig.skills).toEqual([{ name: "commit", source: "local", runs: 5 }]);
     });
 });

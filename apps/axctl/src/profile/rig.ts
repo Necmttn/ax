@@ -24,6 +24,23 @@ export function isToolScope(scope: string): boolean {
     return scope.endsWith("-tool");
 }
 
+/**
+ * Project-scoped skills store the project name INSIDE the skill name
+ * ("apps:expo-deployment" under scope "project:apps") - strip it, or the
+ * aggregates-only invariant leaks project names through rig.skills[].name.
+ */
+export function publicSkillName(name: string, scope: string): string {
+    const project = scope.startsWith("project:")
+        ? scope.slice("project:".length)
+        : scope.startsWith("project-command:")
+            ? scope.slice("project-command:".length)
+            : null;
+    if (project !== null && name.startsWith(`${project}:`)) {
+        return name.slice(project.length + 1);
+    }
+    return name;
+}
+
 export function countRules(markdown: string): number {
     return markdown.split("\n").filter((line) => /^\s*[-*]\s+\S/.test(line)).length;
 }
@@ -37,7 +54,7 @@ export interface RigInputs {
 }
 
 export interface Rig {
-    readonly skills: ReadonlyArray<{ name: string; source: string; runs_30d: number }>;
+    readonly skills: ReadonlyArray<{ name: string; source: string; runs: number }>;
     readonly hooks: ReadonlyArray<string>;
     readonly routing_table: boolean;
     readonly rules?: { readonly count: number };
@@ -46,11 +63,14 @@ export interface Rig {
 export function deriveRig(inputs: RigInputs): Rig {
     const skills = inputs.invocations
         .filter((row) => !isToolScope(inputs.scopes.get(row.skill) ?? "user"))
-        .map((row) => ({
-            name: row.skill,
-            source: skillSource(inputs.scopes.get(row.skill) ?? "user"),
-            runs_30d: row.count,
-        }));
+        .map((row) => {
+            const scope = inputs.scopes.get(row.skill) ?? "user";
+            return {
+                name: publicSkillName(row.skill, scope),
+                source: skillSource(scope),
+                runs: row.count,
+            };
+        });
     const hooks = inputs.hookFiles
         .filter((f) => f.endsWith(".ts") && !f.endsWith(".test.ts"))
         .map((f) => f.replace(/\.ts$/, ""))

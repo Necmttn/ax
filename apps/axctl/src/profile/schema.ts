@@ -85,7 +85,7 @@ const Rig = Schema.Struct({
         Schema.Struct({
             name: Schema.String,
             source: Schema.String,
-            runs_30d: Schema.Number,
+            runs: Schema.Number,
         }),
     ),
     hooks: Schema.Array(Schema.String),

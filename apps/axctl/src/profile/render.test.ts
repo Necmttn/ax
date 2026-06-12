@@ -51,7 +51,7 @@ describe("buildProfile", () => {
             { name: "haiku", share: 0.25, cost_usd: 50 },
         ]);
         expect(p.stats.harnesses).toEqual(["claude", "codex"]);
-        expect(p.rig.skills).toEqual([{ name: "tdd", source: "superpowers", runs_30d: 88 }]);
+        expect(p.rig.skills).toEqual([{ name: "tdd", source: "superpowers", runs: 88 }]);
         expect(p.rig.rules).toEqual({ count: 2 });
         expect(p.taste!.patterns[0]!.name).toBe("stop-edit-loops-early");
     });

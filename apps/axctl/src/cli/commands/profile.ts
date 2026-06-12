@@ -19,7 +19,7 @@ const HOOKS_DIR = `${process.env.HOME}/.ax/hooks`;
 const RULES_FILE = `${process.env.HOME}/.claude/CLAUDE.md`;
 const ROUTING_TABLE = `${process.env.HOME}/.ax/hooks/routing-table.json`;
 
-/** GitHub login via `gh api user`; falls back to $USER with a notice. */
+/** GitHub login via `gh api user`; silently falls back to $USER. */
 const resolveGithubLogin = Effect.gen(function* () {
     const result = yield* Effect.tryPromise({
         try: async () => {
@@ -100,7 +100,7 @@ export function formatProfile(p: ProfileV1): string {
     lines.push("");
     lines.push(`rig: ${p.rig.skills.length} skills · ${p.rig.hooks.length} hooks · routing_table: ${p.rig.routing_table}${p.rig.rules ? ` · ${p.rig.rules.count} rules` : ""}`);
     for (const s of topSkills) {
-        lines.push(`  ${s.name.padEnd(nameWidth)} ${integer(s.runs_30d).padStart(6)} runs  (${s.source})`);
+        lines.push(`  ${s.name.padEnd(nameWidth)} ${integer(s.runs).padStart(6)} runs  (${s.source})`);
     }
     if (p.taste) {
         lines.push("");

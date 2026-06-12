@@ -47,7 +47,7 @@ One gist per user, file `ax-profile.json`, updated in-place via
     "harnesses": ["claude-code", "codex"]
   },
   "rig": {
-    "skills": [{ "name": "tdd", "source": "superpowers", "runs_30d": 88 }],
+    "skills": [{ "name": "tdd", "source": "superpowers", "runs": 88 }],
     "hooks": ["enforce-worktree", "route-dispatch"],
     "routing_table": true,
     "rules": { "count": 14, "topics": ["worktree-discipline", "effect-patterns"] }
@@ -212,7 +212,7 @@ committed only when changed:
 
 ```
 community/leaderboard.json    // all boards precomputed: tokens, sessions, streak, cost
-community/skill-stats.json    // { "superpowers:tdd": { "users": 41, "runs_30d": 2210, "trend_pct": 12 } }
+community/skill-stats.json    // { "superpowers:tdd": { "users": 41, "runs": 2210, "trend_pct": 12 } }
 community/hook-stats.json     // { "enforce-worktree": { "users": 17 } }
 community/state/<year>.json   // anonymized distributions: model share, harness mix,
                               // cost percentiles, skill/hook adoption, taste-pattern frequency
@@ -277,6 +277,12 @@ non-goal.
 - Cost is public by default (decision); first publish shows the exact JSON
   and requires confirmation; `--no-cost` exists from day one;
   `ax profile unpublish` is a single command.
+- Taste summaries are raw proposal hypothesis prose and can carry repo names
+  or dollar amounts - the publish path (Plan 2) must scrub or require
+  per-pattern confirmation; the local renderer ships them as-is.
+- Skill names are scrubbed of project prefixes (`apps:expo-deployment` →
+  `expo-deployment`) and harness tool pseudo-skills are excluded - enforced
+  in `deriveRig`, tested.
 - Aggregates only - enforced by the renderer's output type, not by filtering
   at the edge.
 - Compiled boards validate schema and drop malformed/absurd rows.

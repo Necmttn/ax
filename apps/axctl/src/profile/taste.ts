@@ -4,6 +4,11 @@
  * classifier output where present, section omitted otherwise").
  * Earned confidence: values come from real proposal records, never invented.
  * stack-choice derivation is deferred (needs dep/import signals).
+ *
+ * PUBLISH GATE (Plan 2): summary is raw proposal hypothesis prose - it can
+ * carry repo names or dollar amounts. Fine for the local-only renderer;
+ * the publish path MUST scrub or require per-pattern confirmation before
+ * this text leaves the machine.
  */
 import type { ProposalRow } from "./queries.ts";
 import type { TastePattern } from "./schema.ts";
