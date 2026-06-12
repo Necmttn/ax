@@ -436,6 +436,9 @@ export const api = {
     improveAnalyzeBrief: (): Promise<{ brief: string }> =>
         viaContract("/api/improve/analyze-brief", (c) => c.improve.analyzeBrief()),
 
+    wrappedGenerateBrief: (): Promise<{ brief: string }> =>
+        viaContract("/api/wrapped/generate-brief", (c) => c.insights.wrappedGenerateBrief()),
+
     /** Read-only SQL console (Lab) - daemon accepts SELECT/RETURN/INFO only. */
     query: (sql: string): Promise<{ result: unknown; durationMs: number }> =>
         viaContract(

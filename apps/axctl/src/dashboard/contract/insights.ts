@@ -18,6 +18,7 @@ import { fetchWorkflow } from "../workflow.ts";
 import { sanitizeWrappedProfile } from "../wrapped.ts";
 import { fetchWrappedCached } from "../wrapped-cache.ts";
 import { fetchWrappedCards, sanitizeWrappedCards } from "../wrapped-cards.ts";
+import { renderWrappedGenerateBrief } from "../wrapped-generate-brief.ts";
 import { orInternal } from "./common.ts";
 
 export const InsightsGroupLive = HttpApiBuilder.group(AxApi, "insights", (handlers) =>
@@ -70,6 +71,10 @@ export const InsightsGroupLive = HttpApiBuilder.group(AxApi, "insights", (handle
                     })),
                 ),
             ))
+        .handle("wrappedGenerateBrief", () =>
+            Effect.sync(() => ({
+                brief: renderWrappedGenerateBrief({ date: new Date().toISOString().slice(0, 10) }),
+            })))
         .handle("workflow", () => orInternal(fetchWorkflow()))
         .handle("toolFailures", () => orInternal(fetchToolFailures()))
         .handle("toolFailureDetail", ({ params }) => orInternal(fetchToolFailureDetail(params.label))));
