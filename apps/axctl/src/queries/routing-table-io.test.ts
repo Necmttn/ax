@@ -12,6 +12,7 @@ import {
     saveStoredRoutingTable,
     loadEffectiveRoutingTable,
     appendUserClasses,
+    type LoadedRoutingTable,
     type StoredRoutingTable,
     type StoredRoutingClass,
 } from "./routing-table-io.ts";
@@ -80,6 +81,35 @@ describe("mergeRoutingTables", () => {
         expect(specReview).toHaveLength(1);
         expect(specReview[0]!.origin).toBe("default");
     });
+
+    it("refreshes agentTypes from defaults but keeps user-added keys", () => {
+        const existing: StoredRoutingTable = {
+            version: 1,
+            classes: [],
+            // stale stored copy: codebase-analyzer was edited away from the
+            // current default; my-custom-agent is a user addition
+            agentTypes: { "codebase-analyzer": "haiku", "my-custom-agent": "haiku" },
+        };
+        const merged = mergeRoutingTables(ROUTING_CLASSES, existing);
+        expect(merged.agentTypes["codebase-analyzer"]).toBe("sonnet");
+        expect(merged.agentTypes["my-custom-agent"]).toBe("haiku");
+    });
+
+    it("migrates legacy origin-less rows as user classes", () => {
+        // Today's compile-routing output has NO origin tags; hand-added rows
+        // may lack them too. They must survive the merge tagged origin: user.
+        const existing: LoadedRoutingTable = {
+            version: 1,
+            classes: [
+                { id: "hand-added", pattern: "^x", flags: "i", suggest: "haiku", reason: "mine" },
+            ],
+            agentTypes: {},
+        };
+        const merged = mergeRoutingTables(ROUTING_CLASSES, existing);
+        const row = merged.classes.find((c) => c.id === "hand-added");
+        expect(row).toBeDefined();
+        expect(row!.origin).toBe("user");
+    });
 });
 
 describe("appendUserClasses", () => {
@@ -101,6 +131,24 @@ describe("load/save round-trip", () => {
         expect(loaded).toEqual(table);
         const missing = await run(loadStoredRoutingTable(join(dir, "nope.json")));
         expect(missing).toBeNull();
+    });
+
+    it("normalizes a hand-edited file: missing agentTypes becomes {}, malformed rows dropped", async () => {
+        const dir = mkdtempSync(join(tmpdir(), "ax-routing-io-"));
+        const p = join(dir, "hand-edited.json");
+        const validRow = {
+            id: "my-mined-class",
+            pattern: "^summarize",
+            flags: "i",
+            suggest: "haiku",
+            reason: "mined from my history",
+        };
+        writeFileSync(p, JSON.stringify({ version: 1, classes: [validRow, { id: 42 }] }));
+        const loaded = await run(loadStoredRoutingTable(p));
+        expect(loaded).not.toBeNull();
+        expect(loaded!.agentTypes).toEqual({});
+        expect(loaded!.classes).toHaveLength(1);
+        expect(loaded!.classes[0]!.id).toBe("my-mined-class");
     });
 
     it("loadEffectiveRoutingTable falls back to defaults when file missing or corrupt", async () => {
