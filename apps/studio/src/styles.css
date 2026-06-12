@@ -2642,3 +2642,154 @@ td.skill-cell .description {
     font-size: 12px;
     font-weight: 600;
 }
+
+/* ---- next-action cards (Improve) - siblings of .wrapped-card ---- */
+.next-actions {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 16px;
+    margin: 4px 0 8px;
+}
+@media (max-width: 1280px) { .next-actions { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 760px)  { .next-actions { grid-template-columns: 1fr; } }
+
+.next-action-card {
+    border: 1px solid var(--line);
+    border-top: 4px solid var(--card-accent, var(--green));
+    background: var(--panel);
+    padding: 14px 16px 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    min-height: 190px;
+}
+.next-action-card.accent-green  { --card-accent: var(--green); }
+.next-action-card.accent-blue   { --card-accent: var(--blue); }
+.next-action-card.accent-gold   { --card-accent: var(--gold); }
+.next-action-card.accent-violet { --card-accent: var(--violet); }
+.next-action-card.accent-rose   { --card-accent: var(--rose); }
+
+.next-action-eyebrow {
+    color: var(--card-accent);
+    font-family: ui-monospace, Menlo, monospace;
+    font-size: 12px;
+    letter-spacing: 0.01em;
+}
+.next-action-hero {
+    font-family: Georgia, serif;
+    font-weight: 600;
+    font-size: 24px;
+    line-height: 1.1;
+    letter-spacing: -0.01em;
+    color: var(--ink);
+}
+.next-action-hero.is-title { font-size: 19px; }
+.next-action-title {
+    margin: 0;
+    font-size: 14px;
+    font-weight: 600;
+    line-height: 1.35;
+    color: var(--ink);
+}
+.next-action-evidence {
+    margin: 0;
+    font-size: 13px;
+    line-height: 1.5;
+    color: var(--muted);
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+}
+.next-action-foot {
+    margin-top: auto;
+    padding-top: 10px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+.next-action-primary {
+    background: var(--ink);
+    color: var(--page);
+    border: 1px solid var(--ink);
+    font-family: ui-monospace, Menlo, monospace;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    padding: 6px 12px;
+    cursor: pointer;
+    text-decoration: none;
+}
+.next-action-primary:disabled { opacity: 0.45; cursor: default; }
+.next-action-ghost {
+    font-family: ui-monospace, Menlo, monospace;
+    font-size: 11px;
+    color: var(--muted);
+    background: none;
+    border: none;
+    padding: 0;
+    cursor: pointer;
+    text-decoration: none;
+}
+.next-action-ghost:hover { color: var(--ink); text-decoration: underline; }
+
+.next-actions-note {
+    margin: 6px 0 0;
+    font-family: ui-monospace, Menlo, monospace;
+    font-size: 11px;
+    color: var(--muted-2);
+}
+.next-actions-empty {
+    border: 1px dashed var(--line);
+    background: var(--panel);
+    padding: 28px 16px;
+    text-align: center;
+    font-family: Georgia, serif;
+    font-size: 20px;
+    color: var(--muted);
+}
+
+/* ---- improve page lead + registry section ---- */
+.improve-lead {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 16px;
+    margin-bottom: 16px;
+}
+.panel .improve-headline,
+.improve-headline {
+    margin: 2px 0 4px;
+    font-family: Georgia, serif;
+    font-weight: 600;
+    font-size: clamp(26px, 2.4vw, 32px);
+    line-height: 1.05;
+    letter-spacing: -0.01em;
+    text-transform: none !important;
+}
+.improve-sub { margin: 0; color: var(--muted); font-size: 13px; }
+.improve-registry-head {
+    display: flex;
+    align-items: baseline;
+    gap: 16px;
+    flex-wrap: wrap;
+    margin: 28px 0 12px;
+}
+.improve-registry-head h3 {
+    margin: 0;
+    font-size: 13px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+}
+.improve-registry-head .filters {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+    margin-left: auto;
+}
+.improve-registry-head label {
+    font-family: ui-monospace, Menlo, monospace;
+    font-size: 11px;
+    text-transform: uppercase;
+    color: var(--muted);
+}

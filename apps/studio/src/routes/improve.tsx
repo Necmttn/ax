@@ -105,11 +105,18 @@ export function ImproveRoute() {
 
     return (
         <section className="panel improve-route">
-            <header>
-                <h2>Experiment Loop</h2>
-                <span className="meta">
-                    {proposals.length} proposals · {filtered.length} shown
-                </span>
+            <header className="improve-lead">
+                <div>
+                    <span className="next-action-eyebrow" style={{ color: "var(--green)" }}>
+                        $ what's next
+                    </span>
+                    <h2 className="improve-headline">
+                        <NextActionsHeadline />
+                    </h2>
+                    <p className="improve-sub">
+                        Mined from your sessions - savings to route, fixes that recur, verdicts due.
+                    </p>
+                </div>
                 <AnalysisBriefButton />
             </header>
 
@@ -121,24 +128,27 @@ export function ImproveRoute() {
 
             {query.error ? <div className="error">Error: {String(query.error)}</div> : null}
             {actionError ? <div className="error">{actionError}</div> : null}
-            {actionInfo ? <div className="empty" style={{ color: "#1d6f3d" }}>{actionInfo}</div> : null}
+            {actionInfo ? <div className="empty" style={{ color: "var(--green)" }}>{actionInfo}</div> : null}
 
-            <div className="filter-bar" style={{ display: "flex", gap: 12, alignItems: "center", marginBottom: 12, flexWrap: "wrap" }}>
-                <label>
-                    form{" "}
-                    <select value={formFilter} onChange={(e) => setFormFilter(e.target.value as ProposalForm | "all")}>
-                        {ALL_FORMS.map((f) => (<option key={f} value={f}>{f}</option>))}
-                    </select>
-                </label>
-                <label>
-                    status{" "}
-                    <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value as ProposalStatus | "all")}>
-                        {ALL_STATUSES.map((s) => (<option key={s} value={s}>{s}</option>))}
-                    </select>
-                </label>
-                <span className="meta">
-                    Ranked by confidence × frequency · click a row for details
+            <div className="improve-registry-head">
+                <h3>All proposals</h3>
+                <span className="meta" title="Ranked by confidence × frequency - click a row for details">
+                    {proposals.length} proposals · {filtered.length} shown
                 </span>
+                <div className="filters">
+                    <label>
+                        form{" "}
+                        <select value={formFilter} onChange={(e) => setFormFilter(e.target.value as ProposalForm | "all")}>
+                            {ALL_FORMS.map((f) => (<option key={f} value={f}>{f}</option>))}
+                        </select>
+                    </label>
+                    <label>
+                        status{" "}
+                        <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value as ProposalStatus | "all")}>
+                            {ALL_STATUSES.map((s) => (<option key={s} value={s}>{s}</option>))}
+                        </select>
+                    </label>
+                </div>
             </div>
 
             {query.isLoading ? <div className="loading">Loading…</div> : null}
@@ -460,4 +470,15 @@ function AnalysisBriefButton() {
     });
     if (!query.data) return null;
     return <CopyButton text={query.data.brief} label="Copy analysis brief" />;
+}
+
+/** Serif lead: counts what the loop found (shares the cached next-actions query). */
+function NextActionsHeadline() {
+    const query = useQuery({
+        queryKey: ["next-actions"],
+        queryFn: () => api.nextActions(),
+        staleTime: 60_000,
+    });
+    const n = query.data?.cards.length;
+    return <>{n === undefined ? "What's next" : `${n} actions waiting`}</>;
 }
