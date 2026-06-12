@@ -15,6 +15,30 @@ describe("classifyCommandOutcome", () => {
         })).toBe("expected_feedback");
     });
 
+    test("verification gate is anchored to command position, not keywords", () => {
+        expect(classifyCommandOutcome({
+            command_norm: "ls",
+            command_text: "ls test/",
+            has_error: true,
+            exit_code: 2,
+            output_excerpt: "ls: cannot access",
+        })).toBe("unknown");
+        expect(classifyCommandOutcome({
+            command_norm: "bun run",
+            command_text: "bun run typecheck",
+            has_error: true,
+            exit_code: 1,
+            output_excerpt: "error TS2322: type mismatch",
+        })).toBe("expected_feedback");
+        expect(classifyCommandOutcome({
+            command_norm: "oxlint",
+            command_text: "oxlint --deny-warnings",
+            has_error: true,
+            exit_code: 1,
+            output_excerpt: "lint warnings found",
+        })).toBe("expected_feedback");
+    });
+
     test("classifies search misses and environment blockers", () => {
         expect(classifyCommandOutcome({ command_norm: "rg", has_error: true, exit_code: 1, output_excerpt: "no matches" })).toBe("search_miss");
         expect(classifyCommandOutcome({ command_norm: "surreal", has_error: true, error_text: "connection refused" })).toBe("environment_blocker");

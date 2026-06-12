@@ -1,10 +1,11 @@
 import { Effect } from "effect";
 import { SurrealClient } from "@ax/lib/db";
 import type { DbError } from "@ax/lib/errors";
-import { surrealDate, surrealString } from "@ax/lib/shared/surql";
+import { surrealDate } from "@ax/lib/shared/surql";
 import { nonEmptyString } from "@ax/lib/shared/derive-keys";
 import { fetchSessionCostMap } from "./cost-estimate.ts";
 import { chunked, cleanSessionId, numOrNull, numOrZero, sessionRefList, strOrNull } from "./util.ts";
+import { sessionProjectClause } from "./session-filter.ts";
 
 export interface SessionMetricsRow {
     readonly session: string;
@@ -80,10 +81,7 @@ export const fetchSessionMetrics = (
         const limit = Math.min(Math.max(input.limit, 1), 500);
         const clauses: string[] = [];
         if (input.since) clauses.push(`session.started_at >= ${surrealDate(input.since)}`);
-        if (input.project) {
-            const project = surrealString(input.project);
-            clauses.push(`(session.project = ${project} OR session.cwd = ${project})`);
-        }
+        if (input.project) clauses.push(sessionProjectClause(input.project, "session."));
         const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
         const rows = (yield* db.query<[Array<Record<string, unknown>>]>(`
 SELECT

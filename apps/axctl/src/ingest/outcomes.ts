@@ -6,6 +6,7 @@ import { recordRef } from "./evidence-writers.ts";
 import { surrealDate, surrealJsonOption, surrealObject, surrealOptionDate, surrealOptionString, surrealString } from "@ax/lib/shared/surql";
 import { executeStatementsWith } from "@ax/lib/shared/statement-exec";
 import { isoTimestamp, recordKeyPart, safeKeyPart, type TimestampInput } from "@ax/lib/shared/derive-keys";
+import { checkFamilyFromCommand } from "./check-family.ts";
 
 export type CommandOutcomeKind =
     | "success"
@@ -87,7 +88,7 @@ export function classifyCommandOutcome(row: ToolCallOutcomeRow): CommandOutcomeK
     if (/\b(rg|grep|find|fd)\b/.test(command) && (row.exit_code === 1 || /no matches|not found|0 results/.test(text))) return "search_miss";
     if (/--exit-code|git diff|git status --porcelain|guardrail|preflight/.test(command)) return "guardrail";
     if (/command not found|enoent|econnrefused|connection refused|auth|permission denied|network|port|daemon|database/.test(text)) return "environment_blocker";
-    if (/\b(test|typecheck|tsc|tsgo|lint|oxc|build|check)\b/.test(command)) {
+    if (checkFamilyFromCommand(row.command_text) !== null || checkFamilyFromCommand(row.command_norm) !== null) {
         if (/fail|error|expected|assert|type|lint|diagnostic|compile/.test(text)) return "expected_feedback";
         return "product_bug_signal";
     }

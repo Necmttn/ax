@@ -21,8 +21,10 @@ axctl skills <search|taste|unused|pairs|recovery|stats|recent|classify|tag|lint|
 axctl agents <config|reconcile|scope|park|unpark|rm>   # agent-file registry + overrides
 axctl insights <view>                       # 31 read-only graph views
 axctl classifiers <list|eval|explain|...>   # classifier coverage, graph, lifecycle, label-mining
-axctl sessions <here|around <date>|near <sha>|show <id>|compare|metrics>
+axctl sessions <here|around <date>|near <sha>|show <id>|compare|metrics|churn>
                                             # windowed session queries + graph-derived metrics
+axctl sessions churn [--here|--project=P] [--source=S] [--since=N] [--json]
+                                            # verification churn: landed vs edit vs repair LOC, failed checks, episodes
 axctl signals <list|show <id>>              # relation-signal catalog (fragility cascade, ...)
 axctl costs summary [--since=N]             # estimated token cost by provider/model
 axctl costs for --session <id>              # cost for one session

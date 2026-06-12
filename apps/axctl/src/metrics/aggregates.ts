@@ -26,10 +26,11 @@ import type { DbError } from "@ax/lib/errors";
 import { recordLiteral } from "@ax/lib/ids";
 import { skillRecordLookupKeys } from "@ax/lib/skill-id";
 import { dateField } from "@ax/lib/shared/row-fields";
-import { surrealDate, surrealString } from "@ax/lib/shared/surql";
+import { surrealDate } from "@ax/lib/shared/surql";
 import { fetchSessionCostMap } from "./cost-estimate.ts";
 import { fetchSessionHealthMap } from "./session-metrics-query.ts";
 import { cleanSessionId, isoMs, metricPct, numOrNull, numOrZero, strOrNull } from "./util.ts";
+import { sessionProjectClause } from "./session-filter.ts";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -354,10 +355,7 @@ export const fetchAggregateRows = (
         const db = yield* SurrealClient;
         const clauses: string[] = [];
         if (input.since) clauses.push(`session.started_at >= ${surrealDate(input.since)}`);
-        if (input.project) {
-            const project = surrealString(input.project);
-            clauses.push(`(session.project = ${project} OR session.cwd = ${project})`);
-        }
+        if (input.project) clauses.push(sessionProjectClause(input.project, "session."));
         const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
         const metrics = (yield* db.query<[Array<Record<string, unknown>>]>(`
 SELECT

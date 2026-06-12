@@ -201,6 +201,16 @@ function extractCommandTokens(command: string | null | undefined): string[] | nu
     return null;
 }
 
+/** All shell segments of a command, each stripped of env/cd/wrapper prefixes. */
+export function commandTokenSegments(command: string | null | undefined): string[][] {
+    const tokens = tokenizeShell(command ?? "");
+    if (tokens.length === 0) return [];
+
+    return commandSegments(tokens)
+        .map((segment) => stripCommandPrefixes(segment))
+        .filter((segment) => segment.length > 0);
+}
+
 function tokenizeShell(command: string): string[] {
     const tokens: string[] = [];
     let current = "";
