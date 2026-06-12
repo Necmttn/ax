@@ -1268,6 +1268,8 @@ export interface NextActionCard {
     readonly inline_action: NextActionInlineAction | null;
     /** cheap value teaser parsed from the proposal baseline/hypothesis */
     readonly impact_chip?: string | null;
+    /** the fix mechanism, human-named: "new skill" | "edit CLAUDE.md" | "new hook" | ... */
+    readonly fix_kind?: string | null;
 }
 
 export interface NextActionsSourceNote {

@@ -264,6 +264,21 @@ describe("impactChip", () => {
     });
 });
 
+describe("fixKind", () => {
+    test("names the mechanism per form, guidance names its file target", () => {
+        expect(proposalCards([openProposal({ form: "skill" })])[0]!.fix_kind).toBe("new skill");
+        expect(proposalCards([openProposal({ form: "hook" })])[0]!.fix_kind).toBe("new hook");
+        expect(
+            proposalCards([
+                openProposal({
+                    form: "guidance",
+                    guidance_payload: { file_target: "CLAUDE.md", section: null, suggested_text: "x" },
+                }),
+            ])[0]!.fix_kind,
+        ).toBe("edit CLAUDE.md");
+    });
+});
+
 describe("verdictCards", () => {
     test("only accepted proposals with experiment and no locked_verdict", () => {
         const proposals = [

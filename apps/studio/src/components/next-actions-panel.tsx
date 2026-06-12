@@ -101,7 +101,10 @@ function NextActionCardView({
             <p className="next-action-problem">{card.evidence}</p>
             {heroIsTitle ? null : (
                 <p className="next-action-fix">
-                    <span className="next-action-fix-label">fix &#8594;</span> {title}
+                    <span className="next-action-fix-label">
+                        fix &#8594;{card.fix_kind ? ` ${card.fix_kind}:` : ""}
+                    </span>{" "}
+                    {title}
                 </p>
             )}
             <div className="next-action-foot">

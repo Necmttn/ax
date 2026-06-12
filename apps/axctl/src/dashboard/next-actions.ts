@@ -78,6 +78,25 @@ export const impactChip = (p: ProposalDto): string | null => {
 /**
  * Cards for open improve proposals: review + accept or reject each one.
  */
+/** Name the fix MECHANISM - "checklist" alone doesn't say skill vs
+ *  guidance edit vs hook. Guidance names its actual file target. */
+export const fixKind = (p: ProposalDto): string => {
+    switch (p.form) {
+        case "skill":
+            return "new skill";
+        case "guidance":
+            return `edit ${p.guidance_payload?.file_target ?? "guidance"}`;
+        case "hook":
+            return "new hook";
+        case "subagent":
+            return "new subagent";
+        case "automation":
+            return "automation";
+        default:
+            return String(p.form);
+    }
+};
+
 export const proposalCards = (
     proposals: ReadonlyArray<ProposalDto>,
 ): NextActionCard[] =>
@@ -105,6 +124,7 @@ export const proposalCards = (
                         suggested_verdict: null,
                     },
                     impact_chip: impactChip(p),
+                    fix_kind: fixKind(p),
                 };
             }),
     );
