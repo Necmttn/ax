@@ -152,7 +152,7 @@ docs/superpowers/specs/2026-06-13-ax-dojo-design.md.
 `ax dojo report [--since=<iso>] [--notes-file=<path>]` writes the morning-report
 for a completed run; `ax dojo draft [--title=...] [--kind=bug|improvement]`
 stages an upstream finding to `~/.ax/dojo/outbox/` (never publishes);
-`ax dojo outbox` inspects staged drafts.
+`ax dojo outbox` inspects staged drafts. `ax dojo spar-plan <sha>` freezes a landed task's baseline (prompt + cost/turns/churn) and emits a brief with the worktree pin command + a delta slot; the agent runs the variant with ONE change in that worktree; `ax dojo spar-score <id>` scores variant vs baseline into a receipt (`~/.ax/dojo/spar/`). Hybrid: CLI scaffolds, agent re-runs.
 
 ### Profile
 

@@ -10,6 +10,15 @@ export const dojoOutboxDir = (base: string = defaultDojoDir()): string =>
 export const dojoReportsDir = (base: string = defaultDojoDir()): string =>
     posixPath.join(base, "reports");
 
+export const dojoSparDir = (base: string = defaultDojoDir()): string =>
+    posixPath.join(base, "spar");
+
+export const dojoSparBriefPath = (id: string, base: string = defaultDojoDir()): string =>
+    posixPath.join(dojoSparDir(base), `${id}.md`);
+
+export const dojoSparReportPath = (id: string, base: string = defaultDojoDir()): string =>
+    posixPath.join(dojoSparDir(base), `${id}-report.md`);
+
 /** date is YYYY-MM-DD */
 export const dojoReportPath = (date: string, base: string = defaultDojoDir()): string =>
     posixPath.join(dojoReportsDir(base), `${date}.md`);

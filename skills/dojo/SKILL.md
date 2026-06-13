@@ -67,12 +67,14 @@ docs/superpowers/specs/2026-06-13-ax-dojo-design.md (in the Necmttn/ax repo).
   overrun outweighs the benefit shown by backtest. Both ledgers must appear in
   the proposal; neither alone is sufficient.
 - **spar** - only present when invoked with --spar and spendable >= 30%.
-  One task, one delta, scored: pick a landed task (`ax sessions here`),
-  pin a worktree at the parent SHA, re-run it with exactly ONE change
-  (skill on/off, hook on/off, prompt, thinking level, model via subagent
-  override), score against the historical baseline using graph metrics
-  (tokens, turns, churn, landed). Append the comparison receipt to the
-  report. Track multi-night campaigns as goal files.
+  One task, one delta, scored. Concrete flow:
+  1. Pick a landed task: `ax sessions here --days=30` - note its commit sha from `ax sessions near <sha>` or `git log`.
+  2. `ax dojo spar-plan <sha>` - captures the baseline (prompt + cost/turns/churn) and writes `~/.ax/dojo/spar/<id>.md`; the command prints the exact `git worktree add` command to run next.
+  3. Read the brief at `~/.ax/dojo/spar/<id>.md`; run the printed `git worktree add .claude/worktrees/dojo-spar-<id> -b dojo/spar-<id> <parentSha>` command to pin the worktree at the parent SHA.
+  4. Apply exactly ONE delta in the delta section (skill on/off, hook on/off, prompt change, thinking level, or model override) - no compound changes.
+  5. Do the task in that worktree; let it finish naturally.
+  6. `ax dojo spar-score <id>` - auto-discovers the variant session from the worktree cwd; or pass `--variant-session=<id>` if there are multiple sessions. Writes the receipt to `~/.ax/dojo/spar/<id>-report.md`.
+  7. Append the receipt to the dojo report. Track multi-run campaigns as goal files under docs/superpowers/goals/ so the next session can resume.
 - **explore** - free investigation, retro-meta style: follow a hunch
   through `ax recall` / `ax sessions churn`, and convert anything real
   into a proposal or outbox draft.
