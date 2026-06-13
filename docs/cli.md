@@ -34,7 +34,10 @@ axctl costs for --commit <sha>              # cost for sessions that produced a 
 axctl costs for --branch <name>             # cost for sessions linked to a branch
 axctl cost <models|sessions|split>          # model/cost analytics incl. main-vs-subagent split
 axctl quota [--statusline|--swiftbar]       # Claude plan usage (5h/7d windows); statusline + menubar output
-axctl dojo [--json|--spar|--budget=N|--until=HH:MM|--force|--days=N]   # training agenda: quota budget envelope + prioritized self-improvement items for the ax:dojo skill loop
+axctl dojo agenda [--json|--spar|--budget=N|--until=HH:MM|--force|--days=N]  # training agenda: quota budget envelope + prioritized self-improvement items for the ax:dojo skill loop
+axctl dojo report [--since=<iso>] [--notes-file=<path>] [--json]      # write the morning report for a completed dojo run
+axctl dojo draft [--title=<t>] [--kind=bug|improvement] [--body-file=<path>] [--session=<id>]  # stage an upstream finding to ~/.ax/dojo/outbox/<slug>.md (never publishes)
+axctl dojo outbox [--json]                                            # list staged upstream issue drafts
 axctl dispatches [--candidates]             # subagent dispatch routing analytics + est savings
 axctl routing tune [--dry-run|--emit-brief] # mine YOUR dispatch history for new routing classes
 axctl routing compile                       # regenerate ~/.ax/hooks/routing-table.json (user classes preserved)
@@ -109,14 +112,17 @@ PR branch or a commit SHA for now.
   field, but thinking-only assistant events have their own `usage.output_tokens`
   - that is the thinking spend. Mixed thinking+text turns can't be split and
   report 0, so the aggregate is a lower bound. Shows assistant turns, thinking
-  turns, % with thinking, block count, token volume, avg tokens/turn.
+  turns, % with thinking, block count, token volume, avg tokens/turn, and
+  `think_cost` (USD: thinking tokens are output tokens, priced at the model's
+  `agent_model.output_per_million_usd`; a TOTAL row sums it).
 - **Effort levels** (`session.reasoning_effort`): codex turn_context effort
   (minimal/low/medium/high/xhigh) and claude `settings.json` `effortLevel`
   (high/medium/low). Claude has no per-session effort field, so the global
   setting is stamped only on sessions active within 30 minutes of ingest -
   live sessions get accurate values, history is never backstamped.
 - **Codex reasoning tokens**: `reasoning_output_tokens` as a share of output
-  tokens (from `token_count.total_token_usage`).
+  tokens (from `token_count.total_token_usage`), with its USD cost
+  (`reasoning_cost_usd`) at the model's output rate.
 
 Fields populate at ingest; sessions ingested before the fields existed read as
 zero until their files are re-ingested (the command prints a hint).

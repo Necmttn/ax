@@ -5,8 +5,7 @@ import { FooterCards } from "~/components/landing-v2";
 import { HeroLogoField } from "~/components/landing-v2/supports-strip";
 import "../styles/pitch.css";
 
-const MAILTO =
-  "mailto:necmettin.karakaya@gmail.com?subject=ax%20registry%20-%20early%20access";
+const CONTACT_URL = "https://github.com/Necmttn/ax/discussions";
 
 export const Route = createFileRoute("/registry")({
   head: () => ({
@@ -41,7 +40,10 @@ function Registry() {
         {/* ============= hero ============= */}
         <section className="hero">
           <HeroLogoField />
-          <span className="eyebrow">ax skill registry</span>
+          <span className="eyebrow">
+            ax for teams: governed skills &middot; early access
+          </span>
+          <span className="reg-badge">building with design partners</span>
           <h1>
             Ship curated skills<br />
             to your <em>whole team</em>.
@@ -50,17 +52,24 @@ function Registry() {
             Authored by your engineers. Used by everyone. Never polluted.
           </p>
           <p className="lede">
-            A few engineers build the skills; a lot of people use them. ax syncs
-            your blessed skills down to every laptop, read-only &mdash; and when a
-            consumer&rsquo;s agent hits an edge case, it sends a fix back upstream
-            for you to review. The repo stays clean without locking anyone out.
+            The vision: a few engineers build the skills; a lot of people use
+            them. ax <em>will</em> sync your blessed skills down to every laptop,
+            read-only &mdash; and when a consumer&rsquo;s agent hits an edge case,
+            send a fix back upstream for you to review. We&rsquo;re building this
+            with a handful of design partners. Skills install, the local improve
+            loop, and profile publishing all work today.
           </p>
 
           <div className="install-wrap">
             <span className="install-label">git &amp; npm stay your pipe &mdash; ax adds the brain</span>
             <div className="cta-row">
-              <a className="prompt-pill is-solo" href={MAILTO}>
-                <span className="prompt-pill__label">Request early access</span>
+              <a
+                className="prompt-pill is-solo"
+                href={CONTACT_URL}
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                <span className="prompt-pill__label">Talk to us on GitHub</span>
               </a>
               <a className="cta-secondary" href="#loop">
                 <span className="cta-secondary__icon" aria-hidden="true">
@@ -142,6 +151,83 @@ function Registry() {
           </div>
         </section>
 
+        {/* ============= today vs building ============= */}
+        <section className="pitch-section" id="status">
+          <div className="pitch-head">
+            <span className="eyebrow">where this is</span>
+            <h2>
+              What works today vs what we&rsquo;re <em>building with partners</em>.
+            </h2>
+            <p>
+              Honest about the line: the local half of this loop is shipped. The
+              sync fabric that turns it into a team registry is the design-partner
+              work.
+            </p>
+          </div>
+          <div className="pitch-lanes">
+            <div className="pitch-lane is-out">
+              <h3><span className="dot"></span> works today</h3>
+              <ul>
+                <li><b>Skills install</b> <span className="dim">(npx skills add Necmttn/ax)</span></li>
+                <li><b>Local improve loop</b> <span className="dim">(mine mistakes → reviewed fix)</span></li>
+                <li><b>Profile publishing</b> <span className="dim">(ax profile publish → gist, consent-gated)</span></li>
+                <li><b>Hooks SDK</b> <span className="dim">(typed Effect hooks, Claude Code + Codex)</span></li>
+              </ul>
+            </div>
+            <div className="pitch-lane is-local">
+              <h3><span className="dot"></span> building with design partners</h3>
+              <ul>
+                <li><b>Sync-down</b> <span className="dim">(blessed skills read-only on every laptop)</span></li>
+                <li><b>Suggest-up</b> <span className="dim">(agents propose fixes upstream)</span></li>
+                <li><b>Review queue</b> <span className="dim">(ranked by real usage)</span></li>
+                <li><b>Regulated mode</b> <span className="dim">(consent gate, provenance, fail-closed)</span></li>
+              </ul>
+            </div>
+          </div>
+
+          {/* ----- one receipt-style preview artifact ----- */}
+          <div className="reg-preview" role="img" aria-label="suggestion review queue preview">
+            <div className="reg-preview__bar">
+              <span className="reg-preview__eyebrow">$ ax suggestions review</span>
+              <span className="reg-preview__tag">PREVIEW &middot; in development</span>
+            </div>
+            <div className="reg-preview__card">
+              <div className="reg-preview__head">
+                <span className="reg-preview__skill">contract-redline</span>
+                <span className="reg-preview__rank">rank 1 / 6</span>
+              </div>
+              <p className="reg-preview__title">
+                Fix flowed back: clause-numbering edge case
+              </p>
+              <dl className="reg-preview__stats">
+                <div>
+                  <dt>seats hit</dt>
+                  <dd>9</dd>
+                </div>
+                <div>
+                  <dt>failures, 14d</dt>
+                  <dd>23</dd>
+                </div>
+                <div>
+                  <dt>repro</dt>
+                  <dd>synthetic, PII-free</dd>
+                </div>
+                <div>
+                  <dt>matter</dt>
+                  <dd className="reg-preview__never">never sent</dd>
+                </div>
+              </dl>
+              <div className="reg-preview__actions">
+                <span className="reg-preview__accept">accept &amp; re-sync</span>
+                <span className="reg-preview__reject">reject</span>
+              </div>
+            </div>
+            <p className="reg-preview__note">
+              Mock of the review queue we&rsquo;re building. Numbers illustrative.
+            </p>
+          </div>
+        </section>
+
         {/* ============= the loop ============= */}
         <section className="pitch-section" id="loop">
           <div className="pitch-head">
@@ -164,7 +250,7 @@ function Registry() {
             <div className="pitch-step">
               <span className="n">02</span>
               <h4>Sync down</h4>
-              <p>Blessed skills land read-only on every consumer&rsquo;s laptop, current.</p>
+              <p>ax <em>will</em> land blessed skills read-only on every consumer&rsquo;s laptop, current.</p>
             </div>
             <div className="pitch-step">
               <span className="n">03</span>
@@ -174,12 +260,12 @@ function Registry() {
             <div className="pitch-step">
               <span className="n">04</span>
               <h4>Suggest up</h4>
-              <p>The agent sends back a PII-redacted repro test &mdash; the failure, not the matter.</p>
+              <p>The agent <em>will</em> send back a PII-redacted repro test &mdash; the failure, not the matter.</p>
             </div>
             <div className="pitch-step">
               <span className="n">05</span>
               <h4>Review</h4>
-              <p>ax ranks suggestions by real usage; your engineer accepts, it re-syncs.</p>
+              <p>ax <em>will</em> rank suggestions by real usage; your engineer accepts, it re-syncs.</p>
             </div>
           </div>
         </section>
@@ -229,8 +315,13 @@ function Registry() {
             let&rsquo;s talk.
           </p>
           <div className="cta-row">
-            <a className="prompt-pill is-solo" href={MAILTO}>
-              <span className="prompt-pill__label">Request early access</span>
+            <a
+              className="prompt-pill is-solo"
+              href={CONTACT_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              <span className="prompt-pill__label">Talk to us on GitHub</span>
             </a>
             <Link to="/teams" className="cta-secondary">
               See the manager angle

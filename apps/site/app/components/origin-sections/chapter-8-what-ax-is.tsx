@@ -17,9 +17,9 @@ export function Chapter8WhatAxIs() {
       </p>
 
       <p>
-        It ingests Claude Code and Codex transcripts, tool calls, skills,
-        hooks, corrections, and local git history into a typed graph on
-        your laptop. It asks for session retros while context is still
+        It ingests transcripts from Claude Code, Codex, Pi, OpenCode, and
+        Cursor - plus tool calls, skills, hooks, corrections, and local git
+        history - into a typed graph on your laptop. It asks for session retros while context is still
         warm. It lets bigger retros surface repeated friction. It turns
         proposed fixes into experiments and asks for verdicts later.
       </p>

@@ -16,7 +16,7 @@ export function FeaturesPage() {
         <div className="scale">
           <div className="stat">
             <span className="v">369,132</span>
-            <span className="k">turns indexed</span>
+            <span className="k">user + assistant turns</span>
           </div>
           <div className="stat">
             <span className="v">4,773</span>
@@ -31,6 +31,10 @@ export function FeaturesPage() {
             <span className="k">derived per ingest</span>
           </div>
         </div>
+        <p className="scale-asof">
+          One developer&apos;s local graph, as of June 2026. Turn count is role-filtered to
+          user + assistant exchanges - the real signal, not raw provider events.
+        </p>
         <div className="toc">
           <a href="#sources">01 Sources</a>
           <a href="#graph">02 The graph</a>
@@ -114,9 +118,9 @@ export function FeaturesPage() {
           <p>
             A LaunchAgent (<code>com.necmttn.ax-watch</code>) tails your Claude and Codex transcript
             directories and runs <code>ax ingest --since=1</code> in the background within seconds of a
-            new turn. A weekly cron does a deep-scan backfill for anything the watcher missed.
-            Nothing is uploaded, queued, or phoned home - every read stays on the same filesystem
-            your agent already writes to.
+            new turn. A weekly self-improve cron for deep-scan backfill is on the roadmap (wire-up
+            pending). Nothing is uploaded, queued, or phoned home - every read stays on the same
+            filesystem your agent already writes to.
           </p>
         </div>
 
@@ -128,9 +132,9 @@ export function FeaturesPage() {
             </span>
           </div>
           <div className="item">
-            <span className="k">weekly</span>
+            <span className="k">roadmap</span>
             <span className="v">
-              <b>cron</b> deep-scans for missed sessions + drift
+              <b>weekly cron</b> deep-scan backfill for missed sessions + drift (wire-up pending)
             </span>
           </div>
         </div>
@@ -154,19 +158,17 @@ export function FeaturesPage() {
             <span className="c">{`// schema sketch - SurrealDB v3, ns=ax, db=main`}</span>
             {`\n\n       `}
             <span className="n">session</span>
-            {` ──owns──▶ `}
+            {` ────▶ `}
             <span className="n">turn</span>
             {` ──invoked──▶ `}
-            <span className="n">tool_call</span>
-            {`\n          │                  │                    │\n          │                  │                    ├──touched──▶ `}
-            <span className="n">file</span>
-            {`\n          │                  │                    └──fired────▶ `}
-            <span className="n">hook_event</span>
-            {`\n          │                  │\n          │                  └──addressed──▶ `}
             <span className="n">skill</span>
+            {`\n          │             │\n          │             ├──(owns)───▶ `}
+            <span className="n">tool_call</span>
+            {`\n          │             └──edited───▶ `}
+            <span className="n">file</span>
             {`\n          │\n          └──produced──▶ `}
             <span className="n">commit</span>
-            {` ──changes──▶ `}
+            {` ──touched──▶ `}
             <span className="n">file</span>
             {`\n\n       `}
             <span className="c">{`// relations are first-class - every edge is queryable`}</span>
@@ -207,27 +209,23 @@ export function FeaturesPage() {
               </div>
             </div>
             <div className="legend-block">
-              <div className="legend-title">Relations - 5</div>
+              <div className="legend-title">Relations - 4</div>
               <div className="legend-list">
                 <div className="row rel">
                   <code>invoked</code>
-                  <span className="desc">turn → tool_call</span>
+                  <span className="desc">turn → skill (Skill tool call)</span>
                 </div>
                 <div className="row rel">
                   <code>edited</code>
-                  <span className="desc">tool_call → file (Edit/Write)</span>
+                  <span className="desc">turn → file (Edit/Write)</span>
                 </div>
                 <div className="row rel">
                   <code>touched</code>
-                  <span className="desc">tool_call → file (Read)</span>
+                  <span className="desc">commit → file</span>
                 </div>
                 <div className="row rel">
                   <code>produced</code>
                   <span className="desc">session → commit</span>
-                </div>
-                <div className="row rel">
-                  <code>addressed</code>
-                  <span className="desc">turn → skill (mentioned/loaded)</span>
                 </div>
               </div>
             </div>
@@ -256,7 +254,7 @@ export function FeaturesPage() {
             </div>
             <div className="stage-purpose">Classifies each commit as feature-only or feature-then-fix.</div>
             <div className="stage-meta">
-              writes <b>commit.closure</b>
+              writes <b>commit_classification</b>
             </div>
           </div>
 
@@ -324,7 +322,7 @@ export function FeaturesPage() {
               Audits installed skills, hooks, plists, and settings.json for drift, conflicts, dead weight.
             </div>
             <div className="stage-meta">
-              writes <b>harness_finding</b>
+              live audit - no table; surfaced by <b>ax doctor</b>
             </div>
           </div>
 
@@ -377,7 +375,7 @@ export function FeaturesPage() {
               <div className="iv-form">
                 <span className="nm">hook</span>
                 <span className="ds">
-                  a pre/post-tool gate in <code className="inline">settings.json</code>
+                  a typed pre/post-tool gate in <code className="inline">~/.ax/hooks/</code>, fanned into both harnesses
                 </span>
               </div>
               <div className="iv-form">
@@ -578,7 +576,7 @@ export function FeaturesPage() {
         <div className="section-head">
           <span className="section-num">06 / Surfaces</span>
           <h2>
-            One CLI, <em>eight verbs.</em>
+            One CLI, <em>every query.</em>
           </h2>
           <p className="section-lede">
             Everything ax knows is reachable from <code className="inline">ax</code>. The dashboard, TUI,
@@ -606,6 +604,30 @@ export function FeaturesPage() {
           <div className="cli-row">
             <span className="cmd">ax doctor</span>
             <span className="desc">Harness health check - drift, conflicts, dead weight across skills + hooks + plists.</span>
+          </div>
+          <div className="cli-row">
+            <span className="cmd">
+              ax dispatches <span className="arg">--candidates</span> · ax routing <span className="arg">tune / compile / show</span>
+            </span>
+            <span className="desc">See where subagent spend goes, then route mechanical dispatches to cheaper models. The route-dispatch hook is the deterministic backstop.</span>
+          </div>
+          <div className="cli-row">
+            <span className="cmd">
+              ax cost <span className="arg">models / sessions / split</span>
+            </span>
+            <span className="desc">Per-model and origin (main vs subagent) cost rollups with estimated USD and share-of-total.</span>
+          </div>
+          <div className="cli-row">
+            <span className="cmd">
+              ax quota <span className="arg">--statusline / --swiftbar</span>
+            </span>
+            <span className="desc">Live Claude plan usage (5h / 7d windows) in the CLI, statusline, or menubar. Cached, no DB.</span>
+          </div>
+          <div className="cli-row">
+            <span className="cmd">
+              ax profile <span className="arg">show / publish</span>
+            </span>
+            <span className="desc">Render your local ax profile, or publish it to a public gist - opt-in, consent-gated, registered into the community leaderboard.</span>
           </div>
           <div className="cli-row">
             <span className="cmd">
