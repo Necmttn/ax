@@ -1,27 +1,42 @@
-import { createFileRoute, notFound } from "@tanstack/react-router";
-import { MDXContent } from "@content-collections/mdx/react";
-import { allHowItWorks } from "content-collections";
-import { mdxComponents } from "~/components/mdx-components";
-import { DocShell } from "~/components/doc-shell";
+import { createFileRoute } from "@tanstack/react-router";
+import { SiteHeader } from "~/components/landing-sections/site-header";
+import { SiteFooter } from "~/components/landing-sections/site-footer";
+import { ActHero } from "~/components/how-sections/act-hero";
+import { ActWatch } from "~/components/how-sections/act-watch";
+import { ActGraph } from "~/components/how-sections/act-graph";
+import { ActMine } from "~/components/how-sections/act-mine";
+import { ActPropose } from "~/components/how-sections/act-propose";
+import { ActMeasure } from "~/components/how-sections/act-measure";
+import { ActWhy } from "~/components/how-sections/act-why";
 
 export const Route = createFileRoute("/how-it-works")({
   head: () => ({
     meta: [
-      { title: "How ax sees your work - ax" },
-      { name: "description", content: "How ax ingests transcripts, builds the graph, and derives stages." },
+      { title: "How ax works - ax" },
+      {
+        name: "description",
+        content:
+          "Watch, graph, mine, propose, measure. ax reads your coding-agent history from five harnesses into a typed local graph, mines the mistakes you repeat, and hands them back as small fixes you review one at a time.",
+      },
     ],
   }),
-  loader: () => {
-    const page = allHowItWorks[0];
-    if (!page) throw notFound();
-    return { page };
-  },
-  component: () => {
-    const { page } = Route.useLoaderData();
-    return (
-      <DocShell eyebrow="how it works">
-        <MDXContent code={page.body} components={mdxComponents} />
-      </DocShell>
-    );
-  },
+  component: HowItWorks,
 });
+
+function HowItWorks() {
+  return (
+    <>
+      <SiteHeader />
+      <main className="how-main">
+        <ActHero />
+        <ActWatch />
+        <ActGraph />
+        <ActMine />
+        <ActPropose />
+        <ActMeasure />
+        <ActWhy />
+      </main>
+      <SiteFooter />
+    </>
+  );
+}

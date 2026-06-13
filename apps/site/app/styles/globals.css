@@ -12656,3 +12656,619 @@ footer.site-footer { padding: 48px 32px 56px; }
     .cliref-card__flag { grid-template-columns: 1fr; gap: 2px; }
     .cliref-index nav { columns: 1; }
 }
+
+/* ============================================================================
+   /how-it-works — visual product narrative (WS4)
+   Five full-bleed acts: watch -> graph -> mine -> propose -> measure, plus a
+   "why this shape" close. Receipts aesthetic: ink on paper, Georgia headlines,
+   mono $-eyebrows, hairline rules. Uses only root tokens
+   (--ink/--page/--panel/--line/--muted/--green/--blue/--red/--amber/
+    --serif/--mono/--sans). The PROPOSE act re-uses the landing-v2 .nx-*/.browser
+   dashboard styles by carrying a .landing-v2 wrapper class on its browser.
+   ========================================================================== */
+
+.how-main {
+  color: var(--ink);
+  background: var(--page);
+}
+
+.how-act {
+  border-top: 1px solid var(--line);
+}
+.how-act:first-child { border-top: none; }
+
+.how-act-inner {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 96px 32px 100px;
+}
+
+.how-eyebrow {
+  font-family: var(--mono);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.22em;
+  color: var(--muted);
+  margin: 0 0 22px;
+}
+
+.how-headline {
+  font-family: var(--serif);
+  font-weight: 400;
+  font-size: clamp(30px, 4.4vw, 50px);
+  line-height: 1.06;
+  letter-spacing: -0.8px;
+  margin: 0 0 24px;
+  max-width: 18ch;
+}
+
+.how-dek {
+  font-family: var(--serif);
+  font-size: 19px;
+  line-height: 1.62;
+  color: var(--muted);
+  margin: 0;
+  max-width: 60ch;
+}
+
+.how-act-head { margin-bottom: 48px; }
+
+.how-act-note {
+  font-family: var(--serif);
+  font-size: 16px;
+  line-height: 1.6;
+  color: var(--muted);
+  margin: 36px 0 0;
+  max-width: 62ch;
+}
+.how-act-note code {
+  font-family: var(--mono);
+  font-size: 0.85em;
+  color: var(--ink);
+}
+
+/* ---------- HERO ---------- */
+.how-act--hero .how-act-inner { padding-top: 120px; padding-bottom: 84px; }
+
+.how-hero-title {
+  font-family: var(--serif);
+  font-weight: 400;
+  font-size: clamp(44px, 7.6vw, 92px);
+  line-height: 1.0;
+  letter-spacing: -2px;
+  margin: 0 0 28px;
+}
+.how-hero-title em { font-style: italic; }
+
+.how-hero-lede {
+  font-family: var(--serif);
+  font-size: clamp(19px, 2.1vw, 23px);
+  line-height: 1.55;
+  color: var(--muted);
+  margin: 0 0 44px;
+  max-width: 64ch;
+}
+
+.how-hero-steps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--line);
+  background: var(--panel);
+  width: fit-content;
+  max-width: 100%;
+}
+.how-hero-step {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 12px 20px;
+  border-right: 1px solid var(--line);
+}
+.how-hero-step:last-child { border-right: none; }
+.how-hero-step-num {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--muted);
+}
+.how-hero-step-name {
+  font-family: var(--mono);
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  color: var(--ink);
+}
+
+/* ---------- ACT 1: WATCH ---------- */
+.how-watch-fig {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 120px minmax(0, 0.9fr);
+  align-items: center;
+  gap: 0;
+  margin-top: 8px;
+}
+
+.how-watch-sources {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.how-src {
+  display: grid;
+  grid-template-columns: 28px 1fr auto;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 16px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--ink);
+}
+.how-src-icon {
+  display: inline-flex;
+  width: 22px;
+  height: 22px;
+  color: var(--ink);
+}
+.how-src-icon svg { width: 100%; height: 100%; display: block; }
+.how-src-meta { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.how-src-name {
+  font-family: var(--sans);
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ink);
+}
+.how-src-path {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.how-src-kind {
+  font-family: var(--mono);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.how-watch-bridge { height: 100%; min-height: 240px; }
+.how-watch-wires { width: 100%; height: 100%; display: block; }
+
+.how-watch-sink { display: flex; justify-content: flex-start; }
+.how-sink-card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 22px 22px 20px;
+  background: var(--ink);
+  color: var(--page);
+  border: 1px solid var(--ink);
+  width: 100%;
+}
+.how-sink-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.16em;
+  color: var(--green);
+  margin-bottom: 6px;
+}
+.how-sink-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--green);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--green) 28%, transparent);
+}
+.how-sink-title {
+  font-family: var(--serif);
+  font-size: 22px;
+  letter-spacing: -0.3px;
+}
+.how-sink-host {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: color-mix(in srgb, var(--page) 70%, transparent);
+}
+.how-sink-sub {
+  font-family: var(--sans);
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: color-mix(in srgb, var(--page) 64%, transparent);
+  margin-top: 6px;
+}
+
+/* ---------- ACT 2: GRAPH ---------- */
+.how-graph-fig {
+  margin: 8px 0 0;
+  padding: 0;
+}
+.how-graph-svg {
+  width: 100%;
+  height: auto;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  padding: 24px;
+}
+.how-graph-edge-labels text { fill: var(--muted); }
+.how-node rect {
+  fill: #fff;
+  stroke: var(--ink);
+  stroke-width: 1.2;
+}
+.how-node--session rect { border-top: none; stroke: var(--ink); }
+.how-node--turn rect { stroke: var(--blue); }
+.how-node--skill rect { stroke: var(--green); }
+.how-node--tool rect { stroke: var(--amber); }
+.how-node--file rect { stroke: var(--muted); }
+.how-node--commit rect { stroke: var(--ink); }
+.how-node-kind {
+  font-family: var(--mono);
+  font-size: 13px;
+  font-weight: 600;
+  fill: var(--ink);
+}
+.how-node-val {
+  font-family: var(--mono);
+  font-size: 10.5px;
+  fill: var(--muted);
+}
+.how-graph-cap {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 20px 0 0;
+}
+.how-graph-cap > code {
+  font-family: var(--mono);
+  font-size: 14px;
+  color: var(--ink);
+  align-self: flex-start;
+  border-bottom: 2px solid var(--ink);
+  padding-bottom: 4px;
+}
+.how-graph-cap-note {
+  font-family: var(--serif);
+  font-size: 16px;
+  line-height: 1.6;
+  color: var(--muted);
+  max-width: 62ch;
+}
+.how-graph-cap-note code {
+  font-family: var(--mono);
+  font-size: 0.85em;
+  color: var(--ink);
+}
+
+/* ---------- ACT 3: MINE (receipt) ---------- */
+.how-receipt-fig { margin: 8px 0 0; }
+.how-receipt {
+  max-width: 460px;
+  background: var(--panel);
+  border: 1px solid var(--ink);
+  padding: 24px 26px 22px;
+  box-shadow: 6px 6px 0 var(--line);
+}
+.how-receipt-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+  padding-bottom: 14px;
+  border-bottom: 1px dashed var(--line);
+}
+.how-receipt-cmd {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--ink);
+}
+.how-receipt-win {
+  font-family: var(--mono);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--muted);
+}
+.how-receipt-hero {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  padding: 22px 0 14px;
+}
+.how-receipt-num {
+  font-family: var(--serif);
+  font-size: 64px;
+  line-height: 1;
+  letter-spacing: -2px;
+  color: var(--red);
+}
+.how-receipt-label {
+  font-family: var(--mono);
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.16em;
+  color: var(--muted);
+}
+.how-receipt-claim {
+  font-family: var(--serif);
+  font-size: 17px;
+  line-height: 1.5;
+  color: var(--ink);
+  margin: 0 0 18px;
+}
+.how-receipt-rows {
+  margin: 0;
+  padding: 0;
+  border-top: 1px solid var(--line);
+}
+.how-receipt-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 9px 0;
+  border-bottom: 1px solid var(--line);
+}
+.how-receipt-row dt {
+  font-family: var(--sans);
+  font-size: 13px;
+  color: var(--muted);
+}
+.how-receipt-row dd {
+  margin: 0;
+  font-family: var(--mono);
+  font-size: 13px;
+  color: var(--ink);
+}
+.how-receipt-row--accent dd { color: var(--blue); }
+.how-receipt-foot {
+  font-family: var(--mono);
+  font-size: 10.5px;
+  color: var(--muted);
+  margin: 16px 0 0;
+}
+
+/* ---------- ACT 4: PROPOSE (re-uses landing-v2 dashboard) ---------- */
+.how-propose-browser { margin: 8px auto 0; padding: 0; }
+.how-propose-dash { padding-top: 22px; }
+.how-propose-grid { grid-template-columns: repeat(2, 1fr) !important; }
+
+/* ---------- ACT 5: MEASURE (experiments strip) ---------- */
+.how-exp-fig { margin: 8px 0 0; }
+.how-exp {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  padding: 22px 24px 24px;
+}
+.how-exp .how-eyebrow {
+  display: inline;
+  margin: 0;
+  color: var(--green);
+}
+.how-exp-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 16px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--line);
+  margin-bottom: 16px;
+}
+.how-exp-title {
+  font-family: var(--serif);
+  font-size: 22px;
+  letter-spacing: -0.3px;
+  color: var(--ink);
+  margin: 0;
+}
+.how-exp-meta {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+.how-exp-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.how-bet {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr);
+  gap: 24px;
+  align-items: center;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--muted);
+  padding: 16px 18px;
+}
+.how-bet--win { border-left-color: var(--green); }
+.how-bet--watching { border-left-color: var(--blue); }
+.how-bet--regressed { border-left-color: var(--red); }
+.how-bet-meta { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.how-bet-title {
+  font-family: var(--sans);
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ink);
+}
+.how-bet-desc {
+  font-family: var(--sans);
+  font-size: 12.5px;
+  color: var(--muted);
+  line-height: 1.4;
+}
+.how-bet-verdict {
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  margin-top: 4px;
+}
+.how-bet-verdict--win { color: var(--green); }
+.how-bet-verdict--watching { color: var(--blue); }
+.how-bet-verdict--regressed { color: var(--red); }
+.how-bet-trace { display: flex; flex-direction: column; gap: 7px; }
+.how-trace-row { display: grid; grid-template-columns: 32px 1fr; align-items: center; gap: 10px; }
+.how-trace-label {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--muted);
+  text-align: right;
+}
+.how-trace-track {
+  position: relative;
+  height: 14px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  display: flex;
+  align-items: center;
+}
+.how-trace-bar {
+  height: 100%;
+  background: color-mix(in srgb, var(--blue) 30%, var(--panel));
+  border-right: 1px solid var(--blue);
+}
+.how-trace-bar--win {
+  background: color-mix(in srgb, var(--green) 30%, var(--panel));
+  border-right-color: var(--green);
+}
+.how-trace-pending {
+  font-family: var(--mono);
+  font-size: 9.5px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+  padding-left: 8px;
+}
+
+/* ---------- CLOSE: WHY THIS SHAPE ---------- */
+.how-why-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 20px;
+  margin: 8px 0 0;
+}
+.how-why-card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  padding: 22px 24px 24px;
+}
+.how-why-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  align-self: flex-start;
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--ink);
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  padding: 5px 10px;
+}
+.how-why-chip-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--green);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--green) 28%, transparent);
+}
+.how-why-chip--mono code { font-family: var(--mono); font-size: 12px; }
+.how-why-title {
+  font-family: var(--serif);
+  font-size: 24px;
+  letter-spacing: -0.4px;
+  color: var(--ink);
+  margin: 0;
+}
+.how-why-body {
+  font-family: var(--serif);
+  font-size: 16px;
+  line-height: 1.58;
+  color: var(--muted);
+  margin: 0;
+}
+
+.how-cta {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 14px;
+  margin: 56px 0 0;
+  padding: 28px 30px;
+  background: var(--ink);
+  color: var(--page);
+}
+.how-cta-eyebrow {
+  font-family: var(--mono);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.18em;
+  color: color-mix(in srgb, var(--page) 60%, transparent);
+  margin: 0;
+}
+.how-cta-cmd {
+  font-family: var(--mono);
+  font-size: clamp(14px, 2.2vw, 18px);
+  color: var(--page);
+  border-bottom: 1px solid color-mix(in srgb, var(--page) 36%, transparent);
+  padding-bottom: 6px;
+}
+.how-cta-links { display: flex; flex-wrap: wrap; gap: 22px; margin-top: 6px; }
+.how-cta-link {
+  font-family: var(--mono);
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--page);
+  text-decoration: none;
+  border-bottom: 1px solid transparent;
+}
+.how-cta-link:hover { border-bottom-color: var(--page); }
+
+.how-curious {
+  font-family: var(--sans);
+  font-size: 13px;
+  color: var(--muted);
+  margin: 26px 0 0;
+}
+.how-curious a { color: var(--ink); text-underline-offset: 3px; }
+.how-curious code { font-family: var(--mono); font-size: 0.9em; color: var(--ink); }
+
+/* ---------- responsive ---------- */
+@media (max-width: 860px) {
+  .how-watch-fig { grid-template-columns: 1fr; gap: 24px; }
+  .how-watch-bridge { display: none; }
+  .how-watch-sink { justify-content: stretch; }
+  .how-why-grid { grid-template-columns: 1fr; }
+  .how-bet { grid-template-columns: 1fr; gap: 14px; }
+  .how-exp-head { flex-direction: column; gap: 6px; }
+}
+@media (max-width: 640px) {
+  .how-act-inner { padding: 64px 22px 68px; }
+  .how-act--hero .how-act-inner { padding-top: 88px; }
+  .how-hero-steps { width: 100%; }
+  .how-hero-step { flex: 1 1 auto; justify-content: center; }
+  .how-propose-grid { grid-template-columns: 1fr !important; }
+  .how-receipt { max-width: none; box-shadow: 4px 4px 0 var(--line); }
+  /* keep the graph diagram legible: overflow-scroll rather than shrink the
+     node labels into illegibility on narrow screens */
+  .how-graph-fig { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  .how-graph-svg { min-width: 560px; }
+}
