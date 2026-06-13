@@ -34,6 +34,7 @@ const brief: SparBrief = {
     baselineSession: "session:base",
     worktree: ".claude/worktrees/dojo-spar-ab12cd34-2026-06-13",
     baseline: baseMetrics(),
+    baselineIsSubagent: false,
     delta: "skill: tdd ON",
 };
 
@@ -80,6 +81,13 @@ describe("renderSparBrief / parseSparBrief roundtrip", () => {
         expect(parsed?.id).toBe(brief.id);
         expect(parsed?.baseline.costUsd).toBe(1.20);
         expect(parsed?.parentSha).toBe("ab12cd34");
+        expect(parsed?.baselineIsSubagent).toBe(false);
+    });
+    test("subagent baseline renders a caution and roundtrips the flag", () => {
+        const md = renderSparBrief({ ...brief, baselineIsSubagent: true });
+        expect(md).toContain("baseline is a SUBAGENT session");
+        expect(md).toContain("baseline_is_subagent: true");
+        expect(parseSparBrief(md)?.baselineIsSubagent).toBe(true);
     });
     test("worktreeAbs puts the absolute path in the command but keeps frontmatter relative", () => {
         const md = renderSparBrief(brief, `/Users/x/ax/${brief.worktree}`);
