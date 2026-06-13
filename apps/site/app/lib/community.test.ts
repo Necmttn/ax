@@ -1,8 +1,11 @@
 // apps/site/app/lib/community.test.ts
 import { describe, expect, test } from "bun:test";
 import {
+    formatUsd,
+    formatUsdCompact,
     profileGistRawUrl,
     registrationRawUrl,
+    trendingSkills,
     validateLeaderboard,
     validateProfileV1,
     validateRegistration,
@@ -288,6 +291,46 @@ describe("validateProfileV1 - new optional fields (enriched daily, downstream_sh
     test("workflow section is optional - omit and still validates", () => {
         const p = validateProfileV1(base);
         expect(p.workflow).toBeUndefined();
+    });
+});
+
+describe("formatUsd", () => {
+    test("groups thousands: 22882 -> $22,882", () => {
+        expect(formatUsd(22882)).toBe("$22,882");
+    });
+    test("rounds to whole dollars", () => {
+        expect(formatUsd(42.7)).toBe("$43");
+        expect(formatUsd(0)).toBe("$0");
+    });
+});
+
+describe("formatUsdCompact", () => {
+    test("compacts large values: 22882 -> $22.9k", () => {
+        expect(formatUsdCompact(22882)).toBe("$22.9K");
+    });
+    test("small values stay grouped: 605 -> $605", () => {
+        expect(formatUsdCompact(605)).toBe("$605");
+    });
+});
+
+describe("trendingSkills", () => {
+    const stats = {
+        "local:my-personal-skill": { users: 1, runs: 99 },
+        "superpowers:brainstorming": { users: 3, runs: 30 },
+        "superpowers:tdd": { users: 2, runs: 12 },
+        "caveman:caveman": { users: 1, runs: 5 },
+    };
+    test("drops local:* skills", () => {
+        const out = trendingSkills(stats).map(([n]) => n);
+        expect(out).not.toContain("local:my-personal-skill");
+    });
+    test("requires users >= 2 by default", () => {
+        const out = trendingSkills(stats).map(([n]) => n);
+        expect(out).not.toContain("caveman:caveman");
+        expect(out).toEqual(["superpowers:brainstorming", "superpowers:tdd"]);
+    });
+    test("minUsers override + limit", () => {
+        expect(trendingSkills(stats, { minUsers: 1, limit: 2 })).toHaveLength(2);
     });
 });
 
