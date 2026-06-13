@@ -4,7 +4,7 @@ export function HookBacktestShowcase() {
   return (
     <section id="hook-backtest" className="showcase-hook-backtest">
       <main className="wrap">
-        <p className="eyebrow">before-you-ship · cases</p>
+        <p className="eyebrow">before-you-ship · cases <span className="receipt-tag is-sample">sample output</span></p>
         <h2>
           Ask the graph what your hook <em>would have</em> caught.
         </h2>
@@ -78,18 +78,18 @@ export function HookBacktestShowcase() {
 <span className="term-line rule">  ───────────────────────────────────────────────────────────</span>{"\n"}
 <span className="term-line"><span className="t-muted">  fires            </span> <span className="t-num">12</span> / 1,247 calls  <span className="t-muted">(0.96%)</span></span>{"\n"}
 <span className="term-line"><span className="t-muted">  ├─ </span><span className="t-bad">true positives </span> <span className="t-num">11</span>  <span className="t-muted">would have blocked actual main-branch pushes</span></span>{"\n"}
-<span className="term-line"><span className="t-muted">  └─ </span><span className="t-warn">false positives</span> <span className="t-num"> 1</span>  <span className="t-muted">legitimate hotfix → production · 2026-05-24</span></span>{"\n"}
+<span className="term-line"><span className="t-muted">  └─ </span><span className="t-warn">false positives</span> <span className="t-num"> 1</span>  <span className="t-muted">legitimate release → main · 2026-05-24</span></span>{"\n"}
 <span className="term-line"> </span>{"\n"}
 <span className="term-line"><span className="t-muted">  precision        </span> <span className="t-ok">0.917</span>   <span className="t-muted">recall</span> <span className="t-ok">0.917</span>   <span className="t-muted">F1</span> <span className="t-ok">0.917</span></span>{"\n"}
 <span className="term-line"><span className="t-muted">  prevented rollbacks </span> <span className="t-num">5</span>     <span className="t-muted">(traced via post-event reverts)</span></span>{"\n"}
 <span className="term-line"> </span>{"\n"}
 <span className="term-line"><span className="t-muted">  by repo</span></span>{"\n"}
-<span className="term-line"><span className="t-muted">    </span><span className="t-file">~/Projects/ax</span>        <span className="t-num"> 8</span>  <span className="t-bad">▮▮▮▮▮▮▮▮</span></span>{"\n"}
-<span className="term-line"><span className="t-muted">    </span><span className="t-file">~/Projects/quera</span>     <span className="t-num"> 3</span>  <span className="t-bad">▮▮▮</span></span>{"\n"}
-<span className="term-line"><span className="t-muted">    </span><span className="t-file">~/Projects/dotfiles</span>  <span className="t-num"> 1</span>  <span className="t-warn">▮</span> <span className="t-muted">← false positive lives here</span></span>{"\n"}
+<span className="term-line"><span className="t-muted">    </span><span className="t-file">~/Projects/api</span>      <span className="t-num"> 8</span>  <span className="t-bad">▮▮▮▮▮▮▮▮</span></span>{"\n"}
+<span className="term-line"><span className="t-muted">    </span><span className="t-file">~/Projects/web</span>      <span className="t-num"> 3</span>  <span className="t-bad">▮▮▮</span></span>{"\n"}
+<span className="term-line"><span className="t-muted">    </span><span className="t-file">~/Projects/infra</span>    <span className="t-num"> 1</span>  <span className="t-warn">▮</span> <span className="t-muted">← false positive lives here</span></span>{"\n"}
 <span className="term-line"> </span>{"\n"}
 <span className="term-line"><span className="t-muted">  one to review:</span></span>{"\n"}
-<span className="term-line"><span className="t-muted">    </span><span className="t-id">sess_8af3·turn-42</span>  <span className="t-warn">hotfix/prod-token-leak</span>  <span className="t-muted">→ allow-list?</span></span>{"\n"}
+<span className="term-line"><span className="t-muted">    </span><span className="t-id">sess_8af3·turn-42</span>  <span className="t-warn">release/v2-cutover</span>  <span className="t-muted">→ allow-list?</span></span>{"\n"}
 <span className="term-line"> </span>{"\n"}
 <span className="term-line"><span className="t-ok">  install with:</span> <span className="t-cmd">ax hooks install</span> ~/.ax/hooks/main-branch-guard.ts <span className="t-flag">--providers=</span>claude,codex</span>{"\n"}
 <span className="term-line"><span className="t-prompt">~/.claude $</span> <span className="term-caret" aria-hidden="true" /></span>
@@ -180,7 +180,7 @@ export function HookBacktestShowcase() {
               <span className="tick pass" />
               <span
                 className="tick fp"
-                title="false positive · hotfix on production"
+                title="false positive · release branch on main"
               />
               <span className="tick pass" />
               <span className="tick pass" />

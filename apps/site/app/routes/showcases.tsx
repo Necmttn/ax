@@ -9,6 +9,7 @@ import { DispatchRoutingShowcase } from "~/components/showcases/dispatch-routing
 import { QuotaShowcase } from "~/components/showcases/quota";
 import { ImproveLoopShowcase } from "~/components/showcases/improve-loop";
 import { ChurnShowcase } from "~/components/showcases/churn";
+import { ProfilesCommunityShowcase } from "~/components/showcases/profiles-community";
 
 export const Route = createFileRoute("/showcases")({
   component: Showcases,
@@ -22,16 +23,19 @@ function Showcases() {
         <section className="showcases-intro">
           <p className="eyebrow">what ax actually does</p>
           <h1>
-            Eight scenarios, <em>one graph</em>.
+            Every scenario, <em>one graph</em>.
           </h1>
           <p className="lede">
-            Concrete demos of what your local ax instance already exposes -
-            backtest a hook against history, search every session you've ever
-            had, see where your tokens go, watch a verdict earn its place at
-            +30 sessions, route the intern work to cheaper models, keep your
-            plan budget in view, take proposals mined from your own
-            transcripts, and find out which sessions thrash. Each one is
-            something you can run today.
+            Concrete demos of what your local ax instance already exposes. Each
+            one is something you can run today, on your own history.
+          </p>
+          <p className="lede">
+            Backtest a hook against history. Search every session you&apos;ve
+            ever had. See where your tokens go. Watch a verdict earn its place
+            at +30 sessions. Route the intern work to cheaper models. Keep your
+            plan budget in view. Take proposals mined from your own transcripts.
+            Find out which sessions thrash. Publish your receipts and hand the
+            graph to an agent.
           </p>
           <nav className="showcases-nav" aria-label="showcase jump links">
             <a href="#hook-backtest">hook backtest</a>
@@ -42,6 +46,7 @@ function Showcases() {
             <a href="#quota">quota</a>
             <a href="#improve-loop">improve loop</a>
             <a href="#churn">churn</a>
+            <a href="#profiles-community">profiles + mcp</a>
           </nav>
         </section>
 
@@ -53,6 +58,7 @@ function Showcases() {
         <QuotaShowcase />
         <ImproveLoopShowcase />
         <ChurnShowcase />
+        <ProfilesCommunityShowcase />
       </main>
       <SiteFooter />
     </>
