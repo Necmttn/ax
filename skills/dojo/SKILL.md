@@ -56,11 +56,16 @@ docs/superpowers/specs/2026-06-13-ax-dojo-design.md (in the Necmttn/ax repo).
   (objective + checkpoint index + gates) under docs/superpowers/goals/ so
   the NEXT dojo session resumes it. Output = an improve proposal; merging
   the proposal is what activates anything. NEVER merge, never touch main.
-- **New hooks specifically** - author via @ax/hooks-sdk, validate with
-  `ax hooks backtest <file>`, and put BOTH sides in the proposal: cases it
-  would have caught AND the latency ledger (per-fire cost, est fires/day,
-  cumulative installed-chain overhead). Reject your own hook when overhead
-  outweighs benefit.
+- **New hooks specifically** - author via @ax/hooks-sdk, then run BOTH
+  validators and embed their output in the proposal:
+  1. `ax hooks backtest <file> --json` → cases caught (benefit side): would-block/
+     would-warn rates, false-positive count, cases with evidence.
+  2. `ax hooks bench <file> --json` → per-fire p50/p95 from real bun spawns,
+     est fires/day from tool_call history, installed-chain budget vs --budget-ms
+     default 250 (cost side).
+  Reject the hook when daily cost (fires/day × p95) or an installed-chain budget
+  overrun outweighs the benefit shown by backtest. Both ledgers must appear in
+  the proposal; neither alone is sufficient.
 - **spar** - only present when invoked with --spar and spendable >= 30%.
   One task, one delta, scored: pick a landed task (`ax sessions here`),
   pin a worktree at the parent SHA, re-run it with exactly ONE change
