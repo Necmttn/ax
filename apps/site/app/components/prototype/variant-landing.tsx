@@ -27,7 +27,7 @@ export function VariantLanding({ theme }: { theme: Theme }) {
                 <span className="logo">ax<small>agent experience</small></span>
                 <span className="spacer" />
                 <a>Features</a><a>Profiles</a><a>Leaders</a><a>Docs</a>
-                <a className="cta">Install →</a>
+                <a className="cta">Install ax</a>
             </nav>
 
             <header className="v-land-hero">
@@ -36,14 +36,19 @@ export function VariantLanding({ theme }: { theme: Theme }) {
                     <span className="v-land-kicker"><Led />local-first · 5 harnesses · open source</span>
                     <h1 className="v-land-h1">A taste &amp; telemetry graph for your <em>coding agents</em>.</h1>
                     <p className="v-land-lede">
-                        ax ingests every Claude Code, Codex, and Cursor session into a local
-                        graph - then shows you what your agents actually do, what it costs,
-                        and how to make them better.
+                        ax ingests transcripts from Claude Code, Codex, Cursor, OpenCode, and Pi
+                        into one graph on your machine - then shows which skills you actually use,
+                        what each session cost, and where the tokens went.
                     </p>
                     <div className="v-land-install">
-                        <div className="bar"><span>install</span><span>macos · linux</span></div>
+                        <div className="bar"><span>one command · local only</span><span>macos · linux</span></div>
                         <code><b>curl</b> -fsSL https://ax.necmttn.com/install | sh</code>
                     </div>
+                    <ol className="v-land-steps">
+                        <li><span className="k">01</span> install the CLI &amp; watcher</li>
+                        <li><span className="k">02</span> <code>ax serve</code> ingests your transcripts</li>
+                        <li><span className="k">03</span> open the dashboard - sessions, costs, skills, traced</li>
+                    </ol>
                 </div>
                 <div className="v-land-herocard">
                     <div className="top"><span className="rdx-label">live · @necmttn</span><span className="rdx-stamp">sys.v0.29</span></div>
@@ -69,22 +74,22 @@ export function VariantLanding({ theme }: { theme: Theme }) {
                 <div className="v-land-feats">
                     <article className="v-land-feat">
                         <span className="ic">◷</span>
-                        <h3>Every session, traced</h3>
-                        <p>Turns, tool calls, and dollars - reconstructed from local transcripts, no cloud.</p>
+                        <h3>Every session, traced locally</h3>
+                        <p>ax reads transcripts from all five harnesses into one graph that never leaves your machine.</p>
                         <div className="viz"><CellGrid levels={ACTIVITY.slice(0, 52)} cols={26} cell={9} gap={2} /></div>
                     </article>
                     <article className="v-land-feat">
                         <span className="ic">≣</span>
-                        <h3>Spend, by model</h3>
-                        <p>See where the tokens go - and route the mechanical work to cheaper models.</p>
+                        <h3>Where the tokens go</h3>
+                        <p>See cost per session and per model, and the mechanical work worth routing to something cheaper.</p>
                         <div className="viz" style={{ display: "flex", flexDirection: "column", gap: 7 }}>
                             {MODELS.slice(0, 3).map((m) => <Segbar key={m.name} total={20} on={litFor(m.share, 20)} tone={m.tone === "green" ? "green" : "pri"} />)}
                         </div>
                     </article>
                     <article className="v-land-feat">
                         <span className="ic">✦</span>
-                        <h3>A profile worth sharing</h3>
-                        <p>Your agent archetype, streak, and rig - published to a gist, ranked on the leaderboard.</p>
+                        <h3>Your agent archetype</h3>
+                        <p>A shareable profile of the skills you lean on and the streaks you keep - from real transcripts, not self-report.</p>
                         <div className="viz"><Segbar total={28} on={20} tone="accent" wave /></div>
                     </article>
                 </div>
