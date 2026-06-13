@@ -10675,6 +10675,27 @@ footer .right {
 .leaders-table td, .leaders-table th { padding: 8px 10px; border-bottom: 1px solid var(--line); text-align: left; }
 .leaders-table td:last-child, .leaders-table th:last-child { text-align: right; }
 
+/* ----- nullframe dot-matrix + slam motion (adapted from github.com/m1ckc3s/nullframe, MIT) ----- */
+@font-face {
+    font-family: "Doto";
+    font-style: normal;
+    font-weight: 100 900;
+    font-display: swap;
+    src: url("/fonts/doto.woff2") format("woff2");
+}
+@keyframes pf-vital-in {
+    from { opacity: 0; transform: translateY(8px) scale(0.92); }
+    to { opacity: 1; transform: none; }
+}
+@keyframes pf-bar-rise {
+    from { transform: scaleY(0); }
+    to { transform: scaleY(1); }
+}
+@keyframes pf-led-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.2; }
+}
+
 /* ----- states ----- */
 .pf-loading {
     font-family: var(--mono);
@@ -10683,6 +10704,23 @@ footer .right {
     padding: 96px 0;
 }
 .pf-quiet { font-size: 13.5px; color: var(--muted); margin: 8px 0; }
+
+/* live-fetch honesty tag: the dossier is pulled live from the published gist
+   on every load - not streaming, but always the latest snapshot. */
+.pf-live {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    color: var(--green);
+    letter-spacing: 0.14em;
+}
+.pf-live-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--green);
+    animation: pf-led-pulse 2.4s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+}
 
 /* ----- nameplate ----- */
 .pf-mast { padding-top: 40px; }
@@ -10750,15 +10788,28 @@ footer .right {
     min-width: 0;
 }
 .pf-vital + .pf-vital { padding-left: 18px; border-left: 1px solid var(--line); }
+.pf-vital {
+    animation: pf-vital-in 0.5s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}
+.pf-ledger .pf-vital:nth-child(1) { animation-delay: 0.04s; }
+.pf-ledger .pf-vital:nth-child(2) { animation-delay: 0.1s; }
+.pf-ledger .pf-vital:nth-child(3) { animation-delay: 0.16s; }
+.pf-ledger .pf-vital:nth-child(4) { animation-delay: 0.22s; }
+.pf-ledger .pf-vital:nth-child(5) { animation-delay: 0.28s; }
+.pf-ledger .pf-vital:nth-child(6) { animation-delay: 0.34s; }
 .pf-vital-num {
-    font-family: var(--mono);
-    font-size: 29px;
+    font-family: "Doto", var(--mono);
+    font-variant-numeric: tabular-nums;
+    font-weight: 600;
+    font-size: 28px;
     line-height: 1.05;
-    letter-spacing: -0.5px;
+    letter-spacing: 0;
     white-space: nowrap;
 }
 .pf-vital-num small {
+    font-family: var(--mono);
     font-size: 14px;
+    font-weight: 400;
     color: var(--muted);
     letter-spacing: 0;
 }
@@ -10860,6 +10911,8 @@ footer .right {
     flex-direction: column-reverse; /* first (largest) segment at the base */
     min-height: 0;
     transition: opacity 0.08s ease;
+    transform-origin: bottom;
+    animation: pf-bar-rise 0.45s cubic-bezier(0.34, 1.56, 0.64, 1) both;
 }
 .pf-stack-seg { display: block; flex-basis: 0; min-height: 1px; }
 /* dim the rest of the chart when one day is hovered, so the focused bar pops */
@@ -11997,4 +12050,13 @@ footer .right {
     .pf-sign-name { font-size: 32px; }
     .pf-rawvals-table tbody th { width: 84px; }
     .pf-rawvals-val { white-space: normal; }
+}
+
+/* nullframe motion: respect reduced-motion (vitals slam, bar rise, LED) */
+@media (prefers-reduced-motion: reduce) {
+    .pf-vital,
+    .pf-stack-col,
+    .pf-live-dot { animation: none; }
+    .pf-vital { opacity: 1; transform: none; }
+    .pf-stack-col { transform: scaleY(1); }
 }

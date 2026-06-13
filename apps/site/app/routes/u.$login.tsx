@@ -187,7 +187,9 @@ function ProfileDossier({ profile: p, vs }: { profile: ProfileV1; vs: VsState })
             {/* nameplate */}
             <header className="pf-mast">
                 <div className="pf-mast-kicker">
-                    <span>agent telemetry dossier</span>
+                    <span className="pf-live" title="pulled live from the published gist on load">
+                        <span className="pf-live-dot" aria-hidden="true" />live
+                    </span>
                     <span>{p.window_days}-day window · compiled {p.generated_at.slice(0, 10)}</span>
                 </div>
                 <h1 className="pf-name"><span className="pf-at">@</span>{p.github}</h1>
@@ -620,7 +622,10 @@ function StackedWindow({
                         >
                             <span
                                 className="pf-stack-col"
-                                style={{ height: `${Math.max(c.heightShare * 100, c.tokens > 0 ? 2 : 0)}%` }}
+                                style={{
+                                    height: `${Math.max(c.heightShare * 100, c.tokens > 0 ? 2 : 0)}%`,
+                                    animationDelay: `${0.15 + i * (0.5 / Math.max(cols.length, 1))}s`,
+                                }}
                             >
                                 {c.segments.map((s, j) => (
                                     <span
