@@ -313,14 +313,18 @@ export const fetchSessionMetrics = (
         // turns + wall: count() over the turn_session_seq index + the session's
         // own start/end timestamps (mirrors enrichSessions' indexed lookup).
         const lit = recordLiteral("session", cleanId);
-        const rows = yield* db.query<[TurnWallRow[]]>(
+        // `FROM ONLY <lit>` returns the bare object (not an array of rows), so
+        // the query result is `[ {turn_count, s, e} ]` - read rows[0] directly.
+        // (Indexing rows[0][0] would step INTO the object and yield undefined,
+        // which previously left turns/wall always null.)
+        const rows = yield* db.query<[TurnWallRow | null]>(
             `SELECT
                 (SELECT count() FROM turn WHERE session = ${lit} GROUP ALL)[0].count AS turn_count,
                 type::string(started_at) AS s,
                 type::string(ended_at) AS e
              FROM ONLY ${lit};`,
         );
-        const row = rows?.[0]?.[0] ?? null;
+        const row = rows?.[0] ?? null;
         const turns = row?.turn_count != null ? Number(row.turn_count) || 0 : null;
         const startMs = row?.s ? Date.parse(row.s) : NaN;
         const endMs = row?.e ? Date.parse(row.e) : NaN;
