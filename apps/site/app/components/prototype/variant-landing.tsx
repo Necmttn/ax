@@ -3,11 +3,24 @@
      it installs + ingests + analyzes + briefs you (from the current landing).
    - Hero card cycles the real harness logos ("ingesting…") instead of the
      random-morphing dot glyph. */
-import { useEffect, useState } from "react";
+import { useState, type CSSProperties } from "react";
 import { CellGrid, Led, Segbar } from "./viz";
+import { LogoMatrix } from "./logo-matrix";
 import { ACTIVITY, MODELS, litFor } from "./mock";
 import { PROVIDERS } from "~/components/landing-v2/supports-strip";
 import type { Theme } from "./switcher";
+
+/** Floating harness-logo tiles with a gentle staggered drift - the fancy
+ *  animated logo field kept from the current landing. */
+function HarnessField() {
+    return (
+        <div className="rdx-logofield" aria-hidden="true">
+            {PROVIDERS.map((p, i) => (
+                <span key={p.key} className={`rdx-htile rdx-htile--${p.key}`} style={{ "--i": i } as CSSProperties} title={p.name}>{p.svg}</span>
+            ))}
+        </div>
+    );
+}
 
 const AGENT_PROMPT = `Set up ax for me, end to end. ax is a local agent-experience graph over my coding-agent history (Claude Code, Codex, Cursor, OpenCode, Pi) - it runs locally and I review every change.
 
@@ -19,27 +32,6 @@ const AGENT_PROMPT = `Set up ax for me, end to end. ax is a local agent-experien
 
 /** Hero card content: the 5 harness logos, cycling an "ingesting…" highlight -
  *  meaningful + branded, vs. the old random dot patterns. */
-function HarnessIngest() {
-    const [active, setActive] = useState(0);
-    useEffect(() => {
-        if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) return;
-        const iv = window.setInterval(() => {
-            if (!document.hidden) setActive((a) => (a + 1) % PROVIDERS.length);
-        }, 1300);
-        return () => window.clearInterval(iv);
-    }, []);
-    return (
-        <div className="v-land-ingest">
-            <div className="v-land-ingest-grid">
-                {PROVIDERS.map((p, i) => (
-                    <span key={p.key} className={`v-land-hchip${i === active ? " on" : ""}`} title={p.name}>{p.svg}</span>
-                ))}
-            </div>
-            <div className="v-land-ingest-cap rdx-stamp">ingesting · {PROVIDERS[active]?.name}</div>
-        </div>
-    );
-}
-
 function CopySetupPrompt() {
     const [copied, setCopied] = useState(false);
     const onCopy = () => {
@@ -65,7 +57,9 @@ function CopySetupPrompt() {
     );
 }
 
-export function VariantLanding({ theme: _theme }: { theme: Theme }) {
+export function VariantLanding({ theme }: { theme: Theme }) {
+    const dim = theme === "dark" ? "#232823" : "#dad7cb";
+    const lit = theme === "dark" ? "#eafff0" : "#173a22";
     return (
         <div className="v-land">
             <nav className="v-land-nav">
@@ -76,6 +70,7 @@ export function VariantLanding({ theme: _theme }: { theme: Theme }) {
             </nav>
 
             <header className="v-land-hero">
+                <HarnessField />
                 <div>
                     <span className="v-land-kicker"><Led />local-first · 5 harnesses · open source</span>
                     <h1 className="v-land-h1">A taste &amp; telemetry graph for your <em>coding agents</em>.</h1>
@@ -88,7 +83,7 @@ export function VariantLanding({ theme: _theme }: { theme: Theme }) {
                 </div>
                 <div className="v-land-herocard">
                     <div className="top"><span className="rdx-label" style={{ display: "inline-flex", gap: 7, alignItems: "center" }}><Led />live · @necmttn</span><span className="rdx-stamp">sys.v0.29</span></div>
-                    <HarnessIngest />
+                    <LogoMatrix dim={dim} lit={lit} />
                     <hr className="rdx-tear" />
                     <div className="v-land-herostat">
                         <div><div className="n rdx-doto">412</div><div className="l">sessions</div></div>
