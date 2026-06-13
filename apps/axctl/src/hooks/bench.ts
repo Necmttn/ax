@@ -6,10 +6,18 @@
  * live CLI smoke. Built incrementally across the hooks-bench plan tasks.
  */
 
-import { Effect } from "effect";
+import { Effect, FileSystem, Path } from "effect";
 import { SurrealClient } from "@ax/lib/db";
 import type { DbError } from "@ax/lib/errors";
 import { surrealDate, surrealString } from "@ax/lib/shared/surql";
+import { HOME } from "@ax/lib/paths";
+import { readAllHooks } from "./config.ts";
+import type { ConfiguredHookWithEvidence } from "./config.ts";
+import { HookProviderRegistry } from "./providers/registry.ts";
+import { queryHookSummary } from "../queries/hooks.ts";
+import type { HookSummaryRow } from "../queries/hooks.ts";
+import { loadHookMeta } from "./sdk-install.ts";
+import type { InstallableHookMeta } from "./sdk-install.ts";
 
 export interface PerFireStats {
     readonly p50: number; readonly p95: number;
@@ -168,3 +176,225 @@ export const measureSpawn = (
         }
         return samples;
     });
+
+// ---------------------------------------------------------------------------
+// Installed-chain composition + benchHook orchestration
+// ---------------------------------------------------------------------------
+
+/** Fallback per-hook cost (ms) when no recorded mean exists. The ~70ms is the
+ *  measured `bun <file>.ts` cold-spawn floor noted in the hooks-sdk docs. */
+export const DEFAULT_SPAWN_MS = 70;
+
+/**
+ * PURE: aggregate installed hook costs + the candidate's p50 into a budget
+ * verdict for one event. `beforeMs` = sum of installed; `withMs` = before +
+ * candidate p50; `overBudget` is STRICT (== budget is NOT over).
+ */
+export const composeChain = (
+    event: string,
+    installedCostsMs: readonly number[],
+    candidateP50: number,
+    budgetMs: number,
+    hookNames: readonly string[],
+): ChainSummary => {
+    const before = round(installedCostsMs.reduce((a, b) => a + b, 0));
+    const withC = before + round(candidateP50);
+    return { event, beforeMs: before, withMs: withC, budgetMs, overBudget: withC > budgetMs, hooks: [...hookNames] };
+};
+
+/** Derive a short display name for an installed hook from its command string
+ *  (`bun /abs/path/enforce-worktree.ts` -> `enforce-worktree`,
+ *  `"/abs/hooks/block-bun-test.sh"` -> `block-bun-test`). Matches the last
+ *  script-file token and strips its extension; falls back to the last
+ *  whitespace token (quotes stripped) when no file-like token is present. */
+const chainHookName = (command: string): string => {
+    const matches = [...command.matchAll(/([^/\s"']+)\.(?:ts|js|mjs|cjs|sh|py)\b/g)];
+    const last = matches[matches.length - 1];
+    if (last?.[1]) return last[1];
+    const tokens = command.replace(/["']/g, "").replace(/\s+/g, " ").trim().split(" ");
+    const token = tokens[tokens.length - 1] ?? command;
+    return token.split("/").pop() || token;
+};
+
+/**
+ * For the candidate's first event, enumerate the OTHER hooks installed on that
+ * event and compose the budget chain. Per-hook cost = recorded mean
+ * `duration_ms` (from `queryHookSummary`, matched by exact command) when
+ * present, else `DEFAULT_SPAWN_MS`. Returns null when the candidate has no
+ * events.
+ *
+ * Best-effort + soft-fail: a failed config read or summary query degrades to
+ * the default-estimate path and `log()`s that the chain is an estimate (no
+ * silent approximation). Deps: HookProviderRegistry | FileSystem | Path |
+ * SurrealClient (whatever readAllHooks needs).
+ */
+export const gatherChain = (
+    meta: InstallableHookMeta,
+    candidateP50: number,
+    budgetMs: number,
+): Effect.Effect<
+    ChainSummary | null,
+    never,
+    HookProviderRegistry | FileSystem.FileSystem | Path.Path | SurrealClient
+> =>
+    Effect.gen(function* () {
+        const event = meta.events[0];
+        if (!event) return null;
+
+        // Installed hooks on this event (across providers/scopes). Soft-fail to
+        // an empty chain (just the candidate) rather than aborting the bench.
+        const installed: ReadonlyArray<ConfiguredHookWithEvidence> = yield* readAllHooks({
+            eventFilter: event,
+            withEvidence: false,
+        }).pipe(
+            Effect.catch((e) =>
+                Effect.sync(() => {
+                    // stderr, not Effect.log: the configured logger writes to stdout
+                    // and would corrupt the `--json` ledger on the same stream.
+                    process.stderr.write(`hooks bench: could not enumerate installed hooks on ${event} (${String(e)}); chain shows candidate only\n`);
+                    return [] as ReadonlyArray<ConfiguredHookWithEvidence>;
+                }),
+            ),
+        );
+
+        // Recorded mean duration per command. Soft-fail to an empty map -> every
+        // installed hook costs DEFAULT_SPAWN_MS (estimate path, logged below).
+        const summary: ReadonlyArray<HookSummaryRow> = yield* queryHookSummary({ tail: 1000 }).pipe(
+            Effect.catch(() => Effect.succeed([] as ReadonlyArray<HookSummaryRow>)),
+        );
+        const meanByCommand = new Map<string, number>();
+        for (const row of summary) {
+            if (typeof row.avg_duration_ms === "number" && Number.isFinite(row.avg_duration_ms)) {
+                meanByCommand.set(row.command, row.avg_duration_ms);
+            }
+        }
+
+        let estimated = 0;
+        const costs: number[] = [];
+        const names: string[] = [];
+        for (const h of installed) {
+            if (!h.enabled) continue;
+            const recorded = meanByCommand.get(h.command);
+            if (recorded === undefined) estimated += 1;
+            costs.push(recorded ?? DEFAULT_SPAWN_MS);
+            names.push(chainHookName(h.command));
+        }
+
+        if (estimated > 0) {
+            // stderr keeps stdout clean for the `--json` ledger (see note above).
+            process.stderr.write(`hooks bench: ${estimated}/${costs.length} installed hook(s) on ${event} have no recorded duration; using ${DEFAULT_SPAWN_MS}ms estimate for those\n`);
+        }
+
+        return composeChain(event, costs, candidateP50, budgetMs, names);
+    });
+
+/** Fetch one recent `tool_call.input_json` for `tool`, parsed to an object, or
+ *  null when none / unparseable. Soft-fails (a DB error -> null) so the bench
+ *  always proceeds with an empty payload body. */
+const sampleToolInput = (
+    tool: string,
+): Effect.Effect<Record<string, unknown> | null, never, SurrealClient> =>
+    Effect.gen(function* () {
+        const db = yield* SurrealClient;
+        const rows = yield* db.query<[Array<{ input_json: string | null }>]>(
+            `SELECT input_json FROM tool_call WHERE name = ${surrealString(tool)} AND input_json != NONE ORDER BY ts DESC LIMIT 1;`,
+        ).pipe(Effect.catch(() => Effect.succeed([[]] as [Array<{ input_json: string | null }>])));
+        const raw = rows?.[0]?.[0]?.input_json;
+        if (typeof raw !== "string") return null;
+        try {
+            const parsed = JSON.parse(raw);
+            return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+                ? (parsed as Record<string, unknown>)
+                : null;
+        } catch {
+            return null;
+        }
+    });
+
+export interface BenchOptions {
+    readonly file: string;
+    readonly days: number;
+    readonly runs: number;
+    readonly budgetMs: number;
+}
+
+/**
+ * Orchestrate the full latency ledger for one SDK hook file:
+ *   resolve -> load meta -> sample payload -> spawn-time -> fire-frequency ->
+ *   installed-chain budget.
+ *
+ * loadHookMeta failures (import/validation) are surfaced with a clean stderr
+ * line + nonzero exit (mirrors backtest); every graph source is soft-isolated
+ * so a missing DB/config degrades a single field instead of aborting.
+ */
+export const benchHook = (
+    opts: BenchOptions,
+): Effect.Effect<
+    BenchLedger,
+    never,
+    SurrealClient | FileSystem.FileSystem | Path.Path | HookProviderRegistry
+> =>
+    Effect.gen(function* () {
+        const path = yield* Path.Path;
+        const absFile = path.resolve(expandTilde(opts.file));
+
+        // Import + validate. A typed failure -> clean message + nonzero exit.
+        const meta = yield* loadHookMeta(absFile).pipe(
+            Effect.catchTags({
+                SdkHookImportError: (e) =>
+                    Effect.sync(() => {
+                        process.stderr.write(`cannot import hook file ${absFile}: ${e.reason}\n`);
+                        process.exit(1);
+                    }) as Effect.Effect<never>,
+                SdkHookValidationError: (e) =>
+                    Effect.sync(() => {
+                        process.stderr.write(`${absFile}: ${e.reason}\n`);
+                        process.exit(1);
+                    }) as Effect.Effect<never>,
+            }),
+        );
+
+        const lite: HookMetaLite = {
+            name: meta.name,
+            events: meta.events,
+            matcher: meta.matcher?.tools ? { tools: meta.matcher.tools } : undefined,
+        };
+        const tools = meta.matcher?.tools ?? [];
+
+        // Representative stdin payload (one real tool_call input when available).
+        const firstTool = tools[0];
+        const sampleInput = firstTool ? yield* sampleToolInput(firstTool) : null;
+        const payload = buildRepresentativePayload(lite, sampleInput, process.cwd());
+
+        // Spawn-time samples; first is the cold warm-up, kept separate.
+        const samples = yield* measureSpawn(absFile, payload, opts.runs);
+        const warmup = samples[0] ?? null;
+        const rest = samples.slice(1);
+        const perFire = percentiles(rest.length ? rest : samples);
+
+        // Fire frequency + projected daily cost. Soft-fail to null.
+        const freq = yield* estFiresPerDay(tools, opts.days).pipe(
+            Effect.catch(() =>
+                Effect.succeed<FireFrequency>({ perDay: null, matched: [...tools], basis: "n/a (db unavailable)" }),
+            ),
+        );
+        const dailyCostMs = freq.perDay != null ? round(perFire.p50 * freq.perDay) : null;
+
+        // Installed-chain budget on the candidate's first event.
+        const chain = yield* gatherChain(meta, perFire.p50, opts.budgetMs);
+
+        return {
+            name: meta.name,
+            perFire,
+            warmupMs: warmup != null ? round(warmup) : null,
+            spawns: rest.length ? rest.length : samples.length,
+            logicMs: null,
+            frequency: freq,
+            dailyCostMs,
+            chain,
+        } satisfies BenchLedger;
+    });
+
+/** Expand a leading `~` to the user's home directory (mirrors hooks/cli.ts). */
+const expandTilde = (p: string): string =>
+    p === "~" ? HOME : p.startsWith("~/") ? `${HOME}/${p.slice(2)}` : p;

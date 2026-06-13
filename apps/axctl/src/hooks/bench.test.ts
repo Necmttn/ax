@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { Effect, Layer } from "effect";
-import { buildRepresentativePayload, estFiresPerDay, percentiles, renderLedger } from "./bench.ts";
+import { buildRepresentativePayload, composeChain, estFiresPerDay, percentiles, renderLedger } from "./bench.ts";
 import type { BenchLedger } from "./bench.ts";
 import { SurrealClient } from "@ax/lib/db";
 
@@ -86,6 +86,35 @@ describe("renderLedger", () => {
         expect(out).not.toContain("chain (");
         expect(out).not.toContain("warmup");
         expect(out).not.toContain("logic");
+    });
+});
+
+describe("composeChain", () => {
+    test("sums installed costs + candidate p50; under budget", () => {
+        const c = composeChain("PreToolUse", [60, 70, 68], 72, 250, ["a", "b", "c"]);
+        expect(c.event).toBe("PreToolUse");
+        expect(c.beforeMs).toBe(198); // 60+70+68
+        expect(c.withMs).toBe(270); // 198 + 72
+        expect(c.budgetMs).toBe(250);
+        expect(c.overBudget).toBe(true); // 270 > 250
+        expect(c.hooks).toEqual(["a", "b", "c"]);
+    });
+    test("empty installed chain -> beforeMs 0, withMs = rounded candidate", () => {
+        const c = composeChain("PreToolUse", [], 72.4, 250, []);
+        expect(c.beforeMs).toBe(0);
+        expect(c.withMs).toBe(72); // round(72.4)
+        expect(c.overBudget).toBe(false);
+        expect(c.hooks).toEqual([]);
+    });
+    test("withMs strictly over budget is over; exactly == budget is NOT over", () => {
+        // 200 + 51 = 251 > 250 -> over
+        expect(composeChain("E", [200], 51, 250, []).overBudget).toBe(true);
+        // 200 + 50 = 250 == 250 -> NOT over (strict >)
+        const eq = composeChain("E", [200], 50, 250, []);
+        expect(eq.withMs).toBe(250);
+        expect(eq.overBudget).toBe(false);
+        // 200 + 49 = 249 < 250 -> under
+        expect(composeChain("E", [200], 49, 250, []).overBudget).toBe(false);
     });
 });
 
