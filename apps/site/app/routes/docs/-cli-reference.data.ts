@@ -301,6 +301,29 @@ claude-sonnet-4             54          120   18.7%        201,330`,
         ],
       },
       {
+        name: "dojo",
+        job: "Training agenda: spends surplus plan quota on a prioritized self-improvement work list.",
+        signature: "ax dojo [--budget=N] [--until=HH:MM] [--spar] [--days=N] [--json]",
+        flags: [
+          { flag: "--budget=N", desc: "cap the spend envelope at N% of the binding quota window" },
+          { flag: "--until=HH:MM", desc: "deadline for this session (default: earliest window reset)" },
+          { flag: "--spar", desc: "opt into adversarial spar items (needs >=30% spendable quota)" },
+        ],
+        receipt: `$ ax dojo
+budget    37% of 7d window spendable  ·  until 22:59 (reset)
+agenda
+  1  lock 2 pending verdicts            (improve)
+  2  drain 1 unfilled .ax/tasks brief   (task)
+  3  mint proposals - open pool < 3     (recommend)
+fed to the ax:dojo skill loop`,
+        detail: [
+          "ax dojo composes a budget envelope from the quota module (binding window remaining minus a 15% reserve, deadline = earliest window reset) and a derived, self-clearing item list.",
+          "Items: pending verdicts, unfilled .ax/tasks briefs, judgment-flagged routing backtests, proposal minting (when the open pool < 3), churn-hotspot experiments, opt-in spar, and an explore fallback.",
+          "Each item vanishes once the underlying system records the work (verdict locked, brief consumed, proposal created) - the agenda is stateless between runs.",
+          "Consumed by the ax:dojo skill loop; drafts land in ~/.ax/dojo/outbox/ and a per-day report in ~/.ax/dojo/reports/.",
+        ],
+      },
+      {
         name: "wrapped",
         sub: ["generate", "publish"],
         job: "Agent-authored Wrapped recap cards for the dashboard landing.",
