@@ -3,7 +3,20 @@
    glyph sigil, receipt install block. */
 import { CellGrid, GlyphReel, Led, Segbar } from "./viz";
 import { ACTIVITY, MODELS, litFor } from "./mock";
+import { PROVIDERS } from "~/components/landing-v2/supports-strip";
 import type { Theme } from "./switcher";
+
+/** Floating harness-logo tiles framing the hero - kept from the current
+ *  landing (ax's "works with 5 harnesses" signature), reusing the real SVGs. */
+function HarnessField() {
+    return (
+        <div className="rdx-logofield" aria-hidden="true">
+            {PROVIDERS.map((p) => (
+                <span key={p.key} className={`rdx-htile rdx-htile--${p.key}`} title={p.name}>{p.svg}</span>
+            ))}
+        </div>
+    );
+}
 
 export function VariantLanding({ theme }: { theme: Theme }) {
     const dim = theme === "dark" ? "#232823" : "#dad7cb";
@@ -18,6 +31,7 @@ export function VariantLanding({ theme }: { theme: Theme }) {
             </nav>
 
             <header className="v-land-hero">
+                <HarnessField />
                 <div>
                     <span className="v-land-kicker"><Led />local-first · 5 harnesses · open source</span>
                     <h1 className="v-land-h1">A taste &amp; telemetry graph for your <em>coding agents</em>.</h1>
