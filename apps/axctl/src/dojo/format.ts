@@ -4,7 +4,9 @@
  */
 import type { DojoAgenda } from "./schema.ts";
 
-const windowLabel = (w: DojoAgenda["budget"]["binding_window"]): string =>
+/** Human label for a binding window - the single source for both the agenda
+ *  and the dojo report budget lines. */
+export const windowLabel = (w: DojoAgenda["budget"]["binding_window"]): string =>
     w === "five_hour" ? "5h window" : w === "seven_day" ? "7d window" : "no window";
 
 export const renderAgenda = (agenda: DojoAgenda): string => {

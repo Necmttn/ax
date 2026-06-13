@@ -21,6 +21,7 @@ import { QuotaEnv } from "../quota/quota-env.ts";
 import { getQuota } from "../quota/quota.ts";
 import type { QuotaSnapshot } from "../quota/schema.ts";
 import { computeBudgetEnvelope } from "./budget.ts";
+import { windowLabel } from "./format.ts";
 import { listDrafts, type OutboxDraft } from "./outbox.ts";
 import type { BudgetEnvelope } from "./schema.ts";
 
@@ -37,9 +38,6 @@ export interface ReportData {
     readonly drafts: readonly OutboxDraft[];
     readonly notes: string;
 }
-
-const windowLabel = (w: BudgetEnvelope["binding_window"]): string =>
-    w === "five_hour" ? "5h window" : w === "seven_day" ? "7d window" : "no window";
 
 /** "12% spendable (7d window, 27% left) [quota]" */
 export const formatBudgetLine = (b: BudgetEnvelope): string =>
