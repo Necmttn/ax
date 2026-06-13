@@ -388,7 +388,14 @@ export const captureBaseline = (
                 new SparCaptureError(`no sessions found in the commit window for ${sha}`),
             );
         }
-        const landedSession = sessions.reduce((best, s) =>
+        // The baseline must be a MAIN session: subagent sessions
+        // (source="claude-subagent") rack up high turn_counts by design and would
+        // win the highest-turn_count reduce, yielding a bogus baseline (no real
+        // first_user_message, null turns/wall). Prefer main sessions; fall back
+        // to the unfiltered list only when the window has no main session at all.
+        const mainSessions = sessions.filter((s) => s.source === "claude");
+        const candidates = mainSessions.length > 0 ? mainSessions : sessions;
+        const landedSession = candidates.reduce((best, s) =>
             s.turn_count > best.turn_count ? s : best,
         );
 

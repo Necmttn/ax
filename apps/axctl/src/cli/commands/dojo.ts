@@ -18,6 +18,7 @@
 import { Effect, FileSystem } from "effect";
 import { Argument, Command, Flag } from "effect/unstable/cli";
 import { posixPath } from "@ax/lib/shared/path";
+import { ProcessService } from "@ax/lib/process";
 import { prettyPrint } from "@ax/lib/json";
 import { assembleAgenda, collectAgendaItems } from "../../dojo/agenda.ts";
 import { computeBudgetEnvelope } from "../../dojo/budget.ts";
@@ -283,7 +284,36 @@ const outboxCommand = Command.make(
 // ax dojo spar-plan <sha> - capture + freeze a baseline, emit an experiment brief
 // ---------------------------------------------------------------------------
 
-/** Resolve $PWD to its git repoRoot + repository record key (mirrors `sessions near`). */
+/**
+ * Resolve the MAIN repository root, even when invoked from inside a linked
+ * worktree. `git rev-parse --show-toplevel` (what resolvePwdRepository uses)
+ * returns the LINKED worktree's own toplevel, so a spar worktree path that is
+ * relative to the main repo would double-nest. `--git-common-dir` always points
+ * at the main repo's `.git`; its parent dir is the main repo root. Falls back to
+ * `repoRoot` when there is no linked worktree (or the rev-parse fails).
+ */
+const resolveMainRepoRoot = (repoRoot: string) =>
+    Effect.gen(function* () {
+        const proc = yield* ProcessService;
+        const res = yield* proc.exec("git", ["rev-parse", "--git-common-dir"], {
+            cwd: repoRoot,
+        });
+        const commonDir = res.code === 0 ? res.stdout.trim() : "";
+        if (commonDir.length === 0) return repoRoot;
+        // commonDir is usually absolute (".../<main>/.git") but can be the bare
+        // ".git" relative form when already at the main root.
+        if (commonDir === ".git") return repoRoot;
+        const abs = posixPath.isAbsolute(commonDir)
+            ? commonDir
+            : posixPath.join(repoRoot, commonDir);
+        return posixPath.dirname(abs);
+    });
+
+/**
+ * Resolve $PWD to its git repoRoot + repository record key (mirrors
+ * `sessions near`), plus the MAIN repo root (worktree-aware) used to anchor the
+ * spar worktree path the agent creates.
+ */
 const resolveRepo = Effect.gen(function* () {
     const pwd = yield* resolvePwdRepository().pipe(
         Effect.catchTag("NotAGitRepoError", (err) => {
@@ -291,8 +321,10 @@ const resolveRepo = Effect.gen(function* () {
             return Effect.sync(() => process.exit(1)) as Effect.Effect<never>;
         }),
     );
+    const mainRepoRoot = yield* resolveMainRepoRoot(pwd.repoRoot);
     return {
         repoRoot: pwd.repoRoot,
+        mainRepoRoot,
         repositoryKey: pwd.repositoryRecordId.id as string,
     };
 });
@@ -302,7 +334,7 @@ const sparPlanCommand = Command.make(
     { sha: Argument.string("sha"), json: jsonFlag },
     ({ sha, json }) =>
         Effect.gen(function* () {
-            const { repoRoot, repositoryKey } = yield* resolveRepo;
+            const { repoRoot, mainRepoRoot, repositoryKey } = yield* resolveRepo;
             const brief = yield* captureBaseline(
                 sha,
                 repoRoot,
@@ -326,7 +358,11 @@ const sparPlanCommand = Command.make(
                 console.log(prettyPrint(brief));
                 return;
             }
-            const worktreeCmd = `git worktree add ${brief.worktree} -b dojo/spar-${brief.id} ${brief.parentSha}`;
+            // Anchor the worktree at the MAIN repo root so spar-score (which
+            // joins brief.worktree against the same main root) finds the variant
+            // session's cwd no matter where the agent ran spar-plan from.
+            const worktreeAbs = posixPath.join(mainRepoRoot, brief.worktree);
+            const worktreeCmd = `git worktree add ${worktreeAbs} -b dojo/spar-${brief.id} ${brief.parentSha}`;
             console.log(
                 `${path}\n\nNext:\n  ${worktreeCmd}\n  fill the Delta section, run the task in that worktree, then: ax dojo spar-score ${brief.id}`,
             );
@@ -353,7 +389,7 @@ const sparScoreCommand = Command.make(
             const fs = yield* FileSystem.FileSystem;
             const briefPath = dojoSparBriefPath(id);
             const content = yield* fs.readFileString(briefPath).pipe(
-                Effect.catch(() => {
+                Effect.catchTag("PlatformError", () => {
                     console.error(`ax dojo spar-score: no spar brief at ${briefPath}`);
                     return Effect.sync(() => process.exit(1)) as Effect.Effect<never>;
                 }),
@@ -364,10 +400,11 @@ const sparScoreCommand = Command.make(
                 return yield* Effect.sync(() => process.exit(1));
             }
 
-            // brief.worktree is repo-relative; sessions store an absolute cwd, so
-            // resolve it against the current repoRoot for the variant lookup.
-            const { repoRoot } = yield* resolveRepo;
-            const variantCwd = posixPath.join(repoRoot, brief.worktree);
+            // brief.worktree is relative to the MAIN repo root; sessions store an
+            // absolute cwd, so resolve it against the worktree-aware main root
+            // (not the linked-worktree toplevel, which would double-nest).
+            const { mainRepoRoot } = yield* resolveRepo;
+            const variantCwd = posixPath.join(mainRepoRoot, brief.worktree);
 
             let variantId: string | null;
             if (variantSession.length > 0) {
