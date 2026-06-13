@@ -213,6 +213,15 @@ nav.top-nav a.primary {
   border-color: var(--ink);
 }
 
+nav.top-nav a.nav-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px 8px;
+  color: var(--muted);
+}
+nav.top-nav a.nav-icon:hover { color: var(--ink); border-color: var(--line); }
+
 /* ---- CSS-only mobile menu (no JS, prerender-safe) ---- */
 .nav-toggle {
   position: absolute;
@@ -293,6 +302,13 @@ nav.top-nav a.primary {
     text-align: center;
     border: 1px solid var(--ink);
   }
+  /* in the stacked dropdown, label the GitHub icon link */
+  nav.top-nav a.nav-icon {
+    justify-content: flex-start;
+    gap: 10px;
+    padding: 12px 4px;
+  }
+  nav.top-nav a.nav-icon::after { content: "GitHub"; font-size: 15px; }
 }
 
 /* ---------- releases ---------- */
@@ -908,6 +924,62 @@ pre.install .prompt {
   color: var(--ink);
 }
 
+/* ----- /docs/install activation steps (inside .prose) ----- */
+.prose ol.install-steps {
+  list-style: none;
+  margin: 32px 0 8px;
+  padding: 0;
+  counter-reset: none;
+}
+.prose ol.install-steps > li.install-step {
+  margin: 0 0 28px;
+  padding: 0 0 28px;
+  border-bottom: 1px solid var(--line);
+}
+.prose ol.install-steps > li.install-step:last-child {
+  border-bottom: none;
+  padding-bottom: 0;
+}
+.install-step-head {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  margin: 0 0 12px;
+  flex-wrap: wrap;
+}
+.install-step-num {
+  font-family: var(--mono);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink);
+}
+.install-step-label {
+  font-family: var(--mono);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.18em;
+  color: var(--muted);
+}
+.install-step-title {
+  font-family: var(--serif);
+  font-size: 21px;
+  line-height: 1.2;
+  color: var(--ink);
+}
+.prose .install-step pre.install {
+  margin: 0 0 12px;
+}
+.install-step-note {
+  margin: 0;
+  font-size: 14.5px;
+  line-height: 1.6;
+  color: var(--muted);
+}
+.install-step-note code {
+  font-family: var(--mono);
+  font-size: 0.92em;
+}
+
 .cta {
   display: flex;
   gap: 12px;
@@ -1138,6 +1210,63 @@ footer .right {
   text-transform: uppercase;
   letter-spacing: 0.16em;
   color: var(--muted);
+}
+
+/* ---------- footer sitemap ---------- */
+
+footer.site-footer { padding: 48px 32px 56px; }
+
+.footer-sitemap {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 32px;
+  border-top: 2px solid var(--ink);
+  padding-top: 28px;
+}
+.footer-col { display: flex; flex-direction: column; gap: 10px; }
+.footer-col-head {
+  font-family: var(--mono);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.16em;
+  color: var(--ink);
+  margin-bottom: 4px;
+}
+.footer-col a {
+  font-size: 14px;
+  color: var(--muted);
+  text-decoration: none;
+  width: fit-content;
+}
+.footer-col a:hover { color: var(--ink); }
+
+.footer-base {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 16px;
+  margin-top: 40px;
+  padding-top: 18px;
+  border-top: 1px solid var(--line);
+  font-family: var(--mono);
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+}
+.footer-base-links { display: flex; align-items: baseline; gap: 10px; }
+.footer-base-links a { color: var(--muted); text-decoration: none; }
+.footer-base-links a:hover { color: var(--ink); }
+.footer-base-meta {
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+}
+
+@media (max-width: 720px) {
+  .footer-sitemap { grid-template-columns: repeat(2, 1fr); gap: 28px; }
+}
+@media (max-width: 420px) {
+  .footer-sitemap { grid-template-columns: 1fr; }
 }
 
 /* ---------- fig-shell / figure shared ---------- */
@@ -10482,6 +10611,32 @@ footer .right {
   .docs-adr-list .adr-slug { grid-column: 1 / -1; }
 }
 
+/* ADRs are demoted: one quiet, collapsed records drawer at the bottom */
+.docs-quiet { padding-top: 28px; }
+.docs-quiet-records summary {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  cursor: pointer;
+  list-style: none;
+  font-family: var(--mono);
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--muted);
+  padding: 6px 0;
+}
+.docs-quiet-records summary::-webkit-details-marker { display: none; }
+.docs-quiet-records summary:hover { color: var(--ink); }
+.docs-quiet-note {
+  text-transform: none;
+  letter-spacing: 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+.docs-quiet-records[open] summary { margin-bottom: 12px; }
+.docs-quiet-records .docs-adr-list { border-top: 1px solid var(--line); }
+
 /* ----- documentation shell (MDX pages) ----- */
 .doc-main { padding-top: 8px; padding-bottom: 96px; }
 .doc-crumb { padding: 28px 0 0; }
@@ -10515,6 +10670,20 @@ footer .right {
   line-height: 1.6;
   color: var(--muted);
   margin: 0;
+}
+
+/* standing preface on demoted ADR pages */
+.adr-preface {
+  max-width: 720px;
+  margin: 24px 0 8px;
+  padding: 10px 14px;
+  border-left: 3px solid var(--line);
+  background: var(--panel);
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.6;
+  letter-spacing: 0.02em;
+  color: var(--muted);
 }
 
 /* ----- prose: shared typography for all MDX documents ----- */
