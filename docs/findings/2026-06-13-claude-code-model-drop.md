@@ -1,12 +1,7 @@
 <!--
 TARGET REPO: github.com/anthropics/claude-code
-STATUS: DRAFT - do NOT post until the user confirms. This file is for review only.
-
-To file once confirmed:
-  gh issue create \
-    --repo anthropics/claude-code \
-    --title "Subagent model override silently dropped after a continuation boundary (SendMessage follow-up / post-compaction resume)" \
-    --body-file docs/findings/2026-06-13-claude-code-model-drop.md
+STATUS: POSTED 2026-06-13 -> https://github.com/anthropics/claude-code/issues/68147
+This file is the source of the filed issue; do not re-post.
 -->
 
 # Subagent model override silently dropped after a continuation boundary
