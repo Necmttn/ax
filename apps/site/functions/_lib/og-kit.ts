@@ -53,6 +53,12 @@ export const compactNumber = (n: number): string => {
 export const compactUsd = (n: number): string =>
     n >= 1_000 ? `~$${compactNumber(n)}` : `$${n.toFixed(0)}`;
 
+/** Window-total USD normalised to a 30-day month (mirrors app/lib/hero.ts;
+ * functions and the SPA are separate bundles, so the one-liner lives in
+ * both). */
+export const perMonthUsd = (total: number, windowDays: number): number =>
+    windowDays > 0 ? (total * 30) / windowDays : total;
+
 // ---------------------------------------------------------------------------
 // Stat block - 46px numeral + 14px letter-spaced label (matches share card)
 // ---------------------------------------------------------------------------

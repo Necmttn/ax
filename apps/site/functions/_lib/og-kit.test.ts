@@ -5,6 +5,7 @@ import {
     fmtUsd,
     compactNumber,
     compactUsd,
+    perMonthUsd,
     statHtml,
     footerHtml,
     blockLogoHtml,
@@ -69,6 +70,18 @@ describe("compactUsd", () => {
     });
     test("small spend stays exact", () => {
         expect(compactUsd(42.4)).toBe("$42");
+    });
+});
+
+describe("perMonthUsd", () => {
+    test("30-day window passes through", () => {
+        expect(perMonthUsd(200, 30)).toBe(200);
+    });
+    test("14-day window scales up", () => {
+        expect(perMonthUsd(140, 14)).toBeCloseTo(300);
+    });
+    test("guards divide-by-zero", () => {
+        expect(perMonthUsd(50, 0)).toBe(50);
     });
 });
 
