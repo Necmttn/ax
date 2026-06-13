@@ -36,8 +36,8 @@ axctl cost <models|sessions|split>          # model/cost analytics incl. main-vs
 axctl quota [--statusline|--swiftbar]       # Claude plan usage (5h/7d windows); statusline + menubar output
 axctl dojo agenda [--json|--spar|--budget=N|--until=HH:MM|--force|--days=N]  # training agenda: quota budget envelope + prioritized self-improvement items for the ax:dojo skill loop
 axctl dojo report [--since=<iso>] [--notes-file=<path>] [--json]      # write the morning report for a completed dojo run
-axctl dojo draft [--title=<t>] [--kind=bug|improvement] [--dry-run]   # stage an upstream finding to ~/.ax/dojo/outbox/<slug>.md (never publishes)
-axctl dojo outbox [--list|--show=<slug>]                               # inspect staged upstream issue drafts
+axctl dojo draft [--title=<t>] [--kind=bug|improvement] [--body-file=<path>] [--session=<id>]  # stage an upstream finding to ~/.ax/dojo/outbox/<slug>.md (never publishes)
+axctl dojo outbox [--json]                                            # list staged upstream issue drafts
 axctl dispatches [--candidates]             # subagent dispatch routing analytics + est savings
 axctl routing tune [--dry-run|--emit-brief] # mine YOUR dispatch history for new routing classes
 axctl routing compile                       # regenerate ~/.ax/hooks/routing-table.json (user classes preserved)
