@@ -296,3 +296,37 @@
 .rdx-fig-node.hot { border-color: var(--accent); color: var(--accent); }
 .rdx-fig-arrow { color: var(--dim); padding: 0 8px; }
 .rdx-fig-glyph { height: 130px; }
+
+/* ===========================================================================
+   SURFACE: Teams ("ring") — org instrument board + member roster.
+   Reuses the .v-mc rail/bento shell; adds an org header + roster table.
+   ========================================================================= */
+.v-team-org { display: flex; align-items: center; gap: 14px; }
+.v-team-org .crest { width: 34px; height: 34px; border: 1px solid var(--border-hi); border-radius: 9px; overflow: hidden; flex: none; }
+.v-team-org .name { font-family: var(--serif); font-size: 22px; color: var(--display); }
+.v-team-org .name b { color: var(--accent); font-weight: 400; }
+.v-team-org .ring { font-family: var(--mono); font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--dim); border: 1px solid var(--border); border-radius: 6px; padding: 3px 8px; }
+
+.v-team-roster { padding: 0; gap: 0; }
+.v-team-roster .rdx-label { padding: 16px 18px 12px; }
+.v-team-rt { width: 100%; border-collapse: collapse; font-family: var(--mono); font-size: 12.5px; }
+.v-team-rt th { text-align: left; font-weight: 400; font-size: 10px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--dim); padding: 0 16px 8px; border-bottom: 1px solid var(--border); }
+.v-team-rt th.r, .v-team-rt td.r { text-align: right; }
+.v-team-rt td { padding: 11px 16px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+.v-team-rt tr:last-child td { border-bottom: 0; }
+.v-team-rt tr:hover td { background: var(--surface2); }
+.v-team-who { display: flex; align-items: center; gap: 10px; }
+.v-team-who .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--dim); flex: none; }
+.v-team-who .dot.on { background: var(--green); box-shadow: 0 0 0 3px color-mix(in srgb, var(--green) 22%, transparent); }
+.v-team-who .h { color: var(--display); }
+.v-team-who .h small { color: var(--dim); margin-left: 7px; font-size: 11px; }
+.v-team-arch { color: var(--sec); }
+.v-team-num { font-family: var(--doto); font-variant-numeric: tabular-nums; color: var(--pri); font-size: 15px; }
+.v-team-model { border: 1px solid var(--border); border-radius: 6px; padding: 2px 7px; color: var(--sec); font-size: 11px; }
+.v-team-spark { display: inline-flex; gap: 2px; vertical-align: middle; }
+.v-team-spark i { width: 7px; height: 14px; border-radius: 1px; background: var(--c0); display: inline-block; }
+.v-team-spark i.lvl-1 { background: var(--c1); } .v-team-spark i.lvl-2 { background: var(--c2); }
+.v-team-spark i.lvl-3 { background: var(--c3); } .v-team-spark i.lvl-4 { background: var(--c4); }
+.v-team-rig-row { display: grid; grid-template-columns: 1fr 56px; gap: 8px 12px; align-items: center; font-family: var(--mono); font-size: 11.5px; color: var(--sec); }
+.v-team-rig-row .segwrap { grid-column: 1 / -1; margin-bottom: 4px; }
+.v-team-rig-row .pct { text-align: right; color: var(--pri); }

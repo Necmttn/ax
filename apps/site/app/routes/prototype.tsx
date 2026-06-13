@@ -9,11 +9,13 @@ import { Switcher, type Theme } from "../components/prototype/switcher";
 import { VariantMissionControl } from "../components/prototype/variant-mission-control";
 import { VariantLanding } from "../components/prototype/variant-landing";
 import { VariantArticle } from "../components/prototype/variant-article";
+import { VariantTeams } from "../components/prototype/variant-teams";
 
 // Mission Control won; the prototype now shows that ONE language across the
-// three brand surfaces so we can judge cohesion + the ax uniqueness levers.
+// brand surfaces + the team ("ring") dashboard, to judge cohesion + uniqueness.
 const VARIANTS = [
     { key: "app", name: "App · Mission Control" },
+    { key: "teams", name: "Teams · the ring" },
     { key: "landing", name: "Landing" },
     { key: "article", name: "Article + figures" },
 ] as const;
@@ -40,6 +42,7 @@ function PrototypePage() {
     return (
         <div className="rdx" data-theme={theme} key={`${variant}-${theme}`}>
             {variant === "app" && <VariantMissionControl theme={theme} />}
+            {variant === "teams" && <VariantTeams theme={theme} />}
             {variant === "landing" && <VariantLanding theme={theme} />}
             {variant === "article" && <VariantArticle theme={theme} />}
             <Switcher variants={VARIANTS} current={variant} onVariant={setVariant} theme={theme} onTheme={setTheme} />

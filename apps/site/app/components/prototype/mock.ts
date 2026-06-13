@@ -58,3 +58,69 @@ export const CARDS = [
 
 /** Token-share → segbar lit count over `total`. */
 export const litFor = (share: number, total: number) => Math.max(1, Math.round(share * total));
+
+/* ---- teams / "ring" mock ---------------------------------------------- */
+
+/** Deterministic 14-cell activity sparkline (0..4) seeded from a handle. */
+const spark = (seed: string): number[] => {
+    let h = 2166136261;
+    for (let i = 0; i < seed.length; i++) { h ^= seed.charCodeAt(i); h = Math.imul(h, 16777619); }
+    return Array.from({ length: 14 }, (_, i) => {
+        h ^= h << 13; h ^= h >>> 17; h ^= h << 5; h >>>= 0;
+        const v = (h % 100) / 100;
+        if (i % 11 === 3) return 0;
+        return v > 0.72 ? 4 : v > 0.5 ? 3 : v > 0.25 ? 2 : v > 0.08 ? 1 : 0;
+    });
+};
+
+export interface Member {
+    handle: string;
+    archetype: string;
+    sessions: number;
+    tokens: string;
+    streak: number;
+    cost: string;
+    topModel: string;
+    online: boolean;
+    spark: number[];
+}
+
+export const TEAM = {
+    org: "acme",
+    ring: "engineering",
+    members: 6,
+    onlineNow: 4,
+    sessions: 1500,
+    tokens: "145M",
+    spend: "$2.0K",
+    saved: "$640",
+    windowDays: 30,
+    roster: ([
+        ["necmttn", "Night-Owl Builder", 412, "41.8M", 14, "$571", "claude-fable-5", true],
+        ["dax", "Test-First Surgeon", 318, "28.2M", 31, "$402", "claude-opus-4-8", true],
+        ["kano", "Parallel Dispatcher", 198, "33.1M", 22, "$511", "claude-fable-5", true],
+        ["lena", "Refactor Archaeologist", 256, "19.7M", 7, "$288", "claude-sonnet-4-6", false],
+        ["mir", "Spec-Driven Planner", 174, "12.4M", 4, "$146", "gpt-5.5", true],
+        ["juno", "Debug Bloodhound", 142, "9.8M", 11, "$98", "claude-haiku-4-5", false],
+    ] as const).map(([handle, archetype, sessions, tokens, streak, cost, topModel, online]) => ({
+        handle, archetype, sessions, tokens, streak, cost, topModel, online, spark: spark(handle),
+    })) satisfies Member[],
+    // team-wide model split
+    models: [
+        { name: "claude-fable-5", share: 0.44, cost: "$880", tone: "green" },
+        { name: "claude-opus-4-8", share: 0.27, cost: "$540", tone: "blue" },
+        { name: "gpt-5.5", share: 0.18, cost: "$360", tone: "gold" },
+        { name: "claude-sonnet-4-6", share: 0.11, cost: "$220", tone: "violet" },
+    ] as const,
+    // shared rig adoption (skill → % of team using it)
+    rig: [
+        { name: "superpowers:brainstorming", pct: 1.0 },
+        { name: "using-git-worktrees", pct: 0.83 },
+        { name: "tdd", pct: 0.66 },
+        { name: "systematic-debugging", pct: 0.5 },
+        { name: "efficient-dispatch", pct: 0.33 },
+    ] as const,
+};
+
+/** Aggregate team activity heatmap (sum of member sparks, re-bucketed). */
+export const TEAM_ACTIVITY: number[] = ACTIVITY.map((v, i) => Math.min(4, v + (i % 5 === 0 ? 1 : 0)));
