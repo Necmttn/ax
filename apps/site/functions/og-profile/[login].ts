@@ -16,7 +16,7 @@ import { ImageResponse } from "workers-og";
 import { OG_RENDER_REV } from "../_lib/og-meta";
 import {
     INK, PAPER, DIM, CARD, GREEN, RED,
-    esc, statHtml, footerHtml, blockLogoHtml, compactNumber, compactUsd, loadOgFonts,
+    esc, statHtml, footerHtml, blockLogoHtml, compactNumber, compactUsd, perMonthUsd, loadOgFonts,
 } from "../_lib/og-kit";
 
 const LOGIN_RE = /^[A-Za-z0-9_-]{1,39}$/;
@@ -191,7 +191,7 @@ export const onRequestGet: PagesFunction = async (ctx) => {
         const ins = gistProfile.insights;
         sessions     = s.sessions;
         tokens       = s.tokens.total;
-        spendUsd     = s.cost_usd ?? null;
+        spendUsd     = s.cost_usd != null ? perMonthUsd(s.cost_usd, gistProfile.window_days) : null;
         streakDays   = s.streak_days;
         activeHours  = ins?.hours_total ?? null;
         parallelSessions = ins?.parallel_sessions ?? null;
@@ -227,7 +227,7 @@ export const onRequestGet: PagesFunction = async (ctx) => {
     const statBand1 = `<div style="display:flex;justify-content:space-between;align-items:flex-end;margin-top:36px">${[
         statHtml(sessions != null ? sessions.toLocaleString("en-US") : "-", "SESSIONS", INK, noMr),
         statHtml(tokens  != null ? compactNumber(tokens)             : "-", "TOKENS", INK, noMr),
-        statHtml(spendUsd != null ? compactUsd(spendUsd)             : "-", "EST. SPEND", GREEN, { size: 60, marginRight: 0 }),
+        statHtml(spendUsd != null ? compactUsd(spendUsd)             : "-", "EST. $/MO", GREEN, { size: 60, marginRight: 0 }),
         statHtml(streakDays  != null ? `${streakDays}d`             : "-", "STREAK", INK, noMr),
         statHtml(activeHours != null ? compactNumber(activeHours)   : "-", "HOURS", INK, noMr),
     ].join("")}</div>`;
@@ -247,7 +247,7 @@ export const onRequestGet: PagesFunction = async (ctx) => {
         filler = "";
     }
 
-    const footer = footerHtml("COMPILED FROM LOCAL TRANSCRIPTS");
+    const footer = footerHtml("MEASURED FROM LOCAL TRANSCRIPTS · NOT A SCREENSHOT");
 
     // Top bands live in one inner column with designed margin-top gaps;
     // outer space-between then has exactly two children, which pins the
