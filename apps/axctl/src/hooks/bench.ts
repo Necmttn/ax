@@ -207,7 +207,7 @@ export const composeChain = (
  *  `"/abs/hooks/block-bun-test.sh"` -> `block-bun-test`). Matches the last
  *  script-file token and strips its extension; falls back to the last
  *  whitespace token (quotes stripped) when no file-like token is present. */
-const chainHookName = (command: string): string => {
+export const chainHookName = (command: string): string => {
     const matches = [...command.matchAll(/([^/\s"']+)\.(?:ts|js|mjs|cjs|sh|py)\b/g)];
     const last = matches[matches.length - 1];
     if (last?.[1]) return last[1];
@@ -216,17 +216,75 @@ const chainHookName = (command: string): string => {
     return token.split("/").pop() || token;
 };
 
+/** One installed-hook row reduced to what the chain aggregation needs. */
+export interface ChainHookRow {
+    readonly command: string;
+    readonly enabled: boolean;
+}
+
+export interface ChainCosts {
+    readonly costs: number[];
+    readonly names: string[];
+    /** count of distinct commands that had no recorded duration (estimate path). */
+    readonly estimated: number;
+}
+
 /**
- * For the candidate's first event, enumerate the OTHER hooks installed on that
- * event and compose the budget chain. Per-hook cost = recorded mean
+ * PURE: reduce installed-hook rows to per-hook costs + display names for the
+ * chain. Enabled-only; **deduped by exact command** so the same command counted
+ * twice (e.g. a duplicate install on one provider) is added once. Caller is
+ * responsible for scoping `rows` to a SINGLE harness first - a real
+ * PreToolUse fire only runs one harness's chain, so summing across providers
+ * would ~2x reality. Within a harness, multiple scopes (global+project) are
+ * legitimately additive but still share the command dedup.
+ *
+ * Per-hook cost = recorded mean from `meanByCommand` when present, else
+ * `defaultMs` (and counted in `estimated`).
+ */
+export const dedupeChainCosts = (
+    rows: ReadonlyArray<ChainHookRow>,
+    meanByCommand: ReadonlyMap<string, number>,
+    defaultMs: number,
+): ChainCosts => {
+    const costs: number[] = [];
+    const names: string[] = [];
+    const seen = new Set<string>();
+    let estimated = 0;
+    for (const r of rows) {
+        if (!r.enabled) continue;
+        if (seen.has(r.command)) continue;
+        seen.add(r.command);
+        const recorded = meanByCommand.get(r.command);
+        if (recorded === undefined) estimated += 1;
+        costs.push(recorded ?? defaultMs);
+        names.push(chainHookName(r.command));
+    }
+    return { costs, names, estimated };
+};
+
+/** The harness whose chain a single fire actually runs. A PreToolUse fire runs
+ *  exactly ONE harness's hook chain; we scope to claude (the bench's home
+ *  harness) so the budget reflects reality instead of summing every provider. */
+const CHAIN_PROVIDER = "claude";
+
+/**
+ * For the candidate's first event, enumerate the hooks installed on that event
+ * and compose the budget chain, INCLUDING the candidate itself (so the chain
+ * the model actually runs is fully represented). Per-hook cost = recorded mean
  * `duration_ms` (from `queryHookSummary`, matched by exact command) when
  * present, else `DEFAULT_SPAWN_MS`. Returns null when the candidate has no
  * events.
  *
+ * Single-harness scope: `readAllHooks` returns one row per (provider × scope),
+ * so a hook installed under both claude and codex would be summed twice. A real
+ * fire only runs one harness's chain, so we filter to `CHAIN_PROVIDER` and
+ * dedupe by exact command (`dedupeChainCosts`). Global+project scopes within
+ * the harness stay additive (both fire); only exact-command dupes collapse.
+ *
  * Best-effort + soft-fail: a failed config read or summary query degrades to
- * the default-estimate path and `log()`s that the chain is an estimate (no
- * silent approximation). Deps: HookProviderRegistry | FileSystem | Path |
- * SurrealClient (whatever readAllHooks needs).
+ * the default-estimate path and writes a notice to STDERR (so `--json` stdout
+ * stays clean) - never a silent approximation. Deps: HookProviderRegistry |
+ * FileSystem | Path | SurrealClient.
  */
 export const gatherChain = (
     meta: InstallableHookMeta,
@@ -241,10 +299,11 @@ export const gatherChain = (
         const event = meta.events[0];
         if (!event) return null;
 
-        // Installed hooks on this event (across providers/scopes). Soft-fail to
-        // an empty chain (just the candidate) rather than aborting the bench.
+        // Installed hooks on this event, scoped to the single harness that a
+        // fire actually runs. Soft-fail to an empty chain (candidate only).
         const installed: ReadonlyArray<ConfiguredHookWithEvidence> = yield* readAllHooks({
             eventFilter: event,
+            providerFilter: CHAIN_PROVIDER,
             withEvidence: false,
         }).pipe(
             Effect.catch((e) =>
@@ -269,23 +328,18 @@ export const gatherChain = (
             }
         }
 
-        let estimated = 0;
-        const costs: number[] = [];
-        const names: string[] = [];
-        for (const h of installed) {
-            if (!h.enabled) continue;
-            const recorded = meanByCommand.get(h.command);
-            if (recorded === undefined) estimated += 1;
-            costs.push(recorded ?? DEFAULT_SPAWN_MS);
-            names.push(chainHookName(h.command));
-        }
+        const { costs, names, estimated } = dedupeChainCosts(installed, meanByCommand, DEFAULT_SPAWN_MS);
 
         if (estimated > 0) {
             // stderr keeps stdout clean for the `--json` ledger (see note above).
             process.stderr.write(`hooks bench: ${estimated}/${costs.length} installed hook(s) on ${event} have no recorded duration; using ${DEFAULT_SPAWN_MS}ms estimate for those\n`);
         }
 
-        return composeChain(event, costs, candidateP50, budgetMs, names);
+        // Include the candidate itself in the rendered chain (render says "with
+        // this"); beforeMs stays the installed-only sum, withMs adds the
+        // candidate p50 (composeChain). meta.name is already a clean hook name.
+        const chainNames = [...names, meta.name];
+        return composeChain(event, costs, candidateP50, budgetMs, chainNames);
     });
 
 /** Fetch one recent `tool_call.input_json` for `tool`, parsed to an object, or
@@ -366,10 +420,13 @@ export const benchHook = (
         const sampleInput = firstTool ? yield* sampleToolInput(firstTool) : null;
         const payload = buildRepresentativePayload(lite, sampleInput, process.cwd());
 
-        // Spawn-time samples; first is the cold warm-up, kept separate.
+        // Spawn-time samples; first is the cold warm-up, kept separate. With
+        // <2 runs there is no steady-state slice, so perFire falls back to the
+        // single sample AND warmup is null (reporting the same value as both
+        // warmup and perFire would be misleading).
         const samples = yield* measureSpawn(absFile, payload, opts.runs);
-        const warmup = samples[0] ?? null;
         const rest = samples.slice(1);
+        const warmup = rest.length ? (samples[0] ?? null) : null;
         const perFire = percentiles(rest.length ? rest : samples);
 
         // Fire frequency + projected daily cost. Soft-fail to null.

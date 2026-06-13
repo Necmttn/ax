@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { Effect, Layer } from "effect";
-import { buildRepresentativePayload, composeChain, estFiresPerDay, percentiles, renderLedger } from "./bench.ts";
-import type { BenchLedger } from "./bench.ts";
+import { buildRepresentativePayload, composeChain, dedupeChainCosts, estFiresPerDay, percentiles, renderLedger } from "./bench.ts";
+import type { BenchLedger, ChainHookRow } from "./bench.ts";
 import { SurrealClient } from "@ax/lib/db";
 
 // fake-client harness (mirrors apps/axctl/src/improve/show.test.ts)
@@ -115,6 +115,37 @@ describe("composeChain", () => {
         expect(eq.overBudget).toBe(false);
         // 200 + 49 = 249 < 250 -> under
         expect(composeChain("E", [200], 49, 250, []).overBudget).toBe(false);
+    });
+});
+
+describe("dedupeChainCosts", () => {
+    const row = (command: string, enabled = true): ChainHookRow => ({ command, enabled });
+
+    test("dedupes by exact command (a dup install counts once); distinct commands stay", () => {
+        // Same command appearing twice (e.g. the same hook routed into two
+        // scopes that resolved to one command) collapses to a single cost.
+        const rows = [row("bun /h/a.ts"), row("bun /h/a.ts"), row("bun /h/b.ts")];
+        const r = dedupeChainCosts(rows, new Map(), 70);
+        expect(r.costs).toEqual([70, 70]); // a once + b once, both estimated
+        expect(r.names).toEqual(["a", "b"]);
+        expect(r.estimated).toBe(2);
+    });
+
+    test("recorded mean wins over default; only un-recorded commands are estimated", () => {
+        const rows = [row("bun /h/a.ts"), row("bun /h/b.ts"), row("bun /h/a.ts")];
+        const mean = new Map([["bun /h/a.ts", 42]]); // a recorded, b not
+        const r = dedupeChainCosts(rows, mean, 70);
+        expect(r.costs).toEqual([42, 70]); // a deduped to one @42, b @70 default
+        expect(r.names).toEqual(["a", "b"]);
+        expect(r.estimated).toBe(1); // only b
+    });
+
+    test("disabled rows are excluded", () => {
+        const rows = [row("bun /h/a.ts", false), row("bun /h/b.ts", true)];
+        const r = dedupeChainCosts(rows, new Map([["bun /h/b.ts", 55]]), 70);
+        expect(r.costs).toEqual([55]);
+        expect(r.names).toEqual(["b"]);
+        expect(r.estimated).toBe(0);
     });
 });
 
