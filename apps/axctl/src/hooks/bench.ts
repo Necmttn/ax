@@ -88,7 +88,7 @@ export const renderLedger = (l: BenchLedger): string => {
 
 export interface FireFrequency {
     readonly perDay: number | null;
-    readonly matched: string[];
+    readonly matched: readonly string[];
     readonly basis: string;
 }
 
@@ -109,20 +109,31 @@ export const estFiresPerDay = (
     Effect.gen(function* () {
         if (tools.length === 0) return { perDay: null, matched: [], basis: "n/a" };
         const db = yield* SurrealClient;
-        const since = new Date(Date.now() - days * 86_400_000);
+        // Guard days so days=0 can't divide to Infinity.
+        const window = Math.max(1, days);
+        const since = new Date(Date.now() - window * 86_400_000);
         const list = tools.map((t) => surrealString(t)).join(", ");
         const r = yield* db.query<[Array<{ total: number }>]>(
             `SELECT count() AS total FROM tool_call WHERE name IN [${list}] AND ts > ${surrealDate(since)} GROUP ALL;`,
         );
         const total = r?.[0]?.[0]?.total ?? 0;
-        return { perDay: Math.round(total / days), matched: [...tools], basis: `tool_call/${days}d` };
+        return { perDay: Math.round(total / window), matched: [...tools], basis: `tool_call/${window}d` };
     });
+
+/**
+ * Per-spawn deadline (ms). Hooks have a 10s harness limit, so 15s is a safe
+ * ceiling: a hook that blows past it is misbehaving/hanging and we kill it
+ * rather than stall the bench forever. The deadline value is recorded as the
+ * sample so percentiles still reflect the timeout cost.
+ */
+const SPAWN_DEADLINE_MS = 15_000;
 
 /**
  * Spawn `bun <absFile>` feeding `payload` on stdin, `runs` times (capped 1-100),
  * timing each invocation with `performance.now()`. Returns all wall-time samples
- * (ms). Covered by the live CLI smoke (Task 3), not a unit test - spawning bun
- * in unit tests is slow/flaky.
+ * (ms). Each spawn is bounded by SPAWN_DEADLINE_MS: a hanging hook is killed and
+ * the deadline recorded as its sample (no leaked process). Covered by the live
+ * CLI smoke (Task 3), not a unit test - spawning bun in unit tests is slow/flaky.
  */
 export const measureSpawn = (
     absFile: string,
@@ -139,8 +150,21 @@ export const measureSpawn = (
                 stdout: "ignore",
                 stderr: "ignore",
             });
-            await proc.exited;
-            samples.push(performance.now() - t0);
+            let timer: ReturnType<typeof setTimeout> | undefined;
+            const timedOut = await Promise.race([
+                proc.exited.then(() => false),
+                new Promise<boolean>((resolve) => {
+                    timer = setTimeout(() => resolve(true), SPAWN_DEADLINE_MS);
+                }),
+            ]);
+            if (timer !== undefined) clearTimeout(timer);
+            if (timedOut) {
+                // Kill the hanging process and record the deadline as the cost.
+                proc.kill();
+                samples.push(SPAWN_DEADLINE_MS);
+            } else {
+                samples.push(performance.now() - t0);
+            }
         }
         return samples;
     });

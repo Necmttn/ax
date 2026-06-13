@@ -80,6 +80,13 @@ describe("renderLedger", () => {
         expect(out).toContain("fires/day:     n/a");
         expect(out).not.toContain("daily cost:");
     });
+    test("chain:null + null logicMs/warmup -> no chain line, no crash", () => {
+        const out = renderLedger({ ...ledger, warmupMs: null, logicMs: null, chain: null });
+        expect(out).toContain("hook: enforce-worktree");
+        expect(out).not.toContain("chain (");
+        expect(out).not.toContain("warmup");
+        expect(out).not.toContain("logic");
+    });
 });
 
 describe("estFiresPerDay", () => {
@@ -96,5 +103,11 @@ describe("estFiresPerDay", () => {
             estFiresPerDay([], 30).pipe(Effect.provide(fakeClient([]).layer)),
         );
         expect(r.perDay).toBeNull();
+    });
+    test("total=0 -> perDay 0", async () => {
+        const r = await Effect.runPromise(
+            estFiresPerDay(["Bash"], 30).pipe(Effect.provide(fakeClient([{ total: 0 }]).layer)),
+        );
+        expect(r.perDay).toBe(0);
     });
 });
