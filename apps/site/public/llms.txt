@@ -35,7 +35,10 @@ Install: `curl -fsSL https://ax.necmttn.com/install | bash`, then `npx skills ad
 - `route-dispatch` hook - deterministic dispatch-time nudge when a mechanical dispatch forgets an explicit model
 - `ax costs summary | for --session/--query/--commit/--branch` - what any session, feature, or branch cost in tokens and USD
 - `ax quota [--statusline|--swiftbar|--json]` - live Claude plan usage (5h/7d windows) from the Anthropic usage endpoint, cached locally; one-line statusline output and a SwiftBar menubar plugin ship with it
-- `ax dojo [--json] [--spar] [--budget=N] [--until=HH:MM] [--force] [--days=N]` - training agenda for surplus-quota self-improvement: budget envelope (5h/7d window remaining minus reserve, deadline = window reset) + prioritized items (pending verdicts, unfilled briefs, routing backtests, proposal minting, churn experiments, optional sparring). Consumed lap-by-lap by the ax:dojo skill.
+- `ax dojo agenda [--json] [--spar] [--budget=N] [--until=HH:MM] [--force] [--days=N]` - training agenda for surplus-quota self-improvement: budget envelope (5h/7d window remaining minus reserve, deadline = window reset) + prioritized items (pending verdicts, unfilled briefs, routing backtests, proposal minting, churn experiments, optional sparring). Consumed lap-by-lap by the ax:dojo skill.
+- `ax dojo report [--since=<iso>] [--notes-file=<path>] [--json]` - write the morning report for a completed dojo run: budget envelope, per-lap item log, proposals created, verdicts locked, outbox drafts awaiting review.
+- `ax dojo draft [--title=<t>] [--kind=bug|improvement] [--dry-run]` - stage an upstream finding (ax bug or improvement discovered during training) to `~/.ax/dojo/outbox/<slug>.md`; never publishes - user reviews and publishes via ax-repo skill / gh.
+- `ax dojo outbox [--list|--show=<slug>]` - inspect staged upstream issue drafts in `~/.ax/dojo/outbox/`.
 
 ### Profile
 - `ax profile show [--window=N] [--no-cost]` - your local agent profile rendered from the graph: usage stats, rig (skills/hooks/rules), and evidence-grounded taste patterns

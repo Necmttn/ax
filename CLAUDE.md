@@ -137,7 +137,7 @@ Live/Test layers). No DB (runtime "none").
 
 ### Dojo
 
-`ax dojo [--json] [--spar] [--budget=N] [--until=HH:MM] [--force] [--days=N]` -
+`ax dojo agenda [--json] [--spar] [--budget=N] [--until=HH:MM] [--force] [--days=N]` -
 training agenda for the ax:dojo skill loop (burn surplus plan quota on
 self-improvement). Composes a budget envelope from the quota module (binding
 window remaining minus 15% reserve, deadline = earliest window reset) with a
@@ -149,6 +149,10 @@ explore fallback. Items vanish once the underlying system records the work
 `~/.ax/dojo/outbox/` (upstream issue drafts, publish on review) and
 `~/.ax/dojo/reports/<date>.md`. Module: `apps/axctl/src/dojo/`. Spec:
 docs/superpowers/specs/2026-06-13-ax-dojo-design.md.
+`ax dojo report [--since=<iso>] [--notes-file=<path>]` writes the morning-report
+for a completed run; `ax dojo draft [--title=...] [--kind=bug|improvement]`
+stages an upstream finding to `~/.ax/dojo/outbox/` (never publishes);
+`ax dojo outbox` inspects staged drafts.
 
 ### Profile
 

@@ -6,12 +6,12 @@ description: Surplus-quota training loop over the ax graph - the agent burns the
 # ax:dojo - overnight training loop
 
 You are entering a budget-bounded self-improvement loop. The brain is
-`ax dojo --json`; you are the thin driver. Spec for humans:
+`ax dojo agenda --json`; you are the thin driver. Spec:
 docs/superpowers/specs/2026-06-13-ax-dojo-design.md (in the Necmttn/ax repo).
 
 ## Entry
 
-1. Run `ax dojo --json`. If it fails with a connection error, tell the user
+1. Run `ax dojo agenda --json`. If it fails with a connection error, tell the user
    to run `ax doctor` and STOP.
 2. If `budget.has_surplus` is false: report the envelope and STOP unless the
    user re-invokes with `--force` (then pass `--force` on every lap).
@@ -23,7 +23,7 @@ docs/superpowers/specs/2026-06-13-ax-dojo-design.md (in the Necmttn/ax repo).
 
 ## The lap
 
-1. `ax dojo --json` -> agenda.
+1. `ax dojo agenda --json` -> agenda.
 2. STOP conditions (write the report, then stop):
    - `budget.has_surplus` is false
    - now >= `budget.deadline`
@@ -72,21 +72,26 @@ docs/superpowers/specs/2026-06-13-ax-dojo-design.md (in the Necmttn/ax repo).
   through `ax recall` / `ax sessions churn`, and convert anything real
   into a proposal or outbox draft.
 - **Upstream findings (any lap)** - an ax bug or improvement found while
-  training (items of kind `upstream_draft` are handled by this same rule)
-  goes to `~/.ax/dojo/outbox/<slug>.md` as a complete issue draft
-  (title, body, repro, session refs). NEVER publish from the dojo - the
-  user reviews and publishes in the morning (ax-repo skill / gh).
+  training (items of kind `upstream_draft` are handled by this same rule):
+  run `ax dojo draft --title=<title> --kind=bug|improvement` to stage it
+  to `~/.ax/dojo/outbox/<slug>.md` (complete issue draft: title, body,
+  repro, session refs written by the command). NEVER publish from the dojo -
+  the user reviews and publishes in the morning (ax-repo skill / gh).
 
 ## Exit - the morning report
 
-Write `~/.ax/dojo/reports/<YYYY-MM-DD>.md` (create dirs if missing):
-- budget: envelope at start, spendable consumed (re-run `ax quota` and diff)
-- per lap: item, what happened, evidence refs
-- proposals created/advanced, briefs filled, verdicts locked
-- outbox drafts awaiting review (list paths)
-- skipped/stuck items and why
-Then tell the user the report path and the top 3 things awaiting their
-review. Done.
+Run `ax dojo report --since=<loop-start-iso> --notes-file=<lap-notes-path>` to
+write `~/.ax/dojo/reports/<YYYY-MM-DD>.md`. The command collects the budget
+envelope, per-lap item log (from the lap notes file), proposals created,
+verdicts locked, and outbox drafts awaiting review - pass it the ISO timestamp
+you recorded when the loop started and the scratch file you appended notes to.
+Then tell the user the report path and the top 3 things awaiting their review.
+
+For upstream findings (ax bugs or improvements discovered during training), stage
+them with `ax dojo draft --title=<title> --kind=bug|improvement` before the
+report step - never publish directly. The draft lands in
+`~/.ax/dojo/outbox/<slug>.md`; the user reviews and publishes via ax-repo skill /
+gh in the morning.
 
 ## Hard rails
 
