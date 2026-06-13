@@ -415,3 +415,16 @@
     transform: translateY(-3px);
 }
 .v-land-ingest-cap { color: var(--accent); }
+
+/* cute staggered drift on the copy-prompt harness icons (from current landing);
+   speeds up to a live wiggle on hover. */
+.v-land-promptpill .icons .i { animation: rdxIconDrift 3s ease-in-out infinite; animation-delay: calc(var(--i, 0) * 0.18s); will-change: transform; }
+.v-land-promptpill:hover .icons .i, .v-land-promptpill:focus-visible .icons .i { animation-duration: 1.05s; }
+@keyframes rdxIconDrift {
+    0%, 100% { transform: translateY(0) rotate(0deg); }
+    30% { transform: translateY(-1.5px) rotate(-7deg); }
+    60% { transform: translateY(0.5px) rotate(5deg); }
+}
+@media (prefers-reduced-motion: reduce) { .v-land-promptpill .icons .i { animation: none; } }
+/* floating bg logo field removed per review */
+.rdx-logofield { display: none; }

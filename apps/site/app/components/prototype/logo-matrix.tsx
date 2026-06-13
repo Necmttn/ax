@@ -26,7 +26,7 @@ function svgUri(g: Glyph, w: number, h: number): string {
     return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
 }
 
-export function LogoMatrix({ dim = "#232823", lit = "#eafff0" }: { dim?: string; lit?: string }) {
+export function LogoMatrix({ dim = "#1a2019", mid = "#56b06a", lit = "#eafff0" }: { dim?: string; mid?: string; lit?: string }) {
     const ref = useRef<HTMLCanvasElement>(null);
     const cov = useRef<Array<Float32Array | null>>(HARNESS.map(() => null));
     const [, setReady] = useState(0);
@@ -70,7 +70,13 @@ export function LogoMatrix({ dim = "#232823", lit = "#eafff0" }: { dim?: string;
         if (!cv || !ctx) return;
         const reduced = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
         const dpr = Math.min(2, window.devicePixelRatio || 1);
-        const [d0, d1, d2] = hex(dim), [l0, l1, l2] = hex(lit);
+        const [d0, d1, d2] = hex(dim), [m0, m1, m2] = hex(mid), [l0, l1, l2] = hex(lit);
+        // 3-stop ramp: dim -> accent green -> bright core. Reads as a green-lit
+        // logo screen with white-hot cores, instead of a flat grey-to-white fade.
+        const ramp = (v: number): [number, number, number] => {
+            if (v <= 0.5) { const k = v / 0.5; return [d0 + (m0 - d0) * k, d1 + (m1 - d1) * k, d2 + (m2 - d2) * k]; }
+            const k = (v - 0.5) / 0.5; return [m0 + (l0 - m0) * k, m1 + (l1 - m1) * k, m2 + (l2 - m2) * k];
+        };
         let w = cv.clientWidth, h = cv.clientHeight;
         const size = () => {
             const nw = cv.clientWidth, nh = cv.clientHeight;
@@ -82,7 +88,7 @@ export function LogoMatrix({ dim = "#232823", lit = "#eafff0" }: { dim?: string;
 
         const N = GW * GH;
         const cur = new Float32Array(N), slam = new Float32Array(N).fill(1), dly = new Float32Array(N);
-        let idx = 0, switchAt = 2.6, last = 0, raf = 0;
+        let idx = 0, switchAt = 2.6, last = 0, raf = 0, sweepAt = -10;
         const firstReady = () => cov.current.findIndex(Boolean);
 
         const frame = (ms: number) => {
@@ -101,32 +107,37 @@ export function LogoMatrix({ dim = "#232823", lit = "#eafff0" }: { dim?: string;
                     if (cov.current[cand]) { idx = cand; break; }
                 }
                 switchAt = t + 2.6;
+                sweepAt = t;
                 for (let i = 0; i < N; i++) { dly[i] = t + Math.random() * 0.3; slam[i] = 0; }
                 setActiveName(HARNESS[idx].name);
             }
             const c = cov.current[idx]!;
             ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
             ctx.clearRect(0, 0, w, h);
-            const gap = Math.max(1.5, Math.min(w, h) / GW * 0.18);
+            const gap = Math.max(1.6, Math.min(w, h) / GW * 0.22);
             const cell = Math.min((w - (GW - 1) * gap) / GW, (h - (GH - 1) * gap) / GH);
             const ox = (w - (GW * cell + (GW - 1) * gap)) / 2, oy = (h - (GH * cell + (GH - 1) * gap)) / 2;
+            const sweepX = (t - sweepAt) * (GW + 4) / 0.7 - 2; // a bright band crossing left→right on switch
             for (let y = 0; y < GH; y++) for (let x = 0; x < GW; x++) {
                 const i = y * GW + x;
                 if (t > dly[i]) slam[i] = Math.min(1, slam[i] + step / 0.3);
                 cur[i] += (c[i] - cur[i]) * Math.min(1, step * 9);
-                const v = clamp01(cur[i] * slam[i]);
-                const g0 = Math.round(d0 + (l0 - d0) * v), g1 = Math.round(d1 + (l1 - d1) * v), g2 = Math.round(d2 + (l2 - d2) * v);
-                ctx.fillStyle = `rgb(${g0},${g1},${g2})`;
-                const s = cell * (0.62 + 0.34 * v) * slam[i];
+                let v = clamp01(cur[i] * slam[i]);
+                const sd = Math.abs(x - sweepX);
+                if (sd < 1.4) v = Math.max(v, (1 - sd / 1.4) * 0.85); // sweep glow
+                const [r, g, b] = ramp(v);
+                ctx.fillStyle = `rgb(${Math.round(r)},${Math.round(g)},${Math.round(b)})`;
+                // lit dots a touch larger + rounder; unlit stay small + quiet
+                const s = cell * (0.5 + 0.42 * v) * slam[i];
                 const cx = ox + x * (cell + gap) + cell / 2, cy = oy + y * (cell + gap) + cell / 2;
                 ctx.beginPath();
-                ctx.roundRect(cx - s / 2, cy - s / 2, Math.max(0.5, s), Math.max(0.5, s), 1.5);
+                ctx.roundRect(cx - s / 2, cy - s / 2, Math.max(0.5, s), Math.max(0.5, s), Math.max(1, s * 0.32));
                 ctx.fill();
             }
         };
         raf = requestAnimationFrame(frame);
         return () => { cancelAnimationFrame(raf); ro.disconnect(); };
-    }, [dim, lit]);
+    }, [dim, mid, lit]);
 
     return (
         <div className="v-land-screen">
