@@ -27,6 +27,8 @@ export function buildHero(p: ProfileV1): Hero {
         models: p.stats.models.length,
         skills: p.rig.skills.length,
         sessions,
-        provenance: `measured from ${sessions.toLocaleString("en-US")} session${sessions === 1 ? "" : "s"} over ${p.window_days}d · not a screenshot`,
+        provenance: p.stats.cost_usd !== undefined
+            ? `measured from ${sessions.toLocaleString("en-US")} session${sessions === 1 ? "" : "s"} over ${p.window_days}d · not a screenshot`
+            : `measured from ${sessions.toLocaleString("en-US")} session${sessions === 1 ? "" : "s"} over ${p.window_days}d`,
     };
 }

@@ -65,6 +65,7 @@ interface ProfileStub {
     readonly sessions?: number;
     readonly tokens?: number;
     readonly estimated_spend_usd?: number | null;
+    readonly window_days?: number;
     readonly streak_days?: number;
     readonly active_hours?: number;
     readonly parallel_sessions?: number;
@@ -177,7 +178,9 @@ export const onRequestGet: PagesFunction = async (ctx) => {
     if (stub) {
         sessions     = stub.sessions ?? null;
         tokens       = stub.tokens ?? null;
-        spendUsd     = stub.estimated_spend_usd ?? null;
+        spendUsd     = stub.estimated_spend_usd != null
+            ? (stub.window_days != null ? perMonthUsd(stub.estimated_spend_usd, stub.window_days) : stub.estimated_spend_usd)
+            : null;
         streakDays   = stub.streak_days ?? null;
         activeHours  = stub.active_hours ?? null;
         parallelSessions = stub.parallel_sessions ?? null;

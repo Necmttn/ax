@@ -226,7 +226,6 @@ function ProfileDossier({ profile: p, vs }: { profile: ProfileV1; vs: VsState })
 
             {/* vitals ledger */}
             <section className="pf-ledger" aria-label="vitals">
-                <Vital num={fmtInt(p.stats.sessions)} label="sessions" />
                 <Vital num={fmtCompact(p.stats.tokens.total)} label="tokens" />
                 {ins && <Vital num={fmtCompact(ins.hours_total)} unit="hrs" label="in the loop" />}
                 <Vital num={`${fmtInt(p.stats.active_days)}/${fmtInt(p.window_days)}`} label="days active" />

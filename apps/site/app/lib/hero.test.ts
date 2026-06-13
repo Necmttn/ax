@@ -40,10 +40,12 @@ describe("buildHero", () => {
         expect(h.sessions).toBe(142);
         expect(h.provenance).toBe("measured from 142 sessions over 30d · not a screenshot");
     });
-    test("--no-cost profile omits monthly spend", () => {
+    test("--no-cost profile omits monthly spend and the screenshot jab", () => {
         const { cost_usd: _omit, ...stats } = base.stats;
         const h = buildHero({ ...base, stats });
         expect(h.monthlyUsd).toBeUndefined();
+        expect(h.provenance).toBe("measured from 142 sessions over 30d");
+        expect(h.provenance).not.toContain("not a screenshot");
     });
     test("singular session phrasing", () => {
         const h = buildHero({ ...base, stats: { ...base.stats, sessions: 1 } });
