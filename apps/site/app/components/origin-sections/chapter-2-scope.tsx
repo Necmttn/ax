@@ -41,7 +41,7 @@ export function Chapter2Scope() {
       </p>
 
       <p>
-        The interview-style skills — Matt Peacock’s{" "}
+        The interview-style skills — Matt Pocock’s{" "}
         <code>grillme</code> is the sharpest example — turn the
         agent into a debugger of your own intent. Before any code runs,
         the model grills you for scope, terminology, decision-tree
