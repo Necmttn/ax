@@ -27,6 +27,7 @@ import {
     OTHER_NAME,
     type DayColumn,
 } from "~/lib/window-chart";
+import { buildHero } from "~/lib/hero";
 
 // mirrors LOGIN_RE in community.ts - GitHub handles only, sanitised before use.
 const LOGIN_RE = /^[A-Za-z0-9-]{1,39}$/;
@@ -199,11 +200,38 @@ function ProfileDossier({ profile: p, vs }: { profile: ProfileV1; vs: VsState })
                 </div>
             </header>
 
+            {/* hero: the measured headline - receipts, not a screenshot */}
+            {(() => {
+                const hero = buildHero(p);
+                return (
+                    <section className="pf-hero" aria-label="headline">
+                        <div className="pf-hero-spend">
+                            {hero.monthlyUsd !== undefined ? (
+                                <>
+                                    <span className="pf-hero-num">~{fmtMoney(hero.monthlyUsd)}</span>
+                                    <span className="pf-hero-per">/mo</span>
+                                </>
+                            ) : (
+                                <>
+                                    <span className="pf-hero-num">{fmtInt(hero.sessions)}</span>
+                                    <span className="pf-hero-per">sessions</span>
+                                </>
+                            )}
+                        </div>
+                        <span className="pf-hero-prov">{hero.provenance}</span>
+                        <div className="pf-hero-row">
+                            <Vital num={fmtInt(hero.models)} label="models" />
+                            <Vital num={fmtInt(hero.skills)} label="skills" />
+                            <Vital num={fmtInt(hero.sessions)} label="sessions" />
+                        </div>
+                    </section>
+                );
+            })()}
+
             {/* vitals ledger */}
             <section className="pf-ledger" aria-label="vitals">
                 <Vital num={fmtInt(p.stats.sessions)} label="sessions" />
                 <Vital num={fmtCompact(p.stats.tokens.total)} label="tokens" />
-                {p.stats.cost_usd !== undefined && <Vital num={`~${fmtMoney(p.stats.cost_usd)}`} label="est. spend" />}
                 {ins && <Vital num={fmtCompact(ins.hours_total)} unit="hrs" label="in the loop" />}
                 <Vital num={`${fmtInt(p.stats.active_days)}/${fmtInt(p.window_days)}`} label="days active" />
                 <Vital num={`${fmtInt(p.stats.streak_days)}d`} label="streak" />
