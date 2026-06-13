@@ -39,6 +39,8 @@ Install: `curl -fsSL https://ax.necmttn.com/install | bash`, then `npx skills ad
 - `ax dojo report [--since=<iso>] [--notes-file=<path>] [--json]` - write the morning report for a completed dojo run: budget envelope, per-lap item log, proposals created, verdicts locked, outbox drafts awaiting review.
 - `ax dojo draft [--title=<t>] [--kind=bug|improvement] [--body-file=<path>] [--session=<id>]` - stage an upstream finding (ax bug or improvement discovered during training) to `~/.ax/dojo/outbox/<slug>.md`; never publishes - user reviews and publishes via ax-repo skill / gh.
 - `ax dojo outbox [--json]` - list staged upstream issue drafts in `~/.ax/dojo/outbox/`.
+- `ax dojo spar-plan <sha> [--json]` - capture a landed task's baseline (prompt + cost/turns/churn) and emit a one-delta experiment brief to `~/.ax/dojo/spar/<id>.md`; prints the `git worktree add` command that pins the parent SHA.
+- `ax dojo spar-score <id> [--variant-session=<id>] [--json]` - score the agent's variant session against the frozen baseline; auto-discovers the variant session from the worktree cwd or accepts an explicit id; writes the receipt to `~/.ax/dojo/spar/<id>-report.md`.
 
 ### Profile
 - `ax profile show [--window=N] [--no-cost]` - your local agent profile rendered from the graph: usage stats, rig (skills/hooks/rules), and evidence-grounded taste patterns
