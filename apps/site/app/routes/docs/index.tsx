@@ -97,6 +97,12 @@ const REFERENCE: Card[] = [
     blurb: "The shared vocabulary - sessions, turns, roles, verdicts, and how they connect.",
   },
   {
+    to: "/docs/architecture",
+    kicker: "reference",
+    title: "Architecture",
+    blurb: "The graph shape, the derived tables, and the typed readers built on top - for the curious.",
+  },
+  {
     to: "/changelog",
     kicker: "releases",
     title: "Changelog",
