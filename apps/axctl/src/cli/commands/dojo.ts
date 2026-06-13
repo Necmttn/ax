@@ -22,7 +22,7 @@ import { assembleAgenda, collectAgendaItems } from "../../dojo/agenda.ts";
 import { computeBudgetEnvelope } from "../../dojo/budget.ts";
 import { renderAgenda } from "../../dojo/format.ts";
 import { writeDraft, listDrafts, type DraftKind } from "../../dojo/outbox.ts";
-import { dojoReportPath, dojoReportsDir } from "../../dojo/paths.ts";
+import { dojoReportPath, dojoReportsDir, localDate } from "../../dojo/paths.ts";
 import { gatherReport, renderReport } from "../../dojo/report.ts";
 import { defaultQuotaCachePath } from "../../quota/cache.ts";
 import { QuotaEnvLive } from "../../quota/quota-env.ts";
@@ -54,14 +54,8 @@ export const startOfLocalDay = (nowMs: number): number => {
     return d.getTime();
 };
 
-/** Local YYYY-MM-DD for `nowMs`. */
-export const localDate = (nowMs: number): string => {
-    const d = new Date(nowMs);
-    const y = d.getFullYear();
-    const m = `${d.getMonth() + 1}`.padStart(2, "0");
-    const day = `${d.getDate()}`.padStart(2, "0");
-    return `${y}-${m}-${day}`;
-};
+/** Local YYYY-MM-DD for `nowMs` (single source: dojo/paths.ts). */
+export { localDate };
 
 const VALID_KINDS: ReadonlyArray<DraftKind> = ["bug", "improvement"];
 

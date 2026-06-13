@@ -23,6 +23,7 @@ import type { QuotaSnapshot } from "../quota/schema.ts";
 import { computeBudgetEnvelope } from "./budget.ts";
 import { windowLabel } from "./format.ts";
 import { listDrafts, type OutboxDraft } from "./outbox.ts";
+import { localDate } from "./paths.ts";
 import type { BudgetEnvelope } from "./schema.ts";
 
 export interface ReportData {
@@ -70,15 +71,6 @@ export interface GatherReportInput {
     readonly notes: string;
     readonly outboxDir?: string;
 }
-
-/** local YYYY-MM-DD */
-const localDate = (ms: number): string => {
-    const d = new Date(ms);
-    const y = d.getFullYear();
-    const m = `${d.getMonth() + 1}`.padStart(2, "0");
-    const day = `${d.getDate()}`.padStart(2, "0");
-    return `${y}-${m}-${day}`;
-};
 
 /**
  * Run the two queries + outbox lister + quota read; each source degrades to
