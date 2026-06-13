@@ -5,7 +5,7 @@ export function RoutingPage() {
     <main className="features-page routing-page">
       {/* ============= hero ============= */}
       <section className="hero">
-        <span className="eyebrow">cost routing &middot; new in ax</span>
+        <span className="eyebrow">cost routing &middot; since v0.27</span>
         <h1>
           Your frontier model is doing <em>intern work.</em>
         </h1>
@@ -75,7 +75,7 @@ export function RoutingPage() {
               <span className="rt-step-num">02</span>
               <span className="rt-step-verb">nudge</span>
             </div>
-            <code className="rt-step-cmd">
+            <code className="rt-step-cmd rt-step-cmd--wrap">
               ax hooks install ~/.ax/hooks/route-dispatch.ts --providers=claude
             </code>
             <p className="rt-step-body">
@@ -115,11 +115,12 @@ export function RoutingPage() {
         <div className="section-head">
           <span className="section-num">02 / The receipts</span>
           <h2>
-            One machine, 30 days, <em>verbatim.</em>
+            One machine, <em>verbatim.</em>
           </h2>
           <p className="section-lede">
-            20 patterns of routine work found, $591.57 of addressable spend, $512.91 flagged
-            once the table applied &mdash; the same machine as the numbers above.{" "}
+            Over 30 days: 20 patterns of routine work found, $591.57 of addressable spend.
+            Reprice the last 14 days against the cheaper model and $512.91 is recoverable
+            &mdash; the same machine as the numbers above.{" "}
             <code className="inline">ax routing tune --dry-run</code> prints yours in one
             command.
           </p>
@@ -149,7 +150,7 @@ export function RoutingPage() {
             <span className="p">$</span> <span className="cmd">ax dispatches --candidates --days=14</span>
             {"\n\n"}
             {"total est savings: "}
-            <span className="fig">$512.9076</span>
+            <span className="fig">$512.91</span>
             {"\n"}
             {"top classes: well-specified-impl ("}
             <span className="fig">$222.78</span>
@@ -243,6 +244,10 @@ export function RoutingPage() {
         <div className="rt-install">
           <code>
             <span className="p">$</span> curl -fsSL https://ax.necmttn.com/install | bash
+          </code>
+          <code>
+            <span className="p">$</span> ax ingest{" "}
+            <span className="dim"># first run: build the graph from your history</span>
           </code>
           <code>
             <span className="p">$</span> ax routing tune

@@ -12845,7 +12845,9 @@ footer.site-footer { padding: 48px 32px 56px; }
 @media (max-width: 560px) {
   .prose ol.mf-reqs > li.mf-req { grid-template-columns: 1fr; gap: 4px; }
   .prose .mf-loop-track { font-size: 11px; letter-spacing: 0.08em; }
-||||||| 69ed5938
+}
+
+/* ============================================================
    /brand - the self-demonstrating specimen page (WS6)
    Reuses the cliref editorial language: 2px-cap section heads,
    mono $-eyebrows, serif titles, hairline-ruled panels.
@@ -13248,4 +13250,244 @@ footer.site-footer { padding: 48px 32px 56px; }
     .brand-stacks__row,
     .brand-voice__row,
     .brand-naming__row { grid-template-columns: 1fr; gap: 4px; }
+}
+
+/* ============================================================
+   WS2b truth-pass additions (teams / registry / routing / glossary)
+   Appended as one block so parallel edits merge cleanly. Reuses
+   root tokens (--ink/--page/--panel/--line/--muted/--green/--blue
+   /--red/--amber/--serif/--mono/--sans). Receipts aesthetic.
+   ============================================================ */
+
+/* --- routing: let the long install command wrap instead of clip --- */
+.routing-page .rt-step-cmd--wrap {
+    white-space: normal;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+}
+/* routing CTA: dim inline comment on an install line */
+.routing-page .rt-install code .dim {
+    color: #8a8a82;
+}
+
+/* --- registry: design-partner badge + preview receipt card --- */
+.landing-v2 .reg-badge {
+    display: inline-block;
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--amber);
+    border: 1px solid var(--amber);
+    border-radius: 999px;
+    padding: 3px 10px;
+    margin: 8px 0 4px;
+}
+
+.landing-v2 .reg-preview {
+    max-width: 560px;
+    margin: 36px auto 0;
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    background: var(--panel);
+    overflow: hidden;
+}
+.landing-v2 .reg-preview__bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--line);
+    background: var(--page);
+}
+.landing-v2 .reg-preview__eyebrow {
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--green);
+}
+.landing-v2 .reg-preview__tag {
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--amber);
+    border: 1px solid var(--amber);
+    border-radius: 4px;
+    padding: 2px 6px;
+}
+.landing-v2 .reg-preview__card {
+    padding: 18px 18px 14px;
+}
+.landing-v2 .reg-preview__head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 8px;
+}
+.landing-v2 .reg-preview__skill {
+    font-family: var(--mono);
+    font-size: 13px;
+    color: var(--blue);
+}
+.landing-v2 .reg-preview__rank {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--muted);
+}
+.landing-v2 .reg-preview__title {
+    font-family: var(--serif);
+    font-size: 18px;
+    line-height: 1.25;
+    color: var(--ink);
+    margin: 0 0 14px;
+}
+.landing-v2 .reg-preview__stats {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 12px;
+    margin: 0 0 16px;
+}
+.landing-v2 .reg-preview__stats div {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+.landing-v2 .reg-preview__stats dt {
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--muted);
+}
+.landing-v2 .reg-preview__stats dd {
+    font-family: var(--mono);
+    font-size: 15px;
+    color: var(--ink);
+    margin: 0;
+}
+.landing-v2 .reg-preview__never {
+    color: var(--green) !important;
+    font-size: 12px !important;
+}
+.landing-v2 .reg-preview__actions {
+    display: flex;
+    gap: 10px;
+}
+.landing-v2 .reg-preview__accept,
+.landing-v2 .reg-preview__reject {
+    font-family: var(--mono);
+    font-size: 12px;
+    padding: 6px 12px;
+    border-radius: 6px;
+    border: 1px solid var(--line);
+}
+.landing-v2 .reg-preview__accept {
+    color: var(--page);
+    background: var(--ink);
+    border-color: var(--ink);
+}
+.landing-v2 .reg-preview__reject {
+    color: var(--muted);
+    background: var(--page);
+}
+.landing-v2 .reg-preview__note {
+    margin: 0;
+    padding: 10px 14px 14px;
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--muted);
+    border-top: 1px solid var(--line);
+    text-align: center;
+}
+@media (max-width: 520px) {
+    .landing-v2 .reg-preview__stats { grid-template-columns: repeat(2, 1fr); }
+}
+
+/* --- glossary (/docs/language) curated definition cards --- */
+.gloss { margin-top: 8px; }
+.gloss-group { margin-bottom: 48px; }
+.gloss-group__head {
+    border-top: 1px solid var(--line);
+    padding-top: 18px;
+    margin-bottom: 20px;
+}
+.gloss-group__eyebrow {
+    font-family: var(--mono);
+    font-size: 12px;
+    letter-spacing: 0.04em;
+    color: var(--green);
+    margin: 0 0 6px;
+}
+.gloss .gloss-group__title {
+    font-family: var(--serif);
+    font-size: 26px;
+    line-height: 1.1;
+    color: var(--ink);
+    margin: 0;
+    border: 0;
+    padding: 0;
+}
+.gloss-group__cards {
+    display: grid;
+    gap: 16px;
+}
+.gloss-card {
+    border: 1px solid var(--line);
+    background: var(--panel);
+    border-radius: 10px;
+    padding: 18px 20px 16px;
+}
+.gloss .gloss-card__term {
+    font-family: var(--mono);
+    font-size: 16px;
+    font-weight: 600;
+    color: var(--ink);
+    margin: 0 0 10px;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 10px;
+}
+.gloss-card__dollar {
+    color: var(--green);
+    margin-right: -4px;
+}
+.gloss-card__exp {
+    font-family: var(--sans);
+    font-size: 13px;
+    font-weight: 400;
+    color: var(--muted);
+}
+.gloss .gloss-card__def {
+    font-family: var(--sans);
+    font-size: 15px;
+    line-height: 1.6;
+    color: var(--ink);
+    margin: 0 0 12px;
+}
+.gloss .gloss-card__usage {
+    font-family: var(--serif);
+    font-style: italic;
+    font-size: 14.5px;
+    line-height: 1.55;
+    color: var(--muted);
+    margin: 0;
+    padding-left: 12px;
+    border-left: 2px solid var(--line);
+}
+.gloss-card__usage-label {
+    display: block;
+    font-family: var(--mono);
+    font-style: normal;
+    font-size: 10px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--green);
+    margin-bottom: 4px;
+}
+@media (max-width: 480px) {
+    .gloss .gloss-group__title { font-size: 22px; }
+    .gloss-card { padding: 14px 16px; }
 }
