@@ -7,13 +7,15 @@ import { useState } from "react";
 import "../components/prototype/redesign.css";
 import { Switcher, type Theme } from "../components/prototype/switcher";
 import { VariantMissionControl } from "../components/prototype/variant-mission-control";
-import { VariantEditorial } from "../components/prototype/variant-editorial";
-import { VariantTerminalOS } from "../components/prototype/variant-terminal-os";
+import { VariantLanding } from "../components/prototype/variant-landing";
+import { VariantArticle } from "../components/prototype/variant-article";
 
+// Mission Control won; the prototype now shows that ONE language across the
+// three brand surfaces so we can judge cohesion + the ax uniqueness levers.
 const VARIANTS = [
-    { key: "A", name: "Mission Control" },
-    { key: "B", name: "Editorial Instrument" },
-    { key: "C", name: "Terminal OS" },
+    { key: "app", name: "App · Mission Control" },
+    { key: "landing", name: "Landing" },
+    { key: "article", name: "Article + figures" },
 ] as const;
 
 export const Route = createFileRoute("/prototype")({
@@ -28,7 +30,7 @@ export const Route = createFileRoute("/prototype")({
 function PrototypePage() {
     const search = Route.useSearch();
     const navigate = useNavigate({ from: Route.fullPath });
-    const variant = search.variant ?? "A";
+    const variant = search.variant ?? "app";
     const theme: Theme = search.theme === "light" ? "light" : "dark";
     const [, force] = useState(0);
 
@@ -37,9 +39,9 @@ function PrototypePage() {
 
     return (
         <div className="rdx" data-theme={theme} key={`${variant}-${theme}`}>
-            {variant === "A" && <VariantMissionControl theme={theme} />}
-            {variant === "B" && <VariantEditorial theme={theme} />}
-            {variant === "C" && <VariantTerminalOS />}
+            {variant === "app" && <VariantMissionControl theme={theme} />}
+            {variant === "landing" && <VariantLanding theme={theme} />}
+            {variant === "article" && <VariantArticle theme={theme} />}
             <Switcher variants={VARIANTS} current={variant} onVariant={setVariant} theme={theme} onTheme={setTheme} />
         </div>
     );

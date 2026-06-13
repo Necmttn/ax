@@ -27,7 +27,24 @@ All three support dark + light via `data-theme` on the `.rdx` scope (token sets
 in `redesign.css`). Shared nullframe primitives in `viz.tsx` (Doto / Segbar /
 CellGrid / GlyphReel / Led). Mock data in `mock.ts`.
 
-## DECISION: <pending - user picking direction>
+## ITERATION 2 - Mission Control won; showing brand cohesion + uniqueness
+
+User picked **A (Mission Control)** for the app (desktop-app + team-protocol
+ambition). Follow-on asks: show the SAME language on brand surfaces (landing,
+articles, figures) AND make it more UNIQUE (plain dark HUD "exists like this").
+
+Switcher is now **App / Landing / Article** (one language, dark+light).
+variant-editorial.tsx + variant-terminal-os.tsx kept for reference, no longer
+routed (delete on final fold).
+
+ax uniqueness levers ("editorial instrument" thesis):
+1. GREEN primary accent; orange demoted to --alert (rec/energy).
+2. Georgia SERIF headlines paired with Doto/mono telemetry.
+3. RECEIPT/ledger motif - tear-lines, provenance stamps, install-as-receipt.
+4. GLYPH REEL as ax's animated sigil (landing hero, article Fig.03, future loaders).
+5. Article FIGURES receipt-framed: FIG.NN + "compiled from local transcripts" + dashed caption.
+
+## DECISION: <pending - user reacting to brand surfaces>
 
 Likely outcome is a blend ("masthead from B, panels from C" etc). Capture the
 chosen direction here, then: promote the winning structure into the real

@@ -24,19 +24,22 @@
     font-family: var(--sans);
     -webkit-font-smoothing: antialiased;
 }
+/* ax identity: GREEN is the primary accent (not nullframe orange). Orange is
+   demoted to --alert (rec / live-energy / warnings) so the palette reads ax,
+   not "generic dark HUD". */
 .rdx[data-theme="dark"] {
-    --bg: #0a0a0a; --surface: #111; --surface2: #181818; --border: #222; --border-hi: #333;
-    --dim: #666; --sec: #999; --pri: #e8e8e8; --display: #fff;
-    --accent: #f26522; --green: #4a9e5c; --red: #d71921; --blue: #5b8fd6; --gold: #d6a14a; --violet: #9a86f0;
-    --dot: #1d1d1d; --glyph-dim: #222222; --glyph-lit: #ffffff;
-    --c0: #1c1c1c; --c1: #1e3526; --c2: #2c5639; --c3: #3f8a50; --c4: #62c878;
+    --bg: #0b0d0b; --surface: #111311; --surface2: #181b18; --border: #1f241f; --border-hi: #31382f;
+    --dim: #5f685e; --sec: #939b8f; --pri: #e6e9e2; --display: #fff;
+    --accent: #56b06a; --alert: #f26522; --green: #56b06a; --red: #d7493b; --blue: #5b8fd6; --gold: #d6a14a; --violet: #9a86f0;
+    --dot: #1b211a; --glyph-dim: #232823; --glyph-lit: #eafff0;
+    --c0: #1a1f1a; --c1: #1e3526; --c2: #2c5639; --c3: #3f8a50; --c4: #62c878;
 }
 .rdx[data-theme="light"] {
-    --bg: #efece3; --surface: #fbfaf5; --surface2: #ffffff; --border: #dcd9ce; --border-hi: #c6c3b4;
-    --dim: #a7a499; --sec: #6b6b63; --pri: #2c2c27; --display: #0a0a0a;
-    --accent: #c85a1b; --green: #2f9e44; --red: #c0392b; --blue: #2567a8; --gold: #a66d10; --violet: #6650b8;
-    --dot: #e0ddd2; --glyph-dim: #dad7cb; --glyph-lit: #1a1a1a;
-    --c0: #e6e3d8; --c1: #cfe6d3; --c2: #9fd0aa; --c3: #5fb074; --c4: #2f9e44;
+    --bg: #f1efe6; --surface: #fbfaf4; --surface2: #ffffff; --border: #dbd8cc; --border-hi: #c6c3b3;
+    --dim: #a4a195; --sec: #66695f; --pri: #272a24; --display: #0a0c09;
+    --accent: #2f9e44; --alert: #c85a1b; --green: #2f9e44; --red: #c0392b; --blue: #2567a8; --gold: #a66d10; --violet: #6650b8;
+    --dot: #e1ded2; --glyph-dim: #dad7cb; --glyph-lit: #173a22;
+    --c0: #e6e3d7; --c1: #cfe6d3; --c2: #9fd0aa; --c3: #5fb074; --c4: #2f9e44;
 }
 
 /* ---- primitives ---- */
@@ -53,6 +56,7 @@
 .rdx-seg { display: flex; gap: 3px; height: 12px; }
 .rdx-seg i { flex: 1; background: var(--border); transform: scale(0.3); opacity: 0; animation: rdx-seg-in 0.3s var(--ease-back) forwards; }
 .rdx-seg.accent i.on { background: var(--accent); }
+.rdx-seg.alert i.on { background: var(--alert); }
 .rdx-seg.green i.on { background: var(--green); }
 .rdx-seg.pri i.on { background: var(--pri); }
 .rdx-seg.wave i.on { animation: rdx-seg-in 0.3s var(--ease-back) forwards, rdx-wave 2.4s var(--ease) infinite; }
@@ -69,7 +73,14 @@
 
 .rdx-led { width: 8px; height: 8px; border-radius: 50%; background: var(--green); display: inline-block; animation: rdx-led 2.4s var(--ease) infinite; flex: none; }
 .rdx-led.accent { background: var(--accent); }
+.rdx-led.alert { background: var(--alert); width: 7px; height: 7px; animation-duration: 1.6s; }
 .rdx-led.red { background: var(--red); width: 7px; height: 7px; animation-duration: 1.6s; }
+
+/* receipt / ledger motif - the ax signature: dotted tear-lines + provenance
+   stamps that frame telemetry like a printed receipt. */
+.rdx-tear { height: 0; border: 0; border-top: 1.5px dashed var(--border-hi); margin: 0; opacity: 0.8; }
+.rdx-stamp { font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--dim); }
+.rdx-sigil { width: 100%; height: 100%; }
 
 .rdx-label { font-family: var(--mono); font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--sec); }
 .rdx-dim { color: var(--dim); }
@@ -211,3 +222,77 @@
 .rdx-switch .lbl { padding: 0 10px; min-width: 168px; text-align: center; letter-spacing: 0.02em; }
 .rdx-switch .sep { width: 1px; height: 20px; background: #333; margin: 0 2px; }
 .rdx-switch .theme { display: inline-flex; align-items: center; gap: 6px; }
+
+/* ===========================================================================
+   SURFACE: Landing (marketing in the instrument-panel language)
+   ========================================================================= */
+.v-land { max-width: 1120px; margin: 0 auto; padding: 0 28px 90px; }
+.v-land-nav { display: flex; align-items: center; gap: 22px; padding: 20px 0; font-family: var(--mono); font-size: 13px; color: var(--sec); }
+.v-land-nav .logo { font-family: var(--serif); font-weight: 700; font-size: 21px; color: var(--display); }
+.v-land-nav .logo small { font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--dim); margin-left: 8px; }
+.v-land-nav .spacer { flex: 1; }
+.v-land-nav a { color: var(--sec); }
+.v-land-nav .cta { border: 1px solid var(--accent); color: var(--accent); border-radius: 8px; padding: 6px 14px; }
+.v-land-hero { display: grid; grid-template-columns: 1.15fr 0.85fr; gap: 28px; align-items: stretch; padding: 36px 0 28px; border-top: 1px solid var(--border); }
+@media (max-width: 860px) { .v-land-hero { grid-template-columns: 1fr; } }
+.v-land-kicker { font-family: var(--mono); font-size: 12px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--accent); display: inline-flex; gap: 8px; align-items: center; }
+.v-land-h1 { font-family: var(--serif); font-weight: 400; font-size: clamp(40px, 5.6vw, 68px); line-height: 1.02; letter-spacing: -1.5px; color: var(--display); margin: 18px 0 0; }
+.v-land-h1 em { font-style: italic; color: var(--accent); }
+.v-land-lede { font-size: 17px; line-height: 1.55; color: var(--sec); max-width: 46ch; margin: 20px 0 26px; }
+.v-land-install { border: 1px solid var(--border-hi); border-radius: 12px; background: var(--surface); overflow: hidden; max-width: 440px; }
+.v-land-install .bar { display: flex; justify-content: space-between; padding: 8px 14px; border-bottom: 1px solid var(--border); background: var(--surface2); font-family: var(--mono); font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--dim); }
+.v-land-install code { display: block; padding: 14px; font-family: var(--mono); font-size: 13.5px; color: var(--pri); }
+.v-land-install code b { color: var(--accent); font-weight: 400; }
+.v-land-herocard { border: 1px solid var(--border); border-radius: 16px; background: var(--surface); background-image: radial-gradient(circle, var(--dot) 1.1px, transparent 1.1px); background-size: 16px 16px; background-position: 8px 8px; padding: 16px; display: flex; flex-direction: column; gap: 12px; }
+.v-land-herocard .top { display: flex; justify-content: space-between; }
+.v-land-sigilwrap { flex: 1; min-height: 150px; }
+.v-land-herostat { display: flex; gap: 18px; }
+.v-land-herostat .n { font-family: var(--doto); font-weight: 600; font-size: 30px; color: var(--display); }
+.v-land-herostat .l { font-family: var(--mono); font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--sec); }
+
+.v-land-strip { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1px; background: var(--border); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; margin: 14px 0 56px; }
+@media (max-width: 720px) { .v-land-strip { grid-template-columns: repeat(2, 1fr); } }
+.v-land-stat { background: var(--surface); padding: 16px 18px; display: flex; flex-direction: column; gap: 5px; }
+.v-land-stat .n { font-family: var(--doto); font-weight: 600; font-size: 26px; color: var(--display); }
+.v-land-stat .l { font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--sec); }
+
+.v-land-sech { display: flex; align-items: baseline; gap: 14px; margin: 0 0 22px; }
+.v-land-sech .n { font-family: var(--mono); font-size: 12px; color: var(--accent); }
+.v-land-sech h2 { font-family: var(--serif); font-weight: 400; font-size: 32px; margin: 0; color: var(--display); }
+.v-land-sech .rule { flex: 1; border-top: 1px solid var(--border); transform: translateY(-6px); }
+.v-land-feats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+@media (max-width: 860px) { .v-land-feats { grid-template-columns: 1fr; } }
+.v-land-feat { border: 1px solid var(--border); border-radius: 14px; background: var(--surface); padding: 18px; display: flex; flex-direction: column; gap: 10px; min-height: 200px; }
+.v-land-feat .ic { font-family: var(--mono); color: var(--accent); font-size: 18px; }
+.v-land-feat h3 { font-family: var(--serif); font-weight: 400; font-size: 21px; margin: 0; color: var(--display); }
+.v-land-feat p { font-size: 14px; line-height: 1.5; color: var(--sec); margin: 0; }
+.v-land-feat .viz { margin-top: auto; }
+
+/* ===========================================================================
+   SURFACE: Article (docs/prose + telemetry figures)
+   ========================================================================= */
+.v-art { max-width: 720px; margin: 0 auto; padding: 36px 28px 90px; }
+.v-art-crumb { font-family: var(--mono); font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--sec); display: flex; gap: 10px; }
+.v-art-crumb .accent { color: var(--accent); }
+.v-art h1 { font-family: var(--serif); font-weight: 400; font-size: clamp(34px, 5vw, 50px); line-height: 1.06; letter-spacing: -1px; color: var(--display); margin: 18px 0 10px; }
+.v-art-meta { display: flex; gap: 16px; font-family: var(--mono); font-size: 12px; color: var(--sec); padding-bottom: 20px; }
+.v-art-meta .live { display: inline-flex; gap: 6px; align-items: center; color: var(--accent); }
+.v-art p { font-size: 17px; line-height: 1.65; color: var(--pri); margin: 20px 0; }
+.v-art p .lead { }
+.v-art h2 { font-family: var(--serif); font-weight: 400; font-size: 27px; color: var(--display); margin: 40px 0 0; }
+.v-art code.inl { font-family: var(--mono); font-size: 0.88em; background: var(--surface); border: 1px solid var(--border); border-radius: 5px; padding: 1px 6px; color: var(--accent); }
+.v-art-pull { font-family: var(--serif); font-style: italic; font-size: 22px; line-height: 1.4; color: var(--display); border-left: 2px solid var(--accent); padding-left: 18px; margin: 28px 0; }
+
+/* figure: receipt-framed telemetry. THE article-figure house style. */
+.rdx-fig { border: 1px solid var(--border); border-radius: 14px; background: var(--surface); overflow: hidden; margin: 30px 0; }
+.rdx-fig-head { display: flex; justify-content: space-between; align-items: center; padding: 9px 14px; border-bottom: 1px solid var(--border); background: var(--surface2); }
+.rdx-fig-n { font-family: var(--mono); font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--accent); }
+.rdx-fig-src { font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--dim); display: inline-flex; gap: 7px; align-items: center; }
+.rdx-fig-body { padding: 20px; background-image: radial-gradient(circle, var(--dot) 1px, transparent 1px); background-size: 15px 15px; }
+.rdx-fig-cap { padding: 11px 14px; border-top: 1px dashed var(--border-hi); font-family: var(--mono); font-size: 12px; color: var(--sec); line-height: 1.5; }
+.rdx-fig-cap b { color: var(--pri); font-weight: 400; }
+.rdx-fig-lineage { display: flex; align-items: center; gap: 0; flex-wrap: wrap; font-family: var(--mono); font-size: 12px; }
+.rdx-fig-node { border: 1px solid var(--border-hi); border-radius: 7px; padding: 7px 11px; color: var(--pri); background: var(--surface2); }
+.rdx-fig-node.hot { border-color: var(--accent); color: var(--accent); }
+.rdx-fig-arrow { color: var(--dim); padding: 0 8px; }
+.rdx-fig-glyph { height: 130px; }
