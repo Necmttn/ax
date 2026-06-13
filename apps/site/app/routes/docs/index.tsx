@@ -1,5 +1,5 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { allAdrs, allPages } from "content-collections";
+import { allAdrs } from "content-collections";
 import { SiteHeader } from "~/components/landing-sections/site-header";
 import { SiteFooter } from "~/components/landing-sections/site-footer";
 
@@ -7,54 +7,122 @@ export const Route = createFileRoute("/docs/")({
   head: () => ({
     meta: [
       { title: "Docs - ax" },
-      { name: "description", content: "Reference, guides, and architecture decision records for ax." },
+      {
+        name: "description",
+        content:
+          "Install ax, learn the language, and look up any command. Guides for every shipped loop plus the full CLI reference.",
+      },
     ],
   }),
   loader: () => ({
     adrs: [...allAdrs].sort((a, b) => a.slug.localeCompare(b.slug)),
-    pageCount: allPages.length,
   }),
   component: DocsIndex,
 });
 
-const REFERENCE = [
+type Card = {
+  to: string;
+  params?: Record<string, string>;
+  kicker: string;
+  title: string;
+  blurb: string;
+};
+
+const START: Card[] = [
   {
-    to: "/how-it-works" as const,
+    to: "/docs/install",
+    kicker: "start here",
+    title: "Install ax",
+    blurb:
+      "One curl, the skills, your first ingest, then ax improve recommend. The obvious first stop.",
+  },
+];
+
+const GUIDES: Card[] = [
+  {
+    to: "/features",
     kicker: "guide",
-    title: "How ax sees your work",
-    blurb: "From raw transcripts to a typed graph - the ingest pipeline, stage by stage.",
+    title: "The improve deck",
+    blurb:
+      "Mined proposals reviewed one at a time, an impact engine, and the experiments strip - past bets, measured.",
   },
   {
-    to: "/docs/language" as const,
-    kicker: "reference",
-    title: "Language",
-    blurb: "The shared vocabulary - sessions, turns, roles, verdicts, and how they connect.",
+    to: "/routing",
+    kicker: "guide",
+    title: "Cost routing",
+    blurb:
+      "ax dispatches and ax routing tune|compile|show route mechanical work to cheaper models. Receipts, not vibes.",
   },
   {
-    to: "/docs/cli-reference" as const,
+    to: "/features",
+    kicker: "guide",
+    title: "Hooks SDK",
+    blurb:
+      "Author typed Effect TS hooks once, run them on Claude Code and Codex. Deterministic guards, fail-open.",
+  },
+  {
+    to: "/leaders",
+    kicker: "guide",
+    title: "Profiles & community",
+    blurb:
+      "ax profile publish posts a public gist; /u/<login> and /leaders render the registered boards.",
+  },
+  {
+    to: "/features",
+    kicker: "guide",
+    title: "MCP server",
+    blurb:
+      "ax mcp exposes ten read-only graph queries over stdio so an agent can query your history in-context.",
+  },
+  {
+    to: "/features",
+    kicker: "guide",
+    title: "Quota, recall & churn",
+    blurb:
+      "ax quota tracks live plan usage; ax recall searches turns, commits and skills; ax sessions churn measures verification churn.",
+  },
+];
+
+const REFERENCE: Card[] = [
+  {
+    to: "/docs/cli-reference",
     kicker: "reference",
     title: "CLI reference",
     blurb: "Every ax command, flag, and scoped query you can run from the terminal.",
   },
   {
-    to: "/changelog" as const,
+    to: "/docs/language",
+    kicker: "reference",
+    title: "Language",
+    blurb: "The shared vocabulary - sessions, turns, roles, verdicts, and how they connect.",
+  },
+  {
+    to: "/changelog",
     kicker: "releases",
     title: "Changelog",
     blurb: "Release announcements in product language, plus the generated commit log.",
   },
-  {
-    to: "/manifesto" as const,
-    kicker: "position paper",
-    title: "Manifesto",
-    blurb: "Why the agent experience layer needs to exist at all.",
-  },
-  {
-    to: "/brand" as const,
-    kicker: "brand",
-    title: "Brand",
-    blurb: "Voice, wordmark, and palette for anyone referencing ax.",
-  },
 ];
+
+function CardGrid({ cards }: { cards: Card[] }) {
+  return (
+    <div className="docs-grid">
+      {cards.map((item, i) => (
+        <Link
+          key={`${item.to}-${i}`}
+          to={item.to}
+          params={item.params}
+          className="docs-card"
+        >
+          <span className="docs-card-kicker">{item.kicker}</span>
+          <span className="docs-card-title">{item.title}</span>
+          <span className="docs-card-blurb">{item.blurb}</span>
+          <span className="docs-card-arrow" aria-hidden="true">→</span>
+        </Link>
+      ))}
+    </div>
+  );
+}
 
 function DocsIndex() {
   const { adrs } = Route.useLoaderData();
@@ -65,41 +133,51 @@ function DocsIndex() {
         <header className="docs-hero">
           <p className="eyebrow">documentation</p>
           <h1>
-            Everything ax <em>knows how to tell you</em>.
+            Install it, learn the language, <em>look up any command</em>.
           </h1>
           <p className="lede">
-            Reference for the CLI and the graph language, the guides behind the
-            pipeline, and the architecture decisions that got us here.
+            Start with the install path, then the guides behind each shipped
+            loop, then the full command reference.
           </p>
         </header>
 
         <section className="docs-section">
-          <div className="section-kicker">reference &amp; guides</div>
-          <div className="docs-grid">
-            {REFERENCE.map((item) => (
-              <Link key={item.to} to={item.to} className="docs-card">
-                <span className="docs-card-kicker">{item.kicker}</span>
-                <span className="docs-card-title">{item.title}</span>
-                <span className="docs-card-blurb">{item.blurb}</span>
-                <span className="docs-card-arrow" aria-hidden="true">→</span>
-              </Link>
-            ))}
-          </div>
+          <div className="section-kicker">start here</div>
+          <CardGrid cards={START} />
         </section>
 
         <section className="docs-section">
-          <div className="section-kicker">architecture decision records</div>
-          <ul className="docs-adr-list">
-            {adrs.map((adr) => (
-              <li key={adr.slug}>
-                <Link to="/docs/adr/$slug" params={{ slug: adr.slug }}>
-                  <span className="adr-slug">{adr.slug.replace(/^(\d+)-.*/, "ADR $1")}</span>
-                  <span className="adr-title">{adr.title}</span>
-                  <span className="adr-arrow" aria-hidden="true">→</span>
-                </Link>
-              </li>
-            ))}
-          </ul>
+          <div className="section-kicker">guides</div>
+          <CardGrid cards={GUIDES} />
+        </section>
+
+        <section className="docs-section">
+          <div className="section-kicker">reference</div>
+          <CardGrid cards={REFERENCE} />
+        </section>
+
+        <section className="docs-section docs-quiet">
+          <details className="docs-quiet-records">
+            <summary>
+              Engineering records →
+              <span className="docs-quiet-note">
+                {adrs.length} internal architecture decision records
+              </span>
+            </summary>
+            <ul className="docs-adr-list">
+              {adrs.map((adr) => (
+                <li key={adr.slug}>
+                  <Link to="/docs/adr/$slug" params={{ slug: adr.slug }}>
+                    <span className="adr-slug">
+                      {adr.slug.replace(/^(\d+)-.*/, "$1")}
+                    </span>
+                    <span className="adr-title">{adr.title}</span>
+                    <span className="adr-arrow" aria-hidden="true">→</span>
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          </details>
         </section>
       </main>
       <SiteFooter />

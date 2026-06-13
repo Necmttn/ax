@@ -1,6 +1,6 @@
 // scripts/compile-community.test.ts
 import { describe, expect, test } from "bun:test";
-import { compileCommunity, type GistFetcher } from "./compile-community.ts";
+import { compileCommunity, skillStatKey, type GistFetcher } from "./compile-community.ts";
 
 const profile = (login: string, over: Record<string, unknown> = {}) => ({
     v: 1,
@@ -51,6 +51,19 @@ describe("compileCommunity", () => {
         expect(out.hookStats["enforce-worktree"]).toEqual({ users: 2 });
     });
 
+    test("plugin-namespaced skill name does not double its source prefix", async () => {
+        // Real shape: source="superpowers", name="superpowers:brainstorming"
+        // (rig.ts keeps the plugin id inside the name). The key must NOT be
+        // "superpowers:superpowers:brainstorming".
+        const out = await compileCommunity(users, fetcher({
+            g1: profile("alice", { rig: { skills: [{ name: "superpowers:brainstorming", source: "superpowers", runs: 3 }], hooks: [], routing_table: false } }),
+            g2: profile("bob", { rig: { skills: [{ name: "superpowers:brainstorming", source: "superpowers", runs: 7 }], hooks: [], routing_table: false } }),
+        }), { now: "2026-06-12T03:00:00Z" });
+
+        expect(out.skillStats["superpowers:brainstorming"]).toEqual({ users: 2, runs: 10 });
+        expect(out.skillStats["superpowers:superpowers:brainstorming"]).toBeUndefined();
+    });
+
     test("invalid profile rows are dropped and reported", async () => {
         const out = await compileCommunity(users, fetcher({
             g1: profile("alice"),
@@ -92,6 +105,14 @@ describe("compileCommunity", () => {
         const a = await compileCommunity(users, f, { now: "2026-06-12T03:00:00Z" });
         const b = await compileCommunity(users, f, { now: "2026-06-12T03:00:00Z" });
         expect(JSON.stringify(a)).toBe(JSON.stringify(b));
+    });
+
+    test("skillStatKey dedupes plugin-namespaced source prefix", () => {
+        expect(skillStatKey("superpowers", "superpowers:brainstorming")).toBe("superpowers:brainstorming");
+        expect(skillStatKey("local", "commit")).toBe("local:commit");
+        expect(skillStatKey("local", "codex:rescue")).toBe("local:codex:rescue");
+        // bare name equal to source (defensive)
+        expect(skillStatKey("superpowers", "superpowers")).toBe("superpowers");
     });
 
     test("gist impersonation: mallory's gist claiming github=alice is dropped with github-mismatch", async () => {

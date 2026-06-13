@@ -300,6 +300,44 @@ export function validateLeaderboard(value: unknown): Leaderboard {
 
 export type SkillStats = Record<string, { readonly users: number; readonly runs: number }>;
 
+// --- formatting (shared) --------------------------------------------------------
+
+/**
+ * Compact number formatter - the SAME one the leaderboard uses for token and
+ * session counts. Reused for money so a raw `$22882` renders `$22.9k` instead
+ * of an unreadable wall of digits. Do not add a second formatter elsewhere.
+ */
+const compactFmt = new Intl.NumberFormat("en-US", { notation: "compact", maximumFractionDigits: 1 });
+export const formatCompact = (n: number): string => compactFmt.format(n);
+
+/** Grouped USD: `$22,882`. For larger boards prefer formatUsdCompact. */
+const usdGroupedFmt = new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 });
+export const formatUsd = (n: number): string => `$${usdGroupedFmt.format(n)}`;
+
+/** Compact USD: `$22.9k` under 100k stays readable; reuses compactFmt. */
+export const formatUsdCompact = (n: number): string =>
+    n >= 10_000 ? `$${compactFmt.format(n)}` : `$${usdGroupedFmt.format(n)}`;
+
+// --- trending skills (display filter) -------------------------------------------
+
+/**
+ * A skill "trends" only when it is a real, shared skill: plugin-namespaced or
+ * a known shared source - never a one-off `local:*` skill scoped to a single
+ * machine - and adopted by at least `minUsers` people. Without this the board
+ * fills with junk (every personal/project skill from a single early adopter).
+ */
+export function trendingSkills(
+    stats: SkillStats,
+    opts: { readonly minUsers?: number; readonly limit?: number } = {},
+): ReadonlyArray<readonly [string, { readonly users: number; readonly runs: number }]> {
+    const minUsers = opts.minUsers ?? 2;
+    const limit = opts.limit ?? 50;
+    return Object.entries(stats)
+        .filter(([name, s]) => !name.startsWith("local:") && s.users >= minUsers)
+        .sort(([, a], [, b]) => b.users - a.users || b.runs - a.runs)
+        .slice(0, limit);
+}
+
 export function validateSkillStats(value: unknown): SkillStats {
     if (!isRecord(value)) throw new Error("invalid skill stats");
     const out: Record<string, { users: number; runs: number }> = {};

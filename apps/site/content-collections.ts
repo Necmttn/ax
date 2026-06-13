@@ -41,7 +41,7 @@ const adrs = defineCollection({
 const pages = defineCollection({
   name: "pages",
   directory: "../../docs",
-  include: ["manifesto.md", "brand.md", "language.md", "insights-cli-reference.md"],
+  include: ["manifesto.md", "brand.md", "language.md"],
   // See `adrs.schema` above for why `content: z.string()` is here.
   schema: z.object({
     content: z.string(),
