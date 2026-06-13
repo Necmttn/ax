@@ -1,27 +1,64 @@
-import { createFileRoute, notFound } from "@tanstack/react-router";
-import { MDXContent } from "@content-collections/mdx/react";
-import { allPages } from "content-collections";
-import { mdxComponents } from "~/components/mdx-components";
+import { createFileRoute } from "@tanstack/react-router";
 import { DocShell } from "~/components/doc-shell";
+import { GLOSSARY_GROUPS, type GlossaryTerm } from "./-language.data";
 
 export const Route = createFileRoute("/docs/language")({
   head: () => ({
     meta: [
       { title: "Language - ax" },
-      { name: "description", content: "The shared vocabulary ax uses to describe agent work." },
+      {
+        name: "description",
+        content:
+          "The shared vocabulary ax uses to describe agent work: AX, the improve loop, cost routing, profiles and the surface agents read back.",
+      },
     ],
   }),
-  loader: () => {
-    const page = allPages.find((p) => p.slug === "language");
-    if (!page) throw notFound();
-    return { page };
-  },
-  component: () => {
-    const { page } = Route.useLoaderData();
-    return (
-      <DocShell eyebrow="reference">
-        <MDXContent code={page.body} components={mdxComponents} />
-      </DocShell>
-    );
-  },
+  component: Language,
 });
+
+function TermCard({ entry }: { entry: GlossaryTerm }) {
+  return (
+    <article className="gloss-card">
+      <p className="gloss-card__term">
+        <span className="gloss-card__dollar" aria-hidden="true">
+          $
+        </span>
+        {entry.term}
+        {entry.expansion && (
+          <span className="gloss-card__exp">{entry.expansion}</span>
+        )}
+      </p>
+      <p className="gloss-card__def">{entry.definition}</p>
+      <p className="gloss-card__usage">
+        <span className="gloss-card__usage-label">in the wild</span>
+        {entry.usage}
+      </p>
+    </article>
+  );
+}
+
+function Language() {
+  return (
+    <DocShell
+      eyebrow="$ ax language"
+      title="Language"
+      lede="The shared vocabulary ax uses to describe agent work. Each term: what it means, and how it reads in real copy."
+    >
+      <div className="gloss">
+        {GLOSSARY_GROUPS.map((group) => (
+          <section key={group.eyebrow} className="gloss-group">
+            <header className="gloss-group__head">
+              <p className="gloss-group__eyebrow">{group.eyebrow}</p>
+              <h2 className="gloss-group__title">{group.title}</h2>
+            </header>
+            <div className="gloss-group__cards">
+              {group.terms.map((t) => (
+                <TermCard key={t.term} entry={t} />
+              ))}
+            </div>
+          </section>
+        ))}
+      </div>
+    </DocShell>
+  );
+}
