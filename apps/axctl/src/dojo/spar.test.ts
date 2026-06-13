@@ -156,10 +156,12 @@ describe("fetchSessionMetrics", () => {
                     { session: "session:`s1`", ts: "2026-06-11T00:02:00.000Z", status: "error", command_norm: "tsc" },
                     { session: "session:`s1`", ts: "2026-06-11T00:04:00.000Z", status: "ok", command_norm: "tsc" },
                 ]],
-                // focused turn/wall lookup
-                "AS turn_count": [[
+                // focused turn/wall lookup: `FROM ONLY` returns the bare object,
+                // so the statement result is `[ {turn_count, s, e} ]` (NOT
+                // doubly-nested - that mismatch hid the rows[0][0] indexing bug).
+                "AS turn_count": [
                     { turn_count: 21, s: "2026-06-11T00:00:00.000Z", e: "2026-06-11T00:10:00.000Z" },
-                ]],
+                ],
             },
         });
 
@@ -191,9 +193,9 @@ describe("fetchSessionMetrics", () => {
                 "FROM touched": [[
                     { commit: "commit:`cc`", file: "file:`f1`", path: "src/a.ts", additions: 9, deletions: 1 },
                 ]],
-                "AS turn_count": [[
+                "AS turn_count": [
                     { turn_count: 12, s: "2026-06-11T00:00:00.000Z", e: "2026-06-11T00:05:00.000Z" },
-                ]],
+                ],
             },
         });
 
