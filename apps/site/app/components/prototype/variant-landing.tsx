@@ -1,26 +1,71 @@
-/* THROWAWAY - SURFACE: Landing. The instrument-panel language applied to
-   marketing, with the ax uniqueness levers: green accent, serif headline,
-   glyph sigil, receipt install block. */
-import { CellGrid, GlyphReel, Led, Segbar } from "./viz";
+/* THROWAWAY - SURFACE: Landing. Instrument language + ax uniqueness levers.
+   - Primary get-started is a COPY-SETUP-PROMPT pill: paste into your agent and
+     it installs + ingests + analyzes + briefs you (from the current landing).
+   - Hero card cycles the real harness logos ("ingesting…") instead of the
+     random-morphing dot glyph. */
+import { useEffect, useState } from "react";
+import { CellGrid, Led, Segbar } from "./viz";
 import { ACTIVITY, MODELS, litFor } from "./mock";
 import { PROVIDERS } from "~/components/landing-v2/supports-strip";
 import type { Theme } from "./switcher";
 
-/** Floating harness-logo tiles framing the hero - kept from the current
- *  landing (ax's "works with 5 harnesses" signature), reusing the real SVGs. */
-function HarnessField() {
+const AGENT_PROMPT = `Set up ax for me, end to end. ax is a local agent-experience graph over my coding-agent history (Claude Code, Codex, Cursor, OpenCode, Pi) - it runs locally and I review every change.
+
+1. INSTALL - run \`curl -fsSL https://ax.necmttn.com/install | sh\` to install the ax CLI.
+2. INGEST - run \`ax ingest --dry-run\` and tell me how long a full backfill takes, then run \`ax ingest\` in the BACKGROUND (AX_PROGRESS=plain). Tell me I can watch it live: \`ax serve\` → http://127.0.0.1:1738. When it finishes, summarize total sessions, turns, and the skills/tools I actually use.
+3. VERIFY - run \`ax doctor\` and fix anything that isn't ok.
+4. ANALYZE - run \`ax skills weighted\`, \`ax cost models\`, and \`ax dispatches --candidates\`.
+5. BRIEF ME - in plain words: my agent archetype, where my tokens go, 1–2 under-used skills worth adopting, and the single highest-value change to make next - with the exact command to run.`;
+
+/** Hero card content: the 5 harness logos, cycling an "ingesting…" highlight -
+ *  meaningful + branded, vs. the old random dot patterns. */
+function HarnessIngest() {
+    const [active, setActive] = useState(0);
+    useEffect(() => {
+        if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) return;
+        const iv = window.setInterval(() => {
+            if (!document.hidden) setActive((a) => (a + 1) % PROVIDERS.length);
+        }, 1300);
+        return () => window.clearInterval(iv);
+    }, []);
     return (
-        <div className="rdx-logofield" aria-hidden="true">
-            {PROVIDERS.map((p) => (
-                <span key={p.key} className={`rdx-htile rdx-htile--${p.key}`} title={p.name}>{p.svg}</span>
-            ))}
+        <div className="v-land-ingest">
+            <div className="v-land-ingest-grid">
+                {PROVIDERS.map((p, i) => (
+                    <span key={p.key} className={`v-land-hchip${i === active ? " on" : ""}`} title={p.name}>{p.svg}</span>
+                ))}
+            </div>
+            <div className="v-land-ingest-cap rdx-stamp">ingesting · {PROVIDERS[active]?.name}</div>
         </div>
     );
 }
 
-export function VariantLanding({ theme }: { theme: Theme }) {
-    const dim = theme === "dark" ? "#232823" : "#dad7cb";
-    const lit = theme === "dark" ? "#eafff0" : "#173a22";
+function CopySetupPrompt() {
+    const [copied, setCopied] = useState(false);
+    const onCopy = () => {
+        if (typeof navigator === "undefined" || !navigator.clipboard) return;
+        navigator.clipboard.writeText(AGENT_PROMPT).then(() => {
+            setCopied(true);
+            window.setTimeout(() => setCopied(false), 2200);
+        });
+    };
+    return (
+        <div className="v-land-getstarted">
+            <span className="rdx-stamp">get started · paste into your agent</span>
+            <button type="button" className={`v-land-promptpill${copied ? " copied" : ""}`} onClick={onCopy}>
+                <span className="icons" aria-hidden="true">{PROVIDERS.map((p) => <span key={p.key} className="i">{p.svg}</span>)}</span>
+                <span className="label">{copied ? "✓ Copied - paste into your coding agent" : "Copy setup prompt"}</span>
+            </button>
+            <p className="v-land-getstarted-foot">
+                Your agent installs ax, ingests your history, analyzes it, and briefs you -
+                archetype, token spend, and the next change worth making.
+            </p>
+            <code className="v-land-altinstall">or, by hand: <b>curl</b> -fsSL https://ax.necmttn.com/install | sh</code>
+        </div>
+    );
+}
+
+export function VariantLanding({ theme: _theme }: { theme: Theme }) {
     return (
         <div className="v-land">
             <nav className="v-land-nav">
@@ -31,7 +76,6 @@ export function VariantLanding({ theme }: { theme: Theme }) {
             </nav>
 
             <header className="v-land-hero">
-                <HarnessField />
                 <div>
                     <span className="v-land-kicker"><Led />local-first · 5 harnesses · open source</span>
                     <h1 className="v-land-h1">A taste &amp; telemetry graph for your <em>coding agents</em>.</h1>
@@ -40,19 +84,11 @@ export function VariantLanding({ theme }: { theme: Theme }) {
                         into one graph on your machine - then shows which skills you actually use,
                         what each session cost, and where the tokens went.
                     </p>
-                    <div className="v-land-install">
-                        <div className="bar"><span>one command · local only</span><span>macos · linux</span></div>
-                        <code><b>curl</b> -fsSL https://ax.necmttn.com/install | sh</code>
-                    </div>
-                    <ol className="v-land-steps">
-                        <li><span className="k">01</span> install the CLI &amp; watcher</li>
-                        <li><span className="k">02</span> <code>ax serve</code> ingests your transcripts</li>
-                        <li><span className="k">03</span> open the dashboard - sessions, costs, skills, traced</li>
-                    </ol>
+                    <CopySetupPrompt />
                 </div>
                 <div className="v-land-herocard">
-                    <div className="top"><span className="rdx-label">live · @necmttn</span><span className="rdx-stamp">sys.v0.29</span></div>
-                    <div className="v-land-sigilwrap"><GlyphReel seed={7} dim={dim} lit={lit} /></div>
+                    <div className="top"><span className="rdx-label" style={{ display: "inline-flex", gap: 7, alignItems: "center" }}><Led />live · @necmttn</span><span className="rdx-stamp">sys.v0.29</span></div>
+                    <HarnessIngest />
                     <hr className="rdx-tear" />
                     <div className="v-land-herostat">
                         <div><div className="n rdx-doto">412</div><div className="l">sessions</div></div>

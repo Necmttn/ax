@@ -365,3 +365,37 @@
 .v-land-steps li { display: flex; align-items: baseline; gap: 12px; font-size: 14px; color: var(--sec); line-height: 1.4; }
 .v-land-steps .k { font-family: var(--mono); font-size: 11px; color: var(--accent); letter-spacing: 0.1em; flex: none; }
 .v-land-steps code { font-family: var(--mono); font-size: 0.86em; color: var(--pri); background: var(--surface); border: 1px solid var(--border); border-radius: 5px; padding: 1px 6px; }
+
+/* ---- get-started: copy-setup-prompt pill (paste into your agent) ---- */
+.v-land-getstarted { margin-top: 26px; display: flex; flex-direction: column; gap: 12px; max-width: 480px; }
+.v-land-promptpill {
+    display: flex; align-items: center; gap: 14px; padding: 13px 18px; border-radius: 13px; cursor: pointer;
+    background: var(--accent); border: 1px solid var(--accent); color: #07140c;
+    font: 600 15px/1 var(--sans); transition: 0.16s var(--ease); text-align: left;
+}
+.rdx[data-theme="dark"] .v-land-promptpill { color: #06140b; }
+.v-land-promptpill:hover { filter: brightness(1.06); transform: translateY(-1px); }
+.v-land-promptpill.copied { background: var(--surface2); color: var(--accent); border-color: var(--accent); }
+.v-land-promptpill .icons { display: inline-flex; gap: 3px; }
+.v-land-promptpill .icons .i { width: 22px; height: 22px; display: grid; place-items: center; border-radius: 6px; background: rgba(0,0,0,0.16); }
+.v-land-promptpill.copied .icons { display: none; }
+.v-land-promptpill .icons .i svg { width: 14px; height: 14px; }
+.v-land-getstarted-foot { margin: 0; font-size: 13.5px; line-height: 1.5; color: var(--sec); }
+.v-land-altinstall { font-family: var(--mono); font-size: 12px; color: var(--dim); }
+.v-land-altinstall b { color: var(--accent); font-weight: 400; }
+
+/* ---- hero card: cycling harness-ingest (replaces the random dot glyph) ---- */
+.v-land-ingest { flex: 1 1 auto; min-height: 150px; max-height: 230px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 18px; }
+.v-land-ingest-grid { display: flex; gap: 12px; flex-wrap: wrap; justify-content: center; }
+.v-land-hchip {
+    width: 54px; height: 54px; border-radius: 14px; display: grid; place-items: center;
+    background: var(--surface2); border: 1px solid var(--border); color: color-mix(in srgb, var(--pri) 45%, transparent);
+    transition: 0.3s var(--ease);
+}
+.v-land-hchip svg { width: 24px; height: 24px; }
+.v-land-hchip.on {
+    border-color: var(--accent); color: var(--accent);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 20%, transparent), 0 10px 24px -12px color-mix(in srgb, var(--accent) 60%, transparent);
+    transform: translateY(-3px);
+}
+.v-land-ingest-cap { color: var(--accent); }
