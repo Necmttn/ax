@@ -56,7 +56,7 @@ export function ChapterExhibitH() {
       { text: "swap eslint → oxlint in CI",                  verdict: "regressed",     exp: "reverted 2026-05-15" },
       { text: "skill: parallel-task-helper",                  verdict: "self-resolved", exp: "upstream patched" },
       { text: "tighten typecheck before commit",             verdict: "kept",          exp: "0 missed types" },
-      { text: "add retro Stop hook",                         verdict: "kept",          exp: "3 sessions clean" },
+      { text: "tag classify briefs for unused skills",       verdict: "kept",          exp: "3 sessions clean" },
     ] as { text: string; verdict: string; exp: string }[];
 
     let n = 0;
@@ -217,6 +217,9 @@ export function ChapterExhibitH() {
       root.querySelector("[data-race-counter]")?.appendChild(cap);
     } else {
       setPillState("idle", "auto · idle");
+      // Pre-seed a few iterations so both lanes show content on first paint
+      // instead of two empty panels until the section scrolls into view.
+      for (let i = 0; i < 3; i++) step();
       let io: IntersectionObserver | null = null;
       let fired = false;
       if ("IntersectionObserver" in window) {

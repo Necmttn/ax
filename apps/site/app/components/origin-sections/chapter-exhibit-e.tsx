@@ -42,7 +42,7 @@ export function ChapterExhibitE() {
         verdict: "kept",
         verdictLabel: "KEPT",
         verdictMeta: "merged 2026-05-22",
-        ticks: { 7: '<span class="lk">t+7</span> 12 sessions clean', 30: '<span class="lk">t+30</span> 0 incidents', 90: '<span class="lk">t+90</span> <span style="color:var(--green)">verdict=kept</span>' },
+        ticks: { 7: '<span class="lk">+3</span> 12 sessions clean', 30: '<span class="lk">+10</span> 0 incidents', 90: '<span class="lk">+30</span> <span style="color:var(--green)">verdict=kept</span>' },
       },
       {
         id: "oxlint-swap",
@@ -54,7 +54,7 @@ export function ChapterExhibitE() {
         verdict: "regressed",
         verdictLabel: "REGRESSED",
         verdictMeta: "reverted 2026-05-15",
-        ticks: { 7: '<span class="lk">t+7</span> 3 false positives', 30: '<span class="lk">t+30</span> 1 missed rule', 90: '<span class="lk">t+90</span> <span class="lv-err">reverted</span>' },
+        ticks: { 7: '<span class="lk">+3</span> 3 false positives', 30: '<span class="lk">+10</span> 1 missed rule', 90: '<span class="lk">+30</span> <span class="lv-err">reverted</span>' },
       },
       {
         id: "parallel-task",
@@ -66,7 +66,7 @@ export function ChapterExhibitE() {
         verdict: "self-resolved",
         verdictLabel: "SELF-RESOLVED",
         verdictMeta: "Task tool defaults changed",
-        ticks: { 7: '<span class="lk">t+7</span> 4 invocations', 30: '<span class="lk">t+30</span> 0 invocations', 90: "<span class=\"lk\">t+90</span> upstream patched" },
+        ticks: { 7: '<span class="lk">+3</span> 4 invocations', 30: '<span class="lk">+10</span> 0 invocations', 90: "<span class=\"lk\">+30</span> upstream patched" },
       },
     ];
 
@@ -303,12 +303,13 @@ export function ChapterExhibitE() {
     }
 
     function dayLabel(p: number) {
+      // Internal scale stays 0–90 for the scrubber math; labels read in sessions.
       const d = Math.round(p * 90);
-      if (d === 0) return "t+0 · now";
-      if (d < 7)   return `t+${d} · early`;
-      if (d < 30)  return `t+${d} · week ${Math.ceil(d / 7)}`;
-      if (d < 90)  return `t+${d} · tracking`;
-      return "t+90 · verdict";
+      if (d === 0) return "now";
+      if (d < 7)   return "tracking · early";
+      if (d < 30)  return "+3 sessions";
+      if (d < 90)  return "+10 sessions";
+      return "+30 sessions · verdict";
     }
 
     function renderScrubber() {
@@ -397,7 +398,7 @@ export function ChapterExhibitE() {
       clearEl(expBody!);
       clearEl(verdBody!);
 
-      [["proposals", "drag a retro here"], ["experiments", "start an experiment"], ["verdicts", "resolve at t+90"]].forEach(([col, text]) => {
+      [["proposals", "drag a retro here"], ["experiments", "start an experiment"], ["verdicts", "resolve at +30 sessions"]].forEach(([col, text]) => {
         const bodyEl = root.querySelector<HTMLElement>(`[data-drop="${col}"]`);
         const em = document.createElement("div");
         em.className = "col-empty";
@@ -602,7 +603,7 @@ export function ChapterExhibitE() {
 
   return (
     <figure id="pipeline" className="fig-pipeline" ref={rootRef}
-      aria-label="Interactive four-column pipeline: drag a retro into proposals, start an experiment, then drag the scrubber to t+90 to lock a verdict">
+      aria-label="Interactive four-column pipeline: drag a retro into proposals, start an experiment, then drag the scrubber to +30 sessions to lock a verdict">
       <div className="fig-head">
         <span className="fig-id">Exhibit E</span>
         <span>retro → proposal → experiment → verdict</span>
@@ -632,21 +633,21 @@ export function ChapterExhibitE() {
         <div className="pipeline-col" data-col="verdicts">
           <div className="col-head"><span className="col-num">04</span>verdicts<span className="col-meta" data-count-rejected>locked</span></div>
           <div className="col-body" data-drop="verdicts">
-            <div className="col-empty" data-empty="verdicts">resolve at t+90</div>
+            <div className="col-empty" data-empty="verdicts">resolve at +30 sessions</div>
           </div>
         </div>
       </div>
 
-      <div className="pipeline-scrubber" data-pipeline-scrubber data-position="0" aria-label="scrubber: drag from now to t+90">
+      <div className="pipeline-scrubber" data-pipeline-scrubber data-position="0" aria-label="scrubber: drag from now to +30 sessions">
         <div className="scrubber-rail" data-scrubber-rail>
           <div className="scrubber-fill" data-scrubber-fill></div>
-          <button type="button" className="scrubber-tick" data-tick="0"  style={{left: "0%"}}      aria-label="now"><span>t+0</span></button>
-          <button type="button" className="scrubber-tick" data-tick="7"  style={{left: "33.333%"}} aria-label="t plus 7 days"><span>t+7</span></button>
-          <button type="button" className="scrubber-tick" data-tick="30" style={{left: "66.666%"}} aria-label="t plus 30 days"><span>t+30</span></button>
-          <button type="button" className="scrubber-tick" data-tick="90" style={{left: "100%"}}    aria-label="t plus 90 days"><span>t+90</span></button>
+          <button type="button" className="scrubber-tick" data-tick="0"  style={{left: "0%"}}      aria-label="now"><span>now</span></button>
+          <button type="button" className="scrubber-tick" data-tick="7"  style={{left: "33.333%"}} aria-label="plus 3 sessions"><span>+3</span></button>
+          <button type="button" className="scrubber-tick" data-tick="30" style={{left: "66.666%"}} aria-label="plus 10 sessions"><span>+10</span></button>
+          <button type="button" className="scrubber-tick" data-tick="90" style={{left: "100%"}}    aria-label="plus 30 sessions"><span>+30</span></button>
           <div className="scrubber-handle" data-scrubber-handle style={{left: "0%"}} tabIndex={0} role="slider" aria-valuemin={0} aria-valuemax={90} aria-valuenow={0} aria-label="time scrubber"></div>
         </div>
-        <div className="scrubber-readout" data-scrubber-readout>t+0 · now</div>
+        <div className="scrubber-readout" data-scrubber-readout>now</div>
       </div>
 
       <figcaption>

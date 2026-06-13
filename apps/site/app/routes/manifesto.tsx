@@ -1,8 +1,6 @@
-import { createFileRoute, notFound } from "@tanstack/react-router";
-import { MDXContent } from "@content-collections/mdx/react";
-import { allPages } from "content-collections";
-import { mdxComponents } from "~/components/mdx-components";
+import { createFileRoute } from "@tanstack/react-router";
 import { DocShell } from "~/components/doc-shell";
+import { ManifestoContent } from "./-manifesto.content";
 
 export const Route = createFileRoute("/manifesto")({
   head: () => ({
@@ -11,17 +9,11 @@ export const Route = createFileRoute("/manifesto")({
       { name: "description", content: "Why ax exists - the agent experience layer." },
     ],
   }),
-  loader: () => {
-    const page = allPages.find((p) => p.slug === "manifesto");
-    if (!page) throw notFound();
-    return { page };
-  },
-  component: () => {
-    const { page } = Route.useLoaderData();
-    return (
-      <DocShell eyebrow="position paper">
-        <MDXContent code={page.body} components={mdxComponents} />
-      </DocShell>
-    );
-  },
+  // Content is the curated TS module (-manifesto.content.tsx), not the orphaned
+  // docs/manifesto.md (left in the content collection for a later cleanup PR).
+  component: () => (
+    <DocShell eyebrow="position paper">
+      <ManifestoContent />
+    </DocShell>
+  ),
 });
