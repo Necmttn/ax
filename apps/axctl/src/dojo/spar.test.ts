@@ -5,11 +5,13 @@ import { SurrealClient } from "@ax/lib/db";
 import { AxConfig, AxConfigTest } from "@ax/lib/config";
 import { makeTestSurrealClient } from "@ax/lib/testing/surreal";
 import {
+    COST_TOL,
     fetchSessionMetrics,
     findVariantSession,
     parseSparBrief,
     renderSparBrief,
     renderSparReport,
+    REPAIR_TOL,
     scoreSpar,
 } from "./spar.ts";
 import type { SparBrief, SparMetrics } from "./spar.ts";
@@ -51,6 +53,21 @@ describe("scoreSpar", () => {
     test("mixed: cheaper but more repair", () => {
         expect(scoreSpar(brief.baseline, baseMetrics({ costUsd: 0.9, repairLines: 80 })).verdict).toBe("mixed");
     });
+    test("tolerances: COST_TOL gates the win, REPAIR_TOL flips win -> mixed", () => {
+        const base = brief.baseline;
+        // cost win inside the COST_TOL noise band -> not a win (mixed)
+        const noise = scoreSpar(base, baseMetrics({ costUsd: base.costUsd! - (COST_TOL / 2) }));
+        expect(noise.verdict).toBe("mixed");
+        // cost win clearly past COST_TOL, repair unchanged -> win
+        const win = scoreSpar(base, baseMetrics({ costUsd: base.costUsd! - (COST_TOL * 4) }));
+        expect(win.verdict).toBe("win");
+        // same clear cost win, but repair past REPAIR_TOL -> mixed (tradeoff)
+        const tradeoff = scoreSpar(base, baseMetrics({
+            costUsd: base.costUsd! - (COST_TOL * 4),
+            repairLines: base.repairLines + REPAIR_TOL + 1,
+        }));
+        expect(tradeoff.verdict).toBe("mixed");
+    });
 });
 
 describe("renderSparBrief / parseSparBrief roundtrip", () => {
@@ -66,6 +83,16 @@ describe("renderSparBrief / parseSparBrief roundtrip", () => {
     });
     test("non-brief content -> null", () => {
         expect(parseSparBrief("nope")).toBeNull();
+    });
+    test("baseline block missing `landed` -> null (no silent landed:undefined)", () => {
+        const md = renderSparBrief(brief);
+        const { landed, ...rest } = brief.baseline;
+        void landed;
+        const stripped = md.replace(
+            /```json baseline\n[\s\S]*?\n```/,
+            "```json baseline\n" + JSON.stringify(rest, null, 2) + "\n```",
+        );
+        expect(parseSparBrief(stripped)).toBeNull();
     });
 });
 
@@ -143,6 +170,42 @@ describe("fetchSessionMetrics", () => {
         expect(m.landed).toBe(true);
         expect(m.repairLines).toBeGreaterThan(0);
         expect(m.episodes).toBeGreaterThan(0);
+    });
+
+    test("clean variant: in produced edge but absent from hotSessions -> landed:true, repair:0", async () => {
+        // Regression guard: a session that landed cleanly (produced a commit,
+        // zero verification failures) is FILTERED OUT of churn.hotSessions by
+        // hasVerificationSignal. landed must come from the produced edge, not
+        // hotSessions - otherwise the best outcome scores as a regression.
+        const tc = makeTestSurrealClient({
+            denyWrites: true,
+            routes: {
+                "FROM session_token_usage": [[
+                    { session: "session:`clean`", model: "claude", estimated_cost_usd: 0.7 },
+                ]],
+                // churn base scan: clean session has NO verification signal, so
+                // it never appears here (and thus never in hotSessions).
+                "AS session, source\nFROM session": [[]],
+                // produced edge + touched LOC DO carry the clean session.
+                "FROM produced": [[{ session: "session:`clean`", commit: "commit:`cc`" }]],
+                "FROM touched": [[
+                    { commit: "commit:`cc`", file: "file:`f1`", path: "src/a.ts", additions: 9, deletions: 1 },
+                ]],
+                "AS turn_count": [[
+                    { turn_count: 12, s: "2026-06-11T00:00:00.000Z", e: "2026-06-11T00:05:00.000Z" },
+                ]],
+            },
+        });
+
+        const m = await runDb(
+            fetchSessionMetrics("session:`clean`", new Date("2026-06-11T00:00:00.000Z")),
+            tc.layer,
+        );
+        expect(m.landed).toBe(true);
+        expect(m.repairLines).toBe(0);
+        expect(m.episodes).toBe(0);
+        expect(m.costUsd).toBe(0.7);
+        expect(m.turns).toBe(12);
     });
 
     test("null cost + null turn/wall when nothing matches", async () => {

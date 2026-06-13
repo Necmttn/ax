@@ -17,7 +17,7 @@ import { surrealDate, surrealString } from "@ax/lib/shared/surql";
 import { ProcessService, type ProcessError } from "@ax/lib/process";
 import { findCommitWindow } from "@ax/lib/git-window";
 import { fetchSessionCostMap } from "../metrics/cost-estimate.ts";
-import { fetchSessionChurnSummary } from "../metrics/session-churn.ts";
+import { fetchLandedLocBySession, fetchSessionChurnSummary } from "../metrics/session-churn.ts";
 import { cleanSessionId } from "../metrics/util.ts";
 import { listSessionsNear } from "../dashboard/sessions-query.ts";
 
@@ -69,6 +69,11 @@ export interface SparScore {
 // scoreSpar (pure)
 // ---------------------------------------------------------------------------
 
+/** Cost delta (USD) below this magnitude is treated as noise (no win/regression). */
+export const COST_TOL = 0.05;
+/** Repair-line delta above this counts as materially more repair churn. */
+export const REPAIR_TOL = 20;
+
 const sub = (a: number | null, b: number | null): number | null =>
     a == null || b == null ? null : a - b;
 
@@ -87,8 +92,6 @@ export const scoreSpar = (baseline: SparMetrics, variant: SparMetrics): SparScor
         repairLines: variant.repairLines - baseline.repairLines,
         episodes: variant.episodes - baseline.episodes,
     };
-    const REPAIR_TOL = 20; // lines
-    const COST_TOL = 0.05; // usd, ignore noise
     let verdict: SparVerdict;
     if (!variant.landed) {
         verdict = "regression";
@@ -167,6 +170,26 @@ const section = (content: string, heading: string): string => {
     return m?.[1]?.trim() ?? "";
 };
 
+/** Validate a parsed baseline block into SparMetrics, or null on a bad shape. */
+const asBaselineMetrics = (v: unknown): SparMetrics | null => {
+    if (typeof v !== "object" || v === null) return null;
+    const o = v as Record<string, unknown>;
+    const isFiniteNum = (x: unknown): x is number => typeof x === "number" && Number.isFinite(x);
+    // costUsd/turns/wallMs are `number | null`; reject any other type.
+    const okNullable = (x: unknown): x is number | null => x === null || isFiniteNum(x);
+    if (typeof o.landed !== "boolean") return null;
+    if (!isFiniteNum(o.repairLines) || !isFiniteNum(o.episodes)) return null;
+    if (!okNullable(o.costUsd) || !okNullable(o.turns) || !okNullable(o.wallMs)) return null;
+    return {
+        costUsd: o.costUsd,
+        turns: o.turns,
+        wallMs: o.wallMs,
+        repairLines: o.repairLines,
+        episodes: o.episodes,
+        landed: o.landed,
+    };
+};
+
 export const parseSparBrief = (content: string): SparBrief | null => {
     if (!content.startsWith("---")) return null;
     const id = field(content, "id");
@@ -178,12 +201,17 @@ export const parseSparBrief = (content: string): SparBrief | null => {
 
     const blockMatch = BASELINE_BLOCK.exec(content);
     if (!blockMatch?.[1]) return null;
-    let baseline: SparMetrics;
+    let parsed: unknown;
     try {
-        baseline = JSON.parse(blockMatch[1]) as SparMetrics;
+        parsed = JSON.parse(blockMatch[1]);
     } catch {
         return null;
     }
+    // Shape guard: a hand-edited brief missing `landed` (or with the wrong
+    // type) must not slip through as `landed: undefined`, which would silently
+    // score every variant as a regression.
+    const baseline = asBaselineMetrics(parsed);
+    if (baseline === null) return null;
 
     const prompt = section(content, "Task");
     const deltaRaw = section(content, "Delta");
@@ -248,11 +276,18 @@ interface TurnWallRow {
 
 /**
  * Resolve one session's spar metrics: cost (from the shared cost map), repair
- * /episodes/landed (from the churn summary, matched by clean id), and turns +
- * wall (from a focused single-session lookup).
+ * /episodes (from the churn summary), `landed` (from the `produced` edge), and
+ * turns + wall (from a focused single-session lookup).
  *
- * `landed` here is a proxy (landedLinesAdded > 0); captureBaseline overrides it
- * to true (a baseline is, by definition, a landed task).
+ * `landed` MUST come from the produced edge, NOT from `churn.hotSessions`:
+ * hotSessions is gated by `hasVerificationSignal`, so a CLEAN variant (landed,
+ * zero failures/repair) is absent from it - reading landed off hotSessions
+ * would score the best outcome (clean land) as a regression. The produced-edge
+ * query (`fetchLandedLocBySession`) is immune to that gate. repair/episodes
+ * stay on the churn row - absence -> 0 is correct for a clean session.
+ *
+ * Note: this still pulls a full-window churn summary just for repair/episodes
+ * (acceptable v1); only the `landed` signal uses the targeted produced query.
  */
 export const fetchSessionMetrics = (
     sessionId: string,
@@ -265,11 +300,15 @@ export const fetchSessionMetrics = (
         const costMap = yield* fetchSessionCostMap([sessionId]);
         const costUsd = costMap.get(cleanId)?.estimatedCostUsd ?? null;
 
+        // landed: did this session produce a commit? Read straight off the
+        // produced edge (gate-immune), keyed by clean id.
+        const landedLoc = yield* fetchLandedLocBySession([sessionId]);
+        const landed = landedLoc.bySession.has(cleanId);
+
         const churn = yield* fetchSessionChurnSummary({ since: sinceForChurn, limit: 1000 });
         const churnRow = churn.hotSessions.find((r) => r.session === cleanId);
         const repairLines = churnRow?.repairLinesAdded ?? 0;
         const episodes = churnRow?.episodes ?? 0;
-        const landed = (churnRow?.landedLinesAdded ?? 0) > 0;
 
         // turns + wall: count() over the turn_session_seq index + the session's
         // own start/end timestamps (mirrors enrichSessions' indexed lookup).
@@ -294,7 +333,8 @@ export const fetchSessionMetrics = (
  * Capture + freeze a landed task's baseline from the graph.
  *
  * v1 heuristic: within the commit's [predecessor..commit] window, the landed
- * session is the one with the highest turn_count. `landed` is forced true.
+ * session is the one with the highest turn_count. `landed` is forced true (a
+ * baseline is a landed task by construction).
  *
  * Not unit-tested (needs git + a real graph) - covered by the live spar-plan
  * smoke.
@@ -353,6 +393,10 @@ export const captureBaseline = (
         );
 
         const metrics = yield* fetchSessionMetrics(landedSession.id, from);
+        // Belt-and-suspenders: fetchSessionMetrics now derives landed from the
+        // produced edge, but the highest-turn_count session in the window is
+        // not guaranteed to be the exact commit producer. A baseline is a
+        // landed task by construction, so force it true.
         const baseline: SparMetrics = { ...metrics, landed: true };
 
         const id = `${sha.slice(0, 8)}-${nowIso.slice(0, 10)}`;
