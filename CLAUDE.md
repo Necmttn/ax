@@ -225,6 +225,10 @@ warn / inject; defects fail OPEN. `GitEnv` service makes guards layer-testable.
   into provider configs via the existing codecs (ax ownership markers)
 - `ax hooks backtest <file> [--days]` - replay tool_call history through the
   hook in-process; state-dependent checks use CURRENT repo state (caveat printed)
+- `ax hooks bench <file> [--days --runs --budget-ms --json]` - latency ledger:
+  per-fire p50/p95 from real bun spawns, est fires/day from tool_call history,
+  installed-chain budget vs --budget-ms default 250. Pairs with `ax hooks backtest`
+  (benefit) for dojo hook proposals.
 - `ax hooks cases` - deterministic feedback-case backtests (enforce-worktree
   candidate query + structured pass/fail verdict; separate from backtest)
 - Codex: new hook entries written to `~/.codex/hooks.json` when that file

@@ -20,6 +20,7 @@ import { HookNotFoundError } from "./errors.ts";
 import { installHookFile } from "./sdk-install.ts";
 import { GitEnvLive } from "@ax/hooks-sdk/git-env";
 import { fetchRows, replayRows, summarize, formatReport } from "./backtest.ts";
+import { benchHook, renderLedger } from "./bench.ts";
 import type { HookDefinition } from "@ax/hooks-sdk/define";
 
 /**
@@ -303,6 +304,22 @@ const backtestCommand = Command.make(
         }),
 ).pipe(Command.withDescription("Replay historical tool_call rows through an SDK hook in-process (--days=30 --provider=claude --json)"));
 
+const benchCommand = Command.make(
+    "bench",
+    {
+        file: Argument.string("file"),
+        days: Flag.integer("days").pipe(Flag.withDefault(30)),
+        runs: Flag.integer("runs").pipe(Flag.withDefault(20)),
+        budgetMs: Flag.integer("budget-ms").pipe(Flag.withDefault(250)),
+        json: Flag.boolean("json").pipe(Flag.withDefault(false)),
+    },
+    ({ file, days, runs, budgetMs, json: asJson }) =>
+        Effect.gen(function* () {
+            const ledger = yield* benchHook({ file, days, runs, budgetMs });
+            console.log(asJson ? prettyPrint(ledger) : renderLedger(ledger));
+        }).pipe(Effect.provide(HookProviderRegistryDefault)),
+).pipe(Command.withDescription("Latency ledger for an SDK hook: per-fire p50/p95 (spawn) + fires/day + installed-chain budget (--days=30 --runs=20 --budget-ms=250 --json)"));
+
 /** Spliced into `hooksCommand`'s subcommand list in cli/index.ts. */
 export const hooksConfigSubcommands = [
     configCommand,
@@ -314,4 +331,5 @@ export const hooksConfigSubcommands = [
     initCommand,
     installCommand,
     backtestCommand,
+    benchCommand,
 ];

@@ -55,7 +55,9 @@ axctl evidence <guidance-next|session-summary|weekly>
 axctl improve <list|show|accept|reject|verdict|checkpoint|reset>
 axctl retro <emit|list|pending|brief|reflect|meta|plan>   # the retro-loop CLI
 axctl hook <fire>                           # hook helper invoked from settings.json
-axctl hooks <summary|invocations|backtest|session|config ...>   # + hook-config CRUD
+axctl hooks <summary|invocations|backtest|bench|session|config ...>   # + hook-config CRUD
+axctl hooks bench <file> [--days=N] [--runs=N] [--budget-ms=N] [--json]
+                                            # latency ledger: per-fire p50/p95 (spawn) + fires/day + installed-chain budget
 
 axctl daemon <status|start|stop|restart>
 axctl doctor                                # local-install health check
