@@ -1,6 +1,18 @@
 import { describe, expect, test } from "bun:test";
-import { buildRepresentativePayload, percentiles, renderLedger } from "./bench.ts";
+import { Effect, Layer } from "effect";
+import { buildRepresentativePayload, estFiresPerDay, percentiles, renderLedger } from "./bench.ts";
 import type { BenchLedger } from "./bench.ts";
+import { SurrealClient } from "@ax/lib/db";
+
+// fake-client harness (mirrors apps/axctl/src/improve/show.test.ts)
+const fakeClient = (...fixtures: unknown[][]) => {
+    let i = 0;
+    return {
+        layer: Layer.succeed(SurrealClient, {
+            query: <T>(_: string) => Effect.succeed([(fixtures[i++] ?? [])] as unknown as T),
+        } as never),
+    };
+};
 
 describe("percentiles", () => {
     test("p50/p95/min/max/mean over samples", () => {
@@ -67,5 +79,22 @@ describe("renderLedger", () => {
         const out = renderLedger({ ...ledger, frequency: { perDay: null, matched: [], basis: "n/a" }, dailyCostMs: null });
         expect(out).toContain("fires/day:     n/a");
         expect(out).not.toContain("daily cost:");
+    });
+});
+
+describe("estFiresPerDay", () => {
+    test("counts matched tool_calls / days", async () => {
+        const client = fakeClient([{ total: 420 }]); // 420 matched over 30d
+        const r = await Effect.runPromise(
+            estFiresPerDay(["Bash", "Edit"], 30).pipe(Effect.provide(client.layer)),
+        );
+        expect(r.perDay).toBe(14);
+        expect(r.matched).toEqual(["Bash", "Edit"]);
+    });
+    test("no tools (non-tool hook) -> perDay null, basis n/a", async () => {
+        const r = await Effect.runPromise(
+            estFiresPerDay([], 30).pipe(Effect.provide(fakeClient([]).layer)),
+        );
+        expect(r.perDay).toBeNull();
     });
 });

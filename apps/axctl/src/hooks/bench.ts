@@ -6,6 +6,11 @@
  * live CLI smoke. Built incrementally across the hooks-bench plan tasks.
  */
 
+import { Effect } from "effect";
+import { SurrealClient } from "@ax/lib/db";
+import type { DbError } from "@ax/lib/errors";
+import { surrealDate, surrealString } from "@ax/lib/shared/surql";
+
 export interface PerFireStats {
     readonly p50: number; readonly p95: number;
     readonly min: number; readonly max: number; readonly mean: number;
@@ -76,3 +81,66 @@ export const renderLedger = (l: BenchLedger): string => {
     }
     return lines.join("\n");
 };
+
+// ---------------------------------------------------------------------------
+// Effect glue: fire-frequency query + subprocess spawn timing
+// ---------------------------------------------------------------------------
+
+export interface FireFrequency {
+    readonly perDay: number | null;
+    readonly matched: string[];
+    readonly basis: string;
+}
+
+/**
+ * Estimate fires/day for a tool-matching hook: COUNT tool_call rows whose
+ * `name` is in the hook's matched tools over the last `days`, divided by days.
+ * Non-tool hooks (no matched tools) have no tool_call basis -> perDay null.
+ *
+ * Datetime cutoff inlined via `surrealDate` (SurrealClient.query takes no
+ * bindings; same pattern as report-queries.ts). Count idiom: top-level
+ * `count() AS total ... GROUP ALL` (mirrors wrapped.ts / recall.ts; the repo
+ * memory note that count needs GROUP ALL).
+ */
+export const estFiresPerDay = (
+    tools: readonly string[],
+    days: number,
+): Effect.Effect<FireFrequency, DbError, SurrealClient> =>
+    Effect.gen(function* () {
+        if (tools.length === 0) return { perDay: null, matched: [], basis: "n/a" };
+        const db = yield* SurrealClient;
+        const since = new Date(Date.now() - days * 86_400_000);
+        const list = tools.map((t) => surrealString(t)).join(", ");
+        const r = yield* db.query<[Array<{ total: number }>]>(
+            `SELECT count() AS total FROM tool_call WHERE name IN [${list}] AND ts > ${surrealDate(since)} GROUP ALL;`,
+        );
+        const total = r?.[0]?.[0]?.total ?? 0;
+        return { perDay: Math.round(total / days), matched: [...tools], basis: `tool_call/${days}d` };
+    });
+
+/**
+ * Spawn `bun <absFile>` feeding `payload` on stdin, `runs` times (capped 1-100),
+ * timing each invocation with `performance.now()`. Returns all wall-time samples
+ * (ms). Covered by the live CLI smoke (Task 3), not a unit test - spawning bun
+ * in unit tests is slow/flaky.
+ */
+export const measureSpawn = (
+    absFile: string,
+    payload: string,
+    runs: number,
+): Effect.Effect<number[]> =>
+    Effect.promise(async () => {
+        const samples: number[] = [];
+        const n = Math.min(100, Math.max(1, runs));
+        for (let i = 0; i < n; i++) {
+            const t0 = performance.now();
+            const proc = Bun.spawn(["bun", absFile], {
+                stdin: new TextEncoder().encode(payload),
+                stdout: "ignore",
+                stderr: "ignore",
+            });
+            await proc.exited;
+            samples.push(performance.now() - t0);
+        }
+        return samples;
+    });
