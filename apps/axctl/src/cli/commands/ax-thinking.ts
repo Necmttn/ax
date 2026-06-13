@@ -13,6 +13,7 @@
 import { Effect } from "effect";
 import { Command, Flag } from "effect/unstable/cli";
 import { prettyPrint } from "@ax/lib/json";
+import { usd } from "../render.ts";
 import { fetchThinking } from "../../queries/thinking-analytics.ts";
 import type { RuntimeManifest } from "./manifest.ts";
 import { fail, jsonFlag } from "./shared.ts";
@@ -32,6 +33,7 @@ const cmdThinking = (input: { readonly sinceDays: number; readonly json: boolean
         }
 
         const totalTokens = result.models.reduce((s, m) => s + m.thinking_tokens, 0);
+        const totalThinkCost = result.models.reduce((s, m) => s + m.thinking_cost_usd, 0);
         if (result.models.length === 0 && result.efforts.length === 0) {
             console.log("(no sessions in the requested window)");
             return;
@@ -40,14 +42,22 @@ const cmdThinking = (input: { readonly sinceDays: number; readonly json: boolean
         console.log(
             `${"model".padEnd(28)}  ${"sessions".padStart(8)}  ${"asst_turns".padStart(10)}  ` +
             `${"think_turns".padStart(11)}  ${"think%".padStart(7)}  ${"blocks".padStart(8)}  ` +
-            `${"think_tokens".padStart(12)}  ${"tok/turn".padStart(10)}`,
+            `${"think_tokens".padStart(12)}  ${"tok/turn".padStart(10)}  ${"think_cost".padStart(12)}`,
         );
         for (const m of result.models) {
             console.log(
                 `${m.model.slice(0, 28).padEnd(28)}  ${num(m.sessions).padStart(8)}  ` +
                 `${num(m.assistant_turns).padStart(10)}  ${num(m.thinking_turns).padStart(11)}  ` +
                 `${pct(m.thinking_turn_pct).padStart(7)}  ${num(m.thinking_blocks).padStart(8)}  ` +
-                `${num(m.thinking_tokens).padStart(12)}  ${num(Math.round(m.avg_tokens_per_thinking_turn)).padStart(10)}`,
+                `${num(m.thinking_tokens).padStart(12)}  ${num(Math.round(m.avg_tokens_per_thinking_turn)).padStart(10)}  ` +
+                `${usd(m.thinking_cost_usd, 2).padStart(12)}`,
+            );
+        }
+        if (result.models.length > 1 && totalThinkCost > 0) {
+            console.log(
+                `${"TOTAL".padEnd(28)}  ${"".padStart(8)}  ${"".padStart(10)}  ` +
+                `${"".padStart(11)}  ${"".padStart(7)}  ${"".padStart(8)}  ` +
+                `${num(totalTokens).padStart(12)}  ${"".padStart(10)}  ${usd(totalThinkCost, 2).padStart(12)}`,
             );
         }
 
@@ -77,7 +87,15 @@ const cmdThinking = (input: { readonly sinceDays: number; readonly json: boolean
             for (const r of reasoningRows) {
                 console.log(
                     `  ${r.model.slice(0, 28).padEnd(28)}  ${num(r.reasoning_tokens).padStart(12)}  ` +
-                    `of ${num(r.completion_tokens).padStart(12)}  ${pct(r.reasoning_share_pct).padStart(7)}`,
+                    `of ${num(r.completion_tokens).padStart(12)}  ${pct(r.reasoning_share_pct).padStart(7)}  ` +
+                    `${usd(r.reasoning_cost_usd, 2).padStart(12)}`,
+                );
+            }
+            const totalReasoningCost = reasoningRows.reduce((s, r) => s + r.reasoning_cost_usd, 0);
+            if (reasoningRows.length > 1 && totalReasoningCost > 0) {
+                console.log(
+                    `  ${"TOTAL".padEnd(28)}  ${"".padStart(12)}  ${"".padStart(15)}  ${"".padStart(7)}  ` +
+                    `${usd(totalReasoningCost, 2).padStart(12)}`,
                 );
             }
         }
