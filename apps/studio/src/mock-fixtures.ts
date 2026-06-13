@@ -289,7 +289,96 @@ const EMPTY_TOOL_FAILURES: ToolFailuresResponse = { rows: [], total: 0 } as neve
 const EMPTY_GRAPH: GraphExplorerPayload = { mode: "file-attention", limit: 0, nodes: [], edges: [], query: null } as never;
 const EMPTY_SKILL_GRAPH: SkillGraphPayload = { min_count: 0, limit: 0, node_count: 0, edge_count: 0, max_edge_count: 0, nodes: [], edges: [] };
 const EMPTY_RECALL: RecallResponse = { q: "", hits: [], commits: [], skills: [], truncated: false, total_count: 0, total_counts: { turn: 0, commit: 0, skill: 0 }, window: { offset: 0, limit: 50 } };
-const EMPTY_WRAPPED: WrappedProfile = { generatedAt: NOW, ready: false, sections: [] } as never;
+/** Deterministic ~14-week activity series for the wrapped board demo. */
+const MOCK_WRAPPED_DAYS = ((): WrappedProfile["usage"]["days"] => {
+    const out: Array<{ date: string; sessions: number; turns: number; tokens: number | null }> = [];
+    const start = Date.parse("2026-02-16T00:00:00.000Z");
+    for (let i = 0; i < 98; i++) {
+        // A pseudo-random-but-fixed weave: busier midweek, a couple of dead days.
+        const wobble = Math.sin(i * 0.7) + Math.sin(i * 0.27) * 0.6 + Math.cos(i * 1.3) * 0.4;
+        const base = Math.max(0, Math.round((wobble + 1.4) * 2.3));
+        const sessions = i % 19 === 0 ? 0 : base;
+        out.push({
+            date: new Date(start + i * 86_400_000).toISOString().slice(0, 10),
+            sessions,
+            turns: sessions * 14,
+            tokens: sessions === 0 ? 0 : sessions * 92_000,
+        });
+    }
+    return out;
+})();
+
+const MOCK_WRAPPED: WrappedProfile = {
+    generatedAt: NOW,
+    period: { label: "Last 98 days", startedAt: "2026-02-16T00:00:00.000Z", endedAt: NOW },
+    usage: {
+        sessions: 412,
+        messages: 8930,
+        totalTokens: 41_800_000,
+        activeDays: 92,
+        currentStreakDays: 14,
+        longestStreakDays: 41,
+        peakHour: 23,
+        favoriteModel: "claude-fable-5",
+        tokenComparison: "≈ 418 novels of text",
+        days: MOCK_WRAPPED_DAYS,
+    },
+    primaryArchetype: {
+        id: "night-owl-builder",
+        label: "Night-Owl Builder",
+        score: 0.86,
+        confidence: "high",
+        publicLine: "You ship hardest after midnight - long, focused build sessions with the lights off.",
+        internalExplanation: "73% of tool calls land between 22:00 and 03:00; median session is 47 turns.",
+        evidence: [],
+    },
+    secondaryArchetypes: [],
+    facts: [],
+    metrics: {
+        toolCalls: 18_420,
+        toolFailures: 612,
+        distinctTools: 23,
+        distinctSkills: 38,
+        repositories: 6,
+        verificationCalls: 2_140,
+        spawnedAgents: 96,
+    },
+    privacy: { publicSafe: true, redactedFields: [] },
+    cards: [
+        {
+            question: "How many agents at once?",
+            headline: "3",
+            body: "Your busiest session fanned out to three parallel subagents before merging the work back.",
+            sensitivity: "public",
+            position: 0,
+            series: [1, 1, 2, 3, 2, 3, 1, 2, 3, 2, 1, 2],
+            series_label: "concurrent subagents / week",
+        },
+        {
+            question: "What did you lean on most?",
+            headline: "superpowers",
+            body: "The superpowers skill pack fired in 41% of your sessions - brainstorming, TDD, and worktrees led the pack.",
+            sensitivity: "public",
+            position: 1,
+            series: [4, 6, 5, 8, 7, 9, 6, 8, 10, 7, 9, 11],
+            series_label: "skill invocations / week",
+        },
+        {
+            question: "Where did the tokens go?",
+            headline: "41.8M",
+            body: "Most of your spend rode on claude-fable-5, with cheaper models routed to the mechanical dispatches.",
+            sensitivity: "public",
+            position: 2,
+        },
+        {
+            question: "Your longest unbroken run?",
+            headline: "41 days",
+            body: "A six-week streak from March into April - the longest stretch you kept the graph fed every single day.",
+            sensitivity: "public",
+            position: 3,
+        },
+    ],
+};
 
 // ---------------------------------------------------------------------------
 // Dispatch
@@ -362,7 +451,7 @@ export async function mockFetch<T>(input: RequestInfo, init?: RequestInit): Prom
     if (path.startsWith("/api/graph-explorer")) return EMPTY_GRAPH as unknown as T;
     if (path.startsWith("/api/skill-graph")) return EMPTY_SKILL_GRAPH as unknown as T;
     if (path.startsWith("/api/recall")) return EMPTY_RECALL as unknown as T;
-    if (path === "/api/wrapped" || path === "/api/wrapped/public-preview") return EMPTY_WRAPPED as unknown as T;
+    if (path === "/api/wrapped" || path === "/api/wrapped/public-preview") return MOCK_WRAPPED as unknown as T;
 
     if (path === "/api/wrapped/generate-brief") {
         return { brief: "## Task: Write my Agent Wrapped cards (mock)\n\nConnect a local daemon for the real brief." } as unknown as T;
