@@ -6,6 +6,8 @@ $3,956.59 of that was subagents - the Task dispatches my main agent fires off to
 
 I didn't choose that. Nobody chooses that. It's the default.
 
+One note before the receipts: the priciest model in this data is `claude-fable-5`, which has since been retired. That doesn't soften the point - it is the point. You can't bet on any single model staying available or staying cheap. Fable today, whatever tops the price list next quarter tomorrow. The leak isn't a model. It's how your subagents route. That's the thing you can actually measure and fix.
+
 ## What a single dispatch costs, measured both ways
 
 Take one dispatch from my history: "Implement Task 3: session map strip." Bounded scope, written spec, verifiable output. It ran `inherit`, landed on fable, and cost $50.26. ax re-prices the same dispatch at sonnet rates, same token counts: $15.08.
@@ -42,7 +44,7 @@ claude-sonnet-4-6   517 dispatches    $  478.36
 claude-haiku        114 dispatches    $   47.32
 ```
 
-Read that twice. Sonnet did 517 review-and-implement dispatches for $478. Fable did 247 for $1,979 - 4x the spend for half the dispatches, on the same shapes of bounded work.
+Read that twice. Sonnet did 517 review-and-implement dispatches for $478. Fable did 247 for $1,979 - 4x the spend for half the dispatches, on the same shapes of bounded work. Fable's gone now; read its row as whatever frontier model your inherit dispatches land on this month. The shape of the waste outlives the price list.
 
 `ax dispatches --candidates` flags $605.02 of that month as addressable: inherit dispatches that match a routine routing class and would have run fine one tier down. That's $7,260 a year, on my own disk.
 
