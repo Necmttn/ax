@@ -11998,3 +11998,246 @@ footer .right {
     .pf-rawvals-table tbody th { width: 84px; }
     .pf-rawvals-val { white-space: normal; }
 }
+
+/* ============================================================
+   CLI reference (/docs/cli-reference)
+   - receipts aesthetic: sticky mono command index down the side,
+     job-grouped sections with $-eyebrows, per-command cards with a
+     signature, key flags, ONE real output receipt, and deep flag
+     detail behind a disclosure. Ink-on-paper, reuses root tokens.
+   ============================================================ */
+.cliref .doc-head .eyebrow { font-family: var(--mono); }
+
+.cliref-layout {
+    display: grid;
+    grid-template-columns: 220px minmax(0, 1fr);
+    gap: 48px;
+    align-items: start;
+    margin-top: 24px;
+}
+
+/* --- sticky command index --- */
+.cliref-index {
+    position: sticky;
+    top: 24px;
+    align-self: start;
+    max-height: calc(100vh - 48px);
+    overflow-y: auto;
+    border-right: 1px solid var(--line);
+    padding-right: 20px;
+}
+.cliref-index__label {
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin: 0 0 14px;
+}
+.cliref-index__group { margin-bottom: 18px; }
+.cliref-index__eyebrow {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--green);
+    margin: 0 0 6px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.cliref-index nav ul {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+}
+.cliref-index nav li { margin: 0; }
+.cliref-index nav a {
+    display: block;
+    font-family: var(--mono);
+    font-size: 13px;
+    color: var(--ink);
+    text-decoration: none;
+    padding: 3px 0;
+    border-bottom: 1px solid transparent;
+    transition: color 0.12s ease;
+}
+.cliref-index nav a:hover { color: var(--blue); }
+
+/* --- job groups --- */
+.cliref-group { margin-bottom: 56px; }
+.cliref-group__head {
+    border-top: 1px solid var(--line);
+    padding-top: 20px;
+    margin-bottom: 24px;
+    max-width: 720px;
+}
+.cliref-group__eyebrow {
+    font-family: var(--mono);
+    font-size: 12px;
+    letter-spacing: 0.04em;
+    color: var(--green);
+    margin: 0 0 8px;
+}
+.cliref-group__title {
+    font-family: var(--serif);
+    font-size: 28px;
+    line-height: 1.1;
+    color: var(--ink);
+    margin: 0 0 8px;
+}
+.cliref-group__blurb {
+    font-family: var(--sans);
+    font-size: 16px;
+    line-height: 1.55;
+    color: var(--muted);
+    margin: 0;
+}
+.cliref-group__cards {
+    display: grid;
+    gap: 20px;
+}
+
+/* --- command card --- */
+.cliref-card {
+    border: 1px solid var(--line);
+    background: var(--panel);
+    border-radius: 10px;
+    padding: 20px 22px 18px;
+    scroll-margin-top: 24px;
+}
+.cliref-card__head { margin-bottom: 14px; }
+.cliref-card__name {
+    font-family: var(--mono);
+    font-size: 18px;
+    font-weight: 600;
+    color: var(--ink);
+    margin: 0 0 6px;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 8px;
+}
+.cliref-card__subs {
+    display: inline-flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+.cliref-card__sub {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--muted);
+    background: var(--page);
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    padding: 1px 6px;
+}
+.cliref-card__job {
+    font-family: var(--sans);
+    font-size: 15px;
+    line-height: 1.5;
+    color: var(--ink);
+    margin: 0;
+}
+.cliref-card__sig {
+    font-family: var(--mono);
+    font-size: 13px;
+    color: var(--ink);
+    background: var(--page);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    padding: 10px 12px;
+    margin: 0 0 14px;
+    overflow-x: auto;
+}
+.cliref-card__sig code { font-family: var(--mono); }
+
+.cliref-card__flags {
+    margin: 0 0 14px;
+    display: grid;
+    gap: 6px;
+}
+.cliref-card__flag {
+    display: grid;
+    grid-template-columns: minmax(140px, max-content) 1fr;
+    gap: 14px;
+    align-items: baseline;
+}
+.cliref-card__flag dt {
+    font-family: var(--mono);
+    font-size: 12.5px;
+    color: var(--blue);
+}
+.cliref-card__flag dd {
+    font-family: var(--sans);
+    font-size: 13.5px;
+    color: var(--muted);
+    margin: 0;
+}
+
+.cliref-card__receipt {
+    font-family: var(--mono);
+    font-size: 12px;
+    line-height: 1.5;
+    color: #e8e6df;
+    background: #1a1a18;
+    border-radius: 8px;
+    padding: 14px 16px;
+    margin: 0;
+    overflow-x: auto;
+    white-space: pre;
+}
+.cliref-card__receipt code { font-family: var(--mono); }
+
+.cliref-card__detail { margin-top: 12px; }
+.cliref-card__detail summary {
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--muted);
+    cursor: pointer;
+    list-style: none;
+    user-select: none;
+    padding: 4px 0;
+}
+.cliref-card__detail summary::-webkit-details-marker { display: none; }
+.cliref-card__detail summary::before {
+    content: "▸ ";
+    color: var(--muted);
+}
+.cliref-card__detail[open] summary::before { content: "▾ "; }
+.cliref-card__detail summary:hover { color: var(--ink); }
+.cliref-card__detail ul {
+    margin: 8px 0 0;
+    padding-left: 18px;
+}
+.cliref-card__detail li {
+    font-family: var(--sans);
+    font-size: 13.5px;
+    line-height: 1.55;
+    color: var(--muted);
+    margin: 6px 0;
+}
+.cliref-card__detail li::marker { color: var(--line); }
+
+.cliref-card__receipt::-webkit-scrollbar,
+.cliref-card__sig::-webkit-scrollbar { height: 6px; }
+.cliref-card__receipt::-webkit-scrollbar-thumb { background: #3a3a3a; border-radius: 3px; }
+.cliref-card__sig::-webkit-scrollbar-thumb { background: var(--line); border-radius: 3px; }
+
+@media (max-width: 860px) {
+    .cliref-layout { grid-template-columns: 1fr; gap: 24px; }
+    .cliref-index {
+        position: static;
+        max-height: none;
+        border-right: none;
+        border-bottom: 1px solid var(--line);
+        padding-right: 0;
+        padding-bottom: 16px;
+    }
+    .cliref-index nav { columns: 2; column-gap: 24px; }
+    .cliref-index__group { break-inside: avoid; }
+}
+@media (max-width: 480px) {
+    .cliref-group__title { font-size: 24px; }
+    .cliref-card { padding: 16px 16px 14px; }
+    .cliref-card__flag { grid-template-columns: 1fr; gap: 2px; }
+    .cliref-index nav { columns: 1; }
+}
