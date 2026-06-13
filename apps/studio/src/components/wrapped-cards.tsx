@@ -1,19 +1,30 @@
 import type { WrappedCardDto } from "@ax/lib/shared/dashboard-types";
 
 /**
- * Trace cards - the ax-native wrapped deck. Each card opens with an
- * activity-bar strip in the card's accent (the house sparkline/heatmap
- * material), then a monospace query eyebrow, a serif headline, and a quiet
- * body. Accents rotate through the studio's luminance-matched palette;
- * the bars are deterministic per headline so the deck is stable.
+ * Trace cards - the ax-native wrapped deck, rendered as nullframe-style dark
+ * instrument tiles. Each card opens with an activity-bar strip in the card's
+ * accent (the house sparkline material, real series when grounded), then a
+ * monospace query eyebrow, a serif headline, and a quiet body. Cards slam in
+ * on a stagger and sweep a shine on hover (CSS, see .wrapped-board .nf-card).
  */
-export function WrappedCardGrid({ cards }: { readonly cards: ReadonlyArray<WrappedCardDto> }) {
+export function WrappedCardGrid({
+    cards,
+    startIndex = 0,
+}: {
+    readonly cards: ReadonlyArray<WrappedCardDto>;
+    /** Stagger offset so the deck animates in after the stats bento. */
+    readonly startIndex?: number;
+}) {
     return (
-        <div className="wrapped-cards" aria-label="Wrapped recap cards">
+        <>
             {cards.map((card, i) => (
-                <WrappedCardView key={`${card.position}-${card.headline}`} card={card} index={i} />
+                <WrappedCardView
+                    key={`${card.position}-${card.headline}`}
+                    card={card}
+                    index={startIndex + i}
+                />
             ))}
-        </div>
+        </>
     );
 }
 
@@ -37,7 +48,7 @@ function* seededBars(seed: string, count: number): Generator<number> {
     }
 }
 
-const BAR_COUNT = 22;
+const BAR_COUNT = 24;
 
 /** Normalize a real data series into 8..100% bar heights. */
 const normalizeSeries = (series: ReadonlyArray<number>): number[] => {
@@ -54,27 +65,19 @@ function WrappedCardView({ card, index }: { readonly card: WrappedCardDto; reado
         ? normalizeSeries(card.series ?? [])
         : [...seededBars(card.headline, BAR_COUNT)];
     return (
-        <article className={`wrapped-card accent-${accent}`}>
-            <div
-                className="wrapped-card-strip"
-                aria-hidden={grounded ? undefined : true}
-                title={grounded ? (card.series_label ?? undefined) : undefined}
-            >
+        <article
+            className={`nf-card accent-${accent}`}
+            style={{ animationDelay: `${index * 0.06}s` }}
+        >
+            <div className="nf-strip" aria-hidden="true" title={grounded ? (card.series_label ?? undefined) : undefined}>
                 {bars.map((h, i) => (
                     <i key={i} style={{ height: `${h}%` }} />
                 ))}
-                {grounded && card.series_label ? (
-                    <span className="wrapped-card-series-label">{card.series_label}</span>
-                ) : null}
             </div>
-            <div className="wrapped-card-copy">
-                <span className="wrapped-card-eyebrow">$ {card.question}</span>
-                <h3 className="wrapped-card-headline">{card.headline}</h3>
-                <p className="wrapped-card-body">{card.body}</p>
-                {card.sensitivity === "sensitive" ? (
-                    <span className="badge archive wrapped-card-flag">private</span>
-                ) : null}
-            </div>
+            <span className="nf-eyebrow">$ {card.question}</span>
+            <h3 className="nf-headline">{card.headline}</h3>
+            <p className="nf-body">{card.body}</p>
+            {card.sensitivity === "sensitive" ? <span className="nf-flag">private</span> : null}
         </article>
     );
 }

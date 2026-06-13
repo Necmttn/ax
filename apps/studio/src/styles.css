@@ -3069,3 +3069,444 @@ td.skill-cell .description {
     font-size: 18px;
     color: var(--ink);
 }
+
+/* ============================================================================
+   nullframe primitives - dot-matrix numerals + slam/glim/segbar/shine motion.
+   Adapted from github.com/m1ckc3s/nullframe (MIT, (c) 2026 Mick Cesanek).
+   Reused across the wrapped board; profile + landing pull the same grammar.
+   ========================================================================= */
+@font-face {
+    font-family: "Doto";
+    font-style: normal;
+    font-weight: 100 900;
+    font-display: swap;
+    src: url("./assets/fonts/doto.woff2") format("woff2");
+}
+
+/* Dot-matrix numerals. tabular-nums keeps digits from jittering as they tick. */
+.ax-doto {
+    font-family: "Doto", ui-monospace, monospace;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: 0.01em;
+}
+
+@keyframes ax-seg-in {
+    to {
+        transform: scale(1);
+        opacity: 1;
+    }
+}
+@keyframes ax-cell-slam {
+    60% {
+        transform: scale(1.35);
+    }
+    to {
+        transform: scale(1);
+    }
+}
+@keyframes ax-streak-wave {
+    0%,
+    100% {
+        filter: brightness(0.5);
+    }
+    50% {
+        filter: brightness(1.25);
+    }
+}
+@keyframes ax-shine {
+    0% {
+        left: -140px;
+        opacity: 1;
+    }
+    100% {
+        left: 110%;
+        opacity: 0;
+    }
+}
+@keyframes ax-card-in {
+    from {
+        opacity: 0;
+        transform: translateY(18px) scale(0.96);
+    }
+    to {
+        opacity: 1;
+        transform: none;
+    }
+}
+@keyframes ax-led-pulse {
+    0%,
+    100% {
+        opacity: 1;
+    }
+    50% {
+        opacity: 0.18;
+    }
+}
+
+/* Segmented bar */
+.ax-segbar {
+    display: flex;
+    gap: 3px;
+    height: 12px;
+}
+.ax-segbar i {
+    flex: 1;
+    background: #242424;
+    transform: scale(0.3);
+    opacity: 0;
+    animation: ax-seg-in 0.3s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+}
+.ax-segbar.ink i.on {
+    background: var(--nf-pri, #e8e8e8);
+}
+.ax-segbar.green i.on {
+    background: var(--nf-green, #4a9e5c);
+}
+.ax-segbar.orange i.on {
+    background: var(--nf-orange, #f26522);
+}
+.ax-segbar.accent i.on {
+    background: var(--card-accent, var(--nf-orange, #f26522));
+}
+.ax-segbar.wave i.on {
+    animation:
+        ax-seg-in 0.3s cubic-bezier(0.34, 1.56, 0.64, 1) forwards,
+        ax-streak-wave 2.4s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+}
+
+/* Contribution cell grid */
+.ax-cell-grid {
+    display: grid;
+    align-content: center;
+    justify-content: start;
+}
+.ax-cell-grid i {
+    display: block;
+    border-radius: 2px;
+    background: #1c1c1c;
+    transform: scale(0);
+    animation: ax-cell-slam 0.38s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+    transition: background 0.5s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.ax-cell-grid i.lvl-1 {
+    background: #1e3526;
+}
+.ax-cell-grid i.lvl-2 {
+    background: #2c5639;
+}
+.ax-cell-grid i.lvl-3 {
+    background: #3f8a50;
+}
+.ax-cell-grid i.lvl-4 {
+    background: #62c878;
+}
+.ax-cell-grid i.glim {
+    background: #fff;
+    transition: background 0.12s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* Glyph reel canvas */
+.ax-glyph-reel {
+    width: 100%;
+    height: 100%;
+    min-height: 0;
+}
+.ax-glyph-reel canvas {
+    display: block;
+    width: 100%;
+    height: 100%;
+}
+
+/* LED status dot */
+.ax-led {
+    display: inline-block;
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: var(--nf-orange, #f26522);
+    animation: ax-led-pulse 2.4s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+    flex: none;
+}
+.ax-led.red {
+    background: var(--nf-red, #d71921);
+    width: 7px;
+    height: 7px;
+    animation-duration: 1.6s;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .ax-segbar i,
+    .ax-segbar.wave i.on,
+    .ax-cell-grid i,
+    .ax-led,
+    .wrapped-board .nf-card {
+        animation: none !important;
+        transform: none;
+        opacity: 1;
+    }
+}
+
+/* ============================================================================
+   Wrapped board - the dark "instrument panel" island. Scoped dark tokens so
+   nothing leaks into studio's light chrome; the masthead + tabs stay light
+   above it, the recap itself goes full-bleed black like a workstation HUD.
+   ========================================================================= */
+.wrapped-board {
+    --nf-black: #0a0a0a;
+    --nf-surface: #111;
+    --nf-surface-2: #1a1a1a;
+    --nf-border: #222;
+    --nf-border-hi: #333;
+    --nf-dim: #666;
+    --nf-sec: #999;
+    --nf-pri: #e8e8e8;
+    --nf-display: #fff;
+    --nf-orange: #f26522;
+    --nf-red: #d71921;
+    --nf-green: #4a9e5c;
+
+    margin: 16px 0 8px;
+    padding: 18px;
+    border-radius: 18px;
+    background: var(--nf-black);
+    background-image: radial-gradient(circle, #1d1d1d 1.1px, transparent 1.1px);
+    background-size: 16px 16px;
+    background-position: 8px 8px;
+    color: var(--nf-pri);
+}
+
+.wrapped-board .nf-grid {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 10px;
+}
+@media (max-width: 1020px) {
+    .wrapped-board .nf-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+}
+@media (max-width: 640px) {
+    .wrapped-board .nf-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
+.wrapped-board .nf-card {
+    position: relative;
+    overflow: hidden;
+    background: var(--nf-surface);
+    border: 1px solid var(--nf-border);
+    border-radius: 16px;
+    padding: 20px;
+    display: flex;
+    flex-direction: column;
+    min-height: 168px;
+    opacity: 0;
+    animation: ax-card-in 0.5s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+    transition: border-color 0.2s ease-out;
+}
+.wrapped-board .nf-card:hover {
+    border-color: var(--nf-border-hi);
+}
+/* The accent-coloured deck cards key their strip + eyebrow off --card-accent. */
+.wrapped-board .nf-card.accent-green {
+    --card-accent: var(--nf-green);
+}
+.wrapped-board .nf-card.accent-blue {
+    --card-accent: #4f8fd0;
+}
+.wrapped-board .nf-card.accent-gold {
+    --card-accent: var(--nf-orange);
+}
+.wrapped-board .nf-card.accent-violet {
+    --card-accent: #9a86f0;
+}
+.wrapped-board .nf-card.accent-rose {
+    --card-accent: #e0556f;
+}
+
+/* span helpers for the bento layout */
+.wrapped-board .nf-span-2 {
+    grid-column: span 2;
+}
+@media (max-width: 640px) {
+    .wrapped-board .nf-span-2 {
+        grid-column: span 1;
+    }
+}
+
+/* Shine sweep on hover */
+.wrapped-board .nf-card::after {
+    content: "";
+    position: absolute;
+    top: -30%;
+    bottom: -30%;
+    left: -140px;
+    width: 110px;
+    background: linear-gradient(
+        100deg,
+        transparent,
+        rgba(255, 255, 255, 0.04) 35%,
+        rgba(255, 255, 255, 0.1) 50%,
+        rgba(255, 255, 255, 0.04) 65%,
+        transparent
+    );
+    transform: skewX(-14deg);
+    opacity: 0;
+    pointer-events: none;
+    z-index: 2;
+}
+.wrapped-board .nf-card:hover::after {
+    animation: ax-shine 1.05s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+}
+@media (prefers-reduced-motion: reduce) {
+    .wrapped-board .nf-card:hover::after {
+        animation: none;
+    }
+}
+
+/* Card meta header row */
+.wrapped-board .nf-meta {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 12px;
+    font: 400 11px/1.5 ui-monospace, Menlo, monospace;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--nf-sec);
+}
+.wrapped-board .nf-tag {
+    font: 700 9px/1 ui-monospace, Menlo, monospace;
+    letter-spacing: 0.12em;
+    color: var(--nf-dim);
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+.wrapped-board .nf-tag.live {
+    color: var(--nf-green);
+}
+
+/* Big readouts */
+.wrapped-board .nf-metric {
+    font: 700 40px/1 ui-monospace, Menlo, monospace;
+    letter-spacing: -0.02em;
+    color: var(--nf-display);
+    margin-top: auto;
+}
+.wrapped-board .nf-metric small {
+    font-size: 14px;
+    font-weight: 400;
+    letter-spacing: 0.04em;
+    color: var(--nf-sec);
+    margin-left: 6px;
+}
+.wrapped-board .nf-doto {
+    font-family: "Doto", ui-monospace, monospace;
+    font-variant-numeric: tabular-nums;
+    font-weight: 600;
+    font-size: 58px;
+    line-height: 1;
+    color: var(--nf-display);
+    margin-top: auto;
+}
+.wrapped-board .nf-doto small {
+    font-size: 20px;
+    vertical-align: super;
+    color: var(--nf-sec);
+    margin-left: 4px;
+}
+.wrapped-board .nf-sub {
+    font: 400 11px/1.6 ui-monospace, Menlo, monospace;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--nf-sec);
+    margin-top: 10px;
+}
+.wrapped-board .nf-segbar,
+.wrapped-board .nf-cellwrap {
+    margin-top: auto;
+    padding-top: 14px;
+}
+
+/* Hero card (archetype) - wide, dot-grid bg, glyph reel art */
+.wrapped-board .nf-hero {
+    grid-column: span 2;
+    grid-row: span 2;
+    justify-content: space-between;
+    background-image: radial-gradient(circle, #1d1d1d 1.1px, transparent 1.1px);
+    background-size: 16px 16px;
+    background-position: 8px 8px;
+}
+@media (max-width: 1020px) {
+    .wrapped-board .nf-hero {
+        grid-column: span 2;
+        grid-row: auto;
+    }
+}
+@media (max-width: 640px) {
+    .wrapped-board .nf-hero {
+        grid-column: span 1;
+    }
+}
+.wrapped-board .nf-hero-art {
+    flex: 1;
+    min-height: 120px;
+    margin: 8px 0;
+}
+.wrapped-board .nf-hero-label {
+    font: 500 28px/1.1 Georgia, serif;
+    letter-spacing: -0.01em;
+    color: var(--nf-display);
+}
+.wrapped-board .nf-hero-line {
+    margin: 8px 0 0;
+    font-size: 14px;
+    line-height: 1.5;
+    color: var(--nf-sec);
+    max-width: 52ch;
+}
+
+/* Deck cards (the trace cards) inside the board */
+.wrapped-board .nf-strip {
+    display: flex;
+    align-items: flex-end;
+    gap: 3px;
+    height: 48px;
+    margin: 4px 0 14px;
+}
+.wrapped-board .nf-strip i {
+    flex: 1;
+    background: color-mix(in srgb, var(--card-accent) 70%, var(--nf-surface));
+    border-radius: 1px 1px 0 0;
+    min-height: 3px;
+}
+.wrapped-board .nf-eyebrow {
+    font: 400 12px/1.4 ui-monospace, Menlo, monospace;
+    color: var(--card-accent, var(--nf-orange));
+    letter-spacing: 0.01em;
+}
+.wrapped-board .nf-headline {
+    margin: 6px 0 0;
+    font: 600 clamp(22px, 2.2vw, 28px) / 1.08 Georgia, serif;
+    letter-spacing: -0.01em;
+    color: var(--nf-display);
+}
+.wrapped-board .nf-body {
+    margin: 7px 0 0;
+    font-size: 13px;
+    line-height: 1.5;
+    color: var(--nf-sec);
+}
+.wrapped-board .nf-flag {
+    align-self: flex-start;
+    margin-top: 10px;
+    font: 700 9px/1 ui-monospace, Menlo, monospace;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--nf-dim);
+    border: 1px solid var(--nf-border-hi);
+    border-radius: 4px;
+    padding: 3px 6px;
+}
