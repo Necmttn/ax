@@ -1,4 +1,4 @@
-# 67% of my subagent dispatches ran on a frontier model nobody asked for. ax found $605/month of it sitting in my own transcripts. Here's the loop.
+# My router said sonnet. The invoice said fable. $571 of that gap was hiding in my own transcripts. Here's the loop.
 
 Last month my AI coding agents spent $25,027. One machine, 30 days.
 
@@ -8,7 +8,7 @@ I didn't choose that. Nobody chooses that. It's the default.
 
 ## What a single dispatch costs, measured both ways
 
-Take one dispatch from my history: "Implement Task 3: session map strip." Bounded scope, written spec, verifiable output. It ran `inherit`, landed on fable, and cost $50.26. ax re-prices the same dispatch - same token counts, sonnet rates - at $15.08.
+Take one dispatch from my history: "Implement Task 3: session map strip." Bounded scope, written spec, verifiable output. It ran `inherit`, landed on fable, and cost $50.26. ax re-prices the same dispatch at sonnet rates, same token counts: $15.08.
 
 ```
 "Implement Task 3: session map strip"
@@ -20,51 +20,15 @@ Two days later a same-shape dispatch, "Implement S2-T3: actor attribution," went
 
 That gap, multiplied across hundreds of dispatches a month, is the bill.
 
-## The leak you can't see: your routing is lying to you
-
-Here's the part I found after I'd already drafted this article, and it's worse than everything above.
-
-Routing the dispatch is not the same as the dispatch running on the routed model.
-
-In Claude Code, the `model` override applies to the first leg only. The dispatch starts on the cheap model you named. Then a SendMessage follow-up or a post-compaction resume continues the same task - and silently drops back to the parent's frontier model. The dispatch model column still says `sonnet`. The bill says `fable`.
-
-One dispatch made it obvious. "Implement S2-T4" routed to sonnet. The sonnet leg cost about $1. Then it continued, flipped to fable, and ran up $116 of its $117 total. 99% of the cost landed after the override I'd set was already gone.
-
-```
-"Implement S2-T4"
-  requested:    sonnet
-  sonnet leg:   ~$1
-  continued on: claude-fable-5   $116
-  total:        $117    (99% billed off-model, after the route)
-```
-
-Across the same 30 days: 66 routed dispatches continued on a different model than requested. $571.52 of spend on those dropped legs. On this one machine.
-
-Read those two numbers next to each other. The shipped routing classes flag $605/month of addressable savings; tune mines another $599 the defaults never saw. The model-drop leak is $571.52 - and it's the spend on dispatches you already routed correctly. The leak you can't see by reading the dispatch model column is the same size as the one you can.
-
-`ax dispatches` now flags these rows with a `!` marker and a dropped-cost footer, so a route that didn't stick stops looking like a route that worked.
-
-```
-$ ax dispatches --days=30
-
-ts                   description            dispatch_model  child_model        cost
-2026-06-XXT..:..:..  Implement S2-T4    !   sonnet          claude-fable-5     $117.00
-...
-
-dropped (off-model continuation): 66 dispatches  $571.52
-```
-
-The takeaway is the whole point of measuring this at the transcript level: routing isn't just choosing the cheap model. It's whether the choice sticks. The dispatch model column can say "sonnet" while the bill says "fable." ax measures that gap. Nothing else does.
-
 ## Why everyone defaults to inherit
 
 Three reasons, none of them stupid:
 
 Specifying a model per dispatch is friction. The `model` field is optional, the default works, and the main agent is busy thinking about the task, not the invoice.
 
-Nobody measures it. Your harness shows you a total. It does not show you which subagent ran which model on which description, or what the same dispatch would have cost one tier down.
+The failure mode is invisible. An overpriced dispatch still succeeds. There's no error, no warning, no diff. Just a number at the end of the month that feels too big to argue with.
 
-And the failure mode is invisible. An overpriced dispatch still succeeds. There's no error, no warning, no diff. Just a number at the end of the month that feels too big to argue with.
+And nothing measures it. Your harness shows you a total. It does not show you which subagent ran which model on which description, or what the same dispatch would have cost one tier down.
 
 ## The problem nobody measures
 
@@ -80,7 +44,39 @@ claude-haiku        114 dispatches    $   47.32
 
 Read that twice. Sonnet did 517 review-and-implement dispatches for $478. Fable did 247 for $1,979 - 4x the spend for half the dispatches, on the same shapes of bounded work.
 
-`ax dispatches --candidates` flags $605.02 of that month as addressable: inherit dispatches that match a routine routing class and would have run fine one tier down. That's $7,260 a year. One machine. Found in my own transcripts, sitting on my own disk.
+`ax dispatches --candidates` flags $605.02 of that month as addressable: inherit dispatches that match a routine routing class and would have run fine one tier down. That's $7,260 a year, on my own disk.
+
+## The leak you can't see: your routing is lying to you
+
+Routing the dispatch is not the same as the dispatch running on the routed model.
+
+In Claude Code, the `model` override applies to the first leg only. The dispatch starts on the cheap model you named. Then a SendMessage follow-up or a post-compaction resume continues the same task, and silently drops back to the parent's frontier model. The dispatch model column still says `sonnet`. The bill says `fable`.
+
+One dispatch made it obvious. "Implement S2-T4" routed to sonnet. The sonnet leg cost about $1. Then it continued, flipped to fable, and ran up $116 of its $117 total. 99% of the cost landed after the override I'd set was already gone.
+
+```
+"Implement S2-T4"
+  requested:    sonnet
+  sonnet leg:   ~$1
+  continued on: claude-fable-5   $116
+  total:        $117    (99% billed off-model, after the route)
+```
+
+Across the same 30 days: 66 routed dispatches continued on a different model than requested. $571.52 of spend on those dropped legs. On this one machine.
+
+The leak you can't see is the same size as the one you can.
+
+`ax dispatches` now flags these rows with a `!` marker and a dropped-cost footer, so a route that didn't stick stops looking like a route that worked. ax measures that gap. Nothing else does.
+
+```
+$ ax dispatches --days=30
+
+ts                   description            dispatch_model  child_model        cost
+2026-06-XXT..:..:..  Implement S2-T4    !   sonnet          claude-fable-5     $117.00
+...
+
+dropped (off-model continuation): 66 dispatches  $571.52
+```
 
 So I built the loop that finds it and closes it. ax is free, open source, and local - it reads your transcripts, never your code, never your API keys. github.com/Necmttn/ax
 
@@ -134,7 +130,7 @@ ts                   description                        dispatch_model  child_mo
 
 ### Rule 4: Read the inherit percentage. That's the leak.
 
-`inherit` means no one chose a model - the dispatch silently took the main model. Some of those should be frontier. Most are "implement this spec" and "fix this test." Mine was 67%. An earlier 14-day window on the same machine was 80.7% (574 dispatches, $2,116 subagent spend). The number doesn't fix itself.
+`inherit` means no one chose a model - the dispatch silently took the main model. Some of those should be frontier. Most are "implement this spec" and "fix this test." Mine was 67%. An earlier 14-day window on the same machine was 80.7% (574 dispatches, $2,116 subagent spend). Defaults don't audit themselves.
 
 ```
 67.0% of 1,368 dispatches: inherit
@@ -255,7 +251,7 @@ npx skills add Necmttn/ax
 
 ### Rule 11: Treat flagged savings as a health metric. It should trend to zero.
 
-Once the hook is live, `--candidates` measures what's escaping the table. Run it weekly. A rising number means new dispatch patterns the table hasn't learned yet. My current week - heavy implementation sprint, hook freshly installed mid-window - still shows the pre-hook leak:
+Once the hook is live, `--candidates` measures what's escaping the table. Run it weekly. A rising number means new dispatch patterns the table hasn't learned yet. Hook installed mid-window, so my current week still shows the pre-hook leak:
 
 ```
 $ ax dispatches --candidates --days=7
@@ -329,7 +325,8 @@ tune clustered these too (`plan-phase`, $77.64) - and flagged the cluster `judgm
 - Sonnet: 517 dispatches, $478.36. Fable: 247 dispatches, $1,979.34. Half the dispatches, 4x the money, same shapes of bounded work.
 - $605.02/month flagged by the shipped routing classes - $7,260/year
 - On top of that, `ax routing tune` mined $599.00 of unmatched spend into 20 new classes: $218.63 auto-applied, $380.35 judgment-gated pending backtest
-- And the leak you can't see by reading the dispatch model column: 66 routed dispatches continued off-model, $571.52 billed at frontier rates after the override was set. "Implement S2-T4" routed to sonnet, then ran $116 of its $117 on fable.
+- And the leak you can't see by reading the dispatch model column: 66 routed dispatches continued off-model, $571.52 billed at frontier rates after the override was set
+- Three leaks, comparable size: $605 the defaults catch, $599 tune mines, $571 that never showed in the dispatch model column at all
 - Top leaks: well-specified-impl $282.69, spec-review $80.66, bug-fix $69.37
 - Single-dispatch contrast: "Implement Task 3: session map strip" ran $50.26 on fable inherit, ax-priced at $15.08 on sonnet; a same-shape dispatch explicitly routed to sonnet ran $5.23
 - Earlier 14-day window, same machine: $2,301 of sub-task spend on fable/opus vs $83 on sonnet
@@ -340,8 +337,8 @@ Honest caveats, because the numbers deserve them: the savings are projections fr
 
 The boundary cases. "Implement the spec" routes clean. "Review the design" stays frontier. But "refactor this module" sits in the middle - sometimes mechanical, sometimes a judgment call wearing a mechanical name. Right now ax answers with a gate: anything that smells like judgment goes through an agent-backtested brief before it ever routes down. That's a process answer, not a model answer. I don't yet know if the middle can be classified, or only quarantined.
 
-p.s. - there's a structural thing worth noticing here. every hosted router has the same shape: a platform sits between you and the model, routes your tokens, and takes its cut somewhere in the stack. ax can't do that. it's a local CLI reading transcripts off your own disk. it doesn't proxy your tokens, doesn't bill you, doesn't profit when you spend more or less. the routing table it compiles is yours, built from your history, applied by a hook you can read in one file. the incentive to lower your bill is clean because there's no bill on the other side.
+Share it with whoever pays yours. github.com/Necmttn/ax
 
-Bookmark this for the next time the invoice makes you wince. Share it with whoever pays yours.
+p.s. - there's a structural thing worth noticing here. every hosted router has the same shape: a platform sits between you and the model, routes your tokens, and takes its cut somewhere in the stack. ax can't do that. it's a local CLI reading transcripts off your own disk. it doesn't proxy your tokens, doesn't bill you, doesn't profit when you spend more or less. the routing table it compiles is yours, built from your history, applied by a hook you can read in one file.
 
-github.com/Necmttn/ax
+the incentive to lower your bill is clean because there's no bill on the other side.
