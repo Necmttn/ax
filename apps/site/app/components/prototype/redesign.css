@@ -69,7 +69,11 @@
 .rdx-cells i.lvl-4 { background: var(--c4); }
 .rdx-cells i.glim { background: var(--display); transition: background 0.12s var(--ease); }
 
-.rdx-glyph, .rdx-glyph canvas { width: 100%; height: 100%; display: block; min-height: 0; }
+/* Canvas is absolutely positioned so its intrinsic (bitmap) height can never
+   feed back into the parent's height - that loop made the glyph grow forever
+   when an ancestor height wasn't definite. Parent just needs position+size. */
+.rdx-glyph { position: relative; width: 100%; height: 100%; min-height: 0; overflow: hidden; }
+.rdx-glyph canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
 
 .rdx-led { width: 8px; height: 8px; border-radius: 50%; background: var(--green); display: inline-block; animation: rdx-led 2.4s var(--ease) infinite; flex: none; }
 .rdx-led.accent { background: var(--accent); }
@@ -245,7 +249,7 @@
 .v-land-install code b { color: var(--accent); font-weight: 400; }
 .v-land-herocard { border: 1px solid var(--border); border-radius: 16px; background: var(--surface); background-image: radial-gradient(circle, var(--dot) 1.1px, transparent 1.1px); background-size: 16px 16px; background-position: 8px 8px; padding: 16px; display: flex; flex-direction: column; gap: 12px; }
 .v-land-herocard .top { display: flex; justify-content: space-between; }
-.v-land-sigilwrap { flex: 1; min-height: 150px; }
+.v-land-sigilwrap { flex: 1 1 auto; min-height: 150px; max-height: 220px; }
 .v-land-herostat { display: flex; gap: 18px; }
 .v-land-herostat .n { font-family: var(--doto); font-weight: 600; font-size: 30px; color: var(--display); }
 .v-land-herostat .l { font-family: var(--mono); font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--sec); }

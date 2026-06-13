@@ -80,7 +80,13 @@ export function GlyphReel({ seed = 0, dim = "#222222", lit = "#ffffff" }: { seed
         const dpr = Math.min(2, window.devicePixelRatio || 1);
         const [d0, d1, d2] = hex(dim), [l0, l1, l2] = hex(lit);
         let w = cv.clientWidth, h = cv.clientHeight;
-        const size = () => { w = cv.clientWidth; h = cv.clientHeight; cv.width = Math.max(1, Math.round(w * dpr)); cv.height = Math.max(1, Math.round(h * dpr)); };
+        const size = () => {
+            const nw = cv.clientWidth, nh = cv.clientHeight;
+            if (nw === w && nh === h && cv.width) return; // no-op: never re-drive layout
+            w = nw; h = nh;
+            cv.width = Math.max(1, Math.round(w * dpr));
+            cv.height = Math.max(1, Math.round(h * dpr));
+        };
         size();
         const ro = new ResizeObserver(size); ro.observe(cv);
         const N = GW * GH, cur = new Float32Array(N), slam = new Float32Array(N), dly = new Float32Array(N);
