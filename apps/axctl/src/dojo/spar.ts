@@ -8,6 +8,18 @@
  *
  * Spec: docs/superpowers/specs/2026-06-13-dojo-spar-design.md
  */
+import { Effect } from "effect";
+import { SurrealClient } from "@ax/lib/db";
+import { AxConfig } from "@ax/lib/config";
+import type { DbError } from "@ax/lib/errors";
+import { recordLiteral } from "@ax/lib/ids";
+import { surrealDate, surrealString } from "@ax/lib/shared/surql";
+import { ProcessService, type ProcessError } from "@ax/lib/process";
+import { findCommitWindow } from "@ax/lib/git-window";
+import { fetchSessionCostMap } from "../metrics/cost-estimate.ts";
+import { fetchSessionChurnSummary } from "../metrics/session-churn.ts";
+import { cleanSessionId } from "../metrics/util.ts";
+import { listSessionsNear } from "../dashboard/sessions-query.ts";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -223,3 +235,156 @@ export const renderSparReport = (score: SparScore, brief: SparBrief): string => 
         "",
     ].join("\n");
 };
+
+// ---------------------------------------------------------------------------
+// Effect glue: metrics, baseline capture, variant lookup
+// ---------------------------------------------------------------------------
+
+interface TurnWallRow {
+    readonly turn_count: number | null;
+    readonly s: string | null;
+    readonly e: string | null;
+}
+
+/**
+ * Resolve one session's spar metrics: cost (from the shared cost map), repair
+ * /episodes/landed (from the churn summary, matched by clean id), and turns +
+ * wall (from a focused single-session lookup).
+ *
+ * `landed` here is a proxy (landedLinesAdded > 0); captureBaseline overrides it
+ * to true (a baseline is, by definition, a landed task).
+ */
+export const fetchSessionMetrics = (
+    sessionId: string,
+    sinceForChurn: Date,
+): Effect.Effect<SparMetrics, DbError, SurrealClient | AxConfig> =>
+    Effect.gen(function* () {
+        const db = yield* SurrealClient;
+        const cleanId = cleanSessionId(sessionId);
+
+        const costMap = yield* fetchSessionCostMap([sessionId]);
+        const costUsd = costMap.get(cleanId)?.estimatedCostUsd ?? null;
+
+        const churn = yield* fetchSessionChurnSummary({ since: sinceForChurn, limit: 1000 });
+        const churnRow = churn.hotSessions.find((r) => r.session === cleanId);
+        const repairLines = churnRow?.repairLinesAdded ?? 0;
+        const episodes = churnRow?.episodes ?? 0;
+        const landed = (churnRow?.landedLinesAdded ?? 0) > 0;
+
+        // turns + wall: count() over the turn_session_seq index + the session's
+        // own start/end timestamps (mirrors enrichSessions' indexed lookup).
+        const lit = recordLiteral("session", cleanId);
+        const rows = yield* db.query<[TurnWallRow[]]>(
+            `SELECT
+                (SELECT count() FROM turn WHERE session = ${lit} GROUP ALL)[0].count AS turn_count,
+                type::string(started_at) AS s,
+                type::string(ended_at) AS e
+             FROM ONLY ${lit};`,
+        );
+        const row = rows?.[0]?.[0] ?? null;
+        const turns = row?.turn_count != null ? Number(row.turn_count) || 0 : null;
+        const startMs = row?.s ? Date.parse(row.s) : NaN;
+        const endMs = row?.e ? Date.parse(row.e) : NaN;
+        const wallMs = Number.isFinite(startMs) && Number.isFinite(endMs) ? endMs - startMs : null;
+
+        return { costUsd, turns, wallMs, repairLines, episodes, landed };
+    });
+
+/**
+ * Capture + freeze a landed task's baseline from the graph.
+ *
+ * v1 heuristic: within the commit's [predecessor..commit] window, the landed
+ * session is the one with the highest turn_count. `landed` is forced true.
+ *
+ * Not unit-tested (needs git + a real graph) - covered by the live spar-plan
+ * smoke.
+ */
+export class SparCaptureError {
+    readonly _tag = "SparCaptureError";
+    constructor(readonly message: string) {}
+}
+
+export const captureBaseline = (
+    sha: string,
+    repoRoot: string,
+    repositoryKey: string | null,
+    nowIso: string,
+): Effect.Effect<
+    SparBrief,
+    DbError | ProcessError | SparCaptureError,
+    SurrealClient | AxConfig | ProcessService
+> =>
+    Effect.gen(function* () {
+        const proc = yield* ProcessService;
+
+        const window = yield* findCommitWindow(repoRoot, sha);
+        if (window.kind === "not_found") {
+            return yield* Effect.fail(new SparCaptureError(`unknown sha ${sha}`));
+        }
+
+        let from: Date;
+        let to: Date;
+        if (window.kind === "orphan") {
+            from = new Date(window.commitTs.getTime() - 3 * 24 * 60 * 60 * 1000);
+            to = new Date(window.commitTs.getTime() + 3 * 24 * 60 * 60 * 1000);
+        } else {
+            from = window.from;
+            to = window.to;
+        }
+
+        // Parent SHA for the worktree pin: `<sha>^` (the predecessor). For an
+        // orphan (root) commit there is no parent, so pin the commit itself.
+        const parentRes = yield* proc.exec("git", ["rev-parse", "--verify", "--quiet", `${sha}^`], {
+            cwd: repoRoot,
+        });
+        const parentSha =
+            parentRes.code === 0 && parentRes.stdout.trim().length > 0
+                ? parentRes.stdout.trim()
+                : sha;
+
+        const sessions = yield* listSessionsNear({ from, to, repositoryKey });
+        if (sessions.length === 0) {
+            return yield* Effect.fail(
+                new SparCaptureError(`no sessions found in the commit window for ${sha}`),
+            );
+        }
+        const landedSession = sessions.reduce((best, s) =>
+            s.turn_count > best.turn_count ? s : best,
+        );
+
+        const metrics = yield* fetchSessionMetrics(landedSession.id, from);
+        const baseline: SparMetrics = { ...metrics, landed: true };
+
+        const id = `${sha.slice(0, 8)}-${nowIso.slice(0, 10)}`;
+        return {
+            id,
+            createdAt: nowIso,
+            prompt: landedSession.first_user_message ?? "",
+            parentSha,
+            baselineSession: landedSession.id,
+            worktree: `.claude/worktrees/dojo-spar-${id}`,
+            baseline,
+            delta: "",
+        };
+    });
+
+/**
+ * Find the most recent variant session run in `cwd` at/after `sinceMs` (the
+ * brief's createdAt). Returns the bare session id, or null when the agent
+ * hasn't run the task yet.
+ */
+export const findVariantSession = (
+    cwd: string,
+    sinceMs: number,
+): Effect.Effect<string | null, DbError, SurrealClient> =>
+    Effect.gen(function* () {
+        const db = yield* SurrealClient;
+        const rows = yield* db.query<[Array<{ id: string }>]>(
+            `SELECT type::string(id) AS id FROM session`
+            + ` WHERE cwd = ${surrealString(cwd)}`
+            + ` AND started_at >= ${surrealDate(new Date(sinceMs))}`
+            + ` ORDER BY started_at DESC LIMIT 1;`,
+        );
+        const id = rows?.[0]?.[0]?.id;
+        return id ? String(id) : null;
+    });
