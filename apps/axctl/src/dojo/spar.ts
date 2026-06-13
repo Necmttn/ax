@@ -42,6 +42,12 @@ export interface SparBrief {
     readonly baselineSession: string;
     readonly worktree: string;
     readonly baseline: SparMetrics;
+    /**
+     * True when the commit window had no main session and the baseline fell
+     * back to a subagent session - its metrics are not a re-runnable task, so
+     * the agent should pick a different (main-session-authored) sha.
+     */
+    readonly baselineIsSubagent: boolean;
     /** filled by the agent; "" at plan time */
     readonly delta: string;
 }
@@ -143,9 +149,13 @@ export const renderSparBrief = (brief: SparBrief, worktreeAbs?: string): string 
         `parent_sha: ${oneLine(brief.parentSha)}`,
         `baseline_session: ${oneLine(brief.baselineSession)}`,
         `worktree: ${oneLine(brief.worktree)}`,
+        `baseline_is_subagent: ${brief.baselineIsSubagent}`,
         "---",
         "",
         `# Spar: ${brief.id}`,
+        ...(brief.baselineIsSubagent
+            ? ["", "> ⚠ baseline is a SUBAGENT session, not a re-runnable task - pick a sha authored by a main session before sparring."]
+            : []),
         "",
         "## Task",
         "",
@@ -224,8 +234,9 @@ export const parseSparBrief = (content: string): SparBrief | null => {
     const prompt = section(content, "Task");
     const deltaRaw = section(content, "Delta");
     const delta = deltaRaw === DELTA_PLACEHOLDER ? "" : deltaRaw;
+    const baselineIsSubagent = field(content, "baseline_is_subagent") === "true";
 
-    return { id, createdAt, prompt, parentSha, baselineSession, worktree, baseline, delta };
+    return { id, createdAt, prompt, parentSha, baselineSession, worktree, baseline, baselineIsSubagent, delta };
 };
 
 // ---------------------------------------------------------------------------
@@ -415,10 +426,19 @@ export const captureBaseline = (
         // first_user_message, null turns/wall). Prefer main sessions; fall back
         // to the unfiltered list only when the window has no main session at all.
         const mainSessions = sessions.filter((s) => s.source === "claude");
-        const candidates = mainSessions.length > 0 ? mainSessions : sessions;
+        const baselineIsSubagent = mainSessions.length === 0;
+        const candidates = baselineIsSubagent ? sessions : mainSessions;
         const landedSession = candidates.reduce((best, s) =>
             s.turn_count > best.turn_count ? s : best,
         );
+        if (baselineIsSubagent) {
+            // The window holds only subagent sessions (common for commits whose
+            // work was done by dispatched agents). A subagent baseline is not a
+            // task a human would re-run; warn so the operator picks another sha.
+            console.error(
+                `ax dojo spar-plan: no main session in ${sha}'s commit window - baseline falls back to a subagent (${landedSession.id}). Its metrics are not a re-runnable task; prefer a sha authored by a main session.`,
+            );
+        }
 
         const metrics = yield* fetchSessionMetrics(landedSession.id, from);
         // Belt-and-suspenders: fetchSessionMetrics now derives landed from the
@@ -436,6 +456,7 @@ export const captureBaseline = (
             baselineSession: landedSession.id,
             worktree: `.claude/worktrees/dojo-spar-${id}`,
             baseline,
+            baselineIsSubagent,
             delta: "",
         };
     });
