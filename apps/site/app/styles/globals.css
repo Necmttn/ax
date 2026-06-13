@@ -10777,6 +10777,16 @@ footer .right {
     .pf-vital-num { font-size: 25px; }
 }
 
+.pf-hero { display: flex; flex-direction: column; gap: 8px; margin: 32px 0 12px; }
+.pf-hero-spend { display: flex; align-items: baseline; gap: 10px; }
+.pf-hero-num { font-family: var(--mono); font-size: 76px; font-weight: 700; line-height: 1; color: var(--green); }
+.pf-hero-per { font-family: var(--mono); font-size: 24px; color: var(--muted); }
+.pf-hero-prov { font-family: var(--mono); font-size: 13px; color: var(--muted); letter-spacing: 0.5px; }
+.pf-hero-row { display: flex; gap: 32px; margin-top: 16px; }
+@media (max-width: 640px) {
+    .pf-hero-num { font-size: 56px; }
+}
+
 /* ----- section kicker ----- */
 .pf-section { margin-top: 60px; }
 .pf-kicker {
