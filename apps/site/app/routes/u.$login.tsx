@@ -180,6 +180,7 @@ function ProfileDossier({ profile: p, vs }: { profile: ProfileV1; vs: VsState })
     const models = [...p.stats.models].sort((a, b) => b.share - a.share);
     const { colorOf } = buildModelColors(models);
     const arcs = p.workflow ? buildDisplayArcs(p.workflow.arcs, 5) : [];
+    const hero = buildHero(p);
     let section = 0;
     const nextSection = (): string => String(++section).padStart(2, "0");
 
@@ -201,32 +202,27 @@ function ProfileDossier({ profile: p, vs }: { profile: ProfileV1; vs: VsState })
             </header>
 
             {/* hero: the measured headline - receipts, not a screenshot */}
-            {(() => {
-                const hero = buildHero(p);
-                return (
-                    <section className="pf-hero" aria-label="headline">
-                        <div className="pf-hero-spend">
-                            {hero.monthlyUsd !== undefined ? (
-                                <>
-                                    <span className="pf-hero-num">~{fmtMoney(hero.monthlyUsd)}</span>
-                                    <span className="pf-hero-per">/mo</span>
-                                </>
-                            ) : (
-                                <>
-                                    <span className="pf-hero-num">{fmtInt(hero.sessions)}</span>
-                                    <span className="pf-hero-per">sessions</span>
-                                </>
-                            )}
-                        </div>
-                        <span className="pf-hero-prov">{hero.provenance}</span>
-                        <div className="pf-hero-row">
-                            <Vital num={fmtInt(hero.models)} label="models" />
-                            <Vital num={fmtInt(hero.skills)} label="skills" />
-                            <Vital num={fmtInt(hero.sessions)} label="sessions" />
-                        </div>
-                    </section>
-                );
-            })()}
+            <section className="pf-hero" aria-label="headline">
+                <div className="pf-hero-spend">
+                    {hero.monthlyUsd !== undefined ? (
+                        <>
+                            <span className="pf-hero-num">~{fmtMoney(hero.monthlyUsd)}</span>
+                            <span className="pf-hero-per">/mo</span>
+                        </>
+                    ) : (
+                        <>
+                            <span className="pf-hero-num">{fmtInt(hero.sessions)}</span>
+                            <span className="pf-hero-per">sessions</span>
+                        </>
+                    )}
+                </div>
+                <span className="pf-hero-prov">{hero.provenance}</span>
+                <div className="pf-hero-row">
+                    <Vital num={fmtInt(hero.models)} label="models" />
+                    <Vital num={fmtInt(hero.skills)} label="skills" />
+                    <Vital num={fmtInt(hero.sessions)} label="sessions" />
+                </div>
+            </section>
 
             {/* vitals ledger */}
             <section className="pf-ledger" aria-label="vitals">
