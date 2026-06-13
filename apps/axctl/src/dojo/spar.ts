@@ -125,8 +125,16 @@ const field = (content: string, key: string): string | null => {
 
 const DELTA_PLACEHOLDER = "FILL: which single change to test";
 
-export const renderSparBrief = (brief: SparBrief): string => {
-    const worktreeCmd = `git worktree add ${brief.worktree} -b dojo/spar-${brief.id} ${brief.parentSha}`;
+export const renderSparBrief = (brief: SparBrief, worktreeAbs?: string): string => {
+    // The agent reads the worktree command FROM THIS FILE, so it must carry the
+    // ABSOLUTE path: `git worktree add <relative>` run from inside a linked
+    // worktree creates the variant at the wrong place, and spar-score (which
+    // joins brief.worktree against the main repo root) then never finds the
+    // variant session's cwd. The frontmatter `worktree:` stays relative-to-main
+    // for that join; only the command line is absolute. Callers without the
+    // main root (pure-render tests) fall back to the relative path.
+    const worktreePath = worktreeAbs ?? brief.worktree;
+    const worktreeCmd = `git worktree add ${worktreePath} -b dojo/spar-${brief.id} ${brief.parentSha}`;
     const delta = brief.delta.trim().length > 0 ? brief.delta : DELTA_PLACEHOLDER;
     return [
         "---",
@@ -232,7 +240,7 @@ const fmtSignedNum = (n: number | null): string =>
 const fmtUsd = (n: number | null): string => (n == null ? "-" : `$${n.toFixed(2)}`);
 
 const fmtSignedUsd = (n: number | null): string =>
-    n == null ? "-" : `${n >= 0 ? "+" : "-"}$${Math.abs(n).toFixed(2)}`;
+    n == null ? "-" : `${n > 0 ? "+" : n < 0 ? "-" : ""}$${Math.abs(n).toFixed(2)}`;
 
 const fmtBool = (b: boolean): string => (b ? "yes" : "no");
 
@@ -305,8 +313,17 @@ export const fetchSessionMetrics = (
         const landedLoc = yield* fetchLandedLocBySession([sessionId]);
         const landed = landedLoc.bySession.has(cleanId);
 
-        const churn = yield* fetchSessionChurnSummary({ since: sinceForChurn, limit: 1000 });
+        const CHURN_SCAN_LIMIT = 1000;
+        const churn = yield* fetchSessionChurnSummary({ since: sinceForChurn, limit: CHURN_SCAN_LIMIT });
         const churnRow = churn.hotSessions.find((r) => r.session === cleanId);
+        // A miss with a saturated scan means the session fell off the top-N by
+        // churn, NOT that it was clean - recording 0 would understate the
+        // baseline and inflate a variant into a false "win". Warn so it's visible.
+        if (churnRow === undefined && churn.hotSessions.length >= CHURN_SCAN_LIMIT) {
+            console.error(
+                `ax dojo spar: baseline session ${cleanId} not in the top-${CHURN_SCAN_LIMIT} churn rows for the window; repair/episodes recorded as 0 (may understate the baseline).`,
+            );
+        }
         const repairLines = churnRow?.repairLinesAdded ?? 0;
         const episodes = churnRow?.episodes ?? 0;
 

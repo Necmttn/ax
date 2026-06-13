@@ -81,6 +81,15 @@ describe("renderSparBrief / parseSparBrief roundtrip", () => {
         expect(parsed?.baseline.costUsd).toBe(1.20);
         expect(parsed?.parentSha).toBe("ab12cd34");
     });
+    test("worktreeAbs puts the absolute path in the command but keeps frontmatter relative", () => {
+        const md = renderSparBrief(brief, `/Users/x/ax/${brief.worktree}`);
+        // The command the agent runs must be absolute (so a run from inside a
+        // linked worktree still lands the variant at the main-root path).
+        expect(md).toContain(`git worktree add /Users/x/ax/${brief.worktree} -b dojo/spar-${brief.id}`);
+        // ...but the frontmatter stays relative so spar-score re-joins it.
+        expect(md).toContain(`worktree: ${brief.worktree}`);
+        expect(parseSparBrief(md)?.worktree).toBe(brief.worktree);
+    });
     test("non-brief content -> null", () => {
         expect(parseSparBrief("nope")).toBeNull();
     });

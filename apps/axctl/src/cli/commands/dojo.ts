@@ -347,21 +347,24 @@ const sparPlanCommand = Command.make(
                 }),
             );
 
+            // Anchor the worktree at the MAIN repo root so the brief's embedded
+            // `git worktree add` command, the console hint, and spar-score's
+            // variant cwd lookup (which joins brief.worktree against the same
+            // main root) all agree on ONE absolute path - no matter which
+            // (possibly linked) worktree the agent runs spar-plan from.
+            const worktreeAbs = posixPath.join(mainRepoRoot, brief.worktree);
+
             const fs = yield* FileSystem.FileSystem;
             yield* fs.makeDirectory(dojoSparDir(), { recursive: true });
             const path = dojoSparBriefPath(brief.id);
             const tmp = `${path}.tmp.${process.pid}`;
-            yield* fs.writeFileString(tmp, renderSparBrief(brief));
+            yield* fs.writeFileString(tmp, renderSparBrief(brief, worktreeAbs));
             yield* fs.rename(tmp, path);
 
             if (json) {
                 console.log(prettyPrint(brief));
                 return;
             }
-            // Anchor the worktree at the MAIN repo root so spar-score (which
-            // joins brief.worktree against the same main root) finds the variant
-            // session's cwd no matter where the agent ran spar-plan from.
-            const worktreeAbs = posixPath.join(mainRepoRoot, brief.worktree);
             const worktreeCmd = `git worktree add ${worktreeAbs} -b dojo/spar-${brief.id} ${brief.parentSha}`;
             console.log(
                 `${path}\n\nNext:\n  ${worktreeCmd}\n  fill the Delta section, run the task in that worktree, then: ax dojo spar-score ${brief.id}`,
