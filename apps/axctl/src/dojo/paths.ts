@@ -13,3 +13,12 @@ export const dojoReportsDir = (base: string = defaultDojoDir()): string =>
 /** date is YYYY-MM-DD */
 export const dojoReportPath = (date: string, base: string = defaultDojoDir()): string =>
     posixPath.join(dojoReportsDir(base), `${date}.md`);
+
+/** Local YYYY-MM-DD for an epoch-ms timestamp (the report filename's date). */
+export const localDate = (ms: number): string => {
+    const d = new Date(ms);
+    const y = d.getFullYear();
+    const m = `${d.getMonth() + 1}`.padStart(2, "0");
+    const day = `${d.getDate()}`.padStart(2, "0");
+    return `${y}-${m}-${day}`;
+};
