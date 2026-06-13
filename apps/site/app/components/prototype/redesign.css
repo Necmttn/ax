@@ -237,7 +237,7 @@
 .v-land-nav .spacer { flex: 1; }
 .v-land-nav a { color: var(--sec); }
 .v-land-nav .cta { border: 1px solid var(--accent); color: var(--accent); border-radius: 8px; padding: 6px 14px; }
-.v-land-hero { display: grid; grid-template-columns: 1.15fr 0.85fr; gap: 28px; align-items: stretch; padding: 36px 0 28px; border-top: 1px solid var(--border); }
+.v-land-hero { display: grid; grid-template-columns: 1.1fr 0.9fr; gap: 40px; align-items: center; padding: 48px 0 36px; border-top: 1px solid var(--border); }
 @media (max-width: 860px) { .v-land-hero { grid-template-columns: 1fr; } }
 .v-land-kicker { font-family: var(--mono); font-size: 12px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--accent); display: inline-flex; gap: 8px; align-items: center; }
 .v-land-h1 { font-family: var(--serif); font-weight: 400; font-size: clamp(40px, 5.6vw, 68px); line-height: 1.02; letter-spacing: -1.5px; color: var(--display); margin: 18px 0 0; }
@@ -247,7 +247,7 @@
 .v-land-install .bar { display: flex; justify-content: space-between; padding: 8px 14px; border-bottom: 1px solid var(--border); background: var(--surface2); font-family: var(--mono); font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--dim); }
 .v-land-install code { display: block; padding: 14px; font-family: var(--mono); font-size: 13.5px; color: var(--pri); }
 .v-land-install code b { color: var(--accent); font-weight: 400; }
-.v-land-herocard { border: 1px solid var(--border); border-radius: 16px; background: var(--surface); background-image: radial-gradient(circle, var(--dot) 1.1px, transparent 1.1px); background-size: 16px 16px; background-position: 8px 8px; padding: 16px; display: flex; flex-direction: column; gap: 12px; }
+.v-land-herocard { align-self: center; border: 1px solid var(--border); border-radius: 16px; background: var(--surface); background-image: radial-gradient(circle, var(--dot) 1.1px, transparent 1.1px); background-size: 16px 16px; background-position: 8px 8px; padding: 20px; display: flex; flex-direction: column; gap: 16px; }
 .v-land-herocard .top { display: flex; justify-content: space-between; }
 .v-land-sigilwrap { flex: 1 1 auto; min-height: 150px; max-height: 220px; }
 .v-land-herostat { display: flex; gap: 18px; }
@@ -371,9 +371,11 @@
 .v-land-hero > *:not(.rdx-logofield) { position: relative; z-index: 1; }
 @media (max-width: 980px) { .rdx-logofield { display: none; } }
 
-/* hero-card logo screen (the high-def dot-matrix that renders the harnesses) */
-.v-land-screen { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; gap: 12px; }
-.v-land-screen-canvas { flex: 1 1 auto; min-height: 170px; max-height: 250px; }
+/* hero-card logo screen (the high-def dot-matrix that renders the harnesses).
+   A centred SQUARE so the square logo grid fills it cleanly + stays responsive,
+   instead of a stretched wide box where the grid drifted into a corner. */
+.v-land-screen { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; }
+.v-land-screen-canvas { width: min(100%, 260px); aspect-ratio: 1 / 1; }
 .v-land-screen-cap { text-align: center; color: var(--accent); }
 
 /* get-started steps under the install block */

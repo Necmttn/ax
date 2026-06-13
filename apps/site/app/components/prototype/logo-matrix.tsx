@@ -78,10 +78,13 @@ export function LogoMatrix({ dim = "#1a2019", mid = "#56b06a", lit = "#eafff0" }
             const k = (v - 0.5) / 0.5; return [m0 + (l0 - m0) * k, m1 + (l1 - m1) * k, m2 + (l2 - m2) * k];
         };
         let w = cv.clientWidth, h = cv.clientHeight;
+        // Always track the live box (absolute canvas already prevents the
+        // resize feedback loop). Keeping a stale bitmap left the logo rendering
+        // in a corner when the box settled to its final size after font/layout.
         const size = () => {
-            const nw = cv.clientWidth, nh = cv.clientHeight;
-            if (nw === w && nh === h && cv.width) return;
-            w = nw; h = nh; cv.width = Math.max(1, Math.round(w * dpr)); cv.height = Math.max(1, Math.round(h * dpr));
+            w = cv.clientWidth; h = cv.clientHeight;
+            cv.width = Math.max(1, Math.round(w * dpr));
+            cv.height = Math.max(1, Math.round(h * dpr));
         };
         size();
         const ro = new ResizeObserver(size); ro.observe(cv);
