@@ -86,8 +86,9 @@ export const sparItem = (): DojoItem => ({
     kind: "spar",
     title: "Sparring: one task, one delta, scored (see skill playbook)",
     commands: [
-        "ax sessions here --days=30  # pick a landed task as baseline",
-        "git worktree add .claude/worktrees/dojo-spar <parent-sha>",
+        "ax sessions here --days=30  # pick a landed task; note its commit sha",
+        "ax dojo spar-plan <sha>     # capture baseline + emit the experiment brief",
+        "ax dojo spar-score <id>     # after running the variant in the worktree",
     ],
     success: "spar report appended to the dojo report; goal package updated",
     cost_class: "xl",

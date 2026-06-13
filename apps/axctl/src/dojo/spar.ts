@@ -423,8 +423,11 @@ export const findVariantSession = (
 ): Effect.Effect<string | null, DbError, SurrealClient> =>
     Effect.gen(function* () {
         const db = yield* SurrealClient;
+        // `started_at` must stay in the projection: SurrealDB v3 resolves the
+        // ORDER BY idiom against the SELECT shape, so ordering by a field that
+        // was projected away ("AS id" only) fails to parse.
         const rows = yield* db.query<[Array<{ id: string }>]>(
-            `SELECT type::string(id) AS id FROM session`
+            `SELECT type::string(id) AS id, started_at FROM session`
             + ` WHERE cwd = ${surrealString(cwd)}`
             + ` AND started_at >= ${surrealDate(new Date(sinceMs))}`
             + ` ORDER BY started_at DESC LIMIT 1;`,
