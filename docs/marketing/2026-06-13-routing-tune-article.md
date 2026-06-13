@@ -20,6 +20,42 @@ Two days later a same-shape dispatch, "Implement S2-T3: actor attribution," went
 
 That gap, multiplied across hundreds of dispatches a month, is the bill.
 
+## The leak you can't see: your routing is lying to you
+
+Here's the part I found after I'd already drafted this article, and it's worse than everything above.
+
+Routing the dispatch is not the same as the dispatch running on the routed model.
+
+In Claude Code, the `model` override applies to the first leg only. The dispatch starts on the cheap model you named. Then a SendMessage follow-up or a post-compaction resume continues the same task - and silently drops back to the parent's frontier model. The dispatch model column still says `sonnet`. The bill says `fable`.
+
+One dispatch made it obvious. "Implement S2-T4" routed to sonnet. The sonnet leg cost about $1. Then it continued, flipped to fable, and ran up $116 of its $117 total. 99% of the cost landed after the override I'd set was already gone.
+
+```
+"Implement S2-T4"
+  requested:    sonnet
+  sonnet leg:   ~$1
+  continued on: claude-fable-5   $116
+  total:        $117    (99% billed off-model, after the route)
+```
+
+Across the same 30 days: 66 routed dispatches continued on a different model than requested. $571.52 of spend on those dropped legs. On this one machine.
+
+Read those two numbers next to each other. The shipped routing classes flag $605/month of addressable savings; tune mines another $599 the defaults never saw. The model-drop leak is $571.52 - and it's the spend on dispatches you already routed correctly. The leak you can't see by reading the dispatch model column is the same size as the one you can.
+
+`ax dispatches` now flags these rows with a `!` marker and a dropped-cost footer, so a route that didn't stick stops looking like a route that worked.
+
+```
+$ ax dispatches --days=30
+
+ts                   description            dispatch_model  child_model        cost
+2026-06-XXT..:..:..  Implement S2-T4    !   sonnet          claude-fable-5     $117.00
+...
+
+dropped (off-model continuation): 66 dispatches  $571.52
+```
+
+The takeaway is the whole point of measuring this at the transcript level: routing isn't just choosing the cheap model. It's whether the choice sticks. The dispatch model column can say "sonnet" while the bill says "fable." ax measures that gap. Nothing else does.
+
 ## Why everyone defaults to inherit
 
 Three reasons, none of them stupid:
@@ -293,6 +329,7 @@ tune clustered these too (`plan-phase`, $77.64) - and flagged the cluster `judgm
 - Sonnet: 517 dispatches, $478.36. Fable: 247 dispatches, $1,979.34. Half the dispatches, 4x the money, same shapes of bounded work.
 - $605.02/month flagged by the shipped routing classes - $7,260/year
 - On top of that, `ax routing tune` mined $599.00 of unmatched spend into 20 new classes: $218.63 auto-applied, $380.35 judgment-gated pending backtest
+- And the leak you can't see by reading the dispatch model column: 66 routed dispatches continued off-model, $571.52 billed at frontier rates after the override was set. "Implement S2-T4" routed to sonnet, then ran $116 of its $117 on fable.
 - Top leaks: well-specified-impl $282.69, spec-review $80.66, bug-fix $69.37
 - Single-dispatch contrast: "Implement Task 3: session map strip" ran $50.26 on fable inherit, ax-priced at $15.08 on sonnet; a same-shape dispatch explicitly routed to sonnet ran $5.23
 - Earlier 14-day window, same machine: $2,301 of sub-task spend on fable/opus vs $83 on sonnet
