@@ -12540,7 +12540,7 @@ footer.site-footer { padding: 48px 32px 56px; }
 .cliref-index nav a:hover { color: var(--blue); }
 
 /* --- job groups --- */
-.cliref-group { margin-bottom: 56px; }
+.cliref-group { margin-bottom: 56px; min-width: 0; }
 .cliref-group__head {
     border-top: 1px solid var(--line);
     padding-top: 20px;
@@ -12571,6 +12571,7 @@ footer.site-footer { padding: 48px 32px 56px; }
 .cliref-group__cards {
     display: grid;
     gap: 20px;
+    min-width: 0;
 }
 
 /* --- command card --- */
@@ -12580,6 +12581,9 @@ footer.site-footer { padding: 48px 32px 56px; }
     border-radius: 10px;
     padding: 20px 22px 18px;
     scroll-margin-top: 24px;
+    /* grid item: allow shrink below content so the pre-formatted receipt /
+       signature scroll inside the card instead of overflowing the column */
+    min-width: 0;
 }
 .cliref-card__head { margin-bottom: 14px; }
 .cliref-card__name {
@@ -12654,11 +12658,12 @@ footer.site-footer { padding: 48px 32px 56px; }
     font-family: var(--mono);
     font-size: 12px;
     line-height: 1.5;
-    color: #e8e6df;
+    color: #f2f0ea;
     background: #1a1a18;
     border-radius: 8px;
     padding: 14px 16px;
     margin: 0;
+    max-width: 100%;
     overflow-x: auto;
     white-space: pre;
 }
