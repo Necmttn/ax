@@ -1,7 +1,11 @@
 {
   "local:agent-browser": {
     "users": 1,
-    "runs": 6
+    "runs": 9
+  },
+  "local:ax-extract-workflow": {
+    "users": 1,
+    "runs": 1
   },
   "local:ax-repo": {
     "users": 1,
@@ -9,7 +13,7 @@
   },
   "local:batch-read-upfront": {
     "users": 1,
-    "runs": 27
+    "runs": 25
   },
   "local:claude-api": {
     "users": 1,
@@ -17,7 +21,7 @@
   },
   "local:code-review": {
     "users": 1,
-    "runs": 2
+    "runs": 3
   },
   "local:codex:rescue": {
     "users": 1,
@@ -25,7 +29,7 @@
   },
   "local:codex:review": {
     "users": 1,
-    "runs": 1
+    "runs": 2
   },
   "local:commit": {
     "users": 1,
@@ -33,7 +37,7 @@
   },
   "local:composto": {
     "users": 1,
-    "runs": 26
+    "runs": 24
   },
   "local:dev-browser": {
     "users": 1,
@@ -45,7 +49,7 @@
   },
   "local:dogfood": {
     "users": 1,
-    "runs": 2
+    "runs": 1
   },
   "local:effect-lint": {
     "users": 1,
@@ -58,6 +62,10 @@
   "local:effect-testing": {
     "users": 1,
     "runs": 3
+  },
+  "local:efficient-dispatch": {
+    "users": 1,
+    "runs": 1
   },
   "local:electron": {
     "users": 1,
@@ -119,6 +127,10 @@
     "users": 1,
     "runs": 4
   },
+  "local:prototype": {
+    "users": 1,
+    "runs": 2
+  },
   "local:read-once": {
     "users": 1,
     "runs": 4
@@ -145,7 +157,7 @@
   },
   "local:schedule": {
     "users": 1,
-    "runs": 1
+    "runs": 3
   },
   "local:sim-test": {
     "users": 1,
@@ -157,7 +169,7 @@
   },
   "local:to-issues": {
     "users": 1,
-    "runs": 2
+    "runs": 3
   },
   "local:update-config": {
     "users": 1,
@@ -167,60 +179,56 @@
     "users": 1,
     "runs": 1
   },
-  "local:wait-for-staging": {
-    "users": 1,
-    "runs": 1
-  },
   "local:worktree-permissions": {
     "users": 1,
-    "runs": 4
+    "runs": 5
   },
   "local:worktree-read-strategy": {
     "users": 1,
-    "runs": 26
+    "runs": 51
   },
   "local:write-a-skill": {
     "users": 1,
     "runs": 1
   },
-  "superpowers:superpowers:brainstorming": {
+  "superpowers:brainstorming": {
     "users": 1,
-    "runs": 23
+    "runs": 24
   },
-  "superpowers:superpowers:dispatching-parallel-agents": {
-    "users": 1,
-    "runs": 1
-  },
-  "superpowers:superpowers:executing-plans": {
-    "users": 1,
-    "runs": 2
-  },
-  "superpowers:superpowers:finishing-a-development-branch": {
-    "users": 1,
-    "runs": 15
-  },
-  "superpowers:superpowers:receiving-code-review": {
+  "superpowers:dispatching-parallel-agents": {
     "users": 1,
     "runs": 1
   },
-  "superpowers:superpowers:subagent-driven-development": {
+  "superpowers:executing-plans": {
     "users": 1,
-    "runs": 29
+    "runs": 6
   },
-  "superpowers:superpowers:systematic-debugging": {
+  "superpowers:finishing-a-development-branch": {
+    "users": 1,
+    "runs": 18
+  },
+  "superpowers:receiving-code-review": {
+    "users": 1,
+    "runs": 1
+  },
+  "superpowers:subagent-driven-development": {
+    "users": 1,
+    "runs": 31
+  },
+  "superpowers:systematic-debugging": {
     "users": 1,
     "runs": 2
   },
-  "superpowers:superpowers:test-driven-development": {
+  "superpowers:test-driven-development": {
     "users": 1,
     "runs": 3
   },
-  "superpowers:superpowers:using-git-worktrees": {
+  "superpowers:using-git-worktrees": {
     "users": 1,
-    "runs": 11
+    "runs": 10
   },
-  "superpowers:superpowers:writing-plans": {
+  "superpowers:writing-plans": {
     "users": 1,
-    "runs": 22
+    "runs": 30
   }
 }
