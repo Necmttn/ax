@@ -956,12 +956,13 @@ const VIEW_TOGGLE_BUTTON_STYLE: CSSProperties = {
  *  hook_fire markers (both use `hook-<n>` ids for the shared jump). */
 const HARNESS_HOOK_IDX_BASE = 1_000_000;
 
-const harnessTone = (accent: string): { bg: string; fg: string; bar: string } => ({
+const harnessTone = (accent: string): { bg: string; fg: string; bar: string; chip: string } => ({
     bg: `color-mix(in srgb, ${accent} 8%, var(--panel))`,
     fg: `color-mix(in srgb, ${accent} 45%, var(--ink))`,
     bar: accent,
+    chip: `color-mix(in srgb, ${accent} 24%, var(--panel))`,
 });
-const HARNESS_EFFECT_TONE: Record<string, { bg: string; fg: string; bar: string }> = {
+const HARNESS_EFFECT_TONE: Record<string, { bg: string; fg: string; bar: string; chip: string }> = {
     blocked: harnessTone("var(--red)"),
     modified_input: harnessTone("var(--gold)"),
     injected_context: harnessTone("var(--green)"),
@@ -972,7 +973,7 @@ const HARNESS_EFFECT_TONE: Record<string, { bg: string; fg: string; bar: string 
  *  injected). Shows the guardrail activity inline in the shared transcript. */
 function HarnessHookMarker(props: { readonly hook: ShareHarnessHookView }) {
     const { hook } = props;
-    const tone = HARNESS_EFFECT_TONE[hook.effect] ?? { bg: "var(--page)", fg: "var(--ink)", bar: "var(--muted-2)" };
+    const tone = HARNESS_EFFECT_TONE[hook.effect] ?? { bg: "var(--page)", fg: "var(--ink)", bar: "var(--muted-2)", chip: "var(--track)" };
     return (
         <div
             id={`hook-${HARNESS_HOOK_IDX_BASE + hook.idx}`}
@@ -985,7 +986,7 @@ function HarnessHookMarker(props: { readonly hook: ShareHarnessHookView }) {
             <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
                 <span style={{ fontWeight: 700 }}>⚙ hook</span>
                 <span style={{ fontWeight: 600 }}>{hook.hook_name}</span>
-                <span style={{ background: tone.bar, color: "#fff", padding: "0 6px", borderRadius: 2, fontSize: 10, fontWeight: 600 }}>
+                <span style={{ background: tone.chip, color: tone.fg, padding: "0 6px", borderRadius: 2, fontSize: 10, fontWeight: 600 }}>
                     {hook.effect.replace(/_/g, " ")}
                 </span>
                 {hook.command ? <span style={{ opacity: 0.7 }}>{hook.command}</span> : null}

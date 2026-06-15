@@ -277,7 +277,7 @@ function FailureDetail({
                                 </pre>
                             ) : null}
                             {s.error_text ? (
-                                <pre style={{ margin: "4px 0", padding: "6px 8px", background: "rgba(189, 68, 59, 0.07)", color: "var(--red)", overflowX: "auto" }}>
+                                <pre style={{ margin: "4px 0", padding: "6px 8px", background: "color-mix(in srgb, var(--red) 7%, transparent)", color: "var(--red)", overflowX: "auto" }}>
                                     {truncate(s.error_text, 320)}
                                 </pre>
                             ) : null}

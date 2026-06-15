@@ -58,10 +58,10 @@ export function UsageRoute() {
                                     <td style={{ padding: "3px 8px 3px 0", fontFamily: "monospace" }}>
                                         ax {cmd.command}
                                     </td>
-                                    <td style={{ padding: "3px 8px", color: "var(--color-meta, #888)" }}>
+                                    <td style={{ padding: "3px 8px", color: "var(--muted)" }}>
                                         {cmd.count}×
                                     </td>
-                                    <td style={{ padding: "3px 0", color: "var(--color-meta, #888)", fontSize: "0.85em" }}>
+                                    <td style={{ padding: "3px 0", color: "var(--muted)", fontSize: "0.85em" }}>
                                         last {new Date(cmd.last_used).toLocaleDateString()}
                                     </td>
                                 </tr>
@@ -82,7 +82,7 @@ export function UsageRoute() {
                                 key={cmd}
                                 style={{
                                     padding: "2px 8px",
-                                    background: "var(--color-bg-alt, rgba(0,0,0,0.06))",
+                                    background: "var(--track)",
                                     borderRadius: "4px",
                                     fontSize: "0.85em",
                                 }}
@@ -106,10 +106,10 @@ export function UsageRoute() {
                                     <td style={{ padding: "3px 8px 3px 0", fontFamily: "monospace" }}>
                                         ax {r.command}
                                     </td>
-                                    <td style={{ padding: "3px 8px", color: "var(--color-meta, #888)" }}>
+                                    <td style={{ padding: "3px 8px", color: "var(--muted)" }}>
                                         {r.failures}/{r.runs} failed
                                     </td>
-                                    <td style={{ padding: "3px 0", color: "var(--color-meta, #888)", fontSize: "0.85em" }}>
+                                    <td style={{ padding: "3px 0", color: "var(--muted)", fontSize: "0.85em" }}>
                                         {(r.failureRate * 100).toFixed(0)}%
                                     </td>
                                 </tr>

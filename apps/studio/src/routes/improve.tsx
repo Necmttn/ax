@@ -239,7 +239,7 @@ export function ImproveRoute() {
                                     onClick={() => setSelectedSig(p.dedupe_sig)}
                                     style={{
                                         cursor: "pointer",
-                                        background: selected?.dedupe_sig === p.dedupe_sig ? "rgba(0,0,0,0.05)" : undefined,
+                                        background: selected?.dedupe_sig === p.dedupe_sig ? "var(--track)" : undefined,
                                     }}
                                 >
                                     <td style={{ textAlign: "right" }}>{p.frequency}</td>
