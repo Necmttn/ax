@@ -75,7 +75,7 @@ function BlogPost() {
           <Link to="/blog">← Blog</Link>
         </nav>
         <p className="blog-post-date">{fmtDate(post.date)}</p>
-        <article className="prose">
+        <article className="prose blog-essay">
           <MDXContent code={post.body} components={mdxComponents} />
         </article>
       </main>
