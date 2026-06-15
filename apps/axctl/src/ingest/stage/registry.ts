@@ -1,43 +1,42 @@
-import { Context, Layer, Schema } from "effect";
+import { Context, Layer } from "effect";
 import type { IngestStageTag } from "./tags.ts";
 import type { BaseStageStats, StageDef } from "./types.ts";
-import { SkillsKey, skillsStage } from "../skills.ts";
-import { CommandsKey, commandsStage } from "../commands.ts";
-import { AgentDefKey, agentDefStage } from "../agent-def.ts";
-import { PricingKey, pricingStage } from "../model-pricing.ts";
-import { ClaudeKey, claudeStage } from "../transcripts.ts";
-import { CodexKey, codexStage } from "../codex.ts";
-import { PiKey, piStage } from "../pi.ts";
-import { OpenCodeKey, opencodeStage } from "../opencode.ts";
-import { CursorKey, cursorStage } from "../cursor.ts";
-import { SubagentsKey, subagentsStage } from "../derive-claude-subagents.ts";
-import { InvokedPositionsKey, invokedPositionsStage } from "../backfill-invoked-positions.ts";
-import { SpawnedKey, spawnedStage } from "../derive-spawned.ts";
-import { GitKey, gitStage } from "../git.ts";
-import { GithubPrKey, githubPrStage } from "../github-pr-stage.ts";
-import { SignalsKey, signalsStage } from "../derive-signals.ts";
-import { OutcomesKey, outcomesStage } from "../outcomes.ts";
-import { TurnContentBlocksKey, turnContentBlocksStage } from "../turn-content-blocks.ts";
-import { TurnAnalysisKey, turnAnalysisStage } from "../turn-analysis.ts";
-import { ReactionEventsKey, reactionEventsStage } from "../reaction-events.ts";
-import { ClassifierResultsKey, classifierResultsStage } from "../classifier-results.ts";
-import { SessionHealthKey, sessionHealthStage } from "../session-health.ts";
-import { ClosureKey, closureStage } from "../closure.ts";
-import { DeriveMetricsKey, deriveMetricsStage } from "../derive-metrics.ts";
-import { ProposalsKey, proposalsStage } from "../derive-proposals.ts";
-import { OpportunitiesKey, opportunitiesStage } from "../derive-opportunities.ts";
-import { RetroProposalsKey, retroProposalsStage } from "../derive-retro-proposals.ts";
-import { HarnessKey, harnessStage } from "../harness.ts";
-import { DigestKey, digestStage } from "../../digest/digest-stage.ts";
-import { UsageKey, usageStage } from "../../usage/usage-stage.ts";
+import { skillsStage } from "../skills.ts";
+import { commandsStage } from "../commands.ts";
+import { agentDefStage } from "../agent-def.ts";
+import { pricingStage } from "../model-pricing.ts";
+import { claudeStage } from "../transcripts.ts";
+import { codexStage } from "../codex.ts";
+import { piStage } from "../pi.ts";
+import { opencodeStage } from "../opencode.ts";
+import { cursorStage } from "../cursor.ts";
+import { subagentsStage } from "../derive-claude-subagents.ts";
+import { invokedPositionsStage } from "../backfill-invoked-positions.ts";
+import { spawnedStage } from "../derive-spawned.ts";
+import { gitStage } from "../git.ts";
+import { githubPrStage } from "../github-pr-stage.ts";
+import { signalsStage } from "../derive-signals.ts";
+import { outcomesStage } from "../outcomes.ts";
+import { turnContentBlocksStage } from "../turn-content-blocks.ts";
+import { turnAnalysisStage } from "../turn-analysis.ts";
+import { reactionEventsStage } from "../reaction-events.ts";
+import { classifierResultsStage } from "../classifier-results.ts";
+import { sessionHealthStage } from "../session-health.ts";
+import { closureStage } from "../closure.ts";
+import { deriveMetricsStage } from "../derive-metrics.ts";
+import { proposalsStage } from "../derive-proposals.ts";
+import { opportunitiesStage } from "../derive-opportunities.ts";
+import { retroProposalsStage } from "../derive-retro-proposals.ts";
+import { harnessStage } from "../harness.ts";
+import { digestStage } from "../../digest/digest-stage.ts";
+import { usageStage } from "../../usage/usage-stage.ts";
 
 export type { StageDef } from "./types.ts";
 
-/** Composed union of every known Ingest Stage key. Each stage file exports its
- *  own `Schema.Literal("<key>")`; this union is reassembled by re-exporting
- *  them here. Adding a stage = one import + one entry in the union below. */
-export const IngestStageKey = Schema.Union([SkillsKey, CommandsKey, AgentDefKey, PricingKey, ClaudeKey, CodexKey, PiKey, OpenCodeKey, CursorKey, SubagentsKey, InvokedPositionsKey, SpawnedKey, GitKey, GithubPrKey, SignalsKey, OutcomesKey, TurnContentBlocksKey, TurnAnalysisKey, ReactionEventsKey, ClassifierResultsKey, SessionHealthKey, ClosureKey, DeriveMetricsKey, ProposalsKey, OpportunitiesKey, RetroProposalsKey, HarnessKey, DigestKey, UsageKey]);
-export type IngestStageKey = typeof IngestStageKey.Type;
+/** Derived from ALL_STAGES - the single source of truth for the key union.
+ *  No hand-maintained parallel list; key-uniqueness + deps-validity are
+ *  enforced at test time in registry.test.ts. */
+export type IngestStageKey = (typeof ALL_STAGES)[number]["meta"]["key"];
 
 export interface StageRegistryShape {
     readonly all: () => ReadonlyArray<StageDef<BaseStageStats, unknown>>;

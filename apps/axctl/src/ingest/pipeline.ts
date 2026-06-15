@@ -9,8 +9,8 @@ export {
     StageRegistry,
     StageRegistryDefault,
     StageRegistryLive,
-    IngestStageKey,
     ALL_STAGES,
+    type IngestStageKey,
     type StageDef,
 } from "./stage/registry.ts";
 export {
