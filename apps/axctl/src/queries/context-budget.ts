@@ -19,7 +19,9 @@
  */
 import { Effect } from "effect";
 import { SurrealClient } from "@ax/lib/db";
+import { normalizeLastUsed, UNUSED_RECENT_SQL, UNUSED_SUMMARY_SQL } from "./unused-skills.ts";
 
+const WINDOW_DAYS = 30;
 const CHARS_PER_TOKEN = 4;
 const toTokens = (chars: number) => Math.round(chars / CHARS_PER_TOKEN);
 
@@ -40,6 +42,11 @@ function sourceOf(scope: string): string {
 }
 const isToolScope = (scope: string) => TOOL_SCOPE.test(scope);
 
+/** Description longer than this (chars) is a "trim" candidate - the always-
+ *  loaded index cost is mostly a bloated frontmatter description. ~500 chars
+ *  ≈ 125 tokens in every session. */
+const VERBOSE_CHARS = 500;
+
 export interface SkillBudgetRow {
     readonly name: string;
     readonly scope: string;
@@ -51,6 +58,12 @@ export interface SkillBudgetRow {
     readonly content_hash: string;
     readonly dir_path: string;
     readonly is_tool: boolean;
+    // usage (summed across the user↔project mirror), for cost÷usage actions
+    readonly uses_total: number;
+    readonly uses_window: number;   // invocations inside the recency window
+    readonly last_used: string | null;
+    readonly dead_weight: boolean;  // costs always-loaded tokens, unused in window → reclaim
+    readonly verbose: boolean;      // bloated description → trim
 }
 
 export interface SourceBudgetRow {
@@ -61,6 +74,9 @@ export interface SourceBudgetRow {
     readonly index_tokens: number;
     readonly body_tokens: number;
     readonly is_tool: boolean;
+    readonly uses_window: number;
+    readonly dead_skills: number;
+    readonly reclaimable_index_tokens: number;  // always-loaded tokens from this source's dead weight
 }
 
 export interface ContextBudgetResult {
@@ -77,11 +93,17 @@ export interface ContextBudgetResult {
         /** Claude-skill subset only (excludes other-harness tool catalogs). */
         readonly cc_index_tokens: number;
         readonly cc_body_tokens: number;
+        /** Always-loaded tokens recoverable by disabling unused (dead-weight) skills. */
+        readonly reclaimable_index_tokens: number;
+        readonly reclaimable_skills: number;
+        readonly verbose_skills: number;
+        /** Recency window (days) used to judge "unused". */
+        readonly window_days: number;
     };
 }
 
 const BUDGET_SQL = `
-SELECT name, scope, bytes, string::len(description ?? "") AS desc_len, content_hash, dir_path
+SELECT id, name, scope, bytes, string::len(description ?? "") AS desc_len, content_hash, dir_path
 FROM skill;
 `;
 
@@ -91,21 +113,54 @@ function preferScope(a: string, b: string): boolean {
     const rank = (s: string) => (s.startsWith("project") ? 2 : s.includes(":") && !s.startsWith("plugin") ? 1 : 0);
     return rank(a) <= rank(b);
 }
+const idStr = (v: unknown) => String(v ?? "");
 
 export const fetchContextBudget = Effect.fn("queries.fetchContextBudget")(
     function* () {
         const db = yield* SurrealClient;
-        const raw = yield* db.query<[Array<Record<string, unknown>>]>(BUDGET_SQL)
-            .pipe(Effect.map((r) => r?.[0] ?? []));
+        // budget rows + bulk usage (per skill id) over the invoked edge table,
+        // computed deref-free - see unused-skills.ts for the perf rationale.
+        const [rawRes, summaryRes, recentRes] = yield* Effect.all([
+            db.query<[Array<Record<string, unknown>>]>(BUDGET_SQL),
+            db.query<[Array<Record<string, unknown>>]>(UNUSED_SUMMARY_SQL),
+            db.query<[Array<Record<string, unknown>>]>(UNUSED_RECENT_SQL(WINDOW_DAYS)),
+        ], { concurrency: 3 });
+        const raw = rawRes?.[0] ?? [];
 
-        // Dedup by content_hash, keeping the canonical scope.
-        const byHash = new Map<string, SkillBudgetRow>();
+        const usageById = new Map<string, { uses: number; last: string | null }>();
+        for (const r of summaryRes?.[0] ?? []) {
+            usageById.set(idStr(r.skill_id), { uses: Number(r.total_inv ?? 0), last: normalizeLastUsed(r.last_used) });
+        }
+        const recentById = new Map<string, number>();
+        for (const r of recentRes?.[0] ?? []) recentById.set(idStr(r.skill_id), Number(r.recent ?? 0));
+
+        // Group by content_hash: sum usage across the mirror ids, keep canonical.
+        interface Group { canonical: Record<string, unknown>; canonicalScope: string; uses: number; window: number; last: string | null; }
+        const groups = new Map<string, Group>();
         for (const row of raw) {
-            const scope = String(row.scope ?? "");
             const hash = String(row.content_hash ?? `${row.name}`);
+            const scope = String(row.scope ?? "");
+            const id = idStr(row.id);
+            const u = usageById.get(id);
+            const win = recentById.get(id) ?? 0;
+            const g = groups.get(hash);
+            if (!g) {
+                groups.set(hash, { canonical: row, canonicalScope: scope, uses: u?.uses ?? 0, window: win, last: u?.last ?? null });
+            } else {
+                g.uses += u?.uses ?? 0;
+                g.window += win;
+                if (u?.last && (!g.last || u.last > g.last)) g.last = u.last;
+                if (preferScope(scope, g.canonicalScope)) { g.canonical = row; g.canonicalScope = scope; }
+            }
+        }
+
+        const skills: SkillBudgetRow[] = [...groups.values()].map((g) => {
+            const row = g.canonical;
+            const scope = String(row.scope ?? "");
             const index_chars = Number(row.desc_len ?? 0);
             const body_chars = Number(row.bytes ?? 0);
-            const candidate: SkillBudgetRow = {
+            const is_tool = isToolScope(scope);
+            return {
                 name: String(row.name ?? "(unnamed)"),
                 scope,
                 source: sourceOf(scope),
@@ -113,47 +168,54 @@ export const fetchContextBudget = Effect.fn("queries.fetchContextBudget")(
                 body_chars,
                 index_tokens: toTokens(index_chars),
                 body_tokens: toTokens(body_chars),
-                content_hash: hash,
+                content_hash: String(row.content_hash ?? ""),
                 dir_path: String(row.dir_path ?? ""),
-                is_tool: isToolScope(scope),
+                is_tool,
+                uses_total: g.uses,
+                uses_window: g.window,
+                last_used: g.last,
+                dead_weight: !is_tool && g.window === 0 && index_chars > 0,
+                verbose: !is_tool && index_chars > VERBOSE_CHARS,
             };
-            const existing = byHash.get(hash);
-            if (!existing || preferScope(scope, existing.scope)) byHash.set(hash, candidate);
-        }
+        }).sort((a, b) => b.body_chars - a.body_chars);
 
-        const skills = [...byHash.values()].sort((a, b) => b.body_chars - a.body_chars);
-
-        // Per-source rollup.
+        // Per-source rollup (+ usage / reclaim).
         interface MutableSource {
             source: string; skills: number; index_chars: number; body_chars: number;
             index_tokens: number; body_tokens: number; is_tool: boolean;
+            uses_window: number; dead_skills: number; reclaimable_index_tokens: number;
         }
         const srcMap = new Map<string, MutableSource>();
         for (const s of skills) {
             const cur = srcMap.get(s.source) ?? {
                 source: s.source, skills: 0, index_chars: 0, body_chars: 0,
                 index_tokens: 0, body_tokens: 0, is_tool: s.is_tool,
+                uses_window: 0, dead_skills: 0, reclaimable_index_tokens: 0,
             };
             cur.skills += 1;
             cur.index_chars += s.index_chars;
             cur.body_chars += s.body_chars;
             cur.index_tokens += s.index_tokens;
             cur.body_tokens += s.body_tokens;
+            cur.uses_window += s.uses_window;
+            if (s.dead_weight) { cur.dead_skills += 1; cur.reclaimable_index_tokens += s.index_tokens; }
             srcMap.set(s.source, cur);
         }
         const sources = [...srcMap.values()].sort((a, b) => b.index_chars - a.index_chars);
 
-        const sum = (pick: (s: SkillBudgetRow) => number, tools: boolean) =>
-            skills.filter((s) => s.is_tool === tools).reduce((n, s) => n + pick(s), 0);
-
+        const cc = skills.filter((s) => !s.is_tool);
         const totals = {
             skills: skills.length,
             index_chars: skills.reduce((n, s) => n + s.index_chars, 0),
             body_chars: skills.reduce((n, s) => n + s.body_chars, 0),
             index_tokens: skills.reduce((n, s) => n + s.index_tokens, 0),
             body_tokens: skills.reduce((n, s) => n + s.body_tokens, 0),
-            cc_index_tokens: toTokens(sum((s) => s.index_chars, false)),
-            cc_body_tokens: toTokens(sum((s) => s.body_chars, false)),
+            cc_index_tokens: toTokens(cc.reduce((n, s) => n + s.index_chars, 0)),
+            cc_body_tokens: toTokens(cc.reduce((n, s) => n + s.body_chars, 0)),
+            reclaimable_index_tokens: cc.filter((s) => s.dead_weight).reduce((n, s) => n + s.index_tokens, 0),
+            reclaimable_skills: cc.filter((s) => s.dead_weight).length,
+            verbose_skills: cc.filter((s) => s.verbose).length,
+            window_days: WINDOW_DAYS,
         };
 
         return { skills, sources, totals } satisfies ContextBudgetResult;

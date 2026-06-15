@@ -197,6 +197,11 @@ export interface ContextSkillRow {
     readonly content_hash: string;
     readonly dir_path: string;
     readonly is_tool: boolean;
+    readonly uses_total: number;
+    readonly uses_window: number;
+    readonly last_used: string | null;
+    readonly dead_weight: boolean;
+    readonly verbose: boolean;
 }
 export interface ContextSourceRow {
     readonly source: string;
@@ -206,6 +211,9 @@ export interface ContextSourceRow {
     readonly index_tokens: number;
     readonly body_tokens: number;
     readonly is_tool: boolean;
+    readonly uses_window: number;
+    readonly dead_skills: number;
+    readonly reclaimable_index_tokens: number;
 }
 export interface ContextBudgetResult {
     readonly skills: ReadonlyArray<ContextSkillRow>;
@@ -218,6 +226,10 @@ export interface ContextBudgetResult {
         readonly body_tokens: number;
         readonly cc_index_tokens: number;
         readonly cc_body_tokens: number;
+        readonly reclaimable_index_tokens: number;
+        readonly reclaimable_skills: number;
+        readonly verbose_skills: number;
+        readonly window_days: number;
     };
 }
 export interface ContextDriftRow {
