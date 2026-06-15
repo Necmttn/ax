@@ -119,11 +119,11 @@ Top-3, `• <text> → <action>`; footer points at the Fix #3 front door. Empty 
 
 ## Status
 
-- [ ] model.ts + schema
-- [ ] sources.ts (4 source fns over existing queries)
-- [ ] rank.ts + tests
-- [ ] shown.ts + tests
-- [ ] render.ts + tests
-- [ ] snapshot.ts + watcher wiring
-- [ ] surface-digest.ts hook + fire test
-- [ ] ax digest CLI
+- [x] model.ts + schema
+- [x] sources.ts (4 source fns over existing queries)
+- [x] rank.ts + tests
+- [x] shown.ts + tests
+- [x] render.ts + tests
+- [x] snapshot.ts + watcher wiring
+- [x] surface-digest.ts hook + fire test
+- [x] ax digest CLI
