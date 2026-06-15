@@ -1,9 +1,46 @@
 /* THROWAWAY - Variant A: Mission Control. Dark-first desktop HUD, dense bento. */
+import { useEffect, useState } from "react";
 import { CellGrid, Doto, GlyphReel, Led, Segbar, modelColor } from "./viz";
 import { ACTIVITY, FEED, MODELS, PROFILE, litFor } from "./mock";
 import type { Theme } from "./switcher";
 
 const seedFrom = (s: string) => { let h = 2166136261; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); } return h >>> 0; };
+const p2 = (n: number) => String(n).padStart(2, "0");
+
+/** Live clock hero (nullframe-style): big Doto time + seconds + pulsing dot on
+ *  a dot-grid, with a serif day / mono date + last-push footer. */
+function ClockHero() {
+    const [now, setNow] = useState(() => new Date());
+    useEffect(() => {
+        const iv = window.setInterval(() => { if (!document.hidden) setNow(new Date()); }, 1000);
+        return () => window.clearInterval(iv);
+    }, []);
+    const day = now.toLocaleDateString("en-US", { weekday: "long" });
+    const date = now.toLocaleDateString("en-US", { day: "2-digit", month: "short", year: "numeric" }).toUpperCase();
+    return (
+        <section className="rdx-card v-mc-clock">
+            <div className="v-mc-clock-top rdx-label">
+                <span>local time · <b style={{ color: "var(--pri)" }}>@{PROFILE.handle}</b></span>
+                <span>sys.v0.29 · live · {PROFILE.window.days}d window</span>
+            </div>
+            <div className="v-mc-clock-time">
+                <Led tone="alert" />
+                <span className="rdx-doto t">{p2(now.getHours())}:{p2(now.getMinutes())}</span>
+                <span className="rdx-doto s">{p2(now.getSeconds())}</span>
+            </div>
+            <div className="v-mc-clock-foot">
+                <div>
+                    <div className="day">{day}</div>
+                    <div className="rdx-label">{date} · {PROFILE.sessions} sessions traced</div>
+                </div>
+                <div className="push">
+                    <div className="rdx-label">last push · main</div>
+                    <div className="rdx-label" style={{ color: "var(--pri)" }}>feat/redesign-prototype <span className="sq" /></div>
+                </div>
+            </div>
+        </section>
+    );
+}
 
 export function VariantMissionControl({ theme }: { theme: Theme }) {
     const dim = theme === "dark" ? "#222222" : "#dad7cb";
@@ -16,12 +53,7 @@ export function VariantMissionControl({ theme }: { theme: Theme }) {
                 {RAIL.map((g, i) => <button key={i} className={i === 0 ? "on" : ""} type="button">{g}</button>)}
             </nav>
             <main className="v-mc-main">
-                <div className="v-mc-top">
-                    <span className="v-mc-crumb">mission control · <b>@{PROFILE.handle}</b></span>
-                    <span className="rdx-label" style={{ display: "inline-flex", gap: 8, alignItems: "center" }}>
-                        <Led /> live · {PROFILE.window.days}-day window
-                    </span>
-                </div>
+                <ClockHero />
                 <div className="v-mc-bento">
                     {/* hero: archetype + glyph reel */}
                     <section className="rdx-card v-mc-hero span2 row2 acc-violet" style={{ animationDelay: "0s" }}>
@@ -56,7 +88,7 @@ export function VariantMissionControl({ theme }: { theme: Theme }) {
                     <section className="rdx-card acc-alert" style={{ animationDelay: "0.24s" }}>
                         <div className="rdx-label nf-key">streak</div>
                         <div className="rdx-num v-mc-bottom">{PROFILE.streak}<small>d</small></div>
-                        <Segbar total={Math.max(7, PROFILE.longest)} on={PROFILE.streak} tone="card" wave />
+                        <Segbar total={Math.max(7, PROFILE.longest)} on={PROFILE.streak} color="var(--alert)" gradient />
                         <div className="rdx-label">best {PROFILE.longest} days</div>
                     </section>
 
