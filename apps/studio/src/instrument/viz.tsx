@@ -98,10 +98,10 @@ export function GlyphReel({ seed = 0, dim = "#222222", lit = "#ffffff" }: { seed
         const dpr = Math.min(2, window.devicePixelRatio || 1);
         const [d0, d1, d2] = hex(dim), [l0, l1, l2] = hex(lit);
         let w = cv.clientWidth, h = cv.clientHeight;
+        // Always track the live box (absolute canvas prevents the resize loop);
+        // a stale bitmap left the glyph drawn huge in a corner once the box settled.
         const size = () => {
-            const nw = cv.clientWidth, nh = cv.clientHeight;
-            if (nw === w && nh === h && cv.width) return; // no-op: never re-drive layout
-            w = nw; h = nh;
+            w = cv.clientWidth; h = cv.clientHeight;
             cv.width = Math.max(1, Math.round(w * dpr));
             cv.height = Math.max(1, Math.round(h * dpr));
         };
