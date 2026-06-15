@@ -43,7 +43,10 @@ packages/schema/src/schema.surql               - ax_invocation table DDL (+ SCHE
 `UsageRecord` (Effect Schema; one JSONL line per invocation):
 ```
 ts          Date              invocation start
-command     string            resolved subcommand path: "sessions churn" | "digest" | "ingest"
+command     string            TOP-LEVEL subcommand only: "sessions" | "digest" | "ingest"
+                              (v0 records the top-level command, NOT the two-word path -
+                               see Redaction note; two-word granularity is a deferred
+                               enhancement needing a registry-derived subverb allowlist)
 flags       string[]          flag NAMES only, sorted: ["--here","--json"]  (never values)
 exit_code   number            0 = ok
 duration_ms number
@@ -53,7 +56,7 @@ ax_version  string
 ```
 
 **Redaction (at `record.ts`, before anything hits disk):**
-- Drop ALL positional args (`sessions show <id>`, `recall "<query>"` → `command` + `flags` only).
+- Drop ALL positional args including the second positional - `command` is the validated TOP-LEVEL subcommand only (`sessions show <id>` → `"sessions"`, `recall "<query>"` → `"recall"`). A non-command head → `"(unknown)"`. (Capturing the second positional would leak user-controllable branch/skill/slug names for some groups; top-level is the safe, zero-maintenance surface - and it's what the external team-publish will aggregate.)
 - Drop flag *values* (`--days=30` → `"--days"`, `--project=/Users/...` → `"--project"`).
 - `repo_key` = `basename` only - never the absolute path; null when not in a git repo.
 - No env, no cwd beyond repo_key, no usernames, no positional values.
