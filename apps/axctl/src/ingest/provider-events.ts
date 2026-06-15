@@ -15,7 +15,7 @@ import {
 } from "@ax/lib/shared/surql";
 import { identityPart, stableDigest } from "./record-keys.ts";
 
-export type AgentProviderName = "claude" | "codex" | "pi" | "opencode" | "cursor";
+export type AgentProviderName = "claude" | "codex" | "pi" | "opencode" | "cursor" | "otel";
 
 type JsonInput = unknown;
 type TimestampInput = Date | string;

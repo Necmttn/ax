@@ -68,6 +68,7 @@ describe("contract system group", () => {
         expect(body.api_version).toBe(API_VERSION);
         expect(body.capabilities).toContain("sessions");
         expect(body.live_ingest).toBe(true);
+        expect(body.otlp_receiver).toBe(true);
     });
 
     test("version reports live_ingest false when the sidecar is down", async () => {

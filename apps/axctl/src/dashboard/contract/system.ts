@@ -47,6 +47,9 @@ export const SystemGroupLive = HttpApiBuilder.group(AxApi, "system", (handlers) 
                     api_version: API_VERSION,
                     capabilities: dashboardApiCapabilities(),
                     live_ingest: info.ingestStream !== null,
+                    // OTLP receiver is pure HTTP+JSON+SurrealDB (no native dep),
+                    // so it works in both source and compiled binary - always true.
+                    otlp_receiver: true,
                 });
             }))
         .handle("query", ({ payload }) =>

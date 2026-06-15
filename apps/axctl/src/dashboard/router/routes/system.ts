@@ -25,6 +25,9 @@ export const systemRoutes: ReadonlyArray<AnyRoute> = [
                 // this to engage its polling fallback up front. Additive
                 // optional field: forward-compatible, no api_version bump.
                 live_ingest: serve?.ingestStream != null,
+                // OTLP receiver is pure HTTP+JSON+SurrealDB (no native dep),
+                // so it works in both source and compiled binary - always true.
+                otlp_receiver: true,
             }),
     }),
 ];

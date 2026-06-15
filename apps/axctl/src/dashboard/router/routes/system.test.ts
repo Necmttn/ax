@@ -27,8 +27,9 @@ describe("systemRoutes", () => {
             (() => Promise.reject(new Error("unused"))) as never,
         );
         expect(res.status).toBe(200);
-        const body = await res.json() as { live_ingest: boolean; capabilities: string[] };
+        const body = await res.json() as { live_ingest: boolean; otlp_receiver: boolean; capabilities: string[] };
         expect(body.live_ingest).toBe(false);
+        expect(body.otlp_receiver).toBe(true);
         expect(body.capabilities).toContain("ingest");
     });
 });

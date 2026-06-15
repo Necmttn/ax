@@ -30,6 +30,11 @@ export class DaemonVersion extends Schema.Class<DaemonVersion>("ax/DaemonVersion
      *  on the wire: daemons older than the field omit it, and the hosted
      *  studio must keep decoding their responses. */
     live_ingest: Schema.optionalKey(Schema.Boolean),
+    /** Whether the OTLP receiver (/v1/traces, /v1/metrics, /v1/logs) is
+     *  available. Unlike live_ingest, this is always true: the receiver is
+     *  pure HTTP+JSON+SurrealDB with no native dependency. Optional on the
+     *  wire for forward-compatibility with older daemons. */
+    otlp_receiver: Schema.optionalKey(Schema.Boolean),
 }) {}
 
 /** POST /api/query rejection: non-read SQL or a database error. Legacy
@@ -843,6 +848,38 @@ export const ImproveGroup = HttpApiGroup.make("improve")
         }),
     );
 
+// ---- OTLP receiver -------------------------------------------------------
+
+/** OTLP/HTTP ack: `{ partialSuccess: {} }` (all signals, all cases). */
+export const OtlpAck = Schema.Struct({
+    partialSuccess: Schema.optional(Schema.Struct({})),
+});
+
+/**
+ * The OTLP receiver family: POST /v1/metrics, /v1/traces, /v1/logs.
+ *
+ * All three accept arbitrary binary/JSON bodies (the payload is decoded
+ * manually in the handler via `handleRaw`; `Schema.Unknown` here is a
+ * placeholder so HttpApi registers the endpoint - the actual payload decoding
+ * happens inside the handler, not through the contract codec).
+ * All three return the standard OTLP/HTTP ack `{ partialSuccess: {} }`.
+ */
+export const OtelGroup = HttpApiGroup.make("otel")
+    .add(
+        HttpApiEndpoint.post("otlpMetrics", "/v1/metrics", {
+            payload: Schema.Unknown,
+            success: OtlpAck,
+        }),
+        HttpApiEndpoint.post("otlpTraces", "/v1/traces", {
+            payload: Schema.Unknown,
+            success: OtlpAck,
+        }),
+        HttpApiEndpoint.post("otlpLogs", "/v1/logs", {
+            payload: Schema.Unknown,
+            success: OtlpAck,
+        }),
+    );
+
 // ---- usage rollup payload ------------------------------------------------
 
 /** Command utilization entry in a UsageRollup response. */
@@ -927,5 +964,6 @@ export const AxApi = HttpApi.make("ax")
     .add(ImproveGroup)
     .add(UsageGroup)
     .add(LiveGroup)
+    .add(OtelGroup)
     .annotate(OpenApi.Title, "ax daemon API")
     .annotate(OpenApi.Version, "1");

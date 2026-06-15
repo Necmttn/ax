@@ -75,6 +75,7 @@ fresh clone.
 ## Reactivity
 
 - LaunchAgent watcher (`com.necmttn.ax-watch`, installed by `axctl install`) tails `~/.claude/projects/` + `~/.codex/sessions/` and runs `axctl ingest --since=1` in the background on new transcripts. Do NOT add a Stop hook - Stop fires per turn and blocks Claude until ingest returns.
+- LaunchAgent serve daemon (`com.necmttn.ax-serve`, installed by `axctl install`) auto-starts `ax serve` on login (RunAtLoad + KeepAlive-on-crash), so the dashboard API + OTLP receiver (port 1738) are always up without a manual `ax serve`. serve binds `127.0.0.1` by default (`AX_SERVE_HOST=0.0.0.0` to expose on the LAN); it self-heals if `com.necmttn.ax-db` starts after it. Symmetric across install/status/enable/disable/uninstall with the other agents.
 - Weekly self-improve cron (`~/.claude/self-improve/run.sh`) does deep-scan backfill (planned wire-up)
 - `ax-extract-workflow` skill (installable via `npx skills add Necmttn/ax`) frames "what made X work" investigations - triggers retro + session queries to surface the actual sequence of events behind a result.
 
@@ -84,6 +85,25 @@ fresh clone.
 - CLI `ax ingest` is unchanged (never passes a `runId`). Progress animates on a TTY by default; non-TTY is silent unless forced with `AX_PROGRESS=on` (or `--progress=plain|pipeline`). `AX_PROGRESS=off` silences. Gated in `withIngest` (`apps/axctl/src/cli/index.ts`).
 - **Live ingest needs ax from source** (the `bin/axctl` shim does this). The compiled `--compile` binary serves the dashboard but returns 503 on `POST /api/ingest` - native lmdb can't bundle, so no sidecar. `/api/version` advertises this as `live_ingest: false`; the studio Live tab then falls back to polling the count tiles every 5s (`apps/studio/src/poll-fallback.ts`) instead of a dead stream.
 - **Daemon self-awareness**: `ax serve` writes a pidfile (`~/.local/share/ax/serve.json`, `AX_DATA_DIR` override) and pre-flight-probes its port - re-running it against a live daemon prints the dashboard URLs (exit 0), a foreign listener gets a clean lsof/`--port` hint (no stack trace). `ax serve status` / `ax serve stop` resolve the instance via pidfile → `/api/version` probe → lsof, so they also find pre-pidfile daemons; `stop` only ever kills the pid actually LISTENing on the port. Logic: `apps/axctl/src/dashboard/serve-instance.ts` + `serve-control.ts`.
+
+### OTLP receiver (ax serve)
+
+`ax serve` accepts harness OTLP/JSON telemetry on the daemon port (1738):
+`POST /v1/metrics` (Claude Code usage metrics) + `POST /v1/traces` (Codex
+spans); `/v1/logs` is accepted and dropped (v1 no-op). Bodies decode via Effect
+`Schema` (curated OTLP/JSON subset, `apps/axctl/src/otel/`), normalize per-harness
+(`service.name` -> harness label), and land in `otel_metric_point` / `otel_span`.
+A correlation pass at ingest finish draws `session -> telemetry_of -> otel_*`
+edges by matching `session.id` (OTLP arrives before the transcript, so the
+ingest run owns linking; idempotent, best-effort via `Effect.ignore`). OTLP cost
+is stored separately from file-parsed cost (no double-count). The receiver is
+fail-open (always 2xx so exporters never retry-storm) and JSON-only (ax owns the
+harness config, so it forces `http/json` - no protobuf decode, works in the
+compiled binary). `ax install` writes the harness telemetry config
+(`CLAUDE_CODE_ENABLE_TELEMETRY=1`, `OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:1738`,
+`http/json`; Codex `[otel]` block), idempotent + ax-marked. `/api/version`
+advertises `otlp_receiver: true`. Provider name: `otel`. Spec:
+docs/superpowers/specs/2026-06-15-otel-receiver-design.md.
 
 ## Workflow extraction commands
 

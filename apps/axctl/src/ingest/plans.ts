@@ -241,6 +241,13 @@ export const providerPlanSignalAvailability: Readonly<Record<AgentProviderName, 
         toolNames: [],
         evidence: "Current Cursor state.vscdb fixtures expose composer messages/bubbles only; no raw plan snapshot payload equivalent is present.",
     },
+    otel: {
+        provider: "otel",
+        status: "unavailable",
+        planSources: [],
+        toolNames: [],
+        evidence: "OTLP telemetry spans carry no plan/todo snapshot payload; plan signal is unavailable for this provider.",
+    },
 };
 
 export function normalizeProviderPlanSnapshot(

@@ -66,6 +66,13 @@ export const providerDelegationSignalAvailability: Readonly<Record<AgentProvider
         sharedRecords: ["spawned"],
         evidence: "Current Cursor state.vscdb fixtures expose composer messages/bubbles only; no child-session id or delegation relation payload is present.",
     },
+    otel: {
+        provider: "otel",
+        status: "unavailable",
+        rawSignals: [],
+        sharedRecords: ["spawned"],
+        evidence: "OTLP telemetry spans are ingested as spans/traces; no child-session delegation relation is defined yet.",
+    },
 };
 
 const isRecord = (input: unknown): input is Record<string, unknown> =>

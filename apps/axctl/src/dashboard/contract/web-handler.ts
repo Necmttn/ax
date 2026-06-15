@@ -34,6 +34,7 @@ import { errorText } from "./common.ts";
 import { ImproveGroupLive } from "./improve.ts";
 import { InsightsGroupLive } from "./insights.ts";
 import { LiveGroupLive } from "./live.ts";
+import { OtelGroupLive } from "./otel.ts";
 import { SessionsGroupLive } from "./sessions.ts";
 import { SkillsGroupLive } from "./skills.ts";
 import { ContractServeInfo, SystemGroupLive } from "./system.ts";
@@ -76,6 +77,10 @@ const CONTRACT_ROUTES: ReadonlySet<string> = new Set([
     "GET /api/usage",
     // live (SSE /api/events + binary /api/image stay raw legacy routes)
     "POST /api/ingest",
+    // otel receiver
+    "POST /v1/metrics",
+    "POST /v1/traces",
+    "POST /v1/logs",
     // docs
     "GET /docs",
     "GET /openapi.json",
@@ -142,6 +147,7 @@ export function makeContractWebHandler(opts: MakeContractWebHandlerOptions): Con
             ImproveGroupLive,
             UsageGroupLive,
             LiveGroupLive,
+            OtelGroupLive,
         ]),
         // FileSystem/Path appear twice deliberately: in the mergeAll OUTPUT
         // for request-time handler requirements, and here for the build-time

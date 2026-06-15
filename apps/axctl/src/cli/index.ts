@@ -56,6 +56,7 @@ import { AX_VERSION, liveVersionDeps, printVersion } from "./version.ts";
 import { appendUsageRecord, defaultUsageLogPath, redactInvocation } from "../usage/record.ts";
 import { stderrExit } from "./output.ts";
 import { agentsCommand, agentsRuntime } from "../agents/cli.ts";
+import { correlateOrphanOtel } from "../otel/correlate.ts";
 import { ALL_STAGES } from "../ingest/stage/registry.ts";
 import { IngestRuntimeLayer, ingestRuntimeLayerWith } from "../ingest/stage/runtime.ts";
 import { ConsoleTransportLayer } from "@ax/lib/live-traces/transports/console";
@@ -264,7 +265,13 @@ const withIngest = (args: ReadonlyArray<string>): CliProgram => {
     // not merged on top of the already-built AppLayer - otherwise the sink keeps
     // its default NoopTransport and every event is dropped (no animation, no --debug).
     const layer = transport ? ingestRuntimeLayerWith(transport) : IngestRuntimeLayer;
-    return runCli(args).pipe(Effect.provide(layer), Effect.scoped);
+    return runCli(args).pipe(
+        // After ingest completes successfully, link orphan OTLP rows to their
+        // sessions via telemetry_of edges. Best-effort: never fails the ingest.
+        Effect.tap(() => Effect.ignore(correlateOrphanOtel())),
+        Effect.provide(layer),
+        Effect.scoped,
+    );
 };
 
 /**
