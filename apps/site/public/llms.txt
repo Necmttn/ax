@@ -27,6 +27,7 @@ Install: `curl -fsSL https://ax.necmttn.com/install | bash`, then `npx skills ad
 ### Cost and model routing
 - `ax cost models | sessions | split` - spend by model; the split shows main-loop vs subagent spend so users see what their frontier model burns on mechanical work
 - `ax dispatches [--candidates]` - subagent dispatches that inherited an expensive model + estimated savings at cheaper-model pricing; routed dispatches whose child continued on a different model (the harness drops the model override on continuations) are flagged with their dropped-leg cost
+- `ax dispatches --economy [--days=N]` - spend-mode effectiveness lens: of inherit dispatches matching a route-down class, how many ran cheap (sonnet/haiku) vs expensive (fable/opus)? Shows overspend cost + est savings by routing class + count of route-dispatch Advise hook fires (unlinked - advice→outcome attribution deferred, no clean PreToolUse→spawn join available)
 - `ax thinking` - reasoning-spend rollup: per-model Claude thinking volume (thinking-only turns' own output tokens), reasoning-effort distribution (codex turn_context effort + claude settings effortLevel), and codex reasoning tokens as a share of output
 - `ax routing tune` - mine the user's own dispatch history for new routing classes; judgment work is never auto-routed (vetted via --emit-brief agent backtest)
 - `ax routing compile` - regenerate the routing table that drives the route-dispatch hook and the efficient-dispatch skill, preserving user-mined classes (`ax dispatches compile-routing` is an alias)

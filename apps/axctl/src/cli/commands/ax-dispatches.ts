@@ -11,6 +11,14 @@
  *     and description/agentType matches a routing class. Shows suggested model
  *     + est savings. Footer: total est savings, top 3 classes by savings.
  *
+ *   ax dispatches --economy [--days=N] [--json]
+ *     Spend-mode-aware measurement lens: of the inherit dispatches matching a
+ *     route-down class, how many ran cheap (sonnet/haiku) vs expensive (fable/
+ *     opus)? Plus the route-dispatch Advise hook-fire count (unlinked).
+ *     By-class breakdown sorted by overspend. Advice→outcome attribution is
+ *     deferred (no clean join - PreToolUse fires before the child session id
+ *     exists).
+ *
  *   ax dispatches compile-routing [--out=PATH] [--json]
  *     Write ~/.ax/hooks/routing-table.json from ROUTING_CLASSES. Idempotent
  *     regenerate. --out overrides the default path (tests use tmp dirs).
@@ -23,6 +31,7 @@ import { printNextLinks } from "../next-format.ts";
 import {
     fetchDispatches,
     fetchDispatchCandidates,
+    fetchDispatchEconomy,
     compileRouting,
     compileRoutingSkillMd,
 } from "../../queries/dispatch-analytics.ts";
@@ -33,16 +42,74 @@ import type { RuntimeManifest } from "./manifest.ts";
 import { fail, jsonFlag, optionValue, positiveLimit } from "./shared.ts";
 
 // ---------------------------------------------------------------------------
-// ax dispatches [--days=N] [--limit=N] [--candidates] [--json]
+// ax dispatches [--days=N] [--limit=N] [--candidates] [--economy] [--json]
 // ---------------------------------------------------------------------------
 
 const cmdDispatches = (input: {
     readonly sinceDays: number;
     readonly limit: number;
     readonly candidates: boolean;
+    readonly economy: boolean;
     readonly json: boolean;
 }) =>
     Effect.gen(function* () {
+        if (input.economy) {
+            const table = yield* loadEffectiveRoutingTable();
+            const result = yield* fetchDispatchEconomy({ sinceDays: input.sinceDays, table });
+
+            if (input.json) {
+                console.log(prettyPrint(result));
+                return;
+            }
+
+            // Economy summary header
+            console.log(`dispatch economy lens  (${input.sinceDays} days)\n`);
+
+            if (result.total_routable === 0) {
+                console.log("(no routable inherit dispatches in the requested window)");
+                console.log("  tip: widen with --days=30 or run ax dispatches --candidates to see per-dispatch view");
+                return;
+            }
+
+            // Totals summary
+            const cheapPct = result.total_routable > 0
+                ? ((result.ran_cheap / result.total_routable) * 100).toFixed(1)
+                : "0.0";
+            const expensivePct = result.total_routable > 0
+                ? ((result.ran_expensive / result.total_routable) * 100).toFixed(1)
+                : "0.0";
+
+            console.log(`routable inherit dispatches: ${result.total_routable}`);
+            console.log(`  ran cheap    (sonnet/haiku): ${result.ran_cheap.toString().padStart(4)}  (${cheapPct}%)`);
+            console.log(`  ran expensive (fable/opus):  ${result.ran_expensive.toString().padStart(4)}  (${expensivePct}%)  ← addressable overspend`);
+            console.log(`\noverspend cost: ${usd(result.overspend_usd)}  est savings if re-routed: ${usd(result.total_est_savings_usd)}`);
+
+            if (result.advise_fires_available) {
+                console.log(`route-dispatch Advise fires: ${result.advise_fires}  (advice→outcome attribution deferred - no clean join)`);
+            } else {
+                console.log(`route-dispatch Advise fires: (no hook_command_invocation rows in window)`);
+            }
+
+            // By-class table
+            if (result.by_class.length > 0) {
+                console.log("");
+                const classW = 28;
+                console.log(
+                    `${"class".padEnd(classW)}  ${"total".padStart(6)}  ${"cheap".padStart(6)}  ${"expensive".padStart(9)}  ${"overspend".padStart(10)}  ${"est_savings".padStart(11)}`,
+                );
+                for (const row of result.by_class) {
+                    console.log(
+                        `${truncate(row.classId, classW).padEnd(classW)}  ${row.count.toString().padStart(6)}  ` +
+                        `${row.ran_cheap.toString().padStart(6)}  ${row.ran_expensive.toString().padStart(9)}  ` +
+                        `${usd(row.overspend_usd).padStart(10)}  ${usd(row.est_savings_usd).padStart(11)}`,
+                    );
+                }
+            }
+
+            console.log(`\ntip: ax dispatches --candidates  for per-dispatch view of the expensive-tier rows`);
+            return;
+        }
+
         if (input.candidates) {
             const table = yield* loadEffectiveRoutingTable();
             const result = yield* fetchDispatchCandidates({ sinceDays: input.sinceDays, table });
@@ -146,18 +213,20 @@ const dispatchesMainCommand = Command.make(
         days: Flag.integer("days").pipe(Flag.withDefault(14)),
         limit: positiveLimit(30),
         candidates: Flag.boolean("candidates").pipe(Flag.withDefault(false)),
+        economy: Flag.boolean("economy").pipe(Flag.withDefault(false)),
         json: jsonFlag,
     },
-    ({ days, limit, candidates, json }) => {
+    ({ days, limit, candidates, economy, json }) => {
         if (!Number.isInteger(days) || days <= 0) {
             fail(`ax dispatches: --days must be a positive integer (got "${days}")`);
         }
-        return cmdDispatches({ sinceDays: days, limit, candidates, json });
+        return cmdDispatches({ sinceDays: days, limit, candidates, economy, json });
     },
 ).pipe(
     Command.withDescription(
         "Subagent dispatch analytics: table of dispatches sorted by child cost, with dispatch model, child model, cost. " +
-        "--days=N (default 14)  --limit=N (default 30)  --candidates (inherit + expensive + routing match)  --json",
+        "--days=N (default 14)  --limit=N (default 30)  --candidates (inherit + expensive + routing match)  " +
+        "--economy (spend-mode effectiveness lens: cheap vs expensive for routable dispatches + Advise fire count)  --json",
     ),
 );
 

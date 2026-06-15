@@ -37,9 +37,11 @@ describe("scaffoldWorkspace", () => {
         const ewPath = join(dir, "enforce-worktree.ts");
         const ewwPath = join(dir, "enforce-worktree-write.ts");
         const rdPath = join(dir, "route-dispatch.ts");
+        const rqPath = join(dir, "refresh-quota.ts");
         expect(existsSync(ewPath)).toBe(true);
         expect(existsSync(ewwPath)).toBe(true);
         expect(existsSync(rdPath)).toBe(true);
+        expect(existsSync(rqPath)).toBe(true);
 
         const ewContent = readFileSync(ewPath, "utf8");
         expect(ewContent).toContain('@ax/hooks-sdk/hooks/enforce-worktree');
@@ -53,10 +55,14 @@ describe("scaffoldWorkspace", () => {
         const rdContent = readFileSync(rdPath, "utf8");
         expect(rdContent).toContain('@ax/hooks-sdk/hooks/route-dispatch');
 
+        const rqContent = readFileSync(rqPath, "utf8");
+        expect(rqContent).toContain('@ax/hooks-sdk/hooks/refresh-quota');
+
         // All hook files should be in the written list
         expect(written).toContain(ewPath);
         expect(written).toContain(ewwPath);
         expect(written).toContain(rdPath);
+        expect(written).toContain(rqPath);
     });
 
     test("does not overwrite an existing hook file (preserves user edits)", async () => {
@@ -107,7 +113,8 @@ describe("scaffoldWorkspace", () => {
         expect(written).toContain(join(dir, "enforce-worktree.ts"));
         expect(written).toContain(join(dir, "enforce-worktree-write.ts"));
         expect(written).toContain(join(dir, "route-dispatch.ts"));
-        expect(written.length).toBe(4);
+        expect(written).toContain(join(dir, "refresh-quota.ts"));
+        expect(written.length).toBe(5);
     });
 
     test("creates dir if it does not exist", async () => {

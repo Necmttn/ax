@@ -4,6 +4,10 @@
  * and SwiftBar/xbar plugin output (`--swiftbar`, menubar). All take nowMs +
  * an optional IANA timeZone so tests are deterministic.
  */
+import {
+    computeSpendMode,
+    DEFAULT_SPEND_CONFIG,
+} from "@ax/hooks-sdk/spend-mode";
 import type { QuotaSnapshot, QuotaWindow } from "./schema.ts";
 
 export interface RenderOptions {
@@ -87,6 +91,17 @@ export const renderQuotaTable = (
         lines.push(`${"extra".padEnd(10)}  ${detail.padStart(5)}`);
     }
     lines.push("");
+    const { mode, stale } = computeSpendMode(snapshot, options.nowMs, DEFAULT_SPEND_CONFIG);
+    if (stale) {
+        const fetchedMs = Date.parse(snapshot.fetched_at);
+        const ageMin = Number.isFinite(fetchedMs)
+            ? Math.round((options.nowMs - fetchedMs) / 60_000)
+            : 0;
+        lines.push(`${"mode".padEnd(10)}  ${"stale".padStart(5)} (${ageMin}m old)`);
+    } else {
+        lines.push(`${"mode".padEnd(10)}  ${mode.toUpperCase().padStart(5)}`);
+    }
+    lines.push("");
     lines.push(`(fetched ${agoText(snapshot.fetched_at, options.nowMs)}, ${options.sourceNote})`);
     return lines.join("\n");
 };
@@ -105,7 +120,20 @@ export const renderStatusline = (snapshot: QuotaSnapshot, options: RenderOptions
     if (snapshot.seven_day) {
         parts.push(`7d ${pct(snapshot.seven_day.utilization)}`);
     }
-    return parts.length > 0 ? parts.join(" · ") : "quota n/a";
+    if (parts.length === 0) return "quota n/a";
+    const { mode, stale } = computeSpendMode(snapshot, options.nowMs, DEFAULT_SPEND_CONFIG);
+    if (stale) {
+        const fetchedMs = Date.parse(snapshot.fetched_at);
+        const ageMin = Number.isFinite(fetchedMs)
+            ? Math.round((options.nowMs - fetchedMs) / 60_000)
+            : 0;
+        parts.push(`mode? (stale ${ageMin}m)`);
+    } else if (mode === "splurge") {
+        parts.push("SPLURGE → /dojo");
+    } else {
+        parts.push("CONSERVE");
+    }
+    return parts.join(" · ");
 };
 
 // ---------------------------------------------------------------------------

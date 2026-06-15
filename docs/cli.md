@@ -40,7 +40,7 @@ axctl dojo draft [--title=<t>] [--kind=bug|improvement] [--body-file=<path>] [--
 axctl dojo outbox [--json]                                            # list staged upstream issue drafts
 axctl dojo spar-plan <sha> [--json]                              # capture a landed task's baseline + emit a one-delta experiment brief
 axctl dojo spar-score <id> [--variant-session=<id>] [--json]     # score the agent's variant vs the frozen baseline
-axctl dispatches [--candidates]             # subagent dispatch routing analytics + est savings
+axctl dispatches [--candidates] [--economy] # subagent dispatch routing analytics + est savings + effectiveness lens
 axctl routing tune [--dry-run|--emit-brief] # mine YOUR dispatch history for new routing classes
 axctl routing compile                       # regenerate ~/.ax/hooks/routing-table.json (user classes preserved)
 axctl routing show                          # effective routing table with class origins
@@ -139,6 +139,18 @@ SendMessage follow-ups / post-compact resumes continue on the parent session's
 model. Rows are marked `!` in the child_model column; the footer sums dropped
 dispatches and the cost of off-model legs. Per-model legs come from
 `turn_token_usage` (`child_legs` in `--json`).
+
+## Dispatch economy lens
+
+`ax dispatches --economy [--days=N]` measures whether the route-dispatch advisory
+is working: of the inherit dispatches that matched a route-down routing class
+(mechanical work that *could* be routed to a cheaper model), how many ran cheap
+(sonnet/haiku) vs expensive (fable/opus)? The expensive-tier count is the
+addressable overspend. The lens also reports the count of route-dispatch Advise
+hook fires in the window (unlinked from outcomes - attributing an advisory to the
+resulting dispatch requires a clean PreToolUse→spawn join that isn't available;
+deferred). By-class table sorted by overspend. Use `--candidates` for the
+per-dispatch view of the expensive-tier rows.
 
 ## Grounded agent files (`axctl improve`)
 

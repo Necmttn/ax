@@ -18,6 +18,7 @@ import { readFileSync, writeFileSync, mkdtempSync } from "node:fs";
 import {
     fetchDispatches,
     fetchDispatchCandidates,
+    fetchDispatchEconomy,
     compileRouting,
     renderRoutingTableMarkdown,
     replaceSkillRoutingSection,
@@ -25,6 +26,7 @@ import {
     matchRouting,
     matchRoutingWith,
     EXPENSIVE_TIER_RE,
+    CHEAP_TIER_RE,
 } from "./dispatch-analytics.ts";
 
 const fsLayers = Layer.mergeAll(BunFileSystem.layer, BunPath.layer);
@@ -629,6 +631,242 @@ describe("fetchDispatchCandidates with a custom table", () => {
         );
         expect(result.candidates).toHaveLength(1);
         expect(result.candidates[0]!.routing_match.classId).toBe("summarize");
+    });
+});
+
+// ---------------------------------------------------------------------------
+// CHEAP_TIER_RE
+// ---------------------------------------------------------------------------
+
+describe("CHEAP_TIER_RE", () => {
+    it("matches sonnet and haiku, not fable/opus", () => {
+        expect(CHEAP_TIER_RE.test("claude-sonnet-4-6")).toBe(true);
+        expect(CHEAP_TIER_RE.test("claude-haiku-4-5-20251001")).toBe(true);
+        expect(CHEAP_TIER_RE.test("claude-fable-5")).toBe(false);
+        expect(CHEAP_TIER_RE.test("claude-opus-4-8")).toBe(false);
+    });
+});
+
+// ---------------------------------------------------------------------------
+// fetchDispatchEconomy - bucketing + rollup + advise-fire count
+//
+// Query order (6 result arrays): spawned, usage, toolCalls, parentSessions,
+// agentModels, hookFires.
+// ---------------------------------------------------------------------------
+
+describe("fetchDispatchEconomy", () => {
+    // Pricing catalog used across the bucketing tests. sonnet far cheaper than
+    // the actual fable/opus child cost so est_savings is a clear positive delta.
+    const agentModels = [
+        {
+            name: "claude-sonnet-4-6",
+            input_per_million_usd: 3.0,
+            output_per_million_usd: 15.0,
+            cache_read_per_million_usd: 0.30,
+            cache_creation_per_million_usd: 3.75,
+        },
+    ];
+
+    it("returns zeros when no spawned rows", async () => {
+        const layer = makeMockDb([[], [], [], [], [], []]);
+        const result = await run(fetchDispatchEconomy({ sinceDays: 14 }), layer);
+        expect(result.total_routable).toBe(0);
+        expect(result.ran_cheap).toBe(0);
+        expect(result.ran_expensive).toBe(0);
+        expect(result.overspend_usd).toBe(0);
+        expect(result.total_est_savings_usd).toBe(0);
+        expect(result.by_class).toHaveLength(0);
+        expect(result.days).toBe(14);
+    });
+
+    it("buckets cheap / expensive / unknown-tier matched inherit dispatches", async () => {
+        // Four inherit dispatches all matching the well-specified-impl class
+        // ("Implement ..."): one ran sonnet (cheap), one ran fable (expensive),
+        // one ran opus (expensive), one ran an unknown-tier model (neither).
+        const spawned = [
+            {
+                parent_id: "session:p1", child_id: "session:c-cheap",
+                ts: "2026-06-12T10:00:00Z", agent_type: "general-purpose",
+                description: "Implement the parser cheap", tool_use_id: null,
+            },
+            {
+                parent_id: "session:p1", child_id: "session:c-fable",
+                ts: "2026-06-12T10:01:00Z", agent_type: "general-purpose",
+                description: "Implement the parser fable", tool_use_id: null,
+            },
+            {
+                parent_id: "session:p1", child_id: "session:c-opus",
+                ts: "2026-06-12T10:02:00Z", agent_type: "general-purpose",
+                description: "Implement the parser opus", tool_use_id: null,
+            },
+            {
+                parent_id: "session:p1", child_id: "session:c-unknown",
+                ts: "2026-06-12T10:03:00Z", agent_type: "general-purpose",
+                description: "Implement the parser unknown", tool_use_id: null,
+            },
+        ];
+        const usage = [
+            {
+                session_id: "session:c-cheap", model: "claude-sonnet-4-6",
+                prompt_tokens: 1000, completion_tokens: 100,
+                cache_read_tokens: 0, cache_create_tokens: 0, cost_usd: 0.10,
+            },
+            {
+                session_id: "session:c-fable", model: "claude-fable-5",
+                prompt_tokens: 1_000_000, completion_tokens: 0,
+                cache_read_tokens: 0, cache_create_tokens: 0, cost_usd: 15.0,
+            },
+            {
+                session_id: "session:c-opus", model: "claude-opus-4-8",
+                prompt_tokens: 500_000, completion_tokens: 0,
+                cache_read_tokens: 0, cache_create_tokens: 0, cost_usd: 7.5,
+            },
+            {
+                session_id: "session:c-unknown", model: "claude-mystery-9",
+                prompt_tokens: 1000, completion_tokens: 100,
+                cache_read_tokens: 0, cache_create_tokens: 0, cost_usd: 0.20,
+            },
+        ];
+        const layer = makeMockDb([spawned, usage, [], [], agentModels, []]);
+        const result = await run(fetchDispatchEconomy({ sinceDays: 14 }), layer);
+
+        // All four matched the same route-down class.
+        expect(result.total_routable).toBe(4);
+        expect(result.ran_cheap).toBe(1);     // sonnet
+        expect(result.ran_expensive).toBe(2); // fable + opus
+        // The unknown-tier row is routable but neither cheap nor expensive.
+        const other = result.total_routable - result.ran_cheap - result.ran_expensive;
+        expect(other).toBe(1);
+
+        // Per-class rollup cross-foots to the totals.
+        expect(result.by_class).toHaveLength(1);
+        const cls = result.by_class[0]!;
+        expect(cls.classId).toBe("well-specified-impl");
+        expect(cls.count).toBe(4);
+        expect(cls.ran_cheap).toBe(1);
+        expect(cls.ran_expensive).toBe(2);
+        // count = cheap + expensive + other
+        expect(cls.count).toBe(cls.ran_cheap + cls.ran_expensive + other);
+    });
+
+    it("overspend = full expensive child cost; est savings = the (smaller) delta", async () => {
+        // One inherit dispatch matching the class ran fable at $15.0; repriced
+        // at sonnet ($3/M input) = $3.0 → savings $12.0 < overspend $15.0.
+        const spawned = [
+            {
+                parent_id: "session:p1", child_id: "session:c1",
+                ts: "2026-06-12T10:00:00Z", agent_type: "general-purpose",
+                description: "Implement the migration", tool_use_id: null,
+            },
+        ];
+        const usage = [
+            {
+                session_id: "session:c1", model: "claude-fable-5",
+                prompt_tokens: 1_000_000, completion_tokens: 0,
+                cache_read_tokens: 0, cache_create_tokens: 0, cost_usd: 15.0,
+            },
+        ];
+        const layer = makeMockDb([spawned, usage, [], [], agentModels, []]);
+        const result = await run(fetchDispatchEconomy({ sinceDays: 14 }), layer);
+
+        expect(result.ran_expensive).toBe(1);
+        expect(result.overspend_usd).toBeCloseTo(15.0, 4);
+        // repriced sonnet = 1M * $3/M = $3.0 → savings = $12.0
+        expect(result.total_est_savings_usd).toBeCloseTo(12.0, 2);
+        expect(result.total_est_savings_usd).toBeLessThan(result.overspend_usd);
+
+        const cls = result.by_class[0]!;
+        expect(cls.overspend_usd).toBeCloseTo(15.0, 4);
+        expect(cls.est_savings_usd).toBeCloseTo(12.0, 2);
+    });
+
+    it("ignores non-inherit and non-matching dispatches", async () => {
+        const spawned = [
+            // explicit model (not inherit) → excluded
+            {
+                parent_id: "session:p1", child_id: "session:c-explicit",
+                ts: "2026-06-12T10:00:00Z", agent_type: "general-purpose",
+                description: "Implement explicit", tool_use_id: "tu-explicit",
+            },
+            // no routing-class match → excluded
+            {
+                parent_id: "session:p1", child_id: "session:c-nomatch",
+                ts: "2026-06-12T10:01:00Z", agent_type: "general-purpose",
+                description: "do some random thing", tool_use_id: null,
+            },
+        ];
+        const usage = [
+            {
+                session_id: "session:c-explicit", model: "claude-fable-5",
+                prompt_tokens: 1000, completion_tokens: 100,
+                cache_read_tokens: 0, cache_create_tokens: 0, cost_usd: 1.0,
+            },
+            {
+                session_id: "session:c-nomatch", model: "claude-fable-5",
+                prompt_tokens: 1000, completion_tokens: 100,
+                cache_read_tokens: 0, cache_create_tokens: 0, cost_usd: 1.0,
+            },
+        ];
+        const toolCalls = [
+            { session_id: "session:p1", call_id: "tu-explicit", input_json: JSON.stringify({ model: "fable" }) },
+        ];
+        const layer = makeMockDb([spawned, usage, toolCalls, [], agentModels, []]);
+        const result = await run(fetchDispatchEconomy({ sinceDays: 14 }), layer);
+
+        expect(result.total_routable).toBe(0);
+        expect(result.by_class).toHaveLength(0);
+    });
+
+    it("reports advise_fires from the hook query when present", async () => {
+        const layer = makeMockDb([[], [], [], [], [], [{ n: 7 }]]);
+        const result = await run(fetchDispatchEconomy({ sinceDays: 14 }), layer);
+        expect(result.advise_fires).toBe(7);
+        expect(result.advise_fires_available).toBe(true);
+    });
+
+    it("flags advise_fires unavailable when the hook query is empty", async () => {
+        const layer = makeMockDb([[], [], [], [], [], []]);
+        const result = await run(fetchDispatchEconomy({ sinceDays: 14 }), layer);
+        expect(result.advise_fires).toBe(0);
+        expect(result.advise_fires_available).toBe(false);
+    });
+
+    it("sorts by_class by overspend desc", async () => {
+        // Two classes: well-specified-impl (big fable overspend) and spec-review
+        // (smaller opus overspend). Big one must sort first.
+        const spawned = [
+            {
+                parent_id: "session:p1", child_id: "session:c-impl",
+                ts: "2026-06-12T10:00:00Z", agent_type: "general-purpose",
+                description: "Implement the big feature", tool_use_id: null,
+            },
+            {
+                parent_id: "session:p1", child_id: "session:c-review",
+                ts: "2026-06-12T10:01:00Z", agent_type: null,
+                description: "spec review the PR", tool_use_id: null,
+            },
+        ];
+        const usage = [
+            {
+                session_id: "session:c-impl", model: "claude-fable-5",
+                prompt_tokens: 1_000_000, completion_tokens: 0,
+                cache_read_tokens: 0, cache_create_tokens: 0, cost_usd: 15.0,
+            },
+            {
+                session_id: "session:c-review", model: "claude-opus-4-8",
+                prompt_tokens: 100_000, completion_tokens: 0,
+                cache_read_tokens: 0, cache_create_tokens: 0, cost_usd: 2.0,
+            },
+        ];
+        const layer = makeMockDb([spawned, usage, [], [], agentModels, [{ n: 3 }]]);
+        const result = await run(fetchDispatchEconomy({ sinceDays: 14 }), layer);
+
+        expect(result.by_class).toHaveLength(2);
+        expect(result.by_class[0]!.classId).toBe("well-specified-impl");
+        expect(result.by_class[0]!.overspend_usd).toBeGreaterThan(result.by_class[1]!.overspend_usd);
+        // Totals cross-foot across both classes.
+        expect(result.ran_expensive).toBe(2);
+        expect(result.overspend_usd).toBeCloseTo(17.0, 4);
     });
 });
 
