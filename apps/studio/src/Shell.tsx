@@ -35,9 +35,13 @@ export function Shell({ children }: { children: ReactNode }) {
     const search = state.location.search as { shareOwner?: unknown; gistId?: unknown };
     const isShare = state.location.pathname.startsWith("/share")
         || (typeof search.shareOwner === "string" && typeof search.gistId === "string");
-    return isShare
-        ? <ShareChrome>{children}</ShareChrome>
-        : <FullChrome>{children}</FullChrome>;
+    if (isShare) return <ShareChrome>{children}</ShareChrome>;
+    // Mission Control (the home + /mc) brings its own instrument chrome (icon
+    // rail + clock hero), so it renders bare - no studio masthead/tabs.
+    const path = state.location.pathname;
+    const isInstrument = path === "/" || path.startsWith("/mc") || path.startsWith("/wrapped") || path.startsWith("/lab/sigils");
+    if (isInstrument) return <>{children}</>;
+    return <FullChrome>{children}</FullChrome>;
 }
 
 /** Slim chrome for a standalone shared-session gist view. */

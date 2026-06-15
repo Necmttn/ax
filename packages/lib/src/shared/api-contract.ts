@@ -355,6 +355,10 @@ export const InsightsGroup = HttpApiGroup.make("insights")
             success: Schema.Unknown,
             error: InternalError,
         }),
+        HttpApiEndpoint.get("costModels", "/api/cost/models", {
+            success: Schema.Unknown,
+            error: InternalError,
+        }),
         HttpApiEndpoint.get("workflow", "/api/workflow", {
             success: WorkflowResponse,
             error: InternalError,

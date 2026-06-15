@@ -20,9 +20,10 @@ import { SkillGraphRoute } from "./routes/skill-graph.tsx";
 import { GraphRoute } from "./routes/graph.tsx";
 import { CanvasRoute } from "./routes/canvas.tsx";
 import type { GraphExplorerMode } from "@ax/lib/shared/dashboard-types";
-import { WrappedRoute } from "./routes/wrapped.tsx";
+import { MissionControl } from "./instrument/mission-control.tsx";
 import { ImproveRoute } from "./routes/improve.tsx";
 import { LabRoute } from "./routes/lab.tsx";
+import { SigilGalleryRoute } from "./routes/sigil-gallery.tsx";
 import { ReviewView } from "./routes/review-view.tsx";
 import { sampleNarration, sampleNarrationTurns } from "./routes/narration-sample.ts";
 import { ShareInspectView } from "./routes/share-inspect.tsx";
@@ -67,7 +68,7 @@ function StudioIndexRoute() {
     if (search.shareOwner && search.gistId) {
         return <ShareInspectView owner={search.shareOwner} gistId={search.gistId} />;
     }
-    return <WrappedRoute />;
+    return <MissionControl />;
 }
 
 const skillsRoute = createRoute({
@@ -192,11 +193,6 @@ const canvasRoute = createRoute({
     component: CanvasRoute,
 });
 
-const wrappedRoute = createRoute({
-    getParentRoute: () => rootRoute,
-    path: "/wrapped",
-    component: WrappedRoute,
-});
 
 const improveRoute = createRoute({
     getParentRoute: () => rootRoute,
@@ -208,6 +204,12 @@ const labRoute = createRoute({
     getParentRoute: () => rootRoute,
     path: "/lab",
     component: LabRoute,
+});
+
+const sigilGalleryRoute = createRoute({
+    getParentRoute: () => rootRoute,
+    path: "/lab/sigils",
+    component: SigilGalleryRoute,
 });
 
 /** Prototype showcase for the Story review surface (sample narration + turns). */
@@ -233,8 +235,15 @@ function NarrationDemoRoute() {
     );
 }
 
+const mcRoute = createRoute({
+    getParentRoute: () => rootRoute,
+    path: "/mc",
+    component: MissionControl,
+});
+
 const routeTree = rootRoute.addChildren([
     indexRoute,
+    mcRoute,
     skillsRoute,
     toolsRoute,
     workflowRoute,
@@ -248,9 +257,9 @@ const routeTree = rootRoute.addChildren([
     skillGraphRoute,
     graphRoute,
     canvasRoute,
-    wrappedRoute,
     improveRoute,
     labRoute,
+    sigilGalleryRoute,
     narrationDemoRoute,
 ]);
 

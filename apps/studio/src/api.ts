@@ -175,6 +175,16 @@ export interface IngestTriggerResponse {
     readonly streamBaseUrl: string;
 }
 
+export interface CostModelRow {
+    readonly model: string;
+    readonly sessions: number;
+    readonly cost_usd: number;
+}
+export interface CostModelsResult {
+    readonly rows: ReadonlyArray<CostModelRow>;
+    readonly total_cost_usd: number;
+}
+
 // The version handshake type now comes from the Insights Surface Contract -
 // the same Schema the daemon serves - so the two cannot drift.
 export type { DaemonVersion } from "@ax/lib/shared/api-contract";
@@ -430,6 +440,9 @@ export const api = {
         viaContract("/api/wrapped", (c) => c.insights.wrapped()),
     wrappedPublicPreview: (): Promise<WrappedProfile> =>
         viaContract("/api/wrapped/public-preview", (c) => c.insights.wrappedPublicPreview()),
+
+    costModels: (): Promise<CostModelsResult> =>
+        viaContract("/api/cost/models", (c) => c.insights.costModels()) as Promise<CostModelsResult>,
 
     nextActions: (): Promise<NextActionsPayload> =>
         viaContract("/api/next-actions", (c) => c.improve.nextActions()),

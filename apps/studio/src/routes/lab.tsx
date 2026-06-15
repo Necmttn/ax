@@ -22,6 +22,9 @@ export function LabRoute() {
                 <Link to="/graph" className="badge review" style={{ textDecoration: "none" }}>
                     Graph explorer →
                 </Link>
+                <Link to="/lab/sigils" className="badge review" style={{ textDecoration: "none" }}>
+                    Archetype sigils →
+                </Link>
             </div>
 
             <SqlConsole />
