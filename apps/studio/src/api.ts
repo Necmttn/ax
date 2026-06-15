@@ -185,6 +185,42 @@ export interface CostModelsResult {
     readonly total_cost_usd: number;
 }
 
+// --- context budget (session startup footprint) ----------------------------
+export interface ContextSkillRow {
+    readonly name: string;
+    readonly scope: string;
+    readonly source: string;
+    readonly index_chars: number;
+    readonly body_chars: number;
+    readonly index_tokens: number;
+    readonly body_tokens: number;
+    readonly content_hash: string;
+    readonly dir_path: string;
+    readonly is_tool: boolean;
+}
+export interface ContextSourceRow {
+    readonly source: string;
+    readonly skills: number;
+    readonly index_chars: number;
+    readonly body_chars: number;
+    readonly index_tokens: number;
+    readonly body_tokens: number;
+    readonly is_tool: boolean;
+}
+export interface ContextBudgetResult {
+    readonly skills: ReadonlyArray<ContextSkillRow>;
+    readonly sources: ReadonlyArray<ContextSourceRow>;
+    readonly totals: {
+        readonly skills: number;
+        readonly index_chars: number;
+        readonly body_chars: number;
+        readonly index_tokens: number;
+        readonly body_tokens: number;
+        readonly cc_index_tokens: number;
+        readonly cc_body_tokens: number;
+    };
+}
+
 // The version handshake type now comes from the Insights Surface Contract -
 // the same Schema the daemon serves - so the two cannot drift.
 export type { DaemonVersion } from "@ax/lib/shared/api-contract";
@@ -443,6 +479,8 @@ export const api = {
 
     costModels: (): Promise<CostModelsResult> =>
         viaContract("/api/cost/models", (c) => c.insights.costModels()) as Promise<CostModelsResult>,
+    contextBudget: (): Promise<ContextBudgetResult> =>
+        viaContract("/api/context/budget", (c) => c.insights.contextBudget()) as Promise<ContextBudgetResult>,
 
     nextActions: (): Promise<NextActionsPayload> =>
         viaContract("/api/next-actions", (c) => c.improve.nextActions()),
