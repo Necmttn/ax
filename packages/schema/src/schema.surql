@@ -1910,6 +1910,22 @@ DEFINE FIELD attrs          ON otel_span TYPE option<string>;        -- JSON-enc
 DEFINE FIELD observed_at    ON otel_span TYPE datetime;
 DEFINE INDEX IF NOT EXISTS otel_span_session ON otel_span FIELDS session_id;
 
+DEFINE TABLE otel_log_event SCHEMAFULL;
+DEFINE FIELD harness          ON otel_log_event TYPE string;
+DEFINE FIELD event_name       ON otel_log_event TYPE string;
+DEFINE FIELD session_id       ON otel_log_event TYPE option<string>;
+DEFINE FIELD model            ON otel_log_event TYPE option<string>;
+DEFINE FIELD input_tokens     ON otel_log_event TYPE option<number>;
+DEFINE FIELD output_tokens    ON otel_log_event TYPE option<number>;
+DEFINE FIELD reasoning_tokens ON otel_log_event TYPE option<number>;
+DEFINE FIELD cached_tokens    ON otel_log_event TYPE option<number>;
+DEFINE FIELD tool_tokens      ON otel_log_event TYPE option<number>;
+DEFINE FIELD duration_ms      ON otel_log_event TYPE option<number>;
+DEFINE FIELD status_code      ON otel_log_event TYPE option<number>;
+DEFINE FIELD attrs            ON otel_log_event TYPE option<string>;
+DEFINE FIELD observed_at      ON otel_log_event TYPE datetime;
+DEFINE INDEX IF NOT EXISTS otel_log_event_session ON otel_log_event FIELDS session_id;
+
 -- ---------------------------------------------------------------------------
 -- wrapped_card - agent-authored Wrapped recap cards (improve-first dashboard
 -- PR4). `ax wrapped generate` emits a brief; an agent mines the graph and

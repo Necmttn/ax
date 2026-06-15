@@ -171,6 +171,7 @@ export const SCHEMA_TABLES: readonly SchemaTableSpec[] = [
     { table: "wrapped_card", stage: "active", note: "Agent-authored Wrapped recap cards (ax wrapped publish)." },
     { table: "otel_metric_point", stage: "active", note: "Harness OTLP metric data points (cost/token/usage)." },
     { table: "otel_span", stage: "active", note: "Harness OTLP trace spans (Codex session_loop + children)." },
+    { table: "otel_log_event", stage: "active", note: "Harness OTLP log events (codex events incl. token usage)." },
     { table: "telemetry_of", stage: "active", note: "Edge: session -> otel telemetry row (drawn at ingest)." },
 ] as const;
 
