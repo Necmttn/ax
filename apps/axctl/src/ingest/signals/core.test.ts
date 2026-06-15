@@ -13,6 +13,7 @@ import {
     deriveRecovered,
     deriveSkillPairs,
     groupTurnsBySession,
+    isHarnessInjected,
     matchNegation,
     shouldDeriveAllTimeSkillPairs,
     skillPairedEdgeId,
@@ -86,6 +87,22 @@ describe("matchNegation", () => {
     });
 });
 
+describe("isHarnessInjected", () => {
+    test("flags harness-injected wrappers + task/monitor prompts", () => {
+        expect(isHarnessInjected('<subagent_notification> {"status":"done"}')).toBe(true);
+        expect(isHarnessInjected("<task-notification> <task-id>x</task-id>")).toBe(true);
+        expect(isHarnessInjected("<system-reminder>\nbe brief</system-reminder>")).toBe(true);
+        expect(isHarnessInjected("## Your task\nMonitor the staging deploy for `abc`")).toBe(true);
+        expect(isHarnessInjected("Monitor event: codex roast finished")).toBe(true);
+        expect(isHarnessInjected("Continue prod monitoring for the #957 fix")).toBe(true);
+    });
+    test("does NOT flag genuine user corrections", () => {
+        expect(isHarnessInjected("no, that's the wrong file")).toBe(false);
+        expect(isHarnessInjected("wait, that deletes prod data")).toBe(false);
+        expect(isHarnessInjected("actually, use the other parser instead")).toBe(false);
+    });
+});
+
 describe("deriveCorrections", () => {
     const assistant = turn({
         id: { tb: "turn", id: "0a1b2c3d__seq_000003" },
@@ -127,6 +144,22 @@ describe("deriveCorrections", () => {
 
     test("a negation before any assistant turn emits nothing", () => {
         expect(deriveCorrections(bundle([pushback]))).toEqual([]);
+    });
+
+    test("harness-injected turn is skipped and does not consume the anchor", () => {
+        const notification = turn({
+            id: { tb: "turn", id: "0a1b2c3d__seq_000004c" },
+            seq: 4,
+            role: "user",
+            text_excerpt: '<subagent_notification> {"status":"completed"} no further action',
+        });
+        // assistant -> harness notification (transparent) -> real pushback:
+        // the notification yields no edge, and the pushback still anchors to the
+        // assistant (one correction, not two; notification excluded).
+        const edges = deriveCorrections(bundle([assistant, notification, pushback]));
+        expect(edges).toHaveLength(1);
+        expect(edges[0]?.toTurnKey).toBe("0a1b2c3d__seq_000005");
+        expect(edges[0]?.fromTurnKey).toBe("0a1b2c3d__seq_000003");
     });
 
     test("a text-bearing user turn resets the anchor even without a negation", () => {

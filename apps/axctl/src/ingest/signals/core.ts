@@ -54,6 +54,24 @@ export function matchNegation(text: string): string | null {
     return null;
 }
 
+// Harness-injected user turns (subagent/task notifications, system reminders,
+// slash-command echoes, monitor/loop task prompts) appear in the transcript
+// with the user role but are NOT user-authored corrections. They routinely
+// contain negation words ("no", "wait", "stop") and were polluting the
+// user_correction signal (~13%+ of rows). Exclude them from correction
+// derivation so friction/correction insights stay clean.
+const HARNESS_INJECTED_PATTERNS: ReadonlyArray<RegExp> = [
+    /^<(?:subagent_notification|task-notification|system-reminder|command-name|command-message|command-args|local-command-stdout|local-command-stderr)\b/i,
+    /^##\s+Your task\b/i,
+    /^Monitor (?:the staging deploy|event:)/i,
+    /\bprod monitoring\b/i,
+] as const;
+
+export function isHarnessInjected(text: string): boolean {
+    const head = text.trimStart().slice(0, 400);
+    return HARNESS_INJECTED_PATTERNS.some((re) => re.test(head));
+}
+
 /**
  * Deterministic edge id for `skill_paired`. Pair is treated as undirected, so
  * the lexicographically-smaller skill key always sits in the `in` slot. A
@@ -312,6 +330,10 @@ export function deriveCorrections(bundle: SessionTurns): CorrectionEdge[] {
         // disturbing the anchor (this is what was masking interrupted-by-user
         // turns, which sit immediately after a tool_result user turn).
         if (!text) continue;
+        // Harness-injected user turns (notifications/reminders/task prompts) are
+        // not corrections; skip transparently so they neither count as a
+        // correction nor consume the anchor for a later genuine one.
+        if (isHarnessInjected(text)) continue;
         if (lastAssistantIdx === null) continue;
         const matched = matchNegation(text);
         if (matched) {
