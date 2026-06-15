@@ -3,6 +3,7 @@ import {
     RecordId,
     surql,
     type AnyRecordId,
+    type ConnectOptions,
     type Table,
 } from "surrealdb";
 import { Config, ConfigProvider, Context, Effect, Layer, Option, Redacted, Schedule } from "effect";
@@ -159,14 +160,67 @@ const connectError = (url: string, reason: string): DbError =>
         message: `daemon not reachable at ${url} (${reason}); recover with 'axctl daemon start' (or 'axctl daemon restart'); 'axctl doctor' shows where it stalled`,
     });
 
-const acquire = (cfg: DbConfig): Effect.Effect<Surreal, DbError> =>
+/**
+ * Build the {@link ConnectOptions} for a long-lived SurrealDB connection.
+ *
+ * Critically, credentials + ns/db are passed to `connect()` rather than applied
+ * after the fact via `signin()`/`use()`. This is what keeps a long-running
+ * daemon connection authenticated across the connection's whole life:
+ *
+ *  - The SDK stores `authentication` as its internal auth *provider*. On every
+ *    (re)connect AND on the token-expiry renewal timer it replays the provider
+ *    (`#applyAuthProvider` -> `signin(..., skipOverride=true)`), so the session
+ *    is re-signed-in instead of silently falling back to anonymous.
+ *  - `namespace`/`database` are stored on the root session and replayed via
+ *    `use()` on every reconnect (`#restoreSession`).
+ *
+ * By contrast, calling the public `db.signin()` sets `authOverriden = true`,
+ * which *disables* the auth provider on renewal. The root JWT issued by signin
+ * has a finite TTL and no refresh token, so once it expires the SDK's renewal
+ * logic finds nothing to renew with and invalidates the session -> every
+ * subsequent query returns "Anonymous access not allowed". That is the
+ * recurring `ax serve` auth-loss bug (#431); routing auth through `connect()`
+ * fixes it for both the reconnect and the token-expiry path.
+ *
+ * Exported for hermetic unit tests (assert credentials are wired so the SDK's
+ * re-auth path stays live).
+ */
+export const connectOptions = (cfg: DbConfig): ConnectOptions => ({
+    namespace: cfg.ns,
+    database: cfg.db,
+    authentication: {
+        username: cfg.user,
+        password: Redacted.value(cfg.pass),
+    },
+    // Explicit even though the SDK default is true: the WS engine must
+    // auto-reconnect a dropped daemon connection, and on reconnect the auth
+    // provider above re-signs-in (see #restoreSession / #applyAuthentication).
+    reconnect: true,
+});
+
+/** Minimal slice of the Surreal client `acquire` depends on. Lets tests inject
+ *  a fake that records the connect options without a live daemon. */
+export interface SurrealLike {
+    connect(url: string, options?: ConnectOptions): Promise<unknown>;
+    close(): Promise<unknown>;
+}
+
+/** Factory for the underlying client. Overridable in tests. */
+export type SurrealFactory = () => SurrealLike;
+
+const defaultSurrealFactory: SurrealFactory = () => new Surreal();
+
+export const acquire = (
+    cfg: DbConfig,
+    createClient: SurrealFactory = defaultSurrealFactory,
+): Effect.Effect<Surreal, DbError> =>
     Effect.tryPromise({
         try: async () => {
-            const db = new Surreal();
-            await db.connect(cfg.url);
-            await db.signin({ username: cfg.user, password: Redacted.value(cfg.pass) });
-            await db.use({ namespace: cfg.ns, database: cfg.db });
-            return db;
+            const db = createClient();
+            // Auth + ns/db travel with connect() so the SDK re-applies them on
+            // every reconnect and token renewal (see connectOptions docs).
+            await db.connect(cfg.url, connectOptions(cfg));
+            return db as Surreal;
         },
         catch: (err) => connectError(cfg.url, errorMessage(err)),
     }).pipe(
