@@ -131,6 +131,26 @@ PR branch or a commit SHA for now.
 Fields populate at ingest; sessions ingested before the fields existed read as
 zero until their files are re-ingested (the command prints a hint).
 
+## Digest (push-value)
+
+`ax digest [--json] [--refresh]` renders your local digest board - the ranked
+ax signal a SessionStart hook pushes into the agent's context so value arrives
+without being asked for:
+
+- **Sources**: open `improve` proposals, routing savings (`ax dispatches
+  --candidates`), repair-loop churn (`ax sessions churn`), and quota window burn
+  (only surfaced above 70%). Each maps to one line with a copy-paste action.
+- **Ranking**: `salience = base[kind] × urgency × recency`; the snapshot stores
+  the top 8, the hook surfaces the top 3 unshown.
+- **Compute/surface split**: a `derive`-tagged ingest stage writes
+  `~/.ax/digest.json` every ingest (failure-isolated - a digest error never
+  aborts the surrounding ingest); the `surface-digest` hook reads it, dedups
+  against `~/.ax/digest-shown.json` (6h window, count cap, resolved-drop), and
+  injects. DB down ⇒ stale snapshot, session still boots.
+- `--refresh` recomputes now instead of waiting for the watcher; `--json` prints
+  the raw snapshot. Install the hook with `ax hooks install
+  <path>/surface-digest.ts --providers=claude,codex`.
+
 ## Dispatch model drops
 
 `ax dispatches` flags routed dispatches whose child ran legs on a different
