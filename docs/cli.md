@@ -226,7 +226,7 @@ command = "ax"
 args = ["mcp"]
 ```
 
-The 10 tools, each mirroring the matching CLI command:
+The 16 tools, each mirroring the matching CLI command:
 
 - **recall** - full-text recall across turns / commits / skills (`ax recall`).
 - **sessions_around** - sessions in a date window (`ax sessions around`).
@@ -239,6 +239,12 @@ The 10 tools, each mirroring the matching CLI command:
 - **improve_recommend** - top improvement proposals, ranked (`ax improve recommend`).
 - **improve_show** - one proposal's evidence trail (`ax improve show`).
 - **improve_list** - proposals filtered by status / form (`ax improve list`).
+- **session_metrics** - graph-derived per-session metrics: commits, churn, cost, corrections (`ax sessions metrics`).
+- **signal_show** - signal catalog list or run a named relation signal (`ax signals`).
+- **cost_models** - per-model token and cost rollup (`ax cost models`).
+- **cost_split** - cost matrix split by origin x model (`ax cost split`).
+- **dispatches** - subagent dispatch analytics and routing candidates (`ax dispatches`).
+- **dojo_agenda** - dojo training agenda: budget envelope + prioritized work items (`ax dojo agenda`).
 
 > **Read-only.** Mutating ops (`improve accept/reject/verdict`, `skills
 > tag/lint`, `ingest`) stay on the CLI - they write task files / edges a human
