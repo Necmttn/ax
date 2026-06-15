@@ -54,6 +54,7 @@ describe("replayRows", () => {
         expect(s.total).toBe(3);
         expect(s.wouldBlock).toBe(1);
         expect(s.wouldWarn).toBe(0);
+        expect(s.wouldAdvise).toBe(0);
         expect(s.skippedRows).toBe(0);
         expect(s.providers).toEqual(["claude", "codex"]);
         expect(s.byProject["/repo"]).toEqual({ total: 2, blocked: 1 });
@@ -114,12 +115,36 @@ describe("summarize", () => {
         expect(s.total).toBe(4);
         expect(s.wouldBlock).toBe(1);
         expect(s.wouldWarn).toBe(1);
+        expect(s.wouldAdvise).toBe(0);
         expect(s.byProject["/proj-a"]).toEqual({ total: 2, blocked: 1 });
         expect(s.byProject["/proj-b"]).toEqual({ total: 2, blocked: 0 });
         // Sample should have first line of reason only
         expect(s.samples).toHaveLength(1);
         expect(s.samples[0]?.reason).toBe("BLOCKED: line1");
         expect(s.samples[0]?.command).toBe("git checkout main");
+    });
+
+    test("counts Advise verdicts in wouldAdvise", () => {
+        const adviseVerdict = { _tag: "Advise" as const, context: "re-dispatch with model:sonnet" };
+        const allowVerdict = { _tag: "Allow" as const };
+        const makeRow = (project: string) => ({
+            name: "Agent",
+            input: { description: "implement something" },
+            cwd: project,
+            source: "claude",
+            project,
+            ts: new Date(),
+        });
+        const results = [
+            { row: makeRow("/proj-a"), verdict: adviseVerdict },
+            { row: makeRow("/proj-a"), verdict: adviseVerdict },
+            { row: makeRow("/proj-b"), verdict: allowVerdict },
+        ];
+        const s = summarize(results);
+        expect(s.total).toBe(3);
+        expect(s.wouldAdvise).toBe(2);
+        expect(s.wouldBlock).toBe(0);
+        expect(s.wouldWarn).toBe(0);
     });
 
     test("samples capped at 10", () => {
@@ -211,6 +236,7 @@ describe("formatReport", () => {
         total: 100,
         wouldBlock: 5,
         wouldWarn: 0,
+        wouldAdvise: 0,
         skippedRows: 0,
         providers: ["claude"],
         byProject: { "/repo": { total: 100, blocked: 5 } },

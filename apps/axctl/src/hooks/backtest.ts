@@ -42,6 +42,8 @@ export interface BacktestSummary {
     readonly total: number;
     readonly wouldBlock: number;
     readonly wouldWarn: number;
+    /** Dispatches that received a quota-aware advisory (Verdict.advise). */
+    readonly wouldAdvise: number;
     /** rows dropped before replay (missing/malformed input_json). */
     readonly skippedRows: number;
     /** distinct harness sources actually seen in the replayed rows. */
@@ -103,6 +105,7 @@ export const summarize = (
     const sources = new Set<string>();
     let wouldBlock = 0;
     let wouldWarn = 0;
+    let wouldAdvise = 0;
     for (const { row, verdict } of results) {
         sources.add(row.source);
         const key = row.project ?? "(unknown)";
@@ -121,11 +124,13 @@ export const summarize = (
             }
         }
         if (verdict._tag === "Warn") wouldWarn += 1;
+        if (verdict._tag === "Advise") wouldAdvise += 1;
     }
     return {
         total: results.length,
         wouldBlock,
         wouldWarn,
+        wouldAdvise,
         skippedRows,
         providers: [...sources].sort(),
         byProject,
@@ -317,6 +322,9 @@ export const formatReport = (
     );
     lines.push(
         `  would-warn    ${summary.wouldWarn.toLocaleString()}`,
+    );
+    lines.push(
+        `  would-advise  ${summary.wouldAdvise.toLocaleString()}`,
     );
     if (summary.skippedRows > 0) {
         lines.push(
