@@ -6,7 +6,6 @@ import "./instrument.css";
 
 export const RAIL = [
     { g: "◢", to: "/", label: "mission control", exact: true },
-    { g: "❖", to: "/wrapped", label: "wrapped" },
     { g: "≣", to: "/sessions", label: "sessions" },
     { g: "◷", to: "/workflow", label: "workflow" },
     { g: "⎈", to: "/improve", label: "improve" },

@@ -21,7 +21,6 @@ import { GraphRoute } from "./routes/graph.tsx";
 import { CanvasRoute } from "./routes/canvas.tsx";
 import type { GraphExplorerMode } from "@ax/lib/shared/dashboard-types";
 import { MissionControl } from "./instrument/mission-control.tsx";
-import { WrappedView } from "./instrument/wrapped-view.tsx";
 import { ImproveRoute } from "./routes/improve.tsx";
 import { LabRoute } from "./routes/lab.tsx";
 import { ReviewView } from "./routes/review-view.tsx";
@@ -193,11 +192,6 @@ const canvasRoute = createRoute({
     component: CanvasRoute,
 });
 
-const wrappedRoute = createRoute({
-    getParentRoute: () => rootRoute,
-    path: "/wrapped",
-    component: WrappedView,
-});
 
 const improveRoute = createRoute({
     getParentRoute: () => rootRoute,
@@ -256,7 +250,6 @@ const routeTree = rootRoute.addChildren([
     skillGraphRoute,
     graphRoute,
     canvasRoute,
-    wrappedRoute,
     improveRoute,
     labRoute,
     narrationDemoRoute,

@@ -498,3 +498,5 @@
 .wr-fact h4 { font-family: var(--serif); font-weight: 500; font-size: 16px; color: var(--display); margin: 0; }
 .wr-fact-tag { font-family: var(--mono); font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--dim); border: 1px solid var(--border-hi); border-radius: 4px; padding: 2px 6px; flex: none; }
 .wr-fact p { font-size: 13px; line-height: 1.5; color: var(--sec); margin: 0; }
+
+.wr-section { margin-top: 18px; }

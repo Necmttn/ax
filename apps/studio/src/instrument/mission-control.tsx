@@ -11,6 +11,7 @@ import type { WrappedProfile, WrappedUsageDay } from "@ax/lib/shared/dashboard-t
 import { fmtCount } from "@ax/lib/shared/formatters";
 import { CellGrid, GlyphReel, Led, Segbar } from "./viz.tsx";
 import { InstrumentShell } from "./shell.tsx";
+import { RecapDeck } from "./deck.tsx";
 
 const p2 = (n: number) => String(n).padStart(2, "0");
 /** Compact big numbers (25.3B) - full comma form overflows the metric cards. */
@@ -167,7 +168,7 @@ export function MissionControl() {
     return (
         <InstrumentShell>
             {q.isLoading && !data ? <div className="rdx-label" style={{ padding: 24 }}>loading…</div> : null}
-            {ready && data ? (<><ClockHero profile={data} /><Bento profile={data} /></>) : null}
+            {ready && data ? (<><ClockHero profile={data} /><Bento profile={data} /><RecapDeck cards={data.cards ?? []} /></>) : null}
             {data && !ready ? <div className="rdx-label" style={{ padding: 24 }}>profile not ready - ingest more sessions.</div> : null}
         </InstrumentShell>
     );
