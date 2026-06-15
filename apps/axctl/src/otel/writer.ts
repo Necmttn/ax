@@ -1,8 +1,9 @@
 import { Context, Effect, Layer } from "effect";
 import { SurrealClient } from "@ax/lib/db";
 import type { DbError } from "@ax/lib/errors";
-import { executeStatements } from "@ax/lib/shared/surreal";
 import {
+    executeStatements,
+    recordRef,
     surrealString,
     surrealDate,
     surrealOptionString,
@@ -22,9 +23,8 @@ export interface OtelWriterShape {
 export class OtelWriter extends Context.Service<OtelWriter, OtelWriterShape>()("ax/otel/OtelWriter") {}
 
 const metricStmt = (r: OtelMetricPointRow): string => {
-    const id = metricPointKey(r).replace(/`/g, "");
     return (
-        `UPSERT otel_metric_point:\`${id}\` SET ` +
+        `UPSERT ${recordRef("otel_metric_point", metricPointKey(r))} SET ` +
         `harness = ${surrealString(r.harness)}, ` +
         `metric = ${surrealString(r.metric)}, ` +
         `value = ${r.value}, ` +
@@ -39,9 +39,8 @@ const metricStmt = (r: OtelMetricPointRow): string => {
 };
 
 const spanStmt = (r: OtelSpanRow): string => {
-    const id = spanKey(r).replace(/`/g, "");
     return (
-        `UPSERT otel_span:\`${id}\` SET ` +
+        `UPSERT ${recordRef("otel_span", spanKey(r))} SET ` +
         `harness = ${surrealString(r.harness)}, ` +
         `name = ${surrealString(r.name)}, ` +
         `trace_id = ${surrealString(r.trace_id)}, ` +
