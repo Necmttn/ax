@@ -231,6 +231,9 @@ export async function serveDashboard(args: string[]): Promise<void> {
         // (no full-text index yet) and can take 5-15s on a year-old graph.
         server = Bun.serve({
             port,
+            // loopback by default (always-on daemon; browser studio connects locally);
+            // AX_SERVE_HOST=0.0.0.0 to expose on the LAN.
+            hostname: process.env.AX_SERVE_HOST ?? "127.0.0.1",
             fetch: (req) => handleDashboardRequestWithCors(req, handle.runner, serve, contract),
             idleTimeout: 60,
         });

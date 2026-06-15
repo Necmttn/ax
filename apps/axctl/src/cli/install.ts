@@ -28,6 +28,7 @@ import schemaSurql from "@ax/schema/schema.surql" with { type: "text" };
 import { bucketNames, renderBucketBackends } from "@ax/schema/render";
 import { envConfig as readDbEnvConfig } from "@ax/lib/db";
 import { DEFAULT_INGEST_TIMEOUT_SECONDS } from "@ax/lib/config";
+import { DEFAULT_DASHBOARD_PORT } from "@ax/lib/dashboard-port";
 
 /**
  * Tagged failure for install steps (surreal resolution, symlinking). Extends
@@ -62,6 +63,8 @@ const DB_PLIST = posixPath.join(LAUNCH_AGENTS_DIR, `${DB_LABEL}.plist`);
 const WATCH_PLIST = posixPath.join(LAUNCH_AGENTS_DIR, `${WATCH_LABEL}.plist`);
 const DERIVE_PLIST = posixPath.join(LAUNCH_AGENTS_DIR, `${DERIVE_LABEL}.plist`);
 const QUOTA_REFRESH_PLIST = posixPath.join(LAUNCH_AGENTS_DIR, `${QUOTA_REFRESH_LABEL}.plist`);
+const SERVE_LABEL = "com.necmttn.ax-serve";
+const SERVE_PLIST = posixPath.join(LAUNCH_AGENTS_DIR, `${SERVE_LABEL}.plist`);
 const ROCKSDB_BLOCK_CACHE_SIZE = process.env.AX_DB_ROCKSDB_BLOCK_CACHE_SIZE ?? "268435456";
 const ROCKSDB_WRITE_BUFFER_SIZE = process.env.AX_DB_ROCKSDB_WRITE_BUFFER_SIZE ?? "33554432";
 const ROCKSDB_MAX_WRITE_BUFFER_NUMBER = process.env.AX_DB_ROCKSDB_MAX_WRITE_BUFFER_NUMBER ?? "4";
@@ -239,6 +242,40 @@ const quotaRefreshPlist = (binPath: string): string => `<?xml version="1.0" enco
     <key>PATH</key>
     <string>${HOME}/.bun/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
   </dict>
+</dict>
+</plist>
+`;
+
+export const servePlist = (binPath: string): string => `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>${SERVE_LABEL}</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>-lc</string>
+    <string>exec "${binPath}" serve --port=${DEFAULT_DASHBOARD_PORT}</string>
+  </array>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <dict>
+    <key>SuccessfulExit</key><false/>
+    <key>Crashed</key><true/>
+  </dict>
+  <key>StandardOutPath</key>
+  <string>${LOG_DIR}/serve.out</string>
+  <key>StandardErrorPath</key>
+  <string>${LOG_DIR}/serve.err</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>${HOME}/.bun/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+  </dict>
+  <key>ThrottleInterval</key>
+  <integer>5</integer>
 </dict>
 </plist>
 `;
@@ -640,6 +677,7 @@ function collectDaemonStatus(): Effect.Effect<DaemonStatus, never, FileSystem.Fi
                 yield* launchdStatus(WATCH_LABEL, WATCH_PLIST),
                 yield* launchdStatus(DERIVE_LABEL, DERIVE_PLIST),
                 yield* launchdStatus(QUOTA_REFRESH_LABEL, QUOTA_REFRESH_PLIST),
+                yield* launchdStatus(SERVE_LABEL, SERVE_PLIST),
             ],
         };
     });
@@ -969,6 +1007,10 @@ export function cmdInstall(): Effect.Effect<
         console.log(`  wrote:  ${QUOTA_REFRESH_PLIST}`);
         yield* Effect.promise(() => loadAgent(QUOTA_REFRESH_PLIST));
 
+        yield* fs.writeFileString(SERVE_PLIST, servePlist(binSource));
+        console.log(`  wrote:  ${SERVE_PLIST}`);
+        yield* Effect.promise(() => loadAgent(SERVE_PLIST));
+
         // Apply schema from embedded resource via surreal import. Bucket
         // BACKEND paths are rewritten to THIS machine's buckets dir - the
         // committed schema.surql carries the committing machine's absolute
@@ -1193,7 +1235,8 @@ export function cmdDaemon(
                 const watch = yield* fs.exists(WATCH_PLIST).pipe(orAbsent(false));
                 const derive = yield* fs.exists(DERIVE_PLIST).pipe(orAbsent(false));
                 const quotaRefresh = yield* fs.exists(QUOTA_REFRESH_PLIST).pipe(orAbsent(false));
-                return db && watch && derive && quotaRefresh;
+                const serve = yield* fs.exists(SERVE_PLIST).pipe(orAbsent(false));
+                return db && watch && derive && quotaRefresh && serve;
             });
 
         if (!isMacos()) {
@@ -1212,13 +1255,16 @@ export function cmdDaemon(
                 yield* Effect.promise(() => loadAgent(WATCH_PLIST));
                 yield* Effect.promise(() => loadAgent(DERIVE_PLIST));
                 yield* Effect.promise(() => loadAgent(QUOTA_REFRESH_PLIST));
+                yield* Effect.promise(() => loadAgent(SERVE_PLIST));
             }
         } else if (parsed.command === "stop") {
+            yield* Effect.promise(() => unloadAgentKeepPlist(SERVE_PLIST));
             yield* Effect.promise(() => unloadAgentKeepPlist(QUOTA_REFRESH_PLIST));
             yield* Effect.promise(() => unloadAgentKeepPlist(DERIVE_PLIST));
             yield* Effect.promise(() => unloadAgentKeepPlist(WATCH_PLIST));
             yield* Effect.promise(() => unloadAgentKeepPlist(DB_PLIST));
         } else if (parsed.command === "restart") {
+            yield* Effect.promise(() => unloadAgentKeepPlist(SERVE_PLIST));
             yield* Effect.promise(() => unloadAgentKeepPlist(QUOTA_REFRESH_PLIST));
             yield* Effect.promise(() => unloadAgentKeepPlist(DERIVE_PLIST));
             yield* Effect.promise(() => unloadAgentKeepPlist(WATCH_PLIST));
@@ -1230,6 +1276,7 @@ export function cmdDaemon(
                 yield* Effect.promise(() => loadAgent(WATCH_PLIST));
                 yield* Effect.promise(() => loadAgent(DERIVE_PLIST));
                 yield* Effect.promise(() => loadAgent(QUOTA_REFRESH_PLIST));
+                yield* Effect.promise(() => loadAgent(SERVE_PLIST));
             }
         }
 
@@ -1283,7 +1330,7 @@ export function cmdUninstall(
         const fs = yield* FileSystem.FileSystem;
         const path = yield* Path.Path;
         console.log("[axctl] uninstall");
-        for (const plist of [QUOTA_REFRESH_PLIST, DERIVE_PLIST, WATCH_PLIST, DB_PLIST]) {
+        for (const plist of [SERVE_PLIST, QUOTA_REFRESH_PLIST, DERIVE_PLIST, WATCH_PLIST, DB_PLIST]) {
             const removed = yield* unloadAgent(plist);
             console.log(`  ${removed ? "removed" : "absent "}: ${plist}`);
         }
