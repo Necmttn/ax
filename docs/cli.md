@@ -60,6 +60,8 @@ axctl hook <fire>                           # hook helper invoked from settings.
 axctl hooks <summary|invocations|backtest|bench|session|config ...>   # + hook-config CRUD
 axctl hooks bench <file> [--days=N] [--runs=N] [--budget-ms=N] [--json]
                                             # latency ledger: per-fire p50/p95 (spawn) + fires/day + installed-chain budget
+axctl hooks latency [--days=N (default 7)] [--baseline=M (default 21)] [--json]
+                                            # regression lens: compare recent vs baseline fire latency by hook event from telemetry
 
 axctl daemon <status|start|stop|restart>
 axctl doctor                                # local-install health check

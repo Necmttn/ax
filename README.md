@@ -264,6 +264,7 @@ Write a hook once in typed TypeScript, prove it against your own history, run it
 ax hooks init                                    # scaffold ~/.ax/hooks (TypeScript, @ax/hooks-sdk)
 ax hooks backtest ~/.ax/hooks/my-guard.ts        # replay weeks of real tool calls through it first
 ax hooks install ~/.ax/hooks/my-guard.ts --providers=claude,codex
+ax hooks latency [--days=7] [--baseline=21]      # regression lens: recent vs baseline p95 per hook event
 ```
 
 ## Your agent can query all of this mid-session

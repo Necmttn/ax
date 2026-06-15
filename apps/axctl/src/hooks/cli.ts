@@ -22,6 +22,7 @@ import { GitEnvLive } from "@ax/hooks-sdk/git-env";
 import { fetchRows, replayRows, summarize, formatReport } from "./backtest.ts";
 import { benchHook, renderLedger } from "./bench.ts";
 import type { HookDefinition } from "@ax/hooks-sdk/define";
+import { fetchHookLatencyRegression, renderHookLatency } from "../queries/hook-latency.ts";
 
 /**
  * `ax hooks` config CRUD subcommands (provider-agnostic: claude/cursor/codex/
@@ -320,6 +321,32 @@ const benchCommand = Command.make(
         }).pipe(Effect.provide(HookProviderRegistryDefault)),
 ).pipe(Command.withDescription("Latency ledger for an SDK hook: per-fire p50/p95 (spawn) + fires/day + installed-chain budget (--days=30 --runs=20 --budget-ms=250 --json)"));
 
+const latencyCommand = Command.make(
+    "latency",
+    {
+        days: Flag.integer("days").pipe(Flag.withDefault(7)),
+        baseline: Flag.integer("baseline").pipe(Flag.withDefault(21)),
+        json: Flag.boolean("json").pipe(Flag.withDefault(false)),
+    },
+    ({ days, baseline, json: asJson }) =>
+        fetchHookLatencyRegression({ recentDays: days, baselineDays: baseline }).pipe(
+            Effect.flatMap((report) =>
+                Effect.sync(() => {
+                    console.log(asJson ? prettyPrint(report) : renderHookLatency(report));
+                }),
+            ),
+            Effect.catchTag("DbError", (e) =>
+                Effect.promise(async () => {
+                    process.stderr.write(
+                        `DB unreachable or query failed: ${e.message}\n` +
+                        "Start the DB with 'axctl daemon start' and retry.\n",
+                    );
+                    process.exit(1);
+                }),
+            ),
+        ),
+).pipe(Command.withDescription("Regression lens over hook_command_invocation.duration_ms: compare recent (--days, default 7) vs baseline (--baseline, default 21) p95 per hook; flags regressions (factor 1.5, min 15ms delta, min 20 samples). Empty-state when duration_ms is absent. (--json)"));
+
 /** Spliced into `hooksCommand`'s subcommand list in cli/index.ts. */
 export const hooksConfigSubcommands = [
     configCommand,
@@ -332,4 +359,5 @@ export const hooksConfigSubcommands = [
     installCommand,
     backtestCommand,
     benchCommand,
+    latencyCommand,
 ];

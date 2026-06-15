@@ -56,6 +56,7 @@ Install: `curl -fsSL https://ax.necmttn.com/install | bash`, then `npx skills ad
 - `ax:dojo` skill - surplus-quota overnight training loop: budget-bounded self-improvement (verdicts, briefs, routing, proposals, experiments); install via `npx skills add Necmttn/ax`
 - `ax hooks init / install / backtest / bench / cases` - author typed TypeScript hooks once, run them on Claude Code + Codex; replay history through a hook before installing it
 - `ax hooks bench <file> [--days=N] [--runs=N] [--budget-ms=N] [--json]` - latency ledger: per-fire p50/p95 from real bun spawns, est fires/day from tool_call history, installed-chain budget vs --budget-ms default 250
+- `ax hooks latency [--days=N] [--baseline=M] [--json]` - regression lens: compare recent (default 7d) vs baseline (default 21d) fire latency per hook event (hook_name is event-granular, e.g. PreToolUse:Bash) from hook_command_invocation telemetry; flags hook events where p95 regressed (factor 1.5, min 15ms delta, min 20 samples)
 
 ### Graph insights
 - `ax insights <view>` - 31 read-only graph views
