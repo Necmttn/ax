@@ -500,3 +500,16 @@
 .wr-fact p { font-size: 13px; line-height: 1.5; color: var(--sec); margin: 0; }
 
 .wr-section { margin-top: 18px; }
+
+/* ---- recap deck viz variants (alternating, nullframe-style) ---- */
+.wr-viz { height: 46px; margin-bottom: 14px; }
+.wr-bars { display: flex; align-items: flex-end; gap: 3px; width: 100%; height: 100%; }
+.wr-bars i { flex: 1; background: color-mix(in srgb, var(--card-accent) 72%, var(--surface)); border-radius: 1px 1px 0 0; min-height: 3px; }
+.wr-line { width: 100%; height: 100%; display: block; }
+.wr-cells { display: flex; gap: 3px; width: 100%; height: 100%; align-items: stretch; }
+.wr-cells i { flex: 1; border-radius: 2px; }
+.wr-seg-wrap { width: 100%; height: 100%; display: flex; align-items: center; }
+.wr-ring { width: 100%; height: 100%; display: flex; align-items: center; justify-content: flex-start; }
+.wr-ring svg { width: 42px; height: 42px; transform: rotate(-90deg); }
+.wr-ring .bg { fill: none; stroke: var(--border); stroke-width: 3; }
+.wr-ring .fg { fill: none; stroke: var(--card-accent); stroke-width: 3; stroke-linecap: round; transition: stroke-dashoffset 0.5s var(--ease); }
