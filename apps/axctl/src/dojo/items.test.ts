@@ -51,6 +51,8 @@ const churnRow = (
     episodes,
     passedEpisodes: passed,
     topCheck: "typecheck",
+    otlp_cost_usd: null,
+    otlp_tokens: null,
 });
 
 describe("item mappers", () => {

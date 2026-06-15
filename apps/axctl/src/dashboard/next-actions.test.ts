@@ -138,6 +138,8 @@ const churnRow = (
     episodes: verificationFailures > 0 ? 1 : 0,
     passedEpisodes: 0,
     topCheck: "test",
+    otlp_cost_usd: null,
+    otlp_tokens: null,
 });
 
 const makeCandidate = (
