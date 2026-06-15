@@ -1,5 +1,5 @@
 #!/usr/bin/env bun
-import { Cause, Effect, Layer } from "effect";
+import { Cause, Effect, Exit, Layer } from "effect";
 import { BunFileSystem, BunPath, BunRuntime } from "@effect/platform-bun";
 import { Command } from "effect/unstable/cli";
 import { SurrealClient, type SurrealClientShape } from "@ax/lib/db";
@@ -52,6 +52,7 @@ import {
     lifecycleRuntime,
 } from "./commands/lifecycle.ts";
 import { AX_VERSION, liveVersionDeps, printVersion } from "./version.ts";
+import { appendUsageRecord, defaultUsageLogPath, redactInvocation } from "../usage/record.ts";
 import { stderrExit } from "./output.ts";
 import { agentsCommand, agentsRuntime } from "../agents/cli.ts";
 import { ALL_STAGES } from "../ingest/stage/registry.ts";
@@ -384,8 +385,26 @@ const reportCliFailure = (cause: Cause.Cause<unknown>): Effect.Effect<void> =>
         console.error("axctl error:", err);
     });
 
+const recordInvocation = (args: ReadonlyArray<string>, t0: number, exitCode: number): Promise<void> => {
+    let repoTopdir: string | null = null;
+    try {
+        const r = Bun.spawnSync(["git", "rev-parse", "--show-toplevel"], { stdout: "pipe", stderr: "ignore" });
+        if (r.exitCode === 0) repoTopdir = r.stdout.toString().trim() || null;
+    } catch { /* no git / not a repo */ }
+    const rec = redactInvocation(args, {
+        now: new Date(),
+        exitCode,
+        durationMs: Math.max(0, Math.round(performance.now() - t0)),
+        isTty: process.stderr.isTTY === true,
+        repoTopdir,
+        version: AX_VERSION,
+    });
+    return appendUsageRecord(defaultUsageLogPath(), rec);
+};
+
 if (import.meta.main) {
     const args = process.argv.slice(2);
+    const t0 = performance.now();
     // BunRuntime.runMain makes the CLI the process main fiber: SIGINT/SIGTERM
     // interrupt it (finalizers run), then Runtime.defaultTeardown picks the
     // exit code - 0 success, 1 failure (incl. ShowHelp usage errors), 130 for
@@ -400,6 +419,9 @@ if (import.meta.main) {
         dispatch(args).pipe(
             Effect.tap(() => Effect.promise(() => maybePrintStarNudge(args))),
             Effect.tapCause(reportCliFailure),
+            Effect.onExit((exit) =>
+                Effect.promise(() => recordInvocation(args, t0, Exit.isSuccess(exit) ? 0 : 1)),
+            ),
         ),
         { disableErrorReporting: true },
     );
