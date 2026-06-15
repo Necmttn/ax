@@ -11,19 +11,26 @@ There's a hidden bucket in your AI coding bill, and it's bigger than you think. 
 
 Last month my AI coding agents spent $25,027. $3,956.59 of that was those helpers - 1,368 of them, and 67% ran on the default expensive model for work a cheaper one would have nailed. "Find every caller of this function" does not need your top-tier model. It got it anyway, 1,368 times.
 
-> **Quick glossary** (this piece uses these a lot):
-> - **dispatch** - a helper task your main agent launches to do one side job
-> - **inherit** - the helper runs on the same model as your main chat (the pricey default)
-> - **frontier** - the top-tier, most expensive model (right now that's the likes of opus or fable)
-> - **routing** - sending routine helper work to a cheaper model on purpose
+<FrameworkList label="Quick glossary - this piece uses these a lot">
+  <FrameworkItem name="dispatch">a helper task your main agent launches to do one side job</FrameworkItem>
+  <FrameworkItem name="inherit">the helper runs on the same model as your main chat (the pricey default)</FrameworkItem>
+  <FrameworkItem name="frontier">the top-tier, most expensive model (right now that's the likes of opus or fable)</FrameworkItem>
+  <FrameworkItem name="routing">sending routine helper work to a cheaper model on purpose</FrameworkItem>
+</FrameworkList>
 
-The expensive default here happened to be `claude-fable-5` - a model so good and so short-lived that people still talk about it like a band that broke up too soon. That's the trap, though: the name on the invoice keeps changing. Fable this month, opus the next, whatever frontier tier your helpers inherit after that. You can't build a cost strategy on which model is cheap today. The leak isn't a model. It's that your helpers inherit the expensive one by default, and that outlives every model that comes and goes.
+The expensive default here happened to be `claude-fable-5` - a model so good and so short-lived that people still talk about it like a band that broke up too soon. That's the trap, though: the name on the invoice keeps changing. Fable this month, opus the next, whatever frontier tier your helpers inherit after that. You can't build a cost strategy on which model is cheap today.
+
+<PullQuote cite="the leak isn't a model">
+The leak isn't a model. It's that your helpers inherit the expensive one by default - and that outlives every model that comes and goes.
+</PullQuote>
 
 One helper task makes the gap concrete. "Implement Task 3: session map strip" - bounded scope, written spec - ran inherit, landed on fable, and cost $50.26; ax re-prices the same work at sonnet rates as $15.08. Two days later a near-identical task ran with sonnet named on purpose and cost $5.23. The only thing that changed was whether anyone picked the model.
 
-```
-"Implement Task 3" inherit→fable $50.26   ax-priced sonnet $15.08   same shape, sonnet named $5.23
-```
+<StatGrid label="One helper task, three prices - 'Implement Task 3: session map strip'">
+  <Stat value="$50.26" label="inherit → ran on fable" sub="what it actually cost" />
+  <Stat value="$15.08" label="ax-priced at sonnet" sub="same work, repriced" />
+  <Stat value="$5.23" label="sonnet named on purpose" sub="two days later, same shape" />
+</StatGrid>
 
 Multiply that gap across hundreds of helper tasks a month, and that's the bill.
 
@@ -45,6 +52,8 @@ In Claude Code, the `model` override applies to the first leg only. The dispatch
 
 One dispatch made it obvious. "Implement S2-T4" routed to sonnet. The sonnet leg cost about $1. Then it continued, flipped to fable, and ran up $116 of its $117 total - 99% of the cost landed after the override I'd set was already gone.
 
+<Figure id="Receipt" label="'Implement S2-T4' · the route that didn't stick" lead="The override applied to the first leg only." caption="99% of the cost landed after the routed leg, on the parent's frontier model - and the dispatch_model column still reads sonnet.">
+
 ```
 "Implement S2-T4"
   requested:    sonnet
@@ -53,7 +62,11 @@ One dispatch made it obvious. "Implement S2-T4" routed to sonnet. The sonnet leg
   total:        $117    (99% billed off-model, after the route)
 ```
 
+</Figure>
+
 Across the same 30 days: 66 routed dispatches continued on a different model than requested, $571.52 of spend on those dropped legs. The leak you can't see is the same size as the one you can. `ax dispatches` flags these rows with a `!` marker and a dropped-cost footer, so a route that didn't stick stops looking like a route that worked. ax measures that gap. Nothing else does.
+
+<Figure id="ax dispatches" label="--days=30 · dropped-leg footer" lead="The leak you can't see, made visible." caption="ax marks dropped-leg rows with a ! and a dropped-cost footer, so a route that didn't stick stops looking like a route that worked.">
 
 ```
 $ ax dispatches --days=30
@@ -64,6 +77,8 @@ ts                   description            dispatch_model  child_model        c
 
 dropped (off-model continuation): 66 dispatches  $571.52
 ```
+
+</Figure>
 
 So I built the loop that finds it and closes it. ax is free, open source, and local - it reads your transcripts, never your code, never your API keys. github.com/Necmttn/ax
 
@@ -94,6 +109,8 @@ ax ingest --since=30
 
 The matrix your harness never shows: who spent the money - main agent or subagents - and on which model.
 
+<Figure id="ax cost split" label="--days=30 · origin × model" lead="The split your invoice never breaks out." caption="Share is each row's slice of the $25,027 total. The real table breaks out every main-agent model and adds token columns - collapsed to one line here so the subagent split stays the point.">
+
 ```
 $ ax cost split --days=30
 
@@ -112,11 +129,13 @@ main agent (models trimmed)             $21,015.22   84.0%
 TOTAL (main + subagent)                  $25,027.00  100.0%
 ```
 
-Share is each row's slice of the $25,027 total. The real table breaks out every main-agent model and adds token columns - collapsed to one line here so the subagent split stays the point.
+</Figure>
 
 ### Rule 3: List every dispatch with its price tag
 
 Every Task dispatch: its description, whether a model was specified, what the child actually cost. Sorted by cost. The expensive rows tell you everything.
+
+<Figure id="ax dispatches" label="--days=30 · sorted by child cost" lead="Every dispatch, priced and sorted." caption="The expensive inherit rows tell you everything; the footer counts the routed dispatches that continued off-model.">
 
 ```
 $ ax dispatches --days=30
@@ -130,14 +149,17 @@ ts                   description                        dispatch_model  child_mo
 model drops: 66 routed dispatches continued on a different model ($571.52 on dropped legs, marked "!")
 ```
 
+</Figure>
+
 ### Rule 4: Read the inherit percentage. That's the leak.
 
 `inherit` means no one chose a model - the dispatch silently took the main model. Some of those should be frontier. Most are "implement this spec" and "fix this test." Mine was 67%; an earlier 14-day window on the same machine was 80.7% (574 dispatches, $2,116 subagent spend). Defaults don't audit themselves.
 
-```
-67.0% of 1,368 dispatches: inherit
-→ bounded, well-specified work billed at frontier rates by default
-```
+<Callout tone="good" title="the leak, in one line">
+
+67.0% of 1,368 dispatches ran `inherit` - bounded, well-specified work billed at frontier rates by default, because no one picked a cheaper model.
+
+</Callout>
 
 ### Rule 5: Compute your own annual number
 
@@ -154,6 +176,8 @@ $605.02 flagged / 30 days  ×12 ≈ $7,260 / year
 ### Rule 6: Start from the shipped defaults
 
 ax ships a default routing table - description prefixes and agent types mapped to the cheapest model that handles them. `ax routing compile` writes it to `~/.ax/hooks/routing-table.json`, merge-preserving, so your own classes survive regeneration. `ax routing show` prints what landed.
+
+<Figure id="ax routing show" label="the shipped default table" lead="Description prefixes and agent types, mapped to the cheapest model that handles them." caption="ax routing compile writes the table merge-preserving, so your own classes survive regeneration; show prints what landed, with origins.">
 
 ```
 $ ax routing compile
@@ -176,9 +200,13 @@ agent-type:codebase-pattern-finder                                        haiku 
 agent-type:codebase-analyzer                                              sonnet    default
 ```
 
+</Figure>
+
 ### Rule 7: Flag the candidates and get a dollar figure
 
 `--candidates` filters your dispatch history to the expensive inherit runs that match a routing class, prices the alternative per dispatch, and shows where the $605.02 actually lives:
+
+<Figure id="ax dispatches --candidates" label="--days=30 · est. savings by class" lead="Where the $605.02 actually lives." caption="inherit dispatches that match a routing class, repriced one tier down, ranked by the class that would save the most.">
 
 ```
 $ ax dispatches --candidates --days=30
@@ -192,9 +220,13 @@ top classes by savings:
   bug-fix               $ 69.37
 ```
 
+</Figure>
+
 ### Rule 8: Mine new classes from your unmatched spend
 
 Your dispatch descriptions have patterns the defaults don't know. `ax routing tune` clusters the expensive inherit dispatches that no class caught (two-token prefix clustering, clusters of 3+) and proposes new classes suggesting sonnet. Dry-run first. On my history that surfaced $599.00 of spend the default table never saw:
+
+<Figure id="ax routing tune --dry-run" label="--days=30 · mined proposals" lead="New classes mined from your own history." caption="Two-token prefix clustering over the expensive inherit dispatches no default class caught; judgment-flagged clusters never auto-apply.">
 
 ```
 $ ax routing tune --days=30 --dry-run
@@ -211,6 +243,8 @@ impl-N           ^impl\s+\d+\b          sonnet      10       $25.18  no
 20 proposals  addressable spend: $599.00  (30 days)
 apply non-judgment: ax routing tune --days=30   brief: ax routing tune --emit-brief
 ```
+
+</Figure>
 
 The `issue-N` row alone - "Issue 248 manifest hidden flag" and eleven siblings - is $161.42 of inherit spend with a two-token pattern sitting on top of it.
 
@@ -348,6 +382,8 @@ Everything above tunes the subagent bill. But go back to Rule 2: subagents were 
 
 So I built a command to look at the trunk. `ax cost routability` classifies main-agent turns by the tools they actually used. Read-only sweeps (gather → haiku), mechanical edits (mechanical-impl → sonnet), and web research (niche-research → sonnet) are routable - bounded work the frontier model did inline that a cheap subagent could have done instead. Reasoning, coordination, and judgment stay on frontier. Then it reprices the routable turns one tier down.
 
+<Figure id="ax cost routability" label="--days=30 · main-agent turns, repriced" lead="The trunk, not the tail." caption="$1,766/month - several times the entire subagent leak - sitting in the model you talk to all day. The stays-main row is genuine reasoning and coordination, correctly left on frontier.">
+
 ```
 $ ax cost routability --days=30
 
@@ -362,11 +398,17 @@ stays main      28750   39481   $11238.33   -                -            -
 estimate: edit/read turns assumed mechanically routable (upper-ish bound); claude main only.
 ```
 
+</Figure>
+
 $1,766 a month. About $21K a year. Several times the entire subagent leak the rest of this article is about - $605 a month - and it was sitting in the model I talk to all day. mechanical-impl is the bulk: the main agent editing files itself instead of handing the edit to a sonnet subagent. The $11,238 `stays main` row is genuine reasoning, coordination, and dispatching work, correctly left on frontier. The goal was never cheap everywhere. It's: stop doing bounded mechanical work inline on the most expensive model you have.
 
 Same caveats as the rest, louder here because the number is bigger. It's an upper bound - a turn that reasons hard and then makes one mechanical edit reads as routable, because the transcript strips the thinking, so call $1,766 a ceiling, not a quote. It's Claude main-agent only by construction; other harnesses' main spend isn't counted. And it's projected from historical token counts, not A/B-tested for quality parity.
 
-The behavior moved before the command existed. Over 90 days my subagent dispatch rate went from 19/day to 114/day - 6x. Call it subagent-driven development: once you see the trunk you start pushing work off it, sending bounded, well-specified, mechanical jobs out to cheap subagents instead of running them inline. Routing those subagents cheaper - the 17 rules - is step 2. Step 1 is not doing the expensive work in the main thread at all. The biggest line on the bill is the model you're talking to.
+The behavior moved before the command existed. Over 90 days my subagent dispatch rate went from 19/day to 114/day - 6x. Call it subagent-driven development: once you see the trunk you start pushing work off it, sending bounded, well-specified, mechanical jobs out to cheap subagents instead of running them inline. Routing those subagents cheaper - the 17 rules - is step 2. Step 1 is not doing the expensive work in the main thread at all.
+
+<PullQuote cite="step 1, before any routing">
+The biggest line on the bill is the model you're talking to.
+</PullQuote>
 
 ---
 
@@ -374,13 +416,19 @@ The behavior moved before the command existed. Over 90 days my subagent dispatch
 
 30 days, one machine, real transcripts. $25,027 total agent spend, $3,956.59 of it subagents across 1,368 dispatches, 67.0% inherit. The waste came in three leaks of comparable size:
 
-- $605.02 the shipped routing classes catch - $7,260/year (well-specified-impl $282.69, spec-review $80.66, bug-fix $69.37)
-- $599.00 `ax routing tune` mined into 20 new classes: $218.63 auto-applied, $380.35 judgment-gated pending backtest
-- $571.52 you can't see by reading the dispatch model column at all - 66 routed dispatches that continued off-model after the override was set
+<StatGrid label="Three leaks of comparable size · 30 days, one machine">
+  <Stat value="$605.02" label="shipped classes catch" sub="$7,260/yr · impl $282.69 · review $80.66 · bug-fix $69.37" />
+  <Stat value="$599.00" label="ax routing tune mined → 20 classes" sub="$218.63 auto-applied · $380.35 judgment-gated pending backtest" />
+  <Stat value="$571.52" label="invisible off-model" sub="66 routed dispatches that continued off-model after the override" />
+</StatGrid>
 
 The earlier 14-day window on the same machine told the same story: $2,301 of sub-task spend on fable/opus against $83 on sonnet.
 
-Honest caveats, because the numbers deserve them. The savings are projections from historical token counts, not A/B-tested quality parity. The route-dispatch hook is Claude Code only and advisory by nature - it can't rewrite an Agent dispatch, so it nudges the model rather than enforcing. It's the backstop, not the strategy; the main mechanism is the agent choosing explicit cheap models at dispatch time. And some inherit dispatches genuinely should be frontier - judgment work the table never touches in either direction.
+<Callout tone="note" title="honest caveats, because the numbers deserve them">
+
+The savings are projections from historical token counts, not A/B-tested quality parity. The route-dispatch hook is Claude Code only and advisory by nature - it can't rewrite an Agent dispatch, so it nudges the model rather than enforcing. It's the backstop, not the strategy; the main mechanism is the agent choosing explicit cheap models at dispatch time. And some inherit dispatches genuinely should be frontier - judgment work the table never touches in either direction.
+
+</Callout>
 
 ## What I'm still trying to understand
 
