@@ -4,8 +4,9 @@
  * All three signals return `{ partialSuccess: {} }` (the OTLP/HTTP ack).
  * The handler is fail-open: a bad body or decode failure logs a warning and
  * returns the ack without writing, so a misconfigured sender never crashes the
- * daemon. Only metrics and traces are written today; logs are accepted and
- * silently dropped (no table yet).
+ * daemon. All three signals are decoded, normalized, and written to their
+ * tables: metrics to otel_metric_point, traces to otel_span, logs to
+ * otel_log_event.
  *
  * `handleOtlp` is a plain Effect (no HTTP layer) so the test suite can drive
  * it directly with a stub DB layer. `OtelGroupLive` wires it into the contract
