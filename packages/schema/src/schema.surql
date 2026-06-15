@@ -1860,6 +1860,41 @@ DEFINE INDEX IF NOT EXISTS ingest_file_state_path_uq ON ingest_file_state FIELDS
 DEFINE INDEX IF NOT EXISTS ingest_file_state_source  ON ingest_file_state FIELDS source_kind;
 
 -- ---------------------------------------------------------------------------
+-- OTLP telemetry tables (2026-06-15)
+-- Stores harness-push metric data points and trace spans received via the
+-- /v1/metrics and /v1/traces OTLP/JSON receiver endpoints. Linked to the
+-- session graph via the telemetry_of relation. `attrs` is JSON-encoded
+-- key-value attributes from the OTLP payload. Both tables index session_id
+-- for the correlation pass that emits telemetry_of edges at ingest time.
+-- ---------------------------------------------------------------------------
+DEFINE TABLE otel_metric_point SCHEMAFULL;
+DEFINE FIELD harness     ON otel_metric_point TYPE string;
+DEFINE FIELD metric      ON otel_metric_point TYPE string;
+DEFINE FIELD value       ON otel_metric_point TYPE number;
+DEFINE FIELD unit        ON otel_metric_point TYPE option<string>;
+DEFINE FIELD session_id  ON otel_metric_point TYPE option<string>;
+DEFINE FIELD model       ON otel_metric_point TYPE option<string>;
+DEFINE FIELD skill_name  ON otel_metric_point TYPE option<string>;
+DEFINE FIELD agent_name  ON otel_metric_point TYPE option<string>;
+DEFINE FIELD attrs       ON otel_metric_point TYPE option<string>;   -- JSON-encoded
+DEFINE FIELD observed_at ON otel_metric_point TYPE datetime;
+DEFINE INDEX IF NOT EXISTS otel_metric_session ON otel_metric_point FIELDS session_id;
+
+DEFINE TABLE otel_span SCHEMAFULL;
+DEFINE FIELD harness        ON otel_span TYPE string;
+DEFINE FIELD name           ON otel_span TYPE string;
+DEFINE FIELD trace_id       ON otel_span TYPE string;
+DEFINE FIELD span_id        ON otel_span TYPE string;
+DEFINE FIELD parent_span_id ON otel_span TYPE option<string>;
+DEFINE FIELD session_id     ON otel_span TYPE option<string>;
+DEFINE FIELD started_at     ON otel_span TYPE datetime;
+DEFINE FIELD ended_at       ON otel_span TYPE datetime;
+DEFINE FIELD duration_ms    ON otel_span TYPE number;
+DEFINE FIELD attrs          ON otel_span TYPE option<string>;        -- JSON-encoded
+DEFINE FIELD observed_at    ON otel_span TYPE datetime;
+DEFINE INDEX IF NOT EXISTS otel_span_session ON otel_span FIELDS session_id;
+
+-- ---------------------------------------------------------------------------
 -- wrapped_card - agent-authored Wrapped recap cards (improve-first dashboard
 -- PR4). `ax wrapped generate` emits a brief; an agent mines the graph and
 -- publishes 10-16 headline cards via `ax wrapped publish` (full replace).
@@ -1876,3 +1911,18 @@ DEFINE FIELD series       ON wrapped_card TYPE array<number> DEFAULT [];
     -- on the card's model), rendered as the card's bar strip
 DEFINE FIELD series_label ON wrapped_card TYPE option<string>;
 DEFINE FIELD generated_at ON wrapped_card TYPE datetime DEFAULT time::now();
+
+-- ---------------------------------------------------------------------------
+-- telemetry_of - session -> otel telemetry row edges (2026-06-15)
+-- Drawn at ingest during the correlation pass that matches session_id on
+-- otel_metric_point / otel_span rows back to normalized session records.
+-- TYPE RELATION without FROM/TO constraints: the heterogeneous target
+-- (otel_metric_point | otel_span) follows the same pattern as `concerns`
+-- and `cites_evidence` (unconstrained polymorphic relations). Union-target
+-- syntax (FROM session TO otel_metric_point | otel_span) is not used
+-- elsewhere in this schema; omitting it is the safe, consistent choice.
+-- ---------------------------------------------------------------------------
+DEFINE TABLE telemetry_of TYPE RELATION SCHEMAFULL;
+DEFINE FIELD linked_at ON telemetry_of TYPE datetime DEFAULT time::now();
+DEFINE INDEX IF NOT EXISTS telemetry_of_in  ON telemetry_of FIELDS in;
+DEFINE INDEX IF NOT EXISTS telemetry_of_out ON telemetry_of FIELDS out;
