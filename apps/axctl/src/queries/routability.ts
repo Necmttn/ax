@@ -340,10 +340,17 @@ export const fetchRoutability = Effect.fn("queries.fetchRoutability")(
             const sessionId = String(row.session_id ?? "");
             if (!turnId || !sessionId) continue;
 
+            const role = String(row.role ?? "");
             const usg = usageByTurn.get(turnId);
+            // Only Claude-main work enters grouping. Keep user turns (buildSpans
+            // splits class-runs at them) and any turn carrying a Claude usage row;
+            // drop assistant/tool_result turns with no Claude cost (non-Claude or
+            // cost-less) so they don't inflate the displayed run/turn counts.
+            if (role !== "user" && usg === undefined) continue;
+
             const tf: TurnFacts = {
                 seq: Number(row.seq ?? 0),
-                role: String(row.role ?? ""),
+                role,
                 toolNames: toolsByTurn.get(turnId) ?? [],
                 // thinking signal dropped (dead: 0 on ~97% of turns); field kept
                 // for test fixtures / future reasoning signal.
