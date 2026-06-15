@@ -10,7 +10,7 @@ import { Link } from "@tanstack/react-router";
 import { api } from "../api.ts";
 import type { WrappedProfile, WrappedUsageDay } from "@ax/lib/shared/dashboard-types";
 import { fmtCount } from "@ax/lib/shared/formatters";
-import { CellGrid, GlyphReel, Led, Segbar, modelColor } from "./viz.tsx";
+import { CellGrid, GlyphReel, Led, Segbar } from "./viz.tsx";
 import "./instrument.css";
 
 const RAIL = [
@@ -44,16 +44,19 @@ const dayLevels = (days: ReadonlyArray<WrappedUsageDay>): number[] => {
     });
 };
 
-// TODO(phase-2b): real model split needs a studio cost endpoint. Placeholder so
-// the multi-colour data viz reads; favouriteModel anchors the top row.
-const MODEL_SPLIT = [
-    { name: "claude-fable-5", share: 0.4, cost: "$8.9K", tone: "green" },
-    { name: "claude-opus-4-8", share: 0.3, cost: "$6.7K", tone: "blue" },
-    { name: "gpt-5.5", share: 0.22, cost: "$4.9K", tone: "gold" },
-    { name: "claude-opus-4-7", share: 0.064, cost: "$1.4K", tone: "violet" },
-    { name: "claude-sonnet-4-6", share: 0.022, cost: "$496", tone: "rose" },
-] as const;
-const litFor = (share: number, total: number) => Math.max(1, Math.round(share * total));
+/** Map a model name to a stable channel colour (by family). */
+const toneFor = (m: string): string => {
+    const s = m.toLowerCase();
+    if (s.includes("fable")) return "var(--green)";
+    if (s.includes("opus")) return "var(--blue)";
+    if (s.includes("sonnet")) return "#e0556f";
+    if (s.includes("haiku")) return "var(--violet)";
+    if (s.includes("gpt") || s.includes("o3") || s.includes("o4")) return "var(--gold)";
+    return "var(--accent)";
+};
+const fmtUsd = (n: number): string =>
+    n >= 1000 ? `$${(n / 1000).toFixed(1).replace(/\.0$/, "")}K` : n >= 1 ? `$${Math.round(n)}` : `$${n.toFixed(2)}`;
+const shortModel = (m: string): string => m.replace(/-\d{6,}$/, "");
 
 function ClockHero({ profile }: { profile: WrappedProfile }) {
     const [now, setNow] = useState(() => new Date());
@@ -136,19 +139,33 @@ function Bento({ profile: p }: { profile: WrappedProfile }) {
                 <div className="rdx-label">most active</div>
             </section>
 
-            <section className="rdx-card span2 v-mc-split" style={{ animationDelay: "0.36s" }}>
-                <div className="v-mc-meta rdx-label"><span>model split · window</span><span>cost (est.)</span></div>
-                <div className="nf-list">
-                    {MODEL_SPLIT.map((m) => (
-                        <div className="v-mc-split-row" key={m.name}>
-                            <span style={{ color: "var(--pri)" }}><span className="nf-swatch" style={{ background: modelColor(m.tone) }} />{m.name}</span>
-                            <span>{Math.round(m.share * 100)}% · {m.cost}</span>
-                            <span className="segwrap"><Segbar total={24} on={litFor(m.share, 24)} color={modelColor(m.tone)} /></span>
-                        </div>
-                    ))}
-                </div>
-            </section>
+            <ModelSplitCard />
         </div>
+    );
+}
+
+function ModelSplitCard() {
+    const q = useQuery({ queryKey: ["cost", "models"], queryFn: () => api.costModels() });
+    const all = (q.data?.rows ?? []).filter((r) => r.cost_usd > 0);
+    const total = q.data?.total_cost_usd || all.reduce((s, r) => s + r.cost_usd, 0) || 1;
+    const rows = all.slice(0, 8);
+    return (
+        <section className="rdx-card span2 v-mc-split" style={{ animationDelay: "0.36s" }}>
+            <div className="v-mc-meta rdx-label"><span>model split · 365d</span><span>~{fmtUsd(total)} total</span></div>
+            <div className="nf-list">
+                {rows.length === 0 ? <span className="rdx-label" style={{ marginTop: 8 }}>{q.isLoading ? "loading…" : "no cost data"}</span> : rows.map((r) => {
+                    const share = r.cost_usd / total;
+                    const c = toneFor(r.model);
+                    return (
+                        <div className="v-mc-split-row" key={r.model}>
+                            <span style={{ color: "var(--pri)" }}><span className="nf-swatch" style={{ background: c }} />{shortModel(r.model)}</span>
+                            <span>{Math.round(share * 100)}% · {fmtUsd(r.cost_usd)}</span>
+                            <span className="segwrap"><Segbar total={24} on={Math.max(1, Math.round(share * 24))} color={c} /></span>
+                        </div>
+                    );
+                })}
+            </div>
+        </section>
     );
 }
 

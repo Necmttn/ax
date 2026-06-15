@@ -9,6 +9,7 @@
 import { Effect } from "effect";
 import { HttpApiBuilder } from "effect/unstable/httpapi";
 import { AxApi, NotFoundError } from "@ax/lib/shared/api-contract";
+import { fetchCostModels } from "../../queries/cost-analytics.ts";
 import { fetchEpisodeTimeline } from "../episode-timeline.ts";
 import { fetchProject } from "../project.ts";
 import { emptyRecallResponse, fetchRecall, type RecallParams } from "../recall.ts";
@@ -77,6 +78,8 @@ export const InsightsGroupLive = HttpApiBuilder.group(AxApi, "insights", (handle
             Effect.sync(() => ({
                 brief: renderWrappedGenerateBrief({ date: new Date().toISOString().slice(0, 10) }),
             })))
+        .handle("costModels", () =>
+            orInternal(fetchCostModels({ sinceDays: 365 }).pipe(Effect.map(asJsonValue))))
         .handle("workflow", () => orInternal(fetchWorkflow()))
         .handle("toolFailures", () => orInternal(fetchToolFailures()))
         .handle("toolFailureDetail", ({ params }) => orInternal(fetchToolFailureDetail(params.label))));

@@ -54,6 +54,7 @@ const CONTRACT_ROUTES: ReadonlySet<string> = new Set([
     "GET /api/wrapped",
     "GET /api/wrapped/public-preview",
     "GET /api/wrapped/generate-brief",
+    "GET /api/cost/models",
     "GET /api/workflow",
     "GET /api/tool-failures",
     // sessions
