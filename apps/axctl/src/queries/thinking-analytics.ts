@@ -17,6 +17,7 @@
 import { Effect } from "effect";
 import { SurrealClient } from "@ax/lib/db";
 import { normalizeModelName } from "../ingest/model-pricing.ts";
+import { fetchSparSessionIds } from "./spar-sessions.ts";
 
 // ---------------------------------------------------------------------------
 // Result shapes
@@ -220,6 +221,11 @@ export const fetchThinking = Effect.fn("queries.fetchThinking")(
     function* (opts: { readonly sinceDays: number }) {
         const db = yield* SurrealClient;
 
+        // Fetch spar variant session ids before the main query so we can
+        // exclude them from behavioral totals at the JS join.
+        const sparSessionIds = yield* fetchSparSessionIds();
+        const sparSet = new Set(sparSessionIds.map(cleanSessionId));
+
         const [thinkingResult, sessionsResult, effortResult, reasoningResult, agentModelsResult] = yield* db.query<[
             Array<Record<string, unknown>>,
             Array<Record<string, unknown>>,
@@ -244,18 +250,26 @@ export const fetchThinking = Effect.fn("queries.fetchThinking")(
             );
         }
 
-        const sessionRows: SessionThinkingRow[] = (thinkingResult ?? []).map((r) => ({
-            session_id: String(r.session_id ?? ""),
-            blocks: Number(r.blocks ?? 0),
-            tokens: Number(r.tokens ?? 0),
-            assistant_turns: Number(r.assistant_turns ?? 0),
-            thinking_turns: Number(r.thinking_turns ?? 0),
-        }));
+        // Drop spar sessions at the JS join: filter sessionRows before passing
+        // to rollupThinkingByModel so spar traffic doesn't inflate thinking totals.
+        const sessionRows: SessionThinkingRow[] = (thinkingResult ?? [])
+            .map((r) => ({
+                session_id: String(r.session_id ?? ""),
+                blocks: Number(r.blocks ?? 0),
+                tokens: Number(r.tokens ?? 0),
+                assistant_turns: Number(r.assistant_turns ?? 0),
+                thinking_turns: Number(r.thinking_turns ?? 0),
+            }))
+            .filter((r) => !sparSet.has(cleanSessionId(r.session_id)));
 
         const modelBySession = new Map<string, string | null>();
         for (const r of sessionsResult ?? []) {
+            const cleanId = cleanSessionId(String(r.session_id ?? ""));
+            // Also exclude spar sessions from the model map so they don't
+            // appear in the effort/session counts.
+            if (sparSet.has(cleanId)) continue;
             modelBySession.set(
-                cleanSessionId(String(r.session_id ?? "")),
+                cleanId,
                 r.model == null ? null : String(r.model),
             );
         }
