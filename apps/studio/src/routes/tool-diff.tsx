@@ -15,7 +15,7 @@ import { useHighlighterReady } from "./use-highlighter-ready.ts";
  */
 const OPTIONS: MultiFileDiffProps<undefined>["options"] = {
     diffStyle: "unified",
-    themeType: "light",
+    themeType: "dark",
     theme: { light: "github-light", dark: "pierre-dark" },
     disableFileHeader: true,
     overflow: "wrap",
@@ -27,7 +27,7 @@ const OPTIONS: MultiFileDiffProps<undefined>["options"] = {
  *  so the gutter only shows for whole-file reads; offset reads hide it (the
  *  card header already shows offset/limit). */
 const READ_OPTIONS: FileProps<undefined>["options"] = {
-    themeType: "light",
+    themeType: "dark",
     theme: { light: "github-light", dark: "pierre-dark" },
     disableFileHeader: true,
     overflow: "wrap",

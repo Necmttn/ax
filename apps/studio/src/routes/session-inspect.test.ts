@@ -25,7 +25,7 @@ describe("rawBlockTextStyle", () => {
         expect(hovered.background).toBe(tone.bg);
         expect(hovered.borderBottom).toBe(`1px solid ${tone.bar}`);
         expect(mismatch.background).toBe("transparent");
-        expect(mismatch.borderBottom).toBe("1px dotted #f97316");
+        expect(mismatch.borderBottom).toBe("1px dotted var(--gold)");
     });
 });
 

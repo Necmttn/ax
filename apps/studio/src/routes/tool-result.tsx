@@ -51,8 +51,8 @@ export function ToolResultView({ text, open: openProp }: { text: string; open?: 
 
     if (empty) {
         return (
-            <div style={{ padding: "4px 0 6px", font: `12px/1.5 ${mono}`, color: "#94a3b8" }}>
-                <span style={{ color: "#b8b2cf", marginRight: 8 }}>⌷</span>
+            <div style={{ padding: "4px 0 6px", font: `12px/1.5 ${mono}`, color: "var(--muted)" }}>
+                <span style={{ color: "var(--muted-2)", marginRight: 8 }}>⌷</span>
                 · (no output)
             </div>
         );
@@ -74,17 +74,17 @@ export function ToolResultView({ text, open: openProp }: { text: string; open?: 
                     padding: "4px 0",
                     cursor: "pointer",
                     font: `12.5px/1.5 ${mono}`,
-                    color: "#3a3550",
+                    color: "var(--ink)",
                 }}
             >
-                <span style={{ color: "#b8b2cf", width: 10 }}>{open ? "▾" : "▸"}</span>
-                <span style={{ color: "#8b8398" }}>⌷</span>
-                <span style={{ fontWeight: 600, color: "#5a6472" }}>{summary}</span>
+                <span style={{ color: "var(--muted-2)", width: 10 }}>{open ? "▾" : "▸"}</span>
+                <span style={{ color: "var(--muted)" }}>⌷</span>
+                <span style={{ fontWeight: 600, color: "var(--ink)" }}>{summary}</span>
                 {preview
                     ? (
                         <span
                             style={{
-                                color: "#9aa0ad",
+                                color: "var(--muted)",
                                 overflow: "hidden",
                                 textOverflow: "ellipsis",
                                 whiteSpace: "nowrap",
@@ -102,8 +102,8 @@ export function ToolResultView({ text, open: openProp }: { text: string; open?: 
                             margin: "2px 0 0 19px",
                             padding: "10px 13px",
                             borderRadius: 7,
-                            background: "#1e1e2e",
-                            color: "#cdd6f4",
+                            background: "var(--term-bg)",
+                            color: "var(--term-fg)",
                             font: `11.5px/1.55 ${mono}`,
                             whiteSpace: "pre-wrap",
                             wordBreak: "break-word",
