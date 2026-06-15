@@ -36,4 +36,12 @@ describe("encodeVerdict Route", () => {
     const out = encodeVerdict(Verdict.route({ model: "sonnet" }), "codex");
     expect(out).toEqual({ exitCode: 0 });
   });
+  test("claude: empty merge passes through as exactly {}", () => {
+    const out = encodeVerdict(Verdict.route({}), "claude");
+    expect(JSON.parse(out.stdout!).hookSpecificOutput.updatedInput).toEqual({});
+  });
+  test("claude: existing model passes through verbatim (dumb passthrough, no strip/override)", () => {
+    const out = encodeVerdict(Verdict.route({ model: "opus", description: "x" }), "claude");
+    expect(JSON.parse(out.stdout!).hookSpecificOutput.updatedInput).toEqual({ model: "opus", description: "x" });
+  });
 });

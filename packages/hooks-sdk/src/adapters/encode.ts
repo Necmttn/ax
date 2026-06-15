@@ -37,5 +37,9 @@ export const encodeVerdict = (v: Verdict, harness: Harness): ProcessOutcome => {
             }),
           }
         : { exitCode: 0 };
+    default: {
+      const _exhaustive: never = v;
+      return _exhaustive;
+    }
   }
 };
