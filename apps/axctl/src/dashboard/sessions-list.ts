@@ -163,12 +163,17 @@ export const fetchSessionsList = (opts: SessionsListOpts = {}): Effect.Effect<Se
                 rawIdByBare.set(bareId, r.id);
                 return {
                     id: bareId,
-                    project: r.project,
+                    // SurrealDB returns absent/NONE columns as `undefined`, but the
+                    // SessionListRow schema fields are NullOr(String) (string | null) -
+                    // `undefined` fails encode and 400s the whole list. Coalesce every
+                    // pass-through nullable to `null`. (This was the all-sources bug: a
+                    // row with no ended_at/model/etc. broke `?source=` absent.)
+                    project: r.project ?? null,
                     source: r.source ?? "unknown",
-                    cwd: r.cwd,
-                    model: r.model,
-                    started_at: r.started_at,
-                    ended_at: r.ended_at,
+                    cwd: r.cwd ?? null,
+                    model: r.model ?? null,
+                    started_at: r.started_at ?? null,
+                    ended_at: r.ended_at ?? null,
                     has_raw_file: !!r.has_raw_file,
                     // turn_count intentionally NOT counted from `turn` here:
                     // the cross-session turn table is huge and a batched
@@ -331,12 +336,13 @@ export const fetchSessionChildren = (
 
         const children: SessionListRow[] = rows.map((r): SessionListRow => ({
             id: toBareSessionId(r.id),
-            project: r.project,
+            // coalesce NONE/undefined → null to satisfy NullOr(String) (see fetchSessionsList)
+            project: r.project ?? null,
             source: r.source ?? "unknown",
-            cwd: r.cwd,
-            model: r.model,
-            started_at: r.started_at,
-            ended_at: r.ended_at,
+            cwd: r.cwd ?? null,
+            model: r.model ?? null,
+            started_at: r.started_at ?? null,
+            ended_at: r.ended_at ?? null,
             has_raw_file: !!r.has_raw_file,
             turn_count: 0,
             parent_session,
