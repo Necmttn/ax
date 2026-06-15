@@ -18,12 +18,11 @@ import { HttpServerRequest } from "effect/unstable/http";
 import { HttpApiBuilder } from "effect/unstable/httpapi";
 import { AxApi } from "@ax/lib/shared/api-contract";
 import { OtelWriter, OtelWriterLive } from "../../otel/writer.ts";
-import { decodeLogsPayload, decodeMetricsPayload, decodeTracePayload } from "../../otel/decode.ts";
-import { normalizeLogs, normalizeMetrics, normalizeTrace } from "../../otel/normalize.ts";
+import type { Signal } from "../../otel/signal.ts";
+import { SIGNALS } from "../../otel/signals.ts";
 
 // ------------------------------------------------------------------ types
 
-type Signal = "metrics" | "traces" | "logs";
 const ACK = { partialSuccess: {} } as const;
 
 // ------------------------------------------------------------------ core
@@ -53,21 +52,13 @@ export const handleOtlp = (
         if (json === null) return ACK;
 
         const writer = yield* OtelWriter;
+        const spec = SIGNALS[signal];
 
-        if (signal === "logs") {
-            const payload = yield* decodeLogsPayload(json).pipe(Effect.orElseSucceed(() => null));
-            if (payload) yield* writer.writeLogs(normalizeLogs(payload));
-        } else if (signal === "metrics") {
-            const payload = yield* decodeMetricsPayload(json).pipe(
-                Effect.orElseSucceed(() => null),
-            );
-            if (payload) yield* writer.writeMetrics(normalizeMetrics(payload));
-        } else {
-            const payload = yield* decodeTracePayload(json).pipe(
-                Effect.orElseSucceed(() => null),
-            );
-            if (payload) yield* writer.writeSpans(normalizeTrace(payload));
-        }
+        // Fail-open at the dispatch SEAM: the typed `OtelDecodeError` is swallowed
+        // to null HERE (never inside decode), so all three signals swallow in
+        // exactly one place. A decoded payload normalizes + writes per the spec.
+        const payload = yield* spec.decode(json).pipe(Effect.orElseSucceed(() => null));
+        if (payload !== null) yield* spec.write(writer)(spec.normalize(payload));
 
         return ACK;
     }).pipe(Effect.provide(OtelWriterLive));
