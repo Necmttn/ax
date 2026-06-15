@@ -17,8 +17,22 @@ export const applyClaudeOtelEnv = (
 };
 
 const CODEX_MARKER = "# ax:otel";
-const codexBlock = (endpoint: string): string =>
-    `${CODEX_MARKER}\n[otel]\nexporter = "otlp-http"\nendpoint = "${endpoint}"\nprotocol = "http/json"\n`;
+/**
+ * Codex's `[otel]` schema differs from Claude's env-based config in three ways
+ * (all learned the hard way against a live Codex):
+ *   1. `exporter` is a STRUCT-VARIANT enum - a bare string (`"otlp-http"`) is
+ *      parsed as a unit variant and fails config load, breaking ALL codex
+ *      commands. It must be `exporter = { otlp-http = { ... } }`.
+ *   2. The otlp-http exporter POSTs to the endpoint AS-IS (it does NOT append
+ *      `/v1/<signal>`), and Codex emits OTLP *logs* (events: conversation_starts,
+ *      user_prompt, token usage...), not spans. So the endpoint must carry the
+ *      full `/v1/logs` path - that is where ax's receiver takes Codex telemetry.
+ *   3. `protocol` is Codex's own value `"json"` (not OTEL env's `"http/json"`).
+ */
+const codexBlock = (endpoint: string): string => {
+    const logsEndpoint = `${endpoint.replace(/\/+$/, "")}/v1/logs`;
+    return `${CODEX_MARKER}\n[otel]\nexporter = { otlp-http = { endpoint = "${logsEndpoint}", protocol = "json" } }\n`;
+};
 
 // Matches the ax-owned marker + [otel] block until the next [section] header
 // (that is NOT [otel] itself) or end-of-string. The `?=\n\[(?!otel])` lookahead
