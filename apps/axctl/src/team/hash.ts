@@ -9,5 +9,9 @@ export const hashArtifact = (a: TeamArtifact, readFile: (abs: string) => string)
     const abs = a.kind === "agent" ? a.path : `${a.path}/${rel}`;
     return `${rel}\0${readFile(abs)}`;
   });
+  // Bun.hash is wyhash (non-cryptographic) - this detects CHANGE for the trust
+  // gate, it is NOT a security primitive. A collision only fails SAFE (a changed
+  // file read as unchanged keeps the older trusted content). The executable-hook
+  // trust layer (mesh spec) must use a cryptographic hash (sha256), not this.
   return Bun.hash(parts.join("\0\0")).toString(16);
 };

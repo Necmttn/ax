@@ -120,8 +120,13 @@ const cmdSync = (input: { readonly dryRun: boolean; readonly yes: boolean }) =>
             return;
         }
 
-        // 8. Activate all in to_activate (skip unsafe names), update trust
-        const home = process.env.HOME ?? "/tmp";
+        // 8. Activate all in to_activate (skip unsafe names), update trust.
+        // HOME must be set - never silently write the rig into a surprise location.
+        const home = process.env.HOME;
+        if (!home) {
+            console.error("[ax team sync] HOME is not set; cannot resolve the runtime (~/.claude). Aborting.");
+            return;
+        }
         const activated: string[] = [];
         const mutableTrust = { ...trust };
 
