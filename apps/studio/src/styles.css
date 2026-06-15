@@ -4033,7 +4033,10 @@ td.skill-cell .description {
    the rest of the kit: green accent, orange = alert only, no coloured chrome.
    ========================================================================= */
 .rdx .sessions-instrument { border: 0; background: transparent; padding: 0; }
-.rdx .sessions-instrument .sx-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+/* overflow:visible keeps the body as the vertical scroll container so the
+   thead can be viewport-sticky; the table just spills horizontally on a
+   too-narrow viewport (rare on the desktop target). */
+.rdx .sessions-instrument .sx-scroll { overflow: visible; }
 .rdx .sessions-instrument table.sx-sessions {
     width: 100%;
     min-width: 1280px;
@@ -4041,16 +4044,22 @@ td.skill-cell .description {
     font-family: var(--sans);
     font-size: 13px;
 }
+/* sticky column-header row: pins to the top of the page scroll while the
+   list scrolls under it. Opaque page bg masks the rows; hairline + faint
+   shadow separate it once content is beneath. */
 .rdx .sessions-instrument table.sx-sessions thead th {
+    position: sticky;
+    top: 0;
+    z-index: 3;
     font-family: var(--mono);
     font-size: 10px;
     font-weight: 400;
     letter-spacing: 0.12em;
     text-transform: uppercase;
     color: var(--dim);
-    padding: 0 8px 11px;
+    padding: 10px 8px 11px;
     border-bottom: 1px solid var(--border);
-    background: transparent;
+    background: var(--page);
     white-space: nowrap;
 }
 .rdx .sessions-instrument table.sx-sessions tbody td {
@@ -4084,6 +4093,16 @@ td.skill-cell .description {
     font-size: 12px;
     color: var(--pri);
 }
+/* id is itself an open affordance */
+.rdx .sessions-instrument .sx-id-link {
+    margin-left: 4px;
+    text-decoration: none;
+    border-bottom: 1px solid transparent;
+}
+.rdx .sessions-instrument .sx-id-link:hover { border-bottom-color: var(--accent); }
+.rdx .sessions-instrument .sx-id-link:hover code { color: var(--accent); }
+/* whole openable row is a click target */
+.rdx .sessions-instrument tbody tr.is-openable { cursor: pointer; }
 .rdx .sessions-instrument .sx-project { color: var(--pri); }
 
 /* source chip: swatch dot carries the colour, text stays neutral mono */

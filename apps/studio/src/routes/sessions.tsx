@@ -158,6 +158,12 @@ const Row = memo(function Row({
     const project = sessionProjectLabel(s.project, s.cwd);
     const hasExpandedToggle = onToggleExpanded != null && childCount != null && childCount > 0;
 
+    const navigate = useNavigate();
+    const openSession = useCallback(() => {
+        if (!s.has_raw_file) return;
+        void navigate({ to: "/sessions/$sessionId", params: { sessionId: sid } });
+    }, [navigate, sid, s.has_raw_file]);
+
     // Warm the inspect-data query on hover/focus - intent-based prefetch
     const queryClient = useQueryClient();
     const onIntent = () => {
@@ -168,14 +174,18 @@ const Row = memo(function Row({
             staleTime: 5 * 60_000,
         });
     };
+    // Whole row is a click target (any cell except the interactive controls -
+    // checkbox / expand toggle / explicit links - which stopPropagation).
+    const onRowClick = () => openSession();
 
     return (
         <tr
-            className={indent ? "is-child" : undefined}
+            className={`${indent ? "is-child" : ""}${s.has_raw_file ? " is-openable" : ""}`.trim() || undefined}
             onMouseEnter={onIntent}
             onFocus={onIntent}
+            onClick={onRowClick}
         >
-            <td style={{ textAlign: "center", width: 28 }}>
+            <td style={{ textAlign: "center", width: 28 }} onClick={(e) => e.stopPropagation()}>
                 <input
                     type="checkbox"
                     checked={isSelected ?? false}
@@ -187,7 +197,7 @@ const Row = memo(function Row({
                 {hasExpandedToggle ? (
                     <button
                         className="sx-expand"
-                        onClick={() => onToggleExpanded(sid)}
+                        onClick={(e) => { e.stopPropagation(); onToggleExpanded(sid); }}
                         title={`${expanded ? "Collapse" : "Expand"} ${childCount} subagent${childCount === 1 ? "" : "s"}`}
                     >
                         {expanded ? "▼" : "▶"} {childCount}
@@ -203,7 +213,20 @@ const Row = memo(function Row({
                         <span className="sr-only">live session</span>
                     </span>
                 ) : null}
-                <code title={s.id} style={{ marginLeft: 4 }}>{shortSessionId(s.id)}</code>
+                {s.has_raw_file ? (
+                    <Link
+                        to="/sessions/$sessionId"
+                        params={{ sessionId: sid }}
+                        preload="intent"
+                        className="sx-id-link"
+                        title={`Open ${s.id}`}
+                        onClick={(e) => e.stopPropagation()}
+                    >
+                        <code>{shortSessionId(s.id)}</code>
+                    </Link>
+                ) : (
+                    <code title={s.id} style={{ marginLeft: 4, color: "var(--dim)" }}>{shortSessionId(s.id)}</code>
+                )}
             </td>
             <td><SourceBadge source={s.source} /></td>
             <td className="sx-project">{project}</td>
@@ -238,7 +261,13 @@ const Row = memo(function Row({
             </td>
             <td style={{ whiteSpace: "nowrap" }}>
                 {s.has_raw_file ? (
-                    <Link to="/sessions/$sessionId" params={{ sessionId: sid }} preload="intent" className="sx-open">
+                    <Link
+                        to="/sessions/$sessionId"
+                        params={{ sessionId: sid }}
+                        preload="intent"
+                        className="sx-open"
+                        onClick={(e) => e.stopPropagation()}
+                    >
                         open →
                     </Link>
                 ) : (
