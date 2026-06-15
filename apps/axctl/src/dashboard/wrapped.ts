@@ -1,4 +1,5 @@
 import { Effect } from "effect";
+import { resolveArchetype } from "@ax/lib/shared/archetypes";
 import { SurrealClient } from "@ax/lib/db";
 import type { DbError } from "@ax/lib/errors";
 import type {
@@ -86,15 +87,22 @@ const archetype = (
     publicLine: string,
     internalExplanation: string,
     evidence: ReadonlyArray<WrappedEvidence>,
-): WrappedArchetype => ({
-    id,
-    label,
-    score,
-    confidence: confidence(score),
-    publicLine,
-    internalExplanation,
-    evidence,
-});
+): WrappedArchetype => {
+    // Name + public line come from the canonical dictionary so the classifier,
+    // the agent, the studio hero, and the SEO pages can never disagree. The
+    // inline label/publicLine remain as a fallback for ids not yet in the dict.
+    const def = resolveArchetype(id);
+    const matched = def.id === id;
+    return {
+        id,
+        label: matched ? def.name : label,
+        score,
+        confidence: confidence(score),
+        publicLine: matched ? def.tagline : publicLine,
+        internalExplanation,
+        evidence,
+    };
+};
 
 export function choosePrimaryArchetype(signals: ArchetypeSignals): {
     readonly primary: WrappedArchetype;

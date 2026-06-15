@@ -9,7 +9,9 @@ import { useQuery } from "@tanstack/react-query";
 import { api } from "../api.ts";
 import type { WrappedProfile, WrappedUsageDay } from "@ax/lib/shared/dashboard-types";
 import { fmtCount } from "@ax/lib/shared/formatters";
-import { CellGrid, GlyphReel, Led, Segbar } from "./viz.tsx";
+import { resolveArchetype } from "@ax/lib/shared/archetypes";
+import { CellGrid, Led, Segbar } from "./viz.tsx";
+import { ArchetypeGlyph } from "./archetype-glyph.tsx";
 import { InstrumentShell } from "./shell.tsx";
 import { RecapDeck } from "./deck.tsx";
 
@@ -23,7 +25,6 @@ const fmtBig = (n: number | null | undefined): string => {
     if (a >= 1e4) return (n / 1e3).toFixed(1).replace(/\.0$/, "") + "K";
     return n.toLocaleString("en-US");
 };
-const seedFrom = (s: string) => { let h = 2166136261; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); } return h >>> 0; };
 const hourLabel = (h: number | null) => (h == null ? "n/a" : `${h % 12 === 0 ? 12 : h % 12} ${h < 12 ? "AM" : "PM"}`);
 
 /** Daily activity → 0-4 contribution levels (rank by tokens, else sessions). */
@@ -90,14 +91,20 @@ function Bento({ profile: p }: { profile: WrappedProfile }) {
     const streakCap = Math.max(7, u.longestStreakDays || 7);
     return (
         <div className="v-mc-bento">
-            <section className="rdx-card v-mc-hero span2 row2" style={{ animationDelay: "0s" }}>
-                <div className="v-mc-meta rdx-label"><span className="nf-key">archetype · primary</span><span>{u.favoriteModel ?? ""}</span></div>
-                <div className="v-mc-hero-art"><GlyphReel seed={seedFrom(p.primaryArchetype.id || p.primaryArchetype.label)} /></div>
-                <div>
-                    <div className="v-mc-hero-name">{p.primaryArchetype.label}</div>
-                    <p style={{ margin: "6px 0 0", fontSize: 13.5, lineHeight: 1.5, color: "var(--sec)", maxWidth: "46ch" }}>{p.primaryArchetype.publicLine}</p>
-                </div>
-            </section>
+            {(() => {
+                const arc = resolveArchetype(p.primaryArchetype.id || p.primaryArchetype.label);
+                return (
+                    <section className="rdx-card v-mc-hero span2 row2" style={{ animationDelay: "0s" }}>
+                        <div className="v-mc-meta rdx-label"><span className="nf-key">archetype · primary</span><span>{p.primaryArchetype.confidence} confidence</span></div>
+                        <div className="v-mc-hero-art"><ArchetypeGlyph symbol={arc.symbol} /></div>
+                        <div>
+                            <div className="v-mc-hero-name">{arc.name}</div>
+                            <p style={{ margin: "6px 0 0", fontSize: 13.5, lineHeight: 1.5, color: "var(--sec)", maxWidth: "46ch" }}>{arc.tagline}</p>
+                            <p className="arc-humor">{arc.humor}</p>
+                        </div>
+                    </section>
+                );
+            })()}
 
             <section className="rdx-card" style={{ animationDelay: "0.06s" }}>
                 <div className="rdx-label">sessions</div>

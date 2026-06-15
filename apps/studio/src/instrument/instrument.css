@@ -557,3 +557,10 @@
     .wr-bars i, .wr-meter-strip i { animation: none !important; opacity: 1; transform: none; }
     .wr-line-pulse { animation: none; opacity: 0; }
 }
+
+/* ---- archetype sigil (unique per-archetype dot-matrix) ---- */
+.arc-glyph { display: grid; grid-auto-rows: var(--arc-cell, 12px); gap: 3px; justify-content: center; align-content: center; width: 100%; height: 100%; }
+.arc-glyph i { width: var(--arc-cell, 12px); height: var(--arc-cell, 12px); border-radius: 2px; background: var(--display); transform: scale(0); animation: arc-slam 0.4s var(--ease-back) forwards; }
+@keyframes arc-slam { 60% { transform: scale(1.3); } to { transform: scale(1); } }
+.arc-humor { font-family: var(--mono); font-size: 11px; color: var(--dim); margin-top: 8px; font-style: italic; }
+@media (prefers-reduced-motion: reduce) { .arc-glyph i { animation: none; transform: none; } }
