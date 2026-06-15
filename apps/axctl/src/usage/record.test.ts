@@ -4,10 +4,15 @@ import { redactInvocation } from "./record.ts";
 describe("redactInvocation", () => {
   const base = { now: new Date("2026-06-15T12:00:00Z"), exitCode: 0, durationMs: 5, isTty: false, repoTopdir: "/Users/me/Projects/ax", version: "0.29.0" };
 
-  it("keeps the subcommand path, drops positional args", () => {
+  it("records the top-level subcommand, drops all positionals", () => {
     const r = redactInvocation(["sessions", "show", "abc-123-uuid"], base);
-    expect(r.command).toBe("sessions show");
+    expect(r.command).toBe("sessions");
     expect(r.flags).toEqual([]);
+  });
+  it("a user value after a known group is NOT captured (top-level only)", () => {
+    const r = redactInvocation(["sessions", "my-secret-branch"], base);
+    expect(r.command).toBe("sessions");
+    expect(JSON.stringify(r)).not.toContain("my-secret-branch");
   });
   it("keeps flag NAMES, strips flag values", () => {
     const r = redactInvocation(["recall", "secret query text", "--days=30", "--project=/Users/me/x", "--json"], base);

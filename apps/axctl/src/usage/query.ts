@@ -37,8 +37,10 @@ export const rollup = (rows: ReadonlyArray<InvocationRow>, visibleCommands: Read
   const topCommands = [...byCommand.entries()]
     .map(([command, e]) => ({ command, count: e.count, last_used: e.last }))
     .sort((a, b) => b.count - a.count || (a.command < b.command ? -1 : 1));
-  const invoked = new Set(byCommand.keys());
-  const unusedSurface = visibleCommands.filter((c) => !invoked.has(c));
+  // unusedSurface compares against top-level command tokens (VISIBLE_COMMANDS is
+  // top-level), so normalize invoked commands to their first token.
+  const invokedTop = new Set([...byCommand.keys()].map((c) => c.split(" ")[0]));
+  const unusedSurface = visibleCommands.filter((c) => !invokedTop.has(c));
   const reliability = [...byCommand.entries()]
     .map(([command, e]) => ({ command, runs: e.count, failures: e.failures, failureRate: e.failures / e.count }))
     .filter((x) => x.failures > 0)

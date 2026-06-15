@@ -38,4 +38,8 @@ describe("rollup", () => {
     expect(r.activeDays).toBe(0);
     expect(r.unusedSurface.sort()).toEqual([...visible].sort());
   });
+  it("unusedSurface treats a used group command as used (top-level normalization)", () => {
+    const r = rollup([row({ command: "sessions show" }), row({ command: "sessions churn" })], ["sessions", "digest"]);
+    expect(r.unusedSurface).toEqual(["digest"]); // "sessions" is used, not unused
+  });
 });
