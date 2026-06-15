@@ -144,7 +144,7 @@ const CLAUDE_TOOL_TO_EVENT: Record<string, FileContextHookEvent> = {
 /** Generate up to ~5 path strings to try when looking up the file record. The
  *  agent reports an absolute path; the file table stores repo-relative paths,
  *  which may sit at cwd, the parent dir, or further up in monorepos. */
-function generateLookupCandidates(filePath: string, cwd: string | null): string[] {
+export function generateLookupCandidates(filePath: string, cwd: string | null): string[] {
     if (!cwd || !filePath.startsWith(cwd + "/")) return [];
     const candidates = new Set<string>([filePath.slice(cwd.length + 1)]);
     let parent = cwd;
@@ -159,12 +159,12 @@ function generateLookupCandidates(filePath: string, cwd: string | null): string[
 
 /** Claude Code's `session_id` is a bare UUID. Telemetry + dedup need a
  *  SurrealQL record literal, so prefix `session:` when no table is present. */
-function normalizeSessionId(raw: string | null): string | null {
+export function normalizeSessionId(raw: string | null): string | null {
     if (!raw) return null;
     return raw.includes(":") ? raw : `session:${raw}`;
 }
 
-function adaptClaudePayload(payload: Record<string, unknown>): FileContextHookFlagInput {
+export function adaptClaudePayload(payload: Record<string, unknown>): FileContextHookFlagInput {
     const toolName = typeof payload.tool_name === "string" ? payload.tool_name : "";
     const toolInput = payload.tool_input && typeof payload.tool_input === "object"
         ? payload.tool_input as Record<string, unknown>
@@ -212,7 +212,7 @@ function basename(path: string): string {
     return path.split("/").at(-1) ?? path;
 }
 
-function isSuppressedPath(path: string): boolean {
+export function isSuppressedPath(path: string): boolean {
     if (!path) return true;
     const normalized = path.startsWith("/") ? path : `/${path}`;
     if (SUPPRESSED_BASENAMES.has(basename(path))) return true;
@@ -221,7 +221,13 @@ function isSuppressedPath(path: string): boolean {
     return false;
 }
 
-function isHighSignalSession(session: PriorFileSession): boolean {
+/** Filter a list of file paths to only those not suppressed by isSuppressedPath.
+ *  Preserves the leading-slash normalization in isSuppressedPath. */
+export function filterSuppressed(files: readonly string[]): readonly string[] {
+    return files.filter((path) => !isSuppressedPath(path));
+}
+
+export function isHighSignalSession(session: PriorFileSession): boolean {
     if (session.weight >= 3) return true;
     if (session.corrections > 0) return true;
     if (session.produced_commits > 0) return true;
@@ -270,6 +276,18 @@ export function shouldInjectFileMemory(input: ShouldInjectInput): FileContextHoo
         return { inject: false, reason: "low_signal_only" };
     }
     return { inject: true, reason: "high_signal" };
+}
+
+/** Pure tri-state finalizer: reconciles a decision with whether rendering
+ *  actually produced output. The `reason` strings are keyed by recordHookFire
+ *  telemetry - parity with the composer's inline logic is MANDATORY. */
+export function finalizeInjection(
+    decision: FileContextHookDecision,
+    rendered: string,
+): { readonly inject: boolean; readonly reason: string } {
+    const inject = decision.inject && rendered.length > 0;
+    const reason = inject ? decision.reason : decision.inject ? "empty_render" : decision.reason;
+    return { inject, reason };
 }
 
 const clipText = (s: string, n: number): string => (s.length <= n ? s : `${s.slice(0, n - 1)}...`);
@@ -384,7 +402,7 @@ export const buildFileContextHookResponse = (
             co_touched: [] as readonly FileMemoryCoTouch[],
         };
 
-        const usableFiles = input.files.filter((path) => !isSuppressedPath(path));
+        const usableFiles = filterSuppressed(input.files);
         if (input.files.length === 0 || usableFiles.length === 0) {
             const reason = input.files.length === 0 ? "no_files" : "suppressed_path";
             return { inject: false, reason, context: "", evidence: emptyEvidence };
@@ -408,13 +426,13 @@ export const buildFileContextHookResponse = (
             return { inject: false, reason: "session_already_injected", context: "", evidence: emptyEvidence };
         }
 
-        const lookupPaths = (input.lookupPaths ?? []).filter((p) => !isSuppressedPath(p));
+        const lookupPaths = filterSuppressed(input.lookupPaths ?? []);
         const evidence = yield* buildFileContextHookEvidence({
             q: input.task,
             files: [...usableFiles, ...lookupPaths],
         });
         const decision = shouldInjectFileMemory({
-            files: input.files,
+            files: usableFiles,
             priorFileSessions: evidence.prior_file_sessions,
             corrections: evidence.corrections,
             commits: evidence.commits,
@@ -432,10 +450,10 @@ export const buildFileContextHookResponse = (
         // shouldInjectFileMemory may say inject:true while every section ends
         // up empty (e.g. prior session weight ≥ 3 but no commits/corrections
         // and renderer fallback also empty). Don't emit an empty block.
-        const inject = decision.inject && rendered.length > 0;
+        const { inject, reason } = finalizeInjection(decision, rendered);
         return {
             inject,
-            reason: inject ? decision.reason : decision.inject ? "empty_render" : decision.reason,
+            reason,
             context: rendered,
             evidence: {
                 prior_file_sessions: evidence.prior_file_sessions,
