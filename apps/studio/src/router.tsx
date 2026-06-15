@@ -23,6 +23,7 @@ import type { GraphExplorerMode } from "@ax/lib/shared/dashboard-types";
 import { MissionControl } from "./instrument/mission-control.tsx";
 import { ImproveRoute } from "./routes/improve.tsx";
 import { LabRoute } from "./routes/lab.tsx";
+import { SigilGalleryRoute } from "./routes/sigil-gallery.tsx";
 import { ReviewView } from "./routes/review-view.tsx";
 import { sampleNarration, sampleNarrationTurns } from "./routes/narration-sample.ts";
 import { ShareInspectView } from "./routes/share-inspect.tsx";
@@ -205,6 +206,12 @@ const labRoute = createRoute({
     component: LabRoute,
 });
 
+const sigilGalleryRoute = createRoute({
+    getParentRoute: () => rootRoute,
+    path: "/lab/sigils",
+    component: SigilGalleryRoute,
+});
+
 /** Prototype showcase for the Story review surface (sample narration + turns). */
 const narrationDemoRoute = createRoute({
     getParentRoute: () => rootRoute,
@@ -252,6 +259,7 @@ const routeTree = rootRoute.addChildren([
     canvasRoute,
     improveRoute,
     labRoute,
+    sigilGalleryRoute,
     narrationDemoRoute,
 ]);
 

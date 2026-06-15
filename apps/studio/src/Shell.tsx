@@ -39,7 +39,7 @@ export function Shell({ children }: { children: ReactNode }) {
     // Mission Control (the home + /mc) brings its own instrument chrome (icon
     // rail + clock hero), so it renders bare - no studio masthead/tabs.
     const path = state.location.pathname;
-    const isInstrument = path === "/" || path.startsWith("/mc") || path.startsWith("/wrapped");
+    const isInstrument = path === "/" || path.startsWith("/mc") || path.startsWith("/wrapped") || path.startsWith("/lab/sigils");
     if (isInstrument) return <>{children}</>;
     return <FullChrome>{children}</FullChrome>;
 }

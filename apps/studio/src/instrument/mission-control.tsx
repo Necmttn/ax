@@ -92,7 +92,12 @@ function Bento({ profile: p }: { profile: WrappedProfile }) {
     return (
         <div className="v-mc-bento">
             {(() => {
-                const arc = resolveArchetype(p.primaryArchetype.id || p.primaryArchetype.label);
+                // dev-only sigil preview: ?archetype=verifier overrides the
+                // classified archetype so all 8 icons can be screenshotted.
+                const devArc = import.meta.env?.DEV
+                    ? new URLSearchParams(window.location.search).get("archetype")
+                    : null;
+                const arc = resolveArchetype(devArc || p.primaryArchetype.id || p.primaryArchetype.label);
                 return (
                     <section className="rdx-card v-mc-hero span2 row2" style={{ animationDelay: "0s" }}>
                         <ArchetypeReel archetypeId={arc.id} symbol={arc.symbol} />

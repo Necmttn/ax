@@ -2,8 +2,36 @@
  *  cards. Each card keys a channel colour and renders an APPROVED viz from the
  *  registry - declared by the card's `viz` spec, or assigned positionally until
  *  the wrapped agent emits one. */
+import { useEffect, useRef, useState } from "react";
 import type { WrappedCardDto } from "@ax/lib/shared/dashboard-types";
 import { CardViz, VIZ_KINDS, type VizKind, type VizSpec } from "./card-viz.tsx";
+
+const CARD_MIN = 270, GAP = 12;
+
+/** Pick a column count that leaves NO hanging row: prefer the largest EVEN
+ *  divisor of `count` that fits, then any divisor, then any even count. */
+function bestCols(count: number, fit: number): number {
+    const f = Math.max(1, Math.min(fit, count));
+    for (let c = f; c >= 2; c--) if (count % c === 0 && c % 2 === 0) return c;
+    for (let c = f; c >= 2; c--) if (count % c === 0) return c;
+    for (let c = f; c >= 2; c--) if (c % 2 === 0) return c;
+    return Math.max(1, f);
+}
+
+/** Measure the deck width and resolve an even, orphan-free column count. */
+function useDeckCols(count: number) {
+    const ref = useRef<HTMLDivElement>(null);
+    const [cols, setCols] = useState(2);
+    useEffect(() => {
+        const el = ref.current;
+        if (!el) return;
+        const calc = () => setCols(bestCols(count, Math.floor((el.clientWidth + GAP) / (CARD_MIN + GAP))));
+        calc();
+        const ro = new ResizeObserver(calc); ro.observe(el);
+        return () => ro.disconnect();
+    }, [count]);
+    return [ref, cols] as const;
+}
 
 const ACCENTS = ["green", "blue", "gold", "violet", "rose"] as const;
 const N = 24;
@@ -47,11 +75,12 @@ function DeckCard({ card, index }: { card: WrappedCardDto; index: number }) {
 }
 
 export function RecapDeck({ cards }: { cards: ReadonlyArray<WrappedCardDto> }) {
+    const [ref, cols] = useDeckCols(cards.length);
     if (cards.length === 0) return null;
     return (
         <section className="wr-section">
             <div className="wr-kicker rdx-label">the recap · {cards.length} cards</div>
-            <div className="wr-deck">
+            <div className="wr-deck" ref={ref} style={{ gridTemplateColumns: `repeat(${cols}, 1fr)` }}>
                 {cards.map((c, i) => <DeckCard key={`${c.position}-${c.headline}`} card={c} index={i} />)}
             </div>
         </section>
