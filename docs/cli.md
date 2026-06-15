@@ -39,7 +39,7 @@ axctl dojo report [--since=<iso>] [--notes-file=<path>] [--json]      # write th
 axctl dojo draft [--title=<t>] [--kind=bug|improvement] [--body-file=<path>] [--session=<id>]  # stage an upstream finding to ~/.ax/dojo/outbox/<slug>.md (never publishes)
 axctl dojo outbox [--json]                                            # list staged upstream issue drafts
 axctl dojo spar-plan <sha> [--json]                              # capture a landed task's baseline + emit a one-delta experiment brief
-axctl dojo spar-score <id> [--variant-session=<id>] [--json]     # score the agent's variant vs the frozen baseline
+axctl dojo spar-score <id> [--variant-session=<id>] [--json]     # score the agent's variant vs the frozen baseline; stamps variant session labels=["spar"] (excluded from ax skills weighted + ax thinking, kept in cost)
 axctl dispatches [--candidates] [--economy] # subagent dispatch routing analytics + est savings + effectiveness lens
 axctl routing tune [--dry-run|--emit-brief] # mine YOUR dispatch history for new routing classes
 axctl routing compile                       # regenerate ~/.ax/hooks/routing-table.json (user classes preserved)
