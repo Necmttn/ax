@@ -44,6 +44,40 @@
 .rdx[data-theme="dark"] { color-scheme: dark; }
 .rdx[data-theme="light"] { color-scheme: light; }
 
+/* ---- session-token (--sx-*) dark bridge ----
+   The sessions-list + session-insight components (StoryStrip, SignalBadge,
+   Loc/Commits cells) are authored against the light-only --sx-* ramp
+   (session-tokens.css :root). Inside the dark instrument shell those raw
+   values read as loud near-white bars. Re-map the ramp onto the instrument
+   palette for dark so the story strip / badges become quiet dark-native
+   readouts. Light theme keeps the :root values untouched. Same rules: green =
+   landed/pass, red = friction/revert, slate ramp = phases, NOT orange. */
+.rdx[data-theme="dark"] {
+    --sx-ink-900: var(--pri);
+    --sx-ink-600: var(--sec);
+    --sx-ink-500: var(--sec);
+    --sx-ink-300: var(--dim);
+    --sx-line-200: var(--border);
+    --sx-line-100: var(--border);
+    --sx-tint-50: var(--surface2);
+    --sx-red-700: var(--red);
+    --sx-red-300: color-mix(in srgb, var(--red) 55%, var(--surface));
+    --sx-red-100: color-mix(in srgb, var(--red) 20%, var(--surface));
+    --sx-green-700: var(--green);
+    --sx-green-300: color-mix(in srgb, var(--green) 55%, var(--surface));
+    --sx-green-100: color-mix(in srgb, var(--green) 16%, var(--surface));
+    --sx-amber-700: var(--gold);
+    --sx-amber-500: var(--gold);
+    --sx-amber-100: color-mix(in srgb, var(--gold) 16%, var(--surface));
+    --sx-phase-plan: #46566a;
+    --sx-phase-exec: #6d8398;
+    --sx-phase-review: #9fb4c8;
+    --sx-phase-idle: color-mix(in srgb, var(--border) 70%, var(--surface));
+    --sx-violet-500: var(--violet);
+    --sx-violet-700: color-mix(in srgb, var(--violet) 70%, var(--surface));
+    --sx-chart-line: var(--sec);
+}
+
 /* ---- studio-token bridge ----
    The legacy studio routes (sessions/workflow/improve/skills) are styled with a
    light-only token set (--page/--panel/--ink…). Re-map those names to the

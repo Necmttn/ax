@@ -10,9 +10,11 @@ import { getSharedHighlighter, type DiffsHighlighter, type ThemedToken } from "@
 
 export type { DiffsHighlighter, ThemedToken };
 
-/** light = transcript surfaces (white/panel bg); dark = terminal output
- *  blocks. catppuccin-mocha's editor background is #1e1e2e - exactly the
- *  studio's --term-bg - so dark tokens sit on the block's own color. */
+/** dark = every transcript surface now that the studio lives in the dark .rdx
+ *  instrument shell. catppuccin-mocha's editor background is #1e1e2e - exactly
+ *  the studio's --term-bg - so dark tokens sit on the block's own color. light
+ *  (github-light) is retained for any future light-themed surface but is no
+ *  longer the default. */
 export type HighlightTheme = "light" | "dark";
 const THEME_NAME: Record<HighlightTheme, string> = {
     light: "github-light",
@@ -23,7 +25,7 @@ const THEME_NAME: Record<HighlightTheme, string> = {
 export async function tokenize(
     code: string,
     lang: string,
-    theme: HighlightTheme = "light",
+    theme: HighlightTheme = "dark",
 ): Promise<ThemedToken[][] | null> {
     try {
         const themeName = THEME_NAME[theme];
@@ -40,10 +42,10 @@ export async function tokenize(
 const PLAIN_LANGS = new Set(["text", "plaintext", "txt", "ansi"]);
 
 /** Theme id for consumers that pass a theme name alongside the shared
- *  highlighter (shiki-magic-move). Matches the light transcript surfaces. */
-export const THEME = THEME_NAME.light;
+ *  highlighter (shiki-magic-move). Matches the dark transcript surfaces. */
+export const THEME = THEME_NAME.dark;
 
-/** The shared highlighter with `lang` + the light theme loaded, for consumers
+/** The shared highlighter with `lang` + the dark theme loaded, for consumers
  *  that drive shiki directly (shiki-magic-move). null when the grammar is
  *  unavailable. */
 export async function highlighterFor(lang: string): Promise<DiffsHighlighter | null> {

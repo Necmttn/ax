@@ -57,25 +57,34 @@ export function Span({ span }: { span: InspectSpanDto }) {
 
 type ContentTone = { bg: string; fg: string; bar: string; label: string };
 
+/** Neutral (non-hued) tone for system/permissions/reference families - raised
+ *  track surface, ink text, muted bar. Same dark-bridged shape as `tone()`. */
+const neutralTone = (label: string): ContentTone => ({
+    bg: "var(--track)",
+    fg: "var(--ink)",
+    bar: "var(--muted)",
+    label,
+});
+
 const ALIAS_STYLE: Record<string, ContentTone> = {
-    objective:             { bg: "#dcfce7", fg: "#166534", bar: "#22c55e", label: "objective" },
-    budget:                { bg: "#ffedd5", fg: "#9a3412", bar: "#f97316", label: "budget" },
-    continuation_behavior: { bg: "#fef3c7", fg: "#854d0e", bar: "#eab308", label: "continuation" },
-    completion_audit:      { bg: "#fee2e2", fg: "#991b1b", bar: "#ef4444", label: "completion audit" },
-    progress_visibility:   { bg: "#dbeafe", fg: "#1e3a8a", bar: "var(--blue)", label: "progress" },
-    work_from_evidence:    { bg: "#ccfbf1", fg: "#115e59", bar: "#14b8a6", label: "evidence" },
-    environment_context:   { bg: "#e0f2fe", fg: "#075985", bar: "#0284c7", label: "environment" },
-    permissions:           { bg: "#e5e7eb", fg: "#1f2937", bar: "var(--muted)", label: "permissions" },
-    agent_guidance:        { bg: "#f5f3ff", fg: "#5b21b6", bar: "#8b5cf6", label: "agent guidance" },
-    skills_manifest:       { bg: "#dbeafe", fg: "#1e3a8a", bar: "var(--blue)", label: "skills" },
-    apps_manifest:         { bg: "#ecfccb", fg: "#3f6212", bar: "#84cc16", label: "apps" },
-    plugins_manifest:      { bg: "#fce7f3", fg: "#9d174d", bar: "#ec4899", label: "plugins" },
-    tool_call:             { bg: "#ede9fe", fg: "#4c1d95", bar: "#8b5cf6", label: "tool call" },
-    tool_output:           { bg: "#e9d5ff", fg: "#5b21b6", bar: "#a855f7", label: "tool output" },
-    plan:                  { bg: "#cffafe", fg: "#155e75", bar: "#06b6d4", label: "plan" },
-    todo:                  { bg: "#fef9c3", fg: "#713f12", bar: "#ca8a04", label: "todo" },
-    verification:          { bg: "#dcfce7", fg: "#14532d", bar: "#16a34a", label: "verification" },
-    reference:             { bg: "var(--track)", fg: "var(--ink)", bar: "var(--muted)", label: "reference" },
+    objective:             tone("var(--green)", 12, "objective"),
+    budget:                tone("var(--gold)", 12, "budget"),
+    continuation_behavior: tone("var(--gold)", 18, "continuation"),
+    completion_audit:      tone("var(--red)", 14, "completion audit"),
+    progress_visibility:   tone("var(--blue)", 12, "progress"),
+    work_from_evidence:    tone("var(--green)", 8, "evidence"),
+    environment_context:   tone("var(--blue)", 8, "environment"),
+    permissions:           neutralTone("permissions"),
+    agent_guidance:        tone("var(--violet)", 12, "agent guidance"),
+    skills_manifest:       tone("var(--blue)", 14, "skills"),
+    apps_manifest:         tone("var(--green)", 14, "apps"),
+    plugins_manifest:      tone("var(--rose)", 14, "plugins"),
+    tool_call:             tone("var(--violet)", 14, "tool call"),
+    tool_output:           tone("var(--violet)", 8, "tool output"),
+    plan:                  tone("var(--blue)", 10, "plan"),
+    todo:                  tone("var(--gold)", 14, "todo"),
+    verification:          tone("var(--green)", 16, "verification"),
+    reference:             neutralTone("reference"),
 };
 
 const numberOrNull = (value: number | null | undefined): number | null =>
@@ -201,16 +210,16 @@ function turnTokenUsageTitle(turn: InspectTurnDto): string {
 }
 
 function blockFamily(kind: string): ContentTone {
-    if (kind.includes("system") || kind.includes("instruction")) return { bg: "#e5e7eb", fg: "#1f2937", bar: "var(--muted)", label: "system" };
-    if (kind.includes("environment") || kind.includes("context")) return { bg: "#dbeafe", fg: "#1e3a8a", bar: "var(--blue)", label: "context" };
-    if (kind.includes("objective") || kind.includes("goal")) return { bg: "#dcfce7", fg: "#166534", bar: "#22c55e", label: "objective" };
-    if (kind.includes("budget") || kind.includes("metric")) return { bg: "#ffedd5", fg: "#9a3412", bar: "#f97316", label: "budget" };
-    if (kind.includes("assistant")) return { bg: "#cffafe", fg: "#155e75", bar: "#06b6d4", label: "assistant" };
-    if (kind.includes("tool")) return { bg: "#ede9fe", fg: "#4c1d95", bar: "#8b5cf6", label: "tool" };
-    if (kind.includes("hook")) return { bg: "color-mix(in srgb, var(--green) 14%, var(--panel))", fg: "color-mix(in srgb, var(--green) 45%, var(--ink))", bar: "var(--green)", label: "hook" };
-    if (kind.includes("code")) return { bg: "var(--track)", fg: "var(--ink)", bar: "var(--muted)", label: "code" };
-    if (kind.includes("heading")) return { bg: "#fee2e2", fg: "#991b1b", bar: "#ef4444", label: "heading" };
-    if (kind.includes("paragraph")) return { bg: "#fef9c3", fg: "#78350f", bar: "#eab308", label: "paragraph" };
+    if (kind.includes("system") || kind.includes("instruction")) return neutralTone("system");
+    if (kind.includes("environment") || kind.includes("context")) return tone("var(--blue)", 12, "context");
+    if (kind.includes("objective") || kind.includes("goal")) return tone("var(--green)", 12, "objective");
+    if (kind.includes("budget") || kind.includes("metric")) return tone("var(--gold)", 12, "budget");
+    if (kind.includes("assistant")) return tone("var(--blue)", 10, "assistant");
+    if (kind.includes("tool")) return tone("var(--violet)", 14, "tool");
+    if (kind.includes("hook")) return tone("var(--green)", 14, "hook");
+    if (kind.includes("code")) return neutralTone("code");
+    if (kind.includes("heading")) return tone("var(--red)", 14, "heading");
+    if (kind.includes("paragraph")) return tone("var(--gold)", 12, "paragraph");
     return { bg: "var(--page)", fg: "var(--ink)", bar: "var(--muted-2)", label: blockLabel(kind) };
 }
 
@@ -437,7 +446,7 @@ export function rawBlockTextStyle({
         outline: "none",
         outlineOffset: 1,
         borderBottom: mismatch
-            ? "1px dotted #f97316"
+            ? "1px dotted var(--gold)"
             : emphasized ? `1px solid ${tone.bar}` : "1px solid transparent",
         boxShadow: active ? `inset 0 -2px 0 ${tone.bar}` : "none",
         cursor: "pointer",
@@ -593,9 +602,9 @@ export function CostRail({
         : "-";
     const rows = [
         ["fresh", progress.freshInputCostUsd, "var(--blue)", "Fresh input billed at normal input price."],
-        ["cache write", progress.cacheWriteCostUsd, "#f59e0b", "Cache creation cost reported by provider usage."],
-        ["cache read", progress.cacheReadCostUsd, "#10b981", "Cached input read cost reported by provider usage."],
-        ["output", progress.outputCostUsd, "#8b5cf6", "Output token cost reported by provider usage."],
+        ["cache write", progress.cacheWriteCostUsd, "var(--gold)", "Cache creation cost reported by provider usage."],
+        ["cache read", progress.cacheReadCostUsd, "var(--green)", "Cached input read cost reported by provider usage."],
+        ["output", progress.outputCostUsd, "var(--violet)", "Output token cost reported by provider usage."],
     ] as const;
 
     if (!usage) return null;
@@ -647,7 +656,7 @@ export function CostRail({
                     <div
                         key={label}
                         title={title}
-                        style={{ display: "flex", justifyContent: "space-between", gap: 8, border: "1px solid var(--line)", background: "#fff", borderLeft: `3px solid ${color}`, padding: "5px 6px", font: "10px/1.2 ui-monospace, monospace" }}
+                        style={{ display: "flex", justifyContent: "space-between", gap: 8, border: "1px solid var(--line)", background: "var(--panel)", borderLeft: `3px solid ${color}`, padding: "5px 6px", font: "10px/1.2 ui-monospace, monospace" }}
                     >
                         <span style={{ color: "var(--muted)" }}>{label}</span>
                         <strong>{fmtUsd(value)}</strong>
@@ -741,7 +750,7 @@ export function DockedRail({
     );
 }
 
-const SYMBOL_REF_STYLE = { fontWeight: 700, color: "#15803d" } as const;
+const SYMBOL_REF_STYLE = { fontWeight: 700, color: "var(--green)" } as const;
 
 /**
  * Render a block's raw slice with symbol-reference atom values bolded inline,
@@ -821,7 +830,11 @@ function AnnotatedRawText({
             whiteSpace: "pre-wrap",
             wordBreak: "break-word",
             font: "12.5px/1.55 ui-monospace, SFMono-Regular, Menlo, monospace",
-            background: "#fff",
+            // Dark transcript surface (catppuccin-mocha editor bg) so the
+            // dark-themed fenced-code tokens sit on their own ground.
+            background: "var(--term-bg)",
+            color: "var(--ink)",
+            borderRadius: 6,
         }}>
             {rawParts.length > 0 ? rawParts : rawText}
         </pre>
@@ -874,7 +887,7 @@ export function TurnContentInspector({
                 <div style={{ padding: 10, color: "var(--muted-2)", font: "11px/1.5 ui-monospace, monospace" }}>No parsed block selected.</div>
             ) : (
                 <div style={{ padding: 10, display: "grid", gap: 8 }}>
-                    <div style={{ background: "#fff", border: "1px solid var(--line)", boxShadow: `inset 4px 0 0 ${family.bar}`, padding: "8px 9px" }}>
+                    <div style={{ background: "var(--panel)", border: "1px solid var(--line)", boxShadow: `inset 4px 0 0 ${family.bar}`, padding: "8px 9px" }}>
                         <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "baseline" }}>
                             <strong style={{ color: family.fg, font: "700 11px/1 ui-monospace, monospace", textTransform: "uppercase" }}>
                                 {displayBlockLabel(block)}
@@ -895,7 +908,7 @@ export function TurnContentInspector({
                     </div>
 
                     {turnUsage ? (
-                        <div style={{ background: "#fff", border: "1px solid var(--line)", padding: "8px 9px" }}>
+                        <div style={{ background: "var(--panel)", border: "1px solid var(--line)", padding: "8px 9px" }}>
                             <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "baseline" }}>
                                 <strong style={{ color: "var(--ink)", font: "700 10px/1 ui-monospace, monospace", textTransform: "uppercase" }}>
                                     estimated cost lens
@@ -976,7 +989,7 @@ function AtomCard({ atom, active, compact = false }: { atom: InspectContentAtomD
         <div style={{
             border: `1px solid ${active ? tone.bar : "var(--line)"}`,
             boxShadow: `inset 3px 0 0 ${tone.bar}`,
-            background: active ? tone.bg : "#fff",
+            background: active ? tone.bg : "var(--panel)",
             padding: compact ? "6px 7px" : "8px 9px",
         }}>
             <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "baseline" }}>
@@ -1109,7 +1122,7 @@ function SpawnMarker({ child }: { child: SpawnChildDto }) {
                 {child.tool ? <span style={{ opacity: 0.6 }}>via {child.tool}</span> : null}
                 {m ? <span style={{ background: "color-mix(in srgb, var(--rose) 25%, var(--panel))", color: "color-mix(in srgb, var(--rose) 45%, var(--ink))", padding: "0 6px", borderRadius: 2, fontSize: 10, fontWeight: 600 }}>{m.provider}</span> : null}
                 {chips.map((c) => (
-                    <span key={c.label} style={{ background: "#fee2e2", padding: "0 6px", borderRadius: 2, fontSize: 10 }}>
+                    <span key={c.label} style={{ background: "color-mix(in srgb, var(--red) 14%, var(--panel))", color: "color-mix(in srgb, var(--red) 55%, var(--ink))", padding: "0 6px", borderRadius: 2, fontSize: 10 }}>
                         {c.label}: <strong>{c.value}</strong>
                     </span>
                 ))}
@@ -1162,7 +1175,7 @@ export function HookFireMarker({ hook }: { hook: HookFireDto }) {
             style={{
                 margin: "4px 24px", padding: "6px 10px",
                 scrollMarginTop: JUMP_TARGET_SCROLL_MARGIN,
-                borderLeft: "3px solid #10b981",
+                borderLeft: "3px solid var(--green)",
                 background: hook.inject ? "color-mix(in srgb, var(--green) 8%, var(--panel))" : "var(--page)",
                 borderRadius: 3, fontSize: 11,
                 fontFamily: "ui-monospace, monospace", color: "color-mix(in srgb, var(--green) 45%, var(--ink))",
@@ -1692,8 +1705,8 @@ export function SessionInspectView({ sessionId }: { readonly sessionId: string }
                             <div
                                 ref={sentinelRef}
                                 style={{
-                                    padding: "12px 24px", color: "#64748b", fontSize: 12, fontFamily: "ui-monospace, monospace",
-                                    textAlign: "center", borderTop: "1px dashed #e2e8f0",
+                                    padding: "12px 24px", color: "var(--muted)", fontSize: 12, fontFamily: "ui-monospace, monospace",
+                                    textAlign: "center", borderTop: "1px dashed var(--line)",
                                 }}
                             >
                                 {appendLoading
@@ -1705,16 +1718,16 @@ export function SessionInspectView({ sessionId }: { readonly sessionId: string }
                                         <button
                                             onClick={() => void loadMore(200)}
                                             style={{
-                                                padding: "2px 10px", marginLeft: 6, fontSize: 11, border: "1px solid #e2e8f0",
-                                                background: "#fff", color: "#475569", borderRadius: 4, cursor: "pointer",
+                                                padding: "2px 10px", marginLeft: 6, fontSize: 11, border: "1px solid var(--line)",
+                                                background: "var(--panel)", color: "var(--muted)", borderRadius: 4, cursor: "pointer",
                                             }}
                                         >load 200 more</button>
                                         {" "}
                                         <button
                                             onClick={() => void loadMore(data.total_turns - data.turns.length)}
                                             style={{
-                                                padding: "2px 10px", fontSize: 11, border: "1px solid #e2e8f0",
-                                                background: "#fff", color: "#475569", borderRadius: 4, cursor: "pointer",
+                                                padding: "2px 10px", fontSize: 11, border: "1px solid var(--line)",
+                                                background: "var(--panel)", color: "var(--muted)", borderRadius: 4, cursor: "pointer",
                                             }}
                                         >load all</button>
                                     </>

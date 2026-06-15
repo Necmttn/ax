@@ -41,7 +41,7 @@ function TurnImage({ path, expanded: expandedProp }: { path: string; expanded?: 
                 data-testid="turn-image-fallback"
                 style={{
                     font: `11px/1.5 ${mono}`,
-                    color: "#8b8398",
+                    color: "var(--muted)",
                     whiteSpace: "pre-wrap",
                     wordBreak: "break-word",
                 }}
@@ -68,7 +68,7 @@ function TurnImage({ path, expanded: expandedProp }: { path: string; expanded?: 
                 width: expanded ? "100%" : "auto",
                 objectFit: "contain",
                 borderRadius: 6,
-                border: "1px solid #d8d6cf",
+                border: "1px solid var(--line)",
                 cursor: "pointer",
             }}
         />

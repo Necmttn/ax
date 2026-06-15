@@ -1,5 +1,4 @@
 import { Fragment, memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { CSSProperties, MouseEvent } from "react";
 import { useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { api } from "../api.ts";
@@ -30,19 +29,23 @@ const fmtDuration = (start: string | null, end: string | null): string => {
 export const SOURCE_FILTERS = ["all", "claude", "codex", "pi", "opencode", "cursor"] as const;
 type SourceFilter = typeof SOURCE_FILTERS[number];
 
-export const SOURCE_BADGE_COLORS: Record<string, { bg: string; fg: string }> = {
-    claude: { bg: "#fef3c7", fg: "#92400e" },
-    codex: { bg: "#dbeafe", fg: "#1e3a8a" },
-    pi: { bg: "#dcfce7", fg: "#166534" },
-    opencode: { bg: "#f3e8ff", fg: "#6b21a8" },
-    cursor: { bg: "#cffafe", fg: "#155e75" },
-    "claude-subagent": { bg: "#fed7aa", fg: "#9a3412" },
+/** One stable instrument hue per source - carried only by the swatch dot in
+ *  the chip; the label text stays neutral mono. claude = green (house accent),
+ *  the rest spread across the luminance-matched accent set. NOT orange. */
+export const SOURCE_HUES: Record<string, string> = {
+    claude: "var(--green)",
+    codex: "var(--blue)",
+    pi: "var(--gold)",
+    opencode: "var(--violet)",
+    cursor: "color-mix(in srgb, var(--blue) 55%, var(--green))",
+    "claude-subagent": "var(--dim)",
 };
 
 function SourceBadge({ source }: { source: string }) {
-    const c = SOURCE_BADGE_COLORS[source] ?? { bg: "#e5e7eb", fg: "var(--muted)" };
+    const hue = SOURCE_HUES[source] ?? "var(--dim)";
     return (
-        <span style={{ background: c.bg, color: c.fg, padding: "1px 8px", borderRadius: 3, fontSize: 11, fontWeight: 600 }}>
+        <span className="sx-src">
+            <i className="sx-src-dot" style={{ background: hue }} aria-hidden="true" />
             {source}
         </span>
     );
@@ -56,7 +59,7 @@ function LocCell({ added, removed, maxLoc }: {
     readonly maxLoc: number;
 }) {
     if (added === null && removed === null) {
-        return <span style={{ color: "var(--sx-ink-300)", fontSize: 10 }}>-</span>;
+        return <span style={{ color: "var(--dim)", fontSize: 10 }}>-</span>;
     }
     const a = Math.max(0, added ?? 0);
     const r = Math.max(0, removed ?? 0);
@@ -72,16 +75,16 @@ function LocCell({ added, removed, maxLoc }: {
         <span style={{ display: "inline-flex", alignItems: "center", gap: 5, whiteSpace: "nowrap" }}>
             <span style={{ display: "inline-flex", alignItems: "center", width: FIXED_W }}>
                 {greenW > 0
-                    ? <span style={{ display: "inline-block", width: greenW, height: 5, background: "var(--sx-green-700)", borderRadius: "1px 0 0 1px", opacity: 0.8 }} />
+                    ? <span style={{ display: "inline-block", width: greenW, height: 5, background: "var(--green)", borderRadius: "1px 0 0 1px", opacity: 0.85 }} />
                     : null}
                 {redW > 0
-                    ? <span style={{ display: "inline-block", width: redW, height: 5, background: "var(--sx-red-700)", borderRadius: greenW > 0 ? "0 1px 1px 0" : "1px", opacity: 0.8 }} />
+                    ? <span style={{ display: "inline-block", width: redW, height: 5, background: "var(--red)", borderRadius: greenW > 0 ? "0 1px 1px 0" : "1px", opacity: 0.85 }} />
                     : null}
             </span>
-            <span style={{ fontSize: 10, fontVariantNumeric: "tabular-nums" }}>
-                <span style={{ color: "var(--sx-green-700)" }}>+{fmt(a)}</span>
+            <span style={{ fontSize: 10, fontFamily: "var(--mono)", fontVariantNumeric: "tabular-nums" }}>
+                <span style={{ color: "var(--green)" }}>+{fmt(a)}</span>
                 {" "}
-                <span style={{ color: "var(--sx-red-700)" }}>−{fmt(r)}</span>
+                <span style={{ color: "var(--red)" }}>−{fmt(r)}</span>
             </span>
         </span>
     );
@@ -93,7 +96,7 @@ function CommitsCell({ produced, reverted }: {
     readonly reverted: number | null;
 }) {
     if (produced === null && reverted === null) {
-        return <span style={{ color: "var(--sx-ink-300)", fontSize: 10 }}>-</span>;
+        return <span style={{ color: "var(--dim)", fontSize: 10 }}>-</span>;
     }
     const p = produced ?? 0;
     const r = reverted ?? 0;
@@ -106,17 +109,17 @@ function CommitsCell({ produced, reverted }: {
             {Array.from({ length: shown }, (_, i) => (
                 <span
                     key={i}
-                    style={{ display: "inline-block", width: 6, height: 6, borderRadius: "50%", background: "var(--sx-green-700)", opacity: 0.85 }}
+                    style={{ display: "inline-block", width: 6, height: 6, borderRadius: "50%", background: "var(--green)", opacity: 0.9 }}
                 />
             ))}
             {overflow > 0
-                ? <span style={{ fontSize: 10, color: "var(--sx-green-700)" }}>+{overflow}</span>
+                ? <span style={{ fontSize: 10, fontFamily: "var(--mono)", color: "var(--green)" }}>+{overflow}</span>
                 : null}
             {r > 0
-                ? <span style={{ fontSize: 10, color: "var(--sx-red-700)", marginLeft: overflow > 0 ? 0 : 2 }}>✕{r}</span>
+                ? <span style={{ fontSize: 10, fontFamily: "var(--mono)", color: "var(--red)", marginLeft: overflow > 0 ? 0 : 2 }}>✕{r}</span>
                 : null}
             {p === 0 && r === 0
-                ? <span style={{ color: "var(--sx-ink-300)", fontSize: 10 }}>-</span>
+                ? <span style={{ color: "var(--dim)", fontSize: 10 }}>-</span>
                 : null}
         </span>
     );
@@ -155,6 +158,12 @@ const Row = memo(function Row({
     const project = sessionProjectLabel(s.project, s.cwd);
     const hasExpandedToggle = onToggleExpanded != null && childCount != null && childCount > 0;
 
+    const navigate = useNavigate();
+    const openSession = useCallback(() => {
+        if (!s.has_raw_file) return;
+        void navigate({ to: "/sessions/$sessionId", params: { sessionId: sid } });
+    }, [navigate, sid, s.has_raw_file]);
+
     // Warm the inspect-data query on hover/focus - intent-based prefetch
     const queryClient = useQueryClient();
     const onIntent = () => {
@@ -165,18 +174,18 @@ const Row = memo(function Row({
             staleTime: 5 * 60_000,
         });
     };
-
-    const rowStyle: CSSProperties | undefined = indent
-        ? { background: "var(--track)" }
-        : undefined;
+    // Whole row is a click target (any cell except the interactive controls -
+    // checkbox / expand toggle / explicit links - which stopPropagation).
+    const onRowClick = () => openSession();
 
     return (
         <tr
-            style={rowStyle}
+            className={`${indent ? "is-child" : ""}${s.has_raw_file ? " is-openable" : ""}`.trim() || undefined}
             onMouseEnter={onIntent}
             onFocus={onIntent}
+            onClick={onRowClick}
         >
-            <td style={{ textAlign: "center", width: 28 }}>
+            <td style={{ textAlign: "center", width: 28 }} onClick={(e) => e.stopPropagation()}>
                 <input
                     type="checkbox"
                     checked={isSelected ?? false}
@@ -184,48 +193,46 @@ const Row = memo(function Row({
                     aria-label={`Select ${shortSessionId(s.id)} to compare`}
                 />
             </td>
-            <td style={{ fontFamily: "ui-monospace, monospace", fontSize: 12, paddingLeft: indent ? 32 : 8, whiteSpace: "nowrap" }}>
+            <td className="sx-id" style={{ paddingLeft: indent ? 32 : 8, whiteSpace: "nowrap" }}>
                 {hasExpandedToggle ? (
                     <button
-                        onClick={() => onToggleExpanded(sid)}
-                        style={{
-                            border: "none", background: "transparent", cursor: "pointer",
-                            padding: "0 6px 0 0", fontFamily: "inherit", fontSize: 12, color: "var(--muted)",
-                        }}
+                        className="sx-expand"
+                        onClick={(e) => { e.stopPropagation(); onToggleExpanded(sid); }}
                         title={`${expanded ? "Collapse" : "Expand"} ${childCount} subagent${childCount === 1 ? "" : "s"}`}
                     >
                         {expanded ? "▼" : "▶"} {childCount}
                         {childLoading ? " …" : ""}
                     </button>
                 ) : indent ? (
-                    <span style={{ color: "var(--muted-2)", marginRight: 6 }}>↳</span>
+                    <span className="sx-child-mark">↳</span>
                 ) : (
                     <span style={{ display: "inline-block", width: 32 }} />
                 )}
                 {s.is_live ? (
-                    <span
-                        title="Live session"
-                        style={{
-                            display: "inline-block",
-                            width: 7,
-                            height: 7,
-                            borderRadius: "50%",
-                            background: "var(--sx-green-700)",
-                            boxShadow: "0 0 0 3px var(--sx-green-100)",
-                            margin: "0 5px 1px 1px",
-                            verticalAlign: "middle",
-                        }}
-                    >
+                    <span className="sx-live" title="Live session">
                         <span className="sr-only">live session</span>
                     </span>
                 ) : null}
-                <code title={s.id} style={{ marginLeft: 4 }}>{shortSessionId(s.id)}</code>
+                {s.has_raw_file ? (
+                    <Link
+                        to="/sessions/$sessionId"
+                        params={{ sessionId: sid }}
+                        preload="intent"
+                        className="sx-id-link"
+                        title={`Open ${s.id}`}
+                        onClick={(e) => e.stopPropagation()}
+                    >
+                        <code>{shortSessionId(s.id)}</code>
+                    </Link>
+                ) : (
+                    <code title={s.id} style={{ marginLeft: 4, color: "var(--dim)" }}>{shortSessionId(s.id)}</code>
+                )}
             </td>
             <td><SourceBadge source={s.source} /></td>
-            <td>{project}</td>
-            <td style={{ fontFamily: "ui-monospace, monospace", fontSize: 12, color: "var(--muted)" }}>{fmtTs(s.started_at)}</td>
-            <td style={{ fontFamily: "ui-monospace, monospace", fontSize: 12, color: "var(--muted)", textAlign: "right" }}>{fmtDuration(s.started_at, s.ended_at)}</td>
-            <td style={{ textAlign: "right", fontFamily: "ui-monospace, monospace", fontSize: 12, fontVariantNumeric: "tabular-nums", color: s.turn_count > 0 ? "var(--ink)" : "var(--muted-2)" }}>{s.turn_count > 0 ? s.turn_count.toLocaleString() : "-"}</td>
+            <td className="sx-project">{project}</td>
+            <td className="sx-meta">{fmtTs(s.started_at)}</td>
+            <td className="sx-meta" style={{ textAlign: "right" }}>{fmtDuration(s.started_at, s.ended_at)}</td>
+            <td className={`sx-num${s.turn_count > 0 ? "" : " is-zero"}`} style={{ textAlign: "right" }}>{s.turn_count > 0 ? s.turn_count.toLocaleString() : "-"}</td>
             <td style={{ textAlign: "center", padding: "6px 8px" }}>
                 <StoryStrip
                     sessionId={sid}
@@ -246,19 +253,25 @@ const Row = memo(function Row({
                     reverted={s.reverted_commits}
                 />
             </td>
-            <td style={{ textAlign: "right", fontFamily: "ui-monospace, monospace", fontSize: 12, fontVariantNumeric: "tabular-nums", color: s.cost_usd != null ? "var(--ink)" : "var(--sx-ink-300)" }}>
+            <td className={`sx-num${s.cost_usd != null ? "" : " is-zero"}`} style={{ textAlign: "right" }}>
                 {s.cost_usd != null ? `$${s.cost_usd.toFixed(2)}` : "–"}
             </td>
             <td style={{ textAlign: "left", padding: "6px 8px" }}>
                 <SignalBadge signal={s.signal} friction={s.friction} />
             </td>
-            <td style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            <td style={{ whiteSpace: "nowrap" }}>
                 {s.has_raw_file ? (
-                    <Link to="/sessions/$sessionId" params={{ sessionId: sid }} preload="intent" style={{ color: "var(--blue)", fontWeight: 600 }}>
+                    <Link
+                        to="/sessions/$sessionId"
+                        params={{ sessionId: sid }}
+                        preload="intent"
+                        className="sx-open"
+                        onClick={(e) => e.stopPropagation()}
+                    >
                         open →
                     </Link>
                 ) : (
-                    <span style={{ color: "var(--muted-2)", fontSize: 11 }} title="No raw transcript stored - cannot inspect">no transcript</span>
+                    <span className="sx-notx" title="No raw transcript stored - cannot inspect">no transcript</span>
                 )}
             </td>
         </tr>
@@ -413,78 +426,84 @@ export function SessionsRoute() {
         [filteredRoots],
     );
 
-    const filterBtnStyle = (active: boolean): CSSProperties => ({
-        padding: "4px 12px", fontSize: 11, fontWeight: 600,
-        border: `1px solid ${active ? "var(--green)" : "var(--line)"}`,
-        background: active ? "var(--green)" : "var(--track)",
-        color: active ? "#06140b" : "var(--muted)",
-        borderRadius: 4, cursor: "pointer",
-    });
-
     return (
-        <section className="panel">
-            <header>
-                <h2>Sessions</h2>
-                <span className="meta">
-                    {query.data
-                        ? `${allRoots.length.toLocaleString()} of ${totalCount.toLocaleString()} roots · ${rootsWithChildren} with subagents${search ? ` · ${filteredRoots.length} match search` : ""}`
-                        : "-"}
-                </span>
+        <section className="panel sessions-instrument">
+            <header className="inst-head">
+                <div className="inst-head-top">
+                    <div>
+                        <div className="inst-kicker">$ ax sessions</div>
+                        <h2 className="inst-title">Sessions</h2>
+                        {query.data ? (
+                            <div className="inst-head-meta" style={{ marginTop: 8 }}>
+                                <b>{allRoots.length.toLocaleString()}</b> of{" "}
+                                <b>{totalCount.toLocaleString()}</b> roots
+                                <span>·</span>
+                                <b>{rootsWithChildren.toLocaleString()}</b> with subagents
+                                {search ? (
+                                    <>
+                                        <span>·</span>
+                                        <b>{filteredRoots.length.toLocaleString()}</b> match search
+                                    </>
+                                ) : null}
+                                <span>·</span>
+                                <span className="live">
+                                    <span className="rdx-led" aria-hidden="true" />live
+                                </span>
+                            </div>
+                        ) : null}
+                    </div>
+                    {query.data ? (
+                        <div className="inst-hero">
+                            <span className="rdx-doto n">{totalCount.toLocaleString()}</span>
+                            <span className="l">sessions traced</span>
+                        </div>
+                    ) : null}
+                </div>
             </header>
             {query.error ? <div className="error">Error: {String(query.error)}</div> : null}
-            <div style={{ display: "flex", gap: 12, padding: "8px 0", alignItems: "center", flexWrap: "wrap" }}>
-                {/* Source filter buttons */}
-                <div style={{ display: "flex", gap: 4 }}>
-                    {SOURCE_FILTERS.map((f) => (
-                        <button
-                            key={f}
-                            onClick={() => setSourceFilter(f)}
-                            style={filterBtnStyle(sourceFilter === f)}
-                        >
-                            {f}
-                        </button>
-                    ))}
-                </div>
+            <div className="inst-controls">
+                {SOURCE_FILTERS.map((f) => (
+                    <button
+                        key={f}
+                        type="button"
+                        className={`inst-chip${sourceFilter === f ? " is-active" : ""}`}
+                        onClick={() => setSourceFilter(f)}
+                    >
+                        {f}
+                    </button>
+                ))}
                 <input
                     value={search}
                     onChange={(e) => setSearch(e.target.value)}
-                    placeholder="filter by id / project / cwd / model"
-                    style={{ flex: 1, maxWidth: 360, padding: "4px 8px", fontSize: 12, border: "1px solid var(--line)", borderRadius: 4, background: "var(--panel)", color: "var(--ink)" }}
+                    placeholder="search id / project / cwd / model"
+                    className="inst-search"
+                    aria-label="search sessions"
                 />
                 {allExpandableIds.length > 0 ? (
                     <button
+                        type="button"
+                        className="inst-chip"
                         onClick={() => setExpanded((prev) =>
                             prev.size === allExpandableIds.length ? new Set() : new Set(allExpandableIds),
                         )}
-                        style={{
-                            padding: "4px 10px", fontSize: 11, border: "1px solid var(--line)",
-                            background: "var(--track)", color: "var(--muted)", borderRadius: 4, cursor: "pointer",
-                        }}
                     >
                         {expanded.size === allExpandableIds.length ? "collapse all" : "expand all"}
                     </button>
                 ) : null}
                 <button
+                    type="button"
+                    className={`inst-chip${selected.size >= 2 ? " is-active" : ""}`}
                     onClick={compareSelected}
                     disabled={selected.size < 2}
                     title={selected.size < 2 ? "Select 2+ sessions to compare" : `Compare ${selected.size} sessions`}
-                    style={{
-                        padding: "4px 12px", fontSize: 11, fontWeight: 600,
-                        border: `1px solid ${selected.size >= 2 ? "var(--green)" : "var(--line)"}`, borderRadius: 4,
-                        background: selected.size >= 2 ? "var(--green)" : "var(--track)",
-                        color: selected.size >= 2 ? "#06140b" : "var(--muted-2)",
-                        cursor: selected.size >= 2 ? "pointer" : "not-allowed",
-                    }}
                 >
                     compare{selected.size > 0 ? ` (${selected.size})` : ""}
                 </button>
                 {selected.size > 0 ? (
                     <button
+                        type="button"
+                        className="inst-chip"
                         onClick={() => setSelected(new Set())}
-                        style={{
-                            padding: "4px 8px", fontSize: 11, border: "1px solid var(--line)",
-                            background: "var(--track)", color: "var(--muted)", borderRadius: 4, cursor: "pointer",
-                        }}
                     >
                         clear
                     </button>
@@ -492,23 +511,23 @@ export function SessionsRoute() {
             </div>
             {query.isLoading && !query.data ? <div className="loading">Loading…</div> : null}
             {query.data ? (
-                <div style={{ overflowX: "auto", WebkitOverflowScrolling: "touch" }}>
-                <table style={{ width: "100%", minWidth: 1280, borderCollapse: "collapse" }}>
+                <div className="sx-scroll">
+                <table className="sx-sessions">
                     <thead>
-                        <tr style={{ background: "var(--page)", fontSize: 11, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.05em" }}>
+                        <tr>
                             <th style={{ width: 28 }}></th>
-                            <th style={{ textAlign: "left", padding: "6px 8px" }}>id</th>
-                            <th style={{ textAlign: "left", padding: "6px 8px" }}>source</th>
-                            <th style={{ textAlign: "left", padding: "6px 8px" }}>project</th>
-                            <th style={{ textAlign: "left", padding: "6px 8px" }}>started</th>
-                            <th style={{ textAlign: "right", padding: "6px 8px" }}>duration</th>
-                            <th style={{ textAlign: "right", padding: "6px 8px" }}>turns</th>
-                            <th style={{ textAlign: "center", padding: "6px 8px" }}>story</th>
-                            <th style={{ textAlign: "left", padding: "6px 8px" }}>δloc</th>
-                            <th style={{ textAlign: "left", padding: "6px 8px" }}>commits</th>
-                            <th style={{ textAlign: "right", padding: "6px 8px" }}>cost</th>
-                            <th style={{ textAlign: "left", padding: "6px 8px" }}>signal</th>
-                            <th style={{ textAlign: "left", padding: "6px 8px" }}></th>
+                            <th style={{ textAlign: "left" }}>id</th>
+                            <th style={{ textAlign: "left" }}>source</th>
+                            <th style={{ textAlign: "left" }}>project</th>
+                            <th style={{ textAlign: "left" }}>started</th>
+                            <th style={{ textAlign: "right" }}>duration</th>
+                            <th style={{ textAlign: "right" }}>turns</th>
+                            <th style={{ textAlign: "center" }}>story</th>
+                            <th style={{ textAlign: "left" }}>δloc</th>
+                            <th style={{ textAlign: "left" }}>commits</th>
+                            <th style={{ textAlign: "right" }}>cost</th>
+                            <th style={{ textAlign: "left" }}>signal</th>
+                            <th style={{ textAlign: "left" }}></th>
                         </tr>
                     </thead>
                     <tbody>
@@ -548,27 +567,17 @@ export function SessionsRoute() {
                             );
                         })}
                         {allRoots.length < totalCount ? (
-                            <tr ref={sentinelRef}>
-                                <td colSpan={COL_COUNT} style={{
-                                    padding: "12px 24px", color: "var(--muted)", fontSize: 12,
-                                    fontFamily: "ui-monospace, monospace",
-                                    textAlign: "center", borderTop: "1px dashed var(--line)",
-                                }}>
+                            <tr ref={sentinelRef} className="sx-sentinel">
+                                <td colSpan={COL_COUNT}>
                                     {appendLoading
                                         ? `loading next ${PAGE_SIZE} of ${totalCount.toLocaleString()}…`
                                         : `loaded ${allRoots.length.toLocaleString()} of ${totalCount.toLocaleString()} ·`}
                                     {!appendLoading ? (
-                                        <>
-                                            {" "}
-                                            <button
-                                                onClick={() => void loadMore(PAGE_SIZE)}
-                                                style={{
-                                                    padding: "2px 10px", marginLeft: 6, fontSize: 11,
-                                                    border: "1px solid var(--line)", background: "var(--track)",
-                                                    color: "var(--muted)", borderRadius: 4, cursor: "pointer",
-                                                }}
-                                            >load {PAGE_SIZE} more</button>
-                                        </>
+                                        <button
+                                            type="button"
+                                            className="sx-loadmore"
+                                            onClick={() => void loadMore(PAGE_SIZE)}
+                                        >load {PAGE_SIZE} more</button>
                                     ) : null}
                                 </td>
                             </tr>

@@ -285,7 +285,7 @@ export function ToolRowItem(
                             style={{
                                 margin: "0 0 4px",
                                 font: `12px/1.5 ${mono}`,
-                                color: "#2d2840",
+                                color: "var(--ink)",
                                 whiteSpace: "pre-wrap",
                                 wordBreak: "break-word",
                             }}
@@ -321,7 +321,7 @@ export function ToolRowItem(
                                 overflow: "auto",
                             }}
                         >
-                            <span aria-hidden style={{ color: "#c0a3e8", userSelect: "none" }}>$ </span>
+                            <span aria-hidden style={{ color: "var(--violet)", userSelect: "none" }}>$ </span>
                             <HighlightedCode code={command} lang="shellscript" />
                         </pre>
                     )
