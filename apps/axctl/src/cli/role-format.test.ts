@@ -406,3 +406,76 @@ describe("renderByRoleSection", () => {
         expect(out).toContain("no skill invocations");
     });
 });
+
+// ---------------------------------------------------------------------------
+// Golden string assertions — full byte-identity snapshots
+// These guard that renderTable migration did not change output bytes.
+// ---------------------------------------------------------------------------
+
+describe("renderSkillsByRoleTable - golden string", () => {
+    it("produces byte-identical output to the pre-renderTable version", () => {
+        const out = renderSkillsByRoleTable(SKILLS_BY_ROLE_RESULT, "debugging");
+        expect(out).toBe(
+            "rank  skill                         invocations  source        confidence\n" +
+            "   1  caveman                               100  frontmatter         0.90\n" +
+            "   2  diagnose                               42  brief               0.80\n" +
+            "\n" +
+            "(2 skills for role \"debugging\")",
+        );
+    });
+});
+
+describe("renderRolesForSkillTable - golden string", () => {
+    it("produces byte-identical output to the pre-renderTable version", () => {
+        const out = renderRolesForSkillTable(ROLES_FOR_SKILL_RESULT, "caveman");
+        expect(out).toBe(
+            "role                  source        confidence  rationale                     \n" +
+            "debugging             frontmatter         0.90  primary debugging tool        \n" +
+            "triage                user                   1                                \n" +
+            "\n" +
+            "(2 roles for skill \"caveman\")",
+        );
+    });
+
+    it("ellipsis-truncates rationale at max 50 chars (U+2026)", () => {
+        const longRationale = "x".repeat(100);
+        const result: FetchRolesForSkillResult = {
+            skillExists: true,
+            rows: [
+                {
+                    role_name: "test",
+                    role_weight: 1.0,
+                    source: "user",
+                    confidence: 1.0,
+                    edge_weight_override: null,
+                    rationale: longRationale,
+                    since: null,
+                },
+            ],
+        };
+        const out = renderRolesForSkillTable(result, "myskill");
+        // Column width = 50 (max), rationale = 49 x's + '…'
+        expect(out).toBe(
+            "role                  source        confidence  rationale                                         \n" +
+            "test                  user                   1  xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx…\n" +
+            "\n" +
+            "(1 role for skill \"myskill\")",
+        );
+        expect(out).toContain("…");
+        expect(out).not.toContain("...");
+    });
+});
+
+describe("renderAllRolesTable - golden string", () => {
+    it("produces byte-identical output to the pre-renderTable version", () => {
+        const out = renderAllRolesTable(ALL_ROLES_RESULT);
+        expect(out).toBe(
+            "role                  weight  skills\n" +
+            "debugging               1.50      12\n" +
+            "planning                   2       8\n" +
+            "empty-role                 1       0\n" +
+            "\n" +
+            "(3 roles)",
+        );
+    });
+});

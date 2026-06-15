@@ -2,6 +2,9 @@
  * P3.7: Role read renderers - pure table + JSON output.
  *
  * No I/O, no Effect. Given typed result objects, returns strings.
+ *
+ * Migrated to renderTable (table.ts) for auto-width column-building.
+ * Output is byte-identical to the previous hand-rolled pad/join version.
  */
 
 import type {
@@ -13,6 +16,8 @@ import type {
     RoleRow,
 } from "../dashboard/role-queries.ts";
 import type { SessionSkillRoleGroup } from "@ax/lib/shared/dashboard-types";
+import { renderTable } from "./table.js";
+import type { Column } from "./table.js";
 
 export type { SessionSkillRoleGroup as ByRoleGroup } from "@ax/lib/shared/dashboard-types";
 
@@ -26,11 +31,6 @@ function fmtFloat(n: number): string {
 
 function fmtCount(n: number): string {
     return n.toLocaleString("en-US");
-}
-
-function truncate(s: string | null, max: number): string {
-    if (!s) return "";
-    return s.length > max ? s.slice(0, max - 1) + "…" : s;
 }
 
 // ---------------------------------------------------------------------------
@@ -47,7 +47,7 @@ export function renderSkillsByRoleTable(
 
     const { rows } = result;
 
-    type Row = {
+    type RenderedRow = {
         rank: string;
         skill: string;
         invocations: string;
@@ -55,7 +55,7 @@ export function renderSkillsByRoleTable(
         confidence: string;
     };
 
-    const rendered: Row[] = rows.map((r: SkillByRoleRow, i: number) => ({
+    const rendered: RenderedRow[] = rows.map((r: SkillByRoleRow, i: number) => ({
         rank: String(i + 1),
         skill: r.skill_name,
         invocations: fmtCount(r.invocations),
@@ -63,43 +63,20 @@ export function renderSkillsByRoleTable(
         confidence: fmtFloat(r.confidence),
     }));
 
-    const headers: Row = {
-        rank: "rank",
-        skill: "skill",
-        invocations: "invocations",
-        source: "source",
-        confidence: "confidence",
-    };
+    const cols: Column<RenderedRow>[] = [
+        { header: "rank", get: (r) => r.rank, align: "right" },
+        { header: "skill", get: (r) => r.skill, min: 28 },
+        { header: "invocations", get: (r) => r.invocations, align: "right" },
+        { header: "source", get: (r) => r.source, min: 12 },
+        { header: "confidence", get: (r) => r.confidence, align: "right" },
+    ];
 
-    const colW = (key: keyof Row): number =>
-        Math.max(headers[key].length, ...rendered.map((r) => r[key].length));
-
-    const rankW = colW("rank");
-    const skillW = Math.max(colW("skill"), 28);
-    const invW = colW("invocations");
-    const srcW = Math.max(colW("source"), 12);
-    const confW = colW("confidence");
-
-    const fmt = (r: Row): string =>
-        r.rank.padStart(rankW) +
-        "  " +
-        r.skill.padEnd(skillW) +
-        "  " +
-        r.invocations.padStart(invW) +
-        "  " +
-        r.source.padEnd(srcW) +
-        "  " +
-        r.confidence.padStart(confW);
-
-    const lines: string[] = [];
-    lines.push(fmt(headers));
-    for (const r of rendered) {
-        lines.push(fmt(r));
-    }
-    lines.push("");
-    lines.push(`(${rows.length} skill${rows.length === 1 ? "" : "s"} for role "${role}")`);
-
-    return lines.join("\n");
+    const table = renderTable({ columns: cols, rows: rendered });
+    return [
+        table,
+        "",
+        `(${rows.length} skill${rows.length === 1 ? "" : "s"} for role "${role}")`,
+    ].join("\n");
 }
 
 export function renderSkillsByRoleJson(
@@ -143,53 +120,40 @@ export function renderRolesForSkillTable(
         return `axctl skills roles: no roles assigned to "${skill}"`;
     }
 
-    type Row = {
+    type RenderedRow = {
         role: string;
         source: string;
         confidence: string;
         rationale: string;
     };
 
-    const rendered: Row[] = rows.map((r: RoleForSkillRow) => ({
+    const rendered: RenderedRow[] = rows.map((r: RoleForSkillRow) => ({
         role: r.role_name,
         source: r.source,
         confidence: fmtFloat(r.confidence),
-        rationale: truncate(r.rationale, 50),
+        // Raw rationale — renderTable handles truncation via overflow:'ellipsis' + max:50
+        rationale: r.rationale ?? "",
     }));
 
-    const headers: Row = {
-        role: "role",
-        source: "source",
-        confidence: "confidence",
-        rationale: "rationale",
-    };
+    const cols: Column<RenderedRow>[] = [
+        { header: "role", get: (r) => r.role, min: 20 },
+        { header: "source", get: (r) => r.source, min: 12 },
+        { header: "confidence", get: (r) => r.confidence, align: "right" },
+        {
+            header: "rationale",
+            get: (r) => r.rationale,
+            min: 30,
+            max: 50,
+            overflow: "ellipsis",
+        },
+    ];
 
-    const colW = (key: keyof Row): number =>
-        Math.max(headers[key].length, ...rendered.map((r) => r[key].length));
-
-    const roleW = Math.max(colW("role"), 20);
-    const srcW = Math.max(colW("source"), 12);
-    const confW = colW("confidence");
-    const ratW = Math.max(colW("rationale"), 30);
-
-    const fmt = (r: Row): string =>
-        r.role.padEnd(roleW) +
-        "  " +
-        r.source.padEnd(srcW) +
-        "  " +
-        r.confidence.padStart(confW) +
-        "  " +
-        r.rationale.padEnd(ratW);
-
-    const lines: string[] = [];
-    lines.push(fmt(headers));
-    for (const r of rendered) {
-        lines.push(fmt(r));
-    }
-    lines.push("");
-    lines.push(`(${rows.length} role${rows.length === 1 ? "" : "s"} for skill "${skill}")`);
-
-    return lines.join("\n");
+    const table = renderTable({ columns: cols, rows: rendered });
+    return [
+        table,
+        "",
+        `(${rows.length} role${rows.length === 1 ? "" : "s"} for skill "${skill}")`,
+    ].join("\n");
 }
 
 export function renderRolesForSkillJson(
@@ -226,43 +190,30 @@ export function renderAllRolesTable(result: FetchAllRolesResult): string {
         return "(no roles found)";
     }
 
-    type Row = {
+    type RenderedRow = {
         role: string;
         weight: string;
         skill_count: string;
     };
 
-    const rendered: Row[] = rows.map((r: RoleRow) => ({
+    const rendered: RenderedRow[] = rows.map((r: RoleRow) => ({
         role: r.name,
         weight: fmtFloat(r.weight),
         skill_count: fmtCount(r.skill_count),
     }));
 
-    const headers: Row = {
-        role: "role",
-        weight: "weight",
-        skill_count: "skills",
-    };
+    const cols: Column<RenderedRow>[] = [
+        { header: "role", get: (r) => r.role, min: 20 },
+        { header: "weight", get: (r) => r.weight, align: "right" },
+        { header: "skills", get: (r) => r.skill_count, align: "right", min: 6 },
+    ];
 
-    const colW = (key: keyof Row): number =>
-        Math.max(headers[key].length, ...rendered.map((r) => r[key].length));
-
-    const roleW = Math.max(colW("role"), 20);
-    const wtW = colW("weight");
-    const cntW = Math.max(colW("skill_count"), 6);
-
-    const fmt = (r: Row): string =>
-        r.role.padEnd(roleW) + "  " + r.weight.padStart(wtW) + "  " + r.skill_count.padStart(cntW);
-
-    const lines: string[] = [];
-    lines.push(fmt(headers));
-    for (const r of rendered) {
-        lines.push(fmt(r));
-    }
-    lines.push("");
-    lines.push(`(${rows.length} role${rows.length === 1 ? "" : "s"})`);
-
-    return lines.join("\n");
+    const table = renderTable({ columns: cols, rows: rendered });
+    return [
+        table,
+        "",
+        `(${rows.length} role${rows.length === 1 ? "" : "s"})`,
+    ].join("\n");
 }
 
 export function renderAllRolesJson(result: FetchAllRolesResult): string {

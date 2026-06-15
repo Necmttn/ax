@@ -37,7 +37,9 @@ import {
 } from "../../queries/dispatch-analytics.ts";
 import { loadEffectiveRoutingTable } from "../../queries/routing-table-io.ts";
 import { buildDispatchesNext, buildCandidatesNext } from "../../nav/next-links.ts";
-import { pct, truncate, usd } from "../render.ts";
+import { pct, usd } from "../render.ts";
+import { renderTable } from "../table.js";
+import type { Column } from "../table.js";
 import type { RuntimeManifest } from "./manifest.ts";
 import { fail, jsonFlag, optionValue, positiveLimit } from "./shared.ts";
 
@@ -93,17 +95,35 @@ const cmdDispatches = (input: {
             // By-class table
             if (result.by_class.length > 0) {
                 console.log("");
-                const classW = 28;
-                console.log(
-                    `${"class".padEnd(classW)}  ${"total".padStart(6)}  ${"cheap".padStart(6)}  ${"expensive".padStart(9)}  ${"overspend".padStart(10)}  ${"est_savings".padStart(11)}`,
-                );
-                for (const row of result.by_class) {
-                    console.log(
-                        `${truncate(row.classId, classW).padEnd(classW)}  ${row.count.toString().padStart(6)}  ` +
-                        `${row.ran_cheap.toString().padStart(6)}  ${row.ran_expensive.toString().padStart(9)}  ` +
-                        `${usd(row.overspend_usd).padStart(10)}  ${usd(row.est_savings_usd).padStart(11)}`,
-                    );
-                }
+
+                type EconRow = {
+                    classId: string;
+                    count: string;
+                    ran_cheap: string;
+                    ran_expensive: string;
+                    overspend: string;
+                    est_savings: string;
+                };
+
+                const econRows: EconRow[] = result.by_class.map((row) => ({
+                    classId: row.classId,
+                    count: row.count.toString(),
+                    ran_cheap: row.ran_cheap.toString(),
+                    ran_expensive: row.ran_expensive.toString(),
+                    overspend: usd(row.overspend_usd),
+                    est_savings: usd(row.est_savings_usd),
+                }));
+
+                const econCols: Column<EconRow>[] = [
+                    { header: "class", get: (r) => r.classId, width: 28, overflow: "ellipsis" },
+                    { header: "total", get: (r) => r.count, align: "right", width: 6 },
+                    { header: "cheap", get: (r) => r.ran_cheap, align: "right", width: 6 },
+                    { header: "expensive", get: (r) => r.ran_expensive, align: "right", width: 9 },
+                    { header: "overspend", get: (r) => r.overspend, align: "right", width: 10 },
+                    { header: "est_savings", get: (r) => r.est_savings, align: "right", width: 11 },
+                ];
+
+                console.log(renderTable({ columns: econCols, rows: econRows }));
             }
 
             console.log(`\ntip: ax dispatches --candidates  for per-dispatch view of the expensive-tier rows`);
@@ -126,25 +146,34 @@ const cmdDispatches = (input: {
 
             printNextLinks(buildCandidatesNext(result));
 
-            // Header
-            const descW = 48;
-            const modelW = 28;
-            console.log(
-                `${"ts".padEnd(19)}  ${"agent_type".padEnd(24)}  ${"description".padEnd(descW)}  ` +
-                `${"suggest".padEnd(modelW)}  ${"child_cost".padStart(10)}  ${"est_savings".padStart(11)}`,
-            );
+            type CandRow = {
+                ts: string;
+                agent_type: string;
+                description: string;
+                suggest: string;
+                child_cost: string;
+                est_savings: string;
+            };
 
-            for (const row of result.candidates) {
-                const ts = row.ts.slice(0, 19);
-                const at = truncate(row.agent_type, 24);
-                const desc = truncate(row.description, descW);
-                const suggest = row.suggested_model.slice(0, modelW);
-                console.log(
-                    `${ts.padEnd(19)}  ${at.padEnd(24)}  ${desc.padEnd(descW)}  ` +
-                    `${suggest.padEnd(modelW)}  ${usd(row.child_cost_usd).padStart(10)}  ` +
-                    `${usd(row.est_savings_usd).padStart(11)}`,
-                );
-            }
+            const candRows: CandRow[] = result.candidates.map((row) => ({
+                ts: row.ts,
+                agent_type: row.agent_type ?? "",
+                description: row.description ?? "",
+                suggest: row.suggested_model,
+                child_cost: usd(row.child_cost_usd),
+                est_savings: usd(row.est_savings_usd),
+            }));
+
+            const candCols: Column<CandRow>[] = [
+                { header: "ts", get: (r) => r.ts, width: 19, overflow: "clip" },
+                { header: "agent_type", get: (r) => r.agent_type, width: 24, overflow: "ellipsis" },
+                { header: "description", get: (r) => r.description, width: 48, overflow: "ellipsis" },
+                { header: "suggest", get: (r) => r.suggest, width: 28, overflow: "clip" },
+                { header: "child_cost", get: (r) => r.child_cost, align: "right", width: 10 },
+                { header: "est_savings", get: (r) => r.est_savings, align: "right", width: 11 },
+            ];
+
+            console.log(renderTable({ columns: candCols, rows: candRows }));
 
             console.log(`\ntotal est savings: ${usd(result.total_est_savings_usd)}`);
             if (result.top_classes.length > 0) {
@@ -171,28 +200,36 @@ const cmdDispatches = (input: {
 
         printNextLinks(buildDispatchesNext(result));
 
-        const descW = 48;
-        const dmW = 16; // dispatch model column
-        const cmW = 28; // child model column
+        type DispatchRow = {
+            ts: string;
+            agent_type: string;
+            description: string;
+            dispatch_model: string;
+            child_model: string;
+            child_cost: string;
+        };
 
-        console.log(
-            `${"ts".padEnd(19)}  ${"agent_type".padEnd(24)}  ${"description".padEnd(descW)}  ` +
-            `${"dispatch_model".padEnd(dmW)}  ${"child_model".padEnd(cmW)}  ${"child_cost".padStart(10)}`,
-        );
-
-        for (const row of result.rows) {
-            const ts = row.ts.slice(0, 19);
-            const at = truncate(row.agent_type, 24);
-            const desc = truncate(row.description, descW);
-            const dm = row.dispatch_model.slice(0, dmW);
+        const dispRows: DispatchRow[] = result.rows.map((row) => ({
+            ts: row.ts,
+            agent_type: row.agent_type ?? "",
+            description: row.description ?? "",
+            dispatch_model: row.dispatch_model,
             // "!" marks a routed dispatch whose child ran legs on another model
             // (Claude Code drops the model override on continuations).
-            const cm = `${row.model_dropped ? "!" : ""}${row.child_model ?? "?"}`.slice(0, cmW);
-            console.log(
-                `${ts.padEnd(19)}  ${at.padEnd(24)}  ${desc.padEnd(descW)}  ` +
-                `${dm.padEnd(dmW)}  ${cm.padEnd(cmW)}  ${usd(row.child_cost_usd).padStart(10)}`,
-            );
-        }
+            child_model: `${row.model_dropped ? "!" : ""}${row.child_model ?? "?"}`,
+            child_cost: usd(row.child_cost_usd),
+        }));
+
+        const dispCols: Column<DispatchRow>[] = [
+            { header: "ts", get: (r) => r.ts, width: 19, overflow: "clip" },
+            { header: "agent_type", get: (r) => r.agent_type, width: 24, overflow: "ellipsis" },
+            { header: "description", get: (r) => r.description, width: 48, overflow: "ellipsis" },
+            { header: "dispatch_model", get: (r) => r.dispatch_model, width: 16, overflow: "clip" },
+            { header: "child_model", get: (r) => r.child_model, width: 28, overflow: "clip" },
+            { header: "child_cost", get: (r) => r.child_cost, align: "right", width: 10 },
+        ];
+
+        console.log(renderTable({ columns: dispCols, rows: dispRows }));
 
         console.log(
             `\n${result.total_dispatches} dispatches  ${pct(result.inherit_pct)} inherit  ` +
