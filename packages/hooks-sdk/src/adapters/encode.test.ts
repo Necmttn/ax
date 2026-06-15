@@ -21,27 +21,27 @@ describe("encodeVerdict", () => {
   });
 });
 
-describe("encodeVerdict Route", () => {
-  test("claude: emits permissionDecision allow + updatedInput", () => {
-    const out = encodeVerdict(Verdict.route({ description: "Implement X", model: "sonnet" }), "claude");
+describe("encodeVerdict Advise", () => {
+  test("claude: emits additionalContext JSON with the exact context string", () => {
+    const msg = "this dispatch looks mechanical - re-dispatch with model:sonnet to save quota (conserve mode).";
+    const out = encodeVerdict(Verdict.advise(msg), "claude");
     expect(out.exitCode).toBe(0);
     const json = JSON.parse(out.stdout!);
     expect(json.hookSpecificOutput).toEqual({
       hookEventName: "PreToolUse",
-      permissionDecision: "allow",
-      updatedInput: { description: "Implement X", model: "sonnet" },
+      additionalContext: msg,
     });
   });
-  test("codex: Route degrades to allow (no Agent dispatch / different protocol)", () => {
-    const out = encodeVerdict(Verdict.route({ model: "sonnet" }), "codex");
+  test("codex: Advise degrades to allow (route-dispatch is claude-only; codex has no Agent dispatch)", () => {
+    const out = encodeVerdict(Verdict.advise("some advice"), "codex");
     expect(out).toEqual({ exitCode: 0 });
   });
-  test("claude: empty merge passes through as exactly {}", () => {
-    const out = encodeVerdict(Verdict.route({}), "claude");
-    expect(JSON.parse(out.stdout!).hookSpecificOutput.updatedInput).toEqual({});
-  });
-  test("claude: existing model passes through verbatim (dumb passthrough, no strip/override)", () => {
-    const out = encodeVerdict(Verdict.route({ model: "opus", description: "x" }), "claude");
-    expect(JSON.parse(out.stdout!).hookSpecificOutput.updatedInput).toEqual({ model: "opus", description: "x" });
+  test("claude: judgment catch-rate advisory encodes correctly", () => {
+    const msg = "judgment work (review/design/audit) is the catch-rate gate - prefer the strong model (drop the cheap model: or set model:opus).";
+    const out = encodeVerdict(Verdict.advise(msg), "claude");
+    expect(out.exitCode).toBe(0);
+    const json = JSON.parse(out.stdout!);
+    expect(json.hookSpecificOutput.additionalContext).toBe(msg);
+    expect(json.hookSpecificOutput.hookEventName).toBe("PreToolUse");
   });
 });

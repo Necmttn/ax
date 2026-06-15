@@ -1,16 +1,19 @@
 /**
  * route-dispatch hook
  *
- * Fires on PreToolUse for the `Agent` tool. Routes subagent dispatches
- * quota-aware:
+ * Fires on PreToolUse for the `Agent` tool. Advises subagent dispatches
+ * quota-aware via additionalContext (the only mechanism that reaches the model
+ * for Agent dispatches; CC bugs #39814 + #40580 confirmed updatedInput/deny
+ * are ignored for the Agent tool):
  *
  *   - conserve mode: when a dispatch has no explicit model and matches a
- *     route-down class, silently rewrites the tool input to the suggested
- *     cheaper model (Verdict.route = updatedInput rewrite).
- *   - splurge mode: subtractive - no rewrite, runs on the strong inherited
- *     model.
+ *     route-down class, emits additionalContext advising the model to
+ *     re-dispatch with the suggested cheaper model (Verdict.advise).
+ *   - splurge mode: subtractive - no advisory, runs on the strong inherited
+ *     model (quota resets soon with headroom; no nag).
  *   - judgment guard (any mode): if a cheap explicit model is set for
- *     judgment work (review/design/audit) → warn.
+ *     judgment work (review/design/audit) → advise the model to prefer the
+ *     strong model (catch-rate gate).
  *
  * Spend mode keys off one knob: `routeDownEnforced = (mode === "conserve")`.
  * Mode is determined by AX_SPEND_MODE env override (conserve|splurge), else
@@ -33,7 +36,6 @@ import {
   JUDGMENT_STRONG_RE,
   readQuotaCacheSync,
 } from "../spend-mode.ts";
-import { Verdict } from "../verdict.ts";
 
 // Re-exported for consumers (ax hooks tooling, tests) that historically
 // imported the schema from the hook file.
@@ -84,7 +86,6 @@ const hook = defineHook({
         cheap,
         judgmentStrong,
         routeDownEnforced: mode === "conserve",
-        input,
         suggest: match?.suggest ?? "sonnet",
       });
     }),

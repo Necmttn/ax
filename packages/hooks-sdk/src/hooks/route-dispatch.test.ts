@@ -54,65 +54,66 @@ describe("explicit model set", () => {
     expect(v._tag).toBe("Allow");
   });
 
-  test("model='sonnet' on judgment (quality review) → Warn (catch-rate gate)", async () => {
-    // Rule 0: judgment+cheap → Warn, even with explicit model
+  test("model='sonnet' on judgment (quality review) → Advise (catch-rate gate, reaches model via additionalContext)", async () => {
+    // Rule 0: judgment+cheap → Advise, even with explicit model
     const v = await run({ description: "quality review of the diff", model: "sonnet" });
-    expect(v._tag).toBe("Warn");
-    if (v._tag === "Warn") {
-      expect(v.message).toContain("judgment work");
+    expect(v._tag).toBe("Advise");
+    if (v._tag === "Advise") {
+      expect(v.context).toContain("judgment work");
     }
   });
 
-  test("model='' (empty string) treated as inherit → Route (matches search-locate in conserve)", async () => {
+  test("model='' (empty string) treated as inherit → Advise (matches search-locate in conserve)", async () => {
     // Empty string: explicit=false → not treated as deliberate choice
     const v = await run({ description: "locate symbols", model: "" });
-    // Matches the search-locate pattern → Route in conserve mode
-    expect(v._tag).toBe("Route");
+    // Matches the search-locate pattern → Advise in conserve mode
+    expect(v._tag).toBe("Advise");
   });
 });
 
 // ---------------------------------------------------------------------------
-// conserve mode: match+inherit → Route (auto-rewrite to cheaper model)
+// conserve mode: match+inherit → Advise (advisory, not rewrite)
 // ---------------------------------------------------------------------------
 
-describe("conserve + inherit: route-down classes auto-route", () => {
-  test("'spec review of PR' → Route to sonnet", async () => {
+describe("conserve + inherit: route-down classes advise cheaper model", () => {
+  test("'spec review of PR' → Advise with sonnet", async () => {
     const v = await run({ description: "spec review of PR #42" });
-    expect(v._tag).toBe("Route");
-    if (v._tag === "Route") {
-      expect(v.input.model).toBe("sonnet");
+    expect(v._tag).toBe("Advise");
+    if (v._tag === "Advise") {
+      expect(v.context).toContain("sonnet");
+      expect(v.context).toContain("conserve mode");
     }
   });
 
-  test("'Locate all TODO comments' → Route to haiku (case-insensitive)", async () => {
+  test("'Locate all TODO comments' → Advise with haiku (case-insensitive)", async () => {
     const v = await run({ description: "Locate all TODO comments" });
-    expect(v._tag).toBe("Route");
-    if (v._tag === "Route") {
-      expect(v.input.model).toBe("haiku");
+    expect(v._tag).toBe("Advise");
+    if (v._tag === "Advise") {
+      expect(v.context).toContain("haiku");
     }
   });
 
-  test("'find usages of Foo' → Route to haiku", async () => {
+  test("'find usages of Foo' → Advise with haiku", async () => {
     const v = await run({ description: "find usages of Foo" });
-    expect(v._tag).toBe("Route");
-    if (v._tag === "Route") {
-      expect(v.input.model).toBe("haiku");
+    expect(v._tag).toBe("Advise");
+    if (v._tag === "Advise") {
+      expect(v.context).toContain("haiku");
     }
   });
 
-  test("'research the Effect v4 API' → Route to sonnet", async () => {
+  test("'research the Effect v4 API' → Advise with sonnet", async () => {
     const v = await run({ description: "research the Effect v4 API" });
-    expect(v._tag).toBe("Route");
-    if (v._tag === "Route") {
-      expect(v.input.model).toBe("sonnet");
+    expect(v._tag).toBe("Advise");
+    if (v._tag === "Advise") {
+      expect(v.context).toContain("sonnet");
     }
   });
 
-  test("'implement task: add route-dispatch hook' → Route to sonnet", async () => {
+  test("'implement task: add route-dispatch hook' → Advise with sonnet", async () => {
     const v = await run({ description: "implement task: add route-dispatch hook" });
-    expect(v._tag).toBe("Route");
-    if (v._tag === "Route") {
-      expect(v.input.model).toBe("sonnet");
+    expect(v._tag).toBe("Advise");
+    if (v._tag === "Advise") {
+      expect(v.context).toContain("sonnet");
     }
   });
 });
@@ -136,23 +137,23 @@ describe("splurge + inherit: no auto-route (subtractive)", () => {
 });
 
 // ---------------------------------------------------------------------------
-// judgment-cheap: warn regardless of mode
+// judgment-cheap: advise regardless of mode (reaches model via additionalContext)
 // ---------------------------------------------------------------------------
 
-describe("judgment work on cheap explicit model → Warn", () => {
-  test("judgment+cheap conserve → Warn", async () => {
+describe("judgment work on cheap explicit model → Advise", () => {
+  test("judgment+cheap conserve → Advise", async () => {
     process.env.AX_SPEND_MODE = "conserve";
     const v = await run({ description: "quality review of the diff", model: "sonnet" });
-    expect(v._tag).toBe("Warn");
-    if (v._tag === "Warn") {
-      expect(v.message).toContain("judgment work");
+    expect(v._tag).toBe("Advise");
+    if (v._tag === "Advise") {
+      expect(v.context).toContain("judgment work");
     }
   });
 
-  test("judgment+cheap splurge → Warn (rule 0 always fires)", async () => {
+  test("judgment+cheap splurge → Advise (rule 0 always fires)", async () => {
     process.env.AX_SPEND_MODE = "splurge";
     const v = await run({ description: "code review of the PR", model: "haiku" });
-    expect(v._tag).toBe("Warn");
+    expect(v._tag).toBe("Advise");
   });
 
   test("explicit non-cheap on a route-down class → Allow (deliberate choice)", async () => {
@@ -168,27 +169,27 @@ describe("judgment work on cheap explicit model → Warn", () => {
 // ---------------------------------------------------------------------------
 
 describe("agentType rules", () => {
-  test("subagent_type='Explore' → Route to haiku (conserve)", async () => {
+  test("subagent_type='Explore' → Advise with haiku (conserve)", async () => {
     const v = await run({ subagent_type: "Explore", description: "some task" });
-    expect(v._tag).toBe("Route");
-    if (v._tag === "Route") {
-      expect(v.input.model).toBe("haiku");
+    expect(v._tag).toBe("Advise");
+    if (v._tag === "Advise") {
+      expect(v.context).toContain("haiku");
     }
   });
 
-  test("subagent_type='codebase-locator' → Route to haiku (conserve)", async () => {
+  test("subagent_type='codebase-locator' → Advise with haiku (conserve)", async () => {
     const v = await run({ subagent_type: "codebase-locator" });
-    expect(v._tag).toBe("Route");
-    if (v._tag === "Route") {
-      expect(v.input.model).toBe("haiku");
+    expect(v._tag).toBe("Advise");
+    if (v._tag === "Advise") {
+      expect(v.context).toContain("haiku");
     }
   });
 
-  test("subagent_type='codebase-analyzer' → Route to sonnet (conserve)", async () => {
+  test("subagent_type='codebase-analyzer' → Advise with sonnet (conserve)", async () => {
     const v = await run({ subagent_type: "codebase-analyzer" });
-    expect(v._tag).toBe("Route");
-    if (v._tag === "Route") {
-      expect(v.input.model).toBe("sonnet");
+    expect(v._tag).toBe("Advise");
+    if (v._tag === "Advise") {
+      expect(v.context).toContain("sonnet");
     }
   });
 
@@ -196,9 +197,9 @@ describe("agentType rules", () => {
     // 'Explore' agent type → haiku; description 'research ...' → sonnet.
     // Agent type should win (more specific).
     const v = await run({ subagent_type: "Explore", description: "research the docs" });
-    expect(v._tag).toBe("Route");
-    if (v._tag === "Route") {
-      expect(v.input.model).toBe("haiku");
+    expect(v._tag).toBe("Advise");
+    if (v._tag === "Advise") {
+      expect(v.context).toContain("haiku");
     }
   });
 });
@@ -229,11 +230,11 @@ describe("no match", () => {
 // ---------------------------------------------------------------------------
 
 describe("prompt fallback", () => {
-  test("no description but prompt starts with 'locate' → Route to haiku (conserve)", async () => {
+  test("no description but prompt starts with 'locate' → Advise with haiku (conserve)", async () => {
     const v = await run({ prompt: "locate all files that import Effect" });
-    expect(v._tag).toBe("Route");
-    if (v._tag === "Route") {
-      expect(v.input.model).toBe("haiku");
+    expect(v._tag).toBe("Advise");
+    if (v._tag === "Advise") {
+      expect(v.context).toContain("haiku");
     }
   });
 
@@ -247,16 +248,16 @@ describe("prompt fallback", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Route verdict carries original description through
+// Advise verdict contains the suggested model name
 // ---------------------------------------------------------------------------
 
-describe("route verdict merges input", () => {
-  test("Route includes description from original input", async () => {
+describe("advise verdict content", () => {
+  test("Advise context mentions the suggested model and conserve mode", async () => {
     const v = await run({ description: "spec review of PR #42" });
-    expect(v._tag).toBe("Route");
-    if (v._tag === "Route") {
-      expect(v.input.description).toBe("spec review of PR #42");
-      expect(v.input.model).toBe("sonnet");
+    expect(v._tag).toBe("Advise");
+    if (v._tag === "Advise") {
+      expect(v.context).toContain("sonnet");
+      expect(v.context).toContain("conserve mode");
     }
   });
 });
@@ -266,15 +267,15 @@ describe("route verdict merges input", () => {
 // ---------------------------------------------------------------------------
 
 describe("routing table loading", () => {
-  test("corrupt/absent routing table falls back to defaults and still routes on known pattern", async () => {
+  test("corrupt/absent routing table falls back to defaults and still advises on known pattern", async () => {
     // We cannot easily mock the fs call here without dependency injection,
     // but the real path (~/.ax/hooks/routing-table.json) likely does not exist
     // in CI. The default table is embedded, so the hook should still work.
     const v = await run({ description: "locate things" });
-    // 'locate' matches the default search-locate pattern → Route in conserve
-    expect(v._tag).toBe("Route");
-    if (v._tag === "Route") {
-      expect(v.input.model).toBe("haiku");
+    // 'locate' matches the default search-locate pattern → Advise in conserve
+    expect(v._tag).toBe("Advise");
+    if (v._tag === "Advise") {
+      expect(v.context).toContain("haiku");
     }
   });
 });

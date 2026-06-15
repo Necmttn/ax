@@ -24,15 +24,14 @@ export const encodeVerdict = (v: Verdict, harness: Harness): ProcessOutcome => {
       return { exitCode: 0, stdout: JSON.stringify({ systemMessage: v.message }) };
     case "Inject":
       return { exitCode: 0, stdout: v.context };
-    case "Route":
+    case "Advise":
       return harness === "claude"
         ? {
             exitCode: 0,
             stdout: JSON.stringify({
               hookSpecificOutput: {
                 hookEventName: "PreToolUse",
-                permissionDecision: "allow",
-                updatedInput: v.input,
+                additionalContext: v.context,
               },
             }),
           }
