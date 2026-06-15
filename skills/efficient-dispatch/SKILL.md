@@ -11,12 +11,27 @@ checkable against your own ax graph.
 
 ## The split
 
-**Main model keeps** (never route down): decomposition, architecture and
-product tradeoffs, plan synthesis, quality review, PR review, judging
-conflicting subagent reports, final integration, taste-heavy design/copy.
+Two axes. First, **main model vs subagent**: the main model orchestrates and
+reviews; mechanical work goes to subagents. Second, and the one that actually
+controls spend - **the tier of each subagent dispatch:**
 
-**Cheaper models take** mechanical work - dispatch with an explicit
-`model:` per the routing table below.
+- **Implementer subagents** (well-specified plan tasks, mechanical edits, search,
+  bulk transforms) → dispatch with **`model: sonnet`** (or haiku for pure
+  search/locate, per the table).
+- **Reviewer / judgment subagents** (quality / PR / final / adversarial / code
+  review, design, audit, architect, critique, judge) → **keep the strong model**:
+  inherit the main model, or set `model: opus`/`fable` explicitly. Review is the
+  catch-rate gate; a cheap reviewer misses real bugs.
+
+Get this backwards and you pay twice: in one ax session implementers ran on the
+expensive inherited model while reviewers were sent to a cheap one - ~$130 over,
+weaker catch rate, three fix rounds (memory `feedback-review-gets-strong-model`).
+The default-inherit trap is implementers, not reviewers: a forgotten `model:` on
+an `implement …` dispatch silently runs expensive. Set it.
+
+**Main model keeps** (never dispatched at all): decomposition, architecture and
+product tradeoffs, plan synthesis, judging conflicting subagent reports, final
+integration, taste-heavy design/copy.
 
 ## Routing table
 
@@ -57,7 +72,13 @@ main-model judgment - otherwise pick sonnet.
    (review/design/audit) is sent on a cheap model. Real enforcement is your
    discipline + setting `model:` explicitly on every dispatch.
    Treat the advisory as a re-dispatch signal, not noise.
-4. Treat subagent reports as leads. Before acting on a high-impact finding or
+4. **Workflow scripts** (`.claude/workflows/*.js`) run sandboxed and cannot
+   import ax code. Set `model:` on every `agent(...)` call by hand, per
+   `ax routing show`: mechanical stages → `model: 'sonnet'`; judgment/review
+   stages → keep the strong model. `routing-tune.workflow.js` is the reference.
+   In-tree Effect/axctl code that dispatches should call `resolveDispatchModel`
+   (from `@ax/hooks-sdk`) instead of hardcoding.
+5. Treat subagent reports as leads. Before acting on a high-impact finding or
    declaring done, reopen the cited files and re-run the key verification
    yourself. Expect to find one real bug per delegated phase.
 
