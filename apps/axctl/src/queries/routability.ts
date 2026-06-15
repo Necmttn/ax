@@ -218,8 +218,7 @@ SELECT
     seq,
     role,
     intent_kind,
-    text_excerpt AS text,
-    thinking_tokens
+    text_excerpt AS text
 FROM turn
 WHERE ts > time::now() - ${sinceDays(days)}d;
 `;
@@ -239,22 +238,24 @@ WHERE ts > time::now() - ${sinceDays(days)}d
 `;
 
 /**
- * Per-turn token usage. source distinguishes main ('claude-code' etc.) from
- * subagent ('claude-subagent') at the session level - all rows for a subagent
- * session carry source='claude-subagent'. Filtering happens in JS.
+ * Per-turn token usage for Claude MAIN-agent turns only. Positive allowlist
+ * (source = 'claude') rather than a denylist: claude-subagent is a distinct
+ * source value (excluded), and non-Claude providers carry their own source
+ * (codex/opencode/cursor/pi) WITH real estimated_cost_usd - including them
+ * would pollute the Claude-main denominator and make the routability framing
+ * false. So we admit only Claude main turns here.
  */
 const TURN_USAGE_SQL = (days: number) => `
 SELECT
     type::string(turn) AS turn_id,
-    type::string(session) AS session_id,
-    source,
     prompt_tokens,
     completion_tokens,
     cache_read_input_tokens,
     cache_creation_input_tokens,
     estimated_cost_usd
 FROM turn_token_usage
-WHERE ts > time::now() - ${sinceDays(days)}d;
+WHERE ts > time::now() - ${sinceDays(days)}d
+  AND source = 'claude';
 `;
 
 /** Pricing catalog - same query and field mapping as dispatch-analytics. */
@@ -269,15 +270,15 @@ FROM agent_model;
 `;
 
 /**
- * Pull main-agent turns from SurrealDB, group into class-run spans per
+ * Pull Claude main-agent turns from SurrealDB, group into class-run spans per
  * session, and return a RoutabilityResult. Mirrors fetchCostSplit in
  * cost-analytics.ts: flat queries + JS join/aggregate, no GROUP BY derefs.
  *
- * Session classification: a session is a subagent session if ANY of its
- * turn_token_usage rows have source='claude-subagent'; those sessions are
- * excluded entirely. Sessions with no usage rows (e.g. purely user-turn
- * stubs) are treated as main - they contribute zero cost and don't skew
- * the result.
+ * Main-agent scoping: TURN_USAGE_SQL allowlists source='claude' (Claude
+ * main-agent cost only). claude-subagent and non-Claude providers
+ * (codex/opencode/cursor/pi) carry distinct source values and are excluded
+ * from the cost denominator - their turns may still appear in the grouping
+ * but contribute $0, so they never enter the routable totals.
  */
 export const fetchRoutability = Effect.fn("queries.fetchRoutability")(
     function* (input: RoutabilityInput) {
@@ -308,7 +309,7 @@ export const fetchRoutability = Effect.fn("queries.fetchRoutability")(
             }
         }
 
-        // ---- usage map + subagent session classification ------------------
+        // ---- usage map (Claude main turns only; allowlisted in TURN_USAGE_SQL)
         interface UsageData {
             readonly prompt_tokens: number;
             readonly completion_tokens: number;
@@ -317,15 +318,10 @@ export const fetchRoutability = Effect.fn("queries.fetchRoutability")(
             readonly cost_usd: number;
         }
         const usageByTurn = new Map<string, UsageData>();
-        const subagentSessionIds = new Set<string>();
 
         for (const row of usageRows ?? []) {
             const tid = String(row.turn_id ?? "");
-            const sid = String(row.session_id ?? "");
             if (!tid) continue;
-            if (String(row.source ?? "") === "claude-subagent") {
-                subagentSessionIds.add(sid);
-            }
             usageByTurn.set(tid, {
                 prompt_tokens: Number(row.prompt_tokens ?? 0),
                 completion_tokens: Number(row.completion_tokens ?? 0),
@@ -335,20 +331,23 @@ export const fetchRoutability = Effect.fn("queries.fetchRoutability")(
             });
         }
 
-        // ---- group turns by session (main only), preserving DB seq order --
+        // ---- group turns by session, preserving DB seq order -------------
+        // Non-Claude / subagent turns have no usage row (claude-only allowlist)
+        // so they contribute $0 cost; they never enter the routable denominator.
         const turnsBySession = new Map<string, TurnFacts[]>();
         for (const row of turnRows ?? []) {
             const turnId = String(row.turn_id ?? "");
             const sessionId = String(row.session_id ?? "");
             if (!turnId || !sessionId) continue;
-            if (subagentSessionIds.has(sessionId)) continue;
 
             const usg = usageByTurn.get(turnId);
             const tf: TurnFacts = {
                 seq: Number(row.seq ?? 0),
                 role: String(row.role ?? ""),
                 toolNames: toolsByTurn.get(turnId) ?? [],
-                thinkingTokens: Number(row.thinking_tokens ?? 0),
+                // thinking signal dropped (dead: 0 on ~97% of turns); field kept
+                // for test fixtures / future reasoning signal.
+                thinkingTokens: 0,
                 intentKind: row.intent_kind == null ? null : String(row.intent_kind),
                 text: row.text == null ? null : String(row.text),
                 usage: usg ?? null,
