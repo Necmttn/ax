@@ -120,11 +120,12 @@
     gap: 6px; padding: 16px 0; background: var(--surface);
 }
 .v-mc-rail .logo { font-family: var(--serif); font-size: 22px; font-weight: 700; color: var(--display); margin-bottom: 14px; }
-.v-mc-rail button {
+.v-mc-rail button, .v-mc-rail a {
     width: 38px; height: 38px; border-radius: 10px; border: 1px solid transparent; background: none; color: var(--dim);
     font-family: var(--mono); font-size: 15px; cursor: pointer; display: grid; place-items: center; transition: 0.15s var(--ease);
+    text-decoration: none;
 }
-.v-mc-rail button.on, .v-mc-rail button:hover { color: var(--display); border-color: var(--border-hi); background: var(--surface2); }
+.v-mc-rail button.on, .v-mc-rail button:hover, .v-mc-rail a.on, .v-mc-rail a:hover { color: var(--display); border-color: var(--border-hi); background: var(--surface2); }
 .v-mc-main { padding: 18px; display: flex; flex-direction: column; gap: 12px; min-width: 0; }
 .v-mc-top { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
 .v-mc-crumb { font-family: var(--mono); font-size: 12px; letter-spacing: 0.08em; color: var(--sec); text-transform: uppercase; }

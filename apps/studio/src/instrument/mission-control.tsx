@@ -6,13 +6,21 @@
  */
 import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { Link } from "@tanstack/react-router";
 import { api } from "../api.ts";
 import type { WrappedProfile, WrappedUsageDay } from "@ax/lib/shared/dashboard-types";
 import { fmtCount } from "@ax/lib/shared/formatters";
 import { CellGrid, GlyphReel, Led, Segbar, modelColor } from "./viz.tsx";
 import "./instrument.css";
 
-const RAIL = ["◢", "≣", "◷", "⎈", "✦", "⚙"];
+const RAIL = [
+    { g: "◢", to: "/", label: "mission control", exact: true },
+    { g: "≣", to: "/sessions", label: "sessions" },
+    { g: "◷", to: "/workflow", label: "workflow" },
+    { g: "⎈", to: "/improve", label: "improve" },
+    { g: "✦", to: "/skills", label: "skills" },
+    { g: "⚙", to: "/lab", label: "lab" },
+] as const;
 const p2 = (n: number) => String(n).padStart(2, "0");
 const seedFrom = (s: string) => { let h = 2166136261; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); } return h >>> 0; };
 const hourLabel = (h: number | null) => (h == null ? "n/a" : `${h % 12 === 0 ? 12 : h % 12} ${h < 12 ? "AM" : "PM"}`);
@@ -144,7 +152,13 @@ export function MissionControl() {
             <div className="v-mc">
                 <nav className="v-mc-rail">
                     <div className="logo">ax</div>
-                    {RAIL.map((g, i) => <button key={i} className={i === 0 ? "on" : ""} type="button">{g}</button>)}
+                    {RAIL.map((r) => (
+                        <Link key={r.to} to={r.to} title={r.label} aria-label={r.label}
+                            activeOptions={{ exact: (r as { exact?: boolean }).exact ?? false }}
+                            activeProps={{ className: "on" }}>
+                            {r.g}
+                        </Link>
+                    ))}
                 </nav>
                 <main className="v-mc-main">
                     {q.isLoading && !data ? <div className="rdx-label" style={{ padding: 24 }}>loading…</div> : null}

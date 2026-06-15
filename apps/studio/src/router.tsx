@@ -68,7 +68,7 @@ function StudioIndexRoute() {
     if (search.shareOwner && search.gistId) {
         return <ShareInspectView owner={search.shareOwner} gistId={search.gistId} />;
     }
-    return <WrappedRoute />;
+    return <MissionControl />;
 }
 
 const skillsRoute = createRoute({
