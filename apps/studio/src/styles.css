@@ -4033,10 +4033,16 @@ td.skill-cell .description {
    the rest of the kit: green accent, orange = alert only, no coloured chrome.
    ========================================================================= */
 .rdx .sessions-instrument { border: 0; background: transparent; padding: 0; }
-/* overflow:visible keeps the body as the vertical scroll container so the
-   thead can be viewport-sticky; the table just spills horizontally on a
-   too-narrow viewport (rare on the desktop target). */
-.rdx .sessions-instrument .sx-scroll { overflow: visible; }
+/* Contained scroll pane: the table scrolls inside its own box on BOTH axes, so
+   (a) the sticky thead pins to the top of this pane, and (b) the wide table
+   never overflows the dark .rdx shell horizontally (which would expose the
+   light page body to the right). max-height leaves room for the masthead +
+   controls above. */
+.rdx .sessions-instrument .sx-scroll {
+    overflow: auto;
+    max-height: calc(100dvh - 196px);
+    overscroll-behavior: contain;
+}
 .rdx .sessions-instrument table.sx-sessions {
     width: 100%;
     min-width: 1280px;
@@ -4044,9 +4050,12 @@ td.skill-cell .description {
     font-family: var(--sans);
     font-size: 13px;
 }
-/* sticky column-header row: pins to the top of the page scroll while the
-   list scrolls under it. Opaque page bg masks the rows; hairline + faint
-   shadow separate it once content is beneath. */
+/* The Doto hero is a short 2-line block; center the masthead row so the big
+   number sits against the title instead of floating above its baseline. */
+.rdx .sessions-instrument .inst-head-top { align-items: center; }
+/* sticky column-header row: pins to the top of the scroll pane while the
+   list scrolls under it. Opaque page bg masks the rows; hairline separates
+   it once content is beneath. */
 .rdx .sessions-instrument table.sx-sessions thead th {
     position: sticky;
     top: 0;
