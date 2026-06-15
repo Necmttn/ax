@@ -1,0 +1,479 @@
+/* ============================================================================
+   THROWAWAY redesign prototype - nullframe-derived ax design system.
+   Scoped under .rdx so it never touches the real globals. Dark + light via
+   data-theme. Source grammar: github.com/m1ckc3s/nullframe (MIT).
+   ========================================================================= */
+@font-face {
+    font-family: "Doto";
+    font-style: normal;
+    font-weight: 100 900;
+    font-display: swap;
+    src: url("../assets/fonts/doto.woff2") format("woff2");
+}
+
+.rdx {
+    --doto: "Doto", ui-monospace, monospace;
+    --mono: ui-monospace, "SF Mono", Menlo, Monaco, monospace;
+    --serif: Georgia, "Times New Roman", serif;
+    --sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+    --ease: cubic-bezier(0.4, 0, 0.2, 1);
+    --ease-back: cubic-bezier(0.34, 1.56, 0.64, 1);
+    min-height: 100dvh;
+    background: var(--bg);
+    color: var(--pri);
+    font-family: var(--sans);
+    -webkit-font-smoothing: antialiased;
+}
+/* ax identity: GREEN is the primary accent (not nullframe orange). Orange is
+   demoted to --alert (rec / live-energy / warnings) so the palette reads ax,
+   not "generic dark HUD". */
+.rdx[data-theme="dark"] {
+    --bg: #0b0d0b; --surface: #111311; --surface2: #181b18; --border: #1f241f; --border-hi: #31382f;
+    --dim: #5f685e; --sec: #939b8f; --pri: #e6e9e2; --display: #fff;
+    --accent: #56b06a; --alert: #f26522; --green: #56b06a; --red: #d7493b; --blue: #5b8fd6; --gold: #d6a14a; --violet: #9a86f0;
+    --dot: #1b211a; --glyph-dim: #232823; --glyph-lit: #eafff0;
+    --c0: #1a1f1a; --c1: #1e3526; --c2: #2c5639; --c3: #3f8a50; --c4: #62c878;
+}
+.rdx[data-theme="light"] {
+    --bg: #f1efe6; --surface: #fbfaf4; --surface2: #ffffff; --border: #dbd8cc; --border-hi: #c6c3b3;
+    --dim: #a4a195; --sec: #66695f; --pri: #272a24; --display: #0a0c09;
+    --accent: #2f9e44; --alert: #c85a1b; --green: #2f9e44; --red: #c0392b; --blue: #2567a8; --gold: #a66d10; --violet: #6650b8;
+    --dot: #e1ded2; --glyph-dim: #dad7cb; --glyph-lit: #173a22;
+    --c0: #e6e3d7; --c1: #cfe6d3; --c2: #9fd0aa; --c3: #5fb074; --c4: #2f9e44;
+}
+
+/* ---- primitives ---- */
+.rdx-doto { font-family: var(--doto); font-variant-numeric: tabular-nums; letter-spacing: 0.01em; }
+.rdx-mono { font-family: var(--mono); }
+
+@keyframes rdx-seg-in { to { transform: scale(1); opacity: 1; } }
+@keyframes rdx-slam { 60% { transform: scale(1.35); } to { transform: scale(1); } }
+@keyframes rdx-wave { 0%, 100% { filter: brightness(0.55); } 50% { filter: brightness(1.3); } }
+@keyframes rdx-led { 0%, 100% { opacity: 1; } 50% { opacity: 0.2; } }
+@keyframes rdx-card-in { from { opacity: 0; transform: translateY(14px) scale(0.97); } to { opacity: 1; transform: none; } }
+@keyframes rdx-shine { 0% { left: -140px; opacity: 1; } 100% { left: 110%; opacity: 0; } }
+
+.rdx-seg { display: flex; gap: 3px; height: 12px; }
+.rdx-seg i { flex: 1; background: var(--border); transform: scale(0.3); opacity: 0; animation: rdx-seg-in 0.3s var(--ease-back) forwards; }
+.rdx-seg.accent i.on { background: var(--accent); }
+.rdx-seg.alert i.on { background: var(--alert); }
+.rdx-seg.green i.on { background: var(--green); }
+.rdx-seg.pri i.on { background: var(--pri); }
+.rdx-seg.wave i.on { animation: rdx-seg-in 0.3s var(--ease-back) forwards, rdx-wave 2.4s var(--ease) infinite; }
+
+.rdx-cells { display: grid; align-content: center; justify-content: start; }
+.rdx-cells i { display: block; border-radius: 2px; background: var(--c0); transform: scale(0); animation: rdx-slam 0.38s var(--ease-back) forwards; transition: background 0.5s var(--ease); }
+.rdx-cells i.lvl-1 { background: var(--c1); }
+.rdx-cells i.lvl-2 { background: var(--c2); }
+.rdx-cells i.lvl-3 { background: var(--c3); }
+.rdx-cells i.lvl-4 { background: var(--c4); }
+.rdx-cells i.glim { background: var(--display); transition: background 0.12s var(--ease); }
+
+/* Canvas is absolutely positioned so its intrinsic (bitmap) height can never
+   feed back into the parent's height - that loop made the glyph grow forever
+   when an ancestor height wasn't definite. Parent just needs position+size. */
+.rdx-glyph { position: relative; width: 100%; height: 100%; min-height: 0; overflow: hidden; }
+.rdx-glyph canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+
+.rdx-led { width: 8px; height: 8px; border-radius: 50%; background: var(--green); display: inline-block; animation: rdx-led 2.4s var(--ease) infinite; flex: none; }
+.rdx-led.accent { background: var(--accent); }
+.rdx-led.alert { background: var(--alert); width: 7px; height: 7px; animation-duration: 1.6s; }
+.rdx-led.red { background: var(--red); width: 7px; height: 7px; animation-duration: 1.6s; }
+
+/* receipt / ledger motif - the ax signature: dotted tear-lines + provenance
+   stamps that frame telemetry like a printed receipt. */
+.rdx-tear { height: 0; border: 0; border-top: 1.5px dashed var(--border-hi); margin: 0; opacity: 0.8; }
+.rdx-stamp { font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--dim); }
+.rdx-sigil { width: 100%; height: 100%; }
+
+.rdx-label { font-family: var(--mono); font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--sec); }
+.rdx-dim { color: var(--dim); }
+
+/* generic card */
+.rdx-card {
+    position: relative; overflow: hidden; background: var(--surface); border: 1px solid var(--border);
+    border-radius: 16px; padding: 18px; display: flex; flex-direction: column; gap: 10px;
+    opacity: 0; animation: rdx-card-in 0.5s var(--ease-back) forwards; transition: border-color 0.18s var(--ease);
+}
+.rdx-card:hover { border-color: var(--border-hi); }
+.rdx-card::after {
+    content: ""; position: absolute; inset: -30% auto -30% -140px; width: 110px;
+    background: linear-gradient(100deg, transparent, color-mix(in srgb, var(--display) 10%, transparent) 50%, transparent);
+    transform: skewX(-14deg); opacity: 0; pointer-events: none;
+}
+.rdx-card:hover::after { animation: rdx-shine 1s var(--ease) forwards; }
+.rdx-metric { font-family: var(--mono); font-weight: 700; font-size: 34px; line-height: 1; color: var(--display); letter-spacing: -0.02em; }
+.rdx-metric small { font-size: 13px; font-weight: 400; color: var(--sec); margin-left: 5px; }
+.rdx-num { font-family: var(--doto); font-variant-numeric: tabular-nums; font-weight: 600; font-size: 50px; line-height: 1; color: var(--display); }
+.rdx-num small { font-size: 18px; vertical-align: super; color: var(--sec); margin-left: 3px; }
+
+@media (prefers-reduced-motion: reduce) {
+    .rdx-seg i, .rdx-seg.wave i.on, .rdx-cells i, .rdx-led, .rdx-card { animation: none !important; opacity: 1; transform: none; }
+}
+
+/* ===========================================================================
+   VARIANT A - Mission Control (desktop HUD: icon rail + dense bento)
+   ========================================================================= */
+.v-mc { display: grid; grid-template-columns: 60px 1fr; min-height: 100dvh; }
+.v-mc-rail {
+    border-right: 1px solid var(--border); display: flex; flex-direction: column; align-items: center;
+    gap: 6px; padding: 16px 0; background: var(--surface);
+}
+.v-mc-rail .logo { font-family: var(--serif); font-size: 22px; font-weight: 700; color: var(--display); margin-bottom: 14px; }
+.v-mc-rail button {
+    width: 38px; height: 38px; border-radius: 10px; border: 1px solid transparent; background: none; color: var(--dim);
+    font-family: var(--mono); font-size: 15px; cursor: pointer; display: grid; place-items: center; transition: 0.15s var(--ease);
+}
+.v-mc-rail button.on, .v-mc-rail button:hover { color: var(--display); border-color: var(--border-hi); background: var(--surface2); }
+.v-mc-main { padding: 18px; display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.v-mc-top { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.v-mc-crumb { font-family: var(--mono); font-size: 12px; letter-spacing: 0.08em; color: var(--sec); text-transform: uppercase; }
+.v-mc-crumb b { color: var(--display); }
+.v-mc-bento { display: grid; grid-template-columns: repeat(4, 1fr); grid-auto-rows: 150px; gap: 12px; }
+.v-mc-bento .span2 { grid-column: span 2; }
+.v-mc-bento .row2 { grid-row: span 2; }
+.v-mc-hero { background-image: radial-gradient(circle, var(--dot) 1.1px, transparent 1.1px); background-size: 16px 16px; background-position: 8px 8px; justify-content: space-between; }
+.v-mc-hero-art { flex: 1; min-height: 70px; }
+.v-mc-hero-name { font-family: var(--serif); font-size: 26px; color: var(--display); }
+.v-mc-feed { font-family: var(--mono); font-size: 12px; display: flex; flex-direction: column; gap: 8px; overflow: hidden; }
+.v-mc-feed-row { display: flex; justify-content: space-between; gap: 12px; }
+.v-mc-feed-row .k { flex: none; color: var(--dim); }
+.v-mc-feed-row .feat { color: var(--green); }
+.v-mc-feed-row .fix { color: var(--accent); }
+.v-mc-split { gap: 7px; }
+.v-mc-split-row { display: grid; grid-template-columns: 1fr auto; gap: 8px 10px; align-items: center; font-family: var(--mono); font-size: 11px; color: var(--sec); }
+.v-mc-split-row .segwrap { grid-column: 1 / -1; }
+.v-mc-meta { display: flex; justify-content: space-between; align-items: baseline; }
+.v-mc-bottom { margin-top: auto; }
+
+/* ===========================================================================
+   VARIANT B - Editorial Instrument (ax receipts evolved, light-first)
+   ========================================================================= */
+.v-ed { max-width: 1080px; margin: 0 auto; padding: 40px 32px 80px; }
+.v-ed-kicker { display: flex; justify-content: space-between; font-family: var(--mono); font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--sec); padding-bottom: 12px; border-bottom: 1px solid var(--border); }
+.v-ed-live { display: inline-flex; gap: 7px; align-items: center; color: var(--green); }
+.v-ed-name { font-family: var(--serif); font-size: clamp(46px, 7vw, 76px); font-weight: 400; letter-spacing: -2px; line-height: 1.02; margin: 24px 0 6px; color: var(--display); }
+.v-ed-name .at { color: var(--dim); font-size: 0.55em; vertical-align: 0.22em; }
+.v-ed-sub { display: flex; justify-content: space-between; align-items: baseline; flex-wrap: wrap; gap: 10px; padding-bottom: 20px; border-bottom: 3px double var(--pri); font-family: var(--mono); font-size: 12px; color: var(--sec); }
+.v-ed-chips { display: inline-flex; gap: 6px; }
+.v-ed-chip { border: 1px solid var(--border); background: var(--surface); padding: 3px 9px; font-size: 11px; }
+.v-ed-ledger { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); border-bottom: 1px solid var(--border); }
+.v-ed-vital { padding: 22px 18px 18px 0; display: flex; flex-direction: column; gap: 6px; }
+.v-ed-vital + .v-ed-vital { padding-left: 18px; border-left: 1px solid var(--border); }
+.v-ed-vital .n { font-family: var(--doto); font-variant-numeric: tabular-nums; font-weight: 600; font-size: 30px; line-height: 1.05; color: var(--display); }
+.v-ed-vital .n small { font-family: var(--mono); font-size: 13px; font-weight: 400; color: var(--sec); }
+.v-ed-vital .l { font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--sec); }
+.v-ed-section { margin-top: 56px; }
+.v-ed-h { display: flex; align-items: baseline; gap: 14px; margin-bottom: 18px; }
+.v-ed-h .n { font-family: var(--mono); font-size: 12px; color: var(--accent); }
+.v-ed-h h2 { font-family: var(--serif); font-size: 30px; font-weight: 400; margin: 0; color: var(--display); }
+.v-ed-h .rule { flex: 1; border-top: 1px solid var(--border); transform: translateY(-6px); }
+.v-ed-h .note { font-family: var(--mono); font-size: 11px; color: var(--sec); text-transform: uppercase; letter-spacing: 0.1em; }
+.v-ed-cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+.v-ed-card { border: 1px solid var(--border); background: var(--surface); display: flex; flex-direction: column; }
+.v-ed-card-art { height: 96px; border-bottom: 1px solid var(--border); background-image: radial-gradient(circle, var(--dot) 1.1px, transparent 1.1px); background-size: 13px 13px; }
+.v-ed-card-body { padding: 16px 18px 20px; display: flex; flex-direction: column; gap: 8px; }
+.v-ed-card-q { font-family: var(--mono); font-size: 12px; color: var(--accent); }
+.v-ed-card-a { font-family: var(--serif); font-size: 30px; line-height: 1.05; color: var(--display); }
+.v-ed-card-s { font-size: 13.5px; line-height: 1.5; color: var(--sec); }
+.v-ed-heat { display: flex; align-items: center; gap: 24px; flex-wrap: wrap; }
+.v-ed-heatmeta { font-family: var(--mono); font-size: 12px; color: var(--sec); display: flex; flex-direction: column; gap: 6px; }
+.v-ed-heatmeta b { font-family: var(--doto); font-size: 26px; color: var(--display); }
+
+/* ===========================================================================
+   VARIANT C - Terminal OS (windowed desktop shell)
+   ========================================================================= */
+.v-os { min-height: 100dvh; display: flex; flex-direction: column; }
+.v-os-menubar { display: flex; align-items: center; gap: 20px; padding: 7px 16px; border-bottom: 1px solid var(--border); background: var(--surface); font-family: var(--mono); font-size: 12.5px; color: var(--sec); }
+.v-os-menubar .logo { font-family: var(--serif); font-weight: 700; color: var(--display); font-size: 15px; }
+.v-os-menubar .spacer { flex: 1; }
+.v-os-menubar .item:hover { color: var(--display); cursor: default; }
+.v-os-menubar .pal { border: 1px solid var(--border-hi); border-radius: 7px; padding: 3px 10px; color: var(--pri); }
+.v-os-menubar .live { display: inline-flex; gap: 6px; align-items: center; color: var(--green); }
+.v-os-desk { flex: 1; padding: 16px; display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr); grid-auto-rows: min-content; gap: 14px; align-content: start; background-image: radial-gradient(circle, var(--dot) 1px, transparent 1px); background-size: 22px 22px; }
+.v-os-win { min-width: 0; border: 1px solid var(--border-hi); border-radius: 10px; background: var(--surface); overflow: hidden; box-shadow: 0 18px 40px -24px rgba(0,0,0,0.5); }
+.v-os-win.tall { grid-row: span 2; }
+.v-os-titlebar { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-bottom: 1px solid var(--border); background: var(--surface2); font-family: var(--mono); font-size: 12px; color: var(--sec); }
+.v-os-dots { display: flex; gap: 6px; }
+.v-os-dots i { width: 11px; height: 11px; border-radius: 50%; background: var(--border-hi); display: block; }
+.v-os-dots i:nth-child(1) { background: #e0556f; }
+.v-os-dots i:nth-child(2) { background: var(--gold); }
+.v-os-dots i:nth-child(3) { background: var(--green); }
+.v-os-title { font-weight: 600; color: var(--pri); }
+.v-os-tabbar { display: flex; gap: 2px; padding: 0 10px; border-bottom: 1px solid var(--border); background: var(--surface2); font-family: var(--mono); font-size: 12px; }
+.v-os-tabbar .tab { padding: 8px 12px; color: var(--sec); border-bottom: 2px solid transparent; }
+.v-os-tabbar .tab.on { color: var(--display); border-bottom-color: var(--accent); }
+.v-os-body { padding: 16px; }
+.v-os-prompt { font-family: var(--mono); font-size: 13px; line-height: 1.7; color: var(--pri); }
+.v-os-prompt .pfx { color: var(--green); }
+.v-os-prompt .out { color: var(--sec); }
+.v-os-statline { display: flex; gap: 16px; padding: 7px 16px; border-top: 1px solid var(--border); background: var(--surface); font-family: var(--mono); font-size: 11.5px; color: var(--dim); }
+.v-os-kv { display: grid; grid-template-columns: 1fr auto; gap: 6px 12px; font-family: var(--mono); font-size: 12.5px; }
+.v-os-kv .k { color: var(--sec); }
+.v-os-kv .v { color: var(--display); text-align: right; }
+
+/* ===========================================================================
+   Floating switcher (prototype-only)
+   ========================================================================= */
+.rdx-switch {
+    position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%); z-index: 100;
+    display: flex; align-items: center; gap: 4px; padding: 6px 8px; border-radius: 999px;
+    background: #000; color: #fff; border: 1px solid #333; box-shadow: 0 16px 40px -12px rgba(0,0,0,0.7);
+    font-family: ui-monospace, monospace; font-size: 13px;
+}
+.rdx-switch button { background: none; border: 0; color: #fff; cursor: pointer; padding: 6px 10px; border-radius: 999px; font: inherit; }
+.rdx-switch button:hover { background: #222; }
+.rdx-switch .lbl { padding: 0 10px; min-width: 168px; text-align: center; letter-spacing: 0.02em; }
+.rdx-switch .sep { width: 1px; height: 20px; background: #333; margin: 0 2px; }
+.rdx-switch .theme { display: inline-flex; align-items: center; gap: 6px; }
+
+/* ===========================================================================
+   SURFACE: Landing (marketing in the instrument-panel language)
+   ========================================================================= */
+.v-land { max-width: 1120px; margin: 0 auto; padding: 0 28px 90px; }
+.v-land-nav { display: flex; align-items: center; gap: 22px; padding: 20px 0; font-family: var(--mono); font-size: 13px; color: var(--sec); }
+.v-land-nav .logo { font-family: var(--serif); font-weight: 700; font-size: 21px; color: var(--display); }
+.v-land-nav .logo small { font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--dim); margin-left: 8px; }
+.v-land-nav .spacer { flex: 1; }
+.v-land-nav a { color: var(--sec); }
+.v-land-nav .cta { border: 1px solid var(--accent); color: var(--accent); border-radius: 8px; padding: 6px 14px; }
+.v-land-hero { display: grid; grid-template-columns: 1.1fr 0.9fr; gap: 40px; align-items: center; padding: 48px 0 36px; border-top: 1px solid var(--border); }
+@media (max-width: 860px) { .v-land-hero { grid-template-columns: 1fr; } }
+.v-land-kicker { font-family: var(--mono); font-size: 12px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--accent); display: inline-flex; gap: 8px; align-items: center; }
+.v-land-h1 { font-family: var(--serif); font-weight: 400; font-size: clamp(40px, 5.6vw, 68px); line-height: 1.02; letter-spacing: -1.5px; color: var(--display); margin: 18px 0 0; }
+.v-land-h1 em { font-style: italic; color: var(--accent); }
+.v-land-lede { font-size: 17px; line-height: 1.55; color: var(--sec); max-width: 46ch; margin: 20px 0 26px; }
+.v-land-install { border: 1px solid var(--border-hi); border-radius: 12px; background: var(--surface); overflow: hidden; max-width: 440px; }
+.v-land-install .bar { display: flex; justify-content: space-between; padding: 8px 14px; border-bottom: 1px solid var(--border); background: var(--surface2); font-family: var(--mono); font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--dim); }
+.v-land-install code { display: block; padding: 14px; font-family: var(--mono); font-size: 13.5px; color: var(--pri); }
+.v-land-install code b { color: var(--accent); font-weight: 400; }
+.v-land-herocard { align-self: center; border: 1px solid var(--border); border-radius: 16px; background: var(--surface); background-image: radial-gradient(circle, var(--dot) 1.1px, transparent 1.1px); background-size: 16px 16px; background-position: 8px 8px; padding: 20px; display: flex; flex-direction: column; gap: 16px; }
+.v-land-herocard .top { display: flex; justify-content: space-between; }
+.v-land-sigilwrap { flex: 1 1 auto; min-height: 150px; max-height: 220px; }
+.v-land-herostat { display: flex; gap: 18px; }
+.v-land-herostat .n { font-family: var(--doto); font-weight: 600; font-size: 30px; color: var(--display); }
+.v-land-herostat .l { font-family: var(--mono); font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--sec); }
+
+.v-land-strip { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1px; background: var(--border); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; margin: 14px 0 56px; }
+@media (max-width: 720px) { .v-land-strip { grid-template-columns: repeat(2, 1fr); } }
+.v-land-stat { background: var(--surface); padding: 16px 18px; display: flex; flex-direction: column; gap: 5px; }
+.v-land-stat .n { font-family: var(--doto); font-weight: 600; font-size: 26px; color: var(--display); }
+.v-land-stat .l { font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--sec); }
+
+.v-land-sech { display: flex; align-items: baseline; gap: 14px; margin: 0 0 22px; }
+.v-land-sech .n { font-family: var(--mono); font-size: 12px; color: var(--accent); }
+.v-land-sech h2 { font-family: var(--serif); font-weight: 400; font-size: 32px; margin: 0; color: var(--display); }
+.v-land-sech .rule { flex: 1; border-top: 1px solid var(--border); transform: translateY(-6px); }
+.v-land-feats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+@media (max-width: 860px) { .v-land-feats { grid-template-columns: 1fr; } }
+.v-land-feat { border: 1px solid var(--border); border-radius: 14px; background: var(--surface); padding: 18px; display: flex; flex-direction: column; gap: 10px; min-height: 200px; }
+.v-land-feat .ic { font-family: var(--mono); color: var(--accent); font-size: 18px; }
+.v-land-feat h3 { font-family: var(--serif); font-weight: 400; font-size: 21px; margin: 0; color: var(--display); }
+.v-land-feat p { font-size: 14px; line-height: 1.5; color: var(--sec); margin: 0; }
+.v-land-feat .viz { margin-top: auto; }
+
+/* ===========================================================================
+   SURFACE: Article (docs/prose + telemetry figures)
+   ========================================================================= */
+.v-art { max-width: 720px; margin: 0 auto; padding: 36px 28px 90px; }
+.v-art-crumb { font-family: var(--mono); font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--sec); display: flex; gap: 10px; }
+.v-art-crumb .accent { color: var(--accent); }
+.v-art h1 { font-family: var(--serif); font-weight: 400; font-size: clamp(34px, 5vw, 50px); line-height: 1.06; letter-spacing: -1px; color: var(--display); margin: 18px 0 10px; }
+.v-art-meta { display: flex; gap: 16px; font-family: var(--mono); font-size: 12px; color: var(--sec); padding-bottom: 20px; }
+.v-art-meta .live { display: inline-flex; gap: 6px; align-items: center; color: var(--accent); }
+.v-art p { font-size: 17px; line-height: 1.65; color: var(--pri); margin: 20px 0; }
+.v-art p .lead { }
+.v-art h2 { font-family: var(--serif); font-weight: 400; font-size: 27px; color: var(--display); margin: 40px 0 0; }
+.v-art code.inl { font-family: var(--mono); font-size: 0.88em; background: var(--surface); border: 1px solid var(--border); border-radius: 5px; padding: 1px 6px; color: var(--accent); }
+.v-art-pull { font-family: var(--serif); font-style: italic; font-size: 22px; line-height: 1.4; color: var(--display); border-left: 2px solid var(--accent); padding-left: 18px; margin: 28px 0; }
+
+/* figure: receipt-framed telemetry. THE article-figure house style. */
+.rdx-fig { border: 1px solid var(--border); border-radius: 14px; background: var(--surface); overflow: hidden; margin: 30px 0; }
+.rdx-fig-head { display: flex; justify-content: space-between; align-items: center; padding: 9px 14px; border-bottom: 1px solid var(--border); background: var(--surface2); }
+.rdx-fig-n { font-family: var(--mono); font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--accent); }
+.rdx-fig-src { font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--dim); display: inline-flex; gap: 7px; align-items: center; }
+.rdx-fig-body { padding: 20px; background-image: radial-gradient(circle, var(--dot) 1px, transparent 1px); background-size: 15px 15px; }
+.rdx-fig-cap { padding: 11px 14px; border-top: 1px dashed var(--border-hi); font-family: var(--mono); font-size: 12px; color: var(--sec); line-height: 1.5; }
+.rdx-fig-cap b { color: var(--pri); font-weight: 400; }
+.rdx-fig-lineage { display: flex; align-items: center; gap: 0; flex-wrap: wrap; font-family: var(--mono); font-size: 12px; }
+.rdx-fig-node { border: 1px solid var(--border-hi); border-radius: 7px; padding: 7px 11px; color: var(--pri); background: var(--surface2); }
+.rdx-fig-node.hot { border-color: var(--accent); color: var(--accent); }
+.rdx-fig-arrow { color: var(--dim); padding: 0 8px; }
+.rdx-fig-glyph { height: 130px; }
+
+/* ===========================================================================
+   SURFACE: Teams ("ring") — org instrument board + member roster.
+   Reuses the .v-mc rail/bento shell; adds an org header + roster table.
+   ========================================================================= */
+.v-team-org { display: flex; align-items: center; gap: 14px; }
+.v-team-org .crest { width: 34px; height: 34px; border: 1px solid var(--border-hi); border-radius: 9px; overflow: hidden; flex: none; }
+.v-team-org .name { font-family: var(--serif); font-size: 22px; color: var(--display); }
+.v-team-org .name b { color: var(--accent); font-weight: 400; }
+.v-team-org .ring { font-family: var(--mono); font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--dim); border: 1px solid var(--border); border-radius: 6px; padding: 3px 8px; }
+
+.v-team-roster { padding: 0; gap: 0; }
+.v-team-roster .rdx-label { padding: 16px 18px 12px; }
+.v-team-rt { width: 100%; border-collapse: collapse; font-family: var(--mono); font-size: 12.5px; }
+.v-team-rt th { text-align: left; font-weight: 400; font-size: 10px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--dim); padding: 0 16px 8px; border-bottom: 1px solid var(--border); }
+.v-team-rt th.r, .v-team-rt td.r { text-align: right; }
+.v-team-rt td { padding: 11px 16px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+.v-team-rt tr:last-child td { border-bottom: 0; }
+.v-team-rt tr:hover td { background: var(--surface2); }
+.v-team-who { display: flex; align-items: center; gap: 10px; }
+.v-team-who .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--dim); flex: none; }
+.v-team-who .dot.on { background: var(--green); box-shadow: 0 0 0 3px color-mix(in srgb, var(--green) 22%, transparent); }
+.v-team-who .h { color: var(--display); }
+.v-team-who .h small { color: var(--dim); margin-left: 7px; font-size: 11px; }
+.v-team-arch { color: var(--sec); }
+/* Doto discipline: dot-matrix is reserved for DISPLAY/hero numbers (large,
+   sparse). Dense/tabular numbers (this roster, inline values) stay in clean
+   tabular mono so Doto keeps its impact and the tables stay legible. */
+.v-team-num { font-family: var(--mono); font-variant-numeric: tabular-nums; color: var(--pri); font-size: 13px; }
+.v-team-model { border: 1px solid var(--border); border-radius: 6px; padding: 2px 7px; color: var(--sec); font-size: 11px; }
+.v-team-spark { display: inline-flex; gap: 2px; vertical-align: middle; }
+.v-team-spark i { width: 7px; height: 14px; border-radius: 1px; background: var(--c0); display: inline-block; }
+.v-team-spark i.lvl-1 { background: var(--c1); } .v-team-spark i.lvl-2 { background: var(--c2); }
+.v-team-spark i.lvl-3 { background: var(--c3); } .v-team-spark i.lvl-4 { background: var(--c4); }
+.v-team-rig-row { display: grid; grid-template-columns: 1fr 56px; gap: 8px 12px; align-items: center; font-family: var(--mono); font-size: 11.5px; color: var(--sec); }
+.v-team-rig-row .segwrap { grid-column: 1 / -1; margin-bottom: 4px; }
+.v-team-rig-row .pct { text-align: right; color: var(--pri); }
+
+/* ---- harness-logo field (kept from the current landing: floating provider
+   tiles that frame the hero — ax's "works with 5 harnesses" signature). ---- */
+.v-land-hero { position: relative; }
+/* Field sits ABOVE the hero content (z-index 3) so the tiles read as physical
+   chips floating over the panel - not faint marks tucked behind it. Tiles are
+   placed in negative space / overlapping panel edges, pointer-events: none. */
+.rdx-logofield { position: absolute; inset: -22px -10px -22px; z-index: 3; pointer-events: none; }
+.rdx-htile {
+    position: absolute; display: grid; place-items: center; width: 56px; height: 56px; border-radius: 15px;
+    background: var(--surface2); border: 1px solid var(--border-hi); color: color-mix(in srgb, var(--pri) 72%, transparent);
+    box-shadow: 0 18px 36px -16px rgba(0,0,0,0.55), 0 4px 10px -4px rgba(0,0,0,0.28);
+    /* gentle staggered idle drift - the animated floating logos from the
+       current landing. Each tile offset by its --i so they don't move in sync. */
+    animation: rdxDrift 6s ease-in-out infinite;
+    animation-delay: calc(var(--i, 0) * 0.7s);
+    will-change: transform;
+}
+.rdx[data-theme="light"] .rdx-htile { box-shadow: 0 1px 0 rgba(255,255,255,0.7) inset, 0 16px 32px -16px rgba(20,20,18,0.45); }
+.rdx-htile svg { width: 24px; height: 24px; }
+.rdx-htile--claude   { top: -22px; left: 2%;     color: var(--accent); }
+.rdx-htile--codex    { top: -26px; left: 47%; }
+.rdx-htile--cursor   { top: 118px; right: -1.5%; }
+.rdx-htile--pi       { top: 250px; left: -3.5%;  color: var(--accent); }
+.rdx-htile--opencode { bottom: -20px; left: 33%; }
+@keyframes rdxDrift {
+    0%, 100% { transform: translateY(0) rotate(-4deg); }
+    33% { transform: translateY(-9px) rotate(3deg); }
+    66% { transform: translateY(4px) rotate(-2deg); }
+}
+@media (prefers-reduced-motion: reduce) { .rdx-htile { animation: none; } }
+.v-land-hero > *:not(.rdx-logofield) { position: relative; z-index: 1; }
+@media (max-width: 980px) { .rdx-logofield { display: none; } }
+
+/* hero-card logo screen (the high-def dot-matrix that renders the harnesses).
+   A centred SQUARE so the square logo grid fills it cleanly + stays responsive,
+   instead of a stretched wide box where the grid drifted into a corner. */
+.v-land-screen { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; }
+.v-land-screen-canvas { width: min(100%, 260px); aspect-ratio: 1 / 1; }
+.v-land-screen-cap { text-align: center; color: var(--accent); }
+
+/* get-started steps under the install block */
+.v-land-steps { list-style: none; margin: 18px 0 0; padding: 0; display: flex; flex-direction: column; gap: 9px; max-width: 440px; }
+.v-land-steps li { display: flex; align-items: baseline; gap: 12px; font-size: 14px; color: var(--sec); line-height: 1.4; }
+.v-land-steps .k { font-family: var(--mono); font-size: 11px; color: var(--accent); letter-spacing: 0.1em; flex: none; }
+.v-land-steps code { font-family: var(--mono); font-size: 0.86em; color: var(--pri); background: var(--surface); border: 1px solid var(--border); border-radius: 5px; padding: 1px 6px; }
+
+/* ---- get-started: copy-setup-prompt pill (paste into your agent) ---- */
+.v-land-getstarted { margin-top: 26px; display: flex; flex-direction: column; gap: 12px; max-width: 480px; }
+.v-land-promptpill {
+    display: flex; align-items: center; gap: 14px; padding: 13px 18px; border-radius: 13px; cursor: pointer;
+    background: var(--accent); border: 1px solid var(--accent); color: #07140c;
+    font: 600 15px/1 var(--sans); transition: 0.16s var(--ease); text-align: left;
+}
+.rdx[data-theme="dark"] .v-land-promptpill { color: #06140b; }
+.v-land-promptpill:hover { filter: brightness(1.06); transform: translateY(-1px); }
+.v-land-promptpill.copied { background: var(--surface2); color: var(--accent); border-color: var(--accent); }
+.v-land-promptpill .icons { display: inline-flex; gap: 3px; }
+.v-land-promptpill .icons .i { width: 22px; height: 22px; display: grid; place-items: center; border-radius: 6px; background: rgba(0,0,0,0.16); }
+.v-land-promptpill.copied .icons { display: none; }
+.v-land-promptpill .icons .i svg { width: 14px; height: 14px; }
+.v-land-getstarted-foot { margin: 0; font-size: 13.5px; line-height: 1.5; color: var(--sec); }
+.v-land-altinstall { font-family: var(--mono); font-size: 12px; color: var(--dim); }
+.v-land-altinstall b { color: var(--accent); font-weight: 400; }
+
+/* ---- hero card: cycling harness-ingest (replaces the random dot glyph) ---- */
+.v-land-ingest { flex: 1 1 auto; min-height: 150px; max-height: 230px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 18px; }
+.v-land-ingest-grid { display: flex; gap: 12px; flex-wrap: wrap; justify-content: center; }
+.v-land-hchip {
+    width: 54px; height: 54px; border-radius: 14px; display: grid; place-items: center;
+    background: var(--surface2); border: 1px solid var(--border); color: color-mix(in srgb, var(--pri) 45%, transparent);
+    transition: 0.3s var(--ease);
+}
+.v-land-hchip svg { width: 24px; height: 24px; }
+.v-land-hchip.on {
+    border-color: var(--accent); color: var(--accent);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 20%, transparent), 0 10px 24px -12px color-mix(in srgb, var(--accent) 60%, transparent);
+    transform: translateY(-3px);
+}
+.v-land-ingest-cap { color: var(--accent); }
+
+/* cute staggered drift on the copy-prompt harness icons (from current landing);
+   speeds up to a live wiggle on hover. */
+.v-land-promptpill .icons .i { animation: rdxIconDrift 3s ease-in-out infinite; animation-delay: calc(var(--i, 0) * 0.18s); will-change: transform; }
+.v-land-promptpill:hover .icons .i, .v-land-promptpill:focus-visible .icons .i { animation-duration: 1.05s; }
+@keyframes rdxIconDrift {
+    0%, 100% { transform: translateY(0) rotate(0deg); }
+    30% { transform: translateY(-1.5px) rotate(-7deg); }
+    60% { transform: translateY(0.5px) rotate(5deg); }
+}
+@media (prefers-reduced-motion: reduce) { .v-land-promptpill .icons .i { animation: none; } }
+/* floating bg logo field removed per review */
+.rdx-logofield { display: none; }
+
+/* ---- multi-colour channel accents for the dashboard cards ----
+   Each card keys a --card-accent; a thin top-rule + accent segbar colour-code
+   it like a real instrument panel. Numbers stay display-white for legibility. */
+.rdx-card.acc-green  { --card-accent: var(--green); }
+.rdx-card.acc-blue   { --card-accent: var(--blue); }
+.rdx-card.acc-gold   { --card-accent: var(--gold); }
+.rdx-card.acc-violet { --card-accent: var(--violet); }
+.rdx-card.acc-rose   { --card-accent: #e0556f; }
+.rdx-card.acc-alert  { --card-accent: var(--alert); }
+/* No decorative card chrome - colour belongs to the DATA (segbars, cells,
+   charts), keyed to meaning (model identity, intensity, status). */
+.rdx-seg.card i.on { background: var(--card-accent); }
+.rdx-seg.tint i.on { background: var(--seg); }
+
+/* model legend swatch — colour tied to the model's data bar */
+.nf-swatch { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 8px; vertical-align: middle; }
+
+/* ---- scrollable list region for fixed-height cards ----
+   Lists that can outgrow their tile (model split, feed, roster) scroll inside
+   the card with a soft bottom fade (more-below indicator) + a thin scrollbar +
+   bottom padding, instead of being hard-clipped at the card edge. */
+.nf-list {
+    flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain;
+    padding-bottom: 10px;
+    -webkit-mask-image: linear-gradient(180deg, #000 calc(100% - 16px), transparent);
+    mask-image: linear-gradient(180deg, #000 calc(100% - 16px), transparent);
+}
+.nf-list::-webkit-scrollbar { width: 6px; }
+.nf-list::-webkit-scrollbar-thumb { background: var(--border-hi); border-radius: 3px; }
+.nf-list::-webkit-scrollbar-track { background: transparent; }
+.nf-list { scrollbar-width: thin; scrollbar-color: var(--border-hi) transparent; }
+
+/* ---- clock hero (nullframe-style live time band) ---- */
+.v-mc-clock {
+    padding: 22px 24px; gap: 0; justify-content: space-between; min-height: 230px;
+    background-image: radial-gradient(circle, var(--dot) 1.1px, transparent 1.1px);
+    background-size: 16px 16px; background-position: 8px 8px;
+}
+.v-mc-clock-top { display: flex; justify-content: space-between; gap: 16px; }
+.v-mc-clock-time { display: flex; align-items: center; justify-content: center; gap: 18px; flex: 1; }
+.v-mc-clock-time .t { font-family: var(--doto); font-variant-numeric: tabular-nums; font-weight: 500; font-size: clamp(56px, 9vw, 104px); line-height: 1; letter-spacing: -0.02em; color: var(--display); }
+.v-mc-clock-time .s { font-family: var(--doto); font-variant-numeric: tabular-nums; font-size: clamp(20px, 3vw, 34px); color: var(--sec); align-self: flex-end; padding-bottom: 14px; }
+.v-mc-clock-foot { display: flex; justify-content: space-between; align-items: flex-end; gap: 24px; }
+.v-mc-clock-foot .day { font-family: var(--serif); font-size: 26px; letter-spacing: -0.01em; color: var(--display); margin-bottom: 4px; }
+.v-mc-clock-foot .push { text-align: right; display: flex; flex-direction: column; gap: 4px; }
+.v-mc-clock-foot .push .sq { display: inline-block; width: 9px; height: 12px; background: var(--alert); margin-left: 7px; vertical-align: -1px; }
