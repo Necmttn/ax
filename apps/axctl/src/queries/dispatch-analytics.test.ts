@@ -1018,3 +1018,33 @@ describe("fetchDispatches model-drop join", () => {
         expect(result.dropped_cost_usd).toBeCloseTo(116.3);
     });
 });
+
+// ---------------------------------------------------------------------------
+// resolveDispatchModel integration: candidates exclude judgment work
+// ---------------------------------------------------------------------------
+import { resolveDispatchModel } from "@ax/hooks-sdk/resolve-dispatch-model";
+
+describe("candidates exclude judgment work", () => {
+    it("a judgment∩route-down dispatch is not a route-down candidate", () => {
+        const r = resolveDispatchModel(ROUTING_CLASSES, "implement design review feedback", null);
+        expect(r.tier).toBe("judgment");
+        const isCandidate = r.tier === "route-down" && r.match !== null;
+        expect(isCandidate).toBe(false);
+    });
+
+    it("a plain mechanical impl IS still a route-down candidate", () => {
+        const r = resolveDispatchModel(ROUTING_CLASSES, "implement the lmdb cache reader", null);
+        expect(r.tier).toBe("route-down");
+        const isCandidate = r.tier === "route-down" && r.match !== null;
+        expect(isCandidate).toBe(true);
+        expect(r.effectiveModel).toBe("sonnet");
+    });
+
+    it("economy loop uses the same judgment exclusion predicate", () => {
+        // "Add audit logging" matches feature-add (^Add ) AND judgment (audit) →
+        // both the candidates loop and the economy loop must skip it.
+        const r = resolveDispatchModel(ROUTING_CLASSES, "Add audit logging", null);
+        expect(r.tier).toBe("judgment");
+        expect(r.tier === "route-down" && r.match !== null).toBe(false);
+    });
+});

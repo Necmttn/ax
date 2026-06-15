@@ -24,6 +24,7 @@ import {
     type RoutingMatch,
     type RoutingTable,
 } from "@ax/hooks-sdk/routing-table";
+import { resolveDispatchModel } from "@ax/hooks-sdk/resolve-dispatch-model";
 import { estimateCost, type ModelPricing } from "../ingest/model-pricing.ts";
 import {
     defaultRoutingTablePath,
@@ -700,12 +701,17 @@ export const fetchDispatchCandidates = Effect.fn("queries.fetchDispatchCandidate
             // Candidate criterion (b): child model is expensive tier (fable/opus)
             if (!childModel || !EXPENSIVE_TIER_RE.test(childModel)) continue;
 
-            // Candidate criterion (c): description or agent_type matches a routing class
-            const routingMatch = matchRoutingWith(table, sp.description, sp.agent_type);
-            if (!routingMatch) continue;
+            // Candidate criterion (c): route-down class match AND not judgment work.
+            // Judgment dispatches (review/design/audit) are never routed down, even
+            // when their description also matches a route-down class (regex drift),
+            // so they are excluded from candidates / addressable overspend. Shares
+            // resolveDispatchModel with the route-dispatch hook so the two agree.
+            const resolution = resolveDispatchModel(table, sp.description, sp.agent_type);
+            if (resolution.tier !== "route-down" || !resolution.match) continue;
+            const routingMatch = resolution.match;
 
             // Resolve suggested model name
-            const suggestedAlias = routingMatch.suggest;
+            const suggestedAlias = resolution.effectiveModel ?? routingMatch.suggest;
             const suggestedModelName = MODEL_ALIASES[suggestedAlias] ?? suggestedAlias;
 
             // Reprice
@@ -929,9 +935,14 @@ export const fetchDispatchEconomy = Effect.fn("queries.fetchDispatchEconomy")(
             }
             if (dispatchModel !== "inherit") continue;
 
-            // Must match a routing class
-            const routingMatch = matchRoutingWith(table, sp.description, sp.agent_type);
-            if (!routingMatch) continue;
+            // Must match a route-down class AND not be judgment work. Judgment
+            // dispatches (review/design/audit) are never routed down, even when
+            // their description also matches a route-down class, so they are
+            // excluded from the routable set / overspend. Same resolveDispatchModel
+            // the candidates loop + the route-dispatch hook use (no drift).
+            const resolution = resolveDispatchModel(table, sp.description, sp.agent_type);
+            if (resolution.tier !== "route-down" || !resolution.match) continue;
+            const routingMatch = resolution.match;
 
             // Resolve child model
             const usage = usageByChildId.get(bareChild) ??
