@@ -24,7 +24,6 @@
  * classes (with the same corrupt-file guard as `ax routing compile`).
  */
 import { Effect, FileSystem, Path } from "effect";
-import { JUDGMENT_STRONG_RE } from "@ax/hooks-sdk/spend-mode";
 import {
     fetchDispatches,
     matchRoutingWith,
@@ -42,21 +41,34 @@ import {
 } from "./routing-table-io.ts";
 
 /**
- * Re-export the shared judgment regex from hooks-sdk/spend-mode (single source of truth).
+ * Broad SAFETY guard for unattended auto-apply - DELIBERATELY DIFFERENT from the
+ * hook's JUDGMENT_STRONG_RE (spend-mode.ts), not a duplicate to collapse.
  *
- * Behavioral delta vs the former local JUDGMENT_RE:
- *   Old: matched bare "review", "plan", "verif", "assess" in addition to the
- *        qualified review forms and design/audit/architect.../critique/judg...
- *   New (JUDGMENT_STRONG_RE): matches only qualified reviews (quality/PR/final/
- *        adversarial/code review), design, audit, architect..., critique, critic..., judg...
+ * The two consumers have opposite purposes:
+ *   - The route-dispatch hook uses JUDGMENT_STRONG_RE (narrow, review-focused): it
+ *     WANTS bare/spec review to route down to a cheaper model (that's an advisory
+ *     nudge, reversible by the operator). Narrow is correct there.
+ *   - routing-tune uses this broad guard: `ax routing tune` (bare, no flags)
+ *     auto-applies all NON-judgment proposals to ~/.ax/hooks/routing-table.json
+ *     UNATTENDED. A cluster wrongly classified as mechanical gets silently written
+ *     as a route-down-to-sonnet class. So the auto-apply gate must err toward
+ *     OVER-flagging: any cluster smelling of planning/review/verification/assessment
+ *     is diverted to the human/agent brief path (--emit-brief), never auto-applied.
  *
- * Effect on routing-tune: clusters whose keys contain bare "review", "plan", "verify",
- * or "assess" will no longer be auto-flagged as judgment. They will either
- * auto-apply (if non-judgment) or surface via --emit-brief for human review.
- * This is the defensible call: JUDGMENT_STRONG_RE is the authoritative signal;
- * routing-tune's --emit-brief + agent vetting is the backstop for ambiguous clusters.
+ * Matches bare "review", "plan", "verif", "assess" (with inflections), plus
+ * critique, critic, design, audit, architect, judg (each with a -wildcard) and
+ * the qualified reviews. This is the ORIGINAL pre-collapse pattern, restored
+ * after the regex-unification regression (a narrowed guard let "Plan", "Review",
+ * "Verify", and "Assess" clusters auto-apply as route-down classes).
  */
-export const JUDGMENT_RE = JUDGMENT_STRONG_RE;
+export const JUDGMENT_GUARD_RE =
+    /\b(review\w*|critique\w*|critic\w*|design\w*|plan(s|ned|ning)?|audit\w*|judg\w*|verif\w*|assess\w*|architect\w*)\b/i;
+
+/**
+ * Backward-compat alias. routing-tune's judgment flag uses JUDGMENT_GUARD_RE; this
+ * export name is kept for callers/tests that historically imported JUDGMENT_RE.
+ */
+export const JUDGMENT_RE = JUDGMENT_GUARD_RE;
 
 export interface TuneProposal {
     readonly id: string;
@@ -128,9 +140,11 @@ export const buildProposals = (
             .filter((d) => d.length > 0);
         // Judgment scans the key and EVERY row's description (not just the
         // first-3 examples) - one judgment-work member taints the cluster.
+        // Uses the BROAD JUDGMENT_GUARD_RE (not the hook's narrow regex): this
+        // gate decides what may be auto-applied unattended, so it must over-flag.
         const judgment =
-            JUDGMENT_RE.test(key) ||
-            rows.some((r) => r.description !== null && JUDGMENT_RE.test(r.description));
+            JUDGMENT_GUARD_RE.test(key) ||
+            rows.some((r) => r.description !== null && JUDGMENT_GUARD_RE.test(r.description));
         proposals.push({
             id: key.replace(/\s+/g, "-"),
             pattern: keyToPattern(key),

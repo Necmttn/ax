@@ -10,8 +10,11 @@
  *   readQuotaCacheSync - sync fail-open read of ~/.ax/quota-cache.json
  *   computeSpendMode   - pure mode decision
  *   DEFAULT_SPEND_CONFIG
- *   JUDGMENT_STRONG_RE - single regex for judgment-strong dispatches (shared
- *                        with routing-tune via index.ts re-export)
+ *   JUDGMENT_STRONG_RE - NARROW, review-focused regex for the HOOK ONLY. It
+ *                        deliberately wants bare/spec review to route down (an
+ *                        advisory nudge). routing-tune does NOT use this - it has
+ *                        its own BROAD JUDGMENT_GUARD_RE because its auto-apply
+ *                        gate must over-flag (see routing-tune.ts).
  */
 import { readFileSync } from "node:fs";
 
