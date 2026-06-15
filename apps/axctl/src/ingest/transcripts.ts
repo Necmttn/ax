@@ -47,7 +47,16 @@ import {
     type NormalizedTranscriptBatch,
     type NormalizedTurnWrite,
 } from "./normalized/transcripts.ts";
-import { isRecord, jsonText, numberField, parseJsonl, stringField } from "./normalized/toolkit.ts";
+import {
+    CLAUDE_TEXT_TYPES,
+    isRecord,
+    jsonText,
+    numberField,
+    parseJsonl,
+    stringField,
+    textFromContent,
+} from "./normalized/toolkit.ts";
+import { classifyUserText, FULL_CONTEXT_RULES } from "./normalized/message-kind.ts";
 import {
     buildTurnTokenUsageStatement,
     surrealOptionFloat,
@@ -192,39 +201,13 @@ function asContentBlocks(input: unknown): Record<string, unknown>[] {
     return Array.isArray(input) ? input.filter(isRecord) : [];
 }
 
-function textFromContent(input: unknown): string | null {
-    if (typeof input === "string") {
-        return input;
-    }
-    const text = asContentBlocks(input)
-        .filter((block) => stringField(block, "type") === "text")
-        .map((block) => stringField(block, "text"))
-        .filter((text): text is string => typeof text === "string" && text.length > 0)
-        .join("\n");
-    return text.length > 0 ? text : null;
-}
-
 function messageKind(role: string, content: unknown, textExcerpt: string | null): string {
     const blocks = asContentBlocks(content);
     if (blocks.length > 0 && blocks.every((block) => stringField(block, "type") === "tool_result")) {
         return "tool_result";
     }
     if (role === "user") {
-        if (textExcerpt?.startsWith("<command-name>")) {
-            return "control";
-        }
-        if (textExcerpt && (
-            textExcerpt.startsWith("# AGENTS.md instructions") ||
-            textExcerpt.startsWith("# CLAUDE.md") ||
-            textExcerpt.startsWith("<local-command-caveat>") ||
-            textExcerpt.startsWith("Base directory for this skill:") ||
-            textExcerpt.startsWith("Base directory for this plugin:") ||
-            textExcerpt.includes("<environment_context>") ||
-            textExcerpt.includes("<INSTRUCTIONS>")
-        )) {
-            return "context";
-        }
-        return "task";
+        return classifyUserText(textExcerpt, FULL_CONTEXT_RULES);
     }
     if (role === "assistant") return "assistant";
     return role;
@@ -947,7 +930,10 @@ function createClaudeExtractor(path: Path.Path, projectDir: string, sessionId: s
             const messageContent = message?.content;
             const content = asContentBlocks(messageContent);
 
-            const text = textFromContent(messageContent);
+            const text = textFromContent(messageContent, {
+                acceptedTypes: CLAUDE_TEXT_TYPES,
+                emptyStringIsNull: false,
+            });
             const textExcerpt = text === null ? null : text.slice(0, 500);
             let hasToolUse = false;
             let hasError = false;

@@ -24,8 +24,11 @@ import {
     numberField,
     parseJsonl,
     parseMaybeJson,
+    RESPONSES_TEXT_TYPES,
     stringField,
+    textFromContent,
 } from "./normalized/toolkit.ts";
+import { classifyUserText, PI_CONTEXT_RULES } from "./normalized/message-kind.ts";
 import {
     applyCommandFields,
     makeToolCallWrite,
@@ -184,20 +187,7 @@ function applyToolResult(call: MutableToolCallWrite, result: ToolResultFields): 
 }
 
 export function textFromPiContent(content: unknown): string | null {
-    if (typeof content === "string") return content.length > 0 ? content : null;
-    if (!Array.isArray(content)) return null;
-
-    const text = content
-        .filter(isRecord)
-        .filter((block) => {
-            const type = stringField(block, "type");
-            return type === "text" || type === "input_text" || type === "output_text";
-        })
-        .map((block) => stringField(block, "text"))
-        .filter((value): value is string => typeof value === "string" && value.length > 0)
-        .join("\n");
-
-    return text.length > 0 ? text : null;
+    return textFromContent(content, { acceptedTypes: RESPONSES_TEXT_TYPES, emptyStringIsNull: true });
 }
 
 function hasPiToolUse(content: unknown): boolean {
@@ -210,16 +200,7 @@ function piMessageKind(role: string, textExcerpt: string | null): string {
     if (role === "toolResult" || role === "tool_result") return "tool_result";
     if (role === "assistant") return "assistant";
     if (role === "user") {
-        if (textExcerpt?.startsWith("<command-name>")) return "control";
-        if (textExcerpt && (
-            textExcerpt.startsWith("# AGENTS.md instructions") ||
-            textExcerpt.startsWith("# CLAUDE.md") ||
-            textExcerpt.includes("<environment_context>") ||
-            textExcerpt.includes("<INSTRUCTIONS>")
-        )) {
-            return "context";
-        }
-        return "task";
+        return classifyUserText(textExcerpt, PI_CONTEXT_RULES);
     }
     return role;
 }

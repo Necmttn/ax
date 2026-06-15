@@ -3,6 +3,7 @@ import {
     booleanField,
     boundExcerpt,
     boundedExcerpt,
+    CLAUDE_TEXT_TYPES,
     coercedNumberField,
     intField,
     isRecord,
@@ -12,8 +13,10 @@ import {
     parseJsonRecord,
     parseJsonl,
     parseMaybeJson,
+    RESPONSES_TEXT_TYPES,
     stringArray,
     stringField,
+    textFromContent,
 } from "./toolkit.ts";
 
 describe("parser toolkit JSON access", () => {
@@ -129,5 +132,72 @@ describe("parser toolkit JSON access", () => {
         expect(stringArray(["a", 1, "b", null])).toEqual(["a", "b"]);
         expect(stringArray("a")).toBeNull();
         expect(stringArray(undefined)).toBeNull();
+    });
+});
+
+describe("textFromContent (collapsed 3 parser copies)", () => {
+    // claude preset: { acceptedTypes: CLAUDE_TEXT_TYPES, emptyStringIsNull: false }
+    const claude = (input: unknown) =>
+        textFromContent(input, { acceptedTypes: CLAUDE_TEXT_TYPES, emptyStringIsNull: false });
+    // codex preset: { acceptedTypes: RESPONSES_TEXT_TYPES, emptyStringIsNull: false }
+    const codex = (input: unknown) =>
+        textFromContent(input, { acceptedTypes: RESPONSES_TEXT_TYPES, emptyStringIsNull: false });
+    // pi preset: { acceptedTypes: RESPONSES_TEXT_TYPES, emptyStringIsNull: true }
+    const pi = (input: unknown) =>
+        textFromContent(input, { acceptedTypes: RESPONSES_TEXT_TYPES, emptyStringIsNull: true });
+
+    test("string passthrough - empty string preserved unless emptyStringIsNull", () => {
+        // claude/codex (emptyStringIsNull:false) keep the empty string bit-for-bit
+        expect(claude("")).toBe("");
+        expect(codex("")).toBe("");
+        // pi (emptyStringIsNull:true) collapses empty string to null - load-bearing drift trap
+        expect(pi("")).toBeNull();
+        // non-empty strings always pass through unchanged
+        expect(claude("hello")).toBe("hello");
+        expect(codex("hi")).toBe("hi");
+        expect(pi("hi")).toBe("hi");
+    });
+
+    test("array path joins accepted text blocks with newline, drops empties", () => {
+        expect(claude([{ type: "text", text: "a" }, { type: "text", text: "b" }])).toBe("a\nb");
+        expect(codex([{ type: "text", text: "a" }, { type: "text", text: "b" }])).toBe("a\nb");
+        expect(pi([{ type: "text", text: "a" }, { type: "text", text: "b" }])).toBe("a\nb");
+        // empty-string text blocks are filtered out → all-empty array yields null
+        expect(claude([{ type: "text", text: "" }])).toBeNull();
+        expect(codex([{ type: "text", text: "" }])).toBeNull();
+        expect(pi([{ type: "text", text: "" }])).toBeNull();
+    });
+
+    test("accepted-types matrix - claude accepts only 'text', responses accepts the 3 responses types", () => {
+        const responsesBlocks = [
+            { type: "input_text", text: "x" },
+            { type: "output_text", text: "y" },
+            { type: "text", text: "z" },
+        ];
+        // claude (CLAUDE_TEXT_TYPES) keeps only the plain 'text' block
+        expect(claude(responsesBlocks)).toBe("z");
+        // codex/pi (RESPONSES_TEXT_TYPES) keep all three, in order
+        expect(codex(responsesBlocks)).toBe("x\ny\nz");
+        expect(pi(responsesBlocks)).toBe("x\ny\nz");
+        // input_text alone: dropped by claude, kept by responses presets
+        expect(claude([{ type: "input_text", text: "only" }])).toBeNull();
+        expect(codex([{ type: "input_text", text: "only" }])).toBe("only");
+        expect(pi([{ type: "input_text", text: "only" }])).toBe("only");
+    });
+
+    test("unknown block types and non-record members are dropped", () => {
+        expect(claude([{ type: "thinking", thinking: "hidden" }])).toBeNull();
+        expect(codex([{ type: "tool_use", id: "t1" }])).toBeNull();
+        expect(pi([{ type: "toolCall", name: "x" }])).toBeNull();
+        // non-record array members are filtered by isRecord
+        expect(claude(["bare-string", 42, { type: "text", text: "kept" }])).toBe("kept");
+    });
+
+    test("non-array, non-string input is null", () => {
+        expect(claude(null)).toBeNull();
+        expect(codex(undefined)).toBeNull();
+        expect(pi(42)).toBeNull();
+        expect(claude({ type: "text", text: "x" })).toBeNull(); // bare record, not array
+        expect(claude([])).toBeNull();
     });
 });
