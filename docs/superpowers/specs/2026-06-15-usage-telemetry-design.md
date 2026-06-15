@@ -108,10 +108,10 @@ Each is a pure function over decoded rows (+ the registry for `unusedSurface`), 
 
 ## Status
 
-- [ ] schema: ax_invocation + SCHEMA_TABLES
-- [ ] model.ts + JSONL parse
-- [ ] record.ts (redact + append, fail-silent) + entrypoint wiring
-- [ ] usage-stage.ts (parse → rows, truncate, isolated) + registry
-- [ ] query.ts rollups
-- [ ] ax usage CLI (+ both cli-reference gates, docs)
-- [ ] dashboard Utilization route + studio view
+- [x] schema: ax_invocation + SCHEMA_TABLES
+- [x] model.ts + JSONL parse
+- [x] record.ts (redact + append, fail-silent) + entrypoint wiring
+- [x] usage-stage.ts (parse → rows, truncate, isolated) + registry
+- [x] query.ts rollups
+- [x] ax usage CLI (+ both cli-reference gates, docs)
+- [x] dashboard Utilization route + studio view
