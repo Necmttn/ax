@@ -3,21 +3,12 @@
  */
 import { describe, expect, it } from "bun:test";
 import { Effect, Layer } from "effect";
-import { SurrealClient, type SurrealClientShape } from "@ax/lib/db";
+import { SurrealClient } from "@ax/lib/db";
 import { makeTestSurrealClient } from "@ax/lib/testing/surreal";
 
 import { fetchThinking, reasoningCostUsd, rollupThinkingByModel } from "./thinking-analytics.ts";
 
 type QueryResult = Array<Record<string, unknown>>;
-
-/** Local mock: always returns the same results tuple from any db.query() call.
- *  Used for the pure-rollup tests that don't involve fetchSparSessionIds. */
-const makeMockDb = (results: QueryResult[]): Layer.Layer<SurrealClient> => {
-    const stub: SurrealClientShape = {
-        query: (_sql: string) => Effect.succeed(results as [QueryResult, ...QueryResult[]]),
-    } as unknown as SurrealClientShape;
-    return Layer.succeed(SurrealClient, stub);
-};
 
 const run = <A>(eff: Effect.Effect<A, unknown, SurrealClient>, layer: Layer.Layer<SurrealClient>) =>
     Effect.runPromise(eff.pipe(Effect.provide(layer)));
