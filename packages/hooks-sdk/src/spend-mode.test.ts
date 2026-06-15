@@ -25,6 +25,18 @@ describe("computeSpendMode", () => {
         const r = computeSpendMode(snap({ seven_day: { utilization: 80, resets_at: new Date(NOW + 12 * 3600_000).toISOString() } }), NOW, DEFAULT_SPEND_CONFIG);
         expect(r.mode).toBe("conserve"); // 100-80=20 not > 25
     });
+    test("conserve: headroom boundary - exactly 25% remaining is not > 25", () => {
+        // util=75 → 100-75=25, NOT > 25; near reset, no cap issues. Isolates the
+        // `> minRemainingPct` boundary (the 20%-left test trips cap too at util=80).
+        const r = computeSpendMode(snap({ seven_day: { utilization: 75, resets_at: new Date(NOW + 12 * 3600_000).toISOString() } }), NOW, DEFAULT_SPEND_CONFIG);
+        expect(r.mode).toBe("conserve");
+    });
+    test("conserve: malformed 5h window (non-finite utilization) fails safe → blocks splurge", () => {
+        // A present-but-garbage 5h window must count as near-cap (conserve), not
+        // fail open to splurge. 7d is splurge-eligible; the bad 5h window blocks it.
+        const r = computeSpendMode(snap({ five_hour: { utilization: Number.NaN, resets_at: new Date(NOW + 3600_000).toISOString() } }), NOW, DEFAULT_SPEND_CONFIG);
+        expect(r.mode).toBe("conserve");
+    });
     test("conserve: a window near its cap (5h at 85%) blocks splurge even with 7d headroom", () => {
         const r = computeSpendMode(snap({ five_hour: { utilization: 85, resets_at: new Date(NOW + 3600_000).toISOString() } }), NOW, DEFAULT_SPEND_CONFIG);
         expect(r.mode).toBe("conserve"); // capFloorPct=80, 85>=80

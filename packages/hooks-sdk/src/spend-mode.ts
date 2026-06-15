@@ -131,10 +131,15 @@ export const computeSpendMode = (
   const nearReset = resetMs - nowMs < config.nearResetMs7d;
   const headroom = 100 - sevenDay.utilization > config.minRemainingPct;
   const sevenNearCap = sevenDay.utilization >= config.capFloorPct;
+  // Fail safe toward conserve: a present-but-garbage 5h window (non-finite
+  // utilization) counts as near-cap (blocks splurge). A null/absent 5h window
+  // stays not-near-cap (no 5h signal - the 7d path is what gates splurge).
   const fiveNearCap =
-    snapshot.five_hour !== null && snapshot.five_hour !== undefined
-      ? snapshot.five_hour.utilization >= config.capFloorPct
-      : false;
+    snapshot.five_hour != null &&
+    !(
+      Number.isFinite(snapshot.five_hour.utilization) &&
+      snapshot.five_hour.utilization < config.capFloorPct
+    );
 
   if (nearReset && headroom && !sevenNearCap && !fiveNearCap) {
     return { mode: "splurge", reason: "7d reset soon with surplus", stale: false };
