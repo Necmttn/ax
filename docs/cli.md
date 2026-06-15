@@ -151,6 +151,22 @@ without being asked for:
   the raw snapshot. Install the hook with `ax hooks install
   <path>/surface-digest.ts --providers=claude,codex`.
 
+## Utilization
+
+`ax usage [--days=N] [--json]` shows your ax utilization for the last N days
+(default 30):
+
+- **Active days**: calendar days with at least one invocation.
+- **Top commands**: ranked by run count, up to 8 shown.
+- **Agent vs TTY split**: how many invocations came from an agent subshell vs
+  an interactive terminal.
+- **Never used**: visible top-level commands with zero invocations in the
+  window - the surface you haven't explored yet.
+
+Usage records are written by the CLI itself at every invocation (including
+failures) to `~/.ax/usage.jsonl`; `ax ingest` imports them into the
+`ax_invocation` table.  Run `ax ingest` first to see populated results.
+
 ## Dispatch model drops
 
 `ax dispatches` flags routed dispatches whose child ran legs on a different

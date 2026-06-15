@@ -37,6 +37,7 @@ import { LiveGroupLive } from "./live.ts";
 import { SessionsGroupLive } from "./sessions.ts";
 import { SkillsGroupLive } from "./skills.ts";
 import { ContractServeInfo, SystemGroupLive } from "./system.ts";
+import { UsageGroupLive } from "./usage.ts";
 
 /** Everything the contract handlers reach for; widens as families join. */
 export type ContractServices = SurrealClient;
@@ -71,6 +72,8 @@ const CONTRACT_ROUTES: ReadonlySet<string> = new Set([
     "GET /api/improve",
     "GET /api/next-actions",
     "GET /api/improve/analyze-brief",
+    // usage
+    "GET /api/usage",
     // live (SSE /api/events + binary /api/image stay raw legacy routes)
     "POST /api/ingest",
     // docs
@@ -137,6 +140,7 @@ export function makeContractWebHandler(opts: MakeContractWebHandlerOptions): Con
             SessionsGroupLive,
             SkillsGroupLive,
             ImproveGroupLive,
+            UsageGroupLive,
             LiveGroupLive,
         ]),
         // FileSystem/Path appear twice deliberately: in the mergeAll OUTPUT

@@ -22,6 +22,7 @@ import { CanvasRoute } from "./routes/canvas.tsx";
 import type { GraphExplorerMode } from "@ax/lib/shared/dashboard-types";
 import { MissionControl } from "./instrument/mission-control.tsx";
 import { ImproveRoute } from "./routes/improve.tsx";
+import { UsageRoute } from "./routes/usage.tsx";
 import { LabRoute } from "./routes/lab.tsx";
 import { SigilGalleryRoute } from "./routes/sigil-gallery.tsx";
 import { ReviewView } from "./routes/review-view.tsx";
@@ -200,6 +201,12 @@ const improveRoute = createRoute({
     component: ImproveRoute,
 });
 
+const usageRoute = createRoute({
+    getParentRoute: () => rootRoute,
+    path: "/usage",
+    component: UsageRoute,
+});
+
 const labRoute = createRoute({
     getParentRoute: () => rootRoute,
     path: "/lab",
@@ -258,6 +265,7 @@ const routeTree = rootRoute.addChildren([
     graphRoute,
     canvasRoute,
     improveRoute,
+    usageRoute,
     labRoute,
     sigilGalleryRoute,
     narrationDemoRoute,
