@@ -560,9 +560,115 @@
 .wr-ring-label { font-family: var(--mono); font-size: 9px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--sec); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .wr-ring-spark { width: 100%; height: 12px; display: block; opacity: 0.45; margin-top: 1px; }
 
+/* Radar - polar polygon over a faint web + per-axis legend bars */
+.wr-radar { width: 100%; height: 100%; display: flex; align-items: center; gap: 14px; }
+.wr-radar-svg { flex: none; width: 46px; height: 46px; overflow: visible; }
+.wr-radar-svg .web { fill: none; stroke: color-mix(in srgb, var(--border) 80%, var(--card-accent)); stroke-width: 0.7; }
+.wr-radar-svg .spoke { stroke: color-mix(in srgb, var(--border) 75%, transparent); stroke-width: 0.6; }
+.wr-radar-fill { fill: color-mix(in srgb, var(--card-accent) 26%, transparent); stroke: var(--card-accent); stroke-width: 1.4; stroke-linejoin: round; filter: drop-shadow(0 0 3px color-mix(in srgb, var(--card-accent) 40%, transparent)); transform-origin: 23px 23px; animation: wr-radar-breathe 4.2s var(--ease) infinite; }
+.wr-radar-node { fill: var(--card-accent); }
+.wr-radar-legend { flex: 1; min-width: 0; display: flex; flex-direction: column; justify-content: center; gap: 3px; }
+.wr-radar-bar { height: 3px; border-radius: 2px; background: color-mix(in srgb, var(--card-accent) 12%, var(--surface)); overflow: hidden; }
+.wr-radar-bar i { display: block; height: 100%; border-radius: 2px; background: var(--card-accent); transform-origin: left; animation: wr-bullet-grow 0.7s var(--ease) both; }
+@keyframes wr-radar-breathe { 0%, 100% { transform: scale(0.97); opacity: 0.92; } 50% { transform: scale(1.02); opacity: 1; } }
+
+/* Wave - oscilloscope trace over a graticule with a sweeping scan beam */
+.wr-wave-wrap { width: 100%; height: 100%; }
+.wr-wave { width: 100%; height: 100%; display: block; overflow: hidden; }
+.wr-wave-grat { stroke: var(--border); stroke-width: 1; vector-effect: non-scaling-stroke; }
+.wr-wave-grat.dash { stroke-dasharray: 2 3; opacity: 0.7; }
+.wr-wave-trace { stroke: var(--card-accent); stroke-width: 1.5; stroke-linejoin: round; stroke-linecap: round; filter: drop-shadow(0 0 3px color-mix(in srgb, var(--card-accent) 45%, transparent)); }
+.wr-wave-beam { fill: color-mix(in srgb, var(--card-accent) 16%, transparent); transform-origin: left; animation: wr-wave-sweep 3.6s linear infinite; }
+@keyframes wr-wave-sweep { 0% { transform: translateX(-30%); opacity: 0; } 12% { opacity: 1; } 92% { opacity: 1; } 100% { transform: translateX(620%); opacity: 0; } }
+
+/* Stream - two ribbons flowing around a wavy centreline */
+.wr-stream-wrap { width: 100%; height: 100%; }
+.wr-stream { width: 100%; height: 100%; display: block; }
+.wr-stream-up { fill: color-mix(in srgb, var(--card-accent) 48%, var(--surface)); animation: wr-stream-pulse 5s var(--ease) infinite; }
+.wr-stream-dn { fill: color-mix(in srgb, var(--card-accent) 20%, var(--surface)); animation: wr-stream-pulse 5s var(--ease) -2.5s infinite; }
+.wr-stream-mid { stroke: color-mix(in srgb, var(--card-accent) 80%, transparent); stroke-width: 1; vector-effect: non-scaling-stroke; }
+@keyframes wr-stream-pulse { 0%, 100% { opacity: 0.86; } 50% { opacity: 1; } }
+
+/* Scatter - measurement cloud over a mean baseline */
+.wr-scatter { position: relative; width: 100%; height: 100%; }
+.wr-scatter-svg { position: absolute; inset: 0; width: 100%; height: 100%; }
+.wr-scatter-mean { stroke: color-mix(in srgb, var(--card-accent) 38%, transparent); stroke-width: 1; stroke-dasharray: 3 3; }
+.wr-scatter-dots { position: absolute; inset: 0; }
+.wr-scatter-dot { position: absolute; width: 5px; height: 5px; margin: -2.5px 0 0 -2.5px; border-radius: 50%; background: color-mix(in srgb, var(--card-accent) 45%, var(--surface)); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--card-accent) 55%, transparent); transform: scale(0); animation: wr-dot-in 0.4s var(--ease-back) forwards; }
+.wr-scatter-dot.hot { background: var(--card-accent); box-shadow: 0 0 5px color-mix(in srgb, var(--card-accent) 60%, transparent); }
+@keyframes wr-dot-in { to { transform: scale(1); } }
+
+/* Bullet - actual-vs-target KPI track */
+.wr-bullet { display: flex; flex-direction: column; justify-content: center; gap: 8px; width: 100%; height: 100%; }
+.wr-bullet-track { position: relative; height: 12px; border-radius: 3px; overflow: hidden; display: flex; }
+.wr-bullet-band { height: 100%; }
+.wr-bullet-band.b1 { flex: 4; background: color-mix(in srgb, var(--border) 60%, var(--surface)); }
+.wr-bullet-band.b2 { flex: 3; background: color-mix(in srgb, var(--border) 90%, var(--surface)); }
+.wr-bullet-band.b3 { flex: 3; background: var(--border-hi); }
+.wr-bullet-fill { position: absolute; left: 0; top: 3px; bottom: 3px; border-radius: 2px; background: var(--card-accent); box-shadow: 0 0 6px color-mix(in srgb, var(--card-accent) 45%, transparent); transform-origin: left; animation: wr-bullet-grow 0.7s var(--ease) both; }
+.wr-bullet-tick { position: absolute; top: -2px; bottom: -2px; width: 2px; margin-left: -1px; background: var(--display); box-shadow: 0 0 0 1px var(--surface); }
+.wr-bullet-tick.ok { background: var(--card-accent); }
+.wr-bullet-foot { display: flex; align-items: baseline; gap: 6px; }
+.wr-bullet-val { font-family: var(--doto); font-size: 16px; line-height: 1; color: var(--card-accent); font-variant-numeric: tabular-nums; }
+@keyframes wr-bullet-grow { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+
+/* Comet - orbital progress with a fading trail + pulsing head */
+.wr-comet { width: 100%; height: 100%; display: flex; align-items: center; gap: 12px; }
+.wr-comet-svg { flex: none; width: 46px; height: 46px; overflow: visible; }
+.wr-comet-orbit { fill: none; stroke: var(--border); stroke-width: 1; }
+.wr-comet-trail { fill: none; stroke: var(--card-accent); stroke-width: 2; stroke-linecap: round; filter: drop-shadow(0 0 3px color-mix(in srgb, var(--card-accent) 50%, transparent)); }
+.wr-comet-head { fill: var(--display); stroke: var(--card-accent); stroke-width: 1.5; animation: wr-comet-pulse 2.2s var(--ease) infinite; transform-box: fill-box; transform-origin: center; }
+.wr-comet-meta { flex: 1; min-width: 0; display: grid; align-content: center; gap: 2px; }
+@keyframes wr-comet-pulse { 0%, 100% { filter: drop-shadow(0 0 1px var(--card-accent)); } 50% { filter: drop-shadow(0 0 5px var(--card-accent)); } }
+
+/* Waffle - column-major grid-fill share */
+.wr-waffle { display: flex; align-items: center; gap: 12px; width: 100%; height: 100%; }
+.wr-waffle-grid { flex: none; display: grid; grid-template-columns: repeat(var(--wc, 14), 1fr); grid-template-rows: repeat(var(--wr, 5), 1fr); gap: 2px; width: 130px; height: 100%; }
+.wr-waffle-cell { border-radius: 1px; background: color-mix(in srgb, var(--card-accent) 8%, var(--surface)); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--card-accent) 6%, transparent); }
+.wr-waffle-cell.on { background: var(--card-accent); animation: wr-waffle-in 0.3s var(--ease-back) both; }
+.wr-waffle-cell.lead { box-shadow: 0 0 6px color-mix(in srgb, var(--card-accent) 70%, transparent); animation: wr-waffle-in 0.3s var(--ease-back) both, wr-waffle-glint 2.4s var(--ease) 0.4s infinite; }
+.wr-waffle-meta { flex: 1; min-width: 0; display: grid; align-content: center; gap: 2px; }
+@keyframes wr-waffle-in { from { transform: scale(0.2); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+@keyframes wr-waffle-glint { 0%, 100% { filter: brightness(1); } 50% { filter: brightness(1.5); } }
+
+/* Candles - OHLC bodies with wicks, up/down toned */
+.wr-candles { position: relative; display: flex; align-items: stretch; justify-content: space-between; gap: min(4px, calc(60% / var(--cn, 8))); width: 100%; height: 100%; }
+.wr-candle { position: relative; flex: 1; min-width: 0; }
+.wr-candle-wick { position: absolute; left: 50%; width: 1px; margin-left: -0.5px; background: var(--sec); }
+.wr-candle-body { position: absolute; left: 1px; right: 1px; min-height: 2px; border-radius: 1px; transform-origin: center; animation: wr-candle-in 0.4s var(--ease-back) both; }
+.wr-candle.up .wr-candle-body { background: var(--card-accent); box-shadow: 0 0 4px color-mix(in srgb, var(--card-accent) 40%, transparent); }
+.wr-candle.up .wr-candle-wick { background: color-mix(in srgb, var(--card-accent) 70%, transparent); }
+.wr-candle.dn .wr-candle-body { background: color-mix(in srgb, var(--card-accent) 26%, var(--surface)); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--card-accent) 40%, transparent); }
+@keyframes wr-candle-in { from { transform: scaleY(0); opacity: 0; } to { transform: scaleY(1); opacity: 1; } }
+
+/* Signal - ascending reception bars + Doto strength */
+.wr-signal { width: 100%; height: 100%; display: flex; align-items: center; gap: 12px; }
+.wr-signal-bars { flex: none; display: flex; align-items: flex-end; gap: 3px; width: 46px; height: 100%; }
+.wr-signal-bar { flex: 1; border-radius: 1.5px; background: color-mix(in srgb, var(--card-accent) 10%, var(--surface)); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--card-accent) 8%, transparent); transform-origin: bottom; animation: wr-bars-rise 0.45s var(--ease) both; }
+.wr-signal-bar.on { background: var(--card-accent); }
+.wr-signal-bar.live { box-shadow: 0 0 6px color-mix(in srgb, var(--card-accent) 55%, transparent); animation: wr-bars-rise 0.45s var(--ease) both, wr-signal-blink 2.4s ease-in-out 0.6s infinite; }
+.wr-signal-meta { flex: 1; min-width: 0; display: grid; align-content: center; gap: 2px; }
+.wr-signal-n { font-family: var(--doto); font-size: 18px; line-height: 1; color: var(--display); font-variant-numeric: tabular-nums; display: flex; align-items: baseline; }
+.wr-signal-n i { font-style: normal; font-size: 10px; color: var(--sec); }
+@keyframes wr-signal-blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.55; } }
+
+/* Delta - big Doto figure + trend arrow over a micro-spark */
+.wr-delta { display: flex; flex-direction: column; justify-content: center; gap: 4px; width: 100%; height: 100%; }
+.wr-delta-num { display: flex; align-items: baseline; gap: 8px; }
+.wr-delta-val { font-family: var(--doto); font-size: 26px; line-height: 1; color: var(--display); font-variant-numeric: tabular-nums; }
+.wr-delta-trend { display: flex; align-items: center; gap: 3px; font-family: var(--mono); font-size: 12px; font-variant-numeric: tabular-nums; }
+.wr-delta-arrow { font-style: normal; font-size: 9px; }
+.wr-delta.up .wr-delta-trend { color: var(--card-accent); }
+.wr-delta.dn .wr-delta-trend { color: var(--sec); }
+.wr-delta.dn .wr-delta-arrow { color: var(--red); }
+.wr-delta-spark { width: 100%; height: 14px; display: block; opacity: 0.55; }
+
 @media (prefers-reduced-motion: reduce) {
-    .wr-bars i, .wr-meter-strip i { animation: none !important; opacity: 1; transform: none; }
-    .wr-line-pulse { animation: none; opacity: 0; }
+    .wr-bars i, .wr-meter-strip i, .wr-signal-bar, .wr-candle-body, .wr-bullet-fill, .wr-radar-bar i, .wr-scatter-dot, .wr-waffle-cell.on { animation: none !important; opacity: 1; transform: none; }
+    .wr-radar-bar i { transform: scaleX(1); }
+    .wr-line-pulse, .wr-wave-beam { animation: none; }
+    .wr-wave-beam { opacity: 0; }
+    .wr-radar-fill, .wr-stream-up, .wr-stream-dn, .wr-comet-head, .wr-waffle-cell.lead, .wr-signal-bar.live { animation: none; }
 }
 
 /* ---- archetype sigil (unique per-archetype dot-matrix) ---- */
