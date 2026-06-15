@@ -29,6 +29,10 @@ interface Fixture {
     cascadeRows?: Array<Record<string, unknown>>;
     /** Stored cascade watermark rows (ingest_file_state). */
     watermarkRows?: Array<Record<string, unknown>>;
+    /** OTLP metric point rows (otel_metric_point) for sessionTelemetryCost. */
+    otelMetricRows?: Array<Record<string, unknown>>;
+    /** OTLP log event rows (otel_log_event) for sessionTelemetryCost. */
+    otelLogRows?: Array<Record<string, unknown>>;
     sink?: string[];
     seenSql?: string[];
 }
@@ -52,6 +56,8 @@ const db = (fx: Fixture) =>
             if (/FROM \[turn:/.test(sql)) return Effect.succeed([fx.turns ?? []] as unknown as T);
             if (/FROM produced/.test(sql)) return Effect.succeed([fx.produced ?? []] as unknown as T);
             if (/FROM edited/.test(sql)) return Effect.succeed([fx.edited ?? []] as unknown as T);
+            if (/FROM otel_metric_point/.test(sql)) return Effect.succeed([fx.otelMetricRows ?? []] as unknown as T);
+            if (/FROM otel_log_event/.test(sql)) return Effect.succeed([fx.otelLogRows ?? []] as unknown as T);
             return Effect.succeed([[]] as unknown as T);
         },
     } as never);
@@ -95,7 +101,7 @@ describe("computeFragilityCascade (cross-namespace bridge)", () => {
             turns: [{ id: "turn:`tB`", session: "session:`B`" }],
         };
         const edges = await run(computeFragilityCascade(), fx);
-        expect(edges).toEqual([{ origin: "session:`A`", downstream: "session:`B`", weight: 1 }]);
+        expect(edges).toEqual([{ origin: "session:`A`", downstream: "session:`B`", weight: 1, downstream_cost_usd: null, downstream_tokens: null }]);
     });
 
     test("origin→downstream edges weighted by distinct downstream fixers (direct keys)", async () => {
@@ -189,7 +195,7 @@ describe("computeFragilityCascade (cross-namespace bridge)", () => {
             turns: [{ id: "turn:`tB`", session: "session:`B`" }],
         };
         const edges = await run(computeFragilityCascade(limits), fx);
-        expect(edges).toEqual([{ origin: "session:`A`", downstream: "session:`B`", weight: 1 }]);
+        expect(edges).toEqual([{ origin: "session:`A`", downstream: "session:`B`", weight: 1, downstream_cost_usd: null, downstream_tokens: null }]);
     });
 
     test("the edited query selects the RAW in (turn) ref - never an in.session deref", async () => {
@@ -251,8 +257,8 @@ describe("persist + read (derive-stage precompute)", () => {
         const sink: string[] = [];
         const written = await run(
             persistFragilityCascade([
-                { origin: "session:`A`", downstream: "session:`B`", weight: 2 },
-                { origin: "session:⟨a-b-c⟩", downstream: "session:`D`", weight: 1 },
+                { origin: "session:`A`", downstream: "session:`B`", weight: 2, downstream_cost_usd: null, downstream_tokens: null },
+                { origin: "session:⟨a-b-c⟩", downstream: "session:`D`", weight: 1, downstream_cost_usd: null, downstream_tokens: null },
             ]),
             { sink },
         );
@@ -338,6 +344,28 @@ describe("persist + read (derive-stage precompute)", () => {
                 { origin: null, downstream: "session:`B`", weight: 1 }, // malformed → dropped
             ],
         });
-        expect(edges).toEqual([{ origin: "session:`A`", downstream: "session:`B`", weight: 3 }]);
+        expect(edges).toEqual([{ origin: "session:`A`", downstream: "session:`B`", weight: 3, downstream_cost_usd: null, downstream_tokens: null }]);
+    });
+
+    test("readFragilityCascade enriches edges with downstream OTLP cost; missing telemetry → null", async () => {
+        const fx: Fixture = {
+            cascadeRows: [
+                { origin: "session:`A`", downstream: "session:`B`", weight: 3 },
+                { origin: "session:`A`", downstream: "session:`C`", weight: 1 }, // no OTLP data
+            ],
+            // OTLP metric rows for the B downstream session (bare id is "`B`")
+            otelMetricRows: [
+                { session_id: "`B`", metric: "claude_code.cost.usage", total: 0.042 },
+                { session_id: "`B`", metric: "claude_code.token.usage", total: 8200 },
+            ],
+            otelLogRows: [],
+        };
+        const edges = await run(readFragilityCascade(), fx);
+        const edgeB = edges.find((e) => e.downstream === "session:`B`")!;
+        const edgeC = edges.find((e) => e.downstream === "session:`C`")!;
+        expect(edgeB.downstream_cost_usd).toBeCloseTo(0.042);
+        expect(edgeB.downstream_tokens).toBe(8200);
+        expect(edgeC.downstream_cost_usd).toBeNull();
+        expect(edgeC.downstream_tokens).toBeNull();
     });
 });
