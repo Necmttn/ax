@@ -1,4 +1,4 @@
-import type { DigestItem, DigestKind } from "./model.ts";
+import type { DigestKind } from "./model.ts";
 
 /** Per-kind base weight. Tunable seed (spec §Ranking). */
 export const BASE_WEIGHT: Record<DigestKind, number> = {

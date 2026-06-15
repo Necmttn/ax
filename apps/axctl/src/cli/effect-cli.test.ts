@@ -198,10 +198,11 @@ describe("effect cli", () => {
     });
 
     test("resolveIngestStages: default runs every stage", () => {
-        // 27 = 24 original + agentDefStage (config-front-door agents domain)
+        // 28 = 24 original + agentDefStage (config-front-door agents domain)
         //    + deriveMetricsStage (graph-derived session metrics rollup)
-        //    + githubPrStage (restored GitHub PR ingest - issue #172).
-        expect(resolveIngestStages(testRegistry, [])).toHaveLength(27);
+        //    + githubPrStage (restored GitHub PR ingest - issue #172)
+        //    + digestStage (push-value digest snapshot writer).
+        expect(resolveIngestStages(testRegistry, [])).toHaveLength(28);
     });
 
     test("resolveIngestStages: local agent provider stages can be selected", () => {
@@ -224,6 +225,7 @@ describe("effect cli", () => {
             "classifier-results",
             "closure",
             "derive-metrics",
+            "digest",
             "harness",
             "invoked-positions",
             "opportunities",

@@ -35,6 +35,7 @@ Install: `curl -fsSL https://ax.necmttn.com/install | bash`, then `npx skills ad
 - `route-dispatch` hook - deterministic dispatch-time nudge when a mechanical dispatch forgets an explicit model
 - `ax costs summary | for --session/--query/--commit/--branch` - what any session, feature, or branch cost in tokens and USD
 - `ax quota [--statusline|--swiftbar|--json]` - live Claude plan usage (5h/7d windows) from the Anthropic usage endpoint, cached locally; one-line statusline output and a SwiftBar menubar plugin ship with it
+- `ax digest [--json|--refresh]` - your ranked digest board (improve proposals, routing savings, repair-loops, quota), written to ~/.ax/digest.json every ingest and pushed into the agent's context at session start by the surface-digest hook so value arrives without being asked for
 
 ### Profile
 - `ax profile show [--window=N] [--no-cost]` - your local agent profile rendered from the graph: usage stats, rig (skills/hooks/rules), and evidence-grounded taste patterns
