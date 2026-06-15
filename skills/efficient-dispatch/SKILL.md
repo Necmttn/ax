@@ -49,8 +49,14 @@ main-model judgment - otherwise pick sonnet.
    evidence format to return (files, line refs, commands, diffs, failures),
    verification commands, stop conditions.
 3. Set `model:` explicitly on every mechanical dispatch. The route-dispatch
-   hook warns when you forget - treat the warning as a re-dispatch signal,
-   not noise.
+   hook is quota-aware and ADVISORY (Claude Code hooks cannot enforce model on
+   subagent dispatches - they can only inject context via additionalContext):
+   in conserve mode it advises re-dispatching a forgotten mechanical dispatch
+   with `model:<cheaper>`; near a 7d quota reset (splurge) it stays quiet so
+   work runs on the strong inherited model; it advises when judgment work
+   (review/design/audit) is sent on a cheap model. Real enforcement is your
+   discipline + setting `model:` explicitly on every dispatch.
+   Treat the advisory as a re-dispatch signal, not noise.
 4. Treat subagent reports as leads. Before acting on a high-impact finding or
    declaring done, reopen the cited files and re-run the key verification
    yourself. Expect to find one real bug per delegated phase.

@@ -35,7 +35,22 @@ import {
   defaultQuotaCachePath,
   JUDGMENT_STRONG_RE,
   readQuotaCacheSync,
+  type SpendConfig,
 } from "../spend-mode.ts";
+
+/**
+ * Merge the table's optional spendMode block with DEFAULT_SPEND_CONFIG.
+ * Only fields present in the table override the default; absent keys fall back.
+ */
+const resolveSpendConfig = (tableSpendMode: Partial<SpendConfig> | undefined): SpendConfig =>
+  tableSpendMode === undefined
+    ? DEFAULT_SPEND_CONFIG
+    : {
+        stalenessMs: tableSpendMode.stalenessMs ?? DEFAULT_SPEND_CONFIG.stalenessMs,
+        nearResetMs7d: tableSpendMode.nearResetMs7d ?? DEFAULT_SPEND_CONFIG.nearResetMs7d,
+        minRemainingPct: tableSpendMode.minRemainingPct ?? DEFAULT_SPEND_CONFIG.minRemainingPct,
+        capFloorPct: tableSpendMode.capFloorPct ?? DEFAULT_SPEND_CONFIG.capFloorPct,
+      };
 
 // Re-exported for consumers (ax hooks tooling, tests) that historically
 // imported the schema from the hook file.
@@ -70,12 +85,15 @@ const hook = defineHook({
       const match = matchRoutingTable(table, description, subagentType);
       const judgmentStrong = description !== undefined && JUDGMENT_STRONG_RE.test(description);
 
+      // Resolve spend config: table overrides win over DEFAULT_SPEND_CONFIG.
+      const spendConfig = resolveSpendConfig(table.spendMode as Partial<SpendConfig> | undefined);
+
       // mode (conserve unless a fresh cache says splurge). Env override wins.
       const envMode = process.env.AX_SPEND_MODE;
       const computed = computeSpendMode(
         readQuotaCacheSync(defaultQuotaCachePath()),
         Date.now(),
-        DEFAULT_SPEND_CONFIG,
+        spendConfig,
       );
       const mode =
         envMode === "conserve" || envMode === "splurge" ? envMode : computed.mode;

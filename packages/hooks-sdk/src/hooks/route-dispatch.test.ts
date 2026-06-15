@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { Effect, Result, Schema } from "effect";
 import routeDispatch, { RoutingTableSchema } from "./route-dispatch.ts";
+import { SpendModeConfigSchema } from "../routing-table.ts";
 import { GitEnvTest } from "../git-env.ts";
 
 // ---------------------------------------------------------------------------
@@ -308,6 +309,67 @@ describe("defect handling", () => {
       ).pipe(Effect.provide(layer)),
     );
     expect(result.exitCode).toBe(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// spendMode block in routing table schema
+// ---------------------------------------------------------------------------
+
+describe("routing table spendMode schema", () => {
+  const decode = Schema.decodeUnknownResult(RoutingTableSchema);
+
+  test("routing table with spendMode block parses and field is present", () => {
+    const result = decode({
+      version: 1,
+      classes: [],
+      spendMode: {
+        stalenessMs: 120_000,
+        nearResetMs7d: 48 * 3600_000,
+        minRemainingPct: 30,
+        capFloorPct: 70,
+      },
+    });
+    expect(Result.isSuccess(result)).toBe(true);
+    if (Result.isSuccess(result)) {
+      expect(result.success.spendMode).toEqual({
+        stalenessMs: 120_000,
+        nearResetMs7d: 48 * 3600_000,
+        minRemainingPct: 30,
+        capFloorPct: 70,
+      });
+    }
+  });
+
+  test("routing table without spendMode parses (backward compat)", () => {
+    const result = decode({ version: 1, classes: [] });
+    expect(Result.isSuccess(result)).toBe(true);
+    if (Result.isSuccess(result)) {
+      expect(result.success.spendMode).toBeUndefined();
+    }
+  });
+
+  test("spendMode with partial overrides parses (absent keys allowed)", () => {
+    const result = decode({
+      version: 1,
+      classes: [],
+      spendMode: { nearResetMs7d: 48 * 3600_000 },
+    });
+    expect(Result.isSuccess(result)).toBe(true);
+    if (Result.isSuccess(result)) {
+      expect(result.success.spendMode?.nearResetMs7d).toBe(48 * 3600_000);
+      expect(result.success.spendMode?.stalenessMs).toBeUndefined();
+    }
+  });
+
+  test("SpendModeConfigSchema standalone parse", () => {
+    const decodeConfig = Schema.decodeUnknownResult(SpendModeConfigSchema);
+    const result = decodeConfig({ stalenessMs: 60_000, capFloorPct: 85 });
+    expect(Result.isSuccess(result)).toBe(true);
+    if (Result.isSuccess(result)) {
+      expect(result.success.stalenessMs).toBe(60_000);
+      expect(result.success.capFloorPct).toBe(85);
+    }
   });
 });
 
