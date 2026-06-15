@@ -5,6 +5,7 @@ import { orAbsent } from "@ax/lib/shared/fs-error";
 import { classifyNoFollow } from "@ax/lib/shared/fs-classify";
 import { posixPath } from "@ax/lib/shared/path";
 import { buildOnboardingReport, formatInstallOnboardingGuidance } from "./onboarding.ts";
+import { applyClaudeOtelEnv, applyCodexOtelToml } from "../otel/install-config.ts";
 import { fail } from "./commands/shared.ts";
 import {
     candidatePorts,
@@ -1016,6 +1017,48 @@ export function cmdInstall(): Effect.Effect<
             }
         }
         yield* fs.remove(schemaPath, { force: true });
+
+        // Write OTLP telemetry env into each installed harness config.
+        // Receiver listens on 127.0.0.1:1738 (the ax OTLP port).
+        const OTLP_ENDPOINT = "http://127.0.0.1:1738";
+        const claudeDir = posixPath.join(HOME, ".claude");
+        const claudeSettings = posixPath.join(claudeDir, "settings.json");
+        // Claude: only touch if ~/.claude exists (harness is installed).
+        const claudeDirExists = yield* fs.exists(claudeDir).pipe(orAbsent(false));
+        if (claudeDirExists) {
+            yield* Effect.promise(async () => {
+                try {
+                    let raw = "{}";
+                    try { raw = await Bun.file(claudeSettings).text(); } catch { /* absent - use default */ }
+                    const parsed = JSON.parse(raw) as Record<string, unknown>;
+                    const next = applyClaudeOtelEnv(parsed, OTLP_ENDPOINT);
+                    await Bun.write(claudeSettings, JSON.stringify(next, null, 2) + "\n");
+                    console.log(`  otel: wrote Claude Code OTLP env → ${claudeSettings}`);
+                } catch (err) {
+                    console.warn(`  otel: could not update ${claudeSettings}: ${(err as Error).message}`);
+                }
+            });
+        }
+
+        const codexDir = posixPath.join(HOME, ".codex");
+        const codexConfig = posixPath.join(codexDir, "config.toml");
+        // Codex: only touch if ~/.codex exists (harness is installed).
+        const codexDirExists = yield* fs.exists(codexDir).pipe(orAbsent(false));
+        if (codexDirExists) {
+            yield* Effect.promise(async () => {
+                try {
+                    let existing = "";
+                    try { existing = await Bun.file(codexConfig).text(); } catch { /* absent - start empty */ }
+                    const next = applyCodexOtelToml(existing, OTLP_ENDPOINT);
+                    if (next !== existing) {
+                        await Bun.write(codexConfig, next);
+                        console.log(`  otel: wrote Codex OTLP config → ${codexConfig}`);
+                    }
+                } catch (err) {
+                    console.warn(`  otel: could not update ${codexConfig}: ${(err as Error).message}`);
+                }
+            });
+        }
 
         const { BANNER } = yield* Effect.promise(() => import("./banner.ts"));
         console.log(BANNER);
