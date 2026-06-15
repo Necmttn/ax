@@ -843,6 +843,38 @@ export const ImproveGroup = HttpApiGroup.make("improve")
         }),
     );
 
+// ---- OTLP receiver -------------------------------------------------------
+
+/** OTLP/HTTP ack: `{ partialSuccess: {} }` (all signals, all cases). */
+export const OtlpAck = Schema.Struct({
+    partialSuccess: Schema.optional(Schema.Struct({})),
+});
+
+/**
+ * The OTLP receiver family: POST /v1/metrics, /v1/traces, /v1/logs.
+ *
+ * All three accept arbitrary binary/JSON bodies (the payload is decoded
+ * manually in the handler via `handleRaw`; `Schema.Unknown` here is a
+ * placeholder so HttpApi registers the endpoint - the actual payload decoding
+ * happens inside the handler, not through the contract codec).
+ * All three return the standard OTLP/HTTP ack `{ partialSuccess: {} }`.
+ */
+export const OtelGroup = HttpApiGroup.make("otel")
+    .add(
+        HttpApiEndpoint.post("otlpMetrics", "/v1/metrics", {
+            payload: Schema.Unknown,
+            success: OtlpAck,
+        }),
+        HttpApiEndpoint.post("otlpTraces", "/v1/traces", {
+            payload: Schema.Unknown,
+            success: OtlpAck,
+        }),
+        HttpApiEndpoint.post("otlpLogs", "/v1/logs", {
+            payload: Schema.Unknown,
+            success: OtlpAck,
+        }),
+    );
+
 /** POST /api/ingest - trigger a live ingest run (Durable Streams sidecar). */
 export class IngestTriggerResult extends Schema.Class<IngestTriggerResult>("ax/IngestTriggerResult")({
     runId: Schema.String,
@@ -875,5 +907,6 @@ export const AxApi = HttpApi.make("ax")
     .add(SkillsGroup)
     .add(ImproveGroup)
     .add(LiveGroup)
+    .add(OtelGroup)
     .annotate(OpenApi.Title, "ax daemon API")
     .annotate(OpenApi.Version, "1");
