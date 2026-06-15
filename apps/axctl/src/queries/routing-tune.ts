@@ -24,6 +24,7 @@
  * classes (with the same corrupt-file guard as `ax routing compile`).
  */
 import { Effect, FileSystem, Path } from "effect";
+import { JUDGMENT_STRONG_RE } from "@ax/hooks-sdk/spend-mode";
 import {
     fetchDispatches,
     matchRoutingWith,
@@ -40,8 +41,22 @@ import {
     type StoredRoutingClass,
 } from "./routing-table-io.ts";
 
-export const JUDGMENT_RE =
-    /\b(review\w*|critique\w*|critic\w*|design\w*|plan(s|ned|ning)?|audit\w*|judg\w*|verif\w*|assess\w*|architect\w*)\b/i;
+/**
+ * Re-export the shared judgment regex from hooks-sdk/spend-mode (single source of truth).
+ *
+ * Behavioral delta vs the former local JUDGMENT_RE:
+ *   Old: matched bare "review", "plan", "verif", "assess" in addition to the
+ *        qualified review forms and design/audit/architect.../critique/judg...
+ *   New (JUDGMENT_STRONG_RE): matches only qualified reviews (quality/PR/final/
+ *        adversarial/code review), design, audit, architect..., critique, critic..., judg...
+ *
+ * Effect on routing-tune: clusters whose keys contain bare "review", "plan", "verify",
+ * or "assess" will no longer be auto-flagged as judgment. They will either
+ * auto-apply (if non-judgment) or surface via --emit-brief for human review.
+ * This is the defensible call: JUDGMENT_STRONG_RE is the authoritative signal;
+ * routing-tune's --emit-brief + agent vetting is the backstop for ambiguous clusters.
+ */
+export const JUDGMENT_RE = JUDGMENT_STRONG_RE;
 
 export interface TuneProposal {
     readonly id: string;

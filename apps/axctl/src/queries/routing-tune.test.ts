@@ -85,6 +85,10 @@ describe("clusterRows + buildProposals", () => {
 
     it("flags judgment clusters; pattern derives from the key with N -> \\d+", () => {
         const proposals = buildProposals(clusterRows(rows));
+        // "review-architecture" IS flagged by JUDGMENT_STRONG_RE because
+        // "architecture" matches architect\w* (JUDGMENT_STRONG_RE's architect pattern
+        // covers the full word including the "-ure" suffix). Bare "review" alone would
+        // not match - but "architecture" in the description does.
         const review = proposals.find((p) => p.id === "review-architecture");
         expect(review?.judgment).toBe(true);
         const summarize = proposals.find((p) => p.id === "summarize-the");
@@ -113,7 +117,7 @@ describe("clusterRows + buildProposals", () => {
         }
     });
 
-    it("judgment is computed over ALL rows, not just the first-3 examples", () => {
+    it("judgment scan covers ALL rows; bare 'review' no longer flags (JUDGMENT_STRONG_RE delta)", () => {
         const lateJudgment = [
             row("Migrate auth tokens", "general-purpose", 5),
             row("Migrate auth flows", "general-purpose", 4),
@@ -125,7 +129,9 @@ describe("clusterRows + buildProposals", () => {
         expect(migrate).toBeDefined();
         expect(migrate!.examples).toHaveLength(3);
         expect(migrate!.examples.some((e) => /review/i.test(e))).toBe(false);
-        expect(migrate!.judgment).toBe(true);
+        // With JUDGMENT_STRONG_RE, bare "review" in "Migrate auth review notes" does
+        // NOT trigger judgment. Old JUDGMENT_RE would have flagged this cluster.
+        expect(migrate!.judgment).toBe(false);
     });
 
     it("orders proposals by total cost desc and carries examples + counts", () => {
@@ -139,19 +145,41 @@ describe("clusterRows + buildProposals", () => {
 });
 
 describe("JUDGMENT_RE", () => {
-    it("matches review/critique/design/plan/audit/judge/verify/assess", () => {
-        for (const word of ["Review X", "Critique Y", "Design Z", "Plan the migration", "Audit deps", "Judge outputs", "Verify claims", "Assess risk"]) {
+    // JUDGMENT_RE is now JUDGMENT_STRONG_RE from @ax/hooks-sdk/spend-mode.
+    // Behavioral delta: bare "review", "plan*", "verif*", "assess*" no longer
+    // match. Only qualified reviews (quality/PR/final/adversarial/code review)
+    // and design/audit/architect*/critique/critic*/judg* are flagged.
+    it("matches qualified review kinds, design, audit, architect, critique, judge", () => {
+        for (const word of ["quality review of X", "PR review", "code review", "final review", "adversarial review", "Design Z", "Audit deps", "Judge outputs", "Critique Y"]) {
             expect(JUDGMENT_RE.test(word)).toBe(true);
         }
         expect(JUDGMENT_RE.test("Summarize the changelog")).toBe(false);
     });
-    it("matches inflected forms", () => {
-        for (const phrase of ["Planning the migration", "Reviewing PR #300", "Designing the schema", "Auditing deps", "Assessing risk"]) {
-            expect(JUDGMENT_RE.test(phrase)).toBe(true);
-        }
+    it("does NOT match bare review, plan, verify, assess (delta from old JUDGMENT_RE)", () => {
+        // These matched the old JUDGMENT_RE but JUDGMENT_STRONG_RE is intentionally narrower.
+        expect(JUDGMENT_RE.test("Review X")).toBe(false);
+        expect(JUDGMENT_RE.test("Plan the migration")).toBe(false);
+        expect(JUDGMENT_RE.test("Verify claims")).toBe(false);
+        expect(JUDGMENT_RE.test("Assess risk")).toBe(false);
+    });
+    it("matches architect forms and judg-wildcard; design/audit are exact words only", () => {
+        // architect\w* covers architects, architecture, etc.
+        expect(JUDGMENT_RE.test("architect the layer")).toBe(true);
+        expect(JUDGMENT_RE.test("architecture review")).toBe(true);
+        // judg\w* covers judge, judges, judging, judgment
+        expect(JUDGMENT_RE.test("judging the outputs")).toBe(true);
+        // design and audit match the exact word only (no \w* suffix in the regex)
+        expect(JUDGMENT_RE.test("design the API")).toBe(true);
+        expect(JUDGMENT_RE.test("audit the auth")).toBe(true);
+        // inflected forms of "design"/"audit" do NOT match (delta from old JUDGMENT_RE)
+        expect(JUDGMENT_RE.test("designing the schema")).toBe(false);
+        expect(JUDGMENT_RE.test("auditing deps")).toBe(false);
     });
     it("does not match unrelated words sharing a prefix", () => {
         expect(JUDGMENT_RE.test("Plant seeds")).toBe(false);
+    });
+    it("does not match spec review (deliberate route-down class)", () => {
+        expect(JUDGMENT_RE.test("spec review of PR #42")).toBe(false);
     });
 });
 
