@@ -134,7 +134,14 @@
 .v-mc-bento .span2 { grid-column: span 2; }
 .v-mc-bento .row2 { grid-row: span 2; }
 .v-mc-hero { background-image: radial-gradient(circle, var(--dot) 1.1px, transparent 1.1px); background-size: 16px 16px; background-position: 8px 8px; justify-content: space-between; }
-.v-mc-hero-art { flex: 1; min-height: 70px; }
+.v-mc-hero { min-height: 300px; }
+.arc-reel { position: absolute; inset: 0; z-index: 0; pointer-events: none; }
+.arc-reel canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+.v-mc-hero-over { position: relative; z-index: 1; }
+.v-mc-hero-text {
+    position: absolute; left: 0; right: 0; bottom: 0; z-index: 1; padding: 18px;
+    background: linear-gradient(to top, var(--surface) 44%, color-mix(in srgb, var(--surface) 70%, transparent) 74%, transparent);
+}
 .v-mc-hero-name { font-family: var(--serif); font-size: 26px; color: var(--display); }
 .v-mc-feed { font-family: var(--mono); font-size: 12px; display: flex; flex-direction: column; gap: 8px; overflow: hidden; }
 .v-mc-feed-row { display: flex; justify-content: space-between; gap: 12px; }

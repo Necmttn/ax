@@ -95,9 +95,9 @@ function Bento({ profile: p }: { profile: WrappedProfile }) {
                 const arc = resolveArchetype(p.primaryArchetype.id || p.primaryArchetype.label);
                 return (
                     <section className="rdx-card v-mc-hero span2 row2" style={{ animationDelay: "0s" }}>
-                        <div className="v-mc-meta rdx-label"><span className="nf-key">archetype · primary</span><span>{p.primaryArchetype.confidence} confidence</span></div>
-                        <div className="v-mc-hero-art"><ArchetypeReel archetypeId={arc.id} symbol={arc.symbol} /></div>
-                        <div>
+                        <ArchetypeReel archetypeId={arc.id} symbol={arc.symbol} />
+                        <div className="v-mc-meta rdx-label v-mc-hero-over"><span className="nf-key">archetype · primary</span><span>{p.primaryArchetype.confidence} confidence</span></div>
+                        <div className="v-mc-hero-text">
                             <div className="v-mc-hero-name">{arc.name}</div>
                             <p style={{ margin: "6px 0 0", fontSize: 13.5, lineHeight: 1.5, color: "var(--sec)", maxWidth: "46ch" }}>{arc.tagline}</p>
                             <p className="arc-humor">{arc.humor}</p>
