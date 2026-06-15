@@ -112,7 +112,7 @@ function HunkCard({ event, path, label, onOpenTranscript, onFocusTurn }: {
                     <FileDiff
                         fileDiff={fileDiff}
                         options={{
-                            themeType: "light",
+                            themeType: "dark",
                             theme: { light: "github-light", dark: "pierre-dark" },
                             diffStyle: "unified",
                             overflow: "wrap",

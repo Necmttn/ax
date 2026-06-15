@@ -58,10 +58,10 @@ function buildMatrix(
 }
 
 const intensity = (count: number, max: number): string => {
-    if (count === 0 || max === 0) return "rgba(37, 103, 168, 0)";
+    if (count === 0 || max === 0) return "transparent";
     const ratio = Math.min(1, Math.log10(count + 1) / Math.log10(max + 1));
     const alpha = 0.08 + 0.7 * ratio;
-    return `rgba(37, 103, 168, ${alpha.toFixed(3)})`;
+    return `color-mix(in srgb, var(--blue) ${(alpha * 100).toFixed(1)}%, transparent)`;
 };
 
 const jaccardWidth = (point: WorkflowConvergencePoint): number => {

@@ -180,7 +180,7 @@ export function SessionsCompareRoute() {
                                                 <div
                                                     key={ti}
                                                     className={`turn-cell${t.has_error ? " err" : ""}`}
-                                                    style={{ background: `rgba(56, 189, 248, ${intensity})` }}
+                                                    style={{ background: `color-mix(in srgb, var(--blue) ${(intensity * 100).toFixed(1)}%, transparent)` }}
                                                     title={`turn ${t.seq} · ${t.role ?? "?"} · ${fmtTokens(t.est_tokens)} tok${t.gap_ms != null ? ` · gap ${Math.round(t.gap_ms / 1000)}s` : ""}${t.has_error ? " · ERROR" : ""}`}
                                                 >
                                                     {fmtTokens(t.est_tokens)}
