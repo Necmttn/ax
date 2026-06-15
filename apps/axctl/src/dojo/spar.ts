@@ -462,6 +462,44 @@ export const captureBaseline = (
     });
 
 /**
+ * Stamp a variant session's `labels` field with `"spar"` so behavioral
+ * analytics (`ax skills weighted`, `ax thinking`) can exclude it.
+ *
+ * Merge-union: reads the current labels JSON, adds `"spar"` if absent, and
+ * writes back. Idempotent: re-stamping an already-tagged session is a no-op.
+ * No-op when the session id cannot be resolved (silently returns).
+ *
+ * The `labels` field is `option<string>` containing a JSON-encoded string[]
+ * (schema rule of thumb for SurrealDB v3: nested arrays → JSON string).
+ */
+export const stampSparSession = (
+    sessionId: string,
+): Effect.Effect<void, DbError, SurrealClient> =>
+    Effect.gen(function* () {
+        const db = yield* SurrealClient;
+
+        // Read current labels (may be NONE / null / a JSON-encoded string[]).
+        const readRows = yield* db.query<[Array<{ labels: string | null }>]>(
+            `SELECT labels FROM ${recordLiteral("session", cleanSessionId(sessionId))};`,
+        );
+        const existing = readRows?.[0]?.[0]?.labels ?? null;
+        let current: string[];
+        try {
+            current = existing != null ? (JSON.parse(existing) as string[]) : [];
+            if (!Array.isArray(current)) current = [];
+        } catch {
+            current = [];
+        }
+
+        if (current.includes("spar")) return; // idempotent
+
+        const merged = [...current, "spar"];
+        yield* db.query(
+            `UPDATE ${recordLiteral("session", cleanSessionId(sessionId))} SET labels = ${surrealString(JSON.stringify(merged))};`,
+        );
+    });
+
+/**
  * Find the most recent variant session run in `cwd` at/after `sinceMs` (the
  * brief's createdAt). Returns the bare session id, or null when the agent
  * hasn't run the task yet.

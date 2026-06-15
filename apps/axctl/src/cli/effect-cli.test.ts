@@ -198,11 +198,12 @@ describe("effect cli", () => {
     });
 
     test("resolveIngestStages: default runs every stage", () => {
-        // 28 = 24 original + agentDefStage (config-front-door agents domain)
+        // 29 = 24 original + agentDefStage (config-front-door agents domain)
         //    + deriveMetricsStage (graph-derived session metrics rollup)
         //    + githubPrStage (restored GitHub PR ingest - issue #172)
-        //    + digestStage (push-value digest snapshot writer).
-        expect(resolveIngestStages(testRegistry, [])).toHaveLength(28);
+        //    + digestStage (push-value digest snapshot writer)
+        //    + usageStage (usage-log ingest into ax_invocation).
+        expect(resolveIngestStages(testRegistry, [])).toHaveLength(29);
     });
 
     test("resolveIngestStages: local agent provider stages can be selected", () => {
@@ -239,6 +240,7 @@ describe("effect cli", () => {
             "subagents",
             "turn-analysis",
             "turn-content-blocks",
+            "usage",
         ]);
     });
 

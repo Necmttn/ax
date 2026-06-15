@@ -39,7 +39,7 @@ axctl dojo report [--since=<iso>] [--notes-file=<path>] [--json]      # write th
 axctl dojo draft [--title=<t>] [--kind=bug|improvement] [--body-file=<path>] [--session=<id>]  # stage an upstream finding to ~/.ax/dojo/outbox/<slug>.md (never publishes)
 axctl dojo outbox [--json]                                            # list staged upstream issue drafts
 axctl dojo spar-plan <sha> [--json]                              # capture a landed task's baseline + emit a one-delta experiment brief
-axctl dojo spar-score <id> [--variant-session=<id>] [--json]     # score the agent's variant vs the frozen baseline
+axctl dojo spar-score <id> [--variant-session=<id>] [--json]     # score the agent's variant vs the frozen baseline; stamps variant session labels=["spar"] (excluded from ax skills weighted + ax thinking, kept in cost)
 axctl dispatches [--candidates] [--economy] # subagent dispatch routing analytics + est savings + effectiveness lens
 axctl routing tune [--dry-run|--emit-brief] # mine YOUR dispatch history for new routing classes
 axctl routing compile                       # regenerate ~/.ax/hooks/routing-table.json (user classes preserved)
@@ -151,6 +151,22 @@ without being asked for:
   the raw snapshot. Install the hook with `ax hooks install
   <path>/surface-digest.ts --providers=claude,codex`.
 
+## Utilization
+
+`ax usage [--days=N] [--json]` shows your ax utilization for the last N days
+(default 30):
+
+- **Active days**: calendar days with at least one invocation.
+- **Top commands**: ranked by run count, up to 8 shown.
+- **Agent vs TTY split**: how many invocations came from an agent subshell vs
+  an interactive terminal.
+- **Never used**: visible top-level commands with zero invocations in the
+  window - the surface you haven't explored yet.
+
+Usage records are written by the CLI itself at every invocation (including
+failures) to `~/.ax/usage.jsonl`; `ax ingest` imports them into the
+`ax_invocation` table.  Run `ax ingest` first to see populated results.
+
 ## Dispatch model drops
 
 `ax dispatches` flags routed dispatches whose child ran legs on a different
@@ -210,7 +226,7 @@ command = "ax"
 args = ["mcp"]
 ```
 
-The 10 tools, each mirroring the matching CLI command:
+The 16 tools, each mirroring the matching CLI command:
 
 - **recall** - full-text recall across turns / commits / skills (`ax recall`).
 - **sessions_around** - sessions in a date window (`ax sessions around`).
@@ -223,6 +239,12 @@ The 10 tools, each mirroring the matching CLI command:
 - **improve_recommend** - top improvement proposals, ranked (`ax improve recommend`).
 - **improve_show** - one proposal's evidence trail (`ax improve show`).
 - **improve_list** - proposals filtered by status / form (`ax improve list`).
+- **session_metrics** - graph-derived per-session metrics: commits, churn, cost, corrections (`ax sessions metrics`).
+- **signal_show** - signal catalog list or run a named relation signal (`ax signals`).
+- **cost_models** - per-model token and cost rollup (`ax cost models`).
+- **cost_split** - cost matrix split by origin x model (`ax cost split`).
+- **dispatches** - subagent dispatch analytics and routing candidates (`ax dispatches`).
+- **dojo_agenda** - dojo training agenda: budget envelope + prioritized work items (`ax dojo agenda`).
 
 > **Read-only.** Mutating ops (`improve accept/reject/verdict`, `skills
 > tag/lint`, `ingest`) stay on the CLI - they write task files / edges a human

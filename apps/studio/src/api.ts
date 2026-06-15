@@ -28,6 +28,7 @@ import type {
     WorkflowResponse,
     WrappedProfile,
 } from "@ax/lib/shared/dashboard-types";
+import type { UsageRollupSchema } from "@ax/lib/shared/api-contract";
 
 // Studio mock-mode build flag. When true (set at build time for the public
 // studio bundle), every fetch is either:
@@ -456,6 +457,13 @@ export const api = {
 
     wrappedGenerateBrief: (): Promise<{ brief: string }> =>
         viaContract("/api/wrapped/generate-brief", (c) => c.insights.wrappedGenerateBrief()),
+
+    /** CLI utilization rollup: active days, top commands, unused surface. */
+    usage: (params: { days?: number } = {}): Promise<UsageRollupSchema> =>
+        viaContract("/api/usage", (c) =>
+            c.usage.usageRollup({
+                query: params.days != null ? { days: params.days } : {},
+            })),
 
     /** Read-only SQL console (Lab) - daemon accepts SELECT/RETURN/INFO only. */
     query: (sql: string): Promise<{ result: unknown; durationMs: number }> =>

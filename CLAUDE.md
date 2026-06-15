@@ -172,7 +172,7 @@ docs/superpowers/specs/2026-06-13-ax-dojo-design.md.
 `ax dojo report [--since=<iso>] [--notes-file=<path>]` writes the morning-report
 for a completed run; `ax dojo draft [--title=...] [--kind=bug|improvement]`
 stages an upstream finding to `~/.ax/dojo/outbox/` (never publishes);
-`ax dojo outbox` inspects staged drafts. `ax dojo spar-plan <sha>` freezes a landed task's baseline (prompt + cost/turns/churn) and emits a brief with the worktree pin command + a delta slot; the agent runs the variant with ONE change in that worktree; `ax dojo spar-score <id>` scores variant vs baseline into a receipt (`~/.ax/dojo/spar/`). Hybrid: CLI scaffolds, agent re-runs.
+`ax dojo outbox` inspects staged drafts. `ax dojo spar-plan <sha>` freezes a landed task's baseline (prompt + cost/turns/churn) and emits a brief with the worktree pin command + a delta slot; the agent runs the variant with ONE change in that worktree; `ax dojo spar-score <id>` scores variant vs baseline into a receipt (`~/.ax/dojo/spar/`). Hybrid: CLI scaffolds, agent re-runs. **Spar exclusion**: spar-score stamps the variant session `labels=["spar"]` so it is excluded from behavioral analytics (`ax skills weighted`, `ax thinking`); it stays in cost analytics.
 
 ### Profile
 
@@ -224,11 +224,12 @@ task file, then run `axctl improve lint` to reconcile.
 
 ## MCP server
 
-`ax mcp` runs a stdio MCP server exposing ax's **read-only** queries as 10 tools
+`ax mcp` runs a stdio MCP server exposing ax's **read-only** queries as 16 tools
 (`recall`, `sessions_around`, `session_show`, `skills_weighted`, `skills_by_role`,
-`skills_roles`, `roles`, `improve_recommend`, `improve_show`, `improve_list`) so an
-agent can query the graph in-context. Run from source (no native deps, so the
-compiled binary should work too - untested in v0). Mutating
+`skills_roles`, `roles`, `improve_recommend`, `improve_show`, `improve_list`,
+`session_metrics`, `signal_show`, `cost_models`, `cost_split`, `dispatches`,
+`dojo_agenda`) so an agent can query the graph in-context. Run from source (no
+native deps, so the compiled binary should work too - untested in v0). Mutating
 ops + `sessions_here`/`near` (need a git-resolved repo key) are intentionally not
 exposed. Server: `apps/axctl/src/mcp/server.ts`; registry: `apps/axctl/src/mcp/tools.ts`.
 

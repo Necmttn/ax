@@ -99,11 +99,25 @@ jobs:
 
   publish-artifacts:
     needs: build-artifacts
+    # Run even when a build leg failed so the platforms that DID build still get
+    # published - a flaky test on one runner must not zero out the whole release
+    # (the v0.29.0 incident: darwin's build failed on a flaky shiki test, so this
+    # job was skipped and `latest` shipped with 0 assets, 404ing every install).
+    # The verify step below then fails the run loudly if any asset is missing.
+    if: >-
+      ${{ always()
+      && needs.build-artifacts.result != 'cancelled'
+      && (github.event_name == 'release'
+        || (github.event_name == 'workflow_dispatch' && inputs.tag_name != '')) }}
     runs-on: ubuntu-latest
     concurrency:
       group: release-assets-${{ github.event_name == 'release' && github.event.release.tag_name || inputs.tag_name }}
     permissions:
       contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TAG_NAME: ${{ github.event_name == 'release' && github.event.release.tag_name || inputs.tag_name }}
+      GH_REPO: ${{ github.repository }}
     steps:
       - uses: actions/download-artifact@v4
         with:
@@ -111,10 +125,6 @@ jobs:
           merge-multiple: true
 
       - name: Upload release assets
-        env:
-          GH_TOKEN: ${{ github.token }}
-          TAG_NAME: ${{ github.event_name == 'release' && github.event.release.tag_name || inputs.tag_name }}
-          GH_REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
           cd release-assets
@@ -122,5 +132,25 @@ jobs:
             echo "TAG_NAME is empty - refusing to guess the target release" >&2
             exit 1
           fi
+          if ! ls ./*.tar.gz >/dev/null 2>&1; then
+            echo "::error::no platform binaries were built for $TAG_NAME - every build leg failed; nothing to publish" >&2
+            exit 1
+          fi
           shasum -a 256 ./*.tar.gz > checksums.txt
           gh release upload "$TAG_NAME" ./*.tar.gz checksums.txt --repo "$GH_REPO" --clobber
+
+      - name: Verify release has every expected asset
+        run: |
+          set -euo pipefail
+          # Keep in sync with the build-artifacts matrix.
+          expected="axctl-darwin-arm64.tar.gz axctl-linux-x64.tar.gz checksums.txt"
+          have="$(gh release view "$TAG_NAME" --repo "$GH_REPO" --json assets --jq '.assets[].name')"
+          missing=""
+          for asset in $expected; do
+            printf '%s\n' "$have" | grep -qx "$asset" || missing="$missing $asset"
+          done
+          if [ -n "$missing" ]; then
+            echo "::error::release $TAG_NAME is missing assets:$missing - a 'latest' install will 404 for those platforms. Fix the build, then re-run: gh workflow run release-please.yml -f tag_name=$TAG_NAME" >&2
+            exit 1
+          fi
+          echo "release $TAG_NAME has all expected assets: $expected"

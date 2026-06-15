@@ -3,21 +3,43 @@
  */
 import { describe, expect, it } from "bun:test";
 import { Effect, Layer } from "effect";
-import { SurrealClient, type SurrealClientShape } from "@ax/lib/db";
+import { RecordId } from "surrealdb";
+import { SurrealClient } from "@ax/lib/db";
+import { makeTestSurrealClient } from "@ax/lib/testing/surreal";
 
 import { fetchThinking, reasoningCostUsd, rollupThinkingByModel } from "./thinking-analytics.ts";
 
 type QueryResult = Array<Record<string, unknown>>;
 
-const makeMockDb = (results: QueryResult[]): Layer.Layer<SurrealClient> => {
-    const stub: SurrealClientShape = {
-        query: (_sql: string) => Effect.succeed(results as [QueryResult, ...QueryResult[]]),
-    } as unknown as SurrealClientShape;
-    return Layer.succeed(SurrealClient, stub);
-};
-
 const run = <A>(eff: Effect.Effect<A, unknown, SurrealClient>, layer: Layer.Layer<SurrealClient>) =>
     Effect.runPromise(eff.pipe(Effect.provide(layer)));
+
+/**
+ * Build a test layer for fetchThinking that routes:
+ *   - The spar-sessions query (contains "string::contains") → sparRids
+ *   - Everything else (the batched 5-statement thinking SQL) → batchResults
+ *
+ * Route response shape:
+ *   spar query is `SELECT VALUE id ...` → flat array of RecordId values, so the
+ *     route rows = [sparRids] (one statement result wrapping the RecordId array).
+ *   batch query returns `[thinking, sessions, efforts, reasoning, models]` → fallback = batchResults
+ */
+const makeThinkingMock = (
+    batchResults: QueryResult[],
+    sparRids: RecordId[] = [],
+): Layer.Layer<SurrealClient> => {
+    const tc = makeTestSurrealClient({
+        denyWrites: true,
+        routes: {
+            // spar query: SELECT VALUE id ... WHERE string::contains(labels, 'spar')
+            // returns [Array<RecordId>] - one statement result
+            "string::contains(labels": [sparRids] as unknown as Array<unknown[]>,
+        },
+        // fallback: the batched 5-statement query returns batchResults tuple
+        fallback: batchResults as unknown as Array<unknown[]>,
+    });
+    return tc.layer;
+};
 
 describe("rollupThinkingByModel", () => {
     it("aggregates per model with pct and avg tokens", () => {
@@ -125,6 +147,12 @@ describe("reasoningCostUsd", () => {
 });
 
 describe("fetchThinking", () => {
+    // fetchThinking now issues two db.query() calls:
+    //   1. fetchSparSessionIds (SQL contains "string::contains(labels")
+    //   2. the batched 5-statement thinking/session/effort/reasoning/model SQL
+    //
+    // makeThinkingMock routes by SQL pattern so each call gets the right data.
+
     it("joins thinking rows to session models and maps codex signals", async () => {
         const thinking = [
             { session_id: "session:`s1`", blocks: 2, tokens: 800, assistant_turns: 4, thinking_turns: 2 },
@@ -145,7 +173,7 @@ describe("fetchThinking", () => {
         ];
         const result = await run(
             fetchThinking({ sinceDays: 14 }),
-            makeMockDb([thinking, sessions, efforts, reasoning, agentModels]),
+            makeThinkingMock([thinking, sessions, efforts, reasoning, agentModels]),
         );
         expect(result.models).toHaveLength(1);
         expect(result.models[0].model).toBe("claude-fable-5");
@@ -160,5 +188,35 @@ describe("fetchThinking", () => {
         // 5000 reasoning tokens x $20/M -> $0.1
         expect(result.codex_reasoning[0].reasoning_cost_usd).toBeCloseTo(0.1);
         expect(result.window_days).toBe(14);
+    });
+
+    it("excludes a spar-tagged session from thinking totals", async () => {
+        // s1 is a normal session; spar-s2 is a spar variant that should be dropped.
+        const thinking = [
+            { session_id: "session:s1", blocks: 2, tokens: 800, assistant_turns: 4, thinking_turns: 2 },
+            { session_id: "session:spar-s2", blocks: 5, tokens: 5000, assistant_turns: 10, thinking_turns: 5 },
+        ];
+        const sessions = [
+            { session_id: "session:s1", model: "claude-fable-5", source: "claude" },
+            { session_id: "session:spar-s2", model: "claude-fable-5", source: "claude" },
+        ];
+        const agentModels = [
+            { name: "claude-fable-5", output_per_million_usd: 15 },
+        ];
+        const result = await run(
+            fetchThinking({ sinceDays: 14 }),
+            // sparRids: spar-s2 flagged as a RecordId (matches the SELECT VALUE id
+            // form). makeThinkingMock routes the spar query to [sparRids].
+            // String(RecordId) -> "session:⟨spar-s2⟩" -> cleanSessionId -> "spar-s2",
+            // which matches the thinking row's session_id "session:spar-s2".
+            makeThinkingMock(
+                [thinking, sessions, [], [], agentModels],
+                [new RecordId("session", "spar-s2")],
+            ),
+        );
+        // Only s1's thinking tokens (800) should appear; spar-s2's 5000 excluded.
+        expect(result.models).toHaveLength(1);
+        expect(result.models[0].thinking_tokens).toBe(800);
+        expect(result.models[0].sessions).toBe(1);
     });
 });

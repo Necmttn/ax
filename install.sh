@@ -173,10 +173,95 @@ download_with_curl() {
   fi
 }
 
+# ---------------------------------------------------------------------------
+# Resilience against broken releases. If a release is published with missing
+# binaries (e.g. one platform's build job failed, so `publish-artifacts` was
+# skipped and the GitHub Release "latest" ended up with 0 assets), a plain
+# `latest` install 404s for everyone. When VERSION=latest, resolve the newest
+# release that actually carries the artifact we need and fall back to it.
+# ---------------------------------------------------------------------------
+# Newest-first release tags from the public releases API (works without `gh`).
+# GitHub returns minified JSON, so pull the tag names with a tolerant grep.
+fetch_release_tags() {
+  command -v curl >/dev/null 2>&1 || return 1
+  local token="${GH_TOKEN:-${GITHUB_TOKEN:-}}" json
+  if [[ -n "$token" ]]; then
+    json="$(curl -fsSL -H "Authorization: Bearer $token" -H "Accept: application/vnd.github+json" "https://api.github.com/repos/$REPO/releases?per_page=30" 2>/dev/null)" || return 1
+  else
+    json="$(curl -fsSL -H "Accept: application/vnd.github+json" "https://api.github.com/repos/$REPO/releases?per_page=30" 2>/dev/null)" || return 1
+  fi
+  printf '%s' "$json" | grep -oE '"tag_name":[[:space:]]*"[^"]+"' | sed -E 's/.*"tag_name":[[:space:]]*"([^"]+)".*/\1/'
+}
+
+# HTTP status for a release asset download (follows GitHub's redirect to the
+# asset CDN). 200 means the artifact exists for that tag.
+asset_http_code() {
+  local tag="$1" asset="$2" token="${GH_TOKEN:-${GITHUB_TOKEN:-}}"
+  local url="https://github.com/$REPO/releases/download/$tag/$asset"
+  if [[ -n "$token" ]]; then
+    curl -sIL -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $token" "$url" 2>/dev/null
+  else
+    curl -sIL -o /dev/null -w '%{http_code}' "$url" 2>/dev/null
+  fi
+}
+
+# Mutates the global VERSION from "latest" to a concrete tag when the GitHub
+# latest release is missing the artifact. No-op when latest is healthy, or when
+# the release list can't be resolved (offline) - the existing download + error
+# paths still apply. Prefers `gh` (handles private repos + minified JSON), and
+# falls back to the public API + a per-tag asset probe when `gh` is absent.
+resolve_latest_version() {
+  local asset="$1" newest="" with_asset=""
+
+  if command -v gh >/dev/null 2>&1; then
+    newest="$(gh api "repos/$REPO/releases?per_page=30" \
+      --jq 'first(.[].tag_name) // empty' 2>/dev/null || true)"
+    with_asset="$(gh api "repos/$REPO/releases?per_page=30" \
+      --jq 'first(.[] | select([.assets[].name] | index("'"$asset"'")) | .tag_name) // empty' 2>/dev/null || true)"
+  fi
+
+  if [[ -z "$with_asset" ]]; then
+    local tags tag n=0
+    tags="$(fetch_release_tags)" || return 0
+    [[ -z "$tags" ]] && return 0
+    [[ -z "$newest" ]] && newest="$(printf '%s\n' "$tags" | head -1)"
+    while IFS= read -r tag; do
+      [[ -z "$tag" ]] && continue
+      n=$((n + 1))
+      [[ "$n" -gt 12 ]] && break
+      if [[ "$(asset_http_code "$tag" "$asset")" == "200" ]]; then
+        with_asset="$tag"
+        break
+      fi
+    done <<EOF
+$tags
+EOF
+  fi
+
+  [[ -z "$with_asset" ]] && return 0
+  # Healthy latest: the newest release already carries the asset - leave
+  # VERSION=latest so the install keeps using the /releases/latest path.
+  if [[ -n "$newest" && "$with_asset" == "$newest" ]]; then
+    return 0
+  fi
+  if [[ -n "$newest" ]]; then
+    warn "latest release ${newest} is missing ${asset} (likely a broken release)"
+  fi
+  info "pinning to ${with_asset} - the newest release with a ${asset} build"
+  VERSION="$with_asset"
+}
+
 banner
 
 platform="$(detect_platform)"
 artifact="axctl-${platform}.tar.gz"
+
+# When asked for `latest`, pin to the newest release that actually ships our
+# artifact so a partially-published release can't break the install.
+if [[ -z "$BINARY_PATH" && "$VERSION" == "latest" ]]; then
+  resolve_latest_version "$artifact"
+fi
+
 step "platform $C_BOLD${platform}$C_RESET · channel $C_BOLD${VERSION}$C_RESET"
 
 if [[ -z "$BINARY_PATH" && "$VERSION" != "latest" && "$(command -v axctl || true)" != "" ]]; then
@@ -205,6 +290,10 @@ else
     if ! download_with_curl "$artifact" "$tmp_dir/$artifact"; then
       err "failed to download ${artifact}"
       cat >&2 <<EOF
+
+  Pin to a known-good release if the latest one is missing binaries:
+    AXCTL_VERSION=v0.28.0 curl -fsSL ax.necmttn.com/install | sh
+    (releases: https://github.com/${REPO}/releases)
 
   For private repos, either:
     1. run 'gh auth login', or

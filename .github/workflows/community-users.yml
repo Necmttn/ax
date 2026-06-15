@@ -6,6 +6,16 @@
 # path-filtered required checks wedge unrelated PRs in "expected" forever.
 # So this workflow runs on all PRs and passes trivially when no
 # community/users files are touched.
+#
+# The ruleset requires a SECOND check, `verify` (the code CI gate in ci.yml,
+# on `pull_request`). That never runs on a first-time contributor's fork PR
+# until a maintainer clicks "Approve and run", so a data-only registration sits
+# BLOCKED forever even with validate green and auto-merge armed (#410-adjacent;
+# Dariia-Smyrnova/#417). Since a community/users-only change carries no code,
+# `verify` is not applicable: once we've validated a `clean` PR we satisfy the
+# `verify` context with a success commit status so the armed auto-merge can
+# fire. Code PRs (mode none/mixed) never get this status - real ci.yml `verify`
+# still gates them.
 name: community-users
 
 on:
@@ -20,6 +30,7 @@ jobs:
     permissions:
       contents: write
       pull-requests: write
+      statuses: write
     steps:
       - name: Classify changed files
         id: scope
@@ -78,6 +89,22 @@ jobs:
           bun install --frozen-lockfile
           echo "${{ steps.scope.outputs.files }}" | xargs bun scripts/validate-community-users.ts \
             --author="${{ github.event.pull_request.user.login }}"
+
+      # Validation passed (a failed validator fails the job before here), and a
+      # `clean` PR is community/users/<login>.json files ONLY - no code - so the
+      # required `verify` code gate doesn't apply. Mark it success on THIS head
+      # sha so the ruleset is satisfied. Re-evaluated per synchronize commit: a
+      # later push that adds code re-classifies to `mixed`, this step is skipped,
+      # and real `verify` is required again (no TOCTOU bypass).
+      - name: Satisfy the verify gate for data-only registrations
+        if: steps.scope.outputs.mode == 'clean'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh api -X POST "repos/${{ github.repository }}/statuses/${{ github.event.pull_request.head.sha }}" \
+            -f state=success \
+            -f context=verify \
+            -f description="data-only community registration - code CI not applicable"
 
       - name: Auto-merge
         if: steps.scope.outputs.mode == 'clean'

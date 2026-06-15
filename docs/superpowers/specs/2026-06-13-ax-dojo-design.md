@@ -205,8 +205,11 @@ later.
 
 ## Out of scope (v1)
 
-- cron/launchd auto-trigger near window end (v2; prior art:
-  `~/.claude/self-improve/` launchd setup)
+- ~~cron/launchd auto-trigger near window end~~ **SUPERSEDED (2026-06-15)** by the
+  splurge → `/dojo` nudge (PR #413): a SessionStart hook detects surplus quota
+  (splurge spend-mode) and prompts the operator to run `/dojo` in-harness. An
+  in-harness prompt beats a headless daemon - a cron can't open an interactive
+  session and `claude -p` burns API, not plan. No daemon trigger will ship.
 - dashboard dojo surface
 - multi-repo experiment selection
 - `dojo_run` history table (reports are files first)

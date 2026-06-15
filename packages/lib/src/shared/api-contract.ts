@@ -880,6 +880,57 @@ export const OtelGroup = HttpApiGroup.make("otel")
         }),
     );
 
+// ---- usage rollup payload ------------------------------------------------
+
+/** Command utilization entry in a UsageRollup response. */
+export const TopCommandEntry = Schema.Struct({
+    command: Schema.String,
+    count: Schema.Number,
+    last_used: Schema.String,
+});
+
+/** Per-command failure entry in a UsageRollup response. */
+export const ReliabilityEntry = Schema.Struct({
+    command: Schema.String,
+    runs: Schema.Number,
+    failures: Schema.Number,
+    failureRate: Schema.Number,
+});
+
+/**
+ * CLI utilization rollup: how the user's ax surface is actually being used.
+ * Returned by GET /api/usage. Mirrors the `UsageRollup` type in
+ * apps/axctl/src/usage/query.ts (single source of truth for computation;
+ * this schema is the contract encoding for the HTTP surface).
+ */
+export const UsageRollupSchema = Schema.Struct({
+    windowDays: Schema.Number,
+    total: Schema.Number,
+    activeDays: Schema.Number,
+    topCommands: Schema.Array(TopCommandEntry),
+    unusedSurface: Schema.Array(Schema.String),
+    originSplit: Schema.Struct({ agent: Schema.Number, tty: Schema.Number }),
+    reliability: Schema.Array(ReliabilityEntry),
+});
+
+/** Studio-facing type derived from the contract. */
+export type UsageRollupSchema = typeof UsageRollupSchema.Type;
+
+/**
+ * The usage family: CLI utilization rollup (active days, top commands,
+ * unused surface, origin split, reliability).
+ */
+export const UsageGroup = HttpApiGroup.make("usage")
+    .add(
+        HttpApiEndpoint.get("usageRollup", "/api/usage", {
+            query: {
+                days: Schema.optionalKey(Schema.Number),
+            },
+            success: UsageRollupSchema,
+            error: InternalError,
+        }),
+    );
+
 /** POST /api/ingest - trigger a live ingest run (Durable Streams sidecar). */
 export class IngestTriggerResult extends Schema.Class<IngestTriggerResult>("ax/IngestTriggerResult")({
     runId: Schema.String,
@@ -911,6 +962,7 @@ export const AxApi = HttpApi.make("ax")
     .add(SessionsGroup)
     .add(SkillsGroup)
     .add(ImproveGroup)
+    .add(UsageGroup)
     .add(LiveGroup)
     .add(OtelGroup)
     .annotate(OpenApi.Title, "ax daemon API")

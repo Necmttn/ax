@@ -63,6 +63,7 @@ export const SCHEMA_TABLES: readonly SchemaTableSpec[] = [
     { table: "file_memory", stage: "staged", note: "Reserved for per-file tribal knowledge and BM25 search." },
     { table: "tool", stage: "active", note: "Normalized CLI, MCP, and agent tool identities." },
     { table: "tool_call", stage: "active", note: "Claude and Codex tool calls with errors and command fields." },
+    { table: "ax_invocation", stage: "active", note: "ax's own CLI invocations (redacted) for self-telemetry / utilization." },
     { table: "plan", stage: "active", note: "Current plan state per session/source." },
     { table: "plan_item", stage: "active", note: "Latest stable plan items for each plan." },
     { table: "artifact", stage: "active", note: "Generated reports, dogfood artifacts, and guidance evidence." },
