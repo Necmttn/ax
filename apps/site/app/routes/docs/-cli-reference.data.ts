@@ -254,6 +254,31 @@ claude-sonnet-4             54          120   18.7%        201,330`,
           "Sources: open improve proposals, routing savings, repair-loop churn, and quota burn (surfaced only above 70%). Compute and surface are split by the snapshot file, so a DB hiccup never blocks session boot.",
         ],
       },
+      {
+        name: "usage",
+        job: "Your ax utilization: total runs, active days, top commands, agent-vs-tty split, and the surface you have never touched.",
+        signature: "ax usage [--json] [--days=N]",
+        flags: [
+          { flag: "--days=N", desc: "window in days (default 30)" },
+          { flag: "--json", desc: "machine output: full UsageRollup JSON" },
+        ],
+        receipt: `$ ax usage
+[ax] usage (30d): 147 runs across 18 active days  (agent 89 / tty 58)
+top commands:
+  ingest                   42
+  sessions                 31
+  improve                  19
+  cost                     14
+  quota                     9
+  dispatches                8
+  thinking                  7
+  recall                    5
+3 never used: tui, share, dojo`,
+        detail: [
+          "Usage records are written at every invocation (including failures) to ~/.ax/usage.jsonl and imported into ax_invocation at ingest time. Run ax ingest first to see populated results.",
+          "The never-used list shows visible top-level commands with zero invocations in the window - a quick way to spot surface you have not explored.",
+        ],
+      },
     ],
   },
   {

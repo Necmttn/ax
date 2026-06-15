@@ -23,6 +23,7 @@ import { dispatchesRootCommand, axDispatchesRuntime } from "./commands/ax-dispat
 import { routingRootCommand, axRoutingRuntime } from "./commands/ax-routing.ts";
 import { thinkingCommand, axThinkingRuntime } from "./commands/ax-thinking.ts";
 import { digestCommand, digestRuntime } from "./commands/digest.ts";
+import { usageCommand, usageRuntime } from "./commands/usage.ts";
 import { recallCommand, recallRuntime } from "./commands/recall.ts";
 import { hookCommand, hooksCommand, hooksRuntime } from "./commands/hooks.ts";
 import { retroCommand, retroRuntime } from "./commands/retro.ts";
@@ -89,6 +90,7 @@ export const RUNTIME_BY_COMMAND: RuntimeManifest = {
     ...axRoutingRuntime,
     ...axThinkingRuntime,
     ...digestRuntime,
+    ...usageRuntime,
     ...recallRuntime,
     ...hooksRuntime,
     ...retroRuntime,
@@ -133,6 +135,7 @@ const registeredCommands: ReadonlyArray<Command.Command.Any> = [
     routingRootCommand,
     thinkingCommand,
     digestCommand,
+    usageCommand,
     // Maintenance / plumbing verbs - hidden via their family manifests.
     deriveCommand,
     deriveSignalsCommand,
