@@ -55,8 +55,9 @@ it and pure hooks just don't yield it.
 - The sdk imports `node:fs` in `routing-table.ts` (sync read keeps the hook's
   error channel `never` under plain bun); the `check:no-node-fs` allowlist
   entry moved from `hooks/route-dispatch.ts` to `routing-table.ts`.
-- Match logic is still implemented twice (`matchTable` in the hook,
-  `matchRoutingWith` in `dispatch-analytics.ts`) - same table, near-identical
-  semantics. Left as-is for now: the candidates path matches with
-  required-flags rows while the hook must tolerate hand-edited optional flags;
-  unifying it is a candidate follow-up, not part of this split.
+- ~~Match logic is still implemented twice~~ RESOLVED (follow-up): the matcher
+  now lives once in `routing-table.ts` as `matchRoutingTable`, taking the loose
+  `RoutingTableShape` (the strict in-memory `RoutingTable` is assignable to it),
+  so both the fire-path hook and `ax dispatches --candidates` call it. The
+  axctl-side `matchRoutingWith` / `matchRouting` names survive as thin
+  delegators for existing callers and tests.

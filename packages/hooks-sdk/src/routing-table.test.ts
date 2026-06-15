@@ -7,6 +7,7 @@ import {
   DEFAULT_ROUTING_TABLE,
   RoutingTableSchema,
   loadRoutingTableOrDefault,
+  matchRoutingTable,
   parseStoredRoutingTable,
   readRoutingTableSync,
 } from "./routing-table.ts";
@@ -155,5 +156,55 @@ describe("parseStoredRoutingTable", () => {
     });
     const loaded = parseStoredRoutingTable(text);
     expect(loaded!.agentTypes).toEqual({ Explore: "haiku" });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// matchRoutingTable - the single matcher shared by the fire-path hook and
+// `ax dispatches --candidates` (ADR-0014 follow-up)
+// ---------------------------------------------------------------------------
+
+describe("matchRoutingTable", () => {
+  test("agent-type rules win first (more specific than description)", () => {
+    const m = matchRoutingTable(DEFAULT_ROUTING_TABLE, "implement the parser", "Explore");
+    expect(m?.source).toBe("agentType");
+    expect(m?.classId).toBe("agent-type:Explore");
+    expect(m?.suggest).toBe("haiku");
+  });
+
+  test("falls through to description pattern when no agent-type match", () => {
+    const m = matchRoutingTable(DEFAULT_ROUTING_TABLE, "spec review of the PR", "unknown-agent");
+    expect(m?.source).toBe("description");
+    expect(m?.classId).toBe("spec-review");
+  });
+
+  test("first matching class wins, in order", () => {
+    const m = matchRoutingTable(DEFAULT_ROUTING_TABLE, "implement the new feature", null);
+    expect(m?.classId).toBe("well-specified-impl");
+  });
+
+  test("no match → null; null/undefined description and agentType are safe", () => {
+    expect(matchRoutingTable(DEFAULT_ROUTING_TABLE, "do some analysis", null)).toBeNull();
+    expect(matchRoutingTable(DEFAULT_ROUTING_TABLE, null, null)).toBeNull();
+    expect(matchRoutingTable(DEFAULT_ROUTING_TABLE, undefined, undefined)).toBeNull();
+  });
+
+  test("missing flags + missing agentTypes (loose shape) do not throw", () => {
+    const looseTable = {
+      version: 1 as const,
+      classes: [{ id: "x", pattern: "^build", suggest: "sonnet", reason: "r" }],
+    };
+    expect(matchRoutingTable(looseTable, "build the thing", "Explore")?.classId).toBe("x");
+  });
+
+  test("malformed regex in a class is skipped, not fatal", () => {
+    const table = {
+      version: 1 as const,
+      classes: [
+        { id: "bad", pattern: "(", flags: "", suggest: "haiku", reason: "r" },
+        { id: "good", pattern: "^ship", flags: "i", suggest: "sonnet", reason: "r" },
+      ],
+    };
+    expect(matchRoutingTable(table, "ship it", null)?.classId).toBe("good");
   });
 });

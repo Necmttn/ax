@@ -25,68 +25,15 @@
 
 import { Effect } from "effect";
 import { defineHook, runMain } from "../define.ts";
-import {
-  loadRoutingTableOrDefault,
-  type RoutingTableShape,
-} from "../routing-table.ts";
+import { loadRoutingTableOrDefault, matchRoutingTable } from "../routing-table.ts";
 import { Verdict } from "../verdict.ts";
 
 // Re-exported for consumers (ax hooks tooling, tests) that historically
 // imported the schema from the hook file.
 export { RoutingTableSchema } from "../routing-table.ts";
 
-// ---------------------------------------------------------------------------
-// Match logic (pure, synchronous)
-// ---------------------------------------------------------------------------
-
-interface MatchResult {
-  readonly classId: string;
-  readonly suggest: string;
-  readonly reason: string;
-  readonly source: "agentType" | "description";
-}
-
-const matchTable = (
-  table: RoutingTableShape,
-  description: string | undefined,
-  subagentType: string | undefined,
-): MatchResult | null => {
-  // 1. Agent-type rules win first (more specific)
-  if (subagentType && table.agentTypes) {
-    const suggest = table.agentTypes[subagentType];
-    if (suggest) {
-      return {
-        classId: `agent-type:${subagentType}`,
-        suggest,
-        reason: `agent type ${subagentType}`,
-        source: "agentType",
-      };
-    }
-  }
-
-  // 2. Description/prompt pattern matching
-  if (description) {
-    for (const cls of table.classes) {
-      try {
-        const flags = cls.flags ?? "";
-        const re = new RegExp(cls.pattern, flags);
-        if (re.test(description)) {
-          return {
-            classId: cls.id,
-            suggest: cls.suggest,
-            reason: cls.reason,
-            source: "description",
-          };
-        }
-      } catch {
-        // Malformed regex in routing table entry - skip this entry
-        continue;
-      }
-    }
-  }
-
-  return null;
-};
+// Match logic now lives in ../routing-table.ts (matchRoutingTable) - the single
+// matcher shared with `ax dispatches --candidates` (ADR-0014 follow-up).
 
 // ---------------------------------------------------------------------------
 // Cost multiplier hint (rough guidance - not exact)
@@ -135,7 +82,7 @@ const hook = defineHook({
       const description = rawDescription ?? rawPrompt;
 
       const table = loadRoutingTableOrDefault();
-      const match = matchTable(table, description, subagentType);
+      const match = matchRoutingTable(table, description, subagentType);
 
       if (match === null) return Verdict.allow;
 
