@@ -75,6 +75,7 @@ fresh clone.
 ## Reactivity
 
 - LaunchAgent watcher (`com.necmttn.ax-watch`, installed by `axctl install`) tails `~/.claude/projects/` + `~/.codex/sessions/` and runs `axctl ingest --since=1` in the background on new transcripts. Do NOT add a Stop hook - Stop fires per turn and blocks Claude until ingest returns.
+- LaunchAgent serve daemon (`com.necmttn.ax-serve`, installed by `axctl install`) auto-starts `ax serve` on login (RunAtLoad + KeepAlive-on-crash), so the dashboard API + OTLP receiver (port 1738) are always up without a manual `ax serve`. serve binds `127.0.0.1` by default (`AX_SERVE_HOST=0.0.0.0` to expose on the LAN); it self-heals if `com.necmttn.ax-db` starts after it. Symmetric across install/status/enable/disable/uninstall with the other agents.
 - Weekly self-improve cron (`~/.claude/self-improve/run.sh`) does deep-scan backfill (planned wire-up)
 - `ax-extract-workflow` skill (installable via `npx skills add Necmttn/ax`) frames "what made X work" investigations - triggers retro + session queries to surface the actual sequence of events behind a result.
 
