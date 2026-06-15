@@ -3,6 +3,7 @@ import { SurrealClient } from "@ax/lib/db";
 import type { DbError } from "@ax/lib/errors";
 import { recordLiteral } from "@ax/lib/ids";
 import { surrealDate, surrealString } from "@ax/lib/shared/surql";
+import { numberOrNull, numberOrZero, stringOrNull } from "@ax/lib/shared/surreal";
 import { sessionProjectClause } from "../metrics/session-filter.ts";
 
 export interface CostSessionRow {
@@ -56,19 +57,9 @@ export type CostSelector =
     | { readonly kind: "commit"; readonly sha: string; readonly repositoryKey?: string | null }
     | { readonly kind: "branch"; readonly branch: string; readonly repositoryKey?: string | null; readonly limit: number };
 
-const numberOrZero = (value: unknown): number => {
-    const n = Number(value ?? 0);
-    return Number.isFinite(n) ? n : 0;
-};
-
-const nullableNumber = (value: unknown): number | null => {
-    if (value === null || value === undefined) return null;
-    const n = Number(value);
-    return Number.isFinite(n) ? n : null;
-};
-
-const stringOrNull = (value: unknown): string | null =>
-    typeof value === "string" && value.length > 0 ? value : null;
+// Local alias: nullableNumber → canonical numberOrNull from @ax/lib/shared/surreal.
+// (Deprecated re-export shim - the local definition was removed in F-graph-toolkit.)
+const nullableNumber = numberOrNull;
 
 const toRecordRef = (table: string, id: string): string => {
     let key = id.trim().replace(new RegExp(`^${table}:`), "");

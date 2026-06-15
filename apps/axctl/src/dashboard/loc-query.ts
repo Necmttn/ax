@@ -4,6 +4,7 @@ import { SurrealClient } from "@ax/lib/db";
 import type { DbError } from "@ax/lib/errors";
 import { recordLiteral } from "@ax/lib/ids";
 import { surrealDate, surrealString } from "@ax/lib/shared/surql";
+import { stringOrNull } from "@ax/lib/shared/surreal";
 import { sessionProjectClause } from "../metrics/session-filter.ts";
 
 // ---------------------------------------------------------------------------
@@ -58,8 +59,7 @@ export type LocSelector =
           readonly repositoryKey?: string | null;
       };
 
-const stringOrNull = (value: unknown): string | null =>
-    typeof value === "string" && value.length > 0 ? value : null;
+// stringOrNull imported from @ax/lib/shared/surreal - local definition removed.
 
 const toRecordRef = (table: string, id: string): string => {
     let key = id.trim().replace(new RegExp(`^${table}:`), "");

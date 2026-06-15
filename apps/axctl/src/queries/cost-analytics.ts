@@ -14,6 +14,7 @@
 import { Effect } from "effect";
 import { SurrealClient } from "@ax/lib/db";
 import { surrealLiteral } from "@ax/lib/json";
+import { countField, stringFieldOr } from "@ax/lib/shared/surreal";
 
 // ---------------------------------------------------------------------------
 // cost models
@@ -62,12 +63,12 @@ export const fetchCostModels = Effect.fn("queries.fetchCostModels")(
 
         const parsed: CostModelsRow[] = rows.map((row) => ({
             model: row.model == null ? "(unattributed)" : String(row.model),
-            sessions: Number(row.sessions ?? 0),
-            prompt_tokens: Number(row.prompt_tokens ?? 0),
-            completion_tokens: Number(row.completion_tokens ?? 0),
-            cache_read_tokens: Number(row.cache_read_tokens ?? 0),
-            cache_create_tokens: Number(row.cache_create_tokens ?? 0),
-            cost_usd: Number(row.cost_usd ?? 0),
+            sessions: countField(row, "sessions"),
+            prompt_tokens: countField(row, "prompt_tokens"),
+            completion_tokens: countField(row, "completion_tokens"),
+            cache_read_tokens: countField(row, "cache_read_tokens"),
+            cache_create_tokens: countField(row, "cache_create_tokens"),
+            cost_usd: countField(row, "cost_usd"),
         }));
 
         // Sort by cost desc
@@ -133,13 +134,13 @@ export const fetchCostSessions = Effect.fn("queries.fetchCostSessions")(
         ).pipe(Effect.map((r) => r?.[0] ?? []));
 
         const parsed: CostSessionsRow[] = rows.map((row) => ({
-            session_id: String(row.session_id ?? ""),
+            session_id: stringFieldOr(row, "session_id"),
             project: row.project == null ? null : String(row.project),
             model: row.model == null ? null : String(row.model),
             started_at: row.started_at == null ? null : String(row.started_at),
-            cost_usd: Number(row.cost_usd ?? 0),
-            completion_tokens: Number(row.completion_tokens ?? 0),
-            cache_read_tokens: Number(row.cache_read_tokens ?? 0),
+            cost_usd: countField(row, "cost_usd"),
+            completion_tokens: countField(row, "completion_tokens"),
+            cache_read_tokens: countField(row, "cache_read_tokens"),
         }));
 
         return { rows: parsed } satisfies CostSessionsResult;
@@ -225,16 +226,16 @@ export const fetchCostSplit = Effect.fn("queries.fetchCostSplit")(
 
         for (const row of rows) {
             const origin: "main" | "subagent" =
-                String(row.source ?? "") === "claude-subagent" ? "subagent" : "main";
+                stringFieldOr(row, "source") === "claude-subagent" ? "subagent" : "main";
             const model = row.model == null ? "(unattributed)" : String(row.model);
             const key = `${origin}\x00${model}`;
 
-            const sessions = Number(row.sessions ?? 0);
-            const prompt = Number(row.prompt_tokens ?? 0);
-            const completion = Number(row.completion_tokens ?? 0);
-            const cacheRead = Number(row.cache_read_tokens ?? 0);
-            const cacheCreate = Number(row.cache_create_tokens ?? 0);
-            const cost = Number(row.cost_usd ?? 0);
+            const sessions = countField(row, "sessions");
+            const prompt = countField(row, "prompt_tokens");
+            const completion = countField(row, "completion_tokens");
+            const cacheRead = countField(row, "cache_read_tokens");
+            const cacheCreate = countField(row, "cache_create_tokens");
+            const cost = countField(row, "cost_usd");
 
             const existing = cellMap.get(key);
             if (existing) {
