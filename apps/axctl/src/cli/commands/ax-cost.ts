@@ -13,6 +13,7 @@ import {
     fetchCostSessions,
     fetchCostSplit,
 } from "../../queries/cost-analytics.ts";
+import { fetchRoutability, type RoutabilityResult } from "../../queries/routability.ts";
 import {
     buildCostModelsNext,
     buildCostSplitNext,
@@ -240,6 +241,70 @@ const costSplitCommand = Command.make(
 );
 
 // ---------------------------------------------------------------------------
+// ax cost routability [--days=N] [--min-run=N] [--json]
+// ---------------------------------------------------------------------------
+
+function renderRoutability(r: RoutabilityResult): string {
+    const usdFmt = (n: number) => `$${n.toFixed(2)}`;
+    const out: string[] = [];
+    out.push(`main-agent spend: ${usdFmt(r.mainSpendUsd)}   routable: ${usdFmt(r.routableUsd)} (${r.routablePct.toFixed(0)}%)   est. savings: ${usdFmt(r.estSavingsUsd)}`);
+    out.push("");
+    out.push("class            runs   turns   main_cost    tier     repriced    est_savings");
+    for (const row of r.rows) {
+        if (row.verdict === "stays") {
+            out.push(`${"stays main".padEnd(15)} ${String(row.runs).padStart(5)}  ${String(row.turns).padStart(6)}  ${usdFmt(row.mainCostUsd).padStart(10)}   ${"-".padEnd(7)} ${"-".padStart(10)}  ${"-".padStart(11)}`);
+        } else {
+            out.push(`${row.class.padEnd(15)} ${String(row.runs).padStart(5)}  ${String(row.turns).padStart(6)}  ${usdFmt(row.mainCostUsd).padStart(10)}   ${(row.tier ?? "").padEnd(7)} ${usdFmt(row.repricedUsd ?? 0).padStart(10)}  ${usdFmt(row.estSavingsUsd ?? 0).padStart(11)}`);
+        }
+    }
+    out.push("");
+    out.push("estimate: edit/read turns are assumed mechanically routable; reasoning before an");
+    out.push("edit isn't visible in the transcript, so read this as an upper-ish bound, not ground");
+    out.push("truth. judgment-text turns stay on frontier by design. claude main-agent only.");
+    out.push("next: ax dispatches --candidates   # the subagent-side leak");
+    return out.join("\n");
+}
+
+const cmdCostRoutability = (input: {
+    readonly days: number;
+    readonly minRun: number;
+    readonly json: boolean;
+}) =>
+    Effect.gen(function* () {
+        const result = yield* fetchRoutability({ days: input.days, minRun: input.minRun });
+
+        if (input.json) {
+            console.log(prettyPrint(result));
+            return;
+        }
+
+        console.log(renderRoutability(result));
+    });
+
+const costRoutabilityCommand = Command.make(
+    "routability",
+    {
+        days: Flag.integer("days").pipe(Flag.withDefault(30)),
+        minRun: Flag.integer("min-run").pipe(Flag.withDefault(1)),
+        json: jsonFlag,
+    },
+    ({ days, minRun, json }) => {
+        if (!Number.isInteger(days) || days <= 0) {
+            fail(`ax cost routability: --days must be a positive integer (got "${days}")`);
+        }
+        if (!Number.isInteger(minRun) || minRun <= 0) {
+            fail(`ax cost routability: --min-run must be a positive integer (got "${minRun}")`);
+        }
+        return cmdCostRoutability({ days, minRun, json });
+    },
+).pipe(
+    Command.withDescription(
+        "Estimate how much main-agent spend was routable to a cheaper subagent. " +
+        "--days=N (default 30)  --min-run=N (default 1)  --json",
+    ),
+);
+
+// ---------------------------------------------------------------------------
 // ax cost (group command)
 // ---------------------------------------------------------------------------
 
@@ -251,6 +316,7 @@ export const costCommand = Command.make("cost").pipe(
         costModelsCommand,
         costSessionsCommand,
         costSplitCommand,
+        costRoutabilityCommand,
     ]),
 );
 

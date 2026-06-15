@@ -58,6 +58,7 @@ import {
     buildCostSplitNext,
 } from "../nav/next-links.ts";
 import { fetchCostModels, fetchCostSplit } from "../queries/cost-analytics.ts";
+import { fetchRoutability } from "../queries/routability.ts";
 import { fetchDispatches, fetchDispatchCandidates } from "../queries/dispatch-analytics.ts";
 import { loadEffectiveRoutingTable } from "../queries/routing-table-io.ts";
 import { buildDispatchesNext, buildCandidatesNext } from "../nav/next-links.ts";
@@ -541,6 +542,32 @@ const costSplitTool: AxMcpTool = {
     },
 };
 
+const costRoutabilityTool: AxMcpTool = {
+    name: "cost_routability",
+    description:
+        `Main-thread routability lens: of main-agent (non-subagent) spend, how much sat in routable class-runs (gather -> haiku, mechanical-impl / niche-research -> sonnet) vs genuine judgment, with estimated savings repriced one tier down. Deterministic (tool composition + JUDGMENT_GUARD_RE text guard); turn-level by default. Use to see how much main-thread work could have been a cheaper subagent. ${NEXT_PROTOCOL_HINT}`,
+    inputSchema: {
+        days: z
+            .number()
+            .int()
+            .positive()
+            .optional()
+            .describe("Window in days (default 30)."),
+        min_run: z
+            .number()
+            .int()
+            .positive()
+            .optional()
+            .describe("Min consecutive same-class turns for a span to count (default 1)."),
+    },
+    run: async (args, rt) => {
+        const days = typeof args.days === "number" ? args.days : 30;
+        const minRun = typeof args.min_run === "number" ? args.min_run : 1;
+        const result = await rt.runPromise(fetchRoutability({ days, minRun }));
+        return result;
+    },
+};
+
 const dispatchesTool: AxMcpTool = {
     name: "dispatches",
     description:
@@ -647,6 +674,7 @@ export const axMcpTools: ReadonlyArray<AxMcpTool> = [
     signalShowTool,
     costModelsTool,
     costSplitTool,
+    costRoutabilityTool,
     dispatchesTool,
     dojoAgendaTool,
 ];
