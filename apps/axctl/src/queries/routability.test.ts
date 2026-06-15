@@ -40,3 +40,58 @@ describe("classifyTurn", () => {
     expect(classifyTurn(base, false)).toBe("interactive");
   });
 });
+
+import { buildSpans } from "./routability.ts";
+import type { RepriceUsage } from "./reprice.ts";
+
+const u: RepriceUsage = {
+  prompt_tokens: 1000, completion_tokens: 100,
+  cache_read_tokens: 0, cache_create_tokens: 0, cost_usd: 1,
+};
+
+function turn(seq: number, role: string, tools: string[], extra: Partial<TurnFacts> = {}): TurnFacts {
+  return { seq, role, toolNames: tools, thinkingTokens: 0, intentKind: null, text: null, usage: u, ...extra };
+}
+
+describe("buildSpans", () => {
+  it("groups consecutive same-class assistant turns into one span", () => {
+    const turns = [
+      turn(1, "user", []),
+      turn(2, "assistant", ["Read", "Grep"]),
+      turn(3, "assistant", ["Read"]),
+      turn(4, "assistant", ["Read", "Glob"]),
+    ];
+    const spans = buildSpans(turns, 3);
+    // turn 2 is adjacentToUser -> interactive (own span); 3 & 4 -> gather run of 2
+    const gather = spans.find((s) => s.cls === "gather");
+    expect(gather?.turnCount).toBe(2);
+  });
+
+  it("a user turn breaks a run even when class would continue", () => {
+    const turns = [
+      turn(1, "user", []), turn(2, "assistant", ["Edit"]), turn(3, "assistant", ["Edit"]),
+      turn(4, "user", []), turn(5, "assistant", ["Edit"]), turn(6, "assistant", ["Edit"]),
+    ];
+    const mech = buildSpans(turns, 1).filter((s) => s.cls === "mechanical-impl");
+    expect(mech.length).toBe(2);
+  });
+
+  it("marks a routable span only when run length >= minRun", () => {
+    const turns = [
+      turn(1, "user", []),
+      turn(2, "assistant", ["Read"]), // interactive (adjacent)
+      turn(3, "assistant", ["Read"]), turn(4, "assistant", ["Read"]), turn(5, "assistant", ["Read"]), // gather run of 3
+    ];
+    expect(buildSpans(turns, 3).find((s) => s.cls === "gather")?.routable).toBe(true);
+    expect(buildSpans(turns, 4).find((s) => s.cls === "gather")?.routable).toBe(false);
+  });
+
+  it("sums usage across a span", () => {
+    const turns = [
+      turn(1, "user", []), turn(2, "assistant", ["Read"]),
+      turn(3, "assistant", ["Read"]), turn(4, "assistant", ["Read"]),
+    ];
+    const gather = buildSpans(turns, 1).find((s) => s.cls === "gather");
+    expect(gather?.usage.cost_usd).toBe(2); // turns 3 & 4 (turn 2 is interactive)
+  });
+});

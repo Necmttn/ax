@@ -62,3 +62,60 @@ export function classifyTurn(t: TurnFacts, adjacentToUser: boolean): WorkClass {
 
     return "interactive";
 }
+
+export interface Span {
+  cls: WorkClass;
+  turnCount: number;
+  usage: RepriceUsage; // summed across the span's turns
+  routable: boolean; // cls is routable AND turnCount >= minRun
+}
+
+const ZERO_USAGE = (): RepriceUsage => ({
+  prompt_tokens: 0, completion_tokens: 0, cache_read_tokens: 0, cache_create_tokens: 0, cost_usd: 0,
+});
+
+function addUsage(a: RepriceUsage, b: RepriceUsage | null): RepriceUsage {
+  if (!b) return a;
+  return {
+    prompt_tokens: a.prompt_tokens + b.prompt_tokens,
+    completion_tokens: a.completion_tokens + b.completion_tokens,
+    cache_read_tokens: a.cache_read_tokens + b.cache_read_tokens,
+    cache_create_tokens: a.cache_create_tokens + b.cache_create_tokens,
+    cost_usd: a.cost_usd + b.cost_usd,
+  };
+}
+
+/**
+ * Group ONE session's main-agent turns (seq order) into class-run spans.
+ * Splits at every user turn (judgment boundary); within a segment, groups
+ * consecutive assistant turns sharing a class. A turn neighbouring a user
+ * turn is forced to `interactive`. A span is routable iff its class is
+ * routable AND its run length >= minRun.
+ */
+export function buildSpans(turns: ReadonlyArray<TurnFacts>, minRun: number): Span[] {
+  const spans: Span[] = [];
+  let cur: { cls: WorkClass; turnCount: number; usage: RepriceUsage } | null = null;
+
+  const flush = () => {
+    if (!cur) return;
+    const tier = ROUTABLE_TIER[cur.cls];
+    spans.push({ cls: cur.cls, turnCount: cur.turnCount, usage: cur.usage, routable: tier !== undefined && cur.turnCount >= minRun });
+    cur = null;
+  };
+
+  for (let i = 0; i < turns.length; i++) {
+    const t = turns[i];
+    if (t.role !== "assistant") { flush(); continue; }
+    const prevIsUser = i > 0 && turns[i - 1].role === "user";
+    const cls = classifyTurn(t, prevIsUser);
+    if (cur && cur.cls === cls) {
+      cur.turnCount += 1;
+      cur.usage = addUsage(cur.usage, t.usage);
+    } else {
+      flush();
+      cur = { cls, turnCount: 1, usage: addUsage(ZERO_USAGE(), t.usage) };
+    }
+  }
+  flush();
+  return spans;
+}
