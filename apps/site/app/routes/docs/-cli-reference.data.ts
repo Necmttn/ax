@@ -673,6 +673,38 @@ removed launchd plists and the ax symlink`,
       },
     ],
   },
+  {
+    eyebrow: "$ sync the team rig",
+    title: "Team",
+    blurb:
+      "Activate the shared .ax/ skills and agents committed to the repo into your local runtime, trust-gated per content hash.",
+    commands: [
+      {
+        name: "team",
+        sub: ["sync"],
+        job: "Activate the team's committed .ax/ rig (skills + agents) into your runtime, trust-gated.",
+        signature: "ax team sync [--dry-run] [--yes]",
+        flags: [
+          { flag: "--dry-run", desc: "show what would change without writing anything" },
+          { flag: "--yes", desc: "approve activation of new or changed artifacts" },
+        ],
+        receipt: `$ ax team sync --yes
+[ax team sync]
+activated 2:
+  + skill:tdd
+  + agent:reviewer
+1 unchanged
+gated (executable hooks - trust-review before installing):
+  ~ enforce-worktree`,
+        detail: [
+          "ax team sync scans .ax/skills/, .ax/agents/, and .ax/hooks/ in the current git repo root.",
+          "Skills and agents are non-executable and safe to copy; hooks in .ax/hooks/ require a separate trust review and are never activated automatically.",
+          "Content hashes prevent re-activating unchanged artifacts (idempotent). A changed artifact is re-activated and its trust record updated.",
+          "--dry-run prints the plan without writing anything. Without --yes, prints the activation list and exits without activating.",
+        ],
+      },
+    ],
+  },
 ];
 
 /**

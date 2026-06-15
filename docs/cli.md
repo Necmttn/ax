@@ -260,6 +260,12 @@ The 16 tools, each mirroring the matching CLI command:
 > `sessions_here` / `sessions_near` are intentionally deferred - they need a
 > git/cwd-resolved repository key, a documented follow-up.
 
+## Team
+
+`ax team sync [--dry-run] [--yes]`
+
+Activate the team's committed `.ax/` rig (skills + agents) into your runtime, trust-gated. Non-executable only - hooks in `.ax/hooks/` are reported as gated but never activated. `--dry-run` shows what would change. `--yes` approves activation (required when activating new or changed artifacts).
+
 ## Live ingest in the dashboard
 
 `axctl serve` exposes `POST /api/ingest` (also wired to the dashboard's **Live**
