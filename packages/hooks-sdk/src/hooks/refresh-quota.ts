@@ -3,28 +3,29 @@
  *
  * Fires at SessionStart (once per session, off the hot path).
  * Responsibilities:
- *   1. Kick off a best-effort background refresh of the quota cache. The
- *      refresh is fire-and-forget: if `ax` isn't on PATH or the spawn fails
- *      for any reason, the error is swallowed and the hook continues with
- *      whatever cache is on disk.
- *   2. Read the quota cache synchronously.
+ *   1. AWAIT a best-effort refresh of the quota cache (`ax quota --fresh`).
+ *      This MUST complete before the read - otherwise readQuotaCacheSync runs
+ *      in the same tick and beats the network fetch, so a cold/stale cache
+ *      would make the SessionStart splurge nudge read the pre-refresh cache
+ *      and never fire (exactly when it should). SessionStart is off the hot
+ *      path, so the ~hundreds-of-ms refresh latency is acceptable per spec.
+ *   2. Read the (now-refreshed) quota cache synchronously.
  *   3. Compute the spend mode from the cache.
  *   4. If the mode is splurge, inject a one-line /dojo nudge into the session
  *      context so the model knows to run /dojo.
  *
  * Binary resolution: `ax` may not be on PATH in the hook's spawn environment
- * (the harness fires hooks with a minimal env). The spawn is fully best-effort:
- * any error (ENOENT, non-zero exit) is caught synchronously via a try/catch
- * before the process even starts, and the Promise rejection is caught via
- * .catch(() => {}). The hook never awaits the refresh - it fires and forgets.
- * The actual quota nudge decision is always synchronous against the current
- * cache file, so a failed refresh only means the cache is slightly stale
- * (not a correctness problem; computeSpendMode marks stale → conserve).
+ * (the harness fires hooks with a minimal env). The refresh is fail-open: the
+ * spawn's `.exited` promise is `.catch(() => undefined)`'d, so ENOENT / non-zero
+ * exit / spawn errors resolve to `undefined` instead of rejecting. Wrapping that
+ * already-caught promise in `Effect.promise` yields E = never, R = never - it can
+ * never fail the hook. If the refresh fails, the hook just reads whatever cache
+ * exists; computeSpendMode marks a stale/missing cache → conserve.
  *
- * Run type: Effect.sync → R = never. TypeScript allows assigning R=never to
- * the HookDefinition run type (Effect<Verdict, never, GitEnv>) because a hook
- * that needs no env satisfies the more-constrained signature. Same pattern as
- * route-dispatch.ts.
+ * Run type: Effect.gen → E = never, R = never (the only yielded effect is the
+ * non-failing Effect.promise above). This satisfies the HookDefinition run type
+ * (Effect<Verdict, never, GitEnv>) - a hook that needs no env is assignable to
+ * the more-constrained signature.
  */
 import { Effect } from "effect";
 import { defineHook, runMain } from "../define.ts";
@@ -63,27 +64,22 @@ const hook = defineHook({
   name: "refresh-quota",
   events: ["SessionStart"],
   // No tool matcher: SessionStart is a non-tool event.
-  // No GitEnv needed: all I/O is sync fs + a best-effort fire-and-forget spawn.
-  // Effect.sync → R = never, which satisfies HookDefinition's R = GitEnv.
+  // No GitEnv needed: the only yielded effect is a non-failing Effect.promise,
+  // so the run effect is E = never, R = never - assignable to R = GitEnv.
   run: () =>
-    Effect.sync(() => {
-      // 1. Fire-and-forget cache refresh. Best-effort: any spawn error is
-      //    silently swallowed. We do NOT await - the hook returns immediately
-      //    after reading the existing cache.
-      try {
+    Effect.gen(function* () {
+      // 1. AWAIT a best-effort cache refresh. The `.catch(() => undefined)` makes
+      //    the promise never reject (ENOENT / non-zero exit / `ax` not on PATH all
+      //    resolve to undefined), so Effect.promise gives E = never. We MUST await
+      //    this before the read so the just-fetched cache is on disk.
+      yield* Effect.promise(() =>
         Bun.spawn(["ax", "quota", "--fresh"], {
           stdout: "ignore",
           stderr: "ignore",
-        }).exited.catch(() => {
-          // Non-zero exit or spawn error after process starts - ignore.
-        });
-      } catch {
-        // ENOENT or other synchronous spawn error (`ax` not on PATH) - ignore.
-      }
+        }).exited.catch(() => undefined),
+      );
 
-      // 2. Read the current cache synchronously (may be slightly stale if the
-      //    refresh above hasn't finished yet; that's intentional - correctness
-      //    comes from the staleness check inside computeSpendMode).
+      // 2. Read the now-refreshed cache synchronously.
       const snap = readQuotaCacheSync(defaultQuotaCachePath());
 
       // 3. Compute spend mode.
