@@ -440,9 +440,10 @@
 .rdx-card.acc-violet { --card-accent: var(--violet); }
 .rdx-card.acc-rose   { --card-accent: #e0556f; }
 .rdx-card.acc-alert  { --card-accent: var(--alert); }
-.rdx-card[class*="acc-"]::before {
-    content: ""; position: absolute; top: 0; left: 0; right: 0; height: 2px;
-    background: var(--card-accent); opacity: 0.9; z-index: 2;
-}
-.rdx-card[class*="acc-"] .nf-key { color: var(--card-accent); }
+/* No decorative card chrome - colour belongs to the DATA (segbars, cells,
+   charts), keyed to meaning (model identity, intensity, status). */
 .rdx-seg.card i.on { background: var(--card-accent); }
+.rdx-seg.tint i.on { background: var(--seg); }
+
+/* model legend swatch — colour tied to the model's data bar */
+.nf-swatch { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 8px; vertical-align: middle; }

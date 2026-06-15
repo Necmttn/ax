@@ -9,16 +9,26 @@ export function Doto({ children, className = "" }: { children: React.ReactNode; 
 
 /** Segmented bar - first `on` of `total` cells lit, staggered slam-in. */
 export function Segbar({
-    total, on, tone = "accent", wave = false,
-}: { total: number; on: number; tone?: "accent" | "alert" | "green" | "pri" | "card"; wave?: boolean }) {
+    total, on, tone = "accent", wave = false, color,
+}: { total: number; on: number; tone?: "accent" | "alert" | "green" | "pri" | "card"; wave?: boolean; color?: string }) {
+    const t = color ? "tint" : tone;
     return (
-        <div className={`rdx-seg ${tone} ${wave ? "wave" : ""}`} aria-hidden="true">
+        <div className={`rdx-seg ${t} ${wave ? "wave" : ""}`} aria-hidden="true" style={color ? ({ "--seg": color } as Record<string, string>) : undefined}>
             {Array.from({ length: total }, (_, i) => (
                 <i key={i} className={i < on ? "on" : ""} style={{ animationDelay: `${0.2 + i * 0.04}s` }} />
             ))}
         </div>
     );
 }
+
+/** Resolve a model's tone key to its CSS-var colour. */
+export const modelColor = (tone: string): string =>
+    tone === "blue" ? "var(--blue)"
+    : tone === "gold" ? "var(--gold)"
+    : tone === "violet" ? "var(--violet)"
+    : tone === "rose" ? "#e0556f"
+    : tone === "red" ? "var(--red)"
+    : "var(--green)";
 
 /** Contribution cell grid with diagonal slam + glim. levels row-major 0..4. */
 export function CellGrid({

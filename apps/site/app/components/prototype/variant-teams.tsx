@@ -1,7 +1,7 @@
 /* THROWAWAY - SURFACE: Teams ("ring"). The org-level instrument board: team
    KPIs + a member roster, in the Mission Control language. This is the
    "protocol/ring for companies & teams" view. */
-import { CellGrid, GlyphReel, Led, Segbar } from "./viz";
+import { CellGrid, GlyphReel, Led, Segbar, modelColor } from "./viz";
 import { TEAM, TEAM_ACTIVITY, litFor } from "./mock";
 import type { Theme } from "./switcher";
 
@@ -64,9 +64,9 @@ export function VariantTeams({ theme }: { theme: Theme }) {
                         <div className="v-mc-meta rdx-label"><span className="nf-key">model split · ring</span><span>{t.spend} total</span></div>
                         {t.models.map((m) => (
                             <div className="v-mc-split-row" key={m.name}>
-                                <span style={{ color: "var(--pri)" }}>{m.name}</span>
+                                <span style={{ color: "var(--pri)" }}><span className="nf-swatch" style={{ background: modelColor(m.tone) }} />{m.name}</span>
                                 <span>{Math.round(m.share * 100)}% · {m.cost}</span>
-                                <span className="segwrap"><Segbar total={26} on={litFor(m.share, 26)} tone={m.tone === "green" ? "green" : "pri"} /></span>
+                                <span className="segwrap"><Segbar total={26} on={litFor(m.share, 26)} color={modelColor(m.tone)} /></span>
                             </div>
                         ))}
                     </section>

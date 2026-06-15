@@ -1,5 +1,5 @@
 /* THROWAWAY - Variant A: Mission Control. Dark-first desktop HUD, dense bento. */
-import { CellGrid, Doto, GlyphReel, Led, Segbar } from "./viz";
+import { CellGrid, Doto, GlyphReel, Led, Segbar, modelColor } from "./viz";
 import { ACTIVITY, FEED, MODELS, PROFILE, litFor } from "./mock";
 import type { Theme } from "./switcher";
 
@@ -71,9 +71,9 @@ export function VariantMissionControl({ theme }: { theme: Theme }) {
                         <div className="v-mc-meta rdx-label"><span className="nf-key">model split · window</span><span>{PROFILE.cost} total</span></div>
                         {MODELS.slice(0, 3).map((m) => (
                             <div className="v-mc-split-row" key={m.name}>
-                                <span style={{ color: "var(--pri)" }}>{m.name}</span>
+                                <span style={{ color: "var(--pri)" }}><span className="nf-swatch" style={{ background: modelColor(m.tone) }} />{m.name}</span>
                                 <span>{Math.round(m.share * 100)}% · {m.cost}</span>
-                                <span className="segwrap"><Segbar total={24} on={litFor(m.share, 24)} tone={m.tone === "green" ? "green" : "pri"} /></span>
+                                <span className="segwrap"><Segbar total={24} on={litFor(m.share, 24)} color={modelColor(m.tone)} /></span>
                             </div>
                         ))}
                     </section>
