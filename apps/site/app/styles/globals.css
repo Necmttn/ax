@@ -10930,6 +10930,35 @@ footer.site-footer { padding: 48px 32px 56px; }
   text-decoration: none;
 }
 .doc-crumb a:hover { color: var(--ink); }
+
+/* --- Blog --------------------------------------------------------------- */
+.blog-index { padding-top: 8px; padding-bottom: 96px; }
+.blog-index-head { max-width: 760px; padding: 48px 0 8px; }
+.blog-index-head h1 { font-family: var(--serif); font-size: 44px; line-height: 1.1; margin: 8px 0 0; }
+.blog-index-head h1 em { font-style: italic; color: var(--green); }
+.blog-index-head .lede { color: var(--muted); font-size: 18px; line-height: 1.6; margin-top: 14px; }
+.blog-list { margin-top: 40px; border-top: 1px solid var(--line); }
+.blog-entry { padding: 28px 0; border-bottom: 1px solid var(--line); }
+.blog-meta {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+.blog-tags { display: flex; gap: 6px; }
+.blog-tag { padding: 2px 8px; background: var(--panel); border: 1px solid var(--line); border-radius: 3px; }
+.blog-entry h2 { font-family: var(--serif); font-size: 28px; line-height: 1.2; margin: 10px 0 0; }
+.blog-entry h2 a { color: var(--ink); text-decoration: none; }
+.blog-entry h2 a:hover { color: var(--blue); }
+.blog-excerpt { color: var(--muted); font-size: 16.5px; line-height: 1.6; margin: 10px 0 0; max-width: 720px; }
+.blog-entry-link { display: inline-block; margin-top: 12px; font-family: var(--mono); font-size: 13px; color: var(--blue); text-decoration: none; }
+.blog-entry-link:hover { text-decoration: underline; }
+.blog-post-date { font-family: var(--mono); font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: 1px; padding: 18px 0 0; }
+
 .doc-head { max-width: 760px; padding: 28px 0 4px; }
 .doc-head .eyebrow {
   font-family: var(--mono);

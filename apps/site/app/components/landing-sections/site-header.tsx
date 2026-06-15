@@ -34,6 +34,7 @@ export function SiteHeader() {
         <Link to="/showcases">Showcases</Link>
         <Link to="/leaders">Leaders</Link>
         <Link to="/how-it-works">How</Link>
+        <Link to="/blog">Blog</Link>
         <Link to="/docs">Docs</Link>
         <Link to="/origin">Origin</Link>
         <a
