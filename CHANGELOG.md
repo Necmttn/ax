@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.31.0](https://github.com/Necmttn/ax/compare/v0.30.0...v0.31.0) (2026-06-15)
+
+
+### Features
+
+* ax hooks latency - regression lens over real hook-fire telemetry ([#425](https://github.com/Necmttn/ax/issues/425)) ([f34374f](https://github.com/Necmttn/ax/commit/f34374fdb44be906a4132327515538adf5181641))
+* **mcp:** dojo_agenda tool + retire deferred cron trigger ([#420](https://github.com/Necmttn/ax/issues/420)) ([7aaece9](https://github.com/Necmttn/ax/commit/7aaece920eb869eb0fdc52d400e329ba384b1de7))
+* **otel:** OTLP logs ingestion — Codex events into ax serve ([#432](https://github.com/Necmttn/ax/issues/432)) ([9ec015e](https://github.com/Necmttn/ax/commit/9ec015ecdc8709929ad88155e89ab86ed47b34e5))
+* **otel:** OTLP receiver — harness usage telemetry into ax serve ([#423](https://github.com/Necmttn/ax/issues/423)) ([43c85d1](https://github.com/Necmttn/ax/commit/43c85d1f0d64ca18db49bdc8ea03c862336a8fc9))
+* **site:** nullframe dot-matrix treatment for /u profile ([#400](https://github.com/Necmttn/ax/issues/400)) ([77a1702](https://github.com/Necmttn/ax/commit/77a1702eb6c4fb514b82d60c3c4706457703b18a))
+* spar analytics-exclusion tag (behavioral-only) ([#424](https://github.com/Necmttn/ax/issues/424)) ([07c05bb](https://github.com/Necmttn/ax/commit/07c05bb27284a1ef725591c668ab12b208e99ef4))
+* **studio:** instrument-ify the rest of the dashboard + Context Budget (reclaim/drift) ([#427](https://github.com/Necmttn/ax/issues/427)) ([b83e217](https://github.com/Necmttn/ax/commit/b83e217f6e5c11107fd70136c3804df36a244d66))
+* **usage:** self-telemetry + personal utilization view (adoption Fix [#1](https://github.com/Necmttn/ax/issues/1)a) ([#421](https://github.com/Necmttn/ax/issues/421)) ([c7ac1d2](https://github.com/Necmttn/ax/commit/c7ac1d2e908570994555eb2fdd3479ff66ad78e2))
+
+
+### Bug Fixes
+
+* **otel:** correct Codex [otel] config format (was breaking all codex commands) ([#426](https://github.com/Necmttn/ax/issues/426)) ([b136fb2](https://github.com/Necmttn/ax/commit/b136fb276f09a8148896d4fc153d1847f55a2274))
+* **studio:** /api/sessions all-sources 400 — coalesce NONE columns to null ([#428](https://github.com/Necmttn/ax/issues/428)) ([83d4397](https://github.com/Necmttn/ax/commit/83d43978c140824520f4732d2991668a8d5b031b))
+
 ## [0.30.0](https://github.com/Necmttn/ax/compare/v0.29.0...v0.30.0) (2026-06-15)
 
 
