@@ -60,10 +60,11 @@ Two design assumptions in the original draft were refuted by the data and correc
   first assistant turn of each segment to `interactive`. `minRun=3` gated out ~everything
   (0.0% routable). The **turn is the natural unit**, so the default is `minRun=1`.
 
-At `minRun=1` on the reference machine, ~34% of main-agent assistant cost ($5.2K/30d)
-lands in routable classes - larger than the entire subagent routing leak. The class-run
-grouping mechanic is retained (it still merges adjacent same-class turns and powers the
-`--min-run` knob), just defaulted to 1.
+At `minRun=1` on the reference machine (Claude main only), ~22% of main-agent assistant
+cost is routable (~$3.2K/30d routable -> ~$1.8K/30d est. savings, ~$21K/yr) - several
+times the entire subagent routing leak ($605/mo). The class-run grouping mechanic is
+retained (it still merges adjacent same-class turns and powers the `--min-run` knob),
+just defaulted to 1.
 
 ## Work-class taxonomy (tool composition + text-judgment guard)
 
@@ -151,19 +152,19 @@ Render:
 ```
 $ ax cost routability --days=30
 
-main-agent spend: $15,137   routable: $5,162 (34%)   est. savings: ~$X
+main-agent spend: $14,460   routable: $3,236 (22%)   est. savings: $1,764
 
 class            runs   turns   main_cost   tier     repriced   est_savings
-mechanical-impl  ...    ...     $4,498      sonnet   ...        ...
-gather           ...    ...     $  628      haiku    ...        ...
-niche-research   ...    ...     $   35      sonnet   ...        ...
-stays main (interactive/design-decision)             $9,975     -
+mechanical-impl  ...    ...     $2,887      sonnet   $1,406     $1,481
+gather           ...    ...     $  326      haiku    $   56     $  270
+niche-research   ...    ...     $   23      sonnet   $   10     $   12
+stays main (interactive/design-decision)             $11,224    -
 
-estimate from historical token counts; judgment work left on frontier by design.
+estimate: edit/read turns assumed mechanically routable (upper-ish bound); claude main only.
 next: ax dispatches --candidates   # the subagent-side leak
 ```
 
-(Numbers from the reference-machine smoke test at minRun=1; est_savings filled at run.)
+(Numbers from the reference-machine smoke test, Claude main only, minRun=1.)
 
 ## Reactivity / MCP
 
@@ -180,9 +181,13 @@ next: ax dispatches --candidates   # the subagent-side leak
   lens can't see the reasoning that preceded the edit. This is a known over-count direction;
   `JUDGMENT_GUARD_RE` on the turn text is the only judgment catch. Acceptable for an
   estimate; a populated reasoning signal (`thinking_blocks`) is the v2 refinement.
-- **Non-Claude main spend is under-counted.** ~$3K/30d of main spend (GPT-5.x, etc.) has no
-  per-turn `turn_token_usage` cost row, so `mainSpendUsd` (~$15.1K) sits below the
-  `ax cost split` main total (~$18.1K). The lens is Claude-main accurate; note the gap.
+- **Claude-main only by construction.** `fetchRoutability` allowlists `turn_token_usage.source
+  = 'claude'`, so `mainSpendUsd` (~$14.5K/30d) is *Claude main-agent spend only* - it
+  deliberately excludes Codex/OpenCode/Cursor/Pi main turns (which carry other `source`
+  values, some with their own cost rows) and all `claude-subagent` rows. It therefore sits
+  below the cross-provider `ax cost split` main total by design; it is not a bug or an
+  under-count of Claude. Routing-class tool names are Claude-shaped, so this also avoids
+  mis-pricing non-Claude tool turns. Non-Claude routability is out of scope for v0.
 - The biggest pool - the `interactive` fallback ($9.7K/64%, pure-text/coordination/Task
   turns) - is left as stays-main by design. If a future version wants to probe it (e.g.
   Task-dispatch turns vs genuine reasoning), that's a separate classification problem.

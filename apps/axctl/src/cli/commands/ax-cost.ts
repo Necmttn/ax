@@ -258,7 +258,9 @@ function renderRoutability(r: RoutabilityResult): string {
         }
     }
     out.push("");
-    out.push("estimate from historical token counts; judgment work left on frontier by design.");
+    out.push("estimate: edit/read turns are assumed mechanically routable; reasoning before an");
+    out.push("edit isn't visible in the transcript, so read this as an upper-ish bound, not ground");
+    out.push("truth. judgment-text turns stay on frontier by design. claude main-agent only.");
     out.push("next: ax dispatches --candidates   # the subagent-side leak");
     return out.join("\n");
 }
