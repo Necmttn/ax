@@ -233,6 +233,27 @@ claude-sonnet-4             54          120   18.7%        201,330`,
           "Reasoning-effort distribution spans sources: Codex turn_context effort and Claude settings.json effortLevel stamped on sessions active at ingest time.",
         ],
       },
+      {
+        name: "digest",
+        job: "Your ranked digest board - the ax signal a session-start hook pushes into the agent's context so value arrives without being asked for.",
+        signature: "ax digest [--json] [--refresh]",
+        flags: [
+          { flag: "--refresh", desc: "recompute the snapshot now instead of waiting for the watcher" },
+          { flag: "--json", desc: "print the raw snapshot JSON" },
+        ],
+        receipt: `$ ax digest
+[ax] your board (14d window):
+  - repair-loop (927 LOC churned, 1 failed check: test)
+      -> ax sessions churn --here
+  - routing could save ~$292/wk (61% inherit)
+      -> ax dispatches --candidates
+  - 6 improve proposals pending
+      -> ax improve recommend`,
+        detail: [
+          "A derive-tagged ingest stage writes ~/.ax/digest.json every ingest; the surface-digest hook reads it, dedups against ~/.ax/digest-shown.json (6h window, count cap, resolved-drop), and injects the top 3 at session start.",
+          "Sources: open improve proposals, routing savings, repair-loop churn, and quota burn (surfaced only above 70%). Compute and surface are split by the snapshot file, so a DB hiccup never blocks session boot.",
+        ],
+      },
     ],
   },
   {
