@@ -3080,3 +3080,645 @@ td.skill-cell .description {
     font-size: 18px;
     color: var(--ink);
 }
+
+/* ============================================================================
+   INSTRUMENT DATA-ROUTE KIT  (reference impl: /skills)
+   Reusable, route-agnostic primitives for elevating a dense data route into
+   the ax instrument readout (Mission Control house style). Scoped under .rdx
+   so they inherit the dark/light HUD palette. Other data routes
+   (sessions/workflow/improve) should adopt this same kit.
+   Conventions enforced here:
+     - GREEN is the accent; --alert (orange) is reserved for warnings.
+     - Colour lives in the DATA VIZ (sparklines, score bars, status dots),
+       never as decorative card/panel chrome (no coloured borders).
+     - Doto is reserved for a SINGLE hero number; table numbers stay tabular
+       mono (--mono + tabular-nums).
+   ========================================================================= */
+
+/* --- masthead: receipt-ruled header band ---------------------------------- */
+.rdx .inst-head {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding-bottom: 16px;
+    margin-bottom: 16px;
+    border-bottom: 1px solid var(--border);
+}
+.rdx .inst-head-top {
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 24px;
+    flex-wrap: wrap;
+}
+.rdx .inst-kicker {
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--accent);
+}
+.rdx .inst-title {
+    font-family: var(--serif);
+    font-weight: 400;
+    font-size: 32px;
+    line-height: 1.02;
+    letter-spacing: -0.01em;
+    color: var(--display);
+    margin: 4px 0 0;
+}
+.rdx .inst-head-meta {
+    font-family: var(--mono);
+    font-size: 11.5px;
+    letter-spacing: 0.04em;
+    color: var(--sec);
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+.rdx .inst-head-meta b {
+    font-family: var(--mono);
+    font-variant-numeric: tabular-nums;
+    color: var(--pri);
+    font-weight: 600;
+}
+.rdx .inst-head-meta .live {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    color: var(--green);
+}
+/* the ONE Doto hero readout per view: triage completion */
+.rdx .inst-hero {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 6px;
+    flex: none;
+}
+.rdx .inst-hero .n {
+    font-family: var(--doto);
+    font-variant-numeric: tabular-nums;
+    font-weight: 600;
+    font-size: 40px;
+    line-height: 0.9;
+    color: var(--display);
+}
+.rdx .inst-hero .n small {
+    font-family: var(--mono);
+    font-size: 14px;
+    font-weight: 400;
+    color: var(--sec);
+    margin-left: 2px;
+}
+.rdx .inst-hero .l {
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--sec);
+}
+/* triage progress: thin green meter under the masthead */
+.rdx .inst-progress {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+.rdx .inst-progress .bar {
+    flex: 1;
+    height: 4px;
+    background: var(--surface2);
+    border-radius: 2px;
+    overflow: hidden;
+}
+.rdx .inst-progress .bar i {
+    display: block;
+    height: 100%;
+    background: var(--green);
+    border-radius: 2px;
+    transition: width 0.4s var(--ease, ease);
+}
+.rdx .inst-progress .pct {
+    font-family: var(--mono);
+    font-variant-numeric: tabular-nums;
+    font-size: 11px;
+    color: var(--sec);
+    flex: none;
+}
+
+/* --- controls: chip rows ------------------------------------------------- */
+.rdx .inst-controls {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin-bottom: 10px;
+}
+.rdx .inst-controls .grow { flex: 1 1 200px; }
+.rdx .inst-controls.scope {
+    margin-bottom: 14px;
+    padding-bottom: 14px;
+    border-bottom: 1px solid var(--border);
+}
+.rdx .inst-chiplabel {
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--dim);
+    margin-right: 2px;
+}
+.rdx .inst-chip {
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--sec);
+    background: transparent;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 5px 11px;
+    cursor: pointer;
+    transition: 0.14s var(--ease, ease);
+    white-space: nowrap;
+}
+.rdx .inst-chip:hover {
+    color: var(--pri);
+    border-color: var(--border-hi);
+}
+.rdx .inst-chip.is-active {
+    color: var(--accent);
+    border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
+    background: color-mix(in srgb, var(--accent) 10%, transparent);
+}
+.rdx .inst-chip[disabled] { opacity: 0.5; cursor: default; }
+.rdx .inst-search {
+    flex: 1 1 240px;
+    min-width: 180px;
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--pri);
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 6px 12px;
+}
+.rdx .inst-search::placeholder { color: var(--dim); }
+.rdx .inst-search:focus {
+    outline: none;
+    border-color: var(--border-hi);
+}
+
+/* --- table: hairline instrument readout ---------------------------------- */
+.rdx .skills-instrument table.skills {
+    font-family: var(--sans);
+    font-size: 13px;
+}
+.rdx .skills-instrument table.skills th {
+    font-family: var(--mono);
+    font-size: 10px;
+    font-weight: 400;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--dim);
+    padding: 0 10px 10px;
+    border-bottom: 1px solid var(--border);
+}
+.rdx .skills-instrument table.skills td {
+    padding: 12px 10px;
+    border-bottom: 1px solid color-mix(in srgb, var(--border) 80%, transparent);
+    vertical-align: middle;
+}
+.rdx .skills-instrument button.sort-header {
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--dim);
+}
+.rdx .skills-instrument button.sort-header.is-active,
+.rdx .skills-instrument button.sort-header:hover { color: var(--accent); }
+.rdx .skills-instrument tr.skill-row:hover td {
+    background: var(--surface2);
+}
+.rdx .skills-instrument td.skill-cell strong {
+    font-family: var(--mono);
+    font-size: 13px;
+    color: var(--display);
+    font-weight: 500;
+}
+.rdx .skills-instrument td.skill-cell .description {
+    font-family: var(--sans);
+    color: var(--sec);
+}
+.rdx .skills-instrument td.skill-cell .chip {
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--dim);
+    background: transparent;
+    border-color: var(--border);
+}
+/* tabular numerals for every metric column */
+.rdx .skills-instrument td.num {
+    font-family: var(--mono);
+    font-variant-numeric: tabular-nums;
+    font-size: 12.5px;
+    color: var(--pri);
+}
+.rdx .skills-instrument td.num.dim { color: var(--dim); }
+
+/* highlight rail: green (the house accent), not blue */
+.rdx .skills-instrument tr.row-highlighted td {
+    box-shadow: inset 3px 0 0 var(--accent);
+    background: color-mix(in srgb, var(--accent) 9%, transparent);
+}
+.rdx .skills-instrument tr.row-highlighted td.skill-cell strong { color: var(--accent); }
+
+/* --- score: thin segbar (colour = the data) ------------------------------ */
+.rdx .inst-score { display: inline-flex; align-items: center; gap: 8px; }
+.rdx .inst-score .v {
+    font-family: var(--mono);
+    font-variant-numeric: tabular-nums;
+    font-size: 12.5px;
+    color: var(--pri);
+    min-width: 30px;
+    text-align: right;
+}
+.rdx .inst-score-bar {
+    width: 38px;
+    height: 4px;
+    border-radius: 2px;
+    background: var(--surface2);
+    overflow: hidden;
+    flex: none;
+}
+.rdx .inst-score-bar i {
+    display: block;
+    height: 100%;
+    border-radius: 2px;
+}
+
+/* --- usage sparkline: 7d / 30d / total recency mini-bars ----------------- */
+.rdx .inst-spark {
+    display: inline-flex;
+    align-items: flex-end;
+    gap: 3px;
+    height: 18px;
+    vertical-align: middle;
+}
+.rdx .inst-spark i {
+    width: 5px;
+    min-height: 2px;
+    border-radius: 1px 1px 0 0;
+    background: color-mix(in srgb, var(--green) 28%, var(--surface2));
+}
+.rdx .inst-spark i.hot {
+    background: var(--green);
+}
+.rdx .inst-usage {
+    display: inline-flex;
+    align-items: center;
+    gap: 9px;
+}
+.rdx .inst-usage .v {
+    font-family: var(--mono);
+    font-variant-numeric: tabular-nums;
+    font-size: 12.5px;
+    color: var(--pri);
+}
+.rdx .inst-usage.idle .v { color: var(--dim); }
+
+/* --- recommendation / decision badges as instrument chips ---------------- */
+.rdx .skills-instrument .badge {
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    border-radius: 5px;
+    padding: 3px 8px;
+    border: 1px solid var(--border);
+    background: transparent;
+}
+.rdx .skills-instrument .badge.keep {
+    color: var(--green);
+    border-color: color-mix(in srgb, var(--green) 45%, var(--border));
+    background: color-mix(in srgb, var(--green) 9%, transparent);
+}
+.rdx .skills-instrument .badge.review {
+    color: var(--gold);
+    border-color: color-mix(in srgb, var(--gold) 40%, var(--border));
+    background: color-mix(in srgb, var(--gold) 8%, transparent);
+}
+.rdx .skills-instrument .badge.archive {
+    color: var(--dim);
+    border-color: var(--border);
+    background: transparent;
+}
+.rdx .skills-instrument .reason-button small {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--sec);
+}
+
+/* decision toggle: minimal instrument buttons, semantic when active */
+.rdx .skills-instrument td .actions button {
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.04em;
+    text-transform: lowercase;
+    color: var(--sec);
+    background: transparent;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 4px 9px;
+}
+.rdx .skills-instrument td .actions button:hover {
+    color: var(--pri);
+    border-color: var(--border-hi);
+}
+.rdx .skills-instrument td .actions button.is-active {
+    color: var(--accent);
+    border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
+    background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+.rdx .skills-instrument td small {
+    font-family: var(--mono);
+    font-size: 10.5px;
+    color: var(--dim);
+}
+
+/* decided-row rails keyed to decision (right edge), green for keep */
+.rdx .skills-instrument tr.row-decision-keep td:last-child { box-shadow: inset -3px 0 0 var(--green); }
+.rdx .skills-instrument tr.row-decision-review td:last-child { box-shadow: inset -3px 0 0 var(--gold); }
+.rdx .skills-instrument tr.row-decision-archive td:last-child { box-shadow: inset -3px 0 0 var(--dim); }
+.rdx .skills-instrument tr.row-just-saved td {
+    animation: inst-saved-flash 1.1s ease-out;
+}
+@keyframes inst-saved-flash {
+    0% { background-color: color-mix(in srgb, var(--green) 16%, transparent); }
+    100% { background-color: transparent; }
+}
+
+/* bulk bar: keep the dark instrument surface, not an ink slab */
+.rdx .skills-instrument .bulk-bar {
+    background: var(--surface2);
+    color: var(--pri);
+    border: 1px solid var(--border-hi);
+    border-radius: 8px;
+}
+.rdx .skills-instrument .bulk-bar strong { color: var(--accent); }
+.rdx .skills-instrument .bulk-bar .actions button {
+    background: transparent;
+    color: var(--sec);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    font-family: var(--mono);
+    font-size: 11px;
+}
+.rdx .skills-instrument .bulk-bar .actions button:hover {
+    color: var(--pri);
+    border-color: var(--border-hi);
+}
+.rdx .skills-instrument .load-more button {
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--sec);
+    background: transparent;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 7px 16px;
+    cursor: pointer;
+}
+.rdx .skills-instrument .load-more button:hover { color: var(--pri); border-color: var(--border-hi); }
+
+/* =========================================================================
+   CONTEXT BUDGET  (the /skills route, rebuilt)
+   Reveals the session-startup token tax. Colour lives in the budget viz
+   (stacked bar + per-source bars + weight bars), keyed to the source. The ONE
+   Doto hero is the always-loaded index total; everything else is tabular mono.
+   ========================================================================= */
+
+/* hero: framed as the always-loaded tax, with an on-demand secondary stat */
+.rdx .ctx-hero { max-width: 340px; }
+.rdx .ctx-hero .l { text-align: right; text-transform: none; letter-spacing: 0.02em; font-size: 11px; line-height: 1.35; }
+.rdx .ctx-hero-sub {
+    font-family: var(--mono);
+    font-variant-numeric: tabular-nums;
+    font-size: 11.5px;
+    color: var(--sec);
+    text-align: right;
+    margin-top: 2px;
+}
+.rdx .ctx-hero-sub b { color: var(--pri); font-weight: 600; }
+
+/* --- the breakdown: heart of the page ---------------------------------- */
+.rdx .ctx-breakdown { margin: 4px 0 26px; }
+.rdx .ctx-breakdown-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 16px;
+    margin-bottom: 12px;
+    flex-wrap: wrap;
+}
+.rdx .ctx-breakdown-head h3 {
+    font-family: var(--serif);
+    font-weight: 400;
+    font-size: 19px;
+    color: var(--display);
+    margin: 0;
+}
+.rdx .ctx-breakdown-note {
+    font-family: var(--mono);
+    font-variant-numeric: tabular-nums;
+    font-size: 11px;
+    letter-spacing: 0.04em;
+    color: var(--sec);
+}
+
+/* the stacked segmented bar - one continuous instrument of the index tax */
+.rdx .ctx-stack {
+    display: flex;
+    height: 22px;
+    width: 100%;
+    border-radius: 6px;
+    overflow: hidden;
+    background: var(--surface2);
+    gap: 1.5px;
+    margin-bottom: 16px;
+}
+.rdx .ctx-stack-seg {
+    min-width: 2px;
+    cursor: pointer;
+    transition: filter 0.14s var(--ease, ease), opacity 0.14s var(--ease, ease);
+    opacity: 0.92;
+}
+.rdx .ctx-stack-seg:hover { filter: brightness(1.15); opacity: 1; }
+.rdx .ctx-stack-seg.is-active { opacity: 1; box-shadow: inset 0 0 0 1.5px var(--display); }
+
+/* per-source ledger rows */
+.rdx .ctx-source-list { list-style: none; margin: 0; padding: 0; }
+.rdx .ctx-source-row {
+    display: grid;
+    grid-template-columns: minmax(150px, 1.4fr) 76px minmax(80px, 1fr) 92px 100px;
+    align-items: center;
+    gap: 14px;
+    padding: 9px 8px;
+    border-bottom: 1px solid color-mix(in srgb, var(--border) 80%, transparent);
+    cursor: pointer;
+    transition: background 0.12s var(--ease, ease);
+}
+.rdx .ctx-source-row:hover { background: var(--surface2); }
+.rdx .ctx-source-row.is-active { background: color-mix(in srgb, var(--accent) 7%, transparent); }
+.rdx .ctx-source-name {
+    font-family: var(--mono);
+    font-size: 12.5px;
+    color: var(--display);
+    display: inline-flex;
+    align-items: center;
+    gap: 9px;
+    min-width: 0;
+}
+.rdx .ctx-swatch {
+    width: 9px;
+    height: 9px;
+    border-radius: 2px;
+    flex: none;
+    display: inline-block;
+}
+.rdx .ctx-source-skills {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--dim);
+    text-align: right;
+    white-space: nowrap;
+}
+.rdx .ctx-source-bar {
+    height: 5px;
+    border-radius: 3px;
+    background: var(--surface2);
+    overflow: hidden;
+}
+.rdx .ctx-source-bar i {
+    display: block;
+    height: 100%;
+    border-radius: 3px;
+    transition: width 0.4s var(--ease, ease);
+}
+.rdx .ctx-source-index,
+.rdx .ctx-source-body {
+    font-family: var(--mono);
+    font-variant-numeric: tabular-nums;
+    font-size: 13px;
+    color: var(--pri);
+    text-align: right;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 1px;
+    line-height: 1.1;
+}
+.rdx .ctx-source-index { color: var(--display); }
+.rdx .ctx-source-body { color: var(--sec); }
+.rdx .ctx-source-index small,
+.rdx .ctx-source-body small {
+    font-family: var(--mono);
+    font-size: 9px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--dim);
+}
+.rdx .ctx-foot {
+    font-family: var(--mono);
+    font-size: 11px;
+    line-height: 1.5;
+    color: var(--dim);
+    margin: 14px 0 0;
+}
+.rdx .ctx-link {
+    font-family: var(--mono);
+    font-size: inherit;
+    color: var(--accent);
+    background: none;
+    border: 0;
+    padding: 0;
+    cursor: pointer;
+    text-decoration: underline;
+    text-underline-offset: 2px;
+}
+.rdx .ctx-link:hover { filter: brightness(1.15); }
+
+/* --- skill index controls + table -------------------------------------- */
+.rdx .ctx-controls {
+    margin-top: 18px;
+    padding-top: 16px;
+    border-top: 1px solid var(--border);
+}
+.rdx .ctx-active-filter {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--display);
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    border: 1px solid var(--border-hi);
+    border-radius: 6px;
+    padding: 4px 10px;
+}
+.rdx .ctx-table th .th-sub {
+    font-size: 8.5px;
+    letter-spacing: 0.1em;
+    color: var(--dim);
+    margin-left: 4px;
+}
+.rdx .ctx-table td.skill-cell strong {
+    font-family: var(--mono);
+    font-size: 12.5px;
+    color: var(--display);
+    font-weight: 500;
+}
+.rdx .ctx-tool-tag {
+    font-family: var(--mono);
+    font-size: 9px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--dim);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 1px 5px;
+    margin-left: 8px;
+}
+.rdx .ctx-cell-source {
+    font-family: var(--mono);
+    font-size: 11.5px;
+    color: var(--sec);
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+}
+.rdx .ctx-weight {
+    display: inline-block;
+    width: 64px;
+    height: 5px;
+    border-radius: 3px;
+    background: var(--surface2);
+    overflow: hidden;
+    vertical-align: middle;
+}
+.rdx .ctx-weight i { display: block; height: 100%; border-radius: 3px; }
+
+@media (max-width: 640px) {
+    .rdx .ctx-source-row {
+        grid-template-columns: 1fr auto;
+        gap: 4px 12px;
+    }
+    .rdx .ctx-source-bar { display: none; }
+    .rdx .ctx-source-skills { grid-row: 1; }
+    .rdx .ctx-source-index { grid-column: 1; align-items: flex-start; flex-direction: row; gap: 6px; align-items: baseline; }
+    .rdx .ctx-source-body { grid-column: 2; flex-direction: row; gap: 6px; align-items: baseline; }
+}
