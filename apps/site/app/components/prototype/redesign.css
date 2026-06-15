@@ -447,3 +447,18 @@
 
 /* model legend swatch — colour tied to the model's data bar */
 .nf-swatch { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 8px; vertical-align: middle; }
+
+/* ---- scrollable list region for fixed-height cards ----
+   Lists that can outgrow their tile (model split, feed, roster) scroll inside
+   the card with a soft bottom fade (more-below indicator) + a thin scrollbar +
+   bottom padding, instead of being hard-clipped at the card edge. */
+.nf-list {
+    flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain;
+    padding-bottom: 10px;
+    -webkit-mask-image: linear-gradient(180deg, #000 calc(100% - 16px), transparent);
+    mask-image: linear-gradient(180deg, #000 calc(100% - 16px), transparent);
+}
+.nf-list::-webkit-scrollbar { width: 6px; }
+.nf-list::-webkit-scrollbar-thumb { background: var(--border-hi); border-radius: 3px; }
+.nf-list::-webkit-scrollbar-track { background: transparent; }
+.nf-list { scrollbar-width: thin; scrollbar-color: var(--border-hi) transparent; }

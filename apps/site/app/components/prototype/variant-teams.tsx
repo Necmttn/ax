@@ -62,18 +62,21 @@ export function VariantTeams({ theme }: { theme: Theme }) {
                     {/* model split */}
                     <section className="rdx-card span2 v-mc-split acc-blue" style={{ animationDelay: "0.3s" }}>
                         <div className="v-mc-meta rdx-label"><span className="nf-key">model split · ring</span><span>{t.spend} total</span></div>
-                        {t.models.map((m) => (
-                            <div className="v-mc-split-row" key={m.name}>
-                                <span style={{ color: "var(--pri)" }}><span className="nf-swatch" style={{ background: modelColor(m.tone) }} />{m.name}</span>
-                                <span>{Math.round(m.share * 100)}% · {m.cost}</span>
-                                <span className="segwrap"><Segbar total={26} on={litFor(m.share, 26)} color={modelColor(m.tone)} /></span>
-                            </div>
-                        ))}
+                        <div className="nf-list">
+                            {t.models.map((m) => (
+                                <div className="v-mc-split-row" key={m.name}>
+                                    <span style={{ color: "var(--pri)" }}><span className="nf-swatch" style={{ background: modelColor(m.tone) }} />{m.name}</span>
+                                    <span>{Math.round(m.share * 100)}% · {m.cost}</span>
+                                    <span className="segwrap"><Segbar total={26} on={litFor(m.share, 26)} color={modelColor(m.tone)} /></span>
+                                </div>
+                            ))}
+                        </div>
                     </section>
 
                     {/* roster - the heart of the teams view */}
                     <section className="rdx-card v-team-roster" style={{ gridColumn: "1 / -1", gridRow: "span 2", animationDelay: "0.36s" }}>
                         <div className="v-mc-meta rdx-label" style={{ padding: "16px 18px 12px" }}><span>roster · {t.members}</span><span>by sessions</span></div>
+                        <div className="nf-list">
                         <table className="v-team-rt">
                             <thead>
                                 <tr><th>member</th><th className="r">sessions</th><th className="r">streak</th><th className="r">spend</th><th>14d</th></tr>
@@ -99,12 +102,13 @@ export function VariantTeams({ theme }: { theme: Theme }) {
                                 ))}
                             </tbody>
                         </table>
+                        </div>
                     </section>
 
                     {/* shared rig adoption */}
                     <section className="rdx-card span2 acc-violet" style={{ animationDelay: "0.42s" }}>
                         <div className="v-mc-meta rdx-label"><span className="nf-key">shared rig · adoption</span><span>% of ring</span></div>
-                        <div style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 11 }}>
+                        <div className="nf-list" style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 11 }}>
                             {t.rig.map((s) => (
                                 <div className="v-team-rig-row" key={s.name}>
                                     <span className="segwrap"><Segbar total={30} on={Math.round(s.pct * 30)} tone="card" /></span>
@@ -118,7 +122,7 @@ export function VariantTeams({ theme }: { theme: Theme }) {
                     {/* ring pulse - highlights */}
                     <section className="rdx-card span2 acc-rose" style={{ animationDelay: "0.48s" }}>
                         <div className="v-mc-meta rdx-label"><span className="nf-key">ring pulse · this week</span><span style={{ display: "inline-flex", gap: 6, alignItems: "center", color: "var(--alert)" }}><Led tone="alert" />rec</span></div>
-                        <div className="v-mc-feed" style={{ marginTop: 8 }}>
+                        <div className="v-mc-feed nf-list" style={{ marginTop: 8 }}>
                             <div className="v-mc-feed-row"><span><span style={{ color: "var(--accent)" }}>@dax</span> hit a 31-day streak - longest in the ring</span><span className="k">+2d</span></div>
                             <div className="v-mc-feed-row"><span><span className="feat">routing</span> saved the team $640 vs all-fable</span><span className="k">30d</span></div>
                             <div className="v-mc-feed-row"><span><span style={{ color: "var(--accent)" }}>@kano</span> ran 3 parallel agents on one session</span><span className="k">peak</span></div>

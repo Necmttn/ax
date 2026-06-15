@@ -69,19 +69,21 @@ export function VariantMissionControl({ theme }: { theme: Theme }) {
                     {/* model split */}
                     <section className="rdx-card span2 v-mc-split acc-blue" style={{ animationDelay: "0.36s" }}>
                         <div className="v-mc-meta rdx-label"><span className="nf-key">model split · window</span><span>{PROFILE.cost} total</span></div>
-                        {MODELS.slice(0, 3).map((m) => (
-                            <div className="v-mc-split-row" key={m.name}>
-                                <span style={{ color: "var(--pri)" }}><span className="nf-swatch" style={{ background: modelColor(m.tone) }} />{m.name}</span>
-                                <span>{Math.round(m.share * 100)}% · {m.cost}</span>
-                                <span className="segwrap"><Segbar total={24} on={litFor(m.share, 24)} color={modelColor(m.tone)} /></span>
-                            </div>
-                        ))}
+                        <div className="nf-list">
+                            {MODELS.map((m) => (
+                                <div className="v-mc-split-row" key={m.name}>
+                                    <span style={{ color: "var(--pri)" }}><span className="nf-swatch" style={{ background: modelColor(m.tone) }} />{m.name}</span>
+                                    <span>{Math.round(m.share * 100)}% · {m.cost}</span>
+                                    <span className="segwrap"><Segbar total={24} on={litFor(m.share, 24)} color={modelColor(m.tone)} /></span>
+                                </div>
+                            ))}
+                        </div>
                     </section>
 
                     {/* feed */}
                     <section className="rdx-card span2 v-mc-feed acc-green" style={{ animationDelay: "0.42s" }}>
                         <div className="v-mc-meta rdx-label"><span className="nf-key">activity · push · main</span><span style={{ display: "inline-flex", gap: 6, alignItems: "center", color: "var(--alert)" }}><Led tone="alert" />rec</span></div>
-                        <div style={{ marginTop: 6, display: "flex", flexDirection: "column", gap: 8 }}>
+                        <div className="nf-list" style={{ marginTop: 6, display: "flex", flexDirection: "column", gap: 8 }}>
                             {FEED.map((f) => (
                                 <div className="v-mc-feed-row" key={f.t}>
                                     <span className={f.kind === "feat" ? "feat" : f.kind === "fix" ? "fix" : ""}>{f.msg}</span>
