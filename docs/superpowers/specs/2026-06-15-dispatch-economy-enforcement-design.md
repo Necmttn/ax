@@ -8,6 +8,47 @@ Follows: skills/efficient-dispatch/SKILL.md, the route-dispatch hook (`matchRout
 splurge together · **splurge is purely subtractive** (relax the downgrade; never
 force a model up).
 
+---
+
+## AMENDMENT (2026-06-15) - hooks CANNOT enforce; advisory pivot
+
+During implementation (Task 4 live verification, by design), the load-bearing
+assumption was proven **false**: a Claude Code PreToolUse hook **cannot enforce,
+rewrite, or block the `Agent` (subagent dispatch) tool** - confirmed CC bugs
+#39814 (`updatedInput` ignored for Agent), #40580 (`deny`/exit-2 ignored for
+Agent), #24327 (deny makes the model stop, not retry). The ONLY mechanism that
+reaches the model for an Agent dispatch is **`additionalContext`** (advisory).
+See memory `hooks-cannot-enforce-agent-dispatch`.
+
+**The whole "enforcement" premise is therefore impossible at the hook layer.**
+The route-dispatch hook is fundamentally **advisory**. The pivot (user-approved):
+
+- **`Verdict.route` (updatedInput rewrite) is dead** - replaced by
+  **`Verdict.advise(context)`** encoding as
+  `{exitCode:0, stdout: JSON.stringify({hookSpecificOutput:{hookEventName:"PreToolUse", additionalContext: context}})}`
+  (the mechanism that reaches the model). `Verdict.route` is removed.
+- **`decideVerdict`'s route-down case returns `Verdict.advise(msg)`** (a clear,
+  actionable "this looks mechanical (class X) - re-dispatch with `model:<suggest>`
+  to save quota in conserve mode") **instead of `Verdict.route`**. The
+  judgment-cheap case also uses `Verdict.advise` (so it reaches the model;
+  the old `systemMessage` warn is only reliably user-facing).
+- The `input` field on `DecideInput` is no longer needed (no rewrite); keep
+  `suggest` for the message. Splurge still suppresses the conserve advisory
+  (subtractive) - in splurge the route-down case → `Verdict.allow` (no nag).
+- Everything else is unchanged: `computeSpendMode`, the spend-mode gating, the
+  judgment regex, the freshness mechanism, the statusline surface, the
+  **splurge → /dojo nudge**, and the measurement lens. PR2 is entirely unaffected.
+- **Honest framing everywhere:** this is a quota-aware *advisory*, not
+  enforcement. Real enforcement lives in the cognitive layer (efficient-dispatch
+  skill) + controlled dispatch paths (a workflow/skill setting `model:` when it
+  constructs the Agent call) - out of scope for this hook.
+
+Where the text below says "auto-route" / "Verdict.route" / "silently rewrite" /
+"enforce", read it as the advisory pivot above. The truth-table outcome
+`route(suggest)` becomes `advise(...)`; `block`/`deny` never appear.
+
+---
+
 ## Problem
 
 1. **Enforcement gap.** A `well-specified-impl` class (`^implement ` → sonnet)
