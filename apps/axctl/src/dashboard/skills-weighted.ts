@@ -10,6 +10,7 @@
 import { Effect } from "effect";
 import { SurrealClient } from "@ax/lib/db";
 import type { DbError } from "@ax/lib/errors";
+import { fetchSparSessionIds } from "../queries/spar-sessions.ts";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -103,11 +104,19 @@ export const normalizeSkillsWeightedParams = (
  * fetch the small set of tombstoned skill ids once (DELETED_SKILLS_SQL) and
  * filter them out in JS during the merge.
  */
-function buildInvocationSql(windowDays: number | undefined): string {
-    const whereClause =
-        windowDays !== undefined && windowDays > 0
-            ? `WHERE ts >= time::now() - ${windowDays}d\n`
-            : "";
+function buildInvocationSql(
+    windowDays: number | undefined,
+    sparSessions: readonly string[],
+): string {
+    const conditions: string[] = [];
+    if (windowDays !== undefined && windowDays > 0) {
+        conditions.push(`ts >= time::now() - ${windowDays}d`);
+    }
+    // Exclude spar variant sessions using a flat NOT IN against the denormalized
+    // `session` field on `invoked` (no graph deref - safe on 87k+ edges).
+    // When sparSessions is empty, NOT IN [] excludes nothing.
+    conditions.push(`session NOT IN $sparSessions`);
+    const whereClause = `WHERE ${conditions.join("\n  AND ")}\n`;
     return `
 SELECT
     out AS skill_id,
@@ -193,11 +202,16 @@ export const fetchSkillsWeighted = (
             params.doctorThreshold ?? SKILLS_WEIGHTED_DEFAULT_DOCTOR_THRESHOLD;
         const includeTools = params.includeTools ?? false;
 
+        // Fetch spar variant session ids first (flat, deref-free).
+        // Used to exclude spar traffic from the weighted ranking via NOT IN.
+        const sparSessions = yield* fetchSparSessionIds();
+
         // Run passes + doctor + tombstone + synthetic-tool id queries concurrently.
         const [invRes, roleRes, doctorRes, deletedRes, toolRes, nameRes] = yield* Effect.all(
             [
                 db.query<[Array<Record<string, unknown>>]>(
-                    buildInvocationSql(params.windowDays),
+                    buildInvocationSql(params.windowDays, sparSessions),
+                    { sparSessions: [...sparSessions] },
                 ),
                 db.query<[Array<Record<string, unknown>>]>(ROLE_WEIGHT_SQL),
                 db.query<[Array<Record<string, unknown>>]>(
