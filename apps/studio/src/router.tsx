@@ -21,6 +21,7 @@ import { GraphRoute } from "./routes/graph.tsx";
 import { CanvasRoute } from "./routes/canvas.tsx";
 import type { GraphExplorerMode } from "@ax/lib/shared/dashboard-types";
 import { WrappedRoute } from "./routes/wrapped.tsx";
+import { MissionControl } from "./instrument/mission-control.tsx";
 import { ImproveRoute } from "./routes/improve.tsx";
 import { LabRoute } from "./routes/lab.tsx";
 import { ReviewView } from "./routes/review-view.tsx";
@@ -233,8 +234,15 @@ function NarrationDemoRoute() {
     );
 }
 
+const mcRoute = createRoute({
+    getParentRoute: () => rootRoute,
+    path: "/mc",
+    component: MissionControl,
+});
+
 const routeTree = rootRoute.addChildren([
     indexRoute,
+    mcRoute,
     skillsRoute,
     toolsRoute,
     workflowRoute,

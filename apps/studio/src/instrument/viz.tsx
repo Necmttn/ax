@@ -134,6 +134,6 @@ export function GlyphReel({ seed = 0, dim = "#222222", lit = "#ffffff" }: { seed
 }
 
 /** Pulsing live LED. */
-export function Led({ tone = "green" }: { tone?: "green" | "accent" | "red" }) {
+export function Led({ tone = "green" }: { tone?: "green" | "accent" | "alert" | "red" }) {
     return <span className={`rdx-led ${tone}`} aria-hidden="true" />;
 }
