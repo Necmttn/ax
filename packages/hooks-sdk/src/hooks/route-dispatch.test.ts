@@ -1,6 +1,7 @@
-import { describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { Effect, Result, Schema } from "effect";
 import routeDispatch, { RoutingTableSchema } from "./route-dispatch.ts";
+import { SpendModeConfigSchema } from "../routing-table.ts";
 import { GitEnvTest } from "../git-env.ts";
 
 // ---------------------------------------------------------------------------
@@ -30,74 +31,137 @@ const run = (input: AgentInput) =>
       .pipe(Effect.provide(layer)),
   );
 
+// Force conserve mode for determinism in tests that check routing behavior.
+beforeEach(() => {
+  process.env.AX_SPEND_MODE = "conserve";
+});
+afterEach(() => {
+  delete process.env.AX_SPEND_MODE;
+});
+
 // ---------------------------------------------------------------------------
-// Explicit model → always allow
+// Explicit model → always allow (unless judgment+cheap → warn)
 // ---------------------------------------------------------------------------
 
 describe("explicit model set", () => {
-  test("model='sonnet' → Allow (user made a deliberate choice)", async () => {
+  test("model='sonnet' → Allow (user made a deliberate choice, non-judgment)", async () => {
     const v = await run({ description: "locate all usages", model: "sonnet" });
     expect(v._tag).toBe("Allow");
   });
 
-  test("model='haiku' → Allow", async () => {
+  test("model='haiku' on non-judgment → Allow", async () => {
     const v = await run({ description: "spec review of PR #42", model: "haiku" });
+    // spec review is NOT judgment-strong (JUDGMENT_STRONG_RE requires quality/pr/final/adversarial/code review)
     expect(v._tag).toBe("Allow");
   });
 
-  test("model='' (empty string) is treated as unset → may warn", async () => {
-    // Empty string is falsy - we treat it the same as absent
+  test("model='sonnet' on judgment (quality review) → Advise (catch-rate gate, reaches model via additionalContext)", async () => {
+    // Rule 0: judgment+cheap → Advise, even with explicit model
+    const v = await run({ description: "quality review of the diff", model: "sonnet" });
+    expect(v._tag).toBe("Advise");
+    if (v._tag === "Advise") {
+      expect(v.context).toContain("judgment work");
+    }
+  });
+
+  test("model='' (empty string) treated as inherit → Advise (matches search-locate in conserve)", async () => {
+    // Empty string: explicit=false → not treated as deliberate choice
     const v = await run({ description: "locate symbols", model: "" });
-    // Should warn (matches search-locate) rather than allow
-    expect(v._tag).toBe("Warn");
+    // Matches the search-locate pattern → Advise in conserve mode
+    expect(v._tag).toBe("Advise");
   });
 });
 
 // ---------------------------------------------------------------------------
-// Description-based matches (default routing table)
+// conserve mode: match+inherit → Advise (advisory, not rewrite)
 // ---------------------------------------------------------------------------
 
-describe("description matches default routing table", () => {
-  test("'spec review of PR' → Warn with sonnet suggestion", async () => {
+describe("conserve + inherit: route-down classes advise cheaper model", () => {
+  test("'spec review of PR' → Advise with sonnet", async () => {
     const v = await run({ description: "spec review of PR #42" });
-    expect(v._tag).toBe("Warn");
-    if (v._tag === "Warn") {
-      expect(v.message).toContain("sonnet");
-      expect(v.message).toContain("spec-compliance checklist review");
+    expect(v._tag).toBe("Advise");
+    if (v._tag === "Advise") {
+      expect(v.context).toContain("sonnet");
+      expect(v.context).toContain("conserve mode");
     }
   });
 
-  test("'Locate all TODO comments' → Warn with haiku suggestion (case-insensitive)", async () => {
+  test("'Locate all TODO comments' → Advise with haiku (case-insensitive)", async () => {
     const v = await run({ description: "Locate all TODO comments" });
-    expect(v._tag).toBe("Warn");
-    if (v._tag === "Warn") {
-      expect(v.message).toContain("haiku");
+    expect(v._tag).toBe("Advise");
+    if (v._tag === "Advise") {
+      expect(v.context).toContain("haiku");
     }
   });
 
-  test("'find usages of Foo' → Warn with haiku", async () => {
+  test("'find usages of Foo' → Advise with haiku", async () => {
     const v = await run({ description: "find usages of Foo" });
-    expect(v._tag).toBe("Warn");
-    if (v._tag === "Warn") {
-      expect(v.message).toContain("haiku");
+    expect(v._tag).toBe("Advise");
+    if (v._tag === "Advise") {
+      expect(v.context).toContain("haiku");
     }
   });
 
-  test("'research the Effect v4 API' → Warn with sonnet", async () => {
+  test("'research the Effect v4 API' → Advise with sonnet", async () => {
     const v = await run({ description: "research the Effect v4 API" });
-    expect(v._tag).toBe("Warn");
-    if (v._tag === "Warn") {
-      expect(v.message).toContain("sonnet");
-      expect(v.message).toContain("web/docs research");
+    expect(v._tag).toBe("Advise");
+    if (v._tag === "Advise") {
+      expect(v.context).toContain("sonnet");
     }
   });
 
-  test("'implement task: add route-dispatch hook' → Warn with sonnet", async () => {
+  test("'implement task: add route-dispatch hook' → Advise with sonnet", async () => {
     const v = await run({ description: "implement task: add route-dispatch hook" });
-    expect(v._tag).toBe("Warn");
-    if (v._tag === "Warn") {
-      expect(v.message).toContain("sonnet");
+    expect(v._tag).toBe("Advise");
+    if (v._tag === "Advise") {
+      expect(v.context).toContain("sonnet");
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// splurge mode: match+inherit → Allow (subtractive, runs on strong model)
+// ---------------------------------------------------------------------------
+
+describe("splurge + inherit: no auto-route (subtractive)", () => {
+  test("AX_SPEND_MODE=splurge + match + inherit → Allow (strong inherited model)", async () => {
+    process.env.AX_SPEND_MODE = "splurge";
+    const v = await run({ description: "spec review of PR #42" });
+    expect(v._tag).toBe("Allow");
+  });
+
+  test("AX_SPEND_MODE=splurge + 'find usages' (route-down class) + inherit → Allow", async () => {
+    process.env.AX_SPEND_MODE = "splurge";
+    const v = await run({ description: "find usages of Foo" });
+    expect(v._tag).toBe("Allow");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// judgment-cheap: advise regardless of mode (reaches model via additionalContext)
+// ---------------------------------------------------------------------------
+
+describe("judgment work on cheap explicit model → Advise", () => {
+  test("judgment+cheap conserve → Advise", async () => {
+    process.env.AX_SPEND_MODE = "conserve";
+    const v = await run({ description: "quality review of the diff", model: "sonnet" });
+    expect(v._tag).toBe("Advise");
+    if (v._tag === "Advise") {
+      expect(v.context).toContain("judgment work");
+    }
+  });
+
+  test("judgment+cheap splurge → Advise (rule 0 always fires)", async () => {
+    process.env.AX_SPEND_MODE = "splurge";
+    const v = await run({ description: "code review of the PR", model: "haiku" });
+    expect(v._tag).toBe("Advise");
+  });
+
+  test("explicit non-cheap on a route-down class → Allow (deliberate choice)", async () => {
+    // description matches search-locate (haiku), but model is opus (non-cheap)
+    // explicit=true, cheap=false, judgmentStrong=false → Rule 1: Allow
+    const v = await run({ description: "find usages of Foo", model: "opus" });
+    expect(v._tag).toBe("Allow");
   });
 });
 
@@ -106,38 +170,37 @@ describe("description matches default routing table", () => {
 // ---------------------------------------------------------------------------
 
 describe("agentType rules", () => {
-  test("subagent_type='Explore' → Warn with haiku", async () => {
+  test("subagent_type='Explore' → Advise with haiku (conserve)", async () => {
     const v = await run({ subagent_type: "Explore", description: "some task" });
-    expect(v._tag).toBe("Warn");
-    if (v._tag === "Warn") {
-      expect(v.message).toContain("haiku");
-      expect(v.message).toContain("Explore");
+    expect(v._tag).toBe("Advise");
+    if (v._tag === "Advise") {
+      expect(v.context).toContain("haiku");
     }
   });
 
-  test("subagent_type='codebase-locator' → Warn with haiku", async () => {
+  test("subagent_type='codebase-locator' → Advise with haiku (conserve)", async () => {
     const v = await run({ subagent_type: "codebase-locator" });
-    expect(v._tag).toBe("Warn");
-    if (v._tag === "Warn") {
-      expect(v.message).toContain("haiku");
+    expect(v._tag).toBe("Advise");
+    if (v._tag === "Advise") {
+      expect(v.context).toContain("haiku");
     }
   });
 
-  test("subagent_type='codebase-analyzer' → Warn with sonnet", async () => {
+  test("subagent_type='codebase-analyzer' → Advise with sonnet (conserve)", async () => {
     const v = await run({ subagent_type: "codebase-analyzer" });
-    expect(v._tag).toBe("Warn");
-    if (v._tag === "Warn") {
-      expect(v.message).toContain("sonnet");
+    expect(v._tag).toBe("Advise");
+    if (v._tag === "Advise") {
+      expect(v.context).toContain("sonnet");
     }
   });
 
-  test("agentType wins over description pattern when both match", async () => {
+  test("agentType wins over description pattern when both match (haiku wins over sonnet)", async () => {
     // 'Explore' agent type → haiku; description 'research ...' → sonnet.
     // Agent type should win (more specific).
     const v = await run({ subagent_type: "Explore", description: "research the docs" });
-    expect(v._tag).toBe("Warn");
-    if (v._tag === "Warn") {
-      expect(v.message).toContain("haiku");
+    expect(v._tag).toBe("Advise");
+    if (v._tag === "Advise") {
+      expect(v.context).toContain("haiku");
     }
   });
 });
@@ -168,11 +231,11 @@ describe("no match", () => {
 // ---------------------------------------------------------------------------
 
 describe("prompt fallback", () => {
-  test("no description but prompt starts with 'locate' → Warn (haiku)", async () => {
+  test("no description but prompt starts with 'locate' → Advise with haiku (conserve)", async () => {
     const v = await run({ prompt: "locate all files that import Effect" });
-    expect(v._tag).toBe("Warn");
-    if (v._tag === "Warn") {
-      expect(v.message).toContain("haiku");
+    expect(v._tag).toBe("Advise");
+    if (v._tag === "Advise") {
+      expect(v.context).toContain("haiku");
     }
   });
 
@@ -186,19 +249,16 @@ describe("prompt fallback", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Warn message contains key fields
+// Advise verdict contains the suggested model name
 // ---------------------------------------------------------------------------
 
-describe("warn message format", () => {
-  test("message includes description label, model suggestion, and cost hint", async () => {
+describe("advise verdict content", () => {
+  test("Advise context mentions the suggested model and conserve mode", async () => {
     const v = await run({ description: "spec review of PR #42" });
-    expect(v._tag).toBe("Warn");
-    if (v._tag === "Warn") {
-      expect(v.message).toContain("ax routing:");
-      expect(v.message).toContain('"spec review of PR #42"');
-      expect(v.message).toContain("sonnet");
-      expect(v.message).toContain("cheaper");
-      expect(v.message).toContain("Explicit model silences this");
+    expect(v._tag).toBe("Advise");
+    if (v._tag === "Advise") {
+      expect(v.context).toContain("sonnet");
+      expect(v.context).toContain("conserve mode");
     }
   });
 });
@@ -208,16 +268,15 @@ describe("warn message format", () => {
 // ---------------------------------------------------------------------------
 
 describe("routing table loading", () => {
-  test("corrupt/absent routing table falls back to defaults and still warns on known pattern", async () => {
+  test("corrupt/absent routing table falls back to defaults and still advises on known pattern", async () => {
     // We cannot easily mock the fs call here without dependency injection,
     // but the real path (~/.ax/hooks/routing-table.json) likely does not exist
     // in CI. The default table is embedded, so the hook should still work.
-    // This test verifies the default table is active when the file is absent.
     const v = await run({ description: "locate things" });
-    // 'locate' matches the default search-locate pattern → Warn
-    expect(v._tag).toBe("Warn");
-    if (v._tag === "Warn") {
-      expect(v.message).toContain("haiku");
+    // 'locate' matches the default search-locate pattern → Advise in conserve
+    expect(v._tag).toBe("Advise");
+    if (v._tag === "Advise") {
+      expect(v.context).toContain("haiku");
     }
   });
 });
@@ -250,6 +309,67 @@ describe("defect handling", () => {
       ).pipe(Effect.provide(layer)),
     );
     expect(result.exitCode).toBe(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// spendMode block in routing table schema
+// ---------------------------------------------------------------------------
+
+describe("routing table spendMode schema", () => {
+  const decode = Schema.decodeUnknownResult(RoutingTableSchema);
+
+  test("routing table with spendMode block parses and field is present", () => {
+    const result = decode({
+      version: 1,
+      classes: [],
+      spendMode: {
+        stalenessMs: 120_000,
+        nearResetMs7d: 48 * 3600_000,
+        minRemainingPct: 30,
+        capFloorPct: 70,
+      },
+    });
+    expect(Result.isSuccess(result)).toBe(true);
+    if (Result.isSuccess(result)) {
+      expect(result.success.spendMode).toEqual({
+        stalenessMs: 120_000,
+        nearResetMs7d: 48 * 3600_000,
+        minRemainingPct: 30,
+        capFloorPct: 70,
+      });
+    }
+  });
+
+  test("routing table without spendMode parses (backward compat)", () => {
+    const result = decode({ version: 1, classes: [] });
+    expect(Result.isSuccess(result)).toBe(true);
+    if (Result.isSuccess(result)) {
+      expect(result.success.spendMode).toBeUndefined();
+    }
+  });
+
+  test("spendMode with partial overrides parses (absent keys allowed)", () => {
+    const result = decode({
+      version: 1,
+      classes: [],
+      spendMode: { nearResetMs7d: 48 * 3600_000 },
+    });
+    expect(Result.isSuccess(result)).toBe(true);
+    if (Result.isSuccess(result)) {
+      expect(result.success.spendMode?.nearResetMs7d).toBe(48 * 3600_000);
+      expect(result.success.spendMode?.stalenessMs).toBeUndefined();
+    }
+  });
+
+  test("SpendModeConfigSchema standalone parse", () => {
+    const decodeConfig = Schema.decodeUnknownResult(SpendModeConfigSchema);
+    const result = decodeConfig({ stalenessMs: 60_000, capFloorPct: 85 });
+    expect(Result.isSuccess(result)).toBe(true);
+    if (Result.isSuccess(result)) {
+      expect(result.success.stalenessMs).toBe(60_000);
+      expect(result.success.capFloorPct).toBe(85);
+    }
   });
 });
 

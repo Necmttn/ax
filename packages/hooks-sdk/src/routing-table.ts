@@ -46,10 +46,32 @@ export const RoutingClassSchema = Schema.Struct({
   origin: Schema.optional(Schema.String),
 });
 
+/**
+ * Optional spendMode thresholds block in the routing table.
+ * When present, the route-dispatch hook uses these instead of DEFAULT_SPEND_CONFIG.
+ * When absent, the hook falls back to DEFAULT_SPEND_CONFIG from spend-mode.ts.
+ *
+ * Fields mirror SpendConfig in spend-mode.ts:
+ *   stalenessMs     - cache age above which the snapshot is stale (ms). Default 5 min.
+ *   nearResetMs7d   - 7d window "near reset" threshold (ms). Default 24h.
+ *   minRemainingPct - minimum remaining % required to splurge. Default 25%.
+ *   capFloorPct     - if any window is at or above this %, block splurge. Default 80%.
+ */
+export const SpendModeConfigSchema = Schema.Struct({
+  stalenessMs: Schema.optional(Schema.Number),
+  nearResetMs7d: Schema.optional(Schema.Number),
+  minRemainingPct: Schema.optional(Schema.Number),
+  capFloorPct: Schema.optional(Schema.Number),
+});
+
+export type SpendModeConfigShape = Schema.Schema.Type<typeof SpendModeConfigSchema>;
+
 export const RoutingTableSchema = Schema.Struct({
   version: Schema.Literal(1),
   classes: Schema.Array(RoutingClassSchema),
   agentTypes: Schema.optional(Schema.Record(Schema.String, Schema.String)),
+  /** Optional spend-mode threshold overrides. Absent = use DEFAULT_SPEND_CONFIG. */
+  spendMode: Schema.optional(SpendModeConfigSchema),
 });
 
 /** Decoded shape of a stored routing table (flags/origin/agentTypes optional). */

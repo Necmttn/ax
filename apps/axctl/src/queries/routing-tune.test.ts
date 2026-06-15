@@ -13,6 +13,7 @@ import {
     fetchTuneProposals,
     applyProposals,
     JUDGMENT_RE,
+    JUDGMENT_GUARD_RE,
     renderTuneBrief,
     type TuneProposal,
 } from "./routing-tune.ts";
@@ -125,7 +126,33 @@ describe("clusterRows + buildProposals", () => {
         expect(migrate).toBeDefined();
         expect(migrate!.examples).toHaveLength(3);
         expect(migrate!.examples.some((e) => /review/i.test(e))).toBe(false);
+        // The broad JUDGMENT_GUARD_RE flags bare "review" in "Migrate auth review
+        // notes" (a non-example row) - one judgment member taints the cluster so it
+        // never auto-applies.
         expect(migrate!.judgment).toBe(true);
+    });
+
+    it("auto-apply SAFETY: Plan/Verify clusters stay judgment-flagged (out of unattended auto-apply)", () => {
+        // These clusters previously regressed: the narrowed hook regex let them
+        // flow into `ax routing tune` (bare) auto-apply as route-down-to-sonnet
+        // classes. The broad JUDGMENT_GUARD_RE keeps them flagged → brief path only.
+        const planRows = [
+            row("Plan the migration steps", "general-purpose", 5),
+            row("Plan the rollout phases", "general-purpose", 4),
+            row("Plan the cutover order", "general-purpose", 3),
+        ];
+        const plan = buildProposals(clusterRows(planRows)).find((p) => p.id === "plan-the");
+        expect(plan).toBeDefined();
+        expect(plan!.judgment).toBe(true);
+
+        const verifyRows = [
+            row("Verify the claims hold", "general-purpose", 5),
+            row("Verify the invariants", "general-purpose", 4),
+            row("Verify the migration output", "general-purpose", 3),
+        ];
+        const verify = buildProposals(clusterRows(verifyRows)).find((p) => p.id === "verify-the");
+        expect(verify).toBeDefined();
+        expect(verify!.judgment).toBe(true);
     });
 
     it("orders proposals by total cost desc and carries examples + counts", () => {
@@ -138,7 +165,12 @@ describe("clusterRows + buildProposals", () => {
     });
 });
 
-describe("JUDGMENT_RE", () => {
+describe("JUDGMENT_RE (broad auto-apply guard - aliases JUDGMENT_GUARD_RE)", () => {
+    // JUDGMENT_RE / JUDGMENT_GUARD_RE is the BROAD safety classifier for what may
+    // be auto-applied unattended. It is DELIBERATELY DIFFERENT from the hook's
+    // narrow JUDGMENT_STRONG_RE (spend-mode.ts), which wants bare/spec review to
+    // route down. This guard over-flags so planning/review/verify/assess clusters
+    // never auto-apply as route-down classes.
     it("matches review/critique/design/plan/audit/judge/verify/assess", () => {
         for (const word of ["Review X", "Critique Y", "Design Z", "Plan the migration", "Audit deps", "Judge outputs", "Verify claims", "Assess risk"]) {
             expect(JUDGMENT_RE.test(word)).toBe(true);
@@ -152,6 +184,9 @@ describe("JUDGMENT_RE", () => {
     });
     it("does not match unrelated words sharing a prefix", () => {
         expect(JUDGMENT_RE.test("Plant seeds")).toBe(false);
+    });
+    it("JUDGMENT_RE is the JUDGMENT_GUARD_RE alias (same broad pattern)", () => {
+        expect(JUDGMENT_RE).toBe(JUDGMENT_GUARD_RE);
     });
 });
 
