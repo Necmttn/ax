@@ -34,14 +34,12 @@ const recordKey = (id: unknown): string | null => {
  * Link every otel row whose session_id matches a session and that has no
  * telemetry_of edge yet. Runs at ingest finish; idempotent.
  *
- * NOTE: The SELECT uses SurrealDB v3 dialect. Two expressions need live-DB
- * validation:
- *   1. `type::thing("session", session_id)` - casts session_id string to a
- *      record reference for the IN check. If rejected, replace with:
- *      `AND string::concat("session:", session_id) IN (SELECT VALUE <string>id FROM session)`
- *   2. `count(<-telemetry_of) = 0` - counts incoming telemetry_of edges.
- *      If rejected by v3, use the fallback:
- *      `AND id NOTINSIDE (SELECT VALUE out FROM telemetry_of)`
+ * The SELECT dialect is validated against SurrealDB 3.x:
+ *   - `type::record("session:" + session_id)` casts the session_id string to a
+ *     record reference for the IN check (`type::thing` does NOT exist in v3 -
+ *     the parser suggests `type::record`).
+ *   - `count(<-telemetry_of) = 0` counts incoming telemetry_of edges (orphans
+ *     only); confirmed valid in v3.
  */
 export const correlateOrphanOtel = () =>
     Effect.gen(function* () {
@@ -51,7 +49,7 @@ export const correlateOrphanOtel = () =>
             const q =
                 `SELECT id, session_id FROM ${table} ` +
                 `WHERE session_id != NONE ` +
-                `AND type::thing("session", session_id) IN (SELECT VALUE id FROM session) ` +
+                `AND type::record("session:" + session_id) IN (SELECT VALUE id FROM session) ` +
                 `AND count(<-telemetry_of) = 0;`;
             const res = yield* db.query<Orphan[][]>(q);
             const orphans = res[0] ?? [];
