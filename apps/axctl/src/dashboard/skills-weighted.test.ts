@@ -6,6 +6,7 @@
  * - Rows are merged correctly (role weights summed, floor 1.0).
  * - Doctor count and advice trigger at the threshold.
  * - Spar sessions are excluded from the weighted ranking.
+ * - Recovery latency (lens E): median_recovery_ms from recovered_by edges.
  *
  * Query order (call index):
  *   0 → fetchSparSessionIds (spar exclusion ids)
@@ -15,6 +16,8 @@
  *   4 → deleted skill ids
  *   5 → synthetic skill ids
  *   6 → skill names
+ *   7 → recovered_by edges (skill → session mapping)
+ *   8 → otel_log_event latency (from sessionTelemetryLatency, when sessions found)
  */
 import { describe, it, expect } from "bun:test";
 import { RecordId } from "surrealdb";
@@ -231,5 +234,152 @@ describe("fetchSkillsWeighted", () => {
         const invCall = db.calls[1];
         const bound = invCall?.bindings?.sparSessions as unknown[];
         expect(bound.some((b) => b instanceof RecordId && String(b) === "session:⟨spar-variant⟩")).toBe(true);
+    });
+});
+
+// ---------------------------------------------------------------------------
+// Recovery latency (lens E)
+// ---------------------------------------------------------------------------
+
+describe("recovery latency (lens E)", () => {
+    // recovered_by edges: tdd recovered 2 sessions; caveman has none.
+    const mockRecoveryEdges = [
+        [
+            { skill: "skill:⟨superpowers:tdd⟩", session: "session:sess-abc" },
+            { skill: "skill:⟨superpowers:tdd⟩", session: "session:sess-def" },
+        ],
+    ];
+
+    // otel_log_event latency for the two recovery sessions
+    const mockLatencyRows = [
+        [
+            { session_id: "sess-abc", d: 4000, n: 5 },
+            { session_id: "sess-def", d: 6000, n: 8 },
+        ],
+    ];
+
+    it("computes median_recovery_ms as median of recovery session durations", async () => {
+        const db = makeMockDb([
+            noSparSessions,    // 0 - spar ids
+            mockInvRows,       // 1 - invocation aggregate
+            mockRoleRows,      // 2 - role weights
+            mockDoctorBelow,   // 3 - doctor
+            [[]],              // 4 - deleted
+            [[]],              // 5 - synthetic
+            [[]],              // 6 - names
+            mockRecoveryEdges, // 7 - recovered_by
+            mockLatencyRows,   // 8 - otel_log_event latency
+        ]);
+
+        const result = await runWithMock(db, fetchSkillsWeighted());
+        const tdd = result.rows.find((r) => r.skill_name === "superpowers:tdd")!;
+
+        // median of [4000, 6000] (sorted) = (4000+6000)/2 = 5000
+        expect(tdd.median_recovery_ms).toBe(5000);
+    });
+
+    it("sets median_recovery_ms=null for skills with no recovery edges", async () => {
+        const db = makeMockDb([
+            noSparSessions,
+            mockInvRows,
+            mockRoleRows,
+            mockDoctorBelow,
+            [[]],
+            [[]],
+            [[]],
+            mockRecoveryEdges, // only tdd in edges; caveman absent
+            mockLatencyRows,
+        ]);
+
+        const result = await runWithMock(db, fetchSkillsWeighted());
+        const caveman = result.rows.find((r) => r.skill_name === "caveman")!;
+
+        expect(caveman.median_recovery_ms).toBeNull();
+    });
+
+    it("sets median_recovery_ms=null for all rows when no recovery edges exist", async () => {
+        const db = makeMockDb([
+            noSparSessions,
+            mockInvRows,
+            mockRoleRows,
+            mockDoctorBelow,
+            [[]],
+            [[]],
+            [[]],
+            [[]], // empty recovered_by - sessionTelemetryLatency exits early (no call 8)
+        ]);
+
+        const result = await runWithMock(db, fetchSkillsWeighted());
+
+        for (const row of result.rows) {
+            expect(row.median_recovery_ms).toBeNull();
+        }
+    });
+
+    it("recovered_by query is issued as a separate pass (index 7)", async () => {
+        const db = makeMockDb([
+            noSparSessions,
+            mockInvRows,
+            mockRoleRows,
+            mockDoctorBelow,
+        ]);
+
+        await runWithMock(db, fetchSkillsWeighted());
+
+        expect(db.captured[7]).toContain("recovered_by");
+    });
+
+    it("single recovery session: median_recovery_ms equals its duration", async () => {
+        const singleEdge = [[{ skill: "skill:⟨superpowers:tdd⟩", session: "session:only-one" }]];
+        const singleLatency = [[{ session_id: "only-one", d: 3750, n: 2 }]];
+
+        const db = makeMockDb([
+            noSparSessions,
+            mockInvRows,
+            mockRoleRows,
+            mockDoctorBelow,
+            [[]],
+            [[]],
+            [[]],
+            singleEdge,
+            singleLatency,
+        ]);
+
+        const result = await runWithMock(db, fetchSkillsWeighted());
+        const tdd = result.rows.find((r) => r.skill_name === "superpowers:tdd")!;
+
+        expect(tdd.median_recovery_ms).toBe(3750);
+    });
+
+    it("sessions with no telemetry data do not contribute to median", async () => {
+        // 3 edges for tdd; only 2 have latency data
+        const edges = [[
+            { skill: "skill:⟨superpowers:tdd⟩", session: "session:s1" },
+            { skill: "skill:⟨superpowers:tdd⟩", session: "session:s2" },
+            { skill: "skill:⟨superpowers:tdd⟩", session: "session:s3-no-telemetry" },
+        ]];
+        // s3-no-telemetry is absent from otel_log_event
+        const latency = [[
+            { session_id: "s1", d: 1000, n: 1 },
+            { session_id: "s2", d: 3000, n: 3 },
+        ]];
+
+        const db = makeMockDb([
+            noSparSessions,
+            mockInvRows,
+            mockRoleRows,
+            mockDoctorBelow,
+            [[]],
+            [[]],
+            [[]],
+            edges,
+            latency,
+        ]);
+
+        const result = await runWithMock(db, fetchSkillsWeighted());
+        const tdd = result.rows.find((r) => r.skill_name === "superpowers:tdd")!;
+
+        // median of [1000, 3000] = 2000 (s3 absent → not counted)
+        expect(tdd.median_recovery_ms).toBe(2000);
     });
 });
