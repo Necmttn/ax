@@ -17,6 +17,7 @@
  *   6 → skill names
  */
 import { describe, it, expect } from "bun:test";
+import { RecordId } from "surrealdb";
 import { makeMockDb, runWithMock } from "@ax/lib/testing/surreal";
 import { fetchSkillsWeighted } from "./skills-weighted.ts";
 
@@ -185,6 +186,16 @@ describe("fetchSkillsWeighted", () => {
 
     // -----------------------------------------------------------------------
     // Spar exclusion
+    //
+    // NOTE: the mock layer never evaluates SurrealQL, so these stubs CANNOT
+    // verify that NOT IN actually excludes spar rows. They assert the
+    // STRUCTURAL contract that makes the exclusion fire on the live DB:
+    //   (1) the SQL contains `session NOT IN $sparSessions`, and
+    //   (2) the bound $sparSessions values are RecordId instances (record-typed),
+    //       NOT strings - a string[] binding makes NOT IN a silent no-op
+    //       (record<session> NOT IN [<string>...] is always TRUE).
+    // True semantic validation is the live-DB before/after check in the
+    // spar-exclusion design (a tagged session's skill counts must drop).
     // -----------------------------------------------------------------------
 
     it("invocation SQL contains NOT IN $sparSessions clause", async () => {
@@ -194,24 +205,31 @@ describe("fetchSkillsWeighted", () => {
         expect(db.captured[1]).toContain("session NOT IN $sparSessions");
     });
 
-    it("passes sparSessions binding to the invocation query", async () => {
-        // Spar query returns one session id; assert it is bound in the invocation call.
-        const sparSessionRow = [{ id: "session:⟨spar-abc⟩" }];
-        const db = makeMockDb([[sparSessionRow], mockInvRows, mockRoleRows, mockDoctorBelow]);
+    it("binds $sparSessions as RecordId values (record-typed, not strings)", async () => {
+        // Spar query (index 0) returns raw RecordIds via SELECT VALUE id; assert
+        // they are passed through to the invocation call's binding unchanged and
+        // are RecordId instances - the only form NOT IN actually evaluates.
+        const sparRid = new RecordId("session", "spar-abc");
+        const db = makeMockDb([[[sparRid]], mockInvRows, mockRoleRows, mockDoctorBelow]);
         await runWithMock(db, fetchSkillsWeighted());
         const invCall = db.calls[1];
-        expect(invCall?.bindings?.sparSessions).toEqual(["session:⟨spar-abc⟩"]);
+        const bound = invCall?.bindings?.sparSessions as unknown[];
+        expect(Array.isArray(bound)).toBe(true);
+        expect(bound).toHaveLength(1);
+        // Record-typed contract: the binding MUST be a RecordId, not a string.
+        expect(bound[0]).toBeInstanceOf(RecordId);
+        expect(String(bound[0])).toBe("session:⟨spar-abc⟩");
     });
 
-    it("excludes spar session invocations from the ranking (behavioral exclusion)", async () => {
-        // The mock returns normal inv rows - the exclusion is enforced via the
-        // NOT IN SQL clause + param binding. Verify the spar id from the first
-        // query is wired as the $sparSessions binding on the invocation query.
-        const sparId = "session:⟨spar-variant⟩";
-        const sparRows = [{ id: sparId }];
-        const db = makeMockDb([[sparRows], mockInvRows, mockRoleRows, mockDoctorBelow]);
+    it("wires the spar query's RecordIds into the invocation binding", async () => {
+        // End-to-end (within the stub): the RecordIds emitted by the spar
+        // query (call 0) appear verbatim as $sparSessions on the invocation
+        // query (call 1). On the live DB this is what drops spar invocations.
+        const sparRid = new RecordId("session", "spar-variant");
+        const db = makeMockDb([[[sparRid]], mockInvRows, mockRoleRows, mockDoctorBelow]);
         await runWithMock(db, fetchSkillsWeighted());
         const invCall = db.calls[1];
-        expect(invCall?.bindings?.sparSessions).toContain(sparId);
+        const bound = invCall?.bindings?.sparSessions as unknown[];
+        expect(bound.some((b) => b instanceof RecordId && String(b) === "session:⟨spar-variant⟩")).toBe(true);
     });
 });

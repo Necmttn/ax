@@ -154,8 +154,17 @@ export interface SessionThinkingRow {
     readonly thinking_turns: number;
 }
 
+// Strip the `session:` prefix + record-id delimiters. Handles both the
+// backtick form (`type::string(session)` / `type::string(id)` casts ->
+// session:`uuid`) AND the angle-bracket form (a raw RecordId's String() ->
+// session:⟨uuid⟩, as returned by fetchSparSessionIds' SELECT VALUE id). The
+// spar-session ids and the turn-scan session_id columns must normalize to the
+// same bare uuid or the spar exclusion below silently misses.
 const cleanSessionId = (id: string): string =>
-    id.replace(/^session:/, "").replace(/^`(.*)`$/, "$1");
+    id
+        .replace(/^session:/, "")
+        .replace(/^[`⟨]+/, "")
+        .replace(/[`⟩]+$/, "");
 
 export const rollupThinkingByModel = (
     sessionRows: ReadonlyArray<SessionThinkingRow>,
@@ -222,9 +231,12 @@ export const fetchThinking = Effect.fn("queries.fetchThinking")(
         const db = yield* SurrealClient;
 
         // Fetch spar variant session ids before the main query so we can
-        // exclude them from behavioral totals at the JS join.
+        // exclude them from behavioral totals at the JS join. fetchSparSessionIds
+        // returns RecordId[] (record-vs-record exclusion for the weighted path);
+        // here we normalize each via String() -> cleanSessionId to the bare uuid
+        // so the Set keys match the `type::string(session)` rows below.
         const sparSessionIds = yield* fetchSparSessionIds();
-        const sparSet = new Set(sparSessionIds.map(cleanSessionId));
+        const sparSet = new Set(sparSessionIds.map((id) => cleanSessionId(String(id))));
 
         const [thinkingResult, sessionsResult, effortResult, reasoningResult, agentModelsResult] = yield* db.query<[
             Array<Record<string, unknown>>,

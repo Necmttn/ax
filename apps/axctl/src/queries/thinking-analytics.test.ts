@@ -3,6 +3,7 @@
  */
 import { describe, expect, it } from "bun:test";
 import { Effect, Layer } from "effect";
+import { RecordId } from "surrealdb";
 import { SurrealClient } from "@ax/lib/db";
 import { makeTestSurrealClient } from "@ax/lib/testing/surreal";
 
@@ -15,23 +16,24 @@ const run = <A>(eff: Effect.Effect<A, unknown, SurrealClient>, layer: Layer.Laye
 
 /**
  * Build a test layer for fetchThinking that routes:
- *   - The spar-sessions query (contains "string::contains") → sparRows
+ *   - The spar-sessions query (contains "string::contains") → sparRids
  *   - Everything else (the batched 5-statement thinking SQL) → batchResults
  *
  * Route response shape:
- *   spar query returns `[Array<{id}>]` (1-tuple) → route rows = [sparRows]
+ *   spar query is `SELECT VALUE id ...` → flat array of RecordId values, so the
+ *     route rows = [sparRids] (one statement result wrapping the RecordId array).
  *   batch query returns `[thinking, sessions, efforts, reasoning, models]` → fallback = batchResults
  */
 const makeThinkingMock = (
     batchResults: QueryResult[],
-    sparRows: Array<{ id: string }> = [],
+    sparRids: RecordId[] = [],
 ): Layer.Layer<SurrealClient> => {
     const tc = makeTestSurrealClient({
         denyWrites: true,
         routes: {
-            // spar query: SELECT type::string(id) ... WHERE string::contains(labels, 'spar')
-            // returns [Array<{id}>] - one statement result
-            "string::contains(labels": [sparRows] as unknown as Array<unknown[]>,
+            // spar query: SELECT VALUE id ... WHERE string::contains(labels, 'spar')
+            // returns [Array<RecordId>] - one statement result
+            "string::contains(labels": [sparRids] as unknown as Array<unknown[]>,
         },
         // fallback: the batched 5-statement query returns batchResults tuple
         fallback: batchResults as unknown as Array<unknown[]>,
@@ -203,10 +205,13 @@ describe("fetchThinking", () => {
         ];
         const result = await run(
             fetchThinking({ sinceDays: 14 }),
-            // sparRows: spar-s2 is flagged; makeThinkingMock routes spar query to [sparRows]
+            // sparRids: spar-s2 flagged as a RecordId (matches the SELECT VALUE id
+            // form). makeThinkingMock routes the spar query to [sparRids].
+            // String(RecordId) -> "session:⟨spar-s2⟩" -> cleanSessionId -> "spar-s2",
+            // which matches the thinking row's session_id "session:spar-s2".
             makeThinkingMock(
                 [thinking, sessions, [], [], agentModels],
-                [{ id: "session:spar-s2" }],
+                [new RecordId("session", "spar-s2")],
             ),
         );
         // Only s1's thinking tokens (800) should appear; spar-s2's 5000 excluded.
