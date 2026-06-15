@@ -10,7 +10,7 @@ export function Doto({ children, className = "" }: { children: React.ReactNode; 
 /** Segmented bar - first `on` of `total` cells lit, staggered slam-in. */
 export function Segbar({
     total, on, tone = "accent", wave = false,
-}: { total: number; on: number; tone?: "accent" | "green" | "pri"; wave?: boolean }) {
+}: { total: number; on: number; tone?: "accent" | "alert" | "green" | "pri" | "card"; wave?: boolean }) {
     return (
         <div className={`rdx-seg ${tone} ${wave ? "wave" : ""}`} aria-hidden="true">
             {Array.from({ length: total }, (_, i) => (

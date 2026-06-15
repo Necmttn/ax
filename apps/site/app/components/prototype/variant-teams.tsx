@@ -30,37 +30,38 @@ export function VariantTeams({ theme }: { theme: Theme }) {
                 </div>
 
                 <div className="v-mc-bento">
-                    <section className="rdx-card" style={{ animationDelay: "0s" }}>
-                        <div className="rdx-label">members</div>
-                        <div className="rdx-num v-mc-bottom">{t.members}</div>
+                    <section className="rdx-card acc-blue" style={{ animationDelay: "0s" }}>
+                        <div className="rdx-label nf-key">members</div>
+                        <div className="rdx-metric v-mc-bottom">{t.members}</div>
                         <div className="rdx-label" style={{ display: "inline-flex", gap: 6, alignItems: "center" }}><Led />{t.onlineNow} active now</div>
                     </section>
-                    <section className="rdx-card" style={{ animationDelay: "0.06s" }}>
-                        <div className="rdx-label">sessions</div>
-                        <div className="rdx-num v-mc-bottom">{t.sessions.toLocaleString()}</div>
+                    {/* sessions - the one Doto readout in this view */}
+                    <section className="rdx-card acc-green" style={{ animationDelay: "0.06s" }}>
+                        <div className="rdx-label nf-key">sessions</div>
+                        <div className="rdx-num v-mc-bottom" style={{ fontSize: 40 }}>{t.sessions.toLocaleString()}</div>
                         <div className="rdx-label">this window</div>
                     </section>
-                    <section className="rdx-card" style={{ animationDelay: "0.12s" }}>
-                        <div className="rdx-label">team spend</div>
+                    <section className="rdx-card acc-gold" style={{ animationDelay: "0.12s" }}>
+                        <div className="rdx-label nf-key">team spend</div>
                         <div className="rdx-metric v-mc-bottom">{t.spend}</div>
                         <div className="rdx-label" style={{ color: "var(--accent)" }}>{t.saved} saved by routing</div>
                     </section>
-                    <section className="rdx-card" style={{ animationDelay: "0.18s" }}>
-                        <div className="rdx-label">tokens</div>
+                    <section className="rdx-card acc-violet" style={{ animationDelay: "0.18s" }}>
+                        <div className="rdx-label nf-key">tokens</div>
                         <div className="rdx-metric v-mc-bottom">{t.tokens}</div>
                         <div className="rdx-label">across the ring</div>
                     </section>
 
                     {/* team activity */}
-                    <section className="rdx-card span2" style={{ animationDelay: "0.24s" }}>
-                        <div className="v-mc-meta rdx-label"><span>team activity · daily</span><span style={{ display: "inline-flex", gap: 6, alignItems: "center", color: "var(--green)" }}><Led />live</span></div>
+                    <section className="rdx-card span2 acc-green" style={{ animationDelay: "0.24s" }}>
+                        <div className="v-mc-meta rdx-label"><span className="nf-key">team activity · daily</span><span style={{ display: "inline-flex", gap: 6, alignItems: "center", color: "var(--green)" }}><Led />live</span></div>
                         <div style={{ marginTop: "auto" }}><CellGrid levels={TEAM_ACTIVITY} cols={26} cell={11} /></div>
                         <div className="v-mc-meta rdx-label"><span>aggregate across {t.members} members</span><span>14 weeks</span></div>
                     </section>
 
                     {/* model split */}
-                    <section className="rdx-card span2 v-mc-split" style={{ animationDelay: "0.3s" }}>
-                        <div className="v-mc-meta rdx-label"><span>model split · ring</span><span>{t.spend} total</span></div>
+                    <section className="rdx-card span2 v-mc-split acc-blue" style={{ animationDelay: "0.3s" }}>
+                        <div className="v-mc-meta rdx-label"><span className="nf-key">model split · ring</span><span>{t.spend} total</span></div>
                         {t.models.map((m) => (
                             <div className="v-mc-split-row" key={m.name}>
                                 <span style={{ color: "var(--pri)" }}>{m.name}</span>
@@ -101,12 +102,12 @@ export function VariantTeams({ theme }: { theme: Theme }) {
                     </section>
 
                     {/* shared rig adoption */}
-                    <section className="rdx-card span2" style={{ animationDelay: "0.42s" }}>
-                        <div className="v-mc-meta rdx-label"><span>shared rig · adoption</span><span>% of ring</span></div>
+                    <section className="rdx-card span2 acc-violet" style={{ animationDelay: "0.42s" }}>
+                        <div className="v-mc-meta rdx-label"><span className="nf-key">shared rig · adoption</span><span>% of ring</span></div>
                         <div style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 11 }}>
                             {t.rig.map((s) => (
                                 <div className="v-team-rig-row" key={s.name}>
-                                    <span className="segwrap"><Segbar total={30} on={Math.round(s.pct * 30)} tone="accent" /></span>
+                                    <span className="segwrap"><Segbar total={30} on={Math.round(s.pct * 30)} tone="card" /></span>
                                     <span style={{ color: "var(--pri)" }}>{s.name}</span>
                                     <span className="pct">{Math.round(s.pct * 100)}%</span>
                                 </div>
@@ -115,8 +116,8 @@ export function VariantTeams({ theme }: { theme: Theme }) {
                     </section>
 
                     {/* ring pulse - highlights */}
-                    <section className="rdx-card span2" style={{ animationDelay: "0.48s" }}>
-                        <div className="v-mc-meta rdx-label"><span>ring pulse · this week</span><span style={{ display: "inline-flex", gap: 6, alignItems: "center", color: "var(--accent)" }}><Led tone="alert" />rec</span></div>
+                    <section className="rdx-card span2 acc-rose" style={{ animationDelay: "0.48s" }}>
+                        <div className="v-mc-meta rdx-label"><span className="nf-key">ring pulse · this week</span><span style={{ display: "inline-flex", gap: 6, alignItems: "center", color: "var(--alert)" }}><Led tone="alert" />rec</span></div>
                         <div className="v-mc-feed" style={{ marginTop: 8 }}>
                             <div className="v-mc-feed-row"><span><span style={{ color: "var(--accent)" }}>@dax</span> hit a 31-day streak - longest in the ring</span><span className="k">+2d</span></div>
                             <div className="v-mc-feed-row"><span><span className="feat">routing</span> saved the team $640 vs all-fable</span><span className="k">30d</span></div>

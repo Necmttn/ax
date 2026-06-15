@@ -24,8 +24,8 @@ export function VariantMissionControl({ theme }: { theme: Theme }) {
                 </div>
                 <div className="v-mc-bento">
                     {/* hero: archetype + glyph reel */}
-                    <section className="rdx-card v-mc-hero span2 row2" style={{ animationDelay: "0s" }}>
-                        <div className="v-mc-meta rdx-label"><span>archetype · primary</span><span>{PROFILE.archetype.confidence} confidence</span></div>
+                    <section className="rdx-card v-mc-hero span2 row2 acc-violet" style={{ animationDelay: "0s" }}>
+                        <div className="v-mc-meta rdx-label"><span className="nf-key">archetype · primary</span><span>{PROFILE.archetype.confidence} confidence</span></div>
                         <div className="v-mc-hero-art"><GlyphReel seed={seedFrom(PROFILE.archetype.id)} dim={dim} lit={lit} /></div>
                         <div>
                             <div className="v-mc-hero-name">{PROFILE.archetype.label}</div>
@@ -33,41 +33,42 @@ export function VariantMissionControl({ theme }: { theme: Theme }) {
                         </div>
                     </section>
 
-                    <section className="rdx-card" style={{ animationDelay: "0.06s" }}>
-                        <div className="rdx-label">sessions</div>
-                        <div className="rdx-num v-mc-bottom">{PROFILE.sessions}</div>
+                    <section className="rdx-card acc-blue" style={{ animationDelay: "0.06s" }}>
+                        <div className="rdx-label nf-key">sessions</div>
+                        <div className="rdx-metric v-mc-bottom">{PROFILE.sessions}</div>
                         <div className="rdx-label">{PROFILE.messages.toLocaleString()} messages</div>
                     </section>
 
-                    <section className="rdx-card" style={{ animationDelay: "0.12s" }}>
-                        <div className="rdx-label">tokens</div>
+                    <section className="rdx-card acc-gold" style={{ animationDelay: "0.12s" }}>
+                        <div className="rdx-label nf-key">tokens</div>
                         <div className="rdx-metric v-mc-bottom">{PROFILE.tokens}</div>
                         <div className="rdx-label">≈ 418 novels · {PROFILE.cost}</div>
                     </section>
 
                     {/* activity heatmap */}
-                    <section className="rdx-card span2" style={{ animationDelay: "0.18s" }}>
-                        <div className="v-mc-meta rdx-label"><span>activity · daily</span><span style={{ display: "inline-flex", gap: 6, alignItems: "center", color: "var(--green)" }}><Led />live</span></div>
+                    <section className="rdx-card span2 acc-green" style={{ animationDelay: "0.18s" }}>
+                        <div className="v-mc-meta rdx-label"><span className="nf-key">activity · daily</span><span style={{ display: "inline-flex", gap: 6, alignItems: "center", color: "var(--green)" }}><Led />live</span></div>
                         <div style={{ marginTop: "auto" }}><CellGrid levels={ACTIVITY} cols={26} cell={11} /></div>
                         <div className="v-mc-meta rdx-label"><span>{PROFILE.activeDays} active days</span><span>14 weeks</span></div>
                     </section>
 
-                    <section className="rdx-card" style={{ animationDelay: "0.24s" }}>
-                        <div className="rdx-label">streak</div>
+                    {/* streak - the one Doto (dot-matrix) readout in this view */}
+                    <section className="rdx-card acc-alert" style={{ animationDelay: "0.24s" }}>
+                        <div className="rdx-label nf-key">streak</div>
                         <div className="rdx-num v-mc-bottom">{PROFILE.streak}<small>d</small></div>
-                        <Segbar total={Math.max(7, PROFILE.longest)} on={PROFILE.streak} tone="accent" wave />
+                        <Segbar total={Math.max(7, PROFILE.longest)} on={PROFILE.streak} tone="card" wave />
                         <div className="rdx-label">best {PROFILE.longest} days</div>
                     </section>
 
-                    <section className="rdx-card" style={{ animationDelay: "0.3s" }}>
-                        <div className="rdx-label">peak hour</div>
+                    <section className="rdx-card acc-rose" style={{ animationDelay: "0.3s" }}>
+                        <div className="rdx-label nf-key">peak hour</div>
                         <div className="rdx-metric v-mc-bottom">{PROFILE.peakHour}</div>
                         <div className="rdx-label">most active</div>
                     </section>
 
                     {/* model split */}
-                    <section className="rdx-card span2 v-mc-split" style={{ animationDelay: "0.36s" }}>
-                        <div className="v-mc-meta rdx-label"><span>model split · window</span><span>{PROFILE.cost} total</span></div>
+                    <section className="rdx-card span2 v-mc-split acc-blue" style={{ animationDelay: "0.36s" }}>
+                        <div className="v-mc-meta rdx-label"><span className="nf-key">model split · window</span><span>{PROFILE.cost} total</span></div>
                         {MODELS.slice(0, 3).map((m) => (
                             <div className="v-mc-split-row" key={m.name}>
                                 <span style={{ color: "var(--pri)" }}>{m.name}</span>
@@ -78,8 +79,8 @@ export function VariantMissionControl({ theme }: { theme: Theme }) {
                     </section>
 
                     {/* feed */}
-                    <section className="rdx-card span2 v-mc-feed" style={{ animationDelay: "0.42s" }}>
-                        <div className="v-mc-meta rdx-label"><span>activity · push · main</span><span style={{ display: "inline-flex", gap: 6, alignItems: "center", color: "var(--accent)" }}><Led tone="accent" />rec</span></div>
+                    <section className="rdx-card span2 v-mc-feed acc-green" style={{ animationDelay: "0.42s" }}>
+                        <div className="v-mc-meta rdx-label"><span className="nf-key">activity · push · main</span><span style={{ display: "inline-flex", gap: 6, alignItems: "center", color: "var(--alert)" }}><Led tone="alert" />rec</span></div>
                         <div style={{ marginTop: 6, display: "flex", flexDirection: "column", gap: 8 }}>
                             {FEED.map((f) => (
                                 <div className="v-mc-feed-row" key={f.t}>

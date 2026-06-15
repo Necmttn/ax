@@ -430,3 +430,19 @@
 @media (prefers-reduced-motion: reduce) { .v-land-promptpill .icons .i { animation: none; } }
 /* floating bg logo field removed per review */
 .rdx-logofield { display: none; }
+
+/* ---- multi-colour channel accents for the dashboard cards ----
+   Each card keys a --card-accent; a thin top-rule + accent segbar colour-code
+   it like a real instrument panel. Numbers stay display-white for legibility. */
+.rdx-card.acc-green  { --card-accent: var(--green); }
+.rdx-card.acc-blue   { --card-accent: var(--blue); }
+.rdx-card.acc-gold   { --card-accent: var(--gold); }
+.rdx-card.acc-violet { --card-accent: var(--violet); }
+.rdx-card.acc-rose   { --card-accent: #e0556f; }
+.rdx-card.acc-alert  { --card-accent: var(--alert); }
+.rdx-card[class*="acc-"]::before {
+    content: ""; position: absolute; top: 0; left: 0; right: 0; height: 2px;
+    background: var(--card-accent); opacity: 0.9; z-index: 2;
+}
+.rdx-card[class*="acc-"] .nf-key { color: var(--card-accent); }
+.rdx-seg.card i.on { background: var(--card-accent); }
