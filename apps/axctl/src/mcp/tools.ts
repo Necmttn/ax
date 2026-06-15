@@ -61,6 +61,11 @@ import { fetchCostModels, fetchCostSplit } from "../queries/cost-analytics.ts";
 import { fetchDispatches, fetchDispatchCandidates } from "../queries/dispatch-analytics.ts";
 import { loadEffectiveRoutingTable } from "../queries/routing-table-io.ts";
 import { buildDispatchesNext, buildCandidatesNext } from "../nav/next-links.ts";
+import { assembleAgenda, collectAgendaItems } from "../dojo/agenda.ts";
+import { computeBudgetEnvelope } from "../dojo/budget.ts";
+import { getQuota } from "../quota/quota.ts";
+import { defaultQuotaCachePath } from "../quota/cache.ts";
+import { QuotaEnvLive } from "../quota/quota-env.ts";
 
 /**
  * The long-lived MCP runtime, built from `AppLayer` (SurrealClient + config +
@@ -578,6 +583,46 @@ const dispatchesTool: AxMcpTool = {
     },
 };
 
+const dojoAgendaTool: AxMcpTool = {
+    name: "dojo_agenda",
+    description:
+        "Dojo training agenda for surplus-quota self-improvement: budget envelope (window remaining minus reserve, deadline = window reset) + prioritized work items (pending verdicts, unfilled briefs, routing backtests, proposal minting, churn experiments, optional sparring). Mirrors `ax dojo agenda`. Read-only.",
+    inputSchema: {
+        days: z
+            .number()
+            .int()
+            .positive()
+            .optional()
+            .describe("Window in days (default 30)."),
+        spar: z
+            .boolean()
+            .optional()
+            .describe("Include opt-in sparring items (needs spendable headroom)."),
+    },
+    run: async (args, rt) => {
+        const nowMs = Date.now();
+        const days = typeof args.days === "number" ? args.days : 30;
+        const spar = args.spar === true;
+        return await rt.runPromise(
+            Effect.gen(function* () {
+                const quota = yield* getQuota(
+                    { cachePath: defaultQuotaCachePath(), maxAgeSeconds: 60, nowMs },
+                ).pipe(
+                    Effect.map((r) => r.snapshot),
+                    Effect.catch(() => Effect.succeed(null)),
+                );
+                const envelope = computeBudgetEnvelope(
+                    quota,
+                    { budgetPctOverride: null, untilIso: null, force: false },
+                    nowMs,
+                );
+                const items = yield* collectAgendaItems({ nowMs, days, spar });
+                return assembleAgenda(envelope, items, { nowMs, spar });
+            }).pipe(Effect.provide(QuotaEnvLive)),
+        );
+    },
+};
+
 /**
  * All registered MCP tools. `server.ts` iterates this array to register +
  * wrap each one.
@@ -603,4 +648,5 @@ export const axMcpTools: ReadonlyArray<AxMcpTool> = [
     costModelsTool,
     costSplitTool,
     dispatchesTool,
+    dojoAgendaTool,
 ];
