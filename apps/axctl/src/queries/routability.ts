@@ -5,7 +5,8 @@
  * Spec: docs/superpowers/specs/2026-06-15-cost-routability-lens-design.md
  */
 import { JUDGMENT_GUARD_RE } from "./routing-tune.ts";
-import type { RepriceUsage } from "./reprice.ts";
+import { MODEL_ALIASES, reprice } from "./reprice.ts";
+import type { RepriceUsage, ModelPricing } from "./reprice.ts";
 
 export type WorkClass =
     | "gather"
@@ -118,4 +119,78 @@ export function buildSpans(turns: ReadonlyArray<TurnFacts>, minRun: number): Spa
   }
   flush();
   return spans;
+}
+
+export interface RoutabilityInput {
+  days: number;
+  minRun: number;
+}
+
+export interface RoutabilityClassRow {
+  class: string;
+  verdict: "routable" | "stays";
+  runs: number;
+  turns: number;
+  mainCostUsd: number;
+  tier: string | null;
+  repricedUsd: number | null;
+  estSavingsUsd: number | null;
+}
+
+export interface RoutabilityResult {
+  mainSpendUsd: number;
+  routableUsd: number;
+  routablePct: number;
+  estSavingsUsd: number;
+  rows: ReadonlyArray<RoutabilityClassRow>;
+  days: number;
+  minRun: number;
+}
+
+/**
+ * Roll spans up into per-class routable rows + one "stays main" rollup, and
+ * compute est savings (routable spans repriced one tier down, never negative).
+ */
+export function aggregateRoutability(
+  spans: ReadonlyArray<Span>,
+  pricingCatalog: Map<string, ModelPricing>,
+  input: RoutabilityInput,
+): RoutabilityResult {
+  const routableByClass = new Map<WorkClass, { runs: number; turns: number; main: number; repriced: number }>();
+  let staysMain = 0, staysTurns = 0, staysRuns = 0;
+
+  for (const s of spans) {
+    if (!s.routable) {
+      staysMain += s.usage.cost_usd; staysTurns += s.turnCount; staysRuns += 1;
+      continue;
+    }
+    const tierAlias = ROUTABLE_TIER[s.cls]!;
+    const targetModel = MODEL_ALIASES[tierAlias] ?? tierAlias;
+    const repriced = reprice(s.usage, targetModel, pricingCatalog);
+    const acc = routableByClass.get(s.cls) ?? { runs: 0, turns: 0, main: 0, repriced: 0 };
+    acc.runs += 1; acc.turns += s.turnCount; acc.main += s.usage.cost_usd;
+    acc.repriced += Math.min(repriced, s.usage.cost_usd); // clamp: never "save" by repricing up
+    routableByClass.set(s.cls, acc);
+  }
+
+  const rows: RoutabilityClassRow[] = [];
+  let routableUsd = 0, estSavingsUsd = 0;
+
+  for (const [cls, acc] of routableByClass) {
+    const savings = Math.max(0, acc.main - acc.repriced);
+    routableUsd += acc.main; estSavingsUsd += savings;
+    rows.push({ class: cls, verdict: "routable", runs: acc.runs, turns: acc.turns, mainCostUsd: acc.main, tier: ROUTABLE_TIER[cls] ?? null, repricedUsd: acc.repriced, estSavingsUsd: savings });
+  }
+  rows.sort((a, b) => (b.estSavingsUsd ?? 0) - (a.estSavingsUsd ?? 0));
+
+  if (staysRuns > 0) {
+    rows.push({ class: "stays main", verdict: "stays", runs: staysRuns, turns: staysTurns, mainCostUsd: staysMain, tier: null, repricedUsd: null, estSavingsUsd: null });
+  }
+
+  const mainSpendUsd = routableUsd + staysMain;
+  return {
+    mainSpendUsd, routableUsd,
+    routablePct: mainSpendUsd > 0 ? (routableUsd / mainSpendUsd) * 100 : 0,
+    estSavingsUsd, rows, days: input.days, minRun: input.minRun,
+  };
 }

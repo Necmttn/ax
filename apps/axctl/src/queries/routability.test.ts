@@ -41,7 +41,8 @@ describe("classifyTurn", () => {
   });
 });
 
-import { buildSpans } from "./routability.ts";
+import { buildSpans, aggregateRoutability, type Span } from "./routability.ts";
+import { MODEL_ALIASES, type ModelPricing } from "./reprice.ts";
 import type { RepriceUsage } from "./reprice.ts";
 
 const u: RepriceUsage = {
@@ -93,5 +94,57 @@ describe("buildSpans", () => {
     ];
     const gather = buildSpans(turns, 1).find((s) => s.cls === "gather");
     expect(gather?.usage.cost_usd).toBe(2); // turns 3 & 4 (turn 2 is interactive)
+  });
+});
+
+describe("aggregateRoutability", () => {
+  const catalog = new Map<string, ModelPricing>([
+    [MODEL_ALIASES.sonnet, { provider: "anthropic", inputPerMillionUsd: 3, outputPerMillionUsd: 15, cacheReadPerMillionUsd: 0.3, cacheCreationPerMillionUsd: 3.75, fastMultiplier: 1, pricingSource: "test" }],
+    [MODEL_ALIASES.haiku, { provider: "anthropic", inputPerMillionUsd: 0.8, outputPerMillionUsd: 4, cacheReadPerMillionUsd: 0.08, cacheCreationPerMillionUsd: 1, fastMultiplier: 1, pricingSource: "test" }],
+  ]);
+
+  const bigUsage: RepriceUsage = {
+    prompt_tokens: 2_000_000, completion_tokens: 400_000,
+    cache_read_tokens: 0, cache_create_tokens: 0, cost_usd: 50,
+  };
+
+  const spans: Span[] = [
+    { cls: "gather", turnCount: 5, usage: bigUsage, routable: true },
+    { cls: "mechanical-impl", turnCount: 4, usage: bigUsage, routable: true },
+    { cls: "synthesis", turnCount: 3, usage: bigUsage, routable: false },
+    { cls: "gather", turnCount: 2, usage: bigUsage, routable: false },
+  ];
+
+  it("rolls up routable spans by class with positive savings", () => {
+    const r = aggregateRoutability(spans, catalog, { days: 30, minRun: 3 });
+    const gather = r.rows.find((row) => row.class === "gather" && row.verdict === "routable");
+    expect(gather?.runs).toBe(1);
+    expect(gather?.tier).toBe("haiku");
+    expect(gather!.estSavingsUsd!).toBeGreaterThan(0);
+  });
+
+  it("aggregates everything else into a single 'stays main' rollup", () => {
+    const r = aggregateRoutability(spans, catalog, { days: 30, minRun: 3 });
+    const stays = r.rows.find((row) => row.verdict === "stays");
+    expect(stays).toBeDefined();
+    expect(stays!.mainCostUsd).toBe(100);
+  });
+
+  it("totals: routable + est savings + main spend + pct", () => {
+    const r = aggregateRoutability(spans, catalog, { days: 30, minRun: 3 });
+    expect(r.mainSpendUsd).toBe(200);
+    expect(r.routableUsd).toBe(100);
+    expect(r.routablePct).toBeCloseTo(50, 0);
+    expect(r.estSavingsUsd).toBeGreaterThan(0);
+  });
+
+  it("never reports negative savings (already-cheap span contributes 0)", () => {
+    const cheap: Span = {
+      cls: "gather", turnCount: 5,
+      usage: { prompt_tokens: 10, completion_tokens: 1, cache_read_tokens: 0, cache_create_tokens: 0, cost_usd: 0.0001 },
+      routable: true,
+    };
+    const r = aggregateRoutability([cheap], catalog, { days: 30, minRun: 3 });
+    expect(r.estSavingsUsd).toBeGreaterThanOrEqual(0);
   });
 });
