@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { Effect, Layer } from "effect";
 import { SurrealClient } from "@ax/lib/db";
 import { handleOtlp } from "./otel.ts";
+import codexLogs from "../../otel/__fixtures__/codex-logs.json" with { type: "json" };
 
 const captured: string[] = [];
 const stubDb = Layer.succeed(SurrealClient, {
@@ -51,4 +52,13 @@ describe("handleOtlp", () => {
         expect(captured).toHaveLength(0);
         expect(ack).toEqual({ partialSuccess: {} });
     });
+});
+
+test("logs body → writer UPSERT into otel_log_event, returns ack", async () => {
+    captured.length = 0;
+    const ack = await Effect.runPromise(
+        handleOtlp("logs", toBuf(JSON.stringify(codexLogs)), undefined).pipe(Effect.provide(stubDb)),
+    );
+    expect(captured.join("\n")).toContain("UPSERT otel_log_event:");
+    expect(ack).toEqual({ partialSuccess: {} });
 });

@@ -48,6 +48,24 @@ describe("correlateOrphanOtel", () => {
         expect(all).toContain("m1");
     });
 
+    test("RELATEs an orphan log event row to its session", async () => {
+        sql.length = 0;
+        const logEventDb = Layer.succeed(SurrealClient, {
+            query: <T>(q: string) => {
+                sql.push(q);
+                if (/otel_log_event/.test(q) && /SELECT/i.test(q)) {
+                    return Effect.succeed([[{ id: "otel_log_event:l1", session_id: "s1" }]] as unknown as T);
+                }
+                return Effect.succeed([[]] as unknown as T);
+            },
+        } as never);
+        await Effect.runPromise(correlateOrphanOtel().pipe(Effect.provide(logEventDb)));
+        const all = sql.join("\n");
+        expect(all).toContain("RELATE session:");
+        expect(all).toContain("telemetry_of");
+        expect(all).toContain("otel_log_event:");
+    });
+
     test("no orphans → no RELATE", async () => {
         sql.length = 0;
         // override: both selects return empty by re-importing with a fresh stub

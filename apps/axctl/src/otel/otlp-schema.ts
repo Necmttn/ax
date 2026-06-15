@@ -78,6 +78,23 @@ export const TracePayload = Schema.Struct({
 });
 export type TracePayload = Schema.Schema.Type<typeof TracePayload>;
 
+const LogRecord = Schema.Struct({
+    timeUnixNano: Schema.optional(Schema.String),
+    observedTimeUnixNano: Schema.optional(Schema.String),
+    attributes: Schema.optional(Schema.Array(KeyValue)),
+    body: Schema.optional(Schema.Unknown),
+});
+
+export const LogsPayload = Schema.Struct({
+    resourceLogs: Schema.Array(Schema.Struct({
+        resource: Schema.optional(Schema.Struct({ attributes: Schema.optional(Schema.Array(KeyValue)) })),
+        scopeLogs: Schema.Array(Schema.Struct({
+            logRecords: Schema.Array(LogRecord),
+        })),
+    })),
+});
+export type LogsPayload = Schema.Schema.Type<typeof LogsPayload>;
+
 /** nano-string -> JS Date. */
 export const nanoToDate = (nano: string | undefined): Date =>
     new Date(Number(BigInt(nano ?? "0") / 1_000_000n));

@@ -3,6 +3,7 @@ import { Effect, Layer } from "effect";
 import { SurrealClient } from "@ax/lib/db";
 import { OtelWriter, OtelWriterLive } from "./writer.ts";
 import type { OtelMetricPointRow, OtelSpanRow } from "./rows.ts";
+import type { OtelLogEventRow } from "./rows.ts";
 
 const captured: string[] = [];
 const stubDb = Layer.succeed(SurrealClient, {
@@ -60,4 +61,27 @@ describe("OtelWriter", () => {
         );
         expect(captured).toHaveLength(0);
     });
+});
+
+test("writeLogs issues an UPSERT into otel_log_event with token cols", async () => {
+    captured.length = 0;
+    const row: OtelLogEventRow = {
+        harness: "codex", event_name: "codex.sse_event", session_id: "c1", model: "gpt-5.5",
+        input_tokens: 9994, output_tokens: 0, reasoning_tokens: 0, cached_tokens: 0, tool_tokens: 9994,
+        duration_ms: null, status_code: null, attrs: null, observed_at: new Date("2026-06-15T00:00:00Z"),
+    };
+    await Effect.runPromise(Effect.gen(function* () {
+        const w = yield* OtelWriter; yield* w.writeLogs([row]);
+    }).pipe(Effect.provide(OtelWriterLive), Effect.provide(stubDb)));
+    const sql = captured.join("\n");
+    expect(sql).toContain("UPSERT otel_log_event:");
+    expect(sql).toContain("input_tokens = 9994");
+});
+
+test("writeLogs empty → no query", async () => {
+    captured.length = 0;
+    await Effect.runPromise(Effect.gen(function* () {
+        const w = yield* OtelWriter; yield* w.writeLogs([]);
+    }).pipe(Effect.provide(OtelWriterLive), Effect.provide(stubDb)));
+    expect(captured).toHaveLength(0);
 });

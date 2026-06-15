@@ -62,3 +62,32 @@ describe("normalize", () => {
         expect(rows[0]!.harness).toBe("unknown");
     });
 });
+
+import { normalizeLogs } from "./normalize.ts";
+import codexLogs from "./__fixtures__/codex-logs.json" with { type: "json" };
+
+describe("normalizeLogs", () => {
+    test("allowlist drops transport noise, keeps signal events", () => {
+        const rows = normalizeLogs(codexLogs as never);
+        const names = rows.map((r) => r.event_name);
+        expect(names).not.toContain("codex.websocket_event");
+        expect(names).toContain("codex.user_prompt");
+        expect(names).toContain("codex.conversation_starts");
+        expect(rows.every((r) => r.harness === "codex")).toBe(true);
+    });
+
+    test("sse_event row lifts token columns + session from conversation.id", () => {
+        const rows = normalizeLogs(codexLogs as never);
+        const sse = rows.find((r) => r.event_name === "codex.sse_event");
+        expect(sse).toBeDefined();
+        expect(sse!.input_tokens).toBe(9994);
+        expect(sse!.model).toBe("gpt-5.5");
+        expect(sse!.session_id).toBe("019ecba3-1618-7c63-8e2e-e2eaf13075f3");
+    });
+
+    test("non-allowlisted-only payload → 0 rows", () => {
+        const noise = { resourceLogs: [{ resource: { attributes: [{ key: "service.name", value: { stringValue: "codex_exec" } }] },
+            scopeLogs: [{ logRecords: [{ attributes: [{ key: "event.name", value: { stringValue: "codex.websocket_event" } }] }] }] }] };
+        expect(normalizeLogs(noise as never)).toHaveLength(0);
+    });
+});

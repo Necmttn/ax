@@ -90,13 +90,15 @@ fresh clone.
 
 `ax serve` accepts harness OTLP/JSON telemetry on the daemon port (1738):
 `POST /v1/metrics` (Claude Code usage metrics) + `POST /v1/traces` (span
-sources); `/v1/logs` is accepted and dropped (v1 no-op - full logs ingestion is
-the next PR). NOTE: Codex emits OTLP *logs* (events: conversation_starts,
-user_prompt, token usage), NOT spans, and POSTs to the endpoint as-is, so its
-config targets `/v1/logs` (struct-variant exporter, `protocol = "json"`; see
-install-config.ts); its data lands once logs ingestion ships. Bodies decode via Effect
-`Schema` (curated OTLP/JSON subset, `apps/axctl/src/otel/`), normalize per-harness
-(`service.name` -> harness label), and land in `otel_metric_point` / `otel_span`.
+sources) + `POST /v1/logs` (Codex log events → `otel_log_event` table). NOTE:
+Codex emits OTLP *logs* (events: conversation_starts, user_prompt, token usage),
+NOT spans, and POSTs to the endpoint as-is, so its config targets `/v1/logs`
+(struct-variant exporter, `protocol = "json"`; see install-config.ts); session
+key is `conversation.id`; a curated allowlist drops transport noise
+(websocket/sse-non-usage); token counts (input/output/reasoning/cached/tool)
+land as typed columns. Bodies decode via Effect `Schema` (curated OTLP/JSON
+subset, `apps/axctl/src/otel/`), normalize per-harness (`service.name` ->
+harness label), and land in `otel_metric_point` / `otel_span` / `otel_log_event`.
 A correlation pass at ingest finish draws `session -> telemetry_of -> otel_*`
 edges by matching `session.id` (OTLP arrives before the transcript, so the
 ingest run owns linking; idempotent, best-effort via `Effect.ignore`). OTLP cost

@@ -4,8 +4,9 @@
  * All three signals return `{ partialSuccess: {} }` (the OTLP/HTTP ack).
  * The handler is fail-open: a bad body or decode failure logs a warning and
  * returns the ack without writing, so a misconfigured sender never crashes the
- * daemon. Only metrics and traces are written today; logs are accepted and
- * silently dropped (no table yet).
+ * daemon. All three signals are decoded, normalized, and written to their
+ * tables: metrics to otel_metric_point, traces to otel_span, logs to
+ * otel_log_event.
  *
  * `handleOtlp` is a plain Effect (no HTTP layer) so the test suite can drive
  * it directly with a stub DB layer. `OtelGroupLive` wires it into the contract
@@ -17,8 +18,8 @@ import { HttpServerRequest } from "effect/unstable/http";
 import { HttpApiBuilder } from "effect/unstable/httpapi";
 import { AxApi } from "@ax/lib/shared/api-contract";
 import { OtelWriter, OtelWriterLive } from "../../otel/writer.ts";
-import { decodeMetricsPayload, decodeTracePayload } from "../../otel/decode.ts";
-import { normalizeMetrics, normalizeTrace } from "../../otel/normalize.ts";
+import { decodeLogsPayload, decodeMetricsPayload, decodeTracePayload } from "../../otel/decode.ts";
+import { normalizeLogs, normalizeMetrics, normalizeTrace } from "../../otel/normalize.ts";
 
 // ------------------------------------------------------------------ types
 
@@ -38,8 +39,6 @@ export const handleOtlp = (
     contentEncoding: string | undefined,
 ) =>
     Effect.gen(function* () {
-        if (signal === "logs") return ACK;
-
         const bytes = new Uint8Array(body);
         const raw = contentEncoding === "gzip" ? Bun.gunzipSync(bytes) : bytes;
 
@@ -55,7 +54,10 @@ export const handleOtlp = (
 
         const writer = yield* OtelWriter;
 
-        if (signal === "metrics") {
+        if (signal === "logs") {
+            const payload = yield* decodeLogsPayload(json).pipe(Effect.orElseSucceed(() => null));
+            if (payload) yield* writer.writeLogs(normalizeLogs(payload));
+        } else if (signal === "metrics") {
             const payload = yield* decodeMetricsPayload(json).pipe(
                 Effect.orElseSucceed(() => null),
             );
