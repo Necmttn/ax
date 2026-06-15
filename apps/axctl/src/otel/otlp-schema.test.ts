@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { Schema } from "effect";
-import { AnyValue, MetricsPayload, TracePayload, attrValueToScalar } from "./otlp-schema.ts";
+import { AnyValue, LogsPayload, MetricsPayload, TracePayload, attrValueToScalar } from "./otlp-schema.ts";
 
 describe("otlp envelope schemas", () => {
     test("decodes an AnyValue stringValue", () => {
@@ -50,5 +50,19 @@ describe("otlp envelope schemas", () => {
         };
         const decoded = Schema.decodeUnknownSync(TracePayload)(payload);
         expect(decoded.resourceSpans[0]?.scopeSpans[0]?.spans[0]?.name).toBe("session_loop");
+    });
+
+    test("decodes a minimal logs payload", () => {
+        const payload = {
+            resourceLogs: [{
+                resource: { attributes: [{ key: "service.name", value: { stringValue: "codex_exec" } }] },
+                scopeLogs: [{ logRecords: [{
+                    observedTimeUnixNano: "1718409600000000000",
+                    attributes: [{ key: "event.name", value: { stringValue: "codex.user_prompt" } }],
+                }] }],
+            }],
+        };
+        const d = Schema.decodeUnknownSync(LogsPayload)(payload);
+        expect(d.resourceLogs[0]?.scopeLogs[0]?.logRecords[0]?.attributes?.[0]?.key).toBe("event.name");
     });
 });
