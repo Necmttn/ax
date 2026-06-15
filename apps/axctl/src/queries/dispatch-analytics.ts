@@ -19,7 +19,9 @@ import { Effect, FileSystem, Path } from "effect";
 import { SurrealClient } from "@ax/lib/db";
 import {
     DEFAULT_ROUTING_TABLE,
+    matchRoutingTable,
     type RoutingClass,
+    type RoutingMatch,
     type RoutingTable,
 } from "@ax/hooks-sdk/routing-table";
 import { estimateCost, type ModelPricing } from "../ingest/model-pricing.ts";
@@ -34,7 +36,7 @@ import {
 // Routing classes (schema + defaults owned by @ax/hooks-sdk/routing-table)
 // ---------------------------------------------------------------------------
 
-export type { RoutingClass, RoutingTable };
+export type { RoutingClass, RoutingTable, RoutingMatch };
 
 /**
  * ROUTING_CLASSES - the shipped default seed (`ax routing compile` refreshes
@@ -53,57 +55,22 @@ const MODEL_ALIASES: Record<string, string> = {
 export const EXPENSIVE_TIER_RE = /fable|opus/i;
 
 // ---------------------------------------------------------------------------
-// Routing match
+// Routing match - the matcher itself lives in @ax/hooks-sdk/routing-table
+// (matchRoutingTable), shared with the route-dispatch fire-path hook so the
+// two can never drift (ADR-0014 follow-up). These keep the existing
+// axctl-side names + the strict RoutingTable signature for callers/tests.
 // ---------------------------------------------------------------------------
-
-export interface RoutingMatch {
-    readonly classId: string;
-    readonly suggest: string;
-    readonly reason: string;
-    readonly source: "agentType" | "description";
-}
 
 export const matchRoutingWith = (
     table: RoutingTable,
     description: string | null,
     agentType: string | null,
-): RoutingMatch | null => {
-    // Agent-type rules win first (more specific)
-    if (agentType) {
-        const suggest = table.agentTypes[agentType];
-        if (suggest) {
-            return {
-                classId: `agent-type:${agentType}`,
-                suggest,
-                reason: `agent type ${agentType}`,
-                source: "agentType",
-            };
-        }
-    }
-    if (description) {
-        for (const cls of table.classes) {
-            try {
-                const re = new RegExp(cls.pattern, cls.flags);
-                if (re.test(description)) {
-                    return {
-                        classId: cls.id,
-                        suggest: cls.suggest,
-                        reason: cls.reason,
-                        source: "description",
-                    };
-                }
-            } catch {
-                continue;
-            }
-        }
-    }
-    return null;
-};
+): RoutingMatch | null => matchRoutingTable(table, description, agentType);
 
 export const matchRouting = (
     description: string | null,
     agentType: string | null,
-): RoutingMatch | null => matchRoutingWith(ROUTING_CLASSES, description, agentType);
+): RoutingMatch | null => matchRoutingTable(ROUTING_CLASSES, description, agentType);
 
 // ---------------------------------------------------------------------------
 // Raw DB row interfaces (query results before joining)

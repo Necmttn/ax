@@ -28,8 +28,7 @@ import {
     listSessionsAround,
     normalizeSessionsAroundOpts,
 } from "../dashboard/sessions-query.ts";
-import { fetchSessionShow } from "../dashboard/session-show.ts";
-import type { FetchSessionViewOptions } from "../dashboard/session-view.ts";
+import { fetchEnrichedSession } from "../queries/enriched-session.ts";
 import {
     fetchSkillsWeighted,
     normalizeSkillsWeightedParams,
@@ -200,13 +199,22 @@ const sessionShowTool: AxMcpTool = {
             : new Set<string>();
         const expandAll = args.expandAll === true;
         const byRole = typeof args.byRole === "boolean" ? args.byRole : undefined;
-        const opts: FetchSessionViewOptions = {
-            sessionId,
-            expand,
-            expandAll,
-            ...(byRole !== undefined ? { byRole } : {}),
-        };
-        const payload = await rt.runPromise(fetchSessionShow(opts));
+        // Read through the Enriched Session facade (the single home for
+        // assembling a session read model). The MCP tool needs the Session View
+        // base only - no metrics/insights - so the response shape is the bare
+        // SessionViewPayload, identical to the former fetchSessionShow call.
+        const enriched = await rt.runPromise(
+            fetchEnrichedSession({
+                sessionId,
+                base: {
+                    kind: "view",
+                    expand,
+                    expandAll,
+                    ...(byRole !== undefined ? { byRole } : {}),
+                },
+            }),
+        );
+        const payload = enriched.view!;
         return { ...payload, next: buildSessionShowNext(payload) };
     },
 };
