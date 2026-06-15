@@ -1529,6 +1529,21 @@ DEFINE INDEX IF NOT EXISTS hook_command_invocation_by_status  ON hook_command_in
 DEFINE INDEX IF NOT EXISTS hook_command_invocation_by_effect  ON hook_command_invocation FIELDS effect;
 
 -- ---------------------------------------------------------------------------
+-- ax's own CLI invocations (redacted) for self-telemetry / utilization.
+-- ---------------------------------------------------------------------------
+DEFINE TABLE ax_invocation SCHEMAFULL;
+DEFINE FIELD ts          ON ax_invocation TYPE datetime;
+DEFINE FIELD command     ON ax_invocation TYPE string;
+DEFINE FIELD flags       ON ax_invocation TYPE string;
+DEFINE FIELD exit_code   ON ax_invocation TYPE int;
+DEFINE FIELD duration_ms ON ax_invocation TYPE int;
+DEFINE FIELD origin      ON ax_invocation TYPE string;
+DEFINE FIELD repo_key    ON ax_invocation TYPE option<string>;
+DEFINE FIELD ax_version  ON ax_invocation TYPE string;
+DEFINE INDEX IF NOT EXISTS ax_invocation_by_ts      ON ax_invocation FIELDS ts;
+DEFINE INDEX IF NOT EXISTS ax_invocation_by_command ON ax_invocation FIELDS command, ts;
+
+-- ---------------------------------------------------------------------------
 -- Generic feedback case definitions and deterministic backtest results.
 -- Case types encode "what behavior should follow this evidence?" without
 -- creating hook-specific tables. Results are per evidence item/run.
