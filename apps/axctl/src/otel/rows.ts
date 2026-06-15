@@ -38,3 +38,30 @@ export const metricPointKey = (r: OtelMetricPointRow): string => {
 
 /** Spans carry a globally-unique span_id; use it directly. */
 export const spanKey = (r: Pick<OtelSpanRow, "span_id">): string => r.span_id;
+
+export const OtelLogEventRow = Schema.Struct({
+    harness: Schema.String,
+    event_name: Schema.String,
+    session_id: Schema.NullOr(Schema.String),
+    model: Schema.NullOr(Schema.String),
+    input_tokens: Schema.NullOr(Schema.Number),
+    output_tokens: Schema.NullOr(Schema.Number),
+    reasoning_tokens: Schema.NullOr(Schema.Number),
+    cached_tokens: Schema.NullOr(Schema.Number),
+    tool_tokens: Schema.NullOr(Schema.Number),
+    duration_ms: Schema.NullOr(Schema.Number),
+    status_code: Schema.NullOr(Schema.Number),
+    attrs: Schema.NullOr(Schema.String),
+    observed_at: Schema.Date,
+});
+export type OtelLogEventRow = Schema.Schema.Type<typeof OtelLogEventRow>;
+
+/**
+ * Deterministic id. Log events repeat by name within a session/second, so the
+ * per-payload record `index` is folded in to keep distinct events distinct
+ * (idempotent across re-delivery of the SAME payload).
+ */
+export const logEventKey = (r: OtelLogEventRow, index: number): string => {
+    const ts = r.observed_at instanceof Date ? r.observed_at.toISOString() : String(r.observed_at);
+    return `${r.harness}|${r.event_name}|${r.session_id ?? ""}|${ts}|${index}`;
+};
