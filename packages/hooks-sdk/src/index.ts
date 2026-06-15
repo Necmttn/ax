@@ -20,3 +20,8 @@ export {
   type RoutingTable,
   type RoutingTableShape,
 } from "./routing-table.ts";
+export {
+  resolveDispatchModel,
+  type DispatchModelResolution,
+  type DispatchTier,
+} from "./resolve-dispatch-model.ts";
