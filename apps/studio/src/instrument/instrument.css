@@ -41,6 +41,28 @@
     --dot: #e1ded2; --glyph-dim: #dad7cb; --glyph-lit: #173a22;
     --c0: #e6e3d7; --c1: #cfe6d3; --c2: #9fd0aa; --c3: #5fb074; --c4: #2f9e44;
 }
+.rdx[data-theme="dark"] { color-scheme: dark; }
+.rdx[data-theme="light"] { color-scheme: light; }
+
+/* ---- studio-token bridge ----
+   The legacy studio routes (sessions/workflow/improve/skills) are styled with a
+   light-only token set (--page/--panel/--ink…). Re-map those names to the
+   instrument palette so any route rendered inside the .rdx instrument shell
+   adopts the dark (or light) HUD automatically. Shared names (--green/--blue/
+   --red/--gold/--violet) already resolve to the instrument values inside .rdx,
+   so only the differing names need bridging; --bg/--surface/etc. are
+   theme-scoped, so this one rule adapts to both themes. */
+.rdx {
+    --ink: var(--pri);
+    --muted: var(--sec);
+    --muted-2: var(--dim);
+    --page: var(--bg);
+    --line: var(--border);
+    --panel: var(--surface);
+    --track: var(--surface2);
+}
+/* slim live/ingest strip atop the legacy routes inside the instrument shell */
+.rdx-topbar { display: flex; align-items: center; gap: 12px; padding: 4px 2px 14px; font-family: var(--mono); font-size: 11px; color: var(--sec); }
 
 /* ---- primitives ---- */
 .rdx-doto { font-family: var(--doto); font-variant-numeric: tabular-nums; letter-spacing: 0.01em; }

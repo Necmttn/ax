@@ -1,28 +1,17 @@
 import { useEffect, useState, type ReactNode } from "react";
-import { Link, useRouterState } from "@tanstack/react-router";
-import { useQueryClient } from "@tanstack/react-query";
+import { useRouterState } from "@tanstack/react-router";
 import { api, studioConnection, type DaemonVersion } from "./api.ts";
 import { IngestSplash } from "./components/ingest-splash.tsx";
 import { useIngestEvents } from "./use-ingest-events.ts";
 import { fmtLastUsed } from "@ax/lib/shared/formatters";
 import { cmpSemver, STUDIO_VERSION } from "./version.ts";
+import { InstrumentShell } from "./instrument/shell.tsx";
 
 const STUDIO_MOCK = import.meta.env.VITE_STUDIO_MOCK === "true";
 const DEFAULT_LOCAL_ENDPOINT = "http://127.0.0.1:1738";
 // Min api_version the studio expects. Bump when the studio starts
 // relying on a new endpoint or breaking field rename.
 const STUDIO_MIN_API_VERSION = 1;
-
-interface Tab {
-    readonly to:
-        | "/"
-        | "/improve"
-        | "/sessions"
-        | "/skills"
-        | "/workflow";
-    readonly label: string;
-    readonly prefetch: () => Promise<unknown>;
-}
 
 export function Shell({ children }: { children: ReactNode }) {
     const state = useRouterState();
@@ -41,7 +30,35 @@ export function Shell({ children }: { children: ReactNode }) {
     const path = state.location.pathname;
     const isInstrument = path === "/" || path.startsWith("/mc") || path.startsWith("/wrapped") || path.startsWith("/lab/sigils");
     if (isInstrument) return <>{children}</>;
-    return <FullChrome>{children}</FullChrome>;
+    // Every other route now lives inside the instrument rail too (was FullChrome).
+    return <InstrumentChrome>{children}</InstrumentChrome>;
+}
+
+/** The instrument rail shell + the live/connection chrome the old masthead
+ *  carried (live indicator, ingest splash, mock-mode connect banner). Renders
+ *  the legacy studio routes inside the unified dark HUD; their content is
+ *  dark-bridged via the .rdx studio-token mapping until each is restyled to
+ *  instrument cards. */
+function InstrumentChrome({ children }: { children: ReactNode }) {
+    const live = useIngestEvents();
+    return (
+        <InstrumentShell>
+            {STUDIO_MOCK ? <StudioBanner /> : null}
+            <div className="rdx-topbar">
+                <span
+                    className={`live-indicator ${live.connected ? "on" : "off"}`}
+                    title={live.lastEventAt
+                        ? `last ingest ${fmtLastUsed(live.lastEventAt)}`
+                        : live.connected ? "connected, no events yet" : "disconnected"}
+                >
+                    <span className="live-dot" />
+                    {live.connected ? "live" : "offline"}
+                </span>
+                <IngestSplash />
+            </div>
+            {children}
+        </InstrumentShell>
+    );
 }
 
 /** Slim chrome for a standalone shared-session gist view. */
@@ -77,114 +94,6 @@ function ShareChrome({ children }: { children: ReactNode }) {
                 >
                     ax.necmttn.com →
                 </a>
-            </footer>
-        </div>
-    );
-}
-
-function FullChrome({ children }: { children: ReactNode }) {
-    const state = useRouterState();
-    const path = state.location.pathname;
-    const queryClient = useQueryClient();
-    const live = useIngestEvents();
-
-    const TABS: ReadonlyArray<Tab> = [
-        {
-            to: "/",
-            label: "Wrapped",
-            prefetch: () =>
-                Promise.all([
-                    queryClient.prefetchQuery({
-                        queryKey: ["wrapped"],
-                        queryFn: () => api.wrapped(),
-                    }),
-                    queryClient.prefetchQuery({
-                        queryKey: ["wrapped", "public-preview"],
-                        queryFn: () => api.wrappedPublicPreview(),
-                    }),
-                ]),
-        },
-        {
-            to: "/improve",
-            label: "Improve",
-            prefetch: () =>
-                queryClient.prefetchQuery({
-                    queryKey: ["improve"],
-                    queryFn: () => api.improve(),
-                }),
-        },
-        {
-            to: "/sessions",
-            label: "Sessions",
-            prefetch: () =>
-                queryClient.prefetchQuery({
-                    queryKey: ["sessions", "all"],
-                    queryFn: () => api.sessions({ limit: 200 }),
-                }),
-        },
-        {
-            to: "/skills",
-            label: "Skills",
-            prefetch: () =>
-                queryClient.prefetchQuery({
-                    queryKey: ["skills"],
-                    queryFn: () => api.skills(),
-                }),
-        },
-        {
-            to: "/workflow",
-            label: "Workflow",
-            prefetch: () =>
-                queryClient.prefetchQuery({
-                    queryKey: ["workflow"],
-                    queryFn: () => api.workflow(),
-                }),
-        },
-    ];
-
-    return (
-        <div className="shell">
-            {STUDIO_MOCK ? <StudioBanner /> : null}
-            <header className="masthead">
-                <div className="brand">
-                    <h1>ax</h1>
-                    <span className="brand-tag">agent experience</span>
-                </div>
-                <span
-                    className={`live-indicator ${live.connected ? "on" : "off"}`}
-                    title={
-                        live.lastEventAt
-                            ? `last ingest ${fmtLastUsed(live.lastEventAt)}`
-                            : live.connected
-                            ? "connected, no events yet"
-                            : "disconnected"
-                    }
-                >
-                    <span className="live-dot" />
-                    {live.connected ? "live" : "offline"}
-                </span>
-                <IngestSplash />
-                <nav className="tabs">
-                    {TABS.map((tab) => {
-                        const active =
-                            path === tab.to || (tab.to === "/" && path === "/wrapped");
-                        return (
-                            <Link
-                                key={tab.to}
-                                to={tab.to}
-                                className={active ? "active" : undefined}
-                                onMouseEnter={() => void tab.prefetch()}
-                                onFocus={() => void tab.prefetch()}
-                            >
-                                {tab.label}
-                            </Link>
-                        );
-                    })}
-                </nav>
-            </header>
-            {children}
-            <footer className="shell-footer">
-                <Link to="/lab">Lab</Link>
             </footer>
         </div>
     );
