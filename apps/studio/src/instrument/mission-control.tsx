@@ -6,21 +6,12 @@
  */
 import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Link } from "@tanstack/react-router";
 import { api } from "../api.ts";
 import type { WrappedProfile, WrappedUsageDay } from "@ax/lib/shared/dashboard-types";
 import { fmtCount } from "@ax/lib/shared/formatters";
 import { CellGrid, GlyphReel, Led, Segbar } from "./viz.tsx";
-import "./instrument.css";
+import { InstrumentShell } from "./shell.tsx";
 
-const RAIL = [
-    { g: "◢", to: "/", label: "mission control", exact: true },
-    { g: "≣", to: "/sessions", label: "sessions" },
-    { g: "◷", to: "/workflow", label: "workflow" },
-    { g: "⎈", to: "/improve", label: "improve" },
-    { g: "✦", to: "/skills", label: "skills" },
-    { g: "⚙", to: "/lab", label: "lab" },
-] as const;
 const p2 = (n: number) => String(n).padStart(2, "0");
 /** Compact big numbers (25.3B) - full comma form overflows the metric cards. */
 const fmtBig = (n: number | null | undefined): string => {
@@ -174,24 +165,10 @@ export function MissionControl() {
     const data = q.data ?? null;
     const ready = Boolean(data?.usage && data?.primaryArchetype);
     return (
-        <div className="rdx" data-theme="dark">
-            <div className="v-mc">
-                <nav className="v-mc-rail">
-                    <div className="logo">ax</div>
-                    {RAIL.map((r) => (
-                        <Link key={r.to} to={r.to} title={r.label} aria-label={r.label}
-                            activeOptions={{ exact: (r as { exact?: boolean }).exact ?? false }}
-                            activeProps={{ className: "on" }}>
-                            {r.g}
-                        </Link>
-                    ))}
-                </nav>
-                <main className="v-mc-main">
-                    {q.isLoading && !data ? <div className="rdx-label" style={{ padding: 24 }}>loading…</div> : null}
-                    {ready && data ? (<><ClockHero profile={data} /><Bento profile={data} /></>) : null}
-                    {data && !ready ? <div className="rdx-label" style={{ padding: 24 }}>profile not ready - ingest more sessions.</div> : null}
-                </main>
-            </div>
-        </div>
+        <InstrumentShell>
+            {q.isLoading && !data ? <div className="rdx-label" style={{ padding: 24 }}>loading…</div> : null}
+            {ready && data ? (<><ClockHero profile={data} /><Bento profile={data} /></>) : null}
+            {data && !ready ? <div className="rdx-label" style={{ padding: 24 }}>profile not ready - ingest more sessions.</div> : null}
+        </InstrumentShell>
     );
 }

@@ -478,3 +478,23 @@
 .v-mc-clock-foot .day { font-family: var(--serif); font-size: 26px; letter-spacing: -0.01em; color: var(--display); margin-bottom: 4px; }
 .v-mc-clock-foot .push { text-align: right; display: flex; flex-direction: column; gap: 4px; }
 .v-mc-clock-foot .push .sq { display: inline-block; width: 9px; height: 12px; background: var(--alert); margin-left: 7px; vertical-align: -1px; }
+
+/* ---- Wrapped recap (instrument-styled deck + facts) ---- */
+.wr-page { padding: 6px 2px 40px; }
+.wr-mast { display: flex; justify-content: space-between; align-items: flex-end; gap: 16px; padding-bottom: 16px; margin-bottom: 20px; border-bottom: 1px solid var(--border); }
+.wr-mast-title { font-family: var(--serif); font-size: 30px; letter-spacing: -0.01em; color: var(--display); margin-bottom: 4px; }
+.wr-kicker { margin-bottom: 12px; }
+.wr-deck { display: grid; grid-template-columns: repeat(auto-fill, minmax(270px, 1fr)); gap: 12px; }
+.wr-card { min-height: 200px; gap: 0; }
+.wr-strip { display: flex; align-items: flex-end; gap: 3px; height: 46px; margin-bottom: 14px; }
+.wr-strip i { flex: 1; background: color-mix(in srgb, var(--card-accent) 72%, var(--surface)); border-radius: 1px 1px 0 0; min-height: 3px; }
+.wr-q { font-family: var(--mono); font-size: 12px; letter-spacing: 0.01em; color: var(--card-accent); }
+.wr-head { font-family: var(--serif); font-weight: 600; font-size: clamp(22px, 2.2vw, 28px); line-height: 1.08; letter-spacing: -0.01em; color: var(--display); margin: 6px 0 0; overflow-wrap: anywhere; }
+.wr-body { font-size: 13px; line-height: 1.5; color: var(--sec); margin: 7px 0 0; }
+.wr-empty { padding: 24px; gap: 8px; }
+.wr-facts { display: grid; grid-template-columns: repeat(auto-fill, minmax(290px, 1fr)); gap: 10px; }
+.wr-fact { border: 1px solid var(--border); border-radius: 12px; background: var(--surface); padding: 14px 16px; }
+.wr-fact-head { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; margin-bottom: 6px; }
+.wr-fact h4 { font-family: var(--serif); font-weight: 500; font-size: 16px; color: var(--display); margin: 0; }
+.wr-fact-tag { font-family: var(--mono); font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--dim); border: 1px solid var(--border-hi); border-radius: 4px; padding: 2px 6px; flex: none; }
+.wr-fact p { font-size: 13px; line-height: 1.5; color: var(--sec); margin: 0; }
