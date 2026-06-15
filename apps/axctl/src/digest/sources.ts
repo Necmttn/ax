@@ -41,16 +41,15 @@ export const costToItem = (
 };
 
 export const churnToItem = (
-    input: { sessionId: string; repairLoc: number; failedChecks: number; topFile: string | null },
+    input: { sessionId: string; repairLoc: number; failedChecks: number; topLabel: string | null },
     now: Date,
 ): DigestItem | null => {
     if (input.repairLoc <= 0) return null;
-    const where = input.topFile ? ` in ${input.topFile}` : "";
     return DigestItem.make({
         id: `churn:${input.sessionId}`,
         kind: "churn",
         salience: salience({ kind: "churn", urgency: input.repairLoc + input.failedChecks * 5, ageHours: 0 }),
-        text: `repair-loop${where} (${input.repairLoc} LOC churned, ${input.failedChecks} failed check${input.failedChecks === 1 ? "" : "s"})`,
+        text: `repair-loop (${input.repairLoc} LOC churned, ${input.failedChecks} failed check${input.failedChecks === 1 ? "" : "s"}${input.topLabel ? `: ${input.topLabel}` : ""})`,
         action: "ax sessions churn --here",
         evidence: input.sessionId,
         computed_at: now,
@@ -113,14 +112,14 @@ export const churnItems = (
             return row.repairLinesAdded > best.repairLinesAdded ? row : best;
         }, null);
         if (!worst) return [];
-        // SessionChurnRow has `topCheck` (the most-failing check), not topFile.
-        // We use topCheck as the "where" label since per-file data is not exposed.
+        // SessionChurnRow exposes `topCheck` (the most-failing check name, e.g.
+        // "bun test"), not a file path - so it maps to the topLabel field.
         const item = churnToItem(
             {
                 sessionId: worst.session,
                 repairLoc: worst.repairLinesAdded,
                 failedChecks: worst.verificationFailures,
-                topFile: worst.topCheck,
+                topLabel: worst.topCheck,
             },
             now,
         );

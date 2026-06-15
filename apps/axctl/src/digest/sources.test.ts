@@ -26,13 +26,13 @@ describe("source mappers", () => {
   });
 
   it("churnToItem maps repair-loop session to a churn item", () => {
-    const item = churnToItem({ sessionId: "s1", repairLoc: 14, failedChecks: 1, topFile: "auth.ts" }, now);
+    const item = churnToItem({ sessionId: "s1", repairLoc: 14, failedChecks: 1, topLabel: "auth.ts" }, now);
     expect(item?.kind).toBe("churn");
     expect(item?.action).toBe("ax sessions churn --here");
     expect(item?.text).toContain("auth.ts");
   });
   it("churnToItem returns null when no repair LOC", () => {
-    expect(churnToItem({ sessionId: "s1", repairLoc: 0, failedChecks: 0, topFile: null }, now)).toBeNull();
+    expect(churnToItem({ sessionId: "s1", repairLoc: 0, failedChecks: 0, topLabel: null }, now)).toBeNull();
   });
 
   it("quotaToItem surfaces only above 70% window burn", () => {
