@@ -159,3 +159,57 @@ export const fetchContextBudget = Effect.fn("queries.fetchContextBudget")(
         return { skills, sources, totals } satisfies ContextBudgetResult;
     },
 );
+
+// ---------------------------------------------------------------------------
+// drift: the append-only skill_revision change log
+// ---------------------------------------------------------------------------
+
+export interface SkillDriftRow {
+    readonly name: string;
+    readonly scope: string;
+    readonly change: string;        // 'added' | 'changed'
+    readonly ts: string;            // ISO
+    readonly bytes: number;
+    readonly prev_bytes: number;
+    readonly byte_delta: number;    // bytes - prev_bytes (0 for 'added')
+    readonly token_delta: number;   // byte_delta / 4
+}
+
+export interface SkillDriftResult {
+    readonly changes: ReadonlyArray<SkillDriftRow>;
+    readonly total: number;
+}
+
+const DRIFT_SQL = (limit: number) => `
+SELECT name, scope, change, content_hash, prev_hash, bytes, prev_bytes, ts
+FROM skill_revision
+ORDER BY ts DESC
+LIMIT ${Math.max(1, Math.trunc(limit))};
+`;
+
+export const fetchSkillDrift = Effect.fn("queries.fetchSkillDrift")(
+    function* (opts: { readonly limit: number }) {
+        const db = yield* SurrealClient;
+        const rows = yield* db.query<[Array<Record<string, unknown>>]>(DRIFT_SQL(opts.limit))
+            .pipe(Effect.map((r) => r?.[0] ?? []));
+
+        const changes: SkillDriftRow[] = rows.map((row) => {
+            const bytes = Number(row.bytes ?? 0);
+            const prev_bytes = Number(row.prev_bytes ?? 0);
+            const byte_delta = row.change === "added" ? 0 : bytes - prev_bytes;
+            const ts = row.ts instanceof Date ? row.ts.toISOString() : String(row.ts ?? "");
+            return {
+                name: String(row.name ?? "(unnamed)"),
+                scope: String(row.scope ?? ""),
+                change: String(row.change ?? "changed"),
+                ts,
+                bytes,
+                prev_bytes,
+                byte_delta,
+                token_delta: Math.round(byte_delta / CHARS_PER_TOKEN),
+            };
+        });
+
+        return { changes, total: changes.length } satisfies SkillDriftResult;
+    },
+);

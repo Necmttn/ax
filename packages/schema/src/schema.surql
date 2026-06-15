@@ -36,6 +36,24 @@ DEFINE INDEX IF NOT EXISTS skill_search_desc
     ON skill FIELDS description
     FULLTEXT ANALYZER skill_text BM25 HIGHLIGHTS;
 
+-- Append-only change log for skills: one row per *content change* (content_hash
+-- flip) detected at ingest. The baseline is the current `skill` row; this table
+-- captures drift over time so an edit to a skill (by the user OR an agent that
+-- proactively rewrites it) leaves a tracked point to diff against. Written by
+-- apps/axctl/src/ingest/skill-upsert.ts only when the hash differs.
+DEFINE TABLE skill_revision SCHEMAFULL;
+DEFINE FIELD skill          ON skill_revision TYPE record<skill>;
+DEFINE FIELD name           ON skill_revision TYPE string;
+DEFINE FIELD scope          ON skill_revision TYPE option<string>;
+DEFINE FIELD content_hash   ON skill_revision TYPE string;
+DEFINE FIELD prev_hash      ON skill_revision TYPE option<string>;   -- null on 'added'
+DEFINE FIELD bytes          ON skill_revision TYPE option<int>;
+DEFINE FIELD prev_bytes     ON skill_revision TYPE option<int>;
+DEFINE FIELD change         ON skill_revision TYPE string;           -- 'added' | 'changed'
+DEFINE FIELD ts             ON skill_revision TYPE datetime VALUE time::now();
+DEFINE INDEX IF NOT EXISTS skill_revision_ts ON skill_revision FIELDS ts;
+DEFINE INDEX IF NOT EXISTS skill_revision_skill ON skill_revision FIELDS skill;
+
 -- Agent definition files (`~/.claude/agents/*.md`, `<repo>/.claude/agents/*.md`).
 -- Full graph entity with the same reconcile lifecycle as `skill` (see
 -- apps/axctl/src/ingest/agent-def.ts + apps/axctl/src/agents/). The `skills`

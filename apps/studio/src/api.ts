@@ -220,6 +220,20 @@ export interface ContextBudgetResult {
         readonly cc_body_tokens: number;
     };
 }
+export interface ContextDriftRow {
+    readonly name: string;
+    readonly scope: string;
+    readonly change: string;
+    readonly ts: string;
+    readonly bytes: number;
+    readonly prev_bytes: number;
+    readonly byte_delta: number;
+    readonly token_delta: number;
+}
+export interface ContextDriftResult {
+    readonly changes: ReadonlyArray<ContextDriftRow>;
+    readonly total: number;
+}
 
 // The version handshake type now comes from the Insights Surface Contract -
 // the same Schema the daemon serves - so the two cannot drift.
@@ -481,6 +495,8 @@ export const api = {
         viaContract("/api/cost/models", (c) => c.insights.costModels()) as Promise<CostModelsResult>,
     contextBudget: (): Promise<ContextBudgetResult> =>
         viaContract("/api/context/budget", (c) => c.insights.contextBudget()) as Promise<ContextBudgetResult>,
+    contextDrift: (): Promise<ContextDriftResult> =>
+        viaContract("/api/context/drift", (c) => c.insights.contextDrift()) as Promise<ContextDriftResult>,
 
     nextActions: (): Promise<NextActionsPayload> =>
         viaContract("/api/next-actions", (c) => c.improve.nextActions()),

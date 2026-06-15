@@ -10,7 +10,7 @@ import { Effect } from "effect";
 import { HttpApiBuilder } from "effect/unstable/httpapi";
 import { AxApi, NotFoundError } from "@ax/lib/shared/api-contract";
 import { fetchCostModels } from "../../queries/cost-analytics.ts";
-import { fetchContextBudget } from "../../queries/context-budget.ts";
+import { fetchContextBudget, fetchSkillDrift } from "../../queries/context-budget.ts";
 import { fetchEpisodeTimeline } from "../episode-timeline.ts";
 import { fetchProject } from "../project.ts";
 import { emptyRecallResponse, fetchRecall, type RecallParams } from "../recall.ts";
@@ -83,6 +83,8 @@ export const InsightsGroupLive = HttpApiBuilder.group(AxApi, "insights", (handle
             orInternal(fetchCostModels({ sinceDays: 365 }).pipe(Effect.map(asJsonValue))))
         .handle("contextBudget", () =>
             orInternal(fetchContextBudget().pipe(Effect.map(asJsonValue))))
+        .handle("contextDrift", () =>
+            orInternal(fetchSkillDrift({ limit: 100 }).pipe(Effect.map(asJsonValue))))
         .handle("workflow", () => orInternal(fetchWorkflow()))
         .handle("toolFailures", () => orInternal(fetchToolFailures()))
         .handle("toolFailureDetail", ({ params }) => orInternal(fetchToolFailureDetail(params.label))));
