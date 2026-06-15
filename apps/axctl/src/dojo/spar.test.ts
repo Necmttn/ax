@@ -13,6 +13,7 @@ import {
     renderSparReport,
     REPAIR_TOL,
     scoreSpar,
+    stampSparSession,
 } from "./spar.ts";
 import type { SparBrief, SparMetrics } from "./spar.ts";
 
@@ -266,5 +267,59 @@ describe("findVariantSession", () => {
             tc.layer,
         );
         expect(id).toBeNull();
+    });
+});
+
+// ---------------------------------------------------------------------------
+// stampSparSession
+// ---------------------------------------------------------------------------
+
+describe("stampSparSession", () => {
+    test("issues UPDATE with labels = [\"spar\"] when session has no existing labels", async () => {
+        const tc = makeTestSurrealClient({
+            denyWrites: false,
+            routes: {
+                // SELECT labels read: no existing labels (NONE row)
+                "SELECT labels FROM": [[{ labels: null }]],
+                // UPDATE: captured in tc.captured
+                "UPDATE ": [[]],
+            },
+        });
+        await runDbOnly(stampSparSession("session:abc"), tc.layer);
+        // The UPDATE should set labels to the JSON-encoded ["spar"]
+        const updateSql = tc.captured.find((s) => s.startsWith("UPDATE "));
+        expect(updateSql).toBeDefined();
+        // The SQL wraps the JSON-encoded string in a SurrealQL string literal;
+        // the escaped form is: \"[\\\"spar\\\"]\". Check the label key is present.
+        expect(updateSql).toContain("spar");
+    });
+
+    test("merges into existing labels without clobbering them", async () => {
+        const tc = makeTestSurrealClient({
+            denyWrites: false,
+            routes: {
+                "SELECT labels FROM": [[{ labels: JSON.stringify(["existing"]) }]],
+                "UPDATE ": [[]],
+            },
+        });
+        await runDbOnly(stampSparSession("session:abc"), tc.layer);
+        const updateSql = tc.captured.find((s) => s.startsWith("UPDATE "));
+        expect(updateSql).toBeDefined();
+        // Must include both labels
+        expect(updateSql).toContain("existing");
+        expect(updateSql).toContain("spar");
+    });
+
+    test("is idempotent: does not issue an UPDATE when already tagged", async () => {
+        const tc = makeTestSurrealClient({
+            denyWrites: false,
+            routes: {
+                "SELECT labels FROM": [[{ labels: JSON.stringify(["spar"]) }]],
+            },
+        });
+        await runDbOnly(stampSparSession("session:abc"), tc.layer);
+        // Only the SELECT query should be captured; no UPDATE
+        const updateSql = tc.captured.find((s) => s.startsWith("UPDATE "));
+        expect(updateSql).toBeUndefined();
     });
 });
