@@ -232,7 +232,8 @@ warn / inject; defects fail OPEN. `GitEnv` service makes guards layer-testable.
   installed-chain budget vs --budget-ms default 250. Pairs with `ax hooks backtest`
   (benefit) for dojo hook proposals.
 - `ax hooks latency [--days=7] [--baseline=21] [--json]` - regression lens over
-  hook_command_invocation.duration_ms: compare recent vs baseline p95 per hook,
+  hook_command_invocation.duration_ms: compare recent vs baseline p95 per hook
+  event (hook_name is event-granular, e.g. PreToolUse:Bash, UserPromptSubmit),
   flag regressions (factor 1.5, ≥15ms delta, ≥20 samples). Empty-state when
   duration_ms is absent (provider-reported; run bench for synthetic measure).
 - `ax hooks cases` - deterministic feedback-case backtests (enforce-worktree

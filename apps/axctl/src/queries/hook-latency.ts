@@ -156,6 +156,18 @@ export const renderHookLatency = (report: HookLatencyReport): string => {
     const lines: string[] = [header];
     for (const row of rows) {
         const warn = row.regressed ? "⚠" : "";
+        // Δp95 and ratio compare the two windows - meaningless when EITHER
+        // window has no samples (e.g. a hook that only fired recently shows a
+        // huge "+delta" purely because baseline is empty). Blank them so the
+        // table can't be misread as a regression/improvement. The populated
+        // window's p50/p95 columns still render; the raw JSON keeps the numbers.
+        const oneWindowEmpty = row.recent.samples === 0 || row.baseline.samples === 0;
+        const deltaCell = oneWindowEmpty
+            ? "-"
+            : `${row.p95_delta_ms >= 0 ? "+" : ""}${row.p95_delta_ms}ms`;
+        const ratioCell = oneWindowEmpty || row.p95_ratio === 0
+            ? "n/a"
+            : `${row.p95_ratio.toFixed(2)}x`;
         lines.push([
             pad(row.hook_name, 32),
             rpad(`${row.recent.p50}ms`, 8),
@@ -164,8 +176,8 @@ export const renderHookLatency = (report: HookLatencyReport): string => {
             rpad(`${row.baseline.p50}ms`, 9),
             rpad(`${row.baseline.p95}ms`, 9),
             rpad(String(row.baseline.samples), 7),
-            rpad(`${row.p95_delta_ms >= 0 ? "+" : ""}${row.p95_delta_ms}ms`, 8),
-            rpad(row.p95_ratio === 0 ? "n/a" : `${row.p95_ratio.toFixed(2)}x`, 7),
+            rpad(deltaCell, 8),
+            rpad(ratioCell, 7),
             warn,
         ].join(" "));
     }

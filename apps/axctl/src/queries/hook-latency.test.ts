@@ -238,6 +238,57 @@ describe("renderHookLatency", () => {
         // trim trailing spaces; the warn column for non-regressed is empty string
         expect(hookLine?.trimEnd()).not.toMatch(/⚠\s*$/);
     });
+
+    it("blanks Δp95 and ratio (-/n/a) when a window has 0 samples", () => {
+        // baseline.samples === 0: the numeric delta/ratio would be meaningless
+        // (the hook only fired recently). The comparison columns must blank out.
+        const recentOnly: HookLatencyRow = {
+            hook_name: "recent-only-hook",
+            recent: { p50: 91, p95: 221, samples: 50 },
+            baseline: { p50: 0, p95: 0, samples: 0 },
+            p95_delta_ms: 221, // raw number kept in the model
+            p95_ratio: 0,
+            regressed: false,
+        };
+        const report: HookLatencyReport = {
+            recent_days: 7,
+            baseline_days: 21,
+            rows: [recentOnly],
+            total_fires_with_latency: 50,
+        };
+        const output = renderHookLatency(report);
+        const hookLine = output.split("\n").find((l) => l.includes("recent-only-hook"))!;
+        // Δp95 column shows em dash, NOT a signed "+221ms"
+        expect(hookLine).toContain("-");
+        expect(hookLine).not.toContain("+221ms");
+        // ratio column shows n/a
+        expect(hookLine).toContain("n/a");
+        // the populated window's p50/p95 still render
+        expect(hookLine).toContain("221ms");
+    });
+
+    it("blanks the comparison columns when recent has 0 samples (inverse case)", () => {
+        // recent.samples === 0: a hook that stopped firing - the large negative
+        // delta is not an "improvement", just missing recent data.
+        const baselineOnly: HookLatencyRow = {
+            hook_name: "stopped-hook",
+            recent: { p50: 0, p95: 0, samples: 0 },
+            baseline: { p50: 557, p95: 2808, samples: 444 },
+            p95_delta_ms: -2808,
+            p95_ratio: 0,
+            regressed: false,
+        };
+        const report: HookLatencyReport = {
+            recent_days: 7,
+            baseline_days: 21,
+            rows: [baselineOnly],
+            total_fires_with_latency: 444,
+        };
+        const output = renderHookLatency(report);
+        const hookLine = output.split("\n").find((l) => l.includes("stopped-hook"))!;
+        expect(hookLine).toContain("-");
+        expect(hookLine).not.toContain("-2808ms");
+    });
 });
 
 // ---------------------------------------------------------------------------
