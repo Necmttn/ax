@@ -22,6 +22,15 @@ const RAIL = [
     { g: "⚙", to: "/lab", label: "lab" },
 ] as const;
 const p2 = (n: number) => String(n).padStart(2, "0");
+/** Compact big numbers (25.3B) - full comma form overflows the metric cards. */
+const fmtBig = (n: number | null | undefined): string => {
+    if (n == null) return "n/a";
+    const a = Math.abs(n);
+    if (a >= 1e9) return (n / 1e9).toFixed(1).replace(/\.0$/, "") + "B";
+    if (a >= 1e6) return (n / 1e6).toFixed(1).replace(/\.0$/, "") + "M";
+    if (a >= 1e4) return (n / 1e3).toFixed(1).replace(/\.0$/, "") + "K";
+    return n.toLocaleString("en-US");
+};
 const seedFrom = (s: string) => { let h = 2166136261; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); } return h >>> 0; };
 const hourLabel = (h: number | null) => (h == null ? "n/a" : `${h % 12 === 0 ? 12 : h % 12} ${h < 12 ? "AM" : "PM"}`);
 
@@ -103,7 +112,7 @@ function Bento({ profile: p }: { profile: WrappedProfile }) {
 
             <section className="rdx-card" style={{ animationDelay: "0.12s" }}>
                 <div className="rdx-label">tokens</div>
-                <div className="rdx-metric v-mc-bottom">{u.totalTokens == null ? "n/a" : fmtCount(u.totalTokens)}</div>
+                <div className="rdx-metric v-mc-bottom">{fmtBig(u.totalTokens)}</div>
                 <div className="rdx-label">{u.tokenComparison ?? "all-time"}</div>
             </section>
 
