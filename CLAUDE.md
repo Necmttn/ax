@@ -148,6 +148,19 @@ docs/superpowers/specs/2026-06-15-otel-receiver-design.md.
 `ax cost sessions [--days=N] [--model=<name>] [--limit=N]` - top sessions by cost with id, project, model, started_at (default 14d/20 rows).
 `ax cost split [--days=N]` - origin (main vs subagent) × model matrix with cost and share-of-total; totals row. MCP: `cost_models`, `cost_split`.
 
+### Telemetry-enriched insights
+
+Existing behavior insights traverse the `telemetry_of` edge to attach
+OTLP-sourced cost/latency (shared helper `apps/axctl/src/queries/telemetry-rollup.ts`,
+batched + deref-free): `ax sessions churn` rows gain `otlp_cost_usd`/`otlp_tokens`
+(cost per episode); `fragility_cascade` edges gain `downstream_cost_usd`; the
+`ax insights friction` view gains per-row OTLP cost; `ax skills weighted` gains
+`median_recovery_ms` (recovery latency from `otel_log_event.duration_ms`).
+OTLP-sourced, kept SEPARATE from transcript `session_token_usage` cost (no
+double-count); columns/fields are null when a session has no telemetry. Lights
+up as OTLP data accumulates. Spec:
+docs/superpowers/specs/2026-06-15-telemetry-insight-enrichment-design.md.
+
 ### Plan quota
 
 `ax quota [--json|--statusline|--swiftbar] [--max-age=N] [--fresh]` - live Claude
