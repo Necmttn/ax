@@ -17,6 +17,7 @@
 import { Effect } from "effect";
 import { SurrealClient } from "@ax/lib/db";
 import { normalizeModelName } from "../ingest/model-pricing.ts";
+import { fetchSparSessionIds } from "./spar-sessions.ts";
 
 // ---------------------------------------------------------------------------
 // Result shapes
@@ -153,8 +154,17 @@ export interface SessionThinkingRow {
     readonly thinking_turns: number;
 }
 
+// Strip the `session:` prefix + record-id delimiters. Handles both the
+// backtick form (`type::string(session)` / `type::string(id)` casts ->
+// session:`uuid`) AND the angle-bracket form (a raw RecordId's String() ->
+// session:⟨uuid⟩, as returned by fetchSparSessionIds' SELECT VALUE id). The
+// spar-session ids and the turn-scan session_id columns must normalize to the
+// same bare uuid or the spar exclusion below silently misses.
 const cleanSessionId = (id: string): string =>
-    id.replace(/^session:/, "").replace(/^`(.*)`$/, "$1");
+    id
+        .replace(/^session:/, "")
+        .replace(/^[`⟨]+/, "")
+        .replace(/[`⟩]+$/, "");
 
 export const rollupThinkingByModel = (
     sessionRows: ReadonlyArray<SessionThinkingRow>,
@@ -220,6 +230,14 @@ export const fetchThinking = Effect.fn("queries.fetchThinking")(
     function* (opts: { readonly sinceDays: number }) {
         const db = yield* SurrealClient;
 
+        // Fetch spar variant session ids before the main query so we can
+        // exclude them from behavioral totals at the JS join. fetchSparSessionIds
+        // returns RecordId[] (record-vs-record exclusion for the weighted path);
+        // here we normalize each via String() -> cleanSessionId to the bare uuid
+        // so the Set keys match the `type::string(session)` rows below.
+        const sparSessionIds = yield* fetchSparSessionIds();
+        const sparSet = new Set(sparSessionIds.map((id) => cleanSessionId(String(id))));
+
         const [thinkingResult, sessionsResult, effortResult, reasoningResult, agentModelsResult] = yield* db.query<[
             Array<Record<string, unknown>>,
             Array<Record<string, unknown>>,
@@ -244,18 +262,26 @@ export const fetchThinking = Effect.fn("queries.fetchThinking")(
             );
         }
 
-        const sessionRows: SessionThinkingRow[] = (thinkingResult ?? []).map((r) => ({
-            session_id: String(r.session_id ?? ""),
-            blocks: Number(r.blocks ?? 0),
-            tokens: Number(r.tokens ?? 0),
-            assistant_turns: Number(r.assistant_turns ?? 0),
-            thinking_turns: Number(r.thinking_turns ?? 0),
-        }));
+        // Drop spar sessions at the JS join: filter sessionRows before passing
+        // to rollupThinkingByModel so spar traffic doesn't inflate thinking totals.
+        const sessionRows: SessionThinkingRow[] = (thinkingResult ?? [])
+            .map((r) => ({
+                session_id: String(r.session_id ?? ""),
+                blocks: Number(r.blocks ?? 0),
+                tokens: Number(r.tokens ?? 0),
+                assistant_turns: Number(r.assistant_turns ?? 0),
+                thinking_turns: Number(r.thinking_turns ?? 0),
+            }))
+            .filter((r) => !sparSet.has(cleanSessionId(r.session_id)));
 
         const modelBySession = new Map<string, string | null>();
         for (const r of sessionsResult ?? []) {
+            const cleanId = cleanSessionId(String(r.session_id ?? ""));
+            // Also exclude spar sessions from the model map so they don't
+            // appear in the effort/session counts.
+            if (sparSet.has(cleanId)) continue;
             modelBySession.set(
-                cleanSessionId(String(r.session_id ?? "")),
+                cleanId,
                 r.model == null ? null : String(r.model),
             );
         }

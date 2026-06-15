@@ -64,6 +64,7 @@ DEFINE FIELD source         ON session TYPE string DEFAULT 'claude';  -- 'claude
 DEFINE FIELD started_at     ON session TYPE option<datetime>;
 DEFINE FIELD ended_at       ON session TYPE option<datetime>;
 DEFINE FIELD raw_file       ON session TYPE option<string>;  -- f"transcripts:/<id>.jsonl" pointer; full original jsonl
+DEFINE FIELD labels         ON session TYPE option<string>;  -- JSON-encoded string[] (e.g. ["spar"]); spar-score stamps variant sessions
 DEFINE FIELD repository     ON session TYPE option<record<repository>>;
 DEFINE FIELD checkout       ON session TYPE option<record<checkout>>;
 DEFINE FIELD workspace      ON session TYPE option<record<workspace>>;

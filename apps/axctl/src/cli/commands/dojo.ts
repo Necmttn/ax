@@ -41,6 +41,7 @@ import {
     renderSparBrief,
     renderSparReport,
     scoreSpar,
+    stampSparSession,
 } from "../../dojo/spar.ts";
 import { resolvePwdRepository } from "../../pwd.ts";
 import { defaultQuotaCachePath } from "../../quota/cache.ts";
@@ -421,6 +422,12 @@ const sparScoreCommand = Command.make(
                 );
                 return yield* Effect.sync(() => process.exit(1));
             }
+
+            // Stamp the variant session's labels with "spar" so behavioral
+            // analytics (ax skills weighted, ax thinking) can exclude it.
+            // Idempotent and non-fatal: if the stamp fails, scoring still writes
+            // the receipt (the label is best-effort telemetry).
+            yield* stampSparSession(variantId).pipe(Effect.catch(() => Effect.void));
 
             const variant = yield* fetchSessionMetrics(variantId, new Date(brief.createdAt));
             const score = { ...scoreSpar(brief.baseline, variant), id, variantSession: variantId };
