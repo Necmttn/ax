@@ -20,8 +20,8 @@ import { Effect, type ManagedRuntime, type Layer } from "effect";
 import type { AppLayer } from "@ax/lib/layers";
 import {
     fetchRecall,
+    normalizeRecallParams,
     resolveRecallSources,
-    type RecallParams,
     type RecallSource,
 } from "../dashboard/recall.ts";
 import {
@@ -112,7 +112,6 @@ const recallTool: AxMcpTool = {
             .describe('Which sources to search. Defaults to ["turn"]. Any of "turn", "commit", "skill".'),
     },
     run: async (args, rt) => {
-        const q = String(args.q ?? "").trim();
         const limit = typeof args.limit === "number" ? args.limit : undefined;
         const sources = Array.isArray(args.sources)
             ? (args.sources.filter((s): s is RecallSource =>
@@ -122,11 +121,15 @@ const recallTool: AxMcpTool = {
         // No scope param in v0: omit it so fetchRecall defaults to unscoped
         // (all repositories). Real repo-scoping needs the git resolver, which
         // is unfit for a long-lived server - revisit later.
-        const params: RecallParams = {
-            q,
+        //
+        // Route through the shared recall input contract. This now echoes the
+        // RAW q (previously `.trim()`ed here) to match the CLI/HTTP echo and the
+        // buildRecallNext follow-up links - a deliberate contract invariant.
+        const params = normalizeRecallParams({
+            q: typeof args.q === "string" ? args.q : "",
             ...(limit !== undefined ? { limit } : {}),
             ...(sources && sources.length > 0 ? { sources } : {}),
-        };
+        });
 
         const result = await rt.runPromise(fetchRecall(params));
         const { hits, next } = buildRecallNext(result, {

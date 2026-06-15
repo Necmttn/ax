@@ -19,6 +19,10 @@ import {
 import {
     resolveRecallSources,
     RECALL_DEFAULT_SOURCES,
+    normalizeRecallParams,
+    isEmptyRecallQuery,
+    RECALL_DEFAULT_OFFSET,
+    RECALL_DEFAULT_LIMIT,
 } from "../dashboard/recall.ts";
 import {
     normalizeSessionsAroundOpts,
@@ -118,6 +122,113 @@ describe("resolveRecallSources", () => {
             "commit",
             "skill",
         ]);
+    });
+});
+
+describe("isEmptyRecallQuery", () => {
+    test("empty / whitespace-only is empty; any non-blank char is not", () => {
+        expect(isEmptyRecallQuery("")).toBe(true);
+        expect(isEmptyRecallQuery("   ")).toBe(true);
+        expect(isEmptyRecallQuery("\t\n")).toBe(true);
+        expect(isEmptyRecallQuery("x")).toBe(false);
+        expect(isEmptyRecallQuery("  x  ")).toBe(false);
+    });
+});
+
+describe("normalizeRecallParams", () => {
+    test("echoes RAW q - no trim/lowercase (fetchRecall lowercases internally)", () => {
+        expect(normalizeRecallParams({ q: "  Foo BAR " }).q).toBe("  Foo BAR ");
+    });
+
+    test("missing/null q collapses to empty string", () => {
+        expect(normalizeRecallParams({}).q).toBe("");
+        expect(normalizeRecallParams({ q: null }).q).toBe("");
+    });
+
+    test("fills offset/limit PRESENCE defaults when absent", () => {
+        const out = normalizeRecallParams({ q: "auth" });
+        expect(out.offset).toBe(RECALL_DEFAULT_OFFSET);
+        expect(out.limit).toBe(RECALL_DEFAULT_LIMIT);
+        expect(RECALL_DEFAULT_OFFSET).toBe(0);
+        expect(RECALL_DEFAULT_LIMIT).toBe(50);
+    });
+
+    test("passes present offset/limit through and does NOT clamp (fetchRecall owns the clamp)", () => {
+        const out = normalizeRecallParams({ q: "auth", offset: 5, limit: 500 });
+        expect(out.offset).toBe(5);
+        expect(out.limit).toBe(500); // > maxLimit 200, intentionally unclamped here
+    });
+
+    test("passes sources through UNRESOLVED (no resolveRecallSources pre-application)", () => {
+        expect(normalizeRecallParams({ q: "a", sources: ["commit"] }).sources).toEqual([
+            "commit",
+        ]);
+        // absent sources stay absent so fetchRecall/buildRecallNext resolve once
+        expect("sources" in normalizeRecallParams({ q: "a" })).toBe(false);
+    });
+
+    test("passes project/skill/since/scope through, defaulting the first three to null", () => {
+        const bare = normalizeRecallParams({ q: "a" });
+        expect(bare.project).toBeNull();
+        expect(bare.skill).toBeNull();
+        expect(bare.since).toBeNull();
+        expect("scope" in bare).toBe(false);
+
+        const scoped = normalizeRecallParams({
+            q: "a",
+            project: "p",
+            skill: "s",
+            since: "2026-01-01",
+            scope: { kind: "all" },
+        });
+        expect(scoped.project).toBe("p");
+        expect(scoped.skill).toBe("s");
+        expect(scoped.since).toBe("2026-01-01");
+        expect(scoped.scope).toEqual({ kind: "all" });
+
+        // scope null (CLI --scope unset) is a meaningful value, preserved
+        expect(normalizeRecallParams({ q: "a", scope: null }).scope).toBeNull();
+    });
+});
+
+// Per-rule parity: each transport (CLI / HTTP-query / MCP-args) carries a
+// different SUBSET of recall args, but for the fields they share the normalized
+// result must agree. Documents the genuine surface differences (HTTP has no
+// sources/scope, MCP has no scope) as intentional, not drift.
+describe("normalizeRecallParams - cross-transport parity", () => {
+    const httpQuery = { q: "auth flow", project: "ax", skill: null, since: null };
+    const mcpArgs = { q: "auth flow", sources: ["turn"] as const };
+    const cliOpts = {
+        q: "auth flow",
+        project: "ax",
+        skill: null,
+        since: null,
+        sources: ["turn"] as const,
+        scope: null,
+    };
+
+    test("shared fields collapse identically: raw-q echo + presence defaults", () => {
+        const h = normalizeRecallParams(httpQuery);
+        const m = normalizeRecallParams(mcpArgs);
+        const c = normalizeRecallParams(cliOpts);
+        for (const p of [h, m, c]) {
+            expect(p.q).toBe("auth flow"); // raw echo, every transport
+            expect(p.offset).toBe(RECALL_DEFAULT_OFFSET);
+            expect(p.limit).toBe(RECALL_DEFAULT_LIMIT);
+        }
+    });
+
+    test("project agrees where carried (HTTP+CLI); MCP simply omits it", () => {
+        expect(normalizeRecallParams(httpQuery).project).toBe("ax");
+        expect(normalizeRecallParams(cliOpts).project).toBe("ax");
+        expect(normalizeRecallParams(mcpArgs).project).toBeNull();
+    });
+
+    test("documented surface differences: HTTP has no sources/scope, MCP no scope", () => {
+        expect("sources" in normalizeRecallParams(httpQuery)).toBe(false);
+        expect("scope" in normalizeRecallParams(httpQuery)).toBe(false);
+        expect("scope" in normalizeRecallParams(mcpArgs)).toBe(false);
+        expect(normalizeRecallParams(cliOpts).scope).toBeNull();
     });
 });
 

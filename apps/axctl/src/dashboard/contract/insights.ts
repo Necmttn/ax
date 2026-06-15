@@ -13,7 +13,12 @@ import { fetchCostModels } from "../../queries/cost-analytics.ts";
 import { fetchContextBudget, fetchSkillDrift } from "../../queries/context-budget.ts";
 import { fetchEpisodeTimeline } from "../episode-timeline.ts";
 import { fetchProject } from "../project.ts";
-import { emptyRecallResponse, fetchRecall, type RecallParams } from "../recall.ts";
+import {
+    emptyRecallResponse,
+    fetchRecall,
+    isEmptyRecallQuery,
+    normalizeRecallParams,
+} from "../recall.ts";
 import { fetchSkillGraph } from "../skill-graph.ts";
 import { fetchToolFailureDetail, fetchToolFailures } from "../tool-failures.ts";
 import { fetchWorkflow } from "../workflow.ts";
@@ -26,17 +31,14 @@ import { asJsonValue, orInternal } from "./common.ts";
 export const InsightsGroupLive = HttpApiBuilder.group(AxApi, "insights", (handlers) =>
     handlers
         .handle("recall", ({ query }) => {
-            const params: RecallParams = {
-                q: query.q ?? "",
-                project: query.project ?? null,
-                skill: query.skill ?? null,
-                since: query.since ?? null,
-                offset: query.offset ?? 0,
-                limit: query.limit ?? 50,
-            };
-            if (params.q.trim().length === 0) {
+            const params = normalizeRecallParams(query);
+            if (isEmptyRecallQuery(params.q)) {
                 return Effect.succeed(
-                    emptyRecallResponse(params.q, params.offset ?? 0, params.limit ?? 50),
+                    emptyRecallResponse(
+                        params.q,
+                        params.offset ?? 0,
+                        params.limit ?? 50,
+                    ),
                 );
             }
             return orInternal(fetchRecall(params));

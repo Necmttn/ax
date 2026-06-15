@@ -68,6 +68,58 @@ export const resolveRecallSources = (
 ): ReadonlyArray<RecallSource> =>
     requested && requested.length > 0 ? requested : RECALL_DEFAULT_SOURCES;
 
+/**
+ * Default offset/limit the recall transports fill when a caller omits them.
+ * `RECALL_DEFAULT_LIMIT` is derived from {@link RECALL_PAGINATION} so the
+ * presence-default and the clamp default cannot drift.
+ */
+export const RECALL_DEFAULT_OFFSET = 0;
+export const RECALL_DEFAULT_LIMIT = RECALL_PAGINATION.defaultLimit;
+
+/** Whether a recall query is effectively empty (the no-DB fast path predicate). */
+export const isEmptyRecallQuery = (q: string): boolean => q.trim().length === 0;
+
+/**
+ * The raw arguments a transport (CLI / HTTP / MCP) hands to recall, before the
+ * shared semantics are applied. Every field is optional/nullable because each
+ * transport carries a different subset (HTTP has no sources/scope, MCP no
+ * scope); the genuine surface differences are documented in the contract test.
+ */
+export interface RecallQueryArgs {
+    readonly q?: string | null;
+    readonly project?: string | null;
+    readonly skill?: string | null;
+    readonly since?: string | null;
+    readonly offset?: number | null;
+    readonly limit?: number | null;
+    readonly sources?: ReadonlyArray<RecallSource> | null;
+    readonly scope?: RecallScope;
+}
+
+/**
+ * The single home for recall argument semantics - the Query Input Contract seam
+ * every transport delegates to (CONTEXT.md "Query Input Contract"). Pure: it
+ * fills presence defaults only and leaves all downstream behaviour to
+ * `fetchRecall`. Specifically it:
+ *   - echoes RAW `q` (no trim/lowercase - `fetchRecall` lowercases internally
+ *     only for matching and echoes `params.q` verbatim);
+ *   - passes `sources` through UNRESOLVED (`fetchRecall` + `buildRecallNext`
+ *     both call `resolveRecallSources`; pre-resolving would double-apply);
+ *   - fills offset/limit PRESENCE defaults only - NO clamp (`fetchRecall` owns
+ *     `clampPagination` with `RECALL_PAGINATION`, max 200);
+ *   - passes project/skill/since/scope through (`fetchRecall` trims them).
+ */
+export const normalizeRecallParams = (args: RecallQueryArgs): RecallParams => ({
+    q: args.q ?? "",
+    project: args.project ?? null,
+    skill: args.skill ?? null,
+    since: args.since ?? null,
+    offset: args.offset ?? RECALL_DEFAULT_OFFSET,
+    limit: args.limit ?? RECALL_DEFAULT_LIMIT,
+    ...(args.sources != null ? { sources: args.sources } : {}),
+    ...(args.scope !== undefined ? { scope: args.scope } : {}),
+});
+
 export const emptyRecallResponse = (
     q: string,
     offset: number,
