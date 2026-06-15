@@ -347,7 +347,7 @@ a {
     font-size: 12px;
     font-weight: 600;
     text-decoration: none;
-    color: #fff;
+    color: var(--page);
     background: var(--ink);
     border: 1px solid var(--ink);
     border-radius: 6px;
@@ -477,7 +477,7 @@ table.skills th {
 
 table.skills td {
     padding: 10px 8px;
-    border-bottom: 1px solid rgba(207, 216, 212, 0.74);
+    border-bottom: 1px solid color-mix(in srgb, var(--line) 74%, transparent);
     vertical-align: top;
 }
 
@@ -696,7 +696,7 @@ tr.skill-row {
 }
 
 tr.skill-row:hover td {
-    background: rgba(0, 0, 0, 0.025);
+    background: color-mix(in srgb, var(--ink) 5%, transparent);
 }
 
 tr.skill-row:hover .reason-button small {
@@ -711,7 +711,7 @@ tr.skill-row .actions button {
 
 tr.row-highlighted td {
     box-shadow: inset 6px 0 0 var(--blue);
-    background: rgba(37, 103, 168, 0.07);
+    background: color-mix(in srgb, var(--blue) 12%, transparent);
 }
 
 tr.row-highlighted td.skill-cell strong {
@@ -1605,7 +1605,7 @@ table.heatmap td {
     text-align: center;
     padding: 4px 6px;
     min-width: 56px;
-    border-bottom: 1px solid rgba(207, 216, 212, 0.4);
+    border-bottom: 1px solid color-mix(in srgb, var(--line) 40%, transparent);
     color: var(--ink);
 }
 
@@ -2316,7 +2316,7 @@ td.skill-cell .description {
 /* "Recorded with ax" CTA card at the end of a shared transcript. */
 .share-footer {
     border: 1px solid var(--line);
-    background: #fff;
+    background: var(--panel);
     padding: 16px 20px 18px;
     margin-top: 16px;
     display: grid;
@@ -2458,13 +2458,24 @@ td.skill-cell .description {
     width: min(560px, calc(100vw - 32px));
     max-height: calc(100vh - 64px);
     overflow-y: auto;
-    background: var(--paper, #fff);
-    box-shadow: 0 12px 48px rgba(0, 0, 0, 0.25);
+    background: var(--panel);
+    box-shadow: 0 12px 48px rgba(0, 0, 0, 0.45);
 }
 .masthead-ingest-btn {
     font-size: 12px;
     padding: 4px 10px;
     cursor: pointer;
+    background: var(--track);
+    color: var(--muted);
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    font-family: ui-monospace, Menlo, monospace;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+.masthead-ingest-btn:hover {
+    border-color: var(--green);
+    color: var(--ink);
 }
 .masthead-ingest-error {
     max-width: 280px;

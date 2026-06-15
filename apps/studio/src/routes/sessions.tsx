@@ -167,7 +167,7 @@ const Row = memo(function Row({
     };
 
     const rowStyle: CSSProperties | undefined = indent
-        ? { background: "#fafafa" }
+        ? { background: "var(--track)" }
         : undefined;
 
     return (
@@ -415,9 +415,9 @@ export function SessionsRoute() {
 
     const filterBtnStyle = (active: boolean): CSSProperties => ({
         padding: "4px 12px", fontSize: 11, fontWeight: 600,
-        border: "1px solid var(--line)",
-        background: active ? "var(--ink)" : "#fff",
-        color: active ? "#fff" : "var(--muted)",
+        border: `1px solid ${active ? "var(--green)" : "var(--line)"}`,
+        background: active ? "var(--green)" : "var(--track)",
+        color: active ? "#06140b" : "var(--muted)",
         borderRadius: 4, cursor: "pointer",
     });
 
@@ -449,7 +449,7 @@ export function SessionsRoute() {
                     value={search}
                     onChange={(e) => setSearch(e.target.value)}
                     placeholder="filter by id / project / cwd / model"
-                    style={{ flex: 1, maxWidth: 360, padding: "4px 8px", fontSize: 12, border: "1px solid var(--line)", borderRadius: 4 }}
+                    style={{ flex: 1, maxWidth: 360, padding: "4px 8px", fontSize: 12, border: "1px solid var(--line)", borderRadius: 4, background: "var(--panel)", color: "var(--ink)" }}
                 />
                 {allExpandableIds.length > 0 ? (
                     <button
@@ -458,7 +458,7 @@ export function SessionsRoute() {
                         )}
                         style={{
                             padding: "4px 10px", fontSize: 11, border: "1px solid var(--line)",
-                            background: "#fff", color: "var(--muted)", borderRadius: 4, cursor: "pointer",
+                            background: "var(--track)", color: "var(--muted)", borderRadius: 4, cursor: "pointer",
                         }}
                     >
                         {expanded.size === allExpandableIds.length ? "collapse all" : "expand all"}
@@ -470,9 +470,9 @@ export function SessionsRoute() {
                     title={selected.size < 2 ? "Select 2+ sessions to compare" : `Compare ${selected.size} sessions`}
                     style={{
                         padding: "4px 12px", fontSize: 11, fontWeight: 600,
-                        border: "1px solid var(--line)", borderRadius: 4,
-                        background: selected.size >= 2 ? "var(--ink)" : "#fff",
-                        color: selected.size >= 2 ? "#fff" : "var(--muted-2)",
+                        border: `1px solid ${selected.size >= 2 ? "var(--green)" : "var(--line)"}`, borderRadius: 4,
+                        background: selected.size >= 2 ? "var(--green)" : "var(--track)",
+                        color: selected.size >= 2 ? "#06140b" : "var(--muted-2)",
                         cursor: selected.size >= 2 ? "pointer" : "not-allowed",
                     }}
                 >
@@ -483,7 +483,7 @@ export function SessionsRoute() {
                         onClick={() => setSelected(new Set())}
                         style={{
                             padding: "4px 8px", fontSize: 11, border: "1px solid var(--line)",
-                            background: "#fff", color: "var(--muted)", borderRadius: 4, cursor: "pointer",
+                            background: "var(--track)", color: "var(--muted)", borderRadius: 4, cursor: "pointer",
                         }}
                     >
                         clear
@@ -564,7 +564,7 @@ export function SessionsRoute() {
                                                 onClick={() => void loadMore(PAGE_SIZE)}
                                                 style={{
                                                     padding: "2px 10px", marginLeft: 6, fontSize: 11,
-                                                    border: "1px solid var(--line)", background: "#fff",
+                                                    border: "1px solid var(--line)", background: "var(--track)",
                                                     color: "var(--muted)", borderRadius: 4, cursor: "pointer",
                                                 }}
                                             >load {PAGE_SIZE} more</button>
