@@ -4,7 +4,7 @@ import { executeStatements, recordRef } from "@ax/lib/shared/surreal";
 
 interface Orphan { readonly id: unknown; readonly session_id: string }
 
-const RELATABLE = ["otel_metric_point", "otel_span"] as const;
+const RELATABLE = ["otel_metric_point", "otel_span", "otel_log_event"] as const;
 
 /**
  * Extract the bare record KEY from a SurrealDB row `id`, which the SDK returns
