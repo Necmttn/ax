@@ -186,6 +186,68 @@ export interface CostModelsResult {
     readonly total_cost_usd: number;
 }
 
+// --- context budget (session startup footprint) ----------------------------
+export interface ContextSkillRow {
+    readonly name: string;
+    readonly scope: string;
+    readonly source: string;
+    readonly index_chars: number;
+    readonly body_chars: number;
+    readonly index_tokens: number;
+    readonly body_tokens: number;
+    readonly content_hash: string;
+    readonly dir_path: string;
+    readonly is_tool: boolean;
+    readonly uses_total: number;
+    readonly uses_window: number;
+    readonly last_used: string | null;
+    readonly dead_weight: boolean;
+    readonly verbose: boolean;
+}
+export interface ContextSourceRow {
+    readonly source: string;
+    readonly skills: number;
+    readonly index_chars: number;
+    readonly body_chars: number;
+    readonly index_tokens: number;
+    readonly body_tokens: number;
+    readonly is_tool: boolean;
+    readonly uses_window: number;
+    readonly dead_skills: number;
+    readonly reclaimable_index_tokens: number;
+}
+export interface ContextBudgetResult {
+    readonly skills: ReadonlyArray<ContextSkillRow>;
+    readonly sources: ReadonlyArray<ContextSourceRow>;
+    readonly totals: {
+        readonly skills: number;
+        readonly index_chars: number;
+        readonly body_chars: number;
+        readonly index_tokens: number;
+        readonly body_tokens: number;
+        readonly cc_index_tokens: number;
+        readonly cc_body_tokens: number;
+        readonly reclaimable_index_tokens: number;
+        readonly reclaimable_skills: number;
+        readonly verbose_skills: number;
+        readonly window_days: number;
+    };
+}
+export interface ContextDriftRow {
+    readonly name: string;
+    readonly scope: string;
+    readonly change: string;
+    readonly ts: string;
+    readonly bytes: number;
+    readonly prev_bytes: number;
+    readonly byte_delta: number;
+    readonly token_delta: number;
+}
+export interface ContextDriftResult {
+    readonly changes: ReadonlyArray<ContextDriftRow>;
+    readonly total: number;
+}
+
 // The version handshake type now comes from the Insights Surface Contract -
 // the same Schema the daemon serves - so the two cannot drift.
 export type { DaemonVersion } from "@ax/lib/shared/api-contract";
@@ -444,6 +506,10 @@ export const api = {
 
     costModels: (): Promise<CostModelsResult> =>
         viaContract("/api/cost/models", (c) => c.insights.costModels()) as Promise<CostModelsResult>,
+    contextBudget: (): Promise<ContextBudgetResult> =>
+        viaContract("/api/context/budget", (c) => c.insights.contextBudget()) as Promise<ContextBudgetResult>,
+    contextDrift: (): Promise<ContextDriftResult> =>
+        viaContract("/api/context/drift", (c) => c.insights.contextDrift()) as Promise<ContextDriftResult>,
 
     nextActions: (): Promise<NextActionsPayload> =>
         viaContract("/api/next-actions", (c) => c.improve.nextActions()),

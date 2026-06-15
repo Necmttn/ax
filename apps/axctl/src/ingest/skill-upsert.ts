@@ -16,6 +16,8 @@ export interface SkillContent {
 
 interface SkillLookupRow {
     readonly id?: unknown;
+    readonly content_hash?: unknown;
+    readonly bytes?: unknown;
 }
 
 export function skillRecordIdFromLookup(raw: unknown, fallbackName: SkillName): RecordId {
@@ -34,11 +36,35 @@ export function upsertSkillByName(
 ): Effect.Effect<RecordId, DbError> {
     return Effect.gen(function* () {
         const result = yield* db.query<[SkillLookupRow[]]>(
-            "SELECT id FROM skill WHERE name = $name LIMIT 1;",
+            "SELECT id, content_hash, bytes FROM skill WHERE name = $name LIMIT 1;",
             { name: content.name },
         );
-        const existingId = result?.[0]?.[0]?.id;
-        const id = skillRecordIdFromLookup(existingId, content.name);
+        const existing = result?.[0]?.[0];
+        const id = skillRecordIdFromLookup(existing?.id, content.name);
+
+        // Drift log: append a skill_revision ONLY on a real content change (the
+        // hash flipped) or the first sighting of a new skill. The current `skill`
+        // row is the baseline; this is the append-only trail to diff against.
+        // Fails open - the audit write must never break ingest.
+        const prevHash = typeof existing?.content_hash === "string" ? existing.content_hash : undefined;
+        const isNew = existing == null;
+        const changed = prevHash != null && prevHash !== content.content_hash;
+        if ((isNew || changed) && content.content_hash) {
+            yield* Effect.ignore(db.query(
+                "CREATE skill_revision SET skill = $skill, name = $name, scope = $scope, content_hash = $hash, prev_hash = $prev, bytes = $bytes, prev_bytes = $prevBytes, change = $change;",
+                {
+                    skill: id,
+                    name: content.name,
+                    scope: content.scope,
+                    hash: content.content_hash,
+                    prev: prevHash ?? null,
+                    bytes: content.bytes ?? null,
+                    prevBytes: typeof existing?.bytes === "number" ? existing.bytes : null,
+                    change: isNew ? "added" : "changed",
+                },
+            ));
+        }
+
         yield* db.upsert(id, { ...content });
         return id;
     });
