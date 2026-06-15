@@ -25,7 +25,8 @@ import {
     type RoutingTable,
 } from "@ax/hooks-sdk/routing-table";
 import { resolveDispatchModel } from "@ax/hooks-sdk/resolve-dispatch-model";
-import { estimateCost, type ModelPricing } from "../ingest/model-pricing.ts";
+import { type ModelPricing } from "../ingest/model-pricing.ts";
+import { MODEL_ALIASES, reprice as repriceUsage, type RepriceUsage } from "./reprice.ts";
 import {
     defaultRoutingTablePath,
     loadStoredRoutingTable,
@@ -45,12 +46,6 @@ export type { RoutingClass, RoutingTable, RoutingMatch };
  * DEFAULT_ROUTING_TABLE that the route-dispatch hook falls back to.
  */
 export const ROUTING_CLASSES: RoutingTable = DEFAULT_ROUTING_TABLE;
-
-// Model name resolution for repricing suggestions
-const MODEL_ALIASES: Record<string, string> = {
-    sonnet: "claude-sonnet-4-6",
-    haiku: "claude-haiku-4-5-20251001",
-};
 
 // Expensive model tiers (candidate filter)
 export const EXPENSIVE_TIER_RE = /fable|opus/i;
@@ -651,21 +646,11 @@ export const fetchDispatchCandidates = Effect.fn("queries.fetchDispatchCandidate
         }
 
         // Helper: reprice token buckets at a given model's rates. Delegates to
-        // the ingest's estimateCost - prompt_tokens here is TOTAL billed input
+        // the shared reprice utility - prompt_tokens here is TOTAL billed input
         // (fresh + both cache buckets), and estimateCost recovers fresh input
         // by subtracting the cache buckets before applying the input rate.
-        const reprice = (usage: UsageRow, targetModelName: string): number => {
-            const cost = estimateCost({
-                modelKey: targetModelName,
-                promptTokens: usage.prompt_tokens,
-                completionTokens: usage.completion_tokens,
-                cacheCreationInputTokens: usage.cache_create_tokens,
-                cacheReadInputTokens: usage.cache_read_tokens,
-                estimatedTokens: usage.prompt_tokens + usage.completion_tokens,
-                ...(pricingCatalog.size > 0 ? { pricingCatalog } : {}),
-            });
-            return cost.totalUsd ?? usage.cost_usd;
-        };
+        const reprice = (usage: UsageRow, targetModelName: string): number =>
+            repriceUsage(usage as RepriceUsage, targetModelName, pricingCatalog);
 
         const candidates: CandidateRow[] = [];
 
@@ -888,18 +873,8 @@ export const fetchDispatchEconomy = Effect.fn("queries.fetchDispatchEconomy")(
             });
         }
 
-        const reprice = (usage: UsageRow, targetModelName: string): number => {
-            const cost = estimateCost({
-                modelKey: targetModelName,
-                promptTokens: usage.prompt_tokens,
-                completionTokens: usage.completion_tokens,
-                cacheCreationInputTokens: usage.cache_create_tokens,
-                cacheReadInputTokens: usage.cache_read_tokens,
-                estimatedTokens: usage.prompt_tokens + usage.completion_tokens,
-                ...(pricingCatalog.size > 0 ? { pricingCatalog } : {}),
-            });
-            return cost.totalUsd ?? usage.cost_usd;
-        };
+        const reprice = (usage: UsageRow, targetModelName: string): number =>
+            repriceUsage(usage as RepriceUsage, targetModelName, pricingCatalog);
 
         // Per-class economy accumulators
         interface ClassAccumulator {
