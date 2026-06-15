@@ -28,12 +28,12 @@
 import { Effect } from "effect";
 import { defineHook, runMain } from "../define.ts";
 import { decideVerdict } from "../decide-verdict.ts";
-import { loadRoutingTableOrDefault, matchRoutingTable } from "../routing-table.ts";
+import { loadRoutingTableOrDefault } from "../routing-table.ts";
+import { resolveDispatchModel } from "../resolve-dispatch-model.ts";
 import {
   computeSpendMode,
   DEFAULT_SPEND_CONFIG,
   defaultQuotaCachePath,
-  JUDGMENT_STRONG_RE,
   readQuotaCacheSync,
   type SpendConfig,
 } from "../spend-mode.ts";
@@ -82,8 +82,7 @@ const hook = defineHook({
       const description = rawDescription ?? rawPrompt;
 
       const table = loadRoutingTableOrDefault();
-      const match = matchRoutingTable(table, description, subagentType);
-      const judgmentStrong = description !== undefined && JUDGMENT_STRONG_RE.test(description);
+      const resolution = resolveDispatchModel(table, description, subagentType);
 
       // Resolve spend config: table overrides win over DEFAULT_SPEND_CONFIG.
       const spendConfig = resolveSpendConfig(table.spendMode as Partial<SpendConfig> | undefined);
@@ -99,12 +98,12 @@ const hook = defineHook({
         envMode === "conserve" || envMode === "splurge" ? envMode : computed.mode;
 
       return decideVerdict({
-        match: match !== null,
+        match: resolution.match !== null,
         explicit,
         cheap,
-        judgmentStrong,
+        judgmentStrong: resolution.judgmentStrong,
         routeDownEnforced: mode === "conserve",
-        suggest: match?.suggest ?? "sonnet",
+        suggest: resolution.match?.suggest ?? "sonnet",
       });
     }),
 });
