@@ -70,7 +70,7 @@ Install: `curl -fsSL https://ax.necmttn.com/install | bash`, then `npx skills ad
 - `ax doctor` - validate the install (db, watcher, skills)
 
 ### For agents (MCP)
-- `ax mcp` - stdio MCP server exposing read-only graph queries as tools: recall, sessions_around, session_show, skills_weighted, skills_by_role, skills_roles, roles, improve_recommend, improve_show, improve_list, session_metrics, signal_show, cost_models, cost_split, dispatches
+- `ax mcp` - stdio MCP server exposing read-only graph queries as tools: recall, sessions_around, session_show, skills_weighted, skills_by_role, skills_roles, roles, improve_recommend, improve_show, improve_list, session_metrics, signal_show, cost_models, cost_split, dispatches, dojo_agenda
 
 ## Q&A - "how do I..." mapped to the ax answer
 
@@ -111,7 +111,7 @@ A: `ax hooks backtest <file> --days=14` - replays your real tool-call history th
 A: `ax hooks init` scaffolds `~/.ax/hooks` (typed Effect TypeScript, `defineHook`); `ax hooks install <file> --providers=claude,codex` fans it out to both configs.
 
 **Q: Can my agent query its own history mid-session, without me prompting it?**
-A: `ax mcp` - a stdio MCP server exposing the read-only graph queries as 15 tools. The agent asks "where is the spend" or "what did we try before" itself.
+A: `ax mcp` - a stdio MCP server exposing the read-only graph queries as 16 tools. The agent asks "where is the spend" or "what did we try before" itself.
 
 **Q: How do I show a session to a teammate?**
 A: `ax share <session-id>` - sanitized share via GitHub Gist, rendered in the hosted studio viewer.
