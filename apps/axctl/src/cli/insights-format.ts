@@ -205,6 +205,23 @@ function formatClassifierThemeRows(rows: readonly InsightRow[]): string {
     }).join("\n\n");
 }
 
+function formatFrictionRows(rows: readonly InsightRow[]): string {
+    if (rows.length === 0) return "No friction events found.";
+    const hasCost = rows.some((r) => r.otlp_cost_usd != null);
+    return rows.map((row, index) => {
+        const costStr = hasCost
+            ? (row.otlp_cost_usd != null
+                ? `  cost$=${("$" + (row.otlp_cost_usd as number).toFixed(3))}`
+                : "  cost$=-")
+            : "";
+        return [
+            `${index + 1}. ${textOf(row.kind)}${costStr}  ${compactDate(row.ts)}`,
+            row.text ? `   ${truncate(row.text)}` : null,
+            row.project ? `   project=${textOf(row.project)}` : null,
+        ].filter(Boolean).join("\n");
+    }).join("\n\n");
+}
+
 function formatHarnessCandidateRows(rows: readonly InsightRow[]): string {
     if (rows.length === 0) return "No harness candidates found.";
     return rows.map((row, index) => {
@@ -236,6 +253,8 @@ function formatHarnessCandidateRows(rows: readonly InsightRow[]): string {
 export function formatInsightRows(view: InsightView, rows: readonly InsightRow[], opts: { readonly json?: boolean } = {}): string {
     if (opts.json) return prettyPrint(rows);
     switch (view) {
+        case "friction":
+            return formatFrictionRows(rows);
         case "feedback-language":
         case "message-signals":
             return formatSignalRows(rows);

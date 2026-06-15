@@ -96,4 +96,36 @@ describe("enrichInsightRows", () => {
         );
         expect(rows[0]!.previous_assistant).toBeUndefined();
     });
+
+    test("friction: enriches rows with otlp_cost_usd and otlp_tokens via a single batch", async () => {
+        const tc = makeTestSurrealClient({
+            denyWrites: true,
+            routes: [
+                {
+                    match: "FROM otel_metric_point",
+                    rows: [[
+                        { session_id: "s1", metric: "claude_code.cost.usage", total: 0.25 },
+                        { session_id: "s1", metric: "claude_code.token.usage", total: 800 },
+                    ]],
+                },
+                {
+                    match: "FROM otel_log_event",
+                    rows: [[]],
+                },
+            ],
+        });
+        const frictionRows = [
+            { id: "friction_event:f1", session_ref: "session:s1", session: "session:s1", kind: "tool_failure", ts: new Date() },
+            { id: "friction_event:f2", session_ref: "session:s2", session: "session:s2", kind: "tool_failure", ts: new Date() },
+        ];
+        const rows = await Effect.runPromise(
+            enrichInsightRows("friction", frictionRows).pipe(Effect.provide(tc.layer)),
+        );
+        expect(rows[0]!.otlp_cost_usd).toBe(0.25);
+        expect(rows[0]!.otlp_tokens).toBe(800);
+        expect(rows[1]!.otlp_cost_usd).toBeNull();
+        expect(rows[1]!.otlp_tokens).toBeNull();
+        // Only 2 queries total (otel_metric_point + otel_log_event) - one batch, not per-row
+        expect(tc.captured).toHaveLength(2);
+    });
 });

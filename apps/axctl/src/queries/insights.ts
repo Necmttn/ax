@@ -267,6 +267,7 @@ SELECT
     metrics,
     raw,
     session,
+    type::string(session) AS session_ref,
     session.project AS project,
     session.cwd AS cwd,
     turn,
