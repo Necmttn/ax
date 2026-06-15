@@ -21,11 +21,11 @@ describe("classifyTurn", () => {
   it("edit/bash dominant, low thinking -> mechanical-impl", () => {
     expect(classifyTurn({ ...base, toolNames: ["Edit", "Bash", "Edit", "Write"] }, false)).toBe("mechanical-impl");
   });
-  it("high thinking, no tools -> synthesis", () => {
-    expect(classifyTurn({ ...base, thinkingTokens: 4000, toolNames: [] }, false)).toBe("synthesis");
+  it("no tools, no text -> interactive (thinking signal dropped)", () => {
+    expect(classifyTurn({ ...base, thinkingTokens: 4000, toolNames: [] }, false)).toBe("interactive");
   });
-  it("high thinking + edits -> design-decision", () => {
-    expect(classifyTurn({ ...base, thinkingTokens: 4000, toolNames: ["Edit"] }, false)).toBe("design-decision");
+  it("edits with no judgment text -> mechanical-impl (thinking signal dropped)", () => {
+    expect(classifyTurn({ ...base, thinkingTokens: 4000, toolNames: ["Edit"] }, false)).toBe("mechanical-impl");
   });
   it("judgment text -> design-decision even with read tools", () => {
     expect(classifyTurn({ ...base, text: "Review the design of this module", toolNames: ["Read"] }, false)).toBe("design-decision");

@@ -35,7 +35,6 @@ export interface TurnFacts {
     usage: RepriceUsage | null;
 }
 
-export const THINK_HI = 1500; // output tokens of thinking that marks "reasoning"
 const READ_TOOLS = new Set(["Read", "Grep", "Glob", "LS"]);
 const RESEARCH_TOOLS = new Set(["WebFetch", "WebSearch"]);
 const EDIT_TOOLS = new Set(["Edit", "Write", "NotebookEdit", "Bash"]);
@@ -45,19 +44,22 @@ const INTERACTIVE_INTENTS = new Set(["correction", "preference", "wrapper_instru
  * Assign one work-class to a main-agent turn. Judgment-first precedence so
  * review/design/interactive can never be classed routable. `adjacentToUser`
  * is computed by buildSpans (turn neighbours a user turn).
+ *
+ * Turn-level tool composition only - the `thinking_tokens` signal was dropped
+ * after calibration showed it is 0 on 96.6% of main assistant turns (mixed
+ * turns report 0 = lower bound; transcripts strip thinking text), so no
+ * threshold separated design work from routine edits. Judgment is now caught
+ * solely via JUDGMENT_GUARD_RE on the turn text plus the interactive guards.
  */
 export function classifyTurn(t: TurnFacts, adjacentToUser: boolean): WorkClass {
     if (adjacentToUser) return "interactive";
     if (t.intentKind && INTERACTIVE_INTENTS.has(t.intentKind)) return "interactive";
 
-    const hasEdit = t.toolNames.some((n) => EDIT_TOOLS.has(n));
     const editCount = t.toolNames.filter((n) => EDIT_TOOLS.has(n)).length;
     const readCount = t.toolNames.filter((n) => READ_TOOLS.has(n)).length;
     const researchCount = t.toolNames.filter((n) => RESEARCH_TOOLS.has(n)).length;
 
     if (t.text && JUDGMENT_GUARD_RE.test(t.text)) return "design-decision";
-    if (t.thinkingTokens >= THINK_HI && hasEdit) return "design-decision";
-    if (t.thinkingTokens >= THINK_HI && t.toolNames.length <= 1) return "synthesis";
 
     if (editCount > 0 && editCount >= readCount && editCount >= researchCount) return "mechanical-impl";
     if (researchCount > 0) return "niche-research";
