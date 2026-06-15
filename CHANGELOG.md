@@ -1,5 +1,42 @@
 # Changelog
 
+## [0.30.0](https://github.com/Necmttn/ax/compare/v0.29.0...v0.30.0) (2026-06-15)
+
+
+### Features
+
+* ax dojo - surplus-quota training loop (agenda CLI + skill) ([#390](https://github.com/Necmttn/ax/issues/390)) ([4bae321](https://github.com/Necmttn/ax/commit/4bae32103940b7e3e253ef58026701bc2c07c448))
+* ax dojo report + outbox writers (dojo command family) ([#403](https://github.com/Necmttn/ax/issues/403)) ([6ebefc6](https://github.com/Necmttn/ax/commit/6ebefc6828b5e51717fb8a6ecb6582bdde8a6c54))
+* ax dojo spar - replay benchmark (one task, one delta, scored) ([#405](https://github.com/Necmttn/ax/issues/405)) ([e4b2707](https://github.com/Necmttn/ax/commit/e4b2707eff542b545dcd52792c98e3555262406a))
+* ax hooks bench - hook latency ledger ([#404](https://github.com/Necmttn/ax/issues/404)) ([6ec1a2d](https://github.com/Necmttn/ax/commit/6ec1a2d5c914a1cc87a55e28d2f53d053a53bf84))
+* **axctl:** dispatch model-drop detection + thinking/reasoning capture ([#387](https://github.com/Necmttn/ax/issues/387)) ([af57c68](https://github.com/Necmttn/ax/commit/af57c689a9b9db84951ac5623f365f1a6149a8f3))
+* **axctl:** thinking/reasoning cost USD in ax thinking ([#395](https://github.com/Necmttn/ax/issues/395)) ([b6ee723](https://github.com/Necmttn/ax/commit/b6ee723ad4909066abab09c1d74ee14bbf372f2e))
+* cognitive-layer dispatch enforcement (shared model-tier classifier) ([#416](https://github.com/Necmttn/ax/issues/416)) ([8a6991f](https://github.com/Necmttn/ax/commit/8a6991f3eccc6439885cbf8098dd23279c418171))
+* **digest:** push-value SessionStart digest (adoption Fix [#2](https://github.com/Necmttn/ax/issues/2)) ([#414](https://github.com/Necmttn/ax/issues/414)) ([106e0fe](https://github.com/Necmttn/ax/commit/106e0fe7ae92f51b41a66778488e6f504b09fbe6))
+* **hooks-sdk:** enforce-worktree keeps the primary tree parked on the default branch ([#367](https://github.com/Necmttn/ax/issues/367)) ([bae9794](https://github.com/Necmttn/ax/commit/bae9794258907bc98ae92169ad859df1f85604f7))
+* **profile:** stacked window chart, workflow arcs, leverage-sorted rig ([#369](https://github.com/Necmttn/ax/issues/369)) ([32a87db](https://github.com/Necmttn/ax/commit/32a87dbe1e2407fd8e5301e0477527a95fedbbfa))
+* quota-aware dispatch economy (PR2) - surface, freshness, /dojo nudge, measurement ([#413](https://github.com/Necmttn/ax/issues/413)) ([9e9f2b4](https://github.com/Necmttn/ax/commit/9e9f2b4ae80acf460ceeb5794d54dcf2ae94be66))
+* **site:** community surfaces polish - leaders + showcases ([#393](https://github.com/Necmttn/ax/issues/393)) ([6478955](https://github.com/Necmttn/ax/commit/6478955273ec833410b962f3d72d437dd62f169a))
+* **site:** four new showcases - dispatch routing, quota, improve loop, churn ([#383](https://github.com/Necmttn/ax/issues/383)) ([2539b1a](https://github.com/Necmttn/ax/commit/2539b1a05b510f9d4e225d01c3217fad2dc518fc))
+* **site:** IA restructure - install path, three-tier docs hub, sitemap footer, ADR demotion ([#392](https://github.com/Necmttn/ax/issues/392)) ([64e22eb](https://github.com/Necmttn/ax/commit/64e22ebd9454fa601c8fb46d4a5cc410651cab3e))
+* **site:** landing demo mirrors the real Improve dashboard ([#384](https://github.com/Necmttn/ax/issues/384)) ([098ef31](https://github.com/Necmttn/ax/commit/098ef3178dd8913674eb0a5fcfae240ed3f9abd9))
+* **site:** rebuild /brand as a self-demonstrating specimen page ([#399](https://github.com/Necmttn/ax/issues/399)) ([8a14fc1](https://github.com/Necmttn/ax/commit/8a14fc16299484a4e9803da6ca6c7a736c13f006))
+* **site:** rebuild /docs/cli-reference as a purpose-built reference ([#394](https://github.com/Necmttn/ax/issues/394)) ([fb25f27](https://github.com/Necmttn/ax/commit/fb25f279094c15e0de644526ef7802bd9398565f))
+* **site:** redesign /how-it-works as the five-act visual product narrative ([#402](https://github.com/Necmttn/ax/issues/402)) ([0b256de](https://github.com/Necmttn/ax/commit/0b256debb517fb220767e894eb28ed60f0821e7a))
+* **site:** truth pass on teams/registry/routing + curated glossary ([#398](https://github.com/Necmttn/ax/issues/398)) ([a135dbb](https://github.com/Necmttn/ax/commit/a135dbbe9d79e498cdee6be72c0d380baa99ebbe))
+* **site:** v0.27-v0.29 release announcements + index-ify /changelog ([#391](https://github.com/Necmttn/ax/issues/391)) ([44e42dd](https://github.com/Necmttn/ax/commit/44e42dd9ccc3c784fc6b27a43acec7477f3a175c))
+* **studio:** nullframe instrument design system — Mission Control, living sigils, viz deck ([#415](https://github.com/Necmttn/ax/issues/415)) ([edc1c3f](https://github.com/Necmttn/ax/commit/edc1c3ff259df8232e62fa5bca4149d8323d1438))
+
+
+### Bug Fixes
+
+* **dojo:** spar-plan warns + flags subagent-only baselines ([#409](https://github.com/Necmttn/ax/issues/409)) ([59c44af](https://github.com/Necmttn/ax/commit/59c44af43628f05b467e9d4e619c33e5a269ccda))
+* make installs survive broken releases ([#410](https://github.com/Necmttn/ax/issues/410)) ([#418](https://github.com/Necmttn/ax/issues/418)) ([31081c3](https://github.com/Necmttn/ax/commit/31081c31e59ab6384c7c39beb1e9e262afa44c91))
+* **site:** contain CLI-reference receipt/signature blocks in their cards ([#406](https://github.com/Necmttn/ax/issues/406)) ([8f76527](https://github.com/Necmttn/ax/commit/8f7652749621d4ad5779a7936b292b5588ba2ece))
+* **site:** document `ax dojo` in CLI reference (unbreak main) ([#396](https://github.com/Necmttn/ax/issues/396)) ([69ed593](https://github.com/Necmttn/ax/commit/69ed5938853375778008d9e321697d08d7fbcc91))
+* **site:** truth pass on story/credibility pages (features, origin, manifesto) ([#401](https://github.com/Necmttn/ax/issues/401)) ([dfa50f3](https://github.com/Necmttn/ax/commit/dfa50f3308a9c709ecfafbcb5840c9f72861f7ff))
+* **site:** window chart height matches the model-split legend column ([#370](https://github.com/Necmttn/ax/issues/370)) ([a809c40](https://github.com/Necmttn/ax/commit/a809c4005128a7f1cb8247fb9bf4785b47248500))
+
 ## [0.29.0](https://github.com/Necmttn/ax/compare/v0.28.0...v0.29.0) (2026-06-12)
 
 
