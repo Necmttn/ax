@@ -11,6 +11,7 @@ import { Effect } from "effect";
 import { SurrealClient } from "@ax/lib/db";
 import type { DbError } from "@ax/lib/errors";
 import { fetchSparSessionIds } from "../queries/spar-sessions.ts";
+import { sessionTelemetryLatency, bareSession } from "../queries/telemetry-rollup.ts";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -24,6 +25,12 @@ export interface WeightedSkillRow {
     readonly roles: readonly string[];
     readonly weight: number;
     readonly score: number;
+    /**
+     * Median duration_ms of sessions where this skill appears in a `recovered_by`
+     * edge (i.e. was used to recover from a failure). Source: `otel_log_event`.
+     * null when the skill has no recovery telemetry.
+     */
+    readonly median_recovery_ms: number | null;
 }
 
 export interface DoctorResult {
@@ -315,6 +322,7 @@ export const fetchSkillsWeighted = (
                 roles,
                 weight: weightSum,
                 score,
+                median_recovery_ms: null, // filled in by the recovery pass below
             });
         }
 
@@ -326,6 +334,79 @@ export const fetchSkillsWeighted = (
         });
 
         const topRows = rows.slice(0, limit);
+
+        // ---------------------------------------------------------------------------
+        // Recovery latency pass (lens E) - separate batched queries, no per-row derefs
+        //
+        // The `recovered_by` edge is TYPE RELATION FROM turn TO skill. We resolve
+        // turn→session via a one-hop deref (`in.session`) in a single batched query
+        // over the whole edge table. This is intentionally SEPARATE from the main
+        // weighted aggregate (which is deref-free) to avoid the stacked-deref hang
+        // that hit the invoked-edge query on 87k+ rows.
+        // ---------------------------------------------------------------------------
+
+        /**
+         * SQL to fetch all recovered_by edges mapped to their skill and session.
+         * `in.session` dereferences the turn record's `session` field in one hop.
+         * If the live DB ever fails this deref, the fallback is a 2-query approach:
+         *   1. SELECT type::string(out) AS skill, type::string(in) AS turn FROM recovered_by
+         *   2. SELECT type::string(id) AS turn, type::string(session) AS session FROM turn WHERE id IN [...]
+         */
+        const RECOVERY_EDGES_SQL = `SELECT type::string(out) AS skill, type::string(in.session) AS session FROM recovered_by;`;
+
+        const recoveryEdgesRes = yield* db.query<[Array<Record<string, unknown>>]>(RECOVERY_EDGES_SQL);
+        const recoveryEdges = (recoveryEdgesRes?.[0] ?? []) as Array<Record<string, unknown>>;
+
+        // Build Map<skillId, sessionId[]>
+        const skillToSessions = new Map<string, string[]>();
+        for (const r of recoveryEdges) {
+            const skillId = String(r.skill ?? "");
+            const session = String(r.session ?? "");
+            if (!skillId || !session) continue;
+            const list = skillToSessions.get(skillId);
+            if (list) {
+                list.push(session);
+            } else {
+                skillToSessions.set(skillId, [session]);
+            }
+        }
+
+        // Collect unique session ids across all recovery skills
+        const allRecoverySessions = [...new Set(
+            [...skillToSessions.values()].flat(),
+        )];
+
+        // One batched call to fetch latency for all recovery sessions
+        const latencyMap = yield* sessionTelemetryLatency(allRecoverySessions);
+
+        // Compute per-skill median recovery duration
+        const skillMedianMs = new Map<string, number | null>();
+        for (const [skillId, sessionIds] of skillToSessions) {
+            const durations: number[] = [];
+            for (const sid of sessionIds) {
+                const entry = latencyMap.get(bareSession(sid));
+                if (entry?.duration_ms != null) {
+                    durations.push(entry.duration_ms);
+                }
+            }
+            if (durations.length === 0) {
+                skillMedianMs.set(skillId, null);
+            } else {
+                durations.sort((a, b) => a - b);
+                const mid = Math.floor(durations.length / 2);
+                const median =
+                    durations.length % 2 === 0
+                        ? ((durations[mid - 1]! + durations[mid]!) / 2)
+                        : durations[mid]!;
+                skillMedianMs.set(skillId, median);
+            }
+        }
+
+        // Merge onto topRows (immutable: create new row objects)
+        const finalRows = topRows.map((row) => ({
+            ...row,
+            median_recovery_ms: skillMedianMs.get(row.skill_id) ?? null,
+        }));
 
         // ---------------------------------------------------------------------------
         // Doctor
@@ -346,7 +427,7 @@ export const fetchSkillsWeighted = (
                 : null;
 
         return {
-            rows: topRows,
+            rows: finalRows,
             doctor: {
                 unclassified_count: unclassifiedCount,
                 threshold: doctorThreshold,

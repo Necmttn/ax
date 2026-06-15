@@ -1,6 +1,7 @@
 import { Array as Arr, Effect } from "effect";
 import { SurrealClient, type SurrealClientShape } from "@ax/lib/db";
 import type { DbError } from "@ax/lib/errors";
+import { bareSession, sessionTelemetryCost } from "../queries/telemetry-rollup.ts";
 import { recordKeyPart } from "@ax/lib/shared/derive-keys";
 import { localPathFileRecordKey, recordLiteral, stableDigest } from "@ax/lib/ids";
 import { selectByIds } from "@ax/lib/shared/record-select";
@@ -13,6 +14,8 @@ export interface CascadeEdge {
     readonly origin: string; // session that produced a reverted commit touching a file
     readonly downstream: string; // a later session that edited the same file
     readonly weight: number; // distinct downstream fixers for this origin
+    readonly downstream_cost_usd: number | null; // OTLP-sourced cost for the downstream session
+    readonly downstream_tokens: number | null; // OTLP-sourced token count for the downstream session
 }
 
 /**
@@ -112,7 +115,7 @@ export const joinCascadeEdges = (
     }
     return [...pairs].map((p) => {
         const [origin, downstream] = p.split(" ");
-        return { origin, downstream, weight: downstreamByOrigin.get(origin)!.size };
+        return { origin, downstream, weight: downstreamByOrigin.get(origin)!.size, downstream_cost_usd: null, downstream_tokens: null };
     });
 };
 
@@ -404,12 +407,21 @@ export const readFragilityCascade = (): Effect.Effect<CascadeEdge[], DbError, Su
         const rows = (yield* db.query<[Array<Record<string, unknown>>]>(
             `SELECT type::string(origin) AS origin, type::string(downstream) AS downstream, weight FROM fragility_cascade;`,
         ))?.[0] ?? [];
-        const out: CascadeEdge[] = [];
+        const partialEdges: CascadeEdge[] = [];
         for (const r of rows) {
             const origin = str(r.origin);
             const downstream = str(r.downstream);
             const weight = typeof r.weight === "number" && Number.isFinite(r.weight) ? r.weight : 0;
-            if (origin !== null && downstream !== null) out.push({ origin, downstream, weight });
+            if (origin !== null && downstream !== null) {
+                partialEdges.push({ origin, downstream, weight, downstream_cost_usd: null, downstream_tokens: null });
+            }
         }
-        return out;
+        // ONE batched OTLP cost lookup over deduped downstream ids.
+        const ids = [...new Set(partialEdges.map((e) => e.downstream))];
+        const cost = yield* sessionTelemetryCost(ids);
+        return partialEdges.map((e) => ({
+            ...e,
+            downstream_cost_usd: cost.get(bareSession(e.downstream))?.cost_usd ?? null,
+            downstream_tokens: cost.get(bareSession(e.downstream))?.tokens ?? null,
+        }));
     });

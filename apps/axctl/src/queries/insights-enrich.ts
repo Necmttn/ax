@@ -22,6 +22,7 @@ import type { DbError } from "@ax/lib/errors";
 import { recordIdString } from "@ax/lib/shared/row-fields";
 import { surrealDate } from "@ax/lib/shared/surql";
 import type { InsightView } from "./insights.ts";
+import { bareSession, sessionTelemetryCost } from "./telemetry-rollup.ts";
 
 /** Per-row fan-out width for the context lookups. */
 const ENRICH_FANOUT = 8;
@@ -117,10 +118,28 @@ const enrichRow = (
         };
     });
 
+/** Extract a bare session UUID from a friction row's session_ref (string from
+ *  `type::string(session)`) or fall back to the raw session field. */
+const frictionSessionId = (row: Row): string =>
+    bareSession(
+        typeof row.session_ref === "string"
+            ? row.session_ref
+            : (recordIdString(row.session) ?? String(row.session ?? "")),
+    );
+
 /** Enrich the rows of a classifier insight view with per-row context via
- *  indexed lookups. Views outside ENRICHED_VIEWS pass through untouched. */
+ *  indexed lookups. Views outside ENRICHED_VIEWS pass through untouched.
+ *  The "friction" view gets a single batched OTLP cost lookup appended. */
 export const enrichInsightRows = Effect.fn("queries.enrichInsightRows")(
     function* (view: InsightView, rows: ReadonlyArray<Row>) {
+        if (view === "friction") {
+            const ids = rows.map(frictionSessionId);
+            const cost = yield* sessionTelemetryCost(ids);
+            return rows.map((row): Row => {
+                const c = cost.get(frictionSessionId(row));
+                return { ...row, otlp_cost_usd: c?.cost_usd ?? null, otlp_tokens: c?.tokens ?? null };
+            });
+        }
         if (!ENRICHED_VIEWS.has(view)) return rows;
         return yield* Effect.forEach(rows, (row) => enrichRow(view, row), { concurrency: ENRICH_FANOUT });
     },

@@ -285,6 +285,7 @@ describe("buildSkillsWeightedNext", () => {
         roles: [],
         weight: 1,
         score: 10,
+        median_recovery_ms: null,
     };
 
     test("unclassified skills → classify cmd; top row → roles link", () => {

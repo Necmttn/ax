@@ -149,6 +149,19 @@ docs/superpowers/specs/2026-06-15-otel-receiver-design.md.
 `ax cost split [--days=N]` - origin (main vs subagent) × model matrix with cost and share-of-total; totals row. MCP: `cost_models`, `cost_split`.
 `ax cost routability [--days=N] [--min-run=1] [--json]` - main-thread routability lens: of main-agent spend, how much sat in routable class-runs (gather→haiku, mechanical-impl/niche-research→sonnet) vs genuine judgment, with est savings repriced one tier down. Deterministic - turn-level classification from tool composition + `JUDGMENT_GUARD_RE` text guard (the `thinking_tokens` signal is dead - 0 on ~97% of turns - so it's dropped; `--min-run` groups consecutive same-class turns, default 1 since Claude turns rarely form longer same-class runs). Non-Claude main turns lack per-turn cost rows so main spend reads ~Claude-only. MCP: `cost_routability`. Spec: docs/superpowers/specs/2026-06-15-cost-routability-lens-design.md.
 
+### Telemetry-enriched insights
+
+Existing behavior insights traverse the `telemetry_of` edge to attach
+OTLP-sourced cost/latency (shared helper `apps/axctl/src/queries/telemetry-rollup.ts`,
+batched + deref-free): `ax sessions churn` rows gain `otlp_cost_usd`/`otlp_tokens`
+(cost per episode); `fragility_cascade` edges gain `downstream_cost_usd`; the
+`ax insights friction` view gains per-row OTLP cost; `ax skills weighted` gains
+`median_recovery_ms` (recovery latency from `otel_log_event.duration_ms`).
+OTLP-sourced, kept SEPARATE from transcript `session_token_usage` cost (no
+double-count); columns/fields are null when a session has no telemetry. Lights
+up as OTLP data accumulates. Spec:
+docs/superpowers/specs/2026-06-15-telemetry-insight-enrichment-design.md.
+
 ### Plan quota
 
 `ax quota [--json|--statusline|--swiftbar] [--max-age=N] [--fresh]` - live Claude

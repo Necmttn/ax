@@ -54,6 +54,9 @@ export function renderWeightedTable(result: SkillsWeightedResult): string {
         return lines.join("\n");
     }
 
+    // Show recovery_ms column only when at least one row has telemetry data.
+    const hasRecovery = rows.some((r) => r.median_recovery_ms != null);
+
     // Pre-compute column values so we can compute widths.
     type RenderedRow = {
         rank: string;
@@ -63,6 +66,7 @@ export function renderWeightedTable(result: SkillsWeightedResult): string {
         roles: string;
         weight: string;
         score: string;
+        recovery_ms: string;
     };
 
     const rendered: RenderedRow[] = rows.map((r, i) => ({
@@ -73,6 +77,7 @@ export function renderWeightedTable(result: SkillsWeightedResult): string {
         roles: fmtRoles(r.roles),
         weight: fmtFloat(r.weight),
         score: fmtFloat(r.score),
+        recovery_ms: r.median_recovery_ms != null ? fmtCount(Math.round(r.median_recovery_ms)) : "–",
     }));
 
     // Compute column widths (header floor).
@@ -84,6 +89,7 @@ export function renderWeightedTable(result: SkillsWeightedResult): string {
         roles: "roles",
         weight: "weight",
         score: "score",
+        recovery_ms: "recov_ms",
     };
 
     const colWidth = (key: keyof RenderedRow): number =>
@@ -99,6 +105,7 @@ export function renderWeightedTable(result: SkillsWeightedResult): string {
     const rolesW = Math.max(colWidth("roles"), 20);
     const wtW = colWidth("weight");
     const scoreW = colWidth("score");
+    const recovW = colWidth("recovery_ms");
 
     const header =
         headers.rank.padStart(rankW) +
@@ -113,7 +120,8 @@ export function renderWeightedTable(result: SkillsWeightedResult): string {
         "  " +
         headers.weight.padStart(wtW) +
         "  " +
-        headers.score.padStart(scoreW);
+        headers.score.padStart(scoreW) +
+        (hasRecovery ? "  " + headers.recovery_ms.padStart(recovW) : "");
 
     lines.push(header);
 
@@ -131,7 +139,8 @@ export function renderWeightedTable(result: SkillsWeightedResult): string {
             "  " +
             r.weight.padStart(wtW) +
             "  " +
-            r.score.padStart(scoreW);
+            r.score.padStart(scoreW) +
+            (hasRecovery ? "  " + r.recovery_ms.padStart(recovW) : "");
         lines.push(line);
     }
 
@@ -154,6 +163,7 @@ export interface WeightedJsonOutput {
         readonly roles: readonly string[];
         readonly weight: number;
         readonly score: number;
+        readonly median_recovery_ms: number | null;
     }>;
     readonly doctor: {
         readonly unclassified_count: number;
@@ -172,6 +182,7 @@ export function renderWeightedJson(result: SkillsWeightedResult): string {
             roles: r.roles,
             weight: r.weight,
             score: r.score,
+            median_recovery_ms: r.median_recovery_ms,
         })),
         doctor: {
             unclassified_count: result.doctor.unclassified_count,

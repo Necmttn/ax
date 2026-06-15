@@ -1,4 +1,5 @@
 import { Effect } from "effect";
+import { sessionTelemetryCost } from "../queries/telemetry-rollup.ts";
 import { recordLiteral } from "@ax/lib/ids";
 import { recordKeyPart } from "@ax/lib/shared/derive-keys";
 import { SurrealClient } from "@ax/lib/db";
@@ -45,6 +46,8 @@ export interface SessionChurnRow {
     readonly episodes: number;
     readonly passedEpisodes: number;
     readonly topCheck: string | null;
+    readonly otlp_cost_usd: number | null;
+    readonly otlp_tokens: number | null;
 }
 
 export interface SourceChurnAggregate {
@@ -302,10 +305,20 @@ ${where};`))?.[0] ?? [];
             fetchHookEvents(sessionIds, sourceBySession),
         ], { concurrency: 5 });
 
-        return computeSessionChurn([...edits, ...commandEvents, ...hookEvents], landed.bySession, health, {
+        const summary = computeSessionChurn([...edits, ...commandEvents, ...hookEvents], landed.bySession, health, {
             ...options,
             landedCommits: landed.commits,
         });
+
+        if (summary.hotSessions.length === 0) return summary;
+        const ids = summary.hotSessions.map((r) => r.session);
+        const cost = yield* sessionTelemetryCost(ids);
+        const hotSessions = summary.hotSessions.map((r) => ({
+            ...r,
+            otlp_cost_usd: cost.get(r.session)?.cost_usd ?? null,
+            otlp_tokens: cost.get(r.session)?.tokens ?? null,
+        }));
+        return { ...summary, hotSessions };
     });
 
 export const fetchLandedLocBySession = (
@@ -584,25 +597,34 @@ export const formatSessionChurnSummary = (summary: SessionChurnSummary): string 
         row.topCheck ?? "-",
     ]);
 
-    const sessionRows = summary.hotSessions.map((row) => [
-        truncate(row.session, 20),
-        row.source ?? "unknown",
-        String(row.verificationFailures),
-        String(row.episodes),
-        String(row.passedEpisodes),
-        loc(row.landedLinesAdded, row.landedLinesRemoved),
-        loc(row.editLinesAdded, row.editLinesRemoved),
-        loc(row.repairLinesAdded, row.repairLinesRemoved),
-        row.topCheck ?? "-",
-        row.taskLabel === null ? "-" : truncate(singleLine(row.taskLabel), 48),
-    ]);
+    const hasCost = summary.hotSessions.some((r) => r.otlp_cost_usd !== null);
+    const sessionRows = summary.hotSessions.map((row) => {
+        const cells = [
+            truncate(row.session, 20),
+            row.source ?? "unknown",
+            String(row.verificationFailures),
+            String(row.episodes),
+            String(row.passedEpisodes),
+            loc(row.landedLinesAdded, row.landedLinesRemoved),
+            loc(row.editLinesAdded, row.editLinesRemoved),
+            loc(row.repairLinesAdded, row.repairLinesRemoved),
+            row.topCheck ?? "-",
+            row.taskLabel === null ? "-" : truncate(singleLine(row.taskLabel), 48),
+        ];
+        if (hasCost) cells.push(row.otlp_cost_usd !== null ? `$${row.otlp_cost_usd.toFixed(3)}` : "-");
+        return cells;
+    });
+    const sessionHeaders = [
+        "session", "source", "fails", "episodes", "pass", "landed", "edits", "repair", "top", "task",
+        ...(hasCost ? ["cost$"] : []),
+    ];
 
     return [
         "verification churn by source",
         table(["source", "sess", "fail-sess", "fails", "episodes", "pass", "landed", "edits", "repair", "top"], sourceRows),
         "",
         "hot sessions",
-        table(["session", "source", "fails", "episodes", "pass", "landed", "edits", "repair", "top", "task"], sessionRows),
+        table(sessionHeaders, sessionRows),
     ].join("\n");
 };
 
@@ -697,6 +719,8 @@ const freezeRow = (state: MutableSessionState): SessionChurnRow => ({
     episodes: state.episodes,
     passedEpisodes: state.passedEpisodes,
     topCheck: topCheck(state.checkFailures),
+    otlp_cost_usd: null,
+    otlp_tokens: null,
 });
 
 const buildAggregates = (

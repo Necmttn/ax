@@ -7,6 +7,8 @@ import {
     formatSessionChurnSummary,
     normalizeCheckFamily,
     type ChurnEvent,
+    type SessionChurnRow,
+    type SessionChurnSummary,
 } from "./session-churn.ts";
 
 const edit = (session: string, tsMs: number, linesAdded: number, linesRemoved = 0, source = "codex"): ChurnEvent => ({
@@ -54,12 +56,16 @@ const db = (input: {
     outcomes?: Array<Record<string, unknown>>;
     hooks?: Array<Record<string, unknown>>;
     toolTexts?: Array<Record<string, unknown>>;
+    otelMetrics?: Array<Record<string, unknown>>;
+    otelLogs?: Array<Record<string, unknown>>;
     seenSql?: string[];
     respectBaseLimit?: boolean;
 }) =>
     Layer.succeed(SurrealClient, {
         query: <T>(sql: string) => {
             input.seenSql?.push(sql);
+            if (sql.includes("FROM otel_metric_point")) return Effect.succeed([input.otelMetrics ?? []] as unknown as T);
+            if (sql.includes("FROM otel_log_event")) return Effect.succeed([input.otelLogs ?? []] as unknown as T);
             if (sql.includes("FROM session_health")) return Effect.succeed([input.health ?? []] as unknown as T);
             if (sql.includes("FROM produced")) return Effect.succeed([input.produced ?? []] as unknown as T);
             if (sql.includes("FROM touched")) return Effect.succeed([input.touched ?? []] as unknown as T);
@@ -320,6 +326,16 @@ describe("computeSessionChurn", () => {
         expect(formatSessionChurnSummary(summary)).toBe(
             "no verification churn rows matched (run `ax ingest`, or loosen --since/--source/--here).",
         );
+    });
+
+    test("initializes otlp_cost_usd and otlp_tokens to null on every row", () => {
+        const summary = computeSessionChurn([
+            edit("s1", 1, 1),
+            fail("s1", 2, "test"),
+        ], landed([]), health([]));
+
+        expect(summary.hotSessions[0]?.otlp_cost_usd).toBeNull();
+        expect(summary.hotSessions[0]?.otlp_tokens).toBeNull();
     });
 
     test("normalizes DB-shaped and bare session ids across events and metadata maps", () => {
@@ -630,6 +646,40 @@ describe("fetchSessionChurnSummary", () => {
         });
     });
 
+    test("enriches hot sessions with OTLP cost; sessions without telemetry stay null", async () => {
+        const summary = await Effect.runPromise(fetchSessionChurnSummary({
+            since: null,
+            limit: 20,
+            generatedAt: new Date("2026-06-11T00:00:00.000Z"),
+        }).pipe(Effect.provide(db({
+            base: [
+                { session: "session:`s1`", source: "codex" },
+                { session: "session:`s2`", source: "codex" },
+            ],
+            edits: [
+                { session: "session:`s1`", ts: "2026-06-11T00:01:00.000Z", name: "Edit", input_json: JSON.stringify({ old_string: "a", new_string: "a\nb" }) },
+                { session: "session:`s2`", ts: "2026-06-11T00:01:00.000Z", name: "Edit", input_json: JSON.stringify({ old_string: "a", new_string: "a\nb" }) },
+            ],
+            outcomes: [
+                { session: "session:`s1`", ts: "2026-06-11T00:02:00.000Z", status: "error", command_norm: "tsc" },
+                { session: "session:`s2`", ts: "2026-06-11T00:02:00.000Z", status: "error", command_norm: "tsc" },
+            ],
+            otelMetrics: [
+                { session_id: "s1", metric: "claude_code.cost.usage", total: 0.042 },
+            ],
+            otelLogs: [
+                { session_id: "s1", i: 1000, o: 500, r: 0, t: 0 },
+            ],
+        }))));
+
+        const s1 = summary.hotSessions.find((r) => r.session === "s1");
+        const s2 = summary.hotSessions.find((r) => r.session === "s2");
+        expect(s1?.otlp_cost_usd).toBeCloseTo(0.042, 5);
+        expect(s1?.otlp_tokens).toBe(1500);
+        expect(s2?.otlp_cost_usd).toBeNull();
+        expect(s2?.otlp_tokens).toBeNull();
+    });
+
     test("ambiguous runner norms resolve via batched tool_call text lookup", async () => {
         const seenSql: string[] = [];
         const summary = await Effect.runPromise(fetchSessionChurnSummary({
@@ -664,6 +714,62 @@ describe("fetchSessionChurnSummary", () => {
 });
 
 describe("formatSessionChurnSummary", () => {
+    test("shows cost$ column when at least one hot session has non-null otlp_cost_usd", () => {
+        const row = {
+            session: "s1",
+            source: "codex",
+            taskLabel: null,
+            landedLinesAdded: 0,
+            landedLinesRemoved: 0,
+            editLinesAdded: 5,
+            editLinesRemoved: 0,
+            repairLinesAdded: 3,
+            repairLinesRemoved: 0,
+            editEvents: 1,
+            verificationFailures: 1,
+            verificationPasses: 0,
+            episodes: 1,
+            passedEpisodes: 0,
+            topCheck: "test",
+            otlp_cost_usd: 0.042,
+            otlp_tokens: 1500,
+        } as unknown as SessionChurnRow;
+        const summary = {
+            generatedAt: "2026-06-11T00:00:00.000Z",
+            filters: { since: null, project: null, source: null, limit: 10 },
+            aggregates: [{
+                source: "codex",
+                sessions: 1,
+                sessionsWithFailures: 1,
+                landedLinesAdded: 0,
+                landedLinesRemoved: 0,
+                editLinesAdded: 5,
+                editLinesRemoved: 0,
+                repairLinesAdded: 3,
+                repairLinesRemoved: 0,
+                verificationFailures: 1,
+                episodes: 1,
+                passedEpisodes: 0,
+                topCheck: "test",
+            }],
+            hotSessions: [row],
+        } as unknown as SessionChurnSummary;
+
+        const rendered = formatSessionChurnSummary(summary);
+        expect(rendered).toContain("cost$");
+        expect(rendered).toContain("$0.042");
+    });
+
+    test("omits cost$ column when all hot session otlp costs are null", () => {
+        const summary = computeSessionChurn([
+            edit("s1", 1, 1),
+            fail("s1", 2, "test"),
+        ], landed([]), health([]));
+
+        const rendered = formatSessionChurnSummary(summary);
+        expect(rendered).not.toContain("cost$");
+    });
+
     test("flattens and truncates multi-line task labels in the table", () => {
         const summary = computeSessionChurn([
             edit("s1", 1, 1),

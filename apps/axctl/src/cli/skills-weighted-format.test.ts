@@ -21,6 +21,7 @@ const twoClassified: SkillsWeightedResult = {
             roles: ["framing", "execution"],
             weight: 2.0,
             score: 248.0,
+            median_recovery_ms: null,
         },
         {
             skill_id: "skill:⟨caveman⟩",
@@ -30,6 +31,7 @@ const twoClassified: SkillsWeightedResult = {
             roles: ["execution-mode"],
             weight: 1.0,
             score: 87.0,
+            median_recovery_ms: null,
         },
     ],
     doctor: {
@@ -49,6 +51,7 @@ const withUnclassified: SkillsWeightedResult = {
             roles: ["framing", "execution"],
             weight: 2.0,
             score: 248.0,
+            median_recovery_ms: null,
         },
         {
             skill_id: "skill:⟨worktree-read-strategy⟩",
@@ -58,6 +61,7 @@ const withUnclassified: SkillsWeightedResult = {
             roles: [],
             weight: 1.0,
             score: 62.0,
+            median_recovery_ms: null,
         },
     ],
     doctor: {
