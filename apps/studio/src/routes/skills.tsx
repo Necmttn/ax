@@ -18,8 +18,9 @@ import { fmtCount } from "@ax/lib/shared/formatters";
        tax you pay on turn zero.
      - BODY   (body_tokens): on-demand. The SKILL.md body, only loaded when the
        skill is actually invoked.
-   The page reveals that cost and lets you navigate the skills as an index.
-   No triage. These are real measurements - let the numbers speak.
+   The page reveals that cost AND offers an ACTION LAYER: reclaim the
+   always-loaded tax that buys you nothing. CTAs are copy-to-run only - the
+   page never touches your files; ax observes, you run the command.
    ========================================================================= */
 
 /** chars/4 token est is already done server-side; we format for display. */
@@ -40,7 +41,7 @@ const SOURCE_HUES = [
     "color-mix(in srgb, var(--blue) 55%, var(--surface2))",
 ] as const;
 
-type SortKey = "body" | "index" | "name" | "source";
+type SortKey = "body" | "index" | "name" | "source" | "used";
 type SortDir = "asc" | "desc";
 
 const DEFAULT_DIR: Record<SortKey, SortDir> = {
@@ -48,9 +49,15 @@ const DEFAULT_DIR: Record<SortKey, SortDir> = {
     index: "desc",
     name: "asc",
     source: "asc",
+    used: "desc",
 };
 
 const RENDER_PAGE = 80;
+
+/** How many dead-weight skills to surface in the reclaim panel before "show
+ *  all". Heaviest first - the opportunity, not a purge checklist. */
+const RECLAIM_TOP = 8;
+const RECLAIM_TRIM = 6;
 
 /** Stable hue per source name (so colour survives sort/filter and matches the
  *  legend even when the row order changes). */
@@ -83,6 +90,7 @@ export function SkillsRoute() {
     const [sortKey, setSortKey] = useState<SortKey>("body");
     const [sortDir, setSortDir] = useState<SortDir>("desc");
     const [renderLimit, setRenderLimit] = useState(RENDER_PAGE);
+    const [reclaimAll, setReclaimAll] = useState(false);
     const searchRef = useRef<HTMLInputElement | null>(null);
 
     // Split Claude-Code session sources from the other-harness tool catalogs.
@@ -102,6 +110,10 @@ export function SkillsRoute() {
     // headline. cc_index_tokens from totals is the authoritative figure.
     const indexTotal = data?.totals.cc_index_tokens ?? 0;
     const bodyTotal = data?.totals.cc_body_tokens ?? 0;
+    const windowDays = data?.totals.window_days ?? 30;
+    const reclaimTokens = data?.totals.reclaimable_index_tokens ?? 0;
+    const reclaimSkills = data?.totals.reclaimable_skills ?? 0;
+    const verboseCount = data?.totals.verbose_skills ?? 0;
     const ccSkillCount = useMemo(
         () => ccSources.reduce((n, s) => n + s.skills, 0),
         [ccSources],
@@ -116,6 +128,36 @@ export function SkillsRoute() {
         () => ccSources.reduce((m, s) => Math.max(m, s.index_tokens), 0),
         [ccSources],
     );
+
+    // --- RECLAIM: dead-weight skills, heaviest always-loaded cost first. The
+    // opportunity is the index tax these buy you nothing for. dir_path drives
+    // the copy-to-run `trash` command. Tools excluded (no SKILL.md to disable).
+    const deadWeight = useMemo(() => {
+        if (!data) return [];
+        return data.skills
+            .filter((s) => s.dead_weight && !s.is_tool && s.dir_path)
+            .sort((a, b) => b.index_tokens - a.index_tokens);
+    }, [data]);
+
+    // --- TRIM: verbose skills (description > 500 chars). Keep the skill, tighten
+    // the always-loaded part. Heaviest index first; exclude tools.
+    const verboseSkills = useMemo(() => {
+        if (!data) return [];
+        return data.skills
+            .filter((s) => s.verbose && !s.is_tool)
+            .sort((a, b) => b.index_tokens - a.index_tokens);
+    }, [data]);
+
+    // dir_paths of dead-weight skills per source - the [mute] copy-command body.
+    const deadBySource = useMemo(() => {
+        const map = new Map<string, ContextSkillRow[]>();
+        for (const s of deadWeight) {
+            const arr = map.get(s.source) ?? [];
+            arr.push(s);
+            map.set(s.source, arr);
+        }
+        return map;
+    }, [deadWeight]);
 
     const visibleSkills = useMemo(() => {
         if (!data) return [];
@@ -212,6 +254,20 @@ export function SkillsRoute() {
 
             {data ? (
                 <>
+                    {/* --- RECLAIM: the CTA. Opportunity-framed, heaviest first --- */}
+                    {reclaimTokens > 0 ? (
+                        <ReclaimPanel
+                            reclaimTokens={reclaimTokens}
+                            reclaimSkills={reclaimSkills}
+                            indexTotal={indexTotal}
+                            windowDays={windowDays}
+                            deadWeight={deadWeight}
+                            showAll={reclaimAll}
+                            onToggleAll={() => setReclaimAll((v) => !v)}
+                            hueMap={hueMap}
+                        />
+                    ) : null}
+
                     {/* --- WHERE THE BUDGET GOES: always-loaded index by source --- */}
                     <section className="ctx-breakdown">
                         <div className="ctx-breakdown-head">
@@ -245,43 +301,20 @@ export function SkillsRoute() {
 
                         <ul className="ctx-source-list">
                             {ccSources.map((s) => (
-                                <li
+                                <SourceRow
                                     key={s.source}
-                                    className={`ctx-source-row${sourceFilter === s.source ? " is-active" : ""}`}
-                                    onClick={() =>
+                                    s={s}
+                                    hue={hueMap.get(s.source) ?? "var(--dim)"}
+                                    maxIndexSource={maxIndexSource}
+                                    active={sourceFilter === s.source}
+                                    windowDays={windowDays}
+                                    deadSkills={deadBySource.get(s.source) ?? []}
+                                    onSelect={() =>
                                         setSourceFilter((cur) =>
                                             cur === s.source ? null : s.source,
                                         )
                                     }
-                                >
-                                    <span className="ctx-source-name">
-                                        <i
-                                            className="ctx-swatch"
-                                            style={{ background: hueMap.get(s.source) }}
-                                            aria-hidden="true"
-                                        />
-                                        {s.source}
-                                    </span>
-                                    <span className="ctx-source-skills">
-                                        {fmtCount(s.skills)} {s.skills === 1 ? "skill" : "skills"}
-                                    </span>
-                                    <span className="ctx-source-bar" aria-hidden="true">
-                                        <i
-                                            style={{
-                                                width: `${maxIndexSource > 0 ? Math.max(2, (s.index_tokens / maxIndexSource) * 100) : 0}%`,
-                                                background: hueMap.get(s.source),
-                                            }}
-                                        />
-                                    </span>
-                                    <span className="ctx-source-index">
-                                        {fmtTokens(s.index_tokens)}
-                                        <small>always</small>
-                                    </span>
-                                    <span className="ctx-source-body">
-                                        {fmtTokens(s.body_tokens)}
-                                        <small>on demand</small>
-                                    </span>
-                                </li>
+                                />
                             ))}
                         </ul>
                         {toolSources.length > 0 ? (
@@ -300,6 +333,11 @@ export function SkillsRoute() {
                             </p>
                         ) : null}
                     </section>
+
+                    {/* --- TRIM: verbose skills, keep but tighten --- */}
+                    {verboseSkills.length > 0 ? (
+                        <TrimPanel rows={verboseSkills} hueMap={hueMap} verboseCount={verboseCount} />
+                    ) : null}
 
                     <DriftPanel rows={driftRows} />
 
@@ -369,6 +407,9 @@ export function SkillsRoute() {
                                     <SortHeader k="source" current={sortKey} dir={sortDir} onClick={onSortClick}>
                                         Source
                                     </SortHeader>
+                                    <SortHeader k="used" current={sortKey} dir={sortDir} onClick={onSortClick} className="num">
+                                        Used <span className="th-sub">{windowDays}d</span>
+                                    </SortHeader>
                                     <SortHeader k="index" current={sortKey} dir={sortDir} onClick={onSortClick} className="num">
                                         Index <span className="th-sub">always</span>
                                     </SortHeader>
@@ -409,6 +450,304 @@ export function SkillsRoute() {
             ) : null}
         </section>
     );
+}
+
+/* ===========================================================================
+   ACTION LAYER
+   Three CTAs, all copy-to-run. The page NEVER mutates a file - it copies a
+   command/brief to the clipboard. ax observes; you run it.
+   ========================================================================= */
+
+/** Copies `text` to the clipboard and flips to a "copied ✓" state for 1.6s.
+ *  The whole affordance is the button; caption sits in the panel. */
+function CopyAction({
+    text,
+    label,
+    className = "ctx-act",
+    title,
+}: {
+    readonly text: string;
+    readonly label: string;
+    readonly className?: string;
+    readonly title?: string;
+}) {
+    const [copied, setCopied] = useState(false);
+    return (
+        <button
+            type="button"
+            className={`${className}${copied ? " is-copied" : ""}`}
+            title={title}
+            onClick={() => {
+                void navigator.clipboard.writeText(text).then(() => {
+                    setCopied(true);
+                    setTimeout(() => setCopied(false), 1600);
+                });
+            }}
+        >
+            {copied ? "copied ✓" : label}
+        </button>
+    );
+}
+
+/** `trash <dir_path>` - repo prefers trash over rm. */
+const disableCmd = (s: ContextSkillRow): string => `trash ${shellQuote(s.dir_path)}`;
+
+/** A multi-line `trash dir1 dir2 …` for every dead-weight skill of one source. */
+function muteCmd(rows: ReadonlyArray<ContextSkillRow>): string {
+    const dirs = rows.filter((r) => r.dir_path).map((r) => shellQuote(r.dir_path));
+    if (dirs.length === 0) return "";
+    // one trash call so the user reclaims the whole source in a single run
+    return `trash \\\n  ${dirs.join(" \\\n  ")}`;
+}
+
+/** A one-line agent brief that tightens the always-loaded description. */
+const trimCmd = (s: ContextSkillRow): string =>
+    `axctl improve recommend --skill ${shellQuote(s.name)}  # tighten SKILL.md frontmatter description (~${Math.round(s.index_tokens)} tok always-loaded)`;
+
+/** Minimal shell quoting - wrap in single quotes if the path has spaces or
+ *  shell-special chars; the skill dirs are plain paths but be safe. */
+function shellQuote(s: string): string {
+    if (s === "") return "''";
+    if (/^[A-Za-z0-9_./@:-]+$/.test(s)) return s;
+    return `'${s.replace(/'/g, "'\\''")}'`;
+}
+
+/** CTA 1 - reclaim dead weight. Opportunity headline + the heaviest offenders.
+ *  Calm instrument tone: this is opt-in browsing of the heaviest dead weight,
+ *  not a purge checklist. The {windowDays}d-unused basis is made explicit. */
+function ReclaimPanel({
+    reclaimTokens,
+    reclaimSkills,
+    indexTotal,
+    windowDays,
+    deadWeight,
+    showAll,
+    onToggleAll,
+    hueMap,
+}: {
+    readonly reclaimTokens: number;
+    readonly reclaimSkills: number;
+    readonly indexTotal: number;
+    readonly windowDays: number;
+    readonly deadWeight: ReadonlyArray<ContextSkillRow>;
+    readonly showAll: boolean;
+    readonly onToggleAll: () => void;
+    readonly hueMap: Map<string, string>;
+}) {
+    const shown = showAll ? deadWeight : deadWeight.slice(0, RECLAIM_TOP);
+    const more = deadWeight.length - shown.length;
+    const pct = indexTotal > 0 ? Math.round((reclaimTokens / indexTotal) * 100) : 0;
+    return (
+        <section className="ctx-reclaim">
+            <div className="ctx-reclaim-head">
+                <div className="ctx-reclaim-lede">
+                    <span className="inst-kicker">$ ax reclaim</span>
+                    <h3 className="ctx-reclaim-h">
+                        Reclaim up to <em>~{fmtTokens(reclaimTokens)}</em> tok / session
+                    </h3>
+                    <p className="ctx-reclaim-sub">
+                        {pct}% of your always-loaded tax sits in{" "}
+                        <b>{fmtCount(reclaimSkills)}</b> skills not invoked in the last{" "}
+                        <b>{windowDays}d</b>. Browse the heaviest first - disabling them
+                        cuts the turn-zero load; nothing here runs automatically.
+                    </p>
+                </div>
+                <div className="ctx-reclaim-gauge" aria-hidden="true">
+                    <span className="ctx-reclaim-gauge-bar">
+                        <i style={{ width: `${pct}%` }} />
+                    </span>
+                    <span className="ctx-reclaim-gauge-cap">
+                        {pct}% reclaimable
+                    </span>
+                </div>
+            </div>
+
+            <ul className="ctx-reclaim-list">
+                {shown.map((s) => (
+                    <li key={`${s.source}/${s.name}`} className="ctx-reclaim-row">
+                        <span className="ctx-reclaim-name">
+                            <i
+                                className="ctx-swatch"
+                                style={{ background: hueMap.get(s.source) ?? "var(--dim)" }}
+                                aria-hidden="true"
+                            />
+                            {s.name}
+                        </span>
+                        <span className="ctx-reclaim-reclaim">
+                            {fmtTokens(s.index_tokens)}<small>reclaim</small>
+                        </span>
+                        <span className="ctx-reclaim-last">{lastUsedLabel(s, windowDays)}</span>
+                        <CopyAction
+                            text={disableCmd(s)}
+                            label="[disable]"
+                            className="ctx-act"
+                            title={`copy: ${disableCmd(s)}`}
+                        />
+                    </li>
+                ))}
+            </ul>
+
+            <p className="ctx-reclaim-foot">
+                {more > 0 ? (
+                    <button type="button" className="ctx-link" onClick={onToggleAll}>
+                        {showAll ? "show fewer" : `show ${more} more dead-weight ${more === 1 ? "skill" : "skills"}`}
+                    </button>
+                ) : (
+                    <span>showing all {deadWeight.length}</span>
+                )}
+                <span className="ctx-reclaim-note">
+                    [disable] copies <code>trash &lt;dir&gt;</code> to run yourself - ax
+                    won't touch your files.
+                </span>
+            </p>
+        </section>
+    );
+}
+
+/** CTA 3 - trim verbose skills. Keep the skill, tighten its bloated (always-
+ *  loaded) description. Copies an `axctl improve recommend` brief. */
+function TrimPanel({
+    rows,
+    hueMap,
+    verboseCount,
+}: {
+    readonly rows: ReadonlyArray<ContextSkillRow>;
+    readonly hueMap: Map<string, string>;
+    readonly verboseCount: number;
+}) {
+    const [open, setOpen] = useState(false);
+    const shown = open ? rows : rows.slice(0, RECLAIM_TRIM);
+    const more = rows.length - shown.length;
+    const trimmable = rows.reduce((n, s) => n + s.index_tokens, 0);
+    return (
+        <section className="ctx-trim">
+            <div className="ctx-breakdown-head">
+                <span className="inst-kicker">$ ax trim</span>
+                <span className="ctx-breakdown-note">
+                    {fmtCount(verboseCount)} verbose {verboseCount === 1 ? "skill" : "skills"} ·
+                    long descriptions ride in every session ({fmtTokens(trimmable)} tok across them)
+                </span>
+            </div>
+            <ul className="ctx-trim-list">
+                {shown.map((s) => (
+                    <li key={`${s.source}/${s.name}`} className="ctx-trim-row">
+                        <span className="ctx-reclaim-name">
+                            <i
+                                className="ctx-swatch"
+                                style={{ background: hueMap.get(s.source) ?? "var(--dim)" }}
+                                aria-hidden="true"
+                            />
+                            {s.name}
+                        </span>
+                        <span className="ctx-trim-cost">
+                            {fmtTokens(s.index_tokens)}<small>always</small>
+                        </span>
+                        <CopyAction
+                            text={trimCmd(s)}
+                            label="[trim]"
+                            className="ctx-act ctx-act-trim"
+                            title={`copy: ${trimCmd(s)}`}
+                        />
+                    </li>
+                ))}
+            </ul>
+            {more > 0 ? (
+                <p className="ctx-reclaim-foot">
+                    <button type="button" className="ctx-link" onClick={() => setOpen((v) => !v)}>
+                        {open ? "show fewer" : `show ${more} more`}
+                    </button>
+                    <span className="ctx-reclaim-note">
+                        [trim] copies an <code>axctl improve recommend</code> brief - the
+                        skill stays, its description gets tighter.
+                    </span>
+                </p>
+            ) : (
+                <p className="ctx-reclaim-foot">
+                    <span className="ctx-reclaim-note">
+                        [trim] copies an <code>axctl improve recommend</code> brief - the
+                        skill stays, its description gets tighter.
+                    </span>
+                </p>
+            )}
+        </section>
+    );
+}
+
+/** Per-source ledger row. CTA 2 lives here: sources with dead skills get a
+ *  [mute] action that reclaims the whole source's dead-weight index at once. */
+function SourceRow({
+    s,
+    hue,
+    maxIndexSource,
+    active,
+    windowDays,
+    deadSkills,
+    onSelect,
+}: {
+    readonly s: ContextSourceRow;
+    readonly hue: string;
+    readonly maxIndexSource: number;
+    readonly active: boolean;
+    readonly windowDays: number;
+    readonly deadSkills: ReadonlyArray<ContextSkillRow>;
+    readonly onSelect: () => void;
+}) {
+    // An entirely-cold source (0 invocations in window) is the cleanest mute.
+    const cold = s.uses_window === 0;
+    const canMute = s.dead_skills > 0 && deadSkills.length > 0 && s.reclaimable_index_tokens > 0;
+    return (
+        <li
+            className={`ctx-source-row${active ? " is-active" : ""}${cold ? " is-cold" : ""}`}
+            onClick={onSelect}
+        >
+            <span className="ctx-source-name">
+                <i className="ctx-swatch" style={{ background: hue }} aria-hidden="true" />
+                {s.source}
+            </span>
+            <span className="ctx-source-skills">
+                {fmtCount(s.skills)} {s.skills === 1 ? "skill" : "skills"}
+                {s.dead_skills > 0 ? (
+                    <span className="ctx-source-dead" title={`${s.dead_skills} unused in ${windowDays}d`}>
+                        {fmtCount(s.dead_skills)} cold
+                    </span>
+                ) : null}
+            </span>
+            <span className="ctx-source-bar" aria-hidden="true">
+                <i
+                    style={{
+                        width: `${maxIndexSource > 0 ? Math.max(2, (s.index_tokens / maxIndexSource) * 100) : 0}%`,
+                        background: hue,
+                    }}
+                />
+            </span>
+            <span className="ctx-source-index">
+                {fmtTokens(s.index_tokens)}
+                <small>always</small>
+            </span>
+            <span className="ctx-source-action" onClick={(e) => e.stopPropagation()}>
+                {canMute ? (
+                    <CopyAction
+                        text={muteCmd(deadSkills)}
+                        label={`[mute ${fmtTokens(s.reclaimable_index_tokens)}]`}
+                        className="ctx-act"
+                        title={`copy: trash the ${deadSkills.length} cold ${deadSkills.length === 1 ? "skill" : "skills"} in this source (~${fmtTokens(s.reclaimable_index_tokens)} tok)`}
+                    />
+                ) : (
+                    <span className="ctx-source-body">
+                        {fmtTokens(s.body_tokens)}
+                        <small>on demand</small>
+                    </span>
+                )}
+            </span>
+        </li>
+    );
+}
+
+/** "never" when last_used is null, else "Nd ago"; appended with the window
+ *  basis so the cold-skill judgement is legible, not arbitrary. */
+function lastUsedLabel(s: ContextSkillRow, _windowDays: number): string {
+    if (!s.last_used) return s.uses_total > 0 ? "not in window" : "never used";
+    return `last ${relTime(s.last_used)}`;
 }
 
 /** Compact relative time ("3d ago") from an ISO timestamp. */
@@ -480,16 +819,33 @@ function SkillRow({
     maxBody: number;
 }) {
     const frac = maxBody > 0 ? Math.max(0.02, row.body_tokens / maxBody) : 0;
+    const cls = [
+        "skill-row",
+        row.dead_weight ? "is-dead" : "",
+        row.verbose ? "is-verbose" : "",
+    ].filter(Boolean).join(" ");
     return (
-        <tr className="skill-row">
+        <tr className={cls}>
             <td className="skill-cell">
                 <strong>{row.name}</strong>
                 {row.is_tool ? <span className="ctx-tool-tag">tool</span> : null}
+                {row.verbose && !row.is_tool ? (
+                    <span className="ctx-flag ctx-flag-verbose" title="description > 500 chars - always-loaded">verbose</span>
+                ) : null}
+                {row.dead_weight && !row.is_tool ? (
+                    <span className="ctx-flag ctx-flag-dead" title="0 invocations in window - always-loaded cost, no use">cold</span>
+                ) : null}
             </td>
             <td>
                 <span className="ctx-cell-source">
                     <i className="ctx-swatch" style={{ background: hue }} aria-hidden="true" />
                     {row.source}
+                </span>
+            </td>
+            <td className="num">
+                <span className={`ctx-used${row.uses_window === 0 ? " is-zero" : ""}`}>
+                    {row.uses_window > 0 ? fmtCount(row.uses_window) : "-"}
+                    <small>{row.last_used ? relTime(row.last_used) : (row.uses_total > 0 ? "older" : "never")}</small>
                 </span>
             </td>
             <td className="num">{fmtTokens(row.index_tokens)}</td>
@@ -517,6 +873,10 @@ function sortSkills(
                 break;
             case "index":
                 cmp = a.index_tokens - b.index_tokens;
+                break;
+            case "used":
+                cmp = a.uses_window - b.uses_window ||
+                    (Date.parse(a.last_used ?? "") || 0) - (Date.parse(b.last_used ?? "") || 0);
                 break;
             case "name":
                 cmp = a.name.localeCompare(b.name);

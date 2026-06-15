@@ -3740,6 +3740,273 @@ td.skill-cell .description {
 }
 .rdx .ctx-weight i { display: block; height: 100%; border-radius: 3px; }
 
+/* ===========================================================================
+   ACTION LAYER  (reclaim / mute / trim)
+   The CTA on the budget. Every action COPIES a command to run yourself - the
+   page never mutates a file. Opportunity-framed, calm, instrument tone. GREEN
+   is the only accent (the reclaim is a win); orange stays reserved for alerts.
+   Colour lives in the gauge + swatches, never as a panel border.
+   ========================================================================= */
+
+/* the copy-to-run affordance: a quiet mono chip that confirms in place. The
+   bracketed [label] reads as a terminal action, not a CTA button. */
+.rdx .ctx-act {
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.02em;
+    color: var(--accent);
+    background: none;
+    border: 1px solid color-mix(in srgb, var(--accent) 32%, transparent);
+    border-radius: 5px;
+    padding: 3px 9px;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: background 0.12s var(--ease, ease), border-color 0.12s var(--ease, ease), color 0.12s var(--ease, ease);
+}
+.rdx .ctx-act:hover {
+    background: color-mix(in srgb, var(--accent) 12%, transparent);
+    border-color: color-mix(in srgb, var(--accent) 55%, transparent);
+}
+.rdx .ctx-act.is-copied {
+    color: var(--display);
+    background: color-mix(in srgb, var(--accent) 22%, transparent);
+    border-color: color-mix(in srgb, var(--accent) 60%, transparent);
+}
+/* trim is a softer action (keep the skill) - render it muted, not accented */
+.rdx .ctx-act-trim {
+    color: var(--sec);
+    border-color: var(--border);
+}
+.rdx .ctx-act-trim:hover {
+    color: var(--pri);
+    background: var(--surface2);
+    border-color: var(--border-hi);
+}
+
+/* --- CTA 1: reclaim dead weight ---------------------------------------- */
+.rdx .ctx-reclaim {
+    margin: 4px 0 26px;
+    padding: 18px;
+    border-radius: 8px;
+    background: color-mix(in srgb, var(--accent) 4%, var(--surface));
+    border: 1px solid var(--border);
+}
+.rdx .ctx-reclaim-head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 24px;
+    flex-wrap: wrap;
+    margin-bottom: 14px;
+}
+.rdx .ctx-reclaim-lede { min-width: 0; flex: 1 1 320px; }
+.rdx .ctx-reclaim-h {
+    font-family: var(--serif);
+    font-weight: 400;
+    font-size: 21px;
+    line-height: 1.1;
+    color: var(--display);
+    margin: 6px 0 6px;
+}
+.rdx .ctx-reclaim-h em {
+    font-style: normal;
+    color: var(--accent);
+    font-variant-numeric: tabular-nums;
+}
+.rdx .ctx-reclaim-sub {
+    font-family: var(--mono);
+    font-size: 11.5px;
+    line-height: 1.5;
+    color: var(--sec);
+    margin: 0;
+    max-width: 56ch;
+}
+.rdx .ctx-reclaim-sub b { color: var(--pri); font-weight: 600; }
+.rdx .ctx-reclaim-gauge {
+    flex: 0 0 auto;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 5px;
+    padding-top: 4px;
+}
+.rdx .ctx-reclaim-gauge-bar {
+    width: 132px;
+    height: 7px;
+    border-radius: 4px;
+    background: var(--surface2);
+    overflow: hidden;
+    display: block;
+}
+.rdx .ctx-reclaim-gauge-bar i {
+    display: block;
+    height: 100%;
+    border-radius: 4px;
+    background: var(--accent);
+    transition: width 0.5s var(--ease, ease);
+}
+.rdx .ctx-reclaim-gauge-cap {
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--dim);
+}
+
+.rdx .ctx-reclaim-list { list-style: none; margin: 0; padding: 0; }
+.rdx .ctx-reclaim-row {
+    display: grid;
+    grid-template-columns: minmax(150px, 1fr) 96px minmax(96px, 150px) 88px;
+    align-items: center;
+    gap: 14px;
+    padding: 7px 4px;
+    border-bottom: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+}
+.rdx .ctx-reclaim-row:last-child { border-bottom: 0; }
+.rdx .ctx-reclaim-name {
+    font-family: var(--mono);
+    font-size: 12.5px;
+    color: var(--display);
+    display: inline-flex;
+    align-items: center;
+    gap: 9px;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.rdx .ctx-reclaim-reclaim {
+    font-family: var(--mono);
+    font-variant-numeric: tabular-nums;
+    font-size: 13px;
+    color: var(--accent);
+    text-align: right;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 1px;
+    line-height: 1.1;
+}
+.rdx .ctx-reclaim-reclaim small,
+.rdx .ctx-trim-cost small {
+    font-family: var(--mono);
+    font-size: 9px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--dim);
+}
+.rdx .ctx-reclaim-last {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--dim);
+    text-align: right;
+    white-space: nowrap;
+}
+.rdx .ctx-reclaim-row .ctx-act { justify-self: end; }
+.rdx .ctx-reclaim-foot {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 16px;
+    flex-wrap: wrap;
+    margin: 14px 0 0;
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--dim);
+}
+.rdx .ctx-reclaim-note { color: var(--dim); }
+.rdx .ctx-reclaim-note code {
+    font-family: var(--mono);
+    font-size: 10.5px;
+    color: var(--sec);
+    background: var(--surface2);
+    padding: 1px 5px;
+    border-radius: 3px;
+}
+
+/* --- CTA 3: trim verbose ------------------------------------------------ */
+.rdx .ctx-trim { margin: 0 0 26px; }
+.rdx .ctx-trim-list { list-style: none; margin: 10px 0 0; padding: 0; }
+.rdx .ctx-trim-row {
+    display: grid;
+    grid-template-columns: minmax(150px, 1fr) 96px 70px;
+    align-items: center;
+    gap: 14px;
+    padding: 6px 4px;
+    border-bottom: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
+}
+.rdx .ctx-trim-row:last-child { border-bottom: 0; }
+.rdx .ctx-trim-cost {
+    font-family: var(--mono);
+    font-variant-numeric: tabular-nums;
+    font-size: 13px;
+    color: var(--pri);
+    text-align: right;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 1px;
+    line-height: 1.1;
+}
+.rdx .ctx-trim-row .ctx-act { justify-self: end; }
+
+/* --- CTA 2: per-source mute + cold badge -------------------------------- */
+.rdx .ctx-source-dead {
+    font-family: var(--mono);
+    font-size: 9.5px;
+    letter-spacing: 0.04em;
+    color: var(--dim);
+    margin-left: 8px;
+    padding: 1px 5px;
+    border-radius: 3px;
+    border: 1px solid var(--border);
+}
+.rdx .ctx-source-row.is-cold .ctx-source-dead {
+    color: var(--sec);
+    border-color: var(--border-hi);
+}
+.rdx .ctx-source-action {
+    display: flex;
+    justify-content: flex-end;
+    align-items: center;
+}
+.rdx .ctx-source-action .ctx-act { padding: 3px 8px; }
+.rdx .ctx-source-action .ctx-source-body { align-items: flex-end; }
+
+/* --- skill-index usage column + dead/verbose flags ---------------------- */
+.rdx .ctx-used {
+    display: inline-flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 1px;
+    line-height: 1.1;
+    font-variant-numeric: tabular-nums;
+    color: var(--pri);
+}
+.rdx .ctx-used.is-zero { color: var(--dim); }
+.rdx .ctx-used small {
+    font-family: var(--mono);
+    font-size: 9px;
+    letter-spacing: 0.04em;
+    color: var(--dim);
+    text-transform: lowercase;
+}
+.rdx .ctx-flag {
+    font-family: var(--mono);
+    font-size: 9px;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    border-radius: 3px;
+    padding: 1px 5px;
+    margin-left: 7px;
+    border: 1px solid var(--border);
+    color: var(--dim);
+    vertical-align: middle;
+}
+.rdx .ctx-flag-verbose { color: var(--sec); }
+/* "cold" is information, not alarm - keep it dim, not orange */
+.rdx .skill-row.is-dead td.skill-cell strong { color: var(--sec); }
+
 @media (max-width: 640px) {
     .rdx .ctx-source-row {
         grid-template-columns: 1fr auto;
@@ -3748,5 +4015,12 @@ td.skill-cell .description {
     .rdx .ctx-source-bar { display: none; }
     .rdx .ctx-source-skills { grid-row: 1; }
     .rdx .ctx-source-index { grid-column: 1; align-items: flex-start; flex-direction: row; gap: 6px; align-items: baseline; }
-    .rdx .ctx-source-body { grid-column: 2; flex-direction: row; gap: 6px; align-items: baseline; }
+    .rdx .ctx-source-action { grid-column: 2; }
+    .rdx .ctx-reclaim-row {
+        grid-template-columns: 1fr auto;
+        gap: 3px 12px;
+    }
+    .rdx .ctx-reclaim-last { grid-column: 1; text-align: left; }
+    .rdx .ctx-reclaim-row .ctx-act { grid-row: 1 / span 2; grid-column: 2; }
+    .rdx .ctx-trim-row { grid-template-columns: 1fr auto auto; }
 }
