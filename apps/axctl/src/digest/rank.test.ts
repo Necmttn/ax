@@ -1,8 +1,7 @@
 import { describe, expect, it } from "bun:test";
-import { DigestItem } from "./model.ts";
-import { BASE_WEIGHT, salience, topForSnapshot, pickUnshown } from "./rank.ts";
+import { BASE_WEIGHT, salience, topForSnapshot } from "./rank.ts";
 
-const mk = (over: Partial<{ id: string; kind: DigestItem["kind"]; urgency: number; ageHours: number }>) => {
+const mk = (over: Partial<{ id: string; kind: "cost" | "churn" | "improve" | "quota"; urgency: number; ageHours: number }>) => {
   const kind = over.kind ?? "cost";
   return {
     id: over.id ?? `${kind}:x`,
@@ -41,32 +40,3 @@ describe("topForSnapshot", () => {
   });
 });
 
-describe("pickUnshown", () => {
-  const now = new Date("2026-06-15T12:00:00Z");
-  const item = (id: string, sal: number): DigestItem =>
-    DigestItem.make({ id, kind: "cost", salience: sal, text: "t", action: "a", computed_at: now });
-
-  it("returns top-3 ranked when nothing is suppressed", () => {
-    const snap = [item("a", 3), item("b", 2), item("c", 1), item("d", 0.5)];
-    const picked = pickUnshown(snap, {}, now, 3);
-    expect(picked.map((p) => p.id)).toEqual(["a", "b", "c"]);
-  });
-
-  it("suppresses items shown within 6h", () => {
-    const snap = [item("a", 3), item("b", 2)];
-    const shown = { a: { last_shown_at: new Date("2026-06-15T09:00:00Z").toISOString(), shown_count: 1 } };
-    expect(pickUnshown(snap, shown, now, 3).map((p) => p.id)).toEqual(["b"]);
-  });
-
-  it("suppresses items with shown_count >= 3", () => {
-    const snap = [item("a", 3), item("b", 2)];
-    const shown = { a: { last_shown_at: "2026-06-01T00:00:00Z", shown_count: 3 } };
-    expect(pickUnshown(snap, shown, now, 3).map((p) => p.id)).toEqual(["b"]);
-  });
-
-  it("quiet day: all suppressed → empty array", () => {
-    const snap = [item("a", 3)];
-    const shown = { a: { last_shown_at: new Date("2026-06-15T11:00:00Z").toISOString(), shown_count: 1 } };
-    expect(pickUnshown(snap, shown, now, 3)).toEqual([]);
-  });
-});

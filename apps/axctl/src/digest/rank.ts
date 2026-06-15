@@ -1,5 +1,4 @@
 import type { DigestItem, DigestKind } from "./model.ts";
-import type { ShownState } from "./shown.ts";
 
 /** Per-kind base weight. Tunable seed (spec §Ranking). */
 export const BASE_WEIGHT: Record<DigestKind, number> = {
@@ -9,8 +8,6 @@ export const BASE_WEIGHT: Record<DigestKind, number> = {
   quota: 0.5,
 };
 
-const SUPPRESS_WINDOW_MS = 6 * 60 * 60 * 1000;
-const MAX_SHOWN_COUNT = 3;
 /** Recency half-life: a signal one week old scores ~half a fresh one. */
 const RECENCY_HALFLIFE_HOURS = 168;
 
@@ -32,26 +29,3 @@ export const topForSnapshot = <T extends { salience: number }>(
   items: ReadonlyArray<T>,
   limit = 8,
 ): T[] => [...items].sort((a, b) => b.salience - a.salience).slice(0, limit);
-
-const isSuppressed = (id: string, shown: ShownState, nowMs: number): boolean => {
-  const rec = shown[id];
-  if (!rec) return false;
-  if (rec.shown_count >= MAX_SHOWN_COUNT) return true;
-  const lastMs = Date.parse(rec.last_shown_at);
-  if (Number.isFinite(lastMs) && nowMs - lastMs < SUPPRESS_WINDOW_MS) return true;
-  return false;
-};
-
-/** Surface-selection: ranked snapshot minus suppressed, top `limit`. */
-export const pickUnshown = (
-  items: ReadonlyArray<DigestItem>,
-  shown: ShownState,
-  now: Date,
-  limit = 3,
-): DigestItem[] => {
-  const nowMs = now.getTime();
-  return [...items]
-    .sort((a, b) => b.salience - a.salience)
-    .filter((it) => !isSuppressed(it.id, shown, nowMs))
-    .slice(0, limit);
-};

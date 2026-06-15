@@ -3,6 +3,7 @@ import {
   type DigestSnapshotJson,
   type ShownState,
   isSnapshotFresh,
+  mergeShownState,
   pickUnshownJson,
   renderDigestJson,
 } from "@ax/lib/digest-shared";
@@ -38,16 +39,7 @@ const readJson = async <T>(path: string): Promise<T | null> => {
   }
 };
 
-const recordShownIds = async (path: string, ids: string[], now: Date): Promise<void> => {
-  if (ids.length === 0) return;
-  const prev = (await readJson<ShownState>(path)) ?? {};
-  const next: ShownState = { ...prev };
-  for (const id of ids) {
-    next[id] = {
-      last_shown_at: now.toISOString(),
-      shown_count: (prev[id]?.shown_count ?? 0) + 1,
-    };
-  }
+const writeShownState = async (path: string, next: ShownState): Promise<void> => {
   try {
     const tmp = `${path}.${process.pid}.tmp`;
     await Bun.write(tmp, `${JSON.stringify(next, null, 2)}\n`, { createPath: true });
@@ -66,7 +58,13 @@ const hook = defineHook({
       const snap = yield* Effect.promise(() => readJson<DigestSnapshotJson>(DIGEST_PATH()));
       const shown = (yield* Effect.promise(() => readJson<ShownState>(SHOWN_PATH()))) ?? {};
       const { verdict, shownIds } = decideDigestVerdict(snap, shown, now, MAX_AGE_HOURS);
-      yield* Effect.promise(() => recordShownIds(SHOWN_PATH(), shownIds, now));
+      // Prune resolved entries when we have a fresh snapshot, even if nothing was shown.
+      const fresh = snap !== null && isSnapshotFresh(snap, now, MAX_AGE_HOURS);
+      const liveIds = fresh ? new Set(snap.items.map((i) => i.id)) : null;
+      if (liveIds !== null) {
+        const next = mergeShownState(shown, shownIds, liveIds, now);
+        yield* Effect.promise(() => writeShownState(SHOWN_PATH(), next));
+      }
       return verdict;
     }),
 });

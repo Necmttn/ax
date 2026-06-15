@@ -63,3 +63,20 @@ export const isSnapshotFresh = (
   if (!Number.isFinite(genMs)) return false;
   return now.getTime() - genMs < maxAgeHours * 3600_000;
 };
+
+/** Merge shown-state for the next write: carry over only ids still present in
+ *  the live snapshot (drop resolved), and record/increment the just-shown ids.
+ *  `liveIds` = the ids in the current snapshot; `shownIds` = ids surfaced this fire. */
+export const mergeShownState = (
+  prev: ShownState,
+  shownIds: ReadonlyArray<string>,
+  liveIds: ReadonlySet<string>,
+  now: Date,
+): ShownState => {
+  const next: ShownState = {};
+  for (const [id, rec] of Object.entries(prev)) if (liveIds.has(id)) next[id] = rec;
+  for (const id of shownIds) {
+    next[id] = { last_shown_at: now.toISOString(), shown_count: (prev[id]?.shown_count ?? 0) + 1 };
+  }
+  return next;
+};

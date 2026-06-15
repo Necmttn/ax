@@ -4,6 +4,7 @@ import {
   type DigestSnapshotJson,
   type ShownState,
   isSnapshotFresh,
+  mergeShownState,
   pickUnshownJson,
   renderDigestJson,
 } from "./digest-shared.ts";
@@ -108,5 +109,40 @@ describe("isSnapshotFresh", () => {
 
   it("returns false when generated_at is a malformed date string", () => {
     expect(isSnapshotFresh(makeSnap("not-a-date"), now, 24)).toBe(false);
+  });
+});
+
+describe("mergeShownState", () => {
+  const ts1 = "2026-06-01T00:00:00Z";
+  const ts2 = "2026-06-10T00:00:00Z";
+  const writeNow = new Date("2026-06-15T12:00:00Z");
+
+  it("drops a prev id NOT in liveIds (resolved)", () => {
+    const prev: ShownState = { "churn:GONE": { last_shown_at: ts1, shown_count: 2 } };
+    const result = mergeShownState(prev, [], new Set(), writeNow);
+    expect(result["churn:GONE"]).toBeUndefined();
+  });
+
+  it("carries a prev id that IS in liveIds but wasn't shown this fire (unchanged)", () => {
+    const prev: ShownState = { "cost:routing": { last_shown_at: ts2, shown_count: 1 } };
+    const result = mergeShownState(prev, [], new Set(["cost:routing"]), writeNow);
+    expect(result["cost:routing"]).toEqual({ last_shown_at: ts2, shown_count: 1 });
+  });
+
+  it("increments a shown id's count and bumps last_shown_at", () => {
+    const prev: ShownState = { "improve:foo": { last_shown_at: ts1, shown_count: 1 } };
+    const result = mergeShownState(prev, ["improve:foo"], new Set(["improve:foo"]), writeNow);
+    expect(result["improve:foo"]).toEqual({
+      last_shown_at: writeNow.toISOString(),
+      shown_count: 2,
+    });
+  });
+
+  it("inserts a new shown id at count 1", () => {
+    const result = mergeShownState({}, ["cost:new"], new Set(["cost:new"]), writeNow);
+    expect(result["cost:new"]).toEqual({
+      last_shown_at: writeNow.toISOString(),
+      shown_count: 1,
+    });
   });
 });
