@@ -4,6 +4,8 @@
  * Deterministic: tool composition (A) + thinking signal (B). No LLM.
  * Spec: docs/superpowers/specs/2026-06-15-cost-routability-lens-design.md
  */
+import { Effect } from "effect";
+import { SurrealClient } from "@ax/lib/db";
 import { JUDGMENT_GUARD_RE } from "./routing-tune.ts";
 import { MODEL_ALIASES, reprice } from "./reprice.ts";
 import type { RepriceUsage, ModelPricing } from "./reprice.ts";
@@ -194,3 +196,194 @@ export function aggregateRoutability(
     estSavingsUsd, rows, days: input.days, minRun: input.minRun,
   };
 }
+
+// ---------------------------------------------------------------------------
+// DB fetch
+// ---------------------------------------------------------------------------
+
+const sinceDays = (d: number): number => Math.max(1, Math.trunc(d));
+
+/**
+ * All turns in the window (user + assistant). Ordered by (session, seq) so
+ * each session's slice is contiguous and seq-ordered when read sequentially.
+ * Uses text_excerpt (~500 chars) rather than full text - adequate for
+ * JUDGMENT_GUARD_RE pattern matching which targets first-sentence keywords.
+ */
+const TURNS_SQL = (days: number) => `
+SELECT
+    type::string(id) AS turn_id,
+    type::string(session) AS session_id,
+    seq,
+    role,
+    intent_kind,
+    text_excerpt AS text,
+    thinking_tokens
+FROM turn
+WHERE ts > time::now() - ${sinceDays(days)}d;
+`;
+
+/**
+ * Tool names per turn in the window. tool_call.turn is option<record<turn>>,
+ * so we filter NONE. No index on turn alone; the ts filter limits the scan
+ * to the same window as the turn query.
+ */
+const TOOL_CALLS_SQL = (days: number) => `
+SELECT
+    type::string(turn) AS turn_id,
+    name
+FROM tool_call
+WHERE ts > time::now() - ${sinceDays(days)}d
+  AND turn != NONE;
+`;
+
+/**
+ * Per-turn token usage. source distinguishes main ('claude-code' etc.) from
+ * subagent ('claude-subagent') at the session level - all rows for a subagent
+ * session carry source='claude-subagent'. Filtering happens in JS.
+ */
+const TURN_USAGE_SQL = (days: number) => `
+SELECT
+    type::string(turn) AS turn_id,
+    type::string(session) AS session_id,
+    source,
+    prompt_tokens,
+    completion_tokens,
+    cache_read_input_tokens,
+    cache_creation_input_tokens,
+    estimated_cost_usd
+FROM turn_token_usage
+WHERE ts > time::now() - ${sinceDays(days)}d;
+`;
+
+/** Pricing catalog - same query and field mapping as dispatch-analytics. */
+const AGENT_MODELS_SQL = `
+SELECT
+    name,
+    input_per_million_usd,
+    output_per_million_usd,
+    cache_read_per_million_usd,
+    cache_creation_per_million_usd
+FROM agent_model;
+`;
+
+/**
+ * Pull main-agent turns from SurrealDB, group into class-run spans per
+ * session, and return a RoutabilityResult. Mirrors fetchCostSplit in
+ * cost-analytics.ts: flat queries + JS join/aggregate, no GROUP BY derefs.
+ *
+ * Session classification: a session is a subagent session if ANY of its
+ * turn_token_usage rows have source='claude-subagent'; those sessions are
+ * excluded entirely. Sessions with no usage rows (e.g. purely user-turn
+ * stubs) are treated as main - they contribute zero cost and don't skew
+ * the result.
+ */
+export const fetchRoutability = Effect.fn("queries.fetchRoutability")(
+    function* (input: RoutabilityInput) {
+        const db = yield* SurrealClient;
+
+        const [turnRows, toolCallRows, usageRows, agentModelRows] = yield* db.query<[
+            Array<Record<string, unknown>>,
+            Array<Record<string, unknown>>,
+            Array<Record<string, unknown>>,
+            Array<Record<string, unknown>>,
+        ]>(
+            TURNS_SQL(input.days) +
+            TOOL_CALLS_SQL(input.days) +
+            TURN_USAGE_SQL(input.days) +
+            AGENT_MODELS_SQL,
+        );
+
+        // ---- tool names: turn_id → string[] --------------------------------
+        const toolsByTurn = new Map<string, string[]>();
+        for (const row of toolCallRows ?? []) {
+            const tid = String(row.turn_id ?? "");
+            if (!tid) continue;
+            const names = toolsByTurn.get(tid);
+            if (names) {
+                names.push(String(row.name ?? ""));
+            } else {
+                toolsByTurn.set(tid, [String(row.name ?? "")]);
+            }
+        }
+
+        // ---- usage map + subagent session classification ------------------
+        interface UsageData {
+            readonly prompt_tokens: number;
+            readonly completion_tokens: number;
+            readonly cache_read_tokens: number;
+            readonly cache_create_tokens: number;
+            readonly cost_usd: number;
+        }
+        const usageByTurn = new Map<string, UsageData>();
+        const subagentSessionIds = new Set<string>();
+
+        for (const row of usageRows ?? []) {
+            const tid = String(row.turn_id ?? "");
+            const sid = String(row.session_id ?? "");
+            if (!tid) continue;
+            if (String(row.source ?? "") === "claude-subagent") {
+                subagentSessionIds.add(sid);
+            }
+            usageByTurn.set(tid, {
+                prompt_tokens: Number(row.prompt_tokens ?? 0),
+                completion_tokens: Number(row.completion_tokens ?? 0),
+                cache_read_tokens: Number(row.cache_read_input_tokens ?? 0),
+                cache_create_tokens: Number(row.cache_creation_input_tokens ?? 0),
+                cost_usd: Number(row.estimated_cost_usd ?? 0),
+            });
+        }
+
+        // ---- group turns by session (main only), preserving DB seq order --
+        const turnsBySession = new Map<string, TurnFacts[]>();
+        for (const row of turnRows ?? []) {
+            const turnId = String(row.turn_id ?? "");
+            const sessionId = String(row.session_id ?? "");
+            if (!turnId || !sessionId) continue;
+            if (subagentSessionIds.has(sessionId)) continue;
+
+            const usg = usageByTurn.get(turnId);
+            const tf: TurnFacts = {
+                seq: Number(row.seq ?? 0),
+                role: String(row.role ?? ""),
+                toolNames: toolsByTurn.get(turnId) ?? [],
+                thinkingTokens: Number(row.thinking_tokens ?? 0),
+                intentKind: row.intent_kind == null ? null : String(row.intent_kind),
+                text: row.text == null ? null : String(row.text),
+                usage: usg ?? null,
+            };
+            const bucket = turnsBySession.get(sessionId);
+            if (bucket) {
+                bucket.push(tf);
+            } else {
+                turnsBySession.set(sessionId, [tf]);
+            }
+        }
+
+        // ---- pricing catalog: same field mapping as dispatch-analytics ----
+        const pricingCatalog = new Map<string, ModelPricing>();
+        for (const am of agentModelRows ?? []) {
+            if (am.name == null) continue;
+            pricingCatalog.set(String(am.name), {
+                provider: "anthropic",
+                inputPerMillionUsd: am.input_per_million_usd == null ? null : Number(am.input_per_million_usd),
+                outputPerMillionUsd: am.output_per_million_usd == null ? null : Number(am.output_per_million_usd),
+                cacheReadPerMillionUsd: am.cache_read_per_million_usd == null ? null : Number(am.cache_read_per_million_usd),
+                cacheCreationPerMillionUsd: am.cache_creation_per_million_usd == null ? null : Number(am.cache_creation_per_million_usd),
+                fastMultiplier: 1,
+                pricingSource: "agent_model",
+            });
+        }
+
+        // ---- build spans per session, concat, aggregate ------------------
+        const allSpans: Span[] = [];
+        for (const turns of turnsBySession.values()) {
+            // DB orders by (session, seq); sort defensively in case of ties.
+            turns.sort((a, b) => a.seq - b.seq);
+            for (const s of buildSpans(turns, input.minRun)) {
+                allSpans.push(s);
+            }
+        }
+
+        return aggregateRoutability(allSpans, pricingCatalog, input);
+    },
+);
