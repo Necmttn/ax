@@ -37,7 +37,10 @@ const STEPS: Step[] = [
     note: (
       <>
         One script. Drops the <code>ax</code> binary on your PATH and registers
-        the background watcher so new sessions get ingested automatically.
+        the background watcher so new sessions get ingested automatically. The
+        installer auto-falls back to the newest release that actually ships a
+        binary, so a half-published release can't break it. To pin a specific
+        version, prefix with <code>AXCTL_VERSION=v0.28.0</code>.
       </>
     ),
   },
