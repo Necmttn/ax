@@ -95,15 +95,31 @@ describe("session_metrics arg mapping", () => {
         expect(result).toEqual([]);
     });
 
-    it("ignores non-numeric sinceDays/limit and non-string project", async () => {
+    it("passes valid args through to the runtime", async () => {
         const rt = {
             runPromise: () => Promise.resolve([{ session: "session:x" }]),
         } as never;
         const result = await tool.run(
-            { sinceDays: "7", limit: "10", project: 42 },
+            { sinceDays: 7, limit: 10, project: "/repo" },
             rt,
         );
         expect(result).toEqual([{ session: "session:x" }]);
+    });
+
+    // Behavior change (production-parity): the typed factory parses args through
+    // the zod shape, so wrong-typed args are REJECTED at the boundary instead of
+    // being silently coerced away in `run`. On the live MCP path the SDK already
+    // ran the same `safeParse` BEFORE the callback fired, so it always rejected
+    // these - the old per-tool `typeof` coercion was dead defensive code.
+    it("rejects non-numeric sinceDays/limit and non-string project", async () => {
+        const unreachableRt = {
+            runPromise: () => {
+                throw new Error("runtime should not be reached");
+            },
+        } as never;
+        await expect(
+            tool.run({ sinceDays: "7", limit: "10", project: 42 }, unreachableRt),
+        ).rejects.toThrow();
     });
 });
 
@@ -169,13 +185,17 @@ describe("sessions_around date parsing", () => {
     } as never;
 
     it("rejects an invalid date string before hitting the runtime", async () => {
+        // The bespoke date check now lives in the schema as a `.refine`, so the
+        // failure carries the uniform validation envelope (message preserved).
         await expect(tool.run({ date: "not-a-date" }, unreachableRt)).rejects.toThrow(
             /Invalid date/,
         );
     });
 
-    it("rejects a missing date", async () => {
-        await expect(tool.run({}, unreachableRt)).rejects.toThrow(/Invalid date/);
+    it("rejects a missing date before hitting the runtime", async () => {
+        // Missing required `date` is rejected by the zod shape ("Required"),
+        // still before any DB call.
+        await expect(tool.run({}, unreachableRt)).rejects.toThrow();
     });
 
     it("maps a valid ISO date to a Date and returns the {sessions, next} envelope", async () => {
