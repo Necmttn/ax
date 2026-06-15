@@ -17,8 +17,8 @@ import { HttpServerRequest } from "effect/unstable/http";
 import { HttpApiBuilder } from "effect/unstable/httpapi";
 import { AxApi } from "@ax/lib/shared/api-contract";
 import { OtelWriter, OtelWriterLive } from "../../otel/writer.ts";
-import { decodeMetricsPayload, decodeTracePayload } from "../../otel/decode.ts";
-import { normalizeMetrics, normalizeTrace } from "../../otel/normalize.ts";
+import { decodeLogsPayload, decodeMetricsPayload, decodeTracePayload } from "../../otel/decode.ts";
+import { normalizeLogs, normalizeMetrics, normalizeTrace } from "../../otel/normalize.ts";
 
 // ------------------------------------------------------------------ types
 
@@ -38,8 +38,6 @@ export const handleOtlp = (
     contentEncoding: string | undefined,
 ) =>
     Effect.gen(function* () {
-        if (signal === "logs") return ACK;
-
         const bytes = new Uint8Array(body);
         const raw = contentEncoding === "gzip" ? Bun.gunzipSync(bytes) : bytes;
 
@@ -55,7 +53,10 @@ export const handleOtlp = (
 
         const writer = yield* OtelWriter;
 
-        if (signal === "metrics") {
+        if (signal === "logs") {
+            const payload = yield* decodeLogsPayload(json).pipe(Effect.orElseSucceed(() => null));
+            if (payload) yield* writer.writeLogs(normalizeLogs(payload));
+        } else if (signal === "metrics") {
             const payload = yield* decodeMetricsPayload(json).pipe(
                 Effect.orElseSucceed(() => null),
             );
