@@ -1,165 +1,229 @@
 # Quota-aware dispatch economy - proactive window awareness + enforcement
 
 Date: 2026-06-15
-Status: design for multi-agent review, pre-implementation
-Follows: skills/efficient-dispatch/SKILL.md, the route-dispatch hook, the quota module
+Status: final design (after 2 Opus reviews + Codex critique), pre-implementation
+Follows: skills/efficient-dispatch/SKILL.md, the route-dispatch hook (`matchRoutingTable`, unified in #411), the quota module
+
+**Locked with the user:** auto-route (silent rewrite, not block) · conserve +
+splurge together · **splurge is purely subtractive** (relax the downgrade; never
+force a model up).
 
 ## Problem
 
-Two failures, both observed live:
-
-1. **Enforcement gap.** A `well-specified-impl` routing class (`^implement ` → sonnet)
+1. **Enforcement gap.** A `well-specified-impl` class (`^implement ` → sonnet)
    exists and the route-dispatch hook is installed, yet a full session of
    `Implement …` subagents ran on the expensive inherited model - ~$130 over.
-   The hook only **warns**, and a `PreToolUse(Agent)` warn arrives as the
-   dispatch already goes out: an ignorable nudge, not a guardrail.
+   The hook only **warns**; a `PreToolUse(Agent)` warn arrives as the dispatch
+   already fires - an ignorable nudge. (And `Verdict.block` today encodes as
+   exit-2+stderr, whose reason reaches the **user**, not the model - so
+   block→re-dispatch wouldn't work autonomously, and would also train the agent
+   to set `model:` everywhere and bypass the table. Auto-route avoids both.)
 
-2. **The economy is one-directional and quota-blind.** "Route down to cheaper"
-   is correct only while conserving. Plan quota is **use-it-or-lose-it**: late
-   in a 5h/7d window with 40% remaining, forcing sonnet *wastes* surplus that
-   resets unused. The right rule is **cheap when conserving, best-model
-   everywhere when burning surplus near a reset** - and the system should
-   **proactively know** which regime it's in, not discover it passively.
+2. **Quota-blind in one direction.** "Route down to cheaper" is right *while
+   conserving*. Near a **7-day** reset with budget unspent, forcing sonnet keeps
+   the agent cheap when the rate is about to reset anyway. The system should
+   **proactively know** the regime and, near a 7d reset with genuine headroom,
+   **stop forcing things down** (so work runs on the strong inherited model) -
+   *without* forcing things up (running opus on work the table already deemed
+   sonnet-adequate burns rate for identical output - a vanity metric, per the
+   Codex critique).
 
-## Core: a proactively-fresh spend mode
+## The whole design in one knob
 
-A single signal, `SpendMode = "conserve" | "splurge"`, derived from the quota
-windows and kept **current** so every dispatch decision is accurate.
+`routeDownEnforced = (spendMode === "conserve")`. Plus one orthogonal,
+always-on **judgment warn**. That's it - there is no splurge-specific verdict.
 
-### `computeSpendMode(snapshot, nowMs, config)` - pure
+## Spend mode - proactively fresh
 
-Input: the `QuotaSnapshot` shape already cached at `~/.ax/quota-cache.json`
-(`five_hour`/`seven_day`, each `{ utilization, resets_at }`, plus `fetched_at`).
+### `computeSpendMode(snapshot, nowMs, config) → { mode, reason, stale }` (pure)
 
-- **stale guard:** if `nowMs - fetched_at > stalenessMs` (default 5 min) →
-  `conserve` (never splurge on uncertainty).
-- **splurge** when *either* window satisfies BOTH:
-  - `resets_at - now < nearResetMs` (5h window default 90 min; 7d default 24 h), AND
-  - `100 - utilization > minRemainingPct` (default 25).
-  Rationale: a window about to reset with lots unused = surplus that will
-  evaporate; spend it on the best model.
-- else **conserve**.
-- thresholds (`stalenessMs`, per-window `nearResetMs`, `minRemainingPct`) live
-  in `routing-table.json` so they're tunable without a code change.
+Input: cached `QuotaSnapshot` (`~/.ax/quota-cache.json`): `five_hour` /
+`seven_day` (each **nullable** `{ utilization /* %used 0–100 */, resets_at }`)
++ `fetched_at`.
+
+- **stale guard:** `nowMs - parse(fetched_at) > stalenessMs` (default 5 min) →
+  `conserve` (+ `stale: true`). Never splurge on uncertainty.
+- **null `seven_day`** → `conserve`.
+- **splurge** iff ALL of:
+  - 7d near reset: `parse(seven_day.resets_at) - now < nearResetMs7d` (default 24 h),
+  - 7d headroom: `100 - seven_day.utilization > minRemainingPct` (default 25),
+  - **no window near its cap** (Codex: the windows draw down the *same*
+    consumption, so splurge must not run you into either ceiling):
+    `five_hour.utilization < capFloorPct` AND `seven_day.utilization < capFloorPct`
+    (default 80). A null `five_hour` is treated as not-near-cap.
+- else `conserve`.
+- The **5h window never triggers splurge** (it resets every 5 h → a near-reset
+  test on it is a 30%-duty-cycle timer, not a surplus signal - the central
+  review fix). It only participates as a cap guard.
+- `parse(resets_at)` is strict ISO-8601 → epoch ms; a parse failure → treat that
+  window as null (→ conserve). Clock is the hook's `Date.now()` equivalent
+  passed in as `nowMs` (testable).
+- thresholds (`stalenessMs`, `nearResetMs7d`, `minRemainingPct`, `capFloorPct`)
+  live in `routing-table.json`.
 
 ### Manual override
 
-`AX_SPEND_MODE=auto|conserve|splurge` wins over the computed mode (`auto` = use
-the computation). The "I'm willing to throw the best model at everything" switch.
+`AX_SPEND_MODE=auto|conserve|splurge` wins (`auto` = computed). The hook reads
+`process.env` (the harness propagates user env to forked hooks - same path the
+existing `ALLOW_*` bypasses use; verified in the feasibility review).
 
-### Proactive freshness (the "system knows" requirement)
+### Proactive freshness - both mechanisms, v1
 
-`computeSpendMode` is only as good as the cache. Two mechanisms keep it warm so
-splurge is detected the moment it's true, not whenever the user happens to run
-statusline:
+A stale cache silently falls to conserve, which *during a splurge window* would
+keep forcing things down - the opposite of intent, invisibly. So freshness is
+load-bearing:
 
-1. **SessionStart refresh hook** (new, `~/.ax/hooks/refresh-quota.ts` via the
-   SDK): on `SessionStart`, run a quota refresh (`ax quota` honors its 60s TTL,
-   or `--fresh`) so every session begins with a current window picture. Fires
-   once per session - latency-tolerant, off the per-tool hot path.
-2. **Continuous tick** (recommended, can land in the same PR or follow): the
-   existing `com.necmttn.ax-watch` LaunchAgent already runs in the background;
-   add a periodic `ax quota` refresh (~every 5 min) so long sessions stay fresh
-   between SessionStarts. If deferred, the stale-guard degrades safely to
-   conserve.
+1. **SessionStart refresh hook** (`~/.ax/hooks/refresh-quota.ts`, new SDK hook):
+   shells out to `ax quota --fresh` once per session (off the hot path), then
+   computes the mode. If **splurge**, it `inject`s a one-line **dojo nudge**
+   (see below) instead of a bare `Verdict.allow`. Token absent/expired → no-op
+   (→ stale → surfaced, below).
+2. **Continuous tick** (required, not deferred - splurge on a long session needs
+   it): a dedicated **LaunchAgent with `StartInterval` ~5 min** running
+   `ax quota` (the existing `com.necmttn.ax-watch` is fswatch-driven, *not* a
+   timer, so this is its own unit, installed by `ax install`).
 
-The dispatch hot path **never** fetches - the route-dispatch hook only *reads*
-the local cache file (fast), so the ~70 ms hook budget is preserved.
+The dispatch hot path **never fetches** - the hook only reads the cache (sync
+`node:fs`, matching the routing-table read precedent), preserving ~70 ms.
 
-## Enforcement: route-dispatch hook verdicts
+## Enforcement: route-dispatch hook
 
-Extend `packages/hooks-sdk/src/hooks/route-dispatch.ts`. Detection (routing
-table + `matchTable`) is unchanged; the verdict becomes mode- and
-model-conditional.
+Extend `packages/hooks-sdk/src/hooks/route-dispatch.ts`. Matching is the unified
+`matchRoutingTable` (#411). The verdict is a pure, ordered `decideVerdict`.
 
-Let `match` = `matchTable(table, description, subagentType)` (a route-down class
-suggesting sonnet/haiku), `explicit` = an explicit `model` in the Agent input,
-`cheap` = explicit model matches `/sonnet|haiku/i`, `judgmentStrong` =
-description/agent_type is a **stays-strong** judgment kind (see below).
+### New SDK capability: `Verdict.route(model)` (auto-route)
 
-| condition | verdict |
-|-----------|---------|
-| `match` && !`explicit` && mode=**conserve** | **block** - "looks like `<class>`; dispatch with `model:<suggest>` (or `model:opus` to override)" |
-| `match` && !`explicit` && mode=**splurge** | **allow** - surplus is free; the inherited (strong) model runs |
-| `match` && `cheap` && mode=**splurge** | **warn** - "splurge window: routing down wastes expiring surplus; prefer the strong model" |
-| `judgmentStrong` && `cheap` (any mode) | **warn** - "judgment work is the catch-rate gate; consider the strong model" |
-| `explicit` (and none of the above) | allow - an explicit model is a deliberate choice |
-| no `match`, not `judgmentStrong` | allow |
+Silent rewrite via `updatedInput` (the SDK has no such encoding today):
+`Verdict.route(model)` → `{ hookSpecificOutput: { hookEventName: "PreToolUse",
+permissionDecision: "allow", updatedInput: { ...event.tool.input, model } } }`.
+Claude runs the dispatch on the rewritten model, no agent round-trip. Codex
+(no Agent dispatch) → degrades to `allow`. Scoped SDK change: new `Route` case in
+`encodeVerdict`, its own tests; existing allow/block/warn untouched.
 
-`block` reuses the proven enforce-worktree mechanism (deny the `PreToolUse`,
-agent re-dispatches with a model). It only fires on a *forgotten* route in
-conserve mode - disciplined dispatch (model always set) never trips it.
+### `decideVerdict(inputs) → Verdict` - ordered, judgment-first
 
-### stays-strong judgment set
+Inputs: `match` (route-down class from `matchRoutingTable`, suggesting a cheaper
+tier), `explicit` (an explicit `model` set), `cheap` (explicit ∈ `/sonnet|haiku/i`),
+`judgmentStrong` (description/agent_type is a stays-strong judgment kind),
+`routeDownEnforced` (= conserve).
 
-A regex `STAYS_STRONG_RE` matching the kinds the efficient-dispatch skill keeps
-on the main model - `quality review`, `pr review`, `final review`,
-`adversarial …`, `code review`, `design`, `audit`, `architect…`, `critique`,
-`judg…` - and **explicitly excluding** `spec review` / `spec-compliance`
-(deliberately a route-down class). Implementation guards the `spec` carve-out so
-"spec review" never matches.
+1. `judgmentStrong && cheap` → **warn** ("judgment work is the catch-rate gate;
+   prefer the strong model"). *Rule 0 - judgment is never routed or blocked, any
+   mode.* Kills the `match ∩ judgmentStrong` collision the reviews flagged.
+2. `explicit` → **allow**. A typed model is deliberate; never overridden (incl.
+   `model:opus`, and incl. an explicit cheap model in splurge - no force-up).
+3. `match && !explicit && routeDownEnforced` → **route(suggest)** - silently
+   rewrite the forgotten dispatch to the cheaper tier.
+4. otherwise → **allow**. Covers `!match`; `judgmentStrong && inherit` (= main =
+   strong ✓); and **splurge + match + inherit** → runs on the strong inherited
+   model (best-model-on-everything, subtractively). No splurge warn, no push.
 
-## Surface it (maximize-output visibility)
+All 32 `(match, explicit, cheap, judgmentStrong, routeDownEnforced)` input cells
+are enumerated in the test (many collapse) so no cell rides an unstated default.
 
-`ax quota` (and `--statusline`) render the current `SpendMode`: e.g.
-`5h 9% → 07:00 · 7d 15% · CONSERVE` or `… · SPLURGE ⚡ burn surplus`. So the
-operator and the agent both *see* when to crank everything. Reuses
-`computeSpendMode` - single source of truth.
+### One judgment definition
 
-## Module shape / dependency note
+Collapse the two judgment regexes (`JUDGMENT_RE` in
+`apps/axctl/src/queries/routing-tune.ts` + the proposed `STAYS_STRONG_RE`) into a
+single exported source of truth in `packages/hooks-sdk/src/spend-mode.ts`
+(hot-path importable): matches quality/pr/final/adversarial/code review, design,
+audit, architect, critique, judge - **excluding `spec`/spec-compliance** (a
+deliberate route-down class). routing-tune imports it. No drift.
 
-`computeSpendMode` + a minimal quota-cache reader must be importable by BOTH the
-hook (`packages/hooks-sdk`) and the quota render (`apps/axctl/src/quota`).
-hooks-sdk is hot-path/dependency-light and cannot import `apps/axctl`. Resolve
-the home in the plan:
-- preferred: `@ax/lib` (if hooks-sdk may depend on `@ax/lib` - verify the
-  current dep direction), exporting `computeSpendMode` + the cache reader + the
-  minimal `QuotaSnapshot` type;
-- fallback: a self-contained copy in hooks-sdk (the snapshot shape is tiny), with
-  `apps/axctl/src/quota` importing from there or duplicating the pure function
-  under test parity.
+## Surface it (visibility + staleness)
+
+`ax quota` / `--statusline` render mode + staleness from the same
+`computeSpendMode`: `… · CONSERVE`, `… · SPLURGE ⚡`, or `… · mode? (stale 22m)`.
+A silent fall-to-conserve is **visible** (review: a believed-splurge that quietly
+conserves is maddening).
+
+## Splurge -> dojo nudge (the proactive trigger)
+
+Splurge means "you have weekly allowance about to reset unused" - which is
+exactly the condition the **dojo** loop exists to consume (burn surplus on
+self-improvement). The original dojo vision wanted an automatic window-end
+trigger, but headless firing was rejected (burns API, not plan) and a cron can't
+open an in-harness session. The spend-mode signal solves it the right way: the
+system **nudges the operator to fire `/dojo` themselves** at the moment surplus
+is detected.
+
+- On `SessionStart`, when `computeSpendMode` returns **splurge**, the
+  refresh-quota hook injects one line: e.g.
+  `splurge: ~N% of your 7d budget resets in Hh - run /dojo to spend it on self-improvement`.
+- Fires at most once per session (SessionStart cadence - no spam).
+- The statusline splurge marker mirrors it: `SPLURGE -> /dojo`.
+- In-harness, opt-in, proactive: the system tells you *when*, you decide
+  *whether*. This is the deferred dojo "window-end trigger" delivered as a
+  prompt, not a daemon - and it ties the dispatch-economy + dojo work through one
+  shared signal (`computeSpendMode`).
+
+## Measurement (kept in scope - Codex)
+
+A money-affecting, behavior-changing system needs a feedback loop. The route
+verdicts already land in `hook_command_invocation` (the `effect` field). Add a
+light `ax dispatches` lens that correlates spend mode + route verdicts so you can
+answer "did conserve auto-route the forgotten dispatches, and did splurge avoid
+burning opus on sonnet-adequate work?" - at minimum, record the mode at dispatch
+time. Not a new subsystem; a read over existing telemetry.
+
+## Module shape / dependency (resolved)
+
+`computeSpendMode` + a **new sync** cache reader (`node:fs`; NOT async
+`loadQuotaCache`, which pulls `@ax/lib`) + minimal `QuotaSnapshot` + the single
+judgment regex live **in `packages/hooks-sdk`** (`spend-mode.ts`). hooks-sdk
+stays `effect`-only (`@ax/lib` would drag `surrealdb` into the ~70 ms hot path
+and isn't installed in `~/.ax/hooks` - review-confirmed). `apps/axctl/src/quota`
+imports the pure fn *from hooks-sdk* - one parser for the on-disk format.
 
 ```
-<shared home>/spend-mode.ts      computeSpendMode (pure) + readQuotaCache + SpendModeConfig + tests
-packages/hooks-sdk/src/hooks/route-dispatch.ts   mode-conditional verdicts + STAYS_STRONG_RE
-packages/hooks-sdk/src/hooks/refresh-quota.ts    SessionStart quota refresh (new SDK hook)
-apps/axctl/src/quota/format.ts   render SpendMode in table + statusline
-routing-table.json schema        + spendMode thresholds block
-skills/efficient-dispatch/SKILL.md   document the deterministic conserve/splurge behavior
+packages/hooks-sdk/src/spend-mode.ts          computeSpendMode + readQuotaCacheSync + QuotaSnapshot + judgment regex (pure) + tests
+packages/hooks-sdk/src/verdict.ts (+ encode)  Verdict.route(model) + updatedInput encoding + tests
+packages/hooks-sdk/src/hooks/route-dispatch.ts   decideVerdict (ordered, pure) + wiring
+packages/hooks-sdk/src/hooks/refresh-quota.ts    SessionStart → `ax quota --fresh` + splurge→`/dojo` nudge (inject)
+apps/axctl/src/quota/format.ts                render mode + staleness
+apps/axctl/src/queries/routing-tune.ts        import the shared judgment regex (drop dup)
+apps/axctl/src/queries/dispatch-analytics.ts  + spend-mode-aware effectiveness lens
+routing-table.json schema                     + spendMode thresholds block
+scripts/ + ax install                         periodic-refresh LaunchAgent (StartInterval)
+skills/efficient-dispatch/SKILL.md            RECONCILE "the hook warns" → "auto-routes in conserve; relaxes in splurge"
 ```
 
-Pure cores (`computeSpendMode`, the verdict decision factored as a pure
-`decideVerdict(inputs)`) unit-tested exhaustively (every truth-table row + the
-window/threshold boundaries + the spec-review carve-out). The SessionStart hook
-+ cache read verified via `ax hooks backtest` and a live smoke.
+Pure cores (`computeSpendMode`, `decideVerdict`) unit-tested exhaustively
+(32 cells, window/threshold boundaries incl. cap guard, spec-review carve-out,
+null/stale/parse-fail windows). `Verdict.route` encoding tested. Hooks verified
+via `ax hooks backtest` + a **live smoke confirming `updatedInput` actually
+rewrites the model** and that `systemMessage` warns reach the model (the SDK's
+claim that they do is unverified - gate any warn reliance on this smoke).
 
 ## Safety / scope
 
-- Hot path only reads a local file; no network on dispatch.
-- Splurge requires a fresh cache; stale/missing → conserve (never accidentally
-  splurge).
-- Block fires only on conserve + route-down-match + inherit. Explicit model
-  (incl. `model:opus`) always passes.
+- Hot path: one local file read; no network on dispatch.
+- Splurge requires fresh cache + headroom + no window near cap; stale/null/
+  parse-fail → conserve; staleness surfaced.
+- Auto-route fires only on conserve + route-down match + **inherit**. Any
+  explicit model passes untouched. Judgment work is never routed.
+- Splurge never forces a model and never disables an explicit choice - it only
+  withholds the conserve rewrite.
 
-## Behavior change to flag
+## Behavior change to flag (PR)
 
-route-dispatch goes **warn → block** (conserve mode) for everyone who has it
-installed. Intentional - it's the whole point - but called out in the PR.
+route-dispatch goes **warn → auto-route** (conserve): a forgotten cheap-able
+dispatch now silently runs on the cheaper model. `model:` override +
+`AX_SPEND_MODE` give full control.
 
 ## Out of scope (later)
 
-- `ax routing tune` agent_type mining (the `^implement ` class already covers
-  the implementers).
-- An `ax dispatches` retrospective inversion view (the hook enforces at dispatch
-  time, which beats a report).
-- dojo budget-envelope integration (lifting the 15% reserve in splurge) - natural
-  follow-up once spend mode is shared.
+- `ax routing tune` agent_type mining (`^implement ` class already covers it).
+- Linear-pace/burn-rate splurge refinement (7d-only + cap guard suffices for v1).
+- dojo budget-envelope integration (lifting the 15% reserve in splurge).
 
-## Open questions (for review)
+## Resolved review questions
 
-1. Is the SessionStart refresh enough, or is the watcher tick required in v1 for
-   the "proactively knows" guarantee on long sessions?
-2. Should splurge **block** an explicit *cheap* model (force the strong model)
-   rather than only warn? (Current: warn - an explicit model is intentional.)
-3. `computeSpendMode` home: `@ax/lib` vs a hooks-sdk-local copy - which respects
-   the hot-path dependency constraint best?
+- 5h-window thrash → splurge is **7d-only** (5h is a cap guard only).
+- staleness inverts intent → **watcher tick required in v1** + staleness surfaced.
+- truth-table collisions → **ordered `decideVerdict`, judgment rule 0**, 32 cells.
+- block reason doesn't reach the model / learned bypass → **auto-route** instead.
+- splurge optimizes the wrong objective → **subtractive splurge** (no force-up).
+- OR-ing windows burns shared budget → **cap guard on both windows**.
+- no feedback loop → **measurement lens kept in scope**.
+- `computeSpendMode` home → **hooks-sdk** (not @ax/lib).
