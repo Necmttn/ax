@@ -32,6 +32,7 @@ export const baseApiCapabilities = [
     "events",      // /api/events (SSE)
     "ingest",      // POST /api/ingest -> { runId, stream } + Durable Streams sidecar
     "image",       // GET /api/image?path= -> local on-disk image bytes
+    "otlp",        // POST /v1/traces|/v1/metrics|/v1/logs OTLP/JSON receiver
 ] as const;
 
 export const dashboardApiCapabilities = (

@@ -30,6 +30,11 @@ export class DaemonVersion extends Schema.Class<DaemonVersion>("ax/DaemonVersion
      *  on the wire: daemons older than the field omit it, and the hosted
      *  studio must keep decoding their responses. */
     live_ingest: Schema.optionalKey(Schema.Boolean),
+    /** Whether the OTLP receiver (/v1/traces, /v1/metrics, /v1/logs) is
+     *  available. Unlike live_ingest, this is always true: the receiver is
+     *  pure HTTP+JSON+SurrealDB with no native dependency. Optional on the
+     *  wire for forward-compatibility with older daemons. */
+    otlp_receiver: Schema.optionalKey(Schema.Boolean),
 }) {}
 
 /** POST /api/query rejection: non-read SQL or a database error. Legacy
