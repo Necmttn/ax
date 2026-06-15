@@ -42,28 +42,40 @@ const KNOWN_SUBCOMMAND_FIRST = new Set([
   "serve",      // serve status / stop
 ]);
 
+// Verbs/command names are short lowercase kebab tokens. Anything else
+// (a path, an id, a query, a --escaped value) is user data → never persisted.
+const VERB = /^[a-z][a-z-]{0,30}$/;
+
 export const redactInvocation = (argv: ReadonlyArray<string>, inp: RecordInputs): UsageRecord => {
-  const positionals = argv.filter((a) => !a.startsWith("-"));
-  const head = positionals[0] ?? "(root)";
-  const command = KNOWN_SUBCOMMAND_FIRST.has(head) && positionals[1]
-    ? `${head} ${positionals[1]}`
-    : head;
+  // Everything after a bare "--" is end-of-options USER DATA, never a subcommand.
+  const sep = argv.indexOf("--");
+  const scan = sep === -1 ? argv : argv.slice(0, sep);
+
+  const positionals = scan.filter((a) => !a.startsWith("-"));
+  const head = positionals[0] && VERB.test(positionals[0]) ? positionals[0] : "(unknown)";
+  const command =
+    head !== "(unknown)" &&
+    KNOWN_SUBCOMMAND_FIRST.has(head) &&
+    positionals[1] &&
+    VERB.test(positionals[1])
+      ? `${head} ${positionals[1]}`
+      : head;
+
   const flags = [...new Set(
-    argv.filter((a) => a.startsWith("-")).map((a) => a.split("=")[0]!),
+    scan.filter((a) => a.startsWith("-") && a !== "--").map((a) => a.split("=")[0]!),
   )].sort();
+
   const repo_key = inp.repoTopdir ? inp.repoTopdir.split("/").filter(Boolean).pop()!.toLowerCase() : null;
   return UsageRecord.make({
-    ts: inp.now,
-    command,
-    flags,
-    exit_code: inp.exitCode,
-    duration_ms: inp.durationMs,
-    origin: inp.isTty ? "tty" : "agent",
-    repo_key,
-    ax_version: inp.version,
+    ts: inp.now, command, flags,
+    exit_code: inp.exitCode, duration_ms: inp.durationMs,
+    origin: inp.isTty ? "tty" : "agent", repo_key, ax_version: inp.version,
   });
 };
 
+// v0 tradeoff: read-modify-write; a line may be lost under concurrent
+// invocations (acceptable for telemetry), bounded by the 5MB cap +
+// per-ingest truncation. node:fs appendFile is banned by check:no-node-fs.
 export async function appendUsageRecord(path: string, rec: UsageRecord): Promise<void> {
   try {
     const file = Bun.file(path);

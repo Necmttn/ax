@@ -28,4 +28,21 @@ describe("redactInvocation", () => {
     expect(blob).not.toContain("secret");
     expect(blob).not.toContain("/Users/me");
   });
+  it("malformed positional[1] (a path) is NOT captured into command", () => {
+    const r = redactInvocation(["sessions", "/Users/me/secret/path"], base);
+    expect(r.command).toBe("sessions");
+    const blob = JSON.stringify(r);
+    expect(blob).not.toContain("secret");
+    expect(blob).not.toContain("/Users/me");
+  });
+  it("tokens after -- (end-of-options) never reach command", () => {
+    const r = redactInvocation(["ingest", "--", "secret"], base);
+    expect(r.command).toBe("ingest");
+    expect(JSON.stringify(r)).not.toContain("secret");
+  });
+  it("a non-command head is recorded as (unknown), never the raw token", () => {
+    const r = redactInvocation(["/weird/path"], base);
+    expect(r.command).toBe("(unknown)");
+    expect(JSON.stringify(r)).not.toContain("weird");
+  });
 });
