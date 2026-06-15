@@ -16,6 +16,23 @@ import { SurrealClient } from "@ax/lib/db";
 import { surrealLiteral } from "@ax/lib/json";
 
 // ---------------------------------------------------------------------------
+// Shared constants + SQL-boundary helpers
+// ---------------------------------------------------------------------------
+
+/** Default look-back window for all `ax cost *` subcommands (models / sessions / split). */
+export const COST_DEFAULT_WINDOW_DAYS = 14;
+
+/**
+ * SQL-interpolation boundary guard for day-window values.
+ *
+ * Distinct from transport-level defaults: this guard lives at the SQL
+ * interpolation site to prevent negative/fractional/NaN values reaching
+ * SurrealDB. It is intentionally SEPARATE from clampInt / Flag.withDefault so
+ * that neither the CLI default nor the MCP default bypass the injection guard.
+ */
+const sqlWindowDays = (n: number): number => Math.max(1, Math.trunc(n));
+
+// ---------------------------------------------------------------------------
 // cost models
 // ---------------------------------------------------------------------------
 
@@ -48,7 +65,7 @@ SELECT
     math::sum(cache_creation_input_tokens) AS cache_create_tokens,
     math::sum(estimated_cost_usd) AS cost_usd
 FROM session_token_usage
-WHERE ts > time::now() - ${Math.max(1, Math.trunc(sinceDays))}d
+WHERE ts > time::now() - ${sqlWindowDays(sinceDays)}d
 GROUP BY model
 ORDER BY cost_usd DESC;
 `;
@@ -98,7 +115,7 @@ export interface CostSessionsResult {
 
 const COST_SESSIONS_SQL = (sinceDays: number, limit: number, modelFilter: string | null) => {
     const whereFragments = [
-        `ts > time::now() - ${Math.max(1, Math.trunc(sinceDays))}d`,
+        `ts > time::now() - ${sqlWindowDays(sinceDays)}d`,
         "estimated_cost_usd != NONE",
     ];
     if (modelFilter) {
@@ -187,7 +204,7 @@ SELECT
     math::sum(cache_creation_input_tokens) AS cache_create_tokens,
     math::sum(estimated_cost_usd) AS cost_usd
 FROM session_token_usage
-WHERE ts > time::now() - ${Math.max(1, Math.trunc(sinceDays))}d
+WHERE ts > time::now() - ${sqlWindowDays(sinceDays)}d
 GROUP BY source, model
 ORDER BY cost_usd DESC;
 `;

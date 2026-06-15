@@ -53,3 +53,44 @@ export const clampPagination = (
     offset: clampOffset(params.offset),
     limit: clampLimit(params.limit, config),
 });
+
+// ---------------------------------------------------------------------------
+// clampInt - general-purpose integer clamper (clampLimit minus the optional-max)
+// ---------------------------------------------------------------------------
+
+/**
+ * Config for clampInt.
+ *
+ * - `default`: returned when the value is absent, non-finite, or below `min`.
+ * - `min`:     inclusive lower bound; values below it return `default` (optional - no lower check when absent).
+ * - `max`:     inclusive upper cap (optional - no cap when absent).
+ */
+export interface ClampIntConfig {
+    readonly default: number;
+    readonly min?: number;
+    readonly max?: number;
+}
+
+/**
+ * General-purpose integer clamp.
+ *
+ * Truncates toward zero (like clampLimit/clampOffset), substitutes `default`
+ * for undefined, non-finite, or below-minimum values, and optionally caps at
+ * `max`. Drop-in generalisation of clampLimit for non-pagination uses (day
+ * windows, custom floors/ceilings).
+ *
+ * Rules:
+ *  - `undefined` → `config.default`
+ *  - NaN / ±Infinity → `config.default`
+ *  - fractional → truncated toward zero, then tested
+ *  - value < `config.min` → `config.default` (only when `min` is given)
+ *  - value > `config.max` → `config.max` (only when `max` is given)
+ *  - else → truncated value
+ */
+export const clampInt = (value: number | undefined, config: ClampIntConfig): number => {
+    const n = Math.trunc(value ?? config.default);
+    if (!Number.isFinite(n)) return config.default;
+    if (config.min !== undefined && n < config.min) return config.default;
+    if (config.max !== undefined) return Math.min(config.max, n);
+    return n;
+};
