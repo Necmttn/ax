@@ -308,7 +308,7 @@ ${where};`))?.[0] ?? [];
         });
     });
 
-const fetchLandedLocBySession = (
+export const fetchLandedLocBySession = (
     sessionIds: readonly string[],
 ): Effect.Effect<LandedLoc, DbError, SurrealClient> =>
     Effect.gen(function* () {

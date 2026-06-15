@@ -14,7 +14,7 @@ export interface ProcessOutcome {
  * (supported by both for PreToolUse). Inject = plain stdout (claude
  * SessionStart/UserPromptSubmit add stdout to context).
  */
-export const encodeVerdict = (v: Verdict, _harness: Harness): ProcessOutcome => {
+export const encodeVerdict = (v: Verdict, harness: Harness): ProcessOutcome => {
   switch (v._tag) {
     case "Allow":
       return { exitCode: 0 };
@@ -24,5 +24,21 @@ export const encodeVerdict = (v: Verdict, _harness: Harness): ProcessOutcome => 
       return { exitCode: 0, stdout: JSON.stringify({ systemMessage: v.message }) };
     case "Inject":
       return { exitCode: 0, stdout: v.context };
+    case "Advise":
+      return harness === "claude"
+        ? {
+            exitCode: 0,
+            stdout: JSON.stringify({
+              hookSpecificOutput: {
+                hookEventName: "PreToolUse",
+                additionalContext: v.context,
+              },
+            }),
+          }
+        : { exitCode: 0 };
+    default: {
+      const _exhaustive: never = v;
+      return _exhaustive;
+    }
   }
 };

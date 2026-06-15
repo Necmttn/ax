@@ -47,6 +47,7 @@
     "daemon:uninstall": "bash scripts/uninstall-daemon.sh",
     "build": "bun scripts/build-axctl.ts apps/axctl/src/cli/index.ts dist/axctl",
     "check:cli-reference": "bun scripts/check-cli-reference.ts",
+    "check:site-cli-reference": "bun scripts/check-site-cli-reference.ts",
     "check:release-announcements": "bun scripts/check-release-announcements.ts",
     "check:no-node-fs": "bun scripts/check-no-node-fs.ts",
     "check:record-select": "bun scripts/check-record-select.ts",

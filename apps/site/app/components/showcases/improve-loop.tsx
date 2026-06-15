@@ -68,7 +68,7 @@ export function ImproveLoopShowcase() {
       ref={rootRef}
       aria-label="Improve loop showcase"
     >
-      <p className="eyebrow">the graph talks back · improve</p>
+      <p className="eyebrow">the graph talks back · improve <span className="receipt-tag is-real">from our own graph · 2026-06</span></p>
       <h2>
         Proposals mined from <em>your own</em> transcripts.
       </h2>
@@ -183,7 +183,8 @@ export function ImproveLoopShowcase() {
           <div className="h">runs on your machine</div>
           Mined from the local graph, applied to your own agent files. Nothing auto-edits:
           accept emits a brief, an agent does the work, <code>ax improve lint</code> checks
-          it landed.
+          it landed. The whole deck - proposals, impact, and past bets measured at +3/+10/+30
+          sessions - lives in the studio improve dashboard: <code>ax serve</code>.
         </div>
       </section>
     </section>

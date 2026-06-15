@@ -135,6 +135,25 @@ cache. `--statusline` is one plain line for the Claude Code `statusLine` command
 `scripts/swiftbar/ax-quota.2m.sh`). Module: `apps/axctl/src/quota/` (QuotaEnv seam,
 Live/Test layers). No DB (runtime "none").
 
+### Dojo
+
+`ax dojo agenda [--json] [--spar] [--budget=N] [--until=HH:MM] [--force] [--days=N]` -
+training agenda for the ax:dojo skill loop (burn surplus plan quota on
+self-improvement). Composes a budget envelope from the quota module (binding
+window remaining minus 15% reserve, deadline = earliest window reset) with a
+derived, self-clearing item list: pending verdicts, unfilled .ax/tasks briefs,
+judgment-flagged routing backtests, proposal minting (when open pool < 3),
+churn-hotspot experiments, opt-in spar (needs --spar AND >=30% spendable),
+explore fallback. Items vanish once the underlying system records the work
+(verdict locked / brief consumed / proposal created). State dirs:
+`~/.ax/dojo/outbox/` (upstream issue drafts, publish on review) and
+`~/.ax/dojo/reports/<date>.md`. Module: `apps/axctl/src/dojo/`. Spec:
+docs/superpowers/specs/2026-06-13-ax-dojo-design.md.
+`ax dojo report [--since=<iso>] [--notes-file=<path>]` writes the morning-report
+for a completed run; `ax dojo draft [--title=...] [--kind=bug|improvement]`
+stages an upstream finding to `~/.ax/dojo/outbox/` (never publishes);
+`ax dojo outbox` inspects staged drafts. `ax dojo spar-plan <sha>` freezes a landed task's baseline (prompt + cost/turns/churn) and emits a brief with the worktree pin command + a delta slot; the agent runs the variant with ONE change in that worktree; `ax dojo spar-score <id>` scores variant vs baseline into a receipt (`~/.ax/dojo/spar/`). Hybrid: CLI scaffolds, agent re-runs.
+
 ### Profile
 
 `ax profile show [--window=N] [--no-cost] [--json]` - render your local ax
@@ -171,6 +190,7 @@ not depend on effect).
 
 `ax dispatches [--days=N] [--limit=N]` - subagent dispatch table sorted by child cost (default 14d/30 rows). Shows ts, agent_type, description, dispatch_model ("inherit" when no explicit model), child_model, child_cost_usd. Summary: count, % inherit, total subagent cost. MCP: `dispatches`. Routed dispatches whose child ran legs on another model are marked `!` with a dropped-cost footer - the harness drops the Agent `model` override on SendMessage/compact continuations; per-model legs come from `turn_token_usage` (`child_legs`/`model_dropped`/`dropped_cost_usd` in `--json`).
 `ax dispatches --candidates [--days=N]` - inherit + expensive (fable/opus) + routing-class match filter. Shows suggested model + est savings per dispatch. Footer: total est savings, top 3 classes by savings.
+`ax dispatches --economy [--days=N]` - effectiveness lens: of inherit dispatches matching a route-down class, how many ran cheap (sonnet/haiku) vs expensive (fable/opus)? Overspend cost + est savings by class + count of route-dispatch Advise hook fires (unlinked - advice→outcome attribution deferred). Use --candidates for the per-dispatch view.
 `ax routing compile [--out=PATH]` - merge-preserving regenerate of `~/.ax/hooks/routing-table.json` (defaults refresh, `origin: user` classes survive; refuses to overwrite a corrupt file). `ax dispatches compile-routing` is an alias.
 `ax routing tune [--days=N] [--dry-run] [--emit-brief] [--apply=id,...] [--out=PATH]` - mine unmatched expensive inherit dispatches for new routing classes (two-token prefix clustering, ≥3 members, suggests sonnet). Auto-applies non-judgment proposals to `~/.ax/hooks/routing-table.json` as `origin: user`; judgment-flagged ones (review/design/plan/audit/...) only ship via `--emit-brief` → `.ax/tasks/routing-tune-<date>.md` → agent backtest → `--apply=ids` (carry the brief's `--days` window).
 `ax routing show` - effective table with class origins.
@@ -206,6 +226,10 @@ warn / inject; defects fail OPEN. `GitEnv` service makes guards layer-testable.
   into provider configs via the existing codecs (ax ownership markers)
 - `ax hooks backtest <file> [--days]` - replay tool_call history through the
   hook in-process; state-dependent checks use CURRENT repo state (caveat printed)
+- `ax hooks bench <file> [--days --runs --budget-ms --json]` - latency ledger:
+  per-fire p50/p95 from real bun spawns, est fires/day from tool_call history,
+  installed-chain budget vs --budget-ms default 250. Pairs with `ax hooks backtest`
+  (benefit) for dojo hook proposals.
 - `ax hooks cases` - deterministic feedback-case backtests (enforce-worktree
   candidate query + structured pass/fail verdict; separate from backtest)
 - Codex: new hook entries written to `~/.codex/hooks.json` when that file

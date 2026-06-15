@@ -72,6 +72,10 @@ const GUARD_NAMES = [
     // Claude-only: suggests cheaper model when Agent dispatch has no explicit model set.
     // Codex has no Agent-tool dispatch equivalent; this hook is a no-op there.
     "route-dispatch",
+    // Claude-only: fires at SessionStart to refresh the quota cache and inject a
+    // /dojo nudge when the spend mode is splurge (quota budget resets soon).
+    // Codex has no SessionStart equivalent; harmless to scaffold but won't fire.
+    "refresh-quota",
 ] as const;
 
 const packageJsonContent = (sdkPath: string): string =>

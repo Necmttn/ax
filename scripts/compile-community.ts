@@ -58,6 +58,16 @@ const MAX_SESSIONS = 50_000;
 const sortBoard = (rows: BoardRow[]): BoardRow[] =>
     [...rows].sort((a, b) => b.value - a.value || a.login.localeCompare(b.login));
 
+/**
+ * Canonical "<source>:<name>" key for skill-stats. Plugin-namespaced skills
+ * keep their plugin id INSIDE the name ("superpowers:brainstorming", source
+ * "superpowers" - see rig.ts publicSkillName), so a naive `${source}:${name}`
+ * doubled the prefix to "superpowers:superpowers:brainstorming". Dedupe it.
+ */
+export function skillStatKey(source: string, name: string): string {
+    return name === source || name.startsWith(`${source}:`) ? name : `${source}:${name}`;
+}
+
 const sortedRecord = <V>(entries: Array<[string, V]>): Record<string, V> =>
     Object.fromEntries(entries.sort(([a], [b]) => a.localeCompare(b)));
 
@@ -109,7 +119,7 @@ export async function compileCommunity(
     const modelUsers = new Map<string, number>();
     for (const { p } of profiles) {
         for (const s of p.rig.skills) {
-            const key = `${s.source}:${s.name}`;
+            const key = skillStatKey(s.source, s.name);
             const cur = skillAgg.get(key) ?? { users: 0, runs: 0 };
             skillAgg.set(key, { users: cur.users + 1, runs: cur.runs + s.runs });
         }

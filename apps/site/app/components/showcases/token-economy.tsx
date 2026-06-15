@@ -255,7 +255,7 @@ export function TokenEconomyShowcase() {
                 <span className="tk">0.92M</span> tk
               </div>
               <div className="path">
-                ~/Projects/quera <span className="arrow">›</span> live-traces vendor
+                ~/Projects/api <span className="arrow">›</span> live-traces vendor
               </div>
               <div className="cache-mini">
                 <div className="c" style={{ width: "74%" }} />

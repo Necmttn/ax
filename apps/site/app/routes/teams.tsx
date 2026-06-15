@@ -9,6 +9,7 @@ import { HeroLogoField } from "~/components/landing-v2/supports-strip";
 import "../styles/pitch.css";
 
 const BOOK_URL = "https://cal.com/necmttn/30min";
+const LEADERS_URL = "/leaders";
 
 export const Route = createFileRoute("/teams")({
   head: () => ({
@@ -53,13 +54,15 @@ function ImpactSection() {
   return (
     <section ref={impactRef} className="pitch-section">
       <div className="pitch-head">
-        <span className="eyebrow">what deeper adoption looks like</span>
+        <span className="eyebrow">what deeper adoption will look like</span>
         <h2>
           A faster team has a different <em>shape</em>.
         </h2>
         <p>
           Gates open as a workflow goes from one person&rsquo;s trick to team
-          practice. The scroll <em>is</em> your adoption curve.
+          practice. The aggregation layer that rolls every seat into this curve
+          is what we&rsquo;re building with design partners &mdash; the scroll
+          below sketches the shape it will draw.
         </p>
       </div>
 
@@ -68,10 +71,11 @@ function ImpactSection() {
         <PipelineFlow scrollProgress={scrollProgress} />
         <p className="impact-frame">
           Stuck gates are workflows still trapped in one head &mdash; ax finds
-          them.
+          them per seat today.
         </p>
         <p className="impact-illus">
-          illustrative &mdash; your numbers render from real sessions
+          sketch of the team view &mdash; in development; per-seat receipts are
+          live now (see below)
         </p>
       </div>
     </section>
@@ -86,7 +90,7 @@ function Teams() {
         {/* ============= hero ============= */}
         <section className="hero">
           <HeroLogoField />
-          <span className="eyebrow">ax for engineering teams</span>
+          <span className="eyebrow">ax for engineering teams &middot; early access</span>
           <h1>
             See how your team<br />
             actually ships with <em>AI</em>.
@@ -96,9 +100,11 @@ function Teams() {
             sticking.
           </p>
           <p className="lede">
-            ax turns local coding-agent sessions into evidence for your AI
-            enablement work: which workflows improve real shipping, where the
-            team is stuck, and what should become standard practice.
+            ax is live per seat today &mdash; it turns one engineer&rsquo;s local
+            coding-agent sessions into receipts. The team aggregation layer that
+            rolls those seats together is in development; we&rsquo;re building it
+            with design partners. A walkthrough runs on each engineer&rsquo;s own
+            local ax data, today.
           </p>
 
           <div className="install-wrap">
@@ -184,81 +190,145 @@ function Teams() {
           </div>
         </section>
 
-        {/* ============= dashboard preview ============= */}
+        {/* ============= per-seat receipts (real, single-seat) ============= */}
         <section className="demo" id="demo">
           <div className="demo-intro">
-            <span className="eyebrow">one screen, the whole team</span>
-            <h2>The evidence layer for internal AI enablement.</h2>
+            <span className="eyebrow">this is what one seat looks like</span>
+            <h2>Real receipts, generated locally &mdash; today.</h2>
             <p>
-              Your AI lead shouldn&rsquo;t have to guess what stuck after the
-              workshop. ax shows where leverage is showing up, where usage stays
-              shallow, and which workflows are ready to spread.
+              These are the numbers ax already surfaces from a single
+              engineer&rsquo;s history (run <code>ax studio</code> on your own
+              machine). The team product aggregates these per-seat receipts into
+              one view &mdash; same numbers, rolled up.
             </p>
           </div>
 
-          <div className="browser" role="img" aria-label="ax team dashboard preview">
+          <div className="browser" role="img" aria-label="ax studio per-seat receipts">
             <div className="browser-bar">
               <div className="browser-dots"><span></span><span></span><span></span></div>
-              <div className="browser-url">app.ax / team &middot; this month</div>
+              <div className="browser-url">ax studio &middot; one seat &middot; 14 days</div>
               <div className="browser-spacer"></div>
             </div>
             <div className="dash">
-              <p className="dash-head">Shared agent practice &middot; 12 engineers</p>
+              <p className="dash-head">What ax found on one machine</p>
               <div className="ministats">
                 <div className="mini">
-                  <div className="mini-label">AI-native workflows</div>
-                  <div className="mini-value">41<span className="unit">%</span></div>
-                  <div className="mini-sub"><b>59%</b> still shallow</div>
+                  <div className="mini-label">Redirectable spend</div>
+                  <div className="mini-value"><span className="unit">$</span>605</div>
+                  <div className="mini-sub"><b>routine sub-tasks</b> on the expensive default</div>
                 </div>
                 <div className="mini">
-                  <div className="mini-label">Power users</div>
-                  <div className="mini-value">3<span className="unit">/ 12</span></div>
-                  <div className="mini-sub"><span className="neg">9 not using patterns</span></div>
+                  <div className="mini-label">Top recurring fix</div>
+                  <div className="mini-value">26<span className="unit">×</span></div>
+                  <div className="mini-sub">same mistake, <b>one proposal</b></div>
                 </div>
                 <div className="mini">
-                  <div className="mini-label">Shipping workflows</div>
-                  <div className="mini-value">6</div>
-                  <div className="mini-sub"><span className="pos">+2</span> found this week</div>
+                  <div className="mini-label">Routing est. savings</div>
+                  <div className="mini-value"><span className="unit">$</span>512<span className="unit">.91</span></div>
+                  <div className="mini-sub"><span className="pos">repriced</span> from real tokens</div>
                 </div>
                 <div className="mini">
-                  <div className="mini-label">Ready to spread</div>
-                  <div className="mini-value">3</div>
-                  <div className="mini-sub"><b>proven</b> playbooks</div>
+                  <div className="mini-label">Churn episodes</div>
+                  <div className="mini-value">7</div>
+                  <div className="mini-sub"><span className="neg">failure → repair</span> loops, 30d</div>
                 </div>
               </div>
             </div>
           </div>
           <p className="demo-caption">
-            Aggregates only &mdash; not to police anyone, just to see whether AI
-            is becoming part of how the team ships.
+            Every number here is per-seat and local. The team layer
+            <em> aggregates</em> them &mdash; never per-person behavior, never
+            transcripts.
           </p>
+        </section>
+
+        {/* ============= one person's trick → team practice ============= */}
+        <section className="pitch-section" id="spread">
+          <div className="pitch-head">
+            <span className="eyebrow">one person&rsquo;s trick → team practice</span>
+            <h2>
+              The mechanism that spreads a workflow <em>already ships</em>.
+            </h2>
+            <p>
+              You don&rsquo;t need the aggregation layer to move a good pattern
+              across the team. Two shipped surfaces already do it.
+            </p>
+          </div>
+          <div className="pitch-triad">
+            <div className="pitch-fcard">
+              <span className="ic" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M4 5.5A1.5 1.5 0 0 1 5.5 4H16l4 4v10.5a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 4 18.5z" />
+                  <path d="M15 4v5h5M8 13h8M8 16h5" />
+                </svg>
+              </span>
+              <h3>Skills &amp; hooks SDK</h3>
+              <p>
+                When ax finds a fix worth keeping, it becomes a skill or a typed
+                Effect hook (Claude Code + Codex). Commit it once; everyone&rsquo;s
+                agent runs it. That&rsquo;s one person&rsquo;s trick becoming team
+                practice, today.
+              </p>
+            </div>
+            <div className="pitch-fcard">
+              <span className="ic" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+                  <circle cx="12" cy="8" r="3.2" />
+                  <path d="M5 20c0-3.3 3.1-6 7-6s7 2.7 7 6" />
+                </svg>
+              </span>
+              <h3>Public profiles &amp; leaders</h3>
+              <p>
+                <code>ax profile publish</code> turns one seat into a shareable
+                profile. <a href={LEADERS_URL}>/leaders</a> and
+                {" "}<a href="/u/necmttn">/u/&lt;login&gt;</a> are live multi-person
+                surfaces on the aggregates-only model &mdash; proof the rollup
+                works without sending anyone&rsquo;s code.
+              </p>
+            </div>
+            <div className="pitch-fcard">
+              <span className="ic" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M3 12a9 9 0 0 1 15-6.7L21 8M21 3v5h-5" />
+                  <path d="M21 12a9 9 0 0 1-15 6.7L3 16M3 21v-5h5" />
+                </svg>
+              </span>
+              <h3>The improve loop</h3>
+              <p>
+                ax mines repeated mistakes and proposes a small repo-specific fix,
+                reviewed one at a time. Accept it and it&rsquo;s in the repo &mdash;
+                no aggregation server required.
+              </p>
+            </div>
+          </div>
         </section>
 
         {/* ============= impact signal ============= */}
         <ImpactSection />
 
-        {/* ============= the privacy line ============= */}
+        {/* ============= the privacy contract ============= */}
         <section className="pitch-section" id="privacy">
           <div className="pitch-head">
-            <span className="eyebrow">the privacy line</span>
+            <span className="eyebrow">the privacy contract</span>
             <h2>
-              The collector is <em>open source</em>, so you can read exactly what
-              leaves.
+              You see the exact JSON <em>before</em> anything leaves.
             </h2>
             <p>
-              ax runs on each laptop and computes small derived rows. Only those
-              aggregates ship; the sensitive work stays put by construction.
-              Because it&rsquo;s OSS, you can verify that line instead of
-              trusting it.
+              ax is AGPL-3.0 and runs entirely on each laptop. There is one real
+              export today &mdash; <code>ax profile publish</code> &mdash; and it
+              shows you the precise JSON in a consent prompt before the first byte
+              moves. The team aggregation layer is built to the same contract: a
+              local consent gate, ax-shaped aggregates only. Below is the design
+              contract we&rsquo;re building to.
             </p>
           </div>
           <div className="pitch-lanes">
             <div className="pitch-lane is-out">
-              <h3><span className="dot"></span> what leaves the laptop</h3>
+              <h3><span className="dot"></span> what will leave (after consent)</h3>
               <ul>
                 <li>Per-seat <b>adoption signal</b> <span className="dim">(active days, depth of use)</span></li>
                 <li>Skill / workflow <b>usage rollups</b> <span className="dim">(names, not contents)</span></li>
-                <li><b>What correlates with shipping</b> <span className="dim">(the patterns worth spreading)</span></li>
+                <li><b>Cost &amp; routing aggregates</b> <span className="dim">(the spend worth redirecting)</span></li>
                 <li>Team-level <b>aggregates</b> <span className="dim">(never per-person behavior)</span></li>
               </ul>
             </div>
@@ -268,19 +338,26 @@ function Teams() {
                 <li>Transcript text &amp; <b>prompts</b> <span className="dim">(read locally, never sent)</span></li>
                 <li>Your <b>code</b>, diffs and file contents <span className="dim">(stay on disk)</span></li>
                 <li><b>What</b> each person is building <span className="dim">(yours to keep)</span></li>
-                <li>Everything else ax touches to compute the rollups</li>
+                <li>Anything not in the consent-prompt JSON you approved</li>
               </ul>
             </div>
           </div>
+          <p className="demo-caption">
+            Verifiable today: <code>ax profile publish</code> prints the full
+            payload and waits for your yes. Source is AGPL-3.0 &mdash; read the
+            line, don&rsquo;t trust it.
+          </p>
         </section>
 
         {/* ============= closing CTA ============= */}
         <section className="pitch-cta">
           <h2>What gets measured gets improved.</h2>
           <p>
-            Right now AI adoption isn&rsquo;t measured at all. A walkthrough on
-            your own data shows what stuck, what stayed shallow, and which
-            workflows are ready to become standard practice.
+            Right now AI adoption isn&rsquo;t measured at all. The walkthrough
+            runs on each engineer&rsquo;s own local ax data &mdash; live today
+            &mdash; and shows what stuck, what stayed shallow, and which workflows
+            are ready to spread. We&rsquo;re onboarding design partners for the
+            team aggregation layer as we build it.
           </p>
           <div className="cta-row">
             <a className="prompt-pill is-solo" href={BOOK_URL}>

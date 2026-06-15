@@ -56,9 +56,11 @@ const SURREAL_VERSION = process.env.AXCTL_SURREAL_VERSION ?? "3.1.0";
 const DB_LABEL = "com.necmttn.ax-db";
 const WATCH_LABEL = "com.necmttn.ax-watch";
 const DERIVE_LABEL = "com.necmttn.ax-derive-daily";
+const QUOTA_REFRESH_LABEL = "com.necmttn.ax-quota-refresh";
 const DB_PLIST = posixPath.join(LAUNCH_AGENTS_DIR, `${DB_LABEL}.plist`);
 const WATCH_PLIST = posixPath.join(LAUNCH_AGENTS_DIR, `${WATCH_LABEL}.plist`);
 const DERIVE_PLIST = posixPath.join(LAUNCH_AGENTS_DIR, `${DERIVE_LABEL}.plist`);
+const QUOTA_REFRESH_PLIST = posixPath.join(LAUNCH_AGENTS_DIR, `${QUOTA_REFRESH_LABEL}.plist`);
 const ROCKSDB_BLOCK_CACHE_SIZE = process.env.AX_DB_ROCKSDB_BLOCK_CACHE_SIZE ?? "268435456";
 const ROCKSDB_WRITE_BUFFER_SIZE = process.env.AX_DB_ROCKSDB_WRITE_BUFFER_SIZE ?? "33554432";
 const ROCKSDB_MAX_WRITE_BUFFER_NUMBER = process.env.AX_DB_ROCKSDB_MAX_WRITE_BUFFER_NUMBER ?? "4";
@@ -201,6 +203,40 @@ const derivePlist = (binPath: string): string => `<?xml version="1.0" encoding="
   <dict>
     <key>PATH</key>
     <string>${HOME}/.bun/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>${otlpEnvEntry()}
+  </dict>
+</dict>
+</plist>
+`;
+
+// Periodic quota cache refresh: fires every 5 minutes so the routing hook and
+// statusline always have a fresh-enough snapshot without hammering the API.
+// The StartInterval approach is simpler than a WatchPaths trigger and avoids
+// the watcher's ThrottleInterval stacking. RunAtLoad=false: no immediate fetch
+// on login - the first natural session start is enough for the initial warm.
+const quotaRefreshPlist = (binPath: string): string => `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>${QUOTA_REFRESH_LABEL}</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>-lc</string>
+    <string>${binPath} quota --fresh >>${LOG_DIR}/quota-refresh.log 2>&amp;1 || true</string>
+  </array>
+  <key>StartInterval</key>
+  <integer>300</integer>
+  <key>RunAtLoad</key>
+  <false/>
+  <key>StandardOutPath</key>
+  <string>${LOG_DIR}/quota-refresh.out</string>
+  <key>StandardErrorPath</key>
+  <string>${LOG_DIR}/quota-refresh.err</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>${HOME}/.bun/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
   </dict>
 </dict>
 </plist>
@@ -602,6 +638,7 @@ function collectDaemonStatus(): Effect.Effect<DaemonStatus, never, FileSystem.Fi
                 yield* launchdStatus(DB_LABEL, DB_PLIST),
                 yield* launchdStatus(WATCH_LABEL, WATCH_PLIST),
                 yield* launchdStatus(DERIVE_LABEL, DERIVE_PLIST),
+                yield* launchdStatus(QUOTA_REFRESH_LABEL, QUOTA_REFRESH_PLIST),
             ],
         };
     });
@@ -927,6 +964,10 @@ export function cmdInstall(): Effect.Effect<
         console.log(`  wrote:  ${DERIVE_PLIST}`);
         yield* Effect.promise(() => loadAgent(DERIVE_PLIST));
 
+        yield* fs.writeFileString(QUOTA_REFRESH_PLIST, quotaRefreshPlist(binSource));
+        console.log(`  wrote:  ${QUOTA_REFRESH_PLIST}`);
+        yield* Effect.promise(() => loadAgent(QUOTA_REFRESH_PLIST));
+
         // Apply schema from embedded resource via surreal import. Bucket
         // BACKEND paths are rewritten to THIS machine's buckets dir - the
         // committed schema.surql carries the committing machine's absolute
@@ -1102,13 +1143,14 @@ export function cmdDaemon(
     return Effect.gen(function* () {
         const fs = yield* FileSystem.FileSystem;
         const parsed = parseDaemonCommand(args);
-        // Whether all three plists already exist on disk (probes; absent => false).
+        // Whether all four plists already exist on disk (probes; absent => false).
         const plistsPresent = (): Effect.Effect<boolean, never, FileSystem.FileSystem> =>
             Effect.gen(function* () {
                 const db = yield* fs.exists(DB_PLIST).pipe(orAbsent(false));
                 const watch = yield* fs.exists(WATCH_PLIST).pipe(orAbsent(false));
                 const derive = yield* fs.exists(DERIVE_PLIST).pipe(orAbsent(false));
-                return db && watch && derive;
+                const quotaRefresh = yield* fs.exists(QUOTA_REFRESH_PLIST).pipe(orAbsent(false));
+                return db && watch && derive && quotaRefresh;
             });
 
         if (!isMacos()) {
@@ -1126,12 +1168,15 @@ export function cmdDaemon(
                 yield* Effect.promise(() => loadAgent(DB_PLIST));
                 yield* Effect.promise(() => loadAgent(WATCH_PLIST));
                 yield* Effect.promise(() => loadAgent(DERIVE_PLIST));
+                yield* Effect.promise(() => loadAgent(QUOTA_REFRESH_PLIST));
             }
         } else if (parsed.command === "stop") {
+            yield* Effect.promise(() => unloadAgentKeepPlist(QUOTA_REFRESH_PLIST));
             yield* Effect.promise(() => unloadAgentKeepPlist(DERIVE_PLIST));
             yield* Effect.promise(() => unloadAgentKeepPlist(WATCH_PLIST));
             yield* Effect.promise(() => unloadAgentKeepPlist(DB_PLIST));
         } else if (parsed.command === "restart") {
+            yield* Effect.promise(() => unloadAgentKeepPlist(QUOTA_REFRESH_PLIST));
             yield* Effect.promise(() => unloadAgentKeepPlist(DERIVE_PLIST));
             yield* Effect.promise(() => unloadAgentKeepPlist(WATCH_PLIST));
             yield* Effect.promise(() => unloadAgentKeepPlist(DB_PLIST));
@@ -1141,6 +1186,7 @@ export function cmdDaemon(
                 yield* Effect.promise(() => loadAgent(DB_PLIST));
                 yield* Effect.promise(() => loadAgent(WATCH_PLIST));
                 yield* Effect.promise(() => loadAgent(DERIVE_PLIST));
+                yield* Effect.promise(() => loadAgent(QUOTA_REFRESH_PLIST));
             }
         }
 
@@ -1194,7 +1240,7 @@ export function cmdUninstall(
         const fs = yield* FileSystem.FileSystem;
         const path = yield* Path.Path;
         console.log("[axctl] uninstall");
-        for (const plist of [DERIVE_PLIST, WATCH_PLIST, DB_PLIST]) {
+        for (const plist of [QUOTA_REFRESH_PLIST, DERIVE_PLIST, WATCH_PLIST, DB_PLIST]) {
             const removed = yield* unloadAgent(plist);
             console.log(`  ${removed ? "removed" : "absent "}: ${plist}`);
         }

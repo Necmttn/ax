@@ -257,7 +257,10 @@ describe("NavLink next[] wiring", () => {
             by_role: null,
             compactions: [],
         };
-        const rt = { runPromise: () => Promise.resolve(stub) } as never;
+        // session_show reads through fetchEnrichedSession, which returns the
+        // {view, detail, metrics, insights} envelope; the tool takes .view.
+        const enriched = { view: stub, detail: null, metrics: null, insights: null };
+        const rt = { runPromise: () => Promise.resolve(enriched) } as never;
         const result = (await byName("session_show").run(
             { sessionId: "019e2531-b552-7b53-a029-c780adbb6560" },
             rt,

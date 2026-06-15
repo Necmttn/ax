@@ -5,7 +5,7 @@ import { describe, expect, it } from "bun:test";
 import { Effect, Layer } from "effect";
 import { SurrealClient, type SurrealClientShape } from "@ax/lib/db";
 
-import { fetchThinking, rollupThinkingByModel } from "./thinking-analytics.ts";
+import { fetchThinking, reasoningCostUsd, rollupThinkingByModel } from "./thinking-analytics.ts";
 
 type QueryResult = Array<Record<string, unknown>>;
 
@@ -32,6 +32,7 @@ describe("rollupThinkingByModel", () => {
                 ["b", "claude-fable-5"],
                 ["c", "claude-sonnet-4-6"],
             ]),
+            new Map(),
         );
         expect(rows).toHaveLength(2);
         const fable = rows.find((r) => r.model === "claude-fable-5");
@@ -51,8 +52,75 @@ describe("rollupThinkingByModel", () => {
         const rows = rollupThinkingByModel(
             [{ session_id: "session:`x`", blocks: 1, tokens: 10, assistant_turns: 1, thinking_turns: 1 }],
             new Map(),
+            new Map(),
         );
         expect(rows).toHaveLength(0);
+    });
+
+    it("computes thinking_cost_usd from the pricing map (tokens x output rate / 1e6)", () => {
+        const rows = rollupThinkingByModel(
+            [
+                // 700,000 thinking tokens for fable at $15/M output -> $10.50
+                { session_id: "session:`a`", blocks: 4, tokens: 400000, assistant_turns: 10, thinking_turns: 4 },
+                { session_id: "session:`b`", blocks: 6, tokens: 300000, assistant_turns: 10, thinking_turns: 6 },
+                // 200,000 thinking tokens for sonnet at $5/M output -> $1.00
+                { session_id: "session:`c`", blocks: 2, tokens: 200000, assistant_turns: 5, thinking_turns: 2 },
+                // unpriced model -> cost 0
+                { session_id: "session:`d`", blocks: 1, tokens: 100000, assistant_turns: 2, thinking_turns: 1 },
+                // model present but null rate -> cost 0
+                { session_id: "session:`e`", blocks: 1, tokens: 100000, assistant_turns: 2, thinking_turns: 1 },
+            ],
+            new Map([
+                ["a", "claude-fable-5"],
+                ["b", "claude-fable-5"],
+                ["c", "claude-sonnet-4-6"],
+                ["d", "claude-haiku-x"],
+                ["e", "claude-null-rate"],
+            ]),
+            new Map<string, number | null>([
+                ["claude-fable-5", 15],
+                ["claude-sonnet-4-6", 5],
+                ["claude-null-rate", null],
+                // claude-haiku-x intentionally absent from the pricing map
+            ]),
+        );
+        expect(rows.find((r) => r.model === "claude-fable-5")?.thinking_cost_usd).toBeCloseTo(10.5);
+        expect(rows.find((r) => r.model === "claude-sonnet-4-6")?.thinking_cost_usd).toBeCloseTo(1.0);
+        expect(rows.find((r) => r.model === "claude-haiku-x")?.thinking_cost_usd).toBe(0);
+        expect(rows.find((r) => r.model === "claude-null-rate")?.thinking_cost_usd).toBe(0);
+    });
+
+    it("normalizes the raw session model before the rate lookup (mixed case still bills)", () => {
+        // session.model is raw ("Claude-Fable-5"); the rate map is keyed by
+        // agent_model.name == normalizeModelName(raw) == "claude-fable-5".
+        // Without normalization the lookup misses and cost silently drops to $0.
+        const rows = rollupThinkingByModel(
+            [
+                // 200,000 thinking tokens at $50/M output -> $10.00
+                { session_id: "session:`a`", blocks: 2, tokens: 200000, assistant_turns: 5, thinking_turns: 2 },
+            ],
+            new Map([["a", "Claude-Fable-5"]]),
+            new Map<string, number | null>([["claude-fable-5", 50]]),
+        );
+        const row = rows.find((r) => r.model === "Claude-Fable-5");
+        expect(row?.thinking_cost_usd).toBeCloseTo(10.0);
+    });
+});
+
+describe("reasoningCostUsd", () => {
+    it("computes tokens x rate / 1e6", () => {
+        expect(reasoningCostUsd(5000, 20)).toBeCloseTo(0.1);
+        expect(reasoningCostUsd(700000, 15)).toBeCloseTo(10.5);
+    });
+
+    it("returns 0 for null/missing/non-finite rate", () => {
+        expect(reasoningCostUsd(5000, null)).toBe(0);
+        expect(reasoningCostUsd(5000, undefined)).toBe(0);
+        expect(reasoningCostUsd(5000, Number.NaN)).toBe(0);
+    });
+
+    it("returns 0 for zero tokens", () => {
+        expect(reasoningCostUsd(0, 20)).toBe(0);
     });
 });
 
@@ -71,18 +139,26 @@ describe("fetchThinking", () => {
         const reasoning = [
             { model: "gpt-5.5", sessions: 7, reasoning_tokens: 5000, completion_tokens: 20000 },
         ];
+        const agentModels = [
+            { name: "claude-fable-5", output_per_million_usd: 15 },
+            { name: "gpt-5.5", output_per_million_usd: 20 },
+        ];
         const result = await run(
             fetchThinking({ sinceDays: 14 }),
-            makeMockDb([thinking, sessions, efforts, reasoning]),
+            makeMockDb([thinking, sessions, efforts, reasoning, agentModels]),
         );
         expect(result.models).toHaveLength(1);
         expect(result.models[0].model).toBe("claude-fable-5");
         expect(result.models[0].thinking_tokens).toBe(800);
+        // 800 thinking tokens x $15/M -> $0.012
+        expect(result.models[0].thinking_cost_usd).toBeCloseTo(0.012);
         expect(result.efforts).toEqual([
             { source: "codex", model: "gpt-5.5", reasoning_effort: "medium", sessions: 7 },
             { source: "claude", model: "claude-fable-5", reasoning_effort: "high", sessions: 3 },
         ]);
         expect(result.codex_reasoning[0].reasoning_share_pct).toBeCloseTo(25);
+        // 5000 reasoning tokens x $20/M -> $0.1
+        expect(result.codex_reasoning[0].reasoning_cost_usd).toBeCloseTo(0.1);
         expect(result.window_days).toBe(14);
     });
 });

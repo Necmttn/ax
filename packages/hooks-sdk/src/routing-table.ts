@@ -46,10 +46,32 @@ export const RoutingClassSchema = Schema.Struct({
   origin: Schema.optional(Schema.String),
 });
 
+/**
+ * Optional spendMode thresholds block in the routing table.
+ * When present, the route-dispatch hook uses these instead of DEFAULT_SPEND_CONFIG.
+ * When absent, the hook falls back to DEFAULT_SPEND_CONFIG from spend-mode.ts.
+ *
+ * Fields mirror SpendConfig in spend-mode.ts:
+ *   stalenessMs     - cache age above which the snapshot is stale (ms). Default 5 min.
+ *   nearResetMs7d   - 7d window "near reset" threshold (ms). Default 24h.
+ *   minRemainingPct - minimum remaining % required to splurge. Default 25%.
+ *   capFloorPct     - if any window is at or above this %, block splurge. Default 80%.
+ */
+export const SpendModeConfigSchema = Schema.Struct({
+  stalenessMs: Schema.optional(Schema.Number),
+  nearResetMs7d: Schema.optional(Schema.Number),
+  minRemainingPct: Schema.optional(Schema.Number),
+  capFloorPct: Schema.optional(Schema.Number),
+});
+
+export type SpendModeConfigShape = Schema.Schema.Type<typeof SpendModeConfigSchema>;
+
 export const RoutingTableSchema = Schema.Struct({
   version: Schema.Literal(1),
   classes: Schema.Array(RoutingClassSchema),
   agentTypes: Schema.optional(Schema.Record(Schema.String, Schema.String)),
+  /** Optional spend-mode threshold overrides. Absent = use DEFAULT_SPEND_CONFIG. */
+  spendMode: Schema.optional(SpendModeConfigSchema),
 });
 
 /** Decoded shape of a stored routing table (flags/origin/agentTypes optional). */
@@ -90,6 +112,63 @@ export interface LoadedRoutingTable {
   readonly classes: ReadonlyArray<LoadedRoutingClass>;
   readonly agentTypes: Readonly<Record<string, string>>;
 }
+
+// ---------------------------------------------------------------------------
+// Match (the single matcher both the fire-path hook and `ax dispatches
+// --candidates` consume - ADR-0014 follow-up; they had byte-identical copies)
+// ---------------------------------------------------------------------------
+
+export interface RoutingMatch {
+  readonly classId: string;
+  readonly suggest: string;
+  readonly reason: string;
+  readonly source: "agentType" | "description";
+}
+
+/**
+ * Match a dispatch's agent-type + description against a routing table. Agent-type
+ * rules win first (more specific); then description is tested against each class
+ * pattern in order, first hit wins. A malformed regex in a class is skipped, not
+ * fatal. Accepts the loose `RoutingTableShape` (flags/agentTypes optional) so
+ * both the fire path (hand-edited table on disk) and the strict in-memory
+ * `RoutingTable` (assignable to the shape) call it unchanged.
+ */
+export const matchRoutingTable = (
+  table: RoutingTableShape,
+  description: string | null | undefined,
+  agentType: string | null | undefined,
+): RoutingMatch | null => {
+  if (agentType && table.agentTypes) {
+    const suggest = table.agentTypes[agentType];
+    if (suggest) {
+      return {
+        classId: `agent-type:${agentType}`,
+        suggest,
+        reason: `agent type ${agentType}`,
+        source: "agentType",
+      };
+    }
+  }
+  if (description) {
+    for (const cls of table.classes) {
+      try {
+        const re = new RegExp(cls.pattern, cls.flags ?? "");
+        if (re.test(description)) {
+          return {
+            classId: cls.id,
+            suggest: cls.suggest,
+            reason: cls.reason,
+            source: "description",
+          };
+        }
+      } catch {
+        // Malformed regex in a routing-table entry - skip it.
+        continue;
+      }
+    }
+  }
+  return null;
+};
 
 // ---------------------------------------------------------------------------
 // Path

@@ -34,7 +34,13 @@ axctl costs for --commit <sha>              # cost for sessions that produced a 
 axctl costs for --branch <name>             # cost for sessions linked to a branch
 axctl cost <models|sessions|split>          # model/cost analytics incl. main-vs-subagent split
 axctl quota [--statusline|--swiftbar]       # Claude plan usage (5h/7d windows); statusline + menubar output
-axctl dispatches [--candidates]             # subagent dispatch routing analytics + est savings
+axctl dojo agenda [--json|--spar|--budget=N|--until=HH:MM|--force|--days=N]  # training agenda: quota budget envelope + prioritized self-improvement items for the ax:dojo skill loop
+axctl dojo report [--since=<iso>] [--notes-file=<path>] [--json]      # write the morning report for a completed dojo run
+axctl dojo draft [--title=<t>] [--kind=bug|improvement] [--body-file=<path>] [--session=<id>]  # stage an upstream finding to ~/.ax/dojo/outbox/<slug>.md (never publishes)
+axctl dojo outbox [--json]                                            # list staged upstream issue drafts
+axctl dojo spar-plan <sha> [--json]                              # capture a landed task's baseline + emit a one-delta experiment brief
+axctl dojo spar-score <id> [--variant-session=<id>] [--json]     # score the agent's variant vs the frozen baseline
+axctl dispatches [--candidates] [--economy] # subagent dispatch routing analytics + est savings + effectiveness lens
 axctl routing tune [--dry-run|--emit-brief] # mine YOUR dispatch history for new routing classes
 axctl routing compile                       # regenerate ~/.ax/hooks/routing-table.json (user classes preserved)
 axctl routing show                          # effective routing table with class origins
@@ -51,7 +57,9 @@ axctl evidence <guidance-next|session-summary|weekly>
 axctl improve <list|show|accept|reject|verdict|checkpoint|reset>
 axctl retro <emit|list|pending|brief|reflect|meta|plan>   # the retro-loop CLI
 axctl hook <fire>                           # hook helper invoked from settings.json
-axctl hooks <summary|invocations|backtest|session|config ...>   # + hook-config CRUD
+axctl hooks <summary|invocations|backtest|bench|session|config ...>   # + hook-config CRUD
+axctl hooks bench <file> [--days=N] [--runs=N] [--budget-ms=N] [--json]
+                                            # latency ledger: per-fire p50/p95 (spawn) + fires/day + installed-chain budget
 
 axctl daemon <status|start|stop|restart>
 axctl doctor                                # local-install health check
@@ -108,14 +116,17 @@ PR branch or a commit SHA for now.
   field, but thinking-only assistant events have their own `usage.output_tokens`
   - that is the thinking spend. Mixed thinking+text turns can't be split and
   report 0, so the aggregate is a lower bound. Shows assistant turns, thinking
-  turns, % with thinking, block count, token volume, avg tokens/turn.
+  turns, % with thinking, block count, token volume, avg tokens/turn, and
+  `think_cost` (USD: thinking tokens are output tokens, priced at the model's
+  `agent_model.output_per_million_usd`; a TOTAL row sums it).
 - **Effort levels** (`session.reasoning_effort`): codex turn_context effort
   (minimal/low/medium/high/xhigh) and claude `settings.json` `effortLevel`
   (high/medium/low). Claude has no per-session effort field, so the global
   setting is stamped only on sessions active within 30 minutes of ingest -
   live sessions get accurate values, history is never backstamped.
 - **Codex reasoning tokens**: `reasoning_output_tokens` as a share of output
-  tokens (from `token_count.total_token_usage`).
+  tokens (from `token_count.total_token_usage`), with its USD cost
+  (`reasoning_cost_usd`) at the model's output rate.
 
 Fields populate at ingest; sessions ingested before the fields existed read as
 zero until their files are re-ingested (the command prints a hint).
@@ -148,6 +159,18 @@ SendMessage follow-ups / post-compact resumes continue on the parent session's
 model. Rows are marked `!` in the child_model column; the footer sums dropped
 dispatches and the cost of off-model legs. Per-model legs come from
 `turn_token_usage` (`child_legs` in `--json`).
+
+## Dispatch economy lens
+
+`ax dispatches --economy [--days=N]` measures whether the route-dispatch advisory
+is working: of the inherit dispatches that matched a route-down routing class
+(mechanical work that *could* be routed to a cheaper model), how many ran cheap
+(sonnet/haiku) vs expensive (fable/opus)? The expensive-tier count is the
+addressable overspend. The lens also reports the count of route-dispatch Advise
+hook fires in the window (unlinked from outcomes - attributing an advisory to the
+resulting dispatch requires a clean PreToolUse→spawn join that isn't available;
+deferred). By-class table sorted by overspend. Use `--candidates` for the
+per-dispatch view of the expensive-tier rows.
 
 ## Grounded agent files (`axctl improve`)
 

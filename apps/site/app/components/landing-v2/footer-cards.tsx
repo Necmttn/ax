@@ -4,16 +4,16 @@ export function FooterCards() {
   return (
     <section className="cards">
       <div className="cards-grid">
-        <Link className="card" to="/how-it-works">
+        <Link className="card" to="/docs/install">
           <span className="num">01</span>
           <span className="card-title">
-            How it works <span className="arrow">&rarr;</span>
+            Install ax <span className="arrow">&rarr;</span>
           </span>
         </Link>
-        <Link className="card" to="/showcases">
+        <Link className="card" to="/routing">
           <span className="num">02</span>
           <span className="card-title">
-            Showcases <span className="arrow">&rarr;</span>
+            Routing <span className="arrow">&rarr;</span>
           </span>
         </Link>
         <Link className="card" to="/features">

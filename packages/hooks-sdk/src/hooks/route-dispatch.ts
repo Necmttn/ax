@@ -1,22 +1,24 @@
 /**
  * route-dispatch hook
  *
- * Fires on PreToolUse for the `Agent` tool. When a subagent dispatch has no
- * explicit `model`, matches the dispatch description (or first 120 chars of
- * prompt) against a routing table and emits a `warn` verdict suggesting a
- * cheaper model to the calling model.
+ * Fires on PreToolUse for the `Agent` tool. Advises subagent dispatches
+ * quota-aware via additionalContext (the only mechanism that reaches the model
+ * for Agent dispatches; CC bugs #39814 + #40580 confirmed updatedInput/deny
+ * are ignored for the Agent tool):
  *
- * Verdict choice - warn vs inject:
- *   - `warn` encodes as `{ systemMessage: "..." }` on stdout (exit 0).
- *     Claude Code injects this into the model's context for the CURRENT turn,
- *     so the model can re-read the suggestion and re-dispatch with `model:`
- *     pinned.  `inject` (plain stdout) is for SessionStart/UserPromptSubmit
- *     context augmentation, not PreToolUse feedback; `block` (exit 2) would
- *     prevent the dispatch entirely, which is too aggressive.  `warn` is the
- *     right fit: it reaches the model without stopping the call.
- *   - Codex has no Agent-tool dispatch equivalent; this hook is Claude-only
- *     but the SDK fires it for any harness - it will just never match on Codex
- *     because Codex never emits an `Agent` tool name.
+ *   - conserve mode: when a dispatch has no explicit model and matches a
+ *     route-down class, emits additionalContext advising the model to
+ *     re-dispatch with the suggested cheaper model (Verdict.advise).
+ *   - splurge mode: subtractive - no advisory, runs on the strong inherited
+ *     model (quota resets soon with headroom; no nag).
+ *   - judgment guard (any mode): if a cheap explicit model is set for
+ *     judgment work (review/design/audit) → advise the model to prefer the
+ *     strong model (catch-rate gate).
+ *
+ * Spend mode keys off one knob: `routeDownEnforced = (mode === "conserve")`.
+ * Mode is determined by AX_SPEND_MODE env override (conserve|splurge), else
+ * by computeSpendMode reading the quota cache. Stale/missing cache → conserve
+ * (fail-safe).
  *
  * The routing-table schema, built-in defaults, and the fail-open read live in
  * ../routing-table.ts (ADR-0014) - the same module `ax routing compile|tune`
@@ -25,85 +27,34 @@
 
 import { Effect } from "effect";
 import { defineHook, runMain } from "../define.ts";
+import { decideVerdict } from "../decide-verdict.ts";
+import { loadRoutingTableOrDefault, matchRoutingTable } from "../routing-table.ts";
 import {
-  loadRoutingTableOrDefault,
-  type RoutingTableShape,
-} from "../routing-table.ts";
-import { Verdict } from "../verdict.ts";
+  computeSpendMode,
+  DEFAULT_SPEND_CONFIG,
+  defaultQuotaCachePath,
+  JUDGMENT_STRONG_RE,
+  readQuotaCacheSync,
+  type SpendConfig,
+} from "../spend-mode.ts";
+
+/**
+ * Merge the table's optional spendMode block with DEFAULT_SPEND_CONFIG.
+ * Only fields present in the table override the default; absent keys fall back.
+ */
+const resolveSpendConfig = (tableSpendMode: Partial<SpendConfig> | undefined): SpendConfig =>
+  tableSpendMode === undefined
+    ? DEFAULT_SPEND_CONFIG
+    : {
+        stalenessMs: tableSpendMode.stalenessMs ?? DEFAULT_SPEND_CONFIG.stalenessMs,
+        nearResetMs7d: tableSpendMode.nearResetMs7d ?? DEFAULT_SPEND_CONFIG.nearResetMs7d,
+        minRemainingPct: tableSpendMode.minRemainingPct ?? DEFAULT_SPEND_CONFIG.minRemainingPct,
+        capFloorPct: tableSpendMode.capFloorPct ?? DEFAULT_SPEND_CONFIG.capFloorPct,
+      };
 
 // Re-exported for consumers (ax hooks tooling, tests) that historically
 // imported the schema from the hook file.
 export { RoutingTableSchema } from "../routing-table.ts";
-
-// ---------------------------------------------------------------------------
-// Match logic (pure, synchronous)
-// ---------------------------------------------------------------------------
-
-interface MatchResult {
-  readonly classId: string;
-  readonly suggest: string;
-  readonly reason: string;
-  readonly source: "agentType" | "description";
-}
-
-const matchTable = (
-  table: RoutingTableShape,
-  description: string | undefined,
-  subagentType: string | undefined,
-): MatchResult | null => {
-  // 1. Agent-type rules win first (more specific)
-  if (subagentType && table.agentTypes) {
-    const suggest = table.agentTypes[subagentType];
-    if (suggest) {
-      return {
-        classId: `agent-type:${subagentType}`,
-        suggest,
-        reason: `agent type ${subagentType}`,
-        source: "agentType",
-      };
-    }
-  }
-
-  // 2. Description/prompt pattern matching
-  if (description) {
-    for (const cls of table.classes) {
-      try {
-        const flags = cls.flags ?? "";
-        const re = new RegExp(cls.pattern, flags);
-        if (re.test(description)) {
-          return {
-            classId: cls.id,
-            suggest: cls.suggest,
-            reason: cls.reason,
-            source: "description",
-          };
-        }
-      } catch {
-        // Malformed regex in routing table entry - skip this entry
-        continue;
-      }
-    }
-  }
-
-  return null;
-};
-
-// ---------------------------------------------------------------------------
-// Cost multiplier hint (rough guidance - not exact)
-// ---------------------------------------------------------------------------
-
-const costHint = (suggest: string): string => {
-  // Multipliers vs the expensive tiers (fable/opus) per current agent_model
-  // pricing: fable->haiku 10x, opus->haiku 5x; fable->sonnet ~3x.
-  switch (suggest) {
-    case "haiku":
-      return "~5-10x";
-    case "sonnet":
-      return "~2-3x";
-    default:
-      return "significantly";
-  }
-};
 
 // ---------------------------------------------------------------------------
 // Hook definition
@@ -118,40 +69,43 @@ const hook = defineHook({
   // (R = never is assignable to the HookDefinition's R = GitEnv.)
   run: (event) =>
     Effect.sync(() => {
-      const input = event.tool?.input ?? {};
-      const model = input.model;
+      const input = (event.tool?.input ?? {}) as Record<string, unknown>;
+      const modelRaw = input.model;
+      const explicit = typeof modelRaw === "string" && modelRaw.length > 0;
+      const cheap = explicit && /sonnet|haiku/i.test(modelRaw as string);
       const subagentType =
         typeof input.subagent_type === "string" ? input.subagent_type : undefined;
       const rawDescription =
         typeof input.description === "string" ? input.description : undefined;
       const rawPrompt =
         typeof input.prompt === "string" ? input.prompt.slice(0, 120) : undefined;
-
-      // Explicit model set - the caller has already made a deliberate choice.
-      if (model !== undefined && model !== null && model !== "") {
-        return Verdict.allow;
-      }
-
       const description = rawDescription ?? rawPrompt;
 
       const table = loadRoutingTableOrDefault();
-      const match = matchTable(table, description, subagentType);
+      const match = matchRoutingTable(table, description, subagentType);
+      const judgmentStrong = description !== undefined && JUDGMENT_STRONG_RE.test(description);
 
-      if (match === null) return Verdict.allow;
+      // Resolve spend config: table overrides win over DEFAULT_SPEND_CONFIG.
+      const spendConfig = resolveSpendConfig(table.spendMode as Partial<SpendConfig> | undefined);
 
-      const label = rawDescription
-        ? `"${rawDescription}"`
-        : subagentType
-          ? `agent-type "${subagentType}"`
-          : `"${description ?? "(unknown)"}"`;
+      // mode (conserve unless a fresh cache says splurge). Env override wins.
+      const envMode = process.env.AX_SPEND_MODE;
+      const computed = computeSpendMode(
+        readQuotaCacheSync(defaultQuotaCachePath()),
+        Date.now(),
+        spendConfig,
+      );
+      const mode =
+        envMode === "conserve" || envMode === "splurge" ? envMode : computed.mode;
 
-      const msg =
-        `ax routing: ${label} looks like ${match.reason} work - ` +
-        `consider model: "${match.suggest}" on this dispatch ` +
-        `(est ${costHint(match.suggest)} cheaper). ` +
-        `Explicit model silences this.`;
-
-      return Verdict.warn(msg);
+      return decideVerdict({
+        match: match !== null,
+        explicit,
+        cheap,
+        judgmentStrong,
+        routeDownEnforced: mode === "conserve",
+        suggest: match?.suggest ?? "sonnet",
+      });
     }),
 });
 

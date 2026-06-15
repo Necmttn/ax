@@ -27,6 +27,7 @@ Install: `curl -fsSL https://ax.necmttn.com/install | bash`, then `npx skills ad
 ### Cost and model routing
 - `ax cost models | sessions | split` - spend by model; the split shows main-loop vs subagent spend so users see what their frontier model burns on mechanical work
 - `ax dispatches [--candidates]` - subagent dispatches that inherited an expensive model + estimated savings at cheaper-model pricing; routed dispatches whose child continued on a different model (the harness drops the model override on continuations) are flagged with their dropped-leg cost
+- `ax dispatches --economy [--days=N]` - spend-mode effectiveness lens: of inherit dispatches matching a route-down class, how many ran cheap (sonnet/haiku) vs expensive (fable/opus)? Shows overspend cost + est savings by routing class + count of route-dispatch Advise hook fires (unlinked - advice→outcome attribution deferred, no clean PreToolUse→spawn join available)
 - `ax thinking` - reasoning-spend rollup: per-model Claude thinking volume (thinking-only turns' own output tokens), reasoning-effort distribution (codex turn_context effort + claude settings effortLevel), and codex reasoning tokens as a share of output
 - `ax routing tune` - mine the user's own dispatch history for new routing classes; judgment work is never auto-routed (vetted via --emit-brief agent backtest)
 - `ax routing compile` - regenerate the routing table that drives the route-dispatch hook and the efficient-dispatch skill, preserving user-mined classes (`ax dispatches compile-routing` is an alias)
@@ -35,6 +36,12 @@ Install: `curl -fsSL https://ax.necmttn.com/install | bash`, then `npx skills ad
 - `route-dispatch` hook - deterministic dispatch-time nudge when a mechanical dispatch forgets an explicit model
 - `ax costs summary | for --session/--query/--commit/--branch` - what any session, feature, or branch cost in tokens and USD
 - `ax quota [--statusline|--swiftbar|--json]` - live Claude plan usage (5h/7d windows) from the Anthropic usage endpoint, cached locally; one-line statusline output and a SwiftBar menubar plugin ship with it
+- `ax dojo agenda [--json] [--spar] [--budget=N] [--until=HH:MM] [--force] [--days=N]` - training agenda for surplus-quota self-improvement: budget envelope (5h/7d window remaining minus reserve, deadline = window reset) + prioritized items (pending verdicts, unfilled briefs, routing backtests, proposal minting, churn experiments, optional sparring). Consumed lap-by-lap by the ax:dojo skill.
+- `ax dojo report [--since=<iso>] [--notes-file=<path>] [--json]` - write the morning report for a completed dojo run: budget envelope, per-lap item log, proposals created, verdicts locked, outbox drafts awaiting review.
+- `ax dojo draft [--title=<t>] [--kind=bug|improvement] [--body-file=<path>] [--session=<id>]` - stage an upstream finding (ax bug or improvement discovered during training) to `~/.ax/dojo/outbox/<slug>.md`; never publishes - user reviews and publishes via ax-repo skill / gh.
+- `ax dojo outbox [--json]` - list staged upstream issue drafts in `~/.ax/dojo/outbox/`.
+- `ax dojo spar-plan <sha> [--json]` - capture a landed task's baseline (prompt + cost/turns/churn) and emit a one-delta experiment brief to `~/.ax/dojo/spar/<id>.md`; prints the `git worktree add` command that pins the parent SHA.
+- `ax dojo spar-score <id> [--variant-session=<id>] [--json]` - score the agent's variant session against the frozen baseline; auto-discovers the variant session from the worktree cwd or accepts an explicit id; writes the receipt to `~/.ax/dojo/spar/<id>-report.md`.
 - `ax digest [--json|--refresh]` - your ranked digest board (improve proposals, routing savings, repair-loops, quota), written to ~/.ax/digest.json every ingest and pushed into the agent's context at session start by the surface-digest hook so value arrives without being asked for
 
 ### Profile
@@ -45,7 +52,9 @@ Install: `curl -fsSL https://ax.necmttn.com/install | bash`, then `npx skills ad
 ### Self-improvement loop
 - `ax improve recommend / accept / lint / show` - evidence-backed proposals (guidance, skills, hooks, automations) derived from the graph; accept emits a task brief, lint reconciles applied guidance
 - `ax retro emit / pending / brief` + `ax:retro` skill - guided experiment-loop retrospective: triage proposals, lock verdicts, review hook effectiveness
-- `ax hooks init / install / backtest / cases` - author typed TypeScript hooks once, run them on Claude Code + Codex; replay history through a hook before installing it
+- `ax:dojo` skill - surplus-quota overnight training loop: budget-bounded self-improvement (verdicts, briefs, routing, proposals, experiments); install via `npx skills add Necmttn/ax`
+- `ax hooks init / install / backtest / bench / cases` - author typed TypeScript hooks once, run them on Claude Code + Codex; replay history through a hook before installing it
+- `ax hooks bench <file> [--days=N] [--runs=N] [--budget-ms=N] [--json]` - latency ledger: per-fire p50/p95 from real bun spawns, est fires/day from tool_call history, installed-chain budget vs --budget-ms default 250
 
 ### Graph insights
 - `ax insights <view>` - 31 read-only graph views

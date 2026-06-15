@@ -271,7 +271,7 @@ ax hooks install ~/.ax/hooks/my-guard.ts --providers=claude,codex
 Two integration paths, same graph:
 
 ```bash
-npx skills add Necmttn/ax           # agent skills: setup, retro, extract-workflow, …
+npx skills add Necmttn/ax           # agent skills: setup, retro, extract-workflow, dojo, …
 claude mcp add ax -- ax mcp         # MCP server: read-only graph queries as tools
 ```
 

@@ -38,21 +38,6 @@ const adrs = defineCollection({
   },
 });
 
-const pages = defineCollection({
-  name: "pages",
-  directory: "../../docs",
-  include: ["manifesto.md", "brand.md", "language.md", "insights-cli-reference.md"],
-  // See `adrs.schema` above for why `content: z.string()` is here.
-  schema: z.object({
-    content: z.string(),
-  }),
-  transform: async (doc, ctx) => {
-    const body = await compileMDX(ctx, doc, mdxOptions);
-    const slug = doc._meta.fileName.replace(/\.md$/, "");
-    return { ...doc, slug, body };
-  },
-});
-
 const releaseAnnouncements = defineCollection({
   name: "releaseAnnouncements",
   directory: "../../docs/releases",
@@ -138,4 +123,4 @@ const howItWorks = defineCollection({
   },
 });
 
-export default defineConfig({ content: [adrs, pages, howItWorks, releaseAnnouncements, changelog] });
+export default defineConfig({ content: [adrs, howItWorks, releaseAnnouncements, changelog] });

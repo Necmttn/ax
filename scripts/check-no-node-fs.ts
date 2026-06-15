@@ -43,6 +43,10 @@ const EXCLUDED_FILES: readonly string[] = [
     // the hook's error channel stays `never` under plain bun (~70ms budget).
     // (Was hooks/route-dispatch.ts before the read seam moved here, ADR-0014.)
     "packages/hooks-sdk/src/routing-table.ts",
+    // Same fire-path constraint: quota-cache.json is read synchronously so the
+    // hook's error channel stays `never` under plain bun (~70ms budget).
+    // mirrors readRoutingTableSync - fail-open, effect-free.
+    "packages/hooks-sdk/src/spend-mode.ts",
 ];
 
 const BANNED_SPECIFIERS = [

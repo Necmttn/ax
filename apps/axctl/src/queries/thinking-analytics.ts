@@ -16,6 +16,7 @@
  */
 import { Effect } from "effect";
 import { SurrealClient } from "@ax/lib/db";
+import { normalizeModelName } from "../ingest/model-pricing.ts";
 
 // ---------------------------------------------------------------------------
 // Result shapes
@@ -33,6 +34,12 @@ export interface ThinkingModelRow {
     readonly thinking_turn_pct: number;
     /** thinking_tokens / thinking_turns (0 when no thinking turns) */
     readonly avg_tokens_per_thinking_turn: number;
+    /**
+     * thinking_tokens x agent_model.output_per_million_usd / 1e6 (thinking
+     * tokens bill at the model's output rate). 0 when the model has no
+     * pricing row or a null rate.
+     */
+    readonly thinking_cost_usd: number;
 }
 
 export interface EffortRow {
@@ -49,6 +56,12 @@ export interface CodexReasoningRow {
     readonly completion_tokens: number;
     /** reasoning_tokens / completion_tokens * 100 (reasoning is a subset of output) */
     readonly reasoning_share_pct: number;
+    /**
+     * reasoning_tokens x agent_model.output_per_million_usd / 1e6 (reasoning
+     * tokens bill at the model's output rate). 0 when the model has no
+     * pricing row or a null rate.
+     */
+    readonly reasoning_cost_usd: number;
 }
 
 export interface ThinkingResult {
@@ -111,9 +124,26 @@ WHERE source = 'codex'
 GROUP BY model;
 `;
 
+const AGENT_MODELS_SQL = `
+SELECT name, output_per_million_usd FROM agent_model;
+`;
+
 // ---------------------------------------------------------------------------
 // Pure rollup (exported for tests)
 // ---------------------------------------------------------------------------
+
+/**
+ * USD cost of output-billed reasoning/thinking tokens:
+ * `tokens × outputPerMillionUsd / 1e6`. Returns 0 when the rate is
+ * null/undefined/non-finite (model has no pricing row) - never guesses.
+ */
+export const reasoningCostUsd = (
+    tokens: number,
+    outputPerMillionUsd: number | null | undefined,
+): number => {
+    if (outputPerMillionUsd == null || !Number.isFinite(outputPerMillionUsd)) return 0;
+    return (tokens * outputPerMillionUsd) / 1e6;
+};
 
 export interface SessionThinkingRow {
     readonly session_id: string;
@@ -129,6 +159,7 @@ const cleanSessionId = (id: string): string =>
 export const rollupThinkingByModel = (
     sessionRows: ReadonlyArray<SessionThinkingRow>,
     modelBySession: ReadonlyMap<string, string | null>,
+    outputRateByModel: ReadonlyMap<string, number | null>,
 ): ThinkingModelRow[] => {
     interface Acc {
         sessions: number;
@@ -170,6 +201,13 @@ export const rollupThinkingByModel = (
             avg_tokens_per_thinking_turn: acc.thinking_turns > 0
                 ? acc.thinking_tokens / acc.thinking_turns
                 : 0,
+            thinking_cost_usd: reasoningCostUsd(
+                acc.thinking_tokens,
+                // `model` is a raw session.model string; the rate map is keyed by
+                // agent_model.name == normalizeModelName(raw). Normalize the lookup
+                // key so mixed-case/whitespace/prefixed ids still hit the rate.
+                outputRateByModel.get(normalizeModelName(model) ?? model) ?? null,
+            ),
         }))
         .sort((a, b) => b.thinking_tokens - a.thinking_tokens);
 };
@@ -182,7 +220,8 @@ export const fetchThinking = Effect.fn("queries.fetchThinking")(
     function* (opts: { readonly sinceDays: number }) {
         const db = yield* SurrealClient;
 
-        const [thinkingResult, sessionsResult, effortResult, reasoningResult] = yield* db.query<[
+        const [thinkingResult, sessionsResult, effortResult, reasoningResult, agentModelsResult] = yield* db.query<[
+            Array<Record<string, unknown>>,
             Array<Record<string, unknown>>,
             Array<Record<string, unknown>>,
             Array<Record<string, unknown>>,
@@ -191,8 +230,19 @@ export const fetchThinking = Effect.fn("queries.fetchThinking")(
             SESSION_THINKING_SQL(opts.sinceDays) +
             SESSION_MODELS_SQL(opts.sinceDays) +
             EFFORT_SQL(opts.sinceDays) +
-            CODEX_REASONING_SQL(opts.sinceDays),
+            CODEX_REASONING_SQL(opts.sinceDays) +
+            AGENT_MODELS_SQL,
         );
+
+        // Model name -> output rate ($/M); null when the catalog has no rate.
+        const outputRateByModel = new Map<string, number | null>();
+        for (const r of agentModelsResult ?? []) {
+            if (r.name == null) continue;
+            outputRateByModel.set(
+                String(r.name),
+                r.output_per_million_usd == null ? null : Number(r.output_per_million_usd),
+            );
+        }
 
         const sessionRows: SessionThinkingRow[] = (thinkingResult ?? []).map((r) => ({
             session_id: String(r.session_id ?? ""),
@@ -224,18 +274,22 @@ export const fetchThinking = Effect.fn("queries.fetchThinking")(
             .map((r) => {
                 const reasoning = Number(r.reasoning_tokens ?? 0);
                 const completion = Number(r.completion_tokens ?? 0);
+                const model = r.model == null ? "(unknown)" : String(r.model);
                 return {
-                    model: r.model == null ? "(unknown)" : String(r.model),
+                    model,
                     sessions: Number(r.sessions ?? 0),
                     reasoning_tokens: reasoning,
                     completion_tokens: completion,
                     reasoning_share_pct: completion > 0 ? (reasoning / completion) * 100 : 0,
+                    // `model` is a raw session_token_usage.model string; normalize to
+                    // the agent_model.name key the rate map uses (see rollup above).
+                    reasoning_cost_usd: reasoningCostUsd(reasoning, outputRateByModel.get(normalizeModelName(model) ?? model) ?? null),
                 };
             })
             .sort((a, b) => b.reasoning_tokens - a.reasoning_tokens);
 
         return {
-            models: rollupThinkingByModel(sessionRows, modelBySession),
+            models: rollupThinkingByModel(sessionRows, modelBySession, outputRateByModel),
             efforts,
             codex_reasoning,
             window_days: opts.sinceDays,

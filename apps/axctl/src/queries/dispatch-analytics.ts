@@ -19,7 +19,9 @@ import { Effect, FileSystem, Path } from "effect";
 import { SurrealClient } from "@ax/lib/db";
 import {
     DEFAULT_ROUTING_TABLE,
+    matchRoutingTable,
     type RoutingClass,
+    type RoutingMatch,
     type RoutingTable,
 } from "@ax/hooks-sdk/routing-table";
 import { estimateCost, type ModelPricing } from "../ingest/model-pricing.ts";
@@ -34,7 +36,7 @@ import {
 // Routing classes (schema + defaults owned by @ax/hooks-sdk/routing-table)
 // ---------------------------------------------------------------------------
 
-export type { RoutingClass, RoutingTable };
+export type { RoutingClass, RoutingTable, RoutingMatch };
 
 /**
  * ROUTING_CLASSES - the shipped default seed (`ax routing compile` refreshes
@@ -53,57 +55,22 @@ const MODEL_ALIASES: Record<string, string> = {
 export const EXPENSIVE_TIER_RE = /fable|opus/i;
 
 // ---------------------------------------------------------------------------
-// Routing match
+// Routing match - the matcher itself lives in @ax/hooks-sdk/routing-table
+// (matchRoutingTable), shared with the route-dispatch fire-path hook so the
+// two can never drift (ADR-0014 follow-up). These keep the existing
+// axctl-side names + the strict RoutingTable signature for callers/tests.
 // ---------------------------------------------------------------------------
-
-export interface RoutingMatch {
-    readonly classId: string;
-    readonly suggest: string;
-    readonly reason: string;
-    readonly source: "agentType" | "description";
-}
 
 export const matchRoutingWith = (
     table: RoutingTable,
     description: string | null,
     agentType: string | null,
-): RoutingMatch | null => {
-    // Agent-type rules win first (more specific)
-    if (agentType) {
-        const suggest = table.agentTypes[agentType];
-        if (suggest) {
-            return {
-                classId: `agent-type:${agentType}`,
-                suggest,
-                reason: `agent type ${agentType}`,
-                source: "agentType",
-            };
-        }
-    }
-    if (description) {
-        for (const cls of table.classes) {
-            try {
-                const re = new RegExp(cls.pattern, cls.flags);
-                if (re.test(description)) {
-                    return {
-                        classId: cls.id,
-                        suggest: cls.suggest,
-                        reason: cls.reason,
-                        source: "description",
-                    };
-                }
-            } catch {
-                continue;
-            }
-        }
-    }
-    return null;
-};
+): RoutingMatch | null => matchRoutingTable(table, description, agentType);
 
 export const matchRouting = (
     description: string | null,
     agentType: string | null,
-): RoutingMatch | null => matchRoutingWith(ROUTING_CLASSES, description, agentType);
+): RoutingMatch | null => matchRoutingTable(ROUTING_CLASSES, description, agentType);
 
 // ---------------------------------------------------------------------------
 // Raw DB row interfaces (query results before joining)
@@ -215,6 +182,53 @@ export interface CandidatesResult {
 }
 
 // ---------------------------------------------------------------------------
+// Economy lens (--economy)
+// ---------------------------------------------------------------------------
+
+/** Per-routing-class summary in the economy lens. */
+export interface EconomyClassRow {
+    readonly classId: string;
+    /** Total dispatches that matched this class (inherit + expensive tier). */
+    readonly count: number;
+    /** Dispatches that ran cheap (sonnet/haiku child model) despite matching. */
+    readonly ran_cheap: number;
+    /** Dispatches that ran expensive despite matching (addressable overspend). */
+    readonly ran_expensive: number;
+    /** Total overspend cost (child_cost_usd of the expensive-tier rows). */
+    readonly overspend_usd: number;
+    /** Estimated savings if the expensive rows had been re-priced at suggest. */
+    readonly est_savings_usd: number;
+}
+
+export interface EconomyResult {
+    /** Window in days this result covers. */
+    readonly days: number;
+    /** Total inherit dispatches that matched a route-down class. */
+    readonly total_routable: number;
+    /** How many ran cheap (sonnet/haiku). */
+    readonly ran_cheap: number;
+    /** How many ran expensive (fable/opus) - addressable overspend. */
+    readonly ran_expensive: number;
+    /** Total cost of expensive-tier routable dispatches. */
+    readonly overspend_usd: number;
+    /** Estimated savings if all expensive-tier routable dispatches ran at suggest. */
+    readonly total_est_savings_usd: number;
+    /** Per-class breakdown, sorted by overspend desc. */
+    readonly by_class: ReadonlyArray<EconomyClassRow>;
+    /**
+     * Count of route-dispatch Advise fires (hook_command_invocation where
+     * hook_name contains "route-dispatch" and effect = "injected_context").
+     * Advisory fires are counted unlinked - attributing an Advise fire to the
+     * resulting dispatch requires a clean tool_use_id join that isn't available
+     * (PreToolUse fires before the Agent spawns; the spawned session carries a
+     * different id). Deferred.
+     */
+    readonly advise_fires: number;
+    /** Whether the hook fire count could be queried (false = table empty/unavailable). */
+    readonly advise_fires_available: boolean;
+}
+
+// ---------------------------------------------------------------------------
 // SQL queries (flat, no derefs in aggregates)
 // ---------------------------------------------------------------------------
 
@@ -292,6 +306,21 @@ SELECT
     cache_read_per_million_usd,
     cache_creation_per_million_usd
 FROM agent_model;
+`;
+
+/**
+ * Count route-dispatch Advise fires in the window.
+ * hook_name may be stored as either "route-dispatch" or include the path,
+ * so we match by contains. effect = "injected_context" means Verdict.advise
+ * fired (stdout included hookSpecificOutput.additionalContext).
+ */
+const ROUTE_DISPATCH_FIRES_SQL = (sinceDays: number) => `
+SELECT count() AS n
+FROM hook_command_invocation
+WHERE ts > time::now() - ${Math.max(1, Math.trunc(sinceDays))}d
+  AND string::contains(hook_name, "route-dispatch")
+  AND effect = "injected_context"
+GROUP ALL;
 `;
 
 // ---------------------------------------------------------------------------
@@ -729,6 +758,248 @@ export const fetchDispatchCandidates = Effect.fn("queries.fetchDispatchCandidate
             total_est_savings_usd,
             top_classes,
         } satisfies CandidatesResult;
+    },
+);
+
+// ---------------------------------------------------------------------------
+// Economy lens: spend-mode-aware effectiveness measurement
+//
+// Answers: "of the mechanical dispatches that a route-down advisory could have
+// addressed, how many actually ran cheap vs expensive?" and "how many times did
+// the route-dispatch hook fire an advisory?"
+//
+// Built as a thin rollup over fetchDispatchCandidates (inherit + expensive +
+// routing-class-match). The addressable overspend IS the candidates list; this
+// lens adds the cheap-ran counterpart + the hook-fire count (unlinked - see
+// EconomyResult.advise_fires doc for why attribution is deferred).
+// ---------------------------------------------------------------------------
+
+/** Cheap model tier: sonnet or haiku (lower cost tier). */
+export const CHEAP_TIER_RE = /sonnet|haiku/i;
+
+export const fetchDispatchEconomy = Effect.fn("queries.fetchDispatchEconomy")(
+    function* (opts: { readonly sinceDays: number; readonly table?: RoutingTable }) {
+        const table = opts.table ?? ROUTING_CLASSES;
+        const db = yield* SurrealClient;
+
+        // Parallel: candidates data + cheap-ran data + hook fires
+        // Candidates fetch uses the same 4 queries as fetchDispatchCandidates.
+        // For the cheap-ran half we need the same spawned/usage/toolcall/parent
+        // data but filtered to cheap child models - reuse the same raw queries.
+        const [spawnedResult, usageResult, toolCallsResult, parentSessionsResult, agentModelsResult, hookFiresResult] =
+            yield* db.query<[
+                Array<Record<string, unknown>>,
+                Array<Record<string, unknown>>,
+                Array<Record<string, unknown>>,
+                Array<Record<string, unknown>>,
+                Array<Record<string, unknown>>,
+                Array<Record<string, unknown>>,
+            ]>(
+                SPAWNED_SQL(opts.sinceDays) +
+                USAGE_SQL(opts.sinceDays) +
+                TOOL_CALLS_SQL(opts.sinceDays) +
+                PARENT_SESSIONS_SQL(opts.sinceDays) +
+                AGENT_MODELS_SQL +
+                ROUTE_DISPATCH_FIRES_SQL(opts.sinceDays),
+            );
+
+        const spawnedRows: SpawnedRow[] = (spawnedResult ?? []).map((r) => ({
+            parent_id: String(r.parent_id ?? ""),
+            child_id: String(r.child_id ?? ""),
+            ts: String(r.ts ?? ""),
+            agent_type: r.agent_type == null ? null : String(r.agent_type),
+            description: r.description == null ? null : String(r.description),
+            tool_use_id: r.tool_use_id == null ? null : String(r.tool_use_id),
+        }));
+
+        const usageRows: UsageRow[] = (usageResult ?? []).map((r) => ({
+            session_id: String(r.session_id ?? ""),
+            model: r.model == null ? null : String(r.model),
+            prompt_tokens: Number(r.prompt_tokens ?? 0),
+            completion_tokens: Number(r.completion_tokens ?? 0),
+            cache_read_tokens: Number(r.cache_read_tokens ?? 0),
+            cache_create_tokens: Number(r.cache_create_tokens ?? 0),
+            cost_usd: Number(r.cost_usd ?? 0),
+        }));
+
+        const toolCallRows: ToolCallRow[] = (toolCallsResult ?? []).map((r) => ({
+            session_id: String(r.session_id ?? ""),
+            call_id: String(r.call_id ?? ""),
+            input_json: r.input_json == null ? null : String(r.input_json),
+        }));
+
+        const parentSessionRows: ParentSessionRow[] = (parentSessionsResult ?? []).map((r) => ({
+            session_id: String(r.session_id ?? ""),
+            model: r.model == null ? null : String(r.model),
+        }));
+
+        const agentModels: AgentModelRow[] = (agentModelsResult ?? []).map((r) => ({
+            name: String(r.name ?? ""),
+            input_per_million_usd: r.input_per_million_usd == null ? null : Number(r.input_per_million_usd),
+            output_per_million_usd: r.output_per_million_usd == null ? null : Number(r.output_per_million_usd),
+            cache_read_per_million_usd: r.cache_read_per_million_usd == null ? null : Number(r.cache_read_per_million_usd),
+            cache_creation_per_million_usd: r.cache_creation_per_million_usd == null ? null : Number(r.cache_creation_per_million_usd),
+        }));
+
+        // Hook fire count
+        const hookFireRows = hookFiresResult ?? [];
+        const advise_fires = hookFireRows.length > 0
+            ? Number((hookFireRows[0] as Record<string, unknown>).n ?? 0)
+            : 0;
+        const advise_fires_available = hookFireRows.length > 0;
+
+        // Build lookup maps (mirrors fetchDispatchCandidates)
+        const usageByChildId = new Map<string, UsageRow>();
+        for (const u of usageRows) {
+            const bare = cleanSessionId(u.session_id);
+            usageByChildId.set(u.session_id, u);
+            usageByChildId.set(bare, u);
+            usageByChildId.set(`session:${bare}`, u);
+        }
+
+        const toolCallByCallId = new Map<string, ToolCallRow>();
+        for (const tc of toolCallRows) {
+            if (tc.call_id) toolCallByCallId.set(tc.call_id, tc);
+        }
+
+        const parentModelById = new Map<string, string | null>();
+        for (const ps of parentSessionRows) {
+            const bare = cleanSessionId(ps.session_id);
+            parentModelById.set(bare, ps.model);
+            parentModelById.set(ps.session_id, ps.model);
+        }
+
+        const pricingCatalog = new Map<string, ModelPricing>();
+        for (const am of agentModels) {
+            pricingCatalog.set(am.name, {
+                provider: "anthropic",
+                inputPerMillionUsd: am.input_per_million_usd ?? null,
+                outputPerMillionUsd: am.output_per_million_usd ?? null,
+                cacheCreationPerMillionUsd: am.cache_creation_per_million_usd ?? null,
+                cacheReadPerMillionUsd: am.cache_read_per_million_usd ?? null,
+                fastMultiplier: 1,
+                pricingSource: "agent_model",
+            });
+        }
+
+        const reprice = (usage: UsageRow, targetModelName: string): number => {
+            const cost = estimateCost({
+                modelKey: targetModelName,
+                promptTokens: usage.prompt_tokens,
+                completionTokens: usage.completion_tokens,
+                cacheCreationInputTokens: usage.cache_create_tokens,
+                cacheReadInputTokens: usage.cache_read_tokens,
+                estimatedTokens: usage.prompt_tokens + usage.completion_tokens,
+                ...(pricingCatalog.size > 0 ? { pricingCatalog } : {}),
+            });
+            return cost.totalUsd ?? usage.cost_usd;
+        };
+
+        // Per-class economy accumulators
+        interface ClassAccumulator {
+            count: number;
+            ran_cheap: number;
+            ran_expensive: number;
+            overspend_usd: number;
+            est_savings_usd: number;
+        }
+        const byClass = new Map<string, ClassAccumulator>();
+
+        let total_routable = 0;
+        let total_ran_cheap = 0;
+        let total_ran_expensive = 0;
+        let total_overspend_usd = 0;
+        let total_est_savings_usd = 0;
+
+        for (const sp of spawnedRows) {
+            const bareChild = cleanSessionId(sp.child_id);
+            const bareParent = cleanSessionId(sp.parent_id);
+
+            // Must be inherit dispatch
+            let dispatchModel = "inherit";
+            if (sp.tool_use_id) {
+                const tc = toolCallByCallId.get(sp.tool_use_id);
+                if (tc) {
+                    const inp = parseInputJson(tc.input_json);
+                    const m = inp.model;
+                    if (typeof m === "string" && m.trim().length > 0) {
+                        dispatchModel = m.trim();
+                    }
+                }
+            }
+            if (dispatchModel !== "inherit") continue;
+
+            // Must match a routing class
+            const routingMatch = matchRoutingWith(table, sp.description, sp.agent_type);
+            if (!routingMatch) continue;
+
+            // Resolve child model
+            const usage = usageByChildId.get(bareChild) ??
+                usageByChildId.get(`session:${bareChild}`) ??
+                usageByChildId.get(sp.child_id);
+
+            let childModel: string | null = usage?.model ?? null;
+            if (!childModel) {
+                childModel = parentModelById.get(bareParent) ?? parentModelById.get(sp.parent_id) ?? null;
+            }
+
+            if (!childModel) continue; // can't classify without model info
+
+            total_routable++;
+
+            const isExpensive = EXPENSIVE_TIER_RE.test(childModel);
+            const isCheap = CHEAP_TIER_RE.test(childModel);
+            const childCostUsd = usage?.cost_usd ?? 0;
+
+            // Accumulate for this class
+            const cls = routingMatch.classId;
+            const acc = byClass.get(cls) ?? { count: 0, ran_cheap: 0, ran_expensive: 0, overspend_usd: 0, est_savings_usd: 0 };
+
+            acc.count++;
+
+            if (isExpensive) {
+                total_ran_expensive++;
+                total_overspend_usd += childCostUsd;
+                acc.ran_expensive++;
+                acc.overspend_usd += childCostUsd;
+
+                // Estimate savings vs suggested model
+                const suggestedAlias = routingMatch.suggest;
+                const suggestedModelName = MODEL_ALIASES[suggestedAlias] ?? suggestedAlias;
+                const estSavings = usage ? Math.max(0, childCostUsd - reprice(usage, suggestedModelName)) : 0;
+                total_est_savings_usd += estSavings;
+                acc.est_savings_usd += estSavings;
+            } else if (isCheap) {
+                total_ran_cheap++;
+                acc.ran_cheap++;
+            }
+            // Other (unknown tier) counts in total_routable but not cheap/expensive
+
+            byClass.set(cls, acc);
+        }
+
+        const by_class: EconomyClassRow[] = [...byClass.entries()]
+            .map(([classId, acc]) => ({
+                classId,
+                count: acc.count,
+                ran_cheap: acc.ran_cheap,
+                ran_expensive: acc.ran_expensive,
+                overspend_usd: acc.overspend_usd,
+                est_savings_usd: acc.est_savings_usd,
+            }))
+            .sort((a, b) => b.overspend_usd - a.overspend_usd);
+
+        return {
+            days: opts.sinceDays,
+            total_routable,
+            ran_cheap: total_ran_cheap,
+            ran_expensive: total_ran_expensive,
+            overspend_usd: total_overspend_usd,
+            total_est_savings_usd,
+            by_class,
+            advise_fires,
+            advise_fires_available,
+        } satisfies EconomyResult;
     },
 );
 
