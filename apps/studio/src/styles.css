@@ -3640,6 +3640,34 @@ td.skill-cell .description {
     color: var(--dim);
     margin: 14px 0 0;
 }
+/* DRIFT: skill change log */
+.rdx .ctx-drift { margin: 0 0 26px; }
+.rdx .ctx-drift-list { list-style: none; margin: 10px 0 0; padding: 0; }
+.rdx .ctx-drift-row {
+    display: grid;
+    grid-template-columns: 74px 1fr auto auto;
+    align-items: baseline;
+    gap: 12px;
+    padding: 6px 0;
+    border-bottom: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
+    font-family: var(--mono);
+    font-size: 12px;
+}
+.rdx .ctx-drift-row:last-child { border-bottom: 0; }
+.rdx .ctx-drift-tag {
+    font-size: 9.5px;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    padding: 2px 6px;
+    border-radius: 4px;
+    border: 1px solid var(--border);
+    color: var(--sec);
+    justify-self: start;
+}
+.rdx .ctx-drift-tag.is-added { color: var(--green); border-color: color-mix(in srgb, var(--green) 45%, transparent); }
+.rdx .ctx-drift-name { color: var(--pri); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rdx .ctx-drift-delta { color: var(--sec); font-variant-numeric: tabular-nums; }
+.rdx .ctx-drift-time { color: var(--dim); font-size: 11px; }
 .rdx .ctx-link {
     font-family: var(--mono);
     font-size: inherit;

@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { api } from "../api.ts";
 import type {
     ContextBudgetResult,
+    ContextDriftRow,
     ContextSkillRow,
     ContextSourceRow,
 } from "../api.ts";
@@ -66,6 +67,11 @@ export function SkillsRoute() {
         queryKey: ["context-budget"],
         queryFn: () => api.contextBudget(),
     });
+    const drift = useQuery({
+        queryKey: ["context-drift"],
+        queryFn: () => api.contextDrift(),
+    });
+    const driftRows = drift.data?.changes ?? [];
     const data: ContextBudgetResult | null = budget.data ?? null;
     const loading = budget.isLoading;
     const refreshing = budget.isFetching && !budget.isLoading;
@@ -295,6 +301,8 @@ export function SkillsRoute() {
                         ) : null}
                     </section>
 
+                    <DriftPanel rows={driftRows} />
+
                     {/* --- SKILL INDEX: navigable, sortable, dense --- */}
                     <div className="inst-controls ctx-controls">
                         <button
@@ -399,6 +407,65 @@ export function SkillsRoute() {
                     ) : null}
                 </>
             ) : null}
+        </section>
+    );
+}
+
+/** Compact relative time ("3d ago") from an ISO timestamp. */
+function relTime(iso: string): string {
+    const t = Date.parse(iso);
+    if (!Number.isFinite(t)) return "";
+    const s = (Date.now() - t) / 1000;
+    if (s < 60) return "just now";
+    if (s < 3600) return `${Math.floor(s / 60)}m ago`;
+    if (s < 86400) return `${Math.floor(s / 3600)}h ago`;
+    return `${Math.floor(s / 86400)}d ago`;
+}
+
+/** DRIFT: the append-only skill change log - what shifted since baseline. The
+ *  same skill registered under user + project scopes logs twice; collapse the
+ *  mirror so each change shows once. */
+function DriftPanel({ rows }: { rows: ReadonlyArray<ContextDriftRow> }) {
+    const seen = new Set<string>();
+    const items = rows
+        .filter((r) => {
+            const base = r.name.replace(/^[^:]+:/, "");
+            // collapse the user↔project mirror: same change logged ~same minute
+            // under two scopes, with timestamps a fraction apart.
+            const k = `${r.ts.slice(0, 16)}|${base}|${r.change}|${r.token_delta}`;
+            if (seen.has(k)) return false;
+            seen.add(k);
+            return true;
+        })
+        .slice(0, 12);
+    return (
+        <section className="ctx-drift">
+            <div className="ctx-breakdown-head">
+                <span className="inst-kicker">$ drift</span>
+                <span className="ctx-breakdown-note">skills changed since baseline - tracked from first ingest</span>
+            </div>
+            {items.length === 0 ? (
+                <p className="ctx-foot">
+                    No drift yet. When you - or an agent - edit a skill, the change lands here with its token delta.
+                </p>
+            ) : (
+                <ul className="ctx-drift-list">
+                    {items.map((r, i) => {
+                        const base = r.name.replace(/^[^:]+:/, "");
+                        const delta = r.token_delta;
+                        return (
+                            <li key={`${r.ts}-${base}-${i}`} className="ctx-drift-row">
+                                <span className={`ctx-drift-tag is-${r.change}`}>{r.change}</span>
+                                <span className="ctx-drift-name">{base}</span>
+                                <span className="ctx-drift-delta">
+                                    {r.change === "added" ? "new" : `${delta > 0 ? "+" : ""}${fmtCount(delta)} tok`}
+                                </span>
+                                <span className="ctx-drift-time">{relTime(r.ts)}</span>
+                            </li>
+                        );
+                    })}
+                </ul>
+            )}
         </section>
     );
 }
