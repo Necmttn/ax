@@ -23,11 +23,35 @@ describe("install-config", () => {
         expect(next.env.FOO).toBe("bar");
     });
 
-    test("codex toml gains an [otel] block with the endpoint", () => {
+    test("codex toml writes the struct-variant exporter (NOT a bare string)", () => {
         const toml = applyCodexOtelToml("", ENDPOINT);
         expect(toml).toContain("[otel]");
-        expect(toml).toContain(ENDPOINT);
-        expect(toml).toContain("http/json");
+        // The bug this guards: `exporter = "otlp-http"` is a unit variant and
+        // fails Codex config load, breaking every codex command. It MUST be a
+        // struct variant.
+        expect(toml).toContain("exporter = { otlp-http = {");
+        expect(toml).not.toContain(`exporter = "otlp-http"`);
+        // Codex posts as-is + emits logs → endpoint carries the /v1/logs path.
+        expect(toml).toContain(`endpoint = "${ENDPOINT}/v1/logs"`);
+        // Codex's protocol value is "json" (not OTEL env's "http/json").
+        expect(toml).toContain(`protocol = "json"`);
+        expect(toml).not.toContain("http/json");
+    });
+
+    test("codex toml is valid TOML and parses to the expected shape", async () => {
+        const { tmpdir } = await import("node:os");
+        const { join } = await import("node:path");
+        const toml = applyCodexOtelToml(`model = "gpt-5"\n`, ENDPOINT);
+        // Bun parses .toml on import; an invalid struct (the old bug) throws here.
+        const file = join(tmpdir(), `ax-codex-otel-${process.pid}-${Math.trunc(performance.now())}.toml`);
+        await Bun.write(file, toml);
+        const cfg = (await import(file)).default as {
+            model: string;
+            otel: { exporter: { "otlp-http": { endpoint: string; protocol: string } } };
+        };
+        expect(cfg.model).toBe("gpt-5"); // unrelated content preserved
+        expect(cfg.otel.exporter["otlp-http"].endpoint).toBe(`${ENDPOINT}/v1/logs`);
+        expect(cfg.otel.exporter["otlp-http"].protocol).toBe("json");
     });
 
     test("codex toml is idempotent", () => {

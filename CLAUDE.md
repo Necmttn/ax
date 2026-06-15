@@ -89,8 +89,12 @@ fresh clone.
 ### OTLP receiver (ax serve)
 
 `ax serve` accepts harness OTLP/JSON telemetry on the daemon port (1738):
-`POST /v1/metrics` (Claude Code usage metrics) + `POST /v1/traces` (Codex
-spans); `/v1/logs` is accepted and dropped (v1 no-op). Bodies decode via Effect
+`POST /v1/metrics` (Claude Code usage metrics) + `POST /v1/traces` (span
+sources); `/v1/logs` is accepted and dropped (v1 no-op - full logs ingestion is
+the next PR). NOTE: Codex emits OTLP *logs* (events: conversation_starts,
+user_prompt, token usage), NOT spans, and POSTs to the endpoint as-is, so its
+config targets `/v1/logs` (struct-variant exporter, `protocol = "json"`; see
+install-config.ts); its data lands once logs ingestion ships. Bodies decode via Effect
 `Schema` (curated OTLP/JSON subset, `apps/axctl/src/otel/`), normalize per-harness
 (`service.name` -> harness label), and land in `otel_metric_point` / `otel_span`.
 A correlation pass at ingest finish draws `session -> telemetry_of -> otel_*`
