@@ -10,7 +10,7 @@ import {
     buildRecallNext,
 } from "../../nav/next-links.ts";
 import { printNextLinks } from "../next-format.ts";
-import { fetchRecall, resolveRecallSources, type RecallSource, type RecallScope } from "../../dashboard/recall.ts";
+import { fetchRecall, normalizeRecallParams, resolveRecallSources, type RecallSource, type RecallScope } from "../../dashboard/recall.ts";
 import { resolvePwdRepository } from "../../pwd.ts";
 import type { RuntimeManifest } from "./manifest.ts";
 import { fail, jsonFlag, parseCsvFlag } from "./shared.ts";
@@ -217,14 +217,14 @@ const cmdRecall = (opts: RecallCliOpts) =>
         const skill = yield* resolveSkill(opts.skill);
         const sources = parseSourcesFlag(opts.sources);
         const scope = yield* resolveScope(opts.scopeFlag);
-        const result = yield* fetchRecall({
+        const result = yield* fetchRecall(normalizeRecallParams({
             q: opts.query,
             project,
             skill,
             since: opts.since,
             ...(sources !== null ? { sources } : {}),
             scope,
-        });
+        }));
         const { hits, next } = buildRecallNext(result, {
             requestedSources: resolveRecallSources(sources),
         });
