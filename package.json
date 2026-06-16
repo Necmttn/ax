@@ -43,6 +43,7 @@
     "watcher:uninstall": "bash scripts/uninstall-watcher.sh",
     "community:deploy": "bun alchemy deploy",
     "community:destroy": "bun alchemy destroy",
+    "community:provenance": "bun scripts/gen-skill-provenance.ts",
     "checkpoint:install": "bash scripts/install-checkpoint.sh",
     "checkpoint:uninstall": "bash scripts/uninstall-checkpoint.sh",
     "daemon:install": "bash scripts/install-daemon.sh",
