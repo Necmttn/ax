@@ -54,13 +54,11 @@ One dispatch made it obvious. "Implement S2-T4" routed to sonnet. The sonnet leg
 
 <Figure id="Receipt" label="'Implement S2-T4' · the route that didn't stick" lead="The override applied to the first leg only." caption="99% of the cost landed after the routed leg, on the parent's frontier model - and the dispatch_model column still reads sonnet.">
 
-```
-"Implement S2-T4"
+<AxResult>{`"Implement S2-T4"
   requested:    sonnet
   sonnet leg:   ~$1
   continued on: claude-fable-5   $116
-  total:        $117    (99% billed off-model, after the route)
-```
+  total:        $117    (99% billed off-model, after the route)`}</AxResult>
 
 </Figure>
 
@@ -68,15 +66,13 @@ Across the same 30 days: 66 routed dispatches continued on a different model tha
 
 <Figure id="ax dispatches" label="--days=30 · dropped-leg footer" lead="The leak you can't see, made visible." caption="ax marks dropped-leg rows with a ! and a dropped-cost footer, so a route that didn't stick stops looking like a route that worked.">
 
-```
-$ ax dispatches --days=30
+<AxResult>{`$ ax dispatches --days=30
 
 ts                   description            dispatch_model  child_model        cost
 2026-06-XXT..:..:..  Implement S2-T4    !   sonnet          claude-fable-5     $117.00
 ...
 
-dropped (off-model continuation): 66 dispatches  $571.52
-```
+dropped (off-model continuation): 66 dispatches  $571.52`}</AxResult>
 
 </Figure>
 
@@ -109,25 +105,20 @@ ax ingest --since=30
 
 The matrix your harness never shows: who spent the money - main agent or subagents - and on which model.
 
-<Figure id="ax cost split" label="--days=30 · origin × model" lead="The split your invoice never breaks out." caption="Share is each row's slice of the $25,027 total. The real table breaks out every main-agent model and adds token columns - collapsed to one line here so the subagent split stays the point.">
+<Figure id="ax cost split" label="--days=30 · origin × model" lead="The split your invoice never breaks out." caption="Main agent is the bill: 84% of the $25,027 total. The subagent green slice - the whole subject of this article - is the 16% sliver, broken out below by model. fable is the hot bar: 4x sonnet's spend on half its sessions.">
 
-```
-$ ax cost split --days=30
+<SplitBar total="$25,027.00" totalLabel="total (main + subagent)">
+  <SplitSeg label="main agent" amount="$21,015.22" pct="84.0%" tone="ink" />
+  <SplitSeg label="subagent" amount="$4,011.78" pct="16.0%" tone="green" />
+</SplitBar>
 
-origin × model, 30 days   (subagent rows shown; main rows + token columns trimmed)
-
-origin    model               sessions          cost    share
-subagent  claude-fable-5           247     $1,979.34    7.9%
-subagent  claude-opus-4-7         229     $  758.83    3.0%
-subagent  claude-opus-4-8         225     $  747.93    3.0%
-subagent  claude-sonnet-4-6      517     $  478.36    1.9%
-subagent  claude-haiku           114     $   47.32    0.2%
-                                        ──────────   ───────
-subagent subtotal                        $4,011.78   16.0%
-main agent (models trimmed)             $21,015.22   84.0%
-                                        ──────────   ───────
-TOTAL (main + subagent)                  $25,027.00  100.0%
-```
+<BarChart label="subagent spend by model · 30 days">
+  <Bar name="claude-fable-5" amount="$1,979.34" pct="7.9%" value={1979.34} sub="247 sessions" peak />
+  <Bar name="claude-opus-4-7" amount="$758.83" pct="3.0%" value={758.83} sub="229 sessions" />
+  <Bar name="claude-opus-4-8" amount="$747.93" pct="3.0%" value={747.93} sub="225 sessions" />
+  <Bar name="claude-sonnet-4-6" amount="$478.36" pct="1.9%" value={478.36} sub="517 sessions" />
+  <Bar name="claude-haiku" amount="$47.32" pct="0.2%" value={47.32} sub="114 sessions" />
+</BarChart>
 
 </Figure>
 
@@ -137,8 +128,7 @@ Every Task dispatch: its description, whether a model was specified, what the ch
 
 <Figure id="ax dispatches" label="--days=30 · sorted by child cost" lead="Every dispatch, priced and sorted." caption="The expensive inherit rows tell you everything; the footer counts the routed dispatches that continued off-model.">
 
-```
-$ ax dispatches --days=30
+<AxResult>{`$ ax dispatches --days=30
 
 ts                   description                        dispatch_model  child_model        cost
 2026-06-11T08:52:56  Issue 248 manifest hidden flag     inherit         claude-fable-5     $22.72
@@ -146,8 +136,7 @@ ts                   description                        dispatch_model  child_mo
 ...
 
 1368 dispatches  67.0% inherit  total subagent cost: $3956.59  (30 days)
-model drops: 66 routed dispatches continued on a different model ($571.52 on dropped legs, marked "!")
-```
+model drops: 66 routed dispatches continued on a different model ($571.52 on dropped legs, marked "!")`}</AxResult>
 
 </Figure>
 
@@ -165,9 +154,7 @@ model drops: 66 routed dispatches continued on a different model ($571.52 on dro
 
 Multiply the flagged savings by 12 and decide if it's worth fifteen minutes of setup. Mine was $605.02 over 30 days - about $7,260 a year.
 
-```
-$605.02 flagged / 30 days  ×12 ≈ $7,260 / year
-```
+<AxResult>{`$605.02 flagged / 30 days  ×12 ≈ $7,260 / year`}</AxResult>
 
 ---
 
@@ -208,8 +195,7 @@ agent-type:codebase-analyzer                                              sonnet
 
 <Figure id="ax dispatches --candidates" label="--days=30 · est. savings by class" lead="Where the $605.02 actually lives." caption="inherit dispatches that match a routing class, repriced one tier down, ranked by the class that would save the most.">
 
-```
-$ ax dispatches --candidates --days=30
+<AxResult>{`$ ax dispatches --candidates --days=30
 
 flagged: inherit + fable/opus + class match
 est. savings: $605.02
@@ -217,8 +203,7 @@ est. savings: $605.02
 top classes by savings:
   well-specified-impl   $282.69
   spec-review           $ 80.66
-  bug-fix               $ 69.37
-```
+  bug-fix               $ 69.37`}</AxResult>
 
 </Figure>
 
@@ -248,24 +233,20 @@ apply non-judgment: ax routing tune --days=30   brief: ax routing tune --emit-br
 
 The `issue-N` row alone - "Issue 248 manifest hidden flag" and eleven siblings - is $161.42 of inherit spend with a two-token pattern sitting on top of it.
 
-```
-$ ax routing tune --days=30
-applied non-judgment proposals → ~/.ax/hooks/routing-table.json  (origin: user)
-```
+<AxResult>{`$ ax routing tune --days=30
+applied non-judgment proposals → ~/.ax/hooks/routing-table.json  (origin: user)`}</AxResult>
 
 ### Rule 9: Never let judgment work auto-route. Backtest it.
 
 This is the rule that keeps the loop honest. In the dry-run above, 14 of my 20 proposals carry `judgment: YES` - quality-review ($105.90), plan-phase ($77.64), final-review ($75.70) - the biggest clusters, and never auto-applied. Of the $599.00 mined, only $218.63 is auto-appliable; $380.35 is judgment-gated. A false-positive routing class on review or plan work costs more than it saves. Gated proposals ship as a task brief, your agent adversarially backtests each class against false positives, and only survivors get applied.
 
-```
-$ ax routing tune --days=30 --emit-brief
+<AxResult>{`$ ax routing tune --days=30 --emit-brief
 wrote .ax/tasks/routing-tune-2026-06-13.md
 
 # agent backtests each proposed class against history,
 # hunting for dispatches that would have routed wrong
 
-$ ax routing tune --apply=<id>,<id> --days=30
-```
+$ ax routing tune --apply=<id>,<id> --days=30`}</AxResult>
 
 ### Rule 10: Install the hook that makes it real
 
@@ -287,14 +268,12 @@ npx skills add Necmttn/ax
 
 Once the hook is live, `--candidates` measures what's escaping the table. Run it weekly; a rising number means new dispatch patterns it hasn't learned yet. My hook installed mid-window, so the current week still shows the pre-hook leak:
 
-```
-$ ax dispatches --candidates --days=7
+<AxResult>{`$ ax dispatches --candidates --days=7
 
 total est savings: $419.50
 top classes: well-specified-impl ($212.30), spec-review ($65.15), bug-fix ($54.65)
 
-# target as routed dispatches replace inherit ones: → $0
-```
+# target as routed dispatches replace inherit ones: → $0`}</AxResult>
 
 ### Rule 12: Audit the table, not the vibes
 
@@ -337,12 +316,10 @@ ax routing tune --days=30 --emit-brief # gate the judgment ones
 
 Inherit is not always wrong. Architecture decisions, plan reviews, tricky design calls should run on the strongest model you have, and the table deliberately never touches them. The goal is not "cheapest model everywhere." It's "frontier where judgment lives, sonnet and haiku where the spec is already written." From my 30 days, dispatches that ran inherit on fable and should have:
 
-```
-stayed frontier, correctly:
+<AxResult>{`stayed frontier, correctly:
   "Plan phase 2 CLI families"          $28.17
   "Plan phase 4 parser seam"           $25.29
-  "Correctness review of arch PRs"     $21.04
-```
+  "Correctness review of arch PRs"     $21.04`}</AxResult>
 
 tune clustered these too (`plan-phase`, $77.64) and flagged the cluster `judgment: YES`, so it never auto-routes.
 
@@ -365,10 +342,8 @@ splurge   (earned)    route-down advisories OFF   7d resets soon, real headroom,
 
 Splurge is purely subtractive. It does not force anything up. It stops forcing things down, so your forgotten dispatches run on the strong inherited model while the allowance you'd otherwise waste is there to use.
 
-```
-$ ax quota --statusline
-5h 30% → 15:00 · 7d 19% · SPLURGE ⚡ → /dojo
-```
+<AxResult>{`$ ax quota --statusline
+5h 30% → 15:00 · 7d 19% · SPLURGE ⚡ → /dojo`}</AxResult>
 
 ### Rule 17: When you're in splurge, spend the surplus on purpose.
 
@@ -384,8 +359,7 @@ So I built a command to look at the trunk. `ax cost routability` classifies main
 
 <Figure id="ax cost routability" label="--days=30 · main-agent turns, repriced" lead="The trunk, not the tail." caption="$1,766/month - several times the entire subagent leak - sitting in the model you talk to all day. The stays-main row is genuine reasoning and coordination, correctly left on frontier.">
 
-```
-$ ax cost routability --days=30
+<AxResult>{`$ ax cost routability --days=30
 
 main-agent spend: $14,478   routable: $3,240 (22%)   est. savings: $1,766
 
@@ -395,8 +369,7 @@ gather           1334    1348     $326.94   haiku       $56.01      $270.93
 niche-research     71      95      $22.54   sonnet      $10.20       $12.34
 stays main      28750   39481   $11238.33   -                -            -
 
-estimate: edit/read turns assumed mechanically routable (upper-ish bound); claude main only.
-```
+estimate: edit/read turns assumed mechanically routable (upper-ish bound); claude main only.`}</AxResult>
 
 </Figure>
 
