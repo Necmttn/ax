@@ -10763,6 +10763,125 @@ footer.site-footer { padding: 48px 32px 56px; }
 }
 
 /* ============================================================
+   "starred by engineers from" logo carousel
+   ============================================================ */
+
+.landing-v2 section.used-by {
+  padding: 28px 0 30px;
+  border-bottom: 1px solid var(--line);
+  text-align: center;
+}
+.landing-v2 .used-by-caption {
+  margin: 0 auto 18px;
+  font-family: var(--mono);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.16em;
+  color: var(--muted);
+  opacity: 0.7;
+}
+/* viewport: clip the scrolling copies + fade the edges (Ryan Mulligan pattern) */
+.landing-v2 .used-by-marquee {
+  --gap: 56px;
+  display: flex;
+  gap: var(--gap);
+  overflow: hidden;
+  width: 100%;
+  user-select: none;
+  -webkit-mask-image: linear-gradient(
+    to right,
+    transparent,
+    #000 12%,
+    #000 88%,
+    transparent
+  );
+  mask-image: linear-gradient(
+    to right,
+    transparent,
+    #000 12%,
+    #000 88%,
+    transparent
+  );
+}
+.landing-v2 .used-by-group {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-around;
+  min-width: 100%;
+  gap: var(--gap);
+  /* each copy slides one full width + gap, so the loop is seamless and the
+     gap is accounted for (omitting it causes a visible jump at the loop) */
+  animation: used-by-scroll 40s linear infinite;
+}
+.landing-v2 .used-by-marquee:hover .used-by-group {
+  animation-play-state: paused;
+}
+.landing-v2 .used-by-item {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--muted);
+  opacity: 0.66;
+  transition: color 140ms ease, opacity 140ms ease;
+}
+.landing-v2 .used-by-item:hover {
+  color: var(--ink);
+  opacity: 1;
+}
+/* one shared optical baseline: glyphs + wordmarks sit on a 26px row */
+.landing-v2 .used-by-glyph,
+.landing-v2 .used-by-wordmark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 26px;
+}
+.landing-v2 .used-by-glyph svg {
+  display: block;
+  height: 26px;
+  width: auto;
+  fill: currentColor;
+}
+/* Cloudflare's cloud sits low in its 24x24 box, so it reads small at the
+   shared height - scale it up to match the others optically. */
+.landing-v2 .used-by-item--cloudflare .used-by-glyph svg {
+  transform: scale(1.32);
+}
+.landing-v2 .used-by-wordmark {
+  font-family: var(--serif);
+  font-size: 23px;
+  font-weight: 500;
+  letter-spacing: -0.3px;
+  line-height: 1;
+  white-space: nowrap;
+  color: inherit;
+}
+
+@keyframes used-by-scroll {
+  from { transform: translateX(0); }
+  to   { transform: translateX(calc(-100% - var(--gap))); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .landing-v2 .used-by-group { animation: none; }
+  /* with no animation the second (duplicate) copy is redundant */
+  .landing-v2 .used-by-group[aria-hidden="true"] { display: none; }
+}
+
+@media (max-width: 640px) {
+  .landing-v2 section.used-by { padding: 22px 0 24px; }
+  .landing-v2 .used-by-marquee { --gap: 36px; }
+  .landing-v2 .used-by-glyph,
+  .landing-v2 .used-by-wordmark { height: 22px; }
+  .landing-v2 .used-by-glyph svg { height: 22px; }
+  .landing-v2 .used-by-wordmark { font-size: 20px; }
+}
+
+/* ============================================================
    docs index + documentation shell + prose
    ============================================================ */
 
