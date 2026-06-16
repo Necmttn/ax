@@ -314,20 +314,27 @@ describe("formatUsdCompact", () => {
 });
 
 describe("trendingSkills", () => {
+    // Keys are canonical identities (bare names); the compile already stripped
+    // the install-source prefix and folded local/plugin installs together.
     const stats = {
-        "local:my-personal-skill": { users: 1, runs: 99 },
-        "superpowers:brainstorming": { users: 3, runs: 30 },
-        "superpowers:tdd": { users: 2, runs: 12 },
-        "caveman:caveman": { users: 1, runs: 5 },
+        "my-personal-skill": { users: 1, runs: 99, source: "local" },
+        simplify: { users: 5, runs: 50, source: "local" }, // local-sourced but SHARED
+        brainstorming: { users: 3, runs: 30, source: "superpowers" },
+        tdd: { users: 2, runs: 12, source: "superpowers" },
+        caveman: { users: 1, runs: 5, source: "caveman" },
     };
-    test("drops local:* skills", () => {
+    test("shared skills trend regardless of install source (no local exclusion)", () => {
         const out = trendingSkills(stats).map(([n]) => n);
-        expect(out).not.toContain("local:my-personal-skill");
+        expect(out).toContain("simplify"); // local-sourced, but 5 builders
     });
-    test("requires users >= 2 by default", () => {
+    test("one-off personal skills drop out via the users >= 2 threshold", () => {
         const out = trendingSkills(stats).map(([n]) => n);
-        expect(out).not.toContain("caveman:caveman");
-        expect(out).toEqual(["superpowers:brainstorming", "superpowers:tdd"]);
+        expect(out).not.toContain("my-personal-skill"); // 1 builder
+        expect(out).not.toContain("caveman"); // 1 builder
+    });
+    test("sorts by users desc, then runs desc", () => {
+        const out = trendingSkills(stats).map(([n]) => n);
+        expect(out).toEqual(["simplify", "brainstorming", "tdd"]);
     });
     test("minUsers override + limit", () => {
         expect(trendingSkills(stats, { minUsers: 1, limit: 2 })).toHaveLength(2);

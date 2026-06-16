@@ -299,7 +299,10 @@ export function validateLeaderboard(value: unknown): Leaderboard {
     };
 }
 
-export type SkillStats = Record<string, { readonly users: number; readonly runs: number }>;
+// Keyed by canonical skill identity (bare name, source prefix stripped at
+// compile time). `source` is the best-known install source for display (a real
+// plugin beats "local"); optional so older compiled payloads still validate.
+export type SkillStats = Record<string, { readonly users: number; readonly runs: number; readonly source?: string }>;
 
 // --- formatting (shared) --------------------------------------------------------
 
@@ -322,31 +325,33 @@ export const formatUsdCompact = (n: number): string =>
 // --- trending skills (display filter) -------------------------------------------
 
 /**
- * A skill "trends" only when it is a real, shared skill: plugin-namespaced or
- * a known shared source - never a one-off `local:*` skill scoped to a single
- * machine - and adopted by at least `minUsers` people. Without this the board
- * fills with junk (every personal/project skill from a single early adopter).
+ * A skill "trends" once it is shared - adopted by at least `minUsers` distinct
+ * builders. Stats are keyed by canonical identity (the compile strips the
+ * install-source prefix), so the SAME skill installed as a loose `local:` dir
+ * by one builder and a namespaced plugin by another counts together. The
+ * `minUsers >= 2` threshold - not a `local:` exclusion - is what filters
+ * one-off personal skills: a machine-specific skill only ever has 1 builder.
  */
 export function trendingSkills(
     stats: SkillStats,
     opts: { readonly minUsers?: number; readonly limit?: number } = {},
-): ReadonlyArray<readonly [string, { readonly users: number; readonly runs: number }]> {
+): ReadonlyArray<readonly [string, { readonly users: number; readonly runs: number; readonly source?: string }]> {
     const minUsers = opts.minUsers ?? 2;
     const limit = opts.limit ?? 50;
     return Object.entries(stats)
-        .filter(([name, s]) => !name.startsWith("local:") && s.users >= minUsers)
+        .filter(([, s]) => s.users >= minUsers)
         .sort(([, a], [, b]) => b.users - a.users || b.runs - a.runs)
         .slice(0, limit);
 }
 
 export function validateSkillStats(value: unknown): SkillStats {
     if (!isRecord(value)) throw new Error("invalid skill stats");
-    const out: Record<string, { users: number; runs: number }> = {};
+    const out: Record<string, { users: number; runs: number; source?: string }> = {};
     for (const [k, v] of Object.entries(value)) {
         if (!isRecord(v)) continue;
         if (typeof v.users === "number" && Number.isFinite(v.users)
             && typeof v.runs === "number" && Number.isFinite(v.runs)) {
-            out[k] = { users: v.users, runs: v.runs };
+            out[k] = { users: v.users, runs: v.runs, ...(typeof v.source === "string" ? { source: v.source } : {}) };
         }
     }
     return out;

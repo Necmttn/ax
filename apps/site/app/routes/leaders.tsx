@@ -214,14 +214,15 @@ function TrendingSkills({ skills }: { readonly skills: SkillStats }) {
     return (
         <section className="lb-skills">
             <h2>trending skills</h2>
-            <p className="muted">Adopted by 2+ builders (personal <code>local:*</code> skills don't count).</p>
+            <p className="muted">Skills adopted by 2+ builders, however each installed them.</p>
             <ol className="lb-skill-list">
-                {rows.map(([key, s], i) => {
-                    const idx = key.indexOf(":");
-                    const source = idx > 0 ? key.slice(0, idx) : "";
-                    const name = idx > 0 ? key.slice(idx + 1) : key;
+                {rows.map(([name, s], i) => {
+                    // Keys are canonical skill identities (bare names); the badge
+                    // shows the best-known install source, but only when it's a
+                    // real plugin (a purely-`local` skill gets no badge).
+                    const source = s.source && s.source !== "local" ? s.source : "";
                     return (
-                        <li key={key} className="lb-skill">
+                        <li key={name} className="lb-skill">
                             <span className="lb-skill-rank">{i + 1}</span>
                             <span className="lb-skill-name">
                                 {source && <span className="lb-skill-src">{source}</span>}
