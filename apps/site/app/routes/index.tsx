@@ -4,6 +4,7 @@ import { SiteFooter } from "~/components/landing-sections/site-footer";
 import {
   DashboardPreview,
   LineageFlow,
+  UsedByStrip,
   OpenSourceSection,
   TeamsCallout,
   FooterCards,
@@ -19,6 +20,7 @@ function Landing() {
       <SiteHeader />
       <main className="landing-v2">
         <DashboardPreview />
+        <UsedByStrip />
         <LineageFlow />
         <OpenSourceSection />
         <TeamsCallout />
