@@ -1,6 +1,7 @@
 import { Effect } from "effect";
 import { resolveArchetype } from "@ax/lib/shared/archetypes";
 import { SurrealClient } from "@ax/lib/db";
+import { isContextTool, isVerificationTool } from "../profile/tool-taxonomy.ts";
 import type { DbError } from "@ax/lib/errors";
 import type {
     WrappedArchetype,
@@ -411,8 +412,9 @@ const parsePeakHour = (row: Row | undefined): number | null => {
     return Number.isInteger(hour) && hour >= 0 && hour <= 23 ? hour : null;
 };
 
-const contextToolPattern = /recall|context|rg|sed|cat|find|grep|open|read/i;
-const verificationToolPattern = /test|check|verify|lint|typecheck|tsc|vitest|bun test/i;
+// Verification / context classification shared with profile/queries.ts via
+// tool-taxonomy.ts (ecosystem-aware program matching; see issue #471).
+const refactorToolPattern = /refactor|rewrite|format/i;
 
 export function fetchWrapped(): Effect.Effect<WrappedProfile, DbError, SurrealClient> {
     return Effect.gen(function* () {
@@ -467,12 +469,12 @@ export function fetchWrapped(): Effect.Effect<WrappedProfile, DbError, SurrealCl
         const totalTokens = totalTokensRaw > 0 ? totalTokensRaw : null;
         const tools = queryRows(toolRows);
         const skills = queryRows(skillRows);
-        const toolCount = (pattern: RegExp): number =>
+        const toolCount = (pred: (label: string) => boolean): number =>
             tools
-                .filter((row) => pattern.test(toString(row.tool) ?? ""))
+                .filter((row) => pred(toString(row.tool) ?? ""))
                 .reduce((sum, row) => sum + toNumber(row.count), 0);
-        const verificationCalls = toolCount(verificationToolPattern);
-        const contextCalls = toolCount(contextToolPattern);
+        const verificationCalls = toolCount(isVerificationTool);
+        const contextCalls = toolCount(isContextTool);
         const topToolRow = tools[0];
         const topSkillRow = skills[0];
         const topTool = topToolRow && toString(topToolRow.tool)
@@ -500,7 +502,7 @@ export function fetchWrapped(): Effect.Effect<WrappedProfile, DbError, SurrealCl
             repositories: metrics.repositories,
             spawnedAgents: metrics.spawnedAgents,
             contextCalls,
-            refactorSignals: toolCount(/refactor|rewrite|format/i),
+            refactorSignals: toolCount((label) => refactorToolPattern.test(label)),
         });
         const now = new Date();
 

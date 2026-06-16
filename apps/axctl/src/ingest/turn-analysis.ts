@@ -283,7 +283,9 @@ function classifyUserTurn(row: TurnAnalysisInput): Omit<TurnAnalysisWrite, "turn
         };
     }
 
-    if (ask === "verification_request" || /\bverify|test|typecheck|lint|check\b/i.test(lower)) {
+    // Grouped boundaries: the old ungrouped /\bverify|test|.../ matched "test"
+    // inside "fastest"/"latest", "lint" inside any word, etc. (issue #471).
+    if (ask === "verification_request" || /\b(verify|test|typecheck|lint|check)\b/i.test(lower)) {
         return {
             speaker: "user",
             act: "request",

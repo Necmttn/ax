@@ -236,9 +236,9 @@ describe("fetchWrappedCounts", () => {
         expect(r.distinct_tools).toBe(3);
         expect(r.distinct_skills).toBe(56);
         expect(r.repos_count).toBe(12);
-        // "bun test" matches /test|check|verify|lint|typecheck|tsc|vitest|bun test/i
+        // "bun test" -> verification via tool-taxonomy isVerificationTool
         expect(r.verification_calls).toBe(900);
-        // "Read" matches /recall|context|rg|sed|cat|find|grep|open|read/i
+        // "Read" -> context via tool-taxonomy isContextTool
         expect(r.context_calls).toBe(2000);
         // SQL contains window clause
         expect(db.captured[0]).toContain("time::now() - 30d");

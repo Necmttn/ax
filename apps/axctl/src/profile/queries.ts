@@ -9,6 +9,7 @@
  */
 import { Effect } from "effect";
 import { SurrealClient } from "@ax/lib/db";
+import { isContextTool, isVerificationTool } from "./tool-taxonomy.ts";
 
 const win = (d: number) => `${Math.max(1, Math.trunc(d))}d`;
 
@@ -359,9 +360,8 @@ export interface WrappedCounts {
     readonly context_calls: number;
 }
 
-// Matches dashboard/wrapped.ts ArchetypeSignals computation.
-const verificationToolPattern = /test|check|verify|lint|typecheck|tsc|vitest|bun test/i;
-const contextToolPattern = /recall|context|rg|sed|cat|find|grep|open|read/i;
+// Verification / context classification is shared with dashboard/wrapped.ts
+// via tool-taxonomy.ts (ecosystem-aware program matching; see issue #471).
 
 // Per-tool rows (name, count, failures) - same shape as WRAPPED_TOOLS_SQL but windowed.
 const TOOL_AGG_SQL = (d: number) => `
@@ -423,9 +423,9 @@ export const fetchWrappedCounts = Effect.fn("profile.fetchWrappedCounts")(
         const tool_failures = toolRows.reduce((s, r) => s + Number(r.failures ?? 0), 0);
         const distinct_tools = toolRows.length;
 
-        const toolCount = (pattern: RegExp): number =>
+        const toolCount = (pred: (label: string) => boolean): number =>
             toolRows
-                .filter((r) => pattern.test(String(r.tool ?? "")))
+                .filter((r) => pred(String(r.tool ?? "")))
                 .reduce((s, r) => s + Number(r.count ?? 0), 0);
 
         return {
@@ -435,8 +435,8 @@ export const fetchWrappedCounts = Effect.fn("profile.fetchWrappedCounts")(
             distinct_tools,
             distinct_skills: Number(skillRows[0]?.count ?? 0),
             repos_count: Number(repoRows[0]?.count ?? 0),
-            verification_calls: toolCount(verificationToolPattern),
-            context_calls: toolCount(contextToolPattern),
+            verification_calls: toolCount(isVerificationTool),
+            context_calls: toolCount(isContextTool),
         } satisfies WrappedCounts;
     },
 );
