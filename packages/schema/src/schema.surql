@@ -1657,14 +1657,16 @@ DEFINE FIELD confidence    ON proposal TYPE string;
 DEFINE FIELD status        ON proposal TYPE string DEFAULT 'open';
     -- open | accepted | rejected | superseded
 -- mined (signal-derived) | agent (written via `ax improve propose`).
--- `VALUE $value ?? 'mined'` coerces any NONE/absent write back to 'mined' so a
--- bare `UPDATE proposal SET ...` (accept/reject/housekeep/re-derive) that omits
+-- The VALUE clause coerces a NONE/absent write back to 'mined' so a bare
+-- `UPDATE proposal SET ...` (accept/reject/housekeep/re-derive) that omits
 -- `origin` can never re-coerce an old NONE row and crash with "Expected string
--- but found `NONE`" (issue #472). DEFAULT still seeds 'mined' on first create;
--- an explicit origin='agent' write is preserved. OVERWRITE so the VALUE clause
--- actually replaces the prior definition when re-applied to an existing DB
--- (plain DEFINE FIELD errors "already exists" and keeps the NONE-permitting def).
-DEFINE FIELD OVERWRITE origin ON proposal TYPE string DEFAULT 'mined' VALUE $value ?? 'mined';
+-- but found `NONE`" (issue #472). It tests `IS NONE` explicitly rather than the
+-- broader `?? ` so an *explicit* NULL write still fails type coercion (a real
+-- bug surfaces) instead of being silently relabeled 'mined'. DEFAULT still seeds
+-- 'mined' on first create; an explicit origin='agent' write is preserved.
+-- OVERWRITE so the VALUE clause actually replaces the prior definition when
+-- re-applied to an existing DB (plain DEFINE FIELD errors "already exists").
+DEFINE FIELD OVERWRITE origin ON proposal TYPE string DEFAULT 'mined' VALUE IF $value IS NONE THEN 'mined' ELSE $value END;
 -- Repair rows written before the VALUE clause existed (origin already NONE).
 UPDATE proposal SET origin = 'mined' WHERE origin = NONE;
 DEFINE FIELD hypothesis_template ON proposal TYPE option<string>;

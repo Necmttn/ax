@@ -225,9 +225,9 @@ describe("proposal.origin NONE-coerce guard (#472)", () => {
     // A bare `UPDATE proposal SET ...` re-coerces the whole SCHEMAFULL record;
     // old rows created before `origin` existed stored NONE and crashed with
     // "Expected string but found `NONE`". OVERWRITE + VALUE coalesces it.
-    test("origin uses OVERWRITE + VALUE $value ?? 'mined'", () => {
+    test("origin uses OVERWRITE + an explicit IS NONE coalesce (not the broad ??)", () => {
         expect(schema).toContain(
-            "DEFINE FIELD OVERWRITE origin ON proposal TYPE string DEFAULT 'mined' VALUE $value ?? 'mined';",
+            "DEFINE FIELD OVERWRITE origin ON proposal TYPE string DEFAULT 'mined' VALUE IF $value IS NONE THEN 'mined' ELSE $value END;",
         );
     });
 
