@@ -192,6 +192,70 @@ describe("renderSkillSparBrief / parseSkillSparBrief round-trip", () => {
         expect(parsed).not.toBeNull();
         expect(parsed!.task).toBe(taskWithSubheading);
     });
+
+    // New: How to run step 0 - operator must write edited skill to editedPath file
+    test("## How to run contains step 0 instructing write of edited SKILL.md to editedPath", () => {
+        const editedPath = "/tmp/ax-spar-abc12345-edited.md";
+        const rendered = renderSkillSparBrief(BASE_BRIEF, {
+            editedPathAbs: editedPath,
+        });
+        expect(rendered).toContain(`Write your edited SKILL.md to \`${editedPath}\``);
+        // Step 0 must appear in the How to run section
+        const howToIdx = rendered.indexOf("## How to run");
+        expect(howToIdx).toBeGreaterThan(-1);
+        const howToSection = rendered.slice(howToIdx);
+        expect(howToSection).toContain(`Write your edited SKILL.md to \`${editedPath}\``);
+    });
+
+    // New: swap-in command block has test -f guard before cp
+    test("swap-in command block contains test -f guard before cp", () => {
+        const editedPath = "/tmp/ax-spar-abc12345-edited.md";
+        const rendered = renderSkillSparBrief(BASE_BRIEF, {
+            editedPathAbs: editedPath,
+        });
+        // The guard line must appear in the rendered output
+        expect(rendered).toContain(`test -f "${editedPath}"`);
+        // The guard must appear BEFORE the cp line
+        const guardIdx = rendered.indexOf(`test -f "${editedPath}"`);
+        const cpIdx = rendered.indexOf(`cp "${editedPath}"`);
+        expect(guardIdx).toBeGreaterThan(-1);
+        expect(cpIdx).toBeGreaterThan(-1);
+        expect(guardIdx).toBeLessThan(cpIdx);
+    });
+
+    // New: editedPath in guard and cp must be the same path as the save-target note
+    test("editedPath in guard/cp matches the path given in the save-to note (consistency)", () => {
+        const editedPath = "/Users/user/.ax/dojo/spar/my-skill-abc123-2026-06-16.skill.edited.md";
+        const rendered = renderSkillSparBrief(BASE_BRIEF, {
+            editedPathAbs: editedPath,
+        });
+        // All three occurrences of the path must be identical (guard, cp source, note)
+        const occurrences = [...rendered.matchAll(new RegExp(editedPath.replace(/[/.-]/g, "\\$&"), "g"))];
+        // At minimum: the note, the guard, and the cp source = 3 occurrences
+        expect(occurrences.length).toBeGreaterThanOrEqual(3);
+    });
+
+    // New: ## Edited skill heading line is stable (parser untouched)
+    test("## Edited skill heading is exactly '## Edited skill' on its own line", () => {
+        const rendered = renderSkillSparBrief(BASE_BRIEF);
+        const lines = rendered.split("\n");
+        const headingLine = lines.find((l) => l.startsWith("## Edited skill"));
+        expect(headingLine).toBe("## Edited skill");
+    });
+
+    // New: parser still works when editedPath note is present below ## Edited skill
+    test("parser still extracts editedSkill correctly when draft-area note is present", () => {
+        const brief: SkillSparBrief = {
+            ...BASE_BRIEF,
+            editedSkill: "# My Skill v2\n\nEdited content here.",
+        };
+        const rendered = renderSkillSparBrief(brief, {
+            editedPathAbs: "/tmp/ax-edited.md",
+        });
+        const parsed = parseSkillSparBrief(rendered);
+        expect(parsed).not.toBeNull();
+        expect(parsed!.editedSkill).toBe(brief.editedSkill);
+    });
 });
 
 // ---------------------------------------------------------------------------

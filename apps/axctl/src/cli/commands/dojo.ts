@@ -469,7 +469,7 @@ const sparPlanCommand = Command.make(
                     return;
                 }
                 console.log(
-                    `${briefPath}\n\nNext: fill the Edited skill block in the brief, run both arms, then: ax dojo spar-score ${brief.id}`,
+                    `${briefPath}\n\nnext: write your edited skill to ${editedPathAbs}, run both arms (see the brief), then ax dojo spar-score ${brief.id}`,
                 );
             } else {
                 // ----------------------------------------------------------------
