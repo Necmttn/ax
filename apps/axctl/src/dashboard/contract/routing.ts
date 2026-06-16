@@ -24,6 +24,22 @@ import {
 import { asJsonValue, orInternal } from "./common.ts";
 
 /**
+ * Loopback gate: routing writes mutate `routing-table.json`, which the live
+ * route-dispatch hook reads. They are allowed only when the daemon is bound to
+ * a loopback host (the default). If the operator opted into LAN exposure via
+ * `AX_SERVE_HOST=0.0.0.0` (or any non-loopback host), the write surface stays
+ * read-only so a networked daemon can't have its routing rewritten remotely.
+ * Mirrors how `server.ts` reads the bind host (`process.env.AX_SERVE_HOST`).
+ */
+const LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost", "::1", "[::1]", ""]);
+export const writesAllowed = (): boolean => {
+    const host = (process.env.AX_SERVE_HOST ?? "").trim();
+    return LOOPBACK_HOSTS.has(host);
+};
+const NON_LOOPBACK_WRITE_ERROR =
+    "routing writes are loopback-only; the daemon is bound to a non-loopback host (AX_SERVE_HOST), so the routing table is read-only over the network";
+
+/**
  * Try compiling a regex; return the error message on failure, null on success.
  */
 const tryRegex = (pattern: string, flags: string | undefined): string | null => {
@@ -38,6 +54,9 @@ const tryRegex = (pattern: string, flags: string | undefined): string | null => 
 export const RoutingGroupLive = HttpApiBuilder.group(AxApi, "routing", (handlers) =>
     handlers
         .handle("routingUpsertClass", ({ payload }) => {
+            if (!writesAllowed()) {
+                return Effect.fail(new BadRequestError({ error: NON_LOOPBACK_WRITE_ERROR }));
+            }
             // Validate main pattern before touching the file.
             const patternErr = tryRegex(payload.pattern, payload.flags);
             if (patternErr !== null) {
@@ -73,6 +92,9 @@ export const RoutingGroupLive = HttpApiBuilder.group(AxApi, "routing", (handlers
             }));
         })
         .handle("routingRemoveClass", ({ params }) => {
+            if (!writesAllowed()) {
+                return Effect.fail(new BadRequestError({ error: NON_LOOPBACK_WRITE_ERROR }));
+            }
             const path = defaultRoutingTablePath();
             return orInternal(Effect.gen(function* () {
                 const existing = yield* loadStoredRoutingTable(path);
