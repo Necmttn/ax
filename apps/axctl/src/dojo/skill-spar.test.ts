@@ -76,20 +76,20 @@ describe("renderSkillSparBrief / parseSkillSparBrief round-trip", () => {
         expect(parsed!.task).toBe(brief.task);
     });
 
-    test("opts.worktreeAAbs and worktreeBAbs appear in commands, frontmatter stays relative", () => {
+    test("opts.worktreeAAbs and worktreeBAbs appear in commands (quoted), frontmatter stays relative", () => {
         const rendered = renderSkillSparBrief(BASE_BRIEF, {
             worktreeAAbs: "/abs/repo/.claude/worktrees/dojo-spar-abc12345-a",
             worktreeBAbs: "/abs/repo/.claude/worktrees/dojo-spar-abc12345-b",
             snapshotPathAbs: "/tmp/ax-spar-abc12345-snapshot.md",
+            editedPathAbs: "/tmp/ax-spar-abc12345-edited.md",
         });
 
-        // Absolute paths appear in the worktree commands
-        expect(rendered).toContain("git worktree add /abs/repo/.claude/worktrees/dojo-spar-abc12345-a");
-        expect(rendered).toContain("git worktree add /abs/repo/.claude/worktrees/dojo-spar-abc12345-b");
-        // Snapshot path appears in swap-out command
-        expect(rendered).toContain("cp /tmp/ax-spar-abc12345-snapshot.md");
-        // Derived edited path (snapshot → edited) appears in swap-in command
-        expect(rendered).toContain("cp /tmp/ax-spar-abc12345-edited.md");
+        // Absolute paths appear in the worktree commands, shell-quoted
+        expect(rendered).toContain(`git worktree add "/abs/repo/.claude/worktrees/dojo-spar-abc12345-a"`);
+        expect(rendered).toContain(`git worktree add "/abs/repo/.claude/worktrees/dojo-spar-abc12345-b"`);
+        // Snapshot path appears in swap-out command; edited path in swap-in
+        expect(rendered).toContain(`cp "/tmp/ax-spar-abc12345-snapshot.md"`);
+        expect(rendered).toContain(`cp "/tmp/ax-spar-abc12345-edited.md"`);
 
         // Frontmatter keeps relative worktree paths
         expect(rendered).toContain(`worktree_a: ${BASE_BRIEF.worktreeA}`);
@@ -103,10 +103,82 @@ describe("renderSkillSparBrief / parseSkillSparBrief round-trip", () => {
     test("opts absent: fallback placeholder paths render, round-trip still valid", () => {
         const rendered = renderSkillSparBrief(BASE_BRIEF);
         expect(rendered).toContain("(snapshot path)");
-        expect(rendered).toContain("(edited-skill-path)");
+        expect(rendered).toContain("(edited skill path)");
         const parsed = parseSkillSparBrief(rendered);
         expect(parsed).not.toBeNull();
         expect(parsed!.id).toBe(BASE_BRIEF.id);
+    });
+
+    // DEFECT 1: a SKILL.md carrying its own code fences must round-trip exactly.
+    test("originalSkill containing ```bash/```ts fences and ~~~ runs round-trips exactly", () => {
+        const skillWithFences = [
+            "# My Skill",
+            "",
+            "Run this:",
+            "",
+            "```bash",
+            "echo hi",
+            "ls -la",
+            "```",
+            "",
+            "And some TS:",
+            "",
+            "```ts",
+            "const x = 1;",
+            "```",
+            "",
+            "A tilde run: ~~~ and a longer one ~~~~~",
+            "",
+            "Inline ``code`` too.",
+        ].join("\n");
+        const brief: SkillSparBrief = { ...BASE_BRIEF, originalSkill: skillWithFences };
+        const rendered = renderSkillSparBrief(brief);
+        const parsed = parseSkillSparBrief(rendered);
+        expect(parsed).not.toBeNull();
+        expect(parsed!.originalSkill).toBe(skillWithFences);
+    });
+
+    // DEFECT 1 (edited side): edited skill with fences round-trips exactly too.
+    test("editedSkill containing a ```bash fence round-trips exactly", () => {
+        const editedWithFence = "# Edited\n\n```bash\nrun --it\n```\n\ndone";
+        const brief: SkillSparBrief = { ...BASE_BRIEF, editedSkill: editedWithFence };
+        const rendered = renderSkillSparBrief(brief);
+        const parsed = parseSkillSparBrief(rendered);
+        expect(parsed).not.toBeNull();
+        expect(parsed!.editedSkill).toBe(editedWithFence);
+    });
+
+    // DEFECT 2: swap-in and swap-out must reference DIFFERENT files even when the
+    // snapshot path lacks the literal "snapshot" substring.
+    test("snapshot path without the word 'snapshot' still yields distinct swap-in/swap-out", () => {
+        const rendered = renderSkillSparBrief(BASE_BRIEF, {
+            snapshotPathAbs: "/tmp/ax-orig-abc.md",
+            editedPathAbs: "/tmp/ax-new-abc.md",
+        });
+        // swap-in copies the EDITED file; swap-out copies the ORIGINAL snapshot.
+        expect(rendered).toContain(`cp "/tmp/ax-new-abc.md"`);
+        expect(rendered).toContain(`cp "/tmp/ax-orig-abc.md"`);
+        // The two cp sources must differ (arm B must NOT run the original skill).
+        const cpLines = rendered.split("\n").filter((l) => l.trimStart().startsWith("cp "));
+        const sources = cpLines.map((l) => l.split('"')[1]);
+        expect(new Set(sources).size).toBeGreaterThan(1);
+    });
+
+    // DEFECT 3: a task body with its own `## ` subheading must round-trip whole.
+    test("task containing a '## Notes' subheading round-trips whole", () => {
+        const taskWithSubheading = [
+            "Implement the feature.",
+            "",
+            "## Notes",
+            "",
+            "- be careful with edge cases",
+            "- keep it small",
+        ].join("\n");
+        const brief: SkillSparBrief = { ...BASE_BRIEF, task: taskWithSubheading };
+        const rendered = renderSkillSparBrief(brief);
+        const parsed = parseSkillSparBrief(rendered);
+        expect(parsed).not.toBeNull();
+        expect(parsed!.task).toBe(taskWithSubheading);
     });
 });
 

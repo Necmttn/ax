@@ -14,11 +14,43 @@
 /** Collapse CR/LF to a space so an interpolated value can't break its line. */
 const oneLine = (v: string): string => v.replace(/[\r\n]/g, " ");
 
-/** Mirror of spar.ts frontmatter field reader. */
+/** Frontmatter field reader (same shape as spar.ts's helper, originally from outbox.ts). */
 const field = (content: string, key: string): string | null => {
     const m = new RegExp(`^${key}:[^\\S\\n]*(.*)$`, "m").exec(content);
     const v = m?.[1]?.trim();
     return v && v.length > 0 ? v : null;
+};
+
+/** Shell-quote a path for embedding in a rendered command line (paths may contain spaces). */
+const sh = (p: string): string => `"${p}"`;
+
+/** Length of the longest consecutive backtick run inside a string (0 if none). */
+const longestBacktickRun = (s: string): number => {
+    let max = 0;
+    const runs = s.match(/`+/g);
+    if (runs) for (const run of runs) max = Math.max(max, run.length);
+    return max;
+};
+
+/**
+ * Render a fenced block whose fence is one backtick longer than the longest
+ * backtick run inside the content (GFM nesting rule). This lets the content
+ * carry its own ```bash / ```ts code fences without truncating the block.
+ */
+const renderFence = (info: string, content: string): string[] => {
+    const fence = "`".repeat(Math.max(3, longestBacktickRun(content) + 1));
+    return [`${fence}${info}`, content, fence];
+};
+
+/**
+ * Match a fenced block by info string, honoring a variable-length fence: the
+ * opening fence's backtick count is captured and the closing line must be
+ * exactly that many backticks. Returns the inner content, or null.
+ */
+const parseFence = (content: string, info: string): string | null => {
+    const re = new RegExp("(`{3,})" + info + "\\n([\\s\\S]*?)\\n\\1(?=\\n|$)");
+    const m = re.exec(content);
+    return m?.[2] ?? null;
 };
 
 // ---------------------------------------------------------------------------
@@ -53,20 +85,25 @@ const EDITED_PLACEHOLDER = "FILL: paste the edited SKILL.md here";
  *
  * @param opts.worktreeAAbs  Absolute path for the Arm A worktree command (falls back to worktreeA).
  * @param opts.worktreeBAbs  Absolute path for the Arm B worktree command (falls back to worktreeB).
- * @param opts.snapshotPathAbs  Absolute path where the original SKILL.md snapshot is stored.
- *   The edited-skill path is derived by replacing "snapshot" with "edited" in this path.
- *   Falls back to "(snapshot path)" / "(edited-skill-path)" when not provided.
+ * @param opts.snapshotPathAbs  Absolute path where the original SKILL.md snapshot is stored
+ *   (swap-out restores from here). Falls back to "(snapshot path)".
+ * @param opts.editedPathAbs  Absolute path of the file holding the edited SKILL.md
+ *   (swap-in copies from here). MUST differ from snapshotPathAbs. Falls back to "(edited skill path)".
  */
 export const renderSkillSparBrief = (
     brief: SkillSparBrief,
-    opts?: { worktreeAAbs?: string; worktreeBAbs?: string; snapshotPathAbs?: string },
+    opts?: {
+        worktreeAAbs?: string;
+        worktreeBAbs?: string;
+        snapshotPathAbs?: string;
+        editedPathAbs?: string;
+    },
 ): string => {
     const worktreeAPath = opts?.worktreeAAbs ?? brief.worktreeA;
     const worktreeBPath = opts?.worktreeBAbs ?? brief.worktreeB;
     const snapshotPath = opts?.snapshotPathAbs ?? "(snapshot path)";
-    const editedPath = opts?.snapshotPathAbs
-        ? opts.snapshotPathAbs.replace("snapshot", "edited")
-        : "(edited-skill-path)";
+    const editedPath = opts?.editedPathAbs ?? "(edited skill path)";
+    const skillTarget = `${brief.skillDir}/SKILL.md`;
     const editedContent = brief.editedSkill.trim().length > 0 ? brief.editedSkill : EDITED_PLACEHOLDER;
 
     return [
@@ -92,15 +129,13 @@ export const renderSkillSparBrief = (
         "## Worktrees",
         "",
         "```bash",
-        `git worktree add ${worktreeAPath} -b dojo/spar-${brief.id}-a ${brief.parentSha}`,
-        `git worktree add ${worktreeBPath} -b dojo/spar-${brief.id}-b ${brief.parentSha}`,
+        `git worktree add ${sh(worktreeAPath)} -b dojo/spar-${brief.id}-a ${brief.parentSha}`,
+        `git worktree add ${sh(worktreeBPath)} -b dojo/spar-${brief.id}-b ${brief.parentSha}`,
         "```",
         "",
         "## Original skill (snapshot)",
         "",
-        "```skill-snapshot",
-        brief.originalSkill,
-        "```",
+        ...renderFence("skill-snapshot", brief.originalSkill),
         "",
         `Snapshot path: ${snapshotPath}`,
         "",
@@ -108,24 +143,22 @@ export const renderSkillSparBrief = (
         "",
         "```bash",
         `# swap-in (activate edited skill for Arm B)`,
-        `cp ${editedPath} ${brief.skillDir}/SKILL.md`,
+        `cp ${sh(editedPath)} ${sh(skillTarget)}`,
         `# swap-out (restore original after Arm B completes)`,
-        `cp ${snapshotPath} ${brief.skillDir}/SKILL.md`,
+        `cp ${sh(snapshotPath)} ${sh(skillTarget)}`,
         "```",
         "",
         "## Edited skill",
         "",
-        "```skill-edit",
-        editedContent,
-        "```",
+        ...renderFence("skill-edit", editedContent),
         "",
         "## How to run",
         "",
         `1. Pin both worktrees (see Worktrees above).`,
         `2. **Arm A** - run the task in \`${brief.worktreeA}\` with the original skill (no swap needed).`,
-        `3. **Swap in** - \`cp ${editedPath} ${brief.skillDir}/SKILL.md\``,
+        `3. **Swap in** - \`cp ${sh(editedPath)} ${sh(skillTarget)}\``,
         `4. **Arm B** - run the task in \`${brief.worktreeB}\` with the edited skill active.`,
-        `5. **Swap out** - \`cp ${snapshotPath} ${brief.skillDir}/SKILL.md\``,
+        `5. **Swap out** - \`cp ${sh(snapshotPath)} ${sh(skillTarget)}\``,
         `6. Score: \`ax dojo spar-score ${brief.id}\``,
         "",
         "> **Concurrency caveat**: do not run other Claude sessions while the swap is active - the skill swap is global.",
@@ -138,19 +171,12 @@ export const renderSkillSparBrief = (
 // ---------------------------------------------------------------------------
 
 /**
- * Unique fence delimiters so skill content (which may contain ordinary code
- * fences) can never produce a false-positive match.
- */
-const SNAPSHOT_BLOCK_RE = /```skill-snapshot\n([\s\S]*?)\n```/;
-const EDITED_BLOCK_RE = /```skill-edit\n([\s\S]*?)\n```/;
-
-/**
- * Extract the task text from between `## Task` and the next `## ` heading.
- * Uses double-newline boundaries rather than the `$` assertion to avoid
- * premature termination on the first blank line in multiline tasks.
+ * Extract the task text from between `## Task` and the fixed-order `## Worktrees`
+ * heading. Anchoring on the known next heading (rather than the first `\n\n## `)
+ * lets the task body carry its own `## ` subheadings without truncation.
  */
 const extractTask = (content: string): string => {
-    const m = /## Task\n\n([\s\S]*?)\n\n## /.exec(content);
+    const m = /## Task\n\n([\s\S]*?)\n\n## Worktrees/.exec(content);
     return m?.[1]?.trim() ?? "";
 };
 
@@ -181,13 +207,11 @@ export const parseSkillSparBrief = (content: string): SkillSparBrief | null => {
 
     const task = extractTask(content);
 
-    const snapshotMatch = SNAPSHOT_BLOCK_RE.exec(content);
-    if (!snapshotMatch?.[1]) return null;
-    const originalSkill = snapshotMatch[1];
+    const originalSkill = parseFence(content, "skill-snapshot");
+    if (originalSkill === null) return null;
 
-    const editedMatch = EDITED_BLOCK_RE.exec(content);
-    if (!editedMatch?.[1]) return null;
-    const editedSkillRaw = editedMatch[1];
+    const editedSkillRaw = parseFence(content, "skill-edit");
+    if (editedSkillRaw === null) return null;
     const editedSkill = editedSkillRaw === EDITED_PLACEHOLDER ? "" : editedSkillRaw;
 
     return {
