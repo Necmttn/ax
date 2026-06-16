@@ -205,3 +205,62 @@ describe("fetchCostSplit", () => {
         expect(db.captured[0]).toContain("GROUP BY source, model");
     });
 });
+
+// ---------------------------------------------------------------------------
+// NaN-guard regression tests (F-graph-toolkit: finite guard via countField)
+// Decision: FIX - NaN propagation in cost/token aggregation silently
+// corrupts downstream sums, sorts, and pct calculations. countField's finite
+// guard clamps NaN→0. SurrealDB math::sum() shouldn't return NaN in practice
+// but the guard is a zero-cost safety net.
+// ---------------------------------------------------------------------------
+
+describe("fetchCostModels - NaN-guard (countField adoption)", () => {
+    test("NaN token fields clamp to 0, not NaN (finite guard)", async () => {
+        // Simulate a row where DB returns NaN for a numeric field (edge case)
+        const dbRows = [
+            {
+                model: "test-model",
+                sessions: Number.NaN,
+                prompt_tokens: Number.NaN,
+                completion_tokens: 0,
+                cache_read_tokens: 0,
+                cache_create_tokens: 0,
+                cost_usd: Number.NaN,
+            },
+        ];
+        const db = makeMockDb([[dbRows]]);
+        const result = await runWithMock(db, fetchCostModels({ sinceDays: 14 }));
+
+        // countField clamps NaN → 0 (was: Number(NaN ?? 0) = NaN before fix)
+        expect(Number.isFinite(result.rows[0]!.sessions)).toBe(true);
+        expect(result.rows[0]!.sessions).toBe(0);
+        expect(Number.isFinite(result.rows[0]!.cost_usd)).toBe(true);
+        expect(result.rows[0]!.cost_usd).toBe(0);
+        // total_cost_usd must also be finite (would be NaN if propagation happened)
+        expect(Number.isFinite(result.total_cost_usd)).toBe(true);
+    });
+});
+
+describe("fetchCostSessions - stringFieldOr adoption", () => {
+    test("session_id from DB string round-trips unchanged", async () => {
+        const dbRows = [{
+            session_id: "session:abc123",
+            project: null, model: null, started_at: null,
+            cost_usd: 1.0, completion_tokens: 100, cache_read_tokens: 0,
+        }];
+        const db = makeMockDb([[dbRows]]);
+        const result = await runWithMock(db, fetchCostSessions({ sinceDays: 14, limit: 20, model: null }));
+        expect(result.rows[0]!.session_id).toBe("session:abc123");
+    });
+
+    test("missing session_id defaults to empty string (not undefined)", async () => {
+        // stringFieldOr default fallback for missing key
+        const dbRows = [{
+            project: null, model: null, started_at: null,
+            cost_usd: 0.5, completion_tokens: 0, cache_read_tokens: 0,
+        }];
+        const db = makeMockDb([[dbRows]]);
+        const result = await runWithMock(db, fetchCostSessions({ sinceDays: 14, limit: 20, model: null }));
+        expect(result.rows[0]!.session_id).toBe("");
+    });
+});

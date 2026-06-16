@@ -279,6 +279,63 @@ export const countField = (
     return Number.isFinite(v) ? v : 0;
 };
 
+/**
+ * Coerce a row field to a string.
+ *
+ * `String(v)` is called on non-null/undefined values so numbers, booleans,
+ * and `RecordId`-like objects (whose `.toString()` emits `table:key`) all
+ * produce readable strings rather than `'[object Object]'`. Null / undefined
+ * fall back to `fallback` (default `""`).
+ *
+ * Use this instead of `String(row[key] ?? "")` so the coercion is named and
+ * centrally tested. Distinct from the strict `stringField` which returns null
+ * for any non-string input (no coercion).
+ */
+export const stringFieldOr = (
+    row: Record<string, unknown>,
+    key: string,
+    fallback = "",
+): string => {
+    const v = row[key];
+    return v === null || v === undefined ? fallback : String(v);
+};
+
+// ---------------------------------------------------------------------------
+// VALUE-FORM coercers - shared bodies for the deprecated local copies in
+// metrics/util.ts, dashboard/cost-query.ts, etc.  Named by behavior, not by
+// coerce* vocabulary (spec §F).  New DB-row reads should prefer the ROW-form
+// helpers above (countField, stringFieldOr); these value-form variants exist
+// only as the canonical tested implementation the shims re-export.
+// ---------------------------------------------------------------------------
+
+/**
+ * Coerce any value to a finite number, `null` for null / undefined /
+ * non-finite (including NaN). Unlike the strict `numberFieldOrNull` (which
+ * rejects string `"3"` → null), this calls `Number(v)` first so string counts
+ * and similar coercible values are handled.
+ *
+ * VALUE-form sibling of `numberFieldOrNull`.
+ */
+export const numberOrNull = (v: unknown): number | null => {
+    if (v === null || v === undefined) return null;
+    const n = Number(v);
+    return Number.isFinite(n) ? n : null;
+};
+
+/**
+ * Coerce any value to a finite number, `0` for null / undefined / non-finite.
+ * VALUE-form sibling of `countField`.
+ */
+export const numberOrZero = (v: unknown): number => numberOrNull(v) ?? 0;
+
+/**
+ * Non-empty string or null; null for any non-string input (no coercion).
+ * VALUE-form sibling of `stringField`. Use `stringFieldOr` (or `String(v)`)
+ * when coercing numbers / RecordIds to a string is acceptable.
+ */
+export const stringOrNull = (v: unknown): string | null =>
+    typeof v === "string" && v.length > 0 ? v : null;
+
 /** A record id rendered as a string - accepts a string or a `RecordId`-like
  *  object with a meaningful `toString`. */
 export const recordIdString = (v: unknown): string | null => {

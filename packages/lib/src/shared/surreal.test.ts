@@ -21,9 +21,13 @@ import {
     // typed row field access
     isRecord,
     stringField,
+    stringFieldOr,
     dateField,
     numberFieldOrNull,
     countField,
+    numberOrNull,
+    numberOrZero,
+    stringOrNull,
     recordIdString,
     // record selection
     recordListSource,
@@ -314,6 +318,116 @@ describe("recordIdString", () => {
     });
     test("null → null", () => {
         expect(recordIdString(null)).toBe(null);
+    });
+});
+
+// New helpers: stringFieldOr, numberOrNull, numberOrZero, stringOrNull
+
+describe("stringFieldOr", () => {
+    test("returns string value unchanged", () => {
+        expect(stringFieldOr({ model: "claude-opus" }, "model")).toBe("claude-opus");
+    });
+    test("coerces a number field to string (key distinguisher: stringField would return null)", () => {
+        // String(3 ?? "") = "3" vs stringField = null
+        expect(stringFieldOr({ n: 3 }, "n")).toBe("3");
+        expect(stringField({ n: 3 }, "n")).toBe(null); // strict comparison
+    });
+    test("coerces a RecordId-like object via toString (no [object Object] regression)", () => {
+        const rid = { toString: () => "session:abc" };
+        expect(stringFieldOr({ id: rid }, "id")).toBe("session:abc");
+        expect(stringFieldOr({ id: rid }, "id")).not.toContain("[object Object]");
+    });
+    test("null field → default empty string", () => {
+        expect(stringFieldOr({ k: null }, "k")).toBe("");
+    });
+    test("undefined field (missing key) → default empty string", () => {
+        expect(stringFieldOr({}, "k")).toBe("");
+    });
+    test("custom fallback is used for null/undefined", () => {
+        expect(stringFieldOr({ k: null }, "k", "fallback")).toBe("fallback");
+        expect(stringFieldOr({}, "k", "(missing)")).toBe("(missing)");
+    });
+    test("empty string is returned as-is (not null, not fallback)", () => {
+        // String("" ?? "") stays "" - different from stringField which needs non-empty
+        expect(stringFieldOr({ k: "" }, "k")).toBe("");
+    });
+    test("boolean field → string", () => {
+        expect(stringFieldOr({ v: true }, "v")).toBe("true");
+        expect(stringFieldOr({ v: false }, "v")).toBe("false");
+    });
+});
+
+describe("numberOrNull", () => {
+    test("finite number passthrough", () => {
+        expect(numberOrNull(3)).toBe(3);
+        expect(numberOrNull(0)).toBe(0);
+        expect(numberOrNull(-1.5)).toBe(-1.5);
+    });
+    test("coerces a numeric string to number", () => {
+        expect(numberOrNull("3")).toBe(3);
+        expect(numberOrNull("0")).toBe(0);
+    });
+    test("null → null (not 0, unlike countField)", () => {
+        expect(numberOrNull(null)).toBe(null);
+    });
+    test("undefined → null", () => {
+        expect(numberOrNull(undefined)).toBe(null);
+    });
+    test("NaN → null (finite guard)", () => {
+        expect(numberOrNull(Number.NaN)).toBe(null);
+    });
+    test("Infinity → null (finite guard)", () => {
+        expect(numberOrNull(Number.POSITIVE_INFINITY)).toBe(null);
+        expect(numberOrNull(Number.NEGATIVE_INFINITY)).toBe(null);
+    });
+    test("non-numeric string → null", () => {
+        expect(numberOrNull("junk")).toBe(null);
+    });
+    test("empty string → 0 (Number('') = 0 is finite)", () => {
+        // This is the documented coercing semantics: Number("") = 0
+        expect(numberOrNull("")).toBe(0);
+    });
+});
+
+describe("numberOrZero", () => {
+    test("finite number passthrough", () => {
+        expect(numberOrZero(5)).toBe(5);
+    });
+    test("null → 0", () => {
+        expect(numberOrZero(null)).toBe(0);
+    });
+    test("undefined → 0", () => {
+        expect(numberOrZero(undefined)).toBe(0);
+    });
+    test("NaN → 0 (finite guard - the NaN-leak fix)", () => {
+        expect(numberOrZero(Number.NaN)).toBe(0);
+    });
+    test("non-numeric string → 0", () => {
+        expect(numberOrZero("junk")).toBe(0);
+    });
+    test("numeric string → coerced number", () => {
+        expect(numberOrZero("42")).toBe(42);
+    });
+});
+
+describe("stringOrNull", () => {
+    test("non-empty string passthrough", () => {
+        expect(stringOrNull("x")).toBe("x");
+    });
+    test("empty string → null", () => {
+        expect(stringOrNull("")).toBe(null);
+    });
+    test("number → null (strict, no coercion; use stringFieldOr for coercion)", () => {
+        expect(stringOrNull(3)).toBe(null);
+    });
+    test("null → null", () => {
+        expect(stringOrNull(null)).toBe(null);
+    });
+    test("undefined → null", () => {
+        expect(stringOrNull(undefined)).toBe(null);
+    });
+    test("object → null", () => {
+        expect(stringOrNull({})).toBe(null);
     });
 });
 

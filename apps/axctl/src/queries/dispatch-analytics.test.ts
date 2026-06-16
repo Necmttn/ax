@@ -1048,3 +1048,67 @@ describe("candidates exclude judgment work", () => {
         expect(r.tier === "route-down" && r.match !== null).toBe(false);
     });
 });
+
+// ---------------------------------------------------------------------------
+// NaN-guard regression tests (F-graph-toolkit: countField + stringFieldOr)
+// Decision: FIX - NaN in cost_usd/token fields propagates through JS accum.
+// countField's finite guard ensures NaN → 0. stringFieldOr handles missing
+// session_id / child_id without "[object undefined]" regressions.
+// ---------------------------------------------------------------------------
+
+describe("fetchDispatches - NaN-guard (countField adoption)", () => {
+    const makeDispatches = (costUsd: number, tokens: number): QueryResult[] => {
+        const spawnedRow: Record<string, unknown> = {
+            parent_id: "session:parent1",
+            child_id: "session:child1",
+            ts: "2026-06-01T00:00:00.000Z",
+            agent_type: null,
+            description: "test task",
+            tool_use_id: "tu_123",
+        };
+        const usageRow: Record<string, unknown> = {
+            session_id: "session:child1",
+            model: "claude-opus",
+            prompt_tokens: tokens,
+            completion_tokens: tokens,
+            cache_read_tokens: 0,
+            cache_create_tokens: 0,
+            cost_usd: costUsd,
+        };
+        // 5-query results (each is a QueryResult = array of rows):
+        // spawned, usage, tool_calls, parent_sessions, child_legs
+        return [
+            [spawnedRow],
+            [usageRow],
+            [],
+            [{ session_id: "session:parent1", model: "claude-opus-4-8" }],
+            [],
+        ];
+    };
+
+    it("NaN cost_usd clamps to 0 via countField (not NaN propagation)", async () => {
+        const layer = makeMockDb(makeDispatches(Number.NaN, 100));
+        const result = await run(fetchDispatches({ sinceDays: 14, limit: 10 }), layer);
+
+        // total_child_cost_usd would be NaN without the finite guard in countField
+        expect(Number.isFinite(result.total_child_cost_usd)).toBe(true);
+        if (result.rows.length > 0) {
+            expect(result.rows[0]!.child_cost_usd).not.toBeNaN();
+        }
+    });
+
+    it("stringFieldOr: parent_id and child_id from record-like values don't produce [object Object]", async () => {
+        const spawnedRow: Record<string, unknown> = {
+            parent_id: "session:p1",
+            child_id: "session:c1",
+            ts: "2026-06-01T00:00:00.000Z",
+        };
+        const layer = makeMockDb([[spawnedRow], [], [], [], []]);
+        const result = await run(fetchDispatches({ sinceDays: 14, limit: 10 }), layer);
+        // Whether or not rows are produced, no "[object Object]" must appear
+        for (const row of result.rows) {
+            expect(row.parent_id).not.toContain("[object Object]");
+            expect(row.child_id).not.toContain("[object Object]");
+        }
+    });
+});

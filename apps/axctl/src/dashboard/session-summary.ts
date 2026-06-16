@@ -4,6 +4,7 @@ import type { DbError } from "@ax/lib/errors";
 import { interpolateRid } from "@ax/lib/shared/graph-query";
 import { toBareSessionId } from "@ax/lib/shared/session-id";
 import type { SessionSummary } from "@ax/lib/shared/dashboard-types";
+import { numberOrNull, numberOrZero } from "@ax/lib/shared/surreal";
 
 // DB-ONLY session summary for the canvas detail card. Deliberately avoids
 // `locateTranscript` + the full JSONL read/parse that `fetchSessionInspect`
@@ -31,14 +32,9 @@ const excerpt = (r: [Rows] | undefined): string | null => {
     const v = first(r)?.text_excerpt;
     return typeof v === "string" && v.trim().length > 0 ? v.replace(/\s+/g, " ").trim() : null;
 };
-const numOrNull = (v: unknown): number | null => {
-    const n = Number(v);
-    return Number.isFinite(n) && v !== null && v !== undefined ? n : null;
-};
-const intOf = (r: [Rows] | undefined): number => {
-    const n = Number(first(r)?.n ?? 0);
-    return Number.isFinite(n) ? n : 0;
-};
+// Deprecated local aliases → canonical helpers from @ax/lib/shared/surreal.
+const numOrNull = numberOrNull;
+const intOf = (r: [Rows] | undefined): number => numberOrZero(first(r)?.n);
 
 export const fetchSessionSummary = (
     sessionId: string,

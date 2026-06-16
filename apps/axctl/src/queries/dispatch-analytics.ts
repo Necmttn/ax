@@ -17,6 +17,7 @@
  */
 import { Effect, FileSystem, Path } from "effect";
 import { SurrealClient } from "@ax/lib/db";
+import { countField, stringFieldOr } from "@ax/lib/shared/surreal";
 import {
     DEFAULT_ROUTING_TABLE,
     matchRoutingTable,
@@ -406,32 +407,32 @@ export const fetchDispatches = Effect.fn("queries.fetchDispatches")(
             );
 
         const spawnedRows: SpawnedRow[] = (spawnedResult ?? []).map((r) => ({
-            parent_id: String(r.parent_id ?? ""),
-            child_id: String(r.child_id ?? ""),
-            ts: String(r.ts ?? ""),
+            parent_id: stringFieldOr(r, "parent_id"),
+            child_id: stringFieldOr(r, "child_id"),
+            ts: stringFieldOr(r, "ts"),
             agent_type: r.agent_type == null ? null : String(r.agent_type),
             description: r.description == null ? null : String(r.description),
             tool_use_id: r.tool_use_id == null ? null : String(r.tool_use_id),
         }));
 
         const usageRows: UsageRow[] = (usageResult ?? []).map((r) => ({
-            session_id: String(r.session_id ?? ""),
+            session_id: stringFieldOr(r, "session_id"),
             model: r.model == null ? null : String(r.model),
-            prompt_tokens: Number(r.prompt_tokens ?? 0),
-            completion_tokens: Number(r.completion_tokens ?? 0),
-            cache_read_tokens: Number(r.cache_read_tokens ?? 0),
-            cache_create_tokens: Number(r.cache_create_tokens ?? 0),
-            cost_usd: Number(r.cost_usd ?? 0),
+            prompt_tokens: countField(r, "prompt_tokens"),
+            completion_tokens: countField(r, "completion_tokens"),
+            cache_read_tokens: countField(r, "cache_read_tokens"),
+            cache_create_tokens: countField(r, "cache_create_tokens"),
+            cost_usd: countField(r, "cost_usd"),
         }));
 
         const toolCallRows: ToolCallRow[] = (toolCallsResult ?? []).map((r) => ({
-            session_id: String(r.session_id ?? ""),
-            call_id: String(r.call_id ?? ""),
+            session_id: stringFieldOr(r, "session_id"),
+            call_id: stringFieldOr(r, "call_id"),
             input_json: r.input_json == null ? null : String(r.input_json),
         }));
 
         const parentSessionRows: ParentSessionRow[] = (parentSessionsResult ?? []).map((r) => ({
-            session_id: String(r.session_id ?? ""),
+            session_id: stringFieldOr(r, "session_id"),
             model: r.model == null ? null : String(r.model),
         }));
 
@@ -440,12 +441,12 @@ export const fetchDispatches = Effect.fn("queries.fetchDispatches")(
         for (const r of childLegsResult ?? []) {
             const model = r.model == null ? null : String(r.model);
             if (!model) continue;
-            const bare = cleanSessionId(String(r.session_id ?? ""));
+            const bare = cleanSessionId(stringFieldOr(r, "session_id"));
             const list = legsByChildId.get(bare) ?? [];
             list.push({
                 model,
-                cost_usd: Number(r.cost_usd ?? 0),
-                turns: Number(r.turns ?? 0),
+                cost_usd: countField(r, "cost_usd"),
+                turns: countField(r, "turns"),
             });
             legsByChildId.set(bare, list);
         }
@@ -572,37 +573,37 @@ export const fetchDispatchCandidates = Effect.fn("queries.fetchDispatchCandidate
             );
 
         const spawnedRows: SpawnedRow[] = (spawnedResult ?? []).map((r) => ({
-            parent_id: String(r.parent_id ?? ""),
-            child_id: String(r.child_id ?? ""),
-            ts: String(r.ts ?? ""),
+            parent_id: stringFieldOr(r, "parent_id"),
+            child_id: stringFieldOr(r, "child_id"),
+            ts: stringFieldOr(r, "ts"),
             agent_type: r.agent_type == null ? null : String(r.agent_type),
             description: r.description == null ? null : String(r.description),
             tool_use_id: r.tool_use_id == null ? null : String(r.tool_use_id),
         }));
 
         const usageRows: UsageRow[] = (usageResult ?? []).map((r) => ({
-            session_id: String(r.session_id ?? ""),
+            session_id: stringFieldOr(r, "session_id"),
             model: r.model == null ? null : String(r.model),
-            prompt_tokens: Number(r.prompt_tokens ?? 0),
-            completion_tokens: Number(r.completion_tokens ?? 0),
-            cache_read_tokens: Number(r.cache_read_tokens ?? 0),
-            cache_create_tokens: Number(r.cache_create_tokens ?? 0),
-            cost_usd: Number(r.cost_usd ?? 0),
+            prompt_tokens: countField(r, "prompt_tokens"),
+            completion_tokens: countField(r, "completion_tokens"),
+            cache_read_tokens: countField(r, "cache_read_tokens"),
+            cache_create_tokens: countField(r, "cache_create_tokens"),
+            cost_usd: countField(r, "cost_usd"),
         }));
 
         const toolCallRows: ToolCallRow[] = (toolCallsResult ?? []).map((r) => ({
-            session_id: String(r.session_id ?? ""),
-            call_id: String(r.call_id ?? ""),
+            session_id: stringFieldOr(r, "session_id"),
+            call_id: stringFieldOr(r, "call_id"),
             input_json: r.input_json == null ? null : String(r.input_json),
         }));
 
         const parentSessionRows: ParentSessionRow[] = (parentSessionsResult ?? []).map((r) => ({
-            session_id: String(r.session_id ?? ""),
+            session_id: stringFieldOr(r, "session_id"),
             model: r.model == null ? null : String(r.model),
         }));
 
         const agentModels: AgentModelRow[] = (agentModelsResult ?? []).map((r) => ({
-            name: String(r.name ?? ""),
+            name: stringFieldOr(r, "name"),
             input_per_million_usd: r.input_per_million_usd == null ? null : Number(r.input_per_million_usd),
             output_per_million_usd: r.output_per_million_usd == null ? null : Number(r.output_per_million_usd),
             cache_read_per_million_usd: r.cache_read_per_million_usd == null ? null : Number(r.cache_read_per_million_usd),
@@ -795,37 +796,37 @@ export const fetchDispatchEconomy = Effect.fn("queries.fetchDispatchEconomy")(
             );
 
         const spawnedRows: SpawnedRow[] = (spawnedResult ?? []).map((r) => ({
-            parent_id: String(r.parent_id ?? ""),
-            child_id: String(r.child_id ?? ""),
-            ts: String(r.ts ?? ""),
+            parent_id: stringFieldOr(r, "parent_id"),
+            child_id: stringFieldOr(r, "child_id"),
+            ts: stringFieldOr(r, "ts"),
             agent_type: r.agent_type == null ? null : String(r.agent_type),
             description: r.description == null ? null : String(r.description),
             tool_use_id: r.tool_use_id == null ? null : String(r.tool_use_id),
         }));
 
         const usageRows: UsageRow[] = (usageResult ?? []).map((r) => ({
-            session_id: String(r.session_id ?? ""),
+            session_id: stringFieldOr(r, "session_id"),
             model: r.model == null ? null : String(r.model),
-            prompt_tokens: Number(r.prompt_tokens ?? 0),
-            completion_tokens: Number(r.completion_tokens ?? 0),
-            cache_read_tokens: Number(r.cache_read_tokens ?? 0),
-            cache_create_tokens: Number(r.cache_create_tokens ?? 0),
-            cost_usd: Number(r.cost_usd ?? 0),
+            prompt_tokens: countField(r, "prompt_tokens"),
+            completion_tokens: countField(r, "completion_tokens"),
+            cache_read_tokens: countField(r, "cache_read_tokens"),
+            cache_create_tokens: countField(r, "cache_create_tokens"),
+            cost_usd: countField(r, "cost_usd"),
         }));
 
         const toolCallRows: ToolCallRow[] = (toolCallsResult ?? []).map((r) => ({
-            session_id: String(r.session_id ?? ""),
-            call_id: String(r.call_id ?? ""),
+            session_id: stringFieldOr(r, "session_id"),
+            call_id: stringFieldOr(r, "call_id"),
             input_json: r.input_json == null ? null : String(r.input_json),
         }));
 
         const parentSessionRows: ParentSessionRow[] = (parentSessionsResult ?? []).map((r) => ({
-            session_id: String(r.session_id ?? ""),
+            session_id: stringFieldOr(r, "session_id"),
             model: r.model == null ? null : String(r.model),
         }));
 
         const agentModels: AgentModelRow[] = (agentModelsResult ?? []).map((r) => ({
-            name: String(r.name ?? ""),
+            name: stringFieldOr(r, "name"),
             input_per_million_usd: r.input_per_million_usd == null ? null : Number(r.input_per_million_usd),
             output_per_million_usd: r.output_per_million_usd == null ? null : Number(r.output_per_million_usd),
             cache_read_per_million_usd: r.cache_read_per_million_usd == null ? null : Number(r.cache_read_per_million_usd),

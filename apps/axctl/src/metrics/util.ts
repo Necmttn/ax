@@ -24,16 +24,15 @@ export const chunked = <T>(items: readonly T[], size: number): T[][] => {
 };
 
 // ---------------------------------------------------------------------------
-// Row-field coercion (shared by the metrics fetchers - single copy, #166 review)
+// Row-field coercion (shared by the metrics fetchers)
+// Deprecated re-export shim: canonical implementations live in
+// @ax/lib/shared/surreal. New callers should import directly from there.
 // ---------------------------------------------------------------------------
-
-export const numOrNull = (v: unknown): number | null => {
-    if (v === null || v === undefined) return null;
-    const n = Number(v);
-    return Number.isFinite(n) ? n : null;
-};
-export const numOrZero = (v: unknown): number => numOrNull(v) ?? 0;
-export const strOrNull = (v: unknown): string | null => (typeof v === "string" && v.length > 0 ? v : null);
+export {
+    numberOrNull as numOrNull,
+    numberOrZero as numOrZero,
+    stringOrNull as strOrNull,
+} from "@ax/lib/shared/surreal";
 
 /** Set absent ids to a default (mutates + returns the map). */
 export const fillDefaults = <V>(map: Map<string, V>, ids: readonly string[], def: V): Map<string, V> => {
