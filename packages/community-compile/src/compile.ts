@@ -88,45 +88,13 @@ export function normalizeSkillName(source: string, name: string): string {
     return key.startsWith(`${source}:`) ? key.slice(source.length + 1) : key;
 }
 
-/**
- * Curated provenance for well-known shared skills that ship as loose
- * ~/.claude/skills/ dirs (source "local"), so the board can CREDIT their author
- * instead of showing no badge. Applied ONLY as a fallback - a copy installed
- * from a real plugin keeps its own observed source. Keyed by canonical skill
- * identity (bare name). Extend as more shared collections are identified.
- *
- * Matt Pocock - github.com/mattpocock/skills (MIT).
- */
-export const SKILL_PROVENANCE: Record<string, string> = {
-    "design-an-interface": "mattpocock",
-    qa: "mattpocock",
-    "request-refactor-plan": "mattpocock",
-    "ubiquitous-language": "mattpocock",
-    diagnose: "mattpocock",
-    "grill-with-docs": "mattpocock",
-    "improve-codebase-architecture": "mattpocock",
-    prototype: "mattpocock",
-    tdd: "mattpocock",
-    "to-issues": "mattpocock",
-    "to-prd": "mattpocock",
-    triage: "mattpocock",
-    "zoom-out": "mattpocock",
-    review: "mattpocock",
-    "writing-beats": "mattpocock",
-    "writing-fragments": "mattpocock",
-    "writing-shape": "mattpocock",
-    "git-guardrails-claude-code": "mattpocock",
-    "migrate-to-shoehorn": "mattpocock",
-    "scaffold-exercises": "mattpocock",
-    "setup-pre-commit": "mattpocock",
-    "edit-article": "mattpocock",
-    "obsidian-vault": "mattpocock",
-    caveman: "mattpocock",
-    "grill-me": "mattpocock",
-    handoff: "mattpocock",
-    teach: "mattpocock",
-    "write-a-skill": "mattpocock",
-};
+// Curated provenance for shared skills that ship as loose ~/.claude/skills/
+// dirs (source "local"), so the board can CREDIT their author instead of
+// showing no badge. GENERATED from known public collections (obra/superpowers,
+// mattpocock/skills, this repo's skills/, Claude built-ins) by
+// scripts/gen-skill-provenance.ts - regenerate, never hand-edit the .gen file.
+import { SKILL_PROVENANCE } from "./skill-provenance.gen.ts";
+export { SKILL_PROVENANCE } from "./skill-provenance.gen.ts";
 
 /**
  * Best display source for a skill. A real plugin source observed on any
