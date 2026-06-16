@@ -15,7 +15,8 @@
  *  asserts the two match so this zero-dep copy can't silently drift. */
 export const DASHBOARD_PORT = 1738;
 
-/** Install one-liner + docs, single-sourced for the visible install box too. */
+/** Install one-liner + docs. Single-sourced here for the INSTALL step and for
+ *  any surface that wants to show the install command, so it can't drift. */
 export const AX_INSTALL_CMD = "curl -fsSL ax.necmttn.com/install | sh";
 export const AX_DOCS_URL = "https://ax.necmttn.com/docs";
 

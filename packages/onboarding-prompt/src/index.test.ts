@@ -44,8 +44,16 @@ describe("onboarding prompt - canonical content", () => {
     });
 
     test("with-install shares the same body steps as the canonical prompt", () => {
-        // The reality-check beat must appear in both, proving one source.
-        expect(AGENT_ONBOARDING_WITH_INSTALL).toContain("does this match how I actually work");
+        // Every numbered step body in the post-install prompt (everything after
+        // its leading "N. ") must also appear verbatim in the with-install
+        // variant, proving both derive from one STEPS source.
+        const bodies = AGENT_ONBOARDING_PROMPT.split("\n\n")
+            .filter((p) => /^\d+\. /.test(p))
+            .map((p) => p.replace(/^\d+\. /, ""));
+        expect(bodies.length).toBe(5);
+        for (const body of bodies) {
+            expect(AGENT_ONBOARDING_WITH_INSTALL).toContain(body);
+        }
     });
 
     test("no em-dashes survive (repo hook rewrites them; assert ASCII)", () => {

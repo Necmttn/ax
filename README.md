@@ -43,18 +43,26 @@ which ones to actually use:
 <details>
 <summary><strong>the setup prompt - give this to your agent</strong></summary>
 
+<!-- MANUAL MIRROR of AGENT_ONBOARDING_WITH_INSTALL in packages/onboarding-prompt/src/index.ts
+     (README can't import TS). If you change the prompt, regenerate this block:
+     bun -e "import('@ax/onboarding-prompt').then(m=>process.stdout.write(m.AGENT_ONBOARDING_WITH_INSTALL))" -->
+
 ```text
 Set up ax for me, end to end. ax is a local agent-experience graph over my Claude Code + Codex history - it runs locally and I review every change.
 
+A note from Neco (ax's founder): ax is early and I'm hungry for feedback - every bug, wrong number, or rough edge you send back makes it sharper for everyone. Please don't hold back; if something's off, help me fix it.
+
+CONTRIBUTE-BACK (do this whenever a trigger below fires; never publish anything without showing it to me first and getting an explicit yes): Triggers - a step fails; a fact you report looks wrong or surprising to me; you spot a clear bug or improvement in ax itself. When one fires: ask me 2-3 sharp questions to pin down what I expected, which command/hook/agent is involved, and how often - enough for a repro. Then draft a GitHub issue for github.com/Necmttn/ax, show me the full draft, and on my yes file it via `gh` (the ax-repo skill). If a session is the evidence, run `ax share --dry-run` first, show me the redacted gist, and only publish with `ax share` on my yes - then link it in the issue.
+
 1. INSTALL - run `curl -fsSL ax.necmttn.com/install | sh` to install the ax CLI. Reference: https://ax.necmttn.com/docs
 
-2. INGEST MY HISTORY - first run `ax ingest --dry-run` and tell me, in plain words, how long a full backfill will take. Then start the ingest in the BACKGROUND so we can keep working: run `ax ingest` as a background job with AX_PROGRESS=plain, and watch its output for progress and completion. Tell me I can watch it fill live in the dashboard - run `ax serve` and open http://127.0.0.1:1738. When the ingest finishes, summarize what landed: total sessions, turns, and the top skills/tools I actually use. Then continue with the steps below.
+2. INGEST MY HISTORY - first run `ax ingest --dry-run` and tell me, in plain words, how long a full backfill will take. Then start the ingest in the BACKGROUND so we can keep working: run `ax ingest` as a background job with AX_PROGRESS=plain, and watch its output for progress and completion. Tell me I can watch it fill live in the dashboard - run `ax serve` and open http://127.0.0.1:1738. If it fails or lands zero data after finishing, that's a CONTRIBUTE-BACK trigger. When the ingest finishes, summarize what landed: total sessions, turns, and the top skills/tools I actually use.
 
-3. VERIFY - run `ax doctor`. If anything isn't ok, diagnose and fix it, then re-run until it is.
+3. VERIFY - run `ax doctor`. If anything isn't ok, diagnose and fix it, then re-run until it is. If the cause is a bug in ax itself (not my environment), that's a CONTRIBUTE-BACK trigger.
 
-4. LABEL what ax can't classify - run `ax skills classify`. It writes one `.ax/tasks/classify-<skill>.md` brief per skill I use but ax can't role-tag. For each brief: read the skill, decide its role(s), and fill the YAML frontmatter at the top (`primary_role:` is required; `secondary`, `confidence`, `rationale` are optional). Run `ax roles` to see labels already in use. Then run `ax skills lint` to apply them. If it says "no unclassified skills", that's fine.
+4. REALITY CHECK - show me the headline facts (sessions, turns, top skills + tools), then ask: does this match how I actually work? Heads-up: verification often hides inside PR commands, hooks, and subagents, so if a number reads lower than my gut says, that's a likely miss. If I disagree with any fact, that's a CONTRIBUTE-BACK trigger - my disagreement is the repro.
 
-5. SHOW me the result - run `ax skills weighted` and `ax skills config`. Tell me which skills you labeled and why, and flag anything ax marked orphan or out-of-scope.
+5. LABEL what ax can't classify - run `ax skills classify`. It writes one `.ax/tasks/classify-<skill>.md` brief per skill I use but ax can't role-tag. For each brief: read the skill, decide its role(s), and fill the YAML frontmatter at the top (`primary_role:` is required; `secondary`, `confidence`, `rationale` are optional). Run `ax roles` to see labels already in use. Then run `ax skills lint` to apply them. If it says "no unclassified skills", that's fine. Then show `ax skills weighted` and `ax skills config`; tell me which skills you labeled and why, and flag anything ax marked orphan or out-of-scope.
 
 6. GIVE ME A NEXT STEP - recommend 1-2 under-used skills you'd reach for based on what you saw, then end with a concrete CTA: the exact command or prompt I should run next, and what outcome it will produce.
 ```
