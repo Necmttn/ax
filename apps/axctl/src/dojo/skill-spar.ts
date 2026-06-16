@@ -512,6 +512,14 @@ export const scoreSkillSpar = (
         const cwdA = posixPath.join(mainRepoRoot, brief.worktreeA);
         const cwdB = posixPath.join(mainRepoRoot, brief.worktreeB);
         const sinceMs = Date.parse(brief.createdAt);
+        // Guard a malformed created_at: NaN would flow into surrealDate(new
+        // Date(NaN)) inside findVariantSession and throw a RangeError OUTSIDE
+        // the typed error channel. Fail in-channel instead.
+        if (Number.isNaN(sinceMs)) {
+            return yield* Effect.fail(
+                new SparCaptureError(`malformed created_at in brief ${brief.id}`),
+            );
+        }
 
         const sessionA = yield* findVariantSession(cwdA, sinceMs);
         if (sessionA === null) {
@@ -539,9 +547,11 @@ export const scoreSkillSpar = (
         const score = scoreSpar(a, b);
 
         // Stamp both sessions so behavioral analytics exclude them.
-        // Idempotent - re-stamping is a no-op.
-        yield* stampSparSession(sessionA);
-        yield* stampSparSession(sessionB);
+        // Idempotent and non-fatal: the score is already computed, so a
+        // transient DbError on the label UPDATE must NOT discard an expensive
+        // two-arm spar - swallow it (matches the code-delta spar-score bar).
+        yield* stampSparSession(sessionA).pipe(Effect.catch(() => Effect.void));
+        yield* stampSparSession(sessionB).pipe(Effect.catch(() => Effect.void));
 
         return { sessionA, sessionB, a, b, score };
     });

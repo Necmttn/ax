@@ -846,6 +846,84 @@ describe("scoreSkillSpar", () => {
             expect(JSON.stringify(exit.cause)).toContain("arm B");
         }
     });
+
+    // -----------------------------------------------------------------------
+    // Test 4: A=baseline / B=variant wiring is correct (asymmetric → "win")
+    // -----------------------------------------------------------------------
+    test("A is baseline, B is variant: B cheaper + both landed → 'win' (swap would flip to regression)", async () => {
+        // Both arms land; arm B (variant) is clearly cheaper than arm A
+        // (baseline). scoreSpar(A, B): deltas.costUsd = 0.8 - 2.0 = -1.2 (past
+        // -COST_TOL), no extra repair → "win". A SWAPPED wiring (B baseline /
+        // A variant) would give +1.2 → "regression", so this asserts the seam.
+        //
+        // findVariantSession routes by cwd substring (spar-arm-a / spar-arm-b).
+        // The cost + produced queries are shared across both metric fetches;
+        // each carries BOTH sessions' rows and the per-call clean-id lookup
+        // picks the right one (mirrors spar.test.ts's metric-row idiom).
+        const tc = makeTestSurrealClient({
+            denyWrites: true,
+            routes: {
+                "spar-arm-a": [[{ id: "session:arm-a" }]],
+                "spar-arm-b": [[{ id: "session:arm-b" }]],
+                // cost: arm-a = $2.00 (baseline), arm-b = $0.80 (variant, cheaper)
+                "FROM session_token_usage": [[
+                    { session: "session:arm-a", model: "claude", estimated_cost_usd: 2.0 },
+                    { session: "session:arm-b", model: "claude", estimated_cost_usd: 0.8 },
+                ]],
+                // both arms produced a commit → landed = true for both
+                "FROM produced": [[
+                    { session: "session:arm-a", commit: "commit:ca" },
+                    { session: "session:arm-b", commit: "commit:cb" },
+                ]],
+                "FROM touched": [[
+                    { commit: "commit:ca", file: "file:f1", path: "src/a.ts", additions: 10, deletions: 2 },
+                    { commit: "commit:cb", file: "file:f2", path: "src/b.ts", additions: 10, deletions: 2 },
+                ]],
+                // turns/wall: shared bare object (symmetric, not the asymmetry axis)
+                "AS turn_count": [
+                    { turn_count: 15, s: "2026-06-01T00:00:00.000Z", e: "2026-06-01T00:05:00.000Z" },
+                ],
+            },
+        });
+
+        const result = await runScore(
+            scoreSkillSpar(SCORE_BRIEF, MAIN_ROOT, new Date("2026-06-01T00:00:00.000Z")),
+            tc.layer,
+        );
+
+        expect(result.sessionA).toBe("session:arm-a");
+        expect(result.sessionB).toBe("session:arm-b");
+        // Baseline = arm A ($2.00), variant = arm B ($0.80), both landed.
+        expect(result.a.costUsd).toBe(2.0);
+        expect(result.b.costUsd).toBe(0.8);
+        expect(result.a.landed).toBe(true);
+        expect(result.b.landed).toBe(true);
+        // scoreSpar(A, B): cheaper variant + landed + no extra repair → win.
+        expect(result.score.verdict).toBe("win");
+        expect(result.score.baseline.costUsd).toBe(2.0);
+        expect(result.score.variant.costUsd).toBe(0.8);
+        expect(result.score.deltas.costUsd).toBeCloseTo(-1.2, 5);
+    });
+
+    // -----------------------------------------------------------------------
+    // Test 5: malformed created_at → SparCaptureError (no RangeError escape)
+    // -----------------------------------------------------------------------
+    test("malformed created_at → SparCaptureError before any session lookup", async () => {
+        const tc = makeTestSurrealClient({ denyWrites: true });
+        const badBrief: SkillSparBrief = { ...SCORE_BRIEF, createdAt: "not-a-date" };
+
+        const exit = await Effect.runPromiseExit(
+            scoreSkillSpar(badBrief, MAIN_ROOT, new Date()).pipe(
+                Effect.provide(Layer.mergeAll(tc.layer, configLayer)),
+            ),
+        );
+        expect(exit._tag).toBe("Failure");
+        if (exit._tag === "Failure") {
+            expect(JSON.stringify(exit.cause)).toContain("malformed created_at");
+        }
+        // Failed before issuing any query (no findVariantSession call).
+        expect(tc.captured.length).toBe(0);
+    });
 });
 
 // ---------------------------------------------------------------------------
