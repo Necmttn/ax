@@ -1,6 +1,6 @@
 import { Effect, Layer } from "effect";
 import { TraceTransportTag, type TraceTransport } from "@ax/lib/live-traces/Sink";
-import { createProgressReporter, type ProgressMode, type ProgressReporter, type ProgressStage } from "./progress.ts";
+import { createProgressReporter, type ProgressMode, type ProgressReporter, type ProgressSink, type ProgressStage } from "./progress.ts";
 import { initTuiProgress, type TuiProgressHandle } from "./progress-tui.tsx";
 
 /**
@@ -41,10 +41,17 @@ const readCountAttribute = (
 export const pipelineTraceTransportLayer = (
     mode: ProgressMode = "pipeline",
     stages: readonly ProgressStage[] = [],
+    sink?: ProgressSink,
 ): Layer.Layer<TraceTransportTag> => Layer.sync(
     TraceTransportTag,
     () => {
         let progress: ProgressReporter | null = null;
+        // The trace nests root -> stage span (LiveTrace.step) -> leaf spans
+        // (process.runCommand, db.chunk, ...). Only stage spans - the DIRECT
+        // children of the root - are worth a progress line; rendering every leaf
+        // floods plain mode with thousands of started/done lines (issue #479). We
+        // track the root spanId and render only spans whose parent is that root.
+        let rootSpanId: string | null = null;
         const spanNames = new Map<string, string>();
         const spanCounts = new Map<string, Record<string, number>>();
         const stageOf = (name: string): ProgressStage => ({ source: "ingest", stage: name });
@@ -63,15 +70,27 @@ export const pipelineTraceTransportLayer = (
                                     // step indices are stable; PipelineProgress still
                                     // auto-adds rows as spans start.
                                     stages,
+                                    // Only set sink when provided - exactOptionalPropertyTypes
+                                    // forbids an explicit `undefined` on the optional field.
+                                    ...(sink ? { sink } : {}),
                                 });
                                 break;
                             }
                             case "SpanStart": {
-                                // Skip the trace root span (no parent): its name is the
-                                // whole run label (every stage key joined), which wraps
-                                // the terminal and corrupts the in-place animation. Only
-                                // render actual per-stage spans.
-                                if (!event.parentSpanId) break;
+                                // The trace root span has no parent: its name is the whole
+                                // run label (every stage key joined), which wraps the
+                                // terminal and corrupts the in-place animation. Record its
+                                // id so we can tell stage spans (its direct children) from
+                                // deeper leaf spans, then skip rendering it.
+                                if (!event.parentSpanId) {
+                                    rootSpanId = event.spanId;
+                                    break;
+                                }
+                                // Render only stage spans (direct children of the root);
+                                // nested leaf spans (process.runCommand, db.chunk) are
+                                // noise (#479). Their counts ride the stage span, so
+                                // dropping them loses no progress data.
+                                if (event.parentSpanId !== rootSpanId) break;
                                 spanNames.set(event.spanId, event.name);
                                 progress?.start(stageOf(event.name));
                                 break;
@@ -99,6 +118,7 @@ export const pipelineTraceTransportLayer = (
                             case "TraceEnd": {
                                 progress?.stop();
                                 progress = null;
+                                rootSpanId = null;
                                 spanNames.clear();
                                 spanCounts.clear();
                                 break;
