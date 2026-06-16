@@ -23,6 +23,7 @@ import {
     buildRolesNext,
 } from "../../nav/next-links.ts";
 import { fetchSkillBloat } from "../../queries/skill-bloat.ts";
+import { fetchSkillLoaded } from "../../queries/skill-loaded.ts";
 import { fetchSkillStats } from "../../queries/skill-stats.ts";
 import { fetchUnusedSkills, formatLastUsed } from "../../queries/unused-skills.ts";
 import { skillsConfigSubcommands } from "../../skills/cli.ts";
@@ -351,6 +352,35 @@ const cmdSkillsBloat = (input: SkillsBloatInput) =>
         console.log(
             `\n${rows.length} skill${rows.length === 1 ? "" : "s"} over the ` +
             `${fmtCount(budgetTokens)}-token budget. Trim toward high-signal; length is not effort.`,
+        );
+    });
+
+interface SkillsLoadedInput {
+    readonly limit: number;
+    readonly json: boolean;
+}
+
+const cmdSkillsLoaded = (input: SkillsLoadedInput) =>
+    Effect.gen(function* () {
+        const limit = requirePositiveInt("skills loaded", "limit", input.limit);
+        const rows = yield* fetchSkillLoaded({ limit });
+        if (input.json) {
+            console.log(prettyPrint({ skills: rows }));
+            return;
+        }
+        if (rows.length === 0) {
+            console.log(
+                "No auto-load activations recorded. (The loaded-skills stage " +
+                "stamps these from subagent `skills:` frontmatter at ingest.)",
+            );
+            return;
+        }
+        for (const r of rows) {
+            console.log(`${r.name}  loaded=${fmtCount(r.activations)}`);
+        }
+        console.log(
+            `\n${rows.length} skill${rows.length === 1 ? "" : "s"} auto-loaded via subagent ` +
+            "frontmatter (no Skill-tool call; invisible to invoked-based usage views).",
         );
     });
 
@@ -924,6 +954,24 @@ const bloatCommand = Command.make(
     ),
 );
 
+const loadedCommand = Command.make(
+    "loaded",
+    {
+        limit: positiveLimit(25),
+        json: jsonFlag,
+    },
+    ({ limit, json }) =>
+        cmdSkillsLoaded({ limit, json }).pipe(
+            catchDbErrorAndExit("axctl skills loaded"),
+        ),
+).pipe(
+    Command.withDescription(
+        "List skills auto-loaded via a subagent's `skills:` frontmatter (activated " +
+        "with no Skill-tool call, so absent from invoked-based usage views), ranked " +
+        "by activation count. Reads the `loaded` edge. --limit=N  --json",
+    ),
+);
+
 const weightedCommand = Command.make(
     "weighted",
     {
@@ -982,7 +1030,7 @@ const rolesForSkillCommand = Command.make(
 );
 
 export const skillsCommand = Command.make("skills").pipe(
-    Command.withDescription("Skill-graph queries: search, stats, usage, pairs, recovery, classify, tag, lint, bloat, weighted, by-role, roles"),
+    Command.withDescription("Skill-graph queries: search, stats, usage, pairs, recovery, classify, tag, lint, bloat, loaded, weighted, by-role, roles"),
     Command.withSubcommands([
         searchCommand,
         statsCommand,
@@ -996,6 +1044,7 @@ export const skillsCommand = Command.make("skills").pipe(
         tagCommand,
         skillsLintCommand,
         bloatCommand,
+        loadedCommand,
         byRoleCommand,
         rolesForSkillCommand,
         ...skillsConfigSubcommands,
