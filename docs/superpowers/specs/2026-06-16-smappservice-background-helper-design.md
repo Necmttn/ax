@@ -68,12 +68,14 @@ app-closed capture ever becomes a hard requirement, revisit Option A below.
 
 ## Implementation scope (Option C)
 
-- **P1 - Tray + auto-launch.** Menubar/tray presence (open studio, quit) +
-  `openAtLogin` toggle (`mainAppService`). Verify the single Login Item renders as
-  "ax studio" (Developer ID) on a signed build.
-- **P2 - Ingest while open.** Trigger `ax ingest --since=N` (+ derive) on app
-  launch and on a `Schedule` while running; reuse the ingest-lock. (Supervisor
-  already runs surreal + serve.)
+- **P1 - Tray + auto-launch.** ✅ CORE LANDED: `openAtLogin` via
+  `mainAppService` (ElectronApp.setOpenAtLogin), registered on prod startup -
+  the app is ONE Developer-ID Login Item. ⏳ REMAINING (design-gated): the
+  visible menubar tray UI (icon asset + Open/Quit/toggle menu) + auto-launch
+  default UX. Verify the Login Item renders as "ax studio" on a signed build.
+- **P2 - Ingest while open.** ✅ LANDED: `DesktopIngestScheduler` fires an
+  immediate ingest then every 2 min via the running serve's `POST /api/ingest`
+  (ingest-lock dedupes); self-healing loop; forked into the program scope.
 - **P3 - `install.ts` desktop-awareness.** Detect the installed `ax studio.app`
   (`findDesktopApp`, landed); skip writing the 5 loose plists; migrate (unload +
   remove) any pre-existing ones. Headless CLI (`ax ingest`, manual `ax serve`)
@@ -88,13 +90,14 @@ app-closed capture ever becomes a hard requirement, revisit Option A below.
     `surreal import` through `ChildProcessSpawner`. THEN P3's skip+migrate wiring
     in `cmdInstall` becomes safe (the app owns surreal + schema + serve end to
     end). Requires adding `@ax/schema` as a studio-desktop dep.
-    - Sub-steps: **P3a** desktop schema-on-boot (new `DesktopSchema` module +
-      wire between surreal-ready and serve-spawn in `AxBackendManager`); **P3b**
-      `cmdInstall` skip+migrate when `findDesktopApp()` is truthy (unload+remove
-      the 5 plists, keep binary symlinks + runtime-state).
-- **P4 - CI release.** macOS runner: build → sign (Developer ID) → notarize
-  (`APPLE_ID` / `APPLE_APP_SPECIFIC_PASSWORD` / `APPLE_TEAM_ID`) → `--publish
-  always` → electron-updater feed.
+    - Sub-steps: **P3a** ✅ desktop schema-on-boot (`DesktopSchema` + wired
+      between surreal-ready and serve-spawn; bucket allowlist on surreal config);
+      **P3b** ✅ `cmdInstall` skip+migrate when `findDesktopApp()` is truthy.
+- **P4 - CI release.** ✅ LANDED: `.github/workflows/studio-desktop-release.yml`
+  per-arch matrix (arm64/macos-14, x64/macos-13 - host-arch native deps force
+  per-arch builds) → sign (Developer ID `CSC_LINK`) → notarize (`APPLE_ID` /
+  `APPLE_APP_SPECIFIC_PASSWORD` / `APPLE_TEAM_ID`) → `--publish always`. Needs the
+  secrets configured + a real tagged run to fully validate.
 
 ## Open questions
 
