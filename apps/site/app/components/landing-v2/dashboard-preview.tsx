@@ -1,11 +1,7 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
 import { Link } from "@tanstack/react-router";
-import {
-  AGENT_ONBOARDING_WITH_INSTALL,
-  AX_DOCS_URL,
-  AX_INSTALL_CMD,
-} from "@ax/onboarding-prompt";
+import { AGENT_ONBOARDING_WITH_INSTALL } from "@ax/onboarding-prompt";
 import { HeroLogoField, PROVIDERS } from "./supports-strip";
 import { RetroTerminal } from "./retro-terminal";
 
