@@ -89,7 +89,7 @@ it.
 ## What `ax` is
 
 `ax` is the reference implementation. Local typed graph,
-agent-readable queries, React dashboard, MIT licensed. Runs on your
+agent-readable queries, React dashboard, AGPL-3.0 licensed. Runs on your
 laptop.
 
 The surface is small on purpose:

@@ -562,10 +562,10 @@ ax daemon: running (pid 48213)
         signature: "ax mcp",
         flags: [],
         receipt: `$ ax mcp
-ax MCP server ready (stdio) - 10 read-only tools
+ax MCP server ready (stdio) - 17 read-only tools
   recall  sessions_around  session_show  skills_weighted  ...`,
         detail: [
-          "Exposes 10 read-only tools (recall, sessions_around, session_show, skills_weighted, skills_by_role, skills_roles, roles, improve_recommend, improve_show, improve_list).",
+          "Exposes 17 read-only tools (recall, sessions_around, session_show, session_metrics, skills_weighted, skills_by_role, skills_roles, roles, improve_recommend, improve_show, improve_list, signal_show, cost_models, cost_split, cost_routability, dispatches, dojo_agenda).",
           "Mutating ops and git-resolved queries (sessions here/near) are intentionally not exposed.",
         ],
       },

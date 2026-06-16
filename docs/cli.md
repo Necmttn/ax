@@ -228,7 +228,7 @@ command = "ax"
 args = ["mcp"]
 ```
 
-The 16 tools, each mirroring the matching CLI command:
+The 17 tools, each mirroring the matching CLI command:
 
 - **recall** - full-text recall across turns / commits / skills (`ax recall`).
 - **sessions_around** - sessions in a date window (`ax sessions around`).
@@ -245,6 +245,7 @@ The 16 tools, each mirroring the matching CLI command:
 - **signal_show** - signal catalog list or run a named relation signal (`ax signals`).
 - **cost_models** - per-model token and cost rollup (`ax cost models`).
 - **cost_split** - cost matrix split by origin x model (`ax cost split`).
+- **cost_routability** - main-thread routable-spend lens with est savings (`ax cost routability`).
 - **dispatches** - subagent dispatch analytics and routing candidates (`ax dispatches`).
 - **dojo_agenda** - dojo training agenda: budget envelope + prioritized work items (`ax dojo agenda`).
 
