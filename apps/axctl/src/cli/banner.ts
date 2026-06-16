@@ -40,27 +40,23 @@ export function formatLandingBanner(version: string, color: boolean): string {
     ].join("\n");
 }
 
-const STUDIO_BASE = "https://ax.necmttn.com/studio/";
-
 /**
  * Banner printed on `axctl serve` startup. Surrealist-style: wordmark +
- * the local daemon URL + a deep link to the public studio that auto-connects
- * to this daemon.
+ * the local studio URL. Studio is served by the daemon itself, same-origin,
+ * so opening this URL just works - no cross-origin handshake to a loopback
+ * daemon (the bug the hosted https studio kept hitting).
  */
 export function formatServeBanner(port: number): string {
-    const localUrl = `http://localhost:${port}`;
-    const studioUrl = serveStudioUrl(port);
     return [
         WORDMARK_ASCII,
-        `  local daemon      ${localUrl}`,
-        `  open in studio    ${studioUrl}`,
+        `  studio + api      ${serveStudioUrl(port)}`,
         "",
     ].join("\n");
 }
 
-/** Deep link to the public studio auto-connected to a local daemon port. */
+/** Local studio URL - the daemon serves the studio SPA at its own root. */
 export function serveStudioUrl(port: number): string {
-    return `${STUDIO_BASE}?endpoint=${encodeURIComponent(`http://127.0.0.1:${port}`)}`;
+    return `http://localhost:${port}/`;
 }
 
 /**
@@ -77,8 +73,7 @@ export function formatServeAlreadyRunning(
         : `pid ${info.pid}`;
     return [
         `[ax] ax serve is already running on port ${port} (${pid}, v${info.version})`,
-        `  local daemon      http://localhost:${port}`,
-        `  open in studio    ${serveStudioUrl(port)}`,
+        `  studio + api      ${serveStudioUrl(port)}`,
         "",
         "  manage it:        ax serve status · ax serve stop",
     ].join("\n");
