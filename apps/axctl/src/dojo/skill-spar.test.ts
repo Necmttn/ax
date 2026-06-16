@@ -1,9 +1,15 @@
 import { describe, expect, test } from "bun:test";
+import { Effect, Layer } from "effect";
+import { makeTestSurrealClient } from "@ax/lib/testing/surreal";
+import { ProcessServiceTest } from "@ax/lib/process";
+import { layerTestFileSystem } from "@ax/lib/testing/test-filesystem";
 import {
     renderSkillSparBrief,
     parseSkillSparBrief,
     isSkillSparBrief,
+    resolveSkillSparTask,
     type SkillSparBrief,
+    type ResolveSkillSparOpts,
 } from "./skill-spar.ts";
 
 // ---------------------------------------------------------------------------
@@ -326,5 +332,339 @@ describe("oneLine guard: CR/LF in field cannot break frontmatter", () => {
         const parsed = parseSkillSparBrief(rendered);
         expect(parsed).not.toBeNull();
         expect(parsed!.skillDir).toBe("/some/path /injected-line");
+    });
+});
+
+// ---------------------------------------------------------------------------
+// resolveSkillSparTask - Effect glue tests
+// ---------------------------------------------------------------------------
+
+const SKILL_DIR = "/Users/user/.claude/skills/my-skill";
+const SKILL_MD_CONTENT = "# My Skill\n\nDo the thing.";
+
+/** Default process mock: HEAD → "headsha123", <sha>^ → "parentsha456". */
+const defaultProcMock = ProcessServiceTest({
+    route: (cmd, args) => {
+        if (cmd === "git") {
+            const last = args[args.length - 1] ?? "";
+            if (last === "HEAD") return { stdout: "headsha123\n", stderr: "", code: 0 };
+            if (last.endsWith("^")) return { stdout: "parentsha456\n", stderr: "", code: 0 };
+        }
+        return { stdout: "", stderr: "unexpected", code: 1 };
+    },
+});
+
+const defaultFs = layerTestFileSystem({ [`${SKILL_DIR}/SKILL.md`]: SKILL_MD_CONTENT });
+
+/** Run resolveSkillSparTask and unwrap the result. */
+const runResolve = (
+    skillName: string,
+    opts: ResolveSkillSparOpts | undefined,
+    tc: ReturnType<typeof makeTestSurrealClient>,
+    proc: Layer.Layer<import("@ax/lib/process").ProcessService> = defaultProcMock,
+    fs: Layer.Layer<import("effect").FileSystem.FileSystem> = defaultFs,
+) =>
+    Effect.runPromise(
+        resolveSkillSparTask(skillName, "/repo", null, "2026-06-16T00:00:00.000Z", opts).pipe(
+            Effect.provide(Layer.mergeAll(tc.layer, proc, fs)),
+        ),
+    );
+
+/** Run and expect a SparCaptureError with the given message substring. */
+const runExpectCaptureFail = async (
+    skillName: string,
+    opts: ResolveSkillSparOpts | undefined,
+    tc: ReturnType<typeof makeTestSurrealClient>,
+    msgSubstring: string,
+    proc: Layer.Layer<import("@ax/lib/process").ProcessService> = defaultProcMock,
+    fs: Layer.Layer<import("effect").FileSystem.FileSystem> = defaultFs,
+) => {
+    const exit = await Effect.runPromiseExit(
+        resolveSkillSparTask(skillName, "/repo", null, "2026-06-16T00:00:00.000Z", opts).pipe(
+            Effect.provide(Layer.mergeAll(tc.layer, proc, fs)),
+        ),
+    );
+    expect(exit._tag).toBe("Failure");
+    if (exit._tag === "Failure") {
+        // Stringify the cause to check message content
+        const causeStr = JSON.stringify(exit.cause);
+        expect(causeStr).toContain(msgSubstring);
+    }
+};
+
+describe("resolveSkillSparTask", () => {
+    // -----------------------------------------------------------------------
+    // Test 1: invoked-only history → resolves to the invoking session
+    // -----------------------------------------------------------------------
+    test("invoked-only: resolves to the most-recent invoking session", async () => {
+        const tc = makeTestSurrealClient({
+            denyWrites: true,
+            routes: {
+                "FROM skill WHERE name": [
+                    [{ id: "skill:myskill", name: "my-skill", dir_path: SKILL_DIR }],
+                ],
+                // invoked + loaded multi-statement: invoked has one row, loaded is empty
+                "FROM invoked WHERE out": [
+                    [{ sid: "session:s1", ts: "2026-01-10T00:00:00.000Z" }],
+                    [],
+                ],
+                // session bulk fetch: source + first_user_message
+                "first_user_message FROM": [
+                    [{ id: "session:s1", source: "claude", first_user_message: "Fix the bug" }],
+                ],
+            },
+        });
+
+        const result = await runResolve("my-skill", undefined, tc);
+        expect(result.baselineSession).toBe("session:s1");
+        expect(result.task).toBe("Fix the bug");
+        expect(result.skill).toBe("my-skill");
+        expect(result.skillDir).toBe(SKILL_DIR);
+        expect(result.originalSkill).toBe(SKILL_MD_CONTENT);
+        expect(result.originalHash).toBeTruthy();
+        expect(result.parentSha).toBe("headsha123");
+    });
+
+    // -----------------------------------------------------------------------
+    // Test 2: loaded-only history → resolves to the loading session
+    // -----------------------------------------------------------------------
+    test("loaded-only: resolves to the most-recent loading session", async () => {
+        const tc = makeTestSurrealClient({
+            denyWrites: true,
+            routes: {
+                "FROM skill WHERE name": [
+                    [{ id: "skill:myskill", name: "my-skill", dir_path: SKILL_DIR }],
+                ],
+                // invoked empty, loaded has one row
+                "FROM invoked WHERE out": [
+                    [],
+                    [{ sid: "session:s2", ts: "2026-02-05T00:00:00.000Z" }],
+                ],
+                "first_user_message FROM": [
+                    [{ id: "session:s2", source: "claude", first_user_message: "Do the loaded task" }],
+                ],
+            },
+        });
+
+        const result = await runResolve("my-skill", undefined, tc);
+        expect(result.baselineSession).toBe("session:s2");
+        expect(result.task).toBe("Do the loaded task");
+    });
+
+    // -----------------------------------------------------------------------
+    // Test 3: both invoked + loaded → max ts wins
+    // -----------------------------------------------------------------------
+    test("both invoked + loaded: most-recent edge-ts wins", async () => {
+        const tc = makeTestSurrealClient({
+            denyWrites: true,
+            routes: {
+                "FROM skill WHERE name": [
+                    [{ id: "skill:myskill", name: "my-skill", dir_path: SKILL_DIR }],
+                ],
+                // s1 invoked on Jan 10, s2 loaded on Jan 15 → s2 should win
+                "FROM invoked WHERE out": [
+                    [{ sid: "session:s1", ts: "2026-01-10T00:00:00.000Z" }],
+                    [{ sid: "session:s2", ts: "2026-01-15T00:00:00.000Z" }],
+                ],
+                "first_user_message FROM": [
+                    [
+                        { id: "session:s1", source: "claude", first_user_message: "Older task" },
+                        { id: "session:s2", source: "claude", first_user_message: "Newer task" },
+                    ],
+                ],
+            },
+        });
+
+        const result = await runResolve("my-skill", undefined, tc);
+        expect(result.baselineSession).toBe("session:s2");
+        expect(result.task).toBe("Newer task");
+    });
+
+    // -----------------------------------------------------------------------
+    // Test 4: no history → SparCaptureError
+    // -----------------------------------------------------------------------
+    test("no invoked/loaded history → SparCaptureError", async () => {
+        const tc = makeTestSurrealClient({
+            denyWrites: true,
+            routes: {
+                "FROM skill WHERE name": [
+                    [{ id: "skill:myskill", name: "my-skill", dir_path: SKILL_DIR }],
+                ],
+                "FROM invoked WHERE out": [[], []],
+            },
+        });
+
+        await runExpectCaptureFail("my-skill", undefined, tc, "no sessions found");
+    });
+
+    // -----------------------------------------------------------------------
+    // Test 5: unknown skill → SparCaptureError
+    // -----------------------------------------------------------------------
+    test("unknown skill → SparCaptureError", async () => {
+        const tc = makeTestSurrealClient({
+            denyWrites: true,
+            routes: {
+                "FROM skill WHERE name": [[]],
+            },
+        });
+
+        await runExpectCaptureFail("ghost-skill", undefined, tc, "unknown skill ghost-skill");
+    });
+
+    // -----------------------------------------------------------------------
+    // Test 6: synthetic skill → SparCaptureError
+    // -----------------------------------------------------------------------
+    test("synthetic skill → SparCaptureError", async () => {
+        const tc = makeTestSurrealClient({
+            denyWrites: true,
+            routes: {
+                "FROM skill WHERE name": [
+                    [{ id: "skill:bash", name: "Bash", dir_path: "(synthetic)" }],
+                ],
+            },
+        });
+
+        await runExpectCaptureFail("Bash", undefined, tc, "synthetic/tool skill");
+    });
+
+    // -----------------------------------------------------------------------
+    // Test 7: explicit opts.sessionId → uses it directly (no invoked/loaded)
+    // -----------------------------------------------------------------------
+    test("opts.sessionId: uses specified session directly, skips edge history", async () => {
+        const tc = makeTestSurrealClient({
+            denyWrites: true,
+            routes: {
+                "FROM skill WHERE name": [
+                    [{ id: "skill:myskill", name: "my-skill", dir_path: SKILL_DIR }],
+                ],
+                // Session lookup by specific id
+                "FROM session:": [
+                    [{ id: "session:s42", first_user_message: "Custom task" }],
+                ],
+            },
+        });
+
+        const result = await runResolve("my-skill", { sessionId: "session:s42" }, tc);
+        expect(result.baselineSession).toBe("session:s42");
+        expect(result.task).toBe("Custom task");
+
+        // The invoked/loaded queries must NOT have been issued
+        expect(tc.captured.some((sql) => sql.includes("FROM invoked"))).toBe(false);
+    });
+
+    // -----------------------------------------------------------------------
+    // Test 8: opts.sha → parentSha is <sha>^
+    // -----------------------------------------------------------------------
+    test("opts.sha: parentSha resolved as sha^", async () => {
+        const tc = makeTestSurrealClient({
+            denyWrites: true,
+            routes: {
+                "FROM skill WHERE name": [
+                    [{ id: "skill:myskill", name: "my-skill", dir_path: SKILL_DIR }],
+                ],
+                "FROM invoked WHERE out": [
+                    [{ sid: "session:s1", ts: "2026-01-10T00:00:00.000Z" }],
+                    [],
+                ],
+                "first_user_message FROM": [
+                    [{ id: "session:s1", source: "claude", first_user_message: "Task text" }],
+                ],
+            },
+        });
+
+        // proc mock that verifies the sha^ call
+        const capturedArgs: string[][] = [];
+        const shaProcMock = ProcessServiceTest({
+            route: (cmd, args) => {
+                if (cmd === "git") capturedArgs.push([...args]);
+                const last = args[args.length - 1] ?? "";
+                if (last.endsWith("^")) return { stdout: "parentsha456\n", stderr: "", code: 0 };
+                return { stdout: "headsha123\n", stderr: "", code: 0 };
+            },
+        });
+
+        const result = await runResolve("my-skill", { sha: "abc1234" }, tc, shaProcMock);
+        expect(result.parentSha).toBe("parentsha456");
+        // Must have called git rev-parse ... abc1234^
+        expect(capturedArgs.some((a) => a.includes("abc1234^"))).toBe(true);
+    });
+
+    // -----------------------------------------------------------------------
+    // Test 9: no opts → parentSha is HEAD
+    // -----------------------------------------------------------------------
+    test("no opts: parentSha resolved from HEAD", async () => {
+        const tc = makeTestSurrealClient({
+            denyWrites: true,
+            routes: {
+                "FROM skill WHERE name": [
+                    [{ id: "skill:myskill", name: "my-skill", dir_path: SKILL_DIR }],
+                ],
+                "FROM invoked WHERE out": [
+                    [{ sid: "session:s1", ts: "2026-01-10T00:00:00.000Z" }],
+                    [],
+                ],
+                "first_user_message FROM": [
+                    [{ id: "session:s1", source: "claude", first_user_message: "HEAD task" }],
+                ],
+            },
+        });
+
+        const capturedArgs: string[][] = [];
+        const headProcMock = ProcessServiceTest({
+            route: (cmd, args) => {
+                if (cmd === "git") capturedArgs.push([...args]);
+                const last = args[args.length - 1] ?? "";
+                if (last === "HEAD") return { stdout: "headsha999\n", stderr: "", code: 0 };
+                return { stdout: "parentsha\n", stderr: "", code: 0 };
+            },
+        });
+
+        const result = await runResolve("my-skill", undefined, tc, headProcMock);
+        expect(result.parentSha).toBe("headsha999");
+        expect(capturedArgs.some((a) => a.includes("HEAD"))).toBe(true);
+        // Must NOT have been called with ^
+        expect(capturedArgs.some((a) => a.some((arg) => arg.endsWith("^")))).toBe(false);
+    });
+
+    // -----------------------------------------------------------------------
+    // Test 10: missing SKILL.md → SparCaptureError
+    // -----------------------------------------------------------------------
+    test("no SKILL.md → SparCaptureError", async () => {
+        const tc = makeTestSurrealClient({
+            denyWrites: true,
+            routes: {
+                "FROM skill WHERE name": [
+                    [{ id: "skill:myskill", name: "my-skill", dir_path: SKILL_DIR }],
+                ],
+            },
+        });
+
+        // Empty FS: no SKILL.md
+        const emptyFs = layerTestFileSystem({});
+        await runExpectCaptureFail("my-skill", undefined, tc, "no SKILL.md", defaultProcMock, emptyFs);
+    });
+
+    // -----------------------------------------------------------------------
+    // Test 11: non-claude sessions filtered, remaining none → SparCaptureError
+    // -----------------------------------------------------------------------
+    test("only non-claude sessions in history → SparCaptureError", async () => {
+        const tc = makeTestSurrealClient({
+            denyWrites: true,
+            routes: {
+                "FROM skill WHERE name": [
+                    [{ id: "skill:myskill", name: "my-skill", dir_path: SKILL_DIR }],
+                ],
+                "FROM invoked WHERE out": [
+                    [{ sid: "session:s1", ts: "2026-01-10T00:00:00.000Z" }],
+                    [],
+                ],
+                // source = codex, not claude
+                "first_user_message FROM": [
+                    [{ id: "session:s1", source: "codex", first_user_message: "Codex task" }],
+                ],
+            },
+        });
+
+        await runExpectCaptureFail("my-skill", undefined, tc, "no main (source=claude) sessions");
     });
 });

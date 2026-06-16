@@ -6,6 +6,13 @@
  * with the original skill, Arm B runs with the edited skill active (global
  * swap during Arm B only, restored immediately after).
  */
+import { Effect, FileSystem } from "effect";
+import { SurrealClient } from "@ax/lib/db";
+import type { DbError } from "@ax/lib/errors";
+import { recordLiteral } from "@ax/lib/ids";
+import { surrealString, refListSource, recordKeyPart } from "@ax/lib/shared/surreal";
+import { ProcessService, type ProcessError } from "@ax/lib/process";
+import { SparCaptureError } from "./spar.ts";
 
 // ---------------------------------------------------------------------------
 // Helpers (mirrors of spar.ts module-private helpers)
@@ -243,3 +250,183 @@ export const isSkillSparBrief = (content: string): boolean => {
     if (!content.startsWith("---")) return false;
     return field(content, "kind") === "skill";
 };
+
+// ---------------------------------------------------------------------------
+// resolveSkillSparTask - Effect glue
+// ---------------------------------------------------------------------------
+
+/**
+ * The resolved inputs needed to run a skill spar: the task text, baseline
+ * session, parent SHA for worktree pinning, and the SKILL.md snapshot.
+ */
+export interface SkillSparTask {
+    readonly task: string;
+    readonly baselineSession: string;
+    readonly parentSha: string;
+    readonly skill: string;
+    readonly skillDir: string;
+    readonly originalSkill: string;
+    readonly originalHash: string;
+}
+
+export interface ResolveSkillSparOpts {
+    /** Use this session as the baseline instead of inferring from invoked/loaded history. */
+    readonly sessionId?: string;
+    /** Pin worktrees at `<sha>^`; defaults to HEAD when absent. */
+    readonly sha?: string;
+}
+
+/**
+ * Resolve all inputs needed to create a SkillSparBrief.
+ *
+ * Steps:
+ * 1. Look up the skill record (fails for unknown or synthetic skills).
+ * 2. Read + hash SKILL.md from disk.
+ * 3. Pick the baseline session:
+ *    - `opts.sessionId` → use directly (verify it exists).
+ *    - else → union invoked + loaded edges for this skill, merge max-ts per
+ *      session in JS, filter to source=claude, pick most-recent.
+ * 4. Resolve parentSha from `opts.sha^` or git HEAD.
+ */
+export const resolveSkillSparTask = (
+    skillName: string,
+    repoRoot: string,
+    _repositoryKey: string | null,
+    _nowIso: string,
+    opts?: ResolveSkillSparOpts,
+) =>
+    Effect.gen(function* () {
+        const db = yield* SurrealClient;
+        const fs = yield* FileSystem.FileSystem;
+        const proc = yield* ProcessService;
+
+        // 1. Skill row lookup ---------------------------------------------------
+        const skillQueryRows = yield* db.query<[
+            Array<{ id: string; name: string; dir_path: string | null }>,
+        ]>(
+            `SELECT type::string(id) AS id, name, dir_path FROM skill WHERE name = ${surrealString(skillName)} LIMIT 1;`,
+        );
+        const skillRow = skillQueryRows?.[0]?.[0] ?? null;
+        if (!skillRow) {
+            return yield* Effect.fail(new SparCaptureError(`unknown skill ${skillName}`));
+        }
+        if (skillRow.dir_path === "(synthetic)") {
+            return yield* Effect.fail(
+                new SparCaptureError(`${skillName} is a synthetic/tool skill, not editable`),
+            );
+        }
+        const skillDir = skillRow.dir_path ?? "";
+        const skillId = skillRow.id; // "skill:`abc`" - already type::string
+
+        // 2. SKILL.md snapshot --------------------------------------------------
+        const skillMdPath = `${skillDir}/SKILL.md`;
+        const originalSkill = yield* fs.readFileString(skillMdPath).pipe(
+            Effect.mapError(() => new SparCaptureError(`no SKILL.md at ${skillDir}`)),
+        );
+        const originalHash = Bun.hash(originalSkill).toString(16);
+
+        // 3. Pick task session --------------------------------------------------
+        let baselineSession: string;
+        let task: string;
+
+        if (opts?.sessionId) {
+            // Explicit session: verify it exists and pull first_user_message.
+            const key = recordKeyPart(opts.sessionId, "session") ?? opts.sessionId;
+            const sessRows = yield* db.query<[
+                Array<{ id: string; first_user_message: string | null }>,
+            ]>(
+                `SELECT type::string(id) AS id, first_user_message FROM ${recordLiteral("session", key)};`,
+            );
+            const sess = sessRows?.[0]?.[0] ?? null;
+            if (!sess) {
+                return yield* Effect.fail(
+                    new SparCaptureError(`session ${opts.sessionId} not found`),
+                );
+            }
+            baselineSession = sess.id;
+            task = sess.first_user_message ?? "";
+        } else {
+            // Infer from invoked + loaded edge history (deref-free, two flat queries).
+            const edgeRows = yield* db.query<[
+                Array<{ sid: string; ts: string }>,
+                Array<{ sid: string; ts: string }>,
+            ]>(
+                `SELECT type::string(session) AS sid, type::string(ts) AS ts FROM invoked WHERE out = ${skillId} AND session IS NOT NONE;\n` +
+                `SELECT type::string(in) AS sid, type::string(ts) AS ts FROM loaded WHERE out = ${skillId};`,
+            );
+            const [invokedRows, loadedRows] = edgeRows;
+
+            // Merge: keep max edge-ts per session across both tables.
+            const maxBySid = new Map<string, string>();
+            for (const row of [...(invokedRows ?? []), ...(loadedRows ?? [])]) {
+                if (!row.sid || !row.ts) continue;
+                const prev = maxBySid.get(row.sid);
+                if (!prev || row.ts > prev) maxBySid.set(row.sid, row.ts);
+            }
+
+            if (maxBySid.size === 0) {
+                return yield* Effect.fail(
+                    new SparCaptureError(
+                        `no sessions found that invoked or loaded ${skillName}`,
+                    ),
+                );
+            }
+
+            // Bulk-fetch session rows (source filter + task text).
+            const candidateSids = [...maxBySid.keys()];
+            const sessionRows = yield* db.query<[
+                Array<{ id: string; source: string | null; first_user_message: string | null }>,
+            ]>(
+                `SELECT type::string(id) AS id, source, first_user_message FROM ${refListSource(candidateSids, ["id", "source", "first_user_message"])};`,
+            );
+
+            const mainSessions = (sessionRows?.[0] ?? []).filter((s) => s.source === "claude");
+            if (mainSessions.length === 0) {
+                return yield* Effect.fail(
+                    new SparCaptureError(
+                        `no main (source=claude) sessions found that invoked or loaded ${skillName}`,
+                    ),
+                );
+            }
+
+            // Pick the session whose most-recent edge-ts is highest.
+            let best: { id: string; ts: string; msg: string | null } | null = null;
+            for (const sess of mainSessions) {
+                const ts = maxBySid.get(sess.id) ?? "";
+                if (!best || ts > best.ts) {
+                    best = { id: sess.id, ts, msg: sess.first_user_message ?? null };
+                }
+            }
+            baselineSession = best!.id;
+            task = best!.msg ?? "";
+        }
+
+        // 4. Parent SHA ---------------------------------------------------------
+        let parentSha: string;
+        if (opts?.sha) {
+            const res = yield* proc.exec(
+                "git",
+                ["rev-parse", "--verify", "--quiet", `${opts.sha}^`],
+                { cwd: repoRoot },
+            );
+            parentSha =
+                res.code === 0 && res.stdout.trim().length > 0 ? res.stdout.trim() : opts.sha;
+        } else {
+            const res = yield* proc.exec("git", ["rev-parse", "HEAD"], { cwd: repoRoot });
+            parentSha = res.stdout.trim();
+        }
+
+        return {
+            task,
+            baselineSession,
+            parentSha,
+            skill: skillName,
+            skillDir,
+            originalSkill,
+            originalHash,
+        } satisfies SkillSparTask;
+    }) as Effect.Effect<
+        SkillSparTask,
+        DbError | ProcessError | SparCaptureError,
+        SurrealClient | ProcessService | FileSystem.FileSystem
+    >;
