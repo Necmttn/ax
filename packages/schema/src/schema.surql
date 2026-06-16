@@ -1656,9 +1656,17 @@ DEFINE FIELD confidence    ON proposal TYPE string;
     -- low | medium | high
 DEFINE FIELD status        ON proposal TYPE string DEFAULT 'open';
     -- open | accepted | rejected | superseded
-DEFINE FIELD origin        ON proposal TYPE string DEFAULT 'mined';
-    -- mined (signal-derived) | agent (written via `ax improve propose`)
-    -- old rows read NONE - consumers coalesce to 'mined'
+-- mined (signal-derived) | agent (written via `ax improve propose`).
+-- `VALUE $value ?? 'mined'` coerces any NONE/absent write back to 'mined' so a
+-- bare `UPDATE proposal SET ...` (accept/reject/housekeep/re-derive) that omits
+-- `origin` can never re-coerce an old NONE row and crash with "Expected string
+-- but found `NONE`" (issue #472). DEFAULT still seeds 'mined' on first create;
+-- an explicit origin='agent' write is preserved. OVERWRITE so the VALUE clause
+-- actually replaces the prior definition when re-applied to an existing DB
+-- (plain DEFINE FIELD errors "already exists" and keeps the NONE-permitting def).
+DEFINE FIELD OVERWRITE origin ON proposal TYPE string DEFAULT 'mined' VALUE $value ?? 'mined';
+-- Repair rows written before the VALUE clause existed (origin already NONE).
+UPDATE proposal SET origin = 'mined' WHERE origin = NONE;
 DEFINE FIELD hypothesis_template ON proposal TYPE option<string>;
     -- hypothesis with {{placeholders}} hydrated at serve time from
     -- evidence_query's first row - numbers never expire
