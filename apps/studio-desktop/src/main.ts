@@ -106,11 +106,21 @@ const desktopApplicationLayer = foundationWithBackendLayer.pipe(
     Layer.provideMerge(platformLayer),
 );
 
-// Scheme privileges MUST be registered before app `ready`. t3code applies this
-// as an eager layer that everything else is built on top of, so building the
-// runtime layer runs the registration first.
-const desktopRuntimeLayer = ElectronProtocol.layerSchemePrivileges.pipe(
-    Layer.flatMap(() => desktopApplicationLayer),
-);
+// Single-instance guard. With launch-at-login (mainAppService) the OS may start
+// the app while the user also opens it manually - two instances would fight over
+// the daemon ports/data dir and run two ingest schedulers. Acquire the lock
+// before anything else; if another instance holds it, quit immediately and let
+// it handle the `second-instance` event (focus its window - wired in
+// DesktopLifecycle). MUST run before app `ready`, so it lives here, not in a layer.
+if (!Electron.app.requestSingleInstanceLock()) {
+    Electron.app.quit();
+} else {
+    // Scheme privileges MUST be registered before app `ready`. t3code applies
+    // this as an eager layer that everything else is built on top of, so
+    // building the runtime layer runs the registration first.
+    const desktopRuntimeLayer = ElectronProtocol.layerSchemePrivileges.pipe(
+        Layer.flatMap(() => desktopApplicationLayer),
+    );
 
-DesktopApp.program.pipe(Effect.provide(desktopRuntimeLayer), NodeRuntime.runMain);
+    DesktopApp.program.pipe(Effect.provide(desktopRuntimeLayer), NodeRuntime.runMain);
+}
