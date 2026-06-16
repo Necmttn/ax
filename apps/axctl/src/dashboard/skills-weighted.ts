@@ -164,7 +164,15 @@ const SKILL_NAMES_SQL = `SELECT id, name FROM skill`;
 
 /**
  * Doctor query: count unclassified skills with >= 3 invocations.
- * Mirrors the predicate from src/cli/skills-classify.ts.
+ *
+ * This MUST stay semantically in sync with the canonical predicate in
+ * queries/skill-hygiene.ts (which `ax skills classify` uses): ≥3 invocations,
+ * unclassified = no plays_role edge in (frontmatter|brief|user), synthetic tools
+ * excluded unless includeTools. If the two drift, the doctor nudge ("run ax
+ * skills classify") can point at a command that finds nothing - the dead-end
+ * loop bug. (classify previously diverged via a broken correlated
+ * `NOT (subquery)[0]` predicate - NONE, not false - and excluded every
+ * unclassified skill; it now delegates to fetchSkillHygiene.)
  *
  * NON-correlated by construction: the original per-skill subqueries
  * (`... WHERE in = $parent.id`) ran two graph lookups for every skill row,
