@@ -50,7 +50,9 @@
 import * as Context from "effect/Context";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
+import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
+import * as Path from "effect/Path";
 import * as Ref from "effect/Ref";
 import * as Schedule from "effect/Schedule";
 import * as Scope from "effect/Scope";
@@ -61,6 +63,7 @@ import * as DesktopEnvironment from "../app/DesktopEnvironment.ts";
 import * as DesktopObservability from "../app/DesktopObservability.ts";
 import * as DesktopState from "../app/DesktopState.ts";
 import * as DesktopWindow from "../window/DesktopWindow.ts";
+import * as DesktopSchema from "./DesktopSchema.ts";
 import {
     AX_SERVE_PORT,
     type ArbitrationDecision,
@@ -208,7 +211,11 @@ export const makeSurrealConfig = (env: AxBackendEnvironment): SupervisedProcessC
         `rocksdb://${env.axDataDir}/db`,
     ],
     cwd: env.axSourceRoot,
-    env: {},
+    // Allow the buckets dir so bucket-backed schema imports are not denied
+    // (mirrors the CLI install's surreal plist; see DesktopSchema + issue #251).
+    env: {
+        SURREAL_BUCKET_FOLDER_ALLOWLIST: `${env.axDataDir}/buckets`,
+    },
     readiness: {
         url: new URL(`http://127.0.0.1:${SURREAL_PORT}/health`),
         timeout: READINESS_TIMEOUT,
@@ -269,7 +276,10 @@ interface ManagerProcesses {
     readonly axServe: SupervisedProcess | null;
 }
 
-const make = (makeProcess: MakeSupervisedProcess) =>
+const make = (
+    makeProcess: MakeSupervisedProcess,
+    applySchema: DesktopSchema.ApplySchema = DesktopSchema.noopApplySchema,
+) =>
     Effect.gen(function* () {
         const parentScope = yield* Scope.Scope;
         const arbitration = yield* AxArbitration;
@@ -279,6 +289,10 @@ const make = (makeProcess: MakeSupervisedProcess) =>
         const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
         const httpClient = yield* HttpClient.HttpClient;
         const backendOutputLog = yield* DesktopObservability.DesktopBackendOutputLog;
+        // Fetched once so `applySchema` can be fully provided at its call site,
+        // keeping the public `start`/`stop` effects requirement-free (R = never).
+        const fileSystem = yield* FileSystem.FileSystem;
+        const pathService = yield* Path.Path;
 
         const mode = yield* Ref.make<ArbitrationDecision["mode"] | null>(null);
         const procs = yield* Ref.make<ManagerProcesses>({
@@ -406,6 +420,18 @@ const make = (makeProcess: MakeSupervisedProcess) =>
                         yield* abortNotReady("surreal");
                         return;
                     }
+                    // We own surreal, so we own the schema (IDE daemon model - no
+                    // CLI `ax install` LaunchAgents apply it). Apply it now that
+                    // the DB is ready and before ax serve connects. Fail-soft.
+                    // Provide deps here so `start` stays requirement-free.
+                    yield* applySchema(env).pipe(
+                        Effect.provideService(
+                            ChildProcessSpawner.ChildProcessSpawner,
+                            spawner,
+                        ),
+                        Effect.provideService(FileSystem.FileSystem, fileSystem),
+                        Effect.provideService(Path.Path, pathService),
+                    );
                 }
 
                 const axServe = yield* buildProcess(makeAxServeConfig(env));
@@ -629,8 +655,10 @@ const awaitReady = (
  * `DesktopBackendOutputLog` to be provided by the caller. The {@link liveLayer}
  * bundles the live arbitration + environment derivations.
  */
-export const layer = (makeProcess: MakeSupervisedProcess = makeSupervisedProcess) =>
-    Layer.effect(AxBackendManager, make(makeProcess));
+export const layer = (
+    makeProcess: MakeSupervisedProcess = makeSupervisedProcess,
+    applySchema: DesktopSchema.ApplySchema = DesktopSchema.noopApplySchema,
+) => Layer.effect(AxBackendManager, make(makeProcess, applySchema));
 
 /**
  * Live layer: the real supervisor wired with live arbitration + the
@@ -638,7 +666,7 @@ export const layer = (makeProcess: MakeSupervisedProcess = makeSupervisedProcess
  * (`ChildProcessSpawner`, `HttpClient`, `DesktopBackendOutputLog`,
  * `DesktopState`, `DesktopWindow`, `DesktopEnvironment`) to `main.ts`.
  */
-export const liveLayer = layer().pipe(
+export const liveLayer = layer(makeSupervisedProcess, DesktopSchema.applySchema).pipe(
     Layer.provide(arbitrationLayer),
     Layer.provide(environmentLayer),
 );

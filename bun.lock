@@ -37,7 +37,7 @@
     },
     "apps/axctl": {
       "name": "axctl",
-      "version": "0.26.0",
+      "version": "0.31.0",
       "bin": {
         "axctl": "./bin/axctl",
       },
@@ -138,6 +138,7 @@
       "version": "0.12.1",
       "dependencies": {
         "@ax/lib": "workspace:*",
+        "@ax/schema": "workspace:*",
         "@effect/platform-node": "4.0.0-beta.78",
         "effect": "catalog:",
       },

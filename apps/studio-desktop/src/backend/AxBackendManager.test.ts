@@ -1,5 +1,7 @@
 import { expect, test } from "bun:test";
 
+import * as NodeServices from "@effect/platform-node/NodeServices";
+
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -153,6 +155,9 @@ const platformStubLayer = Layer.mergeAll(
         ),
     ),
     backendOutputLogNoopLayer,
+    // FileSystem + Path: the manager now references DesktopSchema.applySchema
+    // (a no-op in these tests, but its type surfaces FS/Path requirements).
+    NodeServices.layer,
 );
 
 // ---------------------------------------------------------------------------
