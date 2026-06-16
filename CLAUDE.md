@@ -6,6 +6,14 @@ Guidance for Claude Code and other AI assistants working in this repo.
 
 `ax` - local taste & telemetry graph for AI coding agents. Ingests transcripts from 5 harnesses - Claude Code (`~/.claude/projects/`), Codex (`~/.codex/sessions/`), Pi (`~/.pi/agent/sessions/`), OpenCode + Cursor (SQLite stores) - plus installed skills (`~/.claude/skills/`, `~/.agents/skills/`, plugin caches) into a dedicated SurrealDB instance. Each harness has a full parser dual-writing provider events (`agent_*` tables) + normalized records (`session`/`turn`/`tool_call`); `AgentProviderName` enumerates them (`apps/axctl/src/ingest/provider-events.ts`). CLI surfaces "what skills/tools you actually use" on demand.
 
+## Claiming work (multi-agent)
+
+Many agents (all pushing as the same GitHub user) run this repo in parallel, so
+issue *assignee* is useless - the **branch name is the claim**. Before starting an
+issue: `bun run wip list` (🟢 claimed shows branch, ⚪ free), then
+`bun run wip claim <issue#> [type]` (branch `<type>/<issue#>-<slug>` + label +
+claim comment). One branch per issue; work in a worktree off it. See CONTRIBUTING.md.
+
 ## Stack
 
 - **Runtime**: bun ≥ 1.3

@@ -1,0 +1,96 @@
+#!/usr/bin/env bash
+# wip - claim / release / list in-progress issues across many agents (one GitHub user).
+#
+# Why: every agent pushes as the same GitHub user, so issue *assignee* can't tell
+# which of N concurrent agents owns an issue. The BRANCH NAME is the agent identity.
+# Claiming posts a machine-parseable claim comment carrying that branch + host, and
+# flips the `status:in-progress` label so the claim is visible to every other agent
+# (and machine) - not just the local worktree.
+#
+# Usage:
+#   scripts/wip list                 # open issues + who(which branch) claimed them
+#   scripts/wip claim <N> [type]     # branch type/N-slug, label + claim comment
+#   scripts/wip release <N>          # drop label + post release comment
+#
+# type defaults to feat (feat|fix|chore|refactor|docs|test).
+set -euo pipefail
+
+REPO="Necmttn/ax"
+LABEL="status:in-progress"
+MARK="<!-- wip-claim"   # marker prefix on claim/release comments
+
+die() { echo "wip: $*" >&2; exit 1; }
+need() { command -v "$1" >/dev/null || die "missing '$1'"; }
+need gh; need jq; need git
+
+slug() { echo "$1" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9]+/-/g; s/^-+|-+$//g' | cut -c1-40; }
+
+cmd_claim() {
+  local n="${1:?issue number}" type="${2:-feat}"
+  local title; title=$(gh issue view "$n" --repo "$REPO" --json title --jq .title) \
+    || die "issue #$n not found"
+  local branch="$type/$n-$(slug "$title")"
+  local host; host=$(hostname -s)
+
+  if git show-ref --verify --quiet "refs/heads/$branch"; then
+    git switch "$branch"
+  else
+    git switch -c "$branch"
+  fi
+
+  # Push the branch so it's fetchable from any device (continue/take-over across
+  # machines). Best-effort: the claim is still recorded on the issue if push fails.
+  git push -u origin "$branch" 2>/dev/null \
+    && echo "wip: pushed $branch to origin" \
+    || echo "wip: WARNING could not push $branch - claim still recorded on the issue" >&2
+
+  gh issue edit "$n" --repo "$REPO" --add-label "$LABEL" >/dev/null
+  gh issue comment "$n" --repo "$REPO" --body \
+"$MARK branch=$branch host=$host -->
+🤖 Claimed on branch \`$branch\` (host \`$host\`). Working on it - see this branch for progress."
+  echo "wip: claimed #$n on $branch"
+}
+
+cmd_release() {
+  local n="${1:?issue number}"
+  local branch; branch=$(git branch --show-current 2>/dev/null || echo "?")
+  gh issue edit "$n" --repo "$REPO" --remove-label "$LABEL" >/dev/null 2>&1 || true
+  gh issue comment "$n" --repo "$REPO" --body \
+"$MARK released branch=$branch -->
+↩️ Released by branch \`$branch\`."
+  echo "wip: released #$n"
+}
+
+cmd_list() {
+  # For each open issue, derive its live claim from the latest claim/release comment.
+  # 🟢 lines carry the claiming branch, host, and claim age so a dead-laptop claim
+  # (old age) is distinguishable from a fresh one.
+  local now; now=$(date +%s)
+  gh issue list --repo "$REPO" --state open --limit 100 \
+    --json number,title,labels,comments \
+  | jq -r --arg label "$LABEL" --arg mark "$MARK" --argjson now "$now" '
+      def ago($s):
+        ($now - $s) as $d
+        | if   $d < 3600  then "\(($d/60)    | floor)m"
+          elif $d < 86400 then "\(($d/3600)  | floor)h"
+          else                 "\(($d/86400) | floor)d" end;
+      .[]
+      | (.labels | map(.name) | index($label)) as $inprog
+      | (.comments | map(select(.body | startswith($mark))) | last) as $c
+      | (($c.body // "") | [scan("branch=([^ ]+)")] | (.[0][0] // null)) as $branch
+      | (($c.body // "") | [scan("host=([^ ]+)")]   | (.[0][0] // null)) as $host
+      | (($c.body // "") | startswith($mark + " released")) as $released
+      | (if $c then ($c.createdAt | fromdateiso8601) else null end) as $ct
+      | (if $inprog and ($released | not)
+           then "🟢 \($branch // "?")  [\($host // "?"), \(if $ct then ago($ct) else "?" end)]"
+           else "⚪ free" end) as $state
+      | "\($state)\t#\(.number)\t\(.title)"
+    ' | sort
+}
+
+case "${1:-list}" in
+  claim)   shift; cmd_claim "$@";;
+  release) shift; cmd_release "$@";;
+  list|"") cmd_list;;
+  *) die "unknown command '$1' (claim|release|list)";;
+esac
