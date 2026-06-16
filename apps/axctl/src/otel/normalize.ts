@@ -1,25 +1,18 @@
 import { attrMap, nanoToDate, type MetricsPayload, type TracePayload, type LogsPayload } from "./otlp-schema.ts";
 import type { OtelMetricPointRow, OtelSpanRow, OtelLogEventRow } from "./rows.ts";
-
-/** Map an OTLP service.name to ax's harness label. */
-const harnessOf = (serviceName: string | number | boolean | null | undefined): string => {
-    if (serviceName === "claude-code" || serviceName === "claude_code") return "claude";
-    if (serviceName === "codex_cli_rs") return "codex";
-    if (serviceName === "opencode") return "opencode";
-    if (typeof serviceName === "string" && serviceName.startsWith("pi")) return "pi";
-    if (typeof serviceName === "string" && serviceName.startsWith("codex")) return "codex";
-    return "unknown";
-};
+import { walkResources } from "./signal.ts";
 
 const str = (v: string | number | boolean | null | undefined): string | null =>
     typeof v === "string" ? v : v == null ? null : String(v);
 
-export const normalizeMetrics = (payload: MetricsPayload): OtelMetricPointRow[] => {
-    const out: OtelMetricPointRow[] = [];
-    for (const rm of payload.resourceMetrics) {
-        const res = attrMap(rm.resource?.attributes);
-        const harness = harnessOf(res.get("service.name"));
-        for (const sm of rm.scopeMetrics) {
+export const normalizeMetrics = (payload: MetricsPayload): OtelMetricPointRow[] =>
+    walkResources(
+        payload.resourceMetrics,
+        (rm) => rm.resource,
+        (rm) => rm.scopeMetrics,
+        // Leaf stays per-signal: metric-level name/unit closure + sum/gauge 1→N fan-out.
+        ({ res, harness }, sm) => {
+            const out: OtelMetricPointRow[] = [];
             for (const metric of sm.metrics) {
                 const points = metric.sum?.dataPoints ?? metric.gauge?.dataPoints ?? [];
                 for (const dp of points) {
@@ -39,22 +32,21 @@ export const normalizeMetrics = (payload: MetricsPayload): OtelMetricPointRow[] 
                     });
                 }
             }
-        }
-    }
-    return out;
-};
+            return out;
+        },
+    );
 
-export const normalizeTrace = (payload: TracePayload): OtelSpanRow[] => {
-    const out: OtelSpanRow[] = [];
-    for (const rs of payload.resourceSpans) {
-        const res = attrMap(rs.resource?.attributes);
-        const harness = harnessOf(res.get("service.name"));
-        for (const ss of rs.scopeSpans) {
-            for (const span of ss.spans) {
+export const normalizeTrace = (payload: TracePayload): OtelSpanRow[] =>
+    walkResources(
+        payload.resourceSpans,
+        (rs) => rs.resource,
+        (rs) => rs.scopeSpans,
+        ({ res, harness }, ss) =>
+            ss.spans.map((span): OtelSpanRow => {
                 const a = attrMap(span.attributes);
                 const started = nanoToDate(span.startTimeUnixNano);
                 const ended = nanoToDate(span.endTimeUnixNano);
-                out.push({
+                return {
                     harness,
                     name: span.name,
                     trace_id: span.traceId,
@@ -66,12 +58,9 @@ export const normalizeTrace = (payload: TracePayload): OtelSpanRow[] => {
                     duration_ms: ended.getTime() - started.getTime(),
                     attrs: a.size ? JSON.stringify(Object.fromEntries(a.entries())) : null,
                     observed_at: started,
-                });
-            }
-        }
-    }
-    return out;
-};
+                };
+            }),
+    );
 
 const LOG_ALLOWLIST: Record<string, ReadonlySet<string>> = {
     codex: new Set([
@@ -97,13 +86,16 @@ const eventTime = (
     return nanoToDate(observedNano ?? nano);
 };
 
-export const normalizeLogs = (payload: LogsPayload): OtelLogEventRow[] => {
-    const out: OtelLogEventRow[] = [];
-    for (const rl of payload.resourceLogs) {
-        const res = attrMap(rl.resource?.attributes);
-        const harness = harnessOf(res.get("service.name") ?? null);
-        const allow = LOG_ALLOWLIST[harness];
-        for (const sl of rl.scopeLogs) {
+export const normalizeLogs = (payload: LogsPayload): OtelLogEventRow[] =>
+    walkResources(
+        payload.resourceLogs,
+        (rl) => rl.resource,
+        (rl) => rl.scopeLogs,
+        // Leaf stays per-signal: allowlist filter drops non-signal records, so the
+        // emitted array (the one writer indexes at render time) is post-filter.
+        ({ res, harness }, sl) => {
+            const allow = LOG_ALLOWLIST[harness];
+            const out: OtelLogEventRow[] = [];
             for (const rec of sl.logRecords) {
                 const a = attrMap(rec.attributes);
                 const eventName = a.get("event.name");
@@ -125,7 +117,6 @@ export const normalizeLogs = (payload: LogsPayload): OtelLogEventRow[] => {
                     observed_at: eventTime(a, rec.observedTimeUnixNano, rec.timeUnixNano),
                 });
             }
-        }
-    }
-    return out;
-};
+            return out;
+        },
+    );
