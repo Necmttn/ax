@@ -22,6 +22,7 @@ import {
     buildSkillsRolesNext,
     buildRolesNext,
 } from "../../nav/next-links.ts";
+import { fetchSkillBloat } from "../../queries/skill-bloat.ts";
 import { fetchSkillStats } from "../../queries/skill-stats.ts";
 import { fetchUnusedSkills, formatLastUsed } from "../../queries/unused-skills.ts";
 import { skillsConfigSubcommands } from "../../skills/cli.ts";
@@ -316,6 +317,41 @@ const cmdUnused = (input: UnusedInput) =>
                 `${hiddenScoped} agent-scoped skills hidden (load only inside a subagent); --include-scoped to show.`,
             );
         }
+    });
+
+interface SkillsBloatInput {
+    readonly budgetTokens: number;
+    readonly limit: number;
+    readonly json: boolean;
+}
+
+const cmdSkillsBloat = (input: SkillsBloatInput) =>
+    Effect.gen(function* () {
+        const budgetTokens = requirePositiveInt("skills bloat", "budget", input.budgetTokens);
+        const limit = requirePositiveInt("skills bloat", "limit", input.limit);
+        const rows = yield* fetchSkillBloat({ budgetTokens, limit });
+
+        if (input.json) {
+            console.log(prettyPrint({ budgetTokens, skills: rows }));
+            return;
+        }
+        if (rows.length === 0) {
+            console.log(
+                `No skills over ${fmtCount(budgetTokens)} tokens. ` +
+                `(Compact is good - SkillOpt deploys skills at ~300-2,000 tok.)`,
+            );
+            return;
+        }
+        for (const r of rows) {
+            console.log(
+                `${r.name}  ~${fmtCount(r.estTokens)} tok  (+${fmtCount(r.overBy)} over)  ` +
+                `${fmtCount(r.bytes)} B  used=${fmtCount(r.invocations)}`,
+            );
+        }
+        console.log(
+            `\n${rows.length} skill${rows.length === 1 ? "" : "s"} over the ` +
+            `${fmtCount(budgetTokens)}-token budget. Trim toward high-signal; length is not effort.`,
+        );
     });
 
 interface SkillsWeightedInput {
@@ -868,6 +904,26 @@ const skillsLintCommand = Command.make(
     ),
 );
 
+const bloatCommand = Command.make(
+    "bloat",
+    {
+        budget: Flag.integer("budget").pipe(Flag.withDefault(2000)),
+        limit: positiveLimit(25),
+        json: jsonFlag,
+    },
+    ({ budget, limit, json }) =>
+        cmdSkillsBloat({ budgetTokens: budget, limit, json }).pipe(
+            catchDbErrorAndExit("axctl skills bloat"),
+        ),
+).pipe(
+    Command.withDescription(
+        "List installed skills whose body exceeds a token budget (est ~4 B/token " +
+        "from stored bytes). Sorted by size, with all-time invocations so " +
+        "bloated-and-used skills surface first. SkillOpt deploys skills at " +
+        "~300-2,000 tokens. --budget=N (default 2000)  --limit=N  --json",
+    ),
+);
+
 const weightedCommand = Command.make(
     "weighted",
     {
@@ -926,7 +982,7 @@ const rolesForSkillCommand = Command.make(
 );
 
 export const skillsCommand = Command.make("skills").pipe(
-    Command.withDescription("Skill-graph queries: search, stats, usage, pairs, recovery, classify, tag, lint, weighted, by-role, roles"),
+    Command.withDescription("Skill-graph queries: search, stats, usage, pairs, recovery, classify, tag, lint, bloat, weighted, by-role, roles"),
     Command.withSubcommands([
         searchCommand,
         statsCommand,
@@ -939,6 +995,7 @@ export const skillsCommand = Command.make("skills").pipe(
         classifyCommand,
         tagCommand,
         skillsLintCommand,
+        bloatCommand,
         byRoleCommand,
         rolesForSkillCommand,
         ...skillsConfigSubcommands,
