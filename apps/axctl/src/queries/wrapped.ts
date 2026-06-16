@@ -72,6 +72,20 @@ GROUP BY tool
 ORDER BY count DESC
 LIMIT 50;`;
 
+// Verification / context counts classify on the FULL command (`command_text`),
+// not the collapsed `command_norm` (which strips the subcommand for tools
+// outside SUBCOMMAND_TOOLS, e.g. `mvn test` -> `mvn`). Grouped to bound
+// cardinality; the command text is classified in-process and never surfaced
+// (wrapped emits counts only). See issue #471.
+export const WRAPPED_VERIFY_SQL = `
+SELECT
+    (command_text ?? command_norm ?? name) AS cmd,
+    count() AS count
+FROM tool_call
+WHERE ts > time::now() - ${DAYS}d
+  AND (command_text ?? command_norm ?? name) IS NOT NONE
+GROUP BY cmd;`;
+
 export const WRAPPED_REPOSITORY_SQL = `
 SELECT repository, count() AS count
 FROM session

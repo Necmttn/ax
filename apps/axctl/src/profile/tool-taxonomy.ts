@@ -51,6 +51,23 @@ const E2E_PROGRAMS = new Set<string>([
     "testcafe", "nightwatch", "codeceptjs", "wdio",
 ]);
 
+// e2e driver subcommands that are setup/inspection, not running the suite.
+// Only excludable when the full command is known (command_text); a bare,
+// normalized `playwright` label is ambiguous and counts (it is usually a run).
+const E2E_NON_TEST = new Set<string>([
+    "install", "install-deps", "codegen", "open", "show-trace", "merge-reports",
+    "help", "version", "info", "docs", "uninstall",
+]);
+const HELP_VERSION_FLAGS = new Set<string>(["--help", "-h", "--version", "-v", "--info"]);
+
+// Module-runner forms: `python -m pytest`, `node --test`. The verification
+// signal is the module/flag, not the interpreter.
+const PYTHON_INTERPRETERS = new Set<string>(["python", "python3", "py"]);
+const PYTHON_MODULES = new Set<string>([
+    "pytest", "unittest", "nose", "nose2", "tox", "mypy", "ruff", "pylint",
+    "flake8", "pyflakes", "coverage",
+]);
+
 // Programs that ARE verification when invoked, across ecosystems that
 // check-family.ts does not model. Excludes anything already in its
 // DIRECT_BINARIES (vitest/jest/pytest/tsc/tsgo/eslint/oxlint/oxc/golangci-lint)
@@ -101,6 +118,7 @@ const ECO_SUBCOMMANDS: Record<string, ReadonlySet<string>> = {
     xcodebuild: new Set(["test"]),
     stack: new Set(["test"]),
     cabal: new Set(["test"]),
+    rake: new Set(["test", "spec"]),
 };
 
 // Wrappers that run another program (`bundle exec rspec`, `poetry run pytest`,
@@ -114,21 +132,42 @@ const WRAPPER_ALIASES = new Set(["exec", "run"]);
 function segmentIsVerification(segment: readonly string[]): boolean {
     const prog = basename((segment[0] ?? "").toLowerCase());
     if (!prog) return false;
+    const rest = segment.slice(1);
 
     if (WRAPPER_RUNNERS.has(prog)) {
-        let rest = segment.slice(1);
-        if (rest[0] && WRAPPER_ALIASES.has(rest[0].toLowerCase())) rest = rest.slice(1);
+        const wrapped = rest[0] && WRAPPER_ALIASES.has(rest[0].toLowerCase()) ? rest.slice(1) : rest;
         // Re-dispatch through the full classifier so the wrapped command hits
         // check-family too (e.g. `uv run pytest`, `bundle exec rake test`).
-        return rest.length > 0 ? isVerificationTool(rest.join(" ")) : false;
+        return wrapped.length > 0 ? isVerificationTool(wrapped.join(" ")) : false;
     }
 
-    if (E2E_PROGRAMS.has(prog) || ECO_PROGRAMS.has(prog)) return true;
+    // `python -m pytest`, `python3 -m mypy` - the module is the signal.
+    if (PYTHON_INTERPRETERS.has(prog)) {
+        const mi = rest.indexOf("-m");
+        const mod = mi >= 0 ? basename((rest[mi + 1] ?? "").toLowerCase()) : null;
+        return mod !== null && PYTHON_MODULES.has(mod);
+    }
 
+    // `node --test`.
+    if (prog === "node") return rest.some((t) => t.toLowerCase() === "--test");
+
+    if (ECO_PROGRAMS.has(prog)) return true;
+
+    if (E2E_PROGRAMS.has(prog)) {
+        // Exclude setup/inspection subcommands when the full command is known;
+        // a bare driver (no args, e.g. normalized `playwright`) still counts.
+        const lower = rest.map((t) => t.toLowerCase());
+        if (lower.some((t) => HELP_VERSION_FLAGS.has(t))) return false;
+        const arg0 = lower.find((t) => !t.startsWith("-")) ?? null;
+        return arg0 === null || !E2E_NON_TEST.has(arg0);
+    }
+
+    // Option-value-safe: scan all non-flag tokens so `mvn clean test`,
+    // `./gradlew check`, and `xcodebuild -scheme App test` all match the
+    // action regardless of position (the `-scheme App` value is skipped).
     const subs = ECO_SUBCOMMANDS[prog];
     if (subs) {
-        const arg0 = segment.slice(1).find((t) => !t.startsWith("-"))?.toLowerCase();
-        if (arg0 && subs.has(arg0)) return true;
+        return rest.some((t) => !t.startsWith("-") && subs.has(t.toLowerCase()));
     }
     return false;
 }
@@ -159,8 +198,9 @@ export function isVerificationTool(label: string | null | undefined): boolean {
 
 // Context-gathering programs that the canonical READ classifier does not list
 // (it owns cat/sed/rg/grep/find/`git grep` + Read/Grep/Glob names). These are
-// the extras the original contextToolPattern counted.
-const CONTEXT_EXTRAS = new Set<string>(["recall", "context", "open"]);
+// the extras the original contextToolPattern counted - including NotebookRead,
+// a built-in read tool the old /read/i regex matched.
+const CONTEXT_EXTRAS = new Set<string>(["recall", "context", "open", "notebookread"]);
 
 /** True if a tool_call label denotes context-gathering (search / read). */
 export function isContextTool(label: string | null | undefined): boolean {

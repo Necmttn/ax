@@ -376,6 +376,21 @@ GROUP BY tool
 ORDER BY count DESC
 LIMIT 200;`;
 
+// Verification / context counts classify on the FULL command (`command_text`),
+// not the collapsed `command_norm` - `normalizeCommand` strips the subcommand
+// for non-SUBCOMMAND_TOOLS (e.g. `mvn test` -> `mvn`, `npm run lint` ->
+// `npm run`, `bundle exec rspec` -> `bundle`), so the normalized label alone
+// can't see the verifier. Grouped to keep cardinality sane; the command text
+// is classified in-process and never returned (counts-only privacy invariant).
+const VERIFY_AGG_SQL = (d: number) => `
+SELECT
+    (command_text ?? command_norm ?? name) AS cmd,
+    count() AS count
+FROM tool_call
+WHERE ts > time::now() - ${win(d)}
+  AND (command_text ?? command_norm ?? name) IS NOT NONE
+GROUP BY cmd;`;
+
 // Total turn count in window.
 const TURN_COUNT_SQL = (d: number) => `
 SELECT count() AS count
@@ -418,14 +433,19 @@ export const fetchWrappedCounts = Effect.fn("profile.fetchWrappedCounts")(
         const repoRows = yield* db
             .query<[Array<Record<string, unknown>>]>(REPOS_COUNT_SQL(opts.windowDays))
             .pipe(Effect.map((r) => r?.[0] ?? []));
+        const verifyRows = yield* db
+            .query<[Array<Record<string, unknown>>]>(VERIFY_AGG_SQL(opts.windowDays))
+            .pipe(Effect.map((r) => r?.[0] ?? []));
 
         const tool_calls = toolRows.reduce((s, r) => s + Number(r.count ?? 0), 0);
         const tool_failures = toolRows.reduce((s, r) => s + Number(r.failures ?? 0), 0);
         const distinct_tools = toolRows.length;
 
-        const toolCount = (pred: (label: string) => boolean): number =>
-            toolRows
-                .filter((r) => pred(String(r.tool ?? "")))
+        // Verification/context classify on the full command text (verifyRows),
+        // not the collapsed command_norm tool label (toolRows).
+        const cmdCount = (pred: (label: string) => boolean): number =>
+            verifyRows
+                .filter((r) => pred(String(r.cmd ?? "")))
                 .reduce((s, r) => s + Number(r.count ?? 0), 0);
 
         return {
@@ -435,8 +455,8 @@ export const fetchWrappedCounts = Effect.fn("profile.fetchWrappedCounts")(
             distinct_tools,
             distinct_skills: Number(skillRows[0]?.count ?? 0),
             repos_count: Number(repoRows[0]?.count ?? 0),
-            verification_calls: toolCount(isVerificationTool),
-            context_calls: toolCount(isContextTool),
+            verification_calls: cmdCount(isVerificationTool),
+            context_calls: cmdCount(isContextTool),
         } satisfies WrappedCounts;
     },
 );

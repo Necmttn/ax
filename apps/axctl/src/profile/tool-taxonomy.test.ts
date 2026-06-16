@@ -65,6 +65,37 @@ describe("isVerificationTool", () => {
         expect(isVerificationTool("uv run pytest")).toBe(true);
     });
 
+    test("module runners and option-bearing subcommands", () => {
+        expect(isVerificationTool("python -m pytest")).toBe(true);
+        expect(isVerificationTool("python3 -m unittest")).toBe(true);
+        expect(isVerificationTool("python -m mypy src")).toBe(true);
+        expect(isVerificationTool("node --test")).toBe(true);
+        expect(isVerificationTool("rake test")).toBe(true);
+        expect(isVerificationTool("mvn clean test")).toBe(true);
+        // the `-scheme App` option value must not be read as the action
+        expect(isVerificationTool("xcodebuild -scheme App test")).toBe(true);
+        // a python interpreter NOT running a test module is not verification
+        expect(isVerificationTool("python -m http.server")).toBe(false);
+        expect(isVerificationTool("python app.py")).toBe(false);
+    });
+
+    test("e2e driver setup/inspection subcommands are not verification", () => {
+        expect(isVerificationTool("playwright install")).toBe(false);
+        expect(isVerificationTool("playwright codegen")).toBe(false);
+        expect(isVerificationTool("pw --help")).toBe(false);
+        // but the bare normalized driver label still counts (ambiguous -> run)
+        expect(isVerificationTool("playwright")).toBe(true);
+    });
+
+    test("classifies the full command text (production feeds command_text)", () => {
+        // These collapse under normalizeCommand (mvn test -> mvn, npm run lint
+        // -> npm run, bundle exec rspec -> bundle); only the full command sees
+        // the verifier. The profile/wrapped queries now classify command_text.
+        for (const label of ["mvn test", "sbt test", "dotnet test", "npm run lint", "bundle exec rspec"]) {
+            expect(`${label}=${isVerificationTool(label)}`).toBe(`${label}=true`);
+        }
+    });
+
     test("non-verifying subcommands of the same program do NOT match", () => {
         expect(isVerificationTool("go build")).toBe(false);
         expect(isVerificationTool("cargo build")).toBe(false);
@@ -107,6 +138,10 @@ describe("isContextTool", () => {
     test("credits multi-token git grep (regression - head-token reduction dropped it)", () => {
         // command_norm normalizes `git grep foo` -> `git grep` at ingest.
         expect(isContextTool("git grep")).toBe(true);
+    });
+
+    test("credits NotebookRead (regression - old /read/i matched it)", () => {
+        expect(isContextTool("NotebookRead")).toBe(true);
     });
 
     test("does not credit verification or unrelated tools", () => {

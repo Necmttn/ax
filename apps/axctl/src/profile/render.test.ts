@@ -51,6 +51,12 @@ const mockResults = [
     [[{ count: 56 }]],
     // 18: wrappedCounts reposCount
     [[{ count: 12 }]],
+    // 18b: wrappedCounts verifyAgg (full command_text: bun test=verification, Read=context)
+    [[
+        { cmd: "bun test", count: 900 },
+        { cmd: "Read", count: 2000 },
+        { cmd: "Bash", count: 3000 },
+    ]],
     // 19: dailyModels
     [[
         { date: "2026-06-11", model: "fable", tokens: 80_000 },

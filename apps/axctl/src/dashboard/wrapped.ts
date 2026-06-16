@@ -22,6 +22,7 @@ import {
     WRAPPED_TOKEN_USAGE_SQL,
     WRAPPED_TOOLS_SQL,
     WRAPPED_USAGE_SQL,
+    WRAPPED_VERIFY_SQL,
 } from "../queries/wrapped.ts";
 
 export interface ArchetypeSignals {
@@ -429,7 +430,9 @@ export function fetchWrapped(): Effect.Effect<WrappedProfile, DbError, SurrealCl
             toolRows,
             repositoryRows,
             spawnedRows,
+            verifyRows,
         ] = yield* db.query<[
+            Row[],
             Row[],
             Row[],
             Row[],
@@ -450,6 +453,7 @@ export function fetchWrapped(): Effect.Effect<WrappedProfile, DbError, SurrealCl
                 WRAPPED_TOOLS_SQL,
                 WRAPPED_REPOSITORY_SQL,
                 WRAPPED_SPAWNED_SQL,
+                WRAPPED_VERIFY_SQL,
             ].join("\n"),
         );
 
@@ -473,8 +477,14 @@ export function fetchWrapped(): Effect.Effect<WrappedProfile, DbError, SurrealCl
             tools
                 .filter((row) => pred(toString(row.tool) ?? ""))
                 .reduce((sum, row) => sum + toNumber(row.count), 0);
-        const verificationCalls = toolCount(isVerificationTool);
-        const contextCalls = toolCount(isContextTool);
+        // Verification/context classify on the full command text (verifyRows),
+        // not the collapsed command_norm tool label (tools).
+        const cmdCount = (pred: (label: string) => boolean): number =>
+            queryRows(verifyRows)
+                .filter((row) => pred(toString(row.cmd) ?? ""))
+                .reduce((sum, row) => sum + toNumber(row.count), 0);
+        const verificationCalls = cmdCount(isVerificationTool);
+        const contextCalls = cmdCount(isContextTool);
         const topToolRow = tools[0];
         const topSkillRow = skills[0];
         const topTool = topToolRow && toString(topToolRow.tool)
