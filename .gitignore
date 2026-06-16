@@ -11,9 +11,13 @@ dist/
 .worktrees/
 .superpowers/
 
-# local agent + harness state
-.ax/
+# local agent + harness state (.ax/* ignores direct children + their trees, but
+# leaves .ax/ itself includable so the committed team rig can be re-included below)
+.ax/*
 .claude/agents/
+# ...except the committed team rig (ax team sync): skills + agents are versioned
+!.ax/skills/
+!.ax/agents/
 # committed named workflows (Bun-repo pattern) - keep *.workflow.js versioned,
 # ignore everything else in the dir (gitignore can't re-include inside an
 # excluded DIRECTORY, so exclude contents with /* instead)
