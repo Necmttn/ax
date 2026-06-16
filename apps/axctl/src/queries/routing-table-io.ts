@@ -83,6 +83,20 @@ export const appendUserClasses = (
     return { ...table, classes: [...table.classes, ...fresh] };
 };
 
+/** Upsert a user-origin class by id (replaces same-id, else appends). */
+export function upsertUserClass(
+    table: StoredRoutingTable,
+    cls: Omit<StoredRoutingClass, "origin">,
+): StoredRoutingTable {
+    const next: StoredRoutingClass = { ...cls, origin: "user" };
+    return { ...table, classes: [...table.classes.filter((c) => c.id !== cls.id), next] };
+}
+
+/** Remove a class by id, but never a default-origin class. */
+export function removeUserClass(table: StoredRoutingTable, id: string): StoredRoutingTable {
+    return { ...table, classes: table.classes.filter((c) => !(c.id === id && c.origin !== "default")) };
+}
+
 export const saveStoredRoutingTable = (
     path: string,
     table: StoredRoutingTable,

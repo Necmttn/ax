@@ -12,6 +12,8 @@ import {
     saveStoredRoutingTable,
     loadEffectiveRoutingTable,
     appendUserClasses,
+    upsertUserClass,
+    removeUserClass,
     type LoadedRoutingTable,
     type StoredRoutingTable,
     type StoredRoutingClass,
@@ -159,5 +161,31 @@ describe("load/save round-trip", () => {
         expect(eff1.classes.map((c) => c.id)).toEqual(ROUTING_CLASSES.classes.map((c) => c.id));
         const eff2 = await run(loadEffectiveRoutingTable(join(dir, "absent.json")));
         expect(eff2.classes.length).toBe(ROUTING_CLASSES.classes.length);
+    });
+});
+
+const base: StoredRoutingTable = { version: 1, classes: [], agentTypes: {} };
+
+describe("routing-table-io exclude + upsert/remove", () => {
+    it("upsert adds a user class with exclude preserved", () => {
+        const t = upsertUserClass(base, { id: "issue-n", pattern: "^issue", flags: "i", suggest: "sonnet", reason: "issue", exclude: ["design"] });
+        const c = t.classes.find((x) => x.id === "issue-n");
+        expect(c?.origin).toBe("user");
+        expect(c?.exclude).toEqual(["design"]);
+    });
+    it("upsert replaces an existing user class by id (no dup)", () => {
+        const t1 = upsertUserClass(base, { id: "x", pattern: "^a", flags: "", suggest: "sonnet", reason: "a" });
+        const t2 = upsertUserClass(t1, { id: "x", pattern: "^b", flags: "", suggest: "haiku", reason: "b", exclude: ["q"] });
+        expect(t2.classes.filter((c) => c.id === "x").length).toBe(1);
+        expect(t2.classes.find((c) => c.id === "x")?.suggest).toBe("haiku");
+        expect(t2.classes.find((c) => c.id === "x")?.exclude).toEqual(["q"]);
+    });
+    it("removeUserClass removes a user class", () => {
+        const t1 = upsertUserClass(base, { id: "x", pattern: "^a", flags: "", suggest: "sonnet", reason: "a" });
+        expect(removeUserClass(t1, "x").classes.find((c) => c.id === "x")).toBeUndefined();
+    });
+    it("removeUserClass does NOT remove a default class", () => {
+        const withDefault: StoredRoutingTable = { version: 1, agentTypes: {}, classes: [{ id: "d", pattern: "^x", flags: "", suggest: "sonnet", reason: "d", origin: "default" }] };
+        expect(removeUserClass(withDefault, "d").classes.find((c) => c.id === "d")).toBeDefined();
     });
 });
