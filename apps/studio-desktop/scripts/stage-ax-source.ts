@@ -81,6 +81,8 @@ const die = (msg: string): never => {
  *   - apps/axctl                         the CLI / serve entrypoint
  *   - packages/lib (@ax/lib)             db client, paths, layers, live-traces
  *   - packages/schema (@ax/schema)       schema.surql (imported as text) + types
+ *   - packages/hooks-sdk (@ax/hooks-sdk) declared `workspace:*` dep of apps/axctl;
+ *                                        `bun install` fails to resolve without it
  *   - packages/ax-classifier-direction-event     imported by classifiers/registry.ts
  *   - packages/ax-classifier-verification-event   imported by classifiers/registry.ts
  *
@@ -92,6 +94,7 @@ const WORKSPACE_PACKAGES = [
     "apps/axctl",
     "packages/lib",
     "packages/schema",
+    "packages/hooks-sdk",
     "packages/ax-classifier-direction-event",
     "packages/ax-classifier-verification-event",
 ] as const;
