@@ -117,6 +117,36 @@ frontmatter case via `loadAgentScopeMap`, but writes no usage edge.
 
 Until #1 lands, "ax = the open-ended verifier" cannot be tested, let alone claimed.
 
+## Run 2 (2026-06-16): prereq #1 investigated → CRUX RESOLVED (retrospective path is dead)
+
+Probed whether `skill_revision` could be **backfilled from git history** of the skills'
+on-disk dirs (`scripts/prototypes/skillrev-backfill-probe.ts`). Of the top 27 invoked skills:
+
+- 18 sit in a git-tracked dir (0 shallow clones - full history available), BUT
+- only **2** have ≥2 commits touching their dir, and
+- **0** have a commit that straddles the skill's local invocation window (an edit *during* the
+  period it was being used), while **15** have all commits *predating* first local use.
+
+The mechanism is now clear and structural: skills are **installed (committed once) then used** -
+`~/.claude/skills` is an install-snapshot dir, not an evolution log. The edit happens upstream,
+*before* the user ever invokes the skill, so there is no organic before/after signal on a single
+user's machine. (Two probe bugs - `math::min(ts)` returning `"Infinity"` and an early NaN-date
+parse - were caught and fixed before drawing this conclusion; the usage window is now computed
+honestly in JS from the raw `invoked.ts` set.)
+
+**Verdict (resolves the strategy-vs-skeptic fork): the SKEPTIC was right for the passive path.**
+Two independent retrospective sources are both empty - ingest-time `skill_revision` (17 events,
+none testable) and git-history backfill (0 straddling edits). You cannot mine a gate-grade signal
+from passively-observed organic skill edits, because **busy skills don't get edited mid-use and
+edited skills aren't busy.** The confounding question (is churn-delta clean?) never even arises -
+there is no edit→outcome pairing to confound.
+
+**Therefore:** if ax wants to *be* the open-ended verifier, it must use **controlled re-runs**, not
+passive observation - i.e. extend the dojo `spar` loop to carry a *skill edit* as the one delta
+(freeze baseline → apply skill edit → re-run the same task → score). That is the deliberate,
+quota-spending path, and it is the only one that manufactures the counterfactual the gate needs.
+The retrospective `ax verify <skill@version>` design above is shelved.
+
 ## Not in scope
 
 - Building `ax verify` (gated on a positive result here).
