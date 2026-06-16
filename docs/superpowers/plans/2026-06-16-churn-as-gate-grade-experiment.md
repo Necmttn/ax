@@ -72,6 +72,36 @@ H0: churn-delta is indistinguishable from noise once you can't hold the task fix
 One query + one stats pass over the existing graph. No agent re-runs, no quota burn.
 Run before committing any roadmap to the verifier north-star.
 
+## Run 1 result (2026-06-16): blocked upstream, crux still untested
+
+Ran the volume probe (`scripts/prototypes/churn-gate-probe.ts`) against the live graph.
+**Data-starved - experiment cannot run yet.** Findings:
+
+- Only **17 `change='changed'` skill_revision events on 8 skills** - and 8 is inflated by
+  the `necmttn:` plugin-namespace dupe; ~4 real skills (`zoom-out`, `plannotator-*`).
+- **0 of 17 edits had ≥5 invoking sessions on both sides** of the edit ts. The single edit
+  with any data (`plannotator-annotate`: 9 before / 1 after) still fails. Most edited skills
+  show `total=0` invocations.
+
+Root cause is NOT confounding (we never reached the stats) - the join is structurally empty:
+
+1. **`skill_revision` is sparse + recent.** The revision-tracking feature shipped recently
+   and history was never backfilled ("pre-existing sessions read zero until re-ingested").
+   17 events, all on rarely-edited utility skills, none on the workhorses.
+2. **`invoked` undercounts skill use.** It records *explicit Skill-tool calls only*;
+   slash-command / plugin-loaded activations create no `invoked` edge. The skills that get
+   edited are exactly the ones with no `invoked` history.
+
+**Verdict:** the strategy-vs-skeptic crux is **still unresolved** - neither side confirmed.
+But the blocker moved from "is the proxy gate-grade?" to **"ax can't yet observe edit→outcome
+at all."** Prerequisites before re-running:
+
+- backfill `skill_revision` from ingest history (or wait for organic accumulation), AND
+- broaden skill-activation capture beyond the explicit Skill-tool `invoked` edge (slash /
+  plugin / frontmatter loads), so edited skills have downstream sessions to difference.
+
+Until both land, "ax = the open-ended verifier" cannot be tested, let alone claimed.
+
 ## Not in scope
 
 - Building `ax verify` (gated on a positive result here).
