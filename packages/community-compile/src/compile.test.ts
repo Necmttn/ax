@@ -65,6 +65,34 @@ describe("compileCommunity", () => {
         expect(out.skillStats["superpowers:simplify"]).toBeUndefined();
     });
 
+    test("curated provenance credits a loosely-installed shared skill's author", async () => {
+        // grill-me ships as a loose dir (source "local") for everyone, so no
+        // builder reports a plugin source - the registry credits mattpocock.
+        const out = await compileCommunity(users, fetcher({
+            g1: profile("alice", { rig: { skills: [{ name: "grill-me", source: "local", runs: 4 }], hooks: [], routing_table: false } }),
+            g2: profile("bob", { rig: { skills: [{ name: "grill-me", source: "local", runs: 6 }], hooks: [], routing_table: false } }),
+        }), { now: "2026-06-12T03:00:00Z" });
+        expect(out.skillStats["grill-me"]).toEqual({ users: 2, runs: 10, source: "mattpocock" });
+    });
+
+    test("an observed plugin source overrides the provenance registry", async () => {
+        // If a builder genuinely installed it from a plugin, trust that, not
+        // the curated fallback.
+        const out = await compileCommunity(users, fetcher({
+            g1: profile("alice", { rig: { skills: [{ name: "tdd", source: "someplugin", runs: 1 }], hooks: [], routing_table: false } }),
+            g2: profile("bob", { rig: { skills: [{ name: "tdd", source: "local", runs: 1 }], hooks: [], routing_table: false } }),
+        }), { now: "2026-06-12T03:00:00Z" });
+        expect(out.skillStats["tdd"].source).toBe("someplugin"); // not "mattpocock"
+    });
+
+    test("an unknown loose skill stays source 'local'", async () => {
+        const out = await compileCommunity(users, fetcher({
+            g1: profile("alice", { rig: { skills: [{ name: "my-thing", source: "local", runs: 1 }], hooks: [], routing_table: false } }),
+            g2: profile("bob", { rig: { skills: [{ name: "my-thing", source: "local", runs: 1 }], hooks: [], routing_table: false } }),
+        }), { now: "2026-06-12T03:00:00Z" });
+        expect(out.skillStats["my-thing"].source).toBe("local");
+    });
+
     test("a builder counts once per skill even with duplicate sources", async () => {
         const out = await compileCommunity(
             [{ github: "alice", gist_id: "g1", joined: "2026-06-01" }],
