@@ -373,6 +373,14 @@ estimate: edit/read turns assumed mechanically routable (upper-ish bound); claud
 
 </Figure>
 
+You don't have to read it off the terminal. The same numbers render in **ax studio** - the local dashboard - as a live `/cost` view: the spend split, the per-model bars, and the dispatch candidates, all off your own graph.
+
+<Figure id="ax studio" label="/cost · live dashboard" lead="The receipts, on a screen." caption="Spend split (main vs subagent), per-model bars, and the addressable dispatch candidates - the same data the CLI prints, rendered live from the local daemon. The same view carries an interactive routing tuner: edit a class regex and watch which past dispatches it catches before you save it.">
+
+<img src="/blog/studio-cost-split.png" alt="ax studio /cost view: main-vs-subagent spend split bar, per-model cost bars, and a table of dispatch candidates with suggested cheaper models and estimated savings" style={{ width: "100%", height: "auto", display: "block", borderRadius: "8px" }} />
+
+</Figure>
+
 $1,766 a month. About $21K a year. Several times the entire subagent leak the rest of this article is about - $605 a month - and it was sitting in the model I talk to all day. mechanical-impl is the bulk: the main agent editing files itself instead of handing the edit to a sonnet subagent. The $11,238 `stays main` row is genuine reasoning, coordination, and dispatching work, correctly left on frontier. The goal was never cheap everywhere. It's: stop doing bounded mechanical work inline on the most expensive model you have.
 
 Same caveats as the rest, louder here because the number is bigger. It's an upper bound - a turn that reasons hard and then makes one mechanical edit reads as routable, because the transcript strips the thinking, so call $1,766 a ceiling, not a quote. It's Claude main-agent only by construction; other harnesses' main spend isn't counted. And it's projected from historical token counts, not A/B-tested for quality parity.

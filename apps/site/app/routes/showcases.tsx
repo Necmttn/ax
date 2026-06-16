@@ -6,6 +6,7 @@ import { RecallShowcase } from "~/components/showcases/recall";
 import { TokenEconomyShowcase } from "~/components/showcases/token-economy";
 import { VerdictTimelineShowcase } from "~/components/showcases/verdict-timeline";
 import { DispatchRoutingShowcase } from "~/components/showcases/dispatch-routing";
+import { CostViewShowcase } from "~/components/showcases/cost-view";
 import { QuotaShowcase } from "~/components/showcases/quota";
 import { ImproveLoopShowcase } from "~/components/showcases/improve-loop";
 import { ChurnShowcase } from "~/components/showcases/churn";
@@ -43,6 +44,7 @@ function Showcases() {
             <a href="#token-economy">token economy</a>
             <a href="#verdict-timeline">verdict timeline</a>
             <a href="#dispatch-routing">dispatch routing</a>
+            <a href="#cost-view">cost view</a>
             <a href="#quota">quota</a>
             <a href="#improve-loop">improve loop</a>
             <a href="#churn">churn</a>
@@ -55,6 +57,7 @@ function Showcases() {
         <TokenEconomyShowcase />
         <VerdictTimelineShowcase />
         <DispatchRoutingShowcase />
+        <CostViewShowcase />
         <QuotaShowcase />
         <ImproveLoopShowcase />
         <ChurnShowcase />
