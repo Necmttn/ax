@@ -77,6 +77,7 @@ module.exports = {
       { target: "dmg", arch: ["arm64"] },
       { target: "zip", arch: ["arm64"] },
     ],
+    icon: "build/icon.icns",
     category: "public.app-category.developer-tools",
     hardenedRuntime: true,
     gatekeeperAssess: false,
