@@ -55,11 +55,10 @@ export function SiteHeader() {
             <span className="nav-menu-label">Community</span>
             <Link to="/showcases">Showcases</Link>
             <Link to="/leaders">Leaders</Link>
-            <Link to="/blog">Blog</Link>
-            <Link to="/origin">Origin</Link>
           </div>
         </div>
 
+        <Link to="/blog">Blog</Link>
         <Link to="/docs">Docs</Link>
         <a
           className="nav-icon"
