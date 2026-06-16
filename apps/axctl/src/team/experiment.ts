@@ -64,6 +64,10 @@ export async function promoteExperiment(
   guard(kind, name);
   const src = overlayPath(root, kind, name);
   const dst = committedPath(root, kind, name);
+  // Verify the overlay source exists BEFORE touching the committed target -
+  // otherwise a typo'd name would rm -rf the committed artifact then fail the cp.
+  if (Bun.spawnSync(["test", "-e", src]).exitCode !== 0)
+    throw new Error(`promote ${kind}/${name}: no overlay at ${src} (run \`ax team experiment start ${kind} ${name}\` first)`);
   Bun.spawnSync(["mkdir", "-p", `${root}/.ax/${sub(kind)}`]);
   Bun.spawnSync(["rm", "-rf", dst]);
   const r = Bun.spawnSync(["cp", "-R", src, dst]);

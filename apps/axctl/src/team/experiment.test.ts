@@ -40,6 +40,11 @@ describe("start / promote / drop", () => {
     expect(await Bun.file(`${root}/.ax/skills/exp/SKILL.md`).text()).toBe("variant");
     expect(await Bun.file(`${root}/.ax.local/skills/exp/SKILL.md`).exists()).toBe(false);
   });
+  it("promote with NO overlay throws and leaves the committed artifact intact (no data loss)", async () => {
+    await Bun.write(`${root}/.ax/skills/keep/SKILL.md`, "precious");
+    await expect(promoteExperiment(root, "skill", "keep")).rejects.toThrow();
+    expect(await Bun.file(`${root}/.ax/skills/keep/SKILL.md`).text()).toBe("precious");
+  });
   it("drop removes the overlay artifact", async () => {
     await Bun.write(`${root}/.ax.local/skills/exp/SKILL.md`, "v");
     await dropExperiment(root, "skill", "exp");
