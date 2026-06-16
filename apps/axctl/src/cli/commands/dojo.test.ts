@@ -2,7 +2,14 @@ import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, test } from "bun:test";
-import { isValidKind, localDate, makeSkillSlug, startOfLocalDay, untilToIso } from "./dojo.ts";
+import {
+    isValidKind,
+    localDate,
+    makeSkillSlug,
+    makeSkillSparId,
+    startOfLocalDay,
+    untilToIso,
+} from "./dojo.ts";
 import {
     buildSkillSparBrief,
     isSkillSparBrief,
@@ -92,6 +99,42 @@ describe("makeSkillSlug", () => {
 });
 
 // ---------------------------------------------------------------------------
+// makeSkillSparId
+// ---------------------------------------------------------------------------
+
+describe("makeSkillSparId", () => {
+    const NOW = new Date("2026-06-16T12:00:00.000Z");
+
+    test("shape is <slug>-<hash6>-<YYYY-MM-DD>", () => {
+        const id = makeSkillSparId("ax:dojo", NOW);
+        expect(id).toMatch(/^ax-dojo-[0-9a-f]{1,6}-2026-06-16$/);
+    });
+
+    test("is deterministic for the same name + date", () => {
+        expect(makeSkillSparId("caveman", NOW)).toBe(makeSkillSparId("caveman", NOW));
+    });
+
+    test("two distinct names that slug identically get different ids (collision avoided)", () => {
+        // "a:b" and "a-b" both slug to "a-b" but hash differently.
+        const id1 = makeSkillSparId("a:b", NOW);
+        const id2 = makeSkillSparId("a-b", NOW);
+        expect(makeSkillSlug("a:b")).toBe(makeSkillSlug("a-b")); // same slug
+        expect(id1).not.toBe(id2); // but different ids
+    });
+
+    test("empty-slug name (all non-alphanumeric) still yields a usable id (no leading dash)", () => {
+        const id = makeSkillSparId("!!!", NOW);
+        expect(id).not.toStartWith("-");
+        expect(id).toMatch(/^[0-9a-f]{1,6}-2026-06-16$/);
+    });
+
+    test("the date segment tracks the passed Date", () => {
+        const id = makeSkillSparId("caveman", new Date("2027-01-02T23:59:59.000Z"));
+        expect(id).toEndWith("-2027-01-02");
+    });
+});
+
+// ---------------------------------------------------------------------------
 // buildSkillSparBrief (pure helper)
 // ---------------------------------------------------------------------------
 
@@ -175,6 +218,34 @@ describe("spar-plan --skill flag mutex (CLI invocation)", () => {
         expect(result.status).not.toBe(0);
         const output = (result.stderr ?? "") + (result.stdout ?? "");
         expect(output).toContain("mutually exclusive");
+    });
+
+    test("--session without --skill → non-zero exit, requires --skill", () => {
+        const result = spawnSync(
+            "bun",
+            ["src/cli/index.ts", "dojo", "spar-plan", "abc1234", "--session", "session:x"],
+            {
+                encoding: "utf-8",
+                cwd: join(import.meta.dir, "../../.."),
+            },
+        );
+        expect(result.status).not.toBe(0);
+        const output = (result.stderr ?? "") + (result.stdout ?? "");
+        expect(output).toContain("require --skill");
+    });
+
+    test("--sha without --skill → non-zero exit, requires --skill", () => {
+        const result = spawnSync(
+            "bun",
+            ["src/cli/index.ts", "dojo", "spar-plan", "abc1234", "--sha", "deadbeef"],
+            {
+                encoding: "utf-8",
+                cwd: join(import.meta.dir, "../../.."),
+            },
+        );
+        expect(result.status).not.toBe(0);
+        const output = (result.stderr ?? "") + (result.stdout ?? "");
+        expect(output).toContain("require --skill");
     });
 });
 

@@ -346,6 +346,23 @@ export const makeSkillSlug = (name: string): string =>
         .replace(/-+/g, "-")
         .replace(/^-|-$/g, "");
 
+/**
+ * Build the skill-spar brief id: `<slug>-<hash6>-<YYYY-MM-DD>`.
+ *
+ * The hash6 (6 hex chars of a stable hash of the SKILL NAME) disambiguates two
+ * distinct skills that slug to the same string within a day (which would
+ * otherwise silently overwrite each other's brief AND snapshot), and keeps the
+ * id usable when the slug is empty (an all-non-alphanumeric name slugs to "").
+ * The id flows into worktree branch names + file names + the spar-score <id>
+ * lookup - all fine with the extra segment.
+ */
+export const makeSkillSparId = (skillName: string, now: Date): string => {
+    const slug = makeSkillSlug(skillName);
+    const hash6 = Bun.hash(skillName).toString(16).slice(0, 6);
+    const date = now.toISOString().slice(0, 10);
+    return slug ? `${slug}-${hash6}-${date}` : `${hash6}-${date}`;
+};
+
 const sparPlanCommand = Command.make(
     "spar-plan",
     {
@@ -364,14 +381,25 @@ const sparPlanCommand = Command.make(
                 );
             }
 
+            // --session/--sha only mean anything in skill mode; reject them in
+            // code-delta mode so a stray flag is a loud error, not a silent no-op.
+            if (skill === "" && (session !== "" || sha !== "")) {
+                fail(
+                    "ax dojo spar-plan: --session/--sha require --skill (they scope the skill-spar baseline; code-delta mode takes a positional <sha>)",
+                );
+            }
+
             if (skill !== "") {
                 // ----------------------------------------------------------------
                 // SKILL SPAR PATH
                 // ----------------------------------------------------------------
                 const { repoRoot, mainRepoRoot, repositoryKey } = yield* resolveRepo;
 
-                const id = `${makeSkillSlug(skill)}-${new Date().toISOString().slice(0, 10)}`;
-                const createdAt = new Date().toISOString();
+                // Single clock read so the id's date and createdAt can't skew
+                // across a midnight boundary between two `new Date()` calls.
+                const now = new Date();
+                const id = makeSkillSparId(skill, now);
+                const createdAt = now.toISOString();
 
                 const task = yield* resolveSkillSparTask(skill, repoRoot, repositoryKey, {
                     ...(session ? { sessionId: session } : {}),
@@ -399,8 +427,14 @@ const sparPlanCommand = Command.make(
                 const fs = yield* FileSystem.FileSystem;
                 yield* fs.makeDirectory(sparDir, { recursive: true });
 
-                // Write the original skill snapshot (swap-out restores from here).
-                yield* fs.writeFileString(snapshotPathAbs, task.originalSkill);
+                // Write the original skill snapshot atomically (tmp + rename).
+                // This is the SOLE restore source for swap-out - after the live
+                // SKILL.md is overwritten for Arm B, a truncated snapshot would
+                // lose the original skill irrecoverably, so it must never be a
+                // bare write.
+                const snapTmp = `${snapshotPathAbs}.tmp.${process.pid}`;
+                yield* fs.writeFileString(snapTmp, task.originalSkill);
+                yield* fs.rename(snapTmp, snapshotPathAbs);
                 // editedPathAbs is intentionally NOT written - the operator/agent fills it.
 
                 // Write the brief (atomic rename).
