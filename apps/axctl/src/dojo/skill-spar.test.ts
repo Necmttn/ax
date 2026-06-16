@@ -1,5 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import { Effect, Layer } from "effect";
+import { BunFileSystem } from "@effect/platform-bun";
+import { SurrealClient } from "@ax/lib/db";
+import { AxConfig, AxConfigTest } from "@ax/lib/config";
 import { makeTestSurrealClient } from "@ax/lib/testing/surreal";
 import { ProcessServiceTest } from "@ax/lib/process";
 import { layerTestFileSystem } from "@ax/lib/testing/test-filesystem";
@@ -8,9 +11,12 @@ import {
     parseSkillSparBrief,
     isSkillSparBrief,
     resolveSkillSparTask,
+    scoreSkillSpar,
+    renderSkillSparReport,
     type SkillSparBrief,
     type ResolveSkillSparOpts,
 } from "./skill-spar.ts";
+import type { SparScore, SparMetrics } from "./spar.ts";
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -734,5 +740,175 @@ describe("resolveSkillSparTask", () => {
         });
 
         await runExpectCaptureFail("my-skill", undefined, tc, "no main (source=claude) sessions");
+    });
+});
+
+// ---------------------------------------------------------------------------
+// scoreSkillSpar - Effect glue tests
+// ---------------------------------------------------------------------------
+
+describe("scoreSkillSpar", () => {
+    // AxConfig is required by fetchSessionMetrics (churn scan reads AxConfig.knobs).
+    const configLayer = AxConfigTest({}).pipe(Layer.provide(BunFileSystem.layer));
+
+    const runScore = <A>(
+        eff: Effect.Effect<A, unknown, SurrealClient | AxConfig>,
+        tcLayer: Layer.Layer<SurrealClient>,
+    ): Promise<A> =>
+        Effect.runPromise(eff.pipe(Effect.provide(Layer.mergeAll(tcLayer, configLayer))));
+
+    const MAIN_ROOT = "/main/repo";
+
+    // Brief uses relative worktree paths; scoreSkillSpar joins them against MAIN_ROOT.
+    const SCORE_BRIEF: SkillSparBrief = {
+        ...BASE_BRIEF,
+        worktreeA: ".claude/worktrees/spar-arm-a",
+        worktreeB: ".claude/worktrees/spar-arm-b",
+    };
+
+    // -----------------------------------------------------------------------
+    // Test 1: both arm sessions found → known verdict
+    // -----------------------------------------------------------------------
+    test("both arms present → score returned with known verdict (regression on empty metrics)", async () => {
+        // Route by cwd substring: findVariantSession SQL includes the absolute cwd.
+        // spar-arm-a / spar-arm-b appear only in those two queries; all other
+        // queries fall through to the default [[]] → null/0/false metrics.
+        // With empty metrics: variant.landed = false → verdict = "regression".
+        const tc = makeTestSurrealClient({
+            denyWrites: true,
+            routes: {
+                "spar-arm-a": [[{ id: "session:arm-a" }]],
+                "spar-arm-b": [[{ id: "session:arm-b" }]],
+                // stamp SELECT labels → null (will issue UPDATE, but query is OK)
+            },
+        });
+
+        const result = await runScore(
+            scoreSkillSpar(SCORE_BRIEF, MAIN_ROOT, new Date("2026-06-01T00:00:00.000Z")),
+            tc.layer,
+        );
+
+        expect(result.sessionA).toBe("session:arm-a");
+        expect(result.sessionB).toBe("session:arm-b");
+        // With all-empty DB responses: both sessions have landed=false.
+        // scoreSpar(a, b) with variant.landed=false → verdict = "regression".
+        expect(result.score.verdict).toBe("regression");
+        expect(result.a).toBeDefined();
+        expect(result.b).toBeDefined();
+
+        // Both sessions got stampSparSession calls (SELECT labels + UPDATE each).
+        const stampUpdates = tc.captured.filter((s) => s.startsWith("UPDATE"));
+        expect(stampUpdates.length).toBeGreaterThanOrEqual(2);
+    });
+
+    // -----------------------------------------------------------------------
+    // Test 2: arm A session missing → SparCaptureError mentioning "arm A"
+    // -----------------------------------------------------------------------
+    test("arm A session missing → SparCaptureError mentioning 'arm A'", async () => {
+        // No route for spar-arm-a → default [[]] → findVariantSession → null
+        const tc = makeTestSurrealClient({
+            denyWrites: true,
+            routes: {
+                "spar-arm-b": [[{ id: "session:arm-b" }]],
+            },
+        });
+
+        const exit = await Effect.runPromiseExit(
+            scoreSkillSpar(SCORE_BRIEF, MAIN_ROOT, new Date()).pipe(
+                Effect.provide(Layer.mergeAll(tc.layer, configLayer)),
+            ),
+        );
+        expect(exit._tag).toBe("Failure");
+        if (exit._tag === "Failure") {
+            expect(JSON.stringify(exit.cause)).toContain("arm A");
+        }
+    });
+
+    // -----------------------------------------------------------------------
+    // Test 3: arm B session missing → SparCaptureError mentioning "arm B"
+    // -----------------------------------------------------------------------
+    test("arm B session missing → SparCaptureError mentioning 'arm B'", async () => {
+        // Arm A is found; arm B has no route → findVariantSession returns null.
+        const tc = makeTestSurrealClient({
+            denyWrites: true,
+            routes: {
+                "spar-arm-a": [[{ id: "session:arm-a" }]],
+            },
+        });
+
+        const exit = await Effect.runPromiseExit(
+            scoreSkillSpar(SCORE_BRIEF, MAIN_ROOT, new Date()).pipe(
+                Effect.provide(Layer.mergeAll(tc.layer, configLayer)),
+            ),
+        );
+        expect(exit._tag).toBe("Failure");
+        if (exit._tag === "Failure") {
+            expect(JSON.stringify(exit.cause)).toContain("arm B");
+        }
+    });
+});
+
+// ---------------------------------------------------------------------------
+// renderSkillSparReport (pure)
+// ---------------------------------------------------------------------------
+
+describe("renderSkillSparReport", () => {
+    const metrics = (o: Partial<SparMetrics> = {}): SparMetrics => ({
+        costUsd: 1.20,
+        turns: 18,
+        wallMs: 600_000,
+        repairLines: 40,
+        episodes: 3,
+        landed: true,
+        ...o,
+    });
+
+    test("header has skill name + id + 'skill edit'; table has 6 metric rows; verdict present", () => {
+        const score: SparScore = {
+            id: "",
+            variantSession: "",
+            baseline: metrics(),
+            variant: metrics({ costUsd: 0.80, turns: 15, wallMs: 450_000, repairLines: 30, episodes: 2 }),
+            deltas: {
+                costUsd: -0.40,
+                turns: -3,
+                wallMs: -150_000,
+                repairLines: -10,
+                episodes: -1,
+            },
+            verdict: "win",
+        };
+
+        const md = renderSkillSparReport(score, BASE_BRIEF);
+
+        // Header includes the brief id
+        expect(md).toContain(`# Skill spar report: ${BASE_BRIEF.id}`);
+        // Skill-aware lines
+        expect(md).toContain(`skill: ${BASE_BRIEF.skill}`);
+        expect(md).toContain("skill edit");
+        expect(md).toContain(BASE_BRIEF.originalHash);
+        // Table has all 6 metric rows
+        expect(md).toContain("| cost |");
+        expect(md).toContain("| turns |");
+        expect(md).toContain("| wall (ms) |");
+        expect(md).toContain("| repair |");
+        expect(md).toContain("| episodes |");
+        expect(md).toContain("| landed |");
+        // Verdict line
+        expect(md).toContain("verdict: **WIN**");
+    });
+
+    test("regression verdict formats correctly", () => {
+        const score: SparScore = {
+            id: "",
+            variantSession: "",
+            baseline: metrics(),
+            variant: metrics({ landed: false }),
+            deltas: { costUsd: null, turns: null, wallMs: null, repairLines: 0, episodes: 0 },
+            verdict: "regression",
+        };
+        const md = renderSkillSparReport(score, BASE_BRIEF);
+        expect(md).toContain("verdict: **REGRESSION**");
+        expect(md).toContain("| landed | yes | no |");
     });
 });

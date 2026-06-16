@@ -8,11 +8,21 @@
  */
 import { Effect, FileSystem } from "effect";
 import { SurrealClient } from "@ax/lib/db";
+import { AxConfig } from "@ax/lib/config";
 import type { DbError } from "@ax/lib/errors";
 import { recordLiteral } from "@ax/lib/ids";
+import { posixPath } from "@ax/lib/shared/path";
 import { surrealString, refListSource, recordKeyPart } from "@ax/lib/shared/surreal";
 import { ProcessService, type ProcessError } from "@ax/lib/process";
-import { SparCaptureError } from "./spar.ts";
+import {
+    scoreSpar,
+    fetchSessionMetrics,
+    findVariantSession,
+    stampSparSession,
+    SparCaptureError,
+    type SparMetrics,
+    type SparScore,
+} from "./spar.ts";
 
 // ---------------------------------------------------------------------------
 // Helpers (mirrors of spar.ts module-private helpers)
@@ -474,3 +484,115 @@ export const resolveSkillSparTask = (
             originalHash,
         } satisfies SkillSparTask;
     });
+
+// ---------------------------------------------------------------------------
+// scoreSkillSpar - Effect glue: find both arm sessions + compute the score
+// ---------------------------------------------------------------------------
+
+/**
+ * Find both arm sessions in their worktrees, fetch metrics, compute the spar
+ * score (A = baseline, B = variant), and stamp both sessions with "spar" so
+ * behavioral analytics exclude them.
+ *
+ * `mainRepoRoot` is the MAIN repo root (not a linked worktree). `brief.worktreeA`
+ * / `brief.worktreeB` are relative to it; `posixPath.join` mirrors the cwd
+ * resolution used by the code-delta `spar-score` command in dojo.ts
+ * (`posixPath.join(mainRepoRoot, brief.worktree)`).
+ */
+export const scoreSkillSpar = (
+    brief: SkillSparBrief,
+    mainRepoRoot: string,
+    sinceForChurn: Date,
+): Effect.Effect<
+    { sessionA: string; sessionB: string; a: SparMetrics; b: SparMetrics; score: SparScore },
+    DbError | SparCaptureError,
+    SurrealClient | AxConfig
+> =>
+    Effect.gen(function* () {
+        const cwdA = posixPath.join(mainRepoRoot, brief.worktreeA);
+        const cwdB = posixPath.join(mainRepoRoot, brief.worktreeB);
+        const sinceMs = Date.parse(brief.createdAt);
+
+        const sessionA = yield* findVariantSession(cwdA, sinceMs);
+        if (sessionA === null) {
+            return yield* Effect.fail(
+                new SparCaptureError(
+                    `arm A (original-skill) session not found in ${cwdA} since ${brief.createdAt}`,
+                ),
+            );
+        }
+
+        const sessionB = yield* findVariantSession(cwdB, sinceMs);
+        if (sessionB === null) {
+            return yield* Effect.fail(
+                new SparCaptureError(
+                    `arm B (edited-skill) session not found in ${cwdB} since ${brief.createdAt}`,
+                ),
+            );
+        }
+
+        const a = yield* fetchSessionMetrics(sessionA, sinceForChurn);
+        const b = yield* fetchSessionMetrics(sessionB, sinceForChurn);
+
+        // A is baseline, B is variant - matches the skill-spar brief structure:
+        // Arm A runs with the original skill, Arm B with the edited skill.
+        const score = scoreSpar(a, b);
+
+        // Stamp both sessions so behavioral analytics exclude them.
+        // Idempotent - re-stamping is a no-op.
+        yield* stampSparSession(sessionA);
+        yield* stampSparSession(sessionB);
+
+        return { sessionA, sessionB, a, b, score };
+    });
+
+// ---------------------------------------------------------------------------
+// renderSkillSparReport (pure)
+// ---------------------------------------------------------------------------
+
+// Format helpers - duplicated from spar.ts (module-private there). If the
+// formatting logic changes, update both locations. Consider extracting to a
+// shared util if a third consumer appears.
+const _fmtNum = (n: number | null): string => (n == null ? "-" : `${n}`);
+const _fmtSignedNum = (n: number | null): string =>
+    n == null ? "-" : n > 0 ? `+${n}` : `${n}`;
+const _fmtUsd = (n: number | null): string => (n == null ? "-" : `$${n.toFixed(2)}`);
+const _fmtSignedUsd = (n: number | null): string =>
+    n == null ? "-" : `${n > 0 ? "+" : n < 0 ? "-" : ""}$${Math.abs(n).toFixed(2)}`;
+const _fmtBool = (b: boolean): string => (b ? "yes" : "no");
+
+/**
+ * Render a markdown skill spar report from a scored result. Pure - no I/O.
+ *
+ * Header mirrors `renderSparReport` from spar.ts but is skill-aware:
+ * `# Skill spar report: <id>`, skill/delta lines, the same 6-row metric
+ * table, and the verdict.
+ */
+export const renderSkillSparReport = (score: SparScore, brief: SkillSparBrief): string => {
+    const { baseline, variant, deltas, verdict } = score;
+    const rows: ReadonlyArray<readonly [string, string, string, string]> = [
+        ["cost", _fmtUsd(baseline.costUsd), _fmtUsd(variant.costUsd), _fmtSignedUsd(deltas.costUsd)],
+        ["turns", _fmtNum(baseline.turns), _fmtNum(variant.turns), _fmtSignedNum(deltas.turns)],
+        ["wall (ms)", _fmtNum(baseline.wallMs), _fmtNum(variant.wallMs), _fmtSignedNum(deltas.wallMs)],
+        ["repair", `${baseline.repairLines}`, `${variant.repairLines}`, _fmtSignedNum(deltas.repairLines)],
+        ["episodes", `${baseline.episodes}`, `${variant.episodes}`, _fmtSignedNum(deltas.episodes)],
+        ["landed", _fmtBool(baseline.landed), _fmtBool(variant.landed), "-"],
+    ];
+    const table = [
+        "| metric | baseline (arm A) | variant (arm B) | delta |",
+        "| --- | --- | --- | --- |",
+        ...rows.map(([m, b, v, d]) => `| ${m} | ${b} | ${v} | ${d} |`),
+    ].join("\n");
+
+    return [
+        `# Skill spar report: ${brief.id}`,
+        "",
+        `skill: ${brief.skill}`,
+        `delta tested: skill edit (original_hash ${brief.originalHash} → edited)`,
+        "",
+        table,
+        "",
+        `verdict: **${verdict.toUpperCase()}**`,
+        "",
+    ].join("\n");
+};
