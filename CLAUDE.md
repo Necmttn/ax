@@ -79,6 +79,25 @@ fresh clone.
 - Weekly self-improve cron (`~/.claude/self-improve/run.sh`) does deep-scan backfill (planned wire-up)
 - `ax-extract-workflow` skill (installable via `npx skills add Necmttn/ax`) frames "what made X work" investigations - triggers retro + session queries to surface the actual sequence of events behind a result.
 
+### Studio served by the daemon (same-origin)
+
+`ax serve` serves the studio SPA at its own root (`http://127.0.0.1:1738/`), so
+the dashboard fetches `/api/*` same-origin - no mixed-content / Private Network
+Access handshake (the bug that made the hosted `https://ax.necmttn.com/studio/`
+fail to reach a loopback daemon for many users). The studio **daemon** build
+target (`base:/`, `mock:false`, `apps/studio/dist`) is the served bundle:
+`serveStudioAsset` (`apps/axctl/src/dashboard/studio-assets.ts`) reads it off
+disk when running from source, and from assets **embedded in the compiled
+binary** otherwise. The binary embed is codegen: `scripts/build-axctl.ts` calls
+`scripts/gen-studio-embed.ts` `writeManifest()` (builds studio + rewrites
+`studio-embed.gen.ts` with `{ type: "file" }` imports so `bun build --compile`
+bakes the bytes in), compiles, then `writeStub()` restores the committed empty
+stub so the manifest never lands in git. Unknown non-asset routes fall back to
+`index.html` (SPA routing); a missing `/assets/*` is a 404; the daemon landing
+page shows only when no studio is bundled at all. The hosted
+`ax.necmttn.com/studio/` stays a **mock-fixtures demo** (no live daemon); the
+CLI banner points only at the local URL via `serveStudioUrl` (`banner.ts`).
+
 ### Live ingest in the dashboard
 
 - `ax serve` → `POST /api/ingest` (or the **Live** tab) forks `runIngest` (same pipeline as CLI) onto the server runtime. Progress flows as `IngestStreamEvent`s through the `IngestStreamBus` seam (`apps/axctl/src/dashboard/ingest-stream.ts`) to a per-run Durable Stream `ingest:<runId>`; the browser subscribes from offset `-1`, so refresh/reconnect mid-run rehydrates. Exactly one terminal `run_finished` event guaranteed. The bus seam lets the Bun backing swap for a hosted backend later untouched.

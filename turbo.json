@@ -5,6 +5,11 @@
       "dependsOn": ["^build"],
       "outputs": ["dist/**"]
     },
+    "axctl#build": {
+      "comment": "The binary embeds the studio daemon build (scripts/gen-studio-embed.ts), so a studio-only change must bust the binary cache. axctl has no module dep on @ax/studio, so declare the build-time dep explicitly.",
+      "dependsOn": ["^build", "@ax/studio#build"],
+      "outputs": ["dist/**"]
+    },
     "dev": {
       "cache": false,
       "persistent": true,
