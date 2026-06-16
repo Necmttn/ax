@@ -380,7 +380,7 @@ function SignSection({ n, profile, vs }: { n: string; profile: ProfileV1; vs: Vs
                             </form>
                         )}
                         {vs.kind === "loading" && <span className="pf-sign-msg">pulling @{vs.login}…</span>}
-                        {vs.kind === "not-found" && <span className="pf-sign-msg">no dossier on file for @{vs.login}.</span>}
+                        {vs.kind === "not-found" && <UnclaimedChallenger login={vs.login} />}
                         {vs.kind === "error" && <span className="pf-sign-msg">couldn't load @{vs.login}.</span>}
                     </div>
                 </div>
@@ -855,6 +855,21 @@ function groupSkills(skills: readonly ProfileSkill[]): SkillGroup[] {
 }
 
 /* ---------- not-found doubles as the join CTA ---------- */
+
+/** Shown inside SignSection when the challenger is unregistered: a compact dare
+ *  echoing the dossier's stamp + command motifs. */
+function UnclaimedChallenger({ login }: { login: string }) {
+    return (
+        <div className="pf-challenge-unclaimed">
+            <span className="pf-challenge-stamp" aria-hidden="true">unanswered</span>
+            <p className="pf-challenge-line">
+                challenge issued · <strong>@{login}</strong> hasn't published a dossier yet.
+            </p>
+            <code className="pf-empty-cmd">ax profile publish</code>
+            <span className="pf-challenge-sub">one command answers the challenge - their transcripts never leave their machine.</span>
+        </div>
+    );
+}
 
 export function UnclaimedDossier({ login }: { login: string }) {
     return (
