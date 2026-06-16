@@ -29,14 +29,38 @@ export function SiteHeader() {
       </label>
 
       <nav className="top-nav">
-        <Link to="/features">Features</Link>
-        <Link to="/routing">Routing</Link>
-        <Link to="/showcases">Showcases</Link>
-        <Link to="/leaders">Leaders</Link>
-        <Link to="/how-it-works">How</Link>
-        <Link to="/blog">Blog</Link>
+        <div className="nav-group">
+          <button type="button" className="nav-group-btn" aria-haspopup="true">
+            Product
+            <svg className="nav-caret" viewBox="0 0 10 6" width="10" height="6" aria-hidden="true">
+              <path d="M1 1l4 4 4-4" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          </button>
+          <div className="nav-menu">
+            <span className="nav-menu-label">Product</span>
+            <Link to="/features">Features</Link>
+            <Link to="/routing">Routing</Link>
+            <Link to="/how-it-works">How it works</Link>
+          </div>
+        </div>
+
+        <div className="nav-group">
+          <button type="button" className="nav-group-btn" aria-haspopup="true">
+            Community
+            <svg className="nav-caret" viewBox="0 0 10 6" width="10" height="6" aria-hidden="true">
+              <path d="M1 1l4 4 4-4" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          </button>
+          <div className="nav-menu">
+            <span className="nav-menu-label">Community</span>
+            <Link to="/showcases">Showcases</Link>
+            <Link to="/leaders">Leaders</Link>
+            <Link to="/blog">Blog</Link>
+            <Link to="/origin">Origin</Link>
+          </div>
+        </div>
+
         <Link to="/docs">Docs</Link>
-        <Link to="/origin">Origin</Link>
         <a
           className="nav-icon"
           href="https://github.com/Necmttn/ax"
