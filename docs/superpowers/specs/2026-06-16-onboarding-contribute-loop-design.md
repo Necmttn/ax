@@ -43,12 +43,20 @@ always opt-in and shown in full first.
 
 ## Decisions
 
-- **Single source.** `packages/lib/src/agent-onboarding.ts` is the only copy.
-  Make it dependency-free (inline the dashboard port literal). Export two
-  strings: `AGENT_ONBOARDING_PROMPT` (body) and `AGENT_ONBOARDING_WITH_INSTALL`
-  (install prefix + body). The site imports the string from
-  `@ax/lib/agent-onboarding` - a bare string tree-shakes with no `@ax/lib`
-  runtime weight. Delete the inline `AGENT_PROMPT` in `dashboard-preview.tsx`.
+- **Single source = a zero-dep micro-package `@ax/onboarding-prompt`.** The site
+  does not depend on `@ax/lib` today (the prompt was inlined precisely to keep the
+  marketing bundle `@ax/lib`-free). Rather than reintroduce that dep, extract the
+  prompt strings into a new zero-runtime-dep package both `@ax/lib` and `@ax/site`
+  import. It exports `AGENT_ONBOARDING_PROMPT` (body), `AGENT_ONBOARDING_WITH_INSTALL`
+  (install prefix + body), and the install-line constants (`AX_INSTALL_CMD`,
+  `AX_DOCS_URL`). Numbered steps are composed from one `STEPS` array so the
+  post-install (1-5) and install-prefixed (1-6) variants can't drift on numbering.
+  `@ax/lib/agent-onboarding.ts` re-exports the strings and keeps the terminal
+  wrapper `renderAgentOnboarding()`; the site imports the strings + install
+  constants and deletes its inline `AGENT_PROMPT`. The dashboard port stays
+  single-sourced in `@ax/lib/dashboard-port.ts`; the micro-package inlines `1738`
+  and a `@ax/lib` test asserts the two match (extending the existing anti-drift
+  guard).
 
 - **Contribute scope = B (failures + improvement signals + interview).** Triggers
   are: (a) a step fails; (b) a reported fact is wrong or surprising to the user;
