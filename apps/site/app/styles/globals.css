@@ -13012,6 +13012,10 @@ footer.site-footer { padding: 48px 32px 56px; }
     .pf-empty { padding: 28px 22px 20px; margin-top: 48px; }
     .pf-empty h1 { padding-right: 0; font-size: 27px; margin-top: 28px; }
 }
+.pf-challenge-unclaimed { display: flex; flex-direction: column; gap: 8px; margin-top: 12px; padding: 16px; border: 1px dashed var(--line, #33364a); position: relative; }
+.pf-challenge-stamp { align-self: flex-start; font-size: 11px; letter-spacing: 2px; text-transform: uppercase; color: var(--red, #f87171); border: 1px solid currentColor; padding: 2px 8px; }
+.pf-challenge-line { margin: 0; }
+.pf-challenge-sub { font-size: 13px; color: var(--muted, #8b93a1); }
 
 /* ============================================================
    ----- routing page -----
@@ -15852,3 +15856,7 @@ footer.site-footer { padding: 48px 32px 56px; }
   .blog-essay .bk-split-seg-in { font-size: 11px; }
   .blog-essay .bk-bar-head { font-size: 12px; gap: 8px; }
 }
+
+.pf-share-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.pf-share-btn { font: inherit; font-size: 13px; padding: 6px 12px; border: 1px solid var(--green); color: var(--green); background: transparent; cursor: pointer; text-decoration: none; }
+.pf-share-btn:hover { background: color-mix(in srgb, var(--green) 12%, transparent); }

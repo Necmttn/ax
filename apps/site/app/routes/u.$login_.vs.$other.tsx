@@ -1,22 +1,33 @@
-// apps/site/app/routes/u.$login.tsx
-import { createFileRoute } from "@tanstack/react-router";
+// apps/site/app/routes/u.$login_.vs.$other.tsx
+// Canonical, shareable head-to-head duel: /u/<a>/vs/<b>.
+// Thin wrapper over ProfileDossier - presets the vs peer, reuses the overlay.
+// The trailing `_` on `$login_` escapes the `u.$login` layout (whose component
+// renders no <Outlet/>), so this route mounts standalone while keeping the URL
+// path /u/$login/vs/$other (mirrors blog_.$slug, changelog_.$version).
+import { createFileRoute, redirect } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { SiteHeader } from "~/components/landing-sections/site-header";
 import { SiteFooter } from "~/components/landing-sections/site-footer";
+import { ProfileDossier, UnclaimedDossier, type VsState } from "~/components/profile-dossier";
 import { fetchProfile, type ProfileV1 } from "~/lib/community";
-import { ProfileDossier, UnclaimedDossier, LOGIN_RE, type VsState } from "~/components/profile-dossier";
+import { compareDecision, buildDuelOgImageUrl } from "~/lib/challenge";
 
-export const Route = createFileRoute("/u/$login")({
-    validateSearch: (search: Record<string, unknown>) => ({
-        vs: typeof search.vs === "string" && LOGIN_RE.test(search.vs) ? search.vs : undefined,
-    }),
+export const Route = createFileRoute("/u/$login_/vs/$other")({
+    beforeLoad: ({ params }) => {
+        const d = compareDecision(params.login, params.other);
+        if (d.kind === "redirect") throw redirect({ to: d.to });
+        // invalid logins fall through to the component's error state
+    },
     head: ({ params }) => ({
         meta: [
-            { title: `@${params.login} - ax profile` },
-            { name: "description", content: `${params.login}'s agent profile: usage, rig, and taste from the ax graph.` },
+            { title: `@${params.login} vs @${params.other} - ax duel` },
+            { name: "description", content: `Agent profile duel: @${params.login} vs @${params.other}, compiled from the ax graph.` },
+            { property: "og:image", content: buildDuelOgImageUrl(params.login, params.other) },
+            { name: "twitter:card", content: "summary_large_image" },
+            { name: "twitter:image", content: buildDuelOgImageUrl(params.login, params.other) },
         ],
     }),
-    component: ProfilePage,
+    component: DuelPage,
 });
 
 type State =
@@ -25,9 +36,8 @@ type State =
     | { kind: "error"; message: string }
     | { kind: "ready"; profile: ProfileV1 };
 
-function ProfilePage() {
-    const { login } = Route.useParams();
-    const { vs } = Route.useSearch();
+function DuelPage() {
+    const { login, other } = Route.useParams();
     const [state, setState] = useState<State>({ kind: "loading" });
     const [vsState, setVsState] = useState<VsState>({ kind: "none" });
 
@@ -37,9 +47,6 @@ function ProfilePage() {
         fetchProfile(login)
             .then((profile) => {
                 if (!alive) return;
-                // Identity binding: the registered login must match the
-                // gist's claimed github handle, else a hostile gist could
-                // impersonate another user on its /u/ page.
                 if (profile.github.toLowerCase() !== login.toLowerCase()) {
                     setState({ kind: "error", message: "profile identity mismatch" });
                     return;
@@ -49,43 +56,36 @@ function ProfilePage() {
             .catch((e: unknown) => {
                 if (!alive) return;
                 const notFound = typeof e === "object" && e !== null && (e as { notFound?: boolean }).notFound === true;
-                setState(notFound
-                    ? { kind: "not-found" }
-                    : { kind: "error", message: e instanceof Error ? e.message : String(e) });
+                setState(notFound ? { kind: "not-found" } : { kind: "error", message: e instanceof Error ? e.message : String(e) });
             });
         return () => { alive = false; };
     }, [login]);
 
     useEffect(() => {
         let alive = true;
-        if (!vs || vs.toLowerCase() === login.toLowerCase()) {
-            // self-compare is allowed (proves the overlay path); only skip the
-            // empty case so we don't double-render the same series silently.
-            if (!vs) { setVsState({ kind: "none" }); return; }
-        }
-        setVsState({ kind: "loading", login: vs });
-        fetchProfile(vs)
+        setVsState({ kind: "loading", login: other });
+        fetchProfile(other)
             .then((profile) => {
                 if (!alive) return;
-                if (profile.github.toLowerCase() !== vs.toLowerCase()) {
-                    setVsState({ kind: "error", login: vs });
+                if (profile.github.toLowerCase() !== other.toLowerCase()) {
+                    setVsState({ kind: "error", login: other });
                     return;
                 }
-                setVsState({ kind: "ready", login: vs, profile });
+                setVsState({ kind: "ready", login: other, profile });
             })
             .catch((e: unknown) => {
                 if (!alive) return;
                 const notFound = typeof e === "object" && e !== null && (e as { notFound?: boolean }).notFound === true;
-                setVsState(notFound ? { kind: "not-found", login: vs } : { kind: "error", login: vs });
+                setVsState(notFound ? { kind: "not-found", login: other } : { kind: "error", login: other });
             });
         return () => { alive = false; };
-    }, [vs, login]);
+    }, [other]);
 
     return (
         <>
             <SiteHeader />
             <main className="profile-page">
-                {state.kind === "loading" && <p className="pf-loading">pulling the dossier on @{login}…</p>}
+                {state.kind === "loading" && <p className="pf-loading">pulling the duel @{login} vs @{other}…</p>}
                 {state.kind === "not-found" && <UnclaimedDossier login={login} />}
                 {state.kind === "error" && <p className="pf-loading">couldn't load profile: {state.message}</p>}
                 {state.kind === "ready" && <ProfileDossier profile={state.profile} vs={vsState} />}
