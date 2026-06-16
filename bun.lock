@@ -77,6 +77,7 @@
       "name": "@ax/site",
       "version": "0.0.0",
       "dependencies": {
+        "@ax/onboarding-prompt": "workspace:*",
         "@ax/studio": "workspace:*",
         "@content-collections/core": "^0.15.1",
         "@content-collections/mdx": "^0.2.2",
