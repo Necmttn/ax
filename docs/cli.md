@@ -266,6 +266,10 @@ The 16 tools, each mirroring the matching CLI command:
 
 Activate the team's committed `.ax/` rig (skills + agents) into your runtime, trust-gated. Non-executable only - hooks in `.ax/hooks/` are reported as gated but never activated. `--dry-run` shows what would change. `--yes` approves activation (required when activating new or changed artifacts).
 
+`ax team trust [--yes] [--allow-branch]`
+
+Review + install the team's executable `.ax/hooks/*` into your runtime. Uses sha256 trust-on-change: a hook is only installed when its content hash is new or changed, and only when running on the repo's default branch. `--yes` approves installation without interactive prompting. `--allow-branch` bypasses the default-branch guard (advanced use). Fail-safe: non-TTY without `--yes` installs nothing. Team hooks must be self-contained or import from `@ax/hooks-sdk` (v1 limitation: no arbitrary package resolution at hook fire time).
+
 ## Live ingest in the dashboard
 
 `axctl serve` exposes `POST /api/ingest` (also wired to the dashboard's **Live**
