@@ -1,5 +1,4 @@
 import { homedir } from "node:os";
-import { existsSync } from "node:fs";
 import { execSync, spawnSync } from "node:child_process";
 import { Cause, Effect, FileSystem, Path, Schema } from "effect";
 import { orAbsent } from "@ax/lib/shared/fs-error";
@@ -80,11 +79,12 @@ export const DESKTOP_APP_CANDIDATES: readonly string[] = [
  * docs/superpowers/specs/2026-06-16-smappservice-background-helper-design.md), so
  * `cmdInstall` skips the 5 background LaunchAgents (no more "bash - unidentified
  * developer" Login Items) and migrates any pre-existing ones. `exists` is
- * injected for testability; production passes `existsSync`.
+ * injected (the caller resolves existence via the Effect `FileSystem`, so this
+ * stays pure + node:fs-free - the check:no-node-fs gate bans node:fs in apps/).
  */
 export function findDesktopApp(
-    candidates: readonly string[] = DESKTOP_APP_CANDIDATES,
-    exists: (p: string) => boolean = existsSync,
+    candidates: readonly string[],
+    exists: (p: string) => boolean,
 ): string | undefined {
     return candidates.find(exists);
 }
@@ -1039,7 +1039,11 @@ export function cmdInstall(): Effect.Effect<
         // the 5 background LaunchAgents that show as "bash - unidentified
         // developer" Login Items. Skip them + the schema import (the app applies
         // it on boot), and migrate away any pre-existing ones.
-        const desktopApp = findDesktopApp();
+        const presentApps = new Set<string>();
+        for (const candidate of DESKTOP_APP_CANDIDATES) {
+            if (yield* fs.exists(candidate).pipe(orAbsent(false))) presentApps.add(candidate);
+        }
+        const desktopApp = findDesktopApp(DESKTOP_APP_CANDIDATES, (p) => presentApps.has(p));
         if (desktopApp) {
             console.log(`  desktop app detected: ${desktopApp}`);
             console.log(
