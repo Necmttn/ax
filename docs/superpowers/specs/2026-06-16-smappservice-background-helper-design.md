@@ -74,9 +74,20 @@ app-closed capture ever becomes a hard requirement, revisit Option A below.
 - **P2 - Ingest while open.** Trigger `ax ingest --since=N` (+ derive) on app
   launch and on a `Schedule` while running; reuse the ingest-lock. (Supervisor
   already runs surreal + serve.)
-- **P3 - `install.ts` desktop-awareness.** Detect the installed `ax studio.app`;
-  skip writing the 5 loose plists; migrate (unload + `trash`) any pre-existing
-  ones. Headless CLI (`ax ingest`, manual `ax serve`) stays fully functional.
+- **P3 - `install.ts` desktop-awareness.** Detect the installed `ax studio.app`
+  (`findDesktopApp`, landed); skip writing the 5 loose plists; migrate (unload +
+  remove) any pre-existing ones. Headless CLI (`ax ingest`, manual `ax serve`)
+  stays functional.
+  - **OPEN FORK (blocks the skip+migrate wiring): who applies the schema in
+    desktop mode?** Today **only `cmdInstall`** applies the SurrealDB schema
+    (`surreal import` against a running DB, needs the DB plist). Neither
+    `ax serve` nor the desktop `AxBackendManager` applies schema on boot - so
+    naively skipping the plists leaves the DB schema-less. Resolve one of:
+    (1) desktop applies the embedded `schema.surql` on boot after surreal is
+    ready (cleanest; app becomes self-sufficient; new studio-desktop work), or
+    (2) extract a shared `ensureSchema` unit both CLI + desktop call. Until
+    resolved, detection is wired but inert - `cmdInstall` still installs the
+    plists even when the app is present.
 - **P4 - CI release.** macOS runner: build → sign (Developer ID) → notarize
   (`APPLE_ID` / `APPLE_APP_SPECIFIC_PASSWORD` / `APPLE_TEAM_ID`) → `--publish
   always` → electron-updater feed.
