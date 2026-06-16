@@ -292,9 +292,6 @@ export const resolveSkillSparTask = (
     skillName: string,
     repoRoot: string,
     repositoryKey: string | null,
-    // Reserved for caller parity with `captureBaseline` (the brief-render layer
-    // stamps `createdAt`/`id` from it); not needed to resolve the task itself.
-    _nowIso: string,
     opts?: ResolveSkillSparOpts,
 ): Effect.Effect<
     SkillSparTask,

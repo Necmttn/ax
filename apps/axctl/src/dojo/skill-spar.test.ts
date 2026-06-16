@@ -363,9 +363,10 @@ const runResolve = (
     tc: ReturnType<typeof makeTestSurrealClient>,
     proc: Layer.Layer<import("@ax/lib/process").ProcessService> = defaultProcMock,
     fs: Layer.Layer<import("effect").FileSystem.FileSystem> = defaultFs,
+    repositoryKey: string | null = null,
 ) =>
     Effect.runPromise(
-        resolveSkillSparTask(skillName, "/repo", null, "2026-06-16T00:00:00.000Z", opts).pipe(
+        resolveSkillSparTask(skillName, "/repo", repositoryKey, opts).pipe(
             Effect.provide(Layer.mergeAll(tc.layer, proc, fs)),
         ),
     );
@@ -378,9 +379,10 @@ const runExpectCaptureFail = async (
     msgSubstring: string,
     proc: Layer.Layer<import("@ax/lib/process").ProcessService> = defaultProcMock,
     fs: Layer.Layer<import("effect").FileSystem.FileSystem> = defaultFs,
+    repositoryKey: string | null = null,
 ) => {
     const exit = await Effect.runPromiseExit(
-        resolveSkillSparTask(skillName, "/repo", null, "2026-06-16T00:00:00.000Z", opts).pipe(
+        resolveSkillSparTask(skillName, "/repo", repositoryKey, opts).pipe(
             Effect.provide(Layer.mergeAll(tc.layer, proc, fs)),
         ),
     );
@@ -701,7 +703,7 @@ describe("resolveSkillSparTask", () => {
 
         // repositoryKey provided → scoping WHERE clause must be emitted.
         await Effect.runPromise(
-            resolveSkillSparTask("my-skill", "/repo", "local__abc", "2026-06-16T00:00:00.000Z").pipe(
+            resolveSkillSparTask("my-skill", "/repo", "local__abc").pipe(
                 Effect.provide(Layer.mergeAll(tc.layer, defaultProcMock, defaultFs)),
             ),
         );
