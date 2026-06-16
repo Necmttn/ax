@@ -4,6 +4,7 @@ import {
     computeRemaining,
     formatDuration,
     formatDryRun,
+    QUICK_BACKFILL_THRESHOLD,
     type DryRunResult,
     type SessionTally,
 } from "./dry-run.ts";
@@ -170,6 +171,86 @@ describe("formatDryRun", () => {
         expect(out).toContain("incremental");
         expect(out).toContain("ax ingest");
         expect(out).not.toContain("ETA ~"); // no misleading ETA
+    });
+
+    test("unmeasurable rate with a small backlog frames a quick run, not a dead end (#478)", () => {
+        // The reporter's case: ~10 sessions remained but the sample (all
+        // watermark-skipped) produced no rate. Must not say "couldn't measure".
+        const out = formatDryRun(
+            baseResult({
+                sources: { claude: 159, codex: 0, pi: 0, opencodeStore: false, cursorStore: false, sessionsTotal: 159 },
+                inGraph: tally(149, 0),
+                remaining: tally(10, 0),
+                sampled: { items: 0, seconds: 0.2 },
+                ratePerSec: null,
+                etaSeconds: null,
+                populated: true,
+                upToDate: false,
+            }),
+            false,
+        );
+        expect(out).toContain("quick");
+        expect(out).toContain("run it: ax ingest");
+        expect(out).not.toContain("couldn't measure a rate");
+        // populated graph already prints "~10 remaining" once - the quick-run line
+        // must not restate the count (no double-print).
+        expect(out.match(/10 remaining/g) ?? []).toHaveLength(1);
+        expect(out).not.toContain("10 sessions remaining");
+    });
+
+    test("unmeasurable rate on a FRESH graph states the remaining count itself (#478)", () => {
+        // populated:false → no "in graph" line above, so the quick-run line must
+        // carry the count. Guards against the "mostly ingested" mis-wording.
+        const out = formatDryRun(
+            baseResult({
+                sources: { claude: 12, codex: 0, pi: 0, opencodeStore: false, cursorStore: false, sessionsTotal: 12 },
+                inGraph: tally(0, 0),
+                remaining: tally(12, 0),
+                sampled: { items: 0, seconds: 0.2 },
+                ratePerSec: null,
+                etaSeconds: null,
+                populated: false,
+                upToDate: false,
+            }),
+            false,
+        );
+        expect(out).toContain("~12 sessions remaining");
+        expect(out).toContain("quick");
+        expect(out).not.toContain("mostly ingested");
+    });
+
+    test("unmeasurable rate with a large backlog stays honest - no fabricated ETA (#478)", () => {
+        const out = formatDryRun(
+            baseResult({
+                sources: { claude: 5000, codex: 0, pi: 0, opencodeStore: false, cursorStore: false, sessionsTotal: 5000 },
+                inGraph: tally(100, 0),
+                remaining: tally(4900, 0),
+                sampled: { items: 0, seconds: 0.2 },
+                ratePerSec: null,
+                etaSeconds: null,
+                populated: true,
+                upToDate: false,
+            }),
+            false,
+        );
+        expect(out).toContain("couldn't time a sample");
+        expect(out).toContain("ax serve");
+        // No invented duration and no "couldn't measure a rate" dead end.
+        expect(out).not.toMatch(/~\d+[mhs]\d* or less/);
+        expect(out).not.toContain("couldn't measure a rate");
+    });
+
+    test("QUICK_BACKFILL_THRESHOLD boundary selects quick vs honest-no-estimate (#478)", () => {
+        const at = formatDryRun(
+            baseResult({ inGraph: tally(50, 0), remaining: tally(QUICK_BACKFILL_THRESHOLD, 0), sampled: { items: 0, seconds: 0.2 }, ratePerSec: null, etaSeconds: null, populated: true, upToDate: false }),
+            false,
+        );
+        const over = formatDryRun(
+            baseResult({ inGraph: tally(50, 0), remaining: tally(QUICK_BACKFILL_THRESHOLD + 1, 0), sampled: { items: 0, seconds: 0.2 }, ratePerSec: null, etaSeconds: null, populated: true, upToDate: false }),
+            false,
+        );
+        expect(at).toContain("quick");
+        expect(over).toContain("couldn't time a sample");
     });
 
     test("json keeps remaining + upToDate for the caught-up case", () => {
