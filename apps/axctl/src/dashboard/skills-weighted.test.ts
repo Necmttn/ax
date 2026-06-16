@@ -49,11 +49,21 @@ const mockRoleRows = [
     ],
 ];
 
+// The doctor count now delegates to fetchSkillHygiene (#481), whose ONE db.query
+// returns a 3-statement tuple: [invocation counts, skill rows, classified ids].
+// Build N distinct unclassified skills (≥3 invocations, real dir_path, unique
+// content_hash, none classified) so the hygiene join yields exactly N rows.
+function hygieneResp(n: number): unknown[] {
+    const counts = Array.from({ length: n }, (_, i) => ({ sid: `skill:u${i}`, invocations: 5, sessions: 4 }));
+    const skills = Array.from({ length: n }, (_, i) => ({ id: `skill:u${i}`, name: `u${i}`, dir_path: "/skills", content_hash: `h${i}` }));
+    return [counts, skills, []];
+}
+
 // doctor response - 3 unclassified (below threshold=5)
-const mockDoctorBelow = [[{ n: 3 }]];
+const mockDoctorBelow = hygieneResp(3);
 
 // doctor response - 7 unclassified (above threshold=5)
-const mockDoctorAbove = [[{ n: 7 }]];
+const mockDoctorAbove = hygieneResp(7);
 
 // ---------------------------------------------------------------------------
 // Tests
@@ -127,7 +137,7 @@ describe("fetchSkillsWeighted", () => {
         expect(result.rows.some((r) => r.skill_name === "codex:exec_command")).toBe(false);
     });
 
-    it("includeTools=true keeps tools and drops the synthetic doctor clause", async () => {
+    it("includeTools=true keeps tools in the ranking", async () => {
         const db = makeMockDb([
             noSparSessions, invWithTool, mockRoleRows, mockDoctorBelow, [[]], synthIds, nameRows,
         ]);
@@ -136,16 +146,23 @@ describe("fetchSkillsWeighted", () => {
 
         // Tool is ranked (and named) when opted in.
         expect(result.rows[0]!.skill_name).toBe("codex:exec_command");
-        // Doctor SQL (index 3) must NOT exclude synthetics when includeTools.
-        expect(db.captured[3]).not.toContain('dir_path = "(synthetic)"');
     });
 
-    it("doctor SQL excludes synthetics by default", async () => {
-        const db = makeMockDb();
-
-        await runWithMock(db, fetchSkillsWeighted());
-        // Doctor query is at index 3 (after spar query at 0, inv at 1, role at 2)
-        expect(db.captured[3]).toContain('dir_path = "(synthetic)"');
+    it("doctor count excludes synthetic provider tools by default (#481)", async () => {
+        // Doctor delegates to fetchSkillHygiene, which drops synthetic skills
+        // (dir_path == "(synthetic)") in JS rather than via a doctor-SQL clause.
+        const counts = [
+            { sid: "skill:real", invocations: 5, sessions: 4 },
+            { sid: "skill:synthtool", invocations: 9, sessions: 6 },
+        ];
+        const skills = [
+            { id: "skill:real", name: "real", dir_path: "/skills", content_hash: "h1" },
+            { id: "skill:synthtool", name: "tool", dir_path: "(synthetic)", content_hash: "h2" },
+        ];
+        const db = makeMockDb([noSparSessions, mockInvRows, mockRoleRows, [counts, skills, []]]);
+        const result = await runWithMock(db, fetchSkillsWeighted());
+        // Only the real unclassified skill counts; the synthetic tool is excluded.
+        expect(result.doctor.unclassified_count).toBe(1);
     });
 
     it("includes window clause when windowDays is set", async () => {
@@ -180,7 +197,7 @@ describe("fetchSkillsWeighted", () => {
     });
 
     it("handles empty invocation result gracefully", async () => {
-        const db = makeMockDb([noSparSessions, [[]], [[]], [[{ n: 0 }]]]);
+        const db = makeMockDb([noSparSessions, [[]], [[]], hygieneResp(0)]);
         const result = await runWithMock(db, fetchSkillsWeighted());
         expect(result.rows).toHaveLength(0);
         expect(result.doctor.unclassified_count).toBe(0);
