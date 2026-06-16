@@ -37,4 +37,12 @@
 # files, then the catch-all sends client routes to the studio shell.
 /studio/assets/*  /studio/assets/:splat  200
 /studio/*  /studio/  200
+
+# Short profile alias: /@<login> -> /u/<login> (the canonical profile route).
+# The /u/ route owns the SPA render + the edge OG-rewrite (functions/u/[login].ts);
+# this just makes the obvious "@handle" form shareable. Crawlers (X, Slack,
+# Telegram, Discord) follow the 301, so link unfurls still resolve to the real
+# /u/ profile card. MUST precede the /* catch-all (first match wins).
+/@*  /u/:splat  301
+
 /*  /index.html  200

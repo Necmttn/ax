@@ -264,6 +264,8 @@ const cmdProfilePublish = (input: {
                 }),
             );
             console.log(`\npublished: https://gist.github.com/${ref.owner}/${ref.gistId}`);
+            console.log(`profile:   https://ax.necmttn.com/u/${ref.owner}`);
+            console.log(`short:     https://ax.necmttn.com/@${ref.owner}`);
 
             if (!input.skipRegistration) {
                 const result = yield* ensureRegistration({
@@ -286,6 +288,8 @@ const cmdProfilePublish = (input: {
             savePublishState(statePath, { ...state, published_at: nowIso, no_cost: noCost }),
         );
         console.log(`updated: https://gist.github.com/${state.owner}/${state.gist_id}`);
+        console.log(`profile: https://ax.necmttn.com/u/${state.owner}`);
+        console.log(`short:   https://ax.necmttn.com/@${state.owner}`);
     }).pipe(Effect.provide(GitHubEnvLive));
 
 const profilePublishCommand = Command.make(
