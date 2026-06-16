@@ -6,6 +6,20 @@ import { surrealString } from "@ax/lib/shared/surql";
 import { normalizeErrorSignature } from "../ingest/turn-references.ts";
 import { classifyTurnIntent } from "../ingest/intent-kind.ts";
 import { numeric, durationMs, rankToolEvidence } from "./file-evidence-rank.ts";
+import type {
+    BuildFileContextInput,
+    FileMemoryCommit,
+    FileMemoryCorrection,
+    FileMemoryCoTouch,
+    FileRow,
+    MentionSignals,
+    MentionTurn,
+    NeighborFile,
+    PriorFileSession,
+    SessionTurn,
+    ToolEvidenceRow,
+    TouchRow,
+} from "./file-evidence-types.ts";
 
 // ============================================================================
 // File Evidence - the graph-derived, rendering-free evidence about a File.
@@ -16,104 +30,23 @@ import { numeric, durationMs, rankToolEvidence } from "./file-evidence-rank.ts";
 // module owns NO rendering and NO product composition.
 // ============================================================================
 
-export interface FileRow {
-    readonly id: string;
-    readonly path: string;
-    readonly repo?: string | null;
-    readonly repository?: string | null;
-}
-
-export interface ToolEvidenceRow {
-    readonly kind: "read_file" | "searched_file";
-    readonly evidence?: string | null;
-    readonly path_seen?: string | null;
-    readonly excerpt?: string | null;
-    readonly ts?: string | null;
-    readonly path?: string | null;
-    readonly tool_name?: string | null;
-    readonly command_norm?: string | null;
-    readonly turn?: {
-        readonly id?: string;
-        readonly session?: {
-            readonly id?: string;
-            readonly source?: string | null;
-        } | null;
-        readonly seq?: number | null;
-        readonly intent_kind?: string | null;
-        readonly text_excerpt?: string | null;
-    } | null;
-}
-
-export interface TouchRow {
-    readonly id: string;
-    readonly additions?: number | null;
-    readonly deletions?: number | null;
-    readonly ts?: string | null;
-    readonly file?: FileRow | null;
-    readonly commit?: {
-        readonly id?: string | null;
-        readonly sha?: string | null;
-        readonly message?: string | null;
-        readonly author?: string | null;
-        readonly ts?: string | null;
-        readonly sessions?: readonly {
-            readonly id?: string;
-            readonly source?: string | null;
-            readonly cwd?: string | null;
-        }[];
-    } | null;
-}
-
-export interface MentionTurn {
-    readonly id: string;
-    readonly session: string;
-    readonly source?: string | null;
-    readonly seq?: number | null;
-    readonly ts?: string | null;
-    readonly intent_kind?: string | null;
-    readonly text_excerpt?: string | null;
-    readonly score: number;
-    readonly why: readonly string[];
-}
-
-export interface SessionTurn {
-    readonly id: string;
-    readonly session: string;
-    readonly source?: string | null;
-    readonly seq?: number | null;
-    readonly ts?: string | null;
-    readonly message_kind?: string | null;
-    readonly intent_kind?: string | null;
-    readonly text_excerpt?: string | null;
-}
-
-export interface NeighborFile {
-    readonly path: string;
-    readonly count: number;
-}
-
-export interface PriorFileSession {
-    readonly session: string;
-    readonly title: string | null;
-    readonly project: string | null;
-    readonly source: string | null;
-    readonly weight: number;
-    readonly files_touched: number;
-    readonly top_files: readonly string[];
-    readonly produced_commits: number;
-    readonly delivery_status: string | null;
-    readonly review_pain: string | null;
-    readonly pr_size: string | null;
-    readonly pr_title: string | null;
-    readonly merged_to_main: boolean;
-    readonly user_turns: number;
-    readonly assistant_turns: number;
-    readonly corrections: number;
-    readonly interruptions: number;
-    readonly duration_ms: number | null;
-    readonly hands_free_ms: number | null;
-    readonly last_seen: string | null;
-}
+// Re-export the row/result types so the two adapters keep importing the File
+// Evidence surface from one place while the definitions live in the bottom
+// types module.
+export type {
+    BuildFileContextInput,
+    FileMemoryCommit,
+    FileMemoryCorrection,
+    FileMemoryCoTouch,
+    FileRow,
+    MentionSignals,
+    MentionTurn,
+    NeighborFile,
+    PriorFileSession,
+    SessionTurn,
+    ToolEvidenceRow,
+    TouchRow,
+};
 
 interface PriorFileSessionAccumulator {
     session: string;
@@ -135,41 +68,6 @@ interface PriorFileSessionAccumulator {
     hands_free_ms: number | null;
     last_seen: string | null;
     fileWeights: Map<string, number>;
-}
-
-export interface MentionSignals {
-    readonly paths: readonly string[];
-    readonly symbols: readonly string[];
-    readonly errors: readonly string[];
-}
-
-/** The shared input for both File Evidence adapters: a task string plus the
- *  file paths an agent named or touched. */
-export interface BuildFileContextInput {
-    readonly q: string;
-    readonly files: readonly string[];
-}
-
-export interface FileMemoryCorrection {
-    readonly turn_id: string;
-    readonly session_id: string;
-    readonly ts: string | null;
-    readonly text: string;
-    readonly delivery_status: string | null;
-    readonly pr_title: string | null;
-}
-
-export interface FileMemoryCommit {
-    readonly commit_id: string;
-    readonly sha: string | null;
-    readonly message: string | null;
-    readonly ts: string | null;
-}
-
-export interface FileMemoryCoTouch {
-    readonly path: string;
-    readonly co_sessions: number;
-    readonly total_sessions: number;
 }
 
 const GENERIC_BASENAMES = new Set(["index.ts", "index.tsx", "index.js", "README.md", "package.json", "tsconfig.json"]);
@@ -397,7 +295,7 @@ export const loadPriorFileSessions = (fileIds: readonly string[], limit: number)
                 last_seen: string;
             }>
         ]>(`
-            SELECT <string>in.session AS session, <string>out AS file, count() AS weight, time::max(ts) AS last_seen
+            SELECT <string>in.session AS session, out.path AS file, count() AS weight, time::max(ts) AS last_seen
             FROM edited
             WHERE out IN [${fileIds.join(", ")}]
               AND in.session.source != "claude-subagent"

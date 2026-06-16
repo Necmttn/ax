@@ -120,11 +120,12 @@ function fakeContextLayer() {
                     },
                 ]];
             }
-            // Lean prior-session loader: indexed edited aggregate (session/file/weight/last_seen).
+            // Lean prior-session loader: indexed edited aggregate. `file` is the
+            // PATH (out.path), not the record id - top_files renders paths.
             if (sql.includes("FROM edited")) {
                 return [[
-                    { session: "session:s1", file: "file:f1", weight: 7, last_seen: "2026-05-10T00:03:00.000Z" },
-                    { session: "session:s1", file: "file:f2", weight: 2, last_seen: "2026-05-10T00:03:00.000Z" },
+                    { session: "session:s1", file: "src/ingest/codex.ts", weight: 7, last_seen: "2026-05-10T00:03:00.000Z" },
+                    { session: "session:s1", file: "schema/schema.surql", weight: 2, last_seen: "2026-05-10T00:03:00.000Z" },
                 ]];
             }
             if (sql.includes("FROM produced")) {
@@ -211,6 +212,10 @@ describe("file context pack", () => {
         expect(pack.ai_context).toContain("can we fix ingest intent bug in codex transcript");
         expect(pack.ai_context).toContain("Prior sessions that edited these files:");
         expect(pack.ai_context).toContain("9 edits, 2 files, 1 commits, 3u/8a, 1 corrections, main, merged_to_main, moderate review");
+        // Regression: top_files must be PATHS, not file record ids (the lean
+        // loader projects out.path; selecting <string>out would leak `file:...`).
+        expect(pack.evidence.prior_file_sessions[0]?.top_files).toEqual(["src/ingest/codex.ts", "schema/schema.surql"]);
+        expect(pack.ai_context).toContain("Files: src/ingest/codex.ts, schema/schema.surql");
         expect(pack.ai_context.match(/abc1234567/g)?.length).toBe(1);
         expect(pack.evidence.prior_file_sessions[0]).toMatchObject({
             session: "session:s1",

@@ -15,10 +15,8 @@ import {
     type PriorFileSession,
     resolveFiles,
 } from "../context/file-evidence.ts";
-import { extractFileContextSignals } from "../context/file-evidence-rank.ts";
+import { clip, extractFileContextSignals } from "../context/file-evidence-rank.ts";
 import { findRecentInjects } from "./dedup.ts";
-
-export type { FileMemoryCommit, FileMemoryCorrection, FileMemoryCoTouch, PriorFileSession } from "../context/file-evidence.ts";
 
 /** The hook's File Evidence composition: exact-only file resolution (hot path)
  *  plus the four precision signals, each isolated so a single SQL failure
@@ -343,8 +341,6 @@ export function finalizeInjection(
     return { inject, reason };
 }
 
-const clipText = (s: string, n: number): string => (s.length <= n ? s : `${s.slice(0, n - 1)}...`);
-
 const oneLine = (s: string): string => s.replace(/\s+/g, " ").trim();
 
 function tsDate(ts: string | null): string {
@@ -360,14 +356,14 @@ function describeCorrection(c: FileMemoryCorrection): string {
         c.session_id,
         tsDate(c.ts),
         c.delivery_status,
-        c.pr_title ? `pr "${clipText(oneLine(c.pr_title), 80)}"` : null,
+        c.pr_title ? `pr "${clip(oneLine(c.pr_title), 80)}"` : null,
     ].filter(Boolean);
-    return `- "${clipText(oneLine(c.text), 240)}"\n  ref: ${refs.join(" · ")}`;
+    return `- "${clip(oneLine(c.text), 240)}"\n  ref: ${refs.join(" · ")}`;
 }
 
 function describeCommit(c: FileMemoryCommit): string {
     const sha = (c.sha ?? c.commit_id).slice(0, 10);
-    const msg = c.message ? clipText(oneLine(c.message), 120) : "(no message)";
+    const msg = c.message ? clip(oneLine(c.message), 120) : "(no message)";
     return `- ${sha}  "${msg}"  (${tsDate(c.ts)})`;
 }
 
@@ -422,7 +418,7 @@ export function renderFileMemoryBlock(input: FileMemoryRenderInput): string {
                 s.corrections > 0 ? `${s.corrections} corrections` : null,
                 s.merged_to_main ? "merged_to_main" : null,
             ].filter(Boolean);
-            const title = clipText(oneLine(s.title ?? s.project ?? s.session), 160) || s.session;
+            const title = clip(oneLine(s.title ?? s.project ?? s.session), 160) || s.session;
             return `- "${title}" -> ${stats.join(", ")}\n  ref: session:${s.session.replace(/^session:/, "")}`;
         });
         sections.push(["Prior sessions touching this file (no specific corrections recorded):", ...lines]);

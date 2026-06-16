@@ -1,4 +1,4 @@
-import type { MentionSignals, SessionTurn, ToolEvidenceRow, TouchRow } from "./file-evidence.ts";
+import type { MentionSignals, SessionTurn, ToolEvidenceRow, TouchRow } from "./file-evidence-types.ts";
 
 // ============================================================================
 // File Evidence - pure (DB-free) signal extraction, ranking, and compaction.
