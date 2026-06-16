@@ -45,7 +45,7 @@ export interface CompiledOutput {
             readonly cost: BoardRow[];
         };
     };
-    readonly skillStats: Record<string, { users: number; runs: number }>;
+    readonly skillStats: Record<string, { users: number; runs: number; source: string }>;
     readonly hookStats: Record<string, { users: number }>;
     readonly state: {
         readonly year: number;
@@ -71,6 +71,28 @@ const sortBoard = (rows: BoardRow[]): BoardRow[] =>
  */
 export function skillStatKey(source: string, name: string): string {
     return name === source || name.startsWith(`${source}:`) ? name : `${source}:${name}`;
+}
+
+/**
+ * Canonical skill IDENTITY - the bare skill name with the install-source prefix
+ * stripped. The same logical skill ships differently per machine: a namespaced
+ * plugin ("superpowers:brainstorming", source "superpowers") for one builder, a
+ * loose ~/.claude/skills/ dir ("grill-me", source "local") for another. Source
+ * is an install artifact, NOT identity - so trending aggregates on this bare
+ * name, and the `users >= 2` threshold (not a `local:` exclusion) is what
+ * separates shared skills from one-off personal ones. Plugin-namespaced inner
+ * ids are preserved ("codex:rescue" stays "codex:rescue").
+ */
+export function normalizeSkillName(source: string, name: string): string {
+    const key = skillStatKey(source, name);
+    return key.startsWith(`${source}:`) ? key.slice(source.length + 1) : key;
+}
+
+/** Best display source for a skill seen under multiple install sources: a real
+ *  plugin beats "local" (deterministic: lexicographically-first non-local). */
+function representativeSource(sources: ReadonlySet<string>): string {
+    const real = [...sources].filter((s) => s !== "local").sort();
+    return real[0] ?? "local";
 }
 
 const sortedRecord = <V>(entries: Array<[string, V]>): Record<string, V> =>
@@ -118,15 +140,25 @@ export async function compileCommunity(
             }),
         );
 
-    const skillAgg = new Map<string, { users: number; runs: number }>();
+    // Aggregate skills by canonical identity (bare name), NOT by source:name -
+    // see normalizeSkillName. `users` counts distinct builders, deduped within
+    // a profile in case one machine has the same skill under two sources.
+    const skillAgg = new Map<string, { users: number; runs: number; sources: Set<string> }>();
     const hookAgg = new Map<string, { users: number }>();
     const harnessMix = new Map<string, number>();
     const modelUsers = new Map<string, number>();
     for (const { p } of profiles) {
+        const seenSkills = new Set<string>();
         for (const s of p.rig.skills) {
-            const key = skillStatKey(s.source, s.name);
-            const cur = skillAgg.get(key) ?? { users: 0, runs: 0 };
-            skillAgg.set(key, { users: cur.users + 1, runs: cur.runs + s.runs });
+            const id = normalizeSkillName(s.source, s.name);
+            const cur = skillAgg.get(id) ?? { users: 0, runs: 0, sources: new Set<string>() };
+            cur.runs += s.runs;
+            cur.sources.add(s.source);
+            if (!seenSkills.has(id)) {
+                cur.users += 1;
+                seenSkills.add(id);
+            }
+            skillAgg.set(id, cur);
         }
         for (const h of p.rig.hooks) {
             const cur = hookAgg.get(h) ?? { users: 0 };
@@ -151,7 +183,9 @@ export async function compileCommunity(
                 cost: board((p) => p.stats.cost_usd),
             },
         },
-        skillStats: sortedRecord([...skillAgg.entries()]),
+        skillStats: sortedRecord(
+            [...skillAgg.entries()].map(([id, v]) => [id, { users: v.users, runs: v.runs, source: representativeSource(v.sources) }]),
+        ),
         hookStats: sortedRecord([...hookAgg.entries()]),
         state: {
             year: Number(opts.now.slice(0, 4)),

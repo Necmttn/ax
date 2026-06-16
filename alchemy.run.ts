@@ -22,6 +22,7 @@
 import alchemy from "alchemy";
 import { KVNamespace, Worker } from "alchemy/cloudflare";
 import { RepositoryWebhook } from "alchemy/github";
+import { FileSystemStateStore } from "alchemy/state";
 
 const OWNER = "Necmttn";
 const REPO = "ax";
@@ -36,14 +37,24 @@ function requireEnv(name: string): string {
 const githubToken = requireEnv("GITHUB_TOKEN");
 const webhookSecret = requireEnv("COMMUNITY_WEBHOOK_SECRET");
 
-const app = await alchemy("ax-community");
+// State lives in a STABLE, machine-global dir - never inside the (often
+// throwaway) git worktree this is deployed from. The default `.alchemy/` under
+// cwd vanished with a removed worktree once, which made redeploys try to
+// recreate the already-live KV/Worker/webhook. `adopt: true` below lets a
+// fresh state reconcile with existing resources rather than colliding.
+const app = await alchemy("ax-community", {
+    stateStore: (scope) =>
+        new FileSystemStateStore(scope, { rootDir: `${requireEnv("HOME")}/.ax/alchemy-state` }),
+});
 
 const board = await KVNamespace("community-board", {
     title: "ax-community-board",
+    adopt: true,
 });
 
 export const worker = await Worker("ax-community-compile", {
     name: "ax-community-compile",
+    adopt: true,
     entrypoint: "./apps/community-worker/src/worker.ts",
     bindings: {
         BOARD: board,
