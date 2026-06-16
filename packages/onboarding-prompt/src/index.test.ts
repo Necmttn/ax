@@ -26,21 +26,35 @@ describe("onboarding prompt - canonical content", () => {
         expect(AGENT_ONBOARDING_PROMPT).toContain("verification often hides");
     });
 
+    test("body opens with the local-only PRIVACY preamble (read first)", () => {
+        expect(AGENT_ONBOARDING_PROMPT).toContain("PRIVACY (read first");
+        expect(AGENT_ONBOARDING_PROMPT).toContain("no outbound call at ingest");
+        // The privacy guard must explicitly fence off the one command that leaves the box.
+        expect(AGENT_ONBOARDING_PROMPT).toContain("Do NOT run `ax profile publish`");
+    });
+
+    test("body carries the value-tour and parallel-insight steps", () => {
+        expect(AGENT_ONBOARDING_PROMPT).toContain("BUILD MY PROFILE + AGENT WRAPPED");
+        expect(AGENT_ONBOARDING_PROMPT).toContain("ax wrapped generate");
+        expect(AGENT_ONBOARDING_PROMPT).toContain("GATHER MY INSIGHTS IN PARALLEL");
+        expect(AGENT_ONBOARDING_PROMPT).toContain("MOST CAPABLE / strongest-reasoning model");
+    });
+
     test("body points at the serve dashboard port", () => {
         expect(AGENT_ONBOARDING_PROMPT).toContain(`http://127.0.0.1:${DASHBOARD_PORT}`);
     });
 
-    test("body is the 5-step post-install variant (no INSTALL step)", () => {
+    test("body is the 7-step post-install variant (no INSTALL step)", () => {
         expect(AGENT_ONBOARDING_PROMPT).toContain("1. INGEST MY HISTORY");
-        expect(AGENT_ONBOARDING_PROMPT).toContain("5. GIVE ME A NEXT STEP");
+        expect(AGENT_ONBOARDING_PROMPT).toContain("7. GIVE ME A NEXT STEP");
         expect(AGENT_ONBOARDING_PROMPT).not.toContain("INSTALL - run");
     });
 
-    test("with-install variant prepends the install step and renumbers to 6", () => {
+    test("with-install variant prepends the install step and renumbers to 8", () => {
         expect(AGENT_ONBOARDING_WITH_INSTALL).toContain(`1. INSTALL - run \`${AX_INSTALL_CMD}\``);
         expect(AGENT_ONBOARDING_WITH_INSTALL).toContain(AX_DOCS_URL);
         expect(AGENT_ONBOARDING_WITH_INSTALL).toContain("2. INGEST MY HISTORY");
-        expect(AGENT_ONBOARDING_WITH_INSTALL).toContain("6. GIVE ME A NEXT STEP");
+        expect(AGENT_ONBOARDING_WITH_INSTALL).toContain("8. GIVE ME A NEXT STEP");
     });
 
     test("with-install shares the same body steps as the canonical prompt", () => {
@@ -50,7 +64,7 @@ describe("onboarding prompt - canonical content", () => {
         const bodies = AGENT_ONBOARDING_PROMPT.split("\n\n")
             .filter((p) => /^\d+\. /.test(p))
             .map((p) => p.replace(/^\d+\. /, ""));
-        expect(bodies.length).toBe(5);
+        expect(bodies.length).toBe(7);
         for (const body of bodies) {
             expect(AGENT_ONBOARDING_WITH_INSTALL).toContain(body);
         }

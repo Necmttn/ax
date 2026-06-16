@@ -13,8 +13,8 @@ describe("landing copy button", () => {
         expect(src).not.toMatch(/const AGENT_PROMPT\s*=/);
     });
 
-    test("canonical with-install prompt is the 6-step pre-install variant", () => {
+    test("canonical with-install prompt is the 8-step pre-install variant", () => {
         expect(AGENT_ONBOARDING_WITH_INSTALL).toContain("1. INSTALL - run");
-        expect(AGENT_ONBOARDING_WITH_INSTALL).toContain("6. GIVE ME A NEXT STEP");
+        expect(AGENT_ONBOARDING_WITH_INSTALL).toContain("8. GIVE ME A NEXT STEP");
     });
 });

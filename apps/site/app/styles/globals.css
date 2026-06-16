@@ -223,6 +223,59 @@ nav.top-nav a.nav-icon {
 }
 nav.top-nav a.nav-icon:hover { color: var(--ink); border-color: var(--line); }
 
+/* ---- grouped nav dropdowns (Product / Community) ---- */
+.nav-group { position: relative; }
+.nav-group-btn {
+  font: inherit;
+  font-size: 13px;
+  color: var(--muted);
+  background: none;
+  border: 1px solid transparent;
+  padding: 4px 10px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.nav-group:hover .nav-group-btn,
+.nav-group:focus-within .nav-group-btn { color: var(--ink); border-color: var(--line); }
+.nav-caret { opacity: 0.65; transition: transform 0.15s ease; }
+.nav-group:hover .nav-caret,
+.nav-group:focus-within .nav-caret { transform: rotate(180deg); }
+.nav-menu {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 188px;
+  padding: 6px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  box-shadow:
+    0 18px 40px -22px rgba(20, 20, 18, 0.32),
+    0 4px 12px -8px rgba(20, 20, 18, 0.2);
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(-4px);
+  transition: opacity 0.15s ease, transform 0.15s ease, visibility 0.15s;
+}
+.nav-group:hover .nav-menu,
+.nav-group:focus-within .nav-menu { opacity: 1; visibility: visible; transform: none; }
+.top-nav .nav-menu a {
+  padding: 8px 10px;
+  border: none;
+  border-radius: 6px;
+  font-size: 13px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+.top-nav .nav-menu a:hover { background: var(--page); color: var(--ink); border: none; }
+.nav-menu-label { display: none; }
+
 /* ---- CSS-only mobile menu (no JS, prerender-safe) ---- */
 .nav-toggle {
   position: absolute;
@@ -310,6 +363,41 @@ nav.top-nav a.nav-icon:hover { color: var(--ink); border-color: var(--line); }
     padding: 12px 4px;
   }
   nav.top-nav a.nav-icon::after { content: "GitHub"; font-size: 15px; }
+
+  /* grouped dropdowns flatten into labelled sections in the burger menu */
+  .nav-group { display: block; position: static; }
+  .nav-group-btn { display: none; }
+  .nav-menu {
+    position: static;
+    opacity: 1;
+    visibility: visible;
+    transform: none;
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+    min-width: 0;
+    padding: 0;
+    background: none;
+    border: none;
+    border-radius: 0;
+    box-shadow: none;
+  }
+  .nav-menu-label {
+    display: block;
+    padding: 16px 4px 6px;
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+  .top-nav .nav-menu a {
+    padding: 12px 4px;
+    border: none;
+    border-top: 1px solid var(--line);
+    border-radius: 0;
+    font-size: 15px;
+  }
 }
 
 /* ---------- releases ---------- */
@@ -13479,14 +13567,64 @@ footer.site-footer { padding: 48px 32px 56px; }
 .pf-rawvals-table thead th span { font-weight: 600; text-transform: none; letter-spacing: 0.03em; }
 .pf-rawvals-table tbody tr { border-bottom: 1px solid var(--line); }
 .pf-rawvals-table tbody th {
-    font-size: 10.5px;
     font-weight: 400;
+    color: var(--muted);
+    text-align: left;
+    width: 190px;
+    vertical-align: top;
+    padding-right: 14px;
+}
+.pf-rawvals-metric {
+    display: block;
+    font-size: 10.5px;
     text-transform: uppercase;
     letter-spacing: 0.12em;
     color: var(--muted);
-    text-align: left;
-    width: 110px;
 }
+.pf-rawvals-metric-note {
+    display: block;
+    margin-top: 2px;
+    font-size: 10px;
+    line-height: 1.35;
+    text-transform: none;
+    letter-spacing: 0.01em;
+    color: var(--faint, var(--muted));
+    opacity: 0.72;
+}
+/* under-chart axis legend: spoke abbreviation -> plain meaning */
+.pf-axis-legend {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 5px 18px;
+    margin: 14px 0 0;
+    padding: 0;
+}
+.pf-axis-legend-row {
+    display: flex;
+    align-items: baseline;
+    gap: 7px;
+    min-width: 0;
+}
+.pf-axis-legend-key {
+    flex: 0 0 auto;
+    font-size: 9.5px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: var(--muted);
+}
+.pf-axis-legend-note {
+    margin: 0;
+    font-size: 10.5px;
+    line-height: 1.3;
+    color: var(--faint, var(--muted));
+    opacity: 0.78;
+    min-width: 0;
+}
+@media (max-width: 560px) {
+    .pf-axis-legend { grid-template-columns: 1fr; }
+}
+
 .pf-rawvals-val {
     text-align: right;
     color: var(--ink);
@@ -13504,7 +13642,7 @@ footer.site-footer { padding: 48px 32px 56px; }
 }
 @media (max-width: 560px) {
     .pf-sign-name { font-size: 32px; }
-    .pf-rawvals-table tbody th { width: 84px; }
+    .pf-rawvals-table tbody th { width: 130px; }
     .pf-rawvals-val { white-space: normal; }
 }
 
@@ -14912,6 +15050,10 @@ footer.site-footer { padding: 48px 32px 56px; }
 }
 
 /* ---------- ACT 4: PROPOSE (re-uses landing-v2 dashboard) ---------- */
+/* the .landing-v2 wrapper exists only so the dark-instrument overrides
+   (.landing-v2 .browser--instrument .nx-*) resolve; neutralise its shell layout
+   so the browser keeps its how-act geometry. */
+.how-propose-shell { max-width: none; margin: 0; padding: 0; }
 .how-propose-browser { margin: 8px auto 0; padding: 0; }
 .how-propose-dash { padding-top: 22px; }
 .how-propose-grid { grid-template-columns: repeat(2, 1fr) !important; }
