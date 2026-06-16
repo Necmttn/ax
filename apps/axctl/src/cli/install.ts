@@ -949,7 +949,7 @@ export function collectDoctorReport(): Effect.Effect<
                     ? `no ingest_run rows stuck in status "running"`
                     : `${staleIngestRuns.length} ingest_run row(s) stuck in status "running" past the ` +
                         `${ingestTimeoutSeconds}s ingest timeout (${ids}); the run crashed or was killed ` +
-                        `without finalizing - ignore the rows for diagnosis and re-run 'ax ingest'`,
+                        `without finalizing - run 'ax ingest reap' to settle them`,
             });
         }
         const onboarding = yield* buildOnboardingReport();
