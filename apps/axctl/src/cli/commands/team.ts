@@ -13,8 +13,16 @@
  *     bypasses the default-branch guard.
  */
 import { Effect } from "effect";
-import { Command, Flag } from "effect/unstable/cli";
-import { scanWithOverlay } from "../../team/overlay.ts";
+import { Argument, Command, Flag } from "effect/unstable/cli";
+import { scanWithOverlay, ensureAxLocalIgnored } from "../../team/overlay.ts";
+import {
+    startExperiment,
+    promoteExperiment,
+    dropExperiment,
+    isSafeKindName,
+    overlayPath,
+    committedPath,
+} from "../../team/experiment.ts";
 import { hashArtifact } from "../../team/hash.ts";
 import { loadTrust, saveTrust, classify, defaultTrustPath } from "../../team/trust.ts";
 import { activateArtifact, isSafeName } from "../../team/activate.ts";
@@ -420,6 +428,131 @@ const trustCommand = Command.make(
 );
 
 // ---------------------------------------------------------------------------
+// ax team experiment
+// ---------------------------------------------------------------------------
+
+export interface ExperimentItem {
+    readonly key: string;
+    readonly shadows: boolean;
+}
+
+/** Pure: format the experiment list for stdout. No IO. */
+export const renderExperimentList = (items: ReadonlyArray<ExperimentItem>): string => {
+    if (items.length === 0) return "[ax team experiment] no experiments in .ax.local/.";
+    const lines = ["[ax team experiment] active experiments (.ax.local/):"];
+    for (const it of items) lines.push(`  ${it.key}${it.shadows ? "  (overrides the committed version)" : "  (overlay-only)"}`);
+    lines.push("activate with `ax team sync` (or `ax team trust` for hooks); ship with `ax team experiment promote`");
+    return lines.join("\n");
+};
+
+/** Resolve the git repo root, or print an error + return null. */
+const resolveRoot = (): string | null => {
+    const r = Bun.spawnSync(["git", "rev-parse", "--show-toplevel"], {
+        stdout: "pipe",
+        stderr: "ignore",
+    });
+    if (r.exitCode !== 0) {
+        console.error("[ax team experiment] not inside a git repo - run from the team repo root");
+        return null;
+    }
+    return r.stdout.toString().trim();
+};
+
+const startCmd = Command.make(
+    "start",
+    { kind: Argument.string("kind"), name: Argument.string("name") },
+    ({ kind, name }) =>
+        Effect.promise(async () => {
+            const root = resolveRoot();
+            if (!root) return;
+            if (!isSafeKindName(kind, name)) {
+                console.error(
+                    `[ax team experiment start] invalid kind/name: "${kind}/${name}". kind must be skill|agent|hook; name must match [a-zA-Z0-9._-]+`,
+                );
+                return;
+            }
+            await ensureAxLocalIgnored(root);
+            const dst = await startExperiment(root, kind, name);
+            console.log(
+                `editing ${dst} - iterate, then \`ax team sync\` (or \`ax team trust\` for a hook) to activate it; \`ax team experiment promote ${kind} ${name}\` to ship.`,
+            );
+        }),
+).pipe(Command.withDescription("Copy a committed artifact (or scaffold a new one) into .ax.local/ for isolated iteration."));
+
+const listCmd = Command.make(
+    "list",
+    {},
+    () =>
+        Effect.promise(async () => {
+            const root = resolveRoot();
+            if (!root) return;
+            const { artifacts, gated } = await scanWithOverlay(root);
+            const overlayArtifacts = artifacts.filter((a) => a.overlay);
+            const overlayGated = gated.filter((g) => g.overlay);
+
+            const items: ExperimentItem[] = [];
+            for (const a of overlayArtifacts) {
+                const committed = committedPath(root, a.kind, a.name);
+                const shadows = Bun.spawnSync(["test", "-e", committed]).exitCode === 0;
+                items.push({ key: `${a.kind}:${a.name}`, shadows });
+            }
+            for (const g of overlayGated) {
+                const committed = committedPath(root, "hook", g.name);
+                const shadows = Bun.spawnSync(["test", "-e", committed]).exitCode === 0;
+                items.push({ key: `hook:${g.name}`, shadows });
+            }
+
+            console.log(renderExperimentList(items));
+        }),
+).pipe(Command.withDescription("List active experiments in .ax.local/."));
+
+const promoteCmd = Command.make(
+    "promote",
+    { kind: Argument.string("kind"), name: Argument.string("name") },
+    ({ kind, name }) =>
+        Effect.promise(async () => {
+            const root = resolveRoot();
+            if (!root) return;
+            if (!isSafeKindName(kind, name)) {
+                console.error(
+                    `[ax team experiment promote] invalid kind/name: "${kind}/${name}". kind must be skill|agent|hook; name must match [a-zA-Z0-9._-]+`,
+                );
+                return;
+            }
+            const dst = await promoteExperiment(root, kind, name);
+            Bun.spawnSync(["git", "add", dst], { cwd: root });
+            console.log(
+                `promoted ${kind}/${name} → .ax/. Open a PR: \`gh pr create\` (or commit + push). NOTE: a promoted hook must be re-trusted by teammates via \`ax team trust\` after the PR merges.`,
+            );
+        }),
+).pipe(Command.withDescription("Move the experiment from .ax.local/ into the committed .ax/ rig and stage it with git add."));
+
+const dropCmd = Command.make(
+    "drop",
+    { kind: Argument.string("kind"), name: Argument.string("name") },
+    ({ kind, name }) =>
+        Effect.promise(async () => {
+            const root = resolveRoot();
+            if (!root) return;
+            if (!isSafeKindName(kind, name)) {
+                console.error(
+                    `[ax team experiment drop] invalid kind/name: "${kind}/${name}". kind must be skill|agent|hook; name must match [a-zA-Z0-9._-]+`,
+                );
+                return;
+            }
+            await dropExperiment(root, kind, name);
+            console.log(`dropped ${overlayPath(root, kind, name)}`);
+        }),
+).pipe(Command.withDescription("Discard the experiment overlay, reverting to the committed version."));
+
+const experimentCommand = Command.make("experiment").pipe(
+    Command.withDescription(
+        "Iterate on a team artifact in an isolated .ax.local/ overlay, then promote it. start/list/promote/drop.",
+    ),
+    Command.withSubcommands([startCmd, listCmd, promoteCmd, dropCmd]),
+);
+
+// ---------------------------------------------------------------------------
 // ax team (group)
 // ---------------------------------------------------------------------------
 
@@ -427,7 +560,7 @@ export const teamCommand = Command.make("team").pipe(
     Command.withDescription(
         "Team rig management: activate the shared .ax/ skills and agents into your local runtime.",
     ),
-    Command.withSubcommands([syncCommand, trustCommand]),
+    Command.withSubcommands([syncCommand, trustCommand, experimentCommand]),
 );
 
 export const teamRuntime: RuntimeManifest = {
@@ -438,6 +571,7 @@ export const teamRuntime: RuntimeManifest = {
             subcommands: {
                 sync: "none",
                 trust: "none",
+                experiment: "none",
             },
         },
         hidden: false,

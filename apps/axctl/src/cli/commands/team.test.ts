@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { renderSyncReport, renderTrustReport } from "./team.ts";
+import { renderSyncReport, renderTrustReport, renderExperimentList } from "./team.ts";
 
 describe("renderSyncReport", () => {
   it("summarizes activated, unchanged, and gated", () => {
@@ -26,4 +26,14 @@ describe("renderTrustReport", () => {
   it("empty-state when no executable hooks", () => {
     expect(renderTrustReport({ installed: [], changed: [], added: [], onDefault: true })).toContain("no executable");
   });
+});
+
+describe("renderExperimentList", () => {
+  it("lists overlay artifacts with shadow info", () => {
+    const out = renderExperimentList([{ key: "skill:tdd", shadows: true }, { key: "skill:exp", shadows: false }]);
+    expect(out).toContain("skill:tdd");
+    expect(out).toContain("skill:exp");
+    expect(out).toMatch(/shadow|overrides|committed/i);
+  });
+  it("empty-state", () => { expect(renderExperimentList([])).toContain("no experiments"); });
 });
