@@ -480,10 +480,12 @@ describe("resolveSkillSparTask", () => {
                     [{ sid: "session:s1", ts: "2026-01-10T00:00:00.000Z" }],
                     [],
                 ],
-                // session bulk fetch: source + first_user_message
-                "first_user_message FROM": [
-                    [{ id: "session:s1", source: "claude", first_user_message: "Fix the bug" }],
+                // session bulk fetch: source only (first_user_message derived from turn)
+                "source FROM": [
+                    [{ id: "session:s1", source: "claude" }],
                 ],
+                // turn text_excerpt for the picked session
+                "text_excerpt FROM turn WHERE session": [["Fix the bug"]],
             },
         });
 
@@ -512,9 +514,10 @@ describe("resolveSkillSparTask", () => {
                     [],
                     [{ sid: "session:s2", ts: "2026-02-05T00:00:00.000Z" }],
                 ],
-                "first_user_message FROM": [
-                    [{ id: "session:s2", source: "claude", first_user_message: "Do the loaded task" }],
+                "source FROM": [
+                    [{ id: "session:s2", source: "claude" }],
                 ],
+                "text_excerpt FROM turn WHERE session": [["Do the loaded task"]],
             },
         });
 
@@ -538,12 +541,13 @@ describe("resolveSkillSparTask", () => {
                     [{ sid: "session:s1", ts: "2026-01-10T00:00:00.000Z" }],
                     [{ sid: "session:s2", ts: "2026-01-15T00:00:00.000Z" }],
                 ],
-                "first_user_message FROM": [
+                "source FROM": [
                     [
-                        { id: "session:s1", source: "claude", first_user_message: "Older task" },
-                        { id: "session:s2", source: "claude", first_user_message: "Newer task" },
+                        { id: "session:s1", source: "claude" },
+                        { id: "session:s2", source: "claude" },
                     ],
                 ],
+                "text_excerpt FROM turn WHERE session": [["Newer task"]],
             },
         });
 
@@ -609,10 +613,12 @@ describe("resolveSkillSparTask", () => {
                 "FROM skill WHERE name": [
                     [{ id: "skill:myskill", name: "my-skill", dir_path: SKILL_DIR }],
                 ],
-                // Session lookup by specific id
+                // Session existence check (no first_user_message - derived from turn)
                 "FROM session:": [
-                    [{ id: "session:s42", first_user_message: "Custom task" }],
+                    [{ id: "session:s42" }],
                 ],
+                // Turn text_excerpt for the explicit session
+                "text_excerpt FROM turn WHERE session": [["Custom task"]],
             },
         });
 
@@ -638,9 +644,10 @@ describe("resolveSkillSparTask", () => {
                     [{ sid: "session:s1", ts: "2026-01-10T00:00:00.000Z" }],
                     [],
                 ],
-                "first_user_message FROM": [
-                    [{ id: "session:s1", source: "claude", first_user_message: "Task text" }],
+                "source FROM": [
+                    [{ id: "session:s1", source: "claude" }],
                 ],
+                "text_excerpt FROM turn WHERE session": [["Task text"]],
             },
         });
 
@@ -675,9 +682,10 @@ describe("resolveSkillSparTask", () => {
                     [{ sid: "session:s1", ts: "2026-01-10T00:00:00.000Z" }],
                     [],
                 ],
-                "first_user_message FROM": [
-                    [{ id: "session:s1", source: "claude", first_user_message: "HEAD task" }],
+                "source FROM": [
+                    [{ id: "session:s1", source: "claude" }],
                 ],
+                "text_excerpt FROM turn WHERE session": [["HEAD task"]],
             },
         });
 
@@ -737,12 +745,13 @@ describe("resolveSkillSparTask", () => {
                     ],
                     [{ sid: "session:s1", ts: "2026-01-20T00:00:00.000Z" }],
                 ],
-                "first_user_message FROM": [
+                "source FROM": [
                     [
-                        { id: "session:s1", source: "claude", first_user_message: "Winner via loaded ts" },
-                        { id: "session:s2", source: "claude", first_user_message: "Loser" },
+                        { id: "session:s1", source: "claude" },
+                        { id: "session:s2", source: "claude" },
                     ],
                 ],
+                "text_excerpt FROM turn WHERE session": [["Winner via loaded ts"]],
             },
         });
 
@@ -765,19 +774,20 @@ describe("resolveSkillSparTask", () => {
                     [{ sid: "session:s1", ts: "2026-01-10T00:00:00.000Z" }],
                     [],
                 ],
-                "first_user_message FROM": [
-                    [{ id: "session:s1", source: "claude", first_user_message: "Repo task" }],
+                "source FROM": [
+                    [{ id: "session:s1", source: "claude" }],
                 ],
+                "text_excerpt FROM turn WHERE session": [["Repo task"]],
             },
         });
 
-        // repositoryKey provided → scoping WHERE clause must be emitted.
+        // repositoryKey provided → scoping WHERE clause must be emitted on the bulk-fetch.
         await Effect.runPromise(
             resolveSkillSparTask("my-skill", "/repo", "local__abc").pipe(
                 Effect.provide(Layer.mergeAll(tc.layer, defaultProcMock, defaultFs)),
             ),
         );
-        const fetchSql = tc.captured.find((s) => s.includes("first_user_message FROM"));
+        const fetchSql = tc.captured.find((s) => s.includes("source FROM"));
         expect(fetchSql).toBeDefined();
         expect(fetchSql).toContain("WHERE repository = repository:`local__abc`");
     });
@@ -797,13 +807,59 @@ describe("resolveSkillSparTask", () => {
                     [],
                 ],
                 // source = codex, not claude
-                "first_user_message FROM": [
-                    [{ id: "session:s1", source: "codex", first_user_message: "Codex task" }],
+                "source FROM": [
+                    [{ id: "session:s1", source: "codex" }],
                 ],
             },
         });
 
         await runExpectCaptureFail("my-skill", undefined, tc, "no main (source=claude) sessions");
+    });
+
+    // -----------------------------------------------------------------------
+    // Task 12: auto-pick session has no first user turn → SparCaptureError
+    // -----------------------------------------------------------------------
+    test("auto-pick session with no first user turn → SparCaptureError (empty-task guard)", async () => {
+        const tc = makeTestSurrealClient({
+            denyWrites: true,
+            routes: {
+                "FROM skill WHERE name": [
+                    [{ id: "skill:myskill", name: "my-skill", dir_path: SKILL_DIR }],
+                ],
+                "FROM invoked WHERE out": [
+                    [{ sid: "session:s1", ts: "2026-01-10T00:00:00.000Z" }],
+                    [],
+                ],
+                "source FROM": [
+                    [{ id: "session:s1", source: "claude" }],
+                ],
+                // turn query returns empty: no user turns in this session
+                "text_excerpt FROM turn WHERE session": [[]],
+            },
+        });
+
+        await runExpectCaptureFail("my-skill", undefined, tc, "has no first user message");
+    });
+
+    // -----------------------------------------------------------------------
+    // Task 13: explicit sessionId with no first user turn → SparCaptureError
+    // -----------------------------------------------------------------------
+    test("explicit sessionId with no first user turn → SparCaptureError (empty-task guard)", async () => {
+        const tc = makeTestSurrealClient({
+            denyWrites: true,
+            routes: {
+                "FROM skill WHERE name": [
+                    [{ id: "skill:myskill", name: "my-skill", dir_path: SKILL_DIR }],
+                ],
+                "FROM session:": [
+                    [{ id: "session:s42" }],
+                ],
+                // turn query returns empty
+                "text_excerpt FROM turn WHERE session": [[]],
+            },
+        });
+
+        await runExpectCaptureFail("my-skill", { sessionId: "session:s42" }, tc, "has no first user message");
     });
 });
 

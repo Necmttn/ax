@@ -349,6 +349,33 @@ const resolveRepo = Effect.gen(function* () {
 });
 
 /**
+ * Pure flag-validation helper for `ax dojo spar-plan`.
+ *
+ * Returns an error message string when the supplied flags are mutually
+ * exclusive or require another flag that is absent; returns null when valid.
+ * Exported so tests can drive it without spawning the CLI (and without a
+ * running SurrealDB).
+ *
+ * Rules:
+ * - `--skill` and a positional `<sha>` are mutually exclusive.
+ * - `--session` / `--sha` are skill-spar options; they require `--skill`.
+ */
+export const validateSparPlanFlags = (f: {
+    skill: string;
+    session: string;
+    sha: string;
+    positionalSha: string | undefined;
+}): string | null => {
+    if (f.skill !== "" && f.positionalSha !== undefined) {
+        return "ax dojo spar-plan: --skill and positional <sha> are mutually exclusive - use --skill <name> for skill-spar or <sha> alone for code-delta";
+    }
+    if (f.skill === "" && (f.session !== "" || f.sha !== "")) {
+        return "ax dojo spar-plan: --session/--sha require --skill (they scope the skill-spar baseline; code-delta mode takes a positional <sha>)";
+    }
+    return null;
+};
+
+/**
  * Convert a skill name to a filesystem-safe slug: non-alphanumeric chars →
  * `-`, consecutive dashes collapsed, leading/trailing dashes stripped.
  * e.g. "ax:dojo" → "ax-dojo", "my:skill:v2" → "my-skill-v2"
@@ -385,23 +412,20 @@ const sparPlanCommand = Command.make(
         session: Flag.string("session").pipe(Flag.withDefault("")),
         sha: Flag.string("sha").pipe(Flag.withDefault("")),
     },
-    ({ positionalSha, json, skill, session, sha }) =>
-        Effect.gen(function* () {
-            // Mutex: --skill and positional <sha> are mutually exclusive.
-            if (skill !== "" && Option.isSome(positionalSha)) {
-                fail(
-                    "ax dojo spar-plan: --skill and positional <sha> are mutually exclusive - use --skill <name> for skill-spar or <sha> alone for code-delta",
-                );
-            }
+    ({ positionalSha, json, skill, session, sha }) => {
+        // Pure flag validation BEFORE any Effect/DB work. fail() calls
+        // process.exit(2) synchronously so the DB layer is never initialised
+        // when these guards fire - CI tests can assert the error messages
+        // without a running SurrealDB instance.
+        const flagErr = validateSparPlanFlags({
+            skill,
+            session,
+            sha,
+            positionalSha: Option.getOrUndefined(positionalSha),
+        });
+        if (flagErr !== null) fail(flagErr);
 
-            // --session/--sha only mean anything in skill mode; reject them in
-            // code-delta mode so a stray flag is a loud error, not a silent no-op.
-            if (skill === "" && (session !== "" || sha !== "")) {
-                fail(
-                    "ax dojo spar-plan: --session/--sha require --skill (they scope the skill-spar baseline; code-delta mode takes a positional <sha>)",
-                );
-            }
-
+        return Effect.gen(function* () {
             if (skill !== "") {
                 // ----------------------------------------------------------------
                 // SKILL SPAR PATH
@@ -518,7 +542,8 @@ const sparPlanCommand = Command.make(
                     `${path}\n\nNext:\n  ${worktreeCmd}\n  fill the Delta section, run the task in that worktree, then: ax dojo spar-score ${brief.id}`,
                 );
             }
-        }),
+        });
+    },
 ).pipe(
     Command.withDescription(
         "Capture + freeze a baseline and emit an experiment brief to ~/.ax/dojo/spar/<id>.md.\n" +

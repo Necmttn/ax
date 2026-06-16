@@ -1,6 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
-import { homedir } from "node:os";
+import { existsSync, readFileSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, test } from "bun:test";
 import {
@@ -11,6 +10,7 @@ import {
     selectSparScoreKind,
     startOfLocalDay,
     untilToIso,
+    validateSparPlanFlags,
 } from "./dojo.ts";
 import {
     buildSkillSparBrief,
@@ -199,55 +199,53 @@ describe("buildSkillSparBrief", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Flag mutex: --skill + positional <sha> are mutually exclusive
+// Flag validation: validateSparPlanFlags (pure, no DB needed)
 // ---------------------------------------------------------------------------
 
-describe("spar-plan --skill flag mutex (CLI invocation)", () => {
-    // Test the mutex guard via a real CLI invocation. This uses bun to run the
-    // CLI source directly. The command should exit non-zero with a clear error
-    // message when both --skill and a positional sha are provided.
-    test("--skill AND positional sha → non-zero exit with error message", () => {
-        // cwd must be apps/axctl so "src/cli/index.ts" resolves
-        const result = spawnSync(
-            "bun",
-            ["src/cli/index.ts", "dojo", "spar-plan", "abc1234", "--skill", "caveman"],
-            {
-                encoding: "utf-8",
-                cwd: join(import.meta.dir, "../../.."),
-            },
-        );
-        // Should exit with a non-zero code (process.exit(2) from fail())
-        expect(result.status).not.toBe(0);
-        const output = (result.stderr ?? "") + (result.stdout ?? "");
-        expect(output).toContain("mutually exclusive");
+describe("validateSparPlanFlags", () => {
+    test("--skill AND positional sha → error containing 'mutually exclusive'", () => {
+        const msg = validateSparPlanFlags({
+            skill: "caveman",
+            session: "",
+            sha: "",
+            positionalSha: "abc1234",
+        });
+        expect(msg).not.toBeNull();
+        expect(msg).toContain("mutually exclusive");
     });
 
-    test("--session without --skill → non-zero exit, requires --skill", () => {
-        const result = spawnSync(
-            "bun",
-            ["src/cli/index.ts", "dojo", "spar-plan", "abc1234", "--session", "session:x"],
-            {
-                encoding: "utf-8",
-                cwd: join(import.meta.dir, "../../.."),
-            },
-        );
-        expect(result.status).not.toBe(0);
-        const output = (result.stderr ?? "") + (result.stdout ?? "");
-        expect(output).toContain("require --skill");
+    test("--session without --skill → error containing 'require --skill'", () => {
+        const msg = validateSparPlanFlags({
+            skill: "",
+            session: "session:x",
+            sha: "",
+            positionalSha: "abc1234",
+        });
+        expect(msg).not.toBeNull();
+        expect(msg).toContain("require --skill");
     });
 
-    test("--sha without --skill → non-zero exit, requires --skill", () => {
-        const result = spawnSync(
-            "bun",
-            ["src/cli/index.ts", "dojo", "spar-plan", "abc1234", "--sha", "deadbeef"],
-            {
-                encoding: "utf-8",
-                cwd: join(import.meta.dir, "../../.."),
-            },
-        );
-        expect(result.status).not.toBe(0);
-        const output = (result.stderr ?? "") + (result.stdout ?? "");
-        expect(output).toContain("require --skill");
+    test("--sha without --skill → error containing 'require --skill'", () => {
+        const msg = validateSparPlanFlags({
+            skill: "",
+            session: "",
+            sha: "deadbeef",
+            positionalSha: "abc1234",
+        });
+        expect(msg).not.toBeNull();
+        expect(msg).toContain("require --skill");
+    });
+
+    test("valid skill-spar flags (--skill, no positional sha) → null", () => {
+        expect(validateSparPlanFlags({ skill: "caveman", session: "", sha: "", positionalSha: undefined })).toBeNull();
+    });
+
+    test("valid skill-spar with --session and --sha → null", () => {
+        expect(validateSparPlanFlags({ skill: "caveman", session: "session:x", sha: "abc", positionalSha: undefined })).toBeNull();
+    });
+
+    test("valid code-delta flags (positional sha, no --skill) → null", () => {
+        expect(validateSparPlanFlags({ skill: "", session: "", sha: "", positionalSha: "abc1234" })).toBeNull();
     });
 });
 
@@ -295,54 +293,36 @@ describe("selectSparScoreKind", () => {
 });
 
 // ---------------------------------------------------------------------------
-// spar-score skill dispatch: parse-null error path (CLI invocation)
+// spar-score skill dispatch: parse-null path (pure, no DB needed)
 // ---------------------------------------------------------------------------
 
-describe("spar-score skill-spar brief dispatch (CLI)", () => {
-    test(
-        "brief with kind:skill but missing required fields exits 1 with skill-spar error message",
-        () => {
-            // Craft a brief where isSkillSparBrief() is true but parseSkillSparBrief() returns
-            // null (missing skill-snapshot fenced block → parseFence returns null).
-            const id = `test-skill-parse-null-${Date.now()}`;
-            const briefContent = [
-                "---",
-                `id: ${id}`,
-                "created_at: 2026-06-16T00:00:00.000Z",
-                "kind: skill",
-                "skill: caveman",
-                "skill_dir: /some/dir",
-                "original_hash: abc",
-                "parent_sha: deadbeef",
-                "baseline_session: session:abc",
-                "worktree_a: .claude/worktrees/a",
-                "worktree_b: .claude/worktrees/b",
-                "---",
-                "# Skill spar: truncated - no fenced blocks",
-            ].join("\n");
+describe("spar-score skill-spar brief dispatch (pure)", () => {
+    test("brief with kind:skill but missing fenced blocks: isSkillSparBrief=true, parseSkillSparBrief=null, selectSparScoreKind='skill'", () => {
+        // This is the exact condition that triggers the "could not parse skill-spar brief"
+        // error message in the spar-score CLI handler (no DB spawn needed to verify the logic).
+        const briefContent = [
+            "---",
+            "id: test-skill-parse-null",
+            "created_at: 2026-06-16T00:00:00.000Z",
+            "kind: skill",
+            "skill: caveman",
+            "skill_dir: /some/dir",
+            "original_hash: abc",
+            "parent_sha: deadbeef",
+            "baseline_session: session:abc",
+            "worktree_a: .claude/worktrees/a",
+            "worktree_b: .claude/worktrees/b",
+            "---",
+            "# Skill spar: truncated - no fenced blocks",
+        ].join("\n");
 
-            const sparDir = join(homedir(), ".ax", "dojo", "spar");
-            mkdirSync(sparDir, { recursive: true });
-            const briefPath = join(sparDir, `${id}.md`);
-            writeFileSync(briefPath, briefContent, "utf-8");
-
-            try {
-                const result = spawnSync(
-                    "bun",
-                    ["src/cli/index.ts", "dojo", "spar-score", id],
-                    {
-                        encoding: "utf-8",
-                        cwd: join(import.meta.dir, "../../.."),
-                    },
-                );
-                expect(result.status).not.toBe(0);
-                const output = (result.stderr ?? "") + (result.stdout ?? "");
-                expect(output).toContain("could not parse skill-spar brief");
-            } finally {
-                try { unlinkSync(briefPath); } catch { /* ok */ }
-            }
-        },
-    );
+        // isSkillSparBrief: true (kind: skill present)
+        expect(isSkillSparBrief(briefContent)).toBe(true);
+        // parseSkillSparBrief: null (missing skill-snapshot fenced block)
+        expect(parseSkillSparBrief(briefContent)).toBeNull();
+        // selectSparScoreKind routes to "skill" → the handler hits the parse-null guard
+        expect(selectSparScoreKind(briefContent)).toBe("skill");
+    });
 });
 
 // ---------------------------------------------------------------------------

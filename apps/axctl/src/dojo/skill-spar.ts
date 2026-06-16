@@ -373,12 +373,15 @@ export const resolveSkillSparTask = (
         let task: string;
 
         if (opts?.sessionId) {
-            // Explicit session: verify it exists and pull first_user_message.
+            // Explicit session: verify it exists, then derive task from the
+            // first user turn (first_user_message is not stored on session rows;
+            // it is derived via the turn table - see enrichSessions in
+            // apps/axctl/src/dashboard/sessions-query.ts).
             const key = recordKeyPart(opts.sessionId, "session") ?? opts.sessionId;
             const sessRows = yield* db.query<[
-                Array<{ id: string; first_user_message: string | null }>,
+                Array<{ id: string }>,
             ]>(
-                `SELECT type::string(id) AS id, first_user_message FROM ${recordLiteral("session", key)};`,
+                `SELECT type::string(id) AS id FROM ${recordLiteral("session", key)};`,
             );
             const sess = sessRows?.[0]?.[0] ?? null;
             if (!sess) {
@@ -387,7 +390,20 @@ export const resolveSkillSparTask = (
                 );
             }
             baselineSession = sess.id;
-            task = sess.first_user_message ?? "";
+
+            // Derive first user turn text_excerpt (the canonical first-message field).
+            const promptRows = yield* db.query<[Array<string | null>]>(
+                `SELECT VALUE text_excerpt FROM turn WHERE session = ${recordLiteral("session", key)} AND role = 'user' ORDER BY seq ASC LIMIT 1;`,
+            );
+            const promptText = promptRows?.[0]?.[0] ?? null;
+            if (!promptText) {
+                return yield* Effect.fail(
+                    new SparCaptureError(
+                        `resolved session ${opts.sessionId} has no first user message; pass --session with a session that has a prompt, or --sha`,
+                    ),
+                );
+            }
+            task = promptText;
         } else {
             // Infer from invoked + loaded edge history (deref-free, two flat queries).
             const edgeRows = yield* db.query<[
@@ -423,16 +439,20 @@ export const resolveSkillSparTask = (
             // record literal (same shape as listSessionsNear). Absent key (not in
             // a git tree) → global selection (v1 limitation, task may be cross-repo).
             const candidateSids = [...maxBySid.keys()];
+            // first_user_message is NOT stored on the session row - it must be
+            // derived from the first user turn (see enrichSessions in
+            // apps/axctl/src/dashboard/sessions-query.ts). Exclude it from the
+            // bulk fetch and derive it separately after picking the best session.
             const pick = repositoryKey
-                ? ["id", "source", "first_user_message", "repository"]
-                : ["id", "source", "first_user_message"];
+                ? ["id", "source", "repository"]
+                : ["id", "source"];
             const repoClause = repositoryKey
                 ? ` WHERE repository = ${recordLiteral("repository", repositoryKey)}`
                 : "";
             const sessionRows = yield* db.query<[
-                Array<{ id: string; source: string | null; first_user_message: string | null }>,
+                Array<{ id: string; source: string | null }>,
             ]>(
-                `SELECT type::string(id) AS id, source, first_user_message FROM ${refListSource(candidateSids, pick)}${repoClause};`,
+                `SELECT type::string(id) AS id, source FROM ${refListSource(candidateSids, pick)}${repoClause};`,
             );
 
             const mainSessions = (sessionRows?.[0] ?? []).filter((s) => s.source === "claude");
@@ -445,15 +465,29 @@ export const resolveSkillSparTask = (
             }
 
             // Pick the session whose most-recent edge-ts is highest.
-            let best: { id: string; ts: string; msg: string | null } | null = null;
+            let best: { id: string; ts: string } | null = null;
             for (const sess of mainSessions) {
                 const ts = maxBySid.get(sess.id) ?? "";
                 if (!best || ts > best.ts) {
-                    best = { id: sess.id, ts, msg: sess.first_user_message ?? null };
+                    best = { id: sess.id, ts };
                 }
             }
             baselineSession = best!.id;
-            task = best!.msg ?? "";
+
+            // Derive the task text from the first user turn in the chosen session.
+            const bestKey = recordKeyPart(best!.id, "session") ?? best!.id;
+            const promptRows = yield* db.query<[Array<string | null>]>(
+                `SELECT VALUE text_excerpt FROM turn WHERE session = ${recordLiteral("session", bestKey)} AND role = 'user' ORDER BY seq ASC LIMIT 1;`,
+            );
+            const promptText = promptRows?.[0]?.[0] ?? null;
+            if (!promptText) {
+                return yield* Effect.fail(
+                    new SparCaptureError(
+                        `resolved session ${best!.id} has no first user message; pass --session with a session that has a prompt, or --sha`,
+                    ),
+                );
+            }
+            task = promptText;
         }
 
         // 4. Parent SHA ---------------------------------------------------------
