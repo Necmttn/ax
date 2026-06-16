@@ -27,9 +27,9 @@ import {
     defaultExecTrustPath,
     type ExecTrustState,
 } from "../../team/exec-trust.ts";
-import { sha256OfFile } from "../../team/exec-hash.ts";
+import { sha256Hex } from "../../team/exec-hash.ts";
 import { isOnDefaultBranch } from "../../team/git-branch.ts";
-import { installTeamHook } from "../../team/install-team-hook.ts";
+import { installTeamHook, isSafeHookName, hookSnapshotPath } from "../../team/install-team-hook.ts";
 import { HookProviderRegistryDefault } from "../../hooks/providers/registry.ts";
 import type { RuntimeManifest } from "./manifest.ts";
 
@@ -212,6 +212,35 @@ const syncCommand = Command.make(
 // ax team trust
 // ---------------------------------------------------------------------------
 
+/**
+ * Make attacker-controlled hook source safe to print to a terminal.
+ * Strips C0 control chars + DEL (-> "?") and renders ESC visibly ("\x1b") so
+ * embedded ANSI can't scroll the payload out of view or spoof the NEW:/sha256:
+ * review labels. Keeps \n and \t. ESC is replaced FIRST so it survives as text.
+ */
+const sanitize = (s: string): string =>
+    s.replace(/\x1b/g, "\\x1b").replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, "?");
+
+/** Full, sanitized line diff (no truncation - this is executable code about to
+ *  be trusted across the team, so the whole body must be reviewable). */
+const renderDiff = (oldText: string, newText: string): string => {
+    const oldLines = oldText.split("\n");
+    const newLines = newText.split("\n");
+    const out: string[] = [];
+    const n = Math.max(oldLines.length, newLines.length);
+    for (let i = 0; i < n; i++) {
+        const o = oldLines[i];
+        const nw = newLines[i];
+        if (o === nw) {
+            if (o !== undefined) out.push(`    ${sanitize(o)}`);
+        } else {
+            if (o !== undefined) out.push(`  - ${sanitize(o)}`);
+            if (nw !== undefined) out.push(`  + ${sanitize(nw)}`);
+        }
+    }
+    return out.join("\n");
+};
+
 const cmdTrust = (input: { readonly yes: boolean; readonly allowBranch: boolean }) =>
     Effect.gen(function* () {
         // 1. Get git repo root
@@ -233,14 +262,18 @@ const cmdTrust = (input: { readonly yes: boolean; readonly allowBranch: boolean 
             return;
         }
 
-        // 3. sha256 each gated hook
-        const shaMap = yield* Effect.promise(async () => {
-            const map = new Map<string, string>();
-            for (const h of gated) {
-                map.set(execKey(h), await sha256OfFile(h.path));
-            }
-            return map;
+        // 3. Read each gated hook's content ONCE; thread that single buffer
+        //    everywhere so judged == hashed == snapshotted == run == stored.
+        //    Re-reading between hash/diff/install opens a local TOCTOU race where
+        //    the bytes the human approves differ from what gets pinned + run.
+        const body = yield* Effect.promise(async () => {
+            const m = new Map<string, string>();
+            for (const h of gated) m.set(h.name, await Bun.file(h.path).text());
+            return m;
         });
+        const contentOf = (h: GatedArtifact): string => body.get(h.name) ?? "";
+        const shaMap = new Map<string, string>();
+        for (const h of gated) shaMap.set(execKey(h), sha256Hex(contentOf(h)));
         const shaOf = (h: GatedArtifact): string => shaMap.get(execKey(h)) ?? "";
 
         // 4. Load trust state + classify
@@ -268,36 +301,35 @@ const cmdTrust = (input: { readonly yes: boolean; readonly allowBranch: boolean 
             return;
         }
 
-        // 7. Show diffs for changed/added hooks
+        // 7. Show the FULL hook source for review, sanitized. The trust model is
+        //    "the human reads the executable bytes and approves with --yes". So
+        //    never truncate (a payload could hide past a benign head) and never
+        //    emit raw control bytes (ANSI could scroll the payload off-screen or
+        //    spoof the NEW:/sha256: labels). Bytes shown == bytes hashed/run.
         for (const h of cls.changed) {
             const rec = trust[execKey(h)];
             console.log(`CHANGED: ${execKey(h)}`);
             console.log(`  old sha256: ${rec?.sha256 ?? "(unknown)"}`);
             console.log(`  new sha256: ${shaOf(h)}`);
-            if (rec?.content) {
-                const newContent = yield* Effect.promise(() => Bun.file(h.path).text());
-                const oldLines = rec.content.split("\n");
-                const newLines = newContent.split("\n");
-                const diffLines: string[] = [];
-                const maxLines = Math.min(Math.max(oldLines.length, newLines.length), 30);
-                for (let i = 0; i < maxLines; i++) {
-                    if (oldLines[i] !== newLines[i]) {
-                        if (oldLines[i] !== undefined) diffLines.push(`  - ${oldLines[i]}`);
-                        if (newLines[i] !== undefined) diffLines.push(`  + ${newLines[i]}`);
-                    }
-                }
-                if (diffLines.length > 0) console.log(diffLines.join("\n"));
+            const newContent = contentOf(h);
+            if (rec?.content !== undefined) {
+                console.log(renderDiff(rec.content, newContent));
+            } else {
+                console.log(
+                    sanitize(newContent)
+                        .split("\n")
+                        .map((l) => `  | ${l}`)
+                        .join("\n"),
+                );
             }
         }
         for (const h of cls.added) {
-            const content = yield* Effect.promise(() => Bun.file(h.path).text());
             console.log(`NEW: ${execKey(h)}`);
             console.log(`  sha256: ${shaOf(h)}`);
             console.log(
-                content
+                sanitize(contentOf(h))
                     .split("\n")
-                    .slice(0, 15)
-                    .map((l) => `  ${l}`)
+                    .map((l) => `  | ${l}`)
                     .join("\n"),
             );
         }
@@ -319,12 +351,31 @@ const cmdTrust = (input: { readonly yes: boolean; readonly allowBranch: boolean 
             return;
         }
 
+        // 9.5 Validate ALL hook names up front, before installing ANY. An unsafe
+        //     name (e.g. .ax/hooks/.config) would throw mid-loop AFTER earlier
+        //     hooks already wrote to provider configs but BEFORE saveExecTrust,
+        //     leaving config/trust drift. Partition first; skip + warn the rest.
+        const safeInstall = toInstall.filter((h) => {
+            if (isSafeHookName(h.name)) return true;
+            console.warn(`[ax team trust] skipping unsafe hook name: ${JSON.stringify(h.name)}`);
+            return false;
+        });
+
         // 10. Install each approved hook + update trust record
         const installedKeys: string[] = [];
         const mutableTrust: ExecTrustState = { ...trust };
 
-        for (const h of toInstall) {
-            const content = yield* Effect.promise(() => Bun.file(h.path).text());
+        for (const h of safeInstall) {
+            const content = contentOf(h);
+            // Clobber warning: a pre-existing snapshot with no exec-trust record
+            // is somebody else's hook we're about to overwrite.
+            const snapPath = hookSnapshotPath(h.name, home);
+            const untrackedClobber =
+                !(execKey(h) in trust) &&
+                (yield* Effect.promise(() => Bun.file(snapPath).exists()));
+            if (untrackedClobber) {
+                console.warn(`[ax team trust] overwriting existing untracked hook at ${snapPath}`);
+            }
             yield* installTeamHook(h.name, content, home, ["claude", "codex"]);
             mutableTrust[execKey(h)] = {
                 sha256: shaOf(h),
