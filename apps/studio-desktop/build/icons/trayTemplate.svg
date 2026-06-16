@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16">
+  <!-- ax tray mark: ascending telemetry bars. macOS template image (black +
+       alpha; the OS recolors it for light/dark menubars). -->
+  <g fill="#000000">
+    <rect x="2.5" y="9.5" width="2.6" height="4.5" rx="1" />
+    <rect x="6.7" y="6.5" width="2.6" height="7.5" rx="1" />
+    <rect x="10.9" y="3" width="2.6" height="11" rx="1" />
+  </g>
+</svg>

@@ -18,6 +18,7 @@ import * as ElectronApp from "./electron/ElectronApp.ts";
 import * as ElectronMenu from "./electron/ElectronMenu.ts";
 import * as ElectronProtocol from "./electron/ElectronProtocol.ts";
 import * as ElectronShell from "./electron/ElectronShell.ts";
+import * as ElectronTray from "./electron/ElectronTray.ts";
 import * as ElectronWindow from "./electron/ElectronWindow.ts";
 import * as DesktopUpdates from "./updates/DesktopUpdates.ts";
 import * as DesktopWindow from "./window/DesktopWindow.ts";
@@ -67,6 +68,7 @@ const electronLayer = Layer.mergeAll(
     ElectronMenu.layer,
     ElectronProtocol.layer,
     ElectronShell.layer,
+    ElectronTray.layer,
     ElectronWindow.layer,
 );
 

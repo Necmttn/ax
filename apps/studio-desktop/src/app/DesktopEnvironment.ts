@@ -76,6 +76,11 @@ export interface DesktopEnvironmentShape {
      */
     readonly studioStaticDir: string;
     /**
+     * Menubar tray template icon (PNG).
+     * Packaged -> `<appRoot>/icons/trayTemplate.png`; dev -> the repo asset.
+     */
+    readonly trayIconPath: string;
+    /**
      * Canonical ax data dir, authoritative across desktop + CLI daemon.
      * Resolution mirrors `@ax/lib` config (`packages/lib/src/config.ts`) and the
      * daemon install scripts (`scripts/install-daemon.sh`, `db-start.sh`):
@@ -154,6 +159,10 @@ export const make = (
         ? path.join(input.repoRoot, "apps/studio/dist-desktop")
         : path.join(appRoot, "studio");
 
+    const trayIconPath = input.isDevelopment
+        ? path.join(input.repoRoot, "apps/studio-desktop/build/icons/trayTemplate.png")
+        : path.join(appRoot, "icons/trayTemplate.png");
+
     return DesktopEnvironment.of({
         path,
         isDevelopment: input.isDevelopment,
@@ -185,6 +194,7 @@ export const make = (
         preloadPath: path.join(input.dirname, "preload.cjs"),
         axSourceEntry,
         studioStaticDir,
+        trayIconPath,
         axDataDir: resolveAxDataDir(input.homeDir, input.axDataDirOverride, path),
     });
 };

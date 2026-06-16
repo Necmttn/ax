@@ -1,6 +1,6 @@
 {
   "name": "@ax/studio-desktop",
-  "version": "0.12.1",
+  "version": "0.1.0",
   "private": true,
   "license": "AGPL-3.0-only",
   "description": "ax studio desktop app - Electron shell that supervises surreal + ax serve and renders the studio SPA.",

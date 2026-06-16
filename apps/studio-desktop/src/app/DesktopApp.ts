@@ -6,7 +6,9 @@ import * as DesktopIngestScheduler from "../backend/DesktopIngestScheduler.ts";
 import * as ElectronApp from "../electron/ElectronApp.ts";
 import * as ElectronMenu from "../electron/ElectronMenu.ts";
 import * as ElectronProtocol from "../electron/ElectronProtocol.ts";
+import * as ElectronTray from "../electron/ElectronTray.ts";
 import * as DesktopUpdates from "../updates/DesktopUpdates.ts";
+import * as DesktopWindow from "../window/DesktopWindow.ts";
 import * as DesktopEnvironment from "./DesktopEnvironment.ts";
 import * as DesktopLifecycle from "./DesktopLifecycle.ts";
 import * as DesktopObservability from "./DesktopObservability.ts";
@@ -30,6 +32,8 @@ const startup = Effect.gen(function* () {
     const backendManager = yield* AxBackendManager.AxBackendManager;
     const environment = yield* DesktopEnvironment.DesktopEnvironment;
     const updates = yield* DesktopUpdates.DesktopUpdates;
+    const electronTray = yield* ElectronTray.ElectronTray;
+    const desktopWindow = yield* DesktopWindow.DesktopWindow;
 
     // 1. Block until the Electron app is ready. Scheme privileges were already
     //    registered eagerly in main.ts (must happen before ready).
@@ -90,6 +94,35 @@ const startup = Effect.gen(function* () {
             ),
         );
     }
+
+    // 8. Menubar tray: Open ax studio / Start at Login / Quit. Scoped so the
+    //    icon is removed on shutdown. Tray click callbacks are sync, so handlers
+    //    run their (requirement-free) Effects via runPromise and swallow errors
+    //    so a menu click can never crash the app.
+    const trayOpenAtLogin = yield* electronApp.getOpenAtLogin.pipe(
+        Effect.catchCause(() => Effect.succeed(false)),
+    );
+    yield* electronTray.install({
+        iconPath: environment.trayIconPath,
+        openAtLogin: trayOpenAtLogin,
+        handlers: {
+            onOpen: () => {
+                void Effect.runPromise(
+                    desktopWindow.activate.pipe(Effect.catchCause(() => Effect.void)),
+                );
+            },
+            onToggleLogin: () => {
+                void Effect.runPromise(
+                    Effect.flatMap(electronApp.getOpenAtLogin, (enabled) =>
+                        electronApp.setOpenAtLogin(!enabled),
+                    ).pipe(Effect.catchCause(() => Effect.void)),
+                );
+            },
+            onQuit: () => {
+                void Effect.runPromise(electronApp.quit);
+            },
+        },
+    });
 
     yield* logStartupInfo("startup complete");
 }).pipe(Effect.withSpan("desktop.startup"));

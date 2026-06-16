@@ -67,6 +67,7 @@ module.exports = {
     { from: "resources/bin", to: "bin" },
     { from: "resources/ax-src", to: "ax-src" },
     { from: "resources/studio", to: "studio" },
+    { from: "build/icons", to: "icons" },
   ],
   mac: {
     // arm64-first. A split arm64/x64 build produces two clobbering
