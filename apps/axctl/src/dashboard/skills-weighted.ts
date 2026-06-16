@@ -12,6 +12,7 @@ import { SurrealClient } from "@ax/lib/db";
 import type { DbError } from "@ax/lib/errors";
 import { fetchSparSessionIds } from "../queries/spar-sessions.ts";
 import { sessionTelemetryLatency, bareSession } from "../queries/telemetry-rollup.ts";
+import { fetchSkillHygiene, SKILL_HYGIENE_MIN_INVOCATIONS } from "../queries/skill-hygiene.ts";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -184,26 +185,16 @@ const SKILL_NAMES_SQL = `SELECT id, name FROM skill`;
  * Synthetic provider built-in tool skill ids. These rows are written by the
  * codex/pi/opencode/cursor ingest with `dir_path = '(synthetic)'` so tool usage
  * is trackable, but they are tool calls, not skills. The skill table is small,
- * so this direct field-filter scan is cheap - no graph derefs. Used both as a
- * subquery (doctor) and to drop tools from the ranking in JS.
+ * so this direct field-filter scan is cheap - no graph derefs. Used to drop
+ * tools from the ranking in JS (the doctor count excludes them via hygiene's
+ * includeSynthetic flag instead).
  */
 const SYNTHETIC_SKILLS_SQL = `SELECT VALUE id FROM skill WHERE dir_path = "(synthetic)"`;
 
-function buildUnclassifiedSql(includeTools: boolean): string {
-    // Exclude synthetic provider tools from the doctor count too, unless the
-    // caller asked for them - otherwise "N unclassified skills" is dominated by
-    // codex/pi tool calls that can never carry a role.
-    const toolClause = includeTools
-        ? ""
-        : `\n    AND sid NOT IN (${SYNTHETIC_SKILLS_SQL})`;
-    return `
-SELECT count() AS n FROM (
-    SELECT out AS sid, count() AS c FROM invoked GROUP BY sid
-)
-WHERE c >= 3
-    AND sid NOT IN (SELECT VALUE in FROM plays_role WHERE source IN ["frontmatter", "brief", "user"])${toolClause}
-GROUP ALL;`.trim();
-}
+// The doctor count delegates to fetchSkillHygiene (see the Effect.all below).
+// An earlier inline `buildUnclassifiedSql` drifted from it - missing the
+// content-hash dedup and counting orphan invoked-targets - so the nudge
+// over-reported vs what classify briefs (#481).
 
 // ---------------------------------------------------------------------------
 // Main export
@@ -232,9 +223,12 @@ export const fetchSkillsWeighted = (
                     { sparSessions: [...sparSessions] },
                 ),
                 db.query<[Array<Record<string, unknown>>]>(ROLE_WEIGHT_SQL),
-                db.query<[Array<Record<string, unknown>>]>(
-                    buildUnclassifiedSql(includeTools),
-                ),
+                // Doctor count: the SAME source of truth `ax skills classify` uses,
+                // so the nudge count exactly matches what classify will brief (#481).
+                fetchSkillHygiene({
+                    minInvocations: SKILL_HYGIENE_MIN_INVOCATIONS,
+                    includeSynthetic: includeTools,
+                }),
                 db.query<[Array<unknown>]>(DELETED_SKILLS_SQL),
                 db.query<[Array<unknown>]>(SYNTHETIC_SKILLS_SQL),
                 db.query<[Array<Record<string, unknown>>]>(SKILL_NAMES_SQL),
@@ -420,9 +414,9 @@ export const fetchSkillsWeighted = (
         // Doctor
         // ---------------------------------------------------------------------------
 
-        const unclassifiedCount = Number(
-            (doctorRes?.[0] as Array<Record<string, unknown>> | undefined)?.[0]?.n ?? 0,
-        );
+        // doctorRes is now the fetchSkillHygiene row set (same as classify); its
+        // length IS the unclassified-with-≥3-invocations count.
+        const unclassifiedCount = doctorRes.length;
 
         const advice =
             unclassifiedCount >= doctorThreshold
