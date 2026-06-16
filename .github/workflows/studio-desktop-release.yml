@@ -1,21 +1,24 @@
 name: studio-desktop-release
 
-# Build, sign, notarize, and publish the ax studio desktop app (Electron).
+# Build, sign, notarize the ax studio desktop app (Electron) and publish it to
+# the Cloudflare R2 auto-update feed (decoupled from the CLI's GitHub `v*`
+# releases - see electron-builder.config.cjs for why).
 #
-# Per-arch matrix is required: stage-ax-source installs the HOST-arch native
-# deps (e.g. lmdb for live ingest) into the bundled ax source, so an arm64
-# runner cannot correctly produce an x64 app and vice-versa. Each runner fetches
-# its arch's surreal+bun binaries, stages its arch's ax source, and builds ONLY
-# its arch (`electron-builder --arm64|--x64`), publishing to the same GitHub
-# release.
+# arm64 only for now: a split arm64/x64 build emits two clobbering
+# `latest-mac.yml` manifests; Intel support waits on a feed-merge step.
 #
-# Required repo secrets (Apple Developer Program):
-#   CSC_LINK                  base64 of the Developer ID Application .p12
-#   CSC_KEY_PASSWORD          password for that .p12
-#   APPLE_ID                  Apple ID email for notarization
-#   APPLE_APP_SPECIFIC_PASSWORD  app-specific password for that Apple ID
-#   APPLE_TEAM_ID             Apple Developer Team ID
-# GITHUB_TOKEN (provided) is used by electron-builder to upload release assets.
+# Required repo secrets:
+#   Apple (sign + notarize):
+#     CSC_LINK                      base64 of the Developer ID Application .p12
+#     CSC_KEY_PASSWORD              password for that .p12
+#     APPLE_ID                      Apple ID email for notarization
+#     APPLE_APP_SPECIFIC_PASSWORD   app-specific password for that Apple ID
+#     APPLE_TEAM_ID                 Apple Developer Team ID
+#   Cloudflare R2 (upload feed; S3-compatible):
+#     R2_ACCOUNT_ID                 Cloudflare account id (endpoint host)
+#     R2_ACCESS_KEY_ID              R2 API token access key
+#     R2_SECRET_ACCESS_KEY          R2 API token secret
+#     R2_BUCKET                     R2 bucket name (e.g. ax-desktop-releases)
 
 on:
   workflow_dispatch:
@@ -23,20 +26,9 @@ on:
     tags:
       - "studio-desktop-v*"
 
-permissions:
-  contents: write # electron-builder uploads release assets
-
 jobs:
   release:
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - arch: arm64
-            runner: macos-14
-          - arch: x64
-            runner: macos-13
-    runs-on: ${{ matrix.runner }}
+    runs-on: macos-14 # Apple Silicon (arm64)
     steps:
       - uses: actions/checkout@v4
 
@@ -46,9 +38,9 @@ jobs:
 
       - run: bun install --frozen-lockfile
 
-      - name: Fetch vendored binaries (this arch)
+      - name: Fetch vendored binaries (arm64)
         working-directory: apps/studio-desktop
-        run: bun run scripts/fetch-binaries.ts --arch=${{ matrix.arch }}
+        run: bun run scripts/fetch-binaries.ts --arch=arm64
 
       - name: Stage ax source + build renderer/main
         working-directory: apps/studio-desktop
@@ -56,7 +48,7 @@ jobs:
           bun run scripts/stage-ax-source.ts
           bun run build
 
-      - name: electron-builder (sign + notarize + publish)
+      - name: electron-builder (sign + notarize, no publish)
         working-directory: apps/studio-desktop
         env:
           CSC_LINK: ${{ secrets.CSC_LINK }}
@@ -64,5 +56,22 @@ jobs:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: bunx electron-builder --${{ matrix.arch }} --config electron-builder.config.cjs --publish always
+        run: bunx electron-builder --arm64 --config electron-builder.config.cjs --publish never
+
+      - name: Upload to R2 update feed
+        working-directory: apps/studio-desktop
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          # R2 rejects the default aws-cli streaming checksums; only send when required.
+          AWS_REQUEST_CHECKSUM_CALCULATION: WHEN_REQUIRED
+          AWS_RESPONSE_CHECKSUM_VALIDATION: WHEN_REQUIRED
+        run: |
+          aws s3 cp dist-release/ "s3://${{ secrets.R2_BUCKET }}/desktop/" \
+            --recursive \
+            --endpoint-url "https://${{ secrets.R2_ACCOUNT_ID }}.r2.cloudflarestorage.com" \
+            --exclude "*" \
+            --include "*.dmg" \
+            --include "*.zip" \
+            --include "*.blockmap" \
+            --include "latest-mac.yml"
