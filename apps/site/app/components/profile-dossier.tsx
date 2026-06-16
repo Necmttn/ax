@@ -6,10 +6,12 @@ import { RadarChart, type RadarSeries } from "~/components/radar-chart";
 import {
     archetypeFor,
     dominantPair,
+    leadTally,
     profileToAxes,
     RADAR_AXES_META,
     type RadarAxes,
 } from "~/lib/radar";
+import { duelPath, duelXIntent } from "~/lib/challenge";
 import {
     type ProfileV1,
     type ProfileDailyRow,
@@ -297,6 +299,7 @@ function Kicker({ n, title, note }: { n: string; title: string; note?: string })
 function SignSection({ n, profile, vs }: { n: string; profile: ProfileV1; vs: VsState }) {
     const navigate = useNavigate({ from: "/u/$login" });
     const [draft, setDraft] = useState("");
+    const [copied, setCopied] = useState(false);
 
     const selfAxes = profileToAxes(profile);
     const selfArch = archetypeFor(selfAxes, profile);
@@ -304,6 +307,17 @@ function SignSection({ n, profile, vs }: { n: string; profile: ProfileV1; vs: Vs
     const vsReady = vs.kind === "ready" ? vs : null;
     const vsAxes = vsReady ? profileToAxes(vsReady.profile) : null;
     const vsArch = vsReady && vsAxes ? archetypeFor(vsAxes, vsReady.profile) : null;
+
+    const tally = vsReady && vsAxes ? leadTally(selfAxes, vsAxes) : null;
+    const origin = typeof window !== "undefined" ? window.location.origin : "https://ax.necmttn.com";
+    const duelUrl = vsReady ? `${origin}${duelPath(profile.github, vsReady.login)}` : "";
+    const copyDuel = () => {
+        if (!duelUrl) return;
+        void navigator.clipboard?.writeText(duelUrl).then(() => {
+            setCopied(true);
+            window.setTimeout(() => setCopied(false), 1500);
+        }).catch(() => {});
+    };
 
     const series: RadarSeries[] = [{ login: profile.github, axes: selfAxes, color: SELF_COLOR }];
     if (vsReady && vsAxes) series.push({ login: vsReady.login, axes: vsAxes, color: VS_COLOR });
@@ -359,24 +373,37 @@ function SignSection({ n, profile, vs }: { n: string; profile: ProfileV1; vs: Vs
                     {/* compare control */}
                     <div className="pf-sign-compare">
                         {vsReady ? (
-                            <button type="button" className="pf-sign-clear" onClick={clearCompare}>
-                                clear comparison
-                            </button>
+                            <div className="pf-share-row">
+                                <button type="button" className="pf-share-btn" onClick={copyDuel}>
+                                    {copied ? "copied ✓" : "copy duel link"}
+                                </button>
+                                {tally && (
+                                    <a
+                                        className="pf-share-btn"
+                                        href={duelXIntent({ a: profile.github, b: vsReady.login, aLeads: tally.aLeads, total: tally.total, origin })}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                    >
+                                        post on X
+                                    </a>
+                                )}
+                                <button type="button" className="pf-sign-clear" onClick={clearCompare}>clear</button>
+                            </div>
                         ) : (
                             <form className="pf-sign-form" onSubmit={submit}>
-                                <span className="pf-sign-form-label">compare with</span>
+                                <span className="pf-sign-form-label">Think you out-ship @{profile.github}?</span>
                                 <input
                                     className="pf-sign-input"
                                     type="text"
                                     value={draft}
                                     onChange={(e) => setDraft(e.currentTarget.value)}
                                     placeholder="github handle"
-                                    aria-label="github handle to compare with"
+                                    aria-label="github handle to challenge"
                                     spellCheck={false}
                                     autoCapitalize="off"
                                     autoCorrect="off"
                                 />
-                                <button type="submit" className="pf-sign-go">overlay</button>
+                                <button type="submit" className="pf-sign-go">challenge →</button>
                             </form>
                         )}
                         {vs.kind === "loading" && <span className="pf-sign-msg">pulling @{vs.login}…</span>}

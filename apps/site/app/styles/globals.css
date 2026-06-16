@@ -15777,3 +15777,7 @@ footer.site-footer { padding: 48px 32px 56px; }
   .blog-essay .bk-split-seg-in { font-size: 11px; }
   .blog-essay .bk-bar-head { font-size: 12px; gap: 8px; }
 }
+
+.pf-share-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.pf-share-btn { font: inherit; font-size: 13px; padding: 6px 12px; border: 1px solid var(--green); color: var(--green); background: transparent; cursor: pointer; text-decoration: none; }
+.pf-share-btn:hover { background: color-mix(in srgb, var(--green) 12%, transparent); }
