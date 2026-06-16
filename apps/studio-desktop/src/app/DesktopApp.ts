@@ -76,6 +76,21 @@ const startup = Effect.gen(function* () {
         yield* Effect.forkDetach(updates.checkForUpdates);
     }
 
+    // 7. IDE daemon-model continuity: register the app to launch at login as ONE
+    //    Developer-ID Login Item (mainAppService), so ingest/serve resume without
+    //    a separate background agent. Prod only (dev isn't in /Applications, and
+    //    SMAppService registration there errors). Fail-soft: never block boot.
+    if (!environment.isDevelopment) {
+        yield* electronApp.setOpenAtLogin(true).pipe(
+            Effect.tap(() => logStartupInfo("registered launch-at-login (mainAppService)")),
+            Effect.catchCause((cause) =>
+                logStartupInfo("could not register launch-at-login", {
+                    cause: String(cause),
+                }),
+            ),
+        );
+    }
+
     yield* logStartupInfo("startup complete");
 }).pipe(Effect.withSpan("desktop.startup"));
 
