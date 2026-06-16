@@ -677,13 +677,13 @@ removed launchd plists and the ax symlink`,
     eyebrow: "$ sync the team rig",
     title: "Team",
     blurb:
-      "Activate the shared .ax/ skills and agents committed to the repo into your local runtime, trust-gated per content hash. Executable hooks require a separate `ax team trust` review before installation.",
+      "Activate the shared .ax/ skills and agents committed to the repo into your local runtime, trust-gated per content hash. Iterate on artifacts privately in .ax.local/ before promoting. Executable hooks require a separate `ax team trust` review before installation.",
     commands: [
       {
         name: "team",
-        sub: ["sync", "trust"],
-        job: "Sync the team's .ax/ rig (skills + agents) and trust-review + install executable hooks.",
-        signature: "ax team sync|trust [--dry-run] [--yes] [--allow-branch]",
+        sub: ["sync", "trust", "experiment"],
+        job: "Sync the team's .ax/ rig, trust-review executable hooks, and iterate on artifacts in an isolated overlay before promoting.",
+        signature: "ax team sync|trust|experiment <start|list|promote|drop> [--dry-run] [--yes] [--allow-branch]",
         flags: [
           { flag: "--dry-run", desc: "show what would change without writing anything (sync only)" },
           { flag: "--yes", desc: "approve activation / installation of new or changed artifacts" },
@@ -704,6 +704,7 @@ $ ax team trust --yes
         detail: [
           "ax team sync: scans .ax/skills/, .ax/agents/, and .ax/hooks/ in the current git repo root. Skills and agents are non-executable and safe to copy; hooks in .ax/hooks/ are reported as gated but never activated.",
           "ax team trust: reviews + installs executable hooks from .ax/hooks/ using sha256 trust-on-change. Only installs when on the repo's default branch — refuses on feature branches.",
+          "ax team experiment: isolate→iterate→promote loop. `start` copies or scaffolds an artifact into a gitignored .ax.local/ overlay; `list` shows active experiments; `promote` moves the overlay into committed .ax/ + stages with git add (open a PR after); `drop` discards the overlay. Sync annotates overlay artifacts as (experiment).",
           "Content hashes prevent re-activating unchanged artifacts (idempotent). Changed artifacts are re-activated and their trust records updated.",
           "Fail-safe: non-TTY without --yes prints a summary and exits without installing anything.",
           "v1 limitation: team hooks must be self-contained or import from @ax/hooks-sdk.",

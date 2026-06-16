@@ -10,10 +10,11 @@ export interface ScanResult {
 const dirExists = (path: string): boolean =>
   Bun.spawnSync(["test", "-d", path]).exitCode === 0;
 
-/** Scan `<repoRoot>/.ax/` for the team rig. Skills = each `skills/<name>/SKILL.md`
- *  (+ sibling files); agents = each `agents/<name>.md`; hooks = `hooks/*` (gated). */
-export const scanAxFolder = async (repoRoot: string): Promise<ScanResult> => {
-  const ax = `${repoRoot}/.ax`;
+/** Scan `<repoRoot>/<subdir>/` for the team rig. Skills = each `skills/<name>/SKILL.md`
+ *  (+ sibling files); agents = each `agents/<name>.md`; hooks = `hooks/*` (gated).
+ *  `subdir` defaults to `.ax`; pass `.ax.local` for the overlay scan. */
+export const scanAxFolder = async (repoRoot: string, subdir = ".ax"): Promise<ScanResult> => {
+  const ax = `${repoRoot}/${subdir}`;
   if (!dirExists(ax)) return { artifacts: [], gated: [] };
 
   const artifacts: TeamArtifact[] = [];
