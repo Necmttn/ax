@@ -45,8 +45,12 @@ import {
 } from "../../dojo/spar.ts";
 import {
     buildSkillSparBrief,
+    isSkillSparBrief,
+    parseSkillSparBrief,
     renderSkillSparBrief,
+    renderSkillSparReport,
     resolveSkillSparTask,
+    scoreSkillSpar,
 } from "../../dojo/skill-spar.ts";
 import { resolvePwdRepository } from "../../pwd.ts";
 import { defaultQuotaCachePath } from "../../quota/cache.ts";
@@ -87,6 +91,15 @@ const VALID_KINDS: ReadonlyArray<DraftKind> = ["bug", "improvement"];
 /** Narrow a raw --kind value to a DraftKind, or null when it is invalid. */
 export const isValidKind = (kind: string): kind is DraftKind =>
     (VALID_KINDS as ReadonlyArray<string>).includes(kind);
+
+/**
+ * Dispatch helper for spar-score: returns "skill" for skill-spar briefs
+ * (frontmatter contains `kind: skill`), "code" for all others (code-delta
+ * briefs have no `kind:` line, and garbage content falls through to "code").
+ * Exported for unit testing.
+ */
+export const selectSparScoreKind = (content: string): "skill" | "code" =>
+    isSkillSparBrief(content) ? "skill" : "code";
 
 // ---------------------------------------------------------------------------
 // ax dojo agenda
@@ -535,6 +548,42 @@ const sparScoreCommand = Command.make(
                     return Effect.sync(() => process.exit(1)) as Effect.Effect<never>;
                 }),
             );
+            if (selectSparScoreKind(content) === "skill") {
+                // ----------------------------------------------------------------
+                // SKILL SPAR PATH
+                // ----------------------------------------------------------------
+                const skillBrief = parseSkillSparBrief(content);
+                if (skillBrief === null) {
+                    console.error(
+                        `ax dojo spar-score: could not parse skill-spar brief at ${briefPath}`,
+                    );
+                    return yield* Effect.sync(() => process.exit(1));
+                }
+                const { mainRepoRoot } = yield* resolveRepo;
+                // sinceForChurn: same derivation as the code-delta path (new Date(brief.createdAt))
+                const sinceForChurn = new Date(skillBrief.createdAt);
+                const result = yield* scoreSkillSpar(skillBrief, mainRepoRoot, sinceForChurn).pipe(
+                    Effect.catchTag("SparCaptureError", (err) => {
+                        console.error(`ax dojo spar-score: ${err.message}`);
+                        return Effect.sync(() => process.exit(1)) as Effect.Effect<never>;
+                    }),
+                );
+                yield* fs.makeDirectory(dojoSparDir(), { recursive: true });
+                const path = dojoSparReportPath(id);
+                const tmp = `${path}.tmp.${process.pid}`;
+                yield* fs.writeFileString(tmp, renderSkillSparReport(result.score, skillBrief));
+                yield* fs.rename(tmp, path);
+                console.log(
+                    json
+                        ? prettyPrint({ ...result, id })
+                        : renderSkillSparReport(result.score, skillBrief),
+                );
+                return;
+            }
+
+            // ----------------------------------------------------------------
+            // CODE-DELTA PATH (original behavior, 100% unchanged)
+            // ----------------------------------------------------------------
             const brief = parseSparBrief(content);
             if (brief === null) {
                 console.error(`ax dojo spar-score: could not parse spar brief at ${briefPath}`);

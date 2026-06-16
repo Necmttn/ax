@@ -1,5 +1,6 @@
 import { spawnSync } from "node:child_process";
-import { existsSync, readFileSync, unlinkSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, test } from "bun:test";
 import {
@@ -7,6 +8,7 @@ import {
     localDate,
     makeSkillSlug,
     makeSkillSparId,
+    selectSparScoreKind,
     startOfLocalDay,
     untilToIso,
 } from "./dojo.ts";
@@ -247,6 +249,100 @@ describe("spar-plan --skill flag mutex (CLI invocation)", () => {
         const output = (result.stderr ?? "") + (result.stdout ?? "");
         expect(output).toContain("require --skill");
     });
+});
+
+// ---------------------------------------------------------------------------
+// selectSparScoreKind (pure dispatch helper)
+// ---------------------------------------------------------------------------
+
+describe("selectSparScoreKind", () => {
+    test("skill brief (kind: skill in frontmatter) → 'skill'", () => {
+        const brief = buildSkillSparBrief(SAMPLE_TASK, "test-id-2026-06-16", "2026-06-16T00:00:00.000Z");
+        const content = renderSkillSparBrief(brief);
+        // Confirm isSkillSparBrief sees it too (the source of truth)
+        expect(isSkillSparBrief(content)).toBe(true);
+        expect(selectSparScoreKind(content)).toBe("skill");
+    });
+
+    test("code-delta brief (frontmatter with no kind field) → 'code'", () => {
+        // A minimal frontmatter that looks like a code-delta brief (no `kind:` line)
+        const codeDeltaContent = [
+            "---",
+            "id: test-cd-id",
+            "created_at: 2026-06-16T00:00:00.000Z",
+            "sha: deadbeef",
+            "---",
+            "# Spar: test-cd-id",
+        ].join("\n");
+        expect(isSkillSparBrief(codeDeltaContent)).toBe(false);
+        expect(selectSparScoreKind(codeDeltaContent)).toBe("code");
+    });
+
+    test("garbage / empty content → 'code' (falls through to code-delta parse-null error)", () => {
+        expect(selectSparScoreKind("not a brief at all")).toBe("code");
+        expect(selectSparScoreKind("")).toBe("code");
+    });
+
+    test("frontmatter with kind: something-else → 'code'", () => {
+        const notSkill = [
+            "---",
+            "id: other-id",
+            "kind: code",
+            "---",
+        ].join("\n");
+        expect(selectSparScoreKind(notSkill)).toBe("code");
+    });
+});
+
+// ---------------------------------------------------------------------------
+// spar-score skill dispatch: parse-null error path (CLI invocation)
+// ---------------------------------------------------------------------------
+
+describe("spar-score skill-spar brief dispatch (CLI)", () => {
+    test(
+        "brief with kind:skill but missing required fields exits 1 with skill-spar error message",
+        () => {
+            // Craft a brief where isSkillSparBrief() is true but parseSkillSparBrief() returns
+            // null (missing skill-snapshot fenced block → parseFence returns null).
+            const id = `test-skill-parse-null-${Date.now()}`;
+            const briefContent = [
+                "---",
+                `id: ${id}`,
+                "created_at: 2026-06-16T00:00:00.000Z",
+                "kind: skill",
+                "skill: caveman",
+                "skill_dir: /some/dir",
+                "original_hash: abc",
+                "parent_sha: deadbeef",
+                "baseline_session: session:abc",
+                "worktree_a: .claude/worktrees/a",
+                "worktree_b: .claude/worktrees/b",
+                "---",
+                "# Skill spar: truncated - no fenced blocks",
+            ].join("\n");
+
+            const sparDir = join(homedir(), ".ax", "dojo", "spar");
+            mkdirSync(sparDir, { recursive: true });
+            const briefPath = join(sparDir, `${id}.md`);
+            writeFileSync(briefPath, briefContent, "utf-8");
+
+            try {
+                const result = spawnSync(
+                    "bun",
+                    ["src/cli/index.ts", "dojo", "spar-score", id],
+                    {
+                        encoding: "utf-8",
+                        cwd: join(import.meta.dir, "../../.."),
+                    },
+                );
+                expect(result.status).not.toBe(0);
+                const output = (result.stderr ?? "") + (result.stdout ?? "");
+                expect(output).toContain("could not parse skill-spar brief");
+            } finally {
+                try { unlinkSync(briefPath); } catch { /* ok */ }
+            }
+        },
+    );
 });
 
 // ---------------------------------------------------------------------------
