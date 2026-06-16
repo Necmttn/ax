@@ -6,52 +6,70 @@
  * `packages/schema/src/schema.test.ts` (which only pin the DDL text), this
  * exercises the actual runtime coercion path that crashed ingest.
  *
+ * Isolation (critical): the WHOLE scenario runs in a SINGLE `SurrealClient`
+ * acquisition inside one Effect, so the `use()` that selects a throwaway db
+ * (`ax/<unique>`) holds for every statement. `Effect.ensuring` switches the
+ * connection back to `main` and drops the throwaway db even on failure or
+ * interrupt. ax/main is NEVER written, so a mid-test crash cannot strand the
+ * user's real db in the broken #472 schema state.
+ *
+ * (Each `Effect.runPromise(provide(AppLayer))` gets its own connection, so the
+ *  `use()` MUST live in the same run as the work - a per-call `use()` would not
+ *  persist, and writes would leak to main. Hence the single-run shape.)
+ *
  * Story:
- *   1. Simulate a pre-fix DB: redefine `origin` permissively (option<string>)
- *      and seed a proposal row whose `origin` is NONE (an "old row" written
- *      before the field existed) plus one with an explicit origin='agent'.
- *   2. Prove the bug: after tightening to the bare `TYPE string` (no VALUE),
- *      a `UPDATE proposal SET ...` that omits `origin` re-coerces the stored
- *      NONE and fails.
+ *   1. In the throwaway db, define `proposal` permissively (option<string>
+ *      origin) and seed an old NONE row + an explicit origin='agent' row.
+ *   2. Reproduce the bug in two independently-checked steps:
+ *        a. tightening to a bare `TYPE string` (no VALUE) SUCCEEDS, then
+ *        b. a bare `UPDATE proposal SET ...` that omits `origin` FAILS,
+ *           re-coercing the stored NONE (the exact ingest crash).
  *   3. Apply the shipped fix (OVERWRITE + IS-NONE VALUE clause + repair UPDATE).
- *   4. Assert: NONE row repaired to 'mined'; a bare update now succeeds;
- *      origin='agent' is preserved; an explicit NULL write still fails coercion.
+ *   4. NONE row repaired to 'mined'; a bare update succeeds; origin='agent'
+ *      preserved; an explicit NULL write still fails coercion.
  *
  * Gated on `AX_E2E_DB=1` (needs a live SurrealDB at 127.0.0.1:8521 / AX_DB_URL).
- * The test restores the canonical field definition in afterAll so it never
- * leaves the shared schema in the permissive intermediate state.
  */
 
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { beforeAll, describe, expect, test } from "bun:test";
 import { Effect } from "effect";
 import { AppLayer } from "@ax/lib/layers";
 import { SurrealClient } from "@ax/lib/db";
+import { DbError } from "@ax/lib/errors";
 
 const E2E_ENABLED = process.env.AX_E2E_DB === "1";
 
-// The canonical shipped definitions (kept in sync with packages/schema/src/schema.surql).
+// The canonical shipped definitions (kept in sync with packages/schema/src/schema.surql,
+// which the parse-level tests pin verbatim).
 const CANONICAL_FIELD =
     "DEFINE FIELD OVERWRITE origin ON proposal TYPE string DEFAULT 'mined' VALUE IF $value IS NONE THEN 'mined' ELSE $value END;";
 const REPAIR_UPDATE = "UPDATE proposal SET origin = 'mined' WHERE origin = NONE;";
 
-const PERMISSIVE_FIELD = "DEFINE FIELD OVERWRITE origin ON proposal TYPE option<string>;";
+// Minimal proposal table for the throwaway db: just the fields this scenario writes.
+const SEED_SCHEMA = `
+    DEFINE TABLE proposal SCHEMAFULL;
+    DEFINE FIELD form       ON proposal TYPE string;
+    DEFINE FIELD title      ON proposal TYPE string;
+    DEFINE FIELD hypothesis ON proposal TYPE string;
+    DEFINE FIELD dedupe_sig ON proposal TYPE string;
+    DEFINE FIELD confidence ON proposal TYPE string;
+    DEFINE FIELD origin     ON proposal TYPE option<string>;
+`;
 const STRICT_NO_VALUE = "DEFINE FIELD OVERWRITE origin ON proposal TYPE string DEFAULT 'mined';";
 
-const NONE_ID = "proposal:__mig472_none";
-const AGENT_ID = "proposal:__mig472_agent";
+const NONE_ID = "proposal:none_row";
+const AGENT_ID = "proposal:agent_row";
+const TMP_DB = `mig472_${Date.now().toString(36)}`;
 
 const run = <A, E>(eff: Effect.Effect<A, E, SurrealClient>) =>
     Effect.runPromise(eff.pipe(Effect.provide(AppLayer)) as Effect.Effect<A, E, never>);
 
-const cleanup = () =>
-    run(
-        Effect.gen(function* () {
-            const db = yield* SurrealClient;
-            yield* db.query(`DELETE ${NONE_ID}; DELETE ${AGENT_ID};`).pipe(Effect.catch(() => Effect.void));
-            // Always leave the field in its canonical shipped state.
-            yield* db.query(CANONICAL_FIELD).pipe(Effect.catch(() => Effect.void));
-        }),
-    ).catch(() => {/* ignore */});
+interface Results {
+    readonly reproErr: string | null;
+    readonly noneOrigin: string | null;
+    readonly agentOrigin: string | null;
+    readonly nullErr: string | null;
+}
 
 describe("proposal.origin NONE-coercion migration (#472)", () => {
     let dbReachable = false;
@@ -59,23 +77,16 @@ describe("proposal.origin NONE-coercion migration (#472)", () => {
     beforeAll(async () => {
         if (!E2E_ENABLED) return;
         try {
-            await run(
-                Effect.gen(function* () {
-                    const db = yield* SurrealClient;
-                    yield* db.query("RETURN 1;");
-                }),
-            );
+            await run(Effect.gen(function* () {
+                const db = yield* SurrealClient;
+                yield* db.query("RETURN 1;");
+            }));
             dbReachable = true;
         } catch (err) {
             console.warn(
                 `(origin-migration E2E) SurrealDB unreachable - skipping. ${err instanceof Error ? err.message : String(err)}`,
             );
         }
-    });
-
-    afterAll(async () => {
-        if (!E2E_ENABLED || !dbReachable) return;
-        await cleanup();
     });
 
     test("repairs NONE rows, preserves agent, keeps NULL writes failing", async () => {
@@ -85,71 +96,72 @@ describe("proposal.origin NONE-coercion migration (#472)", () => {
             return;
         }
 
-        // 1. Pre-fix DB: permissive field + an old NONE row + an agent row.
-        await run(
-            Effect.gen(function* () {
-                const db = yield* SurrealClient;
+        const results = await run(Effect.gen(function* () {
+            const db = yield* SurrealClient;
+
+            // Success -> null; DbError -> its message. Lets us assert that an
+            // intermediate query failed without aborting the scenario.
+            const captureErr = (sql: string) =>
+                db.query(sql).pipe(
+                    Effect.as<string | null>(null),
+                    Effect.catch((e) => Effect.succeed(e instanceof DbError ? e.message : String(e))),
+                );
+
+            const scenario = Effect.gen(function* () {
+                // Select the throwaway db; every statement below targets it.
+                yield* Effect.promise(() => db.raw.use({ namespace: "ax", database: TMP_DB }));
+
+                // 1. Permissive table + an old NONE row + an agent row.
                 yield* db.query(`
-                    ${PERMISSIVE_FIELD}
-                    DELETE ${NONE_ID}; DELETE ${AGENT_ID};
-                    UPSERT ${NONE_ID} CONTENT { form:'skill', title:'t', hypothesis:'h', dedupe_sig:'mig472none', confidence:'low' };
-                    UPSERT ${AGENT_ID} CONTENT { form:'skill', title:'t', hypothesis:'h', dedupe_sig:'mig472agent', confidence:'low', origin:'agent' };
+                    ${SEED_SCHEMA}
+                    UPSERT ${NONE_ID} CONTENT { form:'skill', title:'t', hypothesis:'h', dedupe_sig:'none', confidence:'low' };
+                    UPSERT ${AGENT_ID} CONTENT { form:'skill', title:'t', hypothesis:'h', dedupe_sig:'agent', confidence:'low', origin:'agent' };
                 `);
-            }),
-        );
 
-        // 2. Reproduce the bug: tighten to bare TYPE string (no VALUE), then a
-        //    bare UPDATE that omits `origin` re-coerces the stored NONE and fails.
-        const reproErr = await run(
-            Effect.gen(function* () {
-                const db = yield* SurrealClient;
+                // 2a. Tightening to a bare TYPE string must succeed on its own
+                //     (so 2b's failure is proven to be the UPDATE, not this DDL).
                 yield* db.query(STRICT_NO_VALUE);
-                yield* db.query(`UPDATE ${NONE_ID} SET hypothesis = 'h2';`);
-            }),
-        ).then(() => null).catch((e: unknown) => (e instanceof Error ? e.message : String(e)));
+                // 2b. The bug: a bare UPDATE omitting `origin` re-coerces the NONE.
+                const reproErr = yield* captureErr(`UPDATE ${NONE_ID} SET hypothesis = 'h2';`);
 
-        expect(reproErr).not.toBeNull();
-        expect(reproErr).toContain("origin");
-        expect(reproErr).toContain("NONE");
-
-        // 3. Apply the shipped fix (field redefinition + repair backfill).
-        await run(
-            Effect.gen(function* () {
-                const db = yield* SurrealClient;
+                // 3. Apply the shipped fix.
                 yield* db.query(`${CANONICAL_FIELD} ${REPAIR_UPDATE}`);
-            }),
-        );
 
-        // 4a. The old NONE row is repaired to 'mined' and a bare update succeeds.
-        const noneOrigin = await run(
-            Effect.gen(function* () {
-                const db = yield* SurrealClient;
+                // 4a. NONE row repaired + bare update now succeeds.
                 yield* db.query(`UPDATE ${NONE_ID} SET hypothesis = 'h3';`);
-                const r = yield* db.query<[string[]]>(`SELECT VALUE origin FROM ${NONE_ID};`);
-                return r?.[0]?.[0] ?? null;
-            }),
-        );
-        expect(noneOrigin).toBe("mined");
-
-        // 4b. An explicit origin='agent' survives a bare update untouched.
-        const agentOrigin = await run(
-            Effect.gen(function* () {
-                const db = yield* SurrealClient;
+                const noneRows = yield* db.query<[string[]]>(`SELECT VALUE origin FROM ${NONE_ID};`);
+                // 4b. agent preserved through a bare update.
                 yield* db.query(`UPDATE ${AGENT_ID} SET hypothesis = 'h3';`);
-                const r = yield* db.query<[string[]]>(`SELECT VALUE origin FROM ${AGENT_ID};`);
-                return r?.[0]?.[0] ?? null;
-            }),
-        );
-        expect(agentOrigin).toBe("agent");
+                const agentRows = yield* db.query<[string[]]>(`SELECT VALUE origin FROM ${AGENT_ID};`);
+                // 4c. explicit NULL still fails coercion.
+                const nullErr = yield* captureErr(`UPDATE ${NONE_ID} SET origin = NULL;`);
 
-        // 4c. An explicit NULL write still fails coercion (not silently relabeled).
-        const nullErr = await run(
-            Effect.gen(function* () {
-                const db = yield* SurrealClient;
-                yield* db.query(`UPDATE ${NONE_ID} SET origin = NULL;`);
-            }),
-        ).then(() => null).catch((e: unknown) => (e instanceof Error ? e.message : String(e)));
-        expect(nullErr).not.toBeNull();
-        expect(nullErr).toContain("NULL");
+                return {
+                    reproErr,
+                    noneOrigin: noneRows?.[0]?.[0] ?? null,
+                    agentOrigin: agentRows?.[0]?.[0] ?? null,
+                    nullErr,
+                } satisfies Results;
+            });
+
+            // Fail-closed cleanup on the SAME connection: back to main, drop temp.
+            // ax/main was never written, so this is the only state to undo.
+            const cleanup = Effect.gen(function* () {
+                yield* Effect.promise(() => db.raw.use({ namespace: "ax", database: "main" }));
+                yield* db.query(`REMOVE DATABASE ${TMP_DB};`).pipe(Effect.ignore);
+            });
+            return yield* scenario.pipe(Effect.ensuring(cleanup));
+        }));
+
+        // 2b: the bare update reproduced the coercion crash.
+        expect(results.reproErr).not.toBeNull();
+        expect(results.reproErr).toContain("origin");
+        expect(results.reproErr).toContain("NONE");
+        // 4a/4b: repaired to 'mined'; agent preserved.
+        expect(results.noneOrigin).toBe("mined");
+        expect(results.agentOrigin).toBe("agent");
+        // 4c: explicit NULL still rejected.
+        expect(results.nullErr).not.toBeNull();
+        expect(results.nullErr).toContain("NULL");
     });
 });
