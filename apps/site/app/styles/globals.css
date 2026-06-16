@@ -13479,14 +13479,64 @@ footer.site-footer { padding: 48px 32px 56px; }
 .pf-rawvals-table thead th span { font-weight: 600; text-transform: none; letter-spacing: 0.03em; }
 .pf-rawvals-table tbody tr { border-bottom: 1px solid var(--line); }
 .pf-rawvals-table tbody th {
-    font-size: 10.5px;
     font-weight: 400;
+    color: var(--muted);
+    text-align: left;
+    width: 190px;
+    vertical-align: top;
+    padding-right: 14px;
+}
+.pf-rawvals-metric {
+    display: block;
+    font-size: 10.5px;
     text-transform: uppercase;
     letter-spacing: 0.12em;
     color: var(--muted);
-    text-align: left;
-    width: 110px;
 }
+.pf-rawvals-metric-note {
+    display: block;
+    margin-top: 2px;
+    font-size: 10px;
+    line-height: 1.35;
+    text-transform: none;
+    letter-spacing: 0.01em;
+    color: var(--faint, var(--muted));
+    opacity: 0.72;
+}
+/* under-chart axis legend: spoke abbreviation -> plain meaning */
+.pf-axis-legend {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 5px 18px;
+    margin: 14px 0 0;
+    padding: 0;
+}
+.pf-axis-legend-row {
+    display: flex;
+    align-items: baseline;
+    gap: 7px;
+    min-width: 0;
+}
+.pf-axis-legend-key {
+    flex: 0 0 auto;
+    font-size: 9.5px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: var(--muted);
+}
+.pf-axis-legend-note {
+    margin: 0;
+    font-size: 10.5px;
+    line-height: 1.3;
+    color: var(--faint, var(--muted));
+    opacity: 0.78;
+    min-width: 0;
+}
+@media (max-width: 560px) {
+    .pf-axis-legend { grid-template-columns: 1fr; }
+}
+
 .pf-rawvals-val {
     text-align: right;
     color: var(--ink);
@@ -13504,7 +13554,7 @@ footer.site-footer { padding: 48px 32px 56px; }
 }
 @media (max-width: 560px) {
     .pf-sign-name { font-size: 32px; }
-    .pf-rawvals-table tbody th { width: 84px; }
+    .pf-rawvals-table tbody th { width: 130px; }
     .pf-rawvals-val { white-space: normal; }
 }
 

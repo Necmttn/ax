@@ -60,7 +60,7 @@ export interface AxisMeta {
 }
 
 export const RADAR_AXES_META: readonly AxisMeta[] = [
-    { key: "DEPTH", label: "DEPTH", note: "share of sessions that ran long" },
+    { key: "DEPTH", label: "DEPTH", note: "share of sessions that landed clean work" },
     { key: "SCALE", label: "SCALE", note: "total tokens moved" },
     { key: "RIGOR", label: "RIGOR", note: "verification share of tool calls" },
     { key: "DELEGATION", label: "DELEG", note: "subagents per session" },
@@ -121,8 +121,11 @@ function logAnchored(value: number, anchors: ReadonlyArray<readonly [number, num
  * result `partial` so the UI can say "some axes need a newer ax version".
  *
  * Axes:
- *  - DEPTH      deep_session_share, linear: 0% -> 0, 60% -> 100 (capped).
- *               Deep work plateaus; nobody runs 100% 90-min sessions.
+ *  - DEPTH      deep_session_share, linear: 0% -> 0, 30% -> 100 (capped).
+ *               Now an OUTCOME metric: share of sessions that landed a real,
+ *               non-reverted commit. Graded on shipping clean work, not on
+ *               wall-clock or turn count (both reward thrash + punish
+ *               handoff-compressed sessions). ~14% ship at all; 30%+ maxes.
  *  - SCALE      tokens.total, log-anchored:
  *                 1M -> 10, 100M -> 40, 1B -> 60, 10B -> 85, 100B -> 100.
  *               Token totals span 5+ orders of magnitude; log keeps them legible.
@@ -144,9 +147,9 @@ export function profileToAxes(p: ProfileV1): RadarAxes {
     let depth = 0;
     let depthRaw = MISSING_RAW;
     if (ins) {
-        depth = score((ins.deep_session_share / 0.6) * 100);
+        depth = score((ins.deep_session_share / 0.3) * 100);
         depthRaw = {
-            label: `${pct1(ins.deep_session_share * 100)} deep sessions`,
+            label: `${pct1(ins.deep_session_share * 100)} landed clean`,
             value: ins.deep_session_share,
         };
     } else {
@@ -314,7 +317,7 @@ function blurbFor(top: RadarAxisKey, second: RadarAxisKey, p: ProfileV1): string
     const fact = (axis: RadarAxisKey): string => {
         switch (axis) {
             case "DEPTH":
-                return ins ? `${pct1(ins.deep_session_share * 100)} of your sessions run long` : "your deep-session share";
+                return ins ? `${pct1(ins.deep_session_share * 100)} of your sessions land clean work` : "your clean-ship share";
             case "SCALE":
                 return `${fmtCompact.format(p.stats.tokens.total)} tokens moved`;
             case "RIGOR":
