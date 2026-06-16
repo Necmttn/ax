@@ -18,6 +18,7 @@
  */
 import { Effect } from "effect";
 import { SurrealClient } from "@ax/lib/db";
+import { dedupeByContentHash } from "./skill-dedupe.ts";
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -46,7 +47,7 @@ export interface SkillHygieneInput {
 // sinceDays window).
 const SQL = `
 SELECT type::string(out) AS sid, count() AS invocations FROM invoked GROUP BY sid;
-SELECT type::string(id) AS id, name, dir_path FROM skill;
+SELECT type::string(id) AS id, name, dir_path, content_hash FROM skill;
 SELECT VALUE type::string(in) FROM plays_role WHERE source IN ["frontmatter", "brief", "user"];
 `;
 
@@ -60,26 +61,54 @@ export const fetchSkillHygiene = Effect.fn("queries.fetchSkillHygiene")(function
     const db = yield* SurrealClient;
     const [counts, skills, classified] = yield* db.query<[
         Array<{ sid: string; invocations: number }>,
-        Array<{ id: string; name: string; dir_path: string | null }>,
+        Array<{ id: string; name: string; dir_path: string | null; content_hash: string | null }>,
         Array<string>,
     ]>(SQL);
 
     // Build lookup structures from the flat result sets
     const classifiedIds = new Set(classified ?? []);
     const byId = new Map(
-        (skills ?? []).map((s) => [s.id, { name: s.name, dir_path: s.dir_path }]),
+        (skills ?? []).map((s) => [s.id, s]),
     );
 
-    // Join, filter, collect
-    const rows: SkillHygieneRow[] = [];
+    // Join each count row to its skill metadata (drop synthetic shims here).
+    // Dedup is applied AFTER the join so a plugin-namespace twin is treated as
+    // classified if EITHER member is classified, and its invocations sum.
+    interface Cand extends SkillHygieneRow {
+        readonly contentHash: string | null;
+        readonly classified: boolean;
+    }
+    const cand: Cand[] = [];
     for (const c of counts ?? []) {
         const skill = byId.get(c.sid);
         if (!skill) continue;                                  // no matching skill row
         if (skill.dir_path === "(synthetic)") continue;        // tool shims, not real skills
-        if (classifiedIds.has(c.sid)) continue;                // already tagged
-        const inv = Number(c.invocations ?? 0);
-        if (inv < input.minInvocations) continue;              // below threshold
-        rows.push({ name: skill.name, invocations: inv });
+        cand.push({
+            name: skill.name,
+            invocations: Number(c.invocations ?? 0),
+            contentHash: skill.content_hash,
+            classified: classifiedIds.has(c.sid),
+        });
+    }
+
+    const deduped = dedupeByContentHash(
+        cand,
+        (r) => r.contentHash,
+        (r) => r.name,
+        (r, name) => ({ ...r, name }),
+        (kept, dup) => ({
+            ...kept,
+            invocations: kept.invocations + dup.invocations,
+            classified: kept.classified || dup.classified,
+        }),
+    );
+
+    // Filter: drop classified twins and below-threshold candidates.
+    const rows: SkillHygieneRow[] = [];
+    for (const r of deduped) {
+        if (r.classified) continue;                            // already tagged
+        if (r.invocations < input.minInvocations) continue;    // below threshold
+        rows.push({ name: r.name, invocations: r.invocations });
     }
 
     rows.sort((a, b) => b.invocations - a.invocations);

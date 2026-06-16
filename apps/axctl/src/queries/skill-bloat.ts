@@ -21,6 +21,7 @@
  */
 import { Effect } from "effect";
 import { SurrealClient } from "@ax/lib/db";
+import { dedupeByContentHash } from "./skill-dedupe.ts";
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -52,9 +53,14 @@ export const estimateTokens = (bytes: number): number =>
 // ---------------------------------------------------------------------------
 
 const SQL = `
-SELECT type::string(id) AS id, name, bytes, dir_path FROM skill;
+SELECT type::string(id) AS id, name, bytes, dir_path, content_hash FROM skill;
 SELECT type::string(out) AS sid, count() AS invocations FROM invoked GROUP BY sid;
 `;
+
+// Internal row carrying the content hash needed for plugin-namespace dedup.
+interface BloatRowWithHash extends SkillBloatRow {
+    readonly contentHash: string | null;
+}
 
 // ---------------------------------------------------------------------------
 // Query
@@ -65,7 +71,7 @@ export const fetchSkillBloat = Effect.fn("queries.fetchSkillBloat")(function* (
 ) {
     const db = yield* SurrealClient;
     const [skills, counts] = yield* db.query<[
-        Array<{ id: string; name: string; bytes: number | null; dir_path: string | null }>,
+        Array<{ id: string; name: string; bytes: number | null; dir_path: string | null; content_hash: string | null }>,
         Array<{ sid: string; invocations: number }>,
     ]>(SQL);
 
@@ -73,7 +79,7 @@ export const fetchSkillBloat = Effect.fn("queries.fetchSkillBloat")(function* (
         (counts ?? []).map((c) => [c.sid, Number(c.invocations ?? 0)]),
     );
 
-    const rows: SkillBloatRow[] = [];
+    const rows: BloatRowWithHash[] = [];
     for (const s of skills ?? []) {
         if (s.dir_path === "(synthetic)") continue;        // tool shims, not real skills
         if (s.bytes == null) continue;                     // un-ingested body size
@@ -86,9 +92,20 @@ export const fetchSkillBloat = Effect.fn("queries.fetchSkillBloat")(function* (
             estTokens,
             overBy: estTokens - input.budgetTokens,
             invocations: invById.get(s.id) ?? 0,
+            contentHash: s.content_hash,
         });
     }
 
-    rows.sort((a, b) => b.estTokens - a.estTokens);
-    return rows.slice(0, input.limit);
+    // Collapse plugin-namespace twins (same file -> two skill rows): keep the
+    // bare name, sum invocations across the twins so usage isn't split.
+    const deduped = dedupeByContentHash(
+        rows,
+        (r) => r.contentHash,
+        (r) => r.name,
+        (r, name) => ({ ...r, name }),
+        (kept, dup) => ({ ...kept, invocations: kept.invocations + dup.invocations }),
+    );
+
+    deduped.sort((a, b) => b.estTokens - a.estTokens);
+    return deduped.slice(0, input.limit).map(({ contentHash: _ch, ...row }) => row);
 });

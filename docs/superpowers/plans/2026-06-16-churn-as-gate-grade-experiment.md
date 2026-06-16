@@ -88,19 +88,32 @@ Root cause is NOT confounding (we never reached the stats) - the join is structu
 1. **`skill_revision` is sparse + recent.** The revision-tracking feature shipped recently
    and history was never backfilled ("pre-existing sessions read zero until re-ingested").
    17 events, all on rarely-edited utility skills, none on the workhorses.
-2. **`invoked` undercounts skill use.** It records *explicit Skill-tool calls only*;
-   slash-command / plugin-loaded activations create no `invoked` edge. The skills that get
-   edited are exactly the ones with no `invoked` history.
+2. **Edited skills had near-zero invocations in the window.** The namespace dupe also split
+   what little signal existed (now fixed in the dedupe commit). Few edits land on busy skills.
 
 **Verdict:** the strategy-vs-skeptic crux is **still unresolved** - neither side confirmed.
-But the blocker moved from "is the proxy gate-grade?" to **"ax can't yet observe edit→outcome
-at all."** Prerequisites before re-running:
+But the blocker moved from "is the proxy gate-grade?" to **"ax can't yet observe edit->outcome
+at all."**
 
-- backfill `skill_revision` from ingest history (or wait for organic accumulation), AND
-- broaden skill-activation capture beyond the explicit Skill-tool `invoked` edge (slash /
-  plugin / frontmatter loads), so edited skills have downstream sessions to difference.
+### Why, precisely (after reading the ingest)
 
-Until both land, "ax = the open-ended verifier" cannot be tested, let alone claimed.
+The dominant blocker is **`skill_revision` sparsity**, NOT activation capture. The `invoked`
+edge already covers explicit Skill-tool calls (`ingest/transcripts.ts`) AND slash-commands
+(`ingest/commands.ts` namespaces `~/.claude/commands/` + per-repo `.claude/commands/`). The
+genuinely uncaptured class is **auto-loaded skills**: pulled in by a subagent's `skills:`
+frontmatter or injected by a SessionStart hook (e.g. `using-superpowers`) - they activate
+with no Skill-tool call, so no `invoked` edge. `ax skills unused` already compensates for the
+frontmatter case via `loadAgentScopeMap`, but writes no usage edge.
+
+### Prerequisites before re-running
+
+1. **Backfill `skill_revision`** from ingest history (or accrue organically). *Primary gate.*
+2. **Capture auto-load activations** as a derived edge - when a subagent with `skills:`
+   frontmatter spawns, or a SessionStart hook injects a skill, stamp an activation row
+   (ts + session). *Secondary; a bounded derive-stage feature, NOT a hot-path parser change.
+   Does not unblock the crux on its own - #1 is the gate.*
+
+Until #1 lands, "ax = the open-ended verifier" cannot be tested, let alone claimed.
 
 ## Not in scope
 

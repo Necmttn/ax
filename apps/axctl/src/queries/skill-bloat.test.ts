@@ -84,6 +84,39 @@ describe("fetchSkillBloat", () => {
         expect(rows.map((r) => r.name)).toEqual(["b", "c"]);
     });
 
+    it("collapses plugin-namespace twins (same content_hash), keeps bare name, sums invocations", async () => {
+        const rows = await run(
+            fetchSkillBloat({ budgetTokens: 100, limit: 10 }),
+            makeMockDb([
+                [
+                    { id: "skill:bare", name: "review", bytes: 800, dir_path: "/s/review", content_hash: "h1" },
+                    { id: "skill:ns", name: "necmttn:review", bytes: 800, dir_path: "/s/review", content_hash: "h1" },
+                ],
+                [
+                    { sid: "skill:bare", invocations: 4 },
+                    { sid: "skill:ns", invocations: 3 },
+                ],
+            ]),
+        );
+        expect(rows).toEqual([
+            { name: "review", bytes: 800, estTokens: 200, overBy: 100, invocations: 7 },
+        ]);
+    });
+
+    it("does NOT collapse distinct skills that lack a content_hash", async () => {
+        const rows = await run(
+            fetchSkillBloat({ budgetTokens: 100, limit: 10 }),
+            makeMockDb([
+                [
+                    { id: "skill:a", name: "a", bytes: 800, dir_path: "/s/a", content_hash: null },
+                    { id: "skill:b", name: "b", bytes: 800, dir_path: "/s/b", content_hash: null },
+                ],
+                [],
+            ]),
+        );
+        expect(rows.map((r) => r.name).sort()).toEqual(["a", "b"]);
+    });
+
     it("returns empty when every skill is within budget", async () => {
         const rows = await run(
             fetchSkillBloat({ budgetTokens: 2000, limit: 10 }),

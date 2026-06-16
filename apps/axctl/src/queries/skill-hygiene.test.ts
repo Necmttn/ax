@@ -116,6 +116,44 @@ describe("fetchSkillHygiene", () => {
         expect(rows).toEqual([]);
     });
 
+    it("collapses plugin-namespace twins: sums invocations, keeps bare name", async () => {
+        const rows = await run(
+            fetchSkillHygiene({ minInvocations: 3, limit: 10 }),
+            makeMockDb([
+                [
+                    { sid: "skill:bare", invocations: 2 },
+                    { sid: "skill:ns", invocations: 3 },
+                ],
+                [
+                    { id: "skill:bare", name: "foo", dir_path: "/s/foo", content_hash: "h1" },
+                    { id: "skill:ns", name: "necmttn:foo", dir_path: "/s/foo", content_hash: "h1" },
+                ],
+                [],
+            ]),
+        );
+        // merged 2+3=5 >= 3 threshold, bare name kept
+        expect(rows).toEqual([{ name: "foo", invocations: 5 }]);
+    });
+
+    it("twin is classified if EITHER member is classified", async () => {
+        const rows = await run(
+            fetchSkillHygiene({ minInvocations: 1, limit: 10 }),
+            makeMockDb([
+                [
+                    { sid: "skill:bare", invocations: 4 },
+                    { sid: "skill:ns", invocations: 4 },
+                ],
+                [
+                    { id: "skill:bare", name: "foo", dir_path: "/s/foo", content_hash: "h1" },
+                    { id: "skill:ns", name: "necmttn:foo", dir_path: "/s/foo", content_hash: "h1" },
+                ],
+                ["skill:ns"], // only the namespaced twin is classified
+            ]),
+        );
+        // collapsed -> classified -> dropped entirely
+        expect(rows).toEqual([]);
+    });
+
     it("returns empty when no data", async () => {
         const rows = await run(
             fetchSkillHygiene({ minInvocations: 3, limit: 10 }),
