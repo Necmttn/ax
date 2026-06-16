@@ -67,6 +67,7 @@ Install: `curl -fsSL https://ax.necmttn.com/install | bash`, then `npx skills ad
 
 ### Setup and ingest
 - `ax team sync` - activate the team's committed .ax/ rig (skills + agents) into your runtime, trust-gated (executable hooks gated)
+- `ax team trust` - review + install executable team hooks from .ax/hooks/ (sha256 trust-on-change, default-branch-only, fail-safe)
 - `ax setup` / `ax install` - first-time install: CLI, local SurrealDB, transcript watcher
 - `ax ingest [here] [--since=Nd]` - ingest transcripts, skills, and git history; `here` scopes to the current repo; the watcher does this automatically on new transcripts
 - `ax roles` - list role labels used for skill classification
