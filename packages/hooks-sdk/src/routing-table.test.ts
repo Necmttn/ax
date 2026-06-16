@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, it, test } from "bun:test";
 import { Result, Schema } from "effect";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -10,6 +10,7 @@ import {
   matchRoutingTable,
   parseStoredRoutingTable,
   readRoutingTableSync,
+  type RoutingTableShape,
 } from "./routing-table.ts";
 
 const tmp = (): string => mkdtempSync(join(tmpdir(), "ax-routing-table-"));
@@ -206,5 +207,40 @@ describe("matchRoutingTable", () => {
       ],
     };
     expect(matchRoutingTable(table, "ship it", null)?.classId).toBe("good");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// matchRoutingTable exclude[] carve-out
+// ---------------------------------------------------------------------------
+
+const tbl = (cls: object): RoutingTableShape => ({
+  version: 1,
+  classes: [{ id: "impl", pattern: "^implement", flags: "i", suggest: "sonnet", reason: "impl", ...cls }],
+  agentTypes: {},
+});
+
+describe("matchRoutingTable exclude", () => {
+  it("matches when no exclude", () => {
+    expect(matchRoutingTable(tbl({}), "Implement task 3", null)?.suggest).toBe("sonnet");
+  });
+  it("exclude regex suppresses a match (falls through to null)", () => {
+    expect(matchRoutingTable(tbl({ exclude: ["design"] }), "Implement the design review", null)).toBeNull();
+  });
+  it("exclude that does not match leaves the class matching", () => {
+    expect(matchRoutingTable(tbl({ exclude: ["zzz"] }), "Implement task 3", null)?.suggest).toBe("sonnet");
+  });
+  it("invalid exclude regex is ignored (fail-open, still matches)", () => {
+    expect(matchRoutingTable(tbl({ exclude: ["("] }), "Implement task 3", null)?.suggest).toBe("sonnet");
+  });
+  it("a later class still matches after an excluded earlier one", () => {
+    const t: RoutingTableShape = {
+      version: 1, agentTypes: {},
+      classes: [
+        { id: "impl", pattern: "^implement", flags: "i", suggest: "sonnet", reason: "i", exclude: ["design"] },
+        { id: "any", pattern: "design", flags: "i", suggest: "haiku", reason: "d" },
+      ],
+    };
+    expect(matchRoutingTable(t, "Implement the design", null)?.suggest).toBe("haiku");
   });
 });
