@@ -1,4 +1,5 @@
 import { homedir } from "node:os";
+import { existsSync } from "node:fs";
 import { execSync, spawnSync } from "node:child_process";
 import { Cause, Effect, FileSystem, Path, Schema } from "effect";
 import { orAbsent } from "@ax/lib/shared/fs-error";
@@ -66,6 +67,27 @@ const DERIVE_PLIST = posixPath.join(LAUNCH_AGENTS_DIR, `${DERIVE_LABEL}.plist`);
 const QUOTA_REFRESH_PLIST = posixPath.join(LAUNCH_AGENTS_DIR, `${QUOTA_REFRESH_LABEL}.plist`);
 const SERVE_LABEL = "com.necmttn.ax-serve";
 const SERVE_PLIST = posixPath.join(LAUNCH_AGENTS_DIR, `${SERVE_LABEL}.plist`);
+
+/** Candidate install locations for the `ax studio` desktop app bundle (productName "ax studio"). */
+export const DESKTOP_APP_CANDIDATES: readonly string[] = [
+    "/Applications/ax studio.app",
+    posixPath.join(HOME, "Applications", "ax studio.app"),
+];
+
+/**
+ * Locate an installed `ax studio.app`. When present, the desktop app owns the
+ * surreal + serve daemon (IDE model - see
+ * docs/superpowers/specs/2026-06-16-smappservice-background-helper-design.md), so
+ * `cmdInstall` skips the 5 background LaunchAgents (no more "bash - unidentified
+ * developer" Login Items) and migrates any pre-existing ones. `exists` is
+ * injected for testability; production passes `existsSync`.
+ */
+export function findDesktopApp(
+    candidates: readonly string[] = DESKTOP_APP_CANDIDATES,
+    exists: (p: string) => boolean = existsSync,
+): string | undefined {
+    return candidates.find(exists);
+}
 const ROCKSDB_BLOCK_CACHE_SIZE = process.env.AX_DB_ROCKSDB_BLOCK_CACHE_SIZE ?? "268435456";
 const ROCKSDB_WRITE_BUFFER_SIZE = process.env.AX_DB_ROCKSDB_WRITE_BUFFER_SIZE ?? "33554432";
 const ROCKSDB_MAX_WRITE_BUFFER_NUMBER = process.env.AX_DB_ROCKSDB_MAX_WRITE_BUFFER_NUMBER ?? "4";

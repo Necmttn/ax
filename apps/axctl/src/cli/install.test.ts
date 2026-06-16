@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
+    findDesktopApp,
     formatDaemonStatus,
     formatDoctorReport,
     parseDaemonCommand,
@@ -8,6 +9,22 @@ import {
     type DaemonStatus,
     type DoctorReport,
 } from "./install.ts";
+
+describe("findDesktopApp (desktop owns the daemon → CLI skips LaunchAgents)", () => {
+    const candidates = [
+        "/Applications/ax studio.app",
+        "/Users/someone/Applications/ax studio.app",
+    ] as const;
+
+    test("returns the first candidate path that exists", () => {
+        const got = findDesktopApp(candidates, (p) => p === candidates[1]);
+        expect(got).toBe(candidates[1]);
+    });
+
+    test("returns undefined when no candidate exists", () => {
+        expect(findDesktopApp(candidates, () => false)).toBeUndefined();
+    });
+});
 
 describe("resolveDaemonHostPort (doctor honors AX_DB_URL)", () => {
     const state = {
