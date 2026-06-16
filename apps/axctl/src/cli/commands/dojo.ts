@@ -15,7 +15,7 @@
  * still render - their items are derived from the local graph, not the quota
  * API.
  */
-import { Effect, FileSystem } from "effect";
+import { Effect, FileSystem, Option } from "effect";
 import { Argument, Command, Flag } from "effect/unstable/cli";
 import { posixPath } from "@ax/lib/shared/path";
 import { ProcessService } from "@ax/lib/process";
@@ -43,12 +43,21 @@ import {
     scoreSpar,
     stampSparSession,
 } from "../../dojo/spar.ts";
+import {
+    buildSkillSparBrief,
+    isSkillSparBrief,
+    parseSkillSparBrief,
+    renderSkillSparBrief,
+    renderSkillSparReport,
+    resolveSkillSparTask,
+    scoreSkillSpar,
+} from "../../dojo/skill-spar.ts";
 import { resolvePwdRepository } from "../../pwd.ts";
 import { defaultQuotaCachePath } from "../../quota/cache.ts";
 import { QuotaEnvLive } from "../../quota/quota-env.ts";
 import { getQuota } from "../../quota/quota.ts";
 import type { RuntimeManifest } from "./manifest.ts";
-import { fail, jsonFlag } from "./shared.ts";
+import { fail, jsonFlag, optionValue } from "./shared.ts";
 
 // ---------------------------------------------------------------------------
 // pure resolution helpers (exported for unit tests)
@@ -82,6 +91,15 @@ const VALID_KINDS: ReadonlyArray<DraftKind> = ["bug", "improvement"];
 /** Narrow a raw --kind value to a DraftKind, or null when it is invalid. */
 export const isValidKind = (kind: string): kind is DraftKind =>
     (VALID_KINDS as ReadonlyArray<string>).includes(kind);
+
+/**
+ * Dispatch helper for spar-score: returns "skill" for skill-spar briefs
+ * (frontmatter contains `kind: skill`), "code" for all others (code-delta
+ * briefs have no `kind:` line, and garbage content falls through to "code").
+ * Exported for unit testing.
+ */
+export const selectSparScoreKind = (content: string): "skill" | "code" =>
+    isSkillSparBrief(content) ? "skill" : "code";
 
 // ---------------------------------------------------------------------------
 // ax dojo agenda
@@ -330,50 +348,207 @@ const resolveRepo = Effect.gen(function* () {
     };
 });
 
+/**
+ * Pure flag-validation helper for `ax dojo spar-plan`.
+ *
+ * Returns an error message string when the supplied flags are mutually
+ * exclusive or require another flag that is absent; returns null when valid.
+ * Exported so tests can drive it without spawning the CLI (and without a
+ * running SurrealDB).
+ *
+ * Rules:
+ * - `--skill` and a positional `<sha>` are mutually exclusive.
+ * - `--session` / `--sha` are skill-spar options; they require `--skill`.
+ */
+export const validateSparPlanFlags = (f: {
+    skill: string;
+    session: string;
+    sha: string;
+    positionalSha: string | undefined;
+}): string | null => {
+    if (f.skill !== "" && f.positionalSha !== undefined) {
+        return "ax dojo spar-plan: --skill and positional <sha> are mutually exclusive - use --skill <name> for skill-spar or <sha> alone for code-delta";
+    }
+    if (f.skill === "" && (f.session !== "" || f.sha !== "")) {
+        return "ax dojo spar-plan: --session/--sha require --skill (they scope the skill-spar baseline; code-delta mode takes a positional <sha>)";
+    }
+    return null;
+};
+
+/**
+ * Convert a skill name to a filesystem-safe slug: non-alphanumeric chars →
+ * `-`, consecutive dashes collapsed, leading/trailing dashes stripped.
+ * e.g. "ax:dojo" → "ax-dojo", "my:skill:v2" → "my-skill-v2"
+ */
+export const makeSkillSlug = (name: string): string =>
+    name
+        .replace(/[^a-zA-Z0-9]/g, "-")
+        .replace(/-+/g, "-")
+        .replace(/^-|-$/g, "");
+
+/**
+ * Build the skill-spar brief id: `<slug>-<hash6>-<YYYY-MM-DD>`.
+ *
+ * The hash6 (6 hex chars of a stable hash of the SKILL NAME) disambiguates two
+ * distinct skills that slug to the same string within a day (which would
+ * otherwise silently overwrite each other's brief AND snapshot), and keeps the
+ * id usable when the slug is empty (an all-non-alphanumeric name slugs to "").
+ * The id flows into worktree branch names + file names + the spar-score <id>
+ * lookup - all fine with the extra segment.
+ */
+export const makeSkillSparId = (skillName: string, now: Date): string => {
+    const slug = makeSkillSlug(skillName);
+    const hash6 = Bun.hash(skillName).toString(16).slice(0, 6);
+    const date = now.toISOString().slice(0, 10);
+    return slug ? `${slug}-${hash6}-${date}` : `${hash6}-${date}`;
+};
+
 const sparPlanCommand = Command.make(
     "spar-plan",
-    { sha: Argument.string("sha"), json: jsonFlag },
-    ({ sha, json }) =>
-        Effect.gen(function* () {
-            const { repoRoot, mainRepoRoot, repositoryKey } = yield* resolveRepo;
-            const brief = yield* captureBaseline(
-                sha,
-                repoRoot,
-                repositoryKey,
-                new Date().toISOString(),
-            ).pipe(
-                Effect.catchTag("SparCaptureError", (err) => {
-                    console.error(`ax dojo spar-plan: ${err.message}`);
-                    return Effect.sync(() => process.exit(1)) as Effect.Effect<never>;
-                }),
-            );
+    {
+        positionalSha: Argument.string("sha").pipe(Argument.optional),
+        json: jsonFlag,
+        skill: Flag.string("skill").pipe(Flag.withDefault("")),
+        session: Flag.string("session").pipe(Flag.withDefault("")),
+        sha: Flag.string("sha").pipe(Flag.withDefault("")),
+    },
+    ({ positionalSha, json, skill, session, sha }) => {
+        // Pure flag validation BEFORE any Effect/DB work. fail() calls
+        // process.exit(2) synchronously so the DB layer is never initialised
+        // when these guards fire - CI tests can assert the error messages
+        // without a running SurrealDB instance.
+        const flagErr = validateSparPlanFlags({
+            skill,
+            session,
+            sha,
+            positionalSha: Option.getOrUndefined(positionalSha),
+        });
+        if (flagErr !== null) fail(flagErr);
 
-            // Anchor the worktree at the MAIN repo root so the brief's embedded
-            // `git worktree add` command, the console hint, and spar-score's
-            // variant cwd lookup (which joins brief.worktree against the same
-            // main root) all agree on ONE absolute path - no matter which
-            // (possibly linked) worktree the agent runs spar-plan from.
-            const worktreeAbs = posixPath.join(mainRepoRoot, brief.worktree);
+        return Effect.gen(function* () {
+            if (skill !== "") {
+                // ----------------------------------------------------------------
+                // SKILL SPAR PATH
+                // ----------------------------------------------------------------
+                const { repoRoot, mainRepoRoot, repositoryKey } = yield* resolveRepo;
 
-            const fs = yield* FileSystem.FileSystem;
-            yield* fs.makeDirectory(dojoSparDir(), { recursive: true });
-            const path = dojoSparBriefPath(brief.id);
-            const tmp = `${path}.tmp.${process.pid}`;
-            yield* fs.writeFileString(tmp, renderSparBrief(brief, worktreeAbs));
-            yield* fs.rename(tmp, path);
+                // Single clock read so the id's date and createdAt can't skew
+                // across a midnight boundary between two `new Date()` calls.
+                const now = new Date();
+                const id = makeSkillSparId(skill, now);
+                const createdAt = now.toISOString();
 
-            if (json) {
-                console.log(prettyPrint(brief));
-                return;
+                const task = yield* resolveSkillSparTask(skill, repoRoot, repositoryKey, {
+                    ...(session ? { sessionId: session } : {}),
+                    ...(sha ? { sha } : {}),
+                }).pipe(
+                    Effect.catchTag("SparCaptureError", (err) => {
+                        console.error(`ax dojo spar-plan: ${err.message}`);
+                        return Effect.sync(() => process.exit(1)) as Effect.Effect<never>;
+                    }),
+                );
+
+                const brief = buildSkillSparBrief(task, id, createdAt);
+
+                // Absolute paths for spar assets (inside ~/.ax/dojo/spar/)
+                const sparDir = dojoSparDir();
+                const snapshotPathAbs = posixPath.join(sparDir, `${id}.skill.orig.md`);
+                const editedPathAbs = posixPath.join(sparDir, `${id}.skill.edited.md`);
+
+                // Absolute worktree paths anchored at MAIN repo root (same
+                // pattern as the code-delta path below, so spar-score's cwd
+                // resolution is consistent across both spar kinds).
+                const worktreeAAbs = posixPath.join(mainRepoRoot, brief.worktreeA);
+                const worktreeBAbs = posixPath.join(mainRepoRoot, brief.worktreeB);
+
+                const fs = yield* FileSystem.FileSystem;
+                yield* fs.makeDirectory(sparDir, { recursive: true });
+
+                // Write the original skill snapshot atomically (tmp + rename).
+                // This is the SOLE restore source for swap-out - after the live
+                // SKILL.md is overwritten for Arm B, a truncated snapshot would
+                // lose the original skill irrecoverably, so it must never be a
+                // bare write.
+                const snapTmp = `${snapshotPathAbs}.tmp.${process.pid}`;
+                yield* fs.writeFileString(snapTmp, task.originalSkill);
+                yield* fs.rename(snapTmp, snapshotPathAbs);
+                // editedPathAbs is intentionally NOT written - the operator/agent fills it.
+
+                // Write the brief (atomic rename).
+                const briefPath = dojoSparBriefPath(brief.id);
+                const tmp = `${briefPath}.tmp.${process.pid}`;
+                yield* fs.writeFileString(
+                    tmp,
+                    renderSkillSparBrief(brief, {
+                        worktreeAAbs,
+                        worktreeBAbs,
+                        snapshotPathAbs,
+                        editedPathAbs,
+                    }),
+                );
+                yield* fs.rename(tmp, briefPath);
+
+                if (json) {
+                    console.log(prettyPrint(brief));
+                    return;
+                }
+                console.log(
+                    `${briefPath}\n\nnext: write your edited skill to ${editedPathAbs}, run both arms (see the brief), then ax dojo spar-score ${brief.id}`,
+                );
+            } else {
+                // ----------------------------------------------------------------
+                // CODE-DELTA PATH (original behavior, 100% unchanged)
+                // ----------------------------------------------------------------
+                const shaStr = optionValue(positionalSha);
+                if (!shaStr) {
+                    fail(
+                        "ax dojo spar-plan: provide a positional <sha> (code-delta mode) or --skill <name> (skill-spar mode)",
+                    );
+                }
+
+                const { repoRoot, mainRepoRoot, repositoryKey } = yield* resolveRepo;
+                const brief = yield* captureBaseline(
+                    shaStr,
+                    repoRoot,
+                    repositoryKey,
+                    new Date().toISOString(),
+                ).pipe(
+                    Effect.catchTag("SparCaptureError", (err) => {
+                        console.error(`ax dojo spar-plan: ${err.message}`);
+                        return Effect.sync(() => process.exit(1)) as Effect.Effect<never>;
+                    }),
+                );
+
+                // Anchor the worktree at the MAIN repo root so the brief's embedded
+                // `git worktree add` command, the console hint, and spar-score's
+                // variant cwd lookup (which joins brief.worktree against the same
+                // main root) all agree on ONE absolute path - no matter which
+                // (possibly linked) worktree the agent runs spar-plan from.
+                const worktreeAbs = posixPath.join(mainRepoRoot, brief.worktree);
+
+                const fs = yield* FileSystem.FileSystem;
+                yield* fs.makeDirectory(dojoSparDir(), { recursive: true });
+                const path = dojoSparBriefPath(brief.id);
+                const tmp = `${path}.tmp.${process.pid}`;
+                yield* fs.writeFileString(tmp, renderSparBrief(brief, worktreeAbs));
+                yield* fs.rename(tmp, path);
+
+                if (json) {
+                    console.log(prettyPrint(brief));
+                    return;
+                }
+                const worktreeCmd = `git worktree add ${worktreeAbs} -b dojo/spar-${brief.id} ${brief.parentSha}`;
+                console.log(
+                    `${path}\n\nNext:\n  ${worktreeCmd}\n  fill the Delta section, run the task in that worktree, then: ax dojo spar-score ${brief.id}`,
+                );
             }
-            const worktreeCmd = `git worktree add ${worktreeAbs} -b dojo/spar-${brief.id} ${brief.parentSha}`;
-            console.log(
-                `${path}\n\nNext:\n  ${worktreeCmd}\n  fill the Delta section, run the task in that worktree, then: ax dojo spar-score ${brief.id}`,
-            );
-        }),
+        });
+    },
 ).pipe(
     Command.withDescription(
-        "Capture + freeze a landed task's baseline (prompt + cost/turns/churn) and emit a one-delta experiment brief to ~/.ax/dojo/spar/<id>.md. --json",
+        "Capture + freeze a baseline and emit an experiment brief to ~/.ax/dojo/spar/<id>.md.\n" +
+            "  Code-delta mode: ax dojo spar-plan <sha> [--json]\n" +
+            "  Skill-spar mode: ax dojo spar-plan --skill <name> [--session <id>] [--sha <sha>] [--json]",
     ),
 );
 
@@ -398,6 +573,42 @@ const sparScoreCommand = Command.make(
                     return Effect.sync(() => process.exit(1)) as Effect.Effect<never>;
                 }),
             );
+            if (selectSparScoreKind(content) === "skill") {
+                // ----------------------------------------------------------------
+                // SKILL SPAR PATH
+                // ----------------------------------------------------------------
+                const skillBrief = parseSkillSparBrief(content);
+                if (skillBrief === null) {
+                    console.error(
+                        `ax dojo spar-score: could not parse skill-spar brief at ${briefPath}`,
+                    );
+                    return yield* Effect.sync(() => process.exit(1));
+                }
+                const { mainRepoRoot } = yield* resolveRepo;
+                // sinceForChurn: same derivation as the code-delta path (new Date(brief.createdAt))
+                const sinceForChurn = new Date(skillBrief.createdAt);
+                const result = yield* scoreSkillSpar(skillBrief, mainRepoRoot, sinceForChurn).pipe(
+                    Effect.catchTag("SparCaptureError", (err) => {
+                        console.error(`ax dojo spar-score: ${err.message}`);
+                        return Effect.sync(() => process.exit(1)) as Effect.Effect<never>;
+                    }),
+                );
+                yield* fs.makeDirectory(dojoSparDir(), { recursive: true });
+                const path = dojoSparReportPath(id);
+                const tmp = `${path}.tmp.${process.pid}`;
+                yield* fs.writeFileString(tmp, renderSkillSparReport(result.score, skillBrief));
+                yield* fs.rename(tmp, path);
+                console.log(
+                    json
+                        ? prettyPrint({ ...result, id })
+                        : renderSkillSparReport(result.score, skillBrief),
+                );
+                return;
+            }
+
+            // ----------------------------------------------------------------
+            // CODE-DELTA PATH (original behavior, 100% unchanged)
+            // ----------------------------------------------------------------
             const brief = parseSparBrief(content);
             if (brief === null) {
                 console.error(`ax dojo spar-score: could not parse spar brief at ${briefPath}`);

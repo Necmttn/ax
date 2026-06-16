@@ -149,7 +149,11 @@
 .rdx-card {
     position: relative; overflow: hidden; background: var(--surface); border: 1px solid var(--border);
     border-radius: 16px; padding: 18px; display: flex; flex-direction: column; gap: 10px;
-    opacity: 0; animation: rdx-card-in 0.5s var(--ease-back) forwards; transition: border-color 0.18s var(--ease);
+    /* fill-mode backwards (not forwards + literal opacity:0) so the entrance
+       animation still plays from the `from` keyframe, but the resting state is
+       the element's own opacity:1 - cards fail VISIBLE if the animation never
+       runs (paused/background tab, missing keyframe). */
+    animation: rdx-card-in 0.5s var(--ease-back) backwards; transition: border-color 0.18s var(--ease);
 }
 .rdx-card:hover { border-color: var(--border-hi); }
 .rdx-card::after {

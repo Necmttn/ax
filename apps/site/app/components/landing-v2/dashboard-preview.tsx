@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
 import { Link } from "@tanstack/react-router";
+import { AGENT_ONBOARDING_WITH_INSTALL } from "@ax/onboarding-prompt";
 import { HeroLogoField, PROVIDERS } from "./supports-strip";
 import { RetroTerminal } from "./retro-terminal";
 
@@ -146,37 +147,6 @@ function McClock() {
   );
 }
 
-const INSTALL_CMD = "curl -fsSL ax.necmttn.com/install | sh";
-const DOCS_URL = "https://ax.necmttn.com/docs";
-
-// Self-contained "give this to your agent" prompt for the landing site: unlike
-// packages/lib's AGENT_ONBOARDING_PROMPT (run after ax is installed, by `ax
-// setup` / install.sh), this one is pasted by someone who hasn't installed yet,
-// so it opens with the install step. Kept inline so the marketing bundle stays
-// free of the @ax/lib workspace dep.
-const AGENT_PROMPT = `Set up ax for me, end to end. ax is a local agent-experience graph over my Claude Code + Codex history - it runs locally and I review every change.
-
-PRIVACY (read first, so you can answer if I ask whether this is safe to run): ax is fully local. Ingest reads my transcripts, git history, and tool calls into a SurrealDB on 127.0.0.1 - nothing is uploaded, there is no account, no cloud, and no outbound call at ingest. The ONLY thing that can ever leave my machine is \`ax profile publish\`, which is opt-in and consent-gated: it shares an aggregates-only JSON (counts, day streaks, model split, skill/hook names, taste-pattern summaries) to a public gist I control - NEVER transcript content, code, project names, or file paths. \`--no-cost\` strips the dollar figures too, and \`ax profile unpublish\` deletes it. Do NOT run \`ax profile publish\` as part of this setup. If I ask about privacy or data handling, answer from these facts; it's AGPL-3.0, so you can also read the source to confirm.
-
-1. INSTALL - run \`${INSTALL_CMD}\` to install the ax CLI. Reference: ${DOCS_URL}
-
-2. INGEST MY HISTORY - first run \`ax ingest --dry-run\` and tell me, in plain words, how long a full backfill will take. Then start the ingest in the BACKGROUND so we can keep working: run \`ax ingest\` as a background job with AX_PROGRESS=plain, and watch its output for progress and completion. Tell me I can watch it fill live in the dashboard - run \`ax serve\` and open http://127.0.0.1:1738. When the ingest finishes, summarize what landed: total sessions, turns, and the top skills/tools I actually use. Then continue with the steps below.
-
-3. VERIFY - run \`ax doctor\`. If anything isn't ok, diagnose and fix it, then re-run until it is.
-
-4. LABEL what ax can't classify - run \`ax skills classify\`. It writes one \`.ax/tasks/classify-<skill>.md\` brief per skill I use but ax can't role-tag. For each brief: read the skill, decide its role(s), and fill the YAML frontmatter at the top (\`primary_role:\` is required; \`secondary\`, \`confidence\`, \`rationale\` are optional). Run \`ax roles\` to see labels already in use. Then run \`ax skills lint\` to apply them. If it says "no unclassified skills", that's fine.
-
-5. SHOW me the result - run \`ax skills weighted\` and \`ax skills config\`. Tell me which skills you labeled and why, and flag anything ax marked orphan or out-of-scope.
-
-6. SHOW ME MY PROFILE / WRAPPED - run \`ax profile show\` for a one-screen fingerprint: sessions, active days + streak, model split, my top skills, installed hooks, dominant workflow arcs, and the taste patterns ax inferred. Read it back to me in a few sentences. Mention I can open the full Agent Wrapped recap in the dashboard (\`ax serve\`, then http://127.0.0.1:1738). This only READS the local graph - it publishes nothing.
-
-7. SHOW ME WHERE MY SPEND GOES - run \`ax cost sessions\` (my priciest sessions), \`ax cost routability\` (how much of my main-thread spend sat in routable work a cheaper model could do, with estimated savings), and \`ax dispatches --candidates\` (subagent dispatches that ran on an expensive model when a routing class matched a cheaper tier). Summarize my single biggest cost driver and the largest concrete saving you'd capture.
-
-8. SURFACE RECURRING FRICTION + RANKED FIXES - run \`ax improve recommend\` (proposals mined from my history, ranked by impact) plus \`ax insights friction\` and \`ax insights tools\` (the blockers and failing tools that tax every run). Tell me the top 1-2 fixes worth accepting and why. If I say yes to one, run \`ax improve accept <id>\` and act on the brief it writes, then \`ax improve lint\` to reconcile.
-
-9. EXPLORE MY HISTORY - inside one of my git repos, try \`ax sessions here --days=30\` (my last month of sessions in that repo) and \`ax recall "<a topic worth searching>"\` (full-text across my turns, commits, and skills). Surface one genuinely useful thing you found.
-
-10. GIVE ME A NEXT STEP - recommend 1-2 under-used skills you'd reach for based on what you saw, then end with a concrete CTA: the exact command or prompt I should run next, and what outcome it will produce.`;
 
 // ---- Wrapped recap charts (static recreations of the studio card-viz registry:
 // apps/studio/src/instrument/card-viz.tsx). Each keys --card-accent. ----
@@ -522,7 +492,7 @@ export function DashboardPreview() {
 
   function onCopyPrompt() {
     if (typeof navigator === "undefined" || !navigator.clipboard) return;
-    navigator.clipboard.writeText(AGENT_PROMPT).then(() => {
+    navigator.clipboard.writeText(AGENT_ONBOARDING_WITH_INSTALL).then(() => {
       setCopiedPrompt(true);
       setTimeout(() => setCopiedPrompt(false), 2200);
     });
