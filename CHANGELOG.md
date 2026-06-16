@@ -1,5 +1,38 @@
 # Changelog
 
+## [0.32.0](https://github.com/Necmttn/ax/compare/v0.31.0...v0.32.0) (2026-06-16)
+
+
+### Features
+
+* ax cost routability — main-thread routability lens ([#437](https://github.com/Necmttn/ax/issues/437)) ([6b27808](https://github.com/Necmttn/ax/commit/6b27808935768ed5a5ba134a91ad263f170f6c3c))
+* **insights:** multi-hop telemetry enrichment of behavior insights ([#439](https://github.com/Necmttn/ax/issues/439)) ([02b43d6](https://github.com/Necmttn/ax/commit/02b43d64d0f95f4b7ca99f176f3a119b274eae0d))
+* **onboarding:** privacy block in agent setup prompt ([#467](https://github.com/Necmttn/ax/issues/467)) ([601bcac](https://github.com/Necmttn/ax/commit/601bcac26c3c10052858f8d9a2e10a19eb1a56cf))
+* **profile:** print profile URL after publish + /@&lt;login&gt; alias ([91def51](https://github.com/Necmttn/ax/commit/91def51e0d00fd59849067037e901f40d00c6484))
+* **profile:** redefine DEPTH as outcome-density + add radar axis legend ([#475](https://github.com/Necmttn/ax/issues/475)) ([e30fbf7](https://github.com/Necmttn/ax/commit/e30fbf7246c7fce7dd98f95ea9380557c7b3eebc))
+* seed ax team rig (.ax/skills + .ax/agents) + un-ignore it ([#451](https://github.com/Necmttn/ax/issues/451)) ([30efbc3](https://github.com/Necmttn/ax/commit/30efbc362446f6a6f1160c5adb84ac656286aacd))
+* **serve:** serve studio from the daemon at 127, drop the hosted-studio link ([#476](https://github.com/Necmttn/ax/issues/476)) ([81d643b](https://github.com/Necmttn/ax/commit/81d643bceb9d9e601c6fa72beba8ec22b9b53a3c))
+* **site:** "used by engineers from" logo strip on landing ([#453](https://github.com/Necmttn/ax/issues/453)) ([d615fcb](https://github.com/Necmttn/ax/commit/d615fcbc4753a1bbe9f81b6ff3a499dd1c5baed6))
+* **site:** blog section + origin-grade article system ([#452](https://github.com/Necmttn/ax/issues/452)) ([4908e8f](https://github.com/Necmttn/ax/commit/4908e8f42c6380f90b4eea0444404aed3ad3c80c))
+* **site:** dark-instrument Mission Control mock on the landing + cycling wrapped popups ([#460](https://github.com/Necmttn/ax/issues/460)) ([f680c34](https://github.com/Necmttn/ax/commit/f680c3402e3b860e0d0a910301f3242396e80812))
+* **site:** embed ax studio /cost screenshots in blog post + showcases ([#461](https://github.com/Necmttn/ax/issues/461)) ([25ade75](https://github.com/Necmttn/ax/commit/25ade75b4d23f0fb18ca9b99afdd73fcf4d9d795))
+* **site:** grouped header nav dropdowns + dark-instrument how-it-works PROPOSE deck ([#465](https://github.com/Necmttn/ax/issues/465)) ([40467e5](https://github.com/Necmttn/ax/commit/40467e552fe1a0a354a332fcd732cd7f2c42719f))
+* **skills:** SkillOpt-informed skill hygiene — token-budget lint, namespace dedup, auto-load capture ([#458](https://github.com/Necmttn/ax/issues/458)) ([571ec51](https://github.com/Necmttn/ax/commit/571ec51b152d45539f7b5c3f4804725ed212d099))
+* **studio:** /cost view + interactive regex routing tuner ([#459](https://github.com/Necmttn/ax/issues/459)) ([53ccfa4](https://github.com/Necmttn/ax/commit/53ccfa485a4bb70c3b500789c761a3a26d5975f4))
+* **studio:** instrument-ify /sessions — masthead, hairline ledger, dark story strips ([#433](https://github.com/Necmttn/ax/issues/433)) ([6259b3d](https://github.com/Necmttn/ax/commit/6259b3d6200c72e8e995172416e3aa674ade69c6))
+* **team:** `.ax.local/` experiment overlay + promote (Mesh B) ([#455](https://github.com/Necmttn/ax/issues/455)) ([2ae4533](https://github.com/Necmttn/ax/commit/2ae4533f8421b085029124f09c91953cca687ddd))
+* **team:** executable-hook trust layer — `ax team trust` (Mesh A) ([#454](https://github.com/Necmttn/ax/issues/454)) ([3a18bb6](https://github.com/Necmttn/ax/commit/3a18bb6ecedf9c23a7b65a740d0ef4d3044a17a8))
+* **team:** local `ax team sync` — Slice 0 of the team improvement mesh ([#440](https://github.com/Necmttn/ax/issues/440)) ([281d232](https://github.com/Necmttn/ax/commit/281d232170f8b8996b2c98804686a8e1b19d8e08))
+
+
+### Bug Fixes
+
+* **cli:** doctor honors AX_DB_URL + classify dead-end loop (dogfood) ([#456](https://github.com/Necmttn/ax/issues/456)) ([347661e](https://github.com/Necmttn/ax/commit/347661e3416c69010b02d3a8deed308eab5a19ed))
+* **db:** route SurrealDB auth through connect() so ax serve never goes anonymous ([#431](https://github.com/Necmttn/ax/issues/431)) ([#435](https://github.com/Necmttn/ax/issues/435)) ([63d19d1](https://github.com/Necmttn/ax/commit/63d19d1c4ff47aad6a15c1096de9b48ad7386d0e))
+* **install:** profile publish watcher gate 6h -&gt; 2h ([#464](https://github.com/Necmttn/ax/issues/464)) ([3e31684](https://github.com/Necmttn/ax/commit/3e31684a682abb11aa6884f6117257a40a4bc232))
+* **signals:** exclude harness-injected turns from correction derivation ([#442](https://github.com/Necmttn/ax/issues/442)) ([86cd863](https://github.com/Necmttn/ax/commit/86cd8638ddbae188405bd8c4c40600c86f3ffd05))
+* **studio:** dark-bridge remaining light-era route stragglers ([#436](https://github.com/Necmttn/ax/issues/436)) ([224be92](https://github.com/Necmttn/ax/commit/224be920ff24f1803fb3eb8ddf0c9a577f2b9daf))
+
 ## [0.31.0](https://github.com/Necmttn/ax/compare/v0.30.0...v0.31.0) (2026-06-15)
 
 
