@@ -283,7 +283,10 @@ function classifyUserTurn(row: TurnAnalysisInput): Omit<TurnAnalysisWrite, "turn
         };
     }
 
-    if (ask === "verification_request" || /\bverify|test|typecheck|lint|check\b/i.test(lower)) {
+    // Grouped boundaries: the old ungrouped /\bverify|test|.../ matched "test"
+    // inside "fastest"/"latest", "lint" inside any word, etc. (issue #471).
+    // Plural/inflected forms kept (run the tests, make sure the checks pass).
+    if (ask === "verification_request" || /\b(verif(?:y|ies)|tests?|typechecks?|lint|checks?)\b/i.test(lower)) {
         return {
             speaker: "user",
             act: "request",
