@@ -12151,13 +12151,92 @@ footer.site-footer { padding: 48px 32px 56px; }
     .profile-page, .leaders-page { padding-left: 20px; padding-right: 20px; }
 }
 
-/* ----- leaders (unchanged behavior, /leaders depends on these) ----- */
-.leaders-tabs { display: flex; gap: 8px; margin: 16px 0; flex-wrap: wrap; }
-.leaders-tabs button { font: inherit; padding: 6px 14px; border: 1px solid var(--line); background: var(--panel); cursor: pointer; border-radius: 6px; }
-.leaders-tabs button[aria-selected="true"] { background: var(--ink); color: var(--page); }
-.leaders-table { width: 100%; border-collapse: collapse; font-family: var(--mono); font-size: 0.9rem; }
-.leaders-table td, .leaders-table th { padding: 8px 10px; border-bottom: 1px solid var(--line); text-align: left; }
-.leaders-table td:last-child, .leaders-table th:last-child { text-align: right; }
+/* ----- leaders: live roster (every builder's full receipt, one row) ----- */
+.lb-head h1 { margin: 0 0 8px; }
+.lb-head .muted { max-width: 64ch; margin: 0 0 10px; }
+.lb-meta { font-family: var(--mono); font-size: 0.78rem; color: var(--muted); margin: 0 0 4px; }
+.lb-meta strong { color: var(--ink); }
+
+.lb-roster { width: 100%; border-collapse: collapse; font-family: var(--mono); font-size: 0.9rem; margin: 18px 0 0; }
+.lb-roster thead th {
+    font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.04em;
+    color: var(--muted); font-weight: 600; border-bottom: 1px solid var(--line);
+    padding: 0 12px 8px; text-align: left;
+}
+.lb-roster thead th.lb-num { text-align: right; }
+.lb-roster thead th button {
+    font: inherit; color: inherit; text-transform: inherit; letter-spacing: inherit;
+    background: none; border: 0; padding: 0; cursor: pointer; display: inline-flex;
+    align-items: baseline; gap: 4px;
+}
+.lb-roster thead th button:hover { color: var(--ink); }
+.lb-roster thead th[data-active="true"] button { color: var(--ink); }
+.lb-caret { font-size: 0.6rem; }
+
+.lb-roster tbody td { padding: 11px 12px; border-bottom: 1px solid var(--line); vertical-align: middle; }
+.lb-roster tbody tr:hover { background: color-mix(in srgb, var(--panel) 60%, transparent); }
+.lb-roster tbody tr[data-lead="true"] td { background: color-mix(in srgb, var(--green) 9%, transparent); }
+.lb-rank { width: 1%; color: var(--muted); font-variant-numeric: tabular-nums; }
+.lb-roster tbody tr[data-lead="true"] .lb-rank { color: var(--green); font-weight: 700; }
+
+.lb-who a { display: inline-flex; align-items: center; gap: 9px; color: var(--ink); text-decoration: none; }
+.lb-who a:hover span { border-bottom: 1px solid var(--ink); }
+.lb-avatar { border-radius: 50%; background: var(--panel); border: 1px solid var(--line); flex: none; }
+
+.lb-num { text-align: right; font-variant-numeric: tabular-nums; }
+.lb-num .lb-val { color: var(--muted); }
+.lb-num[data-active="true"] { position: relative; }
+.lb-num[data-active="true"] .lb-val { color: var(--ink); font-weight: 600; position: relative; z-index: 1; }
+.lb-num[data-active="true"] .lb-bar {
+    position: absolute; right: 0; top: 50%; transform: translateY(-50%); height: 60%;
+    background: color-mix(in srgb, var(--green) 22%, transparent);
+    border-radius: 3px; pointer-events: none;
+}
+
+/* ----- join band (slim CTA woven below the live board, never a takeover) ----- */
+.lb-join {
+    display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+    margin: 22px 0 0; padding: 12px 14px; border: 1px solid var(--line);
+    border-radius: 8px; background: var(--panel);
+}
+.lb-join-cmd {
+    font-family: var(--mono); font-size: 0.82rem; color: var(--ink);
+    background: var(--page); border: 1px solid var(--line); border-radius: 6px;
+    padding: 4px 10px; white-space: nowrap;
+}
+.lb-join-copy { font-size: 0.84rem; color: var(--muted); }
+.lb-join-copy a { color: var(--blue); border-bottom: 1px solid transparent; }
+.lb-join-copy a:hover { border-bottom-color: var(--blue); }
+
+/* ----- trending skills (real community signal, always shown when populated) ----- */
+.lb-skills { margin: 40px 0 0; }
+.lb-skills h2 { margin: 0 0 4px; }
+.lb-skills .muted { margin: 0 0 16px; }
+.lb-skill-list { list-style: none; margin: 0; padding: 0; }
+.lb-skill {
+    display: grid; grid-template-columns: 1.6rem 1fr auto minmax(110px, 0.5fr);
+    align-items: center; gap: 14px; padding: 10px 4px;
+    border-bottom: 1px solid var(--line); font-family: var(--mono); font-size: 0.86rem;
+}
+.lb-skill-rank { color: var(--muted); font-variant-numeric: tabular-nums; text-align: right; }
+.lb-skill-name { color: var(--ink); display: flex; align-items: center; gap: 8px; min-width: 0; }
+.lb-skill-src {
+    font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.03em;
+    color: var(--muted); background: var(--panel); border: 1px solid var(--line);
+    border-radius: 4px; padding: 1px 6px; flex: none;
+}
+.lb-skill-users { color: var(--muted); font-size: 0.78rem; white-space: nowrap; }
+.lb-skill-runs { position: relative; display: flex; justify-content: flex-end; align-items: center; }
+.lb-skill-runs .lb-bar {
+    position: absolute; right: 0; top: 50%; transform: translateY(-50%); height: 70%;
+    background: color-mix(in srgb, var(--blue) 18%, transparent); border-radius: 3px;
+}
+.lb-skill-runs .lb-val { position: relative; z-index: 1; color: var(--ink); font-variant-numeric: tabular-nums; }
+.lb-skill-runs .lb-val small { color: var(--muted); margin-left: 2px; }
+@media (max-width: 640px) {
+    .lb-skill { grid-template-columns: 1.4rem 1fr auto; }
+    .lb-skill-runs { grid-column: 2 / -1; justify-content: flex-start; }
+}
 
 /* ----- founding / empty state (earns its place; never looks broken) ----- */
 .leaders-founding { max-width: 640px; margin: 28px 0 12px; }
