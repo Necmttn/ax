@@ -61,4 +61,23 @@ describe("StageRegistry", () => {
         expect(keys.indexOf("turn-content-blocks")).toBeGreaterThan(keys.indexOf("cursor"));
         expect(keys.indexOf("turn-analysis")).toBeGreaterThan(keys.indexOf("turn-content-blocks"));
     });
+
+    it("all stage keys are unique (no duplicates)", () => {
+        const keys = ALL_STAGES.map((s) => s.meta.key);
+        const uniqueKeys = new Set(keys);
+        expect(uniqueKeys.size).toBe(keys.length);
+    });
+
+    it("all stage deps reference valid stage keys (deps-validity guard)", () => {
+        const keySet = new Set(ALL_STAGES.map((s) => s.meta.key));
+        const invalid: Array<{ stage: string; dep: string }> = [];
+        for (const s of ALL_STAGES) {
+            for (const dep of s.meta.deps) {
+                if (!keySet.has(dep)) {
+                    invalid.push({ stage: s.meta.key, dep });
+                }
+            }
+        }
+        expect(invalid).toEqual([]);
+    });
 });
