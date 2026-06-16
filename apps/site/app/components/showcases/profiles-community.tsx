@@ -99,7 +99,7 @@ export function ProfilesCommunityShowcase() {
       {/* ============ MCP ============ */}
       <div className="section-head">
         <h3>Hand the graph to an agent</h3>
-        <div className="meta">ax mcp · stdio · 10 read-only tools</div>
+        <div className="meta">ax mcp · stdio · 17 read-only tools</div>
       </div>
 
       <article className="surface mcp-card" aria-label="MCP server">
@@ -109,7 +109,7 @@ export function ProfilesCommunityShowcase() {
         </header>
         <p className="surface-note">
           <code>ax mcp</code> runs a stdio MCP server exposing ax&apos;s read-only queries as
-          10 tools, so an agent can interrogate your graph in-context - recall a past session,
+          17 tools, so an agent can interrogate your graph in-context - recall a past session,
           pull weighted skills, read a proposal - mid-task. Mutating ops are deliberately not
           exposed.
         </p>

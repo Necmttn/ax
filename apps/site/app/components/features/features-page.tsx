@@ -644,7 +644,7 @@ export function FeaturesPage() {
           <div className="cli-row">
             <span className="cmd">ax mcp</span>
             <span className="desc">
-              Stdio MCP server - exposes ax&apos;s read-only queries as 10 tools so Claude Code or Codex can query the graph in-context.
+              Stdio MCP server - exposes ax&apos;s read-only queries as 17 tools so Claude Code or Codex can query the graph in-context.
             </span>
           </div>
           <div className="cli-row">
