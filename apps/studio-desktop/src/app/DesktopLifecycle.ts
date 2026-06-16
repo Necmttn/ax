@@ -207,6 +207,17 @@ export const layer = Layer.succeed(
           }).pipe(Effect.withSpan("desktop.lifecycle.activate")),
         );
       });
+      // A second launch (e.g. login item + manual open) is rejected by the
+      // single-instance lock in main.ts; this instance gets `second-instance`
+      // instead - focus/reveal the existing window rather than spawn another.
+      yield* electronApp.on("second-instance", () => {
+        void runEffect(
+          Effect.gen(function* () {
+            const desktopWindow = yield* DesktopWindow.DesktopWindow;
+            yield* desktopWindow.activate;
+          }).pipe(Effect.withSpan("desktop.lifecycle.secondInstance")),
+        );
+      });
       yield* electronApp.on("window-all-closed", () => {
         void runEffect(
           Effect.gen(function* () {

@@ -66,6 +66,28 @@ const DERIVE_PLIST = posixPath.join(LAUNCH_AGENTS_DIR, `${DERIVE_LABEL}.plist`);
 const QUOTA_REFRESH_PLIST = posixPath.join(LAUNCH_AGENTS_DIR, `${QUOTA_REFRESH_LABEL}.plist`);
 const SERVE_LABEL = "com.necmttn.ax-serve";
 const SERVE_PLIST = posixPath.join(LAUNCH_AGENTS_DIR, `${SERVE_LABEL}.plist`);
+
+/** Candidate install locations for the `ax studio` desktop app bundle (productName "ax studio"). */
+export const DESKTOP_APP_CANDIDATES: readonly string[] = [
+    "/Applications/ax studio.app",
+    posixPath.join(HOME, "Applications", "ax studio.app"),
+];
+
+/**
+ * Locate an installed `ax studio.app`. When present, the desktop app owns the
+ * surreal + serve daemon (IDE model - see
+ * docs/superpowers/specs/2026-06-16-smappservice-background-helper-design.md), so
+ * `cmdInstall` skips the 5 background LaunchAgents (no more "bash - unidentified
+ * developer" Login Items) and migrates any pre-existing ones. `exists` is
+ * injected (the caller resolves existence via the Effect `FileSystem`, so this
+ * stays pure + node:fs-free - the check:no-node-fs gate bans node:fs in apps/).
+ */
+export function findDesktopApp(
+    candidates: readonly string[],
+    exists: (p: string) => boolean,
+): string | undefined {
+    return candidates.find(exists);
+}
 const ROCKSDB_BLOCK_CACHE_SIZE = process.env.AX_DB_ROCKSDB_BLOCK_CACHE_SIZE ?? "268435456";
 const ROCKSDB_WRITE_BUFFER_SIZE = process.env.AX_DB_ROCKSDB_WRITE_BUFFER_SIZE ?? "33554432";
 const ROCKSDB_MAX_WRITE_BUFFER_NUMBER = process.env.AX_DB_ROCKSDB_MAX_WRITE_BUFFER_NUMBER ?? "4";
@@ -1012,6 +1034,29 @@ export function cmdInstall(): Effect.Effect<
         yield* writeRuntimeState({ db: { host: DEFAULT_DB_HOST, port: bind.chosen } });
         console.log(`  runtime-state: ${runtimeStatePath()} (db @ ${DEFAULT_DB_HOST}:${bind.chosen})`);
 
+        // IDE daemon model: when the ax studio desktop app is installed it owns
+        // surreal + serve + schema (see DesktopSchema), so the CLI must NOT drop
+        // the 5 background LaunchAgents that show as "bash - unidentified
+        // developer" Login Items. Skip them + the schema import (the app applies
+        // it on boot), and migrate away any pre-existing ones.
+        const presentApps = new Set<string>();
+        for (const candidate of DESKTOP_APP_CANDIDATES) {
+            if (yield* fs.exists(candidate).pipe(orAbsent(false))) presentApps.add(candidate);
+        }
+        const desktopApp = findDesktopApp(DESKTOP_APP_CANDIDATES, (p) => presentApps.has(p));
+        if (desktopApp) {
+            console.log(`  desktop app detected: ${desktopApp}`);
+            console.log(
+                "  it owns surreal + serve + schema (IDE model) - skipping background LaunchAgents",
+            );
+            let migrated = 0;
+            for (const plist of [DB_PLIST, WATCH_PLIST, DERIVE_PLIST, QUOTA_REFRESH_PLIST, SERVE_PLIST]) {
+                if (yield* unloadAgent(plist)) migrated += 1;
+            }
+            if (migrated > 0) {
+                console.log(`  migrated ${migrated} pre-existing LaunchAgent(s) (unloaded + removed)`);
+            }
+        } else {
         yield* fs.writeFileString(
             DB_PLIST,
             dbPlist(binSource, surrealPath, { host: DEFAULT_DB_HOST, port: bind.chosen }),
@@ -1092,6 +1137,7 @@ export function cmdInstall(): Effect.Effect<
             }
         }
         yield* fs.remove(schemaPath, { force: true });
+        }
 
         // Write OTLP telemetry env into each installed harness config.
         // Receiver listens on 127.0.0.1:1738 (the ax OTLP port).
@@ -1141,7 +1187,11 @@ export function cmdInstall(): Effect.Effect<
         console.log("    axctl ingest          # initial fill");
         console.log("    axctl serve           # live web dashboard");
         console.log("    axctl tui             # interactive terminal dashboard");
-        console.log("    launchctl list | grep 'com.necmttn.ax'   # verify both LaunchAgents loaded");
+        console.log(
+            desktopApp
+                ? "    open the ax studio app   # it runs the surreal + serve daemon"
+                : "    launchctl list | grep 'com.necmttn.ax'   # verify the LaunchAgents loaded",
+        );
         console.log();
         console.log("  questions or feedback? join the community:");
         console.log("    https://discord.gg/E4R88Cvr5R");

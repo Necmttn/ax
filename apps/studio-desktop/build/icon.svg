@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <!-- ax studio app icon: ascending telemetry bars on a dark squircle. -->
+  <rect x="64" y="64" width="896" height="896" rx="200" fill="#0B0F0D" />
+  <rect x="64" y="64" width="896" height="896" rx="200" fill="none" stroke="#1C241F" stroke-width="2" />
+  <g fill="#34D399">
+    <rect x="272" y="488" width="120" height="248" rx="36" />
+    <rect x="452" y="368" width="120" height="368" rx="36" />
+    <rect x="632" y="248" width="120" height="488" rx="36" />
+  </g>
+</svg>

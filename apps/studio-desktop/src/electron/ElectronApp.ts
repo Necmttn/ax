@@ -21,6 +21,14 @@ export interface ElectronAppShape {
   readonly relaunch: (options: Electron.RelaunchOptions) => Effect.Effect<void>;
   readonly whenReady: Effect.Effect<void>;
   readonly requestSingleInstanceLock: Effect.Effect<boolean>;
+  /**
+   * Register/unregister the app to launch at login as ONE macOS Login Item
+   * attributed to the app's Developer ID (`mainAppService`, macOS 13+). This is
+   * the IDE daemon model's continuity mechanism - the signed app itself is the
+   * single Login Item, replacing the 5 loose "bash" LaunchAgents.
+   */
+  readonly setOpenAtLogin: (enabled: boolean) => Effect.Effect<void>;
+  readonly getOpenAtLogin: Effect.Effect<boolean>;
 }
 
 export class ElectronApp extends Context.Service<ElectronApp, ElectronAppShape>()(
@@ -60,6 +68,13 @@ const make = ElectronApp.of({
     }),
   whenReady: Effect.promise(() => Electron.app.whenReady()).pipe(Effect.asVoid),
   requestSingleInstanceLock: Effect.sync(() => Electron.app.requestSingleInstanceLock()),
+  setOpenAtLogin: (enabled) =>
+    Effect.sync(() => {
+      Electron.app.setLoginItemSettings({ openAtLogin: enabled, type: "mainAppService" });
+    }),
+  getOpenAtLogin: Effect.sync(
+    () => Electron.app.getLoginItemSettings({ type: "mainAppService" }).openAtLogin,
+  ),
 });
 
 export const layer = Layer.succeed(ElectronApp, make);

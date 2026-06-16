@@ -2,10 +2,13 @@ import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 
 import * as AxBackendManager from "../backend/AxBackendManager.ts";
+import * as DesktopIngestScheduler from "../backend/DesktopIngestScheduler.ts";
 import * as ElectronApp from "../electron/ElectronApp.ts";
 import * as ElectronMenu from "../electron/ElectronMenu.ts";
 import * as ElectronProtocol from "../electron/ElectronProtocol.ts";
+import * as ElectronTray from "../electron/ElectronTray.ts";
 import * as DesktopUpdates from "../updates/DesktopUpdates.ts";
+import * as DesktopWindow from "../window/DesktopWindow.ts";
 import * as DesktopEnvironment from "./DesktopEnvironment.ts";
 import * as DesktopLifecycle from "./DesktopLifecycle.ts";
 import * as DesktopObservability from "./DesktopObservability.ts";
@@ -29,6 +32,8 @@ const startup = Effect.gen(function* () {
     const backendManager = yield* AxBackendManager.AxBackendManager;
     const environment = yield* DesktopEnvironment.DesktopEnvironment;
     const updates = yield* DesktopUpdates.DesktopUpdates;
+    const electronTray = yield* ElectronTray.ElectronTray;
+    const desktopWindow = yield* DesktopWindow.DesktopWindow;
 
     // 1. Block until the Electron app is ready. Scheme privileges were already
     //    registered eagerly in main.ts (must happen before ready).
@@ -52,6 +57,18 @@ const startup = Effect.gen(function* () {
     //    the window once the backend is ready.
     yield* backendManager.start;
 
+    // 5b. Keep the graph fresh while the app is open (IDE daemon model - no
+    //     background agent). Fire an immediate ingest catch-up, then one every
+    //     few minutes, reusing the running daemon's live-ingest pipeline via
+    //     POST /api/ingest. Forked into the program scope so it is interrupted on
+    //     shutdown. Self-healing: a failed run (e.g. serve not ready at the first
+    //     tick) is logged and retried on the next tick, so it is safe to start
+    //     here without gating on backend readiness. See
+    //     docs/superpowers/specs/2026-06-16-smappservice-background-helper-design.md
+    yield* Effect.forkScoped(
+        DesktopIngestScheduler.run({ sinceDays: 7, interval: Duration.minutes(2) }),
+    );
+
     // 6. Phase 3: kick off an electron-updater check. The update feed comes from
     //    electron-builder's GitHub `publish` config, baked into `app-update.yml`
     //    at package time - there is no feed in development, so a check would only
@@ -62,6 +79,50 @@ const startup = Effect.gen(function* () {
     } else {
         yield* Effect.forkDetach(updates.checkForUpdates);
     }
+
+    // 7. IDE daemon-model continuity: register the app to launch at login as ONE
+    //    Developer-ID Login Item (mainAppService), so ingest/serve resume without
+    //    a separate background agent. Prod only (dev isn't in /Applications, and
+    //    SMAppService registration there errors). Fail-soft: never block boot.
+    if (!environment.isDevelopment) {
+        yield* electronApp.setOpenAtLogin(true).pipe(
+            Effect.tap(() => logStartupInfo("registered launch-at-login (mainAppService)")),
+            Effect.catchCause((cause) =>
+                logStartupInfo("could not register launch-at-login", {
+                    cause: String(cause),
+                }),
+            ),
+        );
+    }
+
+    // 8. Menubar tray: Open ax studio / Start at Login / Quit. Scoped so the
+    //    icon is removed on shutdown. Tray click callbacks are sync, so handlers
+    //    run their (requirement-free) Effects via runPromise and swallow errors
+    //    so a menu click can never crash the app.
+    const trayOpenAtLogin = yield* electronApp.getOpenAtLogin.pipe(
+        Effect.catchCause(() => Effect.succeed(false)),
+    );
+    yield* electronTray.install({
+        iconPath: environment.trayIconPath,
+        openAtLogin: trayOpenAtLogin,
+        handlers: {
+            onOpen: () => {
+                void Effect.runPromise(
+                    desktopWindow.activate.pipe(Effect.catchCause(() => Effect.void)),
+                );
+            },
+            onToggleLogin: () => {
+                void Effect.runPromise(
+                    Effect.flatMap(electronApp.getOpenAtLogin, (enabled) =>
+                        electronApp.setOpenAtLogin(!enabled),
+                    ).pipe(Effect.catchCause(() => Effect.void)),
+                );
+            },
+            onQuit: () => {
+                void Effect.runPromise(electronApp.quit);
+            },
+        },
+    });
 
     yield* logStartupInfo("startup complete");
 }).pipe(Effect.withSpan("desktop.startup"));
