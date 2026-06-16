@@ -34,7 +34,17 @@ import {
 } from "./normalized/transcripts.ts";
 // Codex token counts arrive as numbers OR numeric strings - the toolkit's
 // integer probe (`intField`) is this parser's `numberField`.
-import { intField as numberField, isRecord, jsonText, parseJsonl, parseMaybeJson, stringField } from "./normalized/toolkit.ts";
+import {
+    intField as numberField,
+    isRecord,
+    jsonText,
+    parseJsonl,
+    parseMaybeJson,
+    RESPONSES_TEXT_TYPES,
+    stringField,
+    textFromContent,
+} from "./normalized/toolkit.ts";
+import { classifyUserText, FULL_CONTEXT_RULES } from "./normalized/message-kind.ts";
 import {
     applyCommandFields,
     makeToolCallWrite,
@@ -135,39 +145,10 @@ function codexMessageRecord(payload: Record<string, unknown>): Record<string, un
     return null;
 }
 
-function textFromCodexContent(content: unknown): string | null {
-    if (typeof content === "string") return content;
-    if (!Array.isArray(content)) return null;
-    const text = content
-        .filter(isRecord)
-        .filter((block) => {
-            const type = stringField(block, "type");
-            return type === "text" || type === "input_text" || type === "output_text";
-        })
-        .map((block) => stringField(block, "text"))
-        .filter((text): text is string => typeof text === "string" && text.length > 0)
-        .join("\n");
-    return text.length > 0 ? text : null;
-}
-
 function codexMessageKind(role: string, itemType: string | null, textExcerpt: string | null): string {
     if (role === "system" || role === "developer") return "system_or_developer";
     if (role === "user") {
-        if (textExcerpt?.startsWith("<command-name>")) {
-            return "control";
-        }
-        if (textExcerpt && (
-            textExcerpt.startsWith("# AGENTS.md instructions") ||
-            textExcerpt.startsWith("# CLAUDE.md") ||
-            textExcerpt.startsWith("<local-command-caveat>") ||
-            textExcerpt.startsWith("Base directory for this skill:") ||
-            textExcerpt.startsWith("Base directory for this plugin:") ||
-            textExcerpt.includes("<environment_context>") ||
-            textExcerpt.includes("<INSTRUCTIONS>")
-        )) {
-            return "context";
-        }
-        return "task";
+        return classifyUserText(textExcerpt, FULL_CONTEXT_RULES);
     }
     if (role === "assistant") return "assistant";
     if (itemType === "function_call") return "tool_call";
@@ -890,7 +871,10 @@ function createCodexExtractor(
                           ? (stringField(message ?? {}, "role") ?? "assistant")
                           : (itemType ?? "unknown");
 
-                const text = textFromCodexContent(message?.content);
+                const text = textFromContent(message?.content, {
+                    acceptedTypes: RESPONSES_TEXT_TYPES,
+                    emptyStringIsNull: false,
+                });
                 const textExcerpt = text === null ? null : text.slice(0, 500);
                 const kind = codexMessageKind(role, itemType, textExcerpt);
                 turns.push({

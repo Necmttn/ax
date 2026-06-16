@@ -163,3 +163,50 @@ export function boundExcerpt(input: unknown, max = 1200): string | null {
 export function stringArray(input: unknown): readonly string[] | null {
     return Array.isArray(input) ? input.filter((x): x is string => typeof x === "string") : null;
 }
+
+/** Claude content blocks only flatten the plain `text` block type. */
+export const CLAUDE_TEXT_TYPES: ReadonlySet<string> = new Set(["text"]);
+
+/** OpenAI Responses-shaped harnesses (codex, pi) flatten the three text
+ *  variants. */
+export const RESPONSES_TEXT_TYPES: ReadonlySet<string> = new Set([
+    "text",
+    "input_text",
+    "output_text",
+]);
+
+/**
+ * Flatten a message `content` value to its joined text, or null.
+ *
+ * Collapses the three pre-toolkit copies (transcripts `textFromContent`, codex
+ * `textFromCodexContent`, pi `textFromPiContent`) - each kept its own preset:
+ *   - claude: `{ acceptedTypes: CLAUDE_TEXT_TYPES, emptyStringIsNull: false }`
+ *   - codex:  `{ acceptedTypes: RESPONSES_TEXT_TYPES, emptyStringIsNull: false }`
+ *   - pi:     `{ acceptedTypes: RESPONSES_TEXT_TYPES, emptyStringIsNull: true }`
+ *
+ * Behavior (preserved bit-for-bit):
+ *   - string input → the string, EXCEPT when `emptyStringIsNull` and it is
+ *     empty, then null (pi-only). Non-empty strings always pass through.
+ *   - array input → keep record members whose `type` is in `acceptedTypes`,
+ *     read their `text` field, drop empties, join with `\n`; null when empty.
+ *   - anything else → null.
+ */
+export function textFromContent(
+    input: unknown,
+    opts: { acceptedTypes: ReadonlySet<string>; emptyStringIsNull?: boolean },
+): string | null {
+    if (typeof input === "string") {
+        return opts.emptyStringIsNull && input.length === 0 ? null : input;
+    }
+    if (!Array.isArray(input)) return null;
+    const text = input
+        .filter(isRecord)
+        .filter((block) => {
+            const type = stringField(block, "type");
+            return type !== null && opts.acceptedTypes.has(type);
+        })
+        .map((block) => stringField(block, "text"))
+        .filter((value): value is string => typeof value === "string" && value.length > 0)
+        .join("\n");
+    return text.length > 0 ? text : null;
+}
