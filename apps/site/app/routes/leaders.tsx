@@ -1,13 +1,13 @@
 // apps/site/app/routes/leaders.tsx
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { SiteHeader } from "~/components/landing-sections/site-header";
 import { SiteFooter } from "~/components/landing-sections/site-footer";
 import {
     fetchLeaderboard,
     fetchSkillStats,
     formatCompact,
-    formatUsd,
+    formatUsdCompact,
     trendingSkills,
     type Leaderboard,
     type SkillStats,
@@ -23,19 +23,17 @@ export const Route = createFileRoute("/leaders")({
     component: LeadersPage,
 });
 
-const BOARDS = ["tokens", "sessions", "streak", "cost", "skills"] as const;
-type Board = (typeof BOARDS)[number];
-
-// Below this many entrants the boards are technically valid but socially empty -
-// render the founding state instead of a one-row "leaderboard".
-const FOUNDING_THRESHOLD = 5;
-
-const valueLabel: Record<Exclude<Board, "skills">, (v: number) => string> = {
-    tokens: formatCompact,
-    sessions: formatCompact,
-    streak: (v) => `${v}d`,
-    cost: formatUsd,
-};
+// The four ranked metrics, joined into one roster row per builder. `key`
+// indexes both the leaderboard board and the RosterRow; clicking a column
+// header re-sorts the whole roster by that metric (the old tab-flip showed
+// one number at a time - this shows every builder's full receipt at once).
+type MetricKey = "tokens" | "sessions" | "cost" | "streak";
+const METRICS: ReadonlyArray<{ key: MetricKey; label: string; fmt: (v: number) => string }> = [
+    { key: "tokens", label: "tokens", fmt: formatCompact },
+    { key: "sessions", label: "sessions", fmt: formatCompact },
+    { key: "cost", label: "spend", fmt: formatUsdCompact },
+    { key: "streak", label: "streak", fmt: (v) => `${v}d` },
+];
 
 // Privacy boundary doc (the gist carries counts/dates/trend only - no transcripts).
 const WHAT_GETS_PUBLISHED =
@@ -47,17 +45,34 @@ type State =
     | { kind: "error"; message: string }
     | { kind: "ready"; lb: Leaderboard; skills: SkillStats };
 
-function entrantCount(lb: Leaderboard): number {
-    const logins = new Set<string>();
-    for (const board of [lb.boards.tokens, lb.boards.sessions, lb.boards.streak, lb.boards.cost]) {
-        for (const row of board) logins.add(row.login);
-    }
-    return logins.size;
+interface RosterRow {
+    readonly login: string;
+    tokens?: number;
+    sessions?: number;
+    cost?: number;
+    streak?: number;
+}
+
+// Fold the four independently-sorted boards into one row per builder.
+function buildRoster(lb: Leaderboard): RosterRow[] {
+    const byLogin = new Map<string, RosterRow>();
+    const merge = (key: MetricKey, rows: Leaderboard["boards"][MetricKey]) => {
+        for (const r of rows) {
+            const row = byLogin.get(r.login) ?? { login: r.login };
+            row[key] = r.value;
+            byLogin.set(r.login, row);
+        }
+    };
+    merge("tokens", lb.boards.tokens);
+    merge("sessions", lb.boards.sessions);
+    merge("cost", lb.boards.cost);
+    merge("streak", lb.boards.streak);
+    return [...byLogin.values()];
 }
 
 function LeadersPage() {
     const [state, setState] = useState<State>({ kind: "loading" });
-    const [board, setBoard] = useState<Board>("tokens");
+    const [sort, setSort] = useState<MetricKey>("tokens");
 
     useEffect(() => {
         let alive = true;
@@ -71,55 +86,105 @@ function LeadersPage() {
         return () => { alive = false; };
     }, []);
 
-    const founding = state.kind === "ready" && entrantCount(state.lb) < FOUNDING_THRESHOLD;
+    const roster = useMemo(
+        () => (state.kind === "ready" ? buildRoster(state.lb) : []),
+        [state],
+    );
+    const sorted = useMemo(() => {
+        const v = (r: RosterRow) => r[sort] ?? Number.NEGATIVE_INFINITY;
+        return [...roster].sort((a, b) => v(b) - v(a) || a.login.localeCompare(b.login));
+    }, [roster, sort]);
+    const max = useMemo(
+        () => Math.max(1, ...sorted.map((r) => r[sort] ?? 0)),
+        [sorted, sort],
+    );
+
+    const empty = state.kind === "empty" || (state.kind === "ready" && roster.length === 0);
 
     return (
         <>
             <SiteHeader />
             <main className="leaders-page">
-                <h1>leaders</h1>
-                <p className="muted">
-                    Measured from real agent telemetry (last{" "}
-                    {state.kind === "ready" ? state.lb.window_days : 30} days), self-reported
-                    by each user's local ax graph. Join: <code>ax profile publish</code>
-                </p>
+                <header className="lb-head">
+                    <h1>leaders</h1>
+                    <p className="muted">
+                        Ranked from real agent telemetry, self-reported by each builder's local ax
+                        graph and recompiled nightly. Join in one command: <code>ax profile publish</code>
+                    </p>
+                    {state.kind === "ready" && !empty && (
+                        <p className="lb-meta">
+                            <strong>{roster.length}</strong> {roster.length === 1 ? "builder" : "builders"}
+                            {" · "}last {state.lb.window_days}d
+                            {state.lb.compiled_at !== "" && (
+                                <> · compiled {state.lb.compiled_at.slice(0, 16).replace("T", " ")} UTC</>
+                            )}
+                        </p>
+                    )}
+                </header>
 
                 {state.kind === "loading" && <p className="muted">loading…</p>}
-                {(state.kind === "empty" || founding) && (
-                    <FoundingState entrants={state.kind === "ready" ? entrantCount(state.lb) : 0} />
-                )}
+                {empty && <FoundingState />}
                 {state.kind === "error" && <p className="muted">couldn't load leaderboard: {state.message}</p>}
 
-                {state.kind === "ready" && !founding && (
+                {state.kind === "ready" && !empty && (
                     <>
-                        <div className="leaders-tabs" role="tablist">
-                            {BOARDS.map((b) => (
-                                <button key={b} role="tab" aria-selected={board === b} onClick={() => setBoard(b)}>
-                                    {b === "skills" ? "trending skills" : b}
-                                </button>
-                            ))}
-                        </div>
-
-                        {board !== "skills" ? (
-                            <table className="leaders-table">
-                                <thead><tr><th>#</th><th>user</th><th>{board}</th></tr></thead>
-                                <tbody>
-                                    {state.lb.boards[board].map((row, i) => (
-                                        <tr key={row.login}>
-                                            <td>{i + 1}</td>
-                                            <td><Link to="/u/$login" params={{ login: row.login }} search={{ vs: undefined }}>@{row.login}</Link></td>
-                                            <td>{valueLabel[board](row.value)}</td>
-                                        </tr>
+                        <table className="lb-roster">
+                            <thead>
+                                <tr>
+                                    <th className="lb-rank">#</th>
+                                    <th className="lb-who">builder</th>
+                                    {METRICS.map((m) => (
+                                        <th
+                                            key={m.key}
+                                            className="lb-num"
+                                            data-active={sort === m.key}
+                                            aria-sort={sort === m.key ? "descending" : "none"}
+                                        >
+                                            <button type="button" onClick={() => setSort(m.key)}>
+                                                {m.label}
+                                                <span className="lb-caret" aria-hidden>{sort === m.key ? "▾" : ""}</span>
+                                            </button>
+                                        </th>
                                     ))}
-                                </tbody>
-                            </table>
-                        ) : (
-                            <TrendingSkillsTable skills={state.skills} />
-                        )}
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {sorted.map((row, i) => (
+                                    <tr key={row.login} data-lead={i === 0}>
+                                        <td className="lb-rank">{i + 1}</td>
+                                        <td className="lb-who">
+                                            <Link to="/u/$login" params={{ login: row.login }} search={{ vs: undefined }}>
+                                                <img
+                                                    className="lb-avatar"
+                                                    src={`https://github.com/${row.login}.png?size=48`}
+                                                    alt=""
+                                                    width={24}
+                                                    height={24}
+                                                    loading="lazy"
+                                                />
+                                                <span>@{row.login}</span>
+                                            </Link>
+                                        </td>
+                                        {METRICS.map((m) => {
+                                            const v = row[m.key];
+                                            const active = sort === m.key;
+                                            return (
+                                                <td key={m.key} className="lb-num" data-active={active}>
+                                                    {active && v != null && (
+                                                        <span className="lb-bar" style={{ width: `${Math.max(2, (v / max) * 100)}%` }} aria-hidden />
+                                                    )}
+                                                    <span className="lb-val">{v == null ? "-" : m.fmt(v)}</span>
+                                                </td>
+                                            );
+                                        })}
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
 
-                        {state.lb.compiled_at !== "" && (
-                            <p className="muted">compiled {state.lb.compiled_at.slice(0, 16).replace("T", " ")} UTC · refreshes nightly</p>
-                        )}
+                        <JoinBand />
+
+                        <TrendingSkills skills={state.skills} />
                     </>
                 )}
             </main>
@@ -128,55 +193,67 @@ function LeadersPage() {
     );
 }
 
-function TrendingSkillsTable({ skills }: { readonly skills: SkillStats }) {
-    const rows = trendingSkills(skills);
-    if (rows.length === 0) {
-        return (
-            <p className="muted">
-                No skill trends yet - a skill trends once <strong>2+ builders</strong> publish
-                it (personal <code>local:*</code> skills don't count). Check back after the
-                next nightly compile.
-            </p>
-        );
-    }
+// Slim "you're next" band - woven below the live board, never a takeover. The
+// board already proves the boards are real; this just hands you the command.
+function JoinBand() {
     return (
-        <table className="leaders-table">
-            <thead><tr><th>#</th><th>skill</th><th>users</th><th>runs/30d</th></tr></thead>
-            <tbody>
-                {rows.map(([name, s], i) => (
-                    <tr key={name}>
-                        <td>{i + 1}</td>
-                        <td>{name}</td>
-                        <td>{s.users}</td>
-                        <td>{formatCompact(s.runs)}</td>
-                    </tr>
-                ))}
-            </tbody>
-        </table>
+        <aside className="lb-join">
+            <code className="lb-join-cmd">$ ax profile publish</code>
+            <span className="lb-join-copy">
+                ranks what your local ax graph measured - counts, dates, and trends only.{" "}
+                <a href={WHAT_GETS_PUBLISHED} target="_blank" rel="noreferrer">what gets published →</a>
+            </span>
+        </aside>
+    );
+}
+
+function TrendingSkills({ skills }: { readonly skills: SkillStats }) {
+    const rows = trendingSkills(skills);
+    if (rows.length === 0) return null;
+    const maxRuns = Math.max(1, ...rows.map(([, s]) => s.runs));
+    return (
+        <section className="lb-skills">
+            <h2>trending skills</h2>
+            <p className="muted">Adopted by 2+ builders (personal <code>local:*</code> skills don't count).</p>
+            <ol className="lb-skill-list">
+                {rows.map(([key, s], i) => {
+                    const idx = key.indexOf(":");
+                    const source = idx > 0 ? key.slice(0, idx) : "";
+                    const name = idx > 0 ? key.slice(idx + 1) : key;
+                    return (
+                        <li key={key} className="lb-skill">
+                            <span className="lb-skill-rank">{i + 1}</span>
+                            <span className="lb-skill-name">
+                                {source && <span className="lb-skill-src">{source}</span>}
+                                {name}
+                            </span>
+                            <span className="lb-skill-users">{s.users} builders</span>
+                            <span className="lb-skill-runs">
+                                <span className="lb-bar" style={{ width: `${Math.max(4, (s.runs / maxRuns) * 100)}%` }} aria-hidden />
+                                <span className="lb-val">{formatCompact(s.runs)}<small>/30d</small></span>
+                            </span>
+                        </li>
+                    );
+                })}
+            </ol>
+        </section>
     );
 }
 
 /**
- * Founding / empty state. The boards are legitimately empty until the nightly
- * compile picks up enough entrants - so make it earn its place: a real CTA, a
- * paper-stub render of the exact JSON shape that gets published, and an honest
- * "what gets published" privacy link. Never look broken.
+ * Founding / empty state - shown ONLY when the board has zero builders. Make it
+ * earn its place: a real CTA, a paper-stub render of the exact JSON shape that
+ * gets published, and an honest "what gets published" privacy link.
  */
-function FoundingState({ entrants }: { readonly entrants: number }) {
-    const headline =
-        entrants <= 0
-            ? "No one is on the board yet - be #1."
-            : entrants === 1
-                ? "1 builder is publishing receipts - be #2."
-                : `${entrants} builders are publishing receipts - join them.`;
+function FoundingState() {
     return (
         <section className="leaders-founding">
             <p className="lf-eyebrow">$ ax profile publish</p>
-            <h2 className="lf-headline">{headline}</h2>
+            <h2 className="lf-headline">No one is on the board yet - be #1.</h2>
             <p className="lf-lede">
-                The boards rank what your local ax graph actually measured - tokens,
-                sessions, streak, spend - and rebuild nightly. They fill in as builders
-                opt in. One command publishes yours.
+                The boards rank what your local ax graph actually measured - tokens, sessions,
+                streak, spend - and rebuild nightly. They fill in as builders opt in. One command
+                publishes yours.
             </p>
 
             <figure className="lf-stub" aria-label="example published profile">
