@@ -172,6 +172,47 @@ describe("formatDryRun", () => {
         expect(out).not.toContain("ETA ~"); // no misleading ETA
     });
 
+    test("unmeasurable rate with a small backlog frames a quick run, not a dead end (#478)", () => {
+        // The reporter's case: ~10 sessions remained but the sample (all
+        // watermark-skipped) produced no rate. Must not say "couldn't measure".
+        const out = formatDryRun(
+            baseResult({
+                sources: { claude: 159, codex: 0, pi: 0, opencodeStore: false, cursorStore: false, sessionsTotal: 159 },
+                inGraph: tally(149, 0),
+                remaining: tally(10, 0),
+                sampled: { items: 0, seconds: 0.2 },
+                ratePerSec: null,
+                etaSeconds: null,
+                populated: true,
+                upToDate: false,
+            }),
+            false,
+        );
+        expect(out).toContain("~10 sessions remaining");
+        expect(out).toContain("quick");
+        expect(out).toContain("run it: ax ingest");
+        expect(out).not.toContain("couldn't measure a rate");
+    });
+
+    test("unmeasurable rate with a large backlog offers a coarse band (#478)", () => {
+        const out = formatDryRun(
+            baseResult({
+                sources: { claude: 5000, codex: 0, pi: 0, opencodeStore: false, cursorStore: false, sessionsTotal: 5000 },
+                inGraph: tally(100, 0),
+                remaining: tally(4900, 0),
+                sampled: { items: 0, seconds: 0.2 },
+                ratePerSec: null,
+                etaSeconds: null,
+                populated: true,
+                upToDate: false,
+            }),
+            false,
+        );
+        expect(out).toContain("~4,900 sessions remaining");
+        expect(out).toMatch(/roughly ~.* or less/);
+        expect(out).not.toContain("couldn't measure a rate");
+    });
+
     test("json keeps remaining + upToDate for the caught-up case", () => {
         const out = JSON.parse(
             formatDryRun(

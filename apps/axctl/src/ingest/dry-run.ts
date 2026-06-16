@@ -40,6 +40,15 @@ export const ROUGH_SAMPLE_THRESHOLD = 10;
  *  parses to no session, or a watcher mid-write - without losing the ETA for
  *  any real backfill. */
 export const UP_TO_DATE_THRESHOLD = 5;
+/** When the timed sample yields no usable rate (its slice was dominated by
+ *  already-ingested, watermark-skipped files - the near-complete case), a
+ *  remaining backlog at or below this many sessions is framed as a quick run
+ *  rather than left without any estimate (issue #478). */
+export const QUICK_BACKFILL_THRESHOLD = 50;
+/** Conservative fallback throughput (sessions/sec) used only to offer a coarse
+ *  upper-bound band when a LARGER backlog couldn't be timed. Intentionally low
+ *  so the band reads as "no worse than ~X", not a precise promise. */
+export const COARSE_RATE_PER_SEC = 3;
 
 export interface SourceCounts {
     /** claude `.jsonl` transcript files (~one per session). */
@@ -324,10 +333,23 @@ export function formatDryRun(result: DryRunResult, json: boolean): string {
     }
 
     if (result.ratePerSec === null) {
-        // Work remains but the sample measured nothing usable (e.g. all candidate
-        // files were too short to produce a session, or every sampled file was
-        // already ingested and watermark-skipped). Can't project a rate.
-        lines.push("  couldn't measure a rate from the sample; just run it:");
+        // Work remains but the timed sample measured nothing usable - typically
+        // because the slice was dominated by already-ingested (watermark-skipped)
+        // files, i.e. the graph is nearly caught up. Rather than dead-end with
+        // "couldn't measure a rate" (issue #478, reported when 10 sessions
+        // remained), give a coarse but honest framing from the remaining count.
+        const rem = remaining.total;
+        if (rem <= QUICK_BACKFILL_THRESHOLD) {
+            lines.push(
+                `  mostly ingested - ~${rem.toLocaleString()} sessions remaining; the run will be quick (typically well under a minute on this machine).`,
+            );
+        } else {
+            // A larger backlog the sample couldn't time: offer a coarse upper-bound
+            // band from a conservative rate instead of no estimate at all.
+            lines.push(
+                `  ~${rem.toLocaleString()} sessions remaining - couldn't time a sample, but roughly ~${formatDuration(rem / COARSE_RATE_PER_SEC)} or less at a typical ingest rate.`,
+            );
+        }
         lines.push("  run it: ax ingest");
         return lines.join("\n");
     }
