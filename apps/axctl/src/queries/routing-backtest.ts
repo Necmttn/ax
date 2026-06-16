@@ -3,9 +3,16 @@
  *
  * No DB access - callers supply the rows and catalog so this is trivially testable
  * and reusable from both the CLI (`ax routing tune`) and the studio cost view.
+ *
+ * `runRoutingBacktest` is the DB-backed Effect entry-point for the dashboard
+ * handler: it fetches dispatch rows + agent_model pricing, then delegates to the
+ * pure `backtestPattern` function above.
  */
+import { Effect } from "effect";
+import { SurrealClient } from "@ax/lib/db";
 import { reprice, MODEL_ALIASES, type RepriceUsage } from "./reprice.ts";
 import type { ModelPricing } from "../ingest/model-pricing.ts";
+import { fetchDispatches } from "./dispatch-analytics.ts";
 
 /** Regex that matches model names considered "expensive" for routing purposes. */
 const EXPENSIVE_RE = /fable|opus/i;
@@ -116,3 +123,67 @@ export function backtestPattern(
 
     return { matched, excluded, missed, estSavingsUsd, matchedCount: matched.length };
 }
+
+// ---------------------------------------------------------------------------
+// DB-backed Effect entry-point (used by the dashboard /api/routing/backtest
+// handler).  Fetches dispatch rows + agent_model pricing catalog, then
+// delegates to the pure backtestPattern above.
+// ---------------------------------------------------------------------------
+
+const AGENT_MODELS_SQL = `
+SELECT name, input_per_million_usd, output_per_million_usd,
+       cache_read_per_million_usd, cache_creation_per_million_usd
+FROM agent_model;
+`;
+
+export const runRoutingBacktest = Effect.fn("queries.runRoutingBacktest")(
+    function* (payload: BacktestPattern & { readonly days?: number }) {
+        const db = yield* SurrealClient;
+        const sinceDays = Math.max(1, Math.trunc(payload.days ?? 14));
+
+        // Fetch dispatch rows (includes per-dispatch token usage).
+        const result = yield* fetchDispatches({ sinceDays, limit: 2000 });
+
+        // Build pricingCatalog from agent_model - same pattern as
+        // fetchDispatchCandidates in dispatch-analytics.ts.
+        const agentModelRows = yield* db
+            .query<[Array<Record<string, unknown>>]>(AGENT_MODELS_SQL)
+            .pipe(Effect.map((r) => r?.[0] ?? []));
+
+        const pricingCatalog = new Map<string, ModelPricing>();
+        for (const am of agentModelRows) {
+            const name = String(am.name ?? "");
+            if (!name) continue;
+            pricingCatalog.set(name, {
+                provider: "anthropic",
+                inputPerMillionUsd: am.input_per_million_usd == null ? null : Number(am.input_per_million_usd),
+                outputPerMillionUsd: am.output_per_million_usd == null ? null : Number(am.output_per_million_usd),
+                cacheCreationPerMillionUsd: am.cache_creation_per_million_usd == null ? null : Number(am.cache_creation_per_million_usd),
+                cacheReadPerMillionUsd: am.cache_read_per_million_usd == null ? null : Number(am.cache_read_per_million_usd),
+                fastMultiplier: 1,
+                pricingSource: "agent_model",
+            });
+        }
+
+        // Map DispatchRow[] → BacktestDispatch[].
+        const backtestRows: BacktestDispatch[] = result.rows.map((row) => ({
+            description: row.description,
+            agent_type: row.agent_type,
+            child_model: row.child_model,
+            child_cost_usd: row.child_cost_usd,
+            dispatch_model: row.dispatch_model,
+            usage:
+                row.prompt_tokens > 0 || row.completion_tokens > 0
+                    ? {
+                        prompt_tokens: row.prompt_tokens,
+                        completion_tokens: row.completion_tokens,
+                        cache_read_tokens: row.cache_read_tokens,
+                        cache_create_tokens: row.cache_create_tokens,
+                        cost_usd: row.child_cost_usd,
+                    }
+                    : null,
+        }));
+
+        return backtestPattern(backtestRows, payload, pricingCatalog);
+    },
+);

@@ -9,7 +9,11 @@
 import { Effect } from "effect";
 import { HttpApiBuilder } from "effect/unstable/httpapi";
 import { AxApi, NotFoundError } from "@ax/lib/shared/api-contract";
-import { fetchCostModels } from "../../queries/cost-analytics.ts";
+import { fetchCostModels, fetchCostSplit } from "../../queries/cost-analytics.ts";
+import { fetchDispatches, fetchDispatchCandidates } from "../../queries/dispatch-analytics.ts";
+import { fetchRoutability } from "../../queries/routability.ts";
+import { defaultRoutingTablePath, loadStoredRoutingTable } from "../../queries/routing-table-io.ts";
+import { runRoutingBacktest } from "../../queries/routing-backtest.ts";
 import { fetchContextBudget, fetchSkillDrift } from "../../queries/context-budget.ts";
 import { fetchEpisodeTimeline } from "../episode-timeline.ts";
 import { fetchProject } from "../project.ts";
@@ -83,6 +87,20 @@ export const InsightsGroupLive = HttpApiBuilder.group(AxApi, "insights", (handle
             })))
         .handle("costModels", () =>
             orInternal(fetchCostModels({ sinceDays: 365 }).pipe(Effect.map(asJsonValue))))
+        .handle("costSplit", ({ query }) =>
+            orInternal(fetchCostSplit({ sinceDays: query.days ?? 14 }).pipe(Effect.map(asJsonValue))))
+        .handle("costDispatches", ({ query }) =>
+            query.candidates
+                ? orInternal(fetchDispatchCandidates({ sinceDays: query.days ?? 14 }).pipe(Effect.map(asJsonValue)))
+                : orInternal(fetchDispatches({ sinceDays: query.days ?? 14, limit: 30 }).pipe(Effect.map(asJsonValue))))
+        .handle("costRoutability", ({ query }) =>
+            orInternal(fetchRoutability({ days: query.days ?? 14, minRun: query.minRun ?? 1 }).pipe(Effect.map(asJsonValue))))
+        .handle("routingTable", () =>
+            orInternal(
+                loadStoredRoutingTable(defaultRoutingTablePath()).pipe(Effect.map(asJsonValue)),
+            ))
+        .handle("routingBacktest", ({ payload }) =>
+            orInternal(runRoutingBacktest(payload).pipe(Effect.map(asJsonValue))))
         .handle("contextBudget", () =>
             orInternal(fetchContextBudget().pipe(Effect.map(asJsonValue))))
         .handle("contextDrift", () =>
