@@ -132,6 +132,7 @@ export const SCHEMA_TABLES: readonly SchemaTableSpec[] = [
     { table: "query_sample", stage: "staged", note: "Reserved query execution samples." },
     { table: "graph_health_check", stage: "staged", note: "Persisted graph health check rows." },
     { table: "invoked", stage: "active", note: "Turn-to-skill invocation edges." },
+    { table: "loaded", stage: "active", note: "Session-to-skill auto-load activations (subagent skills: frontmatter); separate from invoked." },
     { table: "plays_role", stage: "active", note: "Skill-to-role classification edges." },
     { table: "proposed", stage: "active", note: "Skills mentioned but not invoked." },
     { table: "edited", stage: "active", note: "Turn-to-file edit edges." },

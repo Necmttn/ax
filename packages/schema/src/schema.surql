@@ -1216,6 +1216,18 @@ DEFINE INDEX IF NOT EXISTS invoked_out_ts ON invoked FIELDS out, ts;
 DEFINE INDEX IF NOT EXISTS invoked_session_out_ts ON invoked FIELDS session, out, ts;
 DEFINE INDEX IF NOT EXISTS invoked_in_out_args ON invoked FIELDS in, out, args;
 
+-- Auto-load activations: a skill pulled in by a subagent's `skills:` frontmatter
+-- when that agent spawns. NO Skill-tool call fires, so these never appear as
+-- `invoked` edges. Kept SEPARATE from `invoked` so usage analytics (skills
+-- weighted/taste/churn) are not polluted with non-invocations. Derived by the
+-- `loaded-skills` stage from spawned x agent_def x skill (fully rebuildable).
+DEFINE TABLE loaded       TYPE RELATION FROM session TO skill;
+DEFINE FIELD ts           ON loaded TYPE datetime;
+DEFINE FIELD agent        ON loaded TYPE option<string>;        -- the scoping agent
+DEFINE FIELD source       ON loaded TYPE string DEFAULT 'frontmatter';
+DEFINE INDEX IF NOT EXISTS loaded_out ON loaded FIELDS out;
+DEFINE INDEX IF NOT EXISTS loaded_in  ON loaded FIELDS in;
+
 DEFINE TABLE proposed     TYPE RELATION FROM turn TO skill;     -- assistant text mentioned skill, never invoked
 DEFINE FIELD ts           ON proposed TYPE datetime;
 DEFINE FIELD context_excerpt ON proposed TYPE option<string>;

@@ -109,9 +109,11 @@ frontmatter case via `loadAgentScopeMap`, but writes no usage edge.
 
 1. **Backfill `skill_revision`** from ingest history (or accrue organically). *Primary gate.*
 2. **Capture auto-load activations** as a derived edge - when a subagent with `skills:`
-   frontmatter spawns, or a SessionStart hook injects a skill, stamp an activation row
-   (ts + session). *Secondary; a bounded derive-stage feature, NOT a hot-path parser change.
-   Does not unblock the crux on its own - #1 is the gate.*
+   frontmatter spawns, stamp an activation row (ts + session). **SHIPPED** as the
+   `loaded-skills` stage -> `loaded` edge (session->skill), kept separate from `invoked`.
+   First run materialized 1,062 activations across 16 skill-scoped agents (e.g. design-curator
+   loads 13 skills it never Skill-tool-invokes). A SessionStart-hook-injection variant is still
+   open. *Secondary; does NOT unblock the crux on its own - #1 is the gate.*
 
 Until #1 lands, "ax = the open-ended verifier" cannot be tested, let alone claimed.
 
