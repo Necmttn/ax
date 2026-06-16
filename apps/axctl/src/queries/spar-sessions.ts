@@ -22,7 +22,7 @@ import type { DbError } from "@ax/lib/errors";
  * strings. `invoked.session` / `session.id` are record links, and SurrealDB
  * compares `record<session> NOT IN [<string>...]` as ALWAYS-TRUE (the string
  * IN-list silently matches nothing - documented rule, see
- * apps/axctl/src/context/file-context.ts:647-651). The exclusion at the
+ * @ax/lib/shared/record-select). The exclusion at the
  * weighted aggregate binds these RecordIds so the comparison is
  * record-vs-record and actually fires. Verified empirically on the live DB:
  * a string[] param excludes 0 rows; a RecordId[] param excludes correctly.

@@ -3,15 +3,68 @@ import type { DbError } from "@ax/lib/errors";
 import { SurrealClient } from "@ax/lib/db";
 import { decodeJsonRecordOrNull } from "@ax/lib/decode";
 import {
-    buildFileContextHookEvidence,
-    type FileContextPack,
+    type BuildFileContextInput,
     type FileMemoryCommit,
     type FileMemoryCorrection,
     type FileMemoryCoTouch,
-} from "../context/file-context.ts";
+    type FileRow,
+    loadCoTouchedFiles,
+    loadFileTargetedCorrections,
+    loadPriorFileSessions,
+    loadRecentCommitsForFile,
+    type PriorFileSession,
+    resolveFiles,
+} from "../context/file-evidence.ts";
+import { extractFileContextSignals } from "../context/file-evidence-rank.ts";
 import { findRecentInjects } from "./dedup.ts";
 
-type PriorFileSession = FileContextPack["evidence"]["prior_file_sessions"][number];
+export type { FileMemoryCommit, FileMemoryCorrection, FileMemoryCoTouch, PriorFileSession } from "../context/file-evidence.ts";
+
+/** The hook's File Evidence composition: exact-only file resolution (hot path)
+ *  plus the four precision signals, each isolated so a single SQL failure
+ *  degrades to empty instead of blocking the whole hook. */
+export interface FileContextHookEvidence {
+    readonly files: readonly FileRow[];
+    readonly prior_file_sessions: readonly PriorFileSession[];
+    readonly corrections: readonly FileMemoryCorrection[];
+    readonly commits: readonly FileMemoryCommit[];
+    readonly co_touched: readonly FileMemoryCoTouch[];
+}
+
+export const buildFileContextHookEvidence = (
+    input: BuildFileContextInput,
+): Effect.Effect<FileContextHookEvidence, DbError, SurrealClient> =>
+    Effect.gen(function* () {
+        const signals = extractFileContextSignals(input.q, input.files);
+        const files = yield* resolveFiles(signals.paths, { fuzzyFallback: false });
+        if (files.length === 0) {
+            return {
+                files: [] as readonly FileRow[],
+                prior_file_sessions: [] as readonly PriorFileSession[],
+                corrections: [] as readonly FileMemoryCorrection[],
+                commits: [] as readonly FileMemoryCommit[],
+                co_touched: [] as readonly FileMemoryCoTouch[],
+            };
+        }
+        const fileIds = files.map((file) => file.id);
+        // Each evidence query is isolated: a SQL failure in one (schema drift,
+        // bad cast, missing table) must not block the hook output. Degrade to
+        // empty and log to stderr; the agent still gets whatever did succeed.
+        const guard = <T,>(eff: Effect.Effect<T, DbError, SurrealClient>, label: string, fallback: T) =>
+            eff.pipe(Effect.catch((err) =>
+                Effect.sync(() => {
+                    console.error(`axctl hook ${label} query failed:`, err.message);
+                    return fallback;
+                }),
+            ));
+        const [prior_file_sessions, corrections, commits, co_touched] = yield* Effect.all([
+            guard(loadPriorFileSessions(fileIds, 5), "prior_file_sessions", [] as readonly PriorFileSession[]),
+            guard(loadFileTargetedCorrections(fileIds, 5), "corrections", [] as readonly FileMemoryCorrection[]),
+            guard(loadRecentCommitsForFile(fileIds, 5), "commits", [] as readonly FileMemoryCommit[]),
+            guard(loadCoTouchedFiles(fileIds, 5), "co_touched", [] as readonly FileMemoryCoTouch[]),
+        ], { concurrency: "unbounded" });
+        return { files, prior_file_sessions, corrections, commits, co_touched };
+    });
 
 export type FileContextHookEvent = "pre-edit" | "read" | "write" | "search" | "unknown";
 export type FileContextHookFormat = "plain" | "json" | "claude";

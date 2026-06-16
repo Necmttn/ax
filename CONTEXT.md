@@ -83,6 +83,22 @@ _Avoid_: commit lint
 Code-structure context extracted lazily around changed or queried **Files**.
 _Avoid_: full-repo static index
 
+**File Evidence**:
+The graph-derived, rendering-free evidence about a single **File** - prior
+editing sessions, file-targeted user corrections, touching commits, co-touched
+files, observed tool reads/searches, and turn mentions. A library of retrieval
+primitives behind small `fileIds -> rows` interfaces; the **File Context Pack**
+(CLI) and **File Memory** injection (hook) are the two adapters that select
+primitives and render them differently.
+_Avoid_: file context, lookup result, file context pack
+
+**File Context Pack**:
+The broad, CLI-facing composition of **File Evidence** (`ax.file_context_pack`)
+- all evidence kinds plus a rendered `ai_context` block and a graph-inspection
+query. One of the two **File Evidence** adapters; the other is **File Memory**
+injection.
+_Avoid_: context blob
+
 **Storage Backend**:
 The SurrealDB persistence engine used by `axctl`, separate from product semantics.
 _Avoid_: memory versioning model
@@ -372,6 +388,7 @@ _Avoid_: task
 - `axctl` should coach **Commit Signal** quality through non-blocking diagnostics, not enforce commit workflow policy.
 - The **Derivation Engine** belongs to `axctl`; Codex-specific code can feed it through adapters but should not define its domain model.
 - **Tracer Context** is activity-first and lazy: extract around touched, edited, or queried Files before considering full-repo indexing.
+- **File Evidence** retrieval primitives are agent-neutral and own no rendering; the **File Context Pack** and **File Memory** injection are the two adapters that compose and render them. A prior-session loader has exactly one implementation shared by both adapters; performance variants are not allowed to fork the result shape.
 - **Storage Backend** versioning must stay invisible to product semantics, user-facing queries, and tests.
 - Node tables store durable identity; edge tables store relationship-specific evidence.
 - Schema names should use single words when readable and snake_case when clarity wins; use `changeset` for **Change Set** and `file_memory` for **File Memory**.
