@@ -1,140 +1,144 @@
-# Studio cost view - `/cost` dashboard
+# Studio cost view + interactive routing tuner - `/cost`
 
 Date: 2026-06-16
 Status: design (pre-implementation)
 Branch: feat/studio-cost-view
-Follows: the Effect HttpApi insights contract (`packages/lib/src/shared/api-contract.ts`
-`InsightsGroup`, `costModels` is the precedent), the cost query layer
-(`fetchCostSplit`, `fetchDispatches`/`fetchDispatchCandidates`, `fetchRoutability`),
-studio routing (`apps/studio/src/router.tsx` + `<Shell>` nav).
+Follows: the Effect HttpApi insights contract (`packages/lib/src/shared/api-contract.ts`),
+the cost query layer (`fetchCostSplit`, `fetchDispatches`/`fetchDispatchCandidates`,
+`fetchRoutability`), the shared routing matcher (`packages/hooks-sdk/src/routing-table.ts`
+`matchRoutingTable`) + stored-table io (`apps/axctl/src/queries/routing-table-io.ts`),
+studio routing (`apps/studio/src/router.tsx` + `<Shell>`).
 
 ## Problem
 
-The blog article's signature visuals (main-vs-subagent split, per-model bars, dispatch
-candidates, the routability lens) live only in the CLI + the article's hand-built figures.
-Studio - the live dashboard - has **no cost view**; its only spend-adjacent route is
-`/usage` (command utilization, not $). There's nothing to screenshot as "the live product"
-for cost, and a user who installs ax can't *see* their bill broken down in the dashboard.
+Routing is regex at its core: routing classes are regex patterns on the dispatch description
+(`^implement`, `^Fix\s`, `^issue\s+\d+\b`) → a cheaper model; `ax routing tune` mines new
+regexes; the judgment guard + routability classifier are regex too. But tuning is blind: you
+edit a pattern, run `ax routing tune --emit-brief`, an agent backtests it, you apply IDs. No
+live "what does this pattern actually catch?", and the false-positive problem (a class regex
+that also matches judgment work) is only caught by that slow brief loop.
 
-This adds a `/cost` studio route backed by the existing cost queries, exposed over the
-dashboard HTTP API. v1 scope (user-chosen): **split + dispatches + routability**.
+Meanwhile studio has no cost view at all (only `/usage`, command utilization). This builds one
+`/cost` dashboard that does both halves:
+- **Measure** (read-only): the spend split, dispatch candidates, and main-thread routability.
+- **Tune** (interactive): a regex playground over your real dispatch history - edit a class
+  pattern, see matches vs misses + est savings live, flag false positives (→ persisted
+  exclusions), add/edit/remove classes, all written back to `~/.ax/hooks/routing-table.json`
+  which the route-dispatch hook reads live.
+
+v1 scope (user-chosen): full interactive incl. save-to-table, combined into one `/cost` view.
 
 ## Non-goals
 
-- No new analytics. Pure surfacing of `fetchCostSplit` / `fetchDispatchCandidates` /
-  `fetchRoutability` (already built + tested) through the dashboard API into studio.
-- No curated payload schemas. Mirror `costModels` (`success: Schema.Unknown`) - these are
-  read-only display payloads; the query fns own the shape. (A later tightening pass can add
-  schemas, same as the rest of the insights surface.)
-- Not the article embed. The `/showcases` update + screenshot into the post is Phase 3,
-  separate.
+- No new spend analytics - surfaces existing query fns. No new mining algorithm (the live
+  backtest reuses the candidate/repricing logic; `ax routing tune`'s clustering stays CLI).
+- Measure payloads stay `Schema.Unknown` (mirror `costModels`); the query fns own the shape.
 
-## Architecture (mirror `costModels` × 3)
+## New cross-cutting piece: routing-class exclusions
 
-### 1. Contract - `packages/lib/src/shared/api-contract.ts` `InsightsGroup`
+`RoutingClass` gains `exclude?: readonly string[]` (regex strings). In `matchRoutingTable`:
+after a class's `pattern` (or agentType) matches, if ANY `exclude` regex matches the
+description, the class does **not** route down (treated as no-match / falls through). This is
+the persistent false-positive mechanism, and because the hook fire-path and
+`ax dispatches --candidates` both call `matchRoutingTable`, exclusions take effect everywhere
+with one change. Touch points:
+- `packages/hooks-sdk/src/routing-table.ts`: add `exclude` to the schema + `RoutingClass` +
+  matcher logic (compile each exclude once; invalid regex → ignore that entry, never throw -
+  fail-open like the rest of the hook).
+- `routing-table-io.ts`: preserve `exclude` on user classes through merge/compile/save.
+- Defaults (`ROUTING_CLASSES`) may omit `exclude` (optional); user/tuned classes carry it.
 
-Add three GET endpoints (alongside `costModels`):
+## API (contract + handlers)
 
-```ts
-HttpApiEndpoint.get("costSplit", "/api/cost/split", {
-  query: { days: Schema.optionalKey(Schema.Number) },
-  success: Schema.Unknown, error: InternalError,
-}),
-HttpApiEndpoint.get("costDispatches", "/api/cost/dispatches", {
-  query: {
-    days: Schema.optionalKey(Schema.Number),
-    candidates: Schema.optionalKey(Schema.Boolean),
-  },
-  success: Schema.Unknown, error: InternalError,
-}),
-HttpApiEndpoint.get("costRoutability", "/api/cost/routability", {
-  query: {
-    days: Schema.optionalKey(Schema.Number),
-    minRun: Schema.optionalKey(Schema.Number),
-  },
-  success: Schema.Unknown, error: InternalError,
-}),
-```
+### Read endpoints - `InsightsGroup` (mirror `costModels`, `success: Schema.Unknown`)
+- `GET /api/cost/split?days` → `fetchCostSplit({sinceDays})`
+- `GET /api/cost/dispatches?days&candidates` → `fetchDispatches` / `fetchDispatchCandidates`
+- `GET /api/cost/routability?days&minRun` → `fetchRoutability`
+- `GET /api/routing/table` → the effective stored table (classes w/ origin + agentTypes +
+  exclude) for the tuner list.
 
-### 2. Handlers - `apps/axctl/src/dashboard/contract/insights.ts`
+### Backtest endpoint (read, but takes a candidate class)
+- `POST /api/routing/backtest` body `{pattern, suggest, agentType?, exclude?: string[], days}`
+  → over dispatch history: `matched` (dispatches the pattern catches, with child_cost +
+  est savings repriced to `suggest`, minus those killed by `exclude`), `excluded` (matches
+  the exclude removed), `missed` (expensive inherit dispatches the pattern does NOT catch -
+  candidates for widening). Reuses the candidate/repricing path with an ad-hoc one-class table.
+  POST (not GET) so `exclude[]` rides a JSON body cleanly. Read-only (no write).
 
-```ts
-.handle("costSplit", ({ query }) =>
-  orInternal(fetchCostSplit({ sinceDays: query.days ?? 30 }).pipe(Effect.map(asJsonValue))))
-.handle("costDispatches", ({ query }) =>
-  orInternal((query.candidates
-    ? fetchDispatchCandidates({ sinceDays: query.days ?? 30 })
-    : fetchDispatches({ sinceDays: query.days ?? 30 })
-  ).pipe(Effect.map(asJsonValue))))
-.handle("costRoutability", ({ query }) =>
-  orInternal(fetchRoutability({ days: query.days ?? 30, minRun: query.minRun ?? 1 })
-    .pipe(Effect.map(asJsonValue))))
-```
+### Write endpoints (follow `skillDecide`/`improveAction` POST precedent; localhost-bound)
+- `POST /api/routing/classes` body `{id, pattern, suggest, agentType?, exclude?: string[]}` -
+  upsert a `user`-origin class into routing-table.json via the merge-preserving compile/save
+  logic (refuses to clobber a corrupt file, same as `ax routing compile`). Validate regex
+  before write (400 on invalid pattern/exclude).
+- `DELETE /api/routing/classes/:id` - remove a `user` class (default classes are not
+  deletable; return 400/409). 
+- Writes go through `routing-table-io` save (single source of truth), so the CLI + hook + UI
+  all agree. The route-dispatch hook re-reads the file at fire time → edits are live.
 
-Import the three fns (`cost-analytics.ts`, `dispatch-analytics.ts`, `routability.ts`).
-Verify the exact `fetchDispatches`/`fetchDispatchCandidates` input field names at build time.
+## Studio `/cost` view (`apps/studio/src/routes/cost.tsx`)
 
-### 3. Studio client - `apps/studio/src/api.ts`
+`useQuery` per section (mirror `UsageRoute`'s panel/loading/error). Sections:
 
-Three `viaContract` methods mirroring `costModels`:
+1. **Spend split** - proportional stacked bar (main vs subagent of total) + per-model bars
+   (cost-weighted, fable peak). Native studio bar primitive (do NOT import the site blog kit).
+2. **Dispatch candidates** - table/bars of inherit+expensive dispatches matching a route-down
+   class, suggested model + est savings.
+3. **Main-thread routability** - routable-class rollup + est savings.
+4. **Routing tuner** (the interactive half):
+   - List current classes (default vs user, each with pattern/suggest/exclude).
+   - A pattern editor: type/edit `pattern` + `suggest` (+ optional agentType); debounced
+     `POST /api/routing/backtest` shows **matched** dispatches (green, with $ saved),
+     **missed** expensive ones, running est savings. Live regex feedback (invalid pattern →
+     inline error, no crash).
+   - **Flag false positive**: click a wrong match → its description seeds an `exclude` entry;
+     re-backtest shows it moved to `excluded`. Exclusions editable as a list.
+   - **Save**: `POST /api/routing/classes` (upsert) or `DELETE` (remove user class).
+     Optimistic refresh of the table + candidates.
+   - A mutation confirms with a toast + shows the equivalent CLI (`ax routing ...`) for
+     transparency.
 
-```ts
-costSplit: (days = 30): Promise<CostSplitResult> =>
-  viaContract("/api/cost/split", (c) => c.insights.costSplit({ query: { days } })) as ...,
-costDispatches: (days = 30, candidates = false): Promise<...> =>
-  viaContract("/api/cost/dispatches", (c) => c.insights.costDispatches({ query: { days, candidates } })) as ...,
-costRoutability: (days = 30, minRun = 1): Promise<RoutabilityResult> =>
-  viaContract("/api/cost/routability", (c) => c.insights.costRoutability({ query: { days, minRun } })) as ...,
-```
-
-Reuse the query result types (`CostSplitResult`, `RoutabilityResult`, dispatch types) imported
-from the query modules for the casts.
-
-### 4. Studio route - `apps/studio/src/routes/cost.tsx` (`/cost`)
-
-`CostRoute` component (mirror `UsageRoute`'s `useQuery` + `panel` shape), three sections:
-- **Spend split** - a proportional stacked bar (main vs subagent of total) + per-model bars
-  (cost-weighted, fable peak). The article's hero visual, native in studio styling.
-- **Dispatch candidates** - table/bars of inherit+expensive dispatches matching a route-down
-  class, with suggested model + est savings (from `costDispatches({candidates:true})`).
-- **Main-thread routability** - the routable-class rollup + est savings bars (from
-  `costRoutability`).
-Small shared bar primitive in studio (studio owns its CSS; do NOT import the site's
-`bk-*` blog kit - separate app). Light empty/loading/error states like `UsageRoute`.
-
-### 5. Register + nav
-
-`router.tsx`: add `costRoute` (`getParentRoute: () => rootRoute, path: "/cost"`) to the route
-tree. Add a `/cost` link to the `<Shell>` nav (find the nav in the Shell component).
+### Register + nav
+`router.tsx`: add `costRoute` (`path: "/cost"`). Add a `/cost` link to `<Shell>` nav.
 
 ## Testing
-
-- Contract/handler: the dashboard contract has a wiring test pattern - add coverage that the
-  three endpoints resolve (or at least typecheck into the group). Follow existing insights
-  handler test precedent if present.
-- Pure query fns are already unit-tested (cost-analytics, routability). No new query logic.
-- studio render: a light smoke if the studio test harness supports it; else rely on the live
-  cmux screenshot for verification.
+- **Exclusion matcher** (hooks-sdk): unit tests - class matches, exclude kills it, invalid
+  exclude ignored, no exclude = unchanged. This is the highest-risk logic (touches the live
+  hook) → exhaustive.
+- **io merge**: exclude preserved on user classes across compile/merge/save.
+- **Backtest**: pure repricing/match over a fixture dispatch set → matched/excluded/missed
+  partition + savings math.
+- **Write handlers**: upsert + delete round-trip through routing-table-io (temp file), invalid
+  regex → 400, default class not deletable.
+- studio render: light smoke if harness supports; else cmux live verification.
 
 ## Verification
+- `bun test` (hooks-sdk matcher, io, backtest, handlers) + `bun run typecheck` green for
+  touched packages.
+- `ax dispatches --candidates` still correct WITH an exclude present (regression - the shared
+  matcher now skips excluded).
+- Live: `ax serve` + studio dev, open `/cost` via cmux against the local DB; edit a pattern,
+  watch matches; flag an FP; save; confirm routing-table.json updated and `ax routing show`
+  reflects it. Screenshot for the article.
 
-- `bun run typecheck` (repo) green for the touched packages (lib/axctl/studio); baseline noise
-  excluded.
-- `bun test` for axctl dashboard + lib contract.
-- Build studio (`stage-studio.ts` or studio's `build:web`); run `ax serve` + studio dev,
-  open `/cost` via cmux against the live local DB, screenshot. mainSpend etc. should match
-  `ax cost split` / `ax cost routability`.
+## Safety
+- Dashboard binds 127.0.0.1 by default - write endpoints are local-only (same trust boundary
+  as the CLI writing the file). Note: with `AX_SERVE_HOST=0.0.0.0` the write surface is
+  exposed on the LAN; gate the routing write endpoints behind a localhost check (or a
+  capability flag) so 0.0.0.0 exposure stays read-only. Decide at build: simplest is reject
+  routing writes when the request isn't from loopback.
+- All regex compiled in try/catch; invalid never throws into the hook path.
+- routing-table-io already refuses to overwrite a corrupt file.
 
 ## Phase 3 (separate, after this lands)
-
-- Update `/showcases` to reference/show the studio cost view.
-- Screenshot the live `/cost` view; embed as a `<Figure>` in the routing-tune blog post.
+- Update `/showcases` to reference the studio cost+tuner view.
+- Screenshot the live `/cost` view (measure + tuner); embed as a `<Figure>` in the
+  routing-tune blog post.
 
 ## Risks
-
-- `viaContract` returns the typed contract result but `success: Schema.Unknown` means the
-  client casts - same trade-off the rest of the insights surface already makes (acceptable;
-  the query types carry the real shape).
-- studio bundles ship to the hosted studio (`stage-studio.ts` → site). Keep the new route
-  code-split-friendly; verify the staged build still works (the blog PR's CF build is the
-  precedent gate).
+- Biggest: the exclusion change touches the live route-dispatch hook matcher. Fail-open +
+  exhaustive matcher tests are mandatory.
+- `viaContract` casts the `Schema.Unknown` measure payloads (same trade-off as the rest of the
+  insights surface).
+- Studio bundles ship to hosted studio via `stage-studio.ts`; the write endpoints are daemon
+  (local) only - hosted studio simply won't have a daemon to write to (read parts degrade,
+  tuner save disabled when `api.isLive()` is false). Handle the not-live case in the UI.
