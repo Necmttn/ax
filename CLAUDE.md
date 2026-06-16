@@ -202,7 +202,7 @@ profile (ProfileV1: stats + rig + taste patterns) from the graph.
 publish to a public gist (create once, PATCH in place). First run: consent
 prompt showing the exact JSON, then fork + community/users/<login>.json
 registration PR into Necmttn/ax (git-data API, no local clone). The watcher
-runs `--if-stale=6` after ingest - silent no-op until first consent.
+runs `--if-stale=2` after ingest - silent no-op until first consent.
 `--no-cost` is sticky across republishes; `ax profile unpublish` (delete
 gist + local state) resets it. State: `~/.ax/profile-publish.json`. Spec:
 docs/superpowers/specs/2026-06-12-ax-profiles-design.md; site routes land
