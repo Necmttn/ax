@@ -18,6 +18,7 @@ import {
     writeServePidfile,
 } from "./serve-instance.ts";
 import { defaultRuntimeFactory, makeServeRuntime } from "./serve-runtime.ts";
+import { serveStudioAsset } from "./studio-assets.ts";
 
 export function parseDashboardServeArgs(args: string[]): { port: number } {
     const raw = args.find((arg) => arg.startsWith("--port="))?.split("=")[1];
@@ -51,17 +52,31 @@ export async function handleDashboardRequest(
     const routed = await dispatch(routeTable, req, url, runner, serve);
     if (routed !== null) return routed;
     if (url.pathname.startsWith("/api/")) return jsonResponse({ error: "not_found" });
-    if (req.method === "GET") return serveRootLanding(url.port || String(DEFAULT_DASHBOARD_PORT));
+    if (req.method === "GET") {
+        // Studio is served by the daemon itself, same-origin, so the SPA fetches
+        // /api/* from the same host:port with no mixed-content / Private Network
+        // Access barrier. Embedded in the compiled binary; read off disk when
+        // running from source. Falls through to the landing page only when this
+        // build bundles no studio (and nothing is on disk).
+        const asset = await serveStudioAsset(url.pathname);
+        if (asset !== null) return asset;
+        // serveStudioAsset returns the SPA shell for unknown non-asset routes,
+        // so a null here means either a genuine asset miss (404) or a build with
+        // no studio bundled at all - in which case the root gets the landing page.
+        if (url.pathname === "/" || url.pathname === "") {
+            return serveRootLanding(url.port || String(DEFAULT_DASHBOARD_PORT));
+        }
+        return new Response("not found", { status: 404 });
+    }
     return new Response("not found", { status: 404 });
 }
 
 /**
- * Tiny HTML response at /. ax serve is API-only; the dashboard lives at
- * the hosted studio. This page is what someone sees if they curl the
- * daemon root or accidentally open http://localhost:1738/ in a browser.
+ * Fallback HTML at / when this build bundles no studio assets (and none are on
+ * disk) - e.g. a binary built without the embed step. Normally `ax serve`
+ * serves the studio SPA here directly; this page only shows when it can't.
  */
 function serveRootLanding(port: string): Response {
-    const studioUrl = `https://ax.necmttn.com/studio/?endpoint=${encodeURIComponent(`http://127.0.0.1:${port}`)}`;
     const html = `<!doctype html>
 <html lang="en">
 <head>
@@ -90,8 +105,8 @@ function serveRootLanding(port: string): Response {
   <main>
     <p class="tag">ax · agent experience layer</p>
     <h1>ax serve</h1>
-    <p>API-only daemon. The dashboard UI lives at the hosted studio &mdash; click below to open it with this daemon as the source.</p>
-    <a class="cta" href="${studioUrl}">Open studio &nbsp;→</a>
+    <p>This daemon is up, but no studio UI is bundled in this build. Reinstall the latest <code>ax</code>, or run from source &mdash; studio then serves right here at the daemon root.</p>
+    <a class="cta" href="https://github.com/Necmttn/ax">Get ax &nbsp;→</a>
     <hr>
     <p class="api">
       API endpoints: <code>/api/skills</code>, <code>/api/workflow</code>, <code>/api/improve</code>, <code>/api/version</code> &hellip;<br>

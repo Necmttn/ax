@@ -88,10 +88,10 @@ describe("profileToAxes - ENDURANCE log anchors", () => {
 });
 
 describe("profileToAxes - linear axes + caps", () => {
-    it("DEPTH maps 0->0, 60%->100, caps above", () => {
+    it("DEPTH maps 0->0, 30%->100, caps above", () => {
         expect(profileToAxes(profile({ insights: baseInsights({ deep_session_share: 0 }) })).scores.DEPTH).toBe(0);
-        expect(profileToAxes(profile({ insights: baseInsights({ deep_session_share: 0.3 }) })).scores.DEPTH).toBeCloseTo(50, 1);
-        expect(profileToAxes(profile({ insights: baseInsights({ deep_session_share: 0.6 }) })).scores.DEPTH).toBe(100);
+        expect(profileToAxes(profile({ insights: baseInsights({ deep_session_share: 0.15 }) })).scores.DEPTH).toBeCloseTo(50, 1);
+        expect(profileToAxes(profile({ insights: baseInsights({ deep_session_share: 0.3 }) })).scores.DEPTH).toBe(100);
         expect(profileToAxes(profile({ insights: baseInsights({ deep_session_share: 0.9 }) })).scores.DEPTH).toBe(100);
     });
 
@@ -178,7 +178,7 @@ describe("profileToAxes - raws", () => {
                 repos_count: 12,
             }),
         }));
-        expect(a.raws.DEPTH.label).toBe("7.7% deep sessions");
+        expect(a.raws.DEPTH.label).toBe("7.7% landed clean");
         expect(a.raws.SCALE.label).toBe("19.6B tokens");
         expect(a.raws.RIGOR.label).toBe("2.9% verification share");
         expect(a.raws.DELEGATION.label).toBe("0.87 subagents/session");

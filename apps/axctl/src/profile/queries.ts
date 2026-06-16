@@ -9,6 +9,8 @@
  */
 import { Effect } from "effect";
 import { SurrealClient } from "@ax/lib/db";
+import { recordLiteral } from "@ax/lib/ids";
+import { recordKeyPart } from "@ax/lib/shared/derive-keys";
 import { isContextTool, isVerificationTool } from "./tool-taxonomy.ts";
 
 const win = (d: number) => `${Math.max(1, Math.trunc(d))}d`;
@@ -244,6 +246,102 @@ export const fetchSessionDurations = Effect.fn("profile.fetchSessionDurations")(
                 started_at: String(r.started_at),
                 ended_at: String(r.ended_at),
             })) satisfies SessionDurationRow[];
+    },
+);
+
+// --- deep sessions (outcome density) ----------------------------------------
+
+/**
+ * Sessions that landed a real, non-reverted commit (>0 lines touched). This is
+ * the numerator for DEPTH. Two cheap deref-light statements joined in JS (house
+ * style): (1) produced edges in window from non-subagent sessions to
+ * non-reverted commits, (2) landed LOC per of those commits. A session is
+ * "deep" when at least one of its produced commits actually touched code. No
+ * LOC floor beyond >0 - a surgical fix that ships clean is a deep outcome; size
+ * lives on the SCALE axis, not here.
+ */
+const DEEP_PRODUCED_SQL = (d: number) => `
+SELECT type::string(in) AS session, type::string(out) AS commit
+FROM produced
+WHERE in.started_at > time::now() - ${win(d)}
+  AND in.source != "claude-subagent"
+  AND out.reverted != true;`;
+
+const COMMIT_LANDED_LOC_SQL = (refs: string) => `
+SELECT type::string(in) AS commit, math::sum((additions ?? 0) + (deletions ?? 0)) AS loc
+FROM touched WHERE in IN [${refs}] GROUP BY commit;`;
+
+// DEPTH denominator: own (non-subagent) session count, so the numerator's
+// subagent filter is mirrored. fetchSessionDurations (which feeds hours/longest)
+// keeps counting every session, so the two denominators differ on purpose -
+// subagent sessions roughly DOUBLE the raw count and would halve this share.
+const DEEP_SESSION_TOTAL_SQL = (d: number) => `
+SELECT count() AS total FROM session
+WHERE started_at > time::now() - ${win(d)}
+  AND started_at IS NOT NONE
+  AND source != "claude-subagent"
+GROUP ALL;`;
+
+const LOC_CHUNK = 500;
+
+export interface DeepSessionCount {
+    /** sessions that landed >=1 real, non-reverted commit (DEPTH numerator) */
+    readonly deep: number;
+    /** non-subagent sessions in window (DEPTH denominator) */
+    readonly total: number;
+}
+
+export const fetchDeepSessionCount = Effect.fn("profile.fetchDeepSessionCount")(
+    function* (opts: { readonly windowDays: number }) {
+        const db = yield* SurrealClient;
+        const totalRows = yield* db
+            .query<[Array<Record<string, unknown>>]>(DEEP_SESSION_TOTAL_SQL(opts.windowDays))
+            .pipe(Effect.map((r) => r?.[0] ?? []));
+        const total = Number(totalRows[0]?.total ?? 0);
+
+        const produced = yield* db
+            .query<[Array<Record<string, unknown>>]>(DEEP_PRODUCED_SQL(opts.windowDays))
+            .pipe(Effect.map((r) => r?.[0] ?? []));
+
+        // (session, commit-key) pairs for landed, non-reverted commits.
+        const pairs = produced
+            .map((r) => ({
+                session: String(r.session ?? ""),
+                commit: recordKeyPart(String(r.commit ?? ""), "commit"),
+            }))
+            .filter((p): p is { session: string; commit: string } =>
+                p.session.length > 0 && p.commit !== null && p.commit.length > 0);
+        if (pairs.length === 0) return { deep: 0, total } satisfies DeepSessionCount;
+
+        const commitKeys = [...new Set(pairs.map((p) => p.commit))];
+        const chunks: string[][] = [];
+        for (let i = 0; i < commitKeys.length; i += LOC_CHUNK) {
+            chunks.push(commitKeys.slice(i, i + LOC_CHUNK));
+        }
+        const locRows = (yield* Effect.all(
+            chunks.map((keys) =>
+                db.query<[Array<Record<string, unknown>>]>(
+                    COMMIT_LANDED_LOC_SQL(keys.map((k) => recordLiteral("commit", k)).join(", ")),
+                ).pipe(Effect.map((r) => r?.[0] ?? [])),
+            ),
+            { concurrency: 4 },
+        )).flat();
+
+        // Commit keys whose landed diff actually touched code.
+        const realCommits = new Set<string>();
+        for (const row of locRows) {
+            if (Number(row.loc ?? 0) > 0) {
+                const key = recordKeyPart(String(row.commit ?? ""), "commit");
+                if (key !== null && key.length > 0) realCommits.add(key);
+            }
+        }
+
+        // Distinct sessions that produced >=1 real commit.
+        const deep = new Set<string>();
+        for (const p of pairs) {
+            if (realCommits.has(p.commit)) deep.add(p.session);
+        }
+        return { deep: deep.size, total } satisfies DeepSessionCount;
     },
 );
 

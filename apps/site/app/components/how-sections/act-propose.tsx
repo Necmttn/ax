@@ -20,8 +20,9 @@ export function ActPropose() {
           </p>
         </header>
 
+        <div className="landing-v2 how-propose-shell">
         <div
-          className="landing-v2 browser how-propose-browser"
+          className="browser browser--instrument how-propose-browser"
           role="img"
           aria-label="ax dashboard Improve view at 127.0.0.1:1738 - a ranked proposal card"
         >
@@ -86,6 +87,7 @@ export function ActPropose() {
 
             <p className="nx-foot">+18 more in the registry below</p>
           </div>
+        </div>
         </div>
 
         <p className="how-act-note">

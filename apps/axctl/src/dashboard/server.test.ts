@@ -132,4 +132,21 @@ describe("dashboard server", () => {
         expect(res.status).toBe(200);
         await expect(res.json()).resolves.toEqual({ error: "not_found" });
     });
+
+    // GET / serves the studio SPA (embedded or on-disk) or, failing that, the
+    // daemon landing page - either way 200 HTML. A hashed asset that doesn't
+    // exist is a hard 404 regardless of whether studio is bundled, so it never
+    // leaks the SPA shell for a `.js` request (hash-mismatch surfaces).
+    test("GET / serves HTML (studio or landing)", async () => {
+        const res = await handleDashboardRequest(new Request("http://127.0.0.1:1738/"));
+        expect(res.status).toBe(200);
+        expect(res.headers.get("content-type")).toContain("text/html");
+    });
+
+    test("GET a missing /assets/* path is a 404, never the SPA shell", async () => {
+        const res = await handleDashboardRequest(
+            new Request("http://127.0.0.1:1738/assets/definitely-not-a-real-hash-xyz.js"),
+        );
+        expect(res.status).toBe(404);
+    });
 });

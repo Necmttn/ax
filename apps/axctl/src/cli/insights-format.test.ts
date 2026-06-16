@@ -21,6 +21,24 @@ describe("formatInsightRows", () => {
         expect(output).toContain("assistant #10: I recommend building local storage first");
     });
 
+    test("renders failing tools as a compact table, not raw JSON", () => {
+        const output = formatInsightRows("tools", [
+            { name: "Edit", failure_count: 1057, status_error_count: 1057, last_seen: "2026-06-16T08:52:47.916Z" },
+            { name: "write_stdin", exit_code: 1, failure_count: 840, last_seen: "2026-06-11T13:14:03.371Z" },
+            { name: "Bash", command_norm: "bun test", exit_code: 2, failure_count: 12, last_seen: "2026-06-10T09:06:05.000Z" },
+        ]);
+
+        expect(output).toContain("1. Edit  -  1,057 failures  last 2026-06-16 08:52:47");
+        expect(output).toContain("2. write_stdin (exit 1)  -  840 failures");
+        expect(output).toContain("3. Bash: bun test (exit 2)  -  12 failures");
+        expect(output).not.toContain("status_error_count");
+        expect(output).not.toContain("{");
+    });
+
+    test("renders empty failing-tools view with a friendly message", () => {
+        expect(formatInsightRows("tools", [])).toBe("No failing tools found.");
+    });
+
     test("renders signal summaries without dumping nested JSON", () => {
         const output = formatInsightRows("message-signals", [
             {

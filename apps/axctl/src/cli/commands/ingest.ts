@@ -9,6 +9,7 @@ import { prettyPrint } from "@ax/lib/json";
 import type { DbError } from "@ax/lib/errors";
 import { encodeClaudeProjectSlug } from "@ax/lib/transcript-locator";
 import { runIngest, withIngestRunFinish } from "../../ingest/run.ts";
+import { reapStaleIngestRuns } from "../../ingest/reap-runs.ts";
 import { withIngestLock } from "../../ingest/ingest-lock.ts";
 import { StageRegistry, type StageRegistryShape } from "../../ingest/stage/registry.ts";
 import { selectByKeys, selectByTag } from "../../ingest/stage/select.ts";
@@ -495,6 +496,31 @@ const ingestHereCommand = Command.make(
         "--stages=<a,b,c> overrides the default set.",
 ));
 
+const ingestReapCommand = Command.make(
+    "reap",
+    { dryRun: Flag.boolean("dry-run").pipe(Flag.withDefault(false)), json: jsonFlag },
+    ({ dryRun, json }) =>
+        Effect.gen(function* () {
+            const result = yield* reapStaleIngestRuns({ dryRun });
+            if (json) {
+                console.log(prettyPrint(result));
+                return;
+            }
+            if (result.found === 0) {
+                console.log("no stale ingest_run rows - nothing to reap");
+                return;
+            }
+            console.log(`${dryRun ? "would reap" : "reaped"} ${result.found} stale ingest_run row(s):`);
+            for (const id of result.ids) console.log(`  ingest_run:${id}`);
+            if (dryRun) console.log("(dry-run - no writes)");
+        }),
+).pipe(
+    Command.withDescription(
+        "Settle ingest_run rows stranded in status \"running\" past the ingest timeout " +
+            "(crash/SIGKILL residue that doctor flags). Marks each \"partial\"; idempotent. Use --dry-run to preview.",
+    ),
+);
+
 export const ingestCommand = Command.make(
     "ingest",
     {
@@ -561,7 +587,7 @@ export const ingestCommand = Command.make(
             "(see ADR-0009; canonical list lives in src/ingest/stage/registry.ts). " +
             "Use --reset to wipe the skill graph first and rebuild it clean.",
     ),
-    Command.withSubcommands([ingestHereCommand]),
+    Command.withSubcommands([ingestHereCommand, ingestReapCommand]),
 );
 
 // Shared flag specs + handlers for the derive verbs. They back BOTH the flat

@@ -424,6 +424,7 @@ function SignSection({ n, profile, vs }: { n: string; profile: ProfileV1; vs: Vs
                             some axes read 0 - they need a newer ax version to populate.
                         </p>
                     )}
+                    <AxisLegend />
                 </div>
 
                 <div className="pf-sign-read">
@@ -483,6 +484,20 @@ function SignSection({ n, profile, vs }: { n: string; profile: ProfileV1; vs: Vs
                 vs={vsReady && vsAxes ? { axes: vsAxes, login: vsReady.login } : undefined}
             />
         </section>
+    );
+}
+
+/** Compact six-axis legend under the radar: what each spoke abbreviation means. */
+function AxisLegend() {
+    return (
+        <dl className="pf-axis-legend" aria-label="axis legend">
+            {RADAR_AXES_META.map((m) => (
+                <div className="pf-axis-legend-row" key={m.key}>
+                    <dt className="pf-axis-legend-key">{m.label}</dt>
+                    <dd className="pf-axis-legend-note">{m.note}</dd>
+                </div>
+            ))}
+        </dl>
     );
 }
 
@@ -550,7 +565,10 @@ function RawTable({
                         const bLeads = vs !== undefined && b !== undefined && b.value !== null && (a.value === null || b.value > a.value);
                         return (
                             <tr key={m.key}>
-                                <th scope="row">{m.label}</th>
+                                <th scope="row">
+                                    <span className="pf-rawvals-metric">{m.label}</span>
+                                    <span className="pf-rawvals-metric-note">{m.note}</span>
+                                </th>
                                 <td className={aLeads ? "pf-rawvals-val pf-rawvals-val--lead" : "pf-rawvals-val"}>
                                     {a.label}
                                     {aLeads && <span className="pf-rawvals-dot" aria-label="leads" />}
@@ -820,7 +838,7 @@ function buildInsightCards(ins: ProfileInsights): InsightCard[] {
         {
             q: "How deep do you go?",
             a: fmtPct(ins.deep_session_share),
-            s: "of sessions ran 90+ minutes - deliberate, not drive-by",
+            s: "of sessions landed a real, non-reverted commit - shipped, not just chatted",
             viz: <VizBar value={ins.deep_session_share} />,
         },
         {

@@ -11,6 +11,7 @@ import { buildProfile } from "./render.ts";
 // 17 wrappedCounts(distinctSkills)  18 wrappedCounts(reposCount)
 // 19 dailyModels  20 dailyToolCalls  21 dailyCommits
 // 22 windowedInvocations  23 windowedSessions
+// 24 deepSessions:total  25 deepSessions:produced  26 deepSessions:landed-loc
 const mockResults = [
     [[{ prompt_tokens: 31_000_000, completion_tokens: 7_000_000, sessions: 142 }]],
     [[{ date: "2026-06-11" }, { date: "2026-06-12" }]],
@@ -78,6 +79,18 @@ const mockResults = [
         { id: "session:1", s: "2026-06-12T10:00:00Z", e: "2026-06-12T12:30:00Z" },
         { id: "session:2", s: "2026-06-12T09:00:00Z", e: "2026-06-12T10:30:00Z" },
     ]],
+    // 24: deepSessions total (non-subagent session count = DEPTH denominator)
+    [[{ total: 2 }]],
+    // 25: deepSessions produced edges (session -> non-reverted commit)
+    [[
+        { session: "session:1", commit: "commit:abc" },
+        { session: "session:2", commit: "commit:def" },
+    ]],
+    // 26: deepSessions landed LOC per commit (commit:def landed nothing -> not deep)
+    [[
+        { commit: "commit:abc", loc: 120 },
+        { commit: "commit:def", loc: 0 },
+    ]],
 ];
 
 const env = {
@@ -139,7 +152,8 @@ describe("buildProfile", () => {
         expect(p.insights).toBeDefined();
         expect(p.insights!.hours_total).toBeCloseTo(4, 1); // 2.5h + 1.5h
         expect(p.insights!.longest_session_minutes).toBe(150);
-        expect(p.insights!.deep_session_share).toBe(1); // both sessions >= 90min
+        // 1 of 2 non-subagent sessions landed a real commit (session:1 -> commit:abc, loc>0)
+        expect(p.insights!.deep_session_share).toBe(0.5);
         expect(p.insights!.peak_hour_utc).toBe(13);
         expect(p.insights!.busiest_day).toEqual({ date: "2026-06-12", sessions: 12 });
         expect(p.insights!.max_parallel_sessions).toBe(2);

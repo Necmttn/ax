@@ -61,8 +61,7 @@ export async function serveStatus(
         deps.log(`[ax] ax serve is running on port ${port} (${pid === null ? `pid unknown - find it: ${lsofHint(port)}` : `pid ${pid}`}, v${probe.version})`);
         if (pidfile !== null && pid === pidfile.pid) deps.log(`  started           ${pidfile.startedAt}`);
         deps.log(`  live ingest       ${probe.liveIngest ? "on" : "off (compiled binary - run from source to enable)"}`);
-        deps.log(`  local daemon      http://localhost:${port}`);
-        deps.log(`  open in studio    ${serveStudioUrl(port)}`);
+        deps.log(`  studio + api      ${serveStudioUrl(port)}`);
         return 0;
     }
 

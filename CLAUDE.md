@@ -79,6 +79,25 @@ fresh clone.
 - Weekly self-improve cron (`~/.claude/self-improve/run.sh`) does deep-scan backfill (planned wire-up)
 - `ax-extract-workflow` skill (installable via `npx skills add Necmttn/ax`) frames "what made X work" investigations - triggers retro + session queries to surface the actual sequence of events behind a result.
 
+### Studio served by the daemon (same-origin)
+
+`ax serve` serves the studio SPA at its own root (`http://127.0.0.1:1738/`), so
+the dashboard fetches `/api/*` same-origin - no mixed-content / Private Network
+Access handshake (the bug that made the hosted `https://ax.necmttn.com/studio/`
+fail to reach a loopback daemon for many users). The studio **daemon** build
+target (`base:/`, `mock:false`, `apps/studio/dist`) is the served bundle:
+`serveStudioAsset` (`apps/axctl/src/dashboard/studio-assets.ts`) reads it off
+disk when running from source, and from assets **embedded in the compiled
+binary** otherwise. The binary embed is codegen: `scripts/build-axctl.ts` calls
+`scripts/gen-studio-embed.ts` `writeManifest()` (builds studio + rewrites
+`studio-embed.gen.ts` with `{ type: "file" }` imports so `bun build --compile`
+bakes the bytes in), compiles, then `writeStub()` restores the committed empty
+stub so the manifest never lands in git. Unknown non-asset routes fall back to
+`index.html` (SPA routing); a missing `/assets/*` is a 404; the daemon landing
+page shows only when no studio is bundled at all. The hosted
+`ax.necmttn.com/studio/` stays a **mock-fixtures demo** (no live daemon); the
+CLI banner points only at the local URL via `serveStudioUrl` (`banner.ts`).
+
 ### Live ingest in the dashboard
 
 - `ax serve` → `POST /api/ingest` (or the **Live** tab) forks `runIngest` (same pipeline as CLI) onto the server runtime. Progress flows as `IngestStreamEvent`s through the `IngestStreamBus` seam (`apps/axctl/src/dashboard/ingest-stream.ts`) to a per-run Durable Stream `ingest:<runId>`; the browser subscribes from offset `-1`, so refresh/reconnect mid-run rehydrates. Exactly one terminal `run_finished` event guaranteed. The bus seam lets the Bun backing swap for a hosted backend later untouched.
@@ -195,6 +214,7 @@ docs/superpowers/specs/2026-06-13-ax-dojo-design.md.
 for a completed run; `ax dojo draft [--title=...] [--kind=bug|improvement]`
 stages an upstream finding to `~/.ax/dojo/outbox/` (never publishes);
 `ax dojo outbox` inspects staged drafts. `ax dojo spar-plan <sha>` freezes a landed task's baseline (prompt + cost/turns/churn) and emits a brief with the worktree pin command + a delta slot; the agent runs the variant with ONE change in that worktree; `ax dojo spar-score <id>` scores variant vs baseline into a receipt (`~/.ax/dojo/spar/`). Hybrid: CLI scaffolds, agent re-runs. **Spar exclusion**: spar-score stamps the variant session `labels=["spar"]` so it is excluded from behavioral analytics (`ax skills weighted`, `ax thinking`); it stays in cost analytics.
+`ax dojo spar-plan --skill <name> [--session <id>|--sha <sha>]` plans a skill-EDIT spar: snapshots `~/.claude/skills/<name>/SKILL.md`, auto-picks the most recent main session that invoked or loaded the skill (`--session`/`--sha` override), and emits a two-arm brief. Arm A runs the task with the original skill; arm B runs the SAME task with the EDITED skill. The edited skill must be written to `~/.ax/dojo/spar/<id>.skill.edited.md` - the swap-in command in the brief reads from that file (with a loud guard if it is absent) and copies it over `SKILL.md`; the operator composes the edit in the brief's "Edited skill" draft block and saves it to that path before running arm B. Isolation is a global swap - edit `~/.claude/skills/<name>/SKILL.md`, run, restore from snapshot - because personal>project skill precedence makes worktree-local overrides ineffective and `CLAUDE_CONFIG_DIR` is unreliable. Runs are serialized; don't run other Claude sessions mid-spar. `ax dojo spar-score <id>` detects skill briefs (`isSkillSparBrief`) and scores arm B (edited) vs arm A (original) on cost/turns/repair/episodes/landed, writing the receipt to `~/.ax/dojo/spar/<id>-report.md`. Two fresh runs by design (quota-spending); captures cost/efficiency not output quality (v1); no schema change. Module: `apps/axctl/src/dojo/skill-spar.ts`. Spec: `docs/superpowers/specs/2026-06-16-spar-for-skills-design.md`.
 
 ### Profile
 
@@ -204,7 +224,7 @@ profile (ProfileV1: stats + rig + taste patterns) from the graph.
 publish to a public gist (create once, PATCH in place). First run: consent
 prompt showing the exact JSON, then fork + community/users/<login>.json
 registration PR into Necmttn/ax (git-data API, no local clone). The watcher
-runs `--if-stale=6` after ingest - silent no-op until first consent.
+runs `--if-stale=2` after ingest - silent no-op until first consent.
 `--no-cost` is sticky across republishes; `ax profile unpublish` (delete
 gist + local state) resets it. State: `~/.ax/profile-publish.json`. Spec:
 docs/superpowers/specs/2026-06-12-ax-profiles-design.md; site routes land

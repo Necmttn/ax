@@ -154,7 +154,7 @@ const watchPlist = (binPath: string): string => `<?xml version="1.0" encoding="U
   <array>
     <string>/bin/bash</string>
     <string>-lc</string>
-    <string>${binPath} ingest --since=1 >>${LOG_DIR}/watcher.log 2>&amp;1 &amp;&amp; ${binPath} derive-signals --since=1 >>${LOG_DIR}/watcher.log 2>&amp;1; ${binPath} profile publish --if-stale=6 >>${LOG_DIR}/watcher.log 2>&amp;1 || true</string>
+    <string>${binPath} ingest --since=1 >>${LOG_DIR}/watcher.log 2>&amp;1 &amp;&amp; ${binPath} derive-signals --since=1 >>${LOG_DIR}/watcher.log 2>&amp;1; ${binPath} profile publish --if-stale=2 >>${LOG_DIR}/watcher.log 2>&amp;1 || true</string>
   </array>
   <key>WatchPaths</key>
   <array>
@@ -949,7 +949,7 @@ export function collectDoctorReport(): Effect.Effect<
                     ? `no ingest_run rows stuck in status "running"`
                     : `${staleIngestRuns.length} ingest_run row(s) stuck in status "running" past the ` +
                         `${ingestTimeoutSeconds}s ingest timeout (${ids}); the run crashed or was killed ` +
-                        `without finalizing - ignore the rows for diagnosis and re-run 'ax ingest'`,
+                        `without finalizing - run 'ax ingest reap' to settle them`,
             });
         }
         const onboarding = yield* buildOnboardingReport();
