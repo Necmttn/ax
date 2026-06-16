@@ -9,6 +9,7 @@ export const RAIL = [
     { g: "≣", to: "/sessions", label: "sessions" },
     { g: "◷", to: "/workflow", label: "workflow" },
     { g: "⎈", to: "/improve", label: "improve" },
+    { g: "◧", to: "/cost", label: "cost" },
     { g: "✦", to: "/skills", label: "skills" },
     { g: "⚙", to: "/lab", label: "lab" },
 ] as const;
