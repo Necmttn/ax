@@ -293,7 +293,7 @@ export const runIngest = (
         }));
 
         if (opts.args.includes("--reset")) {
-            yield* db.query("DELETE invoked; DELETE proposed; DELETE concerns; DELETE recovered_by; DELETE skill_paired; DELETE skill;");
+            yield* db.query("DELETE invoked; DELETE loaded; DELETE proposed; DELETE concerns; DELETE recovered_by; DELETE skill_paired; DELETE skill;");
         }
 
         const ctx = IngestContext.make({

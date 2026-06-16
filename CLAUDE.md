@@ -134,6 +134,8 @@ docs/superpowers/specs/2026-06-15-otel-receiver-design.md.
 `ax skills classify [<skill>...]` - bulk-emit `.ax/tasks/classify-*.md` briefs for unclassified skills with ≥3 invocations.
 `ax skills tag <skill> <role> [--confidence=N] [--rationale="..."] [--remove]` - one-shot role override.
 `ax skills lint [--task-dir=<path>] [--dry-run]` - apply filled classify briefs to `plays_role` edges.
+`ax skills bloat [--budget=N] [--limit=N] [--json]` - installed skills whose body exceeds a token budget (est ~4 B/token from the stored `skill.bytes` column; no file reads), sorted by size with all-time invocations so bloated-and-used skills surface first. Default budget 2000 tok. Deref-free two-statement join (`apps/axctl/src/queries/skill-bloat.ts`), sibling of `fetchSkillHygiene`. SkillOpt-informed: self-tuned skills converge to ~300-2,000 tokens; length is not effort.
+`ax skills loaded [--limit=N] [--json]` - skills auto-loaded via a subagent's `skills:` frontmatter (activated with NO Skill-tool call, so absent from `invoked`-based usage views), ranked by activation count. Reads the `loaded` edge written by the `loaded-skills` ingest stage (`apps/axctl/src/ingest/derive-loaded-skills.ts`), kept SEPARATE from `invoked` so usage analytics stay clean. A skill reading `used=0` in `bloat` may be loaded heavily (e.g. design-curator's skills).
 `ax skills weighted [--window=Nd] [--limit=N]` - usage × role-weight ranking; enters doctor mode when many skills are unclassified.
 `ax skills by-role <role>` - list skills tagged with a given role.
 `ax skills roles <skill>` - list roles for a skill.

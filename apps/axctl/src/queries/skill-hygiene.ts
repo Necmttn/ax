@@ -8,15 +8,19 @@
  *   (1) Aggregate invocation + distinct-session counts from `invoked`, grouped
  *       by `out` (skill id). A single `in.session` deref is safe; the production
  *       hang was STACKED derefs (out.deleted_at + in.session) on 87k+ edges.
- *   (2) Fetch all skill rows (id, name, dir_path) - small table, full scan fine.
+ *   (2) Fetch all skill rows (id, name, dir_path, content_hash) - small table.
  *   (3) Fetch classified skill ids via plays_role (user/frontmatter/brief sources).
  *
  * JS join steps:
  *   - Build byId map from (2)
  *   - Build classifiedIds set from (3)
  *   - For each count row in (1): skip synthetic (dir_path == "(synthetic)"),
- *     skip classified, skip below threshold, then push to results.
- *   - Sort desc by invocations, apply limit.
+ *     attach metadata + classified flag.
+ *   - Collapse plugin-namespace twins by content_hash (same SKILL.md ingested as
+ *     a user/bare row AND a project/namespaced row): sum invocations + sessions,
+ *     keep the canonical (bare) name, treat the twin as classified if EITHER
+ *     member is. See skill-dedupe.ts.
+ *   - Drop classified + below-threshold, sort desc by invocations, apply limit.
  *
  * This is the SINGLE source of truth for "unclassified skill with ≥N
  * invocations". `ax skills classify` (default mode) and `ax skills weighted`'s
@@ -27,6 +31,7 @@
  */
 import { Effect } from "effect";
 import { SurrealClient } from "@ax/lib/db";
+import { dedupeByContentHash } from "./skill-dedupe.ts";
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -71,7 +76,7 @@ export interface SkillHygieneInput {
 // sinceDays window).
 const SQL = `
 SELECT type::string(out) AS sid, count() AS invocations, array::len(array::distinct(in.session)) AS sessions FROM invoked GROUP BY sid;
-SELECT type::string(id) AS id, name, dir_path FROM skill;
+SELECT type::string(id) AS id, name, dir_path, content_hash FROM skill;
 SELECT VALUE type::string(in) FROM plays_role WHERE source IN ["frontmatter", "brief", "user"];
 `;
 
@@ -85,26 +90,56 @@ export const fetchSkillHygiene = Effect.fn("queries.fetchSkillHygiene")(function
     const db = yield* SurrealClient;
     const [counts, skills, classified] = yield* db.query<[
         Array<{ sid: string; invocations: number; sessions: number }>,
-        Array<{ id: string; name: string; dir_path: string | null }>,
+        Array<{ id: string; name: string; dir_path: string | null; content_hash: string | null }>,
         Array<string>,
     ]>(SQL);
 
     // Build lookup structures from the flat result sets
     const classifiedIds = new Set(classified ?? []);
     const byId = new Map(
-        (skills ?? []).map((s) => [s.id, { name: s.name, dir_path: s.dir_path }]),
+        (skills ?? []).map((s) => [s.id, s]),
     );
 
-    // Join, filter, collect
-    const rows: SkillHygieneRow[] = [];
+    // Join each count row to its skill metadata (drop synthetic shims here unless
+    // asked to keep them). Dedup is applied AFTER the join so a plugin-namespace
+    // twin is treated as classified if EITHER member is, and its counts sum.
+    interface Cand extends SkillHygieneRow {
+        readonly contentHash: string | null;
+        readonly classified: boolean;
+    }
+    const cand: Cand[] = [];
     for (const c of counts ?? []) {
         const skill = byId.get(c.sid);
         if (!skill) continue;                                  // no matching skill row
         if (!input.includeSynthetic && skill.dir_path === "(synthetic)") continue; // tool shims, not real skills
-        if (classifiedIds.has(c.sid)) continue;                // already tagged
-        const inv = Number(c.invocations ?? 0);
-        if (inv < input.minInvocations) continue;              // below threshold
-        rows.push({ name: skill.name, invocations: inv, sessions: Number(c.sessions ?? 0) });
+        cand.push({
+            name: skill.name,
+            invocations: Number(c.invocations ?? 0),
+            sessions: Number(c.sessions ?? 0),
+            contentHash: skill.content_hash,
+            classified: classifiedIds.has(c.sid),
+        });
+    }
+
+    const deduped = dedupeByContentHash(
+        cand,
+        (r) => r.contentHash,
+        (r) => r.name,
+        (r, name) => ({ ...r, name }),
+        (kept, dup) => ({
+            ...kept,
+            invocations: kept.invocations + dup.invocations,
+            sessions: kept.sessions + dup.sessions,
+            classified: kept.classified || dup.classified,
+        }),
+    );
+
+    // Filter: drop classified twins and below-threshold candidates.
+    const rows: SkillHygieneRow[] = [];
+    for (const r of deduped) {
+        if (r.classified) continue;                            // already tagged
+        if (r.invocations < input.minInvocations) continue;    // below threshold
+        rows.push({ name: r.name, invocations: r.invocations, sessions: r.sessions });
     }
 
     rows.sort((a, b) => b.invocations - a.invocations);

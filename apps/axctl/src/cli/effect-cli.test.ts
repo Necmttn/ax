@@ -202,8 +202,9 @@ describe("effect cli", () => {
         //    + deriveMetricsStage (graph-derived session metrics rollup)
         //    + githubPrStage (restored GitHub PR ingest - issue #172)
         //    + digestStage (push-value digest snapshot writer)
-        //    + usageStage (usage-log ingest into ax_invocation).
-        expect(resolveIngestStages(testRegistry, [])).toHaveLength(29);
+        //    + usageStage (usage-log ingest into ax_invocation)
+        //    + loadedSkillsStage (auto-load skill activation edges).
+        expect(resolveIngestStages(testRegistry, [])).toHaveLength(30);
     });
 
     test("resolveIngestStages: local agent provider stages can be selected", () => {
@@ -229,6 +230,7 @@ describe("effect cli", () => {
             "digest",
             "harness",
             "invoked-positions",
+            "loaded-skills",
             "opportunities",
             "outcomes",
             "proposals",
