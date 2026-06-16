@@ -13,6 +13,7 @@ import { prettyPrint } from "@ax/lib/json";
 import { skillNameToSlug, renderClassifyBrief } from "./skills-classify-template.ts";
 import { validateSkillName } from "@ax/lib/role-name";
 import { fail } from "./commands/shared.ts";
+import { fetchSkillHygiene, SKILL_HYGIENE_MIN_INVOCATIONS } from "../queries/skill-hygiene.ts";
 
 export interface ClassifyRow {
     readonly name: string;
@@ -26,25 +27,13 @@ export interface ClassifyResult {
     readonly skipped: string[];
 }
 
-/**
- * SurrealQL for default mode: unclassified skills with >= 3 invocations.
- * A skill is "unclassified" when it has no plays_role edge with source in
- * ("frontmatter", "brief", "user").
- */
-const buildDefaultSql = () => `
-SELECT
-    name,
-    // $parent.id refers to the outer SELECT row's id (SurrealDB correlated subquery)
-    // https://surrealdb.com/docs/surrealql/statements/select#subqueries
-    array::len((SELECT id FROM invoked WHERE out = $parent.id)) AS invocations,
-    array::len(array::distinct((SELECT in.session FROM invoked WHERE out = $parent.id).in.session)) AS sessions
-FROM skill
-WHERE
-    NOT (SELECT id FROM plays_role WHERE in = $parent.id AND source IN ["frontmatter", "brief", "user"])[0]
-    AND array::len((SELECT id FROM invoked WHERE out = $parent.id)) >= 3
-    AND dir_path != "(synthetic)"
-ORDER BY invocations DESC;
-`.trim();
+// Default mode ("unclassified skills with ≥3 invocations") no longer has its own
+// SurrealQL here. It delegates to fetchSkillHygiene - the single source of truth
+// shared with `ax skills weighted`. The old correlated predicate
+// (`NOT (SELECT ... )[0]`) was broken: that subquery yields NONE for an
+// unclassified skill, and `NOT NONE` is NONE (not true), so the WHERE clause
+// silently excluded EVERY unclassified skill and classify always reported
+// "none found" while weighted reported a positive count.
 
 /**
  * SurrealQL for explicit mode: named skills only, no invocation threshold and
@@ -97,18 +86,31 @@ export const cmdSkillsClassify = (
             }
         }
 
-        const sql = opts.names.length > 0
-            ? buildExplicitSql(opts.names)
-            : buildDefaultSql();
-
-        const result = yield* db.query<[Array<Record<string, unknown>>]>(sql);
-        const rows = (result?.[0] ?? []) as Array<Record<string, unknown>>;
-
-        const selected: ClassifyRow[] = rows.map((r) => ({
-            name: String(r.name ?? ""),
-            invocations: Number(r.invocations ?? 0),
-            sessions: Number(r.sessions ?? 0),
-        })).filter((r) => r.name.length > 0);
+        // Default mode shares fetchSkillHygiene with `ax skills weighted` so the
+        // two surfaces can never disagree on what counts as unclassified.
+        // Explicit mode keeps its own query (named skills, no threshold, no
+        // classified filter - re-classification must be allowed).
+        let selected: ClassifyRow[];
+        if (opts.names.length > 0) {
+            const result = yield* db.query<[Array<Record<string, unknown>>]>(
+                buildExplicitSql(opts.names),
+            );
+            const rows = (result?.[0] ?? []) as Array<Record<string, unknown>>;
+            selected = rows.map((r) => ({
+                name: String(r.name ?? ""),
+                invocations: Number(r.invocations ?? 0),
+                sessions: Number(r.sessions ?? 0),
+            })).filter((r) => r.name.length > 0);
+        } else {
+            const hygiene = yield* fetchSkillHygiene({
+                minInvocations: SKILL_HYGIENE_MIN_INVOCATIONS,
+            });
+            selected = hygiene.map((r) => ({
+                name: r.name,
+                invocations: r.invocations,
+                sessions: r.sessions,
+            }));
+        }
 
         if (opts.json) {
             const out = selected.map((r) => ({

@@ -515,7 +515,7 @@ describe("routingCards", () => {
 
 describe("skillHygieneCards", () => {
     test("decide inline_action with correct skill name", () => {
-        const rows: SkillHygieneRow[] = [{ name: "superpowers:brainstorming", invocations: 15 }];
+        const rows: SkillHygieneRow[] = [{ name: "superpowers:brainstorming", invocations: 15, sessions: 6 }];
         const cards = skillHygieneCards(rows);
         expect(cards).toHaveLength(1);
         expect(cards[0]!.inline_action).toEqual({
@@ -527,25 +527,25 @@ describe("skillHygieneCards", () => {
     });
 
     test("id format is skill_hygiene:name", () => {
-        const rows: SkillHygieneRow[] = [{ name: "my-skill", invocations: 10 }];
+        const rows: SkillHygieneRow[] = [{ name: "my-skill", invocations: 10, sessions: 4 }];
         const cards = skillHygieneCards(rows);
         expect(cards[0]!.id).toBe("skill_hygiene:my-skill");
     });
 
     test("evidence includes invocations", () => {
-        const rows: SkillHygieneRow[] = [{ name: "my-skill", invocations: 42 }];
+        const rows: SkillHygieneRow[] = [{ name: "my-skill", invocations: 42, sessions: 9 }];
         const cards = skillHygieneCards(rows);
         expect(cards[0]!.evidence).toContain("42 invocations");
     });
 
     test("link is /skills", () => {
-        const rows: SkillHygieneRow[] = [{ name: "my-skill", invocations: 10 }];
+        const rows: SkillHygieneRow[] = [{ name: "my-skill", invocations: 10, sessions: 4 }];
         const cards = skillHygieneCards(rows);
         expect(cards[0]!.link).toBe("/skills");
     });
 
     test("brief asks to run classify or tag", () => {
-        const rows: SkillHygieneRow[] = [{ name: "my-skill", invocations: 10 }];
+        const rows: SkillHygieneRow[] = [{ name: "my-skill", invocations: 10, sessions: 4 }];
         const cards = skillHygieneCards(rows);
         expect(cards[0]!.brief).toContain("ax skills classify my-skill");
         expect(cards[0]!.brief).toContain("ax skills tag my-skill");
@@ -555,6 +555,7 @@ describe("skillHygieneCards", () => {
         const rows: SkillHygieneRow[] = Array.from({ length: 7 }, (_, i) => ({
             name: `skill-${i}`,
             invocations: 10 + i,
+            sessions: 1 + i,
         }));
         const cards = skillHygieneCards(rows);
         expect(cards).toHaveLength(5);
@@ -562,9 +563,9 @@ describe("skillHygieneCards", () => {
 
     test("cards sorted by impact descending", () => {
         const rows: SkillHygieneRow[] = [
-            { name: "rare", invocations: 3 },
-            { name: "common", invocations: 100 },
-            { name: "mid", invocations: 20 },
+            { name: "rare", invocations: 3, sessions: 2 },
+            { name: "common", invocations: 100, sessions: 40 },
+            { name: "mid", invocations: 20, sessions: 8 },
         ];
         const cards = skillHygieneCards(rows);
         for (let i = 1; i < cards.length; i++) {
@@ -586,7 +587,7 @@ test("all builders return NextActionCard[] typed arrays", () => {
         churnSummary([churnRow("sess-x", 100, 50, 10, 10, 2)]),
     );
     const rc: NextActionCard[] = routingCards(candidatesResult([makeCandidate("research", 0.05)]));
-    const sc: NextActionCard[] = skillHygieneCards([{ name: "x", invocations: 10 }]);
+    const sc: NextActionCard[] = skillHygieneCards([{ name: "x", invocations: 10, sessions: 3 }]);
 
     // All present (guards against tree-shaking)
     expect([pc, vc, tc, cc, rc, sc].every(Array.isArray)).toBe(true);

@@ -37,16 +37,16 @@ const run = <A>(
 // ---------------------------------------------------------------------------
 
 describe("fetchSkillHygiene", () => {
-    it("joins counts to names, drops synthetic + classified + low-count", async () => {
+    it("joins counts to names, drops synthetic + classified + low-count, carries sessions", async () => {
         const rows = await run(
             fetchSkillHygiene({ minInvocations: 3, limit: 10 }),
             makeMockDb([
-                // statement 1: invocation counts by skill id
+                // statement 1: invocation + distinct-session counts by skill id
                 [
-                    { sid: "skill:composto", invocations: 41 },
-                    { sid: "skill:codex_exec", invocations: 39545 },
-                    { sid: "skill:tagged", invocations: 12 },
-                    { sid: "skill:rare", invocations: 2 },
+                    { sid: "skill:composto", invocations: 41, sessions: 12 },
+                    { sid: "skill:codex_exec", invocations: 39545, sessions: 800 },
+                    { sid: "skill:tagged", invocations: 12, sessions: 5 },
+                    { sid: "skill:rare", invocations: 2, sessions: 1 },
                 ],
                 // statement 2: skill rows
                 [
@@ -59,7 +59,7 @@ describe("fetchSkillHygiene", () => {
                 ["skill:tagged"],
             ]),
         );
-        expect(rows).toEqual([{ name: "composto", invocations: 41 }]);
+        expect(rows).toEqual([{ name: "composto", invocations: 41, sessions: 12 }]);
     });
 
     it("respects limit and sorts by invocations desc", async () => {
@@ -67,8 +67,8 @@ describe("fetchSkillHygiene", () => {
             fetchSkillHygiene({ minInvocations: 3, limit: 1 }),
             makeMockDb([
                 [
-                    { sid: "skill:a", invocations: 5 },
-                    { sid: "skill:b", invocations: 9 },
+                    { sid: "skill:a", invocations: 5, sessions: 2 },
+                    { sid: "skill:b", invocations: 9, sessions: 3 },
                 ],
                 [
                     { id: "skill:a", name: "a", dir_path: "/s/a" },
@@ -77,14 +77,34 @@ describe("fetchSkillHygiene", () => {
                 [],
             ]),
         );
-        expect(rows).toEqual([{ name: "b", invocations: 9 }]);
+        expect(rows).toEqual([{ name: "b", invocations: 9, sessions: 3 }]);
+    });
+
+    it("returns ALL rows (no slice) when limit is omitted", async () => {
+        const rows = await run(
+            fetchSkillHygiene({ minInvocations: 1 }),
+            makeMockDb([
+                [
+                    { sid: "skill:a", invocations: 5, sessions: 2 },
+                    { sid: "skill:b", invocations: 9, sessions: 3 },
+                    { sid: "skill:c", invocations: 1, sessions: 1 },
+                ],
+                [
+                    { id: "skill:a", name: "a", dir_path: "/s/a" },
+                    { id: "skill:b", name: "b", dir_path: "/s/b" },
+                    { id: "skill:c", name: "c", dir_path: "/s/c" },
+                ],
+                [],
+            ]),
+        );
+        expect(rows.map((r) => r.name)).toEqual(["b", "a", "c"]);
     });
 
     it("returns empty when all skills are synthetic", async () => {
         const rows = await run(
             fetchSkillHygiene({ minInvocations: 1, limit: 10 }),
             makeMockDb([
-                [{ sid: "skill:codex_exec", invocations: 999 }],
+                [{ sid: "skill:codex_exec", invocations: 999, sessions: 50 }],
                 [{ id: "skill:codex_exec", name: "codex:exec_command", dir_path: "(synthetic)" }],
                 [],
             ]),
@@ -92,11 +112,23 @@ describe("fetchSkillHygiene", () => {
         expect(rows).toEqual([]);
     });
 
+    it("includeSynthetic keeps synthetic provider tools", async () => {
+        const rows = await run(
+            fetchSkillHygiene({ minInvocations: 1, includeSynthetic: true }),
+            makeMockDb([
+                [{ sid: "skill:codex_exec", invocations: 999, sessions: 50 }],
+                [{ id: "skill:codex_exec", name: "codex:exec_command", dir_path: "(synthetic)" }],
+                [],
+            ]),
+        );
+        expect(rows).toEqual([{ name: "codex:exec_command", invocations: 999, sessions: 50 }]);
+    });
+
     it("returns empty when all skills are classified", async () => {
         const rows = await run(
             fetchSkillHygiene({ minInvocations: 1, limit: 10 }),
             makeMockDb([
-                [{ sid: "skill:foo", invocations: 10 }],
+                [{ sid: "skill:foo", invocations: 10, sessions: 4 }],
                 [{ id: "skill:foo", name: "foo", dir_path: "/skills/foo" }],
                 ["skill:foo"],
             ]),
@@ -108,7 +140,7 @@ describe("fetchSkillHygiene", () => {
         const rows = await run(
             fetchSkillHygiene({ minInvocations: 5, limit: 10 }),
             makeMockDb([
-                [{ sid: "skill:rare", invocations: 2 }],
+                [{ sid: "skill:rare", invocations: 2, sessions: 1 }],
                 [{ id: "skill:rare", name: "rare", dir_path: "/skills/rare" }],
                 [],
             ]),
@@ -128,7 +160,7 @@ describe("fetchSkillHygiene", () => {
         const rows = await run(
             fetchSkillHygiene({ minInvocations: 1, limit: 10 }),
             makeMockDb([
-                [{ sid: "skill:orphan", invocations: 10 }],
+                [{ sid: "skill:orphan", invocations: 10, sessions: 4 }],
                 [],  // no skill rows
                 [],
             ]),
