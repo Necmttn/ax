@@ -358,6 +358,29 @@ export function archetypeFor(axes: RadarAxes, profile?: ProfileV1): Archetype {
     return { sign: base.sign, symbol: base.symbol, blurb };
 }
 
+export interface LeadTally {
+    readonly aLeads: number;
+    readonly bLeads: number;
+    readonly total: number;
+}
+
+/**
+ * Per-axis "who leads" tally between two profiles. Strictly-greater comparable
+ * value wins; null never leads; equal values produce no lead for either side.
+ * Single source of truth for the page's RawTable dots and the duel OG tally.
+ */
+export function leadTally(a: RadarAxes, b: RadarAxes): LeadTally {
+    let aLeads = 0;
+    let bLeads = 0;
+    for (const k of RADAR_AXIS_KEYS) {
+        const av = a.raws[k].value;
+        const bv = b.raws[k].value;
+        if (av !== null && (bv === null || av > bv)) aLeads++;
+        else if (bv !== null && (av === null || bv > av)) bLeads++;
+    }
+    return { aLeads, bLeads, total: RADAR_AXIS_KEYS.length };
+}
+
 /** the two axes that defined the sign - handy for the compare delta block */
 export function dominantPair(axes: RadarAxes): readonly [RadarAxisKey, RadarAxisKey] {
     const ranked = rankAxes(axes);

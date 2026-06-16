@@ -244,6 +244,44 @@ describe("determinism", () => {
     });
 });
 
+/* ---------- leadTally ---------- */
+
+import { leadTally } from "./radar";
+
+// minimal RadarAxes builder: every axis gets {value,label}; scores/raws only
+function axesWith(values: ReadonlyArray<number | null>): RadarAxes {
+    const raws = {} as Record<RadarAxisKey, { value: number | null; label: string }>;
+    const scores = {} as Record<RadarAxisKey, number>;
+    RADAR_AXIS_KEYS.forEach((k, i) => {
+        const v = values[i] ?? null;
+        raws[k] = { value: v, label: v === null ? "-" : String(v) };
+        scores[k] = v ?? 0;
+    });
+    // NOTE: real RadarAxes requires `missing` field (absent from the task spec's builder);
+    // added here to satisfy the interface.
+    return { scores, raws, partial: false, missing: [] };
+}
+
+describe("leadTally", () => {
+    it("counts strictly-greater per-axis wins for each side", () => {
+        const a = axesWith([10, 5, 8, 3, 9, 1]);
+        const b = axesWith([2, 5, 12, 4, 1, 0]);
+        // a wins axes 0,4,5 ; b wins axes 2,3 ; axis 1 is a tie (no lead)
+        const t = leadTally(a, b);
+        expect(t.aLeads).toBe(3);
+        expect(t.bLeads).toBe(2);
+        expect(t.total).toBe(RADAR_AXIS_KEYS.length);
+    });
+
+    it("null never leads; a non-null beats a null", () => {
+        const a = axesWith([5, null, null, null, null, null]);
+        const b = axesWith([null, 7, null, null, null, null]);
+        const t = leadTally(a, b);
+        expect(t.aLeads).toBe(1); // axis0: 5 > null
+        expect(t.bLeads).toBe(1); // axis1: 7 > null
+    });
+});
+
 /* ---------- archetype matrix coverage ---------- */
 
 // hand-built axes need a raws record too; tests above cover real derivation
