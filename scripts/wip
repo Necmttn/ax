@@ -23,7 +23,14 @@ die() { echo "wip: $*" >&2; exit 1; }
 need() { command -v "$1" >/dev/null || die "missing '$1'"; }
 need gh; need jq; need git
 
-slug() { echo "$1" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9]+/-/g; s/^-+|-+$//g' | cut -c1-40; }
+# kebab-case the title, capped ~40 chars but cut on a word (hyphen) boundary so
+# branch names don't end mid-word (`...unreadably-n`).
+slug() {
+  local s; s=$(echo "$1" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9]+/-/g; s/^-+|-+$//g')
+  if [ "${#s}" -le 40 ]; then echo "$s"; return; fi
+  local cut="${s:0:40}"; cut="${cut%-*}"          # drop the trailing partial word
+  echo "$cut" | sed -E 's/-+$//'
+}
 
 cmd_claim() {
   local n="${1:?issue number}" type="${2:-feat}"
@@ -31,24 +38,38 @@ cmd_claim() {
     || die "issue #$n not found"
   local branch="$type/$n-$(slug "$title")"
   local host; host=$(hostname -s)
+  local root; root=$(git rev-parse --show-toplevel)
+  local wt="$root/.claude/worktrees/$n-$type"
 
-  if git show-ref --verify --quiet "refs/heads/$branch"; then
-    git switch "$branch"
+  [ -e "$wt" ] && die "worktree $wt already exists - cd there, or remove it first"
+
+  # This repo mandates worktrees (the enforce-worktree guard blocks edits on the
+  # primary tree), so a claim creates an ISOLATED worktree rather than switching
+  # the current tree's branch. If the branch already exists locally or on origin
+  # (a claim from another device), check it out instead of forking a new one -
+  # that's how you take over / continue cross-machine work.
+  git fetch --quiet origin "$branch" 2>/dev/null || true
+  if git show-ref --verify --quiet "refs/heads/$branch" \
+     || git ls-remote --exit-code --heads origin "$branch" >/dev/null 2>&1; then
+    git worktree add "$wt" "$branch" >/dev/null \
+      || die "couldn't add worktree for existing branch $branch"
+    echo "wip: continuing existing branch $branch"
   else
-    git switch -c "$branch"
+    git worktree add "$wt" -b "$branch" >/dev/null \
+      || die "couldn't create worktree/branch $branch"
+    # Push so the branch is fetchable from any device. Best-effort: the claim is
+    # still recorded on the issue even if push fails (offline).
+    git -C "$wt" push -u origin "$branch" 2>/dev/null \
+      && echo "wip: pushed $branch to origin" \
+      || echo "wip: WARNING could not push $branch - claim still recorded on the issue" >&2
   fi
-
-  # Push the branch so it's fetchable from any device (continue/take-over across
-  # machines). Best-effort: the claim is still recorded on the issue if push fails.
-  git push -u origin "$branch" 2>/dev/null \
-    && echo "wip: pushed $branch to origin" \
-    || echo "wip: WARNING could not push $branch - claim still recorded on the issue" >&2
 
   gh issue edit "$n" --repo "$REPO" --add-label "$LABEL" >/dev/null
   gh issue comment "$n" --repo "$REPO" --body \
 "$MARK branch=$branch host=$host -->
 🤖 Claimed on branch \`$branch\` (host \`$host\`). Working on it - see this branch for progress."
   echo "wip: claimed #$n on $branch"
+  echo "wip: worktree ready -> cd $wt"
 }
 
 cmd_release() {

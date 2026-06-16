@@ -11,8 +11,10 @@ Guidance for Claude Code and other AI assistants working in this repo.
 Many agents (all pushing as the same GitHub user) run this repo in parallel, so
 issue *assignee* is useless - the **branch name is the claim**. Before starting an
 issue: `bun run wip list` (🟢 claimed shows branch, ⚪ free), then
-`bun run wip claim <issue#> [type]` (branch `<type>/<issue#>-<slug>` + label +
-claim comment). One branch per issue; work in a worktree off it. See CONTRIBUTING.md.
+`bun run wip claim <issue#> [type]` - creates an isolated worktree at
+`.claude/worktrees/<issue#>-<type>` on branch `<type>/<issue#>-<slug>`, pushes it,
+labels + comments the issue. `cd` to the printed worktree path to work. One branch
+per issue. See CONTRIBUTING.md.
 
 ## Stack
 
