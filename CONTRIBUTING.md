@@ -14,6 +14,47 @@ fast.
 - **Conventional commits.** `feat:`, `fix:`, `chore:`, `refactor:`,
   `docs:`, `test:` - scope optional. Release-please reads these.
 
+## Claiming work (multi-agent)
+
+Several agents (often all pushing as the **same** GitHub user) work this repo in
+parallel, so the issue *assignee* can't tell you who owns what. The **branch
+name is the claim**. Before starting an issue:
+
+```bash
+bun run wip list          # see open issues + which branch (if any) claimed each
+bun run wip claim 481 fix # worktree + branch fix/481-<slug>, label, claim comment
+cd .claude/worktrees/481-fix   # the path claim prints - do the work here, open a PR
+bun run wip release 481   # only if you abandon it; merging the PR closes it
+```
+
+`claim` creates an **isolated worktree** at `.claude/worktrees/<issue#>-<type>` on
+branch `<type>/<issue#>-<slug>` (this repo's enforce-worktree guard blocks edits on
+the primary tree, so a claim never switches your current tree's branch), **pushes
+the branch to origin**, adds the `status:in-progress` label, and posts a claim
+comment carrying the branch + host so every other agent (and machine) sees the
+claim - not just your local worktree. `wip list` reads those comments back:
+🟢 = claimed (shows `branch [host, age]`), ⚪ = free to grab.
+
+**Multiple devices (same user, many laptops):** claims live on GitHub, so `wip
+list` shows the same truth everywhere - no local sync. Because `claim` pushes the
+branch, you can continue or take over work started on another machine - re-running
+`claim` for the same issue on a second device checks the existing remote branch out
+into a fresh local worktree instead of forking a new branch:
+
+```bash
+bun run wip claim 481 fix   # on device B: "continuing existing branch fix/481-..."
+```
+
+The 🟢 line's `host` tells you which device owns it; the `age` flags a stale claim
+(dead laptop) - clear it from any device with `bun run wip release <N>`.
+
+**Conventions this relies on:**
+- Branch = `<type>/<issue#>-<slug>` (e.g. `fix/481-classify-unclassified`). The
+  leading `<issue#>` is what links work ↔ issue everywhere.
+- One branch per issue; one agent per branch.
+- Always work in a git worktree off that branch (the worktree guard blocks edits
+  on `main`).
+
 ## Local setup
 
 ```bash

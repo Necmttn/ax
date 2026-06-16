@@ -30,6 +30,7 @@
     "prepare": "effect-language-service patch && lefthook install --force",
     "postinstall": "[ -f bun.lock ] && bun2nix -o bun.nix || true",
     "typecheck": "tsc --noEmit",
+    "wip": "scripts/wip",
     "ingest": "bun apps/axctl/src/cli/index.ts ingest",
     "search": "bun apps/axctl/src/cli/index.ts search",
     "db:start": "scripts/db-start.sh",
