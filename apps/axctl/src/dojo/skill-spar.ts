@@ -291,10 +291,16 @@ export interface ResolveSkillSparOpts {
 export const resolveSkillSparTask = (
     skillName: string,
     repoRoot: string,
-    _repositoryKey: string | null,
+    repositoryKey: string | null,
+    // Reserved for caller parity with `captureBaseline` (the brief-render layer
+    // stamps `createdAt`/`id` from it); not needed to resolve the task itself.
     _nowIso: string,
     opts?: ResolveSkillSparOpts,
-) =>
+): Effect.Effect<
+    SkillSparTask,
+    DbError | ProcessError | SparCaptureError,
+    SurrealClient | ProcessService | FileSystem.FileSystem
+> =>
     Effect.gen(function* () {
         const db = yield* SurrealClient;
         const fs = yield* FileSystem.FileSystem;
@@ -372,12 +378,24 @@ export const resolveSkillSparTask = (
                 );
             }
 
-            // Bulk-fetch session rows (source filter + task text).
+            // Bulk-fetch session rows (source filter + task text). When a
+            // `repositoryKey` is known (run inside a git repo), scope candidates
+            // to THIS repo so the chosen task is re-runnable in the parentSha
+            // worktree - a global pick could hand back a task from an unrelated
+            // repo. `repository` is a record-typed field, so it filters via a
+            // record literal (same shape as listSessionsNear). Absent key (not in
+            // a git tree) → global selection (v1 limitation, task may be cross-repo).
             const candidateSids = [...maxBySid.keys()];
+            const pick = repositoryKey
+                ? ["id", "source", "first_user_message", "repository"]
+                : ["id", "source", "first_user_message"];
+            const repoClause = repositoryKey
+                ? ` WHERE repository = ${recordLiteral("repository", repositoryKey)}`
+                : "";
             const sessionRows = yield* db.query<[
                 Array<{ id: string; source: string | null; first_user_message: string | null }>,
             ]>(
-                `SELECT type::string(id) AS id, source, first_user_message FROM ${refListSource(candidateSids, ["id", "source", "first_user_message"])};`,
+                `SELECT type::string(id) AS id, source, first_user_message FROM ${refListSource(candidateSids, pick)}${repoClause};`,
             );
 
             const mainSessions = (sessionRows?.[0] ?? []).filter((s) => s.source === "claude");
@@ -413,6 +431,13 @@ export const resolveSkillSparTask = (
                 res.code === 0 && res.stdout.trim().length > 0 ? res.stdout.trim() : opts.sha;
         } else {
             const res = yield* proc.exec("git", ["rev-parse", "HEAD"], { cwd: repoRoot });
+            // Guard the empty/non-zero case: an unborn HEAD or a non-repo cwd
+            // yields "" here, which would render a broken `git worktree add … ""`.
+            if (!(res.code === 0 && res.stdout.trim().length > 0)) {
+                return yield* Effect.fail(
+                    new SparCaptureError(`could not resolve HEAD in ${repoRoot}`),
+                );
+            }
             parentSha = res.stdout.trim();
         }
 
@@ -425,8 +450,4 @@ export const resolveSkillSparTask = (
             originalSkill,
             originalHash,
         } satisfies SkillSparTask;
-    }) as Effect.Effect<
-        SkillSparTask,
-        DbError | ProcessError | SparCaptureError,
-        SurrealClient | ProcessService | FileSystem.FileSystem
-    >;
+    });

@@ -645,6 +645,72 @@ describe("resolveSkillSparTask", () => {
     });
 
     // -----------------------------------------------------------------------
+    // Test: same session in BOTH invoked + loaded with different ts → max wins
+    // -----------------------------------------------------------------------
+    test("same session in invoked AND loaded: per-session max-edge-ts wins the pick", async () => {
+        // s1 appears in BOTH tables: invoked early (Jan 1), loaded late (Jan 20).
+        // s2 appears once (invoked Jan 10). If the cross-table merge keeps the
+        // MAX ts for s1 (Jan 20), s1 beats s2; if it wrongly kept s1's invoked
+        // ts (Jan 1), s2 (Jan 10) would win. Asserting s1 locks the max merge.
+        const tc = makeTestSurrealClient({
+            denyWrites: true,
+            routes: {
+                "FROM skill WHERE name": [
+                    [{ id: "skill:myskill", name: "my-skill", dir_path: SKILL_DIR }],
+                ],
+                "FROM invoked WHERE out": [
+                    [
+                        { sid: "session:s1", ts: "2026-01-01T00:00:00.000Z" },
+                        { sid: "session:s2", ts: "2026-01-10T00:00:00.000Z" },
+                    ],
+                    [{ sid: "session:s1", ts: "2026-01-20T00:00:00.000Z" }],
+                ],
+                "first_user_message FROM": [
+                    [
+                        { id: "session:s1", source: "claude", first_user_message: "Winner via loaded ts" },
+                        { id: "session:s2", source: "claude", first_user_message: "Loser" },
+                    ],
+                ],
+            },
+        });
+
+        const result = await runResolve("my-skill", undefined, tc);
+        expect(result.baselineSession).toBe("session:s1");
+        expect(result.task).toBe("Winner via loaded ts");
+    });
+
+    // -----------------------------------------------------------------------
+    // Test: repositoryKey scopes the candidate fetch (record-literal WHERE)
+    // -----------------------------------------------------------------------
+    test("repositoryKey emits a repository = repository:<key> filter on the session fetch", async () => {
+        const tc = makeTestSurrealClient({
+            denyWrites: true,
+            routes: {
+                "FROM skill WHERE name": [
+                    [{ id: "skill:myskill", name: "my-skill", dir_path: SKILL_DIR }],
+                ],
+                "FROM invoked WHERE out": [
+                    [{ sid: "session:s1", ts: "2026-01-10T00:00:00.000Z" }],
+                    [],
+                ],
+                "first_user_message FROM": [
+                    [{ id: "session:s1", source: "claude", first_user_message: "Repo task" }],
+                ],
+            },
+        });
+
+        // repositoryKey provided → scoping WHERE clause must be emitted.
+        await Effect.runPromise(
+            resolveSkillSparTask("my-skill", "/repo", "local__abc", "2026-06-16T00:00:00.000Z").pipe(
+                Effect.provide(Layer.mergeAll(tc.layer, defaultProcMock, defaultFs)),
+            ),
+        );
+        const fetchSql = tc.captured.find((s) => s.includes("first_user_message FROM"));
+        expect(fetchSql).toBeDefined();
+        expect(fetchSql).toContain("WHERE repository = repository:`local__abc`");
+    });
+
+    // -----------------------------------------------------------------------
     // Test 11: non-claude sessions filtered, remaining none → SparCaptureError
     // -----------------------------------------------------------------------
     test("only non-claude sessions in history → SparCaptureError", async () => {
