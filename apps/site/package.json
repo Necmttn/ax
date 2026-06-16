@@ -16,6 +16,7 @@
     "verify:functions": "sleep 3 && curl -s -o /dev/null -w '%{content_type}' 'https://ax.necmttn.com/og/Necmttn/a6d4c2215bbe0998c93b38ad11db2ccb' | grep -q image/png && echo 'functions OK on production' || (echo 'PRODUCTION IS MISSING THE PAGES FUNCTIONS (/og, /s meta)' && exit 1)"
   },
   "dependencies": {
+    "@ax/onboarding-prompt": "workspace:*",
     "@ax/studio": "workspace:*",
     "@content-collections/core": "^0.15.1",
     "@content-collections/mdx": "^0.2.2",

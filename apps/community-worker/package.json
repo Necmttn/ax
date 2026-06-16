@@ -1,0 +1,20 @@
+{
+  "name": "@ax/community-worker",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "deploy": "bun alchemy deploy",
+    "destroy": "bun alchemy destroy"
+  },
+  "dependencies": {
+    "@ax/community-compile": "workspace:*"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20260616.1",
+    "@types/bun": "catalog:",
+    "alchemy": "^0.93.12",
+    "typescript": "catalog:"
+  }
+}

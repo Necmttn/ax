@@ -228,6 +228,12 @@ describe("fetchWrappedCounts", () => {
             [[{ count: 56 }]],
             // 4: reposCount
             [[{ count: 12 }]],
+            // 5: verifyAgg (full command_text labels)
+            [[
+                { cmd: "bun test", count: 900 },
+                { cmd: "Read", count: 2000 },
+                { cmd: "Bash", count: 3000 },
+            ]],
         ]);
         const r = await runWithMock(db, fetchWrappedCounts({ windowDays: 30 }));
         expect(r.turns).toBe(41200);
@@ -236,9 +242,9 @@ describe("fetchWrappedCounts", () => {
         expect(r.distinct_tools).toBe(3);
         expect(r.distinct_skills).toBe(56);
         expect(r.repos_count).toBe(12);
-        // "bun test" matches /test|check|verify|lint|typecheck|tsc|vitest|bun test/i
+        // "bun test" -> verification via tool-taxonomy isVerificationTool (verifyAgg)
         expect(r.verification_calls).toBe(900);
-        // "Read" matches /recall|context|rg|sed|cat|find|grep|open|read/i
+        // "Read" -> context via tool-taxonomy isContextTool (verifyAgg)
         expect(r.context_calls).toBe(2000);
         // SQL contains window clause
         expect(db.captured[0]).toContain("time::now() - 30d");
@@ -246,10 +252,12 @@ describe("fetchWrappedCounts", () => {
         expect(db.captured[1]).toContain("FROM turn");
         expect(db.captured[2]).toContain("FROM invoked");
         expect(db.captured[3]).toContain("FROM session");
+        // 5th query classifies the full command text
+        expect(db.captured[4]).toContain("command_text");
     });
 
     test("empty tables -> all zeros", async () => {
-        const db = makeMockDb([[[]], [[]], [[]], [[]]]);
+        const db = makeMockDb([[[]], [[]], [[]], [[]], [[]]]);
         const r = await runWithMock(db, fetchWrappedCounts({ windowDays: 30 }));
         expect(r.turns).toBe(0);
         expect(r.tool_calls).toBe(0);
@@ -271,6 +279,12 @@ describe("fetchWrappedCounts", () => {
             [[{ count: 1000 }]],
             [[{ count: 10 }]],
             [[{ count: 5 }]],
+            // verifyAgg (full command_text labels)
+            [[
+                { cmd: "lint", count: 500 },   // verification
+                { cmd: "grep", count: 300 },   // context
+                { cmd: "Agent", count: 200 },  // neither
+            ]],
         ]);
         const r = await runWithMock(db, fetchWrappedCounts({ windowDays: 30 }));
         expect(r.verification_calls).toBe(500);

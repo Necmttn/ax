@@ -89,3 +89,6 @@ docs/launch-proof/
 
 # ETag cache for nightly community compile - machine-local, no cross-run persistence needed
 community/.gist-etag-cache.json
+
+# alchemy IaC local state (community worker) - resource state, never committed
+.alchemy/

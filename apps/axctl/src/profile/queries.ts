@@ -11,6 +11,7 @@ import { Effect } from "effect";
 import { SurrealClient } from "@ax/lib/db";
 import { recordLiteral } from "@ax/lib/ids";
 import { recordKeyPart } from "@ax/lib/shared/derive-keys";
+import { isContextTool, isVerificationTool } from "./tool-taxonomy.ts";
 
 const win = (d: number) => `${Math.max(1, Math.trunc(d))}d`;
 
@@ -457,9 +458,8 @@ export interface WrappedCounts {
     readonly context_calls: number;
 }
 
-// Matches dashboard/wrapped.ts ArchetypeSignals computation.
-const verificationToolPattern = /test|check|verify|lint|typecheck|tsc|vitest|bun test/i;
-const contextToolPattern = /recall|context|rg|sed|cat|find|grep|open|read/i;
+// Verification / context classification is shared with dashboard/wrapped.ts
+// via tool-taxonomy.ts (ecosystem-aware program matching; see issue #471).
 
 // Per-tool rows (name, count, failures) - same shape as WRAPPED_TOOLS_SQL but windowed.
 const TOOL_AGG_SQL = (d: number) => `
@@ -473,6 +473,21 @@ WHERE ts > time::now() - ${win(d)}
 GROUP BY tool
 ORDER BY count DESC
 LIMIT 200;`;
+
+// Verification / context counts classify on the FULL command (`command_text`),
+// not the collapsed `command_norm` - `normalizeCommand` strips the subcommand
+// for non-SUBCOMMAND_TOOLS (e.g. `mvn test` -> `mvn`, `npm run lint` ->
+// `npm run`, `bundle exec rspec` -> `bundle`), so the normalized label alone
+// can't see the verifier. Grouped to keep cardinality sane; the command text
+// is classified in-process and never returned (counts-only privacy invariant).
+const VERIFY_AGG_SQL = (d: number) => `
+SELECT
+    (command_text ?? command_norm ?? name) AS cmd,
+    count() AS count
+FROM tool_call
+WHERE ts > time::now() - ${win(d)}
+  AND (command_text ?? command_norm ?? name) IS NOT NONE
+GROUP BY cmd;`;
 
 // Total turn count in window.
 const TURN_COUNT_SQL = (d: number) => `
@@ -516,14 +531,19 @@ export const fetchWrappedCounts = Effect.fn("profile.fetchWrappedCounts")(
         const repoRows = yield* db
             .query<[Array<Record<string, unknown>>]>(REPOS_COUNT_SQL(opts.windowDays))
             .pipe(Effect.map((r) => r?.[0] ?? []));
+        const verifyRows = yield* db
+            .query<[Array<Record<string, unknown>>]>(VERIFY_AGG_SQL(opts.windowDays))
+            .pipe(Effect.map((r) => r?.[0] ?? []));
 
         const tool_calls = toolRows.reduce((s, r) => s + Number(r.count ?? 0), 0);
         const tool_failures = toolRows.reduce((s, r) => s + Number(r.failures ?? 0), 0);
         const distinct_tools = toolRows.length;
 
-        const toolCount = (pattern: RegExp): number =>
-            toolRows
-                .filter((r) => pattern.test(String(r.tool ?? "")))
+        // Verification/context classify on the full command text (verifyRows),
+        // not the collapsed command_norm tool label (toolRows).
+        const cmdCount = (pred: (label: string) => boolean): number =>
+            verifyRows
+                .filter((r) => pred(String(r.cmd ?? "")))
                 .reduce((s, r) => s + Number(r.count ?? 0), 0);
 
         return {
@@ -533,8 +553,8 @@ export const fetchWrappedCounts = Effect.fn("profile.fetchWrappedCounts")(
             distinct_tools,
             distinct_skills: Number(skillRows[0]?.count ?? 0),
             repos_count: Number(repoRows[0]?.count ?? 0),
-            verification_calls: toolCount(verificationToolPattern),
-            context_calls: toolCount(contextToolPattern),
+            verification_calls: cmdCount(isVerificationTool),
+            context_calls: cmdCount(isContextTool),
         } satisfies WrappedCounts;
     },
 );

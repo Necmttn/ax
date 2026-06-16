@@ -220,3 +220,18 @@ describe("ingest_run lifecycle schema", () => {
         expect(schema).toContain("DEFINE FIELD last_progress_at ON ingest_run TYPE option<datetime>");
     });
 });
+
+describe("proposal.origin NONE-coerce guard (#472)", () => {
+    // A bare `UPDATE proposal SET ...` re-coerces the whole SCHEMAFULL record;
+    // old rows created before `origin` existed stored NONE and crashed with
+    // "Expected string but found `NONE`". OVERWRITE + VALUE coalesces it.
+    test("origin uses OVERWRITE + an explicit IS NONE coalesce (not the broad ??)", () => {
+        expect(schema).toContain(
+            "DEFINE FIELD OVERWRITE origin ON proposal TYPE string DEFAULT 'mined' VALUE IF $value IS NONE THEN 'mined' ELSE $value END;",
+        );
+    });
+
+    test("a repair UPDATE backfills pre-existing NONE rows", () => {
+        expect(schema).toContain("UPDATE proposal SET origin = 'mined' WHERE origin = NONE;");
+    });
+});

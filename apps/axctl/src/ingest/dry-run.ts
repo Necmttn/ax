@@ -40,6 +40,13 @@ export const ROUGH_SAMPLE_THRESHOLD = 10;
  *  parses to no session, or a watcher mid-write - without losing the ETA for
  *  any real backfill. */
 export const UP_TO_DATE_THRESHOLD = 5;
+/** When the timed sample yields no usable rate (its slice was dominated by
+ *  already-ingested, watermark-skipped files - the near-complete case), a
+ *  remaining backlog at or below this many sessions is framed as a quick run
+ *  rather than left without any estimate (issue #478). A larger backlog stays
+ *  honest ("couldn't time a sample") - we never fabricate an ETA from a guessed
+ *  rate, which is the dishonesty the no-estimate path exists to avoid. */
+export const QUICK_BACKFILL_THRESHOLD = 50;
 
 export interface SourceCounts {
     /** claude `.jsonl` transcript files (~one per session). */
@@ -324,10 +331,22 @@ export function formatDryRun(result: DryRunResult, json: boolean): string {
     }
 
     if (result.ratePerSec === null) {
-        // Work remains but the sample measured nothing usable (e.g. all candidate
-        // files were too short to produce a session, or every sampled file was
-        // already ingested and watermark-skipped). Can't project a rate.
-        lines.push("  couldn't measure a rate from the sample; just run it:");
+        // Work remains but the timed sample measured nothing usable - typically
+        // because the slice was dominated by already-ingested (watermark-skipped)
+        // files, i.e. the graph is nearly caught up. Rather than dead-end with
+        // "couldn't measure a rate" (issue #478, reported when 10 sessions
+        // remained), say something useful from the known remaining count.
+        const rem = remaining.total;
+        // On a populated graph the "in graph: N - ~M remaining" line above already
+        // states the count, so don't repeat it here.
+        const prefix = result.populated ? "  " : `  ~${rem.toLocaleString()} sessions remaining - `;
+        if (rem <= QUICK_BACKFILL_THRESHOLD) {
+            lines.push(`${prefix}a quick run (typically well under a minute on this machine).`);
+        } else {
+            // Larger backlog the sample couldn't time: stay honest - no fabricated
+            // ETA. Point at the live view instead of guessing a duration.
+            lines.push(`${prefix}couldn't time a sample on this machine; run it and watch live in ax serve → http://127.0.0.1:${DEFAULT_DASHBOARD_PORT}`);
+        }
         lines.push("  run it: ax ingest");
         return lines.join("\n");
     }

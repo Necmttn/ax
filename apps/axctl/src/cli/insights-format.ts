@@ -250,11 +250,30 @@ function formatHarnessCandidateRows(rows: readonly InsightRow[]): string {
     }).join("\n\n");
 }
 
+function formatToolRows(rows: readonly InsightRow[]): string {
+    if (rows.length === 0) return "No failing tools found.";
+    const count = (value: unknown): string => {
+        const n = numberOf(value);
+        return n === null ? textOf(value) : n.toLocaleString("en-US");
+    };
+    return rows.map((row, index) => {
+        // Bash-style rows carry the normalized command; prefer it over the bare tool name.
+        const command = textOf(row.command_norm || row.command_tool);
+        const label = command ? `${textOf(row.name)}: ${truncate(command, 80)}` : textOf(row.name);
+        const exit = numberOf(row.exit_code);
+        const exitStr = exit === null ? "" : ` (exit ${exit})`;
+        const last = row.last_seen ? `  last ${compactDate(row.last_seen)}` : "";
+        return `${index + 1}. ${label}${exitStr}  -  ${count(row.failure_count)} failures${last}`;
+    }).join("\n");
+}
+
 export function formatInsightRows(view: InsightView, rows: readonly InsightRow[], opts: { readonly json?: boolean } = {}): string {
     if (opts.json) return prettyPrint(rows);
     switch (view) {
         case "friction":
             return formatFrictionRows(rows);
+        case "tools":
+            return formatToolRows(rows);
         case "feedback-language":
         case "message-signals":
             return formatSignalRows(rows);

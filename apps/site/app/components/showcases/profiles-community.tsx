@@ -59,9 +59,9 @@ export function ProfilesCommunityShowcase() {
             </tbody>
           </table>
           <p className="surface-note">
-            Boards rebuild nightly from registered gists. Trending skills filter out personal{" "}
-            <code className="inline">local:*</code> skills - a skill only trends once 2+ builders
-            publish it. See <Link to="/leaders">the live boards →</Link>
+            Boards rebuild from registered gists. A skill trends once 2+ builders use it -
+            however each installed it (a loose skill dir and a plugin count as the same skill).
+            See <Link to="/leaders">the live boards →</Link>
           </p>
         </article>
 
