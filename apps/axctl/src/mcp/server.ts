@@ -15,72 +15,27 @@
 import { ManagedRuntime } from "effect";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { AppLayer } from "@ax/lib/layers";
 import { AX_VERSION } from "../cli/version.ts";
 import { axMcpTools, type AxRuntime } from "./tools.ts";
 
-/**
- * Wrap a raw tool result in the MCP content envelope. Centralised so every
- * registered tool (and future Task-3 tools) gets identical serialisation: JSON
- * pretty-printed into a single text block.
- */
-export const wrapToolResult = (result: unknown): CallToolResult => ({
-    content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
-});
+// Re-exported for callers (and the smoke test) that import the envelope helpers
+// from the server module. They live in `./wrap.ts` to avoid a server<->tools
+// import cycle, since the tool factory needs them too.
+export { wrapToolResult, wrapToolError } from "./wrap.ts";
 
 /**
- * Wrap a thrown error as an MCP error result. The message is surfaced as text
- * (stderr-safe - this is the JSON-RPC response body, not a stdout log).
- */
-export const wrapToolError = (err: unknown): CallToolResult => ({
-    isError: true,
-    content: [
-        {
-            type: "text",
-            text: err instanceof Error ? err.message : String(err),
-        },
-    ],
-});
-
-/**
- * Build the MCP server and register every tool from `axMcpTools`. Each tool's
- * `run` is invoked with the validated args + the shared runtime; success flows
- * through `wrapToolResult`, failures through `wrapToolError`.
+ * Build the MCP server and register every tool from `axMcpTools`. Each tool
+ * owns its own `register(server, rt)` closure (see `defineMcpTool`), which wires
+ * the SDK callback through `wrapToolResult` / `wrapToolError`. Because the zod
+ * shape stays a deferred generic inside the factory, there is no longer a
+ * TS2589 cast here - registration is a plain typed call.
  */
 export const buildServer = (rt: AxRuntime): McpServer => {
     const server = new McpServer({ name: "ax", version: AX_VERSION });
-
-    // `registerTool`'s generic infers a callback type from the zod inputSchema.
-    // Driving that inference from a `ZodRawShape` (the registry's erased shape
-    // type) hits TS2589 (excessively deep). We register the tools through a
-    // permissive local alias - the shape is still validated by the SDK at
-    // runtime; we only opt out of the compile-time arg inference.
-    const register = server.registerTool.bind(server) as (
-        name: string,
-        config: { description?: string; inputSchema?: unknown },
-        cb: (args: Record<string, unknown>) => Promise<CallToolResult>,
-    ) => unknown;
-
     for (const tool of axMcpTools) {
-        register(
-            tool.name,
-            {
-                description: tool.description,
-                inputSchema: tool.inputSchema,
-            },
-            async (args: Record<string, unknown>): Promise<CallToolResult> => {
-                try {
-                    const result = await tool.run(args, rt);
-                    return wrapToolResult(result);
-                } catch (err) {
-                    console.error(`[ax mcp] tool "${tool.name}" failed:`, err);
-                    return wrapToolError(err);
-                }
-            },
-        );
+        tool.register(server, rt);
     }
-
     return server;
 };
 
