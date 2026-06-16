@@ -57,7 +57,7 @@ import {
     buildCostModelsNext,
     buildCostSplitNext,
 } from "../nav/next-links.ts";
-import { fetchCostModels, fetchCostSplit } from "../queries/cost-analytics.ts";
+import { COST_DEFAULT_WINDOW_DAYS, fetchCostModels, fetchCostSplit } from "../queries/cost-analytics.ts";
 import { fetchRoutability } from "../queries/routability.ts";
 import { fetchDispatches, fetchDispatchCandidates } from "../queries/dispatch-analytics.ts";
 import { loadEffectiveRoutingTable } from "../queries/routing-table-io.ts";
@@ -520,7 +520,7 @@ const costModelsTool: AxMcpTool = {
             .describe("Window in days (default 14)."),
     },
     run: async (args, rt) => {
-        const days = typeof args.days === "number" ? args.days : 14;
+        const days = typeof args.days === "number" ? args.days : COST_DEFAULT_WINDOW_DAYS;
         const result = await rt.runPromise(fetchCostModels({ sinceDays: days }));
         return { ...result, next: buildCostModelsNext(result) };
     },
@@ -539,7 +539,7 @@ const costSplitTool: AxMcpTool = {
             .describe("Window in days (default 14)."),
     },
     run: async (args, rt) => {
-        const days = typeof args.days === "number" ? args.days : 14;
+        const days = typeof args.days === "number" ? args.days : COST_DEFAULT_WINDOW_DAYS;
         const result = await rt.runPromise(fetchCostSplit({ sinceDays: days }));
         return { ...result, next: buildCostSplitNext(result) };
     },
@@ -594,7 +594,7 @@ const dispatchesTool: AxMcpTool = {
             .describe("When true, return only routing-optimisation candidates with est savings."),
     },
     run: async (args, rt) => {
-        const days = typeof args.days === "number" ? args.days : 14;
+        const days = typeof args.days === "number" ? args.days : COST_DEFAULT_WINDOW_DAYS;
         const candidates = args.candidates === true;
         if (candidates) {
             // Match against the live routing table (same file the hook and the

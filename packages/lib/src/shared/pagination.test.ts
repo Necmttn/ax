@@ -1,8 +1,10 @@
 import { describe, expect, test } from "bun:test";
 import {
+    clampInt,
     clampLimit,
     clampOffset,
     clampPagination,
+    type ClampIntConfig,
     type PaginationConfig,
 } from "./pagination.ts";
 
@@ -35,6 +37,40 @@ describe("clampLimit", () => {
         expect(clampLimit(undefined, sessionsCfg)).toBe(200);
         expect(clampLimit(9999, sessionsCfg)).toBe(500);
     });
+});
+
+describe("clampInt", () => {
+    const cfg: ClampIntConfig = { default: 14, min: 1 };
+    const cfgWithMax: ClampIntConfig = { default: 14, min: 1, max: 30 };
+    const cfgNoMin: ClampIntConfig = { default: 14 };
+
+    // --- default ---
+    test("undefined → default", () => expect(clampInt(undefined, cfg)).toBe(14));
+
+    // --- min ---
+    test("zero (below min) → default", () => expect(clampInt(0, cfg)).toBe(14));
+    test("negative (below min) → default", () => expect(clampInt(-3, cfg)).toBe(14));
+    test("exactly at min passes through", () => expect(clampInt(1, cfg)).toBe(1));
+    test("above min passes through", () => expect(clampInt(7, cfg)).toBe(7));
+
+    // --- max ---
+    test("over max clamps to max", () => expect(clampInt(90, cfgWithMax)).toBe(30));
+    test("exactly at max passes through", () => expect(clampInt(30, cfgWithMax)).toBe(30));
+    test("between min and max passes through", () => expect(clampInt(14, cfgWithMax)).toBe(14));
+
+    // --- non-finite ---
+    test("NaN → default", () => expect(clampInt(NaN, cfg)).toBe(14));
+    test("Infinity → default", () => expect(clampInt(Infinity, cfg)).toBe(14));
+    test("-Infinity → default", () => expect(clampInt(-Infinity, cfg)).toBe(14));
+
+    // --- fractional truncation ---
+    test("fractional truncates toward zero", () => expect(clampInt(7.9, cfg)).toBe(7));
+    test("fractional below min after trunc → default", () => expect(clampInt(0.9, cfg)).toBe(14));
+
+    // --- no min configured ---
+    test("no min: any finite value passes", () => expect(clampInt(0, cfgNoMin)).toBe(0));
+    test("no min: negative passes", () => expect(clampInt(-5, cfgNoMin)).toBe(-5));
+    test("no min: undefined → default", () => expect(clampInt(undefined, cfgNoMin)).toBe(14));
 });
 
 describe("clampPagination", () => {

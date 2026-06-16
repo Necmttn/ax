@@ -9,6 +9,7 @@ import { Command, Flag } from "effect/unstable/cli";
 import { prettyPrint } from "@ax/lib/json";
 import { printNextLinks } from "../next-format.ts";
 import {
+    COST_DEFAULT_WINDOW_DAYS,
     fetchCostModels,
     fetchCostSessions,
     fetchCostSplit,
@@ -84,7 +85,7 @@ const cmdCostModels = (input: {
 const costModelsCommand = Command.make(
     "models",
     {
-        days: Flag.integer("days").pipe(Flag.withDefault(14)),
+        days: Flag.integer("days").pipe(Flag.withDefault(COST_DEFAULT_WINDOW_DAYS)),
         json: jsonFlag,
     },
     ({ days, json }) => {
@@ -164,7 +165,7 @@ const cmdCostSessions = (input: {
 const costSessionsCommand = Command.make(
     "sessions",
     {
-        days: Flag.integer("days").pipe(Flag.withDefault(14)),
+        days: Flag.integer("days").pipe(Flag.withDefault(COST_DEFAULT_WINDOW_DAYS)),
         model: Flag.string("model").pipe(Flag.optional),
         limit: positiveLimit(20),
         json: jsonFlag,
@@ -264,7 +265,7 @@ const cmdCostSplit = (input: {
 const costSplitCommand = Command.make(
     "split",
     {
-        days: Flag.integer("days").pipe(Flag.withDefault(14)),
+        days: Flag.integer("days").pipe(Flag.withDefault(COST_DEFAULT_WINDOW_DAYS)),
         json: jsonFlag,
     },
     ({ days, json }) => {
