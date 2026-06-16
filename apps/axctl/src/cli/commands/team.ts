@@ -14,7 +14,7 @@
  */
 import { Effect } from "effect";
 import { Command, Flag } from "effect/unstable/cli";
-import { scanAxFolder } from "../../team/scan.ts";
+import { scanWithOverlay } from "../../team/overlay.ts";
 import { hashArtifact } from "../../team/hash.ts";
 import { loadTrust, saveTrust, classify, defaultTrustPath } from "../../team/trust.ts";
 import { activateArtifact, isSafeName } from "../../team/activate.ts";
@@ -98,13 +98,16 @@ const cmdSync = (input: { readonly dryRun: boolean; readonly yes: boolean }) =>
         }
         const root = r.stdout.toString().trim();
 
-        // 2. Scan .ax/ for artifacts + gated hooks
-        const { artifacts, gated } = yield* Effect.promise(() => scanAxFolder(root));
+        // 2. Scan .ax/ + .ax.local/ overlay for artifacts + gated hooks
+        const { artifacts, gated } = yield* Effect.promise(() => scanWithOverlay(root));
 
         if (artifacts.length === 0 && gated.length === 0) {
             console.log("[ax team sync] no .ax/ rig found in this repo");
             return;
         }
+
+        // Track which artifact keys are from the local overlay, for annotation in reports
+        const overlayKeys = new Set(artifacts.filter((a) => a.overlay).map((a) => artifactKey(a)));
 
         // 3. Pre-read all artifact files to build a sync hash map
         const fileContents = yield* Effect.promise(async () => {
@@ -129,7 +132,8 @@ const cmdSync = (input: { readonly dryRun: boolean; readonly yes: boolean }) =>
             const toActivate = [...cls.added, ...cls.changed];
             if (toActivate.length > 0) {
                 console.log(`[ax team sync] would activate ${toActivate.length}:`);
-                for (const a of toActivate) console.log(`  + ${a.kind}:${a.name}`);
+                for (const a of toActivate)
+                    console.log(`  + ${a.kind}:${a.name}${overlayKeys.has(artifactKey(a)) ? " (experiment)" : ""}`);
             }
             if (cls.unchanged.length > 0) {
                 console.log(`${cls.unchanged.length} unchanged`);
@@ -150,7 +154,8 @@ const cmdSync = (input: { readonly dryRun: boolean; readonly yes: boolean }) =>
         // 7. Without --yes, print what would happen and bail (activate NOTHING)
         if (toActivate.length > 0 && !input.yes) {
             console.log(`[ax team sync] ${toActivate.length} artifact(s) ready to activate:`);
-            for (const a of toActivate) console.log(`  + ${a.kind}:${a.name}`);
+            for (const a of toActivate)
+                console.log(`  + ${a.kind}:${a.name}${overlayKeys.has(artifactKey(a)) ? " (experiment)" : ""}`);
             console.log("re-run with --yes to approve");
             return;
         }
@@ -176,7 +181,7 @@ const cmdSync = (input: { readonly dryRun: boolean; readonly yes: boolean }) =>
                     hash: hashOf(a),
                     activated_at: new Date().toISOString(),
                 };
-                activated.push(`${a.kind}:${a.name}`);
+                activated.push(`${a.kind}:${a.name}${overlayKeys.has(artifactKey(a)) ? " (experiment)" : ""}`);
             }
         });
 
@@ -187,7 +192,7 @@ const cmdSync = (input: { readonly dryRun: boolean; readonly yes: boolean }) =>
         console.log(
             renderSyncReport({
                 activated,
-                unchanged: cls.unchanged.map((a) => `${a.kind}:${a.name}`),
+                unchanged: cls.unchanged.map((a) => `${a.kind}:${a.name}${overlayKeys.has(artifactKey(a)) ? " (experiment)" : ""}`),
                 gated: gated.map((g) => g.name),
             }),
         );
@@ -254,8 +259,8 @@ const cmdTrust = (input: { readonly yes: boolean; readonly allowBranch: boolean 
         }
         const root = r.stdout.toString().trim();
 
-        // 2. Scan .ax/ for gated hooks
-        const { gated } = yield* Effect.promise(() => scanAxFolder(root));
+        // 2. Scan .ax/ + .ax.local/ overlay for gated hooks
+        const { gated } = yield* Effect.promise(() => scanWithOverlay(root));
 
         if (gated.length === 0) {
             console.log("[ax team trust] no executable hooks in .ax/hooks/.");

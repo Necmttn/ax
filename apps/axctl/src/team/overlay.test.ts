@@ -1,5 +1,5 @@
 import { describe, expect, it, beforeAll, afterAll } from "bun:test";
-import { scanWithOverlay } from "./overlay.ts";
+import { scanWithOverlay, ensureAxLocalIgnored } from "./overlay.ts";
 
 let root: string;
 beforeAll(async () => {
@@ -32,4 +32,42 @@ describe("scanWithOverlay", () => {
     expect(r.artifacts).toEqual([]);
     expect(r.gated).toEqual([]);
   });
+});
+
+describe("ensureAxLocalIgnored", () => {
+  const tmpBase = `/tmp/ax-gitignore-${process.pid}`;
+
+  it("creates .gitignore and adds .ax.local/ when file is missing", async () => {
+    const dir = `${tmpBase}/a`;
+    await ensureAxLocalIgnored(dir);
+    const content = await Bun.file(`${dir}/.gitignore`).text();
+    expect(content).toMatch(/^\.ax\.local\/\s*$/m);
+  });
+
+  it("appends .ax.local/ to existing .gitignore without a trailing newline", async () => {
+    const dir = `${tmpBase}/b`;
+    await Bun.write(`${dir}/.gitignore`, "node_modules");
+    await ensureAxLocalIgnored(dir);
+    const content = await Bun.file(`${dir}/.gitignore`).text();
+    expect(content).toContain("node_modules\n.ax.local/\n");
+  });
+
+  it("does not duplicate when .ax.local/ is already present", async () => {
+    const dir = `${tmpBase}/c`;
+    await Bun.write(`${dir}/.gitignore`, "node_modules\n.ax.local/\n");
+    await ensureAxLocalIgnored(dir);
+    const content = await Bun.file(`${dir}/.gitignore`).text();
+    expect(content.split(".ax.local/").length - 1).toBe(1);
+  });
+
+  it("is idempotent across multiple calls", async () => {
+    const dir = `${tmpBase}/d`;
+    await ensureAxLocalIgnored(dir);
+    await ensureAxLocalIgnored(dir);
+    await ensureAxLocalIgnored(dir);
+    const content = await Bun.file(`${dir}/.gitignore`).text();
+    expect(content.split(".ax.local/").length - 1).toBe(1);
+  });
+
+  afterAll(() => Bun.spawnSync(["rm", "-rf", tmpBase]));
 });

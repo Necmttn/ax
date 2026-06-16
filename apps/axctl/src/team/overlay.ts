@@ -1,6 +1,14 @@
 import { scanAxFolder } from "./scan.ts";
 import type { GatedArtifact, TeamArtifact } from "./model.ts";
 
+/** Idempotently ensure `<root>/.gitignore` contains a line ignoring `.ax.local/`. */
+export async function ensureAxLocalIgnored(root: string): Promise<void> {
+  const gi = `${root}/.gitignore`;
+  const cur = (await Bun.file(gi).exists()) ? await Bun.file(gi).text() : "";
+  if (/^\.ax\.local\/?\s*$/m.test(cur)) return; // already ignored
+  await Bun.write(gi, `${cur}${cur && !cur.endsWith("\n") ? "\n" : ""}.ax.local/\n`, { createPath: true });
+}
+
 export const AX_LOCAL_DIR = ".ax.local";
 
 export type OverlayArtifact = TeamArtifact & { readonly overlay: boolean };
