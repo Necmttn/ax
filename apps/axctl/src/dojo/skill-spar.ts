@@ -277,6 +277,32 @@ export interface ResolveSkillSparOpts {
 }
 
 /**
+ * Pure helper: build a SkillSparBrief from a resolved SkillSparTask.
+ * The `id` is `<skillSlug>-<YYYY-MM-DD>` stamped by the caller; `createdAt`
+ * is the ISO timestamp at plan creation. editedSkill starts empty ("").
+ *
+ * Kept pure (no FS/Effect) so it is trivially unit-testable.
+ */
+export const buildSkillSparBrief = (
+    task: SkillSparTask,
+    id: string,
+    createdAt: string,
+): SkillSparBrief => ({
+    id,
+    createdAt,
+    skill: task.skill,
+    skillDir: task.skillDir,
+    originalHash: task.originalHash,
+    parentSha: task.parentSha,
+    baselineSession: task.baselineSession,
+    worktreeA: `.claude/worktrees/dojo-spar-${id}-a`,
+    worktreeB: `.claude/worktrees/dojo-spar-${id}-b`,
+    task: task.task,
+    originalSkill: task.originalSkill,
+    editedSkill: "",
+});
+
+/**
  * Resolve all inputs needed to create a SkillSparBrief.
  *
  * Steps:
