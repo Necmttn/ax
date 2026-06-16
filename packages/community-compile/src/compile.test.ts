@@ -1,6 +1,5 @@
-// scripts/compile-community.test.ts
 import { describe, expect, test } from "bun:test";
-import { compileCommunity, skillStatKey, type GistFetcher } from "./compile-community.ts";
+import { compileCommunity, skillStatKey, type GistFetcher } from "./compile.ts";
 
 const profile = (login: string, over: Record<string, unknown> = {}) => ({
     v: 1,
