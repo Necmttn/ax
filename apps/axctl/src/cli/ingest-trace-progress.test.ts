@@ -65,4 +65,27 @@ describe("pipelineTraceTransportLayer plain mode (issue #479)", () => {
         expect(out).toContain("ingest/skills/upsert done");
         expect(out).toContain("sessions=205");
     });
+
+    test("a count event on a LEAF (grandchild) span is dropped, not attributed", () => {
+        // Counts that ride a nested span (parent = stage, not root) must not leak
+        // into output: the leaf is never tracked, so its SpanEnd is skipped and
+        // its count never reaches a finish line. Only the stage span's own
+        // SpanEnd (no count here) renders.
+        const out = render([
+            traceStart(TRACE, "whole-run", { type: "user", id: "u1" }),
+            spanStart(TRACE, "root", "skills/upsert"),
+            spanStart(TRACE, "stage1", "skills/upsert", {}, "root"),
+            spanStart(TRACE, "leaf1", "db.chunk", {}, "stage1"),
+            // count annotation arrives on the LEAF span, not the stage
+            spanEvent(TRACE, "leaf1", "attribute:ingest.count.sessions", "Info", { value: 999 }),
+            spanEnd(TRACE, "leaf1", "ok", 1),
+            spanEnd(TRACE, "stage1", "ok", 5),
+            traceEnd(TRACE, "completed", 6),
+        ]);
+
+        expect(out).toContain("ingest/skills/upsert done");
+        // The leaf-attributed count must NOT surface (it would, if leaf spans were tracked).
+        expect(out).not.toContain("sessions=999");
+        expect(out).not.toContain("db.chunk");
+    });
 });
