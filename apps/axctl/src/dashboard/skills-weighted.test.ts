@@ -165,6 +165,22 @@ describe("fetchSkillsWeighted", () => {
         expect(result.doctor.unclassified_count).toBe(1);
     });
 
+    it("includeTools=true counts synthetic tools in the doctor count (#481)", async () => {
+        // Mirrors the exclusion test, but opts in: includeTools must thread to
+        // hygiene's includeSynthetic so the synthetic tool is now counted too.
+        const counts = [
+            { sid: "skill:real", invocations: 5, sessions: 4 },
+            { sid: "skill:synthtool", invocations: 9, sessions: 6 },
+        ];
+        const skills = [
+            { id: "skill:real", name: "real", dir_path: "/skills", content_hash: "h1" },
+            { id: "skill:synthtool", name: "tool", dir_path: "(synthetic)", content_hash: "h2" },
+        ];
+        const db = makeMockDb([noSparSessions, mockInvRows, mockRoleRows, [counts, skills, []]]);
+        const result = await runWithMock(db, fetchSkillsWeighted({ includeTools: true }));
+        expect(result.doctor.unclassified_count).toBe(2);
+    });
+
     it("includes window clause when windowDays is set", async () => {
         const db = makeMockDb();
 

@@ -185,19 +185,16 @@ const SKILL_NAMES_SQL = `SELECT id, name FROM skill`;
  * Synthetic provider built-in tool skill ids. These rows are written by the
  * codex/pi/opencode/cursor ingest with `dir_path = '(synthetic)'` so tool usage
  * is trackable, but they are tool calls, not skills. The skill table is small,
- * so this direct field-filter scan is cheap - no graph derefs. Used both as a
- * subquery (doctor) and to drop tools from the ranking in JS.
+ * so this direct field-filter scan is cheap - no graph derefs. Used to drop
+ * tools from the ranking in JS (the doctor count excludes them via hygiene's
+ * includeSynthetic flag instead).
  */
 const SYNTHETIC_SKILLS_SQL = `SELECT VALUE id FROM skill WHERE dir_path = "(synthetic)"`;
 
-// NOTE: the doctor count no longer has its own SurrealQL. An earlier inline
-// `buildUnclassifiedSql` drifted from queries/skill-hygiene.ts - it lacked the
-// content-hash dedup that collapses plugin-namespace twins (same SKILL.md
-// ingested under a bare AND a namespaced name) and counted orphan `invoked`
-// targets with no skill row, so the doctor over-reported (e.g. 37) while
-// `ax skills classify` briefed fewer (e.g. 30): the dead-end nudge from #481.
-// The count now delegates to fetchSkillHygiene - the SAME function classify uses
-// - so the nudge can never point at a command that finds something different.
+// The doctor count delegates to fetchSkillHygiene (see the Effect.all below).
+// An earlier inline `buildUnclassifiedSql` drifted from it - missing the
+// content-hash dedup and counting orphan invoked-targets - so the nudge
+// over-reported vs what classify briefs (#481).
 
 // ---------------------------------------------------------------------------
 // Main export
