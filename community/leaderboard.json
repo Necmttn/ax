@@ -1,29 +1,109 @@
 {
-  "compiled_at": "2026-06-12T08:14:49.510Z",
+  "compiled_at": "2026-06-16T13:38:07.334Z",
   "window_days": 30,
   "boards": {
     "tokens": [
       {
         "login": "Necmttn",
-        "value": 19473486824
+        "value": 25605378072
+      },
+      {
+        "login": "supnim",
+        "value": 22373591137
+      },
+      {
+        "login": "mitchnick",
+        "value": 12795418234
+      },
+      {
+        "login": "janniks",
+        "value": 6547775228
+      },
+      {
+        "login": "jannik-stacks",
+        "value": 5840987891
+      },
+      {
+        "login": "Dariia-Smyrnova",
+        "value": 2298311178
       }
     ],
     "sessions": [
       {
+        "login": "mitchnick",
+        "value": 3616
+      },
+      {
         "login": "Necmttn",
-        "value": 2005
+        "value": 2293
+      },
+      {
+        "login": "janniks",
+        "value": 717
+      },
+      {
+        "login": "Dariia-Smyrnova",
+        "value": 432
+      },
+      {
+        "login": "supnim",
+        "value": 298
+      },
+      {
+        "login": "jannik-stacks",
+        "value": 273
       }
     ],
     "streak": [
       {
+        "login": "janniks",
+        "value": 24
+      },
+      {
+        "login": "mitchnick",
+        "value": 10
+      },
+      {
+        "login": "Dariia-Smyrnova",
+        "value": 9
+      },
+      {
+        "login": "jannik-stacks",
+        "value": 2
+      },
+      {
         "login": "Necmttn",
-        "value": 6
+        "value": 2
+      },
+      {
+        "login": "supnim",
+        "value": 0
       }
     ],
     "cost": [
       {
         "login": "Necmttn",
-        "value": 22648.173916399996
+        "value": 25276.115599500004
+      },
+      {
+        "login": "supnim",
+        "value": 18410.113542950003
+      },
+      {
+        "login": "mitchnick",
+        "value": 12443.596315099996
+      },
+      {
+        "login": "janniks",
+        "value": 5010.6707672
+      },
+      {
+        "login": "jannik-stacks",
+        "value": 3860.2649257
+      },
+      {
+        "login": "Dariia-Smyrnova",
+        "value": 2541.8087257
       }
     ]
   }

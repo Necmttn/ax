@@ -1,39 +1,111 @@
 {
+  "claude-md-management:claude-md-improver": {
+    "users": 1,
+    "runs": 1
+  },
+  "expo:building-native-ui": {
+    "users": 1,
+    "runs": 2
+  },
+  "expo:upgrading-expo": {
+    "users": 1,
+    "runs": 1
+  },
   "local:agent-browser": {
     "users": 1,
-    "runs": 6
+    "runs": 9
+  },
+  "local:argent-react-native-app-workflow": {
+    "users": 1,
+    "runs": 1
+  },
+  "local:aso-audit": {
+    "users": 1,
+    "runs": 1
+  },
+  "local:ax-extract-workflow": {
+    "users": 1,
+    "runs": 1
   },
   "local:ax-repo": {
-    "users": 1,
-    "runs": 4
+    "users": 3,
+    "runs": 10
   },
   "local:batch-read-upfront": {
     "users": 1,
-    "runs": 27
+    "runs": 24
+  },
+  "local:blog-ingest": {
+    "users": 1,
+    "runs": 539
+  },
+  "local:blog-loop-prep": {
+    "users": 1,
+    "runs": 5
+  },
+  "local:ci-watch": {
+    "users": 1,
+    "runs": 1
   },
   "local:claude-api": {
     "users": 1,
     "runs": 2
   },
   "local:code-review": {
+    "users": 2,
+    "runs": 5
+  },
+  "local:codex": {
     "users": 1,
-    "runs": 2
+    "runs": 4
   },
   "local:codex:rescue": {
     "users": 1,
-    "runs": 3
+    "runs": 2
   },
   "local:codex:review": {
     "users": 1,
-    "runs": 1
+    "runs": 2
   },
   "local:commit": {
     "users": 1,
-    "runs": 5
+    "runs": 4
+  },
+  "local:components": {
+    "users": 1,
+    "runs": 1
   },
   "local:composto": {
+    "users": 3,
+    "runs": 36
+  },
+  "local:copywriting": {
     "users": 1,
-    "runs": 26
+    "runs": 2
+  },
+  "local:create-plan": {
+    "users": 1,
+    "runs": 7
+  },
+  "local:create-pr": {
+    "users": 1,
+    "runs": 7
+  },
+  "local:create-spec": {
+    "users": 1,
+    "runs": 11
+  },
+  "local:debug-page": {
+    "users": 1,
+    "runs": 1
+  },
+  "local:deep-research": {
+    "users": 2,
+    "runs": 4
+  },
+  "local:deploy": {
+    "users": 1,
+    "runs": 7
   },
   "local:dev-browser": {
     "users": 1,
@@ -47,6 +119,18 @@
     "users": 1,
     "runs": 2
   },
+  "local:dottie-deploy": {
+    "users": 1,
+    "runs": 2
+  },
+  "local:ds": {
+    "users": 1,
+    "runs": 8
+  },
+  "local:dynasty-analysis": {
+    "users": 1,
+    "runs": 1
+  },
   "local:effect-lint": {
     "users": 1,
     "runs": 4
@@ -59,41 +143,81 @@
     "users": 1,
     "runs": 3
   },
+  "local:efficient-dispatch": {
+    "users": 1,
+    "runs": 1
+  },
   "local:electron": {
     "users": 1,
     "runs": 1
   },
-  "local:expo-deployment": {
+  "local:emil-design-eng": {
     "users": 1,
-    "runs": 1
+    "runs": 2
+  },
+  "local:find-project": {
+    "users": 1,
+    "runs": 2
+  },
+  "local:find-skills": {
+    "users": 2,
+    "runs": 3
+  },
+  "local:finish": {
+    "users": 1,
+    "runs": 21
+  },
+  "local:firecrawl-scrape": {
+    "users": 1,
+    "runs": 2
   },
   "local:fork-daemon-observability": {
     "users": 1,
     "runs": 1
   },
   "local:grill-me": {
-    "users": 1,
-    "runs": 2
+    "users": 3,
+    "runs": 9
   },
   "local:grill-with-docs": {
-    "users": 1,
-    "runs": 2
+    "users": 2,
+    "runs": 3
   },
   "local:gsd:execute-phase": {
     "users": 1,
     "runs": 1
   },
   "local:handoff": {
+    "users": 3,
+    "runs": 9
+  },
+  "local:init": {
     "users": 1,
-    "runs": 4
+    "runs": 2
+  },
+  "local:ios-native-simulator": {
+    "users": 1,
+    "runs": 2
+  },
+  "local:langfuse": {
+    "users": 1,
+    "runs": 10
   },
   "local:linear-cli": {
     "users": 1,
     "runs": 1
   },
   "local:loop": {
+    "users": 2,
+    "runs": 2
+  },
+  "local:mastra": {
     "users": 1,
-    "runs": 1
+    "runs": 7
+  },
+  "local:mcp__dottie__clients_get_clients": {
+    "users": 1,
+    "runs": 3
   },
   "local:monitor-release": {
     "users": 1,
@@ -103,21 +227,53 @@
     "users": 1,
     "runs": 4
   },
+  "local:orchestrator": {
+    "users": 2,
+    "runs": 7
+  },
   "local:plannotator-annotate": {
     "users": 1,
-    "runs": 8
+    "runs": 9
+  },
+  "local:playwright-login": {
+    "users": 1,
+    "runs": 18
+  },
+  "local:podcast-ingest": {
+    "users": 1,
+    "runs": 62
+  },
+  "local:podcast-loop-prep": {
+    "users": 1,
+    "runs": 1
+  },
+  "local:pp-sentry": {
+    "users": 1,
+    "runs": 2
   },
   "local:pre-bash-guard": {
     "users": 1,
     "runs": 1
   },
-  "local:pre-edit-planning": {
+  "local:prepare-commit": {
     "users": 1,
     "runs": 1
   },
   "local:project-investigation": {
     "users": 1,
     "runs": 4
+  },
+  "local:prototype": {
+    "users": 1,
+    "runs": 2
+  },
+  "local:prune-worktrees": {
+    "users": 1,
+    "runs": 1
+  },
+  "local:push-master": {
+    "users": 1,
+    "runs": 1
   },
   "local:read-once": {
     "users": 1,
@@ -127,100 +283,164 @@
     "users": 1,
     "runs": 3
   },
+  "local:research": {
+    "users": 1,
+    "runs": 34
+  },
+  "local:research-codebase": {
+    "users": 1,
+    "runs": 7
+  },
   "local:retro-meta": {
     "users": 1,
     "runs": 2
   },
   "local:review-all": {
     "users": 1,
-    "runs": 26
+    "runs": 25
   },
   "local:roast": {
     "users": 1,
-    "runs": 2
+    "runs": 1
   },
   "local:run": {
     "users": 1,
     "runs": 1
   },
   "local:schedule": {
+    "users": 3,
+    "runs": 5
+  },
+  "local:search-docs": {
     "users": 1,
     "runs": 1
+  },
+  "local:sentry-cli": {
+    "users": 1,
+    "runs": 1
+  },
+  "local:setup": {
+    "users": 1,
+    "runs": 2
+  },
+  "local:shopping": {
+    "users": 1,
+    "runs": 6
   },
   "local:sim-test": {
     "users": 1,
     "runs": 1
   },
   "local:simplify": {
+    "users": 5,
+    "runs": 37
+  },
+  "local:staff-schedule-week": {
     "users": 1,
-    "runs": 23
+    "runs": 3
+  },
+  "local:swiftui-pro": {
+    "users": 1,
+    "runs": 6
+  },
+  "local:tanstack-query": {
+    "users": 1,
+    "runs": 1
+  },
+  "local:tanstack-start-best-practices": {
+    "users": 1,
+    "runs": 1
+  },
+  "local:tdd": {
+    "users": 1,
+    "runs": 9
   },
   "local:to-issues": {
     "users": 1,
-    "runs": 2
+    "runs": 3
   },
   "local:update-config": {
-    "users": 1,
-    "runs": 2
+    "users": 5,
+    "runs": 8
   },
   "local:upgrading-expo": {
     "users": 1,
     "runs": 1
   },
-  "local:wait-for-staging": {
+  "local:vercel-composition-patterns": {
+    "users": 1,
+    "runs": 1
+  },
+  "local:vercel-react-best-practices": {
+    "users": 2,
+    "runs": 3
+  },
+  "local:voice": {
+    "users": 1,
+    "runs": 1
+  },
+  "local:whoami-session": {
     "users": 1,
     "runs": 1
   },
   "local:worktree-permissions": {
     "users": 1,
-    "runs": 4
+    "runs": 7
   },
   "local:worktree-read-strategy": {
     "users": 1,
-    "runs": 26
+    "runs": 60
   },
   "local:write-a-skill": {
     "users": 1,
     "runs": 1
   },
-  "superpowers:superpowers:brainstorming": {
-    "users": 1,
-    "runs": 23
-  },
-  "superpowers:superpowers:dispatching-parallel-agents": {
+  "stripe:stripe-best-practices": {
     "users": 1,
     "runs": 1
   },
-  "superpowers:superpowers:executing-plans": {
+  "superpowers:brainstorming": {
+    "users": 2,
+    "runs": 45
+  },
+  "superpowers:dispatching-parallel-agents": {
     "users": 1,
     "runs": 2
   },
-  "superpowers:superpowers:finishing-a-development-branch": {
+  "superpowers:executing-plans": {
     "users": 1,
-    "runs": 15
+    "runs": 6
   },
-  "superpowers:superpowers:receiving-code-review": {
+  "superpowers:finishing-a-development-branch": {
+    "users": 2,
+    "runs": 31
+  },
+  "superpowers:receiving-code-review": {
+    "users": 2,
+    "runs": 2
+  },
+  "superpowers:subagent-driven-development": {
+    "users": 2,
+    "runs": 47
+  },
+  "superpowers:systematic-debugging": {
+    "users": 2,
+    "runs": 9
+  },
+  "superpowers:test-driven-development": {
+    "users": 2,
+    "runs": 4
+  },
+  "superpowers:using-git-worktrees": {
+    "users": 2,
+    "runs": 17
+  },
+  "superpowers:using-superpowers": {
     "users": 1,
     "runs": 1
   },
-  "superpowers:superpowers:subagent-driven-development": {
-    "users": 1,
-    "runs": 29
-  },
-  "superpowers:superpowers:systematic-debugging": {
-    "users": 1,
-    "runs": 2
-  },
-  "superpowers:superpowers:test-driven-development": {
-    "users": 1,
-    "runs": 3
-  },
-  "superpowers:superpowers:using-git-worktrees": {
-    "users": 1,
-    "runs": 11
-  },
-  "superpowers:superpowers:writing-plans": {
-    "users": 1,
-    "runs": 22
+  "superpowers:writing-plans": {
+    "users": 2,
+    "runs": 48
   }
 }
