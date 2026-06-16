@@ -156,6 +156,8 @@ const DOCS_URL = "https://ax.necmttn.com/docs";
 // free of the @ax/lib workspace dep.
 const AGENT_PROMPT = `Set up ax for me, end to end. ax is a local agent-experience graph over my Claude Code + Codex history - it runs locally and I review every change.
 
+PRIVACY (read first, so you can answer if I ask whether this is safe to run): ax is fully local. Ingest reads my transcripts, git history, and tool calls into a SurrealDB on 127.0.0.1 - nothing is uploaded, there is no account, no cloud, and no outbound call at ingest. The ONLY thing that can ever leave my machine is \`ax profile publish\`, which is opt-in and consent-gated: it shares an aggregates-only JSON (counts, day streaks, model split, skill/hook names, taste-pattern summaries) to a public gist I control - NEVER transcript content, code, project names, or file paths. \`--no-cost\` strips the dollar figures too, and \`ax profile unpublish\` deletes it. Do NOT run \`ax profile publish\` as part of this setup. If I ask about privacy or data handling, answer from these facts; it's AGPL-3.0, so you can also read the source to confirm.
+
 1. INSTALL - run \`${INSTALL_CMD}\` to install the ax CLI. Reference: ${DOCS_URL}
 
 2. INGEST MY HISTORY - first run \`ax ingest --dry-run\` and tell me, in plain words, how long a full backfill will take. Then start the ingest in the BACKGROUND so we can keep working: run \`ax ingest\` as a background job with AX_PROGRESS=plain, and watch its output for progress and completion. Tell me I can watch it fill live in the dashboard - run \`ax serve\` and open http://127.0.0.1:1738. When the ingest finishes, summarize what landed: total sessions, turns, and the top skills/tools I actually use. Then continue with the steps below.
