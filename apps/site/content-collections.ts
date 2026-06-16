@@ -123,4 +123,23 @@ const howItWorks = defineCollection({
   },
 });
 
-export default defineConfig({ content: [adrs, howItWorks, releaseAnnouncements, changelog] });
+const blog = defineCollection({
+  name: "blog",
+  directory: "content/blog",
+  include: "*.md",
+  schema: z.object({
+    title: z.string(),
+    date: z.string(),
+    excerpt: z.string(),
+    tags: z.array(z.string()).optional(),
+    draft: z.boolean().optional(),
+    content: z.string(),
+  }),
+  transform: async (doc, ctx) => {
+    const body = await compileMDX(ctx, doc, mdxOptions);
+    const slug = doc._meta.fileName.replace(/\.md$/, "");
+    return { ...doc, slug, body };
+  },
+});
+
+export default defineConfig({ content: [adrs, howItWorks, releaseAnnouncements, changelog, blog] });
