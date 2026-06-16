@@ -7,9 +7,10 @@
  */
 
 const REPO_RAW = "https://raw.githubusercontent.com/Necmttn/ax/main";
-// Compiled outputs live on the community-data branch (nightly bot pushes
-// there; main has a required-checks ruleset that blocks bot pushes).
-const DATA_RAW = "https://raw.githubusercontent.com/Necmttn/ax/community-data";
+// Compiled outputs are served by the alchemy-provisioned community-compile
+// Worker (apps/community-worker): nightly cron + GitHub push webhook recompile
+// the moment a builder registers. Read-only, CORS-open, edge-cached 5m.
+const BOARD_API = "https://ax-community.necmttn.com";
 const LOGIN_RE = /^[A-Za-z0-9-]{1,39}$/;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -363,12 +364,15 @@ export function profileGistRawUrl(owner: string, gistId: string): string {
     return `https://gist.githubusercontent.com/${owner}/${gistId}/raw/ax-profile.json`;
 }
 
-export const leaderboardUrl = `${DATA_RAW}/community/leaderboard.json`;
-export const skillStatsUrl = `${DATA_RAW}/community/skill-stats.json`;
+export const leaderboardUrl = `${BOARD_API}/leaders`;
+export const skillStatsUrl = `${BOARD_API}/skills`;
 
 async function fetchJson(url: string): Promise<unknown> {
     const res = await fetch(url);
-    if (res.status === 404) throw Object.assign(new Error("not found"), { notFound: true });
+    // 404 (no such resource) and 503 (worker up but board not compiled yet)
+    // both mean "nothing to show" - the leaders page renders its founding
+    // state rather than an error.
+    if (res.status === 404 || res.status === 503) throw Object.assign(new Error("not found"), { notFound: true });
     if (!res.ok) throw new Error(`fetch failed (${res.status})`);
     return res.json();
 }

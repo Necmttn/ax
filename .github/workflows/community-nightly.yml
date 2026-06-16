@@ -1,8 +1,12 @@
 name: community-nightly
 
+# FALLBACK ONLY. The live community compile now runs on the alchemy-provisioned
+# Cloudflare Worker (apps/community-worker): a GitHub push webhook recompiles the
+# moment a builder registers + a nightly cron refreshes everyone's gist numbers.
+# The scheduled trigger is disabled to avoid double-compiling into the now
+# unread community-data branch; workflow_dispatch stays so a maintainer can still
+# run the Bun path by hand if the Worker is ever down.
 on:
-  schedule:
-    - cron: "17 3 * * *"
   workflow_dispatch:
 
 permissions:
