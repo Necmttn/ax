@@ -5,6 +5,10 @@ import * as Scope from "effect/Scope";
 
 import * as Electron from "electron";
 
+import { makeComponentLogger } from "../app/DesktopObservability.ts";
+
+const { logInfo: logTrayInfo } = makeComponentLogger("electron-tray");
+
 /** Actions a tray menu item can dispatch. */
 export type TrayAction = "open" | "toggle-login" | "quit";
 
@@ -88,7 +92,10 @@ const make = ElectronTray.of({
         return tray;
       }),
       (tray) => Effect.sync(() => tray.destroy()),
-    ).pipe(Effect.asVoid),
+    ).pipe(
+      Effect.tap(() => logTrayInfo("menubar tray installed", { iconPath: args.iconPath })),
+      Effect.asVoid,
+    ),
 });
 
 export const layer = Layer.succeed(ElectronTray, make);
