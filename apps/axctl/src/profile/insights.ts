@@ -8,7 +8,6 @@
 import type { DailyActivityRow, SessionDurationRow, TopToolRow, WrappedCounts } from "./queries.ts";
 
 const MAX_SESSION_MS = 24 * 60 * 60 * 1000; // 24h cap per session
-const DEEP_THRESHOLD_MIN = 90;
 
 export interface InsightsInput {
     readonly durations: ReadonlyArray<SessionDurationRow>;
@@ -17,6 +16,20 @@ export interface InsightsInput {
     readonly commits: number;
     readonly tools: ReadonlyArray<TopToolRow>;
     readonly daily: ReadonlyArray<DailyActivityRow>;
+    /**
+     * Count of "outcome-deep" sessions in the window: sessions that landed a
+     * real, non-reverted commit (>0 lines touched). DEPTH measures whether your
+     * sessions REACH a clean shipped outcome, not how long they run - wall-clock
+     * and turn-count both reward thrash and penalise handoff-compressed work, so
+     * depth is graded on the result, not the effort. Omitted -> share is 0.
+     */
+    readonly deepSessions?: number;
+    /**
+     * DEPTH denominator: non-subagent sessions in the window. Kept separate from
+     * the duration-based session count because subagent sessions (which the
+     * numerator excludes) roughly double the raw total. Omitted -> share is 0.
+     */
+    readonly deepSessionTotal?: number;
     /** Optional wrapped-style window counts; omitted when not fetched. */
     readonly wrapped?: WrappedCounts;
 }
@@ -49,7 +62,6 @@ export function deriveInsights(input: InsightsInput): InsightsResult | null {
     // --- duration stats (clamped at 24h per session) ------------------------
     let totalMs = 0;
     let longestMs = 0;
-    let deepCount = 0;
     let validCount = 0;
     const events: Array<{ t: number; delta: 1 | -1 }> = [];
 
@@ -61,14 +73,19 @@ export function deriveInsights(input: InsightsInput): InsightsResult | null {
         const clampedMs = Math.min(endMs - startMs, MAX_SESSION_MS);
         totalMs += clampedMs;
         longestMs = Math.max(longestMs, clampedMs);
-        if (clampedMs / 60_000 >= DEEP_THRESHOLD_MIN) deepCount++;
         events.push({ t: startMs, delta: 1 });
         events.push({ t: endMs, delta: -1 });
     }
 
     const hours_total = Math.round((totalMs / 3_600_000) * 10) / 10;
     const longest_session_minutes = Math.round(longestMs / 60_000);
-    const deep_session_share = validCount > 0 ? deepCount / validCount : 0;
+    // DEPTH = share of (non-subagent) sessions that landed clean work. Both
+    // numerator and denominator are subagent-filtered upstream; clamped at 1 for
+    // safety. Falls back to 0 when the outcome inputs are absent (old callers).
+    const deepTotal = input.deepSessionTotal ?? 0;
+    const deep_session_share = deepTotal > 0
+        ? Math.min(1, (input.deepSessions ?? 0) / deepTotal)
+        : 0;
 
     // --- max parallel sessions (classic sweep line) --------------------------
     // Sort by time; on ties process ends before starts so back-to-back

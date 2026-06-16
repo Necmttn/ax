@@ -15,6 +15,7 @@ import {
     fetchDailyCommits,
     fetchDailyModels,
     fetchDailyToolCalls,
+    fetchDeepSessionCount,
     fetchHarnesses,
     fetchPeakHour,
     fetchSessionDurations,
@@ -82,6 +83,10 @@ export const buildProfile = Effect.fn("profile.buildProfile")(
         const dailyCommits = yield* fetchDailyCommits({ windowDays });
         const windowedInvocations = yield* fetchWindowedInvocations({ windowDays });
         const windowedSessions = yield* fetchWindowedSessions({ windowDays });
+        // 24 deepSessions (outcome-density DEPTH numerator + non-subagent
+        // denominator; appended last so existing render.test mock order stays
+        // aligned). Internally fans out: total-count -> produced -> landed-loc.
+        const deep = yield* fetchDeepSessionCount({ windowDays });
 
         const streak = computeStreak(daily, env.today);
 
@@ -109,6 +114,8 @@ export const buildProfile = Effect.fn("profile.buildProfile")(
             commits: commitCount,
             tools: topTools,
             daily: dailyFull,
+            deepSessions: deep.deep,
+            deepSessionTotal: deep.total,
             wrapped: wrappedCounts,
         });
 

@@ -15,9 +15,9 @@ describe("deriveInsights", () => {
     ];
 
     const baseDurations: SessionDurationRow[] = [
-        s("2026-06-12T10:00:00Z", "2026-06-12T12:30:00Z"), // 2.5h = deep
-        s("2026-06-12T11:00:00Z", "2026-06-12T11:30:00Z"), // 30min = not deep
-        s("2026-06-12T09:00:00Z", "2026-06-12T10:30:00Z"), // 1.5h = deep
+        s("2026-06-12T10:00:00Z", "2026-06-12T12:30:00Z"), // 2.5h
+        s("2026-06-12T11:00:00Z", "2026-06-12T11:30:00Z"), // 30min
+        s("2026-06-12T09:00:00Z", "2026-06-12T10:30:00Z"), // 1.5h
     ];
 
     test("hours_total sums all durations in hours", () => {
@@ -45,7 +45,21 @@ describe("deriveInsights", () => {
         expect(r!.longest_session_minutes).toBe(150);
     });
 
-    test("deep_session_share = sessions >= 90min / total sessions with duration", () => {
+    test("deep_session_share = deepSessions (clean-ship count) / non-subagent total", () => {
+        const r = deriveInsights({
+            durations: baseDurations,
+            peakHour: 10,
+            spawned: 5,
+            commits: 20,
+            tools: [],
+            daily: baseDailyFull,
+            deepSessions: 2,
+            deepSessionTotal: 3,
+        });
+        expect(r!.deep_session_share).toBeCloseTo(2 / 3, 3);
+    });
+
+    test("deep_session_share = 0 when outcome inputs omitted", () => {
         const r = deriveInsights({
             durations: baseDurations,
             peakHour: 10,
@@ -54,7 +68,21 @@ describe("deriveInsights", () => {
             tools: [],
             daily: baseDailyFull,
         });
-        expect(r!.deep_session_share).toBeCloseTo(2 / 3, 3);
+        expect(r!.deep_session_share).toBe(0);
+    });
+
+    test("deep_session_share clamps at 1 when deepSessions exceeds total", () => {
+        const r = deriveInsights({
+            durations: baseDurations,
+            peakHour: 10,
+            spawned: 5,
+            commits: 20,
+            tools: [],
+            daily: baseDailyFull,
+            deepSessions: 5,
+            deepSessionTotal: 3,
+        });
+        expect(r!.deep_session_share).toBe(1);
     });
 
     test("busiest_day = max sessions in daily", () => {
