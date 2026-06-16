@@ -2,6 +2,7 @@ import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 
 import * as AxBackendManager from "../backend/AxBackendManager.ts";
+import * as DesktopIngestScheduler from "../backend/DesktopIngestScheduler.ts";
 import * as ElectronApp from "../electron/ElectronApp.ts";
 import * as ElectronMenu from "../electron/ElectronMenu.ts";
 import * as ElectronProtocol from "../electron/ElectronProtocol.ts";
@@ -51,6 +52,18 @@ const startup = Effect.gen(function* () {
     //    orders surreal -> ax serve (or attaches to an existing pair), and opens
     //    the window once the backend is ready.
     yield* backendManager.start;
+
+    // 5b. Keep the graph fresh while the app is open (IDE daemon model - no
+    //     background agent). Fire an immediate ingest catch-up, then one every
+    //     few minutes, reusing the running daemon's live-ingest pipeline via
+    //     POST /api/ingest. Forked into the program scope so it is interrupted on
+    //     shutdown. Self-healing: a failed run (e.g. serve not ready at the first
+    //     tick) is logged and retried on the next tick, so it is safe to start
+    //     here without gating on backend readiness. See
+    //     docs/superpowers/specs/2026-06-16-smappservice-background-helper-design.md
+    yield* Effect.forkScoped(
+        DesktopIngestScheduler.run({ sinceDays: 7, interval: Duration.minutes(2) }),
+    );
 
     // 6. Phase 3: kick off an electron-updater check. The update feed comes from
     //    electron-builder's GitHub `publish` config, baked into `app-update.yml`
