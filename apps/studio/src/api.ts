@@ -506,6 +506,20 @@ export const api = {
 
     costModels: (): Promise<CostModelsResult> =>
         viaContract("/api/cost/models", (c) => c.insights.costModels()) as Promise<CostModelsResult>,
+    costSplit: (days = 30): Promise<unknown> =>
+        viaContract("/api/cost/split", (c) => c.insights.costSplit({ query: { days } })),
+    costDispatches: (days = 30, candidates = false): Promise<unknown> =>
+        viaContract("/api/cost/dispatches", (c) => c.insights.costDispatches({ query: { days, candidates } })),
+    costRoutability: (days = 30, minRun = 1): Promise<unknown> =>
+        viaContract("/api/cost/routability", (c) => c.insights.costRoutability({ query: { days, minRun } })),
+    routingTable: (): Promise<unknown> =>
+        viaContract("/api/routing/table", (c) => c.insights.routingTable()),
+    routingBacktest: (body: { pattern: string; flags?: string; suggest: string; exclude?: string[]; days?: number }): Promise<unknown> =>
+        viaContract("/api/routing/backtest", (c) => c.insights.routingBacktest({ payload: body }), { method: "POST" }),
+    routingUpsertClass: (body: { id: string; pattern: string; flags?: string; suggest: string; reason?: string; exclude?: string[] }): Promise<unknown> =>
+        viaContract("/api/routing/classes", (c) => c.routing.routingUpsertClass({ payload: body }), { method: "POST" }),
+    routingRemoveClass: (id: string): Promise<unknown> =>
+        viaContract(`/api/routing/classes/${encodeURIComponent(id)}`, (c) => c.routing.routingRemoveClass({ params: { id } }), { method: "DELETE" }),
     contextBudget: (): Promise<ContextBudgetResult> =>
         viaContract("/api/context/budget", (c) => c.insights.contextBudget()) as Promise<ContextBudgetResult>,
     contextDrift: (): Promise<ContextDriftResult> =>

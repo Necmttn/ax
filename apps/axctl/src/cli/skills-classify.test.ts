@@ -22,6 +22,51 @@ function mockDb(rows: MockRow[]): SurrealClientShape {
     return makeTestSurrealClient({ denyWrites: true, fallback: [rows] }).client;
 }
 
+/**
+ * Default mode now delegates to fetchSkillHygiene, which issues ONE 3-statement
+ * query ([invocation counts, skill rows, classified ids]) and joins them in JS.
+ * This builds that 3-statement fixture so the given rows survive the join as the
+ * selected unclassified skills. `extraSkills` lets a test seed skills that should
+ * be filtered OUT (synthetic / classified / below-threshold) to exercise the
+ * predicate end-to-end.
+ */
+function hygieneMockDb(
+    rows: MockRow[],
+    extraSkills: Array<{
+        name: string;
+        invocations: number;
+        sessions?: number;
+        dir_path?: string;
+        classified?: boolean;
+    }> = [],
+): SurrealClientShape {
+    const all = [
+        ...rows.map((r) => ({ ...r, dir_path: `/skills/${r.name}`, classified: false })),
+        ...extraSkills.map((s) => ({
+            name: s.name,
+            invocations: s.invocations,
+            sessions: s.sessions ?? 1,
+            dir_path: s.dir_path ?? `/skills/${s.name}`,
+            classified: s.classified ?? false,
+        })),
+    ];
+    const counts = all.map((s) => ({
+        sid: `skill:${s.name}`,
+        invocations: s.invocations,
+        sessions: s.sessions,
+    }));
+    const skills = all.map((s) => ({
+        id: `skill:${s.name}`,
+        name: s.name,
+        dir_path: s.dir_path,
+    }));
+    const classified = all.filter((s) => s.classified).map((s) => `skill:${s.name}`);
+    return makeTestSurrealClient({
+        denyWrites: true,
+        fallback: [counts, skills, classified],
+    }).client;
+}
+
 // Forced-dependency edit: cmdSkillsClassify now requires FileSystem + Path
 // (the @effect/platform migration); run against the REAL Bun-backed layers.
 const BunFsLayer = Layer.merge(BunFileSystem.layer, BunPath.layer);
@@ -60,7 +105,7 @@ describe("cmdSkillsClassify default mode", () => {
             { name: "composto", invocations: 15, sessions: 4 },
             { name: "codex:rescue", invocations: 8, sessions: 3 },
         ];
-        const db = mockDb(rows);
+        const db = hygieneMockDb(rows);
         await runWith(db, cmdSkillsClassify({ names: [], outDir, dryRun: false, json: false }));
 
         for (const row of rows) {
@@ -73,10 +118,38 @@ describe("cmdSkillsClassify default mode", () => {
         }
     });
 
+    // Regression for the dead-end loop: default mode must SELECT unclassified
+    // skills with ≥3 invocations and exclude classified / synthetic / low-count.
+    // The previous correlated `NOT (subquery)[0]` predicate returned NONE (not
+    // false) for unclassified skills and silently excluded every one of them, so
+    // classify always reported "none found" while `ax skills weighted` reported
+    // a positive count. Now both share fetchSkillHygiene.
+    test("selects unclassified ≥3 and drops classified / synthetic / low-count", async () => {
+        const outDir = mkdtempSync(join(tmpdir(), "ax-classify-filter-"));
+        const db = hygieneMockDb(
+            [{ name: "keep-me", invocations: 9, sessions: 3 }],
+            [
+                { name: "already-tagged", invocations: 20, classified: true },
+                { name: "codex:exec", invocations: 999, dir_path: "(synthetic)" },
+                { name: "too-rare", invocations: 2 },
+            ],
+        );
+        const logged: string[] = [];
+        const origLog = console.log;
+        console.log = (msg: string) => { logged.push(msg); };
+        try {
+            await runWith(db, cmdSkillsClassify({ names: [], outDir, dryRun: false, json: true }));
+        } finally {
+            console.log = origLog;
+        }
+        const parsed = JSON.parse(logged[0] ?? "[]") as Array<Record<string, unknown>>;
+        expect(parsed.map((r) => r.skill)).toEqual(["keep-me"]);
+    });
+
     test("is idempotent - skips existing files without re-writing", async () => {
         const outDir = mkdtempSync(join(tmpdir(), "ax-classify-idem-"));
         const rows: MockRow[] = [{ name: "composto", invocations: 15, sessions: 4 }];
-        const db = mockDb(rows);
+        const db = hygieneMockDb(rows);
 
         // First run - write the file
         await runWith(db, cmdSkillsClassify({ names: [], outDir, dryRun: false, json: false }));
@@ -96,7 +169,7 @@ describe("cmdSkillsClassify default mode", () => {
     test("dry-run does not write any files", async () => {
         const outDir = mkdtempSync(join(tmpdir(), "ax-classify-dry-"));
         const rows: MockRow[] = [{ name: "composto", invocations: 15, sessions: 4 }];
-        const db = mockDb(rows);
+        const db = hygieneMockDb(rows);
         await runWith(db, cmdSkillsClassify({ names: [], outDir, dryRun: true, json: false }));
         const filePath = join(outDir, `classify-composto.md`);
         const exists = await access(filePath).then(() => true, () => false);
@@ -106,7 +179,7 @@ describe("cmdSkillsClassify default mode", () => {
     test("json mode outputs structured list, no files written", async () => {
         const outDir = mkdtempSync(join(tmpdir(), "ax-classify-json-"));
         const rows: MockRow[] = [{ name: "composto", invocations: 15, sessions: 4 }];
-        const db = mockDb(rows);
+        const db = hygieneMockDb(rows);
 
         const logged: string[] = [];
         const origLog = console.log;
@@ -132,7 +205,7 @@ describe("cmdSkillsClassify default mode", () => {
 
     test("empty result from DB prints informational message", async () => {
         const outDir = mkdtempSync(join(tmpdir(), "ax-classify-empty-"));
-        const db = mockDb([]);
+        const db = hygieneMockDb([]);
         const logged: string[] = [];
         const origLog = console.log;
         console.log = (msg: string) => { logged.push(msg); };
@@ -195,24 +268,21 @@ describe("cmdSkillsClassify explicit mode", () => {
 // ---------------------------------------------------------------------------
 
 describe("SQL shape (default mode)", () => {
-    test("default query requires invocations >= 3 and NOT plays_role", async () => {
+    // Default mode delegates to fetchSkillHygiene, whose deref-free 3-statement
+    // query reads the classified set from plays_role (the role-source filter) and
+    // joins counts→skills in JS. The ≥3 threshold and synthetic exclusion are
+    // applied in JS (see fetchSkillHygiene), NOT in SQL - so they are asserted by
+    // the behavioral filter test above, not by string-matching the query.
+    test("default query reads the plays_role classification sources", async () => {
         const outDir = mkdtempSync(join(tmpdir(), "ax-classify-sql-"));
-        const tc = makeTestSurrealClient({ denyWrites: true });
+        const tc = makeTestSurrealClient({ denyWrites: true, fallback: [[], [], []] });
         await runWith(tc.client, cmdSkillsClassify({ names: [], outDir, dryRun: false, json: false }));
-        const capturedSql = tc.captured.at(-1) ?? "";
+        const capturedSql = tc.captured.join("\n");
         expect(capturedSql).toContain("plays_role");
-        expect(capturedSql).toContain(">= 3");
+        expect(capturedSql).toContain("invoked");
         expect(capturedSql).toContain(`"frontmatter"`);
         expect(capturedSql).toContain(`"brief"`);
         expect(capturedSql).toContain(`"user"`);
-    });
-
-    test("default query excludes synthetic provider-tool skills", async () => {
-        const outDir = mkdtempSync(join(tmpdir(), "ax-classify-synthetic-"));
-        const tc = makeTestSurrealClient({ denyWrites: true });
-        await runWith(tc.client, cmdSkillsClassify({ names: [], outDir, dryRun: false, json: false }));
-        const capturedSql = tc.captured.at(-1) ?? "";
-        expect(capturedSql).toContain('dir_path != "(synthetic)"');
     });
 });
 
@@ -226,7 +296,7 @@ describe("output path", () => {
         const rows: MockRow[] = [
             { name: "superpowers:subagent-driven-development", invocations: 10, sessions: 5 },
         ];
-        const db = mockDb(rows);
+        const db = hygieneMockDb(rows);
         await runWith(db, cmdSkillsClassify({ names: [], outDir, dryRun: false, json: false }));
         const expectedFile = join(outDir, "classify-superpowers__subagent-driven-development.md");
         const exists = await access(expectedFile).then(() => true, () => false);

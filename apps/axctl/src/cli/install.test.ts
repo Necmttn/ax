@@ -3,10 +3,46 @@ import {
     formatDaemonStatus,
     formatDoctorReport,
     parseDaemonCommand,
+    resolveDaemonHostPort,
     staleRunningIngestRuns,
     type DaemonStatus,
     type DoctorReport,
 } from "./install.ts";
+
+describe("resolveDaemonHostPort (doctor honors AX_DB_URL)", () => {
+    const state = {
+        version: 1 as const,
+        db: { host: "127.0.0.1", port: 8521 },
+        updatedAt: "2026-06-16T00:00:00.000Z",
+    };
+
+    test("falls back to runtime-state when AX_DB_URL is unset", () => {
+        expect(resolveDaemonHostPort(state, undefined)).toEqual({
+            host: "127.0.0.1",
+            port: 8521,
+            url: "ws://127.0.0.1:8521",
+        });
+    });
+
+    test("honors an explicit AX_DB_URL host:port over runtime-state", () => {
+        // Regression: doctor probed the runtime-state default (8521) while the
+        // rest of the CLI connected via AX_DB_URL - so it checked the wrong
+        // instance and reported another db's listener / stuck ingest_runs.
+        expect(resolveDaemonHostPort(state, "ws://10.0.0.5:8531")).toEqual({
+            host: "10.0.0.5",
+            port: 8531,
+            url: "ws://10.0.0.5:8531",
+        });
+    });
+
+    test("ignores a malformed AX_DB_URL and keeps runtime-state", () => {
+        expect(resolveDaemonHostPort(state, "not a url")).toEqual({
+            host: "127.0.0.1",
+            port: 8521,
+            url: "ws://127.0.0.1:8521",
+        });
+    });
+});
 
 describe("cli install operations", () => {
     test("parses daemon subcommands", () => {

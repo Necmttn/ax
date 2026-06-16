@@ -270,6 +270,17 @@ Activate the team's committed `.ax/` rig (skills + agents) into your runtime, tr
 
 Review + install the team's executable `.ax/hooks/*` into your runtime. Uses sha256 trust-on-change: a hook is only installed when its content hash is new or changed, and only when running on the repo's default branch. `--yes` approves installation without interactive prompting. `--allow-branch` bypasses the default-branch guard (advanced use). Fail-safe: non-TTY without `--yes` installs nothing. Team hooks must be self-contained or import from `@ax/hooks-sdk` (v1 limitation: no arbitrary package resolution at hook fire time).
 
+`ax team experiment <start|list|promote|drop> <kind> <name>`
+
+Iterate on a team artifact (`kind` = `skill` | `agent` | `hook`) in an isolated, gitignored `.ax.local/` overlay, then promote it into the committed `.ax/` rig.
+
+- `start <kind> <name>` - copies the committed artifact (or scaffolds a new one) into `.ax.local/<kind>s/<name>` for isolated editing. Adds `.ax.local/` to `.gitignore` automatically.
+- `list` - shows all active experiments in `.ax.local/`, noting which ones override a committed version.
+- `promote <kind> <name>` - moves the overlay artifact to `.ax/<kind>s/<name>`, stages it with `git add`, and clears the overlay copy. Open a PR after this step. Promoted hooks must be re-trusted by teammates via `ax team trust` after the PR merges.
+- `drop <kind> <name>` - discards the overlay copy, reverting to the committed version.
+
+During iteration, use `ax team sync --yes` (or `ax team trust --yes` for a hook) to activate the overlay version in your own runtime; `sync` annotates overlay-sourced artifacts as `(experiment)` in its output. `experiment score` (telemetry-gated ranking of experiment vs baseline) is deferred to the hosted phase.
+
 ## Live ingest in the dashboard
 
 `axctl serve` exposes `POST /api/ingest` (also wired to the dashboard's **Live**

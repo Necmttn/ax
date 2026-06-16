@@ -19,6 +19,7 @@ import {
     DEFAULT_DB_PORT,
     dbUrlFromState,
     readRuntimeState,
+    type RuntimeState,
     runtimeStatePath,
     writeRuntimeState,
 } from "@ax/lib/runtime-state";
@@ -640,10 +641,42 @@ function launchdStatus(
     });
 }
 
+/** Parse `ws://host:port` (or http/wss) into host + port. null on garbage. */
+function hostPortFromUrl(url: string): { host: string; port: number } | null {
+    try {
+        const u = new URL(url);
+        const port = u.port ? Number(u.port) : NaN;
+        if (!u.hostname || !Number.isFinite(port)) return null;
+        return { host: u.hostname, port };
+    } catch {
+        return null;
+    }
+}
+
+/**
+ * Resolve the DB endpoint doctor should probe. Mirrors the SurrealClient's own
+ * precedence (`AX_DB_URL` wins, else the daemon's runtime-state port - see
+ * packages/lib/src/config.ts) so doctor checks the SAME instance the rest of the
+ * CLI connects to. Without this, an `AX_DB_URL` override (remote DB, custom port,
+ * a second instance) silently left doctor probing the default 8521 daemon and
+ * reporting another instance's listener / buckets / stuck ingest_runs.
+ *
+ * Pure (no fs / process.env reads) so it is unit-testable.
+ */
+export function resolveDaemonHostPort(
+    state: RuntimeState,
+    envUrl: string | undefined,
+): { host: string; port: number; url: string } {
+    const override = envUrl ? hostPortFromUrl(envUrl) : null;
+    if (override) return { host: override.host, port: override.port, url: envUrl as string };
+    return { host: state.db.host, port: state.db.port, url: dbUrlFromState(state) };
+}
+
 function collectDaemonEndpoint(): Effect.Effect<DaemonEndpoint, never, FileSystem.FileSystem> {
     return Effect.gen(function* () {
         const state = yield* readRuntimeState();
-        const probe = probePort(state.db.port);
+        const { host, port, url } = resolveDaemonHostPort(state, process.env.AX_DB_URL);
+        const probe = probePort(port);
         const loadedPid = loadedDbPid();
         // Treat conflict as "another process is listening", not us. When launchd
         // says our DB agent owns this PID, suppress the conflict in the report.
@@ -652,9 +685,9 @@ function collectDaemonEndpoint(): Effect.Effect<DaemonEndpoint, never, FileSyste
                 ? null
                 : probe.holder;
         return {
-            host: state.db.host,
-            port: state.db.port,
-            url: dbUrlFromState(state),
+            host,
+            port,
+            url,
             listening: probe.listening,
             conflict,
             runtimeStatePath: runtimeStatePath(),

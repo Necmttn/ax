@@ -35,6 +35,7 @@ import { ImproveGroupLive } from "./improve.ts";
 import { InsightsGroupLive } from "./insights.ts";
 import { LiveGroupLive } from "./live.ts";
 import { OtelGroupLive } from "./otel.ts";
+import { RoutingGroupLive } from "./routing.ts";
 import { SessionsGroupLive } from "./sessions.ts";
 import { SkillsGroupLive } from "./skills.ts";
 import { ContractServeInfo, SystemGroupLive } from "./system.ts";
@@ -57,6 +58,12 @@ const CONTRACT_ROUTES: ReadonlySet<string> = new Set([
     "GET /api/wrapped/public-preview",
     "GET /api/wrapped/generate-brief",
     "GET /api/cost/models",
+    "GET /api/cost/split",
+    "GET /api/cost/dispatches",
+    "GET /api/cost/routability",
+    "GET /api/routing/table",
+    "POST /api/routing/backtest",
+    "POST /api/routing/classes",
     "GET /api/context/budget",
     "GET /api/context/drift",
     "GET /api/workflow",
@@ -102,6 +109,7 @@ const CONTRACT_PATTERNS: ReadonlyArray<{ readonly method: string; readonly patte
     { method: "GET", pattern: /^\/api\/skills\/[^/]+\/(detail|source)$/ },
     { method: "POST", pattern: /^\/api\/skills\/[^/]+\/(decide|open)$/ },
     { method: "DELETE", pattern: /^\/api\/skills\/[^/]+\/decide$/ },
+    { method: "DELETE", pattern: /^\/api\/routing\/classes\/[^/]+$/ },
     { method: "GET", pattern: /^\/api\/improve\/[^/]+\/impact$/ },
     // All actions route to the contract; the handler answers unknown ones
     // with the legacy 404 { error: "unknown_improve_action" }.
@@ -150,6 +158,7 @@ export function makeContractWebHandler(opts: MakeContractWebHandlerOptions): Con
             UsageGroupLive,
             LiveGroupLive,
             OtelGroupLive,
+            RoutingGroupLive,
         ]),
         // FileSystem/Path appear twice deliberately: in the mergeAll OUTPUT
         // for request-time handler requirements, and here for the build-time
