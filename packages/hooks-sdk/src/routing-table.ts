@@ -44,6 +44,10 @@ export const RoutingClassSchema = Schema.Struct({
   // unknown value must not fail the whole-table decode (which would silently
   // revert the user's routing table to the built-in defaults).
   origin: Schema.optional(Schema.String),
+  // Optional list of regex strings: if ANY exclude matches the description,
+  // the class is skipped (false-positive carve-out). Invalid exclude regexes
+  // are silently ignored (fail-open).
+  exclude: Schema.optional(Schema.Array(Schema.String)),
 });
 
 /**
@@ -87,6 +91,7 @@ export interface RoutingClass {
   readonly flags: string;
   readonly suggest: string; // "sonnet" | "haiku"
   readonly reason: string;
+  readonly exclude?: readonly string[];
 }
 
 export interface RoutingTable {
@@ -154,6 +159,11 @@ export const matchRoutingTable = (
       try {
         const re = new RegExp(cls.pattern, cls.flags ?? "");
         if (re.test(description)) {
+          const excluded = (cls.exclude ?? []).some((ex) => {
+            try { return new RegExp(ex, cls.flags ?? "").test(description); }
+            catch { return false; } // invalid exclude regex → ignore (fail-open)
+          });
+          if (excluded) continue; // false-positive carve-out: skip, try next class
           return {
             classId: cls.id,
             suggest: cls.suggest,

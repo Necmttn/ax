@@ -364,6 +364,42 @@ export const InsightsGroup = HttpApiGroup.make("insights")
             success: Schema.Unknown,
             error: InternalError,
         }),
+        HttpApiEndpoint.get("costSplit", "/api/cost/split", {
+            query: { days: Schema.optionalKey(Schema.Number) },
+            success: Schema.Unknown,
+            error: InternalError,
+        }),
+        HttpApiEndpoint.get("costDispatches", "/api/cost/dispatches", {
+            query: {
+                days: Schema.optionalKey(Schema.Number),
+                candidates: Schema.optionalKey(Schema.Boolean),
+            },
+            success: Schema.Unknown,
+            error: InternalError,
+        }),
+        HttpApiEndpoint.get("costRoutability", "/api/cost/routability", {
+            query: {
+                days: Schema.optionalKey(Schema.Number),
+                minRun: Schema.optionalKey(Schema.Number),
+            },
+            success: Schema.Unknown,
+            error: InternalError,
+        }),
+        HttpApiEndpoint.get("routingTable", "/api/routing/table", {
+            success: Schema.Unknown,
+            error: InternalError,
+        }),
+        HttpApiEndpoint.post("routingBacktest", "/api/routing/backtest", {
+            payload: Schema.Struct({
+                pattern: Schema.String,
+                flags: Schema.optionalKey(Schema.String),
+                suggest: Schema.String,
+                exclude: Schema.optionalKey(Schema.Array(Schema.String)),
+                days: Schema.optionalKey(Schema.Number),
+            }),
+            success: Schema.Unknown,
+            error: InternalError,
+        }),
         HttpApiEndpoint.get("contextBudget", "/api/context/budget", {
             success: Schema.Unknown,
             error: InternalError,
@@ -963,6 +999,28 @@ export const LiveGroup = HttpApiGroup.make("live")
         }),
     );
 
+/** Routing class write endpoints (upsert + delete by id). */
+export const RoutingGroup = HttpApiGroup.make("routing")
+    .add(
+        HttpApiEndpoint.post("routingUpsertClass", "/api/routing/classes", {
+            payload: Schema.Struct({
+                id: Schema.String,
+                pattern: Schema.String,
+                flags: Schema.optionalKey(Schema.String),
+                suggest: Schema.String,
+                reason: Schema.optionalKey(Schema.String),
+                exclude: Schema.optionalKey(Schema.Array(Schema.String)),
+            }),
+            success: Schema.Unknown,
+            error: [BadRequestError, InternalError],
+        }),
+        HttpApiEndpoint.delete("routingRemoveClass", "/api/routing/classes/:id", {
+            params: { id: Schema.String },
+            success: Schema.Unknown,
+            error: [BadRequestError, InternalError],
+        }),
+    );
+
 /** The Insights Surface Contract. Families join as they migrate (ADR-0013). */
 export const AxApi = HttpApi.make("ax")
     .add(SystemGroup)
@@ -973,5 +1031,6 @@ export const AxApi = HttpApi.make("ax")
     .add(UsageGroup)
     .add(LiveGroup)
     .add(OtelGroup)
+    .add(RoutingGroup)
     .annotate(OpenApi.Title, "ax daemon API")
     .annotate(OpenApi.Version, "1");
