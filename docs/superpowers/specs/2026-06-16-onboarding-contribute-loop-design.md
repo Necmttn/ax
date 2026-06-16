@@ -76,6 +76,13 @@ always opt-in and shown in full first.
   failures when they happen; the agent does not have to remember 4 steps back;
   the prompt stays short.
 
+- **Founder note.** The prompt opens with a short first-person line from Neco
+  (ax's founder) asking for feedback - ax is early, every bug / wrong number /
+  rough edge sent back makes it sharper. It primes the CONTRIBUTE loop with a
+  human voice and lowers the friction to say yes to filing an issue or sharing a
+  session. One line, authentic, not salesy; placed directly under the opening,
+  above the CONTRIBUTE block.
+
 - **Verification named as the seeded example, kept generic.** Step 3's hint names
   verification (PR commands / hooks / subagents) as *an* example blind-spot, not
   the only one - primes the exact motivating class without hard-coding ax's
@@ -110,6 +117,10 @@ always opt-in and shown in full first.
 ```
 Set up ax for me, end to end. ax is a local agent-experience graph over my
 Claude Code + Codex history - it runs locally and I review every change.
+
+A note from Neco (ax's founder): ax is early and I'm hungry for feedback -
+every bug, wrong number, or rough edge you send back makes it sharper for
+everyone. Please don't hold back; if something's off, help me fix it.
 
 CONTRIBUTE-BACK (do this whenever a trigger below fires; never publish anything
 without showing it to me first and getting an explicit yes):
