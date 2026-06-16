@@ -72,6 +72,10 @@ export const RoutingGroupLive = HttpApiBuilder.group(AxApi, "routing", (handlers
                 }
             }
 
+            if (!["sonnet", "haiku"].includes(payload.suggest)) {
+                return Effect.fail(new BadRequestError({ error: `invalid suggest "${payload.suggest}" (expected sonnet|haiku)` }));
+            }
+
             const path = defaultRoutingTablePath();
             return orInternal(Effect.gen(function* () {
                 const existing = yield* loadStoredRoutingTable(path);

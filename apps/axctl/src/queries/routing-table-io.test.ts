@@ -72,7 +72,7 @@ describe("mergeRoutingTables", () => {
         expect(ids).toContain("my-mined-class");
     });
 
-    it("user class shadowed by a new default of the same id defers to the default", () => {
+    it("user class with same id as a default overrides the default (user wins)", () => {
         const existing: StoredRoutingTable = {
             version: 1,
             classes: [{ ...userClass, id: "spec-review" }],
@@ -81,7 +81,7 @@ describe("mergeRoutingTables", () => {
         const merged = mergeRoutingTables(ROUTING_CLASSES, existing);
         const specReview = merged.classes.filter((c) => c.id === "spec-review");
         expect(specReview).toHaveLength(1);
-        expect(specReview[0]!.origin).toBe("default");
+        expect(specReview[0]!.origin).toBe("user");
     });
 
     it("refreshes agentTypes from defaults but keeps user-added keys", () => {
@@ -187,5 +187,22 @@ describe("routing-table-io exclude + upsert/remove", () => {
     it("removeUserClass does NOT remove a default class", () => {
         const withDefault: StoredRoutingTable = { version: 1, agentTypes: {}, classes: [{ id: "d", pattern: "^x", flags: "", suggest: "sonnet", reason: "d", origin: "default" }] };
         expect(removeUserClass(withDefault, "d").classes.find((c) => c.id === "d")).toBeDefined();
+    });
+});
+
+describe("mergeRoutingTables user override of defaults", () => {
+    it("a user class with a default id overrides the default (exclude persists)", () => {
+        const defaults = { version: 1 as const, classes: [{ id: "bug-fix", pattern: "^Fix\\s", flags: "", suggest: "sonnet", reason: "fix" }], agentTypes: {} };
+        const existing: StoredRoutingTable = { version: 1, agentTypes: {}, classes: [{ id: "bug-fix", pattern: "^Fix\\s", flags: "", suggest: "sonnet", reason: "fix", exclude: ["design"], origin: "user" }] };
+        const merged = mergeRoutingTables(defaults as any, existing);
+        const c = merged.classes.filter((x) => x.id === "bug-fix");
+        expect(c.length).toBe(1);
+        expect(c[0]!.exclude).toEqual(["design"]);
+        expect(c[0]!.origin).toBe("user");
+    });
+    it("a default with no user override still refreshes from defaults", () => {
+        const defaults = { version: 1 as const, classes: [{ id: "spec-review", pattern: "^spec review", flags: "", suggest: "sonnet", reason: "r" }], agentTypes: {} };
+        const merged = mergeRoutingTables(defaults as any, { version: 1, agentTypes: {}, classes: [] });
+        expect(merged.classes.find((x) => x.id === "spec-review")?.origin).toBe("default");
     });
 });

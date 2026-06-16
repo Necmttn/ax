@@ -46,6 +46,8 @@ interface BacktestResult {
 // Component
 // ---------------------------------------------------------------------------
 
+const escapeRegex = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
 export function RoutingTuner() {
     const isLive = studioConnection.isLive();
     const queryClient = useQueryClient();
@@ -276,11 +278,27 @@ export function RoutingTuner() {
                             </summary>
                             <div style={{ paddingLeft: 12, maxHeight: 140, overflowY: "auto" }}>
                                 {backtestResult.matched.slice(0, 20).map((r, i) => (
-                                    <div key={i} style={{ fontSize: 12, padding: "2px 0", opacity: 0.8, fontFamily: "monospace", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                                        {r.description ?? "(no description)"}
-                                        <span style={{ color: "var(--green, #16845e)", marginLeft: 8 }}>
+                                    <div key={i} style={{ fontSize: 12, padding: "2px 0", opacity: 0.8, fontFamily: "monospace", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", display: "flex", alignItems: "center", gap: 6 }}>
+                                        <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis" }}>{r.description ?? "(no description)"}</span>
+                                        <span style={{ color: "var(--green, #16845e)" }}>
                                             −${r.estSavingsUsd.toFixed(4)}
                                         </span>
+                                        {isLive && r.description && (
+                                            <button
+                                                onClick={() => {
+                                                    const esc = escapeRegex(r.description ?? "");
+                                                    if (!esc) return;
+                                                    setExcludeStr((prev) => {
+                                                        const parts = prev.split(",").map((s) => s.trim()).filter(Boolean);
+                                                        if (parts.includes(esc)) return prev;
+                                                        return [...parts, esc].join(", ");
+                                                    });
+                                                }}
+                                                style={{ fontSize: 10, padding: "1px 4px", cursor: "pointer", background: "transparent", border: "1px solid var(--line, #cfd8d4)", borderRadius: 2, flexShrink: 0 }}
+                                                title="Add to exclude list">
+                                                ✕ exclude
+                                            </button>
+                                        )}
                                     </div>
                                 ))}
                                 {backtestResult.matched.length > 20 && (
@@ -296,8 +314,24 @@ export function RoutingTuner() {
                             </summary>
                             <div style={{ paddingLeft: 12, maxHeight: 100, overflowY: "auto" }}>
                                 {backtestResult.excluded.slice(0, 10).map((r, i) => (
-                                    <div key={i} style={{ fontSize: 12, padding: "2px 0", opacity: 0.6, fontFamily: "monospace", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                                        {r.description ?? "(no description)"}
+                                    <div key={i} style={{ fontSize: 12, padding: "2px 0", opacity: 0.6, fontFamily: "monospace", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", display: "flex", alignItems: "center", gap: 6 }}>
+                                        <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis" }}>{r.description ?? "(no description)"}</span>
+                                        {isLive && r.description && (
+                                            <button
+                                                onClick={() => {
+                                                    const esc = escapeRegex(r.description ?? "");
+                                                    if (!esc) return;
+                                                    setExcludeStr((prev) => {
+                                                        const parts = prev.split(",").map((s) => s.trim()).filter(Boolean);
+                                                        if (parts.includes(esc)) return prev;
+                                                        return [...parts, esc].join(", ");
+                                                    });
+                                                }}
+                                                style={{ fontSize: 10, padding: "1px 4px", cursor: "pointer", background: "transparent", border: "1px solid var(--line, #cfd8d4)", borderRadius: 2, flexShrink: 0 }}
+                                                title="Add to exclude list">
+                                                ✕ exclude
+                                            </button>
+                                        )}
                                     </div>
                                 ))}
                             </div>

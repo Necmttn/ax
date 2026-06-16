@@ -42,10 +42,12 @@ export interface StoredRoutingTable {
 }
 
 /**
- * Refresh defaults, keep user classes. Default ids always win on collision.
+ * Refresh defaults, keep user classes. User classes WIN on id collision:
+ * a stored user class with the same id as a default overrides the default so
+ * hand-tuned exclude lists, patterns, etc. survive `ax routing compile`.
  * Classes: rows with origin !== "default" (i.e. "user" or legacy origin-less)
- * are preserved and tagged "user"; rows tagged "default" are replaced
- * wholesale by the current defaults (stale ones drop).
+ * are preserved and tagged "user"; default-origin rows from the stored file are
+ * replaced wholesale by the current defaults (stale ones drop).
  * agentTypes: defaults overwrite stored values key-by-key (stale stored
  * copies never shadow updated defaults); user-added keys survive.
  */
@@ -53,17 +55,32 @@ export const mergeRoutingTables = (
     defaults: RoutingTable,
     existing: LoadedRoutingTable | null,
 ): StoredRoutingTable => {
-    const defaultClasses: StoredRoutingClass[] = defaults.classes.map((c) => ({
-        ...c,
-        origin: "default" as const,
-    }));
-    const defaultIds = new Set(defaultClasses.map((c) => c.id));
-    const userClasses: StoredRoutingClass[] = (existing?.classes ?? [])
-        .filter((c) => c.origin !== "default" && !defaultIds.has(c.id))
-        .map((c) => ({ ...c, origin: "user" as const }));
+    // Build a lookup of user-origin classes (any non-"default" origin) keyed by id.
+    const userById = new Map<string, StoredRoutingClass>();
+    for (const c of (existing?.classes ?? [])) {
+        if (c.origin !== "default") {
+            userById.set(c.id, { ...c, origin: "user" as const });
+        }
+    }
+    const defaultIds = new Set(defaults.classes.map((c) => c.id));
+
+    // For each default: if a user class with the same id exists, the user wins;
+    // otherwise use the refreshed default.
+    const mergedClasses: StoredRoutingClass[] = defaults.classes.map((c) => {
+        const userOverride = userById.get(c.id);
+        return userOverride ?? { ...c, origin: "default" as const };
+    });
+
+    // Append user classes with non-default ids (preserved from existing).
+    for (const [id, cls] of userById) {
+        if (!defaultIds.has(id)) {
+            mergedClasses.push(cls);
+        }
+    }
+
     return {
         version: 1,
-        classes: [...defaultClasses, ...userClasses],
+        classes: mergedClasses,
         agentTypes: { ...(existing?.agentTypes ?? {}), ...defaults.agentTypes },
     };
 };

@@ -12,7 +12,8 @@ import { AxApi, NotFoundError } from "@ax/lib/shared/api-contract";
 import { fetchCostModels, fetchCostSplit } from "../../queries/cost-analytics.ts";
 import { fetchDispatches, fetchDispatchCandidates } from "../../queries/dispatch-analytics.ts";
 import { fetchRoutability } from "../../queries/routability.ts";
-import { defaultRoutingTablePath, loadStoredRoutingTable } from "../../queries/routing-table-io.ts";
+import { defaultRoutingTablePath, loadStoredRoutingTable, mergeRoutingTables } from "../../queries/routing-table-io.ts";
+import { DEFAULT_ROUTING_TABLE } from "@ax/hooks-sdk/routing-table";
 import { runRoutingBacktest } from "../../queries/routing-backtest.ts";
 import { fetchContextBudget, fetchSkillDrift } from "../../queries/context-budget.ts";
 import { fetchEpisodeTimeline } from "../episode-timeline.ts";
@@ -97,7 +98,9 @@ export const InsightsGroupLive = HttpApiBuilder.group(AxApi, "insights", (handle
             orInternal(fetchRoutability({ days: query.days ?? 14, minRun: query.minRun ?? 1 }).pipe(Effect.map(asJsonValue))))
         .handle("routingTable", () =>
             orInternal(
-                loadStoredRoutingTable(defaultRoutingTablePath()).pipe(Effect.map(asJsonValue)),
+                loadStoredRoutingTable(defaultRoutingTablePath()).pipe(
+                    Effect.map((stored) => asJsonValue(mergeRoutingTables(DEFAULT_ROUTING_TABLE, stored))),
+                ),
             ))
         .handle("routingBacktest", ({ payload }) =>
             orInternal(runRoutingBacktest(payload).pipe(Effect.map(asJsonValue))))
