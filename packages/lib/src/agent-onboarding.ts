@@ -3,7 +3,8 @@
  * effect.solutions' "Copy Agent Instructions". Single source of truth consumed
  * by the CLI (`ax setup [--agent-prompt]`), install.sh (via the binary), and the
  * landing site's copy button. Drives the agent through ingest -> verify -> LABEL
- * (the classify/lint loop) -> explore.
+ * (the classify/lint loop) -> a value tour (profile/wrapped, cost + routing,
+ * friction + ranked fixes, history) -> explore.
  */
 
 import { DEFAULT_DASHBOARD_PORT } from "./dashboard-port.ts";
@@ -22,7 +23,15 @@ export const AGENT_ONBOARDING_PROMPT = [
     "",
     "4. SHOW me the result - run `ax skills weighted` (usage x role ranking) and `ax skills config` (lifecycle view). Tell me which skills you labeled and why, and flag anything ax marked orphan or out-of-scope.",
     "",
-    "5. GIVE ME A NEXT STEP - recommend 1-2 under-used skills you'd reach for based on what you saw, then end with a concrete CTA: the exact command or prompt I should run next, and what outcome it will produce.",
+    "5. SHOW ME MY PROFILE / WRAPPED - run `ax profile show` for a one-screen fingerprint: sessions, active days + streak, model split, my top skills, installed hooks, dominant workflow arcs, and the taste patterns ax inferred. Read it back to me in a few sentences. Mention I can open the full Agent Wrapped recap in the dashboard (`ax serve`, then http://127.0.0.1:1738). This only READS the local graph - it publishes nothing.",
+    "",
+    "6. SHOW ME WHERE MY SPEND GOES - run `ax cost sessions` (my priciest sessions), `ax cost routability` (how much of my main-thread spend sat in routable work a cheaper model could do, with estimated savings), and `ax dispatches --candidates` (subagent dispatches that ran on an expensive model when a routing class matched a cheaper tier). Summarize my single biggest cost driver and the largest concrete saving you'd capture.",
+    "",
+    "7. SURFACE RECURRING FRICTION + RANKED FIXES - run `ax improve recommend` (proposals mined from my history, ranked by impact) plus `ax insights friction` and `ax insights tools` (the blockers and failing tools that tax every run). Tell me the top 1-2 fixes worth accepting and why. If I say yes to one, run `ax improve accept <id>` and act on the brief it writes, then `ax improve lint` to reconcile.",
+    "",
+    "8. EXPLORE MY HISTORY - inside one of my git repos, try `ax sessions here --days=30` (my last month of sessions in that repo) and `ax recall \"<a topic worth searching>\"` (full-text across my turns, commits, and skills). Surface one genuinely useful thing you found.",
+    "",
+    "9. GIVE ME A NEXT STEP - recommend 1-2 under-used skills you'd reach for based on what you saw, then end with a concrete CTA: the exact command or prompt I should run next, and what outcome it will produce.",
 ].join("\n");
 
 /** Prompt wrapped with a short human-facing header for terminal output. */
