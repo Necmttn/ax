@@ -179,6 +179,86 @@ describe("parseClaudeConfigArtifact", () => {
         expect(record.enabledToolCount).toBe(2);
         expect(JSON.stringify(record)).not.toContain("export default");
     });
+
+    test("extracts safe hook metadata from plugin and hook JSON", () => {
+        const hookConfig = {
+            hooks: {
+                PreToolUse: [
+                    {
+                        matcher: "Bash",
+                        hooks: [
+                            {
+                                type: "command",
+                                command: "curl https://example.invalid/hook?token=secret-token",
+                            },
+                        ],
+                    },
+                    {
+                        matcher: { tools: ["Write"] },
+                        hooks: [{ type: "command", command: "echo second-secret" }],
+                    },
+                ],
+                Stop: [{ hooks: [{ type: "command", command: "notify-send done" }] }],
+            },
+        };
+
+        const pluginRecord = parseClaudeConfigArtifact({
+            kind: "plugin",
+            scope: "plugin",
+            path: "/Users/alice/.claude/plugins/cache/market/plugin-a/1.0.0/plugin.json",
+            home: "/Users/alice",
+            text: JSON.stringify(hookConfig),
+        });
+        const hookRecord = parseClaudeConfigArtifact({
+            kind: "hook",
+            scope: "plugin",
+            path: "/Users/alice/.claude/plugins/cache/market/plugin-a/1.0.0/hooks/pre-tool.json",
+            home: "/Users/alice",
+            text: JSON.stringify(hookConfig),
+        });
+
+        for (const record of [pluginRecord, hookRecord]) {
+            expect(record.parseStatus).toBe("ok");
+            expect(record.hookEventNames).toEqual(["PreToolUse", "Stop"]);
+            expect(record.matcherCount).toBe(2);
+            expect(record.commandHashes).toHaveLength(3);
+            expect(record.commandHashes.every((hash) => /^[0-9a-f]{64}$/.test(hash))).toBe(true);
+            expect(JSON.stringify(record)).not.toContain("secret-token");
+            expect(JSON.stringify(record)).not.toContain("echo second-secret");
+            expect(JSON.stringify(record)).not.toContain("notify-send done");
+        }
+
+        const statements = buildGuidanceConfigStatements([pluginRecord, hookRecord]).join("\n");
+        expect(statements).toContain("PreToolUse");
+        expect(statements).toContain(pluginRecord.commandHashes[0]!);
+        expect(statements).not.toContain("secret-token");
+        expect(statements).not.toContain("echo second-secret");
+        expect(statements).not.toContain("notify-send done");
+    });
+
+    test("marks invalid hook JSON invalid but leaves non-JSON hooks metadata-only", () => {
+        const invalidJson = parseClaudeConfigArtifact({
+            kind: "hook",
+            scope: "plugin",
+            path: "/Users/alice/.claude/plugins/cache/market/plugin-a/1.0.0/hooks/pre-tool.json",
+            home: "/Users/alice",
+            text: "{ nope",
+        });
+        const shellHook = parseClaudeConfigArtifact({
+            kind: "hook",
+            scope: "plugin",
+            path: "/Users/alice/.claude/plugins/cache/market/plugin-a/1.0.0/hooks/pre-tool.sh",
+            home: "/Users/alice",
+            text: "echo raw-hook-secret",
+        });
+
+        expect(invalidJson.parseStatus).toBe("invalid_json");
+        expect(invalidJson.commandHashes).toEqual([]);
+        expect(shellHook.parseStatus).toBe("ok");
+        expect(shellHook.hookEventNames).toEqual([]);
+        expect(shellHook.commandHashes).toEqual([]);
+        expect(JSON.stringify(shellHook)).not.toContain("raw-hook-secret");
+    });
 });
 
 describe("buildGuidanceConfigStatements", () => {

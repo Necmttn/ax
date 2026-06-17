@@ -374,6 +374,20 @@ export const parseClaudeConfigArtifact = (
         }
     }
 
+    if ((input.kind === "hook" || input.kind === "plugin") && isJsonFile(input.path)) {
+        try {
+            const root = asRecord(JSON.parse(input.text)) ?? {};
+            const hooks = hookMetadata(root);
+            return baseRecord(input, {
+                hookEventNames: hooks.hookEventNames,
+                matcherCount: hooks.matcherCount,
+                commandHashes: hooks.commandHashes,
+            });
+        } catch {
+            return baseRecord(input, { parseStatus: "invalid_json" });
+        }
+    }
+
     if (input.kind === "agent_definition" || input.kind === "skill" || input.kind === "output_style" || input.kind === "workflow") {
         return baseRecord(input, frontmatterMetadata(input.text));
     }
@@ -487,6 +501,7 @@ const isMarkdownFile = (file: string): boolean => file.endsWith(".md");
 const isWorkflowFile = (file: string): boolean => file.endsWith(".md") || file.endsWith(".workflow.js");
 const isHookFile = (file: string): boolean =>
     file.endsWith(".json") || file.endsWith(".js") || file.endsWith(".ts") || file.endsWith(".sh");
+const isJsonFile = (file: string): boolean => file.endsWith(".json");
 const isMcpConfigFile = (file: string): boolean => {
     const normalized = normalizePath(file);
     return normalized.endsWith("/.mcp.json") || normalized.endsWith("/mcp.json") || normalized.endsWith("/mcp-servers.json");
