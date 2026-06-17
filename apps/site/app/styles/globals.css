@@ -15368,21 +15368,30 @@ footer.site-footer { padding: 48px 32px 56px; }
    bottom rule - the vitals strip owns the divider now (avoids a double line). */
 .profile-v2 section.hero { min-height: 430px; border-bottom: none; }
 
-/* GitHub avatar above the handle (mirrors the leaders-page .lb-avatar source);
-   floated logo-tile shadow for cohesion with the hero. */
-.profile-v2 section.hero .pv2-avatar {
-  display: block;
-  width: 88px;
-  height: 88px;
+/* GitHub avatar (mirrors the leaders-page .lb-avatar source). Base shape; the
+   --hero variant is the big centered headshot, --inline the small ring-tinted
+   chip used in the comparison overlay. */
+.profile-v2 .pv2-avatar {
   border-radius: 50%;
   border: 1px solid var(--line);
   background: var(--panel);
-  margin: 16px auto 8px;
   object-fit: cover;
+}
+.profile-v2 .pv2-avatar--hero {
+  display: block;
+  margin: 16px auto 10px;
   box-shadow:
     0 1px 0 rgba(255, 255, 255, 0.6) inset,
-    0 14px 30px -18px rgba(20, 20, 18, 0.45),
-    0 3px 8px -4px rgba(20, 20, 18, 0.08);
+    0 18px 36px -20px rgba(20, 20, 18, 0.5),
+    0 4px 10px -5px rgba(20, 20, 18, 0.1);
+}
+.profile-v2 .pv2-avatar--inline {
+  display: inline-block;
+  vertical-align: middle;
+  border-width: 2px;
+  margin-right: 7px;
+  position: relative;
+  top: -1px;
 }
 
 /* hero eyebrow carries the live pulse + window line; suppress the landing

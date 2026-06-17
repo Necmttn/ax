@@ -185,6 +185,27 @@ const realHarnesses = (harnesses: readonly string[]): string[] => {
     return out;
 };
 
+/** GitHub avatar by login (same source as the leaders page). `ring` tints the
+ *  border for comparison overlays; `size` drives layout + the @2x source. */
+function Avatar({ login, size, ring, className }: {
+    login: string;
+    size: number;
+    ring?: string;
+    className?: string;
+}) {
+    return (
+        <img
+            className={className ? `pv2-avatar ${className}` : "pv2-avatar"}
+            src={`https://github.com/${login}.png?size=${size * 2}`}
+            alt=""
+            width={size}
+            height={size}
+            loading="eager"
+            style={ring ? { borderColor: ring } : undefined}
+        />
+    );
+}
+
 /* ---------- the dossier ---------- */
 
 function ProfileDossier({ profile: p, vs }: { profile: ProfileV1; vs: VsState }) {
@@ -209,14 +230,7 @@ function ProfileDossier({ profile: p, vs }: { profile: ProfileV1; vs: VsState })
                     <span aria-hidden="true">·</span>
                     {p.window_days}-day window · compiled {p.generated_at.slice(0, 10)}
                 </span>
-                <img
-                    className="pv2-avatar"
-                    src={`https://github.com/${p.github}.png?size=176`}
-                    alt=""
-                    width={88}
-                    height={88}
-                    loading="eager"
-                />
+                <Avatar login={p.github} size={120} className="pv2-avatar--hero" />
                 <h1><span className="pf-at">@</span>{p.github}</h1>
                 <p className="lede">{lede}</p>
                 <span className="pf-harness-list" aria-label="harnesses">
@@ -471,8 +485,10 @@ function SignSection({ profile, vs }: { profile: ProfileV1; vs: VsState }) {
                 <div className="pf-sign-read">
                     {vsArch && vsReady ? (
                         <p className="pf-sign-versus">
+                            <Avatar login={profile.github} size={22} ring={SELF_COLOR} className="pv2-avatar--inline" />
                             <span style={{ color: SELF_COLOR }}>@{profile.github}</span> is {selfArch.sign}
                             {" · "}
+                            <Avatar login={vsReady.login} size={22} ring={VS_COLOR} className="pv2-avatar--inline" />
                             <span style={{ color: VS_COLOR }}>@{vsReady.login}</span> is {vsArch.sign}
                         </p>
                     ) : (
@@ -588,11 +604,13 @@ function RawTable({
                     <tr>
                         <th scope="col">metric</th>
                         <th scope="col" className="pf-rawvals-col">
-                            {vs ? <span style={{ color: SELF_COLOR }}>@{selfLogin}</span> : "value"}
+                            {vs ? (
+                                <><Avatar login={selfLogin} size={18} ring={SELF_COLOR} className="pv2-avatar--inline" /><span style={{ color: SELF_COLOR }}>@{selfLogin}</span></>
+                            ) : "value"}
                         </th>
                         {vs && (
                             <th scope="col" className="pf-rawvals-col">
-                                <span style={{ color: VS_COLOR }}>@{vs.login}</span>
+                                <Avatar login={vs.login} size={18} ring={VS_COLOR} className="pv2-avatar--inline" /><span style={{ color: VS_COLOR }}>@{vs.login}</span>
                             </th>
                         )}
                     </tr>
