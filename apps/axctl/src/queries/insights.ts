@@ -175,6 +175,8 @@ export const SCHEMA_TABLES: readonly SchemaTableSpec[] = [
     { table: "otel_span", stage: "active", note: "Harness OTLP trace spans (Codex session_loop + children)." },
     { table: "otel_log_event", stage: "active", note: "Harness OTLP log events (codex events incl. token usage)." },
     { table: "telemetry_of", stage: "active", note: "Edge: session -> otel telemetry row (drawn at ingest)." },
+    { table: "content_type", stage: "active", note: "Closed content-type taxonomy for tool outputs." },
+    { table: "has_content", stage: "active", note: "tool_call -> content_type edge; denormalizes session + bytes." },
 ] as const;
 
 export function isInsightView(value: string): value is InsightView {
