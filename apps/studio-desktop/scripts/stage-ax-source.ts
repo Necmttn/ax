@@ -83,18 +83,25 @@ const die = (msg: string): never => {
  *   - packages/schema (@ax/schema)       schema.surql (imported as text) + types
  *   - packages/hooks-sdk (@ax/hooks-sdk) declared `workspace:*` dep of apps/axctl;
  *                                        `bun install` fails to resolve without it
+ *   - packages/onboarding-prompt (@ax/onboarding-prompt) transitive `workspace:*`
+ *                                        dep of @ax/lib; same resolve failure
  *   - packages/ax-classifier-direction-event     imported by classifiers/registry.ts
  *   - packages/ax-classifier-verification-event   imported by classifiers/registry.ts
  *
  * `packages/ax-classifier-session-sections` is python-only (referenced solely by
  * string manifest paths, never imported as a module) and is intentionally
  * skipped - it is not needed for `serve`.
+ *
+ * NOTE: this list is hand-maintained - any NEW `@ax/*` workspace dep of axctl OR
+ * of a staged package must be added here or `bun install` in resources/ax-src
+ * fails the release build. TODO: auto-derive from the dependency graph.
  */
 const WORKSPACE_PACKAGES = [
     "apps/axctl",
     "packages/lib",
     "packages/schema",
     "packages/hooks-sdk",
+    "packages/onboarding-prompt",
     "packages/ax-classifier-direction-event",
     "packages/ax-classifier-verification-event",
 ] as const;
