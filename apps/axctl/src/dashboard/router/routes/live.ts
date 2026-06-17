@@ -95,48 +95,88 @@ async function handleImageRequest(url: URL): Promise<Response> {
     }
 }
 
-function handleEventsRequest(runner: EffectRunner): Response {
+/**
+ * GET /api/events - the studio Live SSE stream. Emits `ready` once, then for
+ * each tick: a `: ping` keep-alive (issue #503) plus any new `ingest_event`
+ * rows since the last seen timestamp. `intervalMs` is injectable for tests.
+ */
+export function handleEventsRequest(runner: EffectRunner, intervalMs = 2000): Response {
     let subscriber: ((event: unknown) => void) | null = null;
     let interval: ReturnType<typeof setInterval> | null = null;
     let closed = false;
+    // Guards against overlapping DB polls: setInterval does not await the async
+    // work, so a poll slower than intervalMs would otherwise stack up multiple
+    // concurrent queries against the same `sinceIso` and replay rows.
+    let polling = false;
     let sinceIso = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+
+    const teardown = (): void => {
+        if (closed) return;
+        closed = true;
+        if (interval) clearInterval(interval);
+        if (subscriber) removeIngestEventSubscriber(subscriber);
+    };
+
     const stream = new ReadableStream({
         start(controller) {
-            controller.enqueue(new TextEncoder().encode(formatSseEvent("ready", { ts: new Date().toISOString() })));
+            const encoder = new TextEncoder();
+            // Single write path. The controller can be closed/errored out from
+            // under us (client disconnect before cancel() runs); enqueue throws
+            // in that state, so we catch, tear down, and signal the caller to
+            // stop rather than leaving an interval/subscriber dangling.
+            const safeEnqueue = (frame: string): boolean => {
+                if (closed) return false;
+                try {
+                    controller.enqueue(encoder.encode(frame));
+                    return true;
+                } catch {
+                    teardown();
+                    return false;
+                }
+            };
+
+            safeEnqueue(formatSseEvent("ready", { ts: new Date().toISOString() }));
             subscriber = (event: unknown) => {
-                controller.enqueue(new TextEncoder().encode(formatSseEvent("ingest_event", event)));
+                safeEnqueue(formatSseEvent("ingest_event", event));
             };
             addIngestEventSubscriber(subscriber);
-            interval = setInterval(async () => {
+
+            interval = setInterval(() => {
                 if (closed) return;
-                // Keep-alive every tick so an idle stream (no new ingest rows)
-                // still writes bytes within the daemon's 60s idleTimeout and the
-                // socket is not reaped out from under the browser (issue #503).
-                controller.enqueue(new TextEncoder().encode(formatSseComment("ping")));
-                try {
-                    const result = await runner(Effect.gen(function* () {
-                        const db = yield* SurrealClient;
-                        return yield* db.query<[Array<Record<string, unknown>>]>(recentIngestEventsSql(sinceIso));
-                    }));
-                    for (const row of result?.[0] ?? []) {
-                        if (closed) return;
-                        controller.enqueue(new TextEncoder().encode(formatSseEvent("ingest_event", row)));
-                        const ts = row.ts;
-                        if (typeof ts === "string" || ts instanceof Date) {
-                            sinceIso = new Date(ts).toISOString();
+                // Keep-alive every tick, independent of the DB poll, so an idle
+                // OR wedged-DB stream still writes bytes within the daemon's 60s
+                // idleTimeout and the socket is not reaped out from under the
+                // browser (issue #503).
+                if (!safeEnqueue(formatSseComment("ping"))) return;
+                if (polling) return;
+                polling = true;
+                void (async () => {
+                    try {
+                        const result = await runner(Effect.gen(function* () {
+                            const db = yield* SurrealClient;
+                            return yield* db.query<[Array<Record<string, unknown>>]>(recentIngestEventsSql(sinceIso));
+                        }));
+                        for (const row of result?.[0] ?? []) {
+                            if (!safeEnqueue(formatSseEvent("ingest_event", row))) return;
+                            const ts = row.ts;
+                            if (typeof ts === "string" || ts instanceof Date) {
+                                // Advance the cursor forward only; ISO-8601 UTC
+                                // strings compare chronologically, so a late
+                                // poll can never rewind it.
+                                const next = new Date(ts).toISOString();
+                                if (next > sinceIso) sinceIso = next;
+                            }
                         }
+                    } catch (error) {
+                        safeEnqueue(formatSseEvent("error", { message: error instanceof Error ? error.message : String(error) }));
+                    } finally {
+                        polling = false;
                     }
-                } catch (error) {
-                    if (!closed) {
-                        controller.enqueue(new TextEncoder().encode(formatSseEvent("error", { message: error instanceof Error ? error.message : String(error) })));
-                    }
-                }
-            }, 2000);
+                })();
+            }, intervalMs);
         },
         cancel() {
-            closed = true;
-            if (interval) clearInterval(interval);
-            if (subscriber) removeIngestEventSubscriber(subscriber);
+            teardown();
         },
     });
     return new Response(stream, {
