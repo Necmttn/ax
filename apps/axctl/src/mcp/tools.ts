@@ -69,6 +69,7 @@ import {
     buildCostSplitNext,
 } from "../nav/next-links.ts";
 import { COST_DEFAULT_WINDOW_DAYS, fetchCostModels, fetchCostSplit } from "../queries/cost-analytics.ts";
+import { fetchImageContext } from "../queries/image-context.ts";
 import { fetchRoutability } from "../queries/routability.ts";
 import { fetchDispatches, fetchDispatchCandidates } from "../queries/dispatch-analytics.ts";
 import { loadEffectiveRoutingTable } from "../queries/routing-table-io.ts";
@@ -597,6 +598,31 @@ const costSplitTool: AxMcpTool = defineMcpTool({
     },
 });
 
+const costImagesTool: AxMcpTool = defineMcpTool({
+    name: "cost_images",
+    description:
+        "Per-session image-read context (content_type:binary tool outputs), split main-thread vs subagent. High main-thread MB = screenshots persisting in the main context window and re-billing across turns; route visual judgment to a subagent.",
+    inputSchema: {
+        days: z
+            .number()
+            .int()
+            .positive()
+            .optional()
+            .describe("Window in days (default 14)."),
+        limit: z
+            .number()
+            .int()
+            .positive()
+            .optional()
+            .describe("Max session rows to return (default 20)."),
+    },
+    run: async (args, rt) => {
+        const sinceDays = args.days ?? COST_DEFAULT_WINDOW_DAYS;
+        const limit = args.limit ?? 20;
+        return await rt.runPromise(fetchImageContext({ sinceDays, limit }));
+    },
+});
+
 const costRoutabilityTool: AxMcpTool = defineMcpTool({
     name: "cost_routability",
     description:
@@ -729,6 +755,7 @@ export const axMcpTools: ReadonlyArray<AxMcpTool> = [
     signalShowTool,
     costModelsTool,
     costSplitTool,
+    costImagesTool,
     costRoutabilityTool,
     dispatchesTool,
     dojoAgendaTool,
