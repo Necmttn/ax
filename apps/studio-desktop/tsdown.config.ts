@@ -11,6 +11,10 @@ export default defineConfig({
     external: ["electron", "electron-updater"],
     // Bundle effect + platform-node + @ax/* so the main process is self-contained.
     noExternal: [/^effect/, /^@effect\//, /^@ax\//],
+    // We deliberately bundle those deps (above) into one self-contained main
+    // process. tsdown warns about that and, under CI=true, escalates the warning
+    // to a fatal error - silence it; the bundling is intended.
+    inlineOnly: false,
     // `@ax/schema/schema.surql` is imported as text (DesktopSchema applies it on
     // boot). Teach rolldown to load `.surql` files as string modules instead of
     // trying to parse them as JS.
