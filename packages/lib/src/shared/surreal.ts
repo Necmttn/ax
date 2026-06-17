@@ -589,11 +589,28 @@ export const recordKeyPart = (value: unknown, expectedTable?: string): string | 
  * 2. Non-empty string         → pass through unchanged
  * 3. SurrealDB DateTime object (`constructor.name === "DateTime"`) → `String(value)`
  * 4. Anything else (null / undefined / unknown) → epoch `new Date(0).toISOString()`
+ *    and emits a `console.warn` so silent epoch timestamps surface as data bugs
+ *    (symptom: `ax insights friction` events timestamped `1970-01-01 00:00:00`)
  */
 export const isoTimestamp = (value: TimestampInput | null | undefined): string => {
     if (value instanceof Date) return value.toISOString();
     if (typeof value === "string" && value.length > 0) return value;
     if (value && typeof value === "object" && value.constructor.name === "DateTime") return String(value);
+    const typeDesc = (() => {
+        try {
+            if (value === null) return "null";
+            if (value === undefined) return "undefined";
+            const t = typeof value;
+            const ctor =
+                value != null && typeof value === "object"
+                    ? ((value as object).constructor?.name ?? "?")
+                    : undefined;
+            return ctor ? `${t}(${ctor})` : t;
+        } catch {
+            return "unknown";
+        }
+    })();
+    console.warn("[ax] isoTimestamp: unrecognized timestamp value, defaulting to epoch:", typeDesc);
     return new Date(0).toISOString();
 };
 
