@@ -142,6 +142,7 @@
     "@wterm/core": "0.3.0",
     "@wterm/dom": "0.3.0",
     "effect": "^4.0.0-beta.78",
+    "headroom-ai": "^0.22.4",
     "node-pty": "1.1.0",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",

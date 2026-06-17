@@ -3034,6 +3034,10 @@
     url = "https://registry.npmjs.org/hastscript/-/hastscript-9.0.1.tgz";
     hash = "sha512-g7df9rMFX/SPi34tyGCyUBREQoKkapwdY/T04Qn9TDWfHhAYt4/I0gMVirzK5wEzeUqIjEB+LXC/ypb7Aqno5w==";
   };
+  "headroom-ai@0.22.4" = fetchurl {
+    url = "https://registry.npmjs.org/headroom-ai/-/headroom-ai-0.22.4.tgz";
+    hash = "sha512-9a0rgB/jsWe8gs/ggyUwe6E8DYwKAuBvlUml2ApwlUjb5EfJ611X6X+WG0SiXw3nO6sdyV1/+Ah5uw9P7ecnjw==";
+  };
   "hex-rgb@4.3.0" = fetchurl {
     url = "https://registry.npmjs.org/hex-rgb/-/hex-rgb-4.3.0.tgz";
     hash = "sha512-Ox1pJVrDCyGHMG9CFg1tmrRUMRPRsAWYc/PinY0XzJU4K7y7vjNoLKIQ7BR5UJMCxNN8EM1MNDmHWA/B3aZUuw==";
