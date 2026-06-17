@@ -386,15 +386,38 @@ const ROUTING_WINDOW_DAYS = 14;
 
 /**
  * Per-source timeout: a slow source degrades to a note instead of blocking
- * the panel. The churn leg currently exceeds this (~9s fixed cost - see
- * https://github.com/Necmttn/ax/issues/326); routing and others are typically
- * fast but may spike.
+ * the panel. Tool failures are kept fast because they are a frequent landing
+ * card; the heavier graph rollups get enough room to avoid caching a
+ * timeout-only payload on normal local datasets.
  */
-const SOURCE_TIMEOUT_MS = 4_000;
+const FAST_SOURCE_TIMEOUT_MS = 4_000;
+const DISCOVERY_SOURCE_TIMEOUT_MS = 12_000;
+const HEAVY_DISCOVERY_SOURCE_TIMEOUT_MS = 30_000;
+
+// Per-source budget lives on the source (exhaustive over NextActionKind) rather
+// than a name-matching branch, so adding a source is a single entry here and the
+// compiler flags any kind left unbudgeted. `tool_failure` stays fast (frequent
+// landing card); `churn`/`skill_hygiene` graph rollups get room to avoid caching
+// a timeout-only payload on normal local datasets. `verdict` is derived from the
+// proposal fetch, never fetched on its own, so its budget is unused.
+const KIND_TIMEOUT_MS: Record<NextActionKind, number> = {
+    verdict: DISCOVERY_SOURCE_TIMEOUT_MS,
+    proposal: DISCOVERY_SOURCE_TIMEOUT_MS,
+    tool_failure: FAST_SOURCE_TIMEOUT_MS,
+    routing: DISCOVERY_SOURCE_TIMEOUT_MS,
+    churn: HEAVY_DISCOVERY_SOURCE_TIMEOUT_MS,
+    skill_hygiene: HEAVY_DISCOVERY_SOURCE_TIMEOUT_MS,
+    housekeeping: DISCOVERY_SOURCE_TIMEOUT_MS,
+};
+
+export const nextActionSourceTimeoutMs = (
+    source: NextActionKind,
+    override?: number,
+): number => override ?? KIND_TIMEOUT_MS[source];
 
 /**
- * Fan-out to 5 data sources (proposals, tool failures, churn, routing, skill
- * hygiene), merge and sort all cards by impact descending.
+ * Fan-out to 6 data sources (proposals, tool failures, churn, routing, skill
+ * hygiene, housekeeping), merge and sort all cards by impact descending.
  *
  * Each leg is fail-open: a DB error or timeout becomes a NextActionsSourceNote,
  * never a typed failure. The returned Effect has error type `never` for source
@@ -403,8 +426,6 @@ const SOURCE_TIMEOUT_MS = 4_000;
 export const fetchNextActions = Effect.fn("dashboard.fetchNextActions")(function* (
     opts?: { readonly sourceTimeoutMs?: number },
 ) {
-    const timeoutMs = opts?.sourceTimeoutMs ?? SOURCE_TIMEOUT_MS;
-
     // Mutated from concurrent legs; safe because JS fibers interleave only at
     // yield points - the push inside Effect.sync runs atomically.
     const notes: Array<NextActionsSourceNote> = [];
@@ -424,8 +445,9 @@ export const fetchNextActions = Effect.fn("dashboard.fetchNextActions")(function
         source: NextActionKind,
         eff: Effect.Effect<A, unknown, SurrealClient>,
         empty: A,
-    ): Effect.Effect<A, never, SurrealClient> =>
-        eff.pipe(
+    ): Effect.Effect<A, never, SurrealClient> => {
+        const timeoutMs = nextActionSourceTimeoutMs(source, opts?.sourceTimeoutMs);
+        return eff.pipe(
             Effect.timeoutOrElse({
                 duration: `${timeoutMs} millis`,
                 orElse: () =>
@@ -438,6 +460,7 @@ export const fetchNextActions = Effect.fn("dashboard.fetchNextActions")(function
                 }),
             ),
         );
+    };
 
     const [proposals, failures, churn, routing, hygiene, stale] = yield* Effect.all(
         [
@@ -455,7 +478,7 @@ export const fetchNextActions = Effect.fn("dashboard.fetchNextActions")(function
             guarded("skill_hygiene", fetchSkillHygiene({ minInvocations: 3, limit: 10 }), [] as ReadonlyArray<SkillHygieneRow>),
             guarded("housekeeping", findStaleOpenProposals(HOUSEKEEP_DAYS), [] as ReadonlyArray<StaleProposalRow>),
         ] as const,
-        { concurrency: 3 },
+        { concurrency: 6 },
     );
 
     const cards: NextActionCard[] = [

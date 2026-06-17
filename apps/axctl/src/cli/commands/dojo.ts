@@ -52,7 +52,7 @@ import {
     resolveSkillSparTask,
     scoreSkillSpar,
 } from "../../dojo/skill-spar.ts";
-import { resolvePwdRepository } from "../../pwd.ts";
+import { mainRepoRootFromGitCommonDir, resolvePwdRepository } from "../../pwd.ts";
 import { defaultQuotaCachePath } from "../../quota/cache.ts";
 import { QuotaEnvLive } from "../../quota/quota-env.ts";
 import { getQuota } from "../../quota/quota.ts";
@@ -321,15 +321,9 @@ const resolveMainRepoRoot = (repoRoot: string) =>
         const res = yield* proc.exec("git", ["rev-parse", "--git-common-dir"], {
             cwd: repoRoot,
         });
-        const commonDir = res.code === 0 ? res.stdout.trim() : "";
-        if (commonDir.length === 0) return repoRoot;
-        // commonDir is usually absolute (".../<main>/.git") but can be the bare
-        // ".git" relative form when already at the main root.
-        if (commonDir === ".git") return repoRoot;
-        const abs = posixPath.isAbsolute(commonDir)
-            ? commonDir
-            : posixPath.join(repoRoot, commonDir);
-        return posixPath.dirname(abs);
+        // Shared with `resolvePwdRepository` so both call sites agree on how a
+        // linked worktree maps back to its primary checkout.
+        return mainRepoRootFromGitCommonDir(repoRoot, res.code === 0 ? res.stdout.trim() : "");
     });
 
 /**

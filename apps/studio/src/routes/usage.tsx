@@ -1,10 +1,35 @@
 /**
  * Utilization panel - minimal view of GET /api/usage.
- * Shows: active days, total invocations, top commands, never-used commands.
+ * Shows: active days, total invocations, top commands, origin split, never-used commands.
  */
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../api.ts";
 import type { UsageRollupSchema } from "@ax/lib/shared/api-contract";
+
+type TopCommand = UsageRollupSchema["topCommands"][number];
+
+function CommandTable({ commands }: { readonly commands: readonly TopCommand[] }) {
+    if (commands.length === 0) return <p className="meta">No invocations in this window</p>;
+    return (
+        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.9em" }}>
+            <tbody>
+                {commands.map((cmd) => (
+                    <tr key={cmd.command}>
+                        <td style={{ padding: "3px 8px 3px 0", fontFamily: "monospace" }}>
+                            ax {cmd.command}
+                        </td>
+                        <td style={{ padding: "3px 8px", color: "var(--muted)" }}>
+                            {cmd.count}×
+                        </td>
+                        <td style={{ padding: "3px 0", color: "var(--muted)", fontSize: "0.85em" }}>
+                            last {new Date(cmd.last_used).toLocaleDateString()}
+                        </td>
+                    </tr>
+                ))}
+            </tbody>
+        </table>
+    );
+}
 
 export function UsageRoute() {
     const { data, isLoading, error } = useQuery({
@@ -51,23 +76,26 @@ export function UsageRoute() {
                     <h3 style={{ margin: "12px 0 6px", fontSize: "0.85em", textTransform: "uppercase", letterSpacing: "0.05em" }}>
                         Top commands
                     </h3>
-                    <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.9em" }}>
-                        <tbody>
-                            {data.topCommands.map((cmd) => (
-                                <tr key={cmd.command}>
-                                    <td style={{ padding: "3px 8px 3px 0", fontFamily: "monospace" }}>
-                                        ax {cmd.command}
-                                    </td>
-                                    <td style={{ padding: "3px 8px", color: "var(--muted)" }}>
-                                        {cmd.count}×
-                                    </td>
-                                    <td style={{ padding: "3px 0", color: "var(--muted)", fontSize: "0.85em" }}>
-                                        last {new Date(cmd.last_used).toLocaleDateString()}
-                                    </td>
-                                </tr>
-                            ))}
-                        </tbody>
-                    </table>
+                    <CommandTable commands={data.topCommands} />
+                </>
+            )}
+
+            {(data.topCommandsByOrigin.tty.length > 0 || data.topCommandsByOrigin.agent.length > 0) && (
+                <>
+                    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: "18px", marginTop: "14px" }}>
+                        <section>
+                            <h3 style={{ margin: "0 0 6px", fontSize: "0.85em", textTransform: "uppercase", letterSpacing: "0.05em" }}>
+                                Interactive
+                            </h3>
+                            <CommandTable commands={data.topCommandsByOrigin.tty} />
+                        </section>
+                        <section>
+                            <h3 style={{ margin: "0 0 6px", fontSize: "0.85em", textTransform: "uppercase", letterSpacing: "0.05em" }}>
+                                Agent/background
+                            </h3>
+                            <CommandTable commands={data.topCommandsByOrigin.agent} />
+                        </section>
+                    </div>
                 </>
             )}
 

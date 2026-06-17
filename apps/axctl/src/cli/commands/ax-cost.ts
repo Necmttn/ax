@@ -13,6 +13,7 @@ import {
     fetchCostModels,
     fetchCostSessions,
     fetchCostSplit,
+    type CostModelsResult,
 } from "../../queries/cost-analytics.ts";
 import { fetchRoutability, type RoutabilityResult } from "../../queries/routability.ts";
 import {
@@ -28,6 +29,40 @@ import { fail, jsonFlag, optionValue, positiveLimit } from "./shared.ts";
 // ---------------------------------------------------------------------------
 // ax cost models [--days=N] [--json]
 // ---------------------------------------------------------------------------
+
+export function renderCostModelsTable(result: CostModelsResult): string {
+    type ModelRow = {
+        model: string;
+        sessions: string;
+        prompt: string;
+        completion: string;
+        cache_read: string;
+        cache_create: string;
+        cost: string;
+    };
+
+    const rendered: ModelRow[] = result.rows.map((r) => ({
+        model: r.model,
+        sessions: integer(r.sessions),
+        prompt: integer(r.prompt_tokens),
+        completion: integer(r.completion_tokens),
+        cache_read: integer(r.cache_read_tokens),
+        cache_create: integer(r.cache_create_tokens),
+        cost: usd(r.cost_usd),
+    }));
+
+    const cols: Column<ModelRow>[] = [
+        { header: "model", get: (r) => r.model, min: 20 },
+        { header: "sessions", get: (r) => r.sessions, align: "right", min: 8 },
+        { header: "prompt", get: (r) => r.prompt, align: "right", min: 14 },
+        { header: "completion", get: (r) => r.completion, align: "right", min: 14 },
+        { header: "cache_read", get: (r) => r.cache_read, align: "right", min: 12 },
+        { header: "cache_create", get: (r) => r.cache_create, align: "right", min: 12 },
+        { header: "cost", get: (r) => r.cost, align: "right", min: 10 },
+    ];
+
+    return renderTable({ columns: cols, rows: rendered, gap: " " });
+}
 
 const cmdCostModels = (input: {
     readonly sinceDays: number;
@@ -47,38 +82,7 @@ const cmdCostModels = (input: {
         }
 
         printNextLinks(buildCostModelsNext(result));
-
-        type ModelRow = {
-            model: string;
-            sessions: string;
-            prompt: string;
-            completion: string;
-            cache_read: string;
-            cache_create: string;
-            cost: string;
-        };
-
-        const rendered: ModelRow[] = result.rows.map((r) => ({
-            model: r.model,
-            sessions: integer(r.sessions),
-            prompt: integer(r.prompt_tokens),
-            completion: integer(r.completion_tokens),
-            cache_read: integer(r.cache_read_tokens),
-            cache_create: integer(r.cache_create_tokens),
-            cost: usd(r.cost_usd),
-        }));
-
-        const cols: Column<ModelRow>[] = [
-            { header: "model", get: (r) => r.model, min: 20 },
-            { header: "sessions", get: (r) => r.sessions, align: "right", width: 8 },
-            { header: "prompt", get: (r) => r.prompt, align: "right", width: 14 },
-            { header: "completion", get: (r) => r.completion, align: "right", width: 14 },
-            { header: "cache_read", get: (r) => r.cache_read, align: "right", width: 12 },
-            { header: "cache_create", get: (r) => r.cache_create, align: "right", width: 12 },
-            { header: "cost", get: (r) => r.cost, align: "right", width: 10 },
-        ];
-
-        console.log(renderTable({ columns: cols, rows: rendered, gap: " " }));
+        console.log(renderCostModelsTable(result));
         console.log(`\ntotal: ${usd(result.total_cost_usd)}  (${input.sinceDays} days)`);
     });
 

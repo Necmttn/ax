@@ -32,6 +32,26 @@ const filterRows = (
     });
 };
 
+export interface ToolFailuresRefreshUiInput {
+    // Background ingest invalidations keep React Query `isFetching` true, so the
+    // toolbar deliberately reflects ONLY the user's explicit refresh action.
+    readonly manualRefreshing: boolean;
+}
+
+export const toolFailuresRefreshUi = (input: ToolFailuresRefreshUiInput): {
+    readonly refreshing: boolean;
+    readonly disabled: boolean;
+    readonly label: string;
+    readonly tableOpacity: number;
+} => {
+    const refreshing = input.manualRefreshing;
+    return {
+        refreshing,
+        disabled: refreshing,
+        label: refreshing ? "Refreshing…" : "Refresh",
+        tableOpacity: refreshing ? 0.6 : 1,
+    };
+};
 
 export function ToolFailuresRoute() {
     const queryClient = useQueryClient();
@@ -44,13 +64,21 @@ export function ToolFailuresRoute() {
     const error =
         actionError ?? (failuresQuery.error ? String(failuresQuery.error) : null);
     const loading = failuresQuery.isLoading;
-    const refreshing = failuresQuery.isFetching && !failuresQuery.isLoading;
+    const [manualRefreshing, setManualRefreshing] = useState(false);
+    const refreshUi = toolFailuresRefreshUi({ manualRefreshing });
     const [filter, setFilter] = useState<Filter>("fix");
     const [search, setSearch] = useState("");
     const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set());
 
     const load = async (_mode: "initial" | "refresh" = "refresh") => {
-        await failuresQuery.refetch();
+        setError(null);
+        setManualRefreshing(true);
+        try {
+            const result = await failuresQuery.refetch();
+            if (result.error) setError(String(result.error));
+        } finally {
+            setManualRefreshing(false);
+        }
     };
 
     const visible = useMemo(
@@ -125,9 +153,9 @@ export function ToolFailuresRoute() {
                     onClick={() => load("refresh")}
                     type="button"
                     style={{ marginLeft: "auto" }}
-                    disabled={refreshing}
+                    disabled={refreshUi.disabled}
                 >
-                    {refreshing ? "Refreshing…" : "Refresh"}
+                    {refreshUi.label}
                 </button>
             </div>
 
@@ -139,7 +167,7 @@ export function ToolFailuresRoute() {
             ) : null}
 
             {data && visible.length > 0 ? (
-                <table className="skills" style={{ opacity: refreshing ? 0.6 : 1 }}>
+                <table className="skills" style={{ opacity: refreshUi.tableOpacity }}>
                     <thead>
                         <tr>
                             <th>Command</th>

@@ -64,6 +64,24 @@ export function requireOptionalPositiveInt(
     return requirePositiveInt(cmd, flagName, n);
 }
 
+/** Optional day-window flag: accepts `14` and the documented `14d` spelling. */
+export function parseOptionalPositiveDayWindow(
+    cmd: string,
+    flagName: string,
+    value: string | undefined,
+): number | undefined {
+    if (value === undefined) return undefined;
+    const raw = value.trim();
+    const match = raw.match(/^(\d+)(?:d)?$/i);
+    const n = match ? Number(match[1]) : Number.NaN;
+    if (!Number.isSafeInteger(n) || n <= 0) {
+        fail(
+            `axctl ${cmd}: --${flagName} must be a positive integer day window like 14 or 14d (got "${value}")`,
+        );
+    }
+    return n;
+}
+
 /**
  * Format a numeric counter with thousand-separators (issue #46). Thin
  * unknown-typed bridge over `@ax/lib/shared/formatters` fmtCount for the raw

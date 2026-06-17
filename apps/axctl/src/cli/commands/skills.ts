@@ -47,9 +47,9 @@ import {
     fmtCount,
     jsonFlag,
     optionValue,
+    parseOptionalPositiveDayWindow,
     positiveLimit,
     requirePositiveInt,
-    requireOptionalPositiveInt,
 } from "./shared.ts";
 
 interface SearchInput {
@@ -386,7 +386,7 @@ const cmdSkillsLoaded = (input: SkillsLoadedInput) =>
 
 interface SkillsWeightedInput {
     readonly limit: number;
-    readonly windowDays: number | undefined;
+    readonly windowDays: string | undefined;
     readonly doctorThreshold: number;
     readonly includeTools: boolean;
     readonly json: boolean;
@@ -395,7 +395,7 @@ interface SkillsWeightedInput {
 const cmdSkillsWeighted = (input: SkillsWeightedInput) =>
     Effect.gen(function* () {
         const limit = requirePositiveInt("skills weighted", "limit", input.limit);
-        const windowDays = requireOptionalPositiveInt("skills weighted", "window", input.windowDays);
+        const windowDays = parseOptionalPositiveDayWindow("skills weighted", "window", input.windowDays);
         const doctorThreshold = requirePositiveInt("skills weighted", "doctor-threshold", input.doctorThreshold);
         const json = input.json;
         const includeTools = input.includeTools;
@@ -975,7 +975,7 @@ const loadedCommand = Command.make(
 const weightedCommand = Command.make(
     "weighted",
     {
-        window: Flag.integer("window").pipe(Flag.optional),
+        window: Flag.string("window").pipe(Flag.optional),
         limit: positiveLimit(25),
         doctorThreshold: Flag.integer("doctor-threshold").pipe(Flag.withDefault(5)),
         includeTools: Flag.boolean("include-tools").pipe(Flag.withDefault(false)),

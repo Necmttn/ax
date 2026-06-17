@@ -54,6 +54,7 @@ describe("usageRollup handler", () => {
             total: number;
             activeDays: number;
             topCommands: unknown[];
+            topCommandsByOrigin: { agent: unknown[]; tty: unknown[] };
             unusedSurface: string[];
             originSplit: { agent: number; tty: number };
             reliability: unknown[];
@@ -62,6 +63,8 @@ describe("usageRollup handler", () => {
         expect(body).toHaveProperty("total", 0);
         expect(body).toHaveProperty("activeDays", 0);
         expect(Array.isArray(body.topCommands)).toBe(true);
+        expect(Array.isArray(body.topCommandsByOrigin.agent)).toBe(true);
+        expect(Array.isArray(body.topCommandsByOrigin.tty)).toBe(true);
         expect(Array.isArray(body.unusedSurface)).toBe(true);
         expect(typeof body.originSplit).toBe("object");
         expect(body.originSplit).toHaveProperty("agent");
@@ -85,6 +88,10 @@ describe("usageRollup handler", () => {
             total: number;
             activeDays: number;
             topCommands: Array<{ command: string; count: number }>;
+            topCommandsByOrigin: {
+                agent: Array<{ command: string; count: number }>;
+                tty: Array<{ command: string; count: number }>;
+            };
             originSplit: { agent: number; tty: number };
             reliability: Array<{ command: string; failureRate: number }>;
             unusedSurface: string[];
@@ -94,6 +101,8 @@ describe("usageRollup handler", () => {
         expect(body.activeDays).toBe(3);
         // sessions is top command with 2 uses
         expect(body.topCommands[0]).toMatchObject({ command: "sessions", count: 2 });
+        expect(body.topCommandsByOrigin.tty[0]).toMatchObject({ command: "sessions", count: 2 });
+        expect(body.topCommandsByOrigin.agent[0]).toMatchObject({ command: "ingest", count: 1 });
         // origin split: 2 tty, 1 agent
         expect(body.originSplit).toEqual({ tty: 2, agent: 1 });
         // ingest had 1 failure out of 1 run

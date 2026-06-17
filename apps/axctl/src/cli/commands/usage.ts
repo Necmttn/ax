@@ -12,19 +12,27 @@ import type { RuntimeManifest } from "./manifest.ts";
 import { jsonFlag } from "./shared.ts";
 import { VISIBLE_COMMANDS } from "./visible-commands.ts";
 
+const renderCommandCounts = (commands: UsageRollup["topCommands"]): string =>
+    commands
+        .map((c) => `  ${c.command.padEnd(22)} ${String(c.count).padStart(5)}`)
+        .join("\n");
+
 /** Render a UsageRollup as a human-readable board. Pure (tested). */
 export const renderUsage = (r: UsageRollup): string => {
     if (r.total === 0) return "[ax] no usage recorded yet - run some ax commands, then ingest.";
-    const top = r.topCommands
-        .slice(0, 8)
-        .map((c) => `  ${c.command.padEnd(22)} ${String(c.count).padStart(5)}`)
-        .join("\n");
+    const top = renderCommandCounts(r.topCommands.slice(0, 8));
+    const topTty = renderCommandCounts(r.topCommandsByOrigin.tty.slice(0, 5)) || "  (none)";
+    const topAgent = renderCommandCounts(r.topCommandsByOrigin.agent.slice(0, 5)) || "  (none)";
     const unusedCount = r.unusedSurface.length;
     const unusedList = r.unusedSurface.slice(0, 12).join(", ");
     return [
         `[ax] usage (${r.windowDays}d): ${r.total} runs across ${r.activeDays} active days  (agent ${r.originSplit.agent} / tty ${r.originSplit.tty})`,
         "top commands:",
         top,
+        "top tty commands:",
+        topTty,
+        "top agent/background commands:",
+        topAgent,
         `${unusedCount} never used: ${unusedList}`,
     ].join("\n");
 };
