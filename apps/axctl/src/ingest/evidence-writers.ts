@@ -300,6 +300,18 @@ const snapshotSummary = (snapshot: PlanSnapshotWrite): string =>
     snapshot.items[0]?.content ??
     `${snapshot.items.length.toString(10)} plan items`;
 
+const planItemDeleteStatement = (snapshot: PlanSnapshotWrite, item: PlanSnapshotItemWrite): string | null => {
+    const itemRef = recordRef("plan_item", item.key);
+    const planRef = recordRef("plan", snapshot.planKey);
+    if (snapshot.source === "claude_task") {
+        if (item.externalId && item.externalId.trim().length > 0) {
+            return `DELETE plan_item WHERE plan = ${planRef} AND external_id = ${surrealString(item.externalId)} AND id != ${itemRef};`;
+        }
+        return null;
+    }
+    return `DELETE plan_item WHERE plan = ${planRef} AND seq = ${item.seq.toString(10)} AND id != ${itemRef};`;
+};
+
 export function buildPlanSnapshotStatements(snapshot: PlanSnapshotWrite): string[] {
     const summary = snapshotSummary(snapshot);
     const title =
@@ -330,9 +342,8 @@ export function buildPlanSnapshotStatements(snapshot: PlanSnapshotWrite): string
     ];
 
     for (const item of snapshot.items) {
-        statements.push(
-            `DELETE plan_item WHERE plan = ${recordRef("plan", snapshot.planKey)} AND seq = ${item.seq.toString(10)} AND id != ${recordRef("plan_item", item.key)};`,
-        );
+        const deleteStatement = planItemDeleteStatement(snapshot, item);
+        if (deleteStatement) statements.push(deleteStatement);
         statements.push(
             `UPSERT ${recordRef("plan_item", item.key)} CONTENT ${surrealObject([
                 ["plan", recordRef("plan", snapshot.planKey)],

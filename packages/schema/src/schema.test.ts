@@ -82,6 +82,14 @@ describe("file evidence schema", () => {
     });
 });
 
+describe("plan item schema", () => {
+    test("plan_item_plan_seq is migrated to a non-unique read index", () => {
+        expect(schema).toContain("REMOVE INDEX IF EXISTS plan_item_plan_seq ON plan_item;");
+        expect(schema).toContain("DEFINE INDEX IF NOT EXISTS plan_item_plan_seq ON plan_item FIELDS plan, seq;");
+        expect(schema).not.toContain("DEFINE INDEX IF NOT EXISTS plan_item_plan_seq ON plan_item FIELDS plan, seq UNIQUE");
+    });
+});
+
 describe("intervention safety contract schema", () => {
     test("hook proposals carry the four safety gates", () => {
         expect(schema).toContain("DEFINE FIELD recovery_path      ON hook_proposal TYPE option<string>");

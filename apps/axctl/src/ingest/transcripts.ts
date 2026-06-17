@@ -266,6 +266,13 @@ type ToolResultFields = {
     hasError: boolean;
 };
 
+type PlanSnapshotSlot = {
+    readonly index: number;
+    readonly snapshotSeq: number;
+    readonly createdAt: string;
+    readonly toolCallKey: string;
+};
+
 function applyToolResult(call: MutableToolCallWrite, result: ToolResultFields): void {
     call.outputJson = result.outputJson;
     call.outputExcerpt = result.outputExcerpt;
@@ -337,6 +344,7 @@ function createClaudeExtractor(path: Path.Path, projectDir: string, sessionId: s
     const hookCommandInvocationsByKey = new Map<string, HookCommandInvocationWrite>();
     const toolCallsByCallId = new Map<string, MutableToolCallWrite>();
     const pendingToolResultsByCallId = new Map<string, ToolResultFields>();
+    const taskPlanSnapshotSlotsByCallId = new Map<string, PlanSnapshotSlot>();
     const planCreatedAtBySource = new Map<string, string>();
     const planSnapshotCountsBySource = new Map<string, number>();
     const anonymousToolUseCountsByTurn = new Map<number, number>();
@@ -400,6 +408,63 @@ function createClaudeExtractor(path: Path.Path, projectDir: string, sessionId: s
         if (existing) return existing;
         planCreatedAtBySource.set(source, ts);
         return ts;
+    };
+
+    const isClaudeTaskPlanTool = (name: string): boolean =>
+        name === "TaskCreate" || name === "TaskUpdate" || name === "TaskGet" || name === "TaskList";
+
+    const upsertPlanSnapshot = (input: {
+        readonly toolName: string;
+        readonly payload: unknown;
+        readonly ts: string;
+        readonly toolCallKey: string;
+        readonly existingSlot?: PlanSnapshotSlot;
+    }): PlanSnapshotSlot | null => {
+        const normalized = normalizeProviderPlanSnapshot({
+            provider: "claude",
+            toolName: input.toolName,
+            sessionId,
+            ts: input.ts,
+            input: input.payload,
+        });
+        if (!normalized || normalized.items.length === 0) return null;
+
+        const source = normalized.source;
+        const snapshotSeq = input.existingSlot?.snapshotSeq ?? nextPlanSnapshotSeq(source);
+        const createdAt = input.existingSlot?.createdAt ?? rememberPlanCreatedAt(source, input.ts);
+        const write = toPlanSnapshotWrite({
+            snapshot: normalized,
+            snapshotSeq,
+            createdAt,
+            toolCallKey: input.toolCallKey,
+        });
+
+        if (input.existingSlot) {
+            planSnapshots[input.existingSlot.index] = write;
+            return input.existingSlot;
+        }
+
+        const slot = {
+            index: planSnapshots.length,
+            snapshotSeq,
+            createdAt,
+            toolCallKey: input.toolCallKey,
+        };
+        planSnapshots.push(write);
+        return slot;
+    };
+
+    const taskToolResultPayload = (
+        call: MutableToolCallWrite,
+        resultContent: unknown,
+        topLevelToolUseResult: unknown,
+    ): unknown => {
+        const callInput = isRecord(call.inputJson) ? call.inputJson : {};
+        const resultPayload = isRecord(resultContent) ? resultContent : {};
+        const topLevelPayload = isRecord(topLevelToolUseResult)
+            ? { toolUseResult: topLevelToolUseResult }
+            : {};
+        return { ...callInput, ...topLevelPayload, ...resultPayload };
     };
 
     const processToolUse = (
@@ -546,25 +611,15 @@ function createClaudeExtractor(path: Path.Path, projectDir: string, sessionId: s
             }
         }
 
-        if (name === "TodoWrite" && input) {
-            const normalized = normalizeProviderPlanSnapshot({
-                provider: "claude",
+        if ((name === "TodoWrite" || isClaudeTaskPlanTool(name)) && input) {
+            const slot = upsertPlanSnapshot({
                 toolName: name,
-                sessionId,
+                payload: input,
                 ts,
-                input,
+                toolCallKey,
             });
-            if (normalized && normalized.items.length > 0) {
-                const source = normalized.source;
-                const snapshotSeq = nextPlanSnapshotSeq(source);
-                const createdAt = rememberPlanCreatedAt(source, ts);
-
-                planSnapshots.push(toPlanSnapshotWrite({
-                    snapshot: normalized,
-                    snapshotSeq,
-                    createdAt,
-                    toolCallKey,
-                }));
+            if (slot && isClaudeTaskPlanTool(name)) {
+                taskPlanSnapshotSlotsByCallId.set(callId, slot);
             }
         }
     };
@@ -804,6 +859,7 @@ function createClaudeExtractor(path: Path.Path, projectDir: string, sessionId: s
         ts: string,
         role: string,
         parentProviderEventId: string | null,
+        topLevelToolUseResult: unknown,
     ): boolean => {
         const callId = stringField(block, "tool_use_id");
         const hasError = block.is_error === true;
@@ -839,6 +895,20 @@ function createClaudeExtractor(path: Path.Path, projectDir: string, sessionId: s
             const call = toolCallsByCallId.get(callId);
             if (call) {
                 applyToolResult(call, result);
+                if (isClaudeTaskPlanTool(call.toolName)) {
+                    const slot = upsertPlanSnapshot({
+                        toolName: call.toolName,
+                        payload: taskToolResultPayload(call, block.content, topLevelToolUseResult),
+                        ts,
+                        toolCallKey: toolCallRecordKey({
+                            sessionId,
+                            seq: call.seq,
+                            callId,
+                        }),
+                        existingSlot: taskPlanSnapshotSlotsByCallId.get(callId),
+                    });
+                    if (slot) taskPlanSnapshotSlotsByCallId.set(callId, slot);
+                }
             } else {
                 pendingToolResultsByCallId.set(callId, result);
             }
@@ -1022,7 +1092,10 @@ function createClaudeExtractor(path: Path.Path, projectDir: string, sessionId: s
                     hasToolUse = true;
                     processToolUse(block, ts, turnCwd, role, providerEventId);
                 }
-                if (blockType === "tool_result" && processToolResult(block, ts, role, providerEventId)) {
+                if (
+                    blockType === "tool_result" &&
+                    processToolResult(block, ts, role, providerEventId, rawEntry.toolUseResult)
+                ) {
                     hasError = true;
                 }
                 if (blockType === "thinking" || blockType === "redacted_thinking") {

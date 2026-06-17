@@ -67,6 +67,12 @@ type NormalizeClaudeTodoWriteInput = {
     readonly input: unknown;
 };
 
+type NormalizeClaudeTaskInput = {
+    readonly sessionId: string;
+    readonly ts: string;
+    readonly input: unknown;
+};
+
 type NormalizeCodexUpdatePlanInput = {
     readonly sessionId: string;
     readonly ts: string;
@@ -107,6 +113,12 @@ function normalizeStatus(status: string | null | undefined): PlanStatus {
     return "pending";
 }
 
+function normalizeClaudeTaskStatus(status: string | null | undefined): PlanStatus {
+    if (status === "deleted") return "abandoned";
+    if (status === "active") return "in_progress";
+    return normalizeStatus(status);
+}
+
 function parseMaybeJsonObject(input: unknown): Record<string, unknown> {
     if (typeof input === "string") {
         const parsed = decodeJsonOrNull(input);
@@ -122,6 +134,69 @@ function isRecord(input: unknown): input is Record<string, unknown> {
 function asRecordArray(input: unknown): Record<string, unknown>[] {
     if (!Array.isArray(input)) return [];
     return input.filter(isRecord);
+}
+
+function stringField(input: Record<string, unknown>, field: string): string | null {
+    const value = input[field];
+    return typeof value === "string" ? value : null;
+}
+
+function recordField(input: Record<string, unknown>, field: string): Record<string, unknown> | null {
+    const value = input[field];
+    return isRecord(value) ? value : null;
+}
+
+function firstNonEmptyString(...values: readonly (string | null | undefined)[]): string | null {
+    for (const value of values) {
+        const normalized = nonEmptyString(value ?? null);
+        if (normalized) return normalized;
+    }
+    return null;
+}
+
+function claudeTaskResultRecord(raw: Record<string, unknown>): Record<string, unknown> | null {
+    return recordField(recordField(raw, "toolUseResult") ?? {}, "task");
+}
+
+function claudeTaskResultRecords(raw: Record<string, unknown>): Record<string, unknown>[] {
+    const result = recordField(raw, "toolUseResult");
+    return result ? asRecordArray(result.tasks) : [];
+}
+
+function normalizeClaudeTaskItem(
+    raw: Record<string, unknown>,
+    resultTask: Record<string, unknown> | null,
+    seq: number,
+): NormalizedPlanItem | null {
+    const task = resultTask ?? {};
+    const taskId = firstNonEmptyString(
+        stringField(task, "id"),
+        stringField(task, "taskId"),
+        stringField(task, "task_id"),
+        stringField(raw, "taskId"),
+        stringField(raw, "id"),
+        stringField(raw, "task_id"),
+    );
+    const subject = firstNonEmptyString(stringField(raw, "subject"), stringField(task, "subject"));
+    const description = firstNonEmptyString(
+        stringField(raw, "description"),
+        stringField(task, "description"),
+    );
+    const content = subject ?? description ?? taskId;
+    if (!content) return null;
+
+    return {
+        externalId: taskId,
+        seq,
+        content,
+        activeForm: firstNonEmptyString(
+            stringField(raw, "activeForm"),
+            stringField(raw, "active_form"),
+            stringField(task, "activeForm"),
+            stringField(task, "active_form"),
+        ),
+        status: normalizeClaudeTaskStatus(stringField(task, "status") ?? stringField(raw, "status")),
+    };
 }
 
 function normalizeClaudeTodoWritePayload({
@@ -153,6 +228,89 @@ function normalizeClaudeTodoWritePayload({
         source: "claude_todowrite",
         ts,
         explanation: null,
+        items,
+    };
+}
+
+function normalizeClaudeTaskCreatePayload({
+    sessionId,
+    ts,
+    input,
+}: NormalizeClaudeTaskInput): NormalizedPlanSnapshot {
+    const items: NormalizedPlanItem[] = [];
+    const raw = parseMaybeJsonObject(input);
+    const item = normalizeClaudeTaskItem(raw, claudeTaskResultRecord(raw), 1);
+    if (item) items.push(item);
+
+    return {
+        provider: "claude",
+        sessionId,
+        source: "claude_task",
+        ts,
+        explanation: "TaskCreate",
+        items,
+    };
+}
+
+function normalizeClaudeTaskUpdatePayload({
+    sessionId,
+    ts,
+    input,
+}: NormalizeClaudeTaskInput): NormalizedPlanSnapshot {
+    const items: NormalizedPlanItem[] = [];
+    const raw = parseMaybeJsonObject(input);
+    const item = normalizeClaudeTaskItem(raw, claudeTaskResultRecord(raw), 1);
+    if (item) items.push(item);
+
+    return {
+        provider: "claude",
+        sessionId,
+        source: "claude_task",
+        ts,
+        explanation: "TaskUpdate",
+        items,
+    };
+}
+
+function normalizeClaudeTaskGetPayload({
+    sessionId,
+    ts,
+    input,
+}: NormalizeClaudeTaskInput): NormalizedPlanSnapshot {
+    const items: NormalizedPlanItem[] = [];
+    const raw = parseMaybeJsonObject(input);
+    const item = normalizeClaudeTaskItem(raw, claudeTaskResultRecord(raw), 1);
+    if (item) items.push(item);
+
+    return {
+        provider: "claude",
+        sessionId,
+        source: "claude_task",
+        ts,
+        explanation: "TaskGet",
+        items,
+    };
+}
+
+function normalizeClaudeTaskListPayload({
+    sessionId,
+    ts,
+    input,
+}: NormalizeClaudeTaskInput): NormalizedPlanSnapshot {
+    const items: NormalizedPlanItem[] = [];
+    const raw = parseMaybeJsonObject(input);
+
+    for (const task of claudeTaskResultRecords(raw)) {
+        const item = normalizeClaudeTaskItem(raw, task, items.length + 1);
+        if (item) items.push(item);
+    }
+
+    return {
+        provider: "claude",
+        sessionId,
+        source: "claude_task",
+        ts,
+        explanation: "TaskList",
         items,
     };
 }
@@ -197,6 +355,34 @@ export const providerPlanDetectors: readonly ProviderPlanDetector[] = [
             normalizeClaudeTodoWritePayload({ sessionId, ts, input }),
     },
     {
+        provider: "claude",
+        source: "claude_task",
+        toolName: "TaskCreate",
+        normalize: ({ sessionId, ts, input }) =>
+            normalizeClaudeTaskCreatePayload({ sessionId, ts, input }),
+    },
+    {
+        provider: "claude",
+        source: "claude_task",
+        toolName: "TaskUpdate",
+        normalize: ({ sessionId, ts, input }) =>
+            normalizeClaudeTaskUpdatePayload({ sessionId, ts, input }),
+    },
+    {
+        provider: "claude",
+        source: "claude_task",
+        toolName: "TaskGet",
+        normalize: ({ sessionId, ts, input }) =>
+            normalizeClaudeTaskGetPayload({ sessionId, ts, input }),
+    },
+    {
+        provider: "claude",
+        source: "claude_task",
+        toolName: "TaskList",
+        normalize: ({ sessionId, ts, input }) =>
+            normalizeClaudeTaskListPayload({ sessionId, ts, input }),
+    },
+    {
         provider: "codex",
         source: "codex_update_plan",
         toolName: "update_plan",
@@ -209,9 +395,9 @@ export const providerPlanSignalAvailability: Readonly<Record<AgentProviderName, 
     claude: {
         provider: "claude",
         status: "available",
-        planSources: ["claude_todowrite"],
-        toolNames: ["TodoWrite"],
-        evidence: "Claude transcript tool_use blocks expose TodoWrite todos.",
+        planSources: ["claude_todowrite", "claude_task"],
+        toolNames: ["TodoWrite", "TaskCreate", "TaskUpdate", "TaskGet", "TaskList"],
+        evidence: "Claude transcript tool_use and tool_result blocks expose TodoWrite todos and Task tool plan signals.",
     },
     codex: {
         provider: "codex",
@@ -273,6 +459,34 @@ export function normalizeClaudeTodoWrite(
     return normalized;
 }
 
+export function normalizeClaudeTaskCreate(
+    input: NormalizeClaudeTaskInput,
+): NormalizedPlanSnapshot {
+    const normalized = normalizeProviderPlanSnapshot({
+        provider: "claude",
+        toolName: "TaskCreate",
+        ...input,
+    });
+    if (normalized === null) {
+        throw new Error("missing Claude TaskCreate plan detector");
+    }
+    return normalized;
+}
+
+export function normalizeClaudeTaskUpdate(
+    input: NormalizeClaudeTaskInput,
+): NormalizedPlanSnapshot {
+    const normalized = normalizeProviderPlanSnapshot({
+        provider: "claude",
+        toolName: "TaskUpdate",
+        ...input,
+    });
+    if (normalized === null) {
+        throw new Error("missing Claude TaskUpdate plan detector");
+    }
+    return normalized;
+}
+
 export function normalizeCodexUpdatePlan(
     input: NormalizeCodexUpdatePlanInput,
 ): NormalizedPlanSnapshot {
@@ -315,9 +529,32 @@ export function planItemKey(input: {
     readonly sessionId: string;
     readonly source: string;
     readonly seq: number;
+    readonly externalId?: string | null;
+    readonly toolCallKey?: string | null;
 }): string {
+    const key = planKey(input.sessionId, input.provider, input.source);
+    if (input.source === "claude_task") {
+        const externalId = nonEmptyString(input.externalId ?? null);
+        if (externalId) {
+            return [
+                key,
+                "item_external",
+                recordKeyPart(externalId, "task").slice(0, 80),
+                stableHash(externalId).slice(0, 12),
+            ].join("__");
+        }
+        const toolCallKey = nonEmptyString(input.toolCallKey ?? null);
+        if (toolCallKey) {
+            return [
+                key,
+                "item_tool_call",
+                stableHash(toolCallKey).slice(0, 12),
+                `seq_${input.seq.toString(10).padStart(3, "0")}`,
+            ].join("__");
+        }
+    }
     return [
-        planKey(input.sessionId, input.provider, input.source),
+        key,
         `item_${input.seq.toString(10).padStart(3, "0")}`,
     ].join("__");
 }
@@ -346,6 +583,8 @@ export function toPlanSnapshotWrite({
             sessionId: snapshot.sessionId,
             source: snapshot.source,
             seq: item.seq,
+            externalId: item.externalId,
+            toolCallKey,
         }),
         externalId: item.externalId,
         seq: item.seq,

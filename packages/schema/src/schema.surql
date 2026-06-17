@@ -374,7 +374,8 @@ DEFINE FIELD created_at     ON plan_item TYPE datetime DEFAULT time::now();
 DEFINE FIELD updated_at     ON plan_item TYPE option<datetime>;
 DEFINE FIELD first_seen_at  ON plan_item TYPE option<datetime>;
 DEFINE FIELD last_seen_at   ON plan_item TYPE option<datetime>;
-DEFINE INDEX IF NOT EXISTS plan_item_plan_seq ON plan_item FIELDS plan, seq UNIQUE;
+REMOVE INDEX IF EXISTS plan_item_plan_seq ON plan_item;
+DEFINE INDEX IF NOT EXISTS plan_item_plan_seq ON plan_item FIELDS plan, seq;
 
 DEFINE TABLE artifact SCHEMAFULL;
 DEFINE FIELD kind           ON artifact TYPE string;

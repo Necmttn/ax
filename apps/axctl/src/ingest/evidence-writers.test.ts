@@ -301,4 +301,56 @@ describe("evidence writer statement builders", () => {
             "DELETE plan_item WHERE plan = plan:`plan-key` AND seq = 1 AND id != plan_item:`plan-key__item_001`;",
         );
     });
+
+    test("Claude task plan items replace by external id instead of sequence", () => {
+        const withExternalId = buildPlanSnapshotStatements({
+            planKey: "claude-task-plan",
+            sessionId: "session-1",
+            source: "claude_task",
+            status: "in_progress",
+            createdAt: "2026-05-09T10:00:00.000Z",
+            updatedAt: "2026-05-09T10:00:00.000Z",
+            snapshotKey: "snapshot-key",
+            itemsJson: [],
+            explanation: null,
+            ts: "2026-05-09T10:00:00.000Z",
+            items: [
+                {
+                    key: "claude-task-plan__item_external__task_1",
+                    externalId: "task-1",
+                    seq: 1,
+                    content: "Task 1",
+                    status: "in_progress",
+                },
+            ],
+        });
+
+        expect(withExternalId.join("\n")).toContain(
+            "DELETE plan_item WHERE plan = plan:`claude-task-plan` AND external_id = \"task-1\" AND id != plan_item:`claude-task-plan__item_external__task_1`;",
+        );
+        expect(withExternalId.join("\n")).not.toContain("AND seq = 1");
+
+        const withoutExternalId = buildPlanSnapshotStatements({
+            planKey: "claude-task-plan",
+            sessionId: "session-1",
+            source: "claude_task",
+            status: "pending",
+            createdAt: "2026-05-09T10:00:00.000Z",
+            updatedAt: "2026-05-09T10:00:00.000Z",
+            snapshotKey: "snapshot-key-2",
+            itemsJson: [],
+            explanation: null,
+            ts: "2026-05-09T10:00:00.000Z",
+            items: [
+                {
+                    key: "claude-task-plan__item_tool_call__abc__seq_001",
+                    seq: 1,
+                    content: "Task without id",
+                    status: "pending",
+                },
+            ],
+        });
+
+        expect(withoutExternalId.some((statement) => statement.startsWith("DELETE plan_item"))).toBe(false);
+    });
 });

@@ -930,6 +930,279 @@ describe("Claude transcript extraction", () => {
         );
     });
 
+    test("extracts Claude Task tool plan snapshots", () => {
+        const extracted = __testExtractClaudeJsonlLines(
+            [
+                JSON.stringify({
+                    type: "assistant",
+                    timestamp: "2026-05-09T12:05:00.000Z",
+                    message: {
+                        content: [
+                            {
+                                type: "tool_use",
+                                id: "toolu_task_create",
+                                name: "TaskCreate",
+                                input: {
+                                    subject: "Parse Task tools",
+                                    description: "Normalize Claude Task tool payloads",
+                                    activeForm: "Parsing Task tools",
+                                },
+                            },
+                            {
+                                type: "tool_use",
+                                id: "toolu_task_update",
+                                name: "TaskUpdate",
+                                input: {
+                                    task_id: "task-123",
+                                    subject: "Parse Task tools",
+                                    active_form: "Parsing Task tools",
+                                    status: "in_progress",
+                                },
+                            },
+                        ],
+                    },
+                }),
+            ],
+            "-Users-necmttn-Projects-ax",
+            "claude-task-plan-session",
+        );
+
+        expect(extracted).not.toBeNull();
+        if (!extracted) return;
+
+        expect(extracted.planSnapshots).toHaveLength(2);
+        expect(extracted.planSnapshots.map((snapshot) => snapshot.source)).toEqual([
+            "claude_task",
+            "claude_task",
+        ]);
+        expect(extracted.planSnapshots[0]).toMatchObject({
+            sessionId: "claude-task-plan-session",
+            source: "claude_task",
+            status: "pending",
+            explanation: "TaskCreate",
+            toolCallKey: toolCallRecordKey({
+                sessionId: "claude-task-plan-session",
+                seq: 1,
+                callId: "toolu_task_create",
+            }),
+        });
+        expect(extracted.planSnapshots[0]?.items).toEqual([
+            expect.objectContaining({
+                seq: 1,
+                externalId: null,
+                content: "Parse Task tools",
+                activeForm: "Parsing Task tools",
+                status: "pending",
+            }),
+        ]);
+        expect(extracted.planSnapshots[1]).toMatchObject({
+            sessionId: "claude-task-plan-session",
+            source: "claude_task",
+            status: "in_progress",
+            explanation: "TaskUpdate",
+            toolCallKey: toolCallRecordKey({
+                sessionId: "claude-task-plan-session",
+                seq: 1,
+                callId: "toolu_task_update",
+            }),
+        });
+        expect(extracted.planSnapshots[1]?.items).toEqual([
+            expect.objectContaining({
+                seq: 1,
+                externalId: "task-123",
+                content: "Parse Task tools",
+                activeForm: "Parsing Task tools",
+                status: "in_progress",
+            }),
+        ]);
+    });
+
+    test("preserves Claude TaskCreate identity from top-level toolUseResult task id", () => {
+        const extracted = __testExtractClaudeJsonlLines(
+            [
+                JSON.stringify({
+                    type: "assistant",
+                    timestamp: "2026-05-09T12:05:00.000Z",
+                    message: {
+                        content: [
+                            {
+                                type: "tool_use",
+                                id: "toolu_task_create",
+                                name: "TaskCreate",
+                                input: {
+                                    subject: "Parse Task tools",
+                                    activeForm: "Parsing Task tools",
+                                },
+                            },
+                        ],
+                    },
+                }),
+                JSON.stringify({
+                    type: "user",
+                    timestamp: "2026-05-09T12:05:01.000Z",
+                    message: {
+                        content: [
+                            {
+                                type: "tool_result",
+                                tool_use_id: "toolu_task_create",
+                                content: "Task created.",
+                            },
+                        ],
+                    },
+                    toolUseResult: {
+                        task: {
+                            id: "task-created",
+                            status: "active",
+                        },
+                    },
+                }),
+                JSON.stringify({
+                    type: "assistant",
+                    timestamp: "2026-05-09T12:05:02.000Z",
+                    message: {
+                        content: [
+                            {
+                                type: "tool_use",
+                                id: "toolu_task_update",
+                                name: "TaskUpdate",
+                                input: {
+                                    task_id: "task-created",
+                                    subject: "Parse Task tools",
+                                    status: "completed",
+                                },
+                            },
+                        ],
+                    },
+                }),
+            ],
+            "-Users-necmttn-Projects-ax",
+            "claude-task-result-session",
+        );
+
+        expect(extracted).not.toBeNull();
+        if (!extracted) return;
+
+        expect(extracted.planSnapshots).toHaveLength(2);
+        expect(extracted.planSnapshots[0]?.items).toEqual([
+            expect.objectContaining({
+                externalId: "task-created",
+                content: "Parse Task tools",
+                status: "in_progress",
+            }),
+        ]);
+        expect(extracted.planSnapshots[0]?.items[0]?.key).toBe(
+            extracted.planSnapshots[1]?.items[0]?.key,
+        );
+    });
+
+    test("extracts Claude TaskGet and TaskList top-level toolUseResult plan snapshots", () => {
+        const extracted = __testExtractClaudeJsonlLines(
+            [
+                JSON.stringify({
+                    type: "assistant",
+                    timestamp: "2026-05-09T12:06:00.000Z",
+                    message: {
+                        content: [
+                            {
+                                type: "tool_use",
+                                id: "toolu_task_get",
+                                name: "TaskGet",
+                                input: { task_id: "task-get" },
+                            },
+                            {
+                                type: "tool_use",
+                                id: "toolu_task_list",
+                                name: "TaskList",
+                                input: {},
+                            },
+                        ],
+                    },
+                }),
+                JSON.stringify({
+                    type: "user",
+                    timestamp: "2026-05-09T12:06:01.000Z",
+                    message: {
+                        content: [
+                            {
+                                type: "tool_result",
+                                tool_use_id: "toolu_task_get",
+                                content: "Task loaded.",
+                            },
+                        ],
+                    },
+                    toolUseResult: {
+                        task: {
+                            id: "task-get",
+                            subject: "Read current task",
+                            status: "active",
+                        },
+                    },
+                }),
+                JSON.stringify({
+                    type: "user",
+                    timestamp: "2026-05-09T12:06:02.000Z",
+                    message: {
+                        content: [
+                            {
+                                type: "tool_result",
+                                tool_use_id: "toolu_task_list",
+                                content: "Tasks listed.",
+                            },
+                        ],
+                    },
+                    toolUseResult: {
+                        tasks: [
+                            {
+                                id: "task-list-a",
+                                subject: "List completed task",
+                                status: "completed",
+                            },
+                            {
+                                id: "task-list-b",
+                                description: "List active task",
+                                status: "active",
+                            },
+                        ],
+                    },
+                }),
+            ],
+            "-Users-necmttn-Projects-ax",
+            "claude-task-read-session",
+        );
+
+        expect(extracted).not.toBeNull();
+        if (!extracted) return;
+
+        expect(extracted.planSnapshots).toHaveLength(2);
+        expect(extracted.planSnapshots[0]).toMatchObject({
+            explanation: "TaskGet",
+            status: "in_progress",
+            items: [
+                expect.objectContaining({
+                    externalId: "task-get",
+                    content: "Read current task",
+                    status: "in_progress",
+                }),
+            ],
+        });
+        expect(extracted.planSnapshots[1]).toMatchObject({
+            explanation: "TaskList",
+            status: "in_progress",
+            items: [
+                expect.objectContaining({
+                    externalId: "task-list-a",
+                    content: "List completed task",
+                    status: "completed",
+                }),
+                expect.objectContaining({
+                    externalId: "task-list-b",
+                    content: "List active task",
+                    status: "in_progress",
+                }),
+            ],
+        });
+    });
+
     test("extracts native Claude hook events and command invocation outcomes", () => {
         const extracted = __testExtractClaudeJsonlLines(
             [
