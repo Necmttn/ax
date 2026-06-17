@@ -177,7 +177,21 @@ Net: one source of truth for the recap deck; the profile is identical to the
 studio recap by construction. The `WrappedDeck` component (Task 1) now wraps the
 package `DeckCard` rather than owning card chrome.
 
-Follow-up (separate PR): AI-driven `ax profile interview` - an agent-conducted
-interview at publish time that captures user-authored highlights (setup wins,
-per-skill "learn more" summaries, taste/philosophy, shipped wins) into a new
-`highlights` block rendered as an "In their words" section. Own spec.
+## Queued follow-ups (separate PRs, after this lands)
+
+1. AI-driven `ax profile interview` - an agent-conducted interview at publish
+   time that captures user-authored highlights (setup wins, per-skill "learn
+   more" summaries, taste/philosophy, shipped wins) into a new `highlights`
+   block rendered as an "In their words" section. Own spec.
+
+2. Bespoke head-to-head duel page + OG share card (`/u/$a/vs/$b`). The current
+   comparison is only the `?vs=` overlay on `/u/$login` (now with hero + ring
+   avatars). This adds a purpose-built duel: both avatars side-by-side hero,
+   centered overlaid radar, archetype-vs-archetype, win/loss per metric, both
+   recap decks, and an `og:image` duel share-card. Revive the prior art from
+   PR #494 (`329daf33`, removed in the profile rework) adapted to the reskinned
+   profile: the `u.$login_.vs.$other.tsx` route (trailing-underscore escapes the
+   parent Outlet, same trick as `blog_.$slug`), `lib/challenge.ts`
+   (`compareDecision` redirect + `buildDuelOgImageUrl`), and the
+   `functions/og-duel/[a]/[b].ts` Pages Function. Likely wants the inline
+   `ProfileDossier` extracted into a shared component first. Own spec.
