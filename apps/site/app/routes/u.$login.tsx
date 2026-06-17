@@ -1,9 +1,10 @@
 // apps/site/app/routes/u.$login.tsx
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { useEffect, useState, type FormEvent, type ReactNode } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { SiteHeader } from "~/components/landing-sections/site-header";
 import { SiteFooter } from "~/components/landing-sections/site-footer";
-import { CardArt, type CardArtAccent } from "~/components/dossier-card-art";
+import { HeroLogoField } from "~/components/landing-v2/supports-strip";
+import { WrappedDeck, type InsightCard } from "~/components/wrapped-deck";
 import { RadarChart, type RadarSeries } from "~/components/radar-chart";
 import {
     archetypeFor,
@@ -122,7 +123,7 @@ function ProfilePage() {
     return (
         <>
             <SiteHeader />
-            <main className="profile-page">
+            <main className="landing-v2 profile-v2">
                 {state.kind === "loading" && <p className="pf-loading">pulling the dossier on @{login}…</p>}
                 {state.kind === "not-found" && <UnclaimedDossier login={login} />}
                 {state.kind === "error" && <p className="pf-loading">couldn't load profile: {state.message}</p>}
@@ -179,41 +180,38 @@ function ProfileDossier({ profile: p, vs }: { profile: ProfileV1; vs: VsState })
     const models = [...p.stats.models].sort((a, b) => b.share - a.share);
     const { colorOf } = buildModelColors(models);
     const arcs = p.workflow ? buildDisplayArcs(p.workflow.arcs, 5) : [];
-    let section = 0;
-    const nextSection = (): string => String(++section).padStart(2, "0");
+    const lede = archetypeFor(profileToAxes(p), p).blurb;
 
     return (
-        <article className="pf-dossier">
-            {/* nameplate */}
-            <header className="pf-mast">
-                <div className="pf-mast-kicker">
+        <article className="profile-v2-doc">
+            {/* hero - landing-v2 treatment over the profile's live data */}
+            <section className="hero">
+                <HeroLogoField />
+                <span className="eyebrow pv2-eyebrow">
                     <span className="pf-live" title="pulled live from the published gist on load">
                         <span className="pf-live-dot" aria-hidden="true" />live
                     </span>
-                    <span>{p.window_days}-day window · compiled {p.generated_at.slice(0, 10)}</span>
+                    <span aria-hidden="true">·</span>
+                    {p.window_days}-day window · compiled {p.generated_at.slice(0, 10)}
+                </span>
+                <h1><span className="pf-at">@</span>{p.github}</h1>
+                <p className="lede">{lede}</p>
+                <span className="pf-harness-list" aria-label="harnesses">
+                    {p.stats.harnesses.map((h) => <span className="pf-harness" key={h}>{h}</span>)}
+                </span>
+                <div className="pv2-vitals" aria-label="vitals">
+                    <Vital num={fmtInt(p.stats.sessions)} label="sessions" />
+                    <Vital num={fmtCompact(p.stats.tokens.total)} label="tokens" />
+                    {p.stats.cost_usd !== undefined && <Vital num={`~${fmtMoney(p.stats.cost_usd)}`} label="est. spend" />}
+                    {ins && <Vital num={fmtCompact(ins.hours_total)} unit="hrs" label="in the loop" />}
+                    <Vital num={`${fmtInt(p.stats.active_days)}/${fmtInt(p.window_days)}`} label="days active" />
+                    <Vital num={`${fmtInt(p.stats.streak_days)}d`} label="streak" />
                 </div>
-                <h1 className="pf-name"><span className="pf-at">@</span>{p.github}</h1>
-                <div className="pf-mast-sub">
-                    <span className="pf-harness-list">
-                        {p.stats.harnesses.map((h) => <span className="pf-harness" key={h}>{h}</span>)}
-                    </span>
-                    <span className="pf-mast-via">compiled from local transcripts by <Link to="/">ax</Link></span>
-                </div>
-            </header>
-
-            {/* vitals ledger */}
-            <section className="pf-ledger" aria-label="vitals">
-                <Vital num={fmtInt(p.stats.sessions)} label="sessions" />
-                <Vital num={fmtCompact(p.stats.tokens.total)} label="tokens" />
-                {p.stats.cost_usd !== undefined && <Vital num={`~${fmtMoney(p.stats.cost_usd)}`} label="est. spend" />}
-                {ins && <Vital num={fmtCompact(ins.hours_total)} unit="hrs" label="in the loop" />}
-                <Vital num={`${fmtInt(p.stats.active_days)}/${fmtInt(p.window_days)}`} label="days active" />
-                <Vital num={`${fmtInt(p.stats.streak_days)}d`} label="streak" />
             </section>
 
             {/* the window: one stacked-bar chart, model-keyed, with a legend */}
             <section className="pf-section">
-                <Kicker n={nextSection()} title="The window" note={`last ${p.window_days} days`} />
+                <SectionIntro eyebrow="the window" title="The window" note={`last ${p.window_days} days`} />
                 {daily.length > 0 ? (
                     <StackedWindow
                         daily={daily}
@@ -228,32 +226,20 @@ function ProfileDossier({ profile: p, vs }: { profile: ProfileV1; vs: VsState })
                 )}
             </section>
 
-            {/* wrapped-style insight cards */}
+            {/* the shape of the work: studio wrapped-card deck */}
             {ins && (
                 <section className="pf-section">
-                    <Kicker n={nextSection()} title="The shape of the work" note="derived from session telemetry" />
-                    <div className="pf-cards">
-                        {buildInsightCards(ins).map((c) => (
-                            <div className="pf-card" key={c.q}>
-                                <CardArt seed={c.q} accent={c.accent ?? "green"} />
-                                <div className="pf-card-body">
-                                    <span className="pf-card-q">{c.q}</span>
-                                    <span className="pf-card-a">{c.a}</span>
-                                    {c.viz && <div className="pf-card-viz" aria-hidden="true">{c.viz}</div>}
-                                    <span className="pf-card-s">{c.s}</span>
-                                </div>
-                            </div>
-                        ))}
-                    </div>
+                    <SectionIntro eyebrow="wrapped" title="The shape of the work" note="derived from session telemetry" />
+                    <WrappedDeck cards={buildInsightCards(ins)} />
                 </section>
             )}
 
             {/* the sign: radar + agent archetype */}
-            <SignSection n={nextSection()} profile={p} vs={vs} />
+            <SignSection profile={p} vs={vs} />
 
             {/* the rig: workflow arcs + leverage-sorted skills + guardrails */}
             <section className="pf-section">
-                <Kicker n={nextSection()} title="The rig" note={`${fmtInt(p.rig.skills.length)} skills · ${fmtInt(p.rig.hooks.length)} hooks`} />
+                <SectionIntro eyebrow="the rig" title="The rig" note={`${fmtInt(p.rig.skills.length)} skills · ${fmtInt(p.rig.hooks.length)} hooks`} />
                 {arcs.length > 0 && (
                     <div className="pf-workflow">
                         <div className="pf-workflow-head">
@@ -334,7 +320,7 @@ function ProfileDossier({ profile: p, vs }: { profile: ProfileV1; vs: VsState })
             {/* taste patterns */}
             {p.taste && p.taste.patterns.length > 0 && (
                 <section className="pf-section">
-                    <Kicker n={nextSection()} title="Taste" note="patterns ax keeps seeing" />
+                    <SectionIntro eyebrow="taste" title="Taste" note="patterns ax keeps seeing" />
                     <div className="pf-taste">
                         {p.taste.patterns.map((t) => (
                             <div className="pf-pattern" key={`${t.category}/${t.name}`}>
@@ -351,10 +337,39 @@ function ProfileDossier({ profile: p, vs }: { profile: ProfileV1; vs: VsState })
                 </section>
             )}
 
-            <VisitorCTA />
+            {/* CTA: lead-in + landing footer-cards grid */}
+            <section className="pf-section pv2-cta" aria-label="get ax">
+                <div className="demo-intro">
+                    <span className="eyebrow">get ax</span>
+                    <h2>This dossier compiled itself.</h2>
+                    <p>ax measures your real agent usage locally and publishes only the aggregate &mdash; to a gist you own.</p>
+                </div>
+                <div className="pv2-cmds">
+                    <code className="pv2-cmd">curl -fsSL ax.necmttn.com/install | bash</code>
+                    <code className="pv2-cmd">ax profile publish</code>
+                </div>
+                <div className="cards-grid">
+                    <Link className="card" to="/docs/install">
+                        <span className="num">01</span>
+                        <span className="card-title">Install ax <span className="arrow">&rarr;</span></span>
+                    </Link>
+                    <Link className="card" to="/routing">
+                        <span className="num">02</span>
+                        <span className="card-title">Routing <span className="arrow">&rarr;</span></span>
+                    </Link>
+                    <Link className="card" to="/leaders">
+                        <span className="num">03</span>
+                        <span className="card-title">Leaders <span className="arrow">&rarr;</span></span>
+                    </Link>
+                    <Link className="card" to="/docs">
+                        <span className="num">04</span>
+                        <span className="card-title">Docs <span className="arrow">&rarr;</span></span>
+                    </Link>
+                </div>
+            </section>
 
             {/* colophon */}
-            <footer className="pf-colophon">
+            <footer className="pv2-colophon">
                 <span>compiled by ax from local agent transcripts · nothing leaves the machine unreviewed</span>
                 <span>publish yours → <code>ax profile publish</code></span>
             </footer>
@@ -373,20 +388,20 @@ function Vital({ num, unit, label }: { num: string; unit?: string; label: string
     );
 }
 
-function Kicker({ n, title, note }: { n: string; title: string; note?: string }) {
+/** Landing-v2 section intro: mono eyebrow + serif h2 + optional note line. */
+function SectionIntro({ eyebrow, title, note }: { eyebrow: string; title: string; note?: string }) {
     return (
-        <div className="pf-kicker">
-            <span className="pf-kicker-n">{n}</span>
+        <div className="demo-intro">
+            <span className="eyebrow">{eyebrow}</span>
             <h2>{title}</h2>
-            <span className="pf-kicker-rule" aria-hidden="true" />
-            {note && <span className="pf-kicker-note">{note}</span>}
+            {note && <p>{note}</p>}
         </div>
     );
 }
 
 /* ---------- the sign: radar + archetype ---------- */
 
-function SignSection({ n, profile, vs }: { n: string; profile: ProfileV1; vs: VsState }) {
+function SignSection({ profile, vs }: { profile: ProfileV1; vs: VsState }) {
     const navigate = useNavigate({ from: "/u/$login" });
     const [draft, setDraft] = useState("");
 
@@ -411,7 +426,7 @@ function SignSection({ n, profile, vs }: { n: string; profile: ProfileV1; vs: Vs
 
     return (
         <section className="pf-section">
-            <Kicker n={n} title="The sign" note="six axes, one archetype" />
+            <SectionIntro eyebrow="the sign" title="The sign" note="six axes, one archetype" />
             <p className="pf-sign-method">
                 Axes are log-anchored to fixed scales (not min-max), so shapes compare
                 across any two profiles.
@@ -770,14 +785,6 @@ function SkillRow({ skill }: { skill: ProfileSkill }) {
     );
 }
 
-interface InsightCard {
-    readonly q: string;
-    readonly a: ReactNode;
-    readonly s: string;
-    readonly accent?: CardArtAccent;
-    readonly viz?: ReactNode;
-}
-
 /* ----- mini trace-viz: tiny, mono, data-driven ----- */
 
 /** slim horizontal track with a filled segment; for share/ratio cards */
@@ -825,7 +832,7 @@ function VizRail({ pos }: { pos: number }) {
     );
 }
 
-function buildInsightCards(ins: ProfileInsights): InsightCard[] {
+function buildInsightCards(ins: ProfileInsights): readonly InsightCard[] {
     // weekday index of the busiest day (0=Sun..6=Sat) for the rail position
     const busiestDow = (() => {
         const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(ins.busiest_day.date);
@@ -863,7 +870,6 @@ function buildInsightCards(ins: ProfileInsights): InsightCard[] {
             q: "Busiest day?",
             a: fmtDay(ins.busiest_day.date),
             s: `${fmtInt(ins.busiest_day.sessions)} sessions in a single day`,
-            accent: "ink",
             viz: busiestDow !== undefined ? <VizRail pos={busiestDow / 6} /> : undefined,
         },
         {
@@ -876,14 +882,12 @@ function buildInsightCards(ins: ProfileInsights): InsightCard[] {
             q: "What actually shipped?",
             a: fmtCompact(ins.commits),
             s: "commits landed across the window",
-            accent: "ink",
             viz: <VizTicks count={ins.commits} />,
         },
         {
             q: "Time in the loop?",
             a: <>{fmtCompact(ins.hours_total)}<small> hrs</small></>,
             s: "of recorded agent time on the clock",
-            accent: "ink",
         },
     ];
 
@@ -912,7 +916,6 @@ function buildInsightCards(ins: ProfileInsights): InsightCard[] {
             q: "How wide is the rig?",
             a: `${fmtInt(ins.distinct_skills)} skills`,
             s: `across ${fmtInt(ins.distinct_tools)} distinct tools`,
-            accent: "ink",
             viz: <VizTicks count={ins.distinct_skills} />,
         });
     }
@@ -950,46 +953,24 @@ function groupSkills(skills: readonly ProfileSkill[]): SkillGroup[] {
 
 function UnclaimedDossier({ login }: { login: string }) {
     return (
-        <section className="pf-empty">
-            <span className="pf-empty-stamp" aria-hidden="true">unclaimed</span>
-            <h1>No dossier on file for @{login}.</h1>
-            <p>
-                ax compiles a public profile from your local agent telemetry - sessions,
-                tokens, model split, the rig you've built, the patterns in how you work.
-                One command. Your transcripts never leave your machine; only the
-                aggregate ships, to a gist you own.
-            </p>
-            <code className="pf-empty-cmd">ax profile publish</code>
-            <p>
-                New to ax? <Link to="/">Start here</Link> - install takes 30 seconds,
-                the first ingest does the rest.
-            </p>
-        </section>
-    );
-}
-
-/* ---------- visitor CTA ---------- */
-
-function VisitorCTA() {
-    return (
-        <section className="pf-cta" aria-label="get ax">
-            <h2 className="pf-cta-headline">This dossier compiled itself.</h2>
-            <p className="pf-cta-sub">
-                ax measures your real agent usage locally and publishes only the aggregate
-                - to a gist you own.
-            </p>
-            <div className="pf-cta-cmds">
-                <code className="pf-cta-cmd">curl -fsSL ax.necmttn.com/install | bash</code>
-                <code className="pf-cta-cmd">ax profile publish</code>
-            </div>
-            <a
-                className="pf-cta-repo"
-                href="https://github.com/Necmttn/ax"
-                target="_blank"
-                rel="noopener noreferrer"
-            >
-                or star the repo →
-            </a>
-        </section>
+        <article className="profile-v2-doc">
+            <section className="hero pv2-unclaimed">
+                <HeroLogoField />
+                <span className="eyebrow">unclaimed</span>
+                <h1><span className="pf-at">@</span>{login}</h1>
+                <p className="lede">No dossier on file for @{login} yet.</p>
+                <p className="pv2-unclaimed-copy">
+                    ax compiles a public profile from your local agent telemetry - sessions,
+                    tokens, model split, the rig you've built, the patterns in how you work.
+                    One command. Your transcripts never leave your machine; only the
+                    aggregate ships, to a gist you own.
+                </p>
+                <code className="pv2-cmd">ax profile publish</code>
+                <p className="pv2-unclaimed-copy">
+                    New to ax? <Link to="/">Start here</Link> - install takes 30 seconds,
+                    the first ingest does the rest.
+                </p>
+            </section>
+        </article>
     );
 }
