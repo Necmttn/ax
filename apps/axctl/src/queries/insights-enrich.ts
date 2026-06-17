@@ -127,17 +127,67 @@ const frictionSessionId = (row: Row): string =>
             : (recordIdString(row.session) ?? String(row.session ?? "")),
     );
 
+/** Pure fold - exported for unit testing. Tags each friction row with the
+ *  dominant content type of its session. `bySession` is keyed by bare session
+ *  UUID (no `session:` prefix). Returns `null` when no content data exists. */
+export const foldContentTypeOntoFriction = (
+    rows: ReadonlyArray<Row>,
+    bySession: ReadonlyMap<string, string>,
+): Array<Row & { readonly contentType: string | null }> =>
+    rows.map((r) => ({ ...r, contentType: bySession.get(frictionSessionId(r)) ?? null }));
+
+/** Batch lookup: for each session in `ids`, return the dominant content-type
+ *  category (most bytes) from the `has_content` edge. Deref-free - the edge
+ *  already denormalizes `session`. */
+const fetchFrictionContentTypes = (
+    sessionIds: readonly string[],
+): Effect.Effect<Map<string, string>, DbError, SurrealClient> =>
+    Effect.gen(function* () {
+        if (sessionIds.length === 0) return new Map<string, string>();
+        const db = yield* SurrealClient;
+        const list = sessionIds
+            .map((id) => `session:\`${bareSession(id).replace(/`/g, "")}\``)
+            .join(", ");
+        const raw = (yield* db.query<[Array<{ sid: string; ct: string; bytes: number }>]>(
+            `SELECT type::string(session) AS sid, type::string(out) AS ct, math::sum(bytes) AS bytes `
+            + `FROM has_content WHERE session IN [${list}] GROUP BY sid, ct;`,
+        ))?.[0] ?? [];
+        // Per session: pick the category with the most bytes
+        const best = new Map<string, { ct: string; bytes: number }>();
+        for (const r of raw) {
+            const sid = bareSession(r.sid);
+            const b = Number(r.bytes ?? 0);
+            const prev = best.get(sid);
+            if (!prev || b > prev.bytes) {
+                best.set(sid, { ct: String(r.ct).replace(/^content_type:/, ""), bytes: b });
+            }
+        }
+        const out = new Map<string, string>();
+        for (const [k, v] of best) out.set(k, v.ct);
+        return out;
+    });
+
 /** Enrich the rows of a classifier insight view with per-row context via
  *  indexed lookups. Views outside ENRICHED_VIEWS pass through untouched.
- *  The "friction" view gets a single batched OTLP cost lookup appended. */
+ *  The "friction" view gets a single batched OTLP cost lookup and a
+ *  session-dominant content-type tag appended. */
 export const enrichInsightRows = Effect.fn("queries.enrichInsightRows")(
     function* (view: InsightView, rows: ReadonlyArray<Row>) {
         if (view === "friction") {
             const ids = rows.map(frictionSessionId);
-            const cost = yield* sessionTelemetryCost(ids);
+            const [cost, contentTypes] = yield* Effect.all(
+                [sessionTelemetryCost(ids), fetchFrictionContentTypes(ids)],
+                { concurrency: 2 },
+            );
             return rows.map((row): Row => {
-                const c = cost.get(frictionSessionId(row));
-                return { ...row, otlp_cost_usd: c?.cost_usd ?? null, otlp_tokens: c?.tokens ?? null };
+                const sid = frictionSessionId(row);
+                const c = cost.get(sid);
+                return {
+                    ...row,
+                    otlp_cost_usd: c?.cost_usd ?? null,
+                    otlp_tokens: c?.tokens ?? null,
+                    contentType: contentTypes.get(sid) ?? null,
+                };
             });
         }
         if (!ENRICHED_VIEWS.has(view)) return rows;
