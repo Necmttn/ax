@@ -1,6 +1,12 @@
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { Option } from "effect";
-import { fail, parseCsvFlag, parseFileHints, requirePositiveInt } from "./shared.ts";
+import {
+    fail,
+    parseCsvFlag,
+    parseFileHints,
+    parseOptionalPositiveDayWindow,
+    requirePositiveInt,
+} from "./shared.ts";
 
 // ---------------------------------------------------------------------------
 // fail
@@ -50,6 +56,21 @@ describe("fail", () => {
         expect(requirePositiveInt("sessions around", "days", 14)).toBe(14);
         expect(errorOutput).toEqual([]);
         expect(exitCode).toBeUndefined();
+    });
+
+    it("parseOptionalPositiveDayWindow accepts bare days and d-suffix days", () => {
+        expect(parseOptionalPositiveDayWindow("skills weighted", "window", undefined)).toBeUndefined();
+        expect(parseOptionalPositiveDayWindow("skills weighted", "window", "14")).toBe(14);
+        expect(parseOptionalPositiveDayWindow("skills weighted", "window", "14d")).toBe(14);
+        expect(parseOptionalPositiveDayWindow("skills weighted", "window", "14D")).toBe(14);
+    });
+
+    it("parseOptionalPositiveDayWindow rejects malformed windows with a usage error", () => {
+        expect(() => parseOptionalPositiveDayWindow("skills weighted", "window", "2w")).toThrow("process.exit(2)");
+        expect(errorOutput).toEqual([
+            'axctl skills weighted: --window must be a positive integer day window like 14 or 14d (got "2w")',
+        ]);
+        expect(exitCode).toBe(2);
     });
 });
 

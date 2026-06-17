@@ -11,7 +11,7 @@ import { Effect } from "effect";
 import { SurrealClient } from "@ax/lib/db";
 import type { DbError } from "@ax/lib/errors";
 import { fetchSparSessionIds } from "../queries/spar-sessions.ts";
-import { sessionTelemetryLatency, bareSession } from "../queries/telemetry-rollup.ts";
+import { enrichRowsWithTelemetryLatency } from "../queries/telemetry-rollup.ts";
 import { fetchSkillHygiene, SKILL_HYGIENE_MIN_INVOCATIONS } from "../queries/skill-hygiene.ts";
 
 // ---------------------------------------------------------------------------
@@ -378,17 +378,23 @@ export const fetchSkillsWeighted = (
             [...skillToSessions.values()].flat(),
         )];
 
-        // One batched call to fetch latency for all recovery sessions
-        const latencyMap = yield* sessionTelemetryLatency(allRecoverySessions);
+        const latencyRows = yield* enrichRowsWithTelemetryLatency(
+            allRecoverySessions,
+            (sid) => sid,
+            (session, latency) => ({ session, duration_ms: latency?.duration_ms ?? null }),
+        );
+        const latencyBySession = new Map(
+            latencyRows.map((row) => [row.session, row.duration_ms] as const),
+        );
 
         // Compute per-skill median recovery duration
         const skillMedianMs = new Map<string, number | null>();
         for (const [skillId, sessionIds] of skillToSessions) {
             const durations: number[] = [];
             for (const sid of sessionIds) {
-                const entry = latencyMap.get(bareSession(sid));
-                if (entry?.duration_ms != null) {
-                    durations.push(entry.duration_ms);
+                const duration = latencyBySession.get(sid);
+                if (duration != null) {
+                    durations.push(duration);
                 }
             }
             if (durations.length === 0) {

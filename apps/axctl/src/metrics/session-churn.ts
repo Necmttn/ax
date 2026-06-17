@@ -1,5 +1,5 @@
 import { Effect } from "effect";
-import { sessionTelemetryCost } from "../queries/telemetry-rollup.ts";
+import { enrichRowsWithTelemetryCost } from "../queries/telemetry-rollup.ts";
 import { recordLiteral } from "@ax/lib/ids";
 import { recordKeyPart } from "@ax/lib/shared/derive-keys";
 import { SurrealClient } from "@ax/lib/db";
@@ -310,14 +310,15 @@ ${where};`))?.[0] ?? [];
             landedCommits: landed.commits,
         });
 
-        if (summary.hotSessions.length === 0) return summary;
-        const ids = summary.hotSessions.map((r) => r.session);
-        const cost = yield* sessionTelemetryCost(ids);
-        const hotSessions = summary.hotSessions.map((r) => ({
-            ...r,
-            otlp_cost_usd: cost.get(r.session)?.cost_usd ?? null,
-            otlp_tokens: cost.get(r.session)?.tokens ?? null,
-        }));
+        const hotSessions = yield* enrichRowsWithTelemetryCost(
+            summary.hotSessions,
+            (r) => r.session,
+            (r, cost) => ({
+                ...r,
+                otlp_cost_usd: cost?.cost_usd ?? null,
+                otlp_tokens: cost?.tokens ?? null,
+            }),
+        );
         return { ...summary, hotSessions };
     });
 

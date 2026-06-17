@@ -591,10 +591,7 @@ export function RawTable({
                         return (
                             <Fragment key={m.key}>
                                 <tr className={vs ? "pf-rawvals-row pf-rawvals-row--pair" : "pf-rawvals-row"}>
-                                    <th scope="row" rowSpan={vs ? 2 : 1}>
-                                        <span className="pf-rawvals-metric">{m.label}</span>
-                                        <span className="pf-rawvals-metric-note">{m.note}</span>
-                                    </th>
+                                    <th scope="row" rowSpan={vs ? 2 : 1}>{m.label}</th>
                                     <td className={aLeads ? "pf-rawvals-val pf-rawvals-val--lead" : "pf-rawvals-val"}>
                                         {a.label}
                                         {aLeads && <span className="pf-rawvals-dot" aria-label="leads" />}

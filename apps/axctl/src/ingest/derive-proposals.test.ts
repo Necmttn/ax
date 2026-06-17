@@ -1,17 +1,21 @@
 import { describe, expect, test } from "bun:test";
 import {
     buildGuidanceProposalStatements,
+    buildImageContextProposalStatements,
     buildRoutingProposalStatements,
     buildSkillProposalStatements,
     dedupeSig,
     deriveGuidanceProposalRows,
+    deriveImageContextProposalRow,
     deriveRoutingProposalRow,
     deriveSkillProposalRows,
+    IMAGE_CONTEXT_THRESHOLD_MB,
     normalizeTitle,
     parseMetrics,
     skillProposalFrequency,
 } from "./derive-proposals.ts";
 import type { HarnessLearningCandidate } from "../project/types.ts";
+import type { ImageContextResult } from "../queries/image-context.ts";
 
 describe("derive-proposals helpers", () => {
     test("normalizeTitle lowercases + collapses whitespace", () => {
@@ -273,5 +277,89 @@ describe("buildRoutingProposalStatements", () => {
         const sql = stmts.join("\n");
         expect(sql).toContain("form: \"hook\"");
         expect(sql).toContain(String(baseRoutingRow.frequency));
+    });
+});
+
+// ---------------------------------------------------------------------------
+// Image context proposal tests
+// ---------------------------------------------------------------------------
+
+const MB = 1024 * 1024;
+
+const makeImageContextResult = (mainBytes: number, mainCalls: number): ImageContextResult => ({
+    rows: [],
+    totals: { mainBytes, mainCalls, subagentBytes: 0, subagentCalls: 0 },
+});
+
+describe("deriveImageContextProposalRow", () => {
+    test("returns null when main bytes are below the threshold", () => {
+        const result = makeImageContextResult((IMAGE_CONTEXT_THRESHOLD_MB - 1) * MB, 10);
+        expect(deriveImageContextProposalRow(result, 14)).toBeNull();
+    });
+
+    test("returns null when main bytes are exactly zero", () => {
+        expect(deriveImageContextProposalRow(makeImageContextResult(0, 0), 14)).toBeNull();
+    });
+
+    test("emits a row when main bytes meet the threshold", () => {
+        const result = makeImageContextResult(IMAGE_CONTEXT_THRESHOLD_MB * MB, 5);
+        const row = deriveImageContextProposalRow(result, 14);
+        expect(row).not.toBeNull();
+        expect(row!.title).toBe("Isolate large-image visual judgment to a subagent");
+        expect(row!.frequency).toBe(5);
+        expect(row!.sig.startsWith("subagent__")).toBe(true);
+    });
+
+    test("confidence=medium at threshold (20 MB)", () => {
+        const row = deriveImageContextProposalRow(makeImageContextResult(IMAGE_CONTEXT_THRESHOLD_MB * MB, 3), 14);
+        expect(row!.confidence).toBe("medium");
+    });
+
+    test("confidence=high when main bytes >= 50 MB", () => {
+        const row = deriveImageContextProposalRow(makeImageContextResult(50 * MB, 20), 14);
+        expect(row!.confidence).toBe("high");
+    });
+
+    test("hypothesis includes MB figure, sinceDays, and call count", () => {
+        const row = deriveImageContextProposalRow(makeImageContextResult(30 * MB, 8), 14);
+        expect(row!.hypothesis).toContain("30.0 MB");
+        expect(row!.hypothesis).toContain("last 14d");
+        expect(row!.hypothesis).toContain("8 image reads");
+        expect(row!.hypothesis).toContain("ax cost images");
+        expect(row!.hypothesis).toContain("isolate-heavy-context");
+    });
+
+    test("dedupe_sig is stable across two derivations with different byte counts", () => {
+        const row1 = deriveImageContextProposalRow(makeImageContextResult(25 * MB, 5), 14);
+        const row2 = deriveImageContextProposalRow(makeImageContextResult(60 * MB, 20), 14);
+        // Byte counts differ (hypothesis differs) but title is identical -> same dedupe_sig
+        expect(row1!.sig).toBe(row2!.sig);
+    });
+});
+
+describe("buildImageContextProposalStatements", () => {
+    const baseRow = deriveImageContextProposalRow(
+        makeImageContextResult(25 * MB, 7),
+        14,
+    )!;
+
+    test("new sig: CREATE proposal with form='subagent', baseline, status='open'", () => {
+        const stmts = buildImageContextProposalStatements(baseRow, new Set());
+        const sql = stmts.join("\n");
+        expect(sql).toContain("CREATE proposal:");
+        expect(sql).toContain("form: \"subagent\"");
+        expect(sql).toContain("status: \"open\"");
+        expect(sql).toContain("baseline:");
+        expect(sql).toContain(`dedupe_sig: "${baseRow.sig}"`);
+    });
+
+    test("existing sig: UPDATE mutable fields only, no baseline/status touch", () => {
+        const stmts = buildImageContextProposalStatements(baseRow, new Set([baseRow.sig]));
+        const sql = stmts.join("\n");
+        expect(sql).toContain("UPDATE proposal:");
+        expect(sql).not.toContain("CREATE proposal:");
+        expect(sql).not.toMatch(/\bstatus\s*=/);
+        expect(sql).not.toMatch(/\bbaseline\s*=/);
+        expect(sql).toMatch(/\bfrequency\s*=\s*7/);
     });
 });

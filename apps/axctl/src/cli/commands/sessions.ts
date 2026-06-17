@@ -38,7 +38,7 @@ import { fetchSessionChurnSummary, formatSessionChurnSummary } from "../../metri
 import { fetchSessionMetrics } from "../../metrics/session-metrics-query.ts";
 import { formatSessionMetrics, SESSION_METRICS_LEGEND } from "../../metrics/util.ts";
 import { buildSessionsNext, buildSessionShowNext } from "../../nav/next-links.ts";
-import { resolvePwdRepository } from "../../pwd.ts";
+import { resolvePwdRepository, type PwdResolution } from "../../pwd.ts";
 import { printNextLinks } from "../next-format.ts";
 import { catchDbErrorAndExit, stderrExit, wantsJsonFlag } from "../output.ts";
 import { renderCompareTable, renderCompareJson } from "../session-compare-format.ts";
@@ -57,6 +57,21 @@ import {
 // ---------------------------------------------------------------------------
 // ax sessions - windowed session queries (F2, F3)
 // ---------------------------------------------------------------------------
+
+export const projectRootForHere = (
+    pwd: Pick<PwdResolution, "repoRoot" | "mainRepoRoot">,
+): string => {
+    const { repoRoot, mainRepoRoot } = pwd;
+    if (!mainRepoRoot || mainRepoRoot === repoRoot) return repoRoot;
+    // `sessionProjectClause` filters by cwd path-prefix, so rolling `--here` up
+    // to the primary checkout only works when this worktree physically lives
+    // under it (the common `.claude/worktrees/*` layout). An external/bare
+    // worktree - or a mis-derived `--git-common-dir` (submodule `.git/modules/*`
+    // etc.) - keeps its own root, otherwise its sessions would be silently
+    // filtered out of `sessions metrics/churn --here`.
+    const prefix = mainRepoRoot.endsWith("/") ? mainRepoRoot : `${mainRepoRoot}/`;
+    return repoRoot.startsWith(prefix) ? mainRepoRoot : repoRoot;
+};
 
 /**
  * Format a list of SessionRows for TTY output as a compact table.
@@ -648,7 +663,7 @@ const cmdSessionsMetrics = (input: {
                     stderrExit(`axctl sessions metrics: --here requires a git repository (cwd=${err.cwd})\n`, 2),
                 ),
             );
-            project = pwd.repoRoot;
+            project = projectRootForHere(pwd);
         }
         const since = input.sinceDays === null
             ? null
@@ -758,7 +773,7 @@ export const cmdSessionsChurn = (input: {
                     stderrExit(`axctl sessions churn: --here requires a git repository (cwd=${err.cwd})\n`, 2),
                 ),
             );
-            project = pwd.repoRoot;
+            project = projectRootForHere(pwd);
         }
 
         // Default window keeps the all-session fan-out bounded on mature DBs;

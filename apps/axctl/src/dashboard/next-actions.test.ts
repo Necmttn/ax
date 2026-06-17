@@ -13,6 +13,7 @@ import {
     churnCards,
     housekeepingCards,
     fetchNextActions,
+    nextActionSourceTimeoutMs,
     proposalCards,
     routingCards,
     skillHygieneCards,
@@ -268,12 +269,21 @@ describe("impactChip", () => {
         const b = proposalCards([openProposal({ form: "guidance", frequency: 1 })])[0]!;
         expect(b.impact_chip).toBeNull();
     });
+
+    test("forms without chip metadata return null", () => {
+        expect(proposalCards([openProposal({ form: "subagent", frequency: 9 })])[0]!.impact_chip).toBeNull();
+        expect(proposalCards([openProposal({ form: "automation", frequency: 9 })])[0]!.impact_chip).toBeNull();
+        expect(proposalCards([openProposal({ form: "harness_check", frequency: 9 })])[0]!.impact_chip).toBeNull();
+    });
 });
 
 describe("fixKind", () => {
     test("names the mechanism per form, guidance names its file target", () => {
         expect(proposalCards([openProposal({ form: "skill" })])[0]!.fix_kind).toBe("new skill");
         expect(proposalCards([openProposal({ form: "hook" })])[0]!.fix_kind).toBe("new hook");
+        expect(proposalCards([openProposal({ form: "subagent" })])[0]!.fix_kind).toBe("new subagent");
+        expect(proposalCards([openProposal({ form: "automation" })])[0]!.fix_kind).toBe("automation");
+        expect(proposalCards([openProposal({ form: "harness_check" })])[0]!.fix_kind).toBe("harness check");
         expect(
             proposalCards([
                 openProposal({
@@ -613,6 +623,16 @@ describe("housekeepingCards", () => {
 });
 
 describe("fetchNextActions", () => {
+    test("default budgets keep fast tool failures separate from slower discovery sources", () => {
+        expect(nextActionSourceTimeoutMs("tool_failure")).toBe(4_000);
+        expect(nextActionSourceTimeoutMs("proposal")).toBe(12_000);
+        expect(nextActionSourceTimeoutMs("churn")).toBe(30_000);
+        expect(nextActionSourceTimeoutMs("routing")).toBe(12_000);
+        expect(nextActionSourceTimeoutMs("skill_hygiene")).toBe(30_000);
+        expect(nextActionSourceTimeoutMs("housekeeping")).toBe(12_000);
+        expect(nextActionSourceTimeoutMs("routing", 50)).toBe(50);
+    });
+
     test("a failing source degrades to a note, never a defect", async () => {
         const stub: SurrealClientShape = {
             query: (_sql: string) => Effect.fail(new Error("db down") as never),

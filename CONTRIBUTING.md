@@ -83,6 +83,16 @@ bun run typecheck
 
 CI runs both - failing either blocks merge.
 
+## Shipping a new signal
+
+When you add a new write to the ax graph (table, edge, field, ingest stage) or a
+new analytic query, run the **`ship-checklist`** skill before opening the PR. It
+is the definition-of-done: every write needs an on-demand read AND a proactive
+(agent-facing) read AND docs/distribution - not just the write. The recurring
+miss is shipping the write + a manual CLI read while skipping the MCP tool,
+`improve recommend` generator, and skill pattern that make the signal
+discoverable by an agent. See `skills/ship-checklist/SKILL.md`.
+
 ## Code style
 
 - TypeScript strict, `module: preserve`, `moduleResolution: bundler`.

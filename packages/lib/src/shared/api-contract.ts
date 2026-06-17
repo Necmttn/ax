@@ -984,6 +984,10 @@ export const UsageRollupSchema = Schema.Struct({
     total: Schema.Number,
     activeDays: Schema.Number,
     topCommands: Schema.Array(TopCommandEntry),
+    topCommandsByOrigin: Schema.Struct({
+        agent: Schema.Array(TopCommandEntry),
+        tty: Schema.Array(TopCommandEntry),
+    }),
     unusedSurface: Schema.Array(Schema.String),
     originSplit: Schema.Struct({ agent: Schema.Number, tty: Schema.Number }),
     reliability: Schema.Array(ReliabilityEntry),

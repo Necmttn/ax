@@ -1,8 +1,8 @@
 /**
- * `ax cost models / sessions / split` - model/cost analytics.
+ * `ax cost models / sessions / split / images` - model/cost analytics.
  *
- * All three subcommands are read-only, use the `db` runtime, and mirror
- * the pattern from commands/costs.ts and commands/skills.ts.
+ * All subcommands are read-only, use the `db` runtime, and mirror the
+ * pattern from commands/costs.ts and commands/skills.ts.
  */
 import { Effect } from "effect";
 import { Command, Flag } from "effect/unstable/cli";
@@ -13,8 +13,10 @@ import {
     fetchCostModels,
     fetchCostSessions,
     fetchCostSplit,
+    type CostModelsResult,
 } from "../../queries/cost-analytics.ts";
 import { fetchRoutability, type RoutabilityResult } from "../../queries/routability.ts";
+import { fetchImageContext } from "../../queries/image-context.ts";
 import {
     buildCostModelsNext,
     buildCostSplitNext,
@@ -28,6 +30,40 @@ import { fail, jsonFlag, optionValue, positiveLimit } from "./shared.ts";
 // ---------------------------------------------------------------------------
 // ax cost models [--days=N] [--json]
 // ---------------------------------------------------------------------------
+
+export function renderCostModelsTable(result: CostModelsResult): string {
+    type ModelRow = {
+        model: string;
+        sessions: string;
+        prompt: string;
+        completion: string;
+        cache_read: string;
+        cache_create: string;
+        cost: string;
+    };
+
+    const rendered: ModelRow[] = result.rows.map((r) => ({
+        model: r.model,
+        sessions: integer(r.sessions),
+        prompt: integer(r.prompt_tokens),
+        completion: integer(r.completion_tokens),
+        cache_read: integer(r.cache_read_tokens),
+        cache_create: integer(r.cache_create_tokens),
+        cost: usd(r.cost_usd),
+    }));
+
+    const cols: Column<ModelRow>[] = [
+        { header: "model", get: (r) => r.model, min: 20 },
+        { header: "sessions", get: (r) => r.sessions, align: "right", min: 8 },
+        { header: "prompt", get: (r) => r.prompt, align: "right", min: 14 },
+        { header: "completion", get: (r) => r.completion, align: "right", min: 14 },
+        { header: "cache_read", get: (r) => r.cache_read, align: "right", min: 12 },
+        { header: "cache_create", get: (r) => r.cache_create, align: "right", min: 12 },
+        { header: "cost", get: (r) => r.cost, align: "right", min: 10 },
+    ];
+
+    return renderTable({ columns: cols, rows: rendered, gap: " " });
+}
 
 const cmdCostModels = (input: {
     readonly sinceDays: number;
@@ -47,38 +83,7 @@ const cmdCostModels = (input: {
         }
 
         printNextLinks(buildCostModelsNext(result));
-
-        type ModelRow = {
-            model: string;
-            sessions: string;
-            prompt: string;
-            completion: string;
-            cache_read: string;
-            cache_create: string;
-            cost: string;
-        };
-
-        const rendered: ModelRow[] = result.rows.map((r) => ({
-            model: r.model,
-            sessions: integer(r.sessions),
-            prompt: integer(r.prompt_tokens),
-            completion: integer(r.completion_tokens),
-            cache_read: integer(r.cache_read_tokens),
-            cache_create: integer(r.cache_create_tokens),
-            cost: usd(r.cost_usd),
-        }));
-
-        const cols: Column<ModelRow>[] = [
-            { header: "model", get: (r) => r.model, min: 20 },
-            { header: "sessions", get: (r) => r.sessions, align: "right", width: 8 },
-            { header: "prompt", get: (r) => r.prompt, align: "right", width: 14 },
-            { header: "completion", get: (r) => r.completion, align: "right", width: 14 },
-            { header: "cache_read", get: (r) => r.cache_read, align: "right", width: 12 },
-            { header: "cache_create", get: (r) => r.cache_create, align: "right", width: 12 },
-            { header: "cost", get: (r) => r.cost, align: "right", width: 10 },
-        ];
-
-        console.log(renderTable({ columns: cols, rows: rendered, gap: " " }));
+        console.log(renderCostModelsTable(result));
         console.log(`\ntotal: ${usd(result.total_cost_usd)}  (${input.sinceDays} days)`);
     });
 
@@ -346,18 +351,101 @@ const costRoutabilityCommand = Command.make(
 );
 
 // ---------------------------------------------------------------------------
+// ax cost images [--days=N] [--limit=N] [--json]
+// ---------------------------------------------------------------------------
+
+const mb = (bytes: number): string => (bytes / 1_048_576).toFixed(2);
+
+const cmdCostImages = (input: {
+    readonly sinceDays: number;
+    readonly limit: number;
+    readonly json: boolean;
+}) =>
+    Effect.gen(function* () {
+        const result = yield* fetchImageContext({ sinceDays: input.sinceDays, limit: input.limit });
+
+        if (input.json) {
+            console.log(prettyPrint(result));
+            return;
+        }
+
+        if (result.rows.length === 0) {
+            console.log("(no image content in the requested window)");
+            return;
+        }
+
+        type ImgRow = {
+            session: string;
+            origin: string;
+            calls: string;
+            mb: string;
+            est_tok: string;
+        };
+
+        const rendered: ImgRow[] = result.rows.map((r) => ({
+            // Strip "session:" prefix and SurrealDB backtick wrapping
+            session: r.session.replace(/^session:/, "").replace(/^`(.*)`$/, "$1").slice(0, 14),
+            origin: r.origin,
+            calls: integer(r.calls),
+            mb: mb(r.bytes),
+            est_tok: integer(r.estTokens),
+        }));
+
+        const cols: Column<ImgRow>[] = [
+            { header: "session", get: (r) => r.session, width: 14 },
+            { header: "origin", get: (r) => r.origin, width: 8 },
+            { header: "calls", get: (r) => r.calls, align: "right", width: 6 },
+            { header: "MB", get: (r) => r.mb, align: "right", width: 9 },
+            { header: "est_tok", get: (r) => r.est_tok, align: "right", width: 10 },
+        ];
+
+        console.log(renderTable({ columns: cols, rows: rendered, gap: " " }));
+        console.log();
+        const t = result.totals;
+        console.log(
+            `main-thread image context: ${mb(t.mainBytes)} MB (${integer(t.mainCalls)} calls) - persists + re-bills across turns`,
+        );
+        console.log(`subagent: ${mb(t.subagentBytes)} MB (${integer(t.subagentCalls)} calls) - isolated`);
+        console.log(`\n(${input.sinceDays} days)`);
+    });
+
+const costImagesCommand = Command.make(
+    "images",
+    {
+        days: Flag.integer("days").pipe(Flag.withDefault(COST_DEFAULT_WINDOW_DAYS)),
+        limit: positiveLimit(20),
+        json: jsonFlag,
+    },
+    ({ days, limit, json }) => {
+        if (!Number.isInteger(days) || days <= 0) {
+            fail(`ax cost images: --days must be a positive integer (got "${days}")`);
+        }
+        if (!Number.isInteger(limit) || limit <= 0) {
+            fail(`ax cost images: --limit must be a positive integer (got "${limit}")`);
+        }
+        return cmdCostImages({ sinceDays: days, limit, json });
+    },
+).pipe(
+    Command.withDescription(
+        "Image-read context cost per session split by main-thread vs subagent. " +
+        "--days=N (default 14)  --limit=N (default 20)  --json",
+    ),
+);
+
+// ---------------------------------------------------------------------------
 // ax cost (group command)
 // ---------------------------------------------------------------------------
 
 export const costCommand = Command.make("cost").pipe(
     Command.withDescription(
-        "Model/cost analytics: per-model rollup, top sessions, main-vs-subagent split",
+        "Model/cost analytics: per-model rollup, top sessions, main-vs-subagent split, image context cost",
     ),
     Command.withSubcommands([
         costModelsCommand,
         costSessionsCommand,
         costSplitCommand,
         costRoutabilityCommand,
+        costImagesCommand,
     ]),
 );
 

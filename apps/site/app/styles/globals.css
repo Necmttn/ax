@@ -13121,29 +13121,13 @@ footer.site-footer { padding: 48px 32px 56px; }
 .pf-rawvals-table thead th span { font-weight: 600; text-transform: none; letter-spacing: 0.03em; }
 .pf-rawvals-table tbody tr { border-bottom: 1px solid var(--line); }
 .pf-rawvals-table tbody th {
-    font-weight: 400;
-    color: var(--muted);
-    text-align: left;
-    width: 190px;
-    vertical-align: top;
-    padding-right: 14px;
-}
-.pf-rawvals-metric {
-    display: block;
     font-size: 10.5px;
+    font-weight: 400;
     text-transform: uppercase;
     letter-spacing: 0.12em;
     color: var(--muted);
-}
-.pf-rawvals-metric-note {
-    display: block;
-    margin-top: 2px;
-    font-size: 10px;
-    line-height: 1.35;
-    text-transform: none;
-    letter-spacing: 0.01em;
-    color: var(--faint, var(--muted));
-    opacity: 0.72;
+    text-align: left;
+    width: 110px;
 }
 /* under-chart axis legend: spoke abbreviation -> plain meaning */
 .pf-axis-legend {
@@ -13196,7 +13180,7 @@ footer.site-footer { padding: 48px 32px 56px; }
 }
 @media (max-width: 560px) {
     .pf-sign-name { font-size: 32px; }
-    .pf-rawvals-table tbody th { width: 130px; }
+    .pf-rawvals-table tbody th { width: 84px; }
     .pf-rawvals-val { white-space: normal; }
 }
 

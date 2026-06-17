@@ -22,6 +22,7 @@ const EXPECTED_INPUT_SHAPES: Record<string, readonly string[]> = {
     signal_show: ["id", "limit"],
     cost_models: ["days"],
     cost_split: ["days"],
+    cost_images: ["days", "limit"],
     cost_routability: ["days", "min_run"],
     dispatches: ["candidates", "days", "limit"],
     dojo_agenda: ["days", "spar"],

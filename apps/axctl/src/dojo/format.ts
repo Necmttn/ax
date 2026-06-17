@@ -20,6 +20,9 @@ export const renderAgenda = (agenda: DojoAgenda): string => {
     if (!b.has_surplus) {
         lines.push("no surplus in the current window - dojo will not start without --force");
     }
+    if (agenda.source_failures.length > 0) {
+        lines.push(`degraded sources: ${agenda.source_failures.map((f) => f.source).join(", ")}`);
+    }
     lines.push("");
     agenda.items.forEach((item, i) => {
         lines.push(`${i + 1}. [${item.kind}/${item.cost_class}] ${item.title}`);

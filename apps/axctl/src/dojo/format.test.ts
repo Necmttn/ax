@@ -11,6 +11,7 @@ const agenda: DojoAgenda = {
         window_remaining_pct: 35, reserve_pct: 15,
         deadline: "2026-06-13T12:00:00.000Z", source: "quota",
     },
+    source_failures: [],
     items: [
         {
             id: "verdict:experiment:aaa", kind: "verdict_pending",
@@ -45,5 +46,13 @@ describe("renderAgenda", () => {
         });
         expect(out).toContain("no surplus");
         expect(out).toContain("--force");
+    });
+
+    test("source failures are visible in human output", () => {
+        const out = renderAgenda({
+            ...agenda,
+            source_failures: [{ source: "churn", message: "db offline" }],
+        });
+        expect(out).toContain("degraded sources: churn");
     });
 });
