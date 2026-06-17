@@ -6,11 +6,11 @@
  * record does it correspond to?" resolver.
  */
 import { Effect, FileSystem, Schema } from "effect";
-import * as posixPath from "node:path/posix";
 import { RecordId } from "surrealdb";
 import { SurrealClient } from "@ax/lib/db";
 import type { DbError } from "@ax/lib/errors";
 import { orAbsent } from "@ax/lib/shared/fs-error";
+import { posixPath } from "@ax/lib/shared/path";
 import { ProcessService, type ProcessError } from "@ax/lib/process";
 import {
     chooseIdentity,
