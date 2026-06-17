@@ -9,9 +9,11 @@ import { buildProfile } from "./render.ts";
 // 10 sessionDurations  11 peakHour  12 spawnedCount  13 commitCount  14 topTools
 // 15 wrappedCounts(toolAgg)  16 wrappedCounts(turnCount)
 // 17 wrappedCounts(distinctSkills)  18 wrappedCounts(reposCount)
+// 18b wrappedCounts(verifyAgg)
 // 19 dailyModels  20 dailyToolCalls  21 dailyCommits
 // 22 windowedInvocations  23 windowedSessions
 // 24 deepSessions:total  25 deepSessions:produced  26 deepSessions:landed-loc
+// 27 contentTypeBreakdown
 const mockResults = [
     [[{ prompt_tokens: 31_000_000, completion_tokens: 7_000_000, sessions: 142 }]],
     [[{ date: "2026-06-11" }, { date: "2026-06-12" }]],
@@ -90,6 +92,11 @@ const mockResults = [
     [[
         { commit: "commit:abc", loc: 120 },
         { commit: "commit:def", loc: 0 },
+    ]],
+    // 27: contentTypeBreakdown
+    [[
+        { ct: "content_type:code", calls: 10, bytes: 800 },
+        { ct: "content_type:text", calls: 5, bytes: 200 },
     ]],
 ];
 
@@ -181,9 +188,17 @@ describe("buildProfile", () => {
         expect(p.stats.models[0]).toEqual({ name: "fable", share: 100 / 142 });
     });
 
-    test("no proposals -> taste omitted", async () => {
+    test("no proposals -> taste has only the mix pattern from content types", async () => {
         const noProposals = mockResults.map((r, i) => (i === 5 ? [[]] : r));
         const db = makeMockDb(noProposals);
+        const p = await runWithMock(db, buildProfile({ windowDays: 30, includeCost: true, env }));
+        expect(p.taste?.patterns).toHaveLength(1);
+        expect(p.taste?.patterns[0]?.category).toBe("tool-output-mix");
+    });
+
+    test("no proposals + no content types -> taste omitted", async () => {
+        const noTaste = mockResults.map((r, i) => (i === 5 || i === 27 ? [[]] : r));
+        const db = makeMockDb(noTaste);
         const p = await runWithMock(db, buildProfile({ windowDays: 30, includeCost: true, env }));
         expect(p.taste).toBeUndefined();
     });

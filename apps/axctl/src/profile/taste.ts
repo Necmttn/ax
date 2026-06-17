@@ -10,6 +10,7 @@
  * the publish path MUST scrub or require per-pattern confirmation before
  * this text leaves the machine.
  */
+import type { ContentTypeBreakdown } from "../queries/content-types.ts";
 import type { ProposalRow } from "./queries.ts";
 import type { TastePattern } from "./schema.ts";
 
@@ -46,6 +47,25 @@ const FORM_TO_CATEGORY: Record<string, ProseCategory> = {
 };
 
 const dayOf = (iso: string): string => iso.slice(0, 10);
+
+/**
+ * Derive a tool-output-mix pattern from the global content-type breakdown.
+ * Returns null when the breakdown is empty (taste section stays omitted).
+ */
+export function buildToolOutputMixPattern(
+    breakdown: ContentTypeBreakdown,
+    sessions: number,
+) {
+    const top = breakdown.rows.slice(0, 3);
+    if (top.length === 0) return null;
+    const lead = top[0]!;
+    return {
+        category: "tool-output-mix" as const,
+        name: `${lead.category}-heavy context`,
+        summary: `Context is ${Math.round(lead.tokenShare * 100)}% ${lead.category} by tokens (${top.map((r) => r.category).join(", ")}).`,
+        evidence: { sessions, confidence: 0.9 },
+    };
+}
 
 export function deriveTastePatterns(rows: ReadonlyArray<ProposalRow>): TastePattern[] {
     const byName = new Map<string, { row: ProposalRow; pattern: TastePattern }>();

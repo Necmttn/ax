@@ -6,6 +6,7 @@
  * hook files, rules text) is injected so the Effect needs only SurrealClient.
  */
 import { Effect } from "effect";
+import { fetchContentTypeBreakdown } from "../queries/content-types.ts";
 import { fetchCostModels } from "../queries/cost-analytics.ts";
 import {
     fetchAcceptedProposals,
@@ -31,7 +32,7 @@ import {
 import { deriveInsights } from "./insights.ts";
 import { deriveRig } from "./rig.ts";
 import { computeStreak } from "./streak.ts";
-import { deriveTastePatterns } from "./taste.ts";
+import { buildToolOutputMixPattern, deriveTastePatterns } from "./taste.ts";
 import { decodeProfile, type ProfileV1 } from "./schema.ts";
 import { deriveWorkflowArcs } from "./workflow.ts";
 import { computeDownstreamShares } from "./downstream.ts";
@@ -60,9 +61,11 @@ export const buildProfile = Effect.fn("profile.buildProfile")(
         // 5 skillScopes  6 acceptedProposals  7 costModels
         // 8+9 dailyActivityFull (sessions, tokens)  10 sessionDurations
         // 11 peakHour  12 spawnedCount  13 commitCount  14 topTools
-        // 15+16+17+18 wrappedCounts (toolAgg, turnCount, distinctSkills, reposCount)
+        // 15+16+17+18+18b wrappedCounts (toolAgg, turnCount, distinctSkills, reposCount, verifyAgg)
         // 19 dailyModels  20 dailyToolCalls  21 dailyCommits
         // 22 windowedInvocations  23 windowedSessions
+        // 24 deepSessions:total  25 deepSessions:produced  26 deepSessions:landed-loc
+        // 27 contentTypeBreakdown
         const totals = yield* fetchTokenTotals({ windowDays });
         const daily = yield* fetchDailyActivity({ windowDays });
         const harnesses = yield* fetchHarnesses({ windowDays });
@@ -84,9 +87,10 @@ export const buildProfile = Effect.fn("profile.buildProfile")(
         const windowedInvocations = yield* fetchWindowedInvocations({ windowDays });
         const windowedSessions = yield* fetchWindowedSessions({ windowDays });
         // 24 deepSessions (outcome-density DEPTH numerator + non-subagent
-        // denominator; appended last so existing render.test mock order stays
-        // aligned). Internally fans out: total-count -> produced -> landed-loc.
+        // denominator). Internally fans out: total-count -> produced -> landed-loc.
         const deep = yield* fetchDeepSessionCount({ windowDays });
+        // 27 content-type breakdown (appended last; keeps mock order in render.test.ts aligned)
+        const contentTypes = yield* fetchContentTypeBreakdown();
 
         const streak = computeStreak(daily, env.today);
 
@@ -105,6 +109,8 @@ export const buildProfile = Effect.fn("profile.buildProfile")(
         });
 
         const patterns = deriveTastePatterns(proposals);
+        const mixPattern = buildToolOutputMixPattern(contentTypes, totals.sessions);
+        if (mixPattern !== null) patterns.push(mixPattern);
 
         // null when there is no data at all -> section omitted below.
         const insights = deriveInsights({
