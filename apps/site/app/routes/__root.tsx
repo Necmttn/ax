@@ -30,6 +30,16 @@ export const Route = createRootRoute({
         { name: "twitter:image", content: image },
       ],
       links: [{ rel: "canonical", href: url }],
+      // Cloudflare Web Analytics (privacy-first, beacon-based page views).
+      // Browser-only by design - curl|sh installs are tracked separately via
+      // GitHub release download_count (scripts/adoption.ts), not here.
+      scripts: [
+        {
+          src: "https://static.cloudflareinsights.com/beacon.min.js",
+          defer: true,
+          "data-cf-beacon": '{"token": "833ce82a59a5444dae0e7f986d4552fe"}',
+        },
+      ],
     };
   },
   component: () => (
