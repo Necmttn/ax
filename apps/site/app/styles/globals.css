@@ -15744,18 +15744,8 @@ footer.site-footer { padding: 48px 32px 56px; }
   align-items: center;
   justify-content: center;
 }
-.profile-duel .pf-rawvals-split-mid::before {
-  content: "";
-  position: absolute;
-  left: 50%;
-  top: -1px;
-  bottom: -1px;
-  width: 1px;
-  transform: translateX(-50%);
-  background: color-mix(in srgb, var(--ink) 26%, var(--line));
-}
-.profile-duel .pf-rawvals-split-mid { z-index: 0; }
-.profile-duel .pf-rawvals-split-mid:not(:empty) { background: var(--page); }
+/* no center divider line - it cut straight through the ratio digits; the two
+   opposing bars + the chip already mark the center cleanly. */
 
 /* two-column sections (window / deck / rig / taste) */
 .profile-duel .duel-cols {
