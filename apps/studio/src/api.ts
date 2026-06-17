@@ -144,14 +144,40 @@ async function jsonFetch<T>(input: RequestInfo, init?: RequestInit): Promise<T> 
 }
 
 /**
- * Route a call through the Insights Surface Contract client (ADR-0013).
+ * Route a call through the Insights Surface Contract client (ADR-0013) and
+ * thread the contract's response type straight through: the `HttpApiClient`
+ * call (`c.insights.recall(...)`) already returns a precisely-typed `Effect`,
+ * so `A` is inferred from it and callers no longer annotate `Promise<T>`.
  * Mock mode without a connected endpoint keeps the legacy mock-fixtures
  * behavior, keyed by the same bare path jsonFetch used; otherwise the
  * generated client runs against the connected endpoint (or same-origin).
- * The `T` cast preserves the dashboard-types interfaces the UI was already
- * trusting under jsonFetch<T> - contract payloads tighten in a later pass.
  */
-async function viaContract<T>(
+async function viaContract<A, E>(
+    mockPath: string,
+    call: (client: AxClient) => Effect.Effect<A, E>,
+    mockInit?: RequestInit,
+): Promise<A> {
+    if (STUDIO_MOCK) {
+        const endpoint = readEndpoint();
+        if (!endpoint) {
+            const { mockFetch } = await import("./mock-fixtures.ts");
+            // mockInit carries the method for fixtures keyed on POST/DELETE.
+            return mockFetch<A>(mockPath, mockInit);
+        }
+        return runContract(endpoint, call);
+    }
+    return runContract(null, call);
+}
+
+/**
+ * Variant for endpoints whose contract response is `Schema.Unknown` on
+ * purpose (raw-row passthroughs, deeply-nested mega-payloads, and `RecordId`
+ * payloads - see the inline rationale in api-contract.ts). The contract can't
+ * type these, so the studio asserts the hand-written dashboard-types shape `T`
+ * at this single, greppable seam instead of scattering casts. Migrate a method
+ * off this helper if/when its contract payload is tightened to a `Schema.Struct`.
+ */
+async function viaContractUnknown<T>(
     mockPath: string,
     call: (client: AxClient) => Effect.Effect<unknown, unknown>,
     mockInit?: RequestInit,
@@ -306,15 +332,15 @@ export interface SessionTimelinePayload {
 }
 
 export const api = {
-    version: (): Promise<DaemonVersion> =>
+    version: () =>
         viaContract("/api/version", (c) => c.system.version()),
-    skills: (): Promise<SkillTriageResponse> =>
+    skills: () =>
         viaContract("/api/skills", (c) => c.skills.skills()),
     decide: (
         name: string,
         decision: TriageDecision,
         reason?: string | null,
-    ): Promise<SkillTriageNote> =>
+    ) =>
         viaContract(
             `/api/skills/${encodeURIComponent(name)}/decide`,
             (c) => c.skills.skillDecide({
@@ -323,7 +349,7 @@ export const api = {
             }),
             { method: "POST" },
         ),
-    clearDecision: (name: string): Promise<{ cleared: boolean; skill_name: string }> =>
+    clearDecision: (name: string) =>
         viaContract(
             `/api/skills/${encodeURIComponent(name)}/decide`,
             (c) => c.skills.skillDecideClear({ params: { name } }),
@@ -333,7 +359,7 @@ export const api = {
         names: ReadonlyArray<string>,
         decision: TriageDecision,
         reason?: string | null,
-    ): Promise<{ notes: ReadonlyArray<SkillTriageNote> }> =>
+    ) =>
         viaContract(
             "/api/skills/decide-bulk",
             (c) => c.skills.skillDecideBulk({
@@ -341,12 +367,12 @@ export const api = {
             }),
             { method: "POST" },
         ),
-    detail: (name: string): Promise<SkillDetailPayload> =>
+    detail: (name: string) =>
         viaContract(
             `/api/skills/${encodeURIComponent(name)}/detail`,
             (c) => c.skills.skillDetail({ params: { name } }),
         ),
-    skillSource: (name: string): Promise<SkillSourcePayload> =>
+    skillSource: (name: string) =>
         viaContract(
             `/api/skills/${encodeURIComponent(name)}/source`,
             (c) => c.skills.skillSource({ params: { name } }),
@@ -354,17 +380,17 @@ export const api = {
     openSkill: (
         name: string,
         target: "finder" | "editor",
-    ): Promise<{ launched: string }> =>
+    ) =>
         viaContract(
             `/api/skills/${encodeURIComponent(name)}/open`,
             (c) => c.skills.skillOpen({ params: { name }, payload: { target } }),
             { method: "POST" },
         ),
-    decisions: (): Promise<{ decisions: ReadonlyArray<SkillTriageNote> }> =>
+    decisions: () =>
         viaContract("/api/decisions", (c) => c.skills.decisions()),
-    workflow: (): Promise<WorkflowResponse> =>
+    workflow: () =>
         viaContract("/api/workflow", (c) => c.insights.workflow()),
-    sessions: (params: { offset?: number; limit?: number; source?: string; project?: string } = {}): Promise<SessionListResponse> =>
+    sessions: (params: { offset?: number; limit?: number; source?: string; project?: string } = {}) =>
         viaContract("/api/sessions", (c) =>
             c.sessions.sessionsList({
                 query: {
@@ -375,17 +401,17 @@ export const api = {
                 },
             })),
     sessionDetail: (sessionId: string): Promise<SessionDetailPayload> =>
-        viaContract(
+        viaContractUnknown(
             `/api/sessions/${encodeURIComponent(sessionId)}`,
             (c) => c.sessions.sessionDetail({ params: { id: sessionId } }),
         ),
-    sessionChildren: (parentId: string): Promise<SessionChildrenResponse> =>
+    sessionChildren: (parentId: string) =>
         viaContract(
             `/api/sessions/${encodeURIComponent(parentId)}/children`,
             (c) => c.sessions.sessionChildren({ params: { id: parentId }, query: {} }),
         ),
     sessionInsights: async (sessionId: string): Promise<SessionInsightsPayload> => {
-        const payload = await viaContract<SessionInsightsPayload>(
+        const payload = await viaContractUnknown<SessionInsightsPayload>(
             `/api/sessions/${encodeURIComponent(sessionId)}/insights`,
             (c) => c.sessions.sessionInsights({ params: { id: sessionId } }),
         );
@@ -398,7 +424,7 @@ export const api = {
         return payload;
     },
     sessionInspect: (sessionId: string, params: { turnOffset?: number; turnLimit?: number } = {}): Promise<SessionInspectPayload> =>
-        viaContract(
+        viaContractUnknown(
             `/api/sessions/${encodeURIComponent(sessionId)}/inspect`,
             (c) => c.sessions.sessionInspect({
                 params: { id: sessionId },
@@ -409,11 +435,11 @@ export const api = {
             }),
         ),
     sessionTimeline: (sessionId: string): Promise<SessionTimelinePayload> =>
-        viaContract(
+        viaContractUnknown(
             `/api/sessions/${encodeURIComponent(sessionId)}/timeline`,
             (c) => c.sessions.sessionTimeline({ params: { id: sessionId } }),
         ),
-    sessionCompare: (ids: ReadonlyArray<string>, params: { turns?: boolean } = {}): Promise<SessionComparePayload> =>
+    sessionCompare: (ids: ReadonlyArray<string>, params: { turns?: boolean } = {}) =>
         viaContract("/api/sessions/compare", (c) =>
             c.sessions.sessionCompare({
                 query: {
@@ -421,13 +447,13 @@ export const api = {
                     ...(params.turns ? { turns: "1" } : {}),
                 },
             })),
-    episodeTimeline: (parentId: string): Promise<EpisodeTimelinePayload> =>
+    episodeTimeline: (parentId: string) =>
         viaContract(
             `/api/episodes/${encodeURIComponent(parentId)}`,
             (c) => c.insights.episodeTimeline({ params: { parentId } }),
         ),
     project: (slug: string): Promise<ProjectPagePayload> =>
-        viaContract(
+        viaContractUnknown(
             `/api/projects/${encodeURIComponent(slug)}`,
             (c) => c.insights.project({ params: { project: slug } }),
         ),
@@ -443,18 +469,18 @@ export const api = {
         const qs = usp.toString();
         return jsonFetch(qs ? `/api/graph-explorer?${qs}` : "/api/graph-explorer");
     },
-    sessionCanvas: (params: { limit?: number } = {}): Promise<SessionCanvasPayload> =>
+    sessionCanvas: (params: { limit?: number } = {}) =>
         viaContract("/api/session-canvas", (c) =>
             c.sessions.sessionCanvas({
                 query: params.limit != null ? { limit: params.limit } : {},
             })),
-    sessionOrchestration: (id: string): Promise<SessionOrchestration> =>
+    sessionOrchestration: (id: string) =>
         viaContract("/api/session-orchestration", (c) =>
             c.sessions.sessionOrchestration({ query: { id } })),
-    sessionSummary: (id: string): Promise<SessionSummary> =>
+    sessionSummary: (id: string) =>
         viaContract("/api/session-summary", (c) =>
             c.sessions.sessionSummary({ query: { id } })),
-    skillGraph: (params: { minCount?: number; limit?: number } = {}): Promise<SkillGraphPayload> =>
+    skillGraph: (params: { minCount?: number; limit?: number } = {}) =>
         viaContract("/api/skill-graph", (c) =>
             c.insights.skillGraph({
                 query: {
@@ -469,7 +495,7 @@ export const api = {
         since?: string | null;
         offset?: number;
         limit?: number;
-    }): Promise<RecallResponse> =>
+    }) =>
         viaContract("/api/recall", (c) =>
             c.insights.recall({
                 query: {
@@ -484,7 +510,7 @@ export const api = {
     /** Trigger a live ingest run. Returns the full Durable Streams sidecar URL
      *  the browser subscribes to directly (the sidecar has permissive CORS and
      *  runs on its own localhost port). */
-    ingest: (params: { since?: number } = {}): Promise<IngestTriggerResponse> =>
+    ingest: (params: { since?: number } = {}) =>
         viaContract(
             "/api/ingest",
             (c) => c.live.ingestTrigger({
@@ -492,61 +518,61 @@ export const api = {
             }),
             { method: "POST" },
         ),
-    toolFailures: (): Promise<ToolFailuresResponse> =>
+    toolFailures: () =>
         viaContract("/api/tool-failures", (c) => c.insights.toolFailures()),
-    toolFailureDetail: (label: string): Promise<ToolFailureDetailPayload> =>
+    toolFailureDetail: (label: string) =>
         viaContract(
             `/api/tool-failures/${encodeURIComponent(label)}/detail`,
             (c) => c.insights.toolFailureDetail({ params: { label } }),
         ),
     wrapped: (): Promise<WrappedProfile> =>
-        viaContract("/api/wrapped", (c) => c.insights.wrapped()),
+        viaContractUnknown("/api/wrapped", (c) => c.insights.wrapped()),
     wrappedPublicPreview: (): Promise<WrappedProfile> =>
-        viaContract("/api/wrapped/public-preview", (c) => c.insights.wrappedPublicPreview()),
+        viaContractUnknown("/api/wrapped/public-preview", (c) => c.insights.wrappedPublicPreview()),
 
     costModels: (): Promise<CostModelsResult> =>
-        viaContract("/api/cost/models", (c) => c.insights.costModels()) as Promise<CostModelsResult>,
+        viaContractUnknown("/api/cost/models", (c) => c.insights.costModels()) as Promise<CostModelsResult>,
     costSplit: (days = 30): Promise<unknown> =>
-        viaContract("/api/cost/split", (c) => c.insights.costSplit({ query: { days } })),
+        viaContractUnknown("/api/cost/split", (c) => c.insights.costSplit({ query: { days } })),
     costDispatches: (days = 30, candidates = false): Promise<unknown> =>
-        viaContract("/api/cost/dispatches", (c) => c.insights.costDispatches({ query: { days, candidates } })),
+        viaContractUnknown("/api/cost/dispatches", (c) => c.insights.costDispatches({ query: { days, candidates } })),
     costRoutability: (days = 30, minRun = 1): Promise<unknown> =>
-        viaContract("/api/cost/routability", (c) => c.insights.costRoutability({ query: { days, minRun } })),
+        viaContractUnknown("/api/cost/routability", (c) => c.insights.costRoutability({ query: { days, minRun } })),
     routingTable: (): Promise<unknown> =>
-        viaContract("/api/routing/table", (c) => c.insights.routingTable()),
+        viaContractUnknown("/api/routing/table", (c) => c.insights.routingTable()),
     routingBacktest: (body: { pattern: string; flags?: string; suggest: string; exclude?: string[]; days?: number }): Promise<unknown> =>
-        viaContract("/api/routing/backtest", (c) => c.insights.routingBacktest({ payload: body }), { method: "POST" }),
+        viaContractUnknown("/api/routing/backtest", (c) => c.insights.routingBacktest({ payload: body }), { method: "POST" }),
     routingUpsertClass: (body: { id: string; pattern: string; flags?: string; suggest: string; reason?: string; exclude?: string[] }): Promise<unknown> =>
-        viaContract("/api/routing/classes", (c) => c.routing.routingUpsertClass({ payload: body }), { method: "POST" }),
+        viaContractUnknown("/api/routing/classes", (c) => c.routing.routingUpsertClass({ payload: body }), { method: "POST" }),
     routingRemoveClass: (id: string): Promise<unknown> =>
-        viaContract(`/api/routing/classes/${encodeURIComponent(id)}`, (c) => c.routing.routingRemoveClass({ params: { id } }), { method: "DELETE" }),
+        viaContractUnknown(`/api/routing/classes/${encodeURIComponent(id)}`, (c) => c.routing.routingRemoveClass({ params: { id } }), { method: "DELETE" }),
     contextBudget: (): Promise<ContextBudgetResult> =>
-        viaContract("/api/context/budget", (c) => c.insights.contextBudget()) as Promise<ContextBudgetResult>,
+        viaContractUnknown("/api/context/budget", (c) => c.insights.contextBudget()) as Promise<ContextBudgetResult>,
     contextDrift: (): Promise<ContextDriftResult> =>
-        viaContract("/api/context/drift", (c) => c.insights.contextDrift()) as Promise<ContextDriftResult>,
+        viaContractUnknown("/api/context/drift", (c) => c.insights.contextDrift()) as Promise<ContextDriftResult>,
 
     nextActions: (): Promise<NextActionsPayload> =>
-        viaContract("/api/next-actions", (c) => c.improve.nextActions()),
+        viaContractUnknown("/api/next-actions", (c) => c.improve.nextActions()),
 
     improveAnalyzeBrief: (): Promise<{ brief: string }> =>
-        viaContract("/api/improve/analyze-brief", (c) => c.improve.analyzeBrief()),
+        viaContractUnknown("/api/improve/analyze-brief", (c) => c.improve.analyzeBrief()),
 
     improveImpact: (sig: string): Promise<{ sig: string; impact: ImpactEstimate }> =>
-        viaContract(`/api/improve/${encodeURIComponent(sig)}/impact`, (c) =>
+        viaContractUnknown(`/api/improve/${encodeURIComponent(sig)}/impact`, (c) =>
             c.improve.improveImpact({ params: { sig } })),
 
     wrappedGenerateBrief: (): Promise<{ brief: string }> =>
-        viaContract("/api/wrapped/generate-brief", (c) => c.insights.wrappedGenerateBrief()),
+        viaContractUnknown("/api/wrapped/generate-brief", (c) => c.insights.wrappedGenerateBrief()),
 
     /** CLI utilization rollup: active days, top commands, unused surface. */
-    usage: (params: { days?: number } = {}): Promise<UsageRollupSchema> =>
+    usage: (params: { days?: number } = {}) =>
         viaContract("/api/usage", (c) =>
             c.usage.usageRollup({
                 query: params.days != null ? { days: params.days } : {},
             })),
 
     /** Read-only SQL console (Lab) - daemon accepts SELECT/RETURN/INFO only. */
-    query: (sql: string): Promise<{ result: unknown; durationMs: number }> =>
+    query: (sql: string) =>
         viaContract(
             "/api/query",
             (c) => c.system.query({ payload: { sql } }),
@@ -556,9 +582,9 @@ export const api = {
     // Experiment loop - see
     // docs/superpowers/plans/2026-05-25-experiment-loop-cleanup-and-rebuild.md
     improve: (): Promise<ImprovePayload> =>
-        viaContract("/api/improve", (c) => c.improve.improveList()),
+        viaContractUnknown("/api/improve", (c) => c.improve.improveList()),
     improveAccept: (sig: string, force = false): Promise<ImproveActionResponse> =>
-        viaContract(
+        viaContractUnknown(
             `/api/improve/${encodeURIComponent(sig)}/accept`,
             (c) => c.improve.improveAction({
                 params: { sig, action: "accept" },
@@ -567,7 +593,7 @@ export const api = {
             { method: "POST" },
         ),
     improveReject: (sig: string, reason?: string | null): Promise<ImproveActionResponse> =>
-        viaContract(
+        viaContractUnknown(
             `/api/improve/${encodeURIComponent(sig)}/reject`,
             (c) => c.improve.improveAction({
                 params: { sig, action: "reject" },
@@ -576,7 +602,7 @@ export const api = {
             { method: "POST" },
         ),
     improveSetVerdict: (sig: string, verdict: string): Promise<ImproveActionResponse> =>
-        viaContract(
+        viaContractUnknown(
             `/api/improve/${encodeURIComponent(sig)}/verdict`,
             (c) => c.improve.improveAction({
                 params: { sig, action: "verdict" },
