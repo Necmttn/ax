@@ -22,7 +22,9 @@ const SEARCH_TOOLS = FILE_SEARCH_TOOL_NAMES;
 const EDIT_TOOLS = EDIT_TOOL_NAMES;
 const READ_COMMANDS = FILE_READ_COMMANDS;
 const SEARCH_COMMANDS = FILE_SEARCH_COMMANDS;
-const STRUCTURED_PATH_FIELDS = ["file_path", "path", "notebook_path", "file"] as const;
+// `filePath` is opencode's read/write/edit path field (#161); `target_file`/`targetFile`
+// are cursor's read_file/edit_file path fields (#162). Without these the rows are dropped.
+const STRUCTURED_PATH_FIELDS = ["file_path", "path", "notebook_path", "file", "filePath", "target_file", "targetFile"] as const;
 
 export interface ToolFileEvidenceInput {
     readonly name: string;

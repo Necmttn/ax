@@ -64,9 +64,11 @@ export const EDIT_COMMANDS: ReadonlySet<string> = new Set([
 ]);
 
 /** Lowercased tool names whose calls read a file's contents. */
-export const FILE_READ_TOOL_NAMES: ReadonlySet<string> = new Set(["read"]);
+// `read_file`/`read_file_v2` are cursor's (versioned) read tools (#162).
+export const FILE_READ_TOOL_NAMES: ReadonlySet<string> = new Set(["read", "read_file", "read_file_v2"]);
 /** Lowercased tool names whose calls search across files. */
-export const FILE_SEARCH_TOOL_NAMES: ReadonlySet<string> = new Set(["grep", "glob"]);
+// `codebase_search`/`glob_file_search` are cursor's search tools (#162).
+export const FILE_SEARCH_TOOL_NAMES: ReadonlySet<string> = new Set(["grep", "glob", "codebase_search", "glob_file_search"]);
 /** Read + search tool names merged (metrics treat both as "reads"). */
 export const READ_TOOL_NAMES: ReadonlySet<string> = new Set([
     ...FILE_READ_TOOL_NAMES, ...FILE_SEARCH_TOOL_NAMES,

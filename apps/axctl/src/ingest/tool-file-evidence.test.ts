@@ -23,6 +23,14 @@ describe("tool file evidence classification", () => {
         expect(classifyToolFileEvidence({ name: "exec_command", commandNorm: "git status" })).toEqual([]);
     });
 
+    // #162: cursor uses _v2-suffixed + cursor-specific tool names that matched no set.
+    test("classifies cursor read/search tool names incl _v2 (#162)", () => {
+        expect(classifyToolFileEvidence({ name: "read_file" })).toEqual(["read_file"]);
+        expect(classifyToolFileEvidence({ name: "read_file_v2" })).toEqual(["read_file"]);
+        expect(classifyToolFileEvidence({ name: "codebase_search" })).toEqual(["searched_file"]);
+        expect(classifyToolFileEvidence({ name: "glob_file_search" })).toEqual(["searched_file"]);
+    });
+
     test("extracts edit/read/search paths from structured tool calls", () => {
         const readKey = toolCallRecordKey({
             sessionId: "session-1",
@@ -109,6 +117,60 @@ describe("tool file evidence classification", () => {
                 path: "/repo/src/edit.ts",
                 pathSeen: "src/edit.ts",
                 evidence: "tool_name:apply_patch",
+            },
+        ]);
+    });
+
+    // #161 (opencode `filePath`) + #162 (cursor `read_file_v2` + `target_file`):
+    // without these tool names / path fields the rows were dropped entirely.
+    test("extracts opencode filePath edits and cursor read_file_v2 paths (#161/#162)", () => {
+        const cursorKey = toolCallRecordKey({ sessionId: "s", seq: 1, callId: "c-read" });
+        const opencodeKey = toolCallRecordKey({ sessionId: "s", seq: 2, callId: "c-edit" });
+
+        expect(extractToolFileEvidence([
+            {
+                provider: "cursor",
+                toolName: "read_file_v2",
+                toolKind: "builtin",
+                sessionId: "s",
+                seq: 1,
+                turnKey: turnRecordKey("s", 1),
+                callId: "c-read",
+                ts: "2026-05-29T06:00:00.000Z",
+                cwd: "/repo",
+                inputJson: { target_file: "src/cursor.ts" },
+                hasError: false,
+            },
+            {
+                provider: "opencode",
+                toolName: "edit",
+                toolKind: "builtin",
+                sessionId: "s",
+                seq: 2,
+                turnKey: turnRecordKey("s", 2),
+                callId: "c-edit",
+                ts: "2026-05-29T06:00:01.000Z",
+                cwd: "/repo",
+                inputJson: { filePath: "src/opencode.ts" },
+                hasError: false,
+            },
+        ]).map((item) => ({
+            kind: item.kind,
+            toolCallKey: item.toolCallKey,
+            path: item.path,
+            pathSeen: item.pathSeen,
+        }))).toEqual([
+            {
+                kind: "read_file",
+                toolCallKey: cursorKey,
+                path: "/repo/src/cursor.ts",
+                pathSeen: "src/cursor.ts",
+            },
+            {
+                kind: "edited",
+                toolCallKey: opencodeKey,
+                path: "/repo/src/opencode.ts",
+                pathSeen: "src/opencode.ts",
             },
         ]);
     });
