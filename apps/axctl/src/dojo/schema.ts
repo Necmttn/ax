@@ -50,10 +50,16 @@ export interface BudgetEnvelope {
     readonly source: "quota" | "override" | "forced" | "unavailable";
 }
 
+export interface DojoSourceFailure {
+    readonly source: string;
+    readonly message: string;
+}
+
 export interface DojoAgenda {
     readonly v: 1;
     readonly generated_at: string;
     readonly budget: BudgetEnvelope;
+    readonly source_failures: readonly DojoSourceFailure[];
     readonly items: readonly DojoItem[];
 }
 

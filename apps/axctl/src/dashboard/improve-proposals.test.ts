@@ -7,8 +7,12 @@
 import { describe, expect, it } from "bun:test";
 import { Effect, Layer } from "effect";
 import { SurrealClient, type SurrealClientShape } from "@ax/lib/db";
-import { resetImpactCacheForTest } from "../improve/impact.ts";
-import { fetchImproveProposals, renderHypothesisTemplate, resetHydrateCacheForTest } from "./improve-proposals.ts";
+import { createImpactEstimateCache } from "../improve/impact.ts";
+import {
+    createHypothesisHydrationCache,
+    fetchImproveProposals,
+    renderHypothesisTemplate,
+} from "./improve-proposals.ts";
 import type { ProposalDto } from "@ax/lib/shared/dashboard-types";
 
 // ---------------------------------------------------------------------------
@@ -31,6 +35,12 @@ const run = <A>(
     eff: Effect.Effect<A, unknown, SurrealClient>,
     layer: Layer.Layer<SurrealClient>,
 ) => Effect.runPromise(eff.pipe(Effect.provide(layer)));
+
+const hydrationDeps = () => ({
+    hydrationCache: createHypothesisHydrationCache(),
+    impactCache: createImpactEstimateCache(),
+    nowMs: () => 1_000,
+});
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -92,7 +102,6 @@ const makeSequencedDb = (perCall: QueryResult[][]): Layer.Layer<SurrealClient> =
 
 describe("fetchImproveProposals - hypothesis hydration", () => {
     it("hydrates from evidence_query first row", async () => {
-        resetHydrateCacheForTest();
         const dynamicRow = {
             ...openRow,
             dedupe_sig: "sig-dyn",
@@ -101,7 +110,7 @@ describe("fetchImproveProposals - hypothesis hydration", () => {
             evidence_query: "SELECT count() AS n FROM tool_call GROUP ALL;",
         };
         const rows = await run(
-            fetchImproveProposals(),
+            fetchImproveProposals(hydrationDeps()),
             // call 1: proposals list; call 2: the evidence query
             makeSequencedDb([[[dynamicRow]], [[{ n: 42 }]]]),
         ) as ReadonlyArray<ProposalDto>;
@@ -109,8 +118,6 @@ describe("fetchImproveProposals - hypothesis hydration", () => {
     });
 
     it("mined routing proposal: hypothesis rebuilt from the live impact estimate", async () => {
-        resetHydrateCacheForTest();
-        resetImpactCacheForTest();
         const routingRow = {
             ...openRow,
             form: "hook",
@@ -120,7 +127,7 @@ describe("fetchImproveProposals - hypothesis hydration", () => {
                 "39 model-less dispatches on fable/opus matched mechanical routing classes in the last 2d; est $209.59 redirectable. Apply: ax dispatches compile-routing + route-dispatch hook (ax hooks install).",
         };
         const rows = await run(
-            fetchImproveProposals(),
+            fetchImproveProposals(hydrationDeps()),
             // call 1: proposals list; call 2: fetchDispatchCandidates multi-statement
             // (oversized empty tuple satisfies its destructuring with zero rows)
             makeSequencedDb([[[routingRow]], Array.from({ length: 8 }, () => []) as QueryResult[]]),
@@ -136,7 +143,6 @@ describe("fetchImproveProposals - hypothesis hydration", () => {
     });
 
     it("fail-open: non-readonly or failing query keeps the frozen hypothesis", async () => {
-        resetHydrateCacheForTest();
         const badRow = {
             ...openRow,
             dedupe_sig: "sig-bad",
@@ -145,7 +151,7 @@ describe("fetchImproveProposals - hypothesis hydration", () => {
             evidence_query: "DELETE proposal;",
         };
         const rows = await run(
-            fetchImproveProposals(),
+            fetchImproveProposals(hydrationDeps()),
             makeMockDb([[badRow]]),
         ) as ReadonlyArray<ProposalDto>;
         expect(rows[0]?.hypothesis).toBe("frozen stays");
@@ -155,7 +161,7 @@ describe("fetchImproveProposals - hypothesis hydration", () => {
 describe("fetchImproveProposals - brief attachment", () => {
     it("open row: brief contains sig and open-status ask", async () => {
         const rows = await run(
-            fetchImproveProposals(),
+            fetchImproveProposals(hydrationDeps()),
             makeMockDb([[openRow]]),
         ) as ReadonlyArray<ProposalDto>;
 
@@ -168,7 +174,7 @@ describe("fetchImproveProposals - brief attachment", () => {
 
     it("non-open row: brief contains sig and experiment-status ask", async () => {
         const rows = await run(
-            fetchImproveProposals(),
+            fetchImproveProposals(hydrationDeps()),
             makeMockDb([[acceptedRow]]),
         ) as ReadonlyArray<ProposalDto>;
 
@@ -182,7 +188,7 @@ describe("fetchImproveProposals - brief attachment", () => {
 
     it("coalesces missing origin to mined; preserves explicit agent", async () => {
         const rows = await run(
-            fetchImproveProposals(),
+            fetchImproveProposals(hydrationDeps()),
             makeMockDb([[openRow, { ...openRow, dedupe_sig: "sig-agent", origin: "agent" }]]),
         ) as ReadonlyArray<ProposalDto>;
 
@@ -192,7 +198,7 @@ describe("fetchImproveProposals - brief attachment", () => {
 
     it("returns empty array for empty DB result", async () => {
         const rows = await run(
-            fetchImproveProposals(),
+            fetchImproveProposals(hydrationDeps()),
             makeMockDb([[]]),
         );
         expect(rows).toEqual([]);
@@ -200,7 +206,7 @@ describe("fetchImproveProposals - brief attachment", () => {
 
     it("attaches brief to every row in a multi-row result", async () => {
         const rows = await run(
-            fetchImproveProposals(),
+            fetchImproveProposals(hydrationDeps()),
             makeMockDb([[openRow, acceptedRow]]),
         ) as ReadonlyArray<ProposalDto>;
 

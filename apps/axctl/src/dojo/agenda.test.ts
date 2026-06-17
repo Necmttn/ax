@@ -29,7 +29,21 @@ describe("assembleAgenda", () => {
         );
         expect(agenda.v).toBe(1);
         expect(agenda.generated_at).toBe("2026-06-13T10:00:00.000Z");
+        expect(agenda.source_failures).toEqual([]);
         expect(agenda.items.map((i) => i.id)).toEqual(["v1", "b1", "e1"]);
+    });
+
+    test("surfaces source failures on the agenda read model", () => {
+        const agenda = assembleAgenda(
+            budget,
+            [],
+            {
+                nowMs: 0,
+                spar: false,
+                sourceFailures: [{ source: "churn", message: "db offline" }],
+            },
+        );
+        expect(agenda.source_failures).toEqual([{ source: "churn", message: "db offline" }]);
     });
 
     test("appends explore when otherwise empty", () => {
@@ -76,7 +90,7 @@ describe("collectAgendaItems", () => {
 
     test("empty graph + missing task dir -> only the proposal-mint nudge", async () => {
         const base = mkdtempSync(join(tmpdir(), "ax-dojo-agenda-"));
-        const items = await Effect.runPromise(
+        const collected = await Effect.runPromise(
             collectAgendaItems({
                 nowMs: Date.parse("2026-06-13T10:00:00.000Z"),
                 days: 30,
@@ -86,6 +100,30 @@ describe("collectAgendaItems", () => {
             }).pipe(Effect.provide(env)),
         );
         // 0 open proposals < MINT_THRESHOLD, so the mint nudge is the lone item.
-        expect(items.map((i) => i.kind)).toEqual(["proposal_mint"]);
+        expect(collected.items.map((i) => i.kind)).toEqual(["proposal_mint"]);
+        expect(collected.source_failures).toEqual([]);
+    });
+
+    test("records which agenda sources failed while preserving degraded items", async () => {
+        const base = mkdtempSync(join(tmpdir(), "ax-dojo-agenda-"));
+        const failingClient: SurrealClientShape = {
+            ...emptyClient,
+            query: <T extends unknown[]>(_sql: string, _bindings?: Record<string, unknown>) =>
+                Effect.fail("db offline") as unknown as Effect.Effect<T>,
+        };
+        const failingEnv = Layer.mergeAll(Layer.succeed(SurrealClient, failingClient), BunFileSystem.layer);
+        const collected = await Effect.runPromise(
+            collectAgendaItems({
+                nowMs: Date.parse("2026-06-13T10:00:00.000Z"),
+                days: 30,
+                spar: false,
+                taskDir: join(base, "does-not-exist"),
+                routingTablePath: join(base, "missing-routing-table.json"),
+            }).pipe(Effect.provide(failingEnv)),
+        );
+        expect(collected.items.map((i) => i.kind)).toEqual(["proposal_mint"]);
+        expect(collected.source_failures.map((f) => f.source)).toEqual(
+            expect.arrayContaining(["verdicts", "churn", "proposals", "routing"]),
+        );
     });
 });
