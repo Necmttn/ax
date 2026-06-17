@@ -31,8 +31,10 @@ import {
 // mirrors LOGIN_RE in community.ts - GitHub handles only, sanitised before use.
 export const LOGIN_RE = /^[A-Za-z0-9-]{1,39}$/;
 // series colours: primary profile = ax green, comparison = ax blue.
-const SELF_COLOR = "var(--green)";
-const VS_COLOR = "#2567a8";
+// Exported so the bespoke duel layout (profile-duel.tsx) tints A green / B blue
+// with the exact same tokens the radar series + overlay use.
+export const SELF_COLOR = "var(--green)";
+export const VS_COLOR = "#2567a8";
 
 // comparison-profile load state, kept separate from the primary dossier so a
 // missing/invalid `?vs=` peer degrades to a quiet inline note, never an error
@@ -50,14 +52,16 @@ const COMPACT = new Intl.NumberFormat("en-US", { notation: "compact", maximumFra
 const PLAIN = new Intl.NumberFormat("en-US");
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
+/* These formatters + helpers are exported for reuse by the duel layout
+   (profile-duel.tsx) so the two pages humanize numbers identically. */
 /** 19_600_000_000 -> "19.6B", 13185 -> "13.2K" */
-const fmtCompact = (n: number): string => COMPACT.format(n);
+export const fmtCompact = (n: number): string => COMPACT.format(n);
 /** 2021 -> "2,021" */
-const fmtInt = (n: number): string => PLAIN.format(Math.round(n));
+export const fmtInt = (n: number): string => PLAIN.format(Math.round(n));
 /** 22900 -> "$22.9K" */
-const fmtMoney = (n: number): string => `$${COMPACT.format(n)}`;
+export const fmtMoney = (n: number): string => `$${COMPACT.format(n)}`;
 /** 0.078 -> "7.8%" */
-const fmtPct = (share: number): string => {
+export const fmtPct = (share: number): string => {
     const pct = Math.min(100, Math.max(0, share * 100));
     return `${pct >= 10 ? Math.round(pct) : Math.round(pct * 10) / 10}%`;
 };
@@ -78,12 +82,12 @@ const fmtDay = (iso: string): string => {
     const month = MONTHS[Number(m[2]) - 1];
     return month ? `${month} ${Number(m[3])}` : iso;
 };
-const clampPct = (x: number): number => (Number.isFinite(x) ? Math.min(100, Math.max(0, x)) : 0);
+export const clampPct = (x: number): number => (Number.isFinite(x) ? Math.min(100, Math.max(0, x)) : 0);
 
 /** Harness chips show the real harnesses you run - not internal origins. A
  * "claude-subagent" entry is the same harness as "claude" (just a dispatch
  * origin), so strip the "-subagent" suffix and dedupe, preserving order. */
-const realHarnesses = (harnesses: readonly string[]): string[] => {
+export const realHarnesses = (harnesses: readonly string[]): string[] => {
     const seen = new Set<string>();
     const out: string[] = [];
     for (const h of harnesses) {
@@ -97,7 +101,7 @@ const realHarnesses = (harnesses: readonly string[]): string[] => {
 
 /** GitHub avatar by login (same source as the leaders page). `ring` tints the
  *  border for comparison overlays; `size` drives layout + the @2x source. */
-function Avatar({ login, size, ring, className }: {
+export function Avatar({ login, size, ring, className }: {
     login: string;
     size: number;
     ring?: string;
@@ -329,7 +333,7 @@ export function ProfileDossier({ profile: p, vs }: { profile: ProfileV1; vs: VsS
 
 /* ---------- pieces ---------- */
 
-function Vital({ num, unit, label }: { num: string; unit?: string; label: string }) {
+export function Vital({ num, unit, label }: { num: string; unit?: string; label: string }) {
     return (
         <div className="pf-vital">
             <span className="pf-vital-num">{num}{unit ? <small> {unit}</small> : null}</span>
@@ -339,7 +343,7 @@ function Vital({ num, unit, label }: { num: string; unit?: string; label: string
 }
 
 /** Landing-v2 section intro: mono eyebrow + serif h2 + optional note line. */
-function SectionIntro({ eyebrow, title, note }: { eyebrow: string; title: string; note?: string }) {
+export function SectionIntro({ eyebrow, title, note }: { eyebrow: string; title: string; note?: string }) {
     return (
         <div className="demo-intro">
             <span className="eyebrow">{eyebrow}</span>
@@ -480,7 +484,7 @@ function SignSection({ profile, vs }: { profile: ProfileV1; vs: VsState }) {
 }
 
 /** Compact six-axis legend under the radar: what each spoke abbreviation means. */
-function AxisLegend() {
+export function AxisLegend() {
     return (
         <dl className="pf-axis-legend" aria-label="axis legend">
             {RADAR_AXES_META.map((m) => (
@@ -521,7 +525,7 @@ function ScoreList({ axes }: { axes: RadarAxes }) {
  * row gets two value columns and the per-metric leader is marked with a small
  * green dot; ties and unmeasurable rows get no dot.
  */
-function RawTable({
+export function RawTable({
     self, selfLogin, vs,
 }: {
     self: RadarAxes;
@@ -595,7 +599,7 @@ interface ProfileModelLite { readonly name: string; readonly share: number; read
  * window-level model->colour map the legend uses, so a model reads identically
  * everywhere. Keyboard/touch fallback rides the column's `title` attribute.
  */
-function StackedWindow({
+export function StackedWindow({
     daily, colorOf, busiest, models, sessions, windowDays,
 }: {
     daily: readonly ProfileDailyRow[];
@@ -745,7 +749,7 @@ function WindowTooltip({
 }
 
 /** One leverage-sorted skill: name left, leverage bar + share% + runs right. */
-function SkillRow({ skill }: { skill: ProfileSkill }) {
+export function SkillRow({ skill }: { skill: ProfileSkill }) {
     const share = skill.downstream_share;
     const display = skill.name.includes(":") ? skill.name.slice(skill.name.indexOf(":") + 1) : skill.name;
     return (
@@ -769,7 +773,7 @@ function SkillRow({ skill }: { skill: ProfileSkill }) {
    never a fabricated series). Kinds are assigned for SHAPE VARIETY so no two
    adjacent cards share a chart family. Charts render in card-viz.tsx. ----- */
 
-function buildInsightCards(
+export function buildInsightCards(
     ins: ProfileInsights,
     daily: readonly ProfileDailyRow[],
 ): readonly InsightCard[] {
@@ -913,7 +917,7 @@ function buildInsightCards(
 
 interface SkillGroup { readonly source: string; readonly skills: ProfileSkill[]; readonly runs: number }
 
-function groupSkills(skills: readonly ProfileSkill[]): SkillGroup[] {
+export function groupSkills(skills: readonly ProfileSkill[]): SkillGroup[] {
     const by = new Map<string, ProfileSkill[]>();
     for (const s of skills) {
         const list = by.get(s.source);

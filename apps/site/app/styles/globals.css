@@ -15475,3 +15475,198 @@ footer.site-footer { padding: 48px 32px 56px; }
   margin: 6px auto 20px;
   font-size: 14px;
 }
+
+/* ---- profile-duel: bespoke head-to-head /u/<a>/vs/<b> ----
+   Built entirely around the comparison: two columns, A = ax green (SELF) on the
+   left, B = ax blue (#2567a8, VS) on the right - the same series colours the
+   radar + overlay use. Reuses the .pf-* / .pv2-* / landing tokens; only the
+   duel-specific framing lives here. The per-column recap deck keeps the shared
+   .rdx dark band (owned by @ax/recap-deck) - we only trim its margins. */
+
+/* hero: A | VS | B */
+.profile-duel .duel-hero {
+  padding: 40px 0 10px;
+  text-align: center;
+  border-bottom: 1px solid var(--line);
+}
+.profile-duel .duel-hero-eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  text-transform: none;
+  margin-bottom: 24px;
+}
+.profile-duel .duel-hero-eyebrow::before { display: none; }
+.profile-duel .duel-hero-grid {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  gap: 24px;
+  max-width: 760px;
+  margin: 0 auto;
+}
+.profile-duel .duel-side {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+}
+.profile-duel .duel-side-avatar {
+  border-width: 3px;
+  box-shadow: 0 14px 30px -18px rgba(20, 20, 18, 0.5);
+}
+.profile-duel .duel-side-name {
+  font-size: 26px;
+  margin: 8px 0 0;
+}
+.profile-duel .duel-side-name .pf-at { color: var(--muted); }
+.profile-duel .duel-side-sign {
+  font-family: var(--mono);
+  font-size: 13px;
+  letter-spacing: 0.02em;
+}
+.profile-duel .duel-side-glyph { font-size: 15px; }
+.profile-duel .duel-vs {
+  font-family: var(--mono);
+  font-weight: 700;
+  font-size: 40px;
+  letter-spacing: 0.04em;
+  color: var(--ink);
+  opacity: 0.85;
+}
+
+/* scoreboard */
+.profile-duel .duel-score { text-align: center; }
+.profile-duel .duel-score-line {
+  font-family: "Doto", var(--mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 30px;
+  font-weight: 600;
+  margin: 8px 0 18px;
+}
+.profile-duel .duel-score-tally {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px 10px;
+}
+.profile-duel .duel-axis {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--mono);
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  padding: 5px 10px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--muted);
+}
+.profile-duel .duel-axis-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--line);
+}
+.profile-duel .duel-axis--a {
+  color: var(--green);
+  border-color: color-mix(in srgb, var(--green) 50%, var(--line));
+}
+.profile-duel .duel-axis--a .duel-axis-dot { background: var(--green); }
+.profile-duel .duel-axis--b {
+  color: #2567a8;
+  border-color: color-mix(in srgb, #2567a8 45%, var(--line));
+}
+.profile-duel .duel-axis--b .duel-axis-dot { background: #2567a8; }
+
+/* vitals comparison: A-left | label + marker | B-right */
+.profile-duel .duel-vitals-table {
+  max-width: 720px;
+  margin: 18px auto 0;
+  border-top: 1px solid var(--line);
+}
+.profile-duel .duel-vital-row {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  gap: 16px;
+  padding: 14px 0;
+  border-bottom: 1px solid var(--line);
+}
+.profile-duel .duel-vital-val {
+  font-family: "Doto", var(--mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 22px;
+  font-weight: 600;
+  color: var(--ink);
+}
+.profile-duel .duel-vital-val--a { text-align: right; }
+.profile-duel .duel-vital-val--b { text-align: left; }
+.profile-duel .duel-vital-val--a.is-lead { color: var(--green); }
+.profile-duel .duel-vital-val--b.is-lead { color: #2567a8; }
+.profile-duel .duel-vital-mid {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  min-width: 120px;
+}
+.profile-duel .duel-vital-label {
+  font-family: var(--mono);
+  font-size: 11.5px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.profile-duel .duel-vital-marker { font-size: 12px; line-height: 1; }
+.profile-duel .duel-mk--a { color: var(--green); }
+.profile-duel .duel-mk--b { color: #2567a8; }
+.profile-duel .duel-mk--tie { color: var(--line); }
+
+/* the sign: centered radar + raw-values table */
+.profile-duel .duel-sign { text-align: center; }
+.profile-duel .duel-sign-versus { justify-content: center; }
+.profile-duel .duel-sign-chart {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+/* two-column sections (window / deck / rig / taste) */
+.profile-duel .duel-cols {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 22px;
+  margin-top: 18px;
+  align-items: start;
+}
+.profile-duel .duel-col {
+  border-top: 2px solid var(--line);
+  padding-top: 14px;
+  min-width: 0;
+}
+.profile-duel .duel-col-head {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-bottom: 14px;
+}
+.profile-duel .duel-col-name {
+  font-family: var(--mono);
+  font-size: 14px;
+  font-weight: 600;
+}
+.profile-duel .duel-col .pv2-recap { margin: 0; }
+
+/* CTA share row */
+.profile-duel .duel-share-row { justify-content: center; margin-bottom: 22px; }
+
+@media (max-width: 900px) {
+  .profile-duel .duel-cols { grid-template-columns: 1fr; }
+}
+@media (max-width: 640px) {
+  .profile-duel .duel-hero-grid { grid-template-columns: 1fr; gap: 16px; }
+  .profile-duel .duel-vs { font-size: 26px; }
+  .profile-duel .duel-vital-mid { min-width: 90px; }
+  .profile-duel .duel-vital-val { font-size: 19px; }
+}

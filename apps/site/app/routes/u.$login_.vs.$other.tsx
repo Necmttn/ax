@@ -9,6 +9,7 @@ import { useEffect, useState } from "react";
 import { SiteHeader } from "~/components/landing-sections/site-header";
 import { SiteFooter } from "~/components/landing-sections/site-footer";
 import { ProfileDossier, UnclaimedDossier, type VsState } from "~/components/profile-dossier";
+import { DuelDossier } from "~/components/profile-duel";
 import { fetchProfile, type ProfileV1 } from "~/lib/community";
 import { compareDecision, buildDuelOgImageUrl } from "~/lib/challenge";
 
@@ -84,11 +85,19 @@ function DuelPage() {
     return (
         <>
             <SiteHeader />
-            <main className="landing-v2 profile-v2">
+            <main className="landing-v2 profile-v2 profile-duel-page">
                 {state.kind === "loading" && <p className="pf-loading">pulling the duel @{login} vs @{other}…</p>}
                 {state.kind === "not-found" && <UnclaimedDossier login={login} />}
                 {state.kind === "error" && <p className="pf-loading">couldn't load profile: {state.message}</p>}
-                {state.kind === "ready" && <ProfileDossier profile={state.profile} vs={vsState} />}
+                {state.kind === "ready" && (
+                    // Both profiles resolved -> the bespoke head-to-head layout.
+                    // If the peer is still loading / unregistered / errored, fall
+                    // back to the single dossier with the overlay (preserves the
+                    // challenge form + UnclaimedChallenger dare - no regression).
+                    vsState.kind === "ready"
+                        ? <DuelDossier a={state.profile} b={vsState.profile} />
+                        : <ProfileDossier profile={state.profile} vs={vsState} />
+                )}
             </main>
             <SiteFooter />
         </>
