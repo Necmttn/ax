@@ -9,12 +9,10 @@ import {
 } from "@ax/lib/telemetry-base";
 import type { FileContextHookInput, FileContextHookDecision } from "./file-context-hook.ts";
 import type {
-    FileContextPack,
     FileMemoryCommit,
     FileMemoryCorrection,
-} from "../context/file-context.ts";
-
-type PriorFileSession = FileContextPack["evidence"]["prior_file_sessions"][number];
+    PriorFileSession,
+} from "../context/file-evidence.ts";
 
 export interface HookFireRow extends TelemetryBaseRow {
     readonly kind: "hook_fire";

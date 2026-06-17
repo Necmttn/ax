@@ -122,7 +122,7 @@ function buildInvocationSql(windowDays: number | undefined): string {
     // $sparSessions is bound as a RecordId[] (NOT a string[]) so the comparison
     // is record-vs-record: `record<session> NOT IN [<string>...]` is always TRUE
     // (excludes nothing) - the string IN-list silently matches nothing
-    // (see apps/axctl/src/context/file-context.ts:647-651). Verified on the live
+    // (see @ax/lib/shared/record-select record-id IN-list invariant). Verified on the live
     // DB: RecordId[] excludes correctly; string[] excludes 0 of 31,734 rows.
     // When $sparSessions is empty, NOT IN [] excludes nothing (intended).
     conditions.push(`session NOT IN $sparSessions`);

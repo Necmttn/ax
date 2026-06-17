@@ -2,7 +2,7 @@
 import { Effect } from "effect";
 import { Argument, Command, Flag } from "effect/unstable/cli";
 import { prettyPrint } from "@ax/lib/json";
-import { buildFileContextPack } from "../../context/file-context.ts";
+import { buildFileContextPack } from "../../context/file-context-pack.ts";
 import type { RuntimeManifest } from "./manifest.ts";
 import { jsonFlag, parseFileHints } from "./shared.ts";
 
