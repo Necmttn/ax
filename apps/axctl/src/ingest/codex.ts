@@ -1536,7 +1536,7 @@ export const ingestCodex = Effect.fn("codex.ingest")(
                     ),
                 );
                 if (vanished) {
-                    return null;
+                    return false;
                 }
 
                 const finalBatch = extractor.drain(true);
@@ -1544,7 +1544,7 @@ export const ingestCodex = Effect.fn("codex.ingest")(
                 malformedLineCount += extractor.malformedLines();
                 const completedSession = finalBatch.session ?? currentSession;
                 if (!completedSession) {
-                    return null;
+                    return false;
                 }
 
                 // Snapshot the raw codex jsonl into the `codex_artifacts` bucket as
@@ -1626,7 +1626,7 @@ export const ingestCodex = Effect.fn("codex.ingest")(
                     if (opts.onProgress) yield* opts.onProgress(counts);
                     yield* Effect.logDebug("codex ingest progress", counts);
                 }
-                return completedSession.id;
+                return true;
             }).pipe(Effect.withSpan("codex.file", {
                 // Basename only: keeps exported-trace attributes small (the full
                 // session path is reconstructable locally if ever needed).

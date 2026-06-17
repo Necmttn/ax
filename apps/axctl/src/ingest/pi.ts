@@ -710,7 +710,7 @@ export const ingestPi = Effect.fn("pi.ingest")(
                     warningCount += 1;
                     // Empty/unparseable: not committed, so it re-warns next run -
                     // preserving the pre-watermark behavior (pi re-read every file).
-                    return null;
+                    return false;
                 }
 
                 skipped += extracted.skipped;
@@ -730,7 +730,7 @@ export const ingestPi = Effect.fn("pi.ingest")(
                 eventCount += extracted.providerEvents.length;
                 turnCount += extracted.turns.length;
                 toolCallCount += extracted.toolCalls.length;
-                return extracted.session.id;
+                return true;
             }),
         });
 

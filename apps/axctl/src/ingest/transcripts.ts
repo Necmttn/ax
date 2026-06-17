@@ -1786,7 +1786,7 @@ export const ingestTranscripts = Effect.fn("transcripts.ingest")(
                     }),
                 );
                 if (!extracted) {
-                    return null;
+                    return false;
                 }
                 files += 1;
                 malformedLineCount += extracted.malformedLines;
@@ -1866,10 +1866,10 @@ export const ingestTranscripts = Effect.fn("transcripts.ingest")(
                         ...counts,
                     });
                 }
-                // Returning the session id signals success: the work-unit
-                // commits the watermark only after this processFile resolves, so
-                // a mid-file failure re-processes next run.
-                return extracted.session.id;
+                // Returning true signals success: the work-unit commits the
+                // watermark only after this processFile resolves, so a mid-file
+                // failure re-processes next run.
+                return true;
             }).pipe(Effect.withSpan("transcripts.file", {
                 attributes: { "file.path": candidate.path, "file.size": candidate.sizeBytes },
             })),

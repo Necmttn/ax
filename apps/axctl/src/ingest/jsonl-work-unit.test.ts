@@ -44,7 +44,7 @@ describe("runJsonlProviderFiles - skip-unchanged watermark", () => {
                 source: "codex",
                 processFile: (c) => Effect.sync(() => {
                     processed.push(c.path);
-                    return c.path;
+                    return true;
                 }),
             }).pipe(Effect.provide(layer));
 
@@ -67,7 +67,7 @@ describe("runJsonlProviderFiles - skip-unchanged watermark", () => {
         const processFile = (processed: string[]) => (c: JsonlFileCandidate) =>
             Effect.sync(() => {
                 processed.push(c.path);
-                return c.path;
+                return true;
             });
 
         const base = [candidate("a.jsonl", 10), candidate("b.jsonl", 20)];
@@ -105,7 +105,7 @@ describe("runJsonlProviderFiles - skip-unchanged watermark", () => {
                         ? Effect.fail(new DbError({ operation: "query", message: "boom" }))
                         : Effect.sync(() => {
                             processed.push(c.path);
-                            return c.path;
+                            return true;
                         }),
             }).pipe(Effect.provide(layer));
 
@@ -132,7 +132,7 @@ describe("runJsonlProviderFiles - skip-unchanged watermark", () => {
                 sourceKind: "codex_session",
                 forceEnv: "AX_REDERIVE_TEST",
                 source: "codex",
-                processFile: () => Effect.succeed(null),
+                processFile: () => Effect.succeed(false),
             }).pipe(Effect.provide(layer)),
         );
         expect(r.files).toBe(0);
@@ -149,7 +149,7 @@ describe("runJsonlProviderFiles - skip-unchanged watermark", () => {
             source: "codex",
             processFile: (c: JsonlFileCandidate) => Effect.sync(() => {
                 processed.push(c.path);
-                return c.path;
+                return true;
             }),
         });
         const first: string[] = [];
