@@ -60,7 +60,8 @@ import { isNotFound, skipNotFound } from "@ax/lib/shared/fs-error";
 import { tokenQualityLabels } from "./token-quality.ts";
 import { estimateCost } from "./model-pricing.ts";
 import { walkJsonlFilesStrict } from "./walk-jsonl.ts";
-import { type FileFailureSnapshot, makeFileFailureCollector } from "./file-isolation.ts";
+import type { FileFailureSnapshot } from "./file-isolation.ts";
+import { runJsonlProviderFiles } from "./jsonl-work-unit.ts";
 
 const DEFAULT_CODEX_RAW_MAX_BYTES = 5 * 1024 * 1024;
 const DEFAULT_CODEX_PROGRESS_EVERY = 10;
@@ -1381,24 +1382,21 @@ export const ingestCodex = Effect.fn("codex.ingest")(
         let toolCallCount = 0;
         let planSnapshotCount = 0;
         let malformedLineCount = 0;
-        let activeFiles = 0;
         const recordCount = () => turnCount + invCount + toolCallCount + planSnapshotCount;
 
-        const failures = makeFileFailureCollector({
+        // Skip-unchanged watermark + per-file failure isolation + deadline +
+        // active-file counting all live in the shared JSONL work-unit; codex
+        // supplies discovery (above) and the per-file parse/write below. A file
+        // whose (mtime,size) matched a prior run is skipped without re-parsing.
+        const result = yield* runJsonlProviderFiles({
+            candidates: files,
+            sourceKind: "codex_session",
+            forceEnv: "AX_REDERIVE_CODEX",
             source: "codex",
-            ...(opts.onFileFailures ? { onFailure: opts.onFileFailures } : {}),
-        });
-        yield* Effect.forEach(files.map((file, index) => ({ file, index })), ({ file, index }) => Effect.gen(function* () {
-            // Time-box (dry-run calibration): once the deadline passes, start no
-            // new files; in-flight ones finish.
-            if (opts.deadlineMs !== undefined && Date.now() >= opts.deadlineMs) {
-                return;
-            }
-            activeFiles += 1;
-            // Per-file failure isolation: a bad transcript (or a rejected
-            // statement) skips THIS file - it is retried next run - instead of
-            // aborting the whole stage (see file-isolation.ts).
-            yield* failures.isolate(file.path, Effect.gen(function* () {
+            ...(opts.onFileFailures ? { onFileFailures: opts.onFileFailures } : {}),
+            ...(opts.deadlineMs !== undefined ? { deadlineMs: opts.deadlineMs } : {}),
+            concurrency,
+            processFile: (file, index, loop) => Effect.gen(function* () {
                 if (opts.onProgress && (index < 5 || index % 10 === 0)) {
                     yield* opts.onProgress({
                         currentFile: index + 1,
@@ -1409,7 +1407,7 @@ export const ingestCodex = Effect.fn("codex.ingest")(
                         bytes: byteCount,
                         records: recordCount(),
                         lines: 0,
-                        activeFiles,
+                        activeFiles: loop.activeFiles,
                         phase: 1,
                         sessions: sessionCount,
                         turns: turnCount,
@@ -1454,7 +1452,7 @@ export const ingestCodex = Effect.fn("codex.ingest")(
                             lines: lineCount,
                             fileTurns,
                             fileToolCalls,
-                            activeFiles,
+                            activeFiles: loop.activeFiles,
                             phase,
                             sessions: sessionCount + (sessionUpserted ? 1 : 0),
                             turns: turnCount,
@@ -1538,7 +1536,7 @@ export const ingestCodex = Effect.fn("codex.ingest")(
                     ),
                 );
                 if (vanished) {
-                    return;
+                    return null;
                 }
 
                 const finalBatch = extractor.drain(true);
@@ -1546,7 +1544,7 @@ export const ingestCodex = Effect.fn("codex.ingest")(
                 malformedLineCount += extractor.malformedLines();
                 const completedSession = finalBatch.session ?? currentSession;
                 if (!completedSession) {
-                    return;
+                    return null;
                 }
 
                 // Snapshot the raw codex jsonl into the `codex_artifacts` bucket as
@@ -1617,7 +1615,7 @@ export const ingestCodex = Effect.fn("codex.ingest")(
                         lines: lineCount,
                         fileTurns,
                         fileToolCalls,
-                        activeFiles,
+                        activeFiles: loop.activeFiles,
                         phase: 2,
                         sessions: sessionCount,
                         turns: turnCount,
@@ -1628,17 +1626,16 @@ export const ingestCodex = Effect.fn("codex.ingest")(
                     if (opts.onProgress) yield* opts.onProgress(counts);
                     yield* Effect.logDebug("codex ingest progress", counts);
                 }
-            }));
-            activeFiles -= 1;
-        }).pipe(Effect.withSpan("codex.file", {
-            // Basename only: keeps exported-trace attributes small (the full
-            // session path is reconstructable locally if ever needed).
-            attributes: {
-                "file.name": file.path.slice(file.path.lastIndexOf("/") + 1),
-                "file.bytes": file.sizeBytes,
-            },
-        })), { concurrency, discard: true });
-        yield* failures.report;
+                return completedSession.id;
+            }).pipe(Effect.withSpan("codex.file", {
+                // Basename only: keeps exported-trace attributes small (the full
+                // session path is reconstructable locally if ever needed).
+                attributes: {
+                    "file.name": file.path.slice(file.path.lastIndexOf("/") + 1),
+                    "file.bytes": file.sizeBytes,
+                },
+            })),
+        });
         yield* Effect.logDebug("codex ingest complete", {
             files: fileCount,
             records: recordCount(),
@@ -1657,7 +1654,7 @@ export const ingestCodex = Effect.fn("codex.ingest")(
             toolCalls: toolCallCount,
             planSnapshots: planSnapshotCount,
             malformedLines: malformedLineCount,
-            failedFiles: failures.count(),
+            failedFiles: result.failures.count(),
         } satisfies CodexStats;
     },
 );

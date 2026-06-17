@@ -66,7 +66,6 @@ import { claudeEffortStamp, loadClaudeEffortLevel } from "./claude-effort.ts";
 
 import { selectByIds } from "@ax/lib/shared/record-select";
 import { executeStatements, executeStatementsWith } from "@ax/lib/shared/statement-exec";
-import { fileWatermark } from "@ax/lib/shared/watermark";
 import { skipNotFound } from "@ax/lib/shared/fs-error";
 import { posixPath } from "@ax/lib/shared/path";
 import {
@@ -79,7 +78,8 @@ import {
 } from "@ax/lib/shared/surql";
 import { safeKeyPart } from "@ax/lib/shared/derive-keys";
 import { estimateCost, normalizeModelName } from "./model-pricing.ts";
-import { type FileFailureSnapshot, makeFileFailureCollector } from "./file-isolation.ts";
+import type { FileFailureSnapshot } from "./file-isolation.ts";
+import { runJsonlProviderFiles } from "./jsonl-work-unit.ts";
 import {
     extractClaudeCompaction,
     type CompactionWrite,
@@ -1653,9 +1653,9 @@ export const ingestTranscripts = Effect.fn("transcripts.ingest")(
 
         const candidates: Array<{
             projectDir: string;
-            filePath: string;
+            path: string;
             mtimeMs: number;
-            size: number;
+            sizeBytes: number;
         }> = [];
         let files = 0;
         let sessions = 0;
@@ -1667,7 +1667,6 @@ export const ingestTranscripts = Effect.fn("transcripts.ingest")(
         let hookEventCount = 0;
         let hookCommandInvocationCount = 0;
         let malformedLineCount = 0;
-        let activeFiles = 0;
         const concurrency = cfg.knobs.claudeConcurrency;
         const recordCount = () =>
             turnCount +
@@ -1712,9 +1711,9 @@ export const ingestTranscripts = Effect.fn("transcripts.ingest")(
                 if (cutoff > 0 && mtimeMs < cutoff) continue;
                 candidates.push({
                     projectDir,
-                    filePath,
+                    path: filePath,
                     mtimeMs,
-                    size,
+                    sizeBytes: size,
                 });
             }
         }
@@ -1742,46 +1741,27 @@ export const ingestTranscripts = Effect.fn("transcripts.ingest")(
                 .filter((name): name is string => typeof name === "string" && name.length > 0),
         );
 
-        // Skip-unchanged watermark (hypothesis 006), now via the shared
-        // `fileWatermark` seam: ONE indexed read of every per-file (mtime,size)
-        // marker, an in-memory `unchanged()` skip check, and a `commit()` UPSERT
-        // recorded only after a file's writes succeed. A candidate whose stat
-        // still matches its watermark is output-equivalent to a prior run (its
-        // turns/tool calls/events already persist) so we skip parsing+writing it.
-        // `AX_REDERIVE_CLAUDE=1` forces a full re-parse (ignores watermarks).
-        const wm = yield* fileWatermark({
+        // Skip-unchanged watermark + per-file failure isolation + deadline +
+        // active-file counting all live in the shared JSONL work-unit
+        // (jsonl-work-unit.ts); claude supplies its flat-tree discovery (above)
+        // and the per-file parse/write below. A candidate whose (mtime,size)
+        // still matches a prior run is output-equivalent and skipped without
+        // re-parsing. `AX_REDERIVE_CLAUDE=1` forces a full re-parse.
+        const result = yield* runJsonlProviderFiles({
+            candidates,
             sourceKind: "claude_transcript",
             forceEnv: "AX_REDERIVE_CLAUDE",
-        });
-
-        const failures = makeFileFailureCollector({
             source: "claude",
-            ...(opts.onFileFailures ? { onFailure: opts.onFileFailures } : {}),
-        });
-        yield* Effect.forEach(candidates.map((candidate, index) => ({ candidate, index })), ({ candidate, index }) => Effect.gen(function* () {
-            // Time-box (dry-run calibration): once the deadline passes, start no
-            // new files. In-flight ones finish, so the sample is whatever
-            // completed within the budget.
-            if (opts.deadlineMs !== undefined && Date.now() >= opts.deadlineMs) {
-                return;
-            }
-            // Skip-unchanged: a candidate whose on-disk (mtime,size) still
-            // matches its persisted watermark has already been ingested in a
-            // prior run; its rows persist, so skipping is output-equivalent.
-            if (wm.unchanged(candidate.filePath, candidate.mtimeMs, candidate.size)) {
-                return;
-            }
-            activeFiles += 1;
-            // Per-file failure isolation: a bad transcript (or a rejected
-            // statement) skips THIS file - it is retried next run - instead of
-            // aborting the whole stage (see file-isolation.ts).
-            yield* failures.isolate(candidate.filePath, Effect.gen(function* () {
+            ...(opts.onFileFailures ? { onFileFailures: opts.onFileFailures } : {}),
+            ...(opts.deadlineMs !== undefined ? { deadlineMs: opts.deadlineMs } : {}),
+            concurrency,
+            processFile: (candidate, index, loop) => Effect.gen(function* () {
                 if (opts.onProgress && (index < 5 || index % 10 === 0)) {
                     yield* opts.onProgress({
                         currentFile: index + 1,
                         totalFiles: candidates.length,
                         files,
-                        activeFiles,
+                        activeFiles: loop.activeFiles,
                         records: recordCount(),
                         sessions,
                         turns: turnCount,
@@ -1796,22 +1776,23 @@ export const ingestTranscripts = Effect.fn("transcripts.ingest")(
                 // A transcript that VANISHED between discovery and here (e.g. a
                 // git worktree cleaned up mid-run) surfaces as a typed
                 // PlatformError; NotFound→null SKIPS it. The skip short-circuits
-                // BEFORE `files += 1` / `wm.commit` below, so a vanished file never
-                // advances the watermark. Non-NotFound failures re-raise.
-                const extracted = yield* extractFile(candidate.filePath, candidate.projectDir).pipe(
+                // BEFORE `files += 1` / the work-unit's commit (returning null),
+                // so a vanished file never advances the watermark. Non-NotFound
+                // failures re-raise.
+                const extracted = yield* extractFile(candidate.path, candidate.projectDir).pipe(
                     skipNotFound(null),
                     Effect.withSpan("transcripts.parse", {
-                        attributes: { "file.size": candidate.size },
+                        attributes: { "file.size": candidate.sizeBytes },
                     }),
                 );
                 if (!extracted) {
-                    return;
+                    return null;
                 }
                 files += 1;
                 malformedLineCount += extracted.malformedLines;
                 const pointer = yield* snapshotTranscript(
                     extracted.session.id,
-                    candidate.filePath,
+                    candidate.path,
                 );
                 extracted.session.raw_file = pointer;
                 yield* upsertSessions([extracted.session]);
@@ -1852,7 +1833,7 @@ export const ingestTranscripts = Effect.fn("transcripts.ingest")(
                         currentFile: index + 1,
                         totalFiles: candidates.length,
                         files,
-                        activeFiles,
+                        activeFiles: loop.activeFiles,
                         records: recordCount(),
                         sessions,
                         turns: turnCount,
@@ -1869,7 +1850,7 @@ export const ingestTranscripts = Effect.fn("transcripts.ingest")(
                         currentFile: index + 1,
                         totalFiles: candidates.length,
                         files,
-                        activeFiles,
+                        activeFiles: loop.activeFiles,
                         records: recordCount(),
                         sessions,
                         turns: turnCount,
@@ -1885,15 +1866,14 @@ export const ingestTranscripts = Effect.fn("transcripts.ingest")(
                         ...counts,
                     });
                 }
-                // Record the watermark only after every write for this file
-                // succeeded, so a mid-file failure re-processes next run.
-                yield* wm.commit(candidate.filePath, candidate.mtimeMs, candidate.size);
-            }));
-            activeFiles -= 1;
-        }).pipe(Effect.withSpan("transcripts.file", {
-            attributes: { "file.path": candidate.filePath, "file.size": candidate.size },
-        })), { concurrency, discard: true });
-        yield* failures.report;
+                // Returning the session id signals success: the work-unit
+                // commits the watermark only after this processFile resolves, so
+                // a mid-file failure re-processes next run.
+                return extracted.session.id;
+            }).pipe(Effect.withSpan("transcripts.file", {
+                attributes: { "file.path": candidate.path, "file.size": candidate.sizeBytes },
+            })),
+        });
         yield* Effect.logDebug("transcript ingest complete", {
             files,
             records: recordCount(),
@@ -1918,7 +1898,7 @@ export const ingestTranscripts = Effect.fn("transcripts.ingest")(
             hookEvents: hookEventCount,
             hookCommandInvocations: hookCommandInvocationCount,
             malformedLines: malformedLineCount,
-            failedFiles: failures.count(),
+            failedFiles: result.failures.count(),
         } satisfies TranscriptStats;
     },
 );
