@@ -1,0 +1,39 @@
+/* ============================================================================
+   @ax/recap-deck - THEME (token scope).
+   Defines EVERY CSS var the structural rules in recap-deck.css reference.
+   Scoped under .rdx so it never touches host globals. Dark + light via
+   data-theme. Source grammar: github.com/m1ckc3s/nullframe (MIT).
+   Extracted from apps/studio/src/instrument/instrument.css (the .rdx scope).
+   ========================================================================= */
+.rdx {
+    --doto: "Doto", ui-monospace, monospace;
+    --mono: ui-monospace, "SF Mono", Menlo, Monaco, monospace;
+    --serif: Georgia, "Times New Roman", serif;
+    --sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+    --ease: cubic-bezier(0.4, 0, 0.2, 1);
+    --ease-back: cubic-bezier(0.34, 1.56, 0.64, 1);
+    min-height: 100dvh;
+    background: var(--bg);
+    color: var(--pri);
+    font-family: var(--sans);
+    -webkit-font-smoothing: antialiased;
+}
+/* ax identity: GREEN is the primary accent (not nullframe orange). Orange is
+   demoted to --alert (rec / live-energy / warnings) so the palette reads ax,
+   not "generic dark HUD". */
+.rdx[data-theme="dark"] {
+    --bg: #0b0d0b; --surface: #111311; --surface2: #181b18; --border: #1f241f; --border-hi: #31382f;
+    --dim: #5f685e; --sec: #939b8f; --pri: #e6e9e2; --display: #fff;
+    --accent: #56b06a; --alert: #f26522; --green: #56b06a; --red: #d7493b; --blue: #5b8fd6; --gold: #d6a14a; --violet: #9a86f0;
+    --dot: #1b211a; --glyph-dim: #232823; --glyph-lit: #eafff0;
+    --c0: #1a1f1a; --c1: #1e3526; --c2: #2c5639; --c3: #3f8a50; --c4: #62c878;
+}
+.rdx[data-theme="light"] {
+    --bg: #f1efe6; --surface: #fbfaf4; --surface2: #ffffff; --border: #dbd8cc; --border-hi: #c6c3b3;
+    --dim: #a4a195; --sec: #66695f; --pri: #272a24; --display: #0a0c09;
+    --accent: #2f9e44; --alert: #c85a1b; --green: #2f9e44; --red: #c0392b; --blue: #2567a8; --gold: #a66d10; --violet: #6650b8;
+    --dot: #e1ded2; --glyph-dim: #dad7cb; --glyph-lit: #173a22;
+    --c0: #e6e3d7; --c1: #cfe6d3; --c2: #9fd0aa; --c3: #5fb074; --c4: #2f9e44;
+}
+.rdx[data-theme="dark"] { color-scheme: dark; }
+.rdx[data-theme="light"] { color-scheme: light; }
