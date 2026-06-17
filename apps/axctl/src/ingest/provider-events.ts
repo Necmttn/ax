@@ -15,6 +15,11 @@ import {
 } from "@ax/lib/shared/surql";
 import { identityPart, stableDigest } from "./record-keys.ts";
 
+/**
+ * SDK-hosted Claude sessions still use provider `claude`. Keep the provider
+ * identity shared across Claude surfaces and segment embedded SDK runs with
+ * `labels.entrypoint = "sdk"` plus optional SDK metadata instead.
+ */
 export type AgentProviderName = "claude" | "codex" | "pi" | "opencode" | "cursor" | "otel";
 
 type JsonInput = unknown;
