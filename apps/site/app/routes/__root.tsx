@@ -1,5 +1,9 @@
 import { Outlet, createRootRoute, HeadContent, Scripts } from "@tanstack/react-router";
 import "../styles/globals.css";
+// Shared nullframe recap-deck styles (token scope first, then structural rules)
+// so the profile wrapped deck renders byte-identical to the studio recap deck.
+import "@ax/recap-deck/styles/recap-deck-theme.css";
+import "@ax/recap-deck/styles/recap-deck.css";
 
 export const Route = createRootRoute({
   head: () => {

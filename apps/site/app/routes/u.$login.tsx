@@ -4,8 +4,7 @@ import { useEffect, useState, type FormEvent } from "react";
 import { SiteHeader } from "~/components/landing-sections/site-header";
 import { SiteFooter } from "~/components/landing-sections/site-footer";
 import { HeroLogoField } from "~/components/landing-v2/supports-strip";
-import { WrappedDeck, type InsightCard } from "~/components/wrapped-deck";
-import type { VizSpec } from "~/components/card-viz";
+import { WrappedDeck, type InsightCard, type VizSpec } from "~/components/wrapped-deck";
 import { RadarChart, type RadarSeries } from "~/components/radar-chart";
 import {
     archetypeFor,

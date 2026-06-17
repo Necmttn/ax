@@ -15599,48 +15599,22 @@ footer.site-footer { padding: 48px 32px 56px; }
   .blog-essay .bk-bar-head { font-size: 12px; gap: 8px; }
 }
 
-/* ---- profile-v2 wrapped deck ---- */
-.pv2-deck { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px; margin: 16px 0 8px; }
-@media (max-width: 1500px) { .pv2-deck { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
-@media (max-width: 1020px) { .pv2-deck { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
-@media (max-width: 640px)  { .pv2-deck { grid-template-columns: 1fr; } }
-.pv2-card { border: 1px solid var(--line); background: var(--panel); display: flex; flex-direction: column; min-height: 250px; }
-.pv2-card.accent-green  { --card-accent: var(--green); }
-.pv2-card.accent-blue   { --card-accent: var(--blue); }
-.pv2-card.accent-gold   { --card-accent: var(--gold); }
-.pv2-card.accent-violet { --card-accent: var(--violet); }
-.pv2-card.accent-rose   { --card-accent: var(--rose); }
-.pv2-card.accent-red    { --card-accent: var(--red); }
-.pv2-card.accent-ink    { --card-accent: var(--ink); }
-/* dark recap band: the .browser--instrument wrapper supplies the instrument
-   dark token block (so var(--panel)/--ink/--green etc. resolve dark and the
-   .mc-* chart rules apply); these overrides strip the window chrome so the
-   deck reads as a flat dark slab on the otherwise-light profile page. */
-.landing-v2 .pv2-deck-band {
-  background: var(--page);
-  border: 1px solid var(--line);
+/* ---- profile-v2 wrapped deck: shared @ax/recap-deck band ----
+   The deck now renders the SHARED @ax/recap-deck cards inside a `.rdx`
+   dark-theme scope (so the package tokens resolve and the cards look
+   byte-identical to the studio recap deck). All card + chart styling is owned
+   by the package CSS (recap-deck.css / recap-deck-theme.css). Here we only
+   place that scope as a deliberate rounded dark slab on the otherwise-light
+   profile page - overriding the package's full-viewport `.rdx { min-height }`
+   and supplying the band's margins + rounded corners. The dark slab background
+   comes from the package's `.rdx { background: var(--bg) }` token. */
+.profile-v2 .pv2-recap {
+  min-height: 0;
   border-radius: 16px;
-  box-shadow: none;
-  padding: 22px 22px 14px;
   margin: 16px 0 8px;
+  padding: 22px 22px 18px;
 }
-.landing-v2 .pv2-deck-band .pv2-deck { margin: 0; }
-
-/* large chart region on top of each card - a full-width ~104px chart, not the
-   old 56px strip. */
-.pv2-card-viz { display: flex; align-items: center; height: 104px; padding: 18px 18px 0; overflow: hidden; }
-.pv2-card-viz--center { justify-content: center; }
-/* let the cleanly-scaling chart kinds fill the taller region; the px-positioned
-   kinds (candles/scatter/ring/radar/comet/waffle/signal/bullet) keep native
-   size and sit centered in the region. */
-.landing-v2 .browser--instrument .pv2-card-viz .mc-bars,
-.landing-v2 .browser--instrument .pv2-card-viz .mc-line,
-.landing-v2 .browser--instrument .pv2-card-viz .mc-wave,
-.landing-v2 .browser--instrument .pv2-card-viz .mc-delta { height: 100%; }
-.pv2-card-copy { padding: 14px 16px 18px; display: flex; flex-direction: column; gap: 7px; }
-.pv2-card-eyebrow { color: var(--card-accent); font-family: var(--mono); font-size: 12px; letter-spacing: 0.01em; }
-.pv2-card-headline { margin: 0; font-family: var(--serif); font-weight: 600; font-size: clamp(24px, 2.4vw, 30px); line-height: 1.06; letter-spacing: -0.01em; color: var(--ink); }
-.pv2-card-body { margin: 0; font-size: 14px; line-height: 1.5; color: var(--muted); }
+.profile-v2 .pv2-recap .wr-section { margin-top: 0; }
 
 /* ---- profile-v2 page shell ----
    Deltas on top of the inherited .landing-v2 system. The 1120px shell, .hero,
