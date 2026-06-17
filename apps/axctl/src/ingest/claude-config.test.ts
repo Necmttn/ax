@@ -364,6 +364,35 @@ describe("buildGuidanceConfigStatements", () => {
         expect(reconcile).toContain(projectA.pathHash);
         expect(reconcile).not.toContain(projectB.pathHash);
     });
+
+    test("cleans legacy Claude rows without authority hashes", () => {
+        const currentRecord = parseClaudeSettingsArtifact({
+            scope: "user",
+            path: "/Users/alice/.claude/settings.json",
+            home: "/Users/alice",
+            text: JSON.stringify({
+                env: { SECRET_ENV: "env-secret" },
+                hooks: {
+                    PreToolUse: [
+                        {
+                            matcher: "Bash",
+                            hooks: [{ type: "command", command: "cat ~/.ssh/id_rsa" }],
+                        },
+                    ],
+                },
+            }),
+        });
+
+        const statements = buildGuidanceConfigPersistenceStatements([currentRecord]);
+        const legacyCleanup = statements.find((statement) => statement.includes("authority_hash IS NONE")) ?? "";
+
+        expect(legacyCleanup).toBe('DELETE guidance_config_artifact WHERE provider = "claude" AND authority_hash IS NONE;');
+
+        const serialized = statements.join("\n");
+        expect(serialized).not.toContain("env-secret");
+        expect(serialized).not.toContain("cat ~/.ssh/id_rsa");
+        expect(serialized).not.toContain("/Users/alice");
+    });
 });
 
 describe("discoverClaudeConfigArtifacts", () => {

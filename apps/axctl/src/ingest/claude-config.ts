@@ -882,10 +882,15 @@ export const buildGuidanceConfigReconcileStatements = (
     authorityHashes = uniqueSorted(records.map((record) => record.authorityHash)),
 ): string[] => {
     const pathHashes = uniqueSorted(records.map((record) => record.pathHash));
-    if (authorityHashes.length === 0) return [];
-    return [
-        `DELETE ${GUIDANCE_CONFIG_ARTIFACT_TABLE} WHERE provider = ${surrealString("claude")} AND authority_hash IN ${surrealValue(authorityHashes)} AND path_hash NOT IN ${surrealValue(pathHashes)};`,
+    const statements = [
+        `DELETE ${GUIDANCE_CONFIG_ARTIFACT_TABLE} WHERE provider = ${surrealString("claude")} AND authority_hash IS NONE;`,
     ];
+    if (authorityHashes.length > 0) {
+        statements.unshift(
+            `DELETE ${GUIDANCE_CONFIG_ARTIFACT_TABLE} WHERE provider = ${surrealString("claude")} AND authority_hash IN ${surrealValue(authorityHashes)} AND path_hash NOT IN ${surrealValue(pathHashes)};`,
+        );
+    }
+    return statements;
 };
 
 export const buildGuidanceConfigPersistenceStatements = (
