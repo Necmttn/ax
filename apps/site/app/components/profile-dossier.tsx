@@ -100,14 +100,16 @@ export const realHarnesses = (harnesses: readonly string[]): string[] => {
 };
 
 /** GitHub avatar by login (same source as the leaders page). `ring` tints the
- *  border for comparison overlays; `size` drives layout + the @2x source. */
-export function Avatar({ login, size, ring, className }: {
+ *  border for comparison overlays; `size` drives layout + the @2x source.
+ *  `linked` wraps it in a link to that person's /u/<login> profile. */
+export function Avatar({ login, size, ring, className, linked }: {
     login: string;
     size: number;
     ring?: string;
     className?: string;
+    linked?: boolean;
 }) {
-    return (
+    const img = (
         <img
             className={className ? `pv2-avatar ${className}` : "pv2-avatar"}
             src={`https://github.com/${login}.png?size=${size * 2}`}
@@ -117,6 +119,18 @@ export function Avatar({ login, size, ring, className }: {
             loading="eager"
             style={ring ? { borderColor: ring } : undefined}
         />
+    );
+    if (!linked) return img;
+    return (
+        <Link
+            className="pv2-avatar-link"
+            to="/u/$login"
+            params={{ login }}
+            search={{ vs: undefined }}
+            aria-label={`@${login} profile`}
+        >
+            {img}
+        </Link>
     );
 }
 
@@ -544,12 +558,12 @@ export function RawTable({
                         <th scope="col">metric</th>
                         <th scope="col" className="pf-rawvals-col">
                             {vs ? (
-                                <><Avatar login={selfLogin} size={18} ring={SELF_COLOR} className="pv2-avatar--inline" /><span style={{ color: SELF_COLOR }}>@{selfLogin}</span></>
+                                <><Avatar login={selfLogin} size={18} ring={SELF_COLOR} className="pv2-avatar--inline" linked /><span style={{ color: SELF_COLOR }}>@{selfLogin}</span></>
                             ) : "value"}
                         </th>
                         {vs && (
                             <th scope="col" className="pf-rawvals-col">
-                                <Avatar login={vs.login} size={18} ring={VS_COLOR} className="pv2-avatar--inline" /><span style={{ color: VS_COLOR }}>@{vs.login}</span>
+                                <Avatar login={vs.login} size={18} ring={VS_COLOR} className="pv2-avatar--inline" linked /><span style={{ color: VS_COLOR }}>@{vs.login}</span>
                             </th>
                         )}
                     </tr>

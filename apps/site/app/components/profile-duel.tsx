@@ -240,7 +240,7 @@ export function DuelDossier({ a, b }: { a: ProfileV1; b: ProfileV1 }) {
                 {/* fight-card: A | score | B - the archetype sign is the focal payload */}
                 <div className="duel-versus">
                     <div className="duel-versus-side duel-versus-side--a">
-                        <Avatar login={a.github} size={40} ring={SELF_COLOR} className="duel-versus-avatar" />
+                        <Avatar login={a.github} size={40} ring={SELF_COLOR} className="duel-versus-avatar" linked />
                         <span className="duel-versus-handle" style={{ color: SELF_COLOR }}>@{a.github}</span>
                         <span className="duel-versus-sign">{aArch.sign}</span>
                     </div>
@@ -250,7 +250,7 @@ export function DuelDossier({ a, b }: { a: ProfileV1; b: ProfileV1 }) {
                         <span className="duel-vs-score" style={{ color: VS_COLOR }}>{tally.bLeads}</span>
                     </div>
                     <div className="duel-versus-side duel-versus-side--b">
-                        <Avatar login={b.github} size={40} ring={VS_COLOR} className="duel-versus-avatar" />
+                        <Avatar login={b.github} size={40} ring={VS_COLOR} className="duel-versus-avatar" linked />
                         <span className="duel-versus-handle" style={{ color: VS_COLOR }}>@{b.github}</span>
                         <span className="duel-versus-sign">{bArch.sign}</span>
                     </div>
@@ -412,7 +412,7 @@ function DuelSide({ login, arch, ring, color, side }: {
 }) {
     return (
         <div className={`duel-side duel-side--${side}`}>
-            <Avatar login={login} size={96} ring={ring} className="duel-side-avatar" />
+            <Avatar login={login} size={96} ring={ring} className="duel-side-avatar" linked />
             <h1 className="duel-side-name"><span className="pf-at">@</span>{login}</h1>
             <span className="duel-side-sign" style={{ color }}>
                 <span className="duel-side-glyph" aria-hidden="true">{arch.symbol}</span> {arch.sign}
@@ -431,7 +431,7 @@ function DuelColumn({ login, color, ring, children }: {
     return (
         <div className="duel-col" style={{ borderTopColor: color }}>
             <div className="duel-col-head">
-                <Avatar login={login} size={26} ring={ring} className="pv2-avatar--inline" />
+                <Avatar login={login} size={26} ring={ring} className="pv2-avatar--inline" linked />
                 <span className="duel-col-name" style={{ color }}>@{login}</span>
             </div>
             {children}

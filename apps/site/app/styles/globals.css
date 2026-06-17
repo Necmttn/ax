@@ -15369,6 +15369,15 @@ footer.site-footer { padding: 48px 32px 56px; }
   background: var(--panel);
   object-fit: cover;
 }
+/* clickable avatar → that person's profile */
+.profile-v2 .pv2-avatar-link {
+  display: inline-flex;
+  line-height: 0;
+  border-radius: 50%;
+  transition: transform 0.14s var(--ease, ease), filter 0.14s var(--ease, ease);
+}
+.profile-v2 .pv2-avatar-link:hover { transform: translateY(-1px); filter: brightness(1.04); }
+.profile-v2 .pv2-avatar-link:focus-visible { outline: 2px solid var(--green); outline-offset: 2px; }
 .profile-v2 .pv2-avatar--hero {
   display: block;
   margin: 16px auto 10px;
