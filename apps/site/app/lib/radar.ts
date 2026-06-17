@@ -317,7 +317,7 @@ function blurbFor(top: RadarAxisKey, second: RadarAxisKey, p: ProfileV1): string
     const fact = (axis: RadarAxisKey): string => {
         switch (axis) {
             case "DEPTH":
-                return ins ? `${pct1(ins.deep_session_share * 100)} of your sessions land clean work` : "your clean-ship share";
+                return ins ? `${pct1(ins.deep_session_share * 100)} of your sessions landing clean work` : "your clean-ship share";
             case "SCALE":
                 return `${fmtCompact.format(p.stats.tokens.total)} tokens moved`;
             case "RIGOR":

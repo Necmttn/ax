@@ -170,6 +170,21 @@ const fmtDay = (iso: string): string => {
 };
 const clampPct = (x: number): number => (Number.isFinite(x) ? Math.min(100, Math.max(0, x)) : 0);
 
+/** Harness chips show the real harnesses you run - not internal origins. A
+ * "claude-subagent" entry is the same harness as "claude" (just a dispatch
+ * origin), so strip the "-subagent" suffix and dedupe, preserving order. */
+const realHarnesses = (harnesses: readonly string[]): string[] => {
+    const seen = new Set<string>();
+    const out: string[] = [];
+    for (const h of harnesses) {
+        const base = h.replace(/-subagents?$/i, "");
+        if (seen.has(base)) continue;
+        seen.add(base);
+        out.push(base);
+    }
+    return out;
+};
+
 /* ---------- the dossier ---------- */
 
 function ProfileDossier({ profile: p, vs }: { profile: ProfileV1; vs: VsState }) {
@@ -197,17 +212,20 @@ function ProfileDossier({ profile: p, vs }: { profile: ProfileV1; vs: VsState })
                 <h1><span className="pf-at">@</span>{p.github}</h1>
                 <p className="lede">{lede}</p>
                 <span className="pf-harness-list" aria-label="harnesses">
-                    {p.stats.harnesses.map((h) => <span className="pf-harness" key={h}>{h}</span>)}
+                    {realHarnesses(p.stats.harnesses).map((h) => <span className="pf-harness" key={h}>{h}</span>)}
                 </span>
-                <div className="pv2-vitals" aria-label="vitals">
-                    <Vital num={fmtInt(p.stats.sessions)} label="sessions" />
-                    <Vital num={fmtCompact(p.stats.tokens.total)} label="tokens" />
-                    {p.stats.cost_usd !== undefined && <Vital num={`~${fmtMoney(p.stats.cost_usd)}`} label="est. spend" />}
-                    {ins && <Vital num={fmtCompact(ins.hours_total)} unit="hrs" label="in the loop" />}
-                    <Vital num={`${fmtInt(p.stats.active_days)}/${fmtInt(p.window_days)}`} label="days active" />
-                    <Vital num={`${fmtInt(p.stats.streak_days)}d`} label="streak" />
-                </div>
             </section>
+
+            {/* vitals - a stats strip below the headline (kept OUT of .hero so the
+                absolute floating-logo field never overlaps the divider rule) */}
+            <div className="pv2-vitals" aria-label="vitals">
+                <Vital num={fmtInt(p.stats.sessions)} label="sessions" />
+                <Vital num={fmtCompact(p.stats.tokens.total)} label="tokens" />
+                {p.stats.cost_usd !== undefined && <Vital num={`~${fmtMoney(p.stats.cost_usd)}`} label="est. spend" />}
+                {ins && <Vital num={fmtCompact(ins.hours_total)} unit="hrs" label="in the loop" />}
+                <Vital num={`${fmtInt(p.stats.active_days)}/${fmtInt(p.window_days)}`} label="days active" />
+                <Vital num={`${fmtInt(p.stats.streak_days)}d`} label="streak" />
+            </div>
 
             {/* the window: one stacked-bar chart, model-keyed, with a legend */}
             <section className="pf-section">

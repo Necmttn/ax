@@ -15362,6 +15362,12 @@ footer.site-footer { padding: 48px 32px 56px; }
    .eyebrow, .demo-intro and .cards all apply via the `landing-v2` class on
    <main>; only profile-specific additions live here. */
 
+/* The floating agent-logo field is absolute (inset:0 of .hero); floor the hero
+   height so the lowest tiles (top ~322px + 62px) always sit INSIDE the hero,
+   never bleeding onto the vitals strip below. Drop the landing hero's own
+   bottom rule - the vitals strip owns the divider now (avoids a double line). */
+.profile-v2 section.hero { min-height: 430px; border-bottom: none; }
+
 /* hero eyebrow carries the live pulse + window line; suppress the landing
    eyebrow's leading dot since .pf-live brings its own pulsing dot. */
 .profile-v2 section.hero .eyebrow.pv2-eyebrow { text-transform: none; gap: 7px; }
