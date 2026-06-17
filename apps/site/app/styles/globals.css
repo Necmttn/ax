@@ -15715,8 +15715,8 @@ footer.site-footer { padding: 48px 32px 56px; }
 .profile-duel .pf-rawvals-barrow > td { padding: 0 0 9px; }
 .profile-duel .pf-rawvals-split {
   display: flex;
-  align-items: stretch;
-  height: 9px;
+  align-items: center;
+  height: 16px;
 }
 .profile-duel .pf-rawvals-split-a,
 .profile-duel .pf-rawvals-split-b {
@@ -15733,10 +15733,11 @@ footer.site-footer { padding: 48px 32px 56px; }
 .profile-duel .pf-rawvals-split-mid {
   position: relative;
   flex: 0 0 auto;
-  min-width: 36px;
+  min-width: 52px;
+  padding: 0 10px;
   text-align: center;
   font-family: var(--mono);
-  font-size: 9px;
+  font-size: 10px;
   letter-spacing: 0.02em;
   color: var(--muted);
   display: flex;
@@ -15793,4 +15794,12 @@ footer.site-footer { padding: 48px 32px 56px; }
   .profile-duel .duel-vs { font-size: 26px; }
   .profile-duel .duel-vital-mid { min-width: 90px; }
   .profile-duel .duel-vital-val { font-size: 19px; }
+  /* RAW VALUES: drop the per-row description (it's in the radar legend) and
+     shrink type so the 3 columns + values fit a phone without ragged wrapping. */
+  .profile-duel .pf-rawvals-metric-note { display: none; }
+  .profile-duel .pf-rawvals-table { font-size: 11px; }
+  .profile-duel .pf-rawvals-table thead th { font-size: 9px; letter-spacing: 0.08em; }
+  .profile-duel .pf-rawvals-table th:first-child { width: 22%; }
+  .profile-duel .pf-rawvals-val { font-size: 11px; line-height: 1.35; }
+  .profile-duel .pf-rawvals-split-mid { min-width: 40px; padding: 0 6px; font-size: 9px; }
 }
