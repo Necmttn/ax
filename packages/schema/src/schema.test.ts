@@ -260,6 +260,38 @@ describe("Claude sidecar artifact schema", () => {
     });
 });
 
+describe("guidance/config artifact inventory schema", () => {
+    test("provider-compatible metadata-only table is defined", () => {
+        expect(schema).toContain("DEFINE TABLE IF NOT EXISTS guidance_config_artifact SCHEMAFULL");
+        expect(schema).toContain("DEFINE FIELD provider                 ON guidance_config_artifact TYPE string");
+        expect(schema).toContain("DEFINE FIELD kind                     ON guidance_config_artifact TYPE string");
+        expect(schema).toContain("DEFINE FIELD scope                    ON guidance_config_artifact TYPE string");
+        expect(schema).toContain("DEFINE FIELD safe_path                ON guidance_config_artifact TYPE string");
+        expect(schema).toContain("DEFINE FIELD path_hash                ON guidance_config_artifact TYPE string");
+        expect(schema).toContain("DEFINE FIELD content_hash             ON guidance_config_artifact TYPE option<string>");
+        expect(schema).toContain("DEFINE FIELD parse_status             ON guidance_config_artifact TYPE string");
+        expect(schema).toContain("DEFINE FIELD bytes                    ON guidance_config_artifact TYPE int");
+        expect(schema).toContain("DEFINE FIELD token_estimate           ON guidance_config_artifact TYPE int");
+        expect(schema).toContain("DEFINE FIELD command_hashes_json      ON guidance_config_artifact TYPE option<string>");
+        expect(schema).toContain("DEFINE FIELD hook_event_names_json    ON guidance_config_artifact TYPE option<string>");
+        expect(schema).toContain("DEFINE FIELD mcp_server_names_json    ON guidance_config_artifact TYPE option<string>");
+        expect(schema).toContain("DEFINE FIELD env_keys_json            ON guidance_config_artifact TYPE option<string>");
+        expect(schema).toContain("DEFINE FIELD metadata_json            ON guidance_config_artifact TYPE option<string>");
+    });
+
+    test("read indexes are defined for artifact inventory queries", () => {
+        expect(schema).toContain(
+            "DEFINE INDEX IF NOT EXISTS guidance_config_artifact_path_hash ON guidance_config_artifact FIELDS provider, path_hash UNIQUE",
+        );
+        expect(schema).toContain(
+            "DEFINE INDEX IF NOT EXISTS guidance_config_artifact_kind_scope ON guidance_config_artifact FIELDS provider, kind, scope",
+        );
+        expect(schema).toContain(
+            "DEFINE INDEX IF NOT EXISTS guidance_config_artifact_parse_status ON guidance_config_artifact FIELDS parse_status",
+        );
+    });
+});
+
 describe("proposal.origin NONE-coerce guard (#472)", () => {
     // A bare `UPDATE proposal SET ...` re-coerces the whole SCHEMAFULL record;
     // old rows created before `origin` existed stored NONE and crashed with

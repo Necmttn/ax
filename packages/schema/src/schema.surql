@@ -807,6 +807,38 @@ DEFINE FIELD observed_at       ON guidance_revision TYPE datetime DEFAULT time::
 DEFINE INDEX IF NOT EXISTS guidance_revision_source_hash ON guidance_revision FIELDS source_path, content_hash UNIQUE;
 DEFINE INDEX IF NOT EXISTS guidance_revision_scope ON guidance_revision FIELDS scope, observed_at;
 
+-- Provider-compatible metadata inventory for guidance/config artifacts.
+-- Safe-by-default: stores hashes, counts, event/server/key names, and redacted
+-- coarse paths only. Never raw file bodies, env values, hook commands,
+-- permission patterns, memory text, or absolute home paths.
+DEFINE TABLE IF NOT EXISTS guidance_config_artifact SCHEMAFULL;
+DEFINE FIELD provider                 ON guidance_config_artifact TYPE string;
+DEFINE FIELD kind                     ON guidance_config_artifact TYPE string;
+DEFINE FIELD scope                    ON guidance_config_artifact TYPE string;
+DEFINE FIELD safe_path                ON guidance_config_artifact TYPE string;
+DEFINE FIELD path_hash                ON guidance_config_artifact TYPE string;
+DEFINE FIELD content_hash             ON guidance_config_artifact TYPE option<string>;
+DEFINE FIELD parse_status             ON guidance_config_artifact TYPE string;
+DEFINE FIELD bytes                    ON guidance_config_artifact TYPE int;
+DEFINE FIELD token_estimate           ON guidance_config_artifact TYPE int;
+DEFINE FIELD command_hashes_json      ON guidance_config_artifact TYPE option<string>;
+DEFINE FIELD hook_event_names_json    ON guidance_config_artifact TYPE option<string>;
+DEFINE FIELD matcher_count            ON guidance_config_artifact TYPE int;
+DEFINE FIELD mcp_server_names_json    ON guidance_config_artifact TYPE option<string>;
+DEFINE FIELD env_keys_json            ON guidance_config_artifact TYPE option<string>;
+DEFINE FIELD enabled_tool_count       ON guidance_config_artifact TYPE option<int>;
+DEFINE FIELD model                    ON guidance_config_artifact TYPE option<string>;
+DEFINE FIELD reasoning_effort         ON guidance_config_artifact TYPE option<string>;
+DEFINE FIELD output_style             ON guidance_config_artifact TYPE option<string>;
+DEFINE FIELD permission_allow_count   ON guidance_config_artifact TYPE int;
+DEFINE FIELD permission_ask_count     ON guidance_config_artifact TYPE int;
+DEFINE FIELD permission_deny_count    ON guidance_config_artifact TYPE int;
+DEFINE FIELD metadata_json            ON guidance_config_artifact TYPE option<string>;
+DEFINE FIELD observed_at              ON guidance_config_artifact TYPE datetime DEFAULT time::now();
+DEFINE INDEX IF NOT EXISTS guidance_config_artifact_path_hash ON guidance_config_artifact FIELDS provider, path_hash UNIQUE;
+DEFINE INDEX IF NOT EXISTS guidance_config_artifact_kind_scope ON guidance_config_artifact FIELDS provider, kind, scope;
+DEFINE INDEX IF NOT EXISTS guidance_config_artifact_parse_status ON guidance_config_artifact FIELDS parse_status;
+
 DEFINE TABLE stack SCHEMAFULL;
 DEFINE FIELD name        ON stack TYPE string;
 DEFINE FIELD aliases     ON stack TYPE option<string>;  -- JSON-encoded
