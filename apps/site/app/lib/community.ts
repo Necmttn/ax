@@ -148,6 +148,24 @@ const optStr = (v: unknown, what: string): void => {
 };
 
 /**
+ * Validate an optional array of object rows: guards `Array.isArray` + `isRecord`
+ * per element, then runs `check` for the element-specific field validation.
+ * No-op when the array is absent (the field is optional).
+ */
+const validateRows = (
+    arr: unknown,
+    name: string,
+    check: (row: Record<string, unknown>) => void,
+): void => {
+    if (arr === undefined) return;
+    if (!Array.isArray(arr)) throw new Error(`invalid ${name}`);
+    for (const row of arr) {
+        if (!isRecord(row)) throw new Error(`invalid ${name} row`);
+        check(row);
+    }
+};
+
+/**
  * Every field a route renders as a JSX child or calls a method on MUST be
  * validated here - a hostile gist value that survives this function can
  * only ever render as text, never crash the page.
@@ -267,34 +285,22 @@ export function validateProfileV1(value: unknown): ProfileV1 {
         const h = value.highlights;
         if (!isRecord(h)) throw new Error("invalid highlights");
         str(h.authored_at, "highlights.authored_at");
-        if (h.setup !== undefined) {
-            if (!Array.isArray(h.setup)) throw new Error("invalid highlights.setup");
-            for (const s of h.setup) {
-                if (!isRecord(s)) throw new Error("invalid setup row");
-                str(s.title, "setup.title");
-                str(s.what, "setup.what");
-                str(s.why, "setup.why");
-                optStr(s.link, "setup.link");
-            }
-        }
-        if (h.skills !== undefined) {
-            if (!Array.isArray(h.skills)) throw new Error("invalid highlights.skills");
-            for (const s of h.skills) {
-                if (!isRecord(s)) throw new Error("invalid highlights skill row");
-                str(s.name, "highlights.skill.name");
-                str(s.source, "highlights.skill.source");
-                str(s.summary, "highlights.skill.summary");
-            }
-        }
+        validateRows(h.setup, "highlights.setup", (s) => {
+            str(s.title, "setup.title");
+            str(s.what, "setup.what");
+            str(s.why, "setup.why");
+            optStr(s.link, "setup.link");
+        });
+        validateRows(h.skills, "highlights.skills", (s) => {
+            str(s.name, "highlights.skill.name");
+            str(s.source, "highlights.skill.source");
+            str(s.summary, "highlights.skill.summary");
+        });
         optStr(h.taste, "highlights.taste");
-        if (h.wins !== undefined) {
-            if (!Array.isArray(h.wins)) throw new Error("invalid highlights.wins");
-            for (const w of h.wins) {
-                if (!isRecord(w)) throw new Error("invalid win row");
-                str(w.text, "win.text");
-                optStr(w.evidence, "win.evidence");
-            }
-        }
+        validateRows(h.wins, "highlights.wins", (w) => {
+            str(w.text, "win.text");
+            optStr(w.evidence, "win.evidence");
+        });
     }
     return value as unknown as ProfileV1;
 }

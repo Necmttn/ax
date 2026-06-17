@@ -8,6 +8,8 @@ import { Effect } from "effect";
 import { Command, Flag } from "effect/unstable/cli";
 import { prettyPrint } from "@ax/lib/json";
 import { buildProfile, type ProfileEnv } from "../../profile/render.ts";
+import { fetchSkillInvocations, fetchSkillScopes } from "../../profile/queries.ts";
+import { deriveRig } from "../../profile/rig.ts";
 import type { ProfileV1 } from "../../profile/schema.ts";
 import { integer } from "../render.ts";
 import type { RuntimeManifest } from "./manifest.ts";
@@ -29,6 +31,7 @@ import { renderProfileInterviewBrief } from "../../profile/interview-brief.ts";
 import {
     decodeHighlightsFile,
     defaultHighlightsPath,
+    HighlightsInvalidError,
     loadHighlightsBlock,
     saveHighlightsFile,
     type HighlightsFile,
@@ -59,38 +62,56 @@ const resolveGithubLogin = Effect.gen(function* () {
     return process.env.USER ?? "unknown";
 });
 
-const gatherEnv = Effect.gen(function* () {
-    const hookFiles = yield* Effect.tryPromise({
-        try: () => Array.fromAsync(new Bun.Glob("*.ts").scan({ cwd: HOOKS_DIR })),
-        catch: () => [] as string[],
-    }).pipe(Effect.orElseSucceed(() => [] as string[]));
+/**
+ * Gather the local environment for a profile build. `loadHighlights` is false
+ * for `interview` (it only needs the rig and must NOT fail on a corrupt
+ * highlights file - that's the command you run to regenerate it); true for
+ * show/publish, where an invalid file surfaces as a HighlightsInvalidError
+ * rather than silently dropping the published block.
+ */
+const gatherEnv = (loadHighlights = true) =>
+    Effect.gen(function* () {
+        const hookFiles = yield* Effect.tryPromise({
+            try: () => Array.fromAsync(new Bun.Glob("*.ts").scan({ cwd: HOOKS_DIR })),
+            catch: () => [] as string[],
+        }).pipe(Effect.orElseSucceed(() => [] as string[]));
 
-    const rulesMarkdown = yield* Effect.tryPromise({
-        try: async () => {
-            const file = Bun.file(RULES_FILE);
-            return (await file.exists()) ? await file.text() : null;
-        },
-        catch: () => null,
-    }).pipe(Effect.orElseSucceed(() => null));
+        const rulesMarkdown = yield* Effect.tryPromise({
+            try: async () => {
+                const file = Bun.file(RULES_FILE);
+                return (await file.exists()) ? await file.text() : null;
+            },
+            catch: () => null,
+        }).pipe(Effect.orElseSucceed(() => null));
 
-    const hasRoutingTable = yield* Effect.tryPromise({
-        try: () => Bun.file(ROUTING_TABLE).exists(),
-        catch: () => false,
-    }).pipe(Effect.orElseSucceed(() => false));
+        const hasRoutingTable = yield* Effect.tryPromise({
+            try: () => Bun.file(ROUTING_TABLE).exists(),
+            catch: () => false,
+        }).pipe(Effect.orElseSucceed(() => false));
 
-    const github = yield* resolveGithubLogin;
-    const highlights = yield* Effect.promise(() => loadHighlightsBlock(defaultHighlightsPath()));
-    const now = new Date();
-    return {
-        github,
-        generatedAt: now.toISOString(),
-        today: now.toISOString().slice(0, 10),
-        hookFiles,
-        hasRoutingTable,
-        rulesMarkdown,
-        highlights,
-    } satisfies ProfileEnv;
-});
+        const github = yield* resolveGithubLogin;
+        // A missing file is null (normal); a present-but-invalid file fails with
+        // HighlightsInvalidError (loud) instead of being swallowed to null.
+        const highlights = loadHighlights
+            ? yield* Effect.tryPromise({
+                try: () => loadHighlightsBlock(defaultHighlightsPath()),
+                catch: (e) =>
+                    e instanceof HighlightsInvalidError
+                        ? e
+                        : new HighlightsInvalidError(defaultHighlightsPath(), String(e)),
+            })
+            : null;
+        const now = new Date();
+        return {
+            github,
+            generatedAt: now.toISOString(),
+            today: now.toISOString().slice(0, 10),
+            hookFiles,
+            hasRoutingTable,
+            rulesMarkdown,
+            highlights,
+        } satisfies ProfileEnv;
+    });
 
 // ---------------------------------------------------------------------------
 // Formatting
@@ -244,7 +265,7 @@ const profileShowCommand = Command.make(
         return Effect.gen(function* () {
             const progress = makeProfileProgress({ windowDays: window, includeCost: !noCost });
             yield* progress("env");
-            const env = yield* gatherEnv;
+            const env = yield* gatherEnv();
             yield* progress("build");
             const profile = yield* buildProfile({
                 windowDays: window,
@@ -284,7 +305,22 @@ const cmdProfilePublish = (input: {
             if (!isStale(state.published_at, input.ifStaleHours, nowIso)) return;
         }
 
-        const env = yield* gatherEnv;
+        // An invalid highlights file must not silently drop the published block.
+        // Interactive publish fails loudly; the unattended --if-stale watcher
+        // skips with a warning (and leaves the prior published version intact).
+        const env = yield* gatherEnv().pipe(
+            Effect.catchTag("HighlightsInvalidError", (e) => {
+                if (input.ifStaleHours !== null) {
+                    console.error(
+                        `ax profile publish: skipping auto-refresh - ${e.message}. ` +
+                        "Fix the file or re-run `ax profile interview`.",
+                    );
+                    return Effect.succeed(null);
+                }
+                return Effect.fail(e);
+            }),
+        );
+        if (env === null) return;
         const noCost = input.noCost || (state?.no_cost ?? false);
         const profile = yield* buildProfile({
             windowDays: input.window,
@@ -439,12 +475,22 @@ const cmdProfileInterview = (input: { readonly force: boolean }) =>
             console.log(`already exists: ${path} (re-run with --force to overwrite)`);
             return;
         }
-        const env = yield* gatherEnv;
-        const profile = yield* buildProfile({ windowDays: 30, includeCost: false, env });
+        // Only the rig is needed to prefill the brief - skip the full ~27-query
+        // buildProfile and skip the highlights load (interview regenerates them).
+        const env = yield* gatherEnv(false);
+        const invocations = yield* fetchSkillInvocations({ windowDays: 30 });
+        const scopes = yield* fetchSkillScopes();
+        const rig = deriveRig({
+            invocations,
+            scopes,
+            hookFiles: env.hookFiles,
+            hasRoutingTable: env.hasRoutingTable,
+            rulesMarkdown: env.rulesMarkdown,
+        });
         const md = renderProfileInterviewBrief({
             date,
-            skills: profile.rig.skills.slice(0, 10).map((s) => ({ name: s.name, source: s.source })),
-            hooks: profile.rig.hooks,
+            skills: rig.skills.map((s) => ({ name: s.name, source: s.source })),
+            hooks: rig.hooks,
         });
         yield* Effect.tryPromise(() => Bun.write(path, md));
         console.log(`interview brief written: ${path}`);
@@ -487,6 +533,18 @@ export const profileCommand = Command.make("profile").pipe(
     Command.withSubcommands([profileShowCommand, profilePublishCommand, profileUnpublishCommand, profileInterviewCommand]),
 );
 
+// `interview submit` only validates JSON + writes ~/.ax/profile-highlights.json,
+// so it must not require a live SurrealDB; every other profile path reads the
+// graph. Route per-subcommand (and per-argv for the submit sub-subcommand).
 export const axProfileRuntime: RuntimeManifest = {
-    profile: "db",
+    profile: {
+        kind: "db-conditional",
+        fallback: "db",
+        subcommands: {
+            show: "db",
+            publish: "db",
+            unpublish: "db",
+            interview: (args) => (args[2] === "submit" ? "none" : "db"),
+        },
+    },
 };

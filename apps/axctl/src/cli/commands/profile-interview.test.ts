@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { Effect } from "effect";
-import { cmdProfileInterviewSubmit } from "./profile.ts";
+import { axProfileRuntime, cmdProfileInterviewSubmit } from "./profile.ts";
+import { resolveRuntime } from "./manifest.ts";
 import { loadHighlightsBlock } from "../../profile/highlights.ts";
 
 const tmpPath = () => `/tmp/ax-hl-submit-${process.pid}-${Math.random().toString(36).slice(2)}.json`;
@@ -22,5 +23,15 @@ describe("ax profile interview submit", () => {
         );
         expect(exit._tag).toBe("Failure");
         expect(await Bun.file(path).exists()).toBe(false);
+    });
+
+    test("routes `interview submit` to the no-DB runtime; other paths stay db", () => {
+        const entry = axProfileRuntime.profile;
+        // submit only writes a local file - must not require a live SurrealDB.
+        expect(resolveRuntime(entry, ["profile", "interview", "submit"])).toBe("none");
+        // brief generation reads the rig; show/publish read the graph.
+        expect(resolveRuntime(entry, ["profile", "interview"])).toBe("db");
+        expect(resolveRuntime(entry, ["profile", "show"])).toBe("db");
+        expect(resolveRuntime(entry, ["profile", "publish"])).toBe("db");
     });
 });

@@ -16,6 +16,7 @@ import { duelPath, duelXIntent } from "~/lib/challenge";
 import {
     type ProfileV1,
     type ProfileDailyRow,
+    type ProfileHighlights,
     type ProfileInsights,
     type ProfileSkill,
 } from "~/lib/community";
@@ -92,6 +93,74 @@ function safeHttpUrl(raw: string): string | null {
     } catch {
         return null;
     }
+}
+
+/**
+ * The user-authored highlights blocks (their words → secret weapons → learn
+ * the rig → shipped). Shared by the single-profile dossier AND the duel page,
+ * so both render the "In their words" layer; renders nothing when there are no
+ * highlights or every sub-block is empty. The mined `taste.patterns` cards are
+ * rendered separately by each caller (they differ per layout).
+ */
+export function HighlightsBlocks({ highlights }: { highlights?: ProfileHighlights }) {
+    if (!highlights) return null;
+    return (
+        <>
+            {highlights.taste && (
+                <blockquote className="pf-words">
+                    <p>{highlights.taste}</p>
+                    <cite>- In their words</cite>
+                </blockquote>
+            )}
+
+            {highlights.setup && highlights.setup.length > 0 && (
+                <div className="pf-weapons">
+                    <h3>Secret weapons</h3>
+                    <div className="pf-weapons-grid">
+                        {highlights.setup.map((s, i) => {
+                            const href = s.link ? safeHttpUrl(s.link) : null;
+                            return (
+                                <div className="pf-weapon" key={`${s.title}-${i}`}>
+                                    <div className="pf-weapon-title">
+                                        {href
+                                            ? <a href={href} target="_blank" rel="noopener nofollow">{s.title} ↗</a>
+                                            : s.title}
+                                    </div>
+                                    <p className="pf-weapon-what">{s.what}</p>
+                                    <p className="pf-weapon-why">{s.why}</p>
+                                </div>
+                            );
+                        })}
+                    </div>
+                </div>
+            )}
+
+            {highlights.skills && highlights.skills.length > 0 && (
+                <div className="pf-learn">
+                    <h3>Learn the rig</h3>
+                    {highlights.skills.map((s, i) => (
+                        <div className="pf-learn-row" key={`${s.name}-${i}`}>
+                            <span className="pf-learn-name">{s.name}</span>
+                            <span className="pf-learn-src">{s.source}</span>
+                            <span className="pf-learn-sum">{s.summary}</span>
+                        </div>
+                    ))}
+                </div>
+            )}
+
+            {highlights.wins && highlights.wins.length > 0 && (
+                <div className="pf-wins">
+                    <h3>Shipped</h3>
+                    {highlights.wins.map((w, i) => (
+                        <div className="pf-win" key={i}>
+                            <span className="pf-win-text">✓ {w.text}</span>
+                            {w.evidence && <span className="pf-win-ev">{w.evidence}</span>}
+                        </div>
+                    ))}
+                </div>
+            )}
+        </>
+    );
 }
 
 /** Harness chips show the real harnesses you run - not internal origins. A
@@ -300,59 +369,7 @@ export function ProfileDossier({ profile: p, vs }: { profile: ProfileV1; vs: VsS
                 <section className="pf-section">
                     <SectionIntro eyebrow="taste" title="Taste" note="in their words, and what ax keeps seeing" />
 
-                    {p.highlights?.taste && (
-                        <blockquote className="pf-words">
-                            <p>{p.highlights.taste}</p>
-                            <cite>- In their words</cite>
-                        </blockquote>
-                    )}
-
-                    {p.highlights?.setup && p.highlights.setup.length > 0 && (
-                        <div className="pf-weapons">
-                            <h3>Secret weapons</h3>
-                            <div className="pf-weapons-grid">
-                                {p.highlights.setup.map((s, i) => {
-                                    const href = s.link ? safeHttpUrl(s.link) : null;
-                                    return (
-                                        <div className="pf-weapon" key={`${s.title}-${i}`}>
-                                            <div className="pf-weapon-title">
-                                                {href
-                                                    ? <a href={href} target="_blank" rel="noopener nofollow">{s.title} ↗</a>
-                                                    : s.title}
-                                            </div>
-                                            <p className="pf-weapon-what">{s.what}</p>
-                                            <p className="pf-weapon-why">{s.why}</p>
-                                        </div>
-                                    );
-                                })}
-                            </div>
-                        </div>
-                    )}
-
-                    {p.highlights?.skills && p.highlights.skills.length > 0 && (
-                        <div className="pf-learn">
-                            <h3>Learn the rig</h3>
-                            {p.highlights.skills.map((s, i) => (
-                                <div className="pf-learn-row" key={`${s.name}-${i}`}>
-                                    <span className="pf-learn-name">{s.name}</span>
-                                    <span className="pf-learn-src">{s.source}</span>
-                                    <span className="pf-learn-sum">{s.summary}</span>
-                                </div>
-                            ))}
-                        </div>
-                    )}
-
-                    {p.highlights?.wins && p.highlights.wins.length > 0 && (
-                        <div className="pf-wins">
-                            <h3>Shipped</h3>
-                            {p.highlights.wins.map((w, i) => (
-                                <div className="pf-win" key={`${i}`}>
-                                    <span className="pf-win-text">✓ {w.text}</span>
-                                    {w.evidence && <span className="pf-win-ev">{w.evidence}</span>}
-                                </div>
-                            ))}
-                        </div>
-                    )}
+                    <HighlightsBlocks highlights={p.highlights} />
 
                     {p.taste && p.taste.patterns.length > 0 && (
                         <>

@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { Effect } from "effect";
 import {
     decodeHighlightsFile,
+    HighlightsInvalidError,
     loadHighlightsBlock,
     saveHighlightsFile,
 } from "./highlights.ts";
@@ -38,10 +39,18 @@ describe("highlights file loader", () => {
         expect(await loadHighlightsBlock(tmpPath())).toBeNull();
     });
 
-    test("loadHighlightsBlock returns null for corrupt JSON", async () => {
+    test("loadHighlightsBlock THROWS for corrupt JSON (missing != invalid)", async () => {
         const path = tmpPath();
         await Bun.write(path, "{not json");
-        expect(await loadHighlightsBlock(path)).toBeNull();
+        await expect(loadHighlightsBlock(path)).rejects.toBeInstanceOf(HighlightsInvalidError);
+        await Bun.spawnSync(["rm", "-f", path]);
+    });
+
+    test("loadHighlightsBlock THROWS for valid JSON that fails the schema", async () => {
+        const path = tmpPath();
+        // wins[].text is required; a number violates the schema.
+        await Bun.write(path, JSON.stringify({ v: 1, authored_at: "x", wins: [{ text: 5 }] }));
+        await expect(loadHighlightsBlock(path)).rejects.toBeInstanceOf(HighlightsInvalidError);
         await Bun.spawnSync(["rm", "-f", path]);
     });
 });
