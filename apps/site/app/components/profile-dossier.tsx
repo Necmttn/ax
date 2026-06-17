@@ -84,6 +84,16 @@ const fmtDay = (iso: string): string => {
 };
 export const clampPct = (x: number): number => (Number.isFinite(x) ? Math.min(100, Math.max(0, x)) : 0);
 
+/** Only http/https links are rendered as anchors; anything else renders as text. */
+function safeHttpUrl(raw: string): string | null {
+    try {
+        const u = new URL(raw);
+        return u.protocol === "https:" || u.protocol === "http:" ? u.toString() : null;
+    } catch {
+        return null;
+    }
+}
+
 /** Harness chips show the real harnesses you run - not internal origins. A
  * "claude-subagent" entry is the same harness as "claude" (just a dispatch
  * origin), so strip the "-subagent" suffix and dedupe, preserving order. */
@@ -285,23 +295,83 @@ export function ProfileDossier({ profile: p, vs }: { profile: ProfileV1; vs: VsS
                 </div>
             </section>
 
-            {/* taste patterns */}
-            {p.taste && p.taste.patterns.length > 0 && (
+            {/* taste: user-authored highlights (their words) + mined patterns */}
+            {(p.highlights || (p.taste && p.taste.patterns.length > 0)) && (
                 <section className="pf-section">
-                    <SectionIntro eyebrow="taste" title="Taste" note="patterns ax keeps seeing" />
-                    <div className="pf-taste">
-                        {p.taste.patterns.map((t) => (
-                            <div className="pf-pattern" key={`${t.category}/${t.name}`}>
-                                <span className="pf-pattern-cat">{t.category}{t.slot ? ` · ${t.slot}` : ""}</span>
-                                <div className="pf-pattern-name">{t.name}</div>
-                                {t.summary && <p className="pf-pattern-sum">{t.summary}</p>}
-                                <div className="pf-pattern-ev">
-                                    {fmtInt(t.evidence.sessions)} sessions · confidence {fmtPct(t.evidence.confidence)}
-                                    {t.evidence.trend ? ` · ${t.evidence.trend}` : ""}
-                                </div>
+                    <SectionIntro eyebrow="taste" title="Taste" note="in their words, and what ax keeps seeing" />
+
+                    {p.highlights?.taste && (
+                        <blockquote className="pf-words">
+                            <p>{p.highlights.taste}</p>
+                            <cite>- In their words</cite>
+                        </blockquote>
+                    )}
+
+                    {p.highlights?.setup && p.highlights.setup.length > 0 && (
+                        <div className="pf-weapons">
+                            <h3>Secret weapons</h3>
+                            <div className="pf-weapons-grid">
+                                {p.highlights.setup.map((s, i) => {
+                                    const href = s.link ? safeHttpUrl(s.link) : null;
+                                    return (
+                                        <div className="pf-weapon" key={`${s.title}-${i}`}>
+                                            <div className="pf-weapon-title">
+                                                {href
+                                                    ? <a href={href} target="_blank" rel="noopener nofollow">{s.title} ↗</a>
+                                                    : s.title}
+                                            </div>
+                                            <p className="pf-weapon-what">{s.what}</p>
+                                            <p className="pf-weapon-why">{s.why}</p>
+                                        </div>
+                                    );
+                                })}
                             </div>
-                        ))}
-                    </div>
+                        </div>
+                    )}
+
+                    {p.highlights?.skills && p.highlights.skills.length > 0 && (
+                        <div className="pf-learn">
+                            <h3>Learn the rig</h3>
+                            {p.highlights.skills.map((s, i) => (
+                                <div className="pf-learn-row" key={`${s.name}-${i}`}>
+                                    <span className="pf-learn-name">{s.name}</span>
+                                    <span className="pf-learn-src">{s.source}</span>
+                                    <span className="pf-learn-sum">{s.summary}</span>
+                                </div>
+                            ))}
+                        </div>
+                    )}
+
+                    {p.highlights?.wins && p.highlights.wins.length > 0 && (
+                        <div className="pf-wins">
+                            <h3>Shipped</h3>
+                            {p.highlights.wins.map((w, i) => (
+                                <div className="pf-win" key={`${i}`}>
+                                    <span className="pf-win-text">✓ {w.text}</span>
+                                    {w.evidence && <span className="pf-win-ev">{w.evidence}</span>}
+                                </div>
+                            ))}
+                        </div>
+                    )}
+
+                    {p.taste && p.taste.patterns.length > 0 && (
+                        <>
+                            <div className="pf-taste-divider">patterns ax keeps seeing</div>
+                            <div className="pf-taste">
+                                {p.taste.patterns.map((t) => (
+                                    <div className="pf-pattern" key={`${t.category}/${t.name}`}>
+                                        <span className="pf-pattern-cat">{t.category}{t.slot ? ` · ${t.slot}` : ""}</span>
+                                        <div className="pf-pattern-name">{t.name}</div>
+                                        {t.summary && <p className="pf-pattern-sum">{t.summary}</p>}
+                                        <div className="pf-pattern-ev">
+                                            {fmtInt(t.evidence.sessions)} sessions · confidence {fmtPct(t.evidence.confidence)}
+                                            {t.evidence.trend ? ` · ${t.evidence.trend}` : ""}
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        </>
+                    )}
                 </section>
             )}
 
