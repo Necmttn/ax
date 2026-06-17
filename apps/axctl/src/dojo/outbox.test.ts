@@ -1,5 +1,5 @@
 // apps/axctl/src/dojo/outbox.test.ts
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { describe, expect, test } from "bun:test";
 import { Effect } from "effect";
@@ -34,6 +34,8 @@ describe("writeDraft + listDrafts", () => {
         expect(drafts).toHaveLength(1);
         expect(drafts[0]).toMatchObject({ title: "Fix the scanner!", kind: "bug", session: "s1" });
         expect(drafts[0]?.path).toBe(written.path);
+        // The body carries the ax attribution so it travels into the posted upstream issue.
+        expect(readFileSync(written.path, "utf8")).toContain("Generated with [ax]");
     });
     test("newline in title can't inject extra frontmatter keys", async () => {
         const base = mkdtempSync(`${tmpdir()}/dojo-outbox-`);
