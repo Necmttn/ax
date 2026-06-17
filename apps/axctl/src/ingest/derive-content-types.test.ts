@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { buildContentEdge, renderContentEdge, renderContentTypeNodes, type ContentEdgeSpec } from "./derive-content-types.ts";
+import { buildContentEdge, renderContentEdge, renderContentTypeNodes, type ContentEdgeSpec, type ToolCallRow } from "./derive-content-types.ts";
 
 describe("buildContentEdge", () => {
   test("derives category + denormalized session/bytes from a tool_call row", () => {
@@ -45,5 +45,42 @@ describe("renderContentTypeNodes", () => {
     const stmts = renderContentTypeNodes();
     expect(stmts.length).toBe(12);
     expect(stmts[0]).toContain("UPSERT content_type:");
+  });
+});
+
+describe("renderContentEdge - collision resistance", () => {
+  // Two tool_call ids that share more than 96 chars of common prefix (the old
+  // safeKeyPart truncation limit) must still produce DIFFERENT edge keys so that
+  // cursor/opencode ids from the same conversation never collide.
+  test("two ids sharing a 100+ char prefix produce different has_content edge keys", () => {
+    const base = "tool_call:" + "x".repeat(100);
+    const spec = (id: string): ContentEdgeSpec => ({
+      toolCallId: id,
+      category: "text",
+      session: "session:s1",
+      method: "fallback",
+      confidence: 0.5,
+      fineLabel: null,
+      bytes: 100,
+      ts: "2026-06-17T00:00:00Z",
+    });
+    const sql1 = renderContentEdge(spec(base + "a"));
+    const sql2 = renderContentEdge(spec(base + "b"));
+    expect(sql1).not.toBeNull();
+    expect(sql2).not.toBeNull();
+    const key1 = sql1!.match(/->has_content:`([^`]+)`/)?.[1];
+    const key2 = sql2!.match(/->has_content:`([^`]+)`/)?.[1];
+    expect(key1).toBeDefined();
+    expect(key2).toBeDefined();
+    expect(key1).not.toBe(key2);
+  });
+
+  test("same id always produces the same edge key (idempotent re-runs)", () => {
+    const row: ToolCallRow = {
+      id: "tool_call:abc123", session: "session:s1", name: "Bash",
+      inputJson: null, outputExcerpt: "hello", bytes: 5, ts: "2026-06-17T00:00:00Z",
+    };
+    const e = buildContentEdge(row);
+    expect(renderContentEdge(e)).toBe(renderContentEdge(e));
   });
 });
