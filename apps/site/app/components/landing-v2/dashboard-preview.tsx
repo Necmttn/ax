@@ -517,7 +517,7 @@ export function DashboardPreview() {
           and apply &mdash; one at a time.
         </p>
 
-        <div className="install-wrap">
+        <div className="install-wrap" id="install">
           <span className="install-label">install in 30 seconds</span>
 
           <div className="cta-row">

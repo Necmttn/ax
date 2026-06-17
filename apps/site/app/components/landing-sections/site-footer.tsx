@@ -24,7 +24,7 @@ export function SiteFooter() {
         </div>
         <div className="footer-col">
           <div className="footer-col-head">Docs</div>
-          <Link to="/docs/install">Install</Link>
+          <Link to="/" hash="install">Install</Link>
           <Link to="/docs/cli-reference">CLI reference</Link>
           <Link to="/docs/language">Concepts</Link>
         </div>

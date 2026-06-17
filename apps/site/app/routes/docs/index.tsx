@@ -10,7 +10,7 @@ export const Route = createFileRoute("/docs/")({
       {
         name: "description",
         content:
-          "Install ax, learn the language, and look up any command. Guides for every shipped loop plus the full CLI reference.",
+          "Learn the language and look up any command. Guides for every shipped loop plus the full CLI reference.",
       },
     ],
   }),
@@ -27,16 +27,6 @@ type Card = {
   title: string;
   blurb: string;
 };
-
-const START: Card[] = [
-  {
-    to: "/docs/install",
-    kicker: "start here",
-    title: "Install ax",
-    blurb:
-      "One curl, the skills, your first ingest, then ax improve recommend. The obvious first stop.",
-  },
-];
 
 const GUIDES: Card[] = [
   {
@@ -139,18 +129,13 @@ function DocsIndex() {
         <header className="docs-hero">
           <p className="eyebrow">documentation</p>
           <h1>
-            Install it, learn the language, <em>look up any command</em>.
+            Learn the language, <em>look up any command</em>.
           </h1>
           <p className="lede">
-            Start with the install path, then the guides behind each shipped
-            loop, then the full command reference.
+            The guides behind each shipped loop, then the full command
+            reference.
           </p>
         </header>
-
-        <section className="docs-section">
-          <div className="section-kicker">start here</div>
-          <CardGrid cards={START} />
-        </section>
 
         <section className="docs-section">
           <div className="section-kicker">guides</div>

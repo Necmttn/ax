@@ -4,7 +4,7 @@ export function FooterCards() {
   return (
     <section className="cards">
       <div className="cards-grid">
-        <Link className="card" to="/docs/install">
+        <Link className="card" to="/" hash="install">
           <span className="num">01</span>
           <span className="card-title">
             Install ax <span className="arrow">&rarr;</span>
