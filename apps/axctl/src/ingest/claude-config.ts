@@ -22,6 +22,7 @@ import type { StageDef } from "./stage/registry.ts";
 export const GUIDANCE_CONFIG_ARTIFACT_TABLE = "guidance_config_artifact";
 
 export type GuidanceConfigProvider = "claude";
+export type GuidanceConfigAuthorityKind = "user" | "project" | "plugin";
 export type GuidanceConfigScope =
     | "managed"
     | "system"
@@ -51,6 +52,8 @@ export interface GuidanceConfigArtifact {
     readonly scope: GuidanceConfigScope;
     readonly safePath: string;
     readonly pathHash: string;
+    readonly authorityKind: GuidanceConfigAuthorityKind;
+    readonly authorityHash: string;
     readonly contentHash: string | null;
     readonly parseStatus: GuidanceConfigParseStatus;
     readonly bytes: number;
@@ -137,6 +140,71 @@ const safePathFor = (
     const normalized = normalizePath(path);
     if (!normalized.startsWith("/")) return normalized;
     return `$PATH/${sha256(normalized).slice(0, 16)}`;
+};
+
+const pluginCacheRoot = (home: string): string =>
+    `${normalizePath(home)}/.claude/plugins/cache`;
+
+const authorityFor = (
+    args: {
+        readonly provider: GuidanceConfigProvider;
+        readonly scope: GuidanceConfigScope;
+        readonly path: string;
+        readonly home?: string | undefined;
+        readonly projectRoot?: string | undefined;
+    },
+): { authorityKind: GuidanceConfigAuthorityKind; authorityHash: string } => {
+    const normalizedPath = normalizePath(args.path);
+    let authorityKind: GuidanceConfigAuthorityKind = "user";
+    let authorityRoot = args.home ? normalizePath(args.home) : normalizedPath;
+
+    if (
+        args.projectRoot &&
+        (args.scope === "project" || isWithin(normalizedPath, args.projectRoot))
+    ) {
+        authorityKind = "project";
+        authorityRoot = normalizePath(args.projectRoot);
+    } else if (
+        args.home &&
+        (args.scope === "plugin" || isWithin(normalizedPath, pluginCacheRoot(args.home)))
+    ) {
+        authorityKind = "plugin";
+        authorityRoot = pluginCacheRoot(args.home);
+    } else if (args.home) {
+        authorityRoot = normalizePath(args.home);
+    }
+
+    return {
+        authorityKind,
+        authorityHash: sha256(`${args.provider}\0${authorityKind}\0${authorityRoot}`),
+    };
+};
+
+export const guidanceConfigAuthorityHashesForScan = (
+    opts: DiscoverClaudeConfigArtifactsOptions,
+): string[] => {
+    const provider = "claude";
+    const authorities = [
+        authorityFor({ provider, scope: "user", path: opts.home, home: opts.home }).authorityHash,
+        authorityFor({
+            provider,
+            scope: "plugin",
+            path: pluginCacheRoot(opts.home),
+            home: opts.home,
+        }).authorityHash,
+    ];
+    if (opts.projectRoot) {
+        authorities.push(
+            authorityFor({
+                provider,
+                scope: "project",
+                path: opts.projectRoot,
+                home: opts.home,
+                projectRoot: opts.projectRoot,
+            }).authorityHash,
+        );
+    }
+    return uniqueSorted(authorities);
 };
 
 const byteSize = (text: string): number => Buffer.byteLength(text, "utf8");
@@ -265,12 +333,21 @@ const baseRecord = (
     const bytes = byteSize(input.text);
     const provider = input.provider ?? "claude";
     const safePath = safePathFor(input.path, input.home, input.projectRoot);
+    const authority = authorityFor({
+        provider,
+        scope: input.scope,
+        path: input.path,
+        home: input.home,
+        projectRoot: input.projectRoot,
+    });
     const record: GuidanceConfigArtifact = {
         provider,
         kind: input.kind,
         scope: input.scope,
         safePath,
         pathHash: sha256(`${provider}\0${normalizePath(input.path)}`),
+        authorityKind: authority.authorityKind,
+        authorityHash: authority.authorityHash,
         contentHash: sha256(input.text),
         parseStatus: "ok",
         bytes,
@@ -777,6 +854,8 @@ export const buildGuidanceConfigStatements = (
             ["scope", surrealString(record.scope)],
             ["safe_path", surrealString(record.safePath)],
             ["path_hash", surrealString(record.pathHash)],
+            ["authority_kind", surrealString(record.authorityKind)],
+            ["authority_hash", surrealString(record.authorityHash)],
             ["content_hash", surrealOptionString(record.contentHash)],
             ["parse_status", surrealString(record.parseStatus)],
             ["bytes", intLiteral(record.bytes)],
@@ -800,20 +879,20 @@ export const buildGuidanceConfigStatements = (
 
 export const buildGuidanceConfigReconcileStatements = (
     records: readonly GuidanceConfigArtifact[],
+    authorityHashes = uniqueSorted(records.map((record) => record.authorityHash)),
 ): string[] => {
     const pathHashes = uniqueSorted(records.map((record) => record.pathHash));
-    if (pathHashes.length === 0) {
-        return [`DELETE ${GUIDANCE_CONFIG_ARTIFACT_TABLE} WHERE provider = ${surrealString("claude")};`];
-    }
+    if (authorityHashes.length === 0) return [];
     return [
-        `DELETE ${GUIDANCE_CONFIG_ARTIFACT_TABLE} WHERE provider = ${surrealString("claude")} AND path_hash NOT IN ${surrealValue(pathHashes)};`,
+        `DELETE ${GUIDANCE_CONFIG_ARTIFACT_TABLE} WHERE provider = ${surrealString("claude")} AND authority_hash IN ${surrealValue(authorityHashes)} AND path_hash NOT IN ${surrealValue(pathHashes)};`,
     ];
 };
 
 export const buildGuidanceConfigPersistenceStatements = (
     records: readonly GuidanceConfigArtifact[],
+    authorityHashes?: readonly string[] | undefined,
 ): string[] => [
-    ...buildGuidanceConfigReconcileStatements(records),
+    ...buildGuidanceConfigReconcileStatements(records, authorityHashes ? uniqueSorted(authorityHashes) : undefined),
     ...buildGuidanceConfigStatements(records),
 ];
 
@@ -829,7 +908,13 @@ export const ingestClaudeConfigArtifacts = (): Effect.Effect<
             home: cfg.paths.home,
             projectRoot: process.cwd(),
         });
-        const statements = buildGuidanceConfigPersistenceStatements(records);
+        const statements = buildGuidanceConfigPersistenceStatements(
+            records,
+            guidanceConfigAuthorityHashesForScan({
+                home: cfg.paths.home,
+                projectRoot: process.cwd(),
+            }),
+        );
         yield* executeStatementsWith(db, statements, { chunkSize: 500, label: "claudeConfig" });
         return {
             discovered: records.length,

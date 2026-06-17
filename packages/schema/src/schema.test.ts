@@ -268,6 +268,8 @@ describe("guidance/config artifact inventory schema", () => {
         expect(schema).toContain("DEFINE FIELD scope                    ON guidance_config_artifact TYPE string");
         expect(schema).toContain("DEFINE FIELD safe_path                ON guidance_config_artifact TYPE string");
         expect(schema).toContain("DEFINE FIELD path_hash                ON guidance_config_artifact TYPE string");
+        expect(schema).toContain("DEFINE FIELD authority_kind           ON guidance_config_artifact TYPE string");
+        expect(schema).toContain("DEFINE FIELD authority_hash           ON guidance_config_artifact TYPE string");
         expect(schema).toContain("DEFINE FIELD content_hash             ON guidance_config_artifact TYPE option<string>");
         expect(schema).toContain("DEFINE FIELD parse_status             ON guidance_config_artifact TYPE string");
         expect(schema).toContain("DEFINE FIELD bytes                    ON guidance_config_artifact TYPE int");
@@ -285,6 +287,9 @@ describe("guidance/config artifact inventory schema", () => {
         );
         expect(schema).toContain(
             "DEFINE INDEX IF NOT EXISTS guidance_config_artifact_kind_scope ON guidance_config_artifact FIELDS provider, kind, scope",
+        );
+        expect(schema).toContain(
+            "DEFINE INDEX IF NOT EXISTS guidance_config_artifact_authority ON guidance_config_artifact FIELDS provider, authority_hash",
         );
         expect(schema).toContain(
             "DEFINE INDEX IF NOT EXISTS guidance_config_artifact_parse_status ON guidance_config_artifact FIELDS parse_status",

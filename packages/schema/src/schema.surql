@@ -817,6 +817,8 @@ DEFINE FIELD kind                     ON guidance_config_artifact TYPE string;
 DEFINE FIELD scope                    ON guidance_config_artifact TYPE string;
 DEFINE FIELD safe_path                ON guidance_config_artifact TYPE string;
 DEFINE FIELD path_hash                ON guidance_config_artifact TYPE string;
+DEFINE FIELD authority_kind           ON guidance_config_artifact TYPE string;
+DEFINE FIELD authority_hash           ON guidance_config_artifact TYPE string;
 DEFINE FIELD content_hash             ON guidance_config_artifact TYPE option<string>;
 DEFINE FIELD parse_status             ON guidance_config_artifact TYPE string;
 DEFINE FIELD bytes                    ON guidance_config_artifact TYPE int;
@@ -837,6 +839,7 @@ DEFINE FIELD metadata_json            ON guidance_config_artifact TYPE option<st
 DEFINE FIELD observed_at              ON guidance_config_artifact TYPE datetime DEFAULT time::now();
 DEFINE INDEX IF NOT EXISTS guidance_config_artifact_path_hash ON guidance_config_artifact FIELDS provider, path_hash UNIQUE;
 DEFINE INDEX IF NOT EXISTS guidance_config_artifact_kind_scope ON guidance_config_artifact FIELDS provider, kind, scope;
+DEFINE INDEX IF NOT EXISTS guidance_config_artifact_authority ON guidance_config_artifact FIELDS provider, authority_hash;
 DEFINE INDEX IF NOT EXISTS guidance_config_artifact_parse_status ON guidance_config_artifact FIELDS parse_status;
 
 DEFINE TABLE stack SCHEMAFULL;

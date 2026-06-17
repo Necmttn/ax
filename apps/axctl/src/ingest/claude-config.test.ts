@@ -323,14 +323,46 @@ describe("buildGuidanceConfigStatements", () => {
 
         expect(reconcile).toContain("DELETE guidance_config_artifact");
         expect(reconcile).toContain('provider = "claude"');
+        expect(reconcile).toContain("authority_hash IN");
+        expect(reconcile).toContain(currentRecord.authorityHash);
         expect(reconcile).toContain("path_hash NOT IN");
         expect(reconcile).toContain(currentRecord.pathHash);
+        expect(reconcile).not.toBe(`DELETE guidance_config_artifact WHERE provider = "claude" AND path_hash NOT IN ["${currentRecord.pathHash}"];`);
         expect(statements.some((statement) => statement.startsWith("UPSERT guidance_config_artifact:"))).toBe(true);
 
         const serialized = statements.join("\n");
+        expect(serialized).toContain("authority_kind: \"user\"");
+        expect(serialized).toContain(`authority_hash: "${currentRecord.authorityHash}"`);
         expect(serialized).not.toContain("env-secret");
         expect(serialized).not.toContain("cat ~/.ssh/id_rsa");
         expect(serialized).not.toContain("/Users/alice");
+    });
+
+    test("uses distinct project authorities for similar project-relative paths", () => {
+        const projectA = parseClaudeSettingsArtifact({
+            scope: "project",
+            path: "/repo-a/.claude/settings.json",
+            projectRoot: "/repo-a",
+            text: "{}",
+        });
+        const projectB = parseClaudeSettingsArtifact({
+            scope: "project",
+            path: "/repo-b/.claude/settings.json",
+            projectRoot: "/repo-b",
+            text: "{}",
+        });
+
+        expect(projectA.safePath).toBe("$PROJECT/.claude/settings.json");
+        expect(projectB.safePath).toBe("$PROJECT/.claude/settings.json");
+        expect(projectA.authorityKind).toBe("project");
+        expect(projectB.authorityKind).toBe("project");
+        expect(projectA.authorityHash).not.toBe(projectB.authorityHash);
+
+        const [reconcile] = buildGuidanceConfigPersistenceStatements([projectA]);
+        expect(reconcile).toContain(projectA.authorityHash);
+        expect(reconcile).not.toContain(projectB.authorityHash);
+        expect(reconcile).toContain(projectA.pathHash);
+        expect(reconcile).not.toContain(projectB.pathHash);
     });
 });
 
