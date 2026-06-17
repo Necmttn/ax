@@ -5,6 +5,7 @@ import { SiteHeader } from "~/components/landing-sections/site-header";
 import { SiteFooter } from "~/components/landing-sections/site-footer";
 import { HeroLogoField } from "~/components/landing-v2/supports-strip";
 import { WrappedDeck, type InsightCard } from "~/components/wrapped-deck";
+import type { VizSpec } from "~/components/card-viz";
 import { RadarChart, type RadarSeries } from "~/components/radar-chart";
 import {
     archetypeFor,
@@ -230,7 +231,7 @@ function ProfileDossier({ profile: p, vs }: { profile: ProfileV1; vs: VsState })
             {ins && (
                 <section className="pf-section">
                     <SectionIntro eyebrow="wrapped" title="The shape of the work" note="derived from session telemetry" />
-                    <WrappedDeck cards={buildInsightCards(ins)} />
+                    <WrappedDeck cards={buildInsightCards(ins, daily)} />
                 </section>
             )}
 
@@ -785,104 +786,87 @@ function SkillRow({ skill }: { skill: ProfileSkill }) {
     );
 }
 
-/* ----- mini trace-viz: tiny, mono, data-driven ----- */
+/* ----- grounded card-viz specs: each card carries a real chart driven by the
+   profile's own numbers (daily series where one exists, scalar gauges otherwise -
+   never a fabricated series). Kinds are assigned for SHAPE VARIETY so no two
+   adjacent cards share a chart family. Charts render in card-viz.tsx. ----- */
 
-/** slim horizontal track with a filled segment; for share/ratio cards */
-function VizBar({ value, tone = "green" }: { value: number; tone?: "green" | "red" }) {
-    const pct = clampPct(value * 100);
-    return (
-        <span className="pf-viz pf-viz-bar">
-            <span
-                className={tone === "red" ? "pf-viz-bar-fill pf-viz-bar-fill--red" : "pf-viz-bar-fill"}
-                style={{ width: `${pct}%` }}
-            />
-        </span>
-    );
-}
+function buildInsightCards(
+    ins: ProfileInsights,
+    daily: readonly ProfileDailyRow[],
+): readonly InsightCard[] {
+    // a daily series for a numeric key - only when >= 2 days actually carry it
+    // (else the card falls back to a scalar gauge; we never invent a series).
+    const seriesOf = (pick: (d: ProfileDailyRow) => number | undefined): number[] | undefined => {
+        const present = daily.filter((d) => typeof pick(d) === "number").length;
+        if (present < 2) return undefined;
+        return daily.map((d) => pick(d) ?? 0);
+    };
+    const sessionsSeries = seriesOf((d) => d.sessions);
+    const commitsSeries = seriesOf((d) => d.commits);
 
-/**
- * A row of ticks; caps at `cap`. When the real count exceeds the cap the last
- * few ticks fade out and a dashed rail follows - signalling "more than fits"
- * without misrepresenting the magnitude (the caption stays the source of
- * truth). Small counts render exactly.
- */
-function VizTicks({ count, cap = 20 }: { count: number; cap?: number }) {
-    const n = Math.max(0, Math.round(count));
-    const shown = Math.min(n, cap);
-    const overflow = n > cap;
-    return (
-        <span className="pf-viz pf-viz-ticks">
-            {Array.from({ length: shown }, (_, i) => {
-                const fade = overflow && i >= shown - 3;
-                return <span className={fade ? "pf-viz-tick pf-viz-tick--fade" : "pf-viz-tick"} key={i} />;
-            })}
-            {overflow && <span className="pf-viz-tick--rail" />}
-        </span>
-    );
-}
-
-/** slim rail with a marker positioned proportionally; for time/position cards */
-function VizRail({ pos }: { pos: number }) {
-    const p = clampPct(pos * 100);
-    return (
-        <span className="pf-viz pf-viz-rail">
-            <span className="pf-viz-rail-track" />
-            <span className="pf-viz-rail-marker" style={{ left: `${p}%` }} />
-        </span>
-    );
-}
-
-function buildInsightCards(ins: ProfileInsights): readonly InsightCard[] {
-    // weekday index of the busiest day (0=Sun..6=Sat) for the rail position
-    const busiestDow = (() => {
-        const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(ins.busiest_day.date);
-        if (!m) return undefined;
-        const d = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
-        return Number.isNaN(d.getTime()) ? undefined : d.getDay();
-    })();
+    // scalar gauges (honest 0..100 / clamped-count readouts; caption holds truth)
+    const ringPct = (share: number): VizSpec => ({ kind: "ring", data: [clampPct(share * 100)] });
+    const wafflePct = (share: number): VizSpec => ({ kind: "waffle", data: [clampPct(share * 100)] });
+    const cometPct = (frac: number): VizSpec => ({ kind: "comet", data: [clampPct(frac * 100)] });
+    const signalCount = (n: number, per = 1): VizSpec => ({
+        kind: "signal",
+        data: [Math.min(6, Math.max(0, Math.round(n / per))), 6],
+    });
+    const bulletCount = (n: number, scale: number, goal = 50): VizSpec => ({
+        kind: "bullet",
+        data: [clampPct((n / scale) * 100), goal],
+    });
 
     const cards: InsightCard[] = [
         {
             q: "How deep do you go?",
             a: fmtPct(ins.deep_session_share),
             s: "of sessions landed a real, non-reverted commit - shipped, not just chatted",
-            viz: <VizBar value={ins.deep_session_share} />,
+            viz: ringPct(ins.deep_session_share),
         },
         {
             q: "How many agents at once?",
             a: fmtInt(ins.max_parallel_sessions),
             s: "sessions running in parallel at peak",
-            viz: <VizTicks count={ins.max_parallel_sessions} />,
+            viz: signalCount(ins.max_parallel_sessions),
         },
         {
             q: "Longest single run?",
             a: fmtDuration(ins.longest_session_minutes),
             s: "one session, end to end, without letting go",
-            viz: <VizRail pos={Math.min(1, ins.longest_session_minutes / (24 * 60))} />,
+            // share of a 12-hour marathon, against a 6-hour "deep run" goal line
+            viz: bulletCount(ins.longest_session_minutes, 12 * 60),
         },
         {
             q: "When are you most alive?",
             a: <>{fmtHour(ins.peak_hour_utc)}<small> UTC</small></>,
             s: "the hour the graph lights up",
-            viz: <VizRail pos={Math.min(1, Math.max(0, ins.peak_hour_utc) / 23)} />,
+            viz: cometPct(Math.max(0, ins.peak_hour_utc) / 23),
         },
         {
             q: "Busiest day?",
             a: fmtDay(ins.busiest_day.date),
             s: `${fmtInt(ins.busiest_day.sessions)} sessions in a single day`,
-            viz: busiestDow !== undefined ? <VizRail pos={busiestDow / 6} /> : undefined,
+            // real daily sessions when we have the series; else a clamped gauge
+            viz: sessionsSeries
+                ? { kind: "bars", data: sessionsSeries }
+                : bulletCount(ins.busiest_day.sessions, 20),
         },
         {
             q: "How many hands?",
             a: fmtCompact(ins.subagents_spawned),
             s: "subagents dispatched to do the legwork",
-            viz: <VizTicks count={ins.subagents_spawned} />,
+            viz: signalCount(ins.subagents_spawned, 20),
         },
         {
             q: "What actually shipped?",
             a: fmtCompact(ins.commits),
             s: "commits landed across the window",
-            viz: <VizTicks count={ins.commits} />,
+            // real daily commit rhythm when present; else a clamped gauge
+            viz: commitsSeries
+                ? { kind: "line", data: commitsSeries }
+                : bulletCount(ins.commits, 100),
         },
         {
             q: "Time in the loop?",
@@ -898,7 +882,7 @@ function buildInsightCards(ins: ProfileInsights): readonly InsightCard[] {
             q: "How often do you verify?",
             a: fmtPct(share),
             s: `of tool calls are tests, checks, and lints`,
-            viz: <VizBar value={share} />,
+            viz: wafflePct(share),
         });
     }
     if (ins.tool_failures !== undefined && ins.tool_calls !== undefined && ins.tool_calls > 0) {
@@ -908,7 +892,7 @@ function buildInsightCards(ins: ProfileInsights): readonly InsightCard[] {
             a: fmtPct(share),
             s: `failed calls across ${fmtCompact(ins.tool_calls)} tool runs`,
             accent: "red",
-            viz: <VizBar value={share} tone="red" />,
+            viz: ringPct(share),
         });
     }
     if (ins.distinct_skills !== undefined && ins.distinct_tools !== undefined) {
@@ -916,7 +900,17 @@ function buildInsightCards(ins: ProfileInsights): readonly InsightCard[] {
             q: "How wide is the rig?",
             a: `${fmtInt(ins.distinct_skills)} skills`,
             s: `across ${fmtInt(ins.distinct_tools)} distinct tools`,
-            viz: <VizTicks count={ins.distinct_skills} />,
+            // a breadth radar over the real rig dimensions
+            viz: {
+                kind: "radar",
+                data: [
+                    ins.distinct_skills,
+                    ins.distinct_tools,
+                    ins.repos_count ?? 0,
+                    ins.subagents_spawned,
+                    ins.max_parallel_sessions,
+                ],
+            },
         });
     }
     if (ins.repos_count !== undefined) {
@@ -924,7 +918,7 @@ function buildInsightCards(ins: ProfileInsights): readonly InsightCard[] {
             q: "How many repos?",
             a: fmtInt(ins.repos_count),
             s: "repositories touched this window",
-            viz: <VizTicks count={ins.repos_count} />,
+            viz: signalCount(ins.repos_count),
         });
     }
 

@@ -15612,8 +15612,31 @@ footer.site-footer { padding: 48px 32px 56px; }
 .pv2-card.accent-rose   { --card-accent: var(--rose); }
 .pv2-card.accent-red    { --card-accent: var(--red); }
 .pv2-card.accent-ink    { --card-accent: var(--ink); }
-.pv2-card-strip { display: flex; align-items: flex-end; gap: 3px; height: 56px; padding: 10px 14px 0; border-bottom: 1px solid var(--line); background: color-mix(in srgb, var(--card-accent) 6%, var(--panel)); position: relative; }
-.pv2-card-strip > * { width: 100%; }
+/* dark recap band: the .browser--instrument wrapper supplies the instrument
+   dark token block (so var(--panel)/--ink/--green etc. resolve dark and the
+   .mc-* chart rules apply); these overrides strip the window chrome so the
+   deck reads as a flat dark slab on the otherwise-light profile page. */
+.landing-v2 .pv2-deck-band {
+  background: var(--page);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  box-shadow: none;
+  padding: 22px 22px 14px;
+  margin: 16px 0 8px;
+}
+.landing-v2 .pv2-deck-band .pv2-deck { margin: 0; }
+
+/* large chart region on top of each card - a full-width ~104px chart, not the
+   old 56px strip. */
+.pv2-card-viz { display: flex; align-items: center; height: 104px; padding: 18px 18px 0; overflow: hidden; }
+.pv2-card-viz--center { justify-content: center; }
+/* let the cleanly-scaling chart kinds fill the taller region; the px-positioned
+   kinds (candles/scatter/ring/radar/comet/waffle/signal/bullet) keep native
+   size and sit centered in the region. */
+.landing-v2 .browser--instrument .pv2-card-viz .mc-bars,
+.landing-v2 .browser--instrument .pv2-card-viz .mc-line,
+.landing-v2 .browser--instrument .pv2-card-viz .mc-wave,
+.landing-v2 .browser--instrument .pv2-card-viz .mc-delta { height: 100%; }
 .pv2-card-copy { padding: 14px 16px 18px; display: flex; flex-direction: column; gap: 7px; }
 .pv2-card-eyebrow { color: var(--card-accent); font-family: var(--mono); font-size: 12px; letter-spacing: 0.01em; }
 .pv2-card-headline { margin: 0; font-family: var(--serif); font-weight: 600; font-size: clamp(24px, 2.4vw, 30px); line-height: 1.06; letter-spacing: -0.01em; color: var(--ink); }

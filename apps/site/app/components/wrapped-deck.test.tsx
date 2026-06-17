@@ -78,23 +78,34 @@ describe("WrappedDeck", () => {
     expect(html).toContain("pv2-card-eyebrow");
   });
 
-  it("renders viz node inside the strip", () => {
-    const vizNode = <span data-testid="my-viz" className="pf-viz">bar</span>;
+  it("renders the grounded chart for a viz spec inside the chart region", () => {
     const cards: InsightCard[] = [
-      { q: "Depth?", a: "deep", s: "support", viz: vizNode },
+      { q: "Depth?", a: "deep", s: "support", viz: { kind: "bars", data: [3, 7, 12, 5] } },
     ];
     const html = render(cards);
-    expect(html).toContain('data-testid="my-viz"');
-    expect(html).toContain("pv2-card-strip");
-    // strip should NOT have aria-hidden when viz is present
-    expect(html).not.toContain('class="pv2-card-strip" aria-hidden');
+    // CardViz dispatches kind:"bars" -> the McBars chart markup
+    expect(html).toContain("mc-bars");
+    expect(html).toContain("pv2-card-viz");
+    // chart region should NOT be aria-hidden when a viz is present
+    expect(html).not.toContain('class="pv2-card-viz" aria-hidden');
   });
 
-  it("marks strip aria-hidden when no viz is present", () => {
+  it("renders inside a dark instrument band wrapper", () => {
+    const cards: InsightCard[] = [{ q: "Q", a: "A", s: "s" }];
+    const html = render(cards);
+    expect(html).toContain("pv2-deck-band");
+    expect(html).toContain("browser--instrument");
+  });
+
+  it("renders a viz-less card as copy-only with an aria-hidden chart region", () => {
     const cards: InsightCard[] = [
       { q: "Quiet?", a: "yes", s: "no viz" },
     ];
     const html = render(cards);
-    expect(html).toContain("aria-hidden");
+    // chart region present but hidden from SR; copy still renders
+    expect(html).toContain('class="pv2-card-viz" aria-hidden="true"');
+    expect(html).toContain("Quiet?");
+    expect(html).toContain("yes");
+    expect(html).toContain("no viz");
   });
 });
