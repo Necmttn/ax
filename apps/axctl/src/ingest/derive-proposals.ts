@@ -37,11 +37,13 @@ import { executeStatementsWith } from "@ax/lib/shared/statement-exec";
 import { safeKeyPart, recordKeyPart } from "@ax/lib/shared/derive-keys";
 import type { HarnessLearningCandidate } from "../project/types.ts";
 import { fetchDispatchCandidates } from "../queries/dispatch-analytics.ts";
+import { fetchImageContext, type ImageContextResult } from "../queries/image-context.ts";
 
 export interface DeriveProposalsStats {
     readonly skillProposals: number;
     readonly guidanceProposals: number;
     readonly routingProposals: number;
+    readonly imageContextProposals: number;
     readonly skipped: number;
 }
 
@@ -236,6 +238,108 @@ export const buildRoutingProposalStatements = (
         stmts.push(
             `CREATE ${proposalRef} CONTENT ${surrealObject([
                 ["form", surrealString("hook")],
+                ["title", surrealString(row.title)],
+                ["hypothesis", surrealString(row.hypothesis)],
+                ["dedupe_sig", surrealString(row.sig)],
+                ["frequency", String(row.frequency)],
+                ["confidence", surrealString(row.confidence)],
+                ["status", surrealString("open")],
+                ["baseline", surrealOptionString(baseline)],
+                ["updated_at", "time::now()"],
+            ])};`,
+        );
+    } else {
+        stmts.push(
+            `UPDATE ${proposalRef} SET ${[
+                ["hypothesis", surrealString(row.hypothesis)],
+                ["frequency", String(row.frequency)],
+                ["confidence", surrealString(row.confidence)],
+                ["updated_at", "time::now()"],
+            ].map(([n, v]) => `${n} = ${v}`).join(", ")};`,
+        );
+    }
+
+    return stmts;
+};
+
+// ---------------------------------------------------------------------------
+// Image context proposal (form='subagent') - isolate heavy visual context signal
+// ---------------------------------------------------------------------------
+
+/**
+ * Threshold: surface the signal when main-thread image reads are meaningfully high.
+ * 20 MB main-thread in the window is roughly 5M est-tokens re-billed across every
+ * later turn in those sessions - enough signal that routing visual tasks to a
+ * subagent would reduce context pressure.
+ */
+export const IMAGE_CONTEXT_THRESHOLD_MB = 20;
+
+export interface ImageContextProposalRow {
+    readonly proposalKey: string;
+    readonly title: string;
+    readonly hypothesis: string;
+    readonly confidence: string;
+    readonly frequency: number;
+    readonly sig: string;
+}
+
+/**
+ * Derive a single image-context proposal row from ImageContextResult.
+ *
+ * Returns null when main-thread image bytes are below IMAGE_CONTEXT_THRESHOLD_MB
+ * (signal too thin). The title is STABLE across runs so dedupe_sig accumulates
+ * frequency on the same proposal row across re-derive passes. The hypothesis
+ * includes live figures so the recommendation always cites fresh data.
+ */
+export const deriveImageContextProposalRow = (
+    result: ImageContextResult,
+    sinceDays: number,
+): ImageContextProposalRow | null => {
+    const { mainBytes, mainCalls } = result.totals;
+    const thresholdBytes = IMAGE_CONTEXT_THRESHOLD_MB * 1024 * 1024;
+    if (mainBytes < thresholdBytes) return null;
+
+    const title = "Isolate large-image visual judgment to a subagent";
+    const normTitle = normalizeTitle(title);
+    const sig = dedupeSig("subagent", normTitle);
+
+    const mainMb = (mainBytes / (1024 * 1024)).toFixed(1);
+    const hypothesis =
+        `Main-thread image context is ${mainMb} MB over the last ${sinceDays}d (${mainCalls} image reads);` +
+        ` route large-image visual judgment to a subagent - see \`ax cost images\` and the` +
+        ` efficient-dispatch skill's isolate-heavy-context pattern.`;
+
+    const confidence: string =
+        mainBytes >= 50 * 1024 * 1024 ? "high" : "medium";
+
+    return {
+        proposalKey: proposalKeyFor("subagent", title, sig),
+        title,
+        hypothesis,
+        confidence,
+        frequency: mainCalls,
+        sig,
+    };
+};
+
+/**
+ * Build SurrealQL statements for an image-context proposal row. Mirrors
+ * buildRoutingProposalStatements: CREATE on first sight, UPDATE mutable
+ * fields on re-derive. No typed payload table (subagent form is self-contained).
+ */
+export const buildImageContextProposalStatements = (
+    row: ImageContextProposalRow,
+    existingSigs: ReadonlySet<string> = new Set(),
+): string[] => {
+    const stmts: string[] = [];
+    const proposalRef = recordRef("proposal", row.proposalKey);
+    const baseline = JSON.stringify({ frequency: row.frequency });
+    const isNew = !existingSigs.has(row.sig);
+
+    if (isNew) {
+        stmts.push(
+            `CREATE ${proposalRef} CONTENT ${surrealObject([
+                ["form", surrealString("subagent")],
                 ["title", surrealString(row.title)],
                 ["hypothesis", surrealString(row.hypothesis)],
                 ["dedupe_sig", surrealString(row.sig)],
@@ -498,11 +602,25 @@ FROM skill_candidate;`).pipe(Effect.map((rows) => rows?.[0] ?? [])),
             ? buildRoutingProposalStatements(routingRow, existingSigs)
             : [];
 
-        yield* executeStatementsWith(db, [...skillStmts, ...guidanceStmts, ...routingStmts], { chunkSize: 500 });
+        // Image context proposal (form='subagent'): derive from image-read analytics.
+        // Query failure is tolerated - same pattern as the routing proposal.
+        const imageContextResult = yield* Effect.orElseSucceed(
+            fetchImageContext({ sinceDays, limit: 0 }),
+            () => null as ImageContextResult | null,
+        );
+        const imageContextRow = imageContextResult
+            ? deriveImageContextProposalRow(imageContextResult, sinceDays)
+            : null;
+        const imageContextStmts = imageContextRow
+            ? buildImageContextProposalStatements(imageContextRow, existingSigs)
+            : [];
+
+        yield* executeStatementsWith(db, [...skillStmts, ...guidanceStmts, ...routingStmts, ...imageContextStmts], { chunkSize: 500 });
         return {
             skillProposals: skillRows.length,
             guidanceProposals: guidanceRows.length,
             routingProposals: routingRow ? 1 : 0,
+            imageContextProposals: imageContextRow ? 1 : 0,
             skipped: skillSkipped + guidanceSkipped,
         };
     });
@@ -528,13 +646,14 @@ export const ProposalsKey = Schema.Literal("proposals");
 export type ProposalsKey = typeof ProposalsKey.Type;
 
 /**
- * Proposals stage - derives Skill + Guidance + Routing Proposals from cumulated evidence.
+ * Proposals stage - derives Skill + Guidance + Routing + Image-Context Proposals from cumulated evidence.
  * Depends on {@link ClosureKey}. Consumed by {@link OpportunitiesKey}, {@link RetroProposalsKey}.
  */
 export class ProposalsStats extends BaseStageStats.extend<ProposalsStats>("ProposalsStats")({
     skillProposals: Schema.Number,
     guidanceProposals: Schema.Number,
     routingProposals: Schema.Number,
+    imageContextProposals: Schema.Number,
 }) {}
 
 export const proposalsStage: StageDef<ProposalsStats, SurrealClient | ProcessService | FileSystem.FileSystem | Path.Path> = {
@@ -546,10 +665,11 @@ export const proposalsStage: StageDef<ProposalsStats, SurrealClient | ProcessSer
             const result = yield* deriveProposals({ minFrequency: 3, sinceDays });
             return ProposalsStats.make({
                 durationMs: Date.now() - t0,
-                summary: `derived ${result.skillProposals} skill proposals, ${result.guidanceProposals} guidance proposals, ${result.routingProposals} routing proposals`,
+                summary: `derived ${result.skillProposals} skill proposals, ${result.guidanceProposals} guidance proposals, ${result.routingProposals} routing proposals, ${result.imageContextProposals} image-context proposals`,
                 skillProposals: result.skillProposals,
                 guidanceProposals: result.guidanceProposals,
                 routingProposals: result.routingProposals,
+                imageContextProposals: result.imageContextProposals,
             });
         }),
 };

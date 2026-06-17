@@ -10,15 +10,17 @@ describe("proposalsStage", () => {
         expect(proposalsStage.meta.tags).toEqual(["derive"]);
     });
 
-    it("ProposalsStats schema includes routingProposals field", () => {
+    it("ProposalsStats schema includes routingProposals and imageContextProposals fields", () => {
         const stats = ProposalsStats.make({
             durationMs: 100,
             summary: "test",
             skillProposals: 2,
             guidanceProposals: 1,
             routingProposals: 1,
+            imageContextProposals: 1,
         });
         expect(stats.routingProposals).toBe(1);
+        expect(stats.imageContextProposals).toBe(1);
         expect(stats.skillProposals).toBe(2);
         expect(stats.guidanceProposals).toBe(1);
     });

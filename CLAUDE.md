@@ -179,6 +179,7 @@ docs/superpowers/specs/2026-06-15-otel-receiver-design.md.
 `ax cost sessions [--days=N] [--model=<name>] [--limit=N]` - top sessions by cost with id, project, model, started_at (default 14d/20 rows).
 `ax cost split [--days=N]` - origin (main vs subagent) × model matrix with cost and share-of-total; totals row. MCP: `cost_models`, `cost_split`.
 `ax cost routability [--days=N] [--min-run=1] [--json]` - main-thread routability lens: of main-agent spend, how much sat in routable class-runs (gather→haiku, mechanical-impl/niche-research→sonnet) vs genuine judgment, with est savings repriced one tier down. Deterministic - turn-level classification from tool composition + `JUDGMENT_GUARD_RE` text guard (the `thinking_tokens` signal is dead - 0 on ~97% of turns - so it's dropped; `--min-run` groups consecutive same-class turns, default 1 since Claude turns rarely form longer same-class runs). Non-Claude main turns lack per-turn cost rows so main spend reads ~Claude-only. MCP: `cost_routability`. Spec: docs/superpowers/specs/2026-06-15-cost-routability-lens-design.md.
+`ax cost images [--days=N] [--limit=N] [--json]` - image-read context lens: per-session bytes of image tool outputs (`content_type:binary` via the `has_content` edge), split main-thread vs subagent. Surfaces screenshots that persist in the main context window and re-bill across every later turn - the cue to route visual judgment to a subagent (the `ln`/efficient-dispatch "isolate heavy context" pattern). Deref-free over `has_content` + `spawned` (`apps/axctl/src/queries/image-context.ts`); est tokens is a bytes/4 proxy (image vision billing differs).
 
 ### Telemetry-enriched insights
 
@@ -276,11 +277,11 @@ task file, then run `axctl improve lint` to reconcile.
 
 ## MCP server
 
-`ax mcp` runs a stdio MCP server exposing ax's **read-only** queries as 17 tools
+`ax mcp` runs a stdio MCP server exposing ax's **read-only** queries as 18 tools
 (`recall`, `sessions_around`, `session_show`, `skills_weighted`, `skills_by_role`,
 `skills_roles`, `roles`, `improve_recommend`, `improve_show`, `improve_list`,
-`session_metrics`, `signal_show`, `cost_models`, `cost_split`, `cost_routability`,
-`dispatches`, `dojo_agenda`) so an agent can query the graph in-context. Run from source (no
+`session_metrics`, `signal_show`, `cost_models`, `cost_split`, `cost_images`,
+`cost_routability`, `dispatches`, `dojo_agenda`) so an agent can query the graph in-context. Run from source (no
 native deps, so the compiled binary should work too - untested in v0). Mutating
 ops + `sessions_here`/`near` (need a git-resolved repo key) are intentionally not
 exposed. Server: `apps/axctl/src/mcp/server.ts`; registry: `apps/axctl/src/mcp/tools.ts`.

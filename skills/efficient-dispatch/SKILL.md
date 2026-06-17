@@ -33,6 +33,33 @@ an `implement …` dispatch silently runs expensive. Set it.
 product tradeoffs, plan synthesis, judging conflicting subagent reports, final
 integration, taste-heavy design/copy.
 
+## Isolate heavy context (the second reason to dispatch)
+
+Cost-tier is one reason to dispatch. The other is **context isolation** - and it
+applies even when the work needs the strong model. A large input read into the
+main thread does not cost once: it sits in the context window and is re-sent as
+input on every later turn. A 0.5 MB screenshot Read on turn 5 of a 40-turn
+session is re-billed ~35 times and crowds out earlier reasoning.
+
+The biggest offender is **images**. Reading screenshots for visual judgment
+(does this match the spec? rate this design, find the visual bug) floods the main
+context with vision tokens that persist for the rest of the session. Route it:
+
+- **Dispatch a subagent that returns the judgment as text.** The subagent pays
+  the vision tokens in its own short-lived context and returns a verdict; the
+  main thread keeps the cheap text, never the image bytes. Use the strong model
+  for the subagent if the judgment is hard - the win here is isolation, not tier.
+- **When to route:** the image (or any large output) would otherwise persist
+  across many later main-thread turns AND the question is a returnable verdict.
+- **When NOT to:** tightly iterative visual exploration (look, tweak, look again
+  interleaved with main reasoning - the round-trips cost more than they save),
+  read-once-then-done short sessions (no persistence tail), or when you cannot
+  state the judgment criteria up front (the text verdict is lossy).
+
+Same logic applies to any bulky tool output you only need a conclusion from:
+giant logs, large query dumps, full-file reads for one fact. If you need the
+answer, not the bytes, dispatch for it.
+
 ## Routing table
 
 Source of truth: `~/.ax/hooks/routing-table.json` (regenerate with
@@ -91,6 +118,9 @@ main-model judgment - otherwise pick sonnet.
 - `ax cost split --days=7` - main vs subagent spend by model; the dominant
   cost is usually main-loop cache reads, so move tool-heavy loops (build/test
   cycles, browser QA) into subagents entirely
+- `ax cost images --days=7` - image-read context per session, main vs subagent.
+  High main-thread MB = screenshots persisting in the main window; route that
+  visual judgment to a subagent (see "Isolate heavy context" above)
 - `ax improve recommend` - surfaces a routing proposal automatically when
   missed savings accumulate
 
