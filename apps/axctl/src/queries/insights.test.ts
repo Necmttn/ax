@@ -180,7 +180,7 @@ describe("insights query builders", () => {
         expect(sql).toContain("RETURN [");
         expect(sql).toContain('table: "tool_call"');
         expect(sql).toContain('stage: "active"');
-        expect(sql).toContain('table: "file_memory"');
+        expect(sql).toContain('table: "workspace"');
         expect(sql).toContain('stage: "staged"');
         expect(sql).toContain('table: "agent_provider"');
         expect(sql).toContain('table: "agent_event"');
