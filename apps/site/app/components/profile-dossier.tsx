@@ -1,6 +1,6 @@
 // apps/site/app/components/profile-dossier.tsx
 import { Link, useNavigate } from "@tanstack/react-router";
-import { useState, type FormEvent } from "react";
+import { Fragment, useState, type FormEvent } from "react";
 import { HeroLogoField } from "~/components/landing-v2/supports-strip";
 import { WrappedDeck, type InsightCard, type VizSpec } from "~/components/wrapped-deck";
 import { RadarChart, type RadarSeries } from "~/components/radar-chart";
@@ -561,23 +561,53 @@ export function RawTable({
                         // leader: strictly greater comparable numeric; null never leads
                         const aLeads = vs !== undefined && a.value !== null && (b?.value === null || b === undefined || a.value > b.value);
                         const bLeads = vs !== undefined && b !== undefined && b.value !== null && (a.value === null || b.value > a.value);
+                        // magnitude split-bar: each side normalised to that row's
+                        // pair-max so a blowout reads visually distinct from a near-tie.
+                        const av = a.value;
+                        const bv = b?.value ?? null;
+                        const pairMax = Math.max(av ?? 0, bv ?? 0, 0);
+                        const aPct = pairMax > 0 && av !== null ? Math.min(100, (av / pairMax) * 100) : 0;
+                        const bPct = pairMax > 0 && bv !== null ? Math.min(100, (bv / pairMax) * 100) : 0;
+                        const ratio = av !== null && bv !== null && av > 0 && bv > 0
+                            ? Math.max(av, bv) / Math.min(av, bv)
+                            : null;
+                        const ratioChip = ratio !== null && ratio >= 1.05
+                            ? `${ratio >= 10 ? Math.round(ratio) : (Math.round(ratio * 10) / 10)}×`
+                            : null;
                         return (
-                            <tr key={m.key}>
-                                <th scope="row">
-                                    <span className="pf-rawvals-metric">{m.label}</span>
-                                    <span className="pf-rawvals-metric-note">{m.note}</span>
-                                </th>
-                                <td className={aLeads ? "pf-rawvals-val pf-rawvals-val--lead" : "pf-rawvals-val"}>
-                                    {a.label}
-                                    {aLeads && <span className="pf-rawvals-dot" aria-label="leads" />}
-                                </td>
-                                {vs && b && (
-                                    <td className={bLeads ? "pf-rawvals-val pf-rawvals-val--lead" : "pf-rawvals-val"}>
-                                        {b.label}
-                                        {bLeads && <span className="pf-rawvals-dot" aria-label="leads" />}
+                            <Fragment key={m.key}>
+                                <tr className={vs ? "pf-rawvals-row pf-rawvals-row--pair" : "pf-rawvals-row"}>
+                                    <th scope="row" rowSpan={vs ? 2 : 1}>
+                                        <span className="pf-rawvals-metric">{m.label}</span>
+                                        <span className="pf-rawvals-metric-note">{m.note}</span>
+                                    </th>
+                                    <td className={aLeads ? "pf-rawvals-val pf-rawvals-val--lead" : "pf-rawvals-val"}>
+                                        {a.label}
+                                        {aLeads && <span className="pf-rawvals-dot" aria-label="leads" />}
                                     </td>
+                                    {vs && b && (
+                                        <td className={bLeads ? "pf-rawvals-val pf-rawvals-val--lead" : "pf-rawvals-val"}>
+                                            {b.label}
+                                            {bLeads && <span className="pf-rawvals-dot" aria-label="leads" />}
+                                        </td>
+                                    )}
+                                </tr>
+                                {vs && (
+                                    <tr className="pf-rawvals-barrow">
+                                        <td colSpan={2}>
+                                            <div className="pf-rawvals-split" aria-hidden="true">
+                                                <span className="pf-rawvals-split-a">
+                                                    <span className="pf-rawvals-split-fill pf-rawvals-split-fill--a" style={{ width: `${aPct}%` }} />
+                                                </span>
+                                                <span className="pf-rawvals-split-mid">{ratioChip}</span>
+                                                <span className="pf-rawvals-split-b">
+                                                    <span className="pf-rawvals-split-fill pf-rawvals-split-fill--b" style={{ width: `${bPct}%` }} />
+                                                </span>
+                                            </div>
+                                        </td>
+                                    </tr>
                                 )}
-                            </tr>
+                            </Fragment>
                         );
                     })}
                 </tbody>

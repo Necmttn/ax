@@ -29,7 +29,6 @@ import { type ProfileV1 } from "~/lib/community";
 import { buildModelColors, sortSkillsByLeverage } from "~/lib/window-chart";
 import {
     Avatar,
-    AxisLegend,
     buildInsightCards,
     fmtCompact,
     fmtInt,
@@ -166,6 +165,16 @@ export function DuelDossier({ a, b }: { a: ProfileV1; b: ProfileV1 }) {
             ? <>@{a.github} leads <span style={{ color: SELF_COLOR }}>{tally.aLeads}</span>&ndash;<span style={{ color: VS_COLOR }}>{tally.bLeads}</span></>
             : <>@{b.github} leads <span style={{ color: VS_COLOR }}>{tally.bLeads}</span>&ndash;<span style={{ color: SELF_COLOR }}>{tally.aLeads}</span></>;
 
+    // worded verdict for the fight-card (numbers live in the score badge, so the
+    // verdict line stays words-only - no redundant restating of the tally).
+    const tied = tally.aLeads === tally.bLeads;
+    const aWins = tally.aLeads > tally.bLeads;
+    const verdict = tied
+        ? <>dead even &mdash; <strong>{tally.aLeads}&ndash;{tally.bLeads}</strong> across six axes</>
+        : aWins
+            ? <><span style={{ color: SELF_COLOR }}>@{a.github}</span> takes the sign, <strong>{aArch.sign}</strong></>
+            : <><span style={{ color: VS_COLOR }}>@{b.github}</span> takes the sign, <strong>{bArch.sign}</strong></>;
+
     return (
         <article className="profile-duel">
             {/* hero: A | VS | B */}
@@ -224,32 +233,41 @@ export function DuelDossier({ a, b }: { a: ProfileV1; b: ProfileV1 }) {
                 </div>
             </section>
 
-            {/* the sign: overlaid radar + raw-values comparison table */}
+            {/* the sign: fight-card verdict + overlaid radar + raw-values table */}
             <section className="pf-section duel-sign">
                 <SectionIntro eyebrow="the sign" title="The sign" note="two shapes, one chart" />
-                <p className="pf-sign-method">
-                    Axes are log-anchored to fixed scales (not min-max), so the two shapes
-                    compare directly.
-                </p>
-                <p className="pf-sign-versus duel-sign-versus">
-                    <span className="duel-versus-side">
-                        <Avatar login={a.github} size={30} ring={SELF_COLOR} className="pv2-avatar--inline" />
-                        <span><span style={{ color: SELF_COLOR }}>@{a.github}</span> is {aArch.sign}</span>
-                    </span>
-                    <span className="duel-versus-dot" aria-hidden="true">·</span>
-                    <span className="duel-versus-side">
-                        <Avatar login={b.github} size={30} ring={VS_COLOR} className="pv2-avatar--inline" />
-                        <span><span style={{ color: VS_COLOR }}>@{b.github}</span> is {bArch.sign}</span>
-                    </span>
-                </p>
+
+                {/* fight-card: A | score | B - the archetype sign is the focal payload */}
+                <div className="duel-versus">
+                    <div className="duel-versus-side duel-versus-side--a">
+                        <Avatar login={a.github} size={40} ring={SELF_COLOR} className="duel-versus-avatar" />
+                        <span className="duel-versus-handle" style={{ color: SELF_COLOR }}>@{a.github}</span>
+                        <span className="duel-versus-sign">{aArch.sign}</span>
+                    </div>
+                    <div className="duel-vs-badge" aria-label={`score ${tally.aLeads} to ${tally.bLeads}`}>
+                        <span className="duel-vs-score" style={{ color: SELF_COLOR }}>{tally.aLeads}</span>
+                        <span className="duel-vs-dash" aria-hidden="true">&ndash;</span>
+                        <span className="duel-vs-score" style={{ color: VS_COLOR }}>{tally.bLeads}</span>
+                    </div>
+                    <div className="duel-versus-side duel-versus-side--b">
+                        <Avatar login={b.github} size={40} ring={VS_COLOR} className="duel-versus-avatar" />
+                        <span className="duel-versus-handle" style={{ color: VS_COLOR }}>@{b.github}</span>
+                        <span className="duel-versus-sign">{bArch.sign}</span>
+                    </div>
+                </div>
+                <p className="duel-verdict">{verdict}</p>
+
                 <div className="duel-sign-chart">
-                    <RadarChart series={series} size={460} />
+                    <RadarChart series={series} size={480} />
                     {(aAxes.partial || bAxes.partial) && (
                         <p className="pf-sign-partial">
                             some axes read 0 - they need a newer ax version to populate.
                         </p>
                     )}
-                    <AxisLegend />
+                    <p className="pf-sign-method duel-sign-method">
+                        Axes are log-anchored to fixed scales (not min-max), so the two
+                        shapes compare directly.
+                    </p>
                 </div>
                 <RawTable
                     self={aAxes}

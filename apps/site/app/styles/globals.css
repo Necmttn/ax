@@ -12910,9 +12910,9 @@ footer.site-footer { padding: 48px 32px 56px; }
     margin: 0;
 }
 
-.pf-radar-ring { fill: none; stroke: var(--line); stroke-width: 1; }
-.pf-radar-ring--outer { stroke: color-mix(in srgb, var(--ink) 28%, var(--line)); }
-.pf-radar-spoke { stroke: var(--line); stroke-width: 1; }
+.pf-radar-ring { fill: none; stroke: var(--line); stroke-width: 1; stroke-opacity: 0.55; }
+.pf-radar-ring--outer { stroke: color-mix(in srgb, var(--ink) 28%, var(--line)); stroke-opacity: 0.7; }
+.pf-radar-spoke { stroke: var(--line); stroke-width: 1; stroke-opacity: 0.4; }
 .pf-radar-axis-label {
     font-family: var(--mono);
     font-size: 10px;
@@ -12922,12 +12922,12 @@ footer.site-footer { padding: 48px 32px 56px; }
 }
 .pf-radar-area {
     fill: currentColor;
-    fill-opacity: 0.13;
+    fill-opacity: 0.16;
     stroke: currentColor;
-    stroke-width: 1.75;
+    stroke-width: 2.25;
     stroke-linejoin: round;
 }
-.pf-radar-dot { fill: currentColor; stroke: var(--page); stroke-width: 1; }
+.pf-radar-dot { fill: currentColor; stroke: var(--page); stroke-width: 1.5; }
 
 .pf-radar-legend {
     display: flex;
@@ -15623,36 +15623,138 @@ footer.site-footer { padding: 48px 32px 56px; }
 .profile-duel .duel-mk--b { color: #2567a8; }
 .profile-duel .duel-mk--tie { color: var(--line); }
 
-/* the sign: centered radar + raw-values table */
+/* the sign: centered fight-card verdict + radar + magnitude raw-values */
 .profile-duel .duel-sign { text-align: center; }
-/* versus line: each "@handle is The X" stays an unbreakable unit, the two
-   sides flex-wrap as wholes (never mid-phrase) and align around the dot. */
-.profile-duel .duel-sign-versus {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: center;
+
+/* fight-card: A | score badge | B - the archetype sign is the focal payload,
+   set in serif display; the two sides mirror-align toward the center score. */
+.profile-duel .duel-versus {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
   align-items: center;
-  gap: 6px 14px;
+  gap: 32px;
+  max-width: 760px;
+  margin: 24px auto 0;
 }
 .profile-duel .duel-versus-side {
-  display: inline-flex;
-  align-items: center;
-  gap: 9px;
-  white-space: nowrap;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
 }
-.profile-duel .duel-versus-side .pv2-avatar--inline { margin-right: 0; top: 0; }
-.profile-duel .duel-versus-dot { color: var(--muted); }
+.profile-duel .duel-versus-side--a { align-items: flex-end; text-align: right; }
+.profile-duel .duel-versus-side--b { align-items: flex-start; text-align: left; }
+.profile-duel .duel-versus-avatar { margin: 0 0 2px; }
+.profile-duel .duel-versus-handle {
+  font-family: var(--mono);
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+.profile-duel .duel-versus-sign {
+  font-family: var(--serif);
+  font-size: 24px;
+  line-height: 1.12;
+  color: var(--ink);
+}
+.profile-duel .duel-vs-badge {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 8px;
+  font-family: var(--serif);
+  font-size: 36px;
+  line-height: 1;
+  font-weight: 500;
+  letter-spacing: -0.5px;
+}
+.profile-duel .duel-vs-dash { color: var(--muted); font-size: 26px; }
+.profile-duel .duel-verdict {
+  font-family: var(--serif);
+  font-size: 16px;
+  line-height: 1.4;
+  color: color-mix(in srgb, var(--ink) 80%, var(--page));
+  margin: 16px auto 0;
+  max-width: 52ch;
+}
+.profile-duel .duel-verdict strong { font-weight: 600; color: var(--ink); }
+
+@media (max-width: 760px) {
+  .profile-duel .duel-versus {
+    grid-template-columns: 1fr;
+    gap: 16px;
+    justify-items: center;
+  }
+  .profile-duel .duel-versus-side--a,
+  .profile-duel .duel-versus-side--b { align-items: center; text-align: center; }
+}
+
 .profile-duel .duel-sign-chart {
   display: flex;
   flex-direction: column;
   align-items: center;
+  gap: 8px;
+  margin-top: 32px;
 }
-.profile-duel .duel-sign-chart .pf-radar { max-width: 460px; }
-/* raw-values: 3 columns must fit the shell - fix the layout + let long value
-   phrases wrap instead of overflowing the right edge. */
+.profile-duel .duel-sign-chart .pf-radar { max-width: 480px; }
+.profile-duel .duel-sign-method {
+  margin: 4px auto 0;
+  text-align: center;
+}
+
+/* raw-values: fixed layout so the 3 cols + the magnitude bar row fit the shell */
+.profile-duel .pf-rawvals { margin-top: 40px; text-align: left; }
 .profile-duel .pf-rawvals-table { table-layout: fixed; }
-.profile-duel .pf-rawvals-table th:first-child { width: 36%; }
+.profile-duel .pf-rawvals-table th:first-child { width: 34%; }
 .profile-duel .pf-rawvals-val { white-space: normal; }
+
+/* magnitude split-bars (vs mode): A grows left (green), B grows right (blue),
+   each normalised to that row's pair-max so blowouts read at a glance. */
+.profile-duel .pf-rawvals-row--pair { border-bottom: none; }
+.profile-duel .pf-rawvals-row--pair > td,
+.profile-duel .pf-rawvals-row--pair > th { padding-bottom: 3px; }
+.profile-duel .pf-rawvals-barrow > td { padding: 0 0 9px; }
+.profile-duel .pf-rawvals-split {
+  display: flex;
+  align-items: stretch;
+  height: 9px;
+}
+.profile-duel .pf-rawvals-split-a,
+.profile-duel .pf-rawvals-split-b {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+.profile-duel .pf-rawvals-split-a { justify-content: flex-end; }
+.profile-duel .pf-rawvals-split-b { justify-content: flex-start; }
+.profile-duel .pf-rawvals-split-fill { height: 8px; border-radius: 1px; display: block; }
+.profile-duel .pf-rawvals-split-fill--a { background: color-mix(in srgb, var(--green) 72%, var(--page)); }
+.profile-duel .pf-rawvals-split-fill--b { background: color-mix(in srgb, #2567a8 72%, var(--page)); }
+.profile-duel .pf-rawvals-split-mid {
+  position: relative;
+  flex: 0 0 auto;
+  min-width: 36px;
+  text-align: center;
+  font-family: var(--mono);
+  font-size: 9px;
+  letter-spacing: 0.02em;
+  color: var(--muted);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.profile-duel .pf-rawvals-split-mid::before {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: -1px;
+  bottom: -1px;
+  width: 1px;
+  transform: translateX(-50%);
+  background: color-mix(in srgb, var(--ink) 26%, var(--line));
+}
+.profile-duel .pf-rawvals-split-mid { z-index: 0; }
+.profile-duel .pf-rawvals-split-mid:not(:empty) { background: var(--page); }
 
 /* two-column sections (window / deck / rig / taste) */
 .profile-duel .duel-cols {
