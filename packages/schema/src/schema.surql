@@ -1927,6 +1927,30 @@ DEFINE FIELD attrs            ON otel_log_event TYPE option<string>;
 DEFINE FIELD observed_at      ON otel_log_event TYPE datetime;
 DEFINE INDEX IF NOT EXISTS otel_log_event_session ON otel_log_event FIELDS session_id;
 
+DEFINE TABLE harness_run_context SCHEMAFULL;
+DEFINE FIELD session             ON harness_run_context TYPE record<session>;
+DEFINE FIELD harness             ON harness_run_context TYPE string;
+DEFINE FIELD surface             ON harness_run_context TYPE option<string>;
+DEFINE FIELD entrypoint          ON harness_run_context TYPE option<string>;
+DEFINE FIELD deployment_provider ON harness_run_context TYPE option<string>;
+DEFINE FIELD auth_mode           ON harness_run_context TYPE option<string>;
+DEFINE FIELD model_provider      ON harness_run_context TYPE option<string>;
+DEFINE FIELD model               ON harness_run_context TYPE option<string>;
+DEFINE FIELD reasoning_effort    ON harness_run_context TYPE option<string>;
+DEFINE FIELD reasoning_summary   ON harness_run_context TYPE option<string>;
+DEFINE FIELD approval_policy     ON harness_run_context TYPE option<string>;
+DEFINE FIELD sandbox_policy      ON harness_run_context TYPE option<string>;
+DEFINE FIELD permission_profile  ON harness_run_context TYPE option<string>;
+DEFINE FIELD web_search_mode     ON harness_run_context TYPE option<string>;
+DEFINE FIELD mcp_servers         ON harness_run_context TYPE option<string>;
+DEFINE FIELD app_version         ON harness_run_context TYPE option<string>;
+DEFINE FIELD terminal_type       ON harness_run_context TYPE option<string>;
+DEFINE FIELD source_event        ON harness_run_context TYPE option<record<otel_log_event>>;
+DEFINE FIELD attrs               ON harness_run_context TYPE option<string>;
+DEFINE FIELD observed_at         ON harness_run_context TYPE datetime;
+DEFINE INDEX IF NOT EXISTS harness_run_context_session ON harness_run_context FIELDS session;
+DEFINE INDEX IF NOT EXISTS harness_run_context_harness ON harness_run_context FIELDS harness;
+
 -- ---------------------------------------------------------------------------
 -- wrapped_card - agent-authored Wrapped recap cards (improve-first dashboard
 -- PR4). `ax wrapped generate` emits a brief; an agent mines the graph and

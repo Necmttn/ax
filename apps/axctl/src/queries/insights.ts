@@ -169,6 +169,7 @@ export const SCHEMA_TABLES: readonly SchemaTableSpec[] = [
     { table: "otel_metric_point", stage: "active", note: "Harness OTLP metric data points (cost/token/usage)." },
     { table: "otel_span", stage: "active", note: "Harness OTLP trace spans (Codex session_loop + children)." },
     { table: "otel_log_event", stage: "active", note: "Harness OTLP log events (codex events incl. token usage)." },
+    { table: "harness_run_context", stage: "active", note: "Shared run context projection from transcript and OTLP startup events." },
     { table: "telemetry_of", stage: "active", note: "Edge: session -> otel telemetry row (drawn at ingest)." },
     { table: "content_type", stage: "active", note: "Closed content-type taxonomy for tool outputs." },
     { table: "has_content", stage: "active", note: "tool_call -> content_type edge; denormalizes session + bytes." },
