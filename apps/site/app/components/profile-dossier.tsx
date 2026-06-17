@@ -119,16 +119,24 @@ export function HighlightsBlocks({ highlights }: { highlights?: ProfileHighlight
                     <div className="pf-weapons-grid">
                         {highlights.setup.map((s, i) => {
                             const href = s.link ? safeHttpUrl(s.link) : null;
+                            // headline (title) + 2-3 sentence summary (what) stay visible;
+                            // the rationale (why) + source link reveal on click (native <details>).
                             return (
-                                <div className="pf-weapon" key={`${s.title}-${i}`}>
-                                    <div className="pf-weapon-title">
-                                        {href
-                                            ? <a href={href} target="_blank" rel="noopener nofollow">{s.title} ↗</a>
-                                            : s.title}
+                                <details className="pf-weapon" key={`${s.title}-${i}`}>
+                                    <summary className="pf-weapon-summary">
+                                        <span className="pf-weapon-title">{s.title}</span>
+                                        <p className="pf-weapon-what">{s.what}</p>
+                                        <span className="pf-toggle" aria-hidden="true" />
+                                    </summary>
+                                    <div className="pf-weapon-detail">
+                                        <p className="pf-weapon-why">{s.why}</p>
+                                        {href && (
+                                            <a className="pf-weapon-link" href={href} target="_blank" rel="noopener nofollow">
+                                                source ↗
+                                            </a>
+                                        )}
                                     </div>
-                                    <p className="pf-weapon-what">{s.what}</p>
-                                    <p className="pf-weapon-why">{s.why}</p>
-                                </div>
+                                </details>
                             );
                         })}
                     </div>
@@ -138,12 +146,16 @@ export function HighlightsBlocks({ highlights }: { highlights?: ProfileHighlight
             {highlights.skills && highlights.skills.length > 0 && (
                 <div className="pf-learn">
                     <h3>Learn the rig</h3>
+                    {/* headline (name + source) stays visible; the summary reveals on click. */}
                     {highlights.skills.map((s, i) => (
-                        <div className="pf-learn-row" key={`${s.name}-${i}`}>
-                            <span className="pf-learn-name">{s.name}</span>
-                            <span className="pf-learn-src">{s.source}</span>
-                            <span className="pf-learn-sum">{s.summary}</span>
-                        </div>
+                        <details className="pf-learn-row" key={`${s.name}-${i}`}>
+                            <summary className="pf-learn-summary">
+                                <span className="pf-learn-name">{s.name}</span>
+                                <span className="pf-learn-src">{s.source}</span>
+                                <span className="pf-toggle" aria-hidden="true" />
+                            </summary>
+                            <p className="pf-learn-sum">{s.summary}</p>
+                        </details>
                     ))}
                 </div>
             )}
