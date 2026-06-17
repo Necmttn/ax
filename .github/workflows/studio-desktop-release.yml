@@ -79,5 +79,9 @@ jobs:
           if [ ${#files[@]} -eq 0 ]; then echo "no artifacts to upload" >&2; exit 1; fi
           for f in "${files[@]}"; do
             echo "uploading $(basename "$f") -> $R2_BUCKET/desktop/"
-            bunx wrangler r2 object put "$R2_BUCKET/desktop/$(basename "$f")" --file="$f"
+            # `--remote` is REQUIRED on wrangler v4: `r2 object put` defaults to
+            # LOCAL (miniflare) storage there and silently prints "Upload
+            # complete" without ever touching R2. Pin the version so the flag
+            # set can't drift again.
+            bunx wrangler@4.101.0 r2 object put "$R2_BUCKET/desktop/$(basename "$f")" --file="$f" --remote
           done
