@@ -12922,7 +12922,7 @@ footer.site-footer { padding: 48px 32px 56px; }
 }
 .pf-radar-area {
     fill: currentColor;
-    fill-opacity: 0.18;
+    fill-opacity: 0.13;
     stroke: currentColor;
     stroke-width: 1.75;
     stroke-linejoin: round;
@@ -15625,12 +15625,34 @@ footer.site-footer { padding: 48px 32px 56px; }
 
 /* the sign: centered radar + raw-values table */
 .profile-duel .duel-sign { text-align: center; }
-.profile-duel .duel-sign-versus { justify-content: center; }
+/* versus line: each "@handle is The X" stays an unbreakable unit, the two
+   sides flex-wrap as wholes (never mid-phrase) and align around the dot. */
+.profile-duel .duel-sign-versus {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  align-items: center;
+  gap: 6px 14px;
+}
+.profile-duel .duel-versus-side {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  white-space: nowrap;
+}
+.profile-duel .duel-versus-side .pv2-avatar--inline { margin-right: 0; top: 0; }
+.profile-duel .duel-versus-dot { color: var(--muted); }
 .profile-duel .duel-sign-chart {
   display: flex;
   flex-direction: column;
   align-items: center;
 }
+.profile-duel .duel-sign-chart .pf-radar { max-width: 460px; }
+/* raw-values: 3 columns must fit the shell - fix the layout + let long value
+   phrases wrap instead of overflowing the right edge. */
+.profile-duel .pf-rawvals-table { table-layout: fixed; }
+.profile-duel .pf-rawvals-table th:first-child { width: 36%; }
+.profile-duel .pf-rawvals-val { white-space: normal; }
 
 /* two-column sections (window / deck / rig / taste) */
 .profile-duel .duel-cols {

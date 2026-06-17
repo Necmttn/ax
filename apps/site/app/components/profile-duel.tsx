@@ -226,20 +226,24 @@ export function DuelDossier({ a, b }: { a: ProfileV1; b: ProfileV1 }) {
 
             {/* the sign: overlaid radar + raw-values comparison table */}
             <section className="pf-section duel-sign">
-                <SectionIntro eyebrow="the sign" title="The sign" note="six axes, one archetype each" />
+                <SectionIntro eyebrow="the sign" title="The sign" note="two shapes, one chart" />
                 <p className="pf-sign-method">
                     Axes are log-anchored to fixed scales (not min-max), so the two shapes
                     compare directly.
                 </p>
                 <p className="pf-sign-versus duel-sign-versus">
-                    <Avatar login={a.github} size={22} ring={SELF_COLOR} className="pv2-avatar--inline" />
-                    <span style={{ color: SELF_COLOR }}>@{a.github}</span> is {aArch.sign}
-                    {" · "}
-                    <Avatar login={b.github} size={22} ring={VS_COLOR} className="pv2-avatar--inline" />
-                    <span style={{ color: VS_COLOR }}>@{b.github}</span> is {bArch.sign}
+                    <span className="duel-versus-side">
+                        <Avatar login={a.github} size={30} ring={SELF_COLOR} className="pv2-avatar--inline" />
+                        <span><span style={{ color: SELF_COLOR }}>@{a.github}</span> is {aArch.sign}</span>
+                    </span>
+                    <span className="duel-versus-dot" aria-hidden="true">·</span>
+                    <span className="duel-versus-side">
+                        <Avatar login={b.github} size={30} ring={VS_COLOR} className="pv2-avatar--inline" />
+                        <span><span style={{ color: VS_COLOR }}>@{b.github}</span> is {bArch.sign}</span>
+                    </span>
                 </p>
                 <div className="duel-sign-chart">
-                    <RadarChart series={series} size={420} />
+                    <RadarChart series={series} size={460} />
                     {(aAxes.partial || bAxes.partial) && (
                         <p className="pf-sign-partial">
                             some axes read 0 - they need a newer ax version to populate.
@@ -359,11 +363,11 @@ export function DuelDossier({ a, b }: { a: ProfileV1; b: ProfileV1 }) {
                         <span className="num">02</span>
                         <span className="card-title">Leaders <span className="arrow">&rarr;</span></span>
                     </Link>
-                    <Link className="card" to="/u/$login" params={{ login: a.github }}>
+                    <Link className="card" to="/u/$login" params={{ login: a.github }} search={{ vs: undefined }}>
                         <span className="num">03</span>
                         <span className="card-title">@{a.github} <span className="arrow">&rarr;</span></span>
                     </Link>
-                    <Link className="card" to="/u/$login" params={{ login: b.github }}>
+                    <Link className="card" to="/u/$login" params={{ login: b.github }} search={{ vs: undefined }}>
                         <span className="num">04</span>
                         <span className="card-title">@{b.github} <span className="arrow">&rarr;</span></span>
                     </Link>
