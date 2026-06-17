@@ -15,7 +15,7 @@ export interface RadarSeries {
     readonly color: string;
 }
 
-const RINGS = [25, 50, 75, 100] as const;
+const RINGS = [20, 40, 60, 80, 100] as const;
 const N = RADAR_AXES_META.length; // 6
 
 /** angle (radians) for axis i; first spoke points straight up, clockwise. */
@@ -44,16 +44,10 @@ export function RadarChart({
     const cy = size / 2;
     const radius = size / 2 - pad;
 
-    // ring polygons (hexagons matching the spoke count - reads cleaner than
-    // circles for a 6-axis chart and lines up with the spokes)
-    const ringPolys = RINGS.map((pct) => {
-        const r = (pct / 100) * radius;
-        const pts = Array.from({ length: N }, (_, i) => {
-            const a = angleFor(i);
-            return `${(cx + Math.cos(a) * r).toFixed(2)},${(cy + Math.sin(a) * r).toFixed(2)}`;
-        }).join(" ");
-        return { pct, pts };
-    });
+    // concentric ring circles - a circle can never resolve into the
+    // isometric-cube faces that nested hexagons read as, so the data shapes
+    // (not the grid) dominate the chart.
+    const ringCircles = RINGS.map((pct) => ({ pct, r: (pct / 100) * radius }));
 
     // spoke endpoints + label anchors
     const spokes = RADAR_AXES_META.map((meta, i) => {
@@ -81,11 +75,13 @@ export function RadarChart({
                 aria-label={`radar chart comparing ${series.map((s) => `@${s.login}`).join(" and ")} across six axes`}
             >
                 {/* rings */}
-                {ringPolys.map((r) => (
-                    <polygon
-                        key={r.pct}
-                        className={r.pct === 100 ? "pf-radar-ring pf-radar-ring--outer" : "pf-radar-ring"}
-                        points={r.pts}
+                {ringCircles.map((ring) => (
+                    <circle
+                        key={ring.pct}
+                        className={ring.pct === 100 ? "pf-radar-ring pf-radar-ring--outer" : "pf-radar-ring"}
+                        cx={cx}
+                        cy={cy}
+                        r={ring.r}
                     />
                 ))}
 
@@ -114,7 +110,7 @@ export function RadarChart({
                         <g key={serie.login} style={{ color: serie.color }}>
                             <polygon className="pf-radar-area" points={poly} />
                             {pts.map(([x, y], i) => (
-                                <circle key={RADAR_AXES_META[i]!.key} className="pf-radar-dot" cx={x} cy={y} r={3.2}>
+                                <circle key={RADAR_AXES_META[i]!.key} className="pf-radar-dot" cx={x} cy={y} r={3.4}>
                                     <title>{`@${serie.login} · ${RADAR_AXES_META[i]!.label}: ${fmt(serie.axes.scores[RADAR_AXES_META[i]!.key])}`}</title>
                                 </circle>
                             ))}
