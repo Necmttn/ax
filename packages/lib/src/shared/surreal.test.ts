@@ -645,6 +645,72 @@ describe("isoTimestamp", () => {
     });
 });
 
+describe("isoTimestamp - warn on epoch fallback", () => {
+    // Helper: capture and restore console.warn around a callback.
+    const withWarnSpy = (fn: (calls: unknown[][]) => void): void => {
+        const original = console.warn;
+        const calls: unknown[][] = [];
+        console.warn = (...args: unknown[]) => { calls.push(args); };
+        try {
+            fn(calls);
+        } finally {
+            console.warn = original;
+        }
+    };
+
+    it("does NOT warn for a valid Date", () => {
+        withWarnSpy((calls) => {
+            isoTimestamp(new Date("2024-01-15T10:30:00.000Z"));
+            expect(calls.length).toBe(0);
+        });
+    });
+
+    it("does NOT warn for a non-empty string", () => {
+        withWarnSpy((calls) => {
+            isoTimestamp("2024-03-01T00:00:00.000Z");
+            expect(calls.length).toBe(0);
+        });
+    });
+
+    it("does NOT warn for a SurrealDB DateTime-like object", () => {
+        withWarnSpy((calls) => {
+            const fakeDateTime = {
+                constructor: { name: "DateTime" },
+                toString() { return "2024-06-01T12:00:00.000Z"; },
+            };
+            isoTimestamp(fakeDateTime as unknown as Date);
+            expect(calls.length).toBe(0);
+        });
+    });
+
+    it("warns exactly once and returns epoch for null", () => {
+        withWarnSpy((calls) => {
+            const result = isoTimestamp(null);
+            expect(result).toBe(new Date(0).toISOString());
+            expect(calls.length).toBe(1);
+            expect(String(calls[0]![0])).toContain("[ax] isoTimestamp");
+        });
+    });
+
+    it("warns exactly once and returns epoch for undefined", () => {
+        withWarnSpy((calls) => {
+            const result = isoTimestamp(undefined);
+            expect(result).toBe(new Date(0).toISOString());
+            expect(calls.length).toBe(1);
+            expect(String(calls[0]![0])).toContain("[ax] isoTimestamp");
+        });
+    });
+
+    it("warns exactly once and returns epoch for empty string", () => {
+        withWarnSpy((calls) => {
+            const result = isoTimestamp("" as unknown as Date);
+            expect(result).toBe(new Date(0).toISOString());
+            expect(calls.length).toBe(1);
+            expect(String(calls[0]![0])).toContain("[ax] isoTimestamp");
+        });
+    });
+});
+
 describe("nonEmptyString", () => {
     it("returns the trimmed string when non-empty", () => {
         expect(nonEmptyString("  hello  ")).toBe("hello");
