@@ -12,6 +12,17 @@ describe("install-config", () => {
         expect(next.env.OTEL_EXPORTER_OTLP_ENDPOINT).toBe(ENDPOINT);
     });
 
+    test("adds CC OTLP logs env without sensitive content flags", () => {
+        const next = applyClaudeOtelEnv({}, `${ENDPOINT}/`);
+        expect(next.env.OTEL_LOGS_EXPORTER).toBe("otlp");
+        expect(next.env.OTEL_EXPORTER_OTLP_LOGS_PROTOCOL).toBe("http/json");
+        expect(next.env.OTEL_EXPORTER_OTLP_LOGS_ENDPOINT).toBe(`${ENDPOINT}/v1/logs`);
+        expect(next.env.OTEL_EXPORTER_OTLP_ENDPOINT).toBe(ENDPOINT);
+        expect(next.env.OTEL_LOG_USER_PROMPTS).toBeUndefined();
+        expect(next.env.OTEL_LOG_TOOL_CONTENT).toBeUndefined();
+        expect(next.env.OTEL_LOG_RAW_API_BODIES).toBeUndefined();
+    });
+
     test("is idempotent - re-apply yields equal object", () => {
         const once = applyClaudeOtelEnv({}, ENDPOINT);
         const twice = applyClaudeOtelEnv(once, ENDPOINT);
