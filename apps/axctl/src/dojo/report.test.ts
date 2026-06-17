@@ -30,6 +30,8 @@ describe("renderReport", () => {
         expect(md).toContain("## Proposals created (1)");
         expect(md).toContain("## Outbox drafts pending review (1)");
         expect(md).toContain("## Notes\nran 4 laps");
+        expect(md).toContain("Generated with [ax]");
+        expect(md.trimEnd().endsWith("._")).toBe(true);
     });
     test("empty sections render '- (none)' and no Notes header when notes empty", () => {
         const md = renderReport({ ...data, verdicts: [], proposals: [], drafts: [], notes: "" });
