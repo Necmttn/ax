@@ -5,6 +5,10 @@ import { Effect, FileSystem, Option, Path, PlatformError } from "effect";
 export interface JsonlFileCandidate {
     readonly path: string;
     readonly sizeBytes: number;
+    /** File mtime in epoch ms, carried for the skip-unchanged ingest
+     *  watermark (the JSONL provider work-unit feeds `(mtime,size)` to
+     *  `fileWatermark`). Defaulted to 0 when the stat lacks an mtime. */
+    readonly mtimeMs: number;
 }
 
 interface WalkEntryFile {
@@ -26,9 +30,9 @@ type WalkEntry = WalkEntryFile | WalkEntryDirectory;
  *
  * The Claude parser (`ingestTranscripts` in transcripts.ts) intentionally does
  * NOT use this skeleton: its layout is flat (`<project-slug>/<session>.jsonl`,
- * exactly one level, no recursion) and it must keep the full `(mtime, size)`
- * stat per file for the skip-unchanged ingest watermark, whereas this walker
- * only consumes mtime/size for the `--since` cutoff and discards them.
+ * exactly one level, no recursion) so it keeps its own flat walk. Every
+ * candidate carries `(mtimeMs, sizeBytes)` so all three JSONL providers can
+ * feed `fileWatermark` through the shared work-unit (`jsonl-work-unit.ts`).
  */
 const walkJsonlCore = <E, R>(input: {
     readonly root: string;
@@ -53,7 +57,7 @@ const walkJsonlCore = <E, R>(input: {
                         yield* visit(full);
                     } else if (full.endsWith(".jsonl")) {
                         if (input.cutoffMs > 0 && info.mtimeMs < input.cutoffMs) continue;
-                        out.push({ path: full, sizeBytes: info.sizeBytes });
+                        out.push({ path: full, sizeBytes: info.sizeBytes, mtimeMs: info.mtimeMs });
                     }
                 }
             });

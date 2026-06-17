@@ -75,6 +75,16 @@ unchanged input is skipped (output-equivalent) on the next run. Stored in
 `ingest_file_state` keyed by source kind and path.
 _Avoid_: cache, dedup key
 
+**JSONL Provider Work-Unit**:
+The shared per-file execution loop the three JSONL transcript providers
+(claude / codex / pi) run their candidates through: **Ingest Watermark**
+skip/commit, per-file failure isolation, the dry-run deadline, and the
+file/active-file counters. Each provider supplies only discovery and a
+per-file parse+write; the work-unit owns the mechanics so skip-unchanged is
+uniform across providers (not claude-only). SQLite-store providers
+(opencode / cursor) are a different isolation grain and stay outside it.
+_Avoid_: file loop, ingest helper
+
 **Commit Signal**:
 The quality of commit evidence for reconstructing durable agent work memory.
 _Avoid_: commit lint

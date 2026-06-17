@@ -36,7 +36,7 @@ import {
 } from "./normalized/tool-call-write.ts";
 import { buildSessionTokenUsageStatement } from "./token-usage-writers.ts";
 import { extractToolFileEvidence } from "./tool-file-evidence.ts";
-import { makeFileFailureCollector } from "./file-isolation.ts";
+import { runJsonlProviderFiles } from "./jsonl-work-unit.ts";
 import { decodePiTranscriptLine } from "./line-schemas.ts";
 import { tokenQualityLabels } from "./token-quality.ts";
 import { walkJsonlFilesLenient } from "./walk-jsonl.ts";
@@ -683,14 +683,17 @@ export const ingestPi = Effect.fn("pi.ingest")(
         let skipped = 0;
         let warningCount = 0;
 
-        const failures = makeFileFailureCollector({ source: "pi" });
-        for (const file of files) {
-            // Per-file failure isolation (#261): a bad session file (read
-            // fault or a rejected statement) skips THIS file - it is retried
-            // next run - instead of aborting the whole stage (see
-            // file-isolation.ts). `files` counts only completed files, like
-            // claude/codex.
-            yield* failures.isolate(file.path, Effect.gen(function* () {
+        // Skip-unchanged watermark + per-file failure isolation (#261) live in
+        // the shared JSONL work-unit; pi supplies discovery (above) and the
+        // per-file parse/write below. A file whose (mtime,size) matches a prior
+        // run is skipped without re-reading. `fileCount` (pi's own) counts
+        // completed files, like claude/codex.
+        const result = yield* runJsonlProviderFiles({
+            candidates: files,
+            sourceKind: "pi_session",
+            forceEnv: "AX_REDERIVE_PI",
+            source: "pi",
+            processFile: (file) => Effect.gen(function* () {
                 // OLD: `Bun.file(path).text()` under `Effect.promise` - a read
                 // rejection became an unrecoverable defect. `readFileString`
                 // surfaces a typed PlatformError that the isolation seam
@@ -705,7 +708,9 @@ export const ingestPi = Effect.fn("pi.ingest")(
                     fileCount += 1;
                     skipped += 1;
                     warningCount += 1;
-                    return;
+                    // Empty/unparseable: not committed, so it re-warns next run -
+                    // preserving the pre-watermark behavior (pi re-read every file).
+                    return false;
                 }
 
                 skipped += extracted.skipped;
@@ -725,9 +730,9 @@ export const ingestPi = Effect.fn("pi.ingest")(
                 eventCount += extracted.providerEvents.length;
                 turnCount += extracted.turns.length;
                 toolCallCount += extracted.toolCalls.length;
-            }));
-        }
-        yield* failures.report;
+                return true;
+            }),
+        });
 
         return {
             files: fileCount,
@@ -737,7 +742,7 @@ export const ingestPi = Effect.fn("pi.ingest")(
             toolCalls: toolCallCount,
             skipped,
             warnings: warningCount,
-            failedFiles: failures.count(),
+            failedFiles: result.failures.count(),
         } satisfies PiStats;
     },
 );
