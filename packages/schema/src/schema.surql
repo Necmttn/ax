@@ -1927,6 +1927,26 @@ DEFINE FIELD attrs            ON otel_log_event TYPE option<string>;
 DEFINE FIELD observed_at      ON otel_log_event TYPE datetime;
 DEFINE INDEX IF NOT EXISTS otel_log_event_session ON otel_log_event FIELDS session_id;
 
+DEFINE TABLE harness_tool_event SCHEMAFULL;
+DEFINE FIELD session         ON harness_tool_event TYPE record<session>;
+DEFINE FIELD harness         ON harness_tool_event TYPE string;
+DEFINE FIELD event_kind      ON harness_tool_event TYPE string;
+DEFINE FIELD tool_name       ON harness_tool_event TYPE option<string>;
+DEFINE FIELD tool_call       ON harness_tool_event TYPE option<record<tool_call>>;
+DEFINE FIELD provider_event  ON harness_tool_event TYPE option<record<agent_event>>;
+DEFINE FIELD otel_event      ON harness_tool_event TYPE option<record<otel_log_event>>;
+DEFINE FIELD prompt_id       ON harness_tool_event TYPE option<string>;
+DEFINE FIELD tool_use_id     ON harness_tool_event TYPE option<string>;
+DEFINE FIELD decision        ON harness_tool_event TYPE option<string>;
+DEFINE FIELD decision_source ON harness_tool_event TYPE option<string>;
+DEFINE FIELD success         ON harness_tool_event TYPE option<bool>;
+DEFINE FIELD error_type      ON harness_tool_event TYPE option<string>;
+DEFINE FIELD duration_ms     ON harness_tool_event TYPE option<number>;
+DEFINE FIELD attrs           ON harness_tool_event TYPE option<string>;
+DEFINE FIELD observed_at     ON harness_tool_event TYPE datetime;
+DEFINE INDEX IF NOT EXISTS harness_tool_event_session ON harness_tool_event FIELDS session;
+DEFINE INDEX IF NOT EXISTS harness_tool_event_kind ON harness_tool_event FIELDS event_kind;
+
 DEFINE TABLE harness_run_context SCHEMAFULL;
 DEFINE FIELD session             ON harness_run_context TYPE record<session>;
 DEFINE FIELD harness             ON harness_run_context TYPE string;
