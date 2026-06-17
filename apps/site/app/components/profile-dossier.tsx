@@ -559,10 +559,7 @@ function RawTable({
                         const bLeads = vs !== undefined && b !== undefined && b.value !== null && (a.value === null || b.value > a.value);
                         return (
                             <tr key={m.key}>
-                                <th scope="row">
-                                    <span className="pf-rawvals-metric">{m.label}</span>
-                                    <span className="pf-rawvals-metric-note">{m.note}</span>
-                                </th>
+                                <th scope="row">{m.label}</th>
                                 <td className={aLeads ? "pf-rawvals-val pf-rawvals-val--lead" : "pf-rawvals-val"}>
                                     {a.label}
                                     {aLeads && <span className="pf-rawvals-dot" aria-label="leads" />}
