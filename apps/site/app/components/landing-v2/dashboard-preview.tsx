@@ -4,20 +4,7 @@ import { Link } from "@tanstack/react-router";
 import { AGENT_ONBOARDING_WITH_INSTALL } from "@ax/onboarding-prompt";
 import { HeroLogoField, PROVIDERS } from "./supports-strip";
 import { RetroTerminal } from "./retro-terminal";
-import {
-  McBars,
-  McLine,
-  McRadar,
-  McRing,
-  McWaffle,
-  McCandles,
-  McComet,
-  McWave,
-  McBullet,
-  McSignal,
-  McScatter,
-  McDelta,
-} from "../card-viz";
+import { CardViz, type VizSpec } from "@ax/recap-deck";
 
 // ============================================================================
 // Mission Control preview - a static recreation of the studio home (instrument
@@ -170,20 +157,22 @@ const POP_CHARTS: ReadonlyArray<{
   accent: string;
   q: string;
   h: string;
-  viz: React.ReactNode;
+  viz: VizSpec;
 }> = [
-  { key: "bars", accent: "acc-green", q: "when you ship", h: "Tuesday nights", viz: <McBars data={[22, 31, 28, 44, 39, 58, 47, 63, 71, 55, 82, 90, 74, 61, 88, 96]} /> },
-  { key: "ring", accent: "acc-gold", q: "fixes stick", h: "82% hold", viz: <McRing pct={82} /> },
-  { key: "line", accent: "acc-blue", q: "tokens / year", h: "1.4B", viz: <McLine data={[18, 24, 21, 33, 40, 38, 52, 60, 57, 71, 80, 78, 92, 100]} /> },
-  { key: "radar", accent: "acc-violet", q: "skill profile", h: "systems mind", viz: <McRadar data={[82, 64, 91, 48, 73]} /> },
-  { key: "waffle", accent: "acc-green", q: "paths covered", h: "73%", viz: <McWaffle pct={73} /> },
-  { key: "candles", accent: "acc-rose", q: "session swings", h: "big nights", viz: <McCandles data={[40, 60, 55, 75, 70, 50, 62, 80, 72, 88]} /> },
-  { key: "comet", accent: "acc-blue", q: "quota burn", h: "61%", viz: <McComet pct={61} /> },
-  { key: "wave", accent: "acc-violet", q: "latency", h: "steady", viz: <McWave data={[50, 80, 20, 60, 35, 70, 45, 66, 30, 72]} /> },
-  { key: "scatter", accent: "acc-rose", q: "cost vs reward", h: "lands cheap", viz: <McScatter data={[30, 50, 45, 70, 60, 85, 55, 40, 66, 52]} /> },
-  { key: "bullet", accent: "acc-gold", q: "ship goal", h: "82 / 70", viz: <McBullet actual={82} target={70} /> },
-  { key: "signal", accent: "acc-green", q: "harness health", h: "5 / 6", viz: <McSignal on={5} /> },
-  { key: "delta", accent: "acc-blue", q: "weekly tokens", h: "+18", viz: <McDelta data={[40, 55, 48, 62, 70, 66, 78, 84]} /> },
+  { key: "bars", accent: "acc-green", q: "when you ship", h: "Tuesday nights", viz: { kind: "bars", data: [22, 31, 28, 44, 39, 58, 47, 63, 71, 55, 82, 90, 74, 61, 88, 96] } },
+  { key: "ring", accent: "acc-gold", q: "fixes stick", h: "82% hold", viz: { kind: "ring", data: [82] } },
+  { key: "line", accent: "acc-blue", q: "tokens / year", h: "1.4B", viz: { kind: "line", data: [18, 24, 21, 33, 40, 38, 52, 60, 57, 71, 80, 78, 92, 100] } },
+  { key: "radar", accent: "acc-violet", q: "skill profile", h: "systems mind", viz: { kind: "radar", data: [82, 64, 91, 48, 73] } },
+  { key: "waffle", accent: "acc-green", q: "paths covered", h: "73%", viz: { kind: "waffle", data: [73] } },
+  { key: "candles", accent: "acc-rose", q: "session swings", h: "big nights", viz: { kind: "candles", data: [40, 60, 55, 75, 70, 50, 62, 80, 72, 88] } },
+  { key: "comet", accent: "acc-blue", q: "quota burn", h: "61%", viz: { kind: "comet", data: [61] } },
+  { key: "wave", accent: "acc-violet", q: "latency", h: "steady", viz: { kind: "wave", data: [50, 80, 20, 60, 35, 70, 45, 66, 30, 72] } },
+  { key: "scatter", accent: "acc-rose", q: "cost vs reward", h: "lands cheap", viz: { kind: "scatter", data: [30, 50, 45, 70, 60, 85, 55, 40, 66, 52] } },
+  // package bullet reads [target, actual]: target=first, actual=last -> 70 goal, 82 actual
+  { key: "bullet", accent: "acc-gold", q: "ship goal", h: "82 / 70", viz: { kind: "bullet", data: [70, 82] } },
+  // package signal reads avg(data) as a 0..100 pct -> on = round(83/100*6) = 5 of 6
+  { key: "signal", accent: "acc-green", q: "harness health", h: "5 / 6", viz: { kind: "signal", data: [83] } },
+  { key: "delta", accent: "acc-blue", q: "weekly tokens", h: "+18", viz: { kind: "delta", data: [40, 55, 48, 62, 70, 66, 78, 84] } },
 ];
 
 // chart kinds that render small/fixed-size (center them in the popup viz row);
@@ -472,13 +461,17 @@ export function DashboardPreview() {
           {/* floating wrapped highlights - cycle through all 12 charts */}
           <div className="mc-pop-strip">
             {POP_SLOTS.map(({ off, place }) => {
-              const c = POP_CHARTS[(popTick + off) % POP_CHARTS.length];
+              const c = POP_CHARTS[(popTick + off) % POP_CHARTS.length]!;
               return (
-                <article key={place} className={`mc-pop ${place} ${c.accent} browser--instrument`}>
+                <article
+                  key={place}
+                  className={`mc-pop ${place} ${c.accent} browser--instrument rdx`}
+                  data-theme="dark"
+                >
                   <span className="mc-pop-badge">wrapped</span>
                   <div key={c.key} className="mc-pop-swap">
                     <div className={`mc-pop-viz${POP_CENTERED.has(c.key) ? " mc-pop-viz--center" : ""}`}>
-                      {c.viz}
+                      <CardViz spec={c.viz} />
                     </div>
                     <span className="mc-pop-q">$ {c.q}</span>
                     <h4 className="mc-pop-h">{c.h}</h4>
