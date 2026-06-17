@@ -1,5 +1,60 @@
 # Changelog
 
+## [0.33.0](https://github.com/Necmttn/ax/compare/v0.32.0...v0.33.0) (2026-06-17)
+
+
+### Features
+
+* **analytics:** tier-1 adoption report + Cloudflare Web Analytics beacon ([#514](https://github.com/Necmttn/ax/issues/514)) ([5701119](https://github.com/Necmttn/ax/commit/570111962c6985238cd03621a5c17d1b197441b9))
+* **community:** codegen the skill-provenance registry from known collections ([#501](https://github.com/Necmttn/ax/issues/501)) ([3e2ae73](https://github.com/Necmttn/ax/commit/3e2ae73b94d5544642a105f0de1d16a6803d227a))
+* **community:** compile leaderboard on a Cloudflare Worker (alchemy) ([#492](https://github.com/Necmttn/ax/issues/492)) ([3d6db6d](https://github.com/Necmttn/ax/commit/3d6db6db687501b3f16cbb5d6339d4d0b60de89e))
+* **community:** credit skill authors via a provenance registry ([#499](https://github.com/Necmttn/ax/issues/499)) ([365438e](https://github.com/Necmttn/ax/commit/365438e77e6ed7e9b6a03c1568353319600fc63c))
+* content-type classification of tool outputs + read-path facets ([#524](https://github.com/Necmttn/ax/issues/524)) ([241f6f5](https://github.com/Necmttn/ax/commit/241f6f5cb49f19ed5c6ad8aee519b15604a8119b))
+* **cost:** ax cost images lens + isolate-heavy-context dispatch pattern ([#529](https://github.com/Necmttn/ax/issues/529)) ([fc2a680](https://github.com/Necmttn/ax/commit/fc2a6807d8a3a6ddc2f19d07fd30eaf8b15875d5))
+* **dojo:** spar-for-skills — controlled re-run test of a skill edit ([#486](https://github.com/Necmttn/ax/issues/486)) ([a494b7a](https://github.com/Necmttn/ax/commit/a494b7abe6e88761520daa49e15fa772d2a2ed60))
+* **ingest:** deriveDirectives — proactive directives → guidance proposals ([#537](https://github.com/Necmttn/ax/issues/537)) ([#538](https://github.com/Necmttn/ax/issues/538)) ([4ca858e](https://github.com/Necmttn/ax/commit/4ca858e5eec3ca8fd5c8411b7626aaae0d433045))
+* **memory:** ax memory ops — surface Claude memory writes ([#531](https://github.com/Necmttn/ax/issues/531)) ([#532](https://github.com/Necmttn/ax/issues/532)) ([5401d35](https://github.com/Necmttn/ax/commit/5401d35dc3c7bcebd27051110ec4b8e2c63cb6c1))
+* **onboarding:** add value-tour steps to agent setup prompt ([#482](https://github.com/Necmttn/ax/issues/482)) ([0a67352](https://github.com/Necmttn/ax/commit/0a673525d1149243e08f31fc13b6b3d122201549))
+* **onboarding:** parallel gather with cheap subagents, judgment stays on main ([#487](https://github.com/Necmttn/ax/issues/487)) ([1ab3f7b](https://github.com/Necmttn/ax/commit/1ab3f7bc200de671d10a1030d739d2400d947a7e))
+* **onboarding:** single-source prompt + help-then-contribute loop ([#489](https://github.com/Necmttn/ax/issues/489)) ([9123a08](https://github.com/Necmttn/ax/commit/9123a08589cff3f93cab3b15a665885c9b80259a))
+* **patterns:** directive-mining spec (rescoped to v1 MVP after review) + starter pack ([#535](https://github.com/Necmttn/ax/issues/535)) ([#536](https://github.com/Necmttn/ax/issues/536)) ([5317fb8](https://github.com/Necmttn/ax/commit/5317fb8be7546b9e75d19945c22b59d28dbae0f4))
+* **site:** bespoke head-to-head duel layout for /u/&lt;a&gt;/vs/&lt;b&gt; ([#527](https://github.com/Necmttn/ax/issues/527)) ([58885f8](https://github.com/Necmttn/ax/commit/58885f835d466442262492cc7bc3a47348744e4a))
+* **site:** challenge share-card — pairwise profile duels ([#494](https://github.com/Necmttn/ax/issues/494)) ([329daf3](https://github.com/Necmttn/ax/commit/329daf3341e6f9a07232f2cd8b884a8859898101))
+* **site:** profile reskin + dedicated comparison + shared @ax/recap-deck charts ([#523](https://github.com/Necmttn/ax/issues/523)) ([8ae76a3](https://github.com/Necmttn/ax/commit/8ae76a33acc0d09d674599e8bf3a27571ef803f7))
+* **site:** revamp /leaders into a unified builder roster ([#491](https://github.com/Necmttn/ax/issues/491)) ([8ecc69b](https://github.com/Necmttn/ax/commit/8ecc69b760307abfb19d7b736e53c0c6e3cee65f))
+* **site:** unlisted /status page with live adoption stats ([#516](https://github.com/Necmttn/ax/issues/516)) ([f34307c](https://github.com/Necmttn/ax/commit/f34307cdcab8b91473f2683796131e76f59dbddf))
+* **skills:** ship-checklist - definition-of-done for new ax writes ([#530](https://github.com/Necmttn/ax/issues/530)) ([16a3d2f](https://github.com/Necmttn/ax/commit/16a3d2f6a4bb79aeb8b042d40091b0f71f7b7997))
+* **studio-desktop:** n/ax namespace logo (app icon + tray) ([#526](https://github.com/Necmttn/ax/issues/526)) ([91bd819](https://github.com/Necmttn/ax/commit/91bd819ba7487c02e143bb924540ba709be5b08b))
+* **studio-desktop:** n/ax namespace logo (app icon + tray) ([#528](https://github.com/Necmttn/ax/issues/528)) ([dabbea3](https://github.com/Necmttn/ax/commit/dabbea346d05e3fac462162af116532a8396255c))
+
+
+### Bug Fixes
+
+* **ci:** wrangler r2 upload needs --remote (v4 defaults to local) ([#518](https://github.com/Necmttn/ax/issues/518)) ([1b3e24b](https://github.com/Necmttn/ax/commit/1b3e24b5bddf23bf6e0e5dc9ab55338f6db9b385))
+* **community:** trend skills by canonical identity, not install source ([#498](https://github.com/Necmttn/ax/issues/498)) ([d3c706d](https://github.com/Necmttn/ax/commit/d3c706d2563ba491b67ac16cfd754b6f6606c54d))
+* **ingest:** capture cursor + opencode file evidence ([#161](https://github.com/Necmttn/ax/issues/161), [#162](https://github.com/Necmttn/ax/issues/162)) ([#515](https://github.com/Necmttn/ax/issues/515)) ([8479bea](https://github.com/Necmttn/ax/commit/8479beaf074f855d336d833ad58be8af6bb53aac))
+* **ingest:** dry-run coarse estimate instead of dead-end ([#478](https://github.com/Necmttn/ax/issues/478)) ([#496](https://github.com/Necmttn/ax/issues/496)) ([73a1c78](https://github.com/Necmttn/ax/commit/73a1c784c0da1ccc9a3585a6c146a99825971925))
+* **ingest:** plain progress renders only stage spans ([#479](https://github.com/Necmttn/ax/issues/479)) ([#495](https://github.com/Necmttn/ax/issues/495)) ([404aa1a](https://github.com/Necmttn/ax/commit/404aa1abfefb710b8cbf46484dc248164a12e354))
+* **ingest:** space before AND in content-types since clause ([#533](https://github.com/Necmttn/ax/issues/533)) ([#534](https://github.com/Necmttn/ax/issues/534)) ([b90b7d1](https://github.com/Necmttn/ax/commit/b90b7d1b063678f2c86e849d46f6d64dce5857bc))
+* **insights:** render `ax insights tools` as a table, not raw JSON ([#484](https://github.com/Necmttn/ax/issues/484)) ([75a8df5](https://github.com/Necmttn/ax/commit/75a8df5c30e17897880f50e44f39852959ce0577))
+* **onboarding:** gather subagents use the strongest model, not a cheap one ([#488](https://github.com/Necmttn/ax/issues/488)) ([88afdb0](https://github.com/Necmttn/ax/commit/88afdb0511b6de39b6bc56192b14490ddb1a0f88))
+* **onboarding:** make the value-tour build the Agent Wrapped deck ([#485](https://github.com/Necmttn/ax/issues/485)) ([e588aca](https://github.com/Necmttn/ax/commit/e588aca47e2feeda2c1a0b2a9c68fbbd6c0697b0))
+* **profile:** dedupe axis legend + fix sign blurb grammar ([#477](https://github.com/Necmttn/ax/issues/477)) ([7ec57a5](https://github.com/Necmttn/ax/commit/7ec57a5d24a0b3a6d52946e79104ff68599059de))
+* **profile:** detect stale publish watcher ([819be4a](https://github.com/Necmttn/ax/commit/819be4adb82ffa05a35fb406107b3ed990f77ea5))
+* **profile:** ecosystem-aware verification detection ([#471](https://github.com/Necmttn/ax/issues/471)) ([#474](https://github.com/Necmttn/ax/issues/474)) ([418a13d](https://github.com/Necmttn/ax/commit/418a13dff1d1071c47b36d72d98948427191feb3))
+* **schema:** coerce proposal.origin NONE→'mined' to stop ingest crash ([#472](https://github.com/Necmttn/ax/issues/472)) ([#473](https://github.com/Necmttn/ax/issues/473)) ([e96cd6f](https://github.com/Necmttn/ax/commit/e96cd6f8199f7274871d2485195e5ffeac7ea91a))
+* **serve:** SSE keep-alive heartbeat on /api/events ([#503](https://github.com/Necmttn/ax/issues/503)) ([#506](https://github.com/Necmttn/ax/issues/506)) ([298546b](https://github.com/Necmttn/ax/commit/298546b1ce773d812f28519909b2b14e3236fa3b))
+* **skills:** unify weighted doctor count with classify ([#481](https://github.com/Necmttn/ax/issues/481)) ([#497](https://github.com/Necmttn/ax/issues/497)) ([49795a4](https://github.com/Necmttn/ax/commit/49795a423dd0fc72b315bc4b36cabf295d00d7ec))
+* **studio-desktop:** bundle electron-updater (app crashed on launch) ([#519](https://github.com/Necmttn/ax/issues/519)) ([eb8bbcb](https://github.com/Necmttn/ax/commit/eb8bbcb1c2a7af56f4c63dd96def83eb453b55bf))
+* **studio-desktop:** silence tsdown inline warning (CI escalates to error) ([#512](https://github.com/Necmttn/ax/issues/512)) ([efb4aeb](https://github.com/Necmttn/ax/commit/efb4aeb66fe0b8f4c2c310c1b82e0f426919c54d))
+* **studio-desktop:** stage @ax/onboarding-prompt (release build) ([#511](https://github.com/Necmttn/ax/issues/511)) ([315bf36](https://github.com/Necmttn/ax/commit/315bf3632a07751d1287f4cfbeef9bf817594d49))
+* two dogfood findings — wrapped cards fail-visible + ax ingest reap ([#490](https://github.com/Necmttn/ax/issues/490)) ([75b173d](https://github.com/Necmttn/ax/commit/75b173ddd49fae285284f17ea2c07f97ed896f32))
+
+
+### Performance
+
+* **studio-desktop:** prune serve-irrelevant deps from bundle (-128MB) ([#520](https://github.com/Necmttn/ax/issues/520)) ([3cc6b8e](https://github.com/Necmttn/ax/commit/3cc6b8e3268d1d5ea8fcef84da167cea9c5238b9))
+
 ## [0.32.0](https://github.com/Necmttn/ax/compare/v0.31.0...v0.32.0) (2026-06-16)
 
 
