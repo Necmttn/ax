@@ -173,15 +173,68 @@ function ModelSplitCard() {
     );
 }
 
+function MissionControlNotice({
+    title,
+    detail,
+}: {
+    readonly title: string;
+    readonly detail: string;
+}) {
+    return (
+        <section className="rdx-card" style={{ padding: 24, maxWidth: 520 }}>
+            <div className="rdx-label" style={{ color: "var(--pri)" }}>{title}</div>
+            <div className="rdx-label" style={{ marginTop: 8, lineHeight: 1.5 }}>{detail}</div>
+        </section>
+    );
+}
+
+const errorDetail = (error: unknown): string => {
+    if (error instanceof Error && error.message.length > 0) return error.message;
+    const text = String(error ?? "");
+    return text.length > 0 ? text : "unknown error";
+};
+
+export function MissionControlContent({
+    data,
+    isLoading,
+    error,
+}: {
+    readonly data: WrappedProfile | null;
+    readonly isLoading: boolean;
+    readonly error: unknown;
+}) {
+    const ready = Boolean(data?.usage && data?.primaryArchetype);
+    if (isLoading && !data) {
+        return (
+            <MissionControlNotice
+                title="building profile"
+                detail="Cold graph scans can take about 20s on large local datasets."
+            />
+        );
+    }
+    if (error && !data) {
+        return (
+            <MissionControlNotice
+                title="wrapped profile failed"
+                detail={errorDetail(error)}
+            />
+        );
+    }
+    if (ready && data) {
+        return <><ClockHero profile={data} /><Bento profile={data} /><RecapDeck cards={data.cards ?? []} /></>;
+    }
+    if (data) {
+        return <MissionControlNotice title="profile not ready" detail="Ingest more sessions to build the mission-control profile." />;
+    }
+    return null;
+}
+
 export function MissionControl() {
     const q = useQuery({ queryKey: ["wrapped"], queryFn: () => api.wrapped() });
     const data = q.data ?? null;
-    const ready = Boolean(data?.usage && data?.primaryArchetype);
     return (
         <InstrumentShell>
-            {q.isLoading && !data ? <div className="rdx-label" style={{ padding: 24 }}>loading…</div> : null}
-            {ready && data ? (<><ClockHero profile={data} /><Bento profile={data} /><RecapDeck cards={data.cards ?? []} /></>) : null}
-            {data && !ready ? <div className="rdx-label" style={{ padding: 24 }}>profile not ready - ingest more sessions.</div> : null}
+            <MissionControlContent data={data} isLoading={q.isLoading} error={q.error} />
         </InstrumentShell>
     );
 }

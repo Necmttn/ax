@@ -178,6 +178,47 @@ export function formatProfile(p: ProfileV1): string {
 // ax profile show [--window=30] [--no-cost] [--json]
 // ---------------------------------------------------------------------------
 
+type ProfileProgressStep = "env" | "build" | "done";
+
+export function shouldEmitProfileProgress(input: {
+    readonly stderrIsTTY: boolean;
+    readonly progressEnv: string | undefined;
+}): boolean {
+    const mode = (input.progressEnv ?? "").toLowerCase();
+    if (mode === "off") return false;
+    return input.stderrIsTTY || mode === "on" || mode === "plain";
+}
+
+export function profileProgressLine(
+    step: ProfileProgressStep,
+    input: { readonly windowDays: number; readonly includeCost: boolean },
+    elapsedMs?: number,
+): string {
+    if (step === "env") return "ax profile show: gathering local environment";
+    if (step === "build") {
+        return `ax profile show: building graph profile (window=${input.windowDays}d, cost=${input.includeCost ? "on" : "off"})`;
+    }
+    const seconds = ((elapsedMs ?? 0) / 1000).toFixed(1);
+    return `ax profile show: done in ${seconds}s`;
+}
+
+const makeProfileProgress = (input: {
+    readonly windowDays: number;
+    readonly includeCost: boolean;
+}) => {
+    const enabled = shouldEmitProfileProgress({
+        stderrIsTTY: process.stderr.isTTY === true,
+        progressEnv: process.env.AX_PROGRESS,
+    });
+    const startedAt = Date.now();
+    return (step: ProfileProgressStep) =>
+        Effect.sync(() => {
+            if (!enabled) return;
+            const elapsedMs = step === "done" ? Date.now() - startedAt : undefined;
+            process.stderr.write(`${profileProgressLine(step, input, elapsedMs)}\n`);
+        });
+};
+
 const profileShowCommand = Command.make(
     "show",
     {
@@ -190,12 +231,16 @@ const profileShowCommand = Command.make(
             fail(`ax profile show: --window must be a positive integer (got "${window}")`);
         }
         return Effect.gen(function* () {
+            const progress = makeProfileProgress({ windowDays: window, includeCost: !noCost });
+            yield* progress("env");
             const env = yield* gatherEnv;
+            yield* progress("build");
             const profile = yield* buildProfile({
                 windowDays: window,
                 includeCost: !noCost,
                 env,
             });
+            yield* progress("done");
             console.log(json ? prettyPrint(profile) : formatProfile(profile));
         });
     },

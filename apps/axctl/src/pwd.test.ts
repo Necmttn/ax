@@ -173,6 +173,20 @@ describe("resolvePwdRepository", () => {
         expect(res.repoRoot).toBe(dir);
     });
 
+    test("linked worktree: repoRoot is checkout, mainRepoRoot is primary checkout", async () => {
+        const dir = await makeTempDir();
+        await initRepoWithCommit(dir);
+        const worktree = `${dir}-feature`;
+        tempDirs.push(worktree);
+
+        git(["worktree", "add", "-b", "feature", worktree], dir);
+
+        const res = await resolve(worktree, false);
+
+        expect(res.repoRoot).toBe(worktree);
+        expect(res.mainRepoRoot).toBe(dir);
+    });
+
     test("cwd defaults to process.cwd() when not provided", async () => {
         // This test calls resolvePwdRepository() with no args; it will succeed
         // if we happen to be inside a git repo, or fail with NotAGitRepoError.

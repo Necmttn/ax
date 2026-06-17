@@ -389,15 +389,28 @@ const ROUTING_WINDOW_DAYS = 14;
 
 /**
  * Per-source timeout: a slow source degrades to a note instead of blocking
- * the panel. The churn leg currently exceeds this (~9s fixed cost - see
- * https://github.com/Necmttn/ax/issues/326); routing and others are typically
- * fast but may spike.
+ * the panel. Tool failures are kept fast because they are a frequent landing
+ * card; the heavier graph rollups get enough room to avoid caching a
+ * timeout-only payload on normal local datasets.
  */
-const SOURCE_TIMEOUT_MS = 4_000;
+const FAST_SOURCE_TIMEOUT_MS = 4_000;
+const DISCOVERY_SOURCE_TIMEOUT_MS = 12_000;
+const HEAVY_DISCOVERY_SOURCE_TIMEOUT_MS = 30_000;
+
+export const nextActionSourceTimeoutMs = (
+    source: NextActionKind,
+    override?: number,
+): number => {
+    if (override != null) return override;
+    if (source === "churn" || source === "skill_hygiene") {
+        return HEAVY_DISCOVERY_SOURCE_TIMEOUT_MS;
+    }
+    return source === "tool_failure" ? FAST_SOURCE_TIMEOUT_MS : DISCOVERY_SOURCE_TIMEOUT_MS;
+};
 
 /**
- * Fan-out to 5 data sources (proposals, tool failures, churn, routing, skill
- * hygiene), merge and sort all cards by impact descending.
+ * Fan-out to 6 data sources (proposals, tool failures, churn, routing, skill
+ * hygiene, housekeeping), merge and sort all cards by impact descending.
  *
  * Each leg is fail-open: a DB error or timeout becomes a NextActionsSourceNote,
  * never a typed failure. The returned Effect has error type `never` for source
@@ -406,8 +419,6 @@ const SOURCE_TIMEOUT_MS = 4_000;
 export const fetchNextActions = Effect.fn("dashboard.fetchNextActions")(function* (
     opts?: { readonly sourceTimeoutMs?: number },
 ) {
-    const timeoutMs = opts?.sourceTimeoutMs ?? SOURCE_TIMEOUT_MS;
-
     // Mutated from concurrent legs; safe because JS fibers interleave only at
     // yield points - the push inside Effect.sync runs atomically.
     const notes: Array<NextActionsSourceNote> = [];
@@ -427,8 +438,9 @@ export const fetchNextActions = Effect.fn("dashboard.fetchNextActions")(function
         source: NextActionKind,
         eff: Effect.Effect<A, unknown, SurrealClient>,
         empty: A,
-    ): Effect.Effect<A, never, SurrealClient> =>
-        eff.pipe(
+    ): Effect.Effect<A, never, SurrealClient> => {
+        const timeoutMs = nextActionSourceTimeoutMs(source, opts?.sourceTimeoutMs);
+        return eff.pipe(
             Effect.timeoutOrElse({
                 duration: `${timeoutMs} millis`,
                 orElse: () =>
@@ -441,6 +453,7 @@ export const fetchNextActions = Effect.fn("dashboard.fetchNextActions")(function
                 }),
             ),
         );
+    };
 
     const [proposals, failures, churn, routing, hygiene, stale] = yield* Effect.all(
         [
@@ -458,7 +471,7 @@ export const fetchNextActions = Effect.fn("dashboard.fetchNextActions")(function
             guarded("skill_hygiene", fetchSkillHygiene({ minInvocations: 3, limit: 10 }), [] as ReadonlyArray<SkillHygieneRow>),
             guarded("housekeeping", findStaleOpenProposals(HOUSEKEEP_DAYS), [] as ReadonlyArray<StaleProposalRow>),
         ] as const,
-        { concurrency: 3 },
+        { concurrency: 6 },
     );
 
     const cards: NextActionCard[] = [

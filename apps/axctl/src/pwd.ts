@@ -6,6 +6,7 @@
  * record does it correspond to?" resolver.
  */
 import { Effect, FileSystem, Schema } from "effect";
+import * as posixPath from "node:path/posix";
 import { RecordId } from "surrealdb";
 import { SurrealClient } from "@ax/lib/db";
 import type { DbError } from "@ax/lib/errors";
@@ -37,6 +38,8 @@ export interface PwdResolution {
     readonly cwd: string;
     /** Result of `git rev-parse --show-toplevel`. */
     readonly repoRoot: string;
+    /** Primary checkout root; differs from repoRoot inside linked worktrees. */
+    readonly mainRepoRoot: string;
     /** Normalized remote URL (e.g. "github.com/foo/bar"), or null. */
     readonly remoteUrlNormalized: string | null;
     /** SHA of the initial (root) commit, or null. */
@@ -52,6 +55,15 @@ export interface PwdResolution {
 // ---------------------------------------------------------------------------
 // Implementation
 // ---------------------------------------------------------------------------
+
+export const mainRepoRootFromGitCommonDir = (repoRoot: string, commonDir: string): string => {
+    const trimmed = commonDir.trim();
+    if (trimmed.length === 0 || trimmed === ".git") return repoRoot;
+    const abs = posixPath.isAbsolute(trimmed)
+        ? trimmed
+        : posixPath.join(repoRoot, trimmed);
+    return posixPath.dirname(abs);
+};
 
 /**
  * Resolve the current working directory (or the provided `cwd`) to a
@@ -89,6 +101,14 @@ export const resolvePwdRepository = (
         }
         const repoRoot = toplevelResult.stdout.trim();
 
+        const commonDirResult = yield* proc.exec("git", ["rev-parse", "--git-common-dir"], {
+            cwd: repoRoot,
+        });
+        const mainRepoRoot = mainRepoRootFromGitCommonDir(
+            repoRoot,
+            commonDirResult.code === 0 ? commonDirResult.stdout.trim() : "",
+        );
+
         // Step 3: git config --get remote.origin.url (null if missing / fails)
         const remoteResult = yield* proc.exec(
             "git",
@@ -115,7 +135,7 @@ export const resolvePwdRepository = (
         const identity = chooseIdentity({
             remoteUrlNormalized,
             initialCommit,
-            checkoutRoot: repoRoot,
+            checkoutRoot: mainRepoRoot,
         });
 
         // Step 6: build RecordId
@@ -132,6 +152,7 @@ export const resolvePwdRepository = (
         return {
             cwd: resolvedCwd,
             repoRoot,
+            mainRepoRoot,
             remoteUrlNormalized,
             initialCommit,
             identity,

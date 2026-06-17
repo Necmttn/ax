@@ -13,6 +13,7 @@ import {
     churnCards,
     housekeepingCards,
     fetchNextActions,
+    nextActionSourceTimeoutMs,
     proposalCards,
     routingCards,
     skillHygieneCards,
@@ -613,6 +614,16 @@ describe("housekeepingCards", () => {
 });
 
 describe("fetchNextActions", () => {
+    test("default budgets keep fast tool failures separate from slower discovery sources", () => {
+        expect(nextActionSourceTimeoutMs("tool_failure")).toBe(4_000);
+        expect(nextActionSourceTimeoutMs("proposal")).toBe(12_000);
+        expect(nextActionSourceTimeoutMs("churn")).toBe(30_000);
+        expect(nextActionSourceTimeoutMs("routing")).toBe(12_000);
+        expect(nextActionSourceTimeoutMs("skill_hygiene")).toBe(30_000);
+        expect(nextActionSourceTimeoutMs("housekeeping")).toBe(12_000);
+        expect(nextActionSourceTimeoutMs("routing", 50)).toBe(50);
+    });
+
     test("a failing source degrades to a note, never a defect", async () => {
         const stub: SurrealClientShape = {
             query: (_sql: string) => Effect.fail(new Error("db down") as never),
