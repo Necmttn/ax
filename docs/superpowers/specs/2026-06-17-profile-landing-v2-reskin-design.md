@@ -143,3 +143,41 @@ Unchanged. `ProfilePage` → `fetchProfile` → `ProfileV1`; `ProfileDossier`
 - `prefers-reduced-motion` honoured for any ported hero/pulse animation.
 - No new global CSS tokens; reuse the shared ramp so light/dark and the `.rdx`
   bridge rules are unaffected.
+
+## Update (during implementation): shared `@ax/recap-deck` package
+
+The reskin surfaced that the wrapped-card CHARTS existed in **three diverging
+copies** - studio's canonical `wr-*` registry (`apps/studio/src/instrument/
+card-viz.tsx`), the landing's `mc-*` re-port (`dashboard-preview.tsx`), and the
+profile's first cut (which cloned the landing copy). The profile therefore drifted
+from studio visually. Per user direction ("package the charts both landing &
+studio use, share them"), the charts were extracted into a new zero-build
+workspace package **`@ax/recap-deck`** (`packages/recap-deck/`):
+
+- `card-viz.tsx` - the canonical `wr-*` chart registry + `CardViz` + `VizKind`/
+  `VizSpec`/`VIZ_KINDS` (verbatim from studio).
+- `viz.tsx` - nullframe primitives (`Doto`, `Segbar`).
+- `deck-card.tsx` - data-agnostic `DeckCard` (the `rdx-card acc-* wr-card` chrome).
+- `styles/recap-deck.css` (structural `wr-*`/`rdx-card` rules + Doto `@font-face`)
+  and `styles/recap-deck-theme.css` (the `.rdx` dark/light token scope), shipped
+  with `doto.woff2`.
+
+All three surfaces now consume the package:
+
+- **studio** imports the chart TS from the package (its `instrument.css` keeps
+  the identical structural rules, untouched - zero visual change by construction).
+- **profile** renders the deck via `DeckCard`/`CardViz` inside a
+  `.rdx[data-theme="dark"]` band; cards are fed grounded `VizSpec`s built from
+  `ProfileInsights` + `activity.daily` (real daily series where present, scalar
+  gauges normalised against soft ceilings otherwise - never a fabricated series).
+- **landing** popups render the package `CardViz`; the local `mc-*` copy and its
+  `.mc-*` chart CSS were deleted (−648 lines).
+
+Net: one source of truth for the recap deck; the profile is identical to the
+studio recap by construction. The `WrappedDeck` component (Task 1) now wraps the
+package `DeckCard` rather than owning card chrome.
+
+Follow-up (separate PR): AI-driven `ax profile interview` - an agent-conducted
+interview at publish time that captures user-authored highlights (setup wins,
+per-skill "learn more" summaries, taste/philosophy, shipped wins) into a new
+`highlights` block rendered as an "In their words" section. Own spec.
