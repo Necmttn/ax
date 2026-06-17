@@ -7,6 +7,46 @@ import type { SessionId } from "./session-id.ts";
 
 export type { SessionId } from "./session-id.ts";
 
+// ---------------------------------------------------------------------------
+// Re-exported from api-contract.ts (single source of truth).
+// These were formerly hand-written interfaces here; they now derive from the
+// Effect Schema structs in api-contract so the two never silently drift.
+// ---------------------------------------------------------------------------
+export type {
+    RecallHit,
+    RecallCommitHit,
+    RecallSkillHit,
+    RecallResponse,
+    ToolFailureSample,
+    ToolFailureDetailPayload,
+    ToolFailuresResponse,
+    SkillGraphNode,
+    SkillGraphEdge,
+    SkillGraphPayload,
+    EpisodeNode,
+    EpisodeTimelinePayload,
+    WorkflowEpisode,
+    WorkflowResponse,
+    SessionListRow,
+    SessionListResponse,
+    SessionChildrenResponse,
+    SessionSummary,
+    SessionOrchestration,
+    SessionHealthSummary,
+    SessionCompareTurn,
+    SessionCompareEntry,
+    SessionComparePayload,
+    SessionCompareWinners,
+    SessionCanvasNode,
+    SessionCanvasEdge,
+    SessionCanvasPayload,
+    SkillTriageNote,
+    SkillTriageEntry,
+    SkillTriageResponse,
+    SkillDetailPayload,
+    SkillSourcePayload,
+} from "./api-contract.ts";
+
 export type TriageDecision = "keep" | "archive" | "review";
 
 export interface SkillRow {
@@ -24,27 +64,6 @@ export interface SkillRow {
     readonly proposals: number;
     readonly commits_after: number;
     readonly taste_score: number;
-}
-
-export interface SkillTriageNote {
-    readonly skill_name: string;
-    readonly decision: TriageDecision;
-    readonly reason: string | null;
-    readonly decided_at: string;
-}
-
-export interface SkillTriageEntry extends SkillRow {
-    /** Suggested action based on the score breakdown. */
-    readonly recommendation: TriageDecision;
-    /** One-line why for the recommendation. */
-    readonly recommendation_reason: string;
-    /** User's saved decision, if any. */
-    readonly decision: SkillTriageNote | null;
-}
-
-export interface SkillTriageResponse {
-    readonly generatedAt: string;
-    readonly skills: ReadonlyArray<SkillTriageEntry>;
 }
 
 export interface SkillRecentInvocation {
@@ -65,23 +84,6 @@ export interface SkillPair {
     readonly last_seen: string | null;
 }
 
-export interface SkillDetailPayload {
-    readonly name: string;
-    readonly scope: string | null;
-    readonly description: string | null;
-    readonly dir_path: string | null;
-    readonly invocations: {
-        readonly total: number;
-        readonly d7: number;
-        readonly d30: number;
-        readonly last: string | null;
-    };
-    readonly recent: ReadonlyArray<SkillRecentInvocation>;
-    readonly corrections: ReadonlyArray<SkillRecentInvocation>;
-    readonly proposals: ReadonlyArray<SkillProposalEvidence>;
-    readonly paired: ReadonlyArray<SkillPair>;
-}
-
 /** On-disk state of a skill's SKILL.md file.
  *  - `active`   - SKILL.md present; the agent harness loads it.
  *  - `disabled` - renamed to SKILL.md.archived; harness skips it (reversible).
@@ -90,23 +92,6 @@ export type SkillSourceState = "active" | "disabled" | "missing";
 
 /** Wire format for `GET /api/skills/:name/source` - the skill's SKILL.md
  *  content plus whether ax may rewrite it on disk. */
-export interface SkillSourcePayload {
-    readonly name: string;
-    readonly scope: string;
-    readonly dir_path: string | null;
-    /** Absolute path to SKILL.md (or the .archived variant when disabled). */
-    readonly file_path: string | null;
-    /** Raw YAML frontmatter text (between the `---` fences), if any. */
-    readonly frontmatter: string | null;
-    /** Markdown body after the frontmatter. */
-    readonly body: string | null;
-    readonly state: SkillSourceState;
-    /** True when ax may disable/restore this skill on disk - user-owned
-     *  scopes only. Plugin/builtin/codex skills are read-only. */
-    readonly editable: boolean;
-    /** Set when the file existed but could not be read. */
-    readonly error: string | null;
-}
 
 // ---------------------------------------------------------------------------
 // Tool failure view
@@ -129,27 +114,6 @@ export interface ToolFailureRow {
 export interface ToolFailureEntry extends ToolFailureRow {
     readonly recommendation: ToolFailureRecommendation;
     readonly recommendation_reason: string;
-}
-
-export interface ToolFailuresResponse {
-    readonly generatedAt: string;
-    readonly failures: ReadonlyArray<ToolFailureEntry>;
-}
-
-export interface ToolFailureSample {
-    readonly ts: string;
-    readonly exit_code: number | null;
-    readonly error_text: string | null;
-    readonly output_excerpt: string | null;
-    readonly command_text: string | null;
-    readonly project: string | null;
-    readonly session_id: SessionId | null;
-    readonly cwd: string | null;
-}
-
-export interface ToolFailureDetailPayload {
-    readonly label: string;
-    readonly samples: ReadonlyArray<ToolFailureSample>;
 }
 
 // ---------------------------------------------------------------------------
@@ -265,68 +229,11 @@ export interface SessionDetailPayload {
 /** Per-session health aggregate read from the `session_health` table. The
  *  noise axis (tool_errors + user_corrections + interruptions) is the
  *  "cleaner" signal the compare view ranks on. */
-export interface SessionHealthSummary {
-    readonly turns: number;
-    readonly tool_calls: number;
-    readonly tool_errors: number;
-    readonly user_corrections: number;
-    readonly interruptions: number;
-    readonly subagent_dispatches: number;
-    readonly task_label: string | null;
-}
 
 /** One turn in a session's timeline, with the per-turn trifecta attached.
  *  Only populated when the compare is requested with per-turn detail (P1). */
-export interface SessionCompareTurn {
-    readonly seq: number;
-    readonly role: string | null;
-    readonly ts: string | null;
-    /** Wall-clock gap to the previous turn, ms. Null for the first turn or when
-     *  a timestamp is missing. NOT model latency - transcripts carry no request
-     *  duration. */
-    readonly gap_ms: number | null;
-    readonly est_tokens: number | null;
-    readonly est_cost_usd: number | null;
-    readonly has_error: boolean;
-}
-
-export interface SessionCompareEntry {
-    readonly session_id: SessionId;
-    readonly source: "claude" | "codex" | string;
-    readonly model: string | null;
-    readonly project: string | null;
-    readonly started_at: string | null;
-    readonly ended_at: string | null;
-    /** ended_at - started_at, ms. Null when either bound is missing. This is
-     *  wall-clock, NOT model latency (transcripts carry no request duration). */
-    readonly duration_ms: number | null;
-    readonly token_usage: SessionTokenUsageDetail | null;
-    readonly health: SessionHealthSummary | null;
-    /** Count of `produced` edges (session → commit). */
-    readonly commit_count: number;
-    /** tool_errors + user_corrections + interruptions. Null if no health row. */
-    readonly noise_score: number | null;
-    /** Per-turn timeline, ordered by seq. Present only when per-turn detail was
-     *  requested; undefined in the summary-only (P0) payload. */
-    readonly turns?: ReadonlyArray<SessionCompareTurn>;
-}
 
 /** Winning session id per axis. Null when undecidable (no data, or a tie). */
-export interface SessionCompareWinners {
-    readonly fastest: SessionId | null;
-    readonly cheapest: SessionId | null;
-    readonly fewest_tokens: SessionId | null;
-    readonly cleanest: SessionId | null;
-}
-
-export interface SessionComparePayload {
-    /** Shared task_label when every compared session agrees; null otherwise. */
-    readonly task_label: string | null;
-    readonly sessions: ReadonlyArray<SessionCompareEntry>;
-    readonly winners: SessionCompareWinners;
-    /** Requested ids that failed to validate or resolve to a session. */
-    readonly not_found: ReadonlyArray<string>;
-}
 
 export interface SessionSkillRoleGroup {
     readonly role: string | null;
@@ -352,60 +259,12 @@ export interface SessionViewPayload {
     readonly compactions: ReadonlyArray<SessionCompaction>;
 }
 
-export interface WorkflowEpisode {
-    readonly parent_session_id: SessionId;
-    readonly project: string | null;
-    readonly started_at: string | null;
-    readonly child_count: number;
-    readonly distinct_nicknames: number;
-}
-
-export interface EpisodeNode {
-    readonly session_id: SessionId;
-    readonly role: "parent" | "child";
-    readonly project: string | null;
-    readonly source: string | null;
-    readonly started_at: string | null;
-    readonly ended_at: string | null;
-    readonly duration_ms: number | null;
-    readonly phase: "plan" | "execute" | "review" | "merge" | "other" | "mixed";
-    readonly top_skills: ReadonlyArray<{ readonly skill: string; readonly count: number }>;
-    readonly invocation_count: number;
-}
-
-export interface EpisodeTimelinePayload {
-    readonly parent_session_id: SessionId;
-    readonly project: string | null;
-    readonly started_at: string | null;
-    readonly ended_at: string | null;
-    readonly duration_ms: number | null;
-    readonly node_count: number;
-    readonly nodes: ReadonlyArray<EpisodeNode>;
-    readonly shape: string;
-}
-
 export interface EpisodeShapeAggregate {
     readonly shape: string;
     readonly phases: ReadonlyArray<"plan" | "execute" | "review" | "merge">;
     readonly episode_count: number;
     readonly example_parent_ids: ReadonlyArray<SessionId>;
     readonly avg_children: number;
-}
-
-export interface WorkflowResponse {
-    readonly generatedAt: string;
-    readonly weeksLookback: number;
-    readonly topK: number;
-    readonly skills: ReadonlyArray<WorkflowWeekBucket>;
-    readonly tools: ReadonlyArray<WorkflowWeekBucket>;
-    readonly sessionShape: ReadonlyArray<WorkflowSessionShape>;
-    readonly convergence: ReadonlyArray<WorkflowConvergencePoint>;
-    readonly shapes: ReadonlyArray<SessionShapeAggregate>;
-    readonly shapesTotal: number;
-    readonly episodes: ReadonlyArray<WorkflowEpisode>;
-    readonly episode_shapes: ReadonlyArray<EpisodeShapeAggregate>;
-    readonly episode_shapes_total: number;
-    readonly narrative: string;
 }
 
 export interface ProjectTopSkill {
@@ -446,29 +305,6 @@ export interface ProjectPagePayload {
     readonly failures: ReadonlyArray<ProjectFailure>;
     readonly recent_sessions: ReadonlyArray<ProjectRecentSession>;
     readonly top_episodes: ReadonlyArray<ProjectEpisode>;
-}
-
-export interface SkillGraphNode {
-    readonly name: string;
-    readonly weight: number;
-    readonly last_seen: string | null;
-}
-
-export interface SkillGraphEdge {
-    readonly source: string;
-    readonly target: string;
-    readonly count: number;
-    readonly last_seen: string | null;
-}
-
-export interface SkillGraphPayload {
-    readonly min_count: number;
-    readonly limit: number;
-    readonly node_count: number;
-    readonly edge_count: number;
-    readonly max_edge_count: number;
-    readonly nodes: ReadonlyArray<SkillGraphNode>;
-    readonly edges: ReadonlyArray<SkillGraphEdge>;
 }
 
 export type GraphExplorerMode =
@@ -565,27 +401,6 @@ export interface GraphExplorerPayload {
 // cross-provider. `turns` (conversational user+assistant turns) is kept as a
 // secondary display number. `epochs` = compaction count (1 = no compaction);
 // `compactions` carries the preTokens at each boundary for epoch notches.
-export interface SessionCanvasNode {
-    readonly id: string;
-    readonly label: string;
-    readonly project: string | null;
-    readonly source: string;            // 'claude' | 'codex' | ...
-    readonly started_at: string | null;
-    readonly ended_at: string | null;
-    readonly size: number;              // context tokens (estimated_tokens)
-    readonly turns: number;             // conversational (user+assistant) turns
-    readonly epochs: number;            // compaction epochs (1 = uncompacted)
-    readonly compactions: ReadonlyArray<{ pre_tokens: number; trigger: string }>;
-    readonly context_pressure: string;  // 'low' | 'medium' | 'high' | 'unknown'
-    readonly corrections: number;
-    readonly tone: string;              // success | warning | neutral
-    readonly is_subagent: boolean;
-    readonly subagent_count: number;    // direct children spawned by this session
-    // Fractions [0..1] of the session's [started_at, ended_at] during which the
-    // main agent was blocked waiting on a subagent (merged child intervals).
-    // Drives the swimlane pill's inline work/wait rail.
-    readonly wait_segments: ReadonlyArray<{ readonly start: number; readonly end: number }>;
-}
 
 // Per-session orchestration drill-in: the main rail + every subagent it spawned,
 // with real timing so the UI can show fan-out / parallel / sequential + wait%.
@@ -603,95 +418,6 @@ export interface SessionOrchestrationSubagent {
 // transcript file read/parse) so it returns in ~ms instead of the 20-60s the
 // full inspect endpoint can take when it has to walk the filesystem to locate
 // a transcript. Same facts the card shows - no data loss.
-export interface SessionSummary {
-    readonly session_id: string;
-    readonly task: string | null;          // first user turn (what it was asked)
-    readonly first_ask: string | null;
-    readonly last_assistant: string | null;
-    readonly correction: string | null;
-    readonly turns: number;                // conversational (user+assistant)
-    readonly tokens: number | null;
-    readonly cost_usd: number | null;
-    readonly model: string | null;
-    readonly subagents: number;
-    readonly tools: ReadonlyArray<{ readonly name: string; readonly count: number }>;
-}
-
-export interface SessionOrchestration {
-    readonly session_id: string;
-    readonly label: string;
-    readonly started_at: string | null;
-    readonly ended_at: string | null;
-    readonly wait_pct: number;          // 0..1 share of session blocked on subagents
-    readonly subagents: ReadonlyArray<SessionOrchestrationSubagent>;
-}
-
-export interface SessionCanvasEdge {
-    readonly source: string;
-    readonly target: string;
-    readonly relation: string;          // 'spawned'
-    readonly label: string | null;      // subagent nickname when present
-}
-
-export interface SessionCanvasPayload {
-    readonly generatedAt: string;
-    readonly nodes: ReadonlyArray<SessionCanvasNode>;
-    readonly edges: ReadonlyArray<SessionCanvasEdge>;
-    readonly warnings: ReadonlyArray<string>;
-}
-
-export interface RecallHit {
-    readonly turn_id: string;
-    readonly session_id: SessionId;
-    readonly project: string | null;
-    readonly source: string | null;
-    /** Session working directory - feeds the resume-command NavLink. */
-    readonly cwd: string | null;
-    readonly role: string | null;
-    readonly ts: string | null;
-    readonly snippet: string;
-}
-
-export interface RecallCommitHit {
-    readonly commit_id: string;     // record id
-    readonly sha: string;
-    readonly repo: string | null;   // stable repo key (repo field on commit)
-    readonly repository: string | null; // record id of repository node, if linked
-    readonly ts: string | null;
-    readonly snippet: string;       // commit message (highlighted)
-    readonly score: number;
-}
-
-export interface RecallSkillHit {
-    readonly skill_id: string;
-    readonly name: string;
-    readonly description: string | null;
-    readonly snippet: string;       // matched portion
-    readonly score: number;
-}
-
-export interface RecallResponse {
-    readonly q: string;
-    readonly hits: ReadonlyArray<RecallHit>;     // turns, unchanged
-    readonly commits: ReadonlyArray<RecallCommitHit>;  // empty when not requested
-    readonly skills: ReadonlyArray<RecallSkillHit>;    // empty when not requested
-    /** Back-compat: true when more results exist beyond what was returned in
-     *  any source - turns have more pages, OR commit/skill results were
-     *  limit-capped. */
-    readonly truncated: boolean;
-    /** Sum of matched records across ALL requested sources (turn + commit +
-     *  skill). When only turns are requested this equals the turn count
-     *  (back-compat). Per-source breakdown is in `total_counts`. */
-    readonly total_count: number;
-    /** Per-source total counts. */
-    readonly total_counts: {
-        readonly turn: number;
-        readonly commit: number;
-        readonly skill: number;
-    };
-    /** The slice that was returned (applies to turns). */
-    readonly window: { readonly offset: number; readonly limit: number };
-}
 
 // ---------------------------------------------------------------------------
 // Agent Wrapped: personality-led usage recap
@@ -806,70 +532,6 @@ export interface IngestEvent {
     readonly counts?: Record<string, number> | null;
     readonly raw?: unknown;
     readonly ts: string;
-}
-
-export interface SessionListRow {
-    readonly id: SessionId;
-    readonly project: string | null;
-    readonly source: string;
-    readonly cwd: string | null;
-    readonly model: string | null;
-    readonly started_at: string | null;
-    readonly ended_at: string | null;
-    /** True when a raw transcript pointer exists (session is inspectable). */
-    readonly has_raw_file: boolean;
-    /** From session_health.turns when a health row exists; 0 is a sentinel for
-     *  "no health data", not a literal zero-turn session. */
-    readonly turn_count: number;
-    /** Parent session id when this row was spawned by another session (e.g. a
-     *  Claude subagent / Codex agent). Null for top-level sessions. Always
-     *  null on rows returned from `/api/sessions` (roots-only). Populated on
-     *  rows returned from `/api/sessions/:id/children`. */
-    readonly parent_session: SessionId | null;
-    /** Count of direct children (subagents) this session spawned. Used by the
-     *  SPA to render an expand toggle without first fetching children. Only
-     *  populated on roots returned from `/api/sessions`. */
-    readonly direct_children_count?: number;
-    /** Enrichment block - every field nullable: aggregate rows may not exist
-     *  for a session (pre-backfill ingests, 8s hook-probes, foreign sources).
-     *  Sourced from session_health / session_token_usage / session_metrics
-     *  batch lookups - NEVER from turn-table scans. */
-    readonly cost_usd: number | null;
-    /** Downsampled per-turn estimated tokens (≤20 buckets) for the BURN
-     *  sparkline. Null when the ingest predates burn_buckets backfill. */
-    readonly burn_buckets: ReadonlyArray<number> | null;
-    /** user_corrections + tool_errors. Null when no session_health row. */
-    readonly friction: number | null;
-    /** 'clean' = health row exists and friction is 0. Null = no health data. */
-    readonly signal: "clean" | "friction" | null;
-    /** Commit/LOC outcome from session_metrics (git-derived at ingest). */
-    readonly produced_commits: number | null;
-    readonly reverted_commits: number | null;
-    readonly lines_added: number | null;
-    readonly lines_removed: number | null;
-    /** ended_at is null AND the latest health derive write is recent - the
-     *  watcher re-ingests live transcripts within ~1 min, so a fresh
-     *  session_health.ts is the cheapest liveness proxy. */
-    readonly is_live: boolean;
-}
-
-export interface SessionListResponse {
-    /** Root sessions only - those with no inbound `spawned` edge. To get a
-     *  root's children, call `/api/sessions/:id/children`. */
-    readonly sessions: ReadonlyArray<SessionListRow>;
-    /** Total root count for the active filter set (independent of window). */
-    readonly total_count: number;
-    /** The user's 30-day p90 per-turn token burn. The SPA colors sparkline
-     *  buckets amber only above this threshold. Null when no usage history. */
-    readonly burn_p90: number | null;
-    /** The slice that was returned. Stays pinned to the first page on the
-     *  SPA side when subsequent pages are appended to the same cache key. */
-    readonly window: { readonly offset: number; readonly limit: number };
-}
-
-export interface SessionChildrenResponse {
-    readonly parent_session: SessionId;
-    readonly children: ReadonlyArray<SessionListRow>;
 }
 
 /** Wire format for `/api/sessions/:id/insights` - the expandable insight

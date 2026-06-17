@@ -120,6 +120,7 @@ export const RecallHit = Schema.Struct({
     ts: Schema.NullOr(Schema.String),
     snippet: Schema.String,
 });
+export type RecallHit = typeof RecallHit.Type;
 
 export const RecallCommitHit = Schema.Struct({
     commit_id: Schema.String,
@@ -130,6 +131,7 @@ export const RecallCommitHit = Schema.Struct({
     snippet: Schema.String,
     score: Schema.Number,
 });
+export type RecallCommitHit = typeof RecallCommitHit.Type;
 
 export const RecallSkillHit = Schema.Struct({
     skill_id: Schema.String,
@@ -138,6 +140,7 @@ export const RecallSkillHit = Schema.Struct({
     snippet: Schema.String,
     score: Schema.Number,
 });
+export type RecallSkillHit = typeof RecallSkillHit.Type;
 
 export const RecallResponse = Schema.Struct({
     q: Schema.String,
@@ -182,8 +185,9 @@ export const ToolFailuresResponse = Schema.Struct({
     generatedAt: Schema.String,
     failures: Schema.Array(ToolFailureEntry),
 });
+export type ToolFailuresResponse = typeof ToolFailuresResponse.Type;
 
-const ToolFailureSample = Schema.Struct({
+export const ToolFailureSample = Schema.Struct({
     ts: Schema.String,
     exit_code: Schema.NullOr(Schema.Number),
     error_text: Schema.NullOr(Schema.String),
@@ -193,24 +197,29 @@ const ToolFailureSample = Schema.Struct({
     session_id: Schema.NullOr(Schema.String),
     cwd: Schema.NullOr(Schema.String),
 });
+export type ToolFailureSample = typeof ToolFailureSample.Type;
 
 export const ToolFailureDetailPayload = Schema.Struct({
     label: Schema.String,
     samples: Schema.Array(ToolFailureSample),
 });
+export type ToolFailureDetailPayload = typeof ToolFailureDetailPayload.Type;
 
-const SkillGraphNode = Schema.Struct({
+export const SkillGraphNode = Schema.Struct({
     name: Schema.String,
     weight: Schema.Number,
     last_seen: Schema.NullOr(Schema.String),
 });
 
-const SkillGraphEdge = Schema.Struct({
+export type SkillGraphNode = typeof SkillGraphNode.Type;
+
+export const SkillGraphEdge = Schema.Struct({
     source: Schema.String,
     target: Schema.String,
     count: Schema.Number,
     last_seen: Schema.NullOr(Schema.String),
 });
+export type SkillGraphEdge = typeof SkillGraphEdge.Type;
 
 export const SkillGraphPayload = Schema.Struct({
     min_count: Schema.Number,
@@ -221,10 +230,11 @@ export const SkillGraphPayload = Schema.Struct({
     nodes: Schema.Array(SkillGraphNode),
     edges: Schema.Array(SkillGraphEdge),
 });
+export type SkillGraphPayload = typeof SkillGraphPayload.Type;
 
 const PhaseLiteral = Schema.Literals(["plan", "execute", "review", "merge"]);
 
-const EpisodeNode = Schema.Struct({
+export const EpisodeNode = Schema.Struct({
     session_id: Schema.String,
     role: Schema.Literals(["parent", "child"]),
     project: Schema.NullOr(Schema.String),
@@ -236,6 +246,7 @@ const EpisodeNode = Schema.Struct({
     top_skills: Schema.Array(Schema.Struct({ skill: Schema.String, count: Schema.Number })),
     invocation_count: Schema.Number,
 });
+export type EpisodeNode = typeof EpisodeNode.Type;
 
 export const EpisodeTimelinePayload = Schema.Struct({
     parent_session_id: Schema.String,
@@ -247,6 +258,7 @@ export const EpisodeTimelinePayload = Schema.Struct({
     nodes: Schema.Array(EpisodeNode),
     shape: Schema.String,
 });
+export type EpisodeTimelinePayload = typeof EpisodeTimelinePayload.Type;
 
 const WorkflowWeekBucket = Schema.Struct({
     week: Schema.String,
@@ -273,13 +285,14 @@ const SessionShapeAggregate = Schema.Struct({
     example_session_ids: Schema.Array(Schema.String),
 });
 
-const WorkflowEpisode = Schema.Struct({
+export const WorkflowEpisode = Schema.Struct({
     parent_session_id: Schema.String,
     project: Schema.NullOr(Schema.String),
     started_at: Schema.NullOr(Schema.String),
     child_count: Schema.Number,
     distinct_nicknames: Schema.Number,
 });
+export type WorkflowEpisode = typeof WorkflowEpisode.Type;
 
 const EpisodeShapeAggregate = Schema.Struct({
     shape: Schema.String,
@@ -304,6 +317,7 @@ export const WorkflowResponse = Schema.Struct({
     episode_shapes_total: Schema.Number,
     narrative: Schema.String,
 });
+export type WorkflowResponse = typeof WorkflowResponse.Type;
 
 /**
  * The insights family: cross-source recall, project pages, episode
@@ -428,7 +442,7 @@ export const InsightsGroup = HttpApiGroup.make("insights")
 // detail/inspect/insights payloads stay Schema.Unknown below (transcribing
 // the 54k-line inspect handler's output exactly is high-drift, low-value).
 
-const SessionListRow = Schema.Struct({
+export const SessionListRow = Schema.Struct({
     id: Schema.String,
     project: Schema.NullOr(Schema.String),
     source: Schema.String,
@@ -450,6 +464,7 @@ const SessionListRow = Schema.Struct({
     lines_removed: Schema.NullOr(Schema.Number),
     is_live: Schema.Boolean,
 });
+export type SessionListRow = typeof SessionListRow.Type;
 
 export const SessionListResponse = Schema.Struct({
     sessions: Schema.Array(SessionListRow),
@@ -457,11 +472,13 @@ export const SessionListResponse = Schema.Struct({
     burn_p90: Schema.NullOr(Schema.Number),
     window: Schema.Struct({ offset: Schema.Number, limit: Schema.Number }),
 });
+export type SessionListResponse = typeof SessionListResponse.Type;
 
 export const SessionChildrenResponse = Schema.Struct({
     parent_session: Schema.String,
     children: Schema.Array(SessionListRow),
 });
+export type SessionChildrenResponse = typeof SessionChildrenResponse.Type;
 
 export const SessionSummary = Schema.Struct({
     session_id: Schema.String,
@@ -476,6 +493,7 @@ export const SessionSummary = Schema.Struct({
     subagents: Schema.Number,
     tools: Schema.Array(Schema.Struct({ name: Schema.String, count: Schema.Number })),
 });
+export type SessionSummary = typeof SessionSummary.Type;
 
 const SessionOrchestrationSubagent = Schema.Struct({
     id: Schema.String,
@@ -495,6 +513,7 @@ export const SessionOrchestration = Schema.Struct({
     wait_pct: Schema.Number,
     subagents: Schema.Array(SessionOrchestrationSubagent),
 });
+export type SessionOrchestration = typeof SessionOrchestration.Type;
 
 const SessionTokenUsageDetail = Schema.Struct({
     model: Schema.NullOr(Schema.String),
@@ -511,7 +530,7 @@ const SessionTokenUsageDetail = Schema.Struct({
     pricing_source: Schema.NullOr(Schema.String),
 });
 
-const SessionHealthSummary = Schema.Struct({
+export const SessionHealthSummary = Schema.Struct({
     turns: Schema.Number,
     tool_calls: Schema.Number,
     tool_errors: Schema.Number,
@@ -520,8 +539,9 @@ const SessionHealthSummary = Schema.Struct({
     subagent_dispatches: Schema.Number,
     task_label: Schema.NullOr(Schema.String),
 });
+export type SessionHealthSummary = typeof SessionHealthSummary.Type;
 
-const SessionCompareTurn = Schema.Struct({
+export const SessionCompareTurn = Schema.Struct({
     seq: Schema.Number,
     role: Schema.NullOr(Schema.String),
     ts: Schema.NullOr(Schema.String),
@@ -530,8 +550,9 @@ const SessionCompareTurn = Schema.Struct({
     est_cost_usd: Schema.NullOr(Schema.Number),
     has_error: Schema.Boolean,
 });
+export type SessionCompareTurn = typeof SessionCompareTurn.Type;
 
-const SessionCompareEntry = Schema.Struct({
+export const SessionCompareEntry = Schema.Struct({
     session_id: Schema.String,
     source: Schema.String,
     model: Schema.NullOr(Schema.String),
@@ -545,6 +566,7 @@ const SessionCompareEntry = Schema.Struct({
     noise_score: Schema.NullOr(Schema.Number),
     turns: Schema.optionalKey(Schema.Array(SessionCompareTurn)),
 });
+export type SessionCompareEntry = typeof SessionCompareEntry.Type;
 
 export const SessionComparePayload = Schema.Struct({
     task_label: Schema.NullOr(Schema.String),
@@ -557,8 +579,10 @@ export const SessionComparePayload = Schema.Struct({
     }),
     not_found: Schema.Array(Schema.String),
 });
+export type SessionComparePayload = typeof SessionComparePayload.Type;
+export type SessionCompareWinners = typeof SessionComparePayload.Type["winners"];
 
-const SessionCanvasNode = Schema.Struct({
+export const SessionCanvasNode = Schema.Struct({
     id: Schema.String,
     label: Schema.String,
     project: Schema.NullOr(Schema.String),
@@ -576,13 +600,15 @@ const SessionCanvasNode = Schema.Struct({
     subagent_count: Schema.Number,
     wait_segments: Schema.Array(Schema.Struct({ start: Schema.Number, end: Schema.Number })),
 });
+export type SessionCanvasNode = typeof SessionCanvasNode.Type;
 
-const SessionCanvasEdge = Schema.Struct({
+export const SessionCanvasEdge = Schema.Struct({
     source: Schema.String,
     target: Schema.String,
     relation: Schema.String,
     label: Schema.NullOr(Schema.String),
 });
+export type SessionCanvasEdge = typeof SessionCanvasEdge.Type;
 
 export const SessionCanvasPayload = Schema.Struct({
     generatedAt: Schema.String,
@@ -590,6 +616,7 @@ export const SessionCanvasPayload = Schema.Struct({
     edges: Schema.Array(SessionCanvasEdge),
     warnings: Schema.Array(Schema.String),
 });
+export type SessionCanvasPayload = typeof SessionCanvasPayload.Type;
 
 /**
  * The sessions family: list, children, summary, orchestration, compare, and
@@ -700,6 +727,7 @@ export const SkillTriageNote = Schema.Struct({
     reason: Schema.NullOr(Schema.String),
     decided_at: Schema.String,
 });
+export type SkillTriageNote = typeof SkillTriageNote.Type;
 
 const SkillRowFields = {
     name: Schema.String,
@@ -724,11 +752,13 @@ export const SkillTriageEntry = Schema.Struct({
     recommendation_reason: Schema.String,
     decision: Schema.NullOr(SkillTriageNote),
 });
+export type SkillTriageEntry = typeof SkillTriageEntry.Type;
 
 export const SkillTriageResponse = Schema.Struct({
     generatedAt: Schema.String,
     skills: Schema.Array(SkillTriageEntry),
 });
+export type SkillTriageResponse = typeof SkillTriageResponse.Type;
 
 const SkillRecentInvocation = Schema.Struct({
     ts: Schema.String,
@@ -764,6 +794,7 @@ export const SkillDetailPayload = Schema.Struct({
     proposals: Schema.Array(SkillProposalEvidence),
     paired: Schema.Array(SkillPair),
 });
+export type SkillDetailPayload = typeof SkillDetailPayload.Type;
 
 export const SkillSourcePayload = Schema.Struct({
     name: Schema.String,
@@ -776,6 +807,7 @@ export const SkillSourcePayload = Schema.Struct({
     editable: Schema.Boolean,
     error: Schema.NullOr(Schema.String),
 });
+export type SkillSourcePayload = typeof SkillSourcePayload.Type;
 
 export const SkillDecisionsResponse = Schema.Struct({
     decisions: Schema.Array(SkillTriageNote),
