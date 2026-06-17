@@ -808,13 +808,18 @@ function buildInsightCards(
     const ringPct = (share: number): VizSpec => ({ kind: "ring", data: [clampPct(share * 100)] });
     const wafflePct = (share: number): VizSpec => ({ kind: "waffle", data: [clampPct(share * 100)] });
     const cometPct = (frac: number): VizSpec => ({ kind: "comet", data: [clampPct(frac * 100)] });
-    const signalCount = (n: number, per = 1): VizSpec => ({
+    // signal/ring/comet/waffle all read avg(data) as a 0..100 % strength, so a
+    // count must be normalised against a soft ceiling (not passed raw) - else it
+    // floors to one lit bar. The caption always carries the true count.
+    const signalStrength = (n: number, ceiling: number): VizSpec => ({
         kind: "signal",
-        data: [Math.min(6, Math.max(0, Math.round(n / per))), 6],
+        data: [clampPct((n / ceiling) * 100)],
     });
-    const bulletCount = (n: number, scale: number, goal = 50): VizSpec => ({
+    // bullet reads [target, actual] (first = target tick, last = filled bar), so
+    // the goal-line % goes first and the achieved % second.
+    const bulletCount = (n: number, scale: number, goalPct = 50): VizSpec => ({
         kind: "bullet",
-        data: [clampPct((n / scale) * 100), goal],
+        data: [goalPct, clampPct((n / scale) * 100)],
     });
 
     const cards: InsightCard[] = [
@@ -828,7 +833,8 @@ function buildInsightCards(
             q: "How many agents at once?",
             a: fmtInt(ins.max_parallel_sessions),
             s: "sessions running in parallel at peak",
-            viz: signalCount(ins.max_parallel_sessions),
+            // 10 concurrent agents reads as a full bank
+            viz: signalStrength(ins.max_parallel_sessions, 10),
         },
         {
             q: "Longest single run?",
@@ -856,7 +862,8 @@ function buildInsightCards(
             q: "How many hands?",
             a: fmtCompact(ins.subagents_spawned),
             s: "subagents dispatched to do the legwork",
-            viz: signalCount(ins.subagents_spawned, 20),
+            // a fleet of ~500 dispatches reads as a full bank
+            viz: signalStrength(ins.subagents_spawned, 500),
         },
         {
             q: "What actually shipped?",
@@ -917,7 +924,8 @@ function buildInsightCards(
             q: "How many repos?",
             a: fmtInt(ins.repos_count),
             s: "repositories touched this window",
-            viz: signalCount(ins.repos_count),
+            // ~12 repos in a window reads as a full bank
+            viz: signalStrength(ins.repos_count, 12),
         });
     }
 
