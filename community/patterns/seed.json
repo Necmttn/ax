@@ -1,7 +1,7 @@
 {
-  "version": 1,
+  "version": 2,
   "generated": "2026-06-17",
-  "note": "Curated cold-start pattern pack: battle-tested agent directives a fresh ax install ships with. Many are abstracted from real ax-user feedback memories (source: curated). The contribution loop (spec 2026-06-17-directive-mining-design.md §7) grows this with community-contributed, consent-gated, abstracted patterns.",
+  "note": "Curated cold-start pattern pack: battle-tested agent directives a fresh ax install ships with. Many are abstracted from real ax-user feedback memories (source: curated). Each pattern is tagged `groundable` (detectable from the ax graph via a named detector) or not (pure preference). The contribution loop + grounding layer are specced in docs/superpowers/specs/2026-06-17-directive-mining-design.md (sections 7 + 7.5).",
   "categories": ["verification", "output", "process", "git", "quality", "communication"],
   "landings": ["memory", "guidance", "hook"],
   "patterns": [
@@ -12,6 +12,8 @@
       "directive": "Run the actual verification command and show its output before claiming something works, is fixed, or passes.",
       "phrasings": ["did you test it", "dogfood before you show", "verify before completion", "show me it works", "is it actually passing"],
       "landing": "hook",
+      "groundable": true,
+      "detector": { "id": "done-without-verification", "params": { "scope": "episode" } },
       "rationale": "Unverified 'done' is the most common agent failure mode; it is enforceable as a gate.",
       "source": "curated"
     },
@@ -22,6 +24,8 @@
       "directive": "Back success claims with the command and its real output, not a summary of what should have happened.",
       "phrasings": ["show the output", "prove it", "paste the result", "don't just tell me it works"],
       "landing": "hook",
+      "groundable": true,
+      "detector": { "id": "assertion-without-evidence", "params": { "scope": "turn" } },
       "rationale": "Assertions without evidence hide failures; the receipt is the proof.",
       "source": "curated"
     },
@@ -32,6 +36,8 @@
       "directive": "Before a deletion or overwrite, verify the target query/scope (right table, filter, DB) with a dry-run and confirm the count is sane.",
       "phrasings": ["double-check the query", "dry run first", "are you sure that's the right table"],
       "landing": "hook",
+      "groundable": true,
+      "detector": { "id": "delete-without-dryrun", "params": { "scope": "episode" } },
       "rationale": "A wrong-scope destructive op is hard to reverse; a dry-run is cheap insurance.",
       "source": "curated"
     },
@@ -42,6 +48,8 @@
       "directive": "Print full absolute paths to files you produce so they are clickable; relative paths can't be opened.",
       "phrasings": ["give me the full path", "absolute path", "i can't click that", "full path so i can open"],
       "landing": "guidance",
+      "groundable": false,
+      "detector": null,
       "rationale": "Clickable paths remove a manual step every time the user wants to open an artifact.",
       "source": "curated"
     },
@@ -52,6 +60,8 @@
       "directive": "Wrap paste-ready copy in ``` fences (not blockquotes or decorated text) so it is easy to copy verbatim.",
       "phrasings": ["wrap it in backticks", "code block so i can copy", "don't add the gutter line"],
       "landing": "guidance",
+      "groundable": false,
+      "detector": null,
       "rationale": "Decorated copy forces the user to hand-clean before pasting.",
       "source": "curated"
     },
@@ -62,6 +72,8 @@
       "directive": "Emit complete code; never leave TODO stubs, '... rest unchanged ...', or truncated blocks when asked for full output.",
       "phrasings": ["give me the full file", "no placeholders", "don't truncate", "complete code"],
       "landing": "guidance",
+      "groundable": true,
+      "detector": { "id": "placeholder-in-edit", "params": { "tools": ["Edit", "Write"] } },
       "rationale": "Placeholders shift the completion work back to the user and hide gaps.",
       "source": "curated"
     },
@@ -72,6 +84,8 @@
       "directive": "Stay terse and under token limits; summarize or paginate long logs/lists rather than dumping everything.",
       "phrasings": ["be brief", "keep it short", "summarize", "don't dump the whole thing"],
       "landing": "guidance",
+      "groundable": false,
+      "detector": null,
       "rationale": "Walls of output bury the signal the user actually needs.",
       "source": "curated"
     },
@@ -82,6 +96,8 @@
       "directive": "In audit/report deliverables, embed key screenshots inline in the document, not just list their file paths.",
       "phrasings": ["show the screenshots", "embed the images", "inline the evidence"],
       "landing": "guidance",
+      "groundable": false,
+      "detector": null,
       "rationale": "A path list makes the reader hunt; inline images make findings legible at a glance.",
       "source": "curated"
     },
@@ -92,6 +108,8 @@
       "directive": "Read the full file before editing it; plan all changes, then make one complete edit instead of many partial passes.",
       "phrasings": ["read it first", "understand before you change", "stop editing the same file"],
       "landing": "guidance",
+      "groundable": true,
+      "detector": { "id": "edit-without-prior-read", "params": { "scope": "session" } },
       "rationale": "Blind partial edits cause repeated rework and broken state.",
       "source": "curated"
     },
@@ -102,6 +120,8 @@
       "directive": "Get a basic understanding from a few files, make the change, then iterate - don't read 10+ files before acting.",
       "phrasings": ["just try it", "stop exploring and act", "you're overthinking this"],
       "landing": "guidance",
+      "groundable": true,
+      "detector": { "id": "read-heavy-prelude", "params": { "threshold": 10 } },
       "rationale": "Excess upfront reading burns time and context without improving the change.",
       "source": "curated"
     },
@@ -112,6 +132,8 @@
       "directive": "When the user corrects you, stop, re-read their message, quote back what they asked for, and confirm before proceeding.",
       "phrasings": ["that's not what i said", "re-read my message", "you missed the point"],
       "landing": "guidance",
+      "groundable": false,
+      "detector": null,
       "rationale": "Plowing ahead after a correction compounds the original miss.",
       "source": "curated"
     },
@@ -122,6 +144,8 @@
       "directive": "After two consecutive failures of the same approach, stop, summarize what you tried, and change strategy or ask for guidance.",
       "phrasings": ["stop retrying the same thing", "try something different", "you're stuck in a loop"],
       "landing": "guidance",
+      "groundable": true,
+      "detector": { "id": "repeated-same-failure", "params": { "min_repeats": 3, "scope": "episode" } },
       "rationale": "Repeating a failing approach wastes turns and tokens.",
       "source": "curated"
     },
@@ -132,6 +156,8 @@
       "directive": "When stuck, summarize what you've tried and ask the user for guidance instead of retrying the same approach.",
       "phrasings": ["ask me if you're stuck", "don't guess, ask", "check with me first"],
       "landing": "guidance",
+      "groundable": false,
+      "detector": null,
       "rationale": "A timely question beats a confident wrong path.",
       "source": "curated"
     },
@@ -142,6 +168,8 @@
       "directive": "Every few turns, re-read the original request to make sure you haven't drifted from the goal.",
       "phrasings": ["that's not the goal anymore", "you've drifted", "go back to what i asked"],
       "landing": "guidance",
+      "groundable": false,
+      "detector": null,
       "rationale": "Long tasks drift; periodic re-grounding keeps work on target.",
       "source": "curated"
     },
@@ -152,6 +180,8 @@
       "directive": "Before adding new infra (secrets, configs, resources), search the repo for an established pattern and follow it exactly.",
       "phrasings": ["follow the existing pattern", "don't invent a new way", "how do we already do this"],
       "landing": "guidance",
+      "groundable": false,
+      "detector": null,
       "rationale": "Novel one-off patterns fragment the codebase and surprise reviewers.",
       "source": "curated"
     },
@@ -162,6 +192,8 @@
       "directive": "Before proposing a library/protocol/architecture, verify it against the project's established constraints instead of defaulting to a familiar option.",
       "phrasings": ["does that fit our stack", "check our constraints first", "we don't use that here"],
       "landing": "guidance",
+      "groundable": false,
+      "detector": null,
       "rationale": "An off-stack proposal forces a rework round.",
       "source": "curated"
     },
@@ -172,6 +204,8 @@
       "directive": "Confirm before hard-to-reverse or outward-facing actions (publishing, sending, deleting) unless durably authorized.",
       "phrasings": ["ask before you publish", "don't send it yet", "confirm before deleting"],
       "landing": "hook",
+      "groundable": false,
+      "detector": null,
       "rationale": "Outward actions can't be cleanly undone once they leave the machine.",
       "source": "curated"
     },
@@ -182,6 +216,8 @@
       "directive": "Do feature work in an isolated branch/worktree; never edit or commit directly on the main/default branch.",
       "phrasings": ["don't work on main", "make a branch first", "use a worktree"],
       "landing": "hook",
+      "groundable": true,
+      "detector": { "id": "edit-on-main", "params": { "branches": ["main", "master"] } },
       "rationale": "Direct main edits collide with other work and bypass review.",
       "source": "curated"
     },
@@ -192,6 +228,8 @@
       "directive": "Commit your own changes as you finish each part, scoped to only the files you touched for that part.",
       "phrasings": ["commit each part", "commit as you go", "small focused commits"],
       "landing": "guidance",
+      "groundable": true,
+      "detector": { "id": "low-commit-granularity", "params": { "scope": "session" } },
       "rationale": "Granular commits make review and rollback tractable.",
       "source": "curated"
     },
@@ -202,6 +240,8 @@
       "directive": "Stage the specific files for a commit; avoid blanket `git add -A`, which sweeps in unrelated in-flight changes.",
       "phrasings": ["don't add everything", "stage only what you changed", "no git add -A"],
       "landing": "guidance",
+      "groundable": true,
+      "detector": { "id": "git-add-all", "params": { "tool": "Bash" } },
       "rationale": "Blanket staging commits stray work-in-progress files by accident.",
       "source": "curated"
     },
@@ -212,6 +252,8 @@
       "directive": "After merging, verify the staging/production deploy actually succeeded before declaring the task complete.",
       "phrasings": ["did it deploy", "check staging", "verify the deploy went out"],
       "landing": "guidance",
+      "groundable": false,
+      "detector": null,
       "rationale": "A green PR is not a shipped change; the deploy is the real outcome.",
       "source": "curated"
     },
@@ -222,6 +264,8 @@
       "directive": "Default to heavily/end-to-end typed, modular code that can be tested independently; let that shape refactoring decisions.",
       "phrasings": ["keep it typed", "make it modular", "i should be able to test that on its own"],
       "landing": "memory",
+      "groundable": false,
+      "detector": null,
       "rationale": "Typed + modular code is easier to test, change, and reason about.",
       "source": "curated"
     },
@@ -232,6 +276,8 @@
       "directive": "Route review/judgment work to the strongest model and mechanical implementation to cheaper models, not the reverse.",
       "phrasings": ["use the strong model for review", "don't review with the cheap model"],
       "landing": "guidance",
+      "groundable": true,
+      "detector": { "id": "review-on-weak-model", "params": { "agent_classes": ["review", "audit"] } },
       "rationale": "Weak reviewers miss defects; that's the worst place to economize.",
       "source": "curated"
     },
@@ -242,6 +288,8 @@
       "directive": "After a command that may rewrite files (format, codegen, checkout, sed/awk, installs), treat prior reads as stale and re-read before the next edit.",
       "phrasings": ["that file changed", "re-read after formatting", "your view is stale"],
       "landing": "guidance",
+      "groundable": true,
+      "detector": { "id": "stale-edit-after-mutation", "params": { "scope": "session" } },
       "rationale": "Editing against a stale view corrupts files or fails silently.",
       "source": "curated"
     }

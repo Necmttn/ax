@@ -252,6 +252,84 @@ Guarantees:
 - `ax patterns suggest` - patterns you're not yet following (gap vs your `feedback-*`
   memories + installed hooks). The cold-start companion to the local miner.
 
+### 7.5 Grounding layer - patterns are executable against the graph
+
+A pattern is not just prose to eyeball; the behavioral ones are **executable against
+the ax graph**. Grounding is what makes "are you following this?" and "did adopting it
+help?" answerable, and what separates a *measurable* directive from a vibe. Three layers,
+cleanly separated:
+
+| Layer | Is | Grows via | Conflict |
+|-------|-----|-----------|----------|
+| **Detectors** | code - named, tested graph queries returning evidence rows | reviewed code PRs | n/a (curated) |
+| **Patterns** | data - id + text + landing + `detector` ref + `groundable` | per-user files | zero |
+| **Cases** | data - a pattern instance + the evidence rows a detector matched | per-user files | zero |
+
+A **pattern binds to a detector** (a named graph query), which produces **cases**
+(evidence rows) and **metrics** (violation counts) from the user's own graph.
+
+**Security boundary:** contributors NEVER submit raw SurrealQL (running arbitrary
+contributed queries against a local graph is a footgun). A pattern references a
+**curated detector by id + params**; the detector registry is *code* - tested,
+reviewed, named - so the data layer stays conflict-free AND the query layer stays safe.
+
+Detector registry: `apps/axctl/src/patterns/detectors/*.ts`, each a named, deref-free
+graph query (reusing the insights query toolkit, `check-family.ts`, churn-episode
+logic, the `edited`/branch and `dispatches` model signals). Seed examples:
+
+```
+verify-before-claiming-done → "done-without-verification": assistant turn with done-language
+   ("fixed/passing/works") AND no check-family tool_call in the same episode → violation rows
+worktree-isolation          → "edit-on-main":   `edited` edge where checkout branch = main/master
+dry-run-before-destructive  → "delete-without-dryrun": destructive tool_call (DELETE/DROP/rm) with
+   no preceding count/dry-run in the episode
+no-git-add-all              → "git-add-all":     Bash command_text matching `git add -A|.`
+read-before-edit            → "edit-without-prior-read": Edit on a file with no preceding Read in session
+```
+
+**Not everything is groundable, and that's marked honestly.** Output-format / preference
+patterns (`copy-in-codeblocks`, `full-absolute-paths`, `concise-output`, `typed-modular-testable`)
+can't be detected from the graph; they carry `groundable: false`, `detector: null`, and
+are adopted as guidance/memory, never auto-measured. In the v2 seed pack, **12 of 24
+patterns are graph-grounded**, 12 are preference-only.
+
+What grounding unlocks (the loop becomes real, not prose):
+- **`ax patterns suggest`** runs groundable detectors over your graph → patterns you
+  *actually violate*, ranked by violation count (behavioral, not keyword-matching).
+- **Adoption is measurable**: install a pattern as a hook → detector violation count over
+  time → did it drop? That confirms/escalates the verdict (§2.5 recurrence), grounded in
+  evidence instead of guessed.
+- **Contributed cases are verifiable**: a case ships `detector_id` + evidence shape, so
+  the compile step can re-validate it's a real instance, not a claim. Dedup + the >=N
+  threshold also handle privacy (one-off identifying cases never graduate).
+- **Reuses the existing primitive**: `ax hooks cases` is already "candidate query +
+  structured pass/fail verdict" - this extends that proven shape to community patterns.
+
+### 7.6 Contribution format - conflict-free by construction (locked)
+
+A single shared growing file (a JSON array) is the worst case for contribution: every
+PR edits the same array → structural merge conflicts. Eval frameworks avoid this by
+never sharing one growing file (promptfoo globs a *directory* of per-case files; eval
+datasets append JSONL). ax already has the strongest version of this: **`community/users/<login>.json`** -
+each user owns their own file, validated + auto-merged + nightly-compiled, so two
+contributors *physically cannot* conflict. Mirror it exactly:
+
+```
+community/patterns/
+  seed.json                  # maintainer-curated, single file, low churn - keep as-is
+  contributed/
+    <login>.json             # per-user, append-only, OWNER writes only -> zero conflict
+  trending.json              # COMPILED nightly (generated, never hand-edit)
+  index.json                 # COMPILED: merged seed + contributed, served to installs
+```
+
+A contributor only ever appends to `contributed/<login>.json` (patterns + cases). The
+nightly compile (extends `community-nightly.yml`) merges curated + everyone's
+contributed into `index.json` + `trending.json`, dedups by content hash, graduates a
+pattern to public at >=N independent contributors. "Ever-growing list" = the union of
+per-user files, grown by *adding files*, never editing a shared one. Validation reuses
+`community-users.yml` (schema-checked, data-only PR head, never executed).
+
 ---
 
 ## 8. Open questions (community layer)

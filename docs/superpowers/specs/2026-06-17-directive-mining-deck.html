@@ -1,0 +1,292 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Directive Mining · ax</title>
+<style>
+  :root{
+    --bg:#0b0b0c; --panel:#141416; --panel2:#1a1a1d; --line:#2a2a2f;
+    --ink:#ece9e2; --muted:#8d8d85; --faint:#5a5a54;
+    --green:#46c46e; --amber:#e0a21a; --blue:#5aa0e6; --violet:#9685f0; --rose:#e07aa6; --red:#e06a5a;
+    --serif:Georgia,"Times New Roman",serif;
+    --mono:ui-monospace,"SF Mono",SFMono-Regular,Menlo,Consolas,monospace;
+    --sans:ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html{scroll-behavior:smooth}
+  body{
+    background:var(--bg);color:var(--ink);font-family:var(--sans);
+    -webkit-font-smoothing:antialiased;line-height:1.5;
+    background-image:radial-gradient(circle at 50% -10%, rgba(70,196,110,.05), transparent 60%);
+  }
+  .deck{height:100vh;overflow-y:scroll;scroll-snap-type:y mandatory}
+  section{
+    min-height:100vh;scroll-snap-align:start;display:flex;flex-direction:column;
+    justify-content:center;padding:72px 40px;position:relative;
+    border-bottom:1px solid var(--line);
+  }
+  .wrap{width:100%;max-width:980px;margin:0 auto}
+  .kicker{font-family:var(--mono);font-size:12px;letter-spacing:.18em;text-transform:uppercase;color:var(--amber);margin-bottom:20px;display:flex;gap:12px;align-items:center}
+  .kicker .num{color:var(--faint)}
+  .kicker .bar{height:1px;flex:1;background:var(--line)}
+  h1{font-family:var(--serif);font-weight:400;font-size:clamp(38px,6vw,72px);line-height:1.02;letter-spacing:-.02em}
+  h2{font-family:var(--serif);font-weight:400;font-size:clamp(28px,4vw,46px);line-height:1.06;letter-spacing:-.01em;margin-bottom:8px}
+  .lede{font-size:clamp(17px,2vw,21px);color:var(--muted);max-width:62ch;margin-top:18px}
+  p{max-width:64ch;color:#cfcdc6}
+  .mono{font-family:var(--mono)}
+  .accent{color:var(--green)} .am{color:var(--amber)} .bl{color:var(--blue)} .vi{color:var(--violet)} .ro{color:var(--rose)} .rd{color:var(--red)} .mu{color:var(--muted)}
+  .grid{display:grid;gap:18px;margin-top:34px}
+  .g2{grid-template-columns:1fr 1fr} .g3{grid-template-columns:repeat(3,1fr)}
+  @media(max-width:780px){.g2,.g3{grid-template-columns:1fr}}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:22px 22px}
+  .card h3{font-family:var(--mono);font-size:12.5px;letter-spacing:.04em;text-transform:uppercase;color:var(--muted);margin-bottom:12px;font-weight:600}
+  .card .big{font-size:18px;color:var(--ink);margin-bottom:6px}
+  .card p{font-size:14.5px;color:#bdbbb4;max-width:none}
+  .tag{display:inline-block;font-family:var(--mono);font-size:11px;padding:3px 8px;border-radius:999px;border:1px solid var(--line);color:var(--muted);margin:3px 4px 3px 0}
+  .tag.on{border-color:rgba(70,196,110,.4);color:var(--green)}
+  .tag.off{border-color:rgba(141,141,133,.3);color:var(--faint)}
+  pre{font-family:var(--mono);font-size:13px;line-height:1.6;background:var(--panel);border:1px solid var(--line);border-left:3px solid var(--amber);border-radius:8px;padding:18px 20px;overflow-x:auto;color:#d6d4cd;margin-top:24px}
+  pre .c{color:var(--faint)} pre .k{color:var(--green)} pre .a{color:var(--amber)} pre .b{color:var(--blue)} pre .v{color:var(--violet)} pre .r{color:var(--rose)}
+  .flow{display:flex;flex-wrap:wrap;gap:10px;align-items:stretch;margin-top:30px;font-family:var(--mono);font-size:13px}
+  .step{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:12px 14px;flex:1;min-width:120px}
+  .step .l{color:var(--green);font-weight:600;display:block;margin-bottom:4px}
+  .step .d{color:var(--muted);font-size:12px}
+  .arrow{display:flex;align-items:center;color:var(--faint);font-size:18px}
+  table{width:100%;border-collapse:collapse;margin-top:28px;font-size:14.5px}
+  th,td{text-align:left;padding:12px 14px;border-bottom:1px solid var(--line);vertical-align:top}
+  th{font-family:var(--mono);font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);font-weight:600}
+  td .mono{font-size:13px}
+  .lead-num{font-family:var(--mono);color:var(--amber)}
+  .foot{position:fixed;bottom:16px;right:20px;font-family:var(--mono);font-size:12px;color:var(--faint);z-index:20}
+  .brandmark{position:fixed;top:16px;left:20px;font-family:var(--mono);font-size:13px;letter-spacing:.1em;color:var(--muted);z-index:20}
+  .brandmark b{color:var(--green)}
+  .progress{position:fixed;top:0;left:0;height:2px;background:var(--green);width:0;z-index:30;transition:width .2s ease}
+  .dots{position:fixed;left:18px;top:50%;transform:translateY(-50%);display:flex;flex-direction:column;gap:10px;z-index:20}
+  .dots a{width:7px;height:7px;border-radius:50%;background:var(--line);transition:.2s;display:block}
+  .dots a.active{background:var(--green);transform:scale(1.35)}
+  .hint{position:fixed;bottom:16px;left:20px;font-family:var(--mono);font-size:11px;color:var(--faint);z-index:20}
+  .pillrow{margin-top:26px;max-width:none}
+  .stat{font-family:var(--mono);color:var(--amber)}
+  .rule{height:1px;background:var(--line);margin:26px 0}
+  .lineage{font-family:var(--mono);font-size:12.5px;color:var(--muted);margin-top:40px;line-height:1.9}
+  .lineage .x{color:var(--faint)}
+  ul.clean{list-style:none;margin-top:18px;display:flex;flex-direction:column;gap:10px}
+  ul.clean li{padding-left:20px;position:relative;color:#cfcdc6;font-size:15.5px;max-width:66ch}
+  ul.clean li:before{content:"→";position:absolute;left:0;color:var(--green)}
+</style>
+</head>
+<body>
+<div class="brandmark"><b>ax</b> · directive mining</div>
+<div class="progress" id="bar"></div>
+<div class="dots" id="dots"></div>
+<div class="foot" id="foot">01 / 09</div>
+<div class="hint">↓ / → / space</div>
+
+<div class="deck" id="deck">
+
+  <!-- 01 COVER -->
+  <section>
+    <div class="wrap">
+      <div class="kicker"><span class="num">01</span><span>feature · spec #535</span><span class="bar"></span></div>
+      <h1>ax learns <span class="accent">how you work</span>-<br>then shares it.</h1>
+      <p class="lede">You already tell agents how to behave: <span class="mono am">"dogfood before showing me"</span>, <span class="mono am">"give me full paths"</span>, <span class="mono am">"commit each part"</span>. ax mines those <b>directives</b> from your own transcripts, grounds them against the graph, and grows a conflict-free community pattern library on top.</p>
+      <div class="lineage">
+        dogfood question <span class="x">→</span> <span class="accent">ax memory ops</span> (#532) <span class="x">→</span> caught the watcher-ingest crash <span class="accent">(#534)</span> <span class="x">→</span> searched "remember" turns <span class="x">→</span> <b>this</b>
+      </div>
+    </div>
+  </section>
+
+  <!-- 02 THE GAP -->
+  <section>
+    <div class="wrap">
+      <div class="kicker"><span class="num">02</span><span>the gap</span><span class="bar"></span></div>
+      <h2>ax mines corrections. It misses <span class="am">directives</span>.</h2>
+      <div class="grid g2">
+        <div class="card">
+          <h3 class="rd">Corrections · reactive</h3>
+          <p class="big">"No, that's wrong. I said X."</p>
+          <p>Agent did something → user pushes back. ax already captures these (<span class="mono">deriveCorrections</span>).</p>
+        </div>
+        <div class="card">
+          <h3 class="accent">Directives · proactive</h3>
+          <p class="big">"Remember to verify before you show me."</p>
+          <p>A standing rule, stated before any failure. The highest-signal source for durable memory + guidance - and <b>unharvested</b>.</p>
+        </div>
+      </div>
+      <p style="margin-top:26px"><span class="stat">~half</span> of this user's turns containing <span class="mono am">"remember"</span> already became saved <span class="mono">feedback-*</span> memories. The pattern works - it was just being done <b>by hand</b>.</p>
+    </div>
+  </section>
+
+  <!-- 03 THE LOCAL LOOP -->
+  <section>
+    <div class="wrap">
+      <div class="kicker"><span class="num">03</span><span>the local loop</span><span class="bar"></span></div>
+      <h2>Mine → brief → track → <span class="am">escalate</span></h2>
+      <div class="flow">
+        <div class="step"><span class="l">mine</span><span class="d">n-grams by lift over your turns</span></div>
+        <div class="arrow">→</div>
+        <div class="step"><span class="l">flag</span><span class="d">candidate directive turns</span></div>
+        <div class="arrow">→</div>
+        <div class="step"><span class="l">brief</span><span class="d">.ax/tasks/ → agent judges</span></div>
+        <div class="arrow">→</div>
+        <div class="step"><span class="l">track</span><span class="d">directive record + recurrence</span></div>
+        <div class="arrow">→</div>
+        <div class="step"><span class="l">grow</span><span class="d">recurrence → escalate</span></div>
+      </div>
+      <p style="margin-top:30px">CLI scaffolds deterministically, the agent fills judgment - the same shape as <span class="mono">routing tune --emit-brief</span>, <span class="mono">skills classify</span>, <span class="mono">improve accept</span>. Nothing exotic.</p>
+    </div>
+  </section>
+
+  <!-- 04 WHY IT IMPROVES -->
+  <section>
+    <div class="wrap">
+      <div class="kicker"><span class="num">04</span><span>why it keeps improving</span><span class="bar"></span></div>
+      <h2>Two moves make it self-tuning</h2>
+      <div class="grid g2">
+        <div class="card">
+          <h3 class="bl">Lift, not frequency</h3>
+          <p class="mono" style="color:var(--blue);font-size:15px;margin-bottom:8px">P(outcome | ngram) / P(outcome)</p>
+          <p>Rank n-grams by how much more they lead to a <span class="accent">memory write</span> / accepted proposal - not raw count. Markers are <b>learned per user</b>, re-fit each ingest. "Different users, different words" dissolves: the table is yours.</p>
+        </div>
+        <div class="card">
+          <h3 class="am">Recurrence = escalation</h3>
+          <p class="mono" style="font-size:13.5px;color:#bdbbb4;line-height:1.8">said once&nbsp;&nbsp;&nbsp;&nbsp;<span class="mu">→</span> memory note<br>keeps coming back <span class="mu">→</span> <span class="am">escalate to hook</span><br>stops after&nbsp;&nbsp;&nbsp;<span class="mu">→</span> retire</p>
+          <p style="margin-top:10px">"It keeps coming back" is the <b>feature</b>: if you restate a rule, the note didn't land → promote it to an enforced gate. The system grades its own directives.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 05 THREE LAYERS -->
+  <section>
+    <div class="wrap">
+      <div class="kicker"><span class="num">05</span><span>architecture</span><span class="bar"></span></div>
+      <h2>Detectors · Patterns · Cases</h2>
+      <p class="lede">The separation that makes it safe, conflict-free, and grounded.</p>
+      <table>
+        <tr><th>Layer</th><th>Is</th><th>Grows via</th><th>Conflict</th></tr>
+        <tr><td class="mono accent">Detectors</td><td>code - named, tested graph queries</td><td>reviewed code PRs</td><td class="mu">n/a (curated)</td></tr>
+        <tr><td class="mono am">Patterns</td><td>data - id + text + landing + detector ref</td><td>per-user files</td><td class="accent">zero</td></tr>
+        <tr><td class="mono vi">Cases</td><td>data - instance + matched evidence rows</td><td>per-user files</td><td class="accent">zero</td></tr>
+      </table>
+      <p style="margin-top:24px">A <span class="am">pattern</span> binds to a <span class="accent">detector</span> (a graph query) which produces <span class="vi">cases</span> (evidence) + metrics from <i>your</i> graph.</p>
+    </div>
+  </section>
+
+  <!-- 06 GROUNDING -->
+  <section>
+    <div class="wrap">
+      <div class="kicker"><span class="num">06</span><span>grounding</span><span class="bar"></span></div>
+      <h2>Patterns are <span class="accent">executable</span> against the graph</h2>
+      <p>A directive isn't prose to eyeball - the behavioral ones run as queries that find where you broke them and measure whether adopting them helped.</p>
+      <pre><span class="c">// behavioral → graph-grounded</span>
+verify-before-claiming-done <span class="c">→</span> <span class="k">"done-without-verification"</span>
+   <span class="c">assistant turn says "fixed/passing" AND no check-family tool_call in the episode</span>
+worktree-isolation          <span class="c">→</span> <span class="k">"edit-on-main"</span>      <span class="c">edited edge where branch = main</span>
+no-git-add-all              <span class="c">→</span> <span class="k">"git-add-all"</span>      <span class="c">Bash command_text ~ git add -A</span>
+
+<span class="c">// preference → not groundable, marked honestly</span>
+copy-in-codeblocks          <span class="c">→</span> <span class="r">groundable:false</span>   <span class="c">adopted as guidance, never auto-measured</span></pre>
+      <div class="grid g3" style="margin-top:24px">
+        <div class="card"><h3 class="accent">12 / 24</h3><p>seed patterns are graph-grounded today</p></div>
+        <div class="card"><h3 class="am">no raw SQL</h3><p>contributors reference a <b>curated</b> detector by id - never submit queries</p></div>
+        <div class="card"><h3 class="bl">reuses</h3><p><span class="mono">ax hooks cases</span>, check-family, churn episodes</p></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 07 CONFLICT-FREE CONTRIBUTION -->
+  <section>
+    <div class="wrap">
+      <div class="kicker"><span class="num">07</span><span>contribution</span><span class="bar"></span></div>
+      <h2>Conflict-free <span class="am">by construction</span></h2>
+      <p>One shared growing file = constant merge conflicts. ax already has the fix: <span class="mono">community/users/&lt;login&gt;.json</span> - each user owns their file, so two PRs <b>physically can't</b> collide. Mirror it.</p>
+      <pre>community/patterns/
+  seed.json            <span class="c"># maintainer-curated, low churn</span>
+  contributed/
+    <span class="a">&lt;login&gt;.json</span>       <span class="c"># per-user, append-only → ZERO conflict</span>
+  trending.json        <span class="c"># COMPILED nightly (never hand-edit)</span>
+  index.json           <span class="c"># COMPILED: seed + contributed, served to installs</span></pre>
+      <div class="flow" style="margin-top:22px">
+        <div class="step"><span class="l">auto-mine</span><span class="d">local, no network</span></div><div class="arrow">→</div>
+        <div class="step"><span class="l">auto-abstract</span><span class="d">strip specifics</span></div><div class="arrow">→</div>
+        <div class="step" style="border-color:rgba(224,162,26,.5)"><span class="l am">consent-publish</span><span class="d">one yes · never auto</span></div><div class="arrow">→</div>
+        <div class="step"><span class="l">auto-compile</span><span class="d">dedup · ≥N threshold</span></div><div class="arrow">→</div>
+        <div class="step"><span class="l">auto-seed</span><span class="d">day-1 value</span></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 08 SEED PACK -->
+  <section>
+    <div class="wrap">
+      <div class="kicker"><span class="num">08</span><span>shipped now</span><span class="bar"></span></div>
+      <h2><span class="stat">24</span> battle-tested directives - day one</h2>
+      <p class="lede">The cold-start pack a fresh install ships with. No history needed; no privacy surface. <span class="accent on tag" style="margin-left:6px">grounded</span> <span class="off tag">preference</span></p>
+      <div class="pillrow">
+        <span class="tag on">verify-before-claiming-done</span>
+        <span class="tag on">worktree-isolation</span>
+        <span class="tag on">dry-run-before-destructive</span>
+        <span class="tag on">read-before-edit</span>
+        <span class="tag on">no-git-add-all</span>
+        <span class="tag on">change-approach-after-2-fails</span>
+        <span class="tag on">stale-after-mutation</span>
+        <span class="tag on">reviewers-get-the-strong-model</span>
+        <span class="tag off">full-absolute-paths</span>
+        <span class="tag off">copy-in-codeblocks</span>
+        <span class="tag off">typed-modular-testable</span>
+        <span class="tag off">confirm-before-outward-actions</span>
+      </div>
+      <p style="margin-top:26px">Consume it today: <span class="mono am">ax patterns list</span> · <span class="mono am">ax patterns adopt &lt;id&gt;</span> · <span class="mono am">ax patterns suggest</span> (the gap vs what you already follow).</p>
+    </div>
+  </section>
+
+  <!-- 09 FLYWHEEL / CLOSE -->
+  <section>
+    <div class="wrap">
+      <div class="kicker"><span class="num">09</span><span>the flywheel</span><span class="bar"></span></div>
+      <h2>A system that <span class="accent">improves itself</span></h2>
+      <ul class="clean">
+        <li>Your transcripts reveal how you tell agents to work.</li>
+        <li>ax mines it, grounds it against the graph, measures whether it lands.</li>
+        <li>What recurs gets enforced; what works gets shared; what's shared seeds the next person.</li>
+      </ul>
+      <div class="rule"></div>
+      <p class="mono" style="font-size:13px;color:var(--muted);line-height:1.9">
+        <span class="accent">#532</span> ax memory ops &nbsp;<span class="x mu">·</span>&nbsp;
+        <span class="accent">#534</span> ingest crash fix &nbsp;<span class="x mu">·</span>&nbsp;
+        <span class="accent">#536</span> seed pack + contribution design &nbsp;<span class="x mu">·</span>&nbsp;
+        <span class="am">#535</span> spec
+      </p>
+      <p style="margin-top:14px;color:var(--faint);font-family:var(--mono);font-size:12px">ax - local taste &amp; telemetry graph for AI coding agents</p>
+    </div>
+  </section>
+
+</div>
+
+<script>
+  const deck=document.getElementById('deck');
+  const secs=[...deck.querySelectorAll('section')];
+  const foot=document.getElementById('foot');
+  const bar=document.getElementById('bar');
+  const dotsWrap=document.getElementById('dots');
+  const pad=n=>String(n).padStart(2,'0');
+  secs.forEach((s,i)=>{const a=document.createElement('a');a.href='#';a.dataset.i=i;a.onclick=e=>{e.preventDefault();s.scrollIntoView();};dotsWrap.appendChild(a);});
+  const dots=[...dotsWrap.children];
+  let cur=0;
+  const io=new IntersectionObserver(es=>{
+    es.forEach(e=>{if(e.isIntersecting){cur=secs.indexOf(e.target);
+      foot.textContent=pad(cur+1)+' / '+pad(secs.length);
+      bar.style.width=((cur+1)/secs.length*100)+'%';
+      dots.forEach((d,i)=>d.classList.toggle('active',i===cur));
+    }});
+  },{root:deck,threshold:.55});
+  secs.forEach(s=>io.observe(s));
+  addEventListener('keydown',e=>{
+    if(['ArrowDown','ArrowRight',' ','PageDown'].includes(e.key)){e.preventDefault();secs[Math.min(cur+1,secs.length-1)].scrollIntoView();}
+    if(['ArrowUp','ArrowLeft','PageUp'].includes(e.key)){e.preventDefault();secs[Math.max(cur-1,0)].scrollIntoView();}
+  });
+</script>
+</body>
+</html>
