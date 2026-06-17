@@ -241,6 +241,55 @@ describe("fetchCostModels - NaN-guard (countField adoption)", () => {
     });
 });
 
+// ---------------------------------------------------------------------------
+// fetchCostSplit - content-type dimension (global breakdown, ADAPT path)
+// CostSplitRow is aggregated by (origin x model) with no per-session id,
+// so a per-row dominant content type is meaningless. Instead, the global
+// ContentTypeBreakdown is attached as `result.contentTypes`.
+// ---------------------------------------------------------------------------
+
+describe("fetchCostSplit - contentTypes dimension", () => {
+    test("includes global content-type breakdown as sibling field on result", async () => {
+        const splitRows = [
+            {
+                source: "claude", model: "claude-sonnet-4-6", sessions: 3,
+                prompt_tokens: 300, completion_tokens: 60,
+                cache_read_tokens: 0, cache_create_tokens: 0, cost_usd: 1.5,
+            },
+        ];
+        // Second query: fetchContentTypeBreakdown returns flat rows
+        const contentTypeRows = [
+            { ct: "content_type:code", calls: 5, bytes: 400 },
+            { ct: "content_type:docs", calls: 2, bytes: 200 },
+        ];
+        const db = makeMockDb([[splitRows], [contentTypeRows]]);
+        const result = await runWithMock(db, fetchCostSplit({ sinceDays: 14 }));
+
+        expect(result.contentTypes).toBeDefined();
+        // rows are sorted by estTokens desc; code (400 bytes) > docs (200 bytes)
+        expect(result.contentTypes.rows).toHaveLength(2);
+        expect(result.contentTypes.rows[0]!.category).toBe("code");
+        expect(result.contentTypes.rows[1]!.category).toBe("docs");
+        expect(result.contentTypes.totals.bytes).toBe(600);
+    });
+
+    test("contentTypes is empty breakdown when no content edges exist", async () => {
+        const splitRows = [
+            {
+                source: "claude", model: "A", sessions: 1,
+                prompt_tokens: 100, completion_tokens: 10,
+                cache_read_tokens: 0, cache_create_tokens: 0, cost_usd: 1.0,
+            },
+        ];
+        // Empty content-type response
+        const db = makeMockDb([[splitRows], [[]]]);
+        const result = await runWithMock(db, fetchCostSplit({ sinceDays: 14 }));
+
+        expect(result.contentTypes.rows).toHaveLength(0);
+        expect(result.contentTypes.totals.bytes).toBe(0);
+    });
+});
+
 describe("fetchCostSessions - stringFieldOr adoption", () => {
     test("session_id from DB string round-trips unchanged", async () => {
         const dbRows = [{
