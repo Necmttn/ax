@@ -220,6 +220,55 @@ function dereferenceSymlink(link: string): void {
  * dereference any symlink that escapes `root` (would dangle in the .app);
  * abort on a dangling symlink (the original ENOENT defect).
  */
+/**
+ * Top-level node_modules trees the bundled `ax serve` never loads, removed to
+ * shrink the .app. These are the TUI render stack + dev-tools: axctl lazy-loads
+ * the TUI (`await import("../tui/...")`) and project/dogfood commands, none of
+ * which `serve` touches. Verified by booting `ax serve` from the pruned tree.
+ * Adding a serve-path import of any of these will fail the stage boot-check.
+ */
+const SERVE_IRRELEVANT_PACKAGES: ReadonlyArray<string> = [
+    // TUI render stack (lazy-loaded via `await import("../tui/...")`)
+    "node-pty", // dogfood pty sidecar (terminal); not on the serve path
+    "@opentui", // TUI renderer (lazy)
+    // NB: do NOT prune @tanstack - @durable-streams/state (the live-ingest
+    // sidecar, which serve DOES load) depends on @tanstack/db.
+    "react-devtools-core",
+    "react-devtools-shared",
+    "react-reconciler", // opentui's react renderer
+    "react-dom", // project/stack + studio (not serve)
+    "react", // only the above pull it
+    "scheduler", // react peer
+    // Type-only / build-time (bun transpiles TS at runtime; no tsc needed)
+    "typescript",
+    "@types",
+    "bun-types",
+];
+
+function pruneServeIrrelevant(nodeModulesDir: string): void {
+    for (const pkg of SERVE_IRRELEVANT_PACKAGES) {
+        const dir = join(nodeModulesDir, pkg);
+        if (existsSync(dir)) {
+            const size = dirSize(dir);
+            rmSync(dir, { recursive: true, force: true });
+            log(`  pruned ${pkg}  (${size})`);
+        }
+    }
+    // Remove `.bin` shims left dangling by the prune (e.g. tsc/tsserver ->
+    // typescript). `existsSync` follows the symlink, so a dangling link reads as
+    // missing - exactly the entries that would later abort `ensureSymlinkFree`.
+    const binDir = join(nodeModulesDir, ".bin");
+    if (existsSync(binDir)) {
+        for (const entry of readdirSync(binDir)) {
+            const link = join(binDir, entry);
+            if (!existsSync(link)) {
+                rmSync(link, { force: true });
+                log(`  pruned dangling .bin/${entry}`);
+            }
+        }
+    }
+}
+
 function ensureSymlinkFree(root: string): void {
     const rootReal = realpathSync(root);
     const links = findSymlinks(root);
@@ -354,6 +403,14 @@ async function main() {
                     "Native deps were not staged - investigate before relying on this bundle.",
             );
         }
+        // Prune heavy packages the bundled `ax serve` never loads. axctl is a
+        // monolithic CLI (serve + TUI + mcp + dogfood), but the desktop only runs
+        // `ax serve`, and the TUI is lazy-loaded (`await import("../tui/...")`), so
+        // its render stack is never required. Removing these top-level trees from
+        // the hoisted node_modules is safe FOR SERVE (verified: `serve` boots from
+        // the pruned tree). Saves ~115MB. If you add a serve-path import of any of
+        // these, the stage boot-check / release will surface it.
+        pruneServeIrrelevant(join(AX_SRC, "node_modules"));
         // Backstop: keep self-contained internal links, dereference/abort any
         // symlink that escapes the staged tree (the original ENOENT defect).
         ensureSymlinkFree(AX_SRC);
