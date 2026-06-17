@@ -13,6 +13,7 @@ import {
     interventionSafetyMessage,
     missingInterventionSafetyGates,
 } from "./lifecycle.ts";
+import { interventionFormSpec } from "./intervention-forms.ts";
 
 export interface ShowInput { readonly sigOrId: string; }
 
@@ -78,11 +79,12 @@ export const showExperiment = (
             FROM proposal WHERE dedupe_sig = ${idLit} OR id = ${idLit} LIMIT 1;`);
         const prow = (pRows?.[0] ?? [])[0];
         if (!prow) return null;
-        const rawSafety = prow.form === "hook"
+        const safetyPayloadKey = interventionFormSpec(prow.form)?.safetyPayloadKey;
+        const rawSafety = safetyPayloadKey === "hook_payload"
             ? prow.hook_payload
-            : prow.form === "automation"
-                ? prow.automation_payload
-                : null;
+            : safetyPayloadKey === "automation_payload"
+              ? prow.automation_payload
+              : null;
         const proposal: ShowProposal = {
             shortId: prow.dedupe_sig, title: prow.title, form: prow.form,
             hypothesis: prow.hypothesis, status: prow.status,

@@ -22,7 +22,7 @@ import type { DbError } from "@ax/lib/errors";
 import { recordIdString } from "@ax/lib/shared/row-fields";
 import { surrealDate } from "@ax/lib/shared/surql";
 import type { InsightView } from "./insights.ts";
-import { bareSession, sessionTelemetryCost } from "./telemetry-rollup.ts";
+import { bareSession, enrichRowsWithTelemetryCost } from "./telemetry-rollup.ts";
 
 /** Per-row fan-out width for the context lookups. */
 const ENRICH_FANOUT = 8;
@@ -133,12 +133,11 @@ const frictionSessionId = (row: Row): string =>
 export const enrichInsightRows = Effect.fn("queries.enrichInsightRows")(
     function* (view: InsightView, rows: ReadonlyArray<Row>) {
         if (view === "friction") {
-            const ids = rows.map(frictionSessionId);
-            const cost = yield* sessionTelemetryCost(ids);
-            return rows.map((row): Row => {
-                const c = cost.get(frictionSessionId(row));
-                return { ...row, otlp_cost_usd: c?.cost_usd ?? null, otlp_tokens: c?.tokens ?? null };
-            });
+            return yield* enrichRowsWithTelemetryCost(rows, frictionSessionId, (row, cost): Row => ({
+                ...row,
+                otlp_cost_usd: cost?.cost_usd ?? null,
+                otlp_tokens: cost?.tokens ?? null,
+            }));
         }
         if (!ENRICHED_VIEWS.has(view)) return rows;
         return yield* Effect.forEach(rows, (row) => enrichRow(view, row), { concurrency: ENRICH_FANOUT });

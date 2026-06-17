@@ -60,3 +60,31 @@ export const sessionTelemetryLatency = (sessionIds: readonly string[]): Effect.E
         }
         return out;
     });
+
+const uniqueBareSessions = <Row>(
+    rows: ReadonlyArray<Row>,
+    sessionOf: (row: Row) => unknown,
+): readonly string[] =>
+    [...new Set(rows.map((row) => bareSession(sessionOf(row))).filter((id) => id.length > 0))];
+
+export const enrichRowsWithTelemetryCost = <Row, Out>(
+    rows: ReadonlyArray<Row>,
+    sessionOf: (row: Row) => unknown,
+    merge: (row: Row, telemetry: TelemetryCost | null) => Out,
+): Effect.Effect<Out[], DbError, SurrealClient> =>
+    Effect.gen(function* () {
+        if (rows.length === 0) return [];
+        const telemetry = yield* sessionTelemetryCost(uniqueBareSessions(rows, sessionOf));
+        return rows.map((row) => merge(row, telemetry.get(bareSession(sessionOf(row))) ?? null));
+    });
+
+export const enrichRowsWithTelemetryLatency = <Row, Out>(
+    rows: ReadonlyArray<Row>,
+    sessionOf: (row: Row) => unknown,
+    merge: (row: Row, telemetry: TelemetryLatency | null) => Out,
+): Effect.Effect<Out[], DbError, SurrealClient> =>
+    Effect.gen(function* () {
+        if (rows.length === 0) return [];
+        const telemetry = yield* sessionTelemetryLatency(uniqueBareSessions(rows, sessionOf));
+        return rows.map((row) => merge(row, telemetry.get(bareSession(sessionOf(row))) ?? null));
+    });

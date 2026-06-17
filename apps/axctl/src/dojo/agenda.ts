@@ -4,8 +4,8 @@
  * `assembleAgenda` is the pure, tested core: budget + flat item list -> ordered
  * agenda (priority sort, spar gate, explore fallback). `collectAgendaItems` is
  * the Effect glue that runs every source with per-source failure isolation: a
- * broken source logs to stderr and contributes nothing - it must never kill
- * the whole agenda.
+ * broken source contributes a visible failure record and no items - it must
+ * never kill the whole agenda.
  */
 import { Effect, type FileSystem } from "effect";
 import type { SurrealClient } from "@ax/lib/db";
@@ -23,7 +23,7 @@ import {
     routingBacktestItems,
     sparItem,
 } from "./items.ts";
-import type { BudgetEnvelope, DojoAgenda, DojoItem } from "./schema.ts";
+import type { BudgetEnvelope, DojoAgenda, DojoItem, DojoSourceFailure } from "./schema.ts";
 import { compareByPriority } from "./schema.ts";
 
 export const SPAR_MIN_SPENDABLE_PCT = 30;
@@ -31,6 +31,7 @@ export const SPAR_MIN_SPENDABLE_PCT = 30;
 export interface AssembleOptions {
     readonly nowMs: number;
     readonly spar: boolean;
+    readonly sourceFailures?: readonly DojoSourceFailure[];
 }
 
 /** Pure: budget + flat item list -> ordered agenda. */
@@ -46,6 +47,7 @@ export const assembleAgenda = (
         v: 1,
         generated_at: new Date(opts.nowMs).toISOString(),
         budget,
+        source_failures: opts.sourceFailures ?? [],
         items: sorted,
     };
 };
@@ -66,20 +68,35 @@ const DAY_MS = 86_400_000;
 /** Hot-session rows to consider before churnHotspotItems trims to its top 2. */
 const CHURN_SESSION_LIMIT = 20;
 
-/** Per-source failure isolation: log the failure, contribute the empty value. */
+interface SourceResult<A> {
+    readonly value: A;
+    readonly failure: DojoSourceFailure | null;
+}
+
+const failureMessage = (error: unknown): string =>
+    error instanceof Error ? error.message : String(error);
+
+/** Per-source failure isolation: log the failure and keep it in the read model. */
 const soft = <A, E, R>(
     label: string,
     eff: Effect.Effect<A, E, R>,
     empty: A,
-): Effect.Effect<A, never, R> =>
+): Effect.Effect<SourceResult<A>, never, R> =>
     eff.pipe(
+        Effect.map((value): SourceResult<A> => ({ value, failure: null })),
         Effect.catch((e) =>
             Effect.sync(() => {
-                console.error(`dojo: source ${label} failed: ${String(e)}`);
-                return empty;
+                const message = failureMessage(e);
+                console.error(`dojo: source ${label} failed: ${message}`);
+                return { value: empty, failure: { source: label, message } };
             }),
         ),
     );
+
+export interface CollectAgendaItemsResult {
+    readonly items: readonly DojoItem[];
+    readonly source_failures: readonly DojoSourceFailure[];
+}
 
 /**
  * Run every agenda source and flatten into items. Sources soft-fail
@@ -88,7 +105,7 @@ const soft = <A, E, R>(
  */
 export const collectAgendaItems = (
     opts: CollectOptions,
-): Effect.Effect<readonly DojoItem[], never, SurrealClient | FileSystem.FileSystem> =>
+): Effect.Effect<CollectAgendaItemsResult, never, SurrealClient | FileSystem.FileSystem> =>
     Effect.gen(function* () {
         const verdicts = yield* soft("verdicts", listPendingVerdicts(), []);
         const briefs = yield* soft("briefs", scanTaskDir(opts.taskDir ?? defaultTaskDir()), []);
@@ -111,12 +128,21 @@ export const collectAgendaItems = (
         );
 
         const items: DojoItem[] = [
-            ...pendingVerdictItems(verdicts),
-            ...briefs,
-            ...routingBacktestItems(tune, opts.days),
-            ...churnHotspotItems(churnRows),
+            ...pendingVerdictItems(verdicts.value),
+            ...briefs.value,
+            ...routingBacktestItems(tune.value, opts.days),
+            ...churnHotspotItems(churnRows.value),
         ];
-        const mint = proposalMintItem(open.length);
+        const mint = proposalMintItem(open.value.length);
         if (mint) items.push(mint);
-        return items;
+        return {
+            items,
+            source_failures: [
+                verdicts.failure,
+                briefs.failure,
+                churnRows.failure,
+                open.failure,
+                tune.failure,
+            ].filter((failure): failure is DojoSourceFailure => failure !== null),
+        };
     });

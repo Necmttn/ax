@@ -1,7 +1,7 @@
 import { Array as Arr, Effect } from "effect";
 import { SurrealClient, type SurrealClientShape } from "@ax/lib/db";
 import type { DbError } from "@ax/lib/errors";
-import { bareSession, sessionTelemetryCost } from "../queries/telemetry-rollup.ts";
+import { enrichRowsWithTelemetryCost } from "../queries/telemetry-rollup.ts";
 import { recordKeyPart } from "@ax/lib/shared/derive-keys";
 import { localPathFileRecordKey, recordLiteral, stableDigest } from "@ax/lib/ids";
 import { selectByIds } from "@ax/lib/shared/record-select";
@@ -416,12 +416,9 @@ export const readFragilityCascade = (): Effect.Effect<CascadeEdge[], DbError, Su
                 partialEdges.push({ origin, downstream, weight, downstream_cost_usd: null, downstream_tokens: null });
             }
         }
-        // ONE batched OTLP cost lookup over deduped downstream ids.
-        const ids = [...new Set(partialEdges.map((e) => e.downstream))];
-        const cost = yield* sessionTelemetryCost(ids);
-        return partialEdges.map((e) => ({
+        return yield* enrichRowsWithTelemetryCost(partialEdges, (e) => e.downstream, (e, cost) => ({
             ...e,
-            downstream_cost_usd: cost.get(bareSession(e.downstream))?.cost_usd ?? null,
-            downstream_tokens: cost.get(bareSession(e.downstream))?.tokens ?? null,
+            downstream_cost_usd: cost?.cost_usd ?? null,
+            downstream_tokens: cost?.tokens ?? null,
         }));
     });

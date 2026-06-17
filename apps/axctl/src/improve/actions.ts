@@ -23,6 +23,7 @@ import {
     planLockVerdict,
     planRejectCandidate,
 } from "./lifecycle.ts";
+import { interventionFormSpec, isInterventionForm, type InterventionForm } from "./intervention-forms.ts";
 import { scaffoldSkill, type ScaffoldResult } from "./skill-scaffold.ts";
 import { renderTaskFile, type TaskInput } from "./task-template.ts";
 
@@ -164,104 +165,33 @@ const fetchFullProposal = (idLiteral: string) =>
 const defaultTaskDir = (): string =>
     process.env.AX_TASK_DIR ?? posixPath.join(process.cwd(), ".ax", "tasks");
 
-/**
- * Map a full proposal row + experimentId to a TaskInput for renderTaskFile.
- */
-const buildTaskInput = (row: FullProposalRow, experimentId: string): TaskInput => {
-    const shortId = row.dedupe_sig;
-    const proposalId = `proposal:${recordKeyPart(row.id, "proposal") ?? row.dedupe_sig}`;
-    if (row.form === "guidance") {
-        return {
-            form: "guidance",
-            experimentId,
-            proposalId,
-            shortId,
-            title: row.title,
-            targetPath: row.guidance_payload?.file_target ?? "~/.claude/CLAUDE.md",
-            section: row.guidance_payload?.section ?? null,
-            suggestedBody: row.guidance_payload?.suggested_text ?? row.hypothesis,
-            proposedBehavior: null,
-            confidence: row.confidence ?? "medium",
-            frequency: row.frequency ?? 0,
-            evidence: row.hypothesis,
-        };
-    }
-    if (row.form === "subagent") {
-        return {
-            form: "subagent",
-            experimentId,
-            proposalId,
-            shortId,
-            title: row.title,
-            targetPath: `~/.claude/agents/${row.dedupe_sig}.md`,
-            section: null,
-            suggestedBody: [
-                row.subagent_payload?.bounded_role ? `Role: ${row.subagent_payload.bounded_role}` : null,
-                row.subagent_payload?.delegation_trigger ? `Delegation trigger: ${row.subagent_payload.delegation_trigger}` : null,
-                row.hypothesis,
-            ].filter((line): line is string => line !== null).join("\n\n"),
-            proposedBehavior: null,
-            confidence: "medium",
-            frequency: 0,
-            evidence: row.hypothesis,
-        };
-    }
-    if (row.form === "hook") {
-        return {
-            form: "hook",
-            experimentId,
-            proposalId,
-            shortId,
-            title: row.title,
-            targetPath: "~/.claude/settings.json",
-            section: row.hook_payload?.event_name ?? "PreToolUse",
-            suggestedBody: row.hook_payload?.hook_command ?? `see proposal: ${row.dedupe_sig}`,
-            proposedBehavior: row.hook_payload?.target_tool ?? null,
-            confidence: "medium",
-            frequency: 0,
-            evidence: row.hypothesis,
-            safety: safetyContractFromPayload(row.hook_payload),
-        };
-    }
-    if (row.form === "automation") {
-        return {
-            form: "automation",
-            experimentId,
-            proposalId,
-            shortId,
-            title: row.title,
-            targetPath: `.ax/interventions/${row.dedupe_sig}/AUTOMATION.md`,
-            section: row.automation_payload?.schedule ?? null,
-            suggestedBody: row.automation_payload?.action ?? `see proposal: ${row.dedupe_sig}`,
-            proposedBehavior: row.automation_payload?.trigger_signal ?? null,
-            confidence: "medium",
-            frequency: 0,
-            evidence: row.hypothesis,
-            safety: safetyContractFromPayload(row.automation_payload),
-        };
-    }
-    if (row.form === "harness_check") {
-        const baselineEvidence = typeof row.baseline === "string" && row.baseline.trim().length > 0
-            ? `\n\nBaseline evidence:\n${row.baseline}`
-            : "";
-        const evidence = `${row.hypothesis}${baselineEvidence}`;
-        return {
-            form: "harness_check",
-            experimentId,
-            proposalId: `proposal:${recordKeyPart(row.id, "proposal") ?? row.dedupe_sig}`,
-            shortId,
-            title: row.title,
-            targetPath: `tests/harness/${row.dedupe_sig}.md`,
-            section: null,
-            suggestedBody: evidence,
-            proposedBehavior: evidence,
-            confidence: row.confidence ?? "medium",
-            frequency: row.frequency ?? 0,
-            evidence,
-        };
-    }
-    // skill form
-    return {
+interface TaskBuildContext {
+    readonly shortId: string;
+    readonly proposalId: string;
+}
+
+type TaskInputBuilder = (
+    row: FullProposalRow,
+    experimentId: string,
+    ctx: TaskBuildContext,
+) => TaskInput;
+
+const taskInputBuilders = {
+    guidance: (row, experimentId, { shortId, proposalId }) => ({
+        form: "guidance",
+        experimentId,
+        proposalId,
+        shortId,
+        title: row.title,
+        targetPath: row.guidance_payload?.file_target ?? "~/.claude/CLAUDE.md",
+        section: row.guidance_payload?.section ?? null,
+        suggestedBody: row.guidance_payload?.suggested_text ?? row.hypothesis,
+        proposedBehavior: null,
+        confidence: row.confidence ?? "medium",
+        frequency: row.frequency ?? 0,
+        evidence: row.hypothesis,
+    }),
+    skill: (row, experimentId, { shortId, proposalId }) => ({
         form: "skill",
         experimentId,
         proposalId,
@@ -274,7 +204,87 @@ const buildTaskInput = (row: FullProposalRow, experimentId: string): TaskInput =
         confidence: row.confidence ?? "medium",
         frequency: row.frequency ?? 0,
         evidence: row.hypothesis,
-    };
+    }),
+    harness_check: (row, experimentId, { shortId, proposalId }) => {
+        const baselineEvidence = typeof row.baseline === "string" && row.baseline.trim().length > 0
+            ? `\n\nBaseline evidence:\n${row.baseline}`
+            : "";
+        const evidence = `${row.hypothesis}${baselineEvidence}`;
+        return {
+            form: "harness_check",
+            experimentId,
+            proposalId,
+            shortId,
+            title: row.title,
+            targetPath: `tests/harness/${row.dedupe_sig}.md`,
+            section: null,
+            suggestedBody: evidence,
+            proposedBehavior: evidence,
+            confidence: row.confidence ?? "medium",
+            frequency: row.frequency ?? 0,
+            evidence,
+        };
+    },
+    subagent: (row, experimentId, { shortId, proposalId }) => ({
+        form: "subagent",
+        experimentId,
+        proposalId,
+        shortId,
+        title: row.title,
+        targetPath: `~/.claude/agents/${row.dedupe_sig}.md`,
+        section: null,
+        suggestedBody: [
+            row.subagent_payload?.bounded_role ? `Role: ${row.subagent_payload.bounded_role}` : null,
+            row.subagent_payload?.delegation_trigger ? `Delegation trigger: ${row.subagent_payload.delegation_trigger}` : null,
+            row.hypothesis,
+        ].filter((line): line is string => line !== null).join("\n\n"),
+        proposedBehavior: null,
+        confidence: "medium",
+        frequency: 0,
+        evidence: row.hypothesis,
+    }),
+    hook: (row, experimentId, { shortId, proposalId }) => ({
+        form: "hook",
+        experimentId,
+        proposalId,
+        shortId,
+        title: row.title,
+        targetPath: "~/.claude/settings.json",
+        section: row.hook_payload?.event_name ?? "PreToolUse",
+        suggestedBody: row.hook_payload?.hook_command ?? `see proposal: ${row.dedupe_sig}`,
+        proposedBehavior: row.hook_payload?.target_tool ?? null,
+        confidence: "medium",
+        frequency: 0,
+        evidence: row.hypothesis,
+        safety: safetyContractFromPayload(row.hook_payload),
+    }),
+    automation: (row, experimentId, { shortId, proposalId }) => ({
+        form: "automation",
+        experimentId,
+        proposalId,
+        shortId,
+        title: row.title,
+        targetPath: `.ax/interventions/${row.dedupe_sig}/AUTOMATION.md`,
+        section: row.automation_payload?.schedule ?? null,
+        suggestedBody: row.automation_payload?.action ?? `see proposal: ${row.dedupe_sig}`,
+        proposedBehavior: row.automation_payload?.trigger_signal ?? null,
+        confidence: "medium",
+        frequency: 0,
+        evidence: row.hypothesis,
+        safety: safetyContractFromPayload(row.automation_payload),
+    }),
+} satisfies Record<InterventionForm, TaskInputBuilder>;
+
+/**
+ * Map a full proposal row + experimentId to a TaskInput for renderTaskFile.
+ */
+const buildTaskInput = (row: FullProposalRow, experimentId: string): TaskInput => {
+    const shortId = row.dedupe_sig;
+    const proposalId = `proposal:${recordKeyPart(row.id, "proposal") ?? row.dedupe_sig}`;
+    if (!isInterventionForm(row.form)) {
+        throw new Error(`unsupported proposal form: ${row.form}`);
+    }
+    return taskInputBuilders[row.form](row, experimentId, { shortId, proposalId });
 };
 
 const safetyContractFromPayload = (
@@ -290,6 +300,13 @@ const safetyContractFromPayload = (
     disableCommand: payload?.disable_command ?? null,
     failureMode: payload?.failure_mode ?? null,
 });
+
+const safetyContractForRow = (row: FullProposalRow): InterventionSafetyContract | null => {
+    const payloadKey = interventionFormSpec(row.form)?.safetyPayloadKey;
+    if (payloadKey === "hook_payload") return safetyContractFromPayload(row.hook_payload);
+    if (payloadKey === "automation_payload") return safetyContractFromPayload(row.automation_payload);
+    return null;
+};
 
 export interface AcceptOptions {
     readonly sigOrId: string;
@@ -335,11 +352,7 @@ export const acceptProposal = (
             form: row.form,
             proposalStatus: row.status,
             autoScaffold: Boolean(opts.autoScaffold),
-            safetyContract: row.form === "hook"
-                ? safetyContractFromPayload(row.hook_payload)
-                : row.form === "automation"
-                    ? safetyContractFromPayload(row.automation_payload)
-                    : null,
+            safetyContract: safetyContractForRow(row),
         });
         if (acceptPlan.status === "wrong_status") {
             const db = yield* SurrealClient;

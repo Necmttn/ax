@@ -1,7 +1,11 @@
 import { Effect } from "effect";
 import { SurrealClient } from "@ax/lib/db";
 import type { ProposalDto } from "@ax/lib/shared/dashboard-types";
-import { estimateImpactCached, ROUTING_PROPOSAL_TITLE } from "../improve/impact.ts";
+import {
+    estimateImpactCached,
+    type ImpactEstimateCache,
+    ROUTING_PROPOSAL_TITLE,
+} from "../improve/impact.ts";
 import { renderAgentBrief } from "./agent-brief.ts";
 
 // Experiment-loop shortlist + verdict state. Reads proposal +
@@ -69,11 +73,38 @@ export const renderHypothesisTemplate = (
  *  expires. Fail-open per proposal - a broken query keeps the frozen
  *  hypothesis. Hydration results cache per sig for 5 minutes. */
 const HYDRATE_TTL_MS = 5 * 60_000;
-const hydrateCache = new Map<string, { hypothesis: string; at: number }>();
 
-export function resetHydrateCacheForTest(): void {
-    hydrateCache.clear();
+export interface HypothesisHydrationCache {
+    readonly get: (dedupeSig: string, nowMs: number) => string | null;
+    readonly set: (dedupeSig: string, hypothesis: string, nowMs: number) => void;
 }
+
+export const createHypothesisHydrationCache = (
+    opts: { readonly ttlMs?: number } = {},
+): HypothesisHydrationCache => {
+    const ttlMs = opts.ttlMs ?? HYDRATE_TTL_MS;
+    const cache = new Map<string, { hypothesis: string; at: number }>();
+    return {
+        get: (dedupeSig, nowMs) => {
+            const hit = cache.get(dedupeSig);
+            return hit && nowMs - hit.at < ttlMs ? hit.hypothesis : null;
+        },
+        set: (dedupeSig, hypothesis, nowMs) => {
+            cache.set(dedupeSig, { hypothesis, at: nowMs });
+        },
+    };
+};
+
+export interface ImproveProposalHydrationDeps {
+    readonly hydrationCache?: HypothesisHydrationCache;
+    readonly impactCache?: ImpactEstimateCache;
+    readonly nowMs?: () => number;
+}
+
+const defaultHydrationCache = createHypothesisHydrationCache();
+
+const currentMs = (deps: ImproveProposalHydrationDeps): number =>
+    deps.nowMs?.() ?? Date.now();
 
 /** The mined routing proposal predates hypothesis_template/evidence_query,
  *  so its dollar figure freezes at mine time while the impact endpoint
@@ -82,8 +113,8 @@ export function resetHydrateCacheForTest(): void {
  *  drawer impact then cannot disagree. Fail-open: any error keeps the
  *  frozen text. */
 const hydrateRoutingHypothesis = Effect.fn("dashboard.hydrateRoutingHypothesis")(
-    function* (p: ProposalDto) {
-        const est = yield* estimateImpactCached(p, Date.now()).pipe(
+    function* (p: ProposalDto, deps: ImproveProposalHydrationDeps) {
+        const est = yield* estimateImpactCached(p, currentMs(deps), deps.impactCache).pipe(
             Effect.catch(() => Effect.succeed(null)),
         );
         if (est === null || est.kind !== "savings_usd") return p;
@@ -97,16 +128,19 @@ const hydrateRoutingHypothesis = Effect.fn("dashboard.hydrateRoutingHypothesis")
 
 const hydrateHypothesis = Effect.fn("dashboard.hydrateHypothesis")(function* (
     p: ProposalDto,
+    deps: ImproveProposalHydrationDeps,
 ) {
     if (p.form === "hook" && p.title === ROUTING_PROPOSAL_TITLE) {
-        return yield* hydrateRoutingHypothesis(p);
+        return yield* hydrateRoutingHypothesis(p, deps);
     }
     const template = p.hypothesis_template;
     const query = p.evidence_query;
     if (!template || !query || !/^(SELECT|RETURN)\b/i.test(query.trim())) return p;
-    const hit = hydrateCache.get(p.dedupe_sig);
-    if (hit && Date.now() - hit.at < HYDRATE_TTL_MS) {
-        return { ...p, hypothesis: hit.hypothesis };
+    const cache = deps.hydrationCache ?? defaultHydrationCache;
+    const nowMs = currentMs(deps);
+    const hit = cache.get(p.dedupe_sig, nowMs);
+    if (hit !== null) {
+        return { ...p, hypothesis: hit };
     }
     const db = yield* SurrealClient;
     const hydrated = yield* db.query<[Array<Record<string, unknown>>]>(query).pipe(
@@ -117,18 +151,18 @@ const hydrateHypothesis = Effect.fn("dashboard.hydrateHypothesis")(function* (
         Effect.catch(() => Effect.succeed(null)),
     );
     if (hydrated === null) return p;
-    hydrateCache.set(p.dedupe_sig, { hypothesis: hydrated, at: Date.now() });
+    cache.set(p.dedupe_sig, hydrated, nowMs);
     return { ...p, hypothesis: hydrated };
 });
 
 /** Raw proposal rows, loosely typed at the edge like the legacy queryApi endpoints. */
 export const fetchImproveProposals = Effect.fn("dashboard.fetchImproveProposals")(
-    function* () {
+    function* (deps: ImproveProposalHydrationDeps = {}) {
         const db = yield* SurrealClient;
         const result = yield* db.query<[Array<Record<string, unknown>>]>(PROPOSALS_SQL);
         // TODO: replace with schema decode when the proposal wire shape stabilizes
         const rows = (result[0] ?? []) as unknown as ReadonlyArray<ProposalDto>;
-        const hydrated = yield* Effect.all(rows.map((p) => hydrateHypothesis(p)), {
+        const hydrated = yield* Effect.all(rows.map((p) => hydrateHypothesis(p, deps)), {
             concurrency: 4,
         });
         return hydrated.map(withBrief);
