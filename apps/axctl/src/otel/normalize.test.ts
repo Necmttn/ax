@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { normalizeMetrics, normalizeTrace } from "./normalize.ts";
+import { normalizeLogs, normalizeMetrics, normalizeTrace } from "./normalize.ts";
 
 const CC_METRICS = {
     resourceMetrics: [{
@@ -63,7 +63,6 @@ describe("normalize", () => {
     });
 });
 
-import { normalizeLogs } from "./normalize.ts";
 import codexLogs from "./__fixtures__/codex-logs.json" with { type: "json" };
 
 describe("normalizeLogs", () => {
@@ -89,5 +88,104 @@ describe("normalizeLogs", () => {
         const noise = { resourceLogs: [{ resource: { attributes: [{ key: "service.name", value: { stringValue: "codex_exec" } }] },
             scopeLogs: [{ logRecords: [{ attributes: [{ key: "event.name", value: { stringValue: "codex.websocket_event" } }] }] }] }] };
         expect(normalizeLogs(noise as never)).toHaveLength(0);
+    });
+
+    test("Claude docs events are kept while non-allowlisted noise is dropped", () => {
+        const claudeLogs = {
+            resourceLogs: [{
+                resource: { attributes: [{ key: "service.name", value: { stringValue: "claude-code" } }] },
+                scopeLogs: [{ logRecords: [
+                    { attributes: [
+                        { key: "event.name", value: { stringValue: "claude_code.tool_result" } },
+                        { key: "session.id", value: { stringValue: "claude-session-1" } },
+                    ] },
+                    { attributes: [
+                        { key: "event.name", value: { stringValue: "claude_code.api_request" } },
+                        { key: "session.id", value: { stringValue: "claude-session-1" } },
+                        { key: "input_token_count", value: { stringValue: "120" } },
+                        { key: "output_token_count", value: { intValue: "45" } },
+                        { key: "reasoning_token_count", value: { stringValue: "7" } },
+                        { key: "cached_token_count", value: { intValue: "3" } },
+                        { key: "tool_token_count", value: { stringValue: "2" } },
+                    ] },
+                    { attributes: [
+                        { key: "event.name", value: { stringValue: "claude_code.compaction" } },
+                        { key: "session.id", value: { stringValue: "claude-session-1" } },
+                    ] },
+                    { attributes: [
+                        { key: "event.name", value: { stringValue: "claude_code.debug_noise" } },
+                        { key: "session.id", value: { stringValue: "claude-session-1" } },
+                    ] },
+                ] }],
+            }],
+        };
+
+        const rows = normalizeLogs(claudeLogs as never);
+        const names = rows.map((r) => r.event_name);
+
+        expect(names).toEqual([
+            "claude_code.tool_result",
+            "claude_code.api_request",
+            "claude_code.compaction",
+        ]);
+        expect(names).not.toContain("claude_code.debug_noise");
+        expect(rows.every((r) => r.harness === "claude")).toBe(true);
+        expect(rows.every((r) => r.session_id === "claude-session-1")).toBe(true);
+
+        const apiRequest = rows.find((r) => r.event_name === "claude_code.api_request");
+        expect(apiRequest).toBeDefined();
+        expect(apiRequest!.input_tokens).toBe(120);
+        expect(apiRequest!.output_tokens).toBe(45);
+        expect(apiRequest!.reasoning_tokens).toBe(7);
+        expect(apiRequest!.cached_tokens).toBe(3);
+        expect(apiRequest!.tool_tokens).toBe(2);
+    });
+
+    test("Claude body event names are canonicalized and raw API body events stay excluded", () => {
+        const claudeLogs = {
+            resourceLogs: [{
+                resource: { attributes: [{ key: "service.name", value: { stringValue: "claude-code" } }] },
+                scopeLogs: [{ logRecords: [
+                    { body: { stringValue: "claude_code.tool_result" }, attributes: [
+                        { key: "event.name", value: { stringValue: "tool_result" } },
+                        { key: "session.id", value: { stringValue: "claude-session-2" } },
+                    ] },
+                    { body: { stringValue: "claude_code.api_request" }, attributes: [
+                        { key: "event.name", value: { stringValue: "api_request" } },
+                        { key: "session.id", value: { stringValue: "claude-session-2" } },
+                        { key: "input_token_count", value: { intValue: "11" } },
+                        { key: "output_token_count", value: { intValue: "5" } },
+                    ] },
+                    { body: { stringValue: "claude_code.at_mention" }, attributes: [
+                        { key: "event.name", value: { stringValue: "at_mention" } },
+                        { key: "session.id", value: { stringValue: "claude-session-2" } },
+                    ] },
+                    { body: { stringValue: "claude_code.api_request_body" }, attributes: [
+                        { key: "event.name", value: { stringValue: "api_request_body" } },
+                        { key: "session.id", value: { stringValue: "claude-session-2" } },
+                    ] },
+                    { body: { stringValue: "claude_code.api_response_body" }, attributes: [
+                        { key: "event.name", value: { stringValue: "api_response_body" } },
+                        { key: "session.id", value: { stringValue: "claude-session-2" } },
+                    ] },
+                ] }],
+            }],
+        };
+
+        const rows = normalizeLogs(claudeLogs as never);
+        const names = rows.map((r) => r.event_name);
+
+        expect(names).toEqual([
+            "claude_code.tool_result",
+            "claude_code.api_request",
+        ]);
+        expect(names).not.toContain("claude_code.at_mention");
+        expect(names).not.toContain("claude_code.api_request_body");
+        expect(names).not.toContain("claude_code.api_response_body");
+        expect(rows.every((r) => r.session_id === "claude-session-2")).toBe(true);
+
+        const apiRequest = rows.find((r) => r.event_name === "claude_code.api_request");
+        expect(apiRequest!.input_tokens).toBe(11);
+        expect(apiRequest!.output_tokens).toBe(5);
     });
 });
