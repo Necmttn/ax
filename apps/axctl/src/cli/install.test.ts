@@ -6,6 +6,7 @@ import {
     parseDaemonCommand,
     resolveDaemonHostPort,
     staleRunningIngestRuns,
+    watcherProfilePublishDoctorCheck,
     type DaemonStatus,
     type DoctorReport,
 } from "./install.ts";
@@ -141,6 +142,30 @@ describe("cli install operations", () => {
         expect(JSON.parse(formatDoctorReport(report, true)).checks[0]).toMatchObject({
             name: "binary",
             ok: true,
+        });
+    });
+
+    test("doctor flags watcher profile publish freshness drift", () => {
+        const check = watcherProfilePublishDoctorCheck(
+            "<string>/bin/ax profile publish --if-stale=6 >>watcher.log 2&gt;&amp;1 || true</string>",
+        );
+
+        expect(check).toEqual({
+            name: "watcher-profile-publish",
+            ok: false,
+            detail: "profile publish uses --if-stale=6; expected --if-stale=2; run 'axctl install' to refresh the watcher plist",
+        });
+    });
+
+    test("doctor accepts the current watcher profile publish freshness gate", () => {
+        const check = watcherProfilePublishDoctorCheck(
+            "<string>/bin/ax profile publish --if-stale=2 >>watcher.log 2&gt;&amp;1 || true</string>",
+        );
+
+        expect(check).toEqual({
+            name: "watcher-profile-publish",
+            ok: true,
+            detail: "profile publish freshness gate: 2h",
         });
     });
 });

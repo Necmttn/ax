@@ -4,7 +4,7 @@
 
 **Goal:** `ax profile publish` pushes the ProfileV1 artifact to a user-owned public gist (create once, PATCH in place), registers the user via fork + PR into `Necmttn/ax` (`community/users/<login>.json`), and the watcher keeps the gist fresh; `ax profile unpublish` reverses it.
 
-**Architecture:** A `GitHubEnv` Effect service (mirrors hooks-sdk `GitEnv`: Context.Service + Live/Test layers) wraps every `gh api` call so all publish logic is layer-testable without network. Local consent + gist state lives in `~/.ax/profile-publish.json` (atomic-write). The publish pipeline: render (Plan 1 `buildProfile`) → first-run consent (print exact JSON, y/N) → gist create/patch → one-time registration (fork → remote commit via git-data API, no local clone → PR). Watcher plist gains a debounced `profile publish --if-stale=6h` step that silently no-ops until the user has consented once.
+**Architecture:** A `GitHubEnv` Effect service (mirrors hooks-sdk `GitEnv`: Context.Service + Live/Test layers) wraps every `gh api` call so all publish logic is layer-testable without network. Local consent + gist state lives in `~/.ax/profile-publish.json` (atomic-write). The publish pipeline: render (Plan 1 `buildProfile`) → first-run consent (print exact JSON, y/N) → gist create/patch → one-time registration (fork → remote commit via git-data API, no local clone → PR). Watcher plist gains a debounced `profile publish --if-stale=2h` step that silently no-ops until the user has consented once.
 
 **Tech Stack:** bun, effect@beta v4, `gh` CLI (auth + API transport), `@ax/lib/atomic-write`, bun:test with layer mocks.
 
@@ -810,7 +810,7 @@ Expected: all pass (no new RUNTIME entries needed - `profile` family already reg
 - [ ] **Step 3: Live smoke (careful - real GitHub)**
 
 ```bash
-bun apps/axctl/src/cli/index.ts profile publish --if-stale=6   # no state -> silent no-op, exit 0
+bun apps/axctl/src/cli/index.ts profile publish --if-stale=2   # no state -> silent no-op, exit 0
 bun apps/axctl/src/cli/index.ts profile unpublish              # "not published" message
 ```
 Do NOT run a real first publish in CI/implementation - that creates a real gist + PR. The consent prompt path is verified by the y/N abort: run `echo n | bun apps/axctl/src/cli/index.ts profile publish` and expect "Aborted".
@@ -840,7 +840,7 @@ cd __AX_DIR__ && bun src/cli/index.ts ingest --since=1 >>__LOG_DIR__/watcher.log
 to:
 
 ```
-cd __AX_DIR__ && bun src/cli/index.ts ingest --since=1 >>__LOG_DIR__/watcher.log 2>&1; bun src/cli/index.ts profile publish --if-stale=6 >>__LOG_DIR__/watcher.log 2>&1 || true
+cd __AX_DIR__ && bun src/cli/index.ts ingest --since=1 >>__LOG_DIR__/watcher.log 2>&1; bun src/cli/index.ts profile publish --if-stale=2 >>__LOG_DIR__/watcher.log 2>&1 || true
 ```
 
 (`;` not `&&` - a failed ingest must not block the freshness check; `|| true` keeps launchd happy. The publish step is a silent no-op until the user has consented once - no state file, no publish, no prompt.)
@@ -856,7 +856,7 @@ Expected: `OK`.
 
 ```bash
 git add scripts/com.necmttn.ax-watch.plist
-git commit -m "feat(watcher): keep published profile fresh (publish --if-stale=6)"
+git commit -m "feat(watcher): keep published profile fresh (publish --if-stale=2)"
 ```
 
 ---
@@ -885,7 +885,7 @@ profile (ProfileV1: stats + rig + taste patterns) from the graph.
 publish to a public gist (create once, PATCH in place). First run: consent
 prompt showing the exact JSON, then fork + community/users/<login>.json
 registration PR into Necmttn/ax (git-data API, no local clone). Watcher runs
-`--if-stale=6` after ingest - silent no-op until first consent.
+`--if-stale=2` after ingest - silent no-op until first consent.
 `ax profile unpublish` - delete gist + local state.
 State: `~/.ax/profile-publish.json`. Spec:
 docs/superpowers/specs/2026-06-12-ax-profiles-design.md.

@@ -60,6 +60,7 @@ const DB_LABEL = "com.necmttn.ax-db";
 const WATCH_LABEL = "com.necmttn.ax-watch";
 const DERIVE_LABEL = "com.necmttn.ax-derive-daily";
 const QUOTA_REFRESH_LABEL = "com.necmttn.ax-quota-refresh";
+export const PROFILE_PUBLISH_IF_STALE_HOURS = 2;
 const DB_PLIST = posixPath.join(LAUNCH_AGENTS_DIR, `${DB_LABEL}.plist`);
 const WATCH_PLIST = posixPath.join(LAUNCH_AGENTS_DIR, `${WATCH_LABEL}.plist`);
 const DERIVE_PLIST = posixPath.join(LAUNCH_AGENTS_DIR, `${DERIVE_LABEL}.plist`);
@@ -176,7 +177,7 @@ const watchPlist = (binPath: string): string => `<?xml version="1.0" encoding="U
   <array>
     <string>/bin/bash</string>
     <string>-lc</string>
-    <string>${binPath} ingest --since=1 >>${LOG_DIR}/watcher.log 2>&amp;1 &amp;&amp; ${binPath} derive-signals --since=1 >>${LOG_DIR}/watcher.log 2>&amp;1; ${binPath} profile publish --if-stale=2 >>${LOG_DIR}/watcher.log 2>&amp;1 || true</string>
+    <string>${binPath} ingest --since=1 >>${LOG_DIR}/watcher.log 2>&amp;1 &amp;&amp; ${binPath} derive-signals --since=1 >>${LOG_DIR}/watcher.log 2>&amp;1; ${binPath} profile publish --if-stale=${PROFILE_PUBLISH_IF_STALE_HOURS} >>${LOG_DIR}/watcher.log 2>&amp;1 || true</string>
   </array>
   <key>WatchPaths</key>
   <array>
@@ -199,6 +200,33 @@ const watchPlist = (binPath: string): string => `<?xml version="1.0" encoding="U
 </dict>
 </plist>
 `;
+
+export function watcherProfilePublishDoctorCheck(plistText: string): DoctorCheck {
+    const expected = PROFILE_PUBLISH_IF_STALE_HOURS;
+    const match = /profile publish --if-stale=(\d+)/.exec(plistText);
+    if (!match) {
+        return {
+            name: "watcher-profile-publish",
+            ok: false,
+            detail: `watcher plist is missing profile publish --if-stale=${expected}; run 'axctl install' to refresh the watcher plist`,
+        };
+    }
+
+    const actual = Number.parseInt(match[1] ?? "", 10);
+    if (actual === expected) {
+        return {
+            name: "watcher-profile-publish",
+            ok: true,
+            detail: `profile publish freshness gate: ${expected}h`,
+        };
+    }
+
+    return {
+        name: "watcher-profile-publish",
+        ok: false,
+        detail: `profile publish uses --if-stale=${actual}; expected --if-stale=${expected}; run 'axctl install' to refresh the watcher plist`,
+    };
+}
 
 // Daily full ETL: runs once a day at 04:00 local time. Full ingest (no
 // --since) repulls every transcript file mtime cutoff = 0, then derives all
@@ -895,6 +923,9 @@ export function collectDoctorReport(): Effect.Effect<
         const runtimeStateExists = yield* fs
             .exists(daemon.endpoint.runtimeStatePath)
             .pipe(orAbsent(false));
+        const watcherPlistText = yield* fs
+            .readFileString(WATCH_PLIST)
+            .pipe(orAbsent<string | null>(null));
         const dbReachable = daemon.dbListening && daemon.endpoint.conflict === null;
         const missingBuckets = dbReachable
             ? yield* Effect.promise(() => probeMissingBuckets(daemon.endpoint))
@@ -953,6 +984,9 @@ export function collectDoctorReport(): Effect.Effect<
                 detail: `${agent.loaded ? "loaded" : "not loaded"}; plist=${agent.plistExists ? "present" : "absent"}`,
             })),
         ];
+        if (watcherPlistText !== null) {
+            checks.push(watcherProfilePublishDoctorCheck(watcherPlistText));
+        }
         if (missingBuckets !== null) {
             checks.push({
                 name: "db-buckets",

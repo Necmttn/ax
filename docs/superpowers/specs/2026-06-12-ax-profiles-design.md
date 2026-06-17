@@ -175,7 +175,7 @@ Identity proof: CI requires PR author == `github` field == filename.
     create gist; `gh repo fork Necmttn/ax`; commit
     `community/users/<login>.json` via GitHub API (blob/tree/commit - no
     local clone, zero disk); open registration PR.
-  - Subsequent runs: PATCH gist in place. `--if-stale=6h` reads remote
+  - Subsequent runs: PATCH gist in place. `--if-stale=2h` reads remote
     `generated_at` and no-ops when fresh (cheap; used by automation).
 - `ax profile show [--json]` - local preview, no publish.
 - `ax profile unpublish` - delete gist; open PR removing registration file.
@@ -265,7 +265,7 @@ non-goal.
 ## 5. Automation
 
 - **Client:** watcher (`com.necmttn.ax-watch`) post-ingest hook runs
-  `ax profile publish --if-stale=6h` after a successful ingest - profile
+  `ax profile publish --if-stale=2h` after a successful ingest - profile
   refreshes whenever the user codes. Debounce lives inside the command.
 - **Fallback:** `ax install` registers a daily LaunchAgent timer for machines
   where the watcher misses. Publish remains explicit opt-in (interactive
