@@ -331,6 +331,25 @@ DEFINE INDEX IF NOT EXISTS tool_call_command_tool_ts ON tool_call FIELDS command
 DEFINE INDEX IF NOT EXISTS tool_call_error_ts ON tool_call FIELDS has_error, ts;
 DEFINE INDEX IF NOT EXISTS tool_call_agent_event ON tool_call FIELDS agent_event;
 
+-- Content-type classification of tool_call outputs (derive-content-types stage).
+-- Closed taxonomy; one node per category. See content-type-classify.ts.
+DEFINE TABLE content_type SCHEMAFULL;
+DEFINE FIELD category    ON content_type TYPE string;
+DEFINE FIELD label       ON content_type TYPE string;
+
+-- has_content: tool_call -> content_type. Denormalizes session + bytes so every
+-- downstream rollup is deref-free (house idiom; derefs in aggregates hang prod).
+DEFINE TABLE has_content TYPE RELATION FROM tool_call TO content_type SCHEMAFULL;
+DEFINE FIELD method      ON has_content TYPE string;
+DEFINE FIELD confidence  ON has_content TYPE float DEFAULT 1.0;
+DEFINE FIELD fine_label  ON has_content TYPE option<string>;
+DEFINE FIELD bytes       ON has_content TYPE int DEFAULT 0;
+DEFINE FIELD session     ON has_content TYPE option<record<session>>;
+DEFINE FIELD ts          ON has_content TYPE datetime;
+DEFINE INDEX IF NOT EXISTS has_content_in  ON has_content FIELDS in;
+DEFINE INDEX IF NOT EXISTS has_content_out ON has_content FIELDS out;
+DEFINE INDEX IF NOT EXISTS has_content_session ON has_content FIELDS session;
+
 DEFINE TABLE plan SCHEMAFULL;
 DEFINE FIELD session        ON plan TYPE option<record<session>>;
 DEFINE FIELD source         ON plan TYPE option<string>;

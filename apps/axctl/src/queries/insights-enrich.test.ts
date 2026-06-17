@@ -11,7 +11,7 @@ import { describe, expect, test } from "bun:test";
 import { Effect, type Layer } from "effect";
 import { SurrealClient } from "@ax/lib/db";
 import { makeTestSurrealClient } from "@ax/lib/testing/surreal";
-import { enrichInsightRows } from "./insights-enrich.ts";
+import { enrichInsightRows, foldContentTypeOntoFriction } from "./insights-enrich.ts";
 
 function makeMockDb(): { layer: Layer.Layer<SurrealClient>; captured: string[] } {
     const tc = makeTestSurrealClient({
@@ -125,7 +125,57 @@ describe("enrichInsightRows", () => {
         expect(rows[0]!.otlp_tokens).toBe(800);
         expect(rows[1]!.otlp_cost_usd).toBeNull();
         expect(rows[1]!.otlp_tokens).toBeNull();
-        // Only 2 queries total (otel_metric_point + otel_log_event) - one batch, not per-row
-        expect(tc.captured).toHaveLength(2);
+        // 3 queries total: otel_metric_point + otel_log_event + has_content
+        expect(tc.captured).toHaveLength(3);
+    });
+
+    test("friction: enriches rows with contentType from session-dominant has_content category", async () => {
+        const tc = makeTestSurrealClient({
+            denyWrites: true,
+            routes: [
+                { match: "FROM otel_metric_point", rows: [[]] },
+                { match: "FROM otel_log_event", rows: [[]] },
+                {
+                    match: "FROM has_content",
+                    rows: [[
+                        { sid: "session:s1", ct: "content_type:unknown", bytes: 500 },
+                        { sid: "session:s1", ct: "content_type:code", bytes: 200 },
+                    ]],
+                },
+            ],
+        });
+        const frictionRows = [
+            { id: "friction_event:f1", session_ref: "session:s1", session: "session:s1", kind: "tool_failure", ts: new Date() },
+            { id: "friction_event:f2", session_ref: "session:s2", session: "session:s2", kind: "tool_failure", ts: new Date() },
+        ];
+        const rows = await Effect.runPromise(
+            enrichInsightRows("friction", frictionRows).pipe(Effect.provide(tc.layer)),
+        );
+        // session s1 has dominant category "unknown" (500 bytes > 200)
+        expect(rows[0]!.contentType).toBe("unknown");
+        // session s2 has no has_content data
+        expect(rows[1]!.contentType).toBeNull();
+    });
+});
+
+describe("foldContentTypeOntoFriction", () => {
+    test("tags each friction row with the dominant content type of its session", () => {
+        const rows = [
+            { id: "friction_event:f1", session_ref: "session:s1", session: "session:s1" },
+            { id: "friction_event:f2", session_ref: "session:s2", session: "session:s2" },
+        ];
+        const bySession = new Map([["s1", "unknown"]]);
+        const out = foldContentTypeOntoFriction(rows as never, bySession);
+        expect(out[0]!.contentType).toBe("unknown");
+        expect(out[1]!.contentType).toBeNull();
+    });
+
+    test("uses session_ref when present, falls back to session field", () => {
+        const rows = [
+            { id: "friction_event:f3", session: "session:abc" },
+        ];
+        const bySession = new Map([["abc", "text"]]);
+        const out = foldContentTypeOntoFriction(rows as never, bySession);
+        expect(out[0]!.contentType).toBe("text");
     });
 });

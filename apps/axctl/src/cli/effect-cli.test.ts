@@ -203,8 +203,9 @@ describe("effect cli", () => {
         //    + githubPrStage (restored GitHub PR ingest - issue #172)
         //    + digestStage (push-value digest snapshot writer)
         //    + usageStage (usage-log ingest into ax_invocation)
-        //    + loadedSkillsStage (auto-load skill activation edges).
-        expect(resolveIngestStages(testRegistry, [])).toHaveLength(30);
+        //    + loadedSkillsStage (auto-load skill activation edges)
+        //    + contentTypesStage (content-type classification of tool outputs).
+        expect(resolveIngestStages(testRegistry, [])).toHaveLength(31);
     });
 
     test("resolveIngestStages: local agent provider stages can be selected", () => {
@@ -226,6 +227,7 @@ describe("effect cli", () => {
         expect([...keys].sort()).toEqual([
             "classifier-results",
             "closure",
+            "content-types",
             "derive-metrics",
             "digest",
             "harness",

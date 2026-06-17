@@ -147,6 +147,7 @@ describe("decodeProfile", () => {
             "failure-mode",
             "problem-solving-strategy",
             "stack-choice",
+            "tool-output-mix",
             "workflow",
         ]);
     });

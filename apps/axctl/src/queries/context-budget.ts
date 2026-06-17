@@ -20,6 +20,7 @@
 import { Effect } from "effect";
 import { SurrealClient } from "@ax/lib/db";
 import { normalizeLastUsed, UNUSED_RECENT_SQL, UNUSED_SUMMARY_SQL } from "./unused-skills.ts";
+import { fetchContentTypeBreakdown, type ContentTypeBreakdown } from "./content-types.ts";
 
 const WINDOW_DAYS = 30;
 const CHARS_PER_TOKEN = 4;
@@ -84,6 +85,8 @@ export interface ContextBudgetResult {
     readonly skills: ReadonlyArray<SkillBudgetRow>;
     /** Per-source rollup, heaviest index first. */
     readonly sources: ReadonlyArray<SourceBudgetRow>;
+    /** content-type distribution of tool outputs (token-weighted). */
+    readonly contentTypes: ContentTypeBreakdown;
     readonly totals: {
         readonly skills: number;
         readonly index_chars: number;
@@ -120,11 +123,12 @@ export const fetchContextBudget = Effect.fn("queries.fetchContextBudget")(
         const db = yield* SurrealClient;
         // budget rows + bulk usage (per skill id) over the invoked edge table,
         // computed deref-free - see unused-skills.ts for the perf rationale.
-        const [rawRes, summaryRes, recentRes] = yield* Effect.all([
+        const [rawRes, summaryRes, recentRes, contentTypes] = yield* Effect.all([
             db.query<[Array<Record<string, unknown>>]>(BUDGET_SQL),
             db.query<[Array<Record<string, unknown>>]>(UNUSED_SUMMARY_SQL),
             db.query<[Array<Record<string, unknown>>]>(UNUSED_RECENT_SQL(WINDOW_DAYS)),
-        ], { concurrency: 3 });
+            fetchContentTypeBreakdown(),
+        ], { concurrency: 4 });
         const raw = rawRes?.[0] ?? [];
 
         const usageById = new Map<string, { uses: number; last: string | null }>();
@@ -218,7 +222,7 @@ export const fetchContextBudget = Effect.fn("queries.fetchContextBudget")(
             window_days: WINDOW_DAYS,
         };
 
-        return { skills, sources, totals } satisfies ContextBudgetResult;
+        return { skills, sources, totals, contentTypes } satisfies ContextBudgetResult;
     },
 );
 

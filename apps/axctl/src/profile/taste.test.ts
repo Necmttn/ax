@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { deriveTastePatterns, parseConfidence, slugify } from "./taste.ts";
+import { buildToolOutputMixPattern, deriveTastePatterns, parseConfidence, slugify } from "./taste.ts";
+import type { ContentTypeBreakdown } from "../queries/content-types.ts";
 import type { ProposalRow } from "./queries.ts";
 
 const row = (over: Partial<ProposalRow>): ProposalRow => ({
@@ -66,5 +67,37 @@ describe("deriveTastePatterns", () => {
         ]);
         expect(out).toHaveLength(1);
         expect(out[0]!.evidence.sessions).toBe(9);
+    });
+});
+
+describe("buildToolOutputMixPattern", () => {
+    const breakdown: ContentTypeBreakdown = {
+        rows: [
+            { category: "code", calls: 10, bytes: 800, estTokens: 200, tokenShare: 0.8 },
+            { category: "text", calls: 5, bytes: 200, estTokens: 50, tokenShare: 0.2 },
+        ],
+        totals: { calls: 15, bytes: 1000, estTokens: 250 },
+    };
+
+    test("builds a tool-output-mix pattern from the content breakdown", () => {
+        const p = buildToolOutputMixPattern(breakdown, 42);
+        expect(p?.category).toBe("tool-output-mix");
+        expect(p?.summary).toContain("code");
+    });
+
+    test("encodes lead share in summary", () => {
+        const p = buildToolOutputMixPattern(breakdown, 42);
+        expect(p?.summary).toContain("80%");
+    });
+
+    test("returns null when breakdown has no rows", () => {
+        const empty: ContentTypeBreakdown = { rows: [], totals: { calls: 0, bytes: 0, estTokens: 0 } };
+        expect(buildToolOutputMixPattern(empty, 10)).toBeNull();
+    });
+
+    test("evidence reflects the sessions argument", () => {
+        const p = buildToolOutputMixPattern(breakdown, 7);
+        expect(p?.evidence.sessions).toBe(7);
+        expect(p?.evidence.confidence).toBe(0.9);
     });
 });

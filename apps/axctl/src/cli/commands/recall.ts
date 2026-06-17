@@ -14,8 +14,10 @@ import { fetchRecall, normalizeRecallParams, resolveRecallSources, type RecallSo
 import { resolvePwdRepository } from "../../pwd.ts";
 import type { RuntimeManifest } from "./manifest.ts";
 import { fail, jsonFlag, parseCsvFlag } from "./shared.ts";
+import { ALL_CONTENT_CATEGORIES } from "../../ingest/content-type-classify.ts";
 
 const VALID_SOURCES: ReadonlySet<string> = new Set(["turn", "commit", "skill"]);
+const VALID_TYPES: ReadonlySet<string> = new Set<string>(ALL_CONTENT_CATEGORIES);
 
 function parseSourcesFlag(raw: string | null): ReadonlyArray<RecallSource> | null {
     if (!raw) return null;
@@ -27,6 +29,35 @@ function parseSourcesFlag(raw: string | null): ReadonlyArray<RecallSource> | nul
     return parts as ReadonlyArray<RecallSource>;
 }
 
+type ValidateTypesResult =
+    | { readonly ok: true; readonly types: ReadonlyArray<string> }
+    | { readonly ok: false; readonly invalid: ReadonlyArray<string> };
+
+/**
+ * Pure validator for content-type category names. Exported for unit tests
+ * because parseTypeFlag calls fail() which exits the process (not throwable).
+ */
+export function validateTypes(parts: ReadonlyArray<string>): ValidateTypesResult {
+    const invalid = parts.filter((p) => !VALID_TYPES.has(p));
+    if (invalid.length > 0) return { ok: false, invalid };
+    return { ok: true, types: parts };
+}
+
+/** Parse --type=csv flag into a validated list of content-type categories. */
+export function parseTypeFlag(raw: string | null): ReadonlyArray<string> | null {
+    if (!raw) return null;
+    const parts = parseCsvFlag(raw);
+    if (parts.length === 0) return null;
+    const result = validateTypes(parts);
+    if (!result.ok) {
+        fail(
+            `axctl recall: unknown content type(s): ${result.invalid.join(", ")}. ` +
+            `Valid: ${ALL_CONTENT_CATEGORIES.join(", ")}`,
+        );
+    }
+    return result.types;
+}
+
 interface RecallCliOpts {
     readonly query: string;
     readonly project: string | null;
@@ -34,6 +65,7 @@ interface RecallCliOpts {
     readonly since: string | null;
     readonly sources: string | null;
     readonly scopeFlag: string | null;
+    readonly type: string | null;
     readonly json: boolean;
 }
 
@@ -217,6 +249,7 @@ const cmdRecall = (opts: RecallCliOpts) =>
         const skill = yield* resolveSkill(opts.skill);
         const sources = parseSourcesFlag(opts.sources);
         const scope = yield* resolveScope(opts.scopeFlag);
+        const types = parseTypeFlag(opts.type);
         const result = yield* fetchRecall(normalizeRecallParams({
             q: opts.query,
             project,
@@ -224,6 +257,7 @@ const cmdRecall = (opts: RecallCliOpts) =>
             since: opts.since,
             ...(sources !== null ? { sources } : {}),
             scope,
+            ...(types !== null ? { types } : {}),
         }));
         const { hits, next } = buildRecallNext(result, {
             requestedSources: resolveRecallSources(sources),
@@ -310,9 +344,10 @@ export const recallCommand = Command.make(
         since: Flag.string("since").pipe(Flag.optional),
         sources: Flag.string("sources").pipe(Flag.optional),
         scope: Flag.string("scope").pipe(Flag.optional),
+        type: Flag.string("type").pipe(Flag.optional),
         json: jsonFlag,
     },
-    ({ query, project, skill, since, sources, scope, json }) =>
+    ({ query, project, skill, since, sources, scope, type, json }) =>
         cmdRecall({
             query: query.join(" "),
             project: Option.getOrNull(project),
@@ -320,12 +355,15 @@ export const recallCommand = Command.make(
             since: Option.getOrNull(since),
             sources: Option.getOrNull(sources),
             scopeFlag: Option.getOrNull(scope),
+            type: Option.getOrNull(type),
             json,
         }),
 ).pipe(
     Command.withDescription(
         "Cross-session text search (BM25). --sources=turn,commit,skill chooses record types (default turn). " +
         "--scope=here filters to the current repo (auto-detected); --scope=all overrides. " +
+        "--type=<csv> restricts turns to sessions whose tool outputs include the given content-type categories " +
+        "(e.g. --type=code,json; valid: json,code,diff,markdown,yaml,config,log,filelist,text,binary,empty,unknown). " +
         "--project=? / --skill=? opens an interactive picker. " +
         "See the ax:extract-workflow skill for narrating workflows behind shipped artifacts. " +
         "Output ends with a `next:` footer of copy-paste follow-up commands (drill into a session, resume it in its harness); --json carries the same links in a `next` field.",

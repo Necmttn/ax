@@ -15,6 +15,7 @@ import { Effect } from "effect";
 import { SurrealClient } from "@ax/lib/db";
 import { surrealLiteral } from "@ax/lib/json";
 import { countField, stringFieldOr } from "@ax/lib/shared/surreal";
+import { fetchContentTypeBreakdown, type ContentTypeBreakdown } from "./content-types.ts";
 
 // ---------------------------------------------------------------------------
 // Shared constants + SQL-boundary helpers
@@ -192,6 +193,11 @@ export interface CostSplitTotals {
 export interface CostSplitResult {
     readonly rows: ReadonlyArray<CostSplitRow>;
     readonly totals: CostSplitTotals;
+    /** Global content-type breakdown across all sessions in the window.
+     * CostSplitRow is aggregated by (origin x model) with no per-session id,
+     * so per-row tagging is not meaningful - the distribution is a sibling
+     * field instead. */
+    readonly contentTypes: ContentTypeBreakdown;
 }
 
 const COST_SPLIT_SQL = (sinceDays: number) => `
@@ -298,6 +304,8 @@ export const fetchCostSplit = Effect.fn("queries.fetchCostSplit")(
             cost_usd: totalCost,
         };
 
-        return { rows: splitRows, totals } satisfies CostSplitResult;
+        const contentTypes = yield* fetchContentTypeBreakdown();
+
+        return { rows: splitRows, totals, contentTypes } satisfies CostSplitResult;
     },
 );

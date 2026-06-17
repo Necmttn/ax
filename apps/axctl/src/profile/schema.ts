@@ -13,6 +13,7 @@ export const PATTERN_CATEGORIES = [
     "debugging",
     "failure-mode",
     "workflow",
+    "tool-output-mix",
     "stack-choice",
 ] as const;
 export type PatternCategory = (typeof PATTERN_CATEGORIES)[number];
@@ -39,6 +40,7 @@ const ProsePattern = Schema.Struct({
         "debugging",
         "failure-mode",
         "workflow",
+        "tool-output-mix",
     ]),
     name: Schema.String,
     summary: Schema.String,
