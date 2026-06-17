@@ -896,6 +896,7 @@ function createClaudeExtractor(path: Path.Path, projectDir: string, sessionId: s
             if (call) {
                 applyToolResult(call, result);
                 if (isClaudeTaskPlanTool(call.toolName)) {
+                    const existingSlot = taskPlanSnapshotSlotsByCallId.get(callId);
                     const slot = upsertPlanSnapshot({
                         toolName: call.toolName,
                         payload: taskToolResultPayload(call, block.content, topLevelToolUseResult),
@@ -905,7 +906,7 @@ function createClaudeExtractor(path: Path.Path, projectDir: string, sessionId: s
                             seq: call.seq,
                             callId,
                         }),
-                        existingSlot: taskPlanSnapshotSlotsByCallId.get(callId),
+                        ...(existingSlot ? { existingSlot } : {}),
                     });
                     if (slot) taskPlanSnapshotSlotsByCallId.set(callId, slot);
                 }
