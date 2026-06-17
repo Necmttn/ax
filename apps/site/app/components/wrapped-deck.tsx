@@ -56,7 +56,10 @@ export function WrappedDeck({
               {hasViz ? card.viz : null}
             </div>
             <div className="pv2-card-copy">
-              <span className="pv2-card-eyebrow">$ {card.q}</span>
+              <span className="pv2-card-eyebrow">
+                <span aria-hidden="true">$ </span>
+                {card.q}
+              </span>
               <h3 className="pv2-card-headline">{card.a}</h3>
               <p className="pv2-card-body">{card.s}</p>
             </div>

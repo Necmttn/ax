@@ -55,23 +55,26 @@ describe("WrappedDeck", () => {
       { q: "Third", a: "3", s: "third card - would normally be gold" },
     ];
     const html = render(cards);
-    // first card: accent-green (rotation)
+    // first card: accent-green (rotation, index 0)
     expect(html).toContain("accent-green");
-    // second card: accent-red (pinned)
+    // second card: accent-red (pinned, index 1)
     expect(html).toContain("accent-red");
-    // third card: accent-blue (rotation continues from index 2)
-    // note: "gold" is index 2 in the rotation, since the pinned card at i=1
-    // still consumes a rotation slot only for non-pinned cards; the pinned
-    // card is placed at i=1 so the third card (i=2) gets rotation[2]=gold
+    // third card: accent-gold (rotation by raw index, rotation[2] = gold)
     expect(html).toContain("accent-gold");
+    // the pinned card at index 1 consumed its rotation slot (blue), so blue
+    // must be skipped entirely - proving rotation keys off the raw index.
+    expect(html).not.toContain("accent-blue");
   });
 
-  it("eyebrow renders '$ ' prefix followed by question text", () => {
+  it("eyebrow renders the '$ ' prefix (aria-hidden) and question text", () => {
     const cards: InsightCard[] = [
       { q: "How deep do you go?", a: "73%", s: "supporting" },
     ];
     const html = render(cards);
-    expect(html).toContain("$ How deep do you go?");
+    // the decorative shell prefix is wrapped aria-hidden so SR skips it
+    expect(html).toContain('<span aria-hidden="true">$ </span>');
+    // the question text is rendered outside the decorative span
+    expect(html).toContain("How deep do you go?");
     expect(html).toContain("pv2-card-eyebrow");
   });
 
