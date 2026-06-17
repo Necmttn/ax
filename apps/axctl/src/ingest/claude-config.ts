@@ -14,6 +14,7 @@ import {
     surrealObject,
     surrealOptionString,
     surrealString,
+    surrealValue,
 } from "@ax/lib/shared/surql";
 import { BaseStageStats, IngestContext, StageMeta } from "./stage/types.ts";
 import type { StageDef } from "./stage/registry.ts";
@@ -509,6 +510,64 @@ const isMcpConfigFile = (file: string): boolean => {
 const isOutputStylePath = (file: string): boolean =>
     file.includes("/output-styles/") || file.includes("/output_styles/");
 
+const pluginArtifactKindFor = (file: string): GuidanceConfigArtifactKind | null => {
+    const normalized = normalizePath(file);
+    if (normalized.endsWith("/plugin.json")) return "plugin";
+    if (normalized.endsWith("/SKILL.md")) return "skill";
+    if (isMcpConfigFile(normalized)) return "mcp_server";
+    if (isMarkdownFile(normalized) && (normalized.includes("/agents/") || normalized.includes("/subagents/"))) {
+        return "agent_definition";
+    }
+    if (isMarkdownFile(normalized) && normalized.includes("/rules/")) return "rule";
+    if (isHookFile(normalized) && normalized.includes("/hooks/")) return "hook";
+    if (isWorkflowFile(normalized) && (normalized.includes("/commands/") || normalized.includes("/workflows/"))) {
+        return "workflow";
+    }
+    if (isMarkdownFile(normalized) && isOutputStylePath(normalized)) return "output_style";
+    return null;
+};
+
+const walkPluginArtifacts = (
+    args: {
+        readonly dir: string;
+        readonly home: string;
+        readonly projectRoot?: string | undefined;
+        readonly maxDepth: number;
+        readonly depth?: number | undefined;
+    },
+): Effect.Effect<GuidanceConfigArtifact[], never, FileSystem.FileSystem | Path.Path> =>
+    Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const depth = args.depth ?? 0;
+        if (depth > args.maxDepth) return [];
+        const entryKind = yield* classifyNoFollow(args.dir);
+        if (entryKind !== "Directory") return [];
+        const entries = yield* fs.readDirectory(args.dir).pipe(orAbsent<ReadonlyArray<string>>([]));
+        const out: GuidanceConfigArtifact[] = [];
+        for (const entry of entries) {
+            const full = path.join(args.dir, entry);
+            const kind = yield* classifyNoFollow(full);
+            if (kind === "Directory") {
+                const nested = yield* walkPluginArtifacts({ ...args, dir: full, depth: depth + 1 });
+                out.push(...nested);
+                continue;
+            }
+            if (kind !== "File") continue;
+            const artifactKind = pluginArtifactKindFor(full);
+            if (!artifactKind) continue;
+            const record = yield* fileRecord({
+                path: full,
+                kind: artifactKind,
+                scope: "plugin",
+                home: args.home,
+                projectRoot: args.projectRoot,
+            });
+            if (record) out.push(record);
+        }
+        return out;
+    });
+
 const pluginArtifacts = (
     home: string,
     projectRoot: string | undefined,
@@ -516,58 +575,7 @@ const pluginArtifacts = (
     Effect.gen(function* () {
         const path = yield* Path.Path;
         const pluginCache = path.join(home, ".claude", "plugins", "cache");
-        const common = { home, projectRoot, scope: "plugin" as const, maxDepth: 8 };
-        const groups = yield* Effect.all([
-            walkMatchingFiles({
-                ...common,
-                dir: pluginCache,
-                kind: "plugin",
-                include: (file) => file.endsWith("/plugin.json"),
-            }),
-            walkMatchingFiles({
-                ...common,
-                dir: pluginCache,
-                kind: "skill",
-                include: (file) => file.endsWith("/SKILL.md"),
-            }),
-            walkMatchingFiles({
-                ...common,
-                dir: pluginCache,
-                kind: "agent_definition",
-                include: (file) => isMarkdownFile(file) && (file.includes("/agents/") || file.includes("/subagents/")),
-            }),
-            walkMatchingFiles({
-                ...common,
-                dir: pluginCache,
-                kind: "rule",
-                include: (file) => isMarkdownFile(file) && file.includes("/rules/"),
-            }),
-            walkMatchingFiles({
-                ...common,
-                dir: pluginCache,
-                kind: "hook",
-                include: (file) => isHookFile(file) && file.includes("/hooks/"),
-            }),
-            walkMatchingFiles({
-                ...common,
-                dir: pluginCache,
-                kind: "workflow",
-                include: (file) => isWorkflowFile(file) && (file.includes("/commands/") || file.includes("/workflows/")),
-            }),
-            walkMatchingFiles({
-                ...common,
-                dir: pluginCache,
-                kind: "mcp_server",
-                include: isMcpConfigFile,
-            }),
-            walkMatchingFiles({
-                ...common,
-                dir: pluginCache,
-                kind: "output_style",
-                include: (file) => isMarkdownFile(file) && isOutputStylePath(file),
-            }),
-        ], { concurrency: "unbounded" });
-        return groups.flat();
+        return yield* walkPluginArtifacts({ dir: pluginCache, home, projectRoot, maxDepth: 8 });
     });
 
 export const discoverClaudeConfigArtifacts = (
@@ -790,6 +798,25 @@ export const buildGuidanceConfigStatements = (
         ])};`
     );
 
+export const buildGuidanceConfigReconcileStatements = (
+    records: readonly GuidanceConfigArtifact[],
+): string[] => {
+    const pathHashes = uniqueSorted(records.map((record) => record.pathHash));
+    if (pathHashes.length === 0) {
+        return [`DELETE ${GUIDANCE_CONFIG_ARTIFACT_TABLE} WHERE provider = ${surrealString("claude")};`];
+    }
+    return [
+        `DELETE ${GUIDANCE_CONFIG_ARTIFACT_TABLE} WHERE provider = ${surrealString("claude")} AND path_hash NOT IN ${surrealValue(pathHashes)};`,
+    ];
+};
+
+export const buildGuidanceConfigPersistenceStatements = (
+    records: readonly GuidanceConfigArtifact[],
+): string[] => [
+    ...buildGuidanceConfigReconcileStatements(records),
+    ...buildGuidanceConfigStatements(records),
+];
+
 export const ingestClaudeConfigArtifacts = (): Effect.Effect<
     IngestClaudeConfigStats,
     DbError,
@@ -802,11 +829,11 @@ export const ingestClaudeConfigArtifacts = (): Effect.Effect<
             home: cfg.paths.home,
             projectRoot: process.cwd(),
         });
-        const statements = buildGuidanceConfigStatements(records);
+        const statements = buildGuidanceConfigPersistenceStatements(records);
         yield* executeStatementsWith(db, statements, { chunkSize: 500, label: "claudeConfig" });
         return {
             discovered: records.length,
-            written: statements.length,
+            written: records.length,
         };
     });
 

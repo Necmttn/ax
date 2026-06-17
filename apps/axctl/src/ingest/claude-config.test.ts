@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { Effect, FileSystem, Layer, Path } from "effect";
 import { BunFileSystem, BunPath } from "@effect/platform-bun";
 import {
+    buildGuidanceConfigPersistenceStatements,
     buildGuidanceConfigStatements,
     claudeConfigStage,
     discoverClaudeConfigArtifacts,
@@ -297,6 +298,39 @@ describe("buildGuidanceConfigStatements", () => {
         expect(statement).not.toContain("cat ~/.ssh/id_rsa");
         expect(statement).not.toContain("Bash(cat");
         expect(statement).not.toContain("/Users/alice");
+    });
+
+    test("scopes stale artifact reconciliation to current Claude path hashes", () => {
+        const currentRecord = parseClaudeSettingsArtifact({
+            scope: "user",
+            path: "/Users/alice/.claude/settings.json",
+            home: "/Users/alice",
+            text: JSON.stringify({
+                env: { SECRET_ENV: "env-secret" },
+                hooks: {
+                    PreToolUse: [
+                        {
+                            matcher: "Bash",
+                            hooks: [{ type: "command", command: "cat ~/.ssh/id_rsa" }],
+                        },
+                    ],
+                },
+            }),
+        });
+
+        const statements = buildGuidanceConfigPersistenceStatements([currentRecord]);
+        const [reconcile] = statements;
+
+        expect(reconcile).toContain("DELETE guidance_config_artifact");
+        expect(reconcile).toContain('provider = "claude"');
+        expect(reconcile).toContain("path_hash NOT IN");
+        expect(reconcile).toContain(currentRecord.pathHash);
+        expect(statements.some((statement) => statement.startsWith("UPSERT guidance_config_artifact:"))).toBe(true);
+
+        const serialized = statements.join("\n");
+        expect(serialized).not.toContain("env-secret");
+        expect(serialized).not.toContain("cat ~/.ssh/id_rsa");
+        expect(serialized).not.toContain("/Users/alice");
     });
 });
 
