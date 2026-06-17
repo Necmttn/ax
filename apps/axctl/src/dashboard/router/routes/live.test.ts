@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
+    formatSseComment,
     formatSseEvent,
     imageContentType,
     liveRoutes,
@@ -28,6 +29,14 @@ describe("imageContentType", () => {
 describe("dashboard live routes", () => {
     test("formatSseEvent emits valid SSE frame", () => {
         expect(formatSseEvent("message", { ok: true })).toBe('event: message\ndata: {"ok":true}\n\n');
+    });
+
+    test("formatSseComment emits an EventSource-ignored keep-alive line", () => {
+        // A line starting with ':' is an SSE comment - EventSource never fires
+        // a listener for it. This is the idle keep-alive that prevents the 60s
+        // idleTimeout from reaping the socket mid-stream (issue #503).
+        expect(formatSseComment("ping")).toBe(": ping\n\n");
+        expect(formatSseComment("ping").startsWith(":")).toBe(true);
     });
 
     test("recentIngestEventsSql reads persisted ingest events", () => {

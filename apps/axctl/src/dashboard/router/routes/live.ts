@@ -39,6 +39,18 @@ export function formatSseEvent(event: string, data: unknown): string {
     return `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
 }
 
+/**
+ * SSE comment line. EventSource ignores comments (no listener fires), so this
+ * is a pure keep-alive: it writes bytes to the socket without the client
+ * treating it as an event. Needed because the daemon runs a 60s idleTimeout
+ * (server.ts) and this stream only emits on new ingest rows - an idle studio
+ * tab would otherwise see the socket reaped mid-response
+ * (ERR_INCOMPLETE_CHUNKED_ENCODING) and reconnect-storm. See issue #503.
+ */
+export function formatSseComment(text: string): string {
+    return `: ${text}\n\n`;
+}
+
 export function recentIngestEventsSql(sinceIso: string, limit = 50): string {
     const safeLimit = Number.isInteger(limit) && limit > 0 ? limit : 50;
     return `
@@ -97,6 +109,10 @@ function handleEventsRequest(runner: EffectRunner): Response {
             addIngestEventSubscriber(subscriber);
             interval = setInterval(async () => {
                 if (closed) return;
+                // Keep-alive every tick so an idle stream (no new ingest rows)
+                // still writes bytes within the daemon's 60s idleTimeout and the
+                // socket is not reaped out from under the browser (issue #503).
+                controller.enqueue(new TextEncoder().encode(formatSseComment("ping")));
                 try {
                     const result = await runner(Effect.gen(function* () {
                         const db = yield* SurrealClient;
