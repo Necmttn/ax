@@ -29,6 +29,7 @@ import { renderProfileInterviewBrief } from "../../profile/interview-brief.ts";
 import {
     decodeHighlightsFile,
     defaultHighlightsPath,
+    loadHighlightsBlock,
     saveHighlightsFile,
     type HighlightsFile,
 } from "../../profile/highlights.ts";
@@ -78,6 +79,7 @@ const gatherEnv = Effect.gen(function* () {
     }).pipe(Effect.orElseSucceed(() => false));
 
     const github = yield* resolveGithubLogin;
+    const highlights = yield* Effect.promise(() => loadHighlightsBlock(defaultHighlightsPath()));
     const now = new Date();
     return {
         github,
@@ -86,6 +88,7 @@ const gatherEnv = Effect.gen(function* () {
         hookFiles,
         hasRoutingTable,
         rulesMarkdown,
+        highlights,
     } satisfies ProfileEnv;
 });
 
