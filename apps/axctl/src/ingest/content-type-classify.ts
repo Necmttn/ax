@@ -12,7 +12,7 @@ export type ContentCategory =
   | "json" | "code" | "diff" | "markdown" | "yaml" | "config"
   | "log" | "filelist" | "text" | "binary" | "empty" | "unknown";
 
-export type ClassifyMethod = "extension" | "sniff" | "fallback";
+export type ClassifyMethod = "extension" | "sniff" | "fallback" | "empty";
 
 export interface ClassifyInput {
   /** file_path pulled from the tool input_json (Read/Edit/Write/NotebookEdit); null otherwise */
@@ -86,7 +86,7 @@ const sniff = (output: string, toolName: string | null | undefined): ContentCate
 
 export const classifyContentType = (input: ClassifyInput): ClassifyResult => {
   if (input.output.trim().length === 0) {
-    return { category: "empty", method: "extension", confidence: 1.0, fineLabel: null };
+    return { category: "empty", method: "empty", confidence: 1.0, fineLabel: null };
   }
   if (input.filePath) {
     const ext = extOf(input.filePath);

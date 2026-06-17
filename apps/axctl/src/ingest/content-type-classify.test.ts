@@ -45,4 +45,16 @@ describe("classifyContentType", () => {
   test(".png -> binary", () => {
     expect(classifyContentType({ filePath: "x.png", output: "..." }).category).toBe("binary");
   });
+
+  test("dotfile path -> config, fineLabel dotfile", () => {
+    const r = classifyContentType({ filePath: "/x/.gitignore", output: "node_modules" });
+    expect(r.category).toBe("config");
+    expect(r.fineLabel).toBe("dotfile");
+  });
+
+  test("shebang sniff, no path -> code by sniff", () => {
+    const r = classifyContentType({ filePath: null, output: "#!/bin/bash\necho hi" });
+    expect(r.category).toBe("code");
+    expect(r.method).toBe("sniff");
+  });
 });
