@@ -14,6 +14,9 @@
   --blue: #2567a8;
   --red: #c0392b;
   --amber: #b07900;
+  --gold: #b07900;    /* alias for --amber; used by accent-gold cards */
+  --violet: #6857c4;  /* mid-tone purple for light mode */
+  --rose: #b33c6e;    /* warm rose/dusty pink for light mode */
   --serif: Georgia, "Times New Roman", serif;
   --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   --sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", "Helvetica Neue", sans-serif;
@@ -15852,3 +15855,23 @@ footer.site-footer { padding: 48px 32px 56px; }
   .blog-essay .bk-split-seg-in { font-size: 11px; }
   .blog-essay .bk-bar-head { font-size: 12px; gap: 8px; }
 }
+
+/* ---- profile-v2 wrapped deck ---- */
+.pv2-deck { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px; margin: 16px 0 8px; }
+@media (max-width: 1500px) { .pv2-deck { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+@media (max-width: 1020px) { .pv2-deck { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 640px)  { .pv2-deck { grid-template-columns: 1fr; } }
+.pv2-card { border: 1px solid var(--line); background: var(--panel); display: flex; flex-direction: column; min-height: 250px; }
+.pv2-card.accent-green  { --card-accent: var(--green); }
+.pv2-card.accent-blue   { --card-accent: var(--blue); }
+.pv2-card.accent-gold   { --card-accent: var(--gold); }
+.pv2-card.accent-violet { --card-accent: var(--violet); }
+.pv2-card.accent-rose   { --card-accent: var(--rose); }
+.pv2-card.accent-red    { --card-accent: var(--red); }
+.pv2-card.accent-ink    { --card-accent: var(--ink); }
+.pv2-card-strip { display: flex; align-items: flex-end; gap: 3px; height: 56px; padding: 10px 14px 0; border-bottom: 1px solid var(--line); background: color-mix(in srgb, var(--card-accent) 6%, var(--panel)); position: relative; }
+.pv2-card-strip > * { width: 100%; }
+.pv2-card-copy { padding: 14px 16px 18px; display: flex; flex-direction: column; gap: 7px; }
+.pv2-card-eyebrow { color: var(--card-accent); font-family: var(--mono); font-size: 12px; letter-spacing: 0.01em; }
+.pv2-card-headline { margin: 0; font-family: var(--serif); font-weight: 600; font-size: clamp(24px, 2.4vw, 30px); line-height: 1.06; letter-spacing: -0.01em; color: var(--ink); }
+.pv2-card-body { margin: 0; font-size: 14px; line-height: 1.5; color: var(--muted); }
