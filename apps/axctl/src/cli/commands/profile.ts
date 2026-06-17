@@ -25,6 +25,13 @@ import {
     loadPublishState,
     savePublishState,
 } from "../../profile/publish-state.ts";
+import { renderProfileInterviewBrief } from "../../profile/interview-brief.ts";
+import {
+    decodeHighlightsFile,
+    defaultHighlightsPath,
+    saveHighlightsFile,
+    type HighlightsFile,
+} from "../../profile/highlights.ts";
 
 // ---------------------------------------------------------------------------
 // Environment gathering (the only IO in this file)
@@ -401,11 +408,80 @@ const profileUnpublishCommand = Command.make("unpublish", {}, () => cmdProfileUn
     Command.withDescription("Delete the published profile gist and local publish state."),
 );
 
+// ---------------------------------------------------------------------------
+// ax profile interview submit - validate highlights JSON and write the file.
+// ---------------------------------------------------------------------------
+
+// ax profile interview submit - validate { v, ...highlights } JSON, write the file.
+export const cmdProfileInterviewSubmit = (input: { readonly rawJson: string; readonly path: string }) =>
+    Effect.gen(function* () {
+        const parsed = yield* Effect.try({
+            try: () => JSON.parse(input.rawJson) as unknown,
+            catch: (err) => new Error(`invalid JSON: ${err instanceof Error ? err.message : String(err)}`),
+        });
+        const file: HighlightsFile = yield* decodeHighlightsFile(parsed);
+        yield* Effect.promise(() => saveHighlightsFile(input.path, file));
+        return file;
+    });
+
+// ---------------------------------------------------------------------------
+// ax profile interview - emit the interview brief
+// ---------------------------------------------------------------------------
+
+const cmdProfileInterview = (input: { readonly force: boolean }) =>
+    Effect.gen(function* () {
+        const date = new Date().toISOString().slice(0, 10);
+        const path = `.ax/tasks/profile-interview-${date}.md`;
+        const exists = yield* Effect.tryPromise(() => Bun.file(path).exists());
+        if (exists && !input.force) {
+            console.log(`already exists: ${path} (re-run with --force to overwrite)`);
+            return;
+        }
+        const env = yield* gatherEnv;
+        const profile = yield* buildProfile({ windowDays: 30, includeCost: false, env });
+        const md = renderProfileInterviewBrief({
+            date,
+            skills: profile.rig.skills.slice(0, 10).map((s) => ({ name: s.name, source: s.source })),
+            hooks: profile.rig.hooks,
+        });
+        yield* Effect.tryPromise(() => Bun.write(path, md));
+        console.log(`interview brief written: ${path}`);
+        console.log("hand it to an agent session; answers come back via `ax profile interview submit`");
+    });
+
+const profileInterviewSubmitCommand = Command.make(
+    "submit",
+    { file: Flag.string("file").pipe(Flag.optional) },
+    ({ file }) =>
+        Effect.gen(function* () {
+            const filePath = optionValue(file);
+            const rawJson = filePath !== undefined
+                ? yield* Effect.tryPromise(() => Bun.file(filePath).text())
+                : yield* Effect.tryPromise(() => Bun.stdin.text());
+            yield* cmdProfileInterviewSubmit({ rawJson, path: defaultHighlightsPath() });
+            console.log(`saved: ${defaultHighlightsPath()}`);
+            console.log("run `ax profile publish` to fold these into your public gist.");
+        }),
+).pipe(Command.withDescription(
+    "Validate { v, authored_at, setup?, skills?, taste?, wins? } JSON (stdin or --file) and write ~/.ax/profile-highlights.json.",
+));
+
+const profileInterviewCommand = Command.make(
+    "interview",
+    { force: Flag.boolean("force").pipe(Flag.withDefault(false)) },
+    ({ force }) => cmdProfileInterview({ force }),
+).pipe(
+    Command.withDescription(
+        "Emit .ax/tasks/profile-interview-<date>.md - a brief for an agent to interview you and submit highlights via `ax profile interview submit`. --force overwrites.",
+    ),
+    Command.withSubcommands([profileInterviewSubmitCommand]),
+);
+
 export const profileCommand = Command.make("profile").pipe(
     Command.withDescription(
         "Your ax profile: stats, rig, and taste rendered from the local graph",
     ),
-    Command.withSubcommands([profileShowCommand, profilePublishCommand, profileUnpublishCommand]),
+    Command.withSubcommands([profileShowCommand, profilePublishCommand, profileUnpublishCommand, profileInterviewCommand]),
 );
 
 export const axProfileRuntime: RuntimeManifest = {
