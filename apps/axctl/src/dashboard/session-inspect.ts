@@ -25,6 +25,7 @@ import type {
     SessionInspectPayload,
     SessionTokenUsageDetail,
     SpawnMeta,
+    SpawnedChild,
     ToolCallDto,
     TurnTokenUsageDetail,
 } from "@ax/lib/shared/dashboard-types";
@@ -908,6 +909,130 @@ function hookFiresForTurnWindow(
     });
 }
 
+// ============================================================================
+// Shared inspect assembly - the one place both source paths (graph rows and
+// JSONL lines) turn resolved per-turn inputs into the wire DTO. Each path owns
+// only its sourcing (seq scheme, tool-call/token resolution, empty-turn drop,
+// spawn-meta matching); the assembly below is identical for both and pure
+// (no DB), so it is the unit-test surface for the bug-prone bits.
+// ============================================================================
+
+export interface InspectTurnInput {
+    readonly seq: number;
+    readonly role: string;
+    readonly text: string;
+    readonly ts: string | null;
+    /** Source-resolved tool calls; seqs are rewritten to the display seq here. */
+    readonly toolCalls?: readonly ToolCallDto[] | undefined;
+    /** Source-resolved per-turn token usage (graph: dbSeq lookup; JSONL: derived). */
+    readonly tokenUsage: TurnTokenUsageDetail | null;
+    readonly turnContent: Map<number, InspectTurnContentDto>;
+}
+
+/** Pure: dissect one turn's text, pick its semantic role, rewrite tool-call
+ *  seqs, attach token usage + matched content. Returns the DTO plus its
+ *  per-span char contributions so the caller folds them into its own totals
+ *  (graph: page-only; JSONL: full-session). */
+export function buildInspectTurn(input: InspectTurnInput): {
+    readonly dto: InspectTurnDto;
+    readonly contributions: Partial<Record<InspectSpanKind, number>>;
+} {
+    const fallbackKind: InspectSpanKind = input.role === "assistant" ? "assistant_text" : "user_input";
+    const spans = dissectTurn(input.text, { defaultKind: fallbackKind });
+    const semantic = dominantKind(spans, fallbackKind);
+    const contributions: Partial<Record<InspectSpanKind, number>> = {};
+    for (const s of spans) contributions[s.kind] = (contributions[s.kind] ?? 0) + s.text.length;
+    const dto: InspectTurnDto = {
+        seq: input.seq,
+        role: input.role,
+        semantic_role: semantic,
+        ts: input.ts,
+        char_count: input.text.length,
+        raw_text: input.text,
+        spans: spans.map(toSpanDto),
+        token_usage: input.tokenUsage,
+        content: findTurnContent(input.turnContent, input.seq, input.text),
+        ...(input.toolCalls && input.toolCalls.length > 0
+            ? { tool_calls: input.toolCalls.map((c) => ({ ...c, seq: input.seq })) }
+            : {}),
+    };
+    return { dto, contributions };
+}
+
+/** Fold one turn's span contributions into a running totals map. */
+function addContributions(
+    target: Partial<Record<InspectSpanKind, number>>,
+    contributions: Partial<Record<InspectSpanKind, number>>,
+): void {
+    for (const [kind, len] of Object.entries(contributions) as [InspectSpanKind, number][]) {
+        target[kind] = (target[kind] ?? 0) + len;
+    }
+}
+
+/** Pure: map resolved child edges + stats onto wire children. `metaForChild`
+ *  is the only source-specific bit (graph has no JSONL to match spawn args, so
+ *  it passes `() => null`; the JSONL path passes its ts-proximity matcher). */
+export function buildInspectChildren(
+    childrenEdges: readonly ChildEdge[],
+    childStats: ReadonlyMap<string, ChildStats>,
+    turns: readonly InspectTurnDto[],
+    metaForChild: (ts: string | null) => SpawnMeta | null,
+): SpawnedChild[] {
+    return childrenEdges.map((edge) => {
+        const stats = childStats.get(edge.session_id) ?? null;
+        return {
+            session_id: edge.session_id,
+            ts: edge.ts,
+            tool: edge.tool,
+            nickname: edge.nickname,
+            anchor_turn_seq: anchorChildToTurn(turns, edge.ts),
+            meta: metaForChild(edge.ts),
+            turns: stats?.turns ?? null,
+            tool_calls: stats?.tool_calls ?? null,
+            est_tokens: stats?.est_tokens ?? null,
+            cost_usd: stats?.cost_usd ?? null,
+            duration_ms: stats?.duration_ms ?? null,
+        };
+    });
+}
+
+/** Pure: the shared SessionInspectPayload shape both paths return. */
+export function assembleInspectPayload(args: {
+    readonly sessionId: string;
+    readonly sourcePath: string;
+    readonly project: string | null;
+    readonly cwd: string | null;
+    readonly totalChars: number;
+    readonly tokenUsage: SessionTokenUsageDetail | null;
+    readonly totalTurns: number;
+    readonly turnOffset: number;
+    readonly turnLimit: number;
+    readonly turns: readonly InspectTurnDto[];
+    readonly totalsByKind: Partial<Record<InspectSpanKind, number>>;
+    readonly parent: ParentInfo;
+    readonly children: readonly SpawnedChild[];
+    readonly hookFires: readonly HookFireDto[];
+    readonly totalHookFires: number;
+}): SessionInspectPayload {
+    return {
+        session_id: args.sessionId,
+        source_path: args.sourcePath,
+        project: args.project,
+        cwd: args.cwd,
+        total_chars: args.totalChars,
+        token_usage: args.tokenUsage,
+        total_turns: args.totalTurns,
+        turn_window: { offset: args.turnOffset, limit: args.turnLimit },
+        turns: args.turns,
+        totals_by_kind: args.totalsByKind,
+        parent_session: args.parent.parent_session,
+        parent_nickname: args.parent.parent_nickname,
+        children: args.children,
+        hook_fires: args.hookFires,
+        total_hook_fires: args.totalHookFires,
+    };
+}
+
 const fetchGraphSessionInspect = (
     bareSessionId: string,
     turnOffset: number,
@@ -951,73 +1076,46 @@ const fetchGraphSessionInspect = (
             // carries tool calls; genuinely-empty system/attachment turns that
             // slipped through the filter are still dropped.
             if (!text && !(turnToolCalls && turnToolCalls.length > 0)) continue;
-            const fallbackKind: InspectSpanKind = row.role === "assistant" ? "assistant_text" : "user_input";
-            const spans = dissectTurn(text, { defaultKind: fallbackKind });
-            // A tool-only turn has no spans to dominate; the renderer keys off
-            // `tool_calls`, so default its semantic role to the assistant text
-            // kind (it is an assistant tool_use turn).
-            const semantic = dominantKind(spans, fallbackKind);
-            for (const s of spans) {
-                pageTotals[s.kind] = (pageTotals[s.kind] ?? 0) + s.text.length;
-            }
+            // Display seq is the 0-based turn index (DB seq is 1-based).
             const seq = Number.isFinite(dbSeq) ? dbSeq - 1 : turns.length + turnOffset;
-            turns.push({
+            const { dto, contributions } = buildInspectTurn({
                 seq,
                 role: row.role,
-                semantic_role: semantic,
+                text,
                 ts: row.ts instanceof Date ? row.ts.toISOString() : row.ts,
-                char_count: text.length,
-                raw_text: text,
-                spans: spans.map(toSpanDto),
-                token_usage: turnTokenUsage.get(dbSeq) ?? turnTokenUsage.get(seq) ?? null,
-                content: findTurnContent(turnContent, seq, text),
-                // Rewrite each call's seq to the display seq, matching the JSONL
-                // path (`c.seq = currentSeq`).
-                ...(turnToolCalls && turnToolCalls.length > 0
-                    ? { tool_calls: turnToolCalls.map((c) => ({ ...c, seq })) }
-                    : {}),
+                toolCalls: turnToolCalls,
+                tokenUsage: turnTokenUsage.get(dbSeq) ?? turnTokenUsage.get(seq) ?? null,
+                turnContent,
             });
+            addContributions(pageTotals, contributions);
+            turns.push(dto);
         }
 
         const totals = { ...pageTotals };
         if (parent.parent_session) applySubagentTaskTagging(turns, totals);
 
-        const children = childrenEdges.map((edge) => {
-            const stats = childStats.get(edge.session_id) ?? null;
-            return {
-                session_id: edge.session_id,
-                ts: edge.ts,
-                tool: edge.tool,
-                nickname: edge.nickname,
-                anchor_turn_seq: anchorChildToTurn(turns, edge.ts),
-                meta: null,
-                turns: stats?.turns ?? null,
-                tool_calls: stats?.tool_calls ?? null,
-                est_tokens: stats?.est_tokens ?? null,
-                cost_usd: stats?.cost_usd ?? null,
-                duration_ms: stats?.duration_ms ?? null,
-            };
-        });
-
+        // Graph rows carry no JSONL to match spawn args against, so child meta
+        // is always null here (the JSONL fallback path fills it in).
+        const children = buildInspectChildren(childrenEdges, childStats, turns, () => null);
         const totalChars = Object.values(totals).reduce((sum, value) => sum + Number(value ?? 0), 0);
 
-        return {
-            session_id: bareSessionId,
-            source_path: sessionMeta.raw_file ?? `graph:${bareSessionId}`,
+        return assembleInspectPayload({
+            sessionId: bareSessionId,
+            sourcePath: sessionMeta.raw_file ?? `graph:${bareSessionId}`,
             project: sessionMeta.project,
             cwd: sessionMeta.cwd,
-            total_chars: totalChars,
-            token_usage: tokenUsage,
-            total_turns: totalTurns,
-            turn_window: { offset: turnOffset, limit: turnLimit },
+            totalChars,
+            tokenUsage,
+            totalTurns,
+            turnOffset,
+            turnLimit,
             turns,
-            totals_by_kind: totals,
-            parent_session: parent.parent_session,
-            parent_nickname: parent.parent_nickname,
+            totalsByKind: totals,
+            parent,
             children,
-            hook_fires: hookFiresForTurnWindow(allHookFires, turns, turnOffset, totalTurns),
-            total_hook_fires: allHookFires.length,
-        };
+            hookFires: hookFiresForTurnWindow(allHookFires, turns, turnOffset, totalTurns),
+            totalHookFires: allHookFires.length,
+        });
     });
 
 export interface FetchSessionInspectOptions {
@@ -1098,31 +1196,19 @@ export const fetchSessionInspect = (
                 if (!line.trim()) continue;
                 const canonical = parseLine(line);
                 if (!canonical) continue;
-                const { role, text, ts } = canonical;
-                const fallbackKind: InspectSpanKind = role === "assistant" ? "assistant_text" : "user_input";
-                const spans = dissectTurn(text, { defaultKind: fallbackKind });
-                const semantic = dominantKind(spans, fallbackKind);
-
-                for (const s of spans) {
-                    totals[s.kind] = (totals[s.kind] ?? 0) + s.text.length;
-                }
-                totalChars += text.length;
-
                 const currentSeq = seq++;
-                turns.push({
+                const { dto, contributions } = buildInspectTurn({
                     seq: currentSeq,
-                    role,
-                    semantic_role: semantic,
-                    ts,
-                    char_count: text.length,
-                    raw_text: text,
-                    spans: spans.map(toSpanDto),
-                    token_usage: tokenUsageForSeq(currentSeq),
-                    content: findTurnContent(turnContent, currentSeq, text),
-                    ...(canonical.toolCalls && canonical.toolCalls.length > 0
-                        ? { tool_calls: canonical.toolCalls.map((c) => ({ ...c, seq: currentSeq })) }
-                        : {}),
+                    role: canonical.role,
+                    text: canonical.text,
+                    ts: canonical.ts,
+                    toolCalls: canonical.toolCalls,
+                    tokenUsage: tokenUsageForSeq(currentSeq),
+                    turnContent,
                 });
+                addContributions(totals, contributions);
+                totalChars += canonical.text.length;
+                turns.push(dto);
             }
 
             // If this session was spawned, the parent's brief landed in the
@@ -1181,22 +1267,7 @@ export const fetchSessionInspect = (
                 return spawnCalls[bestIdx]!.meta;
             };
 
-            const children = childrenEdges.map((edge) => {
-                const stats = childStats.get(edge.session_id) ?? null;
-                return {
-                    session_id: edge.session_id,
-                    ts: edge.ts,
-                    tool: edge.tool,
-                    nickname: edge.nickname,
-                    anchor_turn_seq: anchorChildToTurn(turns, edge.ts),
-                    meta: metaForChild(edge.ts),
-                    turns: stats?.turns ?? null,
-                    tool_calls: stats?.tool_calls ?? null,
-                    est_tokens: stats?.est_tokens ?? null,
-                    cost_usd: stats?.cost_usd ?? null,
-                    duration_ms: stats?.duration_ms ?? null,
-                };
-            });
+            const children = buildInspectChildren(childrenEdges, childStats, turns, metaForChild);
 
             // Slice turns to the requested window. The full session totals
             // (totals_by_kind, total_chars) are kept unchanged so the legend
@@ -1209,23 +1280,23 @@ export const fetchSessionInspect = (
             // page picks up any post-last-turn orphans.
             const hookFireSlice = hookFiresForTurnWindow(allHookFires, turnSlice, turnOffset, turns.length);
 
-            return {
-                session_id: bareSessionId,
-                source_path: found.path,
+            return assembleInspectPayload({
+                sessionId: bareSessionId,
+                sourcePath: found.path,
                 project: sessionMeta.project,
                 cwd: sessionMeta.cwd,
-                total_chars: totalChars,
-                token_usage: tokenUsage,
-                total_turns: turns.length,
-                turn_window: { offset: turnOffset, limit: turnLimit },
+                totalChars,
+                tokenUsage,
+                totalTurns: turns.length,
+                turnOffset,
+                turnLimit,
                 turns: turnSlice,
-                totals_by_kind: totals,
-                parent_session: parent.parent_session,
-                parent_nickname: parent.parent_nickname,
+                totalsByKind: totals,
+                parent,
                 children,
-                hook_fires: hookFireSlice,
-                total_hook_fires: allHookFires.length,
-            };
+                hookFires: hookFireSlice,
+                totalHookFires: allHookFires.length,
+            });
         })();
         return payload;
     });
