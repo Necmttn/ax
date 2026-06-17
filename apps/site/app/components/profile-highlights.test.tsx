@@ -21,4 +21,13 @@ describe("dossier renders highlights inside the Taste section", () => {
         expect(src).toContain("https");        // scheme check present
         expect(src).toContain("noopener");
     });
+    test("weapons + skills use native <details> click-toggle for the detail", () => {
+        // headline + summary in <summary>, detail revealed on toggle.
+        expect(src).toMatch(/<details className="pf-weapon"/);
+        expect(src).toMatch(/<summary className="pf-weapon-summary"/);
+        expect(src).toContain("pf-weapon-detail");      // the revealed area
+        expect(src).toMatch(/<details className="pf-learn-row"/);
+        expect(src).toMatch(/<summary className="pf-learn-summary"/);
+        expect(src).toContain("pf-toggle");             // disclosure chevron
+    });
 });
