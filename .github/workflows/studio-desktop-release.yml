@@ -14,10 +14,10 @@ name: studio-desktop-release
 #     APPLE_ID                      Apple ID email for notarization
 #     APPLE_APP_SPECIFIC_PASSWORD   app-specific password for that Apple ID
 #     APPLE_TEAM_ID                 Apple Developer Team ID
-#   Cloudflare R2 (upload feed; S3-compatible):
-#     R2_ACCOUNT_ID                 Cloudflare account id (endpoint host)
-#     R2_ACCESS_KEY_ID              R2 API token access key
-#     R2_SECRET_ACCESS_KEY          R2 API token secret
+#   Cloudflare R2 (upload feed; via wrangler):
+#     CLOUDFLARE_API_TOKEN          CF API token with Workers R2 Storage: Edit
+#     R2_ACCOUNT_ID                 Cloudflare account id (also pins wrangler so it
+#                                   skips the /memberships lookup a scoped token can't read)
 #     R2_BUCKET                     R2 bucket name (e.g. ax-desktop-releases)
 
 on:
@@ -63,20 +63,21 @@ jobs:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: bunx electron-builder --arm64 --config electron-builder.config.cjs --publish never
 
-      - name: Upload to R2 update feed
-        working-directory: apps/studio-desktop
+      - name: Upload to R2 update feed (wrangler)
         env:
-          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
-          # R2 rejects the default aws-cli streaming checksums; only send when required.
-          AWS_REQUEST_CHECKSUM_CALCULATION: WHEN_REQUIRED
-          AWS_RESPONSE_CHECKSUM_VALIDATION: WHEN_REQUIRED
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          # Pinning the account makes wrangler skip the /memberships call that a
+          # scoped R2 token can't read.
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET }}
         run: |
-          aws s3 cp dist-release/ "s3://${{ secrets.R2_BUCKET }}/desktop/" \
-            --recursive \
-            --endpoint-url "https://${{ secrets.R2_ACCOUNT_ID }}.r2.cloudflarestorage.com" \
-            --exclude "*" \
-            --include "*.dmg" \
-            --include "*.zip" \
-            --include "*.blockmap" \
-            --include "latest-mac.yml"
+          shopt -s nullglob
+          files=(apps/studio-desktop/dist-release/*.dmg \
+                 apps/studio-desktop/dist-release/*.zip \
+                 apps/studio-desktop/dist-release/*.blockmap \
+                 apps/studio-desktop/dist-release/latest-mac.yml)
+          if [ ${#files[@]} -eq 0 ]; then echo "no artifacts to upload" >&2; exit 1; fi
+          for f in "${files[@]}"; do
+            echo "uploading $(basename "$f") -> $R2_BUCKET/desktop/"
+            bunx wrangler r2 object put "$R2_BUCKET/desktop/$(basename "$f")" --file="$f"
+          done

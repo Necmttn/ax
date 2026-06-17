@@ -18,23 +18,20 @@
 // (.github/workflows/studio-desktop-release.yml) must:
 //   1. Build SIGNED + NOTARIZED with `--publish never`, producing dist-release/
 //      with the dmg, zip, *.blockmap, and `latest-mac.yml` feed manifest.
-//   2. Upload all of those to the R2 bucket under /desktop/ (S3-compatible).
+//   2. Upload all of those to the R2 bucket under /desktop/ (via wrangler).
 //      `latest-mac.yml` at the feed URL is what the updater polls; without it
 //      `checkForUpdatesAndNotify()` no-ops.
 //   3. Provide credentials:
-//        - R2 (S3) keys to upload: R2_ACCOUNT_ID / R2_ACCESS_KEY_ID /
-//          R2_SECRET_ACCESS_KEY / R2_BUCKET.
+//        - R2 upload: CLOUDFLARE_API_TOKEN (Workers R2 Storage: Edit) +
+//          R2_ACCOUNT_ID + R2_BUCKET.
 //        - Apple signing + notarization (see below): CSC_LINK / CSC_KEY_PASSWORD
 //          + APPLE_ID / APPLE_APP_SPECIFIC_PASSWORD / APPLE_TEAM_ID. macOS
 //          electron-updater REQUIRES the update be signed + notarized; an
 //          unsigned/ad-hoc build refuses to apply a downloaded update.
 //
-// ONE-TIME Cloudflare setup (manual, in the CF dashboard):
-//   - Create an R2 bucket (e.g. `ax-desktop-releases`).
-//   - Expose it at a public custom domain matching the `publish.url` host
-//     (default https://dl.ax.necmttn.com → bucket root; files land under
-//     /desktop/). Or set AX_UPDATE_FEED to your r2.dev URL.
-//   - Create an R2 API token (Object Read & Write) → the R2_* secrets above.
+// Cloudflare setup (DONE 2026-06-17): bucket `ax-desktop-releases` (APAC) + the
+// public custom domain `dl.ax.necmttn.com` are provisioned, and the R2/Apple
+// repo secrets are set. To move the feed, set AX_UPDATE_FEED at build time.
 //
 // IMPORTANT - macOS code-signing / SIGKILL failure mode (see memory:
 // dogfood-compiled-binary-codesign):
