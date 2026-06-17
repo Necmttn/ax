@@ -84,7 +84,7 @@ function DuelPage() {
     return (
         <>
             <SiteHeader />
-            <main className="profile-page">
+            <main className="landing-v2 profile-v2">
                 {state.kind === "loading" && <p className="pf-loading">pulling the duel @{login} vs @{other}…</p>}
                 {state.kind === "not-found" && <UnclaimedDossier login={login} />}
                 {state.kind === "error" && <p className="pf-loading">couldn't load profile: {state.message}</p>}
