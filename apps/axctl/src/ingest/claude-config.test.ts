@@ -153,6 +153,32 @@ describe("parseClaudeConfigArtifact", () => {
         expect(record.tokenEstimate).toBeGreaterThan(0);
         expect(JSON.stringify(record)).not.toContain("Do not store this body");
     });
+
+    test("extracts workflow frontmatter from hyphenated Claude keys", () => {
+        const record = parseClaudeConfigArtifact({
+            kind: "workflow",
+            scope: "user",
+            path: "/Users/alice/.claude/workflows/review.workflow.js",
+            home: "/Users/alice",
+            text: [
+                "---",
+                "model: claude-sonnet-4-20250514",
+                "effort-level: high",
+                "output-style: terse",
+                "allowed-tools:",
+                "  - Read",
+                "  - Bash",
+                "---",
+                "export default {};",
+            ].join("\n"),
+        });
+
+        expect(record.model).toBe("claude-sonnet-4-20250514");
+        expect(record.reasoningEffort).toBe("high");
+        expect(record.outputStyle).toBe("terse");
+        expect(record.enabledToolCount).toBe(2);
+        expect(JSON.stringify(record)).not.toContain("export default");
+    });
 });
 
 describe("buildGuidanceConfigStatements", () => {
@@ -195,6 +221,61 @@ describe("buildGuidanceConfigStatements", () => {
 });
 
 describe("discoverClaudeConfigArtifacts", () => {
+    test("discovers user and project workflow JavaScript files", async () => {
+        const home = await makeTempDir();
+        const projectRoot = await makeTempDir();
+
+        await write(home, ".claude/workflows/user-review.workflow.js", "export default {};");
+        await write(projectRoot, ".claude/workflows/project-review.workflow.js", "export default {};");
+        await write(projectRoot, ".claude/workflows/project-plan.md", "# plan");
+
+        const records = await runFs(discoverClaudeConfigArtifacts({ home, projectRoot }));
+        const signatures = records.map((record) => `${record.scope}:${record.kind}:${record.safePath}`).sort();
+
+        expect(signatures).toContain("user:workflow:~/.claude/workflows/user-review.workflow.js");
+        expect(signatures).toContain("project:workflow:$PROJECT/.claude/workflows/project-review.workflow.js");
+        expect(signatures).toContain("project:workflow:$PROJECT/.claude/workflows/project-plan.md");
+        expect(JSON.stringify(records)).not.toContain("export default");
+    });
+
+    test("discovers plugin-bundled guidance and config artifacts", async () => {
+        const home = await makeTempDir();
+        const pluginRoot = ".claude/plugins/cache/market/plugin-a/1.0.0";
+
+        await write(home, `${pluginRoot}/plugin.json`, JSON.stringify({ name: "plugin-a", secret: "plugin-secret" }));
+        await write(home, `${pluginRoot}/skills/review/SKILL.md`, "---\nname: review\n---\nsecret skill body");
+        await write(home, `${pluginRoot}/agents/reviewer.md`, "---\nname: reviewer\n---\nsecret agent body");
+        await write(home, `${pluginRoot}/rules/no-secrets.md`, "# rule\nsecret rule body");
+        await write(home, `${pluginRoot}/hooks/pre-tool.json`, JSON.stringify({ command: "secret hook command" }));
+        await write(home, `${pluginRoot}/commands/review.md`, "# command\nsecret command body");
+        await write(home, `${pluginRoot}/workflows/deploy.workflow.js`, "export default { secret: true };");
+        await write(home, `${pluginRoot}/.mcp.json`, JSON.stringify({ mcpServers: { github: { token: "secret" } } }));
+        await write(home, `${pluginRoot}/output-styles/brief.md`, "# brief\nsecret style body");
+
+        const records = await runFs(discoverClaudeConfigArtifacts({ home }));
+        const signatures = records.map((record) => `${record.scope}:${record.kind}:${record.safePath}`).sort();
+
+        expect(signatures).toContain("plugin:plugin:~/.claude/plugins/cache/market/plugin-a/1.0.0/plugin.json");
+        expect(signatures).toContain("plugin:skill:~/.claude/plugins/cache/market/plugin-a/1.0.0/skills/review/SKILL.md");
+        expect(signatures).toContain("plugin:agent_definition:~/.claude/plugins/cache/market/plugin-a/1.0.0/agents/reviewer.md");
+        expect(signatures).toContain("plugin:rule:~/.claude/plugins/cache/market/plugin-a/1.0.0/rules/no-secrets.md");
+        expect(signatures).toContain("plugin:hook:~/.claude/plugins/cache/market/plugin-a/1.0.0/hooks/pre-tool.json");
+        expect(signatures).toContain("plugin:workflow:~/.claude/plugins/cache/market/plugin-a/1.0.0/commands/review.md");
+        expect(signatures).toContain("plugin:workflow:~/.claude/plugins/cache/market/plugin-a/1.0.0/workflows/deploy.workflow.js");
+        expect(signatures).toContain("plugin:mcp_server:~/.claude/plugins/cache/market/plugin-a/1.0.0/.mcp.json");
+        expect(signatures).toContain("plugin:output_style:~/.claude/plugins/cache/market/plugin-a/1.0.0/output-styles/brief.md");
+
+        const serialized = JSON.stringify(records);
+        expect(serialized).not.toContain("plugin-secret");
+        expect(serialized).not.toContain("secret skill body");
+        expect(serialized).not.toContain("secret agent body");
+        expect(serialized).not.toContain("secret rule body");
+        expect(serialized).not.toContain("secret hook command");
+        expect(serialized).not.toContain("secret command body");
+        expect(serialized).not.toContain("secret style body");
+        expect(serialized).not.toContain("secret: true");
+    });
+
     test("discovers configured Claude guidance and config files with safe paths", async () => {
         const home = await makeTempDir();
         const projectRoot = await makeTempDir();

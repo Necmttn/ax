@@ -245,9 +245,15 @@ const frontmatterMetadata = (
     const fm = extractFrontmatter(text);
     return {
         model: stringValue(fm.model),
-        reasoningEffort: stringValue(fm.effortLevel ?? fm.reasoning_effort ?? fm.reasoningEffort),
-        outputStyle: stringValue(fm.outputStyle ?? fm.output_style),
-        enabledToolCount: stringArrayOrCsvCount(fm.tools ?? fm.allowed_tools),
+        reasoningEffort: stringValue(
+            fm.effortLevel ??
+            fm["effort-level"] ??
+            fm.reasoning_effort ??
+            fm["reasoning-effort"] ??
+            fm.reasoningEffort,
+        ),
+        outputStyle: stringValue(fm.outputStyle ?? fm["output-style"] ?? fm.output_style),
+        enabledToolCount: stringArrayOrCsvCount(fm.tools ?? fm.allowed_tools ?? fm["allowed-tools"] ?? fm.allowedTools),
     };
 };
 
@@ -368,7 +374,7 @@ export const parseClaudeConfigArtifact = (
         }
     }
 
-    if (input.kind === "agent_definition" || input.kind === "skill" || input.kind === "output_style") {
+    if (input.kind === "agent_definition" || input.kind === "skill" || input.kind === "output_style" || input.kind === "workflow") {
         return baseRecord(input, frontmatterMetadata(input.text));
     }
 
@@ -477,6 +483,78 @@ const walkMatchingFiles = (
         return out;
     });
 
+const isMarkdownFile = (file: string): boolean => file.endsWith(".md");
+const isWorkflowFile = (file: string): boolean => file.endsWith(".md") || file.endsWith(".workflow.js");
+const isHookFile = (file: string): boolean =>
+    file.endsWith(".json") || file.endsWith(".js") || file.endsWith(".ts") || file.endsWith(".sh");
+const isMcpConfigFile = (file: string): boolean => {
+    const normalized = normalizePath(file);
+    return normalized.endsWith("/.mcp.json") || normalized.endsWith("/mcp.json") || normalized.endsWith("/mcp-servers.json");
+};
+const isOutputStylePath = (file: string): boolean =>
+    file.includes("/output-styles/") || file.includes("/output_styles/");
+
+const pluginArtifacts = (
+    home: string,
+    projectRoot: string | undefined,
+): Effect.Effect<GuidanceConfigArtifact[], never, FileSystem.FileSystem | Path.Path> =>
+    Effect.gen(function* () {
+        const path = yield* Path.Path;
+        const pluginCache = path.join(home, ".claude", "plugins", "cache");
+        const common = { home, projectRoot, scope: "plugin" as const, maxDepth: 8 };
+        const groups = yield* Effect.all([
+            walkMatchingFiles({
+                ...common,
+                dir: pluginCache,
+                kind: "plugin",
+                include: (file) => file.endsWith("/plugin.json"),
+            }),
+            walkMatchingFiles({
+                ...common,
+                dir: pluginCache,
+                kind: "skill",
+                include: (file) => file.endsWith("/SKILL.md"),
+            }),
+            walkMatchingFiles({
+                ...common,
+                dir: pluginCache,
+                kind: "agent_definition",
+                include: (file) => isMarkdownFile(file) && (file.includes("/agents/") || file.includes("/subagents/")),
+            }),
+            walkMatchingFiles({
+                ...common,
+                dir: pluginCache,
+                kind: "rule",
+                include: (file) => isMarkdownFile(file) && file.includes("/rules/"),
+            }),
+            walkMatchingFiles({
+                ...common,
+                dir: pluginCache,
+                kind: "hook",
+                include: (file) => isHookFile(file) && file.includes("/hooks/"),
+            }),
+            walkMatchingFiles({
+                ...common,
+                dir: pluginCache,
+                kind: "workflow",
+                include: (file) => isWorkflowFile(file) && (file.includes("/commands/") || file.includes("/workflows/")),
+            }),
+            walkMatchingFiles({
+                ...common,
+                dir: pluginCache,
+                kind: "mcp_server",
+                include: isMcpConfigFile,
+            }),
+            walkMatchingFiles({
+                ...common,
+                dir: pluginCache,
+                kind: "output_style",
+                include: (file) => isMarkdownFile(file) && isOutputStylePath(file),
+            }),
+        ], { concurrency: "unbounded" });
+        return groups.flat();
+    });
+
 export const discoverClaudeConfigArtifacts = (
     opts: DiscoverClaudeConfigArtifactsOptions,
 ): Effect.Effect<GuidanceConfigArtifact[], never, FileSystem.FileSystem | Path.Path> =>
@@ -520,7 +598,7 @@ export const discoverClaudeConfigArtifacts = (
             projectRoot: opts.projectRoot,
             kind: "output_style",
             scope: "user",
-            include: (file) => file.endsWith(".md"),
+            include: isMarkdownFile,
             maxDepth: 4,
         })));
         out.push(...(yield* walkMatchingFiles({
@@ -529,7 +607,7 @@ export const discoverClaudeConfigArtifacts = (
             projectRoot: opts.projectRoot,
             kind: "agent_definition",
             scope: "user",
-            include: (file) => file.endsWith(".md"),
+            include: isMarkdownFile,
             maxDepth: 3,
         })));
         out.push(...(yield* walkMatchingFiles({
@@ -547,7 +625,7 @@ export const discoverClaudeConfigArtifacts = (
             projectRoot: opts.projectRoot,
             kind: "rule",
             scope: "user",
-            include: (file) => file.endsWith(".md"),
+            include: isMarkdownFile,
             maxDepth: 4,
         })));
         out.push(...(yield* walkMatchingFiles({
@@ -556,18 +634,19 @@ export const discoverClaudeConfigArtifacts = (
             projectRoot: opts.projectRoot,
             kind: "workflow",
             scope: "user",
-            include: (file) => file.endsWith(".md"),
+            include: isWorkflowFile,
             maxDepth: 6,
         })));
         out.push(...(yield* walkMatchingFiles({
-            dir: path.join(homeClaude, "plugins", "cache"),
+            dir: path.join(homeClaude, "commands"),
             home: opts.home,
             projectRoot: opts.projectRoot,
-            kind: "plugin",
-            scope: "plugin",
-            include: (file) => file.endsWith("/plugin.json"),
+            kind: "workflow",
+            scope: "user",
+            include: isWorkflowFile,
             maxDepth: 6,
         })));
+        out.push(...(yield* pluginArtifacts(opts.home, opts.projectRoot)));
 
         if (opts.projectRoot) {
             const projectClaude = path.join(opts.projectRoot, ".claude");
@@ -614,7 +693,7 @@ export const discoverClaudeConfigArtifacts = (
                 projectRoot: opts.projectRoot,
                 kind: "rule",
                 scope: "project",
-                include: (file) => file.endsWith(".md"),
+                include: isMarkdownFile,
                 maxDepth: 4,
             })));
             out.push(...(yield* walkMatchingFiles({
@@ -623,7 +702,16 @@ export const discoverClaudeConfigArtifacts = (
                 projectRoot: opts.projectRoot,
                 kind: "workflow",
                 scope: "project",
-                include: (file) => file.endsWith(".md"),
+                include: isWorkflowFile,
+                maxDepth: 6,
+            })));
+            out.push(...(yield* walkMatchingFiles({
+                dir: path.join(projectClaude, "workflows"),
+                home: opts.home,
+                projectRoot: opts.projectRoot,
+                kind: "workflow",
+                scope: "project",
+                include: isWorkflowFile,
                 maxDepth: 6,
             })));
             out.push(...(yield* walkMatchingFiles({
@@ -632,7 +720,7 @@ export const discoverClaudeConfigArtifacts = (
                 projectRoot: opts.projectRoot,
                 kind: "agent_definition",
                 scope: "project",
-                include: (file) => file.endsWith(".md"),
+                include: isMarkdownFile,
                 maxDepth: 3,
             })));
             out.push(...(yield* walkMatchingFiles({
