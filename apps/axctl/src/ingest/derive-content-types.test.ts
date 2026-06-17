@@ -1,5 +1,24 @@
 import { describe, expect, test } from "bun:test";
-import { buildContentEdge, renderContentEdge, renderContentTypeNodes, type ContentEdgeSpec, type ToolCallRow } from "./derive-content-types.ts";
+import { buildContentEdge, renderContentEdge, renderContentTypeNodes, rowsSql, type ContentEdgeSpec, type ToolCallRow } from "./derive-content-types.ts";
+
+// Regression (#533): the incremental rows query interpolated the
+// `sinceAndClause` continuation directly after `NONE`, producing
+// `output_json != NONEAND ts ...` - a SurrealDB parse error that crashed
+// `ax ingest --since=N` (the watcher path). Guard the token boundary.
+describe("rowsSql since-window boundary", () => {
+  test("incremental window keeps a space before AND (no NONEAND)", () => {
+    const sql = rowsSql(1);
+    expect(sql).not.toContain("NONEAND");
+    expect(sql).toContain("output_json != NONE AND ts > time::now() - 1d");
+  });
+
+  test("full re-derive (no since) emits a bare NONE predicate", () => {
+    const sql = rowsSql(undefined);
+    expect(sql).not.toContain("NONEAND");
+    expect(sql).toContain("output_json != NONE");
+    expect(sql).not.toContain("AND ts >");
+  });
+});
 
 describe("buildContentEdge", () => {
   test("derives category + denormalized session/bytes from a tool_call row", () => {
