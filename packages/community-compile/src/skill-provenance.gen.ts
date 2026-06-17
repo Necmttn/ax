@@ -48,6 +48,7 @@ export const SKILL_PROVENANCE: Record<string, string> = {
     "setup": "ax",
     "setup-matt-pocock-skills": "mattpocock",
     "setup-pre-commit": "mattpocock",
+    "ship-checklist": "ax",
     "simplify": "claude",
     "subagent-driven-development": "superpowers",
     "systematic-debugging": "superpowers",
