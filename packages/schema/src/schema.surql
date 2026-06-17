@@ -292,44 +292,6 @@ DEFINE FIELD name           ON workspace TYPE option<string>;
 DEFINE FIELD created_at     ON workspace TYPE datetime DEFAULT time::now();
 DEFINE FIELD updated_at     ON workspace TYPE option<datetime>;
 
-DEFINE TABLE changeset SCHEMAFULL;
-DEFINE FIELD session        ON changeset TYPE option<record<session>>;
-DEFINE FIELD repository     ON changeset TYPE option<record<repository>>;
-DEFINE FIELD checkout       ON changeset TYPE option<record<checkout>>;
-DEFINE FIELD summary_text   ON changeset TYPE string;
-DEFINE FIELD detail_text    ON changeset TYPE option<string>;
-DEFINE FIELD status         ON changeset TYPE option<string>;
-DEFINE FIELD labels         ON changeset TYPE option<string>;  -- JSON-encoded
-DEFINE FIELD metrics        ON changeset TYPE option<string>;  -- JSON-encoded
-DEFINE FIELD created_at     ON changeset TYPE datetime DEFAULT time::now();
-DEFINE FIELD updated_at     ON changeset TYPE option<datetime>;
-DEFINE INDEX IF NOT EXISTS changeset_session ON changeset FIELDS session, created_at;
-DEFINE INDEX IF NOT EXISTS changeset_repository ON changeset FIELDS repository, created_at;
-DEFINE INDEX IF NOT EXISTS changeset_checkout ON changeset FIELDS checkout, created_at;
-DEFINE INDEX IF NOT EXISTS changeset_summary_search
-    ON changeset FIELDS summary_text
-    FULLTEXT ANALYZER skill_text BM25 HIGHLIGHTS;
-
-DEFINE TABLE file_memory SCHEMAFULL;
-DEFINE FIELD file           ON file_memory TYPE option<record<file>>;
-DEFINE FIELD repository     ON file_memory TYPE option<record<repository>>;
-DEFINE FIELD checkout       ON file_memory TYPE option<record<checkout>>;
-DEFINE FIELD workspace      ON file_memory TYPE option<record<workspace>>;
-DEFINE FIELD path           ON file_memory TYPE option<string>;
-DEFINE FIELD kind           ON file_memory TYPE option<string>;
-DEFINE FIELD text           ON file_memory TYPE string;
-DEFINE FIELD labels         ON file_memory TYPE option<string>;  -- JSON-encoded
-DEFINE FIELD metrics        ON file_memory TYPE option<string>;  -- JSON-encoded
-DEFINE FIELD created_at     ON file_memory TYPE datetime DEFAULT time::now();
-DEFINE FIELD updated_at     ON file_memory TYPE option<datetime>;
-DEFINE INDEX IF NOT EXISTS file_memory_file ON file_memory FIELDS file, kind;
-DEFINE INDEX IF NOT EXISTS file_memory_repository_path ON file_memory FIELDS repository, path;
-DEFINE INDEX IF NOT EXISTS file_memory_checkout_path ON file_memory FIELDS checkout, path;
-DEFINE INDEX IF NOT EXISTS file_memory_workspace_path ON file_memory FIELDS workspace, path;
-DEFINE INDEX IF NOT EXISTS file_memory_text_search
-    ON file_memory FIELDS text
-    FULLTEXT ANALYZER skill_text BM25 HIGHLIGHTS;
-
 DEFINE TABLE tool SCHEMAFULL;
 DEFINE FIELD name           ON tool TYPE string;
 DEFINE FIELD provider       ON tool TYPE option<string>;
@@ -1386,32 +1348,12 @@ DEFINE INDEX IF NOT EXISTS concerns_in  ON concerns FIELDS in;
 DEFINE INDEX IF NOT EXISTS concerns_out ON concerns FIELDS out;
 DEFINE INDEX IF NOT EXISTS concerns_in_out_kind ON concerns FIELDS in, out, kind;
 
-DEFINE TABLE includes     TYPE RELATION FROM changeset TO file_memory SCHEMAFULL;
-DEFINE FIELD kind         ON includes TYPE option<string>;
-DEFINE FIELD labels       ON includes TYPE option<string>;  -- JSON-encoded
-DEFINE FIELD ts           ON includes TYPE datetime DEFAULT time::now();
-DEFINE INDEX IF NOT EXISTS includes_in  ON includes FIELDS in;
-DEFINE INDEX IF NOT EXISTS includes_out ON includes FIELDS out;
-
-DEFINE TABLE involves     TYPE RELATION FROM changeset TO file SCHEMAFULL;
-DEFINE FIELD role         ON involves TYPE option<string>;
-DEFINE FIELD labels       ON involves TYPE option<string>;  -- JSON-encoded
-DEFINE FIELD ts           ON involves TYPE datetime DEFAULT time::now();
-DEFINE INDEX IF NOT EXISTS involves_in  ON involves FIELDS in;
-DEFINE INDEX IF NOT EXISTS involves_out ON involves FIELDS out;
-
 DEFINE TABLE resulted_in  TYPE RELATION SCHEMAFULL;
 DEFINE FIELD kind         ON resulted_in TYPE option<string>;
 DEFINE FIELD labels       ON resulted_in TYPE option<string>;  -- JSON-encoded
 DEFINE FIELD ts           ON resulted_in TYPE datetime DEFAULT time::now();
 DEFINE INDEX IF NOT EXISTS resulted_in_in ON resulted_in FIELDS in;
 DEFINE INDEX IF NOT EXISTS resulted_in_out ON resulted_in FIELDS out;
-
-DEFINE TABLE supersedes   TYPE RELATION SCHEMAFULL;
-DEFINE FIELD reason       ON supersedes TYPE option<string>;
-DEFINE FIELD ts           ON supersedes TYPE datetime DEFAULT time::now();
-DEFINE INDEX IF NOT EXISTS supersedes_in ON supersedes FIELDS in;
-DEFINE INDEX IF NOT EXISTS supersedes_out ON supersedes FIELDS out;
 
 DEFINE TABLE produced_artifact TYPE RELATION SCHEMAFULL;
 DEFINE FIELD kind         ON produced_artifact TYPE option<string>;
