@@ -271,7 +271,17 @@ const profileShowCommand = Command.make(
                 windowDays: window,
                 includeCost: !noCost,
                 env,
-            });
+            }).pipe(
+                Effect.timeout("40 seconds"),
+                Effect.catchTag("TimeoutError", () =>
+                    Effect.sync(() =>
+                        fail(
+                            `ax profile show timed out (>40s) - your graph may be very large (Codex-heavy). ` +
+                            `Try a smaller window: ax profile show --window=7`,
+                        ),
+                    ),
+                ),
+            );
             yield* progress("done");
             console.log(json ? prettyPrint(profile) : formatProfile(profile));
         });
