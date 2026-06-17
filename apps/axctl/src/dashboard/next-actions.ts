@@ -27,6 +27,7 @@ import type { SkillHygieneRow } from "../queries/skill-hygiene.ts";
 import { fetchSkillHygiene } from "../queries/skill-hygiene.ts";
 import { fetchImproveProposals, proposalReviewBrief } from "./improve-proposals.ts";
 import { findStaleOpenProposals, type StaleProposalRow } from "../improve/housekeep.ts";
+import { interventionFormSpec } from "../improve/intervention-forms.ts";
 import { fetchToolFailures } from "./tool-failures.ts";
 import { renderAgentBrief } from "./agent-brief.ts";
 
@@ -63,14 +64,16 @@ const nn = (v: string | null, fallback = "unknown"): string => v ?? fallback;
  *  (no recompute; the full estimate lives at /api/improve/:sig/impact).
  *  Mined routing proposals carry their savings figure in the hypothesis. */
 export const impactChip = (p: ProposalDto): string | null => {
-    if (p.form === "hook") {
-        const m = /est \$([\d,]+(?:\.\d+)?)/.exec(p.hypothesis);
-        if (m) return `~$${m[1]} redirectable`;
+    switch (interventionFormSpec(String(p.form))?.nextActionImpactChip ?? "none") {
+        case "routing_savings": {
+            const m = /est \$([\d,]+(?:\.\d+)?)/.exec(p.hypothesis);
+            return m ? `~$${m[1]} redirectable` : null;
+        }
+        case "frequency":
+            return p.frequency > 1 ? `${p.frequency}x recurring` : null;
+        case "none":
+            return null;
     }
-    if (p.form === "guidance" || p.form === "skill") {
-        return p.frequency > 1 ? `${p.frequency}x recurring` : null;
-    }
-    return null;
 };
 
 // ---------------------------------------------------------------------------
@@ -83,19 +86,13 @@ export const impactChip = (p: ProposalDto): string | null => {
 /** Name the fix MECHANISM - "checklist" alone doesn't say skill vs
  *  guidance edit vs hook. Guidance names its actual file target. */
 export const fixKind = (p: ProposalDto): string => {
-    switch (p.form) {
-        case "skill":
-            return "new skill";
-        case "guidance":
+    const spec = interventionFormSpec(String(p.form));
+    if (spec === null) return String(p.form);
+    switch (spec.nextActionFixKind) {
+        case "edit_guidance":
             return `edit ${p.guidance_payload?.file_target ?? "guidance"}`;
-        case "hook":
-            return "new hook";
-        case "subagent":
-            return "new subagent";
-        case "automation":
-            return "automation";
         default:
-            return String(p.form);
+            return spec.nextActionFixKind;
     }
 };
 

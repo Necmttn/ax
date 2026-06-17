@@ -2,6 +2,7 @@ import { Effect } from "effect";
 import { SurrealClient } from "@ax/lib/db";
 import type { ImpactEstimate, ProposalDto } from "@ax/lib/shared/dashboard-types";
 import { fetchDispatchCandidates } from "../queries/dispatch-analytics.ts";
+import { interventionFormSpec } from "./intervention-forms.ts";
 
 /**
  * Projected impact per proposal - the "what is this worth" engine
@@ -123,9 +124,14 @@ export const estimateImpact = Effect.fn("improve.estimateImpact")(function* (
         return yield* hookImpact(p.hook_payload.target_tool);
     }
     const baseline = parseBaseline(p);
-    if (p.form === "guidance") return guidanceImpact(p, baseline);
-    if (p.form === "skill") return skillImpact(p, baseline);
-    return fallbackImpact(p);
+    switch (interventionFormSpec(String(p.form))?.impactModel ?? "fallback") {
+        case "guidance":
+            return guidanceImpact(p, baseline);
+        case "skill":
+            return skillImpact(p, baseline);
+        case "fallback":
+            return fallbackImpact(p);
+    }
 });
 
 // ---------------------------------------------------------------------------
@@ -133,18 +139,40 @@ export const estimateImpact = Effect.fn("improve.estimateImpact")(function* (
 // ---------------------------------------------------------------------------
 
 const IMPACT_TTL_MS = 10 * 60_000;
-const cache = new Map<string, { estimate: ImpactEstimate; at: number }>();
+
+export interface ImpactEstimateCache {
+    readonly get: (dedupeSig: string, nowMs: number) => ImpactEstimate | null;
+    readonly set: (dedupeSig: string, estimate: ImpactEstimate, nowMs: number) => void;
+}
+
+export const createImpactEstimateCache = (
+    opts: { readonly ttlMs?: number } = {},
+): ImpactEstimateCache => {
+    const ttlMs = opts.ttlMs ?? IMPACT_TTL_MS;
+    const cache = new Map<string, { estimate: ImpactEstimate; at: number }>();
+    return {
+        get: (dedupeSig, nowMs) => {
+            const hit = cache.get(dedupeSig);
+            return hit && nowMs - hit.at < ttlMs ? hit.estimate : null;
+        },
+        set: (dedupeSig, estimate, nowMs) => {
+            cache.set(dedupeSig, { estimate, at: nowMs });
+        },
+    };
+};
+
+const defaultImpactEstimateCache = createImpactEstimateCache();
 
 export const estimateImpactCached = Effect.fn("improve.estimateImpactCached")(
-    function* (p: ProposalDto, nowMs: number) {
-        const hit = cache.get(p.dedupe_sig);
-        if (hit && nowMs - hit.at < IMPACT_TTL_MS) return hit.estimate;
+    function* (
+        p: ProposalDto,
+        nowMs: number,
+        cache: ImpactEstimateCache = defaultImpactEstimateCache,
+    ) {
+        const hit = cache.get(p.dedupe_sig, nowMs);
+        if (hit !== null) return hit;
         const estimate = yield* estimateImpact(p);
-        cache.set(p.dedupe_sig, { estimate, at: nowMs });
+        cache.set(p.dedupe_sig, estimate, nowMs);
         return estimate;
     },
 );
-
-export function resetImpactCacheForTest(): void {
-    cache.clear();
-}

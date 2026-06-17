@@ -1,12 +1,12 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { describe, expect, test } from "bun:test";
 import { Effect, Layer } from "effect";
 import { SurrealClient, type SurrealClientShape } from "@ax/lib/db";
 import type { ProposalDto } from "@ax/lib/shared/dashboard-types";
 import {
+    createImpactEstimateCache,
     estimateImpact,
     estimateImpactCached,
     parseBaseline,
-    resetImpactCacheForTest,
     ROUTING_PROPOSAL_TITLE,
 } from "./impact.ts";
 
@@ -40,8 +40,6 @@ const makeDb = (resultsPerCall: QueryResult[][]) => {
 
 const run = <A>(eff: Effect.Effect<A, unknown, SurrealClient>, layer: Layer.Layer<SurrealClient>) =>
     Effect.runPromise(eff.pipe(Effect.provide(layer)));
-
-afterEach(() => resetImpactCacheForTest());
 
 describe("parseBaseline", () => {
     test("tolerates missing/corrupt baseline", () => {
@@ -127,16 +125,27 @@ describe("estimateImpactCached", () => {
     test("second call within TTL skips recompute", async () => {
         const p = proposal({ form: "guidance", baseline: '{"frequency":3}' });
         const layer = makeDb([[[]]]);
-        const a = await run(estimateImpactCached(p, 1_000), layer);
-        const b = await run(estimateImpactCached(p, 2_000), layer);
+        const cache = createImpactEstimateCache();
+        const a = await run(estimateImpactCached(p, 1_000, cache), layer);
+        const b = await run(estimateImpactCached(p, 2_000, cache), layer);
         expect(b).toBe(a);
     });
 
     test("expired entry recomputes", async () => {
         const p = proposal({ form: "guidance", baseline: '{"frequency":3}' });
         const layer = makeDb([[[]]]);
-        const a = await run(estimateImpactCached(p, 1_000), layer);
-        const b = await run(estimateImpactCached(p, 1_000 + 11 * 60_000), layer);
+        const cache = createImpactEstimateCache();
+        const a = await run(estimateImpactCached(p, 1_000, cache), layer);
+        const b = await run(estimateImpactCached(p, 1_000 + 11 * 60_000, cache), layer);
+        expect(b).not.toBe(a);
+        expect(b).toEqual(a);
+    });
+
+    test("independent cache adapters isolate same-sig estimates", async () => {
+        const p = proposal({ form: "guidance", baseline: '{"frequency":3}' });
+        const layer = makeDb([[[]]]);
+        const a = await run(estimateImpactCached(p, 1_000, createImpactEstimateCache()), layer);
+        const b = await run(estimateImpactCached(p, 2_000, createImpactEstimateCache()), layer);
         expect(b).not.toBe(a);
         expect(b).toEqual(a);
     });

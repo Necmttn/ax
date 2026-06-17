@@ -32,8 +32,9 @@ import {
     EXPERIMENT_STATUS_TASK_EMITTED,
     planTaskScaffolded,
 } from "./lifecycle.ts";
+import { interventionFormSpec, type InterventionForm } from "./intervention-forms.ts";
 
-export type LintForm = "guidance" | "skill" | "subagent" | "hook" | "automation" | "harness_check";
+export type LintForm = InterventionForm;
 
 export interface LintTarget {
     readonly path: string;
@@ -272,77 +273,82 @@ const collectIds = (
         return found;
     }
     const content = contentOpt.value;
-    if (target.form === "guidance") {
-        // Parse fault → a marker_parse_error finding (entries set before the
-        // throw are kept, matching the old try/catch).
-        yield* Effect.try({
-            try: () => {
-                // Inline markers (guidance files) carry no explicit experiment id.
-                for (const m of parseInlineMarkers(content)) found.set(m.id, { path: target.path });
-            },
-            catch: (err) => (err as Error).message,
-        }).pipe(
-            Effect.catch((message) =>
-                Effect.sync(() => {
-                    errors.push({
-                        rule: "marker_parse_error",
-                        severity: "error",
-                        path: target.path,
-                        message,
-                    });
-                }),
-            ),
-        );
-    } else if (target.form === "hook") {
-        yield* Effect.try({
-            try: () => {
-                const parsed = decodeJsonOrNull(content);
-                if (parsed === null) throw new Error("invalid JSON in hook config");
-                const commands: string[] = [];
-                collectJsonCommandStrings(parsed, commands);
-                for (const command of commands) {
-                    for (const marker of parseHookCommandMarkers(command)) {
-                        found.set(
-                            marker.id,
-                            marker.experiment === undefined
-                                ? { path: target.path }
-                                : { path: target.path, experiment: marker.experiment },
-                        );
+    const strategy = interventionFormSpec(target.form)?.markerStrategy ?? "frontmatter";
+    switch (strategy) {
+        case "inline":
+            // Parse fault → a marker_parse_error finding (entries set before the
+            // throw are kept, matching the old try/catch).
+            yield* Effect.try({
+                try: () => {
+                    // Inline markers (guidance files) carry no explicit experiment id.
+                    for (const m of parseInlineMarkers(content)) found.set(m.id, { path: target.path });
+                },
+                catch: (err) => (err as Error).message,
+            }).pipe(
+                Effect.catch((message) =>
+                    Effect.sync(() => {
+                        errors.push({
+                            rule: "marker_parse_error",
+                            severity: "error",
+                            path: target.path,
+                            message,
+                        });
+                    }),
+                ),
+            );
+            break;
+        case "hook_command":
+            yield* Effect.try({
+                try: () => {
+                    const parsed = decodeJsonOrNull(content);
+                    if (parsed === null) throw new Error("invalid JSON in hook config");
+                    const commands: string[] = [];
+                    collectJsonCommandStrings(parsed, commands);
+                    for (const command of commands) {
+                        for (const marker of parseHookCommandMarkers(command)) {
+                            found.set(
+                                marker.id,
+                                marker.experiment === undefined
+                                    ? { path: target.path }
+                                    : { path: target.path, experiment: marker.experiment },
+                            );
+                        }
                     }
-                }
-            },
-            catch: (err) => (err instanceof Error ? err.message : String(err)),
-        }).pipe(
-            Effect.catch((message) =>
-                Effect.sync(() => {
-                    errors.push({
-                        rule: "marker_parse_error",
-                        severity: "error",
-                        path: target.path,
-                        message,
-                    });
-                }),
-            ),
-        );
-    } else if (target.form === "automation") {
-        for (const marker of parseAutomationMarkers(content)) {
-            found.set(
-                marker.id,
-                marker.experiment === undefined
-                    ? { path: target.path }
-                    : { path: target.path, experiment: marker.experiment },
+                },
+                catch: (err) => (err instanceof Error ? err.message : String(err)),
+            }).pipe(
+                Effect.catch((message) =>
+                    Effect.sync(() => {
+                        errors.push({
+                            rule: "marker_parse_error",
+                            severity: "error",
+                            path: target.path,
+                            message,
+                        });
+                    }),
+                ),
             );
-        }
-    } else {
-        // Skill and subagent files use frontmatter; may carry ax_experiment.
-        const fm = parseFrontmatterMarker(content);
-        if (fm) {
-            found.set(
-                fm.id,
-                fm.experiment === undefined
-                    ? { path: target.path }
-                    : { path: target.path, experiment: fm.experiment },
-            );
+            break;
+        case "automation":
+            for (const marker of parseAutomationMarkers(content)) {
+                found.set(
+                    marker.id,
+                    marker.experiment === undefined
+                        ? { path: target.path }
+                        : { path: target.path, experiment: marker.experiment },
+                );
+            }
+            break;
+        case "frontmatter": {
+            const fm = parseFrontmatterMarker(content);
+            if (fm) {
+                found.set(
+                    fm.id,
+                    fm.experiment === undefined
+                        ? { path: target.path }
+                        : { path: target.path, experiment: fm.experiment },
+                );
+            }
         }
     }
     return found;

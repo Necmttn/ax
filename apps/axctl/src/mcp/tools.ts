@@ -698,8 +698,12 @@ const dojoAgendaTool: AxMcpTool = defineMcpTool({
                     { budgetPctOverride: null, untilIso: null, force: false },
                     nowMs,
                 );
-                const items = yield* collectAgendaItems({ nowMs, days, spar });
-                return assembleAgenda(envelope, items, { nowMs, spar });
+                const collected = yield* collectAgendaItems({ nowMs, days, spar });
+                return assembleAgenda(envelope, collected.items, {
+                    nowMs,
+                    spar,
+                    sourceFailures: collected.source_failures,
+                });
             }).pipe(Effect.provide(QuotaEnvLive)),
         );
     },

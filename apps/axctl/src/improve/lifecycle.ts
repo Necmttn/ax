@@ -3,6 +3,7 @@
  * intervention lifecycle. Keep this module pure: callers own persistence,
  * rendering, and filesystem effects.
  */
+import { INTERVENTION_FORMS, interventionFormSpec } from "./intervention-forms.ts";
 
 export const PROPOSAL_STATUS_OPEN = "open";
 export const PROPOSAL_STATUS_ACCEPTED = "accepted";
@@ -12,7 +13,7 @@ export const GUIDANCE_STATUS_PROPOSED = "proposed";
 
 export const ACCEPTED_PROPOSAL_FORMS = ["guidance", "skill", "harness_check"] as const;
 export type AcceptedProposalForm = (typeof ACCEPTED_PROPOSAL_FORMS)[number];
-export const MANUAL_TASK_PROPOSAL_FORMS = ["guidance", "skill", "harness_check", "subagent", "hook", "automation"] as const;
+export const MANUAL_TASK_PROPOSAL_FORMS = INTERVENTION_FORMS;
 
 export const EXPERIMENT_STATUS_TASK_EMITTED = "task_emitted";
 export const EXPERIMENT_STATUS_SCAFFOLDED = "scaffolded";
@@ -89,7 +90,8 @@ export function isAcceptedProposalForm(form: string): form is AcceptedProposalFo
 }
 
 export function acceptanceFormError(form: string): string {
-    return `accept supports form=guidance, form=skill, form=harness_check, form=subagent, form=hook, and form=automation (got ${form})`;
+    const labels = INTERVENTION_FORMS.map((f) => `form=${f}`);
+    return `accept supports ${labels.slice(0, -1).join(", ")}, and ${labels.at(-1)} (got ${form})`;
 }
 
 export function acceptedExperimentStatus(input: {
@@ -123,13 +125,14 @@ export function planAcceptCandidate(input: {
             message: `proposal already ${input.proposalStatus}`,
         };
     }
-    if (!(MANUAL_TASK_PROPOSAL_FORMS as readonly string[]).includes(input.form)) {
+    const spec = interventionFormSpec(input.form);
+    if (spec === null) {
         return {
             status: "unsupported_form",
             message: acceptanceFormError(input.form),
         };
     }
-    if (input.form === "hook" || input.form === "automation") {
+    if (spec.requiresSafetyContract) {
         const missing = missingInterventionSafetyGates(input.safetyContract);
         if (missing.length > 0) {
             return {
