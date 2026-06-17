@@ -18,6 +18,7 @@ Install: `curl -fsSL https://ax.necmttn.com/install | bash`, then `npx skills ad
 - `ax sessions here | around <date> | near <sha> | show <id>` - windowed session queries; drill into any session turn by turn
 - `ax:extract-workflow` skill - reconstruct the workflow behind a shipped artifact ("what made X work")
 - `ax share <session-id>` - publish a sanitized session share via GitHub Gist, viewable in the hosted studio
+- `ax memory ops [--events] [--days=N]` - Claude memory-file activity: writes/edits the agent made to `~/.claude/.../memory/*.md`, rolled up per memory file (notes vs the MEMORY index) and per session. Recall (the memory context the harness injects into the system prompt) is not tracked - it never lands in the transcript.
 
 ### Skills intelligence
 - `ax skills search | taste | unused | pairs | recovery | stats | weighted` - which installed skills actually get used, and what they pair with
