@@ -186,7 +186,8 @@ export function shouldEmitProfileProgress(input: {
 }): boolean {
     const mode = (input.progressEnv ?? "").toLowerCase();
     if (mode === "off") return false;
-    return input.stderrIsTTY || mode === "on" || mode === "plain";
+    // Force-emit modes mirror the ingest resolver (`withIngest`, cli/index.ts).
+    return input.stderrIsTTY || mode === "on" || mode === "plain" || mode === "pipeline";
 }
 
 export function profileProgressLine(

@@ -203,7 +203,6 @@ export function MissionControlContent({
     readonly isLoading: boolean;
     readonly error: unknown;
 }) {
-    const ready = Boolean(data?.usage && data?.primaryArchetype);
     if (isLoading && !data) {
         return (
             <MissionControlNotice
@@ -220,7 +219,7 @@ export function MissionControlContent({
             />
         );
     }
-    if (ready && data) {
+    if (data?.usage && data?.primaryArchetype) {
         return <><ClockHero profile={data} /><Bento profile={data} /><RecapDeck cards={data.cards ?? []} /></>;
     }
     if (data) {

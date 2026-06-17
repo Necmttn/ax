@@ -397,16 +397,26 @@ const FAST_SOURCE_TIMEOUT_MS = 4_000;
 const DISCOVERY_SOURCE_TIMEOUT_MS = 12_000;
 const HEAVY_DISCOVERY_SOURCE_TIMEOUT_MS = 30_000;
 
+// Per-source budget lives on the source (exhaustive over NextActionKind) rather
+// than a name-matching branch, so adding a source is a single entry here and the
+// compiler flags any kind left unbudgeted. `tool_failure` stays fast (frequent
+// landing card); `churn`/`skill_hygiene` graph rollups get room to avoid caching
+// a timeout-only payload on normal local datasets. `verdict` is derived from the
+// proposal fetch, never fetched on its own, so its budget is unused.
+const KIND_TIMEOUT_MS: Record<NextActionKind, number> = {
+    verdict: DISCOVERY_SOURCE_TIMEOUT_MS,
+    proposal: DISCOVERY_SOURCE_TIMEOUT_MS,
+    tool_failure: FAST_SOURCE_TIMEOUT_MS,
+    routing: DISCOVERY_SOURCE_TIMEOUT_MS,
+    churn: HEAVY_DISCOVERY_SOURCE_TIMEOUT_MS,
+    skill_hygiene: HEAVY_DISCOVERY_SOURCE_TIMEOUT_MS,
+    housekeeping: DISCOVERY_SOURCE_TIMEOUT_MS,
+};
+
 export const nextActionSourceTimeoutMs = (
     source: NextActionKind,
     override?: number,
-): number => {
-    if (override != null) return override;
-    if (source === "churn" || source === "skill_hygiene") {
-        return HEAVY_DISCOVERY_SOURCE_TIMEOUT_MS;
-    }
-    return source === "tool_failure" ? FAST_SOURCE_TIMEOUT_MS : DISCOVERY_SOURCE_TIMEOUT_MS;
-};
+): number => override ?? KIND_TIMEOUT_MS[source];
 
 /**
  * Fan-out to 6 data sources (proposals, tool failures, churn, routing, skill

@@ -60,7 +60,18 @@ import {
 
 export const projectRootForHere = (
     pwd: Pick<PwdResolution, "repoRoot" | "mainRepoRoot">,
-): string => pwd.mainRepoRoot || pwd.repoRoot;
+): string => {
+    const { repoRoot, mainRepoRoot } = pwd;
+    if (!mainRepoRoot || mainRepoRoot === repoRoot) return repoRoot;
+    // `sessionProjectClause` filters by cwd path-prefix, so rolling `--here` up
+    // to the primary checkout only works when this worktree physically lives
+    // under it (the common `.claude/worktrees/*` layout). An external/bare
+    // worktree - or a mis-derived `--git-common-dir` (submodule `.git/modules/*`
+    // etc.) - keeps its own root, otherwise its sessions would be silently
+    // filtered out of `sessions metrics/churn --here`.
+    const prefix = mainRepoRoot.endsWith("/") ? mainRepoRoot : `${mainRepoRoot}/`;
+    return repoRoot.startsWith(prefix) ? mainRepoRoot : repoRoot;
+};
 
 /**
  * Format a list of SessionRows for TTY output as a compact table.

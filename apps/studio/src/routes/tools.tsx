@@ -33,9 +33,9 @@ const filterRows = (
 };
 
 export interface ToolFailuresRefreshUiInput {
+    // Background ingest invalidations keep React Query `isFetching` true, so the
+    // toolbar deliberately reflects ONLY the user's explicit refresh action.
     readonly manualRefreshing: boolean;
-    readonly queryIsFetching: boolean;
-    readonly queryIsLoading: boolean;
 }
 
 export const toolFailuresRefreshUi = (input: ToolFailuresRefreshUiInput): {
@@ -44,8 +44,6 @@ export const toolFailuresRefreshUi = (input: ToolFailuresRefreshUiInput): {
     readonly label: string;
     readonly tableOpacity: number;
 } => {
-    // Background ingest invalidations keep React Query fetching; the toolbar
-    // state should reflect only the user's explicit refresh action.
     const refreshing = input.manualRefreshing;
     return {
         refreshing,
@@ -67,11 +65,7 @@ export function ToolFailuresRoute() {
         actionError ?? (failuresQuery.error ? String(failuresQuery.error) : null);
     const loading = failuresQuery.isLoading;
     const [manualRefreshing, setManualRefreshing] = useState(false);
-    const refreshUi = toolFailuresRefreshUi({
-        manualRefreshing,
-        queryIsFetching: failuresQuery.isFetching,
-        queryIsLoading: failuresQuery.isLoading,
-    });
+    const refreshUi = toolFailuresRefreshUi({ manualRefreshing });
     const [filter, setFilter] = useState<Filter>("fix");
     const [search, setSearch] = useState("");
     const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set());
