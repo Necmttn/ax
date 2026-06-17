@@ -1,3 +1,4 @@
+/** @jsxImportSource react */
 /**
  * Approved card-viz registry - a small set of blessed, reusable instrument
  * visuals the wrapped agent can target DECLARATIVELY (json-render.dev mindset).

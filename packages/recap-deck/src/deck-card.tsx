@@ -1,3 +1,4 @@
+/** @jsxImportSource react */
 /** Reusable, data-agnostic recap-deck card. The SINGLE source of the
  *  "wrapped" instrument card markup (extracted from the studio deck's
  *  `DeckCard`). Consumers (studio / landing / profile) own their own data

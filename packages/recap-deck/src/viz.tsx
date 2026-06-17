@@ -1,3 +1,4 @@
+/** @jsxImportSource react */
 /* Shared recap-deck viz primitives - nullframe grammar (MIT, m1ckc3s/nullframe).
    Theme-agnostic: colours come from CSS vars on the .rdx scope.
    Extracted verbatim from apps/studio/src/instrument/viz.tsx (Doto + Segbar). */
