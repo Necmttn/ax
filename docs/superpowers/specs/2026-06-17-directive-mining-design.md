@@ -120,6 +120,78 @@ miner counts recurrence automatically (same directive re-surfaced by the same/re
 n-grams across sessions), so directives **self-prioritise and self-escalate** with no
 manual tuning. This is the engine that "keeps improving."
 
+### 2.6 Two entry points - antecedent (bottom-up) + directive (top-down)
+
+A directive is the *reaction* to a problem; **what comes before it** - the recurring
+friction that provoked it - is the **antecedent pattern**, and that's where autonomous
+pattern-recognition + automation start. You say "dogfood before showing me" *because* an
+agent kept claiming done without verifying. The directive is your hand-authored fix; the
+antecedent is the **machine-recognisable pattern the fix addresses**. So there are two
+entry points that meet at a shared spine:
+
+```
+BOTTOM-UP (behaviour)                            TOP-DOWN (words)
+recurring friction pattern in the graph           user states a directive
+   "agent keeps claiming done w/o verifying"         "dogfood before showing me"
+            \                                        /
+             \______________  DETECTOR  ____________/      <- the shared spine
+                  (a named graph query that recognises the pattern)
+                              |  recurs past threshold
+                    candidate directive + proposed enforcement (consent-gated)
+                              |  install hook
+                    measure: did the antecedent drop?  -> verdict / escalate
+```
+
+A directive's detector *is* an antecedent recogniser. The **bottom-up path needs no
+words** - so the "different users, different words" problem disappears entirely for the
+autonomous lane. In ML terms: the directive (words) is the *supervised label*; the
+antecedent (behaviour) is the *unsupervised pattern*. Mining antecedents proposes; the
+directive confirms which ones matter. Semi-supervised, and it works even for users who
+never articulate anything.
+
+**ax already recognises most antecedents - reuse, don't rebuild.** The same queries are
+the antecedent recognisers AND the directive detectors:
+
+| Existing ax signal | Antecedent for directive |
+|--------------------|--------------------------|
+| `sessions churn` episodes (fail -> repair -> close) | verify-before-done, change-approach-after-2-fails |
+| `insights friction` | general friction hotspots |
+| `fragility_cascade` | risky-edit / stale-after-mutation |
+| repair loops / verification taxonomy (failed checks) | verify-before-done |
+| edit-without-read sequences | read-before-edit |
+
+ax also already turns graph signals into proposals (`deriveProposals` / `improve
+recommend`), so antecedent -> candidate is partly built. Bottom-up directive discovery is
+mostly *wiring existing insight signals into the pattern/proposal loop*, not new
+detection. This reframes the whole feature: not "mine what users say" but **"recognise
+friction patterns, propose fixes, let user words confirm and sharpen."**
+
+### 2.7 Granularity ladder - directives (atomic) -> workflows (sequence)
+
+The same mine -> ground -> propose -> automate -> measure loop applies at two scales:
+
+```
+atomic antecedent   ->  directive  ->  HOOK              (enforce a single rule)
+sequence antecedent ->  workflow   ->  CODIFIED WORKFLOW  (automate an ordered arc: skill / checklist / command)
+```
+
+A **directive** is one "how to work" rule (verify-before-done). A **workflow** is a
+recurring *ordered sequence* of actions/skills/episodes that accomplishes a kind of task -
+e.g. the `claim -> worktree -> TDD -> verify -> PR` arc repeated three times in the
+session that produced this spec. Both are patterns mined from the graph; they differ only
+in granularity (single-turn antecedent vs. an ordered chain), and they share the same
+detector/proposal/verdict spine - a workflow detector matches a *sequence* of tool/skill/
+episode events rather than a single-turn shape.
+
+ax already has the **sequence-scale machinery**: the `ax-extract-workflow` skill
+("reconstruct the workflow behind a shipped artifact") and the `workflow_epoch` table.
+So directive mining is the *atomic* rung of a ladder whose *sequence* rung already
+exists - identifying directives is also the on-ramp to identifying workflows. Mining the
+recurring action arcs (and the order directives fire within them) turns "how you work"
+from scattered rules into reusable, suggestable, eventually-automatable workflows.
+*(Workflow-scale detection is a follow-on; this spec ships the atomic rung and the shared
+spine that the sequence rung plugs into.)*
+
 ---
 
 ## 3. The loop
