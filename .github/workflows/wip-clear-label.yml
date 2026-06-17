@@ -1,0 +1,30 @@
+name: wip-clear-label
+
+# When an issue closes (typically a "Closes #N" PR merging), drop the
+# `status:in-progress` label the wip-tracker convention adds when an agent claims
+# it (scripts/wip claim). Merging an issue's PR closes the issue but never touches
+# its labels, so the claim marker lingered on closed issues. Clearing it
+# server-side keeps `bun run wip list` and the issue view honest without a manual
+# `bun run wip release`. See CONTRIBUTING.md "Claiming work".
+
+on:
+  issues:
+    types: [closed]
+
+permissions:
+  issues: write
+
+jobs:
+  clear-label:
+    runs-on: ubuntu-24.04
+    # Only act when the label is actually present - avoids a no-op API call (and
+    # its 422) on the vast majority of issues that were never claimed.
+    if: contains(github.event.issue.labels.*.name, 'status:in-progress')
+    steps:
+      - name: Remove status:in-progress
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh issue edit "${{ github.event.issue.number }}" \
+            --repo "${{ github.repository }}" \
+            --remove-label "status:in-progress"

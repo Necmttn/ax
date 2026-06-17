@@ -24,7 +24,7 @@ name is the claim**. Before starting an issue:
 bun run wip list          # see open issues + which branch (if any) claimed each
 bun run wip claim 481 fix # worktree + branch fix/481-<slug>, label, claim comment
 cd .claude/worktrees/481-fix   # the path claim prints - do the work here, open a PR
-bun run wip release 481   # only if you abandon it; merging the PR closes it
+bun run wip release 481   # only if you ABANDON it; merging the PR auto-clears the label
 ```
 
 `claim` creates an **isolated worktree** at `.claude/worktrees/<issue#>-<type>` on
