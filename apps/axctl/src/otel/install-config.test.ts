@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { applyClaudeOtelEnv, applyCodexOtelToml } from "./install-config.ts";
+import { applyClaudeOtelEnv, applyClaudeTraceOtelEnv, applyCodexOtelToml } from "./install-config.ts";
 
 const ENDPOINT = "http://127.0.0.1:1738";
 
@@ -32,6 +32,38 @@ describe("install-config", () => {
     test("preserves unrelated existing env", () => {
         const next = applyClaudeOtelEnv({ env: { FOO: "bar" } }, ENDPOINT);
         expect(next.env.FOO).toBe("bar");
+    });
+
+    test("adds optional CC trace env only when explicitly applied", () => {
+        const logsOnly = applyClaudeOtelEnv({}, ENDPOINT);
+        expect(logsOnly.env.CLAUDE_CODE_ENHANCED_TELEMETRY_BETA).toBeUndefined();
+        expect(logsOnly.env.OTEL_TRACES_EXPORTER).toBeUndefined();
+
+        const next = applyClaudeTraceOtelEnv(logsOnly, `${ENDPOINT}/`);
+        expect(next.env.CLAUDE_CODE_ENABLE_TELEMETRY).toBe("1");
+        expect(next.env.CLAUDE_CODE_ENHANCED_TELEMETRY_BETA).toBe("1");
+        expect(next.env.OTEL_TRACES_EXPORTER).toBe("otlp");
+        expect(next.env.OTEL_EXPORTER_OTLP_TRACES_PROTOCOL).toBe("http/json");
+        expect(next.env.OTEL_EXPORTER_OTLP_TRACES_ENDPOINT).toBe(`${ENDPOINT}/v1/traces`);
+        expect(next.env.OTEL_EXPORTER_OTLP_ENDPOINT).toBe(ENDPOINT);
+        expect(next.env.OTEL_LOG_RAW_API_BODIES).toBeUndefined();
+    });
+
+    test("trace opt-in preserves explicit log and metric env overrides", () => {
+        const next = applyClaudeTraceOtelEnv({
+            env: {
+                OTEL_LOGS_EXPORTER: "none",
+                OTEL_METRICS_EXPORTER: "none",
+                OTEL_EXPORTER_OTLP_ENDPOINT: "http://collector.local:4318",
+            },
+        }, ENDPOINT);
+
+        expect(next.env.CLAUDE_CODE_ENABLE_TELEMETRY).toBe("1");
+        expect(next.env.OTEL_LOGS_EXPORTER).toBe("none");
+        expect(next.env.OTEL_METRICS_EXPORTER).toBe("none");
+        expect(next.env.OTEL_EXPORTER_OTLP_ENDPOINT).toBe("http://collector.local:4318");
+        expect(next.env.OTEL_TRACES_EXPORTER).toBe("otlp");
+        expect(next.env.OTEL_EXPORTER_OTLP_TRACES_ENDPOINT).toBe(`${ENDPOINT}/v1/traces`);
     });
 
     test("codex toml writes the struct-variant exporter (NOT a bare string)", () => {
