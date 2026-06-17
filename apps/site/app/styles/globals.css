@@ -14,6 +14,9 @@
   --blue: #2567a8;
   --red: #c0392b;
   --amber: #b07900;
+  --gold: #b07900;    /* alias for --amber; used by accent-gold cards */
+  --violet: #6857c4;  /* mid-tone purple for light mode */
+  --rose: #b33c6e;    /* warm rose/dusty pink for light mode */
   --serif: Georgia, "Times New Roman", serif;
   --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   --sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", "Helvetica Neue", sans-serif;
@@ -10428,271 +10431,12 @@ footer.site-footer { padding: 48px 32px 56px; }
   .landing-v2 .browser--instrument .mc-main { padding: 12px; }
 }
 
-/* ---- Wrapped recap deck (scrolls below the bento) + card-viz charts ---- */
-.landing-v2 .browser--instrument .mc-wr-section { margin-top: 4px; }
-.landing-v2 .browser--instrument .mc-wr-kicker { margin-bottom: 12px; }
-.landing-v2 .browser--instrument .mc-wr-deck {
-  display: grid;
-  grid-template-columns: repeat(2, 1fr);
-  grid-auto-rows: min-content;
-  align-content: start;
-  gap: 12px;
-}
-.landing-v2 .browser--instrument .mc-wr-card {
-  --card-accent: var(--green);
-  align-self: start;
-  background: var(--surface);
-  border: 1px solid var(--line);
-  border-radius: 14px;
-  padding: 16px;
-  display: flex;
-  flex-direction: column;
-  min-height: 172px;
-}
-.landing-v2 .browser--instrument .mc-wr-card.acc-green { --card-accent: var(--green); }
-.landing-v2 .browser--instrument .mc-wr-card.acc-blue { --card-accent: var(--blue); }
-.landing-v2 .browser--instrument .mc-wr-card.acc-gold { --card-accent: var(--gold); }
-.landing-v2 .browser--instrument .mc-wr-card.acc-violet { --card-accent: var(--violet); }
-.landing-v2 .browser--instrument .mc-wr-card.acc-rose { --card-accent: #e0556f; }
-.landing-v2 .browser--instrument .mc-wr-viz {
-  height: 46px;
-  margin-bottom: 14px;
-  display: flex;
-  align-items: center;
-}
-.landing-v2 .browser--instrument .mc-wr-viz--center { justify-content: center; }
-.landing-v2 .browser--instrument .mc-wr-q {
-  font-family: var(--mono);
-  font-size: 12px;
-  color: var(--card-accent);
-}
-.landing-v2 .browser--instrument .mc-wr-head {
-  font-family: var(--serif);
-  font-weight: 600;
-  font-size: 21px;
-  line-height: 1.08;
-  letter-spacing: -0.01em;
-  color: var(--display);
-  margin: 6px 0 0;
-}
-.landing-v2 .browser--instrument .mc-wr-body {
-  font-size: 13px;
-  line-height: 1.5;
-  color: var(--muted);
-  margin: 7px 0 0;
-}
-/* bars */
-.landing-v2 .browser--instrument .mc-bars {
-  display: flex;
-  align-items: flex-end;
-  gap: 3px;
-  width: 100%;
-  height: 46px;
-}
-.landing-v2 .browser--instrument .mc-bars i {
-  flex: 1;
-  background: color-mix(in srgb, var(--card-accent) 70%, var(--surface));
-  border-radius: 1px 1px 0 0;
-  min-height: 3px;
-}
-.landing-v2 .browser--instrument .mc-bars i.is-now { background: var(--card-accent); }
-/* line / area */
-.landing-v2 .browser--instrument .mc-line { width: 100%; height: 46px; display: block; }
-.landing-v2 .browser--instrument .mc-line-stroke {
-  stroke: var(--card-accent);
-  stroke-width: 1.5;
-  vector-effect: non-scaling-stroke;
-}
-/* radar */
-.landing-v2 .browser--instrument .mc-radar { width: 46px; height: 46px; }
-.landing-v2 .browser--instrument .mc-radar .web {
-  fill: none;
-  stroke: var(--line-hi);
-  stroke-width: 0.5;
-}
-.landing-v2 .browser--instrument .mc-radar-fill {
-  fill: color-mix(in srgb, var(--card-accent) 24%, transparent);
-  stroke: var(--card-accent);
-  stroke-width: 1;
-}
-.landing-v2 .browser--instrument .mc-radar-node { fill: var(--card-accent); }
-/* ring gauge */
-.landing-v2 .browser--instrument .mc-ring { position: relative; width: 46px; height: 46px; }
-.landing-v2 .browser--instrument .mc-ring svg { width: 46px; height: 46px; transform: rotate(135deg); }
-.landing-v2 .browser--instrument .mc-ring .bg { fill: none; stroke: var(--line); stroke-width: 3.2; }
-.landing-v2 .browser--instrument .mc-ring .fg {
-  fill: none;
-  stroke: var(--card-accent);
-  stroke-width: 3.2;
-  stroke-linecap: round;
-}
-.landing-v2 .browser--instrument .mc-ring-val {
-  position: absolute;
-  inset: 0;
-  display: grid;
-  place-items: center;
-  font-family: "n", var(--mono);
-  font-variant-numeric: tabular-nums;
-  font-size: 16px;
-  color: var(--display);
-}
-
-/* ===========================================================================
-   Wrapped-popup chart kinds - the readouts the floating popups cycle through
-   (bars/line/radar/ring are defined with the recap styles above). Recreated
-   from apps/studio/src/instrument/card-viz.tsx; each keys --card-accent.
-   ========================================================================= */
-/* waffle */
-.landing-v2 .browser--instrument .mc-waffle {
-  display: grid;
-  grid-template-columns: repeat(14, 1fr);
-  grid-auto-rows: 1fr;
-  gap: 2px;
-  width: 100%;
-  max-width: 168px;
-  height: 46px;
-}
-.landing-v2 .browser--instrument .mc-waffle-cell { background: var(--c0); border-radius: 1px; }
-.landing-v2 .browser--instrument .mc-waffle-cell.on { background: var(--card-accent); }
-/* candles */
-.landing-v2 .browser--instrument .mc-candles {
-  position: relative;
-  display: flex;
-  align-items: stretch;
-  gap: 3px;
-  width: 100%;
-  height: 46px;
-}
-.landing-v2 .browser--instrument .mc-candle { position: relative; flex: 1; }
-.landing-v2 .browser--instrument .mc-candle.up { color: var(--green); }
-.landing-v2 .browser--instrument .mc-candle.dn { color: var(--red); }
-.landing-v2 .browser--instrument .mc-candle-wick {
-  position: absolute;
-  left: 50%;
-  width: 1.5px;
-  transform: translateX(-50%);
-  background: currentColor;
-}
-.landing-v2 .browser--instrument .mc-candle-body {
-  position: absolute;
-  left: 1px;
-  right: 1px;
-  border-radius: 1px;
-  background: currentColor;
-}
-/* comet */
-.landing-v2 .browser--instrument .mc-comet { width: 46px; height: 46px; }
-.landing-v2 .browser--instrument .mc-comet svg { width: 46px; height: 46px; }
-.landing-v2 .browser--instrument .mc-comet-orbit { fill: none; stroke: var(--line-hi); stroke-width: 1; }
-.landing-v2 .browser--instrument .mc-comet-trail {
-  fill: none;
-  stroke: var(--card-accent);
-  stroke-width: 2;
-  stroke-linecap: round;
-}
-.landing-v2 .browser--instrument .mc-comet-head { fill: var(--card-accent); }
-/* wave (oscilloscope) */
-.landing-v2 .browser--instrument .mc-wave { width: 100%; height: 46px; display: block; }
-.landing-v2 .browser--instrument .mc-wave-grat { stroke: var(--line); stroke-width: 1; vector-effect: non-scaling-stroke; }
-.landing-v2 .browser--instrument .mc-wave-grat.dash { stroke-dasharray: 2 3; }
-.landing-v2 .browser--instrument .mc-wave-trace { stroke: var(--card-accent); stroke-width: 1.5; }
-/* bullet */
-.landing-v2 .browser--instrument .mc-bullet {
-  width: 100%;
-  height: 46px;
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  gap: 9px;
-}
-.landing-v2 .browser--instrument .mc-bullet-track {
-  position: relative;
-  height: 11px;
-  border-radius: 3px;
-  background: linear-gradient(90deg, color-mix(in srgb, var(--line) 70%, transparent), var(--surface2));
-}
-.landing-v2 .browser--instrument .mc-bullet-fill {
-  position: absolute;
-  left: 0;
-  top: 0;
-  bottom: 0;
-  border-radius: 3px;
-  background: var(--card-accent);
-}
-.landing-v2 .browser--instrument .mc-bullet-tick {
-  position: absolute;
-  top: -3px;
-  bottom: -3px;
-  width: 2px;
-  background: var(--display);
-}
-.landing-v2 .browser--instrument .mc-bullet-foot {
-  display: flex;
-  align-items: baseline;
-  gap: 7px;
-}
-.landing-v2 .browser--instrument .mc-bullet-val {
-  font-family: "n", var(--mono);
-  font-variant-numeric: tabular-nums;
-  font-size: 18px;
-  color: var(--display);
-}
-.landing-v2 .browser--instrument .mc-bullet-goal { font-family: var(--mono); font-size: 10.5px; color: var(--muted); }
-/* signal bars */
-.landing-v2 .browser--instrument .mc-signal { display: flex; align-items: flex-end; gap: 4px; height: 46px; }
-.landing-v2 .browser--instrument .mc-signal-bar {
-  width: 9px;
-  background: var(--surface2);
-  border: 1px solid var(--line);
-  border-radius: 2px;
-}
-.landing-v2 .browser--instrument .mc-signal-bar.on { background: var(--card-accent); border-color: var(--card-accent); }
-/* scatter */
-.landing-v2 .browser--instrument .mc-scatter { position: relative; width: 100%; height: 46px; }
-.landing-v2 .browser--instrument .mc-scatter-svg { position: absolute; inset: 0; width: 100%; height: 100%; }
-.landing-v2 .browser--instrument .mc-scatter-mean { stroke: var(--line-hi); stroke-width: 1; stroke-dasharray: 3 3; }
-.landing-v2 .browser--instrument .mc-scatter-dots { position: absolute; inset: 0; }
-.landing-v2 .browser--instrument .mc-scatter-dot {
-  position: absolute;
-  width: 5px;
-  height: 5px;
-  border-radius: 50%;
-  background: var(--muted);
-  transform: translate(-50%, -50%);
-}
-.landing-v2 .browser--instrument .mc-scatter-dot.hot { background: var(--card-accent); }
-/* delta */
-.landing-v2 .browser--instrument .mc-delta {
-  width: 100%;
-  height: 46px;
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  gap: 4px;
-}
-.landing-v2 .browser--instrument .mc-delta-num { display: flex; align-items: baseline; gap: 8px; }
-.landing-v2 .browser--instrument .mc-delta-val {
-  font-family: "n", var(--mono);
-  font-variant-numeric: tabular-nums;
-  font-size: 26px;
-  color: var(--display);
-}
-.landing-v2 .browser--instrument .mc-delta-trend {
-  font-family: var(--mono);
-  font-size: 12px;
-  color: var(--card-accent);
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-}
-.landing-v2 .browser--instrument .mc-delta.dn .mc-delta-trend { color: var(--red); }
-.landing-v2 .browser--instrument .mc-delta-spark { width: 100%; height: 14px; display: block; }
-
 /* ===========================================================================
    Mission Control window + floating wrapped-highlight popups. The window is the
    restored studio mock; 2-3 popup cards float over its edges (sticking out) to
-   spotlight interesting wrapped findings. Popups carry .browser--instrument so
-   they pick up the dark token block + .mc-* chart styles.
+   spotlight interesting wrapped findings. Popups carry .browser--instrument
+   plus .rdx[data-theme=dark] so the shared @ax/recap-deck wr-* charts (rendered
+   via CardViz) resolve their tokens; the .mc-pop chrome below is landing-local.
    ========================================================================= */
 /* popups sit in the stage gutter (offsets pinned to 0) so they overlap the
    window edges without ever exceeding the content column - no clip needed. */
@@ -12332,45 +12076,13 @@ footer.site-footer { padding: 48px 32px 56px; }
 }
 .pf-quiet { font-size: 13.5px; color: var(--muted); margin: 8px 0; }
 
-/* ----- nameplate ----- */
-.pf-mast { padding-top: 40px; }
-.pf-mast-kicker {
-    display: flex;
-    justify-content: space-between;
-    gap: 8px 24px;
-    flex-wrap: wrap;
-    font-family: var(--mono);
-    font-size: 11px;
-    text-transform: uppercase;
-    letter-spacing: 0.14em;
-    color: var(--muted);
-    padding-bottom: 12px;
-    border-bottom: 1px solid var(--line);
-}
-.pf-name {
-    font-family: var(--serif);
-    font-size: clamp(46px, 7.5vw, 76px);
-    font-weight: 400;
-    letter-spacing: -2px;
-    line-height: 1.02;
-    margin: 26px 0 14px;
-    overflow-wrap: anywhere;
-}
-.pf-name .pf-at {
+/* ----- name @ glyph (rendered in the landing-v2 hero h1) ----- */
+.pf-at {
     color: var(--muted);
     font-size: 0.58em;
     vertical-align: 0.22em;
     letter-spacing: 0;
     margin-right: 2px;
-}
-.pf-mast-sub {
-    display: flex;
-    justify-content: space-between;
-    align-items: baseline;
-    gap: 10px 24px;
-    flex-wrap: wrap;
-    padding-bottom: 22px;
-    border-bottom: 3px double var(--ink);
 }
 .pf-harness-list { display: inline-flex; flex-wrap: wrap; gap: 6px; }
 .pf-harness {
@@ -12381,15 +12093,8 @@ footer.site-footer { padding: 48px 32px 56px; }
     background: var(--panel);
     padding: 3px 9px;
 }
-.pf-mast-via { font-family: var(--mono); font-size: 12px; color: var(--muted); }
-.pf-mast-via a { color: var(--ink); text-decoration-color: var(--green); text-underline-offset: 3px; }
 
-/* ----- vitals ledger ----- */
-.pf-ledger {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(148px, 1fr));
-    border-bottom: 1px solid var(--line);
-}
+/* ----- vitals (Vital component; container restyled under .pv2-vitals) ----- */
 .pf-vital {
     padding: 20px 18px 16px 0;
     display: flex;
@@ -12418,51 +12123,11 @@ footer.site-footer { padding: 48px 32px 56px; }
     color: var(--muted);
 }
 @media (max-width: 720px) {
-    .pf-ledger { grid-template-columns: repeat(2, 1fr); }
-    .pf-vital { border-top: 1px solid var(--line); }
-    .pf-vital:nth-child(odd) { padding-left: 0; border-left: none; }
-    .pf-vital:nth-child(-n+2) { border-top: none; }
     .pf-vital-num { font-size: 25px; }
 }
 
-/* ----- section kicker ----- */
+/* ----- section spacing (intro now uses the landing .demo-intro pattern) ----- */
 .pf-section { margin-top: 60px; }
-.pf-kicker {
-    display: flex;
-    align-items: baseline;
-    gap: 14px;
-    margin-bottom: 24px;
-}
-.pf-kicker-n {
-    font-family: var(--mono);
-    font-size: 12px;
-    color: var(--green);
-    letter-spacing: 0.1em;
-}
-.pf-kicker h2 {
-    font-family: var(--serif);
-    font-size: 27px;
-    font-weight: 400;
-    letter-spacing: -0.5px;
-    line-height: 1.1;
-    margin: 0;
-    white-space: nowrap;
-}
-.pf-kicker-rule { flex: 1; border-top: 1px solid var(--line); transform: translateY(-5px); min-width: 24px; }
-.pf-kicker-note {
-    font-family: var(--mono);
-    font-size: 10.5px;
-    text-transform: uppercase;
-    letter-spacing: 0.12em;
-    color: var(--muted);
-    text-align: right;
-}
-@media (max-width: 560px) {
-    .pf-kicker { flex-wrap: wrap; }
-    .pf-kicker h2 { white-space: normal; }
-    .pf-kicker-note { width: 100%; text-align: left; }
-    .pf-kicker-rule { display: none; }
-}
 
 /* ----- 01 the window: timeline + models ----- */
 .pf-window {
@@ -12611,23 +12276,8 @@ footer.site-footer { padding: 48px 32px 56px; }
 .pf-legend-meta { color: var(--muted); white-space: nowrap; font-size: 12px; }
 .pf-legend-meta strong { color: var(--ink); font-weight: 600; font-size: 13px; }
 
-/* ----- 02 insight cards (wrapped-style) ----- */
-.pf-cards {
-    display: grid;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
-    gap: 1px;
-    background: var(--line);
-    border: 1px solid var(--line);
-}
-.pf-card {
-    background: var(--panel);
-    min-height: 220px;
-    display: flex;
-    flex-direction: column;
-    min-width: 0;
-    overflow: hidden;
-}
-/* generative dither art band - bleeds to the card's top + side edges */
+/* generative dither art band - bleeds to the card's top + side edges.
+   Rendered by dossier-card-art.tsx (retained; no longer used on /u). */
 .pf-card-art {
     position: relative;
     height: 64px;
@@ -12660,40 +12310,7 @@ footer.site-footer { padding: 48px 32px 56px; }
 .pf-card-art-dots span:nth-child(2) { background: color-mix(in srgb, var(--muted) 40%, var(--panel)); }
 .pf-card-art-dots span:nth-child(3) { background: color-mix(in srgb, var(--muted) 28%, var(--panel)); }
 
-.pf-card-body {
-    padding: 16px 20px 18px;
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-    flex: 1;
-    min-width: 0;
-}
-.pf-card-q {
-    font-family: var(--mono);
-    font-size: 10.5px;
-    text-transform: uppercase;
-    letter-spacing: 0.13em;
-    color: var(--green);
-    line-height: 1.45;
-}
-.pf-card-a {
-    font-family: var(--serif);
-    font-size: 36px;
-    letter-spacing: -1px;
-    line-height: 1.02;
-    margin-top: auto;
-    overflow-wrap: anywhere;
-}
-.pf-card-a small {
-    font-size: 0.42em;
-    font-family: var(--mono);
-    letter-spacing: 0.04em;
-    color: var(--muted);
-}
-.pf-card-s { font-size: 12.5px; line-height: 1.45; color: var(--muted); }
-
-/* mini trace-viz - tiny, mono, slots between answer and support line */
-.pf-card-viz { height: 16px; display: flex; align-items: center; }
+/* mini trace-viz - tiny, mono, rendered inside the wrapped-deck accent strip */
 .pf-viz { display: block; width: 100%; }
 .pf-viz-bar {
     position: relative;
@@ -12737,13 +12354,6 @@ footer.site-footer { padding: 48px 32px 56px; }
     transform: translate(-50%, -50%);
     background: var(--green);
     box-shadow: 0 0 0 2px color-mix(in srgb, var(--green) 22%, transparent);
-}
-
-@media (max-width: 980px) { .pf-cards { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
-@media (max-width: 460px) {
-    .pf-cards { grid-template-columns: minmax(0, 1fr); }
-    .pf-card { min-height: 0; }
-    .pf-card-a { font-size: 32px; }
 }
 
 /* ----- the rig: workflow arcs ----- */
@@ -12913,63 +12523,7 @@ footer.site-footer { padding: 48px 32px 56px; }
 .pf-pattern-sum { font-size: 13.5px; line-height: 1.5; margin: 2px 0 4px; }
 .pf-pattern-ev { font-family: var(--mono); font-size: 11px; color: var(--muted); }
 
-/* ----- colophon ----- */
-.pf-colophon {
-    margin-top: 72px;
-    border-top: 2px solid var(--ink);
-    padding-top: 14px;
-    display: flex;
-    justify-content: space-between;
-    gap: 10px 28px;
-    flex-wrap: wrap;
-    font-family: var(--mono);
-    font-size: 12px;
-    color: var(--muted);
-}
-.pf-colophon code {
-    font-family: var(--mono);
-    background: var(--panel);
-    border: 1px solid var(--line);
-    color: var(--ink);
-    padding: 2px 8px;
-}
-
-/* ----- not-found / join CTA ----- */
-.pf-empty {
-    max-width: 560px;
-    margin: 72px auto 48px;
-    border: 1px solid var(--ink);
-    background: var(--panel);
-    padding: 38px 38px 28px;
-    position: relative;
-    box-shadow: 5px 5px 0 color-mix(in srgb, var(--ink) 8%, transparent);
-}
-.pf-empty-stamp {
-    position: absolute;
-    top: 20px;
-    right: 22px;
-    font-family: var(--mono);
-    font-size: 10px;
-    text-transform: uppercase;
-    letter-spacing: 0.22em;
-    color: var(--red);
-    border: 1.5px solid var(--red);
-    padding: 4px 9px 3px;
-    transform: rotate(5deg);
-    opacity: 0.85;
-}
-.pf-empty h1 {
-    font-family: var(--serif);
-    font-size: 31px;
-    font-weight: 400;
-    letter-spacing: -0.5px;
-    line-height: 1.15;
-    margin: 0 0 14px;
-    padding-right: 96px;
-    overflow-wrap: anywhere;
-}
-.pf-empty p { font-size: 14.5px; line-height: 1.55; color: var(--muted); margin: 0 0 12px; }
-.pf-empty p a { color: var(--ink); text-decoration-color: var(--green); text-underline-offset: 3px; }
+/* ----- unanswered-challenge command (UnclaimedChallenger in the vs overlay) ----- */
 .pf-empty-cmd {
     display: block;
     font-family: var(--mono);
@@ -12980,10 +12534,6 @@ footer.site-footer { padding: 48px 32px 56px; }
     margin: 20px 0 18px;
 }
 .pf-empty-cmd::before { content: "$ "; color: var(--green); }
-@media (max-width: 560px) {
-    .pf-empty { padding: 28px 22px 20px; margin-top: 48px; }
-    .pf-empty h1 { padding-right: 0; font-size: 27px; margin-top: 28px; }
-}
 .pf-challenge-unclaimed { display: flex; flex-direction: column; gap: 8px; margin-top: 12px; padding: 16px; border: 1px dashed var(--line, #33364a); position: relative; }
 .pf-challenge-stamp { align-self: flex-start; font-size: 11px; letter-spacing: 2px; text-transform: uppercase; color: var(--red, #f87171); border: 1px solid currentColor; padding: 2px 8px; }
 .pf-challenge-line { margin: 0; }
@@ -13334,57 +12884,6 @@ footer.site-footer { padding: 48px 32px 56px; }
   .routing-page .rt-term pre { font-size: 11px; padding: 16px; }
   .routing-page .rt-step-cmd { font-size: 11px; }
   .routing-page .rt-install code { font-size: 12px; }
-}
-
-/* ----- visitor CTA ----- */
-.pf-cta {
-    margin-top: 72px;
-    border: 1px solid var(--line);
-    border-top: 3px solid var(--ink);
-    background: var(--panel);
-    padding: 40px 40px 32px;
-}
-.pf-cta-headline {
-    font-family: var(--serif);
-    font-size: clamp(24px, 3.5vw, 36px);
-    font-weight: 400;
-    letter-spacing: -0.5px;
-    line-height: 1.15;
-    margin: 0 0 10px;
-}
-.pf-cta-sub {
-    font-size: 14.5px;
-    line-height: 1.55;
-    color: var(--muted);
-    margin: 0 0 24px;
-}
-.pf-cta-cmds {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-    margin-bottom: 20px;
-}
-.pf-cta-cmd {
-    display: block;
-    font-family: var(--mono);
-    font-size: 13.5px;
-    background: var(--ink);
-    color: var(--page);
-    padding: 11px 16px;
-    white-space: pre;
-}
-.pf-cta-cmd::before { content: "$ "; color: var(--green); }
-.pf-cta-repo {
-    font-family: var(--mono);
-    font-size: 12px;
-    color: var(--muted);
-    text-decoration: none;
-    letter-spacing: 0.04em;
-}
-.pf-cta-repo:hover { color: var(--ink); }
-@media (max-width: 560px) {
-    .pf-cta { padding: 28px 22px 22px; }
-    .pf-cta-cmd { white-space: normal; word-break: break-all; }
 }
 
 /* ----- the sign: radar + archetype ----- */
@@ -15351,7 +14850,7 @@ footer.site-footer { padding: 48px 32px 56px; }
 .pf-live { display: inline-flex; align-items: center; gap: 6px; color: var(--green); letter-spacing: 0.14em; }
 .pf-live-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--green); animation: pf-led-pulse 2.4s cubic-bezier(0.4,0,0.2,1) infinite; }
 .pf-vital { animation: pf-vital-in 0.5s cubic-bezier(0.34,1.56,0.64,1) both; }
-.pf-ledger .pf-vital:nth-child(1){animation-delay:0.04s;} .pf-ledger .pf-vital:nth-child(2){animation-delay:0.1s;} .pf-ledger .pf-vital:nth-child(3){animation-delay:0.16s;} .pf-ledger .pf-vital:nth-child(4){animation-delay:0.22s;} .pf-ledger .pf-vital:nth-child(5){animation-delay:0.28s;} .pf-ledger .pf-vital:nth-child(6){animation-delay:0.34s;}
+.pv2-vitals .pf-vital:nth-child(1){animation-delay:0.04s;} .pv2-vitals .pf-vital:nth-child(2){animation-delay:0.1s;} .pv2-vitals .pf-vital:nth-child(3){animation-delay:0.16s;} .pv2-vitals .pf-vital:nth-child(4){animation-delay:0.22s;} .pv2-vitals .pf-vital:nth-child(5){animation-delay:0.28s;} .pv2-vitals .pf-vital:nth-child(6){animation-delay:0.34s;}
 .pf-vital-num { font-family: "Doto", var(--mono); font-variant-numeric: tabular-nums; font-weight: 600; letter-spacing: 0; }
 .pf-vital-num small { font-family: var(--mono); font-weight: 400; }
 .pf-stack-col { transform-origin: bottom; animation: pf-bar-rise 0.55s cubic-bezier(0.34,1.56,0.64,1) both; }
@@ -15832,3 +15331,147 @@ footer.site-footer { padding: 48px 32px 56px; }
 .pf-share-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .pf-share-btn { font: inherit; font-size: 13px; padding: 6px 12px; border: 1px solid var(--green); color: var(--green); background: transparent; cursor: pointer; text-decoration: none; }
 .pf-share-btn:hover { background: color-mix(in srgb, var(--green) 12%, transparent); }
+
+/* ---- profile-v2 wrapped deck: shared @ax/recap-deck band ----
+   The deck now renders the SHARED @ax/recap-deck cards inside a `.rdx`
+   dark-theme scope (so the package tokens resolve and the cards look
+   byte-identical to the studio recap deck). All card + chart styling is owned
+   by the package CSS (recap-deck.css / recap-deck-theme.css). Here we only
+   place that scope as a deliberate rounded dark slab on the otherwise-light
+   profile page - overriding the package's full-viewport `.rdx { min-height }`
+   and supplying the band's margins + rounded corners. The dark slab background
+   comes from the package's `.rdx { background: var(--bg) }` token. */
+.profile-v2 .pv2-recap {
+  min-height: 0;
+  border-radius: 16px;
+  margin: 16px 0 8px;
+  padding: 22px 22px 18px;
+}
+.profile-v2 .pv2-recap .wr-section { margin-top: 0; }
+
+/* ---- profile-v2 page shell ----
+   Deltas on top of the inherited .landing-v2 system. The 1120px shell, .hero,
+   .eyebrow, .demo-intro and .cards all apply via the `landing-v2` class on
+   <main>; only profile-specific additions live here. */
+
+/* The floating agent-logo field is absolute (inset:0 of .hero); floor the hero
+   height so the lowest tiles (top ~322px + 62px) always sit INSIDE the hero,
+   never bleeding onto the vitals strip below. Drop the landing hero's own
+   bottom rule - the vitals strip owns the divider now (avoids a double line). */
+.profile-v2 section.hero { min-height: 430px; border-bottom: none; }
+
+/* GitHub avatar (mirrors the leaders-page .lb-avatar source). Base shape; the
+   --hero variant is the big centered headshot, --inline the small ring-tinted
+   chip used in the comparison overlay. */
+.profile-v2 .pv2-avatar {
+  border-radius: 50%;
+  border: 1px solid var(--line);
+  background: var(--panel);
+  object-fit: cover;
+}
+.profile-v2 .pv2-avatar--hero {
+  display: block;
+  margin: 16px auto 10px;
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.6) inset,
+    0 18px 36px -20px rgba(20, 20, 18, 0.5),
+    0 4px 10px -5px rgba(20, 20, 18, 0.1);
+}
+.profile-v2 .pv2-avatar--inline {
+  display: inline-block;
+  vertical-align: middle;
+  border-width: 2px;
+  margin-right: 7px;
+  position: relative;
+  top: -1px;
+}
+
+/* hero eyebrow carries the live pulse + window line; suppress the landing
+   eyebrow's leading dot since .pf-live brings its own pulsing dot. */
+.profile-v2 section.hero .eyebrow.pv2-eyebrow { text-transform: none; gap: 7px; }
+.profile-v2 section.hero .eyebrow.pv2-eyebrow::before { display: none; }
+.profile-v2 section.hero .pf-live { letter-spacing: 0.08em; }
+
+/* honest harness chips - the data companion to the decorative logo field */
+.profile-v2 section.hero .pf-harness-list { justify-content: center; margin: 4px auto 6px; }
+
+/* vitals: tight inline stat strip folded under the lede */
+.profile-v2 .pv2-vitals {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  margin: 26px auto 0;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+}
+.profile-v2 .pv2-vitals .pf-vital {
+  padding: 18px 22px 14px;
+  align-items: center;
+  text-align: center;
+}
+.profile-v2 .pv2-vitals .pf-vital + .pf-vital { border-left: 1px solid var(--line); }
+@media (max-width: 640px) {
+  .profile-v2 .pv2-vitals .pf-vital { flex: 1 1 40%; padding: 14px 14px 12px; }
+  .profile-v2 .pv2-vitals .pf-vital + .pf-vital { border-left: none; }
+}
+
+/* CTA: centered lead-in commands above the landing footer-cards grid */
+.profile-v2 .pv2-cta { text-align: center; }
+.profile-v2 .pv2-cmds {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0 auto 28px;
+}
+.profile-v2 .pv2-cmd {
+  display: block;
+  font-family: var(--mono);
+  font-size: 13.5px;
+  background: var(--ink);
+  color: var(--page);
+  padding: 11px 16px;
+  text-align: left;
+}
+.profile-v2 .pv2-cmd::before { content: "$ "; color: var(--green); }
+.profile-v2 .pv2-cta .cards-grid { text-align: left; }
+
+/* colophon: one quiet hairline-topped line */
+.profile-v2 .pv2-colophon {
+  margin-top: 48px;
+  border-top: 1px solid var(--line);
+  padding-top: 16px;
+  display: flex;
+  justify-content: space-between;
+  gap: 10px 28px;
+  flex-wrap: wrap;
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--muted);
+}
+.profile-v2 .pv2-colophon code {
+  font-family: var(--mono);
+  background: var(--panel);
+  border: 1px solid var(--line);
+  color: var(--ink);
+  padding: 2px 8px;
+}
+
+/* unclaimed state: hero block + publish command */
+.profile-v2 .pv2-unclaimed { border-bottom: none; }
+.profile-v2 .pv2-unclaimed-copy {
+  font-size: 15px;
+  line-height: 1.6;
+  color: var(--muted);
+  margin: 0 auto 14px;
+  max-width: 52ch;
+}
+.profile-v2 .pv2-unclaimed-copy a {
+  color: var(--ink);
+  text-decoration-color: var(--green);
+  text-underline-offset: 3px;
+}
+.profile-v2 .pv2-unclaimed .pv2-cmd {
+  display: inline-block;
+  margin: 6px auto 20px;
+  font-size: 14px;
+}

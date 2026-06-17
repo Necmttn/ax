@@ -1,3 +1,4 @@
+/** @jsxImportSource react */
 /**
  * Approved card-viz registry - a small set of blessed, reusable instrument
  * visuals the wrapped agent can target DECLARATIVELY (json-render.dev mindset).
@@ -26,7 +27,7 @@ const clampPct = (n: number) => (Number.isFinite(n) ? Math.min(100, Math.max(0, 
 /** Resample/clamp a series to exactly `n` points (nearest sample). */
 const take = (a: number[], n: number): number[] =>
     a.length === 0 ? Array.from({ length: n }, () => 0)
-    : Array.from({ length: n }, (_, i) => a[Math.min(a.length - 1, Math.floor((i / n) * a.length))]);
+    : Array.from({ length: n }, (_, i) => a[Math.min(a.length - 1, Math.floor((i / n) * a.length))] ?? 0);
 
 /** Measure a wrapper's px width (for real-aspect SVG viz). */
 function useWidth(initial = 220): readonly [React.RefObject<HTMLDivElement | null>, number] {
@@ -35,7 +36,7 @@ function useWidth(initial = 220): readonly [React.RefObject<HTMLDivElement | nul
     useEffect(() => {
         const el = ref.current;
         if (!el) return;
-        const ro = new ResizeObserver((e) => setW(Math.max(40, e[0].contentRect.width)));
+        const ro = new ResizeObserver((e) => setW(Math.max(40, e[0]?.contentRect.width ?? 40)));
         ro.observe(el);
         return () => ro.disconnect();
     }, []);
@@ -46,7 +47,7 @@ function useWidth(initial = 220): readonly [React.RefObject<HTMLDivElement | nul
 /** Vertical bars with a hairline baseline, peak tick, and a live "now" cap. */
 function Bars({ data, label }: P): ReactElement {
     if (data.length === 0) return <div className="wr-bars" aria-hidden="true" />;
-    const peak = data.reduce((m, b, i) => (b > data[m] ? i : m), 0);
+    const peak = data.reduce((m, b, i) => (b > (data[m] ?? 0) ? i : m), 0);
     const last = data.length - 1;
     return (
         <div className="wr-bars" role="img" aria-label={label} style={{ ["--bars-n"]: data.length } as CSSProperties}>
@@ -75,16 +76,16 @@ function Line({ data, label }: P): ReactElement {
         return [x, y] as const;
     });
     const d = xy.length === 1
-        ? `M ${xy[0][0]} ${xy[0][1]} L ${w - padX} ${xy[0][1]}`
+        ? `M ${xy[0]![0]} ${xy[0]![1]} L ${w - padX} ${xy[0]![1]}`
         : xy.reduce((acc, [x, y], i) => {
             if (i === 0) return `M ${x} ${y}`;
-            const [x0, y0] = xy[Math.max(0, i - 2)];
-            const [x1, y1] = xy[i - 1];
-            const [x2, y2] = xy[Math.min(n - 1, i + 1)];
+            const [x0, y0] = xy[Math.max(0, i - 2)]!;
+            const [x1, y1] = xy[i - 1]!;
+            const [x2, y2] = xy[Math.min(n - 1, i + 1)]!;
             return `${acc} C ${x1 + (x - x0) / 6} ${y1 + (y - y0) / 6}, ${x - (x2 - x1) / 6} ${y - (y2 - y1) / 6}, ${x} ${y}`;
         }, "");
-    const [lx, ly] = xy[xy.length - 1];
-    const area = `${d} L ${lx} ${H - PAD_B + 4} L ${xy[0][0]} ${H - PAD_B + 4} Z`;
+    const [lx, ly] = xy[xy.length - 1]!;
+    const area = `${d} L ${lx} ${H - PAD_B + 4} L ${xy[0]![0]} ${H - PAD_B + 4} Z`;
     const gid = `wrl-${Math.round(w)}-${n}`;
     return (
         <div className="wr-line-wrap" ref={wrap} title={label}>
@@ -126,7 +127,7 @@ function CellMatrix({ data, label }: P): ReactElement {
 /** Dual-row segmented readout: per-point heat strip over a battery meter. */
 function SegMeter({ data }: P): ReactElement {
     const n = data.length;
-    const last = n ? data[n - 1] : 0;
+    const last = n ? (data[n - 1] ?? 0) : 0;
     const mean = avg(data);
     const cells = 22;
     const onCells = Math.round(clamp01(last / 100) * cells);
@@ -308,8 +309,8 @@ function Scatter({ data, label }: P): ReactElement {
  *  and a target as a vertical tick - a single KPI-against-goal readout. */
 function Bullet({ data, label }: P): ReactElement {
     const vals = data.length ? data : [68, 82];
-    const actual = clampPct(vals[vals.length - 1]);
-    const target = clampPct(vals.length >= 2 ? vals[0] : avg(vals) + 14);
+    const actual = clampPct(vals[vals.length - 1] ?? 0);
+    const target = clampPct(vals.length >= 2 ? (vals[0] ?? 0) : avg(vals) + 14);
     const onTrack = actual >= target;
     return (
         <div className="wr-bullet" aria-hidden="true" title={label}>
@@ -396,7 +397,7 @@ function Candles({ data, label }: P): ReactElement {
     return (
         <div className="wr-candles" role="img" aria-label={label} style={{ ["--cn"]: series.length } as CSSProperties}>
             {series.map((v, i) => {
-                const prev = i === 0 ? series[0] : series[i - 1];
+                const prev = (i === 0 ? series[0] : series[i - 1]) ?? v;
                 const up = v >= prev;
                 const oY = Y(prev), cY = Y(v);
                 const top = Math.min(oY, cY), bodyH = Math.max(2, Math.abs(cY - oY));
@@ -442,7 +443,7 @@ function Signal({ data, label }: P): ReactElement {
  *  series start, over a hairline micro-sparkline. The arrow tints up/down. */
 function Delta({ data, label }: P): ReactElement {
     const pts = data.length ? data : [40, 55, 48, 62, 70];
-    const last = pts[pts.length - 1], first = pts[0];
+    const last = pts[pts.length - 1] ?? 0, first = pts[0] ?? 0;
     const diff = last - first;
     const up = diff >= 0;
     const n = pts.length, max = Math.max(...pts, 1), min = Math.min(...pts, 0), span = Math.max(1, max - min);
