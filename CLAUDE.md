@@ -255,6 +255,18 @@ gist + local state) resets it. State: `~/.ax/profile-publish.json`. Spec:
 docs/superpowers/specs/2026-06-12-ax-profiles-design.md; site routes land
 in plan 4.
 
+`ax profile interview [--force]` - emit `.ax/tasks/profile-interview-<date>.md`, a
+brief for an agent to interview you (draft-then-confirm, grounded in your rig) for
+the user-authored profile layer: secret-weapon setup, per-skill summaries, a
+free-form taste line, and corroborated wins. `ax profile interview submit`
+[--file] validates `{ v, authored_at, setup?, skills?, taste?, wins? }` JSON
+(stdin/--file) against an Effect schema and writes `~/.ax/profile-highlights.json`;
+`buildProfile` folds it in as the optional `highlights` block (separate from mined
+`taste.patterns`), and the site renders both inside the Taste section ("in their
+words"). Persists across republishes; re-run to refresh. Module:
+`apps/axctl/src/profile/{highlights,interview-brief}.ts`. Spec:
+docs/superpowers/specs/2026-06-17-profile-interview-design.md.
+
 Community rails: `community/users/<login>.json` registrations are validated
 (schema + author==filename, `scripts/validate-community-users.ts`) and
 auto-merged by `community-users.yml` (pull_request_target; PR head is data

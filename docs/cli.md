@@ -50,6 +50,8 @@ axctl wrapped <generate|publish>            # agent-authored Wrapped recap cards
 axctl profile publish [--if-stale=H] [--yes] [--skip-registration]
                                             # publish profile gist + one-time community registration PR
 axctl profile unpublish                     # delete the published gist + local consent
+axctl profile interview [--force]              # emit a brief; an agent interviews you for profile highlights
+axctl profile interview submit [--file=PATH]   # validate highlights JSON (stdin/--file) -> ~/.ax/profile-highlights.json
 axctl pricing [--query <model>]             # inspect imported model pricing rows
 axctl share <session-id>                    # publish a sanitized session share via GitHub Gist
 axctl roles                                 # list role labels with skill counts

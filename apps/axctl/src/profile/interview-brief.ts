@@ -12,9 +12,13 @@ export interface ProfileInterviewBriefInput {
     readonly hooks: ReadonlyArray<string>;
 }
 
+/** How many top skills to surface in the brief for the agent to summarize. */
+const BRIEF_SKILL_LIMIT = 10;
+
 export const renderProfileInterviewBrief = ({ date, skills, hooks }: ProfileInterviewBriefInput): string => {
-    const skillList = skills.length > 0
-        ? skills.map((s) => `- ${s.name} (${s.source})`).join("\n")
+    const topSkills = skills.slice(0, BRIEF_SKILL_LIMIT);
+    const skillList = topSkills.length > 0
+        ? topSkills.map((s) => `- ${s.name} (${s.source})`).join("\n")
         : "- (no skills recorded in the window - ask the user what they lean on)";
     const hookList = hooks.length > 0 ? hooks.join(", ") : "(none installed)";
     return `## Task: Interview me for my ax profile highlights (${date})
@@ -67,8 +71,11 @@ echo '<json>' | ax profile interview submit
 
 **Rules:**
 - Everything is MY words - confirm before writing anything down. Don't fabricate.
-- \`link\` is optional and must be http/https; a private repo URL is fine (I'll
-  see the full JSON at publish-time and consent then).
+- \`link\` is optional and must be http/https; a private repo URL is fine - it
+  publishes as part of my profile. The FIRST \`ax profile publish\` shows the
+  exact JSON and asks for consent (and authorizes future auto-refresh); after
+  that, review what's public anytime with \`ax profile show\` and remove it all
+  with \`ax profile unpublish\`. Don't put anything here I wouldn't publish.
 - Submit validates against a schema and fails loudly on a bad shape - fix and
   re-run, never hand-edit the file.
 - After submit, run \`ax profile publish\` to fold these into my public gist.

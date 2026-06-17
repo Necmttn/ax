@@ -4,10 +4,9 @@
  * watcher step no-ops without it). Reads never throw - any corruption
  * degrades to "not published yet".
  *
- * Atomic write: Bun.write(tmp) + mv rename keeps the reader from ever
- * seeing a partial file. node:fs is banned by CI gate check:no-node-fs,
- * so we use Bun.spawnSync(["mv", ...]) for the rename step.
+ * Atomic write via the shared atomicWriteJson helper (Bun.write tmp + mv).
  */
+import { atomicWriteJson } from "./fs.ts";
 
 export interface PublishState {
     readonly v: 1;
@@ -52,17 +51,5 @@ export async function loadPublishState(path: string): Promise<PublishState | nul
 }
 
 export async function savePublishState(path: string, state: PublishState): Promise<void> {
-    // Atomic: write to a sibling tmp file, then rename into place.
-    // Same-directory rename is atomic on POSIX. node:fs is banned by the
-    // check:no-node-fs CI gate, so we use Bun.spawnSync(["mv", ...]).
-    const tmp = `${path}.${process.pid}.tmp`;
-    await Bun.write(tmp, `${JSON.stringify(state, null, 2)}\n`, { createPath: true });
-    const result = Bun.spawnSync(["mv", tmp, path]);
-    if (result.exitCode !== 0) {
-        // Clean up the tmp file and surface the error
-        Bun.spawnSync(["rm", "-f", tmp]);
-        throw new Error(
-            `savePublishState: mv ${tmp} → ${path} failed (exit ${result.exitCode})`,
-        );
-    }
+    await atomicWriteJson(path, state);
 }
