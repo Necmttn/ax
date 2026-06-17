@@ -4,7 +4,7 @@
  *  the wrapped agent emits one. */
 import { useEffect, useRef, useState } from "react";
 import type { WrappedCardDto } from "@ax/lib/shared/dashboard-types";
-import { CardViz, VIZ_KINDS, type VizKind, type VizSpec } from "./card-viz.tsx";
+import { CardViz, VIZ_KINDS, type VizKind, type VizSpec } from "@ax/recap-deck";
 
 const CARD_MIN = 270, GAP = 12;
 
