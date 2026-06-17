@@ -15368,6 +15368,23 @@ footer.site-footer { padding: 48px 32px 56px; }
    bottom rule - the vitals strip owns the divider now (avoids a double line). */
 .profile-v2 section.hero { min-height: 430px; border-bottom: none; }
 
+/* GitHub avatar above the handle (mirrors the leaders-page .lb-avatar source);
+   floated logo-tile shadow for cohesion with the hero. */
+.profile-v2 section.hero .pv2-avatar {
+  display: block;
+  width: 88px;
+  height: 88px;
+  border-radius: 50%;
+  border: 1px solid var(--line);
+  background: var(--panel);
+  margin: 16px auto 8px;
+  object-fit: cover;
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.6) inset,
+    0 14px 30px -18px rgba(20, 20, 18, 0.45),
+    0 3px 8px -4px rgba(20, 20, 18, 0.08);
+}
+
 /* hero eyebrow carries the live pulse + window line; suppress the landing
    eyebrow's leading dot since .pf-live brings its own pulsing dot. */
 .profile-v2 section.hero .eyebrow.pv2-eyebrow { text-transform: none; gap: 7px; }

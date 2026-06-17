@@ -209,6 +209,14 @@ function ProfileDossier({ profile: p, vs }: { profile: ProfileV1; vs: VsState })
                     <span aria-hidden="true">·</span>
                     {p.window_days}-day window · compiled {p.generated_at.slice(0, 10)}
                 </span>
+                <img
+                    className="pv2-avatar"
+                    src={`https://github.com/${p.github}.png?size=176`}
+                    alt=""
+                    width={88}
+                    height={88}
+                    loading="eager"
+                />
                 <h1><span className="pf-at">@</span>{p.github}</h1>
                 <p className="lede">{lede}</p>
                 <span className="pf-harness-list" aria-label="harnesses">
