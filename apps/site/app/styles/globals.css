@@ -12230,13 +12230,41 @@ footer.site-footer { padding: 48px 32px 56px; }
      mono numerals, hairline rules, paper/ink. No SaaS chrome.
    ============================================================ */
 
-.profile-page, .leaders-page {
+.profile-page, .leaders-page, .status-page {
     max-width: var(--shell-max);
     margin: 0 auto;
     padding: 32px var(--shell-pad) 96px;
 }
 @media (max-width: 640px) {
-    .profile-page, .leaders-page { padding-left: 20px; padding-right: 20px; }
+    .profile-page, .leaders-page, .status-page { padding-left: 20px; padding-right: 20px; }
+}
+
+/* ----- status: live adoption receipt (unlisted) ----- */
+.status-head h1 { margin: 0 0 8px; }
+.status-head .muted { max-width: 70ch; margin: 0 0 4px; }
+.status-note { font-family: var(--mono); font-size: 0.82rem; margin: 24px 0; }
+
+.status-cells {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 1px; margin: 26px 0 0; padding: 0;
+    background: var(--line); border: 1px solid var(--line); border-radius: 8px; overflow: hidden;
+}
+.status-cell { background: var(--page); padding: 16px 16px 14px; display: flex; flex-direction: column; gap: 3px; }
+.status-cell dt { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); margin: 0; }
+.status-cell dd { margin: 0; font-family: var(--mono); font-size: 1.7rem; line-height: 1.1; color: var(--ink); font-variant-numeric: tabular-nums; }
+.status-cell-hint { font-size: 0.7rem; }
+
+.status-block { margin: 34px 0 0; }
+.status-block h2 { font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); font-weight: 600; margin: 0 0 12px; }
+.status-bars { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 7px; }
+.status-bars li { display: grid; grid-template-columns: 140px 1fr auto; align-items: center; gap: 12px; font-family: var(--mono); font-size: 0.82rem; }
+.status-bar-label { color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.status-bar-track { height: 8px; background: color-mix(in srgb, var(--line) 60%, transparent); border-radius: 4px; overflow: hidden; }
+.status-bar-fill { display: block; height: 100%; background: color-mix(in srgb, var(--green) 55%, transparent); border-radius: 4px; }
+.status-bar-val { color: var(--ink); font-variant-numeric: tabular-nums; text-align: right; min-width: 3ch; }
+.status-foot { font-size: 0.78rem; max-width: 70ch; margin: 38px 0 0; }
+@media (max-width: 520px) {
+    .status-bars li { grid-template-columns: 96px 1fr auto; }
 }
 
 /* ----- leaders: live roster (every builder's full receipt, one row) ----- */
