@@ -139,8 +139,12 @@ const agendaCommand = Command.make(
                 },
                 nowMs,
             );
-            const items = yield* collectAgendaItems({ nowMs, days, spar });
-            const agenda = assembleAgenda(envelope, items, { nowMs, spar });
+            const collected = yield* collectAgendaItems({ nowMs, days, spar });
+            const agenda = assembleAgenda(envelope, collected.items, {
+                nowMs,
+                spar,
+                sourceFailures: collected.source_failures,
+            });
             console.log(json ? prettyPrint(agenda) : renderAgenda(agenda));
         }).pipe(Effect.provide(QuotaEnvLive));
     },

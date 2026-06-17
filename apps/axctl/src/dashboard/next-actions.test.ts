@@ -268,12 +268,21 @@ describe("impactChip", () => {
         const b = proposalCards([openProposal({ form: "guidance", frequency: 1 })])[0]!;
         expect(b.impact_chip).toBeNull();
     });
+
+    test("forms without chip metadata return null", () => {
+        expect(proposalCards([openProposal({ form: "subagent", frequency: 9 })])[0]!.impact_chip).toBeNull();
+        expect(proposalCards([openProposal({ form: "automation", frequency: 9 })])[0]!.impact_chip).toBeNull();
+        expect(proposalCards([openProposal({ form: "harness_check", frequency: 9 })])[0]!.impact_chip).toBeNull();
+    });
 });
 
 describe("fixKind", () => {
     test("names the mechanism per form, guidance names its file target", () => {
         expect(proposalCards([openProposal({ form: "skill" })])[0]!.fix_kind).toBe("new skill");
         expect(proposalCards([openProposal({ form: "hook" })])[0]!.fix_kind).toBe("new hook");
+        expect(proposalCards([openProposal({ form: "subagent" })])[0]!.fix_kind).toBe("new subagent");
+        expect(proposalCards([openProposal({ form: "automation" })])[0]!.fix_kind).toBe("automation");
+        expect(proposalCards([openProposal({ form: "harness_check" })])[0]!.fix_kind).toBe("harness check");
         expect(
             proposalCards([
                 openProposal({

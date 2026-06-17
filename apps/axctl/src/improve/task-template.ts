@@ -5,8 +5,9 @@
  */
 
 import type { InterventionSafetyContract } from "./lifecycle.ts";
+import type { InterventionForm } from "./intervention-forms.ts";
 
-export type TaskForm = "guidance" | "skill" | "harness_check" | "subagent" | "hook" | "automation";
+export type TaskForm = InterventionForm;
 
 export interface TaskInput {
     readonly form: TaskForm;
@@ -280,19 +281,14 @@ ${i.suggestedBody}
 - evidence-cmd: \`axctl improve show ${i.shortId}\`
 `;
 
-export const renderTaskFile = (input: TaskInput): string => {
-    switch (input.form) {
-        case "guidance":
-            return guidance(input);
-        case "skill":
-            return skill(input);
-        case "harness_check":
-            return harnessCheck(input);
-        case "subagent":
-            return subagent(input);
-        case "hook":
-            return hook(input);
-        case "automation":
-            return automation(input);
-    }
-};
+export const TASK_FORM_RENDERERS = {
+    guidance,
+    skill,
+    harness_check: harnessCheck,
+    subagent,
+    hook,
+    automation,
+} satisfies Record<TaskForm, (input: TaskInput) => string>;
+
+export const renderTaskFile = (input: TaskInput): string =>
+    TASK_FORM_RENDERERS[input.form](input);

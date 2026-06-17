@@ -1,7 +1,12 @@
 import { describe, expect, test } from "bun:test";
 import { Effect, Layer } from "effect";
 import { SurrealClient } from "@ax/lib/db";
-import { sessionTelemetryCost, sessionTelemetryLatency } from "./telemetry-rollup.ts";
+import {
+    enrichRowsWithTelemetryCost,
+    enrichRowsWithTelemetryLatency,
+    sessionTelemetryCost,
+    sessionTelemetryLatency,
+} from "./telemetry-rollup.ts";
 
 const db = (rows: { metric?: unknown[]; log?: unknown[] }) =>
     Layer.succeed(SurrealClient, {
@@ -45,5 +50,49 @@ describe("sessionTelemetryLatency", () => {
         const layer = db({ log: [{ session_id: "c1", d: 693, n: 1 }] });
         const m = await run(sessionTelemetryLatency(["c1"]), layer);
         expect(m.get("c1")?.duration_ms).toBe(693);
+    });
+});
+
+describe("telemetry row enrichment", () => {
+    test("cost enrichment normalizes session record ids and merges absent telemetry as null", async () => {
+        const layer = db({
+            metric: [
+                { session_id: "s1", metric: "claude_code.cost.usage", total: 0.75 },
+                { session_id: "s1", metric: "claude_code.token.usage", total: 300 },
+            ],
+        });
+        const rows = [
+            { id: "a", session: "session:s1" },
+            { id: "b", session: "session:missing" },
+        ] as const;
+        const enriched = await run(
+            enrichRowsWithTelemetryCost(
+                rows,
+                (row) => row.session,
+                (row, cost) => ({
+                    ...row,
+                    otlp_cost_usd: cost?.cost_usd ?? null,
+                    otlp_tokens: cost?.tokens ?? null,
+                }),
+            ),
+            layer,
+        );
+        expect(enriched).toEqual([
+            { id: "a", session: "session:s1", otlp_cost_usd: 0.75, otlp_tokens: 300 },
+            { id: "b", session: "session:missing", otlp_cost_usd: null, otlp_tokens: null },
+        ]);
+    });
+
+    test("latency enrichment hides lookup and normalization details", async () => {
+        const layer = db({ log: [{ session_id: "c1", d: 42, n: 2 }] });
+        const enriched = await run(
+            enrichRowsWithTelemetryLatency(
+                [{ session_id: "session:c1" }],
+                (row) => row.session_id,
+                (row, latency) => ({ ...row, recovery_ms: latency?.duration_ms ?? null }),
+            ),
+            layer,
+        );
+        expect(enriched).toEqual([{ session_id: "session:c1", recovery_ms: 42 }]);
     });
 });
