@@ -159,8 +159,9 @@ unit-testable; the IO (graph queries, file write) stays in the command.
 ### `ax profile interview submit`
 
 Reads `{ ...highlights }` JSON from stdin (or `--file=PATH`), validates against
-the `Highlights` Effect schema, stamps/normalizes `authored_at` if absent, and
-writes `~/.ax/profile-highlights.json`. Mirrors `ax wrapped publish` exactly.
+the `Highlights` Effect schema, and writes `~/.ax/profile-highlights.json`. 
+`authored_at` is a required field and submit fails loudly if it is missing (the 
+brief template always emits it). Mirrors `ax wrapped publish` exactly.
 On success prints a confirmation and the hint to run `ax profile publish`.
 Invalid JSON or schema-mismatch fails loudly (never writes a partial file).
 

@@ -415,7 +415,6 @@ const profileUnpublishCommand = Command.make("unpublish", {}, () => cmdProfileUn
 // ax profile interview submit - validate highlights JSON and write the file.
 // ---------------------------------------------------------------------------
 
-// ax profile interview submit - validate { v, ...highlights } JSON, write the file.
 export const cmdProfileInterviewSubmit = (input: { readonly rawJson: string; readonly path: string }) =>
     Effect.gen(function* () {
         const parsed = yield* Effect.try({
@@ -461,8 +460,9 @@ const profileInterviewSubmitCommand = Command.make(
             const rawJson = filePath !== undefined
                 ? yield* Effect.tryPromise(() => Bun.file(filePath).text())
                 : yield* Effect.tryPromise(() => Bun.stdin.text());
-            yield* cmdProfileInterviewSubmit({ rawJson, path: defaultHighlightsPath() });
-            console.log(`saved: ${defaultHighlightsPath()}`);
+            const hlPath = defaultHighlightsPath();
+            yield* cmdProfileInterviewSubmit({ rawJson, path: hlPath });
+            console.log(`saved: ${hlPath}`);
             console.log("run `ax profile publish` to fold these into your public gist.");
         }),
 ).pipe(Command.withDescription(
