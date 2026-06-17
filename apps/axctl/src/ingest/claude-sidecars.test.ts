@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Effect, FileSystem, Layer, Path } from "effect";
@@ -56,16 +56,6 @@ describe("discoverClaudeSidecarArtifacts", () => {
 
         const records = await runFs(discoverClaudeSidecarArtifacts({ transcriptsDir, project }));
 
-        expect(records.map((record) => record.safeRelativePath).sort()).toEqual([
-            `${project}/debug/log.txt`,
-            `${project}/file-history/history.json`,
-            `${project}/plans/plan.md`,
-            `${project}/session-env/session.json`,
-            `${project}/shell-snapshots/shell.txt`,
-            `${project}/stats-cache.json`,
-            `${project}/tasks/task.json`,
-            `${project}/tool-results/tool-1.json`,
-        ]);
         expect(records.map((record) => record.kind).sort()).toEqual([
             "debug",
             "file-history",
@@ -78,7 +68,40 @@ describe("discoverClaudeSidecarArtifacts", () => {
         ]);
         expect(records.every((record) => record.project === project)).toBe(true);
         expect(records.every((record) => record.safeRelativePath.startsWith(transcriptsDir))).toBe(false);
+        expect(records.every((record) => record.safeRelativePath.startsWith(`${project}/`))).toBe(true);
+        expect(records.every((record) => /^-Users-me-Projects-ax\/[^/]+\/[0-9a-f]{16}$/.test(record.safeRelativePath))).toBe(true);
         expect(records.every((record) => record.pathHash.length === 64)).toBe(true);
+        const serialized = JSON.stringify(records);
+        expect(serialized).not.toContain("tool-1.json");
+        expect(serialized).not.toContain("history.json");
+        expect(serialized).not.toContain("plan.md");
+        expect(serialized).not.toContain("session.json");
+        expect(serialized).not.toContain("shell.txt");
+        expect(serialized).not.toContain("log.txt");
+        expect(serialized).not.toContain("task.json");
+        expect(serialized).not.toContain("stats-cache.json");
+    });
+
+    test("skips symlinked sidecar entries without reading files outside the project", async () => {
+        const transcriptsDir = await makeTempDir();
+        const outsideDir = await makeTempDir();
+        const project = "-Users-me-Projects-ax";
+        const outsidePath = await write(outsideDir, "outside-secret.txt", "outside-secret");
+        await mkdir(join(transcriptsDir, project, "tool-results"), { recursive: true });
+        await symlink(outsidePath, join(transcriptsDir, project, "tool-results", "linked.json"));
+
+        const records = await runFs(discoverClaudeSidecarArtifacts({ transcriptsDir, project }));
+
+        expect(records).toEqual([]);
+        expect(JSON.stringify(records)).not.toContain("outside-secret");
+    });
+
+    test("missing transcript root returns no sidecar artifacts", async () => {
+        const transcriptsDir = join(tmpdir(), "ax-missing-claude-sidecars-root");
+
+        const records = await runFs(discoverClaudeSidecarArtifacts({ transcriptsDir }));
+
+        expect(records).toEqual([]);
     });
 
     test("does not hash or excerpt large sidecar files", async () => {
@@ -118,14 +141,14 @@ describe("buildClaudeSidecarStatements", () => {
         const record = {
             kind: "stats-cache",
             project: "-Users-me-Projects-ax",
-            safeRelativePath: "-Users-me-Projects-ax/stats-cache.json",
+            safeRelativePath: "-Users-me-Projects-ax/stats-cache/aaaaaaaaaaaaaaaa",
             pathHash: "a".repeat(64),
             size: 42,
             mtime,
             contentHash: "b".repeat(64),
             sessionId: null,
             relationIds: {},
-            relationAttrs: { source: "root" },
+            relationAttrs: { sidecar_kind: "stats-cache", path_hash: "a".repeat(64), path_depth: 1 },
             observedAt,
             excerpt: null,
             attrs: { content_hash_skipped: false, excerpt_skipped: true },
@@ -138,14 +161,17 @@ describe("buildClaudeSidecarStatements", () => {
         expect(statement).toContain("UPSERT claude_sidecar_artifact:`aaaaaaaa");
         expect(statement).toContain("kind: \"stats-cache\"");
         expect(statement).toContain("project: \"-Users-me-Projects-ax\"");
-        expect(statement).toContain("safe_relative_path: \"-Users-me-Projects-ax/stats-cache.json\"");
+        expect(statement).toContain("safe_relative_path: \"-Users-me-Projects-ax/stats-cache/aaaaaaaaaaaaaaaa\"");
         expect(statement).toContain("path_hash: \"aaaaaaaa");
         expect(statement).toContain("size: 42");
         expect(statement).toContain("mtime: d\"2026-06-17T11:00:00.000Z\"");
         expect(statement).toContain("content_hash: \"bbbbbbbb");
         expect(statement).toContain("session: NONE");
         expect(statement).toContain("relation_ids_json: \"{}\"");
+        expect(statement).toContain("\\\"path_hash\\\":\\\"aaaaaaaa");
         expect(statement).toContain("observed_at: d\"2026-06-17T12:00:00.000Z\"");
+        expect(statement).not.toContain("\\\"relative_path\\\"");
+        expect(statement).not.toContain("stats-cache.json");
         expect(statement).not.toContain("secret");
         expect(statement).not.toContain(process.env.HOME ?? "__no_home__");
     });

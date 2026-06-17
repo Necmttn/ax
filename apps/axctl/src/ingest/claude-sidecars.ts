@@ -4,6 +4,7 @@ import { AxConfig } from "@ax/lib/config";
 import { SurrealClient } from "@ax/lib/db";
 import type { DbError } from "@ax/lib/errors";
 import { orAbsent } from "@ax/lib/shared/fs-error";
+import { classifyNoFollow } from "@ax/lib/shared/fs-classify";
 import { executeStatementsWith } from "@ax/lib/shared/statement-exec";
 import { safeKeyPart } from "@ax/lib/shared/derive-keys";
 import {
@@ -77,6 +78,9 @@ const extractSessionId = (relativePath: string): string | null => {
     return match ? match[0] : null;
 };
 
+const pathDepth = (relativePath: string): number =>
+    normalizeRel(relativePath).split("/").filter(Boolean).length;
+
 const dateFromStatMtime = (mtime: Option.Option<Date>): Date =>
     Option.getOrElse(mtime, () => new Date(0));
 
@@ -133,14 +137,16 @@ const buildArtifact = (
     },
 ): Effect.Effect<ClaudeSidecarArtifact, never, FileSystem.FileSystem> =>
     Effect.gen(function* () {
-        const safeRelativePath = normalizeRel(`${input.project}/${input.relativePath}`);
+        const identityPath = normalizeRel(`${input.project}/${input.relativePath}`);
+        const pathHash = sha256(identityPath);
+        const safeRelativePath = normalizeRel(`${input.project}/${input.kind}/${pathHash.slice(0, 16)}`);
         const sessionId = extractSessionId(input.relativePath);
         const content = yield* fileContentMetadata(input.absolutePath, input.size);
         return {
             kind: input.kind,
             project: input.project,
             safeRelativePath,
-            pathHash: sha256(safeRelativePath),
+            pathHash,
             size: Math.trunc(input.size),
             mtime: input.mtime,
             contentHash: content.contentHash,
@@ -148,7 +154,8 @@ const buildArtifact = (
             relationIds: sessionId ? { session_id: sessionId } : {},
             relationAttrs: {
                 sidecar_kind: input.kind,
-                relative_path: input.relativePath,
+                path_hash: pathHash,
+                path_depth: pathDepth(input.relativePath),
             },
             observedAt: input.observedAt,
             excerpt: null,
@@ -167,6 +174,8 @@ const discoverFile = (
 ): Effect.Effect<ClaudeSidecarArtifact | null, never, FileSystem.FileSystem> =>
     Effect.gen(function* () {
         const fs = yield* FileSystem.FileSystem;
+        const entryKind = yield* classifyNoFollow(args.absolutePath);
+        if (entryKind !== "File") return null;
         const stat = yield* fs.stat(args.absolutePath).pipe(orAbsent(null as FileSystem.File.Info | null));
         if (stat === null || stat.type !== "File") return null;
         return yield* buildArtifact({
@@ -193,16 +202,16 @@ const walkSidecarDir = (
     Effect.gen(function* () {
         const fs = yield* FileSystem.FileSystem;
         const path = yield* Path.Path;
+        const rootKind = yield* classifyNoFollow(args.dirPath);
+        if (rootKind !== "Directory") return [];
         const entries = yield* fs.readDirectory(args.dirPath).pipe(orAbsent<ReadonlyArray<string>>([]));
         const out: ClaudeSidecarArtifact[] = [];
 
         for (const entry of entries) {
             const absolutePath = path.join(args.dirPath, entry);
-            const stat = yield* fs.stat(absolutePath).pipe(orAbsent(null as FileSystem.File.Info | null));
-            if (stat === null) continue;
-
             const relativePath = normalizeRel(path.join(args.relativePrefix, entry));
-            if (stat.type === "Directory") {
+            const entryKind = yield* classifyNoFollow(absolutePath);
+            if (entryKind === "Directory") {
                 const nested = yield* walkSidecarDir({
                     ...args,
                     dirPath: absolutePath,
@@ -211,8 +220,10 @@ const walkSidecarDir = (
                 out.push(...nested);
                 continue;
             }
-            if (stat.type !== "File") continue;
+            if (entryKind !== "File") continue;
 
+            const stat = yield* fs.stat(absolutePath).pipe(orAbsent(null as FileSystem.File.Info | null));
+            if (stat === null || stat.type !== "File") continue;
             out.push(yield* buildArtifact({
                 kind: args.kind,
                 project: args.project,
@@ -271,11 +282,13 @@ export const discoverClaudeSidecarArtifacts = (
         const observedAt = new Date();
         const projects = opts.project
             ? [opts.project]
-            : (yield* fs.readDirectory(opts.transcriptsDir).pipe(Effect.orDie)).filter(validProjectSlug);
+            : (yield* fs.readDirectory(opts.transcriptsDir).pipe(orAbsent<ReadonlyArray<string>>([]))).filter(validProjectSlug);
         const out: ClaudeSidecarArtifact[] = [];
 
         for (const project of projects) {
             const projectRoot = path.join(opts.transcriptsDir, project);
+            const entryKind = yield* classifyNoFollow(projectRoot);
+            if (entryKind !== "Directory") continue;
             const stat = yield* fs.stat(projectRoot).pipe(orAbsent(null as FileSystem.File.Info | null));
             if (stat === null || stat.type !== "Directory") continue;
             const records = yield* discoverProjectSidecars(opts.transcriptsDir, project, observedAt);
