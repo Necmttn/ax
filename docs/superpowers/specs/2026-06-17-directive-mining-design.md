@@ -185,8 +185,90 @@ A candidate vanishes once it becomes a directive or is dismissed.
 
 ---
 
-## 7. Implementation slices (post-spec)
+## 7. Community layer - seed pack + contribution loop
 
+The local miner only pays off once a user has history; a **community pattern library
+gives day-1 value** and turns ax into a two-sided system (your patterns + everyone's).
+This is the parked registry/mesh design (`ax-registry-mesh-design`) with a *safer
+wedge*: abstracted **patterns** instead of raw recovery verdicts. It rides existing
+community rails - `ax profile publish` (consent gate), `community-nightly` (compile
+worker), trending boards - so it's incremental, not greenfield. Strategically it's also
+the adoption wedge (`team-adoption-roadmap`: push-value first, then contribution, then moat).
+
+### 7.1 Three layers (ship 1 now, design 2-3)
+
+1. **Curated seed pack** - `community/patterns/seed.json`: ~24 battle-tested directives
+   across verification / output / process / git / quality / communication. Decoupled
+   from the miner, **no privacy surface** (outbound-curated). Delivers immediate value:
+   a fresh install ships with adoptable patterns. Many seeds are abstracted from real
+   ax-user `feedback-*` memories - living proof the contribution concept works.
+   **Shipped in this PR.**
+2. **Contribution loop** - local mined directives, abstracted, consent-gated publish,
+   compiled into pattern-stats, fed back as new seeds. See 7.3.
+3. **Trending patterns board** - `community/patterns/trending.json` beside
+   trending-skills; the moat + contributor recognition (same dynamic that already works
+   for skills).
+
+### 7.2 Pattern schema
+
+```jsonc
+{
+  "id": "verify-before-claiming-done",        // stable kebab id
+  "title": "Verify before claiming done",
+  "category": "verification",                  // verification|output|process|git|quality|communication
+  "directive": "Run the actual verification command and show its output before claiming something works/passes.",
+  "phrasings": ["did you test it", "dogfood before showing", "show me it works"],
+  "landing": "hook",                            // memory|guidance|hook (passive -> enforced)
+  "rationale": "Unverified 'done' is the most common agent failure; enforceable as a gate.",
+  "source": "curated"                           // curated|community
+}
+```
+
+### 7.3 Contribution loop - where "auto" applies (and where it must not)
+
+```
+auto-MINE        local n-grams + candidates                      (no network)
+auto-ABSTRACT    directive -> pattern SHAPE, specifics stripped    ("verify-before-claiming-done", not the raw turn)
+consent PUBLISH  one yes, exact JSON shown                        (the ax profile publish model - NEVER auto)
+auto-COMPILE     nightly: dedup + threshold + rank across users   (pattern-stats)
+auto-SEED        installs pull top community patterns             (day-1 value, grows over time)
+```
+
+**Privacy is the whole game** (locked decision, v1): contribute the *generalized
+pattern*, never the raw turn text (which leaks project names, paths, opinions).
+Guarantees:
+- abstraction strips specifics (paths, names, repos) **before anything leaves the machine**;
+- publish is **consent-gated** - profile-publish precedent: show the exact JSON, one
+  explicit yes, PATCH-in-place - **never automatic**;
+- only patterns seen across **>= N independent contributors** compile into the public
+  board (the threshold kills one-off / identifying patterns);
+- validation reuses `community-users.yml` (schema-validated, data-only PR head, never executed).
+
+### 7.4 Consume the seed (immediate-value surface)
+
+- `ax patterns list [--category=C] [--json]` - browse the seed / community library.
+- `ax patterns adopt <id>` - write the pattern into your setup via the existing
+  `improve accept` brief path (memory / guidance / hook per its `landing`).
+- `ax patterns suggest` - patterns you're not yet following (gap vs your `feedback-*`
+  memories + installed hooks). The cold-start companion to the local miner.
+
+---
+
+## 8. Open questions (community layer)
+
+6. **Abstraction mechanism** - generalize a raw directive to a shareable pattern via
+   deterministic templating off the matched n-gram, or an agent abstraction step in the
+   brief (judgment, slower)? Determines how reliably specifics are stripped.
+7. **Contribution threshold N** - how many independent contributors must surface a
+   pattern before it compiles into the public board? (Higher = safer/less identifying,
+   slower to grow.)
+8. **Seed-on-install** - does `ax install` auto-offer the seed pack (opt-in prompt), or
+   is adoption purely pull (`ax patterns adopt`)? Auto-offer = more day-1 value, but must
+   not auto-write the user's config without consent.
+
+## 9. Implementation slices (post-spec)
+
+**Local miner**
 1. `queries/directive-ngrams.ts` - lift table over `turn` × outcomes (deref-free,
    per-user). Tests on synthetic turn/outcome fixtures.
 2. `ingest/derive-directive-candidates.ts` - flag + store candidates (harness-noise
@@ -195,6 +277,17 @@ A candidate vanishes once it becomes a directive or is dismissed.
    template.
 4. Directive record + `improve` proposal-kind wiring (or `directive` table per Q5);
    accept/lint reuse.
-5. Dojo agenda item + escalation rule (memory→hook on recurrence threshold).
-6. Docs gates (cli.md, llms.txt, cli-reference.data.ts, VISIBLE_COMMANDS) +
-   `ax directives` in MCP if read-only views warrant it.
+5. Dojo agenda item + escalation rule (memory->hook on recurrence threshold).
+
+**Community layer**
+6. Seed pack (`community/patterns/seed.json` + README) - **shipped in this PR**.
+7. `cli/commands/ax-patterns.ts` - `list` / `adopt` / `suggest` over the seed pack;
+   `adopt` reuses the `improve accept` brief path. *(Immediate-value slice - build next.)*
+8. Abstraction + consent-gated contribution (`ax patterns contribute`, profile-publish
+   rails), producing a `community/users` data PR.
+9. `community-nightly` compile extension producing `community/patterns/trending.json`
+   (dedup + threshold + rank); site trending-patterns board beside trending-skills.
+
+**Cross-cutting**
+10. Docs gates (cli.md, llms.txt, cli-reference.data.ts, VISIBLE_COMMANDS) for
+    `ax directives` + `ax patterns`; MCP read-only views if warranted.
