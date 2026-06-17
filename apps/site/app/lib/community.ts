@@ -39,6 +39,28 @@ export interface ProfileSkill {
     readonly runs: number;
     readonly downstream_share?: number;
 }
+export interface ProfileSetupItem {
+    readonly title: string;
+    readonly what: string;
+    readonly why: string;
+    readonly link?: string;
+}
+export interface ProfileSkillSummary {
+    readonly name: string;
+    readonly source: string;
+    readonly summary: string;
+}
+export interface ProfileWin {
+    readonly text: string;
+    readonly evidence?: string;
+}
+export interface ProfileHighlights {
+    readonly authored_at: string;
+    readonly setup?: readonly ProfileSetupItem[];
+    readonly skills?: readonly ProfileSkillSummary[];
+    readonly taste?: string;
+    readonly wins?: readonly ProfileWin[];
+}
 export interface TastePattern {
     readonly category: string;
     readonly name: string;
@@ -115,6 +137,7 @@ export interface ProfileV1 {
     readonly activity?: { readonly daily: readonly ProfileDailyRow[] };
     readonly insights?: ProfileInsights;
     readonly workflow?: ProfileWorkflow;
+    readonly highlights?: ProfileHighlights;
 }
 
 const optNum = (v: unknown, what: string): void => {
@@ -238,6 +261,39 @@ export function validateProfileV1(value: unknown): ProfileV1 {
             if (!Array.isArray(arc.steps)) throw new Error("invalid workflow arc.steps");
             for (const step of arc.steps) str(step, "workflow.arc.step");
             num(arc.count, "workflow.arc.count");
+        }
+    }
+    if (value.highlights !== undefined) {
+        const h = value.highlights;
+        if (!isRecord(h)) throw new Error("invalid highlights");
+        str(h.authored_at, "highlights.authored_at");
+        if (h.setup !== undefined) {
+            if (!Array.isArray(h.setup)) throw new Error("invalid highlights.setup");
+            for (const s of h.setup) {
+                if (!isRecord(s)) throw new Error("invalid setup row");
+                str(s.title, "setup.title");
+                str(s.what, "setup.what");
+                str(s.why, "setup.why");
+                optStr(s.link, "setup.link");
+            }
+        }
+        if (h.skills !== undefined) {
+            if (!Array.isArray(h.skills)) throw new Error("invalid highlights.skills");
+            for (const s of h.skills) {
+                if (!isRecord(s)) throw new Error("invalid highlights skill row");
+                str(s.name, "highlights.skill.name");
+                str(s.source, "highlights.skill.source");
+                str(s.summary, "highlights.skill.summary");
+            }
+        }
+        optStr(h.taste, "highlights.taste");
+        if (h.wins !== undefined) {
+            if (!Array.isArray(h.wins)) throw new Error("invalid highlights.wins");
+            for (const w of h.wins) {
+                if (!isRecord(w)) throw new Error("invalid win row");
+                str(w.text, "win.text");
+                optStr(w.evidence, "win.evidence");
+            }
         }
     }
     return value as unknown as ProfileV1;
