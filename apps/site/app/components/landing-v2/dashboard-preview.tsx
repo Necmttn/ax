@@ -4,6 +4,7 @@ import { Link } from "@tanstack/react-router";
 import { AGENT_ONBOARDING_WITH_INSTALL } from "@ax/onboarding-prompt";
 import { HeroLogoField, PROVIDERS } from "./supports-strip";
 import { RetroTerminal } from "./retro-terminal";
+import { CardViz, type VizSpec } from "@ax/recap-deck";
 
 // ============================================================================
 // Mission Control preview - a static recreation of the studio home (instrument
@@ -148,268 +149,6 @@ function McClock() {
 }
 
 
-// ---- Wrapped recap charts (static recreations of the studio card-viz registry:
-// apps/studio/src/instrument/card-viz.tsx). Each keys --card-accent. ----
-function McBars({ data }: { data: number[] }) {
-  const max = Math.max(...data, 1);
-  const last = data.length - 1;
-  return (
-    <div className="mc-bars" aria-hidden="true">
-      {data.map((b, i) => (
-        <i
-          key={i}
-          className={i === last ? "is-now" : undefined}
-          style={{ height: `${Math.max(6, (b / max) * 100)}%` }}
-        />
-      ))}
-    </div>
-  );
-}
-
-function McLine({ data }: { data: number[] }) {
-  const W = 100;
-  const H = 46;
-  const padX = 2;
-  const padT = 5;
-  const padB = 5;
-  const uh = H - padT - padB;
-  const n = data.length;
-  const max = Math.max(...data, 1);
-  const xy = data.map((v, i) => [padX + (i / (n - 1)) * (W - 2 * padX), padT + (1 - v / max) * uh] as const);
-  const stroke = `M ${xy.map((p) => `${p[0].toFixed(1)} ${p[1].toFixed(1)}`).join(" L ")}`;
-  const area = `${stroke} L ${xy[n - 1][0].toFixed(1)} ${H - padB} L ${xy[0][0].toFixed(1)} ${H - padB} Z`;
-  return (
-    <svg className="mc-line" viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" aria-hidden="true">
-      <defs>
-        <linearGradient id="mcLineFill" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor="var(--card-accent)" stopOpacity="0.32" />
-          <stop offset="100%" stopColor="var(--card-accent)" stopOpacity="0" />
-        </linearGradient>
-      </defs>
-      <path d={area} fill="url(#mcLineFill)" />
-      <path d={stroke} className="mc-line-stroke" fill="none" />
-    </svg>
-  );
-}
-
-function McRadar({ data }: { data: number[] }) {
-  const axes = data.length;
-  const cx = 23;
-  const cy = 23;
-  const R = 21;
-  const max = Math.max(...data, 1);
-  const ang = (i: number) => -Math.PI / 2 + (i / axes) * Math.PI * 2;
-  const at = (i: number, r: number) => [cx + Math.cos(ang(i)) * r, cy + Math.sin(ang(i)) * r] as const;
-  const rad = (v: number) => ((v / max) * 0.84 + 0.08) * R;
-  const fmt = (p: readonly [number, number]) => `${p[0].toFixed(1)},${p[1].toFixed(1)}`;
-  const poly = data.map((v, i) => fmt(at(i, rad(v)))).join(" ");
-  return (
-    <svg className="mc-radar" viewBox="0 0 46 46" aria-hidden="true">
-      {[0.4, 0.7, 1].map((rr, k) => (
-        <polygon key={k} className="web" points={Array.from({ length: axes }, (_, i) => fmt(at(i, rr * R))).join(" ")} />
-      ))}
-      <polygon className="mc-radar-fill" points={poly} />
-      {data.map((v, i) => {
-        const [x, y] = at(i, rad(v));
-        return <circle key={i} className="mc-radar-node" cx={x.toFixed(1)} cy={y.toFixed(1)} r={1.5} />;
-      })}
-    </svg>
-  );
-}
-
-function McRing({ pct }: { pct: number }) {
-  const R = 15.5;
-  const C = 2 * Math.PI * R;
-  const dash = C * 0.75;
-  const frac = Math.max(0.04, pct / 100);
-  return (
-    <div className="mc-ring" aria-hidden="true">
-      <svg viewBox="0 0 40 40">
-        <circle cx="20" cy="20" r={R} className="bg" strokeDasharray={`${dash} ${C}`} />
-        <circle cx="20" cy="20" r={R} className="fg" strokeDasharray={`${dash} ${C}`} strokeDashoffset={dash * (1 - frac)} />
-      </svg>
-      <span className="mc-ring-val">{pct}</span>
-    </div>
-  );
-}
-
-function McWaffle({ pct }: { pct: number }) {
-  const ROWS = 5;
-  const COLS = 14;
-  const total = ROWS * COLS;
-  const on = Math.round((pct / 100) * total);
-  return (
-    <div className="mc-waffle" aria-hidden="true">
-      {Array.from({ length: total }, (_, i) => {
-        const col = i % COLS;
-        const row = Math.floor(i / COLS);
-        const order = col * ROWS + (ROWS - 1 - row);
-        return <span key={i} className={`mc-waffle-cell${order < on ? " on" : ""}`} />;
-      })}
-    </div>
-  );
-}
-
-function McCandles({ data }: { data: number[] }) {
-  const max = Math.max(...data, 1);
-  const min = Math.min(...data, 0);
-  const span = Math.max(1, max - min);
-  const Y = (v: number) => 4 + (1 - (v - min) / span) * 36;
-  return (
-    <div className="mc-candles" aria-hidden="true">
-      {data.map((v, i) => {
-        const prev = i === 0 ? data[0] : data[i - 1];
-        const up = v >= prev;
-        const oY = Y(prev);
-        const cY = Y(v);
-        const top = Math.min(oY, cY);
-        const bodyH = Math.max(2, Math.abs(cY - oY));
-        const wickTop = Math.min(top, Y(Math.max(v, prev)) - 3);
-        const wickBot = Math.max(top + bodyH, Y(Math.min(v, prev)) + 3);
-        return (
-          <span key={i} className={`mc-candle ${up ? "up" : "dn"}`}>
-            <span className="mc-candle-wick" style={{ top: `${wickTop}px`, height: `${Math.max(3, wickBot - wickTop)}px` }} />
-            <span className="mc-candle-body" style={{ top: `${top}px`, height: `${bodyH}px` }} />
-          </span>
-        );
-      })}
-    </div>
-  );
-}
-
-function McComet({ pct }: { pct: number }) {
-  const cx = 23;
-  const cy = 23;
-  const rx = 19;
-  const ry = 15;
-  const frac = Math.max(0.02, pct / 100);
-  const C = Math.PI * (3 * (rx + ry) - Math.sqrt((3 * rx + ry) * (rx + 3 * ry)));
-  const dash = C * frac;
-  const ang = -Math.PI / 2 + frac * Math.PI * 2;
-  const hx = cx + Math.cos(ang) * rx;
-  const hy = cy + Math.sin(ang) * ry;
-  return (
-    <div className="mc-comet" aria-hidden="true">
-      <svg viewBox="0 0 46 46">
-        <ellipse className="mc-comet-orbit" cx={cx} cy={cy} rx={rx} ry={ry} />
-        <ellipse
-          className="mc-comet-trail"
-          cx={cx}
-          cy={cy}
-          rx={rx}
-          ry={ry}
-          strokeDasharray={`${dash.toFixed(1)} ${C.toFixed(1)}`}
-          transform={`rotate(-90 ${cx} ${cy})`}
-        />
-        <circle className="mc-comet-head" cx={hx.toFixed(1)} cy={hy.toFixed(1)} r={2.6} />
-      </svg>
-    </div>
-  );
-}
-
-function McWave({ data }: { data: number[] }) {
-  const W = 100;
-  const H = 46;
-  const mid = H / 2;
-  const n = data.length;
-  const max = Math.max(...data, 1);
-  const min = Math.min(...data, 0);
-  const span = Math.max(1, max - min);
-  const d = data
-    .map((v, i) => {
-      const x = (i / (n - 1)) * (W - 2) + 1;
-      const y = mid + (0.5 - (v - min) / span) * (H - 10);
-      return `${i === 0 ? "M" : "L"} ${x.toFixed(1)} ${y.toFixed(1)}`;
-    })
-    .join(" ");
-  return (
-    <svg className="mc-wave" viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" aria-hidden="true">
-      <line className="mc-wave-grat" x1="0" y1={mid} x2={W} y2={mid} />
-      <line className="mc-wave-grat dash" x1={W * 0.5} y1="2" x2={W * 0.5} y2={H - 2} />
-      <path className="mc-wave-trace" d={d} fill="none" vectorEffect="non-scaling-stroke" />
-    </svg>
-  );
-}
-
-function McBullet({ actual, target }: { actual: number; target: number }) {
-  const onTrack = actual >= target;
-  return (
-    <div className="mc-bullet" aria-hidden="true">
-      <div className="mc-bullet-track">
-        <span className="mc-bullet-fill" style={{ width: `${actual}%` }} />
-        <span className={`mc-bullet-tick${onTrack ? " ok" : ""}`} style={{ left: `${target}%` }} />
-      </div>
-      <div className="mc-bullet-foot">
-        <span className="mc-bullet-val">{actual}</span>
-        <span className="mc-bullet-goal">/ {target} goal</span>
-      </div>
-    </div>
-  );
-}
-
-function McSignal({ on, bars = 6 }: { on: number; bars?: number }) {
-  return (
-    <div className="mc-signal" aria-hidden="true">
-      {Array.from({ length: bars }, (_, i) => (
-        <span
-          key={i}
-          className={`mc-signal-bar${i < on ? " on" : ""}`}
-          style={{ height: `${28 + (i / (bars - 1)) * 70}%` }}
-        />
-      ))}
-    </div>
-  );
-}
-
-function McScatter({ data }: { data: number[] }) {
-  const n = data.length;
-  const max = Math.max(...data, 1);
-  const min = Math.min(...data, 0);
-  const span = Math.max(1, max - min);
-  const mean = data.reduce((a, b) => a + b, 0) / n;
-  const meanY = 4 + (1 - (mean - min) / span) * 38;
-  return (
-    <div className="mc-scatter" aria-hidden="true">
-      <svg className="mc-scatter-svg" viewBox="0 0 100 46" preserveAspectRatio="none">
-        <line className="mc-scatter-mean" x1="0" y1={meanY.toFixed(1)} x2="100" y2={meanY.toFixed(1)} vectorEffect="non-scaling-stroke" />
-      </svg>
-      <div className="mc-scatter-dots">
-        {data.map((v, i) => {
-          const x = (i / (n - 1)) * 100;
-          const y = 4 + (1 - (v - min) / span) * 38;
-          return <span key={i} className={`mc-scatter-dot${v >= mean ? " hot" : ""}`} style={{ left: `${x}%`, top: `${y}px` }} />;
-        })}
-      </div>
-    </div>
-  );
-}
-
-function McDelta({ data }: { data: number[] }) {
-  const last = data[data.length - 1];
-  const first = data[0];
-  const diff = last - first;
-  const up = diff >= 0;
-  const n = data.length;
-  const max = Math.max(...data, 1);
-  const min = Math.min(...data, 0);
-  const span = Math.max(1, max - min);
-  const spark = data.map((v, i) => `${(i / (n - 1)) * 100},${(14 - ((v - min) / span) * 12).toFixed(1)}`).join(" ");
-  return (
-    <div className={`mc-delta ${up ? "up" : "dn"}`} aria-hidden="true">
-      <div className="mc-delta-num">
-        <span className="mc-delta-val">{Math.round(last)}</span>
-        <span className="mc-delta-trend">
-          <i>{up ? "▲" : "▼"}</i>
-          {Math.abs(Math.round(diff))}
-        </span>
-      </div>
-      <svg className="mc-delta-spark" viewBox="0 0 100 14" preserveAspectRatio="none">
-        <polyline points={spark} fill="none" stroke="var(--card-accent)" strokeWidth="1.25" vectorEffect="non-scaling-stroke" />
-      </svg>
-    </div>
-  );
-}
-
 // The 12 wrapped readouts the floating popups cycle through - each keys a channel
 // accent and carries one chart + a one-line caption. (Recreated from the studio
 // card-viz registry: apps/studio/src/instrument/card-viz.tsx.)
@@ -418,20 +157,22 @@ const POP_CHARTS: ReadonlyArray<{
   accent: string;
   q: string;
   h: string;
-  viz: React.ReactNode;
+  viz: VizSpec;
 }> = [
-  { key: "bars", accent: "acc-green", q: "when you ship", h: "Tuesday nights", viz: <McBars data={[22, 31, 28, 44, 39, 58, 47, 63, 71, 55, 82, 90, 74, 61, 88, 96]} /> },
-  { key: "ring", accent: "acc-gold", q: "fixes stick", h: "82% hold", viz: <McRing pct={82} /> },
-  { key: "line", accent: "acc-blue", q: "tokens / year", h: "1.4B", viz: <McLine data={[18, 24, 21, 33, 40, 38, 52, 60, 57, 71, 80, 78, 92, 100]} /> },
-  { key: "radar", accent: "acc-violet", q: "skill profile", h: "systems mind", viz: <McRadar data={[82, 64, 91, 48, 73]} /> },
-  { key: "waffle", accent: "acc-green", q: "paths covered", h: "73%", viz: <McWaffle pct={73} /> },
-  { key: "candles", accent: "acc-rose", q: "session swings", h: "big nights", viz: <McCandles data={[40, 60, 55, 75, 70, 50, 62, 80, 72, 88]} /> },
-  { key: "comet", accent: "acc-blue", q: "quota burn", h: "61%", viz: <McComet pct={61} /> },
-  { key: "wave", accent: "acc-violet", q: "latency", h: "steady", viz: <McWave data={[50, 80, 20, 60, 35, 70, 45, 66, 30, 72]} /> },
-  { key: "scatter", accent: "acc-rose", q: "cost vs reward", h: "lands cheap", viz: <McScatter data={[30, 50, 45, 70, 60, 85, 55, 40, 66, 52]} /> },
-  { key: "bullet", accent: "acc-gold", q: "ship goal", h: "82 / 70", viz: <McBullet actual={82} target={70} /> },
-  { key: "signal", accent: "acc-green", q: "harness health", h: "5 / 6", viz: <McSignal on={5} /> },
-  { key: "delta", accent: "acc-blue", q: "weekly tokens", h: "+18", viz: <McDelta data={[40, 55, 48, 62, 70, 66, 78, 84]} /> },
+  { key: "bars", accent: "acc-green", q: "when you ship", h: "Tuesday nights", viz: { kind: "bars", data: [22, 31, 28, 44, 39, 58, 47, 63, 71, 55, 82, 90, 74, 61, 88, 96] } },
+  { key: "ring", accent: "acc-gold", q: "fixes stick", h: "82% hold", viz: { kind: "ring", data: [82] } },
+  { key: "line", accent: "acc-blue", q: "tokens / year", h: "1.4B", viz: { kind: "line", data: [18, 24, 21, 33, 40, 38, 52, 60, 57, 71, 80, 78, 92, 100] } },
+  { key: "radar", accent: "acc-violet", q: "skill profile", h: "systems mind", viz: { kind: "radar", data: [82, 64, 91, 48, 73] } },
+  { key: "waffle", accent: "acc-green", q: "paths covered", h: "73%", viz: { kind: "waffle", data: [73] } },
+  { key: "candles", accent: "acc-rose", q: "session swings", h: "big nights", viz: { kind: "candles", data: [40, 60, 55, 75, 70, 50, 62, 80, 72, 88] } },
+  { key: "comet", accent: "acc-blue", q: "quota burn", h: "61%", viz: { kind: "comet", data: [61] } },
+  { key: "wave", accent: "acc-violet", q: "latency", h: "steady", viz: { kind: "wave", data: [50, 80, 20, 60, 35, 70, 45, 66, 30, 72] } },
+  { key: "scatter", accent: "acc-rose", q: "cost vs reward", h: "lands cheap", viz: { kind: "scatter", data: [30, 50, 45, 70, 60, 85, 55, 40, 66, 52] } },
+  // package bullet reads [target, actual]: target=first, actual=last -> 70 goal, 82 actual
+  { key: "bullet", accent: "acc-gold", q: "ship goal", h: "82 / 70", viz: { kind: "bullet", data: [70, 82] } },
+  // package signal reads avg(data) as a 0..100 pct -> on = round(83/100*6) = 5 of 6
+  { key: "signal", accent: "acc-green", q: "harness health", h: "5 / 6", viz: { kind: "signal", data: [83] } },
+  { key: "delta", accent: "acc-blue", q: "weekly tokens", h: "+18", viz: { kind: "delta", data: [40, 55, 48, 62, 70, 66, 78, 84] } },
 ];
 
 // chart kinds that render small/fixed-size (center them in the popup viz row);
@@ -720,13 +461,17 @@ export function DashboardPreview() {
           {/* floating wrapped highlights - cycle through all 12 charts */}
           <div className="mc-pop-strip">
             {POP_SLOTS.map(({ off, place }) => {
-              const c = POP_CHARTS[(popTick + off) % POP_CHARTS.length];
+              const c = POP_CHARTS[(popTick + off) % POP_CHARTS.length]!;
               return (
-                <article key={place} className={`mc-pop ${place} ${c.accent} browser--instrument`}>
+                <article
+                  key={place}
+                  className={`mc-pop ${place} ${c.accent} browser--instrument rdx`}
+                  data-theme="dark"
+                >
                   <span className="mc-pop-badge">wrapped</span>
                   <div key={c.key} className="mc-pop-swap">
                     <div className={`mc-pop-viz${POP_CENTERED.has(c.key) ? " mc-pop-viz--center" : ""}`}>
-                      {c.viz}
+                      <CardViz spec={c.viz} />
                     </div>
                     <span className="mc-pop-q">$ {c.q}</span>
                     <h4 className="mc-pop-h">{c.h}</h4>
