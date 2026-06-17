@@ -48,6 +48,12 @@ export interface RecallParams {
     readonly sources?: ReadonlyArray<RecallSource>;
     /** Repository scope. null / omitted = all. */
     readonly scope?: RecallScope;
+    /**
+     * Restrict turns to sessions whose tool outputs include at least one of
+     * these content-type categories. Prefiltered via the has_content edge
+     * (deref-free: session is denormalized on the edge). null / omitted = all.
+     */
+    readonly types?: ReadonlyArray<string> | null;
 }
 
 /**
@@ -94,6 +100,7 @@ export interface RecallQueryArgs {
     readonly limit?: number | null;
     readonly sources?: ReadonlyArray<RecallSource> | null;
     readonly scope?: RecallScope;
+    readonly types?: ReadonlyArray<string> | null;
 }
 
 /**
@@ -118,6 +125,7 @@ export const normalizeRecallParams = (args: RecallQueryArgs): RecallParams => ({
     limit: args.limit ?? RECALL_DEFAULT_LIMIT,
     ...(args.sources != null ? { sources: args.sources } : {}),
     ...(args.scope !== undefined ? { scope: args.scope } : {}),
+    ...(args.types != null ? { types: args.types } : {}),
 });
 
 export const emptyRecallResponse = (
@@ -181,6 +189,27 @@ export const fetchRecall = (
                         return { hits: [], total_count: 0 };
                     }
                     sessionFilterClause = `AND session IN [${ids.join(", ")}]`;
+                }
+
+                // Content-type filter: prefilter session ids via the has_content edge.
+                // The edge denormalizes `session` so this query is deref-free.
+                // Record ids are inlined as literals (alphanumeric category names
+                // are safe without quoting); bindings cannot carry record id arrays.
+                if (params.types && params.types.length > 0) {
+                    const typeLiterals = params.types.map((t) => `content_type:${t}`).join(", ");
+                    const typeRows = yield* db.query<[Array<{ sid: string }>]>(
+                        `SELECT type::string(session) AS sid FROM has_content WHERE session != NONE AND out IN [${typeLiterals}]`,
+                    );
+                    const typeIds = (typeRows?.[0] ?? [])
+                        .map((r) => r.sid)
+                        .filter((s) => s.length > 0);
+                    if (typeIds.length === 0) {
+                        return { hits: [], total_count: 0 };
+                    }
+                    const typeClause = `AND session IN [${typeIds.join(", ")}]`;
+                    sessionFilterClause = sessionFilterClause
+                        ? `${sessionFilterClause} ${typeClause}`
+                        : typeClause;
                 }
 
                 // Repository scope filter on turns: filter by session.repository.
