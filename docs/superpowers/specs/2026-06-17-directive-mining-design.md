@@ -1,9 +1,87 @@
 # Directive Mining - learn per-user "how to work" instructions
 
 **Issue:** #535
-**Status:** Draft
+**Status:** Rescoped v1 after adversarial review (see §0). Sections 1–6 describe the
+v1 MVP; sections 7+ and §2.1/§2.6/§2.7 are the **deferred v2 vision** (preserved, not built).
 **Date:** 2026-06-17
 **Found via:** dogfooding `ax memory ops` (#531) → searching the user's "remember" turns → realising ax mines *corrections* but not *directives*.
+
+---
+
+## 0. Status - rescoped after adversarial review
+
+A 4-reviewer panel (2 Codex + 2 Claude, distinct lenses) roasted the original design.
+Unanimous across both models: the original v1 was over-built - a research program
+stapled to an unproven hypothesis, with ~80% either duplicating the existing `improve`
+pipeline or (for the community layer) unsafe as designed. This section records the
+verdict and the rescope; the rest of the doc keeps the full design, tagged.
+
+### 0.1 The v1 MVP (the only thing built first)
+
+**One new signal - `deriveDirectives` - feeding the existing proposal pipeline.** It
+flags *proactive standing-instruction* user turns (imperative-mood, not anchored to a
+prior agent action - the gap `deriveCorrections` leaves, which only catches *reactive*
+push-back) and emits them as `guidance`-form rows into `deriveProposals`. They then
+surface in `ax improve recommend`, accept via the existing `.ax/tasks` brief, and accrue
+`frequency` / verdict **for free**.
+
+> **Zero new commands, zero new tables, zero community layer, zero n-gram miner.**
+> This alone tests the core bet: *will users act on mined directives?* Everything else
+> is gated on that answer.
+
+### 0.2 Reuse map - what already ships (do NOT rebuild)
+
+| Spec concept | Already exists | File |
+|--------------|----------------|------|
+| mine → propose → accept-brief → reconcile → measure | the whole loop | `ingest/derive-proposals.ts` + `improve/` |
+| recurrence → escalate → measure (§2.5) | `frequency` on stable `dedupe_sig` + frozen `baseline` → verdict friction-delta | `derive-proposals.ts` |
+| landing `memory\|guidance\|hook` (§2.3) | `INTERVENTION_FORM_REGISTRY` (`guidance\|skill\|harness_check\|subagent\|hook\|automation`) - a superset | `improve/intervention-forms.ts` |
+| harness-noise filter (§2.2) | drops `<task-notification>` + `claude-subagent` | `ingest/signals/core.ts` (`deriveCorrections`) |
+| grounding detectors (§7.5): `done-without-verification` | verification taxonomy (PR #474) | `check-family.ts` |
+| grounding detectors (§7.5): `edit-on-main` | the enforce-worktree hook | hooks-sdk |
+| "candidate query + pass/fail verdict" | `ax hooks cases` | `queries/feedback-cases.ts` |
+
+So a "directive" is **a new `kind`/detector on the existing proposal pipeline**, not a
+parallel subsystem. (Resolves §6 Q5: reuse, don't add a table.)
+
+### 0.3 Deferred to v2 (built only if the MVP proves the bet)
+
+- **§2.1 n-gram-lift miner** - gold-plating. §2.6 concedes ax already computes the
+  antecedents; v1 wires those existing signals, no new mining. (Also: lift is
+  statistically shaky at one-user scale - sparse N, and the same turn often both states
+  the directive *and* triggers the outcome → circular labels.)
+- **§2.7 workflow ladder** - pure speculation; defers its own payload.
+- **§7 community layer (all of it)** - see §0.4. Premature *and* unsafe.
+- **§7.5 grounding-detector registry as new code** - mostly reskins `insights.ts` /
+  `check-family.ts` / `feedback-cases.ts`. v1 reuses those directly.
+- **24-pattern `seed.json`** - demoted from "subsystem deliverable" to a starter/docs
+  asset (it's generic agent hygiene any LLM regenerates; 12/24 detector refs are
+  illustrative, pending the v2 registry).
+
+### 0.4 Community layer - BLOCKED on security redesign (do not build)
+
+The privacy reviewer found the contribution loop unsafe as designed. Hard blockers
+before any community code:
+
+1. `pull_request_target` auto-merge feeds data into **3 code-execution sinks**: detector
+   `params` → SurrealQL **on every install** (injection unless params are a closed typed
+   schema, bound never interpolated); free-text `directive`/`phrasings` → **stored XSS**
+   on the site; validator pwn-request.
+2. **">= N contributors" does not stop sybils** - content-hash dedup *is* the sybil
+   counter (N free accounts, same hash → graduate → auto-seed a malicious `landing:hook`
+   to every install). Define "independent"; require account history; invert (identical
+   content from many fresh accounts = sybil signal, not diversity); **human gate before
+   graduation**.
+3. **Abstraction leaks** - `phrasings` are raw user turns; per-user `contributed/<login>.json`
+   is world-readable on merge *before* the threshold applies. The "specifics stripped
+   before anything leaves the machine" claim (§7.3) is false as written. Drop `phrasings`
+   from published artifacts; compile from user gists (profile-publish model), not repo forks.
+4. **One-time consent + auto-PATCH** of later-mined content (the watcher re-publishes
+   `--if-stale`) → user consents to X, publishes X+Δ; git history is permanent. Require
+   per-change consent showing the diff.
+5. **Case evidence rows** are raw graph rows (`command_text`, paths) - scrubbing undefined.
+
+→ Community layer is **too risky for v1**; redesign required before it ships.
 
 ---
 
@@ -50,6 +128,11 @@ judgment where it belongs (is this turn a real standing directive, what does it 
 where should it land - the agent).
 
 ### 2.1 Mine n-grams by **lift**, not frequency
+
+> **⚠ v2 - DEFERRED (§0.3).** v1 does NOT build the n-gram miner; it wires ax's
+> existing antecedent signals (churn/friction/fragility/repair, per §2.6) into the
+> proposal pipeline. Lift is also statistically shaky at one-user scale (sparse N,
+> circular labels). Kept here as the v2 vision.
 
 Frequency alone surfaces "the", "can you". The signal is **lift**:
 
@@ -168,6 +251,8 @@ friction patterns, propose fixes, let user words confirm and sharpen."**
 
 ### 2.7 Granularity ladder - directives (atomic) -> workflows (sequence)
 
+> **⚠ v2 - DEFERRED (§0.3).** Speculative; defers its own payload. Not built in v1.
+
 The same mine -> ground -> propose -> automate -> measure loop applies at two scales:
 
 ```
@@ -258,6 +343,12 @@ A candidate vanishes once it becomes a directive or is dismissed.
 ---
 
 ## 7. Community layer - seed pack + contribution loop
+
+> **🚫 v2 - BLOCKED + DEFERRED. Not built in v1.** Premature (§0.3) AND unsafe as
+> designed (§0.4: auto-merge → 3 code-exec sinks, sybil threshold defeated by its own
+> dedup, abstraction leaks raw turns, one-time consent + auto-PATCH). The 5 security
+> blockers in §0.4 must be resolved by redesign before any community code. The curated
+> `seed.json` (layer 1, §7.1) is the only safe-to-ship piece, demoted to a starter asset.
 
 The local miner only pays off once a user has history; a **community pattern library
 gives day-1 value** and turns ax into a two-sided system (your patterns + everyone's).
@@ -417,6 +508,20 @@ per-user files, grown by *adding files*, never editing a shared one. Validation 
    not auto-write the user's config without consent.
 
 ## 9. Implementation slices (post-spec)
+
+> **v1 = slice 0 ONLY.** Everything below slice 0 is **v2**, gated on the MVP proving the
+> bet (and the community slices additionally gated on the §0.4 security redesign).
+
+**v1 MVP**
+0. `ingest/derive-directives.ts` - one signal that flags *proactive standing-instruction*
+   user turns (imperative-mood, not anchored to a prior agent action) and emits a
+   `guidance`-form row into the existing `deriveProposals` pipeline. Reuses
+   `deriveCorrections`' harness-noise filter, `INTERVENTION_FORM_REGISTRY`, and the
+   `frequency`/`baseline`/verdict machinery. Surfaces via `ax improve recommend`; accepts
+   via the existing brief. **No new commands, tables, or community layer.** Tests on
+   synthetic turn fixtures (directive vs task vs correction vs question).
+
+**v2 (deferred - see §0.3 / §0.4)**
 
 **Local miner**
 1. `queries/directive-ngrams.ts` - lift table over `turn` × outcomes (deref-free,

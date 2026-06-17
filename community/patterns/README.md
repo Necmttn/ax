@@ -1,8 +1,14 @@
 # Community patterns
 
-Cold-start library of **agent directives** - abstracted "how to work" instructions a
-fresh ax install ships with, so users get value on day 1 before they've accumulated
-their own history.
+> **Status (post-review):** this is a **starter asset / docs checklist**, not a shipping
+> subsystem. The community contribution loop is **deferred + BLOCKED on a security
+> redesign** (spec §0.4); the `detector` refs are **illustrative**, pending the v2
+> detector registry (spec §0.3). v1 reuses existing ax signals directly. See
+> `docs/superpowers/specs/2026-06-17-directive-mining-design.md` §0.
+
+Cold-start list of **agent directives** - generic "how to work" instructions, useful as
+documentation and a setup checklist. (Low-tech by design; the value bet is the local
+miner, not this file.)
 
 ## Files
 

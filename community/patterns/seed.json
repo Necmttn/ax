@@ -1,7 +1,7 @@
 {
   "version": 2,
   "generated": "2026-06-17",
-  "note": "Curated cold-start pattern pack: battle-tested agent directives a fresh ax install ships with. Many are abstracted from real ax-user feedback memories (source: curated). Each pattern is tagged `groundable` (detectable from the ax graph via a named detector) or not (pure preference). The contribution loop + grounding layer are specced in docs/superpowers/specs/2026-06-17-directive-mining-design.md (sections 7 + 7.5).",
+  "note": "STARTER ASSET (not a subsystem). A curated cold-start list of generic agent directives - useful as documentation / a setup checklist; intentionally low-tech (any LLM could regenerate it). The `detector` refs are ILLUSTRATIVE: they document how a pattern WOULD ground against the graph, but the detector registry is deferred v2 (see spec §0.3). v1 reuses existing ax signals (check-family, enforce-worktree hook, insights/friction) directly rather than a new detector registry. The community contribution loop is BLOCKED on a security redesign (spec §0.4). Spec: docs/superpowers/specs/2026-06-17-directive-mining-design.md.",
   "categories": ["verification", "output", "process", "git", "quality", "communication"],
   "landings": ["memory", "guidance", "hook"],
   "patterns": [
