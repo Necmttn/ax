@@ -229,6 +229,37 @@ describe("ingest_run lifecycle schema", () => {
     });
 });
 
+describe("Claude sidecar artifact schema", () => {
+    test("metadata-only sidecar table is defined", () => {
+        expect(schema).toContain("DEFINE TABLE IF NOT EXISTS claude_sidecar_artifact SCHEMAFULL");
+        expect(schema).toContain("DEFINE FIELD kind               ON claude_sidecar_artifact TYPE string");
+        expect(schema).toContain("DEFINE FIELD project            ON claude_sidecar_artifact TYPE string");
+        expect(schema).toContain("DEFINE FIELD safe_relative_path ON claude_sidecar_artifact TYPE string");
+        expect(schema).toContain("DEFINE FIELD path_hash          ON claude_sidecar_artifact TYPE string");
+        expect(schema).toContain("DEFINE FIELD size               ON claude_sidecar_artifact TYPE int");
+        expect(schema).toContain("DEFINE FIELD mtime              ON claude_sidecar_artifact TYPE datetime");
+        expect(schema).toContain("DEFINE FIELD content_hash       ON claude_sidecar_artifact TYPE option<string>");
+        expect(schema).toContain("DEFINE FIELD session            ON claude_sidecar_artifact TYPE option<record<session>>");
+        expect(schema).toContain("DEFINE FIELD relation_ids_json  ON claude_sidecar_artifact TYPE option<string>");
+        expect(schema).toContain("DEFINE FIELD relation_attrs_json ON claude_sidecar_artifact TYPE option<string>");
+        expect(schema).toContain("DEFINE FIELD observed_at        ON claude_sidecar_artifact TYPE datetime");
+        expect(schema).toContain("DEFINE FIELD excerpt            ON claude_sidecar_artifact TYPE option<string>");
+        expect(schema).toContain("DEFINE FIELD attrs_json         ON claude_sidecar_artifact TYPE option<string>");
+    });
+
+    test("sidecar table has path, session, and kind/project indexes", () => {
+        expect(schema).toContain(
+            "DEFINE INDEX IF NOT EXISTS claude_sidecar_artifact_path_hash ON claude_sidecar_artifact FIELDS path_hash UNIQUE",
+        );
+        expect(schema).toContain(
+            "DEFINE INDEX IF NOT EXISTS claude_sidecar_artifact_session ON claude_sidecar_artifact FIELDS session",
+        );
+        expect(schema).toContain(
+            "DEFINE INDEX IF NOT EXISTS claude_sidecar_artifact_kind_project ON claude_sidecar_artifact FIELDS kind, project",
+        );
+    });
+});
+
 describe("proposal.origin NONE-coerce guard (#472)", () => {
     // A bare `UPDATE proposal SET ...` re-coerces the whole SCHEMAFULL record;
     // old rows created before `origin` existed stored NONE and crashed with

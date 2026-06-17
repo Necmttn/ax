@@ -94,6 +94,27 @@ DEFINE INDEX IF NOT EXISTS session_workspace_started ON session FIELDS workspace
 -- indexes above don't cover it. See GitHub issue #76.
 DEFINE INDEX IF NOT EXISTS session_started ON session FIELDS started_at;
 
+-- Metadata-only Claude Code sidecar artifacts under .claude/projects/<project>/.
+-- Stores bounded file metadata and hashes only; never raw paste/image caches,
+-- raw API bodies, absolute home paths, or large tool-result bodies.
+DEFINE TABLE IF NOT EXISTS claude_sidecar_artifact SCHEMAFULL;
+DEFINE FIELD kind               ON claude_sidecar_artifact TYPE string;
+DEFINE FIELD project            ON claude_sidecar_artifact TYPE string;
+DEFINE FIELD safe_relative_path ON claude_sidecar_artifact TYPE string;
+DEFINE FIELD path_hash          ON claude_sidecar_artifact TYPE string;
+DEFINE FIELD size               ON claude_sidecar_artifact TYPE int;
+DEFINE FIELD mtime              ON claude_sidecar_artifact TYPE datetime;
+DEFINE FIELD content_hash       ON claude_sidecar_artifact TYPE option<string>;
+DEFINE FIELD session            ON claude_sidecar_artifact TYPE option<record<session>>;
+DEFINE FIELD relation_ids_json  ON claude_sidecar_artifact TYPE option<string>;
+DEFINE FIELD relation_attrs_json ON claude_sidecar_artifact TYPE option<string>;
+DEFINE FIELD observed_at        ON claude_sidecar_artifact TYPE datetime;
+DEFINE FIELD excerpt            ON claude_sidecar_artifact TYPE option<string>;
+DEFINE FIELD attrs_json         ON claude_sidecar_artifact TYPE option<string>;
+DEFINE INDEX IF NOT EXISTS claude_sidecar_artifact_path_hash ON claude_sidecar_artifact FIELDS path_hash UNIQUE;
+DEFINE INDEX IF NOT EXISTS claude_sidecar_artifact_session ON claude_sidecar_artifact FIELDS session;
+DEFINE INDEX IF NOT EXISTS claude_sidecar_artifact_kind_project ON claude_sidecar_artifact FIELDS kind, project;
+
 DEFINE TABLE agent_provider SCHEMAFULL;
 DEFINE FIELD name           ON agent_provider TYPE string;
 DEFINE FIELD display_name   ON agent_provider TYPE string;
