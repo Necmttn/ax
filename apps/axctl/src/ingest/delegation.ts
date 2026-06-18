@@ -18,6 +18,8 @@ export type DelegationToolCallInput = {
     readonly ts: string;
     readonly toolName: string;
     readonly outputExcerpt: string | null;
+    /** Tool-call arguments JSON. Codex spawn_agent: `{agent_type, message, fork_context}`. */
+    readonly inputJson?: string | null;
 };
 
 export type NormalizedDelegationSpawn = {
@@ -28,7 +30,14 @@ export type NormalizedDelegationSpawn = {
     readonly childSessionId: string | null;
     readonly nickname: string | null;
     readonly toolName: string;
+    /** Subagent role from the spawn args (codex `agent_type`); null when absent. */
+    readonly agentType: string | null;
+    /** Dispatch prompt from the spawn args (codex `message`), capped; null when absent. */
+    readonly description: string | null;
 };
+
+/** Cap stored dispatch descriptions - routing matches look at the first sentence. */
+const DESCRIPTION_MAX = 2000;
 
 export const providerDelegationSignalAvailability: Readonly<Record<AgentProviderName, ProviderDelegationSignalAvailability>> = {
     claude: {
@@ -89,6 +98,12 @@ export function normalizeDelegationToolCall(
     const parsed = input.outputExcerpt ? decodeJsonOrNull(input.outputExcerpt) : null;
     const payload = isRecord(parsed) ? parsed : null;
 
+    // Dispatch metadata (role + prompt) lives in the spawn-call ARGUMENTS, not
+    // the output. Codex spawn_agent args: { agent_type, message, fork_context }.
+    const args = input.inputJson ? decodeJsonOrNull(input.inputJson) : null;
+    const argsRecord = isRecord(args) ? args : null;
+    const message = argsRecord ? stringField(argsRecord, "message") : null;
+
     return {
         provider: input.provider,
         toolCallId: input.toolCallId,
@@ -97,5 +112,7 @@ export function normalizeDelegationToolCall(
         childSessionId: payload ? stringField(payload, "agent_id") : null,
         nickname: payload ? stringField(payload, "nickname") : null,
         toolName: input.toolName,
+        agentType: argsRecord ? stringField(argsRecord, "agent_type") : null,
+        description: message ? message.slice(0, DESCRIPTION_MAX) : null,
     };
 }
