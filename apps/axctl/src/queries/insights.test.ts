@@ -393,7 +393,7 @@ describe("insights query builders", () => {
         expect(cacheHealthSql(5)).toContain("cache_read_input_tokens / prompt_tokens");
         expect(workflowImpactSql(5)).toContain("FROM session_health");
         expect(workflowImpactSql(5)).toContain("avg_interruptions");
-        expect(codexHealthSql(5)).toContain('WHERE source = "codex" AND estimated_tokens > 0');
+        expect(codexHealthSql(5)).toContain("WHERE source IN ['codex', 'codex-subagent'] AND estimated_tokens > 0");
         expect(codexHealthSql(5)).toContain("ORDER BY estimated_tokens DESC");
     });
 
